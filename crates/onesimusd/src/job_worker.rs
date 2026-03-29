@@ -424,6 +424,8 @@ fn run_backup_phase(
             .name(format!("sd-cat:{job_id}"))
             .spawn(move || {
                 sd_catrec_loop_shm(&mut sd, job_id, &mut shm_end);
+                // Don't drop SHM — shared memory cleanup in forked process crashes
+                std::mem::forget(shm_end);
             })
             .map_err(|e| format!("sd thread: {e}"))?
     } else {
@@ -845,7 +847,8 @@ pub fn spawn_job_worker(job_id: u32, job_name: &str, params: &JobParams) -> io::
     match unsafe { fork() } {
         Ok(ForkResult::Parent { child }) => {
             drop(w2d_w); drop(d2w_r);
-            drop(shm_worker); // parent doesn't need worker end
+            // forget (not drop) worker end — see comment in child branch
+            if let Some(w) = shm_worker { std::mem::forget(w); }
             let from_worker = unsafe { std::fs::File::from_raw_fd(w2d_r.into_raw_fd()) };
             let to_worker = unsafe { std::fs::File::from_raw_fd(d2w_w.into_raw_fd()) };
             info!("spawned worker pid={} job={job_id} '{job_name}' shm={}", child, shm_dir.is_some());
@@ -857,7 +860,9 @@ pub fn spawn_job_worker(job_id: u32, job_name: &str, params: &JobParams) -> io::
         }
         Ok(ForkResult::Child) => {
             drop(w2d_r); drop(d2w_w);
-            drop(shm_dir); // child doesn't need director end
+            // IMPORTANT: forget (not drop) the director end — dropping would
+            // destroy the shared memory segment that the parent still needs.
+            if let Some(d) = shm_dir { std::mem::forget(d); }
             // Close inherited FDs (TCP listener etc)
             let keep = [w2d_w.as_raw_fd(), d2w_r.as_raw_fd()];
             for fd in 3..1024 { if !keep.contains(&fd) { unsafe { libc::close(fd); } } }
