@@ -9,6 +9,7 @@ mod command_ast;
 mod command_executor;
 mod command_queue;
 mod command_registry;
+mod ipc_shm;
 mod commands;
 mod command_worker;
 mod connection_monitor;

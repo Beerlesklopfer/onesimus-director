@@ -1,0 +1,43 @@
+{
+  "timestamp": "20260329-160057",
+  "job": "benchmark-1gb",
+  "cpp": {
+    "port": 9101,
+    "job_id": 0,
+    "files": 0,
+    "bytes": 0,
+    "duration_s": 0,
+    "throughput_mbps": 0,
+    "status": "FAILED_TO_START",
+    "samples": []
+  },
+  "rust": {
+    "port": 29101,
+    "job_id": 16,
+    "files": 0,
+    "bytes": 1,
+    "duration_s": 4.4,
+    "throughput_mbps": 0.0,
+    "status": "E",
+    "samples": [
+      {
+        "t": 0.0,
+        "files": 0,
+        "bytes": 0,
+        "mbps": 0.0
+      },
+      {
+        "t": 2.1,
+        "files": 0,
+        "bytes": 0,
+        "mbps": 0.0
+      },
+      {
+        "t": 4.2,
+        "files": 0,
+        "bytes": 1,
+        "mbps": 0.0
+      }
+    ]
+  }
+}

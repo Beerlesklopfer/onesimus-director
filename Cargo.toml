@@ -56,6 +56,9 @@ openssl = "0.10"
 # Concurrency
 crossbeam-channel = "0.5"
 flume = "0.11"
+
+# Zero-copy IPC (shared memory between fork() processes)
+iceoryx2 = "0.8"
 dashmap = "6"
 
 # Serialization
