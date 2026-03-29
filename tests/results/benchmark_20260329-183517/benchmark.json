@@ -1,0 +1,254 @@
+{
+  "timestamp": "20260329-183517",
+  "job": "benchmark-1gb",
+  "cpp": {
+    "port": 9101,
+    "job_id": 41,
+    "files": 181887,
+    "bytes": 12984977558,
+    "duration_s": 43.1,
+    "throughput_mbps": 287.32,
+    "status": "T",
+    "samples": [
+      {
+        "t": 0.0,
+        "files": 0,
+        "bytes": 0,
+        "mbps": 0
+      },
+      {
+        "t": 3.3,
+        "files": 6254,
+        "bytes": 920711031,
+        "mbps": 878.1
+      },
+      {
+        "t": 6.6,
+        "files": 44209,
+        "bytes": 1640913080,
+        "mbps": 228.9
+      },
+      {
+        "t": 9.9,
+        "files": 135047,
+        "bytes": 2490848513,
+        "mbps": 202.6
+      },
+      {
+        "t": 13.2,
+        "files": 181314,
+        "bytes": 5556411477,
+        "mbps": 974.5
+      },
+      {
+        "t": 16.4,
+        "files": 181319,
+        "bytes": 8221368613,
+        "mbps": 847.2
+      },
+      {
+        "t": 19.7,
+        "files": 181319,
+        "bytes": 9081200933,
+        "mbps": 273.3
+      },
+      {
+        "t": 23.0,
+        "files": 181319,
+        "bytes": 9946013989,
+        "mbps": 206.2
+      },
+      {
+        "t": 26.3,
+        "files": 181319,
+        "bytes": 10610811173,
+        "mbps": 211.3
+      },
+      {
+        "t": 29.6,
+        "files": 181319,
+        "bytes": 11206402341,
+        "mbps": 189.3
+      },
+      {
+        "t": 32.9,
+        "files": 181319,
+        "bytes": 11767390501,
+        "mbps": 133.8
+      },
+      {
+        "t": 36.2,
+        "files": 181319,
+        "bytes": 12203598117,
+        "mbps": 138.7
+      },
+      {
+        "t": 39.5,
+        "files": 181334,
+        "bytes": 12661615912,
+        "mbps": 145.6
+      },
+      {
+        "t": 42.7,
+        "files": 0,
+        "bytes": 0,
+        "mbps": 0
+      },
+      {
+        "t": 43.0,
+        "files": 181887,
+        "bytes": 12984977558,
+        "mbps": 0
+      }
+    ]
+  },
+  "rust": {
+    "port": 29101,
+    "job_id": 42,
+    "files": 0,
+    "bytes": 12974203460,
+    "duration_s": 71.9,
+    "throughput_mbps": 172.09,
+    "status": "T",
+    "samples": [
+      {
+        "t": 0.0,
+        "files": 0,
+        "bytes": 0,
+        "mbps": 0
+      },
+      {
+        "t": 3.4,
+        "files": 0,
+        "bytes": 0,
+        "mbps": 0
+      },
+      {
+        "t": 6.8,
+        "files": 0,
+        "bytes": 0,
+        "mbps": 0
+      },
+      {
+        "t": 10.2,
+        "files": 0,
+        "bytes": 0,
+        "mbps": 0
+      },
+      {
+        "t": 13.6,
+        "files": 0,
+        "bytes": 0,
+        "mbps": 0
+      },
+      {
+        "t": 17.0,
+        "files": 0,
+        "bytes": 0,
+        "mbps": 0
+      },
+      {
+        "t": 20.4,
+        "files": 0,
+        "bytes": 0,
+        "mbps": 0
+      },
+      {
+        "t": 23.8,
+        "files": 0,
+        "bytes": 0,
+        "mbps": 0
+      },
+      {
+        "t": 27.2,
+        "files": 0,
+        "bytes": 0,
+        "mbps": 0
+      },
+      {
+        "t": 30.6,
+        "files": 0,
+        "bytes": 0,
+        "mbps": 0
+      },
+      {
+        "t": 34.0,
+        "files": 0,
+        "bytes": 0,
+        "mbps": 0
+      },
+      {
+        "t": 37.4,
+        "files": 0,
+        "bytes": 0,
+        "mbps": 0
+      },
+      {
+        "t": 40.8,
+        "files": 0,
+        "bytes": 0,
+        "mbps": 0
+      },
+      {
+        "t": 44.2,
+        "files": 0,
+        "bytes": 0,
+        "mbps": 0
+      },
+      {
+        "t": 47.6,
+        "files": 0,
+        "bytes": 0,
+        "mbps": 0
+      },
+      {
+        "t": 51.0,
+        "files": 0,
+        "bytes": 0,
+        "mbps": 0
+      },
+      {
+        "t": 54.4,
+        "files": 0,
+        "bytes": 0,
+        "mbps": 0
+      },
+      {
+        "t": 57.8,
+        "files": 0,
+        "bytes": 0,
+        "mbps": 0
+      },
+      {
+        "t": 61.2,
+        "files": 0,
+        "bytes": 0,
+        "mbps": 0
+      },
+      {
+        "t": 64.6,
+        "files": 0,
+        "bytes": 0,
+        "mbps": 0
+      },
+      {
+        "t": 68.0,
+        "files": 0,
+        "bytes": 0,
+        "mbps": 0
+      },
+      {
+        "t": 71.4,
+        "files": 0,
+        "bytes": 0,
+        "mbps": 0
+      },
+      {
+        "t": 71.8,
+        "files": 0,
+        "bytes": 12974203460,
+        "mbps": 0
+      }
+    ]
+  }
+}
