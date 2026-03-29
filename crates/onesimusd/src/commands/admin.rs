@@ -336,10 +336,10 @@ pub fn cmd_restore(ast: &CommandAst, ctx: &ExecContext) -> CommandResult {
 
     // Fork the autonomous restore worker
     match job_worker::spawn_job_worker(job_id, "RestoreFiles", &params) {
-        Ok(handle) => {
-            tracing::info!("Restore {job_id}: worker pid={}, from backup {restore_jobid}", handle.pid);
+        Ok(spawn) => {
+            tracing::info!("Restore {job_id}: worker pid={} shm={}", spawn.handle.pid, spawn.shm_director.is_some());
             if let Some(ref mgr) = ctx.job_manager {
-                mgr.lock().unwrap().add_job(job_id, "RestoreFiles", handle);
+                mgr.lock().unwrap().add_job_with_shm(job_id, "RestoreFiles", spawn.handle, spawn.shm_director);
             }
         }
         Err(e) => {

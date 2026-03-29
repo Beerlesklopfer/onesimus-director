@@ -185,11 +185,10 @@ pub fn cmd_run(ast: &CommandAst, ctx: &ExecContext) -> CommandResult {
 
     // Fork the autonomous job worker
     match job_worker::spawn_job_worker(job_id, &job.name, &params) {
-        Ok(handle) => {
-            tracing::info!("Job {job_id} '{}': worker pid={}", job.name, handle.pid);
-            // Register with JobManager — monitor thread polls all jobs
+        Ok(spawn) => {
+            tracing::info!("Job {job_id} '{}': worker pid={} shm={}", job.name, spawn.handle.pid, spawn.shm_director.is_some());
             if let Some(ref mgr) = ctx.job_manager {
-                mgr.lock().unwrap().add_job(job_id, &job.name, handle);
+                mgr.lock().unwrap().add_job_with_shm(job_id, &job.name, spawn.handle, spawn.shm_director);
             }
         }
         Err(e) => {

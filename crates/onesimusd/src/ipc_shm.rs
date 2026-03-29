@@ -83,6 +83,11 @@ pub struct ShmDirectorEnd {
     resp_publisher: iceoryx2::port::publisher::Publisher<ipc::Service, ShmCatResp, ()>,
 }
 
+// SAFETY: ShmDirectorEnd is only used from the monitor_loop thread.
+// iceoryx2 uses Rc internally but we guarantee single-thread access
+// via the JobManager Mutex (only one thread calls poll_all at a time).
+unsafe impl Send for ShmDirectorEnd {}
+
 /// Worker-side CatReq sender via shared memory.
 pub struct ShmWorkerEnd {
     pub job_id: u32,
@@ -90,6 +95,9 @@ pub struct ShmWorkerEnd {
     resp_subscriber: iceoryx2::port::subscriber::Subscriber<ipc::Service, ShmCatResp, ()>,
     seq: u32,
 }
+
+// SAFETY: ShmWorkerEnd is only used from the sd-cat thread in the forked worker.
+unsafe impl Send for ShmWorkerEnd {}
 
 /// Create both ends of the SHM channel BEFORE fork().
 /// Returns (director_end, worker_end) — each side uses its own end after fork.

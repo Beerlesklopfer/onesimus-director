@@ -179,10 +179,12 @@ pub fn run_worker(
     params: &JobParams,
     to_director: std::fs::File,
     from_director: std::fs::File,
+    shm: Option<crate::ipc_shm::ShmWorkerEnd>,
 ) -> i32 {
     let mut pipes = WorkerPipes { to_director, from_director };
     let mut state = WorkerState::Init;
     let job_id = params.job_id;
+    let mut shm_worker = shm;
 
     let mut fd: Option<BnetStream<tls_psk::PskStream>> = None;
     let mut sd: Option<BnetStream<tls_psk::PskStream>> = None;
@@ -332,7 +334,7 @@ pub fn run_worker(
                 // Two parallel tasks: FD read + SD CatReq proxy
                 let fd_stream = fd.take().unwrap();
                 let sd_stream = sd.take().unwrap();
-                let result = run_backup_phase(fd_stream, sd_stream, job_id, &mut pipes);
+                let result = run_backup_phase(fd_stream, sd_stream, job_id, &mut pipes, shm_worker.take());
                 match result {
                     Ok((files, bytes, errors, term_code)) => {
                         WorkerState::Finishing { files, bytes, errors, term_code }
@@ -414,17 +416,26 @@ fn run_backup_phase(
     mut sd: BnetStream<tls_psk::PskStream>,
     job_id: u32,
     pipes: &mut WorkerPipes,
+    shm: Option<crate::ipc_shm::ShmWorkerEnd>,
 ) -> Result<(i64, i64, i32, i32), String> {
-    // SD CatReq thread
-    let mut pipe_to = pipes.to_director.try_clone().map_err(|e| format!("pipe clone: {e}"))?;
-    let mut pipe_from = pipes.from_director.try_clone().map_err(|e| format!("pipe clone: {e}"))?;
-
-    let sd_handle = thread::Builder::new()
-        .name(format!("sd-cat:{job_id}"))
-        .spawn(move || {
-            sd_catrec_loop(&mut sd, job_id, &mut pipe_to, &mut pipe_from);
-        })
-        .map_err(|e| format!("sd thread: {e}"))?;
+    // SD CatReq thread — use SHM if available, pipe as fallback
+    let sd_handle = if let Some(mut shm_end) = shm {
+        thread::Builder::new()
+            .name(format!("sd-cat:{job_id}"))
+            .spawn(move || {
+                sd_catrec_loop_shm(&mut sd, job_id, &mut shm_end);
+            })
+            .map_err(|e| format!("sd thread: {e}"))?
+    } else {
+        let mut pipe_to = pipes.to_director.try_clone().map_err(|e| format!("pipe clone: {e}"))?;
+        let mut pipe_from = pipes.from_director.try_clone().map_err(|e| format!("pipe clone: {e}"))?;
+        thread::Builder::new()
+            .name(format!("sd-cat:{job_id}"))
+            .spawn(move || {
+                sd_catrec_loop_pipe(&mut sd, job_id, &mut pipe_to, &mut pipe_from);
+            })
+            .map_err(|e| format!("sd thread: {e}"))?
+    };
 
     // Main thread: read FD messages until restore is done.
     // The FD sends "2000 OK storage end" when SD data transfer is complete,
@@ -484,47 +495,27 @@ fn fd_restore_setup(fd: &mut BnetStream<tls_psk::PskStream>, p: &JobParams, sd_a
     Ok(())
 }
 
-fn sd_catrec_loop(
+/// SD CatReq loop via iceoryx2 shared memory (zero-copy IPC).
+fn sd_catrec_loop_shm(
     sd: &mut BnetStream<tls_psk::PskStream>,
     job_id: u32,
-    to_dir: &mut std::fs::File,
-    from_dir: &mut std::fs::File,
+    shm: &mut crate::ipc_shm::ShmWorkerEnd,
 ) {
-    debug!("Worker {job_id}: SD CatReq thread started");
+    debug!("Worker {job_id}: SD CatReq loop started (SHM)");
     loop {
         match sd.recv() {
             Ok(BnetMessage::Data(data)) => {
-                let msg_raw = String::from_utf8_lossy(&data);
-                let msg = msg_raw.trim().to_string();
+                let msg = String::from_utf8_lossy(&data).trim().to_string();
                 if msg.starts_with("CatReq") {
-                    debug!("Worker {job_id} SD CatReq: {msg}");
-                    let pipe_msg = PipeMessage::CatReq { job_id, request: msg };
-                    if let Ok(json) = serde_json::to_string(&pipe_msg) {
-                        let _ = writeln!(to_dir, "{json}");
-                    }
-                    // Read CatResp from Director via pipe
-                    let mut buf = String::new();
-                    let mut reader = BufReader::new(&mut *from_dir);
-                    match reader.read_line(&mut buf) {
-                        Ok(n) if n > 0 => {
-                            debug!("Worker {job_id} CatResp pipe ({n} bytes): {}", buf.trim());
-                            match serde_json::from_str::<PipeMessage>(&buf) {
-                                Ok(PipeMessage::CatResp { response }) => {
-                                    debug!("Worker {job_id} → SD: {}", &response[..response.len().min(60)]);
-                                    let _ = sd.send_str(&response);
-                                }
-                                other => {
-                                    warn!("Worker {job_id}: unexpected pipe msg: {other:?}, sending OK");
-                                    let _ = sd.send_str("1000 OK\n");
-                                }
-                            }
-                        }
-                        Ok(_) => {
-                            warn!("Worker {job_id}: pipe EOF while waiting for CatResp");
-                            let _ = sd.send_str("1000 OK\n");
+                    debug!("Worker {job_id} CatReq: {}", &msg[..msg.len().min(60)]);
+                    // Send via shared memory — ~1μs instead of ~10ms pipe roundtrip
+                    match shm.request(&msg) {
+                        Ok(response) => {
+                            debug!("Worker {job_id} → SD: {}", &response[..response.len().min(60)]);
+                            let _ = sd.send_str(&response);
                         }
                         Err(e) => {
-                            error!("Worker {job_id}: pipe read error: {e}");
+                            error!("Worker {job_id} SHM CatReq failed: {e}");
                             let _ = sd.send_str("1000 OK\n");
                         }
                     }
@@ -545,7 +536,48 @@ fn sd_catrec_loop(
         }
     }
     let _ = sd.send_signal(BnetSignal::Terminate);
-    debug!("Worker {job_id}: SD CatReq thread ended");
+    debug!("Worker {job_id}: SD CatReq loop ended (SHM)");
+}
+
+/// Legacy pipe-based SD CatReq loop (fallback if SHM not available).
+fn sd_catrec_loop_pipe(
+    sd: &mut BnetStream<tls_psk::PskStream>,
+    job_id: u32,
+    to_dir: &mut std::fs::File,
+    from_dir: &mut std::fs::File,
+) {
+    debug!("Worker {job_id}: SD CatReq thread started (pipe)");
+    loop {
+        match sd.recv() {
+            Ok(BnetMessage::Data(data)) => {
+                let msg = String::from_utf8_lossy(&data).trim().to_string();
+                if msg.starts_with("CatReq") {
+                    debug!("Worker {job_id} SD CatReq: {msg}");
+                    let pipe_msg = PipeMessage::CatReq { job_id, request: msg };
+                    if let Ok(json) = serde_json::to_string(&pipe_msg) {
+                        let _ = writeln!(to_dir, "{json}");
+                    }
+                    let mut buf = String::new();
+                    let mut reader = BufReader::new(&mut *from_dir);
+                    match reader.read_line(&mut buf) {
+                        Ok(n) if n > 0 => {
+                            if let Ok(PipeMessage::CatResp { response }) = serde_json::from_str(&buf) {
+                                let _ = sd.send_str(&response);
+                            } else {
+                                let _ = sd.send_str("1000 OK\n");
+                            }
+                        }
+                        _ => { let _ = sd.send_str("1000 OK\n"); }
+                    }
+                } else if msg.starts_with("3099 Job") { break; }
+                  else if msg.starts_with("Jmsg") { debug!("Worker {job_id} Jmsg: {msg}"); }
+            }
+            Ok(BnetMessage::Signal(BnetSignal::Terminate)) => break,
+            Ok(BnetMessage::Signal(_)) => {}
+            Err(_) => break,
+        }
+    }
+    let _ = sd.send_signal(BnetSignal::Terminate);
 }
 
 // ============================================================================
@@ -785,23 +817,47 @@ impl JobHandle {
 
 /// Spawn a job worker process with dual pipes.
 #[cfg(unix)]
-pub fn spawn_job_worker(job_id: u32, job_name: &str, params: &JobParams) -> io::Result<JobHandle> {
+/// Spawn result includes optional SHM director end for CatReq handling.
+pub struct SpawnResult {
+    pub handle: JobHandle,
+    pub shm_director: Option<crate::ipc_shm::ShmDirectorEnd>,
+}
+
+pub fn spawn_job_worker(job_id: u32, job_name: &str, params: &JobParams) -> io::Result<SpawnResult> {
     use nix::unistd::{fork, ForkResult, pipe};
 
     let (w2d_r, w2d_w) = pipe().map_err(|e| io::Error::new(io::ErrorKind::Other, e))?;
     let (d2w_r, d2w_w) = pipe().map_err(|e| io::Error::new(io::ErrorKind::Other, e))?;
 
+    // Create SHM channel BEFORE fork — both processes inherit the shared memory
+    let shm = crate::ipc_shm::create_shm_channel(job_id);
+    let (shm_dir, shm_worker) = match shm {
+        Ok((d, w)) => {
+            info!("SHM channel created for job {job_id}");
+            (Some(d), Some(w))
+        }
+        Err(e) => {
+            warn!("SHM channel failed for job {job_id}: {e} — falling back to pipes");
+            (None, None)
+        }
+    };
+
     match unsafe { fork() } {
         Ok(ForkResult::Parent { child }) => {
             drop(w2d_w); drop(d2w_r);
+            drop(shm_worker); // parent doesn't need worker end
             let from_worker = unsafe { std::fs::File::from_raw_fd(w2d_r.into_raw_fd()) };
             let to_worker = unsafe { std::fs::File::from_raw_fd(d2w_w.into_raw_fd()) };
-            info!("spawned worker pid={} job={job_id} '{job_name}'", child);
-            Ok(JobHandle { pid: child.as_raw(), job_id, job_name: job_name.to_string(),
-                from_worker: Some(from_worker), to_worker: Some(to_worker) })
+            info!("spawned worker pid={} job={job_id} '{job_name}' shm={}", child, shm_dir.is_some());
+            Ok(SpawnResult {
+                handle: JobHandle { pid: child.as_raw(), job_id, job_name: job_name.to_string(),
+                    from_worker: Some(from_worker), to_worker: Some(to_worker) },
+                shm_director: shm_dir,
+            })
         }
         Ok(ForkResult::Child) => {
             drop(w2d_r); drop(d2w_w);
+            drop(shm_dir); // child doesn't need director end
             // Close inherited FDs (TCP listener etc)
             let keep = [w2d_w.as_raw_fd(), d2w_r.as_raw_fd()];
             for fd in 3..1024 { if !keep.contains(&fd) { unsafe { libc::close(fd); } } }
@@ -811,11 +867,11 @@ pub fn spawn_job_worker(job_id: u32, job_name: &str, params: &JobParams) -> io::
             { use std::ffi::CString; if let Ok(n) = CString::new(proc_name.as_str()) { unsafe { libc::prctl(libc::PR_SET_NAME, n.as_ptr()); } } }
 
             install_worker_signal_handlers();
-            eprintln!("[worker:{job_id}] started pid={}", std::process::id());
+            eprintln!("[worker:{job_id}] started pid={} shm={}", std::process::id(), shm_worker.is_some());
 
             let to_dir = unsafe { std::fs::File::from_raw_fd(w2d_w.into_raw_fd()) };
             let from_dir = unsafe { std::fs::File::from_raw_fd(d2w_r.into_raw_fd()) };
-            let code = run_worker(params, to_dir, from_dir);
+            let code = run_worker(params, to_dir, from_dir, shm_worker);
             eprintln!("[worker:{job_id}] exit {code}");
             std::process::exit(code);
         }

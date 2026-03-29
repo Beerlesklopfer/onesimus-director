@@ -23,6 +23,8 @@ pub struct DirJob {
     pub start_time: i64,
     pub last_files: i64,
     pub last_bytes: i64,
+    /// SHM channel for zero-copy CatReq (None = pipe fallback)
+    pub shm: Option<crate::ipc_shm::ShmDirectorEnd>,
 }
 
 /// Director-side job phases.
@@ -67,6 +69,12 @@ impl JobManager {
     }
 
     pub fn add_job(&mut self, job_id: u32, job_name: &str, handle: JobHandle) {
+        self.add_job_with_shm(job_id, job_name, handle, None);
+    }
+
+    pub fn add_job_with_shm(&mut self, job_id: u32, job_name: &str, handle: JobHandle,
+                             shm: Option<crate::ipc_shm::ShmDirectorEnd>) {
+        let has_shm = shm.is_some();
         self.jobs.push(DirJob {
             job_id,
             job_name: job_name.to_string(),
@@ -75,8 +83,9 @@ impl JobManager {
             start_time: now_unix(),
             last_files: 0,
             last_bytes: 0,
+            shm,
         });
-        debug!("JobManager: added job {job_id} '{job_name}' (total: {})", self.jobs.len());
+        debug!("JobManager: added job {job_id} '{job_name}' shm={has_shm} (total: {})", self.jobs.len());
     }
 
     pub fn active_count(&self) -> usize {
@@ -145,7 +154,20 @@ impl JobManager {
                 continue;
             }
 
-            // Read pipe messages (non-blocking — try_read_message returns None if no data)
+            // SHM CatReq handling (zero-copy, ~1μs per request)
+            if let Some(ref shm) = job.shm {
+                while let Some(req) = shm.try_recv_request() {
+                    let request = req.as_str().to_string();
+                    debug!("JobManager: job {} SHM CatReq: {}", job.job_id, &request[..request.len().min(60)]);
+                    let response = handle_cat_req(&request, &self.catalog, job.job_id);
+                    let resp = crate::ipc_shm::ShmCatResp::new(job.job_id, req.seq, &response);
+                    if let Err(e) = shm.send_response(resp) {
+                        error!("JobManager: job {} SHM send failed: {e}", job.job_id);
+                    }
+                }
+            }
+
+            // Pipe messages (State, Status, JobEnd — NOT CatReq when SHM is active)
             while let Some(msg) = job.handle.try_read_message() {
                 match msg {
                     PipeMessage::State { state, .. } => {
