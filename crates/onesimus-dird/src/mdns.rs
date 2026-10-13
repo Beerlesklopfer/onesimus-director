@@ -11,7 +11,7 @@
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
-use mdns_sd::{ServiceDaemon, ServiceInfo};
+use mdns_sd::{IfKind, ServiceDaemon, ServiceInfo};
 use tracing::{error, info};
 
 pub const SERVICE_TYPE: &str = "_onesimus-dir._tcp.local.";
@@ -21,6 +21,24 @@ pub struct Announcement {
     pub bnet_port: u16,
     /// gRPC port and certificate fingerprint, if gRPC is enabled
     pub grpc: Option<(u16, String)>,
+}
+
+/// Virtual bridges/links of VMs and containers (libvirt, docker, podman,
+/// LXC, veth pairs, VM taps). Their addresses are not reachable from the LAN,
+/// so announcing them makes clients pick a dead address.
+pub fn is_virtual_interface(name: &str) -> bool {
+    const PREFIXES: &[&str] = &["virbr", "docker", "br-", "veth", "vnet", "lxc", "lxdbr", "podman", "cni", "flannel", "tap"];
+    PREFIXES.iter().any(|p| name.starts_with(p))
+}
+
+/// Names of virtual interfaces present on this host (from /sys/class/net).
+fn virtual_interfaces() -> Vec<String> {
+    std::fs::read_dir("/sys/class/net")
+        .map(|d| d.flatten()
+            .map(|e| e.file_name().to_string_lossy().into_owned())
+            .filter(|n| is_virtual_interface(n))
+            .collect())
+        .unwrap_or_default()
 }
 
 /// Hostname without domain part (mDNS names live in .local).
@@ -37,6 +55,15 @@ pub fn advertise_loop(ann: Announcement, shutdown: &AtomicBool) {
             return;
         }
     };
+
+    let skipped = virtual_interfaces();
+    if !skipped.is_empty() {
+        info!("mDNS: not announcing on virtual interfaces {}", skipped.join(", "));
+        let kinds: Vec<IfKind> = skipped.into_iter().map(IfKind::Name).collect();
+        if let Err(e) = daemon.disable_interface(kinds) {
+            error!("mDNS: cannot exclude virtual interfaces: {e}");
+        }
+    }
 
     let host_name = format!("{}.local.", short_hostname().unwrap_or_else(|| "onesimus".to_string()));
 
@@ -77,4 +104,19 @@ pub fn advertise_loop(ann: Announcement, shutdown: &AtomicBool) {
     }
     let _ = daemon.shutdown();
     info!("mDNS: stopped");
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn virtual_interface_names() {
+        for n in ["virbr0", "docker0", "br-1a2b3c", "veth12ab", "vnet0", "lxcbr0", "podman0"] {
+            assert!(is_virtual_interface(n), "{n}");
+        }
+        for n in ["eth0", "enp3s0", "br0", "wlan0", "bond0", "eno1"] {
+            assert!(!is_virtual_interface(n), "{n}");
+        }
+    }
 }
