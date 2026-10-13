@@ -18,6 +18,7 @@ mod fsm;
 mod grpc;
 mod job_manager;
 mod job_worker;
+mod json_output;
 mod mdns;
 mod message_bus;
 mod reload;

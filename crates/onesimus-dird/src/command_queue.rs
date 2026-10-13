@@ -11,20 +11,32 @@ use crossbeam_channel::{Sender, Receiver, bounded, TrySendError};
 use crate::command_ast::CommandAst;
 
 /// Result of command execution.
-#[derive(Debug, Clone)]
+///
+/// `text_output` is the human/API-mode rendering. `json` is the structured
+/// result for JSON API mode (`.api 2`); the session wraps it into the
+/// json-rpc envelope (see json_output.rs). Commands without a JSON rendering
+/// leave it `None` and yield an empty result object, as in C++.
+#[derive(Debug, Clone, Default)]
 pub struct CommandResult {
     pub success: bool,
     pub text_output: String,
     pub error_message: String,
+    pub json: Option<serde_json::Value>,
 }
 
 impl CommandResult {
     pub fn ok(text: String) -> Self {
-        Self { success: true, text_output: text, error_message: String::new() }
+        Self { success: true, text_output: text, ..Default::default() }
     }
 
     pub fn error(msg: String) -> Self {
-        Self { success: false, text_output: String::new(), error_message: msg }
+        Self { success: false, error_message: msg, ..Default::default() }
+    }
+
+    /// Attach the structured JSON result (used in `.api 2` mode).
+    pub fn with_json(mut self, json: serde_json::Value) -> Self {
+        self.json = Some(json);
+        self
     }
 }
 

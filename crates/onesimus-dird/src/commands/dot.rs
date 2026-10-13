@@ -10,6 +10,34 @@
 use crate::command_ast::CommandAst;
 use crate::command_executor::ExecContext;
 use crate::command_queue::CommandResult;
+use serde_json::json;
+
+/// One resource name per line (text) and `{"<array>": [{"name": .., "enabled": ..}]}`
+/// (JSON), like the C++ dot-commands (ArrayStart/ObjectKeyValue/ObjectKeyValueBool).
+/// `enabled` is only emitted for resource types that have the flag.
+fn name_list<'a>(array: &str, key: &str, rows: impl Iterator<Item = (&'a str, Option<bool>)>) -> CommandResult {
+    let mut text = String::new();
+    let mut items = Vec::new();
+    for (name, enabled) in rows {
+        text.push_str(name);
+        text.push('\n');
+        let mut obj = serde_json::Map::new();
+        obj.insert(key.to_string(), json!(name));
+        if let Some(e) = enabled {
+            obj.insert("enabled".to_string(), json!(e));
+        }
+        items.push(serde_json::Value::Object(obj));
+    }
+    CommandResult::ok(text).with_json(json!({ array: items }))
+}
+
+/// Run `f` with the config read-locked; empty list if no config is loaded.
+fn with_config(ctx: &ExecContext, array: &str, f: impl FnOnce(&crate::director_config::DirectorConfig) -> CommandResult) -> CommandResult {
+    match ctx.config.as_ref().and_then(|c| c.read().ok()) {
+        Some(cfg) => f(&cfg),
+        None => CommandResult::ok(String::new()).with_json(json!({ array: [] })),
+    }
+}
 
 /// Helper: check if "enabled" or "disabled" bare flag is present.
 fn enabled_filter(ast: &CommandAst) -> Option<bool> {
@@ -35,109 +63,54 @@ pub fn cmd_dot_noop(_ast: &CommandAst, _ctx: &ExecContext) -> CommandResult {
 /// `.clients [enabled|disabled]`
 pub fn cmd_dot_clients(ast: &CommandAst, ctx: &ExecContext) -> CommandResult {
     let filter = enabled_filter(ast);
-    if let Some(config) = &ctx.config {
-        if let Ok(cfg) = config.read() {
-            let output: String = cfg.clients.iter()
-                .filter(|c| match filter {
-                    Some(want) => c.enabled == want,
-                    None => true,
-                })
-                .map(|c| format!("{}\n", c.name))
-                .collect();
-            return CommandResult::ok(output);
-        }
-    }
-    CommandResult::ok(String::new())
+    with_config(ctx, "clients", |cfg| name_list("clients", "name", cfg.clients.iter()
+        .filter(|c| filter.map_or(true, |want| c.enabled == want))
+        .map(|c| (c.name.as_str(), Some(c.enabled)))))
 }
 
 /// `.jobs [type=<jobtype>] [enabled|disabled]`
 pub fn cmd_dot_jobs(ast: &CommandAst, ctx: &ExecContext) -> CommandResult {
     let filter = enabled_filter(ast);
     let type_f = type_filter(ast);
-    if let Some(config) = &ctx.config {
-        if let Ok(cfg) = config.read() {
-            let output: String = cfg.jobs.iter()
-                .filter(|j| match filter {
-                    Some(want) => j.enabled == want,
-                    None => true,
-                })
-                .filter(|j| match type_f {
-                    Some(t) => format!("{:?}", j.job_type).eq_ignore_ascii_case(t),
-                    None => true,
-                })
-                .map(|j| format!("{}\n", j.name))
-                .collect();
-            return CommandResult::ok(output);
-        }
-    }
-    CommandResult::ok(String::new())
+    with_config(ctx, "jobs", |cfg| name_list("jobs", "name", cfg.jobs.iter()
+        .filter(|j| filter.map_or(true, |want| j.enabled == want))
+        .filter(|j| match type_f {
+            // C++ compares the first character of type= with the job type code
+            Some(t) => format!("{:?}", j.job_type).eq_ignore_ascii_case(t)
+                || (t.len() == 1 && job_type_code(&format!("{:?}", j.job_type)) == t.chars().next().map(|c| c as u32)),
+            None => true,
+        })
+        .map(|j| (j.name.as_str(), Some(j.enabled)))))
 }
 
 /// `.pools [type=<pooltype>]`
 pub fn cmd_dot_pools(ast: &CommandAst, ctx: &ExecContext) -> CommandResult {
     let type_f = type_filter(ast);
-    if let Some(config) = &ctx.config {
-        if let Ok(cfg) = config.read() {
-            let output: String = cfg.pools.iter()
-                .filter(|p| match type_f {
-                    Some(t) => p.pool_type.eq_ignore_ascii_case(t),
-                    None => true,
-                })
-                .map(|p| format!("{}\n", p.name))
-                .collect();
-            return CommandResult::ok(output);
-        }
-    }
-    CommandResult::ok(String::new())
+    with_config(ctx, "pools", |cfg| name_list("pools", "name", cfg.pools.iter()
+        .filter(|p| type_f.map_or(true, |t| p.pool_type.eq_ignore_ascii_case(t)))
+        .map(|p| (p.name.as_str(), None))))
 }
 
 /// `.storage` / `.storages [enabled|disabled]`
 pub fn cmd_dot_storage(ast: &CommandAst, ctx: &ExecContext) -> CommandResult {
     let filter = enabled_filter(ast);
-    if let Some(config) = &ctx.config {
-        if let Ok(cfg) = config.read() {
-            let output: String = cfg.storages.iter()
-                .filter(|s| match filter {
-                    Some(want) => s.enabled == want,
-                    None => true,
-                })
-                .map(|s| format!("{}\n", s.name))
-                .collect();
-            return CommandResult::ok(output);
-        }
-    }
-    CommandResult::ok(String::new())
+    with_config(ctx, "storages", |cfg| name_list("storages", "name", cfg.storages.iter()
+        .filter(|st| filter.map_or(true, |want| st.enabled == want))
+        .map(|st| (st.name.as_str(), Some(st.enabled)))))
 }
 
 /// `.filesets`
 pub fn cmd_dot_filesets(_ast: &CommandAst, ctx: &ExecContext) -> CommandResult {
-    if let Some(config) = &ctx.config {
-        if let Ok(cfg) = config.read() {
-            let output: String = cfg.filesets.iter()
-                .map(|f| format!("{}\n", f.name))
-                .collect();
-            return CommandResult::ok(output);
-        }
-    }
-    CommandResult::ok(String::new())
+    with_config(ctx, "filesets", |cfg| name_list("filesets", "name",
+        cfg.filesets.iter().map(|f| (f.name.as_str(), None))))
 }
 
 /// `.schedule [enabled|disabled]`
 pub fn cmd_dot_schedule(ast: &CommandAst, ctx: &ExecContext) -> CommandResult {
     let filter = enabled_filter(ast);
-    if let Some(config) = &ctx.config {
-        if let Ok(cfg) = config.read() {
-            let output: String = cfg.schedules.iter()
-                .filter(|s| match filter {
-                    Some(want) => s.enabled == want,
-                    None => true,
-                })
-                .map(|s| format!("{}\n", s.name))
-                .collect();
-            return CommandResult::ok(output);
-        }
-    }
-    CommandResult::ok(String::new())
+    with_config(ctx, "schedules", |cfg| name_list("schedules", "name", cfg.schedules.iter()
+        .filter(|sc| filter.map_or(true, |want| sc.enabled == want))
+        .map(|sc| (sc.name.as_str(), Some(sc.enabled)))))
 }
 
 /// `.defaults [job=<name> | client=<name> | storage=<name> | pool=<name>]`
@@ -308,42 +281,67 @@ pub fn cmd_dot_authorized(ast: &CommandAst, ctx: &ExecContext) -> CommandResult 
 
 /// `.catalogs`
 pub fn cmd_dot_catalogs(_ast: &CommandAst, ctx: &ExecContext) -> CommandResult {
-    if let Some(config) = &ctx.config {
-        if let Ok(cfg) = config.read() {
-            let out: String = cfg.catalogs.iter().map(|c| format!("{}\n", c.name)).collect();
-            return CommandResult::ok(out);
-        }
-    }
-    CommandResult::ok(String::new())
+    with_config(ctx, "catalogs", |cfg| name_list("catalogs", "name",
+        cfg.catalogs.iter().map(|c| (c.name.as_str(), None))))
 }
 
 /// `.consoles`
 pub fn cmd_dot_consoles(_ast: &CommandAst, ctx: &ExecContext) -> CommandResult {
-    if let Some(config) = &ctx.config {
-        if let Ok(cfg) = config.read() {
-            let out: String = cfg.consoles.iter().map(|c| format!("{}\n", c.name)).collect();
-            return CommandResult::ok(out);
-        }
-    }
-    CommandResult::ok(String::new())
+    with_config(ctx, "consoles", |cfg| name_list("consoles", "name",
+        cfg.consoles.iter().map(|c| (c.name.as_str(), None))))
 }
 
 /// `.jobdefs`
 pub fn cmd_dot_jobdefs(_ast: &CommandAst, ctx: &ExecContext) -> CommandResult {
-    if let Some(config) = &ctx.config {
-        if let Ok(cfg) = config.read() {
-            let out: String = cfg.jobdefs.iter().map(|j| format!("{}\n", j.name)).collect();
-            return CommandResult::ok(out);
-        }
-    }
-    CommandResult::ok(String::new())
+    with_config(ctx, "jobdefs", |cfg| name_list("jobdefs", "name",
+        cfg.jobdefs.iter().map(|j| (j.name.as_str(), None))))
 }
 
-/// `.levels`
-pub fn cmd_dot_levels(_ast: &CommandAst, _ctx: &ExecContext) -> CommandResult {
-    CommandResult::ok(
-        "Full\nIncremental\nDifferential\nVirtualFull\nInitCatalog\nCatalog\nVolumeToCatalog\nDiskToCatalog\n".to_string()
-    )
+/// `.levels [jobtype]` — C++ joblevels[] table (dird_conf.cc)
+pub fn cmd_dot_levels(ast: &CommandAst, _ctx: &ExecContext) -> CommandResult {
+    let wanted = ast.arguments.first().map(|a| a.key.as_str());
+    let wanted_code = match wanted {
+        Some(t) => match job_type_code(t) {
+            Some(c) => Some(c),
+            None => Some(0), // unknown job type: C++ prints nothing
+        },
+        None => None,
+    };
+    let mut text = String::new();
+    let mut items = Vec::new();
+    for (name, level, jobtype) in JOB_LEVELS {
+        if name.starts_with(' ') { continue; }
+        if let Some(w) = wanted_code {
+            if *jobtype as u32 != w { continue; }
+        }
+        text.push_str(name);
+        text.push('\n');
+        items.push(json!({ "name": name, "level": *level as u32, "jobtype": *jobtype as u32 }));
+    }
+    CommandResult::ok(text).with_json(json!({ "levels": items }))
+}
+
+/// (name, level code, job type code) — dird_conf.cc joblevels[]
+const JOB_LEVELS: &[(&str, char, char)] = &[
+    ("Full", 'F', 'B'), ("Base", 'B', 'B'), ("Incremental", 'I', 'B'),
+    ("Differential", 'D', 'B'), ("Since", 'S', 'B'), ("VirtualFull", 'f', 'B'),
+    ("Catalog", 'C', 'V'), ("InitCatalog", 'V', 'V'), ("VolumeToCatalog", 'O', 'V'),
+    ("DiskToCatalog", 'd', 'V'), ("Data", 'A', 'V'),
+    ("Full", 'F', 'c'), ("Incremental", 'I', 'c'), ("Differential", 'D', 'c'),
+    ("Full", 'F', 'g'), ("Incremental", 'I', 'g'), ("Differential", 'D', 'g'),
+];
+
+/// (type name, job type code) — dird_conf.cc jobtypes[]
+const JOB_TYPES: &[(&str, char)] = &[
+    ("Backup", 'B'), ("Admin", 'D'), ("Archive", 'A'), ("Verify", 'V'),
+    ("Restore", 'R'), ("Migrate", 'g'), ("Copy", 'c'), ("Consolidate", 'O'),
+];
+
+/// Job type code for a type name (case-insensitive) or a single code letter.
+fn job_type_code(name: &str) -> Option<u32> {
+    JOB_TYPES.iter()
+        .find(|(n, _)| n.eq_ignore_ascii_case(name))
+        .map(|(_, c)| *c as u32)
 }
 
 /// `.locations`
@@ -389,59 +387,40 @@ pub fn cmd_dot_messages(_ast: &CommandAst, _ctx: &ExecContext) -> CommandResult 
     CommandResult::ok(String::new())
 }
 
-/// `.msgs` — list message resource names
+/// `.msgs` — list message resource names (C++ uses the key "text")
 pub fn cmd_dot_msgs(_ast: &CommandAst, ctx: &ExecContext) -> CommandResult {
-    if let Some(config) = &ctx.config {
-        if let Ok(cfg) = config.read() {
-            let out: String = cfg.messages.iter().map(|m| format!("{}\n", m.name)).collect();
-            return CommandResult::ok(out);
-        }
-    }
-    CommandResult::ok(String::new())
+    with_config(ctx, "messages", |cfg| name_list("messages", "text",
+        cfg.messages.iter().map(|m| (m.name.as_str(), None))))
 }
 
 /// `.profiles`
 pub fn cmd_dot_profiles(_ast: &CommandAst, ctx: &ExecContext) -> CommandResult {
-    if let Some(config) = &ctx.config {
-        if let Ok(cfg) = config.read() {
-            let out: String = cfg.profiles.iter().map(|p| format!("{}\n", p.name)).collect();
-            return CommandResult::ok(out);
-        }
-    }
-    CommandResult::ok(String::new())
+    with_config(ctx, "profiles", |cfg| name_list("profiles", "name",
+        cfg.profiles.iter().map(|p| (p.name.as_str(), None))))
 }
 
-/// `.types` — list all job types
+/// `.types` — list all job types (C++ DotTypesCmd: key "jobtypes", field "name")
 pub fn cmd_dot_types(_ast: &CommandAst, _ctx: &ExecContext) -> CommandResult {
-    CommandResult::ok(
-        "Backup\nRestore\nVerify\nAdmin\nArchive\nCopy\nMigrate\nConsolidate\n".to_string()
-    )
+    name_list("jobtypes", "name", JOB_TYPES.iter().map(|(n, _)| (*n, None)))
 }
 
-/// `.users` — list user/console resource names
+/// `.users` — User resources (Console resources stand in until User is parsed)
 pub fn cmd_dot_users(_ast: &CommandAst, ctx: &ExecContext) -> CommandResult {
-    if let Some(config) = &ctx.config {
-        if let Ok(cfg) = config.read() {
-            let mut out = String::new();
-            for c in &cfg.consoles {
-                out.push_str(&format!("{}\n", c.name));
-            }
-            return CommandResult::ok(out);
-        }
-    }
-    CommandResult::ok(String::new())
+    with_config(ctx, "users", |cfg| name_list("users", "name",
+        cfg.consoles.iter().map(|c| (c.name.as_str(), None))))
 }
 
 /// `.volstatus` — list all possible volume statuses
 pub fn cmd_dot_volstatus(_ast: &CommandAst, _ctx: &ExecContext) -> CommandResult {
-    CommandResult::ok(
-        "Append\nArchive\nDisabled\nError\nFull\nPurged\nRecycle\nRead-Only\nUsed\nCleaning\n".to_string()
-    )
+    // dird_conf.cc VolumeStatus[]
+    const STATUS: &[&str] = &["Unlabeled", "Append", "Full", "Used", "Recycle", "Purged",
+        "Cleaning", "Error", "Archive", "Disabled"];
+    name_list("volstatus", "name", STATUS.iter().map(|n| (*n, None)))
 }
 
 /// `.actiononpurge` — list possible actions on purge
 pub fn cmd_dot_actiononpurge(_ast: &CommandAst, _ctx: &ExecContext) -> CommandResult {
-    CommandResult::ok("Truncate\nNone\n".to_string())
+    name_list("actiononpurge", "name", ["None", "Truncate"].iter().map(|n| (*n, None)))
 }
 
 /// `.api [0|1|2|off|on|json] [compact=<yes|no>]`
@@ -455,14 +434,15 @@ pub fn cmd_dot_actiononpurge(_ast: &CommandAst, _ctx: &ExecContext) -> CommandRe
 pub fn cmd_dot_api(ast: &CommandAst, _ctx: &ExecContext) -> CommandResult {
     let mode = ast.arguments.first()
         .map(|a| a.value.as_deref().unwrap_or(a.key.as_str()))
-        .unwrap_or("0");
+        .unwrap_or("1");
     let api_mode = match mode {
         "0" | "off" => 0,
         "1" | "on" => 1,
         "2" | "json" => 2,
-        _ => 0,
+        _ => return CommandResult::error(format!(".api: invalid mode \"{mode}\"\n")),
     };
-    CommandResult::ok(format!("api: mode={api_mode}\n"))
+    // C++ DotApiCmd: ObjectKeyValue("api", "%s: ", api, "%d\n")
+    CommandResult::ok(format!("api: {api_mode}\n")).with_json(serde_json::json!({ "api": api_mode }))
 }
 
 /// `.grpc [on|off] [format=<proto|json|text>] [compact=<yes|no>]`

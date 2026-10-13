@@ -144,6 +144,17 @@ pub fn handle_console_session<S: Read + Write>(
             break;
         }
 
+        // C++ ua_cmds.cc Do_a_command(): in API mode the command is framed by
+        // CMD_BEGIN ... CMD_OK/CMD_FAILED; in JSON mode the json-rpc result
+        // follows after that (FinalizeResult). `.api` switches the mode
+        // before it produces output, so its own reply is already JSON.
+        if api_mode != command_executor::ApiMode::Human {
+            if bnet.send_signal(BnetSignal::CmdBegin).is_err() { break; }
+        }
+        if ast.command_name == ".api" {
+            api_mode = parse_api_mode(&ast).unwrap_or(api_mode);
+        }
+
         // Execute command
         let ctx = ExecContext {
             session_id,
@@ -158,16 +169,6 @@ pub fn handle_console_session<S: Read + Write>(
 
         // Session-altering commands
         match ast.command_name.as_str() {
-            ".api" => {
-                if let Some(mode_str) = ast.arguments.first().map(|a| a.value.as_deref().unwrap_or(a.key.as_str())) {
-                    api_mode = match mode_str {
-                        "0" | "off" => command_executor::ApiMode::Human,
-                        "1" | "on" => command_executor::ApiMode::Api,
-                        "2" | "json" => command_executor::ApiMode::Json,
-                        _ => api_mode,
-                    };
-                }
-            }
             "autodisplay" => {
                 let flag = ast.arguments.first().map(|a| a.key.as_str()).unwrap_or("on");
                 auto_display = flag != "off";
@@ -185,42 +186,55 @@ pub fn handle_console_session<S: Read + Write>(
             _ => {}
         }
 
-        // Send result
-        if !result.text_output.is_empty() {
-            let out = if result.text_output.ends_with('\n') {
-                result.text_output.clone()
-            } else {
-                format!("{}\n", result.text_output)
-            };
-            if bnet.send_str(&out).is_err() { break; }
-        }
-        if !result.error_message.is_empty() {
-            let err = if result.error_message.ends_with('\n') {
-                result.error_message.clone()
-            } else {
-                format!("{}\n", result.error_message)
-            };
-            if bnet.send_str(&err).is_err() { break; }
+        if api_mode != command_executor::ApiMode::Human {
+            let sig = if result.success { BnetSignal::CmdOk } else { BnetSignal::CmdFailed };
+            if bnet.send_signal(sig).is_err() { break; }
         }
 
-        // HandleMessages: drain pending bus messages (like C++ ua_session.cc)
+        // Send result
+        if api_mode == command_executor::ApiMode::Json {
+            if bnet.send_str(&crate::json_output::envelope(&result)).is_err() { break; }
+        } else {
+            if !result.text_output.is_empty() {
+                let out = if result.text_output.ends_with('\n') {
+                    result.text_output.clone()
+                } else {
+                    format!("{}\n", result.text_output)
+                };
+                if bnet.send_str(&out).is_err() { break; }
+            }
+            if !result.error_message.is_empty() {
+                let err = if result.error_message.ends_with('\n') {
+                    result.error_message.clone()
+                } else {
+                    format!("{}\n", result.error_message)
+                };
+                if bnet.send_str(&err).is_err() { break; }
+            }
+        }
+
+        // HandleMessages: drain pending bus messages (like C++ ua_server.cc).
+        // In API mode messages never interleave with the command output;
+        // the console is only told via MSGS_PENDING and fetches them itself.
         if auto_display {
             let mut has_messages = false;
             while let Ok(msg) = bus_rx.try_recv() {
-                match msg {
-                    crate::message_bus::BusMessage::ConsoleText { text } => {
-                        let _ = bnet.send_str(&format!("{text}\n"));
-                        has_messages = true;
-                    }
-                    crate::message_bus::BusMessage::JobMessage { job_id, text, .. } if job_id > 0 => {
-                        let _ = bnet.send_str(&format!("{text}\n"));
-                        has_messages = true;
-                    }
-                    _ => {}
+                let text = match msg {
+                    crate::message_bus::BusMessage::ConsoleText { text } => text,
+                    crate::message_bus::BusMessage::JobMessage { job_id, text, .. } if job_id > 0 => text,
+                    _ => continue,
+                };
+                has_messages = true;
+                if api_mode == command_executor::ApiMode::Human {
+                    let _ = bnet.send_str(&format!("{text}\n"));
                 }
             }
-            if has_messages && !gui_mode && api_mode == command_executor::ApiMode::Human {
-                let _ = bnet.send_str("You have messages.\n");
+            if has_messages && !gui_mode {
+                if api_mode == command_executor::ApiMode::Human {
+                    let _ = bnet.send_str("You have messages.\n");
+                } else {
+                    let _ = bnet.send_signal(BnetSignal::MsgsPending);
+                }
             }
         }
 
@@ -237,6 +251,17 @@ pub fn handle_console_session<S: Read + Write>(
 }
 
 /// Parse a CLI command string into a CommandAST.
+/// Mode argument of `.api` (C++ DotApiCmd: no argument means 1).
+fn parse_api_mode(ast: &CommandAst) -> Option<command_executor::ApiMode> {
+    match ast.arguments.first().map(|a| a.value.as_deref().unwrap_or(a.key.as_str())) {
+        None => Some(command_executor::ApiMode::Api),
+        Some("0") | Some("off") => Some(command_executor::ApiMode::Human),
+        Some("1") | Some("on") => Some(command_executor::ApiMode::Api),
+        Some("2") | Some("json") => Some(command_executor::ApiMode::Json),
+        Some(_) => None,
+    }
+}
+
 /// Simple parser: first word is command name, rest are key=value arguments.
 pub(crate) fn parse_cli_command(input: &str) -> CommandAst {
     let mut parts = input.splitn(2, char::is_whitespace);
