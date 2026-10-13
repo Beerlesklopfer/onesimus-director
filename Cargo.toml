@@ -21,7 +21,7 @@ version = "0.25.0"
 edition = "2024"
 authors = ["Joerg Bernau <joerg@bernau.family>"]
 license = "AGPL-3.0"
-repository = "https://github.com/Beerlesklopfer/onesimus"
+repository = "https://github.com/Beerlesklopfer/onesimus-director"
 
 [workspace.dependencies]
 # Async runtime (only for gRPC)
