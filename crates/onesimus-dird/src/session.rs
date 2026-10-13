@@ -35,8 +35,14 @@ pub fn handle_console_session<S: Read + Write>(
     // Register session
     let mgr_session_id = session_mgr.create_session(console_name);
 
-    // CRAM-MD5 two-way authentication (Director is server = initiated_by_remote=true)
-    if !password.is_empty() {
+    // CRAM-MD5 two-way authentication (Director is server = initiated_by_remote=true).
+    // The caller only gets here with a configured password; never skip auth.
+    if password.is_empty() {
+        warn!("session {session_id}: no password for console '{console_name}', rejected");
+        session_mgr.remove_session(mgr_session_id);
+        return;
+    }
+    {
         let auth = CramMd5Auth::new(password, "bareos-dir", 0);
         match auth.two_way_authenticate(&mut bnet, true) {
             Ok(result) if result.success => {
@@ -54,9 +60,6 @@ pub fn handle_console_session<S: Read + Write>(
                 return;
             }
         }
-    } else {
-        // No password configured — allow unauthenticated
-        session_mgr.authenticate_session(mgr_session_id);
     }
 
     // Post-18.2 protocol: send MessageID-based responses
@@ -72,7 +75,12 @@ pub fn handle_console_session<S: Read + Write>(
     }
 
     // 2. kMessageIdInfoMessage (1002) with connection info
-    let info_msg = format!("1002{rs}You are connected using the default console");
+    // C++ ConsoleAuthenticatorFrom_18_2::SendInfoMessage()
+    let info_msg = if console_name == "*UserAgent*" {
+        format!("1002{rs}You are connected using the default console")
+    } else {
+        format!("1002{rs}You are logged in as: {console_name}")
+    };
     if bnet.send_str(&info_msg).is_err() {
         session_mgr.remove_session(mgr_session_id);
         return;

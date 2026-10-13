@@ -45,10 +45,10 @@ impl CramMd5Auth {
         }
     }
 
-    /// Create authenticator from plaintext password.
-    /// The password is first MD5-hashed to a hex string (Bareos convention).
+    /// Create authenticator from a configured password (plaintext, or
+    /// "[md5]<hex>" as Bareos stores it). The key is the MD5 hex (Bareos convention).
     pub fn new(password: &str, qualified_name: &str, tls_policy: i32) -> Self {
-        let password_md5 = md5_hash_password(password);
+        let password_md5 = password_key(password);
         Self {
             password: password_md5,
             qualified_name: bash_spaces(qualified_name),
@@ -292,6 +292,16 @@ pub fn unbash_spaces(s: &str) -> String {
     s.replace('_', " ")
 }
 
+/// Key for CRAM-MD5 / TLS-PSK from a configured password: "[md5]<hex>" is
+/// already the MD5 hex (Bareos stores passwords that way); anything else is
+/// hashed. Without this, an "[md5]" password would be hashed a second time.
+pub fn password_key(password: &str) -> String {
+    match password.strip_prefix("[md5]") {
+        Some(hex) => hex.to_ascii_lowercase(),
+        None => md5_hash_password(password),
+    }
+}
+
 /// MD5-hash a plaintext password to hex string (Bareos password storage convention).
 /// "testpassword" → "e16b2ab8d12314bf4efbd6203906ea6c"
 pub fn md5_hash_password(password: &str) -> String {
@@ -447,5 +457,12 @@ mod tests {
 
         assert!(!server_result.success, "server should reject wrong password");
         // Client may or may not see failure depending on timing
+    }
+
+    #[test]
+    fn md5_prefixed_password_is_not_hashed_twice() {
+        let hex = md5_hash_password("secret");
+        assert_eq!(password_key("secret"), hex);
+        assert_eq!(password_key(&format!("[md5]{}", hex.to_uppercase())), hex);
     }
 }

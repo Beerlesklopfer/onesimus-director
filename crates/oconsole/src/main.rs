@@ -89,6 +89,11 @@ struct ConsoleConfig {
     port: u16,
     name: String,
     password: String,
+    /// oconsole extensions (written by the Onesimus GUI): Grpc = yes,
+    /// Grpc Port = <n>, Grpc Fingerprint = <sha256 hex>
+    grpc: bool,
+    grpc_port: Option<u16>,
+    grpc_fingerprint: Option<String>,
 }
 
 /// Effective CLI — resolved from config file + CLI overrides
@@ -111,6 +116,9 @@ fn load_console_config(path: &str) -> ConsoleConfig {
         port: 9101,
         name: "*UserAgent*".to_string(),
         password: String::new(),
+        grpc: false,
+        grpc_port: None,
+        grpc_fingerprint: None,
     };
 
     let content = match std::fs::read_to_string(path) {
@@ -133,6 +141,11 @@ fn load_console_config(path: &str) -> ConsoleConfig {
                 "port" | "dirport" => cfg.port = val.parse().unwrap_or(9101),
                 "name" => cfg.name = val,
                 "password" => cfg.password = val,
+                "grpc" => cfg.grpc = matches!(val.to_ascii_lowercase().as_str(), "yes" | "true" | "1" | "on"),
+                "grpc port" | "grpcport" => cfg.grpc_port = val.parse().ok(),
+                "grpc fingerprint" | "grpcfingerprint" => {
+                    cfg.grpc_fingerprint = Some(val.replace(':', "").to_ascii_lowercase())
+                }
                 _ => {}
             }
         }
@@ -170,9 +183,9 @@ fn main() {
         port,
         name: name.clone(),
         password: password.clone(),
-        grpc: cli.grpc,
-        grpc_port: cli.grpc_port.unwrap_or(port.saturating_add(1000)),
-        grpc_fingerprint: cli.grpc_fingerprint.clone(),
+        grpc: cli.grpc || file_cfg.grpc,
+        grpc_port: cli.grpc_port.or(file_cfg.grpc_port).unwrap_or(port.saturating_add(1000)),
+        grpc_fingerprint: cli.grpc_fingerprint.clone().or(file_cfg.grpc_fingerprint.clone()),
         command: cli.command.clone(),
         mcp: cli.mcp,
         mcp_allow_write: cli.mcp_allow_write,

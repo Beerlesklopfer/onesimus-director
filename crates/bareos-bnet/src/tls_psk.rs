@@ -102,6 +102,43 @@ pub fn psk_connect(stream: TcpStream, identity: &str, psk: &[u8]) -> io::Result<
     Ok(PskStream { inner: ssl_stream })
 }
 
+/// Accept via TLS-PSK, choosing the key by the client's PSK identity
+/// (e.g. "R_CONSOLE\x1e<name>"), like the C++ daemons. Unknown identities
+/// fail the handshake. Returns the stream and the identity the client used.
+pub fn psk_accept_with<F>(stream: TcpStream, lookup: F) -> io::Result<(PskStream, String)>
+where
+    F: Fn(&str) -> Option<Vec<u8>> + Send + Sync + 'static,
+{
+    let mut ctx = ssl::SslContext::builder(SslMethod::tls_server())
+        .map_err(ssl_err)?;
+    // TLSv1.2 only — see module docs
+    ctx.set_max_proto_version(Some(ssl::SslVersion::TLS1_2)).map_err(ssl_err)?;
+
+    let seen = std::sync::Arc::new(std::sync::Mutex::new(String::new()));
+    let seen_cb = seen.clone();
+    ctx.set_psk_server_callback(move |_ssl, identity, psk_buf| {
+        let id = identity.map(|b| String::from_utf8_lossy(b).into_owned()).unwrap_or_default();
+        *seen_cb.lock().unwrap() = id.clone();
+        match lookup(&id) {
+            Some(psk) => {
+                let n = psk.len().min(psk_buf.len());
+                psk_buf[..n].copy_from_slice(&psk[..n]);
+                Ok(n)
+            }
+            None => Ok(0), // no key: handshake fails
+        }
+    });
+    ctx.set_cipher_list(BAREOS_CIPHERS).map_err(ssl_err)?;
+
+    let ctx = ctx.build();
+    let ssl_stream = ssl::Ssl::new(&ctx)
+        .map_err(ssl_err)?
+        .accept(stream)
+        .map_err(|e| io::Error::new(io::ErrorKind::Other, format!("PSK accept: {e}")))?;
+    let identity = seen.lock().unwrap().clone();
+    Ok((PskStream { inner: ssl_stream }, identity))
+}
+
 /// Accept via TLS-PSK (server mode).
 pub fn psk_accept(stream: TcpStream, psk: &[u8]) -> io::Result<PskStream> {
     let mut ctx = ssl::SslContext::builder(SslMethod::tls_server())
@@ -243,7 +280,7 @@ pub fn accept_any_tls(
 ///
 /// Unser Rust-Parser speichert das Passwort als Klartext, daher hashen wir hier.
 pub fn password_to_psk(password: &str) -> Vec<u8> {
-    crate::cram_md5::md5_hash_password(password).into_bytes()
+    crate::cram_md5::password_key(password).into_bytes()
 }
 
 fn ssl_err(e: openssl::error::ErrorStack) -> io::Error {

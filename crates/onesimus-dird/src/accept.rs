@@ -129,7 +129,7 @@ pub fn accept_loop(
 fn handle_connection(
     stream: TcpStream,
     session_id: u64,
-    password: &str,
+    _password: &str,
     tls_config: Option<Arc<rustls::ServerConfig>>,
     session_mgr: &Arc<SessionManager>,
     cmd_queue: &CommandQueue,
@@ -146,12 +146,14 @@ fn handle_connection(
     match stream.peek(&mut peek_buf) {
         Ok(1) => {
             if peek_buf[0] == 0x16 {
-                // TLS ClientHello — do TLS-PSK accept
-                let psk = bareos_bnet::tls_psk::password_to_psk(password);
-                match bareos_bnet::tls_psk::psk_accept(stream, &psk) {
-                    Ok(psk_stream) => {
-                        debug!("session {session_id}: TLS-PSK accept OK");
-                        handle_hello(BnetStream::new(psk_stream), session_id, password,
+                // TLS ClientHello — TLS-PSK, key chosen by the PSK identity
+                // ("R_CONSOLE\x1e<console>"), like the C++ Director
+                let cfg = shared_config.clone();
+                let lookup = move |identity: &str| psk_for_identity(&cfg, identity);
+                match bareos_bnet::tls_psk::psk_accept_with(stream, lookup) {
+                    Ok((psk_stream, identity)) => {
+                        debug!("session {session_id}: TLS-PSK accept OK (identity {})", identity.replace('\x1e', "/"));
+                        handle_hello(BnetStream::new(psk_stream), session_id, Some(identity),
                                      session_mgr, cmd_queue, shared_config, job_manager, catalog);
                     }
                     Err(e) => {
@@ -161,7 +163,7 @@ fn handle_connection(
             } else {
                 // Plaintext BNET — first byte is part of i32 length header
                 debug!("session {session_id}: plaintext connection detected");
-                handle_hello(BnetStream::new(stream), session_id, password,
+                handle_hello(BnetStream::new(stream), session_id, None,
                              session_mgr, cmd_queue, shared_config, job_manager, catalog);
             }
         }
@@ -171,11 +173,40 @@ fn handle_connection(
     }
 }
 
+/// Password a console authenticates with: the Director password for the
+/// default console ("*UserAgent*"), the Console resource's password for a
+/// named console. None if unknown or empty (connection is refused).
+fn console_password(shared_config: &Option<SharedConfig>, name: &str) -> Option<String> {
+    let cfg = shared_config.as_ref()?.read().ok()?;
+    let pw = if name == "*UserAgent*" {
+        cfg.director.password.clone()
+    } else {
+        cfg.consoles.iter().find(|c| c.name == name)?.password.clone()
+    };
+    (!pw.is_empty()).then_some(pw)
+}
+
+/// TLS-PSK key for a client identity "R_CONSOLE\x1e<name>" / "R_CLIENT\x1e<name>".
+fn psk_for_identity(shared_config: &Option<SharedConfig>, identity: &str) -> Option<Vec<u8>> {
+    let (kind, name) = identity.split_once('\x1e')?;
+    let password = match kind {
+        "R_CONSOLE" => console_password(shared_config, name)?,
+        "R_CLIENT" => {
+            let cfg = shared_config.as_ref()?.read().ok()?;
+            let pw = cfg.clients.iter().find(|c| c.name == name)?.password.clone();
+            if pw.is_empty() { return None; }
+            pw
+        }
+        _ => return None,
+    };
+    Some(bareos_bnet::tls_psk::password_to_psk(&password))
+}
+
 /// Handle connection after stream type is determined.
 fn handle_hello<S: std::io::Read + std::io::Write>(
     mut bnet: BnetStream<S>,
     session_id: u64,
-    password: &str,
+    tls_identity: Option<String>,
     session_mgr: &Arc<SessionManager>,
     cmd_queue: &CommandQueue,
     shared_config: &Option<SharedConfig>,
@@ -200,19 +231,37 @@ fn handle_hello<S: std::io::Read + std::io::Write>(
         }
     };
 
-    match hello {
-        Hello::DefaultConsole => {
-            debug!("default console connected (session {session_id})");
-            session::handle_console_session(
-                bnet, session_id, "*UserAgent*", password, session_mgr, cmd_queue, shared_config, job_manager, catalog,
-            );
+    let console_name = match &hello {
+        Hello::DefaultConsole => Some("*UserAgent*".to_string()),
+        Hello::NamedConsole { name, .. } => Some(name.clone()),
+        Hello::FileDaemon { .. } => None,
+    };
+    if let Some(name) = console_name {
+        // The Hello must name the console the TLS-PSK key belongs to
+        if let Some(id) = &tls_identity {
+            if *id != format!("R_CONSOLE\x1e{name}") {
+                warn!("session {session_id}: console '{name}' does not match TLS-PSK identity, rejected");
+                return;
+            }
         }
-        Hello::NamedConsole { name, version, wants_grpc } => {
+        // Default console: Director password; named console: its own password
+        let Some(password) = console_password(shared_config, &name) else {
+            warn!("session {session_id}: unknown console '{name}' or no password configured, rejected");
+            return;
+        };
+        if let Hello::NamedConsole { version, wants_grpc, .. } = &hello {
             debug!("named console '{name}' v{version} connected (grpc={wants_grpc})");
-            session::handle_console_session(
-                bnet, session_id, &name, password, session_mgr, cmd_queue, shared_config, job_manager, catalog,
-            );
+        } else {
+            debug!("default console connected (session {session_id})");
         }
+        session::handle_console_session(
+            bnet, session_id, &name, &password, session_mgr, cmd_queue, shared_config, job_manager, catalog,
+        );
+        return;
+    }
+
+    match hello {
+        Hello::DefaultConsole | Hello::NamedConsole { .. } => unreachable!(),
         Hello::FileDaemon { client_name, fd_protocol_version } => {
             debug!("FD '{client_name}' connected (proto={fd_protocol_version})");
             session_mgr.add_fd_connection(&client_name, fd_protocol_version);
