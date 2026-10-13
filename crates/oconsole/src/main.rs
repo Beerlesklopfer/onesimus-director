@@ -315,7 +315,7 @@ fn run_bnet_session<S: std::io::Read + std::io::Write + Send + 'static>(cli: &Ef
     }
 
     // Interactive mode
-    interactive_loop(bnet, &cli.name, "bareos-dir");
+    interactive_loop(Box::new(BnetConn { bnet }), &cli.name, "bareos-dir");
 }
 
 /// MCP command runner over an authenticated BNET session (api=0: response ends with EOD).
@@ -404,7 +404,8 @@ impl<S: std::io::Read + std::io::Write + Send> DirectorConn for BnetConn<S> {
             return Vec::new();
         }
         // api=0: send cmd → read Data → EOD marks end
-        // api>0: send cmd → read Data → MainPrompt marks end
+        // api>0: CMD_BEGIN, CMD_OK/CMD_FAILED, Data → MainPrompt marks end
+        // (C++ ua_cmds.cc framing); those framing signals are skipped
         if self.bnet.send_str(cmd).is_err() { return Vec::new(); }
         let mut output = String::new();
         loop {
@@ -414,7 +415,9 @@ impl<S: std::io::Read + std::io::Write + Send> DirectorConn for BnetConn<S> {
                 }
                 Ok(BnetMessage::Signal(BnetSignal::Eod)) => break,
                 Ok(BnetMessage::Signal(BnetSignal::MainPrompt)) => break,
-                _ => break,
+                Ok(BnetMessage::Signal(BnetSignal::Terminate)) => break,
+                Ok(BnetMessage::Signal(_)) => continue,
+                Err(_) => break,
             }
         }
         output.lines()
@@ -805,12 +808,11 @@ impl Validator for BareosHelper {}
 
 impl Helper for BareosHelper {}
 
-fn interactive_loop<S: std::io::Read + std::io::Write + Send + 'static>(
-    bnet: BnetStream<S>,
+fn interactive_loop(
+    mut dir: Box<dyn DirectorConn>,
     console_name: &str,
     director_name: &str,
 ) {
-    let mut dir: Box<dyn DirectorConn> = Box::new(BnetConn { bnet });
 
     // Init messages already drained in run_bnet_session before entering interactive mode.
     let mut helper = BareosHelper::new();
@@ -1076,24 +1078,65 @@ fn run_grpc_mode(cli: &EffCli) {
         return;
     }
 
-    // Interactive mode
-    let stdin = io::stdin();
-    let mut stdout = io::stdout();
-    loop {
-        print!("* ");
-        stdout.flush().ok();
+    // Interactive mode: same line editor (history, tab completion) as BNET
+    let name = session.director_name.clone();
+    interactive_loop(Box::new(GrpcConn { rt, session, pending: Vec::new() }), &cli.name, &name);
+}
 
-        let mut line = String::new();
-        match stdin.lock().read_line(&mut line) {
-            Ok(0) | Err(_) => break,
-            Ok(_) => {}
-        }
+/// gRPC implementation of DirectorConn: each command is one ExecuteCommand
+/// call; the reply is handed to the interactive loop as Data + EOD.
+struct GrpcConn {
+    rt: tokio::runtime::Runtime,
+    session: grpc_client::GrpcSession,
+    pending: Vec<RecvResult>,
+}
 
-        let cmd = line.trim();
-        if cmd.is_empty() { continue; }
-        if matches!(cmd, "quit" | "exit") { break; }
-        run(cmd);
+impl GrpcConn {
+    fn execute(&mut self, cmd: &str, format: bareos_proto_rs::bareos::director::ResponseFormat) -> Result<String, String> {
+        let out = self.rt.block_on(self.session.execute(cmd, format)).map_err(|e| format!("gRPC error: {e}"))?;
+        Ok(if out.error.is_empty() { out.text } else { format!("{}{}", out.text, out.error) })
     }
+}
+
+impl DirectorConn for GrpcConn {
+    fn query(&mut self, cmd: &str) -> Vec<String> {
+        use bareos_proto_rs::bareos::director::ResponseFormat;
+        // Stateless calls: .api has no effect; machine format is chosen per request
+        if cmd.is_empty() || cmd.starts_with(".api") {
+            return Vec::new();
+        }
+        self.execute(cmd, ResponseFormat::Api).unwrap_or_default()
+            .lines()
+            .map(|l| l.trim().to_string())
+            .filter(|l| !l.is_empty())
+            .collect()
+    }
+
+    fn send_cmd(&mut self, cmd: &str) -> bool {
+        use bareos_proto_rs::bareos::director::ResponseFormat;
+        if matches!(cmd, "quit" | "exit" | ".quit") {
+            self.pending = vec![RecvResult::Data("bye".to_string())];
+            return true;
+        }
+        let text = match self.execute(cmd, ResponseFormat::Text) {
+            Ok(t) => t,
+            // A failed call is shown like a command error; the session goes on
+            Err(e) => format!("Error: {e}\n"),
+        };
+        // recv_msg pops from the end
+        self.pending = vec![RecvResult::Signal(BnetSignal::Eod), RecvResult::Data(text)];
+        true
+    }
+
+    fn recv_msg(&mut self) -> Option<RecvResult> {
+        Some(self.pending.pop().unwrap_or(RecvResult::Signal(BnetSignal::Eod)))
+    }
+
+    fn drain(&mut self) {
+        self.pending.clear();
+    }
+
+    fn send_cancel(&mut self) {}
 }
 
 /// MCP command runner over an authenticated gRPC session.
