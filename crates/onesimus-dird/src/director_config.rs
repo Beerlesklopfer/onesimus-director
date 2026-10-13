@@ -24,6 +24,8 @@ pub struct DirectorConfig {
     pub jobdefs: Vec<JobDefsResource>,
     pub messages: Vec<MessagesResource>,
     pub profiles: Vec<ProfileResource>,
+    /// Raw directives in C++ resource order (for `show`)
+    pub raw: Vec<bareos_config::raw::ConfResource>,
 }
 
 impl DirectorConfig {
@@ -31,20 +33,27 @@ impl DirectorConfig {
     /// If path is a directory (e.g. /etc/bareos/bareos-dir.d/), reads all *.conf recursively.
     /// If path is a file, reads it as a single config file.
     pub fn load(path: &Path) -> Result<Self, ConfigError> {
-        if path.is_dir() {
+        let mut config = if path.is_dir() {
             let resources = parser::parse_config_dir(path)?;
-            Self::from_resources(resources)
+            Self::from_resources(resources)?
         } else {
             let content = std::fs::read_to_string(path)
                 .map_err(|e| ConfigError::ParseError(format!("cannot read {}: {e}", path.display())))?;
-            Self::from_str(&content)
+            Self::from_str(&content)?
+        };
+        match bareos_config::raw::load(path) {
+            Ok(raw) => config.raw = raw,
+            Err(e) => tracing::warn!("raw config view unavailable (show): {e}"),
         }
+        Ok(config)
     }
 
     /// Parse configuration from a string.
     pub fn from_str(input: &str) -> Result<Self, ConfigError> {
         let resources = parser::parse_config(input)?;
-        Self::from_resources(resources)
+        let mut config = Self::from_resources(resources)?;
+        config.raw = bareos_config::raw::parse_str(input, None).unwrap_or_default();
+        Ok(config)
     }
 
     /// Build config from parsed resources.
@@ -62,6 +71,7 @@ impl DirectorConfig {
             jobdefs: Vec::new(),
             messages: Vec::new(),
             profiles: Vec::new(),
+            raw: Vec::new(),
         };
 
         for resource in resources {
