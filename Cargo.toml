@@ -17,7 +17,8 @@ members = [
 plugins = ["crates/bareos-plugins"]
 
 [workspace.package]
-version = "0.25.0"
+# <Bareos version this Director is compatible with>+onesimus.<Onesimus (GUI) version>
+version = "25.1.2+onesimus.0.2.0"
 edition = "2024"
 authors = ["Joerg Bernau <joerg@bernau.family>"]
 license = "AGPL-3.0"

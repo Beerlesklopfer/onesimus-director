@@ -222,7 +222,7 @@ echo ""
 
 # === 1. Basis ===
 echo "--- 1. Basis ---"
-run_cmd "version" "0.25.0"
+run_cmd "version" "+onesimus."
 run_cmd "time" "202"
 run_cmd "quit" "bye"
 

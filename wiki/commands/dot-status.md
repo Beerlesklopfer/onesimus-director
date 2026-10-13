@@ -21,7 +21,7 @@ Machine-interface version of the `status` command. Used by bconsole/oconsole and
 ### Director status
 ```
 * .status dir
-bareos-dir Version: 0.25.0
+bareos-dir Version: 25.1.2+onesimus.0.2.0
 Daemon started 29-Mar-2026 08:00:00
 
 Director: bareos-dir

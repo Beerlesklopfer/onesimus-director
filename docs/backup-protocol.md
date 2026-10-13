@@ -342,7 +342,7 @@ bconsole connects with `api=0` (default). The `.api` dot-command changes the mod
 Dir: recv()          ← blocks, waits for command
 Console: sends cmd   → "version\n"
 Dir: executes cmd
-Dir: send_str(result) → "bareos-dir Version: 0.25.0 ..."
+Dir: send_str(result) → "bareos-dir Version: 25.1.2+onesimus.0.2.0 ..."
 Dir: send_signal(EOD) → signal -1
 Dir: recv()          ← back to waiting
 ```
@@ -366,7 +366,7 @@ Dir: send_signal(MainPrompt) → next iteration
 ### Initial handshake (after CRAM-MD5 auth)
 
 ```
-Dir → Console: "1000\x1eOK: bareos-dir Version: 0.25.0"  (data)
+Dir → Console: "1000\x1eOK: bareos-dir Version: 25.1.2+onesimus.0.2.0"  (data)
 Dir → Console: "1002\x1eYou are connected using the default console"  (data)
 ```
 

@@ -21,7 +21,7 @@ status [dir|director|client=<name>|storage=<name>]
 ### Director status
 ```
 * status dir
-Onesimus Director Version 0.25.0 (Debian GNU/Linux 13 (trixie))
+Onesimus Director Version 25.1.2+onesimus.0.2.0 (Debian GNU/Linux 13 (trixie))
 
 Scheduled Jobs:
 Level  Type  Priority  Scheduled           Name
