@@ -166,6 +166,15 @@ fn parse_raw_resources_inner(input: &str) -> Result<Vec<RawResource>, (String, u
             .find(|c: char| c.is_whitespace() || c == '{')
             .ok_or_else(|| (format!("expected resource type, got: {}", &remaining[..20.min(remaining.len())]), remaining.len()))?;
         let resource_type = remaining[..type_end].to_string();
+        // Like C++ "Expected a Resource name identifier": a block keyword or a
+        // stray '}' at top level means a '}' too many above it. Other unknown
+        // resource types are skipped later (lenient, as before).
+        if resource_type.starts_with('}') || ["include", "exclude", "options", "runscript"]
+            .contains(&resource_type.to_ascii_lowercase().as_str())
+        {
+            return Err((format!("expected a resource type, got: {resource_type} (is there one '}}' too many above?)"),
+                        remaining.len()));
+        }
         remaining = remaining[type_end..].trim_start();
 
         // Expect opening brace
@@ -192,28 +201,17 @@ fn parse_raw_resources_inner(input: &str) -> Result<Vec<RawResource>, (String, u
                 let before_brace = trimmed[..brace_pos].trim();
                 if !before_brace.contains('=') && !before_brace.is_empty() {
                     let block_name = before_brace.split_whitespace().next().unwrap_or("").to_lowercase();
-                    remaining = &trimmed[brace_pos + 1..];
-                    // Collect the block content
-                    let block_start = remaining;
-                    let mut depth = 1;
-                    while depth > 0 && !remaining.is_empty() {
-                        if let Some(pos) = remaining.find(|c| c == '{' || c == '}') {
-                            if remaining.as_bytes()[pos] == b'{' {
-                                depth += 1;
-                            } else {
-                                depth -= 1;
-                            }
-                            remaining = &remaining[pos + 1..];
-                        } else {
-                            break;
-                        }
-                    }
+                    // Collect the block content (braces inside quotes, e.g. in a
+                    // RunScript Command, do not count)
+                    let block = &trimmed[brace_pos..];
+                    let (block_content, rest) = parse_brace_value(block)
+                        .map_err(|_| (format!("unbalanced '{{' in '{block_name}' block of resource '{resource_type}'"),
+                                      block.len()))?;
+                    remaining = rest;
                     // Store block content as a directive with "_block_" prefix
-                    let block_len = block_start.len() - remaining.len();
-                    let block_content = &block_start[..block_len];
                     directives.push(RawDirective {
                         key: format!("_block_{block_name}"),
-                        value: block_content.trim_end_matches('}').trim().to_string(),
+                        value: block_content,
                     });
                     continue;
                 }
@@ -778,6 +776,25 @@ Director {
 
         let err = parse_config("Director {\n  Name = x\n}\nBroken\n").unwrap_err().to_string();
         assert!(err.contains("line 4"), "{err}");
+    }
+
+    #[test]
+    fn braces_in_quoted_block_values() {
+        let input = "Job {\n  Name = a\n  Type = Backup\n  RunScript {\n    RunsWhen = Before\n    Command = \"sh -c 'test -f /x && { echo ok; }' # not a comment\"\n  }\n  Priority = 5\n}\n";
+        let resources = parse_config(input).unwrap();
+        match &resources[0] {
+            Resource::Job(j) => assert_eq!(j.name, "a"),
+            _ => panic!("expected Job"),
+        }
+    }
+
+    #[test]
+    fn extra_closing_brace_is_reported_at_the_block() {
+        let input = "FileSet {\n  Name = fs\n  Include {\n    File = /a\n  }\n  }\n\n  Exclude {\n    File = /tmp\n  }\n}\n";
+        let err = parse_config(input).unwrap_err().to_string();
+        assert!(err.contains("line 8"), "{err}");
+        assert!(err.contains("Exclude"), "{err}");
+        assert!(err.contains("too many"), "{err}");
     }
 
     #[test]
