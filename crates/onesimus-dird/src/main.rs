@@ -22,6 +22,7 @@ mod json_output;
 mod kill;
 mod localtime;
 mod mdns;
+mod privileges;
 mod message_bus;
 mod reload;
 mod scheduler;
@@ -223,56 +224,6 @@ fn main() {
         DirectorConfig::from_str("Director { Name = bareos-dir\n Port = 9101\n Password = default\n }").unwrap()
     };
 
-    // Build catalog URL and auto-migrate
-    let catalog_db_url = config.catalogs.first().map(|cat| {
-        if cat.db_address.is_empty() || cat.db_address == "localhost" || cat.db_address == "127.0.0.1" {
-            format!("postgres://{}@localhost/{}?host=/var/run/postgresql", cat.db_user, cat.db_name)
-        } else {
-            format!("postgres://{}@{}:{}/{}", cat.db_user, cat.db_address, cat.db_port, cat.db_name)
-        }
-    });
-
-    if let Some(ref db_url) = catalog_db_url {
-        let cat = config.catalogs.first().unwrap();
-
-        // Schema-Verzeichnis: relativ zum Binary (dev) oder /usr/lib/bareos/ddl/schema (installed)
-        let schema_dir = [
-            // Dev: binary in target/release/, schema in crates/bareos-orm/schema/
-            std::env::current_exe().ok()
-                .and_then(|p| p.parent()?.parent()?.parent().map(|d| d.join("crates/bareos-orm/schema"))),
-            // Installed
-            Some(std::path::PathBuf::from("/usr/lib/bareos/ddl/schema")),
-        ].into_iter().flatten().find(|p| p.exists())
-         .unwrap_or_else(|| std::path::PathBuf::from("/usr/lib/bareos/ddl/schema"));
-
-        if schema_dir.exists() {
-            let migrator = bareos_orm::migration::Migrator::new(&schema_dir);
-            let rt = tokio::runtime::Runtime::new().unwrap();
-            match rt.block_on(async {
-                let pool = sqlx::postgres::PgPoolOptions::new()
-                    .max_connections(1)
-                    .connect(&db_url).await?;
-                migrator.migrate(&pool).await
-            }) {
-                Ok(0) => info!("catalog '{}' schema up to date", cat.db_name),
-                Ok(n) => info!("catalog '{}': applied {} schema migration(s)", cat.db_name, n),
-                Err(e) => warn!("catalog migration failed: {e} (continuing without catalog)"),
-            }
-        } else {
-            debug!("no schema directory found at {}, skipping migration", schema_dir.display());
-        }
-    }
-
-    // Spawn catalog worker (single DB pool for all queries)
-    let catalog_handle = if let Some(url) = catalog_db_url {
-        let (handle, join) = catalog_worker::spawn_catalog_worker(url, &SHUTDOWN);
-        // Store join handle for later
-        Some((handle, join))
-    } else {
-        None
-    };
-    let catalog = catalog_handle.as_ref().map(|(h, _)| h.clone());
-
     // --test-config: validate and exit
     if cli.test_config {
         println!("configuration OK: Director '{}', {} clients, {} jobs, {} storages, {} pools, {} schedules",
@@ -338,39 +289,100 @@ fn main() {
         std::process::exit(0);
     }
 
-    // -u/--user, -g/--group: drop privileges
-    #[cfg(unix)]
-    {
-        if let Some(ref group_name) = cli.group {
-            if let Ok(group) = nix::unistd::Group::from_name(group_name) {
-                if let Some(group) = group {
-                    nix::unistd::setgid(group.gid).ok();
-                    info!("switched to group {}", group_name);
-                }
-            }
-        }
-        if let Some(ref user_name) = cli.user {
-            if let Ok(user) = nix::unistd::User::from_name(user_name) {
-                if let Some(user) = user {
-                    nix::unistd::setuid(user.uid).ok();
-                    info!("switched to user {}", user_name);
-                }
-            }
-        }
-    }
-
-    // -p/--pid-file: write PID
-    if let Some(ref pid_file) = cli.pid_file {
-        let pid = std::process::id();
-        if let Err(e) = std::fs::write(pid_file, format!("{pid}\n")) {
-            error!("cannot write PID file {}: {e}", pid_file.display());
-        }
-    }
-
     // CLI overrides
     if let Some(p) = cli.port { config.director.port = p; }
     if let Some(ref n) = cli.name { config.director.name = n.clone(); }
     if let Some(m) = cli.max_jobs { config.director.max_concurrent_jobs = m; }
+
+    // Daemonize wenn NICHT -f/--foreground — before any thread exists (fork keeps
+    // only the calling thread) and before privileges are dropped (PID file).
+    if !cli.foreground && !cli.test_config {
+        info!("daemonizing...");
+        let mut daemon = daemonize::Daemonize::new()
+            .working_directory(&config.director.working_directory);
+
+        if let Some(ref pid_file) = cli.pid_file {
+            daemon = daemon.pid_file(pid_file);
+        }
+
+        match daemon.start() {
+            Ok(_) => info!("daemon started"),
+            Err(e) => {
+                error!("FATAL: daemonize failed: {e}");
+                std::process::exit(1);
+            }
+        }
+    }
+
+    // -p/--pid-file in foreground mode (daemonize writes it itself)
+    if cli.foreground {
+        if let Some(ref pid_file) = cli.pid_file {
+            if let Err(e) = std::fs::write(pid_file, format!("{}\n", std::process::id())) {
+                error!("cannot write PID file {}: {e}", pid_file.display());
+            }
+        }
+    }
+
+    // -u/--user, -g/--group: drop privileges before the catalog connects
+    // (peer authentication / ~/.pgpass as the target user) and before threads
+    #[cfg(unix)]
+    if let Err(e) = privileges::drop_privileges(cli.user.as_deref(), cli.group.as_deref()) {
+        error!("FATAL: {e}");
+        std::process::exit(1);
+    }
+    if cli.user.is_some() || cli.group.is_some() {
+        info!("running as uid={} gid={}", nix::unistd::getuid(), nix::unistd::getgid());
+    }
+
+    // Build catalog URL and auto-migrate
+    let catalog_db_url = config.catalogs.first().map(|cat| {
+        if cat.db_address.is_empty() || cat.db_address == "localhost" || cat.db_address == "127.0.0.1" {
+            format!("postgres://{}@localhost/{}?host=/var/run/postgresql", cat.db_user, cat.db_name)
+        } else {
+            format!("postgres://{}@{}:{}/{}", cat.db_user, cat.db_address, cat.db_port, cat.db_name)
+        }
+    });
+
+    if let Some(ref db_url) = catalog_db_url {
+        let cat = config.catalogs.first().unwrap();
+
+        // Schema-Verzeichnis: relativ zum Binary (dev) oder /usr/lib/bareos/ddl/schema (installed)
+        let schema_dir = [
+            // Dev: binary in target/release/, schema in crates/bareos-orm/schema/
+            std::env::current_exe().ok()
+                .and_then(|p| p.parent()?.parent()?.parent().map(|d| d.join("crates/bareos-orm/schema"))),
+            // Installed
+            Some(std::path::PathBuf::from("/usr/lib/bareos/ddl/schema")),
+        ].into_iter().flatten().find(|p| p.exists())
+         .unwrap_or_else(|| std::path::PathBuf::from("/usr/lib/bareos/ddl/schema"));
+
+        if schema_dir.exists() {
+            let migrator = bareos_orm::migration::Migrator::new(&schema_dir);
+            let rt = tokio::runtime::Runtime::new().unwrap();
+            match rt.block_on(async {
+                let pool = sqlx::postgres::PgPoolOptions::new()
+                    .max_connections(1)
+                    .connect(&db_url).await?;
+                migrator.migrate(&pool).await
+            }) {
+                Ok(0) => info!("catalog '{}' schema up to date", cat.db_name),
+                Ok(n) => info!("catalog '{}': applied {} schema migration(s)", cat.db_name, n),
+                Err(e) => warn!("catalog migration failed: {e} (continuing without catalog)"),
+            }
+        } else {
+            debug!("no schema directory found at {}, skipping migration", schema_dir.display());
+        }
+    }
+
+    // Spawn catalog worker (single DB pool for all queries)
+    let catalog_handle = if let Some(url) = catalog_db_url {
+        let (handle, join) = catalog_worker::spawn_catalog_worker(url, &SHUTDOWN);
+        // Store join handle for later
+        Some((handle, join))
+    } else {
+        None
+    };
+    let catalog = catalog_handle.as_ref().map(|(h, _)| h.clone());
 
     let port = config.director.port;
     let bind_addr = cli.bind_address.clone().unwrap_or_else(|| "0.0.0.0".to_string());
@@ -398,25 +410,6 @@ fn main() {
     let job_mgr = Arc::new(std::sync::Mutex::new(
         job_manager::JobManager::new(bus.clone(), Some(shared_config.clone()), catalog.clone())
     ));
-
-    // Daemonize wenn NICHT -f/--foreground
-    if !cli.foreground && !cli.test_config {
-        info!("daemonizing...");
-        let mut daemon = daemonize::Daemonize::new()
-            .working_directory("/var/lib/bareos");
-
-        if let Some(ref pid_file) = cli.pid_file {
-            daemon = daemon.pid_file(pid_file);
-        }
-
-        match daemon.start() {
-            Ok(_) => info!("daemon started"),
-            Err(e) => {
-                error!("FATAL: daemonize failed: {e}");
-                std::process::exit(1);
-            }
-        }
-    }
 
     info!("Director '{}' listening on port {}", dir_name, port);
 
