@@ -1,6 +1,10 @@
 //! Onesimus Console (oconsole) — Interactive console client for the Director.
 //!
-//! Connects via BNET (TCP + TLS + CRAM-MD5) or gRPC.
+//! Connects via BNET (TCP + TLS + CRAM-MD5) or gRPC (TLS + pinned certificate).
+//! With --mcp it serves the Model Context Protocol on stdio instead of a prompt.
+
+mod grpc_client;
+mod mcp;
 
 use std::io::{self, BufRead, Write};
 use std::net::TcpStream;
@@ -53,9 +57,26 @@ struct Cli {
     #[arg(short = 'w', long)]
     password: Option<String>,
 
-    /// Use gRPC protocol
+    /// Use gRPC protocol (onesimus-dird only)
     #[arg(long)]
     grpc: bool,
+
+    /// gRPC port (default: Director port + 1000)
+    #[arg(long)]
+    grpc_port: Option<u16>,
+
+    /// Expected SHA-256 fingerprint of the Director's gRPC certificate
+    /// (default: ~/.config/oconsole/known_directors, asked on first use)
+    #[arg(long)]
+    grpc_fingerprint: Option<String>,
+
+    /// Serve the Model Context Protocol on stdin/stdout (for AI assistants)
+    #[arg(long)]
+    mcp: bool,
+
+    /// MCP: also offer the 'execute' tool for state-changing commands
+    #[arg(long, requires = "mcp")]
+    mcp_allow_write: bool,
 
     /// Execute single command and exit
     #[arg(short = 'e', long)]
@@ -77,7 +98,11 @@ struct EffCli {
     name: String,
     password: String,
     grpc: bool,
+    grpc_port: u16,
+    grpc_fingerprint: Option<String>,
     command: Option<String>,
+    mcp: bool,
+    mcp_allow_write: bool,
 }
 
 fn load_console_config(path: &str) -> ConsoleConfig {
@@ -130,7 +155,9 @@ fn main() {
     let name = cli.name.unwrap_or(file_cfg.name);
     let password = cli.password.unwrap_or(file_cfg.password);
 
+    // stderr: stdout belongs to command output (and to the protocol in --mcp mode)
     tracing_subscriber::fmt()
+        .with_writer(std::io::stderr)
         .with_env_filter(
             EnvFilter::try_from_default_env()
                 .unwrap_or_else(|_| EnvFilter::new("warn")),
@@ -144,7 +171,11 @@ fn main() {
         name: name.clone(),
         password: password.clone(),
         grpc: cli.grpc,
+        grpc_port: cli.grpc_port.unwrap_or(port.saturating_add(1000)),
+        grpc_fingerprint: cli.grpc_fingerprint.clone(),
         command: cli.command.clone(),
+        mcp: cli.mcp,
+        mcp_allow_write: cli.mcp_allow_write,
     };
 
     // SIGINT handler: set flag instead of killing process.
@@ -156,7 +187,7 @@ fn main() {
     let addr = format!("{}:{}", eff.address, eff.port);
 
     if eff.grpc {
-        run_grpc_mode(&eff, &addr);
+        run_grpc_mode(&eff);
     } else {
         run_bnet_mode(&eff, &addr);
     }
@@ -257,6 +288,13 @@ fn run_bnet_session<S: std::io::Read + std::io::Write + Send + 'static>(cli: &Ef
         }
     }
 
+    // MCP server mode
+    if cli.mcp {
+        eprintln!("oconsole: serving MCP on stdio{}", if cli.mcp_allow_write { " (write access enabled)" } else { " (read-only)" });
+        mcp::McpServer::new(BnetRunner { bnet }, cli.mcp_allow_write, "bareos-dir".to_string()).serve();
+        return;
+    }
+
     // Single command mode
     if let Some(cmd) = &cli.command {
         execute_single_command(&mut bnet, cmd);
@@ -265,6 +303,28 @@ fn run_bnet_session<S: std::io::Read + std::io::Write + Send + 'static>(cli: &Ef
 
     // Interactive mode
     interactive_loop(bnet, &cli.name, "bareos-dir");
+}
+
+/// MCP command runner over an authenticated BNET session (api=0: response ends with EOD).
+struct BnetRunner<S: std::io::Read + std::io::Write> {
+    bnet: BnetStream<S>,
+}
+
+impl<S: std::io::Read + std::io::Write> mcp::CommandRunner for BnetRunner<S> {
+    fn run(&mut self, command: &str) -> anyhow::Result<String> {
+        self.bnet.send_str(command)?;
+        let mut output = String::new();
+        loop {
+            match self.bnet.recv() {
+                Ok(BnetMessage::Data(data)) => output.push_str(&String::from_utf8_lossy(&data)),
+                Ok(BnetMessage::Signal(BnetSignal::Eod)) | Ok(BnetMessage::Signal(BnetSignal::MainPrompt)) => break,
+                Ok(BnetMessage::Signal(BnetSignal::Terminate)) => anyhow::bail!("Director closed the connection"),
+                Ok(BnetMessage::Signal(_)) => continue,
+                Err(e) => anyhow::bail!("connection error: {e}"),
+            }
+        }
+        Ok(output)
+    }
 }
 
 fn execute_single_command<S: std::io::Read + std::io::Write>(bnet: &mut BnetStream<S>, cmd: &str) {
@@ -921,111 +981,123 @@ fn dirs_home() -> std::path::PathBuf {
 
 // drain_signals removed — now part of DirectorConn::drain()
 
-fn run_grpc_mode(cli: &EffCli, addr: &str) {
-    eprintln!("gRPC mode connecting to {addr}");
+fn run_grpc_mode(cli: &EffCli) {
+    use bareos_proto_rs::bareos::director::ResponseFormat;
 
-    let rt = tokio::runtime::Runtime::new().unwrap();
-    rt.block_on(async {
-        use bareos_proto_rs::bareos::director::{
-            director_client::DirectorClient,
-            CommandRequest, CommandArgument, ListCommandsRequest,
-        };
+    let host = cli.address.clone();
+    let port = cli.grpc_port;
+    let rt = tokio::runtime::Runtime::new().expect("tokio runtime");
 
-        let url = format!("http://{addr}");
-        let mut client = match DirectorClient::connect(url.clone()).await {
-            Ok(c) => {
-                eprintln!("Connected to gRPC Director at {addr}");
-                c
+    // Certificate pin: --grpc-fingerprint, else known_directors, else ask (trust on first use)
+    let mut known = grpc_client::KnownDirectors::load();
+    let fingerprint = match cli.grpc_fingerprint.clone().or_else(|| known.get(&host, port).map(str::to_string)) {
+        Some(fp) => fp,
+        None => {
+            let seen = match rt.block_on(grpc_client::probe_fingerprint(&host, port)) {
+                Ok(fp) => fp,
+                Err(e) => {
+                    eprintln!("gRPC: {e}");
+                    std::process::exit(1);
+                }
+            };
+            if cli.mcp || cli.command.is_some() {
+                eprintln!("gRPC: unknown Director certificate {host}:{port}\n  SHA-256 {seen}");
+                eprintln!("Verify it and pass --grpc-fingerprint {seen}, or connect once interactively.");
+                std::process::exit(1);
+            }
+            eprintln!("The Director {host}:{port} is not known yet.");
+            eprintln!("Certificate SHA-256 fingerprint:\n  {seen}");
+            eprintln!("Compare it with the Director log ('certificate SHA-256 …').");
+            eprint!("Trust and remember this Director? [y/N] ");
+            let _ = io::stderr().flush();
+            let mut answer = String::new();
+            let _ = io::stdin().lock().read_line(&mut answer);
+            if !matches!(answer.trim(), "y" | "Y" | "yes" | "j" | "J" | "ja") {
+                std::process::exit(1);
+            }
+            if let Err(e) = known.remember(&host, port, &seen) {
+                eprintln!("Warning: cannot write {}: {e}", known.path().display());
+            }
+            seen
+        }
+    };
+
+    let mut session = match rt.block_on(grpc_client::GrpcSession::connect(&host, port, &fingerprint, &cli.name, &cli.password)) {
+        Ok(s) => s,
+        Err(e) => {
+            eprintln!("gRPC: {e}");
+            std::process::exit(1);
+        }
+    };
+    eprintln!("Connected to Director {} {} via gRPC ({host}:{port}, TLS)", session.director_name, session.version);
+
+    if cli.mcp {
+        eprintln!("oconsole: serving MCP on stdio{}", if cli.mcp_allow_write { " (write access enabled)" } else { " (read-only)" });
+        let name = session.director_name.clone();
+        let runner = GrpcRunner { rt, session };
+        mcp::McpServer::new(runner, cli.mcp_allow_write, name).serve();
+        return;
+    }
+
+    let mut run = |cmd: &str| -> bool {
+        match rt.block_on(session.execute(cmd, ResponseFormat::Text)) {
+            Ok(out) => {
+                print!("{}", out.text);
+                if !out.error.is_empty() {
+                    eprintln!("{}", out.error.trim_end());
+                }
+                out.success
             }
             Err(e) => {
-                eprintln!("gRPC connect failed: {e}");
-                return;
-            }
-        };
-
-        // Single command mode
-        if let Some(cmd) = &cli.command {
-            let parts: Vec<&str> = cmd.splitn(2, ' ').collect();
-            let command_name = parts[0].to_string();
-            let arguments = if parts.len() > 1 {
-                parts[1].split_whitespace().map(|arg| {
-                    if let Some(eq) = arg.find('=') {
-                        CommandArgument {
-                            key: arg[..eq].to_string(),
-                            value: Some(bareos_proto_rs::bareos::director::command_argument::Value::StringValue(
-                                arg[eq+1..].to_string()
-                            )),
-                        }
-                    } else {
-                        CommandArgument { key: arg.to_string(), value: None }
-                    }
-                }).collect()
-            } else {
-                Vec::new()
-            };
-
-            let request = tonic::Request::new(CommandRequest {
-                command_name,
-                arguments,
-                session_id: String::new(),
-                response_format: 0,
-            });
-
-            match client.execute_command(request).await {
-                Ok(response) => {
-                    let resp = response.into_inner();
-                    if resp.success {
-                        print!("{}", resp.text_output);
-                    } else {
-                        eprintln!("Error: {}", resp.error_message);
-                    }
-                }
-                Err(e) => eprintln!("gRPC error: {e}"),
-            }
-            return;
-        }
-
-        // Interactive mode
-        let stdin = std::io::stdin();
-        let mut stdout = std::io::stdout();
-        loop {
-            print!("* ");
-            use std::io::Write;
-            stdout.flush().ok();
-
-            let mut line = String::new();
-            use std::io::BufRead;
-            match stdin.lock().read_line(&mut line) {
-                Ok(0) => break,
-                Ok(_) => {}
-                Err(_) => break,
-            }
-
-            let cmd = line.trim();
-            if cmd.is_empty() { continue; }
-            if matches!(cmd, "quit" | "exit") { break; }
-
-            let parts: Vec<&str> = cmd.splitn(2, ' ').collect();
-            let request = tonic::Request::new(CommandRequest {
-                command_name: parts[0].to_string(),
-                arguments: Vec::new(),
-                session_id: String::new(),
-                response_format: 0,
-            });
-
-            match client.execute_command(request).await {
-                Ok(response) => {
-                    let resp = response.into_inner();
-                    if resp.success {
-                        print!("{}", resp.text_output);
-                    } else {
-                        eprintln!("{}", resp.error_message);
-                    }
-                }
-                Err(e) => eprintln!("gRPC error: {e}"),
+                eprintln!("gRPC error: {e}");
+                false
             }
         }
-    });
+    };
+
+    // Single command mode
+    if let Some(cmd) = &cli.command {
+        if !run(cmd) {
+            std::process::exit(1);
+        }
+        return;
+    }
+
+    // Interactive mode
+    let stdin = io::stdin();
+    let mut stdout = io::stdout();
+    loop {
+        print!("* ");
+        stdout.flush().ok();
+
+        let mut line = String::new();
+        match stdin.lock().read_line(&mut line) {
+            Ok(0) | Err(_) => break,
+            Ok(_) => {}
+        }
+
+        let cmd = line.trim();
+        if cmd.is_empty() { continue; }
+        if matches!(cmd, "quit" | "exit") { break; }
+        run(cmd);
+    }
+}
+
+/// MCP command runner over an authenticated gRPC session.
+struct GrpcRunner {
+    rt: tokio::runtime::Runtime,
+    session: grpc_client::GrpcSession,
+}
+
+impl mcp::CommandRunner for GrpcRunner {
+    fn run(&mut self, command: &str) -> anyhow::Result<String> {
+        use bareos_proto_rs::bareos::director::ResponseFormat;
+        let out = self.rt.block_on(self.session.execute(command, ResponseFormat::Text))?;
+        if !out.success && out.text.is_empty() {
+            anyhow::bail!("{}", out.error.trim_end());
+        }
+        Ok(if out.error.is_empty() { out.text } else { format!("{}{}", out.text, out.error) })
+    }
 }
 
 #[cfg(test)]
@@ -1040,6 +1112,15 @@ mod tests {
         assert!(cli.name.is_none());
         assert!(!cli.grpc);
         assert!(cli.command.is_none());
+        assert!(!cli.mcp);
+        assert!(!cli.mcp_allow_write);
+    }
+
+    #[test]
+    fn mcp_allow_write_requires_mcp() {
+        assert!(Cli::try_parse_from(["oconsole", "--mcp-allow-write"]).is_err());
+        let cli = Cli::parse_from(["oconsole", "--mcp", "--mcp-allow-write", "--grpc"]);
+        assert!(cli.mcp && cli.mcp_allow_write && cli.grpc);
     }
 
     #[test]

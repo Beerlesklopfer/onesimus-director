@@ -87,6 +87,32 @@ Director {
 }
 ```
 
+## oconsole: gRPC and MCP
+
+```bash
+# gRPC instead of BNET (asks once to trust the Director certificate,
+# stored in ~/.config/oconsole/known_directors)
+oconsole --grpc -a dir.example.org -n admin -w secret
+
+# MCP server on stdio for AI assistants (read-only: tool "query")
+oconsole --mcp
+# also allow state-changing commands (tool "execute": run, cancel, delete, purge, ...)
+oconsole --mcp --mcp-allow-write
+# MCP over gRPC needs a known certificate (connect once interactively or pass it)
+oconsole --mcp --grpc --grpc-fingerprint <sha256>
+```
+
+Register with Claude Code, for example:
+
+```bash
+claude mcp add onesimus -- oconsole --mcp -c /etc/bareos/oconsole.conf
+```
+
+The read-only `query` tool accepts `status`, `list`, `llist`, `show`,
+`version`, `help`, `time`, `messages`, `estimate` and dot-commands (except
+`.sql` and BVFS restore/cleanup). Multi-line input and session commands
+(`quit`, `.api`, `@…`) are rejected.
+
 ## Drop-in Replacement
 
 Both packages can be installed side-by-side, only one runs at a time:
