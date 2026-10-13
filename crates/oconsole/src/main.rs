@@ -503,6 +503,13 @@ impl BareosHelper {
 
     /// Load commands + cached values from Director at connect time.
     /// All queries happen sequentially over one connection before readline starts.
+    /// Reload everything from the Director (after `reload`/`configure`).
+    fn refresh(&mut self, dir: &mut dyn DirectorConn) {
+        self.entries.clear();
+        self.value_cache.clear();
+        self.load_from_director(dir);
+    }
+
     fn load_from_director(&mut self, dir: &mut dyn DirectorConn) {
         // API mode 1 → maschinenlesbar, dann .help all fuer Tab-Completion
         dir.query(".api 1");
@@ -956,6 +963,17 @@ fn interactive_loop(
                             return;
                         }
                         None => break,
+                    }
+                }
+
+                // The Director's resources may have changed: refresh the
+                // completion data (command list, job/client/pool names, ...)
+                let first = cmd.split_whitespace().next().unwrap_or("").to_ascii_lowercase();
+                if matches!(first.as_str(), "reload" | "configure") {
+                    if let Some(helper) = rl.helper_mut() {
+                        helper.refresh(dir.as_mut());
+                        eprintln!("\x1b[2m(tab-completion refreshed: {} commands, {} cached values)\x1b[0m",
+                            helper.entries.len(), helper.value_cache.values().map(|v| v.len()).sum::<usize>());
                     }
                 }
             }
