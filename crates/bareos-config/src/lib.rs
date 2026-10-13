@@ -5,6 +5,7 @@
 
 pub mod resources;
 pub mod parser;
+pub mod raw;
 pub mod values;
 
 pub use resources::*;

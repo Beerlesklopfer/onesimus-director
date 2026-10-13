@@ -223,8 +223,9 @@ pub fn build_registry() -> Vec<CommandDef> {
         CommandDef { name: "messages", aliases: &[], description: "Display pending messages", args: vec![], handler: commands::extra::cmd_messages, dot_command: false },
         CommandDef { name: "memory", aliases: &[], description: "Show memory usage", args: vec![], handler: commands::extra::cmd_memory, dot_command: false },
         CommandDef { name: "show", aliases: &[], description: "Show resource configuration", args: vec![
-            arg_enum("what", "Resource type", vec!["jobs", "clients", "pools", "storages", "schedules", "filesets", "jobdefs"]),
-        ], handler: commands::extra::cmd_show, dot_command: false },
+            arg_enum("what", "Resource type", vec!["directors", "clients", "jobs", "jobdefs", "storages", "catalogs",
+                "schedules", "filesets", "pools", "messages", "counters", "profiles", "consoles", "users", "all", "verbose", "disabled"]),
+        ], handler: commands::show::cmd_show, dot_command: false },
         CommandDef { name: "trace", aliases: &[], description: "Toggle trace output", args: vec![], handler: commands::extra::cmd_trace, dot_command: false },
         CommandDef { name: "var", aliases: &[], description: "Display variable expansion", args: vec![], handler: commands::extra::cmd_var, dot_command: false },
         CommandDef { name: "wait", aliases: &[], description: "Wait for a job to complete", args: vec![arg_int("jobid", "Job ID")], handler: commands::extra::cmd_wait, dot_command: false },
