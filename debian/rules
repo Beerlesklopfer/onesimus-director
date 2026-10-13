@@ -1,8 +1,14 @@
 #!/usr/bin/make -f
+
+# cargo from rustup lives in ~/.cargo/bin, which is not in PATH for every build user
+export PATH := $(HOME)/.cargo/bin:$(PATH)
+
 %:
 	dh $@
 
 override_dh_auto_build:
+	@command -v cargo >/dev/null || { echo "cargo not found: install rustup (https://rustup.rs) or 'apt install cargo rustc'"; exit 1; }
+	@test -f proto/director_service.proto || { echo "proto submodule missing: run 'git submodule update --init'"; exit 1; }
 	cargo build --release -p onesimus-dird -p oconsole
 
 override_dh_auto_install:
