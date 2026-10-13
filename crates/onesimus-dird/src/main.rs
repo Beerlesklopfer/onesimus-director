@@ -19,6 +19,7 @@ mod grpc;
 mod job_manager;
 mod job_worker;
 mod json_output;
+mod localtime;
 mod mdns;
 mod message_bus;
 mod reload;
@@ -27,6 +28,7 @@ mod sd_protocol;
 mod session;
 mod session_manager;
 mod sql_list;
+mod ua_commands_table;
 mod watchdog;
 
 use std::path::PathBuf;
@@ -141,6 +143,10 @@ struct Cli {
 
 fn main() {
     let cli = Cli::parse();
+    localtime::init_locale();
+    localtime::mark_daemon_start();
+    // Before any thread exists: SIGHUP must only reach the dir:sighup thread
+    reload::block_sighup();
 
     // Debug-Level Hilfe
     if cli.debug_level == 999 {

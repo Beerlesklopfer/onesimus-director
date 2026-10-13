@@ -113,91 +113,73 @@ pub fn cmd_dot_schedule(ast: &CommandAst, ctx: &ExecContext) -> CommandResult {
         .map(|sc| (sc.name.as_str(), Some(sc.enabled)))))
 }
 
-/// `.defaults [job=<name> | client=<name> | storage=<name> | pool=<name>]`
+/// `.defaults job=<name> | client=<name> | storage=<name> | pool=<name>`
 ///
-/// Returns key=value pairs for the requested resource defaults.
-/// Compatible with C++ DotDefaultsCmd output.
+/// C++ DotDefaultsCmd: text "key=value" lines, JSON `{"defaults": {...}}`.
 pub fn cmd_dot_defaults(ast: &CommandAst, ctx: &ExecContext) -> CommandResult {
-    let job_name = get_arg(ast, "job");
-    let client_name = get_arg(ast, "client");
-    let storage_name = get_arg(ast, "storage");
-    let pool_name = get_arg(ast, "pool");
-
-    if let Some(config) = &ctx.config {
-        if let Ok(cfg) = config.read() {
-            // job= → show job defaults (most common usage from webui)
-            if let Some(name) = job_name {
-                if let Some(job) = cfg.find_job(name) {
-                    let mut output = String::new();
-                    output.push_str(&format!("job={}\n", job.name));
-                    output.push_str(&format!("pool={}\n", job.pool));
-                    output.push_str(&format!("client={}\n", job.client));
-                    output.push_str(&format!("storage={}\n", job.storage));
-                    output.push_str(&format!("fileset={}\n", job.fileset));
-                    output.push_str(&format!("level={:?}\n", job.level));
-                    output.push_str(&format!("type={:?}\n", job.job_type));
-                    output.push_str(&format!("enabled={}\n", if job.enabled { 1 } else { 0 }));
-                    if !job.schedule.is_empty() {
-                        output.push_str(&format!("schedule={}\n", job.schedule));
-                    }
-                    return CommandResult::ok(output);
-                }
-                return CommandResult::ok(format!("Job '{name}' not found\n"));
+    let mut fields: Vec<(&str, serde_json::Value)> = Vec::new();
+    if let Some(cfg) = ctx.config.as_ref().and_then(|c| c.read().ok()) {
+        let first_catalog = cfg.catalogs.first().map(|c| c.name.clone()).unwrap_or_default();
+        if let Some(name) = get_arg(ast, "job") {
+            if let Some(job) = cfg.find_job(name) {
+                let none = |s: &str| if s.is_empty() { "*None*".to_string() } else { s.to_string() };
+                let client = cfg.find_client(&job.client);
+                let storage = job.storage.clone();
+                fields.push(("job", json!(job.name)));
+                fields.push(("pool", json!(job.pool)));
+                fields.push(("messages", json!(job.messages)));
+                fields.push(("client", json!(none(&job.client))));
+                fields.push(("storage", json!(none(&storage))));
+                fields.push(("where", json!("")));
+                fields.push(("level", json!(format!("{:?}", job.level))));
+                fields.push(("type", json!(format!("{:?}", job.job_type))));
+                fields.push(("fileset", json!(none(&job.fileset))));
+                fields.push(("enabled", json!(job.enabled as i32)));
+                fields.push(("catalog", json!(match client {
+                    Some(c) if !c.catalog.is_empty() => c.catalog.clone(),
+                    Some(_) => first_catalog.clone(),
+                    None => "*None*".to_string(),
+                })));
             }
-
-            // client= → show client defaults
-            if let Some(name) = client_name {
-                if let Some(client) = cfg.find_client(name) {
-                    let mut output = String::new();
-                    output.push_str(&format!("client={}\n", client.name));
-                    output.push_str(&format!("address={}\n", client.address));
-                    output.push_str(&format!("port={}\n", client.port));
-                    output.push_str(&format!("enabled={}\n", if client.enabled { 1 } else { 0 }));
-                    return CommandResult::ok(output);
-                }
-                return CommandResult::ok(format!("Client '{name}' not found\n"));
+        } else if let Some(name) = get_arg(ast, "client") {
+            if let Some(client) = cfg.find_client(name) {
+                fields.push(("client", json!(client.name)));
+                fields.push(("address", json!(client.address)));
+                fields.push(("port", json!(client.port)));
+                // file_retention/job_retention/autoprune: not parsed yet (see show port)
+                fields.push(("enabled", json!(client.enabled as i32)));
+                fields.push(("catalog", json!(if client.catalog.is_empty() { first_catalog.clone() } else { client.catalog.clone() })));
             }
-
-            // storage= → show storage defaults
-            if let Some(name) = storage_name {
-                if let Some(stor) = cfg.find_storage(name) {
-                    let mut output = String::new();
-                    output.push_str(&format!("storage={}\n", stor.name));
-                    output.push_str(&format!("address={}\n", stor.address));
-                    output.push_str(&format!("port={}\n", stor.port));
-                    output.push_str(&format!("enabled={}\n", if stor.enabled { 1 } else { 0 }));
-                    output.push_str(&format!("mediatype={}\n", stor.media_type));
-                    output.push_str(&format!("device={}\n", stor.device));
-                    return CommandResult::ok(output);
-                }
-                return CommandResult::ok(format!("Storage '{name}' not found\n"));
+        } else if let Some(name) = get_arg(ast, "storage") {
+            if let Some(st) = cfg.find_storage(name) {
+                fields.push(("storage", json!(st.name)));
+                fields.push(("address", json!(st.address)));
+                fields.push(("port", json!(st.port)));
+                fields.push(("enabled", json!(st.enabled as i32)));
+                fields.push(("media_type", json!(st.media_type)));
+                fields.push(("device", json!(st.device)));
             }
-
-            // pool= → show pool defaults
-            if let Some(name) = pool_name {
-                if let Some(pool) = cfg.find_pool(name) {
-                    let mut output = String::new();
-                    output.push_str(&format!("pool={}\n", pool.name));
-                    output.push_str(&format!("pool_type={}\n", pool.pool_type));
-                    output.push_str(&format!("recycle={}\n", if pool.recycle { 1 } else { 0 }));
-                    output.push_str(&format!("maximum_volumes={}\n", pool.maximum_volumes));
-                    return CommandResult::ok(output);
-                }
-                return CommandResult::ok(format!("Pool '{name}' not found\n"));
+        } else if let Some(name) = get_arg(ast, "pool") {
+            if let Some(pool) = cfg.find_pool(name) {
+                fields.push(("pool", json!(pool.name)));
+                fields.push(("pool_type", json!(pool.pool_type)));
+                // Only directives the config parser knows; the remaining C++
+                // fields (use_once, max_vol_jobs, ...) follow with the show port.
+                fields.push(("label_format", json!(pool.label_format)));
+                fields.push(("max_volumes", json!(pool.maximum_volumes)));
+                fields.push(("vol_retention", json!(pool.volume_retention.as_secs().to_string())));
+                fields.push(("max_vol_bytes", json!(pool.maximum_volume_bytes.to_string())));
+                fields.push(("auto_prune", json!(pool.auto_prune as i32)));
+                fields.push(("recycle", json!(pool.recycle as i32)));
             }
-
-            // No argument → list defaults for all jobs
-            let mut output = String::new();
-            for job in &cfg.jobs {
-                output.push_str(&format!(
-                    "job={} level={:?} client={} storage={}\n",
-                    job.name, job.level, job.client, job.storage
-                ));
-            }
-            return CommandResult::ok(output);
         }
     }
-    CommandResult::ok(String::new())
+    let text: String = fields.iter().map(|(k, v)| match v {
+        serde_json::Value::String(s) => format!("{k}={s}\n"),
+        other => format!("{k}={other}\n"),
+    }).collect();
+    let obj: serde_json::Map<String, serde_json::Value> = fields.into_iter().map(|(k, v)| (k.to_string(), v)).collect();
+    CommandResult::ok(text).with_json(json!({ "defaults": obj }))
 }
 
 /// `.jobstatus [=<status>]`

@@ -1,5 +1,15 @@
 # Backlog
 
+## KRITISCH: Scheduler startet keine Jobs
+
+`scheduler.rs`: `dispatch_ready_jobs()` erhöht nur einen Zähler
+(`TODO(R6-full): Fork worker process`). Zusätzlich vergleicht
+`fill_queue_from_config()` Stunde/Minute in UTC statt Ortszeit, ignoriert
+Tages-/Wochen-/Monatsangaben der Run-Direktive ("1st Sat", "mon-fri") und
+dedupliziert nicht. Geplante Backups laufen mit onesimus-dird derzeit nicht.
+Folge: `status director` liefert `scheduled: []`.
+
+
 ## Postgres-Plugin für Verzeichnisbäume (BVFS)
 
 Ein fertiges Postgres-Plugin-Crate (auf crates.io, Name noch eintragen) löst die
@@ -14,10 +24,14 @@ Restore-Baum navigieren, wie es bconsole tut (`cd`, `ls`, `mark`).
 - Danach als Tools im MCP-Modus von `oconsole` anbieten (Backup-Baum durchsuchen)
 - Restore-Baum im interaktiven `oconsole` wie bei bconsole
 
-## JSON-Ausgabe (`.api 2`) für alle GUI-Befehle
+## JSON-Ausgabe: Rest
 
-Der Director liefert JSON bisher nur bei `.help`. Die Onesimus-GUI braucht es
-für `list`, `llist`, `show`, `.jobs`, `.clients`, … – gilt für BNET und gRPC.
+Erledigt: Umschlag/Rahmung, Punkt-Befehle, list/llist, .defaults job=,
+.help, time, version, reload, status director, .messages/messages.
+Offen: `.help` Usage von configure (aus Direktiventabellen), `.defaults` für
+client/storage/pool und Restore-Jobs (where/replace) — brauchen die rohen
+Direktiven aus dem show-Port; Reihenfolge der Ressourcen wie C++ (Ladereihenfolge).
+`status director`: terminated-Liste (Jobs seit Start) wird nicht geführt.
 
 ## `llist pools`: prunablevolumes/-jobs/-bytes
 

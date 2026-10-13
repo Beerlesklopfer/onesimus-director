@@ -48,13 +48,13 @@ pub fn cmd_dot_status(ast: &CommandAst, ctx: &ExecContext) -> CommandResult {
 
 fn status_director(ctx: &ExecContext) -> CommandResult {
     let version = env!("CARGO_PKG_VERSION");
-    let now = chrono::Local::now();
+    let started = crate::localtime::daemon_started();
 
     let mut output = format!(
         "bareos-dir Version: {version}\n\
          Daemon started {}\n\
          \n",
-        now.format("%d-%b-%Y %H:%M:%S")
+        crate::localtime::strftime("%d-%b-%Y %H:%M:%S", started)
     );
 
     // Config info
@@ -160,7 +160,60 @@ fn status_director(ctx: &ExecContext) -> CommandResult {
     }
     output.push_str("====\n");
 
-    CommandResult::ok(output)
+    CommandResult::ok(output).with_json(status_director_json(ctx))
+}
+
+/// JSON shape of C++ DoDirectorStatus (ua_status.cc). Only facts the Rust
+/// Director actually has: the scheduler does not dispatch jobs yet, so
+/// "scheduled" stays empty; "terminated" (C++: jobs finished since start)
+/// is not tracked yet either.
+fn status_director_json(ctx: &ExecContext) -> serde_json::Value {
+    use serde_json::json;
+    let name = ctx.config.as_ref()
+        .and_then(|c| c.read().ok().map(|c| c.director.name.clone()))
+        .unwrap_or_default();
+    let os = std::fs::read_to_string("/etc/os-release").ok()
+        .and_then(|s| s.lines().find_map(|l| l.strip_prefix("PRETTY_NAME=")).map(|v| v.trim_matches('"').to_string()))
+        .unwrap_or_else(|| "Linux".to_string());
+
+    let (running, jobs_run) = match &ctx.job_manager {
+        Some(mgr) => {
+            let jobs = mgr.lock().unwrap();
+            let running: Vec<_> = jobs.running_jobs().into_iter()
+                .map(|(id, name, phase)| json!({ "jobid": id, "name": name, "status": phase }))
+                .collect();
+            let finished = jobs.finished_count();
+            (running, finished)
+        }
+        None => (Vec::new(), 0),
+    };
+
+    let clients: Vec<_> = ctx.session_mgr.as_ref()
+        .map(|s| s.get_fd_connections().into_iter().map(|fd| json!({
+            "connecttime": crate::localtime::strftime("%d-%b-%y %H:%M", fd.connect_time as libc::time_t),
+            "protocol_version": fd.protocol_version,
+            "authenticated": true,
+            "name": fd.client_name,
+        })).collect())
+        .unwrap_or_default();
+
+    json!({
+        "header": {
+            "director": name,
+            "version": env!("CARGO_PKG_VERSION"),
+            "release_date": env!("ONESIMUS_BUILD_DATE"),
+            "os": os,
+            "binary_info": "Onesimus",
+            "daemon_started": crate::localtime::strftime("%d-%b-%y %H:%M", crate::localtime::daemon_started()),
+            "jobs_run": jobs_run,
+            "jobs_running": running.len(),
+            "config_warnings": false,
+        },
+        "scheduled": [],
+        "running": running,
+        "terminated": [],
+        "client-connection": clients,
+    })
 }
 
 fn status_client(name: &str, ctx: &ExecContext) -> CommandResult {

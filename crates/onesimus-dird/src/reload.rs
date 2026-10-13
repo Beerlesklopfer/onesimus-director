@@ -4,18 +4,36 @@
 //! and swaps the SharedConfig atomically via RwLock.
 
 use std::path::PathBuf;
-use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
 
 use tracing::{info, error, warn};
 
 use crate::director_config::{DirectorConfig, SharedConfig};
+
+/// Config path + shared config, for the `reload` console command.
+static RELOAD_TARGET: std::sync::OnceLock<(PathBuf, SharedConfig)> = std::sync::OnceLock::new();
+
+/// Block SIGHUP in the calling thread. Must run in main() before any other
+/// thread is spawned: threads inherit the mask, so only the dir:sighup thread
+/// (sigwait) ever receives it. Without this, SIGHUP hits an arbitrary thread
+/// and its default action terminates the Director.
+pub fn block_sighup() {
+    #[cfg(unix)]
+    {
+        use nix::sys::signal::{SigSet, Signal};
+        let mut sigset = SigSet::empty();
+        sigset.add(Signal::SIGHUP);
+        if let Err(e) = sigset.thread_block() {
+            error!("cannot block SIGHUP: {e}");
+        }
+    }
+}
 
 /// Set up SIGHUP handler that triggers config reload.
 pub fn setup_sighup_handler(
     config_path: PathBuf,
     shared_config: SharedConfig,
 ) {
+    let _ = RELOAD_TARGET.set((config_path.clone(), shared_config.clone()));
     std::thread::Builder::new()
         .name("dir:sighup".into())
         .spawn(move || {
@@ -24,42 +42,40 @@ pub fn setup_sighup_handler(
         .expect("failed to spawn SIGHUP handler");
 }
 
+/// Reload the configuration now (console `reload`, SIGHUP).
+/// On error the previous configuration stays active.
+pub fn reload_now() -> Result<(), String> {
+    let (path, shared) = RELOAD_TARGET.get().ok_or("reload not initialized")?;
+    reload_config(path, shared)
+}
+
+fn reload_config(config_path: &std::path::Path, shared_config: &SharedConfig) -> Result<(), String> {
+    info!("reloading configuration from {}", config_path.display());
+    let new_config = DirectorConfig::load(config_path).map_err(|e| {
+        error!("configuration reload failed: {e}");
+        warn!("keeping previous configuration");
+        e.to_string()
+    })?;
+    let mut cfg = shared_config.write().map_err(|e| format!("config lock: {e}"))?;
+    *cfg = new_config;
+    info!("configuration reloaded: Director '{}', {} clients, {} jobs",
+          cfg.director.name, cfg.clients.len(), cfg.jobs.len());
+    Ok(())
+}
+
 #[cfg(unix)]
 fn sighup_loop(config_path: PathBuf, shared_config: SharedConfig) {
-    use nix::sys::signal::{self, SigSet, Signal};
+    use nix::sys::signal::{SigSet, Signal};
 
     let mut sigset = SigSet::empty();
     sigset.add(Signal::SIGHUP);
-
-    // Block SIGHUP in this thread so we can wait for it
     sigset.thread_block().ok();
 
     loop {
-        // Wait for SIGHUP
         match sigset.wait() {
             Ok(Signal::SIGHUP) => {
-                info!("SIGHUP received, reloading configuration from {}",
-                      config_path.display());
-
-                match DirectorConfig::load(&config_path) {
-                    Ok(new_config) => {
-                        match shared_config.write() {
-                            Ok(mut cfg) => {
-                                let old_name = cfg.director.name.clone();
-                                *cfg = new_config;
-                                info!("configuration reloaded: Director '{}', {} clients, {} jobs",
-                                      cfg.director.name, cfg.clients.len(), cfg.jobs.len());
-                            }
-                            Err(e) => {
-                                error!("failed to acquire config write lock: {e}");
-                            }
-                        }
-                    }
-                    Err(e) => {
-                        error!("configuration reload failed: {e}");
-                        warn!("keeping previous configuration");
-                    }
-                }
+                info!("SIGHUP received");
+                let _ = reload_config(&config_path, &shared_config);
             }
             Ok(_) => {} // Other signal, ignore
             Err(e) => {
@@ -78,6 +94,7 @@ fn sighup_loop(_config_path: PathBuf, _shared_config: SharedConfig) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::Arc;
     use std::sync::RwLock;
 
     #[test]

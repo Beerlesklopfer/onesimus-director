@@ -562,27 +562,13 @@ pub fn cmd_truncate(ast: &CommandAst, ctx: &ExecContext) -> CommandResult {
     }
 }
 
-pub fn cmd_reload(_ast: &CommandAst, ctx: &ExecContext) -> CommandResult {
-    // Send SIGHUP to ourselves — the dir:sighup thread picks it up,
-    // re-reads the config file, and swaps SharedConfig via RwLock.
-    #[cfg(unix)]
-    unsafe { libc::kill(libc::getpid(), libc::SIGHUP); }
-
-    // Wait briefly for the reload thread to finish
-    std::thread::sleep(std::time::Duration::from_millis(100));
-
-    if let Some(config) = &ctx.config {
-        if let Ok(cfg) = config.read() {
-            CommandResult::ok(format!(
-                "reloaded\nDirector '{}': {} clients, {} jobs, {} storages, {} pools, {} schedules\n",
-                cfg.director.name, cfg.clients.len(), cfg.jobs.len(),
-                cfg.storages.len(), cfg.pools.len(), cfg.schedules.len()
-            ))
-        } else {
-            CommandResult::error("Failed to read config after reload\n".to_string())
-        }
-    } else {
-        CommandResult::ok("No configuration loaded\n".to_string())
+/// `reload` — re-read the configuration (C++ ReloadCmd: {"reload": {"success": bool}}).
+pub fn cmd_reload(_ast: &CommandAst, _ctx: &ExecContext) -> CommandResult {
+    match crate::reload::reload_now() {
+        Ok(()) => CommandResult::ok("reloaded\n".to_string())
+            .with_json(serde_json::json!({ "reload": { "success": true } })),
+        Err(e) => CommandResult::error(format!("failed to reload\n{e}\n"))
+            .with_json(serde_json::json!({ "reload": { "success": false } })),
     }
 }
 

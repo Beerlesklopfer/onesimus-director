@@ -10,18 +10,46 @@ use crate::command_queue::CommandResult;
 
 const VERSION: &str = env!("CARGO_PKG_VERSION");
 
-pub fn cmd_version(_ast: &CommandAst, _ctx: &ExecContext) -> CommandResult {
-    let os = std::fs::read_to_string("/etc/os-release").ok()
-        .and_then(|s| s.lines()
-            .find(|l| l.starts_with("PRETTY_NAME="))
-            .map(|l| l.trim_start_matches("PRETTY_NAME=").trim_matches('"').to_string()))
-        .unwrap_or_else(|| "Linux".to_string());
-    CommandResult::ok(format!("bareos-dir Version: {VERSION} ({os})\n"))
+pub fn cmd_version(_ast: &CommandAst, ctx: &ExecContext) -> CommandResult {
+    let os_release = std::fs::read_to_string("/etc/os-release").unwrap_or_default();
+    let field = |key: &str| os_release.lines()
+        .find_map(|l| l.strip_prefix(key))
+        .map(|v| v.trim_matches('"').to_string());
+    let os = field("PRETTY_NAME=").unwrap_or_else(|| "Linux".to_string());
+    let distname = field("ID=").unwrap_or_default();
+    let name = ctx.config.as_ref()
+        .and_then(|c| c.read().ok().map(|c| c.director.name.clone()))
+        .unwrap_or_else(|| "bareos-dir".to_string());
+    // Text keeps the "bareos-dir Version:" form for bconsole/WebUI compatibility
+    CommandResult::ok(format!("bareos-dir Version: {VERSION} ({os})\n")).with_json(serde_json::json!({
+        "version": {
+            "name": name,
+            "type": "bareos-director",
+            "version": VERSION,
+            "bdate": env!("ONESIMUS_BUILD_DATE"),
+            "operatingsystem": os,
+            "distname": distname,
+            "distversion": os,
+            "customversionid": "",
+        }
+    }))
 }
 
+/// C++ time_cmd: bstrftime "%a %d-%b-%Y %H:%M:%S" (locale-dependent) + parts.
 pub fn cmd_time(_ast: &CommandAst, _ctx: &ExecContext) -> CommandResult {
-    let now = chrono::Local::now();
-    CommandResult::ok(format!("{}\n", now.format("%Y-%m-%d %H:%M:%S")))
+    let full = crate::localtime::strftime_now("%a %d-%b-%Y %H:%M:%S");
+    let part = |f: &str| crate::localtime::strftime_now(f);
+    CommandResult::ok(format!("{full}\n")).with_json(serde_json::json!({
+        "time": {
+            "full": full,
+            "year": part("%Y"),
+            "month": part("%m"),
+            "day": part("%d"),
+            "hour": part("%H"),
+            "minute": part("%M"),
+            "second": part("%S"),
+        }
+    }))
 }
 
 pub fn cmd_quit(_ast: &CommandAst, _ctx: &ExecContext) -> CommandResult {
@@ -62,6 +90,9 @@ pub fn cmd_help(ast: &CommandAst, _ctx: &ExecContext) -> CommandResult {
 
 /// `.help [all | item=<cmd>]` — from registry, format depends on API mode.
 pub fn cmd_dot_help(ast: &CommandAst, ctx: &ExecContext) -> CommandResult {
+    if ctx.api_mode == ApiMode::Json {
+        return dot_help_json(ast);
+    }
     let registry = crate::command_executor::get_registry();
     let args: Vec<&str> = ast.arguments.iter()
         .map(|a| a.value.as_deref().unwrap_or(a.key.as_str()))
@@ -152,6 +183,32 @@ pub fn cmd_dot_help(ast: &CommandAst, ctx: &ExecContext) -> CommandResult {
     }
 
     CommandResult::ok(output)
+}
+
+/// `.help` in JSON mode, as C++ DotHelpCmd with the Bareos command table:
+/// `{"<cmd>": {"command", "description", "arguments", "permission"}}`.
+/// `all` lists non-dot commands, `item=<cmd>` one command, `full` ignores ACLs.
+fn dot_help_json(ast: &CommandAst) -> CommandResult {
+    use crate::ua_commands_table::UA_COMMANDS;
+    let has = |k: &str| ast.arguments.iter().any(|a| a.key.eq_ignore_ascii_case(k));
+    if ast.arguments.iter().any(|a| a.key.eq_ignore_ascii_case("full") && a.value.is_some()) {
+        return CommandResult::error("The full option does not take a value.\n".to_string());
+    }
+    let entry = |(key, help, usage): &(&str, &str, &str)| serde_json::json!({
+        "command": key, "description": help, "arguments": usage, "permission": true,
+    });
+    let mut result = serde_json::Map::new();
+    if let Some(item) = ast.arguments.iter().find(|a| a.key.eq_ignore_ascii_case("item")).and_then(|a| a.value.as_deref()) {
+        if let Some(c) = UA_COMMANDS.iter().find(|c| c.0 == item) {
+            result.insert(c.0.to_lowercase(), entry(c));
+        }
+    } else {
+        let all = has("all");
+        for c in UA_COMMANDS.iter().filter(|c| !all || !c.0.starts_with('.')) {
+            result.insert(c.0.to_lowercase(), entry(c));
+        }
+    }
+    CommandResult::ok(String::new()).with_json(serde_json::Value::Object(result))
 }
 
 // Legacy static command tables removed — all data now in command_registry.rs
