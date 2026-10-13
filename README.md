@@ -60,6 +60,33 @@ echo "version" | bconsole -c tests/bconsole.conf
 target/debug/oconsole -c tests/bconsole.conf
 ```
 
+## gRPC & Auto-Discovery
+
+Besides BNET (port 9101, compatible with C++ `bconsole`/WebUI) the Director
+offers gRPC (`proto/director_service.proto`) for the Onesimus GUI:
+
+- **TLS only.** Without `Grpc Tls Certificate`/`Grpc Tls Key` a self-signed
+  certificate is generated once in the working directory
+  (`onesimus-grpc.crt`/`.key`); clients pin its SHA-256 fingerprint on first use.
+- **Login** per challenge/response (`GetChallenge` → `Login`) with Console
+  name + password (`*UserAgent*` = Director password); the password is never
+  sent. Every further call carries the session token in `x-onesimus-session`.
+- **mDNS/DNS-SD:** announced as `_onesimus-dir._tcp` (instance = Director name,
+  port = BNET port, TXT `grpc`, `tls`, `fp`, `version`, `product`).
+  Check with `avahi-browse -rt _onesimus-dir._tcp`.
+
+```
+Director {
+  ...
+  Enable Grpc = yes                 # gRPC endpoint (TLS)
+  Grpc Port = 10101                 # default: Port + 1000
+  # Grpc Tls Certificate = /etc/bareos/tls/dir.crt   # default: self-signed
+  # Grpc Tls Key = /etc/bareos/tls/dir.key
+  Mdns Advertise = yes              # default: yes
+  Working Directory = /var/lib/bareos
+}
+```
+
 ## Drop-in Replacement
 
 Both packages can be installed side-by-side, only one runs at a time:

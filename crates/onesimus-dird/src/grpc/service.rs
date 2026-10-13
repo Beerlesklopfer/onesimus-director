@@ -1,91 +1,160 @@
 //! DirectorService implementation for tonic gRPC.
 
-use std::pin::Pin;
 use std::sync::Arc;
 
 use tokio::sync::mpsc;
 use tokio_stream::wrappers::ReceiverStream;
 use tonic::{Request, Response, Status, Streaming};
+use tracing::{info, warn};
 
 use bareos_proto_rs::bareos::director::{
     director_server::Director,
-    CommandRequest, CommandResponse,
-    ListCommandsRequest, ListCommandsResponse, CommandInfo,
-    SessionMessage, session_message,
+    command_argument, session_message,
+    ChallengeRequest, ChallengeResponse, CommandInfo, CommandRequest, CommandResponse,
+    ListCommandsRequest, ListCommandsResponse, LoginRequest, LoginResponse,
+    ResponseFormat as ProtoFormat, ServerInfo, ServerInfoRequest, SessionMessage,
 };
 
-use crate::command_ast::{CommandAst, CommandSource, ResponseFormat, Argument};
+use super::auth::AuthState;
+use crate::command_ast::{Argument, CommandAst, CommandSource, ResponseFormat};
 use crate::command_queue::{CommandQueue, CommandResult};
-use crate::message_bus::{BusMessage, MessageBus};
-use crate::session_manager::SessionManager;
+use crate::message_bus::MessageBus;
+use crate::session::parse_cli_command;
 
 pub struct DirectorServiceImpl {
-    session_mgr: Arc<SessionManager>,
     bus: Arc<MessageBus>,
     cmd_queue: Arc<CommandQueue>,
+    auth: Arc<AuthState>,
+    director_name: String,
+    bnet_port: u16,
 }
 
 impl DirectorServiceImpl {
     pub fn new(
-        session_mgr: Arc<SessionManager>,
         bus: Arc<MessageBus>,
         cmd_queue: Arc<CommandQueue>,
+        auth: Arc<AuthState>,
+        director_name: String,
+        bnet_port: u16,
     ) -> Self {
-        Self { session_mgr, bus, cmd_queue }
+        Self { bus, cmd_queue, auth, director_name, bnet_port }
     }
+}
 
-    fn command_request_to_ast(&self, req: &CommandRequest) -> CommandAst {
+/// Convert a CommandRequest into a CommandAst.
+/// Clients may send the whole command line in `command_name` (as typed in a
+/// console); it is then parsed exactly like a BNET console line.
+fn command_request_to_ast(req: &CommandRequest, session_id: &str) -> CommandAst {
+    let mut ast = if req.arguments.is_empty() && req.command_name.trim().contains(char::is_whitespace) {
+        parse_cli_command(req.command_name.trim())
+    } else {
         CommandAst {
             command_name: req.command_name.clone(),
             arguments: req.arguments.iter().map(|a| {
                 let value = match &a.value {
-                    Some(bareos_proto_rs::bareos::director::command_argument::Value::StringValue(s)) => {
-                        Some(s.clone())
-                    }
-                    Some(bareos_proto_rs::bareos::director::command_argument::Value::JsonValue(b)) => {
-                        Some(String::from_utf8_lossy(b).into_owned())
-                    }
+                    Some(command_argument::Value::StringValue(s)) => Some(s.clone()),
+                    Some(command_argument::Value::JsonValue(b)) => Some(String::from_utf8_lossy(b).into_owned()),
                     None => None,
                 };
                 Argument { key: a.key.clone(), value }
             }).collect(),
-            session_id: req.session_id.clone(),
-            source: CommandSource::Grpc,
-            response_format: ResponseFormat::Grpc,
+            ..Default::default()
         }
+    };
+    ast.session_id = session_id.to_string();
+    ast.source = CommandSource::Grpc;
+    ast.response_format = match req.response_format() {
+        ProtoFormat::Text => ResponseFormat::Text,
+        ProtoFormat::Json => ResponseFormat::Json,
+        ProtoFormat::Api => ResponseFormat::Api,
+        ProtoFormat::Grpc => ResponseFormat::Grpc,
+        ProtoFormat::Default => ResponseFormat::Default,
+    };
+    ast
+}
+
+fn to_response(result: CommandResult) -> CommandResponse {
+    CommandResponse {
+        success: result.success,
+        text_output: result.text_output,
+        json_output: Vec::new(),
+        error_message: result.error_message,
     }
+}
+
+/// Run a command through the shared queue without blocking the tokio runtime.
+async fn run_command(cmd_queue: &Arc<CommandQueue>, ast: CommandAst) -> Result<CommandResult, Status> {
+    let rx = cmd_queue.submit(ast, 0)
+        .ok_or_else(|| Status::resource_exhausted("command queue full"))?;
+    tokio::task::spawn_blocking(move || rx.recv())
+        .await
+        .map_err(|_| Status::internal("command execution failed"))?
+        .map_err(|_| Status::internal("command execution failed"))
 }
 
 #[tonic::async_trait]
 impl Director for DirectorServiceImpl {
+    async fn get_server_info(
+        &self,
+        _request: Request<ServerInfoRequest>,
+    ) -> Result<Response<ServerInfo>, Status> {
+        Ok(Response::new(ServerInfo {
+            director_name: self.director_name.clone(),
+            version: env!("CARGO_PKG_VERSION").to_string(),
+            product: "onesimus-dird".to_string(),
+            bnet_port: self.bnet_port as i32,
+        }))
+    }
+
+    async fn get_challenge(
+        &self,
+        request: Request<ChallengeRequest>,
+    ) -> Result<Response<ChallengeResponse>, Status> {
+        let nonce = self.auth.challenge(&request.into_inner().console_name);
+        Ok(Response::new(ChallengeResponse { nonce }))
+    }
+
+    async fn login(
+        &self,
+        request: Request<LoginRequest>,
+    ) -> Result<Response<LoginResponse>, Status> {
+        let peer = request.remote_addr();
+        let req = request.into_inner();
+        let response = match self.auth.login(&req.console_name, &req.nonce, &req.proof) {
+            Ok(token) => {
+                info!("gRPC login: console '{}' from {:?}", req.console_name, peer);
+                LoginResponse {
+                    success: true,
+                    session_token: token,
+                    director_name: self.director_name.clone(),
+                    version: env!("CARGO_PKG_VERSION").to_string(),
+                    ..Default::default()
+                }
+            }
+            Err(e) => {
+                warn!("gRPC login failed: console '{}' from {:?}: {e}", req.console_name, peer);
+                LoginResponse { success: false, error_message: e, ..Default::default() }
+            }
+        };
+        Ok(Response::new(response))
+    }
+
     async fn execute_command(
         &self,
         request: Request<CommandRequest>,
     ) -> Result<Response<CommandResponse>, Status> {
+        self.auth.check(request.metadata())?;
         let req = request.into_inner();
-        let ast = self.command_request_to_ast(&req);
-
-        // Submit to command queue
-        let result_rx = self.cmd_queue.submit(ast, 0)
-            .ok_or_else(|| Status::resource_exhausted("command queue full"))?;
-
-        // Wait for result
-        let result = result_rx.recv()
-            .map_err(|_| Status::internal("command execution failed"))?;
-
-        Ok(Response::new(CommandResponse {
-            success: result.success,
-            text_output: result.text_output,
-            json_output: Vec::new(),
-            error_message: result.error_message,
-        }))
+        let ast = command_request_to_ast(&req, &req.session_id);
+        let result = run_command(&self.cmd_queue, ast).await?;
+        Ok(Response::new(to_response(result)))
     }
 
     async fn list_commands(
         &self,
-        _request: Request<ListCommandsRequest>,
+        request: Request<ListCommandsRequest>,
     ) -> Result<Response<ListCommandsResponse>, Status> {
-        // Return the 88 known commands
+        self.auth.check(request.metadata())?;
         let commands = KNOWN_COMMANDS.iter().map(|(name, help, usage)| {
             CommandInfo {
                 name: name.to_string(),
@@ -105,6 +174,7 @@ impl Director for DirectorServiceImpl {
         &self,
         request: Request<Streaming<SessionMessage>>,
     ) -> Result<Response<Self::InteractiveSessionStream>, Status> {
+        self.auth.check(request.metadata())?;
         let mut stream = request.into_inner();
         let (tx, rx) = mpsc::channel(32);
 
@@ -121,36 +191,27 @@ impl Director for DirectorServiceImpl {
                     msg = stream.message() => {
                         match msg {
                             Ok(Some(session_msg)) => {
-                                if session_msg.r#type() == session_message::Type::Command {
-                                    // Execute command
-                                    if let Some(cmd_req) = session_msg.command {
-                                        let ast = CommandAst {
-                                            command_name: cmd_req.command_name,
-                                            arguments: Vec::new(),
-                                            session_id: session_msg.session_id.clone(),
-                                            source: CommandSource::Grpc,
-                                            response_format: ResponseFormat::Grpc,
-                                        };
-
-                                        if let Some(result_rx) = cmd_queue.submit(ast, 0) {
-                                            if let Ok(result) = result_rx.recv() {
-                                                let response = SessionMessage {
-                                                    r#type: session_message::Type::Response as i32,
-                                                    session_id: session_msg.session_id,
-                                                    response: Some(CommandResponse {
-                                                        success: result.success,
-                                                        text_output: result.text_output,
-                                                        json_output: Vec::new(),
-                                                        error_message: result.error_message,
-                                                    }),
-                                                    ..Default::default()
-                                                };
-                                                if tx.send(Ok(response)).await.is_err() {
-                                                    break;
-                                                }
-                                            }
-                                        }
-                                    }
+                                if session_msg.r#type() != session_message::Type::Command {
+                                    continue;
+                                }
+                                let Some(cmd_req) = session_msg.command else { continue };
+                                let ast = command_request_to_ast(&cmd_req, &session_msg.session_id);
+                                let response = match run_command(&cmd_queue, ast).await {
+                                    Ok(result) => to_response(result),
+                                    Err(status) => CommandResponse {
+                                        success: false,
+                                        error_message: status.message().to_string(),
+                                        ..Default::default()
+                                    },
+                                };
+                                let reply = SessionMessage {
+                                    r#type: session_message::Type::Response as i32,
+                                    session_id: session_msg.session_id,
+                                    response: Some(response),
+                                    ..Default::default()
+                                };
+                                if tx.send(Ok(reply)).await.is_err() {
+                                    break;
                                 }
                             }
                             Ok(None) => break, // Stream ended

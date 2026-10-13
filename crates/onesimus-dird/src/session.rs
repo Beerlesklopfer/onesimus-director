@@ -238,7 +238,7 @@ pub fn handle_console_session<S: Read + Write>(
 
 /// Parse a CLI command string into a CommandAST.
 /// Simple parser: first word is command name, rest are key=value arguments.
-fn parse_cli_command(input: &str) -> CommandAst {
+pub(crate) fn parse_cli_command(input: &str) -> CommandAst {
     let mut parts = input.splitn(2, char::is_whitespace);
     let command_name = parts.next().unwrap_or("").to_string();
     let args_str = parts.next().unwrap_or("");

@@ -29,6 +29,14 @@ pub struct DirectorResource {
     pub sd_connect_timeout: Duration,
     pub heartbeat_interval: Duration,
     pub enable_grpc: bool,
+    /// gRPC port; None = BNET port + 1000
+    pub grpc_port: Option<u16>,
+    /// PEM files for the gRPC TLS endpoint; None = self-signed, generated on first start
+    pub grpc_tls_certificate: Option<String>,
+    pub grpc_tls_key: Option<String>,
+    /// Announce the Director via mDNS (_onesimus-dir._tcp)
+    pub mdns_advertise: bool,
+    pub working_directory: String,
 }
 
 impl Default for DirectorResource {
@@ -42,6 +50,11 @@ impl Default for DirectorResource {
             sd_connect_timeout: Duration::from_secs(1800),
             heartbeat_interval: Duration::ZERO,
             enable_grpc: false,
+            grpc_port: None,
+            grpc_tls_certificate: None,
+            grpc_tls_key: None,
+            mdns_advertise: true,
+            working_directory: "/var/lib/bareos".to_string(),
         }
     }
 }

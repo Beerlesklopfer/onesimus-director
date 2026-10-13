@@ -7,27 +7,36 @@
 pub mod service;
 pub mod auth;
 pub mod push_events;
+pub mod tls;
 
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
-use tonic::transport::Server;
+use tonic::transport::{Identity, Server, ServerTlsConfig};
 use tracing::{info, error};
 
 use crate::message_bus::MessageBus;
-use crate::session_manager::SessionManager;
 use crate::command_queue::CommandQueue;
 
 use service::DirectorServiceImpl;
 use bareos_proto_rs::bareos::director::director_server::DirectorServer;
 
-/// Run the gRPC server. Called from the dir:grpc named thread.
+/// Everything the gRPC server needs besides the shared queues.
+pub struct GrpcSettings {
+    pub bind_address: String,
+    pub port: u16,
+    pub bnet_port: u16,
+    pub director_name: String,
+    pub identity: tls::GrpcIdentity,
+    pub auth: Arc<auth::AuthState>,
+}
+
+/// Run the gRPC server (TLS only). Called from the dir:grpc named thread.
 /// Creates its own tokio runtime.
 pub fn run_grpc_server(
-    session_mgr: &Arc<SessionManager>,
     bus: &Arc<MessageBus>,
     cmd_queue: &Arc<CommandQueue>,
-    port: u16,
+    settings: GrpcSettings,
     shutdown: &AtomicBool,
 ) {
     let rt = tokio::runtime::Builder::new_multi_thread()
@@ -44,16 +53,25 @@ pub fn run_grpc_server(
         }
     };
 
-    let smgr = session_mgr.clone();
     let b = bus.clone();
     let q = cmd_queue.clone();
     let shutdown_flag = shutdown as *const AtomicBool;
 
     rt.block_on(async move {
-        let addr = format!("0.0.0.0:{port}").parse().unwrap();
-        let svc = DirectorServiceImpl::new(smgr, b, q);
+        let addr = match format!("{}:{}", settings.bind_address, settings.port).parse() {
+            Ok(a) => a,
+            Err(e) => {
+                error!("invalid gRPC bind address {}:{}: {e}", settings.bind_address, settings.port);
+                return;
+            }
+        };
+        let svc = DirectorServiceImpl::new(
+            b, q, settings.auth, settings.director_name, settings.bnet_port,
+        );
+        let tls = ServerTlsConfig::new()
+            .identity(Identity::from_pem(&settings.identity.cert_pem, &settings.identity.key_pem));
 
-        info!("gRPC server listening on {addr}");
+        info!("gRPC server (TLS) listening on {addr}, certificate SHA-256 {}", settings.identity.fingerprint);
 
         // Use a channel to signal shutdown
         let (shutdown_tx, shutdown_rx) = tokio::sync::oneshot::channel::<()>();
@@ -70,7 +88,14 @@ pub fn run_grpc_server(
             }
         });
 
-        let result = Server::builder()
+        let mut builder = match Server::builder().tls_config(tls) {
+            Ok(b) => b,
+            Err(e) => {
+                error!("gRPC TLS setup failed: {e}");
+                return;
+            }
+        };
+        let result = builder
             .add_service(DirectorServer::new(svc))
             .serve_with_shutdown(addr, async { let _ = shutdown_rx.await; });
 

@@ -42,5 +42,11 @@ clap.workspace = true
 tokio-stream = "0.1"
 sqlx.workspace = true
 chrono = "0.4"
+rcgen.workspace = true
+mdns-sd.workspace = true
+hex.workspace = true
+rustls-pemfile.workspace = true
+md-5.workspace = true
+rand.workspace = true
 
 [dev-dependencies]

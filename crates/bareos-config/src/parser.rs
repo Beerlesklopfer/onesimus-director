@@ -399,6 +399,22 @@ fn convert_raw_resource(raw: &RawResource) -> Result<Resource, ConfigError> {
             if let Some(v) = get("enable grpc") {
                 dir.enable_grpc = parse_bool(v).map(|(_, b)| b).unwrap_or(false);
             }
+            let get_any = |keys: &[&str]| keys.iter().find_map(|k| get(k));
+            if let Some(v) = get_any(&["grpc port", "grpcport"]) {
+                dir.grpc_port = v.parse().ok();
+            }
+            if let Some(v) = get_any(&["grpc tls certificate", "grpctlscertificate"]) {
+                dir.grpc_tls_certificate = Some(v.to_string());
+            }
+            if let Some(v) = get_any(&["grpc tls key", "grpctlskey"]) {
+                dir.grpc_tls_key = Some(v.to_string());
+            }
+            if let Some(v) = get_any(&["mdns advertise", "mdnsadvertise"]) {
+                dir.mdns_advertise = parse_bool(v).map(|(_, b)| b).unwrap_or(true);
+            }
+            if let Some(v) = get_any(&["working directory", "workingdirectory"]) {
+                dir.working_directory = v.to_string();
+            }
             if let Some(v) = get("heartbeat interval") {
                 dir.heartbeat_interval = parse_time(v).map(|(_, d)| d).unwrap_or_default();
             }
@@ -675,6 +691,35 @@ Director {
                 assert_eq!(d.password, "secret");
                 assert_eq!(d.max_concurrent_jobs, 10);
                 assert!(d.enable_grpc);
+                assert_eq!(d.grpc_port, None);
+                assert!(d.mdns_advertise);
+                assert_eq!(d.working_directory, "/var/lib/bareos");
+            }
+            _ => panic!("expected Director"),
+        }
+    }
+
+    #[test]
+    fn parse_director_grpc_and_mdns() {
+        let input = r#"
+Director {
+  Name = bareos-dir
+  Password = "secret"
+  Grpc Port = 9111
+  Grpc Tls Certificate = /etc/bareos/tls/dir.crt
+  GrpcTlsKey = /etc/bareos/tls/dir.key
+  Mdns Advertise = no
+  Working Directory = /tmp/dir-work
+}
+"#;
+        let resources = parse_config(input).unwrap();
+        match &resources[0] {
+            Resource::Director(d) => {
+                assert_eq!(d.grpc_port, Some(9111));
+                assert_eq!(d.grpc_tls_certificate.as_deref(), Some("/etc/bareos/tls/dir.crt"));
+                assert_eq!(d.grpc_tls_key.as_deref(), Some("/etc/bareos/tls/dir.key"));
+                assert!(!d.mdns_advertise);
+                assert_eq!(d.working_directory, "/tmp/dir-work");
             }
             _ => panic!("expected Director"),
         }

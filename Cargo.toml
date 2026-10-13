@@ -28,7 +28,7 @@ repository = "https://github.com/Beerlesklopfer/onesimus-director"
 tokio = { version = "1", features = ["full"] }
 
 # gRPC
-tonic = "0.12"
+tonic = { version = "0.12", features = ["tls"] }
 prost = "0.13"
 prost-types = "0.13"
 
@@ -52,6 +52,11 @@ tokio-rustls = "0.26"
 
 # TLS-PSK (for FD/SD connections — Bareos uses PSK, not certificates)
 openssl = "0.10"
+
+# gRPC TLS certificate generation + mDNS service discovery
+rcgen = "0.13"
+mdns-sd = "0.13"
+hex = "0.4"
 
 # Concurrency
 crossbeam-channel = "0.5"

@@ -18,6 +18,7 @@ mod fsm;
 mod grpc;
 mod job_manager;
 mod job_worker;
+mod mdns;
 mod message_bus;
 mod reload;
 mod scheduler;
@@ -458,6 +459,7 @@ fn spawn_named_threads(
     {
         let smgr = session_mgr.clone();
         let q = cmd_queue.clone();
+        let bind_address = bind_address.clone();
         let pw = password.clone();
         let tls_cfg = tls_config.clone();
         let shared_cfg = config.clone();
@@ -504,19 +506,63 @@ fn spawn_named_threads(
         threads.push(("dir:watchdog".into(), handle));
     }
 
-    // dir:grpc — tonic gRPC server (optional)
-    if grpc_enabled {
-        let smgr = session_mgr.clone();
+    // dir:grpc — tonic gRPC server over TLS (optional), dir:mdns — DNS-SD announcement
+    let (dir_name, grpc_port, mdns_advertise, grpc_identity) = {
+        let cfg = config.read().unwrap();
+        let d = &cfg.director;
+        let identity = if grpc_enabled {
+            match grpc::tls::load_or_generate(
+                d.grpc_tls_certificate.as_deref(),
+                d.grpc_tls_key.as_deref(),
+                &d.working_directory,
+                &d.name,
+            ) {
+                Ok(id) => Some(id),
+                Err(e) => {
+                    error!("gRPC disabled: no TLS certificate: {e}");
+                    None
+                }
+            }
+        } else {
+            None
+        };
+        (d.name.clone(), d.grpc_port.unwrap_or(port.saturating_add(1000)), d.mdns_advertise, identity)
+    };
+    let grpc_fingerprint = grpc_identity.as_ref().map(|id| id.fingerprint.clone());
+
+    if let Some(identity) = grpc_identity {
         let b = bus.clone();
         let q = cmd_queue.clone();
-        let grpc_port = port; // TODO: separate gRPC port
+        let settings = grpc::GrpcSettings {
+            bind_address: bind_address.clone(),
+            port: grpc_port,
+            bnet_port: port,
+            director_name: dir_name.clone(),
+            identity,
+            auth: Arc::new(grpc::auth::AuthState::new(config.clone())),
+        };
         let handle = thread::Builder::new()
             .name("dir:grpc".into())
             .spawn(move || {
-                grpc::run_grpc_server(&smgr, &b, &q, grpc_port + 1000, &SHUTDOWN);
+                grpc::run_grpc_server(&b, &q, settings, &SHUTDOWN);
             })
             .expect("failed to spawn dir:grpc");
         threads.push(("dir:grpc".into(), handle));
+    }
+
+    if mdns_advertise {
+        let ann = mdns::Announcement {
+            director_name: dir_name,
+            bnet_port: port,
+            grpc: grpc_fingerprint.map(|fp| (grpc_port, fp)),
+        };
+        let handle = thread::Builder::new()
+            .name("dir:mdns".into())
+            .spawn(move || {
+                mdns::advertise_loop(ann, &SHUTDOWN);
+            })
+            .expect("failed to spawn dir:mdns");
+        threads.push(("dir:mdns".into(), handle));
     }
 
     // dir:cmdworker — processes commands from gRPC and other queue submitters
@@ -525,10 +571,11 @@ fn spawn_named_threads(
         let cfg = config.clone();
         let smgr = session_mgr.clone();
         let cat = catalog.clone();
+        let jmgr = job_mgr.clone();
         let handle = thread::Builder::new()
             .name("dir:cmdworker".into())
             .spawn(move || {
-                command_worker::command_worker_loop(&q, Some(cfg), Some(smgr), cat, &SHUTDOWN);
+                command_worker::command_worker_loop(&q, Some(cfg), Some(smgr), cat, Some(jmgr), &SHUTDOWN);
             })
             .expect("failed to spawn dir:cmdworker");
         threads.push(("dir:cmdworker".into(), handle));

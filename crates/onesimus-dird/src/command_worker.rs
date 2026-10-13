@@ -9,7 +9,9 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use tracing::{info, debug, warn};
 
 use crate::catalog_worker::CatalogHandle;
-use crate::command_executor::{self, ExecContext};
+use crate::command_ast::ResponseFormat;
+use crate::command_executor::{self, ApiMode, ExecContext};
+use crate::job_manager::JobManager;
 use crate::command_queue::CommandQueue;
 use crate::director_config::SharedConfig;
 use crate::session_manager::SessionManager;
@@ -20,6 +22,7 @@ pub fn command_worker_loop(
     config: Option<SharedConfig>,
     session_mgr: Option<Arc<SessionManager>>,
     catalog: Option<CatalogHandle>,
+    job_manager: Option<Arc<std::sync::Mutex<JobManager>>>,
     shutdown: &AtomicBool,
 ) {
     info!("command worker started");
@@ -31,9 +34,13 @@ pub fn command_worker_loop(
                 config: config.clone(),
                 session_mgr: session_mgr.clone(),
                 catalog: catalog.clone(),
-                api_mode: command_executor::ApiMode::Api,
+                api_mode: match cmd.ast.response_format {
+                    ResponseFormat::Json => ApiMode::Json,
+                    ResponseFormat::Text => ApiMode::Human,
+                    _ => ApiMode::Api,
+                },
                 bus_rx: None,
-                job_manager: None,
+                job_manager: job_manager.clone(),
             };
 
             debug!("executing command '{}' from queue", cmd.ast.command_name);
