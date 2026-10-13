@@ -24,13 +24,11 @@ pub struct RawResource {
 
 /// Parse a Bareos config directory tree (bareos-dir.d/**/*.conf).
 pub fn parse_config_dir(dir: &std::path::Path) -> Result<Vec<Resource>, ConfigError> {
-    let mut all_input = String::new();
+    let mut all = Vec::new();
 
     if dir.is_file() {
         // Single file mode
-        let content = std::fs::read_to_string(dir)
-            .map_err(|e| ConfigError::ParseError(format!("read {}: {e}", dir.display())))?;
-        return parse_config(&content);
+        return parse_config_file(dir);
     }
 
     if !dir.is_dir() {
@@ -58,21 +56,39 @@ pub fn parse_config_dir(dir: &std::path::Path) -> Result<Vec<Resource>, ConfigEr
             .filter(|p| p.extension().map(|e| e == "conf").unwrap_or(false))
             .collect();
         conf_files.sort();
+        // Each file on its own: resources never span files, and errors can
+        // name the file (and line) like the C++ parser does.
         for conf in conf_files {
-            let content = std::fs::read_to_string(&conf)
-                .map_err(|e| ConfigError::ParseError(format!("read {}: {e}", conf.display())))?;
-            all_input.push_str(&content);
-            all_input.push('\n');
+            all.extend(parse_config_file(&conf)?);
         }
     }
-    parse_config(&all_input)
+    Ok(all)
+}
+
+/// Parse one config file; errors are prefixed with "<file>: ".
+pub fn parse_config_file(path: &std::path::Path) -> Result<Vec<Resource>, ConfigError> {
+    let content = std::fs::read_to_string(path)
+        .map_err(|e| ConfigError::ParseError(format!("read {}: {e}", path.display())))?;
+    parse_config(&content).map_err(|e| match e {
+        ConfigError::ParseError(msg) => ConfigError::ParseError(format!("{}: {msg}", path.display())),
+        ConfigError::MissingRequired { resource_type, directive } => ConfigError::ParseError(format!(
+            "{}: missing required directive '{directive}' in {resource_type}", path.display())),
+        ConfigError::InvalidValue { directive, message } => ConfigError::ParseError(format!(
+            "{}: invalid value for '{directive}': {message}", path.display())),
+        ConfigError::UnknownResourceType(t) => ConfigError::ParseError(format!(
+            "{}: unknown resource type: {t}", path.display())),
+    })
 }
 
 /// Parse a complete Bareos configuration into typed resources.
 pub fn parse_config(input: &str) -> Result<Vec<Resource>, ConfigError> {
     let cleaned = strip_comments(input);
     let raw_resources = parse_raw_resources(&cleaned)
-        .map_err(|e| ConfigError::ParseError(format!("{e:?}")))?;
+        .map_err(|(msg, offset)| {
+            // strip_comments keeps line breaks, so offsets map to source lines
+            let line = cleaned[..offset.min(cleaned.len())].matches('\n').count() + 1;
+            ConfigError::ParseError(format!("line {line}: {msg}"))
+        })?;
 
     let mut resources = Vec::new();
     for raw in raw_resources {
@@ -129,7 +145,12 @@ fn strip_comments(input: &str) -> String {
 }
 
 /// Parse all raw resource blocks from input.
-fn parse_raw_resources(input: &str) -> Result<Vec<RawResource>, String> {
+/// Errors carry the byte offset into `input` for line reporting.
+fn parse_raw_resources(input: &str) -> Result<Vec<RawResource>, (String, usize)> {
+    parse_raw_resources_inner(input).map_err(|(msg, rest)| (msg, input.len() - rest))
+}
+
+fn parse_raw_resources_inner(input: &str) -> Result<Vec<RawResource>, (String, usize)> {
     let mut resources = Vec::new();
     let mut remaining = input;
 
@@ -143,13 +164,13 @@ fn parse_raw_resources(input: &str) -> Result<Vec<RawResource>, String> {
         // Parse resource type name
         let type_end = remaining
             .find(|c: char| c.is_whitespace() || c == '{')
-            .ok_or_else(|| format!("expected resource type, got: {}", &remaining[..20.min(remaining.len())]))?;
+            .ok_or_else(|| (format!("expected resource type, got: {}", &remaining[..20.min(remaining.len())]), remaining.len()))?;
         let resource_type = remaining[..type_end].to_string();
         remaining = remaining[type_end..].trim_start();
 
         // Expect opening brace
         if !remaining.starts_with('{') {
-            return Err(format!("expected '{{' after resource type '{resource_type}'"));
+            return Err((format!("expected '{{' after resource type '{resource_type}'"), remaining.len()));
         }
         remaining = &remaining[1..];
 
@@ -162,7 +183,7 @@ fn parse_raw_resources(input: &str) -> Result<Vec<RawResource>, String> {
                 break;
             }
             if remaining.is_empty() {
-                return Err(format!("unexpected EOF in resource '{resource_type}'"));
+                return Err((format!("unexpected EOF in resource '{resource_type}'"), remaining.len()));
             }
 
             // Check for nested block (Include { ... }, Exclude { ... }, Options { ... }, etc.)
@@ -199,7 +220,7 @@ fn parse_raw_resources(input: &str) -> Result<Vec<RawResource>, String> {
             }
 
             // Parse directive key (may contain spaces: "Maximum Concurrent Jobs")
-            let (key, rest) = parse_directive_key(remaining)?;
+            let (key, rest) = parse_directive_key(remaining).map_err(|e| (e, remaining.len()))?;
             remaining = rest;
 
             // Skip = sign
@@ -209,7 +230,7 @@ fn parse_raw_resources(input: &str) -> Result<Vec<RawResource>, String> {
             }
 
             // Parse value (until newline, semicolon, or closing brace)
-            let (val, rest) = parse_directive_value(remaining)?;
+            let (val, rest) = parse_directive_value(remaining).map_err(|e| (e, remaining.len()))?;
             remaining = rest;
 
             if !key.is_empty() {
@@ -252,6 +273,9 @@ fn parse_directive_key(input: &str) -> Result<(String, &str), String> {
 
 /// Parse a directive value (until newline, semicolon, or end context).
 fn parse_directive_value(input: &str) -> Result<(String, &str), String> {
+    if input.starts_with('{') {
+        return parse_brace_value(input);
+    }
     let mut result = String::new();
     let mut remaining = input;
     let mut in_quotes = false;
@@ -285,6 +309,34 @@ fn parse_directive_value(input: &str) -> Result<(String, &str), String> {
     }
 
     Ok((result.trim().to_string(), ""))
+}
+
+/// A value in braces (`Addresses = { ipv4 = { addr = 1.2.3.4; port = 9101 } }`):
+/// returns the inner text (balanced, quotes respected) and the input after the
+/// closing brace.
+fn parse_brace_value(input: &str) -> Result<(String, &str), String> {
+    let mut depth = 0usize;
+    let mut in_quotes = false;
+    let mut escaped = false;
+    for (i, c) in input.char_indices() {
+        if escaped {
+            escaped = false;
+            continue;
+        }
+        match c {
+            '\\' if in_quotes => escaped = true,
+            '"' => in_quotes = !in_quotes,
+            '{' if !in_quotes => depth += 1,
+            '}' if !in_quotes => {
+                depth -= 1;
+                if depth == 0 {
+                    return Ok((input[1..i].trim().to_string(), &input[i + 1..]));
+                }
+            }
+            _ => {}
+        }
+    }
+    Err("unbalanced '{' in directive value".to_string())
 }
 
 /// Extract File = <path> directives from a nested Include/Exclude block.
@@ -697,6 +749,45 @@ Director {
             }
             _ => panic!("expected Director"),
         }
+    }
+
+    #[test]
+    fn brace_values_and_line_numbers() {
+        let input = r#"
+Director {
+  Name = bareos-dir
+  Password = "secret"
+  DirAddresses = {
+    ipv4 = { addr = 0.0.0.0; port = 9101 }
+    ipv6 = {
+      addr = ::
+      port = 9101
+    }
+  }
+  Maximum Concurrent Jobs = 7
+}
+"#;
+        let resources = parse_config(input).unwrap();
+        match &resources[0] {
+            Resource::Director(d) => {
+                assert_eq!(d.name, "bareos-dir");
+                assert_eq!(d.max_concurrent_jobs, 7);
+            }
+            _ => panic!("expected Director"),
+        }
+
+        let err = parse_config("Director {\n  Name = x\n}\nBroken\n").unwrap_err().to_string();
+        assert!(err.contains("line 4"), "{err}");
+    }
+
+    #[test]
+    fn errors_name_the_file() {
+        let dir = std::env::temp_dir().join(format!("bareos-config-test-{}", std::process::id()));
+        std::fs::create_dir_all(dir.join("director")).unwrap();
+        std::fs::write(dir.join("director/bad.conf"), "Director {\n  Name = x\n").unwrap();
+        let err = parse_config_dir(&dir).unwrap_err().to_string();
+        std::fs::remove_dir_all(&dir).unwrap();
+        assert!(err.contains("director/bad.conf"), "{err}");
     }
 
     #[test]
