@@ -27,8 +27,12 @@ pub struct Announcement {
 /// LXC, veth pairs, VM taps). Their addresses are not reachable from the LAN,
 /// so announcing them makes clients pick a dead address.
 pub fn is_virtual_interface(name: &str) -> bool {
-    const PREFIXES: &[&str] = &["virbr", "docker", "br-", "veth", "vnet", "lxc", "lxdbr", "podman", "cni", "flannel", "tap"];
-    PREFIXES.iter().any(|p| name.starts_with(p))
+    const PREFIXES: &[&str] = &["virbr", "docker", "veth", "vnet", "lxc", "lxdbr", "podman", "cni", "flannel", "tap"];
+    // Docker user networks are "br-" + 12 hex digits; LAN bridges such as
+    // br0 or br-lan stay announced.
+    let docker_bridge = name.strip_prefix("br-")
+        .is_some_and(|id| id.len() == 12 && id.bytes().all(|b| b.is_ascii_hexdigit()));
+    docker_bridge || PREFIXES.iter().any(|p| name.starts_with(p))
 }
 
 /// Names of virtual interfaces present on this host (from /sys/class/net).
@@ -112,10 +116,10 @@ mod tests {
 
     #[test]
     fn virtual_interface_names() {
-        for n in ["virbr0", "docker0", "br-1a2b3c", "veth12ab", "vnet0", "lxcbr0", "podman0"] {
+        for n in ["virbr0", "docker0", "br-0a1b2c3d4e5f", "veth12ab", "vnet0", "lxcbr0", "podman0"] {
             assert!(is_virtual_interface(n), "{n}");
         }
-        for n in ["eth0", "enp3s0", "br0", "wlan0", "bond0", "eno1"] {
+        for n in ["eth0", "enp3s0", "br0", "br-lan", "br-wan", "wlan0", "bond0", "eno1"] {
             assert!(!is_virtual_interface(n), "{n}");
         }
     }
