@@ -19,6 +19,7 @@ mod grpc;
 mod job_manager;
 mod job_worker;
 mod json_output;
+mod kill;
 mod localtime;
 mod mdns;
 mod message_bus;
@@ -84,6 +85,10 @@ struct Cli {
     #[arg(short, long)]
     test_config: bool,
 
+    /// Stop the running Director (PID from -p, otherwise found via /proc) and exit.
+    #[arg(short = 'k', long)]
+    kill: bool,
+
     /// Full path to pidfile (default: none).
     #[arg(short, long)]
     pid_file: Option<PathBuf>,
@@ -145,8 +150,14 @@ fn main() {
     let cli = Cli::parse();
     localtime::init_locale();
     localtime::mark_daemon_start();
-    // Before any thread exists: SIGHUP must only reach the dir:sighup thread
+    if cli.kill {
+        std::process::exit(kill::kill_running(cli.pid_file.as_deref(), &cli.config));
+    }
+
+    // Before any thread exists: SIGHUP must only reach the dir:sighup thread,
+    // SIGINT/SIGTERM only wait_for_shutdown() (clean stop for systemctl/-k)
     reload::block_sighup();
+    block_shutdown_signals();
 
     // Debug-Level Hilfe
     if cli.debug_level == 999 {
@@ -605,12 +616,24 @@ fn spawn_named_threads(
     threads
 }
 
-fn wait_for_shutdown() {
-    use std::sync::mpsc;
-    let (tx, rx) = mpsc::channel();
+fn shutdown_sigset() -> nix::sys::signal::SigSet {
+    use nix::sys::signal::{SigSet, Signal};
+    let mut set = SigSet::empty();
+    set.add(Signal::SIGINT);
+    set.add(Signal::SIGTERM);
+    set
+}
 
-    let _ = ctrlc::set_handler(move || {
-        let _ = tx.send(());
-    });
-    let _ = rx.recv();
+/// Block SIGINT/SIGTERM in all threads (inherited mask); main waits for them.
+fn block_shutdown_signals() {
+    if let Err(e) = shutdown_sigset().thread_block() {
+        error!("cannot block SIGINT/SIGTERM: {e}");
+    }
+}
+
+fn wait_for_shutdown() {
+    match shutdown_sigset().wait() {
+        Ok(sig) => info!("{sig} received, shutting down"),
+        Err(e) => error!("sigwait failed: {e}"),
+    }
 }
