@@ -19,3 +19,6 @@ debian/files
 debian/*.substvars
 debian/*.debhelper
 debian/debhelper-build-stamp
+
+# Claude Code worktrees/session data
+.claude/
