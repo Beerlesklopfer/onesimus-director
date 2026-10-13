@@ -24,6 +24,8 @@ use tracing::{info, debug, error, warn};
 pub enum CatalogRequest {
     /// Raw SQL query — returns formatted text output.
     RawQuery { sql: String },
+    /// SQL query returning every value as libpq text (like the C++ catalog).
+    TextRows { sql: String },
     /// Get full volume info in OK_media format (24-field protocol string).
     GetVolumeInfo { vol_name: String },
     /// Find an appendable volume in a named pool.
@@ -90,6 +92,8 @@ pub enum CatalogRequest {
 pub enum CatalogResponse {
     /// Text output (query results, formatted strings).
     Text(String),
+    /// Query result with text values.
+    Rows(SqlTable),
     /// Optional text (volume info, bootstrap, etc.).
     OptionalText(Option<String>),
     /// Optional job ID.
@@ -104,6 +108,22 @@ pub enum CatalogResponse {
     SinceUtime { since_utime: i64, prev_job: String },
     /// Pong.
     Pong,
+}
+
+/// A query result as the C++ catalog sees it: all values in PostgreSQL text
+/// format (simple query protocol), NULL as `None`.
+#[derive(Debug, Clone, Default)]
+pub struct SqlTable {
+    pub columns: Vec<SqlColumn>,
+    pub rows: Vec<Vec<Option<String>>>,
+}
+
+#[derive(Debug, Clone)]
+pub struct SqlColumn {
+    /// Column name as returned by PostgreSQL (lowercase for unquoted names)
+    pub name: String,
+    /// Numeric SQL type (C++ SqlFieldIsNumeric: right-aligned, thousands separators)
+    pub numeric: bool,
 }
 
 // ---------------------------------------------------------------------------
@@ -130,6 +150,15 @@ impl CatalogHandle {
     pub fn raw_query(&self, sql: &str) -> Result<String, String> {
         match self.request(CatalogRequest::RawQuery { sql: sql.to_string() })? {
             CatalogResponse::Text(t) => Ok(t),
+            CatalogResponse::Error(e) => Err(e),
+            other => Err(format!("unexpected response: {:?}", resp_debug(&other))),
+        }
+    }
+
+    /// Execute a query and return all values as text (C++ catalog semantics).
+    pub fn query_rows(&self, sql: &str) -> Result<SqlTable, String> {
+        match self.request(CatalogRequest::TextRows { sql: sql.to_string() })? {
+            CatalogResponse::Rows(t) => Ok(t),
             CatalogResponse::Error(e) => Err(e),
             other => Err(format!("unexpected response: {:?}", resp_debug(&other))),
         }
@@ -264,6 +293,7 @@ impl CatalogHandle {
 fn resp_debug(r: &CatalogResponse) -> &'static str {
     match r {
         CatalogResponse::Text(_) => "Text",
+        CatalogResponse::Rows(_) => "Rows",
         CatalogResponse::OptionalText(_) => "OptionalText",
         CatalogResponse::OptionalJobId(_) => "OptionalJobId",
         CatalogResponse::JobId(_) => "JobId",
@@ -315,6 +345,8 @@ pub fn spawn_catalog_worker(
                     let response = match req {
                         CatalogRequest::RawQuery { sql } =>
                             handle_raw_query(&pool, &sql).await,
+                        CatalogRequest::TextRows { sql } =>
+                            handle_text_rows(&pool, &sql).await,
                         CatalogRequest::GetVolumeInfo { vol_name } =>
                             handle_get_volume_info(&pool, &vol_name).await,
                         CatalogRequest::FindAppendableVolume { pool_name } =>
@@ -391,6 +423,30 @@ async fn handle_raw_query(pool: &sqlx::PgPool, sql: &str) -> CatalogResponse {
     }
 
     CatalogResponse::Text(output)
+}
+
+/// Simple query protocol: PostgreSQL sends every value in text format, exactly
+/// what libpq hands to the C++ Director (timestamps, intervals, numerics).
+async fn handle_text_rows(pool: &sqlx::PgPool, sql: &str) -> CatalogResponse {
+    use sqlx::{Column, Row, TypeInfo};
+    let rows = match sqlx::raw_sql(sql).fetch_all(pool).await {
+        Ok(r) => r,
+        Err(e) => return CatalogResponse::Error(format!("Query: {e}")),
+    };
+    let mut table = SqlTable::default();
+    if let Some(first) = rows.first() {
+        table.columns = first.columns().iter().map(|c| SqlColumn {
+            name: c.name().to_string(),
+            numeric: matches!(c.type_info().name(), "INT2" | "INT4" | "INT8" | "NUMERIC" | "FLOAT4" | "FLOAT8" | "OID"),
+        }).collect();
+    }
+    for row in &rows {
+        let values = (0..table.columns.len())
+            .map(|i| row.try_get_unchecked::<Option<String>, _>(i).ok().flatten())
+            .collect();
+        table.rows.push(values);
+    }
+    CatalogResponse::Rows(table)
 }
 
 async fn handle_get_volume_info(pool: &sqlx::PgPool, vol_name: &str) -> CatalogResponse {

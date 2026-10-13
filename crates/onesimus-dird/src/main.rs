@@ -26,6 +26,7 @@ mod scheduler;
 mod sd_protocol;
 mod session;
 mod session_manager;
+mod sql_list;
 mod watchdog;
 
 use std::path::PathBuf;

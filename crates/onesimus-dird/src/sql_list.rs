@@ -1,0 +1,201 @@
+//! Rendering of catalog query results like C++ `BareosDb::ListResult`
+//! (cats/sql.cc): bconsole tables (HORZ), `llist` blocks (VERT), raw rows,
+//! and the JSON array of row objects for `.api 2`.
+
+use serde_json::{Map, Value};
+
+use crate::catalog_worker::SqlTable;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ListType {
+    /// `list`: table with +---+ borders
+    Horz,
+    /// `llist`: one "key: value" block per row
+    Vert,
+    /// unformatted " value" per column, newline per row (list files)
+    Nf,
+    /// like Nf without newline (log text already contains it)
+    Raw,
+}
+
+/// Rows as JSON objects; every value is a string, NULL becomes "" (C++ semantics).
+pub fn json_rows(t: &SqlTable) -> Vec<Value> {
+    t.rows.iter().map(|row| {
+        let mut obj = Map::new();
+        for (col, v) in t.columns.iter().zip(row) {
+            obj.insert(col.name.to_lowercase(), Value::String(v.clone().unwrap_or_default()));
+        }
+        Value::Object(obj)
+    }).collect()
+}
+
+/// Text rendering for the human/API-1 console.
+pub fn render(t: &SqlTable, ty: ListType) -> String {
+    if t.rows.is_empty() {
+        return "No results to list.\n".to_string();
+    }
+    match ty {
+        ListType::Horz => horz(t),
+        ListType::Vert => vert(t),
+        ListType::Nf | ListType::Raw => {
+            let mut out = String::new();
+            for row in &t.rows {
+                for v in row {
+                    out.push(' ');
+                    out.push_str(v.as_deref().unwrap_or("NULL"));
+                }
+                if ty == ListType::Nf {
+                    out.push('\n');
+                }
+            }
+            out
+        }
+    }
+}
+
+fn is_integer(s: &str) -> bool {
+    let s = s.strip_prefix('-').unwrap_or(s);
+    !s.is_empty() && s.bytes().all(|b| b.is_ascii_digit())
+}
+
+/// lib/edit.cc add_commas: 1234567 -> 1,234,567
+pub fn add_commas(s: &str) -> String {
+    let (sign, digits) = match s.strip_prefix('-') {
+        Some(d) => ("-", d),
+        None => ("", s),
+    };
+    let mut out = String::new();
+    for (i, c) in digits.chars().enumerate() {
+        if i > 0 && (digits.len() - i) % 3 == 0 {
+            out.push(',');
+        }
+        out.push(c);
+    }
+    format!("{sign}{out}")
+}
+
+fn column_widths(t: &SqlTable) -> Vec<usize> {
+    t.columns.iter().enumerate().map(|(i, col)| {
+        let mut max_len = t.rows.iter()
+            .map(|r| r[i].as_deref().map_or(0, str::len))
+            .max()
+            .unwrap_or(0);
+        if col.numeric && max_len > 0 && col.name != "jobid" {
+            max_len += (max_len - 1) / 3; // room for commas
+        }
+        // NULL needs 4 characters (PostgreSQL fields are never flagged NOT NULL)
+        col.name.len().max(max_len).max(4).min(100)
+    }).collect()
+}
+
+fn dashes(widths: &[usize]) -> String {
+    let mut s = String::from("+");
+    for w in widths {
+        s.push_str(&"-".repeat((w + 2).min(100)));
+        s.push('+');
+    }
+    s.push('\n');
+    s
+}
+
+fn horz(t: &SqlTable) -> String {
+    let widths = column_widths(t);
+    let mut out = dashes(&widths);
+    out.push('|');
+    for (col, w) in t.columns.iter().zip(&widths) {
+        out.push_str(&format!(" {:<w$} |", col.name, w = w));
+    }
+    out.push('\n');
+    out.push_str(&dashes(&widths));
+    for row in &t.rows {
+        out.push('|');
+        for ((col, v), w) in t.columns.iter().zip(row).zip(&widths) {
+            let cell = match v {
+                None => format!(" {:<w$} |", "NULL", w = w),
+                Some(v) if col.numeric => {
+                    let v = if is_integer(v) && col.name != "jobid" { add_commas(v) } else { v.clone() };
+                    format!(" {:>w$} |", v, w = w)
+                }
+                Some(v) => format!(" {:<w$} |", v, w = w),
+            };
+            out.push_str(&cell);
+        }
+        out.push('\n');
+    }
+    out.push_str(&dashes(&widths));
+    out
+}
+
+fn vert(t: &SqlTable) -> String {
+    let key_len = t.columns.iter().map(|c| c.name.len()).max().unwrap_or(0);
+    let mut out = String::new();
+    for row in &t.rows {
+        for (col, v) in t.columns.iter().zip(row) {
+            let value = match v {
+                None => "NULL".to_string(),
+                Some(v) if col.numeric && is_integer(v) && col.name != "jobid" => add_commas(v),
+                Some(v) => v.clone(),
+            };
+            out.push_str(&format!(" {:>w$}: {value}\n", col.name, w = key_len));
+        }
+        out.push('\n');
+    }
+    out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::catalog_worker::SqlColumn;
+
+    fn table() -> SqlTable {
+        SqlTable {
+            columns: vec![
+                SqlColumn { name: "jobid".into(), numeric: true },
+                SqlColumn { name: "name".into(), numeric: false },
+                SqlColumn { name: "jobbytes".into(), numeric: true },
+            ],
+            rows: vec![
+                vec![Some("479".into()), Some("benchmark-small".into()), Some("824021543".into())],
+                vec![Some("12".into()), None, Some("0".into())],
+            ],
+        }
+    }
+
+    #[test]
+    fn commas() {
+        assert_eq!(add_commas("824021543"), "824,021,543");
+        assert_eq!(add_commas("1000"), "1,000");
+        assert_eq!(add_commas("999"), "999");
+        assert_eq!(add_commas("-1234"), "-1,234");
+    }
+
+    #[test]
+    fn horizontal_table() {
+        let out = render(&table(), ListType::Horz);
+        let lines: Vec<&str> = out.lines().collect();
+        assert_eq!(lines[0], "+-------+-----------------+-------------+");
+        assert_eq!(lines[1], "| jobid | name            | jobbytes    |");
+        assert_eq!(lines[3], "|   479 | benchmark-small | 824,021,543 |");
+        assert_eq!(lines[4], "|    12 | NULL            |           0 |");
+        assert_eq!(lines.len(), 6);
+    }
+
+    #[test]
+    fn vertical_list() {
+        let out = render(&table(), ListType::Vert);
+        assert!(out.starts_with("    jobid: 479\n     name: benchmark-small\n jobbytes: 824,021,543\n\n"));
+    }
+
+    #[test]
+    fn json_strings_and_empty_null() {
+        let rows = json_rows(&table());
+        assert_eq!(rows[0]["jobid"], "479");
+        assert_eq!(rows[1]["name"], "");
+    }
+
+    #[test]
+    fn empty_result() {
+        assert_eq!(render(&SqlTable::default(), ListType::Horz), "No results to list.\n");
+    }
+}

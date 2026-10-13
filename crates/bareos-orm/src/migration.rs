@@ -170,11 +170,12 @@ impl Migrator {
                 }
             }
 
-            // Version in DB speichern (in beiden Tabellen — C++ Kompatibilität)
-            self.set_db_version(pool, schema.version).await?;
+            self.set_db_version(pool, schema).await?;
             applied += 1;
             info!("migration to v{} complete", schema.version);
         }
+
+        repair_cpp_version(pool, &versions).await?;
 
         if applied == 0 {
             let latest = versions.last().map(|s| s.version).unwrap_or(0);
@@ -184,69 +185,106 @@ impl Migrator {
         Ok(applied)
     }
 
+    /// Applied schema version: the highest of the Bareos `version` table
+    /// (base catalog) and our `bareos_schema_version` (incl. Onesimus extensions).
     async fn get_db_version(&self, pool: &sqlx::PgPool) -> Result<u32, OrmError> {
-        // 1. Prüfe C++ Version-Tabelle (VersionId)
+        let mut found: Option<u32> = None;
+
+        // 1. C++ Version-Tabelle (VersionId) — Bareos-Basisschema
         let cpp_exists: bool = sqlx::query_scalar(
             "SELECT EXISTS(SELECT 1 FROM information_schema.tables WHERE table_name = 'version')"
         ).fetch_one(pool).await?;
-
         if cpp_exists {
             let version: Option<i32> = sqlx::query_scalar(
                 "SELECT MAX(versionid) FROM version"
             ).fetch_one(pool).await.unwrap_or(None);
-
             if let Some(v) = version {
                 debug!("found C++ version table: VersionId={v}");
-                return Ok(v as u32);
+                found = Some(v as u32);
             }
         }
 
-        // 2. Prüfe unsere Version-Tabelle
+        // 2. Unsere Version-Tabelle — enthält auch die Onesimus-Erweiterungen
         let our_exists: bool = sqlx::query_scalar(
             "SELECT EXISTS(SELECT 1 FROM information_schema.tables WHERE table_name = 'bareos_schema_version')"
         ).fetch_one(pool).await?;
-
         if our_exists {
             let version: Option<i32> = sqlx::query_scalar(
                 "SELECT MAX(version) FROM bareos_schema_version"
             ).fetch_one(pool).await.unwrap_or(None);
-
             if let Some(v) = version {
                 debug!("found bareos_schema_version: v={v}");
-                return Ok(v as u32);
+                found = Some(found.map_or(v as u32, |f| f.max(v as u32)));
             }
         }
 
-        // 3. Keine Version-Tabelle → Fresh Install
-        info!("no version table found — fresh install");
-        Ok(0)
+        if found.is_none() {
+            info!("no version table found — fresh install");
+        }
+        Ok(found.unwrap_or(0))
     }
 
-    async fn set_db_version(&self, pool: &sqlx::PgPool, version: u32) -> Result<(), OrmError> {
-        // Unsere Version-Tabelle
+    /// Record an applied schema version.
+    ///
+    /// The Bareos `version` table only ever gets Bareos base schema versions:
+    /// the C++ Director refuses to open a catalog whose VersionId it does not
+    /// know, so Onesimus extensions (views, functions) must not bump it —
+    /// otherwise a C++ Director on the same catalog stops working.
+    async fn set_db_version(&self, pool: &sqlx::PgPool, schema: &CatalogSchema) -> Result<(), OrmError> {
         sqlx::query(
             "CREATE TABLE IF NOT EXISTS bareos_schema_version (version integer NOT NULL, applied_at timestamp DEFAULT now())"
         ).execute(pool).await?;
         sqlx::query("INSERT INTO bareos_schema_version (version) VALUES ($1)")
-            .bind(version as i32)
+            .bind(schema.version as i32)
             .execute(pool)
             .await?;
 
-        // C++ Version-Tabelle (falls vorhanden) — für Kompatibilität
+        if is_onesimus_extension(schema) {
+            return Ok(());
+        }
+
         let cpp_exists: bool = sqlx::query_scalar(
             "SELECT EXISTS(SELECT 1 FROM information_schema.tables WHERE table_name = 'version')"
         ).fetch_one(pool).await.unwrap_or(false);
-
         if cpp_exists {
             sqlx::query("DELETE FROM version").execute(pool).await?;
             sqlx::query("INSERT INTO version (versionid) VALUES ($1)")
-                .bind(version as i32)
+                .bind(schema.version as i32)
                 .execute(pool)
                 .await?;
         }
 
         Ok(())
     }
+}
+
+/// Schema files authored by Onesimus extend the catalog (views, functions)
+/// but are no Bareos schema versions.
+fn is_onesimus_extension(schema: &CatalogSchema) -> bool {
+    schema.author.eq_ignore_ascii_case("onesimus")
+}
+
+/// Repair catalogs where an older onesimus-dird wrote an extension version
+/// into the Bareos `version` table: reset it to the newest Bareos base
+/// version so the C++ Director can open the catalog again.
+pub async fn repair_cpp_version(pool: &sqlx::PgPool, versions: &[CatalogSchema]) -> Result<(), OrmError> {
+    let base = versions.iter().filter(|s| !is_onesimus_extension(s)).map(|s| s.version).max();
+    let Some(base) = base else { return Ok(()) };
+    let cpp_exists: bool = sqlx::query_scalar(
+        "SELECT EXISTS(SELECT 1 FROM information_schema.tables WHERE table_name = 'version')"
+    ).fetch_one(pool).await.unwrap_or(false);
+    if !cpp_exists {
+        return Ok(());
+    }
+    let current: Option<i32> = sqlx::query_scalar("SELECT MAX(versionid) FROM version")
+        .fetch_one(pool).await.unwrap_or(None);
+    let is_extension = current.is_some_and(|v| versions.iter()
+        .any(|s| s.version == v as u32 && is_onesimus_extension(s)));
+    if is_extension {
+        info!("resetting Bareos catalog VersionId {} -> {base} (Onesimus extension versions are tracked in bareos_schema_version)", current.unwrap_or(0));
+        sqlx::query("UPDATE version SET versionid = $1").bind(base as i32).execute(pool).await?;
+    }
+    Ok(())
 }
 
 #[cfg(test)]

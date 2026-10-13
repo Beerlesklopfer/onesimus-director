@@ -251,6 +251,37 @@ pub fn handle_console_session<S: Read + Write>(
 }
 
 /// Parse a CLI command string into a CommandAST.
+/// Split an argument string at whitespace outside of double quotes; quotes
+/// are removed (`fileset="My Set"` -> `fileset=My Set`).
+fn split_args(input: &str) -> Vec<String> {
+    let mut args = Vec::new();
+    let mut cur = String::new();
+    let mut in_quotes = false;
+    let mut has_token = false;
+    for c in input.chars() {
+        match c {
+            '"' => {
+                in_quotes = !in_quotes;
+                has_token = true;
+            }
+            c if c.is_whitespace() && !in_quotes => {
+                if has_token {
+                    args.push(std::mem::take(&mut cur));
+                    has_token = false;
+                }
+            }
+            c => {
+                cur.push(c);
+                has_token = true;
+            }
+        }
+    }
+    if has_token {
+        args.push(cur);
+    }
+    args
+}
+
 /// Mode argument of `.api` (C++ DotApiCmd: no argument means 1).
 fn parse_api_mode(ast: &CommandAst) -> Option<command_executor::ApiMode> {
     match ast.arguments.first().map(|a| a.value.as_deref().unwrap_or(a.key.as_str())) {
@@ -264,28 +295,18 @@ fn parse_api_mode(ast: &CommandAst) -> Option<command_executor::ApiMode> {
 
 /// Simple parser: first word is command name, rest are key=value arguments.
 pub(crate) fn parse_cli_command(input: &str) -> CommandAst {
-    let mut parts = input.splitn(2, char::is_whitespace);
+    let mut parts = input.trim().splitn(2, char::is_whitespace);
     let command_name = parts.next().unwrap_or("").to_string();
     let args_str = parts.next().unwrap_or("");
 
-    let mut arguments = Vec::new();
-
-    // Parse arguments: key=value or bare words
-    for token in args_str.split_whitespace() {
-        if let Some(eq_pos) = token.find('=') {
-            let key = token[..eq_pos].to_string();
-            let value = token[eq_pos + 1..].trim_matches('"').to_string();
-            arguments.push(Argument {
-                key,
-                value: Some(value),
-            });
-        } else {
-            arguments.push(Argument {
-                key: token.to_string(),
-                value: None,
-            });
+    // Like C++ ParseArgs(): whitespace separates arguments, double quotes
+    // group (and are removed), key=value pairs split at the first '='.
+    let arguments = split_args(args_str).into_iter().map(|token| {
+        match token.split_once('=') {
+            Some((key, value)) => Argument { key: key.to_string(), value: Some(value.to_string()) },
+            None => Argument { key: token, value: None },
         }
-    }
+    }).collect();
 
     CommandAst {
         command_name,
@@ -299,6 +320,24 @@ pub(crate) fn parse_cli_command(input: &str) -> CommandAst {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn parse_quoted_values() {
+        let ast = parse_cli_command(r#"run job="My Job" client="fd one" level=Full yes"#);
+        assert_eq!(ast.arguments.len(), 4);
+        assert_eq!(ast.arguments[0].key, "job");
+        assert_eq!(ast.arguments[0].value.as_deref(), Some("My Job"));
+        assert_eq!(ast.arguments[1].value.as_deref(), Some("fd one"));
+        assert_eq!(ast.arguments[3].key, "yes");
+        assert!(ast.arguments[3].value.is_none());
+    }
+
+    #[test]
+    fn parse_empty_quoted_value() {
+        let ast = parse_cli_command("configure add console name=x password=\"\"");
+        assert_eq!(ast.arguments[3].key, "password");
+        assert_eq!(ast.arguments[3].value.as_deref(), Some(""));
+    }
 
     #[test]
     fn parse_simple_command() {

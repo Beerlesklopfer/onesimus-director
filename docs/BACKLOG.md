@@ -18,3 +18,9 @@ Restore-Baum navigieren, wie es bconsole tut (`cd`, `ls`, `mark`).
 
 Der Director liefert JSON bisher nur bei `.help`. Die Onesimus-GUI braucht es
 für `list`, `llist`, `show`, `.jobs`, `.clients`, … – gilt für BNET und gRPC.
+
+## `llist pools`: prunablevolumes/-jobs/-bytes
+
+Bareos 25.1 gibt bei `llist pools` zusätzlich eine Prune-Zusammenfassung pro
+Pool aus (ua_output.cc `PoolPruneSummary`, Auswertung der Aufbewahrungsfristen).
+onesimus-dird liefert die Felder noch nicht.
