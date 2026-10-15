@@ -81,3 +81,11 @@
 {"id": "c011-relabel-pool-cancel", "steps": ["relabel storage=File", "2", "."]}
 {"id": "c011-relabel-status", "steps": ["relabel storage=File oldvolume=Full-47321"]}
 {"id": "c011-relabel-unknown-cancel", "steps": ["relabel storage=File oldvolume=nosuchvol", "."]}
+{"id": "c011-update-volume-done", "steps": ["update volume", "19"]}
+{"id": "c011-update-volume-status-cancel", "steps": ["update volume", "1", "2", "."]}
+{"id": "c011-update-volume-badnumber-cancel", "steps": ["update volume", "0", "x", "."]}
+{"id": "c011-update-pool-select-cancel", "steps": ["update pool", "."]}
+{"id": "c011-update-volume-unknown", "steps": ["update volume=nosuchvol volstatus=Full"]}
+{"id": "c011-update-slots", "steps": ["update slots"]}
+{"id": "c011-update-jobid-missing", "steps": ["update jobid"]}
+{"id": "c011-update-api1-cancel", "setup": [".api 1"], "steps": ["update", "."]}

@@ -224,90 +224,389 @@ fn cmd_release_db(ast: &CommandAst, ctx: &ExecContext) -> CommandResult {
 }
 
 pub fn cmd_update(ast: &CommandAst, ctx: &ExecContext) -> CommandResult {
-    // C++ ua_update.cc UpdateCmd: OpenClientDb() before anything else.
-    crate::ua_db::with_client_db(ast, ctx, false, || cmd_update_db(ast, ctx))
+    let mut ua = crate::ua_select::Ua::new(ctx);
+    update_dialog(&mut ua, ast, update_execute);
+    ua.finish(true)
 }
 
-fn cmd_update_db(ast: &CommandAst, ctx: &ExecContext) -> CommandResult {
-    let what = ast.arguments.first().map(|a| a.key.as_str()).unwrap_or("");
-    let cat = match &ctx.catalog {
-        Some(c) => c,
-        None => return CommandResult::ok("No catalog configured\n".to_string()),
-    };
+/// A catalog change of `update` (one SQL statement and its InfoMsg).
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum UpdateAction {
+    /// `UPDATE Media SET <column>=<value> WHERE MediaId=<id>`
+    Media { media_id: i64, column: &'static str, value: String, message: String },
+    /// Pool record from the Pool resource (UpdatePool).
+    Pool(String),
+    /// An update kind without catalog support yet.
+    Unsupported(&'static str),
+}
 
-    match what {
-        "volume" => {
-            let vol = get_arg(ast, "volume").unwrap_or(get_arg(ast, "name").unwrap_or(""));
-            if vol.is_empty() {
-                return CommandResult::ok("update volume: specify volume=<name>\n".to_string());
+type UpdateAct<'f> = &'f mut dyn FnMut(&mut crate::ua_select::Ua, UpdateAction);
+
+/// UpdateCmd (ua_update.cc:71): OpenClientDb, then the keyword (media/volume,
+/// pool, slots/slot, jobid, stats) or "Update choice:".
+fn update_dialog(ua: &mut crate::ua_select::Ua, ast: &CommandAst,
+    mut act: impl FnMut(&mut crate::ua_select::Ua, UpdateAction)) {
+    const KEYWORDS: [&str; 7] = ["media", "volume", "pool", "slots", "slot", "jobid", "stats"];
+    let act: UpdateAct = &mut act;
+    if !ua.open_client_db(ast, false) {
+        return;
+    }
+    let choice = match find_arg_keyword(ast, &KEYWORDS) {
+        Some(0 | 1) => 0,
+        Some(2) => 1,
+        Some(3 | 4) => 2,
+        Some(5) => {
+            // UpdateJob
+            if crate::ua_select::find_arg_with_value(ast, "jobid").is_none() {
+                ua.error_msg("Expect JobId keyword, not found.\n");
+            } else {
+                act(ua, UpdateAction::Unsupported("update jobid"));
             }
-            // Collect updateable fields from arguments
-            let mut sets = Vec::new();
-            if let Some(v) = get_arg(ast, "volstatus") { sets.push(format!("volstatus='{v}'")); }
-            if let Some(v) = get_arg(ast, "maxvolbytes") { sets.push(format!("maxvolbytes={v}")); }
-            if let Some(v) = get_arg(ast, "maxvoljobs") { sets.push(format!("maxvoljobs={v}")); }
-            if let Some(v) = get_arg(ast, "maxvolfiles") { sets.push(format!("maxvolfiles={v}")); }
-            if let Some(v) = get_arg(ast, "slot") { sets.push(format!("slot={v}")); }
-            if let Some(v) = get_arg(ast, "inchanger") { sets.push(format!("inchanger={v}")); }
-            if let Some(v) = get_arg(ast, "enabled") {
-                sets.push(format!("enabled={}", if v == "yes" || v == "1" { 1 } else { 0 }));
+            return;
+        }
+        Some(_) => 3,
+        None => {
+            ua.start_prompt("Update choice:\n");
+            for item in ["Volume parameters", "Pool from resource", "Slots from autochanger", "Long term statistics"] {
+                ua.add_prompt(item);
             }
-            if sets.is_empty() {
-                return CommandResult::ok(format!(
-                    "update volume={vol}: specify attributes to change:\n  \
-                     volstatus=<Append|Full|Used|Purged|Recycle|Error>\n  \
-                     maxvolbytes=<N>  maxvoljobs=<N>  maxvolfiles=<N>\n  \
-                     slot=<N>  inchanger=<0|1>  enabled=<yes|no>\n"
-                ));
-            }
-            let sql = format!("UPDATE media SET {} WHERE volumename='{vol}'", sets.join(", "));
-            match cat.raw_query(&sql) {
-                Ok(_) => CommandResult::ok(format!("Volume \"{vol}\" updated: {}\n", sets.join(", "))),
-                Err(e) => CommandResult::error(format!("Update error: {e}\n")),
+            match ua.do_prompt("item", "Choose catalog item to update") {
+                Some((choice, _)) => choice,
+                None => return,
             }
         }
-        "pool" => {
-            let pool_name = get_arg(ast, "pool").unwrap_or(get_arg(ast, "name").unwrap_or(""));
-            if pool_name.is_empty() {
-                if let Some(config) = &ctx.config {
-                    if let Ok(cfg) = config.read() {
-                        let names: Vec<_> = cfg.pools.iter().map(|p| p.name.as_str()).collect();
-                        return CommandResult::ok(format!(
-                            "update pool: specify pool=<name>\nAvailable: {}\n", names.join(", ")));
+    };
+    match choice {
+        0 => { update_volume(ua, ast, act); }
+        1 => update_pool(ua, ast, act),
+        2 => {
+            // UpdateSlots: an autochanger is required.
+            if crate::ua_select::get_storage_resource(ua, ast, true, true).is_some() {
+                act(ua, UpdateAction::Unsupported("update slots"));
+            }
+        }
+        _ => act(ua, UpdateAction::Unsupported("update stats")),
+    }
+}
+
+/// UpdatePool (ua_update.cc:940): pool resource, its catalog record, update.
+fn update_pool(ua: &mut crate::ua_select::Ua, ast: &CommandAst, act: UpdateAct) {
+    use crate::ua_select;
+    let Some(pool) = ua_select::get_pool_resource(ua, ast) else { return };
+    // GetPoolDbr with the name filled in, otherwise the catalog list.
+    let pool = match ua_select::get_pool_record(ua.ctx, &pool) {
+        Ok(_) => pool,
+        Err(error) => {
+            ua.error_msg(format!("Could not find Pool \"{pool}\": ERR={error}"));
+            match ua_select::select_pool_dbr(ua, ast, "pool") {
+                Some(pool) => pool,
+                None => return,
+            }
+        }
+    };
+    act(ua, UpdateAction::Pool(pool));
+}
+
+/// C++ GetEnabled(): yes/true, no/false, archived or 0..2.
+fn get_enabled(ua: &mut crate::ua_select::Ua, value: &str) -> Option<i64> {
+    let enabled = if value.eq_ignore_ascii_case("yes") || value.eq_ignore_ascii_case("true") {
+        1
+    } else if value.eq_ignore_ascii_case("no") || value.eq_ignore_ascii_case("false") {
+        0
+    } else if value.eq_ignore_ascii_case("archived") {
+        2
+    } else if !value.is_empty() {
+        value.parse::<i64>().unwrap_or(-1)
+    } else {
+        -1
+    };
+    if !(0..=2).contains(&enabled) {
+        ua.error_msg("Invalid Enabled value, it must be yes, no, archived, 0, 1, or 2\n");
+        return None;
+    }
+    Some(enabled)
+}
+
+/// The Update<Field> helpers of ua_update.cc for one volume.
+fn update_field(ua: &mut crate::ua_select::Ua, act: UpdateAct, field: usize, value: &str,
+    media: &crate::ua_select::MediaRecord) {
+    use crate::ua_select::{edit_utime, is_yesno};
+    let set = |column: &'static str, value: String, message: String|
+        UpdateAction::Media { media_id: media.media_id, column, value, message };
+    let action = match field {
+        0 => {
+            const STATUS: [&str; 9] = ["Append", "Archive", "Disabled", "Full", "Used", "Cleaning", "Recycle", "Read-Only", "Error"];
+            match STATUS.iter().find(|s| s.eq_ignore_ascii_case(value)) {
+                Some(status) => set("VolStatus", format!("'{status}'"), format!("New Volume status is: {status}\n")),
+                None => return ua.error_msg(format!("Invalid VolStatus specified: {value}\n")),
+            }
+        }
+        1 | 2 => match crate::commands::show::parse_duration(value) {
+            Some(seconds) if field == 1 =>
+                set("VolRetention", seconds.to_string(), format!("New retention period is: {}\n", edit_utime(seconds))),
+            Some(seconds) =>
+                set("VolUseDuration", seconds.to_string(), format!("New use duration is: {}\n", edit_utime(seconds))),
+            None if field == 1 => return ua.error_msg(format!("Invalid retention period specified: {value}\n")),
+            None => return ua.error_msg(format!("Invalid use duration specified: {value}\n")),
+        },
+        3 => set("MaxVolJobs", crate::commands::job::str_to_int64(value).to_string(), format!("New max jobs is: {value}\n")),
+        4 => set("MaxVolFiles", crate::commands::job::str_to_int64(value).to_string(), format!("New max files is: {value}\n")),
+        5 => match crate::commands::show::parse_size(value) {
+            Some(bytes) => set("MaxVolBytes", bytes.to_string(), format!("New Max bytes is: {bytes}\n")),
+            None => return ua.error_msg(format!("Invalid max. bytes specification: {value}\n")),
+        },
+        6 | 7 => match is_yesno(value) {
+            Some(flag) if field == 6 =>
+                set("Recycle", i32::from(flag).to_string(), format!("New Recycle flag is: {}\n", if flag { "yes" } else { "no" })),
+            Some(flag) =>
+                set("InChanger", i32::from(flag).to_string(), format!("New InChanger flag is: {}\n", if flag { "yes" } else { "no" })),
+            None => return ua.error_msg("Invalid value. It must be yes or no.\n"),
+        },
+        8 => {
+            let slot = crate::commands::job::str_to_int64(value);
+            let max_vols = ua.ctx.catalog.as_ref()
+                .and_then(|cat| cat.query_rows(&format!("SELECT MaxVols FROM Pool WHERE PoolId={}", media.pool_id)).ok())
+                .and_then(|t| t.rows.into_iter().next())
+                .and_then(|row| row.into_iter().next().flatten())
+                .and_then(|v| v.parse::<i64>().ok()).unwrap_or(0);
+            if (max_vols > 0 && slot > max_vols) || slot < 0 {
+                return ua.error_msg(format!("Invalid slot, it must be between 0 and MaxVols={max_vols}\n"));
+            }
+            set("Slot", slot.to_string(), format!("New Slot is: {slot}\n"))
+        }
+        12 => match get_enabled(ua, value) {
+            Some(enabled) => set("Enabled", enabled.to_string(), format!("New Enabled is: {enabled}\n")),
+            None => return,
+        },
+        9 => UpdateAction::Unsupported("update volume pool"),
+        10 => UpdateAction::Unsupported("update volume frompool"),
+        11 => UpdateAction::Unsupported("update volume allfrompool"),
+        13 => UpdateAction::Unsupported("update volume recyclepool"),
+        14 => UpdateAction::Unsupported("update volume actiononpurge"),
+        15 => UpdateAction::Unsupported("update volume storage"),
+        _ => UpdateAction::Unsupported("update volume encrypt"),
+    };
+    act(ua, action);
+}
+
+/// UpdateVolume (ua_update.cc:592): `<keyword>=<value>` arguments, else the
+/// "Parameters to modify:" loop with its per-parameter questions.
+fn update_volume(ua: &mut crate::ua_select::Ua, ast: &CommandAst, act: UpdateAct) -> bool {
+    use crate::ua_select::{self, edit_utime, find_arg, find_arg_with_value};
+    const KEYWORDS: [&str; 17] = ["VolStatus", "VolRetention", "VolUse", "MaxVolJobs", "MaxVolFiles", "MaxVolBytes",
+        "Recycle", "InChanger", "Slot", "Pool", "FromPool", "AllFromPool", "Enabled", "RecyclePool",
+        "ActionOnPurge", "Storage", "Encrypt"];
+    // Argument field index -> update_field index.
+    const FIELD: [usize; 17] = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16];
+    let mut done = false;
+    for (index, keyword) in KEYWORDS.iter().enumerate() {
+        let Some(value) = find_arg_with_value(ast, keyword) else { continue };
+        let media = if index != 11 {
+            match ua_select::select_media_dbr(ua, ast) {
+                Some(media) => media,
+                None => return false,
+            }
+        } else {
+            ua_select::MediaRecord::default()
+        };
+        update_field(ua, act, FIELD[index], value, &media);
+        if index == 10 || index == 11 {
+            return true;
+        }
+        done = true;
+    }
+    if find_arg(ast, "fromallpools").is_some() {
+        act(ua, UpdateAction::Unsupported("update volume fromallpools"));
+        return true;
+    }
+    while !done {
+        ua.start_prompt("Parameters to modify:\n");
+        for item in ["Volume Status", "Volume Retention Period", "Volume Use Duration", "Maximum Volume Jobs",
+            "Maximum Volume Files", "Maximum Volume Bytes", "Recycle Flag", "Slot", "InChanger Flag",
+            "Volume Files", "Pool", "Volume from Pool", "All Volumes from Pool", "All Volumes from all Pools",
+            "Enabled", "RecyclePool", "Action On Purge", "Storage", "Done"] {
+            ua.add_prompt(item);
+        }
+        let choice = ua.do_prompt("", "Select parameter to modify").map(|(i, _)| i as i64).unwrap_or(-1);
+        let mut media = ua_select::MediaRecord::default();
+        if choice != 12 && choice != 13 && choice != 18 {
+            match ua_select::select_media_dbr(ua, ast) {
+                Some(record) => media = record,
+                None => return false,
+            }
+            ua.info_msg(format!("Updating Volume \"{}\"\n", media.volume_name));
+        }
+        match choice {
+            0 => {
+                ua.info_msg(format!("Current Volume status is: {}\n", media.vol_status));
+                ua.start_prompt("Possible Values are:\n");
+                for status in ["Append", "Archive", "Disabled", "Full", "Used", "Cleaning"] {
+                    ua.add_prompt(status);
+                }
+                if media.vol_status == "Purged" {
+                    ua.add_prompt("Recycle");
+                }
+                ua.add_prompt("Read-Only");
+                let Some((_, status)) = ua.do_prompt("", "Choose new Volume Status") else { return true };
+                update_field(ua, act, 0, &status, &media);
+            }
+            1 => {
+                ua.info_msg(format!("Current retention period is: {}\n", edit_utime(media.vol_retention)));
+                let Some(value) = ua.get_cmd("Enter Volume Retention period: ") else { return false };
+                update_field(ua, act, 1, &value, &media);
+            }
+            2 => {
+                ua.info_msg(format!("Current use duration is: {}\n", edit_utime(media.vol_use_duration)));
+                let Some(value) = ua.get_cmd("Enter Volume Use Duration: ") else { return false };
+                update_field(ua, act, 2, &value, &media);
+            }
+            3 => {
+                ua.info_msg(format!("Current max jobs is: {}\n", media.max_vol_jobs));
+                if ua.get_pint("Enter new Maximum Jobs: ").is_none() { return false; }
+                let value = ua.cmd.clone();
+                update_field(ua, act, 3, &value, &media);
+            }
+            4 => {
+                ua.info_msg(format!("Current max files is: {}\n", media.max_vol_files));
+                if ua.get_pint("Enter new Maximum Files: ").is_none() { return false; }
+                let value = ua.cmd.clone();
+                update_field(ua, act, 4, &value, &media);
+            }
+            5 => {
+                ua.info_msg(format!("Current value is: {}\n", media.max_vol_bytes));
+                let Some(value) = ua.get_cmd("Enter new Maximum Bytes: ") else { return false };
+                update_field(ua, act, 5, &value, &media);
+            }
+            6 => {
+                ua.info_msg(format!("Current recycle flag is: {}\n", if media.recycle == 1 { "yes" } else { "no" }));
+                if ua.get_yesno("Enter new Recycle status: ").is_none() { return false; }
+                let value = ua.cmd.clone();
+                update_field(ua, act, 6, &value, &media);
+            }
+            7 => {
+                ua.info_msg(format!("Current Slot is: {}\n", media.slot));
+                if ua.get_pint("Enter new Slot: ").is_none() { return false; }
+                let value = ua.cmd.clone();
+                update_field(ua, act, 8, &value, &media);
+            }
+            8 => {
+                ua.info_msg(format!("Current InChanger flag is: {}\n", media.in_changer));
+                let question = format!("Set InChanger flag for Volume \"{}\": yes/no: ", media.volume_name);
+                let Some(flag) = ua.get_yesno(&question) else { return false };
+                act(ua, UpdateAction::Media { media_id: media.media_id, column: "InChanger",
+                    value: i32::from(flag).to_string(), message: format!("New InChanger flag is: {}\n", i32::from(flag)) });
+            }
+            9 => {
+                ua.warning_msg("Warning changing Volume Files can result\nin loss of data on your Volume\n\n");
+                ua.info_msg(format!("Current Volume Files is: {}\n", media.vol_files));
+                let Some(files) = ua.get_pint("Enter new number of Files for Volume: ") else { return false };
+                if i64::from(files) != media.vol_files + 1 {
+                    ua.warning_msg("Normally, you should only increase Volume Files by one!\n");
+                    if ua.get_yesno("Increase Volume Files? (yes/no): ") != Some(true) {
+                        continue;
                     }
                 }
-                return CommandResult::ok("update pool: specify pool=<name>\n".to_string());
+                act(ua, UpdateAction::Media { media_id: media.media_id, column: "VolFiles",
+                    value: files.to_string(), message: format!("New Volume Files is: {files}\n") });
             }
-            // Sync pool attributes from config to DB
-            if let Some(config) = &ctx.config {
-                if let Ok(cfg) = config.read() {
-                    if let Some(pool) = cfg.pools.iter().find(|p| p.name == pool_name) {
-                        let sql = format!(
-                            "UPDATE pool SET pooltype='{}', maxvols={}, autoprune={}, \
-                             volretention={}, fileretention={}, jobretention={} \
-                             WHERE name='{pool_name}'",
-                            pool.pool_type, pool.maximum_volumes,
-                            if pool.auto_prune { 1 } else { 0 },
-                            pool.volume_retention.as_secs(), 0, 0,
-                        );
-                        match cat.raw_query(&sql) {
-                            Ok(_) => return CommandResult::ok(format!("Pool \"{pool_name}\" updated from resource\n")),
-                            Err(e) => return CommandResult::error(format!("Update error: {e}\n")),
-                        }
-                    }
+            10 => {
+                let pool = ua.ctx.catalog.as_ref()
+                    .and_then(|cat| cat.query_rows(&format!("SELECT Name FROM Pool WHERE PoolId={}", media.pool_id)).ok())
+                    .and_then(|t| t.rows.into_iter().next())
+                    .and_then(|row| row.into_iter().next().flatten());
+                let Some(pool) = pool else {
+                    ua.error_msg("Pool record not found in Catalog.\n");
+                    return false;
+                };
+                ua.info_msg(format!("Current Pool is: {pool}\n"));
+                if ua.get_cmd("Enter new Pool name: ").is_none() { return false; }
+                act(ua, UpdateAction::Unsupported("update volume pool"));
+                return true;
+            }
+            11 => {
+                act(ua, UpdateAction::Unsupported("update volume frompool"));
+                return true;
+            }
+            12 => {
+                if ua_select::select_pool_resource(ua).is_some() {
+                    act(ua, UpdateAction::Unsupported("update volume allfrompool"));
+                }
+                return true;
+            }
+            13 => {
+                act(ua, UpdateAction::Unsupported("update volume fromallpools"));
+                return true;
+            }
+            14 => {
+                ua.info_msg(format!("Current Enabled is: {}\n", media.enabled));
+                let Some(value) = ua.get_cmd("Enter new Enabled: ") else { return false };
+                update_field(ua, act, 12, &value, &media);
+            }
+            15 => {
+                let current = ua.ctx.catalog.as_ref()
+                    .and_then(|cat| cat.query_rows(&format!("SELECT Name FROM Pool WHERE PoolId={}", media.recycle_pool_id)).ok())
+                    .and_then(|t| t.rows.into_iter().next())
+                    .and_then(|row| row.into_iter().next().flatten());
+                match current {
+                    Some(pool) => ua.info_msg(format!("Current RecyclePool is: {pool}\n")),
+                    None => ua.info_msg("No current RecyclePool\n"),
+                }
+                if ua_select::select_pool_dbr(ua, ast, "recyclepool").is_none() { return false; }
+                act(ua, UpdateAction::Unsupported("update volume recyclepool"));
+                return true;
+            }
+            16 => {
+                let current = if media.action_on_purge & 1 != 0 { "Truncate" } else { "None" };
+                ua.info_msg(format!("Current ActionOnPurge is: {current}\n"));
+                if ua.get_cmd("Enter new ActionOnPurge (one of: Truncate, None): ").is_none() { return false; }
+                act(ua, UpdateAction::Unsupported("update volume actiononpurge"));
+            }
+            17 => {
+                act(ua, UpdateAction::Unsupported("update volume storage"));
+                return true;
+            }
+            _ => {
+                ua.info_msg("Selection terminated.\n");
+                return true;
+            }
+        }
+    }
+    true
+}
+
+/// The catalog work of `update`.
+fn update_execute(ua: &mut crate::ua_select::Ua, action: UpdateAction) {
+    let Some(cat) = ua.ctx.catalog.clone() else {
+        ua.send_msg("No catalog configured\n");
+        return;
+    };
+    match action {
+        UpdateAction::Media { media_id, column, value, message } => {
+            match cat.raw_query(&format!("UPDATE Media SET {column}={value} WHERE MediaId={media_id}")) {
+                Ok(_) => ua.info_msg(message),
+                Err(e) => ua.error_msg(format!("{e}\n")),
+            }
+        }
+        UpdateAction::Pool(pool_name) => {
+            let pool = ua.ctx.config.as_ref().and_then(|c| c.read().ok()).and_then(|c| c.find_pool(&pool_name).cloned());
+            if let Some(pool) = pool {
+                let sql = format!(
+                    "UPDATE pool SET pooltype='{}', maxvols={}, autoprune={}, volretention={} WHERE name='{}'",
+                    pool.pool_type, pool.maximum_volumes, i32::from(pool.auto_prune),
+                    pool.volume_retention.as_secs(), pool_name.replace('\'', "''"));
+                if let Err(e) = cat.raw_query(&sql) {
+                    ua.error_msg(format!("UpdatePoolRecord returned 0. ERR={e}\n"));
                 }
             }
-            CommandResult::ok(format!("Pool \"{pool_name}\" not found in config\n"))
+            if let Ok(table) = cat.query_rows(&format!(
+                "SELECT PoolId,Name,NumVols,MaxVols,UseOnce,UseCatalog,AcceptAnyVolume,VolRetention,VolUseDuration,\
+                 MaxVolJobs,MaxVolBytes,AutoPrune,Recycle,PoolType,LabelFormat,Enabled,ScratchPoolId,RecyclePoolId,\
+                 LabelType FROM Pool WHERE Name='{}'", pool_name.replace('\'', "''"))) {
+                ua.send_msg(crate::sql_list::render(&table, crate::sql_list::ListType::Horz));
+            }
+            ua.info_msg("Pool DB record updated from resource.\n");
         }
-        "slots" => {
-            let stor = get_arg(ast, "storage").unwrap_or("?");
-            CommandResult::ok(format!("Updating slots for storage {stor}...\nDone.\n"))
-        }
-        "" => CommandResult::ok(
-            "update: specify one of:\n  update volume=<name> [volstatus=<S>] [maxvolbytes=<N>] ...\n  \
-             update pool=<name>\n  update slots storage=<name>\n".to_string()
-        ),
-        other => CommandResult::ok(format!("update {other}: not supported\n")),
+        UpdateAction::Unsupported(what) => ua.send_msg(format!("{what}: not supported\n")),
     }
 }
 
@@ -1358,6 +1657,48 @@ pub(crate) mod side_effect_tests {
         assert_eq!(writes(&log.lock().unwrap()), 0, "{:?}", log.lock().unwrap());
         scripted(&[], || cmd_purge(&ast("purge jobs client=fd1"), &ctx));
         assert_eq!(writes(&log.lock().unwrap()), 1, "control: a complete purge reaches the catalog");
+    }
+
+    #[test]
+    fn update_dialog_changes_nothing_until_answered() {
+        use crate::ua_select::tests::scripted;
+        let ctx = context();
+        let update = |line: &str, answers: &[&str]| {
+            let mut acted = Vec::new();
+            let (_, console) = scripted(answers, || {
+                let mut ua = crate::ua_select::Ua::new(&ctx);
+                update_dialog(&mut ua, &crate::session::parse_cli_command(line), |_, action| acted.push(action));
+                ua.finish(true);
+            });
+            (console.transcript(), acted)
+        };
+        let (text, acted) = update("update", &["."]);
+        assert_eq!(text, "Update choice:\n1: Volume parameters\n2: Pool from resource\n3: Slots from autochanger\n\
+            4: Long term statistics\nChoose catalog item to update (1-4): .\nSelection aborted, nothing done.\n");
+        assert!(acted.is_empty());
+        let (text, acted) = update("update volume", &["19"]);
+        assert!(text.ends_with("Select parameter to modify (1-19): 19\nSelection terminated.\n"), "{text}");
+        assert!(acted.is_empty());
+        // Cancelled parameter menu: SelectMediaDbr still runs (no catalog: no pools).
+        assert!(update("update volume", &["."]).1.is_empty());
+        let (text, acted) = update("update pool", &["."]);
+        assert!(text.ends_with("Select Pool resource (1-2): .\nSelection aborted, nothing done.\n"), "{text}");
+        assert!(acted.is_empty());
+        // The long term statistics are never computed here.
+        assert_eq!(update("update stats", &[]).1, vec![UpdateAction::Unsupported("update stats")]);
+        assert!(update("update jobid", &[]).1.is_empty());
+        let mut media = crate::ua_select::MediaRecord { media_id: 7, ..Default::default() };
+        media.volume_name = "v".into();
+        let mut ua = crate::ua_select::Ua::new(&ctx);
+        let mut acted = Vec::new();
+        update_field(&mut ua, &mut |_, action| acted.push(action), 0, "full", &media);
+        update_field(&mut ua, &mut |_, action| acted.push(action), 0, "bogus", &media);
+        update_field(&mut ua, &mut |_, action| acted.push(action), 1, "3 days", &media);
+        assert_eq!(acted, vec![
+            UpdateAction::Media { media_id: 7, column: "VolStatus", value: "'Full'".into(), message: "New Volume status is: Full\n".into() },
+            UpdateAction::Media { media_id: 7, column: "VolRetention", value: "259200".into(), message: "New retention period is: 3 days \n".into() },
+        ]);
+        assert_eq!(ua.finish(true).error_message, "Invalid VolStatus specified: bogus\n");
     }
 
     #[test]

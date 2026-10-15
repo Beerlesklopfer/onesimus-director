@@ -828,6 +828,17 @@ pub struct MediaRecord {
     pub vol_status: String,
     pub vol_retention: u64,
     pub enabled: i64,
+    pub vol_use_duration: u64,
+    pub max_vol_jobs: i64,
+    pub max_vol_files: i64,
+    pub max_vol_bytes: u64,
+    pub recycle: i64,
+    pub slot: i64,
+    pub in_changer: i64,
+    pub vol_files: i64,
+    pub recycle_pool_id: i64,
+    pub storage_id: i64,
+    pub action_on_purge: i64,
 }
 
 /// C++ GetMediaRecord() by MediaId or VolumeName: the record or the
@@ -840,7 +851,9 @@ pub fn get_media_record(ctx: &ExecContext, media_id: i64, name: &str) -> Result<
     };
     let row = ctx.catalog.as_ref()
         .and_then(|cat| cat.query_rows(&format!(
-            "SELECT MediaId, VolumeName, PoolId, VolStatus, VolRetention, Enabled FROM Media WHERE {filter}")).ok())
+            "SELECT MediaId, VolumeName, PoolId, VolStatus, VolRetention, Enabled, VolUseDuration, MaxVolJobs, \
+             MaxVolFiles, MaxVolBytes, Recycle, Slot, InChanger, VolFiles, RecyclePoolId, StorageId, ActionOnPurge \
+             FROM Media WHERE {filter}")).ok())
         .and_then(|table| table.rows.into_iter().next());
     let Some(row) = row else {
         return Err(if media_id != 0 {
@@ -857,6 +870,17 @@ pub fn get_media_record(ctx: &ExecContext, media_id: i64, name: &str) -> Result<
         vol_status: text(3),
         vol_retention: text(4).parse().unwrap_or(0),
         enabled: text(5).parse().unwrap_or(0),
+        vol_use_duration: text(6).parse().unwrap_or(0),
+        max_vol_jobs: text(7).parse().unwrap_or(0),
+        max_vol_files: text(8).parse().unwrap_or(0),
+        max_vol_bytes: text(9).parse().unwrap_or(0),
+        recycle: text(10).parse().unwrap_or(0),
+        slot: text(11).parse().unwrap_or(0),
+        in_changer: text(12).parse().unwrap_or(0),
+        vol_files: text(13).parse().unwrap_or(0),
+        recycle_pool_id: text(14).parse().unwrap_or(0),
+        storage_id: text(15).parse().unwrap_or(0),
+        action_on_purge: text(16).parse().unwrap_or(0),
     })
 }
 
