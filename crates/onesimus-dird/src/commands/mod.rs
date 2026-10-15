@@ -18,3 +18,5 @@ pub mod debug;
 pub mod bandwidth;
 pub mod resolve;
 pub mod wait;
+
+pub mod defaults;

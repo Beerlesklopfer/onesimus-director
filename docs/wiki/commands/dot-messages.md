@@ -15,7 +15,7 @@ Referenz: [WIP/25.1.2-pre, `fc2c79b6c43e`](https://github.com/bareos/bareos/blob
 
 - Der Handler ruft jetzt wartende Bus-Nachrichten ab und bewahrt deren Bytes; API-Nachrichten werden bis zum Abruf nicht mehr verworfen. Tests prüfen Reihenfolge und einmaligen Abruf. Globale C++-Spooldatei-Semantik, gRPC-Sitzungsqueue und Live-SHA-256-Parität bleiben offen.
 
-**Lokaler Handler:** [crates/onesimus-dird/src/commands/dot.rs:368](../../../crates/onesimus-dird/src/commands/dot.rs).
+**Lokaler Handler:** [crates/onesimus-dird/src/commands/dot.rs:306](../../../crates/onesimus-dird/src/commands/dot.rs).
 
 Die folgenden vorhandenen Beispiele und Verhaltensbeschreibungen sind lokale Dokumentation; sie sind kein Beleg für vollständige Bareos-Kompatibilität. Bei Widersprüchen gilt der obige Befund.
 <!-- bareos-reference:end -->

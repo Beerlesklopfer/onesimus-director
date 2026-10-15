@@ -15,7 +15,7 @@ Referenz: [WIP/25.1.2-pre, `fc2c79b6c43e`](https://github.com/bareos/bareos/blob
 
 - User-Ressourcen werden jetzt aus der rohen Konfiguration getrennt von Console-Ressourcen gelesen; Text/JSON und Reihenfolge sind durch Regressionstests geprüft. Der Live-SHA-256-Abgleich bleibt offen.
 
-**Lokaler Handler:** [crates/onesimus-dird/src/commands/dot.rs:390](../../../crates/onesimus-dird/src/commands/dot.rs).
+**Lokaler Handler:** [crates/onesimus-dird/src/commands/dot.rs:328](../../../crates/onesimus-dird/src/commands/dot.rs).
 
 Die folgenden vorhandenen Beispiele und Verhaltensbeschreibungen sind lokale Dokumentation; sie sind kein Beleg für vollständige Bareos-Kompatibilität. Bei Widersprüchen gilt der obige Befund.
 <!-- bareos-reference:end -->

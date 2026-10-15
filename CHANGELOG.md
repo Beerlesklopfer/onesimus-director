@@ -90,4 +90,10 @@ onesimus (25.1.2+onesimus.0.2.0-2) UNRELEASED; urgency=medium
     Cross-review syntax and NULL-description handling; retain ACL and dynamic
     configure usage as explicit parity gaps.
 
+  * .defaults: port Client retentions/autoprune, Pool fields, device lists,
+    Pool/Job storage precedence and Restore defaults from effective JobDefs.
+    Preserve source field order/types and purge_oldest_volume= spelling.
+    Fix exponent/underflow, integer bounds and selector-order counterexamples
+    found by independent review; add ten focused regression tests.
+
  -- Joerg Bernau <Joerg.Bernau@onesimus.io>  Thu, 15 Oct 2026 14:00:00 +0200

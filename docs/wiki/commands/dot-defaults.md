@@ -17,7 +17,7 @@ Referenz: [WIP/25.1.2-pre, `fc2c79b6c43e`](https://github.com/bareos/bareos/blob
 
 **Onesimus-Status:** `partial`. Funktionsparität ist nicht durch einen Live-Test nachgewiesen.
 
-- Die lokale Implementierung liefert nur die vom Rust-Konfigurationsmodell unterstützten Felder; der Quellkommentar und Backlog nennen noch fehlende Originalfelder bzw. Restore-Defaults.
+- Client-Retentions/Autoprune, alle Poolfelder samt Source-Sonderfall purge_oldest_volume=, mehrere Devices, Pool-vor-Job-Storage und Restore Where/Replace/RegexWhere sind aus raw config portiert. JobDefs und explizite Overrides werden aufgelöst. Kontroverse Kreuzreviews fanden Exponenten-/Unterlauf-, PINT32- und Selektorprioritätsfehler; Gegenbeispieltests sichern deren Korrektur ab. Globale ACL-Durchsetzung, vollständige Konfigurationsvalidierung und Live-SHA-256-Abgleich aller Ressourcen-/Vererbungsfälle bleiben offen.
 
 **Lokaler Handler:** [crates/onesimus-dird/src/commands/dot.rs:119](../../../crates/onesimus-dird/src/commands/dot.rs).
 

@@ -209,7 +209,7 @@
     ".defaults": {
       "status": "partial",
       "findings": [
-        "Die lokale Implementierung liefert nur die vom Rust-Konfigurationsmodell unterstützten Felder; der Quellkommentar und Backlog nennen noch fehlende Originalfelder bzw. Restore-Defaults."
+        "Client-Retentions/Autoprune, alle Poolfelder samt Source-Sonderfall purge_oldest_volume=, mehrere Devices, Pool-vor-Job-Storage und Restore Where/Replace/RegexWhere sind aus raw config portiert. JobDefs und explizite Overrides werden aufgelöst. Kontroverse Kreuzreviews fanden Exponenten-/Unterlauf-, PINT32- und Selektorprioritätsfehler; Gegenbeispieltests sichern deren Korrektur ab. Globale ACL-Durchsetzung, vollständige Konfigurationsvalidierung und Live-SHA-256-Abgleich aller Ressourcen-/Vererbungsfälle bleiben offen."
       ]
     },
     "add": {
@@ -253,7 +253,7 @@
         },
         {
           "file": "crates/onesimus-dird/src/commands/dot.rs",
-          "line": 237
+          "line": 175
         }
       ]
     },
