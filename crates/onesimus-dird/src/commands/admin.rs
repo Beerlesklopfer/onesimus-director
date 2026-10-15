@@ -115,15 +115,7 @@ pub fn cmd_mount(ast: &CommandAst, ctx: &ExecContext) -> CommandResult {
 }
 
 fn cmd_mount_db(ast: &CommandAst, ctx: &ExecContext) -> CommandResult {
-    let stor = get_arg_or_first(ast, "storage");
-    if let Err(e) = verify_storage(stor, ctx) { return e; }
-    let slot = get_arg(ast, "slot").unwrap_or("0");
-    let drive = get_arg(ast, "drive").unwrap_or("0");
-
-    match sd_command(ctx, stor, &format!("mount slot={slot} drive={drive}")) {
-        Ok(resp) => CommandResult::ok(format!("Sending \"mount\" to Storage {stor}...\n{resp}\n")),
-        Err(e) => CommandResult::error(format!("mount {stor}: {e}\n")),
-    }
+    do_mount_cmd(ast, ctx, "mount")
 }
 
 pub fn cmd_unmount(ast: &CommandAst, ctx: &ExecContext) -> CommandResult {
@@ -132,14 +124,7 @@ pub fn cmd_unmount(ast: &CommandAst, ctx: &ExecContext) -> CommandResult {
 }
 
 fn cmd_unmount_db(ast: &CommandAst, ctx: &ExecContext) -> CommandResult {
-    let stor = get_arg_or_first(ast, "storage");
-    if let Err(e) = verify_storage(stor, ctx) { return e; }
-    let drive = get_arg(ast, "drive").unwrap_or("0");
-
-    match sd_command(ctx, stor, &format!("unmount drive={drive}")) {
-        Ok(resp) => CommandResult::ok(format!("Sending \"unmount\" to Storage {stor}...\n{resp}\n")),
-        Err(e) => CommandResult::error(format!("unmount {stor}: {e}\n")),
-    }
+    do_mount_cmd(ast, ctx, "unmount")
 }
 
 pub fn cmd_release(ast: &CommandAst, ctx: &ExecContext) -> CommandResult {
@@ -148,13 +133,17 @@ pub fn cmd_release(ast: &CommandAst, ctx: &ExecContext) -> CommandResult {
 }
 
 fn cmd_release_db(ast: &CommandAst, ctx: &ExecContext) -> CommandResult {
-    let stor = get_arg_or_first(ast, "storage");
-    if let Err(e) = verify_storage(stor, ctx) { return e; }
+    do_mount_cmd(ast, ctx, "release")
+}
 
-    match sd_command(ctx, stor, "release") {
-        Ok(resp) => CommandResult::ok(format!("Sending \"release\" to Storage {stor}...\n{resp}\n")),
-        Err(e) => CommandResult::error(format!("release {stor}: {e}\n")),
-    }
+/// C++ ua_cmds.cc DoMountCmd(): storage selection, drive/slot, SD request.
+fn do_mount_cmd(ast: &CommandAst, ctx: &ExecContext, cmd: &str) -> CommandResult {
+    use crate::ua_storage_select::{Env, NetSd};
+    let Some(env) = Env::load(ctx) else { return CommandResult::error("No config\n".into()) };
+    let director = ctx.config.as_ref().and_then(|c| c.read().ok())
+        .map(|c| c.director.name.clone()).unwrap_or_default();
+    let mut sd = NetSd { director };
+    CommandResult::ok(crate::ua_storage_select::do_mount_cmd(&ast.arguments, &env, &mut sd, cmd))
 }
 
 pub fn cmd_update(ast: &CommandAst, ctx: &ExecContext) -> CommandResult {
@@ -796,26 +785,8 @@ fn get_arg<'a>(ast: &'a CommandAst, key: &str) -> Option<&'a str> {
         .and_then(|a| a.value.as_deref())
 }
 
-fn get_arg_or_first<'a>(ast: &'a CommandAst, key: &str) -> &'a str {
-    get_arg(ast, key)
-        .or_else(|| ast.arguments.first().and_then(|a| a.value.as_deref()))
-        .or_else(|| ast.arguments.first().map(|a| a.key.as_str()))
-        .unwrap_or("?")
-}
-
 fn has_flag(ast: &CommandAst, key: &str) -> bool {
     ast.arguments.iter().any(|a| a.key == key && a.value.is_none())
-}
-
-fn verify_storage(name: &str, ctx: &ExecContext) -> Result<(), CommandResult> {
-    if let Some(config) = &ctx.config {
-        if let Ok(cfg) = config.read() {
-            if cfg.find_storage(name).is_none() {
-                return Err(CommandResult::error(format!("Storage '{name}' not found\n")));
-            }
-        }
-    }
-    Ok(())
 }
 
 #[cfg(test)]

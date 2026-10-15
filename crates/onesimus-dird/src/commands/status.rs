@@ -20,13 +20,6 @@ pub fn cmd_status(ast: &CommandAst, ctx: &ExecContext) -> CommandResult {
                 .unwrap_or("*");
             status_client(name, ctx)
         }
-        "storage" => {
-            let name = ast.arguments.iter()
-                .find(|a| a.key == "storage")
-                .and_then(|a| a.value.as_deref())
-                .unwrap_or("*");
-            status_storage(name, ctx)
-        }
         "all" => {
             let mut out = status_director(ctx).text_output;
             out.push_str("\n");
@@ -35,10 +28,7 @@ pub fn cmd_status(ast: &CommandAst, ctx: &ExecContext) -> CommandResult {
             out.push_str(&status_storage("*", ctx).text_output);
             CommandResult::ok(out)
         }
-        other => {
-            // Try as client name
-            status_client(other, ctx)
-        }
+        _ => status_storage_selected(ast, ctx),
     }
 }
 
@@ -314,4 +304,16 @@ fn status_storage(name: &str, ctx: &ExecContext) -> CommandResult {
     }
 
     CommandResult::ok(output)
+}
+
+/// Storage branch of C++ StatusCmd (ua_status.cc:200-221): any other first
+/// keyword selects a storage with get_storage_resource(ua, false,
+/// autochangers_only = `slots` given) and reports its status.
+fn status_storage_selected(ast: &CommandAst, ctx: &ExecContext) -> CommandResult {
+    let slots = ast.arguments.iter().any(|a| a.key.eq_ignore_ascii_case("slots"));
+    match crate::ua_storage_select::get_storage_resource(ast, ctx, false, slots) {
+        Ok((store, text)) => crate::ua_db::with_prefix(text, status_storage(&store.name, ctx)),
+        // StatusCmd returns true whatever the selection printed.
+        Err(result) => CommandResult { success: true, ..result },
+    }
 }

@@ -35,6 +35,7 @@ mod session_manager;
 mod sql_list;
 mod ua_commands_table;
 mod ua_db;
+mod ua_storage_select;
 mod version_strings;
 mod watchdog;
 

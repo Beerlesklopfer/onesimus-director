@@ -1,0 +1,26 @@
+{"id": "c013-mount-auto", "steps": ["mount"]}
+{"id": "c013-release-auto", "steps": ["release"]}
+{"id": "c013-mount-positional", "steps": ["mount File"]}
+{"id": "c013-mount-storage", "steps": ["mount storage=File"]}
+{"id": "c013-mount-sd-drive", "steps": ["mount sd=File drive=0"]}
+{"id": "c013-mount-slot", "steps": ["mount storage=File slot=1"]}
+{"id": "c013-mount-twice", "steps": ["mount File File"]}
+{"id": "c013-mount-question", "steps": ["mount ?"]}
+{"id": "c013-mount-notfound", "steps": ["mount storage=nosuch"]}
+{"id": "c013-mount-bare-storage", "steps": ["mount storage"]}
+{"id": "c013-mount-jobid-bad", "steps": ["mount jobid=abc"]}
+{"id": "c013-mount-jobid-notrunning", "steps": ["mount jobid=999999"]}
+{"id": "c013-mount-job-notrunning", "steps": ["mount job=nosuch"]}
+{"id": "c013-mount-job-novalue", "steps": ["mount job"]}
+{"id": "c013-mount-ujobid-notrunning", "steps": ["mount ujobid=nosuch.2026"]}
+{"id": "c013-release-positional", "steps": ["release File"]}
+{"id": "c013-release-drive", "steps": ["release storage=File drive=0"]}
+{"id": "c013-release-alldrives", "steps": ["release alldrives"]}
+{"id": "c013-release-notfound", "steps": ["release nosuch"]}
+{"id": "c013-release-then-mount", "steps": ["release", "mount"]}
+{"id": "c013-status-bogus", "steps": ["status nosuch"], "normalize": ["(?s)Connecting to Storage.*"], "timeout_ms": 20000}
+{"id": "c013-status-sd", "steps": ["status sd=File"], "normalize": ["(?s)Connecting to Storage.*"], "timeout_ms": 20000}
+{"id": "c013-status-storage-novalue", "steps": ["status storage"], "normalize": ["(?s)Connecting to Storage.*"], "timeout_ms": 20000}
+{"id": "c013-status-storage-notfound", "steps": ["status storage=nosuch"], "normalize": ["(?s)Connecting to Storage.*"], "timeout_ms": 20000}
+{"id": "c013-status-jobid-notrunning", "steps": ["status jobid=999999"]}
+{"id": "c013-status-limited", "steps": ["status nosuch"], "normalize": ["(?s)Connecting to Storage.*"], "timeout_ms": 20000, "console": "parity-limited", "password": "parity-limited-pw"}
