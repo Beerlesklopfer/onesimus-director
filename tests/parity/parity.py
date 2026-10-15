@@ -220,6 +220,31 @@ def load_cases(files, selected):
     return cases
 
 
+def psql_admin(sql):
+    return subprocess.run(['psql', '-d', 'postgres', '-v', 'ON_ERROR_STOP=1', '-Atc', sql],
+                          capture_output=True, text=True)
+
+
+def create_catalog_copy(name, template):
+    """CREATE DATABASE … TEMPLATE; retried while the template is briefly in use."""
+    for attempt in range(30):
+        result = psql_admin(f'CREATE DATABASE "{name}" TEMPLATE "{template}"')
+        if result.returncode == 0:
+            return
+        if 'permission denied' in result.stderr:
+            sys.exit(f'cannot create catalog copy: {result.stderr.strip()}\n'
+                     'Grant once: sudo -u postgres psql -c \'ALTER ROLE "<user>" CREATEDB\' '
+                     'or run with --shared-db (live cases then write into the template).')
+        if 'being accessed by other users' not in result.stderr:
+            sys.exit(f'cannot create catalog copy {name}: {result.stderr.strip()}')
+        time.sleep(1 + attempt % 3)
+    sys.exit(f'catalog template {template} stayed in use; stop sessions connected to it')
+
+
+def drop_catalog_copy(name):
+    psql_admin(f'DROP DATABASE IF EXISTS "{name}" WITH (FORCE)')
+
+
 def setup(args):
     """One configuration for both sides: same paths, port and bytes."""
     write_config(args.source, args.work / 'conf' / 'bareos-dir.d', args.port, args)
@@ -237,14 +262,25 @@ def run(args):
     # The sides run one after the other on the identical configuration, so
     # ports, working directory and file names in replies are the same.
     results = {}
+    template = args.db
     for side in SIDES:
-        setup(args)
-        with open(args.work / f'{side}.log', 'w') as log:
-            process = start(side, args.work / 'conf' / 'bareos-dir.d', args.port, log)
-            try:
-                results[side] = {case['id']: capture(args.port, case) for case in cases}
-            finally:
-                stop(process)
+        # Each side works on its own throw-away copy of the catalog template,
+        # so neither live cases nor one side's effects can change shared data.
+        if not args.shared_db:
+            args.db = f'parity_{os.getpid()}_{side}'
+            create_catalog_copy(args.db, template)
+        try:
+            setup(args)
+            with open(args.work / f'{side}.log', 'w') as log:
+                process = start(side, args.work / 'conf' / 'bareos-dir.d', args.port, log)
+                try:
+                    results[side] = {case['id']: capture(args.port, case) for case in cases}
+                finally:
+                    stop(process)
+        finally:
+            if not args.shared_db:
+                drop_catalog_copy(args.db)
+                args.db = template
     records = []
     for case in cases:
         record = compare(case, {side: results[side][case['id']] for side in SIDES}, out)
@@ -295,7 +331,9 @@ def main():
     parser.add_argument('--work', type=Path, default=ROOT / 'target/parity')
     parser.add_argument('--source', type=Path, default=Path('/etc/bareos/bareos-dir.d'))
     parser.add_argument('--port', type=int, default=39101)
-    parser.add_argument('--db', default=os.environ.get('PARITY_DB', 'bareos_cppref'))
+    parser.add_argument('--db', default=os.environ.get('PARITY_DB', 'bareos_cppref'), help='catalog template')
+    parser.add_argument('--shared-db', action='store_true',
+                        help='use --db directly instead of a per-side copy of it (no isolation)')
     parser.add_argument('--db-user', default=os.environ.get('PARITY_DB_USER', os.environ.get('USER', 'bareos')))
     parser.add_argument('--cases', nargs='+', default=sorted((HERE / 'cases').glob('*.jsonl')))
     parser.add_argument('--only', nargs='*', default=[], help='regexes selecting case ids')
