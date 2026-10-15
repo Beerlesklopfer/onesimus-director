@@ -587,7 +587,7 @@ mod input_tests {
         bnet.send_signal(BnetSignal::Eod).unwrap();
         assert_eq!(bnet.recv().unwrap(),BnetMessage::Signal(BnetSignal::Poll));
         bnet.send_str("  VERSION  ").unwrap();
-        assert!(bnet.recv_str().unwrap().contains("bareos-dir Version"));
+        assert!(bnet.recv_str().unwrap().contains(" Version: "));
         assert_eq!(bnet.recv().unwrap(),BnetMessage::Signal(BnetSignal::Eod));
         bnet.send_str("quit").unwrap();drop(bnet);server.join().unwrap();
     }
