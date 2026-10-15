@@ -40,3 +40,13 @@
 {"id": "c011-setdebug-daemon-badnumber", "steps": ["setdebug level=0", "5", "."]}
 {"id": "c011-setbandwidth-badlimit-cancel", "steps": ["setbandwidth", "x", "."]}
 {"id": "c011-setbandwidth-api2", "setup": [".api 2"], "steps": ["setbandwidth"]}
+{"id": "c011-run-job-no", "steps": ["run job=backup-bareos-fd", "no"], "normalize": ["When: +[0-9: -]+"]}
+{"id": "c011-run-job-cancel", "steps": ["run job=backup-bareos-fd", "."], "normalize": ["When: +[0-9: -]+"]}
+{"id": "c011-run-job-illegal-no", "steps": ["run job=backup-bareos-fd", "yes please", "n"], "normalize": ["When: +[0-9: -]+"]}
+{"id": "c011-run-job-mod-cancel", "steps": ["run job=backup-bareos-fd", "mod", "."], "normalize": ["When: +[0-9: -]+"]}
+{"id": "c011-run-job-mod-level-no", "steps": ["run job=backup-bareos-fd", "mod", "1", "1", "no"], "normalize": ["When: +[0-9: -]+"]}
+{"id": "c011-run-job-mod-priority-no", "steps": ["run job=backup-bareos-fd", "mod", "8", "0", "mod", "8", "7", "no"], "normalize": ["When: +[0-9: -]+"]}
+{"id": "c011-run-job-mod-pool-no", "steps": ["run job=backup-bareos-fd", "mod", "9", "2", "no"], "normalize": ["When: +[0-9: -]+"]}
+{"id": "c011-run-job-dotmod-no", "steps": ["run job=backup-bareos-fd", ".mod level=Full", "no"], "normalize": ["When: +[0-9: -]+"]}
+{"id": "c011-run-select-no", "steps": ["run", "2", "no"], "normalize": ["When: +[0-9: -]+"]}
+{"id": "c011-run-job-api1-no", "setup": [".api 1"], "steps": ["run job=backup-bareos-fd", "no"], "normalize": ["When: +[0-9: -]+"]}

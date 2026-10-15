@@ -200,6 +200,14 @@ impl<'a> Ua<'a> {
         .unwrap_or(false)
     }
 
+    /// `ua->signal()` in the middle of the output (e.g. BNET_RUN_CMD); only
+    /// with a console outside batch mode.
+    pub fn send_signal(&mut self, signal: BnetSignal) {
+        if !self.batch() {
+            self.signal(signal);
+        }
+    }
+
     fn signal(&mut self, signal: BnetSignal) -> bool {
         self.flush() && with_attached(|c| c.signal(signal)).unwrap_or(false)
     }

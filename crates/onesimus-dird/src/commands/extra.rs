@@ -311,11 +311,18 @@ fn is_a_number(value: &str) -> bool {
 /// ua_run.cc reRunCmd()/GetRerunCmdlineArguments(): argument errors are
 /// SendMsg lines and make the command fail.
 pub fn cmd_rerun(ast: &CommandAst, ctx: &ExecContext) -> CommandResult {
-    // C++ ua_run.cc reRunCmd: OpenClientDb() before anything else.
-    crate::ua_db::with_client_db(ast, ctx, false, || cmd_rerun_db(ast, ctx))
+    // C++ ua_run.cc reRunCmd: OpenClientDb() before anything else. The
+    // catalog lines go out before a run dialog (C-011), otherwise in front.
+    match crate::ua_db::open_client_db(ast, ctx, false) {
+        Ok(mut prefix) => {
+            let result = cmd_rerun_db(ast, ctx, &mut prefix);
+            crate::ua_db::with_prefix(prefix, result)
+        }
+        Err(result) => result,
+    }
 }
 
-fn cmd_rerun_db(ast: &CommandAst, ctx: &ExecContext) -> CommandResult {
+fn cmd_rerun_db(ast: &CommandAst, ctx: &ExecContext, prefix: &mut String) -> CommandResult {
     let value = |key: &str| ast.arguments.iter().find(|a| a.key.eq_ignore_ascii_case(key))
         .and_then(|a| a.value.as_deref());
     let number = |key: &str| value(key).map(|v| v.trim().parse::<i64>().unwrap_or(0)).unwrap_or(0);
@@ -364,8 +371,11 @@ fn cmd_rerun_db(ast: &CommandAst, ctx: &ExecContext) -> CommandResult {
             arguments,
             ..Default::default()
         };
-        let mut run = crate::commands::job::cmd_run(&run_ast, ctx);
-        run.text_output = format!("{text}{}", run.text_output);
+        // The run dialog follows the text so far (C-011).
+        let mut ua = crate::ua_select::Ua::new(ctx);
+        ua.send_msg(std::mem::take(prefix) + &std::mem::take(&mut text));
+        let ok = crate::commands::job::run_with_ua(&mut ua, &run_ast, crate::commands::job::start_job);
+        let run = ua.finish(ok);
         if !run.success { return run; }
         text = run.text_output;
     }
