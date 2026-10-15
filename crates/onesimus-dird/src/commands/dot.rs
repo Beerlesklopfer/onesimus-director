@@ -173,30 +173,16 @@ pub fn cmd_dot_jobstatus(ast: &CommandAst, _ctx: &ExecContext) -> CommandResult 
 /// Checks if the current console has access to the specified resource.
 /// Returns "authorized" or "not authorized".
 pub fn cmd_dot_authorized(ast: &CommandAst, ctx: &ExecContext) -> CommandResult {
-    // For now: check if the resource exists in config.
-    // Full ACL check requires console ACL system.
-    if let Some(config) = &ctx.config {
-        if let Ok(cfg) = config.read() {
-            for arg in &ast.arguments {
-                let name = arg.value.as_deref().unwrap_or("");
-                let found = match arg.key.as_str() {
-                    "job" => cfg.find_job(name).is_some(),
-                    "client" => cfg.find_client(name).is_some(),
-                    "storage" => cfg.find_storage(name).is_some(),
-                    "schedule" => cfg.schedules.iter().any(|s| s.name == name),
-                    "pool" => cfg.find_pool(name).is_some(),
-                    "fileset" => cfg.filesets.iter().any(|f| f.name == name),
-                    "catalog" => cfg.catalogs.iter().any(|c| c.name == name),
-                    "cmd" => true, // TODO: command ACL check
-                    _ => continue,
-                };
-                if !found {
-                    return CommandResult::ok("not authorized\n".to_string());
-                }
-            }
+    let mut authorized=false;
+    for argument in &ast.arguments {
+        if let Some(kind)=crate::acl::Kind::selector(&argument.key) {
+            authorized=argument.value.as_deref().is_some_and(|name|crate::acl::access(ctx,kind,name));
         }
     }
-    CommandResult::ok("authorized\n".to_string())
+    let mut result=CommandResult::ok(if authorized {"authorized\n"} else {"not authorized\n"}.into())
+        .with_json(serde_json::json!({".authorized":{"authorized":authorized}}));
+    result.success=authorized;
+    result
 }
 
 /// `.catalogs`

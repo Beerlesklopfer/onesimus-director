@@ -149,8 +149,20 @@ pub fn handle_console_session<S: Read + Write>(
             ast.command_name = name.to_string();
         }
 
+        let mut ctx = ExecContext {
+            session_id: mgr_session_id,
+            config: config.clone(),
+            session_mgr: Some(session_mgr.clone()),
+            catalog: catalog.clone(),
+            api_mode,
+            bus_rx: Some(bus_rx.clone()),
+            job_manager: job_manager.clone(),
+        };
+        let command_allowed=matches!(ast.command_name.as_str(),"quit"|"exit"|"whoami")
+            || crate::acl::access(&ctx,crate::acl::Kind::Command,&ast.command_name);
+
         // Check for quit
-        if matches!(ast.command_name.as_str(), "quit" | "exit" | ".quit") {
+        if command_allowed && matches!(ast.command_name.as_str(), "quit" | "exit" | ".quit") {
             let _ = bnet.send_str("bye\n");
             let _ = bnet.send_signal(BnetSignal::Terminate);
             break;
@@ -163,23 +175,16 @@ pub fn handle_console_session<S: Read + Write>(
         if api_mode != command_executor::ApiMode::Human {
             if bnet.send_signal(BnetSignal::CmdBegin).is_err() { break; }
         }
-        if ast.command_name == ".api" {
-            api_mode = parse_api_mode(&ast).unwrap_or(api_mode);
+        if command_allowed && ast.command_name == ".api" {
+            ctx.api_mode = parse_api_mode(&ast).unwrap_or(api_mode);
         }
 
-        // Execute command
-        let ctx = ExecContext {
-            session_id,
-            config: config.clone(),
-            session_mgr: Some(session_mgr.clone()),
-            catalog: catalog.clone(),
-            api_mode,
-            bus_rx: Some(bus_rx.clone()),
-            job_manager: job_manager.clone(),
-        };
+        // Execute command; only successful authorization commits local changes.
         let result = command_executor::dispatch(&ast, &ctx);
 
         // Session-altering commands
+        if result.success {
+        api_mode=ctx.api_mode;
         match ast.command_name.as_str() {
             "autodisplay" => {
                 let flag = ast.arguments.first().map(|a| a.key.as_str()).unwrap_or("on");
@@ -196,6 +201,8 @@ pub fn handle_console_session<S: Read + Write>(
                 if off { grpc_mode = false; }
             }
             _ => {}
+        }
+
         }
 
         if api_mode != command_executor::ApiMode::Human {
@@ -402,5 +409,35 @@ mod tests {
         let ast = parse_cli_command("");
         assert_eq!(ast.command_name, "");
         assert!(ast.arguments.is_empty());
+    }
+}
+
+#[cfg(test)]
+mod acl_transport_tests {
+    use super::*;
+    #[test]
+    fn authenticated_bnet_uses_server_session_and_denied_modes_have_no_effect() {
+        use std::net::{TcpListener,TcpStream};
+        use std::time::Duration;
+        let listener=TcpListener::bind("127.0.0.1:0").unwrap();let address=listener.local_addr().unwrap();
+        let ctx=crate::acl::tests::context();
+        let server=std::thread::spawn(move || {
+            let (stream,_)=listener.accept().unwrap();stream.set_read_timeout(Some(Duration::from_secs(5))).unwrap();
+            handle_console_session(BnetStream::new(stream),u64::MAX,"limited","pw",ctx.session_mgr.as_ref().unwrap(),
+                &CommandQueue::new(16),&ctx.config,&None,&None);
+        });
+        let stream=TcpStream::connect(address).unwrap();stream.set_read_timeout(Some(Duration::from_secs(5))).unwrap();
+        let mut bnet=BnetStream::new(stream);
+        let result=CramMd5Auth::new("pw","limited",0).two_way_authenticate(&mut bnet,false).unwrap();assert!(result.success);
+        assert!(bnet.recv_str().unwrap().starts_with("1000"));assert!(bnet.recv_str().unwrap().starts_with("1002"));
+        for command in [".api 2","gui on","autodisplay off",".grpc on"] {
+            bnet.send_str(command).unwrap();
+            assert!(bnet.recv_str().unwrap().contains("is an invalid command"),"{command}");
+            assert_eq!(bnet.recv().unwrap(),BnetMessage::Signal(BnetSignal::Eod));
+        }
+        bnet.send_str("version").unwrap();
+        assert!(bnet.recv_str().unwrap().contains("bareos-dir Version"));
+        assert_eq!(bnet.recv().unwrap(),BnetMessage::Signal(BnetSignal::Eod));
+        bnet.send_str("quit").unwrap();drop(bnet);server.join().unwrap();
     }
 }

@@ -21,6 +21,7 @@ pub struct SessionInfo {
     pub id: u64,
     pub client_name: String,
     pub authenticated: bool,
+    expires_at: Option<std::time::Instant>,
     pub bus_rx: Receiver<BusMessage>,
 }
 
@@ -68,6 +69,7 @@ impl SessionManager {
             id,
             client_name: client_name.to_string(),
             authenticated: false,
+            expires_at: None,
             bus_rx,
         });
         id
@@ -77,6 +79,23 @@ impl SessionManager {
         if let Some(mut session) = self.sessions.get_mut(&id) {
             session.authenticated = true;
         }
+    }
+
+    pub fn authenticate_session_with_ttl(&self, id:u64, ttl:std::time::Duration) {
+        if let Some(mut session)=self.sessions.get_mut(&id) {
+            session.authenticated=true;
+            session.expires_at=Some(std::time::Instant::now()+ttl);
+        }
+    }
+    pub fn refresh_session_ttl(&self, id:u64, ttl:std::time::Duration) -> bool {
+        let Some(mut session)=self.sessions.get_mut(&id) else {return false;};
+        if !session.authenticated || session.expires_at.is_none_or(|deadline|deadline<=std::time::Instant::now()) {return false;}
+        session.expires_at=Some(std::time::Instant::now()+ttl);
+        true
+    }
+
+    pub fn authenticated_console(&self, id: u64) -> Option<String> {
+        self.sessions.get(&id).filter(|session|session.authenticated && session.expires_at.is_none_or(|deadline|deadline>std::time::Instant::now())).map(|session|session.client_name.clone())
     }
 
     pub fn remove_session(&self, id: u64) {

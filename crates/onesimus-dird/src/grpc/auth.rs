@@ -26,11 +26,13 @@ const DEFAULT_CONSOLE: &str = "*UserAgent*";
 
 struct Session {
     console_name: String,
+    session_id: u64,
     last_used: Instant,
 }
 
 pub struct AuthState {
     config: SharedConfig,
+    session_mgr: std::sync::Arc<crate::session_manager::SessionManager>,
     /// nonce -> (console name, issued at); single use
     nonces: Mutex<HashMap<String, (String, Instant)>>,
     /// token -> session
@@ -38,9 +40,10 @@ pub struct AuthState {
 }
 
 impl AuthState {
-    pub fn new(config: SharedConfig) -> Self {
+    pub fn new(config: SharedConfig, session_mgr: std::sync::Arc<crate::session_manager::SessionManager>) -> Self {
         Self {
             config,
+            session_mgr,
             nonces: Mutex::new(HashMap::new()),
             sessions: Mutex::new(HashMap::new()),
         }
@@ -72,13 +75,24 @@ impl AuthState {
 
         let token = random_hex(32);
         let mut sessions = self.sessions.lock().unwrap();
-        sessions.retain(|_, s| s.last_used.elapsed() < SESSION_IDLE_TTL);
-        sessions.insert(token.clone(), Session { console_name: console, last_used: Instant::now() });
+        sessions.retain(|_, s| {
+            if s.last_used.elapsed() < SESSION_IDLE_TTL { true }
+            else { self.session_mgr.remove_session(s.session_id); false }
+        });
+        let session_id=self.session_mgr.create_session(&console);
+        self.session_mgr.authenticate_session_with_ttl(session_id,SESSION_IDLE_TTL);
+        sessions.insert(token.clone(), Session { console_name: console, session_id, last_used: Instant::now() });
         Ok(token)
     }
 
     /// Check the session header. Returns the console name of the session.
     pub fn check(&self, metadata: &MetadataMap) -> Result<String, Status> {
+        self.identity(metadata).map(|(name,_)|name)
+    }
+    pub fn check_session(&self, metadata: &MetadataMap) -> Result<u64, Status> {
+        self.identity(metadata).map(|(_,id)|id)
+    }
+    fn identity(&self, metadata: &MetadataMap) -> Result<(String,u64), Status> {
         let token = metadata
             .get(SESSION_HEADER)
             .ok_or_else(|| Status::unauthenticated("not logged in"))?
@@ -87,12 +101,24 @@ impl AuthState {
 
         let mut sessions = self.sessions.lock().unwrap();
         match sessions.get_mut(token) {
-            Some(s) if s.last_used.elapsed() < SESSION_IDLE_TTL => {
+            Some(s) if s.last_used.elapsed() < SESSION_IDLE_TTL && self.session_mgr.refresh_session_ttl(s.session_id,SESSION_IDLE_TTL) => {
                 s.last_used = Instant::now();
-                Ok(s.console_name.clone())
+                Ok((s.console_name.clone(),s.session_id))
             }
-            _ => Err(Status::unauthenticated("invalid session token")),
+            _ => {
+                if let Some(session)=sessions.remove(token) { self.session_mgr.remove_session(session.session_id); }
+                Err(Status::unauthenticated("invalid session token"))
+            },
         }
+    }
+
+    #[cfg(test)]
+    pub(crate) fn expire_for_test(&self, token:&str) {
+        self.sessions.lock().unwrap().get_mut(token).unwrap().last_used=Instant::now()-SESSION_IDLE_TTL-Duration::from_secs(1);
+    }
+    pub fn allowed(&self, id:u64, kind:crate::acl::Kind, item:&str) -> bool {
+        let Some(console)=self.session_mgr.authenticated_console(id) else {return false;};
+        self.config.read().map(|cfg|crate::acl::allowed(&cfg,&console,kind,item)).unwrap_or(false)
     }
 
     /// MD5 key for a console: Director password for the default console,
@@ -150,7 +176,7 @@ mod tests {
             "Director {\n  Name = test-dir\n  Password = \"dirpass\"\n}\n\
              Console {\n  Name = admin\n  Password = \"adminpass\"\n}\n",
         ).unwrap();
-        AuthState::new(Arc::new(RwLock::new(cfg)))
+        AuthState::new(Arc::new(RwLock::new(cfg)), Arc::new(crate::session_manager::SessionManager::new(Arc::new(crate::message_bus::MessageBus::new(16)))))
     }
 
     #[test]
@@ -205,6 +231,15 @@ mod tests {
         assert_eq!(password_key("secret"), hex);
     }
 
+    #[test]
+    fn expired_token_revokes_server_allocated_session() {
+        let st=state();let nonce=st.challenge("admin");
+        let token=st.login("admin",&nonce,&compute_proof(&password_key("adminpass"),&nonce)).unwrap();
+        let mut md=MetadataMap::new();md.insert(SESSION_HEADER,MetadataValue::try_from(token.as_str()).unwrap());
+        let id=st.check_session(&md).unwrap();assert_eq!(st.session_mgr.authenticated_console(id).as_deref(),Some("admin"));
+        st.expire_for_test(&token);assert!(st.check_session(&md).is_err());
+        assert!(st.session_mgr.authenticated_console(id).is_none());
+    }
     #[test]
     fn missing_or_bad_token() {
         let st = state();

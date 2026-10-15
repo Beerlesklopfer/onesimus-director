@@ -170,8 +170,8 @@ fn render(fields: Vec<(&str, Value)>) -> CommandResult {
         .collect();
     CommandResult::ok(text).with_json(json!({"defaults":values}))
 }
-fn defaults(ast: &CommandAst, cfg: &DirectorConfig) -> Result<CommandResult, String> {
-    let (kind, name) = ["job", "client", "storage", "pool"]
+fn selector(ast: &CommandAst) -> Option<(&str, &str)> {
+    ["job", "client", "storage", "pool"]
         .into_iter()
         .find_map(|key| {
             ast.arguments
@@ -179,7 +179,9 @@ fn defaults(ast: &CommandAst, cfg: &DirectorConfig) -> Result<CommandResult, Str
                 .find(|a| a.key.eq_ignore_ascii_case(key))
                 .and_then(|a| a.value.as_deref().map(|value| (key, value)))
         })
-        .ok_or_else(|| ".defaults command requires a parameter.\n".to_string())?;
+}
+fn defaults(ast: &CommandAst, cfg: &DirectorConfig) -> Result<CommandResult, String> {
+    let (kind, name) = selector(ast).ok_or_else(|| ".defaults command requires a parameter.\n".to_string())?;
     let empty = || render(Vec::new());
     let mut f = Vec::new();
     let catalog = |client: &bareos_config::resources::ClientResource| {
@@ -419,6 +421,25 @@ pub fn cmd_defaults(ast: &CommandAst, ctx: &ExecContext) -> CommandResult {
     let Ok(cfg) = config.read() else {
         return CommandResult::error("Director configuration unavailable.\n".to_string());
     };
+    // Snapshot before access() acquires the configuration lock again. Nested
+    // RwLock reads can deadlock when a configuration reload is waiting.
+    let snapshot = cfg.clone();
+    drop(cfg);
+    let cfg = snapshot;
+    if let Some((kind, name)) = selector(ast) {
+        let target = match kind {
+            "job" => cfg.find_job(name).map(|r| (crate::acl::Kind::Job, r.name.as_str())),
+            "client" => cfg.find_client(name).map(|r| (crate::acl::Kind::Client, r.name.as_str())),
+            "storage" => cfg.find_storage(name).map(|r| (crate::acl::Kind::Storage, r.name.as_str())),
+            "pool" => cfg.find_pool(name).map(|r| (crate::acl::Kind::Pool, r.name.as_str())),
+            _ => unreachable!(),
+        };
+        // DotDefaultsCmd checks only the selected resource. Job-linked
+        // resources are read directly, without additional ACL lookups.
+        if target.is_some_and(|(kind, name)| !crate::acl::access(ctx, kind, name)) {
+            return render(Vec::new());
+        }
+    }
     defaults(ast, &cfg).unwrap_or_else(|message| {
         if message == ".defaults command requires a parameter.\n" {
             CommandResult {
@@ -462,6 +483,45 @@ Messages {{ Name = Standard }}
             cfg,
         )
         .unwrap()
+    }
+    fn restricted_context(policy: &str) -> ExecContext {
+        use std::sync::{Arc, RwLock};
+        let cfg = config(&format!("Job {{Name=J; Type=Backup; Pool=Backup; Client=fd; Storage=sd}}\nConsole {{Name=limited; Password=x; {policy}}}"));
+        let manager = Arc::new(crate::session_manager::SessionManager::new(Arc::new(crate::message_bus::MessageBus::new(16))));
+        let id = manager.create_session("limited");
+        manager.authenticate_session(id);
+        ExecContext {session_id:id, config:Some(Arc::new(RwLock::new(cfg))), session_mgr:Some(manager),
+            catalog:None, api_mode:crate::command_executor::ApiMode::Human, bus_rx:None, job_manager:None}
+    }
+    #[test]
+    fn defaults_denied_primary_resources_are_indistinguishable_from_missing() {
+        let ctx = restricted_context("");
+        for (kind, name) in [("job", "J"), ("client", "fd"), ("storage", "sd"), ("pool", "Backup")] {
+            let result = cmd_defaults(&crate::session::parse_cli_command(&format!(".defaults {kind}={name}")), &ctx);
+            assert!(result.success);
+            assert_eq!(result.text_output, "");
+            assert_eq!(result.json, Some(json!({"defaults":{}})));
+        }
+    }
+    #[test]
+    fn defaults_allowed_job_keeps_linked_metadata_as_in_original() {
+        // Original checks JobACL once, then directly reads linked pointers.
+        let ctx = restricted_context("JobACL=J; ClientACL=!fd; StorageACL=!sd; PoolACL=!Backup; FileSetACL=!*all*");
+        let result = cmd_defaults(&crate::session::parse_cli_command(".defaults job=J"), &ctx);
+        assert!(result.success);
+        let fields = &result.json.unwrap()["defaults"];
+        assert_eq!(fields["job"], "J");
+        assert_eq!(fields["client"], "fd");
+        assert_eq!(fields["pool"], "Backup");
+        assert_eq!(fields["storage"], "sd");
+    }
+    #[test]
+    fn defaults_resource_acl_is_read_again_after_reload() {
+        let ctx = restricted_context("ClientACL=fd");
+        let command = crate::session::parse_cli_command(".defaults client=fd");
+        assert!(cmd_defaults(&command, &ctx).text_output.contains("client=fd"));
+        ctx.config.as_ref().unwrap().write().unwrap().raw.retain(|r| r.norm_type() != "console");
+        assert_eq!(cmd_defaults(&command, &ctx).json, Some(json!({"defaults":{}})));
     }
     #[test]
     fn client_defaults_include_retention_and_boolean_types() {

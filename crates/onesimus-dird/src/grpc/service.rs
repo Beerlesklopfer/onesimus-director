@@ -83,8 +83,8 @@ fn to_response(result: CommandResult) -> CommandResponse {
 }
 
 /// Run a command through the shared queue without blocking the tokio runtime.
-async fn run_command(cmd_queue: &Arc<CommandQueue>, ast: CommandAst) -> Result<CommandResult, Status> {
-    let rx = cmd_queue.submit(ast, 0)
+async fn run_command(cmd_queue: &Arc<CommandQueue>, ast: CommandAst, session_id: u64) -> Result<CommandResult, Status> {
+    let rx = cmd_queue.submit(ast, session_id)
         .ok_or_else(|| Status::resource_exhausted("command queue full"))?;
     tokio::task::spawn_blocking(move || rx.recv())
         .await
@@ -143,10 +143,10 @@ impl Director for DirectorServiceImpl {
         &self,
         request: Request<CommandRequest>,
     ) -> Result<Response<CommandResponse>, Status> {
-        self.auth.check(request.metadata())?;
+        let session_id=self.auth.check_session(request.metadata())?;
         let req = request.into_inner();
-        let ast = command_request_to_ast(&req, &req.session_id);
-        let result = run_command(&self.cmd_queue, ast).await?;
+        let ast = command_request_to_ast(&req, &session_id.to_string());
+        let result = run_command(&self.cmd_queue, ast, session_id).await?;
         Ok(Response::new(to_response(result)))
     }
 
@@ -154,8 +154,8 @@ impl Director for DirectorServiceImpl {
         &self,
         request: Request<ListCommandsRequest>,
     ) -> Result<Response<ListCommandsResponse>, Status> {
-        self.auth.check(request.metadata())?;
-        let commands = KNOWN_COMMANDS.iter().map(|(name, help, usage)| {
+        let session_id=self.auth.check_session(request.metadata())?;
+        let commands = KNOWN_COMMANDS.iter().filter(|(name,_,_)|self.auth.allowed(session_id,crate::acl::Kind::Command,name)).map(|(name, help, usage)| {
             CommandInfo {
                 name: name.to_string(),
                 help: help.to_string(),
@@ -174,7 +174,9 @@ impl Director for DirectorServiceImpl {
         &self,
         request: Request<Streaming<SessionMessage>>,
     ) -> Result<Response<Self::InteractiveSessionStream>, Status> {
-        self.auth.check(request.metadata())?;
+        let session_id=self.auth.check_session(request.metadata())?;
+        let metadata=request.metadata().clone();
+        let auth=self.auth.clone();
         let mut stream = request.into_inner();
         let (tx, rx) = mpsc::channel(32);
 
@@ -194,9 +196,13 @@ impl Director for DirectorServiceImpl {
                                 if session_msg.r#type() != session_message::Type::Command {
                                     continue;
                                 }
+                                if auth.check_session(&metadata).is_err() {
+                                    let _=tx.send(Err(Status::unauthenticated("session expired"))).await;
+                                    break;
+                                }
                                 let Some(cmd_req) = session_msg.command else { continue };
-                                let ast = command_request_to_ast(&cmd_req, &session_msg.session_id);
-                                let response = match run_command(&cmd_queue, ast).await {
+                                let ast = command_request_to_ast(&cmd_req, &session_id.to_string());
+                                let response = match run_command(&cmd_queue, ast, session_id).await {
                                     Ok(result) => to_response(result),
                                     Err(status) => CommandResponse {
                                         success: false,
@@ -275,3 +281,27 @@ static KNOWN_COMMANDS: &[(&str, &str, &str)] = &[
     ("purge", "Purge catalog records", "purge [files | jobs | volumes]"),
     ("truncate", "Truncate purged volumes", "truncate [volume=name]"),
 ];
+
+#[cfg(test)]
+mod acl_binding_tests {
+    use super::*;
+    #[tokio::test]
+    async fn client_supplied_session_id_cannot_impersonate_default_console() {
+        let ctx=crate::acl::tests::context();
+        let manager=ctx.session_mgr.as_ref().unwrap().clone();
+        let root=manager.create_session("*UserAgent*");manager.authenticate_session(root);
+        let auth=Arc::new(super::super::auth::AuthState::new(ctx.config.clone().unwrap(),manager));
+        let nonce=auth.challenge("limited");
+        let token=auth.login("limited",&nonce,&super::super::auth::compute_proof(&super::super::auth::password_key("pw"),&nonce)).unwrap();
+        let queue=Arc::new(CommandQueue::new(8));
+        let service=DirectorServiceImpl::new(Arc::new(MessageBus::new(16)),queue.clone(),auth,"dir".into(),9101);
+        let mut request=Request::new(CommandRequest{command_name:"delete".into(),session_id:root.to_string(),..Default::default()});
+        request.metadata_mut().insert(super::super::auth::SESSION_HEADER,token.parse().unwrap());
+        let task=tokio::spawn(async move {service.execute_command(request).await.unwrap().into_inner()});
+        let queued=tokio::task::spawn_blocking(move || queue.take().unwrap()).await.unwrap();
+        assert_ne!(queued.session_id,root);assert_eq!(queued.ast.session_id,queued.session_id.to_string());
+        let mut execute_ctx=ctx;execute_ctx.session_id=queued.session_id;
+        let result=crate::command_executor::dispatch(&queued.ast,&execute_ctx);assert!(!result.success);
+        queued.result_tx.send(result).unwrap();assert!(!task.await.unwrap().success);
+    }
+}

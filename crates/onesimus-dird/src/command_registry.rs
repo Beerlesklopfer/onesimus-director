@@ -350,6 +350,10 @@ pub fn dispatch_registry(registry: &[CommandDef], ast: &CommandAst, ctx: &ExecCo
     let Some(command) = find_command(registry, name) else {
         return CommandResult::error(format!("Unknown command: {}\n", ast.command_name));
     };
+    let acl_name=if crate::ua_commands_table::UA_COMMANDS.iter().any(|entry|entry.0==name) {name} else {command.name};
+    if !matches!(acl_name, "exit" | "quit" | "whoami") && !crate::acl::access(ctx, crate::acl::Kind::Command, acl_name) {
+        return CommandResult::error(format!("{}: is an invalid command.\n", ast.command_name));
+    }
     let mut resolved = ast.clone();
     resolved.command_name = name.to_string();
     (command.handler)(&resolved, ctx)

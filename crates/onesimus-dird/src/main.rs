@@ -4,6 +4,7 @@
 //! tokio only for gRPC.
 
 mod accept;
+mod acl;
 mod catalog_worker;
 mod command_ast;
 mod command_executor;
@@ -554,7 +555,7 @@ fn spawn_named_threads(
             bnet_port: port,
             director_name: dir_name.clone(),
             identity,
-            auth: Arc::new(grpc::auth::AuthState::new(config.clone())),
+            auth: Arc::new(grpc::auth::AuthState::new(config.clone(), session_mgr.clone())),
         };
         let handle = thread::Builder::new()
             .name("dir:grpc".into())

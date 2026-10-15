@@ -79,6 +79,17 @@ fn resolve_with(
     } else { None };
     let director = config.director.name.clone();
     drop(config);
+    // Validate every resolved target before contacting either daemon.
+    if let Some(client) = &client {
+        if !crate::acl::access(ctx, crate::acl::Kind::Client, &client.name) {
+            return CommandResult::error(format!("Client \"{}\" not found.\n", client.name));
+        }
+    }
+    if let Some(storage) = &storage {
+        if !crate::acl::access(ctx, crate::acl::Kind::Storage, &storage.name) {
+            return CommandResult::error(format!("Storage \"{}\" not found.\n", storage.name));
+        }
+    }
     let commands: Vec<_> = hosts.into_iter().map(|host| format!("resolve {host}")).collect();
     let mut errors = String::new();
     if let Some(client) = client {
@@ -111,6 +122,33 @@ mod tests {
         ).unwrap();
         ExecContext { session_id: 0, config: Some(Arc::new(RwLock::new(config))),
             session_mgr: None, catalog: None, api_mode: ApiMode::Human, bus_rx: None, job_manager: None }
+    }
+    fn restricted_context(policy: &str) -> ExecContext {
+        let mut ctx = context();
+        let extra = crate::director_config::DirectorConfig::from_str(&format!("Director {{Name=dir}}\nConsole {{Name=limited; Password=x; {policy}}}")).unwrap();
+        ctx.config.as_ref().unwrap().write().unwrap().raw.extend(extra.raw.into_iter().filter(|r| r.norm_type() == "console"));
+        let manager = Arc::new(crate::session_manager::SessionManager::new(Arc::new(crate::message_bus::MessageBus::new(16))));
+        ctx.session_id = manager.create_session("limited");
+        manager.authenticate_session(ctx.session_id);
+        ctx.session_mgr = Some(manager);
+        ctx
+    }
+    #[test]
+    fn resolve_checks_every_resource_before_any_daemon_request() {
+        for (policy, expected) in [("StorageACL=sd", "Client"), ("ClientACL=fd", "Storage")] {
+            let ctx = restricted_context(policy);
+            let result = resolve_with(&crate::session::parse_cli_command("resolve client=fd storage=sd localhost"), &ctx,
+                |_| panic!("no DNS"), |_,_,_| panic!("no FD before all ACL checks"), |_,_,_| panic!("no SD"));
+            assert!(!result.success);
+            assert!(result.error_message.starts_with(expected));
+            assert!(result.text_output.is_empty());
+        }
+        let ctx = restricted_context("ClientACL=fd; StorageACL=sd");
+        let result = resolve_with(&crate::session::parse_cli_command("resolve client=fd storage=sd localhost"), &ctx,
+            |_| panic!("no DNS"), |_,_,_| Ok("FD\n".into()), |_,_,_| Ok("SD\n".into()));
+        assert!(result.success);
+        assert!(result.text_output.contains("FD\n"));
+        assert!(result.text_output.ends_with("SD\n"));
     }
     #[test]
     fn local_addresses_use_original_ipv4_ipv6_layout_and_order() {

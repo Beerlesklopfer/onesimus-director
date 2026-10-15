@@ -235,6 +235,9 @@ fn setdevice_with(
     };
     let director = config.director.name.clone();
     drop(config);
+    if !crate::acl::access(ctx, crate::acl::Kind::Storage, &storage.name) {
+        return CommandResult::error(format!("Storage \"{}\" not found.\n", storage.name));
+    }
     let command = format!("setdevice device={device} autoselect={autoselect}");
     match send(&storage, &director, &command) {
         Ok(response) => CommandResult::ok(format!("Connecting to Storage daemon {} at {}:{}\n{response}",
@@ -462,6 +465,23 @@ mod setdevice_tests {
             bus_rx: None, job_manager: None }
     }
 
+    #[test]
+    fn setdevice_resource_acl_blocks_network_and_allows_named_storage() {
+        let mut ctx = context();
+        let manager = Arc::new(crate::session_manager::SessionManager::new(Arc::new(crate::message_bus::MessageBus::new(16))));
+        ctx.session_id = manager.create_session("limited");
+        manager.authenticate_session(ctx.session_id);
+        ctx.session_mgr = Some(manager);
+        let ast = crate::session::parse_cli_command("setdevice storage=File device=drive0 autoselect=no");
+        let denied = setdevice_with(&ast, &ctx, |_,_,_| panic!("denied storage must never contact SD"));
+        assert!(!denied.success);
+        assert_eq!(denied.error_message, "Storage \"File\" not found.\n");
+        let extra = crate::director_config::DirectorConfig::from_str("Director {Name=dir}\nConsole {Name=limited; Password=x; StorageACL=File}").unwrap();
+        ctx.config.as_ref().unwrap().write().unwrap().raw.extend(extra.raw.into_iter().filter(|r| r.norm_type() == "console"));
+        assert!(setdevice_with(&ast, &ctx, |storage,_,_| {
+            assert_eq!(storage.name, "File"); Ok("3000 OK setdevice\n".into())
+        }).success);
+    }
     #[test]
     fn setdevice_sends_protocol_command_and_preserves_reply() {
         let ast = crate::session::parse_cli_command("setdevice storage=File device=drive0 autoselect=no");
