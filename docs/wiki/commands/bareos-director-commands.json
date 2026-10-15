@@ -711,7 +711,7 @@
     },
     {
       "path": "crates/onesimus-dird/src/commands/dot.rs",
-      "sha256": "e0e541990a98f06e8d30e3e6d4f42e95e8a2e74acc7fee892ece13c8c65de85e"
+      "sha256": "34a6e3bca552078405727603fddf283da2073c40fac0e41ee51f4461075f8787"
     },
     {
       "path": "crates/onesimus-dird/src/commands/extra.rs",
@@ -771,8 +771,8 @@
     "registered_top_level_commands": 88,
     "status_counts": {
       "partial": 16,
-      "registered_unverified": 52,
-      "semantic_mismatch": 3,
+      "registered_unverified": 53,
+      "semantic_mismatch": 2,
       "stub": 17
     },
     "restore_file_selection_commands": 26,
@@ -929,7 +929,7 @@
         },
         "implementation": {
           "file": "crates/onesimus-dird/src/commands/dot.rs",
-          "line": 404
+          "line": 405
         },
         "declared_arguments": [],
         "status": "registered_unverified",
@@ -969,7 +969,7 @@
         },
         "implementation": {
           "file": "crates/onesimus-dird/src/commands/dot.rs",
-          "line": 416
+          "line": 417
         },
         "declared_arguments": [
           "mode"
@@ -1177,9 +1177,9 @@
           "line": 390
         },
         "declared_arguments": [],
-        "status": "semantic_mismatch",
+        "status": "registered_unverified",
         "findings": [
-          "Der Handler listet Console-Ressourcen als User; Bareos listet eigene User-Ressourcen."
+          "User-Ressourcen werden jetzt aus der rohen Konfiguration getrennt von Console-Ressourcen gelesen; Text/JSON und Reihenfolge sind durch Regressionstests geprüft. Der Live-SHA-256-Abgleich bleibt offen."
         ],
         "functional_parity_verified": false
       },
@@ -2000,7 +2000,7 @@
         },
         "implementation": {
           "file": "crates/onesimus-dird/src/commands/dot.rs",
-          "line": 396
+          "line": 397
         },
         "declared_arguments": [],
         "status": "registered_unverified",
@@ -2044,7 +2044,7 @@
         },
         "implementation": {
           "file": "crates/onesimus-dird/src/commands/dot.rs",
-          "line": 507
+          "line": 508
         },
         "declared_arguments": [
           "jobid",
@@ -2093,7 +2093,7 @@
         },
         "implementation": {
           "file": "crates/onesimus-dird/src/commands/dot.rs",
-          "line": 517
+          "line": 518
         },
         "declared_arguments": [
           "jobid",
@@ -2138,7 +2138,7 @@
         },
         "implementation": {
           "file": "crates/onesimus-dird/src/commands/dot.rs",
-          "line": 469
+          "line": 470
         },
         "declared_arguments": [
           "jobid"
@@ -2183,7 +2183,7 @@
         },
         "implementation": {
           "file": "crates/onesimus-dird/src/commands/dot.rs",
-          "line": 494
+          "line": 495
         },
         "declared_arguments": [
           "jobid"
@@ -2230,7 +2230,7 @@
         },
         "implementation": {
           "file": "crates/onesimus-dird/src/commands/dot.rs",
-          "line": 526
+          "line": 527
         },
         "declared_arguments": [
           "jobid",
@@ -2280,7 +2280,7 @@
         },
         "implementation": {
           "file": "crates/onesimus-dird/src/commands/dot.rs",
-          "line": 534
+          "line": 535
         },
         "declared_arguments": [
           "jobid"
@@ -2324,7 +2324,7 @@
         },
         "implementation": {
           "file": "crates/onesimus-dird/src/commands/dot.rs",
-          "line": 478
+          "line": 479
         },
         "declared_arguments": [],
         "status": "stub",
@@ -2364,7 +2364,7 @@
         },
         "implementation": {
           "file": "crates/onesimus-dird/src/commands/dot.rs",
-          "line": 484
+          "line": 485
         },
         "declared_arguments": [
           "yes"
@@ -5578,7 +5578,7 @@
       },
       "implementation": {
         "file": "crates/onesimus-dird/src/commands/dot.rs",
-        "line": 435
+        "line": 436
       },
       "declared_arguments": []
     },
@@ -5606,7 +5606,7 @@
       },
       "implementation": {
         "file": "crates/onesimus-dird/src/commands/dot.rs",
-        "line": 576
+        "line": 577
       },
       "declared_arguments": []
     },
@@ -5620,7 +5620,7 @@
       },
       "implementation": {
         "file": "crates/onesimus-dird/src/commands/dot.rs",
-        "line": 563
+        "line": 564
       },
       "declared_arguments": []
     },
@@ -5634,7 +5634,7 @@
       },
       "implementation": {
         "file": "crates/onesimus-dird/src/commands/dot.rs",
-        "line": 550
+        "line": 551
       },
       "declared_arguments": []
     },

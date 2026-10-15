@@ -11,9 +11,9 @@ Referenz: [WIP/25.1.2-pre, `fc2c79b6c43e`](https://github.com/bareos/bareos/blob
 
 **RunScript erlaubt:** ja. **Audit-Ereignis:** nein. Beide Flags sind keine Read-only-Klassifizierung.
 
-**Onesimus-Status:** `semantic_mismatch`. Funktionsparität ist nicht durch einen Live-Test nachgewiesen.
+**Onesimus-Status:** `registered_unverified`. Funktionsparität ist nicht durch einen Live-Test nachgewiesen.
 
-- Der Handler listet Console-Ressourcen als User; Bareos listet eigene User-Ressourcen.
+- User-Ressourcen werden jetzt aus der rohen Konfiguration getrennt von Console-Ressourcen gelesen; Text/JSON und Reihenfolge sind durch Regressionstests geprüft. Der Live-SHA-256-Abgleich bleibt offen.
 
 **Lokaler Handler:** [crates/onesimus-dird/src/commands/dot.rs:390](../../../crates/onesimus-dird/src/commands/dot.rs).
 

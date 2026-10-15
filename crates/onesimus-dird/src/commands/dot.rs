@@ -386,10 +386,11 @@ pub fn cmd_dot_types(_ast: &CommandAst, _ctx: &ExecContext) -> CommandResult {
     name_list("jobtypes", "name", JOB_TYPES.iter().map(|(n, _)| (*n, None)))
 }
 
-/// `.users` — User resources (Console resources stand in until User is parsed)
+/// `.users` lists User resources, independently of Console resources.
 pub fn cmd_dot_users(_ast: &CommandAst, ctx: &ExecContext) -> CommandResult {
     with_config(ctx, "users", |cfg| name_list("users", "name",
-        cfg.consoles.iter().map(|c| (c.name.as_str(), None))))
+        cfg.raw.iter().filter(|resource| resource.norm_type() == "user")
+            .filter_map(|resource| resource.name().map(|name| (name, None)))))
 }
 
 /// `.volstatus` — list all possible volume statuses
@@ -587,4 +588,23 @@ fn get_arg<'a>(ast: &'a CommandAst, key: &str) -> Option<&'a str> {
     ast.arguments.iter()
         .find(|a| a.key == key)
         .and_then(|a| a.value.as_deref())
+}
+
+#[cfg(test)]
+mod users_tests {
+    use super::*;
+    use std::sync::{Arc, RwLock};
+
+    #[test]
+    fn users_are_not_consoles_and_keep_source_order() {
+        let config = crate::director_config::DirectorConfig::from_str(
+            "Director { Name = dir }\nConsole { Name = console-only }\nUser { Name = alice }\nUser { Name = bob }"
+        ).unwrap();
+        let ctx = ExecContext { session_id: 0, config: Some(Arc::new(RwLock::new(config))),
+            session_mgr: None, catalog: None, api_mode: crate::command_executor::ApiMode::Human,
+            bus_rx: None, job_manager: None };
+        let result = cmd_dot_users(&CommandAst::default(), &ctx);
+        assert_eq!(result.text_output, "alice\nbob\n");
+        assert_eq!(result.json.unwrap(), json!({"users":[{"name":"alice"},{"name":"bob"}]}));
+    }
 }

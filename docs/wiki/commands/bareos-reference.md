@@ -14,8 +14,8 @@ Dies ist ein statischer Quellcodeabgleich; es wurden keine Live-Jobs, Löschunge
 | Status | Anzahl | Bedeutung |
 |---|---:|---|
 | `partial` | 16 | Konkrete fehlende Optionen oder Teilfunktionen belegt |
-| `registered_unverified` | 52 | Handler vorhanden; Funktionsparität nicht nachgewiesen |
-| `semantic_mismatch` | 3 | Abweichende Bedeutung gegenüber Bareos |
+| `registered_unverified` | 53 | Handler vorhanden; Funktionsparität nicht nachgewiesen |
+| `semantic_mismatch` | 2 | Abweichende Bedeutung gegenüber Bareos |
 | `stub` | 17 | Platzhalter statt der beschriebenen Wirkung |
 
 ## Herkunft und Grenzen
@@ -49,7 +49,7 @@ Die Syntaxtexte sind Originalhilfe, keine vollständige formale Grammatik aller 
 | [.catalogs](dot-catalogs.md) | List all catalog resources | `registered_unverified` |
 | [.clients](dot-clients.md) | List all client resources | `registered_unverified` |
 | [.consoles](dot-consoles.md) | List all console resources | `registered_unverified` |
-| [.users](dot-users.md) | List all user resources | `semantic_mismatch` |
+| [.users](dot-users.md) | List all user resources | `registered_unverified` |
 | [.defaults](dot-defaults.md) | Get default settings | `partial` |
 | [.filesets](dot-filesets.md) | List all filesets | `registered_unverified` |
 | [.help](dot-help.md) | Print parsable information about a command | `registered_unverified` |

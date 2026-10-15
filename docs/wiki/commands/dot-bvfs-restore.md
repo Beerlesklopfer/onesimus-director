@@ -19,7 +19,7 @@ Referenz: [WIP/25.1.2-pre, `fc2c79b6c43e`](https://github.com/bareos/bareos/blob
 
 - Der Handler gibt path/jobid/fileid/dirid als Text zurück; er erzeugt keine Restore-Selektion bzw. Handle-Tabelle.
 
-**Lokaler Handler:** [crates/onesimus-dird/src/commands/dot.rs:534](../../../crates/onesimus-dird/src/commands/dot.rs).
+**Lokaler Handler:** [crates/onesimus-dird/src/commands/dot.rs:535](../../../crates/onesimus-dird/src/commands/dot.rs).
 
 Die folgenden vorhandenen Beispiele und Verhaltensbeschreibungen sind lokale Dokumentation; sie sind kein Beleg für vollständige Bareos-Kompatibilität. Bei Widersprüchen gilt der obige Befund.
 <!-- bareos-reference:end -->

@@ -105,9 +105,9 @@
       ]
     },
     ".users": {
-      "status": "semantic_mismatch",
+      "status": "registered_unverified",
       "findings": [
-        "Der Handler listet Console-Ressourcen als User; Bareos listet eigene User-Ressourcen."
+        "User-Ressourcen werden jetzt aus der rohen Konfiguration getrennt von Console-Ressourcen gelesen; Text/JSON und Reihenfolge sind durch Regressionstests geprüft. Der Live-SHA-256-Abgleich bleibt offen."
       ]
     },
     "query": {

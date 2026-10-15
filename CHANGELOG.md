@@ -5,4 +5,7 @@ onesimus (25.1.2+onesimus.0.2.0-2) UNRELEASED; urgency=medium
     including deterministic fixtures and explicit reporting of untested cases.
   * oconsole: honor NO_COLOR for output, readline decoration and diagnostics.
 
+  * .users: list actual User resources in source order instead of Console
+    resources, with matching text and JSON output; add regression coverage.
+
  -- Joerg Bernau <joerg@bernau.family>  Thu, 15 Oct 2026 14:00:00 +0200
