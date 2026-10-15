@@ -89,11 +89,11 @@ pub fn select_storage(ast: &crate::command_ast::CommandAst, ctx: &ExecContext, a
             "storage" | "sd" => {
                 // A bare keyword (NULL argv) leaves the name empty: selection.
                 if let Some(name) = arg.value.as_deref().filter(|name| !name.is_empty()) {
+                    // GetStoreResWithName applies the Storage ACL (ua_acl.cc:279).
                     match config.find_storage(name) {
                         Some(store) if access(ctx, Kind::Storage, &store.name) =>
                             return Ok((store.clone(), String::new())),
-                        Some(_) => {}
-                        None => errors.push_str(&format!("Storage resource \"{name}\": not found\n")),
+                        _ => errors.push_str(&format!("Storage resource \"{name}\": not found\n")),
                     }
                 }
                 break;
