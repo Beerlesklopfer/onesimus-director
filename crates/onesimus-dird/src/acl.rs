@@ -46,7 +46,7 @@ impl Kind {
     }
 }
 
-fn valid_name(item: &str) -> bool {
+pub(crate) fn valid_name(item: &str) -> bool {
     // include/baconfig.h MAX_NAME_LENGTH=128; lib/edit.cc IsNameValid.
     !item.is_empty()
         && item.len() < 128
@@ -159,6 +159,34 @@ pub fn access(ctx: &ExecContext, kind: Kind, item: &str) -> bool {
         .read()
         .map(|config| allowed(&config, &console, kind, item))
         .unwrap_or(false)
+}
+
+/// `UaContext::AclHasRestrictions` (ua_acl.cc:191): the first `!` entry or
+/// `*all*` in the console list, then in its profiles, decides.
+pub fn has_restrictions(ctx: &ExecContext, kind: Kind) -> bool {
+    let Some(manager) = &ctx.session_mgr else { return false };
+    let Some(console) = manager.authenticated_console(ctx.session_id) else { return true };
+    if console == "*UserAgent*" {
+        return false;
+    }
+    let Some(config) = ctx.config.as_ref().and_then(|c| c.read().ok()) else { return true };
+    let Some(resource) = config.raw.iter()
+        .find(|r| r.norm_type() == "console" && r.name() == Some(console.as_str())) else { return true };
+    let decide = |resource: &ConfResource| resource.directives.iter()
+        .filter(|d| d.norm_key() == kind.key()).flat_map(|d| d.values())
+        .find_map(|v| if v.starts_with('!') { Some(true) }
+            else if v.eq_ignore_ascii_case("*all*") { Some(false) } else { None });
+    if let Some(restricted) = decide(resource) {
+        return restricted;
+    }
+    for name in resource.directives.iter().filter(|d| d.norm_key() == "profile").flat_map(|d| d.values()) {
+        if let Some(profile) = config.raw.iter().find(|r| r.norm_type() == "profile" && r.name() == Some(name)) {
+            if let Some(restricted) = decide(profile) {
+                return restricted;
+            }
+        }
+    }
+    true
 }
 
 #[cfg(test)]

@@ -22,3 +22,4 @@ pub mod wait;
 pub mod defaults;
 
 pub mod configure_usage;
+pub mod prompt;

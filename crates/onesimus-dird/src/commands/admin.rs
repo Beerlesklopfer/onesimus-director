@@ -561,67 +561,119 @@ fn cmd_purge_db(ast: &CommandAst, ctx: &ExecContext) -> CommandResult {
     }
 }
 
+/// `truncate volstatus=Purged [storage=] [pool=] [volume=] [drive=] [yes]`
+/// (ua_cmds.cc:1972 TruncateCmd). Arguments are validated exactly like
+/// upstream before the catalog or a Storage Daemon is touched; truncating
+/// needs the confirmation (`yes`), compatibility log C-012.
 pub fn cmd_truncate(ast: &CommandAst, ctx: &ExecContext) -> CommandResult {
-    let volume = get_arg(ast, "volume");
-    let storage = get_arg(ast, "storage");
-    let pool = get_arg(ast, "pool");
+    truncate_with(ast, ctx, |storage, command| sd_command(ctx, storage, command))
+}
 
-    let default_storage = if let Some(config) = &ctx.config {
-        if let Ok(cfg) = config.read() {
-            if cfg.storages.len() == 1 {
-                Some(cfg.storages[0].name.clone())
-            } else { None }
-        } else { None }
-    } else { None };
-
-    let stor = match storage {
-        Some(s) => s.to_string(),
-        None => match default_storage {
-            Some(s) => s,
-            None => return CommandResult::ok("truncate: specify storage=<name>\n".to_string()),
-        },
-    };
-
-    match volume {
-        Some(v) => {
-            match sd_command(ctx, &stor, &format!("truncate Volume=\"{v}\"")) {
-                Ok(resp) => {
-                    // Reset volume bytes in catalog
-                    if let Some(cat) = &ctx.catalog {
-                        let _ = cat.raw_query(&format!(
-                            "UPDATE media SET volbytes=0, volfiles=0, volstatus='Purged' WHERE volumename='{v}'"
-                        ));
-                    }
-                    CommandResult::ok(format!("Truncate Volume \"{v}\" on Storage \"{stor}\":\n{resp}\n"))
-                }
-                Err(e) => CommandResult::error(format!("truncate {v}: {e}\n")),
-            }
+fn truncate_with(
+    ast: &CommandAst,
+    ctx: &ExecContext,
+    mut send: impl FnMut(&str, &str) -> Result<String, String>,
+) -> CommandResult {
+    use super::prompt::{selection_required, usage};
+    use crate::acl::{self, Kind};
+    if ast.arguments.is_empty() {
+        return CommandResult::error(usage("truncate", "missing parameter"));
+    }
+    let value = |key: &str| ast.arguments.iter()
+        .find(|a| a.key.eq_ignore_ascii_case(key) && a.value.is_some())
+        .and_then(|a| a.value.as_deref());
+    let yes = ast.arguments.iter().any(|a| a.key.eq_ignore_ascii_case("yes"));
+    match value("volstatus") {
+        None => return CommandResult::error(usage("truncate", "required parameter 'volstatus' missing")),
+        Some(status) if !status.eq_ignore_ascii_case("Purged") => return CommandResult::error(
+            usage("truncate", "Invalid parameter. 'volstatus' must be 'Purged'.")),
+        Some(_) => {}
+    }
+    let mut parsed = 2; // the command itself and volstatus, as upstream counts
+    let storage = value("storage");
+    if storage.is_some() || acl::has_restrictions(ctx, Kind::Storage) {
+        // SelectStorageDbr (ua_select.cc): "Select Storage resource" dialog
+        // when no accessible storage is named.
+        if !storage.is_some_and(|name| known_storage(ctx, name)) {
+            return selection_required(String::new());
         }
-        None => {
-            // Truncate all purged volumes in pool
-            let p = pool.unwrap_or("*");
-            let mut count = 0;
-            if let Some(cat) = &ctx.catalog {
-                let query = if p == "*" {
-                    "SELECT volumename FROM media WHERE volstatus='Purged'".to_string()
-                } else {
-                    format!("SELECT m.volumename FROM media m JOIN pool p ON m.poolid=p.poolid WHERE m.volstatus='Purged' AND p.name='{p}'")
-                };
-                if let Ok(result) = cat.raw_query(&query) {
-                    for line in result.lines().skip(2) {
-                        let vol = line.trim();
-                        if !vol.is_empty() {
-                            if sd_command(ctx, &stor, &format!("truncate Volume=\"{vol}\"")).is_ok() {
-                                let _ = cat.raw_query(&format!("UPDATE media SET volbytes=0, volfiles=0 WHERE volumename='{vol}'"));
-                                count += 1;
-                            }
-                        }
-                    }
-                }
-            }
-            CommandResult::ok(format!("{count} purged volume(s) truncated on storage \"{stor}\"\n"))
+        parsed += 1;
+    }
+    let pool = value("pool");
+    if pool.is_some() || acl::has_restrictions(ctx, Kind::Pool) {
+        // SelectPoolDbr (ua_select.cc): "Select the Pool" dialog.
+        if !pool.is_some_and(|name| acl::access(ctx, Kind::Pool, name)) {
+            return selection_required(String::new());
+        }
+        parsed += 1;
+    }
+    let volume = value("volume").filter(|name| acl::valid_name(name));
+    if volume.is_some() { parsed += 1; }
+    let mut text = String::new();
+    if let Some(drive) = value("drive") {
+        if drive.parse::<i32>().is_ok() && !drive.starts_with('+') {
+            parsed += 1;
+        } else {
+            text.push_str(&usage("truncate", &format!("Drive number must be integer but was : {drive}\n")));
         }
     }
+    if yes { parsed += 1; }
+    if parsed != ast.arguments.len() + 1 {
+        text.push_str(&usage("truncate", "Invalid parameter."));
+        return CommandResult::error(text);
+    }
+
+    let Some(cat) = &ctx.catalog else {
+        return CommandResult::error(format!("{text}Failed to open db.\n"));
+    };
+    let quote = |v: &str| v.replace('\'', "''");
+    let mut query = String::from("SELECT m.volumename FROM media m JOIN pool p ON m.poolid=p.poolid \
+        WHERE m.volstatus='Purged' AND m.recycle=1 AND m.enabled=1 AND m.volbytes>64512");
+    if let Some(p) = pool { query.push_str(&format!(" AND p.name='{}'", quote(p))); }
+    if let Some(s) = storage {
+        query.push_str(&format!(" AND m.storageid=(SELECT storageid FROM storage WHERE name='{}')", quote(s)));
+    }
+    if let Some(v) = volume { query.push_str(&format!(" AND m.volumename='{}'", quote(v))); }
+    let volumes: Vec<String> = match cat.query_rows(&format!("{query} ORDER BY m.mediaid")) {
+        Ok(table) => table.rows.into_iter().filter_map(|row| row.into_iter().next().flatten()).collect(),
+        Err(e) => return CommandResult::error(format!("{text}{e}\n")),
+    };
+    if volumes.is_empty() {
+        return CommandResult::ok(text);
+    }
+    if !yes {
+        // GetConfirmation (ua_input.cc:165, ua_cmds.cc:2120): API sessions
+        // decline silently; the console is asked "Truncate listed volumes
+        // (yes/no)? " after the volume list (ListSqlQuery, C-011).
+        if ctx.api_mode != crate::command_executor::ApiMode::Human {
+            return CommandResult::ok(text);
+        }
+        return selection_required(format!("{text}Truncate listed volumes (yes/no)? "));
+    }
+    let stor = match storage {
+        Some(s) => s.to_string(),
+        None => match ctx.config.as_ref().and_then(|c| c.read().ok())
+            .filter(|cfg| cfg.storages.len() == 1).map(|cfg| cfg.storages[0].name.clone()) {
+            Some(s) => s,
+            None => return CommandResult::error(format!("{text}truncate: specify storage=<name>\n")),
+        },
+    };
+    for vol in volumes {
+        match send(&stor, &format!("truncate Volume=\"{vol}\"")) {
+            Ok(resp) => {
+                let _ = cat.raw_query(&format!(
+                    "UPDATE media SET volbytes=0, volfiles=0 WHERE volumename='{}'", quote(&vol)));
+                text.push_str(&format!("Truncate Volume \"{vol}\" on Storage \"{stor}\":\n{resp}\n"));
+            }
+            Err(e) => text.push_str(&format!("truncate {vol}: {e}\n")),
+        }
+    }
+    CommandResult::ok(text)
+}
+
+fn known_storage(ctx: &ExecContext, name: &str) -> bool {
+    ctx.config.as_ref().and_then(|c| c.read().ok()).is_some_and(|cfg| cfg.find_storage(name).is_some())
+        && crate::acl::access(ctx, crate::acl::Kind::Storage, name)
 }
 
 /// `reload` — re-read the configuration (C++ ReloadCmd: {"reload": {"success": bool}}).
@@ -660,4 +712,46 @@ fn verify_storage(name: &str, ctx: &ExecContext) -> Result<(), CommandResult> {
         }
     }
     Ok(())
+}
+
+#[cfg(test)]
+pub(crate) mod side_effect_tests {
+    use super::*;
+    use std::sync::{Arc, RwLock};
+
+    pub(crate) fn context() -> ExecContext {
+        let config = crate::director_config::DirectorConfig::from_str(
+            "Director { Name = dir }\nStorage { Name = File; Address = localhost; Port = 9103 }\n\
+             Pool { Name = Full; Pool Type = Backup }\nPool { Name = Incremental; Pool Type = Backup }"
+        ).unwrap();
+        ExecContext { session_id: 0, config: Some(Arc::new(RwLock::new(config))),
+            session_mgr: None, catalog: None, api_mode: crate::command_executor::ApiMode::Human,
+            bus_rx: None, job_manager: None }
+    }
+
+    const USAGE: &str = "USAGE: truncate volstatus=Purged [storage=<storage>] [pool=<pool>] [volume=<volume>] [drive=<drivenum>] [yes]\n";
+
+    #[test]
+    fn truncate_rejects_like_upstream_without_touching_the_sd() {
+        let ctx = context();
+        for (line, expected) in [
+            ("truncate", format!("missing parameter\n{USAGE}")),
+            ("truncate yes", format!("required parameter 'volstatus' missing\n{USAGE}")),
+            ("truncate volstatus", format!("required parameter 'volstatus' missing\n{USAGE}")),
+            ("truncate volstatus=Full", format!("Invalid parameter. 'volstatus' must be 'Purged'.\n{USAGE}")),
+            ("truncate volstatus=purged bogus", format!("Invalid parameter.\n{USAGE}")),
+            ("truncate volstatus=Purged volume=bad*name", format!("Invalid parameter.\n{USAGE}")),
+            ("truncate volstatus=Purged drive=x", format!("Drive number must be integer but was : x\n\n{USAGE}Invalid parameter.\n{USAGE}")),
+            ("truncate volstatus=Purged storage=File yes", "Failed to open db.\n".to_string()),
+        ] {
+            let result = truncate_with(&crate::session::parse_cli_command(line), &ctx,
+                |_, _| panic!("{line}: must not contact the SD"));
+            assert!(!result.success, "{line}");
+            assert_eq!(result.error_message, expected, "{line}");
+        }
+        // Unknown storage: upstream opens the storage selection; nothing is done.
+        let result = truncate_with(&crate::session::parse_cli_command("truncate volstatus=Purged storage=Nope"),
+            &ctx, |_, _| panic!("must not contact the SD"));
+        assert!(result.success && result.error_message.is_empty());
+    }
 }
