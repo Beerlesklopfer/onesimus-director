@@ -678,6 +678,10 @@
   },
   "local_source_files": [
     {
+      "path": "Cargo.toml",
+      "sha256": "dae631ba49ab71f1a39eaf3438a7911a1a9d79f51c5630ce2495826cef19a3e0"
+    },
+    {
       "path": "crates/bareos-bnet/src/debug.rs",
       "sha256": "88e898b585d221cef727d1140ca26fe0b7737ea465b77e3c22ec958147491c63"
     },
@@ -691,7 +695,7 @@
     },
     {
       "path": "crates/oconsole/src/main.rs",
-      "sha256": "550af8bd724d9db4cc63d6999ae71446c7a2d8b8e2c9f2b88c39cb0d0744f737"
+      "sha256": "7eb2995eb9ccd0eca5b830e82becb400cd7cbf156927990e38d369ccbdddb795"
     },
     {
       "path": "crates/oconsole/src/mcp.rs",
@@ -700,6 +704,10 @@
     {
       "path": "crates/oconsole/src/mcp_mirror.rs",
       "sha256": "7e453e7f6d2fbc4858af555adb0285a65c1942a98436d733c3455a3f84188372"
+    },
+    {
+      "path": "crates/oconsole/src/rate_guard.rs",
+      "sha256": "76d6e406a5619d518d3e318fd7fe670907bf25c4432088e0c66efe16cd497d71"
     },
     {
       "path": "crates/onesimus-dird/src/catalog_worker.rs",

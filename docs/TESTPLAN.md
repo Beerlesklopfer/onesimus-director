@@ -1186,3 +1186,32 @@ Sprint 1 alone turns 11 LITE commands into IMPL in under 2 days.
   Große Antworten vollständig; Steuerzeichen als Text, keine Terminal-Escape-Wirkung.
 - Automatische Transporttests verwenden echte rmcp-Verarbeitung und erfassen den
   Spiegelausgabekanal getrennt von den unveränderten Protokollantworten.
+
+## Command Rate Guard und GN/RD-Prompt (15.10.2026)
+
+- Terminal/stdin mit BNET und gRPC: erster Befehl sofort, Folgebefehle erst ab
+  exakt drei Sekunden seit der letzten zugelassenen Eingabe. Ablehnung darf
+  keine Director-Nachricht senden und den Timer nicht verlängern.
+- YesNo/SubPrompt/TextInput teilen den Timer mit dem Hauptprompt. Zu schnelle
+  Antworten verwerfen und denselben Dialog erneut anzeigen; keine Warte-Queue.
+- Verstoßmeldung ausschließlich stderr, niemals stdout/Director; abgewiesene
+  Befehle nicht in die History übernehmen. Multiline-Paste darf nicht umgehen.
+- Prompt GN (grün) bereit, RD (rot) gesperrt. Ohne Tastendruck wieder GN;
+  angefangene Eingabe/Cursor erhalten. NO_COLOR=1 ohne ANSI, Guard weiter aktiv.
+- EOF beendet ohne zusätzlichen ungebremsten quit-Befehl; manuelle Abbruch-
+  Befehle nutzen denselben Guard. MCP und interne Completion-Abfragen unverändert.
+
+Automatische Prüfungen:
+
+```bash
+cargo +1.96.0 test -p oconsole
+cargo +1.96.0 test -p oconsole --no-default-features --features mcp-development
+cargo +1.96.0 build -p oconsole
+python3 scripts/test_oconsole_rate_guard.py --binary target/debug/oconsole -v
+```
+
+Der Python-Test startet nur einen lokalen BNET-Test-Director und das echte
+oconsole-Binary, verwendet temporäre Konfiguration/History und prüft stdin,
+alle drei Dialogtypen, Multiline-Paste sowie den Farbwechsel in einem PTY.
+Die transportunabhängige gRPC-Eingabe nutzt denselben geprüften Haupt-/Dialogloop;
+für einen Live-gRPC-Abgleich dieselben Fälle an der Testinstanz wiederholen.

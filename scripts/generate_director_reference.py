@@ -239,6 +239,8 @@ def main():
                 ROOT / 'crates/onesimus-dird/src/scheduler.rs',
                 ROOT / 'crates/oconsole/src/mcp.rs',
                 ROOT / 'crates/oconsole/src/mcp_mirror.rs',
+                ROOT / 'crates/oconsole/src/rate_guard.rs',
+                ROOT / 'Cargo.toml',
                 ROOT / 'crates/oconsole/src/main.rs',
                 ROOT / 'crates/oconsole/Cargo.toml',
             })

@@ -19,6 +19,7 @@ mod grpc_client;
 mod mcp;
 mod mcp_mirror;
 mod mcp_token;
+mod rate_guard;
 
 use std::io::{self, BufRead, Write};
 use std::net::TcpStream;
@@ -523,6 +524,7 @@ struct CmdEntry {
 struct BareosHelper {
     /// Commands loaded from Director via .help at session start
     entries: Vec<CmdEntry>,
+    rate_guard: rate_guard::CommandRateGuard,
             /// Cached values from Director for tab-completion (loaded at connect)
     /// Maps: dot-command → list of values (e.g. ".clients" → ["bareos-fd", "remote-fd"])
     value_cache: std::collections::HashMap<String, Vec<String>>,
@@ -532,6 +534,7 @@ impl BareosHelper {
     fn new() -> Self {
         Self {
             entries: Vec::new(),
+            rate_guard: rate_guard::CommandRateGuard::default(),
             value_cache: std::collections::HashMap::new(),
         }
     }
@@ -745,6 +748,10 @@ impl Completer for BareosHelper {
 }
 
 impl Highlighter for BareosHelper {
+    fn highlight_prompt<'b, 's: 'b, 'p: 'b>(&'s self, prompt: &'p str, default: bool) -> std::borrow::Cow<'b, str> {
+        if !default { return std::borrow::Cow::Borrowed(prompt); }
+        std::borrow::Cow::Owned(self.rate_guard.prompt(prompt, color::enabled()))
+    }
     fn highlight<'l>(&self, line: &'l str, _pos: usize) -> std::borrow::Cow<'l, str> {
         if !color::enabled() { return std::borrow::Cow::Borrowed(line); }
         if line.is_empty() {
@@ -800,10 +807,6 @@ impl Highlighter for BareosHelper {
         std::borrow::Cow::Owned(format!("{cmd_color}{cmd}\x1b[0m {colored_args}"))
     }
 
-    fn highlight_prompt<'b, 's: 'b, 'p: 'b>(&'s self, prompt: &'p str, _default: bool) -> std::borrow::Cow<'b, str> {
-        if !color::enabled() { return color::output(prompt).into_owned().into(); }
-        std::borrow::Cow::Owned(format!("\x1b[1;36m{}\x1b[0m", prompt))  // Cyan bold prompt
-    }
 
     fn highlight_hint<'h>(&self, hint: &'h str) -> std::borrow::Cow<'h, str> {
         if !color::enabled() { return color::output(hint); }
@@ -861,6 +864,69 @@ impl Validator for BareosHelper {}
 
 impl Helper for BareosHelper {}
 
+/// None means rejected locally; Some(false) means a connection failure.
+fn send_terminal_line(
+    dir: &mut dyn DirectorConn,
+    guard: &rate_guard::CommandRateGuard,
+    line: &str,
+) -> Option<bool> {
+    if line.contains(['\n', '\r']) {
+        eprintln!("oconsole: Command Rate Guard violation: multiline input discarded.");
+        return None;
+    }
+    if !guard.admit() {
+        return None;
+    }
+    Some(dir.send_cmd(line))
+}
+fn send_terminal_cancel(dir: &mut dyn DirectorConn, guard: &rate_guard::CommandRateGuard) -> bool {
+    if !guard.admit() {
+        return false;
+    }
+    dir.send_cancel();
+    true
+}
+fn terminal_readline(
+    rl: &mut Editor<BareosHelper, rustyline::history::DefaultHistory>,
+    prompt: &str,
+    guard: &rate_guard::CommandRateGuard,
+    refresh: &rate_guard::PromptRefresh,
+) -> Result<String, ReadlineError> {
+    refresh.arm(guard.remaining());
+    let result = rl.readline(prompt);
+    refresh.disarm();
+    result
+}
+fn read_guarded_dialog(
+    rl: &mut Editor<BareosHelper, rustyline::history::DefaultHistory>,
+    dir: &mut dyn DirectorConn,
+    guard: &rate_guard::CommandRateGuard,
+    refresh: &rate_guard::PromptRefresh,
+    prompt: &str,
+    cancel_dot: bool,
+) -> bool {
+    loop {
+        match terminal_readline(rl, prompt, guard, refresh) {
+            Ok(input) if cancel_dot && input.trim() == "." => {
+                if send_terminal_cancel(dir, guard) {
+                    return true;
+                }
+            }
+            Ok(input) => match send_terminal_line(dir, guard, input.trim()) {
+                None => continue,
+                Some(sent) => return sent,
+            },
+            Err(ReadlineError::Interrupted) => {
+                eprintln!();
+                if send_terminal_cancel(dir, guard) {
+                    return true;
+                }
+            }
+            Err(_) => return false,
+        }
+    }
+}
+
 fn interactive_loop(
     mut dir: Box<dyn DirectorConn>,
     console_name: &str,
@@ -869,6 +935,7 @@ fn interactive_loop(
 
     // Init messages already drained in run_bnet_session before entering interactive mode.
     let mut helper = BareosHelper::new();
+    let guard = helper.rate_guard.clone();
     helper.load_from_director(dir.as_mut());
     let total_completions: usize = helper.entries.iter().map(|e| e.completions.len()).sum();
     let cached_values: usize = helper.value_cache.values().map(|v| v.len()).sum();
@@ -882,6 +949,9 @@ fn interactive_loop(
         .build();
     let mut rl = Editor::with_config(rl_config).unwrap();
     rl.set_helper(Some(helper));
+    let refresh = if color::enabled() {
+        rl.create_external_printer().map(rate_guard::PromptRefresh::new).unwrap_or_default()
+    } else { rate_guard::PromptRefresh::default() };
 
     let history_file = dirs_home().join(".oconsole_history");
     let _ = rl.load_history(&history_file);
@@ -893,20 +963,15 @@ fn interactive_loop(
         // Kein drain() hier — der State ist nach Init/Command-Response synchron.
         // Das naechste MainPrompt wird vom Director gesendet wenn wir einen Command senden.
 
-        match rl.readline(&prompt) {
+        match terminal_readline(&mut rl, &prompt, &guard, &refresh) {
             Ok(line) => {
                 let cmd = line.trim();
                 if cmd.is_empty() { continue; }
 
-                rl.add_history_entry(cmd).ok();
-
-                // Send command
-                {
-                    // dir already mut
-                    if !dir.send_cmd(cmd) {
-                        eprintln!("\x1b[31mConnection lost\x1b[0m");
-                        break;
-                    }
+                match send_terminal_line(dir.as_mut(), &guard, cmd) {
+                    None => continue,
+                    Some(false) => { eprintln!("Connection lost"); break; }
+                    Some(true) => { rl.add_history_entry(cmd).ok(); }
                 }
 
                 // Quit
@@ -923,8 +988,9 @@ fn interactive_loop(
                 CTRL_C.store(false, Ordering::SeqCst);
                 loop {
                     if CTRL_C.swap(false, Ordering::SeqCst) {
-                        eprintln!("\x1b[33m<CTRL-C> — sending cancel to Director\x1b[0m");
-                        dir.send_cancel();
+                        if send_terminal_cancel(dir.as_mut(), &guard) {
+                            eprintln!("\x1b[33m<CTRL-C> — sending cancel to Director\x1b[0m");
+                        }
                         continue;
                     }
 
@@ -953,45 +1019,24 @@ fn interactive_loop(
                             let _ = rl.save_history(&history_file);
                             return;
                         }
-                        Some(RecvResult::Signal(BnetSignal::YesNo)) => {
-                            match rl.readline(&color::output("\x1b[33m(yes/no): \x1b[0m")) {
-                                Ok(answer) => { dir.send_cmd(answer.trim()); }
-                                Err(ReadlineError::Interrupted) => {
-                                    eprintln!();
-                                    dir.send_cancel();
-                                }
-                                Err(_) => break,
-                            }
-                        }
-                        Some(RecvResult::Signal(BnetSignal::SubPrompt)) => {
-                            match rl.readline(&color::output("\x1b[36m> \x1b[0m")) {
-                                Ok(input) => {
-                                    let s = input.trim();
-                                    // dir already mut
-                                    if s == "." { dir.send_cancel(); } else { dir.send_cmd(s); }
-                                }
-                                Err(ReadlineError::Interrupted) => {
-                                    eprintln!();
-                                    dir.send_cancel();
-                                }
-                                Err(_) => break,
-                            }
-                        }
-                        Some(RecvResult::Signal(BnetSignal::TextInput)) => {
-                            match rl.readline("") {
-                                Ok(input) => { dir.send_cmd(input.trim()); }
-                                Err(ReadlineError::Interrupted) => {
-                                    eprintln!();
-                                    dir.send_cancel();
-                                }
-                                Err(_) => break,
+                        Some(RecvResult::Signal(signal @ (BnetSignal::YesNo | BnetSignal::SubPrompt | BnetSignal::TextInput))) => {
+                            let dialog_prompt = match signal {
+                                BnetSignal::YesNo => "(yes/no): ",
+                                BnetSignal::SubPrompt => "> ",
+                                _ => "input> ",
+                            };
+                            if !read_guarded_dialog(&mut rl, dir.as_mut(), &guard, &refresh,
+                                dialog_prompt, signal == BnetSignal::SubPrompt) {
+                                let _ = rl.save_history(&history_file);
+                                return;
                             }
                         }
                         None => {
                             // EAGAIN/EINTR — check CTRL-C
                             if CTRL_C.swap(false, Ordering::SeqCst) {
-                                eprintln!("\x1b[33m<CTRL-C> — sending cancel to Director\x1b[0m");
-                                dir.send_cancel();
+                                if send_terminal_cancel(dir.as_mut(), &guard) {
+                                    eprintln!("\x1b[33m<CTRL-C> — sending cancel to Director\x1b[0m");
+                                }
                             }
                             continue;
                         }
@@ -1025,7 +1070,7 @@ fn interactive_loop(
             }
             Err(ReadlineError::Interrupted) => continue,
             Err(ReadlineError::Eof) => {
-                dir.send_cmd("quit");
+                // EOF closes the connection; do not send an unguarded command.
                 break;
             }
             Err(e) => {

@@ -95,6 +95,26 @@ Set `NO_COLOR=1` to disable oconsole styling, including prompts, hints and diagn
 - [LLM command reference (JSON)](docs/wiki/commands/bareos-director-commands.json)
 - [Command pages](docs/wiki/commands/README.md)
 
+## oconsole: terminal command rate guard
+
+Terminal/stdin commands and dialog replies share a fixed **three-second**
+minimum interval per running console, for both BNET and gRPC. The first input
+is allowed immediately. Faster inputs are discarded before sending and are
+not queued or added to command history. A `Command Rate Guard violation`
+message and remaining wait time are written only to stderr.
+
+The input prompt is **green** when ready and **red** during the cooldown.
+It switches back to green automatically, preserving partially edited input.
+`NO_COLOR=1` keeps the prompt plain; the guard remains active. Empty top-level
+lines do not consume the interval. Multiline pasted commands are rejected.
+All three Director dialog types use the same timer and re-prompt after rejection.
+Terminal cancellation commands are guarded too; EOF simply closes the connection.
+
+The guard applies to terminal/stdin command entry. MCP tool calls, single-command
+`-e` mode and internal completion queries retain their existing behavior.
+For timed prompt updates, rustyline is pinned to the
+[upstream input-buffer fix](https://github.com/kkawakam/rustyline/commit/f2bbcc5cdf7b99dfe7d97af03976b111bc6fd256).
+
 ## oconsole: gRPC and MCP
 
 The MCP server uses the official Rust SDK `rmcp` (requires Rust 1.88 or newer).

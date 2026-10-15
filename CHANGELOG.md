@@ -69,4 +69,13 @@ onesimus (25.1.2+onesimus.0.2.0-2) UNRELEASED; urgency=medium
     preserve protocol bytes and keep HTTP Authorization headers out of output.
     Add transport-level regression coverage for both compiled MCP policies.
 
+  * oconsole: enforce a shared three-second terminal/stdin command rate guard,
+    including yes/no, selection, text replies and terminal cancellation.
+    Discard fast or multiline input before dispatch and report violations only
+    on stderr; rejected input is neither queued nor added to command history.
+  * Show a green/red admission state in the input prompt, restore green after
+    cooldown without losing edited text, and preserve NO_COLOR behavior.
+    Pin rustyline to the upstream buffered-input fix needed for timed redraws.
+    Add deterministic boundary/spam tests and real-binary BNET/stdin/PTY tests.
+
  -- Joerg Bernau <Joerg.Bernau@onesimus.io>  Thu, 15 Oct 2026 14:00:00 +0200
