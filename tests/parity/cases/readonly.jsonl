@@ -1,0 +1,222 @@
+# Read-only/interactive-entry parity cases; one JSON object per line.
+{"id": "banner", "steps": [], "banner": true}
+{"id": "banner-limited", "steps": [], "banner": true, "console": "parity-limited", "password": "parity-limited-pw"}
+{"id": "version", "steps": ["version"]}
+{"id": "time", "steps": ["time"], "normalize": ["\\d\\d-\\w{3}-\\d{4} \\d\\d:\\d\\d:\\d\\d", "^\\w{2,3} "]}
+{"id": "whoami", "steps": ["whoami"]}
+{"id": "whoami-limited", "steps": ["whoami"], "console": "parity-limited", "password": "parity-limited-pw"}
+{"id": "unknown-command", "steps": ["foobar"]}
+{"id": "empty-line", "steps": [""]}
+{"id": "help", "steps": ["help"]}
+{"id": "help-run", "steps": ["help run"]}
+{"id": "help-configure", "steps": ["help configure"]}
+{"id": "help-unknown", "steps": ["help nosuch"]}
+{"id": "help-limited", "steps": ["help"], "console": "parity-limited", "password": "parity-limited-pw"}
+{"id": "dot-help", "steps": [".help"]}
+{"id": "dot-help-all", "steps": [".help all"]}
+{"id": "dot-help-item", "steps": [".help item=list"]}
+{"id": "dot-help-full", "steps": [".help full"]}
+{"id": "dot-help-limited", "steps": [".help"], "console": "parity-limited", "password": "parity-limited-pw"}
+{"id": "dot-help-json", "steps": [".help item=run"], "setup": [".api 2"]}
+{"id": "dot_jobs", "steps": [".jobs"]}
+{"id": "dot_jobs-type-B", "steps": [".jobs type=B"]}
+{"id": "dot_clients", "steps": [".clients"]}
+{"id": "dot_pools", "steps": [".pools"]}
+{"id": "dot_pools-type-Backup", "steps": [".pools type=Backup"]}
+{"id": "dot_storages", "steps": [".storages"]}
+{"id": "dot_filesets", "steps": [".filesets"]}
+{"id": "dot_catalogs", "steps": [".catalogs"]}
+{"id": "dot_schedule", "steps": [".schedule"]}
+{"id": "dot_msgs", "steps": [".msgs"]}
+{"id": "dot_levels", "steps": [".levels"]}
+{"id": "dot_levels-type-Backup", "steps": [".levels type=Backup"]}
+{"id": "dot_types", "steps": [".types"]}
+{"id": "dot_mediatypes", "steps": [".mediatypes"]}
+{"id": "dot_media", "steps": [".media"]}
+{"id": "dot_locations", "steps": [".locations"]}
+{"id": "dot_volstatus", "steps": [".volstatus"]}
+{"id": "dot_actiononpurge", "steps": [".actiononpurge"]}
+{"id": "dot_profiles", "steps": [".profiles"]}
+{"id": "dot_consoles", "steps": [".consoles"]}
+{"id": "dot_users", "steps": [".users"]}
+{"id": "dot_jobdefs", "steps": [".jobdefs"]}
+{"id": "dot_jobs-limited", "steps": [".jobs"], "console": "parity-limited", "password": "parity-limited-pw"}
+{"id": "dot_clients-limited", "steps": [".clients"], "console": "parity-limited", "password": "parity-limited-pw"}
+{"id": "dot_pools-limited", "steps": [".pools"], "console": "parity-limited", "password": "parity-limited-pw"}
+{"id": "dot_storages-limited", "steps": [".storages"], "console": "parity-limited", "password": "parity-limited-pw"}
+{"id": "dot_jobs-api2", "steps": [".jobs"], "setup": [".api 2"]}
+{"id": "dot_clients-api2", "steps": [".clients"], "setup": [".api 2"]}
+{"id": "dot_pools-api2", "steps": [".pools"], "setup": [".api 2"]}
+{"id": "dot_levels-api2", "steps": [".levels"], "setup": [".api 2"]}
+{"id": "dot-jobstatus", "steps": [".jobstatus"]}
+{"id": "dot-authorized-job", "steps": [".authorized job=backup-bareos-fd"], "console": "parity-limited", "password": "parity-limited-pw"}
+{"id": "dot-authorized-job-denied", "steps": [".authorized job=BackupCatalog"], "console": "parity-limited", "password": "parity-limited-pw"}
+{"id": "dot-authorized-cmd", "steps": [".authorized cmd=run"], "console": "parity-limited", "password": "parity-limited-pw"}
+{"id": "dot-defaults-job", "steps": [".defaults job=backup-bareos-fd"]}
+{"id": "dot-defaults-client", "steps": [".defaults client=bareos-fd"]}
+{"id": "dot-defaults-storage", "steps": [".defaults storage=File"]}
+{"id": "dot-defaults-pool", "steps": [".defaults pool=Full"]}
+{"id": "dot-defaults-restore", "steps": [".defaults job=RestoreFiles"]}
+{"id": "dot-defaults-job-api2", "steps": [".defaults job=backup-bareos-fd"], "setup": [".api 2"]}
+{"id": "dot-api-0", "steps": [".api 0"]}
+{"id": "dot-api-1", "steps": [".api 1"]}
+{"id": "dot-api-2", "steps": [".api 2"]}
+{"id": "dot-api-json", "steps": [".api json compact=yes"]}
+{"id": "dot-sql", "steps": [".sql query=\"select count(*) from job\""]}
+{"id": "dot-noop", "steps": ["."]}
+{"id": "show-director", "steps": ["show director"]}
+{"id": "show-clients", "steps": ["show clients"]}
+{"id": "show-client-bareos-fd", "steps": ["show client=bareos-fd"]}
+{"id": "show-jobs", "steps": ["show jobs"]}
+{"id": "show-job-backup-bareos-fd", "steps": ["show job=backup-bareos-fd"]}
+{"id": "show-jobdefs", "steps": ["show jobdefs"]}
+{"id": "show-storages", "steps": ["show storages"]}
+{"id": "show-pools", "steps": ["show pools"]}
+{"id": "show-pool-Full", "steps": ["show pool=Full"]}
+{"id": "show-filesets", "steps": ["show filesets"]}
+{"id": "show-fileset-LinuxAll", "steps": ["show fileset=LinuxAll"]}
+{"id": "show-schedules", "steps": ["show schedules"]}
+{"id": "show-messages", "steps": ["show messages"]}
+{"id": "show-catalogs", "steps": ["show catalogs"]}
+{"id": "show-consoles", "steps": ["show consoles"]}
+{"id": "show-profiles", "steps": ["show profiles"]}
+{"id": "show-all", "steps": ["show all"]}
+{"id": "show-disabled", "steps": ["show disabled"]}
+{"id": "show-nosuch-foo", "steps": ["show nosuch=foo"]}
+{"id": "show-job-nosuch", "steps": ["show job=nosuch"]}
+{"id": "show-verbose-client", "steps": ["show client=bareos-fd verbose"]}
+{"id": "show-jobs-api2", "steps": ["show jobs"], "setup": [".api 2"]}
+{"id": "list-jobs", "steps": ["list jobs"]}
+{"id": "llist-jobs", "steps": ["llist jobs"]}
+{"id": "list-jobs-limit-5", "steps": ["list jobs limit=5"]}
+{"id": "llist-jobs-limit-5", "steps": ["llist jobs limit=5"]}
+{"id": "list-jobs-last", "steps": ["list jobs last"]}
+{"id": "llist-jobs-last", "steps": ["llist jobs last"]}
+{"id": "list-jobs-jobstatus-T-limit-3", "steps": ["list jobs jobstatus=T limit=3"]}
+{"id": "llist-jobs-jobstatus-T-limit-3", "steps": ["llist jobs jobstatus=T limit=3"]}
+{"id": "list-jobs-client-bareos-fd-limit-3", "steps": ["list jobs client=bareos-fd limit=3"]}
+{"id": "llist-jobs-client-bareos-fd-limit-3", "steps": ["llist jobs client=bareos-fd limit=3"]}
+{"id": "list-jobs-level-F-limit-3", "steps": ["list jobs level=F limit=3"]}
+{"id": "llist-jobs-level-F-limit-3", "steps": ["llist jobs level=F limit=3"]}
+{"id": "list-jobs-days-0", "steps": ["list jobs days=0"]}
+{"id": "llist-jobs-days-0", "steps": ["llist jobs days=0"]}
+{"id": "list-jobid-1", "steps": ["list jobid=1"]}
+{"id": "llist-jobid-1", "steps": ["llist jobid=1"]}
+{"id": "list-job-backup-bareos-fd-limit-2", "steps": ["list job=backup-bareos-fd limit=2"]}
+{"id": "llist-job-backup-bareos-fd-limit-2", "steps": ["llist job=backup-bareos-fd limit=2"]}
+{"id": "list-jobtotals", "steps": ["list jobtotals"]}
+{"id": "llist-jobtotals", "steps": ["llist jobtotals"]}
+{"id": "list-clients", "steps": ["list clients"]}
+{"id": "llist-clients", "steps": ["llist clients"]}
+{"id": "list-pools", "steps": ["list pools"]}
+{"id": "llist-pools", "steps": ["llist pools"]}
+{"id": "list-pool-Full", "steps": ["list pool=Full"]}
+{"id": "llist-pool-Full", "steps": ["llist pool=Full"]}
+{"id": "list-volumes", "steps": ["list volumes"]}
+{"id": "llist-volumes", "steps": ["llist volumes"]}
+{"id": "list-volumes-pool-Full", "steps": ["list volumes pool=Full"]}
+{"id": "llist-volumes-pool-Full", "steps": ["llist volumes pool=Full"]}
+{"id": "list-volume-Full-0001", "steps": ["list volume=Full-0001"]}
+{"id": "llist-volume-Full-0001", "steps": ["llist volume=Full-0001"]}
+{"id": "list-media", "steps": ["list media"]}
+{"id": "llist-media", "steps": ["llist media"]}
+{"id": "list-filesets", "steps": ["list filesets"]}
+{"id": "llist-filesets", "steps": ["llist filesets"]}
+{"id": "list-files-jobid-1-limit-5", "steps": ["list files jobid=1 limit=5"]}
+{"id": "llist-files-jobid-1-limit-5", "steps": ["llist files jobid=1 limit=5"]}
+{"id": "list-basefiles-jobid-1", "steps": ["list basefiles jobid=1"]}
+{"id": "llist-basefiles-jobid-1", "steps": ["llist basefiles jobid=1"]}
+{"id": "list-copies", "steps": ["list copies"]}
+{"id": "llist-copies", "steps": ["llist copies"]}
+{"id": "list-backups-client-bareos-fd-limit-3", "steps": ["list backups client=bareos-fd limit=3"]}
+{"id": "llist-backups-client-bareos-fd-limit-3", "steps": ["llist backups client=bareos-fd limit=3"]}
+{"id": "list-joblog-jobid-1", "steps": ["list joblog jobid=1"]}
+{"id": "llist-joblog-jobid-1", "steps": ["llist joblog jobid=1"]}
+{"id": "list-jobmedia-jobid-1", "steps": ["list jobmedia jobid=1"]}
+{"id": "llist-jobmedia-jobid-1", "steps": ["llist jobmedia jobid=1"]}
+{"id": "list-log-limit-5", "steps": ["list log limit=5"]}
+{"id": "llist-log-limit-5", "steps": ["llist log limit=5"]}
+{"id": "list-nextvolume-job-backup-bareos-fd", "steps": ["list nextvolume job=backup-bareos-fd"]}
+{"id": "llist-nextvolume-job-backup-bareos-fd", "steps": ["llist nextvolume job=backup-bareos-fd"]}
+{"id": "list-storages", "steps": ["list storages"]}
+{"id": "llist-storages", "steps": ["llist storages"]}
+{"id": "list-mediatypes", "steps": ["list mediatypes"]}
+{"id": "llist-mediatypes", "steps": ["llist mediatypes"]}
+{"id": "list-jobs-limit-3-api2", "steps": ["list jobs limit=3"], "setup": [".api 2"]}
+{"id": "llist-jobs-limit-3-api2", "steps": ["llist jobs limit=3"], "setup": [".api 2"]}
+{"id": "list-pools-api2", "steps": ["list pools"], "setup": [".api 2"]}
+{"id": "llist-pools-api2", "steps": ["llist pools"], "setup": [".api 2"]}
+{"id": "list-volumes-api2", "steps": ["list volumes"], "setup": [".api 2"]}
+{"id": "llist-volumes-api2", "steps": ["llist volumes"], "setup": [".api 2"]}
+{"id": "list-clients-api2", "steps": ["list clients"], "setup": [".api 2"]}
+{"id": "llist-clients-api2", "steps": ["llist clients"], "setup": [".api 2"]}
+{"id": "list-jobs-limited", "steps": ["list jobs limit=5"], "console": "parity-limited", "password": "parity-limited-pw"}
+{"id": "list-bogus", "steps": ["list nosuch"]}
+{"id": "status-client", "steps": ["status client=bareos-fd"], "normalize": ["\\d\\d-\\w{3}-\\d\\d \\d\\d:\\d\\d", "Heap: .*", "Daemon started.*"], "timeout_ms": 20000}
+{"id": "status-storage", "steps": ["status storage=File"], "normalize": ["\\d\\d-\\w{3}-\\d\\d \\d\\d:\\d\\d"], "timeout_ms": 20000}
+{"id": "status-scheduler", "steps": ["status scheduler"], "normalize": ["\\d\\d-\\w{3}-\\d\\d \\d\\d:\\d\\d"]}
+{"id": "status-scheduler-job", "steps": ["status scheduler job=backup-bareos-fd days=3"], "normalize": ["\\d\\d-\\w{3}-\\d\\d \\d\\d:\\d\\d"]}
+{"id": "status-subscriptions", "steps": ["status subscriptions"]}
+{"id": "status-configuration", "steps": ["status configuration"]}
+{"id": "status-dir", "steps": ["status director"], "normalize": ["\\d\\d-\\w{3}-\\d\\d \\d\\d:\\d\\d", "Heap: .*", "pid \\d+"]}
+{"id": "status-bogus", "steps": ["status nosuch"]}
+{"id": "dot-status-dir-header", "steps": [".status dir header"], "normalize": ["\\d\\d-\\w{3}-\\d\\d \\d\\d:\\d\\d", "pid \\d+"]}
+{"id": "dot-status-dir-running", "steps": [".status dir running"]}
+{"id": "dot-status-dir-scheduled", "steps": [".status dir scheduled"], "normalize": ["\\d\\d-\\w{3}-\\d\\d \\d\\d:\\d\\d"]}
+{"id": "dot-status-dir-terminated", "steps": [".status dir terminated"]}
+{"id": "messages", "steps": ["messages"]}
+{"id": "dot-messages", "steps": [".messages"]}
+{"id": "memory", "steps": ["memory"], "normalize": ["\\d+"]}
+{"id": "autodisplay-off", "steps": ["autodisplay off"]}
+{"id": "autodisplay-on", "steps": ["autodisplay on"]}
+{"id": "gui-on", "steps": ["gui on"]}
+{"id": "gui-off", "steps": ["gui off"]}
+{"id": "var", "steps": ["var"]}
+{"id": "use", "steps": ["use catalog=MyCatalog"]}
+{"id": "query-list", "steps": ["query"], "steps_note": "dialog"}
+{"id": "sqlquery-select", "steps": ["sqlquery", "select count(*) from job;", ""]}
+{"id": "estimate", "steps": ["estimate job=backup-bareos-fd level=Full"], "timeout_ms": 30000}
+{"id": "estimate-listing", "steps": ["estimate job=backup-bareos-fd level=Full listing"], "timeout_ms": 30000}
+{"id": "resolve-local", "steps": ["resolve localhost"]}
+{"id": "resolve-client", "steps": ["resolve client=bareos-fd localhost"], "timeout_ms": 20000}
+{"id": "setip", "steps": ["setip"]}
+{"id": "wait-idle", "steps": ["wait"]}
+{"id": "wait-jobid", "steps": ["wait jobid=1"]}
+{"id": "cancel-none", "steps": ["cancel jobid=999999"]}
+{"id": "cancel-dialog", "steps": ["cancel"]}
+{"id": "enable-nojob", "steps": ["enable job=nosuch"]}
+{"id": "disable-nojob", "steps": ["disable job=nosuch"]}
+{"id": "configure-export", "steps": ["configure export client=bareos-fd"]}
+{"id": "configure-bad", "steps": ["configure nosuch"]}
+{"id": "prune-dialog", "steps": ["prune"]}
+{"id": "purge-dialog", "steps": ["purge"]}
+{"id": "delete-dialog", "steps": ["delete"]}
+{"id": "update-dialog", "steps": ["update"]}
+{"id": "label-nostorage", "steps": ["label"]}
+{"id": "mount-dialog", "steps": ["mount"]}
+{"id": "release-dialog", "steps": ["release"]}
+{"id": "restore-help", "steps": ["restore help"]}
+{"id": "run-noargs", "steps": ["run"]}
+{"id": "run-unknownjob", "steps": ["run job=nosuch yes"]}
+{"id": "rerun-noargs", "steps": ["rerun"]}
+{"id": "rerun-badid", "steps": ["rerun jobid=999999"]}
+{"id": "import-noargs", "steps": ["import"]}
+{"id": "export-noargs", "steps": ["export"]}
+{"id": "move-noargs", "steps": ["move"]}
+{"id": "trace-noargs", "steps": ["trace"]}
+{"id": "setdebug-dir", "steps": ["setdebug level=0 dir"]}
+{"id": "setdebug-noargs", "steps": ["setdebug"]}
+{"id": "setbandwidth-noargs", "steps": ["setbandwidth"]}
+{"id": "setdevice-noargs", "steps": ["setdevice"]}
+{"id": "add-noargs", "steps": ["add"]}
+{"id": "create-noargs", "steps": ["create"]}
+{"id": "truncate-noargs", "steps": ["truncate"]}
+{"id": "relabel-noargs", "steps": ["relabel"]}
+{"id": "bvfs-get-jobids", "steps": [".bvfs_get_jobids jobid=1"]}
+{"id": "bvfs-lsdirs", "steps": [".bvfs_lsdirs jobid=1 path=/"]}
+{"id": "bvfs-lsfiles", "steps": [".bvfs_lsfiles jobid=1 path=/"]}
+{"id": "bvfs-versions", "steps": [".bvfs_versions client=bareos-fd jobid=1 path=/ fname=x"]}
+{"id": "automount", "steps": ["automount on"]}
+{"id": "dot-quit", "steps": [".quit"]}
+{"id": "quit", "steps": ["quit"]}
+{"id": "exit", "steps": ["exit"]}
