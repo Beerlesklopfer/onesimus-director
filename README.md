@@ -2,7 +2,7 @@
 
 Drop-in replacement for the Bareos Director daemon — independent project after Bareos rejected the Rust rewrite.
 
-**Status:** Full, Incremental, and Differential Backup + Restore working end-to-end with C++ FD/SD.
+**Status:** Full, Incremental, and Differential Backup + Restore working end-to-end with C++ FD/SD. All 88 original console commands registered; per-command SHA-256 output parity vs. `bconsole` is the active acceptance gate.
 
 ## What works
 
@@ -11,6 +11,7 @@ Drop-in replacement for the Bareos Director daemon — independent project after
 - **TLS-PSK** authentication (TLSv1.2, compatible with C++ bconsole/FD/SD)
 - **CRAM-MD5** two-way authentication
 - **Console commands** via C++ `bconsole` or `oconsole`: version, status, restore, run, cancel, list, ...
+- **Director command parity**: `wait`, `setdebug`, `setbandwidth`, `resolve`, `trace`, `.messages`, `.users`, `setdevice`, scoped `run` — each brought up to `bconsole` parity with regression tests and per-command wiki/JSON status
 - **Job Worker FSM**: 17 states, fork() per job, pipe-based IPC to Director
 - **SD CatReq proxy**: FindMedia, GetVolInfo, UpdateMedia, CreateJobMedia
 - **Config parser**: Bareos `bareos-dir.d/*/*.conf` directory format
@@ -94,6 +95,42 @@ Set `NO_COLOR=1` to disable oconsole styling, including prompts, hints and diagn
 - [Wiki: original Bareos command set and completeness audit](docs/wiki/commands/bareos-reference.md)
 - [LLM command reference (JSON)](docs/wiki/commands/bareos-director-commands.json)
 - [Command pages](docs/wiki/commands/README.md)
+
+## Parity testing
+
+Parity against the original Bareos `bconsole` is the acceptance gate, and it is
+measured, not assumed.
+
+- **Coverage.** A concrete test case (parameters, preconditions, expected side
+  effects) for each of the 88 original console commands and the 26 Restore-Shell
+  commands. Registering a command name is not parity.
+- **Two levels, reported separately.** (1) `bconsole` vs. `oconsole` against the
+  *same* Director and *same* reproducible state; (2) the Bareos Director vs. the
+  Onesimus Director with identical configuration and catalog snapshot.
+- **Byte-exact SHA-256.** The command response is captured as unchanged bytes and
+  hashed. For every case `bconsole` and `oconsole` must produce the *same*
+  SHA-256. No trimming, sorting, JSON re-serialization, or error removal — line
+  endings, whitespace, field order, and encoding count.
+- **Deterministic environment.** Identical locale, timezone, API mode, and
+  terminal parameters; `NO_COLOR=1` for `oconsole`. Time, IDs, hostnames, and
+  asynchronous messages are fixed by the test environment or fixtures; genuinely
+  non-deterministic cases stay marked open, not normalized away.
+- **Disposable state.** State-changing commands run only in throwaway instances
+  with the same initial state restored before each client run.
+- **Per-case result JSON.** Command, parameters, context, versions, fixtures,
+  return codes, SHA-256 of both responses, byte counts, diff, and status. Errors,
+  timeouts, and not-run cases never count as passed; raw files and diffs are
+  retained for analysis.
+
+**Tooling.** `tests/compare_directors.py` (wrapper `tests/compare_directors.sh`)
+runs identical commands against C++ `bareos-dir` and Rust `onesimus-dird`,
+compares outputs, measures response times, and emits JSON + PDF reports.
+
+**Anchoring.** Work is anchored to `director-parity-anchor-20261015` (`fb5242f`),
+taken *before* the functional command changes; each main command ships as its own
+commit with tests, wiki/JSON status, and a `CHANGELOG.md` entry. Open sub-functions
+stay explicitly audited until both the source comparison and the SHA-256 matrix
+prove parity (see `docs/BACKLOG.md`).
 
 ## oconsole: terminal command rate guard
 
