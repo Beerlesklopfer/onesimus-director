@@ -1,0 +1,31 @@
+# Compatibility log C-016: .sql / sqlquery output like ListSqlQuery (read-only SELECTs only).
+{"id": "c016-sql-count", "steps": [".sql query=\"select count(*) from pool\""]}
+{"id": "c016-sql-multicol-null", "steps": [".sql query=\"select poolid, name, NULL as nothing, 1234567 as big, 'x'::text as t, 1.5 as f, now() is null as b from pool order by poolid\""]}
+{"id": "c016-sql-empty", "steps": [".sql query=\"select poolid, name from pool where poolid < 0\""]}
+{"id": "c016-sql-syntax-error", "steps": [".sql query=\"selec nothing\""]}
+{"id": "c016-sql-unknown-table", "steps": [".sql query=\"select * from nosuchtable\""]}
+{"id": "c016-sql-no-query", "steps": [".sql"]}
+{"id": "c016-sql-no-value", "steps": [".sql query"]}
+{"id": "c016-sql-semicolons", "steps": [".sql query=\"select 1 as a; select 2 as b\""]}
+{"id": "c016-sql-trailing-semicolon", "steps": [".sql query=\"select 1 as a;\""]}
+{"id": "c016-sql-api1", "steps": [".sql query=\"select poolid, name, NULL as nothing from pool order by poolid\""], "setup": [".api 1"]}
+{"id": "c016-sql-api1-empty", "steps": [".sql query=\"select poolid from pool where poolid < 0\""], "setup": [".api 1"]}
+{"id": "c016-sql-api1-error", "steps": [".sql query=\"selec nothing\""], "setup": [".api 1"]}
+{"id": "c016-sql-api2", "steps": [".sql query=\"select poolid, name, NULL as nothing, 1234567 as big from pool order by poolid\""], "setup": [".api 2"]}
+{"id": "c016-sql-api2-empty", "steps": [".sql query=\"select poolid from pool where poolid < 0\""], "setup": [".api 2"]}
+{"id": "c016-sql-api2-error", "steps": [".sql query=\"selec nothing\""], "setup": [".api 2"]}
+{"id": "c016-sql-api2-noquery", "steps": [".sql"], "setup": [".api 2"]}
+{"id": "c016-sql-error-truncated", "steps": [".sql query=\"select poolid, name, poolid, name, poolid, name, poolid, name, poolid, name from pool where nosuchcolumn = 1 and poolid > 0 and poolid < 1000\""]}
+{"id": "c016-sql-error-end-of-input", "steps": [".sql query=\"select * from\""]}
+{"id": "c016-sql-error-runtime", "steps": [".sql query=\"select 1/0\""]}
+{"id": "c016-sql-error-hint", "steps": [".sql query=\"select nosuchfunc(1)\""]}
+{"id": "c016-sql-jobid-bytes", "steps": [".sql query=\"select jobid, jobbytes, name from job order by jobid limit 3\""]}
+{"id": "c016-sql-api1-semicolons", "steps": [".sql query=\"select 1 as a; select 2 as b, 3 as c\""], "setup": [".api 1"]}
+{"id": "c016-sql-api2-error-hint", "steps": [".sql query=\"select nosuchfunc(1)\""], "setup": [".api 2"]}
+{"id": "c016-sqlquery-select", "steps": ["sqlquery", "select poolid, name, NULL as n from pool order by poolid;", ""]}
+{"id": "c016-sqlquery-multiline", "steps": ["sqlquery", "select count(*)", "from pool;", ""]}
+{"id": "c016-sqlquery-error", "steps": ["sqlquery", "selec nothing;", ""]}
+{"id": "c016-sqlquery-empty", "steps": ["sqlquery", "select poolid from pool where poolid < 0;", ""]}
+{"id": "c016-sqlquery-args-ignored", "steps": ["sqlquery select 1;", ""]}
+{"id": "c016-sqlquery-api2", "steps": ["sqlquery", "select count(*) from pool;", ""], "setup": [".api 2"]}
+{"id": "c016-query-menu", "steps": ["query"]}

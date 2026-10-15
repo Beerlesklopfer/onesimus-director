@@ -580,28 +580,12 @@ fn cmd_bvfs_restore_db(ast: &CommandAst) -> CommandResult {
 
 /// `.sqltables [catalog=<name>]`
 pub fn cmd_dot_sqltables(ast: &CommandAst, ctx: &ExecContext) -> CommandResult {
-    use crate::command_ast::Argument;
-    crate::commands::sql::cmd_dot_sql(
-        &CommandAst {
-            command_name: ".sql".into(),
-            arguments: vec![Argument { key: "tables".into(), value: None }],
-            ..Default::default()
-        },
-        ctx,
-    )
+    crate::commands::sql::cmd_sql_tables(ast, ctx)
 }
 
 /// `.sqlschema [table=<name>] [catalog=<name>]`
 pub fn cmd_dot_sqlschema(ast: &CommandAst, ctx: &ExecContext) -> CommandResult {
-    use crate::command_ast::Argument;
-    crate::commands::sql::cmd_dot_sql(
-        &CommandAst {
-            command_name: ".sql".into(),
-            arguments: vec![Argument { key: "schema".into(), value: None }],
-            ..Default::default()
-        },
-        ctx,
-    )
+    crate::commands::sql::cmd_sql_schema(ast, ctx)
 }
 
 /// `.sqlcount [table=<name>] [catalog=<name>]`

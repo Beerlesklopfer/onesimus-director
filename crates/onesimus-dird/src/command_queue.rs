@@ -24,6 +24,12 @@ pub struct CommandResult {
     pub json: Option<serde_json::Value>,
     /// The ErrorMsg lines were emitted before the SendMsg text (C++ order).
     pub errors_first: bool,
+    /// `error_message` is the text of a single ErrorMsg call spanning
+    /// several lines (one BNET_ERROR_MSG, one JSON error entry).
+    pub single_error: bool,
+    /// Send `text_output` as is, without the terminating newline the
+    /// session otherwise appends (C++ SendMsg of text without "\n").
+    pub verbatim: bool,
 }
 
 impl CommandResult {
@@ -41,8 +47,23 @@ impl CommandResult {
         Self { success: true, text_output: text, error_message: errors, ..Default::default() }
     }
 
+    /// Mark `error_message` as one multi-line ErrorMsg call.
+    pub fn with_error_parts(mut self) -> Self {
+        self.single_error = true;
+        self
+    }
+
+    /// Send the text without an appended newline.
+    pub fn verbatim(mut self) -> Self {
+        self.verbatim = true;
+        self
+    }
+
     /// One entry per ErrorMsg call: each line keeps its trailing newline.
     pub fn error_lines(&self) -> Vec<String> {
+        if self.single_error && !self.error_message.is_empty() {
+            return vec![self.error_message.clone()];
+        }
         self.error_message.lines().filter(|l| !l.trim().is_empty()).map(|l| format!("{l}\n")).collect()
     }
 

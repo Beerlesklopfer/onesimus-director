@@ -234,7 +234,7 @@ pub fn handle_console_session<S: Read + Write>(
         if api_mode == command_executor::ApiMode::Json {
             if bnet.send_str(&crate::json_output::envelope(&result, json_compact)).is_err() { break; }
         } else {
-            let with_newline = |text: &str| if text.ends_with('\n') { text.to_string() } else { format!("{text}\n") };
+            let with_newline = |text: &str| if text.ends_with('\n') || result.verbatim { text.to_string() } else { format!("{text}\n") };
             let mut parts = [&result.text_output, &result.error_message];
             if result.errors_first { parts.reverse(); }
             if parts.iter().filter(|part| !part.is_empty())

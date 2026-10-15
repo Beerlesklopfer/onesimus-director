@@ -436,12 +436,27 @@ async fn handle_raw_query(pool: &sqlx::PgPool, sql: &str) -> CatalogResponse {
 
 /// Simple query protocol: PostgreSQL sends every value in text format, exactly
 /// what libpq hands to the C++ Director (timestamps, intervals, numerics).
+/// Like PQexec, a string with several statements yields the last result set;
+/// errors carry the libpq PQerrorMessage text (see `pq_error_message`).
 async fn handle_text_rows(pool: &sqlx::PgPool, sql: &str) -> CatalogResponse {
-    use sqlx::{Column, Row, TypeInfo};
-    let rows = match sqlx::raw_sql(sql).fetch_all(pool).await {
-        Ok(r) => r,
-        Err(e) => return CatalogResponse::Error(format!("Query: {e}")),
-    };
+    use sqlx::{Column, Either, Row, TypeInfo};
+    use tokio_stream::StreamExt;
+    let mut last: Vec<sqlx::postgres::PgRow> = Vec::new();
+    let mut current = Vec::new();
+    {
+        let mut stream = sqlx::raw_sql(sql).fetch_many(pool);
+        while let Some(item) = stream.next().await {
+            match item {
+                Ok(Either::Left(_done)) => last = std::mem::take(&mut current),
+                Ok(Either::Right(row)) => current.push(row),
+                Err(e) => {
+                    drop(stream);
+                    return CatalogResponse::Error(pq_error_message(pool, sql, &e).await);
+                }
+            }
+        }
+    }
+    let rows = if current.is_empty() { last } else { current };
     let mut table = SqlTable::default();
     if let Some(first) = rows.first() {
         table.columns = first.columns().iter().map(|c| SqlColumn {
@@ -456,6 +471,107 @@ async fn handle_text_rows(pool: &sqlx::PgPool, sql: &str) -> CatalogResponse {
         table.rows.push(values);
     }
     CatalogResponse::Rows(table)
+}
+
+/// libpq PQerrorMessage (fe-protocol3.c pqBuildErrorMessage3, default
+/// verbosity): "<SEVERITY>:  <message>\n", the "LINE n: …" excerpt with the
+/// cursor line, then DETAIL/HINT/QUERY lines. The severity word is the
+/// server-localized one (field S), which sqlx does not expose; it is derived
+/// from the server's lc_messages instead.
+async fn pq_error_message(pool: &sqlx::PgPool, sql: &str, e: &sqlx::Error) -> String {
+    use sqlx::postgres::{PgDatabaseError, PgErrorPosition, PgSeverity};
+    let Some(db) = e.as_database_error().and_then(|d| d.try_downcast_ref::<PgDatabaseError>()) else {
+        return format!("{e}\n");
+    };
+    let lc: Option<String> = sqlx::query_scalar("SHOW lc_messages").fetch_one(pool).await.ok();
+    let severity = match db.severity() {
+        PgSeverity::Fatal => "FATAL",
+        PgSeverity::Panic => "PANIC",
+        _ => localized_error_word(lc.as_deref().unwrap_or("")),
+    };
+    let mut msg = format!("{severity}:  {}\n", db.message());
+    match db.position() {
+        Some(PgErrorPosition::Original(loc)) => msg.push_str(&report_error_position(sql, loc)),
+        _ => {}
+    }
+    if let Some(d) = db.detail() { msg.push_str(&format!("DETAIL:  {d}\n")); }
+    if let Some(h) = db.hint() { msg.push_str(&format!("HINT:  {h}\n")); }
+    if let Some(PgErrorPosition::Internal { query, .. }) = db.position() {
+        msg.push_str(&format!("QUERY:  {query}\n"));
+    }
+    msg
+}
+
+/// Translation of "ERROR" in the PostgreSQL message catalogs (backend po/).
+fn localized_error_word(lc_messages: &str) -> &'static str {
+    let lang = lc_messages.split(['_', '.', '@']).next().unwrap_or("");
+    match lang {
+        "de" => "FEHLER",
+        "fr" => "ERREUR",
+        "it" => "ERRORE",
+        "pt" => "ERRO",
+        "ru" => "ОШИБКА",
+        "sv" => "FEL",
+        "pl" => "BŁĄD",
+        "tr" => "HATA",
+        _ => "ERROR",
+    }
+}
+
+/// libpq reportErrorPosition(): "LINE n: <line>\n" plus the cursor line,
+/// truncated to DISPLAY_SIZE columns around the 1-based character `loc`.
+/// Every character counts as one screen column.
+fn report_error_position(query: &str, loc: usize) -> String {
+    const DISPLAY_SIZE: usize = 60;
+    const MIN_RIGHT_CUT: usize = 10;
+    if loc == 0 {
+        return String::new();
+    }
+    let loc = loc - 1;
+    let chars: Vec<char> = query.chars().map(|c| if c == '\t' { ' ' } else { c }).collect();
+    let (mut loc_line, mut ibeg, mut iend) = (1, 0, None);
+    for (cno, &ch) in chars.iter().enumerate() {
+        if ch == '\r' || ch == '\n' {
+            if cno < loc {
+                if ch == '\r' || cno == 0 || chars[cno - 1] != '\r' {
+                    loc_line += 1;
+                }
+                ibeg = cno + 1;
+            } else {
+                iend = Some(cno);
+                break;
+            }
+        }
+    }
+    let mut iend = iend.unwrap_or(chars.len());
+    if loc > chars.len() {
+        return String::new();
+    }
+    let (mut beg_trunc, mut end_trunc) = (false, false);
+    if iend - ibeg > DISPLAY_SIZE {
+        if ibeg + DISPLAY_SIZE >= loc + MIN_RIGHT_CUT {
+            while iend - ibeg > DISPLAY_SIZE {
+                iend -= 1;
+            }
+            end_trunc = true;
+        } else {
+            while loc + MIN_RIGHT_CUT < iend {
+                iend -= 1;
+                end_trunc = true;
+            }
+            while iend - ibeg > DISPLAY_SIZE {
+                ibeg += 1;
+                beg_trunc = true;
+            }
+        }
+    }
+    let mut prefix = format!("LINE {loc_line}: ");
+    if beg_trunc {
+        prefix.push_str("...");
+    }
+    let line: String = chars[ibeg..iend].iter().collect();
+    let cursor = prefix.chars().count() + loc - ibeg;
+    format!("{prefix}{line}{}\n{}^\n", if end_trunc { "..." } else { "" }, " ".repeat(cursor))
 }
 
 async fn handle_get_volume_info(pool: &sqlx::PgPool, vol_name: &str) -> CatalogResponse {
@@ -859,5 +975,38 @@ mod backup_reference_tests {
             }
             worker.join().unwrap();
         }
+    }
+}
+
+#[cfg(test)]
+mod pq_error_tests {
+    use super::*;
+
+    #[test]
+    fn error_position_like_libpq() {
+        // captured from bareos-dir 25.1.2 with PostgreSQL (c016 parity cases)
+        assert_eq!(report_error_position("selec nothing", 1), "LINE 1: selec nothing\n        ^\n");
+        assert_eq!(report_error_position("select * from nosuchtable", 15),
+            "LINE 1: select * from nosuchtable\n                      ^\n");
+        assert_eq!(report_error_position("select 1\nfrom\tx y", 15), "LINE 2: from x y\n             ^\n");
+        assert_eq!(report_error_position("x", 5), "");
+    }
+
+    #[test]
+    fn long_lines_are_truncated() {
+        let q = format!("select {} frm", "a, ".repeat(40));
+        let out = report_error_position(&q, q.len() - 2);
+        let first = out.lines().next().unwrap();
+        assert!(first.starts_with("LINE 1: ...") && first.ends_with("frm"), "{out}");
+        assert_eq!(first.chars().count(), "LINE 1: ...".len() + 60);
+        let caret = out.lines().nth(1).unwrap();
+        assert_eq!(caret.len(), first.len() - 2); // cursor under the "f" of "frm"
+    }
+
+    #[test]
+    fn severity_word() {
+        assert_eq!(localized_error_word("de_DE.UTF-8"), "FEHLER");
+        assert_eq!(localized_error_word("C"), "ERROR");
+        assert_eq!(localized_error_word("en_US.UTF-8"), "ERROR");
     }
 }
