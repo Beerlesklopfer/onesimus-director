@@ -1,0 +1,42 @@
+# C-011 interactive dialogs (ua_input.cc, ua_select.cc). Only cancelled or harmless answers.
+{"id": "c011-run-cancel", "steps": ["run", "."]}
+{"id": "c011-run-badnumber", "steps": ["run", "0", "x", "."]}
+{"id": "c011-run-api1-cancel", "setup": [".api 1"], "steps": ["run", "."]}
+{"id": "c011-run-api2", "setup": [".api 2"], "steps": ["run"]}
+{"id": "c011-prune-cancel", "steps": ["prune", "."]}
+{"id": "c011-prune-api1-cancel", "setup": [".api 1"], "steps": ["prune", "."]}
+{"id": "c011-prune-files-cancel", "steps": ["prune", "1", "."]}
+{"id": "c011-prune-volume-cancel", "steps": ["prune volume", "."]}
+{"id": "c011-purge-cancel", "steps": ["purge", "."]}
+{"id": "c011-purge-volume-cancel", "steps": ["purge volume", "."]}
+{"id": "c011-delete-cancel", "steps": ["delete", "."]}
+{"id": "c011-delete-volume-cancel", "steps": ["delete", "1", "."]}
+{"id": "c011-delete-jobid-cancel", "steps": ["delete", "2", "."]}
+{"id": "c011-delete-pool-cancel", "steps": ["delete", "3", "."]}
+{"id": "c011-update-cancel", "steps": ["update", "."]}
+{"id": "c011-update-volume-cancel", "steps": ["update", "1", "."]}
+{"id": "c011-update-pool-cancel", "steps": ["update", "2", "."]}
+{"id": "c011-update-stats-cancel", "steps": ["update volume", "."]}
+{"id": "c011-label-cancel", "steps": ["label", "."]}
+{"id": "c011-label-name-cancel", "steps": ["label storage=File", "."]}
+{"id": "c011-relabel-cancel", "steps": ["relabel", "."]}
+{"id": "c011-create-cancel", "steps": ["create", "."]}
+{"id": "c011-add-cancel", "steps": ["add", "."]}
+{"id": "c011-add-pool-cancel", "steps": ["add pool=Full", "."]}
+{"id": "c011-query-cancel", "steps": ["query", "."]}
+{"id": "c011-query-badnumber", "steps": ["query", "999", "."]}
+{"id": "c011-sqlquery-cancel", "steps": ["sqlquery", "."]}
+{"id": "c011-sqlquery-empty", "steps": ["sqlquery", ""]}
+{"id": "c011-trace-cancel", "steps": ["trace", "."]}
+{"id": "c011-setdebug-cancel", "steps": ["setdebug", "."]}
+{"id": "c011-setbandwidth-cancel", "steps": ["setbandwidth", "."]}
+{"id": "c011-enable-cancel", "steps": ["enable", "."]}
+{"id": "c011-disable-cancel", "steps": ["disable", "."]}
+{"id": "c011-estimate-cancel", "steps": ["estimate", "."]}
+{"id": "c011-trace-api1-cancel", "setup": [".api 1"], "steps": ["trace", "."]}
+{"id": "c011-setdebug-badlevel-cancel", "steps": ["setdebug", "x", "-1", "."]}
+{"id": "c011-setdebug-daemon-cancel", "steps": ["setdebug level=0", "."]}
+{"id": "c011-setdebug-daemon-api1-cancel", "setup": [".api 1"], "steps": ["setdebug level=0", "."]}
+{"id": "c011-setdebug-daemon-badnumber", "steps": ["setdebug level=0", "5", "."]}
+{"id": "c011-setbandwidth-badlimit-cancel", "steps": ["setbandwidth", "x", "."]}
+{"id": "c011-setbandwidth-api2", "setup": [".api 2"], "steps": ["setbandwidth"]}
