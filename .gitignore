@@ -55,3 +55,4 @@ debian/debhelper-build-stamp
 
 # Claude Code worktrees/session data
 .claude/
+__pycache__/

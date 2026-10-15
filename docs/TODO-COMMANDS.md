@@ -42,12 +42,15 @@ Teilimplementierungen belegt. Dadurch lautet die aktuelle Aufteilung
   Reale gehaltene Kindprozesse prüfen Abschlussreihenfolge und Fehlerszenarien.
 - Bei `help/.help` wurden falsche Varianten, Suchregeln, Ausgabeformate und
   der inkompatible Completion-Consumer korrigiert. Dynamische `configure`-Usage
-  und ACL bleiben offen.
+  bleibt offen; die ACL-Filter- und Berechtigungslogik ist umgesetzt und getestet.
 - Bei `.defaults` deckte das Gegenreview Exponenten-/Unterlauf-, Integer- und
   Selektorfehler trotz zunächst grüner Tests auf. Diese Fälle sind korrigiert
   und durch eigene Regressionstests abgesichert.
+- Die zentrale Command-, Session- und Ressourcen-ACL wurde im Director
+  geprüft; 17 ACL-Tests sowie die vollständige Testsuite bestätigen die
+  Implementierung, ersetzen aber keine Rohdatenabnahme.
 
-Prüfstand dieses Arbeitspakets: **142 Director-Unit-Tests und 4
+Prüfstand dieses Arbeitspakets: **165 Director-Unit-Tests und 4
 BNET-Integrationstests bestanden; 26 oconsole-Produktionstests,
 27 Entwicklungstests und 4 reale stdin/PTY-Fälle bestanden.**
 Das ist lokale Regressionsevidenz, noch kein bconsole/oconsole-Rohdatenabgleich.
@@ -66,9 +69,9 @@ Live-Paritätsmatrix behauptet oder erzeugt.
 | Etappe | Ergebnis | Abhängigkeiten / Abnahme |
 | --- | --- | --- |
 | P0.1 | Reproduzierbare Original-/Rust-Testinstanzen und Vergleichsmatrix | Versionsanker, identische Konfiguration/Katalogsnapshots, Text/API1/API2, Rohbytes, SHA-256, Seiteneffekte und negative Fälle |
-| P0.2 | Echte Session-, Command- und Ressourcen-ACL | Console/Profile/Default-Console, geordnete Allow/Deny/Regex-Regeln, Alias-/Prefixauflösung; verbotener Aufruf bewirkt nichts |
+| P0.2 | Echte Session-, Command- und Ressourcen-ACL; Kernimplementierung vorhanden | Console/Profile/Default-Console, geordnete Allow/Deny/Regex-Regeln, Alias-/Prefixauflösung; verbotener Aufruf bewirkt nichts; 17 ACL-Tests und die vollständige Suite bestanden |
 | P1.1 | Jobabschluss und Statusprioritäten | `wait` samt `cancel`, Workerexit, FD-/SD-Abbruch, Katalogfehler, Retention und Statuskonflikte |
-| P1.2 | Ressourcenmetadaten und Hilfe | `.defaults`, `help/.help`, dynamische configure-Syntax, ACL, oconsole-Completion |
+| P1.2 | Ressourcenmetadaten und Hilfe | `.defaults`, `help/.help`, dynamische configure-Syntax, oconsole-Completion; ACL-Basis vorhanden |
 | P1.3 | Gemeinsame Dialog- und Daemonabläufe | Auswahl, Bestätigung, Abbruch und Fehler in `trace`, `setdebug`, `setbandwidth`, `setdevice`, `resolve`, `add` |
 | P1.4 | Katalog- und Changeroperationen | `list/llist`, `configure`, `import/export`; DB- und Hardwarewirkung gemeinsam prüfen |
 | P1.5 | Backup-/Restore-Jobketten | `run`, dann `rerun`, dann `restore`; historische Parameter, Zeit-/ID-Auswahl und tatsächliche Datenwirkung |
@@ -84,20 +87,21 @@ Gemeinsame Infrastruktur erhält eigene Commits. Kein Statuswechsel auf
 ## Offene Teilabläufe der priorisierten Befehle
 
 Alle folgenden Zeilen bleiben offen bis zur vollständigen Abnahme. Auch bei
-bereits korrigierten Teilpfaden gelten ACL, Fehlerfälle und der Rohdatenabgleich.
+bereits korrigierten Teilpfaden gelten Fehlerfälle und der Rohdatenabgleich;
+die zentrale ACL-Grundlage ist umgesetzt, die Befehlsabnahme bleibt offen.
 
 | Befehl | Nächste konkrete Teilabläufe / Rest | Erforderlicher Abschlussnachweis |
 | --- | --- | --- |
 | `wait` | FD-/SD-Abbruchkoordination, Regression für State/CatReq nach Cancel, Status-/Ausfallfälle und Originaloptionen prüfen | Cancel verzögert, Workerabsturz, Pipe-/DB-Fehler, status I/E/f/A, Job-/Mount-Auswahl, Text/API/JSON und SHA |
-| `.authorized` | Ressourcenexistenz durch echte ACL ersetzen; Selektorpriorität, Case und JSON portieren | Erlaubte/verbotene sowie nicht existente Namen, Profile, negative Regeln, mehrere Selektoren, tatsächliche Dispatch-Wirkung |
-| `setdevice` | Storage-ACL; vollständige SD-Antworten, EOF und Fehlerfälle | Fake-SD-Befehlsfolge und realer SD-Zustand; keine Erfolgsmeldung ohne Bestätigung |
+| `.authorized` | Selektorpriorität, Case und JSON portieren; Ressourcen-ACL-Selektoren sind umgesetzt | Erlaubte/verbotene sowie nicht existente Namen, Profile, negative Regeln, mehrere Selektoren, tatsächliche Dispatch-Wirkung |
+| `setdevice` | Vollständige SD-Antworten, EOF und Fehlerfälle; Storage-ACL ist umgesetzt | Fake-SD-Befehlsfolge und realer SD-Zustand; keine Erfolgsmeldung ohne Bestätigung |
 | `trace` | Originaldialog und ursprünglicher Trace-Pfad | Auswahl/Abbruch/ungültige Antworten, Dateiöffnung/-wechsel/-fehler, Bytes und Nebenwirkung |
-| `setdebug` | Dialogauswahl, NDMP und ACL | Alle Zielkombinationen/Versionen/Flags, Teilfehler und tatsächliche Debugwirkung |
+| `setdebug` | Dialogauswahl und NDMP; ACL ist umgesetzt | Alle Zielkombinationen/Versionen/Flags, Teilfehler und tatsächliche Debugwirkung |
 | `setbandwidth` | job/jobid/ujobid/state/all, Dialog und NDMP/Legacy | Auswahl darf nicht versehentlich globale Limits setzen; richtige Job-Zuordnung, Quittung, Unlimited und Fehler |
-| `resolve` | ACL, Legacy-/Nicht-TLS-Verbindungen und vollständige Daemonfälle | Mehrere Hosts/FD/SD, Mehrframe-Antworten, DNS-/Verbindungsfehler, unveränderte Antwortbytes |
+| `resolve` | Legacy-/Nicht-TLS-Verbindungen und vollständige Daemonfälle; Client-/Storage-ACL ist umgesetzt | Mehrere Hosts/FD/SD, Mehrframe-Antworten, DNS-/Verbindungsfehler, unveränderte Antwortbytes |
 | `.messages` | Globale Spoolsemantik und gRPC-Sitzungsqueue | Einmalige Zustellung, Reihenfolge, parallele Sessions, erhaltene Meldungsbytes; `messages` mitprüfen |
-| `.defaults` | ACL, vollständige Konfigvalidierung und Originalvergleich der portierten Felder | Alle vier Ressourcenselektoren, JobDefs/Overrides, Restore, Mengen/Zeiten, Storage-/Device-Reihenfolge und SHA |
-| `help` | Dynamische configure-Usage und ACL-Filter/permission | help/.help/all/full/item, unbekannt/Case/Fehler, API1/API2, Completion gegen Original und SHA |
+| `.defaults` | Vollständige Konfigvalidierung und Originalvergleich der portierten Felder; Job/Client/Storage/Pool-ACL ist umgesetzt | Alle vier Ressourcenselektoren, JobDefs/Overrides, Restore, Mengen/Zeiten, Storage-/Device-Reihenfolge und SHA |
+| `help` | Dynamische configure-Usage; ACL-Filter/-permission sind umgesetzt | help/.help/all/full/item, unbekannt/Case/Fehler, API1/API2, Completion gegen Original und SHA |
 | `run` | Accurate/VirtualFull, FileSet-Inhaltsänderung und weitere Originaloptionen | Full-/Differential-/Incremental-Ketten, Pool/FileSet-Override, FD-/SD-/DB-Fehler, Backupinhalt und Katalogwirkung |
 | `rerun` | JobID-Listen/-Bereiche, days/hours, historische Parameter und gemeinsame Startzeit; run-Abhängigkeiten when/nextpool/Dialog | Inklusive ID-Grenzen, strikte Zeitgrenze, f-Statusfilter, nextpool, SQL-Injection und Fehler mitten in der Auswahl |
 | `restore` | Interaktive Dateiauswahl, storage/restoreclient/fileregex und weitere Overrides | Originalselektion bis Bootstrap und wiederhergestellten Dateien; Abbruch und Fehler vor/nach Jobanlage |
@@ -114,9 +118,10 @@ bereits korrigierten Teilpfaden gelten ACL, Fehlerfälle und der Rohdatenabgleic
 
 - `cancel`: erster Lifecyclefix ist vorhanden; Originalselektoren, Dialog,
   tatsächlicher FD-/SD-Abbruch und Ausgabeparität sind weiterhin offen.
-- `.help`: Ausgabevarianten sind korrigiert; dynamische configure-Syntax und
-  ACL verhindern auch hier einen Abschluss. Eigenständiger JSON-Status ist
-  deshalb jetzt `partial` statt `registered_unverified`.
+- `.help`: Ausgabevarianten sind korrigiert; dynamische configure-Syntax
+  verhindert auch hier einen Abschluss. Die ACL-Filter- und
+  Berechtigungslogik ist umgesetzt. Eigenständiger JSON-Status ist deshalb
+  jetzt `partial` statt `registered_unverified`.
 
 ## Weitere Inventarlücken
 
@@ -174,6 +179,7 @@ als globaler Hauptbefehl wäre keine korrekte Umsetzung.
   `ua_select.cc`, `ua_run.cc`, `ua_impexp.cc`, `job.cc`, `dird_conf.cc`,
   `lib/jcr.cc`, `lib/output_formatter.cc`, `lib/edit.cc` im gepinnten Original.
 
-Der nächste sinnvolle Schwerpunkt ist **P0.1/P0.2**: verlässliche
-Originalvergleichs-Fixtures und das gemeinsame ACL-/Sitzungsmodell. Ohne diese
-Grundlagen lassen sich mehrere bereits weit portierte Befehle nicht abschließen.
+Der nächste sinnvolle Schwerpunkt ist **P0.1 und die P0.2-Abnahme**:
+verlässliche Originalvergleichs-Fixtures sowie der Nachweis des gemeinsamen
+ACL-/Sitzungsmodells. Ohne diese Grundlagen lassen sich mehrere bereits weit
+portierte Befehle nicht abschließen.

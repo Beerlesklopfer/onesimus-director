@@ -105,3 +105,181 @@ Je Hauptbefehl ein eigener Commit einschließlich Tests, Wiki-/JSON-Status und E
 Implementiert: Der Standardbuild (`mcp-production`) kompiliert ausschließlich MCP-Lesezugriffe. `execute` und der CLI-Schalter `--mcp-allow-write` sind dort nicht aktivierbar. Schreibzugriffe werden nur mit `--no-default-features --features mcp-development` einkompiliert und benötigen zusätzlich `--mcp-allow-write`. Beide Features zusammen oder keines sind Compile-Fehler. Debian baut ausdrücklich die Produktionsvariante. Gilt für stdio und HTTP; die Director-Verbindung bleibt unverändert.
 
 Abnahme: Tests für beide Buildvarianten, Produktions-CLI ohne Schreibschalter, Ablehnung direkt konstruierter execute-Anfragen und Buildfehler bei widersprüchlichen Features. Entwicklungsartefakte getrennt von Produktionsartefakten kennzeichnen/ablegen.
+
+
+
+###########----------###########----------###########
+
+## Addendum: Plattformübergreifender File Daemon und ereignisgesteuerte Backups
+
+**Stand:** 15.10.2026  
+**Status:** Geplant / Implementierung offen  
+**Geltungsbereich:** `crates/bareos-filed`, `crates/onesimus-dird`, `proto` (Submodule `baReos-proto`)
+
+### Zielsetzung
+
+Onesimus soll als Bareos-kompatibler Director beginnen und schrittweise eine eigenständige, gRPC-basierte Backup-Architektur erhalten. Für onesimus Home wird ein nativer Rust File Daemon benötigt, der auf Windows, macOS und Linux als Hintergrunddienst betrieben werden kann.
+
+Die neue Architektur soll neben zeitgesteuerten Backups auch ereignisgesteuerte Ausführung unterstützen: Ist ein Client zum geplanten Zeitpunkt nicht erreichbar, bleibt der Backup-Bedarf erhalten und wird bei erneuter Verfügbarkeit unter Berücksichtigung der konfigurierten Richtlinien ausgeführt.
+
+Die vorhandene BNET-Kompatibilität bleibt während der Migration erhalten. Bestehende C++ File Daemons und Storage Daemons dienen weiterhin als Referenz für Ende-zu-Ende-Tests.
+
+### 1. Ist-Zustand des Rust File Daemon
+
+Das Crate `crates/bareos-filed` enthält bereits:
+
+- TCP-Accept-Loop und Session-Threads (`accept.rs`)
+- BNET-Kommunikation mit TLS-PSK- und CRAM-MD5-Authentifizierungspfaden
+- Job-Kommandobehandlung (`backup.rs`)
+- Konfigurationsverarbeitung (`config.rs`)
+- Statusausgabe (`status.rs`)
+- Heartbeat-Thread (`heartbeat.rs`)
+- Daemon-Einstiegspunkt (`main.rs`)
+
+**Offene Funktionslücken:**
+
+- `backup.rs`: Dateiscan und Übertragung zum Storage Daemon sind noch nicht implementiert. Der aktuelle Backup-Pfad quittiert den Auftrag und meldet null gesicherte Dateien und Bytes.
+- `restore.rs`: Enthält lediglich einen Platzhalter.
+- `heartbeat.rs`: Wartet periodisch, sendet aber noch keine Heartbeats an den Director.
+- `status.rs`: Laufende und abgeschlossene Jobs werden noch nicht tatsächlich erfasst.
+- `accept.rs`: Implementiert eingehende BNET-Verbindungen, keine vom FD initiierte gRPC-Control-Session.
+- `main.rs`: Enthält Unix-spezifische Prozess- und Daemonlogik. Ein plattformübergreifender Service-Lifecycle ist noch nicht implementiert.
+
+Der Rust-FD darf deshalb noch nicht als funktionaler Ersatz für den C++-FD betrachtet werden.
+
+### 2. Rust-FD: Funktionsparität und Backup-Engine
+
+**Priorität: Hoch, nach beziehungsweise abhängig von den aktuellen Director-Paritätsarbeiten.**
+
+- [ ] Tatsächlichen Dateiscan anhand der FileSet-Include-/Exclude-Regeln implementieren.
+- [ ] Dateiinhalte und erforderliche Metadaten an den Storage Daemon übertragen.
+- [ ] Full-, Incremental- und Differential-Backups implementieren und testen.
+- [ ] Dateiänderungen, Löschungen und Umbenennungen korrekt behandeln.
+- [ ] Restore
+
+###########----------###########----------###########
+
+## Addendum: Rust-only Plugin-System mit verpflichtender Zertifizierung
+
+**Status:** Architekturentscheidung / Umsetzung offen  
+**Geltungsbereich:** onesimus Director, File Daemon, Storage Daemon und zukünftige Erweiterungsschnittstellen  
+**Sicherheitsanforderung:** Fail-closed – ohne gültige Zertifizierung keine Plugin-Ausführung
+
+### 1. Architekturentscheidung
+
+Onesimus verwendet künftig ausschließlich Plugins, die in Rust implementiert und durch eine von onesimus anerkannte Zertifizierungsstelle freigegeben wurden.
+
+Das bisherige Python-Plugin-System auf Basis von PyO3 wird nicht weitergeführt. Python-, Shell- und andere externe Plugin-Runtimes werden nicht als alternative Ausführungswege unterstützt.
+
+Ein Plugin darf nur geladen werden, wenn seine Identität, Integrität, Zertifizierung und Berechtigung erfolgreich überprüft wurden.
+
+**Verbindliche Regel: Kein gültiges Zertifikat – kein Plugin-Load.**
+
+### 2. Plugin-Zertifizierung
+
+Jedes Plugin benötigt ein signiertes Zertifizierungsmanifest.
+
+Das Manifest enthält mindestens:
+
+- [ ] Eindeutige Plugin-ID und Herstelleridentität
+- [ ] Plugin-Version und unterstützte onesimus-API-Versionen
+- [ ] Kryptografischen Hash des freigegebenen Plugin-Artefakts
+- [ ] Zertifizierungsstelle und Signaturinformationen
+- [ ] Gültigkeitszeitraum
+- [ ] Freigegebene Fähigkeiten und Ressourcenberechtigungen
+- [ ] Unterstützte Betriebssysteme und Architekturen
+- [ ] Zertifizierungsrichtlinie beziehungsweise Sicherheitsprofil
+
+Die Zertifizierung muss kryptografisch an das konkrete Plugin-Artefakt gebunden sein. Eine Zertifizierung für Version A darf nicht automatisch Version B autorisieren.
+
+### 3. Verbindliche Prüfung beim Laden
+
+Der Plugin-Loader muss vor jeder Ausführung:
+
+1. Das Plugin-Manifest lesen und validieren.
+2. Den Hash des Plugin-Artefakts überprüfen.
+3. Die digitale Signatur und Zertifikatskette validieren.
+4. Die Zertifizierungsstelle gegen den konfigurierten Trust Store prüfen.
+5. Gültigkeit und gegebenenfalls Widerrufsstatus prüfen.
+6. API-Kompatibilität und Plattformfreigabe prüfen.
+7. Angeforderte Berechtigungen gegen die lokale Sicherheitsrichtlinie prüfen.
+8. Erst danach die Plugin-Initialisierung erlauben.
+
+Bei jeder fehlgeschlagenen Prüfung wird das Plugin abgewiesen. Ein automatischer Fallback auf unsignierte Plugins ist ausgeschlossen.
+
+Auch Entwicklungs- und Debug-Builds dürfen die Zertifizierungsprüfung nicht stillschweigend umgehen. Für die Entwicklung können ausdrücklich konfigurierte Test-Zertifizierungsstellen verwendet werden.
+
+### 4. Plugin-Ausführung und Isolation
+
+Die Implementierungssprache Rust allein stellt keine ausreichende Sicherheitsgrenze dar.
+
+Deshalb muss zwischen der Zertifizierung eines Plugins und seinen tatsächlichen Laufzeitberechtigungen unterschieden werden.
+
+- [ ] Eine versionierte Plugin-API definieren.
+- [ ] Berechtigungen nach dem Least-Privilege-Prinzip vergeben.
+- [ ] Direkten Zugriff auf Director-Interna, Katalog und Schlüsselmaterial standardmäßig verweigern.
+- [ ] Ressourcenlimits und Ausführungszeitgrenzen festlegen.
+- [ ] Plugin-Fehler vom Hauptdaemon isolieren.
+- [ ] Plugin-Ladevorgänge und sicherheitsrelevante Aktionen protokollieren.
+- [ ] Sichere Aktualisierung und Deaktivierung von Plugins implementieren.
+
+**Bevorzugte Architektur:** Rust-Plugins als WebAssembly-Komponenten mit einem kontrollierten Host-Interface und Capability-basierter Freigabe.
+
+Native Rust-Plugins über dynamische Bibliotheken sind nicht automatisch speichersicher gegenüber dem Hostprozess. Eine Zertifizierung ersetzt keine Prozess- oder Sandbox-Isolation.
+
+Die endgültige Laufzeitform ist vor der Implementierung verbindlich festzulegen.
+
+### 5. Zertifizierungs- und Vertrauensmodell
+
+- [ ] onesimus-Trust-Store definieren.
+- [ ] Signaturalgorithmus und Manifestformat festlegen.
+- [ ] Verfahren zur Ausstellung und Erneuerung von Zertifizierungen definieren.
+- [ ] Zertifikatswiderruf und Sperrlisten unterstützen.
+- [ ] Offline-Verifikation für NAS-Appliances ermöglichen.
+- [ ] Vertrauenswürdige Updates des Trust Stores absichern.
+- [ ] Zertifizierungsstatus in der Administrationsoberfläche anzeigen.
+- [ ] Sicherheitsereignisse bei abgewiesenen Plugins protokollieren.
+
+Die Zertifizierung soll nicht nur die Herkunft eines Plugins bestätigen, sondern eine nachvollziehbare Freigabe für definierte Funktionen und Berechtigungen darstellen.
+
+### 6. Migration des bestehenden Plugin-Systems
+
+Das bisherige Crate `crates/bareos-plugins` verwendet PyO3 für Python-Plugins.
+
+- [ ] Bestehende Plugin-Schnittstellen und Anwendungsfälle inventarisieren.
+- [ ] Python-/PyO3-Abhängigkeiten aus der zukünftigen Plugin-Architektur entfernen.
+- [ ] Neue Rust-Plugin-API entwickeln.
+- [ ] Zertifizierungsmanifest und Signaturprüfung implementieren.
+- [ ] Plugin-Loader mit Fail-closed-Verhalten entwickeln.
+- [ ] Benötigte bestehende Plugin-Funktionen nach Rust portieren.
+- [ ] Nicht migrierte Python-Plugins ausdrücklich als nicht unterstützt kennzeichnen.
+- [ ] Dokumentation und Paketierung entsprechend aktualisieren.
+
+Die Migration darf keine stillschweigende Aktivierung nicht zertifizierter Plugins ermöglichen.
+
+### 7. Sicherheits- und Regressionstests
+
+- [ ] Gültig zertifiziertes Plugin wird geladen.
+- [ ] Unsigniertes Plugin wird abgewiesen.
+- [ ] Manipuliertes Plugin wird abgewiesen.
+- [ ] Plugin mit unbekannter Zertifizierungsstelle wird abgewiesen.
+- [ ] Abgelaufenes oder widerrufenes Zertifikat führt zur Ablehnung.
+- [ ] Plugin mit nicht unterstützter API-Version wird abgewiesen.
+- [ ] Plugin mit nicht genehmigten Berechtigungen wird abgewiesen.
+- [ ] Plugin-Absturz beeinträchtigt den Hostdaemon nicht.
+- [ ] Fehlgeschlagene Verifikation wird nachvollziehbar protokolliert.
+- [ ] Offline-Betrieb mit gültiger lokaler Vertrauensbasis funktioniert gemäß definierter Widerrufsrichtlinie.
+
+### 8. Abnahmekriterien
+
+Das neue Plugin-System gilt erst dann als abgeschlossen, wenn:
+
+1. Ausschließlich Rust-basierte Plugins unterstützt werden.
+2. Jedes Plugin vor seiner Initialisierung kryptografisch verifiziert wird.
+3. Nicht zertifizierte Plugins technisch nicht ausführbar sind.
+4. Plugin-Berechtigungen vom Host erzwungen werden.
+5. Ein fehlerhaftes Plugin nicht den Director oder File Daemon kompromittieren kann.
+6. Der Betrieb ohne Internetverbindung gemäß dokumentierter Vertrauens- und Widerrufsrichtlinie möglich ist.
+7. Alle negativen Sicherheitsprüfungen automatisiert getestet sind.
+
+**Verbindlicher Architekturgrundsatz:** Plugin-Ausführung ist eine explizit gewährte Berechtigung, keine Eigenschaft einer installierten Datei. Die Zertifizierung ist notwendig, aber nicht allein hinreichend; zusätzlich gelten Laufzeitisolation und lokale Berechtigungsrichtlinien.
