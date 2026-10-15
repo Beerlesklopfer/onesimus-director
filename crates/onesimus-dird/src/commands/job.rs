@@ -377,41 +377,53 @@ pub fn cmd_cancel(ast: &CommandAst, ctx: &ExecContext) -> CommandResult {
 }
 
 pub fn cmd_enable(ast: &CommandAst, ctx: &ExecContext) -> CommandResult {
-    let target = ast.arguments.first().map(|a| a.key.as_str()).unwrap_or("");
-    let name = ast.arguments.first().and_then(|a| a.value.as_deref()).unwrap_or("");
-    if name.is_empty() {
-        return CommandResult::ok("enable: specify client=, job=, schedule=, or storage=\n".to_string());
-    }
-    let config = match &ctx.config {
-        Some(c) => c,
-        None => return CommandResult::error("No config loaded\n".to_string()),
-    };
-    match target {
-        "client" => toggle_enabled(config, "client", name, true),
-        "job" => toggle_enabled(config, "job", name, true),
-        "schedule" => toggle_enabled(config, "schedule", name, true),
-        "storage" => toggle_enabled(config, "storage", name, true),
-        _ => CommandResult::ok("enable: specify client=, job=, schedule=, or storage=\n".to_string()),
-    }
+    en_disable(ast, ctx, true)
 }
 
 pub fn cmd_disable(ast: &CommandAst, ctx: &ExecContext) -> CommandResult {
-    let target = ast.arguments.first().map(|a| a.key.as_str()).unwrap_or("");
-    let name = ast.arguments.first().and_then(|a| a.value.as_deref()).unwrap_or("");
-    if name.is_empty() {
-        return CommandResult::ok("disable: specify client=, job=, schedule=, or storage=\n".to_string());
-    }
+    en_disable(ast, ctx, false)
+}
+
+/// DoEnDisableCmd (ua_cmds.cc:1022): `schedule`, else `client`, else a job.
+/// There is no storage branch — `storage=` and missing names lead to the
+/// select_enable_disable_*_resource selection (ua_select.cc), never to a
+/// toggle of something else (C-012).
+fn en_disable(ast: &CommandAst, ctx: &ExecContext, enable: bool) -> CommandResult {
+    use crate::acl::{access, Kind};
     let config = match &ctx.config {
         Some(c) => c,
         None => return CommandResult::error("No config loaded\n".to_string()),
     };
-    match target {
-        "client" => toggle_enabled(config, "client", name, false),
-        "job" => toggle_enabled(config, "job", name, false),
-        "schedule" => toggle_enabled(config, "schedule", name, false),
-        "storage" => toggle_enabled(config, "storage", name, false),
-        _ => CommandResult::ok("disable: specify client=, job=, schedule=, or storage=\n".to_string()),
-    }
+    let has = |key: &str| ast.arguments.iter().any(|a| a.key.eq_ignore_ascii_case(key));
+    let value = |key: &str| ast.arguments.iter()
+        .find(|a| a.key.eq_ignore_ascii_case(key) && a.value.is_some()).and_then(|a| a.value.as_deref());
+    let (res_type, label, kind) = if has("schedule") { ("schedule", "Schedule", Kind::Schedule) }
+        else if has("client") { ("client", "Client", Kind::Client) }
+        else { ("job", "Job", Kind::Job) };
+    let (name, shown) = match value(res_type) {
+        Some(name) if access(ctx, kind, name) => (name.to_string(), String::new()),
+        Some(name) => return CommandResult::ok_with_errors(String::new(), format!("{label} \"{name}\" not found.\n")),
+        None => {
+            let candidates: Vec<String> = {
+                let cfg = config.read().unwrap();
+                let states: Vec<(&str, bool)> = match res_type {
+                    "schedule" => cfg.schedules.iter().map(|s| (s.name.as_str(), s.enabled)).collect(),
+                    "client" => cfg.clients.iter().map(|c| (c.name.as_str(), c.enabled)).collect(),
+                    _ => cfg.jobs.iter().map(|j| (j.name.as_str(), j.enabled)).collect(),
+                };
+                crate::director_config::sort_case_insensitive(states.into_iter()
+                    .filter(|(name, enabled)| *enabled != enable && access(ctx, kind, name)).map(|(name, _)| name))
+                    .into_iter().map(str::to_string).collect()
+            };
+            match super::prompt::select_resource(ctx, &format!("The defined {label} resources are:\n"), label,
+                &format!("Select {label} resource"), candidates) {
+                Ok(selected) => selected,
+                // EnableCmd/DisableCmd return true even when nothing was selected.
+                Err(mut result) => { result.success = true; return result; }
+            }
+        }
+    };
+    crate::ua_db::with_prefix(shown, toggle_enabled(config, res_type, &name, enable))
 }
 
 /// ua_cmds.cc DoEnDisableCmd(): an unknown resource is an ErrorMsg, the
@@ -423,7 +435,6 @@ fn toggle_enabled(config: &crate::director_config::SharedConfig, res_type: &str,
         "client" => ("Client", cfg.clients.iter_mut().find(|c| c.name == name).map(|c| c.enabled = enable)),
         "job" => ("Job", cfg.jobs.iter_mut().find(|j| j.name == name).map(|j| j.enabled = enable)),
         "schedule" => ("Schedule", cfg.schedules.iter_mut().find(|s| s.name == name).map(|s| s.enabled = enable)),
-        "storage" => ("Storage", cfg.storages.iter_mut().find(|s| s.name == name).map(|s| s.enabled = enable)),
         _ => return CommandResult::ok(format!("{res_type}: not supported\n")),
     };
     match found {
@@ -460,6 +471,27 @@ mod error_text_tests {
             assert!(result.success, "{line}");
             assert_eq!(result.error_message, expected);
         }
+    }
+
+    #[test]
+    fn enable_disable_never_toggle_storages_or_guess_a_resource() {
+        let config = crate::director_config::DirectorConfig::from_str(
+            "Director { Name = dir }\nStorage { Name = File; Address = localhost; Enabled = no }\n\
+             Job { Name = a; Type = Backup }\nJob { Name = b; Type = Backup }").unwrap();
+        let ctx = ExecContext { session_id: 0, config: Some(Arc::new(RwLock::new(config))),
+            session_mgr: None, catalog: None, api_mode: crate::command_executor::ApiMode::Human,
+            bus_rx: None, job_manager: None };
+        let storage_state = ctx.config.as_ref().unwrap().read().unwrap().find_storage("File").unwrap().enabled;
+        for line in ["enable storage=File", "enable", "enable job"] {
+            let result = cmd_enable(&crate::session::parse_cli_command(line), &ctx);
+            assert_eq!(result.text_output, "The defined Job resources are:\n", "{line}");
+            assert_eq!(result.error_message, "Selection list for \"Job\" is empty!\n", "{line}");
+        }
+        let result = cmd_disable(&crate::session::parse_cli_command("disable storage=File"), &ctx);
+        assert_eq!(result.text_output, "The defined Job resources are:\n1: a\n2: b\nSelect Job resource (1-2): ");
+        let cfg = ctx.config.as_ref().unwrap().read().unwrap();
+        assert_eq!(cfg.find_storage("File").unwrap().enabled, storage_state);
+        assert!(cfg.jobs.iter().all(|j| j.enabled));
     }
 
     #[test]
