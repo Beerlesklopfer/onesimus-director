@@ -13,49 +13,361 @@ use bareos_config::resources::JobType;
 static NEXT_JOB_ID: AtomicU32 = AtomicU32::new(1);
 
 pub fn cmd_run(ast: &CommandAst, ctx: &ExecContext) -> CommandResult {
-    // C++ ua_run.cc DoRunCmd: OpenClientDb() before anything else.
-    crate::ua_db::with_client_db(ast, ctx, false, || cmd_run_db(ast, ctx))
+    let mut ua = crate::ua_select::Ua::new(ctx);
+    let success = run_with_ua(&mut ua, ast, start_job);
+    ua.finish(success)
 }
 
-fn cmd_run_db(ast: &CommandAst, ctx: &ExecContext) -> CommandResult {
-    let job_name = ast.arguments.iter()
-        .find(|a| a.key == "job")
-        .and_then(|a| a.value.as_deref());
+/// Start the job of a confirmed run: the resolved request (job, level,
+/// client, fileset, storage, pool and `yes`) goes through run_selected.
+pub(crate) fn start_job(ast: &CommandAst, ctx: &ExecContext, job: bareos_config::resources::JobResource) -> CommandResult {
+    match ctx.config.as_ref().map(|c| c.read()) {
+        Some(Ok(config)) => run_selected(ast, ctx, config, job),
+        Some(Err(_)) => CommandResult::error("Config read error\n".to_string()),
+        None => CommandResult::error("No config loaded\n".to_string()),
+    }
+}
 
-    let config = match &ctx.config {
-        Some(c) => match c.read() {
-            Ok(c) => c,
-            _ => return CommandResult::error("Config read error\n".to_string()),
-        },
-        None => return CommandResult::error("No config loaded\n".to_string()),
-    };
+/// C++ ua_run.cc DoRunCmd(): OpenClientDb, job selection
+/// (ScanCommandLineArguments/select_job_resource), then — unless `yes` was
+/// given or the console is in batch (JSON) mode — DisplayJobParameters and
+/// "OK to run? (yes/mod/no): " with the ModifyJobParameters dialog. `start`
+/// runs the confirmed job; it is never called on "no", on a cancelled
+/// dialog or without a console (GetCmd fails: "Job not run."). Returns the
+/// DoRunCmd result.
+pub(crate) fn run_with_ua(
+    ua: &mut crate::ua_select::Ua,
+    ast: &CommandAst,
+    start: impl FnOnce(&CommandAst, &ExecContext, bareos_config::resources::JobResource) -> CommandResult,
+) -> bool {
+    let ctx = ua.ctx;
+    if !ua.open_client_db(ast, false) {
+        return false;
+    }
+    let Some(job) = run_select_job(ua, ast) else { return false };
+    let mut state = RunState::new(ast, job);
 
-    // ua_run.cc ScanCommandLineArguments: a missing or unknown job leads to
-    // select_job_resource (ua_select.cc), never to a default job (C-012).
-    let mut shown = String::new();
-    let job = match job_name.and_then(|name| config.find_job(name))
-        .filter(|job| crate::acl::access(ctx, crate::acl::Kind::Job, &job.name)) {
-        Some(j) => j.clone(),
-        None => {
-            match job_name {
-                Some(name) if !name.is_empty() => shown.push_str(&format!("Job \"{name}\" not found\n")),
-                Some(_) => {}
-                None => shown.push_str("A job name must be specified.\n"),
+    // Run without prompting? (`ua->batch` is the JSON mode here.)
+    let yes = crate::ua_select::find_arg(ast, "yes").is_some();
+    if yes || ctx.api_mode == crate::command_executor::ApiMode::Json {
+        return run_start(ua, &state, start);
+    }
+
+    loop {
+        state.display(ua);
+        // Prompt User until we have a valid response.
+        let answer = loop {
+            let Some(answer) = ua.get_cmd("OK to run? (yes/mod/no): ") else {
+                ua.send_msg("Job not run.\n");
+                return false;
+            };
+            if run_answer_valid(&answer) {
+                break answer;
             }
-            let jobs = crate::director_config::sort_case_insensitive(config.jobs.iter()
-                .map(|j| j.name.as_str()).filter(|name| crate::acl::access(ctx, crate::acl::Kind::Job, name)))
-                .into_iter().map(str::to_string).collect();
-            match super::prompt::select_resource(ctx, "The defined Job resources are:\n", "Job",
-                "Select Job resource", jobs) {
-                Ok((name, text)) => {
-                    shown.push_str(&text);
-                    config.find_job(&name).cloned().expect("selected from the configured jobs")
+            ua.warning_msg(format!("Illegal response {answer}\n"));
+        };
+        let lower = answer.to_ascii_lowercase();
+        // ".mod <args>" / "mod <args>": parse the new arguments, show again.
+        if lower.starts_with(".mod ") || (lower.starts_with("mod ") && answer.len() > 6) {
+            let rest = &answer[answer.find(' ').unwrap_or(answer.len())..];
+            state.apply(&crate::session::parse_cli_command(&format!("mod {rest}")));
+            continue;
+        }
+        if !answer.is_empty() && prefix_of(&lower, "mod") {
+            match state.modify(ua) {
+                Some(()) => continue,
+                None => {
+                    ua.send_msg("Job not run.\n");
+                    return false;
                 }
-                Err(result) => return crate::ua_db::with_prefix(shown, result),
             }
         }
-    };
-    crate::ua_db::with_prefix(shown, run_selected(ast, ctx, config, job))
+        if answer.is_empty() || prefix_of(&lower, "yes") {
+            return run_start(ua, &state, start);
+        }
+        ua.send_msg("Job not run.\n");
+        return false;
+    }
+}
+
+/// `bstrncasecmp(cmd, word, strlen(cmd))`: the answer is a prefix of word.
+fn prefix_of(answer_lower: &str, word: &str) -> bool {
+    word.starts_with(answer_lower)
+}
+
+/// C++ DoRunCmd valid_response: empty, or a prefix of ".mod "/"mod "
+/// (compared over at most the keyword length) or of "yes"/"no".
+fn run_answer_valid(answer: &str) -> bool {
+    let lower = answer.to_ascii_lowercase();
+    let head = |n: usize| lower.chars().take(n).collect::<String>();
+    answer.is_empty()
+        || ".mod ".starts_with(&head(5))
+        || "mod ".starts_with(&head(4))
+        || prefix_of(&lower, "yes")
+        || prefix_of(&lower, "no")
+}
+
+fn run_start(
+    ua: &mut crate::ua_select::Ua,
+    state: &RunState,
+    start: impl FnOnce(&CommandAst, &ExecContext, bareos_config::resources::JobResource) -> CommandResult,
+) -> bool {
+    let result = start(&state.to_ast(), ua.ctx, state.job.clone());
+    let success = result.success;
+    ua.send_result(result);
+    success
+}
+
+/// ScanCommandLineArguments' job part: `job=<name>`, else "A job name must
+/// be specified." / "Job \"x\" not found" and select_job_resource.
+fn run_select_job(ua: &mut crate::ua_select::Ua, ast: &CommandAst) -> Option<bareos_config::resources::JobResource> {
+    let ctx = ua.ctx;
+    let job_name = ast.arguments.iter().find(|a| a.key == "job").and_then(|a| a.value.clone());
+    let find = |name: &str| ctx.config.as_ref().and_then(|c| c.read().ok())
+        .and_then(|config| config.find_job(name).cloned())
+        .filter(|job| crate::acl::access(ctx, crate::acl::Kind::Job, &job.name));
+    if let Some(job) = job_name.as_deref().and_then(find) {
+        return Some(job);
+    }
+    match job_name.as_deref() {
+        Some(name) if !name.is_empty() => ua.send_msg(format!("Job \"{name}\" not found\n")),
+        Some(_) => {}
+        None => ua.send_msg("A job name must be specified.\n"),
+    }
+    let name = crate::ua_select::select_job_resource(ua)?;
+    find(&name)
+}
+
+/// The parameters of an interactive run (RunContext and the JobControlRecord
+/// fields that DisplayJobParameters shows and ModifyJobParameters changes).
+struct RunState {
+    job: bareos_config::resources::JobResource,
+    level: String,
+    client: String,
+    fileset: String,
+    storage: String,
+    storage_source: &'static str,
+    /// Explicit pool (command line or user input) with its source.
+    pool: Option<(String, &'static str)>,
+    /// Pool of the level overrides, applied once before the first display
+    /// (DoRunCmd do_pool_overrides) and again only after a Level change.
+    applied_pool: Option<(String, &'static str)>,
+    priority: i64,
+    when: String,
+    format: String,
+    plugin_options: Option<String>,
+}
+
+/// JobLevelToString() for the backup levels.
+fn level_name(level: &str) -> String {
+    match level.to_ascii_lowercase().as_str() {
+        "full" | "f" => "Full",
+        "incremental" | "i" => "Incremental",
+        "differential" | "d" => "Differential",
+        "since" | "s" => "Since",
+        "virtualfull" | "v" => "VirtualFull",
+        _ => return level.to_string(),
+    }.to_string()
+}
+
+fn now_time() -> String {
+    chrono::Local::now().format("%Y-%m-%d %H:%M:%S").to_string()
+}
+
+impl RunState {
+    fn new(ast: &CommandAst, job: bareos_config::resources::JobResource) -> Self {
+        let mut state = Self::defaults(job);
+        state.apply(ast);
+        state
+    }
+
+    /// SetJcrDefaults: everything from the Job resource.
+    fn defaults(job: bareos_config::resources::JobResource) -> Self {
+        Self {
+            level: format!("{:?}", job.level),
+            client: job.client.clone(),
+            fileset: job.fileset.clone(),
+            storage: job.storage.clone(),
+            storage_source: "Job resource",
+            pool: None,
+            applied_pool: None,
+            priority: i64::from(job.priority),
+            when: now_time(),
+            format: "Native".to_string(),
+            plugin_options: None,
+            job,
+        }
+    }
+
+    /// Command line overrides (ScanCommandLineArguments, also `mod <args>`).
+    fn apply(&mut self, ast: &CommandAst) {
+        let arg = |key: &str| crate::ua_select::find_arg_with_value(ast, key).map(str::to_string);
+        if let Some(level) = arg("level") { self.level = level_name(&level); }
+        if let Some(client) = arg("client") { self.client = client; }
+        if let Some(fileset) = arg("fileset") { self.fileset = fileset; }
+        if let Some(storage) = arg("storage") {
+            self.storage = storage;
+            self.storage_source = "command line";
+        }
+        if let Some(pool) = arg("pool") { self.pool = Some((pool, "command line")); }
+        if let Some(priority) = arg("priority") { self.priority = str_to_int64(&priority); }
+        if let Some(options) = arg("pluginoptions") { self.plugin_options = Some(options); }
+    }
+
+    /// ApplyPoolOverrides (job.cc:1225) unless a pool was chosen.
+    fn pool(&self) -> (String, &'static str) {
+        if let Some((pool, source)) = self.pool.as_ref().or(self.applied_pool.as_ref()) {
+            return (pool.clone(), source);
+        }
+        let job = &self.job;
+        match self.level.as_str() {
+            "Full" if !job.full_backup_pool.is_empty() => (job.full_backup_pool.clone(), "Job FullPool override"),
+            "Incremental" if !job.incremental_backup_pool.is_empty() => (job.incremental_backup_pool.clone(), "Job IncPool override"),
+            "Differential" if !job.differential_backup_pool.is_empty() => (job.differential_backup_pool.clone(), "Job DiffPool override"),
+            _ => (job.pool.clone(), "Job resource"),
+        }
+    }
+
+    /// DisplayJobParameters (ua_run.cc:1223) for Backup jobs; other job
+    /// types show nothing yet.
+    fn display(&mut self, ua: &mut crate::ua_select::Ua) {
+        if !matches!(self.job.job_type, JobType::Backup) {
+            return;
+        }
+        let (pool, pool_source) = self.pool();
+        self.applied_pool.get_or_insert((pool.clone(), pool_source));
+        let plugin = self.plugin_options.as_ref().map(|o| format!("Plugin Options: {o}\n")).unwrap_or_default();
+        if ua.api() {
+            ua.send_signal(bareos_bnet::BnetSignal::RunCmd);
+            ua.send_msg(format!("Type: Backup\nTitle: Run Backup Job\nJobName:  {}\nLevel:    {}\nClient:   {}\n\
+                Format:   {}\nFileSet:  {}\nPool:     {pool}\nStorage:  {}\nWhen:     {}\nPriority: {}\n{plugin}",
+                self.job.name, self.level, self.client, self.format, self.fileset, self.storage, self.when, self.priority));
+        } else {
+            ua.send_msg(format!("Run Backup job\nJobName:  {}\nLevel:    {}\nClient:   {}\nFormat:   {}\n\
+                FileSet:  {}\nPool:     {pool} (From {pool_source})\nStorage:  {} (From {})\nWhen:     {}\n\
+                Priority: {}\n{plugin}",
+                self.job.name, self.level, self.client, self.format, self.fileset, self.storage,
+                self.storage_source, self.when, self.priority));
+        }
+    }
+
+    /// ModifyJobParameters (ua_run.cc:531) for Backup jobs: Some(()) shows
+    /// the parameters again, None ends the run ("Job not run.").
+    fn modify(&mut self, ua: &mut crate::ua_select::Ua) -> Option<()> {
+        use crate::ua_select;
+        let backup = matches!(self.job.job_type, JobType::Backup);
+        ua.start_prompt("Parameters to modify:\n");
+        for item in ["Level", "Storage", "Job", "FileSet"] {
+            ua.add_prompt(item);
+        }
+        ua.add_prompt(if matches!(self.job.job_type, JobType::Restore) { "Restore Client" } else { "Client" });
+        for item in ["Backup Format", "When", "Priority"] {
+            ua.add_prompt(item);
+        }
+        if matches!(self.job.job_type, JobType::Backup | JobType::Copy | JobType::Migrate | JobType::Verify) {
+            ua.add_prompt("Pool");
+            if self.level == "VirtualFull" || matches!(self.job.job_type, JobType::Copy | JobType::Migrate) {
+                ua.add_prompt("NextPool");
+                if backup { ua.add_prompt("Plugin Options"); }
+            } else if matches!(self.job.job_type, JobType::Verify) {
+                ua.add_prompt("Verify Job");
+            } else if backup {
+                ua.add_prompt("Plugin Options");
+            }
+        }
+        let (choice, item) = ua.do_prompt("", "Select parameter to modify")?;
+        match (choice, item.as_str()) {
+            (0, _) => {
+                // SelectJobLevel
+                if backup {
+                    ua.start_prompt("Levels:\n");
+                    for level in ["Full", "Incremental", "Differential", "Since", "VirtualFull"] {
+                        ua.add_prompt(level);
+                    }
+                    if let Some((_, level)) = ua.do_prompt("", "Select level") {
+                        self.level = level;
+                    }
+                    // ApplyPoolOverrides(jcr, true) for the new level.
+                    self.applied_pool = None;
+                } else {
+                    ua.warning_msg("Level not appropriate for this Job. Cannot be changed.\n");
+                }
+            }
+            (1, _) => {
+                self.storage = ua_select::select_storage_resource(ua, false)?;
+                self.storage_source = "user selection";
+            }
+            (2, _) => {
+                let name = ua_select::select_job_resource(ua)?;
+                let job = ua.ctx.config.as_ref().and_then(|c| c.read().ok())
+                    .and_then(|c| c.find_job(&name).cloned())?;
+                *self = Self::defaults(job);
+            }
+            (3, _) => self.fileset = ua_select::select_fileset_resource(ua)?,
+            (4, _) => self.client = ua_select::select_client_resource(ua)?,
+            (5, _) => self.format = ua.get_cmd("Please enter Backup Format: ")?,
+            (6, _) => {
+                let when = ua.get_cmd("Please enter desired start time as YYYY-MM-DD HH:MM:SS (return for now): ")?;
+                self.when = if when.is_empty() {
+                    now_time()
+                } else if let Ok(time) = chrono::NaiveDateTime::parse_from_str(&when, "%Y-%m-%d %H:%M:%S") {
+                    time.format("%Y-%m-%d %H:%M:%S").to_string()
+                } else {
+                    ua.send_msg("Invalid time, using current time.\n");
+                    now_time()
+                };
+            }
+            (7, _) => {
+                let priority = ua.get_pint("Enter new Priority: ")?;
+                if priority == 0 {
+                    ua.send_msg("Priority must be a positive integer.\n");
+                } else {
+                    self.priority = i64::from(priority);
+                }
+            }
+            (8, _) => {
+                let pool = ua_select::select_pool_resource(ua)?;
+                self.pool = Some((pool, "user input"));
+            }
+            (_, "Plugin Options") => {
+                // GetPluginOptions
+                if let Some(options) = ua.get_cmd("Please enter Plugin Options string: ") {
+                    if crate::acl::access(ua.ctx, crate::acl::Kind::PluginOptions, &options) {
+                        self.plugin_options = Some(options);
+                    } else {
+                        ua.send_msg("No authorization for \"PluginOptions\" specification.\n");
+                    }
+                }
+            }
+            (_, "Verify Job") => {
+                ua_select::select_job_resource(ua);
+            }
+            (_, "NextPool") => {
+                ua_select::select_pool_resource(ua)?;
+            }
+            _ => {}
+        }
+        Some(())
+    }
+
+    /// The confirmed request for run_selected.
+    fn to_ast(&self) -> CommandAst {
+        use crate::command_ast::Argument;
+        let arg = |key: &str, value: &str| Argument { key: key.to_string(), value: Some(value.to_string()) };
+        let mut arguments = vec![
+            arg("job", &self.job.name),
+            arg("level", &self.level),
+            arg("client", &self.client),
+            arg("fileset", &self.fileset),
+            arg("storage", &self.storage),
+        ];
+        // Interactive runs keep the displayed pool (IgnoreLevelPoolOverrides).
+        if let Some((pool, _)) = self.pool.as_ref().or(self.applied_pool.as_ref()) {
+            arguments.push(arg("pool", pool));
+        }
+        arguments.push(Argument { key: "yes".to_string(), value: None });
+        CommandAst { command_name: "run".to_string(), arguments, ..Default::default() }
+    }
 }
 
 fn run_selected(
@@ -94,12 +406,10 @@ fn run_selected(
     if storage_res.is_none() { return CommandResult::error(format!("Storage '{storage_name}' not found\n")); }
     if fileset_res.is_none() { return CommandResult::error(format!("FileSet '{fileset_name}' not found\n")); }
 
-    // ua_run.cc:408 — without `yes` the job parameters are shown and the
-    // console is asked "OK to run? (yes/mod/no): " (GetCmd, ua_run.cc:434).
-    // Nothing is created or started before the answer (C-012).
+    // ua_run.cc:408 — without `yes` the run dialog (run_with_ua) asks first;
+    // run_selected only starts confirmed requests.
     if !yes {
-        return super::prompt::selection_required(format!("{}OK to run? (yes/mod/no): ",
-            run_parameters(ast, &job, requested_level, client_name, fileset_name, storage_name)));
+        return CommandResult::error("Job not run.\n".to_string());
     }
 
     let (level, level_char, since_utime, prev_job) = match backup_level(requested_level, |level| {
@@ -220,38 +530,6 @@ fn run_selected(
     CommandResult::ok(output)
 }
 
-/// DisplayJobParameters (ua_run.cc:1223) for the console, before any
-/// override is applied; the job type selects the upstream title.
-fn run_parameters(ast: &CommandAst, job: &bareos_config::resources::JobResource, level: &str,
-    client: &str, fileset: &str, storage: &str) -> String {
-    if !matches!(job.job_type, JobType::Backup) {
-        return String::new();
-    }
-    let level = match level.to_ascii_lowercase().as_str() {
-        "full" | "f" => "Full",
-        "incremental" | "i" => "Incremental",
-        "differential" | "d" => "Differential",
-        _ => level,
-    };
-    let arg = |key: &str| ast.arguments.iter().find(|a| a.key.eq_ignore_ascii_case(key))
-        .and_then(|a| a.value.as_deref());
-    // job.cc:1225 ApplyPoolOverrides / ua_run.cc:818 pool sources.
-    let (pool, pool_source) = match arg("pool") {
-        Some(pool) => (pool, "command line"),
-        None => match level {
-            "Full" if !job.full_backup_pool.is_empty() => (job.full_backup_pool.as_str(), "Job FullPool override"),
-            "Incremental" if !job.incremental_backup_pool.is_empty() => (job.incremental_backup_pool.as_str(), "Job IncPool override"),
-            "Differential" if !job.differential_backup_pool.is_empty() => (job.differential_backup_pool.as_str(), "Job DiffPool override"),
-            _ => (job.pool.as_str(), "Job resource"),
-        },
-    };
-    let storage_source = if arg("storage").is_some() { "command line" } else { "Job resource" };
-    format!("Run Backup job\nJobName:  {}\nLevel:    {level}\nClient:   {client}\nFormat:   Native\n\
-             FileSet:  {fileset}\nPool:     {pool} (From {pool_source})\nStorage:  {storage} (From {storage_source})\n\
-             When:     {}\nPriority: {}\n",
-        job.name, chrono::Local::now().format("%Y-%m-%d %H:%M:%S"), job.priority)
-}
-
 /// Decide the effective backup level before creating its catalog record or worker.
 fn backup_level(
     requested: &str,
@@ -274,7 +552,7 @@ fn backup_level(
 }
 
 /// Bareos str_to_int64(): leading blanks, optional sign, leading digits.
-fn str_to_int64(value: &str) -> i64 {
+pub(crate) fn str_to_int64(value: &str) -> i64 {
     let value = value.trim_start();
     let (negative, digits) = match value.strip_prefix('-') {
         Some(rest) => (true, rest),
@@ -346,15 +624,85 @@ pub fn cmd_cancel(ast: &CommandAst, ctx: &ExecContext) -> CommandResult {
             text.push_str(if active.is_empty() { "No Jobs running.\n" } else { "None of your jobs are running.\n" });
             return result(text, errors);
         }
-        // Interactive selection (select_jobs prompt) is not implemented yet.
-        let mut out = String::from("Running jobs:\n");
-        out.push_str("  JobId    Name                           Phase\n");
-        for job in active.iter().filter(|job| crate::acl::access(ctx, crate::acl::Kind::Job, &job.name)) {
-            out.push_str(&format!("  {:<8} {:<30} {}\n", job.id, job.name, job.phase.name()));
+        // select_jobs (ua_select.cc): all/state=..., else the "Select Job:"
+        // dialog with the confirmation for a single running job (C-011).
+        let mut ua = crate::ua_select::Ua::new(ctx);
+        if !errors.is_empty() {
+            ua.error_msg(std::mem::take(&mut errors));
         }
-        out.push_str("\ncancel jobid=<id> to cancel a job.\n");
-        text.push_str(&out);
-        return result(text, errors);
+        ua.send_msg(std::mem::take(&mut text));
+        let authorized: Vec<&crate::job_manager::ActiveJob> = active.iter()
+            .filter(|job| crate::acl::access(ctx, crate::acl::Kind::Job, &job.name)).collect();
+        let select_all = crate::ua_select::find_arg(ast, "all").is_some();
+        let state = crate::ua_select::find_arg_with_value(ast, "state");
+        if select_all || state.is_some() {
+            use crate::job_manager::DirJobPhase as Phase;
+            let wanted: fn(Phase) -> bool = match state.map(str::to_ascii_lowercase).as_deref() {
+                _ if select_all => |_| true,
+                Some("created") => |phase| phase == Phase::Queued,
+                Some("blocked") => |phase| phase == Phase::Paused,
+                Some("waiting") => |phase| matches!(phase, Phase::WaitingCatReq | Phase::WaitingMedia | Phase::WaitingMount),
+                Some("running") => |phase| phase == Phase::Running,
+                _ => {
+                    ua.error_msg("Illegal state either created, blocked, waiting or running\n");
+                    return ua.finish(true);
+                }
+            };
+            for job in authorized.iter().filter(|job| wanted(job.phase)) {
+                if !selected.contains(&job.id) {
+                    selected.push(job.id);
+                }
+                ua.send_msg(format!("Selected Job {} for cancelling\n", job.id));
+            }
+            if selected.is_empty() {
+                ua.send_msg("No Jobs selected.\n");
+                return ua.finish(true);
+            }
+            if !ua.batch() && crate::ua_select::find_arg(ast, "yes").is_none()
+                && ua.get_yesno("Confirm cancel (yes/no): ") != Some(true) {
+                return ua.finish(true);
+            }
+        } else {
+            ua.start_prompt("Select Job:\n");
+            for job in &authorized {
+                ua.add_prompt(&format!("JobId={} Job={}", job.id, job.unique_name));
+            }
+            let Some((_, choice)) = ua.do_prompt("Job", "Choose Job to cancel") else { return ua.finish(true) };
+            if authorized.len() == 1 {
+                let question = if ua.api() {
+                    format!("Cancel: {choice}\n\nConfirm cancel?")
+                } else {
+                    "Confirm cancel (yes/no): ".to_string()
+                };
+                if ua.get_yesno(&question) != Some(true) {
+                    return ua.finish(true);
+                }
+            }
+            let id = choice.strip_prefix("JobId=").and_then(|rest| rest.split(' ').next())
+                .and_then(|id| id.parse::<u32>().ok());
+            match id.and_then(|id| authorized.iter().find(|job| job.id == id)) {
+                Some(job) => selected.push(job.id),
+                None => {
+                    ua.warning_msg(format!("Job \"{choice}\" not found.\n"));
+                    return ua.finish(true);
+                }
+            }
+        }
+        for id in selected {
+            let canceled = ctx.job_manager.as_ref().is_some_and(|mgr| mgr.lock().unwrap().cancel_job(id));
+            if canceled {
+                if let Some(smgr) = &ctx.session_mgr {
+                    smgr.bus().post(BusMessage::JobStatus {
+                        job_id: id, job_name: String::new(), status: "Canceling".to_string(),
+                        timestamp: now_unix(),
+                    });
+                }
+                ua.send_msg(format!("Job {id} canceled (SIGTERM sent to worker)\n"));
+            } else {
+                ua.send_msg(format!("Job {id} not found or already finished\n"));
+            }
+        }
+        return ua.finish(true);
     }
 
     for id in selected {
@@ -415,12 +763,17 @@ fn en_disable(ast: &CommandAst, ctx: &ExecContext, enable: bool) -> CommandResul
                     .filter(|(name, enabled)| *enabled != enable && access(ctx, kind, name)).map(|(name, _)| name))
                     .into_iter().map(str::to_string).collect()
             };
-            match super::prompt::select_resource(ctx, &format!("The defined {label} resources are:\n"), label,
-                &format!("Select {label} resource"), candidates) {
-                Ok(selected) => selected,
-                // EnableCmd/DisableCmd return true even when nothing was selected.
-                Err(mut result) => { result.success = true; return result; }
+            // select_enable_disable_*_resource: DoPrompt dialog (C-011).
+            let mut ua = crate::ua_select::Ua::new(ctx);
+            ua.start_prompt(&format!("The defined {label} resources are:\n"));
+            for name in &candidates {
+                ua.add_prompt(name);
             }
+            let msg = if res_type == "job" { "Select Job resource".to_string() } else { format!("Select {label} resource") };
+            // EnableCmd/DisableCmd return true even when nothing was selected.
+            let Some((_, name)) = ua.do_prompt(label, &msg) else { return ua.finish(true) };
+            ua.send_result(toggle_enabled(config, res_type, &name, enable));
+            return ua.finish(true);
         }
     };
     crate::ua_db::with_prefix(shown, toggle_enabled(config, res_type, &name, enable))
@@ -482,13 +835,15 @@ mod error_text_tests {
             session_mgr: None, catalog: None, api_mode: crate::command_executor::ApiMode::Human,
             bus_rx: None, job_manager: None };
         let storage_state = ctx.config.as_ref().unwrap().read().unwrap().find_storage("File").unwrap().enabled;
+        use crate::ua_select::tests::scripted;
         for line in ["enable storage=File", "enable", "enable job"] {
-            let result = cmd_enable(&crate::session::parse_cli_command(line), &ctx);
+            let (result, _) = scripted(&[], || cmd_enable(&crate::session::parse_cli_command(line), &ctx));
             assert_eq!(result.text_output, "The defined Job resources are:\n", "{line}");
             assert_eq!(result.error_message, "Selection list for \"Job\" is empty!\n", "{line}");
         }
-        let result = cmd_disable(&crate::session::parse_cli_command("disable storage=File"), &ctx);
-        assert_eq!(result.text_output, "The defined Job resources are:\n1: a\n2: b\nSelect Job resource (1-2): ");
+        let (_, console) = scripted(&["."], || cmd_disable(&crate::session::parse_cli_command("disable storage=File"), &ctx));
+        assert_eq!(console.transcript(), "The defined Job resources are:\n1: a\n2: b\nSelect Job resource (1-2): .\n\
+            Selection aborted, nothing done.\n");
         let cfg = ctx.config.as_ref().unwrap().read().unwrap();
         assert_eq!(cfg.find_storage("File").unwrap().enabled, storage_state);
         assert!(cfg.jobs.iter().all(|j| j.enabled));
@@ -532,16 +887,33 @@ mod run_confirmation_tests {
     const JOB: &str = "Job { Name = b1; Type = Backup; Level = Incremental; Client = fd; FileSet = fs; Storage = File; Pool = Full; Messages = m; Priority = 10 }";
 
     fn run(line: &str, ctx: &ExecContext) -> CommandResult {
-        cmd_run_db(&crate::session::parse_cli_command(line), ctx)
+        cmd_run(&crate::session::parse_cli_command(line), ctx)
+    }
+
+    /// Runs `line` with scripted answers; the start hook must never fire.
+    fn dialog(line: &str, ctx: &ExecContext, answers: &[&str]) -> (bool, crate::ua_select::tests::Scripted) {
+        crate::ua_select::tests::scripted(answers, || {
+            let mut ua = crate::ua_select::Ua::new(ctx);
+            let ok = run_with_ua(&mut ua, &crate::session::parse_cli_command(line),
+                |_, _, _| panic!("{line}: {answers:?} must not start a job"));
+            ua.finish(ok);
+            ok
+        })
     }
 
     #[test]
     fn missing_or_unknown_job_ends_in_the_selection() {
         let ctx = context(&format!("{JOB}\n{}", JOB.replace("b1", "A2")));
+        // Without console: batch mode lists the choices.
         assert_eq!(run("run", &ctx).text_output,
-            "A job name must be specified.\nThe defined Job resources are:\n1: A2\n2: b1\nSelect Job resource (1-2): ");
-        assert_eq!(run("run job=nosuch yes", &ctx).text_output,
-            "Job \"nosuch\" not found\nThe defined Job resources are:\n1: A2\n2: b1\nSelect Job resource (1-2): ");
+            "A job name must be specified.\nThe defined Job resources are:\n1: A2\n2: b1\n\
+             Your request has multiple choices for \"Job\". Selection is not possible in batch mode.\n");
+        let (ok, console) = dialog("run job=nosuch yes", &ctx, &["0", "x", "."]);
+        assert!(!ok);
+        assert_eq!(console.transcript(),
+            "Job \"nosuch\" not found\nThe defined Job resources are:\n1: A2\n2: b1\nSelect Job resource (1-2): 0\n\
+             Please enter a number between 1 and 2\nSelect Job resource (1-2): x\n\
+             Expected a positive integer, got: x\nSelect Job resource (1-2): .\nSelection aborted, nothing done.\n");
     }
 
     /// Context whose catalog and job manager record what a run would do.
@@ -557,35 +929,85 @@ mod run_confirmation_tests {
     #[test]
     fn run_rerun_without_yes_create_and_start_nothing() {
         let (ctx, log) = recording_context(JOB);
+        // No console: GetCmd fails, "Job not run.".
         for line in ["run", "run job=b1", "run job=b1 level=Full pool=Full", "run job=nosuch"] {
-            let result = cmd_run_db(&crate::session::parse_cli_command(line), &ctx);
-            assert!(result.text_output.ends_with(": "), "{line}: {}", result.text_output);
+            let result = cmd_run(&crate::session::parse_cli_command(line), &ctx);
+            assert!(result.text_output.ends_with("Job not run.\n"), "{line}: {}", result.text_output);
+        }
+        // Console answers that never start.
+        for answers in [&["no"][..], &["n"], &["."], &["mod", "."], &["maybe", "no"], &["mod", "8", "."]] {
+            let (ctx2, log2) = recording_context(JOB);
+            let (ok, console) = crate::ua_select::tests::scripted(answers, || cmd_run(
+                &crate::session::parse_cli_command("run job=b1"), &ctx2).success);
+            assert!(!ok, "{answers:?}");
+            assert!(console.text().ends_with("Job not run.\n"), "{answers:?}: {}", console.text());
+            assert!(!log2.lock().unwrap().iter().any(|request| request == "CreateJob"), "{answers:?}");
         }
         let rerun = crate::commands::extra::cmd_rerun(&crate::session::parse_cli_command("rerun jobid=1"), &ctx);
-        assert!(rerun.text_output.starts_with("rerunning jobid 1\n") && rerun.text_output.ends_with("OK to run? (yes/mod/no): "),
+        assert!(rerun.text_output.starts_with("rerunning jobid 1\n") && rerun.text_output.ends_with("Job not run.\n"),
             "{}", rerun.text_output);
         assert!(!log.lock().unwrap().iter().any(|request| request == "CreateJob"), "{:?}", log.lock().unwrap());
         assert!(ctx.job_manager.as_ref().unwrap().lock().unwrap().running_jobs().is_empty());
         // Control: with `yes` the double sees the job record request (and
         // refuses it, so nothing is forked).
-        let started = cmd_run_db(&crate::session::parse_cli_command("run job=b1 level=Full yes"), &ctx);
+        let started = cmd_run(&crate::session::parse_cli_command("run job=b1 level=Full yes"), &ctx);
         assert!(!started.success);
         assert!(log.lock().unwrap().iter().any(|request| request == "CreateJob"));
     }
 
     #[test]
-    fn job_without_yes_is_only_displayed() {
+    fn job_without_yes_is_displayed_and_asked() {
         let ctx = context(JOB);
         let result = run("run job=b1", &ctx);
-        assert!(result.success);
+        assert!(!result.success);
         assert!(result.text_output.starts_with("Run Backup job\nJobName:  b1\nLevel:    Incremental\nClient:   fd\n\
             Format:   Native\nFileSet:  fs\nPool:     Full (From Job resource)\nStorage:  File (From Job resource)\nWhen:     "),
             "{}", result.text_output);
-        assert!(result.text_output.ends_with("Priority: 10\nOK to run? (yes/mod/no): "));
-        // A single job is selected automatically, but still not started.
-        let result = run("run", &ctx);
-        assert!(result.text_output.starts_with("A job name must be specified.\nAutomatically selected Job: b1\nRun Backup job\n"));
-        assert!(result.text_output.ends_with("OK to run? (yes/mod/no): "));
+        assert!(result.text_output.ends_with("Priority: 10\nJob not run.\n"));
+        // A single job is selected automatically, then the question.
+        let (ok, console) = dialog("run", &ctx, &["no"]);
+        assert!(!ok);
+        let text = console.transcript();
+        assert!(text.starts_with("A job name must be specified.\nAutomatically selected Job: b1\nRun Backup job\n"), "{text}");
+        assert!(text.ends_with("Priority: 10\nOK to run? (yes/mod/no): no\nJob not run.\n"), "{text}");
+        assert_eq!(console.signals(), vec![bareos_bnet::BnetSignal::SubPrompt]);
+    }
+
+    #[test]
+    fn illegal_answers_and_modify_dialog() {
+        let ctx = context(JOB);
+        let (_, console) = dialog("run job=b1", &ctx, &["yes please", "mod", "1", "1", "mod", "8", "2", "no"]);
+        let text = console.transcript();
+        assert!(text.contains("OK to run? (yes/mod/no): yes please\nIllegal response yes please\n"), "{text}");
+        assert!(text.contains("Parameters to modify:\n 1: Level\n 2: Storage\n 3: Job\n 4: FileSet\n 5: Client\n\
+            \x206: Backup Format\n 7: When\n 8: Priority\n 9: Pool\n10: Plugin Options\n\
+            Select parameter to modify (1-10): 1\nLevels:\n1: Full\n2: Incremental\n3: Differential\n4: Since\n\
+            5: VirtualFull\nSelect level (1-5): 1\nRun Backup job\nJobName:  b1\nLevel:    Full\n"), "{text}");
+        assert!(text.contains("Select parameter to modify (1-10): 8\nEnter new Priority: 2\nRun Backup job\n"), "{text}");
+        assert!(text.contains("Priority: 2\nOK to run? (yes/mod/no): no\nJob not run.\n"), "{text}");
+        // Cancel inside the menu ends the run.
+        let (_, console) = dialog("run job=b1", &ctx, &["mod", "."]);
+        assert!(console.transcript().ends_with("Select parameter to modify (1-10): .\n\
+            Selection aborted, nothing done.\nJob not run.\n"));
+        // Single storage/pool are selected automatically; ".mod" re-scans.
+        let (_, console) = dialog("run job=b1", &ctx, &["mod", "9", ".mod level=Differential", "no"]);
+        let text = console.transcript();
+        assert!(text.contains("Select parameter to modify (1-10): 9\nAutomatically selected Pool: Full\nRun Backup job\n"), "{text}");
+        assert!(text.contains("Pool:     Full (From user input)\n"), "{text}");
+        assert!(text.contains(".mod level=Differential\nRun Backup job\nJobName:  b1\nLevel:    Differential\n"), "{text}");
+        assert!(run_answer_valid("") && run_answer_valid("y") && run_answer_valid("Ye") && run_answer_valid("n")
+            && run_answer_valid("m") && run_answer_valid(".mo") && run_answer_valid("mod x"));
+        assert!(!run_answer_valid("yess") && !run_answer_valid("x") && !run_answer_valid("modx"));
+    }
+
+    #[test]
+    fn api_mode_signals_run_cmd() {
+        let mut ctx = context(JOB);
+        ctx.api_mode = crate::command_executor::ApiMode::Api;
+        let (_, console) = dialog("run job=b1", &ctx, &["no"]);
+        use bareos_bnet::BnetSignal::*;
+        assert_eq!(console.signals(), vec![RunCmd, TextInput]);
+        assert!(console.text().starts_with("Type: Backup\nTitle: Run Backup Job\nJobName:  b1\n"));
     }
 }
 

@@ -214,7 +214,8 @@ pub fn build_registry() -> Vec<CommandDef> {
             arg_enum("sub", "Sub-command", vec!["add", "read", "delete"]),
         ], handler: commands::configure::cmd_configure, dot_command: false },
 
-        CommandDef { name: "sqlquery", aliases: &["query"], description: "Execute raw SQL", args: vec![], handler: commands::sql::cmd_sql_query, dot_command: false },
+        CommandDef { name: "sqlquery", aliases: &[], description: "Execute raw SQL", args: vec![], handler: commands::sql::cmd_sql_query, dot_command: false },
+        CommandDef { name: "query", aliases: &[], description: "Query catalog", args: vec![], handler: commands::sql::cmd_query, dot_command: false },
 
         // === Session ===
         CommandDef { name: "autodisplay", aliases: &[], description: "Toggle automatic message display", args: vec![], handler: commands::extra::cmd_autodisplay, dot_command: false },

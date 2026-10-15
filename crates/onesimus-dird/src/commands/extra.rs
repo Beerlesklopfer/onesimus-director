@@ -165,20 +165,23 @@ pub fn cmd_show(ast: &CommandAst, ctx: &ExecContext) -> CommandResult {
     CommandResult::ok("No config\n".to_string())
 }
 
+/// C++ ua_cmds.cc TraceCmd(): with not exactly one argument the value is
+/// asked for (GetCmd "Turn on or off? "); anything but "off" turns tracing
+/// on. No answer (lone dot, batch mode) changes nothing. Silent.
 pub fn cmd_trace(ast: &CommandAst, ctx: &ExecContext) -> CommandResult {
-    if ast.arguments.len() != 1 || ast.arguments[0].value.is_some() {
-        return CommandResult::error("trace: specify on or off\n".into());
-    }
-    let enabled = match ast.arguments[0].key.to_ascii_lowercase().as_str() {
-        "on" => true,
-        "off" => false,
-        _ => return CommandResult::error("trace: specify on or off\n".into()),
+    let mut ua = crate::ua_select::Ua::new(ctx);
+    let onoff = match ast.arguments.as_slice() {
+        [arg] => arg.key.clone(),
+        _ => match ua.get_cmd("Turn on or off? ") {
+            Some(answer) => answer,
+            None => return ua.finish(true),
+        },
     };
     let path = trace_path(ctx);
-    match bareos_bnet::debug::set_trace(&path, enabled) {
-        Ok(()) => CommandResult::ok(String::new()),
-        Err(error) => CommandResult::error(format!("trace: {}: {error}\n", path.display())),
+    if let Err(error) = bareos_bnet::debug::set_trace(&path, !onoff.eq_ignore_ascii_case("off")) {
+        ua.error_msg(format!("trace: {}: {error}\n", path.display()));
     }
+    ua.finish(true)
 }
 
 pub(crate) fn trace_path(ctx: &ExecContext) -> std::path::PathBuf {
@@ -384,11 +387,18 @@ fn is_a_number(value: &str) -> bool {
 /// ua_run.cc reRunCmd()/GetRerunCmdlineArguments(): argument errors are
 /// SendMsg lines and make the command fail.
 pub fn cmd_rerun(ast: &CommandAst, ctx: &ExecContext) -> CommandResult {
-    // C++ ua_run.cc reRunCmd: OpenClientDb() before anything else.
-    crate::ua_db::with_client_db(ast, ctx, false, || cmd_rerun_db(ast, ctx))
+    // C++ ua_run.cc reRunCmd: OpenClientDb() before anything else. The
+    // catalog lines go out before a run dialog (C-011), otherwise in front.
+    match crate::ua_db::open_client_db(ast, ctx, false) {
+        Ok(mut prefix) => {
+            let result = cmd_rerun_db(ast, ctx, &mut prefix);
+            crate::ua_db::with_prefix(prefix, result)
+        }
+        Err(result) => result,
+    }
 }
 
-fn cmd_rerun_db(ast: &CommandAst, ctx: &ExecContext) -> CommandResult {
+fn cmd_rerun_db(ast: &CommandAst, ctx: &ExecContext, prefix: &mut String) -> CommandResult {
     let value = |key: &str| ast.arguments.iter().find(|a| a.key.eq_ignore_ascii_case(key))
         .and_then(|a| a.value.as_deref());
     let number = |key: &str| value(key).map(|v| v.trim().parse::<i64>().unwrap_or(0)).unwrap_or(0);
@@ -452,8 +462,11 @@ fn cmd_rerun_db(ast: &CommandAst, ctx: &ExecContext) -> CommandResult {
             arguments,
             ..Default::default()
         };
-        let mut run = crate::commands::job::cmd_run(&run_ast, ctx);
-        run.text_output = format!("{text}{}", run.text_output);
+        // The run dialog follows the text so far (C-011).
+        let mut ua = crate::ua_select::Ua::new(ctx);
+        ua.send_msg(std::mem::take(prefix) + &std::mem::take(&mut text));
+        let ok = crate::commands::job::run_with_ua(&mut ua, &run_ast, crate::commands::job::start_job);
+        let run = ua.finish(ok);
         if !run.success { return run; }
         text = run.text_output;
     }
@@ -461,248 +474,214 @@ fn cmd_rerun_db(ast: &CommandAst, ctx: &ExecContext) -> CommandResult {
 }
 
 pub fn cmd_relabel(ast: &CommandAst, ctx: &ExecContext) -> CommandResult {
-    // C++ ua_label.cc do_label: OpenClientDb() before anything else.
-    crate::ua_db::with_client_db(ast, ctx, false, || cmd_relabel_db(ast, ctx))
+    let mut ua = crate::ua_select::Ua::new(ctx);
+    crate::commands::admin::label_dialog(&mut ua, ast, true, |ua, request| {
+        relabel_execute(ua, request, |stor, command| sd_cmd_via_config(ctx, stor, command));
+    });
+    ua.finish(true)
 }
 
-fn cmd_relabel_db(ast: &CommandAst, ctx: &ExecContext) -> CommandResult {
-    relabel_with(ast, ctx, |stor, command| sd_cmd_via_config(ctx, stor, command))
-}
-
-/// do_label(relabel=true) (ua_label.cc:393): storage, old volume, new name
-/// and pool are selected, never defaulted; the old volume must be Purged or
-/// Recycled (ua_label.cc:470). C-012.
-fn relabel_with(
-    ast: &CommandAst,
-    ctx: &ExecContext,
-    send: impl FnOnce(&str, &str) -> Result<String, String>,
-) -> CommandResult {
-    use super::prompt::{select_pool_dbr, select_storage, selection_required};
-    let value = |key: &str| ast.arguments.iter()
-        .find(|a| a.key.eq_ignore_ascii_case(key) && a.value.is_some())
-        .and_then(|a| a.value.as_deref());
-    let (store, mut shown) = match select_storage(ast, ctx, false) {
-        Ok(selected) => selected,
-        Err(result) => return result,
+/// The SD relabel and the catalog rename of a complete relabel request.
+fn relabel_execute(ua: &mut crate::ua_select::Ua, request: crate::commands::admin::LabelRequest,
+    send: impl FnOnce(&str, &str) -> Result<String, String>) {
+    let crate::commands::admin::LabelRequest::Label { storage, volume: newname, old_volume: Some(oldvol), .. } = request else {
+        return;
     };
-    let stor = store.name.as_str();
-    let Some(oldvol) = value("oldvolume") else {
-        // SelectMediaDbr (ua_select.cc:918): pool, media list, then
-        // GetCmd 'E.g. "full-0001" or "*42": '.
-        if value("volume").is_some() {
-            return crate::ua_db::with_prefix(shown, selection_required(String::new()));
-        }
-        return match select_pool_dbr(ctx) {
-            Ok((_, text)) => selection_required(format!("{shown}{text}Enter the volume name or MediaId \
-                of the volume prefixed with an asterisk (*).\nE.g. \"full-0001\" or \"*42\": ")),
-            Err(result) => crate::ua_db::with_prefix(shown, result),
-        };
-    };
-    if let Some(cat) = &ctx.catalog {
-        let status = cat.query_rows(&format!("SELECT VolStatus FROM Media WHERE VolumeName='{}'",
-            oldvol.replace('\'', "''"))).ok()
-            .and_then(|t| t.rows.into_iter().next()).and_then(|row| row.into_iter().next().flatten());
-        match status {
-            None => {
-                // GetMediaRecord fails (ua_label.cc:462), then SelectMediaDbr
-                // tries volume= the same way before asking.
-                let missing = |name: &str| format!("cats/sql_get.cc:1177 Media record for Volume \"{name}\" not found.\n");
-                let mut errors = missing(oldvol);
-                if let Some(newname) = value("volume") {
-                    let exists = cat.query_rows(&format!("SELECT MediaId FROM Media WHERE VolumeName='{}'",
-                        newname.replace('\'', "''"))).is_ok_and(|t| !t.rows.is_empty());
-                    if exists {
-                        // That record would become the volume to relabel: ask.
-                        return crate::ua_db::with_prefix(shown, selection_required(String::new()));
-                    }
-                    errors.push_str(&missing(newname));
-                    let mut result = CommandResult::error(errors);
-                    result.text_output = shown;
-                    return result;
-                }
-                // No volume=: SelectMediaDbr asks for pool and volume.
-                let mut result = match select_pool_dbr(ctx) {
-                    Ok((_, text)) => selection_required(format!("{text}Enter the volume name or MediaId \
-                        of the volume prefixed with an asterisk (*).\nE.g. \"full-0001\" or \"*42\": ")),
-                    Err(result) => result,
-                };
-                result.text_output.insert_str(0, &format!("{shown}{errors}"));
-                return result;
-            }
-            Some(status) if status != "Purged" && status != "Recycle" => {
-                return crate::ua_db::with_prefix(shown, CommandResult::error(format!(
-                    "Volume \"{oldvol}\" has VolStatus {status}. It must be Purged or Recycled before relabeling.\n")));
-            }
-            Some(_) => {}
-        }
-    }
-    let Some(newname) = value("volume") else {
-        return selection_required(format!("{shown}Enter new Volume name: "));
-    };
-    if value("pool").is_none() {
-        match select_pool_dbr(ctx) {
-            Ok((_, text)) => shown.push_str(&text),
-            Err(result) => return crate::ua_db::with_prefix(shown, result),
-        }
-    }
-
-    match send(stor, &format!("relabel OldVolume=\"{oldvol}\" Volume=\"{newname}\"")) {
+    match send(&storage, &format!("relabel OldVolume=\"{oldvol}\" Volume=\"{newname}\"")) {
         Ok(resp) => {
-            if let Some(cat) = &ctx.catalog {
+            if let Some(cat) = &ua.ctx.catalog {
                 let _ = cat.raw_query(&format!("UPDATE media SET volumename='{}' WHERE volumename='{}'",
                     newname.replace('\'', "''"), oldvol.replace('\'', "''")));
             }
-            CommandResult::ok(format!("{shown}Relabel {oldvol} → {newname}:\n{resp}\n"))
+            ua.send_msg(format!("Relabel {oldvol} → {newname}:\n{resp}\n"));
         }
-        Err(e) => crate::ua_db::with_prefix(shown, CommandResult::error(format!("relabel: {e}\n"))),
+        Err(e) => ua.error_msg(format!("relabel: {e}\n")),
     }
 }
 
 pub fn cmd_delete(ast: &CommandAst, ctx: &ExecContext) -> CommandResult {
-    // C++ ua_cmds.cc DeleteCmd: OpenClientDb() before anything else.
-    crate::ua_db::with_client_db(ast, ctx, true, || cmd_delete_db(ast, ctx))
+    let mut ua = crate::ua_select::Ua::new(ctx);
+    let ok = delete_dialog(&mut ua, ast, delete_execute);
+    ua.finish(ok)
 }
 
-fn cmd_delete_db(ast: &CommandAst, ctx: &ExecContext) -> CommandResult {
-    let cat = match &ctx.catalog {
-        Some(c) => c,
-        None => return CommandResult::ok("No catalog configured\n".to_string()),
+/// What a confirmed delete removes from the catalog.
+#[derive(Debug, PartialEq, Eq)]
+enum DeleteAction {
+    Volume { name: String, purged: bool },
+    Pool(String),
+    Job(u64),
+    Storage(String),
+}
+
+/// DeleteCmd (ua_cmds.cc:2220): OpenClientDb, keyword (or the warning and
+/// "Choose catalog item to delete"), then DeleteVolume/DeletePool/DeleteJob/
+/// DeleteStorage with their selections and confirmations. `act` runs only
+/// for a selected and confirmed item.
+fn delete_dialog(ua: &mut crate::ua_select::Ua, ast: &CommandAst,
+    mut act: impl FnMut(&mut crate::ua_select::Ua, DeleteAction)) -> bool {
+    use crate::ua_select::{self, find_arg, find_arg_with_value};
+    const KEYWORDS: [&str; 4] = ["volume", "pool", "jobid", "storage"];
+    let ctx = ua.ctx;
+    if !ua.open_client_db(ast, true) {
+        return true;
+    }
+    let keyword = match ast.arguments.iter().find_map(|a| KEYWORDS.iter().position(|k| a.key.eq_ignore_ascii_case(k))) {
+        Some(keyword) => Some(keyword),
+        None => {
+            ua.warning_msg("In general it is not a good idea to delete either a\n\
+                Pool or a Volume since they may contain data.\n\n");
+            ua.do_keyword_prompt("Choose catalog item to delete", &KEYWORDS)
+        }
     };
-    match delete_request(ast) {
-        DeleteRequest::Dialog(result) => result,
-        DeleteRequest::Volume(vol) => {
-            let vol = vol.replace('\'', "''");
+    match keyword {
+        Some(0) => {
+            // DeleteVolume
+            let Some(media) = ua_select::select_media_dbr(ua, ast) else { return true };
+            ua.warning_msg(format!("\nThis command will delete volume {}\n\
+                and all Jobs saved on that volume from the Catalog\n", media.volume_name));
+            if !ua.batch() && find_arg(ast, "yes").is_none() {
+                let question = format!("Are you sure you want to delete Volume \"{}\"? (yes/no): ", media.volume_name);
+                if ua.get_yesno(&question) != Some(true) {
+                    return true;
+                }
+            }
+            act(ua, DeleteAction::Volume { purged: media.vol_status == "Purged", name: media.volume_name });
+        }
+        Some(1) => {
+            // DeletePool
+            if ua.batch() {
+                ua.error_msg("Deleting pools from the catalog is not supported in batch mode.\n");
+                return false;
+            }
+            let Some(pool) = ua_select::select_pool_dbr(ua, ast, "pool") else { return true };
+            let question = format!("Are you sure you want to delete Pool \"{pool}\"? (yes/no): ");
+            if ua.get_yesno(&question) == Some(true) {
+                act(ua, DeleteAction::Pool(pool));
+            }
+        }
+        Some(2) => {
+            // DeleteJob
+            if find_arg_with_value(ast, "jobid").is_none() {
+                if let Some(jobid) = ua.get_pint("Enter JobId to delete: ") {
+                    act(ua, DeleteAction::Job(u64::from(jobid)));
+                }
+                return true;
+            }
+            let number = |s: &str| ua_select::is_a_number(s);
+            for value in ast.arguments.iter().filter(|a| a.key.eq_ignore_ascii_case("jobid")).filter_map(|a| a.value.clone()) {
+                for token in value.split(',') {
+                    if let Some((low, high)) = token.split_once('-') {
+                        // DeleteJobIdRange
+                        if !(number(low) && number(high)) {
+                            ua.error_msg(format!("Illegal JobId range {low} - {high}, ignored\n"));
+                            continue;
+                        }
+                        let (first, last) = (crate::commands::job::str_to_int64(low) as u64,
+                            crate::commands::job::str_to_int64(high) as u64);
+                        if last <= first {
+                            ua.error_msg(format!("Illegal JobId range {low} - {high} should define increasing JobIds, ignored\n"));
+                            continue;
+                        }
+                        if !ua.batch() && last - first > 25 {
+                            let question = format!("Are you sure you want to delete {} JobIds ? (yes/no): ", last - first);
+                            if ua.get_yesno(&question) != Some(true) {
+                                continue;
+                            }
+                        }
+                        for jobid in first..=last {
+                            act(ua, DeleteAction::Job(jobid));
+                        }
+                    } else if number(token) {
+                        act(ua, DeleteAction::Job(crate::commands::job::str_to_int64(token) as u64));
+                    } else {
+                        ua.error_msg(format!("Illegal JobId {token} ignored\n"));
+                    }
+                }
+            }
+        }
+        Some(_) => {
+            // DeleteStorage
+            let given = match find_arg_with_value(ast, "storage") {
+                Some(name) => name.to_string(),
+                None => ua.get_cmd("Enter storage to delete: ").unwrap_or_default(),
+            };
+            let configured: Vec<String> = ctx.config.as_ref().and_then(|c| c.read().ok())
+                .map(|c| c.storages.iter().map(|s| s.name.clone()).collect()).unwrap_or_default();
+            let orphaned: Vec<String> = ctx.catalog.as_ref()
+                .and_then(|cat| cat.query_rows("SELECT Name FROM Storage").ok())
+                .map(|t| t.rows.into_iter().filter_map(|r| r.into_iter().next().flatten()).collect::<Vec<_>>())
+                .unwrap_or_default().into_iter().filter(|name| !configured.contains(name)).collect();
+            ua.send_msg(format!("Found {} orphaned Storage records.\n", orphaned.len()));
+            if !orphaned.contains(&given) {
+                ua.error_msg(format!("The given storage '{given}' either does not exist at all, or still exists in \
+                    the configuration. In order to remove a storage from the catalog, its configuration must be removed first.\n"));
+                return true;
+            }
+            act(ua, DeleteAction::Storage(given));
+        }
+        None => ua.warning_msg("Nothing done.\n"),
+    }
+    true
+}
+
+/// The catalog work of a confirmed delete.
+fn delete_execute(ua: &mut crate::ua_select::Ua, action: DeleteAction) {
+    let Some(cat) = ua.ctx.catalog.clone() else {
+        ua.send_msg("No catalog configured\n");
+        return;
+    };
+    match action {
+        DeleteAction::Volume { name, .. } => {
+            let vol = name.replace('\'', "''");
             // Delete jobmedia first (FK), then media record
             let _ = cat.raw_query(&format!(
                 "DELETE FROM jobmedia WHERE mediaid IN (SELECT mediaid FROM media WHERE volumename = '{vol}')"));
             match cat.raw_query(&format!("DELETE FROM media WHERE volumename = '{vol}'")) {
-                Ok(_) => CommandResult::ok(format!("Volume {vol} deleted from catalog\n")),
-                Err(e) => CommandResult::error(format!("Delete error: {e}\n")),
+                Ok(_) => ua.send_msg(format!("Volume {name} deleted.\n")),
+                Err(e) => ua.error_msg(format!("Delete error: {e}\n")),
             }
         }
-        DeleteRequest::Jobs(ids, errors) => {
-            let mut output = String::new();
-            for id in ids {
-                let _ = cat.raw_query(&format!("DELETE FROM jobmedia WHERE jobid = {id}"));
-                let _ = cat.raw_query(&format!("DELETE FROM file WHERE jobid = {id}"));
-                match cat.raw_query(&format!("DELETE FROM job WHERE jobid = {id}")) {
-                    Ok(_) => output.push_str(&format!("Jobid {id} and associated records deleted from the catalog.\n")),
-                    Err(e) => return CommandResult::error(format!("Delete error: {e}\n")),
-                }
+        DeleteAction::Job(id) => {
+            let _ = cat.raw_query(&format!("DELETE FROM jobmedia WHERE jobid = {id}"));
+            let _ = cat.raw_query(&format!("DELETE FROM file WHERE jobid = {id}"));
+            match cat.raw_query(&format!("DELETE FROM job WHERE jobid = {id}")) {
+                Ok(_) => ua.send_msg(format!("Jobid {id} and associated records deleted from the catalog.\n")),
+                Err(e) => ua.error_msg(format!("Delete error: {e}\n")),
             }
-            let mut result = CommandResult::ok(output);
-            result.error_message = errors;
-            result
         }
-        DeleteRequest::Unsupported => CommandResult::ok("delete: specify volume=<name> or jobid=<id>\n".to_string()),
-    }
-}
-
-enum DeleteRequest {
-    Dialog(CommandResult),
-    Volume(String),
-    Jobs(Vec<u64>, String),
-    Unsupported,
-}
-
-/// DeleteCmd (ua_cmds.cc:2220) argument handling: what may be deleted
-/// without console interaction. Missing values, a volume without `yes` and
-/// ranges of more than 25 JobIds end at the dialog hook (C-012).
-fn delete_request(ast: &CommandAst) -> DeleteRequest {
-    use super::prompt::{keyword_prompt, selection_required};
-    const KEYWORDS: [&str; 4] = ["volume", "pool", "jobid", "storage"];
-    let keyword = ast.arguments.iter().find_map(|a|
-        KEYWORDS.iter().position(|k| a.key.eq_ignore_ascii_case(k)));
-    let value = |key: &str| ast.arguments.iter()
-        .find(|a| a.key.eq_ignore_ascii_case(key) && a.value.is_some())
-        .and_then(|a| a.value.as_deref());
-    match keyword {
-        None => DeleteRequest::Dialog(keyword_prompt(
-            "In general it is not a good idea to delete either a\n\
-             Pool or a Volume since they may contain data.\n\n", &KEYWORDS, "Choose catalog item to delete")),
-        Some(0) => match value("volume") {
-            // DeleteVolume → SelectMediaDbr (ua_select.cc:918).
-            None => DeleteRequest::Dialog(selection_required(String::new())),
-            Some(vol) if ast.arguments.iter().any(|a| a.key.eq_ignore_ascii_case("yes")) =>
-                DeleteRequest::Volume(vol.to_string()),
-            // ua_cmds.cc:2433-2441 warning, then GetYesno.
-            Some(vol) => DeleteRequest::Dialog(selection_required(format!(
-                "\nThis command will delete volume {vol}\nand all Jobs saved on that volume from the Catalog\n\
-                 Are you sure you want to delete Volume \"{vol}\"? (yes/no): "))),
-        },
-        Some(2) => {
-            // DeleteJob (ua_cmds.cc:2311): GetPint without a value.
-            let Some(list) = value("jobid") else {
-                return DeleteRequest::Dialog(selection_required("Enter JobId to delete: ".into()));
-            };
-            let number = |s: &str| !s.is_empty() && s.bytes().all(|b| b.is_ascii_digit());
-            let (mut ids, mut errors) = (Vec::new(), String::new());
-            for token in list.split(',') {
-                match token.split_once('-') {
-                    // DeleteJobIdRange (ua_cmds.cc:2376).
-                    Some((a, b)) if number(a) && number(b) => {
-                        let (a, b) = (a.parse::<u64>().unwrap_or(0), b.parse::<u64>().unwrap_or(0));
-                        if b > a {
-                            if b - a > 25 {
-                                return DeleteRequest::Dialog(selection_required(format!(
-                                    "Are you sure you want to delete {} JobIds ? (yes/no): ", b - a)));
-                            }
-                            ids.extend(a..=b);
-                        }
-                    }
-                    _ if number(token) => ids.push(token.parse().unwrap_or(0)),
-                    _ => errors.push_str(&format!("Illegal JobId {token} ignored\n")),
-                }
-            }
-            DeleteRequest::Jobs(ids, errors)
-        }
-        Some(_) => DeleteRequest::Unsupported,
+        DeleteAction::Pool(_) => ua.send_msg("delete pool: not supported\n"),
+        DeleteAction::Storage(_) => ua.send_msg("delete storage: not supported\n"),
     }
 }
 
 pub fn cmd_create(ast: &CommandAst, ctx: &ExecContext) -> CommandResult {
-    // C++ ua_cmds.cc CreateCmd: OpenClientDb() before anything else.
-    crate::ua_db::with_client_db(ast, ctx, false, || cmd_create_db(ast, ctx))
+    let mut ua = crate::ua_select::Ua::new(ctx);
+    create_dialog(&mut ua, ast, create_pool);
+    ua.finish(true)
 }
 
-fn cmd_create_db(ast: &CommandAst, ctx: &ExecContext) -> CommandResult {
-    let pool_name = ast.arguments.iter().find(|a| a.key.eq_ignore_ascii_case("pool"))
-        .and_then(|a| a.value.as_deref());
-    let config = match &ctx.config {
-        Some(c) => match c.read() { Ok(c) => c, Err(_) => return CommandResult::error("Config error\n".to_string()) },
-        None => return CommandResult::ok("No config\n".to_string()),
-    };
+/// CreateCmd (ua_cmds.cc:820): OpenClientDb, get_pool_resource (`pool=` or
+/// the selection list — never a default), then CreatePool. `create` runs
+/// only for a selected pool resource.
+fn create_dialog(ua: &mut crate::ua_select::Ua, ast: &CommandAst,
+    create: impl FnOnce(&mut crate::ua_select::Ua, bareos_config::resources::PoolResource)) {
+    if !ua.open_client_db(ast, false) {
+        return;
+    }
+    let Some(name) = crate::ua_select::get_pool_resource(ua, ast) else { return };
+    let pool = ua.ctx.config.as_ref().and_then(|c| c.read().ok())
+        .and_then(|c| c.find_pool(&name).cloned());
+    if let Some(pool) = pool {
+        create(ua, pool);
+    }
+}
 
-    // get_pool_resource (ua_select.cc:1008): exactly one pool, selected when
-    // pool= is missing or unknown — never all pools at once (C-012).
-    let mut shown = String::new();
-    let mut errors = String::new();
-    let allowed = |name: &str| crate::acl::access(ctx, crate::acl::Kind::Pool, name);
-    let named = pool_name.filter(|name| allowed(name));
-    let pool = match named.and_then(|name| config.pools.iter().find(|p| p.name == name)) {
-        Some(pool) => pool,
-        None => {
-            if let Some(name) = named {
-                errors.push_str(&format!("Error: Pool resource \"{name}\" does not exist.\n"));
-            }
-            let names = crate::director_config::sort_case_insensitive(config.pools.iter()
-                .map(|p| p.name.as_str()).filter(|name| allowed(name)))
-                .into_iter().map(str::to_string).collect();
-            match super::prompt::select_resource(ctx, "The defined Pool resources are:\n", "Pool",
-                "Select Pool resource", names) {
-                Ok((name, text)) => {
-                    shown = text;
-                    config.pools.iter().find(|p| p.name == name).expect("selected from the configured pools")
-                }
-                Err(mut result) => {
-                    result.text_output.insert_str(0, &errors);
-                    return result;
-                }
-            }
-        }
-    };
-    let Some(cat) = &ctx.catalog else {
-        return CommandResult::ok(format!("{errors}{shown}No catalog configured\n"));
+/// CreatePool(POOL_OP_CREATE) and the "Pool %s created." message.
+fn create_pool(ua: &mut crate::ua_select::Ua, pool: bareos_config::resources::PoolResource) {
+    let Some(cat) = ua.ctx.catalog.clone() else {
+        ua.send_msg("No catalog configured\n");
+        return;
     };
     let sql = format!(
         "INSERT INTO pool (name, pooltype, maxvols, autoprune, volretention, fileretention, jobretention, numvols) \
@@ -711,53 +690,140 @@ fn cmd_create_db(ast: &CommandAst, ctx: &ExecContext) -> CommandResult {
         if pool.auto_prune { 1 } else { 0 },
         pool.volume_retention.as_secs(), 0, 0,
     );
-    match cat.raw_query(&sql) {
-        // ua_cmds.cc:845 (the "already exists" case is not distinguished yet).
-        Ok(_) => CommandResult::ok(format!("{errors}{shown}Pool {} created.\n", pool.name)),
-        Err(e) => {
-            let mut result = CommandResult::error(format!("{e}\n"));
-            result.text_output = format!("{errors}{shown}");
-            result
-        }
+    // ua_cmds.cc:845 (the "already exists" case is not distinguished yet).
+    if let Err(e) = cat.raw_query(&sql) {
+        ua.error_msg(format!("{e}\n"));
     }
+    ua.send_msg(format!("Pool {} created.\n", pool.name));
 }
 
 pub fn cmd_add(ast: &CommandAst, ctx: &ExecContext) -> CommandResult {
-    // C++ ua_cmds.cc add_cmd: OpenClientDb(ua) after the "label" hint.
-    let hint = "You probably don't want to be using this command since it\n\
-        creates database records without labeling the Volumes.\n\
-        You probably want to use the \"label\" command.\n\n".to_string();
-    crate::ua_db::with_prefix(hint, crate::ua_db::with_client_db(ast, ctx, false, || cmd_add_db(ast, ctx)))
+    let mut ua = crate::ua_select::Ua::new(ctx);
+    add_dialog(&mut ua, ast, add_volumes);
+    ua.finish(true)
 }
 
-/// add_cmd (ua_cmds.cc:611) always asks for the number of volumes and their
-/// names (GetPint/GetCmd); command line arguments only preselect pool and
-/// storage. Without the dialog nothing is created (C-012).
-fn cmd_add_db(ast: &CommandAst, ctx: &ExecContext) -> CommandResult {
-    use super::prompt::{select_pool_dbr, select_storage, selection_required};
-    let pool = ast.arguments.iter().find(|a| a.key.eq_ignore_ascii_case("pool"))
-        .and_then(|a| a.value.as_deref())
-        .filter(|name| crate::acl::access(ctx, crate::acl::Kind::Pool, name));
-    let (pool, mut shown) = match pool {
-        Some(pool) => (pool.to_string(), String::new()),
-        None => match select_pool_dbr(ctx) {
-            Ok(selected) => selected,
-            Err(result) => return result,
-        },
-    };
-    // get_storage_resource(ua) for the media type; GetMediaType otherwise.
-    match select_storage(ast, ctx, false) {
-        Ok((_, text)) => shown.push_str(&text),
-        Err(result) => return crate::ua_db::with_prefix(shown, result),
+/// The volumes `add` creates.
+#[derive(Debug, PartialEq, Eq)]
+struct AddVolumes {
+    pool: String,
+    pool_id: i64,
+    media_type: String,
+    names: Vec<String>,
+    slot: i64,
+    in_changer: bool,
+}
+
+/// add_cmd (ua_cmds.cc:611): hint, OpenClientDb, GetPoolDbr, maximum check,
+/// storage/media type, then number, (base) name, starting number and for
+/// autochangers slot and InChanger. `create` runs only after the complete
+/// dialog.
+fn add_dialog(ua: &mut crate::ua_select::Ua, ast: &CommandAst,
+    create: impl FnOnce(&mut crate::ua_select::Ua, AddVolumes)) {
+    ua.send_msg("You probably don't want to be using this command since it\n\
+        creates database records without labeling the Volumes.\n\
+        You probably want to use the \"label\" command.\n\n");
+    if !ua.open_client_db(ast, false) {
+        return;
     }
-    let max = ctx.catalog.as_ref()
-        .and_then(|cat| cat.query_rows(&format!("SELECT MaxVols, NumVols FROM Pool WHERE Name='{}'",
+    if let Some(volumes) = add_questions(ua, ast) {
+        create(ua, volumes);
+    }
+}
+
+fn add_questions(ua: &mut crate::ua_select::Ua, ast: &CommandAst) -> Option<AddVolumes> {
+    use crate::ua_select;
+    let ctx = ua.ctx;
+    let pool = ua_select::select_pool_dbr(ua, ast, "pool")?;
+    let counts = ctx.catalog.as_ref()
+        .and_then(|cat| cat.query_rows(&format!("SELECT PoolId, MaxVols, NumVols FROM Pool WHERE Name='{}'",
             pool.replace('\'', "''"))).ok())
         .and_then(|t| t.rows.into_iter().next())
         .map(|row| row.into_iter().map(|v| v.and_then(|v| v.parse::<i64>().ok()).unwrap_or(0)).collect::<Vec<_>>())
-        .map(|v| if v[0] == 0 { 1000 } else { v[0] - v[1] })
-        .unwrap_or(1000);
-    selection_required(format!("{shown}Enter number of Volumes to create. 0=>fixed name. Max={max}: "))
+        .unwrap_or_else(|| vec![0, 0, 0]);
+    let (pool_id, mut max_vols, num_vols) = (counts[0], counts[1], counts[2]);
+    while max_vols > 0 && num_vols >= max_vols {
+        ua.warning_msg(format!("Pool already has maximum volumes={max_vols}\n"));
+        max_vols = i64::from(ua.get_pint("Enter new maximum (zero for unlimited): ")?);
+    }
+    // Media type of the storage, otherwise GetMediaType.
+    let storage = ua_select::get_storage_resource(ua, ast, false, false);
+    let media_type = match &storage {
+        Some(name) => ctx.config.as_ref().and_then(|c| c.read().ok())
+            .and_then(|c| c.find_storage(name).map(|s| s.media_type.clone())).unwrap_or_default(),
+        None => ua_select::get_media_type(ua, ast)?,
+    };
+    let max = if max_vols == 0 { 1000 } else { max_vols - num_vols };
+    let num = loop {
+        let num = i64::from(ua.get_pint(&format!("Enter number of Volumes to create. 0=>fixed name. Max={max}: "))?);
+        if num > max {
+            ua.warning_msg(format!("The number must be between 0 and {max}\n"));
+            continue;
+        }
+        break num;
+    };
+    let base = loop {
+        let name = ua.get_cmd(if num == 0 { "Enter Volume name: " } else { "Enter base volume name: " })?;
+        if !ua_select::is_volume_name_legal(ua, &name) {
+            continue;
+        }
+        if name.len() >= 128 - 10 {
+            ua.warning_msg("Volume name too long.\n");
+            continue;
+        }
+        break name;
+    };
+    let (start, count) = if num > 0 {
+        let start = loop {
+            let start = i64::from(ua.get_pint("Enter the starting number: ")?);
+            if start < 1 {
+                ua.warning_msg("Start number must be greater than zero.\n");
+                continue;
+            }
+            break start;
+        };
+        (start, num)
+    } else {
+        (1, 1)
+    };
+    let (mut slot, mut in_changer) = (0, false);
+    if storage.as_deref().is_some_and(|name| ctx.config.as_ref().and_then(|c| c.read().ok())
+        .is_some_and(|c| crate::ua_select::is_autochanger(&c, name))) {
+        slot = i64::from(ua.get_pint("Enter slot (0 for none): ")?);
+        in_changer = ua.get_yesno("InChanger? yes/no: ")?;
+    }
+    let names = (start..start + count)
+        .map(|i| if num > 0 { format!("{base}{i:04}") } else { base.clone() })
+        .collect();
+    Some(AddVolumes { pool, pool_id, media_type, names, slot, in_changer })
+}
+
+/// CreateMediaRecord for each volume (pool defaults, VolStatus Unlabeled)
+/// and the pool's NumVols.
+fn add_volumes(ua: &mut crate::ua_select::Ua, volumes: AddVolumes) {
+    let Some(cat) = ua.ctx.catalog.clone() else {
+        ua.send_msg("No catalog configured\n");
+        return;
+    };
+    for (index, name) in volumes.names.iter().enumerate() {
+        let sql = format!(
+            "INSERT INTO Media (VolumeName, MediaType, PoolId, VolStatus, Enabled, Slot, InChanger, Recycle, \
+             VolRetention, VolUseDuration, MaxVolJobs, MaxVolFiles, MaxVolBytes, RecyclePoolId, ActionOnPurge) \
+             SELECT '{}', '{}', PoolId, 'Unlabeled', 1, {}, {}, Recycle, VolRetention, VolUseDuration, \
+             MaxVolJobs, MaxVolFiles, MaxVolBytes, RecyclePoolId, ActionOnPurge FROM Pool WHERE PoolId={}",
+            name.replace('\'', "''"), volumes.media_type.replace('\'', "''"),
+            volumes.slot + index as i64, i32::from(volumes.in_changer), volumes.pool_id);
+        if let Err(e) = cat.raw_query(&sql) {
+            ua.error_msg(format!("{e}\n"));
+            return;
+        }
+    }
+    if let Err(e) = cat.raw_query(&format!("UPDATE Pool SET NumVols=NumVols+{} WHERE PoolId={}",
+        volumes.names.len(), volumes.pool_id)) {
+        ua.warning_msg(format!("{e}\n"));
+        return;
+    }
+    ua.send_msg(format!("{} Volumes created in pool {}\n", volumes.names.len(), volumes.pool));
 }
 
 pub fn cmd_import(ast: &CommandAst, ctx: &ExecContext) -> CommandResult {
@@ -955,64 +1021,70 @@ mod move_operation_tests {
         assert_eq!(run("move job=Backup", &ctx).error_message, "Job \"Backup\" is not running.\n");
     }
 
-    #[test]
-    fn relabel_never_defaults_storage_volume_or_pool() {
-        let ctx = context("Pool { Name = Full; Pool Type = Backup }\nPool { Name = Inc; Pool Type = Backup }\n\
-            Storage { Name = Other; Address = localhost }");
-        let run = |line: &str| relabel_with(&crate::session::parse_cli_command(line), &ctx,
-            |_, _| panic!("{line}: must not contact the SD"));
-        assert_eq!(run("relabel").text_output,
-            "The defined Storage resources are:\n1: File\n2: Other\nSelect Storage resource (1-2): ");
-        assert_eq!(run("relabel storage=File").text_output,
-            "Defined Pools:\n1: Full\n2: Inc\nSelect the Pool (1-2): ");
-        assert_eq!(run("relabel storage=File oldvolume=a").text_output, "Enter new Volume name: ");
-        assert_eq!(run("relabel storage=File oldvolume=a volume=b").text_output,
-            "Defined Pools:\n1: Full\n2: Inc\nSelect the Pool (1-2): ");
-        assert_eq!(run("relabel storage=File volume=b").text_output, "");
-    }
 
     #[test]
     fn delete_acts_only_on_complete_requests() {
-        let req = |line: &str| delete_request(&crate::session::parse_cli_command(line));
-        for line in ["delete", "delete volume", "delete volume=v1", "delete jobid", "delete jobid=1-100"] {
-            assert!(matches!(req(line), DeleteRequest::Dialog(_)), "{line}");
+        use crate::ua_select::tests::scripted;
+        let ctx = context("Pool { Name = Full; Pool Type = Backup }\nPool { Name = Inc; Pool Type = Backup }");
+        let delete = |line: &str, answers: &[&str]| {
+            let mut acted = Vec::new();
+            let (_, console) = scripted(answers, || {
+                let mut ua = crate::ua_select::Ua::new(&ctx);
+                delete_dialog(&mut ua, &crate::session::parse_cli_command(line), |_, action| acted.push(action));
+                ua.finish(true);
+            });
+            (console.transcript(), acted)
+        };
+        let (text, acted) = delete("delete", &["."]);
+        assert_eq!(text, "In general it is not a good idea to delete either a\nPool or a Volume since they may contain data.\n\n\
+            You have the following choices:\n1: volume\n2: pool\n3: jobid\n4: storage\n\
+            Choose catalog item to delete (1-4): .\nSelection aborted, nothing done.\nNothing done.\n");
+        assert!(acted.is_empty());
+        let (text, acted) = delete("delete", &["3", "."]);
+        assert!(text.ends_with("Choose catalog item to delete (1-4): 3\nEnter JobId to delete: .\n"), "{text}");
+        assert!(acted.is_empty());
+        assert_eq!(delete("delete jobid", &["x", "12"]).1, vec![DeleteAction::Job(12)]);
+        let (text, acted) = delete("delete jobid=3,5-7,x,9-8", &[]);
+        assert_eq!(acted, vec![DeleteAction::Job(3), DeleteAction::Job(5), DeleteAction::Job(6), DeleteAction::Job(7)]);
+        assert_eq!(text, "");
+        let (text, acted) = delete("delete jobid=1-100", &["no"]);
+        assert_eq!((text.as_str(), acted.len()), ("Are you sure you want to delete 99 JobIds ? (yes/no): no\n", 0));
+        // Without catalog the volume and pool selections fail: nothing is deleted.
+        for line in ["delete volume", "delete volume=v1", "delete volume=v1 yes", "delete pool"] {
+            assert!(delete(line, &["."]).1.is_empty(), "{line}");
         }
-        let DeleteRequest::Dialog(menu) = req("delete") else { unreachable!() };
-        assert_eq!(menu.text_output, "In general it is not a good idea to delete either a\nPool or a Volume since they may contain data.\n\n\
-            You have the following choices:\n1: volume\n2: pool\n3: jobid\n4: storage\nChoose catalog item to delete (1-4): ");
-        assert!(matches!(req("delete volume=v1 yes"), DeleteRequest::Volume(v) if v == "v1"));
-        let DeleteRequest::Jobs(ids, errors) = req("delete jobid=3,5-7,x") else { panic!() };
-        assert_eq!((ids, errors.as_str()), (vec![3, 5, 6, 7], "Illegal JobId x ignored\n"));
-        assert!(matches!(req("delete jobid=1;DROP"), DeleteRequest::Jobs(ids, _) if ids.is_empty()));
-
-        let mut ctx = context("Pool { Name = Full; Pool Type = Backup }\nPool { Name = Inc; Pool Type = Backup }");
-        let (catalog, log) = crate::commands::admin::side_effect_tests::recording_catalog("b1");
-        ctx.catalog = Some(catalog);
-        for line in ["delete", "delete volume", "delete volume=v1", "delete jobid", "delete jobid=1-100", "delete jobid=x"] {
-            cmd_delete_db(&crate::session::parse_cli_command(line), &ctx);
-        }
-        for line in ["create", "create pool=Nope", "add", "add pool=Full volume=v1"] {
-            let ast = crate::session::parse_cli_command(line);
-            if line.starts_with("create") { cmd_create_db(&ast, &ctx); } else { cmd_add_db(&ast, &ctx); }
-        }
-        // add asks the pool's MaxVols/NumVols (read only) — nothing else may reach the catalog.
-        assert!(log.lock().unwrap().iter().all(|sql| sql.starts_with("SELECT")), "{:?}", log.lock().unwrap());
-        cmd_delete_db(&crate::session::parse_cli_command("delete volume=v1 yes"), &ctx);
-        assert!(log.lock().unwrap().iter().any(|sql| sql.starts_with("DELETE")), "control");
+        // Batch mode: no question can be answered.
+        let mut ua = crate::ua_select::Ua::new(&ctx);
+        delete_dialog(&mut ua, &crate::session::parse_cli_command("delete"), |_, _| panic!("batch"));
+        let result = ua.finish(true);
+        assert!(result.text_output.contains("Your request has multiple choices for \"\""), "{}", result.text_output);
     }
 
     #[test]
     fn create_and_add_never_default_the_pool() {
+        use crate::ua_select::tests::scripted;
         let ctx = context("Pool { Name = Full; Pool Type = Backup }\nPool { Name = Inc; Pool Type = Backup }");
-        let run = |f: fn(&CommandAst, &ExecContext) -> CommandResult, line: &str|
-            f(&crate::session::parse_cli_command(line), &ctx);
-        assert_eq!(run(cmd_create_db, "create").text_output,
-            "The defined Pool resources are:\n1: Full\n2: Inc\nSelect Pool resource (1-2): ");
-        assert_eq!(run(cmd_create_db, "create pool=Nope").text_output,
-            "Error: Pool resource \"Nope\" does not exist.\nThe defined Pool resources are:\n1: Full\n2: Inc\nSelect Pool resource (1-2): ");
-        assert_eq!(run(cmd_add_db, "add").text_output, "Defined Pools:\n1: Full\n2: Inc\nSelect the Pool (1-2): ");
-        assert_eq!(run(cmd_add_db, "add pool=Full volume=v1 storage=File").text_output,
-            "Enter number of Volumes to create. 0=>fixed name. Max=1000: ");
+        let create = |line: &str, answers: &[&str]| {
+            let mut created = None;
+            let (_, console) = scripted(answers, || {
+                let mut ua = crate::ua_select::Ua::new(&ctx);
+                create_dialog(&mut ua, &crate::session::parse_cli_command(line), |_, pool| created = Some(pool.name));
+                ua.finish(true);
+            });
+            (console.transcript(), created)
+        };
+        assert_eq!(create("create", &["."]), ("The defined Pool resources are:\n1: Full\n2: Inc\n\
+            Select Pool resource (1-2): .\nSelection aborted, nothing done.\n".to_string(), None));
+        assert_eq!(create("create pool=Nope", &["2"]), ("Error: Pool resource \"Nope\" does not exist.\n\
+            The defined Pool resources are:\n1: Full\n2: Inc\nSelect Pool resource (1-2): 2\n".to_string(), Some("Inc".to_string())));
+        assert_eq!(create("create pool=Full", &[]).1, Some("Full".to_string()));
+        // add: no catalog -> no pool list, nothing created.
+        let (_, console) = scripted(&["."], || {
+            let mut ua = crate::ua_select::Ua::new(&ctx);
+            add_dialog(&mut ua, &crate::session::parse_cli_command("add pool=Full"), |_, _| panic!("no pool record"));
+            ua.finish(true)
+        });
+        assert!(console.answers.len() == 1, "nothing asked without catalog");
     }
 
     #[test]
@@ -1068,13 +1140,21 @@ mod trace_command_tests {
     use super::*;
 
     #[test]
-    fn invalid_trace_input_does_not_change_trace_state() {
+    fn trace_without_argument_asks_and_cancel_changes_nothing() {
         let ctx = ExecContext { session_id: 0, config: None, session_mgr: None,
             catalog: None, api_mode: crate::command_executor::ApiMode::Human,
             bus_rx: None, job_manager: None };
         let before = bareos_bnet::debug::trace_enabled();
-        for line in ["trace", "trace maybe", "trace on off", "trace on=yes"] {
-            assert!(!cmd_trace(&crate::session::parse_cli_command(line), &ctx).success);
+        for line in ["trace", "trace on off"] {
+            // Batch mode (no console): no question, no change, no output.
+            let result = cmd_trace(&crate::session::parse_cli_command(line), &ctx);
+            assert!(result.success && result.text_output.is_empty() && result.error_message.is_empty());
+            let (result, console) = crate::ua_select::tests::scripted(&["."], || {
+                cmd_trace(&crate::session::parse_cli_command(line), &ctx)
+            });
+            assert!(result.success);
+            assert_eq!(console.transcript(), "Turn on or off? .\n");
+            assert_eq!(console.signals(), vec![bareos_bnet::BnetSignal::SubPrompt]);
         }
         assert_eq!(bareos_bnet::debug::trace_enabled(), before);
     }

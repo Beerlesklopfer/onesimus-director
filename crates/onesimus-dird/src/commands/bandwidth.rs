@@ -8,7 +8,7 @@ enum Target {
 }
 
 pub fn cmd_setbandwidth(ast: &CommandAst, ctx: &ExecContext) -> CommandResult {
-    setbandwidth_with(ast, ctx, |target, director, command| match target {
+    setbandwidth_dialog_with(ast, ctx, |target, director, command| match target {
         Target::Client(client) => crate::fd_protocol::fd_command(
             &client.address,
             client.port,
@@ -24,6 +24,42 @@ pub fn cmd_setbandwidth(ast: &CommandAst, ctx: &ExecContext) -> CommandResult {
             command,
         ),
     })
+}
+
+/// C++ ua_cmds.cc SetbwlimitCmd() dialogs: without `limit=` the limit is
+/// asked for (GetPint "Enter new bandwidth limit kb/s: "); without a job
+/// selector or `storage` keyword the client comes from get_client_resource
+/// (`client=`/`fd=` or the selection list). A cancelled dialog ends the
+/// command silently. Job selectors and `storage` go to setbandwidth_with
+/// unchanged.
+fn setbandwidth_dialog_with(
+    ast: &CommandAst,
+    ctx: &ExecContext,
+    send: impl FnOnce(&Target, &str, &str) -> Result<String, String>,
+) -> CommandResult {
+    use crate::command_ast::Argument;
+    use crate::ua_select::{self, Ua};
+    let mut ua = Ua::new(ctx);
+    let mut resolved = ast.clone();
+    // C++: limit = atoi(value) * 1024; a negative or missing limit is asked.
+    let given = ua_select::find_arg_with_value(ast, "limit")
+        .map(|v| v.trim().parse::<i64>().unwrap_or(-1));
+    if given.is_none_or(|v| v < 0) {
+        let Some(limit) = ua.get_pint("Enter new bandwidth limit kb/s: ") else { return ua.finish(true) };
+        resolved.arguments.retain(|a| !a.key.eq_ignore_ascii_case("limit"));
+        resolved.arguments.push(Argument { key: "limit".into(), value: Some(limit.to_string()) });
+    }
+    let job_selector = ["job", "jobid", "ujobid", "all", "state"].iter()
+        .any(|k| ua_select::find_arg(ast, k).is_some());
+    if !job_selector && ua_select::find_arg(ast, "storage").is_none() {
+        let Some(client) = ua_select::get_client_resource(&mut ua, ast) else { return ua.finish(true) };
+        resolved.arguments.retain(|a| !a.key.eq_ignore_ascii_case("client") && !a.key.eq_ignore_ascii_case("fd"));
+        resolved.arguments.push(Argument { key: "client".into(), value: Some(client) });
+    }
+    let result = setbandwidth_with(&resolved, ctx, send);
+    let success = result.success;
+    ua.send_result(result);
+    ua.finish(success)
 }
 
 fn setbandwidth_with(
@@ -254,5 +290,36 @@ mod tests {
         for reply in [Ok("2900 Error\n".into()), Err("connection reset".into())] {
             assert!(!setbandwidth_with(&ast, &context(), |_, _, _| reply).success);
         }
+    }
+
+    #[test]
+    fn dialog_asks_limit_then_selects_client() {
+        use crate::ua_select::tests::scripted;
+        let ctx = context();
+        // Batch mode: no limit, nothing happens.
+        let r = setbandwidth_dialog_with(&crate::session::parse_cli_command("setbandwidth"), &ctx,
+            |_, _, _| panic!("no I/O"));
+        assert!(r.success && r.text_output.is_empty() && r.error_message.is_empty());
+        let (r, console) = scripted(&["."], || setbandwidth_dialog_with(
+            &crate::session::parse_cli_command("setbandwidth"), &ctx, |_, _, _| panic!("no I/O")));
+        assert!(r.success);
+        assert_eq!(console.transcript(), "Enter new bandwidth limit kb/s: .\n");
+        // Single client: automatically selected.
+        let (r, console) = scripted(&["x", "4"], || setbandwidth_dialog_with(
+            &crate::session::parse_cli_command("setbandwidth"), &ctx, |target, _, command| {
+                assert!(matches!(target, Target::Client(_)));
+                assert_eq!(command, "setbandwidth=4096 Job=\n");
+                Ok("2000 OK Bandwidth\n".into())
+            }));
+        assert!(r.success);
+        assert_eq!(console.transcript(),
+            "Enter new bandwidth limit kb/s: x\nExpected a positive integer, got: x\n\
+             Enter new bandwidth limit kb/s: 4\nAutomatically selected Client: fd\n\
+             Connecting to Client fd at localhost:9102\nOK Limiting bandwidth to 4kb/s \n");
+        // Unknown client: original error, then the list.
+        let r = setbandwidth_dialog_with(&crate::session::parse_cli_command("setbandwidth limit=1 client=nosuch"),
+            &ctx, |_, _, _| Ok("2000 OK Bandwidth\n".into()));
+        assert_eq!(r.error_message, "Error: Client resource nosuch does not exist.\n");
+        assert!(r.text_output.starts_with("Automatically selected Client: fd\n"));
     }
 }

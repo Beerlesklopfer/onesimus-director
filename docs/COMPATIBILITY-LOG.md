@@ -28,7 +28,7 @@ Neue Einträge unten anhängen; behobene Einträge bleiben mit Commit stehen.
 | C-008 | 15.10.2026 | Banner | Verbindungsaufbau | Ein Frame `1000 OK: <dir> Version: <v> (<date>) -- <cipher>` (Konsole < 18.2) bzw. 1000/1002 mit Community-Hinweis | Kein Datum/Cipher, zusätzliche 1002-Zeile | `authenticate_console.cc:129` | behoben (in development, 15.10.2026) |
 | C-009 | 15.10.2026 | Version | `version`, `status dir`, `.status dir header`, `memory` | `bareos-dir Version: 25.1.2~pre43… (09 October 2026) <distname> <distver> …` | `25.1.2+onesimus.0.2.0 (Debian …)` ohne Datum | `ua_cmds.cc` `VersionCmd` | behoben (`version_strings.rs`; BINARY_INFO „Onesimus“, Support-Hinweis onesimus.io) — Entscheidung 15.10.2026: Bareos-Format byte-gleich, nur Versionstoken `25.1.2+onesimus.<gui>` eigen; Parität normalisiert ausschließlich dieses Token. Folgeentscheidung: Binary-Info/Support-Hinweis im gleichen Format, aber eigener Onesimus-Text (kein Bareos-Community-Anspruch), ebenfalls gezielt normalisiert |
 | C-010 | 15.10.2026 | whoami | `whoami` (Default-Konsole) | `root` | `*UserAgent*` | `ua_cmds.cc:2758` | behoben (C-010 merge) |
-| C-011 | 15.10.2026 | Dialoge | `run`, `prune`, `purge`, `delete`, `update`, `label`, `relabel`, `create`, `add`, `query`, `sqlquery`, `trace`, `setdebug`, `setbandwidth` | Interaktive Auswahl/Eingabe mit Signal `BNET_SUB_PROMPT` (-27) | Fehlermeldung bzw. Usage, Ende mit EOD | `ua_input.cc`, `ua_select.cc` | offen |
+| C-011 | 15.10.2026 | Dialoge | `run`, `prune`, `purge`, `delete`, `update`, `label`, `relabel`, `create`, `add`, `query`, `sqlquery`, `trace`, `setdebug`, `setbandwidth` | Interaktive Auswahl/Eingabe mit Signal `BNET_SUB_PROMPT` (-27) | Fehlermeldung bzw. Usage, Ende mit EOD | `ua_input.cc`, `ua_select.cc` | behoben (Merge 15.10.2026; `cancel`-Dialog noch ohne Test) |
 | C-012 | 15.10.2026 | **Seiteneffekte** | `truncate`, `setip`, `import`, `export`, `move` ohne Argumente | Abbruch mit Usage/Auswahl, keine Wirkung | `truncate` führt ein Truncate aus, `setip` meldet „Client address updated“, `import/export/move` senden Befehle an den SD | `ua_cmds.cc`, `ua_impexp.cc` | behoben (alle Guards + Seiteneffekt-Tests; Dialoge → C-011) |
 | C-013 | 15.10.2026 | Storage-Auswahl | `mount`, `release`, `status` ohne Ziel | Einzige Storage wird automatisch gewählt (`Automatically selected Storage: File`) | `Storage '?' not found` | `ua_select.cc:1228` | behoben (in development, 15.10.2026) |
 | C-014 | 15.10.2026 | status | `status scheduler`, `status subscriptions`, `status configuration`, `status dir`, `.status dir …` | Eigene Unterabschnitte | Fehlen bzw. Delegation an Gesamtstatus | `ua_status.cc` | offen |
@@ -77,7 +77,8 @@ Noch nicht gemergte Agent-Branches (Worktrees unter `.claude/worktrees/`, Commit
 | C-021 restore | `9a6402e` | Konflikt (admin.rs, C-012-Guards) |
 | C-022 bvfs | `5c9ec82 0a58b6c` | Konflikt |
 | C-037 Audit-Log | `021b78d` | Konflikt (parity.py: jetzt Katalogkopien pro Seite) |
-| C-011 Dialoge | 17 Commits `159dea3`..`28cf092` (Basis `9df19d4`) | Framework `ua_select.rs` + alle Dialoge; `cancel` (28cf092) WIP ohne Test; Storage-Auswahl mit C-013 deduplizieren, Hook für estimate (C-017) und restore (C-021) |
+
+C-011 gemergt (Merge-Commit): Konflikte in `admin.rs`/`extra.rs` (update/label/relabel) zugunsten der C-011-Dialoge gelöst — prüfen, ob C-012s spätere Wertvalidierung für `update` (`3500719`) vollständig erhalten ist; C-011-Ersatz für `list_sql_query` durch C-016-Version ersetzt. Voller Paritätslauf nach dem Merge steht aus.
 
 Offen ohne Agent: C-025..C-030, C-031..C-036, C-024-Rest, Umstellung Referenz auf `18be77e6`.
 Voraussetzung: `sudo -u postgres psql -c 'ALTER ROLE "joerg.bernau" CREATEDB'` — sonst

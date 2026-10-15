@@ -920,7 +920,12 @@ fn parse_units(s: &str, mods: &[(&str, u64)]) -> Option<u64> {
     parse_with_mods(s, mods)
 }
 
-fn parse_duration(s: &str) -> Option<u64> {
+/// lib/edit.cc size_to_uint64 (C-011 update dialogs).
+pub(crate) fn parse_size(s: &str) -> Option<u64> {
+    parse_with_mods(s, SIZE_MODS)
+}
+
+pub(crate) fn parse_duration(s: &str) -> Option<u64> {
     parse_with_mods(s, TIME_MODS)
 }
 

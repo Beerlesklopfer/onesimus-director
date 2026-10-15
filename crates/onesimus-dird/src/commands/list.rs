@@ -716,7 +716,7 @@ fn list_backups(args: &Args, ctx: &ExecContext, cat: &CatalogHandle, ty: ListTyp
 // list media / volumes
 // ---------------------------------------------------------------------------
 
-fn volumes_select(ty: ListType) -> &'static str {
+pub(crate) fn volumes_select(ty: ListType) -> &'static str {
     if ty == ListType::Vert {
         "SELECT    Media.MediaId, Media.VolumeName, Media.Slot, Media.PoolId,
           (SELECT Name FROM Pool WHERE Pool.PoolId=Media.PoolId) AS Pool,

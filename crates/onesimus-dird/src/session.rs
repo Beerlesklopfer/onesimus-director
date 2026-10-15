@@ -238,7 +238,8 @@ pub fn handle_console_session_with<S: Read + Write>(
         }
 
         // Execute command; only successful authorization commits local changes.
-        let result = command_executor::dispatch(&ast, &ctx);
+        // Dialogs (ua_select) talk to this console while the command runs.
+        let result = crate::ua_select::with_console(&mut bnet, || command_executor::dispatch(&ast, &ctx));
 
         // Session-altering commands
         if result.success {
