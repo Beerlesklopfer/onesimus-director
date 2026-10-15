@@ -636,7 +636,6 @@ mod trace_command_tests {
 }
 
 #[cfg(test)]
-<<<<<<< HEAD
 mod toggle_tests {
     use super::*;
     use crate::session::parse_cli_command;
@@ -704,7 +703,10 @@ mod toggle_tests {
         assert!(!mgr.session_automount(ctx.session_id));
         run("automount on");
         assert!(mgr.session_automount(ctx.session_id));
-=======
+    }
+}
+
+#[cfg(test)]
 mod whoami_tests {
     use super::*;
     use std::sync::Arc;
@@ -728,6 +730,5 @@ mod whoami_tests {
         let named = whoami("operator");
         assert_eq!(named.text_output, "operator\n");
         assert_eq!(named.json, Some(serde_json::json!({"whoami": "operator"})));
->>>>>>> 1c62bbb (fix(whoami): print root for the default console)
     }
 }
