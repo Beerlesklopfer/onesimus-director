@@ -1,11 +1,44 @@
+# Rust / Cargo
 /target
+**/*.rs.bk
+*.pdb
 Cargo.lock
+
+# Build artifacts
+*.so
+*.dylib
+*.dll
+*.exe
+*.out
+*.bin
+*.wasm
+
+# Test / coverage
+coverage/
+.nyc_output/
+*.profraw
+*.profdata
+
+# Editor / IDE
 *.swp
 *.swo
 *~
 .idea/
 .vscode/
+*.iml
+.DS_Store
+
+# Environments
+.env
 .venv/
+venv/
+
+# Logs
+*.log
+logs/
+
+# Project specific
+bareos-dir.d.tar
 
 # Debian build artifacts
 *.deb
