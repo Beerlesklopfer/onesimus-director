@@ -223,55 +223,107 @@ fn backup_level(
     }
 }
 
+/// Bareos str_to_int64(): leading blanks, optional sign, leading digits.
+fn str_to_int64(value: &str) -> i64 {
+    let value = value.trim_start();
+    let (negative, digits) = match value.strip_prefix('-') {
+        Some(rest) => (true, rest),
+        None => (false, value.strip_prefix('+').unwrap_or(value)),
+    };
+    let number = digits.bytes().take_while(u8::is_ascii_digit)
+        .fold(0i64, |n, d| n.wrapping_mul(10).wrapping_add(i64::from(d - b'0')));
+    if negative { -number } else { number }
+}
+
+/// ua_cmds.cc CancelJobs() with ua_select.cc select_jobs(): explicit
+/// jobid/ujobid/job selections first, then "No Jobs running." when nothing
+/// (authorized) runs. ErrorMsg lines precede the SendMsg text.
 pub fn cmd_cancel(ast: &CommandAst, ctx: &ExecContext) -> CommandResult {
-    let job_id = ast.arguments.iter()
-        .find(|a| a.key == "jobid")
-        .and_then(|a| a.value.as_deref())
-        .and_then(|v| v.parse::<u32>().ok());
+    let active = ctx.job_manager.as_ref()
+        .map(|mgr| mgr.lock().unwrap().active_jobs()).unwrap_or_default();
+    let mut text = String::new();
+    let mut errors = String::new();
+    let mut selected: Vec<u32> = Vec::new();
+    let result = |text: String, errors: String| {
+        let mut result = CommandResult::ok_with_errors(text, errors);
+        result.errors_first = true;
+        result
+    };
 
-    match job_id {
-        Some(id) => {
-            // Send SIGTERM to worker process via JobManager
-            let canceled = if let Some(ref mgr) = ctx.job_manager {
-                mgr.lock().unwrap().cancel_job(id)
+    // FindArgKeyword(ua, {"job", "jobid", "ujobid"}) > 0: the first of these
+    // keywords decides, and "job" (index 0) skips the explicit selection.
+    let keyword = ast.arguments.iter().find_map(|arg| ["job", "jobid", "ujobid"].iter()
+        .position(|key| arg.key.eq_ignore_ascii_case(key)));
+    if keyword.is_some_and(|index| index > 0) {
+        for arg in &ast.arguments {
+            let value = arg.value.as_deref();
+            let job = if arg.key.eq_ignore_ascii_case("jobid") {
+                let id = str_to_int64(value.unwrap_or(""));
+                if id == 0 { continue; }
+                match active.iter().find(|job| i64::from(job.id) == id) {
+                    Some(job) => job,
+                    None => {
+                        errors.push_str(&format!("JobId {} is not running. Use Job name to cancel inactive jobs.\n",
+                            value.unwrap_or("")));
+                        continue;
+                    }
+                }
+            } else if arg.key.eq_ignore_ascii_case("job") || arg.key.eq_ignore_ascii_case("ujobid") {
+                let Some(name) = value else { continue };
+                let partial = arg.key.eq_ignore_ascii_case("job");
+                match active.iter().find(|job| if partial { job.unique_name.starts_with(name) } else { job.unique_name == name }) {
+                    Some(job) => job,
+                    None => {
+                        // WarningMsg: no warning channel yet, ordered as text.
+                        text.push_str(&format!("Warning Job {name} is not running. Continuing anyway ...\n"));
+                        continue;
+                    }
+                }
             } else {
-                false
+                continue;
             };
-
-            if canceled {
-                if let Some(smgr) = &ctx.session_mgr {
-                    smgr.bus().post(BusMessage::JobStatus {
-                        job_id: id, job_name: String::new(), status: "Canceling".to_string(),
-                        timestamp: now_unix(),
-                    });
-                }
-                // Final status, counters and EndTime are committed after worker exit.
-                CommandResult::ok(format!("Job {id} canceled (SIGTERM sent to worker)\n"))
-            } else {
-                CommandResult::ok(format!("Job {id} not found or already finished\n"))
+            if !crate::acl::access(ctx, crate::acl::Kind::Job, &job.name) {
+                errors.push_str("Unauthorized command from this console.\n");
+                return result(text, errors);
             }
-        }
-        None => {
-            // List running jobs if no jobid specified
-            if let Some(ref mgr) = ctx.job_manager {
-                let jobs = mgr.lock().unwrap();
-                let running: Vec<String> = jobs.running_jobs().iter()
-                    .map(|(id, name, phase)| format!("  {id:<8} {name:<30} {phase}"))
-                    .collect();
-                if running.is_empty() {
-                    CommandResult::ok("No running jobs to cancel.\n".to_string())
-                } else {
-                    let mut out = String::from("Running jobs:\n");
-                    out.push_str("  JobId    Name                           Phase\n");
-                    for line in &running { out.push_str(line); out.push('\n'); }
-                    out.push_str("\ncancel jobid=<id> to cancel a job.\n");
-                    CommandResult::ok(out)
-                }
-            } else {
-                CommandResult::ok("cancel: specify jobid=<id>\n".to_string())
-            }
+            if !selected.contains(&job.id) { selected.push(job.id); }
         }
     }
+
+    if selected.is_empty() {
+        let authorized = active.iter().filter(|job| crate::acl::access(ctx, crate::acl::Kind::Job, &job.name)).count();
+        if authorized == 0 {
+            text.push_str(if active.is_empty() { "No Jobs running.\n" } else { "None of your jobs are running.\n" });
+            return result(text, errors);
+        }
+        // Interactive selection (select_jobs prompt) is not implemented yet.
+        let mut out = String::from("Running jobs:\n");
+        out.push_str("  JobId    Name                           Phase\n");
+        for job in active.iter().filter(|job| crate::acl::access(ctx, crate::acl::Kind::Job, &job.name)) {
+            out.push_str(&format!("  {:<8} {:<30} {}\n", job.id, job.name, job.phase.name()));
+        }
+        out.push_str("\ncancel jobid=<id> to cancel a job.\n");
+        text.push_str(&out);
+        return result(text, errors);
+    }
+
+    for id in selected {
+        // Send SIGTERM to worker process via JobManager
+        let canceled = ctx.job_manager.as_ref().is_some_and(|mgr| mgr.lock().unwrap().cancel_job(id));
+        if canceled {
+            if let Some(smgr) = &ctx.session_mgr {
+                smgr.bus().post(BusMessage::JobStatus {
+                    job_id: id, job_name: String::new(), status: "Canceling".to_string(),
+                    timestamp: now_unix(),
+                });
+            }
+            // Final status, counters and EndTime are committed after worker exit.
+            text.push_str(&format!("Job {id} canceled (SIGTERM sent to worker)\n"));
+        } else {
+            text.push_str(&format!("Job {id} not found or already finished\n"));
+        }
+    }
+    result(text, errors)
 }
 
 pub fn cmd_enable(ast: &CommandAst, ctx: &ExecContext) -> CommandResult {
@@ -312,43 +364,21 @@ pub fn cmd_disable(ast: &CommandAst, ctx: &ExecContext) -> CommandResult {
     }
 }
 
+/// ua_cmds.cc DoEnDisableCmd(): an unknown resource is an ErrorMsg, the
+/// command itself still returns true.
 fn toggle_enabled(config: &crate::director_config::SharedConfig, res_type: &str, name: &str, enable: bool) -> CommandResult {
     let action = if enable { "enabled" } else { "disabled" };
     let mut cfg = config.write().unwrap();
-    match res_type {
-        "client" => {
-            if let Some(c) = cfg.clients.iter_mut().find(|c| c.name == name) {
-                c.enabled = enable;
-                CommandResult::ok(format!("Client '{name}' {action}\n"))
-            } else {
-                CommandResult::error(format!("Client '{name}' not found\n"))
-            }
-        }
-        "job" => {
-            if let Some(j) = cfg.jobs.iter_mut().find(|j| j.name == name) {
-                j.enabled = enable;
-                CommandResult::ok(format!("Job '{name}' {action}\n"))
-            } else {
-                CommandResult::error(format!("Job '{name}' not found\n"))
-            }
-        }
-        "schedule" => {
-            if let Some(s) = cfg.schedules.iter_mut().find(|s| s.name == name) {
-                s.enabled = enable;
-                CommandResult::ok(format!("Schedule '{name}' {action}\n"))
-            } else {
-                CommandResult::error(format!("Schedule '{name}' not found\n"))
-            }
-        }
-        "storage" => {
-            if let Some(s) = cfg.storages.iter_mut().find(|s| s.name == name) {
-                s.enabled = enable;
-                CommandResult::ok(format!("Storage '{name}' {action}\n"))
-            } else {
-                CommandResult::error(format!("Storage '{name}' not found\n"))
-            }
-        }
-        _ => CommandResult::ok(format!("{res_type}: not supported\n")),
+    let (label, found) = match res_type {
+        "client" => ("Client", cfg.clients.iter_mut().find(|c| c.name == name).map(|c| c.enabled = enable)),
+        "job" => ("Job", cfg.jobs.iter_mut().find(|j| j.name == name).map(|j| j.enabled = enable)),
+        "schedule" => ("Schedule", cfg.schedules.iter_mut().find(|s| s.name == name).map(|s| s.enabled = enable)),
+        "storage" => ("Storage", cfg.storages.iter_mut().find(|s| s.name == name).map(|s| s.enabled = enable)),
+        _ => return CommandResult::ok(format!("{res_type}: not supported\n")),
+    };
+    match found {
+        Some(()) => CommandResult::ok(format!("{label} \"{name}\" {action}\n")),
+        None => CommandResult::ok_with_errors(String::new(), format!("{label} \"{name}\" not found.\n")),
     }
 }
 
@@ -356,6 +386,49 @@ fn now_unix() -> i64 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap_or_default().as_secs() as i64
+}
+
+#[cfg(test)]
+mod error_text_tests {
+    use super::*;
+    use std::sync::{Arc, RwLock};
+
+    fn context() -> ExecContext {
+        let config = crate::director_config::DirectorConfig::from_str("Director { Name = dir }").unwrap();
+        ExecContext { session_id: 0, config: Some(Arc::new(RwLock::new(config))),
+            session_mgr: None, catalog: None, api_mode: crate::command_executor::ApiMode::Human,
+            bus_rx: None, job_manager: None }
+    }
+
+    #[test]
+    fn enable_disable_unknown_resource_is_an_error_message_of_a_successful_command() {
+        let ctx = context();
+        for (line, expected) in [("enable job=nosuch", "Job \"nosuch\" not found.\n"),
+            ("disable client=nosuch", "Client \"nosuch\" not found.\n")] {
+            let ast = crate::session::parse_cli_command(line);
+            let result = if line.starts_with("enable") { cmd_enable(&ast, &ctx) } else { cmd_disable(&ast, &ctx) };
+            assert!(result.success, "{line}");
+            assert_eq!(result.error_message, expected);
+        }
+    }
+
+    #[test]
+    fn cancel_follows_select_jobs() {
+        let ctx = context();
+        let cancel = |line: &str| cmd_cancel(&crate::session::parse_cli_command(line), &ctx);
+        let result = cancel("cancel jobid=999999");
+        assert_eq!((result.error_message.as_str(), result.text_output.as_str()),
+            ("JobId 999999 is not running. Use Job name to cancel inactive jobs.\n", "No Jobs running.\n"));
+        assert!(result.success && result.errors_first);
+        // "job" as first keyword skips the explicit selection; jobid=abc is ignored.
+        for line in ["cancel", "cancel job=nosuch", "cancel jobid=abc", "cancel all"] {
+            let result = cancel(line);
+            assert_eq!((result.error_message.as_str(), result.text_output.as_str()), ("", "No Jobs running.\n"), "{line}");
+        }
+        assert_eq!(cancel("cancel ujobid=nosuch").text_output,
+            "Warning Job nosuch is not running. Continuing anyway ...\nNo Jobs running.\n");
+        assert_eq!((str_to_int64(" 12abc"), str_to_int64("-3"), str_to_int64("abc")), (12, -3, 0));
+    }
 }
 
 #[cfg(test)]

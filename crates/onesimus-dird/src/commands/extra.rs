@@ -210,9 +210,15 @@ fn setdevice_with(
     ctx: &ExecContext,
     send: impl FnOnce(&bareos_config::resources::StorageResource, &str, &str) -> Result<String, String>,
 ) -> CommandResult {
+    // SetDeviceCommand::Cmd(): ScanCommandLine errors are followed by the
+    // command usage and the command fails.
+    let usage = |errors: String| CommandResult {
+        success: false, error_message: errors, errors_first: true,
+        text_output: crate::command_registry::cmd_usage("setdevice", ""), ..Default::default()
+    };
     for arg in &ast.arguments {
         if !matches!(arg.key.as_str(), "storage" | "device" | "autoselect") {
-            return CommandResult::error(format!("Wrong argument: {}\n", arg.key));
+            return usage(format!("Wrong argument: {}\n", arg.key));
         }
     }
     let value = |key: &str| ast.arguments.iter().find(|a| a.key == key)
@@ -221,11 +227,11 @@ fn setdevice_with(
     for key in ["autoselect", "device", "storage"] {
         if value(key).is_none() { missing.push_str(&format!("Argument missing: {key}\n")); }
     }
-    if !missing.is_empty() { return CommandResult::error(missing); }
+    if !missing.is_empty() { return usage(missing); }
     let autoselect = match value("autoselect").unwrap().to_ascii_lowercase().as_str() {
         "yes" | "true" | "on" | "1" => 1,
         "no" | "false" | "off" | "0" => 0,
-        other => return CommandResult::error(format!("Wrong argument: {other}\n")),
+        other => return usage(format!("Wrong argument: {other}\n")),
     };
     let name = value("storage").unwrap();
     let device = value("device").unwrap();
@@ -251,43 +257,78 @@ fn setdevice_with(
     }
 }
 
+/// Bareos Is_a_number(): optional sign, digits, optional fraction/exponent.
+fn is_a_number(value: &str) -> bool {
+    let value = value.strip_prefix(['+', '-']).unwrap_or(value);
+    let (mantissa, exponent) = match value.split_once(['e', 'E']) {
+        Some((m, e)) => (m, Some(e.strip_prefix(['+', '-']).unwrap_or(e))),
+        None => (value, None),
+    };
+    let (int, frac) = mantissa.split_once('.').unwrap_or((mantissa, ""));
+    let digits = |s: &str| s.bytes().all(|b| b.is_ascii_digit());
+    !int.is_empty() && digits(int) && digits(frac)
+        && exponent.is_none_or(|e| !e.is_empty() && digits(e))
+}
+
+/// ua_run.cc reRunCmd()/GetRerunCmdlineArguments(): argument errors are
+/// SendMsg lines and make the command fail.
 pub fn cmd_rerun(ast: &CommandAst, ctx: &ExecContext) -> CommandResult {
     // C++ ua_run.cc reRunCmd: OpenClientDb() before anything else.
     crate::ua_db::with_client_db(ast, ctx, false, || cmd_rerun_db(ast, ctx))
 }
 
 fn cmd_rerun_db(ast: &CommandAst, ctx: &ExecContext) -> CommandResult {
-    let jobid = ast.arguments.iter().find(|a| a.key == "jobid")
+    let value = |key: &str| ast.arguments.iter().find(|a| a.key.eq_ignore_ascii_case(key))
         .and_then(|a| a.value.as_deref());
-    let Some(id) = jobid else {
-        return CommandResult::ok("rerun: specify jobid=<id>\n".to_string());
-    };
-    // Look up job name from catalog, then dispatch to cmd_run
-    if let Some(cat) = &ctx.catalog {
-        match cat.raw_query(&format!(
-            "SELECT name FROM job WHERE jobid = {id}")) {
-            Ok(result) => {
-                let job_name = result.lines().skip(2).next()
-                    .map(|l| l.trim().to_string())
-                    .unwrap_or_default();
-                if job_name.is_empty() {
-                    return CommandResult::ok(format!("JobId {id} not found in catalog\n"));
-                }
-                // Build a synthetic AST for "run job=<name> yes"
-                let run_ast = crate::command_ast::CommandAst {
-                    command_name: "run".to_string(),
-                    arguments: vec![
-                        crate::command_ast::Argument { key: "job".to_string(), value: Some(job_name.clone()) },
-                        crate::command_ast::Argument { key: "yes".to_string(), value: None },
-                    ],
-                    ..Default::default()
-                };
-                return crate::commands::job::cmd_run(&run_ast, ctx);
-            }
-            Err(e) => return CommandResult::error(format!("Catalog error: {e}\n")),
+    let number = |key: &str| value(key).map(|v| v.trim().parse::<i64>().unwrap_or(0)).unwrap_or(0);
+    let failed = |text: &str| CommandResult { success: false, text_output: text.to_string(), ..Default::default() };
+    let (since_jobid, timeframe) = (number("since_jobid"), number("days") != 0 || number("hours") != 0);
+    let Some(jobids) = value("jobid") else {
+        if !timeframe && since_jobid == 0 {
+            return failed("Please specify jobid, since_jobid, hours or days\n");
         }
+        return CommandResult::ok("rerun: since_jobid, days and hours are not supported yet\n".to_string());
+    };
+    let mut ids = Vec::new();
+    for jobid in jobids.split(',') {
+        if !is_a_number(jobid) {
+            return failed(&format!("Specified jobid \"{jobid}\" is not valid\n"));
+        }
+        ids.push(jobid.parse::<i64>().unwrap_or(0));
     }
-    CommandResult::ok(format!("No catalog — cannot look up JobId {id}\n"))
+    if since_jobid != 0 {
+        return failed("Please specify either jobid or since_jobid (and optionally until_jobid)\n");
+    }
+    if timeframe {
+        return failed("Please specify either jobid or a timeframe\n");
+    }
+
+    let mut text = String::new();
+    for id in ids {
+        // reRunJob(): announce, then look up the Job record.
+        text.push_str(&format!("rerunning jobid {id}\n"));
+        let Some(cat) = &ctx.catalog else { return failed(&text) };
+        let job_name = match cat.raw_query(&format!("SELECT name FROM job WHERE jobid = {id}")) {
+            Ok(result) => result.lines().nth(2).map(|l| l.trim().to_string()).unwrap_or_default(),
+            Err(e) => return failed(&format!("{text}Catalog error: {e}\n")),
+        };
+        // C++ reports a missing record only as a job message (Jmsg M_WARNING).
+        if job_name.is_empty() { return failed(&text); }
+        // Build a synthetic AST for "run job=<name> yes"
+        let run_ast = crate::command_ast::CommandAst {
+            command_name: "run".to_string(),
+            arguments: vec![
+                crate::command_ast::Argument { key: "job".to_string(), value: Some(job_name) },
+                crate::command_ast::Argument { key: "yes".to_string(), value: None },
+            ],
+            ..Default::default()
+        };
+        let mut run = crate::commands::job::cmd_run(&run_ast, ctx);
+        run.text_output = format!("{text}{}", run.text_output);
+        if !run.success { return run; }
+        text = run.text_output;
+    }
+    CommandResult::ok(text)
 }
 
 pub fn cmd_relabel(ast: &CommandAst, ctx: &ExecContext) -> CommandResult {
@@ -533,6 +574,28 @@ mod setdevice_tests {
             let result = setdevice_with(&ast, &context(), |_, _, _| panic!("must not contact SD"));
             assert!(!result.success, "{line}");
         }
+    }
+
+    #[test]
+    fn setdevice_argument_errors_are_followed_by_usage() {
+        let result = setdevice_with(&crate::session::parse_cli_command("setdevice"), &context(), |_, _, _| unreachable!());
+        assert_eq!(result.error_message, "Argument missing: autoselect\nArgument missing: device\nArgument missing: storage\n");
+        assert_eq!(result.text_output, "\nUSAGE: setdevice storage=<storage-name> device=<device-name> autoselect=<bool>\n");
+        assert!(result.errors_first && !result.success);
+    }
+
+    #[test]
+    fn rerun_argument_errors_use_original_texts() {
+        let ctx = context();
+        for (line, expected) in [("rerun", "Please specify jobid, since_jobid, hours or days\n"),
+            ("rerun jobid=1,abc", "Specified jobid \"abc\" is not valid\n"),
+            ("rerun jobid=1 since_jobid=2", "Please specify either jobid or since_jobid (and optionally until_jobid)\n"),
+            ("rerun jobid=1 days=2", "Please specify either jobid or a timeframe\n"),
+            ("rerun jobid=999999", "rerunning jobid 999999\n")] {
+            let result = cmd_rerun(&crate::session::parse_cli_command(line), &ctx);
+            assert_eq!((result.success, result.text_output.as_str()), (false, expected), "{line}");
+        }
+        assert!(is_a_number("-1.5e3") && !is_a_number("") && !is_a_number("1e") && !is_a_number("inf"));
     }
 }
 

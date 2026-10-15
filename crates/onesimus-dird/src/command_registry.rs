@@ -342,21 +342,41 @@ pub fn find_command<'a>(registry: &'a [CommandDef], name: &str) -> Option<&'a Co
     registry.iter().find(|cmd| cmd.name == resolved || cmd.aliases.contains(&resolved))
 }
 
-/// Preserve the resolved alias (e.g. llist) for handlers with alias-specific output.
-pub fn dispatch_registry(registry: &[CommandDef], ast: &CommandAst, ctx: &ExecContext) -> CommandResult {
-    let Some(name) = resolve_command_name(registry, &ast.command_name) else {
-        return CommandResult::error(format!("Unknown command: {}\n", ast.command_name));
-    };
-    let Some(command) = find_command(registry, name) else {
-        return CommandResult::error(format!("Unknown command: {}\n", ast.command_name));
-    };
+/// Resolve a command the console may execute (Do_a_command): unknown and
+/// ACL-denied commands are both rejected as "is an invalid command".
+fn resolve_permitted<'a>(registry: &'a [CommandDef], ast: &CommandAst, ctx: &ExecContext) -> Option<(&'a str, &'a CommandDef)> {
+    let name = resolve_command_name(registry, &ast.command_name)?;
+    let command = find_command(registry, name)?;
     let acl_name=if crate::ua_commands_table::UA_COMMANDS.iter().any(|entry|entry.0==name) {name} else {command.name};
     if !matches!(acl_name, "exit" | "quit" | "whoami") && !crate::acl::access(ctx, crate::acl::Kind::Command, acl_name) {
-        return CommandResult::error(format!("{}: is an invalid command.\n", ast.command_name));
+        return None;
     }
+    Some((name, command))
+}
+
+/// True when Do_a_command finds no permitted command; it then sends neither
+/// CMD_BEGIN nor CMD_OK/CMD_FAILED in API mode.
+pub fn is_invalid_command(registry: &[CommandDef], ast: &CommandAst, ctx: &ExecContext) -> bool {
+    resolve_permitted(registry, ast, ctx).is_none()
+}
+
+/// Preserve the resolved alias (e.g. llist) for handlers with alias-specific output.
+pub fn dispatch_registry(registry: &[CommandDef], ast: &CommandAst, ctx: &ExecContext) -> CommandResult {
+    let Some((name, command)) = resolve_permitted(registry, ast, ctx) else {
+        // ua_cmds.cc Do_a_command(): ErrorMsg("%s: is an invalid command.\n", argk[0])
+        return CommandResult::error(format!("{}: is an invalid command.\n", ast.command_name));
+    };
     let mut resolved = ast.clone();
     resolved.command_name = name.to_string();
     (command.handler)(&resolved, ctx)
+}
+
+/// UaContext::SendCmdUsage(): "<message>\nUSAGE: <key> <usage>\n" (a SendMsg).
+pub fn cmd_usage(key: &str, message: &str) -> String {
+    match crate::ua_commands_table::UA_COMMANDS.iter().find(|entry| entry.0 == key) {
+        Some((key, _, usage)) => format!("{message}\nUSAGE: {key} {usage}\n"),
+        None => message.to_string(),
+    }
 }
 
 /// Generate .help output from registry (one command per line, machine format).
@@ -410,5 +430,15 @@ mod prefix_tests {
         }
         assert!(resolve_command_name(&registry, "").is_none());
         assert!(resolve_command_name(&registry, "unknown").is_none());
+    }
+
+    #[test]
+    fn unknown_command_uses_original_text_and_usage_matches_send_cmd_usage() {
+        let ctx = ExecContext { session_id: 0, config: None, session_mgr: None, catalog: None,
+            api_mode: crate::command_executor::ApiMode::Human, bus_rx: None, job_manager: None };
+        let ast = crate::session::parse_cli_command("FooBar arg=1");
+        assert!(is_invalid_command(&build_registry(), &ast, &ctx));
+        assert_eq!(dispatch_registry(&build_registry(), &ast, &ctx).error_message, "FooBar: is an invalid command.\n");
+        assert_eq!(cmd_usage("setdevice", ""), "\nUSAGE: setdevice storage=<storage-name> device=<device-name> autoselect=<bool>\n");
     }
 }

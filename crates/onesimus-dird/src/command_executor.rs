@@ -54,6 +54,11 @@ pub fn dispatch(ast: &CommandAst, ctx: &ExecContext) -> CommandResult {
     command_registry::dispatch_registry(registry(), ast, ctx)
 }
 
+/// Unknown or ACL-denied command (no API framing signals, see Do_a_command).
+pub fn is_invalid_command(ast: &CommandAst, ctx: &ExecContext) -> bool {
+    command_registry::is_invalid_command(registry(), ast, ctx)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -22,6 +22,8 @@ pub struct CommandResult {
     pub text_output: String,
     pub error_message: String,
     pub json: Option<serde_json::Value>,
+    /// The ErrorMsg lines were emitted before the SendMsg text (C++ order).
+    pub errors_first: bool,
 }
 
 impl CommandResult {
@@ -31,6 +33,17 @@ impl CommandResult {
 
     pub fn error(msg: String) -> Self {
         Self { success: false, error_message: msg, ..Default::default() }
+    }
+
+    /// Successful command that also emitted ErrorMsg lines (C++ commands
+    /// returning true after ua->ErrorMsg); `.api 2` reports it as failed.
+    pub fn ok_with_errors(text: String, errors: String) -> Self {
+        Self { success: true, text_output: text, error_message: errors, ..Default::default() }
+    }
+
+    /// One entry per ErrorMsg call: each line keeps its trailing newline.
+    pub fn error_lines(&self) -> Vec<String> {
+        self.error_message.lines().filter(|l| !l.trim().is_empty()).map(|l| format!("{l}\n")).collect()
     }
 
     /// Attach the structured JSON result (used in `.api 2` mode).

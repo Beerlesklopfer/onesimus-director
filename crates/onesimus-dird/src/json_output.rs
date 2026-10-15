@@ -17,14 +17,17 @@ use crate::command_queue::CommandResult;
 pub fn envelope(result: &CommandResult) -> String {
     let result_obj = result.json.clone().unwrap_or_else(|| Value::Object(Map::new()));
 
-    let msg = if result.success {
+    // JsonFinalizeResult: failed when the command returned false or any
+    // ErrorMsg was emitted. Only error messages are collected; SendMsg text
+    // is dropped, so a failure without ErrorMsg carries "messages": {}.
+    let errors = result.error_lines();
+    let msg = if result.success && errors.is_empty() {
         json!({ "jsonrpc": "2.0", "id": null, "result": result_obj })
     } else {
-        let errors: Vec<Value> = result.error_message
-            .lines()
-            .filter(|l| !l.trim().is_empty())
-            .map(|l| Value::String(format!("{l}\n")))
-            .collect();
+        let mut messages = Map::new();
+        if !errors.is_empty() {
+            messages.insert("error".into(), Value::Array(errors.into_iter().map(Value::String).collect()));
+        }
         json!({
             "jsonrpc": "2.0",
             "id": null,
@@ -33,7 +36,7 @@ pub fn envelope(result: &CommandResult) -> String {
                 "message": "failed",
                 "data": {
                     "result": result_obj,
-                    "messages": { "error": errors },
+                    "messages": messages,
                 },
             },
         })
@@ -75,6 +78,16 @@ mod tests {
         assert_eq!(v["error"]["message"], "failed");
         assert_eq!(v["error"]["data"]["messages"]["error"][0], "foo: is an invalid command.\n");
         assert!(v.get("result").is_none());
+    }
+
+    #[test]
+    fn errors_of_successful_command_fail_and_failure_without_errors_has_empty_messages() {
+        let r = CommandResult::ok_with_errors("No Jobs running.\n".into(), "JobId 1 is not running.\n".into());
+        let v: Value = serde_json::from_str(&envelope(&r)).unwrap();
+        assert_eq!(v["error"]["data"]["messages"], json!({"error": ["JobId 1 is not running.\n"]}));
+        let r = CommandResult { success: false, text_output: "usage\n".into(), ..Default::default() };
+        let v: Value = serde_json::from_str(&envelope(&r)).unwrap();
+        assert_eq!(v["error"]["data"]["messages"], json!({}));
     }
 
     #[test]

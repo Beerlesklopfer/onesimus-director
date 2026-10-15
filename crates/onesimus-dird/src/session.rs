@@ -165,7 +165,10 @@ pub fn handle_console_session<S: Read + Write>(
         // CMD_BEGIN ... CMD_OK/CMD_FAILED; in JSON mode the json-rpc result
         // follows after that (FinalizeResult). `.api` switches the mode
         // before it produces output, so its own reply is already JSON.
-        if api_mode != command_executor::ApiMode::Human {
+        // An unknown or ACL-denied command is answered by an ErrorMsg only,
+        // without the CMD_BEGIN ... CMD_OK/CMD_FAILED frame.
+        let invalid = command_executor::is_invalid_command(&ast, &ctx);
+        if api_mode != command_executor::ApiMode::Human && !invalid {
             if bnet.send_signal(BnetSignal::CmdBegin).is_err() { break; }
         }
         if command_allowed && ast.command_name == ".api" {
@@ -199,7 +202,13 @@ pub fn handle_console_session<S: Read + Write>(
 
         }
 
-        if api_mode != command_executor::ApiMode::Human {
+        // UaContext::ErrorMsg: in API mode every error message is preceded
+        // by BNET_ERROR_MSG (in JSON mode only the signal goes out directly).
+        if api_mode != command_executor::ApiMode::Human
+            && result.error_lines().iter().any(|_| bnet.send_signal(BnetSignal::ErrorMsg).is_err()) {
+            break;
+        }
+        if api_mode != command_executor::ApiMode::Human && !invalid {
             let sig = if result.success { BnetSignal::CmdOk } else { BnetSignal::CmdFailed };
             if bnet.send_signal(sig).is_err() { break; }
         }
@@ -208,21 +217,12 @@ pub fn handle_console_session<S: Read + Write>(
         if api_mode == command_executor::ApiMode::Json {
             if bnet.send_str(&crate::json_output::envelope(&result)).is_err() { break; }
         } else {
-            if !result.text_output.is_empty() {
-                let out = if result.text_output.ends_with('\n') {
-                    result.text_output.clone()
-                } else {
-                    format!("{}\n", result.text_output)
-                };
-                if bnet.send_str(&out).is_err() { break; }
-            }
-            if !result.error_message.is_empty() {
-                let err = if result.error_message.ends_with('\n') {
-                    result.error_message.clone()
-                } else {
-                    format!("{}\n", result.error_message)
-                };
-                if bnet.send_str(&err).is_err() { break; }
+            let with_newline = |text: &str| if text.ends_with('\n') { text.to_string() } else { format!("{text}\n") };
+            let mut parts = [&result.text_output, &result.error_message];
+            if result.errors_first { parts.reverse(); }
+            if parts.iter().filter(|part| !part.is_empty())
+                .any(|part| bnet.send_str(&with_newline(part)).is_err()) {
+                break;
             }
         }
 

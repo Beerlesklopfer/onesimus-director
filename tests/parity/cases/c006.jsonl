@@ -1,0 +1,22 @@
+# C-006 original error texts (read-only; cancel/rerun only with non-existent ids).
+{"id": "c006-unknown-api2", "steps": ["foobar"], "setup": [".api 2"]}
+{"id": "c006-unknown-api1", "steps": ["foobar"], "setup": [".api 1"]}
+{"id": "c006-unknown-mixedcase", "steps": ["FooBar arg=1"]}
+{"id": "c006-unknown-limited", "steps": ["sqlquery"], "console": "parity-limited", "password": "parity-limited-pw"}
+{"id": "c006-enable-nojob-api2", "steps": ["enable job=nosuch"], "setup": [".api 2"]}
+{"id": "c006-disable-nojob-api2", "steps": ["disable job=nosuch"], "setup": [".api 2"]}
+{"id": "c006-enable-noclient", "steps": ["enable client=nosuch"]}
+{"id": "c006-disable-noschedule", "steps": ["disable schedule=nosuch"]}
+{"id": "c006-cancel-none-api2", "steps": ["cancel jobid=999999"], "setup": [".api 2"]}
+{"id": "c006-cancel-noargs-api2", "steps": ["cancel"], "setup": [".api 2"]}
+{"id": "c006-cancel-job", "steps": ["cancel job=nosuch"]}
+{"id": "c006-cancel-ujobid", "steps": ["cancel ujobid=nosuch"]}
+{"id": "c006-cancel-badjobid", "steps": ["cancel jobid=abc"]}
+{"id": "c006-cancel-all", "steps": ["cancel all"]}
+{"id": "c006-rerun-noargs-api2", "steps": ["rerun"], "setup": [".api 2"]}
+{"id": "c006-rerun-badid-api2", "steps": ["rerun jobid=999999"], "setup": [".api 2"]}
+{"id": "c006-rerun-invalidid", "steps": ["rerun jobid=abc"]}
+{"id": "c006-setdevice-noargs-api2", "steps": ["setdevice"], "setup": [".api 2"]}
+{"id": "c006-setdevice-wrongarg", "steps": ["setdevice foo=bar"]}
+{"id": "c006-setdevice-nostorage", "steps": ["setdevice storage=nosuch device=x autoselect=yes"]}
+{"id": "c006-setdevice-badbool", "steps": ["setdevice storage=File device=x autoselect=maybe"]}
