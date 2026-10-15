@@ -27,6 +27,7 @@ mod mdns;
 mod privileges;
 mod message_bus;
 mod reload;
+mod run_time;
 mod scheduler;
 mod sd_protocol;
 mod session;
