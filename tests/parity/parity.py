@@ -75,6 +75,10 @@ def write_config(source, target, port, args):
             line = re.sub(r'"/var/log/bareos/([^"]+)"', lambda m: f'"{work / m[1]}"', line)
             lines.append(line)
         path.write_text('\n'.join(lines) + '\n')
+    # A scheduler firing during a run would start real jobs in the shared
+    # catalog (seen at 21:00 UTC). Disable every schedule on both sides.
+    for path in (target / 'schedule').glob('*.conf'):
+        path.write_text(re.sub(r'(?im)^(\s*Schedule\s*\{)', r'\1\n  Enabled = no', path.read_text()))
     fixture = HERE / 'fixture'
     for path in fixture.rglob('*.conf'):
         destination = target / path.relative_to(fixture)
