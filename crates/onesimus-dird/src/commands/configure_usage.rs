@@ -18,9 +18,9 @@ pub const USAGE: &str = concat!(
     "add pool name=<NAME> [description=<STRING>] [pooltype=<POOLTYPE>] [labelformat=<STRNAME>] [cleaningprefix=<STRNAME>] [usecatalog=<BOOLEAN>] [purgeoldestvolume=<BOOLEAN>] [actiononpurge=<ACTION_ON_PURGE>] [recycleoldestvolume=<BOOLEAN>] [recyclecurrentvolume=<BOOLEAN>] [maximumvolumes=<PINT32>] [maximumvolumejobs=<PINT32>] [maximumvolumefiles=<PINT32>] [maximumvolumebytes=<SIZE64>] [catalogfiles=<BOOLEAN>] [volumeretention=<TIME>] [volumeuseduration=<TIME>] [migrationtime=<TIME>] [migrationhighbytes=<SIZE64>] [migrationlowbytes=<SIZE64>] [nextpool=<RES>] [storage=<RESOURCE_LIST>] [autoprune=<BOOLEAN>] [recycle=<BOOLEAN>] [recyclepool=<RES>] [scratchpool=<RES>] [catalog=<RES>] [minimumblocksize=<SIZE32>] [maximumblocksize=<SIZE32>] |\n",
     "add messages [name=<NAME>] [description=<STRING>] [mailcommand=<STRING>] [operatorcommand=<STRING>] [timestampformat=<STRING>] [syslog=<MESSAGES>] [mail=<MESSAGES>] [mailonerror=<MESSAGES>] [mailonsuccess=<MESSAGES>] [file=<MESSAGES>] [append=<MESSAGES>] [stdout=<MESSAGES>] [stderr=<MESSAGES>] [director=<MESSAGES>] [console=<MESSAGES>] [operator=<MESSAGES>] [catalog=<MESSAGES>] |\n",
     "add counter name=<NAME> [description=<STRING>] [minimum=<INT32>] [maximum=<PINT32>] [wrapcounter=<RES>] [catalog=<RES>] |\n",
-    "add profile name=<NAME> [description=<STRING>] |\n",
-    "add console name=<NAME> [description=<STRING>] password=<AUTOPASSWORD> [usepamauthentication=<BOOLEAN>] [tlsauthenticate=<BOOLEAN>] [tlsenable=<BOOLEAN>] [tlsrequire=<BOOLEAN>] [tlscipherlist=<STRING>] [tlsciphersuites=<STRING>] [tlsdhfile=<DIRECTORY>] [tlsprotocol=<STRING>] [tlsverifypeer=<BOOLEAN>] [tlscacertificatefile=<DIRECTORY>] [tlscacertificatedir=<DIRECTORY>] [tlscertificaterevocationlist=<DIRECTORY>] [tlscertificate=<DIRECTORY>] [tlskey=<DIRECTORY>] [tlsallowedcn=<STRING_LIST>] |\n",
-    "add user name=<NAME> [description=<STRING>] |\n",
+    "add profile name=<NAME> [description=<STRING>] [jobacl=<ACL>] [clientacl=<ACL>] [storageacl=<ACL>] [scheduleacl=<ACL>] [poolacl=<ACL>] [commandacl=<ACL>] [filesetacl=<ACL>] [catalogacl=<ACL>] [whereacl=<ACL>] [pluginoptionsacl=<ACL>] |\n",
+    "add console name=<NAME> [description=<STRING>] password=<AUTOPASSWORD> [jobacl=<ACL>] [clientacl=<ACL>] [storageacl=<ACL>] [scheduleacl=<ACL>] [poolacl=<ACL>] [commandacl=<ACL>] [filesetacl=<ACL>] [catalogacl=<ACL>] [whereacl=<ACL>] [pluginoptionsacl=<ACL>] [profile=<RESOURCE_LIST>] [usepamauthentication=<BOOLEAN>] [tlsauthenticate=<BOOLEAN>] [tlsenable=<BOOLEAN>] [tlsrequire=<BOOLEAN>] [tlscipherlist=<STRING>] [tlsciphersuites=<STRING>] [tlsdhfile=<DIRECTORY>] [tlsprotocol=<STRING>] [tlsverifypeer=<BOOLEAN>] [tlscacertificatefile=<DIRECTORY>] [tlscacertificatedir=<DIRECTORY>] [tlscertificaterevocationlist=<DIRECTORY>] [tlscertificate=<DIRECTORY>] [tlskey=<DIRECTORY>] [tlsallowedcn=<STRING_LIST>] |\n",
+    "add user name=<NAME> [description=<STRING>] [jobacl=<ACL>] [clientacl=<ACL>] [storageacl=<ACL>] [scheduleacl=<ACL>] [poolacl=<ACL>] [commandacl=<ACL>] [filesetacl=<ACL>] [catalogacl=<ACL>] [whereacl=<ACL>] [pluginoptionsacl=<ACL>] [profile=<RESOURCE_LIST>] |\n",
     "export client=<client>",
 );
 
@@ -52,11 +52,11 @@ mod tests {
         assert!(resources[9].starts_with("add counter "));
         assert_eq!(resources[9].matches("=<").count(), 6);
         assert!(resources[10].starts_with("add profile "));
-        assert_eq!(resources[10].matches("=<").count(), 2);
+        assert_eq!(resources[10].matches("=<").count(), 12);
         assert!(resources[11].starts_with("add console "));
-        assert_eq!(resources[11].matches("=<").count(), 18);
+        assert_eq!(resources[11].matches("=<").count(), 29);
         assert!(resources[12].starts_with("add user "));
-        assert_eq!(resources[12].matches("=<").count(), 2);
+        assert_eq!(resources[12].matches("=<").count(), 13);
         assert_eq!(*resources.last().unwrap(), "export client=<client>");
         let client = resources[0];
         assert!(client.contains(" name=<NAME>"));

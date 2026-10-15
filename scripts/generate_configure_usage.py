@@ -34,6 +34,14 @@ def generate(source):
         if not macro:
             raise ValueError(f'Missing TLS macro {name}')
         dird = re.sub(name + r'\([^)]*\)', lambda _: macro[1], dird)
+    # USER_ACL (the CFG_TYPE_ACL directives) and ACL_PROFILE are defined in
+    # dird_conf.cc itself; expand their uses inside the item tables.
+    joined = dird.replace('\\\n', '')
+    for name in ('USER_ACL', 'ACL_PROFILE'):
+        macro = re.search(r'^#define\s+' + name + r'\([^)]*\)\s+([^\n]*)', joined, re.M)
+        if not macro:
+            raise ValueError(f'Missing macro {name}')
+        dird = re.sub(r'(?<!#define )\b' + name + r'\([^)]*\)', lambda _: macro[1], dird)
     datatypes = {fields[0]: literal(fields[1]) for fields, _ in table(clean(files[SOURCES[3]]), 'datatype_names') if fields[0] != '0'}
     messages = clean(files[SOURCES[2]])
     lines = []
