@@ -589,21 +589,27 @@ fn truncate_with(
             usage("truncate", "Invalid parameter. 'volstatus' must be 'Purged'.")),
         Some(_) => {}
     }
+    // OpenDb (ua_cmds.cc:2008) precedes the remaining checks.
+    let prefix = match crate::ua_db::open_client_db(ast, ctx, false) {
+        Ok(prefix) => prefix,
+        Err(result) => return result,
+    };
+    let done = |result: CommandResult| crate::ua_db::with_prefix(prefix.clone(), result);
     let mut parsed = 2; // the command itself and volstatus, as upstream counts
     let storage = value("storage");
     if storage.is_some() || acl::has_restrictions(ctx, Kind::Storage) {
-        // SelectStorageDbr (ua_select.cc): "Select Storage resource" dialog
-        // when no accessible storage is named.
+        // SelectStorageDbr (ua_select.cc:823): "Defined Storages:" /
+        // "Select Storage resource" dialog when no accessible storage is named.
         if !storage.is_some_and(|name| known_storage(ctx, name)) {
-            return selection_required(String::new());
+            return done(selection_required(String::new()));
         }
         parsed += 1;
     }
     let pool = value("pool");
     if pool.is_some() || acl::has_restrictions(ctx, Kind::Pool) {
-        // SelectPoolDbr (ua_select.cc): "Select the Pool" dialog.
+        // SelectPoolDbr (ua_select.cc): "Defined Pools:" / "Select the Pool" dialog.
         if !pool.is_some_and(|name| acl::access(ctx, Kind::Pool, name)) {
-            return selection_required(String::new());
+            return done(selection_required(String::new()));
         }
         parsed += 1;
     }
@@ -620,11 +626,11 @@ fn truncate_with(
     if yes { parsed += 1; }
     if parsed != ast.arguments.len() + 1 {
         text.push_str(&usage("truncate", "Invalid parameter."));
-        return CommandResult::error(text);
+        return done(CommandResult::error(text));
     }
 
     let Some(cat) = &ctx.catalog else {
-        return CommandResult::error(format!("{text}Failed to open db.\n"));
+        return done(CommandResult::error(format!("{text}Failed to open db.\n")));
     };
     let quote = |v: &str| v.replace('\'', "''");
     let mut query = String::from("SELECT m.volumename FROM media m JOIN pool p ON m.poolid=p.poolid \
@@ -636,26 +642,26 @@ fn truncate_with(
     if let Some(v) = volume { query.push_str(&format!(" AND m.volumename='{}'", quote(v))); }
     let volumes: Vec<String> = match cat.query_rows(&format!("{query} ORDER BY m.mediaid")) {
         Ok(table) => table.rows.into_iter().filter_map(|row| row.into_iter().next().flatten()).collect(),
-        Err(e) => return CommandResult::error(format!("{text}{e}\n")),
+        Err(e) => return done(CommandResult::error(format!("{text}{e}\n"))),
     };
     if volumes.is_empty() {
-        return CommandResult::ok(text);
+        return done(CommandResult::ok(text));
     }
     if !yes {
         // GetConfirmation (ua_input.cc:165, ua_cmds.cc:2120): API sessions
         // decline silently; the console is asked "Truncate listed volumes
         // (yes/no)? " after the volume list (ListSqlQuery, C-011).
         if ctx.api_mode != crate::command_executor::ApiMode::Human {
-            return CommandResult::ok(text);
+            return done(CommandResult::ok(text));
         }
-        return selection_required(format!("{text}Truncate listed volumes (yes/no)? "));
+        return done(selection_required(format!("{text}Truncate listed volumes (yes/no)? ")));
     }
     let stor = match storage {
         Some(s) => s.to_string(),
         None => match ctx.config.as_ref().and_then(|c| c.read().ok())
             .filter(|cfg| cfg.storages.len() == 1).map(|cfg| cfg.storages[0].name.clone()) {
             Some(s) => s,
-            None => return CommandResult::error(format!("{text}truncate: specify storage=<name>\n")),
+            None => return done(CommandResult::error(format!("{text}truncate: specify storage=<name>\n"))),
         },
     };
     for vol in volumes {
@@ -668,7 +674,7 @@ fn truncate_with(
             Err(e) => text.push_str(&format!("truncate {vol}: {e}\n")),
         }
     }
-    CommandResult::ok(text)
+    done(CommandResult::ok(text))
 }
 
 fn known_storage(ctx: &ExecContext, name: &str) -> bool {
