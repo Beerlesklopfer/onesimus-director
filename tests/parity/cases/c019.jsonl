@@ -1,0 +1,31 @@
+# C-019 configure (ua_configure.cc). `add` only for resources that never touch the catalog.
+{"id": "c019-configure-bare", "steps": ["configure"]}
+{"id": "c019-configure-add-only", "steps": ["configure add"]}
+{"id": "c019-configure-export-only", "steps": ["configure export"]}
+{"id": "c019-configure-invalid-sub", "steps": ["configure nosuch foo"]}
+{"id": "c019-export-no-client-arg", "steps": ["configure export foo"]}
+{"id": "c019-export-unknown-client", "steps": ["configure export client=nosuch"]}
+{"id": "c019-export-twice", "steps": ["configure export client=bareos-fd", "configure export client=bareos-fd"]}
+{"id": "c019-add-invalid-type", "steps": ["configure add nosuch name=x"]}
+{"id": "c019-add-director", "steps": ["configure add director name=x"]}
+{"id": "c019-add-device", "steps": ["configure add device name=x"]}
+{"id": "c019-add-unknown-directive", "steps": ["configure add console name=c019a password=secret nosuch=1"]}
+{"id": "c019-add-forbidden-char", "steps": ["configure add console name=c019b password=a;b"]}
+{"id": "c019-add-missing-name", "steps": ["configure add console password=secret"]}
+{"id": "c019-add-missing-value", "steps": ["configure add console name=c019c password"]}
+{"id": "c019-add-missing-required", "steps": ["configure add console name=c019d"]}
+{"id": "c019-add-console", "steps": ["configure add console name=c019e password=secret description=\"Parity console\" jobacl=*all* commandacl=status,show", "show console=c019e", "configure add console name=c019e password=other"]}
+{"id": "c019-add-console-type-name", "steps": ["configure add console=c019f password=secret"]}
+{"id": "c019-add-duplicate-existing", "steps": ["configure add profile name=operator"]}
+{"id": "c019-add-profile", "steps": ["configure add profile name=c019g jobacl=backup-bareos-fd clientacl=*all*", "show profile=c019g"]}
+{"id": "c019-add-schedule", "steps": ["configure add schedule name=c019h run=\"Full mon at 3:00\"", "show schedule=c019h"]}
+{"id": "c019-add-schedule-invalid", "steps": ["configure add schedule name=c019i enabled=maybe"]}
+{"id": "c019-add-messages", "steps": ["configure add messages name=c019j description=test"]}
+{"id": "c019-add-invalid-name", "steps": ["configure add console name=c019! password=secret"]}
+{"id": "c019-add-unknown-profile", "steps": ["configure add console name=c019l password=secret profile=nosuch"]}
+{"id": "c019-add-name-twice", "steps": ["configure add console=c019m name=c019n password=secret"]}
+{"id": "c019-add-empty-password", "steps": ["configure add console name=c019o password="]}
+{"id": "c019-add-counter-invalid", "steps": ["configure add counter name=c019p minimum=abc maximum=-1"]}
+{"id": "c019-add-user", "steps": ["configure add user name=c019q profile=operator", "show user=c019q"]}
+{"id": "c019-add-fileset", "steps": ["configure add fileset name=c019r description=x", "show fileset=c019r"]}
+{"id": "c019-add-case-keys", "steps": ["configure add Profile Name=c019s JobACL=a"]}

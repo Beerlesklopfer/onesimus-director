@@ -49,6 +49,11 @@ pub fn reload_now() -> Result<(), String> {
     reload_config(path, shared)
 }
 
+/// The `-c` path the configuration was loaded from (None before startup).
+pub fn config_path() -> Option<PathBuf> {
+    RELOAD_TARGET.get().map(|(path, _)| path.clone())
+}
+
 fn reload_config(config_path: &std::path::Path, shared_config: &SharedConfig) -> Result<(), String> {
     info!("reloading configuration from {}", config_path.display());
     let new_config = DirectorConfig::load(config_path).map_err(|e| {
