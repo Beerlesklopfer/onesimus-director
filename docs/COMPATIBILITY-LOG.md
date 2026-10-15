@@ -25,23 +25,23 @@ Neue Einträge unten anhängen; behobene Einträge bleiben mit Commit stehen.
 | C-005 | 15.10.2026 | Stille Schalter | `autodisplay on/off`, `gui on/off`, `automount on` | Keine Ausgabe | Bestätigungstext (`autodisplay off`, `gui mode on`, …) | `ua_cmds.cc` | behoben (C-005 merge; API-Fehlersignal-Fälle über C-006) |
 | C-006 | 15.10.2026 | Fehlertexte | `foobar`, `enable/disable job=nosuch`, `cancel jobid=…`, `rerun`, `setdevice` | `foobar: is an invalid command.`, `Job "nosuch" not found.`, `JobId … is not running. Use Job name to cancel inactive jobs.` usw. | Eigene Formulierungen | `ua_cmds.cc:596` u. a. | behoben (`a90cb0f`) |
 | C-007 | 15.10.2026 | Leere Eingabe | Leerzeile | Antwort `BNET_EOD` ohne Daten | Keine Antwort (Timeout) | `ua_server.cc` | behoben (`d83c82d`) |
-| C-008 | 15.10.2026 | Banner | Verbindungsaufbau | Ein Frame `1000 OK: <dir> Version: <v> (<date>) -- <cipher>` (Konsole < 18.2) bzw. 1000/1002 mit Community-Hinweis | Kein Datum/Cipher, zusätzliche 1002-Zeile | `authenticate_console.cc:129` | offen |
+| C-008 | 15.10.2026 | Banner | Verbindungsaufbau | Ein Frame `1000 OK: <dir> Version: <v> (<date>) -- <cipher>` (Konsole < 18.2) bzw. 1000/1002 mit Community-Hinweis | Kein Datum/Cipher, zusätzliche 1002-Zeile | `authenticate_console.cc:129` | behoben (in development, 15.10.2026) |
 | C-009 | 15.10.2026 | Version | `version`, `status dir`, `.status dir header`, `memory` | `bareos-dir Version: 25.1.2~pre43… (09 October 2026) <distname> <distver> …` | `25.1.2+onesimus.0.2.0 (Debian …)` ohne Datum | `ua_cmds.cc` `VersionCmd` | behoben (`version_strings.rs`; BINARY_INFO „Onesimus“, Support-Hinweis onesimus.io) — Entscheidung 15.10.2026: Bareos-Format byte-gleich, nur Versionstoken `25.1.2+onesimus.<gui>` eigen; Parität normalisiert ausschließlich dieses Token. Folgeentscheidung: Binary-Info/Support-Hinweis im gleichen Format, aber eigener Onesimus-Text (kein Bareos-Community-Anspruch), ebenfalls gezielt normalisiert |
 | C-010 | 15.10.2026 | whoami | `whoami` (Default-Konsole) | `root` | `*UserAgent*` | `ua_cmds.cc:2758` | behoben (C-010 merge) |
 | C-011 | 15.10.2026 | Dialoge | `run`, `prune`, `purge`, `delete`, `update`, `label`, `relabel`, `create`, `add`, `query`, `sqlquery`, `trace`, `setdebug`, `setbandwidth` | Interaktive Auswahl/Eingabe mit Signal `BNET_SUB_PROMPT` (-27) | Fehlermeldung bzw. Usage, Ende mit EOD | `ua_input.cc`, `ua_select.cc` | offen |
-| C-012 | 15.10.2026 | **Seiteneffekte** | `truncate`, `setip`, `import`, `export`, `move` ohne Argumente | Abbruch mit Usage/Auswahl, keine Wirkung | `truncate` führt ein Truncate aus, `setip` meldet „Client address updated“, `import/export/move` senden Befehle an den SD | `ua_cmds.cc`, `ua_impexp.cc` | teilweise behoben (truncate, setip, import/export/move, run, restore, label/relabel, delete/create/add, enable/disable, rerun; prune/purge folgen) |
-| C-013 | 15.10.2026 | Storage-Auswahl | `mount`, `release`, `status` ohne Ziel | Einzige Storage wird automatisch gewählt (`Automatically selected Storage: File`) | `Storage '?' not found` | `ua_select.cc:1228` | offen |
+| C-012 | 15.10.2026 | **Seiteneffekte** | `truncate`, `setip`, `import`, `export`, `move` ohne Argumente | Abbruch mit Usage/Auswahl, keine Wirkung | `truncate` führt ein Truncate aus, `setip` meldet „Client address updated“, `import/export/move` senden Befehle an den SD | `ua_cmds.cc`, `ua_impexp.cc` | behoben (alle Guards + Seiteneffekt-Tests; Dialoge → C-011) |
+| C-013 | 15.10.2026 | Storage-Auswahl | `mount`, `release`, `status` ohne Ziel | Einzige Storage wird automatisch gewählt (`Automatically selected Storage: File`) | `Storage '?' not found` | `ua_select.cc:1228` | behoben (in development, 15.10.2026) |
 | C-014 | 15.10.2026 | status | `status scheduler`, `status subscriptions`, `status configuration`, `status dir`, `.status dir …` | Eigene Unterabschnitte | Fehlen bzw. Delegation an Gesamtstatus | `ua_status.cc` | offen |
 | C-015 | 15.10.2026 | list | `list nextvolume`, `list mediatypes`, Volumes mit `NULL`-Datum, Leerzeile nach Einzelpool, `llist pools` Prune-Summen, `list jobs` Jobauswahl | Original-Filter und Formatierung | Fehlende Schlüsselwörter, `NULL` statt leer, fehlende Felder, andere Jobmenge | `ua_output.cc` | offen |
-| C-016 | 15.10.2026 | .sql / sqlquery | `.sql query=…`, `sqlquery` | Tabellen-Rahmen wie `list` | Psql-artige Spalten | `ua_dotcmds.cc` `SqlCmd` | offen |
-| C-017 | 15.10.2026 | estimate | `estimate job=…` | FD-Anfrage, `2000 OK estimate files=… bytes=…`, Listing | Platzhalter „Estimate pending“ | `ua_cmds.cc` `EstimateCmd` | offen |
-| C-018 | 15.10.2026 | resolve | `resolve`, `resolve client=` | Reihenfolge ipv6 vor ipv4, doppelte Adresse wie getaddrinfo, TLS-Handshakezeile | Andere Reihenfolge, Duplikate entfernt, keine Handshakezeile | `ua_cmds.cc` `ResolveCmd` | offen |
-| C-019 | 15.10.2026 | configure | `configure export`, `configure nosuch`, `help configure` | Export in Datei unter `bareos-dir-export/`, Original-Usage, Profile-ACL-Direktiven in Usage | Inline-Ausgabe, eigene CRUD-Usage, ACL-Direktiven fehlen | `ua_configure.cc`, `dird_conf.cc` | offen |
-| C-020 | 15.10.2026 | .api json | `.api json compact=yes` | Kompaktes JSON | Pretty-Print | `ua_dotcmds.cc` | offen |
+| C-016 | 15.10.2026 | .sql / sqlquery | `.sql query=…`, `sqlquery` | Tabellen-Rahmen wie `list` | Psql-artige Spalten | `ua_dotcmds.cc` `SqlCmd` | behoben (in development, 15.10.2026) |
+| C-017 | 15.10.2026 | estimate | `estimate job=…` | FD-Anfrage, `2000 OK estimate files=… bytes=…`, Listing | Platzhalter „Estimate pending“ | `ua_cmds.cc` `EstimateCmd` | behoben (in development, 15.10.2026) |
+| C-018 | 15.10.2026 | resolve | `resolve`, `resolve client=` | Reihenfolge ipv6 vor ipv4, doppelte Adresse wie getaddrinfo, TLS-Handshakezeile | Andere Reihenfolge, Duplikate entfernt, keine Handshakezeile | `ua_cmds.cc` `ResolveCmd` | behoben (in development, 15.10.2026) |
+| C-019 | 15.10.2026 | configure | `configure export`, `configure nosuch`, `help configure` | Export in Datei unter `bareos-dir-export/`, Original-Usage, Profile-ACL-Direktiven in Usage | Inline-Ausgabe, eigene CRUD-Usage, ACL-Direktiven fehlen | `ua_configure.cc`, `dird_conf.cc` | behoben (in development, 15.10.2026) |
+| C-020 | 15.10.2026 | .api json | `.api json compact=yes` | Kompaktes JSON | Pretty-Print | `ua_dotcmds.cc` | behoben (in development, 15.10.2026) |
 | C-021 | 15.10.2026 | restore | `restore help` | `Unknown keyword: help` | Versucht Bootstrap zu erzeugen | `ua_restore.cc` | offen |
 | C-022 | 15.10.2026 | bvfs | `.bvfs_get_jobids`, `.bvfs_lsdirs`, `.bvfs_lsfiles`, `.bvfs_versions` | Echte Katalogabfrage | Echo des Befehls (Platzhalter) | `ua_dotcmds.cc` | offen |
-| C-023 | 15.10.2026 | var / use / memory | `var`, `use catalog=…`, `memory` | `var`: Leerzeile; `use`: keine Ausgabe; `memory`: Statuskopf | Eigene Texte bzw. `/proc`-Werte | `ua_cmds.cc` | offen |
-| C-024 | 15.10.2026 | Client-Status | `status client=…` | `Probing client protocol…`, Handshakezeile | `Connected to Client … Version: 54` | `ua_status.cc` | offen |
+| C-023 | 15.10.2026 | var / use / memory | `var`, `use catalog=…`, `memory` | `var`: Leerzeile; `use`: keine Ausgabe; `memory`: Statuskopf | Eigene Texte bzw. `/proc`-Werte | `ua_cmds.cc` | behoben (in development, 15.10.2026) |
+| C-024 | 15.10.2026 | Client-Status | `status client=…` | `Probing client protocol…`, Handshakezeile | `Connected to Client … Version: 54` | `ua_status.cc` | behoben (in development, 15.10.2026) |
 | C-025 | 15.10.2026 | ACL in Listen | `dot_jobs-limited`, `dot_pools-limited`, `run` mit eingeschränkter Konsole | `.jobs`, `.jobdefs`, `.pools`, `.storages`, `.clients`, `.catalogs`, `.filesets`, `.schedule` und die `run`-Jobauswahl filtern nach der Ressourcen-ACL der Konsole | Ungefiltert (nur Reihenfolge korrekt) | `ua_dotcmds.cc:697,728,780,797,819,893,917,1127`, `ua_select.cc:368` | offen |
 | C-026 | 15.10.2026 | ACL in list | `c002-limited-twice`, `list-jobs-limited` | `list pools`/`list jobs` filtern nach Pool-/Job-ACL der Konsole | Ungefiltert | `ua_output.cc:779-812` (`SetAclFilter`) | offen |
 | C-027 | 15.10.2026 | GUI-Modus | `c002-gui` | Nach `gui on` sind numerische Spalten in Listen linksbündig | Rechtsbündig | `ua_output.cc:309` (`jcr->gui`) | offen |
@@ -57,6 +57,29 @@ Neue Einträge unten anhängen; behobene Einträge bleiben mit Commit stehen.
 | C-037 | 15.10.2026 | Audit-Log | Arbeitsverzeichnis der Paritätsinstanz | Bei `Auditing = yes`: `Console [default] from [127.0.0.1] cmdline …`, `… Audit acl failure for Command …`, Info-Zeilen; AuditEvents-Filter | Kein Audit-Log, `MsgType::Audit` wird nie erzeugt | `ua_audit.cc:53-158` | offen |
 | C-038 | 15.10.2026 | **run ohne Bestätigung** | Vorfall bei C-011-Test | `run job=X` ohne `yes` zeigt die Zusammenfassung und fragt `OK to run? (yes/mod/no):` | Startet den Job sofort (zwei echte Jobs 7/8 gestartet; mit Freigabe bereinigt: Worker beendet, Zeilen gelöscht) | `ua_run.cc` | behoben (Guard `350a7ae`→ development; Dialog selbst → C-011) |
 | C-039 | 15.10.2026 | **Katalog-Jobid-Sequenz** | Katalog `bareos_cppref` | Jobids steigen monoton (Sequenz ≥ max(jobid)) | `job_jobid_seq` steht bei 8 trotz max(jobid)=629 — seit 13.10. werden alte Jobids wiederverwendet (JobId 1: Log von März, Jobzeile von Oktober). Verdacht: Rust-ORM-Migration auf Schema 2252 | `cats/ddl`, `crates/bareos-orm` | Ursache: manueller Katalogimport am 13.10.2026 (COPY mit expliziten IDs ohne setval) in einer früheren Sitzung, nicht Rust-Code; Schutz in `bareos-orm` (keine destruktiven Migrationen, Sequenzprüfung mit Warnung) übernommen; Katalog am 15.10.2026 mit Freigabe repariert: 7 Sequenzen (path, job, fileset, jobmedia, media, pool, log) per setval auf max(id) |
-| C-040 | 15.10.2026 | Lokale Erweiterungen | — | — (keine Entsprechung) | `.catalog reset` / `.catalog drop` führen `DROP TABLE … CASCADE` aus, nur durch ACL-TODO geschützt | `crates/onesimus-dird/src/commands/catalog.rs:290,340` | offen, Priorität hoch (Absicherung/Bestätigung) |
+| C-040 | 15.10.2026 | Lokale Erweiterungen | — | — (keine Entsprechung) | `.catalog reset` / `.catalog drop` führen `DROP TABLE … CASCADE` aus, nur durch ACL-TODO geschützt | `crates/onesimus-dird/src/commands/catalog.rs:290,340` | behoben (in development, 15.10.2026) |
 
 Hinweis C-002: Text-Sitzungen über gRPC/Command-Queue nutzen denselben SessionManager und erhalten die Katalogzeilen jetzt ebenfalls einmal pro Sitzung (konsistent mit dem Original, aber neue Ausgabe an dieser Schnittstelle).
+
+## Übergabe 15.10.2026 (Sitzungsende)
+
+`development` = `c3b0099`, Tests grün (onesimus-dird 265+4, oconsole 26, bnet 46, config 29).
+Letzter voller Paritätslauf (vor den letzten Merges): 285/344 identisch, keine Regression.
+
+Noch nicht gemergte Agent-Branches (Worktrees unter `.claude/worktrees/`, Commits per
+`git cherry-pick`; bei Konflikt Branch auf `development` rebasen):
+
+| Eintrag | Branch-Commits | Hinweis |
+| --- | --- | --- |
+| C-015 list/llist | `7cce3e8` | Konflikt in `commands/prompt.rs` (C-013 hat `select_storage` umgebaut) |
+| C-014 status/Scheduler | `5cc3789 ba88561 db0b22b c782a9b bff2632` | Konflikt; `status_client` von C-018 behalten |
+| C-021 restore | `9a6402e` | Konflikt (admin.rs, C-012-Guards) |
+| C-022 bvfs | `5c9ec82 0a58b6c` | Konflikt |
+| C-037 Audit-Log | `021b78d` | Konflikt (parity.py: jetzt Katalogkopien pro Seite) |
+| C-011 Dialoge | Branch `worktree-agent-a2443602a8ed77bcd` | lief bis Sitzungsende, WIP |
+
+Offen ohne Agent: C-025..C-030, C-031..C-036, C-024-Rest, Umstellung Referenz auf `18be77e6`.
+Voraussetzung: `sudo -u postgres psql -c 'ALTER ROLE "joerg.bernau" CREATEDB'` — sonst
+`parity.py run --shared-db` verwenden (dann nur lesende/abbrechende Fälle!).
+Katalog `bareos_cppref` am 15.10. bereinigt: Jobs 7/8 gelöscht, 7 Sequenzen repariert,
+JobHisto geleert, JobRetention bareos-fd auf 180 Tage zurückgesetzt.
