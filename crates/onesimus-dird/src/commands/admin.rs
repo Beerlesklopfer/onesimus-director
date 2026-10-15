@@ -177,12 +177,24 @@ fn cmd_update_db(ast: &CommandAst, ctx: &ExecContext) -> CommandResult {
             }
             // Collect updateable fields from arguments
             let mut sets = Vec::new();
-            if let Some(v) = get_arg(ast, "volstatus") { sets.push(format!("volstatus='{v}'")); }
-            if let Some(v) = get_arg(ast, "maxvolbytes") { sets.push(format!("maxvolbytes={v}")); }
-            if let Some(v) = get_arg(ast, "maxvoljobs") { sets.push(format!("maxvoljobs={v}")); }
-            if let Some(v) = get_arg(ast, "maxvolfiles") { sets.push(format!("maxvolfiles={v}")); }
-            if let Some(v) = get_arg(ast, "slot") { sets.push(format!("slot={v}")); }
-            if let Some(v) = get_arg(ast, "inchanger") { sets.push(format!("inchanger={v}")); }
+            if let Some(v) = get_arg(ast, "volstatus") {
+                // UpdateVolstatus (ua_update.cc:131): only the known states.
+                const STATES: [&str; 9] = ["Append", "Archive", "Disabled", "Full", "Used", "Cleaning",
+                    "Recycle", "Read-Only", "Error"];
+                match STATES.iter().find(|s| s.eq_ignore_ascii_case(v)) {
+                    Some(state) => sets.push(format!("volstatus='{state}'")),
+                    None => return CommandResult::error(format!("Invalid VolStatus specified: {v}\n")),
+                }
+            }
+            // Numbers only: values are put into SQL (C-012).
+            for key in ["maxvolbytes", "maxvoljobs", "maxvolfiles", "slot", "inchanger"] {
+                if let Some(v) = get_arg(ast, key) {
+                    if v.is_empty() || !v.bytes().all(|b| b.is_ascii_digit()) {
+                        return CommandResult::error(format!("Invalid {key} value: {v}\n"));
+                    }
+                    sets.push(format!("{key}={v}"));
+                }
+            }
             if let Some(v) = get_arg(ast, "enabled") {
                 sets.push(format!("enabled={}", if v == "yes" || v == "1" { 1 } else { 0 }));
             }
@@ -194,7 +206,7 @@ fn cmd_update_db(ast: &CommandAst, ctx: &ExecContext) -> CommandResult {
                      slot=<N>  inchanger=<0|1>  enabled=<yes|no>\n"
                 ));
             }
-            let sql = format!("UPDATE media SET {} WHERE volumename='{vol}'", sets.join(", "));
+            let sql = format!("UPDATE media SET {} WHERE volumename='{}'", sets.join(", "), vol.replace('\'', "''"));
             match cat.raw_query(&sql) {
                 Ok(_) => CommandResult::ok(format!("Volume \"{vol}\" updated: {}\n", sets.join(", "))),
                 Err(e) => CommandResult::error(format!("Update error: {e}\n")),
@@ -874,6 +886,10 @@ pub(crate) mod side_effect_tests {
         }
         for line in ["truncate", "truncate volstatus=Purged bogus=1"] {
             truncate_with(&ast(line), &ctx, |_, _| panic!("{line}: must not contact the SD"));
+        }
+        for (line, error) in [("update volume=v1 volstatus=Bogus", "Invalid VolStatus specified: Bogus\n"),
+            ("update volume=v1 maxvoljobs=1;DROP", "Invalid maxvoljobs value: 1;DROP\n")] {
+            assert_eq!(cmd_update_db(&ast(line), &ctx).error_message, error);
         }
         assert!(log.lock().unwrap().is_empty(), "{:?}", log.lock().unwrap());
         cmd_purge_db(&ast("purge jobs client=fd1"), &ctx);
