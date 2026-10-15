@@ -624,15 +624,85 @@ pub fn cmd_cancel(ast: &CommandAst, ctx: &ExecContext) -> CommandResult {
             text.push_str(if active.is_empty() { "No Jobs running.\n" } else { "None of your jobs are running.\n" });
             return result(text, errors);
         }
-        // Interactive selection (select_jobs prompt) is not implemented yet.
-        let mut out = String::from("Running jobs:\n");
-        out.push_str("  JobId    Name                           Phase\n");
-        for job in active.iter().filter(|job| crate::acl::access(ctx, crate::acl::Kind::Job, &job.name)) {
-            out.push_str(&format!("  {:<8} {:<30} {}\n", job.id, job.name, job.phase.name()));
+        // select_jobs (ua_select.cc): all/state=..., else the "Select Job:"
+        // dialog with the confirmation for a single running job (C-011).
+        let mut ua = crate::ua_select::Ua::new(ctx);
+        if !errors.is_empty() {
+            ua.error_msg(std::mem::take(&mut errors));
         }
-        out.push_str("\ncancel jobid=<id> to cancel a job.\n");
-        text.push_str(&out);
-        return result(text, errors);
+        ua.send_msg(std::mem::take(&mut text));
+        let authorized: Vec<&crate::job_manager::ActiveJob> = active.iter()
+            .filter(|job| crate::acl::access(ctx, crate::acl::Kind::Job, &job.name)).collect();
+        let select_all = crate::ua_select::find_arg(ast, "all").is_some();
+        let state = crate::ua_select::find_arg_with_value(ast, "state");
+        if select_all || state.is_some() {
+            use crate::job_manager::DirJobPhase as Phase;
+            let wanted: fn(Phase) -> bool = match state.map(str::to_ascii_lowercase).as_deref() {
+                _ if select_all => |_| true,
+                Some("created") => |phase| phase == Phase::Queued,
+                Some("blocked") => |phase| phase == Phase::Paused,
+                Some("waiting") => |phase| matches!(phase, Phase::WaitingCatReq | Phase::WaitingMedia | Phase::WaitingMount),
+                Some("running") => |phase| phase == Phase::Running,
+                _ => {
+                    ua.error_msg("Illegal state either created, blocked, waiting or running\n");
+                    return ua.finish(true);
+                }
+            };
+            for job in authorized.iter().filter(|job| wanted(job.phase)) {
+                if !selected.contains(&job.id) {
+                    selected.push(job.id);
+                }
+                ua.send_msg(format!("Selected Job {} for cancelling\n", job.id));
+            }
+            if selected.is_empty() {
+                ua.send_msg("No Jobs selected.\n");
+                return ua.finish(true);
+            }
+            if !ua.batch() && crate::ua_select::find_arg(ast, "yes").is_none()
+                && ua.get_yesno("Confirm cancel (yes/no): ") != Some(true) {
+                return ua.finish(true);
+            }
+        } else {
+            ua.start_prompt("Select Job:\n");
+            for job in &authorized {
+                ua.add_prompt(&format!("JobId={} Job={}", job.id, job.unique_name));
+            }
+            let Some((_, choice)) = ua.do_prompt("Job", "Choose Job to cancel") else { return ua.finish(true) };
+            if authorized.len() == 1 {
+                let question = if ua.api() {
+                    format!("Cancel: {choice}\n\nConfirm cancel?")
+                } else {
+                    "Confirm cancel (yes/no): ".to_string()
+                };
+                if ua.get_yesno(&question) != Some(true) {
+                    return ua.finish(true);
+                }
+            }
+            let id = choice.strip_prefix("JobId=").and_then(|rest| rest.split(' ').next())
+                .and_then(|id| id.parse::<u32>().ok());
+            match id.and_then(|id| authorized.iter().find(|job| job.id == id)) {
+                Some(job) => selected.push(job.id),
+                None => {
+                    ua.warning_msg(format!("Job \"{choice}\" not found.\n"));
+                    return ua.finish(true);
+                }
+            }
+        }
+        for id in selected {
+            let canceled = ctx.job_manager.as_ref().is_some_and(|mgr| mgr.lock().unwrap().cancel_job(id));
+            if canceled {
+                if let Some(smgr) = &ctx.session_mgr {
+                    smgr.bus().post(BusMessage::JobStatus {
+                        job_id: id, job_name: String::new(), status: "Canceling".to_string(),
+                        timestamp: now_unix(),
+                    });
+                }
+                ua.send_msg(format!("Job {id} canceled (SIGTERM sent to worker)\n"));
+            } else {
+                ua.send_msg(format!("Job {id} not found or already finished\n"));
+            }
+        }
+        return ua.finish(true);
     }
 
     for id in selected {
