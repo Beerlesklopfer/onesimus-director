@@ -87,9 +87,9 @@
       ]
     },
     "setdevice": {
-      "status": "stub",
+      "status": "partial",
       "findings": [
-        "Der Handler bestätigt die Geräteauswahl; storage/autoselect werden nicht an den SD übertragen."
+        "storage/device/autoselect werden jetzt validiert und als echter setdevice-Befehl an den SD gesendet; dessen Antwort wird weitergereicht. Protokoll- und Fehlerpfadtests bestehen. Storage-ACL-Abgleich und Live-SHA-256-Parität bleiben offen."
       ]
     },
     "use": {

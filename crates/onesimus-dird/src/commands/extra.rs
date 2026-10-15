@@ -214,10 +214,54 @@ pub fn cmd_setip(_ast: &CommandAst, _ctx: &ExecContext) -> CommandResult {
     CommandResult::ok("Client address updated\n".to_string())
 }
 
-pub fn cmd_setdevice(ast: &CommandAst, _ctx: &ExecContext) -> CommandResult {
-    let device = ast.arguments.iter().find(|a| a.key == "device")
-        .and_then(|a| a.value.as_deref()).unwrap_or("?");
-    CommandResult::ok(format!("Device {device} selected\n"))
+pub fn cmd_setdevice(ast: &CommandAst, ctx: &ExecContext) -> CommandResult {
+    setdevice_with(ast, ctx, |storage, director, command| {
+        bareos_stored::command::sd_command(&storage.address, storage.port,
+            &storage.password, director, command)
+    })
+}
+
+fn setdevice_with(
+    ast: &CommandAst,
+    ctx: &ExecContext,
+    send: impl FnOnce(&bareos_config::resources::StorageResource, &str, &str) -> Result<String, String>,
+) -> CommandResult {
+    for arg in &ast.arguments {
+        if !matches!(arg.key.as_str(), "storage" | "device" | "autoselect") {
+            return CommandResult::error(format!("Wrong argument: {}\n", arg.key));
+        }
+    }
+    let value = |key: &str| ast.arguments.iter().find(|a| a.key == key)
+        .and_then(|a| a.value.as_deref()).filter(|s| !s.is_empty());
+    let mut missing = String::new();
+    for key in ["autoselect", "device", "storage"] {
+        if value(key).is_none() { missing.push_str(&format!("Argument missing: {key}\n")); }
+    }
+    if !missing.is_empty() { return CommandResult::error(missing); }
+    let autoselect = match value("autoselect").unwrap().to_ascii_lowercase().as_str() {
+        "yes" | "true" | "on" | "1" => 1,
+        "no" | "false" | "off" | "0" => 0,
+        other => return CommandResult::error(format!("Wrong argument: {other}\n")),
+    };
+    let name = value("storage").unwrap();
+    let device = value("device").unwrap();
+    if device.chars().any(char::is_control) {
+        return CommandResult::error("Invalid control character in device name\n".into());
+    }
+    let Some(config) = ctx.config.as_ref().and_then(|c| c.read().ok()) else {
+        return CommandResult::error("No config\n".into());
+    };
+    let Some(storage) = config.find_storage(name).cloned() else {
+        return CommandResult::error(format!("Storage \"{name}\" not found.\n"));
+    };
+    let director = config.director.name.clone();
+    drop(config);
+    let command = format!("setdevice device={device} autoselect={autoselect}");
+    match send(&storage, &director, &command) {
+        Ok(response) => CommandResult::ok(format!("Connecting to Storage daemon {} at {}:{}\n{response}",
+            storage.name, storage.address, storage.port)),
+        Err(error) => CommandResult::error(format!("Failed to connect to Storage daemon.\n{error}\n")),
+    }
 }
 
 pub fn cmd_resolve(ast: &CommandAst, ctx: &ExecContext) -> CommandResult {
@@ -448,5 +492,43 @@ mod messages_tests {
         assert_eq!(crate::commands::dot::cmd_dot_messages(&dot, &ctx).text_output, "first\nsecond\r\n");
         assert_eq!(crate::commands::dot::cmd_dot_messages(&dot, &ctx).text_output, "");
         assert_eq!(cmd_messages(&crate::session::parse_cli_command("messages"), &ctx).text_output, "You have no messages.\n");
+    }
+}
+
+#[cfg(test)]
+mod setdevice_tests {
+    use super::*;
+    use std::sync::{Arc, RwLock};
+
+    fn context() -> ExecContext {
+        let config = crate::director_config::DirectorConfig::from_str(
+            "Director { Name = dir }\nStorage { Name = File; Address = localhost; Port = 9103 }"
+        ).unwrap();
+        ExecContext { session_id: 0, config: Some(Arc::new(RwLock::new(config))),
+            session_mgr: None, catalog: None, api_mode: crate::command_executor::ApiMode::Human,
+            bus_rx: None, job_manager: None }
+    }
+
+    #[test]
+    fn setdevice_sends_protocol_command_and_preserves_reply() {
+        let ast = crate::session::parse_cli_command("setdevice storage=File device=drive0 autoselect=no");
+        let result = setdevice_with(&ast, &context(), |storage, director, wire| {
+            assert_eq!(storage.name, "File");
+            assert_eq!(director, "dir");
+            assert_eq!(wire, "setdevice device=drive0 autoselect=0");
+            Ok("3000 OK setdevice\n".into())
+        });
+        assert!(result.success);
+        assert_eq!(result.text_output, "Connecting to Storage daemon File at localhost:9103\n3000 OK setdevice\n");
+    }
+
+    #[test]
+    fn setdevice_does_not_send_invalid_or_incomplete_requests() {
+        for line in ["setdevice storage=File", "setdevice storage=File device=x autoselect=maybe",
+            "setdevice storage=File device=x autoselect=yes bogus=1", "setdevice storage=Unknown device=x autoselect=yes"] {
+            let ast = crate::session::parse_cli_command(line);
+            let result = setdevice_with(&ast, &context(), |_, _, _| panic!("must not contact SD"));
+            assert!(!result.success, "{line}");
+        }
     }
 }

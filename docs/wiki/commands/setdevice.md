@@ -15,9 +15,9 @@ setdevice storage=<storage-name> device=<device-name> autoselect=<bool>
 
 **RunScript erlaubt:** ja. **Audit-Ereignis:** ja. Beide Flags sind keine Read-only-Klassifizierung.
 
-**Onesimus-Status:** `stub`. Funktionsparität ist nicht durch einen Live-Test nachgewiesen.
+**Onesimus-Status:** `partial`. Funktionsparität ist nicht durch einen Live-Test nachgewiesen.
 
-- Der Handler bestätigt die Geräteauswahl; storage/autoselect werden nicht an den SD übertragen.
+- storage/device/autoselect werden jetzt validiert und als echter setdevice-Befehl an den SD gesendet; dessen Antwort wird weitergereicht. Protokoll- und Fehlerpfadtests bestehen. Storage-ACL-Abgleich und Live-SHA-256-Parität bleiben offen.
 
 **Lokaler Handler:** [crates/onesimus-dird/src/commands/extra.rs:217](../../../crates/onesimus-dird/src/commands/extra.rs).
 

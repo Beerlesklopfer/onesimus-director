@@ -11,4 +11,7 @@ onesimus (25.1.2+onesimus.0.2.0-2) UNRELEASED; urgency=medium
   * messages/.messages: drain queued message text verbatim and once only;
     preserve pending API messages until explicitly fetched.
 
+  * setdevice: validate required arguments and booleans, send the real SD
+    command and return the daemon response; reject invalid requests before I/O.
+
  -- Joerg Bernau <joerg@bernau.family>  Thu, 15 Oct 2026 14:00:00 +0200

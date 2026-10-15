@@ -715,7 +715,7 @@
     },
     {
       "path": "crates/onesimus-dird/src/commands/extra.rs",
-      "sha256": "6d79ff6f72a2c3acf1744267a400bf63fc37d32f70fd66ec9cad068be2c328a6"
+      "sha256": "91e58e939dcd56f4795153286a1c3785195e1077dd4fb7ce2538acd2fabf7b6d"
     },
     {
       "path": "crates/onesimus-dird/src/commands/job.rs",
@@ -770,10 +770,10 @@
     "top_level_commands": 88,
     "registered_top_level_commands": 88,
     "status_counts": {
-      "partial": 17,
+      "partial": 18,
       "registered_unverified": 53,
       "semantic_mismatch": 2,
-      "stub": 16
+      "stub": 15
     },
     "restore_file_selection_commands": 26,
     "onesimus_extra_names": 8
@@ -2410,7 +2410,7 @@
         },
         "implementation": {
           "file": "crates/onesimus-dird/src/commands/extra.rs",
-          "line": 369
+          "line": 413
         },
         "declared_arguments": [
           "pool"
@@ -2641,7 +2641,7 @@
         },
         "implementation": {
           "file": "crates/onesimus-dird/src/commands/extra.rs",
-          "line": 338
+          "line": 382
         },
         "declared_arguments": [
           "pool"
@@ -2686,7 +2686,7 @@
         },
         "implementation": {
           "file": "crates/onesimus-dird/src/commands/extra.rs",
-          "line": 306
+          "line": 350
         },
         "declared_arguments": [
           "volume",
@@ -2915,7 +2915,7 @@
         },
         "implementation": {
           "file": "crates/onesimus-dird/src/commands/extra.rs",
-          "line": 406
+          "line": 450
         },
         "declared_arguments": [
           "storage"
@@ -3040,7 +3040,7 @@
         },
         "implementation": {
           "file": "crates/onesimus-dird/src/commands/extra.rs",
-          "line": 394
+          "line": 438
         },
         "declared_arguments": [
           "storage"
@@ -3391,7 +3391,7 @@
         },
         "implementation": {
           "file": "crates/onesimus-dird/src/commands/extra.rs",
-          "line": 418
+          "line": 462
         },
         "declared_arguments": [],
         "status": "semantic_mismatch",
@@ -3680,7 +3680,7 @@
         },
         "implementation": {
           "file": "crates/onesimus-dird/src/commands/extra.rs",
-          "line": 283
+          "line": 327
         },
         "declared_arguments": [
           "storage",
@@ -3808,7 +3808,7 @@
         },
         "implementation": {
           "file": "crates/onesimus-dird/src/commands/extra.rs",
-          "line": 249
+          "line": 293
         },
         "declared_arguments": [
           "jobid"
@@ -3853,7 +3853,7 @@
         },
         "implementation": {
           "file": "crates/onesimus-dird/src/commands/extra.rs",
-          "line": 223
+          "line": 267
         },
         "declared_arguments": [
           "client"
@@ -4127,9 +4127,9 @@
         "declared_arguments": [
           "storage"
         ],
-        "status": "stub",
+        "status": "partial",
         "findings": [
-          "Der Handler bestätigt die Geräteauswahl; storage/autoselect werden nicht an den SD übertragen."
+          "storage/device/autoselect werden jetzt validiert und als echter setdevice-Befehl an den SD gesendet; dessen Antwort wird weitergereicht. Protokoll- und Fehlerpfadtests bestehen. Storage-ACL-Abgleich und Live-SHA-256-Parität bleiben offen."
         ],
         "functional_parity_verified": false
       },

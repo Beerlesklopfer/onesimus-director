@@ -13,10 +13,10 @@ Dies ist ein statischer Quellcodeabgleich; es wurden keine Live-Jobs, Löschunge
 
 | Status | Anzahl | Bedeutung |
 |---|---:|---|
-| `partial` | 17 | Konkrete fehlende Optionen oder Teilfunktionen belegt |
+| `partial` | 18 | Konkrete fehlende Optionen oder Teilfunktionen belegt |
 | `registered_unverified` | 53 | Handler vorhanden; Funktionsparität nicht nachgewiesen |
 | `semantic_mismatch` | 2 | Abweichende Bedeutung gegenüber Bareos |
-| `stub` | 16 | Platzhalter statt der beschriebenen Wirkung |
+| `stub` | 15 | Platzhalter statt der beschriebenen Wirkung |
 
 ## Herkunft und Grenzen
 
@@ -115,7 +115,7 @@ Die Syntaxtexte sind Originalhilfe, keine vollständige formale Grammatik aller 
 | [status](status.md) | Report status | `partial` |
 | [setbandwidth](setbandwidth.md) | Sets bandwidth | `stub` |
 | [setdebug](setdebug.md) | Sets debug level | `partial` |
-| [setdevice](setdevice.md) | Sets device parameter | `stub` |
+| [setdevice](setdevice.md) | Sets device parameter | `partial` |
 | [setip](setip.md) | Sets new client address -- if authorized | `stub` |
 | [show](show.md) | Show resource records | `registered_unverified` |
 | [sqlquery](sqlquery.md) | Use SQL to query catalog | `registered_unverified` |
