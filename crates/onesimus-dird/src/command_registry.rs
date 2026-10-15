@@ -135,7 +135,7 @@ pub fn build_registry() -> Vec<CommandDef> {
             arg("all", "Select all files"),
             arg("done", "Skip interactive selection"),
             arg("yes", "Skip confirmation"),
-        ], handler: commands::admin::cmd_restore, dot_command: false },
+        ], handler: commands::restore::cmd_restore, dot_command: false },
 
         CommandDef { name: "enable", aliases: &[], description: "Enable a resource", args: vec![
             arg_resource("job", "Job name", ".jobs"),

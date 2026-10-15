@@ -1,0 +1,23 @@
+# C-021 restore argument handling (ua_restore.cc RestoreCmd, UserSelectJobidsOrFiles).
+# Only variants that end before a job is created: no valid JobId with "all done yes".
+{"id": "c021-unknown-keyword", "steps": ["restore help"]}
+{"id": "c021-unknown-backupformat", "steps": ["restore backupformat=native"]}
+{"id": "c021-unknown-keyword-json", "steps": ["restore help"], "setup": [".api 2"]}
+{"id": "c021-missing-jobid-value", "steps": ["restore jobid"]}
+{"id": "c021-missing-file-value", "steps": ["restore file"]}
+{"id": "c021-jobid-not-a-number", "steps": ["restore jobid=abc"]}
+{"id": "c021-jobid-list-invalid", "steps": ["restore jobid=1,abc all done"]}
+{"id": "c021-jobid-unknown", "steps": ["restore jobid=999999 all done"]}
+{"id": "c021-jobid-zero", "steps": ["restore jobid=0"]}
+{"id": "c021-two-dates", "steps": ["restore current before=2020-01-01"]}
+{"id": "c021-before-short-date", "steps": ["restore before=2020-01-01"]}
+{"id": "c021-before-garbage", "steps": ["restore before=yesterday"]}
+{"id": "c021-pool-unknown", "steps": ["restore pool=NoSuchPool"]}
+{"id": "c021-fileregex-invalid", "steps": ["restore fileregex=( help"]}
+{"id": "c021-comment-illegal", "steps": ["restore comment=a<b help"]}
+{"id": "c021-comment-empty", "steps": ["restore comment= help"]}
+{"id": "c021-client-unknown", "steps": ["restore client=NoSuchClient file=/etc/passwd"]}
+{"id": "c021-client-invalid-name", "steps": ["restore client=a!b file=/etc/passwd"]}
+{"id": "c021-limited-console", "steps": ["restore help"], "console": "parity-limited", "password": "parity-limited-pw"}
+{"id": "c021-cancel-menu", "steps": ["restore", "."]}
+{"id": "c021-cancel-menu-client", "steps": ["restore client=bareos-fd", "."]}

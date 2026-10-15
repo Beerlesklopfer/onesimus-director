@@ -1,16 +1,11 @@
-//! Admin commands: label, mount, unmount, release, update, restore,
+//! Admin commands: label, mount, unmount, release, update,
 //! estimate, prune, purge, truncate, reload
 //!
 //! These commands communicate with the Storage Daemon and/or catalog.
 
-use std::sync::atomic::{AtomicU32, Ordering};
-
 use crate::command_ast::CommandAst;
 use crate::command_executor::ExecContext;
 use crate::command_queue::CommandResult;
-use crate::job_worker::{self, JobParams, WorkerJobType};
-use crate::job_manager;
-use crate::message_bus::{BusMessage, MsgType};
 
 /// Send a command to a named Storage Daemon (resolves from config).
 fn sd_command(ctx: &ExecContext, storage_name: &str, command: &str) -> Result<String, String> {
@@ -27,8 +22,6 @@ fn sd_command(ctx: &ExecContext, storage_name: &str, command: &str) -> Result<St
 
     bareos_stored::command::sd_command(&addr, port, &password, &dir_name, command)
 }
-
-static NEXT_RESTORE_ID: AtomicU32 = AtomicU32::new(10000);
 
 pub fn cmd_label(ast: &CommandAst, ctx: &ExecContext) -> CommandResult {
     // C++ ua_label.cc do_label: OpenClientDb() before anything else.
@@ -243,215 +236,6 @@ fn cmd_update_db(ast: &CommandAst, ctx: &ExecContext) -> CommandResult {
         ),
         other => CommandResult::ok(format!("update {other}: not supported\n")),
     }
-}
-
-pub fn cmd_restore(ast: &CommandAst, ctx: &ExecContext) -> CommandResult {
-    // C++ ua_restore.cc RestoreCmd: OpenClientDb() before anything else.
-    crate::ua_db::with_client_db(ast, ctx, true, || cmd_restore_db(ast, ctx))
-}
-
-/// Keywords of UserSelectJobidsOrFiles (ua_restore.cc:510).
-const RESTORE_KEYWORDS: &[&str] = &["jobid", "current", "before", "file", "directory", "select",
-    "pool", "all", "fileregex", "client", "storage", "fileset", "where", "yes", "bootstrap", "done",
-    "strip_prefix", "add_prefix", "add_suffix", "regexwhere", "restoreclient", "copies", "comment",
-    "restorejob", "replace", "pluginoptions", "archive"];
-
-/// The parts of RestoreCmd (ua_restore.cc:103) that decide whether a
-/// restore may start without console interaction. Only `jobid=… all done
-/// yes` is fully specified; everything else stops where upstream would ask
-/// (C-012). Returns None when the restore may proceed.
-fn restore_needs_dialog(ast: &CommandAst) -> Option<CommandResult> {
-    use super::prompt::{prompt_list, selection_required};
-    for arg in &ast.arguments {
-        if !RESTORE_KEYWORDS.contains(&arg.key.to_ascii_lowercase().as_str()) {
-            return Some(CommandResult::error(format!("Unknown keyword: {}\n", arg.key)));
-        }
-    }
-    let flag = |key: &str| ast.arguments.iter().any(|a| a.key.eq_ignore_ascii_case(key));
-    if ["file", "directory", "select", "fileregex", "before", "current"].iter().any(|k| flag(k)) {
-        // File/date selections need GetClientName and further dialogs.
-        return Some(selection_required(String::new()));
-    }
-    if get_arg(ast, "jobid").is_none() {
-        // ua_restore.cc:648 job selection menu.
-        let choices: Vec<String> = ["List last 20 Jobs run", "List Jobs where a given File is saved",
-            "Enter list of comma separated JobIds to select", "Enter SQL list command",
-            "Select the most recent backup for a client", "Select backup for a client before a specified time",
-            "Enter a list of files to restore", "Enter a list of files to restore before a specified time",
-            "Find the JobIds of the most recent backup for a client",
-            "Find the JobIds for a backup for a client before a specified time",
-            "Enter a list of directories to restore for found JobIds",
-            "Select full restore to a specified Job date", "Cancel"].iter().map(|s| s.to_string()).collect();
-        return Some(selection_required(format!(
-            "\nFirst you select one or more JobIds that contain files\n\
-             to be restored. You will be presented several methods\n\
-             of specifying the JobIds. Then you will be allowed to\n\
-             select which files from those JobIds are to be restored.\n\n{}",
-            prompt_list("To select the JobIds, you have the following choices:\n", &choices, "Select item: "))));
-    }
-    if !flag("all") || !flag("done") {
-        // BuildDirectoryTree (ua_restore.cc:1294): file selection in the tree.
-        return Some(selection_required(String::new()));
-    }
-    if !flag("yes") {
-        // RunCmd of the generated restore job: "OK to run? (yes/mod/no): ".
-        return Some(selection_required("OK to run? (yes/mod/no): ".into()));
-    }
-    None
-}
-
-fn cmd_restore_db(ast: &CommandAst, ctx: &ExecContext) -> CommandResult {
-    if let Some(result) = restore_needs_dialog(ast) {
-        return result;
-    }
-    let where_path = get_arg(ast, "where").unwrap_or("/tmp/bareos-restore");
-    let client_arg = get_arg(ast, "client");
-    let jobid_arg = get_arg(ast, "jobid");
-    let replace = get_arg(ast, "replace").unwrap_or("always");
-
-    let config = match &ctx.config {
-        Some(c) => match c.read() {
-            Ok(c) => c,
-            _ => return CommandResult::error("Config read error\n".to_string()),
-        },
-        None => return CommandResult::error("No config loaded\n".to_string()),
-    };
-
-    // Determine client
-    let client_name = match client_arg {
-        Some(c) => c.to_string(),
-        None => {
-            if config.clients.len() == 1 {
-                config.clients[0].name.clone()
-            } else {
-                let names: Vec<_> = config.clients.iter()
-                    .enumerate()
-                    .map(|(i, c)| format!("  {}. {}", i + 1, c.name))
-                    .collect();
-                return CommandResult::ok(format!(
-                    "Select client:\n{}\nSpecify: restore client=<name> where=<path> [jobid=<N>]\n",
-                    names.join("\n")
-                ));
-            }
-        }
-    };
-
-    let client = match config.find_client(&client_name) {
-        Some(c) => c.clone(),
-        None => return CommandResult::error(format!("Client '{client_name}' not found\n")),
-    };
-
-    // Find backup JobId to restore from
-    let restore_jobid: u32 = match jobid_arg {
-        Some(s) => match s.parse() {
-            Ok(id) => id,
-            Err(_) => return CommandResult::error(format!("Invalid jobid: {s}\n")),
-        },
-        None => {
-            // Find most recent successful backup for this client
-            match job_manager::find_latest_backup_jobid(&ctx.catalog, &client_name) {
-                Some(id) => {
-                    tracing::info!("Restore: auto-selected JobId={id} for client={client_name}");
-                    id
-                }
-                None => return CommandResult::error(format!(
-                    "No successful backup found for client '{client_name}'\n\
-                     Specify: restore client={client_name} jobid=<N> where={where_path}\n"
-                )),
-            }
-        }
-    };
-
-    // Generate bootstrap from catalog
-    let bootstrap = match job_manager::generate_bootstrap(&ctx.catalog, restore_jobid) {
-        Some(bsr) => bsr,
-        None => return CommandResult::error(format!(
-            "Cannot generate bootstrap for JobId={restore_jobid} — no jobmedia records\n"
-        )),
-    };
-
-    // Find a storage resource
-    let storage = match config.storages.first() {
-        Some(s) => s.clone(),
-        None => return CommandResult::error("No storage configured\n".to_string()),
-    };
-
-    let dir_name = config.director.name.clone();
-    let job_id = NEXT_RESTORE_ID.fetch_add(1, Ordering::Relaxed);
-    let now = chrono::Local::now();
-    let unique_job = format!("RestoreFiles.{}", now.format("%Y-%m-%d_%H.%M.%S_%f"));
-
-    let params = JobParams {
-        job_id,
-        unique_job: unique_job.clone(),
-        job_name: "RestoreFiles".to_string(),
-        job_type: WorkerJobType::Restore,
-        level: "full".to_string(),
-        fd_address: client.address.clone(),
-        fd_port: client.port,
-        fd_password: client.password.clone(),
-        sd_address: storage.address.clone(),
-        sd_port: storage.port,
-        sd_password: storage.password.clone(),
-        sd_device: storage.device.clone(),
-        sd_media_type: storage.media_type.clone(),
-        director_name: dir_name,
-        pool_name: "Full".to_string(),
-        fileset_includes: vec![],
-        fileset_excludes: vec![],
-        since_utime: 0,
-        prev_job: String::new(),
-        where_path: Some(where_path.to_string()),
-        replace: Some(replace.to_string()),
-        restore_jobid: Some(restore_jobid),
-        bootstrap: Some(bootstrap),
-    };
-
-    drop(config); // Release RwLock before fork
-
-    // Post queued status
-    if let Some(smgr) = &ctx.session_mgr {
-        smgr.bus().post(BusMessage::JobStatus {
-            job_id, job_name: "RestoreFiles".to_string(),
-            status: "Queued".to_string(), timestamp: now_unix(),
-        });
-        smgr.bus().post(BusMessage::JobMessage {
-            job_id, job_name: "RestoreFiles".to_string(),
-            msg_type: MsgType::Info,
-            text: format!("Start Restore JobId={job_id} from Backup JobId={restore_jobid}, Where={where_path}"),
-            timestamp: now_unix(),
-        });
-    }
-
-    // Fork the autonomous restore worker
-    match job_worker::spawn_job_worker(job_id, "RestoreFiles", &params) {
-        Ok(handle) => {
-            tracing::info!("Restore {job_id}: worker pid={}, from backup {restore_jobid}", handle.pid);
-            if let Some(ref mgr) = ctx.job_manager {
-                mgr.lock().unwrap().add_job(job_id, "RestoreFiles", handle);
-            }
-        }
-        Err(e) => {
-            tracing::error!("Restore {job_id}: fork failed: {e}");
-            return CommandResult::error(format!("Failed to start restore: {e}\n"));
-        }
-    }
-
-    CommandResult::ok(format!(
-        "Restore job queued. JobId={job_id}\n\
-         Restore from:  Backup JobId={restore_jobid}\n\
-         Client:        {client_name}\n\
-         Storage:       {}\n\
-         Where:         {where_path}\n\
-         Replace:       {replace}\n",
-        storage.name,
-    ))
-}
-
-fn now_unix() -> i64 {
-    std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap_or_default().as_secs() as i64
 }
 
 pub fn cmd_estimate(ast: &CommandAst, ctx: &ExecContext) -> CommandResult {
@@ -949,42 +733,6 @@ pub(crate) mod side_effect_tests {
         // No default pool "Full": two pools mean the pool dialog, no SD contact.
         assert_eq!(run("label volume=v1").text_output,
             "Automatically selected Storage: File\nDefined Pools:\n1: Full\n2: Incremental\nSelect the Pool (1-2): ");
-    }
-
-    #[test]
-    fn restore_starts_nothing_until_fully_specified() {
-        for line in ["restore", "restore client=fd", "restore jobid=1", "restore jobid=1 all",
-            "restore jobid=1 done", "restore jobid=1 all done", "restore file=/etc/passwd yes",
-            "restore select all done yes"] {
-            let result = restore_needs_dialog(&crate::session::parse_cli_command(line));
-            assert!(result.is_some_and(|r| r.success), "{line}");
-        }
-        assert!(restore_needs_dialog(&crate::session::parse_cli_command("restore")).unwrap().text_output
-            .ends_with("12: Select full restore to a specified Job date\n13: Cancel\nSelect item:  (1-13): "));
-        assert_eq!(restore_needs_dialog(&crate::session::parse_cli_command("restore help")).unwrap().error_message,
-            "Unknown keyword: help\n");
-        assert_eq!(restore_needs_dialog(&crate::session::parse_cli_command("restore jobid=1 all done yes")).map(|r| r.text_output), None);
-    }
-
-    #[test]
-    fn restore_dialog_paths_touch_neither_catalog_nor_job_manager() {
-        let mut ctx = context();
-        ctx.config.as_ref().unwrap().write().unwrap().clients.push(bareos_config::resources::ClientResource {
-            name: "fd1".into(), ..Default::default() });
-        let (catalog, log) = recording_catalog("b1");
-        ctx.catalog = Some(catalog);
-        ctx.job_manager = Some(Arc::new(std::sync::Mutex::new(crate::job_manager::JobManager::new(
-            Arc::new(crate::message_bus::MessageBus::new(8)), ctx.config.clone(), None))));
-        for line in ["restore", "restore client=fd1", "restore jobid=1", "restore jobid=1 all done", "restore help"] {
-            cmd_restore_db(&crate::session::parse_cli_command(line), &ctx);
-        }
-        assert!(log.lock().unwrap().is_empty(), "{:?}", log.lock().unwrap());
-        assert!(ctx.job_manager.as_ref().unwrap().lock().unwrap().running_jobs().is_empty());
-        // Control: the complete request reaches the catalog (bootstrap
-        // lookup, refused by the double, so no worker is forked).
-        let result = cmd_restore_db(&crate::session::parse_cli_command("restore client=fd1 jobid=1 all done yes"), &ctx);
-        assert!(!result.success);
-        assert!(!log.lock().unwrap().is_empty());
     }
 
     #[test]

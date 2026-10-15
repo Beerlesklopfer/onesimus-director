@@ -6,6 +6,7 @@ pub mod dot;
 pub mod job;
 pub mod list;
 pub mod admin;
+pub mod restore;
 pub mod configure;
 pub mod sql;
 pub mod acl;
