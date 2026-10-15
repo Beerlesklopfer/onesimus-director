@@ -693,12 +693,17 @@ fn en_disable(ast: &CommandAst, ctx: &ExecContext, enable: bool) -> CommandResul
                     .filter(|(name, enabled)| *enabled != enable && access(ctx, kind, name)).map(|(name, _)| name))
                     .into_iter().map(str::to_string).collect()
             };
-            match super::prompt::select_resource(ctx, &format!("The defined {label} resources are:\n"), label,
-                &format!("Select {label} resource"), candidates) {
-                Ok(selected) => selected,
-                // EnableCmd/DisableCmd return true even when nothing was selected.
-                Err(mut result) => { result.success = true; return result; }
+            // select_enable_disable_*_resource: DoPrompt dialog (C-011).
+            let mut ua = crate::ua_select::Ua::new(ctx);
+            ua.start_prompt(&format!("The defined {label} resources are:\n"));
+            for name in &candidates {
+                ua.add_prompt(name);
             }
+            let msg = if res_type == "job" { "Select Job resource".to_string() } else { format!("Select {label} resource") };
+            // EnableCmd/DisableCmd return true even when nothing was selected.
+            let Some((_, name)) = ua.do_prompt(label, &msg) else { return ua.finish(true) };
+            ua.send_result(toggle_enabled(config, res_type, &name, enable));
+            return ua.finish(true);
         }
     };
     crate::ua_db::with_prefix(shown, toggle_enabled(config, res_type, &name, enable))
@@ -760,13 +765,15 @@ mod error_text_tests {
             session_mgr: None, catalog: None, api_mode: crate::command_executor::ApiMode::Human,
             bus_rx: None, job_manager: None };
         let storage_state = ctx.config.as_ref().unwrap().read().unwrap().find_storage("File").unwrap().enabled;
+        use crate::ua_select::tests::scripted;
         for line in ["enable storage=File", "enable", "enable job"] {
-            let result = cmd_enable(&crate::session::parse_cli_command(line), &ctx);
+            let (result, _) = scripted(&[], || cmd_enable(&crate::session::parse_cli_command(line), &ctx));
             assert_eq!(result.text_output, "The defined Job resources are:\n", "{line}");
             assert_eq!(result.error_message, "Selection list for \"Job\" is empty!\n", "{line}");
         }
-        let result = cmd_disable(&crate::session::parse_cli_command("disable storage=File"), &ctx);
-        assert_eq!(result.text_output, "The defined Job resources are:\n1: a\n2: b\nSelect Job resource (1-2): ");
+        let (_, console) = scripted(&["."], || cmd_disable(&crate::session::parse_cli_command("disable storage=File"), &ctx));
+        assert_eq!(console.transcript(), "The defined Job resources are:\n1: a\n2: b\nSelect Job resource (1-2): .\n\
+            Selection aborted, nothing done.\n");
         let cfg = ctx.config.as_ref().unwrap().read().unwrap();
         assert_eq!(cfg.find_storage("File").unwrap().enabled, storage_state);
         assert!(cfg.jobs.iter().all(|j| j.enabled));
