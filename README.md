@@ -249,3 +249,6 @@ dpkg-buildpackage -us -uc -b
 GNU Affero General Public License v3.0 only (`AGPL-3.0-only`); see [LICENSE](LICENSE).
 
 Maintainer: Joerg Bernau <Joerg.Bernau@onesimus.io>.
+
+Die aktuelle [Befehls-Roadmap und Vollständigkeitsprüfung](docs/TOD-COMMANDS.md)
+führt offene Teilabläufe, Prioritäten und Abnahmen zusammen.

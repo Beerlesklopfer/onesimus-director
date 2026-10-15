@@ -96,4 +96,8 @@ onesimus (25.1.2+onesimus.0.2.0-2) UNRELEASED; urgency=medium
     Fix exponent/underflow, integer bounds and selector-order counterexamples
     found by independent review; add ten focused regression tests.
 
+  * Document repeated independent command reviews and the resulting roadmap
+    in docs/TOD-COMMANDS.md. Separate known gaps, unverified registrations and
+    demonstrated parity, and record shared ACL/fixture dependencies and gates.
+
  -- Joerg Bernau <Joerg.Bernau@onesimus.io>  Thu, 15 Oct 2026 14:00:00 +0200
