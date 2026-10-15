@@ -178,12 +178,19 @@ pub fn fd_command(
 
 fn connect_control_fd(address: &str, port: u16, password: &str, director_name: &str)
     -> Result<(BnetStream<bareos_bnet::tls_psk::PskStream>, u32), String> {
+    connect_fd_with_timeout(address, port, password, director_name, Some(Duration::from_secs(15)))
+}
+
+/// Authenticated Director→FD connection (TLS-PSK, Hello, CRAM-MD5) with the
+/// given read timeout; returns the stream and the FD protocol version.
+pub(crate) fn connect_fd_with_timeout(address: &str, port: u16, password: &str, director_name: &str,
+    read_timeout: Option<Duration>) -> Result<(BnetStream<bareos_bnet::tls_psk::PskStream>, u32), String> {
     use std::net::ToSocketAddrs;
     let socket = (address, port).to_socket_addrs().map_err(|e| format!("DNS: {e}"))?
         .next().ok_or("no FD address")?;
     let stream = TcpStream::connect_timeout(&socket, Duration::from_secs(5))
         .map_err(|e| format!("connect: {e}"))?;
-    stream.set_read_timeout(Some(Duration::from_secs(15))).map_err(|e| e.to_string())?;
+    stream.set_read_timeout(read_timeout).map_err(|e| e.to_string())?;
     stream.set_write_timeout(Some(Duration::from_secs(15))).map_err(|e| e.to_string())?;
     let stream = tls_psk::psk_connect(stream, &format!("R_DIRECTOR\x1e{director_name}"),
         &tls_psk::password_to_psk(password)).map_err(|e| format!("TLS-PSK: {e}"))?;
@@ -305,6 +312,39 @@ pub fn fd_query_commands<S: std::io::Read + std::io::Write>(mut fd: BnetStream<S
     })();
     let _ = fd.send_signal(BnetSignal::Terminate);
     result
+}
+
+/// C++ getmsg.cc BgetDirmsg(): the next numbered response line, answering
+/// poll/status/btime signals and swallowing Jmsg/request lines. `None` when
+/// the FD sent a terminating signal (EOD, EOD_POLL, TERMINATE, unknown).
+pub(crate) fn get_dir_msg<S: std::io::Read + std::io::Write>(fd: &mut BnetStream<S>) -> Result<Option<String>, String> {
+    loop {
+        match fd.recv().map_err(|error| format!("FD response: {error}"))? {
+            BnetMessage::Data(bytes) => {
+                let message = String::from_utf8_lossy(&bytes).into_owned();
+                if message.as_bytes().first().is_some_and(u8::is_ascii_digit) {
+                    return Ok(Some(message));
+                }
+                // Jmsg/CatReq/... from the FD: dispatched to the job messages in C++.
+                debug!("FD message: {}", message.trim_end());
+            }
+            BnetMessage::Signal(BnetSignal::EodPoll) => {
+                fd.send_str("1000 OK\n").map_err(|e| e.to_string())?;
+                return Ok(None);
+            }
+            BnetMessage::Signal(BnetSignal::Poll) => fd.send_str("1000 OK\n").map_err(|e| e.to_string())?,
+            BnetMessage::Signal(BnetSignal::Heartbeat | BnetSignal::HeartbeatResponse) => {}
+            BnetMessage::Signal(BnetSignal::Status) => {
+                fd.send_str("Status OK\n").map_err(|e| e.to_string())?;
+                fd.send_signal(BnetSignal::Eod).map_err(|e| e.to_string())?;
+            }
+            BnetMessage::Signal(BnetSignal::Btime) => {
+                let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default();
+                fd.send_str(&format!("btime {}\n", now.as_micros())).map_err(|e| e.to_string())?;
+            }
+            BnetMessage::Signal(_) => return Ok(None),
+        }
+    }
 }
 
 fn read_listing_reply<S: std::io::Read + std::io::Write>(fd: &mut BnetStream<S>) -> Result<String, String> {

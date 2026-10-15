@@ -454,67 +454,6 @@ fn now_unix() -> i64 {
         .unwrap_or_default().as_secs() as i64
 }
 
-pub fn cmd_estimate(ast: &CommandAst, ctx: &ExecContext) -> CommandResult {
-    let job = get_arg(ast, "job");
-    let client = get_arg(ast, "client");
-    let listing = has_flag(ast, "listing");
-
-    let job_name = match job {
-        Some(j) => j,
-        None => {
-            if let Some(config) = &ctx.config {
-                if let Ok(cfg) = config.read() {
-                    let names: Vec<_> = cfg.jobs.iter()
-                        .filter(|j| matches!(j.job_type, bareos_config::resources::JobType::Backup))
-                        .map(|j| j.name.as_str())
-                        .collect();
-                    return CommandResult::ok(format!(
-                        "estimate: specify job=<name>\nBackup jobs: {}\n",
-                        names.join(", ")
-                    ));
-                }
-            }
-            return CommandResult::ok("estimate: specify job=<name>\n".to_string());
-        }
-    };
-
-    // Look up job
-    let (client_name, fileset_name) = if let Some(config) = &ctx.config {
-        if let Ok(cfg) = config.read() {
-            if let Some(j) = cfg.find_job(job_name) {
-                (j.client.clone(), j.fileset.clone())
-            } else {
-                return CommandResult::error(format!("Job '{job_name}' not found\n"));
-            }
-        } else {
-            (String::new(), String::new())
-        }
-    } else {
-        (String::new(), String::new())
-    };
-
-    let client_name = client.unwrap_or(&client_name);
-    let prefix = match crate::ua_db::reopen_client_db(ast, ctx, client_name) {
-        Ok(prefix) => prefix,
-        Err(result) => return result,
-    };
-
-    let mut output = prefix + &format!(
-        "Connecting to Client \"{client_name}\" for estimate...\n\
-         Job: {job_name}\n\
-         FileSet: {fileset_name}\n"
-    );
-
-    if listing {
-        output.push_str("Listing mode enabled\n");
-    }
-
-    // TODO: Connect to FD and run estimate
-    output.push_str("Estimate pending — requires FD connection for file listing\n");
-
-    CommandResult::ok(output)
-}
-
 pub fn cmd_prune(ast: &CommandAst, ctx: &ExecContext) -> CommandResult {
     // C++ ua_prune.cc PruneCmd: OpenClientDb(ua, true) after the Job/Storage ACL restriction checks.
     // Job/Storage restrictions are refused before the catalog is opened.

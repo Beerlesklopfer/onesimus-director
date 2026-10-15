@@ -1,0 +1,31 @@
+# C-017 estimate (ua_cmds.cc EstimateCmd): FD connection, level, fileset, listing.
+# Read-only on the FD; fileset overrides use filesets already in the catalog.
+{"id": "c017-full", "steps": ["estimate job=backup-bareos-fd level=Full"], "timeout_ms": 30000}
+{"id": "c017-default-level", "steps": ["estimate job=backup-bareos-fd"], "timeout_ms": 30000}
+{"id": "c017-incremental", "steps": ["estimate job=backup-bareos-fd level=Incremental"], "timeout_ms": 30000}
+{"id": "c017-differential", "steps": ["estimate job=backup-bareos-fd level=Differential"], "timeout_ms": 30000}
+{"id": "c017-catalog-job", "steps": ["estimate job=BackupCatalog"], "timeout_ms": 30000}
+{"id": "c017-listing", "steps": ["estimate job=BackupCatalog listing"], "timeout_ms": 30000}
+{"id": "c017-listing-full", "steps": ["estimate job=backup-bareos-fd level=Full listing"], "timeout_ms": 30000}
+{"id": "c017-accurate-yes", "steps": ["estimate job=backup-bareos-fd accurate=yes"], "timeout_ms": 30000}
+{"id": "c017-accurate-incr", "steps": ["estimate job=backup-bareos-fd level=Incremental accurate=yes"], "timeout_ms": 30000}
+{"id": "c017-accurate-no", "steps": ["estimate job=backup-bareos-fd accurate=no"], "timeout_ms": 30000}
+{"id": "c017-accurate-bad", "steps": ["estimate job=backup-bareos-fd accurate=maybe"], "timeout_ms": 30000}
+{"id": "c017-accurate-missing", "steps": ["estimate job=backup-bareos-fd accurate"]}
+{"id": "c017-unknown-job", "steps": ["estimate job=nosuch"]}
+{"id": "c017-job-missing", "steps": ["estimate job"]}
+{"id": "c017-restore-job", "steps": ["estimate job=RestoreFiles"]}
+{"id": "c017-client-override", "steps": ["estimate job=backup-bareos-fd client=bareos-fd"], "timeout_ms": 30000}
+{"id": "c017-fd-override", "steps": ["estimate job=backup-bareos-fd fd=bareos-fd"], "timeout_ms": 30000}
+{"id": "c017-fileset-override", "steps": ["estimate job=backup-bareos-fd fileset=Catalog"], "timeout_ms": 30000}
+{"id": "c017-client-fileset-nojob", "steps": ["estimate client=bareos-fd fileset=Catalog"]}
+{"id": "c017-unknown-client", "steps": ["estimate job=backup-bareos-fd client=nosuch"]}
+{"id": "c017-client-missing", "steps": ["estimate job=backup-bareos-fd client"]}
+{"id": "c017-unknown-fileset", "steps": ["estimate job=backup-bareos-fd fileset=nosuch"]}
+{"id": "c017-fileset-missing", "steps": ["estimate job=backup-bareos-fd fileset"]}
+{"id": "c017-bad-level", "steps": ["estimate job=backup-bareos-fd level=bogus"], "timeout_ms": 30000}
+{"id": "c017-level-missing", "steps": ["estimate job=backup-bareos-fd level"]}
+{"id": "c017-twice", "steps": ["estimate job=backup-bareos-fd", "estimate job=backup-bareos-fd"], "timeout_ms": 30000}
+{"id": "c017-api2", "steps": ["estimate job=backup-bareos-fd"], "setup": [".api 2"], "timeout_ms": 30000}
+{"id": "c017-api2-unknown-job", "steps": ["estimate job=nosuch"], "setup": [".api 2"]}
+{"id": "c017-select-job", "steps": ["estimate", "2"], "timeout_ms": 30000}

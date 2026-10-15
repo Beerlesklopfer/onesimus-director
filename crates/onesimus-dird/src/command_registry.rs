@@ -188,7 +188,7 @@ pub fn build_registry() -> Vec<CommandDef> {
             arg_resource("client", "Client name", ".clients"),
             arg_resource("fileset", "FileSet name", ".filesets"),
             arg_enum("level", "Backup level", vec!["Full", "Incremental", "Differential"]),
-        ], handler: commands::admin::cmd_estimate, dot_command: false },
+        ], handler: commands::estimate::cmd_estimate, dot_command: false },
 
         CommandDef { name: "delete", aliases: &[], description: "Delete volume or job records", args: vec![
             arg("volume", "Volume name"),

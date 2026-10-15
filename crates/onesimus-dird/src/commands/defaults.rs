@@ -47,6 +47,20 @@ fn inherited(
     }
     Ok(dirs)
 }
+/// Directives of a Job resource including its JobDefs chain (raw config).
+pub(crate) fn job_directives(cfg: &DirectorConfig, name: &str) -> Vec<Directive> {
+    raw(cfg, "job", name)
+        .and_then(|job| inherited(cfg, job, &mut Vec::new()).ok())
+        .unwrap_or_default()
+}
+/// A time directive in seconds (0 when absent or invalid).
+pub(crate) fn time_directive(dirs: &[Directive], key: &str) -> u64 {
+    number(dirs, key, 0, TIMES).unwrap_or(0)
+}
+/// A yes/no directive.
+pub(crate) fn bool_directive(dirs: &[Directive], key: &str, default: bool) -> bool {
+    boolean(dirs, key, default).map(|v| v != 0).unwrap_or(default)
+}
 const TIMES: &[(&str, u64)] = &[
     ("n", 60),
     ("seconds", 1),

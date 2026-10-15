@@ -1637,22 +1637,22 @@ fn fs_option(keyword: &str, value: &str) -> Option<String> {
 }
 
 #[derive(Default)]
-struct FileOptions {
-    opts: String,
-    regex: Vec<String>,
-    regexdir: Vec<String>,
-    regexfile: Vec<String>,
-    wild: Vec<String>,
-    wilddir: Vec<String>,
-    wildfile: Vec<String>,
-    wildbase: Vec<String>,
-    fstype: Vec<String>,
-    drivetype: Vec<String>,
-    meta: Vec<String>,
-    plugin: Option<String>,
+pub(crate) struct FileOptions {
+    pub(crate) opts: String,
+    pub(crate) regex: Vec<String>,
+    pub(crate) regexdir: Vec<String>,
+    pub(crate) regexfile: Vec<String>,
+    pub(crate) wild: Vec<String>,
+    pub(crate) wilddir: Vec<String>,
+    pub(crate) wildfile: Vec<String>,
+    pub(crate) wildbase: Vec<String>,
+    pub(crate) fstype: Vec<String>,
+    pub(crate) drivetype: Vec<String>,
+    pub(crate) meta: Vec<String>,
+    pub(crate) plugin: Option<String>,
 }
 
-fn default_options(configured: &[&str]) -> String {
+pub(crate) fn default_options(configured: &[&str]) -> String {
     // OptionsDefaultValues (std::map ordered by keyword id): HardLinks, AclSupport, XattrSupport
     let mut s = String::new();
     for (kw, letter) in [("hardlinks", "H"), ("aclsupport", "A"), ("xattrsupport", "X")] {
@@ -1663,7 +1663,7 @@ fn default_options(configured: &[&str]) -> String {
     s
 }
 
-fn parse_options(body: &[Directive]) -> FileOptions {
+pub(crate) fn parse_options(body: &[Directive]) -> FileOptions {
     let mut fo = FileOptions::default();
     let mut configured = Vec::new();
     for d in body {
