@@ -58,6 +58,7 @@ fn reload_config(config_path: &std::path::Path, shared_config: &SharedConfig) ->
     })?;
     let mut cfg = shared_config.write().map_err(|e| format!("config lock: {e}"))?;
     *cfg = new_config;
+    crate::fd_protocol::reset_handshake_modes();
     info!("configuration reloaded: Director '{}', {} clients, {} jobs",
           cfg.director.name, cfg.clients.len(), cfg.jobs.len());
     Ok(())

@@ -199,9 +199,102 @@ fn connect_control_fd(address: &str, port: u16, password: &str, director_name: &
     Ok((bnet, version))
 }
 
-/// Execute listing commands on one authenticated FD connection.
-pub fn fd_query_commands(address: &str, port: u16, password: &str, director_name: &str, commands: &[String]) -> Result<String, String> {
-    let (mut fd, _) = connect_control_fd(address, port, password, director_name)?;
+/// Handshake mode of a console connection to a File Daemon
+/// (C++ ClientConnectionHandshakeMode, dird/fd_cmds.cc).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum HandshakeMode { TlsFirst, CleartextFirst }
+
+/// Per client, the handshake mode that succeeded last; kept until the
+/// configuration is reloaded (`connection_successful_handshake_`).
+static SUCCESSFUL_HANDSHAKE: std::sync::Mutex<Option<std::collections::HashMap<String, HandshakeMode>>>
+    = std::sync::Mutex::new(None);
+
+/// Forget the stored handshake modes (configuration reload).
+pub fn reset_handshake_modes() {
+    if let Ok(mut modes) = SUCCESSFUL_HANDSHAKE.lock() { *modes = None; }
+}
+
+fn stored_handshake(client: &str) -> Option<HandshakeMode> {
+    SUCCESSFUL_HANDSHAKE.lock().ok()?.as_ref()?.get(client).copied()
+}
+
+fn store_handshake(client: &str, mode: HandshakeMode) {
+    if let Ok(mut modes) = SUCCESSFUL_HANDSHAKE.lock() {
+        modes.get_or_insert_with(Default::default).insert(client.to_string(), mode);
+    }
+}
+
+/// Connect to a File Daemon for a console command like the C++
+/// ConnectToFileDaemon with a UaContext (dird/fd_cmds.cc:279). Returns the
+/// console text it produces (OutputMessageForConnectionTry,
+/// SendInfoSuccess, SendInfoChosenCipher) and the authenticated connection.
+/// The text is also returned when the connection fails.
+pub fn connect_fd_console(address: &str, port: u16, password: &str, director_name: &str, client_name: &str)
+    -> (String, Result<BnetStream<bareos_bnet::stream::AnyStream>, String>) {
+    let stored = stored_handshake(client_name);
+    let mut info = String::new();
+    if stored.is_none() {
+        info.push_str("Probing client protocol... (result will be saved until config reload)");
+    }
+    // Clients are TLS-configured by default (TLS Enable = yes), so probing
+    // starts with immediate TLS and falls back to cleartext.
+    let mut mode = stored.unwrap_or(HandshakeMode::TlsFirst);
+    let mut last_error;
+    loop {
+        match connect_fd_mode(address, port, password, director_name, mode) {
+            Ok((bnet, cipher)) => {
+                if stored.is_none() { info.push_str("\r\x0b"); }
+                info.push_str(match mode {
+                    HandshakeMode::TlsFirst => " Handshake: Immediate TLS,",
+                    HandshakeMode::CleartextFirst => " Handshake: Cleartext,",
+                });
+                info.push_str(&tls_psk::cipher_message_string(cipher.as_deref()));
+                info.push('\n');
+                store_handshake(client_name, mode);
+                return (info, Ok(bnet));
+            }
+            Err(error) => last_error = error,
+        }
+        if last_error.starts_with("connect:") || mode == HandshakeMode::CleartextFirst { break; }
+        // UpdateFailedConnectionHandshakeMode: TLS is not required by default.
+        mode = HandshakeMode::CleartextFirst;
+    }
+    (info, Err(last_error))
+}
+
+fn connect_fd_mode(address: &str, port: u16, password: &str, director_name: &str, mode: HandshakeMode)
+    -> Result<(BnetStream<bareos_bnet::stream::AnyStream>, Option<String>), String> {
+    use bareos_bnet::stream::AnyStream;
+    use std::net::ToSocketAddrs;
+    let socket = (address, port).to_socket_addrs().map_err(|e| format!("connect: {e}"))?
+        .next().ok_or("connect: no FD address")?;
+    let stream = TcpStream::connect_timeout(&socket, Duration::from_secs(5))
+        .map_err(|e| format!("connect: {e}"))?;
+    stream.set_read_timeout(Some(Duration::from_secs(15))).map_err(|e| e.to_string())?;
+    stream.set_write_timeout(Some(Duration::from_secs(15))).map_err(|e| e.to_string())?;
+    let (stream, cipher) = match mode {
+        HandshakeMode::TlsFirst => {
+            let tls = tls_psk::psk_connect(stream, &format!("R_DIRECTOR\x1e{director_name}"),
+                &tls_psk::password_to_psk(password)).map_err(|e| format!("TLS-PSK: {e}"))?;
+            let cipher = tls.cipher_name();
+            (AnyStream::Psk(tls), Some(cipher))
+        }
+        HandshakeMode::CleartextFirst => (AnyStream::Plain(stream), None),
+    };
+    let mut bnet = BnetStream::new(stream);
+    bnet.send_str(&make_director_hello(director_name)).map_err(|e| e.to_string())?;
+    let auth = CramMd5Auth::new(password, director_name, 2);
+    if !auth.two_way_authenticate(&mut bnet, false).map_err(|e| e.to_string())?.success {
+        return Err("FD authentication failed".into());
+    }
+    let hello = bnet.recv_str().map_err(|e| format!("FD hello: {e}"))?;
+    hello.strip_prefix(FD_OK_HELLO).ok_or("invalid FD hello")?;
+    Ok((bnet, cipher))
+}
+
+/// Send each command on an authenticated FD connection and collect every
+/// reply up to its EOD, then terminate the connection (DoClientResolve).
+pub fn fd_query_commands<S: std::io::Read + std::io::Write>(mut fd: BnetStream<S>, commands: &[String]) -> Result<String, String> {
     let result = (|| {
         let mut output = String::new();
         for command in commands {
@@ -218,7 +311,11 @@ fn read_listing_reply<S: std::io::Read + std::io::Write>(fd: &mut BnetStream<S>)
     let mut output = String::new();
     loop {
         match fd.recv().map_err(|error| format!("FD response: {error}"))? {
-            BnetMessage::Data(bytes) => output.push_str(&String::from_utf8(bytes).map_err(|e| e.to_string())?),
+            // ua->SendMsg("%s", fd->msg) ends each message at its first NUL.
+            BnetMessage::Data(mut bytes) => {
+                if let Some(end) = bytes.iter().position(|&b| b == 0) { bytes.truncate(end); }
+                output.push_str(&String::from_utf8(bytes).map_err(|e| e.to_string())?)
+            }
             BnetMessage::Signal(BnetSignal::Eod) => return Ok(output),
             BnetMessage::Signal(BnetSignal::Terminate) => return Err("FD terminated listing before EOD".into()),
             BnetMessage::Signal(BnetSignal::Heartbeat) => fd.send_signal(BnetSignal::HeartbeatResponse).map_err(|e| e.to_string())?,
@@ -263,7 +360,7 @@ mod control_reply_tests {
     #[test]
     fn listing_collects_multiple_frames_without_changing_newlines() {
         let mut bytes = Vec::new();
-        for data in [b"first\n".as_slice(), b"second\r\n".as_slice()] {
+        for data in [b"first\n".as_slice(), b"second\r\n\0".as_slice(), b"\0third\n".as_slice()] {
             bytes.extend_from_slice(&(data.len() as i32).to_be_bytes());
             bytes.extend_from_slice(data);
         }

@@ -258,28 +258,18 @@ fn status_client(name: &str, ctx: &ExecContext) -> CommandResult {
 
     let mut output = String::new();
     for client in &clients {
-        output.push_str(&format!("Connecting to Client {} at {}:{}\n",
-                                  client.name, client.address, client.port));
-
-        let result = crate::fd_protocol::query_fd_status(
-            &client.address,
-            client.port,
-            &client.password,
-            &dir_name,
-            &client.name,
-        );
-
-        if result.success {
-            output.push_str(&format!("Connected to Client {}", client.name));
-            if !result.version.is_empty() {
-                output.push_str(&format!(" Version: {}", result.version));
-            }
-            output.push('\n');
-            output.push_str(&result.status_text);
-        } else {
-            output.push_str(&format!("Failed: {}\n", result.status_text));
+        // DoNativeClientStatus (fd_cmds.cc:999)
+        if ctx.api_mode == crate::command_executor::ApiMode::Human {
+            output.push_str(&format!("Connecting to Client {} at {}:{}\n",
+                                      client.name, client.address, client.port));
         }
-        output.push('\n');
+        let (info, fd) = crate::fd_protocol::connect_fd_console(
+            &client.address, client.port, &client.password, &dir_name, &client.name);
+        output.push_str(&info);
+        match fd.and_then(|fd| crate::fd_protocol::fd_query_commands(fd, &["status".to_string()])) {
+            Ok(status) => output.push_str(&status),
+            Err(_) => output.push_str(&format!("\nFailed to connect to Client {}.\n====\n", client.name)),
+        }
     }
 
     CommandResult::ok(output)

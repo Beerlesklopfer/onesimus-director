@@ -56,6 +56,24 @@ pub struct PskStream {
     inner: SslStream<TcpStream>,
 }
 
+impl PskStream {
+    /// Negotiated cipher and protocol, e.g. "TLS_CHACHA20_POLY1305_SHA256 TLSv1.3"
+    /// (C++ TlsOpenSsl::TlsCipherGetName, lib/tls_openssl.cc:89); empty without a cipher.
+    pub fn cipher_name(&self) -> String {
+        let ssl = self.inner.ssl();
+        match ssl.current_cipher() {
+            Some(cipher) => format!("{} {}", cipher.name(), ssl.version_str()),
+            None => String::new(),
+        }
+    }
+}
+
+/// " Encryption: <cipher>" or " Encryption: None" without TLS
+/// (C++ BareosSocket::GetCipherMessageString, lib/bsock.cc:755).
+pub fn cipher_message_string(cipher: Option<&str>) -> String {
+    format!(" Encryption: {}", cipher.unwrap_or("None"))
+}
+
 impl Read for PskStream {
     fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
         self.inner.read(buf)

@@ -1,0 +1,18 @@
+# C-018 resolve (ua_cmds.cc ResolveCmd, fd_cmds.cc DoClientResolve, sd_cmds.cc DoStorageResolve).
+{"id": "c018-localhost", "steps": ["resolve localhost"]}
+{"id": "c018-ipv4-literal", "steps": ["resolve 127.0.0.1"]}
+{"id": "c018-ipv6-literal", "steps": ["resolve ::1"]}
+{"id": "c018-multiple", "steps": ["resolve localhost 127.0.0.1 ::1"]}
+{"id": "c018-unknown", "steps": ["resolve nonexistent.invalid"]}
+{"id": "c018-unknown-after-known", "steps": ["resolve localhost nonexistent.invalid localhost"]}
+{"id": "c018-keyword-value", "steps": ["resolve foo=bar"]}
+{"id": "c018-no-args", "steps": ["resolve"]}
+{"id": "c018-client-missing-name", "steps": ["resolve client"]}
+{"id": "c018-client-unknown", "steps": ["resolve client=nosuch localhost"]}
+{"id": "c018-storage-unknown", "steps": ["resolve storage=nosuch localhost"]}
+{"id": "c018-client", "steps": ["resolve client=bareos-fd localhost"], "timeout_ms": 20000}
+{"id": "c018-client-twice", "steps": ["resolve client=bareos-fd localhost", "resolve fd=bareos-fd 127.0.0.1 ::1"], "timeout_ms": 20000}
+{"id": "c018-storage", "steps": ["resolve storage=File localhost"], "timeout_ms": 20000}
+{"id": "c018-client-storage", "steps": ["resolve client=bareos-fd storage=File localhost"], "timeout_ms": 20000}
+{"id": "c018-api2", "steps": [".api 2", "resolve localhost"]}
+{"id": "c018-api2-client", "steps": [".api 2", "resolve client=bareos-fd localhost"], "timeout_ms": 20000}
