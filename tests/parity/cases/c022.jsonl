@@ -1,0 +1,31 @@
+# C-022 BVFS: real catalog queries. Every case that reads the cache first runs
+# ".bvfs_update jobid=1" (idempotent cache population) so the result does not
+# depend on which Director ran first. .bvfs_cleanup, .bvfs_clear_cache yes and
+# .bvfs_restore modify the catalog and are only covered by unit tests.
+{"id": "c022-update-jobid", "steps": [".bvfs_update jobid=1", ".bvfs_update jobid=1,5"]}
+{"id": "c022-update-unknown-job", "steps": [".bvfs_update jobid=99999", ".bvfs_update jobid=1,99999"], "setup": [".bvfs_update jobid=1"]}
+{"id": "c022-update-api2", "steps": [".bvfs_update jobid=1", ".bvfs_update jobid=99999"], "setup": [".api 2"]}
+{"id": "c022-clear-cache-noyes", "steps": [".bvfs_clear_cache"]}
+{"id": "c022-get-jobids", "steps": [".bvfs_get_jobids jobid=1", ".bvfs_get_jobids jobid=628", ".bvfs_get_jobids jobid=629", ".bvfs_get_jobids jobid=5"]}
+{"id": "c022-get-jobids-all", "steps": [".bvfs_get_jobids jobid=1 all", ".bvfs_get_jobids jobid=629 all"]}
+{"id": "c022-get-jobids-ujobid", "steps": [".bvfs_get_jobids ujobid=backup-bareos-fd.2026-07-10_21.00.00_04"]}
+{"id": "c022-get-jobids-errors", "steps": [".bvfs_get_jobids", ".bvfs_get_jobids jobid=99999", ".bvfs_get_jobids ujobid=nosuchjob"]}
+{"id": "c022-get-jobids-api2", "steps": [".bvfs_get_jobids jobid=1", ".bvfs_get_jobids jobid=99999"], "setup": [".api 2"]}
+{"id": "c022-lsdirs-root", "steps": [".bvfs_lsdirs jobid=1 path=", ".bvfs_lsdirs jobid=1 path=/", ".bvfs_lsdirs jobid=1 path=/usr/"], "setup": [".bvfs_update jobid=1"]}
+{"id": "c022-lsdirs-deep", "steps": [".bvfs_lsdirs jobid=1 path=/usr/sbin/", ".bvfs_lsdirs jobid=1,5 path=/usr/sbin/"], "setup": [".bvfs_update jobid=1"]}
+{"id": "c022-lsdirs-pathid", "steps": [".bvfs_lsdirs jobid=1 pathid=1"], "setup": [".bvfs_update jobid=1"]}
+{"id": "c022-lsdirs-limit", "steps": [".bvfs_lsdirs jobid=1 path=/ limit=1", ".bvfs_lsdirs jobid=1 path=/ limit=1 offset=1", ".bvfs_lsdirs jobid=1 path=/ offset=5"], "setup": [".bvfs_update jobid=1"]}
+{"id": "c022-lsdirs-missing", "steps": [".bvfs_lsdirs jobid=1 path=/no/such/dir/", ".bvfs_lsdirs jobid=99999 path=/", ".bvfs_lsdirs jobid=1", ".bvfs_lsdirs jobid=x path=/"], "setup": [".bvfs_update jobid=1"]}
+{"id": "c022-lsdirs-api1", "steps": [".bvfs_lsdirs jobid=1 path=/usr/"], "setup": [".bvfs_update jobid=1", ".api 1"]}
+{"id": "c022-lsdirs-api2", "steps": [".bvfs_lsdirs jobid=1 path=/usr/", ".bvfs_lsdirs jobid=1 path=/no/such/dir/", ".bvfs_lsdirs jobid=1"], "setup": [".bvfs_update jobid=1", ".api 2"]}
+{"id": "c022-lsfiles", "steps": [".bvfs_lsfiles jobid=1 path=/usr/sbin/ limit=5", ".bvfs_lsfiles jobid=1 pathid=1 limit=3 offset=5", ".bvfs_lsfiles jobid=1,5 path=/usr/sbin/ limit=4"], "setup": [".bvfs_update jobid=1"]}
+{"id": "c022-lsfiles-all", "steps": [".bvfs_lsfiles jobid=1 path=/usr/sbin/"], "setup": [".bvfs_update jobid=1"]}
+{"id": "c022-lsfiles-other", "steps": [".bvfs_lsfiles jobid=1 path=/", ".bvfs_lsfiles jobid=1 path=/no/such/dir/", ".bvfs_lsfiles jobid=1 path=/usr/sbin/ pattern=ssh"], "setup": [".bvfs_update jobid=1"]}
+{"id": "c022-lsfiles-errors", "steps": [".bvfs_lsfiles path=/", ".bvfs_lsfiles jobid=99999 path=/usr/sbin/"]}
+{"id": "c022-lsfiles-api1", "steps": [".bvfs_lsfiles jobid=1 path=/usr/sbin/ limit=3"], "setup": [".bvfs_update jobid=1", ".api 1"]}
+{"id": "c022-lsfiles-api2", "steps": [".bvfs_lsfiles jobid=1 path=/usr/sbin/ limit=3", ".bvfs_lsfiles jobid=99999 path=/"], "setup": [".bvfs_update jobid=1", ".api 2"]}
+{"id": "c022-versions", "steps": [".bvfs_versions jobid=0 client=bareos-fd pathid=1 fname=agetty", ".bvfs_versions jobid=0 client=bareos-fd path=/usr/sbin/ filename=agetty copies versions", ".bvfs_versions jobid=0 client=bareos-fd pathid=1 name=agetty limit=1 offset=1"]}
+{"id": "c022-versions-errors", "steps": [".bvfs_versions jobid=0 pathid=1 fname=agetty", ".bvfs_versions jobid=0 client=nosuch pathid=1 fname=agetty", ".bvfs_versions client=bareos-fd pathid=1 fname=agetty"]}
+{"id": "c022-versions-api2", "steps": [".bvfs_versions jobid=0 client=bareos-fd pathid=1 fname=agetty", ".bvfs_versions jobid=0 pathid=1 fname=agetty"], "setup": [".api 2"]}
+{"id": "c022-acl-limited", "steps": [".bvfs_get_jobids jobid=1", ".bvfs_lsdirs jobid=1 path=/", ".bvfs_lsfiles jobid=1,2 path=/usr/sbin/ limit=2", ".bvfs_get_jobids jobid=2"], "console": "parity-bvfs", "password": "parity-bvfs-pw"}
+{"id": "c022-negative-limit", "steps": [".bvfs_lsfiles jobid=1 path=/usr/sbin/ limit=-1 offset=178", ".bvfs_lsdirs jobid=1 path=/ limit=-1", ".bvfs_versions jobid=0 client=bareos-fd pathid=1 fname=agetty offset=-1"], "setup": [".bvfs_update jobid=1"]}
