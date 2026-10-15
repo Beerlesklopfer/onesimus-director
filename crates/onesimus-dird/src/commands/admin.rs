@@ -37,40 +37,27 @@ pub fn cmd_label(ast: &CommandAst, ctx: &ExecContext) -> CommandResult {
 
 fn cmd_label_db(ast: &CommandAst, ctx: &ExecContext) -> CommandResult {
     let vol = get_arg(ast, "volume");
-    let stor = get_arg(ast, "storage");
     let pool = get_arg(ast, "pool");
     let barcode = has_flag(ast, "barcodes");
 
-    let stor_name = match stor {
-        Some(s) => s,
-        None => {
-            // List available storages
-            if let Some(config) = &ctx.config {
-                if let Ok(cfg) = config.read() {
-                    let names: Vec<_> = cfg.storages.iter().map(|s| s.name.as_str()).collect();
-                    return CommandResult::ok(format!(
-                        "label: specify storage=<name>\nAvailable: {}\n",
-                        names.join(", ")
-                    ));
-                }
-            }
-            return CommandResult::ok("label: specify storage=<name>\n".to_string());
-        }
+    // ua_label.cc:447 get_storage_resource: no default storage (C-012).
+    let (store, mut shown) = match super::prompt::select_storage(ast, ctx, false) {
+        Ok(selected) => selected,
+        Err(result) => return result,
     };
-
-    // Verify storage exists
-    if let Some(config) = &ctx.config {
-        if let Ok(cfg) = config.read() {
-            if cfg.find_storage(stor_name).is_none() {
-                return CommandResult::error(format!("Storage '{stor_name}' not found\n"));
-            }
-        }
-    }
+    let stor_name = store.name.as_str();
 
     match vol {
         Some(v) => {
-            let pool_name = pool.unwrap_or("Full");
-            let mut output = format!("Connecting to Storage daemon {stor_name} ...\n");
+            // SelectPoolDbr: no default pool; a missing pool= is selected.
+            let pool_name = match pool {
+                Some(pool) => pool.to_string(),
+                None => match super::prompt::select_pool_dbr(ctx) {
+                    Ok((name, text)) => { shown.push_str(&text); name }
+                    Err(result) => return crate::ua_db::with_prefix(shown, result),
+                },
+            };
+            let mut output = format!("{shown}Connecting to Storage daemon {stor_name} ...\n");
 
             // Send label command to SD
             let cmd = format!("label Volume=\"{v}\" PoolName=\"{pool_name}\" MediaType=\"File\" Slot=0 drive=0");
@@ -102,7 +89,8 @@ fn cmd_label_db(ast: &CommandAst, ctx: &ExecContext) -> CommandResult {
             CommandResult::ok(format!("Sending barcode label command to Storage {stor_name}...\n"))
         }
         None => {
-            CommandResult::ok("label: specify volume=<name> or barcodes\n".to_string())
+            // ua_label.cc: GetCmd "Enter new Volume name: ".
+            super::prompt::selection_required(format!("{shown}Enter new Volume name: "))
         }
     }
 }
@@ -780,7 +768,7 @@ pub(crate) mod side_effect_tests {
 
     pub(crate) fn context() -> ExecContext {
         let config = crate::director_config::DirectorConfig::from_str(
-            "Director { Name = dir }\nStorage { Name = File; Address = localhost; Port = 9103 }\n\
+            "Director { Name = dir }\nStorage { Name = File; Address = 192.0.2.1; Port = 9103 }\n\
              Pool { Name = Full; Pool Type = Backup }\nPool { Name = Incremental; Pool Type = Backup }"
         ).unwrap();
         ExecContext { session_id: 0, config: Some(Arc::new(RwLock::new(config))),
@@ -812,6 +800,16 @@ pub(crate) mod side_effect_tests {
         let result = truncate_with(&crate::session::parse_cli_command("truncate volstatus=Purged storage=Nope"),
             &ctx, |_, _| panic!("must not contact the SD"));
         assert!(result.success && result.error_message.is_empty());
+    }
+
+    #[test]
+    fn label_selects_instead_of_defaulting() {
+        let ctx = context();
+        let run = |line: &str| cmd_label_db(&crate::session::parse_cli_command(line), &ctx);
+        assert_eq!(run("label").text_output, "Automatically selected Storage: File\nEnter new Volume name: ");
+        // No default pool "Full": two pools mean the pool dialog, no SD contact.
+        assert_eq!(run("label volume=v1").text_output,
+            "Automatically selected Storage: File\nDefined Pools:\n1: Full\n2: Incremental\nSelect the Pool (1-2): ");
     }
 
     #[test]
