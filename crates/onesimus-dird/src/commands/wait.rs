@@ -7,7 +7,8 @@ enum Selection { All, Id(u32), Name(String), Unique(String), Mount }
 struct Options { selection: Selection, timeout: Option<Duration> }
 
 trait Backend {
-    fn require_catalog(&mut self) -> Result<(), String>;
+    /// C++ wait_cmd OpenClientDb(); Ok carries the catalog messages.
+    fn require_catalog(&mut self, ast: &CommandAst) -> Result<String, String>;
     fn active_jobs(&mut self) -> Result<Vec<ActiveJob>, String>;
     fn status(&mut self, id: u32) -> Result<Option<char>, String>;
     fn completion_error(&mut self, _id: Option<u32>) -> Result<Option<String>, String> { Ok(None) }
@@ -17,9 +18,11 @@ trait Backend {
 
 struct Director<'a> { ctx: &'a ExecContext, started: Instant }
 impl Backend for Director<'_> {
-    fn require_catalog(&mut self) -> Result<(), String> {
+    fn require_catalog(&mut self, ast: &CommandAst) -> Result<String, String> {
+        let prefix = crate::ua_db::open_client_db(ast, self.ctx, false)
+            .map_err(|result| format!("{}{}ERR: Can't open db\n", result.text_output, result.error_message))?;
         self.ctx.catalog.as_ref().ok_or("ERR: Can't open db\n")?
-            .query_rows("SELECT 1").map(|_| ()).map_err(|error| format!("ERR: Can't open db: {error}\n"))
+            .query_rows("SELECT 1").map(|_| prefix).map_err(|error| format!("ERR: Can't open db: {error}\n"))
     }
     fn active_jobs(&mut self) -> Result<Vec<ActiveJob>, String> {
         self.ctx.job_manager.as_ref().ok_or("ERR: Job manager is unavailable\n")?
@@ -77,9 +80,18 @@ fn parse(ast: &CommandAst) -> Result<Options, String> {
 }
 
 fn wait_with(ast: &CommandAst, backend: &mut impl Backend) -> CommandResult {
+    let mut prefix = String::new();
+    let result = wait_selected(ast, backend, &mut prefix);
+    crate::ua_db::with_prefix(prefix, result)
+}
+
+fn wait_selected(ast: &CommandAst, backend: &mut impl Backend, prefix: &mut String) -> CommandResult {
     let options = match parse(ast) { Ok(options) => options, Err(error) => return CommandResult::error(error) };
     if !matches!(options.selection, Selection::All) {
-        if let Err(error) = backend.require_catalog() { return CommandResult::error(error); }
+        match backend.require_catalog(ast) {
+            Ok(messages) => *prefix = messages,
+            Err(error) => return CommandResult::error(error),
+        }
     }
     let selected_id = match options.selection {
         Selection::Id(id) => Some(id),
@@ -165,7 +177,7 @@ mod tests {
         completion_errors: VecDeque<Option<String>>,
     }
     impl Backend for Fake {
-        fn require_catalog(&mut self) -> Result<(), String> { self.catalog.clone() }
+        fn require_catalog(&mut self, _: &CommandAst) -> Result<String, String> { self.catalog.clone().map(|_| String::new()) }
         fn active_jobs(&mut self) -> Result<Vec<ActiveJob>, String> { Ok(self.snapshots.pop_front().unwrap_or_default()) }
         fn status(&mut self, id: u32) -> Result<Option<char>, String> { self.queried.push(id); self.status.clone() }
         fn completion_error(&mut self, _: Option<u32>) -> Result<Option<String>, String> { Ok(self.completion_errors.pop_front().flatten()) }

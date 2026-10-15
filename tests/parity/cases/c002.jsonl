@@ -1,0 +1,15 @@
+# C-002 catalog selection messages: per-session catalog state (read-only).
+{"id": "c002-list-twice", "steps": ["list pools", "list pools"]}
+{"id": "c002-private-then-shared", "steps": ["list pools", ".mediatypes"]}
+{"id": "c002-shared-then-private", "steps": [".media", "list pools", ".locations"]}
+{"id": "c002-client-keyword", "steps": ["list jobs client=bareos-fd limit=1", "list pools"]}
+{"id": "c002-job-keyword", "steps": ["list jobs job=backup-bareos-fd limit=1"]}
+{"id": "c002-catalog-keyword", "steps": ["list pools catalog=MyCatalog"]}
+{"id": "c002-use-then-list", "steps": ["use catalog=MyCatalog", "list pools"]}
+{"id": "c002-use-noargs", "steps": ["use"]}
+{"id": "c002-api1", "steps": ["list pools"], "setup": [".api 1"]}
+{"id": "c002-api2", "steps": ["list pools"], "setup": [".api 2"]}
+{"id": "c002-gui", "steps": ["list pools"], "setup": ["gui on"]}
+{"id": "c002-limited-twice", "steps": ["list pools", "list clients"], "console": "parity-limited", "password": "parity-limited-pw"}
+{"id": "c002-bvfs-noargs", "steps": [".bvfs_lsdirs", ".bvfs_cleanup", "list pools"]}
+{"id": "c002-sql-then-list", "steps": [".sql query=\"select count(*) from pool\"", "list pools"]}

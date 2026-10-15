@@ -23,6 +23,22 @@ pub struct SessionInfo {
     pub authenticated: bool,
     expires_at: Option<std::time::Instant>,
     pub bus_rx: Receiver<BusMessage>,
+    /// Catalog state of the console session (C++ UaContext catalog/db).
+    pub catalog: SessionCatalog,
+}
+
+/// Per-session catalog selection, like the C++ UaContext fields `catalog`,
+/// `shared_db`, `private_db` and `gui` (ua_db.cc OpenDb/CloseDb).
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct SessionCatalog {
+    /// Selected Catalog resource (`ua->catalog`); kept across CloseDb.
+    pub name: Option<String>,
+    /// Shared connection opened (`ua->shared_db`).
+    pub shared_open: bool,
+    /// Private connection opened (`ua->private_db`).
+    pub private_open: bool,
+    /// `gui on` (`ua->gui`): first catalog is picked silently.
+    pub gui: bool,
 }
 
 /// File Daemon connection info.
@@ -71,8 +87,19 @@ impl SessionManager {
             authenticated: false,
             expires_at: None,
             bus_rx,
+            catalog: SessionCatalog::default(),
         });
         id
+    }
+
+    /// Access the catalog state of a console session.
+    pub fn with_session_catalog<R>(&self, id: u64, f: impl FnOnce(&mut SessionCatalog) -> R) -> Option<R> {
+        self.sessions.get_mut(&id).map(|mut session| f(&mut session.catalog))
+    }
+
+    /// Mirror the session `gui on/off` flag (C++ `ua->gui`).
+    pub fn set_session_gui(&self, id: u64, gui: bool) {
+        self.with_session_catalog(id, |catalog| catalog.gui = gui);
     }
 
     pub fn authenticate_session(&self, id: u64) {

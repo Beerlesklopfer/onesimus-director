@@ -186,6 +186,7 @@ pub fn handle_console_session<S: Read + Write>(
             "gui" => {
                 let flag = ast.arguments.first().map(|a| a.key.as_str()).unwrap_or("on");
                 gui_mode = flag != "off";
+                session_mgr.set_session_gui(mgr_session_id, gui_mode);
             }
             ".grpc" => {
                 let on = ast.arguments.iter().any(|a| a.key == "on");

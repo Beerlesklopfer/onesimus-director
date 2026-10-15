@@ -124,7 +124,12 @@ pub fn cmd_dot_defaults(ast: &CommandAst, ctx: &ExecContext) -> CommandResult {
 ///
 /// Returns tab-separated status code table.
 /// If a specific status char is given, returns only that entry.
-pub fn cmd_dot_jobstatus(ast: &CommandAst, _ctx: &ExecContext) -> CommandResult {
+pub fn cmd_dot_jobstatus(ast: &CommandAst, ctx: &ExecContext) -> CommandResult {
+    // C++ DotJobstatusCmd: OpenClientDb(ua) before the query.
+    let prefix = match crate::ua_db::open_client_db(ast, ctx, false) {
+        Ok(prefix) => prefix,
+        Err(result) => return result,
+    };
     let filter = ast.arguments.first()
         .and_then(|a| a.value.as_deref().or(Some(a.key.as_str())))
         .and_then(|s| s.chars().next());
@@ -165,7 +170,7 @@ pub fn cmd_dot_jobstatus(ast: &CommandAst, _ctx: &ExecContext) -> CommandResult 
         .map(|(code, desc)| format!("{code}\t{desc}\n"))
         .collect();
 
-    CommandResult::ok(output)
+    crate::ua_db::with_prefix(prefix, CommandResult::ok(output))
 }
 
 /// `.authorized job=<name> | client=<name> | ...`
@@ -255,13 +260,23 @@ fn job_type_code(name: &str) -> Option<u32> {
 }
 
 /// `.locations`
-pub fn cmd_dot_locations(_ast: &CommandAst, _ctx: &ExecContext) -> CommandResult {
+pub fn cmd_dot_locations(ast: &CommandAst, ctx: &ExecContext) -> CommandResult {
+    // C++ ua_dotcmds.cc DotLocationsCmd: OpenClientDb() before anything else.
+    crate::ua_db::with_client_db(ast, ctx, false, || cmd_dot_locations_db(ast, ctx))
+}
+
+fn cmd_dot_locations_db(_ast: &CommandAst, _ctx: &ExecContext) -> CommandResult {
     // Location resources are rarely used — return empty for now
     CommandResult::ok(String::new())
 }
 
 /// `.media` — list all media (volumes) from catalog
-pub fn cmd_dot_media(_ast: &CommandAst, ctx: &ExecContext) -> CommandResult {
+pub fn cmd_dot_media(ast: &CommandAst, ctx: &ExecContext) -> CommandResult {
+    // C++ ua_dotcmds.cc DotMediaCmd: OpenClientDb() before anything else.
+    crate::ua_db::with_client_db(ast, ctx, false, || cmd_dot_media_db(ast, ctx))
+}
+
+fn cmd_dot_media_db(_ast: &CommandAst, ctx: &ExecContext) -> CommandResult {
     if let Some(cat) = &ctx.catalog {
         match cat.raw_query("SELECT volumename FROM media ORDER BY volumename") {
             Ok(result) => {
@@ -279,7 +294,12 @@ pub fn cmd_dot_media(_ast: &CommandAst, ctx: &ExecContext) -> CommandResult {
 }
 
 /// `.mediatypes` — list unique media types from storage resources
-pub fn cmd_dot_mediatypes(_ast: &CommandAst, ctx: &ExecContext) -> CommandResult {
+pub fn cmd_dot_mediatypes(ast: &CommandAst, ctx: &ExecContext) -> CommandResult {
+    // C++ ua_dotcmds.cc DotMediatypesCmd: OpenClientDb() before anything else.
+    crate::ua_db::with_client_db(ast, ctx, false, || cmd_dot_mediatypes_db(ast, ctx))
+}
+
+fn cmd_dot_mediatypes_db(_ast: &CommandAst, ctx: &ExecContext) -> CommandResult {
     if let Some(config) = &ctx.config {
         if let Ok(cfg) = config.read() {
             let mut types: Vec<_> = cfg.storages.iter().map(|s| s.media_type.as_str()).collect();
@@ -395,7 +415,12 @@ pub fn cmd_dot_grpc(ast: &CommandAst, ctx: &ExecContext) -> CommandResult {
 // --- BVFS commands (Virtual File System for restore browsing) ---
 
 /// `.bvfs_update [jobid=<id>]`
-pub fn cmd_bvfs_update(ast: &CommandAst, _ctx: &ExecContext) -> CommandResult {
+pub fn cmd_bvfs_update(ast: &CommandAst, ctx: &ExecContext) -> CommandResult {
+    // C++ ua_dotcmds.cc DotBvfsUpdateCmd: OpenClientDb() before anything else.
+    crate::ua_db::with_client_db(ast, ctx, true, || cmd_bvfs_update_db(ast, ctx))
+}
+
+fn cmd_bvfs_update_db(ast: &CommandAst, _ctx: &ExecContext) -> CommandResult {
     let jobid = get_arg(ast, "jobid");
     match jobid {
         Some(id) => CommandResult::ok(format!("Updating BVFS cache for JobId {id}...\nDone.\n")),
@@ -404,13 +429,48 @@ pub fn cmd_bvfs_update(ast: &CommandAst, _ctx: &ExecContext) -> CommandResult {
 }
 
 /// `.bvfs_cleanup path=<handle>`
-pub fn cmd_bvfs_cleanup(ast: &CommandAst, _ctx: &ExecContext) -> CommandResult {
+pub fn cmd_bvfs_cleanup(ast: &CommandAst, ctx: &ExecContext) -> CommandResult {
+    // C++ DotBvfsCleanupCmd: path check, then OpenClientDb(ua, true).
+    if !ast.arguments.iter().any(|a| a.key.eq_ignore_ascii_case("path") && a.value.is_some()) {
+        return CommandResult::error("Can't find path argument\n".to_string());
+    }
     let path = get_arg(ast, "path").unwrap_or("?");
-    CommandResult::ok(format!("BVFS cleanup for handle \"{path}\": done\n"))
+    crate::ua_db::with_client_db(ast, ctx, true, || {
+        CommandResult::ok(format!("BVFS cleanup for handle \"{path}\": done\n"))
+    })
+}
+
+/// C++ BvfsParseArg(): needs (pathid or path) and a jobid list, then opens
+/// the private catalog connection (OpenClientDb(ua, true)).
+fn bvfs_parse_arg(ast: &CommandAst, ctx: &ExecContext, handler: impl FnOnce() -> CommandResult) -> CommandResult {
+    let mut pathid = false;
+    let mut path = false;
+    let mut jobid = false;
+    for a in &ast.arguments {
+        let value = a.value.as_deref();
+        if a.key.eq_ignore_ascii_case("pathid") {
+            pathid |= value.and_then(|v| v.parse::<i64>().ok()).is_some_and(|v| v != 0);
+        }
+        if a.key.eq_ignore_ascii_case("path") {
+            path = value.is_some();
+        }
+        if a.key.eq_ignore_ascii_case("jobid") {
+            jobid = value.is_some_and(|v| !v.is_empty() && v.split(',').all(|id| !id.is_empty() && id.bytes().all(|b| b.is_ascii_digit())));
+        }
+    }
+    if !((pathid || path) && jobid) {
+        return CommandResult::error("Can't find jobid, pathid or path argument\n".to_string());
+    }
+    crate::ua_db::with_client_db(ast, ctx, true, handler)
 }
 
 /// `.bvfs_clear_cache yes`
-pub fn cmd_bvfs_clear_cache(ast: &CommandAst, _ctx: &ExecContext) -> CommandResult {
+pub fn cmd_bvfs_clear_cache(ast: &CommandAst, ctx: &ExecContext) -> CommandResult {
+    // C++ ua_dotcmds.cc DotBvfsClearCacheCmd: OpenClientDb() before anything else.
+    crate::ua_db::with_client_db(ast, ctx, true, || cmd_bvfs_clear_cache_db(ast, ctx))
+}
+
+fn cmd_bvfs_clear_cache_db(ast: &CommandAst, _ctx: &ExecContext) -> CommandResult {
     let confirmed = ast.arguments.iter().any(|a| a.key == "yes");
     if confirmed {
         CommandResult::ok("BVFS cache cleared\n".to_string())
@@ -420,7 +480,12 @@ pub fn cmd_bvfs_clear_cache(ast: &CommandAst, _ctx: &ExecContext) -> CommandResu
 }
 
 /// `.bvfs_get_jobids jobid=<id> | ujobid=<unique-id> [all]`
-pub fn cmd_bvfs_get_jobids(ast: &CommandAst, _ctx: &ExecContext) -> CommandResult {
+pub fn cmd_bvfs_get_jobids(ast: &CommandAst, ctx: &ExecContext) -> CommandResult {
+    // C++ ua_dotcmds.cc DotBvfsGetJobidsCmd: OpenClientDb() before anything else.
+    crate::ua_db::with_client_db(ast, ctx, true, || cmd_bvfs_get_jobids_db(ast, ctx))
+}
+
+fn cmd_bvfs_get_jobids_db(ast: &CommandAst, _ctx: &ExecContext) -> CommandResult {
     let jobid = get_arg(ast, "jobid");
     let ujobid = get_arg(ast, "ujobid");
     let _all = ast.arguments.iter().any(|a| a.key == "all");
@@ -433,7 +498,11 @@ pub fn cmd_bvfs_get_jobids(ast: &CommandAst, _ctx: &ExecContext) -> CommandResul
 }
 
 /// `.bvfs_lsdirs jobid=<id> path=<path> | pathid=<id> [limit=<n>] [offset=<n>]`
-pub fn cmd_bvfs_lsdirs(ast: &CommandAst, _ctx: &ExecContext) -> CommandResult {
+pub fn cmd_bvfs_lsdirs(ast: &CommandAst, ctx: &ExecContext) -> CommandResult {
+    bvfs_parse_arg(ast, ctx, || cmd_bvfs_lsdirs_db(ast))
+}
+
+fn cmd_bvfs_lsdirs_db(ast: &CommandAst) -> CommandResult {
     let jobid = get_arg(ast, "jobid").unwrap_or("0");
     let path = get_arg(ast, "path").or_else(|| get_arg(ast, "pathid")).unwrap_or("/");
     let _limit = get_arg(ast, "limit");
@@ -443,7 +512,11 @@ pub fn cmd_bvfs_lsdirs(ast: &CommandAst, _ctx: &ExecContext) -> CommandResult {
 }
 
 /// `.bvfs_lsfiles jobid=<id> path=<path> | pathid=<id> [limit=<n>] [offset=<n>]`
-pub fn cmd_bvfs_lsfiles(ast: &CommandAst, _ctx: &ExecContext) -> CommandResult {
+pub fn cmd_bvfs_lsfiles(ast: &CommandAst, ctx: &ExecContext) -> CommandResult {
+    bvfs_parse_arg(ast, ctx, || cmd_bvfs_lsfiles_db(ast))
+}
+
+fn cmd_bvfs_lsfiles_db(ast: &CommandAst) -> CommandResult {
     let jobid = get_arg(ast, "jobid").unwrap_or("0");
     let path = get_arg(ast, "path").or_else(|| get_arg(ast, "pathid")).unwrap_or("/");
     let _limit = get_arg(ast, "limit");
@@ -452,7 +525,11 @@ pub fn cmd_bvfs_lsfiles(ast: &CommandAst, _ctx: &ExecContext) -> CommandResult {
 }
 
 /// `.bvfs_versions client=<name> pathid=<id> filename=<name> [copies] [versions]`
-pub fn cmd_bvfs_versions(ast: &CommandAst, _ctx: &ExecContext) -> CommandResult {
+pub fn cmd_bvfs_versions(ast: &CommandAst, ctx: &ExecContext) -> CommandResult {
+    bvfs_parse_arg(ast, ctx, || cmd_bvfs_versions_db(ast))
+}
+
+fn cmd_bvfs_versions_db(ast: &CommandAst) -> CommandResult {
     let client = get_arg(ast, "client").unwrap_or("?");
     let pathid = get_arg(ast, "pathid").unwrap_or("0");
     let filename = get_arg(ast, "filename").or_else(|| get_arg(ast, "fname")).unwrap_or("?");
@@ -460,7 +537,11 @@ pub fn cmd_bvfs_versions(ast: &CommandAst, _ctx: &ExecContext) -> CommandResult 
 }
 
 /// `.bvfs_restore path=<handle> jobid=<id> [fileid=<id>] [dirid=<id>] [hardlink=<id>]`
-pub fn cmd_bvfs_restore(ast: &CommandAst, _ctx: &ExecContext) -> CommandResult {
+pub fn cmd_bvfs_restore(ast: &CommandAst, ctx: &ExecContext) -> CommandResult {
+    bvfs_parse_arg(ast, ctx, || cmd_bvfs_restore_db(ast))
+}
+
+fn cmd_bvfs_restore_db(ast: &CommandAst) -> CommandResult {
     let path = get_arg(ast, "path").unwrap_or("?");
     let jobid = get_arg(ast, "jobid").unwrap_or("0");
     let fileid = get_arg(ast, "fileid");

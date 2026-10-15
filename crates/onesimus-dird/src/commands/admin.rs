@@ -31,6 +31,11 @@ fn sd_command(ctx: &ExecContext, storage_name: &str, command: &str) -> Result<St
 static NEXT_RESTORE_ID: AtomicU32 = AtomicU32::new(10000);
 
 pub fn cmd_label(ast: &CommandAst, ctx: &ExecContext) -> CommandResult {
+    // C++ ua_label.cc do_label: OpenClientDb() before anything else.
+    crate::ua_db::with_client_db(ast, ctx, false, || cmd_label_db(ast, ctx))
+}
+
+fn cmd_label_db(ast: &CommandAst, ctx: &ExecContext) -> CommandResult {
     let vol = get_arg(ast, "volume");
     let stor = get_arg(ast, "storage");
     let pool = get_arg(ast, "pool");
@@ -99,6 +104,11 @@ pub fn cmd_label(ast: &CommandAst, ctx: &ExecContext) -> CommandResult {
 }
 
 pub fn cmd_mount(ast: &CommandAst, ctx: &ExecContext) -> CommandResult {
+    // C++ ua_cmds.cc DoMountCmd: OpenClientDb() before anything else.
+    crate::ua_db::with_client_db(ast, ctx, false, || cmd_mount_db(ast, ctx))
+}
+
+fn cmd_mount_db(ast: &CommandAst, ctx: &ExecContext) -> CommandResult {
     let stor = get_arg_or_first(ast, "storage");
     if let Err(e) = verify_storage(stor, ctx) { return e; }
     let slot = get_arg(ast, "slot").unwrap_or("0");
@@ -111,6 +121,11 @@ pub fn cmd_mount(ast: &CommandAst, ctx: &ExecContext) -> CommandResult {
 }
 
 pub fn cmd_unmount(ast: &CommandAst, ctx: &ExecContext) -> CommandResult {
+    // C++ ua_cmds.cc DoMountCmd: OpenClientDb() before anything else.
+    crate::ua_db::with_client_db(ast, ctx, false, || cmd_unmount_db(ast, ctx))
+}
+
+fn cmd_unmount_db(ast: &CommandAst, ctx: &ExecContext) -> CommandResult {
     let stor = get_arg_or_first(ast, "storage");
     if let Err(e) = verify_storage(stor, ctx) { return e; }
     let drive = get_arg(ast, "drive").unwrap_or("0");
@@ -122,6 +137,11 @@ pub fn cmd_unmount(ast: &CommandAst, ctx: &ExecContext) -> CommandResult {
 }
 
 pub fn cmd_release(ast: &CommandAst, ctx: &ExecContext) -> CommandResult {
+    // C++ ua_cmds.cc DoMountCmd: OpenClientDb() before anything else.
+    crate::ua_db::with_client_db(ast, ctx, false, || cmd_release_db(ast, ctx))
+}
+
+fn cmd_release_db(ast: &CommandAst, ctx: &ExecContext) -> CommandResult {
     let stor = get_arg_or_first(ast, "storage");
     if let Err(e) = verify_storage(stor, ctx) { return e; }
 
@@ -132,6 +152,11 @@ pub fn cmd_release(ast: &CommandAst, ctx: &ExecContext) -> CommandResult {
 }
 
 pub fn cmd_update(ast: &CommandAst, ctx: &ExecContext) -> CommandResult {
+    // C++ ua_update.cc UpdateCmd: OpenClientDb() before anything else.
+    crate::ua_db::with_client_db(ast, ctx, false, || cmd_update_db(ast, ctx))
+}
+
+fn cmd_update_db(ast: &CommandAst, ctx: &ExecContext) -> CommandResult {
     let what = ast.arguments.first().map(|a| a.key.as_str()).unwrap_or("");
     let cat = match &ctx.catalog {
         Some(c) => c,
@@ -215,6 +240,11 @@ pub fn cmd_update(ast: &CommandAst, ctx: &ExecContext) -> CommandResult {
 }
 
 pub fn cmd_restore(ast: &CommandAst, ctx: &ExecContext) -> CommandResult {
+    // C++ ua_restore.cc RestoreCmd: OpenClientDb() before anything else.
+    crate::ua_db::with_client_db(ast, ctx, true, || cmd_restore_db(ast, ctx))
+}
+
+fn cmd_restore_db(ast: &CommandAst, ctx: &ExecContext) -> CommandResult {
     let where_path = get_arg(ast, "where").unwrap_or("/tmp/bareos-restore");
     let client_arg = get_arg(ast, "client");
     let jobid_arg = get_arg(ast, "jobid");
@@ -405,8 +435,12 @@ pub fn cmd_estimate(ast: &CommandAst, ctx: &ExecContext) -> CommandResult {
     };
 
     let client_name = client.unwrap_or(&client_name);
+    let prefix = match crate::ua_db::reopen_client_db(ast, ctx, client_name) {
+        Ok(prefix) => prefix,
+        Err(result) => return result,
+    };
 
-    let mut output = format!(
+    let mut output = prefix + &format!(
         "Connecting to Client \"{client_name}\" for estimate...\n\
          Job: {job_name}\n\
          FileSet: {fileset_name}\n"
@@ -423,6 +457,11 @@ pub fn cmd_estimate(ast: &CommandAst, ctx: &ExecContext) -> CommandResult {
 }
 
 pub fn cmd_prune(ast: &CommandAst, ctx: &ExecContext) -> CommandResult {
+    // C++ ua_prune.cc PruneCmd: OpenClientDb(ua, true) after the Job/Storage ACL restriction checks.
+    crate::ua_db::with_client_db(ast, ctx, true, || cmd_prune_db(ast, ctx))
+}
+
+fn cmd_prune_db(ast: &CommandAst, ctx: &ExecContext) -> CommandResult {
     let what = ast.arguments.first().map(|a| a.key.as_str()).unwrap_or("");
     let client = get_arg(ast, "client");
     let pool = get_arg(ast, "pool");
@@ -455,6 +494,11 @@ pub fn cmd_prune(ast: &CommandAst, ctx: &ExecContext) -> CommandResult {
 }
 
 pub fn cmd_purge(ast: &CommandAst, ctx: &ExecContext) -> CommandResult {
+    // C++ ua_purge.cc PurgeCmd: OpenClientDb(ua, true) after the "DANGEROUS" warning and ACL restriction checks.
+    crate::ua_db::with_client_db(ast, ctx, true, || cmd_purge_db(ast, ctx))
+}
+
+fn cmd_purge_db(ast: &CommandAst, ctx: &ExecContext) -> CommandResult {
     let what = ast.arguments.first().map(|a| a.key.as_str()).unwrap_or("");
     let volume = get_arg(ast, "volume");
     let cat = match &ctx.catalog {

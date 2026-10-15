@@ -13,6 +13,11 @@ use crate::command_queue::CommandResult;
 use crate::sql_list::{json_rows, render, ListType};
 
 pub fn cmd_list(ast: &CommandAst, ctx: &ExecContext) -> CommandResult {
+    // C++ ua_output.cc DoListCmd: OpenClientDb() before anything else.
+    crate::ua_db::with_client_db(ast, ctx, true, || cmd_list_db(ast, ctx))
+}
+
+fn cmd_list_db(ast: &CommandAst, ctx: &ExecContext) -> CommandResult {
     let ty = if ast.command_name.eq_ignore_ascii_case("llist") { ListType::Vert } else { ListType::Horz };
     let Some(cat) = &ctx.catalog else {
         return CommandResult::error("Could not open catalog database.\n".to_string());

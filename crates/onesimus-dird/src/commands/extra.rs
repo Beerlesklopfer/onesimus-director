@@ -170,7 +170,12 @@ pub(crate) fn trace_path(ctx: &ExecContext) -> std::path::PathBuf {
     std::path::Path::new(&directory).join("bareos-dir.trace")
 }
 
-pub fn cmd_var(ast: &CommandAst, _ctx: &ExecContext) -> CommandResult {
+pub fn cmd_var(ast: &CommandAst, ctx: &ExecContext) -> CommandResult {
+    // C++ ua_cmds.cc var_cmd: OpenClientDb() before anything else.
+    crate::ua_db::with_client_db(ast, ctx, false, || cmd_var_db(ast, ctx))
+}
+
+fn cmd_var_db(ast: &CommandAst, _ctx: &ExecContext) -> CommandResult {
     let name = ast.arguments.first().map(|a| a.key.as_str()).unwrap_or("?");
     CommandResult::ok(format!("Variable {name}: undefined\n"))
 }
@@ -185,8 +190,8 @@ pub fn cmd_whoami(_ast: &CommandAst, ctx: &ExecContext) -> CommandResult {
     CommandResult::ok("*UserAgent*\n".to_string())
 }
 
-pub fn cmd_use(_ast: &CommandAst, _ctx: &ExecContext) -> CommandResult {
-    CommandResult::ok("Using default catalog\n".to_string())
+pub fn cmd_use(ast: &CommandAst, ctx: &ExecContext) -> CommandResult {
+    crate::ua_db::use_catalog(ast, ctx)
 }
 
 pub fn cmd_setip(_ast: &CommandAst, _ctx: &ExecContext) -> CommandResult {
@@ -247,6 +252,11 @@ fn setdevice_with(
 }
 
 pub fn cmd_rerun(ast: &CommandAst, ctx: &ExecContext) -> CommandResult {
+    // C++ ua_run.cc reRunCmd: OpenClientDb() before anything else.
+    crate::ua_db::with_client_db(ast, ctx, false, || cmd_rerun_db(ast, ctx))
+}
+
+fn cmd_rerun_db(ast: &CommandAst, ctx: &ExecContext) -> CommandResult {
     let jobid = ast.arguments.iter().find(|a| a.key == "jobid")
         .and_then(|a| a.value.as_deref());
     let Some(id) = jobid else {
@@ -281,6 +291,11 @@ pub fn cmd_rerun(ast: &CommandAst, ctx: &ExecContext) -> CommandResult {
 }
 
 pub fn cmd_relabel(ast: &CommandAst, ctx: &ExecContext) -> CommandResult {
+    // C++ ua_label.cc do_label: OpenClientDb() before anything else.
+    crate::ua_db::with_client_db(ast, ctx, false, || cmd_relabel_db(ast, ctx))
+}
+
+fn cmd_relabel_db(ast: &CommandAst, ctx: &ExecContext) -> CommandResult {
     let oldvol = ast.arguments.iter().find(|a| a.key == "oldvolume")
         .and_then(|a| a.value.as_deref()).unwrap_or("?");
     let newvol = ast.arguments.iter().find(|a| a.key == "volume")
@@ -304,6 +319,11 @@ pub fn cmd_relabel(ast: &CommandAst, ctx: &ExecContext) -> CommandResult {
 }
 
 pub fn cmd_delete(ast: &CommandAst, ctx: &ExecContext) -> CommandResult {
+    // C++ ua_cmds.cc DeleteCmd: OpenClientDb() before anything else.
+    crate::ua_db::with_client_db(ast, ctx, true, || cmd_delete_db(ast, ctx))
+}
+
+fn cmd_delete_db(ast: &CommandAst, ctx: &ExecContext) -> CommandResult {
     let cat = match &ctx.catalog {
         Some(c) => c,
         None => return CommandResult::ok("No catalog configured\n".to_string()),
@@ -336,6 +356,11 @@ pub fn cmd_delete(ast: &CommandAst, ctx: &ExecContext) -> CommandResult {
 }
 
 pub fn cmd_create(ast: &CommandAst, ctx: &ExecContext) -> CommandResult {
+    // C++ ua_cmds.cc CreateCmd: OpenClientDb() before anything else.
+    crate::ua_db::with_client_db(ast, ctx, false, || cmd_create_db(ast, ctx))
+}
+
+fn cmd_create_db(ast: &CommandAst, ctx: &ExecContext) -> CommandResult {
     let pool_name = ast.arguments.iter().find(|a| a.key == "pool")
         .and_then(|a| a.value.as_deref());
     let cat = match &ctx.catalog {
@@ -367,6 +392,11 @@ pub fn cmd_create(ast: &CommandAst, ctx: &ExecContext) -> CommandResult {
 }
 
 pub fn cmd_add(ast: &CommandAst, ctx: &ExecContext) -> CommandResult {
+    // C++ ua_cmds.cc add_cmd: OpenClientDb(ua) after the "label" hint.
+    crate::ua_db::with_client_db(ast, ctx, false, || cmd_add_db(ast, ctx))
+}
+
+fn cmd_add_db(ast: &CommandAst, ctx: &ExecContext) -> CommandResult {
     let pool = ast.arguments.iter().find(|a| a.key == "pool")
         .and_then(|a| a.value.as_deref()).unwrap_or("Full");
     let volume = ast.arguments.iter().find(|a| a.key == "volume")

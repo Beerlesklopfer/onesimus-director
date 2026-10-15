@@ -7,6 +7,11 @@ use crate::command_executor::ExecContext;
 use crate::command_queue::CommandResult;
 
 pub fn cmd_dot_sql(ast: &CommandAst, ctx: &ExecContext) -> CommandResult {
+    // C++ ua_dotcmds.cc DotSqlCmd: OpenClientDb() before anything else.
+    crate::ua_db::with_client_db(ast, ctx, true, || cmd_dot_sql_db(ast, ctx))
+}
+
+fn cmd_dot_sql_db(ast: &CommandAst, ctx: &ExecContext) -> CommandResult {
     let query = ast.arguments.iter()
         .find(|a| a.key == "query")
         .and_then(|a| a.value.as_deref());
@@ -30,6 +35,11 @@ pub fn cmd_dot_sql(ast: &CommandAst, ctx: &ExecContext) -> CommandResult {
 }
 
 pub fn cmd_sql_query(ast: &CommandAst, ctx: &ExecContext) -> CommandResult {
+    // C++ ua_query.cc SqlqueryCmd: OpenClientDb() before anything else.
+    crate::ua_db::with_client_db(ast, ctx, !ast.arguments.iter().any(|a| a.key.eq_ignore_ascii_case("sharedsession")), || cmd_sql_query_db(ast, ctx))
+}
+
+fn cmd_sql_query_db(ast: &CommandAst, ctx: &ExecContext) -> CommandResult {
     let query: String = ast.arguments.iter()
         .map(|a| {
             if let Some(v) = &a.value {

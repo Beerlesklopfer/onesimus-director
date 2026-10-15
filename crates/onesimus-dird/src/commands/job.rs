@@ -13,6 +13,11 @@ use bareos_config::resources::JobType;
 static NEXT_JOB_ID: AtomicU32 = AtomicU32::new(1);
 
 pub fn cmd_run(ast: &CommandAst, ctx: &ExecContext) -> CommandResult {
+    // C++ ua_run.cc DoRunCmd: OpenClientDb() before anything else.
+    crate::ua_db::with_client_db(ast, ctx, false, || cmd_run_db(ast, ctx))
+}
+
+fn cmd_run_db(ast: &CommandAst, ctx: &ExecContext) -> CommandResult {
     let job_name = ast.arguments.iter()
         .find(|a| a.key == "job")
         .and_then(|a| a.value.as_deref());
