@@ -234,7 +234,7 @@ def main():
         ],
         'scope': 'All top-level commands[] entries in ua_cmds.cc and restore file-selection commands[] entries in ua_tree.cc. Not FD/SD wire commands, bconsole @commands or every internal keyword/prompt.',
         'llm_instructions': [
-            'Use full command names; Bareos prefix matching differs from Onesimus exact-name/alias lookup.',
+            'Prefer full command names; Onesimus now resolves Bareos prefixes in the original table order, while local extensions remain exact matches.',
             'Descriptions and usage describe upstream Bareos, not guaranteed Onesimus behavior.',
             'registered_unverified means a handler exists, not that its semantics or options are complete.',
             'usage is upstream help text, not a formal grammar or exhaustive argument validation schema. NULL remains null; it does not mean no arguments are accepted.',
@@ -280,7 +280,7 @@ Die vollständige Tabelle ist maßgeblich, nicht der historisch unvollständige 
 `list` und `llist` teilen `list_cmd_usage`. `configure` erzeugt seine Syntax aus Ressourcendirektiven in `dird_conf.cc`; die JSON nennt den Generator und seine Ressourcentypen, statt einen Funktionsnamen als Syntax auszugeben.
 `NULL`-Hilfetexte bleiben in JSON `null` (insbesondere `.locations`). Ein leerer/fehlender Syntaxtext beweist nicht, dass ein Befehl keine Parameter akzeptiert.
 
-Bareos akzeptiert in Tabellenreihenfolge Groß-/Kleinschreibung ignorierende Präfixe. Onesimus sucht vollständige Namen und ausdrücklich registrierte Aliase.
+Bareos und Onesimus akzeptieren in der Original-Tabellenreihenfolge Groß-/Kleinschreibung ignorierende Präfixe; lokale Erweiterungen werden zusätzlich über ihre vollständigen Namen und Aliase aufgelöst.
 Die JSON bewahrt jeden Originalnamen, auch `exit`, `quit`, `.quit`, `llist` und `umount`.
 Konfigurationsdirektiven, FD/SD-Protokollbefehle und lokale bconsole-`@`-Befehle gehören nicht zu dieser Konsolentabelle.
 Die Syntaxtexte sind Originalhilfe, keine vollständige formale Grammatik aller internen Optionen und Dialoge.

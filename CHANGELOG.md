@@ -14,4 +14,7 @@ onesimus (25.1.2+onesimus.0.2.0-2) UNRELEASED; urgency=medium
   * setdevice: validate required arguments and booleans, send the real SD
     command and return the daemon response; reject invalid requests before I/O.
 
+  * command dispatch: resolve case-insensitive prefixes in original Bareos
+    table order, preserving aliases and session-changing abbreviated commands.
+
  -- Joerg Bernau <joerg@bernau.family>  Thu, 15 Oct 2026 14:00:00 +0200

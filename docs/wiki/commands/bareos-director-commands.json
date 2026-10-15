@@ -687,7 +687,7 @@
     },
     {
       "path": "crates/onesimus-dird/src/command_registry.rs",
-      "sha256": "b138f8032c4cc7f89b46db46bf81c65b67fcecae7972325314433ac74e05dc91"
+      "sha256": "6318d243ef3d15b605ff6c6134d14005f2ea77150732c3bb5f0f38c30250d454"
     },
     {
       "path": "crates/onesimus-dird/src/commands/acl.rs",
@@ -751,12 +751,12 @@
     },
     {
       "path": "crates/onesimus-dird/src/session.rs",
-      "sha256": "3a0b7ac916fb02ae9f516d49d2d4aca9367700593d27613fbc5080b8258c42c7"
+      "sha256": "a0f34fea6df6443ff90ef2ca7e33b014171a636d131a08ef63f174598689008f"
     }
   ],
   "scope": "All top-level commands[] entries in ua_cmds.cc and restore file-selection commands[] entries in ua_tree.cc. Not FD/SD wire commands, bconsole @commands or every internal keyword/prompt.",
   "llm_instructions": [
-    "Use full command names; Bareos prefix matching differs from Onesimus exact-name/alias lookup.",
+    "Prefer full command names; Onesimus now resolves Bareos prefixes in the original table order, while local extensions remain exact matches.",
     "Descriptions and usage describe upstream Bareos, not guaranteed Onesimus behavior.",
     "registered_unverified means a handler exists, not that its semantics or options are complete.",
     "usage is upstream help text, not a formal grammar or exhaustive argument validation schema. NULL remains null; it does not mean no arguments are accepted.",
@@ -779,21 +779,6 @@
     "onesimus_extra_names": 8
   },
   "cross_cutting_findings": [
-    {
-      "title": "Abweichende Befehlsauflösung",
-      "description": "Bareos sucht das erste passende Präfix in Tabellenreihenfolge; Onesimus erlaubt vollständige Namen und explizite Aliase. Abkürzungen dürfen daher nicht als portiert gelten.",
-      "evidence": [
-        {
-          "file": "core/src/dird/ua_cmds.cc",
-          "line": 540,
-          "url": "https://github.com/bareos/bareos/blob/fc2c79b6c43eb5752e98ebd86116593dbbbe0c68/core/src/dird/ua_cmds.cc#L540"
-        },
-        {
-          "file": "crates/onesimus-dird/src/command_registry.rs",
-          "line": 315
-        }
-      ]
-    },
     {
       "title": "ACL-Parität fehlt",
       "description": "Das Original prüft Command_ACL vor dem Dispatch. Im lokalen Dispatch ist keine entsprechende Prüfung vorhanden; .authorized prüft Existenz und akzeptiert cmd pauschal. Authentifizierung mit Passwort/Token ist kein Ersatz für diese Autorisierung.",

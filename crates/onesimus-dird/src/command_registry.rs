@@ -312,19 +312,37 @@ pub fn build_registry() -> Vec<CommandDef> {
 // ============================================================================
 
 /// Find a command by name or alias.
-pub fn find_command<'a>(registry: &'a [CommandDef], name: &str) -> Option<&'a CommandDef> {
-    let lower = name.to_lowercase();
-    registry.iter().find(|cmd| {
-        cmd.name == lower || cmd.aliases.iter().any(|a| *a == lower)
+/// Bareos resolves the first case-insensitive prefix in its original table.
+/// Local-only aliases/extensions remain exact matches after that lookup.
+pub fn resolve_command_name<'a>(registry: &'a [CommandDef], name: &str) -> Option<&'a str> {
+    if name.is_empty() { return None; }
+    let lower = name.to_ascii_lowercase();
+    if let Some(entry) = crate::ua_commands_table::UA_COMMANDS.iter()
+        .find(|entry| entry.0.starts_with(&lower)) {
+        return Some(entry.0);
+    }
+    registry.iter().find_map(|cmd| {
+        if cmd.name == lower { Some(cmd.name) }
+        else { cmd.aliases.iter().find(|alias| **alias == lower).copied() }
     })
 }
 
-/// Dispatch via registry (replaces the flat match block).
+pub fn find_command<'a>(registry: &'a [CommandDef], name: &str) -> Option<&'a CommandDef> {
+    let resolved = resolve_command_name(registry, name)?;
+    registry.iter().find(|cmd| cmd.name == resolved || cmd.aliases.contains(&resolved))
+}
+
+/// Preserve the resolved alias (e.g. llist) for handlers with alias-specific output.
 pub fn dispatch_registry(registry: &[CommandDef], ast: &CommandAst, ctx: &ExecContext) -> CommandResult {
-    match find_command(registry, &ast.command_name) {
-        Some(cmd) => (cmd.handler)(ast, ctx),
-        None => CommandResult::error(format!("Unknown command: {}\n", ast.command_name)),
-    }
+    let Some(name) = resolve_command_name(registry, &ast.command_name) else {
+        return CommandResult::error(format!("Unknown command: {}\n", ast.command_name));
+    };
+    let Some(command) = find_command(registry, name) else {
+        return CommandResult::error(format!("Unknown command: {}\n", ast.command_name));
+    };
+    let mut resolved = ast.clone();
+    resolved.command_name = name.to_string();
+    (command.handler)(&resolved, ctx)
 }
 
 /// Generate .help output from registry (one command per line, machine format).
@@ -361,5 +379,22 @@ pub fn argument_names<'a>(registry: &'a [CommandDef], cmd_name: &str) -> Vec<&'a
     match find_command(registry, cmd_name) {
         Some(cmd) => cmd.args.iter().map(|a| a.name).collect(),
         None => vec![],
+    }
+}
+
+#[cfg(test)]
+mod prefix_tests {
+    use super::*;
+
+    #[test]
+    fn matches_original_table_order_not_arbitrary_exact_precedence() {
+        let registry = build_registry();
+        for (input, expected) in [("l", "label"), ("LL", "llist"), (".j", ".jobdefs"),
+            (".stor", ".storages"), ("q", "quit"), ("ex", "exit"), (".a", ".actiononpurge"),
+            (".api", ".api"), ("VERSION", "version"), (".sqlcount", ".sqlcount")] {
+            assert_eq!(resolve_command_name(&registry, input), Some(expected), "{input}");
+        }
+        assert!(resolve_command_name(&registry, "").is_none());
+        assert!(resolve_command_name(&registry, "unknown").is_none());
     }
 }

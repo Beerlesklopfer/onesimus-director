@@ -143,7 +143,11 @@ pub fn handle_console_session<S: Read + Write>(
         debug!("session {session_id}: command '{cmd_str}'");
 
         // Parse command into AST
-        let ast = parse_cli_command(cmd_str);
+        let mut ast = parse_cli_command(cmd_str);
+        if let Some(name) = crate::command_registry::resolve_command_name(
+            command_executor::get_registry(), &ast.command_name) {
+            ast.command_name = name.to_string();
+        }
 
         // Check for quit
         if matches!(ast.command_name.as_str(), "quit" | "exit" | ".quit") {
