@@ -87,6 +87,8 @@ Director {
 }
 ```
 
+Set `NO_COLOR=1` to disable oconsole styling, including prompts, hints and diagnostics.
+
 ## Director command reference
 
 - [Wiki: original Bareos command set and completeness audit](docs/wiki/commands/bareos-reference.md)

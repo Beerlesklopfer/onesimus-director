@@ -3,6 +3,13 @@
 //! Connects via BNET (TCP + TLS + CRAM-MD5) or gRPC (TLS + pinned certificate).
 //! With --mcp it serves the Model Context Protocol on stdio instead of a prompt.
 
+mod color;
+
+// Keep all console stdout/stderr decoration under the same NO_COLOR policy.
+macro_rules! print { ($($arg:tt)*) => { std::print!("{}", crate::color::output(&format!($($arg)*))) }; }
+macro_rules! println { () => { std::println!() }; ($($arg:tt)*) => { std::println!("{}", crate::color::output(&format!($($arg)*))) }; }
+macro_rules! eprintln { () => { std::eprintln!() }; ($($arg:tt)*) => { std::eprintln!("{}", crate::color::output(&format!($($arg)*))) }; }
+
 mod grpc_client;
 mod mcp;
 mod mcp_token;
@@ -185,7 +192,7 @@ fn main() {
     let password = cli.password.unwrap_or(file_cfg.password);
 
     // stderr: stdout belongs to command output (and to the protocol in --mcp mode)
-    tracing_subscriber::fmt()
+    tracing_subscriber::fmt().with_ansi(color::enabled())
         .with_writer(std::io::stderr)
         .with_env_filter(
             EnvFilter::try_from_default_env()
@@ -722,6 +729,7 @@ impl Completer for BareosHelper {
 
 impl Highlighter for BareosHelper {
     fn highlight<'l>(&self, line: &'l str, _pos: usize) -> std::borrow::Cow<'l, str> {
+        if !color::enabled() { return std::borrow::Cow::Borrowed(line); }
         if line.is_empty() {
             return std::borrow::Cow::Borrowed(line);
         }
@@ -776,10 +784,12 @@ impl Highlighter for BareosHelper {
     }
 
     fn highlight_prompt<'b, 's: 'b, 'p: 'b>(&'s self, prompt: &'p str, _default: bool) -> std::borrow::Cow<'b, str> {
+        if !color::enabled() { return color::output(prompt).into_owned().into(); }
         std::borrow::Cow::Owned(format!("\x1b[1;36m{}\x1b[0m", prompt))  // Cyan bold prompt
     }
 
     fn highlight_hint<'h>(&self, hint: &'h str) -> std::borrow::Cow<'h, str> {
+        if !color::enabled() { return color::output(hint); }
         // Ghost-Text in grau (dim) — wie fish autosuggestion
         std::borrow::Cow::Owned(format!("\x1b[2m{hint}\x1b[0m"))
     }
@@ -820,7 +830,7 @@ impl Hinter for BareosHelper {
                 if let Some(rest) = usage_hint.strip_prefix(cmd) {
                     let rest = rest.trim_start();
                     if !rest.is_empty() {
-                        return Some(format!("\x1b[2m{rest}\x1b[0m"));
+                        return Some(color::output(&format!("\x1b[2m{rest}\x1b[0m")).into_owned());
                     }
                 }
             }
@@ -927,7 +937,7 @@ fn interactive_loop(
                             return;
                         }
                         Some(RecvResult::Signal(BnetSignal::YesNo)) => {
-                            match rl.readline("\x1b[33m(yes/no): \x1b[0m") {
+                            match rl.readline(&color::output("\x1b[33m(yes/no): \x1b[0m")) {
                                 Ok(answer) => { dir.send_cmd(answer.trim()); }
                                 Err(ReadlineError::Interrupted) => {
                                     eprintln!();
@@ -937,7 +947,7 @@ fn interactive_loop(
                             }
                         }
                         Some(RecvResult::Signal(BnetSignal::SubPrompt)) => {
-                            match rl.readline("\x1b[36m> \x1b[0m") {
+                            match rl.readline(&color::output("\x1b[36m> \x1b[0m")) {
                                 Ok(input) => {
                                     let s = input.trim();
                                     // dir already mut

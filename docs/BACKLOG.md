@@ -44,3 +44,20 @@ onesimus-dird liefert die Felder noch nicht.
 [Originalbefehle und Status](wiki/commands/bareos-reference.md) · [LLM-JSON](wiki/commands/bareos-director-commands.json).
 
 88/88 Originalnamen sind registriert; dies ist keine Funktionsparität. Belegt sind unter anderem BVFS- und Steuerungs-Stubs, fehlende interaktive Restore-Dateiauswahl, `query`/`move`-Semantikabweichungen, unvollständige ACL-Prüfung und zu großzügige MCP-Punktbefehlsfreigaben. Die Referenz enthält die Quellenbelege und unterscheidet diese Befunde von noch ungeprüften Handlern.
+
+## SHA-256-Ausgabeparität je Befehl (Abnahmekriterium)
+
+- Für jeden der 88 Original-Konsolenbefehle und jeden der 26 Restore-Shell-Befehle konkrete Testfälle, Parameter, Vorbedingungen und erwartete Seiteneffekte festlegen. Lokale Erweiterungen separat erfassen.
+- Zuerst `bconsole` und `oconsole` gegen denselben Director und denselben reproduzierbaren Zustand vergleichen; anschließend Bareos- und Onesimus-Director mit identischen Konfigurationen/Katalog-Snapshots vergleichen. Beide Ebenen separat ausweisen.
+- Farbgebung bei `oconsole` mit `NO_COLOR=1` deaktivieren (implementiert). Der Director darf selbst keine ANSI-Farben in Befehlsantworten erzeugen. Für beide Prozesse identische Locale, Zeitzone, API-Modus und Terminalparameter setzen.
+- Die eigentlichen Befehlsantworten als unveränderte Bytes speichern und SHA-256 berechnen. Für jeden Fall müssen `bconsole` und `oconsole` denselben SHA-256 liefern. CLI-Banner, Prompt/Echo und Diagnose-stderr separat erfassen; eine etwaige Extraktion des Antwortbereichs muss explizit und für beide Clients nachvollziehbar sein.
+- Nicht trimmen, Zeilen sortieren, JSON neu serialisieren oder Fehlermeldungen entfernen, um Parität vorzutäuschen. Zeilenenden, Leerzeichen, Feldreihenfolge und Encoding sind Teil der Prüfung.
+- Uhrzeit, Laufzeit, IDs, Hostnamen, Speicherwerte und asynchrone Meldungen durch feste Testumgebung/Fixtures kontrollieren. Wo identische Rohwerte nicht reproduzierbar sind, den Fall als offen/nicht deterministisch ausweisen; ein normalisierter Zusatzvergleich ersetzt keinen erfolgreichen Rohdaten-Hashabgleich.
+- Zustandsändernde Befehle nur in wegwerfbaren Testinstanzen ausführen; vor jedem Clientlauf denselben Ausgangszustand wiederherstellen. Restore-Shell-Dialoge einschließlich Abbruch und Fehlerfällen testen.
+- Ergebnis-JSON pro Testfall: Befehl, Parameter, Kontext, Versionen, Fixtures, Rückgabecodes, SHA-256 beider Antworten, Byteanzahl, Diff und Status. Fehler, Zeitüberschreitungen und nicht ausgeführte Fälle dürfen nicht als bestanden zählen. Rohdateien und Diffs für die Analyse behalten.
+- Abschluss erst nach vollständiger Matrix ohne ungeprüfte Originalbefehle. Der bisherige statische Registry-Abgleich ist kein Ersatz für diese Tests.
+
+## Arbeitsfolge und Git-Anker
+
+Anker: `director-parity-anchor-20261015` (`fb5242f`), vor den funktionalen Befehlsänderungen.
+Je Hauptbefehl ein eigener Commit einschließlich Tests, Wiki-/JSON-Status und Eintrag in `CHANGELOG.md` (Debian-Format). Gemeinsame Infrastruktur erhält eigene Commits. Offene Teilfunktionen bleiben ausdrücklich im Audit, bis Quellabgleich und SHA-256-Matrix die Parität nachweisen.
