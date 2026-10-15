@@ -17,6 +17,7 @@ macro_rules! eprintln { () => { std::eprintln!() }; ($($arg:tt)*) => { std::epri
 
 mod grpc_client;
 mod mcp;
+mod mcp_mirror;
 mod mcp_token;
 
 use std::io::{self, BufRead, Write};

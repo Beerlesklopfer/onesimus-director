@@ -113,6 +113,17 @@ oconsole --mcp --mcp-allow-write
 oconsole --mcp --grpc --grpc-fingerprint <sha256>
 ```
 
+Every MCP request and response is mirrored to **stderr** automatically, independent
+of `RUST_LOG`: initialize, notifications, tool discovery, tool calls and errors.
+An admin running oconsole in a terminal sees access immediately. Each `MCP` line
+contains a timestamp, transport, access ID, direction and the complete content.
+HTTP/SSE data is mirrored as it streams; frames from concurrent accesses are
+labelled separately. HTTP authentication failures are also visible, while
+Authorization headers and the server's bearer token are omitted.
+Control characters are escaped for terminal display; payloads are not truncated.
+When running as a service, follow stderr in the service journal. In stdio mode,
+keep stderr separate from stdout, which carries the MCP protocol.
+
 MCP permissions are selected at compile time:
 
 ```bash

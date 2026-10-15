@@ -238,6 +238,7 @@ def main():
                 ROOT / 'crates/onesimus-dird/src/session.rs',
                 ROOT / 'crates/onesimus-dird/src/scheduler.rs',
                 ROOT / 'crates/oconsole/src/mcp.rs',
+                ROOT / 'crates/oconsole/src/mcp_mirror.rs',
                 ROOT / 'crates/oconsole/src/main.rs',
                 ROOT / 'crates/oconsole/Cargo.toml',
             })

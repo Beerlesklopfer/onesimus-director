@@ -687,15 +687,19 @@
     },
     {
       "path": "crates/oconsole/Cargo.toml",
-      "sha256": "89a70037bf2c515ae5c97faded9552afd425e6e295815a103b563521f2dde1d9"
+      "sha256": "939c54f14c4935fdd6e2819127766447613a4b6018440f8949b1d6c613a3bcda"
     },
     {
       "path": "crates/oconsole/src/main.rs",
-      "sha256": "7229f7a2b76007971c8c78e83c67a4c5162e6246f6e024c652e3eed6a1b2d361"
+      "sha256": "550af8bd724d9db4cc63d6999ae71446c7a2d8b8e2c9f2b88c39cb0d0744f737"
     },
     {
       "path": "crates/oconsole/src/mcp.rs",
-      "sha256": "2e20ef58623dab56ff753dfc686a05c3304cc0378e51b8a402d37b4dbfe92e95"
+      "sha256": "622cdb66b6ab891b18daa281fbeaa9888e1ba4d00291f96150769a54d20fd79c"
+    },
+    {
+      "path": "crates/oconsole/src/mcp_mirror.rs",
+      "sha256": "7e453e7f6d2fbc4858af555adb0285a65c1942a98436d733c3455a3f84188372"
     },
     {
       "path": "crates/onesimus-dird/src/catalog_worker.rs",

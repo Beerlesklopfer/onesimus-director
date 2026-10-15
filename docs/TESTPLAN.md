@@ -1173,3 +1173,16 @@ Full BVFS implementation for the web frontend:
 Every command can be implemented. There are no blockers, only priorities.
 The catalog SPs in v2252 already cover the hardest part (prune/purge).
 Sprint 1 alone turns 11 LITE commands into IMPL in under 2 days.
+
+## MCP-Terminalspiegelung (15.10.2026)
+
+- Produktions- und Entwicklungsbuild: stdio-Handshake, initialized-Notification,
+  tools/list, tools/call, Schreibablehnung und Fehler müssen auf stderr sichtbar
+  sein; stdout bleibt unverändertes MCP. Spiegelung gilt unabhängig von RUST_LOG.
+- HTTP: initialisieren, Session fortsetzen, Tools abfragen/aufrufen, abgewiesene
+  Aufrufe und Director-Fehler. Request-/Response-Body, HTTP-Status, Zeit und
+  Zugriffskennung müssen sichtbar sein. Authorization-Header dürfen nicht erscheinen.
+- SSE: Datenframes vor EOF sichtbar; mehrere Zugriffe mit verschiedenen Kennungen.
+  Große Antworten vollständig; Steuerzeichen als Text, keine Terminal-Escape-Wirkung.
+- Automatische Transporttests verwenden echte rmcp-Verarbeitung und erfassen den
+  Spiegelausgabekanal getrennt von den unveränderten Protokollantworten.

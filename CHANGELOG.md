@@ -63,4 +63,10 @@ onesimus (25.1.2+onesimus.0.2.0-2) UNRELEASED; urgency=medium
   * Prioritize the open subcommands and execution paths of the 21 partially
     implemented commands before other command groups.
 
+  * MCP: mirror stdio and HTTP/SSE requests and responses to stderr immediately,
+    including handshake, notifications, tool discovery, rejected calls and
+    errors. Label accesses with timestamps and IDs; escape terminal controls,
+    preserve protocol bytes and keep HTTP Authorization headers out of output.
+    Add transport-level regression coverage for both compiled MCP policies.
+
  -- Joerg Bernau <Joerg.Bernau@onesimus.io>  Thu, 15 Oct 2026 14:00:00 +0200

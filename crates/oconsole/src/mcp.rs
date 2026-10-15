@@ -28,6 +28,7 @@ pub struct McpServer<R: CommandRunner> {
     #[cfg(feature = "mcp-development")]
     allow_write: bool,
     director_name: String,
+    mirror: crate::mcp_mirror::Mirror,
 }
 
 impl<R: CommandRunner> McpServer<R> {
@@ -39,6 +40,7 @@ impl<R: CommandRunner> McpServer<R> {
             #[cfg(feature = "mcp-development")]
             allow_write,
             director_name,
+            mirror: crate::mcp_mirror::Mirror::stderr(),
         }
     }
 
@@ -89,7 +91,13 @@ impl<R: CommandRunner> McpServer<R> {
                     })
                     .await?;
             } else {
-                let service = ServiceExt::serve(self, rmcp::transport::stdio()).await?;
+                let (read, write) = rmcp::transport::stdio();
+                let access = self.mirror.access("stdio");
+                let transport = (
+                    crate::mcp_mirror::MirrorIo::new(read, access.clone(), "request"),
+                    crate::mcp_mirror::MirrorIo::new(write, access, "response"),
+                );
+                let service = ServiceExt::serve(self, transport).await?;
                 service.waiting().await?;
             }
             Ok(())
@@ -105,6 +113,7 @@ impl<R: CommandRunner> McpServer<R> {
         let mut config = StreamableHttpServerConfig::default();
         config.allowed_hosts.extend(hosts);
         config = config.enforce_origin_validation();
+        let mirror = self.mirror.clone();
         let service = StreamableHttpService::new(
             move || {
                 Ok(Self {
@@ -112,6 +121,7 @@ impl<R: CommandRunner> McpServer<R> {
                     #[cfg(feature = "mcp-development")]
                     allow_write: self.allow_write,
                     director_name: self.director_name.clone(),
+                    mirror: self.mirror.clone(),
                 })
             },
             Arc::new(LocalSessionManager::default()),
@@ -122,21 +132,38 @@ impl<R: CommandRunner> McpServer<R> {
             .layer(axum::middleware::from_fn(
                 move |request: axum::extract::Request, next: axum::middleware::Next| {
                     let token = token.clone();
+                    let access = mirror.access("http");
                     async move {
+                        access.event(
+                            "request",
+                            format!("{} {}", request.method(), request.uri().path()).as_bytes(),
+                        );
+                        let (parts, body) = request.into_parts();
+                        let request = axum::extract::Request::from_parts(
+                            parts,
+                            access.body(body, "request-body"),
+                        );
                         let header = request
                             .headers()
                             .get(axum::http::header::AUTHORIZATION)
                             .and_then(|h| h.to_str().ok());
-                        if !crate::mcp_token::authorized(header, &token) {
+                        let response = if !crate::mcp_token::authorized(header, &token) {
                             use axum::response::IntoResponse;
-                            return (
+                            (
                                 axum::http::StatusCode::UNAUTHORIZED,
                                 [(axum::http::header::WWW_AUTHENTICATE, "Bearer")],
                                 "MCP bearer token required",
                             )
-                                .into_response();
-                        }
-                        next.run(request).await
+                                .into_response()
+                        } else {
+                            next.run(request).await
+                        };
+                        access.event("response", format!("HTTP {}", response.status()).as_bytes());
+                        let (parts, body) = response.into_parts();
+                        axum::response::Response::from_parts(
+                            parts,
+                            access.body(body, "response-body"),
+                        )
                     }
                 },
             ))
@@ -283,6 +310,7 @@ impl<R: CommandRunner> ServerHandler for McpServer<R> {
             #[cfg(feature = "mcp-development")]
             allow_write: self.allow_write,
             director_name: self.director_name.clone(),
+            mirror: self.mirror.clone(),
         };
         tokio::task::spawn_blocking(move || {
             let params = serde_json::to_value(request).expect("serializable tool request");
@@ -386,6 +414,9 @@ mod tests {
     impl CommandRunner for Echo {
         fn run(&mut self, command: &str) -> anyhow::Result<String> {
             self.0.push(command.to_string());
+            if command == "status fail" {
+                anyhow::bail!("test Director unavailable");
+            }
             Ok(format!("ran {command}\n"))
         }
     }
@@ -519,8 +550,17 @@ mod tests {
     async fn rmcp_stdio_handshake_and_tool_call() {
         use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
         let (client, server) = tokio::io::duplex(16384);
+        let capture = crate::mcp_mirror::tests::Capture::default();
+        let mut handler = McpServer::new(Echo(vec![]), false, "dir".into());
+        handler.mirror = capture.mirror();
+        let access = handler.mirror.access("stdio");
+        let (read, write) = tokio::io::split(server);
+        let transport = (
+            crate::mcp_mirror::MirrorIo::new(read, access.clone(), "request"),
+            crate::mcp_mirror::MirrorIo::new(write, access, "response"),
+        );
         let task = tokio::spawn(async move {
-            ServiceExt::serve(McpServer::new(Echo(vec![]), false, "dir".into()), server)
+            ServiceExt::serve(handler, transport)
                 .await
                 .unwrap()
                 .waiting()
@@ -572,7 +612,185 @@ mod tests {
             .await
             .unwrap()
             .unwrap();
+        let records = capture.records();
+        assert!(
+            records.iter().any(|r| r["direction"] == "request"
+                && r["body"]["method"] == "notifications/initialized")
+        );
+        for id in [1, 2, 3, 4] {
+            assert!(
+                records
+                    .iter()
+                    .any(|r| r["direction"] == "request" && r["body"]["id"] == id)
+            );
+            assert!(
+                records
+                    .iter()
+                    .any(|r| r["direction"] == "response" && r["body"]["id"] == id)
+            );
+        }
+        assert!(
+            records
+                .iter()
+                .any(|r| r["body"]["result"]["content"][0]["text"] == "ran list jobs\n")
+        );
+        assert!(
+            records
+                .iter()
+                .any(|r| r["body"]["id"] == 4 && r["body"]["error"].is_object())
+        );
     }
+    #[tokio::test]
+    async fn http_mirrors_handshake_tools_errors_and_notifications_without_auth_headers() {
+        use http_body_util::BodyExt as _;
+        use tower::ServiceExt as _;
+        #[cfg(feature = "mcp-production")]
+        let modes = [false];
+        #[cfg(feature = "mcp-development")]
+        let modes = [false, true];
+        for allow_write in modes {
+            let capture = crate::mcp_mirror::tests::Capture::default();
+            let mut server = McpServer::new(Echo(vec![]), allow_write, "dir".into());
+            server.mirror = capture.mirror();
+            let token = "private-token-not-for-terminal";
+            let app = server.http_router(token.into(), vec![]);
+            let request = |body: Value, session: Option<&str>| {
+                let mut builder = axum::http::Request::builder()
+                    .method("POST")
+                    .uri("/mcp")
+                    .header("host", "localhost")
+                    .header("authorization", format!("Bearer {token}"))
+                    .header("content-type", "application/json")
+                    .header("accept", "application/json, text/event-stream");
+                if let Some(session) = session {
+                    builder = builder.header("mcp-session-id", session);
+                }
+                builder
+                    .body(axum::body::Body::from(body.to_string()))
+                    .unwrap()
+            };
+            let response = app.clone().oneshot(request(json!({"jsonrpc":"2.0","id":1,"method":"initialize",
+            "params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"mirror-test","version":"1"}}}), None)).await.unwrap();
+            assert_eq!(response.status(), 200);
+            let session = response
+                .headers()
+                .get("mcp-session-id")
+                .unwrap()
+                .to_str()
+                .unwrap()
+                .to_string();
+            let body = tokio::time::timeout(
+                std::time::Duration::from_secs(5),
+                response.into_body().collect(),
+            )
+            .await
+            .unwrap()
+            .unwrap()
+            .to_bytes();
+            assert!(String::from_utf8_lossy(&body).contains("oconsole"));
+            let response = app
+                .clone()
+                .oneshot(request(
+                    json!({"jsonrpc":"2.0","method":"notifications/initialized"}),
+                    Some(&session),
+                ))
+                .await
+                .unwrap();
+            assert_eq!(response.status(), 202);
+            for (id, method, params) in [
+                (2, "tools/list", json!({})),
+                (
+                    3,
+                    "tools/call",
+                    json!({"name":"query","arguments":{"command":"list jobs"}}),
+                ),
+                (
+                    4,
+                    "tools/call",
+                    json!({"name":"execute","arguments":{"command":"run job=Backup yes"}}),
+                ),
+                (
+                    5,
+                    "tools/call",
+                    json!({"name":"query","arguments":{"command":"delete volume=x"}}),
+                ),
+                (6, "no-such-method", json!({})),
+                (
+                    7,
+                    "tools/call",
+                    json!({"name":"query","arguments":{"command":"status fail"}}),
+                ),
+            ] {
+                let response = app
+                    .clone()
+                    .oneshot(request(
+                        json!({"jsonrpc":"2.0","id":id,"method":method,"params":params}),
+                        Some(&session),
+                    ))
+                    .await
+                    .unwrap();
+                // HTTP may return a direct JSON response or finite SSE stream.
+                let bytes = tokio::time::timeout(
+                    std::time::Duration::from_secs(5),
+                    response.into_body().collect(),
+                )
+                .await
+                .unwrap()
+                .unwrap()
+                .to_bytes();
+                assert!(!bytes.is_empty(), "missing response for {method}");
+                if id == 4 {
+                    assert_eq!(
+                        String::from_utf8_lossy(&bytes).contains("ran run job=Backup yes"),
+                        allow_write
+                    );
+                }
+                let records = capture.records();
+                assert!(
+                    records
+                        .iter()
+                        .any(|r| r["direction"] == "request-body" && r["body"]["id"] == id)
+                );
+                assert!(records.iter().any(|r| {
+                    r["direction"] == "response-body"
+                        && (r["body"]["id"] == id
+                            || r["body"]["text"]
+                                .as_str()
+                                .is_some_and(|text| text.contains(&format!("\"id\":{id}"))))
+                }));
+            }
+            let denied = axum::http::Request::builder()
+                .method("POST")
+                .uri("/mcp")
+                .header("authorization", "Bearer invalid-private-token")
+                .body(axum::body::Body::empty())
+                .unwrap();
+            let response = app.oneshot(denied).await.unwrap();
+            assert_eq!(response.status(), 401);
+            response.into_body().collect().await.unwrap();
+            let records = capture.records();
+            assert!(records.iter().any(|r| r["direction"] == "response-body"
+                && r["body"]["text"] == "MCP bearer token required"));
+            assert!(
+                !serde_json::to_string(&records)
+                    .unwrap()
+                    .contains("invalid-private-token")
+            );
+            assert!(
+                records
+                    .iter()
+                    .any(|r| r["body"]["method"] == "notifications/initialized")
+            );
+            assert!(records.iter().any(|r| {
+                r["direction"] == "response-body"
+                    && serde_json::to_string(&r["body"])
+                        .unwrap()
+                        .contains("test Director unavailable")
+            }));
+            assert!(!serde_json::to_string(&records).unwrap().contains(token));
+        }
+    }
+
     #[tokio::test]
     async fn http_requires_token_and_accepts_authenticated_initialize() {
         use tokio::io::{AsyncReadExt, AsyncWriteExt};
