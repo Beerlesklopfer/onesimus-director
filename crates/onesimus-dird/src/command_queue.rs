@@ -43,7 +43,17 @@ impl CommandResult {
 
     /// One entry per ErrorMsg call: each line keeps its trailing newline.
     pub fn error_lines(&self) -> Vec<String> {
-        self.error_message.lines().filter(|l| !l.trim().is_empty()).map(|l| format!("{l}\n")).collect()
+        // A blank line belongs to the message before it (one ErrorMsg such
+        // as "...ERR=<errmsg>\n\n" is one JSON message).
+        let mut lines: Vec<String> = Vec::new();
+        for l in self.error_message.lines() {
+            match lines.last_mut() {
+                Some(last) if l.trim().is_empty() => last.push('\n'),
+                _ if l.trim().is_empty() => {}
+                _ => lines.push(format!("{l}\n")),
+            }
+        }
+        lines
     }
 
     /// Attach the structured JSON result (used in `.api 2` mode).
