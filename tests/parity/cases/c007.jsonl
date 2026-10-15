@@ -1,0 +1,19 @@
+# C-007 input edge cases of the console loop (ua_server.cc, ParseArgs, Do_a_command).
+{"id": "c007-whitespace-line", "steps": ["   "]}
+{"id": "c007-tab-line", "steps": ["\t"]}
+{"id": "c007-crlf-line", "steps": ["\r\n"]}
+{"id": "c007-empty-then-command", "steps": ["", "show clients"]}
+{"id": "c007-comment", "steps": ["#comment"]}
+{"id": "c007-hash-space-comment", "steps": ["# version"]}
+{"id": "c007-leading-spaces", "steps": ["    show clients"]}
+{"id": "c007-leading-tab", "steps": ["\tshow\tclients"]}
+{"id": "c007-trailing-spaces", "steps": ["show clients   "]}
+{"id": "c007-trailing-newline", "steps": ["show clients\n"]}
+{"id": "c007-uppercase", "steps": ["SHOW CLIENTS"]}
+{"id": "c007-mixed-case-prefix", "steps": ["ShO clients"]}
+{"id": "c007-equals-only", "steps": ["="]}
+{"id": "c007-equals-value", "steps": ["=show clients"]}
+{"id": "c007-command-with-value", "steps": ["show=x clients"]}
+{"id": "c007-quoted-command", "steps": ["\"show\" clients"]}
+{"id": "c007-lone-dot", "steps": ["."]}
+{"id": "c007-dot-with-args", "steps": [". foo bar=baz"]}

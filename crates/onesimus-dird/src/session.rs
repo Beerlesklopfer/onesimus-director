@@ -113,17 +113,19 @@ pub fn handle_console_session<S: Read + Write>(
 
         // Receive command
         let msg = match bnet.recv() {
-            Ok(BnetMessage::Data(data)) => {
-                match String::from_utf8(data) {
-                    Ok(s) => s,
-                    Err(_) => continue,
-                }
-            }
+            // C++ works on raw bytes; skipping invalid UTF-8 would leave the
+            // console without a reply.
+            Ok(BnetMessage::Data(data)) => String::from_utf8_lossy(&data).into_owned(),
             Ok(BnetMessage::Signal(BnetSignal::Terminate)) => {
                 debug!("session {session_id}: client sent TERMINATE");
                 break;
             }
-            Ok(BnetMessage::Signal(_)) => continue,
+            Ok(BnetMessage::Signal(_)) => {
+                // C++ ua_server.cc: any other signal instead of a command
+                // is answered with BNET_POLL; no command, no EOD.
+                if bnet.send_signal(BnetSignal::Poll).is_err() { break; }
+                continue;
+            }
             Err(BnetError::HardEof) | Err(BnetError::Terminated) => {
                 debug!("session {session_id}: connection closed");
                 break;
@@ -136,14 +138,16 @@ pub fn handle_console_session<S: Read + Write>(
         };
 
         let cmd_str = msg.trim();
-        if cmd_str.is_empty() {
-            continue;
-        }
-
         debug!("session {session_id}: command '{cmd_str}'");
 
         // Parse command into AST
         let mut ast = parse_cli_command(cmd_str);
+        // C++ Do_a_command(): no arguments (empty or whitespace-only line)
+        // runs nothing, but the loop still handles messages and sends EOD.
+        if ast.command_name.is_empty() {
+            if !finish_command(&mut bnet, &bus_rx, auto_display, gui_mode, api_mode) { break; }
+            continue;
+        }
         if let Some(name) = crate::command_registry::resolve_command_name(
             command_executor::get_registry(), &ast.command_name) {
             ast.command_name = name.to_string();
@@ -234,41 +238,7 @@ pub fn handle_console_session<S: Read + Write>(
             break;
         }
 
-        // HandleMessages: drain pending bus messages (like C++ ua_server.cc).
-        // In API mode messages never interleave with the command output;
-        // the console is only told via MSGS_PENDING and fetches them itself.
-        if auto_display && api_mode != command_executor::ApiMode::Human {
-            // API clients fetch messages explicitly; do not consume their queue.
-            if !bus_rx.is_empty() && !gui_mode {
-                let _ = bnet.send_signal(BnetSignal::MsgsPending);
-            }
-        } else if auto_display {
-            let mut has_messages = false;
-            while let Ok(msg) = bus_rx.try_recv() {
-                let text = match msg {
-                    crate::message_bus::BusMessage::ConsoleText { text } => text,
-                    crate::message_bus::BusMessage::JobMessage { job_id, text, .. } if job_id > 0 => text,
-                    _ => continue,
-                };
-                has_messages = true;
-                if api_mode == command_executor::ApiMode::Human {
-                    let _ = bnet.send_str(&format!("{text}\n"));
-                }
-            }
-            if has_messages && !gui_mode {
-                if api_mode == command_executor::ApiMode::Human {
-                    let _ = bnet.send_str("You have messages.\n");
-                } else {
-                    let _ = bnet.send_signal(BnetSignal::MsgsPending);
-                }
-            }
-        }
-
-        // C++ ua_session.cc HandleMessages(): EOD only in non-API mode.
-        // bconsole uses api=0, so it expects EOD after each command response.
-        if api_mode == command_executor::ApiMode::Human {
-            if bnet.send_signal(BnetSignal::Eod).is_err() { break; }
-        }
+        if !finish_command(&mut bnet, &bus_rx, auto_display, gui_mode, api_mode) { break; }
     }
 
     // Cleanup
@@ -276,21 +246,75 @@ pub fn handle_console_session<S: Read + Write>(
     info!("session {session_id} ({console_name}) ended");
 }
 
-/// Parse a CLI command string into a CommandAST.
-/// Split an argument string at whitespace outside of double quotes; quotes
-/// are removed (`fileset="My Set"` -> `fileset=My Set`).
+/// Tail of one console loop iteration (C++ ua_server.cc
+/// HandleUserAgentClientRequest after Do_a_command): pending messages, then
+/// EOD in non-API mode. Also runs after an empty line. False: socket gone.
+fn finish_command<S: Read + Write>(
+    bnet: &mut BnetStream<S>,
+    bus_rx: &crossbeam_channel::Receiver<crate::message_bus::BusMessage>,
+    auto_display: bool,
+    gui_mode: bool,
+    api_mode: command_executor::ApiMode,
+) -> bool {
+    // HandleMessages: drain pending bus messages (like C++ ua_server.cc).
+    // In API mode messages never interleave with the command output;
+    // the console is only told via MSGS_PENDING and fetches them itself.
+    if auto_display && api_mode != command_executor::ApiMode::Human {
+        // API clients fetch messages explicitly; do not consume their queue.
+        if !bus_rx.is_empty() && !gui_mode {
+            let _ = bnet.send_signal(BnetSignal::MsgsPending);
+        }
+    } else if auto_display {
+        let mut has_messages = false;
+        while let Ok(msg) = bus_rx.try_recv() {
+            let text = match msg {
+                crate::message_bus::BusMessage::ConsoleText { text } => text,
+                crate::message_bus::BusMessage::JobMessage { job_id, text, .. } if job_id > 0 => text,
+                _ => continue,
+            };
+            has_messages = true;
+            if api_mode == command_executor::ApiMode::Human {
+                let _ = bnet.send_str(&format!("{text}\n"));
+            }
+        }
+        if has_messages && !gui_mode {
+            if api_mode == command_executor::ApiMode::Human {
+                let _ = bnet.send_str("You have messages.\n");
+            } else {
+                let _ = bnet.send_signal(BnetSignal::MsgsPending);
+            }
+        }
+    }
+
+    // C++ ua_session.cc HandleMessages(): EOD only in non-API mode.
+    // bconsole uses api=0, so it expects EOD after each command response.
+    if api_mode == command_executor::ApiMode::Human {
+        if bnet.send_signal(BnetSignal::Eod).is_err() { return false; }
+    }
+    true
+}
+
+/// Split a command line like C++ lib/scan.cc next_arg(): whitespace
+/// separates arguments, double quotes group (and are removed), a backslash
+/// takes the next character literally (`fileset="My Set"` -> `fileset=My Set`).
 fn split_args(input: &str) -> Vec<String> {
     let mut args = Vec::new();
     let mut cur = String::new();
     let mut in_quotes = false;
     let mut has_token = false;
-    for c in input.chars() {
+    let mut chars = input.chars();
+    while let Some(c) = chars.next() {
         match c {
+            '\\' => {
+                // A trailing backslash ends the line (next_arg copies the NUL).
+                if let Some(next) = chars.next() { cur.push(next); }
+                has_token = true;
+            }
             '"' => {
                 in_quotes = !in_quotes;
                 has_token = true;
             }
-            c if c.is_whitespace() && !in_quotes => {
+            c if c.is_ascii_whitespace() && !in_quotes => {
                 if has_token {
                     args.push(std::mem::take(&mut cur));
                     has_token = false;
@@ -319,24 +343,28 @@ fn parse_api_mode(ast: &CommandAst) -> Option<command_executor::ApiMode> {
     }
 }
 
-/// Simple parser: first word is command name, rest are key=value arguments.
+/// Parse a CLI command line like C++ ParseArgs(): the first argument is the
+/// command, the rest are key=value arguments split at the first '='.
+/// An empty line (no arguments) gives an empty command name.
 pub(crate) fn parse_cli_command(input: &str) -> CommandAst {
-    let mut parts = input.trim().splitn(2, char::is_whitespace);
-    let command_name = parts.next().unwrap_or("").to_string();
-    let args_str = parts.next().unwrap_or("");
-
-    // Like C++ ParseArgs(): whitespace separates arguments, double quotes
-    // group (and are removed), key=value pairs split at the first '='.
-    let arguments = split_args(args_str).into_iter().map(|token| {
-        match token.split_once('=') {
+    // ParseArgsOnly() stops at the first empty argument (e.g. `""`).
+    let mut tokens = split_args(input).into_iter().take_while(|token| !token.is_empty())
+        .map(|token| match token.split_once('=') {
             Some((key, value)) => Argument { key: key.to_string(), value: Some(value.to_string()) },
             None => Argument { key: token, value: None },
-        }
-    }).collect();
+        });
+    // Do_a_command() matches argk[0] (the part before '=') as a prefix of
+    // the command table; an empty keyword (`=`, `=x`) therefore matches its
+    // first entry, the no-op ".".
+    let command_name = match tokens.next() {
+        Some(first) if first.key.is_empty() => ".".to_string(),
+        Some(first) => first.key,
+        None => String::new(),
+    };
 
     CommandAst {
         command_name,
-        arguments,
+        arguments: tokens.collect(),
         session_id: String::new(),
         source: CommandSource::Cli,
         response_format: ResponseFormat::Default,
@@ -411,6 +439,77 @@ mod tests {
         let ast = parse_cli_command("");
         assert_eq!(ast.command_name, "");
         assert!(ast.arguments.is_empty());
+    }
+
+    #[test]
+    fn parse_blank_lines_have_no_command() {
+        for line in ["   ", "\t", "\r\n", " \t \n", "\"\"", "\"\" version"] {
+            let ast = parse_cli_command(line);
+            assert_eq!(ast.command_name, "", "{line:?}");
+            assert!(ast.arguments.is_empty(), "{line:?}");
+        }
+    }
+
+    #[test]
+    fn parse_command_token_like_parse_args() {
+        // Leading/trailing whitespace and tabs separate like spaces.
+        let ast = parse_cli_command("\t  show\tclients   \n");
+        assert_eq!(ast.command_name, "show");
+        assert_eq!(ast.arguments.len(), 1);
+        assert_eq!(ast.arguments[0].key, "clients");
+        // argk[0] is the part before '='; quotes are removed.
+        assert_eq!(parse_cli_command("show=x clients").command_name, "show");
+        assert_eq!(parse_cli_command("\"show\" clients").command_name, "show");
+        // An empty keyword matches the first command table entry ".".
+        assert_eq!(parse_cli_command("=").command_name, ".");
+        let ast = parse_cli_command("=show clients");
+        assert_eq!(ast.command_name, ".");
+        assert_eq!(ast.arguments[0].key, "clients");
+        // Comments are not special: the console sends them as commands.
+        assert_eq!(parse_cli_command("# version").command_name, "#");
+        assert_eq!(parse_cli_command("#comment").command_name, "#comment");
+    }
+
+    #[test]
+    fn parse_stops_at_empty_argument_and_honours_backslash() {
+        let ast = parse_cli_command("show \"\" clients");
+        assert_eq!(ast.command_name, "show");
+        assert!(ast.arguments.is_empty());
+        let ast = parse_cli_command(r#"run comment=a\ b\"c"#);
+        assert_eq!(ast.arguments[0].value.as_deref(), Some("a b\"c"));
+    }
+}
+
+#[cfg(test)]
+mod input_tests {
+    use super::*;
+
+    /// C++ ua_server.cc: an empty line gets EOD only, a signal gets POLL.
+    #[test]
+    fn empty_lines_get_eod_and_signals_get_poll() {
+        use std::net::{TcpListener,TcpStream};
+        use std::time::Duration;
+        let listener=TcpListener::bind("127.0.0.1:0").unwrap();let address=listener.local_addr().unwrap();
+        let ctx=crate::acl::tests::context();
+        let server=std::thread::spawn(move || {
+            let (stream,_)=listener.accept().unwrap();stream.set_read_timeout(Some(Duration::from_secs(5))).unwrap();
+            handle_console_session(BnetStream::new(stream),u64::MAX,"limited","pw",ctx.session_mgr.as_ref().unwrap(),
+                &CommandQueue::new(16),&ctx.config,&None,&None);
+        });
+        let stream=TcpStream::connect(address).unwrap();stream.set_read_timeout(Some(Duration::from_secs(5))).unwrap();
+        let mut bnet=BnetStream::new(stream);
+        let result=CramMd5Auth::new("pw","limited",0).two_way_authenticate(&mut bnet,false).unwrap();assert!(result.success);
+        assert!(bnet.recv_str().unwrap().starts_with("1000"));assert!(bnet.recv_str().unwrap().starts_with("1002"));
+        for line in ["", "   ", "\t", "\r\n"] {
+            bnet.send_str(line).unwrap();
+            assert_eq!(bnet.recv().unwrap(),BnetMessage::Signal(BnetSignal::Eod),"{line:?}");
+        }
+        bnet.send_signal(BnetSignal::Eod).unwrap();
+        assert_eq!(bnet.recv().unwrap(),BnetMessage::Signal(BnetSignal::Poll));
+        bnet.send_str("  VERSION  ").unwrap();
+        assert!(bnet.recv_str().unwrap().contains("bareos-dir Version"));
+        assert_eq!(bnet.recv().unwrap(),BnetMessage::Signal(BnetSignal::Eod));
+        bnet.send_str("quit").unwrap();drop(bnet);server.join().unwrap();
     }
 }
 
