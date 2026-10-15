@@ -17,7 +17,7 @@ enable job=<job-name> client=<client-name> schedule=<schedule-name>
 
 **Onesimus-Status:** `registered_unverified`. Funktionsparität ist nicht durch einen Live-Test nachgewiesen.
 
-**Lokaler Handler:** [crates/onesimus-dird/src/commands/job.rs:272](../../../crates/onesimus-dird/src/commands/job.rs).
+**Lokaler Handler:** [crates/onesimus-dird/src/commands/job.rs:274](../../../crates/onesimus-dird/src/commands/job.rs).
 
 Die folgenden vorhandenen Beispiele und Verhaltensbeschreibungen sind lokale Dokumentation; sie sind kein Beleg für vollständige Bareos-Kompatibilität. Bei Widersprüchen gilt der obige Befund.
 <!-- bareos-reference:end -->

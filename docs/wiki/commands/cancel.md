@@ -17,7 +17,7 @@ cancel storage=<storage-name> | jobid=<jobid> | job=<job-name> | ujobid=<unique-
 
 **Onesimus-Status:** `registered_unverified`. Funktionsparität ist nicht durch einen Live-Test nachgewiesen.
 
-**Lokaler Handler:** [crates/onesimus-dird/src/commands/job.rs:218](../../../crates/onesimus-dird/src/commands/job.rs).
+**Lokaler Handler:** [crates/onesimus-dird/src/commands/job.rs:220](../../../crates/onesimus-dird/src/commands/job.rs).
 
 Die folgenden vorhandenen Beispiele und Verhaltensbeschreibungen sind lokale Dokumentation; sie sind kein Beleg für vollständige Bareos-Kompatibilität. Bei Widersprüchen gilt der obige Befund.
 <!-- bareos-reference:end -->

@@ -682,6 +682,10 @@
       "sha256": "00adc4981e9d59cd2b2c038e72e090bc94c2cb23c78905bfa7955b039c122c90"
     },
     {
+      "path": "crates/onesimus-dird/src/catalog_worker.rs",
+      "sha256": "10a37c25b81acd787d5960137bfee1749ceb0586d6bc058040cd9935c49baaaf"
+    },
+    {
       "path": "crates/onesimus-dird/src/command_executor.rs",
       "sha256": "f48910bed1f33a06bccc0db49483430e266cf8f0188adceb0d0a1e794b71dc90"
     },
@@ -719,7 +723,7 @@
     },
     {
       "path": "crates/onesimus-dird/src/commands/job.rs",
-      "sha256": "7956f703595489970698c5c1544b34e0d1ccdb24f07f1f49859695b36ee514d6"
+      "sha256": "a4b4ff771c84a77d2b92eff8fdeaa5fac3ede4f1a7d385f6b3e876d2c0907ec6"
     },
     {
       "path": "crates/onesimus-dird/src/commands/list.rs",
@@ -744,6 +748,10 @@
     {
       "path": "crates/onesimus-dird/src/commands/status.rs",
       "sha256": "b74371c0e704a9544293f4a963e282124c2c43e9194476a1e8de0e2d21a628e1"
+    },
+    {
+      "path": "crates/onesimus-dird/src/job_worker.rs",
+      "sha256": "3aeeae4ed61ecea9ad8a1f150cc3c70a16c600e2d86116fc661b8a0c7afc7eaa"
     },
     {
       "path": "crates/onesimus-dird/src/scheduler.rs",
@@ -2502,7 +2510,7 @@
         },
         "implementation": {
           "file": "crates/onesimus-dird/src/commands/job.rs",
-          "line": 218
+          "line": 220
         },
         "declared_arguments": [
           "jobid"
@@ -2697,7 +2705,7 @@
         },
         "implementation": {
           "file": "crates/onesimus-dird/src/commands/job.rs",
-          "line": 291
+          "line": 293
         },
         "declared_arguments": [
           "job",
@@ -2744,7 +2752,7 @@
         },
         "implementation": {
           "file": "crates/onesimus-dird/src/commands/job.rs",
-          "line": 272
+          "line": 274
         },
         "declared_arguments": [
           "job",
@@ -3901,7 +3909,7 @@
         ],
         "status": "partial",
         "findings": [
-          "Alle Nicht-Full-Level werden ausdrücklich zu Full hochgestuft. Damit fehlen unter anderem echte Incremental-/Differential-Läufe; weitere Originaloptionen sind nicht vollständig portiert."
+          "Incremental/Differential bleiben bei passender erfolgreicher Backup-Kette erhalten. Referenzen sind nach Client, Job und FileSet eingegrenzt; ohne Full-Basis wird vor Poolwahl und Jobanlage auf Full hochgestuft, DB-Fehler brechen ab. FileSet-/Pool-Overrides werden ausgewertet. Accurate/VirtualFull, FileSet-Inhaltsänderungsprüfung, weitere Originaloptionen und Live-SHA-256-/Backup-Abgleich bleiben offen."
         ],
         "functional_parity_verified": false
       },

@@ -17,7 +17,7 @@ run job=<job-name> client=<client-name> fileset=<fileset-name> level=<level> sto
 
 **Onesimus-Status:** `partial`. Funktionsparität ist nicht durch einen Live-Test nachgewiesen.
 
-- Alle Nicht-Full-Level werden ausdrücklich zu Full hochgestuft. Damit fehlen unter anderem echte Incremental-/Differential-Läufe; weitere Originaloptionen sind nicht vollständig portiert.
+- Incremental/Differential bleiben bei passender erfolgreicher Backup-Kette erhalten. Referenzen sind nach Client, Job und FileSet eingegrenzt; ohne Full-Basis wird vor Poolwahl und Jobanlage auf Full hochgestuft, DB-Fehler brechen ab. FileSet-/Pool-Overrides werden ausgewertet. Accurate/VirtualFull, FileSet-Inhaltsänderungsprüfung, weitere Originaloptionen und Live-SHA-256-/Backup-Abgleich bleiben offen.
 
 **Lokaler Handler:** [crates/onesimus-dird/src/commands/job.rs:15](../../../crates/onesimus-dird/src/commands/job.rs).
 

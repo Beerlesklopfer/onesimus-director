@@ -83,7 +83,7 @@ pub enum CatalogRequest {
     /// Resolve a name to its ID (client, pool, fileset).
     ResolveId { table: String, name: String },
     /// Get since_utime for incremental/differential backup.
-    SinceUtime { client_name: String, level: String },
+    SinceUtime { client_name: String, job_name: String, fileset_name: String, level: String },
     /// Ping / health check.
     Ping,
 }
@@ -272,15 +272,16 @@ impl CatalogHandle {
 
     /// Get since_utime + prev_job for Incremental/Differential backup.
     /// level: "I" for incremental, "D" for differential.
-    pub fn since_utime(&self, client_name: &str, level: &str) -> Option<(i64, String)> {
+    pub fn since_utime(&self, client_name: &str, job_name: &str, fileset_name: &str, level: &str) -> Result<Option<(i64, String)>, String> {
         match self.request(CatalogRequest::SinceUtime {
-            client_name: client_name.to_string(),
-            level: level.to_string(),
-        }) {
-            Ok(CatalogResponse::SinceUtime { since_utime, prev_job }) => {
-                if since_utime > 0 { Some((since_utime, prev_job)) } else { None }
+            client_name: client_name.to_string(), job_name: job_name.to_string(),
+            fileset_name: fileset_name.to_string(), level: level.to_string(),
+        })? {
+            CatalogResponse::SinceUtime { since_utime, prev_job } => {
+                Ok((since_utime > 0).then_some((since_utime, prev_job)))
             }
-            _ => None,
+            CatalogResponse::Error(error) => Err(error),
+            _ => Err("unexpected backup reference response".into()),
         }
     }
 
@@ -365,8 +366,8 @@ pub fn spawn_catalog_worker(
                             handle_create_jobmedia(&pool, job_id, media_id, first_index, last_index, start_file, end_file, start_block, end_block, copy, strip, job_bytes).await,
                         CatalogRequest::ResolveId { table, name } =>
                             handle_resolve_id(&pool, &table, &name).await,
-                        CatalogRequest::SinceUtime { client_name, level } =>
-                            handle_since_utime(&pool, &client_name, &level).await,
+                        CatalogRequest::SinceUtime { client_name, job_name, fileset_name, level } =>
+                            handle_since_utime(&pool, &client_name, &job_name, &fileset_name, &level).await,
                         CatalogRequest::Ping => CatalogResponse::Pong,
                     };
 
@@ -581,28 +582,28 @@ async fn handle_generate_bootstrap(pool: &sqlx::PgPool, job_id: u32) -> CatalogR
 }
 
 /// Get since_utime for incremental/differential backup.
-async fn handle_since_utime(pool: &sqlx::PgPool, client_name: &str, level: &str) -> CatalogResponse {
-    // fn_since_utime(client, level) RETURNS TABLE(since_utime, prev_job)
-    let row: Option<(i64, String)> = match sqlx::query_as(
-        "SELECT since_utime, prev_job FROM fn_since_utime($1, $2)"
-    ).bind(client_name).bind(level).fetch_optional(pool).await {
-        Ok(r) => r,
-        Err(_) => {
-            // Fallback: inline SQL
-            let level_filter = if level == "D" { "AND j.level = 'F'" } else { "AND j.level IN ('F','I','D')" };
-            let sql = format!(
-                "SELECT COALESCE(EXTRACT(EPOCH FROM j.starttime)::bigint, 0), j.job \
-                 FROM job j JOIN client c ON j.clientid = c.clientid \
-                 WHERE c.name = $1 AND j.type = 'B' AND j.jobstatus = 'T' {level_filter} \
-                 ORDER BY j.starttime DESC LIMIT 1"
-            );
-            sqlx::query_as(&sql).bind(client_name).fetch_optional(pool).await.ok().flatten()
-        }
-    };
-
-    match row {
-        Some((ts, prev)) => CatalogResponse::SinceUtime { since_utime: ts, prev_job: prev },
-        None => CatalogResponse::SinceUtime { since_utime: 0, prev_job: String::new() },
+async fn handle_since_utime(pool: &sqlx::PgPool, client_name: &str, job_name: &str, fileset_name: &str, level: &str) -> CatalogResponse {
+    // A different Job/FileSet on the same client must never become our base.
+    // Require a successful Full in the chain, even when selecting a later I/D.
+    let level_filter = if level == "D" { "j.level = 'F'" } else { "j.level IN ('F','I','D')" };
+    let sql = format!(
+        "SELECT COALESCE(EXTRACT(EPOCH FROM j.starttime)::bigint, 0), j.job \
+         FROM job j JOIN client c ON j.clientid = c.clientid \
+         JOIN fileset f ON j.filesetid = f.filesetid \
+         WHERE c.name = $1 AND j.name = $2 AND f.fileset = $3 \
+         AND j.type = 'B' AND j.jobstatus IN ('T','W') AND {level_filter} \
+         AND EXISTS (SELECT 1 FROM job fulljob JOIN fileset fullset ON fulljob.filesetid = fullset.filesetid \
+             WHERE fulljob.clientid = j.clientid AND fulljob.name = j.name \
+             AND fullset.fileset = f.fileset AND fulljob.type = 'B' \
+             AND fulljob.level = 'F' AND fulljob.jobstatus IN ('T','W') \
+             AND fulljob.starttime <= j.starttime) \
+         ORDER BY j.starttime DESC, j.jobid DESC LIMIT 1"
+    );
+    match sqlx::query_as::<_, (i64, String)>(&sql)
+        .bind(client_name).bind(job_name).bind(fileset_name).fetch_optional(pool).await {
+        Ok(Some((ts, prev))) => CatalogResponse::SinceUtime { since_utime: ts, prev_job: prev },
+        Ok(None) => CatalogResponse::SinceUtime { since_utime: 0, prev_job: String::new() },
+        Err(error) => CatalogResponse::Error(format!("Backup reference lookup failed: {error}")),
     }
 }
 
@@ -819,4 +820,36 @@ async fn resolve_or_create_client(pool: &sqlx::PgPool, client_name: &str) -> i32
         info!("Auto-created client record: {client_name} → ClientId={id}");
     }
     id
+}
+
+#[cfg(test)]
+mod backup_reference_tests {
+    use super::*;
+
+    #[test]
+    fn reference_requests_are_scoped_and_errors_propagate() {
+        for response in [CatalogResponse::SinceUtime { since_utime: 123, prev_job: "base".into() },
+            CatalogResponse::Error("query failed".into())] {
+            let (tx, rx) = flume::bounded(1);
+            let handle = CatalogHandle { tx };
+            let worker = std::thread::spawn(move || {
+                let (request, reply) = rx.recv().unwrap();
+                match request {
+                    CatalogRequest::SinceUtime { client_name, job_name, fileset_name, level } => {
+                        assert_eq!((client_name.as_str(), job_name.as_str(), fileset_name.as_str(), level.as_str()),
+                            ("client", "backup", "set", "D"));
+                    },
+                    _ => panic!("wrong request"),
+                }
+                reply.send(response).unwrap();
+            });
+            let result = handle.since_utime("client", "backup", "set", "D");
+            match result {
+                Ok(Some((timestamp, name))) => assert_eq!((timestamp, name.as_str()), (123, "base")),
+                Err(error) => assert_eq!(error, "query failed"),
+                _ => panic!("unexpected result"),
+            }
+            worker.join().unwrap();
+        }
+    }
 }

@@ -56,20 +56,8 @@ pub fn cmd_run(ast: &CommandAst, ctx: &ExecContext) -> CommandResult {
     }
 
     let default_level = format!("{:?}", job.level);
-    let mut level = ast.arguments.iter()
-        .find(|a| a.key == "level")
-        .and_then(|a| a.value.as_deref())
-        .unwrap_or(&default_level)
-        .to_lowercase();
-
-    // TODO: implement incremental/differential with proper since_utime from catalog.
-    // For now, always upgrade to Full — since_utime=0 causes FD fatal error,
-    // and computing the correct since_utime requires querying the last successful
-    // backup's start time from the catalog.
-    if level != "full" {
-        info!("Upgrading level '{}' → 'full' (incremental not yet implemented)", level);
-        level = "full".to_string();
-    }
+    let requested_level = ast.arguments.iter()
+        .find(|a| a.key == "level").and_then(|a| a.value.as_deref()).unwrap_or(&default_level);
 
     let client_name = ast.arguments.iter()
         .find(|a| a.key == "client")
@@ -81,25 +69,31 @@ pub fn cmd_run(ast: &CommandAst, ctx: &ExecContext) -> CommandResult {
         .and_then(|a| a.value.as_deref())
         .unwrap_or(&job.storage);
 
-    // Pool override based on level
-    let pool = match level.as_str() {
-        "full" if !job.full_backup_pool.is_empty() => &job.full_backup_pool,
-        "differential" if !job.differential_backup_pool.is_empty() => &job.differential_backup_pool,
-        "incremental" if !job.incremental_backup_pool.is_empty() => &job.incremental_backup_pool,
-        _ => &job.pool,
-    };
-
-    // Verify resources exist
+    let fileset_name = ast.arguments.iter().find(|a| a.key == "fileset")
+        .and_then(|a| a.value.as_deref()).unwrap_or(&job.fileset);
     let client_res = config.find_client(client_name);
     let storage_res = config.find_storage(storage_name);
-    let fileset_res = config.find_fileset(&job.fileset);
+    let fileset_res = config.find_fileset(fileset_name);
+    if client_res.is_none() { return CommandResult::error(format!("Client '{client_name}' not found\n")); }
+    if storage_res.is_none() { return CommandResult::error(format!("Storage '{storage_name}' not found\n")); }
+    if fileset_res.is_none() { return CommandResult::error(format!("FileSet '{fileset_name}' not found\n")); }
 
-    if client_res.is_none() {
-        return CommandResult::error(format!("Client '{client_name}' not found\n"));
-    }
-    if storage_res.is_none() {
-        return CommandResult::error(format!("Storage '{storage_name}' not found\n"));
-    }
+    let (level, level_char, since_utime, prev_job) = match backup_level(requested_level, |level| {
+        let cat = ctx.catalog.as_ref().ok_or("A catalog is required for incremental/differential backups")?;
+        cat.since_utime(client_name, &job.name, fileset_name, level)
+    }) {
+        Ok(value) => value,
+        Err(error) => return CommandResult::error(format!("run: {error}\n")),
+    };
+    // Use the effective level's pool after any missing-base upgrade to Full.
+    let default_pool = match level_char {
+        "F" if !job.full_backup_pool.is_empty() => &job.full_backup_pool,
+        "D" if !job.differential_backup_pool.is_empty() => &job.differential_backup_pool,
+        "I" if !job.incremental_backup_pool.is_empty() => &job.incremental_backup_pool,
+        _ => &job.pool,
+    };
+    let pool = ast.arguments.iter().find(|a| a.key == "pool")
+        .and_then(|a| a.value.as_deref()).unwrap_or(default_pool);
 
     let client = client_res.unwrap();
     let storage = storage_res.unwrap();
@@ -111,32 +105,19 @@ pub fn cmd_run(ast: &CommandAst, ctx: &ExecContext) -> CommandResult {
 
     // Create job record in DB — JobId comes from the database
     let job_type_str = match job.job_type { JobType::Backup => "B", JobType::Restore => "R", _ => "B" };
-    let level_char = match level.to_lowercase().as_str() { "full" | "f" => "F", "incremental" | "i" => "I", "differential" | "d" => "D", _ => "F" };
     let job_id = if let Some(cat) = &ctx.catalog {
         match cat.create_job(
             &unique_job, &job.name, job_type_str, level_char,
-            client_name, &pool, &job.fileset, now.timestamp(),
+            client_name, pool, fileset_name, now.timestamp(),
         ) {
             Ok(id) => id as u32,
             Err(e) => {
                 tracing::error!("Failed to create job record: {e}");
-                NEXT_JOB_ID.fetch_add(1, Ordering::Relaxed)
+                return CommandResult::error(format!("Failed to create job record: {e}\n"));
             }
         }
     } else {
         NEXT_JOB_ID.fetch_add(1, Ordering::Relaxed)
-    };
-
-    // Compute since_utime for Incremental/Differential (before fork — needs DB)
-    let (since_utime, prev_job) = match level_char {
-        "I" | "D" => {
-            if let Some(cat) = &ctx.catalog {
-                cat.since_utime(client_name, level_char).unwrap_or((0, String::new()))
-            } else {
-                (0, String::new())
-            }
-        }
-        _ => (0, String::new()),
     };
 
     // Build JobParams for the autonomous worker
@@ -209,10 +190,31 @@ pub fn cmd_run(ast: &CommandAst, ctx: &ExecContext) -> CommandResult {
          FileSet:    {}\n\
          Priority:   {}\n\
          When:       now\n",
-        job.job_type, job.name, job.fileset, job.priority,
+        job.job_type, job.name, fileset_name, job.priority,
     );
 
     CommandResult::ok(output)
+}
+
+/// Decide the effective backup level before creating its catalog record or worker.
+fn backup_level(
+    requested: &str,
+    mut lookup: impl FnMut(&str) -> Result<Option<(i64, String)>, String>,
+) -> Result<(String, &'static str, i64, String), String> {
+    let (name, code) = match requested.to_ascii_lowercase().as_str() {
+        "full" | "f" => ("full", "F"),
+        "incremental" | "i" => ("incremental", "I"),
+        "differential" | "d" => ("differential", "D"),
+        _ => return Err(format!("Unsupported backup level: {requested}")),
+    };
+    if code == "F" { return Ok((name.into(), code, 0, String::new())); }
+    match lookup(code)? {
+        Some((timestamp, previous)) if timestamp > 0 => Ok((name.into(), code, timestamp, previous)),
+        _ => {
+            info!("No matching Full backup chain for {name}; upgrading to Full");
+            Ok(("full".into(), "F", 0, String::new()))
+        }
+    }
 }
 
 pub fn cmd_cancel(ast: &CommandAst, ctx: &ExecContext) -> CommandResult {
@@ -351,4 +353,28 @@ fn now_unix() -> i64 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap_or_default().as_secs() as i64
+}
+
+#[cfg(test)]
+mod backup_level_tests {
+    use super::*;
+
+    #[test]
+    fn valid_incremental_and_differential_keep_their_reference() {
+        for (requested, code) in [("Incremental", "I"), ("D", "D")] {
+            let (_, effective, since, previous) = backup_level(requested, |selected| {
+                assert_eq!(selected, code);
+                Ok(Some((123456, "previous-job".into())))
+            }).unwrap();
+            assert_eq!((effective, since, previous.as_str()), (code, 123456, "previous-job"));
+        }
+    }
+
+    #[test]
+    fn missing_chain_upgrades_but_errors_do_not_become_full_backups() {
+        assert_eq!(backup_level("I", |_| Ok(None)).unwrap().1, "F");
+        assert!(backup_level("D", |_| Err("catalog unavailable".into())).is_err());
+        assert!(backup_level("VirtualFull", |_| panic!("invalid level must not query")).is_err());
+        assert_eq!(backup_level("Full", |_| panic!("full must not query")).unwrap().1, "F");
+    }
 }

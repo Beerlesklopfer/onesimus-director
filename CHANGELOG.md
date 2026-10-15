@@ -23,4 +23,8 @@ onesimus (25.1.2+onesimus.0.2.0-2) UNRELEASED; urgency=medium
   * help/.help: remove terminal styling from Director protocol replies so
     console decoration cannot alter command-response hashes.
 
+  * run: keep incremental/differential backups with a valid reference chain,
+    scoped to client/job/FileSet; upgrade missing Full bases before pool and
+    catalog selection, propagate lookup failures, and honor FileSet/pool overrides.
+
  -- Joerg Bernau <joerg@bernau.family>  Thu, 15 Oct 2026 14:00:00 +0200
