@@ -22,28 +22,6 @@ fn cmd_run_db(ast: &CommandAst, ctx: &ExecContext) -> CommandResult {
         .find(|a| a.key == "job")
         .and_then(|a| a.value.as_deref());
 
-    let job_name = match job_name {
-        Some(name) => name,
-        None => {
-            if let Some(config) = &ctx.config {
-                if let Ok(cfg) = config.read() {
-                    let jobs = crate::director_config::sort_case_insensitive(
-                        cfg.jobs.iter().map(|j| j.name.as_str()));
-                    if jobs.is_empty() {
-                        return CommandResult::ok("No jobs configured\n".to_string());
-                    }
-                    let mut output = String::from("The defined Job resources are:\n");
-                    for (i, name) in jobs.iter().enumerate() {
-                        output.push_str(&format!("     {}. {name}\n", i + 1));
-                    }
-                    output.push_str("Select Job resource (1): ");
-                    return CommandResult::ok(output);
-                }
-            }
-            return CommandResult::ok("run: specify job=<name>\n".to_string());
-        }
-    };
-
     let config = match &ctx.config {
         Some(c) => match c.read() {
             Ok(c) => c,
@@ -52,10 +30,42 @@ fn cmd_run_db(ast: &CommandAst, ctx: &ExecContext) -> CommandResult {
         None => return CommandResult::error("No config loaded\n".to_string()),
     };
 
-    let job = match config.find_job(job_name) {
+    // ua_run.cc ScanCommandLineArguments: a missing or unknown job leads to
+    // select_job_resource (ua_select.cc), never to a default job (C-012).
+    let mut shown = String::new();
+    let job = match job_name.and_then(|name| config.find_job(name))
+        .filter(|job| crate::acl::access(ctx, crate::acl::Kind::Job, &job.name)) {
         Some(j) => j.clone(),
-        None => return CommandResult::error(format!("Job '{job_name}' not found\n")),
+        None => {
+            match job_name {
+                Some(name) if !name.is_empty() => shown.push_str(&format!("Job \"{name}\" not found\n")),
+                Some(_) => {}
+                None => shown.push_str("A job name must be specified.\n"),
+            }
+            let jobs = crate::director_config::sort_case_insensitive(config.jobs.iter()
+                .map(|j| j.name.as_str()).filter(|name| crate::acl::access(ctx, crate::acl::Kind::Job, name)))
+                .into_iter().map(str::to_string).collect();
+            match super::prompt::select_resource(ctx, "The defined Job resources are:\n", "Job",
+                "Select Job resource", jobs) {
+                Ok((name, text)) => {
+                    shown.push_str(&text);
+                    config.find_job(&name).cloned().expect("selected from the configured jobs")
+                }
+                Err(result) => return crate::ua_db::with_prefix(shown, result),
+            }
+        }
     };
+    crate::ua_db::with_prefix(shown, run_selected(ast, ctx, config, job))
+}
+
+fn run_selected(
+    ast: &CommandAst,
+    ctx: &ExecContext,
+    config: std::sync::RwLockReadGuard<'_, crate::director_config::DirectorConfig>,
+    job: bareos_config::resources::JobResource,
+) -> CommandResult {
+    let job_name = job.name.as_str();
+    let yes = ast.arguments.iter().any(|a| a.key.eq_ignore_ascii_case("yes"));
 
     if !job.enabled {
         return CommandResult::error(format!("Job '{job_name}' is disabled\n"));
@@ -83,6 +93,14 @@ fn cmd_run_db(ast: &CommandAst, ctx: &ExecContext) -> CommandResult {
     if client_res.is_none() { return CommandResult::error(format!("Client '{client_name}' not found\n")); }
     if storage_res.is_none() { return CommandResult::error(format!("Storage '{storage_name}' not found\n")); }
     if fileset_res.is_none() { return CommandResult::error(format!("FileSet '{fileset_name}' not found\n")); }
+
+    // ua_run.cc:408 — without `yes` the job parameters are shown and the
+    // console is asked "OK to run? (yes/mod/no): " (GetCmd, ua_run.cc:434).
+    // Nothing is created or started before the answer (C-012).
+    if !yes {
+        return super::prompt::selection_required(format!("{}OK to run? (yes/mod/no): ",
+            run_parameters(ast, &job, requested_level, client_name, fileset_name, storage_name)));
+    }
 
     let (level, level_char, since_utime, prev_job) = match backup_level(requested_level, |level| {
         let cat = ctx.catalog.as_ref().ok_or("A catalog is required for incremental/differential backups")?;
@@ -200,6 +218,38 @@ fn cmd_run_db(ast: &CommandAst, ctx: &ExecContext) -> CommandResult {
     );
 
     CommandResult::ok(output)
+}
+
+/// DisplayJobParameters (ua_run.cc:1223) for the console, before any
+/// override is applied; the job type selects the upstream title.
+fn run_parameters(ast: &CommandAst, job: &bareos_config::resources::JobResource, level: &str,
+    client: &str, fileset: &str, storage: &str) -> String {
+    if !matches!(job.job_type, JobType::Backup) {
+        return String::new();
+    }
+    let level = match level.to_ascii_lowercase().as_str() {
+        "full" | "f" => "Full",
+        "incremental" | "i" => "Incremental",
+        "differential" | "d" => "Differential",
+        _ => level,
+    };
+    let arg = |key: &str| ast.arguments.iter().find(|a| a.key.eq_ignore_ascii_case(key))
+        .and_then(|a| a.value.as_deref());
+    // job.cc:1225 ApplyPoolOverrides / ua_run.cc:818 pool sources.
+    let (pool, pool_source) = match arg("pool") {
+        Some(pool) => (pool, "command line"),
+        None => match level {
+            "Full" if !job.full_backup_pool.is_empty() => (job.full_backup_pool.as_str(), "Job FullPool override"),
+            "Incremental" if !job.incremental_backup_pool.is_empty() => (job.incremental_backup_pool.as_str(), "Job IncPool override"),
+            "Differential" if !job.differential_backup_pool.is_empty() => (job.differential_backup_pool.as_str(), "Job DiffPool override"),
+            _ => (job.pool.as_str(), "Job resource"),
+        },
+    };
+    let storage_source = if arg("storage").is_some() { "command line" } else { "Job resource" };
+    format!("Run Backup job\nJobName:  {}\nLevel:    {level}\nClient:   {client}\nFormat:   Native\n\
+             FileSet:  {fileset}\nPool:     {pool} (From {pool_source})\nStorage:  {storage} (From {storage_source})\n\
+             When:     {}\nPriority: {}\n",
+        job.name, chrono::Local::now().format("%Y-%m-%d %H:%M:%S"), job.priority)
 }
 
 /// Decide the effective backup level before creating its catalog record or worker.
@@ -428,6 +478,53 @@ mod error_text_tests {
         assert_eq!(cancel("cancel ujobid=nosuch").text_output,
             "Warning Job nosuch is not running. Continuing anyway ...\nNo Jobs running.\n");
         assert_eq!((str_to_int64(" 12abc"), str_to_int64("-3"), str_to_int64("abc")), (12, -3, 0));
+    }
+}
+
+#[cfg(test)]
+mod run_confirmation_tests {
+    use super::*;
+    use std::sync::{Arc, RwLock};
+
+    fn context(jobs: &str) -> ExecContext {
+        let config = crate::director_config::DirectorConfig::from_str(&format!(
+            "Director {{ Name = dir }}\nClient {{ Name = fd; Address = localhost; Password = x }}\n\
+             Storage {{ Name = File; Address = localhost; Password = x; Device = d; Media Type = File }}\n\
+             FileSet {{ Name = fs; Include {{ File = /etc }} }}\nPool {{ Name = Full; Pool Type = Backup }}\n{jobs}"
+        )).unwrap();
+        ExecContext { session_id: 0, config: Some(Arc::new(RwLock::new(config))),
+            session_mgr: None, catalog: None, api_mode: crate::command_executor::ApiMode::Human,
+            bus_rx: None, job_manager: None }
+    }
+
+    const JOB: &str = "Job { Name = b1; Type = Backup; Level = Incremental; Client = fd; FileSet = fs; Storage = File; Pool = Full; Messages = m; Priority = 10 }";
+
+    fn run(line: &str, ctx: &ExecContext) -> CommandResult {
+        cmd_run_db(&crate::session::parse_cli_command(line), ctx)
+    }
+
+    #[test]
+    fn missing_or_unknown_job_ends_in_the_selection() {
+        let ctx = context(&format!("{JOB}\n{}", JOB.replace("b1", "A2")));
+        assert_eq!(run("run", &ctx).text_output,
+            "A job name must be specified.\nThe defined Job resources are:\n1: A2\n2: b1\nSelect Job resource (1-2): ");
+        assert_eq!(run("run job=nosuch yes", &ctx).text_output,
+            "Job \"nosuch\" not found\nThe defined Job resources are:\n1: A2\n2: b1\nSelect Job resource (1-2): ");
+    }
+
+    #[test]
+    fn job_without_yes_is_only_displayed() {
+        let ctx = context(JOB);
+        let result = run("run job=b1", &ctx);
+        assert!(result.success);
+        assert!(result.text_output.starts_with("Run Backup job\nJobName:  b1\nLevel:    Incremental\nClient:   fd\n\
+            Format:   Native\nFileSet:  fs\nPool:     Full (From Job resource)\nStorage:  File (From Job resource)\nWhen:     "),
+            "{}", result.text_output);
+        assert!(result.text_output.ends_with("Priority: 10\nOK to run? (yes/mod/no): "));
+        // A single job is selected automatically, but still not started.
+        let result = run("run", &ctx);
+        assert!(result.text_output.starts_with("A job name must be specified.\nAutomatically selected Job: b1\nRun Backup job\n"));
+        assert!(result.text_output.ends_with("OK to run? (yes/mod/no): "));
     }
 }
 
