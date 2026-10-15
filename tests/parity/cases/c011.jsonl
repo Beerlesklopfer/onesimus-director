@@ -11,8 +11,8 @@
 {"id": "c011-purge-volume-cancel", "steps": ["purge volume", "."]}
 {"id": "c011-delete-cancel", "steps": ["delete", "."]}
 {"id": "c011-delete-volume-cancel", "steps": ["delete", "1", "."]}
-{"id": "c011-delete-jobid-cancel", "steps": ["delete", "2", "."]}
-{"id": "c011-delete-pool-cancel", "steps": ["delete", "3", "."]}
+{"id": "c011-delete-menu-pool-cancel", "steps": ["delete", "2", "."]}
+{"id": "c011-delete-menu-jobid-cancel", "steps": ["delete", "3", "."]}
 {"id": "c011-update-cancel", "steps": ["update", "."]}
 {"id": "c011-update-volume-cancel", "steps": ["update", "1", "."]}
 {"id": "c011-update-pool-cancel", "steps": ["update", "2", "."]}
@@ -61,3 +61,14 @@
 {"id": "c011-purge-quota-cancel", "steps": ["purge quota", "."]}
 {"id": "c011-purge-volume-select-cancel", "steps": ["purge volume", "2", "."]}
 {"id": "c011-purge-api1-cancel", "setup": [".api 1"], "steps": ["purge", "."]}
+{"id": "c011-delete-jobid-cancel", "steps": ["delete jobid", "x", "."]}
+{"id": "c011-delete-pool-cancel", "steps": ["delete pool", "."]}
+{"id": "c011-delete-volume-pool-cancel", "steps": ["delete volume", "2", "."]}
+{"id": "c011-delete-volume-unknown", "steps": ["delete volume", "2", "nosuchvol"]}
+{"id": "c011-delete-volume-star-unknown", "steps": ["delete volume", "2", "*99999"]}
+{"id": "c011-delete-volname-unknown", "steps": ["delete volume=nosuchvol"]}
+{"id": "c011-delete-storage-empty", "steps": ["delete storage", "."]}
+{"id": "c011-delete-api1-cancel", "setup": [".api 1"], "steps": ["delete", "."]}
+{"id": "c011-create-unknown-cancel", "steps": ["create pool=nosuch", "."]}
+{"id": "c011-add-pool-badnumber-cancel", "steps": ["add pool=Full", "x", "."]}
+{"id": "c011-add-api1-cancel", "setup": [".api 1"], "steps": ["add", "."]}
