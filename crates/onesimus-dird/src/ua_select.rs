@@ -135,6 +135,7 @@ impl<'a> Ua<'a> {
     }
 
     /// True when a console is attached (C++ `ua->UA_sock != nullptr`).
+    #[allow(dead_code)]
     pub fn has_console(&self) -> bool {
         has_console()
     }
@@ -280,7 +281,8 @@ impl<'a> Ua<'a> {
     }
 
     /// C++ GetConfirmation(): `yes` argument, else ask (never in API or
-    /// batch mode); without console `fallback`.
+    /// batch mode); without console `fallback`. (Truncate, C-012.)
+    #[allow(dead_code)]
     pub fn get_confirmation(&mut self, ast: &CommandAst, prompt: &str, fallback: bool) -> bool {
         if find_arg(ast, "yes").is_some() {
             return true;
@@ -562,7 +564,8 @@ pub fn select_job_resource(ua: &mut Ua) -> Option<String> {
     select_from(ua, names, Kind::Job, "The defined Job resources are:\n", "Job", "Select Job resource")
 }
 
-/// C++ select_restore_job_resource().
+/// C++ select_restore_job_resource() (for the restore dialog, C-021).
+#[allow(dead_code)]
 pub fn select_restore_job_resource(ua: &mut Ua) -> Option<String> {
     use bareos_config::resources::JobType;
     let names = resource_names(ua.ctx, |c| c.jobs.iter()
@@ -609,17 +612,6 @@ pub(crate) fn is_autochanger(config: &crate::director_config::DirectorConfig, st
         .and_then(|r| r.directives.iter().find(|d| d.norm_key() == "autochanger"))
         .and_then(|d| d.values().first().map(|v| matches!(v.to_ascii_lowercase().as_str(), "yes" | "true")))
         .unwrap_or(false)
-}
-
-/// C++ get_catalog_resource()'s prompt part (no `catalog=`, not gui).
-pub fn select_catalog_resource(ua: &mut Ua) -> Option<String> {
-    let names = resource_names(ua.ctx, |c| c.catalogs.iter().map(|x| x.name.clone()).collect());
-    // Catalogs are listed in chain order (no SortCaseInsensitive).
-    ua.start_prompt("The defined Catalog resources are:\n");
-    for name in names.iter().filter(|n| acl::access(ua.ctx, Kind::Catalog, n)) {
-        ua.add_prompt(name);
-    }
-    ua.do_prompt("Catalog", "Select Catalog resource").map(|(_, name)| name)
 }
 
 /// C++ get_client_resource(): `client=`/`fd=` or the selection list.
@@ -704,12 +696,11 @@ pub fn get_storage_resource(ua: &mut Ua, ast: &CommandAst, use_default: bool, au
     if let Some(name) = store_name.filter(|n| !n.is_empty()) {
         let exists = resource_names(ctx, |c| c.storages.iter().map(|s| s.name.clone()).collect())
             .iter().any(|n| *n == name);
+        // GetStoreResWithName applies the Storage ACL (ua_acl.cc:279).
         if exists && acl::access(ctx, Kind::Storage, &name) {
             return Some(name);
         }
-        if !exists {
-            ua.error_msg(format!("Storage resource \"{name}\": not found\n"));
-        }
+        ua.error_msg(format!("Storage resource \"{name}\": not found\n"));
     }
     select_storage_resource(ua, autochangers_only)
 }
