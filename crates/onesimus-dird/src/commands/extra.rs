@@ -165,20 +165,23 @@ pub fn cmd_show(ast: &CommandAst, ctx: &ExecContext) -> CommandResult {
     CommandResult::ok("No config\n".to_string())
 }
 
+/// C++ ua_cmds.cc TraceCmd(): with not exactly one argument the value is
+/// asked for (GetCmd "Turn on or off? "); anything but "off" turns tracing
+/// on. No answer (lone dot, batch mode) changes nothing. Silent.
 pub fn cmd_trace(ast: &CommandAst, ctx: &ExecContext) -> CommandResult {
-    if ast.arguments.len() != 1 || ast.arguments[0].value.is_some() {
-        return CommandResult::error("trace: specify on or off\n".into());
-    }
-    let enabled = match ast.arguments[0].key.to_ascii_lowercase().as_str() {
-        "on" => true,
-        "off" => false,
-        _ => return CommandResult::error("trace: specify on or off\n".into()),
+    let mut ua = crate::ua_select::Ua::new(ctx);
+    let onoff = match ast.arguments.as_slice() {
+        [arg] => arg.key.clone(),
+        _ => match ua.get_cmd("Turn on or off? ") {
+            Some(answer) => answer,
+            None => return ua.finish(true),
+        },
     };
     let path = trace_path(ctx);
-    match bareos_bnet::debug::set_trace(&path, enabled) {
-        Ok(()) => CommandResult::ok(String::new()),
-        Err(error) => CommandResult::error(format!("trace: {}: {error}\n", path.display())),
+    if let Err(error) = bareos_bnet::debug::set_trace(&path, !onoff.eq_ignore_ascii_case("off")) {
+        ua.error_msg(format!("trace: {}: {error}\n", path.display()));
     }
+    ua.finish(true)
 }
 
 pub(crate) fn trace_path(ctx: &ExecContext) -> std::path::PathBuf {
@@ -952,13 +955,21 @@ mod trace_command_tests {
     use super::*;
 
     #[test]
-    fn invalid_trace_input_does_not_change_trace_state() {
+    fn trace_without_argument_asks_and_cancel_changes_nothing() {
         let ctx = ExecContext { session_id: 0, config: None, session_mgr: None,
             catalog: None, api_mode: crate::command_executor::ApiMode::Human,
             bus_rx: None, job_manager: None };
         let before = bareos_bnet::debug::trace_enabled();
-        for line in ["trace", "trace maybe", "trace on off", "trace on=yes"] {
-            assert!(!cmd_trace(&crate::session::parse_cli_command(line), &ctx).success);
+        for line in ["trace", "trace on off"] {
+            // Batch mode (no console): no question, no change, no output.
+            let result = cmd_trace(&crate::session::parse_cli_command(line), &ctx);
+            assert!(result.success && result.text_output.is_empty() && result.error_message.is_empty());
+            let (result, console) = crate::ua_select::tests::scripted(&["."], || {
+                cmd_trace(&crate::session::parse_cli_command(line), &ctx)
+            });
+            assert!(result.success);
+            assert_eq!(console.transcript(), "Turn on or off? .\n");
+            assert_eq!(console.signals(), vec![bareos_bnet::BnetSignal::SubPrompt]);
         }
         assert_eq!(bareos_bnet::debug::trace_enabled(), before);
     }
