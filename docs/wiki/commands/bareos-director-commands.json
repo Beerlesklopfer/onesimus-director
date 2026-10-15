@@ -783,11 +783,11 @@
     },
     {
       "path": "crates/onesimus-dird/src/job_worker.rs",
-      "sha256": "3aeeae4ed61ecea9ad8a1f150cc3c70a16c600e2d86116fc661b8a0c7afc7eaa"
+      "sha256": "bb195971b7fccd418f585d564497788e1eee2dd1d4d0508a137235f0c79255df"
     },
     {
       "path": "crates/onesimus-dird/src/logging.rs",
-      "sha256": "cd3e141a6a699cc982158c346ba75a1d2c19f84ca2d7250f72a9c1e118ff553e"
+      "sha256": "48631c609d6553eef60cd74208618e1371363ec0d1b1ba6f377594056dc11730"
     },
     {
       "path": "crates/onesimus-dird/src/main.rs",

@@ -791,8 +791,11 @@ pub fn spawn_job_worker(job_id: u32, job_name: &str, params: &JobParams) -> io::
     let (w2d_r, w2d_w) = pipe().map_err(|e| io::Error::new(io::ErrorKind::Other, e))?;
     let (d2w_r, d2w_w) = pipe().map_err(|e| io::Error::new(io::ErrorKind::Other, e))?;
 
+    // Prevent inheriting a reload-layer write lock held by another thread.
+    let logging_guard = crate::logging::guard_reload_for_fork();
     match unsafe { fork() } {
         Ok(ForkResult::Parent { child }) => {
+            drop(logging_guard);
             drop(w2d_w); drop(d2w_r);
             let from_worker = unsafe { std::fs::File::from_raw_fd(w2d_r.into_raw_fd()) };
             let to_worker = unsafe { std::fs::File::from_raw_fd(d2w_w.into_raw_fd()) };
@@ -801,6 +804,7 @@ pub fn spawn_job_worker(job_id: u32, job_name: &str, params: &JobParams) -> io::
                 from_worker: Some(from_worker), to_worker: Some(to_worker) })
         }
         Ok(ForkResult::Child) => {
+            drop(logging_guard);
             drop(w2d_r); drop(d2w_w);
             // Close inherited FDs (TCP listener etc)
             let keep = [w2d_w.as_raw_fd(), d2w_r.as_raw_fd()];

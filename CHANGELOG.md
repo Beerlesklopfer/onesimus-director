@@ -51,4 +51,7 @@ onesimus (25.1.2+onesimus.0.2.0-2) UNRELEASED; urgency=medium
     preserve Bareos IPv4/IPv6 output and multi-frame daemon replies, reuse
     authenticated connections, and report unknown targets or resolution failures.
 
+  * Serialize diagnostic-filter reloads with worker forks so children cannot
+    inherit an exclusive reload lock from another Director thread.
+
  -- Joerg Bernau <Joerg.Bernau@onesimus.io>  Thu, 15 Oct 2026 14:00:00 +0200

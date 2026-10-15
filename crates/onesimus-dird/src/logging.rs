@@ -1,6 +1,13 @@
 //! Reload the daemon's tracing filter when the console changes debug level.
-use std::sync::OnceLock;
+use std::sync::{Mutex, MutexGuard, OnceLock};
 use tracing_subscriber::{EnvFilter, Registry, reload};
+
+static RELOAD_AND_FORK: Mutex<()> = Mutex::new(());
+
+/// Do not inherit the reload layer while another thread holds its write lock.
+pub fn guard_reload_for_fork() -> MutexGuard<'static, ()> {
+    RELOAD_AND_FORK.lock().unwrap_or_else(|poison| poison.into_inner())
+}
 
 static FILTER: OnceLock<reload::Handle<EnvFilter, Registry>> = OnceLock::new();
 
@@ -9,6 +16,7 @@ pub fn install(handle: reload::Handle<EnvFilter, Registry>) {
 }
 
 pub fn set_level(level: u32) -> Result<(), String> {
+    let _guard = guard_reload_for_fork();
     if let Some(handle) = FILTER.get() {
         apply_filter(handle, level)?;
     }
