@@ -601,7 +601,7 @@ pub fn select_storage_resource(ua: &mut Ua, autochanger_only: bool) -> Option<St
 }
 
 /// `Auto Changer = yes` of a Storage resource (raw configuration view).
-fn is_autochanger(config: &crate::director_config::DirectorConfig, storage: &str) -> bool {
+pub(crate) fn is_autochanger(config: &crate::director_config::DirectorConfig, storage: &str) -> bool {
     config.raw.iter()
         .find(|r| r.norm_type() == "storage" && r.name() == Some(storage))
         .and_then(|r| r.directives.iter().find(|d| d.norm_key() == "autochanger"))
@@ -649,6 +649,111 @@ pub fn get_pool_resource(ua: &mut Ua, ast: &CommandAst) -> Option<String> {
         }
     }
     select_pool_resource(ua)
+}
+
+/// C++ get_storage_resource(ua, use_default, autochangers_only): `storage=`/
+/// `sd=`, with `use_default` also a bare keyword (except barcode(s),
+/// encrypt, scan, slots, alldrives; "?" forces the list), `jobid=`/`job=`/
+/// `ujobid=` of running jobs (Onesimus keeps no storage per running job:
+/// they count as not running), else select_storage_resource.
+pub fn get_storage_resource(ua: &mut Ua, ast: &CommandAst, use_default: bool, autochangers_only: bool) -> Option<String> {
+    let ctx = ua.ctx;
+    let mut store_name: Option<String> = None;
+    for arg in &ast.arguments {
+        if arg.key.is_empty() {
+            continue;
+        }
+        if use_default && arg.value.is_none() {
+            if ["barcode", "barcodes", "encrypt", "scan", "slots", "alldrives"].iter()
+                .any(|k| arg.key.eq_ignore_ascii_case(k)) {
+                continue;
+            }
+            if store_name.is_some() {
+                ua.error_msg("Storage name given twice.\n");
+                return None;
+            }
+            if arg.key.starts_with('?') {
+                store_name = Some(String::new());
+                break;
+            }
+            store_name = Some(arg.key.clone());
+        } else if arg.key.eq_ignore_ascii_case("storage") || arg.key.eq_ignore_ascii_case("sd") {
+            store_name = arg.value.clone();
+            break;
+        } else if arg.key.eq_ignore_ascii_case("jobid") {
+            let jobid = crate::commands::job::str_to_int64(arg.value.as_deref().unwrap_or(""));
+            if jobid <= 0 {
+                ua.error_msg(format!("Expecting jobid=nn command, got: {}\n", arg.key));
+            } else {
+                ua.error_msg(format!("JobId {jobid} is not running.\n"));
+            }
+            return None;
+        } else if ["job", "jobname", "ujobid"].iter().any(|k| arg.key.eq_ignore_ascii_case(k)) {
+            match &arg.value {
+                None => {
+                    let what = if arg.key.eq_ignore_ascii_case("ujobid") { "ujobid" } else { "job" };
+                    ua.error_msg(format!("Expecting {what}=xxx, got: {}.\n", arg.key));
+                }
+                Some(name) => ua.error_msg(format!("Job \"{name}\" is not running.\n")),
+            }
+            return None;
+        }
+    }
+    if let Some(name) = store_name.filter(|n| !n.is_empty()) {
+        let exists = resource_names(ctx, |c| c.storages.iter().map(|s| s.name.clone()).collect())
+            .iter().any(|n| *n == name);
+        if exists && acl::access(ctx, Kind::Storage, &name) {
+            return Some(name);
+        }
+        if !exists {
+            ua.error_msg(format!("Storage resource \"{name}\": not found\n"));
+        }
+    }
+    select_storage_resource(ua, autochangers_only)
+}
+
+/// C++ GetMediaType(): `mediatype=` or the media types of the storages.
+pub fn get_media_type(ua: &mut Ua, ast: &CommandAst) -> Option<String> {
+    if let Some(media_type) = find_arg_with_value(ast, "mediatype") {
+        return Some(media_type.to_string());
+    }
+    let ctx = ua.ctx;
+    let storages: Vec<(String, String)> = ctx.config.as_ref().and_then(|c| c.read().ok())
+        .map(|c| c.storages.iter().map(|s| (s.name.clone(), s.media_type.clone())).collect())
+        .unwrap_or_default();
+    ua.start_prompt("Media Types defined in conf file:\n");
+    for (name, media_type) in &storages {
+        if acl::access(ctx, Kind::Storage, name) {
+            ua.add_prompt(media_type);
+        }
+    }
+    ua.do_prompt("Media Type", "Select the Media Type").map(|(_, media_type)| media_type)
+}
+
+/// C++ ua_label.cc IsVolumeNameLegal() with its ErrorMsg texts.
+pub fn is_volume_name_legal(ua: &mut Ua, name: &str) -> bool {
+    if name.starts_with('/') {
+        ua.error_msg("Volume name can not start with \"/\".\n");
+        return false;
+    }
+    if let Some(c) = name.chars().find(|c| !(c.is_ascii_alphanumeric() || ":.-_/".contains(*c))) {
+        ua.error_msg(format!("Illegal character \"{c}\" in a volume name.\n"));
+        return false;
+    }
+    if name.len() >= 128 {
+        ua.error_msg("Volume name too long.\n");
+        return false;
+    }
+    if name.is_empty() {
+        ua.error_msg("Volume name must be at least one character long.\n");
+        return false;
+    }
+    true
+}
+
+/// C++ Is_a_number().
+pub fn is_a_number(text: &str) -> bool {
+    parse_number(text).is_some()
 }
 
 // ---------------------------------------------------------------------------
