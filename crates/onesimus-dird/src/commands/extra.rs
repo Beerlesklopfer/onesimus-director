@@ -197,14 +197,16 @@ fn cmd_var_db(ast: &CommandAst, _ctx: &ExecContext) -> CommandResult {
     CommandResult::ok(format!("Variable {name}: undefined\n"))
 }
 
+/// `whoami` — the name of the resource behind the console's ACL (the named
+/// Console), or `root` for the default console (ua_cmds.cc WhoAmICmd).
 pub fn cmd_whoami(_ast: &CommandAst, ctx: &ExecContext) -> CommandResult {
-    if let Some(smgr) = &ctx.session_mgr {
-        let sessions = smgr.get_session_names();
-        if let Some((_, name)) = sessions.iter().find(|(id, _)| *id == ctx.session_id) {
-            return CommandResult::ok(format!("{name}\n"));
-        }
-    }
-    CommandResult::ok("*UserAgent*\n".to_string())
+    let name = ctx.session_mgr.as_ref()
+        .and_then(|smgr| smgr.get_session_names().into_iter()
+            .find(|(id, _)| *id == ctx.session_id).map(|(_, name)| name))
+        .filter(|name| name != crate::director_config::USER_AGENT_CONSOLE)
+        .unwrap_or_else(|| "root".to_string());
+    CommandResult::ok(format!("{name}\n"))
+        .with_json(serde_json::json!({ "whoami": name }))
 }
 
 pub fn cmd_use(ast: &CommandAst, ctx: &ExecContext) -> CommandResult {
@@ -634,6 +636,7 @@ mod trace_command_tests {
 }
 
 #[cfg(test)]
+<<<<<<< HEAD
 mod toggle_tests {
     use super::*;
     use crate::session::parse_cli_command;
@@ -701,5 +704,30 @@ mod toggle_tests {
         assert!(!mgr.session_automount(ctx.session_id));
         run("automount on");
         assert!(mgr.session_automount(ctx.session_id));
+=======
+mod whoami_tests {
+    use super::*;
+    use std::sync::Arc;
+
+    fn whoami(console: &str) -> CommandResult {
+        let manager = Arc::new(crate::session_manager::SessionManager::new(Arc::new(
+            crate::message_bus::MessageBus::new(16),
+        )));
+        let id = manager.create_session(console);
+        let ctx = ExecContext { session_id: id, config: None, session_mgr: Some(manager),
+            catalog: None, api_mode: crate::command_executor::ApiMode::Human,
+            bus_rx: None, job_manager: None };
+        cmd_whoami(&crate::session::parse_cli_command("whoami"), &ctx)
+    }
+
+    #[test]
+    fn default_console_is_root_and_named_console_is_its_name() {
+        let root = whoami("*UserAgent*");
+        assert_eq!(root.text_output, "root\n");
+        assert_eq!(root.json, Some(serde_json::json!({"whoami": "root"})));
+        let named = whoami("operator");
+        assert_eq!(named.text_output, "operator\n");
+        assert_eq!(named.json, Some(serde_json::json!({"whoami": "operator"})));
+>>>>>>> 1c62bbb (fix(whoami): print root for the default console)
     }
 }

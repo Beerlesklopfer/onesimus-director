@@ -1,0 +1,7 @@
+# C-010 whoami: user_acl resource name, "root" for the default console (ua_cmds.cc:2754 WhoAmICmd).
+{"id": "c010-whoami-default", "steps": ["whoami"]}
+{"id": "c010-whoami-named", "steps": ["whoami"], "console": "parity-operator", "password": "parity-operator-pw"}
+{"id": "c010-whoami-limited", "steps": ["whoami"], "console": "parity-limited", "password": "parity-limited-pw"}
+{"id": "c010-whoami-json", "steps": ["whoami"], "setup": [".api 2"]}
+{"id": "c010-whoami-json-named", "steps": ["whoami"], "setup": [".api 2"], "console": "parity-operator", "password": "parity-operator-pw"}
+{"id": "c010-whoami-api1", "steps": ["whoami"], "setup": [".api 1"]}
