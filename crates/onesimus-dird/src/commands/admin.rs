@@ -262,7 +262,60 @@ pub fn cmd_restore(ast: &CommandAst, ctx: &ExecContext) -> CommandResult {
     crate::ua_db::with_client_db(ast, ctx, true, || cmd_restore_db(ast, ctx))
 }
 
+/// Keywords of UserSelectJobidsOrFiles (ua_restore.cc:510).
+const RESTORE_KEYWORDS: &[&str] = &["jobid", "current", "before", "file", "directory", "select",
+    "pool", "all", "fileregex", "client", "storage", "fileset", "where", "yes", "bootstrap", "done",
+    "strip_prefix", "add_prefix", "add_suffix", "regexwhere", "restoreclient", "copies", "comment",
+    "restorejob", "replace", "pluginoptions", "archive"];
+
+/// The parts of RestoreCmd (ua_restore.cc:103) that decide whether a
+/// restore may start without console interaction. Only `jobid=… all done
+/// yes` is fully specified; everything else stops where upstream would ask
+/// (C-012). Returns None when the restore may proceed.
+fn restore_needs_dialog(ast: &CommandAst) -> Option<CommandResult> {
+    use super::prompt::{prompt_list, selection_required};
+    for arg in &ast.arguments {
+        if !RESTORE_KEYWORDS.contains(&arg.key.to_ascii_lowercase().as_str()) {
+            return Some(CommandResult::error(format!("Unknown keyword: {}\n", arg.key)));
+        }
+    }
+    let flag = |key: &str| ast.arguments.iter().any(|a| a.key.eq_ignore_ascii_case(key));
+    if ["file", "directory", "select", "fileregex", "before", "current"].iter().any(|k| flag(k)) {
+        // File/date selections need GetClientName and further dialogs.
+        return Some(selection_required(String::new()));
+    }
+    if get_arg(ast, "jobid").is_none() {
+        // ua_restore.cc:648 job selection menu.
+        let choices: Vec<String> = ["List last 20 Jobs run", "List Jobs where a given File is saved",
+            "Enter list of comma separated JobIds to select", "Enter SQL list command",
+            "Select the most recent backup for a client", "Select backup for a client before a specified time",
+            "Enter a list of files to restore", "Enter a list of files to restore before a specified time",
+            "Find the JobIds of the most recent backup for a client",
+            "Find the JobIds for a backup for a client before a specified time",
+            "Enter a list of directories to restore for found JobIds",
+            "Select full restore to a specified Job date", "Cancel"].iter().map(|s| s.to_string()).collect();
+        return Some(selection_required(format!(
+            "\nFirst you select one or more JobIds that contain files\n\
+             to be restored. You will be presented several methods\n\
+             of specifying the JobIds. Then you will be allowed to\n\
+             select which files from those JobIds are to be restored.\n\n{}",
+            prompt_list("To select the JobIds, you have the following choices:\n", &choices, "Select item: "))));
+    }
+    if !flag("all") || !flag("done") {
+        // BuildDirectoryTree (ua_restore.cc:1294): file selection in the tree.
+        return Some(selection_required(String::new()));
+    }
+    if !flag("yes") {
+        // RunCmd of the generated restore job: "OK to run? (yes/mod/no): ".
+        return Some(selection_required("OK to run? (yes/mod/no): ".into()));
+    }
+    None
+}
+
 fn cmd_restore_db(ast: &CommandAst, ctx: &ExecContext) -> CommandResult {
+    if let Some(result) = restore_needs_dialog(ast) {
+        return result;
+    }
     let where_path = get_arg(ast, "where").unwrap_or("/tmp/bareos-restore");
     let client_arg = get_arg(ast, "client");
     let jobid_arg = get_arg(ast, "jobid");
@@ -756,6 +809,29 @@ pub(crate) mod side_effect_tests {
             assert_eq!(result.error_message, expected, "{line}");
         }
         // Unknown storage: upstream opens the storage selection; nothing is done.
+        let result = truncate_with(&crate::session::parse_cli_command("truncate volstatus=Purged storage=Nope"),
+            &ctx, |_, _| panic!("must not contact the SD"));
+        assert!(result.success && result.error_message.is_empty());
+    }
+
+    #[test]
+    fn restore_starts_nothing_until_fully_specified() {
+        for line in ["restore", "restore client=fd", "restore jobid=1", "restore jobid=1 all",
+            "restore jobid=1 done", "restore jobid=1 all done", "restore file=/etc/passwd yes",
+            "restore select all done yes"] {
+            let result = restore_needs_dialog(&crate::session::parse_cli_command(line));
+            assert!(result.is_some_and(|r| r.success), "{line}");
+        }
+        assert!(restore_needs_dialog(&crate::session::parse_cli_command("restore")).unwrap().text_output
+            .ends_with("12: Select full restore to a specified Job date\n13: Cancel\nSelect item:  (1-13): "));
+        assert_eq!(restore_needs_dialog(&crate::session::parse_cli_command("restore help")).unwrap().error_message,
+            "Unknown keyword: help\n");
+        assert_eq!(restore_needs_dialog(&crate::session::parse_cli_command("restore jobid=1 all done yes")).map(|r| r.text_output), None);
+    }
+
+    #[test]
+    fn truncate_unknown_storage_is_a_selection() {
+        let ctx = context();
         let result = truncate_with(&crate::session::parse_cli_command("truncate volstatus=Purged storage=Nope"),
             &ctx, |_, _| panic!("must not contact the SD"));
         assert!(result.success && result.error_message.is_empty());
