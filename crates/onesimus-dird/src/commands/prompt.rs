@@ -136,6 +136,36 @@ pub fn select_storage(ast: &crate::command_ast::CommandAst, ctx: &ExecContext, a
     }
 }
 
+/// get_client_resource (ua_select.cc:506): `client=`/`fd=` names an
+/// accessible client, otherwise select_client_resource offers them.
+pub fn select_client(ast: &crate::command_ast::CommandAst, ctx: &ExecContext)
+    -> Result<(String, String), CommandResult> {
+    use crate::acl::{access, Kind};
+    let Some(config) = ctx.config.as_ref().and_then(|c| c.read().ok()) else {
+        return Err(CommandResult::error("No config\n".into()));
+    };
+    let mut errors = String::new();
+    if let Some(name) = ast.arguments.iter()
+        .find(|a| (a.key.eq_ignore_ascii_case("client") || a.key.eq_ignore_ascii_case("fd")) && a.value.is_some())
+        .and_then(|a| a.value.as_deref()) {
+        if config.find_client(name).is_some() && access(ctx, Kind::Client, name) {
+            return Ok((name.to_string(), String::new()));
+        }
+        errors = format!("Error: Client resource {name} does not exist.\n");
+    }
+    let names = crate::director_config::sort_case_insensitive(config.clients.iter()
+        .map(|c| c.name.as_str()).filter(|name| access(ctx, Kind::Client, name)))
+        .into_iter().map(str::to_string).collect();
+    match select_resource(ctx, "The defined Client resources are:\n", "Client",
+        "Select Client (File daemon) resource", names) {
+        Ok((name, text)) => Ok((name, format!("{errors}{text}"))),
+        Err(mut result) => {
+            result.text_output.insert_str(0, &errors);
+            Err(result)
+        }
+    }
+}
+
 /// SelectPoolDbr (ua_select.cc) without a usable `pool=`: the catalog pools
 /// in PoolId order (configured pools without a catalog), filtered by the
 /// Pool ACL, under "Defined Pools:" / "Select the Pool".

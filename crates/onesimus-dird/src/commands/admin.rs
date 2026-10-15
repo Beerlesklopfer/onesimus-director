@@ -517,88 +517,162 @@ pub fn cmd_estimate(ast: &CommandAst, ctx: &ExecContext) -> CommandResult {
 
 pub fn cmd_prune(ast: &CommandAst, ctx: &ExecContext) -> CommandResult {
     // C++ ua_prune.cc PruneCmd: OpenClientDb(ua, true) after the Job/Storage ACL restriction checks.
+    // Job/Storage restrictions are refused before the catalog is opened.
+    if let Some(denied) = denied_restriction(ctx, &[(crate::acl::Kind::Job, "job"), (crate::acl::Kind::Storage, "storage")]) {
+        return denied;
+    }
     crate::ua_db::with_client_db(ast, ctx, true, || cmd_prune_db(ast, ctx))
 }
 
+/// `Permission denied: need full %s permission.` (ua_prune.cc:370, ua_purge.cc:71).
+fn denied_restriction(ctx: &ExecContext, kinds: &[(crate::acl::Kind, &str)]) -> Option<CommandResult> {
+    kinds.iter().find(|(kind, _)| crate::acl::has_restrictions(ctx, *kind)).map(|(_, name)|
+        CommandResult::error(format!("Permission denied: need full {name} permission.\n")))
+}
+
+/// First argument naming one of `keywords` (FindArgKeyword, case-insensitive).
+fn find_arg_keyword(ast: &CommandAst, keywords: &[&str]) -> Option<usize> {
+    ast.arguments.iter().find_map(|a| keywords.iter().position(|k| a.key.eq_ignore_ascii_case(k)))
+}
+
+enum PruneAction { Jobs(String, String), Volumes(Option<String>) }
+
+/// PruneCmd (ua_prune.cc:362) decisions before any catalog change: keyword
+/// menu, client selection and the retention confirmation, which only `yes`
+/// skips (ConfirmRetention). C-012.
+fn prune_plan(ast: &CommandAst, ctx: &ExecContext) -> Result<PruneAction, CommandResult> {
+    use super::prompt::{keyword_prompt, select_client, selection_required};
+    const KEYWORDS: [&str; 5] = ["Files", "Jobs", "Volume", "Stats", "Directory"];
+    let yes = ast.arguments.iter().any(|a| a.key.eq_ignore_ascii_case("yes"));
+    let kw = find_arg_keyword(ast, &KEYWORDS).or_else(|| ast.arguments.iter()
+        .any(|a| a.key.len() >= 6 && a.key[..6].eq_ignore_ascii_case("volume")).then_some(2));
+    match kw {
+        None => Err(keyword_prompt("", &KEYWORDS, "Choose item to prune")),
+        Some(0 | 1) => {
+            let (client, shown) = select_client(ast, ctx)?;
+            if !yes {
+                // ConfirmRetention: "The current File/Job retention period is: …"
+                // then GetCmd "Continue? (yes/mod/no): ".
+                return Err(selection_required(format!("{shown}Continue? (yes/mod/no): ")));
+            }
+            Ok(PruneAction::Jobs(client, shown))
+        }
+        Some(2) if yes => Ok(PruneAction::Volumes(get_arg(ast, "pool").map(str::to_string))),
+        // Volume selection (SelectMediaDbr / pool report) and ConfirmRetention.
+        Some(2) => Err(selection_required(String::new())),
+        Some(_) => Err(CommandResult::ok("prune: stats and directory are not supported\n".into())),
+    }
+}
+
 fn cmd_prune_db(ast: &CommandAst, ctx: &ExecContext) -> CommandResult {
-    let what = ast.arguments.first().map(|a| a.key.as_str()).unwrap_or("");
-    let client = get_arg(ast, "client");
-    let pool = get_arg(ast, "pool");
+    let plan = match prune_plan(ast, ctx) {
+        Ok(plan) => plan,
+        Err(result) => return result,
+    };
     let cat = match &ctx.catalog {
         Some(c) => c,
         None => return CommandResult::ok("No catalog configured\n".to_string()),
     };
-
-    match what {
-        "jobs" | "files" => {
-            let client_arg = client.map(|c| format!("'{c}'")).unwrap_or("NULL".to_string());
-            match cat.raw_query(&format!("SELECT sp_prune_expired_jobs({client_arg}, 180)")) {
-                Ok(result) => CommandResult::ok(format!("Pruned jobs: {}\n", result.trim())),
+    match plan {
+        PruneAction::Jobs(client, shown) => {
+            match cat.raw_query(&format!("SELECT sp_prune_expired_jobs('{}', 180)", client.replace('\'', "''"))) {
+                Ok(result) => CommandResult::ok(format!("{shown}Pruned jobs: {}\n", result.trim())),
                 Err(e) => CommandResult::error(format!("Prune error: {e}\n")),
             }
         }
-        "volumes" | "volume" => {
-            let pool_arg = pool.map(|p| format!("'{p}'")).unwrap_or("NULL".to_string());
+        PruneAction::Volumes(pool) => {
+            let pool_arg = pool.map(|p| format!("'{}'", p.replace('\'', "''"))).unwrap_or("NULL".to_string());
             match cat.raw_query(&format!("SELECT sp_prune_expired_volumes({pool_arg})")) {
                 Ok(result) => CommandResult::ok(format!("Pruned volumes: {}\n", result.trim())),
                 Err(e) => CommandResult::error(format!("Prune error: {e}\n")),
             }
         }
-        "" => CommandResult::ok(
-            "prune: specify one of:\n  prune jobs [client=<name>]\n  \
-             prune volumes [pool=<name>]\n".to_string()
-        ),
-        other => CommandResult::ok(format!("prune {other}: not supported\n")),
     }
 }
 
 pub fn cmd_purge(ast: &CommandAst, ctx: &ExecContext) -> CommandResult {
     // C++ ua_purge.cc PurgeCmd: OpenClientDb(ua, true) after the "DANGEROUS" warning and ACL restriction checks.
-    crate::ua_db::with_client_db(ast, ctx, true, || cmd_purge_db(ast, ctx))
+    use crate::acl::Kind;
+    let warning = "\nThis command can be DANGEROUS!!!\n\n\
+        It purges (deletes) all Files from a Job,\n\
+        JobId, Client or Volume; or it purges (deletes)\n\
+        all Jobs from a Client or Volume without regard\n\
+        to retention periods. Normally you should use the\n\
+        PRUNE command, which respects retention periods.\n\
+        This command requires full access to all resources.\n".to_string();
+    if let Some(denied) = denied_restriction(ctx, &[(Kind::Client, "client"), (Kind::Job, "job"),
+        (Kind::Pool, "pool"), (Kind::Storage, "storage")]) {
+        return crate::ua_db::with_prefix(warning, denied);
+    }
+    crate::ua_db::with_prefix(warning, crate::ua_db::with_client_db(ast, ctx, true, || cmd_purge_db(ast, ctx)))
+}
+
+enum PurgeAction { FilesOfJob(u64), JobsOfClient(String, String), Volume(String) }
+
+/// PurgeCmd (ua_purge.cc:64) decisions before any catalog change. Purge
+/// has no confirmation, but every target must be named or selected; the
+/// keyword menu "Choose item to purge" replaces any default (C-012).
+fn purge_plan(ast: &CommandAst, ctx: &ExecContext) -> Result<PurgeAction, CommandResult> {
+    use super::prompt::{keyword_prompt, select_client, selection_required};
+    const KEYWORDS: [&str; 4] = ["files", "jobs", "volume", "quota"];
+    let menu = || Err(keyword_prompt("", &KEYWORDS, "Choose item to purge"));
+    match find_arg_keyword(ast, &KEYWORDS) {
+        Some(0) => match find_arg_keyword(ast, &["Job", "JobId", "Client", "Volume"]) {
+            Some(1) => match get_arg(ast, "jobid").map(|v| v.trim().parse::<u64>()) {
+                Some(Ok(id)) if id > 0 => Ok(PurgeAction::FilesOfJob(id)),
+                // GetJobDbr: "Could not find Job" without a valid JobId.
+                _ => Err(selection_required(String::new())),
+            },
+            // Job name / client / volume variants are not implemented here.
+            Some(_) => Err(selection_required(String::new())),
+            None => menu(),
+        },
+        Some(1) => match find_arg_keyword(ast, &["Client", "Volume", "Pool"]) {
+            Some(0) => select_client(ast, ctx).map(|(client, shown)| PurgeAction::JobsOfClient(client, shown)),
+            Some(_) => Err(selection_required(String::new())),
+            None => menu(),
+        },
+        Some(2) => match get_arg(ast, "volume") {
+            Some(volume) if crate::acl::valid_name(volume) => Ok(PurgeAction::Volume(volume.to_string())),
+            // SelectMediaDbr: pool and volume dialog.
+            _ => Err(selection_required(String::new())),
+        },
+        Some(_) => Err(CommandResult::ok("purge quota: not supported\n".into())),
+        None => menu(),
+    }
 }
 
 fn cmd_purge_db(ast: &CommandAst, ctx: &ExecContext) -> CommandResult {
-    let what = ast.arguments.first().map(|a| a.key.as_str()).unwrap_or("");
-    let volume = get_arg(ast, "volume");
+    let plan = match purge_plan(ast, ctx) {
+        Ok(plan) => plan,
+        Err(result) => return result,
+    };
     let cat = match &ctx.catalog {
         Some(c) => c,
         None => return CommandResult::ok("No catalog configured\n".to_string()),
     };
-
-    match what {
-        "files" => {
-            let jobid = get_arg(ast, "jobid").unwrap_or("0");
-            match cat.raw_query(&format!(
-                "DELETE FROM file WHERE jobid = {jobid}")) {
+    match plan {
+        PurgeAction::FilesOfJob(jobid) => {
+            match cat.raw_query(&format!("DELETE FROM file WHERE jobid = {jobid}")) {
                 Ok(_) => CommandResult::ok(format!("Purged files from JobId {jobid}\n")),
                 Err(e) => CommandResult::error(format!("Purge error: {e}\n")),
             }
         }
-        "jobs" => {
-            let client = get_arg(ast, "client").unwrap_or("*");
-            let sql = if client == "*" {
-                "DELETE FROM jobmedia; DELETE FROM job".to_string()
-            } else {
-                format!("DELETE FROM jobmedia WHERE jobid IN (SELECT jobid FROM job j JOIN client c ON j.clientid = c.clientid WHERE c.name = '{client}'); \
-                         DELETE FROM job WHERE clientid IN (SELECT clientid FROM client WHERE name = '{client}')")
-            };
+        PurgeAction::JobsOfClient(client, shown) => {
+            let client = client.replace('\'', "''");
+            let sql = format!("DELETE FROM jobmedia WHERE jobid IN (SELECT jobid FROM job j JOIN client c ON j.clientid = c.clientid WHERE c.name = '{client}'); \
+                         DELETE FROM job WHERE clientid IN (SELECT clientid FROM client WHERE name = '{client}')");
             match cat.raw_query(&sql) {
-                Ok(_) => CommandResult::ok(format!("Purged jobs for client {client}\n")),
+                Ok(_) => CommandResult::ok(format!("{shown}Purged jobs for client {client}\n")),
                 Err(e) => CommandResult::error(format!("Purge error: {e}\n")),
             }
         }
-        "volumes" | "volume" | "" if volume.is_some() => {
-            let v = volume.unwrap();
+        PurgeAction::Volume(v) => {
             match cat.raw_query(&format!("SELECT sp_purge_volume('{v}')")) {
                 Ok(result) => CommandResult::ok(format!("Volume \"{v}\" purged ({} jobmedia records removed)\n", result.trim())),
                 Err(e) => CommandResult::error(format!("Purge error: {e}\n")),
             }
         }
-        "" => CommandResult::ok(
-            "purge: specify one of:\n  purge files jobid=<id>\n  \
-             purge jobs client=<name>\n  purge volume=<name>\n".to_string()
-        ),
-        other => CommandResult::ok(format!("purge {other}: not supported\n")),
     }
 }
 
@@ -800,6 +874,34 @@ pub(crate) mod side_effect_tests {
         let result = truncate_with(&crate::session::parse_cli_command("truncate volstatus=Purged storage=Nope"),
             &ctx, |_, _| panic!("must not contact the SD"));
         assert!(result.success && result.error_message.is_empty());
+    }
+
+    #[test]
+    fn prune_and_purge_need_target_and_confirmation() {
+        let ctx = context();
+        ctx.config.as_ref().unwrap().write().unwrap().clients.push(bareos_config::resources::ClientResource {
+            name: "fd1".into(), ..Default::default() });
+        let ast = |line: &str| crate::session::parse_cli_command(line);
+        let text = |r: Result<PruneAction, CommandResult>| match r { Err(r) => r.text_output, Ok(_) => panic!("acted") };
+        assert_eq!(text(prune_plan(&ast("prune"), &ctx)), "You have the following choices:\n1: Files\n2: Jobs\n3: Volume\n\
+            4: Stats\n5: Directory\nChoose item to prune (1-5): ");
+        assert_eq!(text(prune_plan(&ast("prune jobs"), &ctx)), "Automatically selected Client: fd1\nContinue? (yes/mod/no): ");
+        assert_eq!(text(prune_plan(&ast("prune files client=fd1"), &ctx)), "Continue? (yes/mod/no): ");
+        assert!(prune_plan(&ast("prune volume"), &ctx).is_err());
+        assert!(prune_plan(&ast("prune volumes pool=Full"), &ctx).is_err());
+        assert!(matches!(prune_plan(&ast("prune jobs client=fd1 yes"), &ctx), Ok(PruneAction::Jobs(c, _)) if c == "fd1"));
+        assert!(matches!(prune_plan(&ast("prune volume yes"), &ctx), Ok(PruneAction::Volumes(None))));
+
+        let menu = "You have the following choices:\n1: files\n2: jobs\n3: volume\n4: quota\nChoose item to purge (1-4): ";
+        for line in ["purge", "purge jobs", "purge files", "purge bogus"] {
+            assert_eq!(purge_plan(&ast(line), &ctx).err().map(|r| r.text_output).as_deref(), Some(menu), "{line}");
+        }
+        for line in ["purge files jobid", "purge files jobid=0", "purge files jobid=x", "purge volume", "purge jobs volume"] {
+            assert!(purge_plan(&ast(line), &ctx).is_err(), "{line}");
+        }
+        assert!(matches!(purge_plan(&ast("purge jobs client=fd1"), &ctx), Ok(PurgeAction::JobsOfClient(c, _)) if c == "fd1"));
+        assert!(matches!(purge_plan(&ast("purge files jobid=7"), &ctx), Ok(PurgeAction::FilesOfJob(7))));
+        assert!(matches!(purge_plan(&ast("purge volume=v1"), &ctx), Ok(PurgeAction::Volume(v)) if v == "v1"));
     }
 
     #[test]
