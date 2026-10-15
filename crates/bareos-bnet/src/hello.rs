@@ -120,10 +120,13 @@ pub fn make_director_hello(director_name: &str) -> String {
 
 /// Build a Console hello message.
 pub fn make_console_hello(name: &str, version: &str, want_grpc: bool) -> String {
-    if name == "*UserAgent*" || name.is_empty() {
+    let default_console = name == "*UserAgent*" || name.is_empty();
+    if default_console && version.is_empty() {
         return "Hello *UserAgent* calling\n".to_string();
     }
-    let bashed = bash_spaces(name);
+    // C++ ConsoleAuthenticateWithDirector (lib/bsock.cc:348) sends the version
+    // for the default console as well
+    let bashed = if default_console { "*UserAgent*".to_string() } else { bash_spaces(name) };
     if want_grpc {
         format!("Hello {bashed} calling version {version} proto=grpc\n")
     } else {
@@ -136,6 +139,51 @@ pub fn make_console_hello(name: &str, version: &str, want_grpc: bool) -> String 
 /// Only \x01 (ASCII SOH) is the encoded space character.
 fn unbash_name(name: &str) -> String {
     name.replace('\x01', " ").trim().to_string()
+}
+
+/// C++ BareosVersionNumber::kUndefined (include/version_numbers.h).
+pub const BAREOS_VERSION_UNDEFINED: u32 = 1;
+/// C++ BareosVersionNumber::kRelease_18_2: first console with the
+/// response-message protocol (1000/1001/1002 with record separator).
+pub const BAREOS_VERSION_RELEASE_18_2: u32 = 1802;
+
+/// Port of C++ GetNameAndResourceTypeAndVersionFromHello (lib/util.cc:207).
+/// Returns name, resource type and version number (major * 100 + minor,
+/// `BAREOS_VERSION_UNDEFINED` without version); None for an invalid Hello.
+pub fn name_type_and_version_from_hello(input: &str) -> Option<(String, &'static str, u32)> {
+    // (prefix, resource type, position of name, position of version); order matters
+    const HELLO_LIST: [(&str, &str, usize, Option<usize>); 7] = [
+        ("Hello Storage calling Start Job", "R_JOB", 5, None),
+        ("Hello Start Storage Job", "R_JOB", 4, None),
+        ("Hello Start Job", "R_JOB", 3, None),
+        ("Hello Director", "R_DIRECTOR", 2, None),
+        ("Hello Storage", "R_STORAGE", 2, None),
+        ("Hello Client", "R_CLIENT", 2, None),
+        ("Hello", "R_CONSOLE", 1, Some(4)), // "Hello %s calling version %s"
+    ];
+    let &(_, r_type, name_pos, version_pos) =
+        HELLO_LIST.iter().find(|(prefix, ..)| input.starts_with(prefix))?;
+    // BStringList(input, ' ') splits like std::getline: no trailing empty token
+    let mut args: Vec<&str> = if input.is_empty() { Vec::new() } else { input.split(' ').collect() };
+    if args.last() == Some(&"") { args.pop(); }
+    let name = args.get(name_pos)?.replace('\x01', " ");
+    let mut version = BAREOS_VERSION_UNDEFINED;
+    if let Some(version_str) = version_pos.and_then(|pos| args.get(pos)).filter(|v| !v.is_empty()) {
+        let parts: Vec<&str> = version_str.split('.').collect();
+        if parts.len() < 2 { return None; }
+        let major = stoul(parts[0])?;
+        let minor = stoul(parts[1])?;
+        version = major.wrapping_mul(100).wrapping_add(minor) as u32;
+    }
+    Some((name, r_type, version))
+}
+
+/// std::stoul: leading blanks, optional '+', at least one digit, rest ignored.
+fn stoul(text: &str) -> Option<u64> {
+    let text = text.trim_start();
+    let text = text.strip_prefix('+').unwrap_or(text);
+    let digits = text.find(|c: char| !c.is_ascii_digit()).unwrap_or(text.len());
+    text[..digits].parse().ok()
 }
 
 /// Well-known response messages.
@@ -224,6 +272,28 @@ mod tests {
             make_console_hello("admin", "25.0.0", true),
             "Hello admin calling version 25.0.0 proto=grpc\n"
         );
+    }
+
+    #[test]
+    fn make_console_hello_default_with_version() {
+        assert_eq!(make_console_hello("*UserAgent*", "25.1.2", false),
+                   "Hello *UserAgent* calling version 25.1.2\n");
+    }
+
+    #[test]
+    fn hello_version_numbers() {
+        let v = name_type_and_version_from_hello;
+        assert_eq!(v("Hello *UserAgent* calling\n"), Some(("*UserAgent*".into(), "R_CONSOLE", BAREOS_VERSION_UNDEFINED)));
+        assert_eq!(v("Hello admin calling version 25.1.2+onesimus.0.2.0\n"), Some(("admin".into(), "R_CONSOLE", 2501)));
+        assert_eq!(v("Hello a\x01b calling version 18.2.0"), Some(("a b".into(), "R_CONSOLE", 1802)));
+        assert_eq!(v("Hello admin calling version 17.2.7\n").unwrap().2, 1702);
+        assert_eq!(v("Hello admin calling version 25\n"), None);
+        assert_eq!(v("Hello admin calling version x.1\n"), None);
+        assert_eq!(v("Hello admin calling version "), Some(("admin".into(), "R_CONSOLE", BAREOS_VERSION_UNDEFINED)));
+        assert_eq!(v("Hello Director bareos-dir calling version 25.1"),
+                   Some(("bareos-dir".into(), "R_DIRECTOR", BAREOS_VERSION_UNDEFINED)));
+        assert_eq!(v("Hello"), None);
+        assert_eq!(v("Bye"), None);
     }
 
     #[test]

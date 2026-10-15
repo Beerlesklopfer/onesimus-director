@@ -20,9 +20,23 @@ use crate::director_config::SharedConfig;
 use crate::fsm::SessionState;
 use crate::session_manager::SessionManager;
 
-/// Handle a console session (BNET mode).
+/// What the Director knows about a console connection before authentication.
+pub struct ConsoleConnection {
+    /// Console version from the Hello (C++ BareosVersionNumber, major * 100 + minor).
+    pub version: u32,
+    /// Negotiated TLS cipher (C++ TlsCipherGetName); None on a cleartext connection.
+    pub tls_cipher: Option<String>,
+}
+
+impl Default for ConsoleConnection {
+    fn default() -> Self {
+        Self { version: bareos_bnet::hello::BAREOS_VERSION_RELEASE_18_2, tls_cipher: None }
+    }
+}
+
+/// Handle a console session (BNET mode) of a console from 18.2 on, without TLS.
 pub fn handle_console_session<S: Read + Write>(
-    mut bnet: BnetStream<S>,
+    bnet: BnetStream<S>,
     session_id: u64,
     console_name: &str,
     password: &str,
@@ -32,8 +46,52 @@ pub fn handle_console_session<S: Read + Write>(
     job_manager: &Option<Arc<std::sync::Mutex<crate::job_manager::JobManager>>>,
     catalog: &Option<CatalogHandle>,
 ) {
+    handle_console_session_with(bnet, session_id, console_name, password, &ConsoleConnection::default(),
+        session_mgr, cmd_queue, config, job_manager, catalog);
+}
+
+/// Connection banner after successful authentication, one string per BNET frame.
+/// C++ authenticate_console.cc: ConsoleAuthenticatorBefore_18_2::
+/// SendOkMessageWithSpaceSeparators (one frame with cipher) for consoles before
+/// 18.2, otherwise ConsoleAuthenticatorFrom_18_2::SendResponseMessage (1000) and
+/// SendInfoMessage (1002), fields separated by the record separator.
+pub fn console_banner(director: &str, console_name: &str, connection: &ConsoleConnection) -> Vec<String> {
+    use crate::version_strings::{DATE, FULL, SERVICES_MESSAGE};
+    if connection.version < bareos_bnet::hello::BAREOS_VERSION_RELEASE_18_2 {
+        let cipher = bareos_bnet::tls_psk::cipher_message_string(connection.tls_cipher.as_deref());
+        return vec![format!("1000 OK: {director} Version: {FULL} ({DATE}) -- {cipher}\n")];
+    }
+    // snprintf(version_info, 100, ...): at most 99 bytes
+    let mut version_info = format!("OK: {director} Version: {FULL} ({DATE})");
+    if version_info.len() > 99 {
+        let mut end = 99;
+        while !version_info.is_char_boundary(end) { end -= 1; }
+        version_info.truncate(end);
+    }
+    let who = if console_name == "*UserAgent*" {
+        "connected using the default console".to_string()
+    } else {
+        format!("logged in as: {console_name}")
+    };
+    vec![format!("1000\x1e{version_info}"), format!("1002\x1e{SERVICES_MESSAGE}\nYou are {who}")]
+}
+
+/// Handle a console session (BNET mode).
+pub fn handle_console_session_with<S: Read + Write>(
+    mut bnet: BnetStream<S>,
+    session_id: u64,
+    console_name: &str,
+    password: &str,
+    connection: &ConsoleConnection,
+    session_mgr: &Arc<SessionManager>,
+    cmd_queue: &CommandQueue,
+    config: &Option<SharedConfig>,
+    job_manager: &Option<Arc<std::sync::Mutex<crate::job_manager::JobManager>>>,
+    catalog: &Option<CatalogHandle>,
+) {
     // Register session
     let mgr_session_id = session_mgr.create_session(console_name);
+    let before_18_2 = connection.version < bareos_bnet::hello::BAREOS_VERSION_RELEASE_18_2;
 
     // CRAM-MD5 two-way authentication (Director is server = initiated_by_remote=true).
     // The caller only gets here with a configured password; never skip auth.
@@ -51,6 +109,8 @@ pub fn handle_console_session<S: Read + Write>(
             }
             Ok(_) => {
                 warn!("session {session_id}: CRAM-MD5 auth failed for '{console_name}'");
+                // SendNotAuthorizedMessageWithSpaceSeparators: consoles before 18.2 only
+                if before_18_2 { let _ = bnet.send_str("1999 You are not authorized.\n"); }
                 session_mgr.remove_session(mgr_session_id);
                 return;
             }
@@ -62,28 +122,13 @@ pub fn handle_console_session<S: Read + Write>(
         }
     }
 
-    // Post-18.2 protocol: send MessageID-based responses
-    // Format: "<id><RS><payload>" where RS = 0x1e (Record Separator)
-    let version = env!("CARGO_PKG_VERSION");
-    let rs = "\x1e";
-
-    // 1. kMessageIdOk (1000) with version info
-    let ok_msg = format!("1000{rs}OK: bareos-dir Version: {version}");
-    if bnet.send_str(&ok_msg).is_err() {
-        session_mgr.remove_session(mgr_session_id);
-        return;
-    }
-
-    // 2. kMessageIdInfoMessage (1002) with connection info
-    // C++ ConsoleAuthenticatorFrom_18_2::SendInfoMessage()
-    let info_msg = if console_name == "*UserAgent*" {
-        format!("1002{rs}You are connected using the default console")
-    } else {
-        format!("1002{rs}You are logged in as: {console_name}")
-    };
-    if bnet.send_str(&info_msg).is_err() {
-        session_mgr.remove_session(mgr_session_id);
-        return;
+    let director = config.as_ref().and_then(|c| c.read().ok().map(|c| c.director.name.clone()))
+        .unwrap_or_else(|| "bareos-dir".to_string());
+    for message in console_banner(&director, console_name, connection) {
+        if bnet.send_str(&message).is_err() {
+            session_mgr.remove_session(mgr_session_id);
+            return;
+        }
     }
 
     let mut state = SessionState::CommandLoop;
@@ -685,5 +730,61 @@ mod quit_tests {
         bnet.send_str("quit").unwrap();
         assert!(bnet.recv().is_err());
         server.join().unwrap();
+    }
+}
+
+#[cfg(test)]
+mod banner_tests {
+    //! C++ authenticate_console.cc: banner per console version.
+    use super::*;
+    use crate::version_strings::{DATE, FULL, SERVICES_MESSAGE};
+
+    fn connection(version: u32, cipher: Option<&str>) -> ConsoleConnection {
+        ConsoleConnection { version, tls_cipher: cipher.map(str::to_string) }
+    }
+
+    #[test]
+    fn before_18_2_one_frame_with_cipher() {
+        let cipher = Some("TLS_CHACHA20_POLY1305_SHA256 TLSv1.3");
+        assert_eq!(console_banner("bareos-dir", "*UserAgent*", &connection(1, cipher)),
+            vec![format!("1000 OK: bareos-dir Version: {FULL} ({DATE}) --  Encryption: TLS_CHACHA20_POLY1305_SHA256 TLSv1.3\n")]);
+        assert_eq!(console_banner("d", "admin", &connection(1702, None)),
+            vec![format!("1000 OK: d Version: {FULL} ({DATE}) --  Encryption: None\n")]);
+    }
+
+    #[test]
+    fn from_18_2_ok_and_info_message() {
+        assert_eq!(console_banner("bareos-dir", "*UserAgent*", &connection(1802, None)), vec![
+            format!("1000\x1eOK: bareos-dir Version: {FULL} ({DATE})"),
+            format!("1002\x1e{SERVICES_MESSAGE}\nYou are connected using the default console")]);
+        assert_eq!(console_banner("bareos-dir", "admin", &connection(2501, None))[1],
+            format!("1002\x1e{SERVICES_MESSAGE}\nYou are logged in as: admin"));
+    }
+
+    #[test]
+    fn version_info_truncated_like_snprintf_100() {
+        let banner = console_banner(&"d".repeat(120), "admin", &connection(2501, None));
+        assert_eq!(banner[0].len(), "1000\x1e".len() + 99);
+    }
+
+    #[test]
+    fn failed_auth_of_old_console_gets_not_authorized() {
+        use std::net::{TcpListener, TcpStream};
+        let manager = Arc::new(SessionManager::new(Arc::new(crate::message_bus::MessageBus::new(16))));
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = listener.local_addr().unwrap();
+        let server = std::thread::spawn(move || {
+            let (stream, _) = listener.accept().unwrap();
+            handle_console_session_with(BnetStream::new(stream), 1, "admin", "pw", &connection(1702, None),
+                &manager, &CommandQueue::new(16), &None, &None, &None);
+        });
+        let stream = TcpStream::connect(address).unwrap();
+        stream.set_read_timeout(Some(std::time::Duration::from_secs(5))).unwrap();
+        let mut bnet = BnetStream::new(stream);
+        assert!(!CramMd5Auth::new("wrong", "admin", 0).two_way_authenticate(&mut bnet, false).unwrap().success);
+        server.join().unwrap();
+        let mut rest = Vec::new();
+        while let Ok(BnetMessage::Data(data)) = bnet.recv() { rest.push(String::from_utf8(data).unwrap()); }
+        assert_eq!(rest.last().map(String::as_str), Some("1999 You are not authorized.\n"));
     }
 }

@@ -129,8 +129,10 @@ def capture(port, case):
     name = case.get('console', '*UserAgent*')
     password = case.get('password', PASSWORD)
     steps = list(case.get('setup', [])) + list(case['steps'])
-    result = subprocess.run([str(CAPTURE), f'127.0.0.1:{port}', name, password, *steps],
-                            env={**ENV, 'CAPTURE_TIMEOUT_MS': str(case.get('timeout_ms', 15000))},
+    env = {**ENV, 'CAPTURE_TIMEOUT_MS': str(case.get('timeout_ms', 15000))}
+    if 'hello_version' in case:  # console version in the Hello (default: capture tool's)
+        env['CAPTURE_HELLO_VERSION'] = case['hello_version']
+    result = subprocess.run([str(CAPTURE), f'127.0.0.1:{port}', name, password, *steps], env=env,
                             capture_output=True, timeout=120)
     if result.returncode != 0:
         return {'error': result.stderr.decode(errors='replace').strip() or f'exit {result.returncode}'}

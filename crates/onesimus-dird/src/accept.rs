@@ -12,7 +12,7 @@ use std::thread;
 use tracing::{info, error, debug, warn};
 
 use bareos_bnet::{BnetStream, Hello};
-use bareos_bnet::hello::parse_hello;
+use bareos_bnet::hello::{name_type_and_version_from_hello, parse_hello};
 use bareos_bnet::tls::{self, TlsConfig, TlsOrPlain};
 
 use crate::catalog_worker::CatalogHandle;
@@ -153,7 +153,8 @@ fn handle_connection(
                 match bareos_bnet::tls_psk::psk_accept_with(stream, lookup) {
                     Ok((psk_stream, identity)) => {
                         debug!("session {session_id}: TLS-PSK accept OK (identity {})", identity.replace('\x1e', "/"));
-                        handle_hello(BnetStream::new(psk_stream), session_id, Some(identity),
+                        let cipher = psk_stream.cipher_name();
+                        handle_hello(BnetStream::new(psk_stream), session_id, Some(identity), Some(cipher),
                                      session_mgr, cmd_queue, shared_config, job_manager, catalog);
                     }
                     Err(e) => {
@@ -163,7 +164,7 @@ fn handle_connection(
             } else {
                 // Plaintext BNET — first byte is part of i32 length header
                 debug!("session {session_id}: plaintext connection detected");
-                handle_hello(BnetStream::new(stream), session_id, None,
+                handle_hello(BnetStream::new(stream), session_id, None, None,
                              session_mgr, cmd_queue, shared_config, job_manager, catalog);
             }
         }
@@ -207,6 +208,7 @@ fn handle_hello<S: std::io::Read + std::io::Write>(
     mut bnet: BnetStream<S>,
     session_id: u64,
     tls_identity: Option<String>,
+    tls_cipher: Option<String>,
     session_mgr: &Arc<SessionManager>,
     cmd_queue: &CommandQueue,
     shared_config: &Option<SharedConfig>,
@@ -249,13 +251,20 @@ fn handle_hello<S: std::io::Read + std::io::Write>(
             warn!("session {session_id}: unknown console '{name}' or no password configured, rejected");
             return;
         };
+        // C++ CreateConsoleAuthenticator: the Hello version selects the
+        // protocol (before/from 18.2); an unparsable version is an invalid Hello
+        let Some((_, _, version_number)) = name_type_and_version_from_hello(&hello_msg) else {
+            warn!("session {session_id}: UA Hello is invalid. Got: {hello_msg}");
+            return;
+        };
+        let connection = session::ConsoleConnection { version: version_number, tls_cipher };
         if let Hello::NamedConsole { version, wants_grpc, .. } = &hello {
             debug!("named console '{name}' v{version} connected (grpc={wants_grpc})");
         } else {
             debug!("default console connected (session {session_id})");
         }
-        session::handle_console_session(
-            bnet, session_id, &name, &password, session_mgr, cmd_queue, shared_config, job_manager, catalog,
+        session::handle_console_session_with(
+            bnet, session_id, &name, &password, &connection, session_mgr, cmd_queue, shared_config, job_manager, catalog,
         );
         return;
     }

@@ -5,7 +5,9 @@
 //!
 //!   bnet_capture HOST:PORT NAME PASSWORD STEP...
 //!
-//! NAME `*UserAgent*` uses the default console. Output is one JSON object on
+//! NAME `*UserAgent*` uses the default console. The Hello carries the version
+//! CAPTURE_HELLO_VERSION if set, else the package version (named consoles) or
+//! none (default console, legacy "Hello *UserAgent* calling"). Output is one JSON object on
 //! stdout: the banner frames plus, per step, the frame list and why reading
 //! stopped (`eod`, `signal:<n>` for an input request, `timeout`, `closed`).
 
@@ -79,7 +81,9 @@ fn main() {
         std::process::exit(1);
     });
     let mut bnet = BnetStream::new(tls);
-    let hello = make_console_hello(name, env!("CARGO_PKG_VERSION"), false);
+    let version = std::env::var("CAPTURE_HELLO_VERSION").unwrap_or_else(|_|
+        if name == "*UserAgent*" { String::new() } else { env!("CARGO_PKG_VERSION").to_string() });
+    let hello = make_console_hello(name, &version, false);
     let auth_name = if name == "*UserAgent*" { "*UserAgent*" } else { name.as_str() };
     let authenticated = bnet.send_str(&hello).is_ok()
         && CramMd5Auth::new(password, auth_name, 0).two_way_authenticate(&mut bnet, false)

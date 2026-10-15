@@ -289,12 +289,9 @@ fn run_bnet_mode(cli: &EffCli, addr: &str) {
 
 fn run_bnet_session<S: std::io::Read + std::io::Write + Send + 'static>(cli: &EffCli, mut bnet: BnetStream<S>) {
     // Send hello
-    let version = env!("CARGO_PKG_VERSION");
-    let hello = if cli.name == "*UserAgent*" {
-        make_console_hello("*UserAgent*", "", cli.grpc)
-    } else {
-        make_console_hello(&cli.name, version, cli.grpc)
-    };
+    // Like bconsole (lib/bsock.cc:348) the version goes with every console's
+    // Hello; the Director then answers with the 18.2+ banner (1000 + 1002).
+    let hello = make_console_hello(&cli.name, env!("CARGO_PKG_VERSION"), cli.grpc);
     if let Err(e) = bnet.send_str(&hello) {
         eprintln!("Failed to send hello: {e}");
         std::process::exit(1);
@@ -320,15 +317,18 @@ fn run_bnet_session<S: std::io::Read + std::io::Write + Send + 'static>(cli: &Ef
 
     // Receive init messages: 1000 OK + 1002 Info.
     // C++ Director sends NO signal after init — goes straight to recv().
-    // Read exactly 2 data messages (1000 + 1002), then proceed.
-    for i in 0..2 {
+    // A Director answering in the pre-18.2 form (one frame "1000 OK: ... --
+    // Encryption: ...", authenticate_console.cc:129) sends nothing more.
+    for _ in 0..2 {
         match bnet.recv() {
             Ok(BnetMessage::Data(data)) => {
                 let text = String::from_utf8_lossy(&data);
                 if let Some(pos) = text.find('\x1e') {
                     eprintln!("{}", &text[pos+1..].trim());
+                    if !text.starts_with("1000\x1e") { break; }
                 } else {
                     eprintln!("{}", text.trim());
+                    break;
                 }
             }
             Ok(BnetMessage::Signal(BnetSignal::Eod)) => break,

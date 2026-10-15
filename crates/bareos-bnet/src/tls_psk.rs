@@ -6,9 +6,12 @@
 //!
 //! Uses OpenSSL via the `openssl` crate (rustls doesn't support PSK).
 //!
-//! # Limitierung: TLSv1.2 only fuer PSK
+//! # Limitierung: TLSv1.2 only fuer PSK (ausser `psk_accept_with`)
 //!
 //! TLS-PSK ist auf TLSv1.2 beschraenkt (`set_max_proto_version(TLS1_2)`).
+//! Ausnahme: der Director-Accept `psk_accept_with` handelt wie der C++
+//! Director TLSv1.3 aus (OpenSSL-Kompatibilitaetspfad des TLSv1.2-Callbacks
+//! mit SHA256-Suites; mit bconsole 25.1.2 und psk_connect verifiziert).
 //!
 //! ## Grund
 //!
@@ -129,8 +132,10 @@ where
 {
     let mut ctx = ssl::SslContext::builder(SslMethod::tls_server())
         .map_err(ssl_err)?;
-    // TLSv1.2 only — see module docs
-    ctx.set_max_proto_version(Some(ssl::SslVersion::TLS1_2)).map_err(ssl_err)?;
+    // No protocol cap: like the C++ Director (lib/tls_openssl.cc:84, only
+    // SSL_CTX_set_psk_server_callback) OpenSSL also offers TLSv1.3 with the
+    // TLSv1.2-style PSK callback (SHA256 suites); bconsole 25 negotiates
+    // TLS_CHACHA20_POLY1305_SHA256 TLSv1.3, shown in the console banner.
 
     let seen = std::sync::Arc::new(std::sync::Mutex::new(String::new()));
     let seen_cb = seen.clone();
@@ -334,6 +339,29 @@ mod tests {
         let n = c.read(&mut buf).unwrap();
         assert_eq!(&buf[..n], b"hello back");
         server.join().unwrap();
+    }
+
+    #[test]
+    fn director_accept_negotiates_tls13_like_cpp() {
+        let psk = password_to_psk("testpassword");
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let psk_server = psk.clone();
+        let server = std::thread::spawn(move || {
+            let (stream, _) = listener.accept().unwrap();
+            let (mut s, identity) = psk_accept_with(stream, move |_| Some(psk_server.clone())).unwrap();
+            assert_eq!(identity, "R_CONSOLE\x1eadmin");
+            let mut buf = [0u8; 2];
+            s.read_exact(&mut buf).unwrap();
+            s.cipher_name()
+        });
+        let stream = TcpStream::connect(format!("127.0.0.1:{port}")).unwrap();
+        let mut c = psk_connect(stream, "R_CONSOLE\x1eadmin", &psk).unwrap();
+        c.write_all(b"ok").unwrap();
+        let cipher = server.join().unwrap();
+        assert!(cipher.ends_with(" TLSv1.3"), "{cipher}");
+        assert_eq!(cipher_message_string(Some(&cipher)), format!(" Encryption: {cipher}"));
+        assert_eq!(cipher_message_string(None), " Encryption: None");
     }
 
     #[test]
