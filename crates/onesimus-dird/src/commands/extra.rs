@@ -213,8 +213,24 @@ pub fn cmd_use(ast: &CommandAst, ctx: &ExecContext) -> CommandResult {
     crate::ua_db::use_catalog(ast, ctx)
 }
 
-pub fn cmd_setip(_ast: &CommandAst, _ctx: &ExecContext) -> CommandResult {
-    CommandResult::ok("Client address updated\n".to_string())
+/// `setip` (ua_cmds.cc:995 SetipCmd): only a named console whose name is
+/// also a Client may set that client's address to its own peer address.
+/// The default console has no corresponding resource (C-012).
+pub fn cmd_setip(_ast: &CommandAst, ctx: &ExecContext) -> CommandResult {
+    let console = ctx.session_mgr.as_ref()
+        .and_then(|manager| manager.authenticated_console(ctx.session_id))
+        .filter(|name| name != "*UserAgent*");
+    let Some(console) = console else {
+        return CommandResult::error("No corresponding client found.\n".into());
+    };
+    let known = ctx.config.as_ref().and_then(|c| c.read().ok())
+        .is_some_and(|cfg| cfg.find_client(&console).is_some());
+    if !known || !crate::acl::access(ctx, crate::acl::Kind::Client, &console) {
+        return CommandResult::error(format!("Client \"{console}\" not found.\n"));
+    }
+    // Upstream stores the console's peer address; the session carries none
+    // here, so the address is left unchanged rather than reported as set.
+    CommandResult::error(format!("Client \"{console}\": address of the console connection unknown, nothing changed.\n"))
 }
 
 pub fn cmd_setdevice(ast: &CommandAst, ctx: &ExecContext) -> CommandResult {
@@ -690,6 +706,37 @@ mod move_operation_tests {
             Ok("ok".into())
         });
         assert!(result.success);
+    }
+}
+
+#[cfg(test)]
+mod setip_tests {
+    use super::*;
+    use std::sync::{Arc, RwLock};
+
+    #[test]
+    fn setip_never_changes_a_client_address() {
+        let config = crate::director_config::DirectorConfig::from_str(
+            "Director { Name = dir }\nClient { Name = fd1; Address = 192.0.2.1; Password = x }\n\
+             Console { Name = fd1; Password = pw; CommandACL = *all*; ClientACL = *all* }\n\
+             Console { Name = other; Password = pw; CommandACL = *all*; ClientACL = *all* }").unwrap();
+        let mut ctx = ExecContext { session_id: 0, config: Some(Arc::new(RwLock::new(config))),
+            session_mgr: None, catalog: None, api_mode: crate::command_executor::ApiMode::Human,
+            bus_rx: None, job_manager: None };
+        let ast = crate::session::parse_cli_command("setip");
+        assert_eq!(cmd_setip(&ast, &ctx).error_message, "No corresponding client found.\n");
+        let manager = Arc::new(crate::session_manager::SessionManager::new(Arc::new(crate::message_bus::MessageBus::new(16))));
+        for (console, expected) in [("other", "Client \"other\" not found.\n"),
+            ("fd1", "Client \"fd1\": address of the console connection unknown, nothing changed.\n")] {
+            ctx.session_id = manager.create_session(console);
+            manager.authenticate_session(ctx.session_id);
+            ctx.session_mgr = Some(manager.clone());
+            let result = cmd_setip(&ast, &ctx);
+            assert!(!result.success);
+            assert_eq!(result.error_message, expected);
+        }
+        let config = ctx.config.as_ref().unwrap().read().unwrap();
+        assert_eq!(config.find_client("fd1").unwrap().address, "192.0.2.1");
     }
 }
 
