@@ -13,10 +13,10 @@ Dies ist ein statischer Quellcodeabgleich; es wurden keine Live-Jobs, Löschunge
 
 | Status | Anzahl | Bedeutung |
 |---|---:|---|
-| `partial` | 19 | Konkrete fehlende Optionen oder Teilfunktionen belegt |
+| `partial` | 20 | Konkrete fehlende Optionen oder Teilfunktionen belegt |
 | `registered_unverified` | 52 | Handler vorhanden; Funktionsparität nicht nachgewiesen |
 | `semantic_mismatch` | 2 | Abweichende Bedeutung gegenüber Bareos |
-| `stub` | 15 | Platzhalter statt der beschriebenen Wirkung |
+| `stub` | 14 | Platzhalter statt der beschriebenen Wirkung |
 
 ## Herkunft und Grenzen
 
@@ -37,7 +37,7 @@ Nur `--no-default-features --features mcp-development` kompiliert `execute` ein;
 
 ## Übergreifende Befunde
 
-- **ACL-Parität fehlt** Das Original prüft Command_ACL vor dem Dispatch. Im lokalen Dispatch ist keine entsprechende Prüfung vorhanden; .authorized prüft Existenz und akzeptiert cmd pauschal. Authentifizierung mit Passwort/Token ist kein Ersatz für diese Autorisierung. [core/src/dird/ua_cmds.cc:540](https://github.com/bareos/bareos/blob/fc2c79b6c43eb5752e98ebd86116593dbbbe0c68/core/src/dird/ua_cmds.cc#L540) · [crates/onesimus-dird/src/command_registry.rs:323](../../../crates/onesimus-dird/src/command_registry.rs) · [crates/onesimus-dird/src/commands/dot.rs:237](../../../crates/onesimus-dird/src/commands/dot.rs)
+- **ACL-Parität fehlt** Das Original prüft Command_ACL vor dem Dispatch. Im lokalen Dispatch ist keine entsprechende Prüfung vorhanden; .authorized prüft Existenz und akzeptiert cmd pauschal. Authentifizierung mit Passwort/Token ist kein Ersatz für diese Autorisierung. [core/src/dird/ua_cmds.cc:540](https://github.com/bareos/bareos/blob/fc2c79b6c43eb5752e98ebd86116593dbbbe0c68/core/src/dird/ua_cmds.cc#L540) · [crates/onesimus-dird/src/command_registry.rs:336](../../../crates/onesimus-dird/src/command_registry.rs) · [crates/onesimus-dird/src/commands/dot.rs:237](../../../crates/onesimus-dird/src/commands/dot.rs)
 - **Scheduler startet keine Worker** dispatch_ready_jobs entfernt fällige Jobs und zählt sie, enthält aber weiterhin den TODO zum Fork eines Workers. Geplante Backups sind dadurch nicht funktionsgleich zum Original; dies ist bereits im Backlog dokumentiert. [crates/onesimus-dird/src/scheduler.rs:148](../../../crates/onesimus-dird/src/scheduler.rs) · [docs/BACKLOG.md:3](../../../docs/BACKLOG.md)
 - **Hilfetext ist kein Implementierungsnachweis** Die vorhandene UA_COMMANDS-Tabelle beschreibt Originalsyntax, während die tatsächliche Ausführung über command_registry erfolgt. configure enthält in der lokalen UA-Tabelle einen Generator-Funktionsnamen statt expandierter Syntax, .locations den Text NULL statt eines fehlenden Hilfetextes. [crates/onesimus-dird/src/ua_commands_table.rs:4](../../../crates/onesimus-dird/src/ua_commands_table.rs) · [crates/onesimus-dird/src/command_executor.rs:53](../../../crates/onesimus-dird/src/command_executor.rs)
 
@@ -123,7 +123,7 @@ Nur `--no-default-features --features mcp-development` kompiliert `execute` ein;
 | [show](show.md) | Show resource records | `registered_unverified` |
 | [sqlquery](sqlquery.md) | Use SQL to query catalog | `registered_unverified` |
 | [time](time.md) | Print current time | `registered_unverified` |
-| [trace](trace.md) | Turn on/off trace to file | `stub` |
+| [trace](trace.md) | Turn on/off trace to file | `partial` |
 | [truncate](truncate.md) | Truncate purged volumes | `registered_unverified` |
 | [unmount](unmount.md) | Unmount storage | `registered_unverified` |
 | [umount](umount.md) | Umount - for old-time Unix guys, see unmount | `registered_unverified` |

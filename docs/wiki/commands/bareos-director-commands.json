@@ -678,6 +678,10 @@
   },
   "local_source_files": [
     {
+      "path": "crates/bareos-bnet/src/debug.rs",
+      "sha256": "88e898b585d221cef727d1140ca26fe0b7737ea465b77e3c22ec958147491c63"
+    },
+    {
       "path": "crates/oconsole/Cargo.toml",
       "sha256": "89a70037bf2c515ae5c97faded9552afd425e6e295815a103b563521f2dde1d9"
     },
@@ -727,7 +731,7 @@
     },
     {
       "path": "crates/onesimus-dird/src/commands/extra.rs",
-      "sha256": "91e58e939dcd56f4795153286a1c3785195e1077dd4fb7ce2538acd2fabf7b6d"
+      "sha256": "26d7191596f8c841088a9940f745da94615db5f5762ec9b6eb1bb6bf9ec42ca6"
     },
     {
       "path": "crates/onesimus-dird/src/commands/job.rs",
@@ -760,6 +764,10 @@
     {
       "path": "crates/onesimus-dird/src/job_worker.rs",
       "sha256": "3aeeae4ed61ecea9ad8a1f150cc3c70a16c600e2d86116fc661b8a0c7afc7eaa"
+    },
+    {
+      "path": "crates/onesimus-dird/src/main.rs",
+      "sha256": "779306b0629bbc33638b49abc8582c349afa4be8b54bb0ea80d29f81f8131dd0"
     },
     {
       "path": "crates/onesimus-dird/src/scheduler.rs",
@@ -806,10 +814,10 @@
     "top_level_commands": 88,
     "registered_top_level_commands": 88,
     "status_counts": {
-      "partial": 19,
+      "partial": 20,
       "registered_unverified": 52,
       "semantic_mismatch": 2,
-      "stub": 15
+      "stub": 14
     },
     "restore_file_selection_commands": 26,
     "onesimus_extra_names": 8
@@ -826,7 +834,7 @@
         },
         {
           "file": "crates/onesimus-dird/src/command_registry.rs",
-          "line": 323
+          "line": 336
         },
         {
           "file": "crates/onesimus-dird/src/commands/dot.rs",
@@ -2412,7 +2420,7 @@
         },
         "implementation": {
           "file": "crates/onesimus-dird/src/commands/extra.rs",
-          "line": 413
+          "line": 430
         },
         "declared_arguments": [
           "pool"
@@ -2643,7 +2651,7 @@
         },
         "implementation": {
           "file": "crates/onesimus-dird/src/commands/extra.rs",
-          "line": 382
+          "line": 399
         },
         "declared_arguments": [
           "pool"
@@ -2688,7 +2696,7 @@
         },
         "implementation": {
           "file": "crates/onesimus-dird/src/commands/extra.rs",
-          "line": 350
+          "line": 367
         },
         "declared_arguments": [
           "volume",
@@ -2917,7 +2925,7 @@
         },
         "implementation": {
           "file": "crates/onesimus-dird/src/commands/extra.rs",
-          "line": 450
+          "line": 467
         },
         "declared_arguments": [
           "storage"
@@ -3044,7 +3052,7 @@
         },
         "implementation": {
           "file": "crates/onesimus-dird/src/commands/extra.rs",
-          "line": 438
+          "line": 455
         },
         "declared_arguments": [
           "storage"
@@ -3395,7 +3403,7 @@
         },
         "implementation": {
           "file": "crates/onesimus-dird/src/commands/extra.rs",
-          "line": 462
+          "line": 479
         },
         "declared_arguments": [],
         "status": "semantic_mismatch",
@@ -3684,7 +3692,7 @@
         },
         "implementation": {
           "file": "crates/onesimus-dird/src/commands/extra.rs",
-          "line": 327
+          "line": 344
         },
         "declared_arguments": [
           "storage",
@@ -3812,7 +3820,7 @@
         },
         "implementation": {
           "file": "crates/onesimus-dird/src/commands/extra.rs",
-          "line": 293
+          "line": 310
         },
         "declared_arguments": [
           "jobid"
@@ -3857,7 +3865,7 @@
         },
         "implementation": {
           "file": "crates/onesimus-dird/src/commands/extra.rs",
-          "line": 267
+          "line": 284
         },
         "declared_arguments": [
           "client"
@@ -4031,7 +4039,7 @@
         },
         "implementation": {
           "file": "crates/onesimus-dird/src/commands/extra.rs",
-          "line": 207
+          "line": 224
         },
         "declared_arguments": [
           "client",
@@ -4080,7 +4088,7 @@
         },
         "implementation": {
           "file": "crates/onesimus-dird/src/commands/extra.rs",
-          "line": 198
+          "line": 215
         },
         "declared_arguments": [
           "level"
@@ -4126,7 +4134,7 @@
         },
         "implementation": {
           "file": "crates/onesimus-dird/src/commands/extra.rs",
-          "line": 217
+          "line": 234
         },
         "declared_arguments": [
           "storage"
@@ -4168,7 +4176,7 @@
         },
         "implementation": {
           "file": "crates/onesimus-dird/src/commands/extra.rs",
-          "line": 213
+          "line": 230
         },
         "declared_arguments": [
           "client"
@@ -4342,9 +4350,9 @@
           "line": 151
         },
         "declared_arguments": [],
-        "status": "stub",
+        "status": "partial",
         "findings": [
-          "Der Handler gibt trace on/off als Text zurück; er aktiviert keine Trace-Datei."
+          "trace on/off schaltet jetzt einen gemeinsamen, synchronisierten Datei-Sink für tracing- und BNET-Diagnosen. Die Datei liegt als bareos-dir.trace im WorkingDirectory, wird mit 0600 angelegt und appendend/flushed geschrieben; off schließt sie. Tests prüfen Wirkung und Fehlerpfade. Interaktiver Rückfragedialog, der upstream einkompilierte Trace-Verzeichnispfad und Live-SHA-256-Parität bleiben offen."
         ],
         "functional_parity_verified": false
       },
@@ -4584,7 +4592,7 @@
         },
         "implementation": {
           "file": "crates/onesimus-dird/src/commands/extra.rs",
-          "line": 194
+          "line": 211
         },
         "declared_arguments": [
           "catalog"
@@ -4626,7 +4634,7 @@
         },
         "implementation": {
           "file": "crates/onesimus-dird/src/commands/extra.rs",
-          "line": 156
+          "line": 173
         },
         "declared_arguments": [],
         "status": "stub",
@@ -4709,7 +4717,7 @@
         },
         "implementation": {
           "file": "crates/onesimus-dird/src/commands/extra.rs",
-          "line": 161
+          "line": 178
         },
         "declared_arguments": [
           "jobid"
@@ -4751,7 +4759,7 @@
         },
         "implementation": {
           "file": "crates/onesimus-dird/src/commands/extra.rs",
-          "line": 184
+          "line": 201
         },
         "declared_arguments": [],
         "status": "registered_unverified",

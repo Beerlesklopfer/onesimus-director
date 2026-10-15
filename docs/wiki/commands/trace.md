@@ -15,9 +15,9 @@ trace on | off
 
 **RunScript erlaubt:** ja. **Audit-Ereignis:** ja. Beide Flags sind keine Read-only-Klassifizierung.
 
-**Onesimus-Status:** `stub`. Funktionsparität ist nicht durch einen Live-Test nachgewiesen.
+**Onesimus-Status:** `partial`. Funktionsparität ist nicht durch einen Live-Test nachgewiesen.
 
-- Der Handler gibt trace on/off als Text zurück; er aktiviert keine Trace-Datei.
+- trace on/off schaltet jetzt einen gemeinsamen, synchronisierten Datei-Sink für tracing- und BNET-Diagnosen. Die Datei liegt als bareos-dir.trace im WorkingDirectory, wird mit 0600 angelegt und appendend/flushed geschrieben; off schließt sie. Tests prüfen Wirkung und Fehlerpfade. Interaktiver Rückfragedialog, der upstream einkompilierte Trace-Verzeichnispfad und Live-SHA-256-Parität bleiben offen.
 
 **Lokaler Handler:** [crates/onesimus-dird/src/commands/extra.rs:151](../../../crates/onesimus-dird/src/commands/extra.rs).
 

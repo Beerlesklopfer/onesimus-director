@@ -227,6 +227,8 @@ def main():
             for p in sorted(set((ROOT / 'crates/onesimus-dird/src/commands').glob('*.rs')) | {
                 ROOT / 'crates/onesimus-dird/src/command_registry.rs',
                 ROOT / 'crates/onesimus-dird/src/command_executor.rs',
+                ROOT / 'crates/bareos-bnet/src/debug.rs',
+                ROOT / 'crates/onesimus-dird/src/main.rs',
                 ROOT / 'crates/onesimus-dird/src/catalog_worker.rs',
                 ROOT / 'crates/onesimus-dird/src/job_worker.rs',
                 ROOT / 'crates/onesimus-dird/src/session.rs',

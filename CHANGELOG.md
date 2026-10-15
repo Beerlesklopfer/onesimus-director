@@ -35,4 +35,8 @@ onesimus (25.1.2+onesimus.0.2.0-2) UNRELEASED; urgency=medium
     make Cargo/SPDX and Debian copyright metadata explicit, and update the
     maintainer contact to Joerg.Bernau@onesimus.io.
 
+  * trace: implement synchronized append-only trace files for daemon and
+    protocol diagnostics; trace off closes the sink, failures preserve the
+    previous destination, and files are private and reject symlinks.
+
  -- Joerg Bernau <Joerg.Bernau@onesimus.io>  Thu, 15 Oct 2026 14:00:00 +0200

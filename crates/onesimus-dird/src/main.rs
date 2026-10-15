@@ -187,6 +187,8 @@ fn main() {
         "info,hyper=warn,h2=warn,tower=warn".to_string()
     };
     tracing_subscriber::fmt()
+        .with_ansi(false)
+        .with_writer(|| bareos_bnet::debug::DebugWriter)
         .with_env_filter(
             EnvFilter::try_from_default_env()
                 .unwrap_or_else(|_| EnvFilter::new(&filter)),

@@ -148,9 +148,26 @@ pub fn cmd_show(ast: &CommandAst, ctx: &ExecContext) -> CommandResult {
     CommandResult::ok("No config\n".to_string())
 }
 
-pub fn cmd_trace(ast: &CommandAst, _ctx: &ExecContext) -> CommandResult {
-    let on = ast.arguments.first().map(|a| a.key.as_str()).unwrap_or("on");
-    CommandResult::ok(format!("trace {on}\n"))
+pub fn cmd_trace(ast: &CommandAst, ctx: &ExecContext) -> CommandResult {
+    if ast.arguments.len() != 1 || ast.arguments[0].value.is_some() {
+        return CommandResult::error("trace: specify on or off\n".into());
+    }
+    let enabled = match ast.arguments[0].key.to_ascii_lowercase().as_str() {
+        "on" => true,
+        "off" => false,
+        _ => return CommandResult::error("trace: specify on or off\n".into()),
+    };
+    let path = trace_path(ctx);
+    match bareos_bnet::debug::set_trace(&path, enabled) {
+        Ok(()) => CommandResult::ok(String::new()),
+        Err(error) => CommandResult::error(format!("trace: {}: {error}\n", path.display())),
+    }
+}
+
+fn trace_path(ctx: &ExecContext) -> std::path::PathBuf {
+    let directory = ctx.config.as_ref().and_then(|c| c.read().ok())
+        .map(|c| c.director.working_directory.clone()).unwrap_or_else(|| "/var/lib/bareos".into());
+    std::path::Path::new(&directory).join("bareos-dir.trace")
 }
 
 pub fn cmd_var(ast: &CommandAst, _ctx: &ExecContext) -> CommandResult {
@@ -530,5 +547,22 @@ mod setdevice_tests {
             let result = setdevice_with(&ast, &context(), |_, _, _| panic!("must not contact SD"));
             assert!(!result.success, "{line}");
         }
+    }
+}
+
+#[cfg(test)]
+mod trace_command_tests {
+    use super::*;
+
+    #[test]
+    fn invalid_trace_input_does_not_change_trace_state() {
+        let ctx = ExecContext { session_id: 0, config: None, session_mgr: None,
+            catalog: None, api_mode: crate::command_executor::ApiMode::Human,
+            bus_rx: None, job_manager: None };
+        let before = bareos_bnet::debug::trace_enabled();
+        for line in ["trace", "trace maybe", "trace on off", "trace on=yes"] {
+            assert!(!cmd_trace(&crate::session::parse_cli_command(line), &ctx).success);
+        }
+        assert_eq!(bareos_bnet::debug::trace_enabled(), before);
     }
 }

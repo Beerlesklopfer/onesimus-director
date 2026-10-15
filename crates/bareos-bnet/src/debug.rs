@@ -18,6 +18,87 @@
 
 use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::time::SystemTime;
+use std::fs::{File, OpenOptions};
+use std::io::{self, Write};
+use std::path::{Path, PathBuf};
+use std::sync::Mutex;
+use std::os::unix::fs::OpenOptionsExt;
+
+/// One synchronized sink for protocol debug messages and daemon diagnostics.
+/// Opening a new path is atomic with respect to writers and preserves the old
+/// trace if opening fails. Trace files are append-only and never follow symlinks.
+struct TraceOutput {
+    file: Mutex<Option<(PathBuf, File)>>,
+    process_id: AtomicU32,
+}
+
+impl TraceOutput {
+    const fn new() -> Self { Self { file: Mutex::new(None), process_id: AtomicU32::new(0) } }
+
+    fn set_enabled(&self, path: &Path, enabled: bool) -> io::Result<()> {
+        let pid = std::process::id();
+        let owner = self.process_id.compare_exchange(0, pid, Ordering::Relaxed, Ordering::Relaxed).unwrap_or_else(|owner| owner);
+        if owner != 0 && owner != pid {
+            return Err(io::Error::other("cannot reconfigure an inherited trace sink"));
+        }
+        let mut current = self.file.lock().map_err(|_| io::Error::other("trace lock poisoned"))?;
+        if !enabled {
+            if let Some((_, file)) = current.as_mut() { file.flush()?; }
+            *current = None;
+            return Ok(());
+        }
+        if current.as_ref().is_some_and(|(active, _)| active == path) { return Ok(()); }
+        let file = OpenOptions::new().append(true).create(true).mode(0o600)
+            .custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK).open(path)?;
+        if !file.metadata()?.is_file() { return Err(io::Error::other("trace path is not a regular file")); }
+        *current = Some((path.to_path_buf(), file));
+        Ok(())
+    }
+
+    fn write(&self, bytes: &[u8]) -> io::Result<bool> {
+        // Workers close inherited descriptors after fork. Never touch an
+        // inherited lock, which may have been held by another parent thread.
+        if self.process_id.load(Ordering::Relaxed) != std::process::id() { return Ok(false); }
+        let mut current = self.file.lock().map_err(|_| io::Error::other("trace lock poisoned"))?;
+        let Some((_, file)) = current.as_mut() else { return Ok(false); };
+        if let Err(error) = file.write_all(bytes).and_then(|_| file.flush()) {
+            *current = None;
+            return Err(error);
+        }
+        Ok(true)
+    }
+}
+
+static TRACE_OUTPUT: TraceOutput = TraceOutput::new();
+
+pub fn set_trace(path: &Path, enabled: bool) -> io::Result<()> {
+    TRACE_OUTPUT.set_enabled(path, enabled)
+}
+
+pub fn trace_enabled() -> bool {
+    TRACE_OUTPUT.process_id.load(Ordering::Relaxed) == std::process::id()
+        && TRACE_OUTPUT.file.lock().is_ok_and(|file| file.is_some())
+}
+
+pub fn debug_timestamps() -> bool { DEBUG_TIMESTAMPS.load(Ordering::Relaxed) }
+
+/// Writer for tracing_subscriber; use the same destination as d_msg.
+pub struct DebugWriter;
+
+impl Write for DebugWriter {
+    fn write(&mut self, bytes: &[u8]) -> io::Result<usize> {
+        match TRACE_OUTPUT.write(bytes) {
+            Ok(true) => Ok(bytes.len()),
+            Ok(false) => io::stderr().write(bytes),
+            Err(error) => {
+                eprintln!("Trace output failed; reverting to stderr: {error}");
+                io::stderr().write(bytes)
+            }
+        }
+    }
+    fn flush(&mut self) -> io::Result<()> { io::stderr().flush() }
+}
+
 
 /// Globaler Debug-Level (gesetzt via -d CLI-Flag)
 static DEBUG_LEVEL: AtomicU32 = AtomicU32::new(0);
@@ -64,19 +145,14 @@ pub fn d_msg(file: &str, line: u32, level: u32, msg: &str) {
 
     let daemon = DAEMON_NAME.get().map(|s| s.as_str()).unwrap_or("bareos");
 
+    let mut output = String::new();
     if DEBUG_TIMESTAMPS.load(Ordering::Relaxed) {
-        let now = SystemTime::now()
-            .duration_since(SystemTime::UNIX_EPOCH)
-            .unwrap_or_default();
-        let secs = now.as_secs();
-        let usecs = now.subsec_micros();
-        eprint!("{}.{:06} ", secs, usecs);
+        let now = SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).unwrap_or_default();
+        output.push_str(&format!("{}.{:06} ", now.as_secs(), now.subsec_micros()));
     }
-
-    // Basename aus file extrahieren
     let basename = file.rsplit('/').next().unwrap_or(file);
-
-    eprintln!("{daemon} ({level}): {basename}:{line} {msg}");
+    output.push_str(&format!("{daemon} ({level}): {basename}:{line} {msg}\n"));
+    let _ = DebugWriter.write_all(output.as_bytes());
 }
 
 /// Bareos-kompatibles Dmsg Macro.
@@ -134,4 +210,45 @@ mod tests {
         d_msg("test.rs", 1, 1, "without timestamp");
         set_debug_level(0);
     }
+}
+
+#[cfg(test)]
+mod trace_tests {
+    use super::*;
+    use std::os::unix::fs::PermissionsExt;
+
+    #[test]
+    fn trace_appends_flushes_and_stops_without_global_test_state() {
+        let dir = std::env::temp_dir().join(format!("onesimus-trace-{}-{}", std::process::id(), rand::random::<u64>()));
+        std::fs::create_dir(&dir).unwrap();
+        let path = dir.join("test.trace");
+        let sink = TraceOutput::new();
+        assert!(!sink.write(b"before").unwrap());
+        sink.set_enabled(&path, true).unwrap();
+        assert!(sink.write(b"first\n").unwrap());
+        assert_eq!(std::fs::read(&path).unwrap(), b"first\n");
+        assert_eq!(std::fs::metadata(&path).unwrap().permissions().mode() & 0o777, 0o600);
+        sink.set_enabled(&path, false).unwrap();
+        assert!(!sink.write(b"after").unwrap());
+        sink.set_enabled(&path, true).unwrap();
+        sink.write(b"second\n").unwrap();
+        // A failed replacement must not disable the existing sink.
+        assert!(sink.set_enabled(&dir.join("missing/trace"), true).is_err());
+        sink.write(b"third\n").unwrap();
+        assert_eq!(std::fs::read(&path).unwrap(), b"first\nsecond\nthird\n");
+        sink.set_enabled(&path, false).unwrap();
+        let link = dir.join("link");
+        std::os::unix::fs::symlink(&path, &link).unwrap();
+        assert!(sink.set_enabled(&link, true).is_err());
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+    #[test]
+    fn inherited_sink_bypasses_parent_mutex_and_descriptors() {
+        let sink = TraceOutput::new();
+        sink.process_id.store(std::process::id().wrapping_add(1), Ordering::Relaxed);
+        let _held_by_parent = sink.file.lock().unwrap();
+        assert!(!sink.write(b"child diagnostic").unwrap());
+        assert!(sink.set_enabled(Path::new("unused"), true).is_err());
+    }
+
 }
