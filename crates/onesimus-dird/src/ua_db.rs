@@ -278,9 +278,23 @@ fn get_catalog_resource(ast: &CommandAst, ctx: &ExecContext, res: &Resources, gu
             }
             Some((*only).clone())
         }
-        // Interactive selection (BNET_SUB_PROMPT) is not available yet
-        // (compatibility log C-011); use the first permitted catalog.
-        [first, ..] => Some((*first).clone()),
+        // Several catalogs: DoPrompt dialog (batch mode lists the choices).
+        catalogs => {
+            let mut ua = crate::ua_select::Ua::new(ctx);
+            ua.send_msg(std::mem::take(&mut op.out));
+            if !op.err.is_empty() {
+                ua.error_msg(std::mem::take(&mut op.err));
+            }
+            ua.start_prompt("The defined Catalog resources are:\n");
+            for catalog in catalogs {
+                ua.add_prompt(catalog);
+            }
+            let choice = ua.do_prompt("Catalog", "Select Catalog resource");
+            let rest = ua.finish(true);
+            op.out.push_str(&rest.text_output);
+            op.err.push_str(&rest.error_message);
+            choice.map(|(_, name)| name)
+        }
     }
 }
 
@@ -363,6 +377,26 @@ Console { Name=mycat; Password=pw; CommandACL=*all*; CatalogACL=MyCatalog; Clien
         let ctx = context("limited");
         let err = open_client_db(&ast(&[("client", "fd2")]), &ctx, false).unwrap_err();
         assert_eq!(err.error_message, "No authorization for Catalog \"MyCatalog\"\n");
+    }
+
+    #[test]
+    fn several_catalogs_open_a_selection_dialog() {
+        use crate::ua_select::tests::scripted;
+        let ctx = context("*UserAgent*");
+        let (prefix, console) = scripted(&["3", "2"], || open_client_db(&ast(&[]), &ctx, false));
+        assert_eq!(prefix.unwrap(), "Using Catalog \"Other\"\n");
+        assert_eq!(console.transcript(),
+            "The defined Catalog resources are:\n1: MyCatalog\n2: Other\nSelect Catalog resource (1-2): 3\n\
+             Please enter a number between 1 and 2\nSelect Catalog resource (1-2): 2\n");
+        // Cancelled: no catalog.
+        let ctx = context("*UserAgent*");
+        let (err, _) = scripted(&["."], || open_client_db(&ast(&[]), &ctx, false));
+        assert_eq!(err.unwrap_err().error_message, "Could not find a Catalog resource\n");
+        // Batch mode (no console): the choices and the batch message.
+        let ctx = context("*UserAgent*");
+        let err = open_client_db(&ast(&[]), &ctx, false).unwrap_err();
+        assert_eq!(err.text_output, "The defined Catalog resources are:\n1: MyCatalog\n2: Other\n\
+            Your request has multiple choices for \"Catalog\". Selection is not possible in batch mode.\n");
     }
 
     #[test]

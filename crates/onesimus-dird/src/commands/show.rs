@@ -920,7 +920,7 @@ fn parse_units(s: &str, mods: &[(&str, u64)]) -> Option<u64> {
     parse_with_mods(s, mods)
 }
 
-fn parse_duration(s: &str) -> Option<u64> {
+pub(crate) fn parse_duration(s: &str) -> Option<u64> {
     parse_with_mods(s, TIME_MODS)
 }
 
