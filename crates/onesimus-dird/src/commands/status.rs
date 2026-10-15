@@ -1026,19 +1026,17 @@ fn compute_hash(source: &str) -> String {
 fn list_sql(ua: &mut Ua, ctx: &ExecContext, sql: &str, ty: crate::sql_list::ListType, key: &str) {
     let Some(catalog) = &ctx.catalog else { return };
     match catalog.query_rows(sql) {
-        Ok(mut table) => {
-            // ListSqlQuery prints NULL (the TOTAL row's plugin) as empty.
-            for value in table.rows.iter_mut().flatten() {
-                value.get_or_insert_with(String::new);
-            }
+        Ok(table) => {
             if ua.api == ApiMode::Json {
                 let rows = crate::sql_list::json_rows(&table);
                 ua.json.insert(key.into(), Value::Array(rows));
-            } else if !table.rows.is_empty() {
+            } else if table.rows.is_empty() {
+                ua.decoration("No results to list.\n");
+            } else {
                 ua.send(&crate::sql_list::render(&table, ty));
             }
         }
-        Err(e) => ua.error(&format!("Query failed: {e}\n")),
+        Err(e) => ua.decoration(&format!("Query failed: {e}\n")),
     }
 }
 
@@ -1132,7 +1130,8 @@ fn status_subscriptions(ast: &CommandAst, ctx: &ExecContext) -> CommandResult {
             ua.json.insert("unit-summary".into(), value);
         }
         Some(Ok(table)) if !table.rows.is_empty() => ua.send(&vert),
-        Some(Err(e)) => ua.error(&format!("Query failed: {e}\n")),
+        Some(Ok(_)) => ua.decoration("No results to list.\n"),
+        Some(Err(e)) => ua.decoration(&format!("Query failed: {e}\n")),
         _ => {}
     }
     // The checksum covers the summary as text (get_subscription_status_checksum_source_text)
