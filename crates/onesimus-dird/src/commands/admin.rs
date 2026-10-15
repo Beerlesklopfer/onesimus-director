@@ -87,6 +87,10 @@ fn cmd_label_db(ast: &CommandAst, ctx: &ExecContext) -> CommandResult {
                         ));
                     }
                     output.push_str(&format!("\nVolume \"{v}\" labeled and added to catalog.\n"));
+                    // C++ ua_label.cc:557: mount the new volume unless `automount off`.
+                    if ctx.session_mgr.as_ref().is_none_or(|mgr| mgr.session_automount(ctx.session_id)) {
+                        output.push_str(&automount_after_label(ctx, stor_name));
+                    }
                 }
                 Err(e) => {
                     output.push_str(&format!("SD label failed: {e}\n"));
@@ -101,6 +105,20 @@ fn cmd_label_db(ast: &CommandAst, ctx: &ExecContext) -> CommandResult {
             CommandResult::ok("label: specify volume=<name> or barcodes\n".to_string())
         }
     }
+}
+
+/// C++ ua_label.cc:557 automount: "Requesting to mount <dev> ..." and
+/// `mount <dev> drive=0` (spaces bashed to 0x01) to the SD, echoing its reply.
+fn automount_after_label(ctx: &ExecContext, stor_name: &str) -> String {
+    let device = ctx.config.as_ref().and_then(|c| c.read().ok())
+        .and_then(|cfg| cfg.find_storage(stor_name).map(|s| s.device.clone()))
+        .unwrap_or_default();
+    let mut output = format!("Requesting to mount {device} ...\n");
+    match sd_command(ctx, stor_name, &format!("mount {} drive=0", device.replace(' ', "\x01"))) {
+        Ok(resp) => output.push_str(&resp),
+        Err(e) => output.push_str(&format!("mount {stor_name}: {e}\n")),
+    }
+    output
 }
 
 pub fn cmd_mount(ast: &CommandAst, ctx: &ExecContext) -> CommandResult {

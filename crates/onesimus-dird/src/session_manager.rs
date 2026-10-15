@@ -25,6 +25,8 @@ pub struct SessionInfo {
     pub bus_rx: Receiver<BusMessage>,
     /// Catalog state of the console session (C++ UaContext catalog/db).
     pub catalog: SessionCatalog,
+    /// C++ ua->automount: mount the volume after `label` (default on, ua.cc:84).
+    pub automount: bool,
 }
 
 /// Per-session catalog selection, like the C++ UaContext fields `catalog`,
@@ -88,6 +90,7 @@ impl SessionManager {
             expires_at: None,
             bus_rx,
             catalog: SessionCatalog::default(),
+            automount: true,
         });
         id
     }
@@ -137,6 +140,18 @@ impl SessionManager {
         self.sessions.iter()
             .map(|entry| (entry.id, entry.client_name.clone()))
             .collect()
+    }
+
+    /// `automount on|off` (C++ AutomountCmd).
+    pub fn set_session_automount(&self, id: u64, on: bool) {
+        if let Some(mut session) = self.sessions.get_mut(&id) {
+            session.automount = on;
+        }
+    }
+
+    /// Automount flag of a session; unknown sessions use the C++ default (on).
+    pub fn session_automount(&self, id: u64) -> bool {
+        self.sessions.get(&id).map(|session| session.automount).unwrap_or(true)
     }
 
     // --- FD Connections ---
@@ -233,6 +248,19 @@ mod tests {
     fn make_mgr() -> SessionManager {
         let bus = Arc::new(MessageBus::new(64));
         SessionManager::new(bus)
+    }
+
+    #[test]
+    fn automount_defaults_on_and_is_per_session() {
+        let mgr = make_mgr();
+        let id1 = mgr.create_session("console1");
+        let id2 = mgr.create_session("console2");
+        assert!(mgr.session_automount(id1));
+        mgr.set_session_automount(id1, false);
+        assert!(!mgr.session_automount(id1));
+        assert!(mgr.session_automount(id2));
+        mgr.set_session_automount(id1, true);
+        assert!(mgr.session_automount(id1));
     }
 
     #[test]

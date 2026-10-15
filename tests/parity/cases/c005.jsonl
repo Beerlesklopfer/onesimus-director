@@ -1,0 +1,28 @@
+# C-005 silent toggles: autodisplay/gui/automount argument variants (read-only, session state only).
+{"id": "c005-autodisplay-noarg", "steps": ["autodisplay"]}
+{"id": "c005-autodisplay-foo", "steps": ["autodisplay foo"]}
+{"id": "c005-autodisplay-upper", "steps": ["autodisplay ON"]}
+{"id": "c005-autodisplay-later-kw", "steps": ["autodisplay foo off"]}
+{"id": "c005-autodisplay-kv", "steps": ["autodisplay on=1"]}
+{"id": "c005-autodisplay-off-on", "steps": ["autodisplay off", "autodisplay on"]}
+{"id": "c005-autodisplay-foo-api1", "steps": ["autodisplay foo"], "setup": [".api 1"]}
+{"id": "c005-autodisplay-off-api1", "steps": ["autodisplay off"], "setup": [".api 1"]}
+{"id": "c005-autodisplay-foo-api2", "steps": ["autodisplay foo"], "setup": [".api 2"]}
+{"id": "c005-autodisplay-off-api2", "steps": ["autodisplay off"], "setup": [".api 2"]}
+{"id": "c005-gui-noarg", "steps": ["gui"]}
+{"id": "c005-gui-foo", "steps": ["gui foo"]}
+{"id": "c005-gui-upper", "steps": ["gui OFF"]}
+{"id": "c005-gui-on-off", "steps": ["gui on", "gui off"]}
+{"id": "c005-gui-foo-api2", "steps": ["gui foo"], "setup": [".api 2"]}
+{"id": "c005-gui-on-api2", "steps": ["gui on"], "setup": [".api 2"]}
+{"id": "c005-automount-off", "steps": ["automount off"]}
+{"id": "c005-automount-foo", "steps": ["automount foo"]}
+{"id": "c005-automount-upper", "steps": ["automount OFF"]}
+{"id": "c005-automount-noarg", "steps": ["automount", "off"]}
+{"id": "c005-automount-noarg-dot", "steps": ["automount", "."]}
+{"id": "c005-automount-twoargs", "steps": ["automount on off", "on"]}
+{"id": "c005-automount-on-api1", "steps": ["automount on"], "setup": [".api 1"]}
+{"id": "c005-automount-noarg-api1", "steps": ["automount", "off"], "setup": [".api 1"]}
+{"id": "c005-automount-on-api2", "steps": ["automount on"], "setup": [".api 2"]}
+{"id": "c005-automount-noarg-api2", "steps": ["automount", "off"], "setup": [".api 2"]}
+{"id": "c005-automount-prompt-then-command", "steps": ["automount", "off", "gui on"]}

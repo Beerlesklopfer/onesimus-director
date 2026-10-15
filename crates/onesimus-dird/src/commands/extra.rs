@@ -23,19 +23,48 @@ fn sd_cmd_via_config(ctx: &ExecContext, storage_name: &str, command: &str) -> Re
 
 // --- Interactive/session commands ---
 
+/// C++ FindArgKeyword(ua, {"on", "off"}): first argument keyword (case
+/// insensitive) that is `on` or `off`; anything else is ignored.
+pub(crate) fn on_off_keyword(ast: &CommandAst) -> Option<bool> {
+    ast.arguments.iter().find_map(|a| {
+        if a.key.eq_ignore_ascii_case("on") { Some(true) }
+        else if a.key.eq_ignore_ascii_case("off") { Some(false) }
+        else { None }
+    })
+}
+
+/// C++ AutodisplayCmd/gui_cmd reply: silent on success; without on/off an
+/// ErrorMsg is sent, but the handler still returns true (CMD_OK).
+fn on_off_reply(ast: &CommandAst) -> CommandResult {
+    match on_off_keyword(ast) {
+        Some(_) => CommandResult::ok(String::new()),
+        None => CommandResult {
+            success: true,
+            error_message: "ON or OFF keyword missing.\n".to_string(),
+            ..Default::default()
+        },
+    }
+}
+
+/// C++ ua_output.cc AutodisplayCmd; the session applies the flag.
 pub fn cmd_autodisplay(ast: &CommandAst, _ctx: &ExecContext) -> CommandResult {
-    let on = ast.arguments.first().map(|a| a.key.as_str()).unwrap_or("on");
-    CommandResult::ok(format!("autodisplay {on}\n"))
+    on_off_reply(ast)
 }
 
-pub fn cmd_automount(ast: &CommandAst, _ctx: &ExecContext) -> CommandResult {
-    let on = ast.arguments.first().map(|a| a.key.as_str()).unwrap_or("on");
-    CommandResult::ok(format!("automount {on}\n"))
+/// C++ ua_cmds.cc AutomountCmd: exactly one argument, anything but `off`
+/// (case insensitive) means on. The console session asks for the value
+/// ("Turn on or off? ") when the argument count differs; without an answer
+/// the flag is left unchanged.
+pub fn cmd_automount(ast: &CommandAst, ctx: &ExecContext) -> CommandResult {
+    if let ([arg], Some(mgr)) = (ast.arguments.as_slice(), &ctx.session_mgr) {
+        mgr.set_session_automount(ctx.session_id, !arg.key.eq_ignore_ascii_case("off"));
+    }
+    CommandResult::ok(String::new())
 }
 
+/// C++ ua_output.cc gui_cmd; the session applies the flag.
 pub fn cmd_gui(ast: &CommandAst, _ctx: &ExecContext) -> CommandResult {
-    let on = ast.arguments.first().map(|a| a.key.as_str()).unwrap_or("on");
-    CommandResult::ok(format!("gui mode {on}\n"))
+    on_off_reply(ast)
 }
 
 /// DoMessages sends queued text verbatim; dot mode is silent when empty.
@@ -613,5 +642,76 @@ mod trace_command_tests {
             assert!(!cmd_trace(&crate::session::parse_cli_command(line), &ctx).success);
         }
         assert_eq!(bareos_bnet::debug::trace_enabled(), before);
+    }
+}
+
+#[cfg(test)]
+mod toggle_tests {
+    use super::*;
+    use crate::session::parse_cli_command;
+    use std::sync::Arc;
+
+    fn context() -> ExecContext {
+        let manager = Arc::new(crate::session_manager::SessionManager::new(Arc::new(
+            crate::message_bus::MessageBus::new(16))));
+        let session_id = manager.create_session("*UserAgent*");
+        ExecContext { session_id, config: None, session_mgr: Some(manager), catalog: None,
+            api_mode: crate::command_executor::ApiMode::Human, bus_rx: None, job_manager: None }
+    }
+
+    #[test]
+    fn on_off_keyword_follows_find_arg_keyword() {
+        let kw = |line: &str| on_off_keyword(&parse_cli_command(line));
+        assert_eq!(kw("gui on"), Some(true));
+        assert_eq!(kw("gui OFF"), Some(false));
+        assert_eq!(kw("gui foo off"), Some(false));
+        assert_eq!(kw("gui on=1"), Some(true));
+        assert_eq!(kw("gui off on"), Some(false));
+        assert_eq!(kw("gui"), None);
+        assert_eq!(kw("gui foo"), None);
+        assert_eq!(kw("gui x=on"), None);
+    }
+
+    #[test]
+    fn autodisplay_and_gui_are_silent_or_report_missing_keyword() {
+        let ctx = context();
+        let handlers: [(fn(&CommandAst, &ExecContext) -> CommandResult, &str); 2] =
+            [(cmd_autodisplay, "autodisplay"), (cmd_gui, "gui")];
+        for (handler, name) in handlers {
+            for arg in ["on", "off", "On"] {
+                let result = handler(&parse_cli_command(&format!("{name} {arg}")), &ctx);
+                assert!(result.success);
+                assert_eq!(result.text_output, "");
+                assert_eq!(result.error_message, "");
+            }
+            for line in [name.to_string(), format!("{name} foo")] {
+                let result = handler(&parse_cli_command(&line), &ctx);
+                assert!(result.success, "{line}: C++ handler returns true");
+                assert_eq!(result.text_output, "");
+                assert_eq!(result.error_message, "ON or OFF keyword missing.\n");
+            }
+        }
+    }
+
+    #[test]
+    fn automount_is_silent_and_sets_session_flag() {
+        let ctx = context();
+        let mgr = ctx.session_mgr.clone().unwrap();
+        let run = |line: &str| cmd_automount(&parse_cli_command(line), &ctx);
+        assert!(mgr.session_automount(ctx.session_id));
+        let result = run("automount OFF");
+        assert!(result.success);
+        assert_eq!((result.text_output.as_str(), result.error_message.as_str()), ("", ""));
+        assert!(!mgr.session_automount(ctx.session_id));
+        run("automount foo");
+        assert!(mgr.session_automount(ctx.session_id), "anything but off means on");
+        run("automount off");
+        run("automount");
+        run("automount on off");
+        assert!(!mgr.session_automount(ctx.session_id), "wrong argument count leaves the flag");
+        run("automount off=1");
+        assert!(!mgr.session_automount(ctx.session_id));
+        run("automount on");
+        assert!(mgr.session_automount(ctx.session_id));
     }
 }

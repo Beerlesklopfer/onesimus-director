@@ -179,6 +179,14 @@ pub fn handle_console_session<S: Read + Write>(
             ctx.api_mode = parse_api_mode(&ast).unwrap_or(api_mode);
         }
 
+        // C++ AutomountCmd: without exactly one argument the value is asked
+        // for (GetCmd); no answer (lone dot, lost connection) keeps the flag.
+        if command_allowed && ast.command_name == "automount" && ast.arguments.len() != 1 {
+            ast.arguments = get_cmd(&mut bnet, "Turn on or off? ", api_mode)
+                .map(|answer| vec![Argument { key: answer, value: None }])
+                .unwrap_or_default();
+        }
+
         // Execute command; only successful authorization commits local changes.
         let result = command_executor::dispatch(&ast, &ctx);
 
@@ -186,14 +194,15 @@ pub fn handle_console_session<S: Read + Write>(
         if result.success {
         api_mode=ctx.api_mode;
         match ast.command_name.as_str() {
+            // C++ AutodisplayCmd/gui_cmd: without on/off the flag stays.
             "autodisplay" => {
-                let flag = ast.arguments.first().map(|a| a.key.as_str()).unwrap_or("on");
-                auto_display = flag != "off";
+                if let Some(on) = crate::commands::extra::on_off_keyword(&ast) { auto_display = on; }
             }
             "gui" => {
-                let flag = ast.arguments.first().map(|a| a.key.as_str()).unwrap_or("on");
-                gui_mode = flag != "off";
-                session_mgr.set_session_gui(mgr_session_id, gui_mode);
+                if let Some(on) = crate::commands::extra::on_off_keyword(&ast) {
+                    gui_mode = on;
+                    session_mgr.set_session_gui(mgr_session_id, gui_mode);
+                }
             }
             ".grpc" => {
                 let on = ast.arguments.iter().any(|a| a.key == "on");
@@ -332,6 +341,38 @@ fn split_args(input: &str) -> Vec<String> {
     args
 }
 
+/// C++ ua_input.cc GetCmd(): ask the console for one line of input. JSON
+/// mode is batch mode (DotApiCmd sets ua->batch) and never asks. `.api 1`
+/// clients get BNET_TEXT_INPUT before the prompt, plain consoles
+/// BNET_SUB_PROMPT after it. Signals are ignored; trailing whitespace is
+/// stripped; a lone dot or a lost connection returns None.
+fn get_cmd<S: Read + Write>(
+    bnet: &mut BnetStream<S>,
+    prompt: &str,
+    api_mode: command_executor::ApiMode,
+) -> Option<String> {
+    use command_executor::ApiMode;
+    match api_mode {
+        ApiMode::Json => return None,
+        ApiMode::Api => {
+            bnet.send_signal(BnetSignal::TextInput).ok()?;
+            bnet.send_str(prompt).ok()?;
+        }
+        ApiMode::Human => {
+            bnet.send_str(prompt).ok()?;
+            bnet.send_signal(BnetSignal::SubPrompt).ok()?;
+        }
+    }
+    let answer = loop {
+        match bnet.recv().ok()? {
+            BnetMessage::Data(data) => break String::from_utf8_lossy(&data).trim_end().to_string(),
+            BnetMessage::Signal(BnetSignal::Terminate) => return None,
+            BnetMessage::Signal(_) => continue,
+        }
+    };
+    (answer != ".").then_some(answer)
+}
+
 /// Mode argument of `.api` (C++ DotApiCmd: no argument means 1).
 fn parse_api_mode(ast: &CommandAst) -> Option<command_executor::ApiMode> {
     match ast.arguments.first().map(|a| a.value.as_deref().unwrap_or(a.key.as_str())) {
@@ -374,6 +415,45 @@ pub(crate) fn parse_cli_command(input: &str) -> CommandAst {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Runs get_cmd on the server side of a TCP pair while `client` answers.
+    fn prompt_pair(
+        api_mode: command_executor::ApiMode,
+        client: impl FnOnce(&mut BnetStream<std::net::TcpStream>) + Send + 'static,
+    ) -> Option<String> {
+        use std::net::{TcpListener, TcpStream};
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = listener.local_addr().unwrap();
+        let peer = std::thread::spawn(move || {
+            let stream = TcpStream::connect(address).unwrap();
+            stream.set_read_timeout(Some(std::time::Duration::from_secs(5))).unwrap();
+            client(&mut BnetStream::new(stream));
+        });
+        let (stream, _) = listener.accept().unwrap();
+        let answer = get_cmd(&mut BnetStream::new(stream), "Turn on or off? ", api_mode);
+        peer.join().unwrap();
+        answer
+    }
+
+    #[test]
+    fn get_cmd_prompts_like_cpp() {
+        use command_executor::ApiMode;
+        let answer = prompt_pair(ApiMode::Human, |bnet| {
+            assert_eq!(bnet.recv_str().unwrap(), "Turn on or off? ");
+            assert_eq!(bnet.recv().unwrap(), BnetMessage::Signal(BnetSignal::SubPrompt));
+            bnet.send_signal(BnetSignal::Eod).unwrap();
+            bnet.send_str("OFF \n").unwrap();
+        });
+        assert_eq!(answer.as_deref(), Some("OFF"));
+        let answer = prompt_pair(ApiMode::Api, |bnet| {
+            assert_eq!(bnet.recv().unwrap(), BnetMessage::Signal(BnetSignal::TextInput));
+            assert_eq!(bnet.recv_str().unwrap(), "Turn on or off? ");
+            bnet.send_str(".").unwrap();
+        });
+        assert_eq!(answer, None, "lone dot cancels");
+        // JSON mode is batch mode: no prompt at all.
+        assert_eq!(prompt_pair(ApiMode::Json, |_| {}), None);
+    }
 
     #[test]
     fn parse_quoted_values() {
