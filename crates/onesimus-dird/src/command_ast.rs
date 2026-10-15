@@ -36,4 +36,7 @@ pub struct CommandAst {
     pub session_id: String,
     pub source: CommandSource,
     pub response_format: ResponseFormat,
+    /// Console input line as received (C++ `ua->cmd`); empty when the
+    /// command did not come from a text line.
+    pub raw_line: String,
 }

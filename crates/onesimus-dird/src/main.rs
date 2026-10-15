@@ -12,6 +12,7 @@ mod command_queue;
 mod command_registry;
 mod commands;
 mod command_worker;
+mod expand;
 mod connection_monitor;
 mod director_config;
 mod fd_protocol;

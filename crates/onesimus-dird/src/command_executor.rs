@@ -71,6 +71,7 @@ mod tests {
             session_id: String::new(),
             source: CommandSource::Cli,
             response_format: ResponseFormat::Default,
+            raw_line: String::new(),
         }
     }
 

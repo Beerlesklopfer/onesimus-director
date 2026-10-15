@@ -143,6 +143,7 @@ pub fn handle_console_session<S: Read + Write>(
 
         // Parse command into AST
         let mut ast = parse_cli_command(cmd_str);
+        ast.raw_line = msg.clone();
         // C++ Do_a_command(): no arguments (empty or whitespace-only line)
         // runs nothing, but the loop still handles messages and sends EOD.
         if ast.command_name.is_empty() {
@@ -402,6 +403,7 @@ pub(crate) fn parse_cli_command(input: &str) -> CommandAst {
         session_id: String::new(),
         source: CommandSource::Cli,
         response_format: ResponseFormat::Default,
+        raw_line: input.to_string(),
     }
 }
 

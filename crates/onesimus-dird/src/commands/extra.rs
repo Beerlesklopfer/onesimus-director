@@ -192,9 +192,85 @@ pub fn cmd_var(ast: &CommandAst, ctx: &ExecContext) -> CommandResult {
     crate::ua_db::with_client_db(ast, ctx, false, || cmd_var_db(ast, ctx))
 }
 
-fn cmd_var_db(ast: &CommandAst, _ctx: &ExecContext) -> CommandResult {
-    let name = ast.arguments.first().map(|a| a.key.as_str()).unwrap_or("?");
-    CommandResult::ok(format!("Variable {name}: undefined\n"))
+/// C++ var_cmd(): expand everything behind the first blank of the input
+/// line (`ua->cmd`) and print it; a failed expansion prints an empty line
+/// (the reason goes to the job messages).
+fn cmd_var_db(ast: &CommandAst, ctx: &ExecContext) -> CommandResult {
+    let line = if ast.raw_line.is_empty() { reconstruct_line(ast) } else { ast.raw_line.clone() };
+    // `var` without blank: the C++ loop reads behind the string terminator
+    // into stale buffer contents (undefined); here the rest is empty.
+    let rest = line.find(' ').map(|i| line[i..].trim_start_matches(' ')).unwrap_or("");
+    let Some(mut resolver) = console_resolver(ctx) else {
+        return CommandResult::ok("\n".to_string());
+    };
+    let value = match crate::expand::variable_expansion(rest.as_bytes(), &mut resolver) {
+        Ok(value) => value,
+        Err(message) => {
+            tracing::error!("{}", message.trim_end());
+            Vec::new()
+        }
+    };
+    CommandResult::ok(format!("{}\n", String::from_utf8_lossy(&value)))
+}
+
+/// Command line of a structured (non-text) request.
+fn reconstruct_line(ast: &CommandAst) -> String {
+    let mut line = ast.command_name.clone();
+    for arg in &ast.arguments {
+        line.push(' ');
+        line.push_str(&arg.key);
+        if let Some(value) = &arg.value {
+            line.push('=');
+            line.push_str(value);
+        }
+    }
+    line
+}
+
+/// Expansion context of the console JobControlRecord (ua_server.cc
+/// new_control_jcr("-Console-", JT_CONSOLE)): job defaults of the first Job
+/// resource, type Console, no level, JobId 0, the session catalog.
+fn console_resolver(ctx: &ExecContext) -> Option<crate::expand::DirectorResolver<'static>> {
+    use crate::expand::{CounterDef, DirectorResolver, JobVars};
+    static SEQ: std::sync::Mutex<u32> = std::sync::Mutex::new(0);
+
+    let config = ctx.config.as_ref()?.read().ok()?;
+    let job = config.jobs.first();
+    let storage = job.and_then(|j| j.storage.split(',').next()).unwrap_or("").trim().to_string();
+    let media_type = config.storages.iter().find(|s| s.name == storage)
+        .map(|s| s.media_type.clone()).unwrap_or_default();
+    let catalog = crate::ua_db::selected_catalog(ctx)
+        .or_else(|| config.catalogs.first().map(|c| c.name.clone()))
+        .unwrap_or_default();
+    // CreateUniqueJobName(): sequence 1..59, then 0
+    let seq = {
+        let mut seq = SEQ.lock().unwrap_or_else(|e| e.into_inner());
+        *seq = if *seq >= 59 { 0 } else { *seq + 1 };
+        *seq
+    };
+    let job_name = format!("-Console-.{}_{seq:02}", crate::localtime::strftime_now("%Y-%m-%d_%H.%M.%S"));
+    let catalog_handle = ctx.catalog.clone();
+    Some(DirectorResolver {
+        job: JobVars {
+            job: job.map(|j| j.name.clone()).unwrap_or_default(),
+            dir: config.director.name.clone(),
+            level: " ".into(),
+            job_type: "Console".into(),
+            job_id: 0,
+            client: job.map(|j| j.client.clone()).unwrap_or_default(),
+            num_vols: 0,
+            pool: job.map(|j| j.pool.clone()).unwrap_or_default(),
+            storage,
+            catalog,
+            media_type,
+            job_name,
+        },
+        counters: CounterDef::from_raw(&config.raw),
+        update_counter: Some(Box::new(move |def: &CounterDef, value: i32| {
+            let handle = catalog_handle.as_ref().ok_or("no catalog")?;
+            handle.raw_query(&crate::expand::update_counter_sql(def, value)).map(|_| ())
+        })),
+    })
 }
 
 /// `whoami` — the name of the resource behind the console's ACL (the named

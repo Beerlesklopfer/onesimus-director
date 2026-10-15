@@ -170,6 +170,11 @@ pub fn use_catalog(ast: &CommandAst, ctx: &ExecContext) -> CommandResult {
     result
 }
 
+/// Catalog selected by the session (`ua->catalog`).
+pub fn selected_catalog(ctx: &ExecContext) -> Option<String> {
+    state(ctx, |s| s.name.clone()).flatten()
+}
+
 /// Put the catalog messages in front of a command result.
 pub fn with_prefix(prefix: String, mut result: CommandResult) -> CommandResult {
     if !prefix.is_empty() {
@@ -385,6 +390,34 @@ Console { Name=mycat; Password=pw; CommandACL=*all*; CatalogACL=MyCatalog; Clien
         let ctx = context("*UserAgent*");
         ctx.session_mgr.as_ref().unwrap().set_session_gui(ctx.session_id, true);
         assert_eq!(open_client_db(&ast(&[]), &ctx, false).unwrap(), "Using Catalog \"MyCatalog\"\n");
+    }
+
+    #[test]
+    fn use_selects_named_catalog_or_falls_back_to_selection() {
+        let ctx = context("*UserAgent*");
+        let r = use_catalog(&ast(&[("catalog", "Other")]), &ctx);
+        assert_eq!(r.text_output, "Using Catalog \"Other\"\nUsing Catalog name=Other DB=other\n");
+        assert_eq!(selected_catalog(&ctx).as_deref(), Some("Other"));
+        // Unknown catalog: selection among the permitted catalogs.
+        let ctx = context("mycat");
+        let r = use_catalog(&ast(&[("catalog", "Nope")]), &ctx);
+        assert_eq!(r.text_output,
+            "Automatically selected Catalog: MyCatalog\nUsing Catalog \"MyCatalog\"\nUsing Catalog name=MyCatalog DB=bareos\n");
+
+        // ACL-denied catalog: only the permitted one is offered (and taken).
+        let ctx = context("limited");
+        let r = use_catalog(&ast(&[("catalog", "MyCatalog")]), &ctx);
+        assert_eq!(r.text_output,
+            "Automatically selected Catalog: Other\nUsing Catalog \"Other\"\nUsing Catalog name=Other DB=other\n");
+        assert!(r.error_message.is_empty());
+
+        // No permitted catalog at all: only the selection errors.
+        let ctx = context("nocat");
+        let r = use_catalog(&ast(&[("catalog", "MyCatalog")]), &ctx);
+        assert!(r.success);
+        assert_eq!(r.text_output, "The defined Catalog resources are:\nThe defined Catalog resources are:\n");
+        assert_eq!(r.error_message,
+            "Selection list for \"Catalog\" is empty!\nSelection list for \"Catalog\" is empty!\nCould not find a Catalog resource\n");
     }
 
     #[test]

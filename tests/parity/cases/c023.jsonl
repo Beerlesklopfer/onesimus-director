@@ -1,0 +1,19 @@
+# C-023 var (ua_cmds.cc var_cmd, dird/expand.cc VariableExpansion, lib/var.cc) and use (ua_cmds.cc use_cmd).
+# Only date/time fields and the console job name (time + sequence) are normalized.
+# Not live: `var` without blank (C++ reads stale buffer bytes), `${X:%inc}` (C++ crashes), `${Counter+}` (writes the catalog).
+{"id": "c023-var-blank", "steps": ["var ", "var hello world", "var    spaced   out ", "var \"${Dir}\" 'x'"]}
+{"id": "c023-var-date", "steps": ["var Y=${Year} M=${Month} D=${Day} h=${Hour} m=${Minute} s=${Second} w=${WeekDay}"], "normalize": ["(?<=[YMDhmsw]=)\\d+"]}
+{"id": "c023-var-job", "steps": ["var ${Dir}|${Type}|${Level}|${JobId}|${NumVols}|${Catalog}", "var ${Job}|${Client}|${Pool}|${Storage}|${MediaType}", "var $Dir $Type x$Levelx", "var ${Di}/${J}/${Med}/${Cat}"]}
+{"id": "c023-var-jobname", "steps": ["var ${JobName}"], "normalize": ["-Console-\\.\\d{4}-\\d\\d-\\d\\d_\\d\\d\\.\\d\\d\\.\\d\\d_\\d\\d"]}
+{"id": "c023-var-undefined", "steps": ["var ${Undefined}", "var $Undefined end", "var ${}", "var ${Undef:+set}|${Undef:*x}|${Undef:-dflt}"]}
+{"id": "c023-var-env", "steps": ["var ${LANG} ${LC_ALL}", "var ${LANG[0]} ${LANG[#]} ${LANG[1]} ${LANG[-1]}"]}
+{"id": "c023-var-ops", "steps": ["var ${Dir:u} ${Dir:l} ${Dir:#} ${Dir:o1,3} ${Dir:o1-3} ${Dir:o4,}", "var ${Dir:s/dir/DIR/} ${Dir:s/r/R/g} ${Dir:s/x/y/t} ${Dir:y/a-z/A-Z/} ${Dir:s/(b)(a)/\\2\\1/}", "var ${Dir:p/20/*/l}| ${Dir:p/20/*/r}| ${Dir:p/20/-=/c}|", "var ${Dir:+set} ${Dir:*x} ${Dir:-x} ${Dir:U:#}"]}
+{"id": "c023-var-errors", "steps": ["var ${", "var ${Dir", "var \\", "var ${Dir:o9,1}", "var $", "var ${Dir[}", "var ${Dir:q}", "var a]b", "var ${Dir:%foo}"]}
+{"id": "c023-var-escapes", "steps": ["var a\\nb \\\\ \\x41 \\101 \\q", "var \\x{4142} a\\x00b"]}
+{"id": "c023-var-loops", "steps": ["var [${Dir}]", "var [x${LANG[#]}]{0,1,2}", "var ab[x]{z}", "var [${LANG[#]},]"]}
+{"id": "c023-var-catalog-arg", "steps": ["var catalog=MyCatalog ${Catalog}"]}
+{"id": "c023-var-api2", "setup": [".api 2"], "steps": ["var ${Dir}"]}
+{"id": "c023-use", "steps": ["use", "use catalog=MyCatalog", "use MyCatalog", "use catalog=Nope", "use Nope", "use catalog", "use catalog=MyCatalog extra"]}
+{"id": "c023-use-var", "steps": ["use catalog=MyCatalog", "var ${Catalog}"]}
+{"id": "c023-limited", "steps": ["use", "use catalog=MyCatalog", "var ${Dir}"], "console": "parity-limited", "password": "parity-limited-pw"}
+{"id": "c023-operator", "steps": ["use catalog=MyCatalog", "var ${Dir}"], "console": "parity-operator", "password": "parity-operator-pw"}
