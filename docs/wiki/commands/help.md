@@ -15,7 +15,9 @@ help add autodisplay automount cancel configure create delete disable enable est
 
 **RunScript erlaubt:** nein. **Audit-Ereignis:** nein. Beide Flags sind keine Read-only-Klassifizierung.
 
-**Onesimus-Status:** `registered_unverified`. Funktionsparität ist nicht durch einen Live-Test nachgewiesen.
+**Onesimus-Status:** `partial`. Funktionsparität ist nicht durch einen Live-Test nachgewiesen.
+
+- ANSI-Farbgebung wurde aus help/.help-Protokollantworten entfernt; Tests prüfen alle Hilfevarianten. Textlayout, vollständige Syntax/ACL-Ausgabe und Live-SHA-256-Parität zum Original bleiben offen.
 
 **Lokaler Handler:** [crates/onesimus-dird/src/commands/basic.rs:60](../../../crates/onesimus-dird/src/commands/basic.rs).
 

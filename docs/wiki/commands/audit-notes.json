@@ -217,6 +217,12 @@
       "findings": [
         "Der lokale Handler verlangt volume=<name> und legt einen vereinfachten Katalogdatensatz an; storage/jobid aus der Originalhilfe werden nicht ausgewertet. Die dokumentierte Originalsyntax ohne volume führt lokal nur zur Aufforderung, volume anzugeben."
       ]
+    },
+    "help": {
+      "status": "partial",
+      "findings": [
+        "ANSI-Farbgebung wurde aus help/.help-Protokollantworten entfernt; Tests prüfen alle Hilfevarianten. Textlayout, vollständige Syntax/ACL-Ausgabe und Live-SHA-256-Parität zum Original bleiben offen."
+      ]
     }
   },
   "cross_cutting_findings": [

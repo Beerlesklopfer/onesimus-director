@@ -79,11 +79,11 @@ pub fn cmd_help(ast: &CommandAst, _ctx: &ExecContext) -> CommandResult {
             None => CommandResult::ok(format!("Unknown command: {cmd}\nUse \".help\" for complete command list.\n")),
         }
     } else {
-        let mut output = String::from("  \x1b[1mAvailable commands:\x1b[0m\n\n");
+        let mut output = String::from("  Available commands:\n\n");
         for def in registry.iter().filter(|d| !d.dot_command) {
-            output.push_str(&format!("  \x1b[32m{:<20}\x1b[0m {}\n", def.name, def.description));
+            output.push_str(&format!("  {:<20} {}\n", def.name, def.description));
         }
-        output.push_str("\n  \x1b[2mUse \".help\" for dot-commands. \"help <cmd>\" for details.\x1b[0m\n");
+        output.push_str("\n  Use \".help\" for dot-commands. \"help <cmd>\" for details.\n");
         CommandResult::ok(output)
     }
 }
@@ -172,13 +172,12 @@ pub fn cmd_dot_help(ast: &CommandAst, ctx: &ExecContext) -> CommandResult {
             }
         }
         ApiMode::Human => {
-            output.push_str(&format!("  \x1b[1m{:<22} {}\x1b[0m\n", "Command", "Description"));
+            output.push_str(&format!("  {:<22} {}\n", "Command", "Description"));
             output.push_str(&format!("  {:<22} {}\n", "\u{2500}".repeat(20), "\u{2500}".repeat(50)));
             for def in &commands {
-                let color = if def.dot_command { "\x1b[33m" } else { "\x1b[32m" };
-                output.push_str(&format!("  {color}{:<22}\x1b[0m {}\n", def.name, def.description));
+                output.push_str(&format!("  {:<22} {}\n", def.name, def.description));
             }
-            output.push_str(&format!("\n  \x1b[2m{} commands.\x1b[0m\n", commands.len()));
+            output.push_str(&format!("\n  {} commands.\n", commands.len()));
         }
     }
 
@@ -212,3 +211,20 @@ fn dot_help_json(ast: &CommandAst) -> CommandResult {
 }
 
 // Legacy static command tables removed — all data now in command_registry.rs
+
+#[cfg(test)]
+mod help_color_tests {
+    use super::*;
+
+    #[test]
+    fn help_protocol_responses_have_no_ansi_styling() {
+        let ctx = ExecContext { session_id: 0, config: None, session_mgr: None,
+            catalog: None, api_mode: ApiMode::Human, bus_rx: None, job_manager: None };
+        for command in ["help", ".help", "help run", ".help item=run"] {
+            let ast = crate::session::parse_cli_command(command);
+            let result = if ast.command_name == "help" { cmd_help(&ast, &ctx) } else { cmd_dot_help(&ast, &ctx) };
+            assert!(!result.text_output.contains('\x1b'), "{command}");
+            assert!(!result.text_output.is_empty());
+        }
+    }
+}

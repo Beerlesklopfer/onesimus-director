@@ -13,8 +13,8 @@ Dies ist ein statischer Quellcodeabgleich; es wurden keine Live-Jobs, Löschunge
 
 | Status | Anzahl | Bedeutung |
 |---|---:|---|
-| `partial` | 18 | Konkrete fehlende Optionen oder Teilfunktionen belegt |
-| `registered_unverified` | 53 | Handler vorhanden; Funktionsparität nicht nachgewiesen |
+| `partial` | 19 | Konkrete fehlende Optionen oder Teilfunktionen belegt |
+| `registered_unverified` | 52 | Handler vorhanden; Funktionsparität nicht nachgewiesen |
 | `semantic_mismatch` | 2 | Abweichende Bedeutung gegenüber Bareos |
 | `stub` | 15 | Platzhalter statt der beschriebenen Wirkung |
 
@@ -90,7 +90,7 @@ Die Syntaxtexte sind Originalhilfe, keine vollständige formale Grammatik aller 
 | [exit](exit.md) | Terminate Bconsole session | `registered_unverified` |
 | [export](export.md) | Export volumes from normal slots to import/export slots | `partial` |
 | [gui](gui.md) | Switch between interactive (gui off) and non-interactive (gui on) mode | `registered_unverified` |
-| [help](help.md) | Print help on specific command | `registered_unverified` |
+| [help](help.md) | Print help on specific command | `partial` |
 | [import](import.md) | Import volumes from import/export slots to normal slots | `partial` |
 | [label](label.md) | Label a tape | `registered_unverified` |
 | [list](list.md) | List objects from catalog | `partial` |

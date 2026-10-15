@@ -699,7 +699,7 @@
     },
     {
       "path": "crates/onesimus-dird/src/commands/basic.rs",
-      "sha256": "c4b6d90971419775d19862e76e22b23f795711d81e23249a0f5adfe3f9143688"
+      "sha256": "8c0d2c8e5a9556dbea0259ed5e27b479aa0073607f66c0073912cbd84e927af2"
     },
     {
       "path": "crates/onesimus-dird/src/commands/catalog.rs",
@@ -770,8 +770,8 @@
     "top_level_commands": 88,
     "registered_top_level_commands": 88,
     "status_counts": {
-      "partial": 18,
-      "registered_unverified": 53,
+      "partial": 19,
+      "registered_unverified": 52,
       "semantic_mismatch": 2,
       "stub": 15
     },
@@ -2966,8 +2966,10 @@
         "declared_arguments": [
           "command"
         ],
-        "status": "registered_unverified",
-        "findings": [],
+        "status": "partial",
+        "findings": [
+          "ANSI-Farbgebung wurde aus help/.help-Protokollantworten entfernt; Tests prüfen alle Hilfevarianten. Textlayout, vollständige Syntax/ACL-Ausgabe und Live-SHA-256-Parität zum Original bleiben offen."
+        ],
         "functional_parity_verified": false
       },
       "documentation": "help.md"
