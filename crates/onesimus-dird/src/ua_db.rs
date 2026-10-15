@@ -131,6 +131,15 @@ pub fn reopen_client_db(ast: &CommandAst, ctx: &ExecContext, client: &str) -> Re
     op.finish(ok)
 }
 
+/// C++ OpenDb(): open the session catalog (`catalog=` or the selection),
+/// without looking at `client=`/`job=`.
+pub fn open_db(ast: &CommandAst, ctx: &ExecContext) -> Result<String, CommandResult> {
+    let Some(res) = Resources::load(ctx) else { return Ok(String::new()) };
+    let mut op = Opening::default();
+    let ok = open(ast, ctx, &res, false, &mut op);
+    op.finish(ok)
+}
+
 /// C++ CloseDb(): drop the connections; the selected catalog stays.
 pub fn close_db(ctx: &ExecContext) {
     state(ctx, |s| {

@@ -141,6 +141,46 @@ pub fn allowed(config: &DirectorConfig, console: &str, kind: Kind, item: &str) -
     false
 }
 
+/// C++ ua_acl.cc UaContext::AclNoRestrictions(): the first `!` entry means
+/// restricted, the first `*all*` unrestricted (console list, then profiles);
+/// the default console is unrestricted.
+pub fn no_restrictions(ctx: &ExecContext, kind: Kind) -> bool {
+    let console = match &ctx.session_mgr {
+        Some(manager) => match manager.authenticated_console(ctx.session_id) {
+            Some(name) => name,
+            None => return false,
+        },
+        None => "*UserAgent*".into(),
+    };
+    if console == "*UserAgent*" {
+        return true;
+    }
+    let Some(config) = &ctx.config else { return false };
+    let Ok(config) = config.read() else { return false };
+    let Some(resource) = config.raw.iter()
+        .find(|r| r.norm_type() == "console" && r.name() == Some(console.as_str()))
+    else {
+        return false;
+    };
+    let decide = |resource: &ConfResource| {
+        resource.directives.iter()
+            .filter(|d| d.norm_key() == kind.key())
+            .flat_map(|d| d.values())
+            .find_map(|v| if v.starts_with('!') { Some(false) } else if v.eq_ignore_ascii_case("*all*") { Some(true) } else { None })
+    };
+    if let Some(result) = decide(resource) {
+        return result;
+    }
+    for name in resource.directives.iter().filter(|d| d.norm_key() == "profile").flat_map(|d| d.values()) {
+        if let Some(profile) = config.raw.iter().find(|r| r.norm_type() == "profile" && r.name() == Some(name)) {
+            if let Some(result) = decide(profile) {
+                return result;
+            }
+        }
+    }
+    false
+}
+
 pub fn access(ctx: &ExecContext, kind: Kind, item: &str) -> bool {
     let console = match &ctx.session_mgr {
         Some(manager) => match manager.authenticated_console(ctx.session_id) {

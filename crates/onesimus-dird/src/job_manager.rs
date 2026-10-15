@@ -141,6 +141,15 @@ impl JobManager {
             .count()
     }
 
+    /// JobIds of the jobs that ended since the Director started, in the
+    /// order they were started (C++ RecentJobResultsList without state file).
+    pub fn finished_job_ids(&self) -> Vec<u32> {
+        self.jobs.iter()
+            .filter(|j| matches!(j.phase, DirJobPhase::Completed | DirJobPhase::Error))
+            .map(|j| j.job_id)
+            .collect()
+    }
+
     pub fn cancel_job(&mut self, job_id: u32) -> bool {
         if let Some(job) = self.jobs.iter_mut().find(|j| j.job_id == job_id
             && !matches!(j.phase, DirJobPhase::Completed | DirJobPhase::Error)) {
