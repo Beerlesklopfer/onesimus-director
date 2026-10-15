@@ -2,13 +2,14 @@
 # The fixture schedule ParityPreview is enabled but used by no job, so it
 # only feeds the scheduler preview. Normalized: the version token and build
 # date (C-009), the daemon start / console connect time, and the report
-# time with the checksum derived from it.
-{"id": "c014-status-dir", "steps": ["status dir"], "normalize": ["25\\.1\\.2[~+][\\w.]+", "\\(\\d\\d \\w+ \\d{4}\\)", "\\d\\d-\\w{3}-\\d\\d \\d\\d:\\d\\d"]}
-{"id": "c014-status-director-days", "steps": ["status director days=3"], "normalize": ["25\\.1\\.2[~+][\\w.]+", "\\(\\d\\d \\w+ \\d{4}\\)", "\\d\\d-\\w{3}-\\d\\d \\d\\d:\\d\\d"]}
-{"id": "c014-status-dir-days-invalid", "steps": ["status dir days=600"], "normalize": ["25\\.1\\.2[~+][\\w.]+", "\\(\\d\\d \\w+ \\d{4}\\)", "\\d\\d-\\w{3}-\\d\\d \\d\\d:\\d\\d"]}
-{"id": "c014-status-dir-api1", "steps": ["status dir"], "setup": [".api 1"], "normalize": ["25\\.1\\.2[~+][\\w.]+", "\\(\\d\\d \\w+ \\d{4}\\)", "\\d\\d-\\w{3}-\\d\\d \\d\\d:\\d\\d"]}
-{"id": "c014-status-dir-json", "steps": ["status dir"], "setup": [".api 2"], "normalize": ["25\\.1\\.2[~+][\\w.]+", "\"\\d\\d \\w+ \\d{4}\"", "\\d\\d-\\w{3}-\\d\\d \\d\\d:\\d\\d"]}
-{"id": "c014-dot-status-dir-header", "steps": [".status dir header"], "normalize": ["25\\.1\\.2[~+][\\w.]+", "\\(\\d\\d \\w+ \\d{4}\\)", "\\d\\d-\\w{3}-\\d\\d \\d\\d:\\d\\d"]}
+# time with the checksum derived from it; the binary info (Onesimus
+# wording by user decision, see C-009).
+{"id": "c014-status-dir", "steps": ["status dir"], "normalize": ["25\\.1\\.2[~+][\\w.]+", "\\(\\d\\d \\w+ \\d{4}\\)", "\\d\\d-\\w{3}-\\d\\d \\d\\d:\\d\\d", "(Bareos community|Onesimus) binary"]}
+{"id": "c014-status-director-days", "steps": ["status director days=3"], "normalize": ["25\\.1\\.2[~+][\\w.]+", "\\(\\d\\d \\w+ \\d{4}\\)", "\\d\\d-\\w{3}-\\d\\d \\d\\d:\\d\\d", "(Bareos community|Onesimus) binary"]}
+{"id": "c014-status-dir-days-invalid", "steps": ["status dir days=600"], "normalize": ["25\\.1\\.2[~+][\\w.]+", "\\(\\d\\d \\w+ \\d{4}\\)", "\\d\\d-\\w{3}-\\d\\d \\d\\d:\\d\\d", "(Bareos community|Onesimus) binary"]}
+{"id": "c014-status-dir-api1", "steps": ["status dir"], "setup": [".api 1"], "normalize": ["25\\.1\\.2[~+][\\w.]+", "\\(\\d\\d \\w+ \\d{4}\\)", "\\d\\d-\\w{3}-\\d\\d \\d\\d:\\d\\d", "(Bareos community|Onesimus) binary"]}
+{"id": "c014-status-dir-json", "steps": ["status dir"], "setup": [".api 2"], "normalize": ["25\\.1\\.2[~+][\\w.]+", "\"\\d\\d \\w+ \\d{4}\"", "\\d\\d-\\w{3}-\\d\\d \\d\\d:\\d\\d", "\"binary_info\": \"[^\"]*\""]}
+{"id": "c014-dot-status-dir-header", "steps": [".status dir header"], "normalize": ["25\\.1\\.2[~+][\\w.]+", "\\(\\d\\d \\w+ \\d{4}\\)", "\\d\\d-\\w{3}-\\d\\d \\d\\d:\\d\\d", "(Bareos community|Onesimus) binary"]}
 {"id": "c014-dot-status-dir-current", "steps": [".status dir current"]}
 {"id": "c014-dot-status-dir-last", "steps": [".status dir last"]}
 {"id": "c014-dot-status-dir-running-json", "steps": [".status dir running"], "setup": [".api 2"]}
@@ -24,14 +25,14 @@
 {"id": "c014-status-scheduler-invalid", "steps": ["status scheduler schedule=ParityPreview days=400"]}
 {"id": "c014-status-sched-client", "steps": ["status sched client=bareos-fd days=2"]}
 {"id": "c014-status-scheduler-json", "steps": ["status scheduler schedule=ParityPreview days=3"], "setup": [".api 2"]}
-{"id": "c014-status-subscriptions", "steps": ["status subscriptions"], "normalize": ["25\\.1\\.2[~+][\\w.]+", "Report time: .*", "Checksum: .*"]}
-{"id": "c014-status-subscriptions-all", "steps": ["status sub all anonymize"], "normalize": ["25\\.1\\.2[~+][\\w.]+", "Report time: .*", "Checksum: .*"]}
+{"id": "c014-status-subscriptions", "steps": ["status subscriptions"], "normalize": ["25\\.1\\.2[~+][\\w.]+", "Report time: .*", "Checksum: .*", "Binary info: .*"]}
+{"id": "c014-status-subscriptions-all", "steps": ["status sub all anonymize"], "normalize": ["25\\.1\\.2[~+][\\w.]+", "Report time: .*", "Checksum: .*", "Binary info: .*"]}
 {"id": "c014-status-subscriptions-client", "steps": ["status subscriptions client=bareos-fd detail"]}
 {"id": "c014-status-subscriptions-limited", "steps": ["status subscriptions"], "console": "parity-limited", "password": "parity-limited-pw"}
 {"id": "c014-status-configuration", "steps": ["status conf"]}
 {"id": "c014-status-configuration-limited", "steps": ["status configuration"], "console": "parity-limited", "password": "parity-limited-pw"}
 {"id": "c014-dot-status-dir-running", "steps": [".status dir running"], "normalize": ["\\d\\d-\\w{3}-\\d\\d \\d\\d:\\d\\d"]}
-{"id": "c014-status-subscriptions-json", "steps": ["status subscriptions"], "setup": [".api 2"], "normalize": ["25\\.1\\.2[~+][\\w.]+", "\"report-time\": \".*\"", "\"checksum\": \".*\""]}
+{"id": "c014-status-subscriptions-json", "steps": ["status subscriptions"], "setup": [".api 2"], "normalize": ["25\\.1\\.2[~+][\\w.]+", "\"report-time\": \".*\"", "\"checksum\": \".*\"", "\"binary-info\": \"[^\"]*\""]}
 {"id": "c014-status-subscriptions-clients", "steps": ["status subscriptions clients"], "normalize": ["Checksum: .*"]}
 {"id": "c014-status-subscriptions-plugins", "steps": ["status subscriptions plugins unknown"], "normalize": ["Checksum: .*"]}
-{"id": "c014-status-all", "steps": ["status all"], "normalize": ["25\\.1\\.2[~+][\\w.]+", "\\(\\d\\d \\w+ \\d{4}\\)", "\\d\\d-\\w{3}-\\d\\d \\d\\d:\\d\\d", "Heap: .*"], "timeout_ms": 30000}
+{"id": "c014-status-all", "steps": ["status all"], "normalize": ["25\\.1\\.2[~+][\\w.]+", "\\(\\d\\d \\w+ \\d{4}\\)", "\\d\\d-\\w{3}-\\d\\d \\d\\d:\\d\\d", "Heap: .*", "(Bareos community|Onesimus) binary"], "timeout_ms": 30000}
