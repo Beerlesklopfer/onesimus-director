@@ -50,3 +50,14 @@
 {"id": "c011-run-job-dotmod-no", "steps": ["run job=backup-bareos-fd", ".mod level=Full", "no"], "normalize": ["When: +[0-9: -]+"]}
 {"id": "c011-run-select-no", "steps": ["run", "2", "no"], "normalize": ["When: +[0-9: -]+"]}
 {"id": "c011-run-job-api1-no", "setup": [".api 1"], "steps": ["run job=backup-bareos-fd", "no"], "normalize": ["When: +[0-9: -]+"]}
+{"id": "c011-prune-jobs-cancel", "steps": ["prune jobs", "."]}
+{"id": "c011-prune-jobs-mod-no", "steps": ["prune jobs", "mod", "x", "mod", "3 days", "maybe", "no"]}
+{"id": "c011-prune-stats-cancel", "steps": ["prune stats", "."]}
+{"id": "c011-prune-volume-select-cancel", "steps": ["prune volume", "2", "."]}
+{"id": "c011-prune-volume-unknown", "steps": ["prune volume=nosuchvol"]}
+{"id": "c011-prune-directory-cancel", "steps": ["prune directory", "no", "."]}
+{"id": "c011-purge-jobs-cancel", "steps": ["purge jobs", "."]}
+{"id": "c011-purge-files-cancel", "steps": ["purge files", "."]}
+{"id": "c011-purge-quota-cancel", "steps": ["purge quota", "."]}
+{"id": "c011-purge-volume-select-cancel", "steps": ["purge volume", "2", "."]}
+{"id": "c011-purge-api1-cancel", "setup": [".api 1"], "steps": ["purge", "."]}
