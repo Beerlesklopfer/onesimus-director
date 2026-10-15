@@ -651,6 +651,155 @@ pub fn get_pool_resource(ua: &mut Ua, ast: &CommandAst) -> Option<String> {
     select_pool_resource(ua)
 }
 
+// ---------------------------------------------------------------------------
+// Catalog record selection (ua_select.cc SelectPoolDbr, SelectMediaDbr, ...)
+// ---------------------------------------------------------------------------
+
+/// SQL string literal content.
+fn sql_escape(text: &str) -> String {
+    text.replace('\'', "''")
+}
+
+/// First column of the rows of `sql` (None: no catalog or query error).
+fn catalog_column(ctx: &ExecContext, sql: &str) -> Option<Vec<String>> {
+    let table = ctx.catalog.as_ref()?.query_rows(sql).ok()?;
+    Some(table.rows.into_iter().filter_map(|row| row.into_iter().next().flatten()).collect())
+}
+
+/// C++ GetPoolRecord() by name: Ok(PoolId) or the catalog error text.
+pub fn get_pool_record(ctx: &ExecContext, name: &str) -> Result<i64, String> {
+    catalog_column(ctx, &format!("SELECT PoolId FROM Pool WHERE Name='{}'", sql_escape(name)))
+        .and_then(|ids| ids.first().and_then(|id| id.parse().ok()))
+        .ok_or_else(|| "Pool record not found in Catalog.\n".to_string())
+}
+
+/// C++ SelectPoolDbr(ua, pr, argk): `<argk>=<pool>` (Pool ACL) or the list
+/// of the catalog pools in GetPoolIds order (no ORDER BY; "Defined Pools:", "*None*" first for
+/// recyclepool). Returns the pool name ("*None*" possible).
+pub fn select_pool_dbr(ua: &mut Ua, ast: &CommandAst, argk: &str) -> Option<String> {
+    let ctx = ua.ctx;
+    if let Some(name) = ast.arguments.iter()
+        .find(|a| a.key.eq_ignore_ascii_case(argk) && a.value.as_deref().is_some_and(|v| acl::access(ctx, Kind::Pool, v)))
+        .and_then(|a| a.value.clone())
+    {
+        match get_pool_record(ctx, &name) {
+            Ok(_) => return Some(name),
+            Err(error) => ua.error_msg(format!("Could not find Pool \"{name}\": ERR={error}")),
+        }
+    }
+    let Some(pools) = catalog_column(ctx, "SELECT Name FROM Pool") else {
+        ua.error_msg("Error obtaining pool ids. ERR=\n");
+        return None;
+    };
+    if pools.is_empty() {
+        ua.error_msg("No pools defined. Use the \"create\" command to create one.\n");
+        return None;
+    }
+    ua.start_prompt("Defined Pools:\n");
+    if argk == "recyclepool" {
+        ua.add_prompt("*None*");
+    }
+    for pool in pools.iter().filter(|p| acl::access(ctx, Kind::Pool, p)) {
+        ua.add_prompt(pool);
+    }
+    let (_, name) = ua.do_prompt("Pool", "Select the Pool")?;
+    if name != "*None*" {
+        if let Err(error) = get_pool_record(ctx, &name) {
+            ua.error_msg(format!("Could not find Pool \"{name}\": ERR={error}"));
+            return None;
+        }
+    }
+    Some(name)
+}
+
+/// The Media record fields the dialogs use (C++ MediaDbRecord).
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct MediaRecord {
+    pub media_id: i64,
+    pub volume_name: String,
+    pub pool_id: i64,
+    pub vol_status: String,
+    pub vol_retention: u64,
+    pub enabled: i64,
+}
+
+/// C++ GetMediaRecord() by MediaId or VolumeName: the record or the
+/// catalog error (text and source position of the installed 25.1.2).
+pub fn get_media_record(ctx: &ExecContext, media_id: i64, name: &str) -> Result<MediaRecord, String> {
+    let filter = if media_id != 0 {
+        format!("MediaId={media_id}")
+    } else {
+        format!("VolumeName='{}'", sql_escape(name))
+    };
+    let row = ctx.catalog.as_ref()
+        .and_then(|cat| cat.query_rows(&format!(
+            "SELECT MediaId, VolumeName, PoolId, VolStatus, VolRetention, Enabled FROM Media WHERE {filter}")).ok())
+        .and_then(|table| table.rows.into_iter().next());
+    let Some(row) = row else {
+        return Err(if media_id != 0 {
+            format!("cats/sql_get.cc:1174 Media record MediaId={media_id} not found.\n")
+        } else {
+            format!("cats/sql_get.cc:1177 Media record for Volume \"{name}\" not found.\n")
+        });
+    };
+    let text = |i: usize| row.get(i).cloned().flatten().unwrap_or_default();
+    Ok(MediaRecord {
+        media_id: text(0).parse().unwrap_or(0),
+        volume_name: text(1),
+        pool_id: text(2).parse().unwrap_or(0),
+        vol_status: text(3),
+        vol_retention: text(4).parse().unwrap_or(0),
+        enabled: text(5).parse().unwrap_or(0),
+    })
+}
+
+/// C++ SelectMediaDbr(): `volume=<name>`, otherwise the pool (GetPoolDbr),
+/// its volume list and 'E.g. "full-0001" or "*42": '. Catalog errors are
+/// reported as ErrorMsg.
+pub fn select_media_dbr(ua: &mut Ua, ast: &CommandAst) -> Option<MediaRecord> {
+    let ctx = ua.ctx;
+    let (mut media_id, mut name) = (0, String::new());
+    if let Some(volume) = find_arg_with_value(ast, "volume") {
+        if !acl::valid_name(volume) {
+            return None;
+        }
+        name = volume.to_string();
+    }
+    if name.is_empty() {
+        let pool = select_pool_dbr(ua, ast, "pool")?;
+        let pool_id = get_pool_record(ctx, &pool).unwrap_or(0);
+        if let Some(table) = ctx.catalog.as_ref().and_then(|cat| cat.query_rows(&format!("{} WHERE PoolId={pool_id} ORDER BY MediaId",
+            crate::commands::list::volumes_select(crate::sql_list::ListType::Horz))).ok()) {
+            ua.send_msg(crate::sql_list::render(&table, crate::sql_list::ListType::Horz));
+        }
+        ua.send_msg("Enter the volume name or MediaId of the volume prefixed with an asterisk (*).\n");
+        let answer = ua.get_cmd("E.g. \"full-0001\" or \"*42\": ")?;
+        match answer.strip_prefix('*').filter(|n| parse_number(n).is_some()) {
+            Some(number) => media_id = crate::commands::job::str_to_int64(number),
+            None if acl::valid_name(&answer) => name = answer,
+            None => return None,
+        }
+    }
+    match get_media_record(ctx, media_id, &name) {
+        Ok(record) => Some(record),
+        Err(error) => {
+            ua.error_msg(error);
+            None
+        }
+    }
+}
+
+/// Retention directives of a Client or Pool resource (seconds), from the
+/// raw configuration with the dird_conf.cc defaults.
+pub fn resource_retention(ctx: &ExecContext, kind: &str, name: &str, directive: &str, default: u64) -> u64 {
+    ctx.config.as_ref().and_then(|c| c.read().ok()).and_then(|config| {
+        config.raw.iter()
+            .find(|r| r.norm_type() == kind && r.name() == Some(name))
+            .and_then(|r| r.directives.iter().rev().find(|d| d.norm_key() == directive))
+            .and_then(|d| crate::commands::show::parse_duration(&d.values().join(" ")))
+    }).unwrap_or(default)
+}
+
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;

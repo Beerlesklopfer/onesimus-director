@@ -552,7 +552,7 @@ fn backup_level(
 }
 
 /// Bareos str_to_int64(): leading blanks, optional sign, leading digits.
-fn str_to_int64(value: &str) -> i64 {
+pub(crate) fn str_to_int64(value: &str) -> i64 {
     let value = value.trim_start();
     let (negative, digits) = match value.strip_prefix('-') {
         Some(rest) => (true, rest),
