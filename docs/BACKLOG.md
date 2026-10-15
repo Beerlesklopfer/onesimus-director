@@ -61,3 +61,9 @@ onesimus-dird liefert die Felder noch nicht.
 
 Anker: `director-parity-anchor-20261015` (`fb5242f`), vor den funktionalen Befehlsänderungen.
 Je Hauptbefehl ein eigener Commit einschließlich Tests, Wiki-/JSON-Status und Eintrag in `CHANGELOG.md` (Debian-Format). Gemeinsame Infrastruktur erhält eigene Commits. Offene Teilfunktionen bleiben ausdrücklich im Audit, bis Quellabgleich und SHA-256-Matrix die Parität nachweisen.
+
+## MCP: Entwicklungs- und Produktionsbuild trennen
+
+Implementiert: Der Standardbuild (`mcp-production`) kompiliert ausschließlich MCP-Lesezugriffe. `execute` und der CLI-Schalter `--mcp-allow-write` sind dort nicht aktivierbar. Schreibzugriffe werden nur mit `--no-default-features --features mcp-development` einkompiliert und benötigen zusätzlich `--mcp-allow-write`. Beide Features zusammen oder keines sind Compile-Fehler. Debian baut ausdrücklich die Produktionsvariante. Gilt für stdio und HTTP; die Director-Verbindung bleibt unverändert.
+
+Abnahme: Tests für beide Buildvarianten, Produktions-CLI ohne Schreibschalter, Ablehnung direkt konstruierter execute-Anfragen und Buildfehler bei widersprüchlichen Features. Entwicklungsartefakte getrennt von Produktionsartefakten kennzeichnen/ablegen.

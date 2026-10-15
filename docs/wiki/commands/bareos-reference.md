@@ -30,6 +30,11 @@ Die JSON bewahrt jeden Originalnamen, auch `exit`, `quit`, `.quit`, `llist` und 
 Konfigurationsdirektiven, FD/SD-Protokollbefehle und lokale bconsole-`@`-Befehle gehören nicht zu dieser Konsolentabelle.
 Die Syntaxtexte sind Originalhilfe, keine vollständige formale Grammatik aller internen Optionen und Dialoge.
 
+## MCP-Buildgrenzen
+
+Der Standard- und Debian-Build verwendet `mcp-production`: ausschließlich das lesende MCP-Tool `query`, kein aktivierbarer Schreibhandler und kein `--mcp-allow-write`-Schalter.
+Nur `--no-default-features --features mcp-development` kompiliert `execute` ein; zum Start ist zusätzlich `--mcp-allow-write` erforderlich. Beide Features zusammen oder keines werden vom Compiler abgewiesen. Diese Grenze gilt für stdio und HTTP. BNET/gRPC zum Director sowie normale interaktive Konsolenzugriffe bleiben davon unabhängig.
+
 ## Übergreifende Befunde
 
 - **ACL-Parität fehlt** Das Original prüft Command_ACL vor dem Dispatch. Im lokalen Dispatch ist keine entsprechende Prüfung vorhanden; .authorized prüft Existenz und akzeptiert cmd pauschal. Authentifizierung mit Passwort/Token ist kein Ersatz für diese Autorisierung. [core/src/dird/ua_cmds.cc:540](https://github.com/bareos/bareos/blob/fc2c79b6c43eb5752e98ebd86116593dbbbe0c68/core/src/dird/ua_cmds.cc#L540) · [crates/onesimus-dird/src/command_registry.rs:323](../../../crates/onesimus-dird/src/command_registry.rs) · [crates/onesimus-dird/src/commands/dot.rs:237](../../../crates/onesimus-dird/src/commands/dot.rs)

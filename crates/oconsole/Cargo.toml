@@ -10,6 +10,12 @@ license.workspace = true
 name = "oconsole"
 path = "src/main.rs"
 
+[features]
+# Exactly one MCP policy is compiled into the binary.
+default = ["mcp-production"]
+mcp-production = []
+mcp-development = []
+
 [dependencies]
 bareos-bnet.workspace = true
 bareos-proto-rs.workspace = true

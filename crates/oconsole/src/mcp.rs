@@ -25,16 +25,31 @@ pub trait CommandRunner: Send + 'static {
 
 pub struct McpServer<R: CommandRunner> {
     runner: Arc<Mutex<R>>,
+    #[cfg(feature = "mcp-development")]
     allow_write: bool,
     director_name: String,
 }
 
 impl<R: CommandRunner> McpServer<R> {
-    pub fn new(runner: R, allow_write: bool, director_name: String) -> Self {
+    pub fn new(runner: R, _allow_write: bool, director_name: String) -> Self {
+        #[cfg(feature = "mcp-development")]
+        let allow_write = _allow_write;
         Self {
             runner: Arc::new(Mutex::new(runner)),
+            #[cfg(feature = "mcp-development")]
             allow_write,
             director_name,
+        }
+    }
+
+    fn write_enabled(&self) -> bool {
+        #[cfg(feature = "mcp-development")]
+        {
+            self.allow_write
+        }
+        #[cfg(feature = "mcp-production")]
+        {
+            false
         }
     }
 
@@ -94,6 +109,7 @@ impl<R: CommandRunner> McpServer<R> {
             move || {
                 Ok(Self {
                     runner: self.runner.clone(),
+                    #[cfg(feature = "mcp-development")]
                     allow_write: self.allow_write,
                     director_name: self.director_name.clone(),
                 })
@@ -127,7 +143,7 @@ impl<R: CommandRunner> McpServer<R> {
     }
 
     fn server_info(&self) -> ServerConfig {
-        let mode = if self.allow_write {
+        let mode = if self.write_enabled() {
             "read and write"
         } else {
             "read-only"
@@ -148,7 +164,7 @@ impl<R: CommandRunner> McpServer<R> {
     }
 
     fn tools_list(&self) -> Value {
-        let mut tools = vec![json!({
+        let tools = vec![json!({
             "name": "query",
             "title": "Query the Director (read-only)",
             "description": "Run a read-only bconsole command on the Director and return its output. \
@@ -164,7 +180,10 @@ impl<R: CommandRunner> McpServer<R> {
             },
             "annotations": { "readOnlyHint": true, "openWorldHint": false }
         })];
-        if self.allow_write {
+        #[cfg(feature = "mcp-development")]
+        let mut tools = tools;
+        #[cfg(feature = "mcp-development")]
+        if self.write_enabled() {
             tools.push(json!({
                 "name": "execute",
                 "title": "Execute a Director command",
@@ -195,11 +214,12 @@ impl<R: CommandRunner> McpServer<R> {
 
         match name {
             "query" => {}
-            "execute" if self.allow_write => {}
+            #[cfg(feature = "mcp-development")]
+            "execute" if self.write_enabled() => {}
             "execute" => {
                 return Err((
                     -32602,
-                    "tool 'execute' is disabled (start oconsole with --mcp-allow-write)".into(),
+                    "tool 'execute' is unavailable in this build or disabled".into(),
                 ));
             }
             _ => return Err((-32602, format!("unknown tool: {name}"))),
@@ -213,10 +233,10 @@ impl<R: CommandRunner> McpServer<R> {
             return Ok(tool_result(
                 &format!(
                     "'{command}' is not a read-only command. {}",
-                    if self.allow_write {
+                    if self.write_enabled() {
                         "Use the 'execute' tool."
                     } else {
-                        "Write access is disabled (oconsole --mcp-allow-write)."
+                        "Write access is unavailable in this build or disabled."
                     }
                 ),
                 true,
@@ -260,6 +280,7 @@ impl<R: CommandRunner> ServerHandler for McpServer<R> {
     ) -> Result<CallToolResponse, ErrorData> {
         let server = Self {
             runner: self.runner.clone(),
+            #[cfg(feature = "mcp-development")]
             allow_write: self.allow_write,
             director_name: self.director_name.clone(),
         };
@@ -306,14 +327,42 @@ fn is_read_only(command: &str) -> bool {
         .to_ascii_lowercase();
     if first.starts_with('.') {
         // Full names only: a prefix could resolve to a mutating command.
-        return matches!(first.as_str(),
-            "." | ".actiononpurge" | ".authorized" | ".catalogs" | ".clients"
-            | ".consoles" | ".defaults" | ".filesets" | ".help" | ".jobdefs"
-            | ".jobs" | ".jobstatus" | ".levels" | ".locations" | ".messages"
-            | ".media" | ".mediatypes" | ".msgs" | ".pools" | ".profiles"
-            | ".schedule" | ".status" | ".storage" | ".storages" | ".types"
-            | ".users" | ".volstatus" | ".bvfs_get_jobids" | ".bvfs_lsdirs"
-            | ".bvfs_lsfiles" | ".bvfs_versions" | ".sqltables" | ".sqlschema" | ".sqlcount");
+        return matches!(
+            first.as_str(),
+            "." | ".actiononpurge"
+                | ".authorized"
+                | ".catalogs"
+                | ".clients"
+                | ".consoles"
+                | ".defaults"
+                | ".filesets"
+                | ".help"
+                | ".jobdefs"
+                | ".jobs"
+                | ".jobstatus"
+                | ".levels"
+                | ".locations"
+                | ".messages"
+                | ".media"
+                | ".mediatypes"
+                | ".msgs"
+                | ".pools"
+                | ".profiles"
+                | ".schedule"
+                | ".status"
+                | ".storage"
+                | ".storages"
+                | ".types"
+                | ".users"
+                | ".volstatus"
+                | ".bvfs_get_jobids"
+                | ".bvfs_lsdirs"
+                | ".bvfs_lsfiles"
+                | ".bvfs_versions"
+                | ".sqltables"
+                | ".sqlschema"
+                | ".sqlcount"
+        );
     }
     matches!(
         first.as_str(),
@@ -400,7 +449,16 @@ mod tests {
     #[test]
     fn query_rejects_mutating_dot_commands_and_prefixes() {
         let mut srv = McpServer::new(Echo(vec![]), false, "dir".into());
-        for cmd in [".bvfs_update", ".bvfs_r", ".catalog delete", ".acl set", ".ap 2", ".grpc on", ".sql query=DELETE", ".unknown"] {
+        for cmd in [
+            ".bvfs_update",
+            ".bvfs_r",
+            ".catalog delete",
+            ".acl set",
+            ".ap 2",
+            ".grpc on",
+            ".sql query=DELETE",
+            ".unknown",
+        ] {
             let r = call(&mut srv, tool_call("query", cmd));
             assert_eq!(r["result"]["isError"], true, "{cmd}");
         }
@@ -415,6 +473,7 @@ mod tests {
         assert!(srv.runner.lock().unwrap().0.is_empty());
     }
 
+    #[cfg(feature = "mcp-development")]
     #[test]
     fn execute_allowed_with_flag() {
         let mut srv = McpServer::new(Echo(vec![]), true, "dir".into());
@@ -433,10 +492,27 @@ mod tests {
             "@exit",
             "",
         ] {
-            let r = call(&mut srv, tool_call("execute", cmd));
+            let r = call(&mut srv, tool_call("query", cmd));
             assert_eq!(r["result"]["isError"], true, "{cmd:?}");
         }
         assert!(srv.runner.lock().unwrap().0.is_empty());
+    }
+
+    #[cfg(feature = "mcp-production")]
+    #[test]
+    fn production_cannot_enable_execute_even_with_internal_write_request() {
+        let mut srv = McpServer::new(Echo(vec![]), true, "dir".into());
+        assert!(!srv.write_enabled());
+        assert_eq!(srv.tools_list()["tools"].as_array().unwrap().len(), 1);
+        assert!(call(&mut srv, tool_call("execute", "run job=Backup yes"))["error"].is_object());
+        assert!(srv.runner.lock().unwrap().0.is_empty());
+    }
+
+    #[cfg(feature = "mcp-development")]
+    #[test]
+    fn development_lists_execute_only_after_runtime_opt_in() {
+        let srv = McpServer::new(Echo(vec![]), true, "dir".into());
+        assert_eq!(srv.tools_list()["tools"].as_array().unwrap().len(), 2);
     }
 
     #[tokio::test]

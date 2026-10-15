@@ -232,8 +232,17 @@ def main():
                 ROOT / 'crates/onesimus-dird/src/session.rs',
                 ROOT / 'crates/onesimus-dird/src/scheduler.rs',
                 ROOT / 'crates/oconsole/src/mcp.rs',
+                ROOT / 'crates/oconsole/src/main.rs',
+                ROOT / 'crates/oconsole/Cargo.toml',
             })
         ],
+        'mcp_build_policies': {
+            'default': 'mcp-production',
+            'mutually_exclusive': True,
+            'production': {'feature': 'mcp-production', 'tools': ['query'], 'write_handler_compiled': False},
+            'development': {'feature': 'mcp-development', 'tools': ['query', 'execute'],
+                            'write_handler_compiled': True, 'runtime_opt_in': '--mcp-allow-write'},
+        },
         'scope': 'All top-level commands[] entries in ua_cmds.cc and restore file-selection commands[] entries in ua_tree.cc. Not FD/SD wire commands, bconsole @commands or every internal keyword/prompt.',
         'llm_instructions': [
             'Prefer full command names; Onesimus now resolves Bareos prefixes in the original table order, while local extensions remain exact matches.',
@@ -286,6 +295,11 @@ Bareos und Onesimus akzeptieren in der Original-Tabellenreihenfolge Groß-/Klein
 Die JSON bewahrt jeden Originalnamen, auch `exit`, `quit`, `.quit`, `llist` und `umount`.
 Konfigurationsdirektiven, FD/SD-Protokollbefehle und lokale bconsole-`@`-Befehle gehören nicht zu dieser Konsolentabelle.
 Die Syntaxtexte sind Originalhilfe, keine vollständige formale Grammatik aller internen Optionen und Dialoge.
+
+## MCP-Buildgrenzen
+
+Der Standard- und Debian-Build verwendet `mcp-production`: ausschließlich das lesende MCP-Tool `query`, kein aktivierbarer Schreibhandler und kein `--mcp-allow-write`-Schalter.
+Nur `--no-default-features --features mcp-development` kompiliert `execute` ein; zum Start ist zusätzlich `--mcp-allow-write` erforderlich. Beide Features zusammen oder keines werden vom Compiler abgewiesen. Diese Grenze gilt für stdio und HTTP. BNET/gRPC zum Director sowie normale interaktive Konsolenzugriffe bleiben davon unabhängig.
 
 ## Übergreifende Befunde
 

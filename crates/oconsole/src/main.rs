@@ -3,6 +3,11 @@
 //! Connects via BNET (TCP + TLS + CRAM-MD5) or gRPC (TLS + pinned certificate).
 //! With --mcp it serves the Model Context Protocol on stdio instead of a prompt.
 
+#[cfg(all(feature = "mcp-production", feature = "mcp-development"))]
+compile_error!("MCP production and development policies are mutually exclusive; use --no-default-features --features mcp-development for development");
+#[cfg(not(any(feature = "mcp-production", feature = "mcp-development")))]
+compile_error!("Select an MCP policy: mcp-production (default) or mcp-development");
+
 mod color;
 
 // Keep all console stdout/stderr decoration under the same NO_COLOR policy.
@@ -94,13 +99,23 @@ struct Cli {
     #[arg(long, requires = "mcp_http")]
     mcp_host: Vec<String>,
 
-    /// MCP: also offer the 'execute' tool for state-changing commands
+    /// Development builds only: also offer the state-changing execute tool
+    #[cfg(feature = "mcp-development")]
     #[arg(long, requires = "mcp")]
     mcp_allow_write: bool,
 
     /// Execute single command and exit
     #[arg(short = 'e', long)]
     command: Option<String>,
+}
+
+impl Cli {
+    fn mcp_write_enabled(&self) -> bool {
+        #[cfg(feature = "mcp-development")]
+        { self.mcp_allow_write }
+        #[cfg(feature = "mcp-production")]
+        { false }
+    }
 }
 
 /// Parsed config from oconsole.conf / bconsole.conf
@@ -179,6 +194,7 @@ fn load_console_config(path: &str) -> ConsoleConfig {
 
 fn main() {
     let cli = Cli::parse();
+    let mcp_allow_write = cli.mcp_write_enabled();
 
     // Load config file, then override with CLI args
     let file_cfg = load_console_config(
@@ -211,7 +227,7 @@ fn main() {
         grpc_fingerprint: cli.grpc_fingerprint.clone().or(file_cfg.grpc_fingerprint.clone()),
         command: cli.command.clone(),
         mcp: cli.mcp,
-        mcp_allow_write: cli.mcp_allow_write,
+        mcp_allow_write,
         mcp_http: cli.mcp_http,
         mcp_token_file: cli.mcp_token_file.clone(),
         mcp_host: cli.mcp_host.clone(),
@@ -1216,14 +1232,23 @@ mod tests {
         assert!(!cli.grpc);
         assert!(cli.command.is_none());
         assert!(!cli.mcp);
-        assert!(!cli.mcp_allow_write);
+        assert!(!cli.mcp_write_enabled());
     }
 
+    #[cfg(feature = "mcp-development")]
     #[test]
     fn mcp_allow_write_requires_mcp() {
         assert!(Cli::try_parse_from(["oconsole", "--mcp-allow-write"]).is_err());
         let cli = Cli::parse_from(["oconsole", "--mcp", "--mcp-allow-write", "--grpc"]);
-        assert!(cli.mcp && cli.mcp_allow_write && cli.grpc);
+        assert!(cli.mcp && cli.mcp_write_enabled() && cli.grpc);
+    }
+
+    #[cfg(feature = "mcp-production")]
+    #[test]
+    fn production_has_no_write_flag() {
+        assert!(Cli::try_parse_from(["oconsole", "--mcp", "--mcp-allow-write"]).is_err());
+        let cli = Cli::parse_from(["oconsole", "--mcp"]);
+        assert!(!cli.mcp_write_enabled());
     }
 
     #[test]

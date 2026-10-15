@@ -14,7 +14,8 @@
     "commands",
     "restore_file_selection_commands",
     "onesimus_extensions",
-    "local_source_files"
+    "local_source_files",
+    "mcp_build_policies"
   ],
   "properties": {
     "$schema": {
@@ -225,6 +226,73 @@
         },
         "additionalProperties": false
       }
+    },
+    "mcp_build_policies": {
+      "type": "object",
+      "required": [
+        "default",
+        "mutually_exclusive",
+        "production",
+        "development"
+      ],
+      "properties": {
+        "default": {
+          "const": "mcp-production"
+        },
+        "mutually_exclusive": {
+          "const": true
+        },
+        "production": {
+          "type": "object",
+          "required": [
+            "feature",
+            "tools",
+            "write_handler_compiled"
+          ],
+          "properties": {
+            "feature": {
+              "const": "mcp-production"
+            },
+            "tools": {
+              "const": [
+                "query"
+              ]
+            },
+            "write_handler_compiled": {
+              "const": false
+            }
+          },
+          "additionalProperties": false
+        },
+        "development": {
+          "type": "object",
+          "required": [
+            "feature",
+            "tools",
+            "write_handler_compiled",
+            "runtime_opt_in"
+          ],
+          "properties": {
+            "feature": {
+              "const": "mcp-development"
+            },
+            "tools": {
+              "const": [
+                "query",
+                "execute"
+              ]
+            },
+            "write_handler_compiled": {
+              "const": true
+            },
+            "runtime_opt_in": {
+              "const": "--mcp-allow-write"
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
     }
   },
   "additionalProperties": false,

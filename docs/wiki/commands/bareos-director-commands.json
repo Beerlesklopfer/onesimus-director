@@ -678,8 +678,16 @@
   },
   "local_source_files": [
     {
+      "path": "crates/oconsole/Cargo.toml",
+      "sha256": "89a70037bf2c515ae5c97faded9552afd425e6e295815a103b563521f2dde1d9"
+    },
+    {
+      "path": "crates/oconsole/src/main.rs",
+      "sha256": "7229f7a2b76007971c8c78e83c67a4c5162e6246f6e024c652e3eed6a1b2d361"
+    },
+    {
       "path": "crates/oconsole/src/mcp.rs",
-      "sha256": "00adc4981e9d59cd2b2c038e72e090bc94c2cb23c78905bfa7955b039c122c90"
+      "sha256": "2e20ef58623dab56ff753dfc686a05c3304cc0378e51b8a402d37b4dbfe92e95"
     },
     {
       "path": "crates/onesimus-dird/src/catalog_worker.rs",
@@ -762,6 +770,26 @@
       "sha256": "a0f34fea6df6443ff90ef2ca7e33b014171a636d131a08ef63f174598689008f"
     }
   ],
+  "mcp_build_policies": {
+    "default": "mcp-production",
+    "mutually_exclusive": true,
+    "production": {
+      "feature": "mcp-production",
+      "tools": [
+        "query"
+      ],
+      "write_handler_compiled": false
+    },
+    "development": {
+      "feature": "mcp-development",
+      "tools": [
+        "query",
+        "execute"
+      ],
+      "write_handler_compiled": true,
+      "runtime_opt_in": "--mcp-allow-write"
+    }
+  },
   "scope": "All top-level commands[] entries in ua_cmds.cc and restore file-selection commands[] entries in ua_tree.cc. Not FD/SD wire commands, bconsole @commands or every internal keyword/prompt.",
   "llm_instructions": [
     "Prefer full command names; Onesimus now resolves Bareos prefixes in the original table order, while local extensions remain exact matches.",

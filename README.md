@@ -106,11 +106,27 @@ oconsole --grpc -a dir.example.org -n admin -w secret
 
 # MCP server on stdio for AI assistants (read-only: tool "query")
 oconsole --mcp
-# also allow state-changing commands (tool "execute": run, cancel, delete, purge, ...)
+# Development build only: also allow state-changing commands (tool "execute")
+# Build first with --no-default-features --features mcp-development
 oconsole --mcp --mcp-allow-write
 # MCP over gRPC needs a known certificate (connect once interactively or pass it)
 oconsole --mcp --grpc --grpc-fingerprint <sha256>
 ```
+
+MCP permissions are selected at compile time:
+
+```bash
+# Production: read-only MCP, no execute tool or --mcp-allow-write option
+cargo build --release -p oconsole
+# Development: write-capable MCP; runtime --mcp-allow-write is still required
+cargo build -p oconsole --no-default-features --features mcp-development
+```
+
+`mcp-production` is the default feature. The two policies are mutually exclusive;
+building both or neither fails. Debian packages explicitly select production.
+This policy applies to both MCP transports; interactive and single-command
+Director access keep their existing behavior. Use separate target directories
+when retaining development and production binaries side by side.
 
 For a separately running MCP server that clients can register by URL:
 
