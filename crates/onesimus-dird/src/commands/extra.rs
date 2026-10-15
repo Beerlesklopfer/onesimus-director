@@ -449,11 +449,10 @@ fn cmd_delete_db(ast: &CommandAst, ctx: &ExecContext) -> CommandResult {
         Some(c) => c,
         None => return CommandResult::ok("No catalog configured\n".to_string()),
     };
-    let what = ast.arguments.first().map(|a| a.key.as_str()).unwrap_or("");
-    match what {
-        "volume" => {
-            let vol = ast.arguments.iter().find(|a| a.key == "volume")
-                .and_then(|a| a.value.as_deref()).unwrap_or("?");
+    match delete_request(ast) {
+        DeleteRequest::Dialog(result) => result,
+        DeleteRequest::Volume(vol) => {
+            let vol = vol.replace('\'', "''");
             // Delete jobmedia first (FK), then media record
             let _ = cat.raw_query(&format!(
                 "DELETE FROM jobmedia WHERE mediaid IN (SELECT mediaid FROM media WHERE volumename = '{vol}')"));
@@ -462,17 +461,83 @@ fn cmd_delete_db(ast: &CommandAst, ctx: &ExecContext) -> CommandResult {
                 Err(e) => CommandResult::error(format!("Delete error: {e}\n")),
             }
         }
-        "jobid" => {
-            let id = ast.arguments.iter().find(|a| a.key == "jobid")
-                .and_then(|a| a.value.as_deref()).unwrap_or("0");
-            let _ = cat.raw_query(&format!("DELETE FROM jobmedia WHERE jobid = {id}"));
-            let _ = cat.raw_query(&format!("DELETE FROM file WHERE jobid = {id}"));
-            match cat.raw_query(&format!("DELETE FROM job WHERE jobid = {id}")) {
-                Ok(_) => CommandResult::ok(format!("JobId {id} deleted from catalog\n")),
-                Err(e) => CommandResult::error(format!("Delete error: {e}\n")),
+        DeleteRequest::Jobs(ids, errors) => {
+            let mut output = String::new();
+            for id in ids {
+                let _ = cat.raw_query(&format!("DELETE FROM jobmedia WHERE jobid = {id}"));
+                let _ = cat.raw_query(&format!("DELETE FROM file WHERE jobid = {id}"));
+                match cat.raw_query(&format!("DELETE FROM job WHERE jobid = {id}")) {
+                    Ok(_) => output.push_str(&format!("Jobid {id} and associated records deleted from the catalog.\n")),
+                    Err(e) => return CommandResult::error(format!("Delete error: {e}\n")),
+                }
             }
+            let mut result = CommandResult::ok(output);
+            result.error_message = errors;
+            result
         }
-        _ => CommandResult::ok("delete: specify volume=<name> or jobid=<id>\n".to_string()),
+        DeleteRequest::Unsupported => CommandResult::ok("delete: specify volume=<name> or jobid=<id>\n".to_string()),
+    }
+}
+
+enum DeleteRequest {
+    Dialog(CommandResult),
+    Volume(String),
+    Jobs(Vec<u64>, String),
+    Unsupported,
+}
+
+/// DeleteCmd (ua_cmds.cc:2220) argument handling: what may be deleted
+/// without console interaction. Missing values, a volume without `yes` and
+/// ranges of more than 25 JobIds end at the dialog hook (C-012).
+fn delete_request(ast: &CommandAst) -> DeleteRequest {
+    use super::prompt::{keyword_prompt, selection_required};
+    const KEYWORDS: [&str; 4] = ["volume", "pool", "jobid", "storage"];
+    let keyword = ast.arguments.iter().find_map(|a|
+        KEYWORDS.iter().position(|k| a.key.eq_ignore_ascii_case(k)));
+    let value = |key: &str| ast.arguments.iter()
+        .find(|a| a.key.eq_ignore_ascii_case(key) && a.value.is_some())
+        .and_then(|a| a.value.as_deref());
+    match keyword {
+        None => DeleteRequest::Dialog(keyword_prompt(
+            "In general it is not a good idea to delete either a\n\
+             Pool or a Volume since they may contain data.\n\n", &KEYWORDS, "Choose catalog item to delete")),
+        Some(0) => match value("volume") {
+            // DeleteVolume → SelectMediaDbr (ua_select.cc:918).
+            None => DeleteRequest::Dialog(selection_required(String::new())),
+            Some(vol) if ast.arguments.iter().any(|a| a.key.eq_ignore_ascii_case("yes")) =>
+                DeleteRequest::Volume(vol.to_string()),
+            // ua_cmds.cc:2433-2441 warning, then GetYesno.
+            Some(vol) => DeleteRequest::Dialog(selection_required(format!(
+                "\nThis command will delete volume {vol}\nand all Jobs saved on that volume from the Catalog\n\
+                 Are you sure you want to delete Volume \"{vol}\"? (yes/no): "))),
+        },
+        Some(2) => {
+            // DeleteJob (ua_cmds.cc:2311): GetPint without a value.
+            let Some(list) = value("jobid") else {
+                return DeleteRequest::Dialog(selection_required("Enter JobId to delete: ".into()));
+            };
+            let number = |s: &str| !s.is_empty() && s.bytes().all(|b| b.is_ascii_digit());
+            let (mut ids, mut errors) = (Vec::new(), String::new());
+            for token in list.split(',') {
+                match token.split_once('-') {
+                    // DeleteJobIdRange (ua_cmds.cc:2376).
+                    Some((a, b)) if number(a) && number(b) => {
+                        let (a, b) = (a.parse::<u64>().unwrap_or(0), b.parse::<u64>().unwrap_or(0));
+                        if b > a {
+                            if b - a > 25 {
+                                return DeleteRequest::Dialog(selection_required(format!(
+                                    "Are you sure you want to delete {} JobIds ? (yes/no): ", b - a)));
+                            }
+                            ids.extend(a..=b);
+                        }
+                    }
+                    _ if number(token) => ids.push(token.parse().unwrap_or(0)),
+                    _ => errors.push_str(&format!("Illegal JobId {token} ignored\n")),
+                }
+            }
+            DeleteRequest::Jobs(ids, errors)
+        }
+        Some(_) => DeleteRequest::Unsupported,
     }
 }
 
@@ -482,64 +547,98 @@ pub fn cmd_create(ast: &CommandAst, ctx: &ExecContext) -> CommandResult {
 }
 
 fn cmd_create_db(ast: &CommandAst, ctx: &ExecContext) -> CommandResult {
-    let pool_name = ast.arguments.iter().find(|a| a.key == "pool")
+    let pool_name = ast.arguments.iter().find(|a| a.key.eq_ignore_ascii_case("pool"))
         .and_then(|a| a.value.as_deref());
-    let cat = match &ctx.catalog {
-        Some(c) => c,
-        None => return CommandResult::ok("No catalog configured\n".to_string()),
-    };
     let config = match &ctx.config {
         Some(c) => match c.read() { Ok(c) => c, Err(_) => return CommandResult::error("Config error\n".to_string()) },
         None => return CommandResult::ok("No config\n".to_string()),
     };
 
-    let pools: Vec<_> = match pool_name {
-        Some(name) => config.pools.iter().filter(|p| p.name == name).collect(),
-        None => config.pools.iter().collect(),
+    // get_pool_resource (ua_select.cc:1008): exactly one pool, selected when
+    // pool= is missing or unknown — never all pools at once (C-012).
+    let mut shown = String::new();
+    let mut errors = String::new();
+    let allowed = |name: &str| crate::acl::access(ctx, crate::acl::Kind::Pool, name);
+    let named = pool_name.filter(|name| allowed(name));
+    let pool = match named.and_then(|name| config.pools.iter().find(|p| p.name == name)) {
+        Some(pool) => pool,
+        None => {
+            if let Some(name) = named {
+                errors.push_str(&format!("Error: Pool resource \"{name}\" does not exist.\n"));
+            }
+            let names = crate::director_config::sort_case_insensitive(config.pools.iter()
+                .map(|p| p.name.as_str()).filter(|name| allowed(name)))
+                .into_iter().map(str::to_string).collect();
+            match super::prompt::select_resource(ctx, "The defined Pool resources are:\n", "Pool",
+                "Select Pool resource", names) {
+                Ok((name, text)) => {
+                    shown = text;
+                    config.pools.iter().find(|p| p.name == name).expect("selected from the configured pools")
+                }
+                Err(mut result) => {
+                    result.text_output.insert_str(0, &errors);
+                    return result;
+                }
+            }
+        }
     };
-
-    let mut created = 0;
-    for pool in &pools {
-        let sql = format!(
-            "INSERT INTO pool (name, pooltype, maxvols, autoprune, volretention, fileretention, jobretention, numvols) \
-             VALUES ('{}', '{}', {}, {}, {}, {}, {}, 0) ON CONFLICT (name) DO NOTHING",
-            pool.name, pool.pool_type, pool.maximum_volumes,
-            if pool.auto_prune { 1 } else { 0 },
-            pool.volume_retention.as_secs(), 0, 0,
-        );
-        if cat.raw_query(&sql).is_ok() { created += 1; }
+    let Some(cat) = &ctx.catalog else {
+        return CommandResult::ok(format!("{errors}{shown}No catalog configured\n"));
+    };
+    let sql = format!(
+        "INSERT INTO pool (name, pooltype, maxvols, autoprune, volretention, fileretention, jobretention, numvols) \
+         VALUES ('{}', '{}', {}, {}, {}, {}, {}, 0) ON CONFLICT (name) DO NOTHING",
+        pool.name.replace('\'', "''"), pool.pool_type, pool.maximum_volumes,
+        if pool.auto_prune { 1 } else { 0 },
+        pool.volume_retention.as_secs(), 0, 0,
+    );
+    match cat.raw_query(&sql) {
+        // ua_cmds.cc:845 (the "already exists" case is not distinguished yet).
+        Ok(_) => CommandResult::ok(format!("{errors}{shown}Pool {} created.\n", pool.name)),
+        Err(e) => {
+            let mut result = CommandResult::error(format!("{e}\n"));
+            result.text_output = format!("{errors}{shown}");
+            result
+        }
     }
-    CommandResult::ok(format!("{created} pool(s) created from resource\n"))
 }
 
 pub fn cmd_add(ast: &CommandAst, ctx: &ExecContext) -> CommandResult {
     // C++ ua_cmds.cc add_cmd: OpenClientDb(ua) after the "label" hint.
-    crate::ua_db::with_client_db(ast, ctx, false, || cmd_add_db(ast, ctx))
+    let hint = "You probably don't want to be using this command since it\n\
+        creates database records without labeling the Volumes.\n\
+        You probably want to use the \"label\" command.\n\n".to_string();
+    crate::ua_db::with_prefix(hint, crate::ua_db::with_client_db(ast, ctx, false, || cmd_add_db(ast, ctx)))
 }
 
+/// add_cmd (ua_cmds.cc:611) always asks for the number of volumes and their
+/// names (GetPint/GetCmd); command line arguments only preselect pool and
+/// storage. Without the dialog nothing is created (C-012).
 fn cmd_add_db(ast: &CommandAst, ctx: &ExecContext) -> CommandResult {
-    let pool = ast.arguments.iter().find(|a| a.key == "pool")
-        .and_then(|a| a.value.as_deref()).unwrap_or("Full");
-    let volume = ast.arguments.iter().find(|a| a.key == "volume")
-        .and_then(|a| a.value.as_deref());
-    let cat = match &ctx.catalog {
-        Some(c) => c,
-        None => return CommandResult::ok("No catalog configured\n".to_string()),
+    use super::prompt::{select_pool_dbr, select_storage, selection_required};
+    let pool = ast.arguments.iter().find(|a| a.key.eq_ignore_ascii_case("pool"))
+        .and_then(|a| a.value.as_deref())
+        .filter(|name| crate::acl::access(ctx, crate::acl::Kind::Pool, name));
+    let (pool, mut shown) = match pool {
+        Some(pool) => (pool.to_string(), String::new()),
+        None => match select_pool_dbr(ctx) {
+            Ok(selected) => selected,
+            Err(result) => return result,
+        },
     };
-    match volume {
-        Some(vol) => {
-            let sql = format!(
-                "INSERT INTO media (volumename, mediatype, poolid, volstatus, volbytes, voljobs, volfiles, maxvolbytes) \
-                 SELECT '{vol}', 'File', poolid, 'Append', 0, 0, 0, 0 FROM pool WHERE name = '{pool}' \
-                 ON CONFLICT DO NOTHING"
-            );
-            match cat.raw_query(&sql) {
-                Ok(_) => CommandResult::ok(format!("Volume \"{vol}\" added to pool \"{pool}\"\n")),
-                Err(e) => CommandResult::error(format!("Add error: {e}\n")),
-            }
-        }
-        None => CommandResult::ok("add: specify volume=<name> pool=<name>\n".to_string()),
+    // get_storage_resource(ua) for the media type; GetMediaType otherwise.
+    match select_storage(ast, ctx, false) {
+        Ok((_, text)) => shown.push_str(&text),
+        Err(result) => return crate::ua_db::with_prefix(shown, result),
     }
+    let max = ctx.catalog.as_ref()
+        .and_then(|cat| cat.query_rows(&format!("SELECT MaxVols, NumVols FROM Pool WHERE Name='{}'",
+            pool.replace('\'', "''"))).ok())
+        .and_then(|t| t.rows.into_iter().next())
+        .map(|row| row.into_iter().map(|v| v.and_then(|v| v.parse::<i64>().ok()).unwrap_or(0)).collect::<Vec<_>>())
+        .map(|v| if v[0] == 0 { 1000 } else { v[0] - v[1] })
+        .unwrap_or(1000);
+    selection_required(format!("{shown}Enter number of Volumes to create. 0=>fixed name. Max={max}: "))
 }
 
 pub fn cmd_import(ast: &CommandAst, ctx: &ExecContext) -> CommandResult {
@@ -751,6 +850,35 @@ mod move_operation_tests {
         assert_eq!(run("relabel storage=File oldvolume=a volume=b").text_output,
             "Defined Pools:\n1: Full\n2: Inc\nSelect the Pool (1-2): ");
         assert_eq!(run("relabel storage=File volume=b").text_output, "");
+    }
+
+    #[test]
+    fn delete_acts_only_on_complete_requests() {
+        let req = |line: &str| delete_request(&crate::session::parse_cli_command(line));
+        for line in ["delete", "delete volume", "delete volume=v1", "delete jobid", "delete jobid=1-100"] {
+            assert!(matches!(req(line), DeleteRequest::Dialog(_)), "{line}");
+        }
+        let DeleteRequest::Dialog(menu) = req("delete") else { unreachable!() };
+        assert_eq!(menu.text_output, "In general it is not a good idea to delete either a\nPool or a Volume since they may contain data.\n\n\
+            You have the following choices:\n1: volume\n2: pool\n3: jobid\n4: storage\nChoose catalog item to delete (1-4): ");
+        assert!(matches!(req("delete volume=v1 yes"), DeleteRequest::Volume(v) if v == "v1"));
+        let DeleteRequest::Jobs(ids, errors) = req("delete jobid=3,5-7,x") else { panic!() };
+        assert_eq!((ids, errors.as_str()), (vec![3, 5, 6, 7], "Illegal JobId x ignored\n"));
+        assert!(matches!(req("delete jobid=1;DROP"), DeleteRequest::Jobs(ids, _) if ids.is_empty()));
+    }
+
+    #[test]
+    fn create_and_add_never_default_the_pool() {
+        let ctx = context("Pool { Name = Full; Pool Type = Backup }\nPool { Name = Inc; Pool Type = Backup }");
+        let run = |f: fn(&CommandAst, &ExecContext) -> CommandResult, line: &str|
+            f(&crate::session::parse_cli_command(line), &ctx);
+        assert_eq!(run(cmd_create_db, "create").text_output,
+            "The defined Pool resources are:\n1: Full\n2: Inc\nSelect Pool resource (1-2): ");
+        assert_eq!(run(cmd_create_db, "create pool=Nope").text_output,
+            "Error: Pool resource \"Nope\" does not exist.\nThe defined Pool resources are:\n1: Full\n2: Inc\nSelect Pool resource (1-2): ");
+        assert_eq!(run(cmd_add_db, "add").text_output, "Defined Pools:\n1: Full\n2: Inc\nSelect the Pool (1-2): ");
+        assert_eq!(run(cmd_add_db, "add pool=Full volume=v1 storage=File").text_output,
+            "Enter number of Volumes to create. 0=>fixed name. Max=1000: ");
     }
 
     #[test]
