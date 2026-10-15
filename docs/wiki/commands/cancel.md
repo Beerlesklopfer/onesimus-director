@@ -15,7 +15,9 @@ cancel storage=<storage-name> | jobid=<jobid> | job=<job-name> | ujobid=<unique-
 
 **RunScript erlaubt:** nein. **Audit-Ereignis:** ja. Beide Flags sind keine Read-only-Klassifizierung.
 
-**Onesimus-Status:** `registered_unverified`. Funktionsparität ist nicht durch einen Live-Test nachgewiesen.
+**Onesimus-Status:** `partial`. Funktionsparität ist nicht durch einen Live-Test nachgewiesen.
+
+- Im unabhängigen Review wurde ein vorzeitiger Abschluss nach SIGTERM nachgewiesen. Cancel setzt jetzt Canceling und prüft Signalfehler; endgültiger Katalogstatus/Zähler werden erst nach Workerende geschrieben. Vollständige Originalselektion (job/ujobid/Joblisten/Zustandsfilter/Dialog), FD-/SD-Abbruchkoordination, ACL und Live-SHA-256-Parität sind nicht nachgewiesen.
 
 **Lokaler Handler:** [crates/onesimus-dird/src/commands/job.rs:220](../../../crates/onesimus-dird/src/commands/job.rs).
 

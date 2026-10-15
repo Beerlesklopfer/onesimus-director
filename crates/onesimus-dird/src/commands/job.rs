@@ -235,14 +235,11 @@ pub fn cmd_cancel(ast: &CommandAst, ctx: &ExecContext) -> CommandResult {
             if canceled {
                 if let Some(smgr) = &ctx.session_mgr {
                     smgr.bus().post(BusMessage::JobStatus {
-                        job_id: id, job_name: String::new(), status: "Canceled".to_string(),
+                        job_id: id, job_name: String::new(), status: "Canceling".to_string(),
                         timestamp: now_unix(),
                     });
                 }
-                // Update DB status
-                if let Some(cat) = &ctx.catalog {
-                    let _ = cat.update_job_end(id as i32, "A", now_unix() as i64, 0, 0, 0, 0, 0);
-                }
+                // Final status, counters and EndTime are committed after worker exit.
                 CommandResult::ok(format!("Job {id} canceled (SIGTERM sent to worker)\n"))
             } else {
                 CommandResult::ok(format!("Job {id} not found or already finished\n"))

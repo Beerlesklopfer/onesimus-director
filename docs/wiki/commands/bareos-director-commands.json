@@ -711,7 +711,7 @@
     },
     {
       "path": "crates/onesimus-dird/src/catalog_worker.rs",
-      "sha256": "10a37c25b81acd787d5960137bfee1749ceb0586d6bc058040cd9935c49baaaf"
+      "sha256": "42ab2ce1df475717fd41df3f909e6c8c2f487805e90dd1cb835a8d37dc170bce"
     },
     {
       "path": "crates/onesimus-dird/src/command_executor.rs",
@@ -759,7 +759,7 @@
     },
     {
       "path": "crates/onesimus-dird/src/commands/job.rs",
-      "sha256": "a4b4ff771c84a77d2b92eff8fdeaa5fac3ede4f1a7d385f6b3e876d2c0907ec6"
+      "sha256": "598ebb93ccc03c4b099dc029fe8a17798968b742bda521db4c3d756401ded3de"
     },
     {
       "path": "crates/onesimus-dird/src/commands/list.rs",
@@ -791,7 +791,7 @@
     },
     {
       "path": "crates/onesimus-dird/src/commands/wait.rs",
-      "sha256": "6158d99f476ffa5ff9cd619e9750737b7807f31dcd3de29d422b341b408bc640"
+      "sha256": "37b5af684fcc2a20de5478c8221bebadc86f9d71d08a843bf42c4a38ab266368"
     },
     {
       "path": "crates/onesimus-dird/src/fd_protocol.rs",
@@ -799,11 +799,11 @@
     },
     {
       "path": "crates/onesimus-dird/src/job_manager.rs",
-      "sha256": "fc271c1b1f427c828208e2c7b7f191c88798d79f943fcae3ddccc22d4ae1277e"
+      "sha256": "8348ce82b302b6937c8ff11d90f34718bfe1775ce3815cb59521b0a15b61489d"
     },
     {
       "path": "crates/onesimus-dird/src/job_worker.rs",
-      "sha256": "be9183b8b525756a6fe4b3d7be0b2d404265d34a9cf59d684642e6440c0e38bb"
+      "sha256": "e5eb53928970a681c07069d993672f8df96eb664c679b169460f13cd8a64b2a8"
     },
     {
       "path": "crates/onesimus-dird/src/logging.rs",
@@ -858,8 +858,8 @@
     "top_level_commands": 88,
     "registered_top_level_commands": 88,
     "status_counts": {
-      "partial": 21,
-      "registered_unverified": 52,
+      "partial": 22,
+      "registered_unverified": 51,
       "semantic_mismatch": 2,
       "stub": 13
     },
@@ -2595,8 +2595,10 @@
         "declared_arguments": [
           "jobid"
         ],
-        "status": "registered_unverified",
-        "findings": [],
+        "status": "partial",
+        "findings": [
+          "Im unabhängigen Review wurde ein vorzeitiger Abschluss nach SIGTERM nachgewiesen. Cancel setzt jetzt Canceling und prüft Signalfehler; endgültiger Katalogstatus/Zähler werden erst nach Workerende geschrieben. Vollständige Originalselektion (job/ujobid/Joblisten/Zustandsfilter/Dialog), FD-/SD-Abbruchkoordination, ACL und Live-SHA-256-Parität sind nicht nachgewiesen."
+        ],
         "functional_parity_verified": false
       },
       "documentation": "cancel.md"
@@ -2785,7 +2787,7 @@
         },
         "implementation": {
           "file": "crates/onesimus-dird/src/commands/job.rs",
-          "line": 293
+          "line": 290
         },
         "declared_arguments": [
           "job",
@@ -2832,7 +2834,7 @@
         },
         "implementation": {
           "file": "crates/onesimus-dird/src/commands/job.rs",
-          "line": 274
+          "line": 271
         },
         "declared_arguments": [
           "job",
@@ -4770,7 +4772,7 @@
         },
         "implementation": {
           "file": "crates/onesimus-dird/src/commands/wait.rs",
-          "line": 37
+          "line": 43
         },
         "declared_arguments": [
           "jobid",
@@ -4781,7 +4783,7 @@
         ],
         "status": "partial",
         "findings": [
-          "jobid/jobname/job/ujobid wählen tatsächliche Jobs; ohne Argument wartet der Handler still auf alle aktiven Jobs. mount verarbeitet die numerischen SD-Mount-/Medienzustände über die Worker-Pipe; timeout gilt wie upstream nur für mount. Nach Jobabschluss liefert der Handler den Katalogstatus in Original-Text/JSON einschließlich ExitStatus. Worker-Endmeldungen bleiben auch bei gepufferten Pipe-Reads erhalten; terminale Zustände werden erst mit der JobEnd-Katalogaktualisierung veröffentlicht, FD-Terminationscodes bleiben erhalten. Tests prüfen Auswahl, Ausgabe, Timeout, Statusübertragung und Abschlussreihenfolge. ACL-Abgleich, vollständige FD-/SD-Statusprioritäten, Ausfall der abschließenden Katalogaktualisierung und Live-SHA-256-Parität bleiben offen."
+          "Jobauswahl, mount/timeout und Abschlussausgabe sind portiert. Der Lifecycle verarbeitet jetzt echte Worker-Enden vor dem Katalogabschluss; Canceling bleibt aktiv, finale Zähler bleiben erhalten, Bareos-Statusprioritäten einschließlich Incomplete gelten. Fehlgeschlagene Katalog-Endupdates und der Snapshot-Race werden für wait jobid und wait ohne Argument sichtbar abgefangen; Retention beginnt am tatsächlichen Ende. Gegenprüfungen fanden und Regressionstests reproduzieren diese Fehler. Vollständige FD-/SD-Abbruchkoordination, ACL und Live-SHA-256-Parität bleiben offen."
         ],
         "functional_parity_verified": false
       },

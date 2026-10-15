@@ -76,6 +76,8 @@ pub enum PipeMessage {
     State { job_id: u32, state: String },
     #[serde(rename = "status")]
     Status { job_id: u32, files: i64, bytes: i64, errors: i32 },
+    #[serde(rename = "job_status")]
+    JobStatus { job_id: u32, status: i32 },
     #[serde(rename = "cat_req")]
     CatReq { job_id: u32, request: String },
     #[serde(rename = "cat_resp")]
@@ -90,7 +92,7 @@ pub enum PipeMessage {
 pub fn catalog_job_status(term_code: i32) -> &'static str {
     match term_code {
         0 | 84 => "T", 87 => "W", 101 => "e", 69 | 2 => "E",
-        102 => "f", 65 | 3 => "A", 68 => "D", _ => "E",
+        102 => "f", 65 | 3 => "A", 68 => "D", 73 => "I", _ => "E",
     }
 }
 
@@ -492,7 +494,7 @@ fn fd_restore_setup(fd: &mut BnetStream<tls_psk::PskStream>, p: &JobParams, sd_a
 }
 
 // Bareos getmsg.cc: Status Job=%127s JobStatus=%d; job_status.h: M/m/R.
-fn storage_wait_state(message: &str) -> Result<Option<&'static str>, &'static str> {
+fn storage_job_status(message: &str) -> Result<u8, &'static str> {
     let parts: Vec<_> = message.split_whitespace().collect();
     if parts.len() != 3 || parts[0] != "Status"
         || !parts[1].starts_with("Job=") || parts[1].len() == 4 {
@@ -500,12 +502,12 @@ fn storage_wait_state(message: &str) -> Result<Option<&'static str>, &'static st
     }
     let status = parts[2].strip_prefix("JobStatus=")
         .and_then(|value| value.parse::<u8>().ok()).ok_or("Malformed Storage job status")?;
-    Ok(match status {
-        b'M' => Some("WaitingMount"),
-        b'm' => Some("WaitingMedia"),
-        b'R' => Some("Running"),
-        _ => None,
-    })
+    Ok(status)
+}
+
+#[cfg(test)]
+fn storage_wait_state(message: &str) -> Result<Option<&'static str>, &'static str> {
+    Ok(match storage_job_status(message)? { b'M' => Some("WaitingMount"), b'm' => Some("WaitingMedia"), b'R' => Some("Running"), _ => None })
 }
 
 fn sd_catrec_loop(
@@ -553,17 +555,18 @@ fn sd_catrec_loop(
                         }
                     }
                 } else if msg.starts_with("Status Job=") {
-                    match storage_wait_state(&msg) {
-                        Ok(Some(state)) => {
-                            let update = PipeMessage::State { job_id, state: state.into() };
-                            if let Ok(json) = serde_json::to_string(&update) {
-                                let _ = writeln!(to_dir, "{json}");
-                            }
+                    match storage_job_status(&msg) {
+                        Ok(status) => {
+                            let update = PipeMessage::JobStatus { job_id, status: status as i32 };
+                            if let Ok(json) = serde_json::to_string(&update) { let _ = writeln!(to_dir, "{json}"); }
                         }
-                        Ok(None) => {}
                         Err(error) => warn!("Worker {job_id}: {error}"),
                     }
                 } else if msg.starts_with("3099 Job") {
+                    if let Some(status) = msg.split_whitespace().find_map(|part| part.strip_prefix("JobStatus=").and_then(|value| value.parse::<u8>().ok())) {
+                        let update = PipeMessage::JobStatus { job_id, status: status as i32 };
+                        if let Ok(json) = serde_json::to_string(&update) { let _ = writeln!(to_dir, "{json}"); }
+                    }
                     debug!("Worker {job_id} SD: job end");
                     break;
                 } else if msg.starts_with("3010 Job") {
@@ -813,7 +816,7 @@ impl JobHandle {
         }
     }
 
-    pub fn cancel(&self) { unsafe { libc::kill(self.pid, libc::SIGTERM); } }
+    pub fn cancel(&self) -> bool { self.pid > 0 && unsafe { libc::kill(self.pid, libc::SIGTERM) == 0 } }
     pub fn pause(&self)  { unsafe { libc::kill(self.pid, libc::SIGUSR1); } }
     pub fn resume(&self) { unsafe { libc::kill(self.pid, libc::SIGUSR2); } }
 }
@@ -886,25 +889,83 @@ mod wait_protocol_tests {
             assert!(storage_wait_state(invalid).is_err());
         }
     }
+    fn held_worker(messages: &[PipeMessage]) -> (JobHandle, std::process::ChildStdin) {
+        held_worker_exit(messages, 0)
+    }
+    fn held_worker_exit(messages: &[PipeMessage], code: i32) -> (JobHandle, std::process::ChildStdin) {
+        use std::process::{Command, Stdio};
+        let wire = messages.iter().map(|message| serde_json::to_string(message).unwrap()).collect::<Vec<_>>().join("\n");
+        let mut child = Command::new("/bin/sh").args(["-c", "trap '' TERM; printf '%s\n' \"$1\"; read release; exit \"$2\"", "--"])
+            .arg(wire).arg(code.to_string()).stdin(Stdio::piped()).stdout(Stdio::piped()).spawn().unwrap();
+        let handle = JobHandle {pid: child.id() as i32, job_id: 42, job_name: "Backup".into(), unique_job: "Backup.001".into(),
+            from_worker: Some(BufReader::new(unsafe {std::fs::File::from_raw_fd(child.stdout.take().unwrap().into_raw_fd())})), to_worker: None};
+        (handle, child.stdin.take().unwrap())
+    }
+    fn until(manager: &mut crate::job_manager::JobManager, ready: impl Fn(&crate::job_manager::JobManager) -> bool) {
+        let deadline=std::time::Instant::now()+std::time::Duration::from_secs(3);
+        loop { manager.poll_all(); if ready(manager) { break; }
+            assert!(std::time::Instant::now()<deadline,"worker lifecycle timed out");
+            std::thread::sleep(std::time::Duration::from_millis(1)); }
+    }
+    fn ending(status: u8) -> PipeMessage { PipeMessage::JobEnd {job_id:42,term_code:status as i32,
+        files:12,bytes:1024,errors:1,vol_session_id:None,vol_session_time:None} }
     #[test]
-    fn wait_keeps_job_active_until_the_final_catalog_update_message() {
-        let (read, write) = nix::unistd::pipe().unwrap();
-        let mut write = std::fs::File::from(write);
-        let handle = JobHandle { pid: i32::MAX, job_id: 42, job_name: "Backup".into(), unique_job: "Backup.001".into(),
-            from_worker: Some(BufReader::new(std::fs::File::from(read))), to_worker: None };
-        let mut manager = crate::job_manager::JobManager::new(
-            std::sync::Arc::new(crate::message_bus::MessageBus::new(10)), None, None);
-        manager.add_job(42, "Backup", handle);
-        writeln!(write, "{}", serde_json::to_string(&PipeMessage::State {job_id: 42, state: "Completed".into()}).unwrap()).unwrap();
-        manager.poll_all();
-        assert_eq!(manager.active_count(), 1);
-        writeln!(write, "{}", serde_json::to_string(&PipeMessage::JobEnd {job_id: 42, term_code: 87,
-            files: 12, bytes: 1024, errors: 1, vol_session_id: None, vol_session_time: None}).unwrap()).unwrap();
-        manager.poll_all();
-        assert_eq!(manager.active_count(), 0);
-        let job = manager.get_job(42).unwrap();
-        assert_eq!(job.phase, crate::job_manager::DirJobPhase::Completed);
-        assert_eq!((job.last_files, job.last_bytes), (12, 1024));
+    fn wait_keeps_job_active_until_real_worker_exit_and_final_catalog_update() {
+        let (handle,mut release)=held_worker(&[ending(b'W')]);
+        let cat=crate::catalog_worker::CatalogHandle::mock(|request| match request {
+            crate::catalog_worker::CatalogRequest::UpdateJobEnd {status,job_files,..} => {
+                assert_eq!(status,"W");assert_eq!(job_files,12);crate::catalog_worker::CatalogResponse::Ok(1)
+            }, _=>panic!("unexpected catalog request"),
+        });
+        let mut manager=crate::job_manager::JobManager::new(std::sync::Arc::new(crate::message_bus::MessageBus::new(10)),None,Some(cat));
+        manager.add_job(42,"Backup",handle);
+        until(&mut manager,|manager| manager.get_job(42).unwrap().phase==crate::job_manager::DirJobPhase::Finishing);
+        assert_eq!(manager.active_count(),1);
+        writeln!(release,"exit").unwrap();
+        until(&mut manager,|manager| manager.active_count()==0);
+        assert_eq!(manager.get_job(42).unwrap().phase,crate::job_manager::DirJobPhase::Completed);
+        assert_eq!((manager.get_job(42).unwrap().last_files,manager.get_job(42).unwrap().last_bytes),(12,1024));
+    }
+    #[test]
+    fn cancel_waits_for_worker_and_incomplete_status_beats_cancellation() {
+        for (updates,expected) in [(vec![ending(b'T')],"A"),
+            (vec![PipeMessage::JobStatus{job_id:42,status:b'I' as i32},ending(b'T')],"I")] {
+            let (handle,mut release)=held_worker(&updates);
+            let cat=crate::catalog_worker::CatalogHandle::mock(move |request| match request {
+                crate::catalog_worker::CatalogRequest::UpdateJobEnd {status,job_files,..} => {
+                    assert_eq!(status,expected);assert_eq!(job_files,12);crate::catalog_worker::CatalogResponse::Ok(1)
+                }, _=>panic!("unexpected catalog request"),
+            });
+            let mut manager=crate::job_manager::JobManager::new(std::sync::Arc::new(crate::message_bus::MessageBus::new(10)),None,Some(cat));
+            manager.add_job(42,"Backup",handle);
+            until(&mut manager,|manager| manager.get_job(42).unwrap().phase==crate::job_manager::DirJobPhase::Finishing);
+            assert!(manager.cancel_job(42));assert_eq!(manager.active_count(),1);
+            manager.poll_all();assert_eq!(manager.active_count(),1);
+            writeln!(release,"exit").unwrap();until(&mut manager,|manager|manager.active_count()==0);
+            assert!(!manager.cancel_job(42));
+        }
+    }
+    #[test]
+    fn nonzero_exit_cannot_publish_success_even_after_successful_job_end() {
+        let (handle,mut release)=held_worker_exit(&[ending(b'T')],1);
+        let cat=crate::catalog_worker::CatalogHandle::mock(|request|match request {
+            crate::catalog_worker::CatalogRequest::UpdateJobEnd {status,..} => {assert_eq!(status,"E");crate::catalog_worker::CatalogResponse::Ok(1)},
+            _=>panic!("unexpected request"),
+        });
+        let mut manager=crate::job_manager::JobManager::new(std::sync::Arc::new(crate::message_bus::MessageBus::new(10)),None,Some(cat));
+        manager.add_job(42,"Backup",handle);writeln!(release,"exit").unwrap();
+        until(&mut manager,|manager|manager.active_count()==0);
+        assert_eq!(manager.get_job(42).unwrap().phase,crate::job_manager::DirJobPhase::Error);
+    }
+    #[test]
+    fn final_catalog_failure_remains_visible_to_selected_and_wait_all_consumers() {
+        let since=std::time::Instant::now();
+        let (handle,mut release)=held_worker(&[ending(b'T')]);
+        let cat=crate::catalog_worker::CatalogHandle::mock(|_|crate::catalog_worker::CatalogResponse::Error("injected update failure".into()));
+        let mut manager=crate::job_manager::JobManager::new(std::sync::Arc::new(crate::message_bus::MessageBus::new(10)),None,Some(cat));
+        manager.add_job(42,"Backup",handle);writeln!(release,"exit").unwrap();
+        until(&mut manager,|manager| manager.active_count()==0);
+        for id in [Some(42),None] {assert!(manager.completion_error(id,since).unwrap().contains("injected update failure"));}
     }
     #[test]
     fn consecutive_pipe_messages_survive_reader_buffering_and_eof() {

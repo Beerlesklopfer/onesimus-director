@@ -78,4 +78,10 @@ onesimus (25.1.2+onesimus.0.2.0-2) UNRELEASED; urgency=medium
     Pin rustyline to the upstream buffered-input fix needed for timed redraws.
     Add deterministic boundary/spam tests and real-binary BNET/stdin/PTY tests.
 
+  * wait: keep canceled jobs active until the worker exits, preserve final
+    counters and Bareos status priorities, and expose failed catalog completion
+    to selected-job and wait-all callers. Close the completion-snapshot race,
+    reject failed cancellation signals and retain outcomes from actual finish.
+    Verify with real held child processes and injected catalog failures.
+
  -- Joerg Bernau <Joerg.Bernau@onesimus.io>  Thu, 15 Oct 2026 14:00:00 +0200

@@ -137,6 +137,14 @@ pub struct CatalogHandle {
 }
 
 impl CatalogHandle {
+    #[cfg(test)]
+    pub(crate) fn mock(mut handle: impl FnMut(CatalogRequest) -> CatalogResponse + Send + 'static) -> Self {
+        let (tx, rx) = flume::bounded::<(CatalogRequest, flume::Sender<CatalogResponse>)>(16);
+        std::thread::spawn(move || while let Ok((request, response)) = rx.recv() {
+            let _ = response.send(handle(request));
+        });
+        Self { tx }
+    }
     /// Send a request and wait for the response (blocking).
     fn request(&self, req: CatalogRequest) -> Result<CatalogResponse, String> {
         let (resp_tx, resp_rx) = flume::bounded(1);

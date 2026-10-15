@@ -23,6 +23,22 @@ pub struct DirJob {
     pub start_time: i64,
     pub last_files: i64,
     pub last_bytes: i64,
+    pub completion_error: Option<String>,
+    completed_at: Option<std::time::Instant>,
+    observed_status: char,
+    worker_exit: Option<i32>,
+    pending_end: Option<JobEnd>,
+}
+
+struct JobEnd {
+    term_code: i32, files: i64, bytes: i64, errors: i32,
+    vol_session_id: i32, vol_session_time: i32,
+}
+
+/// Bareos lib/jcr.cc: retain the first equal-priority error; Incomplete wins.
+fn merge_status(previous: char, next: char) -> char {
+    fn priority(status: char) -> u8 { match status { 'I' => 10, 'E' | 'f' | 'A' => 9, 'e' => 8, 'D' => 7, _ => 0 } }
+    if priority(next) > priority(previous) || (priority(next) == 0 && priority(previous) == 0) { next } else { previous }
 }
 
 /// Director-side job phases.
@@ -32,6 +48,7 @@ pub enum DirJobPhase {
     Starting,
     Running,
     Paused,
+    Canceling,
     WaitingCatReq,
     WaitingMedia,
     WaitingMount,
@@ -47,6 +64,7 @@ impl DirJobPhase {
             Self::Starting => "Starting",
             Self::Running => "Running",
             Self::Paused => "Paused",
+            Self::Canceling => "Canceling",
             Self::WaitingCatReq => "WaitingCatReq",
             Self::WaitingMedia => "WaitingMedia",
             Self::WaitingMount => "WaitingMount",
@@ -88,6 +106,8 @@ impl JobManager {
             start_time: now_unix(),
             last_files: 0,
             last_bytes: 0,
+            completion_error: None, completed_at: None, observed_status: 'C',
+            worker_exit: None, pending_end: None,
         });
         debug!("JobManager: added job {job_id} '{job_name}' (total: {})", self.jobs.len());
     }
@@ -122,13 +142,20 @@ impl JobManager {
     }
 
     pub fn cancel_job(&mut self, job_id: u32) -> bool {
-        if let Some(job) = self.jobs.iter_mut().find(|j| j.job_id == job_id) {
-            job.handle.cancel();
-            job.phase = DirJobPhase::Error;
+        if let Some(job) = self.jobs.iter_mut().find(|j| j.job_id == job_id
+            && !matches!(j.phase, DirJobPhase::Completed | DirJobPhase::Error)) {
+            if !job.handle.cancel() { return false; }
+            job.observed_status = merge_status(job.observed_status, 'A');
+            job.phase = DirJobPhase::Canceling;
             true
-        } else {
-            false
-        }
+        } else { false }
+    }
+
+    pub fn completion_error(&self, id: Option<u32>, since: std::time::Instant) -> Option<String> {
+        self.jobs.iter().find(|job| match id {
+            Some(id) => job.job_id == id && job.completion_error.is_some(),
+            None => job.completed_at.is_some_and(|time| time >= since) && job.completion_error.is_some(),
+        }).and_then(|job| job.completion_error.as_ref().map(|error| format!("Job {} catalog completion failed: {error}", job.job_id)))
     }
 
     pub fn pause_job(&mut self, job_id: u32) -> bool {
@@ -161,13 +188,15 @@ impl JobManager {
             }
 
             // Reap first, but drain all final pipe messages before publishing completion.
-            let exit_code = job.handle.try_wait();
+            if job.worker_exit.is_none() { job.worker_exit = job.handle.try_wait(); }
 
             // Read pipe messages (non-blocking — try_read_message returns None if no data)
             while let Some(msg) = job.handle.try_read_message() {
                 match msg {
                     PipeMessage::State { state, .. } => {
                         debug!("JobManager: job {} state={state}", job.job_id);
+                        if matches!(job.observed_status, 'A' | 'I' | 'E' | 'f' | 'e' | 'D')
+                            && matches!(state.as_str(), "Running" | "Paused" | "WaitingMedia" | "WaitMedia" | "WaitingMount" | "WaitMount") { continue; }
                         job.phase = match state.as_str() {
                             "Running" => DirJobPhase::Running,
                             "Paused" => DirJobPhase::Paused,
@@ -180,6 +209,20 @@ impl JobManager {
                         };
                     }
 
+                    PipeMessage::JobStatus { status, .. } => {
+                        if let Some(status) = char::from_u32(status as u32) {
+                            job.observed_status = merge_status(job.observed_status, status);
+                            if job.observed_status == status {
+                                match status {
+                                    'M' => job.phase = DirJobPhase::WaitingMount,
+                                    'm' => job.phase = DirJobPhase::WaitingMedia,
+                                    'R' => job.phase = DirJobPhase::Running,
+                                    _ => {},
+                                }
+                            }
+                        }
+                    }
+
                     PipeMessage::Status { files, bytes, errors, .. } => {
                         job.last_files = files;
                         job.last_bytes = bytes;
@@ -187,79 +230,56 @@ impl JobManager {
 
                     PipeMessage::CatReq { request, .. } => {
                         debug!("JobManager: job {} CatReq: {}", job.job_id, &request[..request.len().min(60)]);
+                        let previous_phase = job.phase;
                         job.phase = DirJobPhase::WaitingCatReq;
                         let response = handle_cat_req(&request, &self.catalog, job.job_id);
                         job.handle.send_message(&PipeMessage::CatResp { response });
-                        job.phase = DirJobPhase::Running;
+                        job.phase = previous_phase;
                     }
 
                     PipeMessage::JobEnd { term_code, files, bytes, errors,
                                           vol_session_id, vol_session_time, .. } => {
-                        let db_status = crate::job_worker::catalog_job_status(term_code);
-                        let success = matches!(db_status, "T" | "W");
-                        let status = if success { "Success" } else { "Error" };
-                        info!("JobManager: job {} '{}' ended — {status} files={files} bytes={bytes} errors={errors}",
-                            job.job_id, job.job_name);
+                        job.observed_status = merge_status(job.observed_status,
+                            crate::job_worker::catalog_job_status(term_code).chars().next().unwrap());
                         job.last_files = files;
                         job.last_bytes = bytes;
-                        job.phase = if success { DirJobPhase::Completed } else { DirJobPhase::Error };
-
-                        // Update job record in DB
-                        if let Some(cat) = &self.catalog {
-                            if let Err(e) = cat.update_job_end(
-                                job.job_id as i32, db_status, now_unix(),
-                                files, bytes, errors as i32,
-                                vol_session_id.unwrap_or(0), vol_session_time.unwrap_or(0),
-                            ) {
-                                error!("JobManager: DB update_job_end failed for job {}: {e}", job.job_id);
-                            }
-                        }
-
-                        // Post to message bus
-                        let msg_type = if success { MsgType::Info } else { MsgType::Error };
-                        self.bus.post(BusMessage::JobMessage {
-                            job_id: job.job_id,
-                            job_name: job.job_name.clone(),
-                            msg_type,
-                            text: format!("Backup {status}: files={files} bytes={bytes} errors={errors}"),
-                            timestamp: now_unix(),
-                        });
-                        self.bus.post(BusMessage::JobStatus {
-                            job_id: job.job_id,
-                            job_name: job.job_name.clone(),
-                            status: status.to_string(),
-                            timestamp: now_unix(),
-                        });
+                        job.phase = DirJobPhase::Finishing;
+                        job.pending_end = Some(JobEnd {term_code, files, bytes, errors,
+                            vol_session_id: vol_session_id.unwrap_or(0), vol_session_time: vol_session_time.unwrap_or(0)});
                     }
 
                     _ => {}
                 }
             }
-            if let Some(exit_code) = exit_code {
-                if !matches!(job.phase, DirJobPhase::Completed | DirJobPhase::Error) {
-                    // A worker that dies without JobEnd has no successful outcome.
-                    job.phase = DirJobPhase::Error;
-                    if let Some(cat) = &self.catalog {
-                        if let Err(error) = cat.update_job_end(job.job_id as i32, "E", now_unix(),
-                            job.last_files, job.last_bytes, 1, 0, 0) {
-                            error!("JobManager: failed to record worker exit: {error}");
-                        }
-                    }
-                }
-                info!("JobManager: job {} worker exited (code={exit_code})", job.job_id);
+            if let Some(exit_code) = job.worker_exit {
+                let ending = job.pending_end.take().unwrap_or_else(|| JobEnd {
+                    term_code: b'E' as i32, files: job.last_files, bytes: job.last_bytes,
+                    errors: 1, vol_session_id: 0, vol_session_time: 0,
+                });
+                job.observed_status = merge_status(job.observed_status,
+                    crate::job_worker::catalog_job_status(ending.term_code).chars().next().unwrap());
+                if exit_code != 0 { job.observed_status = merge_status(job.observed_status, 'E'); }
+                let db_status = job.observed_status.to_string();
+                let result = self.catalog.as_ref().ok_or_else(|| "catalog is unavailable".to_string()).and_then(|cat| cat.update_job_end(
+                    job.job_id as i32, &db_status, now_unix(), ending.files, ending.bytes, ending.errors,
+                    ending.vol_session_id, ending.vol_session_time));
+                job.completion_error = result.err();
+                if let Some(error) = &job.completion_error { error!("JobManager: job {} final catalog update failed: {error}", job.job_id); }
+                let success = job.completion_error.is_none() && matches!(job.observed_status, 'T' | 'W');
+                job.phase = if success { DirJobPhase::Completed } else { DirJobPhase::Error };
+                job.completed_at = Some(std::time::Instant::now());
+                let status = if success { "Success" } else { "Error" };
+                self.bus.post(BusMessage::JobMessage { job_id: job.job_id, job_name: job.job_name.clone(),
+                    msg_type: if success { MsgType::Info } else { MsgType::Error },
+                    text: format!("Job {status}: status={db_status} files={} bytes={} errors={}", ending.files, ending.bytes, ending.errors),
+                    timestamp: now_unix() });
+                self.bus.post(BusMessage::JobStatus {job_id: job.job_id, job_name: job.job_name.clone(), status: status.into(), timestamp: now_unix()});
+                info!("JobManager: job {} worker exited (code={exit_code}), catalog status={db_status}", job.job_id);
             }
         }
 
         // Cleanup completed jobs older than 5 minutes
-        let cutoff = now_unix() - 300;
-        self.jobs.retain(|j| {
-            if matches!(j.phase, DirJobPhase::Completed | DirJobPhase::Error) && j.start_time < cutoff {
-                debug!("JobManager: removing finished job {}", j.job_id);
-                false
-            } else {
-                true
-            }
-        });
+        self.jobs.retain(|job| !job.completed_at.is_some_and(|time| time.elapsed() >= std::time::Duration::from_secs(300)));
     }
 }
 

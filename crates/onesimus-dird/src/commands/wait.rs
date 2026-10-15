@@ -10,6 +10,7 @@ trait Backend {
     fn require_catalog(&mut self) -> Result<(), String>;
     fn active_jobs(&mut self) -> Result<Vec<ActiveJob>, String>;
     fn status(&mut self, id: u32) -> Result<Option<char>, String>;
+    fn completion_error(&mut self, _id: Option<u32>) -> Result<Option<String>, String> { Ok(None) }
     fn sleep(&mut self, duration: Duration);
     fn elapsed(&self) -> Duration;
 }
@@ -23,6 +24,11 @@ impl Backend for Director<'_> {
     fn active_jobs(&mut self) -> Result<Vec<ActiveJob>, String> {
         self.ctx.job_manager.as_ref().ok_or("ERR: Job manager is unavailable\n")?
             .lock().map(|manager| manager.active_jobs()).map_err(|_| "ERR: Job manager lock poisoned\n".into())
+    }
+    fn completion_error(&mut self, id: Option<u32>) -> Result<Option<String>, String> {
+        let manager = self.ctx.job_manager.as_ref().ok_or("ERR: Job manager is unavailable\n")?
+            .lock().map_err(|_| "ERR: Job manager lock poisoned\n")?;
+        Ok(manager.completion_error(id, self.started))
     }
     fn status(&mut self, id: u32) -> Result<Option<char>, String> {
         let table = self.ctx.catalog.as_ref().ok_or("ERR: Can't open db\n")?
@@ -93,13 +99,31 @@ fn wait_with(ast: &CommandAst, backend: &mut impl Backend) -> CommandResult {
     // The original allows briefly queued jobs to enter the running table.
     if !matches!(options.selection, Selection::Mount) { backend.sleep(Duration::from_millis(200)); }
     loop {
+        if !matches!(options.selection, Selection::Mount) {
+            match backend.completion_error(selected_id) {
+                Ok(Some(error)) => return CommandResult::error(format!("ERR: {error}\n")),
+                Err(error) => return CommandResult::error(error),
+                _ => {},
+            }
+        }
         let jobs = match backend.active_jobs() { Ok(jobs) => jobs, Err(error) => return CommandResult::error(error) };
         let finished = match options.selection {
             Selection::Mount => jobs.iter().any(|job| matches!(job.phase, DirJobPhase::WaitingMedia | DirJobPhase::WaitingMount)),
             Selection::All => jobs.is_empty(),
             _ => !jobs.iter().any(|job| Some(job.id) == selected_id),
         };
-        if finished { break; }
+        if finished {
+            // The poller can finish a catalog update between the two snapshots.
+            // Recheck after observing terminal state, before reporting success.
+            if !matches!(options.selection, Selection::Mount) {
+                match backend.completion_error(selected_id) {
+                    Ok(Some(error)) => return CommandResult::error(format!("ERR: {error}\n")),
+                    Err(error) => return CommandResult::error(error),
+                    _ => {},
+                }
+            }
+            break;
+        }
         // As upstream, timeout applies to mount waits only.
         if matches!(options.selection, Selection::Mount) && options.timeout.is_some_and(|timeout| backend.elapsed() >= timeout) {
             return CommandResult::ok("Wait on mount timed out\n".into());
@@ -138,17 +162,19 @@ mod tests {
     struct Fake {
         snapshots: VecDeque<Vec<ActiveJob>>, elapsed: Duration, queried: Vec<u32>,
         status: Result<Option<char>, String>, catalog: Result<(), String>,
+        completion_errors: VecDeque<Option<String>>,
     }
     impl Backend for Fake {
         fn require_catalog(&mut self) -> Result<(), String> { self.catalog.clone() }
         fn active_jobs(&mut self) -> Result<Vec<ActiveJob>, String> { Ok(self.snapshots.pop_front().unwrap_or_default()) }
         fn status(&mut self, id: u32) -> Result<Option<char>, String> { self.queried.push(id); self.status.clone() }
+        fn completion_error(&mut self, _: Option<u32>) -> Result<Option<String>, String> { Ok(self.completion_errors.pop_front().flatten()) }
         fn sleep(&mut self, duration: Duration) { self.elapsed += duration; }
         fn elapsed(&self) -> Duration { self.elapsed }
     }
     fn job(phase: DirJobPhase) -> ActiveJob { ActiveJob { id: 42, name: "Backup".into(), unique_name: "Backup.2026-10-15_14.00.00".into(), phase } }
     fn backend(snapshots: Vec<Vec<ActiveJob>>) -> Fake {
-        Fake { snapshots: snapshots.into(), elapsed: Duration::ZERO, queried: vec![], status: Ok(Some('T')), catalog: Ok(()) }
+        Fake { snapshots: snapshots.into(), elapsed: Duration::ZERO, queried: vec![], status: Ok(Some('T')), catalog: Ok(()), completion_errors: VecDeque::new() }
     }
     #[test]
     fn bare_wait_is_silent_and_waits_until_the_running_set_is_empty() {
@@ -186,6 +212,16 @@ mod tests {
         let result=wait_with(&crate::session::parse_cli_command("wait mount timeout=1"),&mut fake);
         assert_eq!(result.text_output,"Wait on mount timed out\n");
         assert_eq!(fake.elapsed,Duration::from_secs(1));
+    }
+    #[test]
+    fn completion_failure_between_snapshots_cannot_be_reported_as_success() {
+        for command in ["wait", "wait jobid=42"] {
+            let mut fake = backend(vec![vec![]]);
+            fake.completion_errors = vec![None, Some("final update failed".into())].into();
+            let result = wait_with(&crate::session::parse_cli_command(command), &mut fake);
+            assert!(!result.success); assert!(result.error_message.contains("final update failed"));
+            assert!(fake.queried.is_empty());
+        }
     }
     #[test]
     fn invalid_input_missing_jobs_and_catalog_errors_never_claim_completion() {

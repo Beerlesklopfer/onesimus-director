@@ -13,8 +13,8 @@ Dies ist ein statischer Quellcodeabgleich; es wurden keine Live-Jobs, Löschunge
 
 | Status | Anzahl | Bedeutung |
 |---|---:|---|
-| `partial` | 21 | Konkrete fehlende Optionen oder Teilfunktionen belegt |
-| `registered_unverified` | 52 | Handler vorhanden; Funktionsparität nicht nachgewiesen |
+| `partial` | 22 | Konkrete fehlende Optionen oder Teilfunktionen belegt |
+| `registered_unverified` | 51 | Handler vorhanden; Funktionsparität nicht nachgewiesen |
 | `semantic_mismatch` | 2 | Abweichende Bedeutung gegenüber Bareos |
 | `stub` | 13 | Platzhalter statt der beschriebenen Wirkung |
 
@@ -85,7 +85,7 @@ Nur `--no-default-features --features mcp-development` kompiliert `execute` ein;
 | [add](add.md) | Add media to a pool | `partial` |
 | [autodisplay](autodisplay.md) | Autodisplay console messages | `registered_unverified` |
 | [automount](automount.md) | Automount after label | `stub` |
-| [cancel](cancel.md) | Cancel a job | `registered_unverified` |
+| [cancel](cancel.md) | Cancel a job | `partial` |
 | [configure](configure.md) | Configure director resources | `partial` |
 | [create](create.md) | Create DB Pool from resource | `registered_unverified` |
 | [delete](delete.md) | Delete volume, pool or job | `registered_unverified` |
