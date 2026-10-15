@@ -32,8 +32,11 @@ pub fn usage(command: &str, message: &str) -> String {
 /// header, "N: item" lines and "<msg> (1-N): ".
 pub fn prompt_list(header: &str, items: &[String], msg: &str) -> String {
     let mut text = header.to_string();
+    // FormatPrompts (ua_select.cc:1130): index right-aligned to the width of
+    // num_prompts (items + header).
+    let width = (items.len() + 1).to_string().len();
     for (index, item) in items.iter().enumerate() {
-        text.push_str(&format!("{}: {item}\n", index + 1));
+        text.push_str(&format!("{:>width$}: {item}\n", index + 1));
     }
     text.push_str(&format!("{msg} ({}-{}): ", 1, items.len()));
     text
@@ -172,7 +175,8 @@ pub fn select_client(ast: &crate::command_ast::CommandAst, ctx: &ExecContext)
 pub fn select_pool_dbr(ctx: &ExecContext) -> Result<(String, String), CommandResult> {
     use crate::acl::{access, Kind};
     let from_catalog = ctx.catalog.as_ref()
-        .and_then(|cat| cat.query_rows("SELECT Name FROM Pool ORDER BY PoolId").ok())
+        // GetPoolIds has no ORDER BY: the catalog's natural row order.
+        .and_then(|cat| cat.query_rows("SELECT Name FROM Pool").ok())
         .map(|table| table.rows.into_iter().filter_map(|row| row.into_iter().next().flatten()).collect::<Vec<_>>());
     let names = from_catalog.unwrap_or_else(|| ctx.config.as_ref().and_then(|c| c.read().ok())
         .map(|cfg| cfg.pools.iter().map(|p| p.name.clone()).collect()).unwrap_or_default());

@@ -429,6 +429,21 @@ fn cmd_rerun_db(ast: &CommandAst, ctx: &ExecContext) -> CommandResult {
         // " yes" only when the rerun itself had it (ua_run.cc:200); without
         // it the run asks "OK to run?" (C-012).
         let mut arguments = vec![crate::command_ast::Argument { key: "job".to_string(), value: Some(job_name) }];
+        // The record's level, client, pool and fileset (ua_run.cc:97-193).
+        let record = cat.query_rows(&format!("SELECT j.Level, c.Name, p.Name, f.FileSet FROM Job j \
+            LEFT JOIN Client c ON c.ClientId=j.ClientId LEFT JOIN Pool p ON p.PoolId=j.PoolId \
+            LEFT JOIN FileSet f ON f.FileSetId=j.FileSetId WHERE j.JobId={id}")).ok()
+            .and_then(|t| t.rows.into_iter().next()).unwrap_or_default();
+        let level = match record.first().cloned().flatten().as_deref() {
+            Some("F") => Some("Full".to_string()), Some("I") => Some("Incremental".to_string()),
+            Some("D") => Some("Differential".to_string()), _ => None,
+        };
+        for (key, value) in [("level", level), ("client", record.get(1).cloned().flatten()),
+            ("pool", record.get(2).cloned().flatten()), ("fileset", record.get(3).cloned().flatten())] {
+            if let Some(value) = value {
+                arguments.push(crate::command_ast::Argument { key: key.to_string(), value: Some(value) });
+            }
+        }
         if ast.arguments.iter().any(|a| a.key.eq_ignore_ascii_case("yes")) {
             arguments.push(crate::command_ast::Argument { key: "yes".to_string(), value: None });
         }
@@ -488,7 +503,32 @@ fn relabel_with(
             oldvol.replace('\'', "''"))).ok()
             .and_then(|t| t.rows.into_iter().next()).and_then(|row| row.into_iter().next().flatten());
         match status {
-            None => return crate::ua_db::with_prefix(shown, selection_required(String::new())),
+            None => {
+                // GetMediaRecord fails (ua_label.cc:462), then SelectMediaDbr
+                // tries volume= the same way before asking.
+                let missing = |name: &str| format!("cats/sql_get.cc:1177 Media record for Volume \"{name}\" not found.\n");
+                let mut errors = missing(oldvol);
+                if let Some(newname) = value("volume") {
+                    let exists = cat.query_rows(&format!("SELECT MediaId FROM Media WHERE VolumeName='{}'",
+                        newname.replace('\'', "''"))).is_ok_and(|t| !t.rows.is_empty());
+                    if exists {
+                        // That record would become the volume to relabel: ask.
+                        return crate::ua_db::with_prefix(shown, selection_required(String::new()));
+                    }
+                    errors.push_str(&missing(newname));
+                    let mut result = CommandResult::error(errors);
+                    result.text_output = shown;
+                    return result;
+                }
+                // No volume=: SelectMediaDbr asks for pool and volume.
+                let mut result = match select_pool_dbr(ctx) {
+                    Ok((_, text)) => selection_required(format!("{text}Enter the volume name or MediaId \
+                        of the volume prefixed with an asterisk (*).\nE.g. \"full-0001\" or \"*42\": ")),
+                    Err(result) => result,
+                };
+                result.text_output.insert_str(0, &format!("{shown}{errors}"));
+                return result;
+            }
             Some(status) if status != "Purged" && status != "Recycle" => {
                 return crate::ua_db::with_prefix(shown, CommandResult::error(format!(
                     "Volume \"{oldvol}\" has VolStatus {status}. It must be Purged or Recycled before relabeling.\n")));

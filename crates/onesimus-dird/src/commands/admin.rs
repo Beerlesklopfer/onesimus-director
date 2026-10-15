@@ -175,6 +175,11 @@ fn cmd_update_db(ast: &CommandAst, ctx: &ExecContext) -> CommandResult {
             if vol.is_empty() {
                 return CommandResult::ok("update volume: specify volume=<name>\n".to_string());
             }
+            // SelectMediaDbr comes first (ua_update.cc UpdateVolume).
+            if cat.query_rows(&format!("SELECT MediaId FROM Media WHERE VolumeName='{}'", vol.replace('\'', "''")))
+                .is_ok_and(|t| t.rows.is_empty()) {
+                return CommandResult::error(format!("cats/sql_get.cc:1177 Media record for Volume \"{vol}\" not found.\n"));
+            }
             // Collect updateable fields from arguments
             let mut sets = Vec::new();
             if let Some(v) = get_arg(ast, "volstatus") {
@@ -488,6 +493,24 @@ fn find_arg_keyword(ast: &CommandAst, keywords: &[&str]) -> Option<usize> {
 
 enum PruneAction { Jobs(String, String), Volumes(Option<String>) }
 
+/// lib/edit.cc edit_utime: "6 months ", "1 day 2 hours 5 secs", "0 secs".
+fn edit_utime(mut secs: u64) -> String {
+    let mut out = String::new();
+    for (mult, name) in [(31_536_000, "year"), (2_592_000, "month"), (86_400, "day"), (3600, "hour"), (60, "min")] {
+        let times = secs / mult;
+        if times > 0 {
+            secs -= times * mult;
+            out.push_str(&format!("{times} {name}{} ", if times > 1 { "s" } else { "" }));
+        }
+    }
+    if secs == 0 && out.is_empty() {
+        out.push_str("0 secs");
+    } else if secs != 0 {
+        out.push_str(&format!("{secs} sec{}", if secs > 1 { "s" } else { "" }));
+    }
+    out
+}
+
 /// PruneCmd (ua_prune.cc:362) decisions before any catalog change: keyword
 /// menu, client selection and the retention confirmation, which only `yes`
 /// skips (ConfirmRetention). C-012.
@@ -499,11 +522,20 @@ fn prune_plan(ast: &CommandAst, ctx: &ExecContext) -> Result<PruneAction, Comman
         .any(|a| a.key.len() >= 6 && a.key[..6].eq_ignore_ascii_case("volume")).then_some(2));
     match kw {
         None => Err(keyword_prompt("", &KEYWORDS, "Choose item to prune")),
-        Some(0 | 1) => {
-            let (client, shown) = select_client(ast, ctx)?;
+        Some(kw @ (0 | 1)) => {
+            let (client, mut shown) = select_client(ast, ctx)?;
+            // ConfirmRetention (ua_select.cc:51): the client's retention is
+            // shown, then GetCmd "Continue? (yes/mod/no): " unless `yes`.
+            let (what, key, default) = if kw == 0 { ("File", "fileretention", 5_184_000) }
+                else { ("Job", "jobretention", 15_552_000) };
+            let retention = ctx.config.as_ref().and_then(|c| c.read().ok()).and_then(|cfg| cfg.raw.iter()
+                .find(|r| r.norm_type() == "client" && r.name() == Some(client.as_str()))
+                .and_then(|r| r.directives.iter().rev().find(|d| d.norm_key() == key))
+                .and_then(|d| bareos_config::values::parse_time(&d.values().join(" ")).ok())
+                .map(|(_, duration)| duration.as_secs()))
+                .unwrap_or(default);
+            shown.push_str(&format!("The current {what} retention period is: {}\n", edit_utime(retention)));
             if !yes {
-                // ConfirmRetention: "The current File/Job retention period is: …"
-                // then GetCmd "Continue? (yes/mod/no): ".
                 return Err(selection_required(format!("{shown}Continue? (yes/mod/no): ")));
             }
             Ok(PruneAction::Jobs(client, shown))
@@ -856,8 +888,12 @@ pub(crate) mod side_effect_tests {
         let text = |r: Result<PruneAction, CommandResult>| match r { Err(r) => r.text_output, Ok(_) => panic!("acted") };
         assert_eq!(text(prune_plan(&ast("prune"), &ctx)), "You have the following choices:\n1: Files\n2: Jobs\n3: Volume\n\
             4: Stats\n5: Directory\nChoose item to prune (1-5): ");
-        assert_eq!(text(prune_plan(&ast("prune jobs"), &ctx)), "Automatically selected Client: fd1\nContinue? (yes/mod/no): ");
-        assert_eq!(text(prune_plan(&ast("prune files client=fd1"), &ctx)), "Continue? (yes/mod/no): ");
+        assert_eq!(text(prune_plan(&ast("prune jobs"), &ctx)), "Automatically selected Client: fd1\n\
+            The current Job retention period is: 6 months \nContinue? (yes/mod/no): ");
+        assert_eq!(text(prune_plan(&ast("prune files client=fd1"), &ctx)),
+            "The current File retention period is: 2 months \nContinue? (yes/mod/no): ");
+        assert_eq!((edit_utime(0), edit_utime(86_400 + 7_200 + 5), edit_utime(61)),
+            ("0 secs".into(), "1 day 2 hours 5 secs".into(), "1 min 1 sec".into()));
         assert!(prune_plan(&ast("prune volume"), &ctx).is_err());
         assert!(prune_plan(&ast("prune volumes pool=Full"), &ctx).is_err());
         assert!(matches!(prune_plan(&ast("prune jobs client=fd1 yes"), &ctx), Ok(PruneAction::Jobs(c, _)) if c == "fd1"));
@@ -891,9 +927,10 @@ pub(crate) mod side_effect_tests {
             ("update volume=v1 maxvoljobs=1;DROP", "Invalid maxvoljobs value: 1;DROP\n")] {
             assert_eq!(cmd_update_db(&ast(line), &ctx).error_message, error);
         }
-        assert!(log.lock().unwrap().is_empty(), "{:?}", log.lock().unwrap());
+        // Only read-only lookups (update's SelectMediaDbr) may reach the catalog.
+        assert!(log.lock().unwrap().iter().all(|sql| sql.starts_with("SELECT MediaId")), "{:?}", log.lock().unwrap());
         cmd_purge_db(&ast("purge jobs client=fd1"), &ctx);
-        assert_eq!(log.lock().unwrap().len(), 1, "control: a complete purge reaches the catalog");
+        assert!(log.lock().unwrap().iter().any(|sql| sql.starts_with("DELETE")), "control: a complete purge reaches the catalog");
     }
 
     #[test]
