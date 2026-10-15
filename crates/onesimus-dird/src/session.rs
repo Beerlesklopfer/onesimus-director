@@ -161,13 +161,6 @@ pub fn handle_console_session<S: Read + Write>(
         let command_allowed=matches!(ast.command_name.as_str(),"quit"|"exit"|"whoami")
             || crate::acl::access(&ctx,crate::acl::Kind::Command,&ast.command_name);
 
-        // Check for quit
-        if command_allowed && matches!(ast.command_name.as_str(), "quit" | "exit" | ".quit") {
-            let _ = bnet.send_str("bye\n");
-            let _ = bnet.send_signal(BnetSignal::Terminate);
-            break;
-        }
-
         // C++ ua_cmds.cc Do_a_command(): in API mode the command is framed by
         // CMD_BEGIN ... CMD_OK/CMD_FAILED; in JSON mode the json-rpc result
         // follows after that (FinalizeResult). `.api` switches the mode
@@ -230,6 +223,14 @@ pub fn handle_console_session<S: Read + Write>(
                 };
                 if bnet.send_str(&err).is_err() { break; }
             }
+        }
+
+        // C++ ua_cmds.cc quit_cmd() only sets ua->quit; ua_server.cc then
+        // skips HandleMessages and the EOD and closes the socket without
+        // sending BNET_TERMINATE.
+        if command_allowed && result.success
+            && matches!(ast.command_name.as_str(), "quit" | "exit" | ".quit") {
+            break;
         }
 
         // HandleMessages: drain pending bus messages (like C++ ua_server.cc).
@@ -439,5 +440,75 @@ mod acl_transport_tests {
         assert!(bnet.recv_str().unwrap().contains("bareos-dir Version"));
         assert_eq!(bnet.recv().unwrap(),BnetMessage::Signal(BnetSignal::Eod));
         bnet.send_str("quit").unwrap();drop(bnet);server.join().unwrap();
+    }
+}
+
+#[cfg(test)]
+mod quit_tests {
+    //! C++ ua_cmds.cc quit_cmd() / ua_server.cc HandleUserAgentClientRequest():
+    //! quit, exit and .quit send no reply and no BNET_TERMINATE; the socket is
+    //! just closed.
+    use super::*;
+    use std::net::{TcpListener, TcpStream};
+    use std::sync::RwLock;
+    use std::time::Duration;
+
+    fn session(console: &str, acl: &str) -> (BnetStream<TcpStream>, std::thread::JoinHandle<()>) {
+        let config = crate::director_config::DirectorConfig::from_str(&format!(
+            "Director {{Name=dir; Password=secret}}\nConsole {{Name={console}; Password=pw; CommandACL={acl}}}"
+        )).unwrap();
+        let config: Option<SharedConfig> = Some(Arc::new(RwLock::new(config)));
+        let manager = Arc::new(SessionManager::new(Arc::new(crate::message_bus::MessageBus::new(16))));
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = listener.local_addr().unwrap();
+        let name = console.to_string();
+        let server = std::thread::spawn(move || {
+            let (stream, _) = listener.accept().unwrap();
+            stream.set_read_timeout(Some(Duration::from_secs(5))).unwrap();
+            handle_console_session(BnetStream::new(stream), 1, &name, "pw", &manager,
+                &CommandQueue::new(16), &config, &None, &None);
+        });
+        let stream = TcpStream::connect(address).unwrap();
+        stream.set_read_timeout(Some(Duration::from_secs(5))).unwrap();
+        let mut bnet = BnetStream::new(stream);
+        assert!(CramMd5Auth::new("pw", console, 0).two_way_authenticate(&mut bnet, false).unwrap().success);
+        assert!(bnet.recv_str().unwrap().starts_with("1000"));
+        assert!(bnet.recv_str().unwrap().starts_with("1002"));
+        (bnet, server)
+    }
+
+    #[test]
+    fn quit_exit_dot_quit_close_without_reply() {
+        for command in ["quit", "exit", ".quit", "q"] {
+            let (mut bnet, server) = session("admin", "*all*");
+            bnet.send_str(command).unwrap();
+            assert!(bnet.recv().is_err(), "{command}: expected close without frames");
+            server.join().unwrap();
+        }
+    }
+
+    #[test]
+    fn quit_in_json_api_mode_finishes_command_then_closes() {
+        let (mut bnet, server) = session("admin", "*all*");
+        bnet.send_str(".api 2").unwrap();
+        while bnet.recv().unwrap() != BnetMessage::Signal(BnetSignal::MainPrompt) {}
+        bnet.send_str("quit").unwrap();
+        assert_eq!(bnet.recv().unwrap(), BnetMessage::Signal(BnetSignal::CmdBegin));
+        assert_eq!(bnet.recv().unwrap(), BnetMessage::Signal(BnetSignal::CmdOk));
+        let json: serde_json::Value = serde_json::from_str(&bnet.recv_str().unwrap()).unwrap();
+        assert_eq!(json["result"], serde_json::json!({}));
+        assert!(bnet.recv().is_err(), "expected close without MainPrompt or TERMINATE");
+        server.join().unwrap();
+    }
+
+    #[test]
+    fn dot_quit_obeys_command_acl_but_quit_is_always_allowed() {
+        let (mut bnet, server) = session("limited", "version");
+        bnet.send_str(".quit").unwrap();
+        assert!(bnet.recv_str().unwrap().contains("is an invalid command"));
+        assert_eq!(bnet.recv().unwrap(), BnetMessage::Signal(BnetSignal::Eod));
+        bnet.send_str("quit").unwrap();
+        assert!(bnet.recv().is_err());
+        server.join().unwrap();
     }
 }

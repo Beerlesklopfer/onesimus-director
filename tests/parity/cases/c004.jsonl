@@ -1,0 +1,8 @@
+# C-004 session end: quit/exit/.quit close without reply (ua_cmds.cc quit_cmd, ua_server.cc).
+{"id": "c004-quit-abbrev", "steps": ["q"]}
+{"id": "c004-quit-after-command", "steps": ["version", "quit"], "normalize": ["Version: .*"]}
+{"id": "c004-quit-api1", "steps": ["quit"], "setup": [".api 1"]}
+{"id": "c004-quit-json", "steps": ["quit"], "setup": [".api 2"]}
+{"id": "c004-dot-quit-json", "steps": [".quit"], "setup": [".api 2"]}
+{"id": "c004-exit-limited", "steps": ["exit"], "console": "parity-limited", "password": "parity-limited-pw"}
+{"id": "c004-dot-quit-limited", "steps": [".quit"], "console": "parity-limited", "password": "parity-limited-pw"}

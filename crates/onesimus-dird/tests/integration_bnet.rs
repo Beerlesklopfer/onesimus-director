@@ -51,8 +51,7 @@ fn start_test_director(port: u16, shutdown: Arc<AtomicBool>) -> thread::JoinHand
                                     let cmd = cmd.trim();
 
                                     if cmd == "quit" || cmd == "exit" {
-                                        bnet.send_str("bye\n").unwrap();
-                                        bnet.send_signal(BnetSignal::Terminate).unwrap();
+                                        // C++ ua_server.cc: no reply, socket closed
                                         break;
                                     }
 
@@ -121,8 +120,7 @@ fn connect_send_version_quit() {
 
     // Send quit
     bnet.send_str("quit").unwrap();
-    let bye = bnet.recv_str().unwrap();
-    assert!(bye.contains("bye"));
+    assert!(bnet.recv().is_err(), "expected connection close without reply");
 
     // Cleanup
     shutdown.store(true, Ordering::SeqCst);

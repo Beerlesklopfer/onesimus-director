@@ -1005,9 +1005,9 @@ fn interactive_loop(
 
                 // Quit
                 if matches!(cmd, "quit" | "exit" | ".quit") {
-                    // Read goodbye
-                    // dir already mut
-                    if let Some(RecvResult::Data(text)) = dir.recv_msg() {
+                    // C++ Director (ua_cmds.cc quit_cmd) sends nothing and just
+                    // closes the socket; show anything that still arrives.
+                    while let Some(RecvResult::Data(text)) = dir.recv_msg() {
                         println!("{}", text.trim());
                     }
                     break;
@@ -1253,7 +1253,8 @@ impl DirectorConn for GrpcConn {
     fn send_cmd(&mut self, cmd: &str) -> bool {
         use bareos_proto_rs::bareos::director::ResponseFormat;
         if matches!(cmd, "quit" | "exit" | ".quit") {
-            self.pending = vec![RecvResult::Data("bye".to_string())];
+            // Like the BNET Director: quit produces no output
+            self.pending = vec![RecvResult::Closed];
             return true;
         }
         let text = match self.execute(cmd, ResponseFormat::Text) {

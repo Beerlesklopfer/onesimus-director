@@ -51,8 +51,9 @@ pub fn cmd_time(_ast: &CommandAst, _ctx: &ExecContext) -> CommandResult {
     }))
 }
 
+/// C++ ua_cmds.cc quit_cmd(): no output, the session loop closes the socket.
 pub fn cmd_quit(_ast: &CommandAst, _ctx: &ExecContext) -> CommandResult {
-    CommandResult::ok("bye\n".to_string())
+    CommandResult::ok(String::new())
 }
 
 // Bareos ua_cmds.cc help_cmd / DotHelpCmd use the upstream command table,
