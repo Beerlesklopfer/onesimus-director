@@ -100,8 +100,6 @@ fn fill_queue_from_config(config: &SharedConfig, queue: &mut BinaryHeap<Schedule
     };
 
     let now = now_unix();
-    let current_hour = (now % 86400) / 3600;
-    let current_minute = (now % 3600) / 60;
 
     for job in &cfg.jobs {
         if !job.enabled || job.schedule.is_empty() {
@@ -116,8 +114,12 @@ fn fill_queue_from_config(config: &SharedConfig, queue: &mut BinaryHeap<Schedule
         };
 
         for run in &schedule.runs {
-            // Simple check: does this run match the current hour?
-            if run.hour as i64 == current_hour && run.minute as i64 == current_minute {
+            // Local-time day/hour masks like C++ TriggersOnDayAndHour(); the
+            // run is due within the minute of its run time.
+            let runtime = crate::run_time::run_time_in_hour(run, now as libc::time_t) as i64;
+            if crate::run_time::triggers_on_day_and_hour(&run.mask, now as libc::time_t)
+                && runtime <= now && now - runtime < 60
+            {
                 let level = run.level
                     .map(|l| format!("{:?}", l))
                     .unwrap_or_else(|| format!("{:?}", job.level));
@@ -126,7 +128,6 @@ fn fill_queue_from_config(config: &SharedConfig, queue: &mut BinaryHeap<Schedule
                 let already_queued = false; // TODO: proper dedup
 
                 if !already_queued {
-                    let runtime = now; // Due now
                     debug!("scheduling job '{}' level={} at {:02}:{:02}",
                            job.name, level, run.hour, run.minute);
 

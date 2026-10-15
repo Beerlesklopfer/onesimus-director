@@ -27,6 +27,8 @@ pub struct SessionInfo {
     pub catalog: SessionCatalog,
     /// C++ ua->automount: mount the volume after `label` (default on, ua.cc:84).
     pub automount: bool,
+    /// Unix time the console connected (C++ console jcr->start_time).
+    pub connected_at: i64,
 }
 
 /// Per-session catalog selection, like the C++ UaContext fields `catalog`,
@@ -91,6 +93,7 @@ impl SessionManager {
             bus_rx,
             catalog: SessionCatalog::default(),
             automount: true,
+            connected_at: now_unix(),
         });
         id
     }
@@ -134,6 +137,17 @@ impl SessionManager {
 
     pub fn active_session_count(&self) -> usize {
         self.sessions.len()
+    }
+
+    /// Connect times of the authenticated console sessions in connection
+    /// order (C++ foreach_jcr over the JT_CONSOLE jcrs).
+    pub fn console_connect_times(&self) -> Vec<i64> {
+        let mut consoles: Vec<(u64, i64)> = self.sessions.iter()
+            .filter(|s| s.authenticated)
+            .map(|s| (s.id, s.connected_at))
+            .collect();
+        consoles.sort();
+        consoles.into_iter().map(|c| c.1).collect()
     }
 
     pub fn get_session_names(&self) -> Vec<(u64, String)> {

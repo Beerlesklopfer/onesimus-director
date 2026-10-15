@@ -223,9 +223,55 @@ pub struct RunDirective {
     pub level: Option<JobLevel>,
     pub pool: Option<String>,
     pub storage: Option<String>,
+    pub messages: Option<String>,
     pub priority: Option<i32>,
+    pub spool_data: Option<bool>,
+    pub accurate: Option<bool>,
+    /// First hour of `at HH:MM` (0 without `at`); the full set is `mask.hour`.
     pub hour: u32,
     pub minute: u32,
+    /// When the run triggers (C++ RunResource::date_time_mask).
+    pub mask: DateTimeMask,
+}
+
+/// C++ dird/date_time_mask.h: one bit per hour, day of month (0-based),
+/// month (0-based), weekday (0 = Sunday), week of month (0-4) and ISO-like
+/// week of year (0-53).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct DateTimeMask {
+    pub hour: u32,
+    pub mday: u32,
+    pub month: u16,
+    pub wday: u8,
+    pub wom: u8,
+    pub woy: u64,
+    pub last_7days_of_month: bool,
+}
+
+impl DateTimeMask {
+    /// run_conf.cc set_defaults(): every hour, day, month and week.
+    pub fn all() -> Self {
+        Self {
+            hour: (1 << 24) - 1,
+            mday: (1 << 31) - 1,
+            month: (1 << 12) - 1,
+            wday: (1 << 7) - 1,
+            wom: (1 << 5) - 1,
+            woy: (1 << 54) - 1,
+            last_7days_of_month: false,
+        }
+    }
+
+    pub fn has_hour(&self, h: i32) -> bool { bit(self.hour as u64, h) }
+    pub fn has_mday(&self, d: i32) -> bool { bit(self.mday as u64, d) }
+    pub fn has_month(&self, m: i32) -> bool { bit(self.month as u64, m) }
+    pub fn has_wday(&self, d: i32) -> bool { bit(self.wday as u64, d) }
+    pub fn has_wom(&self, w: i32) -> bool { bit(self.wom as u64, w) }
+    pub fn has_woy(&self, w: i32) -> bool { bit(self.woy, w) }
+}
+
+fn bit(mask: u64, n: i32) -> bool {
+    (0..64).contains(&n) && mask & (1 << n) != 0
 }
 
 #[derive(Debug, Clone)]

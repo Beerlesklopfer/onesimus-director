@@ -631,83 +631,412 @@ fn convert_raw_resource(raw: &RawResource) -> Result<Resource, ConfigError> {
     }
 }
 
-/// Parse a Schedule Run directive value.
-/// Examples: "Full 1st sun at 23:45", "Incremental mon-sat at 23:45"
+/// Parse a Schedule Run directive value — port of C++ dird/run_conf.cc
+/// StoreRun(). Examples: "Full 1st sun at 23:45", "Incremental mon-sat at
+/// 23:45", "Level=Full Pool=Monthly 1 jan at 0:05". C++ scan errors are
+/// logged and the Run directive is skipped.
 fn parse_run_directive(input: &str) -> Option<RunDirective> {
-    let input = input.trim();
+    match store_run(input) {
+        Ok(run) => Some(run),
+        Err(e) => {
+            tracing::warn!("Run = {input}: {e}");
+            None
+        }
+    }
+}
+
+/// Lexer tokens of a Run value (C++ lex.cc with NoIdent).
+#[derive(Debug, Clone, PartialEq)]
+enum RunToken {
+    Number(String),
+    Str(String),
+    Equals,
+    Comma,
+}
+
+fn run_tokens(input: &str) -> Vec<RunToken> {
+    fn flush(cur: &mut String, out: &mut Vec<RunToken>) {
+        if !cur.is_empty() {
+            let word = std::mem::take(cur);
+            if word.bytes().all(|b| b.is_ascii_digit()) {
+                out.push(RunToken::Number(word));
+            } else {
+                out.push(RunToken::Str(word));
+            }
+        }
+    }
+    let mut out = Vec::new();
+    let mut cur = String::new();
+    for c in input.chars() {
+        match c {
+            c if c.is_whitespace() || c == '"' => flush(&mut cur, &mut out),
+            '=' => { flush(&mut cur, &mut out); out.push(RunToken::Equals); }
+            ',' => { flush(&mut cur, &mut out); out.push(RunToken::Comma); }
+            '#' | ';' => break,
+            c => cur.push(c),
+        }
+    }
+    flush(&mut cur, &mut out);
+    out
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+enum RunState {
+    None, Range, Mday, Month, Time, At, Wday, Daily, Weekly, Monthly, Hourly, Wom, Woy, Last, Modulo,
+}
+
+/// run_conf.cc keyw[]
+const RUN_KEYWORDS: &[(&str, RunState, i32)] = &[
+    ("on", RunState::None, 0), ("at", RunState::At, 0), ("last", RunState::Last, 0),
+    ("sun", RunState::Wday, 0), ("mon", RunState::Wday, 1), ("tue", RunState::Wday, 2),
+    ("wed", RunState::Wday, 3), ("thu", RunState::Wday, 4), ("fri", RunState::Wday, 5),
+    ("sat", RunState::Wday, 6),
+    ("jan", RunState::Month, 0), ("feb", RunState::Month, 1), ("mar", RunState::Month, 2),
+    ("apr", RunState::Month, 3), ("may", RunState::Month, 4), ("jun", RunState::Month, 5),
+    ("jul", RunState::Month, 6), ("aug", RunState::Month, 7), ("sep", RunState::Month, 8),
+    ("oct", RunState::Month, 9), ("nov", RunState::Month, 10), ("dec", RunState::Month, 11),
+    ("sunday", RunState::Wday, 0), ("monday", RunState::Wday, 1), ("tuesday", RunState::Wday, 2),
+    ("wednesday", RunState::Wday, 3), ("thursday", RunState::Wday, 4), ("friday", RunState::Wday, 5),
+    ("saturday", RunState::Wday, 6),
+    ("january", RunState::Month, 0), ("february", RunState::Month, 1), ("march", RunState::Month, 2),
+    ("april", RunState::Month, 3), ("june", RunState::Month, 5), ("july", RunState::Month, 6),
+    ("august", RunState::Month, 7), ("september", RunState::Month, 8), ("october", RunState::Month, 9),
+    ("november", RunState::Month, 10), ("december", RunState::Month, 11),
+    ("daily", RunState::Daily, 0), ("weekly", RunState::Weekly, 0), ("monthly", RunState::Monthly, 0),
+    ("hourly", RunState::Hourly, 0),
+    ("1st", RunState::Wom, 0), ("2nd", RunState::Wom, 1), ("3rd", RunState::Wom, 2),
+    ("4th", RunState::Wom, 3), ("5th", RunState::Wom, 4),
+    ("first", RunState::Wom, 0), ("second", RunState::Wom, 1), ("third", RunState::Wom, 2),
+    ("fourth", RunState::Wom, 3), ("fifth", RunState::Wom, 4),
+];
+
+fn run_keyword(word: &str) -> Option<(RunState, i32)> {
+    RUN_KEYWORDS.iter().find(|k| k.0.eq_ignore_ascii_case(word)).map(|k| (k.1, k.2))
+}
+
+/// dird_conf.cc joblevels[]; Base and Since have no Rust variant and keep
+/// the job's level.
+fn run_level(word: &str) -> Option<Option<JobLevel>> {
+    let level = match word.to_ascii_lowercase().as_str() {
+        "full" => Some(JobLevel::Full),
+        "incremental" => Some(JobLevel::Incremental),
+        "differential" => Some(JobLevel::Differential),
+        "virtualfull" => Some(JobLevel::VirtualFull),
+        "catalog" => Some(JobLevel::Catalog),
+        "initcatalog" => Some(JobLevel::InitCatalog),
+        "volumetocatalog" => Some(JobLevel::VolumeToCatalog),
+        "disktocatalog" => Some(JobLevel::DiskToCatalog),
+        "data" => Some(JobLevel::Data),
+        "base" | "since" => None,
+        _ => return None,
+    };
+    Some(level)
+}
+
+/// C atoi(): leading digits, 0 if none.
+fn atoi(s: &str) -> i32 {
+    s.bytes().take_while(u8::is_ascii_digit)
+        .fold(0i64, |acc, b| (acc * 10 + (b - b'0') as i64).min(i32::MAX as i64)) as i32
+}
+
+fn is_integer(s: &str) -> bool {
+    !s.is_empty() && s.bytes().all(|b| b.is_ascii_digit())
+}
+
+fn is_week(s: &str) -> bool {
+    s.len() == 3 && s.starts_with(['w', 'W']) && is_integer(&s[1..])
+}
+
+fn set_range(mask: &mut u64, from: i32, to: i32) {
+    for i in from..=to {
+        *mask |= 1 << i;
+    }
+}
+
+fn run_yes_no(word: &str) -> Result<bool, String> {
+    match word.to_ascii_lowercase().as_str() {
+        "yes" | "true" => Ok(true),
+        "no" | "false" => Ok(false),
+        _ => Err(format!("Expect a YES or NO, got: {word}")),
+    }
+}
+
+/// Bit sets of a Run directive while parsing (run_conf.cc have_* flags).
+#[derive(Default)]
+struct RunMasks {
+    hour: u64, mday: u64, month: u64, wday: u64, wom: u64, woy: u64,
+    have_hour: bool, have_mday: bool, have_wday: bool, have_month: bool,
+    have_wom: bool, have_at: bool, have_woy: bool,
+}
+
+fn store_run(input: &str) -> Result<RunDirective, String> {
+    let tokens = run_tokens(input);
     let mut run = RunDirective {
         level: None,
         pool: None,
         storage: None,
+        messages: None,
         priority: None,
+        spool_data: None,
+        accurate: None,
         hour: 0,
         minute: 0,
+        mask: DateTimeMask::all(),
+    };
+    let word = |t: Option<&RunToken>| match t {
+        Some(RunToken::Str(s)) | Some(RunToken::Number(s)) => s.clone(),
+        _ => String::new(),
     };
 
-    let tokens: Vec<&str> = input.split_whitespace().collect();
-    let mut i = 0;
-
-    while i < tokens.len() {
-        let token = tokens[i].to_lowercase();
-
-        // Level keywords
-        match token.as_str() {
-            "full" => { run.level = Some(JobLevel::Full); i += 1; continue; }
-            "incremental" => { run.level = Some(JobLevel::Incremental); i += 1; continue; }
-            "differential" => { run.level = Some(JobLevel::Differential); i += 1; continue; }
-            "virtualfull" => { run.level = Some(JobLevel::VirtualFull); i += 1; continue; }
-            _ => {}
-        }
-
-        // Key=value overrides
-        if let Some(eq_pos) = token.find('=') {
-            let key = &token[..eq_pos];
-            let val = &tokens[i][eq_pos + 1..];
-            match key {
-                "level" => {
-                    run.level = match val.to_lowercase().as_str() {
-                        "full" => Some(JobLevel::Full),
-                        "incremental" => Some(JobLevel::Incremental),
-                        "differential" => Some(JobLevel::Differential),
-                        _ => None,
-                    };
-                }
-                "pool" => { run.pool = Some(val.to_string()); }
-                "storage" => { run.storage = Some(val.to_string()); }
-                "priority" => { run.priority = val.parse().ok(); }
-                _ => {}
+    // Scan for Job level "full", "incremental", ... and keyword=value pairs
+    const FIELDS: &[&str] = &["pool", "fullpool", "incrementalpool", "differentialpool", "nextpool",
+        "level", "storage", "messages", "priority", "spooldata", "maxrunschedtime", "accurate"];
+    let mut pos = 0;
+    while pos < tokens.len() {
+        let key = word(tokens.get(pos));
+        if let Some(field) = FIELDS.iter().find(|f| f.eq_ignore_ascii_case(&key)) {
+            if tokens.get(pos + 1) != Some(&RunToken::Equals) {
+                return Err(format!("Expected an equals, got: {}", word(tokens.get(pos + 1))));
             }
-            i += 1;
+            let value = word(tokens.get(pos + 2));
+            pos += 3;
+            match *field {
+                "spooldata" => run.spool_data = Some(run_yes_no(&value)?),
+                "accurate" => run.accurate = Some(run_yes_no(&value)?),
+                "level" => match run_level(&value) {
+                    Some(level) => run.level = level,
+                    None => return Err(format!("Job level field: {value} not found in run record")),
+                },
+                "priority" => run.priority = Some(value.parse()
+                    .map_err(|_| format!("expected a positive integer, got: {value}"))?),
+                "pool" => run.pool = Some(value),
+                "storage" => run.storage = Some(value),
+                "messages" => run.messages = Some(value),
+                _ => {} // level pools and MaxRunSchedTime are not modelled
+            }
             continue;
         }
-
-        // "at HH:MM"
-        if token == "at" && i + 1 < tokens.len() {
-            let time_str = tokens[i + 1];
-            if let Some(colon) = time_str.find(':') {
-                run.hour = time_str[..colon].parse().unwrap_or(0);
-                // Handle am/pm
-                let min_part = &time_str[colon + 1..];
-                let (min_str, pm) = if min_part.to_lowercase().ends_with("pm") {
-                    (&min_part[..min_part.len() - 2], true)
-                } else if min_part.to_lowercase().ends_with("am") {
-                    (&min_part[..min_part.len() - 2], false)
-                } else {
-                    (min_part, false)
-                };
-                run.minute = min_str.parse().unwrap_or(0);
-                if pm && run.hour < 12 { run.hour += 12; }
-                if !pm && run.hour == 12 { run.hour = 0; } // 12am = 0
-            }
-            i += 2;
+        // Old style Job levels without keyword
+        if let Some(level) = run_level(&key) {
+            run.level = level;
+            pos += 1;
             continue;
         }
-
-        // Skip day/month/ordinal keywords (not parsed into BitMasks yet)
-        i += 1;
+        break;
     }
 
-    Some(run)
+    // Scan schedule times; defaults: every hour of every day, minute 0
+    let all = DateTimeMask::all();
+    let mut m = RunMasks {
+        hour: all.hour as u64, mday: all.mday as u64, month: all.month as u64,
+        wday: all.wday as u64, wom: all.wom as u64, woy: all.woy,
+        ..Default::default()
+    };
+    let mut first_hour = None;
+    for token in &tokens[pos..] {
+        let (state, code, text) = match token {
+            RunToken::Comma => continue,
+            RunToken::Equals => return Err("Unexpected token: =".into()),
+            RunToken::Number(n) => {
+                let code = atoi(n) - 1;
+                if !(0..=30).contains(&code) {
+                    return Err("Day number out of range (1-31)".into());
+                }
+                (RunState::Mday, code, n.as_str())
+            }
+            RunToken::Str(s) if s.contains('-') => (RunState::Range, 0, s.as_str()),
+            RunToken::Str(s) if s.contains(':') => (RunState::Time, 0, s.as_str()),
+            RunToken::Str(s) if s.contains('/') => (RunState::Modulo, 0, s.as_str()),
+            RunToken::Str(s) if is_week(s) => {
+                let code = atoi(&s[1..]);
+                if !(0..=53).contains(&code) {
+                    return Err("Week number out of range (0-53)".into());
+                }
+                (RunState::Woy, code, s.as_str())
+            }
+            RunToken::Str(s) => match run_keyword(s) {
+                Some((state, code)) => (state, code, s.as_str()),
+                None => return Err(format!("Job type field: {s} in run record not found")),
+            },
+        };
+        match state {
+            RunState::None => continue,
+            RunState::Mday => {
+                if !m.have_mday { m.mday = 0; m.have_mday = true; }
+                m.mday |= 1 << code;
+            }
+            RunState::Month => {
+                if !m.have_month { m.month = 0; m.have_month = true; }
+                m.month |= 1 << code;
+            }
+            RunState::Wday => {
+                if !m.have_wday { m.wday = 0; m.have_wday = true; }
+                m.wday |= 1 << code;
+            }
+            RunState::Wom => {
+                if !m.have_wom { m.wom = 0; m.have_wom = true; }
+                m.wom |= 1 << code;
+            }
+            RunState::Woy => {
+                if !m.have_woy { m.woy = 0; m.have_woy = true; }
+                m.woy |= 1 << code;
+            }
+            RunState::Time => {
+                if !m.have_at {
+                    return Err("Time must be preceded by keyword AT.".into());
+                }
+                if !m.have_hour { m.hour = 0; }
+                let (h, rest) = text.split_once(':').unwrap_or((text, ""));
+                let mut h = atoi(h);
+                let minute = atoi(rest);
+                let suffix = rest.get(2..).unwrap_or(rest);
+                let pm = suffix.eq_ignore_ascii_case("pm");
+                let am = suffix.eq_ignore_ascii_case("am");
+                if !pm && !am && rest.len() != 2 {
+                    return Err("Bad time specification.".into());
+                }
+                // 12am is 00:00 and 12pm is 12:00
+                if pm {
+                    if h != 12 { h += 12; }
+                } else if am && h == 12 {
+                    h -= 12;
+                }
+                if !(0..=23).contains(&h) || !(0..=59).contains(&minute) {
+                    return Err("Bad time specification.".into());
+                }
+                m.hour |= 1 << h;
+                first_hour.get_or_insert(h as u32);
+                run.minute = minute as u32;
+                m.have_hour = true;
+            }
+            RunState::At => m.have_at = true,
+            RunState::Last => {
+                run.mask.last_7days_of_month = true;
+                if !m.have_wom { m.wom = 0; m.have_wom = true; }
+            }
+            RunState::Modulo => {
+                let (l, r) = text.split_once('/').unwrap_or((text, ""));
+                if is_integer(l) && is_integer(r) {
+                    let code = atoi(l) - 1;
+                    let code2 = atoi(r);
+                    if !(0..=30).contains(&code) || !(0..=30).contains(&code2) {
+                        return Err("Bad day specification in modulo.".into());
+                    }
+                    if code > code2 {
+                        return Err("Bad day specification, offset must always be <= than modulo.".into());
+                    }
+                    if !m.have_mday { m.mday = 0; m.have_mday = true; }
+                    // C++ divides by zero for "1/0"; no bit is set here
+                    for i in 0..31 {
+                        if code2 != 0 && i % code2 == 0 && i + code < 64 {
+                            m.mday |= 1 << (i + code);
+                        }
+                    }
+                } else if is_week(l) && is_week(r) {
+                    let code = atoi(&l[1..]);
+                    let code2 = atoi(&r[1..]);
+                    if !(0..=53).contains(&code) {
+                        return Err("Week number out of range (0-53) in modulo".into());
+                    }
+                    if code2 <= 0 || code2 > 53 {
+                        return Err("Week interval out of range (1-53) in modulo".into());
+                    }
+                    if code > code2 {
+                        return Err("Bad week number specification in modulo, offset must always be <= than modulo.".into());
+                    }
+                    if !m.have_woy { m.woy = 0; m.have_woy = true; }
+                    let mut week = code;
+                    while week <= 53 {
+                        m.woy |= 1 << week;
+                        week += code2;
+                    }
+                } else {
+                    return Err("Bad modulo time specification. Format for weekdays is '01/02', for yearweeks is 'w01/w02'.".into());
+                }
+            }
+            RunState::Range => {
+                let (l, r) = text.split_once('-').unwrap_or((text, ""));
+                if is_integer(l) && is_integer(r) {
+                    let code = atoi(l) - 1;
+                    let code2 = atoi(r) - 1;
+                    if !(0..=30).contains(&code) || !(0..=30).contains(&code2) {
+                        return Err("Bad day range specification.".into());
+                    }
+                    if !m.have_mday { m.mday = 0; m.have_mday = true; }
+                    if code < code2 {
+                        set_range(&mut m.mday, code, code2);
+                    } else {
+                        set_range(&mut m.mday, code, 30);
+                        set_range(&mut m.mday, 0, code2);
+                    }
+                } else if is_week(l) && is_week(r) {
+                    let code = atoi(&l[1..]);
+                    let code2 = atoi(&r[1..]);
+                    if !(0..=53).contains(&code) || !(0..=53).contains(&code2) {
+                        return Err("Week number out of range (0-53)".into());
+                    }
+                    if !m.have_woy { m.woy = 0; m.have_woy = true; }
+                    if code < code2 {
+                        set_range(&mut m.woy, code, code2);
+                    } else {
+                        set_range(&mut m.woy, code, 53);
+                        set_range(&mut m.woy, 0, code2);
+                    }
+                } else {
+                    // Week days, months or positions
+                    let Some((state, code)) = run_keyword(l)
+                        .filter(|k| matches!(k.0, RunState::Month | RunState::Wday | RunState::Wom))
+                    else {
+                        return Err("Invalid month, week or position day range".into());
+                    };
+                    let Some((_, code2)) = run_keyword(r).filter(|k| k.0 == state && k.1 != code) else {
+                        return Err("Invalid month, weekday or position range".into());
+                    };
+                    let (mask, have, max) = match state {
+                        RunState::Wday => (&mut m.wday, &mut m.have_wday, 6),
+                        // This is a bit odd for months, but C++ accepts it
+                        RunState::Month => (&mut m.month, &mut m.have_month, 11),
+                        _ => (&mut m.wom, &mut m.have_wom, 4),
+                    };
+                    if !*have { *mask = 0; *have = true; }
+                    if code < code2 {
+                        set_range(mask, code, code2);
+                    } else {
+                        set_range(mask, code, max);
+                        set_range(mask, 0, code2);
+                    }
+                }
+            }
+            RunState::Hourly => {
+                m.have_hour = true;
+                set_range(&mut m.hour, 0, 23);
+            }
+            RunState::Weekly => {
+                m.have_mday = true;
+                m.have_wom = true;
+                m.have_woy = true;
+                set_range(&mut m.mday, 0, 30);
+                set_range(&mut m.wom, 0, 4);
+                set_range(&mut m.woy, 0, 53);
+            }
+            RunState::Daily => {
+                m.have_mday = true;
+                set_range(&mut m.wday, 0, 6);
+            }
+            RunState::Monthly => {
+                m.have_month = true;
+                set_range(&mut m.month, 0, 11);
+            }
+        }
+    }
+    run.mask.hour = m.hour as u32;
+    run.mask.mday = m.mday as u32;
+    run.mask.month = m.month as u16;
+    run.mask.wday = m.wday as u8;
+    run.mask.wom = m.wom as u8;
+    run.mask.woy = m.woy;
+    run.hour = first_hour.unwrap_or(0);
+    Ok(run)
 }
 
 #[cfg(test)]
@@ -1081,6 +1410,53 @@ Console {
         assert_eq!(run.pool, Some("MyPool".to_string()));
         assert_eq!(run.hour, 14);
         assert_eq!(run.minute, 0);
+    }
+
+    #[test]
+    fn run_masks_like_store_run() {
+        let run = parse_run_directive("Full 1st sat at 21:00").unwrap();
+        assert_eq!(run.mask.wday, 1 << 6);
+        assert_eq!(run.mask.wom, 1);
+        assert_eq!(run.mask.hour, 1 << 21);
+        assert_eq!(run.mask.mday, (1 << 31) - 1);
+        assert_eq!((run.hour, run.minute), (21, 0));
+
+        let run = parse_run_directive("Differential 2nd-5th sat at 21:00").unwrap();
+        assert_eq!(run.mask.wom, 0b11110);
+        let run = parse_run_directive("Incremental mon-fri at 21:00").unwrap();
+        assert_eq!(run.mask.wday, 0b0111110);
+        let run = parse_run_directive("Level=Full fri-mon at 1:05pm").unwrap();
+        assert_eq!(run.mask.wday, 0b1100011);
+        assert_eq!((run.hour, run.minute), (13, 5));
+        let run = parse_run_directive("Full 12:30am").map(|r| r.mask);
+        assert!(run.is_none(), "time without at is rejected");
+        let run = parse_run_directive("Full at 12:30am").unwrap();
+        assert_eq!(run.mask.hour, 1);
+        let run = parse_run_directive("Full on 1, 15 jan,jul at 0:05").unwrap();
+        assert_eq!(run.mask.mday, 1 | 1 << 14);
+        assert_eq!(run.mask.month, 1 | 1 << 6);
+        let run = parse_run_directive("Full last sun at 2:00").unwrap();
+        assert!(run.mask.last_7days_of_month);
+        assert_eq!(run.mask.wom, 0);
+        let run = parse_run_directive("Full w02-w04 at 2:00").unwrap();
+        assert_eq!(run.mask.woy, 0b11100);
+        let run = parse_run_directive("Full w00/w02 at 2:00").unwrap();
+        assert_eq!(run.mask.woy & 0b1111, 0b0101);
+        let run = parse_run_directive("Full 2/3 at 2:00").unwrap();
+        assert_eq!(run.mask.mday & 0b1111111, 0b0010010);
+        let run = parse_run_directive("Incremental hourly at 0:15").unwrap();
+        assert_eq!(run.mask.hour, (1 << 24) - 1);
+        assert_eq!(run.minute, 15);
+        // Without "at" every hour triggers (run_conf.cc set_defaults)
+        let run = parse_run_directive("Full sun").unwrap();
+        assert_eq!(run.mask.hour, (1 << 24) - 1);
+        let run = parse_run_directive("Pool=Monthly Storage=File Messages=Standard SpoolData=yes Accurate=no Priority=5 Full at 1:00").unwrap();
+        assert_eq!(run.pool.as_deref(), Some("Monthly"));
+        assert_eq!(run.storage.as_deref(), Some("File"));
+        assert_eq!(run.messages.as_deref(), Some("Standard"));
+        assert_eq!((run.spool_data, run.accurate, run.priority), (Some(true), Some(false), Some(5)));
+        assert!(parse_run_directive("Full nosuchday at 1:00").is_none());
+        assert!(parse_run_directive("Full mon-jan at 1:00").is_none());
     }
 
     #[test]
