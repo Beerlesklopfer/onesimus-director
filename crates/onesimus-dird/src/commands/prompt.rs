@@ -70,6 +70,81 @@ pub fn select_resource(ctx: &ExecContext, header: &str, automsg: &str, msg: &str
     }
 }
 
+/// `get_storage_resource(ua, false, autochangers_only)` (ua_select.cc:1320)
+/// for commands without a default argument: `storage=`/`sd=` names the
+/// resource, `jobid=`/`job=`/`ujobid=` refer to running jobs, otherwise
+/// `select_storage_resource` (ua_select.cc:197) offers the accessible
+/// (autochanger) storages. Ok carries the resource and the text upstream
+/// printed while selecting it.
+pub fn select_storage(ast: &crate::command_ast::CommandAst, ctx: &ExecContext, autochangers_only: bool)
+    -> Result<(bareos_config::resources::StorageResource, String), CommandResult> {
+    use crate::acl::{access, Kind};
+    let Some(config) = ctx.config.as_ref().and_then(|c| c.read().ok()) else {
+        return Err(CommandResult::error("No config\n".into()));
+    };
+    let mut errors = String::new();
+    for arg in &ast.arguments {
+        let key = arg.key.to_ascii_lowercase();
+        match key.as_str() {
+            "storage" | "sd" => {
+                // A bare keyword (NULL argv) leaves the name empty: selection.
+                if let Some(name) = arg.value.as_deref().filter(|name| !name.is_empty()) {
+                    match config.find_storage(name) {
+                        Some(store) if access(ctx, Kind::Storage, &store.name) =>
+                            return Ok((store.clone(), String::new())),
+                        Some(_) => {}
+                        None => errors.push_str(&format!("Storage resource \"{name}\": not found\n")),
+                    }
+                }
+                break;
+            }
+            "jobid" => {
+                let id = arg.value.as_deref().and_then(|v| v.trim().parse::<i64>().ok()).unwrap_or(0);
+                if id <= 0 {
+                    return Err(CommandResult::error(format!("Expecting jobid=nn command, got: {}\n", arg.key)));
+                }
+                // Onesimus keeps no storage per running job: treated as not running.
+                return Err(CommandResult::error(format!("JobId {id} is not running.\n")));
+            }
+            "job" | "jobname" | "ujobid" => {
+                let Some(name) = arg.value.as_deref() else {
+                    let what = if key == "ujobid" { "ujobid" } else { "job" };
+                    return Err(CommandResult::error(format!("Expecting {what}=xxx, got: {}.\n", arg.key)));
+                };
+                return Err(CommandResult::error(format!("Job \"{name}\" is not running.\n")));
+            }
+            _ => {}
+        }
+    }
+    let names: Vec<String> = crate::director_config::sort_case_insensitive(config.storages.iter()
+        .filter(|s| access(ctx, Kind::Storage, &s.name))
+        .filter(|s| !autochangers_only || is_autochanger(&config, &s.name))
+        .map(|s| s.name.as_str()))
+        .into_iter().map(str::to_string).collect();
+    let header = if autochangers_only { "The defined Autochanger Storage resources are:\n" }
+        else { "The defined Storage resources are:\n" };
+    let with_errors = |mut result: CommandResult| {
+        result.text_output = format!("{errors}{}", result.text_output);
+        result
+    };
+    match select_resource(ctx, header, "Storage", "Select Storage resource", names) {
+        Ok((name, text)) => match config.find_storage(&name) {
+            Some(store) => Ok((store.clone(), format!("{errors}{text}"))),
+            None => Err(with_errors(CommandResult::error(String::new()))),
+        },
+        Err(result) => Err(with_errors(result)),
+    }
+}
+
+/// `Auto Changer = yes` in the Storage resource (dird_conf.cc "autochanger").
+fn is_autochanger(config: &crate::director_config::DirectorConfig, name: &str) -> bool {
+    config.raw.iter()
+        .find(|r| r.norm_type() == "storage" && r.name() == Some(name))
+        .and_then(|r| r.directives.iter().rev().find(|d| d.norm_key() == "autochanger"))
+        .and_then(|d| d.first())
+        .is_some_and(|v| bareos_config::values::parse_bool(v).is_ok_and(|(_, on)| on))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

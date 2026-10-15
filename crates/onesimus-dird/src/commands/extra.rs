@@ -482,40 +482,63 @@ fn cmd_add_db(ast: &CommandAst, ctx: &ExecContext) -> CommandResult {
 }
 
 pub fn cmd_import(ast: &CommandAst, ctx: &ExecContext) -> CommandResult {
-    let stor = ast.arguments.iter().find(|a| a.key == "storage")
-        .and_then(|a| a.value.as_deref()).unwrap_or("File");
-    let srcslots = ast.arguments.iter().find(|a| a.key == "srcslots")
-        .and_then(|a| a.value.as_deref()).unwrap_or("0");
-
-    match sd_cmd_via_config(ctx, stor, &format!("import srcslots={srcslots}")) {
-        Ok(resp) => CommandResult::ok(format!("Import from storage {stor}:\n{resp}\n")),
-        Err(e) => CommandResult::error(format!("import {stor}: {e}\n")),
-    }
+    move_operation(ast, ctx, "import", |stor, command| sd_cmd_via_config(ctx, stor, command))
 }
 
 pub fn cmd_export(ast: &CommandAst, ctx: &ExecContext) -> CommandResult {
-    let stor = ast.arguments.iter().find(|a| a.key == "storage")
-        .and_then(|a| a.value.as_deref()).unwrap_or("File");
-    let srcslots = ast.arguments.iter().find(|a| a.key == "srcslots")
-        .and_then(|a| a.value.as_deref()).unwrap_or("0");
-
-    match sd_cmd_via_config(ctx, stor, &format!("export srcslots={srcslots}")) {
-        Ok(resp) => CommandResult::ok(format!("Export from storage {stor}:\n{resp}\n")),
-        Err(e) => CommandResult::error(format!("export {stor}: {e}\n")),
-    }
+    move_operation(ast, ctx, "export", |stor, command| sd_cmd_via_config(ctx, stor, command))
 }
 
 pub fn cmd_move(ast: &CommandAst, ctx: &ExecContext) -> CommandResult {
-    let stor = ast.arguments.iter().find(|a| a.key == "storage")
-        .and_then(|a| a.value.as_deref()).unwrap_or("File");
-    let from = ast.arguments.iter().find(|a| a.key == "srcslot")
-        .and_then(|a| a.value.as_deref()).unwrap_or("0");
-    let to = ast.arguments.iter().find(|a| a.key == "dstslot")
-        .and_then(|a| a.value.as_deref()).unwrap_or("0");
+    move_operation(ast, ctx, "move", |stor, command| sd_cmd_via_config(ctx, stor, command))
+}
 
-    match sd_cmd_via_config(ctx, stor, &format!("move srcslot={from} dstslot={to}")) {
-        Ok(resp) => CommandResult::ok(format!("Move slot {from} → {to} on {stor}:\n{resp}\n")),
-        Err(e) => CommandResult::error(format!("move: {e}\n")),
+/// PerformMoveOperation (ua_impexp.cc:897): the storage comes from
+/// get_storage_resource(ua, false, true) — never a default — and export/move
+/// refuse to run without the slot selection they need (C-012).
+fn move_operation(
+    ast: &CommandAst,
+    ctx: &ExecContext,
+    operation: &str,
+    send: impl FnOnce(&str, &str) -> Result<String, String>,
+) -> CommandResult {
+    let (store, mut text) = match super::prompt::select_storage(ast, ctx, true) {
+        Ok(selected) => selected,
+        Err(result) => return result,
+    };
+    let value = |keys: &[&str]| keys.iter().find_map(|key| ast.arguments.iter()
+        .find(|a| a.key.eq_ignore_ascii_case(key) && a.value.is_some())
+        .and_then(|a| a.value.as_deref()));
+    let src = value(&["srcslots", "srcslot"]);
+    let dst = value(&["dstslots", "dstslot"]);
+    let volume = value(&["volume"]);
+    // ua_impexp.cc:1042-1058 operation specific checks.
+    let refusal = match operation {
+        "export" if src.is_none() && volume.is_none() =>
+            Some("Cannot perform an export operation without source slot selection\n"),
+        "move" if src.is_none() || dst.is_none() =>
+            Some("Cannot perform a move operation without source and/or destination selection\n"),
+        _ => None,
+    };
+    if let Some(refusal) = refusal {
+        let mut result = CommandResult::error(refusal.to_string());
+        result.text_output = text;
+        return result;
+    }
+    let mut command = operation.to_string();
+    for (key, value) in [("srcslots", src), ("dstslots", dst), ("volume", volume)] {
+        if let Some(value) = value { command.push_str(&format!(" {key}={value}")); }
+    }
+    match send(&store.name, &command) {
+        Ok(resp) => {
+            text.push_str(&format!("{operation} on storage {}:\n{resp}\n", store.name));
+            CommandResult::ok(text)
+        }
+        Err(e) => {
+            let mut result = CommandResult::error(format!("{operation} {}: {e}\n", store.name));
+            result.text_output = text;
+            result
+        }
     }
 }
 
@@ -615,6 +638,58 @@ mod setdevice_tests {
             assert_eq!((result.success, result.text_output.as_str()), (false, expected), "{line}");
         }
         assert!(is_a_number("-1.5e3") && !is_a_number("") && !is_a_number("1e") && !is_a_number("inf"));
+    }
+}
+
+#[cfg(test)]
+mod move_operation_tests {
+    use super::*;
+    use std::sync::{Arc, RwLock};
+
+    fn context(extra: &str) -> ExecContext {
+        let config = crate::director_config::DirectorConfig::from_str(&format!(
+            "Director {{ Name = dir }}\nStorage {{ Name = File; Address = localhost; Port = 9103 }}\n{extra}"
+        )).unwrap();
+        ExecContext { session_id: 0, config: Some(Arc::new(RwLock::new(config))),
+            session_mgr: None, catalog: None, api_mode: crate::command_executor::ApiMode::Human,
+            bus_rx: None, job_manager: None }
+    }
+
+    fn run(line: &str, ctx: &ExecContext) -> CommandResult {
+        let ast = crate::session::parse_cli_command(line);
+        let operation = ast.command_name.clone();
+        move_operation(&ast, ctx, &operation, |_, _| panic!("{line}: must not contact the SD"))
+    }
+
+    #[test]
+    fn no_autochanger_means_empty_selection_and_no_sd_command() {
+        let ctx = context("");
+        for line in ["import", "export", "move", "import srcslots=1", "move srcslot=1 dstslot=2"] {
+            let result = run(line, &ctx);
+            assert!(!result.success, "{line}");
+            assert_eq!(result.text_output, "The defined Autochanger Storage resources are:\n", "{line}");
+            assert_eq!(result.error_message, "Selection list for \"Storage\" is empty!\n", "{line}");
+        }
+        let result = run("import storage=Nope", &ctx);
+        assert_eq!(result.text_output, "Storage resource \"Nope\": not found\nThe defined Autochanger Storage resources are:\n");
+        assert_eq!(run("export jobid=x", &ctx).error_message, "Expecting jobid=nn command, got: jobid\n");
+        assert_eq!(run("move job=Backup", &ctx).error_message, "Job \"Backup\" is not running.\n");
+    }
+
+    #[test]
+    fn export_and_move_need_slot_selection() {
+        let ctx = context("Storage { Name = Tape; Address = localhost; Auto Changer = yes }");
+        let export = run("export", &ctx);
+        assert_eq!(export.text_output, "Automatically selected Storage: Tape\n");
+        assert_eq!(export.error_message, "Cannot perform an export operation without source slot selection\n");
+        let moved = run("move srcslots=1", &ctx);
+        assert_eq!(moved.error_message, "Cannot perform a move operation without source and/or destination selection\n");
+        let ast = crate::session::parse_cli_command("import");
+        let result = move_operation(&ast, &ctx, "import", |storage, command| {
+            assert_eq!((storage, command), ("Tape", "import"));
+            Ok("ok".into())
+        });
+        assert!(result.success);
     }
 }
 
