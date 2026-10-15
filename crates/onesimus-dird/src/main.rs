@@ -5,6 +5,7 @@
 
 mod accept;
 mod acl;
+mod audit;
 mod catalog_worker;
 mod command_ast;
 mod command_executor;

@@ -436,7 +436,8 @@ pub fn cmd_defaults(ast: &CommandAst, ctx: &ExecContext) -> CommandResult {
         };
         // DotDefaultsCmd checks only the selected resource. Job-linked
         // resources are read directly, without additional ACL lookups.
-        if target.is_some_and(|(kind, name)| !crate::acl::access(ctx, kind, name)) {
+        // Get*ResWithName(argv) audits a denial (ua_dotcmds.cc DotDefaultsCmd).
+        if target.is_some_and(|(kind, name)| !crate::acl::access_audited(ctx, kind, name)) {
             return render(Vec::new());
         }
     }

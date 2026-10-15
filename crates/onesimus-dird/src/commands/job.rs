@@ -332,7 +332,7 @@ pub fn cmd_cancel(ast: &CommandAst, ctx: &ExecContext) -> CommandResult {
             } else {
                 continue;
             };
-            if !crate::acl::access(ctx, crate::acl::Kind::Job, &job.name) {
+            if !crate::acl::access_audited(ctx, crate::acl::Kind::Job, &job.name) {
                 errors.push_str("Unauthorized command from this console.\n");
                 return result(text, errors);
             }

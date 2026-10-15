@@ -344,11 +344,13 @@ pub fn find_command<'a>(registry: &'a [CommandDef], name: &str) -> Option<&'a Co
 
 /// Resolve a command the console may execute (Do_a_command): unknown and
 /// ACL-denied commands are both rejected as "is an invalid command".
-fn resolve_permitted<'a>(registry: &'a [CommandDef], ast: &CommandAst, ctx: &ExecContext) -> Option<(&'a str, &'a CommandDef)> {
+/// `audit`: a denial is audited (AclAccessOk(Command_ACL, key, true)).
+fn resolve_permitted<'a>(registry: &'a [CommandDef], ast: &CommandAst, ctx: &ExecContext, audit: bool) -> Option<(&'a str, &'a CommandDef)> {
     let name = resolve_command_name(registry, &ast.command_name)?;
     let command = find_command(registry, name)?;
     let acl_name=if crate::ua_commands_table::UA_COMMANDS.iter().any(|entry|entry.0==name) {name} else {command.name};
-    if !matches!(acl_name, "exit" | "quit" | "whoami") && !crate::acl::access(ctx, crate::acl::Kind::Command, acl_name) {
+    let access = if audit { crate::acl::access_audited } else { crate::acl::access };
+    if !matches!(acl_name, "exit" | "quit" | "whoami") && !access(ctx, crate::acl::Kind::Command, acl_name) {
         return None;
     }
     Some((name, command))
@@ -357,12 +359,12 @@ fn resolve_permitted<'a>(registry: &'a [CommandDef], ast: &CommandAst, ctx: &Exe
 /// True when Do_a_command finds no permitted command; it then sends neither
 /// CMD_BEGIN nor CMD_OK/CMD_FAILED in API mode.
 pub fn is_invalid_command(registry: &[CommandDef], ast: &CommandAst, ctx: &ExecContext) -> bool {
-    resolve_permitted(registry, ast, ctx).is_none()
+    resolve_permitted(registry, ast, ctx, false).is_none()
 }
 
 /// Preserve the resolved alias (e.g. llist) for handlers with alias-specific output.
 pub fn dispatch_registry(registry: &[CommandDef], ast: &CommandAst, ctx: &ExecContext) -> CommandResult {
-    let Some((name, command)) = resolve_permitted(registry, ast, ctx) else {
+    let Some((name, command)) = resolve_permitted(registry, ast, ctx, true) else {
         // ua_cmds.cc Do_a_command(): ErrorMsg("%s: is an invalid command.\n", argk[0])
         return CommandResult::error(format!("{}: is an invalid command.\n", ast.command_name));
     };

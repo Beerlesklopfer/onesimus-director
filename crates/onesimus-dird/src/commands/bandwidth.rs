@@ -90,7 +90,7 @@ fn setbandwidth_with(
         Target::Client(client) => (crate::acl::Kind::Client, client.name.as_str(), "Client"),
         Target::Storage(storage) => (crate::acl::Kind::Storage, storage.name.as_str(), "Storage"),
     };
-    if !crate::acl::access(ctx, kind, resource) {
+    if !crate::acl::access_audited(ctx, kind, resource) {
         return CommandResult::error(format!("{label} \"{resource}\" not found.\n"));
     }
     let banner = match &target {

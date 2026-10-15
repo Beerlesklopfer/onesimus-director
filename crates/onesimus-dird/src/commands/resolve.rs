@@ -111,7 +111,7 @@ fn resolve_with(
             let Some(name) = argument.value.as_deref() else {
                 return CommandResult::error("Client name missing.\n".into());
             };
-            match config.find_client(name).filter(|c| crate::acl::access(ctx, crate::acl::Kind::Client, &c.name)) {
+            match config.find_client(name).filter(|c| crate::acl::access_audited(ctx, crate::acl::Kind::Client, &c.name)) {
                 Some(found) => client = Some(found.clone()),
                 None => return CommandResult::error(format!("Client \"{name}\" not found.\n")),
             }
@@ -119,7 +119,7 @@ fn resolve_with(
             let Some(name) = argument.value.as_deref() else {
                 return CommandResult::error("Storage name missing.\n".into());
             };
-            match config.find_storage(name).filter(|s| crate::acl::access(ctx, crate::acl::Kind::Storage, &s.name)) {
+            match config.find_storage(name).filter(|s| crate::acl::access_audited(ctx, crate::acl::Kind::Storage, &s.name)) {
                 Some(found) => storage = Some(found.clone()),
                 None => return CommandResult::error(format!("Storage \"{name}\" not found.\n")),
             }

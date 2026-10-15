@@ -148,6 +148,7 @@ pub fn handle_console_session<S: Read + Write>(
             if !finish_command(&mut bnet, &bus_rx, auto_display, gui_mode, api_mode) { break; }
             continue;
         }
+        let typed = ast.command_name.clone();
         if let Some(name) = crate::command_registry::resolve_command_name(
             command_executor::get_registry(), &ast.command_name) {
             ast.command_name = name.to_string();
@@ -172,6 +173,10 @@ pub fn handle_console_session<S: Read + Write>(
         // An unknown or ACL-denied command is answered by an ErrorMsg only,
         // without the CMD_BEGIN ... CMD_OK/CMD_FAILED frame.
         let invalid = command_executor::is_invalid_command(&ast, &ctx);
+        if !invalid {
+            // Do_a_command(): audit before the command runs (ua->cmd is the line as received)
+            crate::audit::command(&ctx, &ast.command_name, &typed, &msg);
+        }
         if api_mode != command_executor::ApiMode::Human && !invalid {
             if bnet.send_signal(BnetSignal::CmdBegin).is_err() { break; }
         }
