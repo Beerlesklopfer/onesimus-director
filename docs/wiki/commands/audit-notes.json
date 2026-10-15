@@ -149,7 +149,7 @@
     "setdebug": {
       "status": "partial",
       "findings": [
-        "Setzt nur das lokale bareos-bnet-Debuglevel. Originalziele client/storage/all sowie trace/timestamp werden hier nicht umgesetzt."
+        "Director/Client/Storage/all werden jetzt gesteuert; all dedupliziert gleiche Endpunkte. trace/timestamp beeinflussen lokale Diagnoseausgabe bzw. Original-FD/SD-Pakete; ältere FD-Versionen erhalten kein timestamp-Feld. Der lokale tracing-Filter wird tatsächlich neu geladen; Verbindungsfehler werden nicht als Erfolg bestätigt. Dialogauswahl ohne Ziel, NDMP, ACL-Abgleich und Live-SHA-256-Parität bleiben offen."
       ]
     },
     "wait": {
@@ -237,7 +237,7 @@
         },
         {
           "file": "crates/onesimus-dird/src/command_registry.rs",
-          "line": 336
+          "line": 344
         },
         {
           "file": "crates/onesimus-dird/src/commands/dot.rs",

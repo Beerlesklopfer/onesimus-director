@@ -19,7 +19,7 @@ move storage=<storage-name> srcslots=<slot-selection> dstslots=<slot-selection>
 
 - Bareos verwendet srcslots/dstslots für Slot-Auswahlen. Der lokale Handler erwartet srcslot/dstslot (Singular), standardmäßig 0; Originalsyntax wird damit nicht korrekt umgesetzt.
 
-**Lokaler Handler:** [crates/onesimus-dird/src/commands/extra.rs:479](../../../crates/onesimus-dird/src/commands/extra.rs).
+**Lokaler Handler:** [crates/onesimus-dird/src/commands/extra.rs:470](../../../crates/onesimus-dird/src/commands/extra.rs).
 
 Die folgenden vorhandenen Beispiele und Verhaltensbeschreibungen sind lokale Dokumentation; sie sind kein Beleg für vollständige Bareos-Kompatibilität. Bei Widersprüchen gilt der obige Befund.
 <!-- bareos-reference:end -->

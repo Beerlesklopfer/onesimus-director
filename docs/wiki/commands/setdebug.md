@@ -17,9 +17,9 @@ setdebug level=<nn> trace=0/1 timestamp=0/1 client=<client-name> | dir | storage
 
 **Onesimus-Status:** `partial`. Funktionsparität ist nicht durch einen Live-Test nachgewiesen.
 
-- Setzt nur das lokale bareos-bnet-Debuglevel. Originalziele client/storage/all sowie trace/timestamp werden hier nicht umgesetzt.
+- Director/Client/Storage/all werden jetzt gesteuert; all dedupliziert gleiche Endpunkte. trace/timestamp beeinflussen lokale Diagnoseausgabe bzw. Original-FD/SD-Pakete; ältere FD-Versionen erhalten kein timestamp-Feld. Der lokale tracing-Filter wird tatsächlich neu geladen; Verbindungsfehler werden nicht als Erfolg bestätigt. Dialogauswahl ohne Ziel, NDMP, ACL-Abgleich und Live-SHA-256-Parität bleiben offen.
 
-**Lokaler Handler:** [crates/onesimus-dird/src/commands/extra.rs:215](../../../crates/onesimus-dird/src/commands/extra.rs).
+**Lokaler Handler:** [crates/onesimus-dird/src/commands/debug.rs:20](../../../crates/onesimus-dird/src/commands/debug.rs).
 
 Die folgenden vorhandenen Beispiele und Verhaltensbeschreibungen sind lokale Dokumentation; sie sind kein Beleg für vollständige Bareos-Kompatibilität. Bei Widersprüchen gilt der obige Befund.
 <!-- bareos-reference:end -->

@@ -161,3 +161,69 @@ mod tests {
         assert!(!result.success);
     }
 }
+
+/// Execute a single-response FD control command over TLS-PSK and CRAM-MD5.
+/// The builder receives the negotiated protocol version (53 adds timestamp).
+/// Existing status/backup connection paths are unaffected.
+pub fn fd_command(
+    address: &str, port: u16, password: &str, director_name: &str,
+    command: impl FnOnce(u32) -> String,
+) -> Result<String, String> {
+    use std::net::ToSocketAddrs;
+    let socket = (address, port).to_socket_addrs().map_err(|e| format!("DNS: {e}"))?
+        .next().ok_or("no FD address")?;
+    let stream = TcpStream::connect_timeout(&socket, Duration::from_secs(5))
+        .map_err(|e| format!("connect: {e}"))?;
+    stream.set_read_timeout(Some(Duration::from_secs(15))).map_err(|e| e.to_string())?;
+    stream.set_write_timeout(Some(Duration::from_secs(15))).map_err(|e| e.to_string())?;
+    let stream = tls_psk::psk_connect(stream, &format!("R_DIRECTOR\x1e{director_name}"),
+        &tls_psk::password_to_psk(password)).map_err(|e| format!("TLS-PSK: {e}"))?;
+    let mut bnet = BnetStream::new(stream);
+    bnet.send_str(&make_director_hello(director_name)).map_err(|e| e.to_string())?;
+    let auth = CramMd5Auth::new(password, director_name, 2);
+    if !auth.two_way_authenticate(&mut bnet, false).map_err(|e| e.to_string())?.success {
+        return Err("FD authentication failed".into());
+    }
+    let hello = bnet.recv_str().map_err(|e| format!("FD hello: {e}"))?;
+    let hello = hello.strip_prefix(FD_OK_HELLO).ok_or("invalid FD hello")?;
+    let version = hello.split_whitespace().next().and_then(|v| v.parse().ok()).unwrap_or(0);
+    bnet.send_str(&command(version)).map_err(|e| e.to_string())?;
+    let result = read_control_reply(&mut bnet);
+    let _ = bnet.send_signal(BnetSignal::Terminate);
+    result
+}
+
+fn read_control_reply<S: std::io::Read + std::io::Write>(bnet: &mut BnetStream<S>) -> Result<String, String> {
+    loop {
+        match bnet.recv().map_err(|e| format!("FD response: {e}"))? {
+            BnetMessage::Data(bytes) => return String::from_utf8(bytes).map_err(|e| e.to_string()),
+            BnetMessage::Signal(BnetSignal::Heartbeat) => {
+                bnet.send_signal(BnetSignal::HeartbeatResponse).map_err(|e| e.to_string())?;
+            }
+            BnetMessage::Signal(BnetSignal::Eod | BnetSignal::Terminate) => return Err("FD ended command without a response".into()),
+            BnetMessage::Signal(_) => {},
+        }
+    }
+}
+
+#[cfg(test)]
+mod control_reply_tests {
+    use super::*;
+    use std::io::{Cursor, Read, Write};
+    struct Stream { input: Cursor<Vec<u8>>, output: Vec<u8> }
+    impl Read for Stream { fn read(&mut self, b: &mut [u8]) -> std::io::Result<usize> { self.input.read(b) } }
+    impl Write for Stream {
+        fn write(&mut self, b: &[u8]) -> std::io::Result<usize> { self.output.extend_from_slice(b); Ok(b.len()) }
+        fn flush(&mut self) -> std::io::Result<()> { Ok(()) }
+    }
+    #[test]
+    fn control_reply_preserves_wire_bytes_and_rejects_premature_end() {
+        let response = b"2000 OK setdebug\r\n";
+        let mut bytes = (response.len() as i32).to_be_bytes().to_vec();
+        bytes.extend_from_slice(response);
+        let mut bnet = BnetStream::new(Stream { input: Cursor::new(bytes), output: vec![] });
+        assert_eq!(read_control_reply(&mut bnet).unwrap().as_bytes(), response);
+        let mut bnet = BnetStream::new(Stream { input: Cursor::new((-1i32).to_be_bytes().to_vec()), output: vec![] });
+        assert!(read_control_reply(&mut bnet).is_err());
+    }
+}

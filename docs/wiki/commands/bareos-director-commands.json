@@ -682,6 +682,10 @@
       "sha256": "88e898b585d221cef727d1140ca26fe0b7737ea465b77e3c22ec958147491c63"
     },
     {
+      "path": "crates/bareos-stored/src/command.rs",
+      "sha256": "3e5b7cdc8b5989d9e3e84828e0290cfcb436af791feeed85e25b8755a7163f03"
+    },
+    {
       "path": "crates/oconsole/Cargo.toml",
       "sha256": "89a70037bf2c515ae5c97faded9552afd425e6e295815a103b563521f2dde1d9"
     },
@@ -703,7 +707,7 @@
     },
     {
       "path": "crates/onesimus-dird/src/command_registry.rs",
-      "sha256": "6318d243ef3d15b605ff6c6134d14005f2ea77150732c3bb5f0f38c30250d454"
+      "sha256": "44d82e9540f19be76f2fab371a82f0292e6770615134946c25f06352fa2c118b"
     },
     {
       "path": "crates/onesimus-dird/src/commands/acl.rs",
@@ -726,12 +730,16 @@
       "sha256": "a2dea6be4c2229f9ff904ab778d27f3318208b00a0059ddc162151bfbb742bf0"
     },
     {
+      "path": "crates/onesimus-dird/src/commands/debug.rs",
+      "sha256": "330b38166dbaf43cbcbb40aa1ee84467755f28e629df098027d4d1def85df774"
+    },
+    {
       "path": "crates/onesimus-dird/src/commands/dot.rs",
       "sha256": "10a681bc3d4b378cedf606b5c99d505aa01d949442243dbcaa091e0e7f862ded"
     },
     {
       "path": "crates/onesimus-dird/src/commands/extra.rs",
-      "sha256": "26d7191596f8c841088a9940f745da94615db5f5762ec9b6eb1bb6bf9ec42ca6"
+      "sha256": "b9a654dfb1cab6fabcf00541d5fd63612eb4b36a8ddde3daef3fa756eda8e958"
     },
     {
       "path": "crates/onesimus-dird/src/commands/job.rs",
@@ -743,7 +751,7 @@
     },
     {
       "path": "crates/onesimus-dird/src/commands/mod.rs",
-      "sha256": "93181d40a9042ef587a46d14832b31b8aa71cda318469ae9450b31909992c6bd"
+      "sha256": "8e76cc686e911c49450119c1e2bd6ea9632867c16c6a9b1621d9a135fe3cf087"
     },
     {
       "path": "crates/onesimus-dird/src/commands/show.rs",
@@ -762,12 +770,20 @@
       "sha256": "b74371c0e704a9544293f4a963e282124c2c43e9194476a1e8de0e2d21a628e1"
     },
     {
+      "path": "crates/onesimus-dird/src/fd_protocol.rs",
+      "sha256": "84d09c8e376b6be24e5c75db96fcda0e0525fb2d628d4013955abfd712c30aae"
+    },
+    {
       "path": "crates/onesimus-dird/src/job_worker.rs",
       "sha256": "3aeeae4ed61ecea9ad8a1f150cc3c70a16c600e2d86116fc661b8a0c7afc7eaa"
     },
     {
+      "path": "crates/onesimus-dird/src/logging.rs",
+      "sha256": "cd3e141a6a699cc982158c346ba75a1d2c19f84ca2d7250f72a9c1e118ff553e"
+    },
+    {
       "path": "crates/onesimus-dird/src/main.rs",
-      "sha256": "779306b0629bbc33638b49abc8582c349afa4be8b54bb0ea80d29f81f8131dd0"
+      "sha256": "10e6ed0a6fa6760c4548bf769a824b54cd55077f65b3621c6d7c541b8c11b84e"
     },
     {
       "path": "crates/onesimus-dird/src/scheduler.rs",
@@ -834,7 +850,7 @@
         },
         {
           "file": "crates/onesimus-dird/src/command_registry.rs",
-          "line": 336
+          "line": 344
         },
         {
           "file": "crates/onesimus-dird/src/commands/dot.rs",
@@ -897,7 +913,7 @@
         "handler": "commands::dot::cmd_dot_noop",
         "registry": {
           "file": "crates/onesimus-dird/src/command_registry.rs",
-          "line": 253
+          "line": 261
         },
         "implementation": {
           "file": "crates/onesimus-dird/src/commands/dot.rs",
@@ -935,7 +951,7 @@
         "handler": "commands::dot::cmd_dot_actiononpurge",
         "registry": {
           "file": "crates/onesimus-dird/src/command_registry.rs",
-          "line": 280
+          "line": 288
         },
         "implementation": {
           "file": "crates/onesimus-dird/src/commands/dot.rs",
@@ -975,7 +991,7 @@
         "handler": "commands::dot::cmd_dot_api",
         "registry": {
           "file": "crates/onesimus-dird/src/command_registry.rs",
-          "line": 283
+          "line": 291
         },
         "implementation": {
           "file": "crates/onesimus-dird/src/commands/dot.rs",
@@ -1024,7 +1040,7 @@
         "handler": "commands::dot::cmd_dot_authorized",
         "registry": {
           "file": "crates/onesimus-dird/src/command_registry.rs",
-          "line": 276
+          "line": 284
         },
         "implementation": {
           "file": "crates/onesimus-dird/src/commands/dot.rs",
@@ -1066,7 +1082,7 @@
         "handler": "commands::dot::cmd_dot_catalogs",
         "registry": {
           "file": "crates/onesimus-dird/src/command_registry.rs",
-          "line": 262
+          "line": 270
         },
         "implementation": {
           "file": "crates/onesimus-dird/src/commands/dot.rs",
@@ -1104,7 +1120,7 @@
         "handler": "commands::dot::cmd_dot_clients",
         "registry": {
           "file": "crates/onesimus-dird/src/command_registry.rs",
-          "line": 256
+          "line": 264
         },
         "implementation": {
           "file": "crates/onesimus-dird/src/commands/dot.rs",
@@ -1142,7 +1158,7 @@
         "handler": "commands::dot::cmd_dot_consoles",
         "registry": {
           "file": "crates/onesimus-dird/src/command_registry.rs",
-          "line": 263
+          "line": 271
         },
         "implementation": {
           "file": "crates/onesimus-dird/src/commands/dot.rs",
@@ -1180,7 +1196,7 @@
         "handler": "commands::dot::cmd_dot_users",
         "registry": {
           "file": "crates/onesimus-dird/src/command_registry.rs",
-          "line": 271
+          "line": 279
         },
         "implementation": {
           "file": "crates/onesimus-dird/src/commands/dot.rs",
@@ -1225,7 +1241,7 @@
         "handler": "commands::dot::cmd_dot_defaults",
         "registry": {
           "file": "crates/onesimus-dird/src/command_registry.rs",
-          "line": 274
+          "line": 282
         },
         "implementation": {
           "file": "crates/onesimus-dird/src/commands/dot.rs",
@@ -1267,7 +1283,7 @@
         "handler": "commands::dot::cmd_dot_filesets",
         "registry": {
           "file": "crates/onesimus-dird/src/command_registry.rs",
-          "line": 260
+          "line": 268
         },
         "implementation": {
           "file": "crates/onesimus-dird/src/commands/dot.rs",
@@ -1307,7 +1323,7 @@
         "handler": "commands::basic::cmd_dot_help",
         "registry": {
           "file": "crates/onesimus-dird/src/command_registry.rs",
-          "line": 250
+          "line": 258
         },
         "implementation": {
           "file": "crates/onesimus-dird/src/commands/basic.rs",
@@ -1345,7 +1361,7 @@
         "handler": "commands::dot::cmd_dot_jobdefs",
         "registry": {
           "file": "crates/onesimus-dird/src/command_registry.rs",
-          "line": 264
+          "line": 272
         },
         "implementation": {
           "file": "crates/onesimus-dird/src/commands/dot.rs",
@@ -1385,7 +1401,7 @@
         "handler": "commands::dot::cmd_dot_jobs",
         "registry": {
           "file": "crates/onesimus-dird/src/command_registry.rs",
-          "line": 257
+          "line": 265
         },
         "implementation": {
           "file": "crates/onesimus-dird/src/commands/dot.rs",
@@ -1423,7 +1439,7 @@
         "handler": "commands::dot::cmd_dot_jobstatus",
         "registry": {
           "file": "crates/onesimus-dird/src/command_registry.rs",
-          "line": 275
+          "line": 283
         },
         "implementation": {
           "file": "crates/onesimus-dird/src/commands/dot.rs",
@@ -1461,7 +1477,7 @@
         "handler": "commands::dot::cmd_dot_levels",
         "registry": {
           "file": "crates/onesimus-dird/src/command_registry.rs",
-          "line": 277
+          "line": 285
         },
         "implementation": {
           "file": "crates/onesimus-dird/src/commands/dot.rs",
@@ -1499,7 +1515,7 @@
         "handler": "commands::dot::cmd_dot_locations",
         "registry": {
           "file": "crates/onesimus-dird/src/command_registry.rs",
-          "line": 266
+          "line": 274
         },
         "implementation": {
           "file": "crates/onesimus-dird/src/commands/dot.rs",
@@ -1537,7 +1553,7 @@
         "handler": "commands::dot::cmd_dot_messages",
         "registry": {
           "file": "crates/onesimus-dird/src/command_registry.rs",
-          "line": 269
+          "line": 277
         },
         "implementation": {
           "file": "crates/onesimus-dird/src/commands/dot.rs",
@@ -1577,7 +1593,7 @@
         "handler": "commands::dot::cmd_dot_media",
         "registry": {
           "file": "crates/onesimus-dird/src/command_registry.rs",
-          "line": 267
+          "line": 275
         },
         "implementation": {
           "file": "crates/onesimus-dird/src/commands/dot.rs",
@@ -1615,7 +1631,7 @@
         "handler": "commands::dot::cmd_dot_mediatypes",
         "registry": {
           "file": "crates/onesimus-dird/src/command_registry.rs",
-          "line": 268
+          "line": 276
         },
         "implementation": {
           "file": "crates/onesimus-dird/src/commands/dot.rs",
@@ -1653,7 +1669,7 @@
         "handler": "commands::dot::cmd_dot_msgs",
         "registry": {
           "file": "crates/onesimus-dird/src/command_registry.rs",
-          "line": 270
+          "line": 278
         },
         "implementation": {
           "file": "crates/onesimus-dird/src/commands/dot.rs",
@@ -1693,7 +1709,7 @@
         "handler": "commands::dot::cmd_dot_pools",
         "registry": {
           "file": "crates/onesimus-dird/src/command_registry.rs",
-          "line": 258
+          "line": 266
         },
         "implementation": {
           "file": "crates/onesimus-dird/src/commands/dot.rs",
@@ -1731,7 +1747,7 @@
         "handler": "commands::dot::cmd_dot_profiles",
         "registry": {
           "file": "crates/onesimus-dird/src/command_registry.rs",
-          "line": 265
+          "line": 273
         },
         "implementation": {
           "file": "crates/onesimus-dird/src/commands/dot.rs",
@@ -1769,7 +1785,7 @@
         "handler": "commands::basic::cmd_quit",
         "registry": {
           "file": "crates/onesimus-dird/src/command_registry.rs",
-          "line": 251
+          "line": 259
         },
         "implementation": {
           "file": "crates/onesimus-dird/src/commands/basic.rs",
@@ -1809,7 +1825,7 @@
         "handler": "commands::sql::cmd_dot_sql",
         "registry": {
           "file": "crates/onesimus-dird/src/command_registry.rs",
-          "line": 287
+          "line": 295
         },
         "implementation": {
           "file": "crates/onesimus-dird/src/commands/sql.rs",
@@ -1849,7 +1865,7 @@
         "handler": "commands::dot::cmd_dot_schedule",
         "registry": {
           "file": "crates/onesimus-dird/src/command_registry.rs",
-          "line": 261
+          "line": 269
         },
         "implementation": {
           "file": "crates/onesimus-dird/src/commands/dot.rs",
@@ -1890,7 +1906,7 @@
         "handler": "commands::status::cmd_dot_status",
         "registry": {
           "file": "crates/onesimus-dird/src/command_registry.rs",
-          "line": 252
+          "line": 260
         },
         "implementation": {
           "file": "crates/onesimus-dird/src/commands/status.rs",
@@ -1930,7 +1946,7 @@
         "handler": "commands::dot::cmd_dot_storage",
         "registry": {
           "file": "crates/onesimus-dird/src/command_registry.rs",
-          "line": 259
+          "line": 267
         },
         "implementation": {
           "file": "crates/onesimus-dird/src/commands/dot.rs",
@@ -1968,7 +1984,7 @@
         "handler": "commands::dot::cmd_dot_types",
         "registry": {
           "file": "crates/onesimus-dird/src/command_registry.rs",
-          "line": 278
+          "line": 286
         },
         "implementation": {
           "file": "crates/onesimus-dird/src/commands/dot.rs",
@@ -2006,7 +2022,7 @@
         "handler": "commands::dot::cmd_dot_volstatus",
         "registry": {
           "file": "crates/onesimus-dird/src/command_registry.rs",
-          "line": 279
+          "line": 287
         },
         "implementation": {
           "file": "crates/onesimus-dird/src/commands/dot.rs",
@@ -2050,7 +2066,7 @@
         "handler": "commands::dot::cmd_bvfs_lsdirs",
         "registry": {
           "file": "crates/onesimus-dird/src/command_registry.rs",
-          "line": 303
+          "line": 311
         },
         "implementation": {
           "file": "crates/onesimus-dird/src/commands/dot.rs",
@@ -2099,7 +2115,7 @@
         "handler": "commands::dot::cmd_bvfs_lsfiles",
         "registry": {
           "file": "crates/onesimus-dird/src/command_registry.rs",
-          "line": 304
+          "line": 312
         },
         "implementation": {
           "file": "crates/onesimus-dird/src/commands/dot.rs",
@@ -2144,7 +2160,7 @@
         "handler": "commands::dot::cmd_bvfs_update",
         "registry": {
           "file": "crates/onesimus-dird/src/command_registry.rs",
-          "line": 299
+          "line": 307
         },
         "implementation": {
           "file": "crates/onesimus-dird/src/commands/dot.rs",
@@ -2189,7 +2205,7 @@
         "handler": "commands::dot::cmd_bvfs_get_jobids",
         "registry": {
           "file": "crates/onesimus-dird/src/command_registry.rs",
-          "line": 302
+          "line": 310
         },
         "implementation": {
           "file": "crates/onesimus-dird/src/commands/dot.rs",
@@ -2236,7 +2252,7 @@
         "handler": "commands::dot::cmd_bvfs_versions",
         "registry": {
           "file": "crates/onesimus-dird/src/command_registry.rs",
-          "line": 305
+          "line": 313
         },
         "implementation": {
           "file": "crates/onesimus-dird/src/commands/dot.rs",
@@ -2286,7 +2302,7 @@
         "handler": "commands::dot::cmd_bvfs_restore",
         "registry": {
           "file": "crates/onesimus-dird/src/command_registry.rs",
-          "line": 306
+          "line": 314
         },
         "implementation": {
           "file": "crates/onesimus-dird/src/commands/dot.rs",
@@ -2330,7 +2346,7 @@
         "handler": "commands::dot::cmd_bvfs_cleanup",
         "registry": {
           "file": "crates/onesimus-dird/src/command_registry.rs",
-          "line": 300
+          "line": 308
         },
         "implementation": {
           "file": "crates/onesimus-dird/src/commands/dot.rs",
@@ -2370,7 +2386,7 @@
         "handler": "commands::dot::cmd_bvfs_clear_cache",
         "registry": {
           "file": "crates/onesimus-dird/src/command_registry.rs",
-          "line": 301
+          "line": 309
         },
         "implementation": {
           "file": "crates/onesimus-dird/src/commands/dot.rs",
@@ -2416,11 +2432,11 @@
         "handler": "commands::extra::cmd_add",
         "registry": {
           "file": "crates/onesimus-dird/src/command_registry.rs",
-          "line": 242
+          "line": 250
         },
         "implementation": {
           "file": "crates/onesimus-dird/src/commands/extra.rs",
-          "line": 430
+          "line": 421
         },
         "declared_arguments": [
           "pool"
@@ -2647,11 +2663,11 @@
         "handler": "commands::extra::cmd_create",
         "registry": {
           "file": "crates/onesimus-dird/src/command_registry.rs",
-          "line": 241
+          "line": 249
         },
         "implementation": {
           "file": "crates/onesimus-dird/src/commands/extra.rs",
-          "line": 399
+          "line": 390
         },
         "declared_arguments": [
           "pool"
@@ -2696,7 +2712,7 @@
         },
         "implementation": {
           "file": "crates/onesimus-dird/src/commands/extra.rs",
-          "line": 367
+          "line": 358
         },
         "declared_arguments": [
           "volume",
@@ -2921,11 +2937,11 @@
         "handler": "commands::extra::cmd_export",
         "registry": {
           "file": "crates/onesimus-dird/src/command_registry.rs",
-          "line": 244
+          "line": 252
         },
         "implementation": {
           "file": "crates/onesimus-dird/src/commands/extra.rs",
-          "line": 467
+          "line": 458
         },
         "declared_arguments": [
           "storage"
@@ -3048,11 +3064,11 @@
         "handler": "commands::extra::cmd_import",
         "registry": {
           "file": "crates/onesimus-dird/src/command_registry.rs",
-          "line": 243
+          "line": 251
         },
         "implementation": {
           "file": "crates/onesimus-dird/src/commands/extra.rs",
-          "line": 455
+          "line": 446
         },
         "declared_arguments": [
           "storage"
@@ -3399,11 +3415,11 @@
         "handler": "commands::extra::cmd_move",
         "registry": {
           "file": "crates/onesimus-dird/src/command_registry.rs",
-          "line": 245
+          "line": 253
         },
         "implementation": {
           "file": "crates/onesimus-dird/src/commands/extra.rs",
-          "line": 479
+          "line": 470
         },
         "declared_arguments": [],
         "status": "semantic_mismatch",
@@ -3688,11 +3704,11 @@
         "handler": "commands::extra::cmd_relabel",
         "registry": {
           "file": "crates/onesimus-dird/src/command_registry.rs",
-          "line": 240
+          "line": 248
         },
         "implementation": {
           "file": "crates/onesimus-dird/src/commands/extra.rs",
-          "line": 344
+          "line": 335
         },
         "declared_arguments": [
           "storage",
@@ -3816,11 +3832,11 @@
         "handler": "commands::extra::cmd_rerun",
         "registry": {
           "file": "crates/onesimus-dird/src/command_registry.rs",
-          "line": 239
+          "line": 247
         },
         "implementation": {
           "file": "crates/onesimus-dird/src/commands/extra.rs",
-          "line": 310
+          "line": 301
         },
         "declared_arguments": [
           "jobid"
@@ -3861,11 +3877,11 @@
         "handler": "commands::extra::cmd_resolve",
         "registry": {
           "file": "crates/onesimus-dird/src/command_registry.rs",
-          "line": 238
+          "line": 246
         },
         "implementation": {
           "file": "crates/onesimus-dird/src/commands/extra.rs",
-          "line": 284
+          "line": 275
         },
         "declared_arguments": [
           "client"
@@ -4035,11 +4051,11 @@
         "handler": "commands::extra::cmd_setbandwidth",
         "registry": {
           "file": "crates/onesimus-dird/src/command_registry.rs",
-          "line": 235
+          "line": 243
         },
         "implementation": {
           "file": "crates/onesimus-dird/src/commands/extra.rs",
-          "line": 224
+          "line": 215
         },
         "declared_arguments": [
           "client",
@@ -4081,21 +4097,28 @@
       ],
       "onesimus": {
         "canonical_name": "setdebug",
-        "handler": "commands::extra::cmd_setdebug",
+        "handler": "commands::debug::cmd_setdebug",
         "registry": {
           "file": "crates/onesimus-dird/src/command_registry.rs",
           "line": 234
         },
         "implementation": {
-          "file": "crates/onesimus-dird/src/commands/extra.rs",
-          "line": 215
+          "file": "crates/onesimus-dird/src/commands/debug.rs",
+          "line": 20
         },
         "declared_arguments": [
-          "level"
+          "level",
+          "trace",
+          "timestamp",
+          "hangup",
+          "client",
+          "storage",
+          "dir",
+          "all"
         ],
         "status": "partial",
         "findings": [
-          "Setzt nur das lokale bareos-bnet-Debuglevel. Originalziele client/storage/all sowie trace/timestamp werden hier nicht umgesetzt."
+          "Director/Client/Storage/all werden jetzt gesteuert; all dedupliziert gleiche Endpunkte. trace/timestamp beeinflussen lokale Diagnoseausgabe bzw. Original-FD/SD-Pakete; ältere FD-Versionen erhalten kein timestamp-Feld. Der lokale tracing-Filter wird tatsächlich neu geladen; Verbindungsfehler werden nicht als Erfolg bestätigt. Dialogauswahl ohne Ziel, NDMP, ACL-Abgleich und Live-SHA-256-Parität bleiben offen."
         ],
         "functional_parity_verified": false
       },
@@ -4130,11 +4153,11 @@
         "handler": "commands::extra::cmd_setdevice",
         "registry": {
           "file": "crates/onesimus-dird/src/command_registry.rs",
-          "line": 237
+          "line": 245
         },
         "implementation": {
           "file": "crates/onesimus-dird/src/commands/extra.rs",
-          "line": 234
+          "line": 225
         },
         "declared_arguments": [
           "storage"
@@ -4172,11 +4195,11 @@
         "handler": "commands::extra::cmd_setip",
         "registry": {
           "file": "crates/onesimus-dird/src/command_registry.rs",
-          "line": 236
+          "line": 244
         },
         "implementation": {
           "file": "crates/onesimus-dird/src/commands/extra.rs",
-          "line": 230
+          "line": 221
         },
         "declared_arguments": [
           "client"
@@ -5558,7 +5581,7 @@
       "handler": "commands::acl::cmd_dot_acl",
       "registry": {
         "file": "crates/onesimus-dird/src/command_registry.rs",
-        "line": 293
+        "line": 301
       },
       "implementation": {
         "file": "crates/onesimus-dird/src/commands/acl.rs",
@@ -5572,7 +5595,7 @@
       "handler": "commands::catalog::cmd_dot_catalog",
       "registry": {
         "file": "crates/onesimus-dird/src/command_registry.rs",
-        "line": 296
+        "line": 304
       },
       "implementation": {
         "file": "crates/onesimus-dird/src/commands/catalog.rs",
@@ -5586,7 +5609,7 @@
       "handler": "commands::dot::cmd_dot_grpc",
       "registry": {
         "file": "crates/onesimus-dird/src/command_registry.rs",
-        "line": 284
+        "line": 292
       },
       "implementation": {
         "file": "crates/onesimus-dird/src/commands/dot.rs",
@@ -5600,7 +5623,7 @@
       "handler": "commands::acl::cmd_dot_acl",
       "registry": {
         "file": "crates/onesimus-dird/src/command_registry.rs",
-        "line": 293
+        "line": 301
       },
       "implementation": {
         "file": "crates/onesimus-dird/src/commands/acl.rs",
@@ -5614,7 +5637,7 @@
       "handler": "commands::dot::cmd_dot_sqlcount",
       "registry": {
         "file": "crates/onesimus-dird/src/command_registry.rs",
-        "line": 290
+        "line": 298
       },
       "implementation": {
         "file": "crates/onesimus-dird/src/commands/dot.rs",
@@ -5628,7 +5651,7 @@
       "handler": "commands::dot::cmd_dot_sqlschema",
       "registry": {
         "file": "crates/onesimus-dird/src/command_registry.rs",
-        "line": 289
+        "line": 297
       },
       "implementation": {
         "file": "crates/onesimus-dird/src/commands/dot.rs",
@@ -5642,7 +5665,7 @@
       "handler": "commands::dot::cmd_dot_sqltables",
       "registry": {
         "file": "crates/onesimus-dird/src/command_registry.rs",
-        "line": 288
+        "line": 296
       },
       "implementation": {
         "file": "crates/onesimus-dird/src/commands/dot.rs",
@@ -5656,7 +5679,7 @@
       "handler": "commands::dot::cmd_dot_storage",
       "registry": {
         "file": "crates/onesimus-dird/src/command_registry.rs",
-        "line": 259
+        "line": 267
       },
       "implementation": {
         "file": "crates/onesimus-dird/src/commands/dot.rs",

@@ -39,4 +39,8 @@ onesimus (25.1.2+onesimus.0.2.0-2) UNRELEASED; urgency=medium
     protocol diagnostics; trace off closes the sink, failures preserve the
     previous destination, and files are private and reject symlinks.
 
+  * setdebug: implement Director/FD/SD/all targets, trace and timestamp flags,
+    daemon endpoint deduplication, FD protocol-version handling and live log
+    filter reload; control replies no longer wait for an absent EOD.
+
  -- Joerg Bernau <Joerg.Bernau@onesimus.io>  Thu, 15 Oct 2026 14:00:00 +0200

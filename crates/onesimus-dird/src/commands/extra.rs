@@ -164,7 +164,7 @@ pub fn cmd_trace(ast: &CommandAst, ctx: &ExecContext) -> CommandResult {
     }
 }
 
-fn trace_path(ctx: &ExecContext) -> std::path::PathBuf {
+pub(crate) fn trace_path(ctx: &ExecContext) -> std::path::PathBuf {
     let directory = ctx.config.as_ref().and_then(|c| c.read().ok())
         .map(|c| c.director.working_directory.clone()).unwrap_or_else(|| "/var/lib/bareos".into());
     std::path::Path::new(&directory).join("bareos-dir.trace")
@@ -210,15 +210,6 @@ pub fn cmd_whoami(_ast: &CommandAst, ctx: &ExecContext) -> CommandResult {
 
 pub fn cmd_use(_ast: &CommandAst, _ctx: &ExecContext) -> CommandResult {
     CommandResult::ok("Using default catalog\n".to_string())
-}
-
-pub fn cmd_setdebug(ast: &CommandAst, _ctx: &ExecContext) -> CommandResult {
-    let level: u32 = ast.arguments.iter().find(|a| a.key == "level")
-        .and_then(|a| a.value.as_deref())
-        .and_then(|v| v.parse().ok())
-        .unwrap_or(0);
-    bareos_bnet::debug::set_debug_level(level);
-    CommandResult::ok(format!("Debug level set to {level}\n"))
 }
 
 pub fn cmd_setbandwidth(ast: &CommandAst, _ctx: &ExecContext) -> CommandResult {

@@ -13,3 +13,5 @@ pub mod catalog;
 pub mod extra;
 pub mod show;
 pub mod show_items;
+
+pub mod debug;

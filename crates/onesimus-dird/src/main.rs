@@ -21,6 +21,7 @@ mod job_worker;
 mod json_output;
 mod kill;
 mod localtime;
+mod logging;
 mod mdns;
 mod privileges;
 mod message_bus;
@@ -186,13 +187,13 @@ fn main() {
     } else {
         "info,hyper=warn,h2=warn,tower=warn".to_string()
     };
-    tracing_subscriber::fmt()
-        .with_ansi(false)
-        .with_writer(|| bareos_bnet::debug::DebugWriter)
-        .with_env_filter(
-            EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| EnvFilter::new(&filter)),
-        )
+    use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
+    let (filter_layer, filter_handle) = tracing_subscriber::reload::Layer::new(
+        EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new(&filter)));
+    logging::install(filter_handle);
+    tracing_subscriber::registry().with(filter_layer)
+        .with(tracing_subscriber::fmt::layer().with_ansi(false)
+            .with_writer(|| bareos_bnet::debug::DebugWriter))
         .init();
 
     // Install rustls CryptoProvider for TLS support

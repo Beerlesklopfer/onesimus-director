@@ -1,0 +1,173 @@
+//! setdebug: Director, client and storage targets using Bareos control packets.
+use bareos_config::resources::{ClientResource, StorageResource};
+use crate::{command_ast::CommandAst, command_executor::ExecContext, command_queue::CommandResult};
+
+#[derive(Clone, Copy)]
+struct Options { level: u32, trace: i32, hangup: i32, timestamp: i32 }
+
+impl Options {
+    fn client_command(self, version: u32) -> String {
+        let mut command = format!("setdebug={} trace={} hangup={}", self.level, self.trace, self.hangup);
+        if version >= 53 { command.push_str(&format!(" timestamp={}", self.timestamp)); }
+        command.push('\n');
+        command
+    }
+    fn storage_command(self) -> String {
+        format!("setdebug={} trace={} timestamp={}\n", self.level, self.trace, self.timestamp)
+    }
+}
+
+pub fn cmd_setdebug(ast: &CommandAst, ctx: &ExecContext) -> CommandResult {
+    setdebug_with(ast, ctx,
+        |client, director, options| crate::fd_protocol::fd_command(&client.address, client.port,
+            &client.password, director, |version| options.client_command(version)),
+        |storage, director, options| bareos_stored::command::sd_control_command(&storage.address,
+            storage.port, &storage.password, director, &options.storage_command()))
+}
+
+fn setdebug_with(
+    ast: &CommandAst, ctx: &ExecContext,
+    mut fd: impl FnMut(&ClientResource, &str, Options) -> Result<String, String>,
+    mut sd: impl FnMut(&StorageResource, &str, Options) -> Result<String, String>,
+) -> CommandResult {
+    let value = |key: &str| ast.arguments.iter().find(|a| a.key.eq_ignore_ascii_case(key)).and_then(|a| a.value.as_deref());
+    let level = match value("level").and_then(|s| s.parse::<u32>().ok()).filter(|level| *level <= i32::MAX as u32) {
+        Some(level) => level,
+        None => return CommandResult::error("setdebug: level=<nonnegative integer> is required\n".into()),
+    };
+    let flag = |key: &str| -> Result<i32, String> {
+        match value(key) {
+            None => Ok(-1),
+            Some(s) => s.parse::<i32>().map(|n| n.signum()).map_err(|_| format!("setdebug: invalid {key}\n")),
+        }
+    };
+    let options = match (flag("trace"), flag("hangup"), flag("timestamp")) {
+        (Ok(trace), Ok(hangup), Ok(timestamp)) => Options { level, trace, hangup, timestamp },
+        (Err(error), _, _) | (_, Err(error), _) | (_, _, Err(error)) => return CommandResult::error(error),
+    };
+    let targets: Vec<_> = ast.arguments.iter().filter(|a| matches!(a.key.to_ascii_lowercase().as_str(),
+        "dir" | "director" | "client" | "fd" | "storage" | "store" | "sd" | "all")).collect();
+    for argument in &ast.arguments {
+        if !matches!(argument.key.to_ascii_lowercase().as_str(), "level" | "trace" | "hangup" | "timestamp"
+            | "dir" | "director" | "client" | "fd" | "storage" | "store" | "sd" | "all") {
+            return CommandResult::error(format!("setdebug: unknown argument {}\n", argument.key));
+        }
+    }
+    if targets.len() != 1 {
+        return CommandResult::error("setdebug: specify exactly one of dir, client=<name>, storage=<name>, all\n".into());
+    }
+    let target = targets[0];
+    let kind = target.key.to_ascii_lowercase();
+    let all = kind == "all";
+    if (all || matches!(kind.as_str(), "dir" | "director")) && target.value.is_some() {
+        return CommandResult::error("setdebug: dir/all does not take a value\n".into());
+    }
+    let mut clients = vec![];
+    let mut storages = vec![];
+    let director;
+    if all || !matches!(kind.as_str(), "dir" | "director") {
+        let Some(config) = ctx.config.as_ref().and_then(|c| c.read().ok()) else {
+            return CommandResult::error("No config\n".into());
+        };
+        director = config.director.name.clone();
+        if all {
+            let mut seen = std::collections::HashSet::new();
+            clients.extend(config.clients.iter().filter(|c| seen.insert((c.address.clone(), c.port))).cloned());
+            seen.clear();
+            storages.extend(config.storages.iter().filter(|s| seen.insert((s.address.clone(), s.port))).cloned());
+        } else {
+            let Some(name) = target.value.as_deref().filter(|n| !n.is_empty()) else {
+                return CommandResult::error("setdebug: target resource name missing\n".into());
+            };
+            match kind.as_str() {
+                "client" | "fd" => match config.find_client(name) {
+                    Some(client) => clients.push(client.clone()),
+                    None => return CommandResult::error(format!("Client \"{name}\" not found.\n")),
+                },
+                _ => match config.find_storage(name) {
+                    Some(storage) => storages.push(storage.clone()),
+                    None => return CommandResult::error(format!("Storage \"{name}\" not found.\n")),
+                },
+            }
+        }
+    } else { director = String::new(); }
+
+    let mut output = String::new();
+    if all || matches!(kind.as_str(), "dir" | "director") {
+        let path = super::extra::trace_path(ctx);
+        if options.trace >= 0 {
+            if let Err(error) = bareos_bnet::debug::set_trace(&path, options.trace > 0) {
+                return CommandResult::error(format!("setdebug: {}: {error}\n", path.display()));
+            }
+        }
+        if let Err(error) = crate::logging::set_level(level) { return CommandResult::error(format!("setdebug: {error}\n")); }
+        if options.timestamp >= 0 { bareos_bnet::debug::set_debug_timestamps(options.timestamp > 0); }
+        output.push_str(&format!("level={} trace={} hangup=0 timestamp={} tracefilename={}\n", level,
+            bareos_bnet::debug::trace_enabled() as u8, bareos_bnet::debug::debug_timestamps() as u8, path.display()));
+    }
+    let mut errors = String::new();
+    for storage in storages {
+        output.push_str(&format!("Connecting to Storage daemon {} at {}:{}\n", storage.name, storage.address, storage.port));
+        match sd(&storage, &director, options) {
+            Ok(reply) => output.push_str(&reply),
+            Err(error) => errors.push_str(&format!("Failed to connect to Storage daemon.\n{error}\n")),
+        }
+    }
+    for client in clients {
+        output.push_str(&format!("Connecting to Client {} at {}:{}\n", client.name, client.address, client.port));
+        match fd(&client, &director, options) {
+            Ok(reply) => output.push_str(&reply),
+            Err(error) => errors.push_str(&format!("Failed to connect to Client.\n{error}\n")),
+        }
+    }
+    if errors.is_empty() { CommandResult::ok(output) }
+    else { let mut result = CommandResult::error(errors); result.text_output = output; result }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::{Arc, RwLock};
+    fn context() -> ExecContext {
+        let config = crate::director_config::DirectorConfig::from_str(
+            "Director { Name = dir }\nClient { Name = fd; Address = localhost }\nClient { Name = duplicate; Address = localhost }\nStorage { Name = sd; Address = localhost }"
+        ).unwrap();
+        ExecContext { session_id: 0, config: Some(Arc::new(RwLock::new(config))),
+            session_mgr: None, catalog: None, api_mode: crate::command_executor::ApiMode::Human,
+            bus_rx: None, job_manager: None }
+    }
+    #[test]
+    fn uses_original_fd_protocol_versions_and_sd_command() {
+        let options = Options { level: 100, trace: 1, hangup: -1, timestamp: 0 };
+        assert_eq!(options.client_command(52), "setdebug=100 trace=1 hangup=-1\n");
+        assert_eq!(options.client_command(53), "setdebug=100 trace=1 hangup=-1 timestamp=0\n");
+        assert_eq!(options.storage_command(), "setdebug=100 trace=1 timestamp=0\n");
+        let result = setdebug_with(&crate::session::parse_cli_command("setdebug client=fd level=100 trace=1 timestamp=0"), &context(),
+            |client, director, actual| { assert_eq!(client.name, "fd"); assert_eq!(director, "dir");
+                assert_eq!(actual.client_command(53), options.client_command(53)); Ok("2000 OK setdebug\n".into()) },
+            |_, _, _| panic!("must not contact SD"));
+        assert_eq!(result.text_output, "Connecting to Client fd at localhost:9102\n2000 OK setdebug\n");
+    }
+    #[test]
+    fn validates_requests_before_any_remote_effect() {
+        for line in ["setdebug client=fd", "setdebug level=bad dir", "setdebug level=1 trace=bad dir",
+            "setdebug level=1 client=missing", "setdebug level=1 client", "setdebug level=1 dir all"] {
+            let result = setdebug_with(&crate::session::parse_cli_command(line), &context(),
+                |_, _, _| panic!("must not contact FD"), |_, _, _| panic!("must not contact SD"));
+            assert!(!result.success, "{line}");
+        }
+    }
+    #[test]
+    fn all_deduplicates_daemons_and_does_not_hide_remote_errors() {
+        let count = std::cell::Cell::new(0);
+        let original = bareos_bnet::debug::debug_level();
+        let result = setdebug_with(&crate::session::parse_cli_command("setdebug level=1 all"), &context(),
+            |_, _, _| { count.set(count.get() + 1); Err("offline".into()) },
+            |_, _, _| { count.set(count.get() + 1); Ok("3000 OK setdebug\n".into()) });
+        bareos_bnet::debug::set_debug_level(original);
+        assert_eq!(count.get(), 2);
+        assert!(!result.success);
+        assert!(result.error_message.contains("offline"));
+        assert!(result.text_output.contains("3000 OK setdebug\n"));
+    }
+}
