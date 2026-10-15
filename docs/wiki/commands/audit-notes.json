@@ -221,13 +221,19 @@
     "help": {
       "status": "partial",
       "findings": [
-        "ANSI-Farbgebung wurde aus help/.help-Protokollantworten entfernt; Tests prüfen alle Hilfevarianten. Textlayout, vollständige Syntax/ACL-Ausgabe und Live-SHA-256-Parität zum Original bleiben offen."
+        "help/.help verwenden jetzt Originaltabellenreihenfolge, Textlayout, Byte-Wrapping, exakte Themen-/item-Suche und die Originalvarianten all/full/item. API1 .help all enthält nur Hauptbefehlsnamen; oconsole liest deshalb .help-Metadaten für Vervollständigung. Unabhängige Kreuzreviews bestätigen die statischen Abläufe. ACL-Filter/permission und die dynamisch generierte configure-Usage sind weiterhin unvollständig; Live-SHA-256-Parität fehlt."
       ]
     },
     "cancel": {
       "status": "partial",
       "findings": [
         "Im unabhängigen Review wurde ein vorzeitiger Abschluss nach SIGTERM nachgewiesen. Cancel setzt jetzt Canceling und prüft Signalfehler; endgültiger Katalogstatus/Zähler werden erst nach Workerende geschrieben. Vollständige Originalselektion (job/ujobid/Joblisten/Zustandsfilter/Dialog), FD-/SD-Abbruchkoordination, ACL und Live-SHA-256-Parität sind nicht nachgewiesen."
+      ]
+    },
+    ".help": {
+      "status": "partial",
+      "findings": [
+        "help/.help verwenden jetzt Originaltabellenreihenfolge, Textlayout, Byte-Wrapping, exakte Themen-/item-Suche und die Originalvarianten all/full/item. API1 .help all enthält nur Hauptbefehlsnamen; oconsole liest deshalb .help-Metadaten für Vervollständigung. Unabhängige Kreuzreviews bestätigen die statischen Abläufe. ACL-Filter/permission und die dynamisch generierte configure-Usage sind weiterhin unvollständig; Live-SHA-256-Parität fehlt."
       ]
     }
   },

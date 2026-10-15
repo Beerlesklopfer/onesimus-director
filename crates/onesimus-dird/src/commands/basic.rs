@@ -1,8 +1,7 @@
 //! Basic commands: version, time, quit, help, .help
 //!
-//! `.help` is the authoritative command reference — it lists ALL commands
-//! (regular + dot-commands) in a machine-readable, tab-separated format.
-//! `help` lists only regular commands and refers the user to `.help`.
+//! Help text and structured metadata follow the upstream Bareos command table.
+//! Both help variants render protocol output without terminal styling.
 
 use crate::command_ast::CommandAst;
 use crate::command_executor::{ExecContext, ApiMode};
@@ -56,173 +55,226 @@ pub fn cmd_quit(_ast: &CommandAst, _ctx: &ExecContext) -> CommandResult {
     CommandResult::ok("bye\n".to_string())
 }
 
-/// `help [command]` — human-readable help from the command registry (SSOT).
-pub fn cmd_help(ast: &CommandAst, _ctx: &ExecContext) -> CommandResult {
-    let registry = crate::command_executor::get_registry();
-    let topic = ast.arguments.first().map(|a| a.value.as_deref().unwrap_or(a.key.as_str()));
+// Bareos ua_cmds.cc help_cmd / DotHelpCmd use the upstream command table,
+// not the completion registry. ACL filtering is still a Director-wide gap:
+// until session ACLs exist, these objects describe the unrestricted console.
+const HELP_HEADER: &str = "  Command            Description\n  =======            ===========\n";
+const HELP_FOOTER: &str = "\nWhen at a prompt, entering a period (.) cancels the command.\n\n";
 
-    if let Some(cmd) = topic {
-        match crate::command_registry::find_command(registry, cmd) {
-            Some(def) => {
-                let args: String = def.args.iter().map(|a| {
-                    if a.required { format!(" {}=<{}>", a.name, a.name) }
-                    else { format!(" [{}=<{}>]", a.name, a.name) }
-                }).collect();
-                CommandResult::ok(format!(
-                    "{}: {}\n  Usage: {}{}\n  Arguments: {}\n",
-                    def.name, def.description, def.name, args,
-                    if def.args.is_empty() { "none".to_string() } else {
-                        def.args.iter().map(|a| format!("{}({:?})", a.name, a.arg_type)).collect::<Vec<_>>().join(", ")
-                    }
-                ))
-            }
-            None => CommandResult::ok(format!("Unknown command: {cmd}\nUse \".help\" for complete command list.\n")),
-        }
-    } else {
-        let mut output = String::from("  Available commands:\n\n");
-        for def in registry.iter().filter(|d| !d.dot_command) {
-            output.push_str(&format!("  {:<20} {}\n", def.name, def.description));
-        }
-        output.push_str("\n  Use \".help\" for dot-commands. \"help <cmd>\" for details.\n");
-        CommandResult::ok(output)
-    }
+type HelpEntry = (&'static str, &'static str, &'static str);
+
+fn description(entry: &HelpEntry) -> &str {
+    // The generated table represents the upstream .locations NULL pointer as
+    // literal "NULL". PoolMem(NULL) renders an empty string in OutputFormatter.
+    if entry.0 == ".locations" && entry.1 == "NULL" { "" } else { entry.1 }
 }
 
-/// `.help [all | item=<cmd>]` — from registry, format depends on API mode.
-pub fn cmd_dot_help(ast: &CommandAst, ctx: &ExecContext) -> CommandResult {
-    if ctx.api_mode == ApiMode::Json {
-        return dot_help_json(ast);
-    }
-    let registry = crate::command_executor::get_registry();
-    let args: Vec<&str> = ast.arguments.iter()
-        .map(|a| a.value.as_deref().unwrap_or(a.key.as_str()))
-        .collect();
+fn help_object(entry: &HelpEntry, arguments: String) -> serde_json::Value {
+    serde_json::json!({
+        "command": entry.0, "description": description(entry),
+        "arguments": arguments, "permission": true,
+    })
+}
 
-    let all = args.contains(&"all");
-    let item = args.iter().find(|a| a.starts_with("item="))
-        .or_else(|| args.iter().find(|a| **a != "all" && !a.is_empty()));
-
-    if let Some(item) = item {
-        let cmd = item.strip_prefix("item=").unwrap_or(item);
-        return match crate::command_registry::find_command(registry, cmd) {
-            Some(def) => {
-                let arg_str: String = def.args.iter()
-                    .map(|a| format!("{}=<{:?}>", a.name, a.arg_type))
-                    .collect::<Vec<_>>().join(" ");
-                let usage = format!("{} {}", def.name, arg_str);
-                match ctx.api_mode {
-                    ApiMode::Json => CommandResult::ok(format!(
-                        "{{\"command\":\"{}\",\"description\":\"{}\",\"usage\":\"{}\",\"arguments\":\"{}\"}}\n",
-                        def.name, def.description, usage, arg_str
-                    )),
-                    ApiMode::Api => CommandResult::ok(format!(
-                        "{}\t{}\t{}\t{}\n", def.name, def.description, usage, arg_str
-                    )),
-                    ApiMode::Human => CommandResult::ok(format!(
-                        "  Command:     {}\n  Description: {}\n  Usage:       {}\n  Arguments:   {}\n",
-                        def.name, def.description, usage,
-                        if def.args.is_empty() { "none".to_string() } else { arg_str }
-                    )),
+/// Port of OutputFormatter::rewrap. Width counts bytes, as in the C++ loop;
+/// brackets prevent wrapping within optional arguments and placeholders.
+fn rewrap_help(value: &str, width: usize, human: bool) -> String {
+    let mut output = Vec::with_capacity(value.len() * 2);
+    let mut open: i32 = 0;
+    let mut chars_in_line = 0;
+    let bytes = value.as_bytes();
+    for (i, &byte) in bytes.iter().enumerate() {
+        chars_in_line += 1;
+        let next = bytes.get(i + 1).copied();
+        match byte {
+            b' ' => {
+                if human && width > 0 && chars_in_line >= width && open <= 0 && next != Some(b'|') {
+                    output.extend_from_slice(b"\n\t");
+                    chars_in_line = 0;
+                } else if chars_in_line > 1 {
+                    output.push(byte);
                 }
             }
-            None => CommandResult::ok(format!("Command '{cmd}' not found.\n")),
-        };
-    }
-
-    let commands: Vec<_> = if all {
-        registry.iter().collect()
-    } else {
-        registry.iter().filter(|d| d.dot_command).collect()
-    };
-
-    let mut output = String::new();
-    match ctx.api_mode {
-        ApiMode::Json => {
-            output.push_str("[\n");
-            for (i, def) in commands.iter().enumerate() {
-                let arg_str: String = def.args.iter()
-                    .map(|a| format!("{}=<{:?}>", a.name, a.arg_type)).collect::<Vec<_>>().join(" ");
-                output.push_str(&format!(
-                    "  {{\"command\":\"{}\",\"description\":\"{}\",\"arguments\":\"{}\"}}",
-                    def.name, def.description, arg_str
-                ));
-                if i + 1 < commands.len() { output.push(','); }
-                output.push('\n');
+            b'|' => {
+                output.push(byte);
+                if human && width > 0 && open <= 0 {
+                    output.extend_from_slice(b"\n\t");
+                    chars_in_line = 0;
+                }
             }
-            output.push_str("]\n");
-        }
-        ApiMode::Api => {
-            // C++ compatible: name\tdescription\tusage\targuments\taudit
-            // arguments = comma-separated, !prefix for bare keywords
-            for def in &commands {
-                use crate::command_registry::{ArgType, CompletionSource};
-                let usage: String = {
-                    let args: String = def.args.iter().map(|a| format!(" [{}=<{}>]", a.name, a.name)).collect();
-                    format!("{}{}", def.name, args)
-                };
-                let arguments: String = def.args.iter().map(|a| {
-                    match a.arg_type {
-                        ArgType::Bool | ArgType::String if a.name == "yes" || a.name == "all" || a.name == "done"
-                            => format!("!{}", a.name), // bare keyword
-                        _ => a.name.to_string(), // key=value arg
-                    }
-                }).collect::<Vec<_>>().join(",");
-                output.push_str(&format!("{}\t{}\t{}\t{}\t{}\n",
-                    def.name, def.description, usage, arguments, !def.dot_command));
+            b'[' | b'<' => { open += 1; output.push(byte); }
+            b']' | b'>' => { open -= 1; output.push(byte); }
+            b'\n' | b'\t' => {
+                if chars_in_line > 1 && !matches!(next, Some(b'\n' | b'\t' | b' ')) {
+                    output.push(b' ');
+                }
             }
-        }
-        ApiMode::Human => {
-            output.push_str(&format!("  {:<22} {}\n", "Command", "Description"));
-            output.push_str(&format!("  {:<22} {}\n", "\u{2500}".repeat(20), "\u{2500}".repeat(50)));
-            for def in &commands {
-                output.push_str(&format!("  {:<22} {}\n", def.name, def.description));
-            }
-            output.push_str(&format!("\n  {} commands.\n", commands.len()));
+            _ => output.push(byte),
         }
     }
-
-    CommandResult::ok(output)
+    String::from_utf8(output).expect("wrapping preserves UTF-8")
 }
 
-/// `.help` in JSON mode, as C++ DotHelpCmd with the Bareos command table:
-/// `{"<cmd>": {"command", "description", "arguments", "permission"}}`.
-/// `all` lists non-dot commands, `item=<cmd>` one command, `full` ignores ACLs.
-fn dot_help_json(ast: &CommandAst) -> CommandResult {
+pub fn cmd_help(ast: &CommandAst, ctx: &ExecContext) -> CommandResult {
     use crate::ua_commands_table::UA_COMMANDS;
-    let has = |k: &str| ast.arguments.iter().any(|a| a.key.eq_ignore_ascii_case(k));
-    if ast.arguments.iter().any(|a| a.key.eq_ignore_ascii_case("full") && a.value.is_some()) {
-        return CommandResult::error("The full option does not take a value.\n".to_string());
+    let human = ctx.api_mode == ApiMode::Human;
+    let mut text = if human { HELP_HEADER.to_string() } else { String::new() };
+    let mut objects = serde_json::Map::new();
+    // Upstream argc == 2 selects a topic; extra arguments instead list commands.
+    let topic = if ast.arguments.len() == 1 { Some(ast.arguments[0].key.as_str()) } else { None };
+    let selected: Vec<_> = match topic {
+        Some(name) => UA_COMMANDS.iter().filter(|c| c.0.eq_ignore_ascii_case(name)).collect(),
+        None => UA_COMMANDS.iter().filter(|c| !c.0.starts_with('.')).collect(),
+    };
+    if let Some(topic) = topic.filter(|_| selected.is_empty()) {
+        // SendMsg is an immediate informational message, including in API mode.
+        text.push_str(&format!("\nCan't find {topic} command.\n\n"));
     }
-    let entry = |(key, help, usage): &(&str, &str, &str)| serde_json::json!({
-        "command": key, "description": help, "arguments": usage, "permission": true,
-    });
-    let mut result = serde_json::Map::new();
-    if let Some(item) = ast.arguments.iter().find(|a| a.key.eq_ignore_ascii_case("item")).and_then(|a| a.value.as_deref()) {
-        if let Some(c) = UA_COMMANDS.iter().find(|c| c.0 == item) {
-            result.insert(c.0.to_lowercase(), entry(c));
+    for entry in selected {
+        let arguments = rewrap_help(entry.2, if topic.is_some() { 45 } else { 0 }, human);
+        if ctx.api_mode != ApiMode::Json {
+            text.push_str(&format!("  {:<18} {}\n", entry.0, description(entry)));
+            if topic.is_some() {
+                text.push_str(&format!("\nArguments:\n\t{arguments}\n"));
+            }
         }
-    } else {
-        let all = has("all");
-        for c in UA_COMMANDS.iter().filter(|c| !all || !c.0.starts_with('.')) {
-            result.insert(c.0.to_lowercase(), entry(c));
-        }
+        objects.insert(entry.0.to_lowercase(), help_object(entry, arguments));
     }
-    CommandResult::ok(String::new()).with_json(serde_json::Value::Object(result))
+    if human { text.push_str(HELP_FOOTER); }
+    CommandResult::ok(text).with_json(serde_json::Value::Object(objects))
 }
 
-// Legacy static command tables removed — all data now in command_registry.rs
+pub fn cmd_dot_help(ast: &CommandAst, ctx: &ExecContext) -> CommandResult {
+    use crate::ua_commands_table::UA_COMMANDS;
+    if ast.arguments.iter().find(|a| a.key.eq_ignore_ascii_case("full")).is_some_and(|a| a.value.is_some()) {
+        return CommandResult::error("The full option does not take a value.\n".into());
+    }
+    let item = ast.arguments.iter().find(|a| a.key.eq_ignore_ascii_case("item"))
+        .and_then(|a| a.value.as_deref());
+    let all = ast.arguments.iter().any(|a| a.key.eq_ignore_ascii_case("all"));
+    let selected: Vec<_> = match item {
+        Some(name) => UA_COMMANDS.iter().filter(|c| c.0 == name).collect(),
+        None => UA_COMMANDS.iter().filter(|c| !all || !c.0.starts_with('.')).collect(),
+    };
+    let mut text = String::new();
+    let mut objects = serde_json::Map::new();
+    for entry in selected {
+        let arguments = rewrap_help(entry.2, 0, false);
+        if ctx.api_mode != ApiMode::Json {
+            if item.is_some() {
+                text.push_str(&format!("{arguments}\n"));
+            } else if all {
+                text.push_str(&format!("{}\n", entry.0));
+            } else {
+                text.push_str(&format!("{} {} -- {arguments}\n", entry.0, description(entry)));
+            }
+        }
+        objects.insert(entry.0.to_lowercase(), help_object(entry, arguments));
+    }
+    CommandResult::ok(text).with_json(serde_json::Value::Object(objects))
+}
 
 #[cfg(test)]
-mod help_color_tests {
+mod help_tests {
     use super::*;
+    use crate::ua_commands_table::UA_COMMANDS;
+
+    fn execute(command: &str, api_mode: ApiMode) -> CommandResult {
+        let ctx = ExecContext { session_id: 0, config: None, session_mgr: None,
+            catalog: None, api_mode, bus_rx: None, job_manager: None };
+        let ast = crate::session::parse_cli_command(command);
+        if ast.command_name == "help" { cmd_help(&ast, &ctx) } else { cmd_dot_help(&ast, &ctx) }
+    }
+
+    #[test]
+    fn help_topic_uses_source_layout_exact_case_insensitive_name_and_mode() {
+        let human = execute("help VeRsIoN", ApiMode::Human);
+        assert_eq!(human.text_output,
+            "  Command            Description\n  =======            ===========\n  version            Print Director version\n\nArguments:\n\t\n\nWhen at a prompt, entering a period (.) cancels the command.\n\n");
+        assert_eq!(execute("help version", ApiMode::Api).text_output,
+            "  version            Print Director version\n\nArguments:\n\t\n");
+        let json = execute("help version", ApiMode::Json);
+        assert_eq!(json.text_output, "");
+        assert_eq!(json.json.unwrap(), serde_json::json!({"version": {
+            "command": "version", "description": "Print Director version", "arguments": "", "permission": true
+        }}));
+        assert!(execute("help ver", ApiMode::Human).text_output.contains("Can't find ver command."));
+        assert!(!execute("help ver", ApiMode::Human).text_output.contains("Print Director version"));
+        assert_eq!(execute("help unknown", ApiMode::Api).text_output, "\nCan't find unknown command.\n\n");
+    }
+
+    #[test]
+    fn help_lists_main_commands_in_upstream_order_with_extra_args() {
+        let expected: String = UA_COMMANDS.iter().filter(|c| !c.0.starts_with('.'))
+            .map(|c| format!("  {:<18} {}\n", c.0, description(c))).collect();
+        assert_eq!(execute("help", ApiMode::Api).text_output, expected);
+        assert_eq!(execute("help run ignored", ApiMode::Api).text_output, expected);
+        assert_eq!(execute("help", ApiMode::Human).text_output, format!("{HELP_HEADER}{expected}{HELP_FOOTER}"));
+        let json = execute("help", ApiMode::Json);
+        assert_eq!(json.text_output, "");
+        assert_eq!(json.json.unwrap().as_object().unwrap().len(), UA_COMMANDS.iter().filter(|c| !c.0.starts_with('.')).count());
+    }
+
+    #[test]
+    fn dot_help_variants_have_upstream_selection_and_text_order() {
+        let all: String = UA_COMMANDS.iter().filter(|c| !c.0.starts_with('.')).map(|c| format!("{}\n", c.0)).collect();
+        let every: String = UA_COMMANDS.iter().map(|c| format!("{} {} -- {}\n", c.0, description(c), rewrap_help(c.2, 0, false))).collect();
+        for mode in [ApiMode::Human, ApiMode::Api] {
+            assert_eq!(execute(".help", mode).text_output, every);
+            assert_eq!(execute(".help full", mode).text_output, every);
+            assert_eq!(execute(".help all", mode).text_output, all);
+            assert_eq!(execute(".help all full", mode).text_output, all);
+            assert_eq!(execute(".help item=version all", mode).text_output, "\n");
+            assert_eq!(execute(".help item=VERSION", mode).text_output, "");
+            assert_eq!(execute(".help item=ver", mode).text_output, "");
+            assert_eq!(execute(".help item item=version", mode).text_output, every);
+            assert_eq!(execute(".help full full=yes", mode).text_output, every);
+        }
+    }
+
+    #[test]
+    fn dot_help_json_and_invalid_full_are_consistent_in_all_modes() {
+        for mode in [ApiMode::Human, ApiMode::Api, ApiMode::Json] {
+            let invalid = execute(".help full=yes item=version", mode);
+            assert!(!invalid.success);
+            assert_eq!(invalid.error_message, "The full option does not take a value.\n");
+        }
+        for command in [".help", ".help full", ".help all", ".help all full", ".help item=version", ".help item=VERSION"] {
+            let result = execute(command, ApiMode::Json);
+            assert!(result.success);
+            assert_eq!(result.text_output, "");
+            let object = result.json.unwrap();
+            let object = object.as_object().unwrap();
+            if command.ends_with("item=VERSION") { assert!(object.is_empty()); }
+            else if command.ends_with("item=version") { assert_eq!(object.len(), 1); }
+            else if command.contains("all") { assert!(object.keys().all(|k| !k.starts_with('.'))); }
+            else { assert_eq!(object.len(), UA_COMMANDS.len()); }
+            for (name, entry) in object {
+                assert_eq!(entry["command"], *name);
+                assert_eq!(entry["permission"], true);
+                assert!(entry["arguments"].is_string());
+                assert!(entry["description"].is_string());
+            }
+        }
+        assert_eq!(execute(".help item=.locations", ApiMode::Json).json.unwrap()[".locations"]["description"], "");
+    }
+
+    #[test]
+    fn source_rewrap_preserves_brackets_and_wraps_top_level_alternatives() {
+        assert_eq!(rewrap_help("a | b [x | y] <p | q> z", 45, true), "a |\n\tb [x | y] <p | q> z");
+        assert_eq!(rewrap_help("  a\n\t b", 0, false), " a b");
+        assert_eq!(rewrap_help("a ".repeat(24).as_str(), 45, true), format!("{}\n\ta ", "a ".repeat(22) + "a"));
+        let run = UA_COMMANDS.iter().find(|c| c.0 == "run").unwrap();
+        let human = execute("help run", ApiMode::Human);
+        assert!(human.text_output.contains(&rewrap_help(run.2, 45, true)));
+        assert!(execute("help run", ApiMode::Api).text_output.contains(run.2));
+        assert_eq!(execute("help run", ApiMode::Json).json.unwrap()["run"]["arguments"], run.2);
+    }
 
     #[test]
     fn help_protocol_responses_have_no_ansi_styling() {
-        let ctx = ExecContext { session_id: 0, config: None, session_mgr: None,
-            catalog: None, api_mode: ApiMode::Human, bus_rx: None, job_manager: None };
         for command in ["help", ".help", "help run", ".help item=run"] {
-            let ast = crate::session::parse_cli_command(command);
-            let result = if ast.command_name == "help" { cmd_help(&ast, &ctx) } else { cmd_dot_help(&ast, &ctx) };
+            let result = execute(command, ApiMode::Human);
             assert!(!result.text_output.contains('\x1b'), "{command}");
             assert!(!result.text_output.is_empty());
         }

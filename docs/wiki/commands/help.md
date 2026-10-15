@@ -17,9 +17,9 @@ help add autodisplay automount cancel configure create delete disable enable est
 
 **Onesimus-Status:** `partial`. Funktionsparität ist nicht durch einen Live-Test nachgewiesen.
 
-- ANSI-Farbgebung wurde aus help/.help-Protokollantworten entfernt; Tests prüfen alle Hilfevarianten. Textlayout, vollständige Syntax/ACL-Ausgabe und Live-SHA-256-Parität zum Original bleiben offen.
+- help/.help verwenden jetzt Originaltabellenreihenfolge, Textlayout, Byte-Wrapping, exakte Themen-/item-Suche und die Originalvarianten all/full/item. API1 .help all enthält nur Hauptbefehlsnamen; oconsole liest deshalb .help-Metadaten für Vervollständigung. Unabhängige Kreuzreviews bestätigen die statischen Abläufe. ACL-Filter/permission und die dynamisch generierte configure-Usage sind weiterhin unvollständig; Live-SHA-256-Parität fehlt.
 
-**Lokaler Handler:** [crates/onesimus-dird/src/commands/basic.rs:60](../../../crates/onesimus-dird/src/commands/basic.rs).
+**Lokaler Handler:** [crates/onesimus-dird/src/commands/basic.rs:118](../../../crates/onesimus-dird/src/commands/basic.rs).
 
 Die folgenden vorhandenen Beispiele und Verhaltensbeschreibungen sind lokale Dokumentation; sie sind kein Beleg für vollständige Bareos-Kompatibilität. Bei Widersprüchen gilt der obige Befund.
 <!-- bareos-reference:end -->

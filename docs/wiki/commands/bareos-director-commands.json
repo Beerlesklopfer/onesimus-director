@@ -695,7 +695,7 @@
     },
     {
       "path": "crates/oconsole/src/main.rs",
-      "sha256": "7eb2995eb9ccd0eca5b830e82becb400cd7cbf156927990e38d369ccbdddb795"
+      "sha256": "e9d28b885fde0177d025c881ea1631e5056675f84dc83a41f2611bd3622124f9"
     },
     {
       "path": "crates/oconsole/src/mcp.rs",
@@ -735,7 +735,7 @@
     },
     {
       "path": "crates/onesimus-dird/src/commands/basic.rs",
-      "sha256": "8c0d2c8e5a9556dbea0259ed5e27b479aa0073607f66c0073912cbd84e927af2"
+      "sha256": "76359164f4b4d5a00f04e60750faf8a4818e59f41a7d32604ca69c5bf524e512"
     },
     {
       "path": "crates/onesimus-dird/src/commands/catalog.rs",
@@ -858,8 +858,8 @@
     "top_level_commands": 88,
     "registered_top_level_commands": 88,
     "status_counts": {
-      "partial": 22,
-      "registered_unverified": 51,
+      "partial": 23,
+      "registered_unverified": 50,
       "semantic_mismatch": 2,
       "stub": 13
     },
@@ -1355,11 +1355,13 @@
         },
         "implementation": {
           "file": "crates/onesimus-dird/src/commands/basic.rs",
-          "line": 92
+          "line": 147
         },
         "declared_arguments": [],
-        "status": "registered_unverified",
-        "findings": [],
+        "status": "partial",
+        "findings": [
+          "help/.help verwenden jetzt Originaltabellenreihenfolge, Textlayout, Byte-Wrapping, exakte Themen-/item-Suche und die Originalvarianten all/full/item. API1 .help all enthält nur Hauptbefehlsnamen; oconsole liest deshalb .help-Metadaten für Vervollständigung. Unabhängige Kreuzreviews bestätigen die statischen Abläufe. ACL-Filter/permission und die dynamisch generierte configure-Usage sind weiterhin unvollständig; Live-SHA-256-Parität fehlt."
+        ],
         "functional_parity_verified": false
       },
       "documentation": "dot-help.md"
@@ -1817,7 +1819,7 @@
         },
         "implementation": {
           "file": "crates/onesimus-dird/src/commands/basic.rs",
-          "line": 55
+          "line": 54
         },
         "declared_arguments": [],
         "status": "registered_unverified",
@@ -2928,7 +2930,7 @@
         },
         "implementation": {
           "file": "crates/onesimus-dird/src/commands/basic.rs",
-          "line": 55
+          "line": 54
         },
         "declared_arguments": [],
         "status": "registered_unverified",
@@ -3051,14 +3053,14 @@
         },
         "implementation": {
           "file": "crates/onesimus-dird/src/commands/basic.rs",
-          "line": 60
+          "line": 118
         },
         "declared_arguments": [
           "command"
         ],
         "status": "partial",
         "findings": [
-          "ANSI-Farbgebung wurde aus help/.help-Protokollantworten entfernt; Tests prüfen alle Hilfevarianten. Textlayout, vollständige Syntax/ACL-Ausgabe und Live-SHA-256-Parität zum Original bleiben offen."
+          "help/.help verwenden jetzt Originaltabellenreihenfolge, Textlayout, Byte-Wrapping, exakte Themen-/item-Suche und die Originalvarianten all/full/item. API1 .help all enthält nur Hauptbefehlsnamen; oconsole liest deshalb .help-Metadaten für Vervollständigung. Unabhängige Kreuzreviews bestätigen die statischen Abläufe. ACL-Filter/permission und die dynamisch generierte configure-Usage sind weiterhin unvollständig; Live-SHA-256-Parität fehlt."
         ],
         "functional_parity_verified": false
       },
@@ -3584,7 +3586,7 @@
         },
         "implementation": {
           "file": "crates/onesimus-dird/src/commands/basic.rs",
-          "line": 55
+          "line": 54
         },
         "declared_arguments": [],
         "status": "registered_unverified",
@@ -4364,7 +4366,7 @@
         },
         "implementation": {
           "file": "crates/onesimus-dird/src/commands/basic.rs",
-          "line": 39
+          "line": 38
         },
         "declared_arguments": [],
         "status": "registered_unverified",
@@ -4729,7 +4731,7 @@
         },
         "implementation": {
           "file": "crates/onesimus-dird/src/commands/basic.rs",
-          "line": 13
+          "line": 12
         },
         "declared_arguments": [],
         "status": "registered_unverified",

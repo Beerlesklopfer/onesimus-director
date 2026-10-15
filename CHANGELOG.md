@@ -84,4 +84,10 @@ onesimus (25.1.2+onesimus.0.2.0-2) UNRELEASED; urgency=medium
     reject failed cancellation signals and retain outcomes from actual finish.
     Verify with real held child processes and injected catalog failures.
 
+  * help/.help: follow the original command table, selection rules, byte wrapping,
+    text/API/JSON layout and all/full/item variants. Update oconsole completion
+    to consume original .help metadata instead of treating .help all as a table.
+    Cross-review syntax and NULL-description handling; retain ACL and dynamic
+    configure usage as explicit parity gaps.
+
  -- Joerg Bernau <Joerg.Bernau@onesimus.io>  Thu, 15 Oct 2026 14:00:00 +0200

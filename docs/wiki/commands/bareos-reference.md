@@ -13,8 +13,8 @@ Dies ist ein statischer Quellcodeabgleich; es wurden keine Live-Jobs, Löschunge
 
 | Status | Anzahl | Bedeutung |
 |---|---:|---|
-| `partial` | 22 | Konkrete fehlende Optionen oder Teilfunktionen belegt |
-| `registered_unverified` | 51 | Handler vorhanden; Funktionsparität nicht nachgewiesen |
+| `partial` | 23 | Konkrete fehlende Optionen oder Teilfunktionen belegt |
+| `registered_unverified` | 50 | Handler vorhanden; Funktionsparität nicht nachgewiesen |
 | `semantic_mismatch` | 2 | Abweichende Bedeutung gegenüber Bareos |
 | `stub` | 13 | Platzhalter statt der beschriebenen Wirkung |
 
@@ -55,7 +55,7 @@ Nur `--no-default-features --features mcp-development` kompiliert `execute` ein;
 | [.users](dot-users.md) | List all user resources | `registered_unverified` |
 | [.defaults](dot-defaults.md) | Get default settings | `partial` |
 | [.filesets](dot-filesets.md) | List all filesets | `registered_unverified` |
-| [.help](dot-help.md) | Print parsable information about a command | `registered_unverified` |
+| [.help](dot-help.md) | Print parsable information about a command | `partial` |
 | [.jobdefs](dot-jobdefs.md) | List all job defaults resources | `registered_unverified` |
 | [.jobs](dot-jobs.md) | List all job resources | `registered_unverified` |
 | [.jobstatus](dot-jobstatus.md) | List jobstatus information | `registered_unverified` |

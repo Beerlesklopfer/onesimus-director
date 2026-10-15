@@ -15,9 +15,11 @@ Referenz: [WIP/25.1.2-pre, `fc2c79b6c43e`](https://github.com/bareos/bareos/blob
 
 **RunScript erlaubt:** nein. **Audit-Ereignis:** nein. Beide Flags sind keine Read-only-Klassifizierung.
 
-**Onesimus-Status:** `registered_unverified`. Funktionsparität ist nicht durch einen Live-Test nachgewiesen.
+**Onesimus-Status:** `partial`. Funktionsparität ist nicht durch einen Live-Test nachgewiesen.
 
-**Lokaler Handler:** [crates/onesimus-dird/src/commands/basic.rs:92](../../../crates/onesimus-dird/src/commands/basic.rs).
+- help/.help verwenden jetzt Originaltabellenreihenfolge, Textlayout, Byte-Wrapping, exakte Themen-/item-Suche und die Originalvarianten all/full/item. API1 .help all enthält nur Hauptbefehlsnamen; oconsole liest deshalb .help-Metadaten für Vervollständigung. Unabhängige Kreuzreviews bestätigen die statischen Abläufe. ACL-Filter/permission und die dynamisch generierte configure-Usage sind weiterhin unvollständig; Live-SHA-256-Parität fehlt.
+
+**Lokaler Handler:** [crates/onesimus-dird/src/commands/basic.rs:147](../../../crates/onesimus-dird/src/commands/basic.rs).
 
 Die folgenden vorhandenen Beispiele und Verhaltensbeschreibungen sind lokale Dokumentation; sie sind kein Beleg für vollständige Bareos-Kompatibilität. Bei Widersprüchen gilt der obige Befund.
 <!-- bareos-reference:end -->

@@ -557,26 +557,14 @@ impl BareosHelper {
     }
 
     fn load_from_director(&mut self, dir: &mut dyn DirectorConn) {
-        // API mode 1 → maschinenlesbar, dann .help all fuer Tab-Completion
+        // Bareos API1 .help carries descriptions and original usage;
+        // .help all intentionally contains only non-dot command names.
         dir.query(".api 1");
-        let lines = dir.query(".help all");
-        dir.query(".api 0"); // zurueck auf human-readable fuer die Session
+        let lines = dir.query(".help");
+        dir.query(".api 0");
 
         for line in &lines {
-            let fields: Vec<&str> = line.split('\t').collect();
-            if fields.is_empty() { continue; }
-
-            let name = fields[0].trim().to_string();
-            if name.is_empty() { continue; }
-
-            let description = fields.get(1).unwrap_or(&"").to_string();
-            let usage = fields.get(2).unwrap_or(&"").to_string();
-            let arguments = fields.get(3).unwrap_or(&"").trim();
-
-            // Parse completions and live-query mappings from arguments field
-            let (completions, live_queries) = Self::parse_arguments(arguments);
-
-            self.entries.push(CmdEntry { name, description, usage, completions, live_queries });
+            if let Some(entry) = Self::parse_help_line(line) { self.entries.push(entry); }
         }
 
         if self.entries.is_empty() {
@@ -604,6 +592,47 @@ impl BareosHelper {
             let values = dir.query(dot_cmd);
             self.value_cache.insert(dot_cmd.clone(), values);
         }
+    }
+
+    fn parse_help_line(line: &str) -> Option<CmdEntry> {
+        let (name, description, usage, arguments) = if line.contains('\t') {
+            // Compatibility with older Onesimus metadata tables.
+            let mut fields = line.split('\t');
+            (fields.next()?.trim(), fields.next().unwrap_or(""), fields.next().unwrap_or(""),
+                Some(fields.next().unwrap_or("")))
+        } else {
+            let (header, usage) = line.split_once(" -- ")?;
+            let (name, description) = header.split_once(' ')?;
+            (name.trim(), description, usage, None)
+        };
+        if name.is_empty() || !name.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'.' || b == b'_') { return None; }
+        let source_arguments;
+        let arguments = match arguments {
+            Some(arguments) => arguments,
+            None => {
+                source_arguments = Self::usage_arguments(usage, name);
+                &source_arguments
+            }
+        };
+        let (completions, live_queries) = Self::parse_arguments(arguments);
+        Some(CmdEntry {name:name.into(),description:description.into(),usage:usage.into(),completions,live_queries})
+    }
+
+    fn usage_arguments(usage: &str, command: &str) -> String {
+        let mut arguments=Vec::new();
+        for token in usage.split_whitespace() {
+            let token=token.trim_matches(|c:char| matches!(c,'['|']'|'('|')'|'|'|','));
+            if token.is_empty() || token==command { continue; }
+            let argument = if let Some((key,_))=token.split_once('=') {
+                if key.is_empty() || !key.bytes().all(|b|b.is_ascii_alphanumeric() || b==b'_') { continue; }
+                key.to_string()
+            } else {
+                if !token.bytes().all(|b|b.is_ascii_alphanumeric() || b==b'_' || b==b'-') { continue; }
+                format!("!{token}")
+            };
+            if !arguments.contains(&argument) { arguments.push(argument); }
+        }
+        arguments.join(",")
     }
 
     /// Parse the arguments field from .help into completions and live-query mappings.
@@ -1268,6 +1297,20 @@ impl mcp::CommandRunner for GrpcRunner {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn completion_consumes_original_help_usage_instead_of_names_only() {
+        let status=BareosHelper::parse_help_line("status Report status -- status [dir | director | client=<client-name> | storage=<storage-name>]").unwrap();
+        assert_eq!(status.name,"status");assert_eq!(status.description,"Report status");
+        for value in ["dir","director","client=","storage="] { assert!(status.completions.contains(&value.to_string())); }
+        assert!(status.live_queries.contains(&("client".into(),".clients".into())));
+        assert!(status.live_queries.contains(&("storage".into(),".storages".into())));
+        let job=BareosHelper::parse_help_line("run Run a job -- run [job=<job-name> level=<level> yes]").unwrap();
+        assert!(job.completions.contains(&"job=".to_string()));assert!(job.completions.contains(&"yes".to_string()));
+        assert!(BareosHelper::parse_help_line("run").is_none());
+        let legacy=BareosHelper::parse_help_line("status\tReport status\tstatus [dir]\t!dir,client").unwrap();
+        assert!(legacy.completions.contains(&"dir".to_string()));
+    }
 
     #[test]
     fn cli_defaults() {

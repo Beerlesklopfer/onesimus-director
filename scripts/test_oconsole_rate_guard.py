@@ -49,8 +49,8 @@ class Director:
                 if command.startswith('.api'):
                     self.send(-1)
                     continue
-                if command == '.help all':
-                    self.send('version\tVersion\tversion\t\t0\ndialog\tDialog\tdialog\t\t0\nquit\tQuit\tquit\t\t0\n')
+                if command == '.help':
+                    self.send('version Version -- version\ndialog Dialog -- dialog\nquit Quit -- quit\n')
                     self.send(-1)
                     continue
                 with self.condition:

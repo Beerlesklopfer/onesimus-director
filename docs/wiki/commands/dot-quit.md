@@ -13,7 +13,7 @@ Referenz: [WIP/25.1.2-pre, `fc2c79b6c43e`](https://github.com/bareos/bareos/blob
 
 **Onesimus-Status:** `registered_unverified`. Funktionsparität ist nicht durch einen Live-Test nachgewiesen.
 
-**Lokaler Handler:** [crates/onesimus-dird/src/commands/basic.rs:55](../../../crates/onesimus-dird/src/commands/basic.rs).
+**Lokaler Handler:** [crates/onesimus-dird/src/commands/basic.rs:54](../../../crates/onesimus-dird/src/commands/basic.rs).
 
 Die folgenden vorhandenen Beispiele und Verhaltensbeschreibungen sind lokale Dokumentation; sie sind kein Beleg für vollständige Bareos-Kompatibilität. Bei Widersprüchen gilt der obige Befund.
 <!-- bareos-reference:end -->
