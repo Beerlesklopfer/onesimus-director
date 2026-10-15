@@ -1,0 +1,23 @@
+# Compatibility log C-012: missing/invalid arguments must abort, prompt or refuse without side effects.
+# Only cases whose ORIGINAL behaviour is side-effect free (usage, errors, empty selections, prompts).
+{"id": "c012-truncate-yes-only", "steps": ["truncate yes"]}
+{"id": "c012-truncate-bad-volstatus", "steps": ["truncate volstatus=Full"]}
+{"id": "c012-truncate-unknown-arg", "steps": ["truncate volstatus=Purged bogus"]}
+{"id": "c012-truncate-bad-drive", "steps": ["truncate volstatus=Purged drive=x"]}
+{"id": "c012-setip-limited", "steps": ["setip"], "console": "parity-limited", "password": "parity-limited-pw"}
+{"id": "c012-import-unknown-storage", "steps": ["import storage=Nope"]}
+{"id": "c012-export-bad-jobid", "steps": ["export jobid=x"]}
+{"id": "c012-move-job-not-running", "steps": ["move job=nosuch"]}
+{"id": "c012-run-unknown-noyes", "steps": ["run job=nosuch"]}
+{"id": "c012-run-confirm", "steps": ["run job=backup-bareos-fd"], "normalize": ["When:     .*"]}
+{"id": "c012-rerun-confirm", "steps": ["rerun jobid=1"], "normalize": ["When:     .*"]}
+{"id": "c012-restore-menu", "steps": ["restore"]}
+{"id": "c012-delete-illegal-jobid", "steps": ["delete jobid=x"]}
+{"id": "c012-create-unknown-pool", "steps": ["create pool=Nope"]}
+{"id": "c012-prune-jobs-confirm", "steps": ["prune jobs"]}
+{"id": "c012-purge-jobs-menu", "steps": ["purge jobs"]}
+{"id": "c012-enable-storage", "steps": ["enable storage=File"]}
+{"id": "c012-disable-storage", "steps": ["disable storage=File"]}
+{"id": "c012-label-no-pool", "steps": ["label volume=c012probe"]}
+{"id": "c012-relabel-unknown-old", "steps": ["relabel storage=File oldvolume=c012nosuch volume=c012new"]}
+{"id": "c012-update-bad-volstatus", "steps": ["update volume=c012nosuch volstatus=Bogus"]}
