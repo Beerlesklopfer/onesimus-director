@@ -19,7 +19,7 @@ rerun jobid=<jobid> | since_jobid=<jobid> [ until_jobid=<jobid> ] | days=<nr_day
 
 - Unterstützt eine JobId mit Katalog-Lookup und delegiert an run; since_jobid/until_jobid/days/hours und die Originalauswahl mehrerer Jobs fehlen.
 
-**Lokaler Handler:** [crates/onesimus-dird/src/commands/extra.rs:295](../../../crates/onesimus-dird/src/commands/extra.rs).
+**Lokaler Handler:** [crates/onesimus-dird/src/commands/extra.rs:269](../../../crates/onesimus-dird/src/commands/extra.rs).
 
 Die folgenden vorhandenen Beispiele und Verhaltensbeschreibungen sind lokale Dokumentation; sie sind kein Beleg für vollständige Bareos-Kompatibilität. Bei Widersprüchen gilt der obige Befund.
 <!-- bareos-reference:end -->

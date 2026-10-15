@@ -169,6 +169,15 @@ pub fn fd_command(
     address: &str, port: u16, password: &str, director_name: &str,
     command: impl FnOnce(u32) -> String,
 ) -> Result<String, String> {
+    let (mut bnet, version) = connect_control_fd(address, port, password, director_name)?;
+    bnet.send_str(&command(version)).map_err(|e| e.to_string())?;
+    let result = read_control_reply(&mut bnet);
+    let _ = bnet.send_signal(BnetSignal::Terminate);
+    result
+}
+
+fn connect_control_fd(address: &str, port: u16, password: &str, director_name: &str)
+    -> Result<(BnetStream<bareos_bnet::tls_psk::PskStream>, u32), String> {
     use std::net::ToSocketAddrs;
     let socket = (address, port).to_socket_addrs().map_err(|e| format!("DNS: {e}"))?
         .next().ok_or("no FD address")?;
@@ -187,10 +196,35 @@ pub fn fd_command(
     let hello = bnet.recv_str().map_err(|e| format!("FD hello: {e}"))?;
     let hello = hello.strip_prefix(FD_OK_HELLO).ok_or("invalid FD hello")?;
     let version = hello.split_whitespace().next().and_then(|v| v.parse().ok()).unwrap_or(0);
-    bnet.send_str(&command(version)).map_err(|e| e.to_string())?;
-    let result = read_control_reply(&mut bnet);
-    let _ = bnet.send_signal(BnetSignal::Terminate);
+    Ok((bnet, version))
+}
+
+/// Execute listing commands on one authenticated FD connection.
+pub fn fd_query_commands(address: &str, port: u16, password: &str, director_name: &str, commands: &[String]) -> Result<String, String> {
+    let (mut fd, _) = connect_control_fd(address, port, password, director_name)?;
+    let result = (|| {
+        let mut output = String::new();
+        for command in commands {
+            fd.send_str(command).map_err(|e| e.to_string())?;
+            output.push_str(&read_listing_reply(&mut fd)?);
+        }
+        Ok(output)
+    })();
+    let _ = fd.send_signal(BnetSignal::Terminate);
     result
+}
+
+fn read_listing_reply<S: std::io::Read + std::io::Write>(fd: &mut BnetStream<S>) -> Result<String, String> {
+    let mut output = String::new();
+    loop {
+        match fd.recv().map_err(|error| format!("FD response: {error}"))? {
+            BnetMessage::Data(bytes) => output.push_str(&String::from_utf8(bytes).map_err(|e| e.to_string())?),
+            BnetMessage::Signal(BnetSignal::Eod) => return Ok(output),
+            BnetMessage::Signal(BnetSignal::Terminate) => return Err("FD terminated listing before EOD".into()),
+            BnetMessage::Signal(BnetSignal::Heartbeat) => fd.send_signal(BnetSignal::HeartbeatResponse).map_err(|e| e.to_string())?,
+            BnetMessage::Signal(_) => {},
+        }
+    }
 }
 
 fn read_control_reply<S: std::io::Read + std::io::Write>(bnet: &mut BnetStream<S>) -> Result<String, String> {
@@ -226,4 +260,16 @@ mod control_reply_tests {
         let mut bnet = BnetStream::new(Stream { input: Cursor::new((-1i32).to_be_bytes().to_vec()), output: vec![] });
         assert!(read_control_reply(&mut bnet).is_err());
     }
+    #[test]
+    fn listing_collects_multiple_frames_without_changing_newlines() {
+        let mut bytes = Vec::new();
+        for data in [b"first\n".as_slice(), b"second\r\n".as_slice()] {
+            bytes.extend_from_slice(&(data.len() as i32).to_be_bytes());
+            bytes.extend_from_slice(data);
+        }
+        bytes.extend_from_slice(&(-1i32).to_be_bytes());
+        let mut fd = BnetStream::new(Stream { input: Cursor::new(bytes), output: vec![] });
+        assert_eq!(read_listing_reply(&mut fd).unwrap(), "first\nsecond\r\n");
+    }
+
 }

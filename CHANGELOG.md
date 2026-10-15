@@ -47,4 +47,8 @@ onesimus (25.1.2+onesimus.0.2.0-2) UNRELEASED; urgency=medium
     control packets, handle unlimited mode, reject overflow and unsupported
     job selectors before I/O, and require a successful daemon acknowledgement.
 
+  * resolve: resolve each hostname locally or on the explicitly selected FD/SD;
+    preserve Bareos IPv4/IPv6 output and multi-frame daemon replies, reuse
+    authenticated connections, and report unknown targets or resolution failures.
+
  -- Joerg Bernau <Joerg.Bernau@onesimus.io>  Thu, 15 Oct 2026 14:00:00 +0200

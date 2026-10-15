@@ -76,4 +76,46 @@ mod control_tests {
         let mut sd = bareos_bnet::BnetStream::new(Stream { input: Cursor::new(vec![]), output: vec![] });
         assert!(read_control_reply(&mut sd).is_err());
     }
+    #[test]
+    fn listings_preserve_frames_and_require_the_end_marker() {
+        let mut bytes = Vec::new();
+        for reply in [b"one\n".as_slice(), b"two\r\n".as_slice()] {
+            bytes.extend_from_slice(&(reply.len() as i32).to_be_bytes());
+            bytes.extend_from_slice(reply);
+        }
+        bytes.extend_from_slice(&(-1i32).to_be_bytes());
+        let mut sd = bareos_bnet::BnetStream::new(Stream { input: Cursor::new(bytes), output: vec![] });
+        assert_eq!(read_listing_reply(&mut sd).unwrap(), "one\ntwo\r\n");
+        let mut sd = bareos_bnet::BnetStream::new(Stream { input: Cursor::new(vec![]), output: vec![] });
+        assert!(read_listing_reply(&mut sd).is_err());
+    }
+
+}
+
+/// Execute EOD-terminated listing commands on a single authenticated connection.
+pub fn sd_query_commands(address: &str, port: u16, password: &str, director_name: &str, commands: &[String]) -> Result<String, String> {
+    let mut sd = crate::connect::connect_sd(address, port, password, director_name)?;
+    let result = (|| {
+        let mut output = String::new();
+        for command in commands {
+            sd.send_str(command).map_err(|e| e.to_string())?;
+            output.push_str(&read_listing_reply(&mut sd)?);
+        }
+        Ok(output)
+    })();
+    let _ = sd.send_signal(BnetSignal::Terminate);
+    result
+}
+
+fn read_listing_reply<S: std::io::Read + std::io::Write>(sd: &mut bareos_bnet::BnetStream<S>) -> Result<String, String> {
+    let mut output = String::new();
+    loop {
+        match sd.recv().map_err(|e| format!("SD response: {e}"))? {
+            BnetMessage::Data(bytes) => output.push_str(&String::from_utf8(bytes).map_err(|e| e.to_string())?),
+            BnetMessage::Signal(BnetSignal::Eod) => return Ok(output),
+            BnetMessage::Signal(BnetSignal::Terminate) => return Err("SD terminated listing before EOD".into()),
+            BnetMessage::Signal(BnetSignal::Heartbeat) => sd.send_signal(BnetSignal::HeartbeatResponse).map_err(|e| e.to_string())?,
+            BnetMessage::Signal(_) => {},
+        }
+    }
 }

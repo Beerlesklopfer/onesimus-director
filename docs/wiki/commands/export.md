@@ -19,7 +19,7 @@ export storage=<storage-name> srcslots=<slot-selection> [ dstslots=<slot-selecti
 
 - Leitet storage und srcslots an den SD weiter; dstslots, volume und scan aus der Originalhilfe werden im Handler nicht ausgewertet.
 
-**Lokaler Handler:** [crates/onesimus-dird/src/commands/extra.rs:452](../../../crates/onesimus-dird/src/commands/extra.rs).
+**Lokaler Handler:** [crates/onesimus-dird/src/commands/extra.rs:426](../../../crates/onesimus-dird/src/commands/extra.rs).
 
 Die folgenden vorhandenen Beispiele und Verhaltensbeschreibungen sind lokale Dokumentation; sie sind kein Beleg für vollständige Bareos-Kompatibilität. Bei Widersprüchen gilt der obige Befund.
 <!-- bareos-reference:end -->

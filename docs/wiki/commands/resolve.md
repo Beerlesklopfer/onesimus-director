@@ -17,9 +17,9 @@ resolve client=<client-name> | storage=<storage-name> <host-name>
 
 **Onesimus-Status:** `partial`. Funktionsparität ist nicht durch einen Live-Test nachgewiesen.
 
-- Löst Clientnamen oder einen Hostnamen auf; die originale storage=<name>-Auflösung fehlt im Handler.
+- Mehrere Hostnamen werden jetzt wahlweise lokal oder auf dem mit client=/fd=/storage= ausgewählten Daemon aufgelöst. FD und SD können gemeinsam angesprochen werden. IPv4-/IPv6-Ausgabe entspricht dem Originalformat; Antworten mehrerer BNET-Frames und deren Zeilenenden bleiben erhalten. Unbekannte Ziele fallen nicht auf lokale DNS-Auflösung zurück. Tests prüfen Routing, Ausgabe und Fehlerpfade. ACL-Abgleich, Legacy-/Nicht-TLS-Verbindungen und Live-SHA-256-Parität bleiben offen.
 
-**Lokaler Handler:** [crates/onesimus-dird/src/commands/extra.rs:269](../../../crates/onesimus-dird/src/commands/extra.rs).
+**Lokaler Handler:** [crates/onesimus-dird/src/commands/resolve.rs:6](../../../crates/onesimus-dird/src/commands/resolve.rs).
 
 Die folgenden vorhandenen Beispiele und Verhaltensbeschreibungen sind lokale Dokumentation; sie sind kein Beleg für vollständige Bareos-Kompatibilität. Bei Widersprüchen gilt der obige Befund.
 <!-- bareos-reference:end -->

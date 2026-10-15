@@ -266,32 +266,6 @@ fn setdevice_with(
     }
 }
 
-pub fn cmd_resolve(ast: &CommandAst, ctx: &ExecContext) -> CommandResult {
-    let hostname = ast.arguments.iter()
-        .find(|a| a.key == "client")
-        .and_then(|a| a.value.as_deref())
-        .or_else(|| ast.arguments.first().map(|a| a.key.as_str()))
-        .unwrap_or("localhost");
-
-    // If it's a client name, resolve from config
-    let addr = if let Some(config) = &ctx.config {
-        if let Ok(cfg) = config.read() {
-            cfg.clients.iter().find(|c| c.name == hostname)
-                .map(|c| c.address.clone())
-                .unwrap_or_else(|| hostname.to_string())
-        } else { hostname.to_string() }
-    } else { hostname.to_string() };
-
-    use std::net::ToSocketAddrs;
-    match format!("{addr}:0").to_socket_addrs() {
-        Ok(addrs) => {
-            let ips: Vec<String> = addrs.map(|a| a.ip().to_string()).collect();
-            CommandResult::ok(format!("{hostname} resolves to: {}\n", ips.join(", ")))
-        }
-        Err(e) => CommandResult::ok(format!("{hostname}: resolution failed: {e}\n")),
-    }
-}
-
 pub fn cmd_rerun(ast: &CommandAst, ctx: &ExecContext) -> CommandResult {
     let jobid = ast.arguments.iter().find(|a| a.key == "jobid")
         .and_then(|a| a.value.as_deref());

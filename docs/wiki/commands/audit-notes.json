@@ -167,7 +167,7 @@
     "resolve": {
       "status": "partial",
       "findings": [
-        "Löst Clientnamen oder einen Hostnamen auf; die originale storage=<name>-Auflösung fehlt im Handler."
+        "Mehrere Hostnamen werden jetzt wahlweise lokal oder auf dem mit client=/fd=/storage= ausgewählten Daemon aufgelöst. FD und SD können gemeinsam angesprochen werden. IPv4-/IPv6-Ausgabe entspricht dem Originalformat; Antworten mehrerer BNET-Frames und deren Zeilenenden bleiben erhalten. Unbekannte Ziele fallen nicht auf lokale DNS-Auflösung zurück. Tests prüfen Routing, Ausgabe und Fehlerpfade. ACL-Abgleich, Legacy-/Nicht-TLS-Verbindungen und Live-SHA-256-Parität bleiben offen."
       ]
     },
     "import": {

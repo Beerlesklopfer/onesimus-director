@@ -683,7 +683,7 @@
     },
     {
       "path": "crates/bareos-stored/src/command.rs",
-      "sha256": "3e5b7cdc8b5989d9e3e84828e0290cfcb436af791feeed85e25b8755a7163f03"
+      "sha256": "46397ca758bb22fc0b7df8bbdba22b2fb6bba91dd2af8ccded9e0c6f02719aaf"
     },
     {
       "path": "crates/oconsole/Cargo.toml",
@@ -707,7 +707,7 @@
     },
     {
       "path": "crates/onesimus-dird/src/command_registry.rs",
-      "sha256": "798ec06d8116d9e9db939e4badcc0b508c9dee87075d6586a5d3acf7daea7a45"
+      "sha256": "2a6afd3d26385b56cd749cc6457cf1747bc5d1e04c82be53b8b2a07b4da238d4"
     },
     {
       "path": "crates/onesimus-dird/src/commands/acl.rs",
@@ -743,7 +743,7 @@
     },
     {
       "path": "crates/onesimus-dird/src/commands/extra.rs",
-      "sha256": "af8b7edd6a23c5d72bca186051490aa49f70b5430a909dbf0236dd53e382abc0"
+      "sha256": "05b87ae0143bbeea22960c01de2a8bc207649b6f59b47f83da870d8a72d683d5"
     },
     {
       "path": "crates/onesimus-dird/src/commands/job.rs",
@@ -755,7 +755,11 @@
     },
     {
       "path": "crates/onesimus-dird/src/commands/mod.rs",
-      "sha256": "00e346d5259bd548ccb470642995bc6d9a34f01c36b3026a766c6d9135655d70"
+      "sha256": "e00fc1060ad6eebd5f2d3a34538367bec4579e1adf19580e29e06710b901851b"
+    },
+    {
+      "path": "crates/onesimus-dird/src/commands/resolve.rs",
+      "sha256": "82e9115d5b8effafdb814782eac03a2f139f437e19d8033e0dd0f83bf8155c78"
     },
     {
       "path": "crates/onesimus-dird/src/commands/show.rs",
@@ -775,7 +779,7 @@
     },
     {
       "path": "crates/onesimus-dird/src/fd_protocol.rs",
-      "sha256": "84d09c8e376b6be24e5c75db96fcda0e0525fb2d628d4013955abfd712c30aae"
+      "sha256": "5f4376e6f496671d218f77f55f4dbf7992788d08d528fa77e8a638bf32fe6eb1"
     },
     {
       "path": "crates/onesimus-dird/src/job_worker.rs",
@@ -2440,7 +2444,7 @@
         },
         "implementation": {
           "file": "crates/onesimus-dird/src/commands/extra.rs",
-          "line": 415
+          "line": 389
         },
         "declared_arguments": [
           "pool"
@@ -2671,7 +2675,7 @@
         },
         "implementation": {
           "file": "crates/onesimus-dird/src/commands/extra.rs",
-          "line": 384
+          "line": 358
         },
         "declared_arguments": [
           "pool"
@@ -2716,7 +2720,7 @@
         },
         "implementation": {
           "file": "crates/onesimus-dird/src/commands/extra.rs",
-          "line": 352
+          "line": 326
         },
         "declared_arguments": [
           "volume",
@@ -2945,7 +2949,7 @@
         },
         "implementation": {
           "file": "crates/onesimus-dird/src/commands/extra.rs",
-          "line": 452
+          "line": 426
         },
         "declared_arguments": [
           "storage"
@@ -3072,7 +3076,7 @@
         },
         "implementation": {
           "file": "crates/onesimus-dird/src/commands/extra.rs",
-          "line": 440
+          "line": 414
         },
         "declared_arguments": [
           "storage"
@@ -3423,7 +3427,7 @@
         },
         "implementation": {
           "file": "crates/onesimus-dird/src/commands/extra.rs",
-          "line": 464
+          "line": 438
         },
         "declared_arguments": [],
         "status": "semantic_mismatch",
@@ -3712,7 +3716,7 @@
         },
         "implementation": {
           "file": "crates/onesimus-dird/src/commands/extra.rs",
-          "line": 329
+          "line": 303
         },
         "declared_arguments": [
           "storage",
@@ -3840,7 +3844,7 @@
         },
         "implementation": {
           "file": "crates/onesimus-dird/src/commands/extra.rs",
-          "line": 295
+          "line": 269
         },
         "declared_arguments": [
           "jobid"
@@ -3878,21 +3882,22 @@
       ],
       "onesimus": {
         "canonical_name": "resolve",
-        "handler": "commands::extra::cmd_resolve",
+        "handler": "commands::resolve::cmd_resolve",
         "registry": {
           "file": "crates/onesimus-dird/src/command_registry.rs",
           "line": 246
         },
         "implementation": {
-          "file": "crates/onesimus-dird/src/commands/extra.rs",
-          "line": 269
+          "file": "crates/onesimus-dird/src/commands/resolve.rs",
+          "line": 6
         },
         "declared_arguments": [
-          "client"
+          "client",
+          "storage"
         ],
         "status": "partial",
         "findings": [
-          "Löst Clientnamen oder einen Hostnamen auf; die originale storage=<name>-Auflösung fehlt im Handler."
+          "Mehrere Hostnamen werden jetzt wahlweise lokal oder auf dem mit client=/fd=/storage= ausgewählten Daemon aufgelöst. FD und SD können gemeinsam angesprochen werden. IPv4-/IPv6-Ausgabe entspricht dem Originalformat; Antworten mehrerer BNET-Frames und deren Zeilenenden bleiben erhalten. Unbekannte Ziele fallen nicht auf lokale DNS-Auflösung zurück. Tests prüfen Routing, Ausgabe und Fehlerpfade. ACL-Abgleich, Legacy-/Nicht-TLS-Verbindungen und Live-SHA-256-Parität bleiben offen."
         ],
         "functional_parity_verified": false
       },
