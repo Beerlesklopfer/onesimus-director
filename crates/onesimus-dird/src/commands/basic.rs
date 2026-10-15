@@ -69,10 +69,14 @@ fn description(entry: &HelpEntry) -> &str {
     if entry.0 == ".locations" && entry.1 == "NULL" { "" } else { entry.1 }
 }
 
-fn help_object(entry: &HelpEntry, arguments: String) -> serde_json::Value {
+fn usage(entry: &HelpEntry) -> &'static str {
+    if entry.0 == "configure" { super::configure_usage::USAGE } else { entry.2 }
+}
+
+fn help_object(entry: &HelpEntry, arguments: String, permission:bool) -> serde_json::Value {
     serde_json::json!({
         "command": entry.0, "description": description(entry),
-        "arguments": arguments, "permission": true,
+        "arguments": arguments, "permission": permission,
     })
 }
 
@@ -131,14 +135,16 @@ pub fn cmd_help(ast: &CommandAst, ctx: &ExecContext) -> CommandResult {
         text.push_str(&format!("\nCan't find {topic} command.\n\n"));
     }
     for entry in selected {
-        let arguments = rewrap_help(entry.2, if topic.is_some() { 45 } else { 0 }, human);
+        let permission=crate::acl::access(ctx,crate::acl::Kind::Command,entry.0);
+        if topic.is_none() && !permission {continue;}
+        let arguments = rewrap_help(usage(entry), if topic.is_some() { 45 } else { 0 }, human);
         if ctx.api_mode != ApiMode::Json {
             text.push_str(&format!("  {:<18} {}\n", entry.0, description(entry)));
             if topic.is_some() {
                 text.push_str(&format!("\nArguments:\n\t{arguments}\n"));
             }
         }
-        objects.insert(entry.0.to_lowercase(), help_object(entry, arguments));
+        objects.insert(entry.0.to_lowercase(), help_object(entry, arguments, permission));
     }
     if human { text.push_str(HELP_FOOTER); }
     CommandResult::ok(text).with_json(serde_json::Value::Object(objects))
@@ -151,6 +157,7 @@ pub fn cmd_dot_help(ast: &CommandAst, ctx: &ExecContext) -> CommandResult {
     }
     let item = ast.arguments.iter().find(|a| a.key.eq_ignore_ascii_case("item"))
         .and_then(|a| a.value.as_deref());
+    let full=ast.arguments.iter().any(|a|a.key.eq_ignore_ascii_case("full"));
     let all = ast.arguments.iter().any(|a| a.key.eq_ignore_ascii_case("all"));
     let selected: Vec<_> = match item {
         Some(name) => UA_COMMANDS.iter().filter(|c| c.0 == name).collect(),
@@ -159,7 +166,9 @@ pub fn cmd_dot_help(ast: &CommandAst, ctx: &ExecContext) -> CommandResult {
     let mut text = String::new();
     let mut objects = serde_json::Map::new();
     for entry in selected {
-        let arguments = rewrap_help(entry.2, 0, false);
+        let permission=crate::acl::access(ctx,crate::acl::Kind::Command,entry.0);
+        if item.is_none() && !full && !permission {continue;}
+        let arguments = rewrap_help(usage(entry), 0, false);
         if ctx.api_mode != ApiMode::Json {
             if item.is_some() {
                 text.push_str(&format!("{arguments}\n"));
@@ -169,7 +178,7 @@ pub fn cmd_dot_help(ast: &CommandAst, ctx: &ExecContext) -> CommandResult {
                 text.push_str(&format!("{} {} -- {arguments}\n", entry.0, description(entry)));
             }
         }
-        objects.insert(entry.0.to_lowercase(), help_object(entry, arguments));
+        objects.insert(entry.0.to_lowercase(), help_object(entry, arguments, permission));
     }
     CommandResult::ok(text).with_json(serde_json::Value::Object(objects))
 }
@@ -218,7 +227,7 @@ mod help_tests {
     #[test]
     fn dot_help_variants_have_upstream_selection_and_text_order() {
         let all: String = UA_COMMANDS.iter().filter(|c| !c.0.starts_with('.')).map(|c| format!("{}\n", c.0)).collect();
-        let every: String = UA_COMMANDS.iter().map(|c| format!("{} {} -- {}\n", c.0, description(c), rewrap_help(c.2, 0, false))).collect();
+        let every: String = UA_COMMANDS.iter().map(|c| format!("{} {} -- {}\n", c.0, description(c), rewrap_help(usage(c), 0, false))).collect();
         for mode in [ApiMode::Human, ApiMode::Api] {
             assert_eq!(execute(".help", mode).text_output, every);
             assert_eq!(execute(".help full", mode).text_output, every);
@@ -269,6 +278,21 @@ mod help_tests {
         assert!(human.text_output.contains(&rewrap_help(run.2, 45, true)));
         assert!(execute("help run", ApiMode::Api).text_output.contains(run.2));
         assert_eq!(execute("help run", ApiMode::Json).json.unwrap()["run"]["arguments"], run.2);
+    }
+
+    #[test]
+    fn configure_help_uses_generated_resource_syntax_in_every_variant() {
+        let original = super::super::configure_usage::USAGE;
+        assert!(original.starts_with("add client name=<NAME>"));
+        assert!(original.ends_with("export client=<client>"));
+        for command in ["help configure", ".help item=configure", ".help", ".help all"] {
+            let result=execute(command,ApiMode::Json);
+            assert_eq!(result.json.unwrap()["configure"]["arguments"],rewrap_help(original,0,false));
+        }
+        let text=execute(".help item=configure",ApiMode::Api).text_output;
+        assert_eq!(text,format!("{}\n",rewrap_help(original,0,false)));
+        assert!(!text.contains("GetUsageStringForConsoleConfigureCommand"));
+        assert!(execute("help configure",ApiMode::Human).text_output.contains("export client=<client>"));
     }
 
     #[test]
