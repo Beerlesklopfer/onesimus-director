@@ -145,6 +145,10 @@ impl Migrator {
                 for stmt in &stmts {
                     let trimmed = stmt.trim();
                     if trimmed.is_empty() || trimmed.starts_with("--") { continue; }
+                    if let Some(op) = destructive_op(trimmed) {
+                        warn!("migration stmt skipped ({op} could reset ids in the shared catalog)\n  SQL: {}", &trimmed[..trimmed.len().min(120)]);
+                        continue;
+                    }
                     debug!("  {}", &trimmed[..trimmed.len().min(80)]);
                     if let Err(e) = sqlx::query(trimmed).execute(pool).await {
                         warn!("migration stmt failed: {e}\n  SQL: {}", &trimmed[..trimmed.len().min(120)]);
@@ -162,6 +166,10 @@ impl Migrator {
                     for stmt in &stmts {
                         let trimmed = stmt.trim();
                         if trimmed.is_empty() || trimmed.starts_with("--") { continue; }
+                        if let Some(op) = destructive_op(trimmed) {
+                            warn!("migration stmt skipped ({op} could reset ids in the shared catalog)\n  SQL: {}", &trimmed[..trimmed.len().min(120)]);
+                            continue;
+                        }
                         debug!("  {}", &trimmed[..trimmed.len().min(80)]);
                         if let Err(e) = sqlx::query(trimmed).execute(pool).await {
                             warn!("migration stmt failed: {e}\n  SQL: {}", &trimmed[..trimmed.len().min(120)]);
@@ -176,6 +184,7 @@ impl Migrator {
         }
 
         repair_cpp_version(pool, &versions).await?;
+        check_sequences(pool).await?;
 
         if applied == 0 {
             let latest = versions.last().map(|s| s.version).unwrap_or(0);
@@ -191,9 +200,7 @@ impl Migrator {
         let mut found: Option<u32> = None;
 
         // 1. C++ Version-Tabelle (VersionId) — Bareos-Basisschema
-        let cpp_exists: bool = sqlx::query_scalar(
-            "SELECT EXISTS(SELECT 1 FROM information_schema.tables WHERE table_name = 'version')"
-        ).fetch_one(pool).await?;
+        let cpp_exists = table_exists(pool, "version").await?;
         if cpp_exists {
             let version: Option<i32> = sqlx::query_scalar(
                 "SELECT MAX(versionid) FROM version"
@@ -205,9 +212,7 @@ impl Migrator {
         }
 
         // 2. Unsere Version-Tabelle — enthält auch die Onesimus-Erweiterungen
-        let our_exists: bool = sqlx::query_scalar(
-            "SELECT EXISTS(SELECT 1 FROM information_schema.tables WHERE table_name = 'bareos_schema_version')"
-        ).fetch_one(pool).await?;
+        let our_exists = table_exists(pool, "bareos_schema_version").await?;
         if our_exists {
             let version: Option<i32> = sqlx::query_scalar(
                 "SELECT MAX(version) FROM bareos_schema_version"
@@ -243,9 +248,7 @@ impl Migrator {
             return Ok(());
         }
 
-        let cpp_exists: bool = sqlx::query_scalar(
-            "SELECT EXISTS(SELECT 1 FROM information_schema.tables WHERE table_name = 'version')"
-        ).fetch_one(pool).await.unwrap_or(false);
+        let cpp_exists = table_exists(pool, "version").await.unwrap_or(false);
         if cpp_exists {
             sqlx::query("DELETE FROM version").execute(pool).await?;
             sqlx::query("INSERT INTO version (versionid) VALUES ($1)")
@@ -256,6 +259,114 @@ impl Migrator {
 
         Ok(())
     }
+}
+
+/// Statement kinds a migration must never run against a catalog it shares
+/// with the Bareos Director: each drops data or moves a sequence, after
+/// which new rows reuse ids (Compatibility log C-039). Migrations are
+/// strictly additive (CREATE ... IF NOT EXISTS, ADD COLUMN, CREATE OR
+/// REPLACE FUNCTION/VIEW).
+fn destructive_op(stmt: &str) -> Option<&'static str> {
+    let upper = stmt.to_ascii_uppercase();
+    let words: Vec<&str> = upper
+        .split(|c: char| !(c.is_ascii_alphanumeric() || c == '_'))
+        .filter(|w| !w.is_empty())
+        .collect();
+    let starts = |prefix: &[&str]| words.len() >= prefix.len() && words[..prefix.len()] == *prefix;
+    if starts(&["DROP", "TABLE"]) || starts(&["DROP", "SEQUENCE"]) || starts(&["DROP", "SCHEMA"]) {
+        Some("DROP")
+    } else if starts(&["TRUNCATE"]) {
+        Some("TRUNCATE")
+    } else if starts(&["ALTER", "SEQUENCE"]) {
+        Some("ALTER SEQUENCE")
+    } else if words.contains(&"SETVAL") {
+        Some("setval")
+    } else if starts(&["ALTER", "TABLE"]) && (words.contains(&"IDENTITY") || words.contains(&"RESTART")) {
+        Some("ALTER TABLE ... IDENTITY")
+    } else if starts(&["ALTER", "TABLE"]) && words.contains(&"DROP") {
+        Some("ALTER TABLE ... DROP")
+    } else {
+        None
+    }
+}
+
+/// Whether `name` resolves to a table on the connection's `search_path` —
+/// the same lookup the unqualified statements here use, so a catalog in
+/// another schema of the same database is never mistaken for this one.
+async fn table_exists(pool: &sqlx::PgPool, name: &str) -> Result<bool, OrmError> {
+    Ok(sqlx::query_scalar("SELECT to_regclass($1) IS NOT NULL")
+        .bind(name)
+        .fetch_one(pool)
+        .await?)
+}
+
+/// A serial sequence whose next value is already taken in its table: the
+/// next insert relying on the column default reuses an id or fails with a
+/// duplicate key (Compatibility log C-039).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SequenceLag {
+    pub sequence: String,
+    pub table: String,
+    pub column: String,
+    /// Value the next `nextval()` returns.
+    pub next_value: i64,
+    pub max_id: i64,
+}
+
+impl SequenceLag {
+    /// SQL that moves the sequence to the highest id. It only ever advances
+    /// the sequence; Onesimus never runs it itself — the catalog belongs to
+    /// the Bareos Director, the operator decides.
+    pub fn repair_sql(&self) -> String {
+        format!(
+            "SELECT setval('{}', (SELECT MAX({}) FROM {}));",
+            quote_ident(&self.sequence).replace('\'', "''"),
+            quote_ident(&self.column),
+            quote_ident(&self.table)
+        )
+    }
+}
+
+fn quote_ident(name: &str) -> String {
+    format!("\"{}\"", name.replace('"', "\"\""))
+}
+
+/// Read-only check of every column-owned sequence in the `search_path`
+/// schema against the highest id of its column. Lagging sequences are
+/// logged with their repair SQL but never changed: the catalog is shared
+/// with the Bareos Director, and resetting or lowering a sequence would let
+/// both Directors reuse ids. Cause seen in C-039: rows copied with explicit
+/// ids into a freshly created catalog (`\copy` without `setval`).
+pub async fn check_sequences(pool: &sqlx::PgPool) -> Result<Vec<SequenceLag>, OrmError> {
+    let owned: Vec<(String, String, String)> = sqlx::query_as(
+        "SELECT s.relname::text, t.relname::text, a.attname::text \
+         FROM pg_class s \
+         JOIN pg_depend d ON d.classid = 'pg_class'::regclass AND d.objid = s.oid \
+              AND d.refclassid = 'pg_class'::regclass AND d.deptype IN ('a', 'i') \
+         JOIN pg_class t ON t.oid = d.refobjid \
+         JOIN pg_attribute a ON a.attrelid = t.oid AND a.attnum = d.refobjsubid \
+         WHERE s.relkind = 'S' AND s.relnamespace = to_regnamespace(current_schema())::oid \
+         ORDER BY s.relname"
+    ).fetch_all(pool).await?;
+
+    let mut lags = Vec::new();
+    for (sequence, table, column) in owned {
+        let (last_value, is_called): (i64, bool) = sqlx::query_as(&format!(
+            "SELECT last_value, is_called FROM {}", quote_ident(&sequence)
+        )).fetch_one(pool).await?;
+        let max_id: Option<i64> = sqlx::query_scalar(&format!(
+            "SELECT MAX({})::bigint FROM {}", quote_ident(&column), quote_ident(&table)
+        )).fetch_one(pool).await?;
+        let next_value = if is_called { last_value + 1 } else { last_value };
+        if let Some(max_id) = max_id.filter(|&m| next_value <= m) {
+            let lag = SequenceLag { sequence, table, column, next_value, max_id };
+            warn!("catalog sequence {} hands out {} next, but {}.{} already reaches {}: ids would be reused \
+                   (not repaired automatically): {}",
+                  lag.sequence, lag.next_value, lag.table, lag.column, lag.max_id, lag.repair_sql());
+            lags.push(lag);
+        }
+    }
+    Ok(lags)
 }
 
 /// Schema files authored by Onesimus extend the catalog (views, functions)
@@ -319,6 +430,70 @@ mod tests {
         assert!(!stmts.is_empty());
         let sql = stmts.join("\n");
         assert!(sql.contains("CREATE TABLE IF NOT EXISTS job"));
+    }
+
+    #[test]
+    fn destructive_statements_are_recognised() {
+        for stmt in [
+            "DROP TABLE IF EXISTS job CASCADE",
+            "drop sequence job_jobid_seq",
+            "TRUNCATE job RESTART IDENTITY",
+            "ALTER SEQUENCE job_jobid_seq RESTART WITH 1",
+            "SELECT setval('job_jobid_seq', 1)",
+            "ALTER TABLE job ALTER COLUMN jobid ADD GENERATED ALWAYS AS IDENTITY",
+            "ALTER TABLE job DROP COLUMN comment",
+        ] {
+            assert!(destructive_op(stmt).is_some(), "{stmt}");
+        }
+        for stmt in [
+            "CREATE TABLE IF NOT EXISTS job (jobid serial NOT NULL)",
+            "ALTER TABLE job ADD COLUMN metadata jsonb",
+            "CREATE INDEX IF NOT EXISTS job_name_idx ON job (name)",
+            "CREATE OR REPLACE VIEW vw_job_summary AS SELECT jobid FROM job",
+        ] {
+            assert_eq!(destructive_op(stmt), None, "{stmt}");
+        }
+    }
+
+    /// The shipped migrations are additive: no statement may drop data or
+    /// touch a sequence, and Onesimus versions add no Bareos tables/columns
+    /// (C-039).
+    #[test]
+    fn shipped_migrations_never_touch_sequences() {
+        let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("schema");
+        let versions = Migrator::new(&dir).load_versions().unwrap();
+        assert!(versions.len() >= 3);
+        let base = &versions[0];
+        assert_eq!(base.version, 2250, "Bareos 25.1.2 base schema (BDB_VERSION)");
+        assert!(!is_onesimus_extension(base));
+        let mut stmts = base.to_statements();
+        for pair in versions.windows(2) {
+            let diff = Migrator::diff(&pair[0], &pair[1]);
+            assert!(is_onesimus_extension(&pair[1]),
+                "v{} would be written to the Bareos version table", pair[1].version);
+            for table in &base.tables {
+                let alter = format!("ALTER TABLE {} ", table.name);
+                assert!(!diff.iter().any(|s| s.starts_with(&alter)),
+                    "v{} changes Bareos table {}", pair[1].version, table.name);
+            }
+            stmts.extend(diff);
+        }
+        // Comment lines are not executed by migrate() (diff marks tables
+        // missing from an extension file as "-- DROP TABLE ...").
+        for stmt in stmts.iter().filter(|s| !s.trim().starts_with("--")) {
+            assert_eq!(destructive_op(stmt.trim()), None, "{stmt}");
+            assert!(!stmt.to_ascii_uppercase().contains("SETVAL"), "{stmt}");
+        }
+    }
+
+    #[test]
+    fn repair_sql_only_advances_to_max() {
+        let lag = SequenceLag {
+            sequence: "job_jobid_seq".into(), table: "job".into(), column: "jobid".into(),
+            next_value: 9, max_id: 629,
+        };
+        assert_eq!(lag.repair_sql(),
+            "SELECT setval('\"job_jobid_seq\"', (SELECT MAX(\"jobid\") FROM \"job\"));");
     }
 
     #[test]
