@@ -1,0 +1,7 @@
+# Compatibility log C-003: resource-chain order of plain listings (API 2 JSON variants).
+{"id": "c003-dot_consoles-api2", "steps": [".consoles"], "setup": [".api 2"]}
+{"id": "c003-dot_msgs-api2", "steps": [".msgs"], "setup": [".api 2"]}
+{"id": "c003-dot_filesets-api2", "steps": [".filesets"], "setup": [".api 2"]}
+{"id": "c003-dot_schedule-api2", "steps": [".schedule"], "setup": [".api 2"]}
+{"id": "c003-dot_profiles-api2", "steps": [".profiles"], "setup": [".api 2"]}
+{"id": "c003-dot_jobs-enabled", "steps": [".jobs enabled"]}

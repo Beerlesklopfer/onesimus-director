@@ -191,10 +191,14 @@ pub fn cmd_dot_catalogs(_ast: &CommandAst, ctx: &ExecContext) -> CommandResult {
         cfg.catalogs.iter().map(|c| (c.name.as_str(), None))))
 }
 
-/// `.consoles`
+/// `.consoles` — the Console chain, which ends with the internal `*UserAgent*`
+/// console the C++ Director appends after loading the configuration.
 pub fn cmd_dot_consoles(_ast: &CommandAst, ctx: &ExecContext) -> CommandResult {
+    use crate::director_config::USER_AGENT_CONSOLE;
     with_config(ctx, "consoles", |cfg| name_list("consoles", "name",
-        cfg.consoles.iter().map(|c| (c.name.as_str(), None))))
+        cfg.consoles.iter().map(|c| c.name.as_str())
+            .chain((!cfg.director.name.is_empty()).then_some(USER_AGENT_CONSOLE))
+            .map(|name| (name, None))))
 }
 
 /// `.jobdefs`
@@ -530,5 +534,19 @@ mod users_tests {
         let result = cmd_dot_users(&CommandAst::default(), &ctx);
         assert_eq!(result.text_output, "alice\nbob\n");
         assert_eq!(result.json.unwrap(), json!({"users":[{"name":"alice"},{"name":"bob"}]}));
+    }
+
+    #[test]
+    fn consoles_keep_chain_order_and_end_with_user_agent() {
+        let config = crate::director_config::DirectorConfig::from_str(
+            "Director { Name = dir }\nConsole { Name = zeta }\nConsole { Name = alpha }"
+        ).unwrap();
+        let ctx = ExecContext { session_id: 0, config: Some(Arc::new(RwLock::new(config))),
+            session_mgr: None, catalog: None, api_mode: crate::command_executor::ApiMode::Human,
+            bus_rx: None, job_manager: None };
+        let result = cmd_dot_consoles(&CommandAst::default(), &ctx);
+        assert_eq!(result.text_output, "zeta\nalpha\n*UserAgent*\n");
+        assert_eq!(result.json.unwrap(),
+            json!({"consoles":[{"name":"zeta"},{"name":"alpha"},{"name":"*UserAgent*"}]}));
     }
 }

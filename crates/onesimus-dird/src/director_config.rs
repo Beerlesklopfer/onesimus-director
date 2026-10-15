@@ -10,6 +10,8 @@ use bareos_config::resources::*;
 use bareos_config::parser::{self, ConfigError};
 
 /// All parsed configuration resources, shareable across threads.
+/// Every vector keeps the C++ resource-chain order (config files in reverse
+/// glob order, see `parser::parse_config_dir`), which listings show unchanged.
 #[derive(Debug, Clone)]
 pub struct DirectorConfig {
     pub director: DirectorResource,
@@ -180,6 +182,23 @@ impl DirectorConfig {
     }
 }
 
+/// Name of the Console resource the C++ Director adds after loading the
+/// configuration (dird_conf.cc CreateAndAddUserAgentConsoleResource): it is
+/// appended to the end of the Console chain whenever a Director resource
+/// exists, so `foreach_res(R_CONSOLE)` listings end with it.
+pub const USER_AGENT_CONSOLE: &str = "*UserAgent*";
+
+/// Resource names for a selection prompt (ua_select.cc StartPrompt lists):
+/// the C++ Director collects the names in resource-chain order and applies
+/// SortCaseInsensitive (lib/util.cc) — ASCII lowercase, byte comparison.
+/// Plain listings (dot commands, `show`) keep the chain order of the vectors
+/// in [`DirectorConfig`] instead.
+pub fn sort_case_insensitive<'a>(names: impl IntoIterator<Item = &'a str>) -> Vec<&'a str> {
+    let mut names: Vec<&str> = names.into_iter().collect();
+    names.sort_by_cached_key(|name| name.to_ascii_lowercase());
+    names
+}
+
 /// Thread-safe shared config handle.
 pub type SharedConfig = Arc<RwLock<DirectorConfig>>;
 
@@ -295,6 +314,13 @@ Console {
 
         assert_eq!(config.consoles.len(), 1);
         assert_eq!(config.consoles[0].name, "admin");
+    }
+
+    #[test]
+    fn selection_names_sort_case_insensitively() {
+        // ua_select.cc select_job_resource: chain order in, SortCaseInsensitive out
+        let chain = ["backup-bareos-fd", "RestoreFiles", "BackupCatalog"];
+        assert_eq!(sort_case_insensitive(chain), ["backup-bareos-fd", "BackupCatalog", "RestoreFiles"]);
     }
 
     #[test]

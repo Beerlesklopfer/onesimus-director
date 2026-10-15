@@ -22,7 +22,8 @@ pub fn cmd_run(ast: &CommandAst, ctx: &ExecContext) -> CommandResult {
         None => {
             if let Some(config) = &ctx.config {
                 if let Ok(cfg) = config.read() {
-                    let jobs: Vec<_> = cfg.jobs.iter().map(|j| j.name.as_str()).collect();
+                    let jobs = crate::director_config::sort_case_insensitive(
+                        cfg.jobs.iter().map(|j| j.name.as_str()));
                     if jobs.is_empty() {
                         return CommandResult::ok("No jobs configured\n".to_string());
                     }

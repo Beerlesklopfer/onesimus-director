@@ -39,28 +39,27 @@ pub fn parse_config_dir(dir: &std::path::Path) -> Result<Vec<Resource>, ConfigEr
     let dir_d = dir.join("bareos-dir.d");
     let config_dir = if dir_d.is_dir() { &dir_d } else { dir };
 
-    // C++ globs <path>/*/*.conf — one level of subdirectories, not recursive.
-    // Collect all .conf files from immediate subdirectories.
+    // C++ globs <path>/*/*.conf — one level of subdirectories, not recursive —
+    // and lex_add() pushes every matched file on a stack, so the last file in
+    // glob order is read first. Resources are appended to their type's chain
+    // in read order, which is the order every listing (foreach_res) shows.
     let entries = std::fs::read_dir(config_dir)
         .map_err(|e| ConfigError::ParseError(format!("readdir {}: {e}", config_dir.display())))?;
-    let mut paths: Vec<_> = entries.filter_map(|e| e.ok()).map(|e| e.path()).collect();
-    paths.sort();
-
-    for subdir in &paths {
+    let mut conf_files = Vec::new();
+    for subdir in entries.filter_map(|e| e.ok()).map(|e| e.path()) {
         if !subdir.is_dir() { continue; }
-        let sub_entries = std::fs::read_dir(subdir)
+        let sub_entries = std::fs::read_dir(&subdir)
             .map_err(|e| ConfigError::ParseError(format!("readdir {}: {e}", subdir.display())))?;
-        let mut conf_files: Vec<_> = sub_entries
+        conf_files.extend(sub_entries
             .filter_map(|e| e.ok())
             .map(|e| e.path())
-            .filter(|p| p.extension().map(|e| e == "conf").unwrap_or(false))
-            .collect();
-        conf_files.sort();
-        // Each file on its own: resources never span files, and errors can
-        // name the file (and line) like the C++ parser does.
-        for conf in conf_files {
-            all.extend(parse_config_file(&conf)?);
-        }
+            .filter(|p| p.extension().map(|e| e == "conf").unwrap_or(false) && p.is_file()));
+    }
+    crate::raw::sort_like_glob(&mut conf_files);
+    // Each file on its own: resources never span files, and errors can
+    // name the file (and line) like the C++ parser does.
+    for conf in conf_files.iter().rev() {
+        all.extend(parse_config_file(conf)?);
     }
     Ok(all)
 }
@@ -825,6 +824,28 @@ Director {
         let err = parse_config_dir(&dir).unwrap_err().to_string();
         std::fs::remove_dir_all(&dir).unwrap();
         assert!(err.contains("director/bad.conf"), "{err}");
+    }
+
+    #[test]
+    fn config_dir_is_read_in_reverse_glob_order() {
+        // lex_open_file(): glob() sorts, lex_add() stacks — last file first,
+        // resources inside one file keep their order.
+        let dir = std::env::temp_dir().join(format!("bareos-config-order-{}", std::process::id()));
+        std::fs::create_dir_all(dir.join("pool")).unwrap();
+        std::fs::create_dir_all(dir.join("profile")).unwrap();
+        for name in ["Differential", "Full", "Incremental", "Scratch"] {
+            std::fs::write(dir.join(format!("pool/{name}.conf")), format!("Pool {{\n  Name = {name}\n}}\n")).unwrap();
+        }
+        std::fs::write(dir.join("profile/Both.conf"), "Profile {\n  Name = first\n}\nProfile {\n  Name = second\n}\n").unwrap();
+        std::fs::write(dir.join("pool/notes.txt"), "not a config file").unwrap();
+        let resources = parse_config_dir(&dir).unwrap();
+        std::fs::remove_dir_all(&dir).unwrap();
+        let names: Vec<String> = resources.iter().map(|r| match r {
+            Resource::Pool(p) => p.name.clone(),
+            Resource::Profile(p) => p.name.clone(),
+            other => panic!("unexpected {other:?}"),
+        }).collect();
+        assert_eq!(names, ["first", "second", "Scratch", "Incremental", "Full", "Differential"]);
     }
 
     #[test]
