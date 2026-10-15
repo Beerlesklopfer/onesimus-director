@@ -267,7 +267,7 @@ def run(args):
         # Each side works on its own throw-away copy of the catalog template,
         # so neither live cases nor one side's effects can change shared data.
         if not args.shared_db:
-            args.db = f'parity_{os.getpid()}_{side}'
+            args.db = f'parity_{os.getpid()}'  # same name on both sides: show/use print it
             create_catalog_copy(args.db, template)
         try:
             setup(args)
