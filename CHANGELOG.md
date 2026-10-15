@@ -31,4 +31,8 @@ onesimus (25.1.2+onesimus.0.2.0-2) UNRELEASED; urgency=medium
     development policies. Compile the execute handler and write CLI option
     only for development; retain runtime opt-in and force Debian production builds.
 
+  * Add the full AGPL-3.0-only license to Director and proto repositories,
+    make Cargo/SPDX and Debian copyright metadata explicit, and update the
+    maintainer contact to Joerg.Bernau@onesimus.io.
+
  -- Joerg Bernau <Joerg.Bernau@onesimus.io>  Thu, 15 Oct 2026 14:00:00 +0200

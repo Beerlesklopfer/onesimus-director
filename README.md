@@ -178,4 +178,6 @@ dpkg-buildpackage -us -uc -b
 
 ## License
 
-AGPL-3.0
+GNU Affero General Public License v3.0 only (`AGPL-3.0-only`); see [LICENSE](LICENSE).
+
+Maintainer: Joerg Bernau <Joerg.Bernau@onesimus.io>.

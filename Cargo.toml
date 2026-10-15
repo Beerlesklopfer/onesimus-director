@@ -20,8 +20,8 @@ plugins = ["crates/bareos-plugins"]
 # <Bareos version this Director is compatible with>+onesimus.<Onesimus (GUI) version>
 version = "25.1.2+onesimus.0.2.0"
 edition = "2024"
-authors = ["Joerg Bernau <joerg@bernau.family>"]
-license = "AGPL-3.0"
+authors = ["Joerg Bernau <Joerg.Bernau@onesimus.io>"]
+license = "AGPL-3.0-only"
 repository = "https://github.com/Beerlesklopfer/onesimus-director"
 
 [workspace.dependencies]
