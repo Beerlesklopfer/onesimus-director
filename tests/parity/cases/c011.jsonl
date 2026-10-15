@@ -89,3 +89,8 @@
 {"id": "c011-update-slots", "steps": ["update slots"]}
 {"id": "c011-update-jobid-missing", "steps": ["update jobid"]}
 {"id": "c011-update-api1-cancel", "setup": [".api 1"], "steps": ["update", "."]}
+{"id": "c011-query-prompt-cancel", "steps": ["query", "3", "."]}
+{"id": "c011-query-client", "steps": ["query", "3", "bareos-fd"]}
+{"id": "c011-query-api1-cancel", "setup": [".api 1"], "steps": ["query", "."]}
+{"id": "c011-sqlquery-multiline", "steps": ["sqlquery", "select count(*)", "from pool;", ""]}
+{"id": "c011-sqlquery-args-ignored", "steps": ["sqlquery select 1;", ""]}
