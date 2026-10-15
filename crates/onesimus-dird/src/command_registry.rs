@@ -240,7 +240,7 @@ pub fn build_registry() -> Vec<CommandDef> {
             arg_resource("storage", "Storage Daemon", ".storages"),
             arg("dir", "Select the Director"), arg("all", "Select all daemons"),
         ], handler: commands::debug::cmd_setdebug, dot_command: false },
-        CommandDef { name: "setbandwidth", aliases: &[], description: "Set bandwidth limit", args: vec![arg_resource("client", "Client name", ".clients"), arg_int("limit", "KB/s")], handler: commands::extra::cmd_setbandwidth, dot_command: false },
+        CommandDef { name: "setbandwidth", aliases: &[], description: "Set bandwidth limit", args: vec![arg_resource("client", "Client name", ".clients"), arg_resource("storage", "Storage name", ".storages"), arg_int("limit", "KiB/s (0: unlimited)")], handler: commands::bandwidth::cmd_setbandwidth, dot_command: false },
         CommandDef { name: "setip", aliases: &[], description: "Update client IP address", args: vec![arg_resource("client", "Client name", ".clients")], handler: commands::extra::cmd_setip, dot_command: false },
         CommandDef { name: "setdevice", aliases: &[], description: "Set device parameters", args: vec![arg_resource("storage", "Storage name", ".storage")], handler: commands::extra::cmd_setdevice, dot_command: false },
         CommandDef { name: "resolve", aliases: &[], description: "DNS resolve hostname", args: vec![arg_resource("client", "Client name", ".clients")], handler: commands::extra::cmd_resolve, dot_command: false },

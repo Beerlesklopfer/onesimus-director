@@ -13,10 +13,10 @@ Dies ist ein statischer Quellcodeabgleich; es wurden keine Live-Jobs, Löschunge
 
 | Status | Anzahl | Bedeutung |
 |---|---:|---|
-| `partial` | 20 | Konkrete fehlende Optionen oder Teilfunktionen belegt |
+| `partial` | 21 | Konkrete fehlende Optionen oder Teilfunktionen belegt |
 | `registered_unverified` | 52 | Handler vorhanden; Funktionsparität nicht nachgewiesen |
 | `semantic_mismatch` | 2 | Abweichende Bedeutung gegenüber Bareos |
-| `stub` | 14 | Platzhalter statt der beschriebenen Wirkung |
+| `stub` | 13 | Platzhalter statt der beschriebenen Wirkung |
 
 ## Herkunft und Grenzen
 
@@ -116,7 +116,7 @@ Nur `--no-default-features --features mcp-development` kompiliert `execute` ein;
 | [resolve](resolve.md) | Resolve a hostname | `partial` |
 | [run](run.md) | Run a job | `partial` |
 | [status](status.md) | Report status | `partial` |
-| [setbandwidth](setbandwidth.md) | Sets bandwidth | `stub` |
+| [setbandwidth](setbandwidth.md) | Sets bandwidth | `partial` |
 | [setdebug](setdebug.md) | Sets debug level | `partial` |
 | [setdevice](setdevice.md) | Sets device parameter | `partial` |
 | [setip](setip.md) | Sets new client address -- if authorized | `stub` |

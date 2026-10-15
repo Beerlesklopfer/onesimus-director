@@ -707,7 +707,7 @@
     },
     {
       "path": "crates/onesimus-dird/src/command_registry.rs",
-      "sha256": "44d82e9540f19be76f2fab371a82f0292e6770615134946c25f06352fa2c118b"
+      "sha256": "798ec06d8116d9e9db939e4badcc0b508c9dee87075d6586a5d3acf7daea7a45"
     },
     {
       "path": "crates/onesimus-dird/src/commands/acl.rs",
@@ -716,6 +716,10 @@
     {
       "path": "crates/onesimus-dird/src/commands/admin.rs",
       "sha256": "8bb0a94fb392326b2b40677fda867e364c688b4f95cc0a2a90343c726e6a9a9b"
+    },
+    {
+      "path": "crates/onesimus-dird/src/commands/bandwidth.rs",
+      "sha256": "38290998874ebc1271a52dcc62582ce6adf99e6ec5ca16f5aec4441f4104d6f2"
     },
     {
       "path": "crates/onesimus-dird/src/commands/basic.rs",
@@ -739,7 +743,7 @@
     },
     {
       "path": "crates/onesimus-dird/src/commands/extra.rs",
-      "sha256": "b9a654dfb1cab6fabcf00541d5fd63612eb4b36a8ddde3daef3fa756eda8e958"
+      "sha256": "af8b7edd6a23c5d72bca186051490aa49f70b5430a909dbf0236dd53e382abc0"
     },
     {
       "path": "crates/onesimus-dird/src/commands/job.rs",
@@ -751,7 +755,7 @@
     },
     {
       "path": "crates/onesimus-dird/src/commands/mod.rs",
-      "sha256": "8e76cc686e911c49450119c1e2bd6ea9632867c16c6a9b1621d9a135fe3cf087"
+      "sha256": "00e346d5259bd548ccb470642995bc6d9a34f01c36b3026a766c6d9135655d70"
     },
     {
       "path": "crates/onesimus-dird/src/commands/show.rs",
@@ -830,10 +834,10 @@
     "top_level_commands": 88,
     "registered_top_level_commands": 88,
     "status_counts": {
-      "partial": 20,
+      "partial": 21,
       "registered_unverified": 52,
       "semantic_mismatch": 2,
-      "stub": 14
+      "stub": 13
     },
     "restore_file_selection_commands": 26,
     "onesimus_extra_names": 8
@@ -2436,7 +2440,7 @@
         },
         "implementation": {
           "file": "crates/onesimus-dird/src/commands/extra.rs",
-          "line": 421
+          "line": 415
         },
         "declared_arguments": [
           "pool"
@@ -2667,7 +2671,7 @@
         },
         "implementation": {
           "file": "crates/onesimus-dird/src/commands/extra.rs",
-          "line": 390
+          "line": 384
         },
         "declared_arguments": [
           "pool"
@@ -2712,7 +2716,7 @@
         },
         "implementation": {
           "file": "crates/onesimus-dird/src/commands/extra.rs",
-          "line": 358
+          "line": 352
         },
         "declared_arguments": [
           "volume",
@@ -2941,7 +2945,7 @@
         },
         "implementation": {
           "file": "crates/onesimus-dird/src/commands/extra.rs",
-          "line": 458
+          "line": 452
         },
         "declared_arguments": [
           "storage"
@@ -3068,7 +3072,7 @@
         },
         "implementation": {
           "file": "crates/onesimus-dird/src/commands/extra.rs",
-          "line": 446
+          "line": 440
         },
         "declared_arguments": [
           "storage"
@@ -3419,7 +3423,7 @@
         },
         "implementation": {
           "file": "crates/onesimus-dird/src/commands/extra.rs",
-          "line": 470
+          "line": 464
         },
         "declared_arguments": [],
         "status": "semantic_mismatch",
@@ -3708,7 +3712,7 @@
         },
         "implementation": {
           "file": "crates/onesimus-dird/src/commands/extra.rs",
-          "line": 335
+          "line": 329
         },
         "declared_arguments": [
           "storage",
@@ -3836,7 +3840,7 @@
         },
         "implementation": {
           "file": "crates/onesimus-dird/src/commands/extra.rs",
-          "line": 301
+          "line": 295
         },
         "declared_arguments": [
           "jobid"
@@ -3881,7 +3885,7 @@
         },
         "implementation": {
           "file": "crates/onesimus-dird/src/commands/extra.rs",
-          "line": 275
+          "line": 269
         },
         "declared_arguments": [
           "client"
@@ -4048,22 +4052,23 @@
       ],
       "onesimus": {
         "canonical_name": "setbandwidth",
-        "handler": "commands::extra::cmd_setbandwidth",
+        "handler": "commands::bandwidth::cmd_setbandwidth",
         "registry": {
           "file": "crates/onesimus-dird/src/command_registry.rs",
           "line": 243
         },
         "implementation": {
-          "file": "crates/onesimus-dird/src/commands/extra.rs",
-          "line": 215
+          "file": "crates/onesimus-dird/src/commands/bandwidth.rs",
+          "line": 7
         },
         "declared_arguments": [
           "client",
+          "storage",
           "limit"
         ],
-        "status": "stub",
+        "status": "partial",
         "findings": [
-          "Der Handler bestätigt limit per Text; er sendet kein Bandbreitenlimit an FD/SD oder laufende Jobs."
+          "client=/storage= senden jetzt tatsächliche setbandwidth-Pakete mit Umrechnung KiB/s zu Bytes/s; 0 hebt die Begrenzung auf. Ungültige Limits, Überlauf und negative Werte werden vor I/O abgelehnt; Erfolg erfordert die Daemon-Bestätigung. job/jobid/ujobid/state/all, interaktive Auswahl, NDMP/Legacy-Protokolle, ACL-Abgleich und Live-SHA-256-Parität bleiben offen. Jobselektoren werden bis dahin ausdrücklich abgelehnt, niemals in globale Limits umgedeutet."
         ],
         "functional_parity_verified": false
       },
@@ -4157,7 +4162,7 @@
         },
         "implementation": {
           "file": "crates/onesimus-dird/src/commands/extra.rs",
-          "line": 225
+          "line": 219
         },
         "declared_arguments": [
           "storage"
@@ -4199,7 +4204,7 @@
         },
         "implementation": {
           "file": "crates/onesimus-dird/src/commands/extra.rs",
-          "line": 221
+          "line": 215
         },
         "declared_arguments": [
           "client"

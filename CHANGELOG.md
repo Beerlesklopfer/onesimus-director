@@ -43,4 +43,8 @@ onesimus (25.1.2+onesimus.0.2.0-2) UNRELEASED; urgency=medium
     daemon endpoint deduplication, FD protocol-version handling and live log
     filter reload; control replies no longer wait for an absent EOD.
 
+  * setbandwidth: send actual client/storage limits using Bareos byte-rate
+    control packets, handle unlimited mode, reject overflow and unsupported
+    job selectors before I/O, and require a successful daemon acknowledgement.
+
  -- Joerg Bernau <Joerg.Bernau@onesimus.io>  Thu, 15 Oct 2026 14:00:00 +0200

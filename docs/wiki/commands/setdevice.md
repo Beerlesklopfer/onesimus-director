@@ -19,7 +19,7 @@ setdevice storage=<storage-name> device=<device-name> autoselect=<bool>
 
 - storage/device/autoselect werden jetzt validiert und als echter setdevice-Befehl an den SD gesendet; dessen Antwort wird weitergereicht. Protokoll- und Fehlerpfadtests bestehen. Storage-ACL-Abgleich und Live-SHA-256-Parität bleiben offen.
 
-**Lokaler Handler:** [crates/onesimus-dird/src/commands/extra.rs:225](../../../crates/onesimus-dird/src/commands/extra.rs).
+**Lokaler Handler:** [crates/onesimus-dird/src/commands/extra.rs:219](../../../crates/onesimus-dird/src/commands/extra.rs).
 
 Die folgenden vorhandenen Beispiele und Verhaltensbeschreibungen sind lokale Dokumentation; sie sind kein Beleg für vollständige Bareos-Kompatibilität. Bei Widersprüchen gilt der obige Befund.
 <!-- bareos-reference:end -->

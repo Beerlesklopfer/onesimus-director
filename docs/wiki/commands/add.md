@@ -19,7 +19,7 @@ add pool=<pool-name> storage=<storage-name> jobid=<jobid>
 
 - Der lokale Handler verlangt volume=<name> und legt einen vereinfachten Katalogdatensatz an; storage/jobid aus der Originalhilfe werden nicht ausgewertet. Die dokumentierte Originalsyntax ohne volume führt lokal nur zur Aufforderung, volume anzugeben.
 
-**Lokaler Handler:** [crates/onesimus-dird/src/commands/extra.rs:421](../../../crates/onesimus-dird/src/commands/extra.rs).
+**Lokaler Handler:** [crates/onesimus-dird/src/commands/extra.rs:415](../../../crates/onesimus-dird/src/commands/extra.rs).
 
 Die folgenden vorhandenen Beispiele und Verhaltensbeschreibungen sind lokale Dokumentation; sie sind kein Beleg für vollständige Bareos-Kompatibilität. Bei Widersprüchen gilt der obige Befund.
 <!-- bareos-reference:end -->

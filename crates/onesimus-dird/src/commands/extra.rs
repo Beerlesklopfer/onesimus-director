@@ -212,12 +212,6 @@ pub fn cmd_use(_ast: &CommandAst, _ctx: &ExecContext) -> CommandResult {
     CommandResult::ok("Using default catalog\n".to_string())
 }
 
-pub fn cmd_setbandwidth(ast: &CommandAst, _ctx: &ExecContext) -> CommandResult {
-    let limit = ast.arguments.iter().find(|a| a.key == "limit")
-        .and_then(|a| a.value.as_deref()).unwrap_or("0");
-    CommandResult::ok(format!("Bandwidth limit set to {limit}\n"))
-}
-
 pub fn cmd_setip(_ast: &CommandAst, _ctx: &ExecContext) -> CommandResult {
     CommandResult::ok("Client address updated\n".to_string())
 }

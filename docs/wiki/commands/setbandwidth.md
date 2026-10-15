@@ -15,11 +15,11 @@ setbandwidth [ client=<client-name> | storage=<storage-name> | jobid=<jobid> | j
 
 **RunScript erlaubt:** ja. **Audit-Ereignis:** ja. Beide Flags sind keine Read-only-Klassifizierung.
 
-**Onesimus-Status:** `stub`. Funktionsparität ist nicht durch einen Live-Test nachgewiesen.
+**Onesimus-Status:** `partial`. Funktionsparität ist nicht durch einen Live-Test nachgewiesen.
 
-- Der Handler bestätigt limit per Text; er sendet kein Bandbreitenlimit an FD/SD oder laufende Jobs.
+- client=/storage= senden jetzt tatsächliche setbandwidth-Pakete mit Umrechnung KiB/s zu Bytes/s; 0 hebt die Begrenzung auf. Ungültige Limits, Überlauf und negative Werte werden vor I/O abgelehnt; Erfolg erfordert die Daemon-Bestätigung. job/jobid/ujobid/state/all, interaktive Auswahl, NDMP/Legacy-Protokolle, ACL-Abgleich und Live-SHA-256-Parität bleiben offen. Jobselektoren werden bis dahin ausdrücklich abgelehnt, niemals in globale Limits umgedeutet.
 
-**Lokaler Handler:** [crates/onesimus-dird/src/commands/extra.rs:215](../../../crates/onesimus-dird/src/commands/extra.rs).
+**Lokaler Handler:** [crates/onesimus-dird/src/commands/bandwidth.rs:7](../../../crates/onesimus-dird/src/commands/bandwidth.rs).
 
 Die folgenden vorhandenen Beispiele und Verhaltensbeschreibungen sind lokale Dokumentation; sie sind kein Beleg für vollständige Bareos-Kompatibilität. Bei Widersprüchen gilt der obige Befund.
 <!-- bareos-reference:end -->

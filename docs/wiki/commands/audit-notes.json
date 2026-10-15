@@ -75,9 +75,9 @@
       ]
     },
     "setbandwidth": {
-      "status": "stub",
+      "status": "partial",
       "findings": [
-        "Der Handler bestätigt limit per Text; er sendet kein Bandbreitenlimit an FD/SD oder laufende Jobs."
+        "client=/storage= senden jetzt tatsächliche setbandwidth-Pakete mit Umrechnung KiB/s zu Bytes/s; 0 hebt die Begrenzung auf. Ungültige Limits, Überlauf und negative Werte werden vor I/O abgelehnt; Erfolg erfordert die Daemon-Bestätigung. job/jobid/ujobid/state/all, interaktive Auswahl, NDMP/Legacy-Protokolle, ACL-Abgleich und Live-SHA-256-Parität bleiben offen. Jobselektoren werden bis dahin ausdrücklich abgelehnt, niemals in globale Limits umgedeutet."
       ]
     },
     "setip": {
