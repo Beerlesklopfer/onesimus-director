@@ -33,6 +33,8 @@ pub enum DirJobPhase {
     Running,
     Paused,
     WaitingCatReq,
+    WaitingMedia,
+    WaitingMount,
     Finishing,
     Completed,
     Error,
@@ -46,11 +48,22 @@ impl DirJobPhase {
             Self::Running => "Running",
             Self::Paused => "Paused",
             Self::WaitingCatReq => "WaitingCatReq",
+            Self::WaitingMedia => "WaitingMedia",
+            Self::WaitingMount => "WaitingMount",
             Self::Finishing => "Finishing",
             Self::Completed => "Completed",
             Self::Error => "Error",
         }
     }
+}
+
+/// Owned snapshot; callers release the manager lock before waiting or querying DB.
+#[derive(Clone)]
+pub struct ActiveJob {
+    pub id: u32,
+    pub name: String,
+    pub unique_name: String,
+    pub phase: DirJobPhase,
 }
 
 /// Manages all active job workers — Vec-based for up to 1000+ jobs.
@@ -95,6 +108,12 @@ impl JobManager {
             .collect()
     }
 
+    pub fn active_jobs(&self) -> Vec<ActiveJob> {
+        self.jobs.iter().filter(|job| !matches!(job.phase, DirJobPhase::Completed | DirJobPhase::Error))
+            .map(|job| ActiveJob { id: job.job_id, name: job.job_name.clone(),
+                unique_name: job.handle.unique_job.clone(), phase: job.phase }).collect()
+    }
+
     /// Jobs that ran to an end since the Director started (still in the table).
     pub fn finished_count(&self) -> usize {
         self.jobs.iter()
@@ -137,20 +156,12 @@ impl JobManager {
     pub fn poll_all(&mut self) {
         for job in &mut self.jobs {
             if matches!(job.phase, DirJobPhase::Completed | DirJobPhase::Error) {
+                job.handle.try_wait();
                 continue;
             }
 
-            // Check if worker exited
-            if let Some(exit_code) = job.handle.try_wait() {
-                if exit_code == 0 {
-                    job.phase = DirJobPhase::Completed;
-                } else {
-                    job.phase = DirJobPhase::Error;
-                }
-                info!("JobManager: job {} '{}' worker exited (code={})",
-                    job.job_id, job.job_name, exit_code);
-                continue;
-            }
+            // Reap first, but drain all final pipe messages before publishing completion.
+            let exit_code = job.handle.try_wait();
 
             // Read pipe messages (non-blocking — try_read_message returns None if no data)
             while let Some(msg) = job.handle.try_read_message() {
@@ -160,9 +171,11 @@ impl JobManager {
                         job.phase = match state.as_str() {
                             "Running" => DirJobPhase::Running,
                             "Paused" => DirJobPhase::Paused,
+                            "WaitingMedia" | "WaitMedia" => DirJobPhase::WaitingMedia,
+                            "WaitingMount" | "WaitMount" => DirJobPhase::WaitingMount,
                             "Finishing" => DirJobPhase::Finishing,
-                            "Completed" => DirJobPhase::Completed,
-                            "Error" => DirJobPhase::Error,
+                            // JobEnd commits the catalog outcome before the job disappears.
+                            "Completed" | "Error" => DirJobPhase::Finishing,
                             _ => job.phase,
                         };
                     }
@@ -182,13 +195,14 @@ impl JobManager {
 
                     PipeMessage::JobEnd { term_code, files, bytes, errors,
                                           vol_session_id, vol_session_time, .. } => {
-                        let status = if term_code == 0 { "Success" } else { "Error" };
-                        let db_status = if term_code == 0 { "T" } else { "E" };
+                        let db_status = crate::job_worker::catalog_job_status(term_code);
+                        let success = matches!(db_status, "T" | "W");
+                        let status = if success { "Success" } else { "Error" };
                         info!("JobManager: job {} '{}' ended — {status} files={files} bytes={bytes} errors={errors}",
                             job.job_id, job.job_name);
                         job.last_files = files;
                         job.last_bytes = bytes;
-                        job.phase = if term_code == 0 { DirJobPhase::Completed } else { DirJobPhase::Error };
+                        job.phase = if success { DirJobPhase::Completed } else { DirJobPhase::Error };
 
                         // Update job record in DB
                         if let Some(cat) = &self.catalog {
@@ -202,7 +216,7 @@ impl JobManager {
                         }
 
                         // Post to message bus
-                        let msg_type = if term_code == 0 { MsgType::Info } else { MsgType::Error };
+                        let msg_type = if success { MsgType::Info } else { MsgType::Error };
                         self.bus.post(BusMessage::JobMessage {
                             job_id: job.job_id,
                             job_name: job.job_name.clone(),
@@ -220,6 +234,19 @@ impl JobManager {
 
                     _ => {}
                 }
+            }
+            if let Some(exit_code) = exit_code {
+                if !matches!(job.phase, DirJobPhase::Completed | DirJobPhase::Error) {
+                    // A worker that dies without JobEnd has no successful outcome.
+                    job.phase = DirJobPhase::Error;
+                    if let Some(cat) = &self.catalog {
+                        if let Err(error) = cat.update_job_end(job.job_id as i32, "E", now_unix(),
+                            job.last_files, job.last_bytes, 1, 0, 0) {
+                            error!("JobManager: failed to record worker exit: {error}");
+                        }
+                    }
+                }
+                info!("JobManager: job {} worker exited (code={exit_code})", job.job_id);
             }
         }
 

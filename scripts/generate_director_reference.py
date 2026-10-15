@@ -234,6 +234,7 @@ def main():
                 ROOT / 'crates/bareos-stored/src/command.rs',
                 ROOT / 'crates/onesimus-dird/src/catalog_worker.rs',
                 ROOT / 'crates/onesimus-dird/src/job_worker.rs',
+                ROOT / 'crates/onesimus-dird/src/job_manager.rs',
                 ROOT / 'crates/onesimus-dird/src/session.rs',
                 ROOT / 'crates/onesimus-dird/src/scheduler.rs',
                 ROOT / 'crates/oconsole/src/mcp.rs',

@@ -1,6 +1,12 @@
 # Onesimus Director — Command Test Plan
 
-**92 commands. 0 excuses. Test them ALL.**
+Aktueller Abgleich: **88 Original-Hauptbefehle und 26 Restore-Dateiauswahlbefehle**
+([Quellreferenz](wiki/commands/bareos-reference.md)).
+
+Priorität seit 15.10.2026: Zuerst die offenen Unterbefehle, Optionen und
+Ablaufketten der 21 teilweise implementierten Hauptbefehle aus
+[BACKLOG.md](BACKLOG.md) vollständig prüfen und vervollständigen.
+Die folgenden historischen Kategorien sind keine aktuelle Paritätsbewertung.
 
 Generated: 2026-03-29
 Test environment: onesimus-dird :29101, bareos-fd :9102, bareos-sd :9103, PostgreSQL catalog

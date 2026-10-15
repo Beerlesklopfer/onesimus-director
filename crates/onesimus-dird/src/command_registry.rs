@@ -228,7 +228,9 @@ pub fn build_registry() -> Vec<CommandDef> {
         ], handler: commands::show::cmd_show, dot_command: false },
         CommandDef { name: "trace", aliases: &[], description: "Toggle trace output", args: vec![], handler: commands::extra::cmd_trace, dot_command: false },
         CommandDef { name: "var", aliases: &[], description: "Display variable expansion", args: vec![], handler: commands::extra::cmd_var, dot_command: false },
-        CommandDef { name: "wait", aliases: &[], description: "Wait for a job to complete", args: vec![arg_int("jobid", "Job ID")], handler: commands::extra::cmd_wait, dot_command: false },
+        CommandDef { name: "wait", aliases: &[], description: "Wait for a job to complete", args: vec![arg_int("jobid", "Job ID"),
+            arg("jobname", "Running job name prefix"), arg("ujobid", "Unique running job name"),
+            arg("mount", "Wait for a media or mount request"), arg_int("timeout", "Mount wait timeout in seconds")], handler: commands::wait::cmd_wait, dot_command: false },
         CommandDef { name: "whoami", aliases: &[], description: "Show current console identity", args: vec![], handler: commands::extra::cmd_whoami, dot_command: false },
         CommandDef { name: "use", aliases: &[], description: "Switch catalog", args: vec![arg_resource("catalog", "Catalog name", ".catalogs")], handler: commands::extra::cmd_use, dot_command: false },
         CommandDef { name: "setdebug", aliases: &[], description: "Set debug level", args: vec![

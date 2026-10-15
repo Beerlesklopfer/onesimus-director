@@ -17,9 +17,9 @@ wait jobname=<name> | jobid=<jobid> | ujobid=<complete_name> | mount [timeout=<n
 
 **Onesimus-Status:** `partial`. Funktionsparität ist nicht durch einen Live-Test nachgewiesen.
 
-- Wertet jobid aus und wartet auf laufende Jobs. Originaloptionen jobname/ujobid/mount/timeout sind im Handler nicht umgesetzt.
+- jobid/jobname/job/ujobid wählen tatsächliche Jobs; ohne Argument wartet der Handler still auf alle aktiven Jobs. mount verarbeitet die numerischen SD-Mount-/Medienzustände über die Worker-Pipe; timeout gilt wie upstream nur für mount. Nach Jobabschluss liefert der Handler den Katalogstatus in Original-Text/JSON einschließlich ExitStatus. Worker-Endmeldungen bleiben auch bei gepufferten Pipe-Reads erhalten; terminale Zustände werden erst mit der JobEnd-Katalogaktualisierung veröffentlicht, FD-Terminationscodes bleiben erhalten. Tests prüfen Auswahl, Ausgabe, Timeout, Statusübertragung und Abschlussreihenfolge. ACL-Abgleich, vollständige FD-/SD-Statusprioritäten, Ausfall der abschließenden Katalogaktualisierung und Live-SHA-256-Parität bleiben offen.
 
-**Lokaler Handler:** [crates/onesimus-dird/src/commands/extra.rs:178](../../../crates/onesimus-dird/src/commands/extra.rs).
+**Lokaler Handler:** [crates/onesimus-dird/src/commands/wait.rs:37](../../../crates/onesimus-dird/src/commands/wait.rs).
 
 Die folgenden vorhandenen Beispiele und Verhaltensbeschreibungen sind lokale Dokumentation; sie sind kein Beleg für vollständige Bareos-Kompatibilität. Bei Widersprüchen gilt der obige Befund.
 <!-- bareos-reference:end -->

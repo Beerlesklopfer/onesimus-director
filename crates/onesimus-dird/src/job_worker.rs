@@ -86,6 +86,14 @@ pub enum PipeMessage {
              #[serde(default)] vol_session_time: Option<i32> },
 }
 
+/// Legacy local exit codes and original FD termination characters.
+pub fn catalog_job_status(term_code: i32) -> &'static str {
+    match term_code {
+        0 | 84 => "T", 87 => "W", 101 => "e", 69 | 2 => "E",
+        102 => "f", 65 | 3 => "A", 68 => "D", _ => "E",
+    }
+}
+
 pub const EXIT_SUCCESS: i32 = 0;
 pub const EXIT_ERROR: i32 = 1;
 pub const EXIT_FATAL: i32 = 2;
@@ -360,13 +368,12 @@ pub fn run_worker(
             }
 
             WorkerState::Finishing { files, bytes, errors, term_code } => {
-                // TermCode: 0=OK, 84='T'=Success, 87='W'=Warnings, 69='E'=Error, 102='f'=Fatal
-                let success = term_code == 0 || term_code == 84 || term_code == 87; // T or W
-                if success && errors == 0 {
-                    WorkerState::Completed { files, bytes, errors }
-                } else {
-                    WorkerState::Error(format!("TermCode={term_code} Errors={errors}"))
-                }
+                // Preserve the FD's actual termination status for the catalog and wait.
+                pipes.send(&PipeMessage::JobEnd {
+                    job_id, term_code, files, bytes, errors,
+                    vol_session_id: Some(vol_session_id), vol_session_time: Some(vol_session_time),
+                });
+                return if matches!(catalog_job_status(term_code), "T" | "W") { EXIT_SUCCESS } else { EXIT_ERROR };
             }
 
             WorkerState::Completed { files, bytes, errors } => {
@@ -383,7 +390,7 @@ pub fn run_worker(
                 if let Some(ref mut f) = fd { let _ = f.send_signal(BnetSignal::Terminate); }
                 if let Some(ref mut s) = sd { let _ = s.send_signal(BnetSignal::Terminate); }
                 pipes.send(&PipeMessage::JobEnd {
-                    job_id, term_code: 2, files: 0, bytes: 0, errors: 1,
+                    job_id, term_code: if WORKER_CANCEL.load(Ordering::SeqCst) { b'A' as i32 } else { b'E' as i32 }, files: 0, bytes: 0, errors: 1,
                     vol_session_id: Some(vol_session_id), vol_session_time: Some(vol_session_time),
                 });
                 return EXIT_FATAL;
@@ -484,6 +491,23 @@ fn fd_restore_setup(fd: &mut BnetStream<tls_psk::PskStream>, p: &JobParams, sd_a
     Ok(())
 }
 
+// Bareos getmsg.cc: Status Job=%127s JobStatus=%d; job_status.h: M/m/R.
+fn storage_wait_state(message: &str) -> Result<Option<&'static str>, &'static str> {
+    let parts: Vec<_> = message.split_whitespace().collect();
+    if parts.len() != 3 || parts[0] != "Status"
+        || !parts[1].starts_with("Job=") || parts[1].len() == 4 {
+        return Err("Malformed Storage job status");
+    }
+    let status = parts[2].strip_prefix("JobStatus=")
+        .and_then(|value| value.parse::<u8>().ok()).ok_or("Malformed Storage job status")?;
+    Ok(match status {
+        b'M' => Some("WaitingMount"),
+        b'm' => Some("WaitingMedia"),
+        b'R' => Some("Running"),
+        _ => None,
+    })
+}
+
 fn sd_catrec_loop(
     sd: &mut BnetStream<tls_psk::PskStream>,
     job_id: u32,
@@ -527,6 +551,17 @@ fn sd_catrec_loop(
                             error!("Worker {job_id}: pipe read error: {e}");
                             let _ = sd.send_str("1000 OK\n");
                         }
+                    }
+                } else if msg.starts_with("Status Job=") {
+                    match storage_wait_state(&msg) {
+                        Ok(Some(state)) => {
+                            let update = PipeMessage::State { job_id, state: state.into() };
+                            if let Ok(json) = serde_json::to_string(&update) {
+                                let _ = writeln!(to_dir, "{json}");
+                            }
+                        }
+                        Ok(None) => {}
+                        Err(error) => warn!("Worker {job_id}: {error}"),
                     }
                 } else if msg.starts_with("3099 Job") {
                     debug!("Worker {job_id} SD: job end");
@@ -737,7 +772,8 @@ pub struct JobHandle {
     pub pid: i32,
     pub job_id: u32,
     pub job_name: String,
-    from_worker: Option<std::fs::File>,
+    pub unique_job: String,
+    from_worker: Option<BufReader<std::fs::File>>,
     to_worker: Option<std::fs::File>,
 }
 
@@ -746,16 +782,15 @@ impl JobHandle {
         let r = self.from_worker.as_mut()?;
         // poll() to check if data is available before blocking read
         use std::os::unix::io::AsRawFd;
-        let fd = r.as_raw_fd();
+        let fd = r.get_ref().as_raw_fd();
         let mut pfd = libc::pollfd { fd, events: libc::POLLIN, revents: 0 };
         let ready = unsafe { libc::poll(&mut pfd, 1, 0) }; // timeout=0 → non-blocking
-        if ready <= 0 || (pfd.revents & libc::POLLIN) == 0 {
+        if r.buffer().is_empty() && (ready <= 0 || (pfd.revents & libc::POLLIN) == 0) {
             return None; // no data available
         }
         // Data is available — safe to read_line (will not block)
         let mut buf = String::new();
-        let mut reader = BufReader::new(&*r);
-        match reader.read_line(&mut buf) {
+        match r.read_line(&mut buf) {
             Ok(n) if n > 0 => serde_json::from_str(&buf).ok(),
             _ => None,
         }
@@ -800,8 +835,8 @@ pub fn spawn_job_worker(job_id: u32, job_name: &str, params: &JobParams) -> io::
             let from_worker = unsafe { std::fs::File::from_raw_fd(w2d_r.into_raw_fd()) };
             let to_worker = unsafe { std::fs::File::from_raw_fd(d2w_w.into_raw_fd()) };
             info!("spawned worker pid={} job={job_id} '{job_name}'", child);
-            Ok(JobHandle { pid: child.as_raw(), job_id, job_name: job_name.to_string(),
-                from_worker: Some(from_worker), to_worker: Some(to_worker) })
+            Ok(JobHandle { pid: child.as_raw(), job_id, job_name: job_name.to_string(), unique_job: params.unique_job.clone(),
+                from_worker: Some(BufReader::new(from_worker)), to_worker: Some(to_worker) })
         }
         Ok(ForkResult::Child) => {
             drop(logging_guard);
@@ -830,4 +865,60 @@ pub fn spawn_job_worker(job_id: u32, job_name: &str, params: &JobParams) -> io::
 #[cfg(not(unix))]
 pub fn spawn_job_worker(_: u32, _: &str, _: &JobParams) -> io::Result<JobHandle> {
     Err(io::Error::new(io::ErrorKind::Unsupported, "fork not available"))
+}
+
+#[cfg(test)]
+mod wait_protocol_tests {
+    use super::*;
+    #[test]
+    fn termination_status_is_not_collapsed_to_success_or_error() {
+        for (code, status) in [(0,"T"),(84,"T"),(87,"W"),(101,"e"),(69,"E"),(102,"f"),(65,"A"),(68,"D"),(2,"E"),(3,"A"),(999,"E")] {
+            assert_eq!(catalog_job_status(code), status);
+        }
+    }
+    #[test]
+    fn storage_wait_status_uses_original_numeric_wire_codes() {
+        for (code, expected) in [(77, Some("WaitingMount")), (109, Some("WaitingMedia")),
+            (82, Some("Running")), (84, None)] {
+            assert_eq!(storage_wait_state(&format!("Status Job=Backup.001 JobStatus={code}\n")).unwrap(), expected);
+        }
+        for invalid in ["Status Job= JobStatus=77", "Status Job=x JobStatus=no", "Status Job=x", "Status Job=x JobStatus=999"] {
+            assert!(storage_wait_state(invalid).is_err());
+        }
+    }
+    #[test]
+    fn wait_keeps_job_active_until_the_final_catalog_update_message() {
+        let (read, write) = nix::unistd::pipe().unwrap();
+        let mut write = std::fs::File::from(write);
+        let handle = JobHandle { pid: i32::MAX, job_id: 42, job_name: "Backup".into(), unique_job: "Backup.001".into(),
+            from_worker: Some(BufReader::new(std::fs::File::from(read))), to_worker: None };
+        let mut manager = crate::job_manager::JobManager::new(
+            std::sync::Arc::new(crate::message_bus::MessageBus::new(10)), None, None);
+        manager.add_job(42, "Backup", handle);
+        writeln!(write, "{}", serde_json::to_string(&PipeMessage::State {job_id: 42, state: "Completed".into()}).unwrap()).unwrap();
+        manager.poll_all();
+        assert_eq!(manager.active_count(), 1);
+        writeln!(write, "{}", serde_json::to_string(&PipeMessage::JobEnd {job_id: 42, term_code: 87,
+            files: 12, bytes: 1024, errors: 1, vol_session_id: None, vol_session_time: None}).unwrap()).unwrap();
+        manager.poll_all();
+        assert_eq!(manager.active_count(), 0);
+        let job = manager.get_job(42).unwrap();
+        assert_eq!(job.phase, crate::job_manager::DirJobPhase::Completed);
+        assert_eq!((job.last_files, job.last_bytes), (12, 1024));
+    }
+    #[test]
+    fn consecutive_pipe_messages_survive_reader_buffering_and_eof() {
+        let (read, write) = nix::unistd::pipe().unwrap();
+        let mut write = std::fs::File::from(write);
+        for state in ["WaitingMedia", "Running"] {
+            writeln!(write, "{}", serde_json::to_string(&PipeMessage::State {job_id: 42, state: state.into()}).unwrap()).unwrap();
+        }
+        drop(write);
+        let mut handle = JobHandle { pid: -1, job_id: 42, job_name: "Backup".into(), unique_job: "Backup.001".into(),
+            from_worker: Some(BufReader::new(std::fs::File::from(read))), to_worker: None };
+        for expected in ["WaitingMedia", "Running"] {
+            assert!(matches!(handle.try_read_message(), Some(PipeMessage::State {state,..}) if state == expected));
+        }
+        assert!(handle.try_read_message().is_none());
+    }
 }

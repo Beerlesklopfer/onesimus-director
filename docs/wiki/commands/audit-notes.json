@@ -155,7 +155,7 @@
     "wait": {
       "status": "partial",
       "findings": [
-        "Wertet jobid aus und wartet auf laufende Jobs. Originaloptionen jobname/ujobid/mount/timeout sind im Handler nicht umgesetzt."
+        "jobid/jobname/job/ujobid wählen tatsächliche Jobs; ohne Argument wartet der Handler still auf alle aktiven Jobs. mount verarbeitet die numerischen SD-Mount-/Medienzustände über die Worker-Pipe; timeout gilt wie upstream nur für mount. Nach Jobabschluss liefert der Handler den Katalogstatus in Original-Text/JSON einschließlich ExitStatus. Worker-Endmeldungen bleiben auch bei gepufferten Pipe-Reads erhalten; terminale Zustände werden erst mit der JobEnd-Katalogaktualisierung veröffentlicht, FD-Terminationscodes bleiben erhalten. Tests prüfen Auswahl, Ausgabe, Timeout, Statusübertragung und Abschlussreihenfolge. ACL-Abgleich, vollständige FD-/SD-Statusprioritäten, Ausfall der abschließenden Katalogaktualisierung und Live-SHA-256-Parität bleiben offen."
       ]
     },
     "rerun": {
@@ -237,7 +237,7 @@
         },
         {
           "file": "crates/onesimus-dird/src/command_registry.rs",
-          "line": 344
+          "line": 346
         },
         {
           "file": "crates/onesimus-dird/src/commands/dot.rs",
@@ -255,7 +255,7 @@
         },
         {
           "file": "docs/BACKLOG.md",
-          "line": 3
+          "line": 41
         }
       ]
     },

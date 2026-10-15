@@ -54,4 +54,13 @@ onesimus (25.1.2+onesimus.0.2.0-2) UNRELEASED; urgency=medium
   * Serialize diagnostic-filter reloads with worker forks so children cannot
     inherit an exclusive reload lock from another Director thread.
 
+  * wait: implement job/jobname/ujobid selection, silent wait-all, mount-state
+    waits and mount timeouts; report actual catalog outcomes in text and JSON,
+    including warning/error/cancel exit statuses and visible catalog failures.
+    Forward numeric SD mount/media states, preserve buffered pipe messages and
+    FD termination codes, and process final catalog updates before completion.
+    Add deterministic coverage for selection, polling and failure paths.
+  * Prioritize the open subcommands and execution paths of the 21 partially
+    implemented commands before other command groups.
+
  -- Joerg Bernau <Joerg.Bernau@onesimus.io>  Thu, 15 Oct 2026 14:00:00 +0200

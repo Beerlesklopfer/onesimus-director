@@ -175,29 +175,6 @@ pub fn cmd_var(ast: &CommandAst, _ctx: &ExecContext) -> CommandResult {
     CommandResult::ok(format!("Variable {name}: undefined\n"))
 }
 
-pub fn cmd_wait(ast: &CommandAst, ctx: &ExecContext) -> CommandResult {
-    let job_id = ast.arguments.iter()
-        .find(|a| a.key == "jobid")
-        .and_then(|a| a.value.as_deref())
-        .and_then(|v| v.parse::<u32>().ok());
-
-    if let Some(ref mgr) = ctx.job_manager {
-        loop {
-            let running = mgr.lock().unwrap().running_jobs();
-            let waiting_for = match job_id {
-                Some(id) => running.iter().any(|(jid, _, _)| *jid == id),
-                None => !running.is_empty(),
-            };
-            if !waiting_for { break; }
-            std::thread::sleep(std::time::Duration::from_secs(1));
-        }
-    }
-    match job_id {
-        Some(id) => CommandResult::ok(format!("Job {id} finished.\n")),
-        None => CommandResult::ok("No jobs running or queued.\n".to_string()),
-    }
-}
-
 pub fn cmd_whoami(_ast: &CommandAst, ctx: &ExecContext) -> CommandResult {
     if let Some(smgr) = &ctx.session_mgr {
         let sessions = smgr.get_session_names();

@@ -1,5 +1,43 @@
 # Backlog
 
+## Aktueller Fokus: die 21 teilweise implementierten Hauptbefehle
+
+Priorität vom 15.10.2026: Zuerst alle offenen Unterbefehle, Optionen und
+Ablaufketten dieser 21 Hauptbefehle vervollständigen. Andere Platzhalter und
+die 26 Befehle der Restore-Dateiauswahl folgen danach; Abhängigkeiten, die
+für einen dieser 21 Befehle erforderlich sind, gehören zu dessen Umsetzung.
+
+Die verbindlichen Einzelbefunde stehen in
+[audit-notes.json](wiki/commands/audit-notes.json). Der Status bleibt offen,
+bis auch Fehlerpfade, Seiteneffekte und SHA-256-Ausgabeparität geprüft sind.
+
+| Hauptbefehl | Offene Teilabläufe / Abnahme |
+| --- | --- |
+| `wait` | Job-/Namensauswahl, Mount-/Medienzustände, Timeout, tatsächlicher Katalogabschluss |
+| `.authorized` | Command- und Ressourcen-ACL statt bloßer Existenzprüfung |
+| `setdevice` | Storage-ACL, vollständige Daemon-Antwort und Fehlerpfade |
+| `trace` | Dialogauswahl und ursprünglicher Trace-Pfad |
+| `setdebug` | Dialogauswahl, NDMP und ACL |
+| `setbandwidth` | Jobselektoren, Zustandsfilter, all, Dialog, NDMP/Legacy und ACL |
+| `resolve` | ACL sowie Legacy-/Nicht-TLS-Verbindungen |
+| `.messages` | Globale Spool-Semantik und gRPC-Sitzungsqueue |
+| `.defaults` | Vollständige Ressourcen- und Restore-Defaults |
+| `help` | Originalsyntax, Textlayout und ACL-gefilterte Hilfe |
+| `run` | Accurate/VirtualFull, FileSet-Änderungen und weitere Originaloptionen |
+| `rerun` | Jobbereiche, Zeitfilter und Mehrfachauswahl |
+| `restore` | Dateiauswahl, Storage-/Client-Overrides und fileregex |
+| `status` | Scheduler/subscriptions/configuration, geplante und beendete Jobs |
+| `.status` | Original-Unterabschnitte und deren eigenes Ausgabeformat |
+| `import` | dstslots, volume und scan |
+| `export` | dstslots, volume und scan |
+| `configure` | Vollständige Direktiven und konfigurierbarer Persistenzpfad |
+| `list` | Originalfilter, Ausgabefelder und Pool-Prune-Summen |
+| `llist` | Originalfilter, Ausgabefelder und Pool-Prune-Summen |
+| `add` | Originaldialog, storage/jobid und vollständige Kataloganlage |
+
+Für jede Tabellenzeile gilt zusätzlich der unten definierte SHA-256-Abgleich.
+Je Hauptbefehl bleibt ein eigener Commit vorgeschrieben.
+
 ## KRITISCH: Scheduler startet keine Jobs
 
 `scheduler.rs`: `dispatch_ready_jobs()` erhöht nur einen Zähler
