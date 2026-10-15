@@ -349,13 +349,16 @@ fn cmd_rerun_db(ast: &CommandAst, ctx: &ExecContext) -> CommandResult {
         };
         // C++ reports a missing record only as a job message (Jmsg M_WARNING).
         if job_name.is_empty() { return failed(&text); }
-        // Build a synthetic AST for "run job=<name> yes"
+        // reRunJob (ua_run.cc:71) builds "run job=<name> ..." and appends
+        // " yes" only when the rerun itself had it (ua_run.cc:200); without
+        // it the run asks "OK to run?" (C-012).
+        let mut arguments = vec![crate::command_ast::Argument { key: "job".to_string(), value: Some(job_name) }];
+        if ast.arguments.iter().any(|a| a.key.eq_ignore_ascii_case("yes")) {
+            arguments.push(crate::command_ast::Argument { key: "yes".to_string(), value: None });
+        }
         let run_ast = crate::command_ast::CommandAst {
             command_name: "run".to_string(),
-            arguments: vec![
-                crate::command_ast::Argument { key: "job".to_string(), value: Some(job_name) },
-                crate::command_ast::Argument { key: "yes".to_string(), value: None },
-            ],
+            arguments,
             ..Default::default()
         };
         let mut run = crate::commands::job::cmd_run(&run_ast, ctx);
