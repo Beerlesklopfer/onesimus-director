@@ -1,6 +1,12 @@
 //! Rendering of catalog query results like C++ `BareosDb::ListResult`
 //! (cats/sql.cc): bconsole tables (HORZ), `llist` blocks (VERT), raw rows,
 //! and the JSON array of row objects for `.api 2`.
+//!
+//! SQL NULL: the C++ PostgreSQL backend fills rows with PQgetvalue(), which
+//! returns "" for NULL (cats/postgresql.cc SqlFetchRow), so ListResult never
+//! sees a NULL pointer and prints an empty value in every mode. Only the
+//! column width counts NULL as 4 characters (PostgreSQL SqlFieldSeek uses
+//! PQgetisnull for max_length).
 
 use serde_json::{Map, Value};
 
@@ -42,7 +48,7 @@ pub fn render(t: &SqlTable, ty: ListType) -> String {
             for row in &t.rows {
                 for v in row {
                     out.push(' ');
-                    out.push_str(v.as_deref().unwrap_or("NULL"));
+                    out.push_str(v.as_deref().unwrap_or(""));
                 }
                 if ty == ListType::Nf {
                     out.push('\n');
@@ -77,13 +83,13 @@ pub fn add_commas(s: &str) -> String {
 fn column_widths(t: &SqlTable) -> Vec<usize> {
     t.columns.iter().enumerate().map(|(i, col)| {
         let mut max_len = t.rows.iter()
-            .map(|r| r[i].as_deref().map_or(0, str::len))
+            .map(|r| r[i].as_deref().map_or(4, str::len)) // NULL counts as "NULL"
             .max()
             .unwrap_or(0);
         if col.numeric && max_len > 0 && col.name != "jobid" {
             max_len += (max_len - 1) / 3; // room for commas
         }
-        // NULL needs 4 characters (PostgreSQL fields are never flagged NOT NULL)
+        // minimum 4 (PostgreSQL fields are never flagged NOT NULL)
         col.name.len().max(max_len).max(4).min(100)
     }).collect()
 }
@@ -111,7 +117,7 @@ fn horz(t: &SqlTable) -> String {
         out.push('|');
         for ((col, v), w) in t.columns.iter().zip(row).zip(&widths) {
             let cell = match v {
-                None => format!(" {:<w$} |", "NULL", w = w),
+                None => format!(" {:<w$} |", "", w = w),
                 Some(v) if col.numeric => {
                     let v = if is_integer(v) && col.name != "jobid" { add_commas(v) } else { v.clone() };
                     format!(" {:>w$} |", v, w = w)
@@ -132,7 +138,7 @@ fn vert(t: &SqlTable) -> String {
     for row in &t.rows {
         for (col, v) in t.columns.iter().zip(row) {
             let value = match v {
-                None => "NULL".to_string(),
+                None => String::new(),
                 Some(v) if col.numeric && is_integer(v) && col.name != "jobid" => add_commas(v),
                 Some(v) => v.clone(),
             };
@@ -177,7 +183,7 @@ mod tests {
         assert_eq!(lines[0], "+-------+-----------------+-------------+");
         assert_eq!(lines[1], "| jobid | name            | jobbytes    |");
         assert_eq!(lines[3], "|   479 | benchmark-small | 824,021,543 |");
-        assert_eq!(lines[4], "|    12 | NULL            |           0 |");
+        assert_eq!(lines[4], "|    12 |                 |           0 |");
         assert_eq!(lines.len(), 6);
     }
 
@@ -185,6 +191,20 @@ mod tests {
     fn vertical_list() {
         let out = render(&table(), ListType::Vert);
         assert!(out.starts_with("    jobid: 479\n     name: benchmark-small\n jobbytes: 824,021,543\n\n"));
+    }
+
+    #[test]
+    fn null_is_empty_but_four_wide() {
+        let t = SqlTable {
+            columns: vec![
+                SqlColumn { name: "id".into(), numeric: true },
+                SqlColumn { name: "endtime".into(), numeric: false },
+            ],
+            rows: vec![vec![None, None]],
+        };
+        assert_eq!(render(&t, ListType::Horz).lines().nth(3), Some("|       |         |"));
+        assert_eq!(render(&t, ListType::Vert), "      id: \n endtime: \n\n");
+        assert_eq!(render(&t, ListType::Nf), "  \n");
     }
 
     #[test]
