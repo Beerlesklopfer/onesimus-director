@@ -1,10 +1,11 @@
 # C-009 version strings (ua_cmds.cc VersionCmd, ua_status.cc ListStatusHeader, lib/version.cc).
-# Only the version token and the build date are normalized.
-# Daemon start time (differs per run) is the only other normalized token.
+# Normalized: the version token and the build date.
+# Also normalized: daemon start time (differs per run) and the binary info
+# (own Onesimus wording by user decision, same position as upstream).
 {"id": "c009-version", "steps": ["version"], "normalize": ["25\\.1\\.2[~+][\\w.]+", "\\(\\d\\d \\w+ \\d{4}\\)"]}
 {"id": "c009-version-json", "steps": ["version"], "setup": [".api 2"], "normalize": ["25\\.1\\.2[~+][\\w.]+", "\"\\d\\d \\w+ \\d{4}\""]}
 {"id": "c009-version-api1", "steps": ["version"], "setup": [".api 1"], "normalize": ["25\\.1\\.2[~+][\\w.]+", "\\(\\d\\d \\w+ \\d{4}\\)"]}
-{"id": "c009-status-dir-header", "steps": [".status dir header"], "normalize": ["25\\.1\\.2[~+][\\w.]+", "\\(\\d\\d \\w+ \\d{4}\\)", "\\d\\d-\\w{3}-\\d\\d \\d\\d:\\d\\d", "pid \\d+"]}
-{"id": "c009-status-dir-header-json", "steps": [".status dir header"], "setup": [".api 2"], "normalize": ["25\\.1\\.2[~+][\\w.]+", "\"\\d\\d \\w+ \\d{4}\"", "\\d\\d-\\w{3}-\\d\\d \\d\\d:\\d\\d", "pid \\d+"]}
-{"id": "c009-memory", "steps": ["memory"], "normalize": ["25\\.1\\.2[~+][\\w.]+", "\\(\\d\\d \\w+ \\d{4}\\)", "\\d\\d-\\w{3}-\\d\\d \\d\\d:\\d\\d"]}
-{"id": "c009-memory-json", "steps": ["memory"], "setup": [".api 2"], "normalize": ["25\\.1\\.2[~+][\\w.]+", "\"\\d\\d \\w+ \\d{4}\"", "\\d\\d-\\w{3}-\\d\\d \\d\\d:\\d\\d"]}
+{"id": "c009-status-dir-header", "steps": [".status dir header"], "normalize": ["25\\.1\\.2[~+][\\w.]+", "\\(\\d\\d \\w+ \\d{4}\\)", "\\d\\d-\\w{3}-\\d\\d \\d\\d:\\d\\d", "(Bareos community|Onesimus) binary"]}
+{"id": "c009-status-dir-header-json", "steps": [".status dir header"], "setup": [".api 2"], "normalize": ["25\\.1\\.2[~+][\\w.]+", "\"\\d\\d \\w+ \\d{4}\"", "\\d\\d-\\w{3}-\\d\\d \\d\\d:\\d\\d", "\"binary_info\": \"(Bareos community|Onesimus)\""]}
+{"id": "c009-memory", "steps": ["memory"], "normalize": ["25\\.1\\.2[~+][\\w.]+", "\\(\\d\\d \\w+ \\d{4}\\)", "\\d\\d-\\w{3}-\\d\\d \\d\\d:\\d\\d", "(Bareos community|Onesimus) binary"]}
+{"id": "c009-memory-json", "steps": ["memory"], "setup": [".api 2"], "normalize": ["25\\.1\\.2[~+][\\w.]+", "\"\\d\\d \\w+ \\d{4}\"", "\\d\\d-\\w{3}-\\d\\d \\d\\d:\\d\\d", "\"binary_info\": \"(Bareos community|Onesimus)\""]}

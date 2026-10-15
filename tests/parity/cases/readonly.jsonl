@@ -160,13 +160,13 @@
 {"id": "status-configuration", "steps": ["status configuration"]}
 {"id": "status-dir", "steps": ["status director"], "normalize": ["\\d\\d-\\w{3}-\\d\\d \\d\\d:\\d\\d", "Heap: .*", "pid \\d+"]}
 {"id": "status-bogus", "steps": ["status nosuch"]}
-{"id": "dot-status-dir-header", "steps": [".status dir header"], "normalize": ["\\d\\d-\\w{3}-\\d\\d \\d\\d:\\d\\d", "pid \\d+"]}
+{"id": "dot-status-dir-header", "steps": [".status dir header"], "normalize": ["25\\.1\\.2[~+][\\w.]+", "\\(\\d\\d \\w+ \\d{4}\\)", "(Bareos community|Onesimus) binary", "\\d\\d-\\w{3}-\\d\\d \\d\\d:\\d\\d", "pid \\d+"]}
 {"id": "dot-status-dir-running", "steps": [".status dir running"]}
 {"id": "dot-status-dir-scheduled", "steps": [".status dir scheduled"], "normalize": ["\\d\\d-\\w{3}-\\d\\d \\d\\d:\\d\\d"]}
 {"id": "dot-status-dir-terminated", "steps": [".status dir terminated"]}
 {"id": "messages", "steps": ["messages"]}
 {"id": "dot-messages", "steps": [".messages"]}
-{"id": "memory", "steps": ["memory"], "normalize": ["\\d+"]}
+{"id": "memory", "steps": ["memory"], "normalize": ["25\\.1\\.2[~+][\\w.]+", "\\(\\d\\d \\w+ \\d{4}\\)", "(Bareos community|Onesimus) binary", "\\d+"]}
 {"id": "autodisplay-off", "steps": ["autodisplay off"]}
 {"id": "autodisplay-on", "steps": ["autodisplay on"]}
 {"id": "gui-on", "steps": ["gui on"]}

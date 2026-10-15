@@ -20,14 +20,17 @@ pub const SHORT_DATE: &str = env!("ONESIMUS_BUILD_SHORT_DATE");
 pub const PROG_DATE_TIME: &str = env!("ONESIMUS_BUILD_PROG_DATE_TIME");
 /// kBareosVersionStrings.Year.
 pub const YEAR: &str = env!("ONESIMUS_BUILD_YEAR");
-/// kBareosVersionStrings.BinaryInfo as defined by the Bareos community packages.
-pub const BINARY_INFO: &str = "Bareos community";
-/// kBareosVersionStrings.ServicesMessage (community packages).
-pub const SERVICES_MESSAGE: &str =
-    "Bareos community build (UNSUPPORTED).\nGet professional support from https://www.bareos.com";
-/// kBareosVersionStrings.JoblogMessage (community packages).
-pub const JOBLOG_MESSAGE: &str =
-    "Bareos community build (UNSUPPORTED): Get professional support from https://www.bareos.com";
+/// kBareosVersionStrings.BinaryInfo. Own wording in the upstream position:
+/// the status header appends " binary" ("..., Onesimus binary"), `status
+/// subscriptions` prints "Binary info: Onesimus".
+pub const BINARY_INFO: &str = "Onesimus";
+/// kBareosVersionStrings.ServicesMessage, two lines without trailing newline
+/// like upstream's "Bareos community build (UNSUPPORTED).\nGet professional
+/// support from https://www.bareos.com".
+pub const SERVICES_MESSAGE: &str = "Onesimus build.\nSupport: https://onesimus.io";
+/// kBareosVersionStrings.JoblogMessage, ServicesMessage on one line
+/// ("<line 1 without period>: <line 2>") as upstream.
+pub const JOBLOG_MESSAGE: &str = "Onesimus build: Support: https://onesimus.io";
 /// Configure-time BAREOS_PLATFORM (os-release ID of the build host, e.g. "debian").
 pub const PLATFORM: &str = env!("ONESIMUS_BUILD_PLATFORM");
 /// Configure-time DISTVER (os-release PRETTY_NAME of the build host).
@@ -155,6 +158,15 @@ mod tests {
         assert_eq!(&SHORT_DATE[5..], &YEAR[2..]);
         assert_eq!(PROG_DATE_TIME.len(), 19, "{PROG_DATE_TIME}");
         assert!(PROG_DATE_TIME.starts_with(YEAR));
+    }
+
+    #[test]
+    fn own_binary_info_in_upstream_shape() {
+        assert!(!BINARY_INFO.contains("Bareos"));
+        assert_eq!(SERVICES_MESSAGE.lines().count(), 2);
+        assert!(!SERVICES_MESSAGE.ends_with('\n'));
+        let (first, second) = SERVICES_MESSAGE.split_once('\n').unwrap();
+        assert_eq!(JOBLOG_MESSAGE, format!("{}: {second}", first.trim_end_matches('.')));
     }
 
     #[test]
