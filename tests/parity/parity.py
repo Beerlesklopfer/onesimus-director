@@ -49,8 +49,12 @@ def write_config(source, target, port, args):
     if target.exists():
         shutil.rmtree(target)
     shutil.copytree(source, target, ignore=shutil.ignore_patterns('*.example'))
+    # Fresh working directory per start: a leftover .conmsg/state file from an
+    # earlier run would make one side announce "You have messages."
     work = target.parent / 'work'
-    work.mkdir(exist_ok=True)
+    if work.exists():
+        shutil.rmtree(work)
+    work.mkdir()
     for path in (target / 'director').glob('*.conf'):
         path.unlink()
     (target / 'director/bareos-dir.conf').write_text(
