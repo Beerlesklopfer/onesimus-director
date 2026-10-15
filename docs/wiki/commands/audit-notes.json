@@ -240,25 +240,6 @@
       ]
     },
     {
-      "title": "MCP-query klassifiziert Punktbefehle zu großzügig",
-      "description": "Die aktuelle MCP-Read-only-Prüfung lässt Punktbefehle bis auf eine Sperrliste zu. Dadurch sind unter anderem .bvfs_update und lokale Erweiterungen wie .catalog erreichbar, obwohl ein führender Punkt keine Read-only-Garantie ist. Die LLM-Referenz vergibt deshalb keine pauschale Read-only-Freigabe.",
-      "evidence": [
-        {
-          "file": "crates/oconsole/src/mcp.rs",
-          "line": 301
-        },
-        {
-          "file": "core/src/dird/ua_cmds.cc",
-          "line": 290,
-          "url": "https://github.com/bareos/bareos/blob/fc2c79b6c43eb5752e98ebd86116593dbbbe0c68/core/src/dird/ua_cmds.cc#L290"
-        },
-        {
-          "file": "crates/onesimus-dird/src/commands/catalog.rs",
-          "line": 12
-        }
-      ]
-    },
-    {
       "title": "Scheduler startet keine Worker",
       "description": "dispatch_ready_jobs entfernt fällige Jobs und zählt sie, enthält aber weiterhin den TODO zum Fork eines Workers. Geplante Backups sind dadurch nicht funktionsgleich zum Original; dies ist bereits im Backlog dokumentiert.",
       "evidence": [

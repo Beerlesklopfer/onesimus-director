@@ -305,17 +305,15 @@ fn is_read_only(command: &str) -> bool {
         .unwrap_or("")
         .to_ascii_lowercase();
     if first.starts_with('.') {
-        // Dot-commands are queries, except those that modify state or run raw SQL
-        return !matches!(
-            first.as_str(),
-            ".sql"
-                | ".bvfs_restore"
-                | ".bvfs_cleanup"
-                | ".bvfs_clear_cache"
-                | ".die"
-                | ".exit"
-                | ".consoles_kill"
-        );
+        // Full names only: a prefix could resolve to a mutating command.
+        return matches!(first.as_str(),
+            "." | ".actiononpurge" | ".authorized" | ".catalogs" | ".clients"
+            | ".consoles" | ".defaults" | ".filesets" | ".help" | ".jobdefs"
+            | ".jobs" | ".jobstatus" | ".levels" | ".locations" | ".messages"
+            | ".media" | ".mediatypes" | ".msgs" | ".pools" | ".profiles"
+            | ".schedule" | ".status" | ".storage" | ".storages" | ".types"
+            | ".users" | ".volstatus" | ".bvfs_get_jobids" | ".bvfs_lsdirs"
+            | ".bvfs_lsfiles" | ".bvfs_versions" | ".sqltables" | ".sqlschema" | ".sqlcount");
     }
     matches!(
         first.as_str(),
@@ -393,6 +391,16 @@ mod tests {
             ".sql query=\"DELETE FROM job\"",
             "purge volume=x",
         ] {
+            let r = call(&mut srv, tool_call("query", cmd));
+            assert_eq!(r["result"]["isError"], true, "{cmd}");
+        }
+        assert!(srv.runner.lock().unwrap().0.is_empty());
+    }
+
+    #[test]
+    fn query_rejects_mutating_dot_commands_and_prefixes() {
+        let mut srv = McpServer::new(Echo(vec![]), false, "dir".into());
+        for cmd in [".bvfs_update", ".bvfs_r", ".catalog delete", ".acl set", ".ap 2", ".grpc on", ".sql query=DELETE", ".unknown"] {
             let r = call(&mut srv, tool_call("query", cmd));
             assert_eq!(r["result"]["isError"], true, "{cmd}");
         }

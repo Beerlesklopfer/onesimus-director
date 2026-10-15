@@ -679,7 +679,7 @@
   "local_source_files": [
     {
       "path": "crates/oconsole/src/mcp.rs",
-      "sha256": "dbb68edd19b7cda45bd70a071ddfb8e2d9e61e872215fb7343236f3e3316238d"
+      "sha256": "00adc4981e9d59cd2b2c038e72e090bc94c2cb23c78905bfa7955b039c122c90"
     },
     {
       "path": "crates/onesimus-dird/src/command_executor.rs",
@@ -795,25 +795,6 @@
         {
           "file": "crates/onesimus-dird/src/commands/dot.rs",
           "line": 237
-        }
-      ]
-    },
-    {
-      "title": "MCP-query klassifiziert Punktbefehle zu großzügig",
-      "description": "Die aktuelle MCP-Read-only-Prüfung lässt Punktbefehle bis auf eine Sperrliste zu. Dadurch sind unter anderem .bvfs_update und lokale Erweiterungen wie .catalog erreichbar, obwohl ein führender Punkt keine Read-only-Garantie ist. Die LLM-Referenz vergibt deshalb keine pauschale Read-only-Freigabe.",
-      "evidence": [
-        {
-          "file": "crates/oconsole/src/mcp.rs",
-          "line": 301
-        },
-        {
-          "file": "core/src/dird/ua_cmds.cc",
-          "line": 290,
-          "url": "https://github.com/bareos/bareos/blob/fc2c79b6c43eb5752e98ebd86116593dbbbe0c68/core/src/dird/ua_cmds.cc#L290"
-        },
-        {
-          "file": "crates/onesimus-dird/src/commands/catalog.rs",
-          "line": 12
         }
       ]
     },
