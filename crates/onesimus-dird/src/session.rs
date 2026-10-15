@@ -96,6 +96,7 @@ pub fn handle_console_session<S: Read + Write>(
     let mut auto_display = true;  // autodisplay on/off
     let mut gui_mode = false;     // gui on/off
     let mut grpc_mode = false;    // .grpc on/off
+    let mut json_compact = false; // .api json compact=yes|no (OutputFormatter::SetCompact)
 
     // EOD after init messages — signals "ready for commands" to the console.
     // Command loop
@@ -176,7 +177,10 @@ pub fn handle_console_session<S: Read + Write>(
             if bnet.send_signal(BnetSignal::CmdBegin).is_err() { break; }
         }
         if command_allowed && ast.command_name == ".api" {
-            ctx.api_mode = parse_api_mode(&ast).unwrap_or(api_mode);
+            if let Some((mode, compact)) = crate::commands::dot::parse_dot_api(&ast) {
+                ctx.api_mode = mode;
+                json_compact = compact.unwrap_or(json_compact);
+            }
         }
 
         // C++ AutomountCmd: without exactly one argument the value is asked
@@ -228,7 +232,7 @@ pub fn handle_console_session<S: Read + Write>(
 
         // Send result
         if api_mode == command_executor::ApiMode::Json {
-            if bnet.send_str(&crate::json_output::envelope(&result)).is_err() { break; }
+            if bnet.send_str(&crate::json_output::envelope(&result, json_compact)).is_err() { break; }
         } else {
             let with_newline = |text: &str| if text.ends_with('\n') { text.to_string() } else { format!("{text}\n") };
             let mut parts = [&result.text_output, &result.error_message];
@@ -371,17 +375,6 @@ fn get_cmd<S: Read + Write>(
         }
     };
     (answer != ".").then_some(answer)
-}
-
-/// Mode argument of `.api` (C++ DotApiCmd: no argument means 1).
-fn parse_api_mode(ast: &CommandAst) -> Option<command_executor::ApiMode> {
-    match ast.arguments.first().map(|a| a.value.as_deref().unwrap_or(a.key.as_str())) {
-        None => Some(command_executor::ApiMode::Api),
-        Some("0") | Some("off") => Some(command_executor::ApiMode::Human),
-        Some("1") | Some("on") => Some(command_executor::ApiMode::Api),
-        Some("2") | Some("json") => Some(command_executor::ApiMode::Json),
-        Some(_) => None,
-    }
 }
 
 /// Parse a CLI command line like C++ ParseArgs(): the first argument is the

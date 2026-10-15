@@ -47,7 +47,7 @@ pub fn command_worker_loop(
             let mut result = command_executor::dispatch(&cmd.ast, &ctx);
             // JSON clients get the same json-rpc envelope as BNET `.api 2`
             if ctx.api_mode == ApiMode::Json {
-                result.text_output = crate::json_output::envelope(&result);
+                result.text_output = crate::json_output::envelope(&result, false);
             }
 
             // Send result back to the submitter

@@ -1,0 +1,27 @@
+# C-020 .api argument forms and jansson JSON output (indent / compact, read-only).
+{"id": "c020-api-noarg", "steps": [".api"]}
+{"id": "c020-api-off", "steps": [".api off"]}
+{"id": "c020-api-on", "steps": [".api on"]}
+{"id": "c020-api-json", "steps": [".api json"]}
+{"id": "c020-api-upper", "steps": [".api JSON"]}
+{"id": "c020-api-invalid", "steps": [".api 3"]}
+{"id": "c020-api-invalid-api2", "steps": [".api foo"], "setup": [".api 2"]}
+{"id": "c020-api-toomany", "steps": [".api 2 compact=yes extra"]}
+{"id": "c020-api-compact-yes", "steps": [".api json compact=yes"]}
+{"id": "c020-api-compact-no", "steps": [".api 2 compact=no"]}
+{"id": "c020-api-compact-upper", "steps": [".api 2 Compact=YES"]}
+{"id": "c020-api-compact-novalue", "steps": [".api 2 compact"]}
+{"id": "c020-api-1-compact", "steps": [".api 1 compact=yes"]}
+{"id": "c020-compact-version", "steps": ["version"], "setup": [".api json compact=yes"], "normalize": ["25\\.1\\.2[~+][\\w.]+", "\"\\d\\d \\w+ \\d{4}\""]}
+{"id": "c020-compact-list-pools", "steps": ["list pools"], "setup": [".api json compact=yes"]}
+{"id": "c020-compact-jobs", "steps": [".jobs"], "setup": [".api json compact=yes"]}
+{"id": "c020-compact-show-client", "steps": ["show client=bareos-fd"], "setup": [".api json compact=yes"]}
+{"id": "c020-compact-help-run", "steps": [".help item=run"], "setup": [".api json compact=yes"]}
+{"id": "c020-compact-error", "steps": ["foobar"], "setup": [".api json compact=yes"]}
+{"id": "c020-compact-sql", "steps": [".sql query=\"select 'a/b' || chr(34) || chr(92) || chr(1) || chr(9) || chr(10) || chr(31) || chr(127) || 'äö€' as s\""], "setup": [".api json compact=yes"]}
+{"id": "c020-json-sql", "steps": [".sql query=\"select 'a/b' || chr(34) || chr(92) || chr(1) || chr(9) || chr(10) || chr(31) || chr(127) || 'äö€' as s\""], "setup": [".api 2"]}
+{"id": "c020-json-version", "steps": ["version"], "setup": [".api 2"], "normalize": ["25\\.1\\.2[~+][\\w.]+", "\"\\d\\d \\w+ \\d{4}\""]}
+{"id": "c020-json-show-client", "steps": ["show client=bareos-fd"], "setup": [".api 2"]}
+{"id": "c020-json-error", "steps": ["foobar"], "setup": [".api 2"]}
+{"id": "c020-compact-persists", "steps": ["version", ".api 0", ".api 2", "version"], "setup": [".api json compact=yes"], "normalize": ["25\\.1\\.2[~+][\\w.]+", "\"\\d\\d \\w+ \\d{4}\""]}
+{"id": "c020-compact-reset", "steps": [".api 2 compact=no", "version"], "setup": [".api json compact=yes"], "normalize": ["25\\.1\\.2[~+][\\w.]+", "\"\\d\\d \\w+ \\d{4}\""]}

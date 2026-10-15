@@ -8,7 +8,7 @@
 //!            .pools [type=<T>], .storages [enabled|disabled], .schedule [enabled|disabled]
 
 use crate::command_ast::CommandAst;
-use crate::command_executor::ExecContext;
+use crate::command_executor::{ApiMode, ExecContext};
 use crate::command_queue::CommandResult;
 use serde_json::json;
 
@@ -361,19 +361,41 @@ pub fn cmd_dot_actiononpurge(_ast: &CommandAst, _ctx: &ExecContext) -> CommandRe
 /// - 1/on:  machine-readable (tab-separated)
 /// - 2/json: JSON output
 ///
-/// The mode is persisted per session (set in session.rs after dispatch).
+/// The mode and the compact flag are persisted per session (session.rs
+/// applies [`parse_dot_api`] before dispatch, so the reply already uses them).
 pub fn cmd_dot_api(ast: &CommandAst, _ctx: &ExecContext) -> CommandResult {
-    let mode = ast.arguments.first()
-        .map(|a| a.value.as_deref().unwrap_or(a.key.as_str()))
-        .unwrap_or("1");
-    let api_mode = match mode {
-        "0" | "off" => 0,
-        "1" | "on" => 1,
-        "2" | "json" => 2,
-        _ => return CommandResult::error(format!(".api: invalid mode \"{mode}\"\n")),
+    // C++ DotApiCmd: anything else returns false without a message.
+    let Some((api_mode, _)) = parse_dot_api(ast) else {
+        return CommandResult { success: false, ..Default::default() };
     };
+    let api_mode = api_mode as i32;
     // C++ DotApiCmd: ObjectKeyValue("api", "%s: ", api, "%d\n")
     CommandResult::ok(format!("api: {api_mode}\n")).with_json(serde_json::json!({ "api": api_mode }))
+}
+
+/// C++ ua_dotcmds.cc DotApiCmd(): the new API mode and, for json with
+/// exactly `compact=<value>` as second argument, the compact flag (`yes`
+/// switches it on, any other value off; without it the flag stays). The
+/// keywords are compared case-insensitively; no argument means 1; more than
+/// two arguments or an unknown keyword fail.
+pub fn parse_dot_api(ast: &CommandAst) -> Option<(ApiMode, Option<bool>)> {
+    let args = &ast.arguments;
+    let Some(first) = args.first() else { return Some((ApiMode::Api, None)) };
+    if args.len() > 2 {
+        return None;
+    }
+    let mode = match first.key.to_ascii_lowercase().as_str() {
+        "off" | "0" => ApiMode::Human,
+        "on" | "1" => ApiMode::Api,
+        "json" | "2" => ApiMode::Json,
+        _ => return None,
+    };
+    // FindArgWithValue(ua, "compact") == 2
+    let compact = args.get(1)
+        .filter(|arg| mode == ApiMode::Json && arg.key.eq_ignore_ascii_case("compact"))
+        .and_then(|arg| arg.value.as_deref())
+        .map(|value| value.eq_ignore_ascii_case("yes"));
+    Some((mode, compact))
 }
 
 /// `.grpc [on|off] [format=<proto|json|text>] [compact=<yes|no>]`
@@ -629,5 +651,26 @@ mod users_tests {
         assert_eq!(result.text_output, "zeta\nalpha\n*UserAgent*\n");
         assert_eq!(result.json.unwrap(),
             json!({"consoles":[{"name":"zeta"},{"name":"alpha"},{"name":"*UserAgent*"}]}));
+    }
+
+    #[test]
+    fn dot_api_arguments_follow_dot_api_cmd() {
+        let parse = |line: &str| parse_dot_api(&crate::session::parse_cli_command(line));
+        assert_eq!(parse(".api"), Some((ApiMode::Api, None)));
+        assert_eq!(parse(".api OFF"), Some((ApiMode::Human, None)));
+        assert_eq!(parse(".api on"), Some((ApiMode::Api, None)));
+        assert_eq!(parse(".api 2"), Some((ApiMode::Json, None)));
+        assert_eq!(parse(".api json compact=yes"), Some((ApiMode::Json, Some(true))));
+        assert_eq!(parse(".api JSON Compact=YES"), Some((ApiMode::Json, Some(true))));
+        assert_eq!(parse(".api 2 compact=no"), Some((ApiMode::Json, Some(false))));
+        assert_eq!(parse(".api 2 compact=maybe"), Some((ApiMode::Json, Some(false))));
+        assert_eq!(parse(".api 2 compact"), Some((ApiMode::Json, None)));
+        assert_eq!(parse(".api 1 compact=yes"), Some((ApiMode::Api, None)));
+        assert_eq!(parse(".api 3"), None);
+        assert_eq!(parse(".api 2 compact=yes x"), None);
+        let ctx = ExecContext { session_id: 0, config: None, session_mgr: None, catalog: None,
+            api_mode: ApiMode::Human, bus_rx: None, job_manager: None };
+        let failed = cmd_dot_api(&crate::session::parse_cli_command(".api foo"), &ctx);
+        assert!(!failed.success && failed.text_output.is_empty() && failed.error_message.is_empty());
     }
 }
