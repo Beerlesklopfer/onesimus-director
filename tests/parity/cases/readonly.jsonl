@@ -1,7 +1,7 @@
 # Read-only/interactive-entry parity cases; one JSON object per line.
 {"id": "banner", "steps": [], "banner": true}
 {"id": "banner-limited", "steps": [], "banner": true, "console": "parity-limited", "password": "parity-limited-pw"}
-{"id": "version", "steps": ["version"]}
+{"id": "version", "steps": ["version"], "normalize": ["25\\.1\\.2[~+][\\w.]+", "\\(\\d\\d \\w+ \\d{4}\\)"]}
 {"id": "time", "steps": ["time"], "normalize": ["\\d\\d-\\w{3}-\\d{4} \\d\\d:\\d\\d:\\d\\d", "^\\w{2,3} "]}
 {"id": "whoami", "steps": ["whoami"]}
 {"id": "whoami-limited", "steps": ["whoami"], "console": "parity-limited", "password": "parity-limited-pw"}

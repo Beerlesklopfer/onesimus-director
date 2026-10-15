@@ -6,30 +6,37 @@
 use crate::command_ast::CommandAst;
 use crate::command_executor::{ExecContext, ApiMode};
 use crate::command_queue::CommandResult;
+use crate::version_strings as v;
 
-const VERSION: &str = env!("CARGO_PKG_VERSION");
-
+/// C++ ua_cmds.cc VersionCmd: "<name> Version: <Full> (<Date>) <OsInfo>
+/// <BAREOS_PLATFORM> <OsInfo> <CustomVersionId>\n".
 pub fn cmd_version(_ast: &CommandAst, ctx: &ExecContext) -> CommandResult {
-    let os_release = std::fs::read_to_string("/etc/os-release").unwrap_or_default();
-    let field = |key: &str| os_release.lines()
-        .find_map(|l| l.strip_prefix(key))
-        .map(|v| v.trim_matches('"').to_string());
-    let os = field("PRETTY_NAME=").unwrap_or_else(|| "Linux".to_string());
-    let distname = field("ID=").unwrap_or_default();
-    let name = ctx.config.as_ref()
-        .and_then(|c| c.read().ok().map(|c| c.director.name.clone()))
-        .unwrap_or_else(|| "bareos-dir".to_string());
-    // Text keeps the "bareos-dir Version:" form for bconsole/WebUI compatibility
-    CommandResult::ok(format!("bareos-dir Version: {VERSION} ({os})\n")).with_json(serde_json::json!({
+    let os = v::os_info();
+    let (name, verid) = ctx.config.as_ref()
+        .and_then(|c| c.read().ok().map(|c| {
+            // Director "Ver Id" directive (me->verid), only kept in the raw config
+            let verid = c.raw.iter()
+                .filter(|r| r.norm_type() == "director")
+                .flat_map(|r| r.directives.iter())
+                .find(|d| d.norm_key() == "verid")
+                .and_then(|d| d.first())
+                .unwrap_or("")
+                .to_string();
+            (c.director.name.clone(), verid)
+        }))
+        .unwrap_or_else(|| ("bareos-dir".to_string(), String::new()));
+    let text = format!("{name} Version: {} ({}) {os} {} {os} {verid}\n",
+        v::FULL, v::DATE, v::PLATFORM);
+    CommandResult::ok(text).with_json(serde_json::json!({
         "version": {
             "name": name,
             "type": "bareos-director",
-            "version": VERSION,
-            "bdate": env!("ONESIMUS_BUILD_DATE"),
+            "version": v::FULL,
+            "bdate": v::DATE,
             "operatingsystem": os,
-            "distname": distname,
+            "distname": v::PLATFORM,
             "distversion": os,
-            "customversionid": "",
+            "customversionid": verid,
         }
     }))
 }

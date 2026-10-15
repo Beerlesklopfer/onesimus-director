@@ -87,21 +87,9 @@ pub fn cmd_messages(ast: &CommandAst, ctx: &ExecContext) -> CommandResult {
     CommandResult::ok(output)
 }
 
-pub fn cmd_memory(_ast: &CommandAst, _ctx: &ExecContext) -> CommandResult {
-    // Read /proc/self/status for VmRSS (resident set size)
-    let mut output = String::new();
-    if let Ok(status) = std::fs::read_to_string("/proc/self/status") {
-        for line in status.lines() {
-            if line.starts_with("VmRSS:") || line.starts_with("VmSize:") ||
-               line.starts_with("VmPeak:") || line.starts_with("Threads:") {
-                output.push_str(&format!("{line}\n"));
-            }
-        }
-    }
-    if output.is_empty() {
-        output.push_str("Memory info not available\n");
-    }
-    CommandResult::ok(output)
+/// C++ ua_cmds.cc MemoryCmd: prints ListDirStatusHeader.
+pub fn cmd_memory(_ast: &CommandAst, ctx: &ExecContext) -> CommandResult {
+    crate::commands::status::dir_status_header(ctx)
 }
 
 pub fn cmd_show(ast: &CommandAst, ctx: &ExecContext) -> CommandResult {

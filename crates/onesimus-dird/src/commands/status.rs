@@ -43,19 +43,59 @@ pub fn cmd_status(ast: &CommandAst, ctx: &ExecContext) -> CommandResult {
 }
 
 pub fn cmd_dot_status(ast: &CommandAst, ctx: &ExecContext) -> CommandResult {
+    let arg = |i: usize| ast.arguments.get(i).map(|a| a.key.to_lowercase());
+    if arg(0).as_deref() == Some("dir") && arg(1).as_deref() == Some("header") {
+        return dir_status_header(ctx);
+    }
     cmd_status(ast, ctx)
 }
 
-fn status_director(ctx: &ExecContext) -> CommandResult {
-    let version = env!("CARGO_PKG_VERSION");
-    let started = crate::localtime::daemon_started();
-
-    let mut output = format!(
-        "bareos-dir Version: {version}\n\
-         Daemon started {}\n\
-         \n",
-        crate::localtime::strftime("%d-%b-%Y %H:%M:%S", started)
+/// C++ ua_status.cc ListDirStatusHeader (also `memory`). Plugin list,
+/// secure erase command and configuration warnings are not supported by the
+/// Rust Director and therefore never printed.
+pub fn dir_status_header(ctx: &ExecContext) -> CommandResult {
+    let header = dir_status_header_json(ctx);
+    let text = format!(
+        "{} Version: {} ({}) {}\n\
+         Daemon started {}. Jobs: run={}, running={} db:postgresql, {} binary\n",
+        header["director"].as_str().unwrap_or_default(),
+        crate::version_strings::FULL,
+        crate::version_strings::DATE,
+        crate::version_strings::os_info(),
+        header["daemon_started"].as_str().unwrap_or_default(),
+        header["jobs_run"], header["jobs_running"],
+        crate::version_strings::BINARY_INFO,
     );
+    CommandResult::ok(text).with_json(serde_json::json!({ "header": header }))
+}
+
+/// JSON object of ListDirStatusHeader.
+fn dir_status_header_json(ctx: &ExecContext) -> serde_json::Value {
+    let name = ctx.config.as_ref()
+        .and_then(|c| c.read().ok().map(|c| c.director.name.clone()))
+        .unwrap_or_default();
+    let (jobs_run, jobs_running) = ctx.job_manager.as_ref()
+        .map(|mgr| {
+            let jobs = mgr.lock().unwrap();
+            (jobs.finished_count(), jobs.running_jobs().len())
+        })
+        .unwrap_or((0, 0));
+    serde_json::json!({
+        "director": name,
+        "version": crate::version_strings::FULL,
+        "release_date": crate::version_strings::DATE,
+        "os": crate::version_strings::os_info(),
+        "binary_info": crate::version_strings::BINARY_INFO,
+        "daemon_started": crate::localtime::strftime("%d-%b-%y %H:%M", crate::localtime::daemon_started()),
+        "jobs_run": jobs_run,
+        "jobs_running": jobs_running,
+        "config_warnings": false,
+    })
+}
+
+fn status_director(ctx: &ExecContext) -> CommandResult {
+    let mut output = dir_status_header(ctx).text_output;
+    output.push('\n');
 
     // Config info
     if let Some(config) = &ctx.config {
@@ -169,24 +209,11 @@ fn status_director(ctx: &ExecContext) -> CommandResult {
 /// is not tracked yet either.
 fn status_director_json(ctx: &ExecContext) -> serde_json::Value {
     use serde_json::json;
-    let name = ctx.config.as_ref()
-        .and_then(|c| c.read().ok().map(|c| c.director.name.clone()))
+    let running: Vec<_> = ctx.job_manager.as_ref()
+        .map(|mgr| mgr.lock().unwrap().running_jobs().into_iter()
+            .map(|(id, name, phase)| json!({ "jobid": id, "name": name, "status": phase }))
+            .collect())
         .unwrap_or_default();
-    let os = std::fs::read_to_string("/etc/os-release").ok()
-        .and_then(|s| s.lines().find_map(|l| l.strip_prefix("PRETTY_NAME=")).map(|v| v.trim_matches('"').to_string()))
-        .unwrap_or_else(|| "Linux".to_string());
-
-    let (running, jobs_run) = match &ctx.job_manager {
-        Some(mgr) => {
-            let jobs = mgr.lock().unwrap();
-            let running: Vec<_> = jobs.running_jobs().into_iter()
-                .map(|(id, name, phase)| json!({ "jobid": id, "name": name, "status": phase }))
-                .collect();
-            let finished = jobs.finished_count();
-            (running, finished)
-        }
-        None => (Vec::new(), 0),
-    };
 
     let clients: Vec<_> = ctx.session_mgr.as_ref()
         .map(|s| s.get_fd_connections().into_iter().map(|fd| json!({
@@ -198,17 +225,7 @@ fn status_director_json(ctx: &ExecContext) -> serde_json::Value {
         .unwrap_or_default();
 
     json!({
-        "header": {
-            "director": name,
-            "version": env!("CARGO_PKG_VERSION"),
-            "release_date": env!("ONESIMUS_BUILD_DATE"),
-            "os": os,
-            "binary_info": "Onesimus",
-            "daemon_started": crate::localtime::strftime("%d-%b-%y %H:%M", crate::localtime::daemon_started()),
-            "jobs_run": jobs_run,
-            "jobs_running": running.len(),
-            "config_warnings": false,
-        },
+        "header": dir_status_header_json(ctx),
         "scheduled": [],
         "running": running,
         "terminated": [],

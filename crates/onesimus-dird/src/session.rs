@@ -617,7 +617,7 @@ mod acl_transport_tests {
             assert_eq!(bnet.recv().unwrap(),BnetMessage::Signal(BnetSignal::Eod));
         }
         bnet.send_str("version").unwrap();
-        assert!(bnet.recv_str().unwrap().contains("bareos-dir Version"));
+        assert!(bnet.recv_str().unwrap().starts_with("dir Version: "));
         assert_eq!(bnet.recv().unwrap(),BnetMessage::Signal(BnetSignal::Eod));
         bnet.send_str("quit").unwrap();drop(bnet);server.join().unwrap();
     }
