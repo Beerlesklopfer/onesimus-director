@@ -11,9 +11,9 @@ Referenz: [WIP/25.1.2-pre, `fc2c79b6c43e`](https://github.com/bareos/bareos/blob
 
 **RunScript erlaubt:** nein. **Audit-Ereignis:** nein. Beide Flags sind keine Read-only-Klassifizierung.
 
-**Onesimus-Status:** `stub`. Funktionsparität ist nicht durch einen Live-Test nachgewiesen.
+**Onesimus-Status:** `partial`. Funktionsparität ist nicht durch einen Live-Test nachgewiesen.
 
-- Der registrierte Handler gibt immer eine leere Ausgabe zurück; er ruft keine ausstehenden Nachrichten ab. Der Sessionloop hat zusätzlich automatische Nachrichtenverarbeitung, was diesen expliziten Befehl nicht ersetzt.
+- Der Handler ruft jetzt wartende Bus-Nachrichten ab und bewahrt deren Bytes; API-Nachrichten werden bis zum Abruf nicht mehr verworfen. Tests prüfen Reihenfolge und einmaligen Abruf. Globale C++-Spooldatei-Semantik, gRPC-Sitzungsqueue und Live-SHA-256-Parität bleiben offen.
 
 **Lokaler Handler:** [crates/onesimus-dird/src/commands/dot.rs:368](../../../crates/onesimus-dird/src/commands/dot.rs).
 

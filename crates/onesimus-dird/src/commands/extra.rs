@@ -38,53 +38,24 @@ pub fn cmd_gui(ast: &CommandAst, _ctx: &ExecContext) -> CommandResult {
     CommandResult::ok(format!("gui mode {on}\n"))
 }
 
-pub fn cmd_messages(_ast: &CommandAst, ctx: &ExecContext) -> CommandResult {
-    use crate::message_bus::{BusMessage, MsgType};
-
+/// DoMessages sends queued text verbatim; dot mode is silent when empty.
+pub fn cmd_messages(ast: &CommandAst, ctx: &ExecContext) -> CommandResult {
     let mut output = String::new();
-    let mut count = 0;
-
     if let Some(rx) = &ctx.bus_rx {
-        loop {
-            match rx.try_recv() {
-                Ok(BusMessage::JobMessage { job_id, job_name, msg_type, text, timestamp }) => {
-                    let prefix = match msg_type {
-                        MsgType::Info     => "INFO",
-                        MsgType::Warning  => "WARNING",
-                        MsgType::Error    => "ERROR",
-                        MsgType::Fatal    => "FATAL",
-                        MsgType::Mount    => "MOUNT",
-                        MsgType::Saved    => "SAVED",
-                        MsgType::Restored => "RESTORED",
-                        MsgType::Skipped  => "SKIPPED",
-                        MsgType::Audit    => "AUDIT",
-                    };
-                    if job_id > 0 {
-                        output.push_str(&format!("{prefix} JobId={job_id} {job_name}: {text}\n"));
-                    } else {
-                        output.push_str(&format!("{prefix}: {text}\n"));
-                    }
-                    count += 1;
-                }
-                Ok(BusMessage::JobStatus { job_id, job_name, status, .. }) => {
-                    output.push_str(&format!("JobId={job_id} {job_name}: {status}\n"));
-                    count += 1;
-                }
-                Ok(BusMessage::ConsoleText { text }) => {
-                    output.push_str(&format!("{text}\n"));
-                    count += 1;
-                }
-                Ok(_) => { count += 1; } // FD/SD events — skip in console output
-                Err(_) => break,
-            }
+        while let Ok(message) = rx.try_recv() {
+            let text = match message {
+                crate::message_bus::BusMessage::ConsoleText { text }
+                | crate::message_bus::BusMessage::JobMessage { text, .. } => text,
+                _ => continue,
+            };
+            output.push_str(&text);
         }
     }
-
-    if count == 0 {
-        CommandResult::ok("No pending messages.\n".to_string())
-    } else {
-        CommandResult::ok(output)
+    if output.is_empty() && ast.command_name != ".messages"
+        && ctx.api_mode == crate::command_executor::ApiMode::Human {
+        output.push_str("You have no messages.\n");
     }
+    CommandResult::ok(output)
 }
 
 pub fn cmd_memory(_ast: &CommandAst, _ctx: &ExecContext) -> CommandResult {
@@ -455,5 +426,27 @@ pub fn cmd_move(ast: &CommandAst, ctx: &ExecContext) -> CommandResult {
     match sd_cmd_via_config(ctx, stor, &format!("move srcslot={from} dstslot={to}")) {
         Ok(resp) => CommandResult::ok(format!("Move slot {from} → {to} on {stor}:\n{resp}\n")),
         Err(e) => CommandResult::error(format!("move: {e}\n")),
+    }
+}
+
+#[cfg(test)]
+mod messages_tests {
+    use super::*;
+    use crate::message_bus::{BusMessage, MessageBus, MsgType};
+
+    #[test]
+    fn messages_preserve_bytes_and_are_consumed_once() {
+        let bus = MessageBus::new(8);
+        let rx = bus.subscribe();
+        let ctx = ExecContext { session_id: 0, config: None, session_mgr: None,
+            catalog: None, api_mode: crate::command_executor::ApiMode::Human,
+            bus_rx: Some(rx), job_manager: None };
+        bus.post_text("first\n");
+        bus.post(BusMessage::JobMessage { job_id: 42, job_name: "job".into(),
+            msg_type: MsgType::Warning, text: "second\r\n".into(), timestamp: 0 });
+        let dot = crate::session::parse_cli_command(".messages");
+        assert_eq!(crate::commands::dot::cmd_dot_messages(&dot, &ctx).text_output, "first\nsecond\r\n");
+        assert_eq!(crate::commands::dot::cmd_dot_messages(&dot, &ctx).text_output, "");
+        assert_eq!(cmd_messages(&crate::session::parse_cli_command("messages"), &ctx).text_output, "You have no messages.\n");
     }
 }

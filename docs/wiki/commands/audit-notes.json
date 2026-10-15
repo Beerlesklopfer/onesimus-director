@@ -99,9 +99,9 @@
       ]
     },
     ".messages": {
-      "status": "stub",
+      "status": "partial",
       "findings": [
-        "Der registrierte Handler gibt immer eine leere Ausgabe zurück; er ruft keine ausstehenden Nachrichten ab. Der Sessionloop hat zusätzlich automatische Nachrichtenverarbeitung, was diesen expliziten Befehl nicht ersetzt."
+        "Der Handler ruft jetzt wartende Bus-Nachrichten ab und bewahrt deren Bytes; API-Nachrichten werden bis zum Abruf nicht mehr verworfen. Tests prüfen Reihenfolge und einmaligen Abruf. Globale C++-Spooldatei-Semantik, gRPC-Sitzungsqueue und Live-SHA-256-Parität bleiben offen."
       ]
     },
     ".users": {

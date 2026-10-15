@@ -13,10 +13,10 @@ Dies ist ein statischer Quellcodeabgleich; es wurden keine Live-Jobs, Löschunge
 
 | Status | Anzahl | Bedeutung |
 |---|---:|---|
-| `partial` | 16 | Konkrete fehlende Optionen oder Teilfunktionen belegt |
+| `partial` | 17 | Konkrete fehlende Optionen oder Teilfunktionen belegt |
 | `registered_unverified` | 53 | Handler vorhanden; Funktionsparität nicht nachgewiesen |
 | `semantic_mismatch` | 2 | Abweichende Bedeutung gegenüber Bareos |
-| `stub` | 17 | Platzhalter statt der beschriebenen Wirkung |
+| `stub` | 16 | Platzhalter statt der beschriebenen Wirkung |
 
 ## Herkunft und Grenzen
 
@@ -58,7 +58,7 @@ Die Syntaxtexte sind Originalhilfe, keine vollständige formale Grammatik aller 
 | [.jobstatus](dot-jobstatus.md) | List jobstatus information | `registered_unverified` |
 | [.levels](dot-levels.md) | List all backup levels | `registered_unverified` |
 | [.locations](dot-locations.md) | Keine Beschreibung in der Originaltabelle (NULL) | `registered_unverified` |
-| [.messages](dot-messages.md) | Display pending messages | `stub` |
+| [.messages](dot-messages.md) | Display pending messages | `partial` |
 | [.media](dot-media.md) | List all medias | `registered_unverified` |
 | [.mediatypes](dot-mediatypes.md) | List all media types | `registered_unverified` |
 | [.msgs](dot-msgs.md) | List all message resources | `registered_unverified` |

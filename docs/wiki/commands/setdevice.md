@@ -19,7 +19,7 @@ setdevice storage=<storage-name> device=<device-name> autoselect=<bool>
 
 - Der Handler bestätigt die Geräteauswahl; storage/autoselect werden nicht an den SD übertragen.
 
-**Lokaler Handler:** [crates/onesimus-dird/src/commands/extra.rs:246](../../../crates/onesimus-dird/src/commands/extra.rs).
+**Lokaler Handler:** [crates/onesimus-dird/src/commands/extra.rs:217](../../../crates/onesimus-dird/src/commands/extra.rs).
 
 Die folgenden vorhandenen Beispiele und Verhaltensbeschreibungen sind lokale Dokumentation; sie sind kein Beleg für vollständige Bareos-Kompatibilität. Bei Widersprüchen gilt der obige Befund.
 <!-- bareos-reference:end -->

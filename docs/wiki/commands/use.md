@@ -19,7 +19,7 @@ use catalog=<catalog>
 
 - Der Handler gibt immer Using default catalog zurück; er wechselt keinen Sitzungskatalog.
 
-**Lokaler Handler:** [crates/onesimus-dird/src/commands/extra.rs:223](../../../crates/onesimus-dird/src/commands/extra.rs).
+**Lokaler Handler:** [crates/onesimus-dird/src/commands/extra.rs:194](../../../crates/onesimus-dird/src/commands/extra.rs).
 
 Die folgenden vorhandenen Beispiele und Verhaltensbeschreibungen sind lokale Dokumentation; sie sind kein Beleg für vollständige Bareos-Kompatibilität. Bei Widersprüchen gilt der obige Befund.
 <!-- bareos-reference:end -->

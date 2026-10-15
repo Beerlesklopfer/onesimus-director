@@ -365,8 +365,8 @@ pub fn cmd_dot_mediatypes(_ast: &CommandAst, ctx: &ExecContext) -> CommandResult
 }
 
 /// `.messages` — display pending messages (dot version)
-pub fn cmd_dot_messages(_ast: &CommandAst, _ctx: &ExecContext) -> CommandResult {
-    CommandResult::ok(String::new())
+pub fn cmd_dot_messages(ast: &CommandAst, ctx: &ExecContext) -> CommandResult {
+    crate::commands::extra::cmd_messages(ast, ctx)
 }
 
 /// `.msgs` — list message resource names (C++ uses the key "text")

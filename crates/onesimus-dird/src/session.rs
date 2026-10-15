@@ -224,7 +224,12 @@ pub fn handle_console_session<S: Read + Write>(
         // HandleMessages: drain pending bus messages (like C++ ua_server.cc).
         // In API mode messages never interleave with the command output;
         // the console is only told via MSGS_PENDING and fetches them itself.
-        if auto_display {
+        if auto_display && api_mode != command_executor::ApiMode::Human {
+            // API clients fetch messages explicitly; do not consume their queue.
+            if !bus_rx.is_empty() && !gui_mode {
+                let _ = bnet.send_signal(BnetSignal::MsgsPending);
+            }
+        } else if auto_display {
             let mut has_messages = false;
             while let Ok(msg) = bus_rx.try_recv() {
                 let text = match msg {

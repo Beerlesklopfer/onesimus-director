@@ -19,7 +19,7 @@ trace on | off
 
 - Der Handler gibt trace on/off als Text zurück; er aktiviert keine Trace-Datei.
 
-**Lokaler Handler:** [crates/onesimus-dird/src/commands/extra.rs:180](../../../crates/onesimus-dird/src/commands/extra.rs).
+**Lokaler Handler:** [crates/onesimus-dird/src/commands/extra.rs:151](../../../crates/onesimus-dird/src/commands/extra.rs).
 
 Die folgenden vorhandenen Beispiele und Verhaltensbeschreibungen sind lokale Dokumentation; sie sind kein Beleg für vollständige Bareos-Kompatibilität. Bei Widersprüchen gilt der obige Befund.
 <!-- bareos-reference:end -->
