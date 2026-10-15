@@ -850,6 +850,26 @@ pub(crate) mod side_effect_tests {
             bus_rx: None, job_manager: None }
     }
 
+    /// Catalog double that records every request; job creation and any
+    /// write are visible in the log. `job_name` answers the rerun lookup.
+    pub(crate) fn recording_catalog(job_name: &'static str)
+        -> (crate::catalog_worker::CatalogHandle, Arc<std::sync::Mutex<Vec<String>>>) {
+        use crate::catalog_worker::{CatalogRequest, CatalogResponse};
+        let log = Arc::new(std::sync::Mutex::new(Vec::new()));
+        let seen = log.clone();
+        let handle = crate::catalog_worker::CatalogHandle::mock(move |request| {
+            let (entry, response) = match request {
+                CatalogRequest::RawQuery { sql } => (sql, CatalogResponse::Text(format!("name\n----\n{job_name}\n"))),
+                CatalogRequest::TextRows { sql } => (sql, CatalogResponse::Error("no rows in the double".into())),
+                CatalogRequest::CreateJob { .. } => ("CreateJob".to_string(), CatalogResponse::Error("double".into())),
+                _ => ("other request".to_string(), CatalogResponse::Error("double".into())),
+            };
+            seen.lock().unwrap().push(entry);
+            response
+        });
+        (handle, log)
+    }
+
     const USAGE: &str = "USAGE: truncate volstatus=Purged [storage=<storage>] [pool=<pool>] [volume=<volume>] [drive=<drivenum>] [yes]\n";
 
     #[test]
@@ -902,6 +922,23 @@ pub(crate) mod side_effect_tests {
         assert!(matches!(purge_plan(&ast("purge jobs client=fd1"), &ctx), Ok(PurgeAction::JobsOfClient(c, _)) if c == "fd1"));
         assert!(matches!(purge_plan(&ast("purge files jobid=7"), &ctx), Ok(PurgeAction::FilesOfJob(7))));
         assert!(matches!(purge_plan(&ast("purge volume=v1"), &ctx), Ok(PurgeAction::Volume(v)) if v == "v1"));
+
+        // The handlers send nothing to the catalog on any guarded path.
+        let mut ctx = ctx;
+        let (catalog, log) = recording_catalog("b1");
+        ctx.catalog = Some(catalog);
+        for line in ["prune", "prune jobs", "prune files", "prune volume", "prune volumes pool=Full"] {
+            cmd_prune_db(&ast(line), &ctx);
+        }
+        for line in ["purge", "purge jobs", "purge files", "purge files jobid=0", "purge volume", "purge jobs pool=Full"] {
+            cmd_purge_db(&ast(line), &ctx);
+        }
+        for line in ["truncate", "truncate volstatus=Purged bogus=1"] {
+            truncate_with(&ast(line), &ctx, |_, _| panic!("{line}: must not contact the SD"));
+        }
+        assert!(log.lock().unwrap().is_empty(), "{:?}", log.lock().unwrap());
+        cmd_purge_db(&ast("purge jobs client=fd1"), &ctx);
+        assert_eq!(log.lock().unwrap().len(), 1, "control: a complete purge reaches the catalog");
     }
 
     #[test]
@@ -927,6 +964,27 @@ pub(crate) mod side_effect_tests {
         assert_eq!(restore_needs_dialog(&crate::session::parse_cli_command("restore help")).unwrap().error_message,
             "Unknown keyword: help\n");
         assert_eq!(restore_needs_dialog(&crate::session::parse_cli_command("restore jobid=1 all done yes")).map(|r| r.text_output), None);
+    }
+
+    #[test]
+    fn restore_dialog_paths_touch_neither_catalog_nor_job_manager() {
+        let mut ctx = context();
+        ctx.config.as_ref().unwrap().write().unwrap().clients.push(bareos_config::resources::ClientResource {
+            name: "fd1".into(), ..Default::default() });
+        let (catalog, log) = recording_catalog("b1");
+        ctx.catalog = Some(catalog);
+        ctx.job_manager = Some(Arc::new(std::sync::Mutex::new(crate::job_manager::JobManager::new(
+            Arc::new(crate::message_bus::MessageBus::new(8)), ctx.config.clone(), None))));
+        for line in ["restore", "restore client=fd1", "restore jobid=1", "restore jobid=1 all done", "restore help"] {
+            cmd_restore_db(&crate::session::parse_cli_command(line), &ctx);
+        }
+        assert!(log.lock().unwrap().is_empty(), "{:?}", log.lock().unwrap());
+        assert!(ctx.job_manager.as_ref().unwrap().lock().unwrap().running_jobs().is_empty());
+        // Control: the complete request reaches the catalog (bootstrap
+        // lookup, refused by the double, so no worker is forked).
+        let result = cmd_restore_db(&crate::session::parse_cli_command("restore client=fd1 jobid=1 all done yes"), &ctx);
+        assert!(!result.success);
+        assert!(!log.lock().unwrap().is_empty());
     }
 
     #[test]

@@ -868,6 +868,21 @@ mod move_operation_tests {
         let DeleteRequest::Jobs(ids, errors) = req("delete jobid=3,5-7,x") else { panic!() };
         assert_eq!((ids, errors.as_str()), (vec![3, 5, 6, 7], "Illegal JobId x ignored\n"));
         assert!(matches!(req("delete jobid=1;DROP"), DeleteRequest::Jobs(ids, _) if ids.is_empty()));
+
+        let mut ctx = context("Pool { Name = Full; Pool Type = Backup }\nPool { Name = Inc; Pool Type = Backup }");
+        let (catalog, log) = crate::commands::admin::side_effect_tests::recording_catalog("b1");
+        ctx.catalog = Some(catalog);
+        for line in ["delete", "delete volume", "delete volume=v1", "delete jobid", "delete jobid=1-100", "delete jobid=x"] {
+            cmd_delete_db(&crate::session::parse_cli_command(line), &ctx);
+        }
+        for line in ["create", "create pool=Nope", "add", "add pool=Full volume=v1"] {
+            let ast = crate::session::parse_cli_command(line);
+            if line.starts_with("create") { cmd_create_db(&ast, &ctx); } else { cmd_add_db(&ast, &ctx); }
+        }
+        // add asks the pool's MaxVols/NumVols (read only) — nothing else may reach the catalog.
+        assert!(log.lock().unwrap().iter().all(|sql| sql.starts_with("SELECT")), "{:?}", log.lock().unwrap());
+        cmd_delete_db(&crate::session::parse_cli_command("delete volume=v1 yes"), &ctx);
+        assert!(log.lock().unwrap().iter().any(|sql| sql.starts_with("DELETE")), "control");
     }
 
     #[test]

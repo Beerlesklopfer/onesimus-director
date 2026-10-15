@@ -544,6 +544,35 @@ mod run_confirmation_tests {
             "Job \"nosuch\" not found\nThe defined Job resources are:\n1: A2\n2: b1\nSelect Job resource (1-2): ");
     }
 
+    /// Context whose catalog and job manager record what a run would do.
+    pub(crate) fn recording_context(jobs: &str) -> (ExecContext, Arc<std::sync::Mutex<Vec<String>>>) {
+        let mut ctx = context(jobs);
+        let (catalog, log) = crate::commands::admin::side_effect_tests::recording_catalog("b1");
+        ctx.catalog = Some(catalog);
+        ctx.job_manager = Some(Arc::new(std::sync::Mutex::new(crate::job_manager::JobManager::new(
+            Arc::new(crate::message_bus::MessageBus::new(8)), ctx.config.clone(), None))));
+        (ctx, log)
+    }
+
+    #[test]
+    fn run_rerun_without_yes_create_and_start_nothing() {
+        let (ctx, log) = recording_context(JOB);
+        for line in ["run", "run job=b1", "run job=b1 level=Full pool=Full", "run job=nosuch"] {
+            let result = cmd_run_db(&crate::session::parse_cli_command(line), &ctx);
+            assert!(result.text_output.ends_with(": "), "{line}: {}", result.text_output);
+        }
+        let rerun = crate::commands::extra::cmd_rerun(&crate::session::parse_cli_command("rerun jobid=1"), &ctx);
+        assert!(rerun.text_output.starts_with("rerunning jobid 1\n") && rerun.text_output.ends_with("OK to run? (yes/mod/no): "),
+            "{}", rerun.text_output);
+        assert!(!log.lock().unwrap().iter().any(|request| request == "CreateJob"), "{:?}", log.lock().unwrap());
+        assert!(ctx.job_manager.as_ref().unwrap().lock().unwrap().running_jobs().is_empty());
+        // Control: with `yes` the double sees the job record request (and
+        // refuses it, so nothing is forked).
+        let started = cmd_run_db(&crate::session::parse_cli_command("run job=b1 level=Full yes"), &ctx);
+        assert!(!started.success);
+        assert!(log.lock().unwrap().iter().any(|request| request == "CreateJob"));
+    }
+
     #[test]
     fn job_without_yes_is_only_displayed() {
         let ctx = context(JOB);
