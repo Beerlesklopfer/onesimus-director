@@ -58,6 +58,7 @@ Neue Einträge unten anhängen; behobene Einträge bleiben mit Commit stehen.
 | C-038 | 15.10.2026 | **run ohne Bestätigung** | Vorfall bei C-011-Test | `run job=X` ohne `yes` zeigt die Zusammenfassung und fragt `OK to run? (yes/mod/no):` | Startet den Job sofort (zwei echte Jobs 7/8 gestartet; mit Freigabe bereinigt: Worker beendet, Zeilen gelöscht) | `ua_run.cc` | behoben (Guard `350a7ae`→ development; Dialog selbst → C-011) |
 | C-039 | 15.10.2026 | **Katalog-Jobid-Sequenz** | Katalog `bareos_cppref` | Jobids steigen monoton (Sequenz ≥ max(jobid)) | `job_jobid_seq` steht bei 8 trotz max(jobid)=629 — seit 13.10. werden alte Jobids wiederverwendet (JobId 1: Log von März, Jobzeile von Oktober). Verdacht: Rust-ORM-Migration auf Schema 2252 | `cats/ddl`, `crates/bareos-orm` | Ursache: manueller Katalogimport am 13.10.2026 (COPY mit expliziten IDs ohne setval) in einer früheren Sitzung, nicht Rust-Code; Schutz in `bareos-orm` (keine destruktiven Migrationen, Sequenzprüfung mit Warnung) übernommen; Katalog am 15.10.2026 mit Freigabe repariert: 7 Sequenzen (path, job, fileset, jobmedia, media, pool, log) per setval auf max(id) |
 | C-040 | 15.10.2026 | Lokale Erweiterungen | — | — (keine Entsprechung) | `.catalog reset` / `.catalog drop` führen `DROP TABLE … CASCADE` aus, nur durch ACL-TODO geschützt | `crates/onesimus-dird/src/commands/catalog.rs:290,340` | behoben (in development, 15.10.2026) |
+| C-041 | 15.10.2026 | Konfiguration JobDefs | `c011-run-select-no` | Explizites `Level = Full` im Job hat Vorrang vor JobDefs | JobDefs-Merge in `director_config` überschreibt das explizite Level (BackupCatalog zeigt Incremental) | `dird_conf.cc` (JobDefs-Vererbung) | offen |
 
 Hinweis C-002: Text-Sitzungen über gRPC/Command-Queue nutzen denselben SessionManager und erhalten die Katalogzeilen jetzt ebenfalls einmal pro Sitzung (konsistent mit dem Original, aber neue Ausgabe an dieser Schnittstelle).
 
@@ -76,7 +77,7 @@ Noch nicht gemergte Agent-Branches (Worktrees unter `.claude/worktrees/`, Commit
 | C-021 restore | `9a6402e` | Konflikt (admin.rs, C-012-Guards) |
 | C-022 bvfs | `5c9ec82 0a58b6c` | Konflikt |
 | C-037 Audit-Log | `021b78d` | Konflikt (parity.py: jetzt Katalogkopien pro Seite) |
-| C-011 Dialoge | Branch `worktree-agent-a2443602a8ed77bcd` | lief bis Sitzungsende, WIP |
+| C-011 Dialoge | 17 Commits `159dea3`..`28cf092` (Basis `9df19d4`) | Framework `ua_select.rs` + alle Dialoge; `cancel` (28cf092) WIP ohne Test; Storage-Auswahl mit C-013 deduplizieren, Hook für estimate (C-017) und restore (C-021) |
 
 Offen ohne Agent: C-025..C-030, C-031..C-036, C-024-Rest, Umstellung Referenz auf `18be77e6`.
 Voraussetzung: `sudo -u postgres psql -c 'ALTER ROLE "joerg.bernau" CREATEDB'` — sonst
