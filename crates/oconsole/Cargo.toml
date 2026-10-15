@@ -31,3 +31,7 @@ rustls.workspace = true
 tokio-rustls.workspace = true
 hyper-util = { version = "0.1", features = ["tokio"] }
 tower = { version = "0.4", features = ["util"] }
+
+rmcp = { version = "3.5.1", default-features = false, features = ["server", "transport-io", "transport-streamable-http-server"] }
+axum = "0.8"
+rand.workspace = true

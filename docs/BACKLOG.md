@@ -10,7 +10,7 @@ dedupliziert nicht. Geplante Backups laufen mit onesimus-dird derzeit nicht.
 Folge: `status director` liefert `scheduled: []`.
 
 
-## Postgres-Plugin für Verzeichnisbäume (BVFS)
+## Postgres-Plugin für Verzeichnisbäume (OVFS)
 
 Ein fertiges Postgres-Plugin-Crate (auf crates.io, Name noch eintragen) löst die
 Verzeichnisbäume im Catalog direkt in PostgreSQL auf. Damit lässt sich im
@@ -38,3 +38,9 @@ Direktiven aus dem show-Port; Reihenfolge der Ressourcen wie C++ (Ladereihenfolg
 Bareos 25.1 gibt bei `llist pools` zusätzlich eine Prune-Zusammenfassung pro
 Pool aus (ua_output.cc `PoolPruneSummary`, Auswertung der Aufbewahrungsfristen).
 onesimus-dird liefert die Felder noch nicht.
+
+## Quellbasierter Director-Vollständigkeitsabgleich
+
+[Originalbefehle und Status](wiki/commands/bareos-reference.md) · [LLM-JSON](wiki/commands/bareos-director-commands.json).
+
+88/88 Originalnamen sind registriert; dies ist keine Funktionsparität. Belegt sind unter anderem BVFS- und Steuerungs-Stubs, fehlende interaktive Restore-Dateiauswahl, `query`/`move`-Semantikabweichungen, unvollständige ACL-Prüfung und zu großzügige MCP-Punktbefehlsfreigaben. Die Referenz enthält die Quellenbelege und unterscheidet diese Befunde von noch ungeprüften Handlern.

@@ -1,0 +1,424 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Bareos Director static command reference",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "title",
+    "reference_date",
+    "upstream",
+    "scope",
+    "llm_instructions",
+    "summary",
+    "cross_cutting_findings",
+    "commands",
+    "restore_file_selection_commands",
+    "onesimus_extensions",
+    "local_source_files"
+  ],
+  "properties": {
+    "$schema": {
+      "type": "string"
+    },
+    "schema_version": {
+      "const": 1
+    },
+    "title": {
+      "type": "string"
+    },
+    "reference_date": {
+      "type": "string",
+      "format": "date"
+    },
+    "upstream": {
+      "type": "object",
+      "required": [
+        "repository",
+        "tag",
+        "commit",
+        "license",
+        "notice",
+        "files"
+      ],
+      "properties": {
+        "repository": {
+          "type": "string"
+        },
+        "tag": {
+          "type": "string"
+        },
+        "commit": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{40}$"
+        },
+        "license": {
+          "type": "string"
+        },
+        "notice": {
+          "type": "string"
+        },
+        "files": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": [
+              "path",
+              "sha256"
+            ],
+            "properties": {
+              "path": {
+                "type": "string"
+              },
+              "sha256": {
+                "type": "string",
+                "pattern": "^[0-9a-f]{64}$"
+              }
+            },
+            "additionalProperties": false
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    "scope": {
+      "type": "string"
+    },
+    "llm_instructions": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "summary": {
+      "type": "object",
+      "required": [
+        "top_level_commands",
+        "registered_top_level_commands",
+        "status_counts",
+        "restore_file_selection_commands",
+        "onesimus_extra_names"
+      ],
+      "properties": {
+        "top_level_commands": {
+          "type": "integer"
+        },
+        "registered_top_level_commands": {
+          "type": "integer"
+        },
+        "restore_file_selection_commands": {
+          "type": "integer"
+        },
+        "onesimus_extra_names": {
+          "type": "integer"
+        },
+        "status_counts": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "integer",
+            "minimum": 0
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    "cross_cutting_findings": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "title",
+          "description",
+          "evidence"
+        ],
+        "properties": {
+          "title": {
+            "type": "string"
+          },
+          "description": {
+            "type": "string"
+          },
+          "evidence": {
+            "type": "array",
+            "items": {
+              "$ref": "#/$defs/location"
+            }
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    "commands": {
+      "type": "array",
+      "items": {
+        "allOf": [
+          {
+            "$ref": "#/$defs/command"
+          },
+          {
+            "properties": {
+              "context": {
+                "const": "director_console"
+              }
+            },
+            "required": [
+              "allowed_in_runscript",
+              "argument_keywords_in_help",
+              "documentation"
+            ]
+          }
+        ]
+      }
+    },
+    "restore_file_selection_commands": {
+      "type": "array",
+      "items": {
+        "allOf": [
+          {
+            "$ref": "#/$defs/command"
+          },
+          {
+            "properties": {
+              "context": {
+                "const": "restore_file_selection"
+              }
+            }
+          }
+        ]
+      }
+    },
+    "onesimus_extensions": {
+      "type": "array",
+      "items": {
+        "allOf": [
+          {
+            "$ref": "#/$defs/local"
+          },
+          {
+            "required": [
+              "name"
+            ],
+            "properties": {
+              "name": {
+                "type": "string"
+              }
+            }
+          }
+        ]
+      }
+    },
+    "local_source_files": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "path",
+          "sha256"
+        ],
+        "properties": {
+          "path": {
+            "type": "string"
+          },
+          "sha256": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$"
+          }
+        },
+        "additionalProperties": false
+      }
+    }
+  },
+  "additionalProperties": false,
+  "$defs": {
+    "location": {
+      "type": "object",
+      "required": [
+        "file",
+        "line"
+      ],
+      "properties": {
+        "file": {
+          "type": "string"
+        },
+        "line": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "url": {
+          "type": "string",
+          "format": "uri"
+        }
+      },
+      "additionalProperties": false
+    },
+    "local": {
+      "type": "object",
+      "required": [
+        "canonical_name",
+        "handler",
+        "registry",
+        "implementation",
+        "declared_arguments"
+      ],
+      "properties": {
+        "canonical_name": {
+          "type": "string"
+        },
+        "handler": {
+          "type": "string"
+        },
+        "registry": {
+          "$ref": "#/$defs/location"
+        },
+        "implementation": {
+          "$ref": "#/$defs/location"
+        },
+        "declared_arguments": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "onesimus": {
+      "type": "object",
+      "required": [
+        "status",
+        "findings",
+        "functional_parity_verified"
+      ],
+      "properties": {
+        "canonical_name": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "handler": {
+          "type": "string"
+        },
+        "registry": {
+          "$ref": "#/$defs/location"
+        },
+        "implementation": {
+          "$ref": "#/$defs/location"
+        },
+        "declared_arguments": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "status": {
+          "enum": [
+            "registered_unverified",
+            "partial",
+            "stub",
+            "semantic_mismatch",
+            "missing",
+            "missing_context"
+          ]
+        },
+        "findings": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "functional_parity_verified": {
+          "const": false
+        }
+      },
+      "additionalProperties": false
+    },
+    "command": {
+      "type": "object",
+      "required": [
+        "name",
+        "context",
+        "description",
+        "usage",
+        "usage_kind",
+        "upstream_handler",
+        "source",
+        "handler_source",
+        "audit_event",
+        "onesimus"
+      ],
+      "properties": {
+        "name": {
+          "type": "string",
+          "minLength": 1
+        },
+        "context": {
+          "enum": [
+            "director_console",
+            "restore_file_selection"
+          ]
+        },
+        "description": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "usage": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "usage_kind": {
+          "enum": [
+            "literal",
+            "shared_literal",
+            "not_declared",
+            "generated_from_resource_directives",
+            "not_declared_in_table"
+          ]
+        },
+        "usage_summary": {
+          "type": "string"
+        },
+        "usage_generator": {
+          "$ref": "#/$defs/location"
+        },
+        "configure_add_resource_types": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "upstream_handler": {
+          "type": "string"
+        },
+        "source": {
+          "$ref": "#/$defs/location"
+        },
+        "handler_source": {
+          "$ref": "#/$defs/location"
+        },
+        "audit_event": {
+          "type": "boolean"
+        },
+        "allowed_in_runscript": {
+          "type": "boolean"
+        },
+        "argument_keywords_in_help": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "uniqueItems": true
+        },
+        "documentation": {
+          "type": "string"
+        },
+        "onesimus": {
+          "$ref": "#/$defs/onesimus"
+        }
+      },
+      "additionalProperties": false
+    }
+  }
+}

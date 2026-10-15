@@ -5,6 +5,7 @@
 
 mod grpc_client;
 mod mcp;
+mod mcp_token;
 
 use std::io::{self, BufRead, Write};
 use std::net::TcpStream;
@@ -74,6 +75,18 @@ struct Cli {
     #[arg(long)]
     mcp: bool,
 
+    /// MCP: serve Streamable HTTP at /mcp instead of stdio (e.g. 127.0.0.1:9104)
+    #[arg(long, requires = "mcp")]
+    mcp_http: Option<std::net::SocketAddr>,
+
+    /// MCP HTTP bearer-token file (created with mode 0600 if missing)
+    #[arg(long, requires = "mcp_http")]
+    mcp_token_file: Option<std::path::PathBuf>,
+
+    /// Additional HTTP Host authority to accept, e.g. mcp.example.org
+    #[arg(long, requires = "mcp_http")]
+    mcp_host: Vec<String>,
+
     /// MCP: also offer the 'execute' tool for state-changing commands
     #[arg(long, requires = "mcp")]
     mcp_allow_write: bool,
@@ -108,6 +121,9 @@ struct EffCli {
     command: Option<String>,
     mcp: bool,
     mcp_allow_write: bool,
+    mcp_http: Option<std::net::SocketAddr>,
+    mcp_token_file: Option<std::path::PathBuf>,
+    mcp_host: Vec<String>,
 }
 
 fn load_console_config(path: &str) -> ConsoleConfig {
@@ -189,6 +205,9 @@ fn main() {
         command: cli.command.clone(),
         mcp: cli.mcp,
         mcp_allow_write: cli.mcp_allow_write,
+        mcp_http: cli.mcp_http,
+        mcp_token_file: cli.mcp_token_file.clone(),
+        mcp_host: cli.mcp_host.clone(),
     };
 
     // SIGINT handler: set flag instead of killing process.
@@ -303,8 +322,8 @@ fn run_bnet_session<S: std::io::Read + std::io::Write + Send + 'static>(cli: &Ef
 
     // MCP server mode
     if cli.mcp {
-        eprintln!("oconsole: serving MCP on stdio{}", if cli.mcp_allow_write { " (write access enabled)" } else { " (read-only)" });
-        mcp::McpServer::new(BnetRunner { bnet }, cli.mcp_allow_write, "bareos-dir".to_string()).serve();
+        eprintln!("oconsole: serving MCP{}", if cli.mcp_allow_write { " (write access enabled)" } else { " (read-only)" });
+        mcp::McpServer::new(BnetRunner { bnet }, cli.mcp_allow_write, "bareos-dir".to_string()).serve_transport(cli.mcp_http, cli.mcp_token_file.clone(), cli.mcp_host.clone()).unwrap_or_else(|e| { eprintln!("MCP: {e}"); std::process::exit(1) });
         return;
     }
 
@@ -323,7 +342,7 @@ struct BnetRunner<S: std::io::Read + std::io::Write> {
     bnet: BnetStream<S>,
 }
 
-impl<S: std::io::Read + std::io::Write> mcp::CommandRunner for BnetRunner<S> {
+impl<S: std::io::Read + std::io::Write + Send + 'static> mcp::CommandRunner for BnetRunner<S> {
     fn run(&mut self, command: &str) -> anyhow::Result<String> {
         self.bnet.send_str(command)?;
         let mut output = String::new();
@@ -1065,10 +1084,10 @@ fn run_grpc_mode(cli: &EffCli) {
     eprintln!("Connected to Director {} {} via gRPC ({host}:{port}, TLS)", session.director_name, session.version);
 
     if cli.mcp {
-        eprintln!("oconsole: serving MCP on stdio{}", if cli.mcp_allow_write { " (write access enabled)" } else { " (read-only)" });
+        eprintln!("oconsole: serving MCP{}", if cli.mcp_allow_write { " (write access enabled)" } else { " (read-only)" });
         let name = session.director_name.clone();
         let runner = GrpcRunner { rt, session };
-        mcp::McpServer::new(runner, cli.mcp_allow_write, name).serve();
+        mcp::McpServer::new(runner, cli.mcp_allow_write, name).serve_transport(cli.mcp_http, cli.mcp_token_file.clone(), cli.mcp_host.clone()).unwrap_or_else(|e| { eprintln!("MCP: {e}"); std::process::exit(1) });
         return;
     }
 
@@ -1195,6 +1214,14 @@ mod tests {
         assert!(Cli::try_parse_from(["oconsole", "--mcp-allow-write"]).is_err());
         let cli = Cli::parse_from(["oconsole", "--mcp", "--mcp-allow-write", "--grpc"]);
         assert!(cli.mcp && cli.mcp_allow_write && cli.grpc);
+    }
+
+    #[test]
+    fn mcp_http_options_require_server_mode() {
+        assert!(Cli::try_parse_from(["oconsole", "--mcp-http", "127.0.0.1:9104"]).is_err());
+        assert!(Cli::try_parse_from(["oconsole", "--mcp", "--mcp-token-file", "/tmp/token"]).is_err());
+        let cli = Cli::parse_from(["oconsole", "--mcp", "--mcp-http", "127.0.0.1:9104", "--mcp-token-file", "/tmp/token"]);
+        assert_eq!(cli.mcp_http.unwrap().port(), 9104);
     }
 
     #[test]

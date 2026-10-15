@@ -87,7 +87,15 @@ Director {
 }
 ```
 
+## Director command reference
+
+- [Wiki: original Bareos command set and completeness audit](docs/wiki/commands/bareos-reference.md)
+- [LLM command reference (JSON)](docs/wiki/commands/bareos-director-commands.json)
+- [Command pages](docs/wiki/commands/README.md)
+
 ## oconsole: gRPC and MCP
+
+The MCP server uses the official Rust SDK `rmcp` (requires Rust 1.88 or newer).
 
 ```bash
 # gRPC instead of BNET (asks once to trust the Director certificate,
@@ -101,6 +109,28 @@ oconsole --mcp --mcp-allow-write
 # MCP over gRPC needs a known certificate (connect once interactively or pass it)
 oconsole --mcp --grpc --grpc-fingerprint <sha256>
 ```
+
+For a separately running MCP server that clients can register by URL:
+
+```bash
+oconsole --mcp --mcp-http 127.0.0.1:9104 -c /etc/bareos/oconsole.conf
+# Read the bearer token locally to enter it in the client's authentication settings:
+cat ~/.config/oconsole/mcp.token
+```
+
+The endpoint is `http://127.0.0.1:9104/mcp` (Streamable HTTP). Every request
+requires `Authorization: Bearer <token>`. The token is generated from 32 OS-random
+bytes on first start and reused after restarts. It is stored with permissions
+`0600` in `$XDG_CONFIG_HOME/oconsole/mcp.token` (default
+`~/.config/oconsole/mcp.token`). Override with `--mcp-token-file /path/to/token`.
+The file belongs to the OS user running oconsole. To rotate the token, stop
+oconsole, remove the file, restart, and update clients. The token is never logged.
+All clients using this token share the configured Director console and its ACLs.
+
+For remote clients, expose `/mcp` through an HTTPS reverse proxy and add its public
+hostname with `--mcp-host mcp.example.org`. The proxy must forward the
+`Authorization` header. Use the public HTTPS URL in the client. stdio mode does
+not require this token. The Director connection still uses BNET or `--grpc`.
 
 Register with Claude Code, for example:
 

@@ -10,76 +10,130 @@
 //!   query   — read-only commands (list, show, status, dot-commands, …)
 //!   execute — any command; only with --mcp-allow-write
 
-use std::io::{BufRead, Write};
+use std::sync::{Arc, Mutex};
 
-use serde_json::{json, Value};
+use rmcp::model::*;
+use rmcp::service::RequestContext;
+use rmcp::{ErrorData, RoleServer, ServerHandler, ServiceExt};
 
-const PROTOCOL_VERSIONS: &[&str] = &["2025-06-18", "2025-03-26", "2024-11-05"];
+use serde_json::{Value, json};
 
 /// Runs one command line against the Director and returns its text output.
-pub trait CommandRunner {
+pub trait CommandRunner: Send + 'static {
     fn run(&mut self, command: &str) -> anyhow::Result<String>;
 }
 
 pub struct McpServer<R: CommandRunner> {
-    runner: R,
+    runner: Arc<Mutex<R>>,
     allow_write: bool,
     director_name: String,
 }
 
 impl<R: CommandRunner> McpServer<R> {
     pub fn new(runner: R, allow_write: bool, director_name: String) -> Self {
-        Self { runner, allow_write, director_name }
-    }
-
-    /// Serve until stdin closes.
-    pub fn serve(&mut self) {
-        let stdin = std::io::stdin();
-        let mut stdout = std::io::stdout();
-        for line in stdin.lock().lines() {
-            let Ok(line) = line else { break };
-            if line.trim().is_empty() {
-                continue;
-            }
-            if let Some(reply) = self.handle_line(&line) {
-                let _ = writeln!(stdout, "{reply}");
-                let _ = stdout.flush();
-            }
+        Self {
+            runner: Arc::new(Mutex::new(runner)),
+            allow_write,
+            director_name,
         }
     }
 
-    /// Handle one JSON-RPC message. Returns the response line, if any.
-    pub fn handle_line(&mut self, line: &str) -> Option<String> {
-        let msg: Value = match serde_json::from_str(line) {
-            Ok(v) => v,
-            Err(e) => return Some(error_response(Value::Null, -32700, &format!("parse error: {e}")).to_string()),
-        };
-        let id = msg.get("id").cloned();
-        let method = msg.get("method").and_then(Value::as_str).unwrap_or("");
-        let params = msg.get("params").cloned().unwrap_or(Value::Null);
-
-        // Notifications (no id) never get a response
-        let id = id?;
-
-        let result = match method {
-            "initialize" => Ok(self.initialize(&params)),
-            "ping" => Ok(json!({})),
-            "tools/list" => Ok(self.tools_list()),
-            "tools/call" => self.tools_call(&params),
-            _ => Err((-32601, format!("method not found: {method}"))),
-        };
-        Some(match result {
-            Ok(r) => json!({ "jsonrpc": "2.0", "id": id, "result": r }),
-            Err((code, msg)) => error_response(id, code, &msg),
-        }.to_string())
+    pub fn serve_transport(
+        self,
+        address: Option<std::net::SocketAddr>,
+        token_path: Option<std::path::PathBuf>,
+        hosts: Vec<String>,
+    ) -> anyhow::Result<()> {
+        // Read/generate the credential before entering the async runtime.
+        let http = address
+            .map(|address| {
+                let path = token_path
+                    .map(Ok)
+                    .unwrap_or_else(crate::mcp_token::default_path)?;
+                let token = crate::mcp_token::load_or_create(&path)?;
+                eprintln!(
+                    "oconsole: MCP URL http://{address}/mcp; bearer token file {}",
+                    path.display()
+                );
+                Ok::<_, anyhow::Error>((address, token))
+            })
+            .transpose()?;
+        // Keep the runner alive outside the runtime (GrpcRunner owns a runtime).
+        let runner = self.runner.clone();
+        let result = tokio::runtime::Runtime::new()?.block_on(async move {
+            if let Some((address, token)) = http {
+                let listener = tokio::net::TcpListener::bind(address).await?;
+                axum::serve(listener, self.http_router(token, hosts))
+                    .with_graceful_shutdown(async {
+                        loop {
+                            if crate::CTRL_C.load(std::sync::atomic::Ordering::Relaxed) {
+                                break;
+                            }
+                            tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+                        }
+                    })
+                    .await?;
+            } else {
+                let service = ServiceExt::serve(self, rmcp::transport::stdio()).await?;
+                service.waiting().await?;
+            }
+            Ok(())
+        });
+        drop(runner);
+        result
     }
 
-    fn initialize(&self, params: &Value) -> Value {
-        let requested = params.get("protocolVersion").and_then(Value::as_str).unwrap_or("");
-        let version = if PROTOCOL_VERSIONS.contains(&requested) { requested } else { PROTOCOL_VERSIONS[0] };
-        let mode = if self.allow_write { "read and write" } else { "read-only" };
-        json!({
-            "protocolVersion": version,
+    fn http_router(self, token: String, hosts: Vec<String>) -> axum::Router {
+        use rmcp::transport::streamable_http_server::{
+            StreamableHttpServerConfig, StreamableHttpService, session::local::LocalSessionManager,
+        };
+        let mut config = StreamableHttpServerConfig::default();
+        config.allowed_hosts.extend(hosts);
+        config = config.enforce_origin_validation();
+        let service = StreamableHttpService::new(
+            move || {
+                Ok(Self {
+                    runner: self.runner.clone(),
+                    allow_write: self.allow_write,
+                    director_name: self.director_name.clone(),
+                })
+            },
+            Arc::new(LocalSessionManager::default()),
+            config,
+        );
+        axum::Router::new()
+            .route_service("/mcp", service)
+            .layer(axum::middleware::from_fn(
+                move |request: axum::extract::Request, next: axum::middleware::Next| {
+                    let token = token.clone();
+                    async move {
+                        let header = request
+                            .headers()
+                            .get(axum::http::header::AUTHORIZATION)
+                            .and_then(|h| h.to_str().ok());
+                        if !crate::mcp_token::authorized(header, &token) {
+                            use axum::response::IntoResponse;
+                            return (
+                                axum::http::StatusCode::UNAUTHORIZED,
+                                [(axum::http::header::WWW_AUTHENTICATE, "Bearer")],
+                                "MCP bearer token required",
+                            )
+                                .into_response();
+                        }
+                        next.run(request).await
+                    }
+                },
+            ))
+    }
+
+    fn server_info(&self) -> ServerConfig {
+        let mode = if self.allow_write {
+            "read and write"
+        } else {
+            "read-only"
+        };
+        serde_json::from_value(json!({
+            "protocolVersion": ProtocolVersion::default(),
             "capabilities": { "tools": { "listChanged": false } },
             "serverInfo": { "name": "oconsole", "version": env!("CARGO_PKG_VERSION") },
             "instructions": format!(
@@ -89,7 +143,8 @@ impl<R: CommandRunner> McpServer<R> {
                  Use 'help' or '.help all' to discover commands.",
                 self.director_name
             ),
-        })
+        }))
+        .expect("valid server metadata")
     }
 
     fn tools_list(&self) -> Value {
@@ -129,7 +184,7 @@ impl<R: CommandRunner> McpServer<R> {
         json!({ "tools": tools })
     }
 
-    fn tools_call(&mut self, params: &Value) -> Result<Value, (i64, String)> {
+    fn tools_call(&self, params: &Value) -> Result<Value, (i64, String)> {
         let name = params.get("name").and_then(Value::as_str).unwrap_or("");
         let command = params
             .get("arguments")
@@ -141,7 +196,12 @@ impl<R: CommandRunner> McpServer<R> {
         match name {
             "query" => {}
             "execute" if self.allow_write => {}
-            "execute" => return Err((-32602, "tool 'execute' is disabled (start oconsole with --mcp-allow-write)".into())),
+            "execute" => {
+                return Err((
+                    -32602,
+                    "tool 'execute' is disabled (start oconsole with --mcp-allow-write)".into(),
+                ));
+            }
             _ => return Err((-32602, format!("unknown tool: {name}"))),
         }
 
@@ -151,14 +211,24 @@ impl<R: CommandRunner> McpServer<R> {
         }
         if name == "query" && !is_read_only(command) {
             return Ok(tool_result(
-                &format!("'{command}' is not a read-only command. {}",
-                    if self.allow_write { "Use the 'execute' tool." }
-                    else { "Write access is disabled (oconsole --mcp-allow-write)." }),
+                &format!(
+                    "'{command}' is not a read-only command. {}",
+                    if self.allow_write {
+                        "Use the 'execute' tool."
+                    } else {
+                        "Write access is disabled (oconsole --mcp-allow-write)."
+                    }
+                ),
                 true,
             ));
         }
 
-        match self.runner.run(command) {
+        match self
+            .runner
+            .lock()
+            .map_err(|_| (-32603, "Director runner unavailable".into()))?
+            .run(command)
+        {
             Ok(out) if out.trim().is_empty() => Ok(tool_result("(no output)", false)),
             Ok(out) => Ok(tool_result(&out, false)),
             Err(e) => Ok(tool_result(&format!("Director error: {e}"), true)),
@@ -170,8 +240,40 @@ fn tool_result(text: &str, is_error: bool) -> Value {
     json!({ "content": [{ "type": "text", "text": text }], "isError": is_error })
 }
 
-fn error_response(id: Value, code: i64, message: &str) -> Value {
-    json!({ "jsonrpc": "2.0", "id": id, "error": { "code": code, "message": message } })
+impl<R: CommandRunner> ServerHandler for McpServer<R> {
+    fn get_info(&self) -> ServerConfig {
+        self.server_info()
+    }
+
+    async fn list_tools(
+        &self,
+        _: Option<PaginatedRequestParams>,
+        _: RequestContext<RoleServer>,
+    ) -> Result<ListToolsResult, ErrorData> {
+        Ok(serde_json::from_value(self.tools_list()).expect("valid tool metadata"))
+    }
+
+    async fn call_tool(
+        &self,
+        request: CallToolRequestParams,
+        _: RequestContext<RoleServer>,
+    ) -> Result<CallToolResponse, ErrorData> {
+        let server = Self {
+            runner: self.runner.clone(),
+            allow_write: self.allow_write,
+            director_name: self.director_name.clone(),
+        };
+        tokio::task::spawn_blocking(move || {
+            let params = serde_json::to_value(request).expect("serializable tool request");
+            let result = server
+                .tools_call(&params)
+                .map_err(|(_, message)| ErrorData::invalid_params(message, None))?;
+            let result: CallToolResult = serde_json::from_value(result).expect("valid tool result");
+            Ok(result.into())
+        })
+        .await
+        .map_err(|e| ErrorData::internal_error(e.to_string(), None))?
+    }
 }
 
 /// One single command line, no control characters (BNET would take them literally).
@@ -182,8 +284,14 @@ fn validate_command(command: &str) -> Result<(), String> {
     if command.chars().any(|c| c.is_control()) {
         return Err("command must be a single line without control characters".into());
     }
-    let first = command.split_whitespace().next().unwrap_or("").to_ascii_lowercase();
-    if matches!(first.as_str(), "quit" | "exit" | ".quit" | ".api" | "@exit") || first.starts_with('@') {
+    let first = command
+        .split_whitespace()
+        .next()
+        .unwrap_or("")
+        .to_ascii_lowercase();
+    if matches!(first.as_str(), "quit" | "exit" | ".quit" | ".api" | "@exit")
+        || first.starts_with('@')
+    {
         return Err(format!("'{first}' is not available via MCP"));
     }
     Ok(())
@@ -191,17 +299,35 @@ fn validate_command(command: &str) -> Result<(), String> {
 
 /// Commands that only read Director/catalog state.
 fn is_read_only(command: &str) -> bool {
-    let first = command.split_whitespace().next().unwrap_or("").to_ascii_lowercase();
+    let first = command
+        .split_whitespace()
+        .next()
+        .unwrap_or("")
+        .to_ascii_lowercase();
     if first.starts_with('.') {
         // Dot-commands are queries, except those that modify state or run raw SQL
         return !matches!(
             first.as_str(),
-            ".sql" | ".bvfs_restore" | ".bvfs_cleanup" | ".bvfs_clear_cache" | ".die" | ".exit" | ".consoles_kill"
+            ".sql"
+                | ".bvfs_restore"
+                | ".bvfs_cleanup"
+                | ".bvfs_clear_cache"
+                | ".die"
+                | ".exit"
+                | ".consoles_kill"
         );
     }
     matches!(
         first.as_str(),
-        "status" | "list" | "llist" | "show" | "version" | "help" | "time" | "messages" | "estimate"
+        "status"
+            | "list"
+            | "llist"
+            | "show"
+            | "version"
+            | "help"
+            | "time"
+            | "messages"
+            | "estimate"
     )
 }
 
@@ -218,35 +344,33 @@ mod tests {
     }
 
     fn call(srv: &mut McpServer<Echo>, line: Value) -> Value {
-        serde_json::from_str(&srv.handle_line(&line.to_string()).unwrap()).unwrap()
+        match line["method"].as_str().unwrap() {
+            "tools/list" => json!({"result": srv.tools_list()}),
+            "tools/call" => match srv.tools_call(&line["params"]) {
+                Ok(result) => json!({"result": result}),
+                Err((code, message)) => json!({"error": {"code": code, "message": message}}),
+            },
+            _ => unreachable!(),
+        }
     }
 
     fn tool_call(tool: &str, cmd: &str) -> Value {
-        json!({"jsonrpc":"2.0","id":7,"method":"tools/call","params":{"name":tool,"arguments":{"command":cmd}}})
-    }
-
-    #[test]
-    fn initialize_negotiates_version() {
-        let mut srv = McpServer::new(Echo(vec![]), false, "dir".into());
-        let r = call(&mut srv, json!({"jsonrpc":"2.0","id":1,"method":"initialize",
-            "params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"t","version":"1"}}}));
-        assert_eq!(r["result"]["protocolVersion"], "2024-11-05");
-        assert_eq!(r["result"]["serverInfo"]["name"], "oconsole");
-        let r = call(&mut srv, json!({"jsonrpc":"2.0","id":2,"method":"initialize","params":{"protocolVersion":"1999-01-01"}}));
-        assert_eq!(r["result"]["protocolVersion"], PROTOCOL_VERSIONS[0]);
-    }
-
-    #[test]
-    fn notifications_get_no_response() {
-        let mut srv = McpServer::new(Echo(vec![]), false, "dir".into());
-        assert!(srv.handle_line(r#"{"jsonrpc":"2.0","method":"notifications/initialized"}"#).is_none());
+        json!({"method":"tools/call","params":{"name":tool,"arguments":{"command":cmd}}})
     }
 
     #[test]
     fn read_only_mode_lists_only_query() {
         let mut srv = McpServer::new(Echo(vec![]), false, "dir".into());
-        let r = call(&mut srv, json!({"jsonrpc":"2.0","id":3,"method":"tools/list"}));
-        let names: Vec<_> = r["result"]["tools"].as_array().unwrap().iter().map(|t| t["name"].clone()).collect();
+        let r = call(
+            &mut srv,
+            json!({"jsonrpc":"2.0","id":3,"method":"tools/list"}),
+        );
+        let names: Vec<_> = r["result"]["tools"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|t| t["name"].clone())
+            .collect();
         assert_eq!(names, vec![json!("query")]);
     }
 
@@ -263,11 +387,16 @@ mod tests {
     #[test]
     fn query_rejects_writes_without_running_them() {
         let mut srv = McpServer::new(Echo(vec![]), false, "dir".into());
-        for cmd in ["delete volume=Full-0001 yes", "run job=Backup yes", ".sql query=\"DELETE FROM job\"", "purge volume=x"] {
+        for cmd in [
+            "delete volume=Full-0001 yes",
+            "run job=Backup yes",
+            ".sql query=\"DELETE FROM job\"",
+            "purge volume=x",
+        ] {
             let r = call(&mut srv, tool_call("query", cmd));
             assert_eq!(r["result"]["isError"], true, "{cmd}");
         }
-        assert!(srv.runner.0.is_empty());
+        assert!(srv.runner.lock().unwrap().0.is_empty());
     }
 
     #[test]
@@ -275,7 +404,7 @@ mod tests {
         let mut srv = McpServer::new(Echo(vec![]), false, "dir".into());
         let r = call(&mut srv, tool_call("execute", "run job=Backup yes"));
         assert!(r["error"].is_object());
-        assert!(srv.runner.0.is_empty());
+        assert!(srv.runner.lock().unwrap().0.is_empty());
     }
 
     #[test]
@@ -283,23 +412,118 @@ mod tests {
         let mut srv = McpServer::new(Echo(vec![]), true, "dir".into());
         let r = call(&mut srv, tool_call("execute", "run job=Backup yes"));
         assert_eq!(r["result"]["isError"], false);
-        assert_eq!(srv.runner.0, vec!["run job=Backup yes"]);
+        assert_eq!(srv.runner.lock().unwrap().0, vec!["run job=Backup yes"]);
     }
 
     #[test]
     fn multi_line_and_session_commands_rejected() {
         let mut srv = McpServer::new(Echo(vec![]), true, "dir".into());
-        for cmd in ["list jobs\ndelete volume=x yes", "quit", ".api 2", "@exit", ""] {
+        for cmd in [
+            "list jobs\ndelete volume=x yes",
+            "quit",
+            ".api 2",
+            "@exit",
+            "",
+        ] {
             let r = call(&mut srv, tool_call("execute", cmd));
             assert_eq!(r["result"]["isError"], true, "{cmd:?}");
         }
-        assert!(srv.runner.0.is_empty());
+        assert!(srv.runner.lock().unwrap().0.is_empty());
     }
 
-    #[test]
-    fn unknown_method_is_an_error() {
-        let mut srv = McpServer::new(Echo(vec![]), false, "dir".into());
-        let r = call(&mut srv, json!({"jsonrpc":"2.0","id":9,"method":"resources/list"}));
-        assert_eq!(r["error"]["code"], -32601);
+    #[tokio::test]
+    async fn rmcp_stdio_handshake_and_tool_call() {
+        use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
+        let (client, server) = tokio::io::duplex(16384);
+        let task = tokio::spawn(async move {
+            ServiceExt::serve(McpServer::new(Echo(vec![]), false, "dir".into()), server)
+                .await
+                .unwrap()
+                .waiting()
+                .await
+                .unwrap();
+        });
+        let (read, mut write) = tokio::io::split(client);
+        let mut lines = BufReader::new(read).lines();
+        write.write_all(b"{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\",\"params\":{\"protocolVersion\":\"2024-11-05\",\"capabilities\":{},\"clientInfo\":{\"name\":\"test\",\"version\":\"1\"}}}\n").await.unwrap();
+        let reply: Value =
+            serde_json::from_str(&lines.next_line().await.unwrap().unwrap()).unwrap();
+        assert_eq!(reply["result"]["serverInfo"]["name"], "oconsole");
+        assert_eq!(reply["result"]["protocolVersion"], "2024-11-05");
+        write
+            .write_all(b"{\"jsonrpc\":\"2.0\",\"method\":\"notifications/initialized\"}\n")
+            .await
+            .unwrap();
+        for (id, method, params) in [
+            (2, "tools/list", json!({})),
+            (
+                3,
+                "tools/call",
+                json!({"name":"query","arguments":{"command":"list jobs"}}),
+            ),
+            (
+                4,
+                "tools/call",
+                json!({"name":"execute","arguments":{"command":"run job=Backup yes"}}),
+            ),
+        ] {
+            let request = json!({"jsonrpc":"2.0", "id":id, "method":method, "params":params});
+            write
+                .write_all(format!("{request}\n").as_bytes())
+                .await
+                .unwrap();
+            let reply: Value =
+                serde_json::from_str(&lines.next_line().await.unwrap().unwrap()).unwrap();
+            assert_eq!(reply["id"], id);
+            match id {
+                2 => assert_eq!(reply["result"]["tools"].as_array().unwrap().len(), 1),
+                3 => assert_eq!(reply["result"]["content"][0]["text"], "ran list jobs\n"),
+                4 => assert!(reply["error"].is_object()),
+                _ => unreachable!(),
+            }
+        }
+        drop(write);
+        drop(lines);
+        tokio::time::timeout(std::time::Duration::from_secs(5), task)
+            .await
+            .unwrap()
+            .unwrap();
+    }
+    #[tokio::test]
+    async fn http_requires_token_and_accepts_authenticated_initialize() {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        let token = "a".repeat(64);
+        let app =
+            McpServer::new(Echo(vec![]), false, "dir".into()).http_router(token.clone(), vec![]);
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let task = tokio::spawn(async move {
+            axum::serve(listener, app).await.unwrap();
+        });
+        for (auth, expected) in [
+            (String::new(), "401"),
+            ("Authorization: Bearer wrong\r\n".into(), "401"),
+            (format!("Authorization: Bearer {token}\r\n"), "200"),
+        ] {
+            let mut stream = tokio::net::TcpStream::connect(address).await.unwrap();
+            let body = json!({"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"test","version":"1"}}}).to_string();
+            let request = format!(
+                "POST /mcp HTTP/1.1\r\nHost: localhost\r\n{auth}Content-Type: application/json\r\nAccept: application/json, text/event-stream\r\nConnection: close\r\nContent-Length: {}\r\n\r\n{body}",
+                body.len()
+            );
+            stream.write_all(request.as_bytes()).await.unwrap();
+            let mut bytes = [0u8; 8192];
+            let size =
+                tokio::time::timeout(std::time::Duration::from_secs(5), stream.read(&mut bytes))
+                    .await
+                    .unwrap()
+                    .unwrap();
+            let response = String::from_utf8_lossy(&bytes[..size]);
+            assert!(
+                response.starts_with(&format!("HTTP/1.1 {expected}")),
+                "{response}"
+            );
+        }
+        task.abort();
     }
 }

@@ -1,0 +1,305 @@
+{
+  "schema_version": 1,
+  "method": "Manual static review. Status applies to the current handler and is not a live compatibility certification.",
+  "commands": {
+    ".bvfs_update": {
+      "status": "stub",
+      "findings": [
+        "Der Handler bestätigt die Cache-Operation lediglich per Text; keine BVFS-Katalogoperation wird ausgeführt."
+      ]
+    },
+    ".bvfs_cleanup": {
+      "status": "stub",
+      "findings": [
+        "Der Handler bestätigt die Cache-Operation lediglich per Text; keine BVFS-Katalogoperation wird ausgeführt."
+      ]
+    },
+    ".bvfs_clear_cache": {
+      "status": "stub",
+      "findings": [
+        "Der Handler bestätigt die Cache-Operation lediglich per Text; keine BVFS-Katalogoperation wird ausgeführt."
+      ]
+    },
+    ".bvfs_lsdirs": {
+      "status": "stub",
+      "findings": [
+        "Der Handler gibt die übergebenen Suchparameter als Text zurück; er liest keine Verzeichnis-, Datei- oder Versionsdaten aus dem Katalog."
+      ]
+    },
+    ".bvfs_lsfiles": {
+      "status": "stub",
+      "findings": [
+        "Der Handler gibt die übergebenen Suchparameter als Text zurück; er liest keine Verzeichnis-, Datei- oder Versionsdaten aus dem Katalog."
+      ]
+    },
+    ".bvfs_versions": {
+      "status": "stub",
+      "findings": [
+        "Der Handler gibt die übergebenen Suchparameter als Text zurück; er liest keine Verzeichnis-, Datei- oder Versionsdaten aus dem Katalog."
+      ]
+    },
+    ".bvfs_restore": {
+      "status": "stub",
+      "findings": [
+        "Der Handler gibt path/jobid/fileid/dirid als Text zurück; er erzeugt keine Restore-Selektion bzw. Handle-Tabelle."
+      ]
+    },
+    ".bvfs_get_jobids": {
+      "status": "stub",
+      "findings": [
+        "jobid wird lediglich zurückgegeben, ujobid als Text ausgegeben; erforderliche Full-/Differential-/Incremental-Jobketten werden nicht aus dem Katalog ermittelt."
+      ]
+    },
+    "estimate": {
+      "status": "stub",
+      "findings": [
+        "Der Handler liest Jobdaten, führt aber keine FD-Schätzung aus; die Ausgabe lautet ausdrücklich Estimate pending."
+      ]
+    },
+    "automount": {
+      "status": "stub",
+      "findings": [
+        "Der Handler bestätigt on/off per Text; im BNET-Sessionloop wird kein automount-Zustand gesetzt."
+      ]
+    },
+    "trace": {
+      "status": "stub",
+      "findings": [
+        "Der Handler gibt trace on/off als Text zurück; er aktiviert keine Trace-Datei."
+      ]
+    },
+    "var": {
+      "status": "stub",
+      "findings": [
+        "Der Handler gibt Variable <name>: undefined zurück; Bareos-Variablenexpansion fehlt."
+      ]
+    },
+    "setbandwidth": {
+      "status": "stub",
+      "findings": [
+        "Der Handler bestätigt limit per Text; er sendet kein Bandbreitenlimit an FD/SD oder laufende Jobs."
+      ]
+    },
+    "setip": {
+      "status": "stub",
+      "findings": [
+        "Der Handler bestätigt Client address updated; er verändert keine Client-Adresse."
+      ]
+    },
+    "setdevice": {
+      "status": "stub",
+      "findings": [
+        "Der Handler bestätigt die Geräteauswahl; storage/autoselect werden nicht an den SD übertragen."
+      ]
+    },
+    "use": {
+      "status": "stub",
+      "findings": [
+        "Der Handler gibt immer Using default catalog zurück; er wechselt keinen Sitzungskatalog."
+      ]
+    },
+    ".messages": {
+      "status": "stub",
+      "findings": [
+        "Der registrierte Handler gibt immer eine leere Ausgabe zurück; er ruft keine ausstehenden Nachrichten ab. Der Sessionloop hat zusätzlich automatische Nachrichtenverarbeitung, was diesen expliziten Befehl nicht ersetzt."
+      ]
+    },
+    ".users": {
+      "status": "semantic_mismatch",
+      "findings": [
+        "Der Handler listet Console-Ressourcen als User; Bareos listet eigene User-Ressourcen."
+      ]
+    },
+    "query": {
+      "status": "semantic_mismatch",
+      "findings": [
+        "Bareos QueryCmd öffnet QueryFile und bietet ein interaktives Menü vordefinierter Katalogabfragen. Lokal ist query ein Alias für sqlquery und führt den übergebenen Text als SQL aus."
+      ]
+    },
+    ".authorized": {
+      "status": "partial",
+      "findings": [
+        "Der Handler prüft überwiegend Ressourcenexistenz; cmd wird pauschal als autorisiert behandelt. Dies ist keine Command-/Resource-ACL-Prüfung wie im Original."
+      ]
+    },
+    "run": {
+      "status": "partial",
+      "findings": [
+        "Alle Nicht-Full-Level werden ausdrücklich zu Full hochgestuft. Damit fehlen unter anderem echte Incremental-/Differential-Läufe; weitere Originaloptionen sind nicht vollständig portiert."
+      ]
+    },
+    "restore": {
+      "status": "partial",
+      "findings": [
+        "Der Handler erzeugt Bootstrap für einen Job und startet direkt einen Restore-Worker. Interaktive Dateiauswahl fehlt; storage wird nicht als Override ausgewertet (erste konfigurierte Storage wird benutzt), viele Originaloptionen wie restoreclient/fileregex fehlen."
+      ]
+    },
+    "status": {
+      "status": "partial",
+      "findings": [
+        "Der Handler behandelt dir/director/client/storage/all. Originalziele wie scheduler, subscriptions und configuration besitzen hier keinen eigenen Dispatch. Geplante und beendete Jobs sind im Director-JSON noch nicht vollständig abgebildet."
+      ]
+    },
+    ".status": {
+      "status": "partial",
+      "findings": [
+        "Der Handler delegiert an den normalen status-Handler; die Original-Unterabschnitte current/last/header/scheduled/running/terminated usw. werden nicht separat umgesetzt."
+      ]
+    },
+    "setdebug": {
+      "status": "partial",
+      "findings": [
+        "Setzt nur das lokale bareos-bnet-Debuglevel. Originalziele client/storage/all sowie trace/timestamp werden hier nicht umgesetzt."
+      ]
+    },
+    "wait": {
+      "status": "partial",
+      "findings": [
+        "Wertet jobid aus und wartet auf laufende Jobs. Originaloptionen jobname/ujobid/mount/timeout sind im Handler nicht umgesetzt."
+      ]
+    },
+    "rerun": {
+      "status": "partial",
+      "findings": [
+        "Unterstützt eine JobId mit Katalog-Lookup und delegiert an run; since_jobid/until_jobid/days/hours und die Originalauswahl mehrerer Jobs fehlen."
+      ]
+    },
+    "resolve": {
+      "status": "partial",
+      "findings": [
+        "Löst Clientnamen oder einen Hostnamen auf; die originale storage=<name>-Auflösung fehlt im Handler."
+      ]
+    },
+    "import": {
+      "status": "partial",
+      "findings": [
+        "Leitet storage und srcslots an den SD weiter; dstslots, volume und scan aus der Originalhilfe werden im Handler nicht ausgewertet."
+      ]
+    },
+    "export": {
+      "status": "partial",
+      "findings": [
+        "Leitet storage und srcslots an den SD weiter; dstslots, volume und scan aus der Originalhilfe werden im Handler nicht ausgewertet."
+      ]
+    },
+    "move": {
+      "status": "semantic_mismatch",
+      "findings": [
+        "Bareos verwendet srcslots/dstslots für Slot-Auswahlen. Der lokale Handler erwartet srcslot/dstslot (Singular), standardmäßig 0; Originalsyntax wird damit nicht korrekt umgesetzt."
+      ]
+    },
+    "configure": {
+      "status": "partial",
+      "findings": [
+        "Lokales CRUD ist eine Erweiterung, kein vollständiger Port aller Bareos-Ressourcendirektiven. Der Persistenzpfad ist auf /etc/bareos festgelegt; Originalsyntax wird dynamisch aus deutlich umfangreicheren Direktiventabellen erzeugt."
+      ]
+    },
+    "list": {
+      "status": "partial",
+      "findings": [
+        "Wesentliche Katalogabfragen sind portiert; die im Projekt-Backlog belegten zusätzlichen Pool-Prune-Summen (prunablevolumes/-jobs/-bytes) fehlen. Alle Originalfilter und Ausgabefelder sind noch nicht systematisch gegen Bareos getestet."
+      ]
+    },
+    "llist": {
+      "status": "partial",
+      "findings": [
+        "Wesentliche Katalogabfragen sind portiert; die im Projekt-Backlog belegten zusätzlichen Pool-Prune-Summen (prunablevolumes/-jobs/-bytes) fehlen. Alle Originalfilter und Ausgabefelder sind noch nicht systematisch gegen Bareos getestet."
+      ]
+    },
+    ".defaults": {
+      "status": "partial",
+      "findings": [
+        "Die lokale Implementierung liefert nur die vom Rust-Konfigurationsmodell unterstützten Felder; der Quellkommentar und Backlog nennen noch fehlende Originalfelder bzw. Restore-Defaults."
+      ]
+    },
+    "add": {
+      "status": "partial",
+      "findings": [
+        "Der lokale Handler verlangt volume=<name> und legt einen vereinfachten Katalogdatensatz an; storage/jobid aus der Originalhilfe werden nicht ausgewertet. Die dokumentierte Originalsyntax ohne volume führt lokal nur zur Aufforderung, volume anzugeben."
+      ]
+    }
+  },
+  "cross_cutting_findings": [
+    {
+      "title": "Abweichende Befehlsauflösung",
+      "description": "Bareos sucht das erste passende Präfix in Tabellenreihenfolge; Onesimus erlaubt vollständige Namen und explizite Aliase. Abkürzungen dürfen daher nicht als portiert gelten.",
+      "evidence": [
+        {
+          "file": "core/src/dird/ua_cmds.cc",
+          "line": 540,
+          "url": "https://github.com/bareos/bareos/blob/fc2c79b6c43eb5752e98ebd86116593dbbbe0c68/core/src/dird/ua_cmds.cc#L540"
+        },
+        {
+          "file": "crates/onesimus-dird/src/command_registry.rs",
+          "line": 315
+        }
+      ]
+    },
+    {
+      "title": "ACL-Parität fehlt",
+      "description": "Das Original prüft Command_ACL vor dem Dispatch. Im lokalen Dispatch ist keine entsprechende Prüfung vorhanden; .authorized prüft Existenz und akzeptiert cmd pauschal. Authentifizierung mit Passwort/Token ist kein Ersatz für diese Autorisierung.",
+      "evidence": [
+        {
+          "file": "core/src/dird/ua_cmds.cc",
+          "line": 540,
+          "url": "https://github.com/bareos/bareos/blob/fc2c79b6c43eb5752e98ebd86116593dbbbe0c68/core/src/dird/ua_cmds.cc#L540"
+        },
+        {
+          "file": "crates/onesimus-dird/src/command_registry.rs",
+          "line": 323
+        },
+        {
+          "file": "crates/onesimus-dird/src/commands/dot.rs",
+          "line": 237
+        }
+      ]
+    },
+    {
+      "title": "MCP-query klassifiziert Punktbefehle zu großzügig",
+      "description": "Die aktuelle MCP-Read-only-Prüfung lässt Punktbefehle bis auf eine Sperrliste zu. Dadurch sind unter anderem .bvfs_update und lokale Erweiterungen wie .catalog erreichbar, obwohl ein führender Punkt keine Read-only-Garantie ist. Die LLM-Referenz vergibt deshalb keine pauschale Read-only-Freigabe.",
+      "evidence": [
+        {
+          "file": "crates/oconsole/src/mcp.rs",
+          "line": 301
+        },
+        {
+          "file": "core/src/dird/ua_cmds.cc",
+          "line": 290,
+          "url": "https://github.com/bareos/bareos/blob/fc2c79b6c43eb5752e98ebd86116593dbbbe0c68/core/src/dird/ua_cmds.cc#L290"
+        },
+        {
+          "file": "crates/onesimus-dird/src/commands/catalog.rs",
+          "line": 12
+        }
+      ]
+    },
+    {
+      "title": "Scheduler startet keine Worker",
+      "description": "dispatch_ready_jobs entfernt fällige Jobs und zählt sie, enthält aber weiterhin den TODO zum Fork eines Workers. Geplante Backups sind dadurch nicht funktionsgleich zum Original; dies ist bereits im Backlog dokumentiert.",
+      "evidence": [
+        {
+          "file": "crates/onesimus-dird/src/scheduler.rs",
+          "line": 148
+        },
+        {
+          "file": "docs/BACKLOG.md",
+          "line": 3
+        }
+      ]
+    },
+    {
+      "title": "Hilfetext ist kein Implementierungsnachweis",
+      "description": "Die vorhandene UA_COMMANDS-Tabelle beschreibt Originalsyntax, während die tatsächliche Ausführung über command_registry erfolgt. configure enthält in der lokalen UA-Tabelle einen Generator-Funktionsnamen statt expandierter Syntax, .locations den Text NULL statt eines fehlenden Hilfetextes.",
+      "evidence": [
+        {
+          "file": "crates/onesimus-dird/src/ua_commands_table.rs",
+          "line": 4
+        },
+        {
+          "file": "crates/onesimus-dird/src/command_executor.rs",
+          "line": 53
+        }
+      ]
+    }
+  ]
+}
