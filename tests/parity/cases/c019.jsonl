@@ -1,4 +1,7 @@
 # C-019 configure (ua_configure.cc). `add` only for resources that never touch the catalog.
+# Added consoles/profiles stay in the running Directors and show up in later cases.
+# No live case for `configure add console=a name=b`: the original keeps the
+# half-parsed Console "a" after the parser error (RemoveResource looks up "ab").
 {"id": "c019-configure-bare", "steps": ["configure"]}
 {"id": "c019-configure-add-only", "steps": ["configure add"]}
 {"id": "c019-configure-export-only", "steps": ["configure export"]}
@@ -23,7 +26,6 @@
 {"id": "c019-add-messages", "steps": ["configure add messages name=c019j description=test"]}
 {"id": "c019-add-invalid-name", "steps": ["configure add console name=c019! password=secret"]}
 {"id": "c019-add-unknown-profile", "steps": ["configure add console name=c019l password=secret profile=nosuch"]}
-{"id": "c019-add-name-twice", "steps": ["configure add console=c019m name=c019n password=secret"]}
 {"id": "c019-add-empty-password", "steps": ["configure add console name=c019o password="]}
 {"id": "c019-add-counter-invalid", "steps": ["configure add counter name=c019p minimum=abc maximum=-1"]}
 {"id": "c019-add-user", "steps": ["configure add user name=c019q profile=operator", "show user=c019q"]}

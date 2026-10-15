@@ -26,6 +26,9 @@ pub struct DirectorConfig {
     pub jobdefs: Vec<JobDefsResource>,
     pub messages: Vec<MessagesResource>,
     pub profiles: Vec<ProfileResource>,
+    /// Consoles read from the configuration files; the C++ Director appends
+    /// `*UserAgent*` after them, and `configure add console` after that.
+    pub loaded_consoles: usize,
     /// Raw directives in C++ resource order (for `show`)
     pub raw: Vec<bareos_config::raw::ConfResource>,
 }
@@ -73,6 +76,7 @@ impl DirectorConfig {
             jobdefs: Vec::new(),
             messages: Vec::new(),
             profiles: Vec::new(),
+            loaded_consoles: 0,
             raw: Vec::new(),
         };
 
@@ -99,6 +103,7 @@ impl DirectorConfig {
         }
 
         // Resolve JobDefs: merge defaults into Jobs that reference a JobDefs
+        config.loaded_consoles = config.consoles.len();
         config.resolve_jobdefs();
 
         Ok(config)

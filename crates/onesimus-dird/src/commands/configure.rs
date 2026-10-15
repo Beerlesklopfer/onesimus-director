@@ -649,7 +649,14 @@ fn configure_delete(ast: &CommandAst, ctx: &ExecContext) -> CommandResult {
                         "job" => { let b = cfg.jobs.len(); cfg.jobs.retain(|j| j.name != *name); (b, b > cfg.jobs.len()) }
                         "pool" => { let b = cfg.pools.len(); cfg.pools.retain(|p| p.name != *name); (b, b > cfg.pools.len()) }
                         "storage" => { let b = cfg.storages.len(); cfg.storages.retain(|s| s.name != *name); (b, b > cfg.storages.len()) }
-                        "console" => { let b = cfg.consoles.len(); cfg.consoles.retain(|c| c.name != *name); (b, b > cfg.consoles.len()) }
+                        "console" => {
+                            let b = cfg.consoles.len();
+                            if cfg.consoles.iter().position(|c| c.name == *name).is_some_and(|i| i < cfg.loaded_consoles) {
+                                cfg.loaded_consoles -= 1;
+                            }
+                            cfg.consoles.retain(|c| c.name != *name);
+                            (b, b > cfg.consoles.len())
+                        }
                         "schedule" => { let b = cfg.schedules.len(); cfg.schedules.retain(|s| s.name != *name); (b, b > cfg.schedules.len()) }
                         _ => (0, false),
                     };

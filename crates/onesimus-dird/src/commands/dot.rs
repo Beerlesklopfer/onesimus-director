@@ -197,13 +197,18 @@ pub fn cmd_dot_catalogs(_ast: &CommandAst, ctx: &ExecContext) -> CommandResult {
 }
 
 /// `.consoles` — the Console chain, which ends with the internal `*UserAgent*`
-/// console the C++ Director appends after loading the configuration.
+/// console the C++ Director appends after loading the configuration
+/// (consoles added later by `configure add` follow it).
 pub fn cmd_dot_consoles(_ast: &CommandAst, ctx: &ExecContext) -> CommandResult {
     use crate::director_config::USER_AGENT_CONSOLE;
-    with_config(ctx, "consoles", |cfg| name_list("consoles", "name",
-        cfg.consoles.iter().map(|c| c.name.as_str())
-            .chain((!cfg.director.name.is_empty()).then_some(USER_AGENT_CONSOLE))
-            .map(|name| (name, None))))
+    with_config(ctx, "consoles", |cfg| {
+        let (loaded, added) = cfg.consoles.split_at(cfg.loaded_consoles.min(cfg.consoles.len()));
+        name_list("consoles", "name",
+            loaded.iter().map(|c| c.name.as_str())
+                .chain((!cfg.director.name.is_empty()).then_some(USER_AGENT_CONSOLE))
+                .chain(added.iter().map(|c| c.name.as_str()))
+                .map(|name| (name, None)))
+    })
 }
 
 /// `.jobdefs`
