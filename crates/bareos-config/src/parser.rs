@@ -360,7 +360,7 @@ fn extract_file_directives(block_content: &str) -> String {
 
 /// Parse Job/JobDefs directives into a JobResource.
 fn parse_job_fields(directives: &HashMap<String, String>) -> Result<JobResource, ConfigError> {
-    let get = |key: &str| directives.get(key).map(|s| s.as_str());
+    let get = |key: &str| directives.get(&crate::raw::normalize_key(key)).map(|s| s.as_str());
     let require = |key: &str| -> Result<&str, ConfigError> {
         get(key).ok_or_else(|| ConfigError::MissingRequired {
             resource_type: "Job".to_string(),
@@ -423,10 +423,11 @@ fn convert_raw_resource(raw: &RawResource) -> Result<Resource, ConfigError> {
     let directives: HashMap<String, String> = raw
         .directives
         .iter()
-        .map(|d| (d.key.clone(), d.value.clone()))
+        .map(|d| (crate::raw::normalize_key(&d.key), d.value.clone()))
         .collect();
 
-    let get = |key: &str| directives.get(key).map(|s| s.as_str());
+    // C++ ignores case and spaces in directive names.
+    let get = |key: &str| directives.get(&crate::raw::normalize_key(key)).map(|s| s.as_str());
     let require = |key: &str| -> Result<&str, ConfigError> {
         get(key).ok_or_else(|| ConfigError::MissingRequired {
             resource_type: raw.resource_type.clone(),
@@ -439,7 +440,7 @@ fn convert_raw_resource(raw: &RawResource) -> Result<Resource, ConfigError> {
             let mut dir = DirectorResource::default();
             dir.name = require("name")?.to_string();
             if let Some(v) = get("password") { dir.password = v.to_string(); }
-            if let Some(v) = get("port") { dir.port = v.parse().unwrap_or(9101); }
+            if let Some(v) = get("port").or(get("dirport")) { dir.port = v.parse().unwrap_or(9101); }
             if let Some(v) = get("maximum concurrent jobs") {
                 dir.max_concurrent_jobs = v.parse().unwrap_or(1);
             }
@@ -475,7 +476,7 @@ fn convert_raw_resource(raw: &RawResource) -> Result<Resource, ConfigError> {
             let mut client = ClientResource::default();
             client.name = require("name")?.to_string();
             if let Some(v) = get("address") { client.address = v.to_string(); }
-            if let Some(v) = get("port") { client.port = v.parse().unwrap_or(9102); }
+            if let Some(v) = get("port").or(get("fdport")) { client.port = v.parse().unwrap_or(9102); }
             if let Some(v) = get("password") { client.password = v.to_string(); }
             if let Some(v) = get("catalog") { client.catalog = v.to_string(); }
             if let Some(v) = get("maximum concurrent jobs") {
@@ -501,7 +502,7 @@ fn convert_raw_resource(raw: &RawResource) -> Result<Resource, ConfigError> {
             let mut stor = StorageResource::default();
             stor.name = require("name")?.to_string();
             if let Some(v) = get("address") { stor.address = v.to_string(); }
-            if let Some(v) = get("port") { stor.port = v.parse().unwrap_or(9103); }
+            if let Some(v) = get("port").or(get("sdport")) { stor.port = v.parse().unwrap_or(9103); }
             if let Some(v) = get("password") { stor.password = v.to_string(); }
             if let Some(v) = get("device") { stor.device = v.to_string(); }
             if let Some(v) = get("media type") { stor.media_type = v.to_string(); }
@@ -747,6 +748,25 @@ Director {
             }
             _ => panic!("expected Director"),
         }
+    }
+
+    /// C-001: DirPort/FdPort/SdPort are aliases of Port; case and spaces in
+    /// directive names are ignored (dird_conf.cc Alias{"DirPort"}).
+    #[test]
+    fn port_aliases_and_spaced_keywords() {
+        let input = "Director {\n Name = d\n Dir Port = 39101\n MaximumConcurrentJobs = 7\n}\n\
+            Client {\n Name = c\n Address = h\n Password = p\n FDPort = 19102\n}\n\
+            Storage {\n Name = s\n Address = h\n Password = p\n SdPort = 19103\n Device = x\n Media Type = File\n}\n";
+        let mut seen = 0;
+        for resource in &parse_config(input).unwrap() {
+            match resource {
+                Resource::Director(d) => { assert_eq!((d.port, d.max_concurrent_jobs), (39101, 7)); seen += 1; }
+                Resource::Client(c) => { assert_eq!(c.port, 19102); seen += 1; }
+                Resource::Storage(s) => { assert_eq!(s.port, 19103); seen += 1; }
+                _ => {}
+            }
+        }
+        assert_eq!(seen, 3);
     }
 
     #[test]
