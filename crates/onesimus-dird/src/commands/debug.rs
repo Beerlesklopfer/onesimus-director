@@ -31,7 +31,7 @@ impl Options {
 }
 
 pub fn cmd_setdebug(ast: &CommandAst, ctx: &ExecContext) -> CommandResult {
-    setdebug_with(
+    setdebug_dialog_with(
         ast,
         ctx,
         |client, director, options| {
@@ -53,6 +53,132 @@ pub fn cmd_setdebug(ast: &CommandAst, ctx: &ExecContext) -> CommandResult {
             )
         },
     )
+}
+
+/// C++ atoi(): optional sign and leading digits, 0 otherwise.
+fn atoi(text: &str) -> i64 {
+    let text = text.trim_start();
+    let (sign, digits) = match text.as_bytes().first() {
+        Some(b'-') => (-1, &text[1..]),
+        Some(b'+') => (1, &text[1..]),
+        _ => (1, text),
+    };
+    let end = digits.bytes().take_while(u8::is_ascii_digit).count();
+    sign * digits[..end].parse::<i64>().unwrap_or(0)
+}
+
+/// Daemon chosen by the SetdebugCmd dialog.
+enum DebugTarget {
+    Director,
+    All,
+    Client(String),
+    Storage(String),
+}
+
+/// C++ ua_cmds.cc SetdebugCmd() argument scan and dialogs: the level is
+/// asked for when missing or negative (GetPint "Enter new debug level: "),
+/// a client/storage keyword without a known resource opens the selection
+/// list, and without any daemon keyword the daemon type is asked for
+/// ("Available daemons are: "). The resolved request then goes to
+/// setdebug_with. Cancelled dialogs end the command silently (C++ returns
+/// true without output).
+fn setdebug_dialog_with(
+    ast: &CommandAst,
+    ctx: &ExecContext,
+    fd: impl FnMut(&ClientResource, &str, Options) -> Result<String, String>,
+    sd: impl FnMut(&StorageResource, &str, Options) -> Result<String, String>,
+) -> CommandResult {
+    use crate::ua_select::{self, Ua};
+    let mut ua = Ua::new(ctx);
+    let mut level = ua_select::find_arg_with_value(ast, "level").map(atoi).unwrap_or(-1);
+    if level < 0 {
+        match ua.get_pint("Enter new debug level: ") {
+            Some(value) => level = value as i64,
+            None => return ua.finish(true),
+        }
+    }
+    let exists = |storage: bool, name: &str| {
+        ctx.config.as_ref().and_then(|c| c.read().ok()).is_some_and(|c| {
+            if storage { c.find_storage(name).is_some() } else { c.find_client(name).is_some() }
+        })
+    };
+    let mut target = None;
+    for arg in &ast.arguments {
+        let key = arg.key.to_ascii_lowercase();
+        match key.as_str() {
+            "all" => target = Some(DebugTarget::All),
+            "dir" | "director" => target = Some(DebugTarget::Director),
+            "client" | "fd" => {
+                target = match arg.value.as_deref().filter(|name| exists(false, name)) {
+                    Some(name) => Some(DebugTarget::Client(name.to_string())),
+                    None => ua_select::select_client_resource(&mut ua).map(DebugTarget::Client),
+                };
+            }
+            "store" | "storage" | "sd" => {
+                target = match arg.value.as_deref().filter(|name| exists(true, name)) {
+                    Some(name) => Some(DebugTarget::Storage(name.to_string())),
+                    None => get_storage_resource(&mut ua, ast).map(DebugTarget::Storage),
+                };
+            }
+            _ => {}
+        }
+        if target.is_some() {
+            break;
+        }
+    }
+    if target.is_none() {
+        ua.start_prompt("Available daemons are: \n");
+        for daemon in ["Director", "Storage", "Client", "All"] {
+            ua.add_prompt(daemon);
+        }
+        target = match ua.do_prompt("", "Select daemon type to set debug level") {
+            Some((0, _)) => Some(DebugTarget::Director),
+            Some((1, _)) => get_storage_resource(&mut ua, ast).map(DebugTarget::Storage),
+            Some((2, _)) => ua_select::select_client_resource(&mut ua).map(DebugTarget::Client),
+            Some((3, _)) => Some(DebugTarget::All),
+            _ => None,
+        };
+    }
+    let Some(target) = target else { return ua.finish(true) };
+
+    let mut resolved = CommandAst { command_name: ast.command_name.clone(), ..Default::default() };
+    let argument = |key: &str, value: Option<String>| crate::command_ast::Argument { key: key.to_string(), value };
+    resolved.arguments.push(argument("level", Some(level.to_string())));
+    for key in ["trace", "hangup", "timestamp"] {
+        if let Some(value) = ua_select::find_arg_with_value(ast, key) {
+            resolved.arguments.push(argument(key, Some(atoi(value).to_string())));
+        }
+    }
+    resolved.arguments.push(match target {
+        DebugTarget::Director => argument("dir", None),
+        DebugTarget::All => argument("all", None),
+        DebugTarget::Client(name) => argument("client", Some(name)),
+        DebugTarget::Storage(name) => argument("storage", Some(name)),
+    });
+    let result = setdebug_with(&resolved, ctx, fd, sd);
+    let success = result.success;
+    ua.send_result(result);
+    ua.finish(success)
+}
+
+/// C++ get_storage_resource(ua) as SetdebugCmd uses it (no default
+/// keyword): `storage=`/`sd=` names a resource, otherwise the selection
+/// list. (Job based selection jobid=/job=/ujobid= is not supported here.)
+fn get_storage_resource(ua: &mut crate::ua_select::Ua, ast: &CommandAst) -> Option<String> {
+    let name = ast.arguments.iter()
+        .find(|a| a.key.eq_ignore_ascii_case("storage") || a.key.eq_ignore_ascii_case("sd"))
+        .and_then(|a| a.value.clone());
+    if let Some(name) = name.filter(|n| !n.is_empty()) {
+        let found = ua.ctx.config.as_ref().and_then(|c| c.read().ok())
+            .is_some_and(|c| c.find_storage(&name).is_some());
+        if found && crate::acl::access(ua.ctx, crate::acl::Kind::Storage, &name) {
+            return Some(name);
+        }
+        if !found {
+            ua.error_msg(format!("Storage resource \"{name}\": not found\n"));
+        }
+    }
+    crate::ua_select::select_storage_resource(ua, false)
 }
 
 fn setdebug_with(
@@ -428,5 +554,43 @@ mod tests {
         assert!(!result.success);
         assert!(result.error_message.contains("offline"));
         assert!(result.text_output.contains("3000 OK setdebug\n"));
+    }
+
+    #[test]
+    fn dialog_asks_level_and_daemon_type() {
+        use crate::ua_select::tests::scripted;
+        let ctx = context();
+        // Batch mode: no level, nothing happens.
+        let r = setdebug_dialog_with(&crate::session::parse_cli_command("setdebug"), &ctx,
+            |_, _, _| panic!("no FD"), |_, _, _| panic!("no SD"));
+        assert!(r.success && r.text_output.is_empty() && r.error_message.is_empty());
+        // Cancel at the level question.
+        let (r, console) = scripted(&["."], || setdebug_dialog_with(
+            &crate::session::parse_cli_command("setdebug"), &ctx,
+            |_, _, _| panic!("no FD"), |_, _, _| panic!("no SD")));
+        assert!(r.success);
+        assert_eq!(console.transcript(), "Enter new debug level: .\n");
+        // Level given, daemon type asked, client list (two clients), cancel.
+        let (r, console) = scripted(&["3", "."], || setdebug_dialog_with(
+            &crate::session::parse_cli_command("setdebug level=5"), &ctx,
+            |_, _, _| panic!("no FD"), |_, _, _| panic!("no SD")));
+        assert!(r.success);
+        assert_eq!(console.transcript(),
+            "Available daemons are: \n1: Director\n2: Storage\n3: Client\n4: All\n\
+             Select daemon type to set debug level (1-4): 3\n\
+             The defined Client resources are:\n1: duplicate\n2: fd\n\
+             Select Client (File daemon) resource (1-2): .\nSelection aborted, nothing done.\n");
+        // storage keyword without value: single storage selected automatically.
+        let (r, _) = scripted(&[], || setdebug_dialog_with(
+            &crate::session::parse_cli_command("setdebug level=2 storage"), &ctx,
+            |_, _, _| panic!("no FD"), |storage, _, options| {
+                assert_eq!((storage.name.as_str(), options.level), ("sd", 2));
+                Ok("3000 OK setdebug\n".into())
+            }));
+        assert!(r.success);
+        assert_eq!(r.text_output, "Automatically selected Storage: sd\nConnecting to Storage daemon sd at localhost:9103\n3000 OK setdebug\n");
+        assert_eq!(atoi("12abc"), 12);
+        assert_eq!(atoi("x"), 0);
+        assert_eq!(atoi("-3"), -3);
     }
 }
