@@ -115,11 +115,13 @@ pub struct Ua<'a> {
     prompts: Vec<String>,
     /// Last answer of GetCmd (C++ `ua->cmd`).
     pub cmd: String,
+    /// Last catalog error of this command (C++ `ua->db->strerror()`).
+    pub db_error: String,
 }
 
 impl<'a> Ua<'a> {
     pub fn new(ctx: &'a ExecContext) -> Self {
-        Self { ctx, segments: Vec::new(), interacted: false, prompts: Vec::new(), cmd: String::new() }
+        Self { ctx, segments: Vec::new(), interacted: false, prompts: Vec::new(), cmd: String::new(), db_error: String::new() }
     }
 
     /// C++ `ua->api` (set for `.api 1` and `.api 2`).
@@ -871,7 +873,13 @@ pub fn select_media_dbr(ua: &mut Ua, ast: &CommandAst) -> Option<MediaRecord> {
         name = volume.to_string();
     }
     if name.is_empty() {
-        let pool = select_pool_dbr(ua, ast, "pool")?;
+        // GetPoolDbr failed: the last catalog error (if any) is reported.
+        let Some(pool) = select_pool_dbr(ua, ast, "pool") else {
+            if !ua.db_error.is_empty() {
+                ua.error_msg(ua.db_error.clone());
+            }
+            return None;
+        };
         let pool_id = get_pool_record(ctx, &pool).unwrap_or(0);
         if let Some(table) = ctx.catalog.as_ref().and_then(|cat| cat.query_rows(&format!("{} WHERE PoolId={pool_id} ORDER BY MediaId",
             crate::commands::list::volumes_select(crate::sql_list::ListType::Horz))).ok()) {
@@ -888,7 +896,8 @@ pub fn select_media_dbr(ua: &mut Ua, ast: &CommandAst) -> Option<MediaRecord> {
     match get_media_record(ctx, media_id, &name) {
         Ok(record) => Some(record),
         Err(error) => {
-            ua.error_msg(error);
+            ua.error_msg(error.clone());
+            ua.db_error = error;
             None
         }
     }

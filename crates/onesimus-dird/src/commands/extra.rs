@@ -383,75 +383,28 @@ fn cmd_rerun_db(ast: &CommandAst, ctx: &ExecContext, prefix: &mut String) -> Com
 }
 
 pub fn cmd_relabel(ast: &CommandAst, ctx: &ExecContext) -> CommandResult {
-    // C++ ua_label.cc do_label: OpenClientDb() before anything else.
-    crate::ua_db::with_client_db(ast, ctx, false, || cmd_relabel_db(ast, ctx))
+    let mut ua = crate::ua_select::Ua::new(ctx);
+    crate::commands::admin::label_dialog(&mut ua, ast, true, |ua, request| {
+        relabel_execute(ua, request, |stor, command| sd_cmd_via_config(ctx, stor, command));
+    });
+    ua.finish(true)
 }
 
-fn cmd_relabel_db(ast: &CommandAst, ctx: &ExecContext) -> CommandResult {
-    relabel_with(ast, ctx, |stor, command| sd_cmd_via_config(ctx, stor, command))
-}
-
-/// do_label(relabel=true) (ua_label.cc:393): storage, old volume, new name
-/// and pool are selected, never defaulted; the old volume must be Purged or
-/// Recycled (ua_label.cc:470). C-012.
-fn relabel_with(
-    ast: &CommandAst,
-    ctx: &ExecContext,
-    send: impl FnOnce(&str, &str) -> Result<String, String>,
-) -> CommandResult {
-    use super::prompt::{select_pool_dbr, select_storage, selection_required};
-    let value = |key: &str| ast.arguments.iter()
-        .find(|a| a.key.eq_ignore_ascii_case(key) && a.value.is_some())
-        .and_then(|a| a.value.as_deref());
-    let (store, mut shown) = match select_storage(ast, ctx, false) {
-        Ok(selected) => selected,
-        Err(result) => return result,
+/// The SD relabel and the catalog rename of a complete relabel request.
+fn relabel_execute(ua: &mut crate::ua_select::Ua, request: crate::commands::admin::LabelRequest,
+    send: impl FnOnce(&str, &str) -> Result<String, String>) {
+    let crate::commands::admin::LabelRequest::Label { storage, volume: newname, old_volume: Some(oldvol), .. } = request else {
+        return;
     };
-    let stor = store.name.as_str();
-    let Some(oldvol) = value("oldvolume") else {
-        // SelectMediaDbr (ua_select.cc:918): pool, media list, then
-        // GetCmd 'E.g. "full-0001" or "*42": '.
-        if value("volume").is_some() {
-            return crate::ua_db::with_prefix(shown, selection_required(String::new()));
-        }
-        return match select_pool_dbr(ctx) {
-            Ok((_, text)) => selection_required(format!("{shown}{text}Enter the volume name or MediaId \
-                of the volume prefixed with an asterisk (*).\nE.g. \"full-0001\" or \"*42\": ")),
-            Err(result) => crate::ua_db::with_prefix(shown, result),
-        };
-    };
-    if let Some(cat) = &ctx.catalog {
-        let status = cat.query_rows(&format!("SELECT VolStatus FROM Media WHERE VolumeName='{}'",
-            oldvol.replace('\'', "''"))).ok()
-            .and_then(|t| t.rows.into_iter().next()).and_then(|row| row.into_iter().next().flatten());
-        match status {
-            None => return crate::ua_db::with_prefix(shown, selection_required(String::new())),
-            Some(status) if status != "Purged" && status != "Recycle" => {
-                return crate::ua_db::with_prefix(shown, CommandResult::error(format!(
-                    "Volume \"{oldvol}\" has VolStatus {status}. It must be Purged or Recycled before relabeling.\n")));
-            }
-            Some(_) => {}
-        }
-    }
-    let Some(newname) = value("volume") else {
-        return selection_required(format!("{shown}Enter new Volume name: "));
-    };
-    if value("pool").is_none() {
-        match select_pool_dbr(ctx) {
-            Ok((_, text)) => shown.push_str(&text),
-            Err(result) => return crate::ua_db::with_prefix(shown, result),
-        }
-    }
-
-    match send(stor, &format!("relabel OldVolume=\"{oldvol}\" Volume=\"{newname}\"")) {
+    match send(&storage, &format!("relabel OldVolume=\"{oldvol}\" Volume=\"{newname}\"")) {
         Ok(resp) => {
-            if let Some(cat) = &ctx.catalog {
+            if let Some(cat) = &ua.ctx.catalog {
                 let _ = cat.raw_query(&format!("UPDATE media SET volumename='{}' WHERE volumename='{}'",
                     newname.replace('\'', "''"), oldvol.replace('\'', "''")));
             }
-            CommandResult::ok(format!("{shown}Relabel {oldvol} → {newname}:\n{resp}\n"))
+            ua.send_msg(format!("Relabel {oldvol} → {newname}:\n{resp}\n"));
         }
-        Err(e) => crate::ua_db::with_prefix(shown, CommandResult::error(format!("relabel: {e}\n"))),
+        Err(e) => ua.error_msg(format!("relabel: {e}\n")),
     }
 }
 
@@ -977,21 +930,6 @@ mod move_operation_tests {
         assert_eq!(run("move job=Backup", &ctx).error_message, "Job \"Backup\" is not running.\n");
     }
 
-    #[test]
-    fn relabel_never_defaults_storage_volume_or_pool() {
-        let ctx = context("Pool { Name = Full; Pool Type = Backup }\nPool { Name = Inc; Pool Type = Backup }\n\
-            Storage { Name = Other; Address = localhost }");
-        let run = |line: &str| relabel_with(&crate::session::parse_cli_command(line), &ctx,
-            |_, _| panic!("{line}: must not contact the SD"));
-        assert_eq!(run("relabel").text_output,
-            "The defined Storage resources are:\n1: File\n2: Other\nSelect Storage resource (1-2): ");
-        assert_eq!(run("relabel storage=File").text_output,
-            "Defined Pools:\n1: Full\n2: Inc\nSelect the Pool (1-2): ");
-        assert_eq!(run("relabel storage=File oldvolume=a").text_output, "Enter new Volume name: ");
-        assert_eq!(run("relabel storage=File oldvolume=a volume=b").text_output,
-            "Defined Pools:\n1: Full\n2: Inc\nSelect the Pool (1-2): ");
-        assert_eq!(run("relabel storage=File volume=b").text_output, "");
-    }
 
     #[test]
     fn delete_acts_only_on_complete_requests() {

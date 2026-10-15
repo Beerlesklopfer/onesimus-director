@@ -72,3 +72,12 @@
 {"id": "c011-create-unknown-cancel", "steps": ["create pool=nosuch", "."]}
 {"id": "c011-add-pool-badnumber-cancel", "steps": ["add pool=Full", "x", "."]}
 {"id": "c011-add-api1-cancel", "setup": [".api 1"], "steps": ["add", "."]}
+{"id": "c011-label-pool-cancel", "steps": ["label storage=File volume=c011probe", "."]}
+{"id": "c011-label-illegal-cancel", "steps": ["label", "/x", "a b", "."]}
+{"id": "c011-label-used-cancel", "steps": ["label", "Full-0001", "."]}
+{"id": "c011-label-barcodes", "steps": ["label barcodes"]}
+{"id": "c011-label-unknown-storage-cancel", "steps": ["label storage=Nope", "."]}
+{"id": "c011-label-api1-cancel", "setup": [".api 1"], "steps": ["label", "."]}
+{"id": "c011-relabel-pool-cancel", "steps": ["relabel storage=File", "2", "."]}
+{"id": "c011-relabel-status", "steps": ["relabel storage=File oldvolume=Full-47321"]}
+{"id": "c011-relabel-unknown-cancel", "steps": ["relabel storage=File oldvolume=nosuchvol", "."]}

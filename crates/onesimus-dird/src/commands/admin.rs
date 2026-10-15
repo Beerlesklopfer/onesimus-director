@@ -31,68 +31,134 @@ fn sd_command(ctx: &ExecContext, storage_name: &str, command: &str) -> Result<St
 static NEXT_RESTORE_ID: AtomicU32 = AtomicU32::new(10000);
 
 pub fn cmd_label(ast: &CommandAst, ctx: &ExecContext) -> CommandResult {
-    // C++ ua_label.cc do_label: OpenClientDb() before anything else.
-    crate::ua_db::with_client_db(ast, ctx, false, || cmd_label_db(ast, ctx))
+    let mut ua = crate::ua_select::Ua::new(ctx);
+    label_dialog(&mut ua, ast, false, label_execute);
+    ua.finish(true)
 }
 
-fn cmd_label_db(ast: &CommandAst, ctx: &ExecContext) -> CommandResult {
-    let vol = get_arg(ast, "volume");
-    let pool = get_arg(ast, "pool");
-    let barcode = has_flag(ast, "barcodes");
+/// A complete label/relabel request (ua_label.cc do_label).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum LabelRequest {
+    Barcodes { storage: String },
+    Label { storage: String, volume: String, pool: String, old_volume: Option<String> },
+}
 
-    // ua_label.cc:447 get_storage_resource: no default storage (C-012).
-    let (store, mut shown) = match super::prompt::select_storage(ast, ctx, false) {
-        Ok(selected) => selected,
-        Err(result) => return result,
-    };
-    let stor_name = store.name.as_str();
-
-    match vol {
-        Some(v) => {
-            // SelectPoolDbr: no default pool; a missing pool= is selected.
-            let pool_name = match pool {
-                Some(pool) => pool.to_string(),
-                None => match super::prompt::select_pool_dbr(ctx) {
-                    Ok((name, text)) => { shown.push_str(&text); name }
-                    Err(result) => return crate::ua_db::with_prefix(shown, result),
-                },
-            };
-            let mut output = format!("{shown}Connecting to Storage daemon {stor_name} ...\n");
-
-            // Send label command to SD
-            let cmd = format!("label Volume=\"{v}\" PoolName=\"{pool_name}\" MediaType=\"File\" Slot=0 drive=0");
-            match sd_command(ctx, stor_name, &cmd) {
-                Ok(resp) => {
-                    output.push_str(&format!("Label Volume \"{v}\" Pool \"{pool_name}\":\n"));
-                    output.push_str(&resp);
-                    // Create media record in catalog
-                    if let Some(cat) = &ctx.catalog {
-                        let _ = cat.raw_query(&format!(
-                            "INSERT INTO media (volumename, mediatype, poolid, volstatus, volbytes, voljobs, volfiles, maxvolbytes) \
-                             SELECT '{v}', 'File', poolid, 'Append', 0, 0, 0, 0 FROM pool WHERE name = '{pool_name}' \
-                             ON CONFLICT DO NOTHING"
-                        ));
-                    }
-                    output.push_str(&format!("\nVolume \"{v}\" labeled and added to catalog.\n"));
-                    // C++ ua_label.cc:557: mount the new volume unless `automount off`.
-                    if ctx.session_mgr.as_ref().is_none_or(|mgr| mgr.session_automount(ctx.session_id)) {
-                        output.push_str(&automount_after_label(ctx, stor_name));
-                    }
-                }
-                Err(e) => {
-                    output.push_str(&format!("SD label failed: {e}\n"));
+/// do_label (ua_label.cc:393): OpenClientDb, storage (get_storage_resource
+/// with the default keyword), for relabel the old volume (`oldvolume=` or
+/// SelectMediaDbr; it must be Purged or Recycled), the new name (`volume=`
+/// or "Enter new Volume name: " until legal and unused), the slot for
+/// autochangers and the pool (SelectPoolDbr). `act` runs only for a
+/// complete request.
+pub(crate) fn label_dialog(ua: &mut crate::ua_select::Ua, ast: &CommandAst, relabel: bool,
+    act: impl FnOnce(&mut crate::ua_select::Ua, LabelRequest)) {
+    use crate::ua_select::{self, find_arg_with_value};
+    let ctx = ua.ctx;
+    if !ua.open_client_db(ast, false) {
+        return;
+    }
+    let barcodes = !relabel && ast.arguments.iter()
+        .any(|a| a.key.eq_ignore_ascii_case("barcode") || a.key.eq_ignore_ascii_case("barcodes"));
+    let Some(storage) = ua_select::get_storage_resource(ua, ast, true, barcodes) else { return };
+    let autochanger = ctx.config.as_ref().and_then(|c| c.read().ok())
+        .is_some_and(|c| ua_select::is_autochanger(&c, &storage));
+    if barcodes {
+        act(ua, LabelRequest::Barcodes { storage });
+        return;
+    }
+    let mut old_volume = None;
+    if relabel {
+        let mut old = None;
+        if let Some(name) = find_arg_with_value(ast, "oldvolume") {
+            match ua_select::get_media_record(ctx, 0, name) {
+                Ok(record) => old = Some(record),
+                Err(error) => {
+                    ua.error_msg(error.clone());
+                    ua.db_error = error;
                 }
             }
-            CommandResult::ok(output)
         }
-        None if barcode => {
-            CommandResult::ok(format!("Sending barcode label command to Storage {stor_name}...\n"))
+        let old = match old {
+            Some(old) => old,
+            None => match ua_select::select_media_dbr(ua, ast) {
+                Some(old) => old,
+                None => return,
+            },
+        };
+        if old.vol_status != "Purged" && old.vol_status != "Recycle" {
+            ua.error_msg(format!("Volume \"{}\" has VolStatus {}. It must be Purged or Recycled before relabeling.\n",
+                old.volume_name, old.vol_status));
+            return;
         }
-        None => {
-            // ua_label.cc: GetCmd "Enter new Volume name: ".
-            super::prompt::selection_required(format!("{shown}Enter new Volume name: "))
+        old_volume = Some(old.volume_name);
+    }
+    let mut given = find_arg_with_value(ast, "volume").map(str::to_string);
+    let volume = loop {
+        let name = match given.take() {
+            Some(name) => name,
+            None => match ua.get_cmd("Enter new Volume name: ") {
+                Some(name) => name,
+                None => return,
+            },
+        };
+        if !ua_select::is_volume_name_legal(ua, &name) {
+            continue;
+        }
+        // An existing record is only reused while it is not labeled (VolBytes 0).
+        let used = ctx.catalog.as_ref()
+            .and_then(|cat| cat.query_rows(&format!("SELECT VolBytes FROM Media WHERE VolumeName='{}'",
+                name.replace('\'', "''"))).ok())
+            .and_then(|t| t.rows.into_iter().next())
+            .and_then(|row| row.into_iter().next().flatten())
+            .is_some_and(|bytes| bytes != "0");
+        if used {
+            ua.error_msg(format!("Media record for new Volume \"{name}\" already exists.\n"));
+            continue;
+        }
+        break name;
+    };
+    if find_arg_with_value(ast, "slot").is_none() && autochanger
+        && ua.get_pint("Enter slot (0 or Enter for none): ").is_none() {
+        return;
+    }
+    let Some(pool) = ua_select::select_pool_dbr(ua, ast, "pool") else { return };
+    act(ua, LabelRequest::Label { storage, volume, pool, old_volume });
+}
+
+/// SendLabelRequest and the catalog/automount work of a complete label.
+fn label_execute(ua: &mut crate::ua_select::Ua, request: LabelRequest) {
+    let ctx = ua.ctx;
+    let (stor_name, v, pool_name) = match request {
+        LabelRequest::Barcodes { storage } => {
+            ua.send_msg(format!("Sending barcode label command to Storage {storage}...\n"));
+            return;
+        }
+        LabelRequest::Label { storage, volume, pool, .. } => (storage, volume, pool),
+    };
+    let mut output = format!("Connecting to Storage daemon {stor_name} ...\n");
+    let cmd = format!("label Volume=\"{v}\" PoolName=\"{pool_name}\" MediaType=\"File\" Slot=0 drive=0");
+    match sd_command(ctx, &stor_name, &cmd) {
+        Ok(resp) => {
+            output.push_str(&format!("Label Volume \"{v}\" Pool \"{pool_name}\":\n"));
+            output.push_str(&resp);
+            // Create media record in catalog
+            if let Some(cat) = &ctx.catalog {
+                let _ = cat.raw_query(&format!(
+                    "INSERT INTO media (volumename, mediatype, poolid, volstatus, volbytes, voljobs, volfiles, maxvolbytes) \
+                     SELECT '{v}', 'File', poolid, 'Append', 0, 0, 0, 0 FROM pool WHERE name = '{pool_name}' \
+                     ON CONFLICT DO NOTHING"
+                ));
+            }
+            output.push_str(&format!("\nVolume \"{v}\" labeled and added to catalog.\n"));
+            // C++ ua_label.cc:557: mount the new volume unless `automount off`.
+            if ctx.session_mgr.as_ref().is_none_or(|mgr| mgr.session_automount(ctx.session_id)) {
+                output.push_str(&automount_after_label(ctx, &stor_name));
+            }
+        }
+        Err(e) => {
+            output.push_str(&format!("SD label failed: {e}\n"));
         }
     }
+    ua.send_msg(output);
 }
 
 /// C++ ua_label.cc:557 automount: "Requesting to mount <dev> ..." and
@@ -1296,12 +1362,31 @@ pub(crate) mod side_effect_tests {
 
     #[test]
     fn label_selects_instead_of_defaulting() {
+        use crate::ua_select::tests::scripted;
         let ctx = context();
-        let run = |line: &str| cmd_label_db(&crate::session::parse_cli_command(line), &ctx);
-        assert_eq!(run("label").text_output, "Automatically selected Storage: File\nEnter new Volume name: ");
-        // No default pool "Full": two pools mean the pool dialog, no SD contact.
-        assert_eq!(run("label volume=v1").text_output,
-            "Automatically selected Storage: File\nDefined Pools:\n1: Full\n2: Incremental\nSelect the Pool (1-2): ");
+        let label = |line: &str, relabel: bool, answers: &[&str]| {
+            let mut acted = None;
+            let (_, console) = scripted(answers, || {
+                let mut ua = crate::ua_select::Ua::new(&ctx);
+                label_dialog(&mut ua, &crate::session::parse_cli_command(line), relabel, |_, request| acted = Some(request));
+                ua.finish(true);
+            });
+            (console.transcript(), acted)
+        };
+        assert_eq!(label("label", false, &["."]),
+            ("Automatically selected Storage: File\nEnter new Volume name: .\n".to_string(), None));
+        assert_eq!(label("label", false, &["/x", "a b", "."]).0, "Automatically selected Storage: File\n\
+            Enter new Volume name: /x\nVolume name can not start with \"/\".\nEnter new Volume name: a b\n\
+            Illegal character \" \" in a volume name.\nEnter new Volume name: .\n");
+        // No catalog: no pool list, nothing labeled.
+        assert_eq!(label("label volume=v1", false, &["."]).1, None);
+        assert_eq!(label("label storage=Nope volume=v1", false, &["."]).1, None);
+        // barcodes: only autochangers qualify (none here).
+        assert_eq!(label("label barcodes", false, &[]).1, None);
+        // relabel needs the old volume first.
+        assert_eq!(label("relabel", true, &["."]).1, None);
+        let mut ua = crate::ua_select::Ua::new(&ctx);
+        label_dialog(&mut ua, &crate::session::parse_cli_command("label volume=v1"), false, |_, _| panic!("batch"));
     }
 
     #[test]
