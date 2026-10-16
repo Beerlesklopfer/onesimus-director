@@ -56,8 +56,12 @@ den Bareos-Katalog unverändert und liefert für den Restore den Verzeichnisbaum
 als JSON. Getestet wird gegen die neuesten Versionen: PostgreSQL 19 und
 Bareos 25.1.2-pre (Katalogschema 2250).
 
-Stand 16.10.2026 (implementiert im Plugin-Repo `oenesimus-postgres-plugin`, dort noch
-nicht committet/freigegeben; Doku dort unter `docs/wiki/` user/ und developer/). Zielumgebung:
+Stand 16.10.2026: committet auf `development` (`4041335`) in
+https://github.com/Beerlesklopfer/oenesimus-postgres-plugin (öffentlich; `development` ist
+Default, `master`/`main` erst zur Produktion). Doku im GitHub-Wiki:
+https://github.com/Beerlesklopfer/oenesimus-postgres-plugin/wiki (User-Installation,
+User-Restore-Modes, User-Functions, User-Tree-Model, Developer-Architecture,
+Developer-Bareos-Semantics, Developer-Development). Zielumgebung:
 Katalog-DB auf einem SBC mit 1–2 GB RAM, Katalog in PC-Backup-Größe (~1 Mio. Dateien).
 Rückgabe als `json` (nicht `jsonb`: jsonb-Arrays sind auf 256 MB begrenzt).
 
