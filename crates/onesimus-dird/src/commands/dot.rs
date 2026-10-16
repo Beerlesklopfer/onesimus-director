@@ -2,7 +2,7 @@
 //!
 //! Compatible with C++ ua_dotcmds.cc output format.
 //! Each command returns one item per line (for list commands)
-//! or key=value pairs (for .defaults, .jobstatus).
+//! or key=value pairs (for .defaults); .jobstatus lists the catalog Status table.
 //!
 //! Filtering: .clients [enabled|disabled], .jobs [type=<T>] [enabled|disabled],
 //!            .pools [type=<T>], .storages [enabled|disabled], .schedule [enabled|disabled]
@@ -120,57 +120,74 @@ pub fn cmd_dot_defaults(ast: &CommandAst, ctx: &ExecContext) -> CommandResult {
     super::defaults::cmd_defaults(ast, ctx)
 }
 
-/// `.jobstatus [=<status>]`
-///
-/// Returns tab-separated status code table.
-/// If a specific status char is given, returns only that entry.
+/// `.jobstatus[=<status>]` — C++ ua_dotcmds.cc DotJobstatusCmd: only the
+/// value of the command word itself (`ua->argv[0]`) filters; it must be a
+/// single character. The rows come from the catalog Status table
+/// (get_jobstatus_details), listed with ListSqlQuery(HORZ_LIST).
 pub fn cmd_dot_jobstatus(ast: &CommandAst, ctx: &ExecContext) -> CommandResult {
-    // C++ DotJobstatusCmd: OpenClientDb(ua) before the query.
-    let prefix = match crate::ua_db::open_client_db(ast, ctx, false) {
-        Ok(prefix) => prefix,
-        Err(result) => return result,
-    };
-    let filter = ast.arguments.first()
-        .and_then(|a| a.value.as_deref().or(Some(a.key.as_str())))
-        .and_then(|s| s.chars().next());
+    // ua->argv[0]: the value of the command word (`.jobstatus=T`).
+    let argv0 = crate::session::split_args(&ast.raw_line).into_iter().next()
+        .and_then(|token| token.split_once('=').map(|(_, v)| v.to_string()));
+    let mut filter = String::new();
+    if let Some(status) = argv0.as_deref() {
+        let mut chars = status.chars();
+        match (chars.next(), chars.next()) {
+            (Some(c), None) if c.is_ascii() => filter = format!("WHERE JobStatus = '{c}' "),
+            _ => return CommandResult::error(format!(
+                "Unknown JobStatus '{status}'. JobStatus must be a single character.\n")),
+        }
+    }
+    crate::ua_db::with_client_db(ast, ctx, false, || {
+        let Some(cat) = &ctx.catalog else {
+            return CommandResult { success: false, ..Default::default() };
+        };
+        // cats/postgresql_queries.inc 0062_get_jobstatus_details
+        let sql = format!("SELECT DISTINCT JobStatus, JobStatusLong, Severity,
+       CASE
+       WHEN JobStatus in ('T') THEN '0'
+       WHEN JobStatus in ('W') THEN '1'
+       WHEN JobStatus in ('e', 'f', 'A', 'E') THEN '2'
+       END as ExitLevel,
+       CASE
+       WHEN JobStatus in ('T') THEN 'Ok'
+       WHEN JobStatus in ('W') THEN 'Warning'
+       WHEN JobStatus in ('e', 'f', 'A', 'E') THEN 'Error'
+       END as ExitStatus
+  FROM Status {filter}
+ ORDER BY JobStatus
+");
+        match cat.query_rows(&sql) {
+            Ok(t) => {
+                let text = match ctx.api_mode {
+                    ApiMode::Api => horz_api1(&t),
+                    _ => crate::sql_list::render(&t, crate::sql_list::ListType::Horz),
+                };
+                CommandResult::ok(text)
+                    .with_json(json!({ "jobstatus": crate::sql_list::json_rows(&t) }))
+            }
+            // ListSqlQuery(..., verbose=false): errmsg is not sent.
+            Err(_) => CommandResult { success: false, ..Default::default() },
+        }
+    })
+}
 
-    let entries: &[(&str, &str)] = &[
-        ("A", "Canceled by user"),
-        ("B", "Blocked"),
-        ("C", "Created, not yet running"),
-        ("D", "Verify found differences"),
-        ("E", "Terminated with errors"),
-        ("F", "Waiting for FD"),
-        ("I", "Incomplete job"),
-        ("L", "Committing data (last despool)"),
-        ("M", "Waiting for mount"),
-        ("R", "Running"),
-        ("S", "Waiting for SD"),
-        ("T", "Completed successfully"),
-        ("W", "Completed with warnings"),
-        ("a", "SD despooling attributes"),
-        ("c", "Waiting for client"),
-        ("d", "Waiting for max jobs"),
-        ("e", "Non-fatal error"),
-        ("f", "Fatal error"),
-        ("i", "Doing batch insert file records"),
-        ("j", "Waiting for job"),
-        ("m", "Waiting for media"),
-        ("p", "Waiting for priority"),
-        ("q", "Queued"),
-        ("s", "Waiting for storage"),
-        ("t", "Waiting for start time"),
-    ];
-
-    let output: String = entries.iter()
-        .filter(|(code, _)| match filter {
-            Some(ch) => code.starts_with(ch),
-            None => true,
-        })
-        .map(|(code, desc)| format!("{code}\t{desc}\n"))
-        .collect();
-
-    crate::ua_db::with_prefix(prefix, CommandResult::ok(output))
+/// ListResult(HORZ_LIST) under `.api 1`: the Decoration() parts (dashes,
+/// header, leading "|", "No results to list.") are suppressed, only the
+/// preformatted cells " <value> |" of each row (newline after the last) remain.
+/// Interim until sql_list::render() itself is API-1 aware (C-028); an
+/// already stripped rendering is passed through unchanged.
+fn horz_api1(t: &crate::catalog_worker::SqlTable) -> String {
+    if t.rows.is_empty() {
+        return String::new();
+    }
+    let table = crate::sql_list::render(t, crate::sql_list::ListType::Horz);
+    if !table.starts_with('+') {
+        return table;
+    }
+    let lines: Vec<&str> = table.lines().collect();
+    lines[3..lines.len() - 1].iter()
+        .map(|l| format!("{}\n", l.strip_prefix('|').unwrap_or(l)))
+        .collect()
 }
 
 /// `.authorized job=<name> | client=<name> | ...`
@@ -219,6 +236,11 @@ pub fn cmd_dot_jobdefs(_ast: &CommandAst, ctx: &ExecContext) -> CommandResult {
 
 /// `.levels [jobtype]` — C++ joblevels[] table (dird_conf.cc)
 pub fn cmd_dot_levels(ast: &CommandAst, _ctx: &ExecContext) -> CommandResult {
+    // C++ DotLevelsCmd: argc 1 lists all, argc 2 filters by argk[1],
+    // more arguments list nothing.
+    if ast.arguments.len() > 1 {
+        return CommandResult::ok(String::new()).with_json(json!({ "levels": [] }));
+    }
     let wanted = ast.arguments.first().map(|a| a.key.as_str());
     let wanted_code = match wanted {
         Some(t) => match job_type_code(t) {
@@ -270,9 +292,8 @@ pub fn cmd_dot_locations(ast: &CommandAst, ctx: &ExecContext) -> CommandResult {
     crate::ua_db::with_client_db(ast, ctx, false, || cmd_dot_locations_db(ast, ctx))
 }
 
-fn cmd_dot_locations_db(_ast: &CommandAst, _ctx: &ExecContext) -> CommandResult {
-    // Location resources are rarely used — return empty for now
-    CommandResult::ok(String::new())
+fn cmd_dot_locations_db(_ast: &CommandAst, ctx: &ExecContext) -> CommandResult {
+    one_column(ctx, "locations", "SELECT DISTINCT Location FROM Location ORDER BY Location", "List Location")
 }
 
 /// `.media` — list all media (volumes) from catalog
@@ -282,39 +303,32 @@ pub fn cmd_dot_media(ast: &CommandAst, ctx: &ExecContext) -> CommandResult {
 }
 
 fn cmd_dot_media_db(_ast: &CommandAst, ctx: &ExecContext) -> CommandResult {
-    if let Some(cat) = &ctx.catalog {
-        match cat.raw_query("SELECT volumename FROM media ORDER BY volumename") {
-            Ok(result) => {
-                // Extract just the volume names (skip header)
-                let names: String = result.lines().skip(2) // skip header + separator
-                    .filter(|l| !l.trim().is_empty())
-                    .map(|l| format!("{}\n", l.trim()))
-                    .collect();
-                return CommandResult::ok(names);
-            }
-            Err(_) => {}
-        }
-    }
-    CommandResult::ok(String::new())
+    one_column(ctx, "media", "SELECT DISTINCT Media.VolumeName FROM Media ORDER BY VolumeName", "List Media")
 }
 
-/// `.mediatypes` — list unique media types from storage resources
+/// `.mediatypes` — the media types of the catalog MediaType table
 pub fn cmd_dot_mediatypes(ast: &CommandAst, ctx: &ExecContext) -> CommandResult {
     // C++ ua_dotcmds.cc DotMediatypesCmd: OpenClientDb() before anything else.
     crate::ua_db::with_client_db(ast, ctx, false, || cmd_dot_mediatypes_db(ast, ctx))
 }
 
 fn cmd_dot_mediatypes_db(_ast: &CommandAst, ctx: &ExecContext) -> CommandResult {
-    if let Some(config) = &ctx.config {
-        if let Ok(cfg) = config.read() {
-            let mut types: Vec<_> = cfg.storages.iter().map(|s| s.media_type.as_str()).collect();
-            types.sort();
-            types.dedup();
-            let out: String = types.iter().map(|t| format!("{t}\n")).collect();
-            return CommandResult::ok(out);
-        }
+    one_column(ctx, "mediatypes", "SELECT DISTINCT MediaType FROM MediaType ORDER BY MediaType", "List MediaType")
+}
+
+/// C++ ua_dotcmds.cc SqlQuery(..., OneHandler): the first column of every
+/// row as `{"name": ..}` inside `array`; a failed query is reported with
+/// ErrorMsg("<what> failed: ERR=..") and the command still succeeds.
+fn one_column(ctx: &ExecContext, array: &str, sql: &str, what: &str) -> CommandResult {
+    let Some(cat) = &ctx.catalog else {
+        return CommandResult::ok(String::new()).with_json(json!({ array: [] }));
+    };
+    match cat.query_rows(sql) {
+        Ok(t) => name_list(array, "name", t.rows.iter()
+            .map(|row| (row.first().and_then(|v| v.as_deref()).unwrap_or(""), None))),
+        Err(e) => CommandResult::ok_with_errors(String::new(), format!("{what} failed: ERR={e}\n"))
+            .with_json(json!({ array: [] })),
     }
-    CommandResult::ok(String::new())
 }
 
 /// `.messages` — display pending messages (dot version)
@@ -519,5 +533,39 @@ mod users_tests {
             api_mode: ApiMode::Human, bus_rx: None, job_manager: None };
         let failed = cmd_dot_api(&crate::session::parse_cli_command(".api foo"), &ctx);
         assert!(!failed.success && failed.text_output.is_empty() && failed.error_message.is_empty());
+    }
+}
+
+#[cfg(test)]
+mod jobstatus_tests {
+    use super::*;
+
+    fn ctx() -> ExecContext {
+        ExecContext { session_id: 0, config: None, session_mgr: None, catalog: None,
+            api_mode: ApiMode::Human, bus_rx: None, job_manager: None }
+    }
+
+    /// C++ DotJobstatusCmd: only `.jobstatus=X` filters; the value must be
+    /// exactly one byte, checked before the catalog is opened.
+    #[test]
+    fn jobstatus_value_must_be_one_character() {
+        for (line, status) in [(".jobstatus=TT", "TT"), (".jobstatus=", ""), (".jobstatus=ä", "ä")] {
+            let ast = crate::session::parse_cli_command(line);
+            let r = cmd_dot_jobstatus(&ast, &ctx());
+            assert!(!r.success, "{line}");
+            assert_eq!(r.error_message,
+                format!("Unknown JobStatus '{status}'. JobStatus must be a single character.\n"));
+        }
+        // Other arguments are ignored (no error before the catalog query).
+        let ast = crate::session::parse_cli_command(".jobstatus TT status=TT");
+        assert!(cmd_dot_jobstatus(&ast, &ctx()).error_message.is_empty());
+    }
+
+    #[test]
+    fn levels_with_two_arguments_list_nothing() {
+        let ast = crate::session::parse_cli_command(".levels Backup Restore");
+        assert_eq!(cmd_dot_levels(&ast, &ctx()).text_output, "");
+        let ast = crate::session::parse_cli_command(".levels Backup");
+        assert!(cmd_dot_levels(&ast, &ctx()).text_output.starts_with("Full\n"));
     }
 }
