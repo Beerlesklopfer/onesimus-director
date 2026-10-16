@@ -23,6 +23,7 @@ mod director_config;
 mod fd_protocol;
 mod fsm;
 mod grpc;
+mod internal_jobs;
 mod job_manager;
 mod job_messages;
 mod job_worker;

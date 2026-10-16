@@ -138,12 +138,15 @@ pub struct Ua<'a> {
     /// A UaContext of its own with a console, never in batch mode (C++
     /// new_ua_context() of the restore tree, which keeps only `api`).
     dialog: bool,
+    /// The JSON object of a sub-result (ua->send->ObjectStart…, e.g. the
+    /// "run" object of a started job) for the command result in API mode 2.
+    json: Option<serde_json::Value>,
 }
 
 impl<'a> Ua<'a> {
     pub fn new(ctx: &'a ExecContext) -> Self {
         Self { ctx, segments: Vec::new(), interacted: false, prompts: Vec::new(), cmd: String::new(), db_error: String::new(),
-            dialog: false }
+            dialog: false, json: None }
     }
 
     /// C++ new_ua_context() with the console and `api` flag of `ctx`: not in
@@ -189,7 +192,10 @@ impl<'a> Ua<'a> {
 
     /// Append a result produced by not yet ported code (text, then errors
     /// or the other way round as recorded).
-    pub fn send_result(&mut self, result: CommandResult) {
+    pub fn send_result(&mut self, mut result: CommandResult) {
+        if let Some(json) = result.json.take() {
+            self.json = Some(json);
+        }
         if result.errors_inline {
             // The text holds everything in call order.
             if !result.text_output.is_empty() {
@@ -484,7 +490,7 @@ impl<'a> Ua<'a> {
             self.flush();
             return CommandResult { success, ..Default::default() };
         }
-        let mut result = CommandResult { success, ..Default::default() };
+        let mut result = CommandResult { success, json: self.json.take(), ..Default::default() };
         result.errors_first = matches!(self.segments.first(), Some(Segment::Error(_)));
         // Text and errors that alternate more than once (or errors already
         // inside a sub-result's text) cannot be sent as two blocks: the text

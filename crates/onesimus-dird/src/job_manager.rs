@@ -222,6 +222,16 @@ pub struct JobManager {
     recent: std::collections::VecDeque<u32>,
     /// jobq_server() looks at the queue every 2 seconds, or when a job ended.
     last_schedule: std::time::Instant,
+    /// jobq_server(): a job moved from the waiting to the ready queue runs
+    /// after the server's "pause for 2 seconds" (jobq.cc:550); per JobId the
+    /// earliest start. Compatibility log C-058.
+    ready_at: std::collections::HashMap<u32, std::time::Instant>,
+    start_delay: std::time::Duration,
+    /// sched_wait(): next look at a delayed job (every 30 seconds).
+    wait_check: std::collections::HashMap<u32, std::time::Instant>,
+    wait_interval: std::time::Duration,
+    /// sched_wait() "waiting N seconds" job messages not yet posted.
+    wait_messages: Vec<(u32, std::time::Instant, String)>,
 }
 
 /// RecentJobResultsList max_count_recent_job_results.
@@ -232,7 +242,18 @@ impl JobManager {
         Self { jobs: Vec::new(), bus, config, catalog, catreq_jobs: std::collections::HashMap::new(),
             delayed: Vec::new(), waiting: Vec::new(), ready: std::collections::VecDeque::new(),
             spawner: crate::job_worker::spawn_job_worker, next_seq: 0,
-            jobs_run: 0, recent: std::collections::VecDeque::new(), last_schedule: std::time::Instant::now() }
+            jobs_run: 0, recent: std::collections::VecDeque::new(), last_schedule: std::time::Instant::now(),
+            ready_at: std::collections::HashMap::new(),
+            start_delay: std::time::Duration::from_secs(if cfg!(test) { 0 } else { 2 }),
+            wait_check: std::collections::HashMap::new(),
+            wait_interval: std::time::Duration::from_secs(if cfg!(test) { 0 } else { 30 }),
+            wait_messages: Vec::new() }
+    }
+
+    /// The jobq_server pause before a ready job runs (tests).
+    #[cfg(test)]
+    pub fn set_start_delay(&mut self, delay: std::time::Duration) {
+        self.start_delay = delay;
     }
 
     pub fn add_job(&mut self, job_id: u32, job_name: &str, handle: JobHandle) {
@@ -306,7 +327,19 @@ impl JobManager {
             jcr: JcrState { priority: start.priority, allow_mixed_priority, sched_time: start.sched_time,
                 params: Some(start.params), ..Default::default() },
         });
-        if delayed { self.delayed.push(job_id) } else { self.insert_waiting(job_id) }
+        if delayed {
+            // jobq.cc sched_wait(): the message, then a look every 30 seconds.
+            let wtime = self.get_job(job_id).map_or(0, |j| j.jcr.sched_time - now_unix()).max(0);
+            let unique = self.get_job(job_id).map(|j| j.handle.unique_job.clone()).unwrap_or_default();
+            // Posted by the monitor shortly after the run command has replied
+            // (the sched_wait thread starts after JobqAdd returned).
+            self.wait_messages.push((job_id, std::time::Instant::now() + std::time::Duration::from_millis(200),
+                format!("Job {unique} waiting {wtime} seconds for scheduled start time.\n")));
+            self.wait_check.insert(job_id, std::time::Instant::now() + self.wait_interval.min(std::time::Duration::from_secs(wtime as u64)));
+            self.delayed.push(job_id)
+        } else {
+            self.insert_waiting(job_id)
+        }
         debug!("JobManager: queued job {job_id} '{job_name}'");
         self.schedule();
     }
@@ -358,10 +391,22 @@ impl JobManager {
     fn schedule(&mut self) {
         self.last_schedule = std::time::Instant::now();
         let now = now_unix();
+        // sched_wait(): a canceled job leaves its wait at the next 30-second look.
+        let instant = std::time::Instant::now();
+        let checks = self.wait_check.clone();
+        let looked = |id: &u32| checks.get(id).is_none_or(|at| *at <= instant);
         let due: Vec<u32> = self.delayed.iter().copied()
-            .filter(|id| self.get_job(*id).is_none_or(|j| j.jcr.sched_time <= now || is_job_canceled(j.observed_status)))
+            .filter(|id| self.get_job(*id).is_none_or(|j| j.jcr.sched_time <= now
+                || (is_job_canceled(j.observed_status) && looked(id))))
             .collect();
+        for id in self.delayed.clone() {
+            if looked(&id) && !due.contains(&id) {
+                let remaining = self.get_job(id).map_or(0, |j| j.jcr.sched_time - now).max(0) as u64;
+                self.wait_check.insert(id, instant + self.wait_interval.min(std::time::Duration::from_secs(remaining)));
+            }
+        }
         for id in due {
+            self.wait_check.remove(&id);
             self.delayed.retain(|d| *d != id);
             match self.get_job(id).map(|j| is_job_canceled(j.observed_status)) {
                 // JobqAdd() of a canceled job: to the front of the ready queue.
@@ -388,6 +433,7 @@ impl JobManager {
                 if !self.acquire_resources(id) { continue; }
                 self.waiting.retain(|w| *w != id);
                 self.ready.push_back(id);
+                self.ready_at.insert(id, std::time::Instant::now() + self.start_delay);
             }
         }
         self.start_ready();
@@ -434,24 +480,71 @@ impl JobManager {
                 let name = self.get_job(id).map(|j| j.job_name.clone()).unwrap_or_default();
                 let (max_workers, ..) = self.limits(&name, "", "");
                 if self.running().count() >= max_workers { break; }
+                if self.ready_at.get(&id).is_some_and(|at| *at > std::time::Instant::now()) { break; }
             }
             self.ready.pop_front();
+            self.ready_at.remove(&id);
             let spawner = self.spawner;
             let Some(job) = self.jobs.iter_mut().find(|j| j.job_id == id) else { continue };
             if canceled {
                 // job_thread() of a canceled job: no daemons, only its cleanup.
+                // Job types whose "Version:" message comes from job_thread()
+                // (not at queue time) get it here as well.
+                if job.jcr.params.as_ref().is_some_and(|p| p.job_type == crate::job_worker::WorkerJobType::Admin
+                    || p.job_type.internal().is_some()) {
+                    crate::console_msg::post_job_message(&self.bus, self.config.as_ref(), BusMessage::JobMessage {
+                        job_id: id, job_name: job.job_name.clone(), msg_type: crate::message_bus::MsgType::Info,
+                        text: crate::job_messages::version_text(), timestamp: now_unix() });
+                }
                 job.pending_end = Some(JobEnd { term_code: b'A' as i32, files: 0, bytes: 0, errors: 0,
                     vol_session_id: 0, vol_session_time: 0 });
                 job.worker_exit = Some(0);
                 continue;
             }
             let Some(params) = job.jcr.params.clone() else { continue };
+            if let Some(kind) = params.job_type.internal() {
+                // job_thread() of a job the Director runs itself (C-058):
+                // JS_Running, UpdateJobStartRecord, "Version:", the job, its end.
+                job.start_time = now_unix();
+                if let Some(report) = job.jcr.report.as_mut() { report.start_time = job.start_time; }
+                self.next_seq += 1;
+                job.jcr.started_seq = self.next_seq;
+                job.jcr.job_started = true;
+                job.observed_status = merge_status(job.observed_status, 'R');
+                let outcome = match self.config.as_ref().and_then(|c| c.read().ok()) {
+                    Some(config) => crate::internal_jobs::run(&config, self.catalog.as_ref(), &crate::internal_jobs::Request {
+                        kind, job_id: id, unique_job: &params.unique_job, job_name: &job.job_name, pool: &params.pool_name }),
+                    None => crate::internal_jobs::Outcome { status: 'f', ..Default::default() },
+                };
+                if let Some(cat) = &self.catalog {
+                    let start = job.start_time;
+                    let pool = outcome.pool_id.as_deref().map(|p| format!(",PoolId={p}")).unwrap_or_default();
+                    if let Err(e) = cat.raw_query(&format!(
+                        "UPDATE Job SET JobStatus='{}',StartTime=to_timestamp({start}),JobTDate={start}{pool} WHERE JobId={id}",
+                        job.observed_status)) {
+                        warn!("Job {id}: UpdateJobStartRecord: {e}");
+                    }
+                }
+                let mut messages = vec![(crate::message_bus::MsgType::Info, crate::job_messages::version_text())];
+                messages.extend(outcome.messages);
+                for (msg_type, text) in messages {
+                    crate::console_msg::post_job_message(&self.bus, self.config.as_ref(), BusMessage::JobMessage {
+                        job_id: id, job_name: job.job_name.clone(), msg_type, text, timestamp: now_unix() });
+                }
+                if let Some(report) = job.jcr.report.as_mut() { report.selected = outcome.selected; }
+                job.pending_end = Some(JobEnd { term_code: outcome.status as i32, files: 0, bytes: 0, errors: 0,
+                    vol_session_id: 0, vol_session_time: 0 });
+                job.worker_exit = Some(0);
+                continue;
+            }
             match spawner(id, &job.job_name, &params) {
                 Ok(handle) => {
                     info!("Job {id} '{}': worker pid={}", job.job_name, handle.pid);
                     job.handle = handle;
                     job.phase = DirJobPhase::Starting;
                     job.start_time = now_unix();
+                    // The report shows jr.StartTime (job_thread), not the queue time.
+                    if let Some(report) = job.jcr.report.as_mut() { report.start_time = job.start_time; }
                     self.next_seq += 1;
                     job.jcr.started_seq = self.next_seq;
                     // job_thread(): JS_Running, then UpdateJobStartRecord().
@@ -585,6 +678,16 @@ impl JobManager {
     /// Poll all active worker pipes. Non-blocking.
     /// Handles CatReq, status updates, state changes, job completion.
     pub fn poll_all(&mut self) {
+        if !self.wait_messages.is_empty() {
+            let now = std::time::Instant::now();
+            let (due, later): (Vec<_>, Vec<_>) = std::mem::take(&mut self.wait_messages).into_iter().partition(|m| m.1 <= now);
+            self.wait_messages = later;
+            for (job_id, _, text) in due {
+                let job_name = self.get_job(job_id).map(|j| j.job_name.clone()).unwrap_or_default();
+                crate::console_msg::post_job_message(&self.bus, self.config.as_ref(), BusMessage::JobMessage {
+                    job_id, job_name, msg_type: crate::message_bus::MsgType::Info, text, timestamp: now_unix() });
+            }
+        }
         for job in &mut self.jobs {
             if matches!(job.phase, DirJobPhase::Completed | DirJobPhase::Error) {
                 job.handle.try_wait();
@@ -750,6 +853,9 @@ impl JobManager {
         let queued = !(self.waiting.is_empty() && self.ready.is_empty() && self.delayed.is_empty());
         if queued && (self.jobs_run != jobs_run || self.last_schedule.elapsed() >= std::time::Duration::from_secs(2)) {
             self.schedule();
+        } else if !self.ready.is_empty() {
+            // Ready jobs whose jobq_server pause has passed.
+            self.start_ready();
         }
 
         // Cleanup completed jobs older than 5 minutes

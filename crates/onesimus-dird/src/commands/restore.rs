@@ -78,6 +78,9 @@ pub(crate) struct Launch {
     pub replace: Option<String>,
     /// The bootstrap file written for this restore.
     pub bootstrap_path: Option<String>,
+    /// The Restore Job resource and the storage of the run (C-058).
+    pub job: Option<String>,
+    pub storage: Option<String>,
 }
 
 pub fn cmd_restore(ast: &CommandAst, ctx: &ExecContext) -> CommandResult {
@@ -363,6 +366,8 @@ pub(crate) fn restore_with(ast: &CommandAst, ctx: &ExecContext,
             where_path: value("where"),
             replace: value("replace"),
             bootstrap_path: value("bootstrap"),
+            job: value("job"),
+            storage: value("storage"),
         })
     });
     ua.finish(true)
@@ -1751,11 +1756,13 @@ fn str_to_utime(s: &str) -> i64 {
     }
 }
 
-/// Start the restore worker for a complete selection.
-fn start_restore(ctx: &ExecContext, launch: Launch) -> CommandResult {
-    let Launch { restore_jobid, client: client_name, restore_client, where_path, replace, bootstrap_path } = launch;
-    let where_path = where_path.unwrap_or_else(|| "/tmp/bareos-restore".to_string());
-    let replace = replace.unwrap_or_else(|| "always".to_string());
+/// Start a confirmed restore (the `restore` command and `run` of a Restore
+/// job, job.cc RunJob): the Job record (Type 'R', Level 'F', the restore
+/// client), the job queue and the reply "Job queued. JobId=N". The worker
+/// reads the bootstrap the restore wrote, else one generated from the
+/// catalog for `restore_jobid`. Compatibility log C-058.
+pub(crate) fn start_restore(ctx: &ExecContext, launch: Launch) -> CommandResult {
+    let Launch { restore_jobid, client: _, restore_client, where_path, replace, bootstrap_path, job, storage } = launch;
 
     let config = match &ctx.config {
         Some(c) => match c.read() {
@@ -1764,6 +1771,16 @@ fn start_restore(ctx: &ExecContext, launch: Launch) -> CommandResult {
         },
         None => return CommandResult::error("No config loaded\n".to_string()),
     };
+    let job = match job.as_deref().and_then(|name| config.find_job(name))
+        .or_else(|| config.jobs.iter().find(|j| j.job_type == JobType::Restore)) {
+        Some(job) => job.clone(),
+        None => return CommandResult::error("No Restore Job resource found!\n".to_string()),
+    };
+    let job_dirs = crate::commands::defaults::job_directives(&config, &job.name);
+    let job_value = |key: &str| job_dirs.iter().rev().find(|d| d.norm_key() == key).and_then(|d| d.first())
+        .map(str::to_string);
+    let where_path = where_path.or_else(|| job_value("where")).unwrap_or_else(|| "/tmp/bareos-restores".to_string());
+    let replace = replace.or_else(|| job_value("replace")).unwrap_or_else(|| "always".to_string()).to_ascii_lowercase();
 
     let client = match config.find_client(&restore_client) {
         Some(c) => c.clone(),
@@ -1779,21 +1796,35 @@ fn start_restore(ctx: &ExecContext, launch: Launch) -> CommandResult {
         )),
     };
 
-    // Find a storage resource
-    let storage = match config.storages.first() {
+    // The read storage of the run, else the Job's, else the first one.
+    let storage = match storage.as_deref().and_then(|s| config.find_storage(s))
+        .or_else(|| config.find_storage(job.storage.split(',').next().unwrap_or("").trim()))
+        .or_else(|| config.storages.first()) {
         Some(s) => s.clone(),
         None => return CommandResult::error("No storage configured\n".to_string()),
     };
 
     let dir_name = config.director.name.clone();
-    let job_id = NEXT_RESTORE_ID.fetch_add(1, Ordering::Relaxed);
-    let now = chrono::Local::now();
-    let unique_job = format!("RestoreFiles.{}", now.format("%Y-%m-%d_%H.%M.%S_%f"));
+    drop(config); // Release RwLock before fork
+
+    let now = now_unix();
+    let unique_job = crate::commands::job::unique_job_name(&job.name, now);
+    let job_id = if ctx.catalog.is_some() {
+        match crate::commands::job::create_job_record(ctx, &unique_job, &job.name, 'R', 'F', Some(&client.name), now, "") {
+            Ok(id) => id,
+            Err(e) => {
+                tracing::error!("Failed to create job record: {e}");
+                return CommandResult::error("Job failed.\n".to_string());
+            }
+        }
+    } else {
+        NEXT_RESTORE_ID.fetch_add(1, Ordering::Relaxed)
+    };
 
     let params = JobParams {
         job_id,
         unique_job: unique_job.clone(),
-        job_name: "RestoreFiles".to_string(),
+        job_name: job.name.clone(),
         job_type: WorkerJobType::Restore,
         level: "full".to_string(),
         fd_address: client.address.clone(),
@@ -1805,13 +1836,13 @@ fn start_restore(ctx: &ExecContext, launch: Launch) -> CommandResult {
         sd_device: storage.device.clone(),
         sd_media_type: storage.media_type.clone(),
         director_name: dir_name,
-        pool_name: "Full".to_string(),
+        pool_name: job.pool.clone(),
         fileset_includes: vec![],
         fileset_excludes: vec![],
         since_utime: 0,
         prev_job: String::new(),
-        where_path: Some(where_path.clone()),
-        replace: Some(replace.clone()),
+        where_path: Some(where_path),
+        replace: Some(replace),
         restore_jobid: Some(restore_jobid),
         bootstrap: Some(bootstrap),
         client_name: client.name.clone(),
@@ -1819,51 +1850,18 @@ fn start_restore(ctx: &ExecContext, launch: Launch) -> CommandResult {
     };
     let report = crate::job_messages::JobReport {
         kind: crate::job_messages::ReportKind::Restore, job: unique_job.clone(), client: client.name.clone(),
-        sched_time: now.timestamp(), start_time: now.timestamp(),
+        sched_time: now, start_time: now,
         trigger: crate::job_messages::TRIGGER_USER.to_string(), ..Default::default()
     };
 
-    drop(config); // Release RwLock before fork
-
-    // Post queued status
     if let Some(smgr) = &ctx.session_mgr {
-        smgr.bus().post(BusMessage::JobStatus {
-            job_id, job_name: "RestoreFiles".to_string(),
-            status: "Queued".to_string(), timestamp: now_unix(),
-        });
         for text in [crate::job_messages::version_text(), crate::job_messages::start_restore_text(&unique_job)] {
             crate::console_msg::post_job_message(smgr.bus(), ctx.config.as_ref(), BusMessage::JobMessage {
-                job_id, job_name: "RestoreFiles".to_string(), msg_type: MsgType::Info, text, timestamp: now_unix(),
+                job_id, job_name: job.name.clone(), msg_type: MsgType::Info, text, timestamp: now_unix(),
             });
         }
     }
-
-    // Fork the autonomous restore worker
-    match job_worker::spawn_job_worker(job_id, "RestoreFiles", &params) {
-        Ok(handle) => {
-            tracing::info!("Restore {job_id}: worker pid={}, from backup {restore_jobid}", handle.pid);
-            if let Some(ref mgr) = ctx.job_manager {
-                let mut mgr = mgr.lock().unwrap();
-                mgr.add_job(job_id, "RestoreFiles", handle);
-                mgr.set_job_resources(job_id, &client.name, &storage.name);
-                mgr.set_job_report(job_id, report);
-            }
-        }
-        Err(e) => {
-            tracing::error!("Restore {job_id}: fork failed: {e}");
-            return CommandResult::error(format!("Failed to start restore: {e}\n"));
-        }
-    }
-
-    CommandResult::ok(format!(
-        "Restore job queued. JobId={job_id}\n\
-         Restore from:  Backup JobId={restore_jobid}\n\
-         Client:        {client_name}\n\
-         Storage:       {}\n\
-         Where:         {where_path}\n\
-         Replace:       {replace}\n",
-        storage.name,
-    ))
+    crate::commands::job::queue_job(ctx, &job, params, report, &client.name, &storage.name, now)
 }
 
 fn now_unix() -> i64 {
