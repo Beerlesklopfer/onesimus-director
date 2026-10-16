@@ -80,7 +80,7 @@ Früher nicht gemergte Agent-Branches (erledigt) (Worktrees unter `.claude/workt
 
 C-011 gemergt (Merge-Commit): Konflikte in `admin.rs`/`extra.rs` (update/label/relabel) zugunsten der C-011-Dialoge gelöst — prüfen, ob C-012s spätere Wertvalidierung für `update` (`3500719`) vollständig erhalten ist; C-011-Ersatz für `list_sql_query` durch C-016-Version ersetzt. Voller Paritätslauf nach dem Merge steht aus.
 
-Nach C-011/C-015/C-017-Merge: C-011-Dialog in `estimate` (Hook C-017) und `list volumes pool=<unbekannt>` (C-015) anbinden; ebenso `restore.rs prompt_menu()` (C-021, 4 Fälle).
+Dialoganbindung (estimate, list volumes pool=, restore-Menü, truncate, import/export/move, eine Storage-Auswahl) am 16.10.2026 gemergt; offen: Restore-Menüpunkte 1, 2, 4–12.
 
 Offen ohne Agent: C-025..C-030, C-031..C-036, C-024-Rest, Umstellung Referenz auf `18be77e6`.
 Voraussetzung: `sudo -u postgres psql -c 'ALTER ROLE "joerg.bernau" CREATEDB'` — sonst
