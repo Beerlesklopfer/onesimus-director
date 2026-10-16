@@ -84,6 +84,11 @@ Neue Einträge unten anhängen; behobene Einträge bleiben mit Commit stehen.
 | C-063 | 17.10.2026 | show disabled | `dl-show-reload` | `show disabled jobs` nutzt den Laufzeitstatus (nach `disable`) | Liest die Konfiguration: „No disabled Jobs.“ | `ua_cmds.cc` show_disabled_jobs | offen |
 | C-064 | 17.10.2026 | show, API 1 | `dl-show-api1` | `.api 1` + `show client=…` zeigt geerbtes `Catalog = "MyCatalog"` | Zeile fehlt | `lib/res.cc` | offen |
 | C-065 | 17.10.2026 | show, API json | `dl-show-json` | `.api json` + `show pool=…` enthält Standardschlüssel labeltype, actiononpurge, nextpool, recyclepool, scratchpool, catalog | Schlüssel fehlen | `lib/res.cc` JSON-Ausgabe | offen |
+| C-066 | 17.10.2026 | create pool | `ds-create-pool*` | Vorhandener Pool: „Error: Pool Full already exists.\nUse update to change it.“ | SQL-Fehler „Spalte fileretention … existiert nicht“, trotzdem „Pool Full created.“ | `ua_create.cc`, `cats/sql_create.cc` | offen |
+| C-067 | 17.10.2026 | update volume/stats/jobid | `ds-update-*` | `update volume pool=/recyclepool=/actiononpurge=/storage=`, `allfrompool=`, `fromallpools`, `update stats [days=]`, `update jobid=…` | „<what>: not supported“ (`admin.rs` UpdateAction::Unsupported) | `ua_update.cc` | offen |
+| C-068 | 17.10.2026 | update pool | `ds-update-pool` | Pool-Tabelle nach `update pool=` mit allen Spalten (maxvolfiles, actiononpurge, nextpoolid, min/maxblocksize, migration*) | Weniger Spalten | `ua_update.cc` UpdatePool, `cats/sql_list.cc` | offen |
+| C-069 | 17.10.2026 | move | `ds-move-*` | `move storage=…` fragt zuerst den SD nach Slots („is not an autochanger“, „No slots in changer.“) | Fehlermeldung ohne SD-Kontakt | `ua_label.cc`/`ua_impexp.cc` move_cmd | offen |
+| C-070 | 17.10.2026 | label, API 2 | `ds-label-api2` | Signale [-16, -16, -15, -15, -18] | [-16, -15, -18], Ausgabe gleich | wie C-061 (Befehl rahmt sich selbst) | offen |
 
 Hinweis C-057: Ursache war nicht ein anderer Ladeweg, sondern `omit_defaults_`: das erste CheckResources() setzt es, danach markiert der Parser ungesetzte Direktiven nicht mehr als geerbt, und `show` druckt nach einem `reload` jeden Nicht-Default-Wert (Client-`Catalog`, leere Res-Verweise `""`, `LabelType`, `ActionOnPurge`, …; in `verbose` entfallen dafür die leeren `# X = `-Listen). Onesimus führt das als `DirectorConfig::reloaded`. Der Fehlerpfad prüft jetzt wie das Original (`config_check.rs`: unbekannte Direktiven, Pflichtdirektiven, doppelte Namen, unauflösbare Verweise, CheckResources-Regeln) und antwortet nur „failed to reload“ (API 2: `error` „failed“); Jmsg-Texte und „Please correct …/Resetting …“ gehen ins Daemon-Log. Ein erfolgreicher `reload` legt wie CheckCatalog(UPDATE_CATALOG) die Client/Storage-Sätze neuer Ressourcen an. Offen: die Lexer-Diagnosen (scan_err mit Zeile/Spalte) schreibt Onesimus nicht ins Log; der Start prüft weiterhin nicht (eine beim Start ungültige Konfiguration wird geladen). Fälle `c057`, Harness-Felder `config`/`restore_reload`/`log`.
 
@@ -111,6 +116,7 @@ eindeutige Sortierung), `c015-list-jobs-enabled-count` (undefiniertes Verhalten 
 
 ### Offen
 
+- Offen (17.10.2026): C-062 … C-070 (Funde der Doku-Agenten).
 - C-058 teilweise behoben (17.10.2026); offen: Verify, Copy/Migrate-Arbeitsjobs, PoolOccupancy, Consolidate mit Always-Incremental-Jobs, RunScripts (siehe Hinweis C-058).
 - Befehlsstatus im Wiki (`docs/wiki/commands`): 53 `parity_verified`, 31 `partial`, 4 `registered_unverified`, 26 Restore-Baum-Befehle `missing_context` (Stand vor den C-045/C-049/C-055-Merges, Auffrischung offen).
 - OVFS-Integration im Director gemergt (16.10.2026): Erkennung beim Connect (Version 0.1.x + Signaturen), Befehle `.ovfs_status/_latest/_tree/_ls/_versions`, MCP-Tools in oconsole, SQL-Rückfall byte-gleich zur Extension (Äquivalenztest mit gebauter Extension auf PG 17).
