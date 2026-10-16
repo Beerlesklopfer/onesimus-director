@@ -1,4 +1,4 @@
-# .bvfs_clear_cache -- Clear Entire BVFS Cache
+# .bvfs_clear_cache — BVFS-Cache leeren
 
 <!-- bareos-reference:start -->
 ## Aus den Bareos-Originalquellen
@@ -26,54 +26,79 @@ Referenz: [WIP/25.1.2-pre-43-g18be77e68, `18be77e6832e`](https://github.com/bare
 
 Die folgenden vorhandenen Beispiele und Verhaltensbeschreibungen sind lokale Dokumentation; sie sind kein Beleg für vollständige Bareos-Kompatibilität. Bei Widersprüchen gilt der obige Befund.
 <!-- bareos-reference:end -->
-Drops all BVFS cache tables from the catalog database. This forces a full rebuild on the next `.bvfs_update` call. Requires explicit confirmation.
+## Zweck
+
+`.bvfs_clear_cache yes` leert den gesamten BVFS-Cache im Katalog: Es setzt `Job.HasCache` aller Jobs auf 0 und leert die Tabellen `PathHierarchy` und `PathVisibility`. Danach muss der Cache mit [.bvfs_update](dot-bvfs-update.md) neu aufgebaut werden, bevor [.bvfs_lsdirs](dot-bvfs-lsdirs.md) wieder Verzeichnisse findet. Backup-Daten und Dateieinträge bleiben unberührt.
+
+BVFS bleibt in Onesimus unverändert zur Abwärtskompatibilität erhalten (etwa für bareos-webui). Die OVFS-Befehle nutzen diesen Cache nicht.
 
 ## Syntax
 
-```
+```text
 .bvfs_clear_cache yes
 ```
 
-## Arguments
+## Argumente
 
-| Argument | Description |
-|----------|-------------|
-| `yes` | Required confirmation flag. The command refuses to run without it. |
+| Argument | Werte | Bedeutung |
+|---|---|---|
+| `yes` | – | Pflicht; ohne `yes` geschieht nichts. Eine Rückfrage gibt es nicht. |
 
-## Examples
+## API-Modi
 
-### Clear the cache
-```
-* .bvfs_clear_cache yes
-BVFS cache cleared
-```
+`.api 0` und `.api 1` antworten mit `OK`. `.api 2` antwortet mit leerem `result`.
 
-### Without confirmation (rejected)
-```
-* .bvfs_clear_cache
-Use: .bvfs_clear_cache yes
-```
+## Beispiele
 
-### Full rebuild workflow
-```
-* .bvfs_clear_cache yes
-BVFS cache cleared
-* .bvfs_update
-Updating BVFS cache for all jobs...
-Done.
+### Ohne und mit yes
+
+```text
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]> .bvfs_clear_cache
+Automatically selected Catalog: MyCatalog
+Using Catalog "MyCatalog"
+Can't find 'yes' argument
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]> .bvfs_clear_cache yes
+OK
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]>
 ```
 
-## Notes
+### Unter .api 1
 
-- This is a destructive operation: all cached BVFS data is removed.
-- After clearing, `.bvfs_lsdirs` and `.bvfs_lsfiles` will return no results until `.bvfs_update` is run.
-- Use this when the BVFS cache is suspected to be corrupt or inconsistent.
-- The `yes` argument is a positional flag, not a key=value pair.
-- On large catalogs, the subsequent `.bvfs_update` to rebuild the cache can take significant time.
+```text
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]> .api 1
+api: 1
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]> .bvfs_clear_cache yes
+OK
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]>
+```
 
-## Related Commands
+### Als JSON
 
-- [.bvfs_update](dot-bvfs-update.md) -- Rebuild the cache after clearing
-- [.bvfs_cleanup](dot-bvfs-cleanup.md) -- Remove individual restore session tables
-- [.bvfs_lsdirs](dot-bvfs-lsdirs.md) -- Browse directories (requires cache)
-- [.bvfs_lsfiles](dot-bvfs-lsfiles.md) -- Browse files (requires cache)
+```text
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]> .api 2
+{
+  "jsonrpc": "2.0",
+  "id": null,
+  "result": {
+    "api": 2
+  }
+}
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]> .bvfs_clear_cache yes
+{
+  "jsonrpc": "2.0",
+  "id": null,
+  "result": {}
+}
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]>
+```
+
+## Fehlermeldungen
+
+| Meldung | Ursache und Abhilfe |
+|---|---|
+| `Can't find 'yes' argument` | `yes` fehlt; der Cache bleibt unverändert. |
+
+## Siehe auch
+
+- [.bvfs_update](dot-bvfs-update.md) — Cache neu aufbauen
+- [.bvfs_cleanup](dot-bvfs-cleanup.md) — Restore-Tabelle löschen
