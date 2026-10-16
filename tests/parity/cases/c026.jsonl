@@ -1,0 +1,39 @@
+# C-026: list/llist output filtered by the console ACLs (SetAclFilter, tri-state FilterData, meta.range.filtered).
+{"id": "c026-limited-jobs", "steps": ["list jobs", "list jobs limit=5 offset=2", "list jobs count", "list job=BackupCatalog", "list jobid=2", "list jobid=1", "list jobs client=bareos-fd limit=3"], "console": "parity-limited", "password": "parity-limited-pw"}
+{"id": "c026-limited-llist-jobs", "steps": ["llist jobs limit=20", "llist jobid=14", "llist jobid=2", "llist jobs last"], "console": "parity-limited", "password": "parity-limited-pw"}
+{"id": "c026-limited-jobtotals", "steps": ["list jobtotals"], "console": "parity-limited", "password": "parity-limited-pw"}
+{"id": "c026-limited-files", "steps": ["list files jobid=2", "list basefiles jobid=2", "list files jobid=1"], "console": "parity-limited", "password": "parity-limited-pw"}
+{"id": "c026-limited-filesets", "steps": ["list fileset jobid=1", "list fileset jobid=2", "list fileset filesetid=3", "list filesets", "llist filesets"], "console": "parity-limited", "password": "parity-limited-pw"}
+{"id": "c026-limited-jobmedia", "steps": ["list jobmedia jobid=2", "list jobmedia jobid=1", "list joblog jobid=2", "list joblog jobid=1 count"], "console": "parity-limited", "password": "parity-limited-pw"}
+{"id": "c026-limited-log", "steps": ["list log", "llist log limit=10", "list log reverse limit=8"], "console": "parity-limited", "password": "parity-limited-pw"}
+{"id": "c026-limited-pools", "steps": ["list pools", "llist pools", "list pool=Full", "list pool=Incremental", "list poolid=2", "list poolid=3"], "console": "parity-limited", "password": "parity-limited-pw"}
+{"id": "c026-limited-clients", "steps": ["list clients", "llist clients", "list client=bareos-fd", "list storages", "llist storages"], "console": "parity-limited", "password": "parity-limited-pw"}
+{"id": "c026-limited-volumes", "steps": ["list volumes", "llist volumes", "list volumes all", "llist volumes all", "list volume=Full-0001", "list mediaid=47322", "list volumes jobid=2"], "console": "parity-limited", "password": "parity-limited-pw"}
+{"id": "c026-limited-misc", "steps": ["list copies", "list backups client=bareos-fd fileset=SelfTest", "llist backups client=bareos-fd fileset=SelfTest", "list jobstats jobid=2"], "console": "parity-limited", "password": "parity-limited-pw"}
+{"id": "c026-listacl-jobs", "steps": ["list jobs", "list jobs limit=5 offset=2", "list jobs count", "list job=BackupCatalog", "list jobid=2", "list jobid=1", "list jobs client=bareos-fd limit=3"], "console": "parity-listacl", "password": "parity-listacl-pw"}
+{"id": "c026-listacl-llist-jobs", "steps": ["llist jobs limit=20", "llist jobid=14", "llist jobid=2", "llist jobs last"], "console": "parity-listacl", "password": "parity-listacl-pw"}
+{"id": "c026-listacl-jobtotals", "steps": ["list jobtotals"], "console": "parity-listacl", "password": "parity-listacl-pw"}
+{"id": "c026-listacl-files", "steps": ["list files jobid=2", "list basefiles jobid=2", "list files jobid=1"], "console": "parity-listacl", "password": "parity-listacl-pw"}
+{"id": "c026-listacl-filesets", "steps": ["list fileset jobid=1", "list fileset jobid=2", "list fileset filesetid=3", "list filesets", "llist filesets"], "console": "parity-listacl", "password": "parity-listacl-pw"}
+{"id": "c026-listacl-jobmedia", "steps": ["list jobmedia jobid=2", "list jobmedia jobid=1", "list joblog jobid=2", "list joblog jobid=1 count"], "console": "parity-listacl", "password": "parity-listacl-pw"}
+{"id": "c026-listacl-log", "steps": ["list log", "llist log limit=10", "list log reverse limit=8"], "console": "parity-listacl", "password": "parity-listacl-pw"}
+{"id": "c026-listacl-pools", "steps": ["list pools", "llist pools", "list pool=Full", "list pool=Incremental", "list poolid=2", "list poolid=3"], "console": "parity-listacl", "password": "parity-listacl-pw"}
+{"id": "c026-listacl-clients", "steps": ["list clients", "llist clients", "list client=bareos-fd", "list storages", "llist storages"], "console": "parity-listacl", "password": "parity-listacl-pw"}
+{"id": "c026-listacl-volumes", "steps": ["list volumes", "llist volumes", "list volumes all", "llist volumes all", "list volume=Full-0001", "list mediaid=47322", "list volumes jobid=2"], "console": "parity-listacl", "password": "parity-listacl-pw"}
+{"id": "c026-listacl-misc", "steps": ["list copies", "list backups client=bareos-fd fileset=SelfTest", "llist backups client=bareos-fd fileset=SelfTest", "list jobstats jobid=2"], "console": "parity-listacl", "password": "parity-listacl-pw"}
+{"id": "c026-operator-jobs", "steps": ["list jobs", "list jobs limit=5 offset=2", "list jobs count", "list job=BackupCatalog", "list jobid=2", "list jobid=1", "list jobs client=bareos-fd limit=3"], "console": "parity-operator", "password": "parity-operator-pw"}
+{"id": "c026-operator-llist-jobs", "steps": ["llist jobs limit=20", "llist jobid=14", "llist jobid=2", "llist jobs last"], "console": "parity-operator", "password": "parity-operator-pw"}
+{"id": "c026-operator-jobtotals", "steps": ["list jobtotals"], "console": "parity-operator", "password": "parity-operator-pw"}
+{"id": "c026-operator-files", "steps": ["list files jobid=2", "list basefiles jobid=2", "list files jobid=1"], "console": "parity-operator", "password": "parity-operator-pw"}
+{"id": "c026-operator-filesets", "steps": ["list fileset jobid=1", "list fileset jobid=2", "list fileset filesetid=3", "list filesets", "llist filesets"], "console": "parity-operator", "password": "parity-operator-pw"}
+{"id": "c026-operator-jobmedia", "steps": ["list jobmedia jobid=2", "list jobmedia jobid=1", "list joblog jobid=2", "list joblog jobid=1 count"], "console": "parity-operator", "password": "parity-operator-pw"}
+{"id": "c026-operator-log", "steps": ["list log", "llist log limit=10", "list log reverse limit=8"], "console": "parity-operator", "password": "parity-operator-pw"}
+{"id": "c026-operator-pools", "steps": ["list pools", "llist pools", "list pool=Full", "list pool=Incremental", "list poolid=2", "list poolid=3"], "console": "parity-operator", "password": "parity-operator-pw"}
+{"id": "c026-operator-clients", "steps": ["list clients", "llist clients", "list client=bareos-fd", "list storages", "llist storages"], "console": "parity-operator", "password": "parity-operator-pw"}
+{"id": "c026-operator-volumes", "steps": ["list volumes", "llist volumes", "list volumes all", "llist volumes all", "list volume=Full-0001", "list mediaid=47322", "list volumes jobid=2"], "console": "parity-operator", "password": "parity-operator-pw"}
+{"id": "c026-operator-misc", "steps": ["list copies", "list backups client=bareos-fd fileset=SelfTest", "llist backups client=bareos-fd fileset=SelfTest", "list jobstats jobid=2"], "console": "parity-operator", "password": "parity-operator-pw"}
+{"id": "c026-listacl-api2-1", "steps": ["list jobs", "llist jobs limit=10", "list jobs limit=3 offset=1", "list jobs count", "list jobid=2", "list pools"], "setup": [".api 2"], "console": "parity-listacl", "password": "parity-listacl-pw"}
+{"id": "c026-listacl-api2-2", "steps": ["llist pools", "list pool=Incremental", "list clients", "list storages", "list filesets", "list volumes"], "setup": [".api 2"], "console": "parity-listacl", "password": "parity-listacl-pw"}
+{"id": "c026-listacl-api2-3", "steps": ["list volumes all", "llist volumes all", "list log", "list fileset jobid=2", "list backups client=bareos-fd fileset=SelfTest", "list jobtotals"], "setup": [".api 2"], "console": "parity-listacl", "password": "parity-listacl-pw"}
+{"id": "c026-bvfs-list-denied", "steps": ["list jobs", "llist pools"], "console": "parity-bvfs", "password": "parity-bvfs-pw"}
+{"id": "c026-bvfs-api2-list-denied", "steps": ["list jobs"], "setup": [".api 2"], "console": "parity-bvfs", "password": "parity-bvfs-pw"}
