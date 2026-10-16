@@ -6,7 +6,10 @@
 //! GetNumDrives() and dird/sd_cmds.cc open_sd_bsock(),
 //! NativeGetNumDrives() and NativeAutochangerVolumeOperation(), as used by
 //! `mount`, `unmount`/`umount`, `release` (ua_cmds.cc DoMountCmd) and the
-//! storage branch of `status` (ua_status.cc StatusCmd).
+//! storage branch of `status` (ua_status.cc StatusCmd), and the shared
+//! autochanger helpers: GetNumSlots(), native_get_vol_list(),
+//! get_vol_list_from_storage() with its cache, InvalidateVolList(),
+//! vol_is_loaded_in_drive() and GetUserSlotList() (compatibility log C-045).
 //!
 //! Messages and the dialogs (several storages, several drives, autochanger
 //! slot) go through the command's [`Ua`] (compatibility log C-011).
@@ -304,9 +307,9 @@ pub fn get_num_slots(ua: &mut Ua, sd: &mut impl SdLink, store: &StorageResource)
     slots
 }
 
-/// One `autochanger listall` entry (C++ vol_list_t): type `D`/`S`/`I`
-/// (other letters: `?`), drive or slot number, content `E`/`F` (other:
-/// `?`), the slot loaded in a drive and the volume name.
+/// One autochanger list entry (C++ vol_list_t): type `D`/`S`/`I` (other
+/// letters: `?`), drive or slot number, content `E`/`F` (other: `?`), the
+/// slot loaded in a drive and the volume name.
 #[derive(Debug, Clone, PartialEq)]
 pub struct VolListEntry {
     pub slot_type: char,
@@ -314,6 +317,13 @@ pub struct VolListEntry {
     pub content: char,
     pub loaded: Option<u16>,
     pub vol_name: Option<String>,
+}
+
+impl VolListEntry {
+    /// vol_list_t::currently_loaded_slot_number (kInvalidSlotNumber when unset).
+    pub fn loaded_slot(&self) -> u16 {
+        self.loaded.unwrap_or(u16::MAX)
+    }
 }
 
 /// C++ IsAnInteger(): one or more digits and nothing else.
@@ -326,18 +336,25 @@ fn atoi_u16(text: &str) -> u16 {
     str_to_int64(text) as i32 as u16
 }
 
-/// native_get_vol_list(ua, store, listall = true, scan) (sd_cmds.cc:263):
-/// `autochanger listall <dev>`; SD messages (`3nnn `) are passed on, parse
-/// errors are reported. None when the connection failed or nothing was
+/// C++ IsSlotNumberValid() (baconfig.h:243).
+pub fn is_slot_number_valid(slot: u16) -> bool {
+    slot != 0 && slot != u16::MAX
+}
+
+/// native_get_vol_list() (sd_cmds.cc:258): `autochanger listall <dev> ` or
+/// `autochanger list <dev> `; SD messages (`3nnn `) are passed on, parse
+/// errors are reported. `scan` (list only) keeps empty slots and checks
+/// only the slot number. None when the connection failed or nothing was
 /// parsed. Entries are in StorageCompareVolListEntry order (element
 /// address: drives first, then slots); equal addresses are dropped like
 /// dlist::binary_insert.
-pub fn native_get_vol_list_all(ua: &mut Ua, sd: &mut impl SdLink, store: &StorageResource)
+pub fn native_get_vol_list(ua: &mut Ua, sd: &mut impl SdLink, store: &StorageResource, listall: bool, scan: bool)
     -> Option<Vec<VolListEntry>> {
     const INDEX_SLOT_OFFSET: u16 = 100;
-    const INDEX_MAX_DRIVES: u32 = 100;
-    let messages = open_and_exchange(ua, sd, store, &format!("autochanger listall {}\n", dev_name(store)))?;
-    let mut list: Vec<(u32, VolListEntry)> = Vec::new();
+    const INDEX_MAX_DRIVES: u16 = 100;
+    let command = if listall { "listall" } else { "list" };
+    let messages = open_and_exchange(ua, sd, store, &format!("autochanger {command} {} \n", dev_name(store)))?;
+    let mut list: Vec<(u16, VolListEntry)> = Vec::new();
     for message in messages {
         // StripTrailingJunk()
         let msg = message.trim_end_matches([' ', '\n', '\r', '\t']);
@@ -346,56 +363,215 @@ pub fn native_get_vol_list_all(ua: &mut Ua, sd: &mut impl SdLink, store: &Storag
             ua.send_msg(format!("{msg}\n"));
             continue;
         }
-        let fields: Vec<&str> = msg.splitn(5, ':').collect();
-        if fields.len() < 3 {
-            ua.error_msg(format!("Illegal output from autochanger listall: {msg}\n"));
+        // list gives at most 2 fields (the volume name keeps any further
+        // ':'), listall at most 5.
+        let fields: Vec<&str> = msg.splitn(if listall { 5 } else { 2 }, ':').collect();
+        if fields.len() < 2 || (listall && fields.len() < 3) {
+            // parse_error: the ':' replaced so far are restored.
+            ua.error_msg(format!("Illegal output from autochanger {command}: {msg}\n"));
             continue;
         }
-        let slot_type = match fields[0].chars().next() {
-            Some(c @ ('D' | 'S' | 'I')) => c,
-            _ => '?',
-        };
-        let slot = atoi_u16(fields[1]);
-        let address = if slot_type == 'D' {
-            if !is_an_integer(fields[1]) || slot == u16::MAX {
-                ua.error_msg(format!("Invalid Drive number: {}\n", fields[1]));
+        let (field1, field2) = (fields[0], fields[1]);
+        let mut entry = VolListEntry { slot_type: 'S', slot: u16::MAX, content: '?', loaded: None, vol_name: None };
+        let address;
+        if scan && !listall {
+            // Scanning -- require only valid slot
+            entry.slot = atoi_u16(field1);
+            if entry.slot == 0 {
+                // sd->msg ends after field1 here.
+                ua.error_msg(format!("Invalid Slot number: {field1}\n"));
                 continue;
             }
-            if u32::from(slot) >= INDEX_MAX_DRIVES {
-                ua.error_msg(format!(
-                    "Drive number {slot} greater then INDEX_MAX_DRIVES({INDEX_MAX_DRIVES}) please increase define\n"));
-                continue;
-            }
-            u32::from(slot)
-        } else {
-            if !is_an_integer(fields[1]) || slot == 0 {
-                ua.error_msg(format!("Invalid Slot number: {}\n", fields[1]));
-                continue;
-            }
-            // slot_number_t arithmetic wraps like upstream.
-            u32::from(INDEX_SLOT_OFFSET.wrapping_add(slot))
-        };
-        let mut entry = VolListEntry { slot_type, slot, content: '?', loaded: None, vol_name: None };
-        match fields[2].chars().next() {
-            Some('E') => entry.content = 'E',
-            Some('F') => {
+            if field2.is_empty() {
+                entry.content = 'E';
+            } else {
                 entry.content = 'F';
-                match slot_type {
-                    'S' | 'I' => entry.vol_name = fields.get(3).map(|v| v.to_string()),
-                    'D' => {
-                        entry.loaded = fields.get(3).map(|v| atoi_u16(v));
-                        entry.vol_name = fields.get(4).map(|v| v.to_string());
-                    }
-                    _ => {}
-                }
+                entry.vol_name = Some(field2.to_string());
             }
-            _ => {}
+            address = INDEX_SLOT_OFFSET.wrapping_add(entry.slot);
+        } else if !listall {
+            if field2.is_empty() {
+                continue;
+            }
+            entry.slot = atoi_u16(field1);
+            if !is_an_integer(field1) || entry.slot == 0 {
+                ua.error_msg(format!("Invalid Slot number: {field1}\n"));
+                continue;
+            }
+            if !crate::ua_select::is_volume_name_legal(ua, field2) {
+                ua.error_msg(format!("Invalid Volume name: {field2}\n"));
+                continue;
+            }
+            entry.content = 'F';
+            entry.vol_name = Some(field2.to_string());
+            address = INDEX_SLOT_OFFSET.wrapping_add(entry.slot);
+        } else {
+            entry.slot_type = match field1.chars().next() {
+                Some(c @ ('D' | 'S' | 'I')) => c,
+                _ => '?',
+            };
+            entry.slot = atoi_u16(field2);
+            if entry.slot_type == 'D' {
+                if !is_an_integer(field2) || entry.slot == u16::MAX {
+                    ua.error_msg(format!("Invalid Drive number: {field2}\n"));
+                    continue;
+                }
+                address = entry.slot;
+                if address >= INDEX_MAX_DRIVES {
+                    ua.error_msg(format!(
+                        "Drive number {} greater then INDEX_MAX_DRIVES({INDEX_MAX_DRIVES}) please increase define\n",
+                        entry.slot));
+                    continue;
+                }
+            } else {
+                if !is_an_integer(field2) || entry.slot == 0 {
+                    ua.error_msg(format!("Invalid Slot number: {field2}\n"));
+                    continue;
+                }
+                // slot_number_t arithmetic wraps like upstream.
+                address = INDEX_SLOT_OFFSET.wrapping_add(entry.slot);
+            }
+            match fields[2].chars().next() {
+                Some('E') => entry.content = 'E',
+                Some('F') => {
+                    entry.content = 'F';
+                    match entry.slot_type {
+                        'S' | 'I' => entry.vol_name = fields.get(3).map(|v| v.to_string()),
+                        'D' => {
+                            entry.loaded = fields.get(3).map(|v| atoi_u16(v));
+                            entry.vol_name = fields.get(4).map(|v| v.to_string());
+                        }
+                        _ => {}
+                    }
+                }
+                _ => {}
+            }
         }
         if let Err(pos) = list.binary_search_by(|(a, _)| a.cmp(&address)) {
             list.insert(pos, (address, entry));
         }
     }
     if list.is_empty() { None } else { Some(list.into_iter().map(|(_, e)| e).collect()) }
+}
+
+/// runtime_storage_status->vol_list per storage: (listall type, timestamp,
+/// contents).
+type VolListCache = HashMap<String, (bool, i64, Vec<VolListEntry>)>;
+static VOL_LIST: Mutex<Option<VolListCache>> = Mutex::new(None);
+
+/// CacheStatusInterval of a Storage resource (default 30 seconds).
+fn cache_status_interval(ua: &Ua, store: &StorageResource) -> i64 {
+    let Some(config) = ua.ctx.config.as_ref().and_then(|c| c.read().ok()) else { return 30 };
+    config.raw.iter()
+        .find(|r| r.norm_type() == "storage" && r.name() == Some(store.name.as_str()))
+        .filter(|r| r.directives.iter().any(|d| d.norm_key() == "cachestatusinterval"))
+        .map(|r| crate::commands::defaults::time_directive(&r.directives, "cachestatusinterval") as i64)
+        .unwrap_or(30)
+}
+
+/// get_vol_list_from_storage() (storage.cc:553): the content of the
+/// autochanger, served from the per-storage cache when `cached`, of the
+/// same list type and not older than CacheStatusInterval; any other call
+/// drops the cached list and asks the SD (a successful answer is cached).
+pub fn get_vol_list_from_storage(ua: &mut Ua, sd: &mut impl SdLink, store: &StorageResource, listall: bool,
+    scan: bool, cached: bool) -> Option<Vec<VolListEntry>> {
+    let now = unsafe { libc::time(std::ptr::null_mut()) } as i64;
+    let interval = cache_status_interval(ua, store);
+    if let Ok(mut cache) = VOL_LIST.lock() {
+        let cache = cache.get_or_insert_with(HashMap::new);
+        if let Some((kind, timestamp, contents)) = cache.get(&store.name) {
+            if cached && *kind == listall && now - *timestamp <= interval {
+                return Some(contents.clone());
+            }
+            cache.remove(&store.name);
+        }
+    }
+    let contents = native_get_vol_list(ua, sd, store, listall, scan)?;
+    if let Ok(mut cache) = VOL_LIST.lock() {
+        cache.get_or_insert_with(HashMap::new).insert(store.name.clone(), (listall, now, contents.clone()));
+    }
+    Some(contents)
+}
+
+/// InvalidateVolList() (storage.cc:811): mount, unmount and release change
+/// the content of the autochanger.
+pub fn invalidate_vol_list(store_name: &str) {
+    if let Ok(mut cache) = VOL_LIST.lock() {
+        if let Some(cache) = cache.as_mut() {
+            cache.remove(store_name);
+        }
+    }
+}
+
+/// vol_is_loaded_in_drive() (storage.cc:741): the drive holding the volume
+/// of `slot`.
+pub fn vol_is_loaded_in_drive(list: &[VolListEntry], slot: u16) -> Option<&VolListEntry> {
+    list.iter().find(|vl| vl.slot_type == 'D' && vl.loaded_slot() == slot)
+}
+
+/// C++ atoi() of a digit string: strtol() (saturating) truncated to int.
+fn atoi_digits(text: &str) -> i32 {
+    text.bytes().try_fold(0i64, |acc, d| acc.checked_mul(10)?.checked_add(i64::from(d - b'0')))
+        .unwrap_or(i64::MAX) as i32
+}
+
+/// GetUserSlotList() (ua_select.cc:1822): the slots selected by
+/// `<argument>=` (or the argument without its trailing `s`), e.g.
+/// `slots=1-3,7`; all slots without it. Index `n` is slot `n + 1`. None on
+/// a malformed list (upstream logs the reason only at debug level).
+pub fn get_user_slot_list(args: &[Argument], argument: &str, num_slots: i32) -> Option<Vec<bool>> {
+    // FindArgWithValue(): the first argument with that keyword, if it has a value.
+    let find = |key: &str| args.iter().find(|a| a.key.eq_ignore_ascii_case(key)).and_then(|a| a.value.as_deref());
+    let mut search: String = argument.chars().take(19).collect();
+    let mut value = find(&search);
+    if value.is_none() && search.ends_with('s') {
+        search.pop();
+        value = find(&search);
+    }
+    let mut slots = vec![false; num_slots.max(0) as usize];
+    let Some(value) = value else {
+        slots.iter_mut().for_each(|s| *s = true);
+        return Some(slots);
+    };
+    let skip_spaces = |p: &str| p.trim_start_matches(|c: char| c.is_ascii_whitespace()).to_string();
+    // StripTrailingJunk(); the loop ends at an empty remainder ("1,,2" is "1").
+    let mut rest = Some(value.trim_end_matches([' ', '\n', '\r', '\t']));
+    while let Some(p) = rest.filter(|p| !p.is_empty()) {
+        let (part, next) = match p.split_once(',') {
+            Some((part, next)) => (part, Some(next)),
+            None => (p, None),
+        };
+        rest = next;
+        let (beg, end) = match part.find('-') {
+            // Negative numbers not permitted
+            Some(0) => return None,
+            Some(h) => {
+                let (start, end) = (skip_spaces(&part[..h]), &part[h + 1..]);
+                if !is_an_integer(end) || !is_an_integer(&start) {
+                    return None;
+                }
+                let (beg, end) = (atoi_digits(&start), atoi_digits(end));
+                if end < beg {
+                    return None;
+                }
+                (beg, end)
+            }
+            None => {
+                let start = skip_spaces(part);
+                if !is_an_integer(&start) {
+                    return None;
+                }
+                (atoi_digits(&start), atoi_digits(&start))
+            }
+        };
+        if beg <= 0 || end <= 0 || end > num_slots {
+            return None;
+        }
+        for i in beg..=end {
+            slots[(i - 1) as usize] = true;
+        }
+    }
+    Some(slots)
 }
 
 /// GetStorageDrive() (ua_select.cc:1429); None is kInvalidDriveNumber.
@@ -436,8 +612,8 @@ fn get_storage_slot(ua: &mut Ua, args: &[Argument], env: &Env, store: &StorageRe
 /// relayed unchanged.
 fn volume_operation(ua: &mut Ua, sd: &mut impl SdLink, store: &StorageResource, operation: &str, drive: i16,
     slot: i16) {
-    // IsSlotNumberValid(): slots are counted from 1.
-    let command = if slot > 0 {
+    // IsSlotNumberValid() on the slot_number_t.
+    let command = if is_slot_number_valid(slot as u16) {
         format!("{operation} {} drive={drive} slot={slot}\n", dev_name(store))
     } else {
         format!("{operation} {} drive={drive}\n", dev_name(store))
@@ -479,6 +655,8 @@ pub fn do_mount_cmd(ua: &mut Ua, args: &[Argument], env: &Env, sd: &mut impl SdL
             volume_operation(ua, sd, &store, cmd, i, slot);
         }
     }
+
+    invalidate_vol_list(&store.name);
 }
 
 #[cfg(test)]
@@ -719,7 +897,7 @@ mod tests {
         let ctx = context(CONFIG, ApiMode::Human);
         let mut sd = fake(|_| Ok(vec!["3998 not an autochanger.\n".into()]));
         let mut ua = Ua::new(&ctx);
-        assert_eq!(native_get_vol_list_all(&mut ua, &mut sd, &storage("Tape", "TapeDev")), None);
+        assert_eq!(native_get_vol_list(&mut ua, &mut sd, &storage("Tape", "TapeDev"), true, false), None);
         assert_eq!(output(ua.finish(true)), "Connecting to Storage daemon Tape at sd.example:9103 ...\n3998 not an autochanger.\n");
 
         let mut sd = fake(|_| Ok(vec![
@@ -727,8 +905,8 @@ mod tests {
             "garbage\n".into(), "S:x:E\n".into(), "S:1:F:dup\n".into(),
         ]));
         let mut ua = Ua::new(&ctx);
-        let list = native_get_vol_list_all(&mut ua, &mut sd, &storage("Tape", "TapeDev")).unwrap();
-        assert_eq!(sd.sent, ["Tape: autochanger listall TapeDev\n"]);
+        let list = native_get_vol_list(&mut ua, &mut sd, &storage("Tape", "TapeDev"), true, false).unwrap();
+        assert_eq!(sd.sent, ["Tape: autochanger listall TapeDev \n"]);
         let result = ua.finish(true);
         assert_eq!(result.text_output, "Connecting to Storage daemon Tape at sd.example:9103 ...\n");
         assert_eq!(result.error_message, "Illegal output from autochanger listall: garbage\nInvalid Slot number: x\n");
@@ -740,5 +918,109 @@ mod tests {
             ('S', 2, 'E', None, None),
             ('I', 10, 'F', None, Some("vol10")),
         ]);
+    }
+
+    fn entries(list: &[VolListEntry]) -> Vec<(char, u16, char, Option<u16>, Option<&str>)> {
+        list.iter().map(|e| (e.slot_type, e.slot, e.content, e.loaded, e.vol_name.as_deref())).collect()
+    }
+
+    #[test]
+    fn vol_list_listall_errors() {
+        let ctx = context(CONFIG, ApiMode::Human);
+        let mut sd = fake(|_| Ok(vec![
+            "S:1\n".into(), "D:x:E\n".into(), "D:100:E\n".into(), "D:-1:E\n".into(), "X:5:F:v\n".into(),
+            "S:6:Q\n".into(), "S:7:F:a:b:c\n".into(), "D:1:F\n".into(),
+        ]));
+        let mut ua = Ua::new(&ctx);
+        let list = native_get_vol_list(&mut ua, &mut sd, &storage("Tape", "TapeDev"), true, false).unwrap();
+        assert_eq!(ua.finish(true).error_message, "Illegal output from autochanger listall: S:1\n\
+            Invalid Drive number: x\n\
+            Drive number 100 greater then INDEX_MAX_DRIVES(100) please increase define\n\
+            Invalid Drive number: -1\n");
+        assert_eq!(entries(&list), [
+            ('D', 1, 'F', None, None),
+            ('?', 5, 'F', None, None),
+            ('S', 6, '?', None, None),
+            ('S', 7, 'F', None, Some("a")),
+        ]);
+    }
+
+    #[test]
+    fn vol_list_list_and_scan() {
+        let ctx = context(CONFIG, ApiMode::Human);
+        let answer = |_: &str| Ok(vec!["3306 Issuing autochanger \"list\" command.\n".into(), "2:vol2\n".into(),
+            "1:\n".into(), "x:volx\n".into(), "0:vol0\n".into(), "3:bad vol\n".into(), "4:v:4\n".into(),
+            "nocolon\n".into()]);
+        let mut sd = fake(answer);
+        let mut ua = Ua::new(&ctx);
+        let list = native_get_vol_list(&mut ua, &mut sd, &storage("Tape", "TapeDev"), false, false).unwrap();
+        assert_eq!(sd.sent, ["Tape: autochanger list TapeDev \n"]);
+        let result = ua.finish(true);
+        assert_eq!(result.text_output, "Connecting to Storage daemon Tape at sd.example:9103 ...\n\
+            3306 Issuing autochanger \"list\" command.\n");
+        assert_eq!(result.error_message, "Invalid Slot number: x\nInvalid Slot number: 0\n\
+            Illegal character \" \" in a volume name.\nInvalid Volume name: bad vol\n\
+            Illegal output from autochanger list: nocolon\n");
+        assert_eq!(entries(&list), [('S', 2, 'F', None, Some("vol2")), ('S', 4, 'F', None, Some("v:4"))]);
+
+        // Scan: empty slots are kept, only the slot number is checked.
+        let mut sd = fake(answer);
+        let mut ua = Ua::new(&ctx);
+        let list = native_get_vol_list(&mut ua, &mut sd, &storage("Tape", "TapeDev"), false, true).unwrap();
+        assert_eq!(ua.finish(true).error_message, "Invalid Slot number: x\nInvalid Slot number: 0\n\
+            Illegal output from autochanger list: nocolon\n");
+        assert_eq!(entries(&list), [
+            ('S', 1, 'E', None, None),
+            ('S', 2, 'F', None, Some("vol2")),
+            ('S', 3, 'F', None, Some("bad vol")),
+            ('S', 4, 'F', None, Some("v:4")),
+        ]);
+    }
+
+    #[test]
+    fn vol_list_cache() {
+        let ctx = context(CONFIG, ApiMode::Human);
+        let store = storage("CacheTape", "TapeDev");
+        let mut sd = fake(|cmd| Ok(vec![if cmd.contains("listall") { "S:1:F:all\n" } else { "1:part\n" }.into()]));
+        let mut ua = Ua::new(&ctx);
+        let all = get_vol_list_from_storage(&mut ua, &mut sd, &store, true, true, true).unwrap();
+        assert_eq!(get_vol_list_from_storage(&mut ua, &mut sd, &store, true, true, true).unwrap(), all);
+        assert_eq!(sd.sent.len(), 1, "served from the cache");
+        // Another list type or cached=false asks the SD again.
+        let part = get_vol_list_from_storage(&mut ua, &mut sd, &store, false, false, true).unwrap();
+        assert_eq!(part[0].vol_name.as_deref(), Some("part"));
+        get_vol_list_from_storage(&mut ua, &mut sd, &store, false, false, false);
+        get_vol_list_from_storage(&mut ua, &mut sd, &store, true, true, true);
+        assert_eq!(sd.sent.len(), 4);
+        // A failed retrieval leaves nothing cached.
+        invalidate_vol_list("CacheTape");
+        let mut failing = fake(|_| Err("refused".into()));
+        assert!(get_vol_list_from_storage(&mut ua, &mut failing, &store, true, true, true).is_none());
+        get_vol_list_from_storage(&mut ua, &mut sd, &store, true, true, true);
+        assert_eq!(sd.sent.len(), 5);
+    }
+
+    #[test]
+    fn slot_helpers() {
+        let all = |n: i32| get_user_slot_list(&[], "slots", n);
+        assert_eq!(all(3), Some(vec![true, true, true]));
+        let sel = |line: &str, n: i32| get_user_slot_list(&parse(line), "slots", n)
+            .map(|v| v.iter().enumerate().filter(|(_, on)| **on).map(|(i, _)| i + 1).collect::<Vec<_>>());
+        assert_eq!(sel("slots=2,4-5", 6), Some(vec![2, 4, 5]));
+        assert_eq!(sel("slot=3", 6), Some(vec![3]));
+        assert_eq!(sel("slots=6", 6), Some(vec![6]));
+        assert_eq!(sel("slots=", 6), Some(vec![]));
+        assert_eq!(sel("slots slot=2", 6), Some(vec![2]));
+        assert_eq!(sel("slots=99999999999", 6), None);
+        for bad in ["slots=7", "slots=0", "slots=-1", "slots=1-", "slots=3-2", "slots=,1"] {
+            assert_eq!(sel(bad, 6), None, "{bad}");
+        }
+        assert!(is_slot_number_valid(1) && !is_slot_number_valid(0) && !is_slot_number_valid(u16::MAX));
+        let list = [
+            VolListEntry { slot_type: 'D', slot: 0, content: 'E', loaded: None, vol_name: None },
+            VolListEntry { slot_type: 'D', slot: 1, content: 'F', loaded: Some(4), vol_name: Some("v4".into()) },
+        ];
+        assert_eq!(vol_is_loaded_in_drive(&list, 4).map(|d| d.slot), Some(1));
+        assert!(vol_is_loaded_in_drive(&list, 3).is_none());
     }
 }

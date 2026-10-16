@@ -1346,39 +1346,279 @@ fn dot_status_storage(ast: &CommandAst, ctx: &ExecContext, cmd: Option<&str>) ->
 fn status_storage_selected(ast: &CommandAst, ctx: &ExecContext) -> CommandResult {
     let slots = ast.arguments.iter().any(|a| a.key.eq_ignore_ascii_case("slots"));
     let mut ua = crate::ua_select::Ua::new(ctx);
+    let mut json = None;
     // StatusCmd returns true whatever the selection printed.
     if let Some(store) = crate::ua_select::get_storage_resource(&mut ua, ast, false, slots) {
         if slots {
-            status_slots(&mut ua, ast, &store);
+            let director = ctx.config.as_ref().and_then(|c| c.read().ok())
+                .map(|c| c.director.name.clone()).unwrap_or_default();
+            let mut sd = crate::ua_storage_select::NetSd { director };
+            json = status_slots(&mut ua, ast, &store, &mut sd);
         } else {
             ua.send_msg(storage_status(&store, None, ctx));
         }
     }
-    ua.finish(true)
+    let result = ua.finish(true);
+    match json {
+        Some(json) => result.with_json(json),
+        None => result,
+    }
+}
+
+/// The fields of a catalog Media record used by the slot views (C++
+/// MediaDbRecord after GetMediaRecord(), PoolDbRecord::Name after
+/// GetPoolRecord(), "?" when the pool is unknown).
+#[derive(Default)]
+struct SlotMedia {
+    volume_name: String,
+    vol_bytes: u64,
+    vol_status: String,
+    media_type: String,
+    slot: i32,
+    last_written: i64,
+    vol_retention: u64,
+    pool: String,
+}
+
+/// GetMediaRecord() by VolumeName (sql_get.cc:1065) + GetPoolRecord() by
+/// PoolId. An empty name succeeds with an empty record (upstream then only
+/// counts the media); None: no single matching Media row.
+fn slot_media(ctx: &ExecContext, vol_name: &str) -> Option<SlotMedia> {
+    let unknown_pool = || "?".to_string();
+    if vol_name.is_empty() {
+        return Some(SlotMedia { pool: unknown_pool(), ..Default::default() });
+    }
+    let catalog = ctx.catalog.as_ref()?;
+    let table = catalog.query_rows(&format!(
+        "SELECT VolumeName,VolBytes,MediaType,VolStatus,PoolId,VolRetention,Slot,LastWritten \
+         FROM Media WHERE VolumeName='{}'", vol_name.replace('\'', "''"))).ok()?;
+    let [row] = table.rows.as_slice() else { return None };
+    let text = |i: usize| row.get(i).cloned().flatten().unwrap_or_default();
+    // str_to_int64()/str_to_uint64()
+    let number = |i: usize| atoi(&text(i));
+    let pool_id = number(4);
+    let pool = (pool_id != 0).then(|| catalog.query_rows(&format!("SELECT Name FROM Pool WHERE Pool.PoolId={pool_id}")).ok())
+        .flatten()
+        .and_then(|t| match t.rows.as_slice() { [row] => Some(row.first().cloned().flatten().unwrap_or_default()), _ => None })
+        .unwrap_or_else(unknown_pool);
+    Some(SlotMedia {
+        volume_name: text(0),
+        vol_bytes: number(1) as u64,
+        media_type: text(2),
+        vol_status: text(3),
+        vol_retention: number(5) as u64,
+        slot: number(6) as i32,
+        last_written: db_time(row.get(7).cloned().flatten().as_deref()),
+        pool,
+    })
 }
 
 /// `status storage=… slots`: C++ StatusSlots() (ua_status.cc:1917) without
 /// API mode, StatusContentApi() (:1703) with `.api 1`, StatusContentJson()
-/// (:1804) with `.api 2`. Implemented up to the autochanger volume list:
-/// without slots or volumes upstream ends with a warning; the slot table
-/// of a non-empty list is not implemented yet (no autochanger in the
-/// parity setup, see compatibility log C-042).
-fn status_slots(ua: &mut crate::ua_select::Ua, ast: &CommandAst, store: &bareos_config::resources::StorageResource) {
+/// (:1804) with `.api 2` (returns the "contents" result). The autochanger
+/// is asked through `sd`; volumes are looked up in the catalog.
+fn status_slots(ua: &mut crate::ua_select::Ua, ast: &CommandAst, store: &bareos_config::resources::StorageResource,
+    sd: &mut impl crate::ua_storage_select::SdLink) -> Option<Value> {
+    use crate::ua_storage_select as uss;
     let ctx = ua.ctx;
     if !ua.open_client_db(ast, false) {
-        return;
+        return None;
     }
-    let director = ctx.config.as_ref().and_then(|c| c.read().ok())
-        .map(|c| c.director.name.clone()).unwrap_or_default();
-    let mut sd = crate::ua_storage_select::NetSd { director };
-    if ctx.api_mode == ApiMode::Human
-        && crate::ua_storage_select::get_num_slots(ua, &mut sd, store) <= 0 {
-        ua.warning_msg("No slots in changer to scan.\n");
-        return;
+    let mut max_slots = 0;
+    let mut slot_list = Vec::new();
+    if ctx.api_mode == ApiMode::Human {
+        max_slots = uss::get_num_slots(ua, sd, store) as u16;
+        if max_slots == 0 {
+            ua.warning_msg("No slots in changer to scan.\n");
+            return None;
+        }
+        slot_list = uss::get_user_slot_list(&ast.arguments, "slots", i32::from(max_slots))?;
     }
-    if crate::ua_storage_select::native_get_vol_list_all(ua, &mut sd, store).is_none() {
+    let Some(vol_list) = uss::get_vol_list_from_storage(ua, sd, store, true, true, true) else {
         ua.warning_msg("No Volumes found, or no barcodes.\n");
+        return None;
+    };
+    match ctx.api_mode {
+        ApiMode::Human => {
+            slot_table(ua, &vol_list, max_slots, &slot_list);
+            None
+        }
+        ApiMode::Api => {
+            content_api(ua, &vol_list);
+            None
+        }
+        ApiMode::Json => Some(json!({ "contents": content_json(ctx, &vol_list) })),
     }
+}
+
+/// The slot table of StatusSlots() (ua_status.cc:1947).
+fn slot_table(ua: &mut crate::ua_select::Ua, vol_list: &[crate::ua_storage_select::VolListEntry], max_slots: u16,
+    slot_list: &[bool]) {
+    // Slot | Volume | Status | MediaType | Pool
+    // printf "%Ns": padded by bytes, never truncated.
+    let pad = |s: &str, width: usize| format!("{}{s}", " ".repeat(width.saturating_sub(s.len())));
+    let line = |slot: u16, flag: char, vol: &str, status: &str, media_type: &str, pool: &str| {
+        format!(" {slot:>4}{flag}| {} | {} | {} | {} |\n", pad(vol, 16), pad(status, 9), pad(media_type, 14), pad(pool, 24))
+    };
+    ua.send_msg(" Slot |   Volume Name    |   Status  |  Media Type    |         Pool            |\n");
+    ua.send_msg("------+------------------+-----------+----------------+--------------------------|\n");
+    for vl1 in vol_list {
+        if !matches!(vl1.slot_type, 'S' | 'I') {
+            // We are not interested in drive slots.
+            continue;
+        }
+        let import = vl1.slot_type == 'I';
+        let other = if import { '@' } else { '*' };
+        if vl1.slot > max_slots {
+            ua.warning_msg(format!("Slot {} greater than max {} ignored.\n", vl1.slot as i16, max_slots as i16));
+            continue;
+        }
+        // Check if user wants us to look at this slot
+        if !slot_list.get(usize::from(vl1.slot).wrapping_sub(1)).copied().unwrap_or(false) {
+            continue;
+        }
+        let mut vl2 = None;
+        let name = match vl1.content {
+            'E' => {
+                if import {
+                    ua.send_msg(line(vl1.slot, '@', "?", "?", "?", "?"));
+                    continue;
+                }
+                // See if this empty slot is empty because the volume is
+                // loaded in one of the drives.
+                vl2 = crate::ua_storage_select::vol_is_loaded_in_drive(vol_list, vl1.slot);
+                match vl2.and_then(|d| d.vol_name.as_deref()) {
+                    Some(name) => name,
+                    None => {
+                        ua.send_msg(line(vl1.slot, '*', "?", "?", "?", "?"));
+                        continue;
+                    }
+                }
+            }
+            'F' => match vl1.vol_name.as_deref() {
+                Some(name) => name,
+                None => {
+                    ua.send_msg(line(vl1.slot, other, "?", "?", "?", "?"));
+                    continue;
+                }
+            },
+            _ => continue,
+        };
+        // bstrncpy(mr.VolumeName, …, MAX_NAME_LENGTH)
+        let name: String = name.chars().take(127).collect();
+        match (!name.is_empty()).then(|| slot_media(ua.ctx, &name)).flatten() {
+            Some(mr) => {
+                let flag = if import {
+                    '@'
+                } else if i32::from(vl1.slot) == mr.slot {
+                    if vl2.is_some() { '%' } else { ' ' }
+                } else {
+                    '*'
+                };
+                ua.send_msg(line(vl1.slot, flag, &mr.volume_name, &mr.vol_status, &mr.media_type, &mr.pool));
+            }
+            None => ua.send_msg(line(vl1.slot, other, &name, "?", "?", "?")),
+        }
+    }
+}
+
+/// The volume of a slot: its own or the one loaded in a drive from it
+/// (vol_is_loaded_in_drive()); None: an empty slot.
+fn slot_volume<'a>(vol_list: &'a [crate::ua_storage_select::VolListEntry],
+    vl1: &'a crate::ua_storage_select::VolListEntry) -> Option<Option<&'a str>> {
+    match vl1.content {
+        'F' => Some(vl1.vol_name.as_deref()),
+        'E' => crate::ua_storage_select::vol_is_loaded_in_drive(vol_list, vl1.slot).map(|d| d.vol_name.as_deref()),
+        _ => None,
+    }
+}
+
+/// StatusContentApi() (ua_status.cc:1703): `D|` drive and `S|`/`I|` slot
+/// lines; full slots via ContentSendInfoApi() (:1615).
+fn content_api(ua: &mut crate::ua_select::Ua, vol_list: &[crate::ua_storage_select::VolListEntry]) {
+    for vl1 in vol_list {
+        match (vl1.slot_type, vl1.content) {
+            ('D', 'F') => ua.send_msg(format!("D|{}|{}|{}\n", vl1.slot as i16, vl1.loaded_slot() as i16,
+                vl1.vol_name.as_deref().unwrap_or("(null)"))),
+            ('D', 'E') => ua.send_msg(format!("D|{}||\n", vl1.slot as i16)),
+            (t @ ('S' | 'I'), 'F' | 'E') => match slot_volume(vol_list, vl1) {
+                // A NULL volume name is undefined behaviour upstream; it is
+                // treated as an empty name.
+                Some(name) => {
+                    let line = match slot_media(ua.ctx, &name.unwrap_or("").chars().take(127).collect::<String>()) {
+                        Some(mr) => format!("{t}|{}|{}|{}|{}|{}|{}|{}|{}|{}\n", vl1.slot as i16, mr.slot as i16,
+                            mr.volume_name, mr.vol_bytes, mr.vol_status, mr.media_type, mr.pool, mr.last_written as u64,
+                            (mr.last_written as u64).wrapping_add(mr.vol_retention)),
+                        None => format!("{t}|{}|0|{}|?|?|?|?|0|0\n", vl1.slot as i16, name.unwrap_or("")),
+                    };
+                    ua.send_msg(line);
+                }
+                None => ua.send_msg(format!("{t}|{}||||||||\n", vl1.slot as i16)),
+            },
+            _ => {}
+        }
+    }
+}
+
+/// StatusContentJson() (ua_status.cc:1804): the "contents" array; full
+/// slots via ContentSendInfoJson() (:1641).
+fn content_json(ctx: &ExecContext, vol_list: &[crate::ua_storage_select::VolListEntry]) -> Value {
+    let mut contents = Vec::new();
+    for vl1 in vol_list {
+        let mut object = Map::new();
+        match vl1.slot_type {
+            'D' => {
+                object.insert("type".into(), json!("drive"));
+                object.insert("slotnr".into(), json!(vl1.slot));
+                match vl1.content {
+                    'F' => {
+                        object.insert("content".into(), json!("full"));
+                        object.insert("loaded".into(), json!(vl1.loaded_slot()));
+                        object.insert("volname".into(), json!(vl1.vol_name.as_deref().unwrap_or("")));
+                    }
+                    'E' => {
+                        object.insert("content".into(), json!("empty"));
+                    }
+                    _ => {}
+                }
+            }
+            'S' | 'I' if matches!(vl1.content, 'F' | 'E') => {
+                let kind = if vl1.slot_type == 'S' { "slot" } else { "import_slot" };
+                object.insert("type".into(), json!(kind));
+                object.insert("slotnr".into(), json!(vl1.slot));
+                object.insert("content".into(), json!(if slot_volume(vol_list, vl1).is_some() { "full" } else { "empty" }));
+                if let Some(name) = slot_volume(vol_list, vl1) {
+                    let name: String = name.unwrap_or("").chars().take(127).collect();
+                    match slot_media(ctx, &name) {
+                        Some(mr) => {
+                            object.insert("mr_slotnr".into(), json!(mr.slot));
+                            object.insert("mr_volname".into(), json!(mr.volume_name));
+                            object.insert("mr_volbytes".into(), json!(mr.vol_bytes as i64));
+                            object.insert("mr_volstatus".into(), json!(mr.vol_status));
+                            object.insert("mr_mediatype".into(), json!(mr.media_type));
+                            object.insert("pr_name".into(), json!(mr.pool));
+                            object.insert("mr_lastwritten".into(), json!(mr.last_written));
+                            object.insert("mr_expire".into(),
+                                json!((mr.last_written as u64).wrapping_add(mr.vol_retention) as i64));
+                        }
+                        None => {
+                            object.insert("mr_slotnr".into(), json!(0));
+                            object.insert("mr_volname".into(), json!(name));
+                            object.insert("mr_volbytes".into(), json!("?"));
+                            object.insert("mr_volstatus".into(), json!("?"));
+                            object.insert("mr_mediatype".into(), json!("?"));
+                            object.insert("pr_name".into(), json!("?"));
+                            object.insert("mr_lastwritten".into(), json!(0));
+                            object.insert("mr_expire".into(), json!(0));
+                        }
+                    }
+                }
+            }
+            _ => continue,
+        }
+        contents.push(Value::Object(object));
+    }
+    Value::Array(contents)
 }
 
 #[cfg(test)]
@@ -1422,5 +1662,257 @@ mod tests {
         assert_eq!(name_valid("a*b"), Err("Illegal character \"*\" in name.\n".into()));
         assert_eq!(level_code_name("I"), "Incremental");
         assert_eq!(job_type_code_name("B"), "Backup");
+    }
+
+    // ---- status storage=… slots (compatibility log C-045) ----
+
+    use crate::catalog_worker::{CatalogHandle, CatalogRequest, CatalogResponse, SqlTable};
+    use crate::command_ast::Argument;
+    use crate::ua_storage_select::{SdLink, invalidate_vol_list};
+    use bareos_config::resources::StorageResource;
+
+    /// Fake autochanger SD: answers like stored/dir_cmd.cc ChangerCmd() +
+    /// autochanger.cc AutochangerCmd() with an mtx-changer listall output.
+    struct ChangerSd { sent: Vec<String>, slots: u16, listall: Vec<&'static str> }
+
+    impl SdLink for ChangerSd {
+        fn exchange(&mut self, store: &StorageResource, command: &str) -> Result<Vec<String>, String> {
+            self.sent.push(command.to_string());
+            let dev = store.device.as_str();
+            let issuing = |cmd: &str| format!("3306 Issuing autochanger \"{cmd}\" command.\n");
+            Ok(if command == format!("autochanger slots {dev}\n") {
+                vec![issuing("slots"), format!("slots={}", self.slots)]
+            } else if command == format!("autochanger listall {dev} \n") {
+                std::iter::once(issuing("listall")).chain(self.listall.iter().map(|l| l.to_string())).collect()
+            } else {
+                vec![format!("3908 Error scanning autochanger drives/list/slots command: {command}")]
+            })
+        }
+    }
+
+    const LISTALL: &[&str] = &["D:0:F:3:vol3\n", "D:1:E\n", "S:1:F:vol1\n", "S:2:E\n", "S:3:E\n",
+        "S:4:F:unknown4\n", "S:5:F:vol5\n", "I:6:F:vol6\n", "I:7:E\n"];
+
+    fn changer(listall: &[&'static str]) -> ChangerSd {
+        ChangerSd { sent: vec![], slots: 6, listall: listall.to_vec() }
+    }
+
+    fn rows(rows: Vec<Vec<Option<&str>>>) -> CatalogResponse {
+        CatalogResponse::Rows(SqlTable { columns: vec![],
+            rows: rows.into_iter().map(|r| r.into_iter().map(|v| v.map(str::to_string)).collect()).collect() })
+    }
+
+    /// Catalog double: Media vol1/vol3/vol5/vol6, Pools 1 Full and 2 Scratch.
+    fn slots_catalog() -> CatalogHandle {
+        CatalogHandle::mock(|request| {
+            let CatalogRequest::TextRows { sql } = request else { return CatalogResponse::Error("write".into()) };
+            let media = |cols: [Option<&str>; 8]| rows(vec![cols.to_vec()]);
+            const MEDIA: &str = "SELECT VolumeName,VolBytes,MediaType,VolStatus,PoolId,VolRetention,Slot,LastWritten \
+                FROM Media WHERE VolumeName='";
+            if let Some(name) = sql.strip_prefix(MEDIA) {
+                match name.trim_end_matches('\'') {
+                    "vol1" => media([Some("vol1"), Some("1000"), Some("File"), Some("Append"), Some("1"), Some("100"),
+                        Some("1"), Some("2026-10-15 20:00:00")]),
+                    "vol3" => media([Some("vol3"), Some("3000"), Some("File"), Some("Full"), Some("1"), Some("0"),
+                        Some("3"), None]),
+                    "vol5" => media([Some("vol5"), Some("5"), Some("LTO"), Some("Used"), Some("77"), Some("10"),
+                        Some("9"), Some("2026-10-15 20:00:01")]),
+                    "vol6" => media([Some("vol6"), Some("6"), Some("File"), Some("Append"), Some("2"), Some("0"),
+                        Some("0"), None]),
+                    _ => rows(vec![]),
+                }
+            } else {
+                match sql.as_str() {
+                    "SELECT Name FROM Pool WHERE Pool.PoolId=1" => rows(vec![vec![Some("Full")]]),
+                    "SELECT Name FROM Pool WHERE Pool.PoolId=2" => rows(vec![vec![Some("Scratch")]]),
+                    "SELECT Name FROM Pool WHERE Pool.PoolId=77" => rows(vec![]),
+                    other => panic!("unexpected query {other}"),
+                }
+            }
+        })
+    }
+
+    fn slots_ast(line: &str) -> CommandAst {
+        let arguments = line.split_whitespace().map(|w| match w.split_once('=') {
+            Some((k, v)) => Argument { key: k.into(), value: Some(v.into()) },
+            None => Argument { key: w.into(), value: None },
+        }).collect();
+        CommandAst { command_name: "status".into(), arguments, ..Default::default() }
+    }
+
+    /// Run status_slots for the storage `name`: the output in call order
+    /// and the JSON result.
+    fn run_slots(mode: ApiMode, name: &str, line: &str, sd: &mut ChangerSd) -> (String, Option<Value>) {
+        let mut ctx = crate::ua_select::tests::context("Director { Name=dir; Password=secret }", mode);
+        ctx.catalog = Some(slots_catalog());
+        let store = StorageResource { name: name.into(), address: "sd.example".into(), port: 9103,
+            device: "ChangerDev".into(), ..Default::default() };
+        let mut ua = crate::ua_select::Ua::new(&ctx);
+        let json = status_slots(&mut ua, &slots_ast(line), &store, sd);
+        let result = ua.finish(true);
+        let out = if result.errors_inline || !result.errors_first {
+            format!("{}{}", result.text_output, if result.errors_inline { "" } else { &result.error_message })
+        } else {
+            format!("{}{}", result.error_message, result.text_output)
+        };
+        (out, json)
+    }
+
+    fn connect(name: &str) -> String {
+        format!("Connecting to Storage daemon {name} at sd.example:9103 ...\n")
+    }
+
+    fn lw(text: &str) -> i64 {
+        db_time(Some(text))
+    }
+
+    #[test]
+    fn slot_table_like_status_slots() {
+        let mut sd = changer(LISTALL);
+        let (out, json) = run_slots(ApiMode::Human, "SlotsTable", "storage=SlotsTable slots", &mut sd);
+        assert!(json.is_none());
+        assert_eq!(sd.sent, ["autochanger slots ChangerDev\n", "autochanger listall ChangerDev \n"]);
+        // Lines as printf(" %4i%c| %16s | %9s | %14s | %24s |\n", …) prints them.
+        let expected = [
+            connect("SlotsTable").as_str(),
+            "3306 Issuing autochanger \"slots\" command.\n",
+            "Device \"ChangerDev\" has 6 slots.\n",
+            &connect("SlotsTable"),
+            "3306 Issuing autochanger \"listall\" command.\n",
+            " Slot |   Volume Name    |   Status  |  Media Type    |         Pool            |\n",
+            "------+------------------+-----------+----------------+--------------------------|\n",
+            "    1 |             vol1 |    Append |           File |                     Full |\n",
+            "    2*|                ? |         ? |              ? |                        ? |\n",
+            "    3%|             vol3 |      Full |           File |                     Full |\n",
+            "    4*|         unknown4 |         ? |              ? |                        ? |\n",
+            "    5*|             vol5 |      Used |            LTO |                        ? |\n",
+            "    6@|             vol6 |    Append |           File |                  Scratch |\n",
+            "Slot 7 greater than max 6 ignored.\n",
+        ].concat();
+        assert_eq!(out, expected);
+
+        // Slots and the volume list are cached: no SD contact at all.
+        // FindArgWithValue("slots") stops at the bare "slots": all slots.
+        assert_eq!(run_slots(ApiMode::Human, "SlotsTable", "SlotsTable slots slots=2", &mut sd).0,
+            expected[expected.find(" Slot |").unwrap()..]);
+        let (out, _) = run_slots(ApiMode::Human, "SlotsTable", "SlotsTable slots=2,4-5", &mut sd);
+        assert_eq!(sd.sent.len(), 2);
+        assert_eq!(out, [
+            " Slot |   Volume Name    |   Status  |  Media Type    |         Pool            |\n",
+            "------+------------------+-----------+----------------+--------------------------|\n",
+            "    2*|                ? |         ? |              ? |                        ? |\n",
+            "    4*|         unknown4 |         ? |              ? |                        ? |\n",
+            "    5*|             vol5 |      Used |            LTO |                        ? |\n",
+            "Slot 7 greater than max 6 ignored.\n",
+        ].concat());
+
+        // A malformed slot list ends the command silently.
+        assert_eq!(run_slots(ApiMode::Human, "SlotsTable", "slots slot=7", &mut sd).0, "");
+        for list in ["3-1", "0", "-2", "2-x", "x-2", "1,,2", "7", ",1", "a", "1,"] {
+            if list == "1," {
+                // A trailing ',' ends the list: only slot 1.
+                assert!(run_slots(ApiMode::Human, "SlotsTable", "slots=1,", &mut sd).0.ends_with(
+                    "|\n    1 |             vol1 |    Append |           File |                     Full |\n\
+                     Slot 7 greater than max 6 ignored.\n"));
+                continue;
+            }
+            assert_eq!(run_slots(ApiMode::Human, "SlotsTable", &format!("slots={list}"), &mut sd).0, "", "{list}");
+        }
+
+        // mount/unmount/release invalidate the list: asked again.
+        invalidate_vol_list("SlotsTable");
+        let (out, _) = run_slots(ApiMode::Human, "SlotsTable", "slots slots=1", &mut sd);
+        assert_eq!(sd.sent.len(), 3);
+        assert_eq!(&sd.sent[2], "autochanger listall ChangerDev \n");
+        assert!(out.starts_with(&format!("{}3306 Issuing autochanger \"listall\" command.\n Slot |",
+            connect("SlotsTable"))), "{out}");
+    }
+
+    #[test]
+    fn slot_table_without_slots_or_volumes() {
+        let mut sd = ChangerSd { sent: vec![], slots: 0, listall: vec![] };
+        assert_eq!(run_slots(ApiMode::Human, "SlotsNone", "slots", &mut sd).0, [
+            connect("SlotsNone").as_str(),
+            "3306 Issuing autochanger \"slots\" command.\n",
+            "Device \"ChangerDev\" has 0 slots.\n",
+            "No slots in changer to scan.\n",
+        ].concat());
+        let mut sd = ChangerSd { sent: vec![], slots: 4,
+            listall: vec!["3998 Autochanger error: ERR=Child exited with code 1\n"] };
+        assert_eq!(run_slots(ApiMode::Human, "SlotsEmpty", "slots", &mut sd).0, [
+            connect("SlotsEmpty").as_str(),
+            "3306 Issuing autochanger \"slots\" command.\n",
+            "Device \"ChangerDev\" has 4 slots.\n",
+            &connect("SlotsEmpty"),
+            "3306 Issuing autochanger \"listall\" command.\n",
+            "3998 Autochanger error: ERR=Child exited with code 1\n",
+            "No Volumes found, or no barcodes.\n",
+        ].concat());
+        // A full slot without volume name, an empty volume name, an import
+        // slot without name.
+        let mut sd = ChangerSd { sent: vec![], slots: 3, listall: vec!["S:1:F\n", "S:2:F:\n", "I:3:F\n"] };
+        let (out, _) = run_slots(ApiMode::Human, "SlotsOdd", "slots", &mut sd);
+        assert!(out.ends_with(&[
+            "    1*|                ? |         ? |              ? |                        ? |\n",
+            "    2*|                  |         ? |              ? |                        ? |\n",
+            "    3@|                ? |         ? |              ? |                        ? |\n",
+        ].concat()), "{out}");
+    }
+
+    #[test]
+    fn content_api_lines() {
+        let mut sd = changer(LISTALL);
+        let (out, json) = run_slots(ApiMode::Api, "SlotsApi", "slots", &mut sd);
+        assert!(json.is_none());
+        // StatusContentApi asks for no slot count.
+        assert_eq!(sd.sent, ["autochanger listall ChangerDev \n"]);
+        let (lw1, lw5) = (lw("2026-10-15 20:00:00"), lw("2026-10-15 20:00:01"));
+        assert_eq!(out, [
+            connect("SlotsApi"),
+            "3306 Issuing autochanger \"listall\" command.\n".into(),
+            "D|0|3|vol3\n".into(),
+            "D|1||\n".into(),
+            format!("S|1|1|vol1|1000|Append|File|Full|{lw1}|{}\n", lw1 + 100),
+            "S|2||||||||\n".into(),
+            "S|3|3|vol3|3000|Full|File|Full|0|0\n".into(),
+            "S|4|0|unknown4|?|?|?|?|0|0\n".into(),
+            format!("S|5|9|vol5|5|Used|LTO|?|{lw5}|{}\n", lw5 + 10),
+            "I|6|0|vol6|6|Append|File|Scratch|0|0\n".into(),
+            "I|7||||||||\n".into(),
+        ].concat());
+    }
+
+    #[test]
+    fn content_json_objects() {
+        let mut sd = changer(LISTALL);
+        let (_, json) = run_slots(ApiMode::Json, "SlotsJson", "slots", &mut sd);
+        let (lw1, lw5) = (lw("2026-10-15 20:00:00"), lw("2026-10-15 20:00:01"));
+        #[allow(clippy::too_many_arguments)]
+        fn full(kind: &str, slot: u16, mr_slot: i64, name: &str, bytes: i64, status: &str, mt: &str, pool: &str,
+            lastw: i64, expire: i64) -> Value {
+            json!({ "type": kind, "slotnr": slot, "content": "full", "mr_slotnr": mr_slot, "mr_volname": name,
+                "mr_volbytes": bytes, "mr_volstatus": status, "mr_mediatype": mt, "pr_name": pool,
+                "mr_lastwritten": lastw, "mr_expire": expire })
+        }
+        let expected = json!({ "contents": [
+            { "type": "drive", "slotnr": 0, "content": "full", "loaded": 3, "volname": "vol3" },
+            { "type": "drive", "slotnr": 1, "content": "empty" },
+            full("slot", 1, 1, "vol1", 1000, "Append", "File", "Full", lw1, lw1 + 100),
+            { "type": "slot", "slotnr": 2, "content": "empty" },
+            full("slot", 3, 3, "vol3", 3000, "Full", "File", "Full", 0, 0),
+            { "type": "slot", "slotnr": 4, "content": "full", "mr_slotnr": 0, "mr_volname": "unknown4",
+              "mr_volbytes": "?", "mr_volstatus": "?", "mr_mediatype": "?", "pr_name": "?",
+              "mr_lastwritten": 0, "mr_expire": 0 },
+            full("slot", 5, 9, "vol5", 5, "Used", "LTO", "?", lw5, lw5 + 10),
+            full("import_slot", 6, 0, "vol6", 6, "Append", "File", "Scratch", 0, 0),
+            { "type": "import_slot", "slotnr": 7, "content": "empty" },
+        ]});
+        // Compared as jansson would print them (key order included).
+        assert_eq!(crate::json_output::dumps(&json.unwrap(), false), crate::json_output::dumps(&expected, false));
+        // Without volumes: the warning only, no "contents".
+        let mut sd = ChangerSd { sent: vec![], slots: 4, listall: vec![] };
+        let (out, json) = run_slots(ApiMode::Json, "SlotsJsonNone", "slots", &mut sd);
+        assert!(json.is_none());
+        assert!(out.ends_with("No Volumes found, or no barcodes.\n"), "{out}");
     }
 }
