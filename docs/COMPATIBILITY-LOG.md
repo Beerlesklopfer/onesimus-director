@@ -76,7 +76,7 @@ Hinweis C-002: Text-Sitzungen über gRPC/Command-Queue nutzen denselben SessionM
 
 `development` = `1b074e1` (gepusht nach `origin/development`). Alle Agent-Branches beider
 Runden sind gemergt. Tests grün: onesimus-dird 365 + 4, oconsole 26, bareos-config 37,
-bareos-bnet 46. Letzter voller Paritätslauf eines Agenten auf dem Endstand: 1436 von 1443
+bareos-bnet 46. Voller Paritätslauf auf dem Endstand (16.10.2026, Baseline aktualisiert): 1436 von 1443
 Fällen byte-identisch, keine Regression.
 
 Verbleibende Unterschiede im Paritätslauf: `banner`, `banner-limited`, `status-dir`,
