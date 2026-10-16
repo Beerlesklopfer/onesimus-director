@@ -59,9 +59,9 @@ DAEMON_LOGS = ('bareos-audit.log', 'bareos.log')
 AUDIT_TIMESTAMP = r'^\d\d-\w{3} \d\d:\d\d'
 # Audit-log comparison only: after a reload that fails in CheckCatalog
 # (C-075) the original formats the date with a freed buffer and writes
-# garbage (random bytes, e.g. "P!\a0\xfd~" or "sect571r1") instead of
+# garbage (random bytes, e.g. "P!\a0\xfd~", "sect571r1" or nothing) instead of
 # "dd-Mon hh:mm" from then on; any space-free prefix before "<name>: " counts.
-AUDIT_PREFIX = r'^(?:\d\d-\w{3} \d\d:\d\d|[^\n ]+(?= [^\s:]+: ))'
+AUDIT_PREFIX = r'^(?:\d\d-\w{3} \d\d:\d\d|[^\n ]*(?= [^\s:]+: ))'
 
 
 def write_config(source, target, port, args):

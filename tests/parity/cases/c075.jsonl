@@ -1,4 +1,6 @@
 # C-075: reload checks every Catalog resource by connecting (CheckCatalog(UPDATE_CATALOG)).
-{"id": "c075-reload-bad-catalog", "config": {"catalog/c075-bad.conf": "Catalog {\n  Name = c075-bad\n  dbname = c075_nosuchdb\n  dbuser = c075_nosuchuser\n}\n"}, "log": true, "timeout_ms": 60000, "steps": ["reload", "show catalog=c075-bad", "show catalogs"]}
-{"id": "c075-reload-bad-catalog-api2", "setup": [".api 2"], "config": {"catalog/c075-bad.conf": "Catalog {\n  Name = c075-bad\n  dbname = c075_nosuchdb\n  dbuser = c075_nosuchuser\n}\n"}, "timeout_ms": 60000, "steps": ["reload"]}
-{"id": "c075-after-bad-catalog", "steps": ["show catalogs"]}
+# isolated: after a reload that fails in CheckCatalog the original formats dates from a freed
+# buffer (garbage audit timestamps), so these cases run last, after all other cases.
+{"isolated": true, "id": "c075-reload-bad-catalog", "config": {"catalog/c075-bad.conf": "Catalog {\n  Name = c075-bad\n  dbname = c075_nosuchdb\n  dbuser = c075_nosuchuser\n}\n"}, "log": true, "timeout_ms": 60000, "steps": ["reload", "show catalog=c075-bad", "show catalogs"]}
+{"isolated": true, "id": "c075-reload-bad-catalog-api2", "setup": [".api 2"], "config": {"catalog/c075-bad.conf": "Catalog {\n  Name = c075-bad\n  dbname = c075_nosuchdb\n  dbuser = c075_nosuchuser\n}\n"}, "timeout_ms": 60000, "steps": ["reload"]}
+{"isolated": true, "id": "c075-after-bad-catalog", "steps": ["show catalogs"]}
