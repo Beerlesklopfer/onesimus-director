@@ -193,64 +193,7 @@ fn bstrutime(t: i64) -> String {
     crate::localtime::strftime("%Y-%m-%d %H:%M:%S", t as libc::time_t)
 }
 
-/// lib/btime.cc StrToUtime(): `sscanf` is Bareos' bsscanf (baconfig.h:455),
-/// so "%u-%u-%u %u:%u:%u%15s" reads digits without skipping blanks (no
-/// digit is a 0), the blank matches any amount of white space and %15s
-/// reads non-blank characters, which must be none. Then DateIsValid and
-/// mktime(); 0 for every invalid time.
-fn str_to_utime(text: &str) -> i64 {
-    let buf = text.as_bytes();
-    let is_space = |c: u8| matches!(c, b' ' | b'\t' | b'\n' | 0x0b | 0x0c | b'\r');
-    if buf.is_empty() {
-        return 0;
-    }
-    let mut pos = 0;
-    let mut fields = [0i32; 6];
-    for (i, field) in fields.iter_mut().enumerate() {
-        let mut value: u64 = 0;
-        while pos < buf.len() && buf[pos].is_ascii_digit() {
-            value = value.wrapping_mul(10).wrapping_add(u64::from(buf[pos] - b'0'));
-            pos += 1;
-        }
-        *field = value as u32 as i32;
-        match b"-- ::".get(i) {
-            Some(b' ') => while pos < buf.len() && is_space(buf[pos]) {
-                pos += 1;
-            },
-            Some(&literal) => {
-                if buf.get(pos) != Some(&literal) {
-                    return 0;
-                }
-                pos += 1;
-            }
-            None => {}
-        }
-    }
-    if buf.get(pos).is_some_and(|&c| !is_space(c)) {
-        return 0;
-    }
-    let [year, month, day, hour, min, sec] = fields;
-    let (year, month) = (year.wrapping_sub(1900), month.wrapping_sub(1));
-    // DateIsValid()
-    let leap = { let y = year.wrapping_add(1900); y % 4 == 0 && !(y % 100 == 0 && y % 400 != 0) };
-    let days = match month {
-        1 => if leap { 29 } else { 28 },
-        3 | 5 | 8 | 10 => 30,
-        _ => 31,
-    };
-    if year <= 0 || !(0..=11).contains(&month) || day <= 0 || day > days || !(0..=23).contains(&hour)
-        || !(0..=59).contains(&min) || !(0..=59).contains(&sec)
-    {
-        return 0;
-    }
-    let mut tm: libc::tm = unsafe { std::mem::zeroed() };
-    (tm.tm_year, tm.tm_mon, tm.tm_mday, tm.tm_hour, tm.tm_min, tm.tm_sec) = (year, month, day, hour, min, sec);
-    tm.tm_isdst = -1;
-    match unsafe { libc::mktime(&mut tm) } {
-        -1 => 0,
-        time => time as i64,
-    }
-}
+use crate::btime::str_to_utime;
 
 /// Value of an item of a resource's directives (last one wins, aliases of
 /// the job items resolved).
