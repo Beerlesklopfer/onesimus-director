@@ -12,7 +12,7 @@
 {"id": "c027-gui-list-log", "steps": ["gui on", "list log limit=3"]}
 {"id": "c027-gui-sql", "steps": ["gui on", ".sql query=\"select count(*) as n, 1234567 as big from pool\""]}
 {"id": "c027-gui-sqlquery-keyword", "steps": ["gui on", "list jobs jobstatus=T limit=3", "llist jobid=1"]}
-{"id": "c027-gui-status-dir", "steps": ["gui on", "status director"], "normalize": ["Version: .*", "db:postgresql, .*"]}
+{"id": "c027-gui-status-dir", "steps": ["gui on", "status director"], "normalize": ["Version: .*", "db:postgresql, .*", "(?<=Daemon started )\\S+ \\S+", "(?<=Console connected at )\\S+ \\S+"]}
 {"id": "c027-gui-show", "steps": ["gui on", "show pools", "show catalog"]}
 {"id": "c027-gui-messages", "steps": ["gui on", "messages"]}
 {"id": "c027-gui-off-again", "steps": ["gui on", "gui off", "llist pools", "list jobs limit=3"]}
