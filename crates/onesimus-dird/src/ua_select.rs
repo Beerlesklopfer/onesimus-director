@@ -135,11 +135,21 @@ pub struct Ua<'a> {
     pub cmd: String,
     /// Last catalog error of this command (C++ `ua->db->strerror()`).
     pub db_error: String,
+    /// A UaContext of its own with a console, never in batch mode (C++
+    /// new_ua_context() of the restore tree, which keeps only `api`).
+    dialog: bool,
 }
 
 impl<'a> Ua<'a> {
     pub fn new(ctx: &'a ExecContext) -> Self {
-        Self { ctx, segments: Vec::new(), interacted: false, prompts: Vec::new(), cmd: String::new(), db_error: String::new() }
+        Self { ctx, segments: Vec::new(), interacted: false, prompts: Vec::new(), cmd: String::new(), db_error: String::new(),
+            dialog: false }
+    }
+
+    /// C++ new_ua_context() with the console and `api` flag of `ctx`: not in
+    /// batch mode even under `.api 2`, plain text output.
+    pub(crate) fn new_dialog(ctx: &'a ExecContext) -> Self {
+        Self { dialog: true, ..Self::new(ctx) }
     }
 
     /// C++ `ua->api` (set for `.api 1` and `.api 2`).
@@ -149,7 +159,7 @@ impl<'a> Ua<'a> {
 
     /// C++ `ua->batch`: JSON mode (DotApiCmd) or no console at all.
     pub fn batch(&self) -> bool {
-        self.ctx.api_mode == ApiMode::Json || !has_console()
+        (self.ctx.api_mode == ApiMode::Json && !self.dialog) || !has_console()
     }
 
     /// True when a console is attached (C++ `ua->UA_sock != nullptr`).
@@ -262,7 +272,9 @@ impl<'a> Ua<'a> {
         }
     }
 
-    fn signal(&mut self, signal: BnetSignal) -> bool {
+    /// `sock->signal()` after the buffered output, whatever the mode (C++
+    /// `user->signal()` in UserSelectFilesFromTree); false without console.
+    pub(crate) fn signal(&mut self, signal: BnetSignal) -> bool {
         self.flush() && with_attached(|c| c.signal(signal)).unwrap_or(false)
     }
 

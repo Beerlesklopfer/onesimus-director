@@ -1,0 +1,48 @@
+# C-047 restore file selection tree (ua_tree.cc), BuildDirectoryTree (ua_restore.cc:1294).
+# Every case ends without starting a restore: abort/quit, or done followed by "no".
+{"id": "c047-tree-help-abort", "steps": ["restore jobid=1", "help", "?", ".help", "abort"]}
+{"id": "c047-tree-ls-cd", "steps": ["restore jobid=1", "ls", "pwd", ".pwd", "cd /etc", "ls", "cd ..", "cd nosuch", "cd a b", "dir", ".dir", ".ls", ".lsdir", "quit"]}
+{"id": "c047-tree-mark-count", "steps": ["restore jobid=1", "count", "cd /", "mark etc", "count", "lsmark", ".lsmark", "unmark etc/*", "count", "estimate", "quit"]}
+{"id": "c047-tree-find", "steps": ["restore jobid=1", "find", "find *.conf", "find passwd hosts", "quit"]}
+{"id": "c047-tree-all", "steps": ["restore jobid=1 all", "count", "estimate", "lsmark", "abort"]}
+{"id": "c047-tree-two-jobs", "steps": ["restore jobid=1,5", "count", "find *", "quit"]}
+{"id": "c047-tree-invalid", "steps": ["restore jobid=1", "", "bogus", ".bogus", "d", "e", "markdir etc", "unmarkdir etc", "add", "delete", "q"]}
+{"id": "c047-tree-api1", "setup": [".api 1"], "steps": ["restore jobid=1", "pwd", "ls", "bogus", "quit"]}
+{"id": "c047-tree-mark-files", "steps": ["restore jobid=1,5", "cd /usr/sbin", "mark zic e2*", "ls e*", "lsmark", ".lsmark", "count", "estimate", "cd ..", "lsmark", "ls", "find zic", "unmark e2fsck", "estimate", "cd /", "lsmark", "unmark *", "count", "quit"]}
+{"id": "c047-tree-dir-files", "steps": ["restore jobid=5", "cd usr/sbin", "dir", ".dir mk*", "dir nosuch", "cd /usr/sbin/zic", "cd ../../usr", "pwd", "quit"]}
+{"id": "c047-tree-mark-paths", "steps": ["restore jobid=1", "mark /usr/sbin/zic", "mark usr/**/e2*", "mark /", "unmark /usr/**", "markdir usr", "cd usr", "markdir sbin", "unmarkdir s*", "lsmark", "add sbin/zic", "delete sbin/", "count", "abort"]}
+{"id": "c047-tree-prefix-case", "steps": ["restore jobid=1", "LS", "Co", "es", "fi zic", "h", "m /usr", "un /usr", "dON"], "normalize": ["restore\\.\\d+\\.bsr", "When:.*"]}
+{"id": "c047-tree-done-no", "steps": ["restore jobid=1", "cd /usr/sbin", "mark zic", "done", "no"], "normalize": ["restore\\.\\d+\\.bsr", "When:.*"]}
+{"id": "c047-tree-dot-done", "steps": ["restore jobid=1", "mark *", "."], "normalize": ["restore\\.\\d+\\.bsr", "When:.*"]}
+{"id": "c047-all-done-no", "steps": ["restore jobid=1,5 all done", "no"], "normalize": ["restore\\.\\d+\\.bsr", "When:.*"]}
+{"id": "c047-nofiles-no", "steps": ["restore jobid=3", "no", ""]}
+{"id": "c047-nofiles-regex", "steps": ["restore jobid=3", "no", "(", "."]}
+{"id": "c047-nofiles-all-done", "steps": ["restore jobid=3 all done", "no"], "normalize": ["restore\\.\\d+\\.bsr", "When:.*"]}
+{"id": "c047-menu1", "steps": ["restore", "1", "13"]}
+{"id": "c047-menu2", "steps": ["restore", "2", "zic", "13"]}
+{"id": "c047-menu4", "steps": ["restore", "4", "SELECT JobId FROM Job WHERE JobId < 3 ORDER BY JobId", "13"]}
+{"id": "c047-menu4-error", "steps": ["restore", "4", "SELECT nosuch FROM Job", "13"]}
+{"id": "c047-menu5-cancel", "steps": ["restore", "5", "."]}
+{"id": "c047-menu5-fileset", "steps": ["restore", "5", "1", "no"]}
+{"id": "c047-menu6-date", "steps": ["restore", "6", "nodate", "2026-10-16", "."]}
+{"id": "c047-menu7-files", "steps": ["restore", "7", "/usr/sbin/zic", "/usr/sbin/nosuch", "", "no"], "normalize": ["restore\\.\\d+\\.bsr", "When:.*"]}
+{"id": "c047-menu9", "steps": ["restore", "9", "1", "13"]}
+{"id": "c047-menu11-dirs", "steps": ["restore", "11", "1", "/usr/sbin", "/nosuch", "", "no"], "normalize": ["restore\\.\\d+\\.bsr", "When:.*"]}
+{"id": "c047-menu12", "steps": ["restore", "12", "5", "quit"]}
+{"id": "c047-menu12-bad", "steps": ["restore", "12", "x"]}
+{"id": "c047-file-arg", "steps": ["restore client=bareos-fd file=/usr/sbin/zic file=/nosuch", "no"], "normalize": ["restore\\.\\d+\\.bsr", "When:.*"]}
+{"id": "c047-select-current", "steps": ["restore select current client=bareos-fd fileset=LinuxAll", "quit"]}
+{"id": "c047-jobid-done-nothing-marked", "steps": ["restore jobid=1 done"]}
+{"id": "c047-tree-json", "setup": [".api 2"], "steps": ["restore jobid=1", "ls", "quit"]}
+{"id": "c047-tree-api1-done", "setup": [".api 1"], "steps": ["restore jobid=1", "mark *", "done", "no"], "normalize": ["restore\\.\\d+\\.bsr", "When:.*"]}
+{"id": "c047-menu8-files-before", "steps": ["restore", "8", "2026-10-14", "/usr/sbin/zic", "", "no"], "normalize": ["restore\\.\\d+\\.bsr", "When:.*"]}
+{"id": "c047-menu10", "steps": ["restore", "10", "2026-10-14 12:00:00", "1", "13"]}
+{"id": "c047-select-pool", "steps": ["restore select pool=Incremental client=bareos-fd fileset=LinuxAll", "quit"]}
+{"id": "c047-select-copies", "steps": ["restore select copies client=bareos-fd fileset=LinuxAll", "no", "quit"]}
+{"id": "c047-select-archive", "steps": ["restore select archive client=bareos-fd fileset=LinuxAll"]}
+{"id": "c047-select-badfileset", "steps": ["restore select client=bareos-fd fileset=nosuch", "."]}
+{"id": "c047-select-before", "steps": ["restore select before=2026-07-01 client=bareos-fd fileset=LinuxAll", "quit"]}
+{"id": "c047-fileregex-only", "steps": ["restore fileregex=zic client=bareos-fd fileset=LinuxAll", "no"], "normalize": ["restore\\.\\d+\\.bsr", "When:.*"]}
+{"id": "c047-directory-arg", "steps": ["restore jobid=1 client=bareos-fd directory=/usr/sbin/", "no"], "normalize": ["restore\\.\\d+\\.bsr", "When:.*"]}
+{"id": "c047-directory-nojobid", "steps": ["restore client=bareos-fd directory=/usr/sbin/"]}
+{"id": "c047-fileregex-jobid", "steps": ["restore jobid=1 fileregex=zic client=bareos-fd", "no"], "normalize": ["restore\\.\\d+\\.bsr", "When:.*"]}

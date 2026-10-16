@@ -282,12 +282,12 @@ pub fn decode_stat(lstat: &str) -> Stat {
 }
 
 /// C++ guid_list uid_to_name()/gid_to_name(): name or the number.
-fn uid_name(uid: u32) -> String {
+pub(crate) fn uid_name(uid: u32) -> String {
     nix::unistd::User::from_uid(nix::unistd::Uid::from_raw(uid)).ok().flatten()
         .map(|u| u.name).unwrap_or_else(|| uid.to_string())
 }
 
-fn gid_name(gid: u32) -> String {
+pub(crate) fn gid_name(gid: u32) -> String {
     nix::unistd::Group::from_gid(nix::unistd::Gid::from_raw(gid)).ok().flatten()
         .map(|g| g.name).unwrap_or_else(|| gid.to_string())
 }
@@ -1054,7 +1054,7 @@ pub fn cmd_bvfs_get_jobids(ast: &CommandAst, ctx: &ExecContext) -> CommandResult
 
 /// bstrutime(StartTime + 1) of the job's StartTime (the current time if the
 /// job has none), in the Director's local time like the catalog values.
-fn accurate_date(start_time: &str) -> String {
+pub(crate) fn accurate_date(start_time: &str) -> String {
     let start = chrono::NaiveDateTime::parse_from_str(start_time.get(..19).unwrap_or(""), "%Y-%m-%d %H:%M:%S")
         .unwrap_or_else(|_| chrono::Local::now().naive_local());
     (start + chrono::Duration::seconds(1)).format("%Y-%m-%d %H:%M:%S").to_string()

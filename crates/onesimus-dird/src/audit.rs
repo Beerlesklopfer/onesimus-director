@@ -99,6 +99,27 @@ pub fn command(ctx: &ExecContext, key: &str, typed: &str, cmdline: &str) {
     });
 }
 
+/// UserSelectFilesFromTree(): AuditEventWanted(audit_event) and
+/// LogAuditEventCmdline() of a restore tree command. The tree runs on a new
+/// UaContext without user ACL, so the console is always "default".
+pub fn tree_command(ctx: &ExecContext, audit_event: bool, typed: &str, cmdline: &str) {
+    with_config(ctx, |config| {
+        if !auditing(config) || !audit_event {
+            return;
+        }
+        let events: Vec<&str> = director(config).map(|d| d.directives.iter()
+            .filter(|d| d.norm_key() == "auditevents")
+            .flat_map(|d| d.values())
+            .collect()).unwrap_or_default();
+        if !events.is_empty() && !events.iter().any(|event| event.eq_ignore_ascii_case(typed)) {
+            return;
+        }
+        let cmdline = cmdline.split('\0').next().unwrap_or("");
+        daemon_message(config, MsgType::Audit,
+            &format!("Console [default] from [{}] cmdline {cmdline}\n", peer_host()));
+    });
+}
+
 /// UaContext::LogAuditEventAclFailure().
 pub fn acl_failure(ctx: &ExecContext, kind: Kind, item: &str) {
     with_config(ctx, |config| {
@@ -124,7 +145,6 @@ pub fn acl_failure(ctx: &ExecContext, kind: Kind, item: &str) {
 }
 
 /// UaContext::LogAuditEventInfoMsg().
-#[allow(dead_code)]
 pub fn info(ctx: &ExecContext, message: &str) {
     with_config(ctx, |config| {
         if !auditing(config) {
