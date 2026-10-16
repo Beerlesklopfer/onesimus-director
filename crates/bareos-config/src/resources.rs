@@ -106,6 +106,9 @@ pub struct JobResource {
     pub jobdefs: String,
     pub run_before_job: String,
     pub run_after_job: String,
+    /// Items written in the resource or inherited from a JobDefs
+    /// (`IsMemberPresent`, normalized item names, see `jobdefs::item_key`).
+    pub present: std::collections::BTreeSet<String>,
 }
 
 impl Default for JobResource {
@@ -130,6 +133,7 @@ impl Default for JobResource {
             jobdefs: String::new(),
             run_before_job: String::new(),
             run_after_job: String::new(),
+            present: Default::default(),
         }
     }
 }

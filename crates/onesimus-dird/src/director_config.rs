@@ -109,51 +109,16 @@ impl DirectorConfig {
         Ok(config)
     }
 
-    /// Merge JobDefs defaults into Jobs.
-    /// For each Job with a non-empty `jobdefs` field, copy missing values
-    /// from the referenced JobDefs resource.
+    /// PopulateJobdefaults() (dird_conf.cc): JobDefs take the items of their
+    /// JobDefs in chain order, then Jobs take the items of their JobDefs; an
+    /// item written in the resource always wins (see `bareos_config::jobdefs`).
     fn resolve_jobdefs(&mut self) {
-        // Clone jobdefs list to avoid borrow conflicts
-        let defs: Vec<_> = self.jobdefs.clone();
-
-        for job in &mut self.jobs {
-            if job.jobdefs.is_empty() { continue; }
-
-            let def = match defs.iter().find(|d| d.name == job.jobdefs) {
-                Some(d) => &d.job,
-                None => {
-                    tracing::warn!("Job '{}': JobDefs '{}' not found", job.name, job.jobdefs);
-                    continue;
-                }
-            };
-
-            // Merge: Job-Feld leer → aus JobDefs uebernehmen
-            if job.client.is_empty() { job.client = def.client.clone(); }
-            if job.fileset.is_empty() { job.fileset = def.fileset.clone(); }
-            if job.schedule.is_empty() { job.schedule = def.schedule.clone(); }
-            if job.storage.is_empty() { job.storage = def.storage.clone(); }
-            if job.pool.is_empty() { job.pool = def.pool.clone(); }
-            if job.full_backup_pool.is_empty() { job.full_backup_pool = def.full_backup_pool.clone(); }
-            if job.differential_backup_pool.is_empty() { job.differential_backup_pool = def.differential_backup_pool.clone(); }
-            if job.incremental_backup_pool.is_empty() { job.incremental_backup_pool = def.incremental_backup_pool.clone(); }
-            if job.messages.is_empty() { job.messages = def.messages.clone(); }
-            if job.write_bootstrap.is_empty() { job.write_bootstrap = def.write_bootstrap.clone(); }
-            // Type und Level nur uebernehmen wenn Job sie nicht explizit setzt
-            // (Default = Backup/Full — wenn Job diese hat und JobDefs andere, behaelt Job)
-            if job.job_type == JobType::Backup && def.job_type != JobType::Backup {
-                job.job_type = def.job_type;
+        for job in &self.jobs {
+            if !job.jobdefs.is_empty() && !self.jobdefs.iter().any(|d| d.name == job.jobdefs) {
+                tracing::warn!("Job '{}': JobDefs '{}' not found", job.name, job.jobdefs);
             }
-            if job.level == JobLevel::Full && def.level != JobLevel::Full {
-                job.level = def.level;
-            }
-            // Priority nur wenn Default (10)
-            if job.priority == 10 && def.priority != 10 {
-                job.priority = def.priority;
-            }
-
-            tracing::debug!("Job '{}': merged from JobDefs '{}' (client={}, fileset={}, storage={}, pool={})",
-                job.name, job.jobdefs, job.client, job.fileset, job.storage, job.pool);
         }
+        bareos_config::jobdefs::propagate_typed(&mut self.jobdefs, &mut self.jobs);
     }
 
     /// Find a client by name.
@@ -326,6 +291,28 @@ Console {
         // ua_select.cc select_job_resource: chain order in, SortCaseInsensitive out
         let chain = ["backup-bareos-fd", "RestoreFiles", "BackupCatalog"];
         assert_eq!(sort_case_insensitive(chain), ["backup-bareos-fd", "BackupCatalog", "RestoreFiles"]);
+    }
+
+    #[test]
+    fn explicit_job_items_win_over_jobdefs() {
+        // C-041: BackupCatalog sets Level = Full and Priority explicitly
+        let config = DirectorConfig::from_str(r#"
+JobDefs { Name = "DefaultJob"; Type = Backup; Level = Incremental; Client = fd; FileSet = "SelfTest"
+  Schedule = "WeeklyCycle"; Storage = File; Messages = Standard; Pool = Incremental; Priority = 10 }
+Job { Name = "BackupCatalog"; JobDefs = "DefaultJob"; Level = Full; FileSet = "Catalog"; Priority = 11 }
+Job { Name = "Other"; JobDefs = "Late"; Priority = 10; Type = Backup }
+JobDefs { Name = "Late"; Type = Restore; Level = Differential; Priority = 3 }
+"#).unwrap();
+        let bc = config.find_job("BackupCatalog").unwrap();
+        assert_eq!(bc.level, JobLevel::Full);
+        assert_eq!(bc.fileset, "Catalog");
+        assert_eq!(bc.priority, 11);
+        assert_eq!(bc.pool, "Incremental");
+        assert_eq!(bc.schedule, "WeeklyCycle");
+        let other = config.find_job("Other").unwrap();
+        assert_eq!(other.level, JobLevel::Differential);
+        assert_eq!(other.priority, 10);
+        assert_eq!(other.job_type, JobType::Backup);
     }
 
     #[test]

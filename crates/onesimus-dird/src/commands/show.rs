@@ -111,11 +111,32 @@ impl Kind {
 /// The configuration as `show` sees it.
 struct Conf<'a> {
     res: Vec<(Kind, &'a ConfResource)>,
+    /// Job/JobDefs after PopulateJobdefaults()
+    propagated: bareos_config::jobdefs::Propagated,
 }
 
 impl<'a> Conf<'a> {
     fn new(raw: &'a [ConfResource]) -> Self {
-        Self { res: raw.iter().filter_map(|r| Kind::from_type(&r.rtype).map(|k| (k, r))).collect() }
+        Self {
+            res: raw.iter().filter_map(|r| Kind::from_type(&r.rtype).map(|k| (k, r))).collect(),
+            propagated: bareos_config::jobdefs::propagate_raw(raw),
+        }
+    }
+
+    /// Directives a Job/JobDefs got from its JobDefs chain (inherit_content_
+    /// items and from_jobdef run scripts), as a resource of their own.
+    fn inherited(&self, kind: Kind, res: &ConfResource) -> Option<ConfResource> {
+        let name = res.name()?;
+        let dirs = match kind {
+            Kind::Job => self.propagated.job(name),
+            Kind::JobDefs => self.propagated.jobdefs(name),
+            _ => None,
+        }?;
+        Some(ConfResource {
+            rtype: res.rtype.clone(),
+            directives: dirs.iter().filter(|e| e.inherited).map(|e| e.directive.clone()).collect(),
+            source: None,
+        })
     }
 
     fn of_kind(&self, kind: Kind) -> impl Iterator<Item = &'a ConfResource> + '_ {
@@ -514,14 +535,9 @@ fn matching<'a>(res: &'a ConfResource, item: &Item) -> Vec<&'a Directive> {
 }
 
 fn print_items(conf: &Conf, kind: Kind, res: &ConfResource, verbose: bool, internal: bool, w: &mut W) {
-    // JobDefs inheritance (PropagateResource): values set in the JobDefs
-    let jobdefs = if kind == Kind::Job {
-        res.directives.iter().find(|d| d.norm_key() == "jobdefs")
-            .and_then(|d| d.first())
-            .and_then(|n| conf.find(Kind::JobDefs, n))
-    } else {
-        None
-    };
+    // JobDefs inheritance (PopulateJobdefaults): values copied from the JobDefs chain
+    let inherited_res = conf.inherited(kind, res);
+    let jobdefs = inherited_res.as_ref();
 
     let items = kind.items();
     for item in items {
@@ -1956,6 +1972,28 @@ FileSet {
         }));
         assert!(r.text_output.starts_with("Job {\n  Name = \"BackupCatalog\"\n  Level = Full\n"));
         assert!(r.text_output.contains("  RunBeforeJob = \"/usr/lib/bareos/scripts/make_catalog_backup MyCatalog\"\n"));
+    }
+
+    #[test]
+    fn jobdefs_chain_inherited_items_and_runscripts() {
+        // PopulateJobdefaults: B takes C's items, J takes B's (with C's)
+        let conf = r#"
+JobDefs { Name = C; Schedule = SC; RunBeforeJob = "c" }
+JobDefs { Name = B; JobDefs = C; Level = Differential; Priority = 5 }
+Job { Name = J; JobDefs = B; Level = Full; RunAfterJob = "a" }
+"#;
+        let raw = parse_str(conf, None).unwrap();
+        let r = show(&ast(&[("job", Some("J"))]), &raw);
+        assert_eq!(r.text_output, "Job {\n  Name = \"J\"\n  Level = Full\n  JobDefs = \"B\"\n  RunAfterJob = \"a\"\n}\n\n");
+        let r = show(&ast(&[("job", Some("J")), ("verbose", None)]), &raw);
+        assert!(r.text_output.contains("  # Schedule = \"SC\"\n"), "{}", r.text_output);
+        assert!(r.text_output.contains("  # Priority = 5\n"));
+        assert!(r.text_output.contains("  # RunBeforeJob = \"c\"\n"));
+        assert!(!r.text_output.contains("Level = Differential"));
+        let r = show(&ast(&[("jobdefs", Some("B"))]), &raw);
+        assert!(!r.text_output.contains("Schedule"));
+        let r = show(&ast(&[("jobdefs", Some("B")), ("verbose", None)]), &raw);
+        assert!(r.text_output.contains("  # Schedule = \"SC\"\n"));
     }
 
     #[test]
