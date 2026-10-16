@@ -8,6 +8,7 @@ mod acl;
 mod audit;
 mod catalog_worker;
 mod command_ast;
+mod console_msg;
 mod command_executor;
 mod command_queue;
 mod command_registry;
@@ -344,6 +345,9 @@ fn main() {
     if cli.user.is_some() || cli.group.is_some() {
         info!("running as uid={} gid={}", nix::unistd::getuid(), nix::unistd::getgid());
     }
+
+    // dird.cc: InitConsoleMsg(working_directory) — console message queue
+    console_msg::init(std::path::Path::new(&config.director.working_directory), &config.director.name);
 
     // Build catalog URL and auto-migrate
     let catalog_db_url = config.catalogs.first().map(|cat| {

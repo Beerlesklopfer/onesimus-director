@@ -1,0 +1,17 @@
+# C-036 console message queue (ua_server.cc end of command, ua_output.cc MessagesCmd/DotMessagesCmd,
+# ua_dotcmds.cc DotGetmsgsCmd, ua_input.cc GetCmd ".messages"). The harness routes no message to the
+# console queue (Daemon has no console destination, no job runs), so these cases cover the
+# "nothing pending" paths; queued messages are covered by unit tests (console_msg, session).
+{"id": "c036-messages-twice", "steps": ["messages", "messages"]}
+{"id": "c036-messages-abbrev", "steps": ["mes"]}
+{"id": "c036-messages-args", "steps": ["messages all"]}
+{"id": "c036-dot-messages-twice", "steps": [".messages", ".messages"]}
+{"id": "c036-autodisplay-on-messages", "steps": ["autodisplay on", "messages", ".messages", ""]}
+{"id": "c036-gui-on-messages", "steps": ["gui on", "messages", ".messages"]}
+{"id": "c036-messages-api1", "steps": ["messages", ".messages"], "setup": [".api 1"]}
+{"id": "c036-messages-api2", "steps": ["messages", ".messages"], "setup": [".api 2"]}
+{"id": "c036-autodisplay-on-api1", "steps": ["autodisplay on", "messages", ""], "setup": [".api 1"]}
+{"id": "c036-getcmd-dot-messages", "steps": ["automount", ".messages"]}
+{"id": "c036-getcmd-dot-messages-autodisplay", "steps": ["autodisplay on", "automount", ".messages"]}
+{"id": "c036-messages-limited", "steps": ["messages", ".messages", "autodisplay on"], "console": "parity-limited", "password": "parity-limited-pw"}
+{"id": "c036-messages-operator", "steps": ["messages", ".messages", "whoami"], "console": "parity-operator", "password": "parity-operator-pw"}

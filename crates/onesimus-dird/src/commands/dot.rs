@@ -332,8 +332,12 @@ fn one_column(ctx: &ExecContext, array: &str, sql: &str, what: &str) -> CommandR
 }
 
 /// `.messages` — display pending messages (dot version)
-pub fn cmd_dot_messages(ast: &CommandAst, ctx: &ExecContext) -> CommandResult {
-    crate::commands::extra::cmd_messages(ast, ctx)
+pub fn cmd_dot_messages(_ast: &CommandAst, ctx: &ExecContext) -> CommandResult {
+    // C++ ua_dotcmds.cc DotGetmsgsCmd: pending messages, independent of autodisplay
+    if crate::console_msg::pending() {
+        return crate::commands::extra::do_messages(ctx);
+    }
+    CommandResult::ok(String::new())
 }
 
 /// `.msgs` — list message resource names (C++ uses the key "text")

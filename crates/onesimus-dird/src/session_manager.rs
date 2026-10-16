@@ -27,6 +27,10 @@ pub struct SessionInfo {
     pub catalog: SessionCatalog,
     /// C++ ua->automount: mount the volume after `label` (default on, ua.cc:84).
     pub automount: bool,
+    /// C++ ua->auto_display_messages (`autodisplay on|off`, default off, ua.cc:47).
+    pub auto_display: bool,
+    /// C++ ua->user_notified_msg_pending: "You have messages." already said.
+    pub user_notified_msg_pending: bool,
     /// Unix time the console connected (C++ console jcr->start_time).
     pub connected_at: i64,
 }
@@ -93,6 +97,8 @@ impl SessionManager {
             bus_rx,
             catalog: SessionCatalog::default(),
             automount: true,
+            auto_display: false,
+            user_notified_msg_pending: false,
             connected_at: now_unix(),
         });
         id
@@ -166,6 +172,29 @@ impl SessionManager {
     /// Automount flag of a session; unknown sessions use the C++ default (on).
     pub fn session_automount(&self, id: u64) -> bool {
         self.sessions.get(&id).map(|session| session.automount).unwrap_or(true)
+    }
+
+    /// `autodisplay on|off` (C++ AutodisplayCmd, `ua->auto_display_messages`).
+    pub fn set_session_auto_display(&self, id: u64, on: bool) {
+        if let Some(mut session) = self.sessions.get_mut(&id) {
+            session.auto_display = on;
+        }
+    }
+
+    /// Autodisplay flag of a session (C++ default off, ua.cc:47).
+    pub fn session_auto_display(&self, id: u64) -> bool {
+        self.sessions.get(&id).is_some_and(|session| session.auto_display)
+    }
+
+    /// C++ `ua->user_notified_msg_pending`.
+    pub fn set_session_notified(&self, id: u64, notified: bool) {
+        if let Some(mut session) = self.sessions.get_mut(&id) {
+            session.user_notified_msg_pending = notified;
+        }
+    }
+
+    pub fn session_notified(&self, id: u64) -> bool {
+        self.sessions.get(&id).is_some_and(|session| session.user_notified_msg_pending)
     }
 
     // --- FD Connections ---
