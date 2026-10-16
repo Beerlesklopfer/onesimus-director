@@ -56,43 +56,46 @@ den Bareos-Katalog unverändert und liefert für den Restore den Verzeichnisbaum
 als JSON. Getestet wird gegen die neuesten Versionen: PostgreSQL 19 und
 Bareos 25.1.2-pre (Katalogschema 2250).
 
-Stand 16.10.2026 (implementiert im Plugin-Repo, dort noch nicht committet/freigegeben):
-Rückgabe als `json` (nicht `jsonb`: ein jsonb-Array ist auf 256 MB begrenzt, ein Baum mit
-1,2 Mio. Einträgen überschreitet das). Drei Restore-Modi:
+Stand 16.10.2026 (implementiert im Plugin-Repo `oenesimus-postgres-plugin`, dort noch
+nicht committet/freigegeben; Doku dort unter `docs/wiki/` user/ und developer/). Zielumgebung:
+Katalog-DB auf einem SBC mit 1–2 GB RAM, Katalog in PC-Backup-Größe (~1 Mio. Dateien).
+Rückgabe als `json` (nicht `jsonb`: jsonb-Arrays sind auf 256 MB begrenzt).
 
-1. `ovfs.tree(jobid int, root text, max_entries bigint DEFAULT 1000000)`: genau ein Job,
-   nur dessen Zeilen. Teilbaum per Bereichssuche über `path_name_idx` (Collation `C`),
-   Dateien über `file_jpfid_idx`.
-2. `ovfs.tree(jobids int[], root, max_entries)`: vom Aufrufer übergebene Jobkette. Je
-   (Pfad, Name) gewinnt die neueste JobTDate, `FileIndex = 0` löscht; innerhalb eines Jobs
-   gilt die Hardlink-Regel aus `ua_tree.cc` (letzte Kopie einer Datei, erste eines Hardlinks).
-3. `ovfs.jobids_latest(client text, fileset text DEFAULT NULL) -> int[]` und
-   `ovfs.tree_latest(client, root, fileset DEFAULT NULL, max_entries)`: neuester Stand wie
-   Restore-Option 5 (`uar_last_full_no_pool`, `uar_dif`, `uar_inc`): letzter Full je FileSet,
-   danach letzter Diff, danach die Incrementals; nur JobStatus T/W, Type B,
-   StartTime < now, nur Jobs auf aktivierten Volumes (JobMedia/Media.Enabled). `fileset`
-   NULL nur, wenn der Client Backups genau eines FileSets hat, sonst Fehler mit Liste.
-
-Jeder Knoten trägt `jobid` und `fileindex` (Restore-Kennung); `link_fileindex` verweist auf
-denselben Job. Geprüft gegen Bareos `select_recent_version` plus Filter `FileIndex > 0` auf
-1,23 Mio. Einträgen: identisch. Getestet nur mit PostgreSQL 19rc1 und dem DDL von
-25.1.2-pre.
+- `ovfs.tree(jobid | jobids int[], root text, depth int, max_entries bigint DEFAULT 1000000)`:
+  Baum ab `root`, `depth` Pflicht (1 = root plus direkte Kinder). Verzeichnisse an der
+  Tiefengrenze haben keine `children`, tragen aber `entries` (lebende Einträge darunter) und
+  werden per `ls` nachgeladen. `max_entries` zählt Knoten im Ergebnis. Bei einer Jobkette
+  gewinnt je (Pfad, Name) die neueste JobTDate, `FileIndex = 0` löscht; Hardlink-Regel aus
+  `ua_tree.cc`.
+- `ovfs.tree_latest(client, root, depth, fileset DEFAULT NULL, max_entries)` mit
+  `ovfs.jobids_latest(client, fileset)`: neuester Stand wie Restore-Option 5
+  (`uar_last_full_no_pool`, `uar_dif`, `uar_inc`); WARNING, wenn der Full auf keinem
+  aktivierten Volume liegt (die Kette enthält ihn dann wie bei Bareos nicht).
+- `ovfs.ls(jobids int[], dir) -> rows` (name, name_b64, path, path_b64, kind, jobid, fileid,
+  fileindex, delta_seq, delta_parts json, mode, uid, gid, size, mtime, link_fileindex,
+  entries): direkte Kinder eines Verzeichnisses, zum Nachladen in ein MVC-Baummodell
+  (`canFetchMore` = `entries > 0` und noch keine Kinder).
+- `ovfs.versions(client, path, name, copies DEFAULT false) -> rows`: alle Versionen einer
+  Datei, neueste zuerst, mit Volumes und InChanger (wie `.bvfs_versions`).
+- BaseFiles und DeltaSeq werden wie bei Bareos aufgelöst
+  (`select_recent_version_with_basejob_and_delta` plus Delta-Kette aus `ua_tree`);
+  Delta-Dateien tragen `delta_seq` und `delta_parts [{jobid, fileindex}, …]`.
+- Reihenfolge der Kinder: erst Dateien (nach Namensbytes), dann Verzeichnisse (Name + `/`),
+  also Indexreihenfolge; andere Sortierung in der Ansicht.
+- Speicher: Zeilen werden sortiert über einen Cursor gestreamt; `ls` auf 1,25 Mio. Zeilen
+  braucht im Spitzenwert 160 MB Backend-RSS (davon ~133 MB Shared Buffers), ein voller Baum
+  etwa das Doppelte seiner Textgröße.
+- Jeder Knoten trägt `jobid` und `fileindex` (Restore-Kennung); `link_fileindex` verweist auf
+  denselben Job. Parität gegen die Bareos-Restore-Abfrage auf 1.230.502 Einträgen: identisch.
+  Getestet mit PostgreSQL 19rc1 und dem DDL von 25.1.2-pre.
 
 Rolle im Director: BVFS (`.bvfs_*`, `crates/onesimus-dird/src/commands/bvfs.rs`) ist
 byte-gleich portiert und bleibt nur zur Abwärtskompatibilität für Bareos-Clients erhalten
-(Paritätsfälle `c022`); OVFS ist der Onesimus-Weg und bekommt eigene Director-Befehle bzw.
-MCP-Tools. Die Jobkette ermittelt der Director (Pool-/FileSet-Regeln) oder
-`ovfs.jobids_latest`.
+(Paritätsfälle `c022`); OVFS ist der Onesimus-Weg.
 
-Erledigt (aus der früheren Offen-Liste): Jobkette, Restore-Kennungen (jobid/fileindex/
-link_fileindex je Knoten).
-
-Später/optional:
-
-- Versionen einer Datei über mehrere Jobs (`.bvfs_versions`) als eigene
-  Funktion, etwa `ovfs.versions`
-- Base-Jobs (`BaseFiles`) und Delta-Dateien (`DeltaSeq`): noch nicht behandelt;
-  zunächst erkennen und als nicht unterstützt melden statt falsch darstellen
+Offen: Director-Integration — eigene Befehle bzw. MCP-Tools in oconsole auf Basis von
+`ovfs.tree` mit `depth` plus `ovfs.ls` (Nachladen), `ovfs.versions`; Restore-Auswahl über
+die Restore-Kennungen (Bootstrap über `JobMedia`).
 
 Integration:
 
@@ -102,7 +105,7 @@ Integration:
 - Restore-Baum im interaktiven `oconsole` wie bei bconsole (`cd`, `ls`, `mark`)
 - Befund am Rande: `crates/bareos-orm/schema/v2250_bareos_catalog.json` setzt
   den Primärschlüssel von `pathvisibility` auf `jobid`; im Bareos-DDL ist er
-  `(JobId, PathId)`
+  `(JobId, PathId)` (Kompatibilitätslog C-052)
 
 ## JSON-Ausgabe: Rest
 
