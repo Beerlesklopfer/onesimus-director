@@ -579,19 +579,19 @@ pub fn cmd_disable(ast: &CommandAst, ctx: &ExecContext) -> CommandResult {
 /// select_enable_disable_*_resource selection (ua_select.cc), never to a
 /// toggle of something else (C-012).
 fn en_disable(ast: &CommandAst, ctx: &ExecContext, enable: bool) -> CommandResult {
-    use crate::acl::{access, Kind};
+    use crate::acl::{access, access_audited, Kind};
     let config = match &ctx.config {
         Some(c) => c,
         None => return CommandResult::error("No config loaded\n".to_string()),
     };
     let has = |key: &str| ast.arguments.iter().any(|a| a.key.eq_ignore_ascii_case(key));
-    let value = |key: &str| ast.arguments.iter()
-        .find(|a| a.key.eq_ignore_ascii_case(key) && a.value.is_some()).and_then(|a| a.value.as_deref());
+    let value = |key: &str| crate::ua_select::find_arg_with_value(ast, key);
     let (res_type, label, kind) = if has("schedule") { ("schedule", "Schedule", Kind::Schedule) }
         else if has("client") { ("client", "Client", Kind::Client) }
         else { ("job", "Job", Kind::Job) };
+    // Get{Schedule,Client,Job}ResWithName(): the ACL check is audited.
     let (name, shown) = match value(res_type) {
-        Some(name) if access(ctx, kind, name) => (name.to_string(), String::new()),
+        Some(name) if access_audited(ctx, kind, name) => (name.to_string(), String::new()),
         Some(name) => return CommandResult::ok_with_errors(String::new(), format!("{label} \"{name}\" not found.\n")),
         None => {
             let candidates: Vec<String> = {
@@ -633,7 +633,15 @@ fn toggle_enabled(config: &crate::director_config::SharedConfig, res_type: &str,
         _ => return CommandResult::ok(format!("{res_type}: not supported\n")),
     };
     match found {
-        Some(()) => CommandResult::ok(format!("{label} \"{name}\" {action}\n")),
+        // ObjectStart(action) + ArrayStart("<type>s") with the one name.
+        Some(()) => CommandResult {
+            json: Some(serde_json::json!({ &action[..action.len() - 1]: { format!("{res_type}s"): [name] } })),
+            ..CommandResult::ok(format!("{label} \"{name}\" {action}\n"))
+        }.with_warning(format!(
+            "{}abling is a temporary operation until the director reloads.\n\
+             For a permanent setting, please set the value of the \"Enabled\"\n\
+             directive in the relevant configuration resource file.\n",
+            if enable { "En" } else { "Dis" })),
         None => CommandResult::ok_with_errors(String::new(), format!("{label} \"{name}\" not found.\n")),
     }
 }
@@ -666,6 +674,24 @@ mod error_text_tests {
             assert!(result.success, "{line}");
             assert_eq!(result.error_message, expected);
         }
+    }
+
+    #[test]
+    fn enable_disable_success_warns_about_the_temporary_change() {
+        let config = crate::director_config::DirectorConfig::from_str(
+            "Director { Name = dir }\nJob { Name = a; Type = Backup }").unwrap();
+        let ctx = ExecContext { session_id: 0, config: Some(Arc::new(RwLock::new(config))),
+            session_mgr: None, catalog: None, api_mode: crate::command_executor::ApiMode::Human,
+            bus_rx: None, job_manager: None };
+        let warning = "abling is a temporary operation until the director reloads.\n\
+            For a permanent setting, please set the value of the \"Enabled\"\n\
+            directive in the relevant configuration resource file.\n";
+        let result = cmd_disable(&crate::session::parse_cli_command("disable job=a"), &ctx);
+        assert_eq!(result.text_output, format!("Job \"a\" disabled\nDis{warning}"));
+        assert_eq!(result.messages, vec![(crate::command_queue::MsgKind::Warning, format!("Dis{warning}"))]);
+        assert_eq!(result.json, Some(serde_json::json!({"disable": {"jobs": ["a"]}})));
+        let result = cmd_enable(&crate::session::parse_cli_command("enable job=a"), &ctx);
+        assert_eq!(result.text_output, format!("Job \"a\" enabled\nEn{warning}"));
     }
 
     #[test]
