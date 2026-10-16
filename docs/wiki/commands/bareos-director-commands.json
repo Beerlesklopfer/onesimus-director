@@ -699,7 +699,7 @@
     },
     {
       "path": "crates/oconsole/src/mcp.rs",
-      "sha256": "e2813d38de4b735a46d6ea8e3c3d143c88e3515866e4a92699726776c5c88fdd"
+      "sha256": "16e15fe0675441c9749a7da9303aabda7608e271c73b35fcf5ffdff7623bdefb"
     },
     {
       "path": "crates/oconsole/src/mcp_mirror.rs",
@@ -711,7 +711,7 @@
     },
     {
       "path": "crates/onesimus-dird/src/catalog_worker.rs",
-      "sha256": "c26aed2254c2a613a129df279808373b57f6f7164e619e91be799babe4713809"
+      "sha256": "5558b7ad1fffc481f4e96c3b4020b19d244af65844958c497f82610bdf292346"
     },
     {
       "path": "crates/onesimus-dird/src/command_executor.rs",
@@ -719,7 +719,7 @@
     },
     {
       "path": "crates/onesimus-dird/src/command_registry.rs",
-      "sha256": "96e207eb5b8d0a822650e6f05f567f2d997044b5d585125b812e26a4ea59814c"
+      "sha256": "834c7d0a069a6bf01cbd9f814a5acd4a8c188e1e785b2342458204b4f579735b"
     },
     {
       "path": "crates/onesimus-dird/src/commands/acl.rs",
@@ -787,7 +787,11 @@
     },
     {
       "path": "crates/onesimus-dird/src/commands/mod.rs",
-      "sha256": "adfd77c6dbf67f9c5de27a597a64e17d121e5452dfc853268999da56861da540"
+      "sha256": "6c98a1ebf2815a85b505afd9892537df028b515b646c2a82c5bae2c02844d34f"
+    },
+    {
+      "path": "crates/onesimus-dird/src/commands/ovfs.rs",
+      "sha256": "a8846e45d76dd1a9d62a631fc13a7a0b2ec504cb664c4258de8d8cb2ebb20d83"
     },
     {
       "path": "crates/onesimus-dird/src/commands/prompt.rs",
@@ -843,7 +847,7 @@
     },
     {
       "path": "crates/onesimus-dird/src/main.rs",
-      "sha256": "6ec3226e60c73512e61d08779b9121a679233918d42c4cb26398f6416fe997c2"
+      "sha256": "8910b19cf9e8781618a0461c3f54bd80626ec09934593d2bee72ddbfa6b673fe"
     },
     {
       "path": "crates/onesimus-dird/src/scheduler.rs",
@@ -860,7 +864,12 @@
     "production": {
       "feature": "mcp-production",
       "tools": [
-        "query"
+        "query",
+        "ovfs_status",
+        "ovfs_latest",
+        "ovfs_tree",
+        "ovfs_ls",
+        "ovfs_versions"
       ],
       "write_handler_compiled": false
     },
@@ -868,6 +877,11 @@
       "feature": "mcp-development",
       "tools": [
         "query",
+        "ovfs_status",
+        "ovfs_latest",
+        "ovfs_tree",
+        "ovfs_ls",
+        "ovfs_versions",
         "execute"
       ],
       "write_handler_compiled": true,
@@ -900,7 +914,7 @@
     "restore_file_selection_status_counts": {
       "missing_context": 26
     },
-    "onesimus_extra_names": 8
+    "onesimus_extra_names": 13
   },
   "parity_evidence": {
     "date": "2026-10-16",
@@ -7718,6 +7732,103 @@
         "line": 451
       },
       "declared_arguments": []
+    },
+    {
+      "name": ".ovfs_latest",
+      "canonical_name": ".ovfs_latest",
+      "handler": "commands::ovfs::cmd_ovfs_latest",
+      "registry": {
+        "file": "crates/onesimus-dird/src/command_registry.rs",
+        "line": 321
+      },
+      "implementation": {
+        "file": "crates/onesimus-dird/src/commands/ovfs.rs",
+        "line": 265
+      },
+      "declared_arguments": [
+        "client",
+        "fileset",
+        "json"
+      ]
+    },
+    {
+      "name": ".ovfs_ls",
+      "canonical_name": ".ovfs_ls",
+      "handler": "commands::ovfs::cmd_ovfs_ls",
+      "registry": {
+        "file": "crates/onesimus-dird/src/command_registry.rs",
+        "line": 323
+      },
+      "implementation": {
+        "file": "crates/onesimus-dird/src/commands/ovfs.rs",
+        "line": 349
+      },
+      "declared_arguments": [
+        "jobid",
+        "client",
+        "fileset",
+        "path",
+        "json"
+      ]
+    },
+    {
+      "name": ".ovfs_status",
+      "canonical_name": ".ovfs_status",
+      "handler": "commands::ovfs::cmd_ovfs_status",
+      "registry": {
+        "file": "crates/onesimus-dird/src/command_registry.rs",
+        "line": 320
+      },
+      "implementation": {
+        "file": "crates/onesimus-dird/src/commands/ovfs.rs",
+        "line": 232
+      },
+      "declared_arguments": [
+        "refresh",
+        "json"
+      ]
+    },
+    {
+      "name": ".ovfs_tree",
+      "canonical_name": ".ovfs_tree",
+      "handler": "commands::ovfs::cmd_ovfs_tree",
+      "registry": {
+        "file": "crates/onesimus-dird/src/command_registry.rs",
+        "line": 322
+      },
+      "implementation": {
+        "file": "crates/onesimus-dird/src/commands/ovfs.rs",
+        "line": 288
+      },
+      "declared_arguments": [
+        "jobid",
+        "client",
+        "fileset",
+        "root",
+        "depth",
+        "max_entries",
+        "json"
+      ]
+    },
+    {
+      "name": ".ovfs_versions",
+      "canonical_name": ".ovfs_versions",
+      "handler": "commands::ovfs::cmd_ovfs_versions",
+      "registry": {
+        "file": "crates/onesimus-dird/src/command_registry.rs",
+        "line": 324
+      },
+      "implementation": {
+        "file": "crates/onesimus-dird/src/commands/ovfs.rs",
+        "line": 383
+      },
+      "declared_arguments": [
+        "client",
+        "path",
+        "name",
+        "copies",
+        "json"
+      ]
     },
     {
       "name": ".profile",

@@ -257,8 +257,8 @@ def main():
         'mcp_build_policies': {
             'default': 'mcp-production',
             'mutually_exclusive': True,
-            'production': {'feature': 'mcp-production', 'tools': ['query'], 'write_handler_compiled': False},
-            'development': {'feature': 'mcp-development', 'tools': ['query', 'execute'],
+            'production': {'feature': 'mcp-production', 'tools': ['query', 'ovfs_status', 'ovfs_latest', 'ovfs_tree', 'ovfs_ls', 'ovfs_versions'], 'write_handler_compiled': False},
+            'development': {'feature': 'mcp-development', 'tools': ['query', 'ovfs_status', 'ovfs_latest', 'ovfs_tree', 'ovfs_ls', 'ovfs_versions', 'execute'],
                             'write_handler_compiled': True, 'runtime_opt_in': '--mcp-allow-write'},
         },
         'scope': 'All top-level commands[] entries in ua_cmds.cc and restore file-selection commands[] entries in ua_tree.cc. Not FD/SD wire commands, bconsole @commands or every internal keyword/prompt.',

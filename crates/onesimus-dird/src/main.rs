@@ -28,6 +28,7 @@ mod kill;
 mod localtime;
 mod logging;
 mod mdns;
+mod ovfs;
 mod privileges;
 mod message_bus;
 mod reload;
@@ -393,6 +394,9 @@ fn main() {
         None
     };
     let catalog = catalog_handle.as_ref().map(|(h, _)| h.clone());
+    if let Some(catalog) = &catalog {
+        ovfs::register_for_reload(catalog.clone());
+    }
 
     let port = config.director.port;
     let bind_addr = cli.bind_address.clone().unwrap_or_else(|| "0.0.0.0".to_string());

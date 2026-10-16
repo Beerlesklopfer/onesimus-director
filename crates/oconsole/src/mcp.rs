@@ -8,6 +8,9 @@
 //!
 //! Tools:
 //!   query   — read-only commands (list, show, status, dot-commands, …)
+//!   ovfs_status, ovfs_latest, ovfs_tree, ovfs_ls, ovfs_versions
+//!           — read-only restore-tree browsing (Director `.ovfs_*` commands,
+//!             JSON output); always available, also in the production build
 //!   execute — any command; only with --mcp-allow-write
 
 use std::sync::{Arc, Mutex};
@@ -183,7 +186,8 @@ impl<R: CommandRunner> McpServer<R> {
                 "Connected to the Onesimus/Bareos Director '{}' ({mode}). \
                  Commands are bconsole command lines, e.g. 'status dir', 'list jobs', \
                  'list volumes', 'show client=NAME', 'llist jobid=42'. \
-                 Use 'help' or '.help all' to discover commands.",
+                 Use 'help' or '.help all' to discover commands. \
+                 Browse backup contents with the ovfs_* tools (ovfs_latest, ovfs_tree, ovfs_ls, ovfs_versions).",
                 self.director_name
             ),
         }))
@@ -191,7 +195,7 @@ impl<R: CommandRunner> McpServer<R> {
     }
 
     fn tools_list(&self) -> Value {
-        let tools = vec![json!({
+        let mut tools = vec![json!({
             "name": "query",
             "title": "Query the Director (read-only)",
             "description": "Run a read-only bconsole command on the Director and return its output. \
@@ -207,8 +211,7 @@ impl<R: CommandRunner> McpServer<R> {
             },
             "annotations": { "readOnlyHint": true, "openWorldHint": false }
         })];
-        #[cfg(feature = "mcp-development")]
-        let mut tools = tools;
+        tools.extend(ovfs_tools());
         #[cfg(feature = "mcp-development")]
         if self.write_enabled() {
             tools.push(json!({
@@ -232,6 +235,15 @@ impl<R: CommandRunner> McpServer<R> {
 
     fn tools_call(&self, params: &Value) -> Result<Value, (i64, String)> {
         let name = params.get("name").and_then(Value::as_str).unwrap_or("");
+        if name.starts_with("ovfs_") {
+            let arguments = params.get("arguments").cloned().unwrap_or_else(|| json!({}));
+            let command = match ovfs_command(name, &arguments) {
+                Ok(Some(command)) => command,
+                Ok(None) => return Err((-32602, format!("unknown tool: {name}"))),
+                Err(msg) => return Ok(tool_result(&msg, true)),
+            };
+            return self.run_read_only(&command);
+        }
         let command = params
             .get("arguments")
             .and_then(|a| a.get("command"))
@@ -270,6 +282,11 @@ impl<R: CommandRunner> McpServer<R> {
             ));
         }
 
+        self.run_read_only(command)
+    }
+
+    /// Run a command line that passed the tool's checks.
+    fn run_read_only(&self, command: &str) -> Result<Value, (i64, String)> {
         match self
             .runner
             .lock()
@@ -281,6 +298,163 @@ impl<R: CommandRunner> McpServer<R> {
             Err(e) => Ok(tool_result(&format!("Director error: {e}"), true)),
         }
     }
+}
+
+/// The read-only OVFS tools (Director `.ovfs_*` commands, Onesimus
+/// extension): browse restore trees lazily — `ovfs_latest` or a job list,
+/// `ovfs_tree` with a small depth, `ovfs_ls` per expanded directory.
+fn ovfs_tools() -> Vec<Value> {
+    let chain = json!({
+        "jobids": { "type": "string", "description": "comma-separated JobIds of the chain (Full, Differential, Incrementals); or use client" },
+        "client": { "type": "string", "description": "client name: the chain of its latest state (restore option 5)" },
+        "fileset": { "type": "string", "description": "FileSet name, needed if the client has backups of several FileSets" }
+    });
+    let with = |extra: Value| {
+        let mut properties = chain.as_object().unwrap().clone();
+        properties.extend(extra.as_object().unwrap().clone());
+        Value::Object(properties)
+    };
+    let annotations = json!({ "readOnlyHint": true, "openWorldHint": false });
+    vec![
+        json!({
+            "name": "ovfs_status",
+            "title": "Restore-tree backend status",
+            "description": "Whether the catalog has the OVFS PostgreSQL extension (version) and whether \
+                restore trees use it or the Director fallback. Results are the same either way.",
+            "inputSchema": { "type": "object", "properties": {} },
+            "annotations": annotations,
+        }),
+        json!({
+            "name": "ovfs_latest",
+            "title": "Job chain of a client's latest backup",
+            "description": "JobIds (Full, Differential, Incrementals) that restore the client's latest state, \
+                as Bareos restore option 5 selects them. Pass them to ovfs_tree/ovfs_ls.",
+            "inputSchema": { "type": "object", "properties": {
+                "client": { "type": "string", "description": "client name" },
+                "fileset": { "type": "string", "description": "FileSet name (if the client has several)" }
+            }, "required": ["client"] },
+            "annotations": annotations,
+        }),
+        json!({
+            "name": "ovfs_tree",
+            "title": "Restore tree of a job chain",
+            "description": "Directory tree below root as JSON, depth levels deep (1 = root and its children). \
+                Directories at the depth limit carry 'entries' instead of children; expand them with ovfs_ls. \
+                Every node carries jobid/fileindex (restore identity). Keep depth small.",
+            "inputSchema": { "type": "object", "properties": with(json!({
+                "root": { "type": "string", "description": "directory, default /" },
+                "depth": { "type": "integer", "minimum": 0, "description": "levels below root, default 1" },
+                "max_entries": { "type": "integer", "minimum": 1, "description": "most nodes in the result, default 100000" }
+            })) },
+            "annotations": annotations,
+        }),
+        json!({
+            "name": "ovfs_ls",
+            "title": "List one directory of a job chain",
+            "description": "Direct children of one directory (files first, then directories with 'entries' counts).",
+            "inputSchema": { "type": "object", "properties": with(json!({
+                "path": { "type": "string", "description": "directory, e.g. /home/anna/" }
+            })), "required": ["path"] },
+            "annotations": annotations,
+        }),
+        json!({
+            "name": "ovfs_versions",
+            "title": "Versions of one file",
+            "description": "All backed-up versions of a file of a client, newest first, with volumes.",
+            "inputSchema": { "type": "object", "properties": {
+                "client": { "type": "string", "description": "client name" },
+                "path": { "type": "string", "description": "directory of the file, e.g. /etc/" },
+                "name": { "type": "string", "description": "file name; empty for the directory itself" },
+                "copies": { "type": "boolean", "description": "include copy jobs" }
+            }, "required": ["client", "path"] },
+            "annotations": annotations,
+        }),
+    ]
+}
+
+/// `key="value"` with the console's quoting (backslash escapes).
+fn ovfs_arg(key: &str, value: &str) -> Result<String, String> {
+    if value.chars().any(char::is_control) {
+        return Err(format!("{key} must not contain control characters"));
+    }
+    Ok(format!("{key}=\"{}\"", value.replace('\\', "\\\\").replace('"', "\\\"")))
+}
+
+/// The Director command line of an OVFS tool; `Ok(None)` for an unknown tool.
+fn ovfs_command(tool: &str, arguments: &Value) -> Result<Option<String>, String> {
+    let text = |key: &str| -> Result<Option<String>, String> {
+        match arguments.get(key) {
+            None | Some(Value::Null) => Ok(None),
+            Some(Value::String(s)) => Ok(Some(s.clone())),
+            Some(Value::Number(n)) => Ok(Some(n.to_string())),
+            Some(_) => Err(format!("{key} must be a string")),
+        }
+    };
+    let number = |key: &str| -> Result<Option<i64>, String> {
+        match arguments.get(key) {
+            None | Some(Value::Null) => Ok(None),
+            Some(v) => v.as_i64().map(Some).ok_or_else(|| format!("{key} must be an integer")),
+        }
+    };
+    let required = |key: &str| -> Result<String, String> {
+        text(key)?.filter(|v| !v.is_empty()).ok_or_else(|| format!("{key} is required"))
+    };
+    let mut parts: Vec<String> = Vec::new();
+    let chain = |parts: &mut Vec<String>| -> Result<(), String> {
+        if let Some(jobids) = text("jobids")? {
+            if jobids.is_empty() || !jobids.split(',').all(|id| !id.trim().is_empty() && id.trim().bytes().all(|b| b.is_ascii_digit())) {
+                return Err("jobids must be comma-separated JobIds".into());
+            }
+            parts.push(format!("jobid={}", jobids.replace(' ', "")));
+        } else if let Some(client) = text("client")? {
+            parts.push(ovfs_arg("client", &client)?);
+        } else {
+            return Err("jobids or client is required".into());
+        }
+        if let Some(fileset) = text("fileset")? {
+            parts.push(ovfs_arg("fileset", &fileset)?);
+        }
+        Ok(())
+    };
+    let command = match tool {
+        "ovfs_status" => ".ovfs_status".to_string(),
+        "ovfs_latest" => {
+            parts.push(ovfs_arg("client", &required("client")?)?);
+            if let Some(fileset) = text("fileset")? {
+                parts.push(ovfs_arg("fileset", &fileset)?);
+            }
+            format!(".ovfs_latest {}", parts.join(" "))
+        }
+        "ovfs_tree" => {
+            chain(&mut parts)?;
+            if let Some(root) = text("root")? {
+                parts.push(ovfs_arg("root", &root)?);
+            }
+            if let Some(depth) = number("depth")? {
+                parts.push(format!("depth={depth}"));
+            }
+            if let Some(max) = number("max_entries")? {
+                parts.push(format!("max_entries={max}"));
+            }
+            format!(".ovfs_tree {}", parts.join(" "))
+        }
+        "ovfs_ls" => {
+            chain(&mut parts)?;
+            parts.push(ovfs_arg("path", &required("path")?)?);
+            format!(".ovfs_ls {}", parts.join(" "))
+        }
+        "ovfs_versions" => {
+            parts.push(ovfs_arg("client", &required("client")?)?);
+            parts.push(ovfs_arg("path", &required("path")?)?);
+            parts.push(ovfs_arg("name", &text("name")?.unwrap_or_default())?);
+            if arguments.get("copies").and_then(Value::as_bool) == Some(true) {
+                parts.push("copies".into());
+            }
+            format!(".ovfs_versions {}", parts.join(" "))
+        }
+        _ => return Ok(None),
+    };
+    Ok(Some(format!("{} json", command.trim_end())))
 }
 
 fn tool_result(text: &str, is_error: bool) -> Value {
@@ -390,6 +564,11 @@ fn is_read_only(command: &str) -> bool {
                 | ".sqltables"
                 | ".sqlschema"
                 | ".sqlcount"
+                | ".ovfs_status"
+                | ".ovfs_latest"
+                | ".ovfs_tree"
+                | ".ovfs_ls"
+                | ".ovfs_versions"
         );
     }
     matches!(
@@ -449,7 +628,50 @@ mod tests {
             .iter()
             .map(|t| t["name"].clone())
             .collect();
-        assert_eq!(names, vec![json!("query")]);
+        assert_eq!(names, vec![json!("query"), json!("ovfs_status"), json!("ovfs_latest"),
+            json!("ovfs_tree"), json!("ovfs_ls"), json!("ovfs_versions")]);
+        for tool in r["result"]["tools"].as_array().unwrap() {
+            assert_eq!(tool["annotations"]["readOnlyHint"], true, "{}", tool["name"]);
+        }
+    }
+
+    #[test]
+    fn ovfs_tools_build_read_only_command_lines() {
+        let mut srv = McpServer::new(Echo(vec![]), false, "dir".into());
+        let ovfs = |tool: &str, args: Value| json!({"method":"tools/call","params":{"name":tool,"arguments":args}});
+        for (tool, args, line) in [
+            ("ovfs_status", json!({}), ".ovfs_status json"),
+            ("ovfs_latest", json!({"client":"pc-anna"}), ".ovfs_latest client=\"pc-anna\" json"),
+            ("ovfs_tree", json!({"jobids":"40, 41,42","root":"/home/a b/","depth":2}),
+                ".ovfs_tree jobid=40,41,42 root=\"/home/a b/\" depth=2 json"),
+            ("ovfs_ls", json!({"client":"fd","fileset":"Linux","path":"/it's \"x\"/"}),
+                ".ovfs_ls client=\"fd\" fileset=\"Linux\" path=\"/it's \\\"x\\\"/\" json"),
+            ("ovfs_versions", json!({"client":"fd","path":"/etc/","name":"passwd","copies":true}),
+                ".ovfs_versions client=\"fd\" path=\"/etc/\" name=\"passwd\" copies json"),
+        ] {
+            let r = call(&mut srv, ovfs(tool, args));
+            assert_eq!(r["result"]["isError"], false, "{tool}: {r}");
+            assert_eq!(srv.runner.lock().unwrap().0.last().unwrap(), line);
+        }
+        let ran = srv.runner.lock().unwrap().0.len();
+        for (tool, args) in [
+            ("ovfs_tree", json!({})),
+            ("ovfs_tree", json!({"jobids":"1;delete"})),
+            ("ovfs_ls", json!({"jobids":"1"})),
+            ("ovfs_ls", json!({"jobids":"1","path":"/a\nb/"})),
+            ("ovfs_versions", json!({"client":"fd"})),
+            ("ovfs_tree", json!({"jobids":"1","depth":"x"})),
+        ] {
+            let r = call(&mut srv, ovfs(tool, args.clone()));
+            assert_eq!(r["result"]["isError"], true, "{tool} {args}");
+        }
+        assert_eq!(srv.runner.lock().unwrap().0.len(), ran);
+        assert!(call(&mut srv, ovfs("ovfs_nosuch", json!({})))["error"].is_object());
+        for cmd in [".ovfs_status", ".ovfs_tree jobid=1", ".ovfs_ls jobid=1 path=/"] {
+            assert_eq!(call(&mut srv, tool_call("query", cmd))["result"]["isError"], false, "{cmd}");
+        }
+        // prefixes are not read-only names
+        assert_eq!(call(&mut srv, tool_call("query", ".ovfs"))["result"]["isError"], true);
     }
 
     #[test]
@@ -537,7 +759,9 @@ mod tests {
     fn production_cannot_enable_execute_even_with_internal_write_request() {
         let mut srv = McpServer::new(Echo(vec![]), true, "dir".into());
         assert!(!srv.write_enabled());
-        assert_eq!(srv.tools_list()["tools"].as_array().unwrap().len(), 1);
+        let tools = srv.tools_list();
+        assert!(tools["tools"].as_array().unwrap().iter().all(|t| t["name"] != "execute"));
+        assert!(tools["tools"].as_array().unwrap().iter().all(|t| t["annotations"]["readOnlyHint"] == true));
         assert!(call(&mut srv, tool_call("execute", "run job=Backup yes"))["error"].is_object());
         assert!(srv.runner.lock().unwrap().0.is_empty());
     }
@@ -546,7 +770,7 @@ mod tests {
     #[test]
     fn development_lists_execute_only_after_runtime_opt_in() {
         let srv = McpServer::new(Echo(vec![]), true, "dir".into());
-        assert_eq!(srv.tools_list()["tools"].as_array().unwrap().len(), 2);
+        assert_eq!(srv.tools_list()["tools"].as_array().unwrap().len(), 7);
     }
 
     #[tokio::test]
@@ -603,7 +827,7 @@ mod tests {
                 serde_json::from_str(&lines.next_line().await.unwrap().unwrap()).unwrap();
             assert_eq!(reply["id"], id);
             match id {
-                2 => assert_eq!(reply["result"]["tools"].as_array().unwrap().len(), 1),
+                2 => assert_eq!(reply["result"]["tools"].as_array().unwrap().len(), 6), // query + 5 read-only OVFS tools
                 3 => assert_eq!(reply["result"]["content"][0]["text"], "ran list jobs\n"),
                 4 => assert!(reply["error"].is_object()),
                 _ => unreachable!(),

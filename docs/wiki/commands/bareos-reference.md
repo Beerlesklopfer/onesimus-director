@@ -7,7 +7,7 @@ Das ist der exakte Quellstand des installierten Referenz-Directors (`bareos-dir 
 
 ## Ergebnis
 
-**88 Originalbefehle, davon 88 lokal registriert.** Hinzu kommen 26 Befehle der separaten Restore-Dateiauswahl und 8 lokale Zusatznamen.
+**88 Originalbefehle, davon 88 lokal registriert.** Hinzu kommen 26 Befehle der separaten Restore-Dateiauswahl und 13 lokale Zusatznamen.
 Registrierung ist kein Nachweis funktionaler Vollständigkeit. Der Director ist nach den belegten Lücken **nicht vollständig kompatibel**.
 Der Status stützt sich auf den Paritätsvergleich (`tests/parity`: Original- und Onesimus-Director nacheinander auf identischer Konfiguration, jede Seite auf eigener Katalogkopie, Rohbytes und Signale je Schritt verglichen) und auf das [Kompatibilitätslog](../../COMPATIBILITY-LOG.md). Paritätslauf vom 16.10.2026 auf `development` = `7993ce6`: 1479 von 1481 Fällen byte-identisch (2 Unterschiede, 0 Fehler).
 `parity_verified` gilt nur für die in der JSON unter `parity_cases` genannten Varianten; Seiteneffekte auf echte FD/SD (Labeln, Mount, Bandbreite, Debug, Cancel laufender Jobs) werden im Paritätslauf nicht ausgeführt und sind nur durch Einheitentests belegt.
@@ -171,7 +171,7 @@ Diese Befehle stehen in `ua_tree.cc::commands[]`, nicht in der Hauptkonsole. Gle
 
 Zusatznamen sind keine Belege für upstream vorhandene Funktionen. Die JSON enthält ihre lokalen Handler und Aliase.
 
-`.acl`, `.catalog`, `.grpc`, `.profile`, `.sqlcount`, `.sqlschema`, `.sqltables`, `.storage`.
+`.acl`, `.catalog`, `.grpc`, `.ovfs_latest`, `.ovfs_ls`, `.ovfs_status`, `.ovfs_tree`, `.ovfs_versions`, `.profile`, `.sqlcount`, `.sqlschema`, `.sqltables`, `.storage`.
 
 ## Reproduzieren und aktualisieren
 
