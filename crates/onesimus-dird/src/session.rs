@@ -276,10 +276,18 @@ pub fn handle_console_session_with<S: Read + Write>(
 
         }
 
-        // UaContext::ErrorMsg: in API mode every error message is preceded
-        // by BNET_ERROR_MSG (in JSON mode only the signal goes out directly).
+        // UaContext::vSendMsg: in API mode every ErrorMsg/WarningMsg/InfoMsg
+        // is preceded by BNET_ERROR_MSG/WARNING_MSG/INFO_MSG (in JSON mode
+        // only the signal goes out directly).
         if api_mode != command_executor::ApiMode::Human
-            && result.error_lines().iter().any(|_| bnet.send_signal(BnetSignal::ErrorMsg).is_err()) {
+            && result.message_list().iter().any(|(kind, _)| {
+                let signal = match kind {
+                    crate::command_queue::MsgKind::Error => BnetSignal::ErrorMsg,
+                    crate::command_queue::MsgKind::Warning => BnetSignal::WarningMsg,
+                    crate::command_queue::MsgKind::Info => BnetSignal::InfoMsg,
+                };
+                bnet.send_signal(signal).is_err()
+            }) {
             break;
         }
         if api_mode != command_executor::ApiMode::Human && !invalid {
@@ -292,7 +300,9 @@ pub fn handle_console_session_with<S: Read + Write>(
             if bnet.send_str(&crate::json_output::envelope(&result, json_compact)).is_err() { break; }
         } else {
             let with_newline = |text: &str| if text.ends_with('\n') || result.verbatim { text.to_string() } else { format!("{text}\n") };
-            let mut parts = [&result.text_output, &result.error_message];
+            let no_errors = String::new();
+            let errors = if result.errors_inline { &no_errors } else { &result.error_message };
+            let mut parts = [&result.text_output, errors];
             if result.errors_first { parts.reverse(); }
             if parts.iter().filter(|part| !part.is_empty())
                 .any(|part| bnet.send_str(&with_newline(part)).is_err()) {

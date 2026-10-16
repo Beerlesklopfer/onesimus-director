@@ -138,7 +138,7 @@ fn wait_selected(ast: &CommandAst, backend: &mut impl Backend, prefix: &mut Stri
         }
         // As upstream, timeout applies to mount waits only.
         if matches!(options.selection, Selection::Mount) && options.timeout.is_some_and(|timeout| backend.elapsed() >= timeout) {
-            return CommandResult::ok("Wait on mount timed out\n".into());
+            return CommandResult::ok(String::new()).with_warning("Wait on mount timed out\n");
         }
         backend.sleep(Duration::from_secs(1));
     }

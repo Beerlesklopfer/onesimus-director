@@ -144,7 +144,7 @@ fn setbandwidth_with(
     let command = format!("setbandwidth={bytes} Job=\n");
     match send(&target, &director, &command) {
         Ok(reply) if reply.trim_end() == "2000 OK Bandwidth" => {
-            CommandResult::ok(format!("{banner}OK Limiting bandwidth to {limit}kb/s \n"))
+            CommandResult::ok(banner).with_info(format!("OK Limiting bandwidth to {limit}kb/s \n"))
         }
         Ok(reply) => {
             let mut result =
