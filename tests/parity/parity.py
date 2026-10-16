@@ -57,6 +57,11 @@ SIDES = ('cpp', 'rust')
 # Messages resource `append` destinations in the working directory
 DAEMON_LOGS = ('bareos-audit.log', 'bareos.log')
 AUDIT_TIMESTAMP = r'^\d\d-\w{3} \d\d:\d\d'
+# Audit-log comparison only: after a reload that fails in CheckCatalog
+# (C-075) the original formats the date with a freed buffer and writes
+# garbage (random bytes, e.g. "P!\a0\xfd~" or "sect571r1") instead of
+# "dd-Mon hh:mm" from then on; any space-free prefix before "<name>: " counts.
+AUDIT_PREFIX = r'^(?:\d\d-\w{3} \d\d:\d\d|[^\n ]+(?= [^\s:]+: ))'
 
 
 def write_config(source, target, port, args):
@@ -420,7 +425,7 @@ def run(args):
 def compare_audit_log(work, out):
     """Pseudo case `audit-log`: both sides' audit logs, only the timestamp
     prefix of each message normalized."""
-    record = {'id': 'audit-log', 'steps': [], 'normalize': [AUDIT_TIMESTAMP], 'sides': {},
+    record = {'id': 'audit-log', 'steps': [], 'normalize': [AUDIT_PREFIX], 'sides': {},
               'status': 'match', 'reasons': []}
     parts = {}
     for side in SIDES:
@@ -428,7 +433,7 @@ def compare_audit_log(work, out):
         data = path.read_bytes()
         record['sides'][side] = [{'bytes': len(data), 'sha256': hashlib.sha256(data).hexdigest(),
                                   'signals': [], 'end': 'file', 'raw': str(path)}]
-        parts[side] = re.sub(AUDIT_TIMESTAMP.encode(), b'<N>', data, flags=re.M)
+        parts[side] = re.sub(AUDIT_PREFIX.encode(), b'<N>', data, flags=re.M)
     if parts['cpp'] != parts['rust']:
         record['status'] = 'diff'
         diff = list(difflib.unified_diff(parts['cpp'].decode('latin-1').splitlines(True),
