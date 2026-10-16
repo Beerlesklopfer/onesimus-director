@@ -1545,11 +1545,13 @@ fn content_api(ua: &mut crate::ua_select::Ua, vol_list: &[crate::ua_storage_sele
                 // A NULL volume name is undefined behaviour upstream; it is
                 // treated as an empty name.
                 Some(name) => {
-                    let line = match slot_media(ua.ctx, &name.unwrap_or("").chars().take(127).collect::<String>()) {
+                    // bstrncpy(mr.VolumeName, vol_name, MAX_NAME_LENGTH)
+                    let name: String = name.unwrap_or("").chars().take(127).collect();
+                    let line = match slot_media(ua.ctx, &name) {
                         Some(mr) => format!("{t}|{}|{}|{}|{}|{}|{}|{}|{}|{}\n", vl1.slot as i16, mr.slot as i16,
                             mr.volume_name, mr.vol_bytes, mr.vol_status, mr.media_type, mr.pool, mr.last_written as u64,
                             (mr.last_written as u64).wrapping_add(mr.vol_retention)),
-                        None => format!("{t}|{}|0|{}|?|?|?|?|0|0\n", vl1.slot as i16, name.unwrap_or("")),
+                        None => format!("{t}|{}|0|{name}|?|?|?|?|0|0\n", vl1.slot as i16),
                     };
                     ua.send_msg(line);
                 }
