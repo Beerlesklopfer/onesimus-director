@@ -17,7 +17,7 @@ prune files [client=<client>] [pool=<pool>] [yes] | jobs [client=<client>] [pool
 
 **Onesimus-Status:** `registered_unverified`. Funktionsparität ist nicht durch einen Live-Test nachgewiesen.
 
-**Lokaler Handler:** [crates/onesimus-dird/src/commands/admin.rs:647](../../../crates/onesimus-dird/src/commands/admin.rs).
+**Lokaler Handler:** [crates/onesimus-dird/src/commands/admin.rs:739](../../../crates/onesimus-dird/src/commands/admin.rs).
 
 Die folgenden vorhandenen Beispiele und Verhaltensbeschreibungen sind lokale Dokumentation; sie sind kein Beleg für vollständige Bareos-Kompatibilität. Bei Widersprüchen gilt der obige Befund.
 <!-- bareos-reference:end -->

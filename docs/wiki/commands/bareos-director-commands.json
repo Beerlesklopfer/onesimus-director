@@ -711,7 +711,7 @@
     },
     {
       "path": "crates/onesimus-dird/src/catalog_worker.rs",
-      "sha256": "ec0bbdbffcc89a8728867eb54fceeddfe2ec47d82d0c571243f28d063ec49a9c"
+      "sha256": "4558adafd48b876a1eba6bdc55590ba43c0f7b2bb9471b8833d0c019854d3586"
     },
     {
       "path": "crates/onesimus-dird/src/command_executor.rs",
@@ -727,7 +727,7 @@
     },
     {
       "path": "crates/onesimus-dird/src/commands/admin.rs",
-      "sha256": "2746c72f4439a70728e3612bdf41fc12caaa28ee90f0b07469e5b16bcb70d533"
+      "sha256": "1501160f1578701767a082e4d814078c2c0ef8111d17c5d19abe345bacb67990"
     },
     {
       "path": "crates/onesimus-dird/src/commands/bandwidth.rs",
@@ -3526,7 +3526,7 @@
         },
         "implementation": {
           "file": "crates/onesimus-dird/src/commands/admin.rs",
-          "line": 647
+          "line": 739
         },
         "declared_arguments": [
           "volume",
@@ -3578,7 +3578,7 @@
         },
         "implementation": {
           "file": "crates/onesimus-dird/src/commands/admin.rs",
-          "line": 1017
+          "line": 1109
         },
         "declared_arguments": [
           "volume"
@@ -3856,7 +3856,7 @@
         },
         "implementation": {
           "file": "crates/onesimus-dird/src/commands/admin.rs",
-          "line": 1358
+          "line": 1450
         },
         "declared_arguments": [],
         "status": "registered_unverified",
@@ -4482,7 +4482,7 @@
         },
         "implementation": {
           "file": "crates/onesimus-dird/src/commands/admin.rs",
-          "line": 1222
+          "line": 1314
         },
         "declared_arguments": [
           "storage",
