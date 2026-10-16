@@ -51,7 +51,8 @@ pub fn get_registry() -> &'static [CommandDef] {
 
 /// Dispatch a command via the registry (SSOT).
 pub fn dispatch(ast: &CommandAst, ctx: &ExecContext) -> CommandResult {
-    command_registry::dispatch_registry(registry(), ast, ctx)
+    crate::sql_list::with_api1(ctx.api_mode == ApiMode::Api,
+        || command_registry::dispatch_registry(registry(), ast, ctx))
 }
 
 /// Unknown or ACL-denied command (no API framing signals, see Do_a_command).

@@ -203,10 +203,16 @@ fn show_disabled(conf: &Conf, which: Option<&str>, out: &mut Out) {
                 && d.first().is_some_and(|v| parse_bool(v) == Some(false))))
             .filter_map(|r| r.name().map(str::to_string))
             .collect();
+        // Decoration (ua_output.cc:334,340): not printed in `.api 1`
+        let deco = crate::sql_list::decorations();
         if names.is_empty() {
-            out.text.push_str(&format!("No disabled {title}.\n"));
+            if deco {
+                out.text.push_str(&format!("No disabled {title}.\n"));
+            }
         } else {
-            out.text.push_str(&format!("Disabled {title}:\n"));
+            if deco {
+                out.text.push_str(&format!("Disabled {title}:\n"));
+            }
             for n in &names {
                 out.text.push_str(&format!("   {n}\n"));
             }
