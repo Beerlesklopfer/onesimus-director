@@ -575,7 +575,7 @@ pub fn get_user_slot_list(args: &[Argument], argument: &str, num_slots: i32) -> 
 }
 
 /// GetStorageDrive() (ua_select.cc:1429); None is kInvalidDriveNumber.
-fn get_storage_drive(ua: &mut Ua, args: &[Argument], env: &Env, sd: &mut impl SdLink, store: &StorageResource)
+pub fn get_storage_drive(ua: &mut Ua, args: &[Argument], env: &Env, sd: &mut impl SdLink, store: &StorageResource)
     -> Option<i16> {
     if let Some(drive) = arg_number(args, "drive") {
         return Some(drive);
@@ -657,6 +657,38 @@ pub fn do_mount_cmd(ua: &mut Ua, args: &[Argument], env: &Env, sd: &mut impl SdL
     }
 
     invalidate_vol_list(&store.name);
+}
+
+/// get_volume_name_from_SD() (sd_cmds.cc:186): `readlabel <dev> Slot=<slot>
+/// drive=<drive>`; every SD message up to the first `3001 Volume=<name>
+/// Slot=<n>` is relayed. Used by `update slots scan` (C-054).
+pub fn get_volume_name_from_sd(ua: &mut Ua, sd: &mut impl SdLink, store: &StorageResource, slot: u16, drive: i16)
+    -> Option<String> {
+    // readlabelcmd "readlabel %s Slot=%hd drive=%hd\n"
+    let command = format!("readlabel {} Slot={} drive={drive}\n", dev_name(store), slot as i16);
+    let Some(messages) = open_and_exchange(ua, sd, store, &command) else {
+        ua.error_msg("Could not open SD socket.\n");
+        return None;
+    };
+    for message in messages {
+        ua.send_msg(message.clone());
+        if let Some(name) = message.strip_prefix("3001 Volume=").and_then(scan_readlabel_response) {
+            return Some(name);
+        }
+    }
+    None
+}
+
+/// sscanf(msg + 12, "%s Slot=%hd") == 2.
+fn scan_readlabel_response(rest: &str) -> Option<String> {
+    let is_space = |c: char| c.is_ascii_whitespace();
+    let rest = rest.trim_start_matches(is_space);
+    let end = rest.find(is_space).unwrap_or(rest.len());
+    if end == 0 { return None; }
+    let (name, rest) = rest.split_at(end);
+    let rest = rest.trim_start_matches(is_space).strip_prefix("Slot=")?.trim_start_matches(is_space);
+    let digits = rest.strip_prefix(['+', '-']).unwrap_or(rest);
+    digits.starts_with(|c: char| c.is_ascii_digit()).then(|| name.to_string())
 }
 
 #[cfg(test)]

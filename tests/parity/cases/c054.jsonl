@@ -1,0 +1,12 @@
+{"id": "c054-update-slots-file", "steps": ["update slots storage=File"], "timeout_ms": 20000}
+{"id": "c054-update-slot-file", "steps": ["update slot storage=File"], "timeout_ms": 20000}
+{"id": "c054-update-slots-default-arg", "steps": ["update slots File"], "timeout_ms": 20000}
+{"id": "c054-update-slots-storage-first", "steps": ["update storage=File slots"], "timeout_ms": 20000}
+{"id": "c054-update-slots-range", "steps": ["update slots=1-3 storage=File"], "timeout_ms": 20000}
+{"id": "c054-update-slots-drive", "steps": ["update slots storage=File drive=0"], "timeout_ms": 20000}
+{"id": "c054-update-slots-enabled-bad", "steps": ["update slots storage=File enabled=bogus"], "timeout_ms": 20000}
+{"id": "c054-update-slots-enabled-no", "steps": ["update slots storage=File enabled=no"], "timeout_ms": 20000}
+{"id": "c054-update-slots-nosuch", "steps": ["update slots storage=Nope"], "timeout_ms": 20000}
+{"id": "c054-update-slots-api1", "steps": [".api 1", "update slots storage=File"], "timeout_ms": 20000}
+{"id": "c054-update-slots-api2", "steps": [".api 2", "update slots storage=File"], "timeout_ms": 20000}
+{"id": "c054-update-slots-twice", "steps": ["update slots storage=File", "update slots storage=File"], "timeout_ms": 20000}

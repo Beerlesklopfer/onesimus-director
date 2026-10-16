@@ -209,6 +209,9 @@ enum UpdateAction {
     Media { media_id: i64, column: &'static str, value: String, message: String },
     /// Pool record from the Pool resource (UpdatePool).
     Pool(String),
+    /// UpdateSlots (ua_update.cc:1075) on the selected storage with the
+    /// command arguments (key, value): SD dialog and catalog work.
+    Slots { storage: String, args: Vec<(String, Option<String>)> },
     /// An update kind without catalog support yet.
     Unsupported(&'static str),
 }
@@ -253,9 +256,10 @@ fn update_dialog(ua: &mut crate::ua_select::Ua, ast: &CommandAst,
         0 => { update_volume(ua, ast, act); }
         1 => update_pool(ua, ast, act),
         2 => {
-            // UpdateSlots: an autochanger is required.
-            if crate::ua_select::get_storage_resource(ua, ast, true, true).is_some() {
-                act(ua, UpdateAction::Unsupported("update slots"));
+            // UpdateSlots: get_storage_resource(ua, true, true).
+            if let Some(store) = crate::ua_select::get_storage_resource(ua, ast, true, true) {
+                let args = ast.arguments.iter().map(|a| (a.key.clone(), a.value.clone())).collect();
+                act(ua, UpdateAction::Slots { storage: store.name, args });
             }
         }
         _ => act(ua, UpdateAction::Unsupported("update stats")),
@@ -671,8 +675,154 @@ fn update_execute(ua: &mut crate::ua_select::Ua, action: UpdateAction) {
             }
             ua.info_msg("Pool DB record updated from resource.\n");
         }
+        UpdateAction::Slots { storage, args } => {
+            use crate::ua_storage_select::{Env, NetSd};
+            let Some(env) = Env::load(ua.ctx) else { return };
+            let Some(store) = env.storages.iter().find(|s| s.0.name == storage).map(|s| s.0.clone()) else { return };
+            let args: Vec<crate::command_ast::Argument> = args.into_iter()
+                .map(|(key, value)| crate::command_ast::Argument { key, value }).collect();
+            let director = ua.ctx.config.as_ref().and_then(|c| c.read().ok())
+                .map(|c| c.director.name.clone()).unwrap_or_default();
+            update_slots(ua, &args, &env, &store, &mut NetSd { director });
+        }
         UpdateAction::Unsupported(what) => ua.send_msg(format!("{what}: not supported\n")),
     }
+}
+
+/// C++ UpdateSlots() (ua_update.cc:1075) after the storage selection:
+/// slot count and volume list from the SD (`scan`: the label of every
+/// slot), then Slot/InChanger/StorageId of the catalog volumes
+/// (compatibility log C-054).
+fn update_slots(ua: &mut crate::ua_select::Ua, args: &[crate::command_ast::Argument],
+    env: &crate::ua_storage_select::Env, store: &bareos_config::resources::StorageResource,
+    sd: &mut impl crate::ua_storage_select::SdLink) {
+    use crate::ua_storage_select as storage;
+    let Some(cat) = ua.ctx.catalog.clone() else {
+        ua.send_msg("No catalog configured\n");
+        return;
+    };
+    let scan = args.iter().any(|a| a.key.eq_ignore_ascii_case("scan"));
+    // kInvalidDriveNumber (uint16_t max) is sent as %hd.
+    let mut drive: i16 = -1;
+    if scan {
+        drive = storage::get_storage_drive(ua, args, env, sd, store).unwrap_or(-1);
+    }
+    let mut enabled = None;
+    // FindArgWithValue(): the first "Enabled" argument decides.
+    if let Some(value) = args.iter().find(|a| a.key.eq_ignore_ascii_case("enabled"))
+        .and_then(|a| a.value.as_deref()) {
+        match get_enabled(ua, value) {
+            Some(value) => enabled = Some(value),
+            None => return,
+        }
+    }
+
+    // slot_number_t is uint16_t.
+    let max_slots = storage::get_num_slots(ua, sd, store) as u16;
+    if max_slots == 0 {
+        ua.warning_msg("No slots in changer to scan.\n");
+        return;
+    }
+    let Some(mut slot_list) = storage::get_user_slot_list(args, "slots", i32::from(max_slots)) else { return };
+
+    let Some(vol_list) = storage::get_vol_list_from_storage(ua, sd, store, false, scan, false) else {
+        ua.warning_msg("No Volumes found to update, or no barcodes.\n");
+        return;
+    };
+
+    // store->StorageId: the catalog record of the storage (0 without one).
+    let storage_id = crate::ua_select::get_storage_record(ua.ctx, &store.name).unwrap_or(0);
+    let query = |sql: &str| cat.query_rows(sql);
+
+    // First zap out any InChanger with StorageId=0
+    let _ = query("UPDATE Media SET InChanger=0 WHERE StorageId=0");
+
+    for vl in &vol_list {
+        let slot = vl.slot;
+        if slot > max_slots {
+            ua.warning_msg(format!("Slot {slot} greater than max {max_slots} ignored.\n"));
+            continue;
+        }
+        // Check if user wants us to look at this slot
+        let index = usize::from(slot.wrapping_sub(1));
+        if !slot_list.get(index).copied().unwrap_or(false) {
+            continue;
+        }
+        // If scanning, we read the label rather than the barcode
+        let vol_name = if scan {
+            storage::get_volume_name_from_sd(ua, sd, store, slot, drive)
+        } else {
+            vl.vol_name.clone()
+        };
+        slot_list[index] = false;
+
+        // MakeInchangerUnique with MediaId 0 (by VolumeName).
+        let vol = vol_name.as_deref().unwrap_or("");
+        let _ = make_inchanger_unique(&query, slot, storage_id, None, vol);
+
+        let Some(vol) = vol_name else {
+            ua.info_msg(format!("No VolName for Slot={slot} InChanger set to zero.\n"));
+            continue;
+        };
+
+        // GetMediaRecord by VolumeName.
+        let record = query(&format!(
+            "SELECT MediaId,VolumeName,Slot,InChanger,StorageId FROM Media WHERE VolumeName='{}'", slots_sql_escape(&vol)))
+            .ok().filter(|t| t.rows.len() == 1).and_then(|t| t.rows.into_iter().next());
+        let Some(row) = record else {
+            ua.warning_msg(format!("Volume \"{vol}\" not found in catalog. Slot={slot} InChanger set to zero.\n"));
+            continue;
+        };
+        let field = |i: usize| row.get(i).cloned().flatten().unwrap_or_default();
+        let number = |i: usize| field(i).parse::<i64>().unwrap_or(0);
+        let (media_id, name) = (number(0), field(1));
+        if number(2) != i64::from(slot) || number(3) == 0 || number(4) != storage_id {
+            // UpdateMediaRecord(): the changed columns, then MakeInchangerUnique.
+            let enabled = enabled.map(|e| format!(",Enabled={e}")).unwrap_or_default();
+            let sql = format!("UPDATE Media SET Slot={slot},InChanger=1,StorageId={storage_id}{enabled} \
+                WHERE VolumeName='{}'", slots_sql_escape(&name));
+            let result = query(&sql).map_err(|e| format!("update {sql} failed:\n{e}\n"))
+                .and_then(|_| make_inchanger_unique(&query, slot, storage_id, Some(media_id), &name));
+            match result {
+                Ok(()) => ua.info_msg(format!(
+                    "Catalog record for Volume \"{name}\" updated to reference slot {slot}.\n")),
+                Err(error) => ua.error_msg(error),
+            }
+        } else {
+            ua.info_msg(format!("Catalog record for Volume \"{name}\" is up to date.\n"));
+        }
+    }
+
+    // Any slot not visited gets it Inchanger flag reset.
+    for slot in 1..=max_slots {
+        if slot_list.get(usize::from(slot - 1)).copied().unwrap_or(false)
+            && make_inchanger_unique(&query, slot, storage_id, None, "").is_err() {
+            ua.warning_msg(format!("Could not set inchanger to 0 for slot {slot}.\n"));
+        }
+    }
+}
+
+/// EscapeString() for PostgreSQL (standard_conforming_strings).
+fn slots_sql_escape(text: &str) -> String {
+    text.replace('\'', "''")
+}
+
+/// BareosDb::MakeInchangerUnique() (sql_update.cc:418) for a record with
+/// InChanger=1: no other volume of this storage keeps the slot.
+fn make_inchanger_unique(query: &impl Fn(&str) -> Result<crate::catalog_worker::SqlTable, String>, slot: u16,
+    storage_id: i64, media_id: Option<i64>, vol_name: &str) -> Result<(), String> {
+    if slot == 0 || storage_id == 0 {
+        return Ok(());
+    }
+    let sql = match media_id {
+        Some(id) if id != 0 => format!(
+            "UPDATE Media SET InChanger=0, Slot=0 WHERE Slot={slot} AND StorageId={storage_id} AND MediaId!={id}"),
+        _ if !vol_name.is_empty() => format!(
+            "UPDATE Media SET InChanger=0, Slot=0 WHERE Slot={slot} AND StorageId={storage_id} AND VolumeName!='{}'",
+            slots_sql_escape(vol_name)),
+        _ => format!("UPDATE Media SET InChanger=0, Slot=0 WHERE Slot={slot} AND StorageId={storage_id}"),
+    };
+    query(&sql).map(|_| ()).map_err(|e| format!("update {sql} failed:\n{e}\n"))
 }
 
 pub fn cmd_estimate(ast: &CommandAst, ctx: &ExecContext) -> CommandResult {
@@ -2043,5 +2193,173 @@ pub(crate) mod side_effect_tests {
         }));
         assert_eq!(sent, vec!["File: truncate Volume=\"v1\""]);
         assert_eq!(writes(&log.lock().unwrap()), 1);
+    }
+}
+
+/// `update slots` against a fake SD and a catalog double (C-054).
+#[cfg(test)]
+mod update_slots_tests {
+    use super::*;
+    use std::sync::Arc;
+
+    /// Fake SD for `update slots` (reply formats of stored/dir_cmd.cc
+    /// ChangerCmd/ReadlabelCmd and stored/autochanger.cc): records commands.
+    struct SlotsSd { sent: Vec<String>, answer: fn(&str) -> Vec<String> }
+
+    impl crate::ua_storage_select::SdLink for SlotsSd {
+        fn exchange(&mut self, _store: &bareos_config::resources::StorageResource, command: &str)
+            -> Result<Vec<String>, String> {
+            self.sent.push(command.to_string());
+            Ok((self.answer)(command).into_iter().map(|m| format!("{m}\n")).collect())
+        }
+    }
+
+    /// Catalog double: StorageId 3 for "Changer…" (none for other storages),
+    /// media vol1 (MediaId 1, slot 1, in changer, StorageId 3) and vol2
+    /// (MediaId 2, slot 0, not in changer, StorageId 0); statements with
+    /// "Slot=4 " fail. Every statement is logged.
+    fn slots_catalog() -> (crate::catalog_worker::CatalogHandle, Arc<std::sync::Mutex<Vec<String>>>) {
+        use crate::catalog_worker::{CatalogRequest, CatalogResponse, SqlColumn, SqlTable};
+        let log = Arc::new(std::sync::Mutex::new(Vec::new()));
+        let seen = log.clone();
+        let handle = crate::catalog_worker::CatalogHandle::mock(move |request| {
+            let sql = match request {
+                CatalogRequest::TextRows { sql } | CatalogRequest::RawQuery { sql } => sql,
+                _ => "other request".to_string(),
+            };
+            seen.lock().unwrap().push(sql.clone());
+            let table = |columns: &[&str], rows: Vec<Vec<&str>>| CatalogResponse::Rows(SqlTable {
+                columns: columns.iter().map(|c| SqlColumn { name: c.to_string(), numeric: false }).collect(),
+                rows: rows.into_iter().map(|r| r.into_iter().map(|v| Some(v.to_string())).collect()).collect() });
+            if sql.contains("Slot=4 ") {
+                CatalogResponse::Error("ERROR:  simulated failure".into())
+            } else if sql.starts_with("SELECT StorageId FROM Storage") {
+                table(&["storageid"], if sql.contains("'Changer") { vec![vec!["3"]] } else { vec![] })
+            } else if sql.starts_with("SELECT MediaId,VolumeName,Slot,InChanger,StorageId FROM Media") {
+                let columns = ["mediaid", "volumename", "slot", "inchanger", "storageid"];
+                if sql.ends_with("'vol1'") {
+                    table(&columns, vec![vec!["1", "vol1", "1", "1", "3"]])
+                } else if sql.ends_with("'vol2'") {
+                    table(&columns, vec![vec!["2", "vol2", "0", "0", "0"]])
+                } else {
+                    table(&columns, vec![])
+                }
+            } else {
+                table(&[], vec![])
+            }
+        });
+        (handle, log)
+    }
+
+    fn run_update_slots(storage: &str, line: &str, answer: fn(&str) -> Vec<String>)
+        -> (String, Vec<String>, Vec<String>) {
+        let mut ctx = side_effect_tests::context();
+        let (catalog, log) = slots_catalog();
+        ctx.catalog = Some(catalog);
+        let store = bareos_config::resources::StorageResource { name: storage.into(), address: "sd.example".into(),
+            port: 9103, device: "Dev".into(), ..Default::default() };
+        let env = crate::ua_storage_select::Env { storages: vec![(store.clone(), true, true)], running: vec![] };
+        let ast = crate::session::parse_cli_command(line);
+        let mut sd = SlotsSd { sent: vec![], answer };
+        let mut ua = crate::ua_select::Ua::new(&ctx);
+        update_slots(&mut ua, &ast.arguments, &env, &store, &mut sd);
+        let result = ua.finish(true);
+        let output = format!("{}{}", result.text_output, if result.errors_inline { "" } else { &result.error_message });
+        let sql = log.lock().unwrap().clone();
+        (output, sd.sent, sql)
+    }
+
+    fn connect(storage: &str) -> String {
+        format!("Connecting to Storage daemon {storage} at sd.example:9103 ...\n")
+    }
+
+    fn writes(sql: &[String]) -> Vec<&str> {
+        sql.iter().filter(|q| q.starts_with("UPDATE")).map(String::as_str).collect()
+    }
+
+    #[test]
+    fn update_slots_from_barcodes() {
+        let (output, sent, sql) = run_update_slots("ChangerBar", "update slots", |cmd| match cmd {
+            c if c.starts_with("autochanger slots") => vec!["slots=4".into()],
+            c if c.starts_with("autochanger list") => vec!["1:vol1".into(), "2:vol2".into(), "3:volX".into(),
+                "5:vol5".into(), "3995 Bad autochanger \"list\" command".into()],
+            _ => vec![],
+        });
+        assert_eq!(sent, ["autochanger slots Dev\n", "autochanger list Dev \n"]);
+        let c = connect("ChangerBar");
+        assert_eq!(output, format!("{c}Device \"Dev\" has 4 slots.\n{c}\
+            3995 Bad autochanger \"list\" command\n\
+            Catalog record for Volume \"vol1\" is up to date.\n\
+            Catalog record for Volume \"vol2\" updated to reference slot 2.\n\
+            Volume \"volX\" not found in catalog. Slot=3 InChanger set to zero.\n\
+            Slot 5 greater than max 4 ignored.\n\
+            Could not set inchanger to 0 for slot 4.\n"));
+        assert_eq!(writes(&sql), [
+            "UPDATE Media SET InChanger=0 WHERE StorageId=0",
+            "UPDATE Media SET InChanger=0, Slot=0 WHERE Slot=1 AND StorageId=3 AND VolumeName!='vol1'",
+            "UPDATE Media SET InChanger=0, Slot=0 WHERE Slot=2 AND StorageId=3 AND VolumeName!='vol2'",
+            "UPDATE Media SET Slot=2,InChanger=1,StorageId=3 WHERE VolumeName='vol2'",
+            "UPDATE Media SET InChanger=0, Slot=0 WHERE Slot=2 AND StorageId=3 AND MediaId!=2",
+            "UPDATE Media SET InChanger=0, Slot=0 WHERE Slot=3 AND StorageId=3 AND VolumeName!='volX'",
+            "UPDATE Media SET InChanger=0, Slot=0 WHERE Slot=4 AND StorageId=3",
+        ]);
+    }
+
+    #[test]
+    fn update_slots_scan_reads_the_labels() {
+        let (output, sent, sql) = run_update_slots("ChangerScan", "update slots=1-2 scan drive=1 enabled=no", |cmd| match cmd {
+            c if c.starts_with("autochanger slots") => vec!["slots=3".into()],
+            c if c.starts_with("autochanger list") => vec!["1:".into(), "2:vol2".into(), "3:vol3".into()],
+            c if c.starts_with("readlabel Dev Slot=1 ") => vec!["3301 Issuing autochanger \"loaded? drive 1\" command.".into(),
+                "3001 Volume=vol2 Slot=1".into(), "3001 not shown".into()],
+            _ => vec!["3902 Cannot mount Volume on Storage Device \"Dev\".".into()],
+        });
+        assert_eq!(sent, ["autochanger slots Dev\n", "autochanger list Dev \n",
+            "readlabel Dev Slot=1 drive=1\n", "readlabel Dev Slot=2 drive=1\n"]);
+        let c = connect("ChangerScan");
+        assert_eq!(output, format!("{c}Device \"Dev\" has 3 slots.\n{c}\
+            {c}3301 Issuing autochanger \"loaded? drive 1\" command.\n3001 Volume=vol2 Slot=1\n\
+            Catalog record for Volume \"vol2\" updated to reference slot 1.\n\
+            {c}3902 Cannot mount Volume on Storage Device \"Dev\".\n\
+            No VolName for Slot=2 InChanger set to zero.\n"));
+        assert_eq!(writes(&sql), [
+            "UPDATE Media SET InChanger=0 WHERE StorageId=0",
+            "UPDATE Media SET InChanger=0, Slot=0 WHERE Slot=1 AND StorageId=3 AND VolumeName!='vol2'",
+            "UPDATE Media SET Slot=1,InChanger=1,StorageId=3,Enabled=0 WHERE VolumeName='vol2'",
+            "UPDATE Media SET InChanger=0, Slot=0 WHERE Slot=1 AND StorageId=3 AND MediaId!=2",
+            "UPDATE Media SET InChanger=0, Slot=0 WHERE Slot=2 AND StorageId=3",
+        ], "slot 3 is outside slots=1-2");
+    }
+
+    #[test]
+    fn update_slots_stops_before_the_sd_on_bad_arguments() {
+        let none = |_: &str| -> Vec<String> { panic!("must not contact the SD") };
+        let (output, sent, _) = run_update_slots("ChangerArgs", "update slots enabled=bogus", none);
+        assert_eq!(output, "Invalid Enabled value, it must be yes, no, archived, 0, 1, or 2\n");
+        assert!(sent.is_empty());
+        // A bad slot list is silent upstream (Dmsg only).
+        let (output, sent, sql) = run_update_slots("ChangerList", "update slots=3-1", |_| vec!["slots=4".into()]);
+        assert_eq!(output, format!("{}Device \"Dev\" has 4 slots.\n", connect("ChangerList")));
+        assert_eq!(sent, ["autochanger slots Dev\n"]);
+        assert!(writes(&sql).is_empty());
+    }
+
+    #[test]
+    fn update_slots_on_a_plain_device_and_without_storage_record() {
+        let (output, _, _) = run_update_slots("PlainSlots", "update slots",
+            |_| vec!["3998 Device \"Dev\" is not an autochanger.".into()]);
+        assert_eq!(output, format!("{}3998 Device \"Dev\" is not an autochanger.\nDevice \"Dev\" has 0 slots.\n\
+            No slots in changer to scan.\n", connect("PlainSlots")));
+        // Empty list: warning, no catalog change.
+        let (output, _, sql) = run_update_slots("EmptySlots", "update slots", |cmd|
+            if cmd.starts_with("autochanger slots") { vec!["slots=2".into()] } else { vec![] });
+        assert!(output.ends_with("No Volumes found to update, or no barcodes.\n"), "{output}");
+        assert!(writes(&sql).is_empty());
+        // StorageId 0: MakeInchangerUnique does nothing.
+        let (output, _, sql) = run_update_slots("NoRecord", "update slots", |cmd|
+            if cmd.starts_with("autochanger slots") { vec!["slots=2".into()] } else { vec!["1:vol1".into()] });
+        assert!(output.ends_with("Catalog record for Volume \"vol1\" updated to reference slot 1.\n"), "{output}");
+        assert_eq!(writes(&sql), ["UPDATE Media SET InChanger=0 WHERE StorageId=0",
+            "UPDATE Media SET Slot=1,InChanger=1,StorageId=0 WHERE VolumeName='vol1'"]);
     }
 }

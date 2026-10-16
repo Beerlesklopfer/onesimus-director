@@ -876,7 +876,7 @@ pub fn get_pool_dbr(ua: &mut Ua, ast: &CommandAst, name: &str, argk: &str) -> Op
 }
 
 /// C++ GetStorageRecord() by name: the StorageId, if there is exactly one.
-fn get_storage_record(ctx: &ExecContext, name: &str) -> Option<i64> {
+pub(crate) fn get_storage_record(ctx: &ExecContext, name: &str) -> Option<i64> {
     let ids = catalog_column(ctx, &format!("SELECT StorageId FROM Storage WHERE Storage.Name='{}'", sql_escape(name)))?;
     match ids.as_slice() {
         [id] => id.parse().ok(),
