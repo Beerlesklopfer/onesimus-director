@@ -171,7 +171,7 @@
 {"id": "autodisplay-on", "steps": ["autodisplay on"]}
 {"id": "gui-on", "steps": ["gui on"]}
 {"id": "gui-off", "steps": ["gui off"]}
-{"id": "var", "steps": ["var"]}
+{"id": "var", "steps": ["var"], "normalize": ["(?s)(?<=Using Catalog \"MyCatalog\"\\n).*\\Z"], "note": "C-023: bare var makes C++ print an uninitialized buffer (stale bytes of earlier messages, may contain newlines, varies per run); Onesimus prints an empty line. Everything after the catalog-selection lines is undefined upstream and normalized"}
 {"id": "use", "steps": ["use catalog=MyCatalog"]}
 {"id": "query-list", "steps": ["query"], "steps_note": "dialog"}
 {"id": "sqlquery-select", "steps": ["sqlquery", "select count(*) from job;", ""]}
