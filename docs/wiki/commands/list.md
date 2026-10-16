@@ -1,4 +1,4 @@
-# list — List Catalog Records
+# list — Katalogdatensätze auflisten
 
 <!-- bareos-reference:start -->
 ## Aus den Bareos-Originalquellen
@@ -28,97 +28,1068 @@ list basefiles ( jobid=<jobid> | ujobid=<complete_name> ) | backups client=<clie
 
 Die folgenden vorhandenen Beispiele und Verhaltensbeschreibungen sind lokale Dokumentation; sie sind kein Beleg für vollständige Bareos-Kompatibilität. Bei Widersprüchen gilt der obige Befund.
 <!-- bareos-reference:end -->
-Query the PostgreSQL catalog for job, volume, client, pool, and file records.
+
+## Zweck
+
+`list` liest Datensätze aus dem Katalog und zeigt sie als Tabelle: Jobs, Job-Protokolle, gesicherte Dateien, FileSets, Volumes, Pools, Clients, Storages, Kopien und Statistiken. Der Befehl liest nur und verändert nichts. Für dieselben Daten mit allen Spalten untereinander gibt es [llist](llist.md); beide Befehle verstehen dieselben Schlüsselwörter.
+
+Beim ersten Katalogzugriff einer Sitzung meldet der Director `Automatically selected Catalog: MyCatalog` und `Using Catalog "MyCatalog"`. Nennt der Befehl einen Client oder Job, aus dem sich der Katalog ergibt, erscheint nur die zweite Zeile. Bei weiteren Befehlen derselben Sitzung fallen beide Zeilen weg.
 
 ## Syntax
 
-```
-list <what> [limit=<N>] [jobid=<N>] [job=<name>]
-```
-
-## Sub-Commands
-
-| What | Description | Source |
-|------|-------------|--------|
-| `jobs` | Job records (default) | `vw_job_summary` view |
-| `jobid=<N>` | Single job by ID | `job` table |
-| `job=<name>` | Jobs by name | `job` table |
-| `volumes` / `media` | Volume records | `vw_volume_status` view |
-| `clients` | Client records | `client` table |
-| `pools` | Pool records | `pool` table |
-| `files` | File records | `vw_file_list` view |
-| `storages` | Storage records | `storage` table |
-| `schedules` | Schedule records | `schedule` table |
-| `filesets` | FileSet resources | config (not DB) |
-| `jobtotals` | Summary statistics | `job` table (aggregate) |
-
-## Examples
-
-### List recent jobs
-```
-* list jobs
-jobid  jobname           type level jobstatus clientname  starttime            endtime              jobfiles jobbytes
-10     backup-bareos-fd  B    F     T         bareos-fd   2026-03-28 21:20:40  2026-03-28 21:20:42  458      71683878
-9      backup-bareos-fd  B    F     T         bareos-fd   2026-03-28 21:18:16  2026-03-28 21:18:18  458      71683878
+```text
+list jobs [job=<name>] [client=<name>] [jobstatus=<status>[,…]] [jobtype=<typ>[,…]] [joblevel=<level>[,…]] [volume=<volume>] [pool=<pool>] [days=<n>] [hours=<n>] [last] [count] [reverse] [order=asc|desc] [current | enabled | disabled] [limit=<n> [offset=<n>]]
+list job=<name> | jobname=<name> [Filter wie bei jobs]
+list jobid=<jobid> | ujobid=<eindeutiger-jobname>
+list jobtotals
+list files jobid=<jobid> | ujobid=<eindeutiger-jobname>
+list basefiles jobid=<jobid> | ujobid=<eindeutiger-jobname>
+list fileset [jobid=<jobid> | ujobid=<eindeutiger-jobname> | filesetid=<id>]
+list filesets
+list jobmedia [jobid=<jobid> | ujobid=<eindeutiger-jobname>]
+list joblog jobid=<jobid> | ujobid=<eindeutiger-jobname> [count]
+list log [client=<name>] [reverse]
+list pools | pool=<name> | poolid=<id>
+list clients | client=<name>
+list storages
+list volumes | media [all | jobid=<jobid> | ujobid=<eindeutiger-jobname> | pool=<pool>] [count]
+list volume=<name> | media=<name> | volumeid=<id> | mediaid=<id>
+list nextvolume | nextvol [job=<name>] [days=<n>]
+list copies [jobid=<jobid>[,…]]
+list backups client=<name> [fileset=<name> | fileset=any] [jobstatus=<status>[,…]] [level=<level>[,…]] [order=asc|desc] [days=<n>] [hours=<n>]
+list jobstatistics | jobstats jobid=<jobid>
+list <schlüsselwort> … [catalog=<katalog>] [limit=<n> [offset=<n>]] [current] [enabled | disabled]
 ```
 
-### List specific job
-```
-* list jobid=10
-jobid  name              type level jobstatus starttime            endtime              jobfiles jobbytes  joberrors
-10     backup-bareos-fd  B    F     T         2026-03-28 21:20:40  2026-03-28 21:20:42  458      71683878  0
+## Argumente
+
+| Argument | Werte | Bedeutung |
+|---|---|---|
+| `jobs` | – | Alle Jobs aus dem Katalog, eine Zeile pro Job. Die Filter dieser Tabelle lassen sich kombinieren. |
+| `job=<name>`, `jobname=<name>` | Jobname | Nur Jobs mit diesem Namen. Allein (`list job=…`) wirkt es wie `list jobs job=…`. |
+| `jobid=<jobid>` | Ganzzahl | Genau ein Job. Unbekannte JobIds liefern eine leere Antwort. |
+| `ujobid=<name>` | eindeutiger Jobname, z.B. `backup-bareos-fd.2026-10-13_21.00.00_09` | Genau ein Job über seinen eindeutigen Namen. |
+| `client=<name>` | Clientname | Nur Jobs dieses Clients. Bei `log` und `backups` ebenfalls Filter; ein unbekannter Name ergibt `invalid client argument`. |
+| `jobstatus=<status>` | Buchstabe (`T`, `W`, `E`, `f`, `A`, `R`, …) oder `terminated`, `warnings`, `error`, `fatal`, `canceled`, `running`; mehrere mit Komma | Nur Jobs mit diesem Status. |
+| `jobtype=<typ>` | Buchstabe (`B`, `R`, `V`, `C`, `M`, …) oder exakter Name wie `Backup`, `Copy` (Groß-/Kleinschreibung zählt); mehrere mit Komma | Nur Jobs dieses Typs. |
+| `joblevel=<level>`, `level=<level>` | `F`, `I`, `D` oder `Full`, `Incremental`, `Differential`; mehrere mit Komma | Nur Jobs dieses Levels. Ein einzelner Buchstabe wird wörtlich genommen, `level=f` findet also nichts. |
+| `volume=<volume>` | Volumename | Nur Jobs, die auf dieses Volume geschrieben haben. |
+| `pool=<pool>` | Poolname | Bei `jobs`: nur Jobs dieses Pools. Bei `volumes`: nur Volumes dieses Pools; ein unbekannter Pool öffnet eine Auswahlliste (siehe Dialoge). Allein: der Pool-Datensatz mit Prune-Details. |
+| `days=<n>`, `hours=<n>` | Ganzzahl | Nur Jobs, die in den letzten n Tagen bzw. Stunden gestartet sind. Bei `nextvolume`: Anzahl Tage voraus (höchstens 50). |
+| `last` | – | Pro Jobname nur der letzte Lauf. |
+| `count` | – | Statt der Zeilen nur ihre Anzahl (`jobs`, `joblog`, `volumes`). |
+| `reverse` | – | Umgekehrte Reihenfolge (neueste zuerst), bei `jobs` und `log`. |
+| `order=asc\|desc` | `asc`, `desc` (auch abgekürzt) | Sortierung nach Startzeit, bei `jobs` und `backups`. Ein anderer Wert ist bei `backups` ein Fehler. |
+| `limit=<n>`, `offset=<n>` | Ganzzahl | Höchstens n Zeilen, ab Zeile `offset`. `limit=0` oder ein ungültiger Wert ergeben keine Zeilen. |
+| `current` | – | Nur Zeilen, deren Job, Client, Pool, Storage oder FileSet noch in der Konfiguration steht. |
+| `enabled`, `disabled` | – | Nur Zeilen, deren Ressource in der Konfiguration aktiviert bzw. deaktiviert ist. |
+| `jobtotals` | – | Anzahl, Dateien und Bytes je Jobname und als Summe. |
+| `files` | – | Pfade der in einem Job gesicherten Dateien. Braucht `jobid=` oder `ujobid=`. |
+| `basefiles` | – | Basisdateien eines Base-Jobs. Braucht `jobid=` oder `ujobid=`. |
+| `fileset` | mit `jobid=`, `ujobid=` oder `filesetid=` | Der FileSet-Datensatz mit dem gespeicherten FileSet-Text. |
+| `filesets` | – | Alle FileSet-Datensätze im Katalog. |
+| `jobmedia` | optional `jobid=`, `ujobid=` | Welche Volumes ein Job (oder alle Jobs) beschrieben hat. |
+| `joblog` | mit `jobid=` oder `ujobid=` | Das gespeicherte Jobprotokoll mit Zeitstempeln. |
+| `log` | optional `client=`, `reverse` | Die letzten Protokollzeilen aller Jobs. |
+| `pools`, `poolid=<id>` | – / Ganzzahl | Pool-Datensätze. |
+| `clients`, `client=<name>` | – / Clientname | Client-Datensätze. `client` ohne Wert ist kein gültiges Schlüsselwort. |
+| `storages` | – | Storage-Datensätze. |
+| `volumes`, `media` | optional `all`, `jobid=`, `ujobid=`, `pool=` | Volumes, nach Pool gruppiert. Mit `all` in einer Tabelle, mit `jobid=` nur die Volumenamen des Jobs. |
+| `volume=<name>`, `media=<name>`, `volumeid=<id>`, `mediaid=<id>` | Name / Ganzzahl | Genau ein Volume. |
+| `nextvolume`, `nextvol` | optional `job=`, `days=` | Welches Volume der Job als nächstes beschreiben würde. Ohne `job=` folgt eine Auswahlliste. |
+| `copies` | optional `jobid=` (Liste mit Komma) | Kopierjobs zu den angegebenen Jobs. |
+| `backups` | `client=` Pflicht, dazu `fileset=` (Name oder `any`) und die Job-Filter | Sicherungen eines Clients. |
+| `jobstatistics`, `jobstats` | mit `jobid=` | Statistikdatensätze eines laufenden oder gelaufenen Jobs. |
+| `catalog=<katalog>` | Katalogname | Diesen Katalog verwenden (siehe [use](use.md)). |
+
+## Dialoge
+
+Zwei Varianten fragen nach, wenn eine Angabe fehlt oder nicht passt:
+
+- `list volumes pool=<pool>` mit einem Pool, den der Katalog nicht kennt, zeigt die definierten Pools und fragt `Select the Pool (1-4):`. Eine Nummer wählt den Pool, `.` bricht ab (`Selection aborted, nothing done.` und `Pool <name> doesn't exist.`).
+- `list nextvolume` ohne `job=` zeigt die Job-Ressourcen und fragt `Select Job resource (1-9):`. Eine Nummer wählt den Job, `.` bricht ab.
+
+Eine Zahl außerhalb des Bereichs beantwortet der Director mit `Please enter a number between 1 and <n>` und fragt erneut. Unter `.api 2` wird nicht gefragt: Die Fehlermeldungen kommen direkt als JSON-Fehler zurück.
+
+## API-Modi
+
+- **`.api 0`** (Standard): Tabellen mit Rahmen, Zahlen mit Tausendertrennzeichen.
+- **`gui on`**: wie `.api 0`, aber Zahlen ohne Trennzeichen und linksbündig; die Zeile `Automatically selected Catalog` fällt weg.
+- **`.api 1`**: nur die Datenzeilen ohne Rahmen und Kopfzeile; Fehler und Warnungen als eigene Meldungen.
+- **`.api 2`**: JSON-RPC-Objekt. Der Schlüssel unter `result` heißt wie die Tabelle (`jobs`, `pools`, `volumes`, `clients`, `storages`, `jobmedia`, `joblog`, `filesets`, …), alle Werte sind Zeichenketten. Mit `limit=` kommt `meta.range` mit `limit`, `offset` und `filtered` dazu. Fehler stehen in `error.data.messages.error`, Warnungen in `…warning`. Die Katalogmeldungen fehlen. `list nextvolume` liefert unter `.api 2` ein leeres `result`.
+- **`.api json compact=yes`**: dasselbe JSON in einer Zeile.
+
+## Beispiele
+
+### Jobs anzeigen
+
+`list jobs` zeigt alle Jobs. Mit `limit=` begrenzt man die Ausgabe.
+
+```text
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]> list jobs limit=5
+Automatically selected Catalog: MyCatalog
+Using Catalog "MyCatalog"
++-------+-----------------+-----------+---------------------+----------+------+-------+----------+-------------+-----------+
+| jobid | name            | client    | starttime           | duration | type | level | jobfiles | jobbytes    | jobstatus |
++-------+-----------------+-----------+---------------------+----------+------+-------+----------+-------------+-----------+
+|   479 | benchmark-small | bareos-fd | 2026-03-30 22:26:51 | 00:00:02 | B    | F     |    2,605 | 824,021,543 | T         |
+|   480 | benchmark-small | bareos-fd | 2026-03-30 22:26:51 | 00:00:02 | B    | F     |    2,605 | 824,021,543 | T         |
+|   481 | benchmark-small | bareos-fd | 2026-03-30 22:26:51 | 00:00:02 | B    | F     |    2,605 | 824,021,543 | T         |
+|   482 | benchmark-small | bareos-fd | 2026-03-30 22:26:53 | 00:00:01 | B    | F     |    2,605 | 824,021,543 | T         |
+|   483 | benchmark-small | bareos-fd | 2026-03-30 22:37:04 | 00:00:04 | B    | F     |    2,605 | 824,021,543 | T         |
++-------+-----------------+-----------+---------------------+----------+------+-------+----------+-------------+-----------+
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]>
 ```
 
-### List with limit
-```
-* list jobs limit=3
+### Jobs filtern
+
+Filter lassen sich kombinieren, hier nach Status, Typ und Level.
+
+```text
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]> list jobs jobstatus=T,W limit=3
++-------+-----------------+-----------+---------------------+----------+------+-------+----------+-------------+-----------+
+| jobid | name            | client    | starttime           | duration | type | level | jobfiles | jobbytes    | jobstatus |
++-------+-----------------+-----------+---------------------+----------+------+-------+----------+-------------+-----------+
+|   479 | benchmark-small | bareos-fd | 2026-03-30 22:26:51 | 00:00:02 | B    | F     |    2,605 | 824,021,543 | T         |
+|   480 | benchmark-small | bareos-fd | 2026-03-30 22:26:51 | 00:00:02 | B    | F     |    2,605 | 824,021,543 | T         |
+|   481 | benchmark-small | bareos-fd | 2026-03-30 22:26:51 | 00:00:02 | B    | F     |    2,605 | 824,021,543 | T         |
++-------+-----------------+-----------+---------------------+----------+------+-------+----------+-------------+-----------+
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]> list jobs jobtype=B joblevel=I limit=2
++-------+------------------+-----------+---------------------+----------+------+-------+----------+------------+-----------+
+| jobid | name             | client    | starttime           | duration | type | level | jobfiles | jobbytes   | jobstatus |
++-------+------------------+-----------+---------------------+----------+------+-------+----------+------------+-----------+
+|   602 | backup-bareos-fd | bareos-fd | 2026-06-12 21:00:02 | 00:00:01 | B    | I     |        7 | 57,746,072 | T         |
+|   605 | backup-bareos-fd | bareos-fd | 2026-06-15 21:00:02 | 00:00:01 | B    | I     |        7 | 57,978,936 | T         |
++-------+------------------+-----------+---------------------+----------+------+-------+----------+------------+-----------+
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]>
 ```
 
-### List volumes with fill percentage
-```
-* list volumes
-mediaid volumename volstatus volbytes   voljobs volfiles mediatype poolname pct_full
-1       Full-0001  Append    839002751  4       0        File      Full     0.0
+Nur Jobs eines Clients oder eines Jobnamens:
+
+```text
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]> list jobs client=bareos-fd limit=2
+Using Catalog "MyCatalog"
++-------+-----------------+-----------+---------------------+----------+------+-------+----------+-------------+-----------+
+| jobid | name            | client    | starttime           | duration | type | level | jobfiles | jobbytes    | jobstatus |
++-------+-----------------+-----------+---------------------+----------+------+-------+----------+-------------+-----------+
+|   479 | benchmark-small | bareos-fd | 2026-03-30 22:26:51 | 00:00:02 | B    | F     |    2,605 | 824,021,543 | T         |
+|   480 | benchmark-small | bareos-fd | 2026-03-30 22:26:51 | 00:00:02 | B    | F     |    2,605 | 824,021,543 | T         |
++-------+-----------------+-----------+---------------------+----------+------+-------+----------+-------------+-----------+
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]>
 ```
 
-### List files from a backup
-```
-* list files
-fileid jobid filepath
-902    2     /usr/sbin/
-901    2     /usr/sbin/bareos-dird
-900    2     /usr/sbin/bconsole
-```
-
-### List filesets (from config, not DB)
-```
-* list filesets
-Name                      Include                                  Exclude
-SelfTest                  /usr/sbin                                -
-LinuxAll                  /                                        /proc, /tmp, /sys
+```text
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]> list jobs jobname=BackupCatalog limit=2
+Automatically selected Catalog: MyCatalog
+Using Catalog "MyCatalog"
++-------+---------------+-----------+---------------------+----------+------+-------+----------+----------+-----------+
+| jobid | name          | client    | starttime           | duration | type | level | jobfiles | jobbytes | jobstatus |
++-------+---------------+-----------+---------------------+----------+------+-------+----------+----------+-----------+
+|   508 | BackupCatalog | bareos-fd | 2026-04-03 21:30:06 | 00:30:07 | B    | F     |        0 |        0 | f         |
+|   511 | BackupCatalog | bareos-fd | 2026-04-06 21:30:12 | 00:30:06 | B    | F     |        0 |        0 | f         |
++-------+---------------+-----------+---------------------+----------+------+-------+----------+----------+-----------+
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]>
 ```
 
-### Job totals
+Jobs der letzten Tage:
+
+```text
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]> list jobs days=1
+Automatically selected Catalog: MyCatalog
+Using Catalog "MyCatalog"
++-------+------------------+-----------+---------------------+----------+------+-------+----------+----------+-----------+
+| jobid | name             | client    | starttime           | duration | type | level | jobfiles | jobbytes | jobstatus |
++-------+------------------+-----------+---------------------+----------+------+-------+----------+----------+-----------+
+|     5 | backup-bareos-fd | bareos-fd | 2026-10-15 21:00:02 | 00:00:00 | B    | I     |       12 |  965,864 | T         |
+|     9 | backup-bareos-fd | bareos-fd | 2026-10-15 21:00:02 | 00:00:00 | B    | I     |        0 |        0 | T         |
+|    10 | backup-bareos-fd | bareos-fd | 2026-10-15 21:00:02 | 00:00:01 | B    | I     |        0 |        0 | T         |
+|    11 | backup-bareos-fd | bareos-fd | 2026-10-15 21:00:03 | 00:00:01 | B    | I     |        0 |        0 | T         |
+|    12 | backup-bareos-fd | bareos-fd | 2026-10-15 21:00:13 | 00:00:00 | B    | I     |        0 |        0 | T         |
+|    13 | backup-bareos-fd | bareos-fd | 2026-10-15 21:00:45 | 00:00:01 | B    | I     |        0 |        0 | T         |
+|    14 | backup-bareos-fd | bareos-fd | 2026-10-15 21:00:52 | 00:00:00 | B    | I     |        0 |        0 | f         |
+|    15 | backup-bareos-fd | bareos-fd | 2026-10-15 21:00:56 | 00:00:00 | B    | I     |        0 |        0 | T         |
+|     6 | BackupCatalog    | bareos-fd | 2026-10-15 21:10:02 | 00:00:00 | B    | F     |        0 |        0 | E         |
++-------+------------------+-----------+---------------------+----------+------+-------+----------+----------+-----------+
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]>
 ```
-* list jobtotals
-jobs  files  bytes
-10    4580   716838780
+
+Jobs auf einem bestimmten Volume:
+
+```text
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]> list jobs volume=Full-47321
+Automatically selected Catalog: MyCatalog
+Using Catalog "MyCatalog"
++-------+------------------+-----------+---------------------+----------+------+-------+----------+-------------+-----------+
+| jobid | name             | client    | starttime           | duration | type | level | jobfiles | jobbytes    | jobstatus |
++-------+------------------+-----------+---------------------+----------+------+-------+----------+-------------+-----------+
+|   600 | backup-bareos-fd | bareos-fd | 2026-06-11 21:00:02 | 00:00:01 | B    | F     |      599 | 157,762,030 | T         |
+|   601 | BackupCatalog    | bareos-fd | 2026-06-11 21:10:04 | 00:00:01 | B    | F     |       67 |      14,972 | W         |
+|   603 | BackupCatalog    | bareos-fd | 2026-06-12 21:10:04 | 00:00:00 | B    | F     |       67 |      14,972 | W         |
+[…]
++-------+------------------+-----------+---------------------+----------+------+-------+----------+-------------+-----------+
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]>
 ```
 
-## Job Status Codes
+### Letzter Lauf je Job, umgekehrte Reihenfolge, Seiten
 
-| Code | Meaning |
-|------|---------|
-| `C` | Created (not yet running) |
-| `R` | Running |
-| `T` | Terminated successfully |
-| `E` | Error |
-| `f` | Fatal error |
-| `W` | Warnings |
-| `A` | Canceled by user |
+```text
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]> list jobs last
+Automatically selected Catalog: MyCatalog
+Using Catalog "MyCatalog"
++-------+------------------+-----------+---------------------+----------+------+-------+----------+-------------+-----------+
+| jobid | name             | client    | starttime           | duration | type | level | jobfiles | jobbytes    | jobstatus |
++-------+------------------+-----------+---------------------+----------+------+-------+----------+-------------+-----------+
+|   506 | benchmark-small  | bareos-fd | 2026-03-30 22:53:21 | 00:00:54 | B    | F     |    2,605 | 824,021,543 | T         |
+|   628 | backup-bareos-fd | bareos-fd | 2026-07-10 21:00:02 | 00:00:01 | B    | I     |        0 |           0 | T         |
+|   629 | BackupCatalog    | bareos-fd | 2026-07-10 21:10:04 | 00:00:01 | B    | F     |       67 |      14,972 | W         |
++-------+------------------+-----------+---------------------+----------+------+-------+----------+-------------+-----------+
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]>
+```
 
-## Related Commands
+```text
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]> list jobs reverse limit=3
+Automatically selected Catalog: MyCatalog
+Using Catalog "MyCatalog"
++-------+------------------+-----------+---------------------+----------+------+-------+----------+----------+-----------+
+| jobid | name             | client    | starttime           | duration | type | level | jobfiles | jobbytes | jobstatus |
++-------+------------------+-----------+---------------------+----------+------+-------+----------+----------+-----------+
+|     6 | BackupCatalog    | bareos-fd | 2026-10-15 21:10:02 | 00:00:00 | B    | F     |        0 |        0 | E         |
+|    15 | backup-bareos-fd | bareos-fd | 2026-10-15 21:00:56 | 00:00:00 | B    | I     |        0 |        0 | T         |
+|    14 | backup-bareos-fd | bareos-fd | 2026-10-15 21:00:52 | 00:00:00 | B    | I     |        0 |        0 | f         |
++-------+------------------+-----------+---------------------+----------+------+-------+----------+----------+-----------+
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]>
+```
 
-- [llist](llist.md) — Same as list (alias)
-- [sqlquery](sqlquery.md) — Raw SQL queries
-- [.sql](dot-sql.md) — Dot-command SQL interface
+```text
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]> list jobs limit=2 offset=1
+Automatically selected Catalog: MyCatalog
+Using Catalog "MyCatalog"
++-------+-----------------+-----------+---------------------+----------+------+-------+----------+-------------+-----------+
+| jobid | name            | client    | starttime           | duration | type | level | jobfiles | jobbytes    | jobstatus |
++-------+-----------------+-----------+---------------------+----------+------+-------+----------+-------------+-----------+
+|   480 | benchmark-small | bareos-fd | 2026-03-30 22:26:51 | 00:00:02 | B    | F     |    2,605 | 824,021,543 | T         |
+|   481 | benchmark-small | bareos-fd | 2026-03-30 22:26:51 | 00:00:02 | B    | F     |    2,605 | 824,021,543 | T         |
++-------+-----------------+-----------+---------------------+----------+------+-------+----------+-------------+-----------+
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]>
+```
+
+### Jobs zählen
+
+```text
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]> list jobs count jobstatus=T
+Automatically selected Catalog: MyCatalog
+Using Catalog "MyCatalog"
++-------+
+| count |
++-------+
+|    53 |
++-------+
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]>
+```
+
+### Nur Jobs, die noch konfiguriert sind
+
+`current` blendet Jobs aus, deren Job-Ressource es nicht mehr gibt (hier fallen die alten `benchmark-small`-Läufe weg).
+
+```text
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]> list jobs current
+Automatically selected Catalog: MyCatalog
+Using Catalog "MyCatalog"
++-------+------------------+-----------+---------------------+----------+------+-------+----------+-------------+-----------+
+| jobid | name             | client    | starttime           | duration | type | level | jobfiles | jobbytes    | jobstatus |
++-------+------------------+-----------+---------------------+----------+------+-------+----------+-------------+-----------+
+|   507 | backup-bareos-fd | bareos-fd | 2026-04-03 21:00:02 | 00:30:01 | B    | F     |        0 |           0 | f         |
+|   508 | BackupCatalog    | bareos-fd | 2026-04-03 21:30:06 | 00:30:07 | B    | F     |        0 |           0 | f         |
+|   509 | backup-bareos-fd | bareos-fd | 2026-04-04 21:00:02 | 00:30:01 | B    | F     |        0 |           0 | f         |
+[…]
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]>
+```
+
+### Einen Job anzeigen
+
+```text
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]> list jobid=14
+Automatically selected Catalog: MyCatalog
+Using Catalog "MyCatalog"
++-------+------------------+-----------+---------------------+----------+------+-------+----------+----------+-----------+
+| jobid | name             | client    | starttime           | duration | type | level | jobfiles | jobbytes | jobstatus |
++-------+------------------+-----------+---------------------+----------+------+-------+----------+----------+-----------+
+|    14 | backup-bareos-fd | bareos-fd | 2026-10-15 21:00:52 | 00:00:00 | B    | I     |        0 |        0 | f         |
++-------+------------------+-----------+---------------------+----------+------+-------+----------+----------+-----------+
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]>
+```
+
+```text
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]> list ujobid=backup-bareos-fd.2026-10-13_21.00.00_09
+Automatically selected Catalog: MyCatalog
+Using Catalog "MyCatalog"
++-------+------------------+-----------+---------------------+----------+------+-------+----------+-------------+-----------+
+| jobid | name             | client    | starttime           | duration | type | level | jobfiles | jobbytes    | jobstatus |
++-------+------------------+-----------+---------------------+----------+------+-------+----------+-------------+-----------+
+|     1 | backup-bareos-fd | bareos-fd | 2026-10-13 21:00:02 | 00:00:01 | B    | I     |      180 | 126,345,661 | T         |
++-------+------------------+-----------+---------------------+----------+------+-------+----------+-------------+-----------+
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]>
+```
+
+### Summen je Job
+
+```text
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]> list jobtotals limit=1
+Automatically selected Catalog: MyCatalog
+Using Catalog "MyCatalog"
++------+--------+----------------+------------------+
+| jobs | files  | bytes          | job              |
++------+--------+----------------+------------------+
+|   57 |    938 |        209,608 | BackupCatalog    |
+|   28 | 72,940 | 23,072,603,204 | benchmark-small  |
+|   76 |    865 |    823,720,976 | backup-bareos-fd |
++------+--------+----------------+------------------+
++------+--------+----------------+
+| jobs | files  | bytes          |
++------+--------+----------------+
+|  161 | 74,743 | 23,896,533,788 |
++------+--------+----------------+
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]>
+```
+
+### Gesicherte Dateien eines Jobs
+
+```text
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]> list files jobid=5
+Automatically selected Catalog: MyCatalog
+Using Catalog "MyCatalog"
+ /usr/sbin/
+ /usr/sbin/bareos-webui-proxy
+ /usr/sbin/mkfs.ntfs
+ /usr/sbin/mkntfs
+ /usr/sbin/mount.lowntfs-3g
+ /usr/sbin/mount.ntfs
+ /usr/sbin/mount.ntfs-3g
+ /usr/sbin/ntfsclone
+ /usr/sbin/ntfscp
+ /usr/sbin/ntfslabel
+ /usr/sbin/ntfsresize
+ /usr/sbin/ntfsundelete
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]>
+```
+
+### FileSet eines Jobs
+
+```text
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]> list fileset jobid=1
+Automatically selected Catalog: MyCatalog
+Using Catalog "MyCatalog"
++-----------+----------+------------------------+---------------------+----------------------------------------------------------------------------------------------------+
+| filesetid | fileset  | md5                    | createtime          | filesettext                                                                                          |
++-----------+----------+------------------------+---------------------+----------------------------------------------------------------------------------------------------+
+|         1 | SelfTest | 35wO25lkbw+icQACU80RdB | 2026-03-21 23:44:48 | FileSet {
+  Name = "SelfTest"
+  Description = "fileset just to backup some files for selftest"
+  Include {
+    Options {
+      Signature = "XXH128"
+      HardLinks = No
+      AclSupport = Yes
+      XattrSupport = Yes
+    }
+    File = "/usr/sbin"
+  }
+}
+
+ |
++-----------+----------+------------------------+---------------------+----------------------------------------------------------------------------------------------------+
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]>
+```
+
+Alle FileSets im Katalog (gekürzt):
+
+```text
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]> list filesets limit=2
+Automatically selected Catalog: MyCatalog
+Using Catalog "MyCatalog"
++-----------+--------------+------------------------+---------------------+----------------------------------------------------------------------------------------------------+
+| filesetid | fileset      | md5                    | createtime          | filesettext                                                                                          |
++-----------+--------------+------------------------+---------------------+----------------------------------------------------------------------------------------------------+
+|         1 | SelfTest     | 35wO25lkbw+icQACU80RdB | 2026-03-21 23:44:48 | FileSet {
+  Name = "SelfTest"
+  Description = "fileset just to backup some files for selftest"
+  Include {
+    Options {
+      Signature = "XXH128"
+      HardLinks = No
+      AclSupport = Yes
+      XattrSupport = Yes
+    }
+    File = "/usr/sbin"
+  }
+}
+[…]
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]>
+```
+
+### Volumes eines Jobs
+
+```text
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]> list jobmedia jobid=1
+Automatically selected Catalog: MyCatalog
+Using Catalog "MyCatalog"
++-------+-------------------+------------+-----------+
+| jobid | volumename        | firstindex | lastindex |
++-------+-------------------+------------+-----------+
+|     1 | Incremental-47322 |          1 |       180 |
++-------+-------------------+------------+-----------+
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]>
+```
+
+```text
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]> list volumes jobid=1
+Automatically selected Catalog: MyCatalog
+Using Catalog "MyCatalog"
++-------------------+
+| volumename        |
++-------------------+
+| Incremental-47322 |
++-------------------+
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]>
+```
+
+### Jobprotokoll
+
+```text
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]> list joblog jobid=1 limit=5
+Automatically selected Catalog: MyCatalog
+Using Catalog "MyCatalog"
+ 2026-03-21 23:44:50 bareos-dir JobId 1: Version: 25.0.3~pre51.cd3792b91 (18 March 2026) Debian GNU/Linux 13 (trixie)
+ 2026-03-21 23:44:50 bareos-dir JobId 1: Start Backup JobId 1, Job=backup-bareos-fd.2026-03-21_23.44.48_04
+ 2026-03-21 23:44:50 bareos-dir JobId 1: Connected Storage daemon at WS-JOERG.intranet.bernau.family:9103, encryption: TLS_CHACHA20_POLY1305_SHA256 TLSv1.3
+ 2026-03-21 23:44:50 bareos-dir JobId 1:  Encryption: TLS_CHACHA20_POLY1305_SHA256 TLSv1.3
+ 2026-03-21 23:44:50 bareos-dir JobId 1: Probing client protocol... (result will be saved until config reload)
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]>
+```
+
+```text
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]> list joblog jobid=1 count
+Automatically selected Catalog: MyCatalog
+Using Catalog "MyCatalog"
++-------+
+| count |
++-------+
+|    28 |
++-------+
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]>
+```
+
+### Letzte Protokollzeilen
+
+```text
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]> list log limit=5
+Automatically selected Catalog: MyCatalog
+Using Catalog "MyCatalog"
+ bareos-sd JobId 629: Elapsed time=00:00:01, Transfer rate=22.73 K Bytes/second
+ bareos-dir JobId 629: Insert of attributes batch table with 67 entries start
+ bareos-dir JobId 629: Insert of attributes batch table done
+ bareos-dir JobId 629: Error: Error running program when updating bootstrap file: |/usr/bin/bsmtp -h localhost -f "(Bareos) " -s "Bootstrap for Job BackupCatalog.2026-07-10_21.10.00_05" root: ERR=Child exited with code 1
+ bareos-dir JobId 629: Error: Bareos bareos-dir 25.0.4~pre179.6e6f5b19f (16Jun26):
+  OS Information:         Debian GNU/Linux 13 (trixie)
+  JobId:                  629
+  Job:                    BackupCatalog.2026-07-10_21.10.00_05
+[…]
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]>
+```
+
+### Pools
+
+```text
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]> list pools
+Automatically selected Catalog: MyCatalog
+Using Catalog "MyCatalog"
++--------+--------------+---------+---------+----------+---------------+
+| poolid | name         | numvols | maxvols | pooltype | labelformat   |
++--------+--------------+---------+---------+----------+---------------+
+|      1 | Scratch      |       0 |       0 | Scratch  | *             |
+|      2 | Incremental  |       1 |     100 | Backup   | Incremental-  |
+|      3 | Full         |       3 |     100 | Backup   | Full-         |
+|      4 | Differential |       1 |     100 | Backup   | Differential- |
++--------+--------------+---------+---------+----------+---------------+
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]>
+```
+
+Ein einzelner Pool zeigt zusätzlich, was beim nächsten Prune wegfallen würde:
+
+```text
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]> list pool=Full
+Automatically selected Catalog: MyCatalog
+Using Catalog "MyCatalog"
++--------+------+---------+---------+----------+-------------+
+| poolid | name | numvols | maxvols | pooltype | labelformat |
++--------+------+---------+---------+----------+-------------+
+|      3 | Full |       3 |     100 | Backup   | Full-       |
++--------+------+---------+---------+----------+-------------+
+
+Prune details:
+  Reason: 
+  Prunable volumes: 0
+  Prunable jobs: 0
+  Prunable bytes: 0 
+  Affected statuses:
+    none
+  Prunable volumes:
+    none
+  Prunable jobs:
+    none
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]>
+```
+
+### Clients und Storages
+
+```text
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]> list clients
+Automatically selected Catalog: MyCatalog
+Using Catalog "MyCatalog"
++----------+----------------+---------------+--------------+
+| clientid | name           | fileretention | jobretention |
++----------+----------------+---------------+--------------+
+|        1 | bareos-fd      |     5,184,000 |   15,552,000 |
+|        2 | parity-ndmp-fd |             0 |            0 |
++----------+----------------+---------------+--------------+
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]>
+```
+
+```text
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]> list client=bareos-fd
+Using Catalog "MyCatalog"
++----------+-----------+---------------+--------------+
+| clientid | name      | fileretention | jobretention |
++----------+-----------+---------------+--------------+
+|        1 | bareos-fd |     5,184,000 |   15,552,000 |
++----------+-----------+---------------+--------------+
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]>
+```
+
+```text
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]> list storages
+Automatically selected Catalog: MyCatalog
+Using Catalog "MyCatalog"
++-----------+------------------+-------------+
+| storageid | name             | autochanger |
++-----------+------------------+-------------+
+|         2 | ParityNdmpNative |           0 |
+|         3 | ParityNdmp       |           0 |
+|         1 | File             |           0 |
++-----------+------------------+-------------+
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]>
+```
+
+### Volumes
+
+Ohne weitere Angabe gruppiert nach Pool:
+
+```text
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]> list media
+Automatically selected Catalog: MyCatalog
+Using Catalog "MyCatalog"
+Pool: Incremental
++---------+-------------------+-----------+---------+-------------+----------+--------------+---------+------+-----------+-----------+---------------------+---------+------------------+
+| mediaid | volumename        | volstatus | enabled | volbytes    | volfiles | volretention | recycle | slot | inchanger | mediatype | lastwritten         | storage | hasencryptionkey |
++---------+-------------------+-----------+---------+-------------+----------+--------------+---------+------+-----------+-----------+---------------------+---------+------------------+
+|  47,322 | Incremental-47322 | Append    |       1 | 493,607,891 |        0 |    2,592,000 |       1 |    0 |         0 | File      | 2026-10-15 21:00:02 | File    |                0 |
++---------+-------------------+-----------+---------+-------------+----------+--------------+---------+------+-----------+-----------+---------------------+---------+------------------+
+Pool: Full
++---------+------------+-----------+---------+----------------+----------+--------------+---------+------+-----------+-----------+---------------------+---------+------------------+
+| mediaid | volumename | volstatus | enabled | volbytes       | volfiles | volretention | recycle | slot | inchanger | mediatype | lastwritten         | storage | hasencryptionkey |
++---------+------------+-----------+---------+----------------+----------+--------------+---------+------+-----------+-----------+---------------------+---------+------------------+
+|  47,318 | Full-0001  | Error     |       1 | 23,902,210,671 |        5 |            0 |       1 |    0 |         0 | File      | 2026-03-30 22:54:15 | File    |                0 |
+|  47,320 | Full-0002  | Error     |       1 |    124,004,811 |        0 |            0 |       1 |    0 |         0 | File      |                     |         |                0 |
+|  47,321 | Full-47321 | Append    |       1 |    158,201,165 |        0 |   31,536,000 |       1 |    0 |         0 | File      | 2026-07-10 21:10:05 | File    |                0 |
++---------+------------+-----------+---------+----------------+----------+--------------+---------+------+-----------+-----------+---------------------+---------+------------------+
+Pool: Differential
++---------+--------------------+-----------+---------+-------------+----------+--------------+---------+------+-----------+-----------+---------------------+---------+------------------+
+| mediaid | volumename         | volstatus | enabled | volbytes    | volfiles | volretention | recycle | slot | inchanger | mediatype | lastwritten         | storage | hasencryptionkey |
++---------+--------------------+-----------+---------+-------------+----------+--------------+---------+------+-----------+-----------+---------------------+---------+------------------+
+|  47,323 | Differential-47323 | Append    |       1 | 172,444,761 |        0 |    7,776,000 |       1 |    0 |         0 | File      | 2026-06-20 21:00:02 | File    |                0 |
++---------+--------------------+-----------+---------+-------------+----------+--------------+---------+------+-----------+-----------+---------------------+---------+------------------+
+Pool: Scratch
+No results to list.
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]>
+```
+
+Alle Volumes in einer Tabelle, oder nur ein Pool:
+
+```text
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]> list volumes all
+Automatically selected Catalog: MyCatalog
+Using Catalog "MyCatalog"
++---------+--------------------+-----------+---------+----------------+----------+--------------+---------+------+-----------+-----------+---------------------+---------+------------------+
+| mediaid | volumename         | volstatus | enabled | volbytes       | volfiles | volretention | recycle | slot | inchanger | mediatype | lastwritten         | storage | hasencryptionkey |
++---------+--------------------+-----------+---------+----------------+----------+--------------+---------+------+-----------+-----------+---------------------+---------+------------------+
+|  47,318 | Full-0001          | Error     |       1 | 23,902,210,671 |        5 |            0 |       1 |    0 |         0 | File      | 2026-03-30 22:54:15 | File    |                0 |
+|  47,320 | Full-0002          | Error     |       1 |    124,004,811 |        0 |            0 |       1 |    0 |         0 | File      |                     |         |                0 |
+|  47,321 | Full-47321         | Append    |       1 |    158,201,165 |        0 |   31,536,000 |       1 |    0 |         0 | File      | 2026-07-10 21:10:05 | File    |                0 |
+|  47,322 | Incremental-47322  | Append    |       1 |    493,607,891 |        0 |    2,592,000 |       1 |    0 |         0 | File      | 2026-10-15 21:00:02 | File    |                0 |
+|  47,323 | Differential-47323 | Append    |       1 |    172,444,761 |        0 |    7,776,000 |       1 |    0 |         0 | File      | 2026-06-20 21:00:02 | File    |                0 |
++---------+--------------------+-----------+---------+----------------+----------+--------------+---------+------+-----------+-----------+---------------------+---------+------------------+
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]>
+```
+
+```text
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]> list volumes pool=Full
+Automatically selected Catalog: MyCatalog
+Using Catalog "MyCatalog"
++---------+------------+-----------+---------+----------------+----------+--------------+---------+------+-----------+-----------+---------------------+---------+------------------+
+| mediaid | volumename | volstatus | enabled | volbytes       | volfiles | volretention | recycle | slot | inchanger | mediatype | lastwritten         | storage | hasencryptionkey |
++---------+------------+-----------+---------+----------------+----------+--------------+---------+------+-----------+-----------+---------------------+---------+------------------+
+|  47,318 | Full-0001  | Error     |       1 | 23,902,210,671 |        5 |            0 |       1 |    0 |         0 | File      | 2026-03-30 22:54:15 | File    |                0 |
+|  47,320 | Full-0002  | Error     |       1 |    124,004,811 |        0 |            0 |       1 |    0 |         0 | File      |                     |         |                0 |
+|  47,321 | Full-47321 | Append    |       1 |    158,201,165 |        0 |   31,536,000 |       1 |    0 |         0 | File      | 2026-07-10 21:10:05 | File    |                0 |
++---------+------------+-----------+---------+----------------+----------+--------------+---------+------+-----------+-----------+---------------------+---------+------------------+
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]>
+```
+
+Ein einzelnes Volume über Namen oder ID:
+
+```text
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]> list media=Full-47321
+Automatically selected Catalog: MyCatalog
+Using Catalog "MyCatalog"
++---------+------------+-----------+---------+-------------+----------+--------------+---------+------+-----------+-----------+---------------------+---------+------------------+
+| mediaid | volumename | volstatus | enabled | volbytes    | volfiles | volretention | recycle | slot | inchanger | mediatype | lastwritten         | storage | hasencryptionkey |
++---------+------------+-----------+---------+-------------+----------+--------------+---------+------+-----------+-----------+---------------------+---------+------------------+
+|  47,321 | Full-47321 | Append    |       1 | 158,201,165 |        0 |   31,536,000 |       1 |    0 |         0 | File      | 2026-07-10 21:10:05 | File    |                0 |
++---------+------------+-----------+---------+-------------+----------+--------------+---------+------+-----------+-----------+---------------------+---------+------------------+
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]> list volumeid=47321
++---------+------------+-----------+---------+-------------+----------+--------------+---------+------+-----------+-----------+---------------------+---------+------------------+
+| mediaid | volumename | volstatus | enabled | volbytes    | volfiles | volretention | recycle | slot | inchanger | mediatype | lastwritten         | storage | hasencryptionkey |
++---------+------------+-----------+---------+-------------+----------+--------------+---------+------+-----------+-----------+---------------------+---------+------------------+
+|  47,321 | Full-47321 | Append    |       1 | 158,201,165 |        0 |   31,536,000 |       1 |    0 |         0 | File      | 2026-07-10 21:10:05 | File    |                0 |
++---------+------------+-----------+---------+-------------+----------+--------------+---------+------+-----------+-----------+---------------------+---------+------------------+
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]> list volume=Full-47321
++---------+------------+-----------+---------+-------------+----------+--------------+---------+------+-----------+-----------+---------------------+---------+------------------+
+| mediaid | volumename | volstatus | enabled | volbytes    | volfiles | volretention | recycle | slot | inchanger | mediatype | lastwritten         | storage | hasencryptionkey |
++---------+------------+-----------+---------+-------------+----------+--------------+---------+------+-----------+-----------+---------------------+---------+------------------+
+|  47,321 | Full-47321 | Append    |       1 | 158,201,165 |        0 |   31,536,000 |       1 |    0 |         0 | File      | 2026-07-10 21:10:05 | File    |                0 |
++---------+------------+-----------+---------+-------------+----------+--------------+---------+------+-----------+-----------+---------------------+---------+------------------+
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]>
+```
+
+Anzahl der Volumes je Pool:
+
+```text
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]> list volumes count
+Automatically selected Catalog: MyCatalog
+Using Catalog "MyCatalog"
+Pool: Incremental
++-------+
+| count |
++-------+
+|     1 |
++-------+
+Pool: Full
++-------+
+| count |
++-------+
+|     3 |
++-------+
+Pool: Differential
++-------+
+| count |
++-------+
+|     1 |
++-------+
+Pool: Scratch
++-------+
+| count |
++-------+
+|     0 |
++-------+
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]>
+```
+
+### Unbekannter Pool: Auswahl im Dialog
+
+```text
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]> list volumes pool=nosuch
+Automatically selected Catalog: MyCatalog
+Using Catalog "MyCatalog"
+Could not find Pool "nosuch": ERR=Pool record not found in Catalog.
+Could not find Pool "nosuch": ERR=Pool record not found in Catalog.
+Defined Pools:
+1: Incremental
+2: Full
+3: Differential
+4: Scratch
+Select the Pool (1-4): 
+> 2
++---------+------------+-----------+---------+----------------+----------+--------------+---------+------+-----------+-----------+---------------------+---------+------------------+
+| mediaid | volumename | volstatus | enabled | volbytes       | volfiles | volretention | recycle | slot | inchanger | mediatype | lastwritten         | storage | hasencryptionkey |
++---------+------------+-----------+---------+----------------+----------+--------------+---------+------+-----------+-----------+---------------------+---------+------------------+
+|  47,318 | Full-0001  | Error     |       1 | 23,902,210,671 |        5 |            0 |       1 |    0 |         0 | File      | 2026-03-30 22:54:15 | File    |                0 |
+|  47,320 | Full-0002  | Error     |       1 |    124,004,811 |        0 |            0 |       1 |    0 |         0 | File      |                     |         |                0 |
+|  47,321 | Full-47321 | Append    |       1 |    158,201,165 |        0 |   31,536,000 |       1 |    0 |         0 | File      | 2026-07-10 21:10:05 | File    |                0 |
++---------+------------+-----------+---------+----------------+----------+--------------+---------+------+-----------+-----------+---------------------+---------+------------------+
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]>
+```
+
+Abbruch mit `.`:
+
+```text
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]> list volumes pool=nosuch
+Automatically selected Catalog: MyCatalog
+Using Catalog "MyCatalog"
+Could not find Pool "nosuch": ERR=Pool record not found in Catalog.
+Could not find Pool "nosuch": ERR=Pool record not found in Catalog.
+Defined Pools:
+1: Incremental
+2: Full
+3: Differential
+4: Scratch
+Select the Pool (1-4): 
+> .
+Selection aborted, nothing done.
+Pool nosuch doesn't exist.
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]>
+```
+
+### Nächstes Volume eines Jobs
+
+```text
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]> list nextvolume job=backup-bareos-fd days=99
+Using Catalog "MyCatalog"
+Ignoring invalid value for days. Max is 50.
+The next Volume to be used by Job "backup-bareos-fd" (Pool=Incremental, Level=Differential) will be Incremental-47322
+The next Volume to be used by Job "backup-bareos-fd" (Pool=Incremental, Level=Incremental) will be Incremental-47322
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]>
+```
+
+Ohne `job=` fragt der Director nach dem Job:
+
+```text
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]> list nextvolume
+Automatically selected Catalog: MyCatalog
+Using Catalog "MyCatalog"
+The defined Job resources are:
+ 1: backup-bareos-fd
+ 2: BackupCatalog
+ 3: parity-admin
+ 4: parity-consolidate
+ 5: parity-copy
+ 6: parity-migrate
+ 7: parity-restore-regex
+ 8: parity-verify
+ 9: RestoreFiles
+Select Job resource (1-9): 
+> 1
+The next Volume to be used by Job "backup-bareos-fd" (Pool=Incremental, Level=Differential) will be Incremental-47322
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]>
+```
+
+```text
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]> list nextvolume
+Automatically selected Catalog: MyCatalog
+Using Catalog "MyCatalog"
+The defined Job resources are:
+ 1: backup-bareos-fd
+ 2: BackupCatalog
+ 3: parity-admin
+ 4: parity-consolidate
+ 5: parity-copy
+ 6: parity-migrate
+ 7: parity-restore-regex
+ 8: parity-verify
+ 9: RestoreFiles
+Select Job resource (1-9): 
+> .
+Selection aborted, nothing done.
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]>
+```
+
+### Sicherungen eines Clients
+
+```text
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]> list backups client=bareos-fd fileset=SelfTest limit=3
+Using Catalog "MyCatalog"
++-------+------------------+-----------+---------------------+----------+------+-------+----------+-------------+-----------+
+| jobid | name             | client    | starttime           | duration | type | level | jobfiles | jobbytes    | jobstatus |
++-------+------------------+-----------+---------------------+----------+------+-------+----------+-------------+-----------+
+|   600 | backup-bareos-fd | bareos-fd | 2026-06-11 21:00:02 | 00:00:01 | B    | F     |      599 | 157,762,030 | T         |
+|   602 | backup-bareos-fd | bareos-fd | 2026-06-12 21:00:02 | 00:00:01 | B    | I     |        7 |  57,746,072 | T         |
+|   604 | backup-bareos-fd | bareos-fd | 2026-06-13 21:00:02 | 00:00:01 | B    | D     |        8 |  86,042,816 | T         |
++-------+------------------+-----------+---------------------+----------+------+-------+----------+-------------+-----------+
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]>
+```
+
+```text
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]> list backups client=bareos-fd order=desc limit=3
+Using Catalog "MyCatalog"
++-------+------------------+-----------+---------------------+----------+------+-------+----------+----------+-----------+
+| jobid | name             | client    | starttime           | duration | type | level | jobfiles | jobbytes | jobstatus |
++-------+------------------+-----------+---------------------+----------+------+-------+----------+----------+-----------+
+|    15 | backup-bareos-fd | bareos-fd | 2026-10-15 21:00:56 | 00:00:00 | B    | I     |        0 |        0 | T         |
+|    13 | backup-bareos-fd | bareos-fd | 2026-10-15 21:00:45 | 00:00:01 | B    | I     |        0 |        0 | T         |
+|    12 | backup-bareos-fd | bareos-fd | 2026-10-15 21:00:13 | 00:00:00 | B    | I     |        0 |        0 | T         |
++-------+------------------+-----------+---------------------+----------+------+-------+----------+----------+-----------+
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]>
+```
+
+### Kopien und Statistiken
+
+Gibt es keine Kopierjobs, bleibt die Antwort leer. Für Jobs ohne Statistikdaten kommt `No results to list.`
+
+```text
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]> list copies
+Automatically selected Catalog: MyCatalog
+Using Catalog "MyCatalog"
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]>
+```
+
+```text
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]> list jobstatistics jobid=600
+Automatically selected Catalog: MyCatalog
+Using Catalog "MyCatalog"
+No results to list.
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]>
+```
+
+### Ausgabe für Programme: `.api 1`
+
+```text
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]> .api 1
+api: 1
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]> list jobmedia jobid=1
+     1 | Incremental-47322 |          1 |       180 |
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]>
+```
+
+### Ausgabe als JSON: `.api 2`
+
+```text
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]> .api 2
+{
+  "jsonrpc": "2.0",
+  "id": null,
+  "result": {
+    "api": 2
+  }
+}
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]> list jobs limit=2
+{
+  "jsonrpc": "2.0",
+  "id": null,
+  "result": {
+    "jobs": [
+      {
+        "jobid": "479",
+        "name": "benchmark-small",
+        "client": "bareos-fd",
+        "starttime": "2026-03-30 22:26:51",
+        "duration": "00:00:02",
+        "type": "B",
+        "level": "F",
+        "jobfiles": "2605",
+        "jobbytes": "824021543",
+        "jobstatus": "T"
+      },
+      {
+        "jobid": "480",
+        "name": "benchmark-small",
+        "client": "bareos-fd",
+        "starttime": "2026-03-30 22:26:51",
+        "duration": "00:00:02",
+        "type": "B",
+        "level": "F",
+        "jobfiles": "2605",
+        "jobbytes": "824021543",
+        "jobstatus": "T"
+      }
+    ],
+    "meta": {
+      "range": {
+        "limit": 2,
+        "filtered": 0
+      }
+    }
+  }
+}
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]>
+```
+
+```text
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]> .api 2
+{
+  "jsonrpc": "2.0",
+  "id": null,
+  "result": {
+    "api": 2
+  }
+}
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]> list jobtotals
+{
+  "jsonrpc": "2.0",
+  "id": null,
+  "result": {
+    "jobs": [
+      {
+        "jobs": "28",
+        "files": "72940",
+        "bytes": "23072603204",
+        "job": "benchmark-small"
+      },
+      {
+        "jobs": "57",
+        "files": "938",
+        "bytes": "209608",
+        "job": "BackupCatalog"
+      },
+      {
+        "jobs": "75",
+        "files": "685",
+        "bytes": "697375315",
+        "job": "backup-bareos-fd"
+      }
+    ],
+    "jobtotals": {
+      "jobs": "160",
+      "files": "74563",
+      "bytes": "23770188127"
+    }
+  }
+}
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]>
+```
+
+Fehler unter `.api 2`:
+
+```text
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]> .api 2
+{
+  "jsonrpc": "2.0",
+  "id": null,
+  "result": {
+    "api": 2
+  }
+}
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]> list jobs jobtype=bogus
+{
+  "jsonrpc": "2.0",
+  "id": null,
+  "error": {
+    "code": 1,
+    "message": "failed",
+    "data": {
+      "result": {},
+      "messages": {
+        "warning": [
+          "Illegal jobtype bogus\n"
+        ],
+        "error": [
+          "invalid jobtype parameter\n"
+        ]
+      }
+    }
+  }
+}
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]>
+```
+
+### Kompaktes JSON
+
+```text
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]> .api json compact=yes
+{"jsonrpc":"2.0","id":null,"result":{"api":2}}
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]> list pools
+{"jsonrpc":"2.0","id":null,"result":{"pools":[{"poolid":"1","name":"Scratch","numvols":"0","maxvols":"0","pooltype":"Scratch","labelformat":"*"},{"poolid":"2","name":"Incremental","numvols":"1","maxvols":"100","pooltype":"Backup","labelformat":"Incremental-"},{"poolid":"3","name":"Full","numvols":"3","maxvols":"100","pooltype":"Backup","labelformat":"Full-"},{"poolid":"4","name":"Differential","numvols":"1","maxvols":"100","pooltype":"Backup","labelformat":"Differential-"}]}}
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]>
+```
+
+### GUI-Modus
+
+```text
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]> gui on
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]> list jobs limit=5
+Using Catalog "MyCatalog"
++-------+-----------------+-----------+---------------------+----------+------+-------+----------+-------------+-----------+
+| jobid | name            | client    | starttime           | duration | type | level | jobfiles | jobbytes    | jobstatus |
++-------+-----------------+-----------+---------------------+----------+------+-------+----------+-------------+-----------+
+| 479   | benchmark-small | bareos-fd | 2026-03-30 22:26:51 | 00:00:02 | B    | F     | 2605     | 824021543   | T         |
+| 480   | benchmark-small | bareos-fd | 2026-03-30 22:26:51 | 00:00:02 | B    | F     | 2605     | 824021543   | T         |
+| 481   | benchmark-small | bareos-fd | 2026-03-30 22:26:51 | 00:00:02 | B    | F     | 2605     | 824021543   | T         |
+| 482   | benchmark-small | bareos-fd | 2026-03-30 22:26:53 | 00:00:01 | B    | F     | 2605     | 824021543   | T         |
+| 483   | benchmark-small | bareos-fd | 2026-03-30 22:37:04 | 00:00:04 | B    | F     | 2605     | 824021543   | T         |
++-------+-----------------+-----------+---------------------+----------+------+-------+----------+-------------+-----------+
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]>
+```
+
+### Konsole mit eingeschränkten Rechten
+
+Eine Konsole mit ACLs sieht nur die erlaubten Zeilen. Hier darf `parity-limited` nur die Pools `Full` und `Scratch` sehen. Bei `list jobs limit=3` wird zuerst begrenzt und dann gefiltert: Die drei ersten Jobs gehören nicht zur Job-ACL, die Tabelle bleibt leer.
+
+```text
+parity-limited@bareos-dir[25.1.2+onesimus.0.2.0]> list pools
+Automatically selected Catalog: MyCatalog
+Using Catalog "MyCatalog"
++--------+--------------+---------+---------+----------+---------------+
+| poolid | name         | numvols | maxvols | pooltype | labelformat   |
++--------+--------------+---------+---------+----------+---------------+
+|      1 | Scratch      |       0 |       0 | Scratch  | *             |
+|      3 | Full         |       3 |     100 | Backup   | Full-         |
++--------+--------------+---------+---------+----------+---------------+
+parity-limited@bareos-dir[25.1.2+onesimus.0.2.0]> list jobs limit=3
++-------+-----------------+-----------+---------------------+----------+------+-------+----------+-------------+-----------+
+| jobid | name            | client    | starttime           | duration | type | level | jobfiles | jobbytes    | jobstatus |
++-------+-----------------+-----------+---------------------+----------+------+-------+----------+-------------+-----------+
++-------+-----------------+-----------+---------------------+----------+------+-------+----------+-------------+-----------+
+parity-limited@bareos-dir[25.1.2+onesimus.0.2.0]> list volumes
+Pool: Full
++---------+------------+-----------+---------+----------------+----------+--------------+---------+------+-----------+-----------+---------------------+---------+------------------+
+| mediaid | volumename | volstatus | enabled | volbytes       | volfiles | volretention | recycle | slot | inchanger | mediatype | lastwritten         | storage | hasencryptionkey |
++---------+------------+-----------+---------+----------------+----------+--------------+---------+------+-----------+-----------+---------------------+---------+------------------+
+|  47,318 | Full-0001  | Error     |       1 | 23,902,210,671 |        5 |            0 |       1 |    0 |         0 | File      | 2026-03-30 22:54:15 | File    |                0 |
+|  47,320 | Full-0002  | Error     |       1 |    124,004,811 |        0 |            0 |       1 |    0 |         0 | File      |                     |         |                0 |
+|  47,321 | Full-47321 | Append    |       1 |    158,201,165 |        0 |   31,536,000 |       1 |    0 |         0 | File      | 2026-07-10 21:10:05 | File    |                0 |
++---------+------------+-----------+---------+----------------+----------+--------------+---------+------+-----------+-----------+---------------------+---------+------------------+
+Pool: Scratch
+No results to list.
+parity-limited@bareos-dir[25.1.2+onesimus.0.2.0]>
+```
+
+Eine Konsole ohne `list` in ihrer Command-ACL bekommt:
+
+```text
+parity-bvfs@bareos-dir[25.1.2+onesimus.0.2.0]> list jobs
+list: is an invalid command.
+parity-bvfs@bareos-dir[25.1.2+onesimus.0.2.0]>
+```
+
+## Fehlermeldungen
+
+| Meldung | Ursache und Abhilfe |
+|---|---|
+| `list command requires a keyword` | `list` ohne Schlüsselwort. Ein Schlüsselwort aus der Syntax angeben. |
+| `Unknown list keyword: <wort>` | Unbekanntes Schlüsselwort (z.B. `mediatypes`), Schlüsselwort ohne nötigen Wert (`list client`, `list poolid`, `list mediaid`) oder ungültige Angaben bei `copies`/`backups` (`jobid=x`, `order=x`). |
+| `'list jobs' does not allow an jobs parameter` | `list jobs=<wert>`: `jobs` nimmt keinen Wert. `job=<name>` verwenden. |
+| `Missing job parameter`, `Missing jobid parameter` | `list job` bzw. `list jobid` ohne `=<wert>`. |
+| `invalid jobstatus parameter` | Leerer oder unbekannter Status bei `jobstatus=`. |
+| `invalid joblevel parameter` | Unbekanntes Level, z.B. `VirtualFull`. Nur `F`, `I`, `D` bzw. `Full`, `Incremental`, `Differential`. |
+| `Illegal jobtype <typ>` / `invalid jobtype parameter` | Unbekannter Jobtyp. Der Name muss exakt geschrieben sein (`Backup`, nicht `backup`). |
+| `invalid client argument: <name>` | Der Client steht nicht im Katalog. |
+| `jobid not found in db, access to job or client denied by ACL, or client not found in db` | `files`, `basefiles`, `jobmedia`, `joblog` ohne gültige JobId, mit einer unbekannten JobId oder ohne Zugriffsrecht. Bei `fileset` ohne Angabe zusätzlich `or missing filesetid`. |
+| `missing parameter: client` | `list backups` ohne `client=`. Danach folgt `Unknown list keyword: backups`. |
+| `Access to specified FileSet not allowed.` | `backups … fileset=<name>` mit einem FileSet außerhalb der FileSet-ACL der Konsole. |
+| `no jobid given` | `list jobstatistics` ohne `jobid=` oder mit einer JobId ohne Zugriffsrecht. |
+| `No results to list.` | Keine passenden Datensätze. |
+| `Could not find Pool "<name>": ERR=Pool record not found in Catalog.` | Unbekannter Pool bei `list volumes pool=`; es folgt die Auswahl. Nach Abbruch: `Pool <name> doesn't exist.` |
+| `Ignoring invalid value for days. Max is 50.` | `days=` bei `nextvolume` größer als 50 oder negativ; der Wert wird ignoriert. |
+| `Could not find next Volume for Job <job>.` | Für den Job lässt sich kein Volume bestimmen, z.B. bei einem Restore-Job. |
+| `list: is an invalid command.` | Die Konsole darf `list` nicht ausführen (Command-ACL). |
+
+`list nextvolume` mit einem unbekannten Job meldet unter Onesimus Erfolg, das Original einen Fehler (Kompatibilitätslog C-046).
+
+## Siehe auch
+
+- [llist](llist.md) — dieselben Daten mit allen Spalten untereinander
+- [show](show.md) — Ressourcen aus der Konfiguration statt aus dem Katalog
+- [use](use.md) — Katalog wählen
+- [sqlquery](sqlquery.md) — eigene SQL-Abfragen
+- [query](query.md) — vordefinierte Katalogabfragen
+- [status](status.md) — laufende und geplante Jobs
+- [gui](gui.md) — GUI-Modus ein- und ausschalten
+- [dot-api](dot-api.md) — API-Modus umschalten
