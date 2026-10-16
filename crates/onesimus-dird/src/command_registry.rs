@@ -307,14 +307,14 @@ pub fn build_registry() -> Vec<CommandDef> {
         CommandDef { name: ".catalog", aliases: &[], description: "Catalog management", args: vec![], handler: commands::catalog::cmd_dot_catalog, dot_command: true },
 
         // BVFS
-        CommandDef { name: ".bvfs_update", aliases: &[], description: "Update BVFS cache", args: vec![arg_int("jobid", "Job ID")], handler: commands::dot::cmd_bvfs_update, dot_command: true },
-        CommandDef { name: ".bvfs_cleanup", aliases: &[], description: "Cleanup BVFS temp tables", args: vec![], handler: commands::dot::cmd_bvfs_cleanup, dot_command: true },
-        CommandDef { name: ".bvfs_clear_cache", aliases: &[], description: "Clear BVFS cache", args: vec![arg("yes", "Confirm")], handler: commands::dot::cmd_bvfs_clear_cache, dot_command: true },
-        CommandDef { name: ".bvfs_get_jobids", aliases: &[], description: "Get job IDs for restore", args: vec![arg_int("jobid", "Job ID")], handler: commands::dot::cmd_bvfs_get_jobids, dot_command: true },
-        CommandDef { name: ".bvfs_lsdirs", aliases: &[], description: "List directories (BVFS)", args: vec![arg_int("jobid", "Job ID"), arg_int("pathid", "Path ID")], handler: commands::dot::cmd_bvfs_lsdirs, dot_command: true },
-        CommandDef { name: ".bvfs_lsfiles", aliases: &[], description: "List files (BVFS)", args: vec![arg_int("jobid", "Job ID"), arg_int("pathid", "Path ID")], handler: commands::dot::cmd_bvfs_lsfiles, dot_command: true },
-        CommandDef { name: ".bvfs_versions", aliases: &[], description: "List file versions", args: vec![arg_int("jobid", "Job ID"), arg_int("pathid", "Path ID"), arg("fname", "File name")], handler: commands::dot::cmd_bvfs_versions, dot_command: true },
-        CommandDef { name: ".bvfs_restore", aliases: &[], description: "Restore from BVFS selection", args: vec![arg_int("jobid", "Job ID")], handler: commands::dot::cmd_bvfs_restore, dot_command: true },
+        CommandDef { name: ".bvfs_update", aliases: &[], description: "Update BVFS cache", args: vec![arg_int("jobid", "Job ID")], handler: commands::bvfs::cmd_bvfs_update, dot_command: true },
+        CommandDef { name: ".bvfs_cleanup", aliases: &[], description: "Cleanup BVFS temp tables", args: vec![], handler: commands::bvfs::cmd_bvfs_cleanup, dot_command: true },
+        CommandDef { name: ".bvfs_clear_cache", aliases: &[], description: "Clear BVFS cache", args: vec![arg("yes", "Confirm")], handler: commands::bvfs::cmd_bvfs_clear_cache, dot_command: true },
+        CommandDef { name: ".bvfs_get_jobids", aliases: &[], description: "Get job IDs for restore", args: vec![arg_int("jobid", "Job ID")], handler: commands::bvfs::cmd_bvfs_get_jobids, dot_command: true },
+        CommandDef { name: ".bvfs_lsdirs", aliases: &[], description: "List directories (BVFS)", args: vec![arg_int("jobid", "Job ID"), arg_int("pathid", "Path ID")], handler: commands::bvfs::cmd_bvfs_lsdirs, dot_command: true },
+        CommandDef { name: ".bvfs_lsfiles", aliases: &[], description: "List files (BVFS)", args: vec![arg_int("jobid", "Job ID"), arg_int("pathid", "Path ID")], handler: commands::bvfs::cmd_bvfs_lsfiles, dot_command: true },
+        CommandDef { name: ".bvfs_versions", aliases: &[], description: "List file versions", args: vec![arg_int("jobid", "Job ID"), arg_int("pathid", "Path ID"), arg("fname", "File name")], handler: commands::bvfs::cmd_bvfs_versions, dot_command: true },
+        CommandDef { name: ".bvfs_restore", aliases: &[], description: "Restore from BVFS selection", args: vec![arg_int("jobid", "Job ID")], handler: commands::bvfs::cmd_bvfs_restore, dot_command: true },
     ]
 }
 

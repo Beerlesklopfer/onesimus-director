@@ -86,6 +86,17 @@ pub enum CatalogRequest {
     SinceUtime { client_name: String, job_name: String, fileset_name: String, level: String },
     /// Ping / health check.
     Ping,
+    /// Reserve one pooled connection for a sequence of statements (C++
+    /// private catalog connection, e.g. BVFS with BEGIN/LOCK/COMMIT).
+    Dedicated { ops: flume::Receiver<(ConnectionOp, flume::Sender<CatalogResponse>)> },
+}
+
+/// A statement on a dedicated connection.
+pub enum ConnectionOp {
+    /// Rows with text values (CatalogResponse::Rows).
+    Rows(String),
+    /// Statement(s) without result; CatalogResponse::Ok(affected rows).
+    Execute(String),
 }
 
 /// Response from the catalog worker.
@@ -297,6 +308,58 @@ impl CatalogHandle {
     pub fn ping(&self) -> bool {
         matches!(self.request(CatalogRequest::Ping), Ok(CatalogResponse::Pong))
     }
+
+    /// Reserve one connection of the pool; it is returned when the
+    /// CatalogConnection is dropped.
+    pub fn dedicated(&self) -> Result<CatalogConnection, String> {
+        let (tx, ops) = flume::unbounded();
+        match self.request(CatalogRequest::Dedicated { ops })? {
+            CatalogResponse::Ok(_) => Ok(CatalogConnection { tx }),
+            CatalogResponse::Error(e) => Err(e),
+            other => Err(format!("unexpected response: {:?}", resp_debug(&other))),
+        }
+    }
+}
+
+/// One reserved catalog connection (all statements run on it in order).
+pub struct CatalogConnection {
+    tx: flume::Sender<(ConnectionOp, flume::Sender<CatalogResponse>)>,
+}
+
+impl CatalogConnection {
+    #[cfg(test)]
+    pub(crate) fn mock(mut handle: impl FnMut(ConnectionOp) -> CatalogResponse + Send + 'static) -> Self {
+        let (tx, rx) = flume::unbounded::<(ConnectionOp, flume::Sender<CatalogResponse>)>();
+        std::thread::spawn(move || while let Ok((op, response)) = rx.recv() {
+            let _ = response.send(handle(op));
+        });
+        Self { tx }
+    }
+
+    fn request(&self, op: ConnectionOp) -> Result<CatalogResponse, String> {
+        let (resp_tx, resp_rx) = flume::bounded(1);
+        self.tx.send((op, resp_tx)).map_err(|_| "catalog connection closed".to_string())?;
+        resp_rx.recv().map_err(|_| "catalog connection dropped response".to_string())
+    }
+
+    /// Query returning all values as text (C++ SqlQuery/QueryDb).
+    pub fn query_rows(&self, sql: &str) -> Result<SqlTable, String> {
+        match self.request(ConnectionOp::Rows(sql.to_string()))? {
+            CatalogResponse::Rows(t) => Ok(t),
+            CatalogResponse::Error(e) => Err(e),
+            other => Err(format!("unexpected response: {:?}", resp_debug(&other))),
+        }
+    }
+
+    /// Statement(s) returning the number of affected rows (C++ UpdateDb,
+    /// SqlAffectedRows).
+    pub fn execute(&self, sql: &str) -> Result<u64, String> {
+        match self.request(ConnectionOp::Execute(sql.to_string()))? {
+            CatalogResponse::Ok(n) => Ok(n),
+            CatalogResponse::Error(e) => Err(e),
+            other => Err(format!("unexpected response: {:?}", resp_debug(&other))),
+        }
+    }
 }
 
 fn resp_debug(r: &CatalogResponse) -> &'static str {
@@ -333,7 +396,8 @@ pub fn spawn_catalog_worker(
                 .build()
                 .expect("catalog worker: tokio runtime");
 
-            rt.block_on(async {
+            let local = tokio::task::LocalSet::new();
+            local.block_on(&rt, async {
                 let pool = match sqlx::postgres::PgPoolOptions::new()
                     .max_connections(8)
                     .connect(&catalog_url)
@@ -377,6 +441,14 @@ pub fn spawn_catalog_worker(
                         CatalogRequest::SinceUtime { client_name, job_name, fileset_name, level } =>
                             handle_since_utime(&pool, &client_name, &job_name, &fileset_name, &level).await,
                         CatalogRequest::Ping => CatalogResponse::Pong,
+                        CatalogRequest::Dedicated { ops } => {
+                            // Serve the statements in a task so other requests
+                            // keep running while the connection is reserved
+                            // (local task: sqlx raw_sql futures are not Send).
+                            let pool = pool.clone();
+                            tokio::task::spawn_local(handle_dedicated(pool, ops));
+                            CatalogResponse::Ok(0)
+                        }
                     };
 
                     let _ = resp_tx.send(response);
@@ -439,7 +511,7 @@ async fn handle_raw_query(pool: &sqlx::PgPool, sql: &str) -> CatalogResponse {
 /// Like PQexec, a string with several statements yields the last result set;
 /// errors carry the libpq PQerrorMessage text (see `pq_error_message`).
 async fn handle_text_rows(pool: &sqlx::PgPool, sql: &str) -> CatalogResponse {
-    use sqlx::{Column, Either, Row, TypeInfo};
+    use sqlx::Either;
     use tokio_stream::StreamExt;
     let mut last: Vec<sqlx::postgres::PgRow> = Vec::new();
     let mut current = Vec::new();
@@ -457,6 +529,42 @@ async fn handle_text_rows(pool: &sqlx::PgPool, sql: &str) -> CatalogResponse {
         }
     }
     let rows = if current.is_empty() { last } else { current };
+    CatalogResponse::Rows(text_table(&rows))
+}
+
+/// Run the statements of one CatalogConnection on a single pooled connection.
+async fn handle_dedicated(pool: sqlx::PgPool, ops: flume::Receiver<(ConnectionOp, flume::Sender<CatalogResponse>)>) {
+    let mut conn = match pool.acquire().await {
+        Ok(c) => Some(c),
+        Err(e) => {
+            error!("catalog worker: no connection for dedicated use: {e}");
+            None
+        }
+    };
+    while let Ok((op, resp_tx)) = ops.recv_async().await {
+        let response = match (&mut conn, op) {
+            (None, _) => CatalogResponse::Error("no catalog connection".into()),
+            (Some(c), op) => connection_op(&mut **c, op).await,
+        };
+        let _ = resp_tx.send(response);
+    }
+}
+
+async fn connection_op(conn: &mut sqlx::PgConnection, op: ConnectionOp) -> CatalogResponse {
+    match op {
+        ConnectionOp::Rows(sql) => match sqlx::raw_sql(&sql).fetch_all(conn).await {
+            Ok(rows) => CatalogResponse::Rows(text_table(&rows)),
+            Err(e) => CatalogResponse::Error(format!("Query: {e}")),
+        },
+        ConnectionOp::Execute(sql) => match sqlx::raw_sql(&sql).execute(conn).await {
+            Ok(r) => CatalogResponse::Ok(r.rows_affected()),
+            Err(e) => CatalogResponse::Error(format!("Query: {e}")),
+        },
+    }
+}
+
+fn text_table(rows: &[sqlx::postgres::PgRow]) -> SqlTable {
+    use sqlx::{Column, Row, TypeInfo};
     let mut table = SqlTable::default();
     if let Some(first) = rows.first() {
         table.columns = first.columns().iter().map(|c| SqlColumn {
@@ -464,13 +572,13 @@ async fn handle_text_rows(pool: &sqlx::PgPool, sql: &str) -> CatalogResponse {
             numeric: matches!(c.type_info().name(), "INT2" | "INT4" | "INT8" | "NUMERIC" | "FLOAT4" | "FLOAT8" | "OID"),
         }).collect();
     }
-    for row in &rows {
+    for row in rows {
         let values = (0..table.columns.len())
             .map(|i| row.try_get_unchecked::<Option<String>, _>(i).ok().flatten())
             .collect();
         table.rows.push(values);
     }
-    CatalogResponse::Rows(table)
+    table
 }
 
 /// libpq PQerrorMessage (fe-protocol3.c pqBuildErrorMessage3, default

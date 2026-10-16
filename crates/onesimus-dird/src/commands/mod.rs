@@ -3,6 +3,7 @@
 pub mod basic;
 pub mod status;
 pub mod dot;
+pub mod bvfs;
 pub mod job;
 pub mod list;
 pub mod admin;

@@ -64,7 +64,17 @@ impl CommandResult {
         if self.single_error && !self.error_message.is_empty() {
             return vec![self.error_message.clone()];
         }
-        self.error_message.lines().filter(|l| !l.trim().is_empty()).map(|l| format!("{l}\n")).collect()
+        // A blank line belongs to the message before it (one ErrorMsg such
+        // as "...ERR=<errmsg>\n\n" is one JSON message).
+        let mut lines: Vec<String> = Vec::new();
+        for l in self.error_message.lines() {
+            match lines.last_mut() {
+                Some(last) if l.trim().is_empty() => last.push('\n'),
+                _ if l.trim().is_empty() => {}
+                _ => lines.push(format!("{l}\n")),
+            }
+        }
+        lines
     }
 
     /// Attach the structured JSON result (used in `.api 2` mode).
