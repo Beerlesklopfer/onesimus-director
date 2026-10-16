@@ -1,0 +1,50 @@
+# C-059: StrToUtime()/CompensateShortDate() with Bareos' bsscanf. The run
+# dialog prints the parsed `when=` (TZ=UTC) and restore prints the
+# compensated date or selects jobs before it. Read-only: every run is
+# answered "no", every restore stops before a job is created.
+{"id": "c059-restore-before-year", "steps": ["restore before=2020"]}
+{"id": "c059-restore-before-year-month", "steps": ["restore before=2020-01"]}
+{"id": "c059-restore-before-year-month-1", "steps": ["restore before=2020-1"]}
+{"id": "c059-restore-before-year-garbage", "steps": ["restore before=2020x"]}
+{"id": "c059-restore-before-1899", "steps": ["restore before=1899-01-01"]}
+{"id": "c059-restore-before-zero-fields", "steps": ["restore before=2020-00-00"]}
+{"id": "c059-restore-before-hour", "steps": ["restore before=\"2020-01-02 3\""]}
+{"id": "c059-restore-before-minute", "steps": ["restore before=\"2020-01-02 3:4\""]}
+{"id": "c059-restore-before-word", "steps": ["restore before=\"2020-01-01 garbage\""]}
+{"id": "c059-restore-before-trailing-word", "steps": ["restore before=\"2020-01-01 10:00:00 trailing\""]}
+{"id": "c059-restore-before-no-blank", "steps": ["restore before=\"2026-10-1612:34:56\""]}
+{"id": "c059-restore-before-sec-overflow", "steps": ["restore before=\"2026-10-16 12:34:56123456789012345678\""]}
+{"id": "c059-restore-before-month-wrap", "steps": ["restore before=2026-4294967297-16"]}
+{"id": "c059-restore-before-bad-ranges", "steps": ["restore before=\"2020-13-45 99:99:99\""]}
+{"id": "c059-restore-before-feb29", "steps": ["restore before=2023-02-29"]}
+{"id": "c059-restore-before-slash", "steps": ["restore before=2020/01/01"]}
+{"id": "c059-restore-before-iso-t", "steps": ["restore before=2020-01-01T10:00:00"]}
+{"id": "c059-restore-before-plus", "steps": ["restore before=+2020-01-01"]}
+{"id": "c059-restore-before-two-digit", "steps": ["restore before=26-01-01"]}
+{"id": "c059-restore-menu-date-short", "steps": ["restore", "6", "2020-01", "quit"]}
+{"id": "c059-restore-menu-date-bad-then-ok", "steps": ["restore", "6", "2020x", "2026-04-03 21:00:03 x", "quit"]}
+{"id": "c059-select-before-month", "steps": ["restore select before=2026-05 client=bareos-fd fileset=LinuxAll", "quit"]}
+{"id": "c059-select-before-short-time", "steps": ["restore select before=\"2026-04-03 21:00\" client=bareos-fd fileset=LinuxAll", "quit"]}
+{"id": "c059-select-before-trailing", "steps": ["restore select before=\"2026-04-03 21:00:03 x\" client=bareos-fd fileset=LinuxAll", "quit"]}
+{"id": "c059-when-trailing-word-no", "steps": ["run job=backup-bareos-fd when=\"2030-01-02 03:04:05 trailing\"", "no"], "normalize": []}
+{"id": "c059-when-empty-time-no", "steps": ["run job=backup-bareos-fd when=\"2030-01-02 ::\"", "no"], "normalize": []}
+{"id": "c059-when-empty-min-no", "steps": ["run job=backup-bareos-fd when=\"2030-01-02 7::\"", "no"], "normalize": []}
+{"id": "c059-when-month-wrap-no", "steps": ["run job=backup-bareos-fd when=\"2030-4294967297-02 03:04:05\"", "no"], "normalize": []}
+{"id": "c059-when-year-wrap64-no", "steps": ["run job=backup-bareos-fd when=\"18446744073709553646-01-02 03:04:05\"", "no"], "normalize": []}
+{"id": "c059-when-before-epoch-no", "steps": ["run job=backup-bareos-fd when=\"1960-01-01 00:00:00\"", "no"], "normalize": []}
+{"id": "c059-when-minus-one-no", "steps": ["run job=backup-bareos-fd when=\"1969-12-31 23:59:59\"", "no"], "normalize": ["When: +[0-9: -]+"]}
+{"id": "c059-when-epoch-no", "steps": ["run job=backup-bareos-fd when=\"1970-01-01 00:00:00\"", "no"], "normalize": ["When: +[0-9: -]+"]}
+{"id": "c059-when-1901-no", "steps": ["run job=backup-bareos-fd when=\"1901-01-01 00:00:00\"", "no"], "normalize": []}
+{"id": "c059-when-1900-no", "steps": ["run job=backup-bareos-fd when=\"1900-01-01 00:00:00\"", "no"], "normalize": ["When: +[0-9: -]+"]}
+{"id": "c059-when-year-10000-no", "steps": ["run job=backup-bareos-fd when=\"10000-01-01 00:00:00\"", "no"], "normalize": []}
+{"id": "c059-when-two-digit-no", "steps": ["run job=backup-bareos-fd when=\"30-01-02 03:04:05\"", "no"], "normalize": ["When: +[0-9: -]+"]}
+{"id": "c059-when-plus-no", "steps": ["run job=backup-bareos-fd when=\"+2030-01-02 03:04:05\"", "no"], "normalize": ["When: +[0-9: -]+"]}
+{"id": "c059-when-fraction-no", "steps": ["run job=backup-bareos-fd when=\"2030-01-02 03:04:05.5\"", "no"], "normalize": ["When: +[0-9: -]+"]}
+{"id": "c059-when-no-blank-no", "steps": ["run job=backup-bareos-fd when=\"2030-01-0203:04:05\"", "no"], "normalize": ["When: +[0-9: -]+"]}
+{"id": "c059-when-hour24-no", "steps": ["run job=backup-bareos-fd when=\"2030-01-02 24:00:00\"", "no"], "normalize": ["When: +[0-9: -]+"]}
+{"id": "c059-when-apr31-no", "steps": ["run job=backup-bareos-fd when=\"2030-04-31 00:00:00\"", "no"], "normalize": ["When: +[0-9: -]+"]}
+{"id": "c059-when-2100-feb29-no", "steps": ["run job=backup-bareos-fd when=\"2100-02-29 00:00:00\"", "no"], "normalize": ["When: +[0-9: -]+"]}
+{"id": "c059-when-2000-feb29-no", "steps": ["run job=backup-bareos-fd when=\"2000-02-29 00:00:00\"", "no"], "normalize": []}
+{"id": "c059-mod-when-trailing", "steps": ["run job=backup-bareos-fd", "mod", "7", "2030-01-02 03:04:05 x", "no"], "normalize": ["When: +[0-9: -]+"]}
+{"id": "c059-mod-when-bad", "steps": ["run job=backup-bareos-fd", "mod", "7", "2030-01-02x", "2030-01-02 7::", "no"], "normalize": ["When: +2026[0-9: -]+"]}
+{"id": "c059-mod-when-month-wrap", "steps": ["run job=backup-bareos-fd", "mod", "7", "2030-4294967298-02 03:04:05", "no"], "normalize": ["When: +2026[0-9: -]+"]}

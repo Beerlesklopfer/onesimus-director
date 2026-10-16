@@ -77,10 +77,12 @@ Neue Einträge unten anhängen; behobene Einträge bleiben mit Commit stehen.
 | C-056 | 16.10.2026 | setbandwidth | — | `SetbwlimitCmd`: Auswahl per job/jobid/ujobid/all/state, Original-Fehlertexte | Nur `client=`/`storage=` mit `limit=`, eigene Fehlertexte | `ua_cmds.cc:935` | offen |
 | C-057 | 16.10.2026 | reload | — | Nach `reload` zeigt `show clients` beim Client `Catalog = "MyCatalog"` | Zeile fehlt nach `reload`; Fehlerpfad von reload nicht verglichen | `dird.cc` (reload) | offen |
 | C-058 | 16.10.2026 | Jobstart anderer Jobtypen | — | `run … yes` startet Restore/Verify/Admin/Copy/Migrate/Consolidate (RunJob) | „Running X jobs is not available yet.“ (Restore über `restore` funktioniert) | `job.cc` RunJob, `migrate.cc`, `verify.cc`, `admin.cc` | offen |
-| C-059 | 16.10.2026 | Zeitangaben | — | StrToUtime mit Bareos-eigenem `bsscanf` (installierte libbareos) | `purge.rs`/`estimate.rs` nutzen eigene Ports mit libc-sscanf-Semantik (Randfälle ungeprüft) | `lib/btime.cc`, `lib/scan.cc` | offen |
+| C-059 | 16.10.2026 | Zeitangaben | `c059-*` | StrToUtime/CompensateShortDate mit Bareos-eigenem `bsscanf` (installierte libbareos): `%u` ohne Vorzeichen/Leerzeichen, leeres Feld = 0, Überlauf modulo 2^32, Text nach Leerzeichen erlaubt, Jahr allein/Jahr-Monat werden ergänzt, Zeiten vor 1970 negativ | Sieben eigene Ports (`purge.rs`, `estimate.rs`, `catreq.rs`, `status.rs`, `list.rs`, `bvfs.rs`, `restore.rs`) mit libc-/chrono-Semantik; `restore before=2020` bzw. `2020-01` abgelehnt; Since-Zeit echter Backups per `EXTRACT(EPOCH)` als UTC statt Ortszeit (FD bekam die Since-Zeit um den UTC-Versatz zu spät) | `lib/btime.cc`, `lib/scan.cc`, `ua_restore.cc` CompensateShortDate, `fd_cmds.cc` SendSinceTime | behoben (16.10.2026): ein gemeinsamer Port `btime.rs` auf `scan.rs` (bsscanf), Erwartungswerte per C++-Harness gegen die installierte libbareos geprüft |
 | C-060 | 16.10.2026 | Handshake-Modus | `c018-client` nach `c017-*` | Ein erfolgreicher FD-Connect ohne Konsole (z. B. `estimate`) speichert den Handshake-Modus; der nächste Konsolen-Connect probt nicht mehr | `estimate` speicherte nichts → „Probing client protocol…“ erneut | `fd_cmds.cc` ConnectToFileDaemon | behoben (16.10.2026) |
 
 Hinweis C-002: Text-Sitzungen über gRPC/Command-Queue nutzen denselben SessionManager und erhalten die Katalogzeilen jetzt ebenfalls einmal pro Sitzung (konsistent mit dem Original, aber neue Ausgabe an dieser Schnittstelle).
+
+Hinweis C-059: Die übrigen StrToUtime-Aufrufer des Originals (`update jobid=… starttime=`, Run On Incoming Connect Interval) sind in Onesimus nicht implementiert; sie müssen bei ihrer Portierung `crate::btime::str_to_utime` verwenden.
 
 ## Stand 16.10.2026
 
@@ -101,7 +103,7 @@ eindeutige Sortierung), `c015-list-jobs-enabled-count` (undefiniertes Verhalten 
 
 ### Offen
 
-- Einträge mit Status „offen“ in der Tabelle: C-056, C-057, C-058, C-059 (Agenten am 16.10.2026 durch das Ausgabenlimit unterbrochen; Arbeitsstand liegt in ihren Worktrees).
+- Einträge mit Status „offen“ in der Tabelle: C-056, C-057, C-058 (Agenten am 16.10.2026 durch das Ausgabenlimit unterbrochen; Arbeitsstand liegt in ihren Worktrees).
 - Befehlsstatus im Wiki (`docs/wiki/commands`): 53 `parity_verified`, 31 `partial`, 4 `registered_unverified`, 26 Restore-Baum-Befehle `missing_context` (Stand vor den C-045/C-049/C-055-Merges, Auffrischung offen).
 - OVFS-Integration im Director gemergt (16.10.2026): Erkennung beim Connect (Version 0.1.x + Signaturen), Befehle `.ovfs_status/_latest/_tree/_ls/_versions`, MCP-Tools in oconsole, SQL-Rückfall byte-gleich zur Extension (Äquivalenztest mit gebauter Extension auf PG 17).
 - OVFS (eigene PostgreSQL-Extension, paralleles Projekt `oenesimus-postgres-plugin`) ist der Onesimus-Weg für Verzeichnisbäume und Restore-Auswahl. BVFS (`commands/bvfs.rs`, byte-gleich portiert, Fälle `c022`) bleibt nur zur Abwärtskompatibilität für Bareos-Clients (z. B. bareos-webui) erhalten und darf sich dabei nicht ändern.

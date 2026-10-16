@@ -1052,12 +1052,15 @@ pub fn cmd_bvfs_get_jobids(ast: &CommandAst, ctx: &ExecContext) -> CommandResult
     CommandResult::ok(format!("{prefix}{filtered}\n")).with_json(json!({ "jobids": items }))
 }
 
-/// bstrutime(StartTime + 1) of the job's StartTime (the current time if the
-/// job has none), in the Director's local time like the catalog values.
+/// cats/sql_get.cc AccurateGetJobids(): bstrutime(StartTime + 1), where
+/// StartTime is StrToUtime() of the job's catalog StartTime (GetJobRecord)
+/// and the current time when that is 0.
 pub(crate) fn accurate_date(start_time: &str) -> String {
-    let start = chrono::NaiveDateTime::parse_from_str(start_time.get(..19).unwrap_or(""), "%Y-%m-%d %H:%M:%S")
-        .unwrap_or_else(|_| chrono::Local::now().naive_local());
-    (start + chrono::Duration::seconds(1)).format("%Y-%m-%d %H:%M:%S").to_string()
+    let start = match crate::btime::str_to_utime(start_time) {
+        0 => (unsafe { libc::time(std::ptr::null_mut()) }) as i64,
+        time => time,
+    };
+    crate::localtime::strftime("%Y-%m-%d %H:%M:%S", (start + 1) as libc::time_t)
 }
 
 #[cfg(test)]
@@ -1285,6 +1288,9 @@ SELECT Job.JobId, JobTDate, FileIndex, Name, PathId, FileId FROM File JOIN Job U
         assert!(log[1].contains("Level='D'") && log[2].contains("Level='I'"));
         assert_eq!(log[4], "DROP TABLE IF EXISTS btemp30");
         assert_eq!(accurate_date("2026-07-10 21:00:02"), "2026-07-10 21:00:03");
-        assert_eq!(accurate_date("2026-12-31 23:59:59.5"), "2027-01-01 00:00:00");
+        assert_eq!(accurate_date("2026-12-31 23:59:59"), "2027-01-01 00:00:00");
+        // not a StrToUtime time: the current time
+        let now = crate::localtime::strftime_now("%Y-%m-%d");
+        assert!(accurate_date("2026-12-31 23:59:59.5").starts_with(&now[..4]));
     }
 }

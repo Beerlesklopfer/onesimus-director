@@ -1588,9 +1588,8 @@ fn find_next_volume(cat: &CatalogHandle, pool_id: &str, media_type: &str, storag
             let t = cat.query_rows(&sql).ok()?;
             for row in &t.rows {
                 let n = |i: usize| row[i].as_deref().map(str_to_int64).unwrap_or(0);
-                let first_written = row[8].as_deref()
-                    .and_then(|v| chrono::NaiveDateTime::parse_from_str(v, "%Y-%m-%d %H:%M:%S").ok())
-                    .and_then(|v| Local.from_local_datetime(&v).single()).map(|v| v.timestamp()).unwrap_or(0);
+                // sql_find.cc FindNextVolume(): StrToUtime(cFirstWritten)
+                let first_written = crate::btime::str_to_utime_opt(row[8].as_deref());
                 let expired = status == "Append" && n(1) > 0
                     && ((n(4) > 0 && n(3) >= n(4)) || (n(5) > 0 && n(5) <= n(1)) || (n(6) > 0 && n(6) <= n(2))
                         || (n(7) > 0 && n(7) <= now - first_written));
