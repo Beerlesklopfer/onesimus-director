@@ -443,7 +443,9 @@ fn parse_arg(ast: &CommandAst, ctx: &ExecContext) -> Result<(Args, String), (Str
 }
 
 /// C++ BvfsValidateJobid(): Job ACL on the job name, Client ACL on its client.
-fn validate_jobid(db: &dyn Db, ctx: &ExecContext, jobid: &str) -> bool {
+fn validate_jobid(db: &dyn Db, ctx: &ExecContext, jobid: &str, audit: bool) -> bool {
+    // AclAccessOk(…, audit_event): denials go to the audit log when set.
+    let allowed = |kind, name: &str| if audit { acl::access_audited(ctx, kind, name) } else { acl::access(ctx, kind, name) };
     let id = str_to_int64(jobid);
     let sql = if id == 0 {
         "SELECT Name, ClientId FROM Job WHERE Job=''".to_string()
@@ -453,14 +455,14 @@ fn validate_jobid(db: &dyn Db, ctx: &ExecContext, jobid: &str) -> bool {
     let Ok(table) = db.rows(&sql) else { return false };
     let Some(row) = table.rows.first() else { return false };
     let name = row.first().cloned().flatten().unwrap_or_default();
-    if !acl::access(ctx, Kind::Job, &name) {
+    if !allowed(Kind::Job, &name) {
         return false;
     }
     let client_id = str_to_int64(&row.get(1).cloned().flatten().unwrap_or_default());
     if client_id != 0 {
         if let Ok(names) = column0(db, &format!("SELECT Name FROM Client WHERE Client.ClientId={client_id}")) {
             if let Some(client) = names.first() {
-                if !acl::access(ctx, Kind::Client, client) {
+                if !allowed(Kind::Client, client) {
                     return false;
                 }
             }
@@ -470,9 +472,9 @@ fn validate_jobid(db: &dyn Db, ctx: &ExecContext, jobid: &str) -> bool {
 }
 
 /// C++ BvfsValidateJobids(): the permitted jobids of the list ("" if none).
-fn validate_jobids(db: &dyn Db, ctx: &ExecContext, jobids: &str) -> String {
+fn validate_jobids(db: &dyn Db, ctx: &ExecContext, jobids: &str, audit: bool) -> String {
     jobids.split(',').take_while(|id| !id.is_empty())
-        .filter(|id| validate_jobid(db, ctx, id))
+        .filter(|id| validate_jobid(db, ctx, id, audit))
         .collect::<Vec<_>>()
         .join(",")
 }
@@ -873,7 +875,7 @@ pub fn cmd_bvfs_restore(ast: &CommandAst, ctx: &ExecContext) -> CommandResult {
         Err((text, error)) => return finish(text, error, false),
     };
     let Some(db) = connection(ctx) else { return finish(prefix, ERR_UNAUTHORIZED.into(), false) };
-    let jobids = validate_jobids(&db, ctx, args.jobid.as_deref().unwrap_or(""));
+    let jobids = validate_jobids(&db, ctx, args.jobid.as_deref().unwrap_or(""), true);
     if jobids.is_empty() {
         return finish(prefix, ERR_UNAUTHORIZED.into(), false);
     }
@@ -895,7 +897,7 @@ pub fn cmd_bvfs_lsfiles(ast: &CommandAst, ctx: &ExecContext) -> CommandResult {
         Err((text, error)) => return finish(text, error, false),
     };
     let Some(db) = connection(ctx) else { return finish(prefix, ERR_UNAUTHORIZED.into(), false) };
-    let jobids = validate_jobids(&db, ctx, args.jobid.as_deref().unwrap_or(""));
+    let jobids = validate_jobids(&db, ctx, args.jobid.as_deref().unwrap_or(""), true);
     if jobids.is_empty() {
         return finish(prefix, ERR_UNAUTHORIZED.into(), false);
     }
@@ -914,7 +916,7 @@ pub fn cmd_bvfs_lsdirs(ast: &CommandAst, ctx: &ExecContext) -> CommandResult {
         Err((text, error)) => return finish(text, error, true),
     };
     let Some(db) = connection(ctx) else { return finish(prefix, ERR_UNAUTHORIZED.into(), false) };
-    let jobids = validate_jobids(&db, ctx, args.jobid.as_deref().unwrap_or(""));
+    let jobids = validate_jobids(&db, ctx, args.jobid.as_deref().unwrap_or(""), true);
     if jobids.is_empty() {
         return finish(prefix, ERR_UNAUTHORIZED.into(), false);
     }
@@ -1043,7 +1045,7 @@ pub fn cmd_bvfs_get_jobids(ast: &CommandAst, ctx: &ExecContext) -> CommandResult
         }
     }
 
-    let filtered = validate_jobids(&db, ctx, &jobids.join(","));
+    let filtered = validate_jobids(&db, ctx, &jobids.join(","), false);
     let items: Vec<Value> = filtered.split(',').take_while(|id| !id.is_empty()).map(|id| json!({ "id": id })).collect();
     CommandResult::ok(format!("{prefix}{filtered}\n")).with_json(json!({ "jobids": items }))
 }
