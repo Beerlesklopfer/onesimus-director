@@ -84,7 +84,15 @@ pub fn cmd_configure(ast: &CommandAst, ctx: &ExecContext) -> CommandResult {
     };
     let with_warning = |mut result: CommandResult| {
         if !warning.is_empty() {
-            if result.success { result.text_output.insert_str(0, warning) } else { result.error_message.insert_str(0, warning) }
+            // ua->WarningMsg() before anything else: first in the output,
+            // first message (BNET_WARNING_MSG, `.api 2` "warning" list).
+            if result.text_output.is_empty() || !result.errors_first {
+                result.text_output.insert_str(0, warning);
+                result.errors_first = false;
+            } else {
+                result.error_message.insert_str(0, warning);
+            }
+            result.messages.insert(0, (crate::command_queue::MsgKind::Warning, warning.to_string()));
         }
         result
     };

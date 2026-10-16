@@ -850,7 +850,7 @@ pub fn cmd_bvfs_clear_cache(ast: &CommandAst, ctx: &ExecContext) -> CommandResul
     if let Some(db) = connection(ctx) {
         let _ = db.exec("BEGIN;\n   UPDATE Job SET HasCache=0;\n   TRUNCATE PathHierarchy;\n   TRUNCATE PathVisibility;\nCOMMIT;\n");
     }
-    finish(prefix + "OK\n", String::new(), true)
+    finish(prefix, String::new(), true).with_info("OK\n") // InfoMsg
 }
 
 /// `.bvfs_cleanup path=b2<number>`

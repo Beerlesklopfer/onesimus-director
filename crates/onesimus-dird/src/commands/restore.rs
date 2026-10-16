@@ -17,7 +17,7 @@ use bareos_config::resources::JobType;
 use crate::acl::{self, Kind};
 use crate::command_ast::{Argument, CommandAst};
 use crate::command_executor::{ApiMode, ExecContext};
-use crate::command_queue::CommandResult;
+use crate::command_queue::{CommandResult, MsgKind};
 use crate::job_manager;
 use crate::job_worker::{self, JobParams, WorkerJobType};
 use crate::message_bus::{BusMessage, MsgType};
@@ -65,6 +65,8 @@ struct Ua {
     out: String,
     err: String,
     errors_first: bool,
+    /// ErrorMsg/WarningMsg/InfoMsg calls in order (CommandResult::messages).
+    messages: Vec<(MsgKind, String)>,
 }
 
 impl Ua {
@@ -77,15 +79,31 @@ impl Ua {
             self.errors_first = true;
         }
         self.err.push_str(text);
+        self.messages.push((MsgKind::Error, text.to_string()));
+    }
+
+    /// ua->WarningMsg(): text plus BNET_WARNING_MSG / "warning" entry.
+    fn warning(&mut self, text: &str) {
+        self.out.push_str(text);
+        self.messages.push((MsgKind::Warning, text.to_string()));
+    }
+
+    /// ua->InfoMsg(): text plus BNET_INFO_MSG / "info" entry.
+    fn info(&mut self, text: &str) {
+        self.out.push_str(text);
+        self.messages.push((MsgKind::Info, text.to_string()));
     }
 
     fn finish(self, success: bool) -> CommandResult {
+        // Without WarningMsg/InfoMsg the errors keep their line split.
+        let notices = self.messages.iter().any(|(kind, _)| *kind != MsgKind::Error);
         CommandResult {
             success,
             text_output: self.out,
             error_message: self.err,
             errors_first: self.errors_first,
             json: None,
+            messages: if notices { self.messages } else { Vec::new() },
             ..Default::default()
         }
     }
@@ -507,12 +525,12 @@ fn filter_jobids(ua: &mut Ua, ctx: &ExecContext, list: &str) -> Selection {
         selected.push(jobid);
     }
     if selected.is_empty() {
-        ua.send("No Jobs selected.\n");
+        ua.warning("No Jobs selected.\n");
         return Selection::Abort;
     }
     let joined = selected.iter().map(u32::to_string).collect::<Vec<_>>().join(",");
     let plural = if selected.len() > 1 { "s" } else { "" };
-    ua.send(&format!("You have selected the following JobId{plural}: {joined}\n"));
+    ua.info(&format!("You have selected the following JobId{plural}: {joined}\n"));
     Selection::JobIds(selected)
 }
 

@@ -146,12 +146,12 @@ fn show(ast: &CommandAst, raw: &[ConfResource]) -> CommandResult {
     let mut out = Out::default();
 
     if args.iter().any(|a| a.key.eq_ignore_ascii_case("help")) {
-        out.text.push_str("Keywords for the show command are:\n");
+        // InfoMsg for the header and every keyword
+        let mut result = out.finish().with_info("Keywords for the show command are:\n");
         for (kw, _) in SHOW_KEYWORDS {
-            out.text.push_str(kw);
-            out.text.push('\n');
+            result = result.with_info(format!("{kw}\n"));
         }
-        return out.finish();
+        return result;
     }
 
     if args.is_empty() || args.iter().any(|a| a.key.eq_ignore_ascii_case("all")) {

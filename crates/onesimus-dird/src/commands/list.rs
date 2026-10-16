@@ -10,7 +10,7 @@ use serde_json::{json, Map, Value};
 use crate::catalog_worker::{CatalogHandle, SqlTable};
 use crate::command_ast::CommandAst;
 use crate::command_executor::{ApiMode, ExecContext};
-use crate::command_queue::CommandResult;
+use crate::command_queue::{CommandResult, MsgKind};
 use crate::sql_list::{add_commas, json_rows, render_shown, ListType};
 
 pub fn cmd_list(ast: &CommandAst, ctx: &ExecContext) -> CommandResult {
@@ -73,11 +73,20 @@ struct ListOut<'c> {
     filtered: u64,
     /// The command ended in a dialog (StartPrompt/DoPrompt) or a stand-in for one.
     dialog: Option<CommandResult>,
+    /// WarningMsg/InfoMsg calls (their text is also in `text`).
+    messages: Vec<(MsgKind, String)>,
 }
 
 impl ListOut<'_> {
     fn error(&mut self, msg: impl Into<String>) {
         self.errors.push_str(&msg.into());
+    }
+
+    /// ua->WarningMsg(): output text plus BNET_WARNING_MSG / "warning" entry.
+    fn warning(&mut self, msg: impl Into<String>) {
+        let msg = msg.into();
+        self.text.push_str(&msg);
+        self.messages.push((MsgKind::Warning, msg));
     }
 
     /// FilterData() for every row: which rows are shown. Suppressed rows
@@ -141,6 +150,7 @@ impl ListOut<'_> {
                 self.text.push_str(&self.errors);
             }
             dialog.text_output.insert_str(0, &self.text);
+            dialog.messages.splice(0..0, self.messages);
             return dialog;
         }
         if ok && self.errors.is_empty() && (self.range.is_some() || !self.filters.is_empty()) {
@@ -154,13 +164,15 @@ impl ListOut<'_> {
             range.insert("filtered".into(), json!(self.filtered));
             self.json.insert("meta".into(), json!({ "range": range }));
         }
-        if ok && self.errors.is_empty() {
-            CommandResult::ok(self.text).with_json(Value::Object(self.json))
+        let mut r = if ok && self.errors.is_empty() {
+            CommandResult::ok(self.text)
         } else {
             let mut r = CommandResult::error(self.errors);
             r.text_output = self.text;
-            r.with_json(Value::Object(self.json))
-        }
+            r
+        };
+        r.messages = self.messages;
+        r.with_json(Value::Object(self.json))
     }
 }
 
@@ -696,7 +708,7 @@ impl ListOptions {
                 // GetParsedJobType: one character is the code, else the exact (case-sensitive) name
                 let t = TYPES.iter().find(|(n, c)| if s.len() == 1 { s.starts_with(*c) } else { *n == s });
                 let Some(t) = t else {
-                    out.text.push_str(&format!("Illegal jobtype {s}\n")); // WarningMsg
+                    out.warning(format!("Illegal jobtype {s}\n"));
                     return Err("invalid jobtype parameter\n".into());
                 };
                 o.jobtype.push(t.1);
@@ -1385,7 +1397,7 @@ fn list_nextvol(args: &Args, ctx: &ExecContext, cat: &CatalogHandle, out: &mut L
     if let Some(v) = args.value("days") {
         days = str_to_int64(v) as i32 as i64;
         if !(0..=MAX_DAYS).contains(&days) {
-            out.text.push_str(&format!("Ignoring invalid value for days. Max is {MAX_DAYS}.\n")); // WarningMsg
+            out.warning(format!("Ignoring invalid value for days. Max is {MAX_DAYS}.\n"));
             days = 1;
         }
     }
