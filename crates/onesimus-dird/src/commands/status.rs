@@ -437,16 +437,7 @@ fn list_running_jobs(ua: &mut Ua, ctx: &ExecContext) {
     let cfg = ctx.config.as_ref().and_then(|c| c.read().ok().map(|c| c.clone()));
     let mut rows = Vec::new();
     for job in jobs.iter().filter(|j| acl::access(ctx, Kind::Job, &j.name)) {
-        use crate::job_manager::DirJobPhase as P;
-        let msg = match job.phase {
-            P::Queued | P::Starting => "is waiting execution",
-            P::Canceling => "has been canceled",
-            P::WaitingMedia => "is waiting for an appendable Volume",
-            P::WaitingMount => "is waiting for a mount request",
-            P::Completed => "has terminated",
-            P::Error => "has erred",
-            P::Running | P::Paused | P::WaitingCatReq | P::Finishing => "is running",
-        };
+        let msg = running_job_status(job);
         let res = cfg.as_ref().and_then(|c| c.jobs.iter().find(|j| j.name == job.name).cloned());
         let level = match res.as_ref().map(|r| r.job_type) {
             Some(JobType::Admin | JobType::Archive | JobType::Restore) => "      ".to_string(),
@@ -468,6 +459,57 @@ fn list_running_jobs(ua: &mut Ua, ctx: &ExecContext) {
         ApiMode::Human => ua.send("====\n"),
         ApiMode::Api => {}
     }
+}
+
+/// ListRunningJobs(): the status text of a job from its JobStatus and the
+/// Storage daemon's status (Compatibility log C-048).
+fn running_job_status(job: &crate::job_manager::ActiveJob) -> String {
+    let client = (!job.client.is_empty()).then_some(job.client.as_str());
+    let storage = (!job.storage.is_empty()).then_some(job.storage.as_str());
+    let mut msg = match job.status {
+        'C' => "is waiting execution".to_string(),
+        'R' => "is running".into(),
+        'B' => "is blocked".into(),
+        'T' => "has terminated".into(),
+        'W' => "has terminated with warnings".into(),
+        'E' => "has erred".into(),
+        'e' => "has errors".into(),
+        'f' => "has a fatal error".into(),
+        'D' => "has verify differences".into(),
+        'A' => "has been canceled".into(),
+        'F' => client.map_or("is waiting on Client".into(), |c| format!("is waiting on Client {c}")),
+        'S' => storage.map_or("is waiting on Storage".into(), |s| format!("is waiting on Storage \"{s}\"")),
+        's' => "is waiting on max Storage jobs".into(),
+        'c' => "is waiting on max Client jobs".into(),
+        'j' => "is waiting on max Job jobs".into(),
+        'd' => "is waiting on max total jobs".into(),
+        't' if job.sched_time != 0 => format!("is waiting for its start time at {}",
+            bstrftime_nc(job.sched_time as libc::time_t)),
+        't' => "is waiting for its start time".into(),
+        'p' => "is waiting for higher priority jobs to finish".into(),
+        'L' => "SD committing Data".into(),
+        'l' => "SD despooling Data".into(),
+        'a' => "SD despooling Attributes".into(),
+        'i' => "Dir inserting Attributes".into(),
+        other => format!("is in unknown state {other}"),
+    };
+    match job.sd_status {
+        'M' => msg = "is waiting for a mount request".into(),
+        'm' => msg = "is waiting for an appendable Volume".into(),
+        'F' => msg = if !job.fd_connected {
+            "is waiting for Client to connect (Client Initiated Connection)".into()
+        } else if let (Some(c), Some(s)) = (client, storage) {
+            format!("is waiting for Client {c} to connect to Storage {s}")
+        } else {
+            "is waiting for Client to connect to Storage daemon".into()
+        },
+        'L' => msg = "SD committing Data".into(),
+        'l' => msg = "SD despooling Data".into(),
+        'a' => msg = "SD despooling Attributes".into(),
+        'i' => msg = "Dir inserting Attributes".into(),
+        _ => {}
+    }
+    msg
 }
 
 /// lib/edit.cc edit_uint64_with_suffix(): "126.3 M", "0 ".
@@ -637,15 +679,7 @@ fn dot_status_current(ua: &mut Ua, ctx: &ExecContext) {
     ua.send("1000 OK .status\n");
     let jobs = ctx.job_manager.as_ref().map(|m| m.lock().unwrap().active_jobs()).unwrap_or_default();
     for job in jobs.iter().filter(|j| acl::access(ctx, Kind::Job, &j.name)) {
-        use crate::job_manager::DirJobPhase as P;
-        let status = match job.phase {
-            P::Queued | P::Starting => 'C',
-            P::Canceling => 'A',
-            P::Error => 'f',
-            P::Completed => 'T',
-            _ => 'R',
-        };
-        ua.send(&format!("JobId={} JobStatus={status} JobErrors=0\n", job.id));
+        ua.send(&format!("JobId={} JobStatus={} JobErrors=0\n", job.id, job.status));
     }
 }
 
@@ -1916,5 +1950,27 @@ mod tests {
         let (out, json) = run_slots(ApiMode::Json, "SlotsJsonNone", "slots", &mut sd);
         assert!(json.is_none());
         assert!(out.ends_with("No Volumes found, or no barcodes.\n"), "{out}");
+    }
+
+    /// ListRunningJobs() status texts (Compatibility log C-048).
+    #[test]
+    fn running_job_status_texts() {
+        use crate::job_manager::ActiveJob;
+        let job = |status, sd_status, fd_connected| ActiveJob { status, sd_status, fd_connected,
+            client: "fd1".into(), storage: "File".into(), ..Default::default() };
+        let texts: Vec<String> = ['C', 'R', 'B', 'A', 'F', 'S', 's', 'c', 'j', 'd', 'p', 't', 'T', 'f', 'x']
+            .iter().map(|status| running_job_status(&job(*status, '\0', false))).collect();
+        assert_eq!(texts, ["is waiting execution", "is running", "is blocked", "has been canceled",
+            "is waiting on Client fd1", "is waiting on Storage \"File\"", "is waiting on max Storage jobs",
+            "is waiting on max Client jobs", "is waiting on max Job jobs", "is waiting on max total jobs",
+            "is waiting for higher priority jobs to finish", "is waiting for its start time", "has terminated",
+            "has a fatal error", "is in unknown state x"]);
+        assert_eq!(running_job_status(&ActiveJob { status: 'S', ..Default::default() }), "is waiting on Storage");
+        assert_eq!(running_job_status(&job('R', 'm', true)), "is waiting for an appendable Volume");
+        assert_eq!(running_job_status(&job('A', 'M', true)), "is waiting for a mount request");
+        assert_eq!(running_job_status(&job('R', 'F', true)), "is waiting for Client fd1 to connect to Storage File");
+        assert_eq!(running_job_status(&job('R', 'F', false)), "is waiting for Client to connect (Client Initiated Connection)");
+        let start = ActiveJob { status: 't', sched_time: 1_700_000_000, ..Default::default() };
+        assert_eq!(running_job_status(&start), format!("is waiting for its start time at {}", bstrftime_nc(1_700_000_000)));
     }
 }

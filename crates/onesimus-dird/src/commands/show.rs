@@ -1045,20 +1045,22 @@ fn director_addresses(res: &ConfResource) -> Vec<Addr> {
 // --- runscripts ---------------------------------------------------------------
 
 #[derive(Debug, Clone, PartialEq)]
-struct Script {
-    command: String,
-    console: bool,
+pub(crate) struct Script {
+    pub(crate) command: String,
+    pub(crate) console: bool,
     short_form: bool,
     /// None = never
-    when: Option<&'static str>,
-    on_success: bool,
-    on_failure: bool,
-    fail_on_error: bool,
-    target: String,
+    pub(crate) when: Option<&'static str>,
+    pub(crate) on_success: bool,
+    pub(crate) on_failure: bool,
+    pub(crate) fail_on_error: bool,
+    pub(crate) target: String,
     short_name: Option<&'static str>,
 }
 
-fn runscripts(res: &ConfResource) -> Vec<Script> {
+/// The RunScripts of a resource in configuration order (also used by
+/// `runscript::run_job_scripts`).
+pub(crate) fn runscripts(res: &ConfResource) -> Vec<Script> {
     let mut out = Vec::new();
     for d in &res.directives {
         let key = d.norm_key();
