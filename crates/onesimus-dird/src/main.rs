@@ -364,14 +364,7 @@ fn main() {
         let cat = config.catalogs.first().unwrap();
 
         // Schema-Verzeichnis: relativ zum Binary (dev) oder /usr/lib/bareos/ddl/schema (installed)
-        let schema_dir = [
-            // Dev: binary in target/release/, schema in crates/bareos-orm/schema/
-            std::env::current_exe().ok()
-                .and_then(|p| p.parent()?.parent()?.parent().map(|d| d.join("crates/bareos-orm/schema"))),
-            // Installed
-            Some(std::path::PathBuf::from("/usr/lib/bareos/ddl/schema")),
-        ].into_iter().flatten().find(|p| p.exists())
-         .unwrap_or_else(|| std::path::PathBuf::from("/usr/lib/bareos/ddl/schema"));
+        let schema_dir = commands::catalog::schema_dir();
 
         if schema_dir.exists() {
             let migrator = bareos_orm::migration::Migrator::new(&schema_dir);

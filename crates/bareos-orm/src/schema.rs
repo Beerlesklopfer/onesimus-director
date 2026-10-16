@@ -40,7 +40,10 @@ pub struct TableDef {
     pub description: String,
     /// Spalten
     pub columns: Vec<ColumnDef>,
-    /// Primärschlüssel (Spaltenname)
+    /// Primärschlüssel: Spaltenname, bei zusammengesetzten Schlüsseln durch
+    /// Komma getrennt (`"jobid, pathid"`); leer = kein Primärschlüssel (wie
+    /// `version`, `jobhisto`, `devicestats` in der Bareos-DDL).
+    #[serde(default)]
     pub primary_key: String,
     /// Indizes
     #[serde(default)]
@@ -51,6 +54,10 @@ pub struct TableDef {
     /// Zusätzliche Constraints
     #[serde(default)]
     pub constraints: Vec<ConstraintDef>,
+    /// Zeilen, die beim Anlegen eingefügt werden (Werte in Spaltenreihenfolge),
+    /// z.B. die `status`-Zeilen und die `version`-Zeile der Bareos-DDL.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub initial_rows: Vec<Vec<serde_json::Value>>,
 }
 
 /// Spalten-Definition.
@@ -73,6 +80,9 @@ pub struct ColumnDef {
     /// JSONB: Schema-Validierung für JSON-Spalten
     #[serde(default)]
     pub json_schema: Option<serde_json::Value>,
+    /// `ALTER TABLE ... ALTER COLUMN ... SET STATISTICS n`
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub statistics: Option<i32>,
 }
 
 /// Index-Definition.
@@ -167,6 +177,9 @@ pub struct FunctionDef {
     /// Volatility: VOLATILE, STABLE, IMMUTABLE (Default: VOLATILE)
     #[serde(default = "default_volatility")]
     pub volatility: String,
+    /// PARALLEL: SAFE, RESTRICTED, UNSAFE (Default: nicht angegeben = UNSAFE)
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub parallel: Option<String>,
 }
 
 fn default_returns() -> String { "void".to_string() }
@@ -198,11 +211,8 @@ impl CatalogSchema {
         sql.push_str(&format!("-- Generated from JSON schema\n\n"));
 
         for table in &self.tables {
-            sql.push_str(&table.to_create_sql());
-            sql.push('\n');
-
-            for idx in &table.indices {
-                sql.push_str(&idx.to_sql(&table.name));
+            for stmt in table.to_statements() {
+                sql.push_str(&stmt);
                 sql.push('\n');
             }
             sql.push('\n');
@@ -230,12 +240,9 @@ impl CatalogSchema {
     /// Generiere einzelne SQL-Statements (Tables + Indices + Functions + Views).
     pub fn to_statements(&self) -> Vec<String> {
         let mut stmts = Vec::new();
-        // 1. Tables + Indices
+        // 1. Tables + Indices + initial rows
         for table in &self.tables {
-            stmts.push(table.to_create_sql());
-            for idx in &table.indices {
-                stmts.push(idx.to_sql(&table.name));
-            }
+            stmts.extend(table.to_statements());
         }
         // 2. Functions (before views, views may reference functions)
         for func in &self.functions {
@@ -255,43 +262,77 @@ impl CatalogSchema {
 }
 
 impl TableDef {
+    /// Primärschlüssel-Spalten (leer: kein Primärschlüssel).
+    pub fn primary_key_columns(&self) -> Vec<&str> {
+        self.primary_key.split(',').map(str::trim).filter(|c| !c.is_empty()).collect()
+    }
+
+    /// Alle Anweisungen zum Anlegen der Tabelle: CREATE TABLE, Spalten-
+    /// Statistikziele, Indizes, Anfangszeilen.
+    pub fn to_statements(&self) -> Vec<String> {
+        let mut stmts = vec![self.to_create_sql()];
+        for col in &self.columns {
+            if let Some(target) = col.statistics {
+                stmts.push(format!(
+                    "ALTER TABLE {} ALTER COLUMN {} SET STATISTICS {target};",
+                    self.name, col.name
+                ));
+            }
+        }
+        for idx in &self.indices {
+            stmts.push(idx.to_sql(&self.name));
+        }
+        stmts.extend(self.insert_statements());
+        stmts
+    }
+
+    /// INSERTs für `initial_rows`. Idempotent: eine Zeile wird nur eingefügt,
+    /// wenn es noch keine mit demselben Primärschlüssel (ohne Primärschlüssel:
+    /// mit denselben Werten) gibt.
+    pub fn insert_statements(&self) -> Vec<String> {
+        let pk = self.primary_key_columns();
+        self.initial_rows.iter().map(|row| {
+            let cols: Vec<&str> = self.columns.iter().take(row.len()).map(|c| c.name.as_str()).collect();
+            let values: Vec<String> = row.iter().map(sql_literal).collect();
+            let matches: Vec<String> = cols.iter().zip(&values)
+                .filter(|(c, _)| pk.is_empty() || pk.contains(c))
+                .map(|(c, v)| format!("{c} = {v}"))
+                .collect();
+            format!(
+                "INSERT INTO {t} ({}) SELECT {} WHERE NOT EXISTS (SELECT 1 FROM {t} WHERE {});",
+                cols.join(", "), values.join(", "), matches.join(" AND "), t = self.name
+            )
+        }).collect()
+    }
+
     /// Generiere CREATE TABLE SQL.
     pub fn to_create_sql(&self) -> String {
-        let mut sql = format!("CREATE TABLE IF NOT EXISTS {} (\n", self.name);
-
-        for (i, col) in self.columns.iter().enumerate() {
-            sql.push_str(&format!("    {} {}", col.name, col.col_type));
+        let mut items: Vec<String> = self.columns.iter().map(|col| {
+            let mut item = format!("    {} {}", col.name, col.col_type);
             if col.not_null {
-                sql.push_str(" NOT NULL");
+                item.push_str(" NOT NULL");
             }
             if let Some(ref default) = col.default {
-                sql.push_str(&format!(" DEFAULT {default}"));
+                item.push_str(&format!(" DEFAULT {default}"));
             }
-            sql.push(',');
-            if !col.description.is_empty() {
-                sql.push_str(&format!("  -- {}", col.description));
-            }
-            sql.push('\n');
+            item
+        }).collect();
+
+        let pk = self.primary_key_columns();
+        if !pk.is_empty() {
+            items.push(format!("    PRIMARY KEY ({})", pk.join(", ")));
         }
-
-        // Primary Key
-        sql.push_str(&format!("    PRIMARY KEY ({})", self.primary_key));
-
-        // Foreign Keys
         for fk in &self.foreign_keys {
-            sql.push_str(&format!(
-                ",\n    FOREIGN KEY ({}) REFERENCES {}({}) ON DELETE {}",
+            items.push(format!(
+                "    FOREIGN KEY ({}) REFERENCES {}({}) ON DELETE {}",
                 fk.column, fk.references_table, fk.references_column, fk.on_delete
             ));
         }
-
-        // Constraints
         for c in &self.constraints {
-            sql.push_str(&format!(",\n    CONSTRAINT {} CHECK ({})", c.name, c.expression));
+            items.push(format!("    CONSTRAINT {} CHECK ({})", c.name, c.expression));
         }
 
-        sql.push_str("\n);\n");
-        sql
+        format!("CREATE TABLE IF NOT EXISTS {} (\n{}\n);\n", self.name, items.join(",\n"))
     }
 
     /// Generiere ALTER TABLE SQL für eine Spalten-Änderung.
@@ -304,6 +345,15 @@ impl TableDef {
         }
         sql.push_str(";\n");
         sql
+    }
+}
+
+/// SQL-Literal für einen JSON-Wert einer Anfangszeile.
+fn sql_literal(value: &serde_json::Value) -> String {
+    match value {
+        serde_json::Value::Null => "NULL".to_string(),
+        serde_json::Value::String(s) => format!("'{}'", s.replace('\'', "''")),
+        other => other.to_string(),
     }
 }
 
@@ -349,11 +399,12 @@ impl FunctionDef {
     /// Generiere CREATE OR REPLACE FUNCTION SQL.
     pub fn to_sql(&self) -> String {
         let security = if self.security_definer { "\nSECURITY DEFINER" } else { "" };
+        let parallel = self.parallel.as_deref().map(|p| format!(" PARALLEL {p}")).unwrap_or_default();
         format!(
-            "CREATE OR REPLACE FUNCTION {}({}) RETURNS {} AS $$\n{}\n$$ LANGUAGE {}\n{}{};",
+            "CREATE OR REPLACE FUNCTION {}({}) RETURNS {} AS $$\n{}\n$$ LANGUAGE {}\n{}{}{};",
             self.name, self.params, self.returns,
             self.body,
-            self.language, self.volatility, security,
+            self.language, self.volatility, parallel, security,
         )
     }
 }

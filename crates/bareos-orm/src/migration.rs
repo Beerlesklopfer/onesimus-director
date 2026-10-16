@@ -50,6 +50,39 @@ impl Migrator {
         Ok(versions.into_iter().last())
     }
 
+    /// All versions folded into one schema: the Bareos base tables plus every
+    /// later addition (tables, columns, indices, functions, views). Its
+    /// `to_statements()` creates what a fresh `migrate()` creates, which a
+    /// single extension file (no tables of its own) cannot.
+    pub fn combined(&self) -> Result<Option<CatalogSchema>, OrmError> {
+        let mut versions = self.load_versions()?.into_iter();
+        let Some(mut combined) = versions.next() else { return Ok(None) };
+        for next in versions {
+            for table in next.tables {
+                match combined.tables.iter_mut().find(|t| t.name == table.name) {
+                    Some(existing) => {
+                        for col in table.columns {
+                            if !existing.columns.iter().any(|c| c.name == col.name) {
+                                existing.columns.push(col);
+                            }
+                        }
+                        for idx in table.indices {
+                            if !existing.indices.iter().any(|i| i.name == idx.name) {
+                                existing.indices.push(idx);
+                            }
+                        }
+                    }
+                    None => combined.tables.push(table),
+                }
+            }
+            combined.functions.extend(next.functions);
+            combined.views.extend(next.views);
+            combined.version = next.version;
+            combined.description = next.description;
+        }
+        Ok(Some(combined))
+    }
+
     /// Generiere die Migration-SQL von Version `from` nach `to`.
     pub fn diff(from: &CatalogSchema, to: &CatalogSchema) -> Vec<String> {
         let mut statements = Vec::new();
@@ -57,10 +90,7 @@ impl Migrator {
         // Neue Tabellen
         for table in &to.tables {
             if from.find_table(&table.name).is_none() {
-                statements.push(table.to_create_sql());
-                for idx in &table.indices {
-                    statements.push(idx.to_sql(&table.name));
-                }
+                statements.extend(table.to_statements());
             }
         }
 
@@ -483,6 +513,28 @@ mod tests {
         for stmt in stmts.iter().filter(|s| !s.trim().starts_with("--")) {
             assert_eq!(destructive_op(stmt.trim()), None, "{stmt}");
             assert!(!stmt.to_ascii_uppercase().contains("SETVAL"), "{stmt}");
+        }
+    }
+
+    /// `.catalog create` builds from all versions folded together: the Bareos
+    /// base tables with their original keys plus the Onesimus extensions
+    /// (Compatibility log C-052).
+    #[test]
+    fn combined_schema_creates_base_tables_and_extensions() {
+        let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("schema");
+        let migrator = Migrator::new(&dir);
+        let combined = migrator.combined().unwrap().unwrap();
+        let versions = migrator.load_versions().unwrap();
+        assert_eq!(combined.version, versions.last().unwrap().version);
+        let stmts = combined.to_statements();
+        let pv = stmts.iter().find(|s| s.starts_with("CREATE TABLE IF NOT EXISTS pathvisibility")).unwrap();
+        assert!(pv.contains("PRIMARY KEY (jobid, pathid)"), "{pv}");
+        let version = stmts.iter().find(|s| s.starts_with("CREATE TABLE IF NOT EXISTS version")).unwrap();
+        assert!(!version.contains("PRIMARY KEY"), "{version}");
+        assert!(stmts.iter().any(|s| s.starts_with("INSERT INTO version (versionid) SELECT 2250 WHERE NOT EXISTS")));
+        assert_eq!(stmts.iter().filter(|s| s.starts_with("INSERT INTO status ")).count(), 26);
+        for f in versions.iter().flat_map(|v| &v.functions) {
+            assert!(stmts.iter().any(|s| s.starts_with(&format!("CREATE OR REPLACE FUNCTION {}(", f.name))), "{}", f.name);
         }
     }
 

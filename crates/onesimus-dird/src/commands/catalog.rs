@@ -48,7 +48,7 @@ pub fn cmd_dot_catalog(ast: &CommandAst, ctx: &ExecContext) -> CommandResult {
 }
 
 fn catalog_schema(_ast: &CommandAst, _ctx: &ExecContext) -> CommandResult {
-    let schema_dir = std::path::Path::new("catalog/schema");
+    let schema_dir = &schema_dir();
     let migrator = bareos_orm::migration::Migrator::new(schema_dir);
 
     match migrator.latest() {
@@ -58,13 +58,13 @@ fn catalog_schema(_ast: &CommandAst, _ctx: &ExecContext) -> CommandResult {
                 Err(e) => CommandResult::error(format!("JSON error: {e}\n")),
             }
         }
-        Ok(None) => CommandResult::ok("Kein Schema gefunden in catalog/schema/\n".to_string()),
+        Ok(None) => CommandResult::ok(format!("Kein Schema gefunden in {}\n", schema_dir.display())),
         Err(e) => CommandResult::error(format!("Schema load error: {e}\n")),
     }
 }
 
 fn catalog_version(_ast: &CommandAst, _ctx: &ExecContext) -> CommandResult {
-    let schema_dir = std::path::Path::new("catalog/schema");
+    let schema_dir = &schema_dir();
     let migrator = bareos_orm::migration::Migrator::new(schema_dir);
 
     match migrator.load_versions() {
@@ -88,7 +88,7 @@ fn catalog_version(_ast: &CommandAst, _ctx: &ExecContext) -> CommandResult {
 }
 
 fn catalog_tables(_ast: &CommandAst, _ctx: &ExecContext) -> CommandResult {
-    let schema_dir = std::path::Path::new("catalog/schema");
+    let schema_dir = &schema_dir();
     let migrator = bareos_orm::migration::Migrator::new(schema_dir);
 
     match migrator.latest() {
@@ -124,7 +124,7 @@ fn catalog_describe(ast: &CommandAst, _ctx: &ExecContext) -> CommandResult {
         return CommandResult::ok(".catalog describe table=<name>\n".to_string());
     }
 
-    let schema_dir = std::path::Path::new("catalog/schema");
+    let schema_dir = &schema_dir();
     let migrator = bareos_orm::migration::Migrator::new(schema_dir);
 
     match migrator.latest() {
@@ -180,7 +180,7 @@ fn catalog_describe(ast: &CommandAst, _ctx: &ExecContext) -> CommandResult {
 }
 
 fn catalog_ddl(_ast: &CommandAst, _ctx: &ExecContext) -> CommandResult {
-    let schema_dir = std::path::Path::new("catalog/schema");
+    let schema_dir = &schema_dir();
     let migrator = bareos_orm::migration::Migrator::new(schema_dir);
 
     match migrator.full_ddl() {
@@ -213,7 +213,7 @@ fn catalog_migrate(_ast: &CommandAst, ctx: &ExecContext) -> CommandResult {
 }
 
 fn catalog_codegen(_ast: &CommandAst, _ctx: &ExecContext) -> CommandResult {
-    let schema_dir = std::path::Path::new("catalog/schema");
+    let schema_dir = &schema_dir();
     let migrator = bareos_orm::migration::Migrator::new(schema_dir);
 
     match migrator.latest() {
@@ -227,7 +227,7 @@ fn catalog_codegen(_ast: &CommandAst, _ctx: &ExecContext) -> CommandResult {
 }
 
 fn catalog_diff(_ast: &CommandAst, _ctx: &ExecContext) -> CommandResult {
-    let schema_dir = std::path::Path::new("catalog/schema");
+    let schema_dir = &schema_dir();
     let migrator = bareos_orm::migration::Migrator::new(schema_dir);
 
     match migrator.load_versions() {
@@ -258,9 +258,24 @@ fn catalog_diff(_ast: &CommandAst, _ctx: &ExecContext) -> CommandResult {
     }
 }
 
+/// Schema directory, the same one the startup migration uses: next to the
+/// build tree in development, `/usr/lib/bareos/ddl/schema` when installed.
+pub fn schema_dir() -> std::path::PathBuf {
+    let installed = std::path::PathBuf::from("/usr/lib/bareos/ddl/schema");
+    [
+        // Dev: binary in target/<profile>/, schema in crates/bareos-orm/schema/
+        std::env::current_exe().ok()
+            .and_then(|p| p.parent()?.parent()?.parent().map(|d| d.join("crates/bareos-orm/schema"))),
+        Some(installed.clone()),
+    ].into_iter().flatten().find(|p| p.exists()).unwrap_or(installed)
+}
+
+/// Schema for `.catalog create|drop|reset`: every version folded together,
+/// so `create` builds the Bareos base tables (Compatibility log C-052) and
+/// not only the objects of the newest extension file.
 fn latest_schema() -> Result<bareos_orm::schema::CatalogSchema, String> {
-    let migrator = bareos_orm::migration::Migrator::new(std::path::Path::new("catalog/schema"));
-    match migrator.latest() {
+    let migrator = bareos_orm::migration::Migrator::new(&schema_dir());
+    match migrator.combined() {
         Ok(Some(schema)) => Ok(schema),
         Ok(None) => Err("Kein Schema\n".to_string()),
         Err(e) => Err(format!("Schema error: {e}\n")),

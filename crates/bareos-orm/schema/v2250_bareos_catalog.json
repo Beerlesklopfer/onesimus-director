@@ -10,7 +10,7 @@
       "description": "Directory paths for backed up files",
       "columns": [
         {"name": "pathid", "type": "serial", "not_null": true},
-        {"name": "path", "type": "text", "not_null": true}
+        {"name": "path", "type": "text", "not_null": true, "statistics": 1000}
       ],
       "primary_key": "pathid",
       "indices": [
@@ -101,35 +101,35 @@
       "name": "jobhisto",
       "description": "Long-term job statistics (same structure as job)",
       "columns": [
-        {"name": "jobid", "type": "integer"},
-        {"name": "job", "type": "text"},
-        {"name": "name", "type": "text"},
-        {"name": "type", "type": "char(1)"},
-        {"name": "level", "type": "char(1)"},
-        {"name": "clientid", "type": "integer", "default": "0"},
-        {"name": "jobstatus", "type": "char(1)"},
+        {"name": "jobid", "type": "integer", "not_null": true},
+        {"name": "job", "type": "text", "not_null": true},
+        {"name": "name", "type": "text", "not_null": true},
+        {"name": "type", "type": "char(1)", "not_null": true},
+        {"name": "level", "type": "char(1)", "not_null": true},
+        {"name": "clientid", "type": "integer"},
+        {"name": "jobstatus", "type": "char(1)", "not_null": true},
         {"name": "schedtime", "type": "timestamp without time zone"},
         {"name": "starttime", "type": "timestamp without time zone"},
         {"name": "endtime", "type": "timestamp without time zone"},
         {"name": "realendtime", "type": "timestamp without time zone"},
-        {"name": "jobtdate", "type": "bigint", "default": "0"},
-        {"name": "volsessionid", "type": "integer", "default": "0"},
-        {"name": "volsessiontime", "type": "integer", "default": "0"},
-        {"name": "jobfiles", "type": "integer", "default": "0"},
-        {"name": "jobbytes", "type": "bigint", "default": "0"},
-        {"name": "readbytes", "type": "bigint", "default": "0"},
-        {"name": "joberrors", "type": "integer", "default": "0"},
-        {"name": "jobmissingfiles", "type": "integer", "default": "0"},
-        {"name": "poolid", "type": "integer", "default": "0"},
-        {"name": "filesetid", "type": "integer", "default": "0"},
-        {"name": "priorjobid", "type": "integer", "default": "0"},
-        {"name": "purgedfiles", "type": "smallint", "default": "0"},
-        {"name": "hasbase", "type": "smallint", "default": "0"},
-        {"name": "hascache", "type": "smallint", "default": "0"},
-        {"name": "reviewed", "type": "smallint", "default": "0"},
+        {"name": "jobtdate", "type": "bigint"},
+        {"name": "volsessionid", "type": "integer"},
+        {"name": "volsessiontime", "type": "integer"},
+        {"name": "jobfiles", "type": "integer"},
+        {"name": "jobbytes", "type": "bigint"},
+        {"name": "readbytes", "type": "bigint"},
+        {"name": "joberrors", "type": "integer"},
+        {"name": "jobmissingfiles", "type": "integer"},
+        {"name": "poolid", "type": "integer"},
+        {"name": "filesetid", "type": "integer"},
+        {"name": "priorjobid", "type": "integer"},
+        {"name": "purgedfiles", "type": "smallint"},
+        {"name": "hasbase", "type": "smallint"},
+        {"name": "hascache", "type": "smallint"},
+        {"name": "reviewed", "type": "smallint"},
         {"name": "comment", "type": "text"}
       ],
-      "primary_key": "jobid",
+      "primary_key": "",
       "indices": [
         {"name": "jobhisto_idx", "columns": ["starttime"]}
       ]
@@ -235,6 +235,9 @@
       "indices": [
         {"name": "media_volumename_id", "columns": ["volumename"], "unique": true},
         {"name": "media_poolid_idx", "columns": ["poolid"]}
+      ],
+      "constraints": [
+        {"name": "media_volstatus_check", "type": "check", "expression": "volstatus IN ('Unlabeled', 'Full', 'Archive', 'Append', 'Recycle', 'Purged', 'Read-Only', 'Disabled', 'Error', 'Busy', 'Used', 'Cleaning', 'Scratch')"}
       ]
     },
     {
@@ -314,6 +317,9 @@
       "primary_key": "poolid",
       "indices": [
         {"name": "pool_name_idx", "columns": ["name"]}
+      ],
+      "constraints": [
+        {"name": "pool_pooltype_check", "type": "check", "expression": "pooltype IN ('Backup', 'Copy', 'Cloned', 'Archive', 'Migration', 'Scratch')"}
       ]
     },
     {
@@ -358,7 +364,10 @@
         {"name": "newvolstatus", "type": "text", "not_null": true},
         {"name": "newenabled", "type": "smallint"}
       ],
-      "primary_key": "loclogid"
+      "primary_key": "loclogid",
+      "constraints": [
+        {"name": "locationlog_newvolstatus_check", "type": "check", "expression": "newvolstatus IN ('Unlabeled', 'Full', 'Archive', 'Append', 'Recycle', 'Purged', 'Read-Only', 'Disabled', 'Error', 'Busy', 'Used', 'Cleaning', 'Scratch')"}
+      ]
     },
     {
       "name": "counters",
@@ -408,7 +417,7 @@
         {"name": "size", "type": "bigint", "default": "0"},
         {"name": "files", "type": "integer", "default": "0"}
       ],
-      "primary_key": "jobid"
+      "primary_key": "jobid, pathid"
     },
     {
       "name": "version",
@@ -416,7 +425,8 @@
       "columns": [
         {"name": "versionid", "type": "integer", "not_null": true}
       ],
-      "primary_key": "versionid"
+      "primary_key": "",
+      "initial_rows": [[2250]]
     },
     {
       "name": "status",
@@ -426,7 +436,35 @@
         {"name": "jobstatuslong", "type": "text"},
         {"name": "severity", "type": "integer"}
       ],
-      "primary_key": "jobstatus"
+      "primary_key": "jobstatus",
+      "initial_rows": [
+        ["C", "Created, not yet running", 15],
+        ["R", "Running", 15],
+        ["B", "Blocked", 15],
+        ["T", "Completed successfully", 10],
+        ["E", "Terminated with errors", 25],
+        ["e", "Non-fatal error", 20],
+        ["f", "Fatal error", 100],
+        ["D", "Verify found differences", 15],
+        ["A", "Canceled by user", 90],
+        ["I", "Incomplete job", 15],
+        ["L", "Committing data", 15],
+        ["W", "Terminated with warnings", 20],
+        ["l", "Doing data despooling", 15],
+        ["q", "Queued waiting for device", 15],
+        ["F", "Waiting for Client", 15],
+        ["S", "Waiting for Storage daemon", 15],
+        ["m", "Waiting for new media", 15],
+        ["M", "Waiting for media mount", 15],
+        ["s", "Waiting for storage resource", 15],
+        ["j", "Waiting for job resource", 15],
+        ["c", "Waiting for client resource", 15],
+        ["d", "Waiting on maximum jobs", 15],
+        ["t", "Waiting on start time", 15],
+        ["p", "Waiting on higher priority jobs", 15],
+        ["a", "SD despooling attributes", 15],
+        ["i", "Doing batch insert file records", 15]
+      ]
     },
     {
       "name": "quota",
@@ -447,7 +485,7 @@
         {"name": "filesystem", "type": "text", "not_null": true},
         {"name": "dumplevel", "type": "integer", "not_null": true}
       ],
-      "primary_key": "clientid"
+      "primary_key": "clientid, filesetid, filesystem"
     },
     {
       "name": "ndmpjobenvironment",
@@ -458,7 +496,7 @@
         {"name": "envname", "type": "text", "not_null": true},
         {"name": "envvalue", "type": "text", "not_null": true}
       ],
-      "primary_key": "jobid"
+      "primary_key": "jobid, fileindex, envname"
     },
     {
       "name": "devicestats",
@@ -478,7 +516,7 @@
         {"name": "volcatfiles", "type": "bigint", "default": "0"},
         {"name": "volcatblocks", "type": "bigint", "default": "0"}
       ],
-      "primary_key": "deviceid"
+      "primary_key": ""
     },
     {
       "name": "jobstats",
@@ -490,7 +528,7 @@
         {"name": "jobfiles", "type": "integer", "default": "0"},
         {"name": "jobbytes", "type": "bigint", "default": "0"}
       ],
-      "primary_key": "deviceid"
+      "primary_key": ""
     },
     {
       "name": "tapealerts",
@@ -500,7 +538,11 @@
         {"name": "sampletime", "type": "timestamp without time zone", "not_null": true},
         {"name": "alertflags", "type": "bigint", "default": "0"}
       ],
-      "primary_key": "deviceid"
+      "primary_key": ""
     }
+  ],
+  "functions": [
+    {"name": "bareos_frombase64", "description": "FromBase64 (core/src/lib/base64.cc) in plpgsql", "params": "field text", "returns": "bigint", "language": "plpgsql", "volatility": "IMMUTABLE", "parallel": "SAFE", "body": " declare\n  i integer default 0;\n  res bigint default 0;\n  rf text default '';\n  base64 text default 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';\n  z integer := char_length(field);\n begin\n  rf := substring(field from 0 for 1);\n  -- skip negative\n  if rf = '-' then i := i+1; end if;\n  rf := substring(field from i for 1);\n  while  ( rf != ' ' ) and ( i <= z ) loop\n    res := res << 6;\n    res := res + position(rf in base64) - 1;\n    i := i + 1;\n    rf := substring(field from i for 1);\n  end loop;\n  return res;\nend"},
+    {"name": "decode_lstat", "description": "DecodeStat (core/src/lib/attrib.cc) in plpgsql", "params": "lst text, params text[] = array['st_dev','st_ino','st_mode','st_nlink', 'st_uid','st_gid','st_rdev','st_size', 'st_blksize','st_blocks','st_atime','st_mtime', 'st_ctime','linkfi','st_flags','data']", "returns": "table( st_dev bigint, st_ino bigint, st_mode bigint, st_nlink bigint, st_uid bigint, st_gid bigint, st_rdev bigint, st_size bigint, st_blksize bigint, st_blocks bigint, st_atime bigint, st_mtime bigint, st_ctime bigint, linkfi bigint, st_flags bigint, data bigint )", "language": "plpgsql", "volatility": "IMMUTABLE", "parallel": "SAFE", "body": " declare\n  fields text[];\n begin\n  fields = string_to_array(lst, ' ');\n  return query\n  select\n    case\n      when 'st_dev' = any (params) then\n        bareos_frombase64(fields[1])\n    end as st_dev,\n    case\n      when 'st_ino' = any (params) then\n        bareos_frombase64(fields[2])\n    end as st_ino,\n    case\n      when 'st_mode' = any (params) then\n        bareos_frombase64(fields[3])\n    end as st_mode,\n    case\n      when 'st_nlink' = any (params) then\n        bareos_frombase64(fields[4])\n    end as st_nlink,\n    case\n      when 'st_uid' = any (params) then\n        bareos_frombase64(fields[5])\n    end as st_uid,\n    case\n      when 'st_gid' = any (params) then\n        bareos_frombase64(fields[6])\n    end as st_gid,\n    case\n      when 'st_rdev' = any (params) then\n        bareos_frombase64(fields[7])\n    end as st_rdev,\n    case\n      when 'st_size' = any (params) then\n        bareos_frombase64(fields[8])\n    end as st_size,\n    case\n      when 'st_blksize' = any (params) then\n        bareos_frombase64(fields[9])\n    end as st_blksize,\n    case\n      when 'st_blocks' = any (params) then\n        bareos_frombase64(fields[10])\n    end as st_blocks,\n    case\n      when 'st_atime' = any (params) then\n        bareos_frombase64(fields[11])\n    end as st_atime,\n    case\n      when 'st_mtime' = any (params) then\n        bareos_frombase64(fields[12])\n    end as st_mtime,\n    case\n      when 'st_ctime' = any (params) then\n        bareos_frombase64(fields[13])\n    end as st_ctime,\n    case\n      when 'linkfi' = any (params) then\n        bareos_frombase64(fields[14])\n    end as linkfi,\n    case\n      when 'st_flags' = any (params) then\n        bareos_frombase64(fields[15])\n    end as st_flags,\n    case\n      when 'data' = any (params) then\n        bareos_frombase64(fields[16])\n    end as data\n    ;\n end"}
   ]
 }
