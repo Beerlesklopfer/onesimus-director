@@ -18,9 +18,9 @@
 {"id": "c013-release-alldrives", "steps": ["release alldrives"]}
 {"id": "c013-release-notfound", "steps": ["release nosuch"]}
 {"id": "c013-release-then-mount", "steps": ["release", "mount"]}
-{"id": "c013-status-bogus", "steps": ["status nosuch"], "normalize": ["(?s)Connecting to Storage.*"], "timeout_ms": 20000}
-{"id": "c013-status-sd", "steps": ["status sd=File"], "normalize": ["(?s)Connecting to Storage.*"], "timeout_ms": 20000}
-{"id": "c013-status-storage-novalue", "steps": ["status storage"], "normalize": ["(?s)Connecting to Storage.*"], "timeout_ms": 20000}
-{"id": "c013-status-storage-notfound", "steps": ["status storage=nosuch"], "normalize": ["(?s)Connecting to Storage.*"], "timeout_ms": 20000}
+{"id": "c013-status-bogus", "steps": ["status nosuch"], "timeout_ms": 20000}
+{"id": "c013-status-sd", "steps": ["status sd=File"], "timeout_ms": 20000}
+{"id": "c013-status-storage-novalue", "steps": ["status storage"], "timeout_ms": 20000}
+{"id": "c013-status-storage-notfound", "steps": ["status storage=nosuch"], "timeout_ms": 20000}
 {"id": "c013-status-jobid-notrunning", "steps": ["status jobid=999999"]}
-{"id": "c013-status-limited", "steps": ["status nosuch"], "normalize": ["(?s)Connecting to Storage.*"], "timeout_ms": 20000, "console": "parity-limited", "password": "parity-limited-pw"}
+{"id": "c013-status-limited", "steps": ["status nosuch"], "timeout_ms": 20000, "console": "parity-limited", "password": "parity-limited-pw"}

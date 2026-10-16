@@ -709,8 +709,10 @@ pub fn get_client_resource(ua: &mut Ua, ast: &CommandAst) -> Option<String> {
         (a.key.eq_ignore_ascii_case("client") || a.key.eq_ignore_ascii_case("fd")) && a.value.is_some()
     }) {
         let name = arg.value.as_deref().unwrap_or_default();
-        let exists = resource_names(ua.ctx, |c| c.clients.iter().map(|x| x.name.clone()).collect())
-            .iter().any(|n| n == name);
+        // GetClientResWithName(): audited Client ACL check of the name.
+        let exists = acl::access_audited(ua.ctx, Kind::Client, name)
+            && resource_names(ua.ctx, |c| c.clients.iter().map(|x| x.name.clone()).collect())
+                .iter().any(|n| n == name);
         if exists {
             return Some(name.to_string());
         }

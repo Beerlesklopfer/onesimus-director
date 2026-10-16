@@ -213,7 +213,11 @@ impl SdLink for NetSd {
         if sd.send_str(command).is_ok() {
             loop {
                 match sd.recv() {
-                    Ok(BnetMessage::Data(data)) => messages.push(String::from_utf8_lossy(&data).into_owned()),
+                    Ok(BnetMessage::Data(data)) => {
+                        // SendMsg("%s", msg) / sscanf: the text up to the first NUL.
+                        let end = data.iter().position(|&b| b == 0).unwrap_or(data.len());
+                        messages.push(String::from_utf8_lossy(&data[..end]).into_owned())
+                    }
                     Ok(BnetMessage::Signal(BnetSignal::Heartbeat)) => {
                         let _ = sd.send_signal(BnetSignal::HeartbeatResponse);
                     }
@@ -271,6 +275,127 @@ fn get_num_drives(ua: &mut Ua, sd: &mut impl SdLink, store: &StorageResource) ->
         cache.get_or_insert_with(HashMap::new).insert(store.name.clone(), drives);
     }
     drives
+}
+
+/// runtime_storage_status->slots: reused once it is positive.
+static SLOTS: Mutex<Option<HashMap<String, i16>>> = Mutex::new(None);
+
+/// GetNumSlots() (storage.cc:640) / NativeGetNumSlots() (sd_cmds.cc:530).
+pub fn get_num_slots(ua: &mut Ua, sd: &mut impl SdLink, store: &StorageResource) -> i16 {
+    if let Some(slots) = SLOTS.lock().ok().and_then(|d| d.as_ref()?.get(&store.name).copied()) {
+        if slots > 0 { return slots; }
+    }
+    let mut slots = 0;
+    if let Some(messages) = open_and_exchange(ua, sd, store, &format!("autochanger slots {}\n", dev_name(store))) {
+        for message in messages {
+            match message.strip_prefix("slots=").and_then(|rest| {
+                let digits: String = rest.chars().take_while(|c| c.is_ascii_digit()).collect();
+                digits.parse::<i16>().ok()
+            }) {
+                Some(n) => { slots = n; break; }
+                None => ua.send_msg(message),
+            }
+        }
+        ua.send_msg(format!("Device \"{}\" has {slots} slots.\n", dev_name(store).replace('\u{1}', " ")));
+    }
+    if let Ok(mut cache) = SLOTS.lock() {
+        cache.get_or_insert_with(HashMap::new).insert(store.name.clone(), slots);
+    }
+    slots
+}
+
+/// One `autochanger listall` entry (C++ vol_list_t): type `D`/`S`/`I`
+/// (other letters: `?`), drive or slot number, content `E`/`F` (other:
+/// `?`), the slot loaded in a drive and the volume name.
+#[derive(Debug, Clone, PartialEq)]
+pub struct VolListEntry {
+    pub slot_type: char,
+    pub slot: u16,
+    pub content: char,
+    pub loaded: Option<u16>,
+    pub vol_name: Option<String>,
+}
+
+/// C++ IsAnInteger(): one or more digits and nothing else.
+fn is_an_integer(text: &str) -> bool {
+    !text.is_empty() && text.bytes().all(|b| b.is_ascii_digit())
+}
+
+/// C++ atoi() stored into a slot_number_t (uint16_t).
+fn atoi_u16(text: &str) -> u16 {
+    str_to_int64(text) as i32 as u16
+}
+
+/// native_get_vol_list(ua, store, listall = true, scan) (sd_cmds.cc:263):
+/// `autochanger listall <dev>`; SD messages (`3nnn `) are passed on, parse
+/// errors are reported. None when the connection failed or nothing was
+/// parsed. Entries are in StorageCompareVolListEntry order (element
+/// address: drives first, then slots); equal addresses are dropped like
+/// dlist::binary_insert.
+pub fn native_get_vol_list_all(ua: &mut Ua, sd: &mut impl SdLink, store: &StorageResource)
+    -> Option<Vec<VolListEntry>> {
+    const INDEX_SLOT_OFFSET: u16 = 100;
+    const INDEX_MAX_DRIVES: u32 = 100;
+    let messages = open_and_exchange(ua, sd, store, &format!("autochanger listall {}\n", dev_name(store)))?;
+    let mut list: Vec<(u32, VolListEntry)> = Vec::new();
+    for message in messages {
+        // StripTrailingJunk()
+        let msg = message.trim_end_matches([' ', '\n', '\r', '\t']);
+        let bytes = msg.as_bytes();
+        if bytes.len() >= 5 && bytes[0] == b'3' && bytes[1..4].iter().all(u8::is_ascii_digit) && bytes[4] == b' ' {
+            ua.send_msg(format!("{msg}\n"));
+            continue;
+        }
+        let fields: Vec<&str> = msg.splitn(5, ':').collect();
+        if fields.len() < 3 {
+            ua.error_msg(format!("Illegal output from autochanger listall: {msg}\n"));
+            continue;
+        }
+        let slot_type = match fields[0].chars().next() {
+            Some(c @ ('D' | 'S' | 'I')) => c,
+            _ => '?',
+        };
+        let slot = atoi_u16(fields[1]);
+        let address = if slot_type == 'D' {
+            if !is_an_integer(fields[1]) || slot == u16::MAX {
+                ua.error_msg(format!("Invalid Drive number: {}\n", fields[1]));
+                continue;
+            }
+            if u32::from(slot) >= INDEX_MAX_DRIVES {
+                ua.error_msg(format!(
+                    "Drive number {slot} greater then INDEX_MAX_DRIVES({INDEX_MAX_DRIVES}) please increase define\n"));
+                continue;
+            }
+            u32::from(slot)
+        } else {
+            if !is_an_integer(fields[1]) || slot == 0 {
+                ua.error_msg(format!("Invalid Slot number: {}\n", fields[1]));
+                continue;
+            }
+            // slot_number_t arithmetic wraps like upstream.
+            u32::from(INDEX_SLOT_OFFSET.wrapping_add(slot))
+        };
+        let mut entry = VolListEntry { slot_type, slot, content: '?', loaded: None, vol_name: None };
+        match fields[2].chars().next() {
+            Some('E') => entry.content = 'E',
+            Some('F') => {
+                entry.content = 'F';
+                match slot_type {
+                    'S' | 'I' => entry.vol_name = fields.get(3).map(|v| v.to_string()),
+                    'D' => {
+                        entry.loaded = fields.get(3).map(|v| atoi_u16(v));
+                        entry.vol_name = fields.get(4).map(|v| v.to_string());
+                    }
+                    _ => {}
+                }
+            }
+            _ => {}
+        }
+        if let Err(pos) = list.binary_search_by(|(a, _)| a.cmp(&address)) {
+            list.insert(pos, (address, entry));
+        }
+    }
+    if list.is_empty() { None } else { Some(list.into_iter().map(|(_, e)| e).collect()) }
 }
 
 /// GetStorageDrive() (ua_select.cc:1429); None is kInvalidDriveNumber.
@@ -575,5 +700,45 @@ mod tests {
     #[test]
     fn str_to_int64_like_upstream() {
         assert_eq!((str_to_int64("12x"), str_to_int64("-3"), str_to_int64("abc")), (12, -3, 0));
+    }
+
+    #[test]
+    fn num_slots_of_a_plain_device() {
+        let mut sd = fake(|_| Ok(vec!["3998 Device \"FileDev\" is not an autochanger.\n".into(), "slots=0\n".into()]));
+        let ctx = context(CONFIG, ApiMode::Human);
+        let mut ua = Ua::new(&ctx);
+        let store = storage("SlotsPlain", "FileDev");
+        assert_eq!(get_num_slots(&mut ua, &mut sd, &store), 0);
+        assert_eq!(sd.sent, ["SlotsPlain: autochanger slots FileDev\n"]);
+        assert_eq!(output(ua.finish(true)), "Connecting to Storage daemon SlotsPlain at sd.example:9103 ...\n\
+            3998 Device \"FileDev\" is not an autochanger.\nDevice \"FileDev\" has 0 slots.\n");
+    }
+
+    #[test]
+    fn vol_list_listall_parsing() {
+        let ctx = context(CONFIG, ApiMode::Human);
+        let mut sd = fake(|_| Ok(vec!["3998 not an autochanger.\n".into()]));
+        let mut ua = Ua::new(&ctx);
+        assert_eq!(native_get_vol_list_all(&mut ua, &mut sd, &storage("Tape", "TapeDev")), None);
+        assert_eq!(output(ua.finish(true)), "Connecting to Storage daemon Tape at sd.example:9103 ...\n3998 not an autochanger.\n");
+
+        let mut sd = fake(|_| Ok(vec![
+            "S:2:E\n".into(), "S:1:F:vol1\n".into(), "D:0:F:3:vol3\n".into(), "I:10:F:vol10\n".into(),
+            "garbage\n".into(), "S:x:E\n".into(), "S:1:F:dup\n".into(),
+        ]));
+        let mut ua = Ua::new(&ctx);
+        let list = native_get_vol_list_all(&mut ua, &mut sd, &storage("Tape", "TapeDev")).unwrap();
+        assert_eq!(sd.sent, ["Tape: autochanger listall TapeDev\n"]);
+        let result = ua.finish(true);
+        assert_eq!(result.text_output, "Connecting to Storage daemon Tape at sd.example:9103 ...\n");
+        assert_eq!(result.error_message, "Illegal output from autochanger listall: garbage\nInvalid Slot number: x\n");
+        let got: Vec<(char, u16, char, Option<u16>, Option<&str>)> = list.iter()
+            .map(|e| (e.slot_type, e.slot, e.content, e.loaded, e.vol_name.as_deref())).collect();
+        assert_eq!(got, [
+            ('D', 0, 'F', Some(3), Some("vol3")),
+            ('S', 1, 'F', None, Some("vol1")),
+            ('S', 2, 'E', None, None),
+            ('I', 10, 'F', None, Some("vol10")),
+        ]);
     }
 }

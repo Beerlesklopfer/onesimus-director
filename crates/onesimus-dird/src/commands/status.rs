@@ -101,8 +101,7 @@ pub fn cmd_status(ast: &CommandAst, ctx: &ExecContext) -> CommandResult {
     } else if key.starts_with("dir") {
         status_director(ast, ctx)
     } else if key == "client" {
-        let name = arg_value(ast, "client").unwrap_or("*");
-        status_client(name, ctx)
+        status_client_selected(ast, ctx, None)
     } else if key.starts_with("sched") {
         status_scheduler(ast, ctx)
     } else if key.starts_with("sub") {
@@ -140,8 +139,9 @@ pub fn cmd_dot_status(ast: &CommandAst, ctx: &ExecContext) -> CommandResult {
             }
             ua.finish(true)
         }
-        "client" => status_client(arg_value(ast, "client").unwrap_or("*"), ctx),
-        "storage" => status_storage(arg_value(ast, "storage").unwrap_or("*"), ctx),
+        // `if (ua->argc == 3) statuscmd = ua->argk[2]`
+        "client" => status_client_selected(ast, ctx, dot_status_cmd(ast)),
+        "storage" => dot_status_storage(ast, ctx, dot_status_cmd(ast)),
         _ => bad("1900 Bad .status command, wrong argument.\n"),
     }
 }
@@ -150,31 +150,36 @@ pub fn cmd_dot_status(ast: &CommandAst, ctx: &ExecContext) -> CommandResult {
 /// once per address/port.
 fn status_all(ast: &CommandAst, ctx: &ExecContext) -> CommandResult {
     let mut result = status_director(ast, ctx);
-    let (storages, clients) = match ctx.config.as_ref().and_then(|c| c.read().ok()) {
+    let (storages, clients, director) = match ctx.config.as_ref().and_then(|c| c.read().ok()) {
         Some(cfg) => {
-            let mut storages: Vec<(String, String, u16)> = Vec::new();
+            let mut storages: Vec<bareos_config::resources::StorageResource> = Vec::new();
             for s in cfg.storages.iter().filter(|s| acl::access(ctx, Kind::Storage, &s.name)) {
-                if !storages.iter().any(|u| u.1 == s.address && u.2 == s.port) {
-                    storages.push((s.name.clone(), s.address.clone(), s.port));
+                if !storages.iter().any(|u| u.address == s.address && u.port == s.port) {
+                    storages.push(s.clone());
                 }
             }
-            let mut clients: Vec<(String, String, u16)> = Vec::new();
+            let mut clients: Vec<bareos_config::resources::ClientResource> = Vec::new();
             for c in cfg.clients.iter().filter(|c| acl::access(ctx, Kind::Client, &c.name)) {
-                if !clients.iter().any(|u| u.1 == c.address && u.2 == c.port) {
-                    clients.push((c.name.clone(), c.address.clone(), c.port));
+                if !clients.iter().any(|u| u.address == c.address && u.port == c.port) {
+                    clients.push(c.clone());
                 }
             }
-            (storages, clients)
+            (storages, clients, cfg.director.name.clone())
         }
-        None => (Vec::new(), Vec::new()),
+        None => (Vec::new(), Vec::new(), String::new()),
     };
-    for (name, ..) in &storages {
-        result.text_output.push_str(&status_storage(name, ctx).text_output);
+    for store in &storages {
+        result.text_output.push_str(&storage_status(store, None, ctx));
     }
-    for (name, ..) in &clients {
-        result.text_output.push_str(&status_client(name, ctx).text_output);
+    for client in &clients {
+        result.text_output.push_str(&client_status(client, None, ctx, &director));
     }
     result
+}
+
+/// DotStatusCmd(): `if (ua->argc == 3) statuscmd = ua->argk[2]`.
+fn dot_status_cmd(ast: &CommandAst) -> Option<&str> {
+    (ast.arguments.len() == 2).then(|| ast.arguments[1].key.as_str())
 }
 
 // ---------------------------------------------------------------------------
@@ -1231,87 +1236,109 @@ fn dir_status_header_json(ctx: &ExecContext) -> serde_json::Value {
     })
 }
 
-fn status_client(name: &str, ctx: &ExecContext) -> CommandResult {
-    let config = match &ctx.config {
-        Some(c) => c.read().ok(),
-        None => return CommandResult::ok(format!("Client {name}: no config loaded\n")),
-    };
-    let config = match config {
-        Some(c) => c,
-        None => return CommandResult::ok(format!("Client {name}: config lock error\n")),
-    };
-
-    let dir_name = config.director.name.clone();
-
-    // Find all matching clients
-    let clients: Vec<_> = if name == "*" {
-        config.clients.iter().collect()
-    } else {
-        config.clients.iter().filter(|c| c.name == name).collect()
-    };
-
-    if clients.is_empty() {
-        return CommandResult::ok(format!("Client '{name}' not found in configuration\n"));
+/// C++ ClientStatus() (ua_status.cc:79) -> DoNativeClientStatus()
+/// (fd_cmds.cc:999); `cmd` is the `.status client=… <cmd>` argument.
+fn client_status(client: &bareos_config::resources::ClientResource, cmd: Option<&str>, ctx: &ExecContext,
+                 director: &str) -> String {
+    if !client.enabled {
+        return format!("Client \"{}\" is disabled; skipping status call\n", client.name);
     }
-
     let mut output = String::new();
-    for client in &clients {
-        // DoNativeClientStatus (fd_cmds.cc:999)
-        if ctx.api_mode == crate::command_executor::ApiMode::Human {
-            output.push_str(&format!("Connecting to Client {} at {}:{}\n",
-                                      client.name, client.address, client.port));
-        }
-        let (info, fd) = crate::fd_protocol::connect_fd_console(
-            &client.address, client.port, &client.password, &dir_name, &client.name);
-        output.push_str(&info);
-        match fd.and_then(|fd| crate::fd_protocol::fd_query_commands(fd, &["status".to_string()])) {
-            Ok(status) => output.push_str(&status),
-            Err(_) => output.push_str(&format!("\nFailed to connect to Client {}.\n====\n", client.name)),
-        }
+    if ctx.api_mode == ApiMode::Human {
+        output.push_str(&format!("Connecting to Client {} at {}:{}\n", client.name, client.address, client.port));
     }
-
-    CommandResult::ok(output)
+    let (info, fd) = crate::fd_protocol::connect_fd_console(
+        &client.address, client.port, &client.password, director, &client.name);
+    output.push_str(&info);
+    let command = match cmd {
+        Some(cmd) => format!(".status {cmd}"),
+        None => "status".to_string(),
+    };
+    match fd.and_then(|fd| crate::fd_protocol::fd_query_commands(fd, &[command])) {
+        Ok(status) => output.push_str(&status),
+        Err(_) => output.push_str(&format!("\nFailed to connect to Client {}.\n====\n", client.name)),
+    }
+    output
 }
 
-fn status_storage(name: &str, ctx: &ExecContext) -> CommandResult {
-    let config = match &ctx.config {
-        Some(c) => match c.read() {
-            Ok(c) => c,
-            Err(_) => return CommandResult::ok(format!("Storage {name}: config error\n")),
-        },
-        None => return CommandResult::ok(format!("Storage {name}: no config\n")),
-    };
-
-    let dir_name = config.director.name.clone();
-    let storages: Vec<_> = if name == "*" {
-        config.storages.iter().collect()
-    } else {
-        config.storages.iter().filter(|s| s.name == name).collect()
-    };
-
-    if storages.is_empty() {
-        return CommandResult::ok(format!("Storage '{name}' not found\n"));
-    }
-
-    let mut output = String::new();
-    for stor in &storages {
-        output.push_str(&format!("Connecting to Storage {} at {}:{}\n",
-                                  stor.name, stor.address, stor.port));
-
-        let result = crate::sd_protocol::query_sd_status(
-            &stor.address, stor.port, &stor.password, &dir_name, &stor.name,
-        );
-
-        if result.success {
-            output.push_str(&format!("Connected to Storage {}\n", stor.name));
-            output.push_str(&result.status_text);
-        } else {
-            output.push_str(&format!("Failed: {}\n", result.status_text));
+/// `status client[=<name>]` and `.status client[=<name>] [<cmd>]`: C++
+/// get_client_resource() (ua_select.cc:506), then ClientStatus().
+fn status_client_selected(ast: &CommandAst, ctx: &ExecContext, cmd: Option<&str>) -> CommandResult {
+    let mut ua = crate::ua_select::Ua::new(ctx);
+    if let Some(name) = crate::ua_select::get_client_resource(&mut ua, ast) {
+        let found = ctx.config.as_ref().and_then(|c| c.read().ok()).and_then(|cfg| {
+            let client = cfg.clients.iter().find(|c| c.name == name)?.clone();
+            Some((client, cfg.director.name.clone()))
+        });
+        if let Some((client, director)) = found {
+            ua.send_msg(client_status(&client, cmd, ctx, &director));
         }
-        output.push('\n');
     }
+    ua.finish(true)
+}
 
-    CommandResult::ok(output)
+/// Every `Device` of a Storage resource joined with "," (C++
+/// DoNativeStorageStatus builds `devicenames` from `store->device`).
+fn device_names(config: &DirectorConfig, store: &bareos_config::resources::StorageResource) -> String {
+    let devices: Vec<String> = config.raw.iter()
+        .find(|r| r.norm_type() == "storage" && r.name() == Some(store.name.as_str()))
+        .map(|r| r.directives.iter().filter(|d| d.norm_key() == "device")
+            .flat_map(|d| d.values().iter().map(|v| v.to_string()).collect::<Vec<_>>()).collect())
+        .unwrap_or_else(|| store.device.split(',').map(|d| d.trim().trim_matches('"').to_string()).collect());
+    devices.join(",")
+}
+
+/// C++ StorageStatus() (storage.cc:501) -> DoNativeStorageStatus()
+/// (sd_cmds.cc:692): connect, print the TLS line, send `status <devices>`
+/// or `.status <cmd>` and relay every message of the SD unchanged.
+fn storage_status(store: &bareos_config::resources::StorageResource, cmd: Option<&str>, ctx: &ExecContext) -> String {
+    use bareos_bnet::{BnetMessage, BnetSignal};
+    let Some((director, devices)) = ctx.config.as_ref().and_then(|c| c.read().ok())
+        .map(|cfg| (cfg.director.name.clone(), device_names(&cfg, store))) else {
+        return String::new();
+    };
+    let mut output = String::new();
+    if ctx.api_mode == ApiMode::Human {
+        output.push_str(&format!("Connecting to Storage daemon {} at {}:{}\n", store.name, store.address, store.port));
+    }
+    let mut sd = match bareos_stored::connect::connect_sd(&store.address, store.port, &store.password, &director) {
+        Ok(sd) => sd,
+        Err(_) => {
+            output.push_str(&format!("\nFailed to connect to Storage daemon {}.\n====\n", store.name));
+            return output;
+        }
+    };
+    let cipher = sd.inner().cipher_name();
+    output.push_str(&bareos_bnet::tls_psk::cipher_message_string(Some(&cipher).filter(|c| !c.is_empty()).map(|c| c.as_str())));
+    output.push('\n');
+    let command = match cmd {
+        Some(cmd) => format!(".status {cmd}\n"),
+        // BashSpaces()
+        None => format!("status {}\n", devices.replace(' ', "\u{1}")),
+    };
+    // fsend errors are silent upstream; the receive loop then ends.
+    if sd.send_str(&command).is_ok() {
+        // while (store_bsock->recv() >= 0): every signal ends the loop.
+        while let Ok(BnetMessage::Data(data)) = sd.recv() {
+            // SendMsg("%s", msg): the text up to the first NUL.
+            let end = data.iter().position(|&b| b == 0).unwrap_or(data.len());
+            output.push_str(&String::from_utf8_lossy(&data[..end]));
+        }
+    }
+    // TerminateAndCloseJcrStoreSocket()
+    let _ = sd.send_signal(BnetSignal::Terminate);
+    output
+}
+
+/// `.status storage[=<name>] [<cmd>]`: get_storage_resource(ua) and
+/// StorageStatus().
+fn dot_status_storage(ast: &CommandAst, ctx: &ExecContext, cmd: Option<&str>) -> CommandResult {
+    let mut ua = crate::ua_select::Ua::new(ctx);
+    // DotStatusCmd returns true whatever the selection printed.
+    if let Some(store) = crate::ua_select::get_storage_resource(&mut ua, ast, false, false) {
+        ua.send_msg(storage_status(&store, cmd, ctx));
+    }
+    ua.finish(true)
 }
 
 /// Storage branch of C++ StatusCmd(): `status storage=<name>` or any other
@@ -1320,13 +1347,38 @@ fn status_storage_selected(ast: &CommandAst, ctx: &ExecContext) -> CommandResult
     let slots = ast.arguments.iter().any(|a| a.key.eq_ignore_ascii_case("slots"));
     let mut ua = crate::ua_select::Ua::new(ctx);
     // StatusCmd returns true whatever the selection printed.
-    let Some(store) = crate::ua_select::get_storage_resource(&mut ua, ast, false, slots) else {
-        return ua.finish(true);
-    };
-    let result = status_storage(&store.name, ctx);
-    let success = result.success;
-    ua.send_result(result);
-    ua.finish(success)
+    if let Some(store) = crate::ua_select::get_storage_resource(&mut ua, ast, false, slots) {
+        if slots {
+            status_slots(&mut ua, ast, &store);
+        } else {
+            ua.send_msg(storage_status(&store, None, ctx));
+        }
+    }
+    ua.finish(true)
+}
+
+/// `status storage=… slots`: C++ StatusSlots() (ua_status.cc:1917) without
+/// API mode, StatusContentApi() (:1703) with `.api 1`, StatusContentJson()
+/// (:1804) with `.api 2`. Implemented up to the autochanger volume list:
+/// without slots or volumes upstream ends with a warning; the slot table
+/// of a non-empty list is not implemented yet (no autochanger in the
+/// parity setup, see compatibility log C-042).
+fn status_slots(ua: &mut crate::ua_select::Ua, ast: &CommandAst, store: &bareos_config::resources::StorageResource) {
+    let ctx = ua.ctx;
+    if !ua.open_client_db(ast, false) {
+        return;
+    }
+    let director = ctx.config.as_ref().and_then(|c| c.read().ok())
+        .map(|c| c.director.name.clone()).unwrap_or_default();
+    let mut sd = crate::ua_storage_select::NetSd { director };
+    if ctx.api_mode == ApiMode::Human
+        && crate::ua_storage_select::get_num_slots(ua, &mut sd, store) <= 0 {
+        ua.warning_msg("No slots in changer to scan.\n");
+        return;
+    }
+    if crate::ua_storage_select::native_get_vol_list_all(ua, &mut sd, store).is_none() {
+        ua.warning_msg("No Volumes found, or no barcodes.\n");
+    }
 }
 
 #[cfg(test)]
