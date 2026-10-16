@@ -1,4 +1,4 @@
-# .profiles — List Profile Names
+# .profiles — Namen der Profile auflisten
 
 <!-- bareos-reference:start -->
 ## Aus den Bareos-Originalquellen
@@ -21,41 +21,125 @@ Referenz: [WIP/25.1.2-pre-43-g18be77e68, `18be77e6832e`](https://github.com/bare
 
 Die folgenden vorhandenen Beispiele und Verhaltensbeschreibungen sind lokale Dokumentation; sie sind kein Beleg für vollständige Bareos-Kompatibilität. Bei Widersprüchen gilt der obige Befund.
 <!-- bareos-reference:end -->
-Machine-interface command used by bconsole/oconsole for tab-completion. Returns one profile resource name per line from the Director configuration.
+
+## Zweck
+
+`.profiles` listet die Namen aller Profile-Ressourcen, einen pro Zeile. Profile bündeln ACLs, die Console- und User-Ressourcen über `Profile = <name>` übernehmen. Oberflächen und die Tab-Vervollständigung nutzen den Befehl. Der Befehl liest nur.
 
 ## Syntax
 
-```
+```text
 .profiles
 ```
 
-## Arguments
+## Argumente
 
-None.
+Der Befehl hat keine Argumente. Weitere Wörter werden ignoriert (Paritätsfall `dcfg-profiles-arg`).
 
-## Examples
+Die Reihenfolge ist die interne Reihenfolge der Konfiguration, nicht alphabetisch. Die Liste wird nicht nach ACLs gefiltert.
 
-### List all profiles
-```
-* .profiles
-operator
-webui-admin
+## API-Modi
+
+Unter `.api 0` und `.api 1` kommt dieselbe Liste. Unter `.api 2` steht sie in `result.profiles` als Array von Objekten mit dem Feld `name`.
+
+## Beispiele
+
+### Profile auflisten
+
+Paritätsfall `dot_profiles`. `c019g` und `c019s` wurden vorher mit `configure add profile` angelegt.
+
+```text
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]> .profiles
 webui-readonly
+webui-admin
+parity-acl
+operator
+c019g
+c019s
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]>
 ```
 
-### No profiles configured
+### Profile als JSON
+
+Paritätsfall `dcfg-profiles-api2`; hier wurden zuvor `c019s`, `c019g` und `dcfg-prof` angelegt und die Konfiguration neu geladen.
+
+```text
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]> .api 2
+{
+  "jsonrpc": "2.0",
+  "id": null,
+  "result": {
+    "api": 2
+  }
+}
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]> .profiles
+{
+  "jsonrpc": "2.0",
+  "id": null,
+  "result": {
+    "profiles": [
+      {
+        "name": "webui-readonly"
+      },
+      {
+        "name": "webui-admin"
+      },
+      {
+        "name": "parity-acl"
+      },
+      {
+        "name": "operator"
+      },
+      {
+        "name": "dcfg-prof"
+      },
+      {
+        "name": "c019s"
+      },
+      {
+        "name": "c019g"
+      }
+    ]
+  }
+}
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]>
 ```
-* .profiles
+
+### Konsole mit Profil
+
+`parity-operator` erhält seine Rechte über das Profil `operator` und darf `.profiles` ausführen (Paritätsfall `c025-profiles-operator`).
+
+```text
+parity-operator@bareos-dir[25.1.2+onesimus.0.2.0]> .profiles
+webui-readonly
+webui-admin
+parity-acl
+operator
+c019g
+c019s
+parity-operator@bareos-dir[25.1.2+onesimus.0.2.0]>
 ```
 
-## Notes
+### Konsole ohne Berechtigung
 
-- Output is one name per line, no headers, no formatting.
-- Output is terminated by the EOD signal.
-- Profile resources define reusable ACL sets that can be assigned to Console resources.
-- Used by console programs to populate the `profile=` argument completion list.
+Paritätsfall `c025-profiles-limited`.
 
-## Related Commands
+```text
+parity-limited@bareos-dir[25.1.2+onesimus.0.2.0]> .profiles
+.profiles: is an invalid command.
+parity-limited@bareos-dir[25.1.2+onesimus.0.2.0]>
+```
 
-- [.consoles](dot-consoles.md) -- List console names
-- [.acl](dot-acl.md) -- Manage console ACLs
+## Fehlermeldungen
+
+| Meldung | Ursache und Abhilfe |
+|---|---|
+| `.profiles: is an invalid command.` | Die Konsole darf `.profiles` nicht ausführen (`CommandACL`). |
+
+## Siehe auch
+
+- [.consoles](dot-consoles.md) — Namen aller Console-Ressourcen
+- [.users](dot-users.md) — Namen aller User-Ressourcen
+- [show](show.md) — `show profiles` zeigt die Profile mit ihren ACLs
+- [configure](configure.md) — Profil zur Laufzeit anlegen
+- [.authorized](dot-authorized.md) — eine einzelne Berechtigung prüfen

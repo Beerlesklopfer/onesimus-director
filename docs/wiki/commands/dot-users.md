@@ -1,4 +1,4 @@
-# .users — List User Resource Names
+# .users — Namen der Benutzer auflisten
 
 <!-- bareos-reference:start -->
 ## Aus den Bareos-Originalquellen
@@ -21,41 +21,98 @@ Referenz: [WIP/25.1.2-pre-43-g18be77e68, `18be77e6832e`](https://github.com/bare
 
 Die folgenden vorhandenen Beispiele und Verhaltensbeschreibungen sind lokale Dokumentation; sie sind kein Beleg für vollständige Bareos-Kompatibilität. Bei Widersprüchen gilt der obige Befund.
 <!-- bareos-reference:end -->
-Machine-interface command used by bconsole/oconsole for tab-completion. Returns one User resource name per line from the Director configuration.
+
+## Zweck
+
+`.users` listet die Namen aller User-Ressourcen, einen pro Zeile. User-Ressourcen beschreiben Benutzer, die sich über eine Konsole mit PAM-Anmeldung einloggen; ihre Rechte kommen aus Profilen. Gibt es keine User-Ressource, ist die Antwort leer. Der Befehl liest nur.
 
 ## Syntax
 
-```
+```text
 .users
 ```
 
-## Arguments
+## Argumente
 
-None.
+Der Befehl hat keine Argumente. Weitere Wörter werden ignoriert (Paritätsfall `dcfg-users-arg`).
 
-## Examples
+Die Reihenfolge ist die interne Reihenfolge der Konfiguration, nicht alphabetisch. Die Liste wird nicht nach ACLs gefiltert.
 
-### List users
+## API-Modi
+
+Unter `.api 0` und `.api 1` kommt dieselbe Liste. Unter `.api 2` steht sie in `result.users` als Array von Objekten mit dem Feld `name`.
+
+## Beispiele
+
+### Keine User-Ressourcen
+
+In der Standardkonfiguration gibt es keine User-Ressource; die Antwort ist leer (Paritätsfall `dot_users`).
+
+```text
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]> .users
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]>
 ```
-* .users
-admin
-operator
+
+### Benutzer auflisten
+
+`dcfg-user` wurde mit `configure add user` angelegt, `dcfg-u` als Datei `bareos-dir.d/user/dcfg-u.conf` und mit `reload` geladen (Paritätsfall `dcfg-users-added`).
+
+```text
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]> reload
+reloaded
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]> .users
+dcfg-user
+dcfg-u
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]>
 ```
 
-### No user resources configured (typical)
+### Benutzer als JSON
+
+Paritätsfall `dcfg-users-api2`.
+
+```text
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]> .api 2
+{
+  "jsonrpc": "2.0",
+  "id": null,
+  "result": {
+    "api": 2
+  }
+}
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]> .users
+{
+  "jsonrpc": "2.0",
+  "id": null,
+  "result": {
+    "users": [
+      {
+        "name": "dcfg-user"
+      }
+    ]
+  }
+}
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]>
 ```
-* .users
+
+### Konsole ohne Berechtigung
+
+Paritätsfall `c025-users-limited`.
+
+```text
+parity-limited@bareos-dir[25.1.2+onesimus.0.2.0]> .users
+.users: is an invalid command.
+parity-limited@bareos-dir[25.1.2+onesimus.0.2.0]>
 ```
 
-## Notes
+## Fehlermeldungen
 
-- Output is one name per line, no headers, no formatting.
-- Output is terminated by the EOD signal.
-- User resources are optional and rarely configured in most Bareos installations. Access control is typically handled via Console and Profile resources instead.
-- Returns empty output when no User resources exist.
+| Meldung | Ursache und Abhilfe |
+|---|---|
+| `.users: is an invalid command.` | Die Konsole darf `.users` nicht ausführen (`CommandACL`). |
 
-## Related Commands
+## Siehe auch
 
-- [.consoles](dot-consoles.md) -- List console names
-- [.profiles](dot-profiles.md) -- List profile names
-- [whoami](whoami.md) -- Show current console identity
+- [.consoles](dot-consoles.md) — Namen aller Console-Ressourcen
+- [.profiles](dot-profiles.md) — Namen aller Profile
+- [show](show.md) — `show users` zeigt die User-Ressourcen mit allen Direktiven
+- [configure](configure.md) — User-Ressource zur Laufzeit anlegen
