@@ -15,7 +15,5 @@
 {"id": "c035-wait-mount-timeout", "steps": ["wait mount timeout=1"]}
 {"id": "c035-wait-mount-timeout-api1", "setup": [".api 1"], "steps": ["wait mount timeout=1"]}
 {"id": "c035-wait-mount-timeout-api2", "setup": [".api 2"], "steps": ["wait mount timeout=1"]}
-{"id": "c035-setbandwidth-api1", "setup": [".api 1"], "steps": ["setbandwidth limit=100 client=bareos-fd"], "normalize": ["(?<=kb/s )[^\\n]*"], "note": "C++ prints the uninitialized Job buffer after kb/s (ua_cmds.cc:871)"}
-{"id": "c035-setbandwidth-api2", "setup": [".api 2"], "steps": ["setbandwidth limit=100 client=bareos-fd"]}
 {"id": "c035-cancel-job-nosuch-api1", "setup": [".api 1"], "steps": ["cancel job=nosuch"]}
 {"id": "c035-cancel-job-nosuch-api2", "setup": [".api 2"], "steps": ["cancel job=nosuch"]}

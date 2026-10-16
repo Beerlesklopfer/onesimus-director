@@ -107,7 +107,7 @@ eindeutige Sortierung), `c015-list-jobs-enabled-count` (undefiniertes Verhalten 
   Wegwerfkopie des Katalog-Templates `bareos_cppref` (CREATE DATABASE … TEMPLATE, Rolle
   `joerg.bernau` hat CREATEDB). `--shared-db` nur für rein lesende Fälle.
 - Lokale CI: `ci/local-ci.py`; jeder Check ein eigener Schritt, Fehler werden nur berichtet.
-- Katalogkopien isolieren nur die Datenbank. FD/SD sind echt und gemeinsam: keine
+- Katalogkopien isolieren nur die Datenbank. FD/SD sind echt und gemeinsam (16.10.2026: die Fälle `c035-setbandwidth-api1/-api2` setzten bei jedem Lauf `bwlimit=100kB/s` am echten FD; entfernt, der Warnkanal von `setbandwidth` bleibt per Einheitentest abgedeckt): keine
   zustandsändernden FD/SD-Befehle live (setbandwidth mit Limit, setdebug client/storage,
   setdevice auf echte Geräte, unmount/label, cancel an Daemons).
 - Bereinigungen am Testkatalog nur mit Freigabe des Nutzers. Am 15./16.10.2026 bereinigt:

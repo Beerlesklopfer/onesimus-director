@@ -1160,8 +1160,6 @@
  "c035-list-nextvol-days-api1": "match",
  "c035-list-nextvol-days-api2": "match",
  "c035-list-nextvol-days-nojob-api2": "match",
- "c035-setbandwidth-api1": "match",
- "c035-setbandwidth-api2": "match",
  "c035-show-help": "match",
  "c035-show-help-api1": "match",
  "c035-show-help-api2": "match",
