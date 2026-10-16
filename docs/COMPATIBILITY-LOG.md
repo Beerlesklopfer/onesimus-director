@@ -79,6 +79,7 @@ Neue Einträge unten anhängen; behobene Einträge bleiben mit Commit stehen.
 | C-058 | 16.10.2026 | Jobstart anderer Jobtypen | — | `run … yes` startet Restore/Verify/Admin/Copy/Migrate/Consolidate (RunJob) | „Running X jobs is not available yet.“ (Restore über `restore` funktioniert) | `job.cc` RunJob, `migrate.cc`, `verify.cc`, `admin.cc` | offen |
 | C-059 | 16.10.2026 | Zeitangaben | — | StrToUtime mit Bareos-eigenem `bsscanf` (installierte libbareos) | `purge.rs`/`estimate.rs` nutzen eigene Ports mit libc-sscanf-Semantik (Randfälle ungeprüft) | `lib/btime.cc`, `lib/scan.cc` | offen |
 | C-060 | 16.10.2026 | Handshake-Modus | `c018-client` nach `c017-*` | Ein erfolgreicher FD-Connect ohne Konsole (z. B. `estimate`) speichert den Handshake-Modus; der nächste Konsolen-Connect probt nicht mehr | `estimate` speicherte nichts → „Probing client protocol…“ erneut | `fd_cmds.cc` ConnectToFileDaemon | behoben (16.10.2026) |
+| C-061 | 16.10.2026 | API 2, leere Eingabe | `c056-*-api2` | Ein „.“ als eigener Befehl unter `.api 2` erzeugt die Signale [-16, -16, -15, -15, -18] | Rust sendet [-16, -15, -18]; Ausgabebytes identisch | `ua_input.cc`/`console`-Loop | offen |
 
 Hinweis C-002: Text-Sitzungen über gRPC/Command-Queue nutzen denselben SessionManager und erhalten die Katalogzeilen jetzt ebenfalls einmal pro Sitzung (konsistent mit dem Original, aber neue Ausgabe an dieser Schnittstelle).
 
