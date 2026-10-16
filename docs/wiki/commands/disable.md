@@ -1,4 +1,4 @@
-# disable -- Disable a Job, Client, Schedule, or Storage
+# disable — Job, Client oder Zeitplan abschalten
 
 <!-- bareos-reference:start -->
 ## Aus den Bareos-Originalquellen
@@ -25,61 +25,227 @@ disable job=<job-name> client=<client-name> schedule=<schedule-name>
 
 Die folgenden vorhandenen Beispiele und Verhaltensbeschreibungen sind lokale Dokumentation; sie sind kein Beleg für vollständige Bareos-Kompatibilität. Bei Widersprüchen gilt der obige Befund.
 <!-- bareos-reference:end -->
-Disable a resource so it will not be used for scheduled operations or manual runs.
+## Zweck
+
+`disable` schaltet einen Job, einen Client oder einen Zeitplan (Schedule) ab. Ein abgeschalteter Job wird vom Zeitplan nicht mehr gestartet, ein abgeschalteter Client nicht mehr gesichert, ein abgeschalteter Zeitplan löst keine Jobs mehr aus. Von Hand lässt sich ein abgeschalteter Job mit [run](run.md) weiterhin starten. Die Änderung gilt nur im Speicher des laufenden Directors bis zum nächsten [reload](reload.md) oder Neustart; dauerhaft wirkt nur die Direktive `Enabled = no` in der Konfiguration.
 
 ## Syntax
 
-```
-disable [job=<name>|client=<name>|schedule=<name>|storage=<name>]
-```
-
-## Arguments
-
-| Argument | Description |
-|----------|-------------|
-| `job=<name>` | Disable a Job resource |
-| `client=<name>` | Disable a Client resource |
-| `schedule=<name>` | Disable a Schedule resource |
-| `storage=<name>` | Disable a Storage resource |
-
-## Examples
-
-### Disable a job during maintenance
-```
-* disable job=backup-bareos-fd
-Job 'backup-bareos-fd' disabled
+```text
+disable
+disable job=<job>
+disable client=<client>
+disable schedule=<schedule>
+disable job | client | schedule
 ```
 
-### Disable a client
-```
-* disable client=bareos-fd
-Client 'bareos-fd' disabled
+## Argumente
+
+| Argument | Werte | Bedeutung |
+|---|---|---|
+| `job=<job>` | Name einer Job-Ressource | Diesen Job abschalten. |
+| `client=<client>` | Name einer Client-Ressource | Diesen Client abschalten. |
+| `schedule=<schedule>` | Name einer Schedule-Ressource | Diesen Zeitplan abschalten. |
+| `job`, `client`, `schedule` ohne Wert | – | Auswahl unter den eingeschalteten Ressourcen dieser Art. |
+
+Ohne Argument wählt `disable` unter den eingeschalteten Jobs. Andere Wörter (etwa `storage=`) werden übergangen; dann gilt ebenfalls die Jobauswahl.
+
+## Dialoge
+
+Die Auswahlliste enthält die eingeschalteten Ressourcen, die die Konsole sehen darf, und fragt `Select Job resource (1-n):` (bzw. `Select Client resource`, `Select Schedule resource`). Eine Nummer schaltet ab, `.` bricht ab (`Selection aborted, nothing done.`). Ist die Liste leer, meldet der Director `Selection list for "<Art>" is empty!`.
+
+## API-Modi
+
+Unter `.api 0` und `.api 1` kommt derselbe Text. Unter `.api 2` steht das Ergebnis in `result.disable` mit den Listen `jobs`, `clients` bzw. `schedules`; eine leere Auswahl liefert ein leeres `result`, ein unbekannter Name einen JSON-RPC-Fehler.
+
+## Beispiele
+
+### Job abschalten
+
+```text
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]> disable job=backup-bareos-fd
+Job "backup-bareos-fd" disabled
+Disabling is a temporary operation until the director reloads.
+For a permanent setting, please set the value of the "Enabled"
+directive in the relevant configuration resource file.
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]>
 ```
 
-### Verify with show
+### Job aus der Liste wählen
+
+```text
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]> disable
+The defined Job resources are:
+ 1: backup-bareos-fd
+ 2: BackupCatalog
+ 3: parity-admin
+ 4: parity-consolidate
+ 5: parity-copy
+ 6: parity-migrate
+ 7: parity-restore-regex
+ 8: parity-verify
+ 9: RestoreFiles
+Select Job resource (1-9):
+> 1
+Job "backup-bareos-fd" disabled
+Disabling is a temporary operation until the director reloads.
+For a permanent setting, please set the value of the "Enabled"
+directive in the relevant configuration resource file.
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]>
 ```
-* disable job=backup-bareos-fd
-Job 'backup-bareos-fd' disabled
-* show jobs
-Job {
-  Name = "backup-bareos-fd"
-  ...
-  Enabled = no
+
+### Auswahl abbrechen
+
+```text
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]> disable
+The defined Job resources are:
+ 1: backup-bareos-fd
+ 2: BackupCatalog
+ 3: parity-admin
+ 4: parity-consolidate
+ 5: parity-copy
+ 6: parity-migrate
+ 7: parity-restore-regex
+ 8: parity-verify
+ 9: RestoreFiles
+Select Job resource (1-9):
+> .
+Selection aborted, nothing done.
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]>
+```
+
+### Client aus der Liste wählen
+
+```text
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]> disable client
+The defined Client resources are:
+1: bareos-fd
+2: parity-ndmp-fd
+Select Client resource (1-2):
+> .
+Selection aborted, nothing done.
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]>
+```
+
+### Zeitplan abschalten
+
+```text
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]> disable schedule=WeeklyCycle
+Schedule "WeeklyCycle" disabled
+Disabling is a temporary operation until the director reloads.
+For a permanent setting, please set the value of the "Enabled"
+directive in the relevant configuration resource file.
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]>
+```
+
+### Unter .api 1 und .api 2
+
+```text
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]> .api 1
+api: 1
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]> disable schedule=WeeklyCycle
+Schedule "WeeklyCycle" disabled
+Disabling is a temporary operation until the director reloads.
+For a permanent setting, please set the value of the "Enabled"
+directive in the relevant configuration resource file.
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]>
+```
+
+```text
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]> .api 2
+{
+  "jsonrpc": "2.0",
+  "id": null,
+  "result": {
+    "api": 2
+  }
 }
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]> disable schedule=WeeklyCycle
+{
+  "jsonrpc": "2.0",
+  "id": null,
+  "result": {
+    "disable": {
+      "schedules": [
+        "WeeklyCycle"
+      ]
+    }
+  }
+}
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]>
 ```
 
-## Behavior
+### Unbekannte Namen
 
-- Sets the `Enabled` flag to `no` in the in-memory configuration for the named resource.
-- Disabled jobs will not run via the scheduler and `run job=<name>` will be rejected with "Job is disabled".
-- Disabled clients are excluded from automatic job selection.
-- Disabled schedules stop triggering their associated jobs.
-- The change is effective immediately but does not persist across Director restarts unless saved.
-- Without arguments, the command prints usage help.
-- This is an audited command.
+```text
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]> disable job=nosuch
+Job "nosuch" not found.
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]>
+```
 
-## Related Commands
+```text
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]> disable schedule=nosuch
+Schedule "nosuch" not found.
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]>
+```
 
-- [enable](enable.md) -- Enable a job/client/schedule/storage
-- [show](show.md) -- Show resource configuration
-- [reload](reload.md) -- Reload configuration from disk
+```text
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]> .api 2
+{
+  "jsonrpc": "2.0",
+  "id": null,
+  "result": {
+    "api": 2
+  }
+}
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]> disable job=nosuch
+{
+  "jsonrpc": "2.0",
+  "id": null,
+  "error": {
+    "code": 1,
+    "message": "failed",
+    "data": {
+      "result": {},
+      "messages": {
+        "error": [
+          "Job \"nosuch\" not found.\n"
+        ]
+      }
+    }
+  }
+}
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]>
+```
+
+### Konsole mit eingeschränkter Job-ACL
+
+Die Konsole `parity-device` darf nur bestimmte Jobs sehen; andere gelten als unbekannt.
+
+```text
+parity-device@bareos-dir[25.1.2+onesimus.0.2.0]> disable job=BackupCatalog
+Job "BackupCatalog" not found.
+parity-device@bareos-dir[25.1.2+onesimus.0.2.0]> disable job=backup-bareos-fd
+Job "backup-bareos-fd" disabled
+Disabling is a temporary operation until the director reloads.
+For a permanent setting, please set the value of the "Enabled"
+directive in the relevant configuration resource file.
+parity-device@bareos-dir[25.1.2+onesimus.0.2.0]>
+```
+
+## Fehlermeldungen
+
+| Meldung | Ursache und Abhilfe |
+|---|---|
+| `Job "<name>" not found.` | Unbekannter oder für die Konsole nicht sichtbarer Job. |
+| `Client "<name>" not found.` | Unbekannter oder nicht sichtbarer Client. |
+| `Schedule "<name>" not found.` | Unbekannter oder nicht sichtbarer Zeitplan. |
+| `Selection list for "Schedule" is empty!` | Keine passende Ressource sichtbar (entsprechend für Job und Client). |
+| `disable: is an invalid command.` | Die Konsole darf `disable` nicht ausführen (Command ACL). |
+
+## Siehe auch
+
+- [enable](enable.md) — wieder einschalten
+- [show](show.md) — Konfiguration und `Enabled`-Zustand anzeigen
+- [reload](reload.md) — Konfiguration neu laden (setzt `enable`/`disable` zurück)
+- [status](status.md) — geplante Jobs anzeigen
