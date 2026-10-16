@@ -1,4 +1,4 @@
-# automount -- Toggle Automatic Device Mounting
+# automount — Automatisches Mounten nach label schalten
 
 <!-- bareos-reference:start -->
 ## Aus den Bareos-Originalquellen
@@ -25,51 +25,137 @@ automount on | off
 
 Die folgenden vorhandenen Beispiele und Verhaltensbeschreibungen sind lokale Dokumentation; sie sind kein Beleg für vollständige Bareos-Kompatibilität. Bei Widersprüchen gilt der obige Befund.
 <!-- bareos-reference:end -->
-Enable or disable automatic mounting of storage devices after a `label` command.
+
+## Zweck
+
+`automount` legt für die laufende Konsolensitzung fest, ob ein Volume nach `label` automatisch eingehängt (gemountet) wird. Die Einstellung gilt nur für diese Sitzung und ist ab Sitzungsbeginn eingeschaltet. Der Befehl verändert weder Katalog noch Konfiguration noch Daemons und gibt keine Bestätigung aus.
 
 ## Syntax
 
-```
-automount [on|off]
-```
-
-## Arguments
-
-| Argument | Description |
-|----------|-------------|
-| `on` | Enable automatic mounting (default) |
-| `off` | Disable automatic mounting |
-
-## Examples
-
-### Enable automount
-```
-* automount on
-automount on
+```text
+automount on | off
+automount
 ```
 
-### Disable automount
+## Argumente
+
+| Argument | Werte | Bedeutung |
+|---|---|---|
+| `on` | – | Nach `label` automatisch mounten. |
+| `off` | – | Nicht automatisch mounten. Groß- und Kleinschreibung spielt keine Rolle (`OFF` wirkt wie `off`). |
+
+Jedes andere Wort als `off` schaltet automount ein, ohne Fehlermeldung (`automount foo` wirkt wie `automount on`). Steht nicht genau ein Wort hinter `automount`, fragt der Director nach.
+
+## Dialoge
+
+Ohne Argument (oder mit mehr als einem) fragt der Director `Turn on or off?`. Die Antwort wird wie das Argument ausgewertet: `off` schaltet aus, jede andere Antwort ein. Auch `.` schaltet daher ein; die Antwort bestätigt der Director nicht.
+
+```text
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]> automount
+Turn on or off? 
+> off
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]>
 ```
-* automount off
-automount off
+
+```text
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]> automount on off
+Turn on or off? 
+> on
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]>
 ```
 
-### Default (enable)
+## API-Modi
+
+Unter `.api 0` und `.api 1` gibt `automount on` bzw. `automount off` nichts aus. Unter `.api 2` kommt ein leeres `result`. Ohne Argument fragt der Director unter `.api 1` mit einer freien Texteingabe; den Fragetext schickt er erst mit der Antwort. Unter `.api 2` fragt er gar nicht: `automount` ohne Argument endet sofort mit leerem `result`, und ein danach eingegebenes `off` gilt als neuer, unbekannter Befehl.
+
+## Beispiele
+
+### Automount ausschalten
+
+```text
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]> automount off
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]>
 ```
-* automount
-automount on
+
+### Automount einschalten
+
+```text
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]> automount on
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]>
 ```
 
-## Behavior
+### Unbekanntes Wort
 
-- When `on`, the Storage Daemon automatically mounts a device after a successful `label` command, making the volume immediately available for writing.
-- When `off`, a manual `mount` command is required after labeling.
-- The default state is `on`.
-- This setting affects the current console session.
-- This is not an audited command.
+```text
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]> automount foo
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]>
+```
 
-## Related Commands
+### Punkt als Antwort
 
-- [mount](mount.md) -- Manually mount a device
-- [label](label.md) -- Label a volume (auto-mounts if enabled)
-- [unmount](unmount.md) -- Unmount a device
+Ein `.` bricht hier nicht ab, sondern schaltet automount ein.
+
+```text
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]> automount
+Turn on or off? 
+> .
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]>
+```
+
+### Unter .api 1 mit Rückfrage
+
+```text
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]> .api 1
+api: 1
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]> automount
+input> off
+Turn on or off? 
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]>
+```
+
+### Unter .api 2
+
+```text
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]> .api 2
+{
+  "jsonrpc": "2.0",
+  "id": null,
+  "result": {
+    "api": 2
+  }
+}
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]> automount
+{
+  "jsonrpc": "2.0",
+  "id": null,
+  "result": {}
+}
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]> off
+{
+  "jsonrpc": "2.0",
+  "id": null,
+  "error": {
+    "code": 1,
+    "message": "failed",
+    "data": {
+      "result": {},
+      "messages": {
+        "error": [
+          "off: is an invalid command.\n"
+        ]
+      }
+    }
+  }
+}
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]>
+```
+
+## Fehlermeldungen
+
+`automount` gibt keine eigenen Fehlermeldungen aus. Die Meldung `off: is an invalid command.` unter `.api 2` entsteht, weil dort keine Rückfrage kommt und `off` als eigener Befehl gesendet wird.
+
+## Siehe auch
+
+- [label](label.md) — Volume beschriften; danach wird bei eingeschaltetem automount gemountet
+- [mount](mount.md) — Volume von Hand einhängen
+- [unmount](unmount.md) — Volume aushängen
