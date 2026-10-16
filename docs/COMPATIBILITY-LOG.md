@@ -69,6 +69,7 @@ Neue Einträge unten anhängen; behobene Einträge bleiben mit Commit stehen.
 | C-049 | 16.10.2026 | purge action= | — | ActionOnPurge (Relabel über SD) | Lokale Meldung „not supported“ | `ua_purge.cc:690ff` | offen |
 | C-050 | 16.10.2026 | Speicherprotokoll | — | NDMP-Storages/-Clients werden gesondert behandelt (setdevice überspringt, Status, Mount) | Kein Protokollfeld in StorageResource, nur natives Protokoll | `ua_cmds.cc:1552`, `storage.cc:727` | offen |
 | C-051 | 16.10.2026 | Jobmeldungen | — | Originaltexte der Jobmeldungen („Start Backup JobId …“, Abschlussbericht), Jmsg der Konsolen-JCR | Eigene Texte (nur Kopf und Routing wie Original) | `backup.cc`, `job.cc`, `ua_run.cc:80-187` | offen |
+| C-052 | 16.10.2026 | Katalogschema (ORM) | — | `PathVisibility` Primärschlüssel `(JobId, PathId)` | Schemabeschreibung `crates/bareos-orm/schema/v2250_bareos_catalog.json` nennt nur `jobid` (wirkt nur, wenn Rust das Schema selbst anlegt; Testkatalog korrekt aus Original-DDL) | `ddl/creates/postgresql.sql:356-362` | offen |
 
 Hinweis C-002: Text-Sitzungen über gRPC/Command-Queue nutzen denselben SessionManager und erhalten die Katalogzeilen jetzt ebenfalls einmal pro Sitzung (konsistent mit dem Original, aber neue Ausgabe an dieser Schnittstelle).
 
@@ -90,7 +91,8 @@ eindeutige Sortierung), `c015-list-jobs-enabled-count` (undefiniertes Verhalten 
 
 ### Offen
 
-- Einträge mit Status „offen“ in der Tabelle: C-042-Rest → C-045, C-043, C-044, C-045 bis C-051.
+- Einträge mit Status „offen“ in der Tabelle: C-043 bis C-052.
+- OVFS (eigene PostgreSQL-Extension, paralleles Projekt `oenesimus-postgres-plugin`): BVFS ist in `commands/bvfs.rs` byte-gleich portiert und per `c022` abgesichert; OVFS als zusätzliche Onesimus-Funktion bzw. alternatives Backend nur, solange die `.bvfs_*`-Paritätsfälle identisch bleiben.
 - Prüfen, ob C-012s Wertvalidierung für `update` (`3500719`) nach dem C-011-Merge vollständig erhalten ist.
 - Normalisierung der alten Fälle (`banner*`, `status-dir`, `status-subscriptions`,
   `dot-status-dir-running`) auf Versionstoken/Zeit, damit sie grün werden.
