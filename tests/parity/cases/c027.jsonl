@@ -1,0 +1,21 @@
+# C-027 gui on/off: jcr->gui switches catalog lists to left-aligned numbers without commas (cats/sql.cc ListResult).
+{"id": "c027-gui-list-pools", "steps": ["gui on", "list pools", "gui off", "list pools"]}
+{"id": "c027-gui-llist-pools", "steps": ["gui on", "llist pools"]}
+{"id": "c027-gui-list-jobs", "steps": ["gui on", "list jobs limit=5"]}
+{"id": "c027-gui-llist-jobs", "steps": ["gui on", "llist jobs limit=2"]}
+{"id": "c027-gui-list-media", "steps": ["gui on", "list media"]}
+{"id": "c027-gui-llist-media", "steps": ["gui on", "llist volumes"]}
+{"id": "c027-gui-list-clients", "steps": ["gui on", "list clients", "llist clients"]}
+{"id": "c027-gui-list-jobtotals", "steps": ["gui on", "list jobtotals"]}
+{"id": "c027-gui-list-jobmedia", "steps": ["gui on", "list jobmedia limit=3"]}
+{"id": "c027-gui-list-filesets", "steps": ["gui on", "list filesets"]}
+{"id": "c027-gui-list-log", "steps": ["gui on", "list log limit=3"]}
+{"id": "c027-gui-sql", "steps": ["gui on", ".sql query=\"select count(*) as n, 1234567 as big from pool\""]}
+{"id": "c027-gui-sqlquery-keyword", "steps": ["gui on", "list jobs jobstatus=T limit=3", "llist jobid=1"]}
+{"id": "c027-gui-status-dir", "steps": ["gui on", "status director"], "normalize": ["Version: .*", "db:postgresql, .*", "(?<=Daemon started )\\S+ \\S+", "(?<=Console connected at )\\S+ \\S+"]}
+{"id": "c027-gui-show", "steps": ["gui on", "show pools", "show catalog"]}
+{"id": "c027-gui-messages", "steps": ["gui on", "messages"]}
+{"id": "c027-gui-off-again", "steps": ["gui on", "gui off", "llist pools", "list jobs limit=3"]}
+{"id": "c027-gui-noarg", "steps": ["gui on", "gui", "list pools"]}
+{"id": "c027-gui-api1", "steps": ["gui on", "list pools"], "setup": [".api 1"]}
+{"id": "c027-gui-api2", "steps": ["gui on", "list pools"], "setup": [".api 2"]}
