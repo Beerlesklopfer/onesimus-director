@@ -11,6 +11,10 @@ end reason are compared, and SHA-256/byte counts of both sides are recorded.
 Normalization exists only per case (`normalize`: list of regexes whose
 matches are replaced by "<N>") and is written into the report.
 
+Cases with `"isolated": true` (they start jobs) run after all other cases in
+a second Director start per side, so their jobs never show up in the other
+cases (status dir, list jobs).
+
 The baseline (tests/parity/baseline.json) is a ratchet: a case recorded as
 "match" must keep matching, otherwise the run fails. Use --update-baseline
 to record newly matching cases.
@@ -278,12 +282,25 @@ def run(args):
             create_catalog_copy(args.db, template)
         try:
             setup(args)
+            # Cases with "isolated": true start jobs: they run after all other
+            # cases in a Director of their own (fresh RecentJobResultsList,
+            # nothing they leave in the catalog reaches the other cases).
+            shared = [case for case in cases if not case.get('isolated')]
+            isolated = [case for case in cases if case.get('isolated')]
+            results[side] = {}
             with open(args.work / f'{side}.log', 'w') as log:
-                process = start(side, args.work / 'conf' / 'bareos-dir.d', args.port, log)
-                try:
-                    results[side] = {case['id']: capture(args.port, case) for case in cases}
-                finally:
-                    stop(process)
+                for group in (shared, isolated):
+                    if not group:
+                        continue
+                    if group is isolated:
+                        for path in work.iterdir():  # state files, console message queue
+                            if path.name not in DAEMON_LOGS:
+                                path.unlink()
+                    process = start(side, args.work / 'conf' / 'bareos-dir.d', args.port, log)
+                    try:
+                        results[side].update({case['id']: capture(args.port, case) for case in group})
+                    finally:
+                        stop(process)
             for name in DAEMON_LOGS:
                 target = args.work / f'{side}-{name.removeprefix("bareos-")}'
                 if (work / name).exists():
