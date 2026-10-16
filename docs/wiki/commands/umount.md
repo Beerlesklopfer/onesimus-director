@@ -1,4 +1,4 @@
-# umount
+# umount — Gerät aushängen (anderer Name für unmount)
 
 <!-- bareos-reference:start -->
 ## Aus den Bareos-Originalquellen
@@ -25,3 +25,54 @@ umount storage=<storage-name> [ drive=<drivenum> ] jobid=<jobid> | job=<job-name
 
 Die folgenden vorhandenen Beispiele und Verhaltensbeschreibungen sind lokale Dokumentation; sie sind kein Beleg für vollständige Bareos-Kompatibilität. Bei Widersprüchen gilt der obige Befund.
 <!-- bareos-reference:end -->
+## Zweck
+
+`umount` ist derselbe Befehl wie [unmount](unmount.md), unter dem von Unix gewohnten Namen. Argumente, Dialoge, API-Modi und Meldungen sind identisch; die ausführliche Beschreibung steht bei [unmount](unmount.md).
+
+## Syntax
+
+```text
+umount [ storage=<storage> | <storage> ] [ drive=<laufwerk> ] [ alldrives ]
+umount jobid=<jobid> | job=<job-name> | ujobid=<eindeutiger-job-name>
+```
+
+## Argumente
+
+Wie bei [unmount](unmount.md#argumente).
+
+## Beispiele
+
+### Storage auswählen lassen
+
+```text
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]> umount
+Automatically selected Catalog: MyCatalog
+Using Catalog "MyCatalog"
+The defined Storage resources are:
+1: File
+2: ParityNdmp
+3: ParityNdmpNative
+Select Storage resource (1-3):
+> .
+Selection aborted, nothing done.
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]>
+```
+
+### Kein laufender Job
+
+```text
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]> umount jobid=999999
+Automatically selected Catalog: MyCatalog
+Using Catalog "MyCatalog"
+JobId 999999 is not running.
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]>
+```
+
+## Fehlermeldungen
+
+Wie bei [unmount](unmount.md#fehlermeldungen).
+
+## Siehe auch
+
+- [unmount](unmount.md) — vollständige Beschreibung
+- [mount](mount.md) — Gerät wieder einbinden

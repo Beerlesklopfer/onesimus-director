@@ -1,4 +1,4 @@
-# add -- Add Volume to a Pool
+# add — Volumes ohne Label im Katalog anlegen
 
 <!-- bareos-reference:start -->
 ## Aus den Bareos-Originalquellen
@@ -26,53 +26,233 @@ add pool=<pool-name> storage=<storage-name> jobid=<jobid>
 
 Die folgenden vorhandenen Beispiele und Verhaltensbeschreibungen sind lokale Dokumentation; sie sind kein Beleg für vollständige Bareos-Kompatibilität. Bei Widersprüchen gilt der obige Befund.
 <!-- bareos-reference:end -->
-Add an existing volume record to a pool in the catalog without physically labeling the medium.
+## Zweck
+
+`add` legt Media-Einträge für Volumes im Katalog an, ohne das Medium selbst zu beschriften. Das braucht man nur in Sonderfällen, etwa wenn Bänder schon ein Bareos-Label tragen oder wenn Volumes vorab im Katalog stehen sollen. Der Befehl verändert nur den Katalog; der Storage Daemon wird nicht angesprochen. Im Normalfall ist [label](label.md) der richtige Befehl, darauf weist auch der Director bei jedem Aufruf hin.
 
 ## Syntax
 
-```
-add [pool=<pool-name>] [storage=<storage-name>] [jobid=<id>]
-```
-
-## Arguments
-
-| Argument | Description |
-|----------|-------------|
-| `pool=<pool-name>` | Pool to add the volume to |
-| `storage=<storage-name>` | Storage daemon for the volume |
-| `jobid=<id>` | Associate with a specific job |
-
-## Examples
-
-### Add a volume to a pool
-```
-* add pool=Full storage=File
-Volume added to pool
+```text
+add [ pool=<pool> ] [ storage=<storage> ]
 ```
 
-### Add interactively
+## Argumente
+
+| Argument | Werte | Bedeutung |
+|---|---|---|
+| `pool=<pool>` | Pool-Name aus dem Katalog | Pool, in dem die Volumes angelegt werden. Fehlt die Angabe, erscheint eine Pool-Auswahl. Darf die Konsole nur einen Pool benutzen, wird er automatisch gewählt. |
+| `storage=<storage>` | Name einer Storage-Ressource | Bestimmt den Media Type und die Storage-Zuordnung der neuen Volumes. Fehlt die Angabe, erscheint eine Storage-Auswahl. Bricht man sie ab, wählt der Director den Media Type selbst (oder fragt danach, wenn es mehrere gibt). |
+
+`jobid=<jobid>` steht zwar in der Bareos-Hilfe, wird von `add` aber nicht ausgewertet. Die übrigen Angaben (Anzahl, Name, Startnummer, Slot) fragt `add` immer im Dialog ab.
+
+## Dialoge
+
+1. **Pool** — `Select the Pool (1-<n>):`, wenn `pool=` fehlt.
+2. **Storage** — `Select Storage resource (1-<n>):`, wenn `storage=` fehlt. Ein `.` an dieser Stelle bricht nicht ab, sondern lässt den Director den Media Type automatisch wählen (`Automatically selected Media Type: File`).
+3. **Anzahl** — `Enter number of Volumes to create. 0=>fixed name. Max=<n>:`. `0` legt genau ein Volume mit einem festen Namen an, eine Zahl größer 0 eine Serie mit fortlaufender Nummer. `Max` ist die Zahl der Volumes, die der Pool noch aufnehmen darf (1000, wenn der Pool unbegrenzt ist). Hat der Pool sein Maximum schon erreicht, fragt der Director zuerst `Enter new maximum (zero for unlimited):`.
+4. **Name** — bei `0` `Enter Volume name:`, sonst `Enter base volume name:`. An den Basisnamen wird eine vierstellige Nummer angehängt.
+5. **Startnummer** — nur bei einer Serie: `Enter the starting number:` (mindestens 1).
+6. **Slot und InChanger** — nur bei Autochanger-Storages: `Enter slot (0 for none):` und `InChanger? yes/no:`.
+
+Ein `.` bricht jede Frage ab (außer der Storage-Auswahl, siehe oben). Nach dem Abbruch wird nichts angelegt.
+
+## API-Modi
+
+Unter `.api 0` laufen die Dialoge wie gezeigt. Unter `.api 1` schickt der Director die Auswahllisten ohne Nummern als einzelne Einträge (`Defined Pools:` gefolgt von `Incremental`, `Full`, `Differential`, `Scratch`) und wartet auf eine Auswahl; diese Form ist für Programme gedacht. Für `.api 2` gibt es keinen Paritätsfall.
+
+## Beispiele
+
+### Pool auswählen lassen und abbrechen
+
+```text
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]> add
+You probably don't want to be using this command since it
+creates database records without labeling the Volumes.
+You probably want to use the "label" command.
+
+Automatically selected Catalog: MyCatalog
+Using Catalog "MyCatalog"
+Defined Pools:
+1: Incremental
+2: Full
+3: Differential
+4: Scratch
+Select the Pool (1-4):
+> .
+Selection aborted, nothing done.
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]>
 ```
-* add
-Volume added to pool
+
+### Ein Volume mit festem Namen anlegen
+
+Mit `0` als Anzahl legt `add` genau ein Volume mit dem eingegebenen Namen an.
+
+```text
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]> add pool=Full storage=File
+You probably don't want to be using this command since it
+creates database records without labeling the Volumes.
+You probably want to use the "label" command.
+
+Automatically selected Catalog: MyCatalog
+Using Catalog "MyCatalog"
+Enter number of Volumes to create. 0=>fixed name. Max=97:
+> 0
+Enter Volume name:
+> docsvol1
+1 Volumes created in pool Full
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]>
 ```
 
-### Add after manual volume creation
+### Eine Serie von Volumes anlegen
+
+Mit `2` als Anzahl, dem Basisnamen `docsser` und der Startnummer `1` entstehen die Volumes `docsser0001` und `docsser0002`.
+
+```text
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]> add pool=Full storage=File
+You probably don't want to be using this command since it
+creates database records without labeling the Volumes.
+You probably want to use the "label" command.
+
+Automatically selected Catalog: MyCatalog
+Using Catalog "MyCatalog"
+Enter number of Volumes to create. 0=>fixed name. Max=96:
+> 2
+Enter base volume name:
+> docsser
+Enter the starting number:
+> 1
+2 Volumes created in pool Full
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]>
 ```
-* add pool=Offsite storage=Tape
-Volume added to pool
+
+### Storage-Auswahl abbrechen
+
+Bricht man die Storage-Auswahl ab, wählt der Director den Media Type selbst und fragt weiter nach der Anzahl.
+
+```text
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]> add pool=Full
+You probably don't want to be using this command since it
+creates database records without labeling the Volumes.
+You probably want to use the "label" command.
+
+Automatically selected Catalog: MyCatalog
+Using Catalog "MyCatalog"
+The defined Storage resources are:
+1: File
+2: ParityNdmp
+3: ParityNdmpNative
+Select Storage resource (1-3):
+> .
+Selection aborted, nothing done.
+Automatically selected Media Type: File
+Enter number of Volumes to create. 0=>fixed name. Max=97:
+>
 ```
 
-## Behavior
+### Konsole mit nur einem erlaubten Pool
 
-- Creates a volume catalog record and assigns it to the specified pool.
-- Unlike `label`, this does not write a physical label to the medium -- it only updates the catalog.
-- Useful for manually registering volumes that were created outside of Bareos (e.g. pre-labeled tapes).
-- The volume name is prompted interactively if not provided.
-- This is an audited command.
+Darf die Konsole nur den Pool `Full` benutzen, entfällt die Pool-Auswahl (Konsole `parity-c030-pool`).
 
-## Related Commands
+```text
+parity-c030-pool@bareos-dir[25.1.2+onesimus.0.2.0]> add
+You probably don't want to be using this command since it
+creates database records without labeling the Volumes.
+You probably want to use the "label" command.
 
-- [label](label.md) -- Label and register a new volume (physical + catalog)
-- [delete](delete.md) -- Delete a volume record from the catalog
-- [list](list.md) -- List volumes in a pool
-- [update](update.md) -- Update volume attributes
+Automatically selected Catalog: MyCatalog
+Using Catalog "MyCatalog"
+Automatically selected Pool: Full
+The defined Storage resources are:
+1: File
+2: ParityNdmp
+3: ParityNdmpNative
+Select Storage resource (1-3):
+> .
+Selection aborted, nothing done.
+Automatically selected Media Type: File
+Enter number of Volumes to create. 0=>fixed name. Max=97:
+>
+```
+
+### Zu große Anzahl
+
+```text
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]> add pool=Full storage=File
+You probably don't want to be using this command since it
+creates database records without labeling the Volumes.
+You probably want to use the "label" command.
+
+Automatically selected Catalog: MyCatalog
+Using Catalog "MyCatalog"
+Enter number of Volumes to create. 0=>fixed name. Max=94:
+> 500
+The number must be between 0 and 94
+Enter number of Volumes to create. 0=>fixed name. Max=94:
+> .
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]>
+```
+
+### Ungültiger Volume-Name
+
+Das Zeichen `|` trennt in Bareos Volume-Listen und ist im Namen nicht erlaubt.
+
+```text
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]> add pool=Full storage=File
+You probably don't want to be using this command since it
+creates database records without labeling the Volumes.
+You probably want to use the "label" command.
+
+Automatically selected Catalog: MyCatalog
+Using Catalog "MyCatalog"
+Enter number of Volumes to create. 0=>fixed name. Max=94:
+> 0
+Enter Volume name:
+> a|b
+Illegal character "|" in a volume name.
+Enter Volume name:
+> .
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]>
+```
+
+### Startnummer 0
+
+```text
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]> add pool=Full storage=File
+You probably don't want to be using this command since it
+creates database records without labeling the Volumes.
+You probably want to use the "label" command.
+
+Automatically selected Catalog: MyCatalog
+Using Catalog "MyCatalog"
+Enter number of Volumes to create. 0=>fixed name. Max=94:
+> 3
+Enter base volume name:
+> docsz
+Enter the starting number:
+> 0
+Start number must be greater than zero.
+Enter the starting number:
+> .
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]>
+```
+
+## Fehlermeldungen
+
+| Meldung | Ursache und Abhilfe |
+|---|---|
+| `You probably don't want to be using this command since it …` | Hinweis bei jedem Aufruf, kein Fehler. Zum Beschriften neuer Medien [label](label.md) benutzen. |
+| `The number must be between 0 and <max>` | Die Anzahl ist größer als der freie Platz im Pool. Kleinere Zahl eingeben oder `Maximum Volumes` des Pools erhöhen. |
+| `Pool already has maximum volumes=<n>` | Der Pool ist voll; der Director fragt nach einem neuen Maximum. |
+| `Illegal character "<z>" in a volume name.` | Der Name enthält ein nicht erlaubtes Zeichen. Erlaubt sind Buchstaben, Ziffern und `:.-_/`. |
+| `Volume name too long.` / `Volume name must be at least one character long.` | Der Name ist zu lang oder leer. |
+| `Start number must be greater than zero.` | Die Startnummer einer Serie muss mindestens 1 sein. |
+| `Expected a positive integer, got: <eingabe>` | Bei einer Auswahl oder Anzahl wurde keine Zahl eingegeben. |
+| `Selection aborted, nothing done.` | Der Dialog wurde mit `.` abgebrochen. |
+
+## Siehe auch
+
+- [label](label.md) — Volume beschriften und im Katalog anlegen
+- [create](create.md) — Pool-Eintrag im Katalog anlegen
+- [update](update.md) — Eigenschaften von Volumes ändern
+- [delete](delete.md) — Volumes aus dem Katalog löschen
+- [list](list.md) — Volumes anzeigen (`list volumes pool=<pool>`)
