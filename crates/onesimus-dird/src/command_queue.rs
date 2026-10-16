@@ -55,6 +55,10 @@ pub struct CommandResult {
     /// drive the message signals and the `.api 2` messages lists. When no
     /// Error entry is present, the errors come from `error_message`.
     pub messages: Vec<(MsgKind, String)>,
+    /// `text_output` already contains the ErrorMsg text in call order
+    /// (`error_message` is a copy for inspection, `messages` drive the
+    /// signals); the session sends `text_output` only.
+    pub errors_inline: bool,
 }
 
 impl CommandResult {

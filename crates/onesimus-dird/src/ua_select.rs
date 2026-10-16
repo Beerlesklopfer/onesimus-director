@@ -165,6 +165,14 @@ impl<'a> Ua<'a> {
     /// Append a result produced by not yet ported code (text, then errors
     /// or the other way round as recorded).
     pub fn send_result(&mut self, result: CommandResult) {
+        if result.errors_inline {
+            // The text holds everything in call order.
+            if !result.text_output.is_empty() {
+                self.segments.push(Segment::Text(result.text_output));
+            }
+            self.segments.extend(result.messages.into_iter().map(|(kind, text)| Segment::Note(kind, text)));
+            return;
+        }
         if result.messages.iter().any(|(kind, _)| *kind == MsgKind::Error) {
             // Errors recorded per call: the text already holds the rest.
             let messages = result.messages.into_iter().map(|(kind, text)| match kind {
@@ -438,9 +446,29 @@ impl<'a> Ua<'a> {
         }
         let mut result = CommandResult { success, ..Default::default() };
         result.errors_first = matches!(self.segments.first(), Some(Segment::Error(_)));
+        // Text and errors that alternate more than once (or errors already
+        // inside a sub-result's text) cannot be sent as two blocks: the text
+        // then carries everything in call order (C++ sends each message at
+        // once).
+        let is_error = |segment: &Segment| match segment {
+            Segment::Error(_) => Some(true),
+            Segment::Note(..) => None,
+            Segment::Text(t) if t.is_empty() => None,
+            _ => Some(false),
+        };
+        let kinds: Vec<bool> = self.segments.iter().filter_map(is_error).collect();
+        result.errors_inline = kinds.windows(2).filter(|w| w[0] != w[1]).count() > 1
+            || self.segments.iter().any(|s| matches!(s, Segment::Note(MsgKind::Error, _)));
         for segment in self.segments {
             match segment {
                 Segment::Error(t) => {
+                    result.error_message.push_str(&t);
+                    if result.errors_inline {
+                        result.text_output.push_str(&t);
+                    }
+                    result.messages.push((MsgKind::Error, t));
+                }
+                Segment::Note(MsgKind::Error, t) => {
                     result.error_message.push_str(&t);
                     result.messages.push((MsgKind::Error, t));
                 }
@@ -1307,5 +1335,36 @@ Pool { Name=Full }
              The current Job retention period is: 1 day \nContinue? (yes/mod/no): no\n");
         assert_eq!(edit_utime(0), "0 secs");
         assert_eq!(edit_utime(60 * 60 * 24 * 400 + 61), "1 year 1 month 5 days 1 min 1 sec");
+    }
+
+    #[test]
+    fn finish_keeps_message_kinds_and_call_order() {
+        use crate::command_queue::MsgKind;
+        let ctx = context(CONFIG, ApiMode::Json);
+        let mut ua = Ua::new(&ctx);
+        ua.send_msg("text\n");
+        ua.warning_msg("warn\n");
+        ua.error_msg("err one\nerr two\n");
+        let r = ua.finish(true);
+        assert!(!r.errors_inline && !r.errors_first);
+        assert_eq!((r.text_output.as_str(), r.error_message.as_str()), ("text\nwarn\n", "err one\nerr two\n"));
+        assert_eq!(r.message_list(), vec![(MsgKind::Warning, "warn\n".to_string()),
+            (MsgKind::Error, "err one\nerr two\n".to_string())]);
+        // Text, error, text: the text carries everything in call order.
+        let mut ua = Ua::new(&ctx);
+        ua.send_msg("a\n");
+        ua.error_msg("bad\n");
+        ua.send_msg("\n");
+        let r = ua.finish(false);
+        assert!(r.errors_inline);
+        assert_eq!((r.text_output.as_str(), r.error_message.as_str()), ("a\nbad\n\n", "bad\n"));
+        // Forwarded into another Ua: no duplicated text, messages kept.
+        let mut outer = Ua::new(&ctx);
+        outer.send_result(r);
+        outer.info_msg("i\n");
+        let r = outer.finish(false);
+        assert!(r.errors_inline);
+        assert_eq!(r.text_output, "a\nbad\n\ni\n");
+        assert_eq!(r.message_list().iter().map(|(k, _)| *k).collect::<Vec<_>>(), [MsgKind::Error, MsgKind::Info]);
     }
 }
