@@ -184,7 +184,7 @@ mod tests {
         fn sleep(&mut self, duration: Duration) { self.elapsed += duration; }
         fn elapsed(&self) -> Duration { self.elapsed }
     }
-    fn job(phase: DirJobPhase) -> ActiveJob { ActiveJob { id: 42, name: "Backup".into(), unique_name: "Backup.2026-10-15_14.00.00".into(), phase } }
+    fn job(phase: DirJobPhase) -> ActiveJob { ActiveJob { id: 42, name: "Backup".into(), unique_name: "Backup.2026-10-15_14.00.00".into(), phase, ..Default::default() } }
     fn backend(snapshots: Vec<Vec<ActiveJob>>) -> Fake {
         Fake { snapshots: snapshots.into(), elapsed: Duration::ZERO, queried: vec![], status: Ok(Some('T')), catalog: Ok(()), completion_errors: VecDeque::new() }
     }

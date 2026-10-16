@@ -820,6 +820,8 @@ impl JobHandle {
     }
 
     pub fn try_wait(&self) -> Option<i32> {
+        // A queued job has no process yet; waitpid(0) would reap any child.
+        if self.pid <= 0 { return None; }
         use nix::sys::wait::{waitpid, WaitPidFlag};
         use nix::unistd::Pid;
         match waitpid(Pid::from_raw(self.pid), Some(WaitPidFlag::WNOHANG)) {
@@ -835,9 +837,19 @@ impl JobHandle {
         Self { pid, job_id, job_name: job_name.into(), unique_job: unique_job.into(), from_worker: None, to_worker: None }
     }
 
+    /// The handle of a queued job whose worker is not forked yet (jobq.cc
+    /// waiting queue). Compatibility log C-048.
+    pub fn pending(job_id: u32, job_name: &str, unique_job: &str) -> Self {
+        Self { pid: 0, job_id, job_name: job_name.into(), unique_job: unique_job.into(), from_worker: None, to_worker: None }
+    }
+
+    /// True once a worker process exists for the job.
+    pub fn spawned(&self) -> bool { self.pid > 0 }
+
     pub fn cancel(&self) -> bool { self.pid > 0 && unsafe { libc::kill(self.pid, libc::SIGTERM) == 0 } }
-    pub fn pause(&self)  { unsafe { libc::kill(self.pid, libc::SIGUSR1); } }
-    pub fn resume(&self) { unsafe { libc::kill(self.pid, libc::SIGUSR2); } }
+    // kill(0, ...) would signal the whole process group: only real workers.
+    pub fn pause(&self)  { if self.pid > 0 { unsafe { libc::kill(self.pid, libc::SIGUSR1); } } }
+    pub fn resume(&self) { if self.pid > 0 { unsafe { libc::kill(self.pid, libc::SIGUSR2); } } }
 }
 
 /// Spawn a job worker process with dual pipes.
@@ -963,6 +975,21 @@ mod wait_protocol_tests {
             writeln!(release,"exit").unwrap();until(&mut manager,|manager|manager.active_count()==0);
             assert!(!manager.cancel_job(42));
         }
+    }
+    #[test]
+    fn sd_wait_status_is_kept_apart_from_job_status() {
+        // Compatibility log C-048: getmsg.cc SetJcrSdJobStatus().
+        let (handle,mut release)=held_worker(&[PipeMessage::State{job_id:42,state:"ConnectingSD".into()},
+            PipeMessage::State{job_id:42,state:"Running".into()},PipeMessage::JobStatus{job_id:42,status:b'M' as i32}]);
+        let mut manager=crate::job_manager::JobManager::new(std::sync::Arc::new(crate::message_bus::MessageBus::new(10)),None,None);
+        manager.add_job(42,"Backup",handle);
+        until(&mut manager,|manager| manager.active_jobs()[0].sd_status=='M');
+        let job=manager.active_jobs().remove(0);
+        assert_eq!((job.status,job.phase,job.waiting(),job.fd_connected,job.sd_connected,job.job_started),
+            ('R',crate::job_manager::DirJobPhase::WaitingMount,true,true,true,true));
+        writeln!(release,"exit").unwrap();
+        until(&mut manager,|manager| manager.active_count()==0);
+        assert_eq!((manager.finished_count(),manager.finished_job_ids()),(1,vec![42]));
     }
     #[test]
     fn nonzero_exit_cannot_publish_success_even_after_successful_job_end() {

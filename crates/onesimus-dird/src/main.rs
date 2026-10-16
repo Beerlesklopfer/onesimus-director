@@ -32,6 +32,7 @@ mod privileges;
 mod message_bus;
 mod reload;
 mod run_time;
+mod runscript;
 mod scheduler;
 mod sd_label;
 mod sd_protocol;

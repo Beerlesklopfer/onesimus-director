@@ -499,20 +499,19 @@ fn run_selected(
         });
     }
 
-    // Fork the autonomous job worker
-    match job_worker::spawn_job_worker(job_id, &job.name, &params) {
-        Ok(handle) => {
-            tracing::info!("Job {job_id} '{}': worker pid={}", job.name, handle.pid);
-            // Register with JobManager — monitor thread polls all jobs
-            if let Some(ref mgr) = ctx.job_manager {
-                let mut mgr = mgr.lock().unwrap();
-                mgr.add_job(job_id, &job.name, handle);
-                mgr.set_job_resources(job_id, &resources.0, &resources.1);
+    // RunJob(): the job queue forks the worker once its priority and the
+    // Maximum Concurrent Jobs allow it (Compatibility log C-048).
+    if let Some(ref mgr) = ctx.job_manager {
+        mgr.lock().unwrap().enqueue_job(job_id, &job.name, crate::job_manager::QueuedStart {
+            params, priority: job.priority, sched_time: now.timestamp(),
+        }, &resources.0, &resources.1);
+    } else {
+        match job_worker::spawn_job_worker(job_id, &job.name, &params) {
+            Ok(handle) => tracing::info!("Job {job_id} '{}': worker pid={}", job.name, handle.pid),
+            Err(e) => {
+                tracing::error!("Job {job_id}: fork failed: {e}");
+                return CommandResult::error(format!("Failed to start job: {e}\n"));
             }
-        }
-        Err(e) => {
-            tracing::error!("Job {job_id}: fork failed: {e}");
-            return CommandResult::error(format!("Failed to start job: {e}\n"));
         }
     }
 

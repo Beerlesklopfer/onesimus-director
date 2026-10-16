@@ -170,11 +170,10 @@ pub fn select_jobs(ua: &mut Ua, ast: &CommandAst, active: &[ActiveJob], reason: 
             |_| true
         } else {
             match state.map(str::to_ascii_lowercase).as_deref() {
-                Some("created") => |job| job.phase.job_status() == 'C',
-                Some("blocked") => |job| job.phase.job_started() && job.phase.job_status() == 'B',
-                // JobWaiting(): the waits Onesimus knows are the SD's.
-                Some("waiting") => |job| job.phase.job_started() && matches!(job.phase.job_status(), 'm' | 'M'),
-                Some("running") => |job| job.phase.job_started() && job.phase.job_status() == 'R',
+                Some("created") => |job| job.status == 'C',
+                Some("blocked") => |job| job.job_started && job.status == 'B',
+                Some("waiting") => ActiveJob::waiting,
+                Some("running") => |job| job.job_started && job.status == 'R',
                 _ => {
                     ua.error_msg("Illegal state either created, blocked, waiting or running\n");
                     return None;
@@ -226,22 +225,23 @@ pub fn select_jobs(ua: &mut Ua, ast: &CommandAst, active: &[ActiveJob], reason: 
     }
 }
 
-/// job.cc CancelJob() (:673): queued jobs are only marked, started jobs are
-/// canceled on the File and Storage daemon first. The worker process is
-/// signalled in every case (C++ setJobStatus(JS_Canceled) plus the thread
-/// signal); the job's own report follows when it has ended.
+/// job.cc CancelJob() (:673): a job still in the queue is only marked and
+/// leaves the queue (JobqRemove), a started job is canceled on the File and
+/// Storage daemon it is connected to. A forked worker is signalled in every
+/// case (C++ setJobStatus(JS_Canceled) plus the thread signal); the job's own
+/// report follows when it has ended. When the daemons took the cancel, the
+/// job's RunScripts "AfterJob" run (job.cc:741). Compatibility log C-034, C-048.
 fn cancel_job(ua: &mut Ua, job: &ActiveJob, links: &mut dyn CancelLinks) {
     let ctx = ua.ctx;
-    let old_status = job.phase.job_status();
-    if old_status == 'C' {
+    let mut ok = true;
+    if crate::job_manager::is_queued_status(job.status) {
         ua.info_msg(format!("JobId {}, Job {} marked to be canceled.\n", job.id, job.unique_name));
-    } else {
-        // jcr->file_bsock / jcr->store_bsock: a started worker has both.
+    } else if job.fd_connected || job.sd_connected {
+        // jcr->file_bsock / jcr->store_bsock
         let (client, store) = job_daemons(ctx, job);
         let director = director_name(ctx);
         let command = format!("cancel Job={}\n", job.unique_name);
-        let mut ok = true;
-        if let Some(client) = client {
+        if let (true, Some(client)) = (job.fd_connected, client) {
             // fd_cmds.cc CancelFileDaemonJob (:976)
             let (info, reply) = links.file_daemon(&client, &director, &command);
             ua.send_msg(info);
@@ -253,11 +253,14 @@ fn cancel_job(ua: &mut Ua, job: &ActiveJob, links: &mut dyn CancelLinks) {
                 }
             }
         }
-        if let (true, Some(store)) = (ok, store) {
+        if let (true, true, Some(store)) = (ok, job.sd_connected, store) {
             // sd_cmds.cc CancelStorageDaemonJob(ua, jcr, interactive) (:620)
             match links.storage_daemon(&store, &director, &command) {
                 Ok(messages) => messages.into_iter().for_each(|message| ua.send_msg(message)),
-                Err(_) => ua.error_msg("Failed to connect to Storage daemon.\n"),
+                Err(_) => {
+                    ua.error_msg("Failed to connect to Storage daemon.\n");
+                    ok = false;
+                }
             }
         }
     }
@@ -268,6 +271,13 @@ fn cancel_job(ua: &mut Ua, job: &ActiveJob, links: &mut dyn CancelLinks) {
                 job_id: job.id, job_name: job.name.clone(), status: "Canceling".to_string(),
                 timestamp: now_unix(),
             });
+        }
+    }
+    if ok {
+        let script_job = ctx.job_manager.as_ref().and_then(|mgr| mgr.lock().unwrap().take_post_scripts(job.id));
+        if let Some(script_job) = script_job {
+            crate::runscript::run_job_scripts(ctx.config.as_ref(), ctx.session_mgr.as_ref().map(|s| s.bus()),
+                &script_job, "AfterJob");
         }
     }
 }
@@ -509,8 +519,9 @@ Job { Name = other; Client = fd1; Storage = File }
         let mut fake = Fake::default();
         let (result, _) = run("cancel state=idle", &ctx, &mut fake, &[]);
         assert_eq!(result.error_message, "Illegal state either created, blocked, waiting or running\n");
-        let (result, _) = run("cancel state=running", &ctx, &mut fake, &[]);
-        assert_eq!(result.text_output, "No Jobs selected.\n");
+        // A job waiting for media keeps JobStatus R (the wait is the SD's).
+        let (_, transcript) = run("cancel state=running", &ctx, &mut fake, &["no"]);
+        assert_eq!(transcript, "Selected Job 8 for cancelling\nConfirm cancel (yes/no): no\n");
         // Declined confirmation: nothing canceled.
         let (_, transcript) = run("cancel state=WAITING", &ctx, &mut fake, &["no"]);
         assert_eq!(transcript, "Selected Job 8 for cancelling\nConfirm cancel (yes/no): no\n");
@@ -532,5 +543,66 @@ Job { Name = other; Client = fd1; Storage = File }
         let codes: String = [P::Queued, P::Starting, P::Running, P::Paused, P::Canceling, P::WaitingCatReq,
             P::WaitingMedia, P::WaitingMount, P::Finishing, P::Completed, P::Error].iter().map(|p| p.job_status()).collect();
         assert_eq!(codes, "CCRBARmMRTf");
+    }
+
+    /// job.cc:698/703: only the daemons the job is connected to are contacted.
+    #[test]
+    fn only_connected_daemons_are_canceled() {
+        let (mut w1, mut w2) = (Worker::spawn(), Worker::spawn());
+        let ctx = ctx_with(ApiMode::Human, &[(5, "backup", DirJobPhase::Running, &w1), (6, "other", DirJobPhase::Starting, &w2)]);
+        {
+            let mut manager = ctx.job_manager.as_ref().unwrap().lock().unwrap();
+            // Job 5 waits on the SD (connected to the FD only), job 6 on the FD.
+            manager.set_connections(5, true, false, 'S');
+            manager.set_connections(6, false, false, 'F');
+        }
+        let mut fake = Fake::default();
+        let (result, _) = run("cancel jobid=5", &ctx, &mut fake, &[]);
+        let unique = "backup.2026-10-16_10.00.00_05";
+        assert_eq!(result.text_output, format!(" Handshake: Immediate TLS,\n2001 Job {unique} marked to be canceled.\n"));
+        assert_eq!(fake.calls, vec![("fd", format!("fd1:cancel Job={unique}\n"))]);
+        // JS_WaitFD is no queue state: nothing is printed, no daemon is contacted.
+        let (result, _) = run("cancel jobid=6", &ctx, &mut fake, &[]);
+        assert_eq!((result.text_output.as_str(), fake.calls.len()), ("", 1));
+        assert!(w1.terminated() && w2.terminated());
+        assert_eq!((phase(&ctx, 5), phase(&ctx, 6)), (DirJobPhase::Canceling, DirJobPhase::Canceling));
+    }
+
+    /// job.cc:741 RunScripts(jcr, ..., "AfterJob") after a cancel, once per job;
+    /// not when the File daemon could not be reached.
+    #[test]
+    fn after_job_scripts_run_on_cancel() {
+        let dir = std::env::temp_dir().join(format!("onesimus-c048-cancel-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let log = dir.join("after.log");
+        let _ = std::fs::remove_file(&log);
+        let config = format!("{CONFIG}Job {{ Name = scripted; Client = fd1; Storage = File
+  RunAfterFailedJob = \"/bin/sh -c 'echo %i %e %n %c >> {log}'\"
+  RunAfterJob = \"/bin/sh -c 'echo success >> {log}'\" }}\n", log = log.display());
+        let (w1, w2, w3) = (Worker::spawn(), Worker::spawn(), Worker::spawn());
+        let mut ctx = context(&config, ApiMode::Human);
+        let mut manager = JobManager::new(Arc::new(crate::message_bus::MessageBus::new(10)), None, None);
+        for (id, worker) in [(7, &w1), (8, &w2), (9, &w3)] {
+            let unique = format!("scripted.2026-10-16_10.00.00_0{id}");
+            manager.add_job(id, "scripted", crate::job_worker::JobHandle::detached(worker.0.id() as i32, id, "scripted", &unique));
+            manager.set_phase(id, DirJobPhase::Running);
+            manager.set_job_resources(id, "fd1", "File");
+        }
+        manager.set_phase(8, DirJobPhase::Starting);
+        ctx.job_manager = Some(Arc::new(Mutex::new(manager)));
+        let read = || std::fs::read_to_string(&log).unwrap_or_default();
+        let mut fake = Fake::default();
+        run("cancel jobid=7", &ctx, &mut fake, &[]);
+        assert_eq!(read(), "7 Canceled scripted fd1\n");
+        // Once per job: a second cancel does not run them again.
+        run("cancel jobid=7", &ctx, &mut fake, &[]);
+        // A job still in the queue (JS_Created) runs them as well.
+        let (result, _) = run("cancel jobid=8", &ctx, &mut fake, &[]);
+        assert_eq!(result.text_output, "JobId 8, Job scripted.2026-10-16_10.00.00_08 marked to be canceled.\n");
+        assert_eq!(read(), "7 Canceled scripted fd1\n8 Canceled scripted fd1\n");
+        let mut fake = Fake { fd_down: true, ..Default::default() };
+        run("cancel jobid=9", &ctx, &mut fake, &[]);
+        assert_eq!(read(), "7 Canceled scripted fd1\n8 Canceled scripted fd1\n");
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }
