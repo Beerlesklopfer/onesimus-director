@@ -1,0 +1,38 @@
+{"id": "t001-update-volstatus-bad", "steps": ["update volume=Full-0001 volstatus=Bogus"]}
+{"id": "t001-update-missing-media-first", "steps": ["update volume=t001nosuch volstatus=Bogus maxvoljobs=abc"]}
+{"id": "t001-update-maxvoljobs-word", "steps": ["update volume=Full-0001 maxvoljobs=abc"]}
+{"id": "t001-update-maxvolfiles-junk", "steps": ["update volume=Full-0001 maxvolfiles=12x"]}
+{"id": "t001-update-maxvolbytes-bad", "steps": ["update volume=Full-0001 maxvolbytes=xyz"]}
+{"id": "t001-update-volretention-bad", "steps": ["update volume=Full-0001 volretention=bogus"]}
+{"id": "t001-update-voluse-bad", "steps": ["update volume=Full-0001 voluse=bogus"]}
+{"id": "t001-update-recycle-bad", "steps": ["update volume=Full-0001 recycle=maybe"]}
+{"id": "t001-update-inchanger-bad", "steps": ["update volume=Full-0001 inchanger=maybe"]}
+{"id": "t001-update-slot-negative", "steps": ["update volume=Full-0001 slot=-1"]}
+{"id": "t001-update-slot-maxvols", "steps": ["update volume=Full-0001 slot=101"]}
+{"id": "t001-update-enabled-bad", "steps": ["update volume=Full-0001 enabled=7"]}
+{"id": "t001-update-enabled-word", "steps": ["update volume=Full-0001 enabled=maybe"]}
+{"id": "t001-update-encrypt-bad", "steps": ["update volume=Full-0001 encrypt=bogus", "update volume=Full-0001 encrypt=true"]}
+{"id": "t001-update-encrypt-nokey", "steps": ["update volume=Full-0001 encrypt=no", "update volume=Full-0001 encrypt=Rotate"]}
+{"id": "t001-update-pool-unknown", "steps": ["update volume=Full-0001 pool=t001nosuch", "."]}
+{"id": "t001-update-recyclepool-unknown", "steps": ["update volume=Full-0001 recyclepool=t001nosuch", "."]}
+{"id": "t001-update-allfrompool-unknown", "steps": ["update volume allfrompool=t001nosuch", "."]}
+{"id": "t001-update-pool-resource-unknown", "steps": ["update pool=t001nosuch", "."]}
+{"id": "t001-update-two-errors", "steps": ["update volume=Full-0001 volstatus=Bogus maxvolbytes=xyz"]}
+{"id": "t001-dialog-status-cancel", "steps": ["update volume=Full-0001", "1", "."]}
+{"id": "t001-dialog-retention-bad", "steps": ["update volume=Full-0001", "2", "bogus", "."]}
+{"id": "t001-dialog-use-bad", "steps": ["update volume=Full-0001", "3", "bogus", "."]}
+{"id": "t001-dialog-maxjobs-bad", "steps": ["update volume=Full-0001", "4", "abc", "."]}
+{"id": "t001-dialog-maxfiles-bad", "steps": ["update volume=Full-0001", "5", "-3", "."]}
+{"id": "t001-dialog-maxbytes-bad", "steps": ["update volume=Full-0001", "6", "xyz", "."]}
+{"id": "t001-dialog-recycle-bad", "steps": ["update volume=Full-0001", "7", "maybe", "."]}
+{"id": "t001-dialog-slot-bad", "steps": ["update volume=Full-0001", "8", "500", "."]}
+{"id": "t001-dialog-inchanger-bad", "steps": ["update volume=Full-0001", "9", "maybe", "."]}
+{"id": "t001-dialog-volfiles-decline", "steps": ["update volume=Full-0001", "10", "5", "no", "."]}
+{"id": "t001-dialog-pool-unknown", "steps": ["update volume=Full-0001", "11", "t001nosuch", "."]}
+{"id": "t001-dialog-enabled-bad", "steps": ["update volume=Full-0001", "15", "7", "."]}
+{"id": "t001-dialog-recyclepool-cancel", "steps": ["update volume=Full-0001", "16", "."]}
+{"id": "t001-relabel-not-purged", "steps": ["relabel storage=File oldvolume=Full-0001 volume=t001new"]}
+{"id": "t001-relabel-old-unknown-cancel", "steps": ["relabel storage=File oldvolume=t001nosuch volume=t001new", "."]}
+{"id": "t001-label-existing-cancel", "steps": ["label storage=File volume=Full-0001", "."]}
+{"id": "t001-label-illegal-arg-cancel", "steps": ["label storage=File volume=/ab", "."]}
+{"id": "t001-label-illegal-char-cancel", "steps": ["label storage=File volume=a!b", "."]}

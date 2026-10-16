@@ -849,6 +849,20 @@ pub fn select_pool_dbr(ua: &mut Ua, ast: &CommandAst, argk: &str) -> Option<Stri
     Some(name)
 }
 
+/// C++ GetPoolDbr(ua, pr, argk) (ua_select.cc:704) with `name` filled in:
+/// the catalog pool (Pool ACL), otherwise "Could not find Pool" and
+/// SelectPoolDbr. An empty `name` goes straight to SelectPoolDbr.
+pub fn get_pool_dbr(ua: &mut Ua, ast: &CommandAst, name: &str, argk: &str) -> Option<String> {
+    if !name.is_empty() {
+        match get_pool_record(ua.ctx, name) {
+            Ok(_) if acl::access(ua.ctx, Kind::Pool, name) => return Some(name.to_string()),
+            Ok(_) => ua.error_msg(format!("Could not find Pool \"{name}\": ERR=")),
+            Err(error) => ua.error_msg(format!("Could not find Pool \"{name}\": ERR={error}")),
+        }
+    }
+    select_pool_dbr(ua, ast, argk)
+}
+
 /// C++ GetStorageRecord() by name: the StorageId, if there is exactly one.
 fn get_storage_record(ctx: &ExecContext, name: &str) -> Option<i64> {
     let ids = catalog_column(ctx, &format!("SELECT StorageId FROM Storage WHERE Storage.Name='{}'", sql_escape(name)))?;

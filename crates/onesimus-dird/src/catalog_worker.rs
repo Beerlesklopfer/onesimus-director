@@ -84,6 +84,10 @@ pub enum CatalogRequest {
     ResolveId { table: String, name: String },
     /// Get since_utime for incremental/differential backup.
     SinceUtime { client_name: String, job_name: String, fileset_name: String, level: String },
+    /// Parse and analyse one statement without executing it (extended
+    /// protocol Parse/Describe); CatalogResponse::Ok(0) or the libpq
+    /// PQerrorMessage text of the parse/analysis error.
+    Prepare { sql: String },
     /// Ping / health check.
     Ping,
     /// Reserve one pooled connection for a sequence of statements (C++
@@ -304,6 +308,16 @@ impl CatalogHandle {
         }
     }
 
+    /// Parse one statement without running it: Ok or the PQerrorMessage
+    /// text the C++ catalog would report for it (positions relative to `sql`).
+    pub fn check_statement(&self, sql: &str) -> Result<(), String> {
+        match self.request(CatalogRequest::Prepare { sql: sql.to_string() })? {
+            CatalogResponse::Ok(_) => Ok(()),
+            CatalogResponse::Error(e) => Err(e),
+            other => Err(format!("unexpected response: {:?}", resp_debug(&other))),
+        }
+    }
+
     /// Health check.
     pub fn ping(&self) -> bool {
         matches!(self.request(CatalogRequest::Ping), Ok(CatalogResponse::Pong))
@@ -440,6 +454,7 @@ pub fn spawn_catalog_worker(
                             handle_resolve_id(&pool, &table, &name).await,
                         CatalogRequest::SinceUtime { client_name, job_name, fileset_name, level } =>
                             handle_since_utime(&pool, &client_name, &job_name, &fileset_name, &level).await,
+                        CatalogRequest::Prepare { sql } => handle_prepare(&pool, &sql).await,
                         CatalogRequest::Ping => CatalogResponse::Pong,
                         CatalogRequest::Dedicated { ops } => {
                             // Serve the statements in a task so other requests
@@ -504,6 +519,15 @@ async fn handle_raw_query(pool: &sqlx::PgPool, sql: &str) -> CatalogResponse {
     }
 
     CatalogResponse::Text(output)
+}
+
+/// Parse/Describe only: the statement is never executed.
+async fn handle_prepare(pool: &sqlx::PgPool, sql: &str) -> CatalogResponse {
+    use sqlx::Executor;
+    match pool.prepare(sql).await {
+        Ok(_) => CatalogResponse::Ok(0),
+        Err(e) => CatalogResponse::Error(pq_error_message(pool, sql, &e).await),
+    }
 }
 
 /// Simple query protocol: PostgreSQL sends every value in text format, exactly
