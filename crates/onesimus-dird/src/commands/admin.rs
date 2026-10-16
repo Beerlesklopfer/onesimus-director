@@ -1736,11 +1736,13 @@ fn truncate_with(
     // ua->GetStoreResWithId(mr.StorageId)->Protocol: upstream dereferences
     // the resource unchecked (a missing one crashes the Director); here the
     // command ends instead.
-    let Some(_store) = truncate_record_name(db, "Storage", first.storage_id)
+    let Some(store) = truncate_record_name(db, "Storage", first.storage_id)
         .and_then(|name| truncate_store(ctx, &name)) else { return ua.finish(false) };
-    // TODO(C-050): Storage Protocol; every storage is native until the
-    // configuration carries it (otherwise WarningMsg "Storage uses a
-    // non-native protocol. Truncate is only supported for native protocols.\n").
+    // Protocol != APT_NATIVE (ua_cmds.cc:2115, C-050).
+    if store.protocol.is_ndmp() {
+        ua.warning_msg("Storage uses a non-native protocol. Truncate is only supported for native protocols.\n");
+        return ua.finish(false);
+    }
     // GetConfirmation (ua_input.cc:165, ua_cmds.cc:2120): `yes`, otherwise
     // the console is asked; API and batch sessions decline silently.
     if !ua.get_confirmation(ast, "Truncate listed volumes (yes/no)? ", false) {
