@@ -7,6 +7,7 @@ mod accept;
 mod acl;
 mod audit;
 mod catalog_worker;
+mod check_catalog;
 mod catreq;
 mod command_ast;
 mod console_msg;
@@ -398,6 +399,10 @@ fn main() {
     let catalog = catalog_handle.as_ref().map(|(h, _)| h.clone());
     if let Some(catalog) = &catalog {
         ovfs::register_for_reload(catalog.clone());
+    }
+    // CheckCatalog(): basic Client/Storage/MediaType records.
+    if let Some(cat) = &catalog {
+        check_catalog::ensure_basic_records(&config, cat);
     }
 
     let port = config.director.port;
