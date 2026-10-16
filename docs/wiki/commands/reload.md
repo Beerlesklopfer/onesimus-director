@@ -11,7 +11,9 @@ Referenz: [WIP/25.1.2-pre-43-g18be77e68, `18be77e6832e`](https://github.com/bare
 
 **RunScript erlaubt:** ja. **Audit-Ereignis:** ja. Beide Flags sind keine Read-only-Klassifizierung.
 
-**Onesimus-Status:** `registered_unverified`. Funktionsparität ist nicht durch einen Live-Test nachgewiesen.
+**Onesimus-Status:** `registered_unverified`. Funktionsparität ist nicht durch einen Paritätsfall nachgewiesen.
+
+- Kein Paritätsfall (Reload ändert die laufende Konfiguration beider Directors).
 
 **Lokaler Handler:** [crates/onesimus-dird/src/commands/admin.rs:1450](../../../crates/onesimus-dird/src/commands/admin.rs).
 

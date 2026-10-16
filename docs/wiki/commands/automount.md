@@ -15,9 +15,11 @@ automount on | off
 
 **RunScript erlaubt:** nein. **Audit-Ereignis:** ja. Beide Flags sind keine Read-only-Klassifizierung.
 
-**Onesimus-Status:** `stub`. Funktionsparität ist nicht durch einen Live-Test nachgewiesen.
+**Onesimus-Status:** `parity_verified`. Alle unten genannten Paritätsfälle antworten byte-identisch zum Original; nicht genannte Varianten sind damit nicht belegt.
 
-- Der Handler bestätigt on/off per Text; im BNET-Sessionloop wird kein automount-Zustand gesetzt.
+- Paritätslauf 16.10.2026 (`development` `7993ce6`): 14 von 14 Fällen byte-identisch; Modi: Text, API 1, API 2, GUI.
+
+**Paritätsfälle (14):** `c005-automount-off`, `c005-automount-foo`, `c005-automount-upper`, `c005-automount-noarg`, `c005-automount-noarg-dot`, `c005-automount-twoargs`, `c005-automount-on-api1`, `c005-automount-noarg-api1`, `c005-automount-on-api2`, `c005-automount-noarg-api2`, `c005-automount-prompt-then-command`, `c036-getcmd-dot-messages`, `c036-getcmd-dot-messages-autodisplay`, `automount`.
 
 **Lokaler Handler:** [crates/onesimus-dird/src/commands/extra.rs:58](../../../crates/onesimus-dird/src/commands/extra.rs).
 

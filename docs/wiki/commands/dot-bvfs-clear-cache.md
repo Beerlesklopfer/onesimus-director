@@ -15,9 +15,12 @@ Referenz: [WIP/25.1.2-pre-43-g18be77e68, `18be77e6832e`](https://github.com/bare
 
 **RunScript erlaubt:** nein. **Audit-Ereignis:** ja. Beide Flags sind keine Read-only-Klassifizierung.
 
-**Onesimus-Status:** `stub`. Funktionsparität ist nicht durch einen Live-Test nachgewiesen.
+**Onesimus-Status:** `partial`. Paritätsfälle vorhanden, vollständige Funktionsparität aber nicht nachgewiesen (siehe Befunde).
 
-- Der Handler bestätigt die Cache-Operation lediglich per Text; keine BVFS-Katalogoperation wird ausgeführt.
+- Paritätslauf 16.10.2026 (`development` `7993ce6`): 3 von 3 Fällen byte-identisch; Modi: Text, API 1, API 2.
+- Verglichen sind Ausgaben ohne `yes`; `.bvfs_clear_cache yes` ändert den Katalog und ist nur durch Einheitentests belegt.
+
+**Paritätsfälle (3):** `c022-clear-cache-noyes`, `c035-bvfs-clear-cache-api1`, `c035-bvfs-clear-cache-api2`.
 
 **Lokaler Handler:** [crates/onesimus-dird/src/commands/bvfs.rs:839](../../../crates/onesimus-dird/src/commands/bvfs.rs).
 

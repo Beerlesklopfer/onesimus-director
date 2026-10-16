@@ -15,7 +15,16 @@ delete [volume=<vol-name> [yes] | volume pool=<pool-name> [yes] | storage storag
 
 **RunScript erlaubt:** ja. **Audit-Ereignis:** ja. Beide Flags sind keine Read-only-Klassifizierung.
 
-**Onesimus-Status:** `registered_unverified`. Funktionsparität ist nicht durch einen Live-Test nachgewiesen.
+**Onesimus-Status:** `partial`. Paritätsfälle vorhanden, vollständige Funktionsparität aber nicht nachgewiesen (siehe Befunde).
+
+- Paritätslauf 16.10.2026 (`development` `7993ce6`): 15 von 16 Fällen byte-identisch; Modi: Text, API 1, API 2.
+- Abweichende Fälle: `c035-delete-noarg-api2`.
+- `.api 2`: Original liefert `"deleted": {}`, Onesimus ein leeres Ergebnis (C-046, Fall `c035-delete-noarg-api2`).
+- Löschen von Volume/Pool/Job wird nur über Dialog- und Abbruchpfade verglichen; die Katalogwirkung ist nur durch Einheitentests belegt.
+
+**Offene Logeinträge:** `C-046` ([Kompatibilitätslog](../../COMPATIBILITY-LOG.md)).
+
+**Paritätsfälle (16):** `c011-delete-cancel`, `c011-delete-volume-cancel`, `c011-delete-menu-pool-cancel`, `c011-delete-menu-jobid-cancel`, `c011-delete-jobid-cancel`, `c011-delete-pool-cancel`, `c011-delete-volume-pool-cancel`, `c011-delete-volume-unknown`, `c011-delete-volume-star-unknown`, `c011-delete-volname-unknown`, `c011-delete-storage-empty`, `c011-delete-api1-cancel`, `c012-delete-illegal-jobid`, `c035-delete-noarg-api1`, `c035-delete-noarg-api2`, `delete-dialog`.
 
 **Lokaler Handler:** [crates/onesimus-dird/src/commands/extra.rs:657](../../../crates/onesimus-dird/src/commands/extra.rs).
 

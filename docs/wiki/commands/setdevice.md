@@ -15,9 +15,14 @@ setdevice storage=<storage-name> device=<device-name> autoselect=<bool>
 
 **RunScript erlaubt:** ja. **Audit-Ereignis:** ja. Beide Flags sind keine Read-only-Klassifizierung.
 
-**Onesimus-Status:** `partial`. Funktionsparität ist nicht durch einen Live-Test nachgewiesen.
+**Onesimus-Status:** `partial`. Paritätsfälle vorhanden, vollständige Funktionsparität aber nicht nachgewiesen (siehe Befunde).
 
-- storage/device/autoselect werden jetzt validiert und als echter setdevice-Befehl an den SD gesendet; dessen Antwort wird weitergereicht. Protokoll- und Fehlerpfadtests bestehen. Storage-ACL-Abgleich und Live-SHA-256-Parität bleiben offen.
+- Paritätslauf 16.10.2026 (`development` `7993ce6`): 23 von 23 Fällen byte-identisch; Modi: Text, API 1, API 2, Konsolen parity-device, parity-limited.
+- NDMP-Storages werden nicht übersprungen (C-050). Verglichen sind ACL, Argumentprüfung und SD-Antwort auf dem Fixture-Storage.
+
+**Offene Logeinträge:** `C-050` ([Kompatibilitätslog](../../COMPATIBILITY-LOG.md)).
+
+**Paritätsfälle (23):** `c006-setdevice-noargs-api2`, `c006-setdevice-wrongarg`, `c006-setdevice-nostorage`, `c006-setdevice-badbool`, `c031-setdevice-forbidden`, `c031-setdevice-forbidden-unknown`, `c031-setdevice-forbidden-api1`, `c031-setdevice-forbidden-api2`, `c031-setdevice-permitted-nodev`, `c031-setdevice-permitted-nodev-api2`, `c031-setdevice-limited-nocmd`, `c031-setdevice-nodev`, `c031-setdevice-nodev-api1`, `c031-setdevice-nodev-api2`, `c031-setdevice-nostorage-api2`, `c031-setdevice-autoselect-upper`, `c031-setdevice-autoselect-on`, `c031-setdevice-key-upper`, `c031-setdevice-key-novalue`, `c031-setdevice-empty-value`, `c031-setdevice-missing-two`, `c031-setdevice-wrongarg-api2`, `setdevice-noargs`.
 
 **Lokaler Handler:** [crates/onesimus-dird/src/commands/extra.rs:321](../../../crates/onesimus-dird/src/commands/extra.rs).
 

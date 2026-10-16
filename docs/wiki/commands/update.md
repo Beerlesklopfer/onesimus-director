@@ -15,7 +15,14 @@ update [volume=<volume-name> [volstatus=<status>] [volretention=<time-def>] [act
 
 **RunScript erlaubt:** ja. **Audit-Ereignis:** ja. Beide Flags sind keine Read-only-Klassifizierung.
 
-**Onesimus-Status:** `registered_unverified`. Funktionsparität ist nicht durch einen Live-Test nachgewiesen.
+**Onesimus-Status:** `partial`. Paritätsfälle vorhanden, vollständige Funktionsparität aber nicht nachgewiesen (siehe Befunde).
+
+- Paritätslauf 16.10.2026 (`development` `7993ce6`): 47 von 47 Fällen byte-identisch; Modi: Text, API 1.
+- `update slots` meldet „not supported“ (C-054). Volume-/Pool-Parameter sind verglichen, `update stats` und Autochanger-Pfade nicht vollständig.
+
+**Offene Logeinträge:** `C-054` ([Kompatibilitätslog](../../COMPATIBILITY-LOG.md)).
+
+**Paritätsfälle (47):** `c011-update-cancel`, `c011-update-volume-cancel`, `c011-update-pool-cancel`, `c011-update-stats-cancel`, `c011-update-volume-done`, `c011-update-volume-status-cancel`, `c011-update-volume-badnumber-cancel`, `c011-update-pool-select-cancel`, `c011-update-volume-unknown`, `c011-update-slots`, `c011-update-jobid-missing`, `c011-update-api1-cancel`, `c012-update-bad-volstatus`, `update-dialog`, `t001-update-volstatus-bad`, `t001-update-missing-media-first`, `t001-update-maxvoljobs-word`, `t001-update-maxvolfiles-junk`, `t001-update-maxvolbytes-bad`, `t001-update-volretention-bad`, `t001-update-voluse-bad`, `t001-update-recycle-bad`, `t001-update-inchanger-bad`, `t001-update-slot-negative`, `t001-update-slot-maxvols`, `t001-update-enabled-bad`, `t001-update-enabled-word`, `t001-update-encrypt-bad`, `t001-update-encrypt-nokey`, `t001-update-pool-unknown`, `t001-update-recyclepool-unknown`, `t001-update-allfrompool-unknown`, `t001-update-pool-resource-unknown`, `t001-update-two-errors`, `t001-dialog-status-cancel`, `t001-dialog-retention-bad`, `t001-dialog-use-bad`, `t001-dialog-maxjobs-bad`, `t001-dialog-maxfiles-bad`, `t001-dialog-maxbytes-bad`, `t001-dialog-recycle-bad`, `t001-dialog-slot-bad`, `t001-dialog-inchanger-bad`, `t001-dialog-volfiles-decline`, `t001-dialog-pool-unknown`, `t001-dialog-enabled-bad`, `t001-dialog-recyclepool-cancel`.
 
 **Lokaler Handler:** [crates/onesimus-dird/src/commands/admin.rs:199](../../../crates/onesimus-dird/src/commands/admin.rs).
 

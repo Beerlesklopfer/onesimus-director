@@ -15,7 +15,12 @@ prune files [client=<client>] [pool=<pool>] [yes] | jobs [client=<client>] [pool
 
 **RunScript erlaubt:** ja. **Audit-Ereignis:** ja. Beide Flags sind keine Read-only-Klassifizierung.
 
-**Onesimus-Status:** `registered_unverified`. Funktionsparität ist nicht durch einen Live-Test nachgewiesen.
+**Onesimus-Status:** `partial`. Paritätsfälle vorhanden, vollständige Funktionsparität aber nicht nachgewiesen (siehe Befunde).
+
+- Paritätslauf 16.10.2026 (`development` `7993ce6`): 35 von 35 Fällen byte-identisch; Modi: Text, API 1, API 2, Konsolen parity-c030-client, parity-c030-job, parity-c030-pool, parity-c030-storage.
+- Verglichen sind Dialoge, ACL-Prüfungen (C-030) und Bestätigungstexte auf der Katalogkopie; der Katalogzustand nach dem Prunen wird nicht verglichen.
+
+**Paritätsfälle (35):** `c011-prune-cancel`, `c011-prune-api1-cancel`, `c011-prune-files-cancel`, `c011-prune-volume-cancel`, `c011-prune-jobs-cancel`, `c011-prune-jobs-mod-no`, `c011-prune-stats-cancel`, `c011-prune-volume-select-cancel`, `c011-prune-volume-unknown`, `c011-prune-directory-cancel`, `c012-prune-jobs-confirm`, `c030-prune-job`, `c030-prune-storage`, `c030-prune-client`, `c030-prune-pool`, `c030-prune-volume-client`, `c030-prune-stats-client`, `c030-prune-stats-pool`, `c030-prune-directory-pool`, `c030-prune-directory-client-cancel`, `c030-prune-files-pool-cancel`, `c030-prune-jobs-pool-cancel`, `c030-prune-volume-pool-cancel`, `c030-prune-job-api1`, `c030-prune-storage-api2`, `c030-prune-volume-pool-report`, `c030-prune-volume-all-no`, `c030-prune-volume-all-pool-no`, `c030-prune-volume-wrong-pool-no`, `c030-prune-volume-invalid-name`, `c030-prune-files-no`, `c030-prune-files-pool-no`, `c030-prune-directory-client-no-path`, `c030-prune-volume-pool-api1`, `prune-dialog`.
 
 **Lokaler Handler:** [crates/onesimus-dird/src/commands/admin.rs:739](../../../crates/onesimus-dird/src/commands/admin.rs).
 

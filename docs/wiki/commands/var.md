@@ -11,9 +11,12 @@ Referenz: [WIP/25.1.2-pre-43-g18be77e68, `18be77e6832e`](https://github.com/bare
 
 **RunScript erlaubt:** nein. **Audit-Ereignis:** ja. Beide Flags sind keine Read-only-Klassifizierung.
 
-**Onesimus-Status:** `stub`. Funktionsparität ist nicht durch einen Live-Test nachgewiesen.
+**Onesimus-Status:** `parity_verified`. Alle unten genannten Paritätsfälle antworten byte-identisch zum Original; nicht genannte Varianten sind damit nicht belegt.
 
-- Der Handler gibt Variable <name>: undefined zurück; Bareos-Variablenexpansion fehlt.
+- Paritätslauf 16.10.2026 (`development` `7993ce6`): 16 von 16 Fällen byte-identisch; Modi: Text, API 2, Konsolen parity-limited, parity-operator.
+- Nacktes `var` gibt im Original undefinierte Speicherreste aus; der Fall `var` prüft deshalb nur die Katalogzeilen davor.
+
+**Paritätsfälle (16):** `c023-var-blank`, `c023-var-date`, `c023-var-job`, `c023-var-jobname`, `c023-var-undefined`, `c023-var-env`, `c023-var-ops`, `c023-var-errors`, `c023-var-escapes`, `c023-var-loops`, `c023-var-catalog-arg`, `c023-var-api2`, `c023-use-var`, `c023-limited`, `c023-operator`, `var`.
 
 **Lokaler Handler:** [crates/onesimus-dird/src/commands/extra.rs:199](../../../crates/onesimus-dird/src/commands/extra.rs).
 

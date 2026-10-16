@@ -15,9 +15,14 @@ setdebug level=<nn> trace=0/1 timestamp=0/1 client=<client-name> | dir | storage
 
 **RunScript erlaubt:** ja. **Audit-Ereignis:** ja. Beide Flags sind keine Read-only-Klassifizierung.
 
-**Onesimus-Status:** `partial`. Funktionsparität ist nicht durch einen Live-Test nachgewiesen.
+**Onesimus-Status:** `partial`. Paritätsfälle vorhanden, vollständige Funktionsparität aber nicht nachgewiesen (siehe Befunde).
 
-- Director/Client/Storage/all werden jetzt gesteuert; all dedupliziert gleiche Endpunkte. trace/timestamp beeinflussen lokale Diagnoseausgabe bzw. Original-FD/SD-Pakete; ältere FD-Versionen erhalten kein timestamp-Feld. Der lokale tracing-Filter wird tatsächlich neu geladen; Verbindungsfehler werden nicht als Erfolg bestätigt. Dialogauswahl ohne Ziel, NDMP, ACL-Abgleich und Live-SHA-256-Parität bleiben offen.
+- Paritätslauf 16.10.2026 (`development` `7993ce6`): 7 von 7 Fällen byte-identisch; Modi: Text, API 1.
+- Verglichen sind nur Dialog/Abbruch und `setdebug level=0 dir`; Debug-Pegel an echte FD/SD sind laut Testregeln nicht live erlaubt und nur durch Einheitentests belegt (NDMP: C-050).
+
+**Offene Logeinträge:** `C-050` ([Kompatibilitätslog](../../COMPATIBILITY-LOG.md)).
+
+**Paritätsfälle (7):** `c011-setdebug-cancel`, `c011-setdebug-badlevel-cancel`, `c011-setdebug-daemon-cancel`, `c011-setdebug-daemon-api1-cancel`, `c011-setdebug-daemon-badnumber`, `setdebug-dir`, `setdebug-noargs`.
 
 **Lokaler Handler:** [crates/onesimus-dird/src/commands/debug.rs:33](../../../crates/onesimus-dird/src/commands/debug.rs).
 

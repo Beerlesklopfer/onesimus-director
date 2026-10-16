@@ -15,9 +15,15 @@ restore where=</path> client=<client-name> storage=<storage-name> bootstrap=<fil
 
 **RunScript erlaubt:** nein. **Audit-Ereignis:** ja. Beide Flags sind keine Read-only-Klassifizierung.
 
-**Onesimus-Status:** `partial`. Funktionsparität ist nicht durch einen Live-Test nachgewiesen.
+**Onesimus-Status:** `partial`. Paritätsfälle vorhanden, vollständige Funktionsparität aber nicht nachgewiesen (siehe Befunde).
 
-- Der Handler erzeugt Bootstrap für einen Job und startet direkt einen Restore-Worker. Interaktive Dateiauswahl fehlt; storage wird nicht als Override ausgewertet (erste konfigurierte Storage wird benutzt), viele Originaloptionen wie restoreclient/fileregex fehlen.
+- Paritätslauf 16.10.2026 (`development` `7993ce6`): 28 von 28 Fällen byte-identisch; Modi: Text, API 1, API 2, Konsolen parity-limited.
+- Menüpunkte 1, 2, 4–12, Dateibaum-Auswahl, mehrere JobIds und regexwhere fehlen (C-047).
+- Verglichen sind Argumentbehandlung und Abbruchpfade; ein echter Restore läuft im Paritätslauf nicht.
+
+**Offene Logeinträge:** `C-047`, `C-051` ([Kompatibilitätslog](../../COMPATIBILITY-LOG.md)).
+
+**Paritätsfälle (28):** `c012-restore-menu`, `c021-unknown-keyword`, `c021-unknown-backupformat`, `c021-unknown-keyword-json`, `c021-missing-jobid-value`, `c021-missing-file-value`, `c021-jobid-not-a-number`, `c021-jobid-list-invalid`, `c021-jobid-unknown`, `c021-jobid-zero`, `c021-two-dates`, `c021-before-short-date`, `c021-before-garbage`, `c021-pool-unknown`, `c021-fileregex-invalid`, `c021-comment-illegal`, `c021-comment-empty`, `c021-client-unknown`, `c021-client-invalid-name`, `c021-limited-console`, `c021-cancel-menu`, `c021-cancel-menu-client`, `restore-help`, `w011-restore-item-cancel`, `w011-restore-badnumber-cancel`, `w011-restore-jobids-cancel`, `w011-restore-api1-cancel`, `w011-restore-api2`.
 
 **Lokaler Handler:** [crates/onesimus-dird/src/commands/restore.rs:73](../../../crates/onesimus-dird/src/commands/restore.rs).
 

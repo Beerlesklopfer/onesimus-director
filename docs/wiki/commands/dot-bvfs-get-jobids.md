@@ -15,9 +15,11 @@ Referenz: [WIP/25.1.2-pre-43-g18be77e68, `18be77e6832e`](https://github.com/bare
 
 **RunScript erlaubt:** ja. **Audit-Ereignis:** ja. Beide Flags sind keine Read-only-Klassifizierung.
 
-**Onesimus-Status:** `stub`. Funktionsparität ist nicht durch einen Live-Test nachgewiesen.
+**Onesimus-Status:** `parity_verified`. Alle unten genannten Paritätsfälle antworten byte-identisch zum Original; nicht genannte Varianten sind damit nicht belegt.
 
-- jobid wird lediglich zurückgegeben, ujobid als Text ausgegeben; erforderliche Full-/Differential-/Incremental-Jobketten werden nicht aus dem Katalog ermittelt.
+- Paritätslauf 16.10.2026 (`development` `7993ce6`): 7 von 7 Fällen byte-identisch; Modi: Text, API 2, Konsolen parity-bvfs.
+
+**Paritätsfälle (7):** `c022-get-jobids`, `c022-get-jobids-all`, `c022-get-jobids-ujobid`, `c022-get-jobids-errors`, `c022-get-jobids-api2`, `c022-acl-limited`, `bvfs-get-jobids`.
 
 **Lokaler Handler:** [crates/onesimus-dird/src/commands/bvfs.rs:978](../../../crates/onesimus-dird/src/commands/bvfs.rs).
 

@@ -15,7 +15,12 @@ create pool=<pool-name>
 
 **RunScript erlaubt:** nein. **Audit-Ereignis:** ja. Beide Flags sind keine Read-only-Klassifizierung.
 
-**Onesimus-Status:** `registered_unverified`. Funktionsparität ist nicht durch einen Live-Test nachgewiesen.
+**Onesimus-Status:** `partial`. Paritätsfälle vorhanden, vollständige Funktionsparität aber nicht nachgewiesen (siehe Befunde).
+
+- Paritätslauf 16.10.2026 (`development` `7993ce6`): 4 von 4 Fällen byte-identisch; Modi: Text.
+- Verglichen sind Dialog und unbekannter Pool; das Anlegen eines Pools im Katalog ist nicht verglichen.
+
+**Paritätsfälle (4):** `c011-create-cancel`, `c011-create-unknown-cancel`, `c012-create-unknown-pool`, `create-noargs`.
 
 **Lokaler Handler:** [crates/onesimus-dird/src/commands/extra.rs:813](../../../crates/onesimus-dird/src/commands/extra.rs).
 

@@ -15,7 +15,14 @@ relabel storage=<storage-name> oldvolume=<old-volume-name>  volume=<new-volume-n
 
 **RunScript erlaubt:** nein. **Audit-Ereignis:** ja. Beide Flags sind keine Read-only-Klassifizierung.
 
-**Onesimus-Status:** `registered_unverified`. Funktionsparität ist nicht durch einen Live-Test nachgewiesen.
+**Onesimus-Status:** `partial`. Paritätsfälle vorhanden, vollständige Funktionsparität aber nicht nachgewiesen (siehe Befunde).
+
+- Paritätslauf 16.10.2026 (`development` `7993ce6`): 8 von 8 Fällen byte-identisch; Modi: Text.
+- Verglichen sind Dialog- und Abbruchpfade; Relabel über den SD ist nur durch Einheitentests belegt (Antwortauswertung siehe C-053).
+
+**Offene Logeinträge:** `C-053` ([Kompatibilitätslog](../../COMPATIBILITY-LOG.md)).
+
+**Paritätsfälle (8):** `c011-relabel-cancel`, `c011-relabel-pool-cancel`, `c011-relabel-status`, `c011-relabel-unknown-cancel`, `c012-relabel-unknown-old`, `relabel-noargs`, `t001-relabel-not-purged`, `t001-relabel-old-unknown-cancel`.
 
 **Lokaler Handler:** [crates/onesimus-dird/src/commands/extra.rs:631](../../../crates/onesimus-dird/src/commands/extra.rs).
 

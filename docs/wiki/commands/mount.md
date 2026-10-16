@@ -15,7 +15,14 @@ mount storage=<storage-name> slot=<num> drive=<drivenum> jobid=<jobid> | job=<jo
 
 **RunScript erlaubt:** nein. **Audit-Ereignis:** ja. Beide Flags sind keine Read-only-Klassifizierung.
 
-**Onesimus-Status:** `registered_unverified`. Funktionsparität ist nicht durch einen Live-Test nachgewiesen.
+**Onesimus-Status:** `partial`. Paritätsfälle vorhanden, vollständige Funktionsparität aber nicht nachgewiesen (siehe Befunde).
+
+- Paritätslauf 16.10.2026 (`development` `7993ce6`): 16 von 16 Fällen byte-identisch; Modi: Text.
+- Autochanger-Slots und NDMP fehlen bzw. sind ungeprüft (C-045/C-050 Umfeld); verglichen sind Auswahl und Fehlerpfade am File-Storage.
+
+**Offene Logeinträge:** `C-050` ([Kompatibilitätslog](../../COMPATIBILITY-LOG.md)).
+
+**Paritätsfälle (16):** `c013-mount-auto`, `c013-mount-positional`, `c013-mount-storage`, `c013-mount-sd-drive`, `c013-mount-slot`, `c013-mount-twice`, `c013-mount-question`, `c013-mount-notfound`, `c013-mount-bare-storage`, `c013-mount-jobid-bad`, `c013-mount-jobid-notrunning`, `c013-mount-job-notrunning`, `c013-mount-job-novalue`, `c013-mount-ujobid-notrunning`, `c013-release-then-mount`, `mount-dialog`.
 
 **Lokaler Handler:** [crates/onesimus-dird/src/commands/admin.rs:171](../../../crates/onesimus-dird/src/commands/admin.rs).
 

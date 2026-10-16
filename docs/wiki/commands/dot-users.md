@@ -11,9 +11,11 @@ Referenz: [WIP/25.1.2-pre-43-g18be77e68, `18be77e6832e`](https://github.com/bare
 
 **RunScript erlaubt:** ja. **Audit-Ereignis:** nein. Beide Flags sind keine Read-only-Klassifizierung.
 
-**Onesimus-Status:** `registered_unverified`. Funktionsparität ist nicht durch einen Live-Test nachgewiesen.
+**Onesimus-Status:** `parity_verified`. Alle unten genannten Paritätsfälle antworten byte-identisch zum Original; nicht genannte Varianten sind damit nicht belegt.
 
-- User-Ressourcen werden jetzt aus der rohen Konfiguration getrennt von Console-Ressourcen gelesen; Text/JSON und Reihenfolge sind durch Regressionstests geprüft. Der Live-SHA-256-Abgleich bleibt offen.
+- Paritätslauf 16.10.2026 (`development` `7993ce6`): 9 von 9 Fällen byte-identisch; Modi: Text, API 2, Konsolen parity-acl, parity-bvfs, parity-limited, parity-operator.
+
+**Paritätsfälle (9):** `c025-users-limited`, `c025-users-limited-api2`, `c025-users-operator`, `c025-users-operator-api2`, `c025-users-bvfs`, `c025-users-bvfs-api2`, `c025-users-acl`, `c025-users-acl-api2`, `dot_users`.
 
 **Lokaler Handler:** [crates/onesimus-dird/src/commands/dot.rs:383](../../../crates/onesimus-dird/src/commands/dot.rs).
 

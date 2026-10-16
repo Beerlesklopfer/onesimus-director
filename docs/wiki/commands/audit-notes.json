@@ -1,269 +1,2394 @@
 {
   "schema_version": 1,
-  "method": "Manual static review. Status applies to the current handler and is not a live compatibility certification.",
+  "method": "Evidence-based: parity cases tests/parity/cases/*.jsonl mapped to the commands they exercise (first word resolved like Bareos, dialog answers excluded), results of the full parity run named in parity_evidence, and open entries of docs/COMPATIBILITY-LOG.md. parity_verified = every listed case byte-identical and no open log entry or known uncovered side effect; partial = cases exist but open entries, differing cases, uncovered variants or unit-test-only side effects are named; registered_unverified = handler without parity case; missing_context = restore file-selection shell absent.",
   "commands": {
-    ".bvfs_update": {
-      "status": "stub",
+    ".": {
+      "status": "parity_verified",
       "findings": [
-        "Der Handler bestätigt die Cache-Operation lediglich per Text; keine BVFS-Katalogoperation wird ausgeführt."
+        "Paritätslauf 16.10.2026 (`development` `7993ce6`): 3 von 3 Fällen byte-identisch; Modi: Text."
+      ],
+      "parity_cases": [
+        "c007-lone-dot",
+        "c007-dot-with-args",
+        "dot-noop"
       ]
     },
-    ".bvfs_cleanup": {
-      "status": "stub",
+    ".actiononpurge": {
+      "status": "parity_verified",
       "findings": [
-        "Der Handler bestätigt die Cache-Operation lediglich per Text; keine BVFS-Katalogoperation wird ausgeführt."
+        "Paritätslauf 16.10.2026 (`development` `7993ce6`): 2 von 2 Fällen byte-identisch; Modi: Text, API 2."
+      ],
+      "parity_cases": [
+        "c029-actiononpurge-api2",
+        "dot_actiononpurge"
       ]
     },
-    ".bvfs_clear_cache": {
-      "status": "stub",
+    ".api": {
+      "status": "parity_verified",
       "findings": [
-        "Der Handler bestätigt die Cache-Operation lediglich per Text; keine BVFS-Katalogoperation wird ausgeführt."
-      ]
-    },
-    ".bvfs_lsdirs": {
-      "status": "stub",
-      "findings": [
-        "Der Handler gibt die übergebenen Suchparameter als Text zurück; er liest keine Verzeichnis-, Datei- oder Versionsdaten aus dem Katalog."
-      ]
-    },
-    ".bvfs_lsfiles": {
-      "status": "stub",
-      "findings": [
-        "Der Handler gibt die übergebenen Suchparameter als Text zurück; er liest keine Verzeichnis-, Datei- oder Versionsdaten aus dem Katalog."
-      ]
-    },
-    ".bvfs_versions": {
-      "status": "stub",
-      "findings": [
-        "Der Handler gibt die übergebenen Suchparameter als Text zurück; er liest keine Verzeichnis-, Datei- oder Versionsdaten aus dem Katalog."
-      ]
-    },
-    ".bvfs_restore": {
-      "status": "stub",
-      "findings": [
-        "Der Handler gibt path/jobid/fileid/dirid als Text zurück; er erzeugt keine Restore-Selektion bzw. Handle-Tabelle."
-      ]
-    },
-    ".bvfs_get_jobids": {
-      "status": "stub",
-      "findings": [
-        "jobid wird lediglich zurückgegeben, ujobid als Text ausgegeben; erforderliche Full-/Differential-/Incremental-Jobketten werden nicht aus dem Katalog ermittelt."
-      ]
-    },
-    "estimate": {
-      "status": "stub",
-      "findings": [
-        "Der Handler liest Jobdaten, führt aber keine FD-Schätzung aus; die Ausgabe lautet ausdrücklich Estimate pending."
-      ]
-    },
-    "automount": {
-      "status": "stub",
-      "findings": [
-        "Der Handler bestätigt on/off per Text; im BNET-Sessionloop wird kein automount-Zustand gesetzt."
-      ]
-    },
-    "trace": {
-      "status": "partial",
-      "findings": [
-        "trace on/off schaltet jetzt einen gemeinsamen, synchronisierten Datei-Sink für tracing- und BNET-Diagnosen. Die Datei liegt als bareos-dir.trace im WorkingDirectory, wird mit 0600 angelegt und appendend/flushed geschrieben; off schließt sie. Tests prüfen Wirkung und Fehlerpfade. Interaktiver Rückfragedialog, der upstream einkompilierte Trace-Verzeichnispfad und Live-SHA-256-Parität bleiben offen."
-      ]
-    },
-    "var": {
-      "status": "stub",
-      "findings": [
-        "Der Handler gibt Variable <name>: undefined zurück; Bareos-Variablenexpansion fehlt."
-      ]
-    },
-    "setbandwidth": {
-      "status": "partial",
-      "findings": [
-        "client=/storage= senden jetzt tatsächliche setbandwidth-Pakete mit Umrechnung KiB/s zu Bytes/s; 0 hebt die Begrenzung auf. Ungültige Limits, Überlauf und negative Werte werden vor I/O abgelehnt; Erfolg erfordert die Daemon-Bestätigung. job/jobid/ujobid/state/all, interaktive Auswahl, NDMP/Legacy-Protokolle, ACL-Abgleich und Live-SHA-256-Parität bleiben offen. Jobselektoren werden bis dahin ausdrücklich abgelehnt, niemals in globale Limits umgedeutet."
-      ]
-    },
-    "setip": {
-      "status": "stub",
-      "findings": [
-        "Der Handler bestätigt Client address updated; er verändert keine Client-Adresse."
-      ]
-    },
-    "setdevice": {
-      "status": "partial",
-      "findings": [
-        "storage/device/autoselect werden jetzt validiert und als echter setdevice-Befehl an den SD gesendet; dessen Antwort wird weitergereicht. Protokoll- und Fehlerpfadtests bestehen. Storage-ACL-Abgleich und Live-SHA-256-Parität bleiben offen."
-      ]
-    },
-    "use": {
-      "status": "stub",
-      "findings": [
-        "Der Handler gibt immer Using default catalog zurück; er wechselt keinen Sitzungskatalog."
-      ]
-    },
-    ".messages": {
-      "status": "partial",
-      "findings": [
-        "Der Handler ruft jetzt wartende Bus-Nachrichten ab und bewahrt deren Bytes; API-Nachrichten werden bis zum Abruf nicht mehr verworfen. Tests prüfen Reihenfolge und einmaligen Abruf. Globale C++-Spooldatei-Semantik, gRPC-Sitzungsqueue und Live-SHA-256-Parität bleiben offen."
-      ]
-    },
-    ".users": {
-      "status": "registered_unverified",
-      "findings": [
-        "User-Ressourcen werden jetzt aus der rohen Konfiguration getrennt von Console-Ressourcen gelesen; Text/JSON und Reihenfolge sind durch Regressionstests geprüft. Der Live-SHA-256-Abgleich bleibt offen."
-      ]
-    },
-    "query": {
-      "status": "semantic_mismatch",
-      "findings": [
-        "Bareos QueryCmd öffnet QueryFile und bietet ein interaktives Menü vordefinierter Katalogabfragen. Lokal ist query ein Alias für sqlquery und führt den übergebenen Text als SQL aus."
+        "Paritätslauf 16.10.2026 (`development` `7993ce6`): 28 von 28 Fällen byte-identisch; Modi: Text, API 1, API 2."
+      ],
+      "parity_cases": [
+        "c018-api2",
+        "c018-api2-client",
+        "c020-api-noarg",
+        "c020-api-off",
+        "c020-api-on",
+        "c020-api-json",
+        "c020-api-upper",
+        "c020-api-invalid",
+        "c020-api-invalid-api2",
+        "c020-api-toomany",
+        "c020-api-compact-yes",
+        "c020-api-compact-no",
+        "c020-api-compact-upper",
+        "c020-api-compact-novalue",
+        "c020-api-1-compact",
+        "c020-compact-persists",
+        "c020-compact-reset",
+        "c028-api-toggle",
+        "c042-status-storage-api1",
+        "c042-status-storage-api2",
+        "c042-dot-status-storage-api2",
+        "c042-status-storage-slots-api1",
+        "c042-status-storage-slots-api2",
+        "c042-status-storage-api1-twice",
+        "dot-api-0",
+        "dot-api-1",
+        "dot-api-2",
+        "dot-api-json"
       ]
     },
     ".authorized": {
-      "status": "partial",
+      "status": "parity_verified",
       "findings": [
-        "Der Handler prüft überwiegend Ressourcenexistenz; cmd wird pauschal als autorisiert behandelt. Dies ist keine Command-/Resource-ACL-Prüfung wie im Original."
+        "Paritätslauf 16.10.2026 (`development` `7993ce6`): 3 von 3 Fällen byte-identisch; Modi: Text, Konsolen parity-limited."
+      ],
+      "parity_cases": [
+        "dot-authorized-job",
+        "dot-authorized-job-denied",
+        "dot-authorized-cmd"
       ]
     },
-    "run": {
-      "status": "partial",
+    ".catalogs": {
+      "status": "parity_verified",
       "findings": [
-        "Incremental/Differential bleiben bei passender erfolgreicher Backup-Kette erhalten. Referenzen sind nach Client, Job und FileSet eingegrenzt; ohne Full-Basis wird vor Poolwahl und Jobanlage auf Full hochgestuft, DB-Fehler brechen ab. FileSet-/Pool-Overrides werden ausgewertet. Accurate/VirtualFull, FileSet-Inhaltsänderungsprüfung, weitere Originaloptionen und Live-SHA-256-/Backup-Abgleich bleiben offen."
+        "Paritätslauf 16.10.2026 (`development` `7993ce6`): 9 von 9 Fällen byte-identisch; Modi: Text, API 2, Konsolen parity-acl, parity-bvfs, parity-limited, parity-operator."
+      ],
+      "parity_cases": [
+        "c025-catalogs-limited",
+        "c025-catalogs-limited-api2",
+        "c025-catalogs-operator",
+        "c025-catalogs-operator-api2",
+        "c025-catalogs-bvfs",
+        "c025-catalogs-bvfs-api2",
+        "c025-catalogs-acl",
+        "c025-catalogs-acl-api2",
+        "dot_catalogs"
       ]
     },
-    "restore": {
-      "status": "partial",
+    ".clients": {
+      "status": "parity_verified",
       "findings": [
-        "Der Handler erzeugt Bootstrap für einen Job und startet direkt einen Restore-Worker. Interaktive Dateiauswahl fehlt; storage wird nicht als Override ausgewertet (erste konfigurierte Storage wird benutzt), viele Originaloptionen wie restoreclient/fileregex fehlen."
+        "Paritätslauf 16.10.2026 (`development` `7993ce6`): 20 von 20 Fällen byte-identisch; Modi: Text, API 1, API 2, Konsolen parity-acl, parity-bvfs, parity-limited, parity-operator."
+      ],
+      "parity_cases": [
+        "c025-clients-limited",
+        "c025-clients-limited-api2",
+        "c025-clients-disabled-limited",
+        "c025-clients-disabled-limited-api2",
+        "c025-clients-operator",
+        "c025-clients-operator-api2",
+        "c025-clients-disabled-operator",
+        "c025-clients-disabled-operator-api2",
+        "c025-clients-bvfs",
+        "c025-clients-bvfs-api2",
+        "c025-clients-disabled-bvfs",
+        "c025-clients-disabled-bvfs-api2",
+        "c025-clients-acl",
+        "c025-clients-acl-api2",
+        "c025-clients-disabled-acl",
+        "c025-clients-disabled-acl-api2",
+        "c028-dot-clients",
+        "dot_clients",
+        "dot_clients-limited",
+        "dot_clients-api2"
       ]
     },
-    "status": {
+    ".consoles": {
+      "status": "parity_verified",
+      "findings": [
+        "Paritätslauf 16.10.2026 (`development` `7993ce6`): 10 von 10 Fällen byte-identisch; Modi: Text, API 2, Konsolen parity-acl, parity-bvfs, parity-limited, parity-operator."
+      ],
+      "parity_cases": [
+        "c003-dot_consoles-api2",
+        "c025-consoles-limited",
+        "c025-consoles-limited-api2",
+        "c025-consoles-operator",
+        "c025-consoles-operator-api2",
+        "c025-consoles-bvfs",
+        "c025-consoles-bvfs-api2",
+        "c025-consoles-acl",
+        "c025-consoles-acl-api2",
+        "dot_consoles"
+      ]
+    },
+    ".users": {
+      "status": "parity_verified",
+      "findings": [
+        "Paritätslauf 16.10.2026 (`development` `7993ce6`): 9 von 9 Fällen byte-identisch; Modi: Text, API 2, Konsolen parity-acl, parity-bvfs, parity-limited, parity-operator."
+      ],
+      "parity_cases": [
+        "c025-users-limited",
+        "c025-users-limited-api2",
+        "c025-users-operator",
+        "c025-users-operator-api2",
+        "c025-users-bvfs",
+        "c025-users-bvfs-api2",
+        "c025-users-acl",
+        "c025-users-acl-api2",
+        "dot_users"
+      ]
+    },
+    ".defaults": {
+      "status": "parity_verified",
+      "findings": [
+        "Paritätslauf 16.10.2026 (`development` `7993ce6`): 9 von 9 Fällen byte-identisch; Modi: Text, API 2."
+      ],
+      "parity_cases": [
+        "c041-defaults-backupcatalog",
+        "c041-defaults-backupcatalog-api2",
+        "c041-defaults-jobdefs",
+        "dot-defaults-job",
+        "dot-defaults-client",
+        "dot-defaults-storage",
+        "dot-defaults-pool",
+        "dot-defaults-restore",
+        "dot-defaults-job-api2"
+      ]
+    },
+    ".filesets": {
+      "status": "parity_verified",
+      "findings": [
+        "Paritätslauf 16.10.2026 (`development` `7993ce6`): 10 von 10 Fällen byte-identisch; Modi: Text, API 2, Konsolen parity-acl, parity-bvfs, parity-limited, parity-operator."
+      ],
+      "parity_cases": [
+        "c003-dot_filesets-api2",
+        "c025-filesets-limited",
+        "c025-filesets-limited-api2",
+        "c025-filesets-operator",
+        "c025-filesets-operator-api2",
+        "c025-filesets-bvfs",
+        "c025-filesets-bvfs-api2",
+        "c025-filesets-acl",
+        "c025-filesets-acl-api2",
+        "dot_filesets"
+      ]
+    },
+    ".help": {
+      "status": "parity_verified",
+      "findings": [
+        "Paritätslauf 16.10.2026 (`development` `7993ce6`): 8 von 8 Fällen byte-identisch; Modi: Text, API 1, API 2, Konsolen parity-limited."
+      ],
+      "parity_cases": [
+        "c020-compact-help-run",
+        "c028-dot-help",
+        "dot-help",
+        "dot-help-all",
+        "dot-help-item",
+        "dot-help-full",
+        "dot-help-limited",
+        "dot-help-json"
+      ]
+    },
+    ".jobdefs": {
+      "status": "parity_verified",
+      "findings": [
+        "Paritätslauf 16.10.2026 (`development` `7993ce6`): 9 von 9 Fällen byte-identisch; Modi: Text, API 2, Konsolen parity-acl, parity-bvfs, parity-limited, parity-operator."
+      ],
+      "parity_cases": [
+        "c025-jobdefs-limited",
+        "c025-jobdefs-limited-api2",
+        "c025-jobdefs-operator",
+        "c025-jobdefs-operator-api2",
+        "c025-jobdefs-bvfs",
+        "c025-jobdefs-bvfs-api2",
+        "c025-jobdefs-acl",
+        "c025-jobdefs-acl-api2",
+        "dot_jobdefs"
+      ]
+    },
+    ".jobs": {
+      "status": "parity_verified",
+      "findings": [
+        "Paritätslauf 16.10.2026 (`development` `7993ce6`): 31 von 31 Fällen byte-identisch; Modi: Text, API 1, API 2, Konsolen parity-acl, parity-bvfs, parity-limited, parity-operator."
+      ],
+      "parity_cases": [
+        "c003-dot_jobs-enabled",
+        "c020-compact-jobs",
+        "c025-jobs-limited",
+        "c025-jobs-limited-api2",
+        "c025-jobs-enabled-limited",
+        "c025-jobs-enabled-limited-api2",
+        "c025-jobs-type-B-limited",
+        "c025-jobs-type-B-limited-api2",
+        "c025-jobs-operator",
+        "c025-jobs-operator-api2",
+        "c025-jobs-enabled-operator",
+        "c025-jobs-enabled-operator-api2",
+        "c025-jobs-type-B-operator",
+        "c025-jobs-type-B-operator-api2",
+        "c025-jobs-bvfs",
+        "c025-jobs-bvfs-api2",
+        "c025-jobs-enabled-bvfs",
+        "c025-jobs-enabled-bvfs-api2",
+        "c025-jobs-type-B-bvfs",
+        "c025-jobs-type-B-bvfs-api2",
+        "c025-jobs-acl",
+        "c025-jobs-acl-api2",
+        "c025-jobs-enabled-acl",
+        "c025-jobs-enabled-acl-api2",
+        "c025-jobs-type-B-acl",
+        "c025-jobs-type-B-acl-api2",
+        "c028-dot-jobs",
+        "dot_jobs",
+        "dot_jobs-type-B",
+        "dot_jobs-limited",
+        "dot_jobs-api2"
+      ]
+    },
+    ".jobstatus": {
+      "status": "parity_verified",
+      "findings": [
+        "Paritätslauf 16.10.2026 (`development` `7993ce6`): 21 von 21 Fällen byte-identisch; Modi: Text, API 1, API 2."
+      ],
+      "parity_cases": [
+        "c029-jobstatus",
+        "c029-jobstatus-T",
+        "c029-jobstatus-e",
+        "c029-jobstatus-unknown-char",
+        "c029-jobstatus-long",
+        "c029-jobstatus-empty",
+        "c029-jobstatus-arg-ignored",
+        "c029-jobstatus-kv-ignored",
+        "c029-jobstatus-twice",
+        "c029-jobstatus-catalog",
+        "c029-jobstatus-catalog-bogus",
+        "c029-jobstatus-api1",
+        "c029-jobstatus-api1-T",
+        "c029-jobstatus-api1-bad",
+        "c029-jobstatus-api2",
+        "c029-jobstatus-api2-T",
+        "c029-jobstatus-api2-Z",
+        "c029-jobstatus-api2-bad",
+        "c029-jobstatus-api1-Z",
+        "c029-jobstatus-quote",
+        "dot-jobstatus"
+      ]
+    },
+    ".levels": {
+      "status": "parity_verified",
+      "findings": [
+        "Paritätslauf 16.10.2026 (`development` `7993ce6`): 6 von 6 Fällen byte-identisch; Modi: Text, API 2."
+      ],
+      "parity_cases": [
+        "c029-levels-api2-type",
+        "c029-levels-backup",
+        "c029-levels-two",
+        "dot_levels",
+        "dot_levels-type-Backup",
+        "dot_levels-api2"
+      ]
+    },
+    ".locations": {
+      "status": "parity_verified",
+      "findings": [
+        "Paritätslauf 16.10.2026 (`development` `7993ce6`): 4 von 4 Fällen byte-identisch; Modi: Text, API 2."
+      ],
+      "parity_cases": [
+        "c002-shared-then-private",
+        "c029-locations",
+        "c029-locations-api2",
+        "dot_locations"
+      ]
+    },
+    ".messages": {
+      "status": "parity_verified",
+      "findings": [
+        "Paritätslauf 16.10.2026 (`development` `7993ce6`): 8 von 8 Fällen byte-identisch; Modi: Text, API 1, API 2, GUI, Konsolen parity-limited, parity-operator.",
+        "Jobmeldungen selbst (Texte aus Jobs) sind Gegenstand von C-051, nicht dieses Befehls."
+      ],
+      "parity_cases": [
+        "c036-dot-messages-twice",
+        "c036-autodisplay-on-messages",
+        "c036-gui-on-messages",
+        "c036-messages-api1",
+        "c036-messages-api2",
+        "c036-messages-limited",
+        "c036-messages-operator",
+        "dot-messages"
+      ]
+    },
+    ".media": {
+      "status": "parity_verified",
+      "findings": [
+        "Paritätslauf 16.10.2026 (`development` `7993ce6`): 5 von 5 Fällen byte-identisch; Modi: Text, API 1, API 2."
+      ],
+      "parity_cases": [
+        "c002-shared-then-private",
+        "c029-media",
+        "c029-media-api1",
+        "c029-media-api2",
+        "dot_media"
+      ]
+    },
+    ".mediatypes": {
+      "status": "parity_verified",
+      "findings": [
+        "Paritätslauf 16.10.2026 (`development` `7993ce6`): 9 von 9 Fällen byte-identisch; Modi: Text, API 1, API 2, Konsolen parity-acl, parity-bvfs, parity-limited, parity-operator."
+      ],
+      "parity_cases": [
+        "c002-private-then-shared",
+        "c025-mediatypes-limited",
+        "c025-mediatypes-operator",
+        "c025-mediatypes-bvfs",
+        "c025-mediatypes-acl",
+        "c029-mediatypes",
+        "c029-mediatypes-api1",
+        "c029-mediatypes-api2",
+        "dot_mediatypes"
+      ]
+    },
+    ".msgs": {
+      "status": "parity_verified",
+      "findings": [
+        "Paritätslauf 16.10.2026 (`development` `7993ce6`): 10 von 10 Fällen byte-identisch; Modi: Text, API 2, Konsolen parity-acl, parity-bvfs, parity-limited, parity-operator."
+      ],
+      "parity_cases": [
+        "c003-dot_msgs-api2",
+        "c025-msgs-limited",
+        "c025-msgs-limited-api2",
+        "c025-msgs-operator",
+        "c025-msgs-operator-api2",
+        "c025-msgs-bvfs",
+        "c025-msgs-bvfs-api2",
+        "c025-msgs-acl",
+        "c025-msgs-acl-api2",
+        "dot_msgs"
+      ]
+    },
+    ".pools": {
       "status": "partial",
       "findings": [
-        "Der Handler behandelt dir/director/client/storage/all. Originalziele wie scheduler, subscriptions und configuration besitzen hier keinen eigenen Dispatch. Geplante und beendete Jobs sind im Director-JSON noch nicht vollständig abgebildet."
+        "Paritätslauf 16.10.2026 (`development` `7993ce6`): 21 von 21 Fällen byte-identisch; Modi: Text, API 1, API 2, Konsolen parity-acl, parity-bvfs, parity-limited, parity-operator.",
+        "`type=` vergleicht exakt statt als Präfix ohne Groß-/Kleinschreibung (C-044); die Fälle prüfen nur vollständige Typnamen."
+      ],
+      "open_log_entries": [
+        "C-044"
+      ],
+      "parity_cases": [
+        "c025-pools-limited",
+        "c025-pools-limited-api2",
+        "c025-pools-type-Backup-limited",
+        "c025-pools-type-Backup-limited-api2",
+        "c025-pools-operator",
+        "c025-pools-operator-api2",
+        "c025-pools-type-Backup-operator",
+        "c025-pools-type-Backup-operator-api2",
+        "c025-pools-bvfs",
+        "c025-pools-bvfs-api2",
+        "c025-pools-type-Backup-bvfs",
+        "c025-pools-type-Backup-bvfs-api2",
+        "c025-pools-acl",
+        "c025-pools-acl-api2",
+        "c025-pools-type-Backup-acl",
+        "c025-pools-type-Backup-acl-api2",
+        "c028-dot-pools",
+        "dot_pools",
+        "dot_pools-type-Backup",
+        "dot_pools-limited",
+        "dot_pools-api2"
+      ]
+    },
+    ".profiles": {
+      "status": "parity_verified",
+      "findings": [
+        "Paritätslauf 16.10.2026 (`development` `7993ce6`): 10 von 10 Fällen byte-identisch; Modi: Text, API 2, Konsolen parity-acl, parity-bvfs, parity-limited, parity-operator."
+      ],
+      "parity_cases": [
+        "c003-dot_profiles-api2",
+        "c025-profiles-limited",
+        "c025-profiles-limited-api2",
+        "c025-profiles-operator",
+        "c025-profiles-operator-api2",
+        "c025-profiles-bvfs",
+        "c025-profiles-bvfs-api2",
+        "c025-profiles-acl",
+        "c025-profiles-acl-api2",
+        "dot_profiles"
+      ]
+    },
+    ".quit": {
+      "status": "parity_verified",
+      "findings": [
+        "Paritätslauf 16.10.2026 (`development` `7993ce6`): 3 von 3 Fällen byte-identisch; Modi: Text, API 2, Konsolen parity-limited."
+      ],
+      "parity_cases": [
+        "c004-dot-quit-json",
+        "c004-dot-quit-limited",
+        "dot-quit"
+      ]
+    },
+    ".sql": {
+      "status": "parity_verified",
+      "findings": [
+        "Paritätslauf 16.10.2026 (`development` `7993ce6`): 30 von 30 Fällen byte-identisch; Modi: Text, API 1, API 2, GUI."
+      ],
+      "parity_cases": [
+        "c002-sql-then-list",
+        "c016-sql-count",
+        "c016-sql-multicol-null",
+        "c016-sql-empty",
+        "c016-sql-syntax-error",
+        "c016-sql-unknown-table",
+        "c016-sql-no-query",
+        "c016-sql-no-value",
+        "c016-sql-semicolons",
+        "c016-sql-trailing-semicolon",
+        "c016-sql-api1",
+        "c016-sql-api1-empty",
+        "c016-sql-api1-error",
+        "c016-sql-api2",
+        "c016-sql-api2-empty",
+        "c016-sql-api2-error",
+        "c016-sql-api2-noquery",
+        "c016-sql-error-truncated",
+        "c016-sql-error-end-of-input",
+        "c016-sql-error-runtime",
+        "c016-sql-error-hint",
+        "c016-sql-jobid-bytes",
+        "c016-sql-api1-semicolons",
+        "c016-sql-api2-error-hint",
+        "c020-compact-sql",
+        "c020-json-sql",
+        "c027-gui-sql",
+        "c028-sql",
+        "c028-sql-bad",
+        "dot-sql"
+      ]
+    },
+    ".schedule": {
+      "status": "parity_verified",
+      "findings": [
+        "Paritätslauf 16.10.2026 (`development` `7993ce6`): 18 von 18 Fällen byte-identisch; Modi: Text, API 2, Konsolen parity-acl, parity-bvfs, parity-limited, parity-operator."
+      ],
+      "parity_cases": [
+        "c003-dot_schedule-api2",
+        "c025-schedule-limited",
+        "c025-schedule-limited-api2",
+        "c025-schedule-enabled-limited",
+        "c025-schedule-enabled-limited-api2",
+        "c025-schedule-operator",
+        "c025-schedule-operator-api2",
+        "c025-schedule-enabled-operator",
+        "c025-schedule-enabled-operator-api2",
+        "c025-schedule-bvfs",
+        "c025-schedule-bvfs-api2",
+        "c025-schedule-enabled-bvfs",
+        "c025-schedule-enabled-bvfs-api2",
+        "c025-schedule-acl",
+        "c025-schedule-acl-api2",
+        "c025-schedule-enabled-acl",
+        "c025-schedule-enabled-acl-api2",
+        "dot_schedule"
       ]
     },
     ".status": {
       "status": "partial",
       "findings": [
-        "Der Handler delegiert an den normalen status-Handler; die Original-Unterabschnitte current/last/header/scheduled/running/terminated usw. werden nicht separat umgesetzt."
+        "Paritätslauf 16.10.2026 (`development` `7993ce6`): 22 von 22 Fällen byte-identisch; Modi: Text, API 2.",
+        "Warte-Zustände laufender Jobs (FD/SD/Ressourcen/Priorität) und beendete Jobs in der JCR-Liste fehlen (C-048); im Fixture läuft kein Job."
+      ],
+      "open_log_entries": [
+        "C-048"
+      ],
+      "parity_cases": [
+        "c009-status-dir-header",
+        "c009-status-dir-header-json",
+        "c014-dot-status-dir-header",
+        "c014-dot-status-dir-current",
+        "c014-dot-status-dir-last",
+        "c014-dot-status-dir-running-json",
+        "c014-dot-status-dir-scheduled-json",
+        "c014-dot-status-dir-terminated-json",
+        "c014-dot-status-dir-bogus",
+        "c014-dot-status-dir-noarg",
+        "c014-dot-status-noarg",
+        "c014-dot-status-bogus",
+        "c014-dot-status-dir-running",
+        "c042-dot-status-storage",
+        "c042-dot-status-storage-header",
+        "c042-dot-status-storage-running",
+        "c042-dot-status-storage-api2",
+        "c042-dot-status-client-header",
+        "dot-status-dir-header",
+        "dot-status-dir-running",
+        "dot-status-dir-scheduled",
+        "dot-status-dir-terminated"
       ]
     },
-    "setdebug": {
+    ".storages": {
+      "status": "parity_verified",
+      "findings": [
+        "Paritätslauf 16.10.2026 (`development` `7993ce6`): 18 von 18 Fällen byte-identisch; Modi: Text, API 2, Konsolen parity-acl, parity-bvfs, parity-limited, parity-operator."
+      ],
+      "parity_cases": [
+        "c025-storages-limited",
+        "c025-storages-limited-api2",
+        "c025-storages-enabled-limited",
+        "c025-storages-enabled-limited-api2",
+        "c025-storages-operator",
+        "c025-storages-operator-api2",
+        "c025-storages-enabled-operator",
+        "c025-storages-enabled-operator-api2",
+        "c025-storages-bvfs",
+        "c025-storages-bvfs-api2",
+        "c025-storages-enabled-bvfs",
+        "c025-storages-enabled-bvfs-api2",
+        "c025-storages-acl",
+        "c025-storages-acl-api2",
+        "c025-storages-enabled-acl",
+        "c025-storages-enabled-acl-api2",
+        "dot_storages",
+        "dot_storages-limited"
+      ]
+    },
+    ".types": {
+      "status": "parity_verified",
+      "findings": [
+        "Paritätslauf 16.10.2026 (`development` `7993ce6`): 2 von 2 Fällen byte-identisch; Modi: Text, API 2."
+      ],
+      "parity_cases": [
+        "c029-types-api2",
+        "dot_types"
+      ]
+    },
+    ".volstatus": {
+      "status": "parity_verified",
+      "findings": [
+        "Paritätslauf 16.10.2026 (`development` `7993ce6`): 2 von 2 Fällen byte-identisch; Modi: Text, API 2."
+      ],
+      "parity_cases": [
+        "c029-volstatus-api2",
+        "dot_volstatus"
+      ]
+    },
+    ".bvfs_lsdirs": {
+      "status": "parity_verified",
+      "findings": [
+        "Paritätslauf 16.10.2026 (`development` `7993ce6`): 11 von 11 Fällen byte-identisch; Modi: Text, API 1, API 2, Konsolen parity-bvfs."
+      ],
+      "parity_cases": [
+        "c002-bvfs-noargs",
+        "c022-lsdirs-root",
+        "c022-lsdirs-deep",
+        "c022-lsdirs-pathid",
+        "c022-lsdirs-limit",
+        "c022-lsdirs-missing",
+        "c022-lsdirs-api1",
+        "c022-lsdirs-api2",
+        "c022-acl-limited",
+        "c022-negative-limit",
+        "bvfs-lsdirs"
+      ]
+    },
+    ".bvfs_lsfiles": {
+      "status": "parity_verified",
+      "findings": [
+        "Paritätslauf 16.10.2026 (`development` `7993ce6`): 9 von 9 Fällen byte-identisch; Modi: Text, API 1, API 2, Konsolen parity-bvfs."
+      ],
+      "parity_cases": [
+        "c022-lsfiles",
+        "c022-lsfiles-all",
+        "c022-lsfiles-other",
+        "c022-lsfiles-errors",
+        "c022-lsfiles-api1",
+        "c022-lsfiles-api2",
+        "c022-acl-limited",
+        "c022-negative-limit",
+        "bvfs-lsfiles"
+      ]
+    },
+    ".bvfs_update": {
+      "status": "parity_verified",
+      "findings": [
+        "Paritätslauf 16.10.2026 (`development` `7993ce6`): 3 von 3 Fällen byte-identisch; Modi: Text, API 2."
+      ],
+      "parity_cases": [
+        "c022-update-jobid",
+        "c022-update-unknown-job",
+        "c022-update-api2"
+      ]
+    },
+    ".bvfs_get_jobids": {
+      "status": "parity_verified",
+      "findings": [
+        "Paritätslauf 16.10.2026 (`development` `7993ce6`): 7 von 7 Fällen byte-identisch; Modi: Text, API 2, Konsolen parity-bvfs."
+      ],
+      "parity_cases": [
+        "c022-get-jobids",
+        "c022-get-jobids-all",
+        "c022-get-jobids-ujobid",
+        "c022-get-jobids-errors",
+        "c022-get-jobids-api2",
+        "c022-acl-limited",
+        "bvfs-get-jobids"
+      ]
+    },
+    ".bvfs_versions": {
+      "status": "parity_verified",
+      "findings": [
+        "Paritätslauf 16.10.2026 (`development` `7993ce6`): 5 von 5 Fällen byte-identisch; Modi: Text, API 2."
+      ],
+      "parity_cases": [
+        "c022-versions",
+        "c022-versions-errors",
+        "c022-versions-api2",
+        "c022-negative-limit",
+        "bvfs-versions"
+      ]
+    },
+    ".bvfs_restore": {
+      "status": "registered_unverified",
+      "findings": [
+        "Kein Paritätsfall: ändert den Katalog (Handle-Tabelle); nur durch Einheitentests belegt."
+      ]
+    },
+    ".bvfs_cleanup": {
       "status": "partial",
       "findings": [
-        "Director/Client/Storage/all werden jetzt gesteuert; all dedupliziert gleiche Endpunkte. trace/timestamp beeinflussen lokale Diagnoseausgabe bzw. Original-FD/SD-Pakete; ältere FD-Versionen erhalten kein timestamp-Feld. Der lokale tracing-Filter wird tatsächlich neu geladen; Verbindungsfehler werden nicht als Erfolg bestätigt. Dialogauswahl ohne Ziel, NDMP, ACL-Abgleich und Live-SHA-256-Parität bleiben offen."
+        "Paritätslauf 16.10.2026 (`development` `7993ce6`): 1 von 1 Fällen byte-identisch; Modi: Text.",
+        "Nur `.bvfs_cleanup` ohne Argumente verglichen; das Löschen einer Handle-Tabelle ist nur durch Einheitentests belegt."
+      ],
+      "parity_cases": [
+        "c002-bvfs-noargs"
       ]
     },
-    "wait": {
+    ".bvfs_clear_cache": {
       "status": "partial",
       "findings": [
-        "Jobauswahl, mount/timeout und Abschlussausgabe sind portiert. Der Lifecycle verarbeitet jetzt echte Worker-Enden vor dem Katalogabschluss; Canceling bleibt aktiv, finale Zähler bleiben erhalten, Bareos-Statusprioritäten einschließlich Incomplete gelten. Fehlgeschlagene Katalog-Endupdates und der Snapshot-Race werden für wait jobid und wait ohne Argument sichtbar abgefangen; Retention beginnt am tatsächlichen Ende. Gegenprüfungen fanden und Regressionstests reproduzieren diese Fehler. Vollständige FD-/SD-Abbruchkoordination, ACL und Live-SHA-256-Parität bleiben offen."
-      ]
-    },
-    "rerun": {
-      "status": "partial",
-      "findings": [
-        "Unterstützt eine JobId mit Katalog-Lookup und delegiert an run; since_jobid/until_jobid/days/hours und die Originalauswahl mehrerer Jobs fehlen."
-      ]
-    },
-    "resolve": {
-      "status": "partial",
-      "findings": [
-        "Mehrere Hostnamen werden jetzt wahlweise lokal oder auf dem mit client=/fd=/storage= ausgewählten Daemon aufgelöst. FD und SD können gemeinsam angesprochen werden. IPv4-/IPv6-Ausgabe entspricht dem Originalformat; Antworten mehrerer BNET-Frames und deren Zeilenenden bleiben erhalten. Unbekannte Ziele fallen nicht auf lokale DNS-Auflösung zurück. Tests prüfen Routing, Ausgabe und Fehlerpfade. ACL-Abgleich, Legacy-/Nicht-TLS-Verbindungen und Live-SHA-256-Parität bleiben offen."
-      ]
-    },
-    "import": {
-      "status": "partial",
-      "findings": [
-        "Leitet storage und srcslots an den SD weiter; dstslots, volume und scan aus der Originalhilfe werden im Handler nicht ausgewertet."
-      ]
-    },
-    "export": {
-      "status": "partial",
-      "findings": [
-        "Leitet storage und srcslots an den SD weiter; dstslots, volume und scan aus der Originalhilfe werden im Handler nicht ausgewertet."
-      ]
-    },
-    "move": {
-      "status": "semantic_mismatch",
-      "findings": [
-        "Bareos verwendet srcslots/dstslots für Slot-Auswahlen. Der lokale Handler erwartet srcslot/dstslot (Singular), standardmäßig 0; Originalsyntax wird damit nicht korrekt umgesetzt."
-      ]
-    },
-    "configure": {
-      "status": "partial",
-      "findings": [
-        "Lokales CRUD ist eine Erweiterung, kein vollständiger Port aller Bareos-Ressourcendirektiven. Der Persistenzpfad ist auf /etc/bareos festgelegt; Originalsyntax wird dynamisch aus deutlich umfangreicheren Direktiventabellen erzeugt."
-      ]
-    },
-    "list": {
-      "status": "partial",
-      "findings": [
-        "Wesentliche Katalogabfragen sind portiert; die im Projekt-Backlog belegten zusätzlichen Pool-Prune-Summen (prunablevolumes/-jobs/-bytes) fehlen. Alle Originalfilter und Ausgabefelder sind noch nicht systematisch gegen Bareos getestet."
-      ]
-    },
-    "llist": {
-      "status": "partial",
-      "findings": [
-        "Wesentliche Katalogabfragen sind portiert; die im Projekt-Backlog belegten zusätzlichen Pool-Prune-Summen (prunablevolumes/-jobs/-bytes) fehlen. Alle Originalfilter und Ausgabefelder sind noch nicht systematisch gegen Bareos getestet."
-      ]
-    },
-    ".defaults": {
-      "status": "partial",
-      "findings": [
-        "Client-Retentions/Autoprune, alle Poolfelder samt Source-Sonderfall purge_oldest_volume=, mehrere Devices, Pool-vor-Job-Storage und Restore Where/Replace/RegexWhere sind aus raw config portiert. JobDefs und explizite Overrides werden aufgelöst. Kontroverse Kreuzreviews fanden Exponenten-/Unterlauf-, PINT32- und Selektorprioritätsfehler; Gegenbeispieltests sichern deren Korrektur ab. Globale ACL-Durchsetzung, vollständige Konfigurationsvalidierung und Live-SHA-256-Abgleich aller Ressourcen-/Vererbungsfälle bleiben offen."
+        "Paritätslauf 16.10.2026 (`development` `7993ce6`): 3 von 3 Fällen byte-identisch; Modi: Text, API 1, API 2.",
+        "Verglichen sind Ausgaben ohne `yes`; `.bvfs_clear_cache yes` ändert den Katalog und ist nur durch Einheitentests belegt."
+      ],
+      "parity_cases": [
+        "c022-clear-cache-noyes",
+        "c035-bvfs-clear-cache-api1",
+        "c035-bvfs-clear-cache-api2"
       ]
     },
     "add": {
       "status": "partial",
       "findings": [
-        "Der lokale Handler verlangt volume=<name> und legt einen vereinfachten Katalogdatensatz an; storage/jobid aus der Originalhilfe werden nicht ausgewertet. Die dokumentierte Originalsyntax ohne volume führt lokal nur zur Aufforderung, volume anzugeben."
+        "Paritätslauf 16.10.2026 (`development` `7993ce6`): 9 von 9 Fällen byte-identisch; Modi: Text, API 1, Konsolen parity-c030-client, parity-c030-job, parity-c030-pool, parity-c030-storage.",
+        "Verglichen sind Dialog, ACL-Warnung und Abbruch; das tatsächliche Anlegen von Volumes und der Katalogzustand danach sind nicht verglichen."
+      ],
+      "parity_cases": [
+        "c011-add-cancel",
+        "c011-add-pool-cancel",
+        "c011-add-pool-badnumber-cancel",
+        "c011-add-api1-cancel",
+        "c030-add-job-cancel",
+        "c030-add-storage-cancel",
+        "c030-add-client-cancel",
+        "c030-add-pool-cancel",
+        "add-noargs"
       ]
     },
-    "help": {
-      "status": "partial",
+    "autodisplay": {
+      "status": "parity_verified",
       "findings": [
-        "help/.help verwenden jetzt Originaltabellenreihenfolge, Textlayout, Byte-Wrapping, exakte Themen-/item-Suche und die Originalvarianten all/full/item. API1 .help all enthält nur Hauptbefehlsnamen; oconsole liest deshalb .help-Metadaten für Vervollständigung. Unabhängige Kreuzreviews bestätigen die statischen Abläufe. ACL-Filter/permission und die dynamisch generierte configure-Usage sind weiterhin unvollständig; Live-SHA-256-Parität fehlt."
+        "Paritätslauf 16.10.2026 (`development` `7993ce6`): 16 von 16 Fällen byte-identisch; Modi: Text, API 1, API 2, Konsolen parity-limited."
+      ],
+      "parity_cases": [
+        "c005-autodisplay-noarg",
+        "c005-autodisplay-foo",
+        "c005-autodisplay-upper",
+        "c005-autodisplay-later-kw",
+        "c005-autodisplay-kv",
+        "c005-autodisplay-off-on",
+        "c005-autodisplay-foo-api1",
+        "c005-autodisplay-off-api1",
+        "c005-autodisplay-foo-api2",
+        "c005-autodisplay-off-api2",
+        "c036-autodisplay-on-messages",
+        "c036-autodisplay-on-api1",
+        "c036-getcmd-dot-messages-autodisplay",
+        "c036-messages-limited",
+        "autodisplay-off",
+        "autodisplay-on"
+      ]
+    },
+    "automount": {
+      "status": "parity_verified",
+      "findings": [
+        "Paritätslauf 16.10.2026 (`development` `7993ce6`): 14 von 14 Fällen byte-identisch; Modi: Text, API 1, API 2, GUI."
+      ],
+      "parity_cases": [
+        "c005-automount-off",
+        "c005-automount-foo",
+        "c005-automount-upper",
+        "c005-automount-noarg",
+        "c005-automount-noarg-dot",
+        "c005-automount-twoargs",
+        "c005-automount-on-api1",
+        "c005-automount-noarg-api1",
+        "c005-automount-on-api2",
+        "c005-automount-noarg-api2",
+        "c005-automount-prompt-then-command",
+        "c036-getcmd-dot-messages",
+        "c036-getcmd-dot-messages-autodisplay",
+        "automount"
       ]
     },
     "cancel": {
       "status": "partial",
       "findings": [
-        "Im unabhängigen Review wurde ein vorzeitiger Abschluss nach SIGTERM nachgewiesen. Cancel setzt jetzt Canceling und prüft Signalfehler; endgültiger Katalogstatus/Zähler werden erst nach Workerende geschrieben. Vollständige Originalselektion (job/ujobid/Joblisten/Zustandsfilter/Dialog), FD-/SD-Abbruchkoordination, ACL und Live-SHA-256-Parität sind nicht nachgewiesen."
+        "Paritätslauf 16.10.2026 (`development` `7993ce6`): 24 von 24 Fällen byte-identisch; Modi: Text, API 1, API 2.",
+        "Verglichen sind Selektion und Fehlertexte nur mit nicht existierenden bzw. nicht laufenden Jobs. Abbruch laufender Jobs über FD/SD ist nur durch Einheitentests belegt.",
+        "RunScripts „AfterJob“ bei Cancel und Warte-Zustände fehlen (C-048)."
+      ],
+      "open_log_entries": [
+        "C-048"
+      ],
+      "parity_cases": [
+        "c006-cancel-none-api2",
+        "c006-cancel-noargs-api2",
+        "c006-cancel-job",
+        "c006-cancel-ujobid",
+        "c006-cancel-badjobid",
+        "c006-cancel-all",
+        "c034-storage-nosuch-job",
+        "c034-storage-nosuch-job-api2",
+        "c034-storage-badjobid",
+        "c034-storage-nojobid",
+        "c034-storage-jobid-novalue",
+        "c034-storage-unknown",
+        "c034-storage-after-jobid",
+        "c034-storage-novalue",
+        "c034-sd-keyword",
+        "c034-state-running",
+        "c034-state-idle",
+        "c034-state-novalue",
+        "c034-all-yes",
+        "c034-all-api1",
+        "c035-cancel-job-nosuch-api1",
+        "c035-cancel-job-nosuch-api2",
+        "cancel-none",
+        "cancel-dialog"
       ]
     },
-    ".help": {
+    "configure": {
+      "status": "parity_verified",
+      "findings": [
+        "Paritätslauf 16.10.2026 (`development` `7993ce6`): 31 von 31 Fällen byte-identisch; Modi: Text.",
+        "`configure add` ist für Ressourcen ohne Katalogbezug verglichen, die Wirkung über `show` im selben Fall; `reload` danach ist nicht abgedeckt."
+      ],
+      "parity_cases": [
+        "c019-configure-bare",
+        "c019-configure-add-only",
+        "c019-configure-export-only",
+        "c019-configure-invalid-sub",
+        "c019-export-no-client-arg",
+        "c019-export-unknown-client",
+        "c019-export-twice",
+        "c019-add-invalid-type",
+        "c019-add-director",
+        "c019-add-device",
+        "c019-add-unknown-directive",
+        "c019-add-forbidden-char",
+        "c019-add-missing-name",
+        "c019-add-missing-value",
+        "c019-add-missing-required",
+        "c019-add-console",
+        "c019-add-console-type-name",
+        "c019-add-duplicate-existing",
+        "c019-add-profile",
+        "c019-add-schedule",
+        "c019-add-schedule-invalid",
+        "c019-add-messages",
+        "c019-add-invalid-name",
+        "c019-add-unknown-profile",
+        "c019-add-empty-password",
+        "c019-add-counter-invalid",
+        "c019-add-user",
+        "c019-add-fileset",
+        "c019-add-case-keys",
+        "configure-export",
+        "configure-bad"
+      ]
+    },
+    "create": {
       "status": "partial",
       "findings": [
-        "help/.help verwenden jetzt Originaltabellenreihenfolge, Textlayout, Byte-Wrapping, exakte Themen-/item-Suche und die Originalvarianten all/full/item. API1 .help all enthält nur Hauptbefehlsnamen; oconsole liest deshalb .help-Metadaten für Vervollständigung. Unabhängige Kreuzreviews bestätigen die statischen Abläufe. ACL-Filter/permission und die dynamisch generierte configure-Usage sind weiterhin unvollständig; Live-SHA-256-Parität fehlt."
+        "Paritätslauf 16.10.2026 (`development` `7993ce6`): 4 von 4 Fällen byte-identisch; Modi: Text.",
+        "Verglichen sind Dialog und unbekannter Pool; das Anlegen eines Pools im Katalog ist nicht verglichen."
+      ],
+      "parity_cases": [
+        "c011-create-cancel",
+        "c011-create-unknown-cancel",
+        "c012-create-unknown-pool",
+        "create-noargs"
+      ]
+    },
+    "delete": {
+      "status": "partial",
+      "findings": [
+        "Paritätslauf 16.10.2026 (`development` `7993ce6`): 15 von 16 Fällen byte-identisch; Modi: Text, API 1, API 2.",
+        "Abweichende Fälle: `c035-delete-noarg-api2`.",
+        "`.api 2`: Original liefert `\"deleted\": {}`, Onesimus ein leeres Ergebnis (C-046, Fall `c035-delete-noarg-api2`).",
+        "Löschen von Volume/Pool/Job wird nur über Dialog- und Abbruchpfade verglichen; die Katalogwirkung ist nur durch Einheitentests belegt."
+      ],
+      "open_log_entries": [
+        "C-046"
+      ],
+      "parity_cases": [
+        "c011-delete-cancel",
+        "c011-delete-volume-cancel",
+        "c011-delete-menu-pool-cancel",
+        "c011-delete-menu-jobid-cancel",
+        "c011-delete-jobid-cancel",
+        "c011-delete-pool-cancel",
+        "c011-delete-volume-pool-cancel",
+        "c011-delete-volume-unknown",
+        "c011-delete-volume-star-unknown",
+        "c011-delete-volname-unknown",
+        "c011-delete-storage-empty",
+        "c011-delete-api1-cancel",
+        "c012-delete-illegal-jobid",
+        "c035-delete-noarg-api1",
+        "c035-delete-noarg-api2",
+        "delete-dialog"
+      ]
+    },
+    "disable": {
+      "status": "parity_verified",
+      "findings": [
+        "Paritätslauf 16.10.2026 (`development` `7993ce6`): 30 von 30 Fällen byte-identisch; Modi: Text, API 1, API 2, Konsolen parity-acl, parity-bvfs, parity-device, parity-limited, parity-operator."
+      ],
+      "parity_cases": [
+        "c006-disable-nojob-api2",
+        "c006-disable-noschedule",
+        "c011-disable-cancel",
+        "c012-disable-storage",
+        "c025-disable-select-limited",
+        "c025-disable-select-limited-api2",
+        "c025-disable-schedule-select-limited",
+        "c025-disable-schedule-select-limited-api2",
+        "c025-disable-select-operator",
+        "c025-disable-select-operator-api2",
+        "c025-disable-select-bvfs",
+        "c025-disable-select-bvfs-api2",
+        "c025-disable-schedule-select-bvfs",
+        "c025-disable-schedule-select-bvfs-api2",
+        "c025-disable-select-acl",
+        "c025-disable-select-acl-api2",
+        "c025-disable-schedule-select-acl",
+        "c025-disable-schedule-select-acl-api2",
+        "c032-job-disable-enable",
+        "c032-job-disable-enable-api1",
+        "c032-job-disable-enable-api2",
+        "c032-client-disable-enable",
+        "c032-client-disable-enable-api2",
+        "c032-schedule-disable",
+        "c032-schedule-disable-api1",
+        "c032-schedule-disable-api2",
+        "c032-job-select-disable-enable",
+        "c032-limited-job",
+        "c032-limited-job-api2",
+        "disable-nojob"
+      ]
+    },
+    "enable": {
+      "status": "parity_verified",
+      "findings": [
+        "Paritätslauf 16.10.2026 (`development` `7993ce6`): 29 von 29 Fällen byte-identisch; Modi: Text, API 1, API 2, Konsolen parity-acl, parity-bvfs, parity-device, parity-limited, parity-operator."
+      ],
+      "parity_cases": [
+        "c006-enable-nojob-api2",
+        "c006-enable-noclient",
+        "c011-enable-cancel",
+        "c012-enable-storage",
+        "c025-enable-select-limited",
+        "c025-enable-select-limited-api2",
+        "c025-enable-client-select-limited",
+        "c025-enable-client-select-limited-api2",
+        "c025-enable-select-operator",
+        "c025-enable-select-operator-api2",
+        "c025-enable-client-select-operator",
+        "c025-enable-client-select-operator-api2",
+        "c025-enable-select-bvfs",
+        "c025-enable-select-bvfs-api2",
+        "c025-enable-client-select-bvfs",
+        "c025-enable-client-select-bvfs-api2",
+        "c025-enable-select-acl",
+        "c025-enable-select-acl-api2",
+        "c025-enable-client-select-acl",
+        "c025-enable-client-select-acl-api2",
+        "c032-job-disable-enable",
+        "c032-job-disable-enable-api1",
+        "c032-job-disable-enable-api2",
+        "c032-client-disable-enable",
+        "c032-client-disable-enable-api2",
+        "c032-job-select-disable-enable",
+        "c032-limited-job",
+        "c032-limited-job-api2",
+        "enable-nojob"
+      ]
+    },
+    "estimate": {
+      "status": "parity_verified",
+      "findings": [
+        "Paritätslauf 16.10.2026 (`development` `7993ce6`): 38 von 38 Fällen byte-identisch; Modi: Text, API 1, API 2.",
+        "Fragt den echten FD ab (lesend)."
+      ],
+      "parity_cases": [
+        "c011-estimate-cancel",
+        "c017-full",
+        "c017-default-level",
+        "c017-incremental",
+        "c017-differential",
+        "c017-catalog-job",
+        "c017-listing",
+        "c017-listing-full",
+        "c017-accurate-yes",
+        "c017-accurate-incr",
+        "c017-accurate-no",
+        "c017-accurate-bad",
+        "c017-accurate-missing",
+        "c017-unknown-job",
+        "c017-job-missing",
+        "c017-restore-job",
+        "c017-client-override",
+        "c017-fd-override",
+        "c017-fileset-override",
+        "c017-client-fileset-nojob",
+        "c017-unknown-client",
+        "c017-client-missing",
+        "c017-unknown-fileset",
+        "c017-fileset-missing",
+        "c017-bad-level",
+        "c017-level-missing",
+        "c017-twice",
+        "c017-api2",
+        "c017-api2-unknown-job",
+        "c017-select-job",
+        "c041-estimate-backupcatalog",
+        "c041-estimate-backupfd",
+        "estimate",
+        "estimate-listing",
+        "w011-estimate-badnumber-cancel",
+        "w011-estimate-level-cancel",
+        "w011-estimate-api1-cancel",
+        "w011-estimate-api2"
+      ]
+    },
+    "exit": {
+      "status": "parity_verified",
+      "findings": [
+        "Paritätslauf 16.10.2026 (`development` `7993ce6`): 2 von 2 Fällen byte-identisch; Modi: Text, Konsolen parity-limited."
+      ],
+      "parity_cases": [
+        "c004-exit-limited",
+        "exit"
+      ]
+    },
+    "export": {
+      "status": "partial",
+      "findings": [
+        "Paritätslauf 16.10.2026 (`development` `7993ce6`): 2 von 2 Fällen byte-identisch; Modi: Text.",
+        "Kein Autochanger im Fixture: verglichen sind nur Guards ohne Argumente; Slotbewegungen sind nur durch Einheitentests belegt."
+      ],
+      "open_log_entries": [
+        "C-045"
+      ],
+      "parity_cases": [
+        "c012-export-bad-jobid",
+        "export-noargs"
+      ]
+    },
+    "gui": {
+      "status": "parity_verified",
+      "findings": [
+        "Paritätslauf 16.10.2026 (`development` `7993ce6`): 30 von 30 Fällen byte-identisch; Modi: Text, API 1, API 2, GUI."
+      ],
+      "parity_cases": [
+        "c005-gui-noarg",
+        "c005-gui-foo",
+        "c005-gui-upper",
+        "c005-gui-on-off",
+        "c005-gui-foo-api2",
+        "c005-gui-on-api2",
+        "c005-automount-prompt-then-command",
+        "c027-gui-list-pools",
+        "c027-gui-llist-pools",
+        "c027-gui-list-jobs",
+        "c027-gui-llist-jobs",
+        "c027-gui-list-media",
+        "c027-gui-llist-media",
+        "c027-gui-list-clients",
+        "c027-gui-list-jobtotals",
+        "c027-gui-list-jobmedia",
+        "c027-gui-list-filesets",
+        "c027-gui-list-log",
+        "c027-gui-sql",
+        "c027-gui-sqlquery-keyword",
+        "c027-gui-status-dir",
+        "c027-gui-show",
+        "c027-gui-messages",
+        "c027-gui-off-again",
+        "c027-gui-noarg",
+        "c027-gui-api1",
+        "c027-gui-api2",
+        "c036-gui-on-messages",
+        "gui-on",
+        "gui-off"
+      ]
+    },
+    "help": {
+      "status": "parity_verified",
+      "findings": [
+        "Paritätslauf 16.10.2026 (`development` `7993ce6`): 7 von 7 Fällen byte-identisch; Modi: Text, API 1, Konsolen parity-limited."
+      ],
+      "parity_cases": [
+        "c028-help",
+        "c028-help-run",
+        "help",
+        "help-run",
+        "help-configure",
+        "help-unknown",
+        "help-limited"
+      ]
+    },
+    "import": {
+      "status": "partial",
+      "findings": [
+        "Paritätslauf 16.10.2026 (`development` `7993ce6`): 2 von 2 Fällen byte-identisch; Modi: Text.",
+        "Kein Autochanger im Fixture: verglichen sind nur Guards ohne Argumente; Slotbewegungen und Katalogupdates sind nur durch Einheitentests belegt."
+      ],
+      "open_log_entries": [
+        "C-045"
+      ],
+      "parity_cases": [
+        "c012-import-unknown-storage",
+        "import-noargs"
+      ]
+    },
+    "label": {
+      "status": "partial",
+      "findings": [
+        "Paritätslauf 16.10.2026 (`development` `7993ce6`): 13 von 13 Fällen byte-identisch; Modi: Text, API 1.",
+        "Verglichen sind Dialog-, Namens- und Abbruchpfade; das Labeln selbst (SD-Wirkung, Katalogeintrag) ist laut Testregeln nicht live erlaubt und nur durch Einheitentests belegt."
+      ],
+      "parity_cases": [
+        "c011-label-cancel",
+        "c011-label-name-cancel",
+        "c011-label-pool-cancel",
+        "c011-label-illegal-cancel",
+        "c011-label-used-cancel",
+        "c011-label-barcodes",
+        "c011-label-unknown-storage-cancel",
+        "c011-label-api1-cancel",
+        "c012-label-no-pool",
+        "label-nostorage",
+        "t001-label-existing-cancel",
+        "t001-label-illegal-arg-cancel",
+        "t001-label-illegal-char-cancel"
+      ]
+    },
+    "list": {
+      "status": "partial",
+      "findings": [
+        "Paritätslauf 16.10.2026 (`development` `7993ce6`): 299 von 299 Fällen byte-identisch; Modi: Text, API 1, API 2, GUI, Konsolen parity-bvfs, parity-limited, parity-listacl, parity-operator.",
+        "`list nextvolume` mit unbekanntem Job scheitert im Original im Batchmodus (CMD_FAILED), Onesimus meldet Erfolg (C-046)."
+      ],
+      "open_log_entries": [
+        "C-046"
+      ],
+      "parity_cases": [
+        "c002-list-twice",
+        "c002-private-then-shared",
+        "c002-shared-then-private",
+        "c002-client-keyword",
+        "c002-job-keyword",
+        "c002-catalog-keyword",
+        "c002-use-then-list",
+        "c002-api1",
+        "c002-api2",
+        "c002-gui",
+        "c002-limited-twice",
+        "c002-bvfs-noargs",
+        "c002-sql-then-list",
+        "c015-list-no-keyword",
+        "c015-list-mediatypes-unknown",
+        "c015-list-jobs-jobstatus-T_E",
+        "c015-list-jobs-jobstatus-terminated_fatal",
+        "c015-list-jobs-jobstatus-bogus",
+        "c015-list-jobs-jobstatus-f",
+        "c015-list-jobs-level-Full",
+        "c015-list-jobs-level-I",
+        "c015-list-jobs-level-Incremental_Differential",
+        "c015-list-jobs-level-bogus",
+        "c015-list-jobs-jobtype-B",
+        "c015-list-jobs-jobtype-Backup",
+        "c015-list-jobs-jobtype-Copy",
+        "c015-list-jobs-jobtype-bogus",
+        "c015-list-jobs-client-bareos-fd-limit-2",
+        "c015-list-jobs-client-nosuch",
+        "c015-list-jobs-job-BackupCatalog",
+        "c015-list-jobs-jobname-BackupCatalog-limit-2",
+        "c015-list-jobs-job-nosuch",
+        "c015-list-jobs-days-1",
+        "c015-list-jobs-hours-1",
+        "c015-list-jobs-hours-1000000",
+        "c015-list-jobs-last",
+        "c015-list-jobs-last-jobstatus-T",
+        "c015-list-jobs-limit-2-offset-1",
+        "c015-list-jobs-offset-3",
+        "c015-list-jobs-reverse-limit-3",
+        "c015-list-jobs-count",
+        "c015-list-jobs-count-jobstatus-T",
+        "c015-list-jobs-count-last",
+        "c015-list-jobs-volume-Full-47321",
+        "c015-list-jobs-pool-Full-limit-2",
+        "c015-list-jobs-pool-nosuch",
+        "c015-list-jobs-current",
+        "c015-list-jobs-enabled",
+        "c015-list-jobs-disabled",
+        "c015-list-jobs-limit-0",
+        "c015-list-jobs-limit-abc",
+        "c015-list-jobs-value",
+        "c015-list-job-missing",
+        "c015-list-jobid-missing",
+        "c015-list-jobid-14",
+        "c015-list-jobid-99999",
+        "c015-list-ujobid",
+        "c015-list-jobname",
+        "c015-list-jobtotals-limit",
+        "c015-list-files-jobid-5",
+        "c015-list-files-limit-offset",
+        "c015-list-files-nojobid",
+        "c015-list-files-jobid-99999",
+        "c015-list-files-jobid-14",
+        "c015-list-basefiles-nojobid",
+        "c015-list-files-ujobid",
+        "c015-list-fileset-jobid-1",
+        "c015-list-fileset-filesetid-3",
+        "c015-list-fileset-none",
+        "c015-list-filesets-limit",
+        "c015-list-fileset-jobid-14",
+        "c015-list-jobmedia-all",
+        "c015-list-jobmedia-99999",
+        "c015-list-joblog-none",
+        "c015-list-joblog-99999",
+        "c015-list-joblog-count",
+        "c015-list-joblog-limit",
+        "c015-list-log",
+        "c015-list-log-reverse",
+        "c015-list-log-client",
+        "c015-list-log-client-nosuch",
+        "c015-list-pools",
+        "c015-list-pool-nosuch",
+        "c015-list-poolid-3",
+        "c015-list-poolid-none",
+        "c015-list-pool-Incremental",
+        "c015-list-pool-Scratch",
+        "c015-list-pools-current",
+        "c015-list-client",
+        "c015-list-client-none",
+        "c015-list-client-nosuch",
+        "c015-list-clients-enabled",
+        "c015-list-storages-current",
+        "c015-list-volumes-all",
+        "c015-list-media-all",
+        "c015-list-volumes-jobid-1",
+        "c015-list-volumes-jobid-99999",
+        "c015-list-volumes-pool-nosuch",
+        "c015-list-volumes-limit",
+        "c015-list-volumes-count",
+        "c015-list-volumes-pool-count",
+        "c015-list-volume-nosuch",
+        "c015-list-mediaid",
+        "c015-list-mediaid-none",
+        "c015-list-volumes-all-limit",
+        "c015-list-copies-jobid",
+        "c015-list-copies-jobid-list",
+        "c015-list-copies-jobid-bad",
+        "c015-list-backups-none",
+        "c015-list-backups-fileset",
+        "c015-list-backups-fileset-any",
+        "c015-list-backups-fileset-nosuch",
+        "c015-list-backups-order-desc",
+        "c015-list-backups-order-asc",
+        "c015-list-backups-order-bad",
+        "c015-list-backups-jobstatus",
+        "c015-list-backups-jobstatus-bad",
+        "c015-list-backups-level",
+        "c015-list-backups-level-diff",
+        "c015-list-backups-client-nosuch",
+        "c015-list-jobstats",
+        "c015-list-jobstatistics-none",
+        "c015-list-nextvol",
+        "c015-list-nextvolume-days-3",
+        "c015-list-nextvolume-days-99",
+        "c015-list-nextvolume-catalog",
+        "c015-list-nextvolume-restore",
+        "c015-list-nextvolume-days-0",
+        "c015-list-jobs-x-jobtype-backup",
+        "c015-list-jobs-x-level-VirtualFull",
+        "c015-list-jobs-x-level-f",
+        "c015-list-jobs-x-jobstatus-[",
+        "c015-list-jobs-x-jobstatus-",
+        "c015-list-volumes-all-current",
+        "c015-list-backups-level-bad",
+        "c015-list-jobs-enabled-count",
+        "c015-api2x-list-jobs-current-limit-3",
+        "c015-api2x-list-clients-disabled",
+        "c015-api2x-list-files-jobid-1-limit-2-current",
+        "c015-api2-list-jobs-jobid-99999",
+        "c015-api2-list-files-jobid-5-limit-2-offset-1",
+        "c015-api2-list-log-limit-2",
+        "c015-api2-list-volumes-pool-Full",
+        "c015-api2-list-volumes-all",
+        "c015-api2-list-copies",
+        "c015-api2-list-backups-client-bareos-fd-limit-2",
+        "c015-api2-list-jobtotals",
+        "c015-api2-list-pool-Full",
+        "c015-api2-list-joblog-jobid-1-limit-2",
+        "c015-api2-list-nextvolume-job-backup-bareos-fd",
+        "c015-api2-list-jobs-count",
+        "c015-api2-list-volume-Full-47321",
+        "c015-api2-list-jobmedia-jobid-1",
+        "c015-api2-list-fileset-jobid-1",
+        "c015-api2-list-nosuch",
+        "c015-api2-list",
+        "c015-api2-list-jobid-14",
+        "c015-api2-list-basefiles-jobid-1",
+        "c015-api2-list-clients",
+        "c015-api2-list-storages",
+        "c015-api2-list-jobs-limit-2-offset-1",
+        "c015-api2-list-jobs-job-nosuch",
+        "c015-api2-list-joblog-jobid-1-count",
+        "c015-api2-list-mediaid-47321",
+        "c015-api2-list-volumes-jobid-1",
+        "c015-api2-list-jobstats-jobid-1",
+        "c015-api2-list-backups",
+        "c020-compact-list-pools",
+        "c026-limited-jobs",
+        "c026-limited-jobtotals",
+        "c026-limited-files",
+        "c026-limited-filesets",
+        "c026-limited-jobmedia",
+        "c026-limited-log",
+        "c026-limited-pools",
+        "c026-limited-clients",
+        "c026-limited-volumes",
+        "c026-limited-misc",
+        "c026-listacl-jobs",
+        "c026-listacl-jobtotals",
+        "c026-listacl-files",
+        "c026-listacl-filesets",
+        "c026-listacl-jobmedia",
+        "c026-listacl-log",
+        "c026-listacl-pools",
+        "c026-listacl-clients",
+        "c026-listacl-volumes",
+        "c026-listacl-misc",
+        "c026-operator-jobs",
+        "c026-operator-jobtotals",
+        "c026-operator-files",
+        "c026-operator-filesets",
+        "c026-operator-jobmedia",
+        "c026-operator-log",
+        "c026-operator-pools",
+        "c026-operator-clients",
+        "c026-operator-volumes",
+        "c026-operator-misc",
+        "c026-listacl-api2-1",
+        "c026-listacl-api2-2",
+        "c026-listacl-api2-3",
+        "c026-bvfs-list-denied",
+        "c026-bvfs-api2-list-denied",
+        "c027-gui-list-pools",
+        "c027-gui-list-jobs",
+        "c027-gui-list-media",
+        "c027-gui-list-clients",
+        "c027-gui-list-jobtotals",
+        "c027-gui-list-jobmedia",
+        "c027-gui-list-filesets",
+        "c027-gui-list-log",
+        "c027-gui-sqlquery-keyword",
+        "c027-gui-off-again",
+        "c027-gui-noarg",
+        "c027-gui-api1",
+        "c027-gui-api2",
+        "c028-list-jobs",
+        "c028-list-jobs-limit",
+        "c028-list-jobs-count",
+        "c028-list-jobs-last",
+        "c028-list-jobid",
+        "c028-list-job",
+        "c028-list-jobtotals",
+        "c028-list-basefiles",
+        "c028-list-files",
+        "c028-list-fileset",
+        "c028-list-filesets",
+        "c028-list-jobmedia",
+        "c028-list-joblog",
+        "c028-list-log",
+        "c028-list-pools",
+        "c028-list-pool",
+        "c028-list-clients",
+        "c028-list-client",
+        "c028-list-storages",
+        "c028-list-volumes",
+        "c028-list-volumes-pool",
+        "c028-list-media-all",
+        "c028-list-volume",
+        "c028-list-mediaid",
+        "c028-list-nextvol",
+        "c028-list-copies",
+        "c028-list-copies-jobid",
+        "c028-list-backups",
+        "c028-list-jobstats",
+        "c028-list-jobs-disabled",
+        "c028-list-clients-disabled",
+        "c028-list-schedules-disabled",
+        "c028-list-jobid-none",
+        "c028-list-files-none",
+        "c028-list-noarg",
+        "c028-list-bogus",
+        "c028-list-files-all",
+        "c028-list-volumes-count",
+        "c028-api-toggle",
+        "c035-list-jobtype-bogus-api1",
+        "c035-list-jobtype-bogus-api2",
+        "c035-list-jobtype-bogus-api2-compact",
+        "c035-list-nextvol-days-api1",
+        "c035-list-nextvol-days-api2",
+        "c035-list-nextvol-days-nojob-api2",
+        "c041-list-nextvol-backupcatalog",
+        "list-jobs",
+        "list-jobs-limit-5",
+        "list-jobs-last",
+        "list-jobs-jobstatus-T-limit-3",
+        "list-jobs-client-bareos-fd-limit-3",
+        "list-jobs-level-F-limit-3",
+        "list-jobs-days-0",
+        "list-jobid-1",
+        "list-job-backup-bareos-fd-limit-2",
+        "list-jobtotals",
+        "list-clients",
+        "list-pools",
+        "list-pool-Full",
+        "list-volumes",
+        "list-volumes-pool-Full",
+        "list-volume-Full-0001",
+        "list-media",
+        "list-filesets",
+        "list-files-jobid-1-limit-5",
+        "list-basefiles-jobid-1",
+        "list-copies",
+        "list-backups-client-bareos-fd-limit-3",
+        "list-joblog-jobid-1",
+        "list-jobmedia-jobid-1",
+        "list-log-limit-5",
+        "list-nextvolume-job-backup-bareos-fd",
+        "list-storages",
+        "list-mediatypes",
+        "list-jobs-limit-3-api2",
+        "list-pools-api2",
+        "list-volumes-api2",
+        "list-clients-api2",
+        "list-jobs-limited",
+        "list-bogus",
+        "w011-list-volumes-pool-cancel",
+        "w011-list-volumes-pool-api2",
+        "w011-list-nextvol-cancel"
+      ]
+    },
+    "llist": {
+      "status": "partial",
+      "findings": [
+        "Paritätslauf 16.10.2026 (`development` `7993ce6`): 110 von 110 Fällen byte-identisch; Modi: Text, API 1, API 2, GUI, Konsolen parity-bvfs, parity-limited, parity-listacl, parity-operator.",
+        "`llist nextvolume` teilt den Pfad von `list nextvolume` (C-046)."
+      ],
+      "open_log_entries": [
+        "C-046"
+      ],
+      "parity_cases": [
+        "c015-llist-no-keyword",
+        "c015-llist-jobs-jobstatus-f",
+        "c015-llist-jobs-last",
+        "c015-llist-jobs-count",
+        "c015-llist-jobs-limit-2-offset-1",
+        "c015-llist-jobs-reverse-limit-2",
+        "c015-llist-jobs-client-bareos-fd-limit-1",
+        "c015-llist-jobs-volume-Full-47321-limit-2",
+        "c015-llist-jobid-14",
+        "c015-llist-ujobid-nosuch",
+        "c015-llist-files-jobid-5",
+        "c015-llist-fileset-jobid-1",
+        "c015-llist-jobmedia-all",
+        "c015-llist-joblog-count",
+        "c015-llist-log",
+        "c015-llist-pool-nosuch",
+        "c015-llist-poolid-3",
+        "c015-llist-client",
+        "c015-llist-volumes-all",
+        "c015-llist-volumes-jobid-1",
+        "c015-llist-volumeid",
+        "c015-llist-backups",
+        "c015-llist-jobstats",
+        "c015-llist-pools-current",
+        "c015-llist-volumes-all-current",
+        "c015-llist-jobs-current-limit",
+        "c015-api2x-llist-jobs-disabled",
+        "c015-api2-llist-pool-Full",
+        "c015-api2-llist-jobs-jobid-14",
+        "c026-limited-llist-jobs",
+        "c026-limited-filesets",
+        "c026-limited-log",
+        "c026-limited-pools",
+        "c026-limited-clients",
+        "c026-limited-volumes",
+        "c026-limited-misc",
+        "c026-listacl-llist-jobs",
+        "c026-listacl-filesets",
+        "c026-listacl-log",
+        "c026-listacl-pools",
+        "c026-listacl-clients",
+        "c026-listacl-volumes",
+        "c026-listacl-misc",
+        "c026-operator-llist-jobs",
+        "c026-operator-filesets",
+        "c026-operator-log",
+        "c026-operator-pools",
+        "c026-operator-clients",
+        "c026-operator-volumes",
+        "c026-operator-misc",
+        "c026-listacl-api2-1",
+        "c026-listacl-api2-2",
+        "c026-listacl-api2-3",
+        "c026-bvfs-list-denied",
+        "c027-gui-llist-pools",
+        "c027-gui-llist-jobs",
+        "c027-gui-llist-media",
+        "c027-gui-list-clients",
+        "c027-gui-sqlquery-keyword",
+        "c027-gui-off-again",
+        "c028-llist-jobs",
+        "c028-llist-jobs-limit",
+        "c028-llist-jobid",
+        "c028-llist-jobtotals",
+        "c028-llist-files",
+        "c028-llist-fileset",
+        "c028-llist-filesets",
+        "c028-llist-jobmedia",
+        "c028-llist-joblog",
+        "c028-llist-log",
+        "c028-llist-pools",
+        "c028-llist-clients",
+        "c028-llist-storages",
+        "c028-llist-volumes",
+        "c028-llist-backups",
+        "c028-llist-jobs-last",
+        "c028-llist-pool-full",
+        "llist-jobs",
+        "llist-jobs-limit-5",
+        "llist-jobs-last",
+        "llist-jobs-jobstatus-T-limit-3",
+        "llist-jobs-client-bareos-fd-limit-3",
+        "llist-jobs-level-F-limit-3",
+        "llist-jobs-days-0",
+        "llist-jobid-1",
+        "llist-job-backup-bareos-fd-limit-2",
+        "llist-jobtotals",
+        "llist-clients",
+        "llist-pools",
+        "llist-pool-Full",
+        "llist-volumes",
+        "llist-volumes-pool-Full",
+        "llist-volume-Full-0001",
+        "llist-media",
+        "llist-filesets",
+        "llist-files-jobid-1-limit-5",
+        "llist-basefiles-jobid-1",
+        "llist-copies",
+        "llist-backups-client-bareos-fd-limit-3",
+        "llist-joblog-jobid-1",
+        "llist-jobmedia-jobid-1",
+        "llist-log-limit-5",
+        "llist-nextvolume-job-backup-bareos-fd",
+        "llist-storages",
+        "llist-mediatypes",
+        "llist-jobs-limit-3-api2",
+        "llist-pools-api2",
+        "llist-volumes-api2",
+        "llist-clients-api2",
+        "w011-llist-volumes-pool-cancel"
+      ]
+    },
+    "messages": {
+      "status": "parity_verified",
+      "findings": [
+        "Paritätslauf 16.10.2026 (`development` `7993ce6`): 13 von 13 Fällen byte-identisch; Modi: Text, API 1, API 2, GUI, Konsolen parity-limited, parity-operator.",
+        "Jobmeldungen selbst (Texte aus Jobs) sind Gegenstand von C-051, nicht dieses Befehls."
+      ],
+      "parity_cases": [
+        "c027-gui-messages",
+        "c028-messages",
+        "c036-messages-twice",
+        "c036-messages-abbrev",
+        "c036-messages-args",
+        "c036-autodisplay-on-messages",
+        "c036-gui-on-messages",
+        "c036-messages-api1",
+        "c036-messages-api2",
+        "c036-autodisplay-on-api1",
+        "c036-messages-limited",
+        "c036-messages-operator",
+        "messages"
+      ]
+    },
+    "memory": {
+      "status": "parity_verified",
+      "findings": [
+        "Paritätslauf 16.10.2026 (`development` `7993ce6`): 3 von 3 Fällen byte-identisch; Modi: Text, API 2."
+      ],
+      "parity_cases": [
+        "c009-memory",
+        "c009-memory-json",
+        "memory"
+      ]
+    },
+    "mount": {
+      "status": "partial",
+      "findings": [
+        "Paritätslauf 16.10.2026 (`development` `7993ce6`): 16 von 16 Fällen byte-identisch; Modi: Text.",
+        "Autochanger-Slots und NDMP fehlen bzw. sind ungeprüft (C-045/C-050 Umfeld); verglichen sind Auswahl und Fehlerpfade am File-Storage."
+      ],
+      "open_log_entries": [
+        "C-050"
+      ],
+      "parity_cases": [
+        "c013-mount-auto",
+        "c013-mount-positional",
+        "c013-mount-storage",
+        "c013-mount-sd-drive",
+        "c013-mount-slot",
+        "c013-mount-twice",
+        "c013-mount-question",
+        "c013-mount-notfound",
+        "c013-mount-bare-storage",
+        "c013-mount-jobid-bad",
+        "c013-mount-jobid-notrunning",
+        "c013-mount-job-notrunning",
+        "c013-mount-job-novalue",
+        "c013-mount-ujobid-notrunning",
+        "c013-release-then-mount",
+        "mount-dialog"
+      ]
+    },
+    "move": {
+      "status": "partial",
+      "findings": [
+        "Paritätslauf 16.10.2026 (`development` `7993ce6`): 2 von 2 Fällen byte-identisch; Modi: Text.",
+        "Kein Autochanger im Fixture: verglichen sind nur Guards ohne Argumente; Slotbewegungen sind nur durch Einheitentests belegt. Die Originalsyntax srcslots/dstslots wird inzwischen ausgewertet."
+      ],
+      "open_log_entries": [
+        "C-045"
+      ],
+      "parity_cases": [
+        "c012-move-job-not-running",
+        "move-noargs"
+      ]
+    },
+    "prune": {
+      "status": "partial",
+      "findings": [
+        "Paritätslauf 16.10.2026 (`development` `7993ce6`): 35 von 35 Fällen byte-identisch; Modi: Text, API 1, API 2, Konsolen parity-c030-client, parity-c030-job, parity-c030-pool, parity-c030-storage.",
+        "Verglichen sind Dialoge, ACL-Prüfungen (C-030) und Bestätigungstexte auf der Katalogkopie; der Katalogzustand nach dem Prunen wird nicht verglichen."
+      ],
+      "parity_cases": [
+        "c011-prune-cancel",
+        "c011-prune-api1-cancel",
+        "c011-prune-files-cancel",
+        "c011-prune-volume-cancel",
+        "c011-prune-jobs-cancel",
+        "c011-prune-jobs-mod-no",
+        "c011-prune-stats-cancel",
+        "c011-prune-volume-select-cancel",
+        "c011-prune-volume-unknown",
+        "c011-prune-directory-cancel",
+        "c012-prune-jobs-confirm",
+        "c030-prune-job",
+        "c030-prune-storage",
+        "c030-prune-client",
+        "c030-prune-pool",
+        "c030-prune-volume-client",
+        "c030-prune-stats-client",
+        "c030-prune-stats-pool",
+        "c030-prune-directory-pool",
+        "c030-prune-directory-client-cancel",
+        "c030-prune-files-pool-cancel",
+        "c030-prune-jobs-pool-cancel",
+        "c030-prune-volume-pool-cancel",
+        "c030-prune-job-api1",
+        "c030-prune-storage-api2",
+        "c030-prune-volume-pool-report",
+        "c030-prune-volume-all-no",
+        "c030-prune-volume-all-pool-no",
+        "c030-prune-volume-wrong-pool-no",
+        "c030-prune-volume-invalid-name",
+        "c030-prune-files-no",
+        "c030-prune-files-pool-no",
+        "c030-prune-directory-client-no-path",
+        "c030-prune-volume-pool-api1",
+        "prune-dialog"
+      ]
+    },
+    "purge": {
+      "status": "partial",
+      "findings": [
+        "Paritätslauf 16.10.2026 (`development` `7993ce6`): 34 von 34 Fällen byte-identisch; Modi: Text, API 1, API 2, Konsolen parity-c030-client, parity-c030-job, parity-c030-pool, parity-c030-storage.",
+        "`action=` (ActionOnPurge, Relabel über SD) fehlt (C-049); `action=truncate` fehlt (C-053).",
+        "Verglichen sind Dialoge, ACL-Prüfungen und Bestätigungstexte auf der Katalogkopie; der Katalogzustand danach wird nicht verglichen."
+      ],
+      "open_log_entries": [
+        "C-049",
+        "C-053"
+      ],
+      "parity_cases": [
+        "c011-purge-cancel",
+        "c011-purge-volume-cancel",
+        "c011-purge-jobs-cancel",
+        "c011-purge-files-cancel",
+        "c011-purge-quota-cancel",
+        "c011-purge-volume-select-cancel",
+        "c011-purge-api1-cancel",
+        "c012-purge-jobs-menu",
+        "c030-purge-job",
+        "c030-purge-storage",
+        "c030-purge-client",
+        "c030-purge-pool",
+        "c030-purge-client-api1",
+        "c030-purge-pool-api2",
+        "c030-purge-jobs-client-no",
+        "c030-purge-jobs-client-cancel",
+        "c030-purge-jobs-client-invalid-answer",
+        "c030-purge-jobs-client-api1",
+        "c030-purge-jobs-client-api2",
+        "c030-purge-jobs-client-jobstatus-bad",
+        "c030-purge-jobs-client-jobstatus-no",
+        "c030-purge-files-client-no",
+        "c030-purge-files-menu-client-no",
+        "c030-purge-jobs-pool-no",
+        "c030-purge-jobs-pool-incremental-no",
+        "c030-purge-volume-no",
+        "c030-purge-volume-error-no",
+        "c030-purge-volume-jobstatus-bad",
+        "c030-purge-volume-jobid",
+        "c030-purge-volume-two-no",
+        "c030-purge-volume-menu-no",
+        "c030-purge-volume-api1",
+        "c030-purge-quota-client",
+        "purge-dialog"
+      ]
+    },
+    "quit": {
+      "status": "parity_verified",
+      "findings": [
+        "Paritätslauf 16.10.2026 (`development` `7993ce6`): 5 von 5 Fällen byte-identisch; Modi: Text, API 1, API 2."
+      ],
+      "parity_cases": [
+        "c004-quit-abbrev",
+        "c004-quit-after-command",
+        "c004-quit-api1",
+        "c004-quit-json",
+        "quit"
+      ]
+    },
+    "query": {
+      "status": "parity_verified",
+      "findings": [
+        "Paritätslauf 16.10.2026 (`development` `7993ce6`): 8 von 8 Fällen byte-identisch; Modi: Text, API 1."
+      ],
+      "parity_cases": [
+        "c011-query-cancel",
+        "c011-query-badnumber",
+        "c011-query-prompt-cancel",
+        "c011-query-client",
+        "c011-query-api1-cancel",
+        "c016-query-menu",
+        "c028-query-1",
+        "query-list"
+      ]
+    },
+    "restore": {
+      "status": "partial",
+      "findings": [
+        "Paritätslauf 16.10.2026 (`development` `7993ce6`): 28 von 28 Fällen byte-identisch; Modi: Text, API 1, API 2, Konsolen parity-limited.",
+        "Menüpunkte 1, 2, 4–12, Dateibaum-Auswahl, mehrere JobIds und regexwhere fehlen (C-047).",
+        "Verglichen sind Argumentbehandlung und Abbruchpfade; ein echter Restore läuft im Paritätslauf nicht."
+      ],
+      "open_log_entries": [
+        "C-047",
+        "C-051"
+      ],
+      "parity_cases": [
+        "c012-restore-menu",
+        "c021-unknown-keyword",
+        "c021-unknown-backupformat",
+        "c021-unknown-keyword-json",
+        "c021-missing-jobid-value",
+        "c021-missing-file-value",
+        "c021-jobid-not-a-number",
+        "c021-jobid-list-invalid",
+        "c021-jobid-unknown",
+        "c021-jobid-zero",
+        "c021-two-dates",
+        "c021-before-short-date",
+        "c021-before-garbage",
+        "c021-pool-unknown",
+        "c021-fileregex-invalid",
+        "c021-comment-illegal",
+        "c021-comment-empty",
+        "c021-client-unknown",
+        "c021-client-invalid-name",
+        "c021-limited-console",
+        "c021-cancel-menu",
+        "c021-cancel-menu-client",
+        "restore-help",
+        "w011-restore-item-cancel",
+        "w011-restore-badnumber-cancel",
+        "w011-restore-jobids-cancel",
+        "w011-restore-api1-cancel",
+        "w011-restore-api2"
+      ]
+    },
+    "relabel": {
+      "status": "partial",
+      "findings": [
+        "Paritätslauf 16.10.2026 (`development` `7993ce6`): 8 von 8 Fällen byte-identisch; Modi: Text.",
+        "Verglichen sind Dialog- und Abbruchpfade; Relabel über den SD ist nur durch Einheitentests belegt (Antwortauswertung siehe C-053)."
+      ],
+      "open_log_entries": [
+        "C-053"
+      ],
+      "parity_cases": [
+        "c011-relabel-cancel",
+        "c011-relabel-pool-cancel",
+        "c011-relabel-status",
+        "c011-relabel-unknown-cancel",
+        "c012-relabel-unknown-old",
+        "relabel-noargs",
+        "t001-relabel-not-purged",
+        "t001-relabel-old-unknown-cancel"
+      ]
+    },
+    "release": {
+      "status": "partial",
+      "findings": [
+        "Paritätslauf 16.10.2026 (`development` `7993ce6`): 7 von 7 Fällen byte-identisch; Modi: Text.",
+        "Verglichen sind Auswahl und Fehlerpfade am File-Storage; NDMP (C-050) ungeprüft."
+      ],
+      "open_log_entries": [
+        "C-050"
+      ],
+      "parity_cases": [
+        "c013-release-auto",
+        "c013-release-positional",
+        "c013-release-drive",
+        "c013-release-alldrives",
+        "c013-release-notfound",
+        "c013-release-then-mount",
+        "release-dialog"
+      ]
+    },
+    "reload": {
+      "status": "registered_unverified",
+      "findings": [
+        "Kein Paritätsfall (Reload ändert die laufende Konfiguration beider Directors)."
+      ]
+    },
+    "rerun": {
+      "status": "partial",
+      "findings": [
+        "Paritätslauf 16.10.2026 (`development` `7993ce6`): 32 von 32 Fällen byte-identisch; Modi: Text, API 1, API 2.",
+        "Auswahl und Fehlertexte sind verglichen; der tatsächliche Jobstart wird im Paritätslauf nicht ausgeführt (Jobmeldungen C-051)."
+      ],
+      "open_log_entries": [
+        "C-051"
+      ],
+      "parity_cases": [
+        "c006-rerun-noargs-api2",
+        "c006-rerun-badid-api2",
+        "c006-rerun-invalidid",
+        "c012-rerun-confirm",
+        "c033-since-none",
+        "c033-since-yes-none",
+        "c033-since-zero",
+        "c033-since-text",
+        "c033-since-days",
+        "c033-until-only",
+        "c033-since-until-no",
+        "c033-since-list-no",
+        "c033-since-prompt-abort",
+        "c033-since-invalid-answer",
+        "c033-since-long-answer",
+        "c033-since-confirm-run-no",
+        "c033-since-api2",
+        "c033-since-api1",
+        "c033-days-no",
+        "c033-days-negative",
+        "c033-hours-none",
+        "c033-days-hours-no",
+        "c033-jobid-list-no",
+        "c033-jobid-nopool",
+        "c033-jobid-fraction",
+        "c033-jobid-trailing-comma",
+        "c033-jobid-leading-comma",
+        "c033-jobid-empty",
+        "c033-jobid-negative",
+        "c033-jobid-missing-then-ok",
+        "rerun-noargs",
+        "rerun-badid"
+      ]
+    },
+    "resolve": {
+      "status": "parity_verified",
+      "findings": [
+        "Paritätslauf 16.10.2026 (`development` `7993ce6`): 19 von 19 Fällen byte-identisch; Modi: Text, API 2.",
+        "Legacy-/Nicht-TLS-Daemons sind im Fixture nicht vorhanden."
+      ],
+      "parity_cases": [
+        "c018-localhost",
+        "c018-ipv4-literal",
+        "c018-ipv6-literal",
+        "c018-multiple",
+        "c018-unknown",
+        "c018-unknown-after-known",
+        "c018-keyword-value",
+        "c018-no-args",
+        "c018-client-missing-name",
+        "c018-client-unknown",
+        "c018-storage-unknown",
+        "c018-client",
+        "c018-client-twice",
+        "c018-storage",
+        "c018-client-storage",
+        "c018-api2",
+        "c018-api2-client",
+        "resolve-local",
+        "resolve-client"
+      ]
+    },
+    "run": {
+      "status": "partial",
+      "findings": [
+        "Paritätslauf 16.10.2026 (`development` `7993ce6`): 30 von 30 Fällen byte-identisch; Modi: Text, API 1, API 2, Konsolen parity-acl, parity-bvfs, parity-limited, parity-operator.",
+        "`run job=RestoreFiles` fragt im Original nach der JobId (C-043); Onesimus geht direkt zu „OK to run?“.",
+        "Der Paritätslauf startet keine echten Jobs (nur Zusammenfassung, `mod`/`no`/Abbruch). Jobablauf, Jobmeldungen (C-051) und CatReq-Updates (C-055) sind nur durch Einheitentests belegt."
+      ],
+      "open_log_entries": [
+        "C-043",
+        "C-051",
+        "C-055"
+      ],
+      "parity_cases": [
+        "c011-run-cancel",
+        "c011-run-badnumber",
+        "c011-run-api1-cancel",
+        "c011-run-api2",
+        "c011-run-job-no",
+        "c011-run-job-cancel",
+        "c011-run-job-illegal-no",
+        "c011-run-job-mod-cancel",
+        "c011-run-job-mod-level-no",
+        "c011-run-job-mod-priority-no",
+        "c011-run-job-mod-pool-no",
+        "c011-run-job-dotmod-no",
+        "c011-run-select-no",
+        "c011-run-job-api1-no",
+        "c012-run-unknown-noyes",
+        "c012-run-confirm",
+        "c025-run-select-limited",
+        "c025-run-select-limited-api2",
+        "c025-run-select-operator",
+        "c025-run-select-operator-api2",
+        "c025-run-select-bvfs",
+        "c025-run-select-bvfs-api2",
+        "c025-run-select-acl",
+        "c025-run-select-acl-api2",
+        "c041-run-backupcatalog-no",
+        "c041-run-backupcatalog-api1-no",
+        "c041-run-backupcatalog-mod-cancel",
+        "c041-run-backupfd-no",
+        "run-noargs",
+        "run-unknownjob"
+      ]
+    },
+    "status": {
+      "status": "partial",
+      "findings": [
+        "Paritätslauf 16.10.2026 (`development` `7993ce6`): 51 von 52 Fällen byte-identisch; Modi: Text, API 1, API 2, GUI, Konsolen parity-limited.",
+        "Instabil (gemeinsamer echter FD bzw. nicht eindeutige Sortierung, allein grün): `c042-status-client-star`.",
+        "`status storage=… slots` endet ohne Slottabelle (C-045; kein Autochanger im Fixture, der Fall `c042-status-storage-slots` deckt nur den Nicht-Autochanger ab).",
+        "Warte-Zustände laufender Jobs fehlen (C-048); NDMP-Storages werden nicht gesondert behandelt (C-050)."
+      ],
+      "open_log_entries": [
+        "C-045",
+        "C-048",
+        "C-050"
+      ],
+      "parity_cases": [
+        "c013-status-bogus",
+        "c013-status-sd",
+        "c013-status-storage-novalue",
+        "c013-status-storage-notfound",
+        "c013-status-jobid-notrunning",
+        "c013-status-limited",
+        "c014-status-dir",
+        "c014-status-director-days",
+        "c014-status-dir-days-invalid",
+        "c014-status-dir-api1",
+        "c014-status-dir-json",
+        "c014-status-scheduler-preview",
+        "c014-status-scheduler-past",
+        "c014-status-scheduler-range",
+        "c014-status-scheduler-invalid",
+        "c014-status-sched-client",
+        "c014-status-scheduler-json",
+        "c014-status-subscriptions",
+        "c014-status-subscriptions-all",
+        "c014-status-subscriptions-client",
+        "c014-status-subscriptions-limited",
+        "c014-status-configuration",
+        "c014-status-configuration-limited",
+        "c014-status-subscriptions-json",
+        "c014-status-subscriptions-clients",
+        "c014-status-subscriptions-plugins",
+        "c014-status-all",
+        "c027-gui-status-dir",
+        "c028-status-scheduler",
+        "c028-status-dir",
+        "c028-status-scheduler-days",
+        "c042-status-storage",
+        "c042-status-sd",
+        "c042-status-bogus",
+        "c042-status-storage-star",
+        "c042-status-client-star",
+        "c042-status-storage-slots",
+        "c042-status-storage-api1",
+        "c042-status-storage-api2",
+        "c042-status-all",
+        "c042-status-storage-twice",
+        "c042-status-storage-slots-api1",
+        "c042-status-storage-slots-api2",
+        "c042-status-storage-api1-twice",
+        "status-client",
+        "status-storage",
+        "status-scheduler",
+        "status-scheduler-job",
+        "status-subscriptions",
+        "status-configuration",
+        "status-dir",
+        "status-bogus"
+      ]
+    },
+    "setbandwidth": {
+      "status": "partial",
+      "findings": [
+        "Paritätslauf 16.10.2026 (`development` `7993ce6`): 6 von 6 Fällen byte-identisch; Modi: Text, API 1, API 2.",
+        "Verglichen sind Dialog/Abbruch und `setbandwidth limit=100 client=bareos-fd` in API 1/2 (setzt das Limit am gemeinsamen echten FD; die tatsächliche Drosselung wird nicht geprüft). SD-Limits und Jobselektoren sind nur durch Einheitentests belegt (NDMP: C-050)."
+      ],
+      "open_log_entries": [
+        "C-050"
+      ],
+      "parity_cases": [
+        "c011-setbandwidth-cancel",
+        "c011-setbandwidth-badlimit-cancel",
+        "c011-setbandwidth-api2",
+        "c035-setbandwidth-api1",
+        "c035-setbandwidth-api2",
+        "setbandwidth-noargs"
+      ]
+    },
+    "setdebug": {
+      "status": "partial",
+      "findings": [
+        "Paritätslauf 16.10.2026 (`development` `7993ce6`): 7 von 7 Fällen byte-identisch; Modi: Text, API 1.",
+        "Verglichen sind nur Dialog/Abbruch und `setdebug level=0 dir`; Debug-Pegel an echte FD/SD sind laut Testregeln nicht live erlaubt und nur durch Einheitentests belegt (NDMP: C-050)."
+      ],
+      "open_log_entries": [
+        "C-050"
+      ],
+      "parity_cases": [
+        "c011-setdebug-cancel",
+        "c011-setdebug-badlevel-cancel",
+        "c011-setdebug-daemon-cancel",
+        "c011-setdebug-daemon-api1-cancel",
+        "c011-setdebug-daemon-badnumber",
+        "setdebug-dir",
+        "setdebug-noargs"
+      ]
+    },
+    "setdevice": {
+      "status": "partial",
+      "findings": [
+        "Paritätslauf 16.10.2026 (`development` `7993ce6`): 23 von 23 Fällen byte-identisch; Modi: Text, API 1, API 2, Konsolen parity-device, parity-limited.",
+        "NDMP-Storages werden nicht übersprungen (C-050). Verglichen sind ACL, Argumentprüfung und SD-Antwort auf dem Fixture-Storage."
+      ],
+      "open_log_entries": [
+        "C-050"
+      ],
+      "parity_cases": [
+        "c006-setdevice-noargs-api2",
+        "c006-setdevice-wrongarg",
+        "c006-setdevice-nostorage",
+        "c006-setdevice-badbool",
+        "c031-setdevice-forbidden",
+        "c031-setdevice-forbidden-unknown",
+        "c031-setdevice-forbidden-api1",
+        "c031-setdevice-forbidden-api2",
+        "c031-setdevice-permitted-nodev",
+        "c031-setdevice-permitted-nodev-api2",
+        "c031-setdevice-limited-nocmd",
+        "c031-setdevice-nodev",
+        "c031-setdevice-nodev-api1",
+        "c031-setdevice-nodev-api2",
+        "c031-setdevice-nostorage-api2",
+        "c031-setdevice-autoselect-upper",
+        "c031-setdevice-autoselect-on",
+        "c031-setdevice-key-upper",
+        "c031-setdevice-key-novalue",
+        "c031-setdevice-empty-value",
+        "c031-setdevice-missing-two",
+        "c031-setdevice-wrongarg-api2",
+        "setdevice-noargs"
+      ]
+    },
+    "setip": {
+      "status": "partial",
+      "findings": [
+        "Paritätslauf 16.10.2026 (`development` `7993ce6`): 2 von 2 Fällen byte-identisch; Modi: Text, Konsolen parity-limited.",
+        "Verglichen ist nur die Ablehnung für Konsolen ohne gleichnamigen Client; das Setzen der Client-Adresse ist nur durch Einheitentests belegt."
+      ],
+      "parity_cases": [
+        "c012-setip-limited",
+        "setip"
+      ]
+    },
+    "show": {
+      "status": "parity_verified",
+      "findings": [
+        "Paritätslauf 16.10.2026 (`development` `7993ce6`): 53 von 53 Fällen byte-identisch; Modi: Text, API 1, API 2, GUI."
+      ],
+      "parity_cases": [
+        "c007-empty-then-command",
+        "c007-leading-spaces",
+        "c007-leading-tab",
+        "c007-trailing-spaces",
+        "c007-trailing-newline",
+        "c007-uppercase",
+        "c007-mixed-case-prefix",
+        "c007-command-with-value",
+        "c019-add-console",
+        "c019-add-profile",
+        "c019-add-schedule",
+        "c019-add-user",
+        "c019-add-fileset",
+        "c020-compact-show-client",
+        "c020-json-show-client",
+        "c027-gui-show",
+        "c028-show-pools",
+        "c028-show-job",
+        "c028-show-schedules",
+        "c028-show-disabled",
+        "c028-show-all",
+        "c028-show-disabled-jobs",
+        "c035-show-help",
+        "c035-show-help-api1",
+        "c035-show-help-api2",
+        "c041-show-job-backupcatalog",
+        "c041-show-job-backupcatalog-verbose",
+        "c041-show-job-backupfd-verbose",
+        "c041-show-jobdefs-defaultjob",
+        "c041-show-jobdefs-verbose",
+        "c041-show-job-backupcatalog-api2",
+        "show-director",
+        "show-clients",
+        "show-client-bareos-fd",
+        "show-jobs",
+        "show-job-backup-bareos-fd",
+        "show-jobdefs",
+        "show-storages",
+        "show-pools",
+        "show-pool-Full",
+        "show-filesets",
+        "show-fileset-LinuxAll",
+        "show-schedules",
+        "show-messages",
+        "show-catalogs",
+        "show-consoles",
+        "show-profiles",
+        "show-all",
+        "show-disabled",
+        "show-nosuch-foo",
+        "show-job-nosuch",
+        "show-verbose-client",
+        "show-jobs-api2"
+      ]
+    },
+    "sqlquery": {
+      "status": "parity_verified",
+      "findings": [
+        "Paritätslauf 16.10.2026 (`development` `7993ce6`): 13 von 13 Fällen byte-identisch; Modi: Text, API 1, API 2, Konsolen parity-limited."
+      ],
+      "parity_cases": [
+        "c006-unknown-limited",
+        "c011-sqlquery-cancel",
+        "c011-sqlquery-empty",
+        "c011-sqlquery-multiline",
+        "c011-sqlquery-args-ignored",
+        "c016-sqlquery-select",
+        "c016-sqlquery-multiline",
+        "c016-sqlquery-error",
+        "c016-sqlquery-empty",
+        "c016-sqlquery-args-ignored",
+        "c016-sqlquery-api2",
+        "c028-sqlquery",
+        "sqlquery-select"
+      ]
+    },
+    "time": {
+      "status": "parity_verified",
+      "findings": [
+        "Paritätslauf 16.10.2026 (`development` `7993ce6`): 1 von 1 Fällen byte-identisch; Modi: Text."
+      ],
+      "parity_cases": [
+        "time"
+      ]
+    },
+    "trace": {
+      "status": "partial",
+      "findings": [
+        "Paritätslauf 16.10.2026 (`development` `7993ce6`): 3 von 3 Fällen byte-identisch; Modi: Text, API 1.",
+        "Verglichen sind Dialog und Abbruch; das Schreiben der Trace-Datei ist nur durch Einheitentests belegt."
+      ],
+      "parity_cases": [
+        "c011-trace-cancel",
+        "c011-trace-api1-cancel",
+        "trace-noargs"
+      ]
+    },
+    "truncate": {
+      "status": "partial",
+      "findings": [
+        "Paritätslauf 16.10.2026 (`development` `7993ce6`): 8 von 8 Fällen byte-identisch; Modi: Text.",
+        "Truncate über SD-Relabel mit Auswertung von `3000 OK label.` fehlt (C-053); verglichen sind nur Guards und Abbruchpfade."
+      ],
+      "open_log_entries": [
+        "C-053"
+      ],
+      "parity_cases": [
+        "c012-truncate-yes-only",
+        "c012-truncate-bad-volstatus",
+        "c012-truncate-unknown-arg",
+        "c012-truncate-bad-drive",
+        "truncate-noargs",
+        "w011-truncate-storage-cancel",
+        "w011-truncate-pool-cancel",
+        "w011-truncate-confirm-no"
+      ]
+    },
+    "unmount": {
+      "status": "registered_unverified",
+      "findings": [
+        "Kein Paritätsfall: Unmount am echten SD ist laut Testregeln nicht live erlaubt; Verhalten nur durch Einheitentests belegt."
+      ],
+      "open_log_entries": [
+        "C-050"
+      ]
+    },
+    "umount": {
+      "status": "registered_unverified",
+      "findings": [
+        "Alias von unmount; kein Paritätsfall (siehe unmount)."
+      ],
+      "open_log_entries": [
+        "C-050"
+      ]
+    },
+    "update": {
+      "status": "partial",
+      "findings": [
+        "Paritätslauf 16.10.2026 (`development` `7993ce6`): 47 von 47 Fällen byte-identisch; Modi: Text, API 1.",
+        "`update slots` meldet „not supported“ (C-054). Volume-/Pool-Parameter sind verglichen, `update stats` und Autochanger-Pfade nicht vollständig."
+      ],
+      "open_log_entries": [
+        "C-054"
+      ],
+      "parity_cases": [
+        "c011-update-cancel",
+        "c011-update-volume-cancel",
+        "c011-update-pool-cancel",
+        "c011-update-stats-cancel",
+        "c011-update-volume-done",
+        "c011-update-volume-status-cancel",
+        "c011-update-volume-badnumber-cancel",
+        "c011-update-pool-select-cancel",
+        "c011-update-volume-unknown",
+        "c011-update-slots",
+        "c011-update-jobid-missing",
+        "c011-update-api1-cancel",
+        "c012-update-bad-volstatus",
+        "update-dialog",
+        "t001-update-volstatus-bad",
+        "t001-update-missing-media-first",
+        "t001-update-maxvoljobs-word",
+        "t001-update-maxvolfiles-junk",
+        "t001-update-maxvolbytes-bad",
+        "t001-update-volretention-bad",
+        "t001-update-voluse-bad",
+        "t001-update-recycle-bad",
+        "t001-update-inchanger-bad",
+        "t001-update-slot-negative",
+        "t001-update-slot-maxvols",
+        "t001-update-enabled-bad",
+        "t001-update-enabled-word",
+        "t001-update-encrypt-bad",
+        "t001-update-encrypt-nokey",
+        "t001-update-pool-unknown",
+        "t001-update-recyclepool-unknown",
+        "t001-update-allfrompool-unknown",
+        "t001-update-pool-resource-unknown",
+        "t001-update-two-errors",
+        "t001-dialog-status-cancel",
+        "t001-dialog-retention-bad",
+        "t001-dialog-use-bad",
+        "t001-dialog-maxjobs-bad",
+        "t001-dialog-maxfiles-bad",
+        "t001-dialog-maxbytes-bad",
+        "t001-dialog-recycle-bad",
+        "t001-dialog-slot-bad",
+        "t001-dialog-inchanger-bad",
+        "t001-dialog-volfiles-decline",
+        "t001-dialog-pool-unknown",
+        "t001-dialog-enabled-bad",
+        "t001-dialog-recyclepool-cancel"
+      ]
+    },
+    "use": {
+      "status": "parity_verified",
+      "findings": [
+        "Paritätslauf 16.10.2026 (`development` `7993ce6`): 7 von 7 Fällen byte-identisch; Modi: Text, Konsolen parity-limited, parity-operator."
+      ],
+      "parity_cases": [
+        "c002-use-then-list",
+        "c002-use-noargs",
+        "c023-use",
+        "c023-use-var",
+        "c023-limited",
+        "c023-operator",
+        "use"
+      ]
+    },
+    "var": {
+      "status": "parity_verified",
+      "findings": [
+        "Paritätslauf 16.10.2026 (`development` `7993ce6`): 16 von 16 Fällen byte-identisch; Modi: Text, API 2, Konsolen parity-limited, parity-operator.",
+        "Nacktes `var` gibt im Original undefinierte Speicherreste aus; der Fall `var` prüft deshalb nur die Katalogzeilen davor."
+      ],
+      "parity_cases": [
+        "c023-var-blank",
+        "c023-var-date",
+        "c023-var-job",
+        "c023-var-jobname",
+        "c023-var-undefined",
+        "c023-var-env",
+        "c023-var-ops",
+        "c023-var-errors",
+        "c023-var-escapes",
+        "c023-var-loops",
+        "c023-var-catalog-arg",
+        "c023-var-api2",
+        "c023-use-var",
+        "c023-limited",
+        "c023-operator",
+        "var"
+      ]
+    },
+    "version": {
+      "status": "parity_verified",
+      "findings": [
+        "Paritätslauf 16.10.2026 (`development` `7993ce6`): 9 von 9 Fällen byte-identisch; Modi: Text, API 1, API 2."
+      ],
+      "parity_cases": [
+        "c004-quit-after-command",
+        "c009-version",
+        "c009-version-json",
+        "c009-version-api1",
+        "c020-compact-version",
+        "c020-json-version",
+        "c020-compact-persists",
+        "c020-compact-reset",
+        "version"
+      ]
+    },
+    "wait": {
+      "status": "partial",
+      "findings": [
+        "Paritätslauf 16.10.2026 (`development` `7993ce6`): 5 von 5 Fällen byte-identisch; Modi: Text, API 1, API 2.",
+        "Verglichen sind nur `wait` ohne laufende Jobs und `wait mount timeout=`; das Warten auf echte Jobenden ist nur durch Einheitentests belegt (C-048)."
+      ],
+      "open_log_entries": [
+        "C-048"
+      ],
+      "parity_cases": [
+        "c035-wait-mount-timeout",
+        "c035-wait-mount-timeout-api1",
+        "c035-wait-mount-timeout-api2",
+        "wait-idle",
+        "wait-jobid"
+      ]
+    },
+    "whoami": {
+      "status": "parity_verified",
+      "findings": [
+        "Paritätslauf 16.10.2026 (`development` `7993ce6`): 9 von 9 Fällen byte-identisch; Modi: Text, API 1, API 2, Konsolen parity-limited, parity-operator."
+      ],
+      "parity_cases": [
+        "c010-whoami-default",
+        "c010-whoami-named",
+        "c010-whoami-limited",
+        "c010-whoami-json",
+        "c010-whoami-json-named",
+        "c010-whoami-api1",
+        "c036-messages-operator",
+        "whoami",
+        "whoami-limited"
       ]
     }
   },
   "cross_cutting_findings": [
     {
-      "title": "ACL-Parität fehlt",
-      "description": "Das Original prüft Command_ACL vor dem Dispatch. Im lokalen Dispatch ist keine entsprechende Prüfung vorhanden; .authorized prüft Existenz und akzeptiert cmd pauschal. Authentifizierung mit Passwort/Token ist kein Ersatz für diese Autorisierung.",
-      "evidence": [
-        {
-          "file": "core/src/dird/ua_cmds.cc",
-          "line": 540,
-          "url": "https://github.com/bareos/bareos/blob/18be77e6832e33f5acd64094b9cba6066f2503f9/core/src/dird/ua_cmds.cc#L540"
-        },
-        {
-          "file": "crates/onesimus-dird/src/command_registry.rs",
-          "line": 346
-        },
-        {
-          "file": "crates/onesimus-dird/src/commands/dot.rs",
-          "line": 175
-        }
-      ]
-    },
-    {
       "title": "Scheduler startet keine Worker",
-      "description": "dispatch_ready_jobs entfernt fällige Jobs und zählt sie, enthält aber weiterhin den TODO zum Fork eines Workers. Geplante Backups sind dadurch nicht funktionsgleich zum Original; dies ist bereits im Backlog dokumentiert.",
+      "description": "dispatch_ready_jobs entfernt fällige Jobs und zählt sie, enthält aber weiterhin den TODO zum Fork eines Workers. Geplante Backups sind dadurch nicht funktionsgleich zum Original; dies ist im Backlog dokumentiert und vom Paritätslauf nicht erfasst.",
       "evidence": [
         {
           "file": "crates/onesimus-dird/src/scheduler.rs",
-          "line": 148
+          "line": 165
         },
         {
           "file": "docs/BACKLOG.md",
@@ -272,18 +2397,275 @@
       ]
     },
     {
-      "title": "Hilfetext ist kein Implementierungsnachweis",
-      "description": "Die vorhandene UA_COMMANDS-Tabelle beschreibt Originalsyntax, während die tatsächliche Ausführung über command_registry erfolgt. configure enthält in der lokalen UA-Tabelle einen Generator-Funktionsnamen statt expandierter Syntax, .locations den Text NULL statt eines fehlenden Hilfetextes.",
+      "title": "Daemon-Seiteneffekte nicht im Paritätslauf",
+      "description": "FD und SD sind im Paritätslauf echt und gemeinsam. Zustandsändernde Daemonbefehle (Labeln, Unmount, Bandbreiten- und Debuglimits, Cancel laufender Jobs, echte Backup-/Restore-Jobs) werden deshalb nicht live verglichen; ihre Wirkung ist nur durch Einheitentests belegt. Betroffene Befehle stehen höchstens auf partial.",
       "evidence": [
         {
-          "file": "crates/onesimus-dird/src/ua_commands_table.rs",
-          "line": 4
-        },
+          "file": "docs/COMPATIBILITY-LOG.md",
+          "line": 110
+        }
+      ]
+    },
+    {
+      "title": "Katalogwirkung wird nicht verglichen",
+      "description": "Der Paritätsvergleich prüft Antwortbytes, Signale und Endgrund je Schritt sowie das Audit-Log, nicht den Katalogzustand nach einem Befehl. Katalogändernde Befehle sind nur so weit belegt, wie Folgeschritte im selben Fall (z. B. list/show) die Wirkung sichtbar machen.",
+      "evidence": [
         {
-          "file": "crates/onesimus-dird/src/command_executor.rs",
-          "line": 53
+          "file": "tests/parity/parity.py",
+          "line": 162
         }
       ]
     }
-  ]
+  ],
+  "parity_evidence": {
+    "date": "2026-10-16",
+    "development_commit": "7993ce6",
+    "cases": 1481,
+    "counts": {
+      "match": 1479,
+      "diff": 2,
+      "error": 0
+    },
+    "command": "python3 tests/parity/parity.py run --port 39930 --work target/parity",
+    "differing_cases": [
+      "c035-delete-noarg-api2",
+      "c042-status-client-star"
+    ]
+  },
+  "restore_file_selection_commands": {
+    "abort": {
+      "status": "missing_context",
+      "open_log_entries": [
+        "C-047"
+      ],
+      "findings": [
+        "Onesimus restore queues a job directly; no interactive restore file-selection shell is implemented (C-047). The restore menu cases c021-* only cover argument handling and aborts before the tree."
+      ]
+    },
+    "add": {
+      "status": "missing_context",
+      "open_log_entries": [
+        "C-047"
+      ],
+      "findings": [
+        "Onesimus restore queues a job directly; no interactive restore file-selection shell is implemented (C-047). The restore menu cases c021-* only cover argument handling and aborts before the tree."
+      ]
+    },
+    "cd": {
+      "status": "missing_context",
+      "open_log_entries": [
+        "C-047"
+      ],
+      "findings": [
+        "Onesimus restore queues a job directly; no interactive restore file-selection shell is implemented (C-047). The restore menu cases c021-* only cover argument handling and aborts before the tree."
+      ]
+    },
+    "count": {
+      "status": "missing_context",
+      "open_log_entries": [
+        "C-047"
+      ],
+      "findings": [
+        "Onesimus restore queues a job directly; no interactive restore file-selection shell is implemented (C-047). The restore menu cases c021-* only cover argument handling and aborts before the tree."
+      ]
+    },
+    "delete": {
+      "status": "missing_context",
+      "open_log_entries": [
+        "C-047"
+      ],
+      "findings": [
+        "Onesimus restore queues a job directly; no interactive restore file-selection shell is implemented (C-047). The restore menu cases c021-* only cover argument handling and aborts before the tree."
+      ]
+    },
+    "dir": {
+      "status": "missing_context",
+      "open_log_entries": [
+        "C-047"
+      ],
+      "findings": [
+        "Onesimus restore queues a job directly; no interactive restore file-selection shell is implemented (C-047). The restore menu cases c021-* only cover argument handling and aborts before the tree."
+      ]
+    },
+    ".dir": {
+      "status": "missing_context",
+      "open_log_entries": [
+        "C-047"
+      ],
+      "findings": [
+        "Onesimus restore queues a job directly; no interactive restore file-selection shell is implemented (C-047). The restore menu cases c021-* only cover argument handling and aborts before the tree."
+      ]
+    },
+    "done": {
+      "status": "missing_context",
+      "open_log_entries": [
+        "C-047"
+      ],
+      "findings": [
+        "Onesimus restore queues a job directly; no interactive restore file-selection shell is implemented (C-047). The restore menu cases c021-* only cover argument handling and aborts before the tree."
+      ]
+    },
+    "estimate": {
+      "status": "missing_context",
+      "open_log_entries": [
+        "C-047"
+      ],
+      "findings": [
+        "Onesimus restore queues a job directly; no interactive restore file-selection shell is implemented (C-047). The restore menu cases c021-* only cover argument handling and aborts before the tree."
+      ]
+    },
+    "exit": {
+      "status": "missing_context",
+      "open_log_entries": [
+        "C-047"
+      ],
+      "findings": [
+        "Onesimus restore queues a job directly; no interactive restore file-selection shell is implemented (C-047). The restore menu cases c021-* only cover argument handling and aborts before the tree."
+      ]
+    },
+    "find": {
+      "status": "missing_context",
+      "open_log_entries": [
+        "C-047"
+      ],
+      "findings": [
+        "Onesimus restore queues a job directly; no interactive restore file-selection shell is implemented (C-047). The restore menu cases c021-* only cover argument handling and aborts before the tree."
+      ]
+    },
+    "help": {
+      "status": "missing_context",
+      "open_log_entries": [
+        "C-047"
+      ],
+      "findings": [
+        "Onesimus restore queues a job directly; no interactive restore file-selection shell is implemented (C-047). The restore menu cases c021-* only cover argument handling and aborts before the tree."
+      ]
+    },
+    "ls": {
+      "status": "missing_context",
+      "open_log_entries": [
+        "C-047"
+      ],
+      "findings": [
+        "Onesimus restore queues a job directly; no interactive restore file-selection shell is implemented (C-047). The restore menu cases c021-* only cover argument handling and aborts before the tree."
+      ]
+    },
+    ".ls": {
+      "status": "missing_context",
+      "open_log_entries": [
+        "C-047"
+      ],
+      "findings": [
+        "Onesimus restore queues a job directly; no interactive restore file-selection shell is implemented (C-047). The restore menu cases c021-* only cover argument handling and aborts before the tree."
+      ]
+    },
+    ".lsdir": {
+      "status": "missing_context",
+      "open_log_entries": [
+        "C-047"
+      ],
+      "findings": [
+        "Onesimus restore queues a job directly; no interactive restore file-selection shell is implemented (C-047). The restore menu cases c021-* only cover argument handling and aborts before the tree."
+      ]
+    },
+    "lsmark": {
+      "status": "missing_context",
+      "open_log_entries": [
+        "C-047"
+      ],
+      "findings": [
+        "Onesimus restore queues a job directly; no interactive restore file-selection shell is implemented (C-047). The restore menu cases c021-* only cover argument handling and aborts before the tree."
+      ]
+    },
+    ".lsmark": {
+      "status": "missing_context",
+      "open_log_entries": [
+        "C-047"
+      ],
+      "findings": [
+        "Onesimus restore queues a job directly; no interactive restore file-selection shell is implemented (C-047). The restore menu cases c021-* only cover argument handling and aborts before the tree."
+      ]
+    },
+    "mark": {
+      "status": "missing_context",
+      "open_log_entries": [
+        "C-047"
+      ],
+      "findings": [
+        "Onesimus restore queues a job directly; no interactive restore file-selection shell is implemented (C-047). The restore menu cases c021-* only cover argument handling and aborts before the tree."
+      ]
+    },
+    "markdir": {
+      "status": "missing_context",
+      "open_log_entries": [
+        "C-047"
+      ],
+      "findings": [
+        "Onesimus restore queues a job directly; no interactive restore file-selection shell is implemented (C-047). The restore menu cases c021-* only cover argument handling and aborts before the tree."
+      ]
+    },
+    "pwd": {
+      "status": "missing_context",
+      "open_log_entries": [
+        "C-047"
+      ],
+      "findings": [
+        "Onesimus restore queues a job directly; no interactive restore file-selection shell is implemented (C-047). The restore menu cases c021-* only cover argument handling and aborts before the tree."
+      ]
+    },
+    ".pwd": {
+      "status": "missing_context",
+      "open_log_entries": [
+        "C-047"
+      ],
+      "findings": [
+        "Onesimus restore queues a job directly; no interactive restore file-selection shell is implemented (C-047). The restore menu cases c021-* only cover argument handling and aborts before the tree."
+      ]
+    },
+    "unmark": {
+      "status": "missing_context",
+      "open_log_entries": [
+        "C-047"
+      ],
+      "findings": [
+        "Onesimus restore queues a job directly; no interactive restore file-selection shell is implemented (C-047). The restore menu cases c021-* only cover argument handling and aborts before the tree."
+      ]
+    },
+    "unmarkdir": {
+      "status": "missing_context",
+      "open_log_entries": [
+        "C-047"
+      ],
+      "findings": [
+        "Onesimus restore queues a job directly; no interactive restore file-selection shell is implemented (C-047). The restore menu cases c021-* only cover argument handling and aborts before the tree."
+      ]
+    },
+    "quit": {
+      "status": "missing_context",
+      "open_log_entries": [
+        "C-047"
+      ],
+      "findings": [
+        "Onesimus restore queues a job directly; no interactive restore file-selection shell is implemented (C-047). The restore menu cases c021-* only cover argument handling and aborts before the tree."
+      ]
+    },
+    ".help": {
+      "status": "missing_context",
+      "open_log_entries": [
+        "C-047"
+      ],
+      "findings": [
+        "Onesimus restore queues a job directly; no interactive restore file-selection shell is implemented (C-047). The restore menu cases c021-* only cover argument handling and aborts before the tree."
+      ]
+    },
+    "?": {
+      "status": "missing_context",
+      "open_log_entries": [
+        "C-047"
+      ],
+      "findings": [
+        "Onesimus restore queues a job directly; no interactive restore file-selection shell is implemented (C-047). The restore menu cases c021-* only cover argument handling and aborts before the tree."
+      ]
+    }
+  }
 }

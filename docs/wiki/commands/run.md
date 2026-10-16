@@ -15,9 +15,15 @@ run job=<job-name> client=<client-name> fileset=<fileset-name> level=<level> sto
 
 **RunScript erlaubt:** nein. **Audit-Ereignis:** ja. Beide Flags sind keine Read-only-Klassifizierung.
 
-**Onesimus-Status:** `partial`. Funktionsparität ist nicht durch einen Live-Test nachgewiesen.
+**Onesimus-Status:** `partial`. Paritätsfälle vorhanden, vollständige Funktionsparität aber nicht nachgewiesen (siehe Befunde).
 
-- Incremental/Differential bleiben bei passender erfolgreicher Backup-Kette erhalten. Referenzen sind nach Client, Job und FileSet eingegrenzt; ohne Full-Basis wird vor Poolwahl und Jobanlage auf Full hochgestuft, DB-Fehler brechen ab. FileSet-/Pool-Overrides werden ausgewertet. Accurate/VirtualFull, FileSet-Inhaltsänderungsprüfung, weitere Originaloptionen und Live-SHA-256-/Backup-Abgleich bleiben offen.
+- Paritätslauf 16.10.2026 (`development` `7993ce6`): 30 von 30 Fällen byte-identisch; Modi: Text, API 1, API 2, Konsolen parity-acl, parity-bvfs, parity-limited, parity-operator.
+- `run job=RestoreFiles` fragt im Original nach der JobId (C-043); Onesimus geht direkt zu „OK to run?“.
+- Der Paritätslauf startet keine echten Jobs (nur Zusammenfassung, `mod`/`no`/Abbruch). Jobablauf, Jobmeldungen (C-051) und CatReq-Updates (C-055) sind nur durch Einheitentests belegt.
+
+**Offene Logeinträge:** `C-043`, `C-051`, `C-055` ([Kompatibilitätslog](../../COMPATIBILITY-LOG.md)).
+
+**Paritätsfälle (30):** `c011-run-cancel`, `c011-run-badnumber`, `c011-run-api1-cancel`, `c011-run-api2`, `c011-run-job-no`, `c011-run-job-cancel`, `c011-run-job-illegal-no`, `c011-run-job-mod-cancel`, `c011-run-job-mod-level-no`, `c011-run-job-mod-priority-no`, `c011-run-job-mod-pool-no`, `c011-run-job-dotmod-no`, `c011-run-select-no`, `c011-run-job-api1-no`, `c012-run-unknown-noyes`, `c012-run-confirm`, `c025-run-select-limited`, `c025-run-select-limited-api2`, `c025-run-select-operator`, `c025-run-select-operator-api2`, `c025-run-select-bvfs`, `c025-run-select-bvfs-api2`, `c025-run-select-acl`, `c025-run-select-acl-api2`, `c041-run-backupcatalog-no`, `c041-run-backupcatalog-api1-no`, `c041-run-backupcatalog-mod-cancel`, `c041-run-backupfd-no`, `run-noargs`, `run-unknownjob`.
 
 **Lokaler Handler:** [crates/onesimus-dird/src/commands/job.rs:15](../../../crates/onesimus-dird/src/commands/job.rs).
 

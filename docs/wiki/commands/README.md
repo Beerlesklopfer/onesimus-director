@@ -8,6 +8,8 @@ Command documentation for Onesimus Director and the original Bareos console inte
 
 The upstream reference is pinned to Bareos commit `18be77e6832e33f5acd64094b9cba6066f2503f9` (branch `bareos-25`, `WIP/25.1.2-pre-43-g18be77e68`), the exact source of the installed reference binary `bareos-dir 25.1.2~pre43.18be77e68`. It contains all 88 top-level commands and the 26 commands of the separate restore file-selection shell. The audit distinguishes handler registration from verified behavior; consult each page's source-derived section before relying on older examples.
 
+Each command's status is derived from the parity comparison (`tests/parity`, original and Onesimus Director on identical fixtures) and the [compatibility log](../../COMPATIBILITY-LOG.md): `parity_verified` means every listed parity case replies byte-identically and no open log entry concerns the command; `partial` names open log entries, differing cases, uncovered variants or side effects only covered by unit tests; `registered_unverified` means there is no parity case yet. Status overview and roadmap: [TODO-COMMANDS.md](../../TODO-COMMANDS.md).
+
 ## Console Commands
 
 | Command | Description |

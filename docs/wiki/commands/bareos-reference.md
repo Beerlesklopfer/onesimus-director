@@ -9,14 +9,14 @@ Das ist der exakte Quellstand des installierten Referenz-Directors (`bareos-dir 
 
 **88 Originalbefehle, davon 88 lokal registriert.** Hinzu kommen 26 Befehle der separaten Restore-Dateiauswahl und 8 lokale Zusatznamen.
 Registrierung ist kein Nachweis funktionaler Vollständigkeit. Der Director ist nach den belegten Lücken **nicht vollständig kompatibel**.
-Dies ist ein statischer Quellcodeabgleich; es wurden keine Live-Jobs, Löschungen oder anderen Director-Befehle ausgeführt.
+Der Status stützt sich auf den Paritätsvergleich (`tests/parity`: Original- und Onesimus-Director nacheinander auf identischer Konfiguration, jede Seite auf eigener Katalogkopie, Rohbytes und Signale je Schritt verglichen) und auf das [Kompatibilitätslog](../../COMPATIBILITY-LOG.md). Paritätslauf vom 16.10.2026 auf `development` = `7993ce6`: 1479 von 1481 Fällen byte-identisch (2 Unterschiede, 0 Fehler).
+`parity_verified` gilt nur für die in der JSON unter `parity_cases` genannten Varianten; Seiteneffekte auf echte FD/SD (Labeln, Mount, Bandbreite, Debug, Cancel laufender Jobs) werden im Paritätslauf nicht ausgeführt und sind nur durch Einheitentests belegt.
 
 | Status | Anzahl | Bedeutung |
 |---|---:|---|
-| `partial` | 23 | Konkrete fehlende Optionen oder Teilfunktionen belegt |
-| `registered_unverified` | 50 | Handler vorhanden; Funktionsparität nicht nachgewiesen |
-| `semantic_mismatch` | 2 | Abweichende Bedeutung gegenüber Bareos |
-| `stub` | 13 | Platzhalter statt der beschriebenen Wirkung |
+| `parity_verified` | 53 | Alle Paritätsfälle des Befehls (Text, API-Modi, Fehlerpfade laut `parity_cases`) byte-identisch, kein offener Logeintrag |
+| `partial` | 31 | Paritätsfälle vorhanden, aber offene Logeinträge, ungedeckte Varianten oder nur einheitengetestete Seiteneffekte |
+| `registered_unverified` | 4 | Handler vorhanden; kein Paritätsfall, Funktionsparität nicht nachgewiesen |
 
 ## Herkunft und Grenzen
 
@@ -37,135 +37,135 @@ Nur `--no-default-features --features mcp-development` kompiliert `execute` ein;
 
 ## Übergreifende Befunde
 
-- **ACL-Parität fehlt** Das Original prüft Command_ACL vor dem Dispatch. Im lokalen Dispatch ist keine entsprechende Prüfung vorhanden; .authorized prüft Existenz und akzeptiert cmd pauschal. Authentifizierung mit Passwort/Token ist kein Ersatz für diese Autorisierung. [core/src/dird/ua_cmds.cc:540](https://github.com/bareos/bareos/blob/18be77e6832e33f5acd64094b9cba6066f2503f9/core/src/dird/ua_cmds.cc#L540) · [crates/onesimus-dird/src/command_registry.rs:346](../../../crates/onesimus-dird/src/command_registry.rs) · [crates/onesimus-dird/src/commands/dot.rs:175](../../../crates/onesimus-dird/src/commands/dot.rs)
-- **Scheduler startet keine Worker** dispatch_ready_jobs entfernt fällige Jobs und zählt sie, enthält aber weiterhin den TODO zum Fork eines Workers. Geplante Backups sind dadurch nicht funktionsgleich zum Original; dies ist bereits im Backlog dokumentiert. [crates/onesimus-dird/src/scheduler.rs:148](../../../crates/onesimus-dird/src/scheduler.rs) · [docs/BACKLOG.md:41](../../../docs/BACKLOG.md)
-- **Hilfetext ist kein Implementierungsnachweis** Die vorhandene UA_COMMANDS-Tabelle beschreibt Originalsyntax, während die tatsächliche Ausführung über command_registry erfolgt. configure enthält in der lokalen UA-Tabelle einen Generator-Funktionsnamen statt expandierter Syntax, .locations den Text NULL statt eines fehlenden Hilfetextes. [crates/onesimus-dird/src/ua_commands_table.rs:4](../../../crates/onesimus-dird/src/ua_commands_table.rs) · [crates/onesimus-dird/src/command_executor.rs:53](../../../crates/onesimus-dird/src/command_executor.rs)
+- **Scheduler startet keine Worker** dispatch_ready_jobs entfernt fällige Jobs und zählt sie, enthält aber weiterhin den TODO zum Fork eines Workers. Geplante Backups sind dadurch nicht funktionsgleich zum Original; dies ist im Backlog dokumentiert und vom Paritätslauf nicht erfasst. [crates/onesimus-dird/src/scheduler.rs:165](../../../crates/onesimus-dird/src/scheduler.rs) · [docs/BACKLOG.md:41](../../../docs/BACKLOG.md)
+- **Daemon-Seiteneffekte nicht im Paritätslauf** FD und SD sind im Paritätslauf echt und gemeinsam. Zustandsändernde Daemonbefehle (Labeln, Unmount, Bandbreiten- und Debuglimits, Cancel laufender Jobs, echte Backup-/Restore-Jobs) werden deshalb nicht live verglichen; ihre Wirkung ist nur durch Einheitentests belegt. Betroffene Befehle stehen höchstens auf partial. [docs/COMPATIBILITY-LOG.md:110](../../../docs/COMPATIBILITY-LOG.md)
+- **Katalogwirkung wird nicht verglichen** Der Paritätsvergleich prüft Antwortbytes, Signale und Endgrund je Schritt sowie das Audit-Log, nicht den Katalogzustand nach einem Befehl. Katalogändernde Befehle sind nur so weit belegt, wie Folgeschritte im selben Fall (z. B. list/show) die Wirkung sichtbar machen. [tests/parity/parity.py:162](../../../tests/parity/parity.py)
 
 ## Director-Konsole: vollständige Originaltabelle
 
 | Befehl | Originalbeschreibung | Lokaler Status |
 |---|---|---|
-| [.](dot-noop.md) | no op | `registered_unverified` |
-| [.actiononpurge](dot-actiononpurge.md) | List possible actions on purge | `registered_unverified` |
-| [.api](dot-api.md) | Switch between different api modes | `registered_unverified` |
-| [.authorized](dot-authorized.md) | Check for authorization | `partial` |
-| [.catalogs](dot-catalogs.md) | List all catalog resources | `registered_unverified` |
-| [.clients](dot-clients.md) | List all client resources | `registered_unverified` |
-| [.consoles](dot-consoles.md) | List all console resources | `registered_unverified` |
-| [.users](dot-users.md) | List all user resources | `registered_unverified` |
-| [.defaults](dot-defaults.md) | Get default settings | `partial` |
-| [.filesets](dot-filesets.md) | List all filesets | `registered_unverified` |
-| [.help](dot-help.md) | Print parsable information about a command | `partial` |
-| [.jobdefs](dot-jobdefs.md) | List all job defaults resources | `registered_unverified` |
-| [.jobs](dot-jobs.md) | List all job resources | `registered_unverified` |
-| [.jobstatus](dot-jobstatus.md) | List jobstatus information | `registered_unverified` |
-| [.levels](dot-levels.md) | List all backup levels | `registered_unverified` |
-| [.locations](dot-locations.md) | Keine Beschreibung in der Originaltabelle (NULL) | `registered_unverified` |
-| [.messages](dot-messages.md) | Display pending messages | `partial` |
-| [.media](dot-media.md) | List all medias | `registered_unverified` |
-| [.mediatypes](dot-mediatypes.md) | List all media types | `registered_unverified` |
-| [.msgs](dot-msgs.md) | List all message resources | `registered_unverified` |
-| [.pools](dot-pools.md) | List all pool resources | `registered_unverified` |
-| [.profiles](dot-profiles.md) | List all profile resources | `registered_unverified` |
-| [.quit](dot-quit.md) | Close connection | `registered_unverified` |
-| [.sql](dot-sql.md) | Send an arbitrary SQL command | `registered_unverified` |
-| [.schedule](dot-schedule.md) | List all schedule resources | `registered_unverified` |
+| [.](dot-noop.md) | no op | `parity_verified` |
+| [.actiononpurge](dot-actiononpurge.md) | List possible actions on purge | `parity_verified` |
+| [.api](dot-api.md) | Switch between different api modes | `parity_verified` |
+| [.authorized](dot-authorized.md) | Check for authorization | `parity_verified` |
+| [.catalogs](dot-catalogs.md) | List all catalog resources | `parity_verified` |
+| [.clients](dot-clients.md) | List all client resources | `parity_verified` |
+| [.consoles](dot-consoles.md) | List all console resources | `parity_verified` |
+| [.users](dot-users.md) | List all user resources | `parity_verified` |
+| [.defaults](dot-defaults.md) | Get default settings | `parity_verified` |
+| [.filesets](dot-filesets.md) | List all filesets | `parity_verified` |
+| [.help](dot-help.md) | Print parsable information about a command | `parity_verified` |
+| [.jobdefs](dot-jobdefs.md) | List all job defaults resources | `parity_verified` |
+| [.jobs](dot-jobs.md) | List all job resources | `parity_verified` |
+| [.jobstatus](dot-jobstatus.md) | List jobstatus information | `parity_verified` |
+| [.levels](dot-levels.md) | List all backup levels | `parity_verified` |
+| [.locations](dot-locations.md) | Keine Beschreibung in der Originaltabelle (NULL) | `parity_verified` |
+| [.messages](dot-messages.md) | Display pending messages | `parity_verified` |
+| [.media](dot-media.md) | List all medias | `parity_verified` |
+| [.mediatypes](dot-mediatypes.md) | List all media types | `parity_verified` |
+| [.msgs](dot-msgs.md) | List all message resources | `parity_verified` |
+| [.pools](dot-pools.md) | List all pool resources | `partial` |
+| [.profiles](dot-profiles.md) | List all profile resources | `parity_verified` |
+| [.quit](dot-quit.md) | Close connection | `parity_verified` |
+| [.sql](dot-sql.md) | Send an arbitrary SQL command | `parity_verified` |
+| [.schedule](dot-schedule.md) | List all schedule resources | `parity_verified` |
 | [.status](dot-status.md) | Report status | `partial` |
-| [.storages](dot-storages.md) | List all storage resources | `registered_unverified` |
-| [.types](dot-types.md) | List all job types | `registered_unverified` |
-| [.volstatus](dot-volstatus.md) | List all volume status | `registered_unverified` |
-| [.bvfs_lsdirs](dot-bvfs-lsdirs.md) | List directories using BVFS | `stub` |
-| [.bvfs_lsfiles](dot-bvfs-lsfiles.md) | List files using BVFS | `stub` |
-| [.bvfs_update](dot-bvfs-update.md) | Update BVFS cache | `stub` |
-| [.bvfs_get_jobids](dot-bvfs-get-jobids.md) | Get jobids required for a restore | `stub` |
-| [.bvfs_versions](dot-bvfs-versions.md) | List versions of a file | `stub` |
-| [.bvfs_restore](dot-bvfs-restore.md) | Mark BVFS files/directories for restore. Stored in handle. | `stub` |
-| [.bvfs_cleanup](dot-bvfs-cleanup.md) | Cleanup BVFS cache for a certain handle | `stub` |
-| [.bvfs_clear_cache](dot-bvfs-clear-cache.md) | Clear BVFS cache | `stub` |
+| [.storages](dot-storages.md) | List all storage resources | `parity_verified` |
+| [.types](dot-types.md) | List all job types | `parity_verified` |
+| [.volstatus](dot-volstatus.md) | List all volume status | `parity_verified` |
+| [.bvfs_lsdirs](dot-bvfs-lsdirs.md) | List directories using BVFS | `parity_verified` |
+| [.bvfs_lsfiles](dot-bvfs-lsfiles.md) | List files using BVFS | `parity_verified` |
+| [.bvfs_update](dot-bvfs-update.md) | Update BVFS cache | `parity_verified` |
+| [.bvfs_get_jobids](dot-bvfs-get-jobids.md) | Get jobids required for a restore | `parity_verified` |
+| [.bvfs_versions](dot-bvfs-versions.md) | List versions of a file | `parity_verified` |
+| [.bvfs_restore](dot-bvfs-restore.md) | Mark BVFS files/directories for restore. Stored in handle. | `registered_unverified` |
+| [.bvfs_cleanup](dot-bvfs-cleanup.md) | Cleanup BVFS cache for a certain handle | `partial` |
+| [.bvfs_clear_cache](dot-bvfs-clear-cache.md) | Clear BVFS cache | `partial` |
 | [add](add.md) | Add media to a pool | `partial` |
-| [autodisplay](autodisplay.md) | Autodisplay console messages | `registered_unverified` |
-| [automount](automount.md) | Automount after label | `stub` |
+| [autodisplay](autodisplay.md) | Autodisplay console messages | `parity_verified` |
+| [automount](automount.md) | Automount after label | `parity_verified` |
 | [cancel](cancel.md) | Cancel a job | `partial` |
-| [configure](configure.md) | Configure director resources | `partial` |
-| [create](create.md) | Create DB Pool from resource | `registered_unverified` |
-| [delete](delete.md) | Delete volume, pool or job | `registered_unverified` |
-| [disable](disable.md) | Disable a job/client/schedule | `registered_unverified` |
-| [enable](enable.md) | Enable a job/client/schedule | `registered_unverified` |
-| [estimate](estimate.md) | Performs FileSet estimate, listing gives full listing | `stub` |
-| [exit](exit.md) | Terminate Bconsole session | `registered_unverified` |
+| [configure](configure.md) | Configure director resources | `parity_verified` |
+| [create](create.md) | Create DB Pool from resource | `partial` |
+| [delete](delete.md) | Delete volume, pool or job | `partial` |
+| [disable](disable.md) | Disable a job/client/schedule | `parity_verified` |
+| [enable](enable.md) | Enable a job/client/schedule | `parity_verified` |
+| [estimate](estimate.md) | Performs FileSet estimate, listing gives full listing | `parity_verified` |
+| [exit](exit.md) | Terminate Bconsole session | `parity_verified` |
 | [export](export.md) | Export volumes from normal slots to import/export slots | `partial` |
-| [gui](gui.md) | Switch between interactive (gui off) and non-interactive (gui on) mode | `registered_unverified` |
-| [help](help.md) | Print help on specific command | `partial` |
+| [gui](gui.md) | Switch between interactive (gui off) and non-interactive (gui on) mode | `parity_verified` |
+| [help](help.md) | Print help on specific command | `parity_verified` |
 | [import](import.md) | Import volumes from import/export slots to normal slots | `partial` |
-| [label](label.md) | Label a tape | `registered_unverified` |
+| [label](label.md) | Label a tape | `partial` |
 | [list](list.md) | List objects from catalog | `partial` |
 | [llist](llist.md) | Full or long list like list command | `partial` |
-| [messages](messages.md) | Display pending messages | `registered_unverified` |
-| [memory](memory.md) | Print current memory usage | `registered_unverified` |
-| [mount](mount.md) | Mount storage | `registered_unverified` |
-| [move](move.md) | Move slots in an autochanger | `semantic_mismatch` |
-| [prune](prune.md) | Prune records from catalog | `registered_unverified` |
-| [purge](purge.md) | Purge records from catalog | `registered_unverified` |
-| [quit](quit.md) | Terminate Bconsole session | `registered_unverified` |
-| [query](query.md) | Query catalog | `semantic_mismatch` |
+| [messages](messages.md) | Display pending messages | `parity_verified` |
+| [memory](memory.md) | Print current memory usage | `parity_verified` |
+| [mount](mount.md) | Mount storage | `partial` |
+| [move](move.md) | Move slots in an autochanger | `partial` |
+| [prune](prune.md) | Prune records from catalog | `partial` |
+| [purge](purge.md) | Purge records from catalog | `partial` |
+| [quit](quit.md) | Terminate Bconsole session | `parity_verified` |
+| [query](query.md) | Query catalog | `parity_verified` |
 | [restore](restore.md) | Restore files | `partial` |
-| [relabel](relabel.md) | Relabel a tape | `registered_unverified` |
-| [release](release.md) | Release storage | `registered_unverified` |
+| [relabel](relabel.md) | Relabel a tape | `partial` |
+| [release](release.md) | Release storage | `partial` |
 | [reload](reload.md) | Reload conf file | `registered_unverified` |
 | [rerun](rerun.md) | Rerun a job | `partial` |
-| [resolve](resolve.md) | Resolve a hostname | `partial` |
+| [resolve](resolve.md) | Resolve a hostname | `parity_verified` |
 | [run](run.md) | Run a job | `partial` |
 | [status](status.md) | Report status | `partial` |
 | [setbandwidth](setbandwidth.md) | Sets bandwidth | `partial` |
 | [setdebug](setdebug.md) | Sets debug level | `partial` |
 | [setdevice](setdevice.md) | Sets device parameter | `partial` |
-| [setip](setip.md) | Sets new client address -- if authorized | `stub` |
-| [show](show.md) | Show resource records | `registered_unverified` |
-| [sqlquery](sqlquery.md) | Use SQL to query catalog | `registered_unverified` |
-| [time](time.md) | Print current time | `registered_unverified` |
+| [setip](setip.md) | Sets new client address -- if authorized | `partial` |
+| [show](show.md) | Show resource records | `parity_verified` |
+| [sqlquery](sqlquery.md) | Use SQL to query catalog | `parity_verified` |
+| [time](time.md) | Print current time | `parity_verified` |
 | [trace](trace.md) | Turn on/off trace to file | `partial` |
-| [truncate](truncate.md) | Truncate purged volumes | `registered_unverified` |
+| [truncate](truncate.md) | Truncate purged volumes | `partial` |
 | [unmount](unmount.md) | Unmount storage | `registered_unverified` |
 | [umount](umount.md) | Umount - for old-time Unix guys, see unmount | `registered_unverified` |
-| [update](update.md) | Update volume, pool, slots, job or statistics | `registered_unverified` |
-| [use](use.md) | Use specific catalog | `stub` |
-| [var](var.md) | Does variable expansion | `stub` |
-| [version](version.md) | Print Director version | `registered_unverified` |
+| [update](update.md) | Update volume, pool, slots, job or statistics | `partial` |
+| [use](use.md) | Use specific catalog | `parity_verified` |
+| [var](var.md) | Does variable expansion | `parity_verified` |
+| [version](version.md) | Print Director version | `parity_verified` |
 | [wait](wait.md) | Wait until no jobs are running | `partial` |
-| [whoami](whoami.md) | Print the user name associated with this console | `registered_unverified` |
+| [whoami](whoami.md) | Print the user name associated with this console | `parity_verified` |
 
 ## Restore-Dateiauswahl (eigener Kontext)
 
-Diese Befehle stehen in `ua_tree.cc::commands[]`, nicht in der Hauptkonsole. Onesimus besitzt derzeit keine entsprechende interaktive Dateiauswahl. Gleichnamige Konsolenbefehle zählen nicht als Implementierung dieses Kontexts.
+Diese Befehle stehen in `ua_tree.cc::commands[]`, nicht in der Hauptkonsole. Gleichnamige Konsolenbefehle zählen nicht als Implementierung dieses Kontexts. Status: `missing_context` 26.
 
-| Befehl | Originalbeschreibung | Originalquelle |
-|---|---|---|
-| `abort` | abort and do not do restore | [Handler](https://github.com/bareos/bareos/blob/18be77e6832e33f5acd64094b9cba6066f2503f9/core/src/dird/ua_tree.cc#L1080) |
-| `add` | add dir/file to be restored recursively, wildcards allowed | [Handler](https://github.com/bareos/bareos/blob/18be77e6832e33f5acd64094b9cba6066f2503f9/core/src/dird/ua_tree.cc#L548) |
-| `cd` | change current directory | [Handler](https://github.com/bareos/bareos/blob/18be77e6832e33f5acd64094b9cba6066f2503f9/core/src/dird/ua_tree.cc#L958) |
-| `count` | count marked files in and below the cd | [Handler](https://github.com/bareos/bareos/blob/18be77e6832e33f5acd64094b9cba6066f2503f9/core/src/dird/ua_tree.cc#L604) |
-| `delete` | delete dir/file to be restored recursively in dir | [Handler](https://github.com/bareos/bareos/blob/18be77e6832e33f5acd64094b9cba6066f2503f9/core/src/dird/ua_tree.cc#L1022) |
-| `dir` | long list current directory, wildcards allowed | [Handler](https://github.com/bareos/bareos/blob/18be77e6832e33f5acd64094b9cba6066f2503f9/core/src/dird/ua_tree.cc#L890) |
-| `.dir` | long list current directory, wildcards allowed | [Handler](https://github.com/bareos/bareos/blob/18be77e6832e33f5acd64094b9cba6066f2503f9/core/src/dird/ua_tree.cc#L885) |
-| `done` | leave file selection mode | [Handler](https://github.com/bareos/bareos/blob/18be77e6832e33f5acd64094b9cba6066f2503f9/core/src/dird/ua_tree.cc#L1078) |
-| `estimate` | estimate restore size | [Handler](https://github.com/bareos/bareos/blob/18be77e6832e33f5acd64094b9cba6066f2503f9/core/src/dird/ua_tree.cc#L895) |
-| `exit` | same as done command | [Handler](https://github.com/bareos/bareos/blob/18be77e6832e33f5acd64094b9cba6066f2503f9/core/src/dird/ua_tree.cc#L1078) |
-| `find` | find files, wildcards allowed | [Handler](https://github.com/bareos/bareos/blob/18be77e6832e33f5acd64094b9cba6066f2503f9/core/src/dird/ua_tree.cc#L623) |
-| `help` | print help | [Handler](https://github.com/bareos/bareos/blob/18be77e6832e33f5acd64094b9cba6066f2503f9/core/src/dird/ua_tree.cc#L938) |
-| `ls` | list current directory, wildcards allowed | [Handler](https://github.com/bareos/bareos/blob/18be77e6832e33f5acd64094b9cba6066f2503f9/core/src/dird/ua_tree.cc#L693) |
-| `.ls` | list current directory, wildcards allowed | [Handler](https://github.com/bareos/bareos/blob/18be77e6832e33f5acd64094b9cba6066f2503f9/core/src/dird/ua_tree.cc#L678) |
-| `.lsdir` | list subdir in current directory, wildcards allowed | [Handler](https://github.com/bareos/bareos/blob/18be77e6832e33f5acd64094b9cba6066f2503f9/core/src/dird/ua_tree.cc#L654) |
-| `lsmark` | list the marked files in and below the cd | [Handler](https://github.com/bareos/bareos/blob/18be77e6832e33f5acd64094b9cba6066f2503f9/core/src/dird/ua_tree.cc#L765) |
-| `.lsmark` | list the marked files in | [Handler](https://github.com/bareos/bareos/blob/18be77e6832e33f5acd64094b9cba6066f2503f9/core/src/dird/ua_tree.cc#L716) |
-| `mark` | mark dir/file to be restored recursively, wildcards allowed | [Handler](https://github.com/bareos/bareos/blob/18be77e6832e33f5acd64094b9cba6066f2503f9/core/src/dird/ua_tree.cc#L548) |
-| `markdir` | mark directory name to be restored (no files) | [Handler](https://github.com/bareos/bareos/blob/18be77e6832e33f5acd64094b9cba6066f2503f9/core/src/dird/ua_tree.cc#L571) |
-| `pwd` | print current working directory | [Handler](https://github.com/bareos/bareos/blob/18be77e6832e33f5acd64094b9cba6066f2503f9/core/src/dird/ua_tree.cc#L992) |
-| `.pwd` | print current working directory | [Handler](https://github.com/bareos/bareos/blob/18be77e6832e33f5acd64094b9cba6066f2503f9/core/src/dird/ua_tree.cc#L1009) |
-| `unmark` | unmark dir/file to be restored recursively in dir | [Handler](https://github.com/bareos/bareos/blob/18be77e6832e33f5acd64094b9cba6066f2503f9/core/src/dird/ua_tree.cc#L1022) |
-| `unmarkdir` | unmark directory name only no recursion | [Handler](https://github.com/bareos/bareos/blob/18be77e6832e33f5acd64094b9cba6066f2503f9/core/src/dird/ua_tree.cc#L1045) |
-| `quit` | quit and do not do restore | [Handler](https://github.com/bareos/bareos/blob/18be77e6832e33f5acd64094b9cba6066f2503f9/core/src/dird/ua_tree.cc#L1080) |
-| `.help` | print help | [Handler](https://github.com/bareos/bareos/blob/18be77e6832e33f5acd64094b9cba6066f2503f9/core/src/dird/ua_tree.cc#L669) |
-| `?` | print help | [Handler](https://github.com/bareos/bareos/blob/18be77e6832e33f5acd64094b9cba6066f2503f9/core/src/dird/ua_tree.cc#L938) |
+| Befehl | Originalbeschreibung | Originalquelle | Lokaler Status |
+|---|---|---|---|
+| `abort` | abort and do not do restore | [Handler](https://github.com/bareos/bareos/blob/18be77e6832e33f5acd64094b9cba6066f2503f9/core/src/dird/ua_tree.cc#L1080) | `missing_context` |
+| `add` | add dir/file to be restored recursively, wildcards allowed | [Handler](https://github.com/bareos/bareos/blob/18be77e6832e33f5acd64094b9cba6066f2503f9/core/src/dird/ua_tree.cc#L548) | `missing_context` |
+| `cd` | change current directory | [Handler](https://github.com/bareos/bareos/blob/18be77e6832e33f5acd64094b9cba6066f2503f9/core/src/dird/ua_tree.cc#L958) | `missing_context` |
+| `count` | count marked files in and below the cd | [Handler](https://github.com/bareos/bareos/blob/18be77e6832e33f5acd64094b9cba6066f2503f9/core/src/dird/ua_tree.cc#L604) | `missing_context` |
+| `delete` | delete dir/file to be restored recursively in dir | [Handler](https://github.com/bareos/bareos/blob/18be77e6832e33f5acd64094b9cba6066f2503f9/core/src/dird/ua_tree.cc#L1022) | `missing_context` |
+| `dir` | long list current directory, wildcards allowed | [Handler](https://github.com/bareos/bareos/blob/18be77e6832e33f5acd64094b9cba6066f2503f9/core/src/dird/ua_tree.cc#L890) | `missing_context` |
+| `.dir` | long list current directory, wildcards allowed | [Handler](https://github.com/bareos/bareos/blob/18be77e6832e33f5acd64094b9cba6066f2503f9/core/src/dird/ua_tree.cc#L885) | `missing_context` |
+| `done` | leave file selection mode | [Handler](https://github.com/bareos/bareos/blob/18be77e6832e33f5acd64094b9cba6066f2503f9/core/src/dird/ua_tree.cc#L1078) | `missing_context` |
+| `estimate` | estimate restore size | [Handler](https://github.com/bareos/bareos/blob/18be77e6832e33f5acd64094b9cba6066f2503f9/core/src/dird/ua_tree.cc#L895) | `missing_context` |
+| `exit` | same as done command | [Handler](https://github.com/bareos/bareos/blob/18be77e6832e33f5acd64094b9cba6066f2503f9/core/src/dird/ua_tree.cc#L1078) | `missing_context` |
+| `find` | find files, wildcards allowed | [Handler](https://github.com/bareos/bareos/blob/18be77e6832e33f5acd64094b9cba6066f2503f9/core/src/dird/ua_tree.cc#L623) | `missing_context` |
+| `help` | print help | [Handler](https://github.com/bareos/bareos/blob/18be77e6832e33f5acd64094b9cba6066f2503f9/core/src/dird/ua_tree.cc#L938) | `missing_context` |
+| `ls` | list current directory, wildcards allowed | [Handler](https://github.com/bareos/bareos/blob/18be77e6832e33f5acd64094b9cba6066f2503f9/core/src/dird/ua_tree.cc#L693) | `missing_context` |
+| `.ls` | list current directory, wildcards allowed | [Handler](https://github.com/bareos/bareos/blob/18be77e6832e33f5acd64094b9cba6066f2503f9/core/src/dird/ua_tree.cc#L678) | `missing_context` |
+| `.lsdir` | list subdir in current directory, wildcards allowed | [Handler](https://github.com/bareos/bareos/blob/18be77e6832e33f5acd64094b9cba6066f2503f9/core/src/dird/ua_tree.cc#L654) | `missing_context` |
+| `lsmark` | list the marked files in and below the cd | [Handler](https://github.com/bareos/bareos/blob/18be77e6832e33f5acd64094b9cba6066f2503f9/core/src/dird/ua_tree.cc#L765) | `missing_context` |
+| `.lsmark` | list the marked files in | [Handler](https://github.com/bareos/bareos/blob/18be77e6832e33f5acd64094b9cba6066f2503f9/core/src/dird/ua_tree.cc#L716) | `missing_context` |
+| `mark` | mark dir/file to be restored recursively, wildcards allowed | [Handler](https://github.com/bareos/bareos/blob/18be77e6832e33f5acd64094b9cba6066f2503f9/core/src/dird/ua_tree.cc#L548) | `missing_context` |
+| `markdir` | mark directory name to be restored (no files) | [Handler](https://github.com/bareos/bareos/blob/18be77e6832e33f5acd64094b9cba6066f2503f9/core/src/dird/ua_tree.cc#L571) | `missing_context` |
+| `pwd` | print current working directory | [Handler](https://github.com/bareos/bareos/blob/18be77e6832e33f5acd64094b9cba6066f2503f9/core/src/dird/ua_tree.cc#L992) | `missing_context` |
+| `.pwd` | print current working directory | [Handler](https://github.com/bareos/bareos/blob/18be77e6832e33f5acd64094b9cba6066f2503f9/core/src/dird/ua_tree.cc#L1009) | `missing_context` |
+| `unmark` | unmark dir/file to be restored recursively in dir | [Handler](https://github.com/bareos/bareos/blob/18be77e6832e33f5acd64094b9cba6066f2503f9/core/src/dird/ua_tree.cc#L1022) | `missing_context` |
+| `unmarkdir` | unmark directory name only no recursion | [Handler](https://github.com/bareos/bareos/blob/18be77e6832e33f5acd64094b9cba6066f2503f9/core/src/dird/ua_tree.cc#L1045) | `missing_context` |
+| `quit` | quit and do not do restore | [Handler](https://github.com/bareos/bareos/blob/18be77e6832e33f5acd64094b9cba6066f2503f9/core/src/dird/ua_tree.cc#L1080) | `missing_context` |
+| `.help` | print help | [Handler](https://github.com/bareos/bareos/blob/18be77e6832e33f5acd64094b9cba6066f2503f9/core/src/dird/ua_tree.cc#L669) | `missing_context` |
+| `?` | print help | [Handler](https://github.com/bareos/bareos/blob/18be77e6832e33f5acd64094b9cba6066f2503f9/core/src/dird/ua_tree.cc#L938) | `missing_context` |
 
 ## Onesimus-Erweiterungen
 

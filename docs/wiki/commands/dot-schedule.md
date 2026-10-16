@@ -15,7 +15,11 @@ Referenz: [WIP/25.1.2-pre-43-g18be77e68, `18be77e6832e`](https://github.com/bare
 
 **RunScript erlaubt:** nein. **Audit-Ereignis:** nein. Beide Flags sind keine Read-only-Klassifizierung.
 
-**Onesimus-Status:** `registered_unverified`. Funktionsparität ist nicht durch einen Live-Test nachgewiesen.
+**Onesimus-Status:** `parity_verified`. Alle unten genannten Paritätsfälle antworten byte-identisch zum Original; nicht genannte Varianten sind damit nicht belegt.
+
+- Paritätslauf 16.10.2026 (`development` `7993ce6`): 18 von 18 Fällen byte-identisch; Modi: Text, API 2, Konsolen parity-acl, parity-bvfs, parity-limited, parity-operator.
+
+**Paritätsfälle (18):** `c003-dot_schedule-api2`, `c025-schedule-limited`, `c025-schedule-limited-api2`, `c025-schedule-enabled-limited`, `c025-schedule-enabled-limited-api2`, `c025-schedule-operator`, `c025-schedule-operator-api2`, `c025-schedule-enabled-operator`, `c025-schedule-enabled-operator-api2`, `c025-schedule-bvfs`, `c025-schedule-bvfs-api2`, `c025-schedule-enabled-bvfs`, `c025-schedule-enabled-bvfs-api2`, `c025-schedule-acl`, `c025-schedule-acl-api2`, `c025-schedule-enabled-acl`, `c025-schedule-enabled-acl-api2`, `dot_schedule`.
 
 **Lokaler Handler:** [crates/onesimus-dird/src/commands/dot.rs:127](../../../crates/onesimus-dird/src/commands/dot.rs).
 

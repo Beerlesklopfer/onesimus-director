@@ -15,9 +15,11 @@ use catalog=<catalog>
 
 **RunScript erlaubt:** nein. **Audit-Ereignis:** ja. Beide Flags sind keine Read-only-Klassifizierung.
 
-**Onesimus-Status:** `stub`. Funktionsparität ist nicht durch einen Live-Test nachgewiesen.
+**Onesimus-Status:** `parity_verified`. Alle unten genannten Paritätsfälle antworten byte-identisch zum Original; nicht genannte Varianten sind damit nicht belegt.
 
-- Der Handler gibt immer Using default catalog zurück; er wechselt keinen Sitzungskatalog.
+- Paritätslauf 16.10.2026 (`development` `7993ce6`): 7 von 7 Fällen byte-identisch; Modi: Text, Konsolen parity-limited, parity-operator.
+
+**Paritätsfälle (7):** `c002-use-then-list`, `c002-use-noargs`, `c023-use`, `c023-use-var`, `c023-limited`, `c023-operator`, `use`.
 
 **Lokaler Handler:** [crates/onesimus-dird/src/commands/extra.rs:297](../../../crates/onesimus-dird/src/commands/extra.rs).
 

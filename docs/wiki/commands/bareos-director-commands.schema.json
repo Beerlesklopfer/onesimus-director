@@ -118,6 +118,13 @@
             "type": "integer",
             "minimum": 0
           }
+        },
+        "restore_file_selection_status_counts": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "integer",
+            "minimum": 0
+          }
         }
       },
       "additionalProperties": false
@@ -293,6 +300,55 @@
         }
       },
       "additionalProperties": false
+    },
+    "parity_evidence": {
+      "type": "object",
+      "required": [
+        "date",
+        "development_commit",
+        "cases",
+        "counts",
+        "command"
+      ],
+      "properties": {
+        "date": {
+          "type": "string",
+          "format": "date"
+        },
+        "development_commit": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{7,40}$"
+        },
+        "cases": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "counts": {
+          "type": "object",
+          "required": [
+            "match",
+            "diff",
+            "error"
+          ],
+          "additionalProperties": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "command": {
+          "type": "string"
+        },
+        "differing_cases": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "note": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false
     }
   },
   "additionalProperties": false,
@@ -379,6 +435,7 @@
         },
         "status": {
           "enum": [
+            "parity_verified",
             "registered_unverified",
             "partial",
             "stub",
@@ -394,7 +451,25 @@
           }
         },
         "functional_parity_verified": {
-          "const": false
+          "type": "boolean",
+          "description": "true exactly when status is parity_verified"
+        },
+        "parity_cases": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "uniqueItems": true,
+          "description": "ids of tests/parity/cases entries that exercise this command"
+        },
+        "open_log_entries": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^C-\\d{3}$"
+          },
+          "uniqueItems": true,
+          "description": "open docs/COMPATIBILITY-LOG.md entries concerning this command"
         }
       },
       "additionalProperties": false

@@ -15,9 +15,14 @@ Referenz: [WIP/25.1.2-pre-43-g18be77e68, `18be77e6832e`](https://github.com/bare
 
 **RunScript erlaubt:** nein. **Audit-Ereignis:** ja. Beide Flags sind keine Read-only-Klassifizierung.
 
-**Onesimus-Status:** `partial`. Funktionsparität ist nicht durch einen Live-Test nachgewiesen.
+**Onesimus-Status:** `partial`. Paritätsfälle vorhanden, vollständige Funktionsparität aber nicht nachgewiesen (siehe Befunde).
 
-- Der Handler delegiert an den normalen status-Handler; die Original-Unterabschnitte current/last/header/scheduled/running/terminated usw. werden nicht separat umgesetzt.
+- Paritätslauf 16.10.2026 (`development` `7993ce6`): 22 von 22 Fällen byte-identisch; Modi: Text, API 2.
+- Warte-Zustände laufender Jobs (FD/SD/Ressourcen/Priorität) und beendete Jobs in der JCR-Liste fehlen (C-048); im Fixture läuft kein Job.
+
+**Offene Logeinträge:** `C-048` ([Kompatibilitätslog](../../COMPATIBILITY-LOG.md)).
+
+**Paritätsfälle (22):** `c009-status-dir-header`, `c009-status-dir-header-json`, `c014-dot-status-dir-header`, `c014-dot-status-dir-current`, `c014-dot-status-dir-last`, `c014-dot-status-dir-running-json`, `c014-dot-status-dir-scheduled-json`, `c014-dot-status-dir-terminated-json`, `c014-dot-status-dir-bogus`, `c014-dot-status-dir-noarg`, `c014-dot-status-noarg`, `c014-dot-status-bogus`, `c014-dot-status-dir-running`, `c042-dot-status-storage`, `c042-dot-status-storage-header`, `c042-dot-status-storage-running`, `c042-dot-status-storage-api2`, `c042-dot-status-client-header`, `dot-status-dir-header`, `dot-status-dir-running`, `dot-status-dir-scheduled`, `dot-status-dir-terminated`.
 
 **Lokaler Handler:** [crates/onesimus-dird/src/commands/status.rs:118](../../../crates/onesimus-dird/src/commands/status.rs).
 

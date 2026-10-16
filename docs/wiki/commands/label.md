@@ -15,7 +15,12 @@ label storage=<storage-name> volume=<volume-name> pool=<pool-name> slot=<slot> [
 
 **RunScript erlaubt:** nein. **Audit-Ereignis:** ja. Beide Flags sind keine Read-only-Klassifizierung.
 
-**Onesimus-Status:** `registered_unverified`. Funktionsparität ist nicht durch einen Live-Test nachgewiesen.
+**Onesimus-Status:** `partial`. Paritätsfälle vorhanden, vollständige Funktionsparität aber nicht nachgewiesen (siehe Befunde).
+
+- Paritätslauf 16.10.2026 (`development` `7993ce6`): 13 von 13 Fällen byte-identisch; Modi: Text, API 1.
+- Verglichen sind Dialog-, Namens- und Abbruchpfade; das Labeln selbst (SD-Wirkung, Katalogeintrag) ist laut Testregeln nicht live erlaubt und nur durch Einheitentests belegt.
+
+**Paritätsfälle (13):** `c011-label-cancel`, `c011-label-name-cancel`, `c011-label-pool-cancel`, `c011-label-illegal-cancel`, `c011-label-used-cancel`, `c011-label-barcodes`, `c011-label-unknown-storage-cancel`, `c011-label-api1-cancel`, `c012-label-no-pool`, `label-nostorage`, `t001-label-existing-cancel`, `t001-label-illegal-arg-cancel`, `t001-label-illegal-char-cancel`.
 
 **Lokaler Handler:** [crates/onesimus-dird/src/commands/admin.rs:26](../../../crates/onesimus-dird/src/commands/admin.rs).
 

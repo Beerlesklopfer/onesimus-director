@@ -15,9 +15,14 @@ wait jobname=<name> | jobid=<jobid> | ujobid=<complete_name> | mount [timeout=<n
 
 **RunScript erlaubt:** nein. **Audit-Ereignis:** nein. Beide Flags sind keine Read-only-Klassifizierung.
 
-**Onesimus-Status:** `partial`. Funktionsparität ist nicht durch einen Live-Test nachgewiesen.
+**Onesimus-Status:** `partial`. Paritätsfälle vorhanden, vollständige Funktionsparität aber nicht nachgewiesen (siehe Befunde).
 
-- Jobauswahl, mount/timeout und Abschlussausgabe sind portiert. Der Lifecycle verarbeitet jetzt echte Worker-Enden vor dem Katalogabschluss; Canceling bleibt aktiv, finale Zähler bleiben erhalten, Bareos-Statusprioritäten einschließlich Incomplete gelten. Fehlgeschlagene Katalog-Endupdates und der Snapshot-Race werden für wait jobid und wait ohne Argument sichtbar abgefangen; Retention beginnt am tatsächlichen Ende. Gegenprüfungen fanden und Regressionstests reproduzieren diese Fehler. Vollständige FD-/SD-Abbruchkoordination, ACL und Live-SHA-256-Parität bleiben offen.
+- Paritätslauf 16.10.2026 (`development` `7993ce6`): 5 von 5 Fällen byte-identisch; Modi: Text, API 1, API 2.
+- Verglichen sind nur `wait` ohne laufende Jobs und `wait mount timeout=`; das Warten auf echte Jobenden ist nur durch Einheitentests belegt (C-048).
+
+**Offene Logeinträge:** `C-048` ([Kompatibilitätslog](../../COMPATIBILITY-LOG.md)).
+
+**Paritätsfälle (5):** `c035-wait-mount-timeout`, `c035-wait-mount-timeout-api1`, `c035-wait-mount-timeout-api2`, `wait-idle`, `wait-jobid`.
 
 **Lokaler Handler:** [crates/onesimus-dird/src/commands/wait.rs:46](../../../crates/onesimus-dird/src/commands/wait.rs).
 

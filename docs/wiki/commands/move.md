@@ -15,9 +15,14 @@ move storage=<storage-name> srcslots=<slot-selection> dstslots=<slot-selection>
 
 **RunScript erlaubt:** ja. **Audit-Ereignis:** ja. Beide Flags sind keine Read-only-Klassifizierung.
 
-**Onesimus-Status:** `semantic_mismatch`. Funktionsparität ist nicht durch einen Live-Test nachgewiesen.
+**Onesimus-Status:** `partial`. Paritätsfälle vorhanden, vollständige Funktionsparität aber nicht nachgewiesen (siehe Befunde).
 
-- Bareos verwendet srcslots/dstslots für Slot-Auswahlen. Der lokale Handler erwartet srcslot/dstslot (Singular), standardmäßig 0; Originalsyntax wird damit nicht korrekt umgesetzt.
+- Paritätslauf 16.10.2026 (`development` `7993ce6`): 2 von 2 Fällen byte-identisch; Modi: Text.
+- Kein Autochanger im Fixture: verglichen sind nur Guards ohne Argumente; Slotbewegungen sind nur durch Einheitentests belegt. Die Originalsyntax srcslots/dstslots wird inzwischen ausgewertet.
+
+**Offene Logeinträge:** `C-045` ([Kompatibilitätslog](../../COMPATIBILITY-LOG.md)).
+
+**Paritätsfälle (2):** `c012-move-job-not-running`, `move-noargs`.
 
 **Lokaler Handler:** [crates/onesimus-dird/src/commands/extra.rs:992](../../../crates/onesimus-dird/src/commands/extra.rs).
 

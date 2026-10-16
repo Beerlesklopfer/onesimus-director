@@ -15,9 +15,9 @@ Referenz: [WIP/25.1.2-pre-43-g18be77e68, `18be77e6832e`](https://github.com/bare
 
 **RunScript erlaubt:** ja. **Audit-Ereignis:** ja. Beide Flags sind keine Read-only-Klassifizierung.
 
-**Onesimus-Status:** `stub`. Funktionsparität ist nicht durch einen Live-Test nachgewiesen.
+**Onesimus-Status:** `registered_unverified`. Funktionsparität ist nicht durch einen Paritätsfall nachgewiesen.
 
-- Der Handler gibt path/jobid/fileid/dirid als Text zurück; er erzeugt keine Restore-Selektion bzw. Handle-Tabelle.
+- Kein Paritätsfall: ändert den Katalog (Handle-Tabelle); nur durch Einheitentests belegt.
 
 **Lokaler Handler:** [crates/onesimus-dird/src/commands/bvfs.rs:872](../../../crates/onesimus-dird/src/commands/bvfs.rs).
 

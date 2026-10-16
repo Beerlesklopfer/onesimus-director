@@ -15,7 +15,11 @@ disable job=<job-name> client=<client-name> schedule=<schedule-name>
 
 **RunScript erlaubt:** ja. **Audit-Ereignis:** ja. Beide Flags sind keine Read-only-Klassifizierung.
 
-**Onesimus-Status:** `registered_unverified`. Funktionsparität ist nicht durch einen Live-Test nachgewiesen.
+**Onesimus-Status:** `parity_verified`. Alle unten genannten Paritätsfälle antworten byte-identisch zum Original; nicht genannte Varianten sind damit nicht belegt.
+
+- Paritätslauf 16.10.2026 (`development` `7993ce6`): 30 von 30 Fällen byte-identisch; Modi: Text, API 1, API 2, Konsolen parity-acl, parity-bvfs, parity-device, parity-limited, parity-operator.
+
+**Paritätsfälle (30):** `c006-disable-nojob-api2`, `c006-disable-noschedule`, `c011-disable-cancel`, `c012-disable-storage`, `c025-disable-select-limited`, `c025-disable-select-limited-api2`, `c025-disable-schedule-select-limited`, `c025-disable-schedule-select-limited-api2`, `c025-disable-select-operator`, `c025-disable-select-operator-api2`, `c025-disable-select-bvfs`, `c025-disable-select-bvfs-api2`, `c025-disable-schedule-select-bvfs`, `c025-disable-schedule-select-bvfs-api2`, `c025-disable-select-acl`, `c025-disable-select-acl-api2`, `c025-disable-schedule-select-acl`, `c025-disable-schedule-select-acl-api2`, `c032-job-disable-enable`, `c032-job-disable-enable-api1`, `c032-job-disable-enable-api2`, `c032-client-disable-enable`, `c032-client-disable-enable-api2`, `c032-schedule-disable`, `c032-schedule-disable-api1`, `c032-schedule-disable-api2`, `c032-job-select-disable-enable`, `c032-limited-job`, `c032-limited-job-api2`, `disable-nojob`.
 
 **Lokaler Handler:** [crates/onesimus-dird/src/commands/job.rs:573](../../../crates/onesimus-dird/src/commands/job.rs).
 

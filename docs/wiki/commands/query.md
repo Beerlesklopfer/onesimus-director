@@ -11,9 +11,11 @@ Referenz: [WIP/25.1.2-pre-43-g18be77e68, `18be77e6832e`](https://github.com/bare
 
 **RunScript erlaubt:** nein. **Audit-Ereignis:** ja. Beide Flags sind keine Read-only-Klassifizierung.
 
-**Onesimus-Status:** `semantic_mismatch`. Funktionsparität ist nicht durch einen Live-Test nachgewiesen.
+**Onesimus-Status:** `parity_verified`. Alle unten genannten Paritätsfälle antworten byte-identisch zum Original; nicht genannte Varianten sind damit nicht belegt.
 
-- Bareos QueryCmd öffnet QueryFile und bietet ein interaktives Menü vordefinierter Katalogabfragen. Lokal ist query ein Alias für sqlquery und führt den übergebenen Text als SQL aus.
+- Paritätslauf 16.10.2026 (`development` `7993ce6`): 8 von 8 Fällen byte-identisch; Modi: Text, API 1.
+
+**Paritätsfälle (8):** `c011-query-cancel`, `c011-query-badnumber`, `c011-query-prompt-cancel`, `c011-query-client`, `c011-query-api1-cancel`, `c016-query-menu`, `c028-query-1`, `query-list`.
 
 **Lokaler Handler:** [crates/onesimus-dird/src/commands/sql.rs:132](../../../crates/onesimus-dird/src/commands/sql.rs).
 

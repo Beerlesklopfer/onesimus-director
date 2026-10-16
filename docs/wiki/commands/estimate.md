@@ -15,9 +15,12 @@ estimate fileset=<fileset-name> client=<client-name> level=<level> accurate=<yes
 
 **RunScript erlaubt:** ja. **Audit-Ereignis:** ja. Beide Flags sind keine Read-only-Klassifizierung.
 
-**Onesimus-Status:** `stub`. Funktionsparität ist nicht durch einen Live-Test nachgewiesen.
+**Onesimus-Status:** `parity_verified`. Alle unten genannten Paritätsfälle antworten byte-identisch zum Original; nicht genannte Varianten sind damit nicht belegt.
 
-- Der Handler liest Jobdaten, führt aber keine FD-Schätzung aus; die Ausgabe lautet ausdrücklich Estimate pending.
+- Paritätslauf 16.10.2026 (`development` `7993ce6`): 38 von 38 Fällen byte-identisch; Modi: Text, API 1, API 2.
+- Fragt den echten FD ab (lesend).
+
+**Paritätsfälle (38):** `c011-estimate-cancel`, `c017-full`, `c017-default-level`, `c017-incremental`, `c017-differential`, `c017-catalog-job`, `c017-listing`, `c017-listing-full`, `c017-accurate-yes`, `c017-accurate-incr`, `c017-accurate-no`, `c017-accurate-bad`, `c017-accurate-missing`, `c017-unknown-job`, `c017-job-missing`, `c017-restore-job`, `c017-client-override`, `c017-fd-override`, `c017-fileset-override`, `c017-client-fileset-nojob`, `c017-unknown-client`, `c017-client-missing`, `c017-unknown-fileset`, `c017-fileset-missing`, `c017-bad-level`, `c017-level-missing`, `c017-twice`, `c017-api2`, `c017-api2-unknown-job`, `c017-select-job`, `c041-estimate-backupcatalog`, `c041-estimate-backupfd`, `estimate`, `estimate-listing`, `w011-estimate-badnumber-cancel`, `w011-estimate-level-cancel`, `w011-estimate-api1-cancel`, `w011-estimate-api2`.
 
 **Lokaler Handler:** [crates/onesimus-dird/src/commands/estimate.rs:139](../../../crates/onesimus-dird/src/commands/estimate.rs).
 

@@ -15,7 +15,15 @@ purge [files [job=<job> | jobid=<jobid> | client=<client> | volume=<volume>]] | 
 
 **RunScript erlaubt:** ja. **Audit-Ereignis:** ja. Beide Flags sind keine Read-only-Klassifizierung.
 
-**Onesimus-Status:** `registered_unverified`. Funktionsparität ist nicht durch einen Live-Test nachgewiesen.
+**Onesimus-Status:** `partial`. Paritätsfälle vorhanden, vollständige Funktionsparität aber nicht nachgewiesen (siehe Befunde).
+
+- Paritätslauf 16.10.2026 (`development` `7993ce6`): 34 von 34 Fällen byte-identisch; Modi: Text, API 1, API 2, Konsolen parity-c030-client, parity-c030-job, parity-c030-pool, parity-c030-storage.
+- `action=` (ActionOnPurge, Relabel über SD) fehlt (C-049); `action=truncate` fehlt (C-053).
+- Verglichen sind Dialoge, ACL-Prüfungen und Bestätigungstexte auf der Katalogkopie; der Katalogzustand danach wird nicht verglichen.
+
+**Offene Logeinträge:** `C-049`, `C-053` ([Kompatibilitätslog](../../COMPATIBILITY-LOG.md)).
+
+**Paritätsfälle (34):** `c011-purge-cancel`, `c011-purge-volume-cancel`, `c011-purge-jobs-cancel`, `c011-purge-files-cancel`, `c011-purge-quota-cancel`, `c011-purge-volume-select-cancel`, `c011-purge-api1-cancel`, `c012-purge-jobs-menu`, `c030-purge-job`, `c030-purge-storage`, `c030-purge-client`, `c030-purge-pool`, `c030-purge-client-api1`, `c030-purge-pool-api2`, `c030-purge-jobs-client-no`, `c030-purge-jobs-client-cancel`, `c030-purge-jobs-client-invalid-answer`, `c030-purge-jobs-client-api1`, `c030-purge-jobs-client-api2`, `c030-purge-jobs-client-jobstatus-bad`, `c030-purge-jobs-client-jobstatus-no`, `c030-purge-files-client-no`, `c030-purge-files-menu-client-no`, `c030-purge-jobs-pool-no`, `c030-purge-jobs-pool-incremental-no`, `c030-purge-volume-no`, `c030-purge-volume-error-no`, `c030-purge-volume-jobstatus-bad`, `c030-purge-volume-jobid`, `c030-purge-volume-two-no`, `c030-purge-volume-menu-no`, `c030-purge-volume-api1`, `c030-purge-quota-client`, `purge-dialog`.
 
 **Lokaler Handler:** [crates/onesimus-dird/src/commands/admin.rs:1109](../../../crates/onesimus-dird/src/commands/admin.rs).
 

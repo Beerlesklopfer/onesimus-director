@@ -13,9 +13,12 @@ Ressourcentypen für `add`: `client`, `jobdefs`, `job`, `storage`, `catalog`, `s
 
 **RunScript erlaubt:** nein. **Audit-Ereignis:** ja. Beide Flags sind keine Read-only-Klassifizierung.
 
-**Onesimus-Status:** `partial`. Funktionsparität ist nicht durch einen Live-Test nachgewiesen.
+**Onesimus-Status:** `parity_verified`. Alle unten genannten Paritätsfälle antworten byte-identisch zum Original; nicht genannte Varianten sind damit nicht belegt.
 
-- Lokales CRUD ist eine Erweiterung, kein vollständiger Port aller Bareos-Ressourcendirektiven. Der Persistenzpfad ist auf /etc/bareos festgelegt; Originalsyntax wird dynamisch aus deutlich umfangreicheren Direktiventabellen erzeugt.
+- Paritätslauf 16.10.2026 (`development` `7993ce6`): 31 von 31 Fällen byte-identisch; Modi: Text.
+- `configure add` ist für Ressourcen ohne Katalogbezug verglichen, die Wirkung über `show` im selben Fall; `reload` danach ist nicht abgedeckt.
+
+**Paritätsfälle (31):** `c019-configure-bare`, `c019-configure-add-only`, `c019-configure-export-only`, `c019-configure-invalid-sub`, `c019-export-no-client-arg`, `c019-export-unknown-client`, `c019-export-twice`, `c019-add-invalid-type`, `c019-add-director`, `c019-add-device`, `c019-add-unknown-directive`, `c019-add-forbidden-char`, `c019-add-missing-name`, `c019-add-missing-value`, `c019-add-missing-required`, `c019-add-console`, `c019-add-console-type-name`, `c019-add-duplicate-existing`, `c019-add-profile`, `c019-add-schedule`, `c019-add-schedule-invalid`, `c019-add-messages`, `c019-add-invalid-name`, `c019-add-unknown-profile`, `c019-add-empty-password`, `c019-add-counter-invalid`, `c019-add-user`, `c019-add-fileset`, `c019-add-case-keys`, `configure-export`, `configure-bad`.
 
 **Lokaler Handler:** [crates/onesimus-dird/src/commands/configure.rs:79](../../../crates/onesimus-dird/src/commands/configure.rs).
 

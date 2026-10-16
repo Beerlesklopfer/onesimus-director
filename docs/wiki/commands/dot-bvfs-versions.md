@@ -15,9 +15,11 @@ Referenz: [WIP/25.1.2-pre-43-g18be77e68, `18be77e6832e`](https://github.com/bare
 
 **RunScript erlaubt:** ja. **Audit-Ereignis:** ja. Beide Flags sind keine Read-only-Klassifizierung.
 
-**Onesimus-Status:** `stub`. Funktionsparität ist nicht durch einen Live-Test nachgewiesen.
+**Onesimus-Status:** `parity_verified`. Alle unten genannten Paritätsfälle antworten byte-identisch zum Original; nicht genannte Varianten sind damit nicht belegt.
 
-- Der Handler gibt die übergebenen Suchparameter als Text zurück; er liest keine Verzeichnis-, Datei- oder Versionsdaten aus dem Katalog.
+- Paritätslauf 16.10.2026 (`development` `7993ce6`): 5 von 5 Fällen byte-identisch; Modi: Text, API 2.
+
+**Paritätsfälle (5):** `c022-versions`, `c022-versions-errors`, `c022-versions-api2`, `c022-negative-limit`, `bvfs-versions`.
 
 **Lokaler Handler:** [crates/onesimus-dird/src/commands/bvfs.rs:938](../../../crates/onesimus-dird/src/commands/bvfs.rs).
 

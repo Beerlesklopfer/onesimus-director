@@ -15,7 +15,14 @@ truncate volstatus=Purged [storage=<storage>] [pool=<pool>] [volume=<volume>] [d
 
 **RunScript erlaubt:** ja. **Audit-Ereignis:** ja. Beide Flags sind keine Read-only-Klassifizierung.
 
-**Onesimus-Status:** `registered_unverified`. Funktionsparität ist nicht durch einen Live-Test nachgewiesen.
+**Onesimus-Status:** `partial`. Paritätsfälle vorhanden, vollständige Funktionsparität aber nicht nachgewiesen (siehe Befunde).
+
+- Paritätslauf 16.10.2026 (`development` `7993ce6`): 8 von 8 Fällen byte-identisch; Modi: Text.
+- Truncate über SD-Relabel mit Auswertung von `3000 OK label.` fehlt (C-053); verglichen sind nur Guards und Abbruchpfade.
+
+**Offene Logeinträge:** `C-053` ([Kompatibilitätslog](../../COMPATIBILITY-LOG.md)).
+
+**Paritätsfälle (8):** `c012-truncate-yes-only`, `c012-truncate-bad-volstatus`, `c012-truncate-unknown-arg`, `c012-truncate-bad-drive`, `truncate-noargs`, `w011-truncate-storage-cancel`, `w011-truncate-pool-cancel`, `w011-truncate-confirm-no`.
 
 **Lokaler Handler:** [crates/onesimus-dird/src/commands/admin.rs:1314](../../../crates/onesimus-dird/src/commands/admin.rs).
 

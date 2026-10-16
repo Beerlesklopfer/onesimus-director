@@ -15,7 +15,11 @@ autodisplay on | off
 
 **RunScript erlaubt:** nein. **Audit-Ereignis:** nein. Beide Flags sind keine Read-only-Klassifizierung.
 
-**Onesimus-Status:** `registered_unverified`. Funktionsparität ist nicht durch einen Live-Test nachgewiesen.
+**Onesimus-Status:** `parity_verified`. Alle unten genannten Paritätsfälle antworten byte-identisch zum Original; nicht genannte Varianten sind damit nicht belegt.
+
+- Paritätslauf 16.10.2026 (`development` `7993ce6`): 16 von 16 Fällen byte-identisch; Modi: Text, API 1, API 2, Konsolen parity-limited.
+
+**Paritätsfälle (16):** `c005-autodisplay-noarg`, `c005-autodisplay-foo`, `c005-autodisplay-upper`, `c005-autodisplay-later-kw`, `c005-autodisplay-kv`, `c005-autodisplay-off-on`, `c005-autodisplay-foo-api1`, `c005-autodisplay-off-api1`, `c005-autodisplay-foo-api2`, `c005-autodisplay-off-api2`, `c036-autodisplay-on-messages`, `c036-autodisplay-on-api1`, `c036-getcmd-dot-messages-autodisplay`, `c036-messages-limited`, `autodisplay-off`, `autodisplay-on`.
 
 **Lokaler Handler:** [crates/onesimus-dird/src/commands/extra.rs:50](../../../crates/onesimus-dird/src/commands/extra.rs).
 

@@ -15,9 +15,16 @@ status all | dir=<dir-name> | director | scheduler | schedule=<schedule-name> | 
 
 **RunScript erlaubt:** ja. **Audit-Ereignis:** ja. Beide Flags sind keine Read-only-Klassifizierung.
 
-**Onesimus-Status:** `partial`. Funktionsparität ist nicht durch einen Live-Test nachgewiesen.
+**Onesimus-Status:** `partial`. Paritätsfälle vorhanden, vollständige Funktionsparität aber nicht nachgewiesen (siehe Befunde).
 
-- Der Handler behandelt dir/director/client/storage/all. Originalziele wie scheduler, subscriptions und configuration besitzen hier keinen eigenen Dispatch. Geplante und beendete Jobs sind im Director-JSON noch nicht vollständig abgebildet.
+- Paritätslauf 16.10.2026 (`development` `7993ce6`): 51 von 52 Fällen byte-identisch; Modi: Text, API 1, API 2, GUI, Konsolen parity-limited.
+- Instabil (gemeinsamer echter FD bzw. nicht eindeutige Sortierung, allein grün): `c042-status-client-star`.
+- `status storage=… slots` endet ohne Slottabelle (C-045; kein Autochanger im Fixture, der Fall `c042-status-storage-slots` deckt nur den Nicht-Autochanger ab).
+- Warte-Zustände laufender Jobs fehlen (C-048); NDMP-Storages werden nicht gesondert behandelt (C-050).
+
+**Offene Logeinträge:** `C-045`, `C-048`, `C-050` ([Kompatibilitätslog](../../COMPATIBILITY-LOG.md)).
+
+**Paritätsfälle (52):** `c013-status-bogus`, `c013-status-sd`, `c013-status-storage-novalue`, `c013-status-storage-notfound`, `c013-status-jobid-notrunning`, `c013-status-limited`, `c014-status-dir`, `c014-status-director-days`, `c014-status-dir-days-invalid`, `c014-status-dir-api1`, `c014-status-dir-json`, `c014-status-scheduler-preview`, `c014-status-scheduler-past`, `c014-status-scheduler-range`, `c014-status-scheduler-invalid`, `c014-status-sched-client`, `c014-status-scheduler-json`, `c014-status-subscriptions`, `c014-status-subscriptions-all`, `c014-status-subscriptions-client`, `c014-status-subscriptions-limited`, `c014-status-configuration`, `c014-status-configuration-limited`, `c014-status-subscriptions-json`, `c014-status-subscriptions-clients`, `c014-status-subscriptions-plugins`, `c014-status-all`, `c027-gui-status-dir`, `c028-status-scheduler`, `c028-status-dir`, `c028-status-scheduler-days`, `c042-status-storage`, `c042-status-sd`, `c042-status-bogus`, `c042-status-storage-star`, `c042-status-client-star`, `c042-status-storage-slots`, `c042-status-storage-api1`, `c042-status-storage-api2`, `c042-status-all`, `c042-status-storage-twice`, `c042-status-storage-slots-api1`, `c042-status-storage-slots-api2`, `c042-status-storage-api1-twice`, `status-client`, `status-storage`, `status-scheduler`, `status-scheduler-job`, `status-subscriptions`, `status-configuration`, `status-dir`, `status-bogus`.
 
 **Lokaler Handler:** [crates/onesimus-dird/src/commands/status.rs:91](../../../crates/onesimus-dird/src/commands/status.rs).
 

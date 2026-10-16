@@ -15,9 +15,15 @@ cancel storage=<storage-name> | jobid=<jobid> | job=<job-name> | ujobid=<unique-
 
 **RunScript erlaubt:** nein. **Audit-Ereignis:** ja. Beide Flags sind keine Read-only-Klassifizierung.
 
-**Onesimus-Status:** `partial`. Funktionsparität ist nicht durch einen Live-Test nachgewiesen.
+**Onesimus-Status:** `partial`. Paritätsfälle vorhanden, vollständige Funktionsparität aber nicht nachgewiesen (siehe Befunde).
 
-- Im unabhängigen Review wurde ein vorzeitiger Abschluss nach SIGTERM nachgewiesen. Cancel setzt jetzt Canceling und prüft Signalfehler; endgültiger Katalogstatus/Zähler werden erst nach Workerende geschrieben. Vollständige Originalselektion (job/ujobid/Joblisten/Zustandsfilter/Dialog), FD-/SD-Abbruchkoordination, ACL und Live-SHA-256-Parität sind nicht nachgewiesen.
+- Paritätslauf 16.10.2026 (`development` `7993ce6`): 24 von 24 Fällen byte-identisch; Modi: Text, API 1, API 2.
+- Verglichen sind Selektion und Fehlertexte nur mit nicht existierenden bzw. nicht laufenden Jobs. Abbruch laufender Jobs über FD/SD ist nur durch Einheitentests belegt.
+- RunScripts „AfterJob“ bei Cancel und Warte-Zustände fehlen (C-048).
+
+**Offene Logeinträge:** `C-048` ([Kompatibilitätslog](../../COMPATIBILITY-LOG.md)).
+
+**Paritätsfälle (24):** `c006-cancel-none-api2`, `c006-cancel-noargs-api2`, `c006-cancel-job`, `c006-cancel-ujobid`, `c006-cancel-badjobid`, `c006-cancel-all`, `c034-storage-nosuch-job`, `c034-storage-nosuch-job-api2`, `c034-storage-badjobid`, `c034-storage-nojobid`, `c034-storage-jobid-novalue`, `c034-storage-unknown`, `c034-storage-after-jobid`, `c034-storage-novalue`, `c034-sd-keyword`, `c034-state-running`, `c034-state-idle`, `c034-state-novalue`, `c034-all-yes`, `c034-all-api1`, `c035-cancel-job-nosuch-api1`, `c035-cancel-job-nosuch-api2`, `cancel-none`, `cancel-dialog`.
 
 **Lokaler Handler:** [crates/onesimus-dird/src/commands/cancel.rs:63](../../../crates/onesimus-dird/src/commands/cancel.rs).
 

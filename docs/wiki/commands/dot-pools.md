@@ -15,7 +15,14 @@ Referenz: [WIP/25.1.2-pre-43-g18be77e68, `18be77e6832e`](https://github.com/bare
 
 **RunScript erlaubt:** ja. **Audit-Ereignis:** nein. Beide Flags sind keine Read-only-Klassifizierung.
 
-**Onesimus-Status:** `registered_unverified`. Funktionsparität ist nicht durch einen Live-Test nachgewiesen.
+**Onesimus-Status:** `partial`. Paritätsfälle vorhanden, vollständige Funktionsparität aber nicht nachgewiesen (siehe Befunde).
+
+- Paritätslauf 16.10.2026 (`development` `7993ce6`): 21 von 21 Fällen byte-identisch; Modi: Text, API 1, API 2, Konsolen parity-acl, parity-bvfs, parity-limited, parity-operator.
+- `type=` vergleicht exakt statt als Präfix ohne Groß-/Kleinschreibung (C-044); die Fälle prüfen nur vollständige Typnamen.
+
+**Offene Logeinträge:** `C-044` ([Kompatibilitätslog](../../COMPATIBILITY-LOG.md)).
+
+**Paritätsfälle (21):** `c025-pools-limited`, `c025-pools-limited-api2`, `c025-pools-type-Backup-limited`, `c025-pools-type-Backup-limited-api2`, `c025-pools-operator`, `c025-pools-operator-api2`, `c025-pools-type-Backup-operator`, `c025-pools-type-Backup-operator-api2`, `c025-pools-bvfs`, `c025-pools-bvfs-api2`, `c025-pools-type-Backup-bvfs`, `c025-pools-type-Backup-bvfs-api2`, `c025-pools-acl`, `c025-pools-acl-api2`, `c025-pools-type-Backup-acl`, `c025-pools-type-Backup-acl-api2`, `c028-dot-pools`, `dot_pools`, `dot_pools-type-Backup`, `dot_pools-limited`, `dot_pools-api2`.
 
 **Lokaler Handler:** [crates/onesimus-dird/src/commands/dot.rs:100](../../../crates/onesimus-dird/src/commands/dot.rs).
 

@@ -15,7 +15,11 @@ unmount storage=<storage-name> [ drive=<drivenum> ] jobid=<jobid> | job=<job-nam
 
 **RunScript erlaubt:** nein. **Audit-Ereignis:** ja. Beide Flags sind keine Read-only-Klassifizierung.
 
-**Onesimus-Status:** `registered_unverified`. Funktionsparität ist nicht durch einen Live-Test nachgewiesen.
+**Onesimus-Status:** `registered_unverified`. Funktionsparität ist nicht durch einen Paritätsfall nachgewiesen.
+
+- Kein Paritätsfall: Unmount am echten SD ist laut Testregeln nicht live erlaubt; Verhalten nur durch Einheitentests belegt.
+
+**Offene Logeinträge:** `C-050` ([Kompatibilitätslog](../../COMPATIBILITY-LOG.md)).
 
 **Lokaler Handler:** [crates/onesimus-dird/src/commands/admin.rs:175](../../../crates/onesimus-dird/src/commands/admin.rs).
 

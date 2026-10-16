@@ -15,9 +15,12 @@ add pool=<pool-name> storage=<storage-name> jobid=<jobid>
 
 **RunScript erlaubt:** nein. **Audit-Ereignis:** ja. Beide Flags sind keine Read-only-Klassifizierung.
 
-**Onesimus-Status:** `partial`. Funktionsparität ist nicht durch einen Live-Test nachgewiesen.
+**Onesimus-Status:** `partial`. Paritätsfälle vorhanden, vollständige Funktionsparität aber nicht nachgewiesen (siehe Befunde).
 
-- Der lokale Handler verlangt volume=<name> und legt einen vereinfachten Katalogdatensatz an; storage/jobid aus der Originalhilfe werden nicht ausgewertet. Die dokumentierte Originalsyntax ohne volume führt lokal nur zur Aufforderung, volume anzugeben.
+- Paritätslauf 16.10.2026 (`development` `7993ce6`): 9 von 9 Fällen byte-identisch; Modi: Text, API 1, Konsolen parity-c030-client, parity-c030-job, parity-c030-pool, parity-c030-storage.
+- Verglichen sind Dialog, ACL-Warnung und Abbruch; das tatsächliche Anlegen von Volumes und der Katalogzustand danach sind nicht verglichen.
+
+**Paritätsfälle (9):** `c011-add-cancel`, `c011-add-pool-cancel`, `c011-add-pool-badnumber-cancel`, `c011-add-api1-cancel`, `c030-add-job-cancel`, `c030-add-storage-cancel`, `c030-add-client-cancel`, `c030-add-pool-cancel`, `add-noargs`.
 
 **Lokaler Handler:** [crates/onesimus-dird/src/commands/extra.rs:855](../../../crates/onesimus-dird/src/commands/extra.rs).
 

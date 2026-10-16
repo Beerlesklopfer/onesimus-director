@@ -15,9 +15,12 @@ trace on | off
 
 **RunScript erlaubt:** ja. **Audit-Ereignis:** ja. Beide Flags sind keine Read-only-Klassifizierung.
 
-**Onesimus-Status:** `partial`. Funktionsparität ist nicht durch einen Live-Test nachgewiesen.
+**Onesimus-Status:** `partial`. Paritätsfälle vorhanden, vollständige Funktionsparität aber nicht nachgewiesen (siehe Befunde).
 
-- trace on/off schaltet jetzt einen gemeinsamen, synchronisierten Datei-Sink für tracing- und BNET-Diagnosen. Die Datei liegt als bareos-dir.trace im WorkingDirectory, wird mit 0600 angelegt und appendend/flushed geschrieben; off schließt sie. Tests prüfen Wirkung und Fehlerpfade. Interaktiver Rückfragedialog, der upstream einkompilierte Trace-Verzeichnispfad und Live-SHA-256-Parität bleiben offen.
+- Paritätslauf 16.10.2026 (`development` `7993ce6`): 3 von 3 Fällen byte-identisch; Modi: Text, API 1.
+- Verglichen sind Dialog und Abbruch; das Schreiben der Trace-Datei ist nur durch Einheitentests belegt.
+
+**Paritätsfälle (3):** `c011-trace-cancel`, `c011-trace-api1-cancel`, `trace-noargs`.
 
 **Lokaler Handler:** [crates/onesimus-dird/src/commands/extra.rs:177](../../../crates/onesimus-dird/src/commands/extra.rs).
 

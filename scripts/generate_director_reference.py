@@ -207,19 +207,24 @@ def main():
         implementation.update(status='registered_unverified' if name in local else 'missing', findings=[])
         if name in overrides['commands']:
             implementation.update(overrides['commands'][name])
-        implementation['functional_parity_verified'] = False
+        implementation['functional_parity_verified'] = implementation['status'] == 'parity_verified'
         command['onesimus'] = implementation
         command['documentation'] = filename(name)
+    tree_overrides = overrides.get('restore_file_selection_commands', {})
     for command in tree:
-        command['onesimus'] = {'status': 'missing_context', 'functional_parity_verified': False,
+        command['onesimus'] = {'status': 'missing_context',
                               'findings': ['Onesimus restore queues a job directly; no interactive restore file-selection shell is implemented.'],
                               'implementation': local['restore']['implementation']}
+        command['onesimus'].update(tree_overrides.get(command['name'], {}))
+        command['onesimus']['functional_parity_verified'] = command['onesimus']['status'] == 'parity_verified'
     extras = [{'name': n, **v} for n, v in sorted(local.items()) if n not in {c['name'] for c in commands}]
     counts = dict(sorted(Counter(c['onesimus']['status'] for c in commands).items()))
+    tree_counts = dict(sorted(Counter(c['onesimus']['status'] for c in tree).items()))
+    evidence = overrides.get('parity_evidence')
     data = {
         '$schema': './bareos-director-commands.schema.json',
         'schema_version': 1,
-        'title': 'Bareos Director command reference and Onesimus static coverage audit',
+        'title': 'Bareos Director command reference and Onesimus coverage audit',
         'reference_date': '2026-10-16',
         'upstream': {'repository': 'https://github.com/bareos/bareos', 'tag': TAG, 'commit': COMMIT,
                      'license': 'AGPL-3.0-only',
@@ -261,19 +266,27 @@ def main():
             'Prefer full command names; Onesimus now resolves Bareos prefixes in the original table order, while local extensions remain exact matches.',
             'Descriptions and usage describe upstream Bareos, not guaranteed Onesimus behavior.',
             'registered_unverified means a handler exists, not that its semantics or options are complete.',
+            'parity_verified means every parity case listed in parity_cases replied byte-identically to the original Director (text, API modes and error paths as listed) and no open compatibility-log entry concerns the command; it does not cover variants absent from parity_cases.',
+            'partial means parity cases exist (all or mostly matching) but findings name open compatibility-log entries, uncovered variants or side effects that were only unit-tested.',
             'usage is upstream help text, not a formal grammar or exhaustive argument validation schema. NULL remains null; it does not mean no arguments are accepted.',
             'argument_keywords_in_help is a lexical index only, not a list of required or implemented arguments.',
             'Never infer read-only access from a leading dot, allowed_in_runscript or audit_event.',
             'Bareos console query is different from the MCP tool named query.',
             'Restore file-selection commands belong to a separate shell; do not send them as top-level Director commands.',
-            'No live Director or destructive command was executed for this audit; all functional_parity_verified values are false.',
+            'functional_parity_verified is true only for parity_verified; the evidence is the parity run named in parity_evidence (tests/parity), not a static review.',
         ],
         'summary': {'top_level_commands': len(commands), 'registered_top_level_commands': sum(c['name'] in local for c in commands),
-                    'status_counts': counts, 'restore_file_selection_commands': len(tree), 'onesimus_extra_names': len(extras)},
+                    'status_counts': counts, 'restore_file_selection_commands': len(tree),
+                    'restore_file_selection_status_counts': tree_counts, 'onesimus_extra_names': len(extras)},
+        **({'parity_evidence': evidence} if evidence else {}),
         'cross_cutting_findings': overrides['cross_cutting_findings'],
         'commands': commands, 'restore_file_selection_commands': tree, 'onesimus_extensions': extras,
     }
     outputs = {OUT / 'bareos-director-commands.json': json.dumps(data, ensure_ascii=False, indent=2) + '\n'}
+    evidence_line = (f"Paritätslauf vom {'.'.join(reversed(evidence['date'].split('-')))} auf `development` = `{evidence['development_commit']}`: "
+                     f"{evidence['counts']['match']} von {evidence['cases']} Fällen byte-identisch "
+                     f"({evidence['counts']['diff']} Unterschiede, {evidence['counts']['error']} Fehler)."
+                     if evidence else 'Kein Paritätslauf hinterlegt.')
     intro = f'''# Bareos Director: Originalreferenz und Vollständigkeitsabgleich
 
 [LLM-Referenz (JSON)](bareos-director-commands.json) · [JSON-Schema](bareos-director-commands.schema.json) · [Wiki-Übersicht](README.md) · [Audit-Notizen](audit-notes.json)
@@ -285,13 +298,16 @@ Das ist der exakte Quellstand des installierten Referenz-Directors (`bareos-dir 
 
 **{len(commands)} Originalbefehle, davon {sum(c['name'] in local for c in commands)} lokal registriert.** Hinzu kommen {len(tree)} Befehle der separaten Restore-Dateiauswahl und {len(extras)} lokale Zusatznamen.
 Registrierung ist kein Nachweis funktionaler Vollständigkeit. Der Director ist nach den belegten Lücken **nicht vollständig kompatibel**.
-Dies ist ein statischer Quellcodeabgleich; es wurden keine Live-Jobs, Löschungen oder anderen Director-Befehle ausgeführt.
+Der Status stützt sich auf den Paritätsvergleich (`tests/parity`: Original- und Onesimus-Director nacheinander auf identischer Konfiguration, jede Seite auf eigener Katalogkopie, Rohbytes und Signale je Schritt verglichen) und auf das [Kompatibilitätslog](../../COMPATIBILITY-LOG.md). {evidence_line}
+`parity_verified` gilt nur für die in der JSON unter `parity_cases` genannten Varianten; Seiteneffekte auf echte FD/SD (Labeln, Mount, Bandbreite, Debug, Cancel laufender Jobs) werden im Paritätslauf nicht ausgeführt und sind nur durch Einheitentests belegt.
 
 | Status | Anzahl | Bedeutung |
 |---|---:|---|
 '''
-    meanings = {'registered_unverified': 'Handler vorhanden; Funktionsparität nicht nachgewiesen',
-                'partial': 'Konkrete fehlende Optionen oder Teilfunktionen belegt',
+    meanings = {'parity_verified': 'Alle Paritätsfälle des Befehls (Text, API-Modi, Fehlerpfade laut `parity_cases`) byte-identisch, kein offener Logeintrag',
+                'registered_unverified': 'Handler vorhanden; kein Paritätsfall, Funktionsparität nicht nachgewiesen',
+                'partial': 'Paritätsfälle vorhanden, aber offene Logeinträge, ungedeckte Varianten oder nur einheitengetestete Seiteneffekte',
+                'missing_context': 'Eigener Dialogkontext fehlt in Onesimus',
                 'stub': 'Platzhalter statt der beschriebenen Wirkung',
                 'semantic_mismatch': 'Abweichende Bedeutung gegenüber Bareos', 'missing': 'Kein lokaler Dispatch-Eintrag'}
     for status, count in counts.items():
@@ -348,18 +364,28 @@ Referenz: [{TAG}, `{COMMIT[:12]}`]({command['source']['url']}) · [Vollständigk
             section += '**Originalsyntax:** Kein Parametertext in der Tabelle; daraus folgt keine Aussage über interaktive Eingaben oder intern akzeptierte Optionen.\n\n'
         section += f"**RunScript erlaubt:** {'ja' if command['allowed_in_runscript'] else 'nein'}. **Audit-Ereignis:** {'ja' if command['audit_event'] else 'nein'}. Beide Flags sind keine Read-only-Klassifizierung.\n\n"
         local_item = command['onesimus']
-        section += f"**Onesimus-Status:** `{local_item['status']}`. Funktionsparität ist nicht durch einen Live-Test nachgewiesen.\n\n"
+        if local_item['status'] == 'parity_verified':
+            verdict = 'Alle unten genannten Paritätsfälle antworten byte-identisch zum Original; nicht genannte Varianten sind damit nicht belegt.'
+        elif local_item.get('parity_cases'):
+            verdict = 'Paritätsfälle vorhanden, vollständige Funktionsparität aber nicht nachgewiesen (siehe Befunde).'
+        else:
+            verdict = 'Funktionsparität ist nicht durch einen Paritätsfall nachgewiesen.'
+        section += f"**Onesimus-Status:** `{local_item['status']}`. {verdict}\n\n"
         for finding in local_item['findings']:
             section += f'- {finding}\n'
         if local_item['findings']:
             section += '\n'
+        if local_item.get('open_log_entries'):
+            section += '**Offene Logeinträge:** ' + ', '.join(f'`{e}`' for e in local_item['open_log_entries']) + ' ([Kompatibilitätslog](../../COMPATIBILITY-LOG.md)).\n\n'
+        if local_item.get('parity_cases'):
+            section += f"**Paritätsfälle ({len(local_item['parity_cases'])}):** " + ', '.join(f'`{c}`' for c in local_item['parity_cases']) + '.\n\n'
         if 'implementation' in local_item:
             section += '**Lokaler Handler:** ' + md_link(local_item['implementation']) + '.\n\n'
         section += 'Die folgenden vorhandenen Beispiele und Verhaltensbeschreibungen sind lokale Dokumentation; sie sind kein Beleg für vollständige Bareos-Kompatibilität. Bei Widersprüchen gilt der obige Befund.\n' + end
         outputs[page] = before + section + after
-    intro += '\n## Restore-Dateiauswahl (eigener Kontext)\n\nDiese Befehle stehen in `ua_tree.cc::commands[]`, nicht in der Hauptkonsole. Onesimus besitzt derzeit keine entsprechende interaktive Dateiauswahl. Gleichnamige Konsolenbefehle zählen nicht als Implementierung dieses Kontexts.\n\n| Befehl | Originalbeschreibung | Originalquelle |\n|---|---|---|\n'
+    intro += '\n## Restore-Dateiauswahl (eigener Kontext)\n\nDiese Befehle stehen in `ua_tree.cc::commands[]`, nicht in der Hauptkonsole. Gleichnamige Konsolenbefehle zählen nicht als Implementierung dieses Kontexts. Status: ' + ', '.join(f'`{k}` {v}' for k, v in tree_counts.items()) + '.\n\n| Befehl | Originalbeschreibung | Originalquelle | Lokaler Status |\n|---|---|---|---|\n'
     for command in tree:
-        intro += f"| `{command['name']}` | {command['description']} | [Handler]({command['handler_source']['url']}) |\n"
+        intro += f"| `{command['name']}` | {command['description']} | [Handler]({command['handler_source']['url']}) | `{command['onesimus']['status']}` |\n"
     intro += '\n## Onesimus-Erweiterungen\n\nZusatznamen sind keine Belege für upstream vorhandene Funktionen. Die JSON enthält ihre lokalen Handler und Aliase.\n\n' + ', '.join(f"`{e['name']}`" for e in extras) + '.\n'
     intro += '''
 ## Reproduzieren und aktualisieren

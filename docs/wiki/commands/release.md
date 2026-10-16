@@ -15,7 +15,14 @@ release storage=<storage-name> [ drive=<drivenum> ] [ alldrives ]
 
 **RunScript erlaubt:** ja. **Audit-Ereignis:** ja. Beide Flags sind keine Read-only-Klassifizierung.
 
-**Onesimus-Status:** `registered_unverified`. Funktionsparität ist nicht durch einen Live-Test nachgewiesen.
+**Onesimus-Status:** `partial`. Paritätsfälle vorhanden, vollständige Funktionsparität aber nicht nachgewiesen (siehe Befunde).
+
+- Paritätslauf 16.10.2026 (`development` `7993ce6`): 7 von 7 Fällen byte-identisch; Modi: Text.
+- Verglichen sind Auswahl und Fehlerpfade am File-Storage; NDMP (C-050) ungeprüft.
+
+**Offene Logeinträge:** `C-050` ([Kompatibilitätslog](../../COMPATIBILITY-LOG.md)).
+
+**Paritätsfälle (7):** `c013-release-auto`, `c013-release-positional`, `c013-release-drive`, `c013-release-alldrives`, `c013-release-notfound`, `c013-release-then-mount`, `release-dialog`.
 
 **Lokaler Handler:** [crates/onesimus-dird/src/commands/admin.rs:179](../../../crates/onesimus-dird/src/commands/admin.rs).
 

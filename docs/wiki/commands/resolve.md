@@ -15,9 +15,12 @@ resolve client=<client-name> | storage=<storage-name> <host-name>
 
 **RunScript erlaubt:** nein. **Audit-Ereignis:** ja. Beide Flags sind keine Read-only-Klassifizierung.
 
-**Onesimus-Status:** `partial`. Funktionsparität ist nicht durch einen Live-Test nachgewiesen.
+**Onesimus-Status:** `parity_verified`. Alle unten genannten Paritätsfälle antworten byte-identisch zum Original; nicht genannte Varianten sind damit nicht belegt.
 
-- Mehrere Hostnamen werden jetzt wahlweise lokal oder auf dem mit client=/fd=/storage= ausgewählten Daemon aufgelöst. FD und SD können gemeinsam angesprochen werden. IPv4-/IPv6-Ausgabe entspricht dem Originalformat; Antworten mehrerer BNET-Frames und deren Zeilenenden bleiben erhalten. Unbekannte Ziele fallen nicht auf lokale DNS-Auflösung zurück. Tests prüfen Routing, Ausgabe und Fehlerpfade. ACL-Abgleich, Legacy-/Nicht-TLS-Verbindungen und Live-SHA-256-Parität bleiben offen.
+- Paritätslauf 16.10.2026 (`development` `7993ce6`): 19 von 19 Fällen byte-identisch; Modi: Text, API 2.
+- Legacy-/Nicht-TLS-Daemons sind im Fixture nicht vorhanden.
+
+**Paritätsfälle (19):** `c018-localhost`, `c018-ipv4-literal`, `c018-ipv6-literal`, `c018-multiple`, `c018-unknown`, `c018-unknown-after-known`, `c018-keyword-value`, `c018-no-args`, `c018-client-missing-name`, `c018-client-unknown`, `c018-storage-unknown`, `c018-client`, `c018-client-twice`, `c018-storage`, `c018-client-storage`, `c018-api2`, `c018-api2-client`, `resolve-local`, `resolve-client`.
 
 **Lokaler Handler:** [crates/onesimus-dird/src/commands/resolve.rs:7](../../../crates/onesimus-dird/src/commands/resolve.rs).
 
