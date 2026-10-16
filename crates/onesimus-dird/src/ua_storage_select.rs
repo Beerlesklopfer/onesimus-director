@@ -8,12 +8,8 @@
 //! `mount`, `unmount`/`umount`, `release` (ua_cmds.cc DoMountCmd) and the
 //! storage branch of `status` (ua_status.cc StatusCmd).
 //!
-//! Upstream prints everything (SendMsg and ErrorMsg) into the console in
-//! call order; the text is collected here in that order. Where upstream
-//! waits for console input (several storages, several drives, autochanger
-//! slot) the dialog of compatibility log C-011 is not available yet: those
-//! paths go through [`prompt_select`] / [`prompt_input`], which print what
-//! upstream prints before it waits and then cancel.
+//! Messages and the dialogs (several storages, several drives, autochanger
+//! slot) go through the command's [`Ua`] (compatibility log C-011).
 
 use std::collections::HashMap;
 use std::sync::Mutex;
@@ -22,9 +18,9 @@ use bareos_bnet::{BnetMessage, BnetSignal};
 use bareos_config::resources::StorageResource;
 
 use crate::acl::{self, Kind};
-use crate::command_ast::{Argument, CommandAst};
-use crate::command_executor::{ApiMode, ExecContext};
-use crate::command_queue::CommandResult;
+use crate::command_ast::Argument;
+use crate::command_executor::ExecContext;
+use crate::ua_select::Ua;
 
 /// Everything the selection needs, copied out of the configuration lock.
 pub struct Env {
@@ -32,15 +28,14 @@ pub struct Env {
     pub storages: Vec<(StorageResource, bool, bool)>,
     /// Running jobs: (JobId, unique Job name, write storage name).
     pub running: Vec<(u32, String, String)>,
-    /// `!ua->api`: DoPrompt reports an automatic selection.
-    pub human: bool,
 }
 
 impl Env {
     pub fn load(ctx: &ExecContext) -> Option<Self> {
         let config = ctx.config.as_ref()?.read().ok()?;
         let storages = config.storages.iter()
-            .map(|s| (s.clone(), is_autochanger(&config, &s.name), acl::access(ctx, Kind::Storage, &s.name)))
+            .map(|s| (s.clone(), crate::ua_select::is_autochanger(&config, &s.name),
+                acl::access(ctx, Kind::Storage, &s.name)))
             .collect();
         // jcr->dir_impl->res.write_storage: Onesimus keeps no per-job storage
         // record; the job resource's Storage is what the job writes to.
@@ -52,7 +47,7 @@ impl Env {
                 (job.id, job.unique_name, storage)
             })
             .collect();
-        Some(Self { storages, running, human: ctx.api_mode == ApiMode::Human })
+        Some(Self { storages, running })
     }
 
     /// `ua->GetStoreResWithName()` (ua_acl.cc:279): Storage ACL, exact name.
@@ -69,42 +64,9 @@ impl Env {
     }
 }
 
-/// `Auto Changer = yes` in the Storage resource (dird_conf.cc "autochanger").
-fn is_autochanger(config: &crate::director_config::DirectorConfig, name: &str) -> bool {
-    config.raw.iter()
-        .find(|r| r.norm_type() == "storage" && r.name() == Some(name))
-        .and_then(|r| r.directives.iter().rev().find(|d| d.norm_key() == "autochanger"))
-        .and_then(|d| d.first())
-        .is_some_and(|v| bareos_config::values::parse_bool(v).is_ok_and(|(_, on)| on))
-}
-
-/// `get_storage_resource(ua, use_default, autochangers_only)` for a session.
-/// Ok carries the storage and the text printed while selecting it; Err the
-/// result to return when no storage was selected.
-pub fn get_storage_resource(ast: &CommandAst, ctx: &ExecContext, use_default: bool, autochangers_only: bool)
-    -> Result<(StorageResource, String), CommandResult> {
-    let Some(env) = Env::load(ctx) else {
-        return Err(CommandResult::error("No config\n".into()));
-    };
-    let mut out = String::new();
-    match select(&ast.arguments, &env, use_default, autochangers_only, &mut out) {
-        Some(store) => Ok((store, out)),
-        // A waiting dialog prompt ends without newline (nothing failed);
-        // otherwise the last line is the ErrorMsg that ended the selection.
-        None if !out.ends_with('\n') => Err(CommandResult::ok(out)),
-        None => {
-            let split = out[..out.len() - 1].rfind('\n').map_or(0, |i| i + 1);
-            let mut result = CommandResult::error(out[split..].to_string());
-            out.truncate(split);
-            result.text_output = out;
-            Err(result)
-        }
-    }
-}
-
 /// C++ get_storage_resource() (ua_select.cc:1320) on the arguments after
 /// the command name.
-pub fn select(args: &[Argument], env: &Env, use_default: bool, autochangers_only: bool, out: &mut String)
+pub fn select(ua: &mut Ua, args: &[Argument], env: &Env, use_default: bool, autochangers_only: bool)
     -> Option<StorageResource> {
     let mut store_name: Option<String> = None;
     let mut store: Option<String> = None;
@@ -117,7 +79,7 @@ pub fn select(args: &[Argument], env: &Env, use_default: bool, autochangers_only
             if IGNORED.iter().any(|k| k.eq_ignore_ascii_case(&arg.key)) { continue; }
             // Default argument is storage
             if store_name.is_some() {
-                out.push_str("Storage name given twice.\n");
+                ua.error_msg("Storage name given twice.\n");
                 return None;
             }
             if arg.key.starts_with('?') {
@@ -135,7 +97,7 @@ pub fn select(args: &[Argument], env: &Env, use_default: bool, autochangers_only
                 "jobid" => {
                     let jobid = arg.value.as_deref().map(str_to_int64).unwrap_or(0);
                     if jobid <= 0 {
-                        out.push_str(&format!("Expecting jobid=nn command, got: {}\n", arg.key));
+                        ua.error_msg(format!("Expecting jobid=nn command, got: {}\n", arg.key));
                         return None;
                     }
                     // jobid is an int in upstream.
@@ -143,7 +105,7 @@ pub fn select(args: &[Argument], env: &Env, use_default: bool, autochangers_only
                     match env.running.iter().find(|j| j.0 as i64 == jobid as i64) {
                         Some(job) => store = Some(job.2.clone()),
                         None => {
-                            out.push_str(&format!("JobId {jobid} is not running.\n"));
+                            ua.error_msg(format!("JobId {jobid} is not running.\n"));
                             return None;
                         }
                     }
@@ -152,7 +114,7 @@ pub fn select(args: &[Argument], env: &Env, use_default: bool, autochangers_only
                 "job" | "jobname" | "ujobid" => {
                     let Some(name) = arg.value.as_deref() else {
                         let what = if key == "ujobid" { "ujobid" } else { "job" };
-                        out.push_str(&format!("Expecting {what}=xxx, got: {}.\n", arg.key));
+                        ua.error_msg(format!("Expecting {what}=xxx, got: {}.\n", arg.key));
                         return None;
                     };
                     let job = if key == "ujobid" {
@@ -163,7 +125,7 @@ pub fn select(args: &[Argument], env: &Env, use_default: bool, autochangers_only
                     match job {
                         Some(job) => store = Some(job.2.clone()),
                         None => {
-                            out.push_str(&format!("Job \"{name}\" is not running.\n"));
+                            ua.error_msg(format!("Job \"{name}\" is not running.\n"));
                             return None;
                         }
                     }
@@ -180,15 +142,18 @@ pub fn select(args: &[Argument], env: &Env, use_default: bool, autochangers_only
     }
     if found.is_none() {
         if let Some(name) = store_name.as_deref().filter(|n| !n.is_empty()) {
-            found = env.get_store_res_with_name(name).cloned();
+            // GetStoreResWithName(name) audits a denied name (ua_acl.cc:309).
+            if acl::access_audited(ua.ctx, Kind::Storage, name) {
+                found = env.get_store_res_with_name(name).cloned();
+            }
             if found.is_none() {
-                out.push_str(&format!("Storage resource \"{name}\": not found\n"));
+                ua.error_msg(format!("Storage resource \"{name}\": not found\n"));
             }
         }
     }
     // No keywords found, so present a selection list
     if found.is_none() {
-        found = select_storage_resource(env, autochangers_only, out);
+        found = select_storage_resource(ua, env, autochangers_only);
     }
     found
 }
@@ -207,54 +172,19 @@ fn str_to_int64(text: &str) -> i64 {
 }
 
 /// C++ select_storage_resource() (ua_select.cc:197).
-pub fn select_storage_resource(env: &Env, autochanger_only: bool, out: &mut String) -> Option<StorageResource> {
-    let header = if autochanger_only {
+pub fn select_storage_resource(ua: &mut Ua, env: &Env, autochanger_only: bool) -> Option<StorageResource> {
+    ua.start_prompt(if autochanger_only {
         "The defined Autochanger Storage resources are:\n"
     } else {
         "The defined Storage resources are:\n"
-    };
-    let names: Vec<String> = crate::director_config::sort_case_insensitive(env.storages.iter()
+    });
+    for name in crate::director_config::sort_case_insensitive(env.storages.iter()
         .filter(|s| s.2 && (!autochanger_only || s.1))
-        .map(|s| s.0.name.as_str()))
-        .into_iter().map(str::to_string).collect();
-    let name = prompt_select(env.human, header, &names, "Storage", "Select Storage resource", out)?;
+        .map(|s| s.0.name.as_str())) {
+        ua.add_prompt(name);
+    }
+    let (_, name) = ua.do_prompt("Storage", "Select Storage resource")?;
     env.get_store_res_with_name(&name).cloned()
-}
-
-/// DoPrompt (ua_select.cc:1210) over a prepared list.
-///
-/// One entry is selected automatically, an empty list fails. Several
-/// entries need the console dialog (compatibility log C-011): until it
-/// exists, this hook prints the list and the prompt like upstream and then
-/// cancels the selection.
-pub fn prompt_select(human: bool, header: &str, items: &[String], automsg: &str, msg: &str, out: &mut String)
-    -> Option<String> {
-    if items.len() == 1 {
-        if human {
-            out.push_str(&format!("Automatically selected {automsg}: {}\n", items[0]));
-        }
-        return Some(items[0].clone());
-    }
-    out.push_str(header);
-    if items.is_empty() {
-        out.push_str(&format!("Selection list for \"{automsg}\" is empty!\n"));
-        return None;
-    }
-    // FormatPrompts() short form: "%*d: %s\n" with the width of num_prompts.
-    let width = (items.len() + 1).to_string().len();
-    for (index, item) in items.iter().enumerate() {
-        out.push_str(&format!("{:>width$}: {item}\n", index + 1));
-    }
-    out.push_str(&format!("{msg} (1-{}): ", items.len()));
-    None
-}
-
-/// GetCmd() (ua_input.cc): needs the console dialog (C-011). Prints the
-/// prompt and reports no input. Upstream continues without a slot only when
-/// reading the answer fails; here nobody could answer, so callers stop.
-pub fn prompt_input(prompt: &str, out: &mut String) -> Option<String> {
-    out.push_str(prompt);
-    None
 }
 
 /// C++ FindArgWithValue() + atoi().
@@ -305,13 +235,13 @@ fn dev_name(store: &StorageResource) -> String {
 
 /// open_sd_bsock() (sd_cmds.cc:165) + one exchange; None if the connection
 /// failed (the error has been printed).
-fn open_and_exchange(sd: &mut impl SdLink, store: &StorageResource, command: &str, out: &mut String)
+fn open_and_exchange(ua: &mut Ua, sd: &mut impl SdLink, store: &StorageResource, command: &str)
     -> Option<Vec<String>> {
-    out.push_str(&format!("Connecting to Storage daemon {} at {}:{} ...\n", store.name, store.address, store.port));
+    ua.send_msg(format!("Connecting to Storage daemon {} at {}:{} ...\n", store.name, store.address, store.port));
     match sd.exchange(store, command) {
         Ok(messages) => Some(messages),
         Err(_) => {
-            out.push_str("Failed to connect to Storage daemon.\n");
+            ua.error_msg("Failed to connect to Storage daemon.\n");
             None
         }
     }
@@ -321,19 +251,19 @@ fn open_and_exchange(sd: &mut impl SdLink, store: &StorageResource, command: &st
 static DRIVES: Mutex<Option<HashMap<String, i16>>> = Mutex::new(None);
 
 /// GetNumDrives() (storage.cc:668) / NativeGetNumDrives() (sd_cmds.cc:558).
-fn get_num_drives(sd: &mut impl SdLink, store: &StorageResource, out: &mut String) -> i16 {
+fn get_num_drives(ua: &mut Ua, sd: &mut impl SdLink, store: &StorageResource) -> i16 {
     if let Some(drives) = DRIVES.lock().ok().and_then(|d| d.as_ref()?.get(&store.name).copied()) {
         if drives > 0 { return drives; }
     }
     let mut drives = 0;
-    if let Some(messages) = open_and_exchange(sd, store, &format!("autochanger drives {}\n", dev_name(store)), out) {
+    if let Some(messages) = open_and_exchange(ua, sd, store, &format!("autochanger drives {}\n", dev_name(store))) {
         for message in messages {
             match message.strip_prefix("drives=").and_then(|rest| {
                 let digits: String = rest.chars().take_while(|c| c.is_ascii_digit()).collect();
                 digits.parse::<i16>().ok()
             }) {
                 Some(n) => { drives = n; break; }
-                None => out.push_str(&message),
+                None => ua.send_msg(message),
             }
         }
     }
@@ -344,7 +274,7 @@ fn get_num_drives(sd: &mut impl SdLink, store: &StorageResource, out: &mut Strin
 }
 
 /// GetStorageDrive() (ua_select.cc:1429); None is kInvalidDriveNumber.
-fn get_storage_drive(args: &[Argument], env: &Env, sd: &mut impl SdLink, store: &StorageResource, out: &mut String)
+fn get_storage_drive(ua: &mut Ua, args: &[Argument], env: &Env, sd: &mut impl SdLink, store: &StorageResource)
     -> Option<i16> {
     if let Some(drive) = arg_number(args, "drive") {
         return Some(drive);
@@ -352,81 +282,88 @@ fn get_storage_drive(args: &[Argument], env: &Env, sd: &mut impl SdLink, store: 
     if !env.autochanger(&store.name) {
         return Some(0);
     }
-    let drives = get_num_drives(sd, store, out);
+    let drives = get_num_drives(ua, sd, store);
     if drives == 1 {
         return Some(0);
     }
-    let items: Vec<String> = (0..drives.max(0)).map(|n| format!("Drive {n}")).collect();
-    let choice = prompt_select(env.human, "Select Drive:\n", &items, "Drive", "Select drive", out)?;
+    ua.start_prompt("Select Drive:\n");
+    for n in 0..drives.max(0) {
+        ua.add_prompt(&format!("Drive {n}"));
+    }
+    let (_, choice) = ua.do_prompt("Drive", "Select drive")?;
     choice.strip_prefix("Drive ").and_then(|n| n.parse().ok())
 }
 
-/// GetStorageSlot() (ua_select.cc:1471); -1 means no slot, None that the
-/// slot dialog is not available (see [`prompt_input`]).
-fn get_storage_slot(args: &[Argument], env: &Env, store: &StorageResource, out: &mut String) -> Option<i16> {
+/// GetStorageSlot() (ua_select.cc:1471); -1 means no slot. None: the slot
+/// question was cancelled. Upstream then continues without a slot; here a
+/// cancelled dialog ends the command without contacting the SD.
+fn get_storage_slot(ua: &mut Ua, args: &[Argument], env: &Env, store: &StorageResource) -> Option<i16> {
     if let Some(slot) = arg_number(args, "slot") {
         return Some(slot);
     }
     if env.autochanger(&store.name) {
-        return prompt_input("Enter autochanger slot: ", out).map(|answer| str_to_int64(&answer) as i32 as i16);
+        return ua.get_cmd("Enter autochanger slot: ").map(|answer| str_to_int64(&answer) as i32 as i16);
     }
     Some(-1)
 }
 
 /// NativeAutochangerVolumeOperation() (sd_cmds.cc:793): the SD answer is
 /// relayed unchanged.
-fn volume_operation(sd: &mut impl SdLink, store: &StorageResource, operation: &str, drive: i16, slot: i16,
-    out: &mut String) {
+fn volume_operation(ua: &mut Ua, sd: &mut impl SdLink, store: &StorageResource, operation: &str, drive: i16,
+    slot: i16) {
     // IsSlotNumberValid(): slots are counted from 1.
     let command = if slot > 0 {
         format!("{operation} {} drive={drive} slot={slot}\n", dev_name(store))
     } else {
         format!("{operation} {} drive={drive}\n", dev_name(store))
     };
-    if let Some(messages) = open_and_exchange(sd, store, &command, out) {
+    if let Some(messages) = open_and_exchange(ua, sd, store, &command) {
         for message in messages {
-            out.push_str(&message);
+            ua.send_msg(message);
         }
     }
 }
 
 /// C++ DoMountCmd() (ua_cmds.cc:2498) after OpenClientDb(): `cmd` is
 /// "mount", "unmount" or "release". The command always succeeds.
-pub fn do_mount_cmd(args: &[Argument], env: &Env, sd: &mut impl SdLink, cmd: &str) -> String {
-    let mut out = String::new();
+pub fn do_mount_cmd(ua: &mut Ua, args: &[Argument], env: &Env, sd: &mut impl SdLink, cmd: &str) {
     let do_alldrives = (cmd == "release" || cmd == "unmount")
         && args.iter().any(|a| a.key.eq_ignore_ascii_case("alldrives"));
 
-    let Some(store) = select(args, env, true, false, &mut out) else { return out };
+    let Some(store) = select(ua, args, env, true, false) else { return };
     let mut drive = -1;
     if !do_alldrives {
-        match get_storage_drive(args, env, sd, &store, &mut out) {
+        match get_storage_drive(ua, args, env, sd, &store) {
             Some(d) => drive = d,
-            None => return out,
+            None => return,
         }
     }
     let mut slot = -1;
     if cmd == "mount" {
-        match get_storage_slot(args, env, &store, &mut out) {
+        match get_storage_slot(ua, args, env, &store) {
             Some(s) => slot = s,
-            None => return out,
+            None => return,
         }
     }
 
     if !do_alldrives {
-        volume_operation(sd, &store, cmd, drive, slot, &mut out);
+        volume_operation(ua, sd, &store, cmd, drive, slot);
     } else {
-        let drives = get_num_drives(sd, &store, &mut out);
+        let drives = get_num_drives(ua, sd, &store);
         for i in 0..drives.max(0) {
-            volume_operation(sd, &store, cmd, i, slot, &mut out);
+            volume_operation(ua, sd, &store, cmd, i, slot);
         }
     }
-    out
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::command_executor::ApiMode;
+    use crate::command_queue::CommandResult;
+    use crate::ua_select::tests::{context, scripted};
+
+    const CONFIG: &str = "Director { Name=dir; Password=secret }";
 
     fn arg(key: &str, value: Option<&str>) -> Argument {
         Argument { key: key.into(), value: value.map(str::to_string) }
@@ -448,7 +385,6 @@ mod tests {
         Env {
             storages: storages.iter().map(|(n, ac, ok)| (storage(n, &format!("{n}Dev")), *ac, *ok)).collect(),
             running: vec![(7, "Backup.2026-10-15_21.00.00_03".into(), "Tape".into())],
-            human: true,
         }
     }
 
@@ -464,10 +400,42 @@ mod tests {
 
     fn fake(answer: fn(&str) -> Result<Vec<String>, String>) -> FakeSd { FakeSd { sent: vec![], answer } }
 
+    /// Output of a command without console in emission order.
+    fn output(result: CommandResult) -> String {
+        if result.errors_first {
+            format!("{}{}", result.error_message, result.text_output)
+        } else {
+            format!("{}{}", result.text_output, result.error_message)
+        }
+    }
+
+    fn sel_in(mode: ApiMode, line: &str, env: &Env, use_default: bool) -> (Option<String>, String) {
+        let ctx = context(CONFIG, mode);
+        let mut ua = Ua::new(&ctx);
+        let store = select(&mut ua, &parse(line), env, use_default, false);
+        (store.map(|s| s.name), output(ua.finish(true)))
+    }
+
     fn sel(line: &str, env: &Env, use_default: bool) -> (Option<String>, String) {
-        let mut out = String::new();
-        let store = select(&parse(line), env, use_default, false, &mut out);
-        (store.map(|s| s.name), out)
+        sel_in(ApiMode::Human, line, env, use_default)
+    }
+
+    fn mount(line: &str, env: &Env, sd: &mut FakeSd, cmd: &str) -> String {
+        let ctx = context(CONFIG, ApiMode::Human);
+        let mut ua = Ua::new(&ctx);
+        do_mount_cmd(&mut ua, &parse(line), env, sd, cmd);
+        output(ua.finish(true))
+    }
+
+    /// do_mount_cmd with a console answering `answers`; the transcript.
+    fn mount_dialog(answers: &[&str], line: &str, env: &Env, sd: &mut FakeSd, cmd: &str) -> String {
+        let ctx = context(CONFIG, ApiMode::Human);
+        let (_, console) = scripted(answers, || {
+            let mut ua = Ua::new(&ctx);
+            do_mount_cmd(&mut ua, &parse(line), env, sd, cmd);
+            ua.finish(true)
+        });
+        console.transcript()
     }
 
     #[test]
@@ -475,9 +443,8 @@ mod tests {
         let e = env(&[("File", false, true), ("Hidden", false, false)]);
         assert_eq!(sel("", &e, true), (Some("File".into()), "Automatically selected Storage: File\n".into()));
         assert_eq!(sel("nosuch", &e, false), (Some("File".into()), "Automatically selected Storage: File\n".into()));
-        let mut quiet = env(&[("File", false, true)]);
-        quiet.human = false;
-        assert_eq!(sel("", &quiet, true), (Some("File".into()), String::new()));
+        let quiet = env(&[("File", false, true)]);
+        assert_eq!(sel_in(ApiMode::Api, "", &quiet, true), (Some("File".into()), String::new()));
     }
 
     #[test]
@@ -510,32 +477,53 @@ mod tests {
     }
 
     #[test]
-    fn several_or_no_storages_need_the_dialog() {
+    fn several_storages_are_offered_in_the_dialog() {
         let e = env(&[("b", false, true), ("A", false, true)]);
-        assert_eq!(sel("", &e, true), (None,
-            "The defined Storage resources are:\n1: A\n2: b\nSelect Storage resource (1-2): ".into()));
+        let ctx = context(CONFIG, ApiMode::Human);
+        let (store, console) = scripted(&["2"], || select(&mut Ua::new(&ctx), &[], &e, true, false));
+        assert_eq!(store.map(|s| s.name).as_deref(), Some("b"));
+        assert_eq!(console.transcript(),
+            "The defined Storage resources are:\n1: A\n2: b\nSelect Storage resource (1-2): 2\n");
+        let (store, console) = scripted(&["."], || {
+            let mut ua = Ua::new(&ctx);
+            let store = select(&mut ua, &[], &e, true, false);
+            ua.finish(true);
+            store
+        });
+        assert!(store.is_none());
+        assert_eq!(console.transcript(), "The defined Storage resources are:\n1: A\n2: b\n\
+            Select Storage resource (1-2): .\nSelection aborted, nothing done.\n");
+        // Without a console (batch mode) the choices are listed.
+        assert_eq!(sel("", &e, true), (None, "The defined Storage resources are:\n1: A\n2: b\n\
+            Your request has multiple choices for \"Storage\". Selection is not possible in batch mode.\n".into()));
         let none = env(&[("Hidden", false, false)]);
-        assert_eq!(sel("", &none, true), (None,
-            "The defined Storage resources are:\nSelection list for \"Storage\" is empty!\n".into()));
-        let mut out = String::new();
-        let ac = select_storage_resource(&env(&[("File", false, true), ("Tape", true, true)]), true, &mut out);
-        assert_eq!((ac.map(|s| s.name), out), (Some("Tape".into()), "Automatically selected Storage: Tape\n".into()));
+        let ((store, result), _) = scripted(&[], || {
+            let mut ua = Ua::new(&ctx);
+            let store = select(&mut ua, &[], &none, true, false);
+            (store, ua.finish(false))
+        });
+        assert!(store.is_none());
+        assert_eq!(output(result), "The defined Storage resources are:\nSelection list for \"Storage\" is empty!\n");
+        let mut ua = Ua::new(&ctx);
+        let ac = select_storage_resource(&mut ua, &env(&[("File", false, true), ("Tape", true, true)]), true);
+        assert_eq!((ac.map(|s| s.name), output(ua.finish(true))),
+            (Some("Tape".into()), "Automatically selected Storage: Tape\n".into()));
     }
 
     #[test]
     fn mount_release_and_unmount_talk_to_the_selected_sd() {
         let e = env(&[("File", false, true)]);
         let mut sd = fake(|_| Ok(vec!["3906 File device \"FileDev\" is always mounted.\n".into()]));
-        assert_eq!(do_mount_cmd(&[], &e, &mut sd, "mount"),
+        assert_eq!(mount("", &e, &mut sd, "mount"),
             "Automatically selected Storage: File\nConnecting to Storage daemon File at sd.example:9103 ...\n\
              3906 File device \"FileDev\" is always mounted.\n");
         assert_eq!(sd.sent, vec!["File: mount FileDev drive=0\n"]);
 
         let mut sd = fake(|_| Ok(vec![]));
-        do_mount_cmd(&parse("File drive=2 slot=5"), &e, &mut sd, "mount");
-        do_mount_cmd(&parse("storage=File slot=0"), &e, &mut sd, "mount");
-        do_mount_cmd(&parse("File slot=3"), &e, &mut sd, "release");
-        do_mount_cmd(&parse("umountish"), &e, &mut sd, "unmount");
+        mount("File drive=2 slot=5", &e, &mut sd, "mount");
+        mount("storage=File slot=0", &e, &mut sd, "mount");
+        mount("File slot=3", &e, &mut sd, "release");
+        mount("umountish", &e, &mut sd, "unmount");
         assert_eq!(sd.sent, vec!["File: mount FileDev drive=2 slot=5\n", "File: mount FileDev drive=0\n",
             "File: release FileDev drive=0\n", "File: unmount FileDev drive=0\n"]);
     }
@@ -545,7 +533,7 @@ mod tests {
         let mut e = env(&[("File", false, true)]);
         e.storages[0].0.device = "My Device".into();
         let mut sd = fake(|_| Err("refused".into()));
-        assert_eq!(do_mount_cmd(&parse("storage=File"), &e, &mut sd, "release"),
+        assert_eq!(mount("storage=File", &e, &mut sd, "release"),
             "Connecting to Storage daemon File at sd.example:9103 ...\nFailed to connect to Storage daemon.\n");
         assert_eq!(sd.sent, vec!["File: release My\u{1}Device drive=0\n"]);
     }
@@ -555,15 +543,17 @@ mod tests {
         let e = env(&[("Changer13", true, true)]);
         let mut sd = fake(|cmd| Ok(if cmd.starts_with("autochanger") { vec!["drives=2\n".into()] }
             else { vec![format!("3922 {cmd}")] }));
-        let out = do_mount_cmd(&parse("Changer13 alldrives"), &e, &mut sd, "unmount");
+        let out = mount("Changer13 alldrives", &e, &mut sd, "unmount");
         assert_eq!(sd.sent, vec!["Changer13: autochanger drives Changer13Dev\n",
             "Changer13: unmount Changer13Dev drive=0\n", "Changer13: unmount Changer13Dev drive=1\n"]);
         assert_eq!(out.matches("Connecting to Storage daemon Changer13").count(), 3);
-        // Cached: the next command needs no drive query, two drives → dialog.
+        // Cached: the next command needs no drive query; two drives → dialog.
         let mut sd = fake(|_| Ok(vec![]));
-        let out = do_mount_cmd(&parse("Changer13"), &e, &mut sd, "release");
-        assert!(sd.sent.is_empty());
-        assert_eq!(out, "Select Drive:\n1: Drive 0\n2: Drive 1\nSelect drive (1-2): ");
+        assert_eq!(mount_dialog(&["."], "Changer13", &e, &mut sd, "release"),
+            "Select Drive:\n1: Drive 0\n2: Drive 1\nSelect drive (1-2): .\nSelection aborted, nothing done.\n");
+        assert!(sd.sent.is_empty(), "a cancelled drive selection contacts no SD");
+        mount_dialog(&["2"], "Changer13", &e, &mut sd, "release");
+        assert_eq!(sd.sent, vec!["Changer13: release Changer13Dev drive=1\n"]);
     }
 
     #[test]
@@ -571,12 +561,14 @@ mod tests {
         let e = env(&[("Changer11", true, true)]);
         let mut sd = fake(|cmd| Ok(if cmd.starts_with("autochanger") { vec!["3998 note\n".into(), "drives=1\n".into()] }
             else { vec![] }));
-        let out = do_mount_cmd(&parse("Changer11"), &e, &mut sd, "mount");
-        assert_eq!(out, "Connecting to Storage daemon Changer11 at sd.example:9103 ...\n3998 note\n\
-            Enter autochanger slot: ");
-        assert_eq!(sd.sent, vec!["Changer11: autochanger drives Changer11Dev\n"]);
+        assert_eq!(mount_dialog(&["."], "Changer11", &e, &mut sd, "mount"),
+            "Connecting to Storage daemon Changer11 at sd.example:9103 ...\n3998 note\nEnter autochanger slot: .\n");
+        assert_eq!(sd.sent, vec!["Changer11: autochanger drives Changer11Dev\n"], "cancelled: no mount");
         let mut sd = fake(|_| Ok(vec![]));
-        do_mount_cmd(&parse("Changer11 slot=4"), &e, &mut sd, "mount");
+        mount_dialog(&["4"], "Changer11", &e, &mut sd, "mount");
+        assert_eq!(sd.sent, vec!["Changer11: mount Changer11Dev drive=0 slot=4\n"]);
+        let mut sd = fake(|_| Ok(vec![]));
+        mount("Changer11 slot=4", &e, &mut sd, "mount");
         assert_eq!(sd.sent, vec!["Changer11: mount Changer11Dev drive=0 slot=4\n"]);
     }
 

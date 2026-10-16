@@ -16,15 +16,19 @@ use crate::sql_list::{add_commas, json_rows, render_shown, ListType};
 
 pub fn cmd_list(ast: &CommandAst, ctx: &ExecContext) -> CommandResult {
     // C++ ua_output.cc DoListCmd: OpenClientDb() before anything else.
-    crate::ua_db::with_client_db(ast, ctx, true, || cmd_list_db(ast, ctx))
+    match crate::ua_db::open_client_db(ast, ctx, true) {
+        Ok(prefix) => cmd_list_db(ast, ctx, prefix),
+        Err(result) => result,
+    }
 }
 
-fn cmd_list_db(ast: &CommandAst, ctx: &ExecContext) -> CommandResult {
+fn cmd_list_db(ast: &CommandAst, ctx: &ExecContext, prefix: String) -> CommandResult {
     let ty = if ast.command_name.eq_ignore_ascii_case("llist") { ListType::Vert } else { ListType::Horz };
     let Some(cat) = &ctx.catalog else {
-        return CommandResult::error("Could not open catalog database.\n".to_string());
+        return crate::ua_db::with_prefix(prefix, CommandResult::error("Could not open catalog database.\n".to_string()));
     };
-    let mut out = ListOut { ctx: Some(ctx), ..Default::default() };
+    // The catalog messages of OpenClientDb come first (also before a dialog).
+    let mut out = ListOut { ctx: Some(ctx), text: prefix, ..Default::default() };
     let ok = do_list(&Args(ast), ctx, cat, ty, &mut out);
     out.finish(ok)
 }
@@ -74,13 +78,33 @@ struct ListOut<'c> {
     filters: Vec<Filter>,
     /// get_num_rows_filtered()
     filtered: u64,
-    /// The command ended in a dialog (StartPrompt/DoPrompt) or a stand-in for one.
-    dialog: Option<CommandResult>,
     /// WarningMsg/InfoMsg calls (their text is also in `text`).
     messages: Vec<(MsgKind, String)>,
+    /// Console dialog (StartPrompt/DoPrompt) of this command: once started,
+    /// all output goes through it in C++ order.
+    ua: Option<crate::ua_select::Ua<'c>>,
 }
 
-impl ListOut<'_> {
+impl<'c> ListOut<'c> {
+    /// The dialog of this command, with the output so far handed over.
+    fn dialog(&mut self) -> &mut crate::ua_select::Ua<'c> {
+        let ctx = self.ctx.expect("a dialog needs the command context");
+        let pending = self.take_pending();
+        let ua = self.ua.get_or_insert_with(|| crate::ua_select::Ua::new(ctx));
+        ua.send_result(pending);
+        ua
+    }
+
+    /// The output collected so far (text, ErrorMsg, Warning/InfoMsg).
+    fn take_pending(&mut self) -> CommandResult {
+        CommandResult {
+            text_output: std::mem::take(&mut self.text),
+            error_message: std::mem::take(&mut self.errors),
+            messages: std::mem::take(&mut self.messages),
+            ..Default::default()
+        }
+    }
+
     fn error(&mut self, msg: impl Into<String>) {
         self.errors.push_str(&msg.into());
     }
@@ -186,16 +210,10 @@ impl ListOut<'_> {
     }
 
     fn finish(mut self, ok: bool) -> CommandResult {
-        if let Some(mut dialog) = self.dialog.take() {
-            if self.ctx.is_some_and(|ctx| ctx.api_mode == ApiMode::Json) {
-                dialog.error_message.insert_str(0, &self.errors);
-            } else {
-                // ErrorMsg lines come between the output so far and the prompt
-                self.text.push_str(&self.errors);
-            }
-            dialog.text_output.insert_str(0, &self.text);
-            dialog.messages.splice(0..0, self.messages);
-            return dialog;
+        if let Some(mut ua) = self.ua.take() {
+            ua.send_result(self.take_pending());
+            // After a dialog the C++ return value alone decides (BNET_CMD_OK).
+            return ua.finish(ok);
         }
         if ok && self.errors.is_empty() && (self.range.is_some() || !self.filters.is_empty()) {
             let mut range = Map::new();
@@ -1407,19 +1425,12 @@ fn list_media(args: &Args, ctx: &ExecContext, cat: &CatalogHandle, ty: ListType,
             .ok().and_then(|t| t.rows.first().and_then(|r| r[0].clone()));
         let mut id = lookup(pool).filter(|_| crate::acl::access(ctx, crate::acl::Kind::Pool, pool));
         if id.is_none() {
-            let not_found = format!("Could not find Pool \"{pool}\": ERR=Pool record not found in Catalog.\n");
-            out.error(not_found.clone());
+            out.error(format!("Could not find Pool \"{pool}\": ERR=Pool record not found in Catalog.\n"));
             // SelectPoolDbr: the pool= argument once more, then the dialog
-            if crate::acl::access(ctx, crate::acl::Kind::Pool, pool) {
-                out.error(not_found);
-            }
-            match super::prompt::select_pool_dbr(ctx) {
-                Ok((name, text)) => {
-                    out.text.push_str(&text);
-                    id = lookup(&name);
-                }
-                Err(result) => {
-                    out.dialog = Some(result);
+            match crate::ua_select::select_pool_dbr(out.dialog(), args.0, "pool") {
+                Some(name) => id = lookup(&name),
+                None => {
+                    out.error(format!("Pool {pool} doesn't exist.\n"));
                     return true;
                 }
             }
@@ -1504,20 +1515,10 @@ fn list_nextvol(args: &Args, ctx: &ExecContext, cat: &CatalogHandle, out: &mut L
     let job = match job {
         Some(job) => job,
         None => {
-            let names = crate::director_config::sort_case_insensitive(config.jobs.iter().map(|j| j.name.as_str()))
-                .into_iter().filter(|name| access(ctx, Kind::Job, name)).map(str::to_string).collect();
-            match super::prompt::select_resource(ctx, "The defined Job resources are:\n", "Job", "Select Job resource", names) {
-                Ok((name, text)) => {
-                    out.text.push_str(&text);
-                    match config.find_job(&name) {
-                        Some(job) => job.clone(),
-                        None => return false,
-                    }
-                }
-                Err(result) => {
-                    out.dialog = Some(result);
-                    return false;
-                }
+            let Some(name) = crate::ua_select::select_job_resource(out.dialog()) else { return false };
+            match config.find_job(&name) {
+                Some(job) => job.clone(),
+                None => return false,
             }
         }
     };
@@ -1554,7 +1555,7 @@ fn list_nextvol(args: &Args, ctx: &ExecContext, cat: &CatalogHandle, out: &mut L
         let Some(store) = config.find_storage(&storage) else { continue };
         let storage_id = cat.query_rows(&format!("SELECT StorageId FROM Storage WHERE Name='{}'", esc(&store.name))).ok()
             .and_then(|t| t.rows.first().and_then(|r| r[0].clone())).unwrap_or_else(|| "0".into());
-        let in_changer = super::prompt::is_autochanger(&config, &store.name);
+        let in_changer = crate::ua_select::is_autochanger(&config, &store.name);
         match find_next_volume(cat, &pool_id, &store.media_type, &storage_id, in_changer) {
             Some(volume) => {
                 out.text.push_str(&format!("The next Volume to be used by Job \"{}\" (Pool={pool}, Level={level}) will be {volume}\n",

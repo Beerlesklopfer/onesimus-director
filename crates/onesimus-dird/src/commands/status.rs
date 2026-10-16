@@ -1318,11 +1318,15 @@ fn status_storage(name: &str, ctx: &ExecContext) -> CommandResult {
 /// first argument (storage selection: compatibility log C-013).
 fn status_storage_selected(ast: &CommandAst, ctx: &ExecContext) -> CommandResult {
     let slots = ast.arguments.iter().any(|a| a.key.eq_ignore_ascii_case("slots"));
-    match crate::ua_storage_select::get_storage_resource(ast, ctx, false, slots) {
-        Ok((store, text)) => crate::ua_db::with_prefix(text, status_storage(&store.name, ctx)),
-        // StatusCmd returns true whatever the selection printed.
-        Err(result) => CommandResult { success: true, ..result },
-    }
+    let mut ua = crate::ua_select::Ua::new(ctx);
+    // StatusCmd returns true whatever the selection printed.
+    let Some(store) = crate::ua_select::get_storage_resource(&mut ua, ast, false, slots) else {
+        return ua.finish(true);
+    };
+    let result = status_storage(&store.name, ctx);
+    let success = result.success;
+    ua.send_result(result);
+    ua.finish(success)
 }
 
 #[cfg(test)]

@@ -1,0 +1,16 @@
+{"id": "w011-estimate-badnumber-cancel", "steps": ["estimate", "0", "."]}
+{"id": "w011-estimate-level-cancel", "steps": ["estimate level=bogus", "."]}
+{"id": "w011-estimate-api1-cancel", "setup": [".api 1"], "steps": ["estimate", "."]}
+{"id": "w011-estimate-api2", "setup": [".api 2"], "steps": ["estimate"]}
+{"id": "w011-list-volumes-pool-cancel", "steps": ["list volumes pool=nosuch", "."]}
+{"id": "w011-llist-volumes-pool-cancel", "steps": ["llist volumes pool=nosuch", "."]}
+{"id": "w011-list-volumes-pool-api2", "setup": [".api 2"], "steps": ["list volumes pool=nosuch"]}
+{"id": "w011-list-nextvol-cancel", "steps": ["list nextvolume", "."]}
+{"id": "w011-restore-item-cancel", "steps": ["restore", "13"]}
+{"id": "w011-restore-badnumber-cancel", "steps": ["restore", "99", "."]}
+{"id": "w011-restore-jobids-cancel", "steps": ["restore", "3", "."]}
+{"id": "w011-restore-api1-cancel", "setup": [".api 1"], "steps": ["restore", "."]}
+{"id": "w011-restore-api2", "setup": [".api 2"], "steps": ["restore"]}
+{"id": "w011-truncate-storage-cancel", "steps": ["truncate volstatus=Purged storage=nosuch", "."]}
+{"id": "w011-truncate-pool-cancel", "steps": ["truncate volstatus=Purged pool=nosuch", "."]}
+{"id": "w011-truncate-confirm-no", "steps": ["truncate volstatus=Purged", "no"]}

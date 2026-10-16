@@ -234,15 +234,9 @@ pub fn handle_console_session_with<S: Read + Write>(
         // C++ AutomountCmd: without exactly one argument the value is asked
         // for (GetCmd); no answer (lone dot, lost connection) keeps the flag.
         if command_allowed && ast.command_name == "automount" && ast.arguments.len() != 1 {
-            let answer = get_cmd(&mut bnet, "Turn on or off? ", api_mode);
-            // ua_input.cc:66: an answer ".messages" first runs DotMessagesCmd
-            if answer.as_deref() == Some(".messages") {
-                crate::console_msg::dot_messages_cmd(&ctx, ".messages",
-                    |messages| messages.iter().all(|m| bnet.send(m).is_ok()));
-            }
-            ast.arguments = answer
-                .map(|answer| vec![Argument { key: answer, value: None }])
-                .unwrap_or_default();
+            let answer = crate::ua_select::with_console(&mut bnet,
+                || crate::ua_select::Ua::new(&ctx).get_cmd("Turn on or off? "));
+            ast.arguments = answer.map(|answer| vec![Argument { key: answer, value: None }]).unwrap_or_default();
         }
 
         // Execute command; only successful authorization commits local changes.
@@ -404,38 +398,6 @@ pub(crate) fn split_args(input: &str) -> Vec<String> {
     args
 }
 
-/// C++ ua_input.cc GetCmd(): ask the console for one line of input. JSON
-/// mode is batch mode (DotApiCmd sets ua->batch) and never asks. `.api 1`
-/// clients get BNET_TEXT_INPUT before the prompt, plain consoles
-/// BNET_SUB_PROMPT after it. Signals are ignored; trailing whitespace is
-/// stripped; a lone dot or a lost connection returns None.
-fn get_cmd<S: Read + Write>(
-    bnet: &mut BnetStream<S>,
-    prompt: &str,
-    api_mode: command_executor::ApiMode,
-) -> Option<String> {
-    use command_executor::ApiMode;
-    match api_mode {
-        ApiMode::Json => return None,
-        ApiMode::Api => {
-            bnet.send_signal(BnetSignal::TextInput).ok()?;
-            bnet.send_str(prompt).ok()?;
-        }
-        ApiMode::Human => {
-            bnet.send_str(prompt).ok()?;
-            bnet.send_signal(BnetSignal::SubPrompt).ok()?;
-        }
-    }
-    let answer = loop {
-        match bnet.recv().ok()? {
-            BnetMessage::Data(data) => break String::from_utf8_lossy(&data).trim_end().to_string(),
-            BnetMessage::Signal(BnetSignal::Terminate) => return None,
-            BnetMessage::Signal(_) => continue,
-        }
-    };
-    (answer != ".").then_some(answer)
-}
-
 /// Parse a CLI command line like C++ ParseArgs(): the first argument is the
 /// command, the rest are key=value arguments split at the first '='.
 /// An empty line (no arguments) gives an empty command name.
@@ -469,7 +431,8 @@ pub(crate) fn parse_cli_command(input: &str) -> CommandAst {
 mod tests {
     use super::*;
 
-    /// Runs get_cmd on the server side of a TCP pair while `client` answers.
+    /// Asks the automount question (Ua::get_cmd) on the server side of a TCP
+    /// pair while `client` answers.
     fn prompt_pair(
         api_mode: command_executor::ApiMode,
         client: impl FnOnce(&mut BnetStream<std::net::TcpStream>) + Send + 'static,
@@ -483,7 +446,9 @@ mod tests {
             client(&mut BnetStream::new(stream));
         });
         let (stream, _) = listener.accept().unwrap();
-        let answer = get_cmd(&mut BnetStream::new(stream), "Turn on or off? ", api_mode);
+        let ctx = crate::ua_select::tests::context("Director { Name=dir; Password=x }", api_mode);
+        let answer = crate::ua_select::with_console(&mut BnetStream::new(stream),
+            || crate::ua_select::Ua::new(&ctx).get_cmd("Turn on or off? "));
         peer.join().unwrap();
         answer
     }

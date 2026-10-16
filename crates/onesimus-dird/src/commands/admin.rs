@@ -51,7 +51,7 @@ pub(crate) fn label_dialog(ua: &mut crate::ua_select::Ua, ast: &CommandAst, rela
     }
     let barcodes = !relabel && ast.arguments.iter()
         .any(|a| a.key.eq_ignore_ascii_case("barcode") || a.key.eq_ignore_ascii_case("barcodes"));
-    let Some(storage) = ua_select::get_storage_resource(ua, ast, true, barcodes) else { return };
+    let Some(storage) = ua_select::get_storage_resource(ua, ast, true, barcodes).map(|s| s.name) else { return };
     let autochanger = ctx.config.as_ref().and_then(|c| c.read().ok())
         .is_some_and(|c| ua_select::is_autochanger(&c, &storage));
     if barcodes {
@@ -169,40 +169,31 @@ fn automount_after_label(ctx: &ExecContext, stor_name: &str) -> String {
 }
 
 pub fn cmd_mount(ast: &CommandAst, ctx: &ExecContext) -> CommandResult {
-    // C++ ua_cmds.cc DoMountCmd: OpenClientDb() before anything else.
-    crate::ua_db::with_client_db(ast, ctx, false, || cmd_mount_db(ast, ctx))
-}
-
-fn cmd_mount_db(ast: &CommandAst, ctx: &ExecContext) -> CommandResult {
     do_mount_cmd(ast, ctx, "mount")
 }
 
 pub fn cmd_unmount(ast: &CommandAst, ctx: &ExecContext) -> CommandResult {
-    // C++ ua_cmds.cc DoMountCmd: OpenClientDb() before anything else.
-    crate::ua_db::with_client_db(ast, ctx, false, || cmd_unmount_db(ast, ctx))
-}
-
-fn cmd_unmount_db(ast: &CommandAst, ctx: &ExecContext) -> CommandResult {
     do_mount_cmd(ast, ctx, "unmount")
 }
 
 pub fn cmd_release(ast: &CommandAst, ctx: &ExecContext) -> CommandResult {
-    // C++ ua_cmds.cc DoMountCmd: OpenClientDb() before anything else.
-    crate::ua_db::with_client_db(ast, ctx, false, || cmd_release_db(ast, ctx))
-}
-
-fn cmd_release_db(ast: &CommandAst, ctx: &ExecContext) -> CommandResult {
     do_mount_cmd(ast, ctx, "release")
 }
 
-/// C++ ua_cmds.cc DoMountCmd(): storage selection, drive/slot, SD request.
+/// C++ ua_cmds.cc DoMountCmd(): OpenClientDb(), storage selection,
+/// drive/slot, SD request.
 fn do_mount_cmd(ast: &CommandAst, ctx: &ExecContext, cmd: &str) -> CommandResult {
     use crate::ua_storage_select::{Env, NetSd};
+    let mut ua = crate::ua_select::Ua::new(ctx);
+    if !ua.open_client_db(ast, false) {
+        return ua.finish(false);
+    }
     let Some(env) = Env::load(ctx) else { return CommandResult::error("No config\n".into()) };
     let director = ctx.config.as_ref().and_then(|c| c.read().ok())
         .map(|c| c.director.name.clone()).unwrap_or_default();
     let mut sd = NetSd { director };
-    CommandResult::ok(crate::ua_storage_select::do_mount_cmd(&ast.arguments, &env, &mut sd, cmd))
+    crate::ua_storage_select::do_mount_cmd(&mut ua, &ast.arguments, &env, &mut sd, cmd);
+    ua.finish(true)
 }
 
 pub fn cmd_update(ast: &CommandAst, ctx: &ExecContext) -> CommandResult {
@@ -1237,7 +1228,7 @@ fn truncate_with(
     ctx: &ExecContext,
     mut send: impl FnMut(&str, &str) -> Result<String, String>,
 ) -> CommandResult {
-    use super::prompt::{selection_required, usage};
+    use super::prompt::usage;
     use crate::acl::{self, Kind};
     if ast.arguments.is_empty() {
         return CommandResult::error(usage("truncate", "missing parameter"));
@@ -1253,78 +1244,101 @@ fn truncate_with(
         Some(_) => {}
     }
     // OpenDb (ua_cmds.cc:2008) precedes the remaining checks.
-    let prefix = match crate::ua_db::open_client_db(ast, ctx, false) {
-        Ok(prefix) => prefix,
-        Err(result) => return result,
-    };
-    let done = |result: CommandResult| crate::ua_db::with_prefix(prefix.clone(), result);
+    let mut ua = crate::ua_select::Ua::new(ctx);
+    if !ua.open_client_db(ast, false) {
+        return ua.finish(false);
+    }
     let mut parsed = 2; // the command itself and volstatus, as upstream counts
-    let storage = value("storage");
+    let mut storage = value("storage").map(str::to_string);
     if storage.is_some() || acl::has_restrictions(ctx, Kind::Storage) {
-        // SelectStorageDbr (ua_select.cc:823): "Defined Storages:" /
-        // "Select Storage resource" dialog when no accessible storage is named.
-        if !storage.is_some_and(|name| known_storage(ctx, name)) {
-            return done(selection_required(String::new()));
+        if ctx.catalog.is_none() {
+            ua.error_msg("Failed to open db.\n");
+            return ua.finish(false);
+        }
+        // SelectStorageDbr (ua_select.cc:823): `storage=` or the
+        // "Defined Storages:" / "Select the Storage" dialog.
+        match crate::ua_select::select_storage_dbr(&mut ua, ast, "storage") {
+            Some(name) => storage = Some(name),
+            None => return ua.finish(false),
         }
         parsed += 1;
     }
-    let pool = value("pool");
+    let mut pool = value("pool").map(str::to_string);
     if pool.is_some() || acl::has_restrictions(ctx, Kind::Pool) {
-        // SelectPoolDbr (ua_select.cc): "Defined Pools:" / "Select the Pool" dialog.
-        if !pool.is_some_and(|name| acl::access(ctx, Kind::Pool, name)) {
-            return done(selection_required(String::new()));
+        if ctx.catalog.is_none() {
+            ua.error_msg("Failed to open db.\n");
+            return ua.finish(false);
         }
-        parsed += 1;
+        // SelectPoolDbr (ua_select.cc:726): `pool=` or the "Defined Pools:"
+        // / "Select the Pool" dialog.
+        let given = pool.is_some();
+        match crate::ua_select::select_pool_dbr(&mut ua, ast, "pool") {
+            Some(name) => pool = Some(name),
+            None => return ua.finish(false),
+        }
+        if given { parsed += 1; }
     }
     let volume = value("volume").filter(|name| acl::valid_name(name));
     if volume.is_some() { parsed += 1; }
-    let mut text = String::new();
     if let Some(drive) = value("drive") {
         if drive.parse::<i32>().is_ok() && !drive.starts_with('+') {
             parsed += 1;
         } else {
-            text.push_str(&usage("truncate", &format!("Drive number must be integer but was : {drive}\n")));
+            ua.error_msg(usage("truncate", &format!("Drive number must be integer but was : {drive}\n")));
         }
     }
     if yes { parsed += 1; }
     if parsed != ast.arguments.len() + 1 {
-        text.push_str(&usage("truncate", "Invalid parameter."));
-        return done(CommandResult::error(text));
+        ua.error_msg(usage("truncate", "Invalid parameter."));
+        return ua.finish(false);
     }
 
     let Some(cat) = &ctx.catalog else {
-        return done(CommandResult::error(format!("{text}Failed to open db.\n")));
+        ua.error_msg("Failed to open db.\n");
+        return ua.finish(false);
     };
     let quote = |v: &str| v.replace('\'', "''");
-    let mut query = String::from("SELECT m.volumename FROM media m JOIN pool p ON m.poolid=p.poolid \
-        WHERE m.volstatus='Purged' AND m.recycle=1 AND m.enabled=1 AND m.volbytes>64512");
-    if let Some(p) = pool { query.push_str(&format!(" AND p.name='{}'", quote(p))); }
-    if let Some(s) = storage {
-        query.push_str(&format!(" AND m.storageid=(SELECT storageid FROM storage WHERE name='{}')", quote(s)));
+    // PrepareMediaSqlQuery (sql_get.cc:1781) with Recycle=1, Enabled=1,
+    // VolBytes > 64512 and VolStatus Purged.
+    let mut query = String::from("SELECT DISTINCT Media.MediaId,Media.VolumeName,Pool.Name AS Pool,\
+        Storage.Name AS Storage,Media.MediaType,Media.LastWritten,Media.VolFiles,Media.VolBytes,\
+        Media.VolStatus,Media.ActionOnPurge,Media.Comment FROM Media LEFT JOIN Pool USING(PoolId) \
+        LEFT JOIN Storage USING(StorageId) WHERE Media.Recycle=1 AND Media.Enabled=1 ");
+    if let Some(s) = &storage {
+        query.push_str(&format!("AND Media.StorageId=(SELECT StorageId FROM Storage WHERE Name='{}') ", quote(s)));
     }
-    if let Some(v) = volume { query.push_str(&format!(" AND m.volumename='{}'", quote(v))); }
-    let volumes: Vec<String> = match cat.query_rows(&format!("{query} ORDER BY m.mediaid")) {
-        Ok(table) => table.rows.into_iter().filter_map(|row| row.into_iter().next().flatten()).collect(),
-        Err(e) => return done(CommandResult::error(format!("{text}{e}\n"))),
-    };
-    if volumes.is_empty() {
-        return done(CommandResult::ok(text));
+    if let Some(p) = &pool {
+        query.push_str(&format!("AND Media.PoolId=(SELECT PoolId FROM Pool WHERE Name='{}') ", quote(p)));
     }
-    if !yes {
-        // GetConfirmation (ua_input.cc:165, ua_cmds.cc:2120): API sessions
-        // decline silently; the console is asked "Truncate listed volumes
-        // (yes/no)? " after the volume list (ListSqlQuery, C-011).
-        if ctx.api_mode != crate::command_executor::ApiMode::Human {
-            return done(CommandResult::ok(text));
+    query.push_str("AND Media.VolBytes > 64512 AND Media.VolStatus = 'Purged' ");
+    if let Some(v) = volume { query.push_str(&format!("AND Media.VolumeName IN ('{}') ", quote(v))); }
+    // ListSqlQuery (HORZ_LIST "volumes"), then the listed volumes.
+    let table = match cat.query_rows(&query) {
+        Ok(table) => table,
+        Err(e) => {
+            ua.error_msg(format!("{e}\n"));
+            return ua.finish(false);
         }
-        return done(selection_required(format!("{text}Truncate listed volumes (yes/no)? ")));
+    };
+    ua.send_msg(crate::sql_list::render(&table, crate::sql_list::ListType::Horz));
+    let volumes: Vec<String> = table.rows.into_iter().filter_map(|row| row.into_iter().nth(1).flatten()).collect();
+    if volumes.is_empty() {
+        return ua.finish(true);
+    }
+    // GetConfirmation (ua_input.cc:165, ua_cmds.cc:2120): `yes`, otherwise
+    // the console is asked; API and batch sessions decline silently.
+    if !ua.get_confirmation(ast, "Truncate listed volumes (yes/no)? ", false) {
+        return ua.finish(false);
     }
     let stor = match storage {
-        Some(s) => s.to_string(),
+        Some(s) => s,
         None => match ctx.config.as_ref().and_then(|c| c.read().ok())
             .filter(|cfg| cfg.storages.len() == 1).map(|cfg| cfg.storages[0].name.clone()) {
             Some(s) => s,
-            None => return done(CommandResult::error(format!("{text}truncate: specify storage=<name>\n"))),
+            None => {
+                ua.error_msg("truncate: specify storage=<name>\n");
+                return ua.finish(false);
+            }
         },
     };
     for vol in volumes {
@@ -1332,17 +1346,12 @@ fn truncate_with(
             Ok(resp) => {
                 let _ = cat.raw_query(&format!(
                     "UPDATE media SET volbytes=0, volfiles=0 WHERE volumename='{}'", quote(&vol)));
-                text.push_str(&format!("Truncate Volume \"{vol}\" on Storage \"{stor}\":\n{resp}\n"));
+                ua.send_msg(format!("Truncate Volume \"{vol}\" on Storage \"{stor}\":\n{resp}\n"));
             }
-            Err(e) => text.push_str(&format!("truncate {vol}: {e}\n")),
+            Err(e) => ua.send_msg(format!("truncate {vol}: {e}\n")),
         }
     }
-    done(CommandResult::ok(text))
-}
-
-fn known_storage(ctx: &ExecContext, name: &str) -> bool {
-    ctx.config.as_ref().and_then(|c| c.read().ok()).is_some_and(|cfg| cfg.find_storage(name).is_some())
-        && crate::acl::access(ctx, crate::acl::Kind::Storage, name)
+    ua.finish(true)
 }
 
 /// `reload` — re-read the configuration (C++ ReloadCmd: {"reload": {"success": bool}}).
@@ -1420,10 +1429,10 @@ pub(crate) mod side_effect_tests {
             assert!(!result.success, "{line}");
             assert_eq!(result.error_message, expected, "{line}");
         }
-        // Unknown storage: upstream opens the storage selection; nothing is done.
+        // The storage selection needs the catalog (OpenDb).
         let result = truncate_with(&crate::session::parse_cli_command("truncate volstatus=Purged storage=Nope"),
             &ctx, |_, _| panic!("must not contact the SD"));
-        assert!(result.success && result.error_message.is_empty());
+        assert_eq!((result.success, result.error_message.as_str()), (false, "Failed to open db.\n"));
     }
 
     #[test]
@@ -1576,11 +1585,68 @@ pub(crate) mod side_effect_tests {
         label_dialog(&mut ua, &crate::session::parse_cli_command("label volume=v1"), false, |_, _| panic!("batch"));
     }
 
+    /// Catalog with the storages File and Tape (no StorageId records) and
+    /// one purged volume v1; every query is logged.
+    fn truncate_catalog() -> (crate::catalog_worker::CatalogHandle, Arc<std::sync::Mutex<Vec<String>>>) {
+        use crate::catalog_worker::{CatalogRequest, CatalogResponse, SqlColumn, SqlTable};
+        let log = Arc::new(std::sync::Mutex::new(Vec::new()));
+        let seen = log.clone();
+        let table = |rows: &[&str]| SqlTable { columns: vec![SqlColumn { name: "name".into(), numeric: false }],
+            rows: rows.iter().map(|r| vec![Some(r.to_string())]).collect() };
+        let handle = crate::catalog_worker::CatalogHandle::mock(move |request| {
+            let sql = match request {
+                CatalogRequest::TextRows { sql } | CatalogRequest::RawQuery { sql } => sql,
+                _ => "other request".to_string(),
+            };
+            seen.lock().unwrap().push(sql.clone());
+            CatalogResponse::Rows(if sql == "SELECT Name FROM Storage" {
+                table(&["File", "Tape"])
+            } else if sql.starts_with("SELECT StorageId FROM Storage") {
+                table(&if sql.contains("'File'") { vec!["1"] } else { vec![] })
+            } else if sql.starts_with("SELECT DISTINCT Media.MediaId,Media.VolumeName") {
+                SqlTable { columns: vec![SqlColumn { name: "mediaid".into(), numeric: true },
+                    SqlColumn { name: "volumename".into(), numeric: false }],
+                    rows: vec![vec![Some("7".into()), Some("v1".into())]] }
+            } else {
+                table(&[])
+            })
+        });
+        (handle, log)
+    }
+
     #[test]
-    fn truncate_unknown_storage_is_a_selection() {
-        let ctx = context();
-        let result = truncate_with(&crate::session::parse_cli_command("truncate volstatus=Purged storage=Nope"),
-            &ctx, |_, _| panic!("must not contact the SD"));
-        assert!(result.success && result.error_message.is_empty());
+    fn truncate_dialogs_change_nothing_when_cancelled() {
+        use crate::ua_select::tests::scripted;
+        let mut ctx = context();
+        let (catalog, log) = truncate_catalog();
+        ctx.catalog = Some(catalog);
+        let ast = |line: &str| crate::session::parse_cli_command(line);
+        // Unknown storage: SelectStorageDbr offers the catalog storages.
+        let (result, console) = scripted(&["."], || truncate_with(&ast("truncate volstatus=Purged storage=Nope"),
+            &ctx, |_, _| panic!("must not contact the SD")));
+        assert!(!result.success);
+        assert_eq!(console.transcript(), "Could not find Storage \"Nope\": ERR=Defined Storages:\n1: File\n2: Tape\n\
+            Select the Storage (1-2): .\nSelection aborted, nothing done.\n");
+        // The confirmation: "no" and a cancel decline.
+        for answer in ["no", "."] {
+            let (result, console) = scripted(&[answer], || truncate_with(&ast("truncate volstatus=Purged storage=File"),
+                &ctx, |_, _| panic!("{answer}: must not contact the SD")));
+            assert!(!result.success);
+            assert!(console.transcript().ends_with(&format!("|       7 | v1         |\n\
+                +---------+------------+\nTruncate listed volumes (yes/no)? {answer}\n")), "{}", console.transcript());
+        }
+        // Without console (and in API mode) nothing is asked and nothing done.
+        let result = truncate_with(&ast("truncate volstatus=Purged storage=File"), &ctx, |_, _| panic!("no console"));
+        assert!(!result.success);
+        let writes = |log: &Vec<String>| log.iter().filter(|q| q.starts_with("UPDATE")).count();
+        assert_eq!(writes(&log.lock().unwrap()), 0);
+        // Control: "yes" truncates.
+        let mut sent = Vec::new();
+        scripted(&["yes"], || truncate_with(&ast("truncate volstatus=Purged storage=File"), &ctx, |storage, command| {
+            sent.push(format!("{storage}: {command}"));
+            Ok(String::new())
+        }));
+        assert_eq!(sent, vec!["File: truncate Volume=\"v1\""]);
+        assert_eq!(writes(&log.lock().unwrap()), 1);
     }
 }
