@@ -174,6 +174,20 @@ pub(crate) fn create_pool(cat: &mut Cat, pool: &PoolSettings, create: bool) -> i
     1
 }
 
+/// ua_db.cc UpdatePoolReferences(): only pools with a RecyclePool or
+/// ScratchPool are rewritten.
+pub(crate) fn update_pool_references(cat: &mut Cat, pool: &PoolSettings) -> bool {
+    if pool.recycle_pool.is_none() && pool.scratch_pool.is_none() {
+        return true;
+    }
+    let mut pr = PoolRecord { name: pool.name.clone(), ..Default::default() };
+    if !catreq::get_pool_record(cat, &mut pr) {
+        return false;
+    }
+    set_pooldbr_from_poolres(&mut pr, pool, false);
+    set_pooldbr_references(cat, &mut pr, pool) && catreq::update_pool_record(cat, &mut pr)
+}
+
 /// sql_update.cc UpdateMediaDefaults(): by VolumeName when set, else for
 /// every volume of the pool.
 pub(crate) fn update_media_defaults(cat: &mut Cat, mr: &MediaRecord) -> bool {
