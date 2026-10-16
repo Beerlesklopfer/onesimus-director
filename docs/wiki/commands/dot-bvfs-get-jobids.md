@@ -1,4 +1,4 @@
-# .bvfs_get_jobids -- Get Job Chain for Restore
+# .bvfs_get_jobids — Job-Kette für einen Restore ermitteln (BVFS)
 
 <!-- bareos-reference:start -->
 ## Aus den Bareos-Originalquellen
@@ -25,56 +25,169 @@ Referenz: [WIP/25.1.2-pre-43-g18be77e68, `18be77e6832e`](https://github.com/bare
 
 Die folgenden vorhandenen Beispiele und Verhaltensbeschreibungen sind lokale Dokumentation; sie sind kein Beleg für vollständige Bareos-Kompatibilität. Bei Widersprüchen gilt der obige Befund.
 <!-- bareos-reference:end -->
-Returns the list of Job IDs needed to reconstruct a full restore for a given job. For incremental/differential backups, this walks the job chain back to the last full backup and returns all job IDs in the chain (full + differentials + incrementals).
+## Zweck
+
+`.bvfs_get_jobids` liefert zu einem Job die Kette der JobIds, die für einen vollständigen Restore seines Stands nötig ist: die Full-Sicherung, die letzte Differential und alle Incrementals bis zu diesem Job. Die Liste dient als `jobid=`-Argument für [.bvfs_update](dot-bvfs-update.md), [.bvfs_lsdirs](dot-bvfs-lsdirs.md) und [.bvfs_lsfiles](dot-bvfs-lsfiles.md). Der Befehl liest nur aus dem Katalog.
+
+BVFS bleibt in Onesimus unverändert zur Abwärtskompatibilität erhalten (etwa für bareos-webui). Der Onesimus-Weg für Restore-Bäume ist OVFS; das Gegenstück zu diesem Befehl ist [.ovfs_latest](dot-ovfs-latest.md).
 
 ## Syntax
 
-```
-.bvfs_get_jobids jobid=<N>
-.bvfs_get_jobids ujobid=<unique-id>
-.bvfs_get_jobids jobid=<N> all
-```
-
-## Arguments
-
-| Argument | Description |
-|----------|-------------|
-| `jobid=<N>` | Job ID to resolve the backup chain for. |
-| `ujobid=<unique-id>` | Unique Job ID (alternative to numeric jobid). |
-| `all` | Optional flag: include copy and migration jobs in the chain. |
-
-## Examples
-
-### Get job chain for a specific job
-```
-* .bvfs_get_jobids jobid=42
-1,15,28,42
+```text
+.bvfs_get_jobids jobid=<id> [all]
+.bvfs_get_jobids ujobid=<jobname> [all]
 ```
 
-### Using unique job ID
+## Argumente
+
+| Argument | Werte | Bedeutung |
+|---|---|---|
+| `jobid=<id>` | JobId | Job, dessen Stand wiederhergestellt werden soll. |
+| `ujobid=<jobname>` | eindeutiger Jobname, z. B. `backup-bareos-fd.2026-07-10_21.00.00_04` | Statt `jobid=`; hat Vorrang. |
+| `all` | – | Ketten aller FileSets des Clients zusammenfassen (je FileSet der neueste Stand bis zur Startzeit des Jobs). |
+
+Für einen Job der Stufe Base kommt nur seine eigene JobId zurück. JobIds, die die Konsole nach Job-, Client- oder FileSet-ACL nicht sehen darf, fallen aus der Liste.
+
+## API-Modi
+
+`.api 0` und `.api 1` liefern die JobIds als eine Zeile, durch Kommas getrennt (unter `.api 1` ohne die Katalogzeilen). `.api 2` liefert `result.jobids` als Liste von Objekten `{"id": "<jobid>"}`; Fehler stehen in `error.data.messages.error`.
+
+## Beispiele
+
+### Job-Kette zu einer JobId
+
+```text
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]> .bvfs_get_jobids jobid=1
+Automatically selected Catalog: MyCatalog
+Using Catalog "MyCatalog"
+600,615,616,618,620,622,624,626,628,1
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]> .bvfs_get_jobids jobid=628
+600,615,616,618,620,622,624,626,628
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]> .bvfs_get_jobids jobid=629
+629
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]> .bvfs_get_jobids jobid=5
+600,615,616,618,620,622,624,626,628,1,3,5,9,10
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]>
 ```
-* .bvfs_get_jobids ujobid=backup-bareos-fd.2026-03-29_01.00.00_05
-ujobid=backup-bareos-fd.2026-03-29_01.00.00_05: 1,15,28,42
+
+### Ketten aller FileSets
+
+```text
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]> .bvfs_get_jobids jobid=1 all
+Automatically selected Catalog: MyCatalog
+Using Catalog "MyCatalog"
+506,629,600,615,616,618,620,622,624,626,628,1
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]> .bvfs_get_jobids jobid=629 all
+506,629,600,615,616,618,620,622,624,626,628
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]>
 ```
 
-### Include copy jobs in the chain
+### Über den eindeutigen Jobnamen
+
+```text
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]> .bvfs_get_jobids ujobid=backup-bareos-fd.2026-07-10_21.00.00_04
+Automatically selected Catalog: MyCatalog
+Using Catalog "MyCatalog"
+600,615,616,618,620,622,624,626,628
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]>
 ```
-* .bvfs_get_jobids jobid=42 all
-1,15,28,42,50
+
+### Unter .api 1
+
+```text
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]> .api 1
+api: 1
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]> .bvfs_get_jobids jobid=5
+600,615,616,618,620,622,624,626,628,1,3,5,9,10
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]> .bvfs_get_jobids jobid=5 all
+506,629,600,615,616,618,620,622,624,626,628,1,3,5,9,10
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]>
 ```
 
-## Notes
+### Als JSON
 
-- The returned comma-separated list of job IDs should be passed to `.bvfs_update` and the browsing commands (`.bvfs_lsdirs`, `.bvfs_lsfiles`).
-- For a full backup, only the single job ID is returned.
-- For incremental backups, the chain includes: last Full + all Differentials + all Incrementals up to the specified job.
-- The `all` flag adds copy and migration jobs that may hold data on different volumes.
-- Either `jobid` or `ujobid` must be specified; if neither is given, an error is returned.
+```text
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]> .api 2
+{
+  "jsonrpc": "2.0",
+  "id": null,
+  "result": {
+    "api": 2
+  }
+}
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]> .bvfs_get_jobids jobid=1
+{
+  "jsonrpc": "2.0",
+  "id": null,
+  "result": {
+    "jobids": [
+      {
+        "id": "600"
+[…]
+        "id": "1"
+      }
+    ]
+  }
+}
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]> .bvfs_get_jobids jobid=99999
+{
+  "jsonrpc": "2.0",
+  "id": null,
+  "error": {
+    "code": 1,
+    "message": "failed",
+    "data": {
+      "result": {},
+      "messages": {
+        "error": [
+          "Unable to get Job record for JobId=99999: ERR=cats/sql_get.cc:275 No Job found for JobId 99999\n\n"
+        ]
+      }
+    }
+  }
+}
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]>
+```
 
-## Related Commands
+### Konsole mit eingeschränkten ACLs
 
-- [.bvfs_update](dot-bvfs-update.md) -- Update cache for the returned job IDs
-- [.bvfs_lsdirs](dot-bvfs-lsdirs.md) -- Browse directories using the job chain
-- [.bvfs_lsfiles](dot-bvfs-lsfiles.md) -- Browse files using the job chain
-- [.bvfs_restore](dot-bvfs-restore.md) -- Restore selected files
-- [restore](restore.md) -- Interactive restore command
+Die Konsole `parity-bvfs` darf JobId 1 nicht sehen; die Liste bleibt leer.
+
+```text
+parity-bvfs@bareos-dir[25.1.2+onesimus.0.2.0]> .bvfs_get_jobids jobid=1
+Automatically selected Catalog: MyCatalog
+Using Catalog "MyCatalog"
+
+parity-bvfs@bareos-dir[25.1.2+onesimus.0.2.0]>
+```
+
+### Fehlende oder unbekannte Jobs
+
+```text
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]> .bvfs_get_jobids
+Automatically selected Catalog: MyCatalog
+Using Catalog "MyCatalog"
+Can't find ujobid or jobid argument
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]> .bvfs_get_jobids jobid=99999
+Unable to get Job record for JobId=99999: ERR=cats/sql_get.cc:275 No Job found for JobId 99999
+
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]> .bvfs_get_jobids ujobid=nosuchjob
+Unable to get Job record for JobId=nosuchjob: ERR=cats/sql_get.cc:273 No Job found for JobName 'nosuchjob'
+
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]>
+```
+
+## Fehlermeldungen
+
+| Meldung | Ursache und Abhilfe |
+|---|---|
+| `Can't find ujobid or jobid argument` | Weder `jobid=` noch `ujobid=` angegeben. |
+| `Unable to get Job record for JobId=<id>: ERR=cats/sql_get.cc:275 No Job found for JobId <id>` | Die JobId gibt es nicht im Katalog. |
+| `Unable to get Job record for JobId=<name>: ERR=cats/sql_get.cc:273 No Job found for JobName '<name>'` | Der Jobname aus `ujobid=` ist unbekannt. |
+
+## Siehe auch
+
+- [.bvfs_update](dot-bvfs-update.md) — BVFS-Cache für die Kette füllen
+- [.bvfs_lsdirs](dot-bvfs-lsdirs.md) — Verzeichnisse der Kette auflisten
+- [.ovfs_latest](dot-ovfs-latest.md) — Job-Kette des neuesten Stands (Onesimus)
+- [restore](restore.md) — Restore im Dialog
