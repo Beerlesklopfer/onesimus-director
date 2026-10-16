@@ -965,8 +965,10 @@ pub fn cmd_bvfs_versions(ast: &CommandAst, ctx: &ExecContext) -> CommandResult {
     }
     let mut out = Output::new(ctx);
     if let Some(db) = connection(ctx) {
-        // 25.1.2 escapes the path before GetPathRecord() escapes it again.
-        let pathid = if args.pathid != 0 { args.pathid } else { path_id(&db, &escape(args.path.as_deref().unwrap_or(""))) };
+        // Bvfs::GetAllFileVersions(path) (bvfs.cc:487, 18be77e6) hands the raw
+        // path to GetPathRecord(), which escapes it once; fc2c79b6 escaped it
+        // twice, so paths containing a quote never matched.
+        let pathid = if args.pathid != 0 { args.pathid } else { path_id(&db, args.path.as_deref().unwrap_or("")) };
         file_versions(&db, &mut out, pathid, &fname, &client, copies, args.limit as u32, args.offset as u32);
     }
     out.result(prefix, "versions")

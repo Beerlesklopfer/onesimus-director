@@ -190,7 +190,6 @@ fn query_dialog(ua: &mut crate::ua_select::Ua, ast: &CommandAst, path: &str,
     };
     let mut prompts: Vec<String> = Vec::new();
     let mut query = String::new();
-    let mut substitutions: [Option<String>; 9] = Default::default();
     for line in &lines[start..] {
         if line.starts_with('#') {
             continue;
@@ -213,7 +212,7 @@ fn query_dialog(ua: &mut crate::ua_select::Ua, ast: &CommandAst, path: &str,
         query.push_str(&line);
         let Some(statement) = query.strip_suffix(';').map(str::to_string) else { continue };
         if !statement.is_empty() {
-            let statement = substitute_prompts(ua, &statement, &prompts, &mut substitutions);
+            let statement = substitute_prompts(ua, &statement, &prompts);
             match statement.strip_prefix('!') {
                 Some(vertical) => {
                     if let Ok(text) = run(ua.ctx, vertical, ListType::Vert) {
@@ -232,7 +231,7 @@ fn query_dialog(ua: &mut crate::ua_select::Ua, ast: &CommandAst, path: &str,
         query.clear();
     }
     if !query.is_empty() {
-        let statement = substitute_prompts(ua, &query, &prompts, &mut substitutions);
+        let statement = substitute_prompts(ua, &query, &prompts);
         match statement.strip_prefix('!') {
             Some(vertical) => {
                 if let Ok(text) = run(ua.ctx, vertical, ListType::Vert) {
@@ -250,13 +249,16 @@ fn query_dialog(ua: &mut crate::ua_select::Ua, ast: &CommandAst, path: &str,
     }
 }
 
-/// C++ substitute_prompts(): %1..%9 are asked once per query (GetCmd with
-/// the "*" prompt) and inserted SQL-escaped; "%%" is a percent sign.
-fn substitute_prompts(ua: &mut crate::ua_select::Ua, query: &str, prompts: &[String],
-    substitutions: &mut [Option<String>; 9]) -> String {
+/// C++ substitute_prompts() (ua_query.cc:156, 18be77e6): %1..%9 are asked
+/// once per statement (GetCmd with the "*" prompt; `subst[9]` is local to each
+/// call, so every statement of a multi-statement query asks again) and
+/// inserted SQL-escaped; a repeated %n in the same statement reuses the
+/// answer (fc2c79b6 re-escaped the latest input instead); "%%" is a percent sign.
+fn substitute_prompts(ua: &mut crate::ua_select::Ua, query: &str, prompts: &[String]) -> String {
     if prompts.is_empty() {
         return query.to_string();
     }
+    let mut substitutions: [Option<String>; 9] = Default::default();
     let mut out = String::new();
     let mut chars = query.chars().peekable();
     while let Some(c) = chars.next() {
@@ -397,6 +399,30 @@ mod dialog_tests {
         let mut ua = crate::ua_select::Ua::new(&ctx);
         query_dialog(&mut ua, &crate::session::parse_cli_command("query"), "/nonexistent/q.sql", |_, _, _| panic!());
         assert_eq!(ua.finish(true).error_message, "Could not open /nonexistent/q.sql: ERR=No such file or directory\n");
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    /// ua_query.cc:164 (18be77e6): `subst[9]` is local to substitute_prompts(),
+    /// so each statement asks its prompts again; within one statement a
+    /// repeated %n reuses the answer of that statement.
+    #[test]
+    fn query_prompts_again_for_every_statement() {
+        let ctx = context(CONFIG, ApiMode::Human);
+        let dir = std::env::temp_dir().join(format!("query-per-statement-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("query.sql");
+        std::fs::write(&path, ":Two statements\n*Name:\n*Other:\nSELECT '%1', '%2', '%1';\nSELECT '%1';\n").unwrap();
+        let mut seen = Vec::new();
+        let (_, console) = scripted(&["a", "b", "c"], || {
+            let mut ua = crate::ua_select::Ua::new(&ctx);
+            query_dialog(&mut ua, &crate::session::parse_cli_command("query"), path.to_str().unwrap(), |_, sql, _| {
+                seen.push(sql.to_string());
+                Ok(String::new())
+            });
+            ua.finish(true);
+        });
+        assert_eq!(seen, vec!["SELECT 'a', 'b', 'a'".to_string(), "SELECT 'c'".to_string()]);
+        assert_eq!(console.transcript(), "Automatically selected : Two statements\nName: a\nOther: b\nName: c\n");
         std::fs::remove_dir_all(&dir).unwrap();
     }
 }
