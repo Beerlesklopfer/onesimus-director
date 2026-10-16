@@ -28,6 +28,7 @@ mod kill;
 mod localtime;
 mod logging;
 mod mdns;
+mod ndmp;
 mod ovfs;
 mod privileges;
 mod message_bus;

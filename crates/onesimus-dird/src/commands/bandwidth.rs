@@ -129,6 +129,11 @@ fn setbandwidth_with(
     if !crate::acl::access_audited(ctx, kind, resource) {
         return CommandResult::error(format!("{label} \"{resource}\" not found.\n"));
     }
+    // setbwlimit_stored() (ua_cmds.cc:892): no SD connection for an NDMP
+    // storage (compatibility log C-050).
+    if matches!(&target, Target::Storage(storage) if storage.protocol.is_ndmp()) {
+        return CommandResult::error("Storage selected is NDMP storage which cannot have a bandwidth limit\n".into());
+    }
     let banner = match &target {
         Target::Client(client) => format!(
             "Connecting to Client {} at {}:{}\n",

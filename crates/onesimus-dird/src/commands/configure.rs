@@ -593,11 +593,7 @@ fn configure_add(ast: &CommandAst, ctx: &ExecContext, layout: Option<&Layout>) -
 /// File Daemon below `<configdir>/bareos-dir-export/`.
 fn export_client(cfg: &DirectorConfig, layout: &Layout, client: &str) -> Result<(String, Value), String> {
     let res = cfg.find_client(client).ok_or_else(String::new)?;
-    let ndmp = cfg.raw.iter()
-        .find(|r| r.norm_type() == "client" && r.name() == Some(client))
-        .and_then(|r| r.directives.iter().find(|d| d.norm_key() == "protocol").and_then(|d| d.first().map(str::to_string)))
-        .is_some_and(|p| p.to_ascii_lowercase().starts_with("ndmp"));
-    let password = if ndmp {
+    let password = if res.protocol.is_ndmp() {
         res.password.clone()
     } else {
         match res.password.strip_prefix("[md5]") {

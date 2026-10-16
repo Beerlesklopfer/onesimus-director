@@ -254,6 +254,17 @@ pub(crate) fn open_and_exchange(ua: &mut Ua, sd: &mut impl SdLink, store: &Stora
     }
 }
 
+/// GetRobotElementStatus() of an NDMP storage (C-050): returns before a
+/// session unless it is an autochanger with NdmpChangerDevice and a
+/// complete agent configuration; the session itself is not supported.
+fn ndmp_robot_session(ua: &mut Ua, store: &StorageResource) {
+    let autochanger = ua.ctx.config.as_ref().and_then(|c| c.read().ok())
+        .is_some_and(|c| crate::ua_select::is_autochanger(&c, &store.name));
+    if let Some(message) = crate::ndmp::robot_session(store, autochanger) {
+        ua.error_msg(message);
+    }
+}
+
 /// runtime_storage_status->drives: the drive count is asked once per storage.
 static DRIVES: Mutex<Option<HashMap<String, i16>>> = Mutex::new(None);
 
@@ -261,6 +272,11 @@ static DRIVES: Mutex<Option<HashMap<String, i16>>> = Mutex::new(None);
 fn get_num_drives(ua: &mut Ua, sd: &mut impl SdLink, store: &StorageResource) -> i16 {
     if let Some(drives) = DRIVES.lock().ok().and_then(|d| d.as_ref()?.get(&store.name).copied()) {
         if drives > 0 { return drives; }
+    }
+    if store.protocol.is_ndmp() {
+        // NdmpGetNumDrives() (ndmp_dma_storage.cc:627), C-050
+        ndmp_robot_session(ua, store);
+        return 0;
     }
     let mut drives = 0;
     if let Some(messages) = open_and_exchange(ua, sd, store, &format!("autochanger drives {}\n", dev_name(store))) {
@@ -287,6 +303,11 @@ static SLOTS: Mutex<Option<HashMap<String, i16>>> = Mutex::new(None);
 pub fn get_num_slots(ua: &mut Ua, sd: &mut impl SdLink, store: &StorageResource) -> i16 {
     if let Some(slots) = SLOTS.lock().ok().and_then(|d| d.as_ref()?.get(&store.name).copied()) {
         if slots > 0 { return slots; }
+    }
+    if store.protocol.is_ndmp() {
+        // NdmpGetNumSlots() (ndmp_dma_storage.cc:612), C-050
+        ndmp_robot_session(ua, store);
+        return 0;
     }
     let mut slots = 0;
     if let Some(messages) = open_and_exchange(ua, sd, store, &format!("autochanger slots {}\n", dev_name(store))) {
@@ -486,6 +507,13 @@ pub fn get_vol_list_from_storage(ua: &mut Ua, sd: &mut impl SdLink, store: &Stor
             cache.remove(&store.name);
         }
     }
+    if store.protocol.is_ndmp() {
+        // ndmp_get_vol_list() (ndmp_dma_storage.cc:419), C-050: no list
+        // without the robot session.
+        ua.warning_msg("get ndmp_vol_list...\n");
+        ndmp_robot_session(ua, store);
+        return None;
+    }
     let contents = native_get_vol_list(ua, sd, store, listall, scan)?;
     if let Ok(mut cache) = VOL_LIST.lock() {
         cache.get_or_insert_with(HashMap::new).insert(store.name.clone(), (listall, now, contents.clone()));
@@ -612,6 +640,14 @@ fn get_storage_slot(ua: &mut Ua, args: &[Argument], env: &Env, store: &StorageRe
 /// relayed unchanged.
 fn volume_operation(ua: &mut Ua, sd: &mut impl SdLink, store: &StorageResource, operation: &str, drive: i16,
     slot: i16) {
+    if store.protocol.is_ndmp() {
+        // NdmpAutochangerVolumeOperation() (ndmp_dma_storage.cc:815), C-050:
+        // mount/unmount/release are legal operations; the element mapping
+        // needs the robot session.
+        ua.warning_msg(format!("NdmpAutochangerVolumeOperation: operation {operation}, drive {drive}, slot {slot}\n"));
+        ndmp_robot_session(ua, store);
+        return;
+    }
     // IsSlotNumberValid() on the slot_number_t.
     let command = if is_slot_number_valid(slot as u16) {
         format!("{operation} {} drive={drive} slot={slot}\n", dev_name(store))
