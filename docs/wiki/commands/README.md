@@ -43,6 +43,10 @@ Antworten in Beispielen stammen nur aus echten Läufen: aus den Paritätsfällen
 Beispielausgabe nicht verfügbar: <Grund>.
 ```
 
+Die Seiten beschreiben Onesimus: Beispiele zeigen die Antwort des Onesimus Directors (`*.rust.raw`). Antwortet das Original anders, folgt unter dem Terminalblock genau eine Textzeile (kein Codeblock) mit dem Text des Originals und der Nummer im [Kompatibilitätslog](../../COMPATIBILITY-LOG.md), zum Beispiel:
+
+**Abweichung vom Original:** Das Original fragt den Storage Daemon nach den Slots und antwortet `No slots in changer.` (C-071)
+
 ### So sieht oconsole aus
 
 Die Beispiele zeigen eine `oconsole`-Sitzung, so wie sie im Terminal erscheint, mit Prompt und ohne Farbe. Die Farben werden hier einmal beschrieben und in den Seiten nicht nachgebildet:
