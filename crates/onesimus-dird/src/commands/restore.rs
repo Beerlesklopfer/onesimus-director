@@ -837,9 +837,9 @@ fn escape(text: &str) -> String {
     text.replace('\'', "''")
 }
 
-/// StripTrailingJunk(): trailing blanks and control characters.
+/// StripTrailingJunk(): trailing newlines, carriage returns and blanks.
 fn strip_trailing_junk(text: &str) -> &str {
-    text.trim_end_matches(|c: char| c == ' ' || c.is_ascii_control())
+    text.trim_end_matches(['\n', '\r', ' '])
 }
 
 /// InsertOneFileOrDir (ua_restore.cc:955)
@@ -916,7 +916,7 @@ fn jobid_fileindex(ua: &mut Ua, rx: &mut Rx, sql: &str) -> bool {
 
 /// InsertFileIntoFindexList (ua_restore.cc:1006)
 fn insert_file_into_findex_list(ua: &mut Ua, rx: &mut Rx, file: &str, date: &str) -> bool {
-    let file = file.strip_suffix('\n').unwrap_or(file);
+    let file = file.trim_end_matches(['\n', '\r']);
     // SplitPathAndFilename(): everything after the last / is the file name
     let split = file.rfind('/').map_or(0, |p| p + 1);
     let (path, fname) = (escape(&file[..split]), escape(&file[split..]));
