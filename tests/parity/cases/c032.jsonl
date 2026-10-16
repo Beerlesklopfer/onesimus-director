@@ -1,0 +1,14 @@
+# Compatibility log C-032: enable/disable success text plus the WarningMsg about the temporary change (ua_cmds.cc:1074-1103).
+# Every case restores the state it changes. Schedules are disabled by the harness and are only ever disabled here
+# (enabling one would let the scheduler start real jobs).
+{"id": "c032-job-disable-enable", "steps": ["disable job=backup-bareos-fd", "enable job=backup-bareos-fd"]}
+{"id": "c032-job-disable-enable-api1", "steps": ["disable job=backup-bareos-fd", "enable job=backup-bareos-fd"], "setup": [".api 1"]}
+{"id": "c032-job-disable-enable-api2", "steps": ["disable job=backup-bareos-fd", "enable job=backup-bareos-fd"], "setup": [".api 2"]}
+{"id": "c032-client-disable-enable", "steps": ["disable client=bareos-fd", "enable client=bareos-fd"]}
+{"id": "c032-client-disable-enable-api2", "steps": ["disable client=bareos-fd", "enable client=bareos-fd"], "setup": [".api 2"]}
+{"id": "c032-schedule-disable", "steps": ["disable schedule=WeeklyCycle"]}
+{"id": "c032-schedule-disable-api1", "steps": ["disable schedule=WeeklyCycle"], "setup": [".api 1"]}
+{"id": "c032-schedule-disable-api2", "steps": ["disable schedule=WeeklyCycle"], "setup": [".api 2"]}
+{"id": "c032-job-select-disable-enable", "steps": ["disable", "1", "enable", "1"]}
+{"id": "c032-limited-job", "steps": ["disable job=BackupCatalog", "disable job=backup-bareos-fd", "enable job=backup-bareos-fd"], "console": "parity-device", "password": "parity-device-pw"}
+{"id": "c032-limited-job-api2", "steps": ["disable job=backup-bareos-fd", "enable job=backup-bareos-fd"], "setup": [".api 2"], "console": "parity-device", "password": "parity-device-pw"}

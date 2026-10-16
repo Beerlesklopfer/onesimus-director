@@ -319,9 +319,19 @@ pub fn cmd_setip(_ast: &CommandAst, ctx: &ExecContext) -> CommandResult {
 }
 
 pub fn cmd_setdevice(ast: &CommandAst, ctx: &ExecContext) -> CommandResult {
+    // SetDeviceCommand::SendToSd(): only a failed connect is an error; the
+    // SD's single reply is relayed if one arrives (recv() >= 0), otherwise
+    // nothing is printed.
     setdevice_with(ast, ctx, |storage, director, command| {
-        bareos_stored::command::sd_command(&storage.address, storage.port,
-            &storage.password, director, command)
+        use bareos_bnet::BnetMessage;
+        let mut sd = bareos_stored::connect::connect_sd(&storage.address, storage.port,
+            &storage.password, director)?;
+        let reply = match sd.send_str(command).ok().and_then(|_| sd.recv().ok()) {
+            Some(BnetMessage::Data(bytes)) => String::from_utf8_lossy(&bytes).into_owned(),
+            _ => String::new(),
+        };
+        let _ = sd.send_signal(bareos_bnet::BnetSignal::Terminate);
+        Ok(reply)
     })
 }
 
@@ -341,16 +351,17 @@ fn setdevice_with(
             return usage(format!("Wrong argument: {}\n", arg.key));
         }
     }
-    let value = |key: &str| ast.arguments.iter().find(|a| a.key == key)
-        .and_then(|a| a.value.as_deref()).filter(|s| !s.is_empty());
+    // FindArgWithValue(): only the first argument with this keyword counts.
+    let value = |key: &str| crate::ua_select::find_arg_with_value(ast, key).filter(|s| !s.is_empty());
     let mut missing = String::new();
     for key in ["autoselect", "device", "storage"] {
         if value(key).is_none() { missing.push_str(&format!("Argument missing: {key}\n")); }
     }
     if !missing.is_empty() { return usage(missing); }
-    let autoselect = match value("autoselect").unwrap().to_ascii_lowercase().as_str() {
-        "yes" | "true" | "on" | "1" => 1,
-        "no" | "false" | "off" | "0" => 0,
+    // BoolString (lib/bool_string.h): case-sensitive true/yes/1, false/no/0.
+    let autoselect = match value("autoselect").unwrap() {
+        "yes" | "true" | "1" => 1,
+        "no" | "false" | "0" => 0,
         other => return usage(format!("Wrong argument: {other}\n")),
     };
     let name = value("storage").unwrap();
@@ -361,19 +372,28 @@ fn setdevice_with(
     let Some(config) = ctx.config.as_ref().and_then(|c| c.read().ok()) else {
         return CommandResult::error("No config\n".into());
     };
-    let Some(storage) = config.find_storage(name).cloned() else {
+    // SetDeviceCommand::Cmd() (ua_cmds.cc:1597): a restricted console is
+    // checked first, then GetStoreResWithName() (audited ACL check + lookup).
+    if crate::acl::has_restrictions(ctx, crate::acl::Kind::Storage)
+        && !crate::acl::access(ctx, crate::acl::Kind::Storage, name)
+    {
+        return CommandResult::error(format!("Access to storage \"{name}\" forbidden\n"));
+    }
+    let storage = crate::acl::access_audited(ctx, crate::acl::Kind::Storage, name)
+        .then(|| config.find_storage(name).cloned()).flatten();
+    let Some(storage) = storage else {
         return CommandResult::error(format!("Storage \"{name}\" not found.\n"));
     };
     let director = config.director.name.clone();
     drop(config);
-    if !crate::acl::access(ctx, crate::acl::Kind::Storage, &storage.name) {
-        return CommandResult::error(format!("Storage \"{}\" not found.\n", storage.name));
-    }
     let command = format!("setdevice device={device} autoselect={autoselect}");
     match send(&storage, &director, &command) {
         Ok(response) => CommandResult::ok(format!("Connecting to Storage daemon {} at {}:{}\n{response}",
             storage.name, storage.address, storage.port)),
-        Err(error) => CommandResult::error(format!("Failed to connect to Storage daemon.\n{error}\n")),
+        Err(error) => {
+            tracing::debug!("setdevice: SD connect failed: {error}");
+            CommandResult::error("Failed to connect to Storage daemon.\n".into())
+        }
     }
 }
 
@@ -1070,7 +1090,7 @@ mod setdevice_tests {
         let ast = crate::session::parse_cli_command("setdevice storage=File device=drive0 autoselect=no");
         let denied = setdevice_with(&ast, &ctx, |_,_,_| panic!("denied storage must never contact SD"));
         assert!(!denied.success);
-        assert_eq!(denied.error_message, "Storage \"File\" not found.\n");
+        assert_eq!(denied.error_message, "Access to storage \"File\" forbidden\n");
         let extra = crate::director_config::DirectorConfig::from_str("Director {Name=dir}\nConsole {Name=limited; Password=x; StorageACL=File}").unwrap();
         ctx.config.as_ref().unwrap().write().unwrap().raw.extend(extra.raw.into_iter().filter(|r| r.norm_type() == "console"));
         assert!(setdevice_with(&ast, &ctx, |storage,_,_| {
@@ -1093,7 +1113,9 @@ mod setdevice_tests {
     #[test]
     fn setdevice_does_not_send_invalid_or_incomplete_requests() {
         for line in ["setdevice storage=File", "setdevice storage=File device=x autoselect=maybe",
-            "setdevice storage=File device=x autoselect=yes bogus=1", "setdevice storage=Unknown device=x autoselect=yes"] {
+            "setdevice storage=File device=x autoselect=yes bogus=1", "setdevice storage=Unknown device=x autoselect=yes",
+            "setdevice storage=File device=x autoselect=on", "setdevice storage=File device=x autoselect=Yes",
+            "setdevice Storage=File device=x autoselect=yes"] {
             let ast = crate::session::parse_cli_command(line);
             let result = setdevice_with(&ast, &context(), |_, _, _| panic!("must not contact SD"));
             assert!(!result.success, "{line}");

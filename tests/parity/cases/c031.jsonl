@@ -1,0 +1,20 @@
+# Compatibility log C-031: setdevice ACL check, argument scan and SD reply (ua_cmds.cc:1509-1621).
+# Permitted storages only get device names the SD does not know, so the SD rejects them unchanged.
+{"id": "c031-setdevice-forbidden", "steps": ["setdevice storage=ParityPreview device=nosuchdev autoselect=yes"], "console": "parity-device", "password": "parity-device-pw"}
+{"id": "c031-setdevice-forbidden-unknown", "steps": ["setdevice storage=nosuch device=nosuchdev autoselect=yes"], "console": "parity-device", "password": "parity-device-pw"}
+{"id": "c031-setdevice-forbidden-api1", "steps": ["setdevice storage=ParityPreview device=nosuchdev autoselect=no"], "setup": [".api 1"], "console": "parity-device", "password": "parity-device-pw"}
+{"id": "c031-setdevice-forbidden-api2", "steps": ["setdevice storage=ParityPreview device=nosuchdev autoselect=no"], "setup": [".api 2"], "console": "parity-device", "password": "parity-device-pw"}
+{"id": "c031-setdevice-permitted-nodev", "steps": ["setdevice storage=File device=nosuchdev autoselect=no"], "console": "parity-device", "password": "parity-device-pw"}
+{"id": "c031-setdevice-permitted-nodev-api2", "steps": ["setdevice storage=File device=nosuchdev autoselect=no"], "setup": [".api 2"], "console": "parity-device", "password": "parity-device-pw"}
+{"id": "c031-setdevice-limited-nocmd", "steps": ["setdevice storage=File device=nosuchdev autoselect=no"], "console": "parity-limited", "password": "parity-limited-pw"}
+{"id": "c031-setdevice-nodev", "steps": ["setdevice storage=File device=nosuchdev autoselect=yes"]}
+{"id": "c031-setdevice-nodev-api1", "steps": ["setdevice storage=File device=nosuchdev autoselect=yes"], "setup": [".api 1"]}
+{"id": "c031-setdevice-nodev-api2", "steps": ["setdevice storage=File device=nosuchdev autoselect=yes"], "setup": [".api 2"]}
+{"id": "c031-setdevice-nostorage-api2", "steps": ["setdevice storage=nosuch device=nosuchdev autoselect=yes"], "setup": [".api 2"]}
+{"id": "c031-setdevice-autoselect-upper", "steps": ["setdevice storage=File device=nosuchdev autoselect=Yes"]}
+{"id": "c031-setdevice-autoselect-on", "steps": ["setdevice storage=File device=nosuchdev autoselect=on"]}
+{"id": "c031-setdevice-key-upper", "steps": ["setdevice Storage=File device=nosuchdev autoselect=yes"]}
+{"id": "c031-setdevice-key-novalue", "steps": ["setdevice storage storage=File device=nosuchdev autoselect=no"]}
+{"id": "c031-setdevice-empty-value", "steps": ["setdevice storage= device=nosuchdev autoselect=yes"]}
+{"id": "c031-setdevice-missing-two", "steps": ["setdevice storage=File"]}
+{"id": "c031-setdevice-wrongarg-api2", "steps": ["setdevice storage=File device=nosuchdev autoselect=yes bogus=1"], "setup": [".api 2"]}
