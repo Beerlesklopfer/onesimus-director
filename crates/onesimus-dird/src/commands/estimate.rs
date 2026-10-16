@@ -296,7 +296,10 @@ fn estimate_job(ast: &CommandAst, ctx: &ExecContext, mut reply: Reply, job: Opti
 
     reply.out.push_str(&format!("Connecting to Client {} at {}:{}\n", plan.client, plan.address, plan.port));
     let mut fd = match fd_protocol::connect_fd_with_timeout(&plan.address, plan.port, &plan.password, &plan.director, None) {
-        Ok((fd, _)) => fd,
+        Ok((fd, _)) => {
+            fd_protocol::note_tls_handshake(&plan.client);
+            fd
+        }
         Err(error) => {
             tracing::warn!("estimate: connect to client {}: {error}", plan.client);
             return reply.error("Failed to connect to Client.\n");

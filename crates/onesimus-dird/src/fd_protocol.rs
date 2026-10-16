@@ -225,6 +225,14 @@ fn stored_handshake(client: &str) -> Option<HandshakeMode> {
     SUCCESSFUL_HANDSHAKE.lock().ok()?.as_ref()?.get(client).copied()
 }
 
+/// A non-console connect (e.g. estimate) that succeeded with immediate TLS
+/// records the mode silently, like ConnectToFileDaemon without UaContext.
+pub(crate) fn note_tls_handshake(client: &str) {
+    if stored_handshake(client).is_none() {
+        store_handshake(client, HandshakeMode::TlsFirst);
+    }
+}
+
 fn store_handshake(client: &str, mode: HandshakeMode) {
     if let Ok(mut modes) = SUCCESSFUL_HANDSHAKE.lock() {
         modes.get_or_insert_with(Default::default).insert(client.to_string(), mode);

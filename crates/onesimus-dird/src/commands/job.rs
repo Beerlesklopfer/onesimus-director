@@ -166,6 +166,19 @@ fn level_from_name(name: &str) -> Option<u8> {
 }
 
 /// JobLevelToString() (dird_conf.cc:2090).
+/// Level text for the job report (C-051): codes and names map to the
+/// JobLevel names, anything else is passed through.
+fn level_name(level: &str) -> String {
+    match level.to_ascii_lowercase().as_str() {
+        "full" | "f" => "Full",
+        "incremental" | "i" => "Incremental",
+        "differential" | "d" => "Differential",
+        "since" | "s" => "Since",
+        "virtualfull" | "v" => "VirtualFull",
+        _ => return level.to_string(),
+    }.to_string()
+}
+
 fn job_level_to_string(level: u8) -> String {
     JOB_LEVELS.iter().find(|(_, l)| *l == level).map(|(n, _)| n.to_string())
         .unwrap_or_else(|| format!("{} ({level})", level as char))
