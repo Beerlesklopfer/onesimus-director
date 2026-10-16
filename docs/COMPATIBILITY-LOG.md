@@ -92,7 +92,7 @@ eindeutige Sortierung), `c015-list-jobs-enabled-count` (undefiniertes Verhalten 
 ### Offen
 
 - Einträge mit Status „offen“ in der Tabelle: C-043 bis C-052.
-- OVFS (eigene PostgreSQL-Extension, paralleles Projekt `oenesimus-postgres-plugin`): BVFS ist in `commands/bvfs.rs` byte-gleich portiert und per `c022` abgesichert; OVFS als zusätzliche Onesimus-Funktion bzw. alternatives Backend nur, solange die `.bvfs_*`-Paritätsfälle identisch bleiben.
+- OVFS (eigene PostgreSQL-Extension, paralleles Projekt `oenesimus-postgres-plugin`) ist der Onesimus-Weg für Verzeichnisbäume und Restore-Auswahl. BVFS (`commands/bvfs.rs`, byte-gleich portiert, Fälle `c022`) bleibt nur zur Abwärtskompatibilität für Bareos-Clients (z. B. bareos-webui) erhalten und darf sich dabei nicht ändern.
 - Prüfen, ob C-012s Wertvalidierung für `update` (`3500719`) nach dem C-011-Merge vollständig erhalten ist.
 - Normalisierung der alten Fälle (`banner*`, `status-dir`, `status-subscriptions`,
   `dot-status-dir-running`) auf Versionstoken/Zeit, damit sie grün werden.
