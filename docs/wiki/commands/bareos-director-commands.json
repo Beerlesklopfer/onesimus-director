@@ -711,7 +711,7 @@
     },
     {
       "path": "crates/onesimus-dird/src/catalog_worker.rs",
-      "sha256": "4558adafd48b876a1eba6bdc55590ba43c0f7b2bb9471b8833d0c019854d3586"
+      "sha256": "c26aed2254c2a613a129df279808373b57f6f7164e619e91be799babe4713809"
     },
     {
       "path": "crates/onesimus-dird/src/command_executor.rs",
@@ -727,7 +727,7 @@
     },
     {
       "path": "crates/onesimus-dird/src/commands/admin.rs",
-      "sha256": "1501160f1578701767a082e4d814078c2c0ef8111d17c5d19abe345bacb67990"
+      "sha256": "f197e8dee14204016c0e94b4bbed29365b63bfdb67d875892ea1deb2792e878e"
     },
     {
       "path": "crates/onesimus-dird/src/commands/bandwidth.rs",
@@ -795,7 +795,7 @@
     },
     {
       "path": "crates/onesimus-dird/src/commands/purge.rs",
-      "sha256": "612e10a3e17aa3d70c678a07d53a82e9d17f6dd3fdf84d2305c2cfbcf9248643"
+      "sha256": "950ef9410b6aa902b08a100f8ae0f7f4cdf978d4ac666e2609cdadc1dccc0254"
     },
     {
       "path": "crates/onesimus-dird/src/commands/resolve.rs",
@@ -819,7 +819,7 @@
     },
     {
       "path": "crates/onesimus-dird/src/commands/status.rs",
-      "sha256": "975226268ad66a5481ea555ce444874fcf35160c29da0eda6b9d1e4897d7e86e"
+      "sha256": "40717a83a9f1935847a1de04f21dc2746f8cf94714f63c71a8edf9295aa8f2aa"
     },
     {
       "path": "crates/onesimus-dird/src/commands/wait.rs",
@@ -831,11 +831,11 @@
     },
     {
       "path": "crates/onesimus-dird/src/job_manager.rs",
-      "sha256": "a39b78d373cf322b6b1151aeb4460a467fa61e231b2d41ca8d90bf2c2c01e098"
+      "sha256": "bdef3d2beb21f0925feb82816c638c85dcbd14a33dca60223df125c6ef483238"
     },
     {
       "path": "crates/onesimus-dird/src/job_worker.rs",
-      "sha256": "c992b6f8491cbd8d4474788c150f78f26eee94cc0547c0d484441f20ca0b7af8"
+      "sha256": "eeab6d58d6c52d543a4baba36c9b75a1eefdf0a9ce49480aeb3d65af384ebae1"
     },
     {
       "path": "crates/onesimus-dird/src/logging.rs",
@@ -843,7 +843,7 @@
     },
     {
       "path": "crates/onesimus-dird/src/main.rs",
-      "sha256": "de1e973e673e73c6c1c3bafdbaca656cc99dd99cdd6d2971149a5a565ddad20a"
+      "sha256": "6ec3226e60c73512e61d08779b9121a679233918d42c4cb26398f6416fe997c2"
     },
     {
       "path": "crates/onesimus-dird/src/scheduler.rs",
@@ -5357,7 +5357,7 @@
         },
         "implementation": {
           "file": "crates/onesimus-dird/src/commands/admin.rs",
-          "line": 1450
+          "line": 1496
         },
         "declared_arguments": [],
         "status": "registered_unverified",
@@ -6290,7 +6290,7 @@
         },
         "implementation": {
           "file": "crates/onesimus-dird/src/commands/admin.rs",
-          "line": 1314
+          "line": 1360
         },
         "declared_arguments": [
           "storage",
