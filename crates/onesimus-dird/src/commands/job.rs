@@ -1062,6 +1062,19 @@ impl Jcr {
         if let Some(pool) = self.pool.as_ref().filter(|_| self.ignore_level_pool_overrides) {
             arguments.push(arg("pool", pool));
         }
+        // What a restore was confirmed with (for the restore start).
+        if self.job_type == JobType::Restore {
+            let replace = REPLACE_OPTIONS.iter().find(|(_, token)| *token == self.replace).map(|(name, _)| *name);
+            let jobid = (self.restore_job_id != 0).then(|| self.restore_job_id.to_string());
+            for (key, value) in [("restoreclient", self.client.as_deref()), ("bootstrap", self.restore_bootstrap.as_deref()),
+                ("where", self.where_.as_deref()), ("regexwhere", self.regex_where.as_deref()), ("replace", replace),
+                ("pluginoptions", self.plugin_options.as_deref()), ("jobid", jobid.as_deref())]
+            {
+                if let Some(value) = value {
+                    arguments.push(arg(key, value));
+                }
+            }
+        }
         arguments.push(Argument { key: "yes".to_string(), value: None });
         CommandAst { command_name: "run".to_string(), arguments, ..Default::default() }
     }
