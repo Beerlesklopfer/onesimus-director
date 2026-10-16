@@ -248,6 +248,7 @@ impl JobManager {
         debug!("JobManager: added job {job_id} '{job_name}' (total: {})", self.jobs.len());
     }
 
+    #[cfg_attr(not(test), allow(dead_code))]
     pub fn active_count(&self) -> usize {
         self.jobs.iter().filter(|j| !matches!(j.phase, DirJobPhase::Completed | DirJobPhase::Error)).count()
     }
@@ -800,7 +801,8 @@ pub fn monitor_loop(
         let had_work;
         {
             let mut mgr = manager.lock().unwrap();
-            let before = mgr.active_count();
+            // Queued jobs need no fast polling (jobq looks every 2 seconds).
+            let before = mgr.running().count();
             mgr.poll_all();
             had_work = before > 0;
         }
