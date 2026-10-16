@@ -26,20 +26,9 @@ pub enum CatalogRequest {
     RawQuery { sql: String },
     /// SQL query returning every value as libpq text (like the C++ catalog).
     TextRows { sql: String },
-    /// Get full volume info in OK_media format (24-field protocol string).
-    GetVolumeInfo { vol_name: String },
-    /// Find an appendable volume in a named pool.
-    FindAppendableVolume { pool_name: String },
-    /// Update media record from SD UpdateMedia values.
-    UpdateMedia {
-        vol_name: String,
-        mounts: i64,
-        bytes: i64,
-        jobs: i32,
-        files: i64,
-        errors: i64,
-        writes: i64,
-    },
+    /// Statement(s) without result; CatalogResponse::Ok(affected rows)
+    /// (C++ UpdateDb/InsertDb/DeleteDb).
+    Execute { sql: String },
     /// Generate bootstrap data for a restore.
     GenerateBootstrap { job_id: u32 },
     /// Find the most recent successful backup job for a client.
@@ -65,20 +54,6 @@ pub enum CatalogRequest {
         job_errors: i32,
         vol_session_id: i32,
         vol_session_time: i32,
-    },
-    /// Create a JobMedia record (SD→Dir CatReq). Performance-critical.
-    CreateJobMedia {
-        job_id: i32,
-        media_id: i32,
-        first_index: i32,
-        last_index: i32,
-        start_file: i32,
-        end_file: i32,
-        start_block: i64,
-        end_block: i64,
-        copy: i32,
-        strip: i32,
-        job_bytes: i64,
     },
     /// Resolve a name to its ID (client, pool, fileset).
     ResolveId { table: String, name: String },
@@ -187,30 +162,13 @@ impl CatalogHandle {
         }
     }
 
-    /// Get full volume info in OK_media format.
-    pub fn get_volume_info(&self, vol_name: &str) -> Option<String> {
-        match self.request(CatalogRequest::GetVolumeInfo { vol_name: vol_name.to_string() }) {
-            Ok(CatalogResponse::OptionalText(t)) => t,
-            _ => None,
+    /// Statement(s) returning the number of affected rows (C++ UpdateDb).
+    pub fn execute(&self, sql: &str) -> Result<u64, String> {
+        match self.request(CatalogRequest::Execute { sql: sql.to_string() })? {
+            CatalogResponse::Ok(n) => Ok(n),
+            CatalogResponse::Error(e) => Err(e),
+            other => Err(format!("unexpected response: {:?}", resp_debug(&other))),
         }
-    }
-
-    /// Find an appendable volume in a pool.
-    pub fn find_appendable_volume(&self, pool_name: &str) -> Option<String> {
-        match self.request(CatalogRequest::FindAppendableVolume { pool_name: pool_name.to_string() }) {
-            Ok(CatalogResponse::OptionalText(t)) => t,
-            _ => None,
-        }
-    }
-
-    /// Update media record in DB.
-    pub fn update_media(
-        &self, vol_name: &str, mounts: i64, bytes: i64, jobs: i32,
-        files: i64, errors: i64, writes: i64,
-    ) {
-        let _ = self.request(CatalogRequest::UpdateMedia {
-            vol_name: vol_name.to_string(), mounts, bytes, jobs, files, errors, writes,
-        });
     }
 
     /// Generate bootstrap data for a restore.
@@ -261,23 +219,6 @@ impl CatalogHandle {
             job_files, job_bytes, job_errors, vol_session_id, vol_session_time,
         })? {
             CatalogResponse::Ok(_) => Ok(()),
-            CatalogResponse::Error(e) => Err(e),
-            _ => Err("unexpected response".into()),
-        }
-    }
-
-    /// Create a JobMedia record. Returns JobMediaId.
-    pub fn create_jobmedia(
-        &self, job_id: i32, media_id: i32, first_index: i32, last_index: i32,
-        start_file: i32, end_file: i32, start_block: i64, end_block: i64,
-        copy: i32, strip: i32, job_bytes: i64,
-    ) -> Result<i32, String> {
-        match self.request(CatalogRequest::CreateJobMedia {
-            job_id, media_id, first_index, last_index,
-            start_file, end_file, start_block, end_block,
-            copy, strip, job_bytes,
-        })? {
-            CatalogResponse::JobId(id) => Ok(id),
             CatalogResponse::Error(e) => Err(e),
             _ => Err("unexpected response".into()),
         }
@@ -434,12 +375,11 @@ pub fn spawn_catalog_worker(
                             handle_raw_query(&pool, &sql).await,
                         CatalogRequest::TextRows { sql } =>
                             handle_text_rows(&pool, &sql).await,
-                        CatalogRequest::GetVolumeInfo { vol_name } =>
-                            handle_get_volume_info(&pool, &vol_name).await,
-                        CatalogRequest::FindAppendableVolume { pool_name } =>
-                            handle_find_appendable_volume(&pool, &pool_name).await,
-                        CatalogRequest::UpdateMedia { vol_name, mounts, bytes, jobs, files, errors, writes } =>
-                            handle_update_media(&pool, &vol_name, mounts, bytes, jobs, files, errors, writes).await,
+                        CatalogRequest::Execute { sql } =>
+                            match sqlx::raw_sql(&sql).execute(&pool).await {
+                                Ok(r) => CatalogResponse::Ok(r.rows_affected()),
+                                Err(e) => CatalogResponse::Error(pq_error_message(&pool, &sql, &e).await),
+                            },
                         CatalogRequest::GenerateBootstrap { job_id } =>
                             handle_generate_bootstrap(&pool, job_id).await,
                         CatalogRequest::FindLatestBackupJobId { client_name } =>
@@ -448,8 +388,6 @@ pub fn spawn_catalog_worker(
                             handle_create_job(&pool, &job_name, &name, &job_type, &level, &client_name, &pool_name, &fileset_name, sched_time).await,
                         CatalogRequest::UpdateJobEnd { job_id, status, end_time, job_files, job_bytes, job_errors, vol_session_id, vol_session_time } =>
                             handle_update_job_end(&pool, job_id, &status, end_time, job_files, job_bytes, job_errors, vol_session_id, vol_session_time).await,
-                        CatalogRequest::CreateJobMedia { job_id, media_id, first_index, last_index, start_file, end_file, start_block, end_block, copy, strip, job_bytes } =>
-                            handle_create_jobmedia(&pool, job_id, media_id, first_index, last_index, start_file, end_file, start_block, end_block, copy, strip, job_bytes).await,
                         CatalogRequest::ResolveId { table, name } =>
                             handle_resolve_id(&pool, &table, &name).await,
                         CatalogRequest::SinceUtime { client_name, job_name, fileset_name, level } =>
@@ -706,72 +644,6 @@ fn report_error_position(query: &str, loc: usize) -> String {
     format!("{prefix}{line}{}\n{}^\n", if end_trunc { "..." } else { "" }, " ".repeat(cursor))
 }
 
-async fn handle_get_volume_info(pool: &sqlx::PgPool, vol_name: &str) -> CatalogResponse {
-    let row: Option<(
-        String, i32, i64, i64, i64, i64, i64, i64, i64,
-        String, i64, i32, i64, i64, i64, i64,
-    )> = match sqlx::query_as(
-        "SELECT volumename, COALESCE(voljobs,0)::int, COALESCE(volfiles,0)::bigint, \
-         COALESCE(volblocks,0)::bigint, COALESCE(volbytes,0)::bigint, COALESCE(volmounts,0)::bigint, \
-         COALESCE(volerrors,0)::bigint, COALESCE(volwrites,0)::bigint, COALESCE(maxvolbytes,0)::bigint, \
-         COALESCE(volstatus,'Append'), COALESCE(slot,0)::bigint, mediaid, \
-         COALESCE(endfile,0)::bigint, COALESCE(endblock,0)::bigint, \
-         COALESCE(minblocksize,0)::bigint, COALESCE(maxblocksize,0)::bigint \
-         FROM media WHERE volumename = $1"
-    ).bind(vol_name).fetch_optional(pool).await {
-        Ok(r) => r,
-        Err(e) => return CatalogResponse::Error(format!("GetVolumeInfo: {e}")),
-    };
-
-    CatalogResponse::OptionalText(row.map(|(vn, vj, vf, vbl, vby, vm, ve, vw, mvb, vs, sl, mid, ef, eb, minbs, maxbs)| {
-        format!(
-            "1000 OK VolName={vn} VolJobs={vj} VolFiles={vf} \
-             VolBlocks={vbl} VolBytes={vby} VolMounts={vm} VolErrors={ve} VolWrites={vw} \
-             MaxVolBytes={mvb} VolCapacityBytes=0 VolStatus={vs} Slot={sl} \
-             MaxVolJobs=0 MaxVolFiles=0 InChanger=0 VolReadTime=0 \
-             VolWriteTime=0 EndFile={ef} EndBlock={eb} LabelType=0 \
-             MediaId={mid} EncryptionKey=*None* MinBlocksize={minbs} MaxBlocksize={maxbs}\n"
-        )
-    }))
-}
-
-async fn handle_find_appendable_volume(pool: &sqlx::PgPool, pool_name: &str) -> CatalogResponse {
-    // fn_find_appendable_volume(p_pool_name text) RETURNS text
-    let row: Option<(Option<String>,)> = match sqlx::query_as(
-        "SELECT fn_find_appendable_volume($1)"
-    ).bind(pool_name).fetch_optional(pool).await {
-        Ok(r) => r,
-        Err(_) => {
-            // Fallback: SP not installed
-            let r: Option<(String,)> = sqlx::query_as(
-                "SELECT m.volumename FROM media m JOIN pool p ON m.poolid = p.poolid \
-                 WHERE p.name = $1 AND m.volstatus = 'Append' ORDER BY m.mediaid LIMIT 1"
-            ).bind(pool_name).fetch_optional(pool).await.ok().flatten();
-            return CatalogResponse::OptionalText(r.map(|(n,)| n));
-        }
-    };
-
-    CatalogResponse::OptionalText(row.and_then(|(v,)| v))
-}
-
-async fn handle_update_media(
-    pool: &sqlx::PgPool, vol_name: &str,
-    mounts: i64, bytes: i64, jobs: i32, files: i64, errors: i64, writes: i64,
-) -> CatalogResponse {
-    match sqlx::query(
-        "UPDATE media SET volmounts=$1, volbytes=$2, voljobs=$3, volfiles=$4, \
-         volerrors=$5, volwrites=$6 WHERE volumename=$7"
-    )
-    .bind(mounts).bind(bytes).bind(jobs).bind(files).bind(errors).bind(writes).bind(vol_name)
-    .execute(pool).await {
-        Ok(r) => {
-            debug!("UpdateMedia: vol={vol_name} bytes={bytes} mounts={mounts}");
-            CatalogResponse::Ok(r.rows_affected())
-        }
-        Err(e) => CatalogResponse::Error(format!("UpdateMedia: {e}")),
-    }
-}
-
 async fn handle_generate_bootstrap(pool: &sqlx::PgPool, job_id: u32) -> CatalogResponse {
     // Get job info
     let job_row: Option<(i32, i32, String)> = match sqlx::query_as(
@@ -860,55 +732,6 @@ async fn handle_since_utime(pool: &sqlx::PgPool, client_name: &str, job_name: &s
         Ok(Some((ts, prev))) => CatalogResponse::SinceUtime { since_utime: ts, prev_job: prev },
         Ok(None) => CatalogResponse::SinceUtime { since_utime: 0, prev_job: String::new() },
         Err(error) => CatalogResponse::Error(format!("Backup reference lookup failed: {error}")),
-    }
-}
-
-/// Create a JobMedia record — performance-critical (many per backup).
-/// Uses sp_create_jobmedia SP with inline SQL fallback.
-async fn handle_create_jobmedia(
-    pool: &sqlx::PgPool, job_id: i32, media_id: i32,
-    first_index: i32, last_index: i32, start_file: i32, end_file: i32,
-    start_block: i64, end_block: i64, _copy: i32, _strip: i32, job_bytes: i64,
-) -> CatalogResponse {
-    // Try SP first
-    let result: Result<i32, _> = sqlx::query_scalar(
-        "SELECT sp_create_jobmedia($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)"
-    )
-    .bind(job_id).bind(media_id).bind(first_index).bind(last_index)
-    .bind(start_file).bind(end_file).bind(start_block).bind(end_block)
-    .bind(_copy).bind(_strip).bind(job_bytes)
-    .fetch_one(pool).await;
-
-    match result {
-        Ok(jm_id) => CatalogResponse::JobId(jm_id),
-        Err(_) => {
-            // Fallback: inline SQL
-            let vol_index: i32 = sqlx::query_scalar(
-                "SELECT COALESCE(COUNT(*), 0)::int + 1 FROM jobmedia WHERE jobid = $1"
-            ).bind(job_id).fetch_one(pool).await.unwrap_or(1);
-
-            match sqlx::query_scalar(
-                "INSERT INTO jobmedia (jobid, mediaid, firstindex, lastindex, \
-                 startfile, endfile, startblock, endblock, volindex, jobbytes) \
-                 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING jobmediaid"
-            )
-            .bind(job_id).bind(media_id).bind(first_index).bind(last_index)
-            .bind(start_file).bind(end_file).bind(start_block).bind(end_block)
-            .bind(vol_index).bind(job_bytes)
-            .fetch_one(pool).await {
-                Ok(jm_id) => {
-                    // Update media EndFile/EndBlock
-                    let _ = sqlx::query(
-                        "UPDATE media SET endfile = GREATEST(endfile, $1), \
-                         endblock = GREATEST(endblock, $2) WHERE mediaid = $3"
-                    ).bind(end_file).bind(end_block).bind(media_id)
-                    .execute(pool).await;
-
-                    CatalogResponse::JobId(jm_id)
-                }
-                Err(e) => CatalogResponse::Error(format!("CreateJobMedia: {e}")),
-            }
-        }
     }
 }
 

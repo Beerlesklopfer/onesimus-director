@@ -7,9 +7,10 @@ use std::sync::{Arc, Mutex};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::thread;
 
-use tracing::{info, debug, warn, error};
+use tracing::{info, debug, error};
 
 use crate::catalog_worker::CatalogHandle;
+use crate::commands::bvfs::Db;
 use crate::job_worker::{JobHandle, PipeMessage};
 use crate::message_bus::{MessageBus, BusMessage, MsgType};
 use crate::director_config::SharedConfig;
@@ -114,11 +115,13 @@ pub struct JobManager {
     bus: Arc<MessageBus>,
     config: Option<SharedConfig>,
     catalog: Option<CatalogHandle>,
+    /// Catalog state of the SD catalog requests per JobId (catreq.rs).
+    catreq_jobs: std::collections::HashMap<u32, crate::catreq::CatReqJob>,
 }
 
 impl JobManager {
     pub fn new(bus: Arc<MessageBus>, config: Option<SharedConfig>, catalog: Option<CatalogHandle>) -> Self {
-        Self { jobs: Vec::new(), bus, config, catalog }
+        Self { jobs: Vec::new(), bus, config, catalog, catreq_jobs: std::collections::HashMap::new() }
     }
 
     pub fn add_job(&mut self, job_id: u32, job_name: &str, handle: JobHandle) {
@@ -281,12 +284,25 @@ impl JobManager {
                     }
 
                     PipeMessage::CatReq { request, .. } => {
-                        debug!("JobManager: job {} CatReq: {}", job.job_id, &request[..request.len().min(60)]);
+                        debug!("JobManager: job {} CatReq: {}", job.job_id, request.chars().take(60).collect::<String>());
                         let previous_phase = job.phase;
                         job.phase = DirJobPhase::WaitingCatReq;
-                        let response = handle_cat_req(&request, &self.catalog, job.job_id);
-                        job.handle.send_message(&PipeMessage::CatResp { response });
+                        let reply = catreq_session(&mut self.catreq_jobs, &self.catalog, &self.config, job)
+                            .dispatch(self.catalog.as_ref().map(|c| c as &dyn Db), &batch_opener(&self.catalog), request.as_bytes());
+                        if let Some((files, bytes)) = reply.job_counts {
+                            job.last_files = files as i64;
+                            job.last_bytes = bytes as i64;
+                        }
+                        post_catreq_messages(&self.bus, self.config.as_ref(), job, reply.messages);
+                        job.handle.send_message(&PipeMessage::CatResp { response: reply.to_sd });
                         job.phase = previous_phase;
+                    }
+
+                    PipeMessage::UpdCat { data, .. } => {
+                        let data = hex::decode(&data).unwrap_or_default();
+                        let reply = catreq_session(&mut self.catreq_jobs, &self.catalog, &self.config, job)
+                            .dispatch(self.catalog.as_ref().map(|c| c as &dyn Db), &batch_opener(&self.catalog), &data);
+                        post_catreq_messages(&self.bus, self.config.as_ref(), job, reply.messages);
                     }
 
                     PipeMessage::JobEnd { term_code, files, bytes, errors,
@@ -304,6 +320,11 @@ impl JobManager {
                 }
             }
             if let Some(exit_code) = job.worker_exit {
+                // msgchan.cc EndTransaction() and backup.cc WriteBatchFileRecords().
+                if let Some(mut state) = self.catreq_jobs.remove(&job.job_id) {
+                    let messages = state.end_of_job(self.catalog.as_ref().map(|c| c as &dyn Db), &batch_opener(&self.catalog));
+                    post_catreq_messages(&self.bus, self.config.as_ref(), job, messages);
+                }
                 let ending = job.pending_end.take().unwrap_or_else(|| JobEnd {
                     term_code: b'E' as i32, files: job.last_files, bytes: job.last_bytes,
                     errors: 1, vol_session_id: 0, vol_session_time: 0,
@@ -336,97 +357,32 @@ impl JobManager {
     }
 }
 
-/// CatReq handler — queries DB via CatalogHandle (MPSC channel).
-fn handle_cat_req(request: &str, catalog: &Option<CatalogHandle>, job_id: u32) -> String {
-    let Some(cat) = catalog else {
-        return "1000 OK\n".to_string();
-    };
-
-    if request.contains("FindMedia") {
-        let pool = extract_field(request, "pool_name=").unwrap_or("Full".into());
-        debug!("CatReq: FindMedia pool={pool}");
-        match cat.find_appendable_volume(&pool) {
-            Some(name) => cat.get_volume_info(&name).unwrap_or("1901 No Media.\n".into()),
-            None => "1901 No Media.\n".to_string(),
-        }
-    } else if request.contains("GetVolInfo") {
-        let vol = extract_field(request, "VolName=").unwrap_or("Full-0001".into());
-        debug!("CatReq: GetVolInfo vol={vol}");
-        cat.get_volume_info(&vol).unwrap_or("1901 No Media.\n".into())
-    } else if request.contains("UpdateMedia") {
-        let vol = extract_field(request, "VolName=").unwrap_or("Full-0001".into());
-        debug!("CatReq: UpdateMedia vol={vol}");
-        let mounts: i64 = extract_field(request, "VolMounts=").and_then(|s| s.parse().ok()).unwrap_or(0);
-        let bytes: i64 = extract_field(request, "VolBytes=").and_then(|s| s.parse().ok()).unwrap_or(0);
-        let jobs: i32 = extract_field(request, "VolJobs=").and_then(|s| s.parse().ok()).unwrap_or(0);
-        let files: i64 = extract_field(request, "VolFiles=").and_then(|s| s.parse().ok()).unwrap_or(0);
-        let errors: i64 = extract_field(request, "VolErrors=").and_then(|s| s.parse().ok()).unwrap_or(0);
-        let writes: i64 = extract_field(request, "VolWrites=").and_then(|s| s.parse().ok()).unwrap_or(0);
-        cat.update_media(&vol, mounts, bytes, jobs, files, errors, writes);
-        cat.get_volume_info(&vol).unwrap_or("1901 No Media.\n".into())
-    } else if request.contains("CreateJobMedia") {
-        // CatReq format: "CatReq Job=%s CreateJobMedia FirstIndex=%u LastIndex=%u
-        //   StartFile=%u EndFile=%u StartBlock=%u EndBlock=%u Copy=%d Strip=%d MediaId=%s"
-        let first_idx: i32 = extract_field(request, "FirstIndex=").and_then(|s| s.parse().ok()).unwrap_or(0);
-        let last_idx: i32 = extract_field(request, "LastIndex=").and_then(|s| s.parse().ok()).unwrap_or(0);
-        let start_file: i32 = extract_field(request, "StartFile=").and_then(|s| s.parse().ok()).unwrap_or(0);
-        let end_file: i32 = extract_field(request, "EndFile=").and_then(|s| s.parse().ok()).unwrap_or(0);
-        let start_block: i64 = extract_field(request, "StartBlock=").and_then(|s| s.parse().ok()).unwrap_or(0);
-        let end_block: i64 = extract_field(request, "EndBlock=").and_then(|s| s.parse().ok()).unwrap_or(0);
-        let copy: i32 = extract_field(request, "Copy=").and_then(|s| s.parse().ok()).unwrap_or(0);
-        let strip: i32 = extract_field(request, "Strip=").and_then(|s| s.parse().ok()).unwrap_or(0);
-        let media_id: i32 = extract_field(request, "MediaId=").and_then(|s| s.parse().ok()).unwrap_or(0);
-        // job_id comes from the running job context (not from CatReq string,
-        // which only has Job=unique_name, not the numeric JobId)
-        let db_job_id = job_id as i32;
-
-        debug!("CatReq: CreateJobMedia job={db_job_id} media={media_id} fi={first_idx}-{last_idx} blk={start_block}-{end_block}");
-
-        match cat.create_jobmedia(db_job_id, media_id, first_idx, last_idx,
-            start_file, end_file, start_block, end_block, copy, strip, 0) {
-            Ok(jm_id) => {
-                info!("CreateJobMedia: JobMediaId={jm_id} job={job_id} media={media_id}");
-                "1000 OK CreateJobMedia\n".to_string()
-            }
-            Err(e) => {
-                error!("CreateJobMedia failed: {e}");
-                "1000 OK CreateJobMedia\n".to_string() // SD expects OK regardless
-            }
-        }
-    } else if request.contains("UpdateJobRecord") {
-        // "Catreq Job=%s UpdateJobRecord JobFiles=%u JobBytes=%llu"
-        let files: i64 = extract_field(request, "JobFiles=").and_then(|s| s.parse().ok()).unwrap_or(0);
-        let bytes: i64 = extract_field(request, "JobBytes=").and_then(|s| s.parse().ok()).unwrap_or(0);
-        debug!("CatReq: UpdateJobRecord job={job_id} files={files} bytes={bytes}");
-        if let Err(e) = cat.raw_query(&format!(
-            "UPDATE job SET jobfiles={files}, jobbytes={bytes} WHERE jobid={job_id}")) {
-            warn!("UpdateJobRecord: {e}");
-        }
-        "1000 OK\n".to_string()
-    } else if request.contains("UpdateFileList") || request.contains("Filelist") {
-        // Fire-and-forget — SD signals new files written, no action needed
-        debug!("CatReq: UpdateFileList job={job_id}");
-        "1000 OK\n".to_string()
-    } else if request.contains("DeleteNullJobmediaRecords") {
-        // "CatReq Job=%s DeleteNullJobmediaRecords jobid=%u"
-        debug!("CatReq: DeleteNullJobmediaRecords job={job_id}");
-        if let Err(e) = cat.raw_query(&format!(
-            "DELETE FROM jobmedia WHERE jobid={job_id} AND firstindex=0 AND lastindex=0 \
-             AND startblock=0 AND endblock=0")) {
-            warn!("DeleteNullJobmediaRecords: {e}");
-        }
-        "1000 OK DeleteNullJobmediaRecords\n".to_string()
-    } else {
-        debug!("CatReq: unknown: {}", &request[..request.len().min(80)]);
-        "1000 OK\n".to_string()
-    }
+/// The catreq.rs state of a job, created with its context on first use.
+fn catreq_session<'a>(sessions: &'a mut std::collections::HashMap<u32, crate::catreq::CatReqJob>,
+                      catalog: &Option<CatalogHandle>, config: &Option<SharedConfig>, job: &DirJob)
+                      -> &'a mut crate::catreq::CatReqJob {
+    sessions.entry(job.job_id).or_insert_with(|| {
+        let context = match catalog {
+            Some(cat) => crate::catreq::load_context(cat, config.as_ref(), job.job_id, job.start_time,
+                job.resources.as_ref().map(|(_, storage)| storage.as_str())),
+            None => crate::catreq::JobContext { job_id: job.job_id, start_time: job.start_time, catalog_files: true,
+                ..Default::default() },
+        };
+        crate::catreq::CatReqJob::new(context)
+    })
 }
 
+/// A private catalog connection for the batch file insert (jcr->db_batch).
+fn batch_opener(catalog: &Option<CatalogHandle>) -> impl Fn() -> Option<Box<dyn Db + Send>> + '_ {
+    move || catalog.as_ref()?.dedicated().ok().map(|c| Box::new(c) as Box<dyn Db + Send>)
+}
 
-fn extract_field(request: &str, prefix: &str) -> Option<String> {
-    request.split_whitespace()
-        .find(|s| s.starts_with(prefix))
-        .map(|s| s[prefix.len()..].to_string())
+/// Jmsg() of the catalog requests to the job's messages.
+fn post_catreq_messages(bus: &MessageBus, config: Option<&SharedConfig>, job: &DirJob, messages: crate::catreq::Messages) {
+    for (msg_type, text) in messages {
+        crate::console_msg::post_job_message(bus, config, BusMessage::JobMessage {
+            job_id: job.job_id, job_name: job.job_name.clone(), msg_type, text, timestamp: now_unix() });
+    }
 }
 
 /// Generate bootstrap data for a restore from a given backup JobId.

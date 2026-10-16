@@ -7,6 +7,7 @@ mod accept;
 mod acl;
 mod audit;
 mod catalog_worker;
+mod catreq;
 mod command_ast;
 mod console_msg;
 mod command_executor;

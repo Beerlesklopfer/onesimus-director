@@ -82,6 +82,9 @@ pub enum PipeMessage {
     CatReq { job_id: u32, request: String },
     #[serde(rename = "cat_resp")]
     CatResp { response: String },
+    /// SD `UpdCat` attribute record, hex encoded (binary; no answer).
+    #[serde(rename = "upd_cat")]
+    UpdCat { job_id: u32, data: String },
     #[serde(rename = "job_end")]
     JobEnd { job_id: u32, term_code: i32, files: i64, bytes: i64, errors: i32,
              #[serde(default)] vol_session_id: Option<i32>,
@@ -522,9 +525,17 @@ fn sd_catrec_loop(
             Ok(BnetMessage::Data(data)) => {
                 let msg_raw = String::from_utf8_lossy(&data);
                 let msg = msg_raw.trim().to_string();
-                if msg.starts_with("CatReq") {
+                // getmsg.cc BgetDirmsg(): `U`pdCat records go to CatalogUpdate()
+                // without an answer, `C`atReq/Catreq and `B`lastAttr to the
+                // Director, which may answer (an empty answer sends nothing).
+                if data.first() == Some(&b'U') {
+                    let pipe_msg = PipeMessage::UpdCat { job_id, data: hex::encode(&data) };
+                    if let Ok(json) = serde_json::to_string(&pipe_msg) {
+                        let _ = writeln!(to_dir, "{json}");
+                    }
+                } else if matches!(data.first(), Some(b'C' | b'B')) {
                     debug!("Worker {job_id} SD CatReq: {msg}");
-                    let pipe_msg = PipeMessage::CatReq { job_id, request: msg };
+                    let pipe_msg = PipeMessage::CatReq { job_id, request: msg_raw.into_owned() };
                     if let Ok(json) = serde_json::to_string(&pipe_msg) {
                         let _ = writeln!(to_dir, "{json}");
                     }
@@ -536,8 +547,10 @@ fn sd_catrec_loop(
                             debug!("Worker {job_id} CatResp pipe ({n} bytes): {}", buf.trim());
                             match serde_json::from_str::<PipeMessage>(&buf) {
                                 Ok(PipeMessage::CatResp { response }) => {
-                                    debug!("Worker {job_id} → SD: {}", &response[..response.len().min(60)]);
-                                    let _ = sd.send_str(&response);
+                                    debug!("Worker {job_id} → SD: {}", response.chars().take(60).collect::<String>());
+                                    if !response.is_empty() {
+                                        let _ = sd.send_str(&response);
+                                    }
                                 }
                                 other => {
                                     warn!("Worker {job_id}: unexpected pipe msg: {other:?}, sending OK");
