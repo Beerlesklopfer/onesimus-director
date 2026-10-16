@@ -5,6 +5,7 @@ pub mod status;
 pub mod dot;
 pub mod bvfs;
 pub mod job;
+pub mod cancel;
 pub mod list;
 pub mod admin;
 pub mod estimate;

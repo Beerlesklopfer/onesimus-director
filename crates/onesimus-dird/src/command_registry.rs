@@ -125,7 +125,7 @@ pub fn build_registry() -> Vec<CommandDef> {
 
         CommandDef { name: "cancel", aliases: &[], description: "Cancel a running job", args: vec![
             arg_int("jobid", "Job ID to cancel"),
-        ], handler: commands::job::cmd_cancel, dot_command: false },
+        ], handler: commands::cancel::cmd_cancel, dot_command: false },
 
         CommandDef { name: "restore", aliases: &[], description: "Restore files from backup", args: vec![
             arg_resource("client", "Client name", ".clients"),

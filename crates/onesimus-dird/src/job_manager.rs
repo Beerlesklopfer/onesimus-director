@@ -28,6 +28,9 @@ pub struct DirJob {
     observed_status: char,
     worker_exit: Option<i32>,
     pending_end: Option<JobEnd>,
+    /// Client and (write or read) Storage the job uses, for `cancel`
+    /// (C++ jcr->dir_impl->res.client / write_storage).
+    resources: Option<(String, String)>,
 }
 
 struct JobEnd {
@@ -73,6 +76,27 @@ impl DirJobPhase {
             Self::Error => "Error",
         }
     }
+
+    /// Upstream JobStatus code of the phase (lib/jcr.h JS_*): a job whose
+    /// worker has not reached its daemons yet is JS_Created; storage waits
+    /// are JS_WaitMedia/JS_WaitMount, a paused job JS_Blocked.
+    pub fn job_status(&self) -> char {
+        match self {
+            Self::Queued | Self::Starting => 'C',
+            Self::Running | Self::WaitingCatReq | Self::Finishing => 'R',
+            Self::Paused => 'B',
+            Self::Canceling => 'A',
+            Self::WaitingMedia => 'm',
+            Self::WaitingMount => 'M',
+            Self::Completed => 'T',
+            Self::Error => 'f',
+        }
+    }
+
+    /// C++ `jcr->job_started`: the job left the queue and runs.
+    pub fn job_started(&self) -> bool {
+        !matches!(self, Self::Queued | Self::Starting)
+    }
 }
 
 /// Owned snapshot; callers release the manager lock before waiting or querying DB.
@@ -107,7 +131,7 @@ impl JobManager {
             last_files: 0,
             last_bytes: 0,
             completion_error: None, completed_at: None, observed_status: 'C',
-            worker_exit: None, pending_end: None,
+            worker_exit: None, pending_end: None, resources: None,
         });
         debug!("JobManager: added job {job_id} '{job_name}' (total: {})", self.jobs.len());
     }
@@ -148,6 +172,25 @@ impl JobManager {
             .filter(|j| matches!(j.phase, DirJobPhase::Completed | DirJobPhase::Error))
             .map(|j| j.job_id)
             .collect()
+    }
+
+    /// Record the Client and Storage resource names a started job uses.
+    pub fn set_job_resources(&mut self, job_id: u32, client: &str, storage: &str) {
+        if let Some(job) = self.jobs.iter_mut().find(|j| j.job_id == job_id) {
+            job.resources = Some((client.to_string(), storage.to_string()));
+        }
+    }
+
+    /// Client and Storage resource names recorded by [`Self::set_job_resources`].
+    pub fn job_resources(&self, job_id: u32) -> Option<(String, String)> {
+        self.get_job(job_id)?.resources.clone()
+    }
+
+    #[cfg(test)]
+    pub fn set_phase(&mut self, job_id: u32, phase: DirJobPhase) {
+        if let Some(job) = self.jobs.iter_mut().find(|j| j.job_id == job_id) {
+            job.phase = phase;
+        }
     }
 
     pub fn cancel_job(&mut self, job_id: u32) -> bool {
