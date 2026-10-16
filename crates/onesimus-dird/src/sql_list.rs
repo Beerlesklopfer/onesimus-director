@@ -37,15 +37,23 @@ pub fn json_rows(t: &SqlTable) -> Vec<Value> {
 
 /// Text rendering for the human/API-1 console.
 pub fn render(t: &SqlTable, ty: ListType) -> String {
+    render_shown(t, ty, &vec![true; t.rows.len()])
+}
+
+/// Like [`render`], but only rows with `shown[i]` are printed: the
+/// OutputFormatter filters (FilterData) drop rows while ListResult runs, so
+/// "No results to list." and the column widths still count every row.
+pub fn render_shown(t: &SqlTable, ty: ListType, shown: &[bool]) -> String {
     if t.rows.is_empty() {
         return "No results to list.\n".to_string();
     }
+    let rows = || t.rows.iter().zip(shown).filter(|(_, s)| **s).map(|(r, _)| r);
     match ty {
-        ListType::Horz => horz(t),
-        ListType::Vert => vert(t),
+        ListType::Horz => horz(t, rows()),
+        ListType::Vert => vert(t, rows()),
         ListType::Nf | ListType::Raw => {
             let mut out = String::new();
-            for row in &t.rows {
+            for row in rows() {
                 for v in row {
                     out.push(' ');
                     out.push_str(v.as_deref().unwrap_or(""));
@@ -59,8 +67,8 @@ pub fn render(t: &SqlTable, ty: ListType) -> String {
     }
 }
 
+/// lib/edit.cc IsAnInteger: digits only (no sign).
 fn is_integer(s: &str) -> bool {
-    let s = s.strip_prefix('-').unwrap_or(s);
     !s.is_empty() && s.bytes().all(|b| b.is_ascii_digit())
 }
 
@@ -104,7 +112,7 @@ fn dashes(widths: &[usize]) -> String {
     s
 }
 
-fn horz(t: &SqlTable) -> String {
+fn horz<'a>(t: &SqlTable, rows: impl Iterator<Item = &'a Vec<Option<String>>>) -> String {
     let widths = column_widths(t);
     let mut out = dashes(&widths);
     out.push('|');
@@ -113,7 +121,7 @@ fn horz(t: &SqlTable) -> String {
     }
     out.push('\n');
     out.push_str(&dashes(&widths));
-    for row in &t.rows {
+    for row in rows {
         out.push('|');
         for ((col, v), w) in t.columns.iter().zip(row).zip(&widths) {
             let cell = match v {
@@ -132,10 +140,10 @@ fn horz(t: &SqlTable) -> String {
     out
 }
 
-fn vert(t: &SqlTable) -> String {
+fn vert<'a>(t: &SqlTable, rows: impl Iterator<Item = &'a Vec<Option<String>>>) -> String {
     let key_len = t.columns.iter().map(|c| c.name.len()).max().unwrap_or(0);
     let mut out = String::new();
-    for row in &t.rows {
+    for row in rows {
         for (col, v) in t.columns.iter().zip(row) {
             let value = match v {
                 None => String::new(),
@@ -212,6 +220,26 @@ mod tests {
         let rows = json_rows(&table());
         assert_eq!(rows[0]["jobid"], "479");
         assert_eq!(rows[1]["name"], "");
+    }
+
+    #[test]
+    fn filtered_rows_keep_widths() {
+        let out = render_shown(&table(), ListType::Horz, &[false, true]);
+        let lines: Vec<&str> = out.lines().collect();
+        assert_eq!(lines[1], "| jobid | name            | jobbytes    |");
+        assert_eq!(lines[3], "|    12 |                 |           0 |");
+        assert_eq!(lines.len(), 5);
+        let none = render_shown(&table(), ListType::Horz, &[false, false]);
+        assert_eq!(none.lines().count(), 4);
+    }
+
+    #[test]
+    fn negative_numbers_get_no_commas() {
+        let t = SqlTable {
+            columns: vec![SqlColumn { name: "n".into(), numeric: true }],
+            rows: vec![vec![Some("-1234".into())]],
+        };
+        assert_eq!(render(&t, ListType::Vert), " n: -1234\n\n");
     }
 
     #[test]

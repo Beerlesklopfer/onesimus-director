@@ -628,7 +628,7 @@ const JOB_TYPES: &[(&str, char)] = &[
 ];
 
 /// dird_conf.cc joblevels[] (name, level code)
-const JOB_LEVELS: &[(&str, char)] = &[
+pub(crate) const JOB_LEVELS: &[(&str, char)] = &[
     ("Full", 'F'), ("Base", 'B'), ("Incremental", 'I'), ("Differential", 'D'), ("Since", 'S'),
     ("VirtualFull", 'f'), ("Catalog", 'C'), ("InitCatalog", 'V'), ("VolumeToCatalog", 'O'),
     ("DiskToCatalog", 'd'), ("Data", 'A'),
@@ -1190,26 +1190,26 @@ fn print_runscripts(item: &Item, scripts: &[(Script, bool)], inherited: bool, ve
 
 // --- schedule run -------------------------------------------------------------
 
-struct RunSpec {
-    pool: Option<String>,
+pub(crate) struct RunSpec {
+    pub(crate) pool: Option<String>,
     full_pool: Option<String>,
     inc_pool: Option<String>,
     diff_pool: Option<String>,
     next_pool: Option<String>,
-    level: Option<char>,
-    storage: Option<String>,
+    pub(crate) level: Option<char>,
+    pub(crate) storage: Option<String>,
     msgs: Option<String>,
     priority: u32,
     maxrunschedtime: u64,
     accurate: bool,
-    hour: [bool; 24],
-    mday: [bool; 31],
-    wday: [bool; 7],
-    month: [bool; 12],
-    wom: [bool; 5],
-    woy: [bool; 54],
-    last_7days: bool,
-    minute: u32,
+    pub(crate) hour: [bool; 24],
+    pub(crate) mday: [bool; 31],
+    pub(crate) wday: [bool; 7],
+    pub(crate) month: [bool; 12],
+    pub(crate) wom: [bool; 5],
+    pub(crate) woy: [bool; 54],
+    pub(crate) last_7days: bool,
+    pub(crate) minute: u32,
 }
 
 const RUN_KEYWORDS: &[(&str, char, usize)] = &[
@@ -1239,6 +1239,11 @@ fn set_range(bits: &mut [bool], from: usize, to: usize) {
 
 /// run_conf.cc StoreRun (schedule part) + dird_conf.cc PrintConfigRun
 fn run_string(tokens: &[Tok]) -> String {
+    print_run(&parse_run(tokens))
+}
+
+/// run_conf.cc StoreRun: modifiers and the date/time mask of one `Run =`.
+pub(crate) fn parse_run(tokens: &[Tok]) -> RunSpec {
     let words: Vec<(Option<&str>, bool)> = tokens.iter().map(|t| match t {
         Tok::Word(s) | Tok::Quoted(s) => (Some(s.as_str()), false),
         Tok::Eq => (None, true),
@@ -1373,7 +1378,7 @@ fn run_string(tokens: &[Tok]) -> String {
         }
     }
     let _ = (have_mday, have_month);
-    print_run(&r)
+    r
 }
 
 fn print_run(r: &RunSpec) -> String {

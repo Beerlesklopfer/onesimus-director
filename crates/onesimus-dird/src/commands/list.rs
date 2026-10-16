@@ -4,13 +4,14 @@
 //! (cats/postgresql_queries.inc), the same JSON keys (`.api 2`) and the same
 //! table/vertical text rendering (see sql_list.rs).
 
+use chrono::{Datelike, Local, TimeZone, Timelike};
 use serde_json::{json, Map, Value};
 
 use crate::catalog_worker::{CatalogHandle, SqlTable};
 use crate::command_ast::CommandAst;
-use crate::command_executor::ExecContext;
+use crate::command_executor::{ApiMode, ExecContext};
 use crate::command_queue::CommandResult;
-use crate::sql_list::{json_rows, render, ListType};
+use crate::sql_list::{add_commas, json_rows, render_shown, ListType};
 
 pub fn cmd_list(ast: &CommandAst, ctx: &ExecContext) -> CommandResult {
     // C++ ua_output.cc DoListCmd: OpenClientDb() before anything else.
@@ -22,7 +23,7 @@ fn cmd_list_db(ast: &CommandAst, ctx: &ExecContext) -> CommandResult {
     let Some(cat) = &ctx.catalog else {
         return CommandResult::error("Could not open catalog database.\n".to_string());
     };
-    let mut out = ListOut::default();
+    let mut out = ListOut { ctx: Some(ctx), ..Default::default() };
     let ok = do_list(&Args(ast), ctx, cat, ty, &mut out);
     out.finish(ok)
 }
@@ -35,34 +36,122 @@ pub fn cmd_llist(ast: &CommandAst, ctx: &ExecContext) -> CommandResult {
 // Output collection (text + JSON result object), like the OutputFormatter
 // ---------------------------------------------------------------------------
 
+/// Configured resource types the OutputFormatter filters look up (R_JOB, ...).
+#[derive(Clone, Copy, Debug)]
+enum Res {
+    Job,
+    Client,
+    Pool,
+    FileSet,
+    Storage,
+}
+
+/// OutputFormatter filter tuples (lib/output_formatter.h) on a row column,
+/// evaluated by ua_output.cc filterit(). The ACL tuple (SetAclFilter) is
+/// added with the console ACLs (compatibility log C-026).
+#[derive(Clone, Copy, Debug)]
+enum Filter {
+    /// OF_FILTER_RESOURCE (`current`): the resource is configured
+    Resource(usize, Res),
+    /// OF_FILTER_ENABLED (`enabled`)
+    Enabled(usize, Res),
+    /// OF_FILTER_DISABLED (`disabled`)
+    Disabled(usize, Res),
+}
+
 #[derive(Default)]
-struct ListOut {
+struct ListOut<'c> {
+    ctx: Option<&'c ExecContext>,
     text: String,
     json: Map<String, Value>,
     errors: String,
     /// limit/offset filter → "meta": {"range": {...}} (JsonFinalizeResult)
     range: Option<(u64, Option<u64>)>,
+    /// Row filters; any filter (or a range) makes HasFilters() true.
+    filters: Vec<Filter>,
+    /// get_num_rows_filtered()
+    filtered: u64,
+    /// The command ended in a dialog (StartPrompt/DoPrompt) or a stand-in for one.
+    dialog: Option<CommandResult>,
 }
 
-impl ListOut {
+impl ListOut<'_> {
     fn error(&mut self, msg: impl Into<String>) {
         self.errors.push_str(&msg.into());
     }
 
+    /// FilterData() for every row: which rows are shown. Suppressed rows
+    /// are counted for meta.range.filtered.
+    fn shown(&mut self, t: &SqlTable) -> Vec<bool> {
+        if self.filters.is_empty() {
+            return vec![true; t.rows.len()];
+        }
+        let config = self.ctx.and_then(|ctx| ctx.config.as_ref()).and_then(|c| c.read().ok()).map(|c| c.clone());
+        let shown: Vec<bool> = t.rows.iter()
+            .map(|row| self.filters.iter().all(|f| self.keep(config.as_ref(), *f, row))).collect();
+        self.filtered += shown.iter().filter(|s| !**s).count() as u64;
+        shown
+    }
+
+    /// filterit(): false = OF_FILTER_STATE_SUPPRESS. An empty column value is
+    /// OF_FILTER_STATE_UNKNOWN, which only matters for ACL tuples.
+    fn keep(&self, config: Option<&crate::director_config::DirectorConfig>, filter: Filter, row: &[Option<String>]) -> bool {
+        let (Filter::Resource(column, res) | Filter::Enabled(column, res) | Filter::Disabled(column, res)) = filter;
+        // A column past the row (enabled/disabled on the one-column count
+        // result) is read out of bounds in C++; observed: suppressed.
+        let Some(value) = row.get(column) else { return false };
+        let Some(name) = value.as_deref().filter(|v| !v.is_empty()) else { return true };
+        let (Some(ctx), Some(config)) = (self.ctx, config) else { return true };
+        match filter {
+            // my_config->GetResWithName(): configuration only, no ACL
+            Filter::Resource(..) => match res {
+                Res::Job => config.find_job(name).is_some(),
+                Res::Client => config.find_client(name).is_some(),
+                Res::Pool => config.find_pool(name).is_some(),
+                Res::FileSet => config.find_fileset(name).is_some(),
+                Res::Storage => config.find_storage(name).is_some(),
+            },
+            // ua->Get<Res>ResWithName(): with the console ACL
+            Filter::Enabled(..) | Filter::Disabled(..) => {
+                let want = matches!(filter, Filter::Enabled(..));
+                use crate::acl::{access, Kind};
+                match res {
+                    Res::Job => config.find_job(name).is_some_and(|j| j.enabled == want) && access(ctx, Kind::Job, name),
+                    Res::Client => config.find_client(name).is_some_and(|c| c.enabled == want) && access(ctx, Kind::Client, name),
+                    Res::Storage => config.find_storage(name).is_some_and(|s| s.enabled == want) && access(ctx, Kind::Storage, name),
+                    Res::Pool | Res::FileSet => true,
+                }
+            }
+        }
+    }
+
     /// ArrayStart(key) + ListResult + ArrayEnd(key)
     fn array(&mut self, key: &str, t: &SqlTable, ty: ListType) {
-        self.text.push_str(&render(t, ty));
-        self.json.insert(key.to_lowercase(), Value::Array(json_rows(t)));
+        let shown = self.shown(t);
+        self.text.push_str(&render_shown(t, ty, &shown));
+        self.json.insert(key.to_lowercase(), Value::Array(shown_json(t, &shown)));
     }
 
     fn finish(mut self, ok: bool) -> CommandResult {
-        if let Some((limit, offset)) = self.range {
-            let mut range = Map::new();
-            range.insert("limit".into(), json!(limit));
-            if let Some(o) = offset {
-                range.insert("offset".into(), json!(o));
+        if let Some(mut dialog) = self.dialog.take() {
+            if self.ctx.is_some_and(|ctx| ctx.api_mode == ApiMode::Json) {
+                dialog.error_message.insert_str(0, &self.errors);
+            } else {
+                // ErrorMsg lines come between the output so far and the prompt
+                self.text.push_str(&self.errors);
             }
-            range.insert("filtered".into(), json!(0));
+            dialog.text_output.insert_str(0, &self.text);
+            return dialog;
+        }
+        if ok && self.errors.is_empty() && (self.range.is_some() || !self.filters.is_empty()) {
+            let mut range = Map::new();
+            if let Some((limit, offset)) = self.range {
+                range.insert("limit".into(), json!(limit));
+                if let Some(o) = offset {
+                    range.insert("offset".into(), json!(o));
+                }
+            }
+            range.insert("filtered".into(), json!(self.filtered));
             self.json.insert("meta".into(), json!({ "range": range }));
         }
         if ok && self.errors.is_empty() {
@@ -73,6 +162,10 @@ impl ListOut {
             r.with_json(Value::Object(self.json))
         }
     }
+}
+
+fn shown_json(t: &SqlTable, shown: &[bool]) -> Vec<Value> {
+    json_rows(t).into_iter().zip(shown).filter(|(_, s)| **s).map(|(v, _)| v).collect()
 }
 
 // ---------------------------------------------------------------------------
@@ -98,6 +191,10 @@ impl<'a> Args<'a> {
         self.0.arguments.iter().skip(1).any(|a| a.key.eq_ignore_ascii_case(name))
             || self.is(name)
     }
+    /// FindArg(ua, name) > 0: present after the list keyword
+    fn has_after_keyword(&self, name: &str) -> bool {
+        self.0.arguments.iter().skip(1).any(|a| a.key.eq_ignore_ascii_case(name))
+    }
     /// GetArgValue / FindArgWithValue
     fn value(&self, name: &str) -> Option<&'a str> {
         self.0.arguments.iter()
@@ -108,6 +205,49 @@ impl<'a> Args<'a> {
 
 fn esc(s: &str) -> String {
     s.replace('\'', "''")
+}
+
+/// lib/edit.cc str_to_int64: optional blanks and sign, then leading digits.
+fn str_to_int64(s: &str) -> i64 {
+    let s = s.trim_start();
+    let (neg, digits) = match s.as_bytes().first() {
+        Some(b'-') => (true, &s[1..]),
+        Some(b'+') => (false, &s[1..]),
+        _ => (false, s),
+    };
+    let value = digits.bytes().take_while(u8::is_ascii_digit)
+        .fold(0i64, |acc, b| acc.wrapping_mul(10).wrapping_add((b - b'0') as i64));
+    if neg { -value } else { value }
+}
+
+/// lib/edit.cc Is_a_number_list: "1,2,3" (a trailing comma is accepted).
+fn is_a_number_list(s: &str) -> bool {
+    let mut previous_digit = false;
+    let mut digit_seen = false;
+    for b in s.bytes() {
+        if b.is_ascii_digit() {
+            previous_digit = true;
+            digit_seen = true;
+        } else if b == b',' && previous_digit {
+            previous_digit = false;
+        } else {
+            return false;
+        }
+    }
+    digit_seen
+}
+
+/// lib/edit.cc edit_uint64_with_suffix: "1.234 K", "0 ".
+fn with_suffix(value: u64) -> String {
+    const SUFFIX: &[&str] = &["", "K", "M", "G", "T", "P", "E", "Z", "Y", "FIX ME"];
+    let mut mbuf = add_commas(&value.to_string());
+    let commas = mbuf.matches(',').count();
+    if let Some(first) = mbuf.find(',') {
+        let rest: String = mbuf[first + 1..].split(',').next().unwrap_or("").to_string();
+        mbuf = format!("{}.{}", &mbuf[..first], rest);
+        mbuf.truncate(5);
+    }
+    format!("{mbuf} {}", SUFFIX[commas.min(SUFFIX.len() - 1)])
 }
 
 fn query(cat: &CatalogHandle, sql: &str, out: &mut ListOut) -> Option<SqlTable> {
@@ -138,7 +278,7 @@ fn jobid_from_cmdline(args: &Args, cat: &CatalogHandle) -> i64 {
     let sql = if let Some(ujobid) = args.value("ujobid") {
         format!("SELECT JobId FROM Job WHERE Job='{}'", esc(ujobid))
     } else if let Some(jobid) = args.value("jobid") {
-        let id: i64 = jobid.trim().parse().unwrap_or(0);
+        let id = str_to_int64(jobid);
         format!("SELECT JobId FROM Job WHERE JobId={id}")
     } else {
         return 0;
@@ -177,7 +317,7 @@ fn do_list(args: &Args, ctx: &ExecContext, cat: &CatalogHandle, ty: ListType, ou
         return false;
     };
 
-    let opts = match ListOptions::parse(args) {
+    let opts = match ListOptions::parse(args, out) {
         Ok(o) => o,
         Err(e) => {
             out.error(e);
@@ -197,8 +337,9 @@ fn do_list(args: &Args, ctx: &ExecContext, cat: &CatalogHandle, ty: ListType, ou
         out.array("jobs", &t, ListType::Horz);
         let Some(t) = query(cat, "SELECT COUNT(*) AS Jobs, SUM(JobFiles) AS Files, SUM(JobBytes) AS Bytes \
              FROM Job WHERE Type IN ('B','A','a','C')", out) else { return false };
-        out.text.push_str(&render(&t, ListType::Horz));
-        let totals = json_rows(&t).into_iter().next().unwrap_or_else(|| json!({}));
+        let shown = out.shown(&t);
+        out.text.push_str(&render_shown(&t, ListType::Horz, &shown));
+        let totals = shown_json(&t, &shown).into_iter().next().unwrap_or_else(|| json!({}));
         out.json.insert("jobtotals".into(), totals);
         return true;
     }
@@ -219,37 +360,45 @@ fn do_list(args: &Args, ctx: &ExecContext, cat: &CatalogHandle, ty: ListType, ou
                  WHERE BaseFiles.JobId={jobid} AND BaseFiles.BaseJobId = File.JobId \
                  AND BaseFiles.FileId = File.FileId AND Path.PathId=File.PathId"), "files")
         };
-        let Some(mut t) = query(cat, &sql, out) else { return false };
-        // No SQL range here: the C++ OutputFormatter applies limit/offset per row
-        if let Some((limit, offset)) = out.range {
-            let skip = offset.unwrap_or(0) as usize;
-            t.rows = t.rows.into_iter().skip(skip).take(limit as usize).collect();
-        }
-        // NF_LIST: only rows, no "No results" decoration for big queries
+        let Some(t) = query(cat, &sql, out) else { return false };
+        // BigSqlQuery: limit/offset only reach meta.range (filterit ignores
+        // them), and the per-row ListResult prints nothing for no rows.
+        let shown = out.shown(&t);
         if !t.rows.is_empty() {
-            out.text.push_str(&render(&t, ListType::Nf));
+            out.text.push_str(&render_shown(&t, ListType::Nf, &shown));
         }
-        out.json.insert(key.into(), Value::Array(json_rows(&t)));
+        out.json.insert(key.into(), Value::Array(shown_json(&t, &shown)));
         return true;
     }
 
-    if args.is("fileset") || args.is("filesets") {
-        let select = "SELECT DISTINCT FileSet.FileSetId AS FileSetId, FileSet, MD5, CreateTime, FileSetText";
-        let sql = if args.is("fileset") {
-            let filesetid: i64 = args.value("filesetid").and_then(|v| v.parse().ok()).unwrap_or(0);
-            let jobid = jobid_from_cmdline(args, cat);
-            if jobid > 0 {
-                format!("{select} FROM Job, FileSet WHERE Job.FileSetId = FileSet.FileSetId \
-                     AND Job.JobId='{jobid}' {range}")
-            } else if filesetid > 0 {
-                format!("SELECT FileSetId, FileSet, MD5, CreateTime, FileSetText FROM FileSet WHERE FileSetId={filesetid} ")
-            } else {
-                out.error("jobid not found in db, access to job or client denied by ACL, or client not found in db or missing filesetid\n");
-                return false;
+    if args.is("fileset") {
+        let filesetid = args.value("filesetid").map(str_to_int64).unwrap_or(0);
+        let jobid = jobid_from_cmdline(args, cat);
+        if jobid > 0 || filesetid > 0 {
+            if opts.current {
+                out.filters.push(Filter::Resource(1, Res::FileSet));
             }
-        } else {
-            format!("{select} FROM FileSet ORDER BY FileSetId ASC {range}")
-        };
+            let sql = if jobid != 0 {
+                format!("SELECT DISTINCT FileSet.FileSetId AS FileSetId, FileSet, MD5, CreateTime, FileSetText \
+                     FROM Job, FileSet WHERE Job.FileSetId = FileSet.FileSetId \
+                     AND Job.JobId='{}' {range}", jobid as u32)
+            } else {
+                format!("SELECT FileSetId, FileSet, MD5, CreateTime, FileSetText FROM FileSet WHERE FileSetId={filesetid} ")
+            };
+            let Some(t) = query(cat, &sql, out) else { return false };
+            out.array("filesets", &t, ty);
+            return true;
+        }
+        out.error("jobid not found in db, access to job or client denied by ACL, or client not found in db or missing filesetid\n");
+        return false;
+    }
+
+    if args.is("filesets") {
+        if opts.current {
+            out.filters.push(Filter::Resource(1, Res::FileSet));
+        }
+        let sql = format!("SELECT DISTINCT FileSet.FileSetId AS FileSetId, FileSet, MD5, CreateTime, FileSetText \
+             FROM FileSet ORDER BY FileSetId ASC {range}");
         let Some(t) = query(cat, &sql, out) else { return false };
         out.array("filesets", &t, ty);
         return true;
@@ -311,38 +460,42 @@ fn do_list(args: &Args, ctx: &ExecContext, cat: &CatalogHandle, ty: ListType, ou
             format!("SELECT LogId, JobName, ClientName, Time, LogText FROM ({inner}) AS sub ORDER BY LogId ASC ")
         };
         let Some(t) = query(cat, &sql, out) else { return false };
-        // Text mode shows only the log text (other columns hidden), JSON gets all
+        let shown = out.shown(&t);
+        // Outside JSON mode LogId, JobName, ClientName and Time are hidden columns
         let text_only = SqlTable {
             columns: t.columns.iter().skip(4).cloned().collect(),
             rows: t.rows.iter().map(|r| r.iter().skip(4).cloned().collect()).collect(),
         };
-        out.text.push_str(&render(&text_only, if ty == ListType::Vert { ListType::Vert } else { ListType::Raw }));
-        out.json.insert("log".into(), Value::Array(json_rows(&t)));
+        out.text.push_str(&render_shown(&text_only, if ty == ListType::Vert { ListType::Vert } else { ListType::Raw }, &shown));
+        out.json.insert("log".into(), Value::Array(shown_json(&t, &shown)));
         return true;
     }
 
-    if args.is("pool") || args.is("pools") || (args.is("poolid") && args.keyword_value().is_some()) {
-        let filter = if args.is("poolid") {
-            let id: i64 = args.keyword_value().and_then(|v| v.parse().ok()).unwrap_or(0);
-            format!("WHERE poolid={id}")
-        } else if let Some(name) = args.keyword_value() {
-            format!("WHERE Name='{}'", esc(name))
-        } else {
-            "ORDER BY PoolId".to_string()
-        };
-        let select = if ty == ListType::Vert {
-            "SELECT PoolId,Name,NumVols,MaxVols,UseOnce,UseCatalog,AcceptAnyVolume,VolRetention,\
-             VolUseDuration,MaxVolJobs,MaxVolBytes,AutoPrune,Recycle,PoolType,LabelFormat,Enabled,\
-             ScratchPoolId,RecyclePoolId,LabelType "
-        } else {
-            "SELECT PoolId,Name,NumVols,MaxVols,PoolType,LabelFormat "
-        };
-        let Some(t) = query(cat, &format!("{select} FROM Pool {filter}"), out) else { return false };
+    if args.is("pool") || args.is("pools") {
+        return list_pools(args, ctx, cat, ty, &opts, out);
+    }
+
+    if args.is("poolid") && args.keyword_value().is_some() {
+        if opts.current {
+            out.filters.push(Filter::Resource(1, Res::Pool));
+        }
+        let id = args.keyword_value().map(str_to_int64).unwrap_or(0);
+        let filter = if id > 0 { format!("WHERE poolid={id}") } else { "ORDER BY PoolId".to_string() };
+        let Some(t) = query(cat, &format!("{} FROM Pool {filter}", pool_select(ty)), out) else { return false };
         out.array("pools", &t, ty);
         return true;
     }
 
     if args.is("clients") || (args.is("client") && args.keyword_value().is_some()) {
+        if opts.current {
+            out.filters.push(Filter::Resource(1, Res::Client));
+        }
+        if opts.enabled {
+            out.filters.push(Filter::Enabled(1, Res::Client));
+        }
+        if opts.disabled {
+            out.filters.push(Filter::Disabled(1, Res::Client));
+        }
         let filter = match args.keyword_value() {
             Some(name) if args.is("client") => format!("WHERE Name = '{}'", esc(name)),
             _ => String::new(),
@@ -358,48 +511,96 @@ fn do_list(args: &Args, ctx: &ExecContext, cat: &CatalogHandle, ty: ListType, ou
     }
 
     if args.is("storages") {
+        if opts.current {
+            out.filters.push(Filter::Resource(1, Res::Storage));
+        }
+        if opts.enabled {
+            out.filters.push(Filter::Enabled(1, Res::Storage));
+        }
+        if opts.disabled {
+            out.filters.push(Filter::Disabled(1, Res::Storage));
+        }
         let Some(t) = query(cat, "SELECT * FROM Storage", out) else { return false };
         out.array("storages", &t, ty);
         return true;
     }
 
     if args.is("media") || args.is("volume") || args.is("volumes") {
-        return list_media(args, cat, ty, &range, out);
+        return list_media(args, ctx, cat, ty, &opts, &range, out);
     }
 
     if (args.is("mediaid") || args.is("volumeid")) && args.keyword_value().is_some() {
-        let id: i64 = args.keyword_value().and_then(|v| v.parse().ok()).unwrap_or(0);
-        let sql = format!("{} WHERE MediaId={id} ORDER BY MediaId {range}", volumes_select(ty));
+        let id = args.keyword_value().map(str_to_int64).unwrap_or(0);
+        // ListMediaRecords in count mode only knows VolumeName and PoolId
+        let sql = if opts.count {
+            VOLUMES_COUNT.to_string()
+        } else if id > 0 {
+            format!("{} WHERE MediaId={id} ORDER BY MediaId {range}", volumes_select(ty))
+        } else {
+            format!("{} ORDER BY MediaId {range}", volumes_select(ty))
+        };
         let Some(t) = query(cat, &sql, out) else { return false };
-        out.text.push_str(&render(&t, ty));
-        out.json.insert("volume".into(), json_rows(&t).into_iter().next().unwrap_or_else(|| json!({})));
+        object(out, "volume", &t, ty);
         return true;
+    }
+
+    if args.is("nextvol") || args.is("nextvolume") {
+        return list_nextvol(args, ctx, cat, out);
     }
 
     if args.is("copies") {
-        let jobids = args.value("jobid");
-        if let Some(ids) = jobids {
-            if !ids.split(',').all(|i| !i.is_empty() && i.bytes().all(|b| b.is_ascii_digit())) {
-                out.error(format!("Unknown list keyword: {}\n", args.keyword().unwrap_or("")));
-                return false;
+        match args.value("jobid") {
+            Some(ids) if !is_a_number_list(ids) => {}
+            jobids => {
+                let filter = jobids.filter(|ids| !ids.is_empty())
+                    .map(|ids| format!(" AND (Job.PriorJobId IN ({ids}) OR Job.JobId IN ({ids})) ")).unwrap_or_default();
+                let sql = format!("SELECT DISTINCT Job.PriorJobId AS JobId, Job.Job, Job.JobId AS CopyJobId, Media.MediaType \
+                     FROM Job JOIN JobMedia USING (JobId) JOIN Media USING (MediaId) \
+                     WHERE Job.Type = 'c' {filter} ORDER BY Job.PriorJobId DESC {range} ");
+                let Some(t) = query(cat, &sql, out) else { return false };
+                if !t.rows.is_empty() {
+                    out.text.push_str(if jobids.is_some() { "These JobIds have copies as follows:\n" }
+                                      else { "The catalog contains copies as follows:\n" });
+                    out.array("copies", &t, ty);
+                }
+                return true;
             }
         }
-        let filter = jobids.map(|ids| format!(" AND (Job.PriorJobId IN ({ids}) OR Job.JobId IN ({ids})) ")).unwrap_or_default();
-        let sql = format!("SELECT DISTINCT Job.PriorJobId AS JobId, Job.Job, Job.JobId AS CopyJobId, Media.MediaType \
-             FROM Job JOIN JobMedia USING (JobId) JOIN Media USING (MediaId) \
-             WHERE Job.Type = 'c' {filter} ORDER BY Job.PriorJobId DESC {range} ");
-        let Some(t) = query(cat, &sql, out) else { return false };
-        if !t.rows.is_empty() {
-            out.text.push_str(if jobids.is_some() { "These JobIds have copies as follows:\n" }
-                              else { "The catalog contains copies as follows:\n" });
-            out.array("copies", &t, ty);
-        }
-        return true;
     }
 
     // C++ falls through to "Unknown list keyword" when the backups arguments are invalid
-    if args.is("backups") && list_backups(args, ctx, cat, ty, &range, out) {
-        return true;
+    if args.is("backups") {
+        if let Some(sql) = list_backups_sql(args, ctx, cat, ty, &range, out) {
+            match ty {
+                ListType::Vert => {
+                    if opts.current {
+                        out.filters.push(Filter::Resource(2, Res::Job));
+                        out.filters.push(Filter::Resource(22, Res::Pool));
+                    }
+                    if opts.enabled {
+                        out.filters.push(Filter::Enabled(2, Res::Job));
+                    }
+                    if opts.disabled {
+                        out.filters.push(Filter::Disabled(2, Res::Job));
+                    }
+                }
+                _ => {
+                    if opts.current {
+                        out.filters.push(Filter::Resource(1, Res::Job));
+                    }
+                    if opts.enabled {
+                        out.filters.push(Filter::Enabled(1, Res::Job));
+                    }
+                    if opts.disabled {
+                        out.filters.push(Filter::Disabled(1, Res::Job));
+                    }
+                }
+            }
+            // ListSqlQuery(verbose=false): a failing query prints nothing
+            let Ok(t) = cat.query_rows(&sql) else { return false };
+            out.array("backups", &t, ty);
+            return true;
+        }
     }
 
     if args.is("jobstatistics") || args.is("jobstats") {
@@ -419,6 +620,14 @@ fn do_list(args: &Args, ctx: &ExecContext, cat: &CatalogHandle, ty: ListType, ou
     false
 }
 
+/// ObjectStart(key) + ListResult + ObjectEnd(key): the row object(s) inside
+/// a JSON object instead of an array.
+fn object(out: &mut ListOut, key: &str, t: &SqlTable, ty: ListType) {
+    let shown = out.shown(t);
+    out.text.push_str(&render_shown(t, ty, &shown));
+    out.json.insert(key.into(), shown_json(t, &shown).into_iter().next().unwrap_or_else(|| json!({})));
+}
+
 // ---------------------------------------------------------------------------
 // list jobs
 // ---------------------------------------------------------------------------
@@ -427,44 +636,69 @@ fn do_list(args: &Args, ctx: &ExecContext, cat: &CatalogHandle, ty: ListType, ou
 struct ListOptions {
     count: bool,
     last: bool,
+    current: bool,
+    enabled: bool,
+    disabled: bool,
     jobstatus: Vec<char>,
     joblevel: Vec<char>,
     jobtype: Vec<char>,
 }
 
+/// Single-character codes accepted as given ('A' <= c <= 'z', ua_select.cc).
+fn status_char(s: &str) -> Option<char> {
+    (s.len() == 1 && (b'A'..=b'z').contains(&s.as_bytes()[0])).then(|| s.as_bytes()[0] as char)
+}
+
 impl ListOptions {
-    fn parse(args: &Args) -> Result<Self, String> {
-        let mut o = ListOptions { count: args.has("count"), last: args.has("last"), ..Default::default() };
+    /// ListCmdOptions::parse (ua_output.cc) with GetUserJobStatusSelection,
+    /// GetUserJobLevelSelection and GetUserJobTypeListSelection (ua_select.cc).
+    fn parse(args: &Args, out: &mut ListOut) -> Result<Self, String> {
+        let mut o = ListOptions {
+            current: args.has("current"), enabled: args.has("enabled"), disabled: args.has("disabled"),
+            count: args.has("count"), last: args.has("last"), ..Default::default()
+        };
         if let Some(v) = args.value("jobstatus") {
+            if v.is_empty() {
+                return Err("invalid jobstatus parameter\n".into());
+            }
             for s in v.split(',') {
-                let c = match s.to_ascii_lowercase().as_str() {
-                    _ if s.len() == 1 && s.as_bytes()[0].is_ascii_alphabetic() => s.as_bytes()[0] as char,
-                    "terminated" => 'T',
-                    "warnings" => 'W',
-                    "canceled" => 'A',
-                    "running" => 'R',
-                    "error" => 'E',
-                    "fatal" => 'f',
-                    _ => return Err("invalid jobstatus parameter\n".into()),
+                let c = match status_char(s) {
+                    Some(c) => c,
+                    None => match s.to_ascii_lowercase().as_str() {
+                        "terminated" => 'T',
+                        "warnings" => 'W',
+                        "canceled" => 'A',
+                        "running" => 'R',
+                        "error" => 'E',
+                        "fatal" => 'f',
+                        _ => return Err("invalid jobstatus parameter\n".into()),
+                    },
                 };
                 o.jobstatus.push(c);
             }
         }
         if let Some(v) = args.value("joblevel").or_else(|| args.value("level")) {
             for s in v.split(',') {
-                if s.len() == 1 {
-                    o.joblevel.push(s.as_bytes()[0] as char);
-                } else {
-                    let lv = LEVELS.iter().find(|(n, _)| n.eq_ignore_ascii_case(s))
-                        .ok_or_else(|| "invalid joblevel parameter\n".to_string())?;
-                    o.joblevel.push(lv.1);
-                }
+                let c = match status_char(s) {
+                    Some(c) => c,
+                    None => match s.to_ascii_lowercase().as_str() {
+                        "full" => 'F',
+                        "differential" => 'D',
+                        "incremental" => 'I',
+                        _ => return Err("invalid joblevel parameter\n".into()),
+                    },
+                };
+                o.joblevel.push(c);
             }
         }
         if let Some(v) = args.value("jobtype") {
             for s in v.split(',') {
-                let t = TYPES.iter().find(|(n, c)| n.eq_ignore_ascii_case(s) || (s.len() == 1 && s.starts_with(*c)))
-                    .ok_or_else(|| "invalid jobtype parameter\n".to_string())?;
+                // GetParsedJobType: one character is the code, else the exact (case-sensitive) name
+                let t = TYPES.iter().find(|(n, c)| if s.len() == 1 { s.starts_with(*c) } else { *n == s });
+                let Some(t) = t else {
+                    out.text.push_str(&format!("Illegal jobtype {s}\n")); // WarningMsg
+                    return Err("invalid jobtype parameter\n".into());
+                };
                 o.jobtype.push(t.1);
             }
         }
@@ -546,39 +780,76 @@ ORDER BY StartTime{order_range};
     }
 }
 
+/// `days=`/`hours=` of ListJobs: `now - secs * n` computed in C `int`
+/// (wraps for large values), 0 = no time selection.
+fn schedtime(args: &Args, now: i64) -> i64 {
+    let mut schedtime = 0;
+    if let Some(v) = args.value("days") {
+        schedtime = now - 86400i32.wrapping_mul(str_to_int64(v) as i32) as i64;
+    }
+    if let Some(v) = args.value("hours") {
+        schedtime = now - 3600i32.wrapping_mul(str_to_int64(v) as i32) as i64;
+    }
+    schedtime
+}
+
 fn list_jobs(args: &Args, cat: &CatalogHandle, ty: ListType, opts: &ListOptions, out: &mut ListOut) -> bool {
     if args.is("jobs") && args.keyword_value().is_some() {
         out.error("'list jobs' does not allow an jobs parameter\n");
         return false;
     }
 
-    let mut selection = String::new();
-    if let Some(name) = args.value("jobname").or_else(|| args.value("job")) {
-        selection.push_str(&format!("AND Job.Name = '{}' ", esc(name)));
+    let mut name = None;
+    if let Some(n) = args.value("jobname").or_else(|| args.value("job")) {
+        name = Some(n);
     } else if args.is("job") || args.is("jobname") {
         out.error(format!("Missing {} parameter\n", args.keyword().unwrap_or("")));
         return false;
     }
 
     let jobid = jobid_from_cmdline(args, cat);
-    if jobid > 0 {
-        selection.insert_str(0, &format!("AND Job.JobId={jobid} "));
-    } else if jobid < 0 {
+    if jobid < 0 {
         // Unknown jobid or no permission: empty object, not an error (C++)
         out.json.insert("jobs".into(), json!({}));
         return true;
-    } else if args.is("jobid") || args.is("ujobid") {
+    } else if jobid == 0 && (args.is("jobid") || args.is("ujobid")) {
         out.error(format!("Missing {} parameter\n", args.keyword().unwrap_or("")));
         return false;
     }
 
-    let since = args.value("hours").and_then(|h| h.parse::<i64>().ok()).map(|h| h * 3600)
-        .or_else(|| args.value("days").and_then(|d| d.parse::<i64>().ok()).map(|d| d * 86400));
+    let since = schedtime(args, chrono::Utc::now().timestamp());
 
     let client = match client_from_db(args, cat, out) {
         Ok(c) => c,
         Err(()) => return false,
     };
+
+    // ListJobs: filter tuples on the job/client (pool, fileset) columns
+    let (job_col, client_col) = if ty == ListType::Vert { (2, 7) } else { (1, 2) };
+    if !opts.count && opts.current {
+        out.filters.push(Filter::Resource(job_col, Res::Job));
+        out.filters.push(Filter::Resource(client_col, Res::Client));
+        if ty == ListType::Vert {
+            out.filters.push(Filter::Resource(22, Res::Pool));
+            out.filters.push(Filter::Resource(25, Res::FileSet));
+        }
+    }
+    // also on the one-column count result (see ListOut::keep)
+    if opts.enabled {
+        out.filters.push(Filter::Enabled(job_col, Res::Job));
+    }
+    if opts.disabled {
+        out.filters.push(Filter::Disabled(job_col, Res::Job));
+    }
+
+    // BareosDb::ListJobRecords selection
+    let mut selection = String::new();
+    if jobid > 0 {
+        selection.push_str(&format!("AND Job.JobId={jobid} "));
+    }
+    if let Some(n) = name {
+        selection.push_str(&format!("AND Job.Name = '{}' ", esc(n)));
+    }
     if let Some(c) = client {
         selection.push_str(&format!("AND Client.Name = '{}' ", esc(c)));
     }
@@ -597,8 +868,8 @@ fn list_jobs(args: &Args, cat: &CatalogHandle, ty: ListType, opts: &ListOptions,
     if let Some(p) = args.value("pool") {
         selection.push_str(&format!("AND Job.poolid = (SELECT poolid FROM pool WHERE name = '{}' LIMIT 1) ", esc(p)));
     }
-    if let Some(secs) = since {
-        let t = chrono::Local::now() - chrono::Duration::seconds(secs);
+    if since != 0 {
+        let t = Local.timestamp_opt(since, 0).single().unwrap_or_else(Local::now);
         selection.push_str(&format!("AND Job.SchedTime > '{}' ", t.format("%Y-%m-%d %H:%M:%S")));
     }
 
@@ -615,7 +886,9 @@ WHERE Job.JobId > 0
 {range};
 ")
     } else {
-        list_jobs_sql(ty == ListType::Vert, opts.last, &selection, &range)
+        // "reverse": ORDER BY StartTime DESC
+        let order_range = if args.has("reverse") { format!(" DESC{range}") } else { range };
+        list_jobs_sql(ty == ListType::Vert, opts.last, &selection, &order_range)
     };
     let Some(t) = query(cat, &sql, out) else { return false };
     out.array("jobs", &t, ty);
@@ -626,30 +899,35 @@ WHERE Job.JobId > 0
 // list backups
 // ---------------------------------------------------------------------------
 
-fn list_backups(args: &Args, ctx: &ExecContext, cat: &CatalogHandle, ty: ListType, range: &str, out: &mut ListOut) -> bool {
+/// ParseListBackupsCmd(): the list_jobs query, None when an argument is
+/// invalid (the caller then reports "Unknown list keyword").
+fn list_backups_sql(args: &Args, ctx: &ExecContext, cat: &CatalogHandle, ty: ListType, range: &str, out: &mut ListOut) -> Option<String> {
     let client = match client_from_db(args, cat, out) {
         Ok(Some(c)) => c,
         Ok(None) => {
             out.error("missing parameter: client\n");
-            return false;
+            return None;
         }
-        Err(()) => return false,
+        Err(()) => return None,
     };
     let mut selection = format!("AND Job.Type IN('B', 'A', 'a') AND Client.Name='{}' ", esc(client));
 
-    // jobstatus= (default: terminated + warnings)
+    // parse_jobstatus_selection_param (default: terminated + warnings);
+    // unknown names are skipped
     let mut status = Vec::new();
     if let Some(v) = args.value("jobstatus") {
         for s in v.split(',') {
-            let c = match s.to_ascii_lowercase().as_str() {
-                _ if s.len() == 1 && s.as_bytes()[0].is_ascii_alphabetic() => s.as_bytes()[0] as char,
-                "terminated" => 'T',
-                "warnings" => 'W',
-                "canceled" => 'A',
-                "running" => 'R',
-                "error" => 'E',
-                "fatal" => 'f',
-                _ => continue,
+            let c = match status_char(s) {
+                Some(c) => c,
+                None => match s.to_ascii_lowercase().as_str() {
+                    "terminated" => 'T',
+                    "warnings" => 'W',
+                    "canceled" => 'A',
+                    "running" => 'R',
+                    "error" => 'E',
+                    "fatal" => 'f',
+                    _ => continue,
+                },
             };
             status.push(c);
         }
@@ -660,24 +938,36 @@ fn list_backups(args: &Args, ctx: &ExecContext, cat: &CatalogHandle, ty: ListTyp
         selection.push_str(&format!(" AND JobStatus IN ({})", sql_char_list(&status)));
     }
 
-    // level= (prefix match on backup levels)
+    // parse_level_selection_param: prefix match on the backup levels; every
+    // argument counts, matched or not, which can yield invalid SQL like C++
     if let Some(v) = args.value("level") {
-        let mut levels = Vec::new();
+        let mut temp = String::new();
+        let mut cnt = 0;
         for s in v.split(',') {
             for (name, code) in LEVELS.iter().take(6) {
-                if name.to_ascii_lowercase().starts_with(&s.to_ascii_lowercase()) {
-                    levels.push(*code);
+                if name.len() >= s.len() && name[..s.len()].eq_ignore_ascii_case(s) {
+                    if cnt == 0 {
+                        temp.push_str(&format!(" AND Level IN ('{code}'"));
+                    } else {
+                        temp.push_str(&format!(",'{code}'"));
+                    }
                 }
             }
+            cnt += 1;
         }
-        if !levels.is_empty() {
-            selection.push_str(&format!(" AND Level IN ({})", sql_char_list(&levels)));
+        if cnt > 0 {
+            temp.push(')');
         }
+        selection.push_str(&temp);
     }
 
-    // fileset= / any: restrict to configured FileSets (listall)
+    // parse_fileset_selection_param(listall = true)
     match args.value("fileset") {
         Some(fs) if !fs.eq_ignore_ascii_case("any") => {
+            if !crate::acl::access(ctx, crate::acl::Kind::FileSet, fs) {
+                out.error("Access to specified FileSet not allowed.\n");
+                return None;
+            }
             selection.push_str(&format!("AND FileSet='{}' ", esc(fs)));
         }
         _ => {
@@ -685,8 +975,10 @@ fn list_backups(args: &Args, ctx: &ExecContext, cat: &CatalogHandle, ty: ListTyp
                 .and_then(|c| c.read().ok())
                 .map(|cfg| cfg.filesets.iter().map(|f| f.name.clone()).collect())
                 .unwrap_or_default();
-            if !names.is_empty() {
-                let ors: Vec<String> = names.iter().map(|n| format!("FileSet='{}'", esc(n))).collect();
+            let ors: Vec<String> = names.iter()
+                .filter(|n| crate::acl::access(ctx, crate::acl::Kind::FileSet, n))
+                .map(|n| format!("FileSet='{}'", esc(n))).collect();
+            if !ors.is_empty() {
                 selection.push_str(&format!("AND ({}) ", ors.join(" OR ")));
             }
         }
@@ -700,16 +992,235 @@ fn list_backups(args: &Args, ctx: &ExecContext, cat: &CatalogHandle, ty: ListTyp
         } else if "descending".starts_with(&o) {
             criteria.push_str(" DESC");
         } else {
-            out.error(format!("Unknown list keyword: {}\n", args.keyword().unwrap_or("")));
-            return false;
+            return None;
         }
     }
     criteria.push_str(range);
 
-    let sql = list_jobs_sql(ty == ListType::Vert, false, &selection, &criteria);
-    let Some(t) = query(cat, &sql, out) else { return false };
-    out.array("backups", &t, ty);
+    Some(list_jobs_sql(ty == ListType::Vert, false, &selection, &criteria))
+}
+
+// ---------------------------------------------------------------------------
+// list pools
+// ---------------------------------------------------------------------------
+
+fn pool_select(ty: ListType) -> &'static str {
+    if ty == ListType::Vert {
+        POOL_FIELDS
+    } else {
+        "SELECT PoolId,Name,NumVols,MaxVols,PoolType,LabelFormat "
+    }
+}
+
+/// QueryPoolListRows / ListPoolRecords(VERT_LIST)
+const POOL_FIELDS: &str = "SELECT PoolId,Name,NumVols,MaxVols,UseOnce,UseCatalog,AcceptAnyVolume,VolRetention,\
+     VolUseDuration,MaxVolJobs,MaxVolBytes,AutoPrune,Recycle,PoolType,LabelFormat,Enabled,\
+     ScratchPoolId,RecyclePoolId,LabelType ";
+
+/// `list pool[s][=name]`: the pool table plus the prune report of one named
+/// pool; `llist` prints the records as "key: value" lines with the prune
+/// summary (ua_output.cc EmitPoolFields).
+fn list_pools(args: &Args, ctx: &ExecContext, cat: &CatalogHandle, ty: ListType, opts: &ListOptions, out: &mut ListOut) -> bool {
+    let name = args.keyword_value().unwrap_or("");
+    if opts.current {
+        out.filters.push(Filter::Resource(1, Res::Pool));
+    }
+    let filter = if name.is_empty() { "ORDER BY PoolId".to_string() } else { format!("WHERE Name='{}'", esc(name)) };
+
+    let json_detail = ty == ListType::Horz && ctx.api_mode == ApiMode::Json && !name.is_empty();
+    if ty == ListType::Vert || json_detail {
+        let Ok(t) = cat.query_rows(&format!("{POOL_FIELDS} FROM Pool {filter}")) else { return true };
+        let shown = out.shown(&t);
+        let mut pools = Vec::new();
+        for (row, _) in t.rows.iter().zip(&shown).filter(|(_, s)| **s) {
+            let field = |i: usize| row.get(i).cloned().flatten().unwrap_or_default();
+            let Some(report) = pool_prune_report(ctx, cat, str_to_int64(&field(0))) else {
+                let what = if json_detail { "details" } else { "summary" };
+                out.error(format!("Failed to compute prune {what} for pool {}.\n", field(1)));
+                out.json.insert("pools".into(), Value::Array(pools));
+                return false;
+            };
+            let mut obj = Map::new();
+            let mut emit = |key: &str, value: String, text: &mut String| {
+                text.push_str(&format!("{key}: {value}\n"));
+                obj.insert(key.into(), Value::String(value));
+            };
+            for (i, col) in t.columns.iter().enumerate() {
+                emit(&col.name.to_lowercase(), field(i), &mut out.text);
+            }
+            emit("prunablevolumes", report.volumes.len().to_string(), &mut out.text);
+            emit("prunablejobs", report.jobs.len().to_string(), &mut out.text);
+            emit("prunablebytes", report.bytes().to_string(), &mut out.text);
+            if json_detail {
+                report.json(&mut obj);
+            }
+            pools.push(Value::Object(obj));
+        }
+        out.json.insert("pools".into(), Value::Array(pools));
+        return true;
+    }
+
+    let Some(t) = query(cat, &format!("{} FROM Pool {filter}", pool_select(ty)), out) else { return false };
+    out.array("pools", &t, ty);
+
+    if ty == ListType::Horz && !name.is_empty() {
+        let id = cat.query_rows(&format!("SELECT PoolId FROM Pool WHERE Name='{}'", esc(name))).ok()
+            .and_then(|t| t.rows.first().and_then(|r| r[0].clone()));
+        if let Some(id) = id {
+            let Some(report) = pool_prune_report(ctx, cat, str_to_int64(&id)) else {
+                out.error(format!("Failed to compute prune details for pool {name}.\n"));
+                return false;
+            };
+            out.text.push_str(&report.text());
+        }
+    }
     true
+}
+
+/// ua_prune.h PoolPruneVolumeDetail
+struct PruneVolume {
+    name: String,
+    status: String,
+    last_written: String,
+    job_ids: Vec<i64>,
+    bytes: u64,
+}
+
+/// ua_prune.h PoolPruneReport: the volumes (Full/Used, not archived) whose
+/// jobs are older than the volume retention, and those jobs.
+struct PruneReport {
+    volumes: Vec<PruneVolume>,
+    /// (jobid, name, bytes, starttime) ordered by jobid
+    jobs: Vec<(i64, String, u64, String)>,
+    /// (status, volumes) in volume order
+    statuses: Vec<(String, u64)>,
+}
+
+const PRUNE_REASON: &str = "volume_retention_expired";
+
+impl PruneReport {
+    fn reason(&self) -> &'static str {
+        if self.volumes.is_empty() { "" } else { PRUNE_REASON }
+    }
+
+    fn bytes(&self) -> u64 {
+        self.jobs.iter().map(|j| j.2).sum()
+    }
+
+    /// EmitPoolPruneReportText
+    fn text(&self) -> String {
+        let count = |n: u64| add_commas(&n.to_string());
+        let mut s = String::from("\nPrune details:\n");
+        s.push_str(&format!("  Reason: {}\n", self.reason()));
+        s.push_str(&format!("  Prunable volumes: {}\n", count(self.volumes.len() as u64)));
+        s.push_str(&format!("  Prunable jobs: {}\n", count(self.jobs.len() as u64)));
+        s.push_str(&format!("  Prunable bytes: {}\n", with_suffix(self.bytes())));
+        s.push_str("  Affected statuses:\n");
+        if self.statuses.is_empty() {
+            s.push_str("    none\n");
+        }
+        for (status, n) in &self.statuses {
+            s.push_str(&format!("    - {status} ({})\n", count(*n)));
+        }
+        s.push_str("  Prunable volumes:\n");
+        if self.volumes.is_empty() {
+            s.push_str("    none\n");
+        }
+        for v in &self.volumes {
+            s.push_str(&format!("    - {} | status={} | lastwritten={} | jobs={} | bytes={}\n",
+                v.name, v.status, v.last_written, count(v.job_ids.len() as u64), with_suffix(v.bytes)));
+        }
+        s.push_str("  Prunable jobs:\n");
+        if self.jobs.is_empty() {
+            s.push_str("    none\n");
+        }
+        for (jobid, name, bytes, start) in &self.jobs {
+            s.push_str(&format!("    - {} | {name} | {start} | {}\n", count(*jobid as u64), with_suffix(*bytes)));
+        }
+        s
+    }
+
+    /// EmitPoolPruneReportJson
+    fn json(&self, obj: &mut Map<String, Value>) {
+        obj.insert("reason".into(), json!(self.reason()));
+        obj.insert("status_breakdown".into(), Value::Array(self.statuses.iter()
+            .map(|(status, n)| json!({"status": status, "volumes": n})).collect()));
+        obj.insert("volumes".into(), Value::Array(self.volumes.iter().map(|v| json!({
+            "name": v.name, "status": v.status, "lastwritten": v.last_written, "reason": PRUNE_REASON,
+            "prunablejobs": v.job_ids.len(), "prunablebytes": v.bytes, "jobids": v.job_ids,
+        })).collect()));
+        obj.insert("jobs".into(), Value::Array(self.jobs.iter().map(|(jobid, name, bytes, start)| json!({
+            "jobid": jobid, "name": name, "bytes": bytes, "starttime": start,
+        })).collect()));
+    }
+}
+
+/// GetPoolPruneReport (ua_prune.cc): read-only catalog queries.
+fn pool_prune_report(ctx: &ExecContext, cat: &CatalogHandle, pool_id: i64) -> Option<PruneReport> {
+    let now = chrono::Utc::now().timestamp();
+    let ids = |t: &SqlTable| -> Vec<i64> { t.rows.iter().filter_map(|r| r[0].as_deref().map(str_to_int64)).collect() };
+    let running: Vec<i64> = ctx.job_manager.as_ref().and_then(|m| m.lock().ok())
+        .map(|m| m.running_jobs().into_iter().map(|j| j.0 as i64).collect()).unwrap_or_default();
+    let media = cat.query_rows(&format!("SELECT MediaId, VolumeName, VolStatus, Enabled, VolRetention, LastWritten \
+         FROM Media WHERE PoolId={pool_id} ORDER BY MediaId")).ok()?;
+    let mut volumes = Vec::new();
+    for row in &media.rows {
+        let field = |i: usize| row[i].clone().unwrap_or_default();
+        if field(3) == "2" || !(field(2) == "Full" || field(2) == "Used") {
+            continue; // VOL_ARCHIVED, or not prunable
+        }
+        // GetPruneCandidatesForVolume: sel_JobMedia + copy/migration children
+        let retention = str_to_int64(&field(4));
+        let mut jobs = ids(&cat.query_rows(&format!("SELECT DISTINCT JobMedia.JobId FROM JobMedia, Job \
+             WHERE MediaId = {} AND Job.JobId = JobMedia.JobId AND Job.JobTDate < {} ORDER BY JobId",
+             field(0), now - retention)).ok()?);
+        if !jobs.is_empty() {
+            let list = jobs.iter().map(i64::to_string).collect::<Vec<_>>().join(",");
+            jobs.extend(ids(&cat.query_rows(&format!("SELECT JobId from Job WHERE type in ('c','g') \
+                 AND priorjobid in ({list})")).ok()?));
+        }
+        jobs.retain(|j| !running.contains(j));
+        if jobs.is_empty() {
+            continue;
+        }
+        jobs.sort_unstable();
+        jobs.dedup();
+        volumes.push(PruneVolume { name: field(1), status: field(2), last_written: field(5), job_ids: jobs, bytes: 0 });
+    }
+
+    let mut all: Vec<i64> = volumes.iter().flat_map(|v| v.job_ids.iter().copied()).collect();
+    all.sort_unstable();
+    all.dedup();
+    let mut jobs = Vec::new();
+    if !all.is_empty() {
+        let list = all.iter().map(i64::to_string).collect::<Vec<_>>().join(",");
+        let t = cat.query_rows(&format!("SELECT JobId, Name, JobBytes, StartTime FROM Job WHERE JobId IN ({list}) \
+             ORDER BY JobId")).ok()?;
+        for row in &t.rows {
+            let Some(id) = row[0].as_deref() else { continue };
+            let field = |i: usize| row[i].clone().unwrap_or_default();
+            jobs.push((str_to_int64(id), field(1), field(2).parse().unwrap_or(0), field(3)));
+        }
+    }
+    for v in &mut volumes {
+        v.bytes = v.job_ids.iter().filter_map(|id| jobs.iter().find(|j| j.0 == *id)).map(|j| j.2).sum();
+    }
+
+    // BuildPoolPruneReport: statuses in volume order, volumes by LastWritten (empty last), name
+    let mut statuses: Vec<(String, u64)> = Vec::new();
+    for v in &volumes {
+        match statuses.iter_mut().find(|s| s.0 == v.status) {
+            Some(s) => s.1 += 1,
+            None => statuses.push((v.status.clone(), 1)),
+        }
+    }
+    volumes.sort_by(|a, b| match (a.last_written.is_empty(), b.last_written.is_empty()) {
+        _ if a.last_written == b.last_written => a.name.cmp(&b.name),
+        (true, _) => std::cmp::Ordering::Greater,
+        (_, true) => std::cmp::Ordering::Less,
+        _ => a.last_written.cmp(&b.last_written),
+    });
+    Some(PruneReport { volumes, jobs, statuses })
 }
 
 // ---------------------------------------------------------------------------
@@ -753,7 +1264,19 @@ LEFT JOIN Storage USING(StorageId)
     }
 }
 
-fn list_media(args: &Args, cat: &CatalogHandle, ty: ListType, range: &str, out: &mut ListOut) -> bool {
+/// postgresql_queries.inc list_volumes_count_0
+const VOLUMES_COUNT: &str = "SELECT COUNT(DISTINCT Media.MediaId) as count FROM Media;\n";
+
+/// BareosDb::ListMediaRecords for a pool (count or records)
+fn media_of_pool_sql(ty: ListType, count: bool, pool_id: &str, range: &str) -> String {
+    if count {
+        format!("SELECT COUNT(DISTINCT Media.MediaId) as count\nFROM Media\nWHERE Media.PoolId={pool_id}\n")
+    } else {
+        format!("{} WHERE PoolId={pool_id} ORDER BY MediaId {range}", volumes_select(ty))
+    }
+}
+
+fn list_media(args: &Args, ctx: &ExecContext, cat: &CatalogHandle, ty: ListType, opts: &ListOptions, range: &str, out: &mut ListOut) -> bool {
     let jobid = jobid_from_cmdline(args, cat);
     if jobid > 0 {
         let sql = if ty == ListType::Vert {
@@ -773,46 +1296,315 @@ fn list_media(args: &Args, cat: &CatalogHandle, ty: ListType, range: &str, out: 
 
     // list volume=<name>
     if let Some(name) = args.keyword_value() {
-        let sql = format!("{} WHERE VolumeName='{}'", volumes_select(ty), esc(name));
+        let sql = if opts.count {
+            format!("SELECT COUNT(DISTINCT Media.MediaId) as count\nFROM Media\nWHERE VolumeName='{}'\n", esc(name))
+        } else {
+            format!("{} WHERE VolumeName='{}'", volumes_select(ty), esc(name))
+        };
         let Some(t) = query(cat, &sql, out) else { return false };
-        out.text.push_str(&render(&t, ty));
-        out.json.insert("volume".into(), json_rows(&t).into_iter().next().unwrap_or_else(|| json!({})));
+        object(out, "volume", &t, ty);
         return true;
     }
 
-    // pool=<name>: flat array
+    // pool=<name>: flat array; GetPoolDbr asks for a pool when it is unknown
     if let Some(pool) = args.value("pool") {
-        let id = cat.query_rows(&format!("SELECT PoolId FROM Pool WHERE Name='{}'", esc(pool)))
+        let lookup = |name: &str| cat.query_rows(&format!("SELECT PoolId FROM Pool WHERE Name='{}'", esc(name)))
             .ok().and_then(|t| t.rows.first().and_then(|r| r[0].clone()));
-        let Some(id) = id else {
-            out.error(format!("Pool {pool} doesn't exist.\n"));
-            return true;
-        };
-        let sql = format!("{} WHERE PoolId={id} ORDER BY MediaId {range}", volumes_select(ty));
-        let Some(t) = query(cat, &sql, out) else { return false };
+        let mut id = lookup(pool).filter(|_| crate::acl::access(ctx, crate::acl::Kind::Pool, pool));
+        if id.is_none() {
+            let not_found = format!("Could not find Pool \"{pool}\": ERR=Pool record not found in Catalog.\n");
+            out.error(not_found.clone());
+            // SelectPoolDbr: the pool= argument once more, then the dialog
+            if crate::acl::access(ctx, crate::acl::Kind::Pool, pool) {
+                out.error(not_found);
+            }
+            match super::prompt::select_pool_dbr(ctx) {
+                Ok((name, text)) => {
+                    out.text.push_str(&text);
+                    id = lookup(&name);
+                }
+                Err(result) => {
+                    out.dialog = Some(result);
+                    return true;
+                }
+            }
+        }
+        let Some(id) = id else { return true };
+        let Some(t) = query(cat, &media_of_pool_sql(ty, opts.count, &id, range), out) else { return false };
         out.array("volumes", &t, ty);
         return true;
     }
 
     // all: flat over all pools
-    if args.has("all") && !args.is("all") {
-        let sql = format!("{} ORDER BY MediaId {range}", volumes_select(ty));
+    if args.has_after_keyword("all") {
+        if opts.current {
+            // column 4 is the pool name in the llist query (VolBytes in the list query, as in C++)
+            out.filters.push(Filter::Resource(4, Res::Pool));
+        }
+        let sql = if opts.count {
+            VOLUMES_COUNT.to_string()
+        } else {
+            format!("{} ORDER BY MediaId {range}", volumes_select(ty))
+        };
         let Some(t) = query(cat, &sql, out) else { return false };
         out.array("volumes", &t, ty);
         return true;
     }
 
-    // grouped by pool: {"volumes": {"<pool>": [...]}}
+    // grouped by pool (GetPoolIds order): {"volumes": {"<pool>": [...]}}
     let Some(pools) = query(cat, "SELECT PoolId, Name FROM Pool", out) else { return false };
     let mut grouped = Map::new();
     for row in &pools.rows {
         let (Some(id), Some(name)) = (&row[0], &row[1]) else { continue };
-        let sql = format!("{} WHERE PoolId={id} ORDER BY MediaId {range}", volumes_select(ty));
-        let Some(t) = query(cat, &sql, out) else { return false };
+        let Some(t) = query(cat, &media_of_pool_sql(ty, opts.count, id, range), out) else { return false };
         out.text.push_str(&format!("Pool: {name}\n"));
-        out.text.push_str(&render(&t, ty));
-        grouped.insert(name.to_lowercase(), Value::Array(json_rows(&t)));
+        let shown = out.shown(&t);
+        out.text.push_str(&render_shown(&t, ty, &shown));
+        grouped.insert(name.to_lowercase(), Value::Array(shown_json(&t, &shown)));
     }
     out.json.insert("volumes".into(), Value::Object(grouped));
     true
+}
+
+// ---------------------------------------------------------------------------
+// list nextvolume
+// ---------------------------------------------------------------------------
+
+/// ListNextvol (ua_output.cc): for every Run of the job's schedule within
+/// `days`, the volume FindNextVolumeForAppend would choose.
+///
+/// Read-only: upstream calls it with fnv_no_create_vol but fnv_prune, so it
+/// may also recycle purged volumes, prune volumes, mark expired Append
+/// volumes Full/Used and create a missing pool. Onesimus only looks the
+/// volume up (Append, then Unlabeled; expired volumes are skipped instead of
+/// being marked) and changes nothing in the catalog.
+fn list_nextvol(args: &Args, ctx: &ExecContext, cat: &CatalogHandle, out: &mut ListOut) -> bool {
+    use crate::acl::{access, Kind};
+    const MAX_DAYS: i64 = 50; // kDefaultNumberOfDays
+    let mut days = 1;
+    if let Some(v) = args.value("days") {
+        days = str_to_int64(v) as i32 as i64;
+        if !(0..=MAX_DAYS).contains(&days) {
+            out.text.push_str(&format!("Ignoring invalid value for days. Max is {MAX_DAYS}.\n")); // WarningMsg
+            days = 1;
+        }
+    }
+    let Some(config) = ctx.config.as_ref().and_then(|c| c.read().ok()).map(|c| c.clone()) else { return false };
+
+    // GetJobResWithName (with Job ACL), else select_job_resource
+    let job = args.value("job").and_then(|name| config.find_job(name))
+        .filter(|job| access(ctx, Kind::Job, &job.name)).cloned();
+    let job = match job {
+        Some(job) => job,
+        None => {
+            let names = crate::director_config::sort_case_insensitive(config.jobs.iter().map(|j| j.name.as_str()))
+                .into_iter().filter(|name| access(ctx, Kind::Job, name)).map(str::to_string).collect();
+            match super::prompt::select_resource(ctx, "The defined Job resources are:\n", "Job", "Select Job resource", names) {
+                Ok((name, text)) => {
+                    out.text.push_str(&text);
+                    match config.find_job(&name) {
+                        Some(job) => job.clone(),
+                        None => return false,
+                    }
+                }
+                Err(result) => {
+                    out.dialog = Some(result);
+                    return false;
+                }
+            }
+        }
+    };
+
+    let raw = |kind: &str, name: &str| config.raw.iter().find(|r| r.norm_type() == kind && r.name() == Some(name));
+    let runs: Vec<_> = raw("schedule", &job.schedule).map(|s| s.directives.iter()
+        .filter(|d| d.norm_key() == "run").map(|d| super::show::parse_run(&d.tokens)).collect()).unwrap_or_default();
+
+    let now = chrono::Utc::now().timestamp();
+    let mut found = false;
+    for run in &runs {
+        if !triggers_within(run, now, days) {
+            continue;
+        }
+        // CompleteJcrForJob: the (run) pool must be in the catalog
+        let pool = run.pool.clone().unwrap_or_else(|| job.pool.clone());
+        let pool_id = cat.query_rows(&format!("SELECT PoolId FROM Pool WHERE Name='{}'", esc(&pool))).ok()
+            .and_then(|t| t.rows.first().and_then(|r| r[0].clone()));
+        let Some(pool_id) = pool_id else {
+            // upstream creates the pool here (catalog write): not done
+            found = false;
+            break;
+        };
+        let level = run.level.and_then(|l| super::show::JOB_LEVELS.iter().find(|(_, c)| *c == l))
+            .map(|(n, _)| *n).unwrap_or("");
+        // GetJobStorage: run pool storage, run storage, pool storage, job storage
+        let pool_storage = |name: &str| raw("pool", name)
+            .and_then(|p| p.directives.iter().find(|d| d.norm_key() == "storage"))
+            .and_then(|d| d.first().map(str::to_string));
+        let storage = run.pool.as_deref().and_then(pool_storage)
+            .or_else(|| run.storage.clone())
+            .or_else(|| pool_storage(&job.pool))
+            .unwrap_or_else(|| job.storage.clone());
+        let Some(store) = config.find_storage(&storage) else { continue };
+        let storage_id = cat.query_rows(&format!("SELECT StorageId FROM Storage WHERE Name='{}'", esc(&store.name))).ok()
+            .and_then(|t| t.rows.first().and_then(|r| r[0].clone())).unwrap_or_else(|| "0".into());
+        let in_changer = super::prompt::is_autochanger(&config, &store.name);
+        match find_next_volume(cat, &pool_id, &store.media_type, &storage_id, in_changer) {
+            Some(volume) => {
+                out.text.push_str(&format!("The next Volume to be used by Job \"{}\" (Pool={pool}, Level={level}) will be {volume}\n",
+                    job.name));
+                found = true;
+            }
+            None => out.error(format!("Could not find next Volume for Job {} (Pool={pool}, Level={level}).\n", job.name)),
+        }
+    }
+    if !found {
+        out.error(format!("Could not find next Volume for Job {}.\n", job.name));
+        return false;
+    }
+    true
+}
+
+/// FindNextVolumeForAppend steps 1 and 2 (BareosDb::FindNextVolume with
+/// VolStatus Append, then Unlabeled), retried without the InChanger
+/// restriction. HasVolumeExpired volumes are skipped (upstream marks them
+/// Full/Used in the catalog and searches again).
+fn find_next_volume(cat: &CatalogHandle, pool_id: &str, media_type: &str, storage_id: &str, mut in_changer: bool) -> Option<String> {
+    let now = chrono::Utc::now().timestamp();
+    loop {
+        let changer = if in_changer { format!("AND InChanger=1 AND StorageId={storage_id}") } else { String::new() };
+        for status in ["Append", "Unlabeled"] {
+            let sql = format!("SELECT VolumeName,VolJobs,VolFiles,VolBytes,MaxVolBytes,MaxVolJobs,MaxVolFiles,\
+                 VolUseDuration,FirstWritten FROM Media WHERE PoolId={pool_id} AND MediaType='{}' AND Enabled=1 \
+                 AND VolStatus='{status}' {changer} ORDER BY LastWritten IS NULL,LastWritten DESC,MediaId",
+                 esc(media_type));
+            let t = cat.query_rows(&sql).ok()?;
+            for row in &t.rows {
+                let n = |i: usize| row[i].as_deref().map(str_to_int64).unwrap_or(0);
+                let first_written = row[8].as_deref()
+                    .and_then(|v| chrono::NaiveDateTime::parse_from_str(v, "%Y-%m-%d %H:%M:%S").ok())
+                    .and_then(|v| Local.from_local_datetime(&v).single()).map(|v| v.timestamp()).unwrap_or(0);
+                let expired = status == "Append" && n(1) > 0
+                    && ((n(4) > 0 && n(3) >= n(4)) || (n(5) > 0 && n(5) <= n(1)) || (n(6) > 0 && n(6) <= n(2))
+                        || (n(7) > 0 && n(7) <= now - first_written));
+                if !expired {
+                    return row[0].clone();
+                }
+            }
+        }
+        if !in_changer {
+            return None;
+        }
+        in_changer = false;
+    }
+}
+
+/// RunResource::NextScheduleTime(start, ndays).has_value(): a day within
+/// `ndays` the run triggers on (DateTimeMask::TriggersOnDay) with a
+/// scheduled hour (on the first day: from the current hour on).
+fn triggers_within(run: &super::show::RunSpec, start: i64, ndays: i64) -> bool {
+    let mut time = start;
+    for d in 0..=ndays {
+        if let Some(tm) = Local.timestamp_opt(time, 0).single() {
+            if triggers_on_day(run, &tm) {
+                let first = if d == 0 { tm.hour() as usize } else { 0 };
+                if run.hour[first..].iter().any(|h| *h) {
+                    return true;
+                }
+            }
+        }
+        time += 24 * 60 * 60;
+    }
+    false
+}
+
+/// dird/date_time_mask.cc TriggersOnDay with dird/date_time.cc DateTime.
+fn triggers_on_day(run: &super::show::RunSpec, tm: &chrono::DateTime<Local>) -> bool {
+    let mday = tm.day0() as usize;
+    let yday = tm.ordinal0() as i64;
+    // LastDayOfMonth uses tm_year (years since 1900) for the leap year test
+    let year = tm.year() as i64 - 1900;
+    let leap = year % 400 == 0 || (year % 100 != 0 && year % 4 == 0);
+    let last_days: [i64; 12] = if leap {
+        [30, 59, 90, 120, 151, 181, 212, 243, 273, 304, 334, 365]
+    } else {
+        [30, 58, 89, 119, 150, 180, 211, 242, 272, 303, 333, 364]
+    };
+    let last_7days = last_days[tm.month0() as usize] - 7 < yday;
+    run.mday[mday]
+        && run.wday[tm.weekday().num_days_from_sunday() as usize]
+        && run.month[tm.month0() as usize]
+        && (run.wom.get(mday / 7).copied().unwrap_or(false) || (last_7days && run.last_7days))
+        && run.woy.get(week_of_year(tm)).copied().unwrap_or(false)
+}
+
+/// lib/btime.cc TmWoy: ISO-like week of the year (week of 4 January = 1).
+fn week_of_year(tm: &chrono::DateTime<Local>) -> usize {
+    let yday = tm.ordinal0() as i64;
+    let jan4 = chrono::NaiveDate::from_ymd_opt(tm.year(), 1, 4).map(|d| d.weekday().num_days_from_sunday() as i64)
+        .unwrap_or(0);
+    let mut fty = 1 - jan4;
+    if fty <= 0 {
+        fty += 7;
+    }
+    let woy = yday - fty + 4;
+    if woy < 0 { 0 } else { (1 + woy / 7) as usize }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn c_number_helpers() {
+        assert_eq!(str_to_int64(" 12abc"), 12);
+        assert_eq!(str_to_int64("-3"), -3);
+        assert_eq!(str_to_int64("abc"), 0);
+        assert!(is_a_number_list("1,2"));
+        assert!(is_a_number_list("1,"));
+        assert!(!is_a_number_list(",1"));
+        assert!(!is_a_number_list("x"));
+        assert_eq!(with_suffix(0), "0 ");
+        assert_eq!(with_suffix(999), "999 ");
+        assert_eq!(with_suffix(1234), "1.234 K");
+        assert_eq!(with_suffix(824021543), "824.0 M");
+    }
+
+    #[test]
+    fn hours_wrap_like_c_int() {
+        use crate::command_ast::{Argument, CommandAst};
+        let ast = |key: &str, value: &str| CommandAst {
+            command_name: "list".into(),
+            arguments: vec![Argument { key: "jobs".into(), value: None }, Argument { key: key.into(), value: Some(value.into()) }],
+            ..Default::default()
+        };
+        assert_eq!(schedtime(&Args(&ast("hours", "1")), 10_000), 6_400);
+        // 3600 * 1000000 overflows a C int: the time lies in the future
+        assert_eq!(schedtime(&Args(&ast("hours", "1000000")), 0), 694_967_296);
+        assert_eq!(schedtime(&Args(&ast("days", "abc")), 5), 5);
+    }
+
+    #[test]
+    fn week_of_year_like_tm_woy() {
+        let at = |y, m, d| Local.from_local_datetime(&chrono::NaiveDate::from_ymd_opt(y, m, d).unwrap()
+            .and_hms_opt(12, 0, 0).unwrap()).single().unwrap();
+        // 4 January 2026 is a Sunday: fty = 1, woy = yday + 3
+        assert_eq!(week_of_year(&at(2026, 1, 1)), 1);
+        assert_eq!(week_of_year(&at(2026, 10, 15)), 42);
+    }
+
+    #[test]
+    fn schedule_runs_within_days() {
+        use bareos_config::raw::Tok;
+        let run = |spec: &str| super::super::show::parse_run(&spec.split(' ').map(|w| Tok::Word(w.into())).collect::<Vec<_>>());
+        let at = |y, m, d, h| Local.from_local_datetime(&chrono::NaiveDate::from_ymd_opt(y, m, d).unwrap()
+            .and_hms_opt(h, 0, 0).unwrap()).single().unwrap().timestamp();
+        // Thursday 15 October 2026
+        assert!(triggers_within(&run("Incremental mon-fri at 21:00"), at(2026, 10, 15, 12), 0));
+        assert!(!triggers_within(&run("Incremental mon-fri at 21:00"), at(2026, 10, 15, 22), 0));
+        assert!(triggers_within(&run("Incremental mon-fri at 21:00"), at(2026, 10, 15, 22), 1));
+        // Saturday 17 October is the 3rd Saturday of the month
+        assert!(!triggers_within(&run("Full 1st sat at 21:00"), at(2026, 10, 15, 12), 3));
+        assert!(triggers_within(&run("Differential 2nd-5th sat at 21:00"), at(2026, 10, 15, 12), 2));
+        assert!(!triggers_within(&run("Differential 2nd-5th sat at 21:00"), at(2026, 10, 15, 12), 1));
+    }
 }

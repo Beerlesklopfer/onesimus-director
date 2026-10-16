@@ -32,7 +32,7 @@ Neue Einträge unten anhängen; behobene Einträge bleiben mit Commit stehen.
 | C-012 | 15.10.2026 | **Seiteneffekte** | `truncate`, `setip`, `import`, `export`, `move` ohne Argumente | Abbruch mit Usage/Auswahl, keine Wirkung | `truncate` führt ein Truncate aus, `setip` meldet „Client address updated“, `import/export/move` senden Befehle an den SD | `ua_cmds.cc`, `ua_impexp.cc` | behoben (alle Guards + Seiteneffekt-Tests; Dialoge → C-011) |
 | C-013 | 15.10.2026 | Storage-Auswahl | `mount`, `release`, `status` ohne Ziel | Einzige Storage wird automatisch gewählt (`Automatically selected Storage: File`) | `Storage '?' not found` | `ua_select.cc:1228` | behoben (in development, 15.10.2026) |
 | C-014 | 15.10.2026 | status | `status scheduler`, `status subscriptions`, `status configuration`, `status dir`, `.status dir …` | Eigene Unterabschnitte | Fehlen bzw. Delegation an Gesamtstatus | `ua_status.cc` | behoben (Merge 15.10.2026; offen: SD-Teil von `status all`/`status storage`, Normalisierung alter Fälle) |
-| C-015 | 15.10.2026 | list | `list nextvolume`, `list mediatypes`, Volumes mit `NULL`-Datum, Leerzeile nach Einzelpool, `llist pools` Prune-Summen, `list jobs` Jobauswahl | Original-Filter und Formatierung | Fehlende Schlüsselwörter, `NULL` statt leer, fehlende Felder, andere Jobmenge | `ua_output.cc` | offen |
+| C-015 | 15.10.2026 | list | `list nextvolume`, `list mediatypes`, Volumes mit `NULL`-Datum, Leerzeile nach Einzelpool, `llist pools` Prune-Summen, `list jobs` Jobauswahl | Original-Filter und Formatierung | Fehlende Schlüsselwörter, `NULL` statt leer, fehlende Felder, andere Jobmenge | `ua_output.cc` | behoben (Merge 16.10.2026; Prompt bei unbekanntem Pool → C-011-Dialog anbinden, ACL → C-026) |
 | C-016 | 15.10.2026 | .sql / sqlquery | `.sql query=…`, `sqlquery` | Tabellen-Rahmen wie `list` | Psql-artige Spalten | `ua_dotcmds.cc` `SqlCmd` | behoben (in development, 15.10.2026) |
 | C-017 | 15.10.2026 | estimate | `estimate job=…` | FD-Anfrage, `2000 OK estimate files=… bytes=…`, Listing | Platzhalter „Estimate pending“ | `ua_cmds.cc` `EstimateCmd` | behoben (in development, 15.10.2026) |
 | C-018 | 15.10.2026 | resolve | `resolve`, `resolve client=` | Reihenfolge ipv6 vor ipv4, doppelte Adresse wie getaddrinfo, TLS-Handshakezeile | Andere Reihenfolge, Duplikate entfernt, keine Handshakezeile | `ua_cmds.cc` `ResolveCmd` | behoben (in development, 15.10.2026) |
@@ -72,12 +72,13 @@ Noch nicht gemergte Agent-Branches (Worktrees unter `.claude/worktrees/`, Commit
 
 | Eintrag | Branch-Commits | Hinweis |
 | --- | --- | --- |
-| C-015 list/llist | `7cce3e8` | Konflikt in `commands/prompt.rs` (C-013 hat `select_storage` umgebaut) |
 | C-021 restore | `9a6402e` | Konflikt (admin.rs, C-012-Guards) |
 | C-022 bvfs | `5c9ec82 0a58b6c` | Konflikt |
 | C-037 Audit-Log | `021b78d` | Konflikt (parity.py: jetzt Katalogkopien pro Seite) |
 
 C-011 gemergt (Merge-Commit): Konflikte in `admin.rs`/`extra.rs` (update/label/relabel) zugunsten der C-011-Dialoge gelöst — prüfen, ob C-012s spätere Wertvalidierung für `update` (`3500719`) vollständig erhalten ist; C-011-Ersatz für `list_sql_query` durch C-016-Version ersetzt. Voller Paritätslauf nach dem Merge steht aus.
+
+Nach C-011/C-015/C-017-Merge: C-011-Dialog in `estimate` (Hook C-017) und `list volumes pool=<unbekannt>` (C-015) anbinden.
 
 Offen ohne Agent: C-025..C-030, C-031..C-036, C-024-Rest, Umstellung Referenz auf `18be77e6`.
 Voraussetzung: `sudo -u postgres psql -c 'ALTER ROLE "joerg.bernau" CREATEDB'` — sonst
