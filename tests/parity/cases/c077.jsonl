@@ -1,0 +1,5 @@
+{"id": "c077-delete-storage-configured", "steps": ["delete storage=File"]}
+{"id": "c077-delete-storage-nosuch", "steps": ["delete storage=Nope"]}
+{"id": "c077-delete-pool-no", "steps": ["delete pool=Differential", "no", "list pools"]}
+{"id": "c077-delete-pool-yes", "isolated": true, "steps": ["delete pool=Differential", "yes", "list pools", "list volumes pool=Differential"]}
+{"id": "c077-delete-pool-dialog", "isolated": true, "steps": ["delete pool", "3", "yes", "list pools"]}

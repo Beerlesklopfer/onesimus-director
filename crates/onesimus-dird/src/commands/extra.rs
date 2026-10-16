@@ -818,7 +818,7 @@ fn delete_dialog(ua: &mut crate::ua_select::Ua, ast: &CommandAst,
 }
 
 /// The catalog work of a confirmed delete (DeleteVolume after the
-/// confirmation, DoJobDelete; pool and storage deletion are not ported).
+/// confirmation, DoJobDelete, DeletePoolRecord, delete_storages).
 fn delete_execute(ua: &mut crate::ua_select::Ua, action: DeleteAction,
     deleted: &mut serde_json::Map<String, serde_json::Value>) {
     use serde_json::Value;
@@ -865,8 +865,44 @@ fn delete_execute(ua: &mut crate::ua_select::Ua, action: DeleteAction,
             }
             ua.send_msg(format!("Jobid {id} and associated records deleted from the catalog.\n"));
         }
-        DeleteAction::Pool(_) => ua.send_msg("delete pool: not supported\n"),
-        DeleteAction::Storage(_) => ua.send_msg("delete storage: not supported\n"),
+        DeleteAction::Pool(pool) => {
+            // BareosDb::DeletePoolRecord(): its volumes, then the pool (no
+            // message, errors only in the catalog's errmsg).
+            let id = cat.query_rows(&format!("SELECT PoolId FROM Pool WHERE Name='{}'", pool.replace('\'', "''")))
+                .ok().filter(|t| t.rows.len() == 1)
+                .and_then(|t| t.rows.into_iter().next())
+                .map(|row| super::job::str_to_int64(row.first().cloned().flatten().as_deref().unwrap_or("")));
+            if let Some(id) = id {
+                let id = id as i32;
+                let _ = cat.execute(&format!("DELETE FROM Media WHERE Media.PoolId = {id}"));
+                let _ = cat.execute(&format!("DELETE FROM Pool WHERE Pool.PoolId = {id}"));
+            }
+        }
+        DeleteAction::Storage(storage) => {
+            // get_deletable_storageids() (dbcheck_utils.cc:168): only
+            // storages no volume or device refers to; the Emsg warnings go
+            // to the daemon log.
+            let column = |sql: &str| cat.query_rows(sql).map(|t| t.rows.into_iter()
+                .filter_map(|r| r.into_iter().next().flatten()).collect::<Vec<_>>()).unwrap_or_default();
+            let mut deletable = Vec::new();
+            for id in column(&format!("SELECT storageid FROM storage WHERE Name in ('{storage}')")) {
+                let volumes = column(&format!("SELECT volumename FROM media WHERE storageid={id}"));
+                let devices = column(&format!("SELECT name FROM device WHERE storageid={id}"));
+                for (what, name) in volumes.iter().map(|v| ("volume", v)).chain(devices.iter().map(|d| ("device", d))) {
+                    tracing::warn!("Orphaned storage '{storage}' is being used by {what} '{name}'. \
+                        An orphaned storage will only be removed when it is no longer referenced.");
+                }
+                if volumes.is_empty() && devices.is_empty() {
+                    deletable.push(id);
+                }
+            }
+            if !deletable.is_empty() {
+                ua.send_msg(format!("Deleting {} orphaned storage record(s).\n", deletable.len()));
+                for id in deletable {
+                    let _ = cat.execute(&format!("DELETE FROM storage WHERE storageid={id}"));
+                }
+            }
+        }
     }
 }
 
