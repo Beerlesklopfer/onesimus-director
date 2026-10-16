@@ -678,18 +678,18 @@ fn find_arg_keyword(ast: &CommandAst, keywords: &[&str]) -> Option<usize> {
 /// What a confirmed prune does.
 #[derive(Debug, PartialEq, Eq)]
 enum PruneAction {
-    Files { client: String, retention: u64 },
-    Jobs { client: String, retention: u64 },
+    Files { client: String, pool: Option<String>, retention: u64 },
+    Jobs { client: String, pool: Option<String>, retention: u64 },
     Volume(String),
     Stats(u64),
-    Directory { client: Option<String>, path: String },
+    Directory { client: Option<String>, path: String, recursive: bool },
 }
 
 /// PruneCmd (ua_prune.cc:362) dialogs: keyword menu, client/pool selection,
 /// volume selection and ConfirmRetention ("Continue? (yes/mod/no): ", only
 /// `yes` skips it). `act` runs only for a confirmed request.
 fn prune_dialog(ua: &mut crate::ua_select::Ua, ast: &CommandAst,
-    act: impl FnOnce(&mut crate::ua_select::Ua, PruneAction) -> bool) -> bool {
+    mut act: impl FnMut(&mut crate::ua_select::Ua, PruneAction) -> bool) -> bool {
     use crate::acl::{has_restrictions, Kind};
     use crate::ua_select::{self, find_arg, find_arg_with_value};
     const KEYWORDS: [&str; 5] = ["Files", "Jobs", "Volume", "Stats", "Directory"];
@@ -731,10 +731,10 @@ fn prune_dialog(ua: &mut crate::ua_select::Ua, ast: &CommandAst,
             };
             let Some(retention) = ua.confirm_retention(ast, retention, what) else { return false };
             if index == 0 {
-                act(ua, PruneAction::Files { client, retention });
+                act(ua, PruneAction::Files { client, pool, retention });
                 true
             } else {
-                act(ua, PruneAction::Jobs { client, retention })
+                act(ua, PruneAction::Jobs { client, pool, retention })
             }
         }
         Some(2) => {
@@ -742,21 +742,15 @@ fn prune_dialog(ua: &mut crate::ua_select::Ua, ast: &CommandAst,
                 // PruneAllVolumes (ua_prune.cc:326): every volume (of the
                 // pool) with its own ConfirmRetention.
                 let pool = pool_of(ua);
-                let pool_id = pool.as_deref().and_then(|p| ua_select::get_pool_record(ctx, p).ok());
                 let names = ctx.catalog.as_ref()
-                    .and_then(|cat| cat.query_rows("SELECT VolumeName FROM Media ORDER BY VolumeName").ok())
-                    .map(|t| t.rows.into_iter().filter_map(|r| r.into_iter().next().flatten()).collect::<Vec<_>>())
-                    .unwrap_or_default();
+                    .and_then(|cat| cat.query_rows("SELECT DISTINCT Media.VolumeName FROM Media ORDER BY VolumeName").ok())
+                    .map(|t| t.rows.into_iter().filter_map(|r| r.into_iter().next().flatten()).collect::<Vec<_>>());
+                let Some(names) = names else { return false };
                 let mut result = true;
                 for volume in names {
-                    let record = match ua_select::get_media_record(ctx, 0, &volume) {
-                        Ok(record) => record,
-                        Err(error) => {
-                            ua.error_msg(error);
-                            return false;
-                        }
-                    };
-                    if pool_id.is_some_and(|id| id != record.pool_id) {
+                    let Some(record) = select_media_dbr_by_name(ua, &volume) else { return false };
+                    let Some(pool_name) = select_pool_for_media_dbr(ua, &record) else { return false };
+                    if pool.as_deref().is_some_and(|p| p != pool_name) {
                         continue;
                     }
                     if record.enabled == 2 {
@@ -768,7 +762,7 @@ fn prune_dialog(ua: &mut crate::ua_select::Ua, ast: &CommandAst,
                         result = false;
                         break;
                     }
-                    result &= act_volume(ua, record.volume_name);
+                    result &= act(ua, PruneAction::Volume(record.volume_name));
                 }
                 return result;
             }
@@ -791,21 +785,23 @@ fn prune_dialog(ua: &mut crate::ua_select::Ua, ast: &CommandAst,
             if has_restrictions(ctx, Kind::Client) {
                 return denied(ua, "client");
             }
-            if volumes.is_empty() && pool.is_some() {
-                // GetPoolPruneReport and its volume selection are not ported.
-                ua.error_msg("prune volume pool=: the prunable volume report is not supported yet\n");
-                return false;
+            if let (true, Some(pool)) = (volumes.is_empty(), pool.as_deref()) {
+                match select_prunable_volumes(ua, pool) {
+                    Some(selected) if selected.is_empty() => return true,
+                    Some(selected) => volumes = selected,
+                    None => return false,
+                }
             }
-            let mut result = true;
             if !volumes.is_empty() {
+                let mut result = true;
                 for volume in volumes {
-                    let record = match ua_select::get_media_record(ctx, 0, &volume) {
-                        Ok(record) => record,
-                        Err(error) => {
-                            ua.error_msg(error);
-                            return false;
-                        }
-                    };
+                    let Some(record) = select_media_dbr_by_name(ua, &volume) else { return false };
+                    let Some(pool_name) = select_pool_for_media_dbr(ua, &record) else { return false };
+                    if let Some(pool) = pool.as_deref().filter(|p| *p != pool_name) {
+                        ua.error_msg(format!("Volume \"{}\" is not in Pool \"{pool}\".\n", record.volume_name));
+                        result = false;
+                        continue;
+                    }
                     if record.enabled == 2 {
                         ua.error_msg(format!("Cannot prune Volume \"{}\" because it is archived.\n", record.volume_name));
                         result = false;
@@ -815,11 +811,14 @@ fn prune_dialog(ua: &mut crate::ua_select::Ua, ast: &CommandAst,
                         result = false;
                         continue;
                     }
-                    result &= act_volume(ua, record.volume_name);
+                    result &= act(ua, PruneAction::Volume(record.volume_name));
                 }
                 return result;
             }
             let Some(record) = ua_select::select_media_dbr(ua, ast) else { return false };
+            if select_pool_for_media_dbr(ua, &record).is_none() {
+                return false;
+            }
             if record.enabled == 2 {
                 ua.error_msg(format!("Cannot prune Volume \"{}\" because it is archived.\n", record.volume_name));
                 return false;
@@ -876,15 +875,101 @@ fn prune_dialog(ua: &mut crate::ua_select::Ua, ast: &CommandAst,
                     path
                 }
             };
-            act(ua, PruneAction::Directory { client, path })
+            act(ua, PruneAction::Directory { client, path, recursive })
         }
         _ => true,
     }
 }
 
-/// One volume of `prune volume=a volume=b` (PruneVolume).
-fn act_volume(ua: &mut crate::ua_select::Ua, volume: String) -> bool {
-    prune_execute(ua, PruneAction::Volume(volume))
+/// C++ SelectMediaDbrByName(): invalid names fail silently, a missing
+/// record is reported.
+fn select_media_dbr_by_name(ua: &mut crate::ua_select::Ua, name: &str) -> Option<crate::ua_select::MediaRecord> {
+    if !crate::acl::valid_name(name) {
+        return None;
+    }
+    match crate::ua_select::get_media_record(ua.ctx, 0, name) {
+        Ok(record) => Some(record),
+        Err(error) => {
+            ua.error_msg(error);
+            None
+        }
+    }
+}
+
+/// C++ SelectPoolForMediaDbr(): the name of the volume's pool (Pool ACL).
+fn select_pool_for_media_dbr(ua: &mut crate::ua_select::Ua, record: &crate::ua_select::MediaRecord) -> Option<String> {
+    let name = ua.ctx.catalog.as_ref()
+        .and_then(|cat| cat.query_rows(&format!("SELECT Name FROM Pool WHERE PoolId={}", record.pool_id)).ok())
+        .and_then(|t| t.rows.into_iter().next())
+        .and_then(|row| row.into_iter().next().flatten());
+    let Some(name) = name else {
+        ua.error_msg(format!("Pool record not found in Catalog.\n"));
+        return None;
+    };
+    if !crate::acl::access(ua.ctx, crate::acl::Kind::Pool, &name) {
+        ua.error_msg(format!("No access to Pool \"{name}\"\n"));
+        return None;
+    }
+    Some(name)
+}
+
+/// `prune volume pool=<pool>` without volumes (ua_prune.cc:486): the
+/// prunable volume report and the selection. Some(empty) when the pool has
+/// no prunable volume, None when nothing is to be done.
+fn select_prunable_volumes(ua: &mut crate::ua_select::Ua, pool: &str) -> Option<Vec<String>> {
+    use super::purge;
+    let pool_id = match crate::ua_select::get_pool_record(ua.ctx, pool) {
+        Ok(id) => id,
+        Err(_) => {
+            ua.error_msg(format!("Pool {pool} doesn't exist.\n"));
+            return None;
+        }
+    };
+    let connection = ua.ctx.catalog.as_ref().and_then(|cat| cat.dedicated().ok());
+    let report = connection.as_ref().and_then(|db| purge::pool_prune_report(ua, db, pool_id));
+    let Some(report) = report else {
+        ua.error_msg(format!("Failed to compute prune details for pool {pool}.\n"));
+        return None;
+    };
+    drop(connection);
+    if report.is_empty() {
+        ua.send_msg(format!("No prunable volumes found in Pool \"{pool}\".\n"));
+        return Some(Vec::new());
+    }
+    ua.send_msg(format!("Prunable volumes in Pool \"{pool}\" (oldest data first):\n"));
+    for (index, volume) in report.iter().enumerate() {
+        ua.send_msg(purge::report_line(index + 1, volume));
+    }
+    let selection = ua.get_cmd("Enter volume numbers or names separated by commas (or \"all\"): ")?;
+    let selection = selection.trim();
+    if selection.is_empty() {
+        ua.error_msg("No volumes selected.\n");
+        return None;
+    }
+    if selection.eq_ignore_ascii_case("all") {
+        return Some(report.into_iter().map(|v| v.name).collect());
+    }
+    let mut selected: Vec<String> = Vec::new();
+    for token in selection.split(',').map(str::trim).filter(|t| !t.is_empty()) {
+        let mut name = token.to_string();
+        if crate::ua_select::is_a_number(token) {
+            let index = crate::commands::job::str_to_int64(token);
+            if index < 1 || index > report.len() as i64 {
+                ua.error_msg(format!("Invalid prune selection \"{token}\".\n"));
+                return None;
+            }
+            name = report[index as usize - 1].name.clone();
+        }
+        if selected.contains(&name) {
+            continue;
+        }
+        if !report.iter().any(|v| v.name == name) {
+            ua.error_msg(format!("Volume \"{name}\" is not currently prunable in Pool \"{pool}\".\n"));
+            return None;
+        }
+        selected.push(name);
+    }
+    Some(selected)
 }
 
 /// Duration directive of the Director resource (raw configuration).
@@ -896,42 +981,56 @@ fn director_duration(ctx: &ExecContext, directive: &str, default: u64) -> u64 {
     }).unwrap_or(default)
 }
 
-/// The catalog work of a confirmed prune. Only job pruning by client and the
-/// pool-wide volume pruning exist in the catalog layer; the other prune
-/// kinds report that they are not supported (nothing is changed).
-fn prune_execute(ua: &mut crate::ua_select::Ua, action: PruneAction) -> bool {
-    let Some(cat) = ua.ctx.catalog.clone() else {
-        ua.send_msg("No catalog configured\n");
-        return true;
-    };
-    match action {
-        PruneAction::Jobs { client, retention } => {
-            let days = retention / 86_400;
-            match cat.raw_query(&format!("SELECT sp_prune_expired_jobs('{}', {days})", client.replace('\'', "''"))) {
-                Ok(result) => {
-                    ua.send_msg(format!("Pruned jobs: {}\n", result.trim()));
-                    true
-                }
-                Err(e) => {
-                    ua.error_msg(format!("Prune error: {e}\n"));
-                    false
-                }
-            }
+/// A private catalog connection for the catalog work (temporary tables of
+/// PruneJobs and UpgradeCopies need one connection).
+fn private_db(ua: &mut crate::ua_select::Ua) -> Option<crate::catalog_worker::CatalogConnection> {
+    let connection = ua.ctx.catalog.as_ref().map(|cat| cat.dedicated());
+    match connection {
+        Some(Ok(connection)) => Some(connection),
+        Some(Err(error)) => {
+            ua.error_msg(format!("{error}\n"));
+            None
         }
-        PruneAction::Files { .. } => { ua.send_msg("prune files: not supported\n"); false }
-        PruneAction::Volume(_) => { ua.send_msg("prune volume: not supported\n"); false }
-        PruneAction::Stats(_) => { ua.send_msg("prune stats: not supported\n"); false }
-        PruneAction::Directory { .. } => { ua.send_msg("prune directory: not supported\n"); false }
+        None => {
+            ua.send_msg("No catalog configured\n");
+            None
+        }
+    }
+}
+
+/// The catalog work of a confirmed prune (commands/purge.rs).
+fn prune_execute(ua: &mut crate::ua_select::Ua, action: PruneAction) -> bool {
+    use super::purge;
+    let Some(db) = private_db(ua) else { return false };
+    match action {
+        PruneAction::Files { client, pool, retention } => {
+            purge::prune_files(ua, &db, &client, pool.as_deref(), retention);
+            true
+        }
+        PruneAction::Jobs { client, pool, retention } => purge::prune_jobs(ua, &db, &client, pool.as_deref(), retention),
+        PruneAction::Volume(name) => match purge::get_volume_by_name(&db, &name) {
+            Ok(mut volume) => purge::prune_volume(ua, &db, &mut volume),
+            Err(error) => {
+                ua.error_msg(error);
+                false
+            }
+        },
+        PruneAction::Stats(retention) => {
+            purge::prune_stats(ua, &db, retention);
+            true
+        }
+        PruneAction::Directory { client, path, recursive } => purge::prune_directory(ua, &db, client.as_deref(), &path, recursive),
     }
 }
 
 pub fn cmd_purge(ast: &CommandAst, ctx: &ExecContext) -> CommandResult {
     let mut ua = crate::ua_select::Ua::new(ctx);
-    let ok = purge_dialog(&mut ua, ast, purge_execute);
+    let ok = purge_dialog(&mut ua, ast, |ua, action| purge_execute(ua, ast, action));
     ua.finish(ok)
 }
 
-/// What a purge does once its target is known (purge has no confirmation).
+/// What a purge does once its target is known (the confirmation follows
+/// in purge_execute once the jobs are counted).
 #[derive(Debug, PartialEq, Eq)]
 enum PurgeAction {
     FilesOfJob(i64),
@@ -1107,30 +1206,21 @@ fn get_job_dbr(ua: &mut crate::ua_select::Ua, ast: &CommandAst) -> Option<i64> {
     }
 }
 
-/// The catalog work of a purge.
-fn purge_execute(ua: &mut crate::ua_select::Ua, action: PurgeAction) {
-    let Some(cat) = ua.ctx.catalog.clone() else {
-        ua.send_msg("No catalog configured\n");
-        return;
-    };
-    let result = match &action {
-        PurgeAction::FilesOfJob(jobid) => cat.raw_query(&format!("DELETE FROM file WHERE jobid = {jobid}"))
-            .map(|_| format!("Purged files from JobId {jobid}\n")),
-        PurgeAction::JobsOfClient(client) => {
-            let client = client.replace('\'', "''");
-            cat.raw_query(&format!("DELETE FROM jobmedia WHERE jobid IN (SELECT jobid FROM job j JOIN client c ON j.clientid = c.clientid WHERE c.name = '{client}'); \
-                 DELETE FROM job WHERE clientid IN (SELECT clientid FROM client WHERE name = '{client}')"))
-                .map(|_| format!("Purged jobs for client {client}\n"))
-        }
-        PurgeAction::JobsOfVolume(volume) => cat.raw_query(&format!("SELECT sp_purge_volume('{}')", volume.replace('\'', "''")))
-            .map(|result| format!("Volume \"{volume}\" purged ({} jobmedia records removed)\n", result.trim())),
-        PurgeAction::FilesOfClient(_) => Ok("purge files client: not supported\n".to_string()),
-        PurgeAction::JobsOfPool(_) => Ok("purge jobs pool: not supported\n".to_string()),
-        PurgeAction::QuotaOfClient(_) => Ok("purge quota: not supported\n".to_string()),
-    };
-    match result {
-        Ok(text) => ua.send_msg(text),
-        Err(e) => ua.error_msg(format!("Purge error: {e}\n")),
+/// The catalog work of a purge (commands/purge.rs); the confirmations
+/// ("Purge (yes/no)? ") are asked there once the jobs are counted.
+fn purge_execute(ua: &mut crate::ua_select::Ua, ast: &CommandAst, action: PurgeAction) {
+    use super::purge;
+    let Some(db) = private_db(ua) else { return };
+    match action {
+        PurgeAction::FilesOfJob(jobid) => purge::purge_files(&db, &jobid.to_string()),
+        PurgeAction::FilesOfClient(client) => purge::purge_files_from_client(ua, ast, &db, &client),
+        PurgeAction::JobsOfClient(client) => purge::purge_jobs_from_client(ua, ast, &db, &client),
+        PurgeAction::JobsOfVolume(volume) => match purge::get_volume_by_name(&db, &volume) {
+            Ok(mut volume) => { purge::purge_jobs_from_volume(ua, ast, &db, &mut volume, true); }
+            Err(error) => ua.error_msg(error),
+        },
+        PurgeAction::JobsOfPool(pool) => purge::purge_jobs_from_pool(ua, ast, &db, &pool),
+        PurgeAction::QuotaOfClient(client) => purge::purge_quota_from_client(ua, &db, &client),
     }
 }
 
@@ -1359,7 +1449,7 @@ pub(crate) mod side_effect_tests {
             Continue? (yes/mod/no): .\n".to_string(), None));
         assert_eq!(prune("prune files client=fd1", &["no"]).1, None);
         assert_eq!(prune("prune", &["2", "mod", "3 days", "yes"]).1,
-            Some(PruneAction::Jobs { client: "fd1".into(), retention: 3 * 86_400 }));
+            Some(PruneAction::Jobs { client: "fd1".into(), pool: None, retention: 3 * 86_400 }));
         assert_eq!(prune("prune stats", &["."]).0,
             "The current Statistics retention period is: 5 years 1 month 5 days \nContinue? (yes/mod/no): .\n");
         assert_eq!(prune("prune directory", &["no", "."]).0,
@@ -1372,7 +1462,7 @@ pub(crate) mod side_effect_tests {
         let mut ua = crate::ua_select::Ua::new(&ctx);
         let mut acted = None;
         prune_dialog(&mut ua, &ast("prune jobs client=fd1 yes"), |_, action| { acted = Some(action); true });
-        assert_eq!(acted, Some(PruneAction::Jobs { client: "fd1".into(), retention: 180 * 86_400 }));
+        assert_eq!(acted, Some(PruneAction::Jobs { client: "fd1".into(), pool: None, retention: 180 * 86_400 }));
 
         // Purge: the warning, then the keyword menu for incomplete requests.
         let purge = |line: &str, answers: &[&str]| {
@@ -1411,7 +1501,8 @@ pub(crate) mod side_effect_tests {
         let writes = |log: &Vec<String>| log.iter().filter(|q| !q.trim_start().to_ascii_uppercase().starts_with("SELECT")).count();
         assert_eq!(writes(&log.lock().unwrap()), 0, "{:?}", log.lock().unwrap());
         scripted(&[], || cmd_purge(&ast("purge jobs client=fd1"), &ctx));
-        assert_eq!(writes(&log.lock().unwrap()), 1, "control: a complete purge reaches the catalog");
+        assert!(log.lock().unwrap().iter().any(|q| q == "other request"),
+            "control: a complete purge asks for the private catalog connection");
     }
 
     #[test]

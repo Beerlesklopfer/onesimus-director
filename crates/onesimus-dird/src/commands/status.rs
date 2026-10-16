@@ -466,7 +466,7 @@ fn list_running_jobs(ua: &mut Ua, ctx: &ExecContext) {
 }
 
 /// lib/edit.cc edit_uint64_with_suffix(): "126.3 M", "0 ".
-fn edit_uint64_with_suffix(v: u64) -> String {
+pub(crate) fn edit_uint64_with_suffix(v: u64) -> String {
     const SUFFIX: [&str; 10] = ["", "K", "M", "G", "T", "P", "E", "Z", "Y", "FIX ME"];
     let with_commas = crate::sql_list::add_commas(&v.to_string());
     let commas = with_commas.matches(',').count().min(SUFFIX.len() - 1);

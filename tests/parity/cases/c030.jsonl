@@ -1,0 +1,52 @@
+{"id": "c030-prune-job", "steps": ["prune"], "console": "parity-c030-job", "password": "parity-c030-pw"}
+{"id": "c030-purge-job", "steps": ["purge"], "console": "parity-c030-job", "password": "parity-c030-pw"}
+{"id": "c030-add-job-cancel", "steps": ["add", "."], "console": "parity-c030-job", "password": "parity-c030-pw"}
+{"id": "c030-prune-storage", "steps": ["prune"], "console": "parity-c030-storage", "password": "parity-c030-pw"}
+{"id": "c030-purge-storage", "steps": ["purge"], "console": "parity-c030-storage", "password": "parity-c030-pw"}
+{"id": "c030-add-storage-cancel", "steps": ["add", "."], "console": "parity-c030-storage", "password": "parity-c030-pw"}
+{"id": "c030-prune-client", "steps": ["prune"], "console": "parity-c030-client", "password": "parity-c030-pw"}
+{"id": "c030-purge-client", "steps": ["purge"], "console": "parity-c030-client", "password": "parity-c030-pw"}
+{"id": "c030-add-client-cancel", "steps": ["add", "."], "console": "parity-c030-client", "password": "parity-c030-pw"}
+{"id": "c030-prune-pool", "steps": ["prune"], "console": "parity-c030-pool", "password": "parity-c030-pw"}
+{"id": "c030-purge-pool", "steps": ["purge"], "console": "parity-c030-pool", "password": "parity-c030-pw"}
+{"id": "c030-add-pool-cancel", "steps": ["add", "."], "console": "parity-c030-pool", "password": "parity-c030-pw"}
+{"id": "c030-prune-volume-client", "steps": ["prune volume=Full-0001"], "console": "parity-c030-client", "password": "parity-c030-pw"}
+{"id": "c030-prune-stats-client", "steps": ["prune stats"], "console": "parity-c030-client", "password": "parity-c030-pw"}
+{"id": "c030-prune-stats-pool", "steps": ["prune stats"], "console": "parity-c030-pool", "password": "parity-c030-pw"}
+{"id": "c030-prune-directory-pool", "steps": ["prune directory"], "console": "parity-c030-pool", "password": "parity-c030-pw"}
+{"id": "c030-prune-directory-client-cancel", "steps": ["prune directory", "."], "console": "parity-c030-client", "password": "parity-c030-pw"}
+{"id": "c030-prune-files-pool-cancel", "steps": ["prune files client=bareos-fd", "."], "console": "parity-c030-pool", "password": "parity-c030-pw"}
+{"id": "c030-prune-jobs-pool-cancel", "steps": ["prune jobs client=bareos-fd", "."], "console": "parity-c030-pool", "password": "parity-c030-pw"}
+{"id": "c030-prune-volume-pool-cancel", "steps": ["prune volume", "."], "console": "parity-c030-pool", "password": "parity-c030-pw"}
+{"id": "c030-prune-job-api1", "setup": [".api 1"], "steps": ["prune"], "console": "parity-c030-job", "password": "parity-c030-pw"}
+{"id": "c030-purge-client-api1", "setup": [".api 1"], "steps": ["purge"], "console": "parity-c030-client", "password": "parity-c030-pw"}
+{"id": "c030-purge-pool-api2", "setup": [".api 2"], "steps": ["purge"], "console": "parity-c030-pool", "password": "parity-c030-pw"}
+{"id": "c030-prune-storage-api2", "setup": [".api 2"], "steps": ["prune"], "console": "parity-c030-storage", "password": "parity-c030-pw"}
+{"id": "c030-purge-jobs-client-no", "steps": ["purge jobs client=bareos-fd", "no"]}
+{"id": "c030-purge-jobs-client-cancel", "steps": ["purge jobs client=bareos-fd", "."]}
+{"id": "c030-purge-jobs-client-invalid-answer", "steps": ["purge jobs client=bareos-fd", "maybe", "no"]}
+{"id": "c030-purge-jobs-client-api1", "setup": [".api 1"], "steps": ["purge jobs client=bareos-fd"]}
+{"id": "c030-purge-jobs-client-api2", "setup": [".api 2"], "steps": ["purge jobs client=bareos-fd"]}
+{"id": "c030-purge-jobs-client-jobstatus-bad", "steps": ["purge jobs client=bareos-fd jobstatus=bogus"]}
+{"id": "c030-purge-jobs-client-jobstatus-no", "steps": ["purge jobs client=bareos-fd jobstatus=T,error", "no"]}
+{"id": "c030-purge-files-client-no", "steps": ["purge files client=bareos-fd", "no"]}
+{"id": "c030-purge-files-menu-client-no", "steps": ["purge", "1", "no"]}
+{"id": "c030-purge-jobs-pool-no", "steps": ["purge jobs pool=Full", "no"]}
+{"id": "c030-purge-jobs-pool-incremental-no", "steps": ["purge jobs pool=Incremental", "no"]}
+{"id": "c030-purge-volume-no", "steps": ["purge volume=Full-47321", "no"]}
+{"id": "c030-purge-volume-error-no", "steps": ["purge volume=Full-0001", "no"]}
+{"id": "c030-purge-volume-jobstatus-bad", "steps": ["purge volume=Full-47321 jobstatus=xx"]}
+{"id": "c030-purge-volume-jobid", "steps": ["purge volume=Full-47321 jobid=1"]}
+{"id": "c030-purge-volume-two-no", "steps": ["purge volume=Full-47321 volume=Incremental-47322", "no", "no"]}
+{"id": "c030-purge-volume-menu-no", "steps": ["purge", "3", "2", "Incremental-47322", "no"]}
+{"id": "c030-purge-volume-api1", "setup": [".api 1"], "steps": ["purge volume=Full-47321"]}
+{"id": "c030-purge-quota-client", "steps": ["purge quota client=bareos-fd"]}
+{"id": "c030-prune-volume-pool-report", "steps": ["prune volume pool=Incremental"]}
+{"id": "c030-prune-volume-all-no", "steps": ["prune volume all", "no"]}
+{"id": "c030-prune-volume-all-pool-no", "steps": ["prune volume all pool=Full", "no"]}
+{"id": "c030-prune-volume-wrong-pool-no", "steps": ["prune volume=Full-47321 pool=Incremental", "no"]}
+{"id": "c030-prune-volume-invalid-name", "steps": ["prune volume=bad*name"]}
+{"id": "c030-prune-files-no", "steps": ["prune files client=bareos-fd", "no"]}
+{"id": "c030-prune-files-pool-no", "steps": ["prune files client=bareos-fd pool=Full", "no"]}
+{"id": "c030-prune-directory-client-no-path", "steps": ["prune directory client=bareos-fd", "."]}
+{"id": "c030-prune-volume-pool-api1", "setup": [".api 1"], "steps": ["prune volume pool=Full"]}

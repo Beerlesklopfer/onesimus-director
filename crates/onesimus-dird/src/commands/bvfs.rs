@@ -787,7 +787,7 @@ fn compute_restore_list(db: &dyn Db, jobids: &str, fileid: &str, dirid: &str, ha
 
 /// C++ BareosDb::AccurateGetJobids() for the console (jcr->JobId 0):
 /// Full + Differential + Incrementals up to `date`.
-fn accurate_get_jobids(db: &dyn Db, client_id: i64, job_type: char, date: &str, fileset_id: i64) -> Option<Vec<String>> {
+pub(crate) fn accurate_get_jobids(db: &dyn Db, client_id: i64, job_type: char, date: &str, fileset_id: i64) -> Option<Vec<String>> {
     let jobid = 0;
     let retval = 'bail: {
         let create = format!(
