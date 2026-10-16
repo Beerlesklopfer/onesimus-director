@@ -80,10 +80,11 @@ Runden sind gemergt. Tests grün: onesimus-dird 365 + 4, oconsole 26, bareos-con
 bareos-bnet 46. Voller Paritätslauf auf dem Endstand (16.10.2026, Baseline aktualisiert): 1436 von 1443
 Fällen byte-identisch, keine Regression.
 
-Verbleibende Unterschiede im Paritätslauf: `banner`, `banner-limited`, `status-dir`,
-`status-subscriptions`, `dot-status-dir-running` (nur fehlende Normalisierung von
-Version/Zeit in alten Fällen), `var` (Original gibt bei nacktem `var` Speicherreste aus),
-`c035-delete-noarg-api2` (C-046).
+Verbleibende Unterschiede im Paritätslauf: nur noch `c035-delete-noarg-api2` (C-046).
+Die alten Fälle `banner*`, `status-dir`, `status-subscriptions`, `dot-status-dir-running`
+normalisieren seit 16.10.2026 Versionstoken, Build-Datum, Binary-Info und Zeiten wie die
+neueren Fälle. `var`: das Original gibt bei nacktem `var` undefinierte Speicherreste aus;
+der Fall prüft daher nur noch die Katalogzeilen davor (Hinweis im Fall, Commit `dd377c0`).
 
 Instabile Fälle (gelegentlich rot, allein grün): `status-client` (echter FD wird von
 mehreren Directors gleichzeitig benutzt), `list-jobs` (Jobs mit gleicher Startzeit ohne
@@ -94,8 +95,6 @@ eindeutige Sortierung), `c015-list-jobs-enabled-count` (undefiniertes Verhalten 
 - Einträge mit Status „offen“ in der Tabelle: C-043 bis C-052.
 - OVFS (eigene PostgreSQL-Extension, paralleles Projekt `oenesimus-postgres-plugin`) ist der Onesimus-Weg für Verzeichnisbäume und Restore-Auswahl. BVFS (`commands/bvfs.rs`, byte-gleich portiert, Fälle `c022`) bleibt nur zur Abwärtskompatibilität für Bareos-Clients (z. B. bareos-webui) erhalten und darf sich dabei nicht ändern.
 - Prüfen, ob C-012s Wertvalidierung für `update` (`3500719`) nach dem C-011-Merge vollständig erhalten ist.
-- Normalisierung der alten Fälle (`banner*`, `status-dir`, `status-subscriptions`,
-  `dot-status-dir-running`) auf Versionstoken/Zeit, damit sie grün werden.
 - Referenzquelle auf `18be77e6` umstellen (exakter Stand des installierten `bareos-dir`).
 
 ### Testumgebung und Regeln
