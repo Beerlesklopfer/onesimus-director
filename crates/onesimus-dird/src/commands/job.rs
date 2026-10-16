@@ -768,8 +768,8 @@ mod run_confirmation_tests {
             assert!(!log2.lock().unwrap().iter().any(|request| request == "CreateJob"), "{answers:?}");
         }
         let rerun = crate::commands::extra::cmd_rerun(&crate::session::parse_cli_command("rerun jobid=1"), &ctx);
-        assert!(rerun.text_output.starts_with("rerunning jobid 1\n") && rerun.text_output.ends_with("Job not run.\n"),
-            "{}", rerun.text_output);
+        // The double has no Job record: reRunJob stops after the announcement.
+        assert_eq!(rerun.text_output, "rerunning jobid 1\n");
         assert!(!log.lock().unwrap().iter().any(|request| request == "CreateJob"), "{:?}", log.lock().unwrap());
         assert!(ctx.job_manager.as_ref().unwrap().lock().unwrap().running_jobs().is_empty());
         // Control: with `yes` the double sees the job record request (and
