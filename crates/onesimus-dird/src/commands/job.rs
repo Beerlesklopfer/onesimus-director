@@ -1667,7 +1667,8 @@ fn run_selected(
             Ok(id) => id as u32,
             Err(e) => {
                 tracing::error!("Failed to create job record: {e}");
-                return CommandResult::error(format!("Failed to create job record: {e}\n"));
+                // RunJob() returned JobId 0 (ua_run.cc:509).
+                return CommandResult::error("Job failed.\n".to_string());
             }
         }
     } else {
@@ -1735,21 +1736,14 @@ fn run_selected(
         }
     }
 
-    let output = format!(
-        "Job queued. JobId={job_id}\n\
-         Run {:?} job\n\
-         Job:        {}\n\
-         Level:      {level}\n\
-         Client:     {client_name}\n\
-         Storage:    {storage_name}\n\
-         Pool:       {pool}\n\
-         FileSet:    {}\n\
-         Priority:   {}\n\
-         When:       now\n",
-        job.job_type, job.name, fileset_name, job.priority,
-    );
+    job_queued(job_id)
+}
 
-    CommandResult::ok(output)
+/// DoRunCmd (ua_run.cc:513): ObjectKeyValue("jobid", …, "Job queued. JobId=%s\n")
+/// inside the "run" object; the JobId is a string in JSON.
+fn job_queued(job_id: u32) -> CommandResult {
+    CommandResult::ok(format!("Job queued. JobId={job_id}\n"))
+        .with_json(serde_json::json!({"run": {"jobid": job_id.to_string()}}))
 }
 
 /// Decide the effective backup level before creating its catalog record or worker.
@@ -2122,6 +2116,13 @@ mod run_confirmation_tests {
         let result = start_job(&crate::session::parse_cli_command("run job=a1 yes"), &ctx, job);
         assert!(!result.success);
         assert_eq!(result.error_message, "Running Admin jobs is not available yet.\n");
+    }
+
+    #[test]
+    fn queued_jobs_report_the_jobid_as_string() {
+        let result = job_queued(42);
+        assert_eq!(result.text_output, "Job queued. JobId=42\n");
+        assert_eq!(result.json, Some(serde_json::json!({"run": {"jobid": "42"}})));
     }
 
     #[test]
