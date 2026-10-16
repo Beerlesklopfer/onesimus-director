@@ -1,0 +1,10 @@
+{"id": "c053-truncate-drive-negative", "steps": ["truncate volstatus=Purged drive=-1"]}
+{"id": "c053-truncate-drive-plus", "steps": ["truncate volstatus=Purged drive=+1"]}
+{"id": "c053-truncate-drive-large-confirm-no", "steps": ["truncate volstatus=Purged drive=99999999999", "no"]}
+{"id": "c053-truncate-drive-confirm-no", "steps": ["truncate volstatus=Purged drive=1", "no"]}
+{"id": "c053-truncate-volstatus-first-without-value", "steps": ["truncate volstatus volstatus=Purged"]}
+{"id": "c053-truncate-storage-first-without-value", "steps": ["truncate volstatus=Purged storage storage=File"]}
+{"id": "c053-truncate-volume-unknown", "steps": ["truncate volstatus=Purged volume=c053-nosuchvolume"]}
+{"id": "c053-truncate-volume-confirm-no", "steps": ["truncate volstatus=Purged volume=Full-0001", "no"]}
+{"id": "c053-truncate-catalog-arg", "steps": ["truncate volstatus=Purged catalog=MyCatalog"]}
+{"id": "c053-truncate-client-arg", "steps": ["truncate volstatus=Purged client=bareos-fd"]}
