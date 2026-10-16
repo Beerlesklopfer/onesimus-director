@@ -199,7 +199,9 @@ impl ListOut<'_> {
             self.json.insert("meta".into(), json!({ "range": range }));
         }
         if ok && self.errors.is_empty() {
-            CommandResult::ok(self.text).with_json(Value::Object(self.json))
+            let result = CommandResult::ok(self.text).with_json(Value::Object(self.json));
+            // `.api 1` NF_LIST rows have no newline (Decoration): send as is
+            if crate::sql_list::decorations() { result } else { result.verbatim() }
         } else {
             let mut r = CommandResult::error(self.errors);
             r.text_output = self.text;
@@ -622,8 +624,10 @@ fn do_list(args: &Args, ctx: &ExecContext, cat: &CatalogHandle, ty: ListType, ou
                      WHERE Job.Type = 'c' {filter} ORDER BY Job.PriorJobId DESC {range} ");
                 let Some(t) = query(cat, &sql, out) else { return false };
                 if !t.rows.is_empty() {
-                    out.text.push_str(if jobids.is_some() { "These JobIds have copies as follows:\n" }
-                                      else { "The catalog contains copies as follows:\n" });
+                    if crate::sql_list::decorations() { // Decoration, sql_list.cc:367
+                        out.text.push_str(if jobids.is_some() { "These JobIds have copies as follows:\n" }
+                                          else { "The catalog contains copies as follows:\n" });
+                    }
                     out.array("copies", &t, ty);
                 }
                 return true;
@@ -1148,7 +1152,9 @@ fn list_pools(args: &Args, ctx: &ExecContext, cat: &CatalogHandle, ty: ListType,
                 out.error(format!("Failed to compute prune details for pool {name}.\n"));
                 return false;
             };
-            out.text.push_str(&report.text());
+            if crate::sql_list::decorations() {
+                out.text.push_str(&report.text()); // Decoration only, ua_output.cc:228-280
+            }
         }
     }
     true
@@ -1444,7 +1450,9 @@ fn list_media(args: &Args, ctx: &ExecContext, cat: &CatalogHandle, ty: ListType,
             continue;
         }
         let Some(t) = query(cat, &media_of_pool_sql(ty, opts.count, id, range), out) else { return false };
-        out.text.push_str(&format!("Pool: {name}\n"));
+        if crate::sql_list::decorations() {
+            out.text.push_str(&format!("Pool: {name}\n")); // Decoration, ua_output.cc:813
+        }
         let shown = out.shown(&t);
         out.text.push_str(&render_shown(&t, ty, &shown));
         grouped.insert(name.to_lowercase(), Value::Array(shown_json(&t, &shown)));

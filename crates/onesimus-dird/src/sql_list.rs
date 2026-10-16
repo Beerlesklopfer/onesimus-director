@@ -28,6 +28,8 @@ thread_local! {
     /// `jcr->gui` of the console whose command is running on this thread
     /// (set by `gui on`, cats/sql.cc ListResult checks it per value).
     static GUI: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+    /// `.api 1` of the running command (set by command_executor::dispatch).
+    static API1: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
 }
 
 /// Run `f` with `jcr->gui` set to `gui` (restored afterwards, like the
@@ -41,6 +43,22 @@ pub fn with_gui<R>(gui: bool, f: impl FnOnce() -> R) -> R {
 
 fn gui() -> bool {
     GUI.with(std::cell::Cell::get)
+}
+
+/// Run `f` with the `.api 1` flag set: OutputFormatter::Decoration() prints
+/// nothing in API_MODE_ON (lib/output_formatter.cc:90-104), so ListResult
+/// drops dashes, header, the leading "|", the blank line after `llist`
+/// records and "No results to list." (cats/sql.cc:661, 534-627).
+pub fn with_api1<R>(on: bool, f: impl FnOnce() -> R) -> R {
+    let old = API1.with(|c| c.replace(on));
+    let r = f();
+    API1.with(|c| c.set(old));
+    r
+}
+
+/// True while OutputFormatter::Decoration() output is printed (not `.api 1`).
+pub fn decorations() -> bool {
+    !API1.with(|c| c.get())
 }
 
 /// Rows as JSON objects; every value is a string, NULL becomes "" (C++ semantics).
@@ -64,7 +82,7 @@ pub fn render(t: &SqlTable, ty: ListType) -> String {
 /// "No results to list." and the column widths still count every row.
 pub fn render_shown(t: &SqlTable, ty: ListType, shown: &[bool]) -> String {
     if t.rows.is_empty() {
-        return "No results to list.\n".to_string();
+        return if decorations() { "No results to list.\n".to_string() } else { String::new() };
     }
     let rows = || t.rows.iter().zip(shown).filter(|(_, s)| **s).map(|(r, _)| r);
     match ty {
@@ -77,7 +95,7 @@ pub fn render_shown(t: &SqlTable, ty: ListType, shown: &[bool]) -> String {
                     out.push(' ');
                     out.push_str(v.as_deref().unwrap_or(""));
                 }
-                if ty == ListType::Nf {
+                if ty == ListType::Nf && decorations() {
                     out.push('\n');
                 }
             }
@@ -133,15 +151,21 @@ fn dashes(widths: &[usize]) -> String {
 
 fn horz<'a>(t: &SqlTable, rows: impl Iterator<Item = &'a Vec<Option<String>>>) -> String {
     let widths = column_widths(t);
-    let mut out = dashes(&widths);
-    out.push('|');
-    for (col, w) in t.columns.iter().zip(&widths) {
-        out.push_str(&format!(" {:<w$} |", col.name, w = w));
-    }
-    out.push('\n');
-    out.push_str(&dashes(&widths));
-    for row in rows {
+    let deco = decorations();
+    let mut out = String::new();
+    if deco {
+        out.push_str(&dashes(&widths));
         out.push('|');
+        for (col, w) in t.columns.iter().zip(&widths) {
+            out.push_str(&format!(" {:<w$} |", col.name, w = w));
+        }
+        out.push('\n');
+        out.push_str(&dashes(&widths));
+    }
+    for row in rows {
+        if deco {
+            out.push('|');
+        }
         for ((col, v), w) in t.columns.iter().zip(row).zip(&widths) {
             let cell = match v {
                 None => format!(" {:<w$} |", "", w = w),
@@ -157,7 +181,9 @@ fn horz<'a>(t: &SqlTable, rows: impl Iterator<Item = &'a Vec<Option<String>>>) -
         }
         out.push('\n');
     }
-    out.push_str(&dashes(&widths));
+    if deco {
+        out.push_str(&dashes(&widths));
+    }
     out
 }
 
@@ -173,7 +199,9 @@ fn vert<'a>(t: &SqlTable, rows: impl Iterator<Item = &'a Vec<Option<String>>>) -
             };
             out.push_str(&format!(" {:>w$}: {value}\n", col.name, w = key_len));
         }
-        out.push('\n');
+        if decorations() {
+            out.push('\n');
+        }
     }
     out
 }
@@ -279,5 +307,19 @@ mod tests {
     #[test]
     fn empty_result() {
         assert_eq!(render(&SqlTable::default(), ListType::Horz), "No results to list.\n");
+    }
+
+    /// `.api 1`: Decoration() is silent (lib/output_formatter.cc:90-104).
+    #[test]
+    fn api1_drops_decorations() {
+        with_api1(true, || {
+            assert_eq!(render(&table(), ListType::Horz),
+                "   479 | benchmark-small | 824,021,543 |\n    12 |                 |           0 |\n");
+            assert!(render(&table(), ListType::Vert)
+                .starts_with("    jobid: 479\n     name: benchmark-small\n jobbytes: 824,021,543\n    jobid: 12\n"));
+            assert_eq!(render(&table(), ListType::Nf), " 479 benchmark-small 824021543 12  0");
+            assert_eq!(render(&SqlTable::default(), ListType::Horz), "");
+        });
+        assert!(decorations());
     }
 }

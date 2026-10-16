@@ -1,0 +1,77 @@
+# C-028: .api 1 output (OutputFormatter::Decoration suppressed, api-dependent branches)
+{"id": "c028-list-jobs", "steps": ["list jobs"], "setup": [".api 1"]}
+{"id": "c028-llist-jobs", "steps": ["llist jobs"], "setup": [".api 1"]}
+{"id": "c028-list-jobs-limit", "steps": ["list jobs limit=2"], "setup": [".api 1"]}
+{"id": "c028-llist-jobs-limit", "steps": ["llist jobs limit=2"], "setup": [".api 1"]}
+{"id": "c028-list-jobs-count", "steps": ["list jobs count"], "setup": [".api 1"]}
+{"id": "c028-list-jobs-last", "steps": ["list jobs last"], "setup": [".api 1"]}
+{"id": "c028-list-jobid", "steps": ["list jobid=1"], "setup": [".api 1"]}
+{"id": "c028-llist-jobid", "steps": ["llist jobid=1"], "setup": [".api 1"]}
+{"id": "c028-list-job", "steps": ["list job=backup-bareos-fd limit=2"], "setup": [".api 1"]}
+{"id": "c028-list-jobtotals", "steps": ["list jobtotals"], "setup": [".api 1"]}
+{"id": "c028-llist-jobtotals", "steps": ["llist jobtotals"], "setup": [".api 1"]}
+{"id": "c028-list-basefiles", "steps": ["list basefiles jobid=1"], "setup": [".api 1"]}
+{"id": "c028-list-files", "steps": ["list files jobid=1 limit=3"], "setup": [".api 1"]}
+{"id": "c028-llist-files", "steps": ["llist files jobid=1 limit=3"], "setup": [".api 1"]}
+{"id": "c028-list-fileset", "steps": ["list fileset jobid=1"], "setup": [".api 1"]}
+{"id": "c028-llist-fileset", "steps": ["llist fileset jobid=1"], "setup": [".api 1"]}
+{"id": "c028-list-filesets", "steps": ["list filesets"], "setup": [".api 1"]}
+{"id": "c028-llist-filesets", "steps": ["llist filesets"], "setup": [".api 1"]}
+{"id": "c028-list-jobmedia", "steps": ["list jobmedia jobid=1"], "setup": [".api 1"]}
+{"id": "c028-llist-jobmedia", "steps": ["llist jobmedia jobid=1"], "setup": [".api 1"]}
+{"id": "c028-list-joblog", "steps": ["list joblog jobid=1 limit=3"], "setup": [".api 1"]}
+{"id": "c028-llist-joblog", "steps": ["llist joblog jobid=1 limit=3"], "setup": [".api 1"]}
+{"id": "c028-list-log", "steps": ["list log limit=3"], "setup": [".api 1"]}
+{"id": "c028-llist-log", "steps": ["llist log limit=3"], "setup": [".api 1"]}
+{"id": "c028-list-pools", "steps": ["list pools"], "setup": [".api 1"]}
+{"id": "c028-llist-pools", "steps": ["llist pools"], "setup": [".api 1"]}
+{"id": "c028-list-pool", "steps": ["list pool=Full"], "setup": [".api 1"]}
+{"id": "c028-list-clients", "steps": ["list clients"], "setup": [".api 1"]}
+{"id": "c028-llist-clients", "steps": ["llist clients"], "setup": [".api 1"]}
+{"id": "c028-list-client", "steps": ["list client=bareos-fd"], "setup": [".api 1"]}
+{"id": "c028-list-storages", "steps": ["list storages"], "setup": [".api 1"]}
+{"id": "c028-llist-storages", "steps": ["llist storages"], "setup": [".api 1"]}
+{"id": "c028-list-volumes", "steps": ["list volumes"], "setup": [".api 1"]}
+{"id": "c028-llist-volumes", "steps": ["llist volumes"], "setup": [".api 1"]}
+{"id": "c028-list-volumes-pool", "steps": ["list volumes pool=Full"], "setup": [".api 1"]}
+{"id": "c028-list-media-all", "steps": ["list media all"], "setup": [".api 1"]}
+{"id": "c028-list-volume", "steps": ["list volume=nosuch"], "setup": [".api 1"]}
+{"id": "c028-list-mediaid", "steps": ["list mediaid=1"], "setup": [".api 1"]}
+{"id": "c028-list-nextvol", "steps": ["list nextvol job=backup-bareos-fd"], "setup": [".api 1"]}
+{"id": "c028-list-copies", "steps": ["list copies"], "setup": [".api 1"]}
+{"id": "c028-list-copies-jobid", "steps": ["list copies jobid=1"], "setup": [".api 1"]}
+{"id": "c028-list-backups", "steps": ["list backups client=bareos-fd limit=3"], "setup": [".api 1"]}
+{"id": "c028-llist-backups", "steps": ["llist backups client=bareos-fd limit=3"], "setup": [".api 1"]}
+{"id": "c028-list-jobstats", "steps": ["list jobstatistics jobid=1"], "setup": [".api 1"]}
+{"id": "c028-list-jobs-disabled", "steps": ["list jobs disabled"], "setup": [".api 1"]}
+{"id": "c028-list-clients-disabled", "steps": ["list clients disabled"], "setup": [".api 1"]}
+{"id": "c028-list-schedules-disabled", "steps": ["list schedules disabled"], "setup": [".api 1"]}
+{"id": "c028-list-jobid-none", "steps": ["list jobid=99999"], "setup": [".api 1"]}
+{"id": "c028-list-files-none", "steps": ["list files jobid=99999"], "setup": [".api 1"]}
+{"id": "c028-list-noarg", "steps": ["list"], "setup": [".api 1"]}
+{"id": "c028-list-bogus", "steps": ["list bogus"], "setup": [".api 1"]}
+{"id": "c028-show-pools", "steps": ["show pools"], "setup": [".api 1"]}
+{"id": "c028-show-job", "steps": ["show job=backup-bareos-fd"], "setup": [".api 1"]}
+{"id": "c028-show-schedules", "steps": ["show schedules"], "setup": [".api 1"]}
+{"id": "c028-show-disabled", "steps": ["show disabled"], "setup": [".api 1"]}
+{"id": "c028-show-all", "steps": ["show all"], "setup": [".api 1"]}
+{"id": "c028-status-scheduler", "steps": ["status scheduler"], "setup": [".api 1"]}
+{"id": "c028-status-dir", "steps": ["status dir"], "setup": [".api 1"], "normalize": ["25\\.1\\.2[~+][\\w.]+", "\\(\\d\\d \\w+ \\d{4}\\)", "\\d\\d-\\w{3}-\\d\\d \\d\\d:\\d\\d", "(Bareos community|Onesimus) binary"]}
+{"id": "c028-status-scheduler-days", "steps": ["status scheduler days=3"], "setup": [".api 1"]}
+{"id": "c028-sql", "steps": [".sql query=\"SELECT poolid, name FROM pool ORDER BY poolid\""], "setup": [".api 1"]}
+{"id": "c028-sql-bad", "steps": [".sql query=\"SELECT nosuch FROM pool\""], "setup": [".api 1"]}
+{"id": "c028-sqlquery", "steps": ["sqlquery", "SELECT poolid, name FROM pool ORDER BY poolid;", "."], "setup": [".api 1"]}
+{"id": "c028-query-1", "steps": ["query", "1", "."], "setup": [".api 1"]}
+{"id": "c028-messages", "steps": ["messages"], "setup": [".api 1"]}
+{"id": "c028-dot-help", "steps": [".help"], "setup": [".api 1"]}
+{"id": "c028-help", "steps": ["help"], "setup": [".api 1"]}
+{"id": "c028-dot-jobs", "steps": [".jobs"], "setup": [".api 1"]}
+{"id": "c028-dot-clients", "steps": [".clients"], "setup": [".api 1"]}
+{"id": "c028-dot-pools", "steps": [".pools"], "setup": [".api 1"]}
+{"id": "c028-help-run", "steps": ["help run"], "setup": [".api 1"]}
+{"id": "c028-show-disabled-jobs", "steps": ["show disabled jobs"], "setup": [".api 1"]}
+{"id": "c028-list-files-all", "steps": ["list files jobid=1"], "setup": [".api 1"]}
+{"id": "c028-llist-jobs-last", "steps": ["llist jobs last"], "setup": [".api 1"]}
+{"id": "c028-list-volumes-count", "steps": ["list volumes count"], "setup": [".api 1"]}
+{"id": "c028-llist-pool-full", "steps": ["llist pool=Full"], "setup": [".api 1"]}
+{"id": "c028-api-toggle", "steps": [".api 1", "list pools", ".api 0", "list pools"]}
