@@ -1814,6 +1814,13 @@ fn start_restore(ctx: &ExecContext, launch: Launch) -> CommandResult {
         replace: Some(replace.clone()),
         restore_jobid: Some(restore_jobid),
         bootstrap: Some(bootstrap),
+        client_name: client.name.clone(),
+        client_first_connection: crate::job_messages::first_client_connection(&client.name),
+    };
+    let report = crate::job_messages::JobReport {
+        kind: crate::job_messages::ReportKind::Restore, job: unique_job.clone(), client: client.name.clone(),
+        sched_time: now.timestamp(), start_time: now.timestamp(),
+        trigger: crate::job_messages::TRIGGER_USER.to_string(), ..Default::default()
     };
 
     drop(config); // Release RwLock before fork
@@ -1824,12 +1831,11 @@ fn start_restore(ctx: &ExecContext, launch: Launch) -> CommandResult {
             job_id, job_name: "RestoreFiles".to_string(),
             status: "Queued".to_string(), timestamp: now_unix(),
         });
-        crate::console_msg::post_job_message(smgr.bus(), ctx.config.as_ref(), BusMessage::JobMessage {
-            job_id, job_name: "RestoreFiles".to_string(),
-            msg_type: MsgType::Info,
-            text: format!("Start Restore JobId={job_id} from Backup JobId={restore_jobid}, Where={where_path}"),
-            timestamp: now_unix(),
-        });
+        for text in [crate::job_messages::version_text(), crate::job_messages::start_restore_text(&unique_job)] {
+            crate::console_msg::post_job_message(smgr.bus(), ctx.config.as_ref(), BusMessage::JobMessage {
+                job_id, job_name: "RestoreFiles".to_string(), msg_type: MsgType::Info, text, timestamp: now_unix(),
+            });
+        }
     }
 
     // Fork the autonomous restore worker
@@ -1840,6 +1846,7 @@ fn start_restore(ctx: &ExecContext, launch: Launch) -> CommandResult {
                 let mut mgr = mgr.lock().unwrap();
                 mgr.add_job(job_id, "RestoreFiles", handle);
                 mgr.set_job_resources(job_id, &client.name, &storage.name);
+                mgr.set_job_report(job_id, report);
             }
         }
         Err(e) => {

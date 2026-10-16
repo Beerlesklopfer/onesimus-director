@@ -172,11 +172,15 @@ pub(crate) fn code(msg_type: MsgType) -> u32 {
     }
 }
 
-/// Current time in the Messages resource's TimestampFormat (default
+/// `mtime` in the Messages resource's TimestampFormat (default
 /// log_timestamp_format "%d-%b %H:%M"), without the separating blank.
-pub(crate) fn timestamp(res: &ConfResource) -> String {
+fn timestamp_at(res: &ConfResource, mtime: i64) -> String {
     let format = directive(res, "timestampformat").filter(|f| !f.is_empty()).unwrap_or("%d-%b %H:%M");
-    crate::localtime::strftime_now(format)
+    crate::localtime::strftime(format, mtime as libc::time_t)
+}
+
+fn now() -> i64 {
+    unsafe { libc::time(std::ptr::null_mut()) as i64 }
 }
 
 /// Destination files kept open like MessageDestinationInfo::file_pointer_.
@@ -184,28 +188,62 @@ static FILES: Mutex<Option<HashMap<(&'static str, String), File>>> = Mutex::new(
 
 /// e_msg() for message types without a prefix of their own ("<name>: ")
 /// delivered by DispatchMessage() through the daemon Messages resource
-/// (the Director's `Messages`). Only `file`, `append` and `console` (the
-/// console message queue) destinations are served; each line gets the "%d-%b %H:%M " timestamp (or the resource's
-/// TimestampFormat).
+/// (the Director's `Messages`).
 pub fn daemon_message(config: &DirectorConfig, msg_type: MsgType, text: &str) {
-    let Some(name) = director(config).and_then(|d| directive(d, "messages")) else { return };
-    let Some(res) = config.raw.iter()
+    let Some(res) = daemon_messages(config) else { return };
+    dispatch(res, code(msg_type), 0, &format!("{}: {text}", config.director.name), None);
+}
+
+/// The Director's Messages resource (`daemon_msgs`).
+pub(crate) fn daemon_messages(config: &DirectorConfig) -> Option<&ConfResource> {
+    let name = director(config).and_then(|d| directive(d, "messages"))?;
+    messages_resource(config, name)
+}
+
+/// The Messages resource `name`.
+pub(crate) fn messages_resource<'a>(config: &'a DirectorConfig, name: &str) -> Option<&'a ConfResource> {
+    config.raw.iter()
         .find(|r| r.norm_type() == "messages" && r.name().is_some_and(|n| n.eq_ignore_ascii_case(name)))
-    else { return };
-    let dt = format!("{} ", timestamp(res));
-    let msg = format!("{}: {text}", config.director.name);
-    let line = format!("{dt}{msg}");
-    let bit = 1u32 << code(msg_type);
+}
+
+/// DispatchMessage(jcr, type, mtime, msg) over the destinations of `res`
+/// that want message type `code` (lib/message.h M_*). `mtime` 0 is now, 1
+/// is now without the date prefix. Served destinations: `console` (the
+/// console message queue), `file`, `append` (date prefix, then the message)
+/// and `catalog` (a Log row through DirDbLogInsert, only with a JCR that
+/// has a catalog: `job_id`). Mail, operator, syslog and the std streams
+/// are not served.
+pub(crate) fn dispatch(res: &ConfResource, code: u32, mtime: i64, msg: &str, job_id: Option<u32>) {
+    let (mtime, dt_conversion) = match mtime {
+        0 => (now(), true),
+        1 => (now(), false),
+        t => (t, true),
+    };
+    let Some(bit) = 1u32.checked_shl(code) else { return };
     let mut files = FILES.lock().unwrap_or_else(|e| e.into_inner());
     let files = files.get_or_insert_with(HashMap::new);
     for dest in crate::commands::show::destinations(res) {
-        if dest.types & bit != 0 && dest.code == "console" {
-            crate::console_msg::append(&dt, &msg);
+        if dest.types & bit == 0 {
             continue;
         }
-        if dest.types & bit == 0 || !matches!(dest.code, "file" | "append") {
-            continue;
+        let dt = if dt_conversion { format!("{} ", timestamp_at(res, mtime)) } else { String::new() };
+        match dest.code {
+            "console" => {
+                crate::console_msg::append(&dt, msg);
+                continue;
+            }
+            "catalog" => {
+                if let Some(job_id) = job_id {
+                    if !crate::job_messages::log_insert(job_id, mtime, msg) {
+                        tracing::warn!("Msg delivery error: Unable to store data in database.");
+                    }
+                }
+                continue;
+            }
+            "file" | "append" => {}
+            _ => continue,
         }
+        let line = format!("{dt}{msg}");
         let key = (dest.code, dest.where_.clone());
         if !files.contains_key(&key) {
             // DispatchMessage(): kAppend opens "ab", kFile "w+b"

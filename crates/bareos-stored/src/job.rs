@@ -74,7 +74,9 @@ pub fn sd_job_setup(sd: &mut BnetStream<PskStream>, p: &SdJobParams) -> Result<S
 }
 
 /// Send "use storage/device" commands to SD.
-pub fn sd_use_device(sd: &mut BnetStream<PskStream>, p: &SdJobParams) -> Result<(), String> {
+/// Returns the SD's answer ("3000 OK use device device=...") and the job
+/// messages ("Jmsg Job=...") it sent before.
+pub fn sd_use_device(sd: &mut BnetStream<PskStream>, p: &SdJobParams) -> Result<(String, Vec<String>), String> {
     let append = if p.job_type == SdJobType::Restore { 0 } else { 1 };
     let cmd = format!(
         "use storage=File media_type={} pool_name={} pool_type=Backup append={append} copy=0 stripe=0\n",
@@ -85,10 +87,11 @@ pub fn sd_use_device(sd: &mut BnetStream<PskStream>, p: &SdJobParams) -> Result<
     sd.send_signal(BnetSignal::Eod).map_err(|e| format!("eod1: {e}"))?;
     sd.send_signal(BnetSignal::Eod).map_err(|e| format!("eod2: {e}"))?;
 
+    let mut jmsgs = Vec::new();
     loop {
         match sd.recv_str() {
-            Ok(r) if r.contains("3000 OK") => return Ok(()),
-            Ok(r) if r.starts_with("Jmsg") => { debug!("SD Jmsg: {}", r.trim()); continue; }
+            Ok(r) if r.contains("3000 OK") => return Ok((r, jmsgs)),
+            Ok(r) if r.starts_with("Jmsg") => { debug!("SD Jmsg: {}", r.trim()); jmsgs.push(r); continue; }
             Ok(r) => return Err(format!("unexpected: {r}")),
             Err(e) => return Err(format!("recv: {e}")),
         }

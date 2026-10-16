@@ -66,6 +66,13 @@ pub struct JobParams {
     pub replace: Option<String>,       // "always", "never", "ifnewer", "ifolder"
     pub restore_jobid: Option<u32>,     // JobId of backup to restore from
     pub bootstrap: Option<String>,      // Bootstrap data (volumes + file indices)
+    /// Client resource name (job messages "Connected Client: <name> ...").
+    #[serde(default)]
+    pub client_name: String,
+    /// First connection to the client since the configuration was loaded
+    /// (fd_cmds.cc "Probing client protocol..." and the handshake text).
+    #[serde(default)]
+    pub client_first_connection: bool,
 }
 
 /// Messages on the Worker↔Director pipe (JSON, one per line).
@@ -89,6 +96,65 @@ pub enum PipeMessage {
     JobEnd { job_id: u32, term_code: i32, files: i64, bytes: i64, errors: i32,
              #[serde(default)] vol_session_id: Option<i32>,
              #[serde(default)] vol_session_time: Option<i32> },
+    /// A job message (Jmsg) for the Director to dispatch: `msg_type` is the
+    /// M_* code, `mtime` the message time (0: when dispatched). `raw`: a
+    /// complete message a daemon sent ("Jmsg Job=.. type=.. level=.."),
+    /// otherwise the body the Director puts its Jmsg header in front of.
+    #[serde(rename = "jmsg")]
+    Jmsg { job_id: u32, msg_type: u32, mtime: i64, text: String, #[serde(default)] raw: bool },
+}
+
+/// lib/message.h M_* codes of the worker's own job messages.
+const M_ERROR: u32 = 4;
+const M_INFO: u32 = 6;
+
+/// The worker's pipe to the Director for job messages (any thread).
+static JMSG_PIPE: std::sync::Mutex<Option<std::fs::File>> = std::sync::Mutex::new(None);
+
+/// Write one pipe message as one line in a single write.
+fn write_pipe_line(file: &mut std::fs::File, msg: &PipeMessage) {
+    if let Ok(mut json) = serde_json::to_string(msg) {
+        json.push('\n');
+        let _ = file.write_all(json.as_bytes());
+    }
+}
+
+fn send_jmsg(msg: PipeMessage) {
+    let mut pipe = JMSG_PIPE.lock().unwrap_or_else(|e| e.into_inner());
+    if let Some(file) = pipe.as_mut() {
+        write_pipe_line(file, &msg);
+    }
+}
+
+/// Jmsg(jcr, type, 0, text) of the worker's job.
+fn worker_jmsg(job_id: u32, msg_type: u32, text: String) {
+    send_jmsg(PipeMessage::Jmsg { job_id, msg_type, mtime: 0, text, raw: false });
+}
+
+/// getmsg.cc BgetDirmsg(): "Jmsg Job=%127s type=%d level=%lld <message>"
+/// gives (type, mtime, message); None when malformed.
+fn parse_daemon_jmsg(line: &str) -> Option<(u32, i64, String)> {
+    let rest = line.strip_prefix("Jmsg Job=")?;
+    let (job, rest) = rest.split_once(' ')?;
+    if job.is_empty() {
+        return None;
+    }
+    let rest = rest.trim_start_matches(' ');
+    let (msg_type, rest) = rest.split_once(' ').unwrap_or((rest, ""));
+    let msg_type = msg_type.strip_prefix("type=")?.parse::<i32>().ok()?;
+    let rest = rest.trim_start_matches(' ');
+    let (level, rest) = rest.split_once(' ').unwrap_or((rest, ""));
+    let mtime = level.strip_prefix("level=")?.parse::<i64>().ok()?;
+    Some((msg_type as u32, mtime, rest.to_string()))
+}
+
+/// A job message line of the File or Storage daemon: dispatched by the
+/// Director as it is; "Malformed message: %s\n" (M_ERROR) otherwise.
+fn forward_daemon_jmsg(job_id: u32, line: &str) {
+    match parse_daemon_jmsg(line) {
+        Some((msg_type, mtime, text)) => send_jmsg(PipeMessage::Jmsg { job_id, msg_type, mtime, text, raw: true }),
+        None => worker_jmsg(job_id, M_ERROR, format!("Malformed message: {line}\n")),
+    }
 }
 
 /// Legacy local exit codes and original FD termination characters.
@@ -193,6 +259,7 @@ pub fn run_worker(
     to_director: std::fs::File,
     from_director: std::fs::File,
 ) -> i32 {
+    *JMSG_PIPE.lock().unwrap_or_else(|e| e.into_inner()) = to_director.try_clone().ok();
     let mut pipes = WorkerPipes { to_director, from_director };
     let mut state = WorkerState::Init;
     let job_id = params.job_id;
@@ -211,15 +278,31 @@ pub fn run_worker(
             }
 
             WorkerState::ConnectingFD => {
+                // fd_cmds.cc ConnectToFileDaemon(): OutputMessageForConnectionTry,
+                // TlsLogConninfo, SendInfoSuccess, SendInfoChosenCipher
+                if params.client_first_connection {
+                    worker_jmsg(job_id, M_INFO, crate::job_messages::PROBING_TEXT.to_string());
+                }
                 match connect_fd(params) {
-                    Ok(b) => { fd = Some(b); info!("Worker {job_id}: FD connected"); WorkerState::ConnectingSD }
+                    Ok((b, cipher)) => {
+                        let who = format!("Client: {}", params.client_name);
+                        worker_jmsg(job_id, M_INFO, crate::job_messages::connected_text(&who, &params.fd_address, params.fd_port, Some(&cipher)));
+                        worker_jmsg(job_id, M_INFO, crate::job_messages::handshake_text(params.client_first_connection));
+                        worker_jmsg(job_id, M_INFO, crate::job_messages::cipher_text(Some(&cipher)));
+                        fd = Some(b); info!("Worker {job_id}: FD connected"); WorkerState::ConnectingSD
+                    }
                     Err(e) => WorkerState::Error(format!("FD connect: {e}"))
                 }
             }
 
             WorkerState::ConnectingSD => {
                 match connect_sd(params) {
-                    Ok(b) => { sd = Some(b); info!("Worker {job_id}: SD connected"); WorkerState::SDJobSetup }
+                    Ok((b, cipher)) => {
+                        // TlsLogConninfo (Qmsg) and sd_cmds.cc:152
+                        worker_jmsg(job_id, M_INFO, crate::job_messages::connected_text("Storage daemon", &params.sd_address, params.sd_port, Some(&cipher)));
+                        worker_jmsg(job_id, M_INFO, crate::job_messages::cipher_text(Some(&cipher)));
+                        sd = Some(b); info!("Worker {job_id}: SD connected"); WorkerState::SDJobSetup
+                    }
                     Err(e) => WorkerState::Error(format!("SD connect: {e}"))
                 }
             }
@@ -239,7 +322,12 @@ pub fn run_worker(
 
             WorkerState::SDUseDevice => {
                 match sd_use_device(sd.as_mut().unwrap(), params) {
-                    Ok(()) => WorkerState::SDRun,
+                    Ok(device) => {
+                        // msgchan.cc:183/259
+                        let write = params.job_type != WorkerJobType::Restore;
+                        worker_jmsg(job_id, M_INFO, crate::job_messages::using_device_text(&device, write));
+                        WorkerState::SDRun
+                    }
                     Err(e) => WorkerState::Error(format!("SD use: {e}"))
                 }
             }
@@ -459,8 +547,16 @@ fn sd_job_setup(sd: &mut BnetStream<tls_psk::PskStream>, p: &JobParams) -> Resul
     bareos_stored::job::sd_job_setup(sd, &to_sd_params(p))
 }
 
-fn sd_use_device(sd: &mut BnetStream<tls_psk::PskStream>, p: &JobParams) -> Result<(), String> {
-    bareos_stored::job::sd_use_device(sd, &to_sd_params(p))
+/// The device the Storage daemon accepted (OK_device "3000 OK use device
+/// device=%s", unbashed); its job messages are forwarded.
+fn sd_use_device(sd: &mut BnetStream<tls_psk::PskStream>, p: &JobParams) -> Result<String, String> {
+    let (answer, jmsgs) = bareos_stored::job::sd_use_device(sd, &to_sd_params(p))?;
+    for line in &jmsgs {
+        forward_daemon_jmsg(p.job_id, line);
+    }
+    let device = answer.trim_end().split_once("3000 OK use device device=").map(|(_, d)| d)
+        .and_then(|d| d.split_whitespace().next()).unwrap_or(&p.sd_device);
+    Ok(crate::job_messages::unbash_spaces(device))
 }
 
 fn sd_send_bootstrap(sd: &mut BnetStream<tls_psk::PskStream>, p: &JobParams) -> Result<(), String> {
@@ -585,7 +681,7 @@ fn sd_catrec_loop(
                 } else if msg.starts_with("3010 Job") {
                     debug!("Worker {job_id} SD: job start");
                 } else if msg.starts_with("Jmsg") {
-                    debug!("Worker {job_id} SD Jmsg: {msg}");
+                    forward_daemon_jmsg(job_id, &msg_raw);
                 } else {
                     debug!("Worker {job_id} SD: {}", &msg[..msg.len().min(80)]);
                 }
@@ -651,7 +747,7 @@ fn fd_job_setup(fd: &mut BnetStream<tls_psk::PskStream>, p: &JobParams, sd_auth_
     loop {
         match fd.recv_str() {
             Ok(r) if r.contains("2000 OK") => break,
-            Ok(r) if r.starts_with("Jmsg") => continue,
+            Ok(r) if r.starts_with("Jmsg") => { forward_daemon_jmsg(p.job_id, &r); continue }
             Ok(r) => return Err(format!("fileset: {r}")),
             Err(e) => return Err(format!("fileset recv: {e}")),
         }
@@ -682,6 +778,10 @@ fn wait_for_fd_end_job(fd: &mut BnetStream<tls_psk::PskStream>, job_id: u32) -> 
                     let _ = fd.send_signal(BnetSignal::Eod);
                     continue;
                 }
+                if msg.starts_with("Jmsg") {
+                    forward_daemon_jmsg(job_id, &String::from_utf8_lossy(&data));
+                    continue;
+                }
                 debug!("Worker {job_id} FD: {}", &msg[..msg.len().min(120)]);
             }
             Ok(BnetMessage::Signal(sig)) => {
@@ -700,12 +800,13 @@ fn wait_for_fd_end_job(fd: &mut BnetStream<tls_psk::PskStream>, job_id: u32) -> 
 // Connection helpers
 // ============================================================================
 
-fn connect_fd(p: &JobParams) -> Result<BnetStream<tls_psk::PskStream>, String> {
+fn connect_fd(p: &JobParams) -> Result<(BnetStream<tls_psk::PskStream>, String), String> {
     let sock = resolve_connect(&format!("{}:{}", p.fd_address, p.fd_port), 3)?;
     sock.set_read_timeout(None).ok();
     let psk = tls_psk::password_to_psk(&p.fd_password);
     let stream = tls_psk::psk_connect(sock, &format!("R_DIRECTOR\x1e{}", p.director_name), &psk)
         .map_err(|e| format!("TLS-PSK: {e}"))?;
+    let cipher = stream.cipher_name();
     let mut bnet = BnetStream::new(stream);
     bnet.send_str(&make_director_hello(&p.director_name)).map_err(|e| format!("hello: {e}"))?;
     let auth = CramMd5Auth::new(&p.fd_password, &p.director_name, 2);
@@ -713,22 +814,23 @@ fn connect_fd(p: &JobParams) -> Result<BnetStream<tls_psk::PskStream>, String> {
     if !r.success { return Err("CRAM failed".into()); }
     let hello = bnet.recv_str().map_err(|e| format!("hello resp: {e}"))?;
     if !hello.contains("2000 OK Hello") { return Err(format!("bad hello: {hello}")); }
-    Ok(bnet)
+    Ok((bnet, cipher))
 }
 
-fn connect_sd(p: &JobParams) -> Result<BnetStream<tls_psk::PskStream>, String> {
+fn connect_sd(p: &JobParams) -> Result<(BnetStream<tls_psk::PskStream>, String), String> {
     let sock = resolve_connect(&format!("{}:{}", p.sd_address, p.sd_port), 3)?;
     sock.set_read_timeout(None).ok();
     let psk = tls_psk::password_to_psk(&p.sd_password);
     let stream = tls_psk::psk_connect(sock, &format!("R_DIRECTOR\x1e{}", p.director_name), &psk)
         .map_err(|e| format!("TLS-PSK: {e}"))?;
+    let cipher = stream.cipher_name();
     let mut bnet = BnetStream::new(stream);
     bnet.send_str(&make_director_hello(&p.director_name)).map_err(|e| format!("hello: {e}"))?;
     let auth = CramMd5Auth::new(&p.sd_password, &p.director_name, 2);
     let r = auth.two_way_authenticate(&mut bnet, false).map_err(|e| format!("CRAM: {e}"))?;
     if !r.success { return Err("CRAM failed".into()); }
     let _ = bnet.recv_str(); // 3000 OK Hello
-    Ok(bnet)
+    Ok((bnet, cipher))
 }
 
 fn resolve_connect(addr: &str, timeout_secs: u64) -> Result<std::net::TcpStream, String> {
@@ -747,7 +849,8 @@ fn send_expect(bnet: &mut BnetStream<tls_psk::PskStream>, cmd: &str, expect: &st
             Ok(BnetMessage::Data(data)) => {
                 let r = String::from_utf8_lossy(&data).to_string();
                 if r.contains(expect) { debug!("Worker {job_id} {label}: {}", r.trim()); return Ok(r); }
-                if r.starts_with("Jmsg") || r.starts_with("2001") { debug!("Worker {job_id} {label} Jmsg: {}", r.trim()); continue; }
+                if r.starts_with("Jmsg") { forward_daemon_jmsg(job_id, &r); continue; }
+                if r.starts_with("2001") { debug!("Worker {job_id} {label} Jmsg: {}", r.trim()); continue; }
                 return Err(format!("{label}: {r}"));
             }
             Ok(BnetMessage::Signal(BnetSignal::Eod)) => continue,
@@ -1027,5 +1130,118 @@ mod wait_protocol_tests {
             assert!(matches!(handle.try_read_message(), Some(PipeMessage::State {state,..}) if state == expected));
         }
         assert!(handle.try_read_message().is_none());
+    }
+}
+
+#[cfg(test)]
+mod job_message_tests {
+    use super::*;
+    use crate::catalog_worker::{CatalogHandle, CatalogRequest, CatalogResponse, SqlColumn, SqlTable};
+    use std::sync::{Arc, Mutex, RwLock};
+
+    #[test]
+    fn daemon_job_messages_are_parsed_like_bget_dirmsg() {
+        assert_eq!(parse_daemon_jmsg("Jmsg Job=backup.2026 type=6 level=1783627202 bareos-sd JobId 626: Ready to append\n"),
+            Some((6, 1_783_627_202, "bareos-sd JobId 626: Ready to append\n".to_string())));
+        assert_eq!(parse_daemon_jmsg("Jmsg Job=x type=4 level=0 "), Some((4, 0, String::new())));
+        for malformed in ["Jmsg Job= type=6 level=1 m", "Jmsg Job=x type=a level=1 m", "Jmsg Job=x level=1", "Jmsgx"] {
+            assert_eq!(parse_daemon_jmsg(malformed), None, "{malformed}");
+        }
+    }
+
+    fn rows(columns: &[&str], values: Vec<Vec<&str>>) -> CatalogResponse {
+        CatalogResponse::Rows(SqlTable {
+            columns: columns.iter().map(|c| SqlColumn { name: c.to_string(), numeric: false }).collect(),
+            rows: values.into_iter().map(|r| r.into_iter().map(|v| Some(v.to_string())).collect()).collect(),
+        })
+    }
+
+    /// A worker double: a shell that writes `messages` on the pipe and exits.
+    fn worker(messages: &[PipeMessage]) -> JobHandle {
+        use std::process::{Command, Stdio};
+        let wire = messages.iter().map(|m| serde_json::to_string(m).unwrap()).collect::<Vec<_>>().join("\n");
+        let mut child = Command::new("/bin/sh").args(["-c", "printf '%s\n' \"$1\"", "--"]).arg(wire)
+            .stdout(Stdio::piped()).spawn().unwrap();
+        JobHandle { pid: child.id() as i32, job_id: 42, job_name: "Backup".into(), unique_job: "Backup.2026-10-16_10.00.00_01".into(),
+            from_worker: Some(BufReader::new(unsafe { std::fs::File::from_raw_fd(child.stdout.take().unwrap().into_raw_fd()) })),
+            to_worker: None }
+    }
+
+    #[test]
+    fn job_messages_reach_console_queue_and_log_table_in_order() {
+        let queue = crate::console_msg::test_queue("job-messages");
+        let config = crate::director_config::DirectorConfig::from_str(r#"
+Director { Name = bareos-dir; Password = secret; Messages = Daemon }
+Messages { Name = Daemon; console = all }
+Messages { Name = Standard; console = all, !skipped, !saved, !audit; catalog = all, !skipped, !saved, !audit }
+Client { Name = bareos-fd; Address = localhost; Password = pw; Catalog = MyCatalog }
+Job { Name = Backup; Type = Backup; Client = bareos-fd; FileSet = SelfTest; Storage = File; Pool = Full; Messages = Standard }
+"#).unwrap();
+        let log = Arc::new(Mutex::new(Vec::new()));
+        let seen = log.clone();
+        let catalog = CatalogHandle::mock(move |request| match request {
+            CatalogRequest::UpdateJobEnd { .. } => CatalogResponse::Ok(1),
+            CatalogRequest::TextRows { sql } => {
+                if sql.starts_with("INSERT INTO Log") { seen.lock().unwrap().push(sql); return rows(&[], vec![]); }
+                if sql.starts_with("SELECT ClientId") { return rows(&["c", "n", "uname"], vec![vec!["1", "bareos-fd", "u"]]); }
+                if sql.starts_with("SELECT VolumeName") { return rows(&["v", "m"], vec![vec!["Full-0001", "1"]]); }
+                if sql.starts_with("SELECT VolBytes") { return rows(&["b"], vec![vec!["1000"]]); }
+                rows(&[], vec![])
+            }
+            _ => CatalogResponse::Error("unexpected".into()),
+        });
+        crate::job_messages::set_catalog(Some(catalog.clone()));
+        let messages = [
+            PipeMessage::Jmsg { job_id: 42, msg_type: 6, mtime: 0, text: "Using Device \"FileStorage\" to write.\n".into(), raw: false },
+            PipeMessage::Jmsg { job_id: 42, msg_type: 6, mtime: 1_783_627_202,
+                text: "bareos-sd JobId 42: Ready to append to end of Volume \"Full-0001\" size=1\n".into(), raw: true },
+            PipeMessage::JobStatus { job_id: 42, status: b'T' as i32 },
+            PipeMessage::JobEnd { job_id: 42, term_code: b'T' as i32, files: 5, bytes: 2000, errors: 0,
+                vol_session_id: Some(1), vol_session_time: Some(2) },
+        ];
+        let shared = Arc::new(RwLock::new(config));
+        let mut manager = crate::job_manager::JobManager::new(Arc::new(crate::message_bus::MessageBus::new(10)),
+            Some(shared), Some(catalog));
+        manager.add_job(42, "Backup", worker(&messages));
+        manager.set_job_report(42, crate::job_messages::JobReport { job: "Backup.2026-10-16_10.00.00_01".into(),
+            level: "Full".into(), client: "bareos-fd".into(), trigger: "User".into(), ..Default::default() });
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(3);
+        while manager.active_count() > 0 {
+            manager.poll_all();
+            assert!(std::time::Instant::now() < deadline, "worker double timed out");
+            std::thread::sleep(std::time::Duration::from_millis(1));
+        }
+        let lines: Vec<String> = queue.take().into_iter().map(|l| String::from_utf8(l).unwrap()).collect();
+        let bodies: Vec<&str> = lines.iter().map(|l| l.splitn(3, ' ').nth(2).unwrap_or("")).collect();
+        assert_eq!(bodies[0], "bareos-dir JobId 42: Using Device \"FileStorage\" to write.\n");
+        assert_eq!(bodies[1], "bareos-sd JobId 42: Ready to append to end of Volume \"Full-0001\" size=1\n");
+        assert_eq!(bodies[2], format!("bareos-dir JobId 42: Bareos bareos-dir {} ({}):\n",
+            crate::version_strings::FULL, crate::version_strings::SHORT_DATE));
+        assert!(lines.iter().any(|l| l == "  Termination:            Backup OK\n"), "{lines:?}");
+        let inserts = log.lock().unwrap().clone();
+        assert_eq!(inserts.len(), 3);
+        assert!(inserts[0].starts_with("INSERT INTO Log (JobId, Time, LogText) VALUES (42,'"));
+        assert!(inserts[0].ends_with("','bareos-dir JobId 42: Using Device \"FileStorage\" to write.\n')"));
+        // the daemon's mtime (local time; other tests may switch TZ meanwhile)
+        assert!(inserts[1].starts_with("INSERT INTO Log (JobId, Time, LogText) VALUES (42,'2026-07-"), "{}", inserts[1]);
+        assert!(inserts[1].ends_with(":00:02','bareos-sd JobId 42: Ready to append to end of Volume \"Full-0001\" size=1\n')"),
+            "{}", inserts[1]);
+        assert!(inserts[2].contains("  Volume name(s):         Full-0001\n"));
+        assert!(inserts[2].contains("  Last Volume Bytes:      1,000 (1.000 KB)\n"), "{}", inserts[2]);
+        crate::job_messages::set_catalog(None);
+    }
+
+    #[test]
+    fn console_jcr_messages_use_the_director_messages_resource() {
+        let queue = crate::console_msg::test_queue("console-jcr");
+        let config = crate::director_config::DirectorConfig::from_str(r#"
+Director { Name = bareos-dir; Password = secret; Messages = Daemon }
+Messages { Name = Daemon; console = all, !skipped, !saved, !audit }
+"#).unwrap();
+        crate::console_msg::job_message(&config, "-Console-", 0, crate::message_bus::MsgType::Warning, 0,
+            "Error getting Job record for Job rerun: ERR=x\n");
+        let lines: Vec<String> = queue.take().into_iter().map(|l| String::from_utf8(l).unwrap()).collect();
+        assert_eq!(lines.len(), 1);
+        assert!(lines[0].ends_with(" bareos-dir JobId 0: Warning: Error getting Job record for Job rerun: ERR=x\n"));
     }
 }

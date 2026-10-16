@@ -12,7 +12,7 @@ use tracing::{info, debug, warn, error};
 use crate::catalog_worker::CatalogHandle;
 use crate::commands::bvfs::Db;
 use crate::job_worker::{JobHandle, PipeMessage};
-use crate::message_bus::{MessageBus, BusMessage, MsgType};
+use crate::message_bus::{MessageBus, BusMessage};
 use crate::director_config::SharedConfig;
 
 /// Director-side view of a running job.
@@ -63,6 +63,9 @@ struct JcrState {
     post_scripts_ran: bool,
     /// Counted in num_jobs_run / RecentJobResultsList.
     recorded: bool,
+    /// Job report data (resources and their sources), set when the job is
+    /// started; None for jobs without an end-of-job report. C-051.
+    report: Option<crate::job_messages::JobReport>,
 }
 
 /// What a queued job needs to start (jobq.cc JobqAdd). Compatibility log C-048.
@@ -495,6 +498,13 @@ impl JobManager {
         self.get_job(job_id)?.resources.clone()
     }
 
+    /// Record the job report data of a started job (end-of-job summary).
+    pub fn set_job_report(&mut self, job_id: u32, report: crate::job_messages::JobReport) {
+        if let Some(job) = self.jobs.iter_mut().find(|j| j.job_id == job_id) {
+            job.jcr.report = Some(report);
+        }
+    }
+
     /// Put a job into the state of `phase` as its worker would (tests).
     #[cfg(test)]
     pub fn set_phase(&mut self, job_id: u32, phase: DirJobPhase) {
@@ -664,6 +674,17 @@ impl JobManager {
                             vol_session_id: vol_session_id.unwrap_or(0), vol_session_time: vol_session_time.unwrap_or(0)});
                     }
 
+                    PipeMessage::Jmsg { msg_type, mtime, text, raw, .. } => {
+                        if let Some(config) = self.config.as_ref().and_then(|c| c.read().ok()) {
+                            if raw {
+                                // getmsg.cc: a daemon's "Jmsg Job=.. type=.. level=.." line
+                                crate::console_msg::dispatch_job_message(&config, &job.job_name, job.job_id, msg_type, mtime, &text);
+                            } else if let Some(kind) = crate::job_messages::msg_type_of(msg_type) {
+                                crate::console_msg::job_message(&config, &job.job_name, job.job_id, kind, mtime, &text);
+                            }
+                        }
+                    }
+
                     _ => {}
                 }
             }
@@ -680,6 +701,8 @@ impl JobManager {
                 job.observed_status = merge_status(job.observed_status,
                     crate::job_worker::catalog_job_status(ending.term_code).chars().next().unwrap());
                 if exit_code != 0 { job.observed_status = merge_status(job.observed_status, 'E'); }
+                // NativeBackupCleanup: terminated with errors is JS_Warnings
+                if job.observed_status == 'T' && ending.errors > 0 { job.observed_status = 'W'; }
                 let db_status = job.observed_status.to_string();
                 let result = self.catalog.as_ref().ok_or_else(|| "catalog is unavailable".to_string()).and_then(|cat| cat.update_job_end(
                     job.job_id as i32, &db_status, now_unix(), ending.files, ending.bytes, ending.errors,
@@ -690,11 +713,24 @@ impl JobManager {
                 job.phase = if success { DirJobPhase::Completed } else { DirJobPhase::Error };
                 job.completed_at = Some(std::time::Instant::now());
                 let status = if success { "Success" } else { "Error" };
-                crate::console_msg::post_job_message(&self.bus, self.config.as_ref(), BusMessage::JobMessage {
-                    job_id: job.job_id, job_name: job.job_name.clone(),
-                    msg_type: if success { MsgType::Info } else { MsgType::Error },
-                    text: format!("Job {status}: status={db_status} files={} bytes={} errors={}", ending.files, ending.bytes, ending.errors),
-                    timestamp: now_unix() });
+                // NativeBackupCleanup / NativeRestoreCleanup: the job report
+                if let Some(report) = &job.jcr.report {
+                    let end_time = now_unix();
+                    let fd_status = crate::job_worker::catalog_job_status(ending.term_code).chars().next().unwrap_or('E');
+                    let outcome = crate::job_messages::JobOutcome {
+                        job_id: job.job_id, status: job.observed_status, end_time,
+                        files: ending.files.max(0) as u64, bytes: ending.bytes.max(0) as u64,
+                        read_bytes: ending.bytes.max(0) as u64, sd_files: ending.files.max(0) as u64,
+                        sd_bytes: ending.bytes.max(0) as u64, errors: ending.errors.max(0) as u32, sd_errors: 0,
+                        vol_session_id: ending.vol_session_id, vol_session_time: ending.vol_session_time,
+                        fd_status, sd_status: job.jcr.sd_status, vss: false, encrypt: false,
+                    };
+                    let director = self.config.as_ref().and_then(|c| c.read().ok()).map(|c| c.director.name.clone()).unwrap_or_default();
+                    for (msg_type, text) in crate::job_messages::end_of_job(&director, self.catalog.as_ref(), report, &outcome) {
+                        crate::console_msg::post_job_message(&self.bus, self.config.as_ref(), BusMessage::JobMessage {
+                            job_id: job.job_id, job_name: job.job_name.clone(), msg_type, text, timestamp: end_time });
+                    }
+                }
                 self.bus.post(BusMessage::JobStatus {job_id: job.job_id, job_name: job.job_name.clone(), status: status.into(), timestamp: now_unix()});
                 info!("JobManager: job {} worker exited (code={exit_code}), catalog status={db_status}", job.job_id);
             }
@@ -864,7 +900,8 @@ Job { Name = single; Client = fd1; Storage = File }
             fd_password: String::new(), sd_address: String::new(), sd_port: 0, sd_password: String::new(),
             sd_device: String::new(), sd_media_type: String::new(), director_name: "dir".into(), pool_name: "Full".into(),
             fileset_includes: Vec::new(), fileset_excludes: Vec::new(), since_utime: 0, prev_job: String::new(),
-            where_path: None, replace: None, restore_jobid: None, bootstrap: None }
+            where_path: None, replace: None, restore_jobid: None, bootstrap: None,
+            client_name: String::new(), client_first_connection: false }
     }
 
     fn enqueue(m: &mut JobManager, id: u32, name: &str, priority: i32, client: &str, storage: &str) {
