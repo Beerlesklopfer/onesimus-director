@@ -490,7 +490,7 @@ fn run_selected(
             job_id, job_name: job.name.clone(), status: "Queued".to_string(),
             timestamp: now_unix(),
         });
-        smgr.bus().post(BusMessage::JobMessage {
+        crate::console_msg::post_job_message(smgr.bus(), ctx.config.as_ref(), BusMessage::JobMessage {
             job_id, job_name: job.name.clone(),
             msg_type: crate::message_bus::MsgType::Info,
             text: format!("Start Backup JobId={job_id}, Job={}, Level={level}", job.name),

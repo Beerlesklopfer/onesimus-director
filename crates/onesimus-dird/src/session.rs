@@ -134,11 +134,8 @@ pub fn handle_console_session_with<S: Read + Write>(
     let mut state = SessionState::CommandLoop;
     let mut api_mode = command_executor::ApiMode::Human;
 
-    // Subscribe to MessageBus for job messages, status updates, etc.
-    let bus_rx = session_mgr.bus().subscribe();
-
-    // Session flags (set by autodisplay, gui, trace, .grpc commands)
-    let mut auto_display = true;  // autodisplay on/off
+    // Session flags (set by gui, trace, .grpc commands; autodisplay and the
+    // "You have messages." flag live in the SessionManager)
     let mut gui_mode = false;     // gui on/off
     let mut grpc_mode = false;    // .grpc on/off
     let mut json_compact = false; // .api json compact=yes|no (OutputFormatter::SetCompact)
@@ -189,10 +186,19 @@ pub fn handle_console_session_with<S: Read + Write>(
         // Parse command into AST
         let mut ast = parse_cli_command(cmd_str);
         ast.raw_line = msg.clone();
+        let mut ctx = ExecContext {
+            session_id: mgr_session_id,
+            config: config.clone(),
+            session_mgr: Some(session_mgr.clone()),
+            catalog: catalog.clone(),
+            api_mode,
+            bus_rx: None,
+            job_manager: job_manager.clone(),
+        };
         // C++ Do_a_command(): no arguments (empty or whitespace-only line)
         // runs nothing, but the loop still handles messages and sends EOD.
         if ast.command_name.is_empty() {
-            if !finish_command(&mut bnet, &bus_rx, auto_display, gui_mode, api_mode) { break; }
+            if !finish_command(&mut bnet, &ctx, gui_mode, api_mode) { break; }
             continue;
         }
         let typed = ast.command_name.clone();
@@ -201,15 +207,6 @@ pub fn handle_console_session_with<S: Read + Write>(
             ast.command_name = name.to_string();
         }
 
-        let mut ctx = ExecContext {
-            session_id: mgr_session_id,
-            config: config.clone(),
-            session_mgr: Some(session_mgr.clone()),
-            catalog: catalog.clone(),
-            api_mode,
-            bus_rx: Some(bus_rx.clone()),
-            job_manager: job_manager.clone(),
-        };
         let command_allowed=matches!(ast.command_name.as_str(),"quit"|"exit"|"whoami")
             || crate::acl::access(&ctx,crate::acl::Kind::Command,&ast.command_name);
 
@@ -237,7 +234,13 @@ pub fn handle_console_session_with<S: Read + Write>(
         // C++ AutomountCmd: without exactly one argument the value is asked
         // for (GetCmd); no answer (lone dot, lost connection) keeps the flag.
         if command_allowed && ast.command_name == "automount" && ast.arguments.len() != 1 {
-            ast.arguments = get_cmd(&mut bnet, "Turn on or off? ", api_mode)
+            let answer = get_cmd(&mut bnet, "Turn on or off? ", api_mode);
+            // ua_input.cc:66: an answer ".messages" first runs DotMessagesCmd
+            if answer.as_deref() == Some(".messages") {
+                crate::console_msg::dot_messages_cmd(&ctx, ".messages",
+                    |messages| messages.iter().all(|m| bnet.send(m).is_ok()));
+            }
+            ast.arguments = answer
                 .map(|answer| vec![Argument { key: answer, value: None }])
                 .unwrap_or_default();
         }
@@ -252,7 +255,9 @@ pub fn handle_console_session_with<S: Read + Write>(
         match ast.command_name.as_str() {
             // C++ AutodisplayCmd/gui_cmd: without on/off the flag stays.
             "autodisplay" => {
-                if let Some(on) = crate::commands::extra::on_off_keyword(&ast) { auto_display = on; }
+                if let Some(on) = crate::commands::extra::on_off_keyword(&ast) {
+                    session_mgr.set_session_auto_display(mgr_session_id, on);
+                }
             }
             "gui" => {
                 if let Some(on) = crate::commands::extra::on_off_keyword(&ast) {
@@ -303,7 +308,7 @@ pub fn handle_console_session_with<S: Read + Write>(
             break;
         }
 
-        if !finish_command(&mut bnet, &bus_rx, auto_display, gui_mode, api_mode) { break; }
+        if !finish_command(&mut bnet, &ctx, gui_mode, api_mode) { break; }
     }
 
     // Cleanup
@@ -314,40 +319,32 @@ pub fn handle_console_session_with<S: Read + Write>(
 /// Tail of one console loop iteration (C++ ua_server.cc
 /// HandleUserAgentClientRequest after Do_a_command): pending messages, then
 /// EOD in non-API mode. Also runs after an empty line. False: socket gone.
+///
+/// Pending console messages (the Director-wide queue, console_msg) are
+/// handled only when the console may run `messages`: with autodisplay on
+/// they are sent (DotMessagesCmd); otherwise a console outside gui mode is
+/// told once — "You have messages." or, in API mode, BNET_MSGS_PENDING —
+/// until it fetches them.
 fn finish_command<S: Read + Write>(
     bnet: &mut BnetStream<S>,
-    bus_rx: &crossbeam_channel::Receiver<crate::message_bus::BusMessage>,
-    auto_display: bool,
+    ctx: &ExecContext,
     gui_mode: bool,
     api_mode: command_executor::ApiMode,
 ) -> bool {
-    // HandleMessages: drain pending bus messages (like C++ ua_server.cc).
-    // In API mode messages never interleave with the command output;
-    // the console is only told via MSGS_PENDING and fetches them itself.
-    if auto_display && api_mode != command_executor::ApiMode::Human {
-        // API clients fetch messages explicitly; do not consume their queue.
-        if !bus_rx.is_empty() && !gui_mode {
-            let _ = bnet.send_signal(BnetSignal::MsgsPending);
-        }
-    } else if auto_display {
-        let mut has_messages = false;
-        while let Ok(msg) = bus_rx.try_recv() {
-            let text = match msg {
-                crate::message_bus::BusMessage::ConsoleText { text } => text,
-                crate::message_bus::BusMessage::JobMessage { job_id, text, .. } if job_id > 0 => text,
-                _ => continue,
-            };
-            has_messages = true;
-            if api_mode == command_executor::ApiMode::Human {
-                let _ = bnet.send_str(&format!("{text}\n"));
-            }
-        }
-        if has_messages && !gui_mode {
-            if api_mode == command_executor::ApiMode::Human {
-                let _ = bnet.send_str("You have messages.\n");
-            } else {
+    let api = api_mode != command_executor::ApiMode::Human;
+    if crate::console_msg::pending() && crate::acl::access(ctx, crate::acl::Kind::Command, "messages") {
+        let manager = ctx.session_mgr.as_ref();
+        if crate::console_msg::auto_display(ctx) {
+            crate::console_msg::dot_messages_cmd(ctx, "messages",
+                |messages| messages.iter().all(|m| bnet.send(m).is_ok()));
+            if let Some(manager) = manager { manager.set_session_notified(ctx.session_id, false); }
+        } else if !gui_mode && !manager.is_some_and(|m| m.session_notified(ctx.session_id)) {
+            if api {
                 let _ = bnet.send_signal(BnetSignal::MsgsPending);
+            } else {
+                let _ = bnet.send_str("You have messages.\n");
             }
+            if let Some(manager) = manager { manager.set_session_notified(ctx.session_id, true); }
         }
     }
 
@@ -792,5 +789,136 @@ mod banner_tests {
         let mut rest = Vec::new();
         while let Ok(BnetMessage::Data(data)) = bnet.recv() { rest.push(String::from_utf8(data).unwrap()); }
         assert_eq!(rest.last().map(String::as_str), Some("1999 You are not authorized.\n"));
+    }
+}
+
+#[cfg(test)]
+mod console_message_tests {
+    //! C++ ua_server.cc HandleUserAgentClientRequest() after Do_a_command:
+    //! the Director-wide console message queue (console_msg) is announced
+    //! once ("You have messages." / BNET_MSGS_PENDING), shown directly with
+    //! autodisplay on, and only for consoles that may run `messages`.
+    use super::*;
+    use crate::console_msg::ConsoleQueue;
+    use std::net::{TcpListener, TcpStream};
+    use std::sync::RwLock;
+    use std::time::Duration;
+
+    fn session(queue: &Arc<ConsoleQueue>, console: &str, acl: &str) -> (BnetStream<TcpStream>, std::thread::JoinHandle<()>) {
+        let config = crate::director_config::DirectorConfig::from_str(&format!(
+            "Director {{Name=dir; Password=secret}}\nConsole {{Name={console}; Password=pw; CommandACL={acl}}}"
+        )).unwrap();
+        let config: Option<SharedConfig> = Some(Arc::new(RwLock::new(config)));
+        let manager = Arc::new(SessionManager::new(Arc::new(crate::message_bus::MessageBus::new(16))));
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = listener.local_addr().unwrap();
+        let name = console.to_string();
+        let queue = queue.clone();
+        let server = std::thread::spawn(move || {
+            crate::console_msg::use_test_queue(queue);
+            let (stream, _) = listener.accept().unwrap();
+            stream.set_read_timeout(Some(Duration::from_secs(5))).unwrap();
+            handle_console_session(BnetStream::new(stream), 1, &name, "pw", &manager,
+                &CommandQueue::new(16), &config, &None, &None);
+        });
+        let stream = TcpStream::connect(address).unwrap();
+        stream.set_read_timeout(Some(Duration::from_secs(5))).unwrap();
+        let mut bnet = BnetStream::new(stream);
+        assert!(CramMd5Auth::new("pw", console, 0).two_way_authenticate(&mut bnet, false).unwrap().success);
+        assert!(bnet.recv_str().unwrap().starts_with("1000"));
+        assert!(bnet.recv_str().unwrap().starts_with("1002"));
+        (bnet, server)
+    }
+
+    /// Frames up to and including `until`: data as text, signals as "<Name>".
+    fn reply(bnet: &mut BnetStream<TcpStream>, until: BnetSignal) -> Vec<String> {
+        let mut frames = Vec::new();
+        loop {
+            match bnet.recv().unwrap() {
+                BnetMessage::Data(data) => frames.push(String::from_utf8(data).unwrap()),
+                BnetMessage::Signal(signal) => {
+                    frames.push(format!("<{signal:?}>"));
+                    if signal == until { return frames; }
+                }
+            }
+        }
+    }
+
+    fn command(bnet: &mut BnetStream<TcpStream>, line: &str, until: BnetSignal) -> Vec<String> {
+        bnet.send_str(line).unwrap();
+        reply(bnet, until)
+    }
+
+    fn close(mut bnet: BnetStream<TcpStream>, server: std::thread::JoinHandle<()>) {
+        bnet.send_str("quit").unwrap();
+        drop(bnet);
+        server.join().unwrap();
+    }
+
+    #[test]
+    fn announced_once_until_fetched_in_order() {
+        let queue = crate::console_msg::test_queue("announce");
+        let (mut bnet, server) = session(&queue, "admin", "*all*");
+        assert_eq!(command(&mut bnet, "", BnetSignal::Eod), ["<Eod>"]);
+        queue.append("16-Oct 10:00 ", "dir JobId 1: first\n");
+        queue.append("16-Oct 10:01 ", "dir JobId 2: second");
+        assert_eq!(command(&mut bnet, "", BnetSignal::Eod), ["You have messages.\n", "<Eod>"]);
+        assert_eq!(command(&mut bnet, "", BnetSignal::Eod), ["<Eod>"], "told only once");
+        assert_eq!(command(&mut bnet, "messages", BnetSignal::Eod),
+            ["16-Oct 10:00 dir JobId 1: first\n", "16-Oct 10:01 dir JobId 2: second\n", "<Eod>"]);
+        assert_eq!(command(&mut bnet, "messages", BnetSignal::Eod), ["You have no messages.\n", "<Eod>"]);
+        assert_eq!(command(&mut bnet, ".messages", BnetSignal::Eod), ["<Eod>"]);
+        queue.append("", "third\n");
+        assert_eq!(command(&mut bnet, "", BnetSignal::Eod), ["You have messages.\n", "<Eod>"], "told again after fetching");
+        assert_eq!(command(&mut bnet, ".messages", BnetSignal::Eod), ["third\n", "<Eod>"],
+            ".messages fetches without autodisplay");
+        close(bnet, server);
+    }
+
+    #[test]
+    fn autodisplay_shows_messages_after_the_command() {
+        let queue = crate::console_msg::test_queue("autodisplay");
+        let (mut bnet, server) = session(&queue, "admin", "*all*");
+        assert_eq!(command(&mut bnet, "autodisplay on", BnetSignal::Eod), ["<Eod>"]);
+        queue.append("", "first\n");
+        assert_eq!(command(&mut bnet, "", BnetSignal::Eod), ["first\n", "<Eod>"]);
+        assert!(!queue.pending());
+        // GetCmd: an answer ".messages" shows them, then counts as the answer
+        assert_eq!(command(&mut bnet, "automount", BnetSignal::SubPrompt), ["Turn on or off? ", "<SubPrompt>"]);
+        queue.append("", "second\n");
+        assert_eq!(command(&mut bnet, ".messages", BnetSignal::Eod), ["second\n", "<Eod>"]);
+        close(bnet, server);
+    }
+
+    #[test]
+    fn gui_mode_and_command_acl_suppress_the_announcement() {
+        let queue = crate::console_msg::test_queue("gui");
+        let (mut bnet, server) = session(&queue, "admin", "*all*");
+        assert_eq!(command(&mut bnet, "gui on", BnetSignal::Eod), ["<Eod>"]);
+        queue.append("", "first\n");
+        assert_eq!(command(&mut bnet, "", BnetSignal::Eod), ["<Eod>"]);
+        assert_eq!(command(&mut bnet, "gui off", BnetSignal::Eod), ["You have messages.\n", "<Eod>"]);
+        close(bnet, server);
+
+        let queue = crate::console_msg::test_queue("acl");
+        let (mut bnet, server) = session(&queue, "limited", "version, autodisplay");
+        queue.append("", "first\n");
+        assert_eq!(command(&mut bnet, "", BnetSignal::Eod), ["<Eod>"]);
+        assert_eq!(command(&mut bnet, "autodisplay on", BnetSignal::Eod), ["<Eod>"]);
+        assert!(queue.pending(), "not shown without the messages command");
+        close(bnet, server);
+    }
+
+    #[test]
+    fn api_mode_signals_msgs_pending_once() {
+        let queue = crate::console_msg::test_queue("api");
+        let (mut bnet, server) = session(&queue, "admin", "*all*");
+        command(&mut bnet, ".api 1", BnetSignal::MainPrompt);
+        queue.append("", "first\n");
+        assert_eq!(command(&mut bnet, "", BnetSignal::MainPrompt), ["<MsgsPending>", "<MainPrompt>"]);
+        assert_eq!(command(&mut bnet, "", BnetSignal::MainPrompt), ["<MainPrompt>"]);
+        assert_eq!(command(&mut bnet, "messages", BnetSignal::MainPrompt),
+            ["<CmdBegin>", "first\n", "<CmdOk>", "<MainPrompt>"]);
+        close(bnet, server);
     }
 }

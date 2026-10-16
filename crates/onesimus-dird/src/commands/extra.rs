@@ -67,24 +67,30 @@ pub fn cmd_gui(ast: &CommandAst, _ctx: &ExecContext) -> CommandResult {
     on_off_reply(ast)
 }
 
-/// DoMessages sends queued text verbatim; dot mode is silent when empty.
-pub fn cmd_messages(ast: &CommandAst, ctx: &ExecContext) -> CommandResult {
+/// DoMessages(): the queued console messages go raw to the attached console
+/// (in every API mode, before the command's result); a caller without a
+/// console gets them as text output.
+pub(crate) fn do_messages(ctx: &ExecContext) -> CommandResult {
     let mut output = String::new();
-    if let Some(rx) = &ctx.bus_rx {
-        while let Ok(message) = rx.try_recv() {
-            let text = match message {
-                crate::message_bus::BusMessage::ConsoleText { text }
-                | crate::message_bus::BusMessage::JobMessage { text, .. } => text,
-                _ => continue,
-            };
-            output.push_str(&text);
-        }
-    }
-    if output.is_empty() && ast.command_name != ".messages"
-        && ctx.api_mode == crate::command_executor::ApiMode::Human {
-        output.push_str("You have no messages.\n");
-    }
+    crate::console_msg::do_messages(ctx, |messages| {
+        crate::ua_select::send_raw(messages).unwrap_or_else(|| {
+            output = messages.iter().map(|m| String::from_utf8_lossy(m)).collect();
+            true
+        })
+    });
     CommandResult::ok(output)
+}
+
+/// C++ ua_output.cc MessagesCmd: pending messages when the command line
+/// (`ua->cmd`) passes the Command ACL, otherwise the decoration
+/// "You have no messages." (plain console mode only).
+pub fn cmd_messages(ast: &CommandAst, ctx: &ExecContext) -> CommandResult {
+    let cmd = if ast.raw_line.is_empty() { ast.command_name.as_str() } else { ast.raw_line.as_str() };
+    if crate::console_msg::pending() && crate::acl::access(ctx, crate::acl::Kind::Command, cmd) {
+        return do_messages(ctx);
+    }
+    let decoration = if ctx.api_mode == crate::command_executor::ApiMode::Human { "You have no messages.\n" } else { "" };
+    CommandResult::ok(decoration.to_string())
 }
 
 /// C++ ua_cmds.cc MemoryCmd: prints ListDirStatusHeader.
@@ -890,22 +896,24 @@ fn move_operation(
 #[cfg(test)]
 mod messages_tests {
     use super::*;
-    use crate::message_bus::{BusMessage, MessageBus, MsgType};
 
     #[test]
     fn messages_preserve_bytes_and_are_consumed_once() {
-        let bus = MessageBus::new(8);
-        let rx = bus.subscribe();
+        let _queue = crate::console_msg::test_queue("extra");
         let ctx = ExecContext { session_id: 0, config: None, session_mgr: None,
             catalog: None, api_mode: crate::command_executor::ApiMode::Human,
-            bus_rx: Some(rx), job_manager: None };
-        bus.post_text("first\n");
-        bus.post(BusMessage::JobMessage { job_id: 42, job_name: "job".into(),
-            msg_type: MsgType::Warning, text: "second\r\n".into(), timestamp: 0 });
+            bus_rx: None, job_manager: None };
+        crate::console_msg::append("", "first\n");
+        crate::console_msg::append("dt ", "second\r\n");
         let dot = crate::session::parse_cli_command(".messages");
-        assert_eq!(crate::commands::dot::cmd_dot_messages(&dot, &ctx).text_output, "first\nsecond\r\n");
+        assert_eq!(crate::commands::dot::cmd_dot_messages(&dot, &ctx).text_output, "first\ndt second\r\n");
         assert_eq!(crate::commands::dot::cmd_dot_messages(&dot, &ctx).text_output, "");
         assert_eq!(cmd_messages(&crate::session::parse_cli_command("messages"), &ctx).text_output, "You have no messages.\n");
+        crate::console_msg::append("", "third\n");
+        assert_eq!(cmd_messages(&crate::session::parse_cli_command("messages"), &ctx).text_output, "third\n");
+        // API modes: no decoration
+        let api = ExecContext { api_mode: crate::command_executor::ApiMode::Api, ..ctx };
+        assert_eq!(cmd_messages(&crate::session::parse_cli_command("messages"), &api).text_output, "");
     }
 }
 

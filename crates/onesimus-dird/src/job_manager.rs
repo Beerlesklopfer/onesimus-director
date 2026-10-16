@@ -278,7 +278,8 @@ impl JobManager {
                 job.phase = if success { DirJobPhase::Completed } else { DirJobPhase::Error };
                 job.completed_at = Some(std::time::Instant::now());
                 let status = if success { "Success" } else { "Error" };
-                self.bus.post(BusMessage::JobMessage { job_id: job.job_id, job_name: job.job_name.clone(),
+                crate::console_msg::post_job_message(&self.bus, self.config.as_ref(), BusMessage::JobMessage {
+                    job_id: job.job_id, job_name: job.job_name.clone(),
                     msg_type: if success { MsgType::Info } else { MsgType::Error },
                     text: format!("Job {status}: status={db_status} files={} bytes={} errors={}", ending.files, ending.bytes, ending.errors),
                     timestamp: now_unix() });

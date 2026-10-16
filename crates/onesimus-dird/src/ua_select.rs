@@ -33,11 +33,19 @@ pub trait Console {
     /// Next data message from the console; signals are skipped (C++ GetCmd
     /// `if (status == BNET_SIGNAL) continue;`). None on error or terminate.
     fn recv(&mut self) -> Option<String>;
+    /// Send raw bytes as one data message (C++ `UA_sock->send()`).
+    fn send_bytes(&mut self, data: &[u8]) -> bool {
+        self.send(&String::from_utf8_lossy(data))
+    }
 }
 
 impl<S: Read + Write> Console for BnetStream<S> {
     fn send(&mut self, text: &str) -> bool {
         self.send_str(text).is_ok()
+    }
+
+    fn send_bytes(&mut self, data: &[u8]) -> bool {
+        BnetStream::send(self, data).is_ok()
     }
 
     fn signal(&mut self, signal: BnetSignal) -> bool {
@@ -82,6 +90,13 @@ pub fn with_console<R>(console: &mut dyn Console, f: impl FnOnce() -> R) -> R {
 
 fn has_console() -> bool {
     CONSOLE.with(|c| c.get().is_some())
+}
+
+/// Send raw messages straight to the attached console (C++
+/// `ua->UA_sock->send()`, bypassing the output formatter). None without a
+/// console; otherwise whether every send succeeded.
+pub fn send_raw(messages: &[Vec<u8>]) -> Option<bool> {
+    with_attached(|console| messages.iter().all(|m| console.send_bytes(m)))
 }
 
 /// Use the attached console. The pointer is taken out while in use, so no
@@ -243,7 +258,12 @@ impl<'a> Ua<'a> {
         let answer = with_attached(|c| c.recv()).flatten()?;
         let answer = answer.trim_end_matches(|c: char| c.is_ascii_whitespace()).to_string();
         self.cmd = answer.clone();
-        // TODO(C-011): GetCmd runs DotMessagesCmd for an answer ".messages".
+        // ua_input.cc:66: an answer ".messages" first runs DotMessagesCmd,
+        // then counts as the answer.
+        if answer == ".messages" {
+            crate::console_msg::dot_messages_cmd(self.ctx, ".messages",
+                |messages| with_attached(|c| messages.iter().all(|m| c.send_bytes(m))).unwrap_or(false));
+        }
         (answer != ".").then_some(answer)
     }
 

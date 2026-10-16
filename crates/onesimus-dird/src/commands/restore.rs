@@ -891,7 +891,7 @@ fn start_restore(ctx: &ExecContext, launch: Launch) -> CommandResult {
             job_id, job_name: "RestoreFiles".to_string(),
             status: "Queued".to_string(), timestamp: now_unix(),
         });
-        smgr.bus().post(BusMessage::JobMessage {
+        crate::console_msg::post_job_message(smgr.bus(), ctx.config.as_ref(), BusMessage::JobMessage {
             job_id, job_name: "RestoreFiles".to_string(),
             msg_type: MsgType::Info,
             text: format!("Start Restore JobId={job_id} from Backup JobId={restore_jobid}, Where={where_path}"),
