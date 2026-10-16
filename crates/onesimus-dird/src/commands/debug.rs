@@ -306,12 +306,12 @@ fn setdebug_with(
         storages.retain(|storage| seen.insert((storage.address.clone(), storage.port)));
     } else {
         for client in &clients {
-            if !crate::acl::access(ctx, crate::acl::Kind::Client, &client.name) {
+            if !crate::acl::access_audited(ctx, crate::acl::Kind::Client, &client.name) {
                 return CommandResult::error(format!("Client \"{}\" not found.\n", client.name));
             }
         }
         for storage in &storages {
-            if !crate::acl::access(ctx, crate::acl::Kind::Storage, &storage.name) {
+            if !crate::acl::access_audited(ctx, crate::acl::Kind::Storage, &storage.name) {
                 return CommandResult::error(format!("Storage \"{}\" not found.\n", storage.name));
             }
         }

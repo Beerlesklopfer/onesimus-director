@@ -142,6 +142,9 @@ fn handle_connection(
     // Console-Sessions: kein harter read-timeout — User kann lange am Prompt sitzen.
     // Die Session endet durch quit/SIGTERM/Connection-Reset, nicht durch Timeout.
     stream.set_read_timeout(None).ok();
+    if let Ok(peer) = stream.peer_addr() {
+        crate::audit::set_peer_host(peer.ip().to_string());
+    }
     let mut peek_buf = [0u8; 1];
     match stream.peek(&mut peek_buf) {
         Ok(1) => {

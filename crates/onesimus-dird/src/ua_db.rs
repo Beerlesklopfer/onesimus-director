@@ -81,7 +81,7 @@ pub fn open_client_db(ast: &CommandAst, ctx: &ExecContext, use_private: bool) ->
 
     // Try for catalog keyword
     if let Some(name) = find_arg_with_value(ast, "catalog") {
-        if let Some(catalog) = res.catalog(name).filter(|c| acl::access(ctx, Kind::Catalog, c)) {
+        if let Some(catalog) = res.catalog(name).filter(|c| acl::access_audited(ctx, Kind::Catalog, c)) {
             let catalog = catalog.to_string();
             select(ctx, &catalog);
             let ok = open(ast, ctx, &res, use_private, &mut op);
@@ -91,11 +91,11 @@ pub fn open_client_db(ast: &CommandAst, ctx: &ExecContext, use_private: bool) ->
 
     // Try for client keyword, then for Job keyword (catalog of the job's client)
     let client = find_arg_with_value(ast, "client")
-        .filter(|c| acl::access(ctx, Kind::Client, c))
+        .filter(|c| acl::access_audited(ctx, Kind::Client, c))
         .and_then(|c| res.client_catalog(c));
     let catalog = client.or_else(|| {
         find_arg_with_value(ast, "job")
-            .filter(|j| acl::access(ctx, Kind::Job, j))
+            .filter(|j| acl::access_audited(ctx, Kind::Job, j))
             .and_then(|j| res.jobs.iter().find(|job| job.0 == j))
             .filter(|job| !job.1.is_empty())
             .and_then(|job| res.client_catalog(&job.1))
@@ -104,7 +104,7 @@ pub fn open_client_db(ast: &CommandAst, ctx: &ExecContext, use_private: bool) ->
         if state(ctx, |s| s.name.as_ref().is_some_and(|n| *n != catalog)) == Some(true) {
             close_db(ctx);
         }
-        if !acl::access(ctx, Kind::Catalog, &catalog) {
+        if !acl::access_audited(ctx, Kind::Catalog, &catalog) {
             op.err.push_str(&format!("No authorization for Catalog \"{catalog}\"\n"));
             return op.finish(false);
         }
@@ -256,7 +256,7 @@ fn get_catalog_resource(ast: &CommandAst, ctx: &ExecContext, res: &Resources, gu
     for arg in &ast.arguments {
         if arg.key.eq_ignore_ascii_case("catalog") {
             if let Some(name) = arg.value.as_deref() {
-                if let Some(catalog) = res.catalog(name).filter(|c| acl::access(ctx, Kind::Catalog, c)) {
+                if let Some(catalog) = res.catalog(name).filter(|c| acl::access_audited(ctx, Kind::Catalog, c)) {
                     return Some(catalog.to_string());
                 }
             }

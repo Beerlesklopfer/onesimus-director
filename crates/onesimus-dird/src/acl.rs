@@ -255,6 +255,16 @@ pub fn lists_command(ctx: &ExecContext, item: &str) -> bool {
             .any(literal)
 }
 
+/// AclAccessOk(acl, item, audit_event=true): a denial is written to the
+/// audit log (UaContext::LogAuditEventAclFailure).
+pub fn access_audited(ctx: &ExecContext, kind: Kind, item: &str) -> bool {
+    let allowed = access(ctx, kind, item);
+    if !allowed {
+        crate::audit::acl_failure(ctx, kind, item);
+    }
+    allowed
+}
+
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;

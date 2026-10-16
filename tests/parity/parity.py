@@ -42,6 +42,9 @@ CPP_DIR = Path('/usr/sbin/bareos-dir')
 PASSWORD = 'parity-dir-pw'
 ENV = {**os.environ, 'LC_ALL': 'C', 'LANG': 'C', 'TZ': 'UTC', 'NO_COLOR': '1'}
 SIDES = ('cpp', 'rust')
+# Messages resource `append` destinations in the working directory
+DAEMON_LOGS = ('bareos-audit.log', 'bareos.log')
+AUDIT_TIMESTAMP = r'^\d\d-\w{3} \d\d:\d\d'
 
 
 def write_config(source, target, port, args):
@@ -261,6 +264,10 @@ def run(args):
     out.mkdir(parents=True)
     # The sides run one after the other on the identical configuration, so
     # ports, working directory and file names in replies are the same.
+    # The Messages destinations live in the working directory, which the
+    # next setup() recreates: each side's logs are moved to
+    # <work>/<side>-<name> right after its Director stopped.
+    work = args.work / 'conf' / 'work'
     results = {}
     template = args.db
     for side in SIDES:
@@ -277,6 +284,12 @@ def run(args):
                     results[side] = {case['id']: capture(args.port, case) for case in cases}
                 finally:
                     stop(process)
+            for name in DAEMON_LOGS:
+                target = args.work / f'{side}-{name.removeprefix("bareos-")}'
+                if (work / name).exists():
+                    (work / name).replace(target)
+                else:
+                    target.write_bytes(b'')
         finally:
             if not args.shared_db:
                 drop_catalog_copy(args.db)
@@ -285,9 +298,34 @@ def run(args):
     for case in cases:
         record = compare(case, {side: results[side][case['id']] for side in SIDES}, out)
         records.append(record)
+    records.append(compare_audit_log(args.work, out))
+    for record in records:
         if args.verbose or record['status'] != 'match':
-            print(f'{record["status"]:6} {case["id"]}' + (f'  ({"; ".join(record["reasons"][:2])})' if record['reasons'] else ''))
+            print(f'{record["status"]:6} {record["id"]}' + (f'  ({"; ".join(record["reasons"][:2])})' if record['reasons'] else ''))
     return gate(args, records)
+
+
+def compare_audit_log(work, out):
+    """Pseudo case `audit-log`: both sides' audit logs, only the timestamp
+    prefix of each message normalized."""
+    record = {'id': 'audit-log', 'steps': [], 'normalize': [AUDIT_TIMESTAMP], 'sides': {},
+              'status': 'match', 'reasons': []}
+    parts = {}
+    for side in SIDES:
+        path = work / f'{side}-audit.log'
+        data = path.read_bytes()
+        record['sides'][side] = [{'bytes': len(data), 'sha256': hashlib.sha256(data).hexdigest(),
+                                  'signals': [], 'end': 'file', 'raw': str(path)}]
+        parts[side] = re.sub(AUDIT_TIMESTAMP.encode(), b'<N>', data, flags=re.M)
+    if parts['cpp'] != parts['rust']:
+        record['status'] = 'diff'
+        diff = list(difflib.unified_diff(parts['cpp'].decode('latin-1').splitlines(True),
+                                         parts['rust'].decode('latin-1').splitlines(True),
+                                         'cpp:audit-log', 'rust:audit-log'))
+        changed = sum(line[0] in '+-' and not line.startswith(('+++', '---')) for line in diff)
+        record['reasons'].append(f'audit log differs ({changed} lines)')
+        (out / 'audit-log.diff').write_text(''.join(diff))
+    return record
 
 
 def gate(args, records):

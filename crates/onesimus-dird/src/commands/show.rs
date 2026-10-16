@@ -1492,10 +1492,10 @@ const MSG_TYPES: &[(&str, u32)] = &[
 ];
 const M_MAX: u32 = 17;
 
-struct Dest {
-    code: &'static str,
-    where_: String,
-    types: u32, // bit mask over M_ codes (bit n = code n)
+pub(crate) struct Dest {
+    pub(crate) code: &'static str,
+    pub(crate) where_: String,
+    pub(crate) types: u32, // bit mask over M_ codes (bit n = code n)
 }
 
 fn print_messages(res: &ConfResource, verbose: bool, w: &mut W) {
@@ -1509,6 +1509,26 @@ fn print_messages(res: &ConfResource, verbose: bool, w: &mut W) {
         }
     }
 
+    let chain = destinations(res);
+
+    for e in &chain {
+        let what = message_types(e.types, verbose);
+        let has_where = matches!(e.code, "mail" | "file" | "append" | "director" | "operator" | "mailonerror" | "mailonsuccess");
+        let mut line = format!("{}{}", w.prefix(false), e.code);
+        let mut obj = Map::new();
+        if has_where {
+            line.push_str(&format!(" = {}", e.where_));
+            obj.insert("where".into(), json!(e.where_));
+        }
+        line.push_str(&format!(" = {what}\n"));
+        obj.insert("what".into(), json!(what));
+        w.text.push_str(&line);
+        w.put(e.code, Value::Object(obj));
+    }
+}
+
+/// Destination chain of a Messages resource (lib/msg_res.cc StoreMsgs).
+pub(crate) fn destinations(res: &ConfResource) -> Vec<Dest> {
     let mut chain: Vec<Dest> = Vec::new();
     for d in &res.directives {
         let key = d.norm_key();
@@ -1552,21 +1572,7 @@ fn print_messages(res: &ConfResource, verbose: bool, w: &mut W) {
             }
         }
     }
-
-    for e in &chain {
-        let what = message_types(e.types, verbose);
-        let has_where = matches!(e.code, "mail" | "file" | "append" | "director" | "operator" | "mailonerror" | "mailonsuccess");
-        let mut line = format!("{}{}", w.prefix(false), e.code);
-        let mut obj = Map::new();
-        if has_where {
-            line.push_str(&format!(" = {}", e.where_));
-            obj.insert("where".into(), json!(e.where_));
-        }
-        line.push_str(&format!(" = {what}\n"));
-        obj.insert("what".into(), json!(what));
-        w.text.push_str(&line);
-        w.put(e.code, Value::Object(obj));
-    }
+    chain
 }
 
 fn add_dest(chain: &mut Vec<Dest>, code: &'static str, where_: &str, m: u32) {
