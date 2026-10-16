@@ -92,9 +92,7 @@ fn director_name(ctx: &ExecContext) -> String {
 /// ua_cmds.cc CancelStorageDaemonJob(ua, cmd) (:758).
 fn cancel_storage_daemon_job(ua: &mut Ua, ast: &CommandAst, links: &mut dyn CancelLinks) {
     let ctx = ua.ctx;
-    let Some(name) = ua_select::get_storage_resource(ua, ast, false, false) else { return };
-    let Some(store) = ctx.config.as_ref()
-        .and_then(|c| c.read().ok().and_then(|c| c.find_storage(&name).cloned())) else { return };
+    let Some(store) = ua_select::get_storage_resource(ua, ast, false, false) else { return };
     let Some(jobid) = ua_select::find_arg_with_value(ast, "jobid") else {
         ua.warning_msg("Missing jobid=JobId specification\n");
         return;

@@ -902,7 +902,7 @@ fn add_questions(ua: &mut crate::ua_select::Ua, ast: &CommandAst) -> Option<AddV
         max_vols = i64::from(ua.get_pint("Enter new maximum (zero for unlimited): ")?);
     }
     // Media type of the storage, otherwise GetMediaType.
-    let storage = ua_select::get_storage_resource(ua, ast, false, false);
+    let storage = ua_select::get_storage_resource(ua, ast, false, false).map(|s| s.name);
     let media_type = match &storage {
         Some(name) => ctx.config.as_ref().and_then(|c| c.read().ok())
             .and_then(|c| c.find_storage(name).map(|s| s.media_type.clone())).unwrap_or_default(),
@@ -1002,9 +1002,9 @@ fn move_operation(
     operation: &str,
     send: impl FnOnce(&str, &str) -> Result<String, String>,
 ) -> CommandResult {
-    let (store, mut text) = match super::prompt::select_storage(ast, ctx, true) {
-        Ok(selected) => selected,
-        Err(result) => return result,
+    let mut ua = crate::ua_select::Ua::new(ctx);
+    let Some(store) = crate::ua_select::get_storage_resource(&mut ua, ast, false, true) else {
+        return ua.finish(false);
     };
     let value = |keys: &[&str]| keys.iter().find_map(|key| ast.arguments.iter()
         .find(|a| a.key.eq_ignore_ascii_case(key) && a.value.is_some())
@@ -1021,9 +1021,8 @@ fn move_operation(
         _ => None,
     };
     if let Some(refusal) = refusal {
-        let mut result = CommandResult::error(refusal.to_string());
-        result.text_output = text;
-        return result;
+        ua.error_msg(refusal);
+        return ua.finish(false);
     }
     let mut command = operation.to_string();
     for (key, value) in [("srcslots", src), ("dstslots", dst), ("volume", volume)] {
@@ -1031,13 +1030,12 @@ fn move_operation(
     }
     match send(&store.name, &command) {
         Ok(resp) => {
-            text.push_str(&format!("{operation} on storage {}:\n{resp}\n", store.name));
-            CommandResult::ok(text)
+            ua.send_msg(format!("{operation} on storage {}:\n{resp}\n", store.name));
+            ua.finish(true)
         }
         Err(e) => {
-            let mut result = CommandResult::error(format!("{operation} {}: {e}\n", store.name));
-            result.text_output = text;
-            result
+            ua.error_msg(format!("{operation} {}: {e}\n", store.name));
+            ua.finish(false)
         }
     }
 }
@@ -1171,11 +1169,18 @@ mod move_operation_tests {
         for line in ["import", "export", "move", "import srcslots=1", "move srcslot=1 dstslot=2"] {
             let result = run(line, &ctx);
             assert!(!result.success, "{line}");
-            assert_eq!(result.text_output, "The defined Autochanger Storage resources are:\n", "{line}");
-            assert_eq!(result.error_message, "Selection list for \"Storage\" is empty!\n", "{line}");
+            // Without console DoPrompt is in batch mode.
+            assert_eq!(result.text_output, "The defined Autochanger Storage resources are:\n\
+                Your request has multiple choices for \"Storage\". Selection is not possible in batch mode.\n", "{line}");
         }
+        // With a console: nothing to ask, so the result carries the text.
+        let (result, console) = crate::ua_select::tests::scripted(&[], || run("import", &ctx));
+        assert!(!result.success && console.events.is_empty());
+        assert_eq!(result.text_output, "The defined Autochanger Storage resources are:\n");
+        assert_eq!(result.error_message, "Selection list for \"Storage\" is empty!\n");
         let result = run("import storage=Nope", &ctx);
-        assert_eq!(result.text_output, "Storage resource \"Nope\": not found\nThe defined Autochanger Storage resources are:\n");
+        assert_eq!(result.error_message, "Storage resource \"Nope\": not found\n");
+        assert_eq!(result.text_output, "The defined Autochanger Storage resources are:\nYour request has multiple choices for \"Storage\". Selection is not possible in batch mode.\n");
         assert_eq!(run("export jobid=x", &ctx).error_message, "Expecting jobid=nn command, got: jobid\n");
         assert_eq!(run("move job=Backup", &ctx).error_message, "Job \"Backup\" is not running.\n");
     }

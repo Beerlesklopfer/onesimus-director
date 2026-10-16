@@ -4,10 +4,12 @@
 //! Everything upstream checks before the file selection is ported in the
 //! upstream order: comment, fileregex, regexwhere/where ACL, OpenClientDb,
 //! the Restore Job resources, the keyword loop and the JobId list. The
-//! interactive parts (JobId menu, file selection tree, client/date
-//! questions, "OK to run?") are not available yet (C-011 dialogs); they end
-//! the command without creating a job. A restore is only started for an
-//! explicit `jobid=… client=… all done yes`.
+//! JobId menu and the Restore Job selection are console dialogs (C-011);
+//! of the menu only "Enter list of comma separated JobIds" and "Cancel" are
+//! ported. The other interactive parts (other menu items, file selection
+//! tree, client/date questions, "OK to run?") are not available yet; they
+//! end the command without creating a job. A restore is only started for a
+//! complete selection with `client=… all done yes`.
 
 use std::ffi::{CStr, CString};
 use std::sync::atomic::{AtomicU32, Ordering};
@@ -16,11 +18,12 @@ use bareos_config::resources::JobType;
 
 use crate::acl::{self, Kind};
 use crate::command_ast::{Argument, CommandAst};
-use crate::command_executor::{ApiMode, ExecContext};
-use crate::command_queue::{CommandResult, MsgKind};
+use crate::command_executor::ExecContext;
+use crate::command_queue::CommandResult;
 use crate::job_manager;
 use crate::job_worker::{self, JobParams, WorkerJobType};
 use crate::message_bus::{BusMessage, MsgType};
+use crate::ua_select::Ua;
 
 /// UserSelectJobidsOrFiles kw[] (ua_restore.cc:511), in upstream order.
 const KEYWORDS: [&str; 27] = [
@@ -58,57 +61,6 @@ const MAX_NAME_LENGTH: usize = 128;
 
 static NEXT_RESTORE_ID: AtomicU32 = AtomicU32::new(10000);
 
-/// SendMsg/ErrorMsg output in emission order (two channels, see
-/// CommandResult::errors_first).
-#[derive(Default)]
-struct Ua {
-    out: String,
-    err: String,
-    errors_first: bool,
-    /// ErrorMsg/WarningMsg/InfoMsg calls in order (CommandResult::messages).
-    messages: Vec<(MsgKind, String)>,
-}
-
-impl Ua {
-    fn send(&mut self, text: &str) {
-        self.out.push_str(text);
-    }
-
-    fn error(&mut self, text: &str) {
-        if self.out.is_empty() && self.err.is_empty() {
-            self.errors_first = true;
-        }
-        self.err.push_str(text);
-        self.messages.push((MsgKind::Error, text.to_string()));
-    }
-
-    /// ua->WarningMsg(): text plus BNET_WARNING_MSG / "warning" entry.
-    fn warning(&mut self, text: &str) {
-        self.out.push_str(text);
-        self.messages.push((MsgKind::Warning, text.to_string()));
-    }
-
-    /// ua->InfoMsg(): text plus BNET_INFO_MSG / "info" entry.
-    fn info(&mut self, text: &str) {
-        self.out.push_str(text);
-        self.messages.push((MsgKind::Info, text.to_string()));
-    }
-
-    fn finish(self, success: bool) -> CommandResult {
-        // Without WarningMsg/InfoMsg the errors keep their line split.
-        let notices = self.messages.iter().any(|(kind, _)| *kind != MsgKind::Error);
-        CommandResult {
-            success,
-            text_output: self.out,
-            error_message: self.err,
-            errors_first: self.errors_first,
-            json: None,
-            messages: if notices { self.messages } else { Vec::new() },
-            ..Default::default()
-        }
-    }
-}
-
 /// Everything the start of the restore needs once the selection is complete.
 pub(crate) struct Launch {
     pub restore_jobid: u32,
@@ -116,7 +68,6 @@ pub(crate) struct Launch {
     pub restore_client: String,
     pub where_path: Option<String>,
     pub replace: Option<String>,
-    pub prefix: String,
 }
 
 pub fn cmd_restore(ast: &CommandAst, ctx: &ExecContext) -> CommandResult {
@@ -139,11 +90,11 @@ fn has_arg(ast: &CommandAst, key: &str) -> bool {
 /// only called for a complete selection with `yes`.
 pub(crate) fn restore_with(ast: &CommandAst, ctx: &ExecContext,
     launch: impl FnOnce(Launch) -> CommandResult) -> CommandResult {
-    let mut ua = Ua::default();
+    let mut ua = Ua::new(ctx);
 
     if let Some(comment) = arg_with_value(ast, "comment") {
         if let Err(message) = comment_legal(comment) {
-            ua.error(message);
+            ua.error_msg(message);
             return ua.finish(false);
         }
     }
@@ -157,8 +108,8 @@ pub(crate) fn restore_with(ast: &CommandAst, ctx: &ExecContext,
 
     if let Some(regex) = arg_with_value(ast, "fileregex") {
         if let Err(message) = regex_check(regex) {
-            ua.send(&format!("Regex compile error: {message}\n"));
-            ua.error("Invalid \"FileRegex\" value.\n");
+            ua.send_msg(&format!("Regex compile error: {message}\n"));
+            ua.error_msg("Invalid \"FileRegex\" value.\n");
             return ua.finish(false);
         }
     }
@@ -169,19 +120,19 @@ pub(crate) fn restore_with(ast: &CommandAst, ctx: &ExecContext,
 
     if let Some(regexwhere) = &regexwhere {
         if !acl::access(ctx, Kind::Where, regexwhere) {
-            ua.error("\"RegexWhere\" specification not authorized.\n");
+            ua.error_msg("\"RegexWhere\" specification not authorized.\n");
             return ua.finish(false);
         }
     }
     if let Some(where_path) = where_path {
         if !acl::access(ctx, Kind::Where, where_path) {
-            ua.error("\"where\" specification not authorized.\n");
+            ua.error_msg("\"where\" specification not authorized.\n");
             return ua.finish(false);
         }
     }
 
     match crate::ua_db::open_client_db(ast, ctx, true) {
-        Ok(prefix) => ua.send(&prefix),
+        Ok(prefix) => ua.send_msg(&prefix),
         Err(result) => return result,
     }
 
@@ -189,14 +140,13 @@ pub(crate) fn restore_with(ast: &CommandAst, ctx: &ExecContext,
     let restore_jobs = restore_job_names(ctx);
     if restore_jobs.is_empty() {
         let path = crate::reload::config_path().map(|p| p.display().to_string()).unwrap_or_default();
-        ua.error(&format!("No Restore Job Resource found in {path}.\n\
+        ua.error_msg(&format!("No Restore Job Resource found in {path}.\n\
             You must create at least one before running this command.\n"));
         return ua.finish(false);
     }
 
     let jobids = match select_jobids(&mut ua, ast, ctx) {
         Selection::JobIds(jobids) => jobids,
-        Selection::Prompt => return ua.finish(true),
         Selection::Abort => return ua.finish(false),
     };
 
@@ -220,9 +170,9 @@ pub(crate) fn restore_with(ast: &CommandAst, ctx: &ExecContext,
             && acl::access(ctx, Kind::Job, name));
         if !found {
             if let Some(name) = restorejob {
-                ua.error(&format!("Error: Restore Job resource \"{name}\" does not exist.\n"));
+                ua.error_msg(&format!("Error: Restore Job resource \"{name}\" does not exist.\n"));
             }
-            if select_restore_job(&mut ua, ctx, &restore_jobs).is_none() {
+            if crate::ua_select::select_restore_job_resource(&mut ua).is_none() {
                 return ua.finish(false);
             }
         }
@@ -239,11 +189,11 @@ pub(crate) fn restore_with(ast: &CommandAst, ctx: &ExecContext,
     let restore_client = match arg_with_value(ast, "restoreclient") {
         Some(name) => {
             if let Err(message) = name_valid(name) {
-                ua.error(&format!("restoreclient argument: {message}"));
+                ua.error_msg(&format!("restoreclient argument: {message}"));
                 return ua.finish(false);
             }
             if !client_resource_exists(ctx, name) {
-                ua.error(&format!("invalid restoreclient argument: {name}\n"));
+                ua.error_msg(&format!("invalid restoreclient argument: {name}\n"));
                 return ua.finish(false);
             }
             name.to_string()
@@ -259,23 +209,25 @@ pub(crate) fn restore_with(ast: &CommandAst, ctx: &ExecContext,
     // RunCmd checks of the generated run command (ua_run.cc:2018,2229).
     if let Some(options) = arg_with_value(ast, "pluginoptions") {
         if !acl::access(ctx, Kind::PluginOptions, options) {
-            ua.send("No authorization for \"PluginOptions\" specification.\n");
+            ua.send_msg("No authorization for \"PluginOptions\" specification.\n");
             return ua.finish(false);
         }
     }
     if !acl::access(ctx, Kind::Client, &restore_client) {
-        ua.error(&format!("No authorization. Client \"{restore_client}\".\n"));
+        ua.error_msg(&format!("No authorization. Client \"{restore_client}\".\n"));
         return ua.finish(false);
     }
 
-    launch(Launch {
+    let result = launch(Launch {
         restore_jobid: jobids[0],
         client,
         restore_client,
         where_path: where_path.map(str::to_string),
         replace: replace.map(str::to_string),
-        prefix: ua.out,
-    })
+    });
+    let success = result.success;
+    ua.send_result(result);
+    ua.finish(success)
 }
 
 /// End of the ported part: the dialog that follows upstream is not
@@ -286,15 +238,13 @@ fn not_available(mut ua: Ua, what: &str) -> CommandResult {
 }
 
 fn unavailable(ua: &mut Ua, what: &str) {
-    ua.error(&format!("{what} is not available yet; give jobid=<id> client=<name> all done yes.\n"));
-    ua.send("Restore not done.\n");
+    ua.error_msg(&format!("{what} is not available yet; give jobid=<id> client=<name> all done yes.\n"));
+    ua.send_msg("Restore not done.\n");
 }
 
 enum Selection {
     /// Selected JobIds (ACL filtered, duplicates of the previous one removed).
     JobIds(Vec<u32>),
-    /// Stopped at a console prompt (output ends with the prompt).
-    Prompt,
     /// Error or cancel (UserSelectJobidsOrFiles returned 0).
     Abort,
 }
@@ -302,7 +252,7 @@ enum Selection {
 /// HasValue (ua_restore.cc:411).
 fn has_value<'a>(ua: &mut Ua, arg: &'a Argument) -> Option<&'a str> {
     if arg.value.is_none() {
-        ua.error(&format!("Missing value for keyword: {}\n", arg.key));
+        ua.error_msg(&format!("Missing value for keyword: {}\n", arg.key));
     }
     arg.value.as_deref()
 }
@@ -318,7 +268,7 @@ fn select_jobids(ua: &mut Ua, ast: &CommandAst, ctx: &ExecContext) -> Selection 
 
     for arg in &ast.arguments {
         let Some(keyword) = KEYWORDS.iter().position(|k| k.eq_ignore_ascii_case(&arg.key)) else {
-            ua.error(&format!("Unknown keyword: {}\n", arg.key));
+            ua.error_msg(&format!("Unknown keyword: {}\n", arg.key));
             return Selection::Abort;
         };
         match keyword {
@@ -340,7 +290,7 @@ fn select_jobids(ua: &mut Ua, ast: &CommandAst, ctx: &ExecContext) -> Selection 
                 let Some(value) = has_value(ua, arg) else { return Selection::Abort };
                 let date = compensate_short_date(value);
                 if str_to_utime(&date) == 0 {
-                    ua.error(&format!("Improper date format: {date}\n"));
+                    ua.error_msg(&format!("Improper date format: {date}\n"));
                     return Selection::Abort;
                 }
                 have_date = true;
@@ -360,7 +310,7 @@ fn select_jobids(ua: &mut Ua, ast: &CommandAst, ctx: &ExecContext) -> Selection 
                     .and_then(|c| c.read().ok().map(|c| c.find_pool(value).is_some()))
                     .unwrap_or(false);
                 if !exists || !acl::access(ctx, Kind::Pool, value) {
-                    ua.error(&format!("Error: Pool resource \"{value}\" does not exist.\n"));
+                    ua.error_msg(&format!("Error: Pool resource \"{value}\" does not exist.\n"));
                     return Selection::Abort;
                 }
             }
@@ -384,9 +334,24 @@ fn select_jobids(ua: &mut Ua, ast: &CommandAst, ctx: &ExecContext) -> Selection 
     }
 
     if !done {
-        ua.send(INTRO);
-        return prompt_menu(ua, ctx, "To select the JobIds, you have the following choices:\n",
-            &SELECT_LIST, "", "Select item: ");
+        ua.send_msg(INTRO);
+        // The selection menu (ua_restore.cc:657).
+        ua.start_prompt("To select the JobIds, you have the following choices:\n");
+        for item in SELECT_LIST {
+            ua.add_prompt(item);
+        }
+        match ua.do_prompt("", "Select item: ") {
+            // error or cancel; 13: Cancel
+            None | Some((12, _)) => return Selection::Abort,
+            // enter a list of JobIds
+            Some((2, _)) => {
+                let Some(answer) = ua.get_cmd("Enter JobId(s), comma separated, to restore: ") else {
+                    return Selection::Abort;
+                };
+                jobids = answer;
+            }
+            Some((_, item)) => return not_available_selection(ua, &format!("Menu item \"{item}\"")),
+        }
     }
 
     filter_jobids(ua, ctx, &jobids)
@@ -395,65 +360,6 @@ fn select_jobids(ua: &mut Ua, ast: &CommandAst, ctx: &ExecContext) -> Selection 
 fn not_available_selection(ua: &mut Ua, what: &str) -> Selection {
     unavailable(ua, what);
     Selection::Abort
-}
-
-/// StartPrompt/AddPrompt/DoPrompt (ua_select.cc:1210) for a list of more
-/// than one entry. The interactive answer is not available yet (C-011):
-/// the output ends with the prompt; batch consoles (`.api 2`) get the
-/// upstream batch-mode refusal.
-fn prompt_menu(ua: &mut Ua, ctx: &ExecContext, header: &str, items: &[&str], automsg: &str,
-    msg: &str) -> Selection {
-    ua.send(header);
-    if ctx.api_mode == ApiMode::Api {
-        for item in items {
-            ua.send(item);
-        }
-    } else {
-        ua.send(&format_prompts(items));
-    }
-    if ctx.api_mode == ApiMode::Json {
-        ua.send(&format!("Your request has multiple choices for \"{automsg}\". \
-            Selection is not possible in batch mode.\n"));
-        return Selection::Abort;
-    }
-    ua.send(&format!("{msg} (1-{}): ", items.len()));
-    Selection::Prompt
-}
-
-/// FormatPrompts (ua_select.cc:1130) for lists of at most 20 entries: the
-/// number is right aligned to the width of the entry count plus one.
-fn format_prompts(items: &[&str]) -> String {
-    let width = (items.len() + 1).to_string().len();
-    items.iter().enumerate()
-        .map(|(index, item)| format!("{:>width$}: {item}\n", index + 1))
-        .collect()
-}
-
-/// select_restore_job_resource (ua_select.cc:402). Returns the job if the
-/// choice is automatic.
-fn select_restore_job(ua: &mut Ua, ctx: &ExecContext, jobs: &[String]) -> Option<String> {
-    let mut names: Vec<String> = jobs.iter().filter(|j| acl::access(ctx, Kind::Job, j)).cloned().collect();
-    names.sort_by_key(|name| name.to_lowercase());
-    names.dedup();
-    match names.as_slice() {
-        [] => {
-            ua.send("The defined Restore Job resources are:\n");
-            ua.error("Selection list for \"Job\" is empty!\n");
-            None
-        }
-        [only] => {
-            if ctx.api_mode == ApiMode::Human {
-                ua.send(&format!("Automatically selected Job: {only}\n"));
-            }
-            Some(only.clone())
-        }
-        _ => {
-            let items: Vec<&str> = names.iter().map(String::as_str).collect();
-            prompt_menu(ua, ctx, "The defined Restore Job resources are:\n", &items, "Job",
-                "Select Restore Job");
-            None
-        }
-    }
 }
 
 fn restore_job_names(ctx: &ExecContext) -> Vec<String> {
@@ -477,7 +383,7 @@ fn client_resource_exists(ctx: &ExecContext, name: &str) -> bool {
 fn client_name(ua: &mut Ua, ast: &CommandAst, ctx: &ExecContext) -> Option<Option<String>> {
     let Some(name) = arg_with_value(ast, "client") else { return Some(None) };
     if let Err(message) = name_valid(name) {
-        ua.error(&format!("client argument: {message}"));
+        ua.error_msg(&format!("client argument: {message}"));
         return None;
     }
     let sql = format!("SELECT ClientId FROM Client WHERE Name='{name}'");
@@ -485,7 +391,7 @@ fn client_name(ua: &mut Ua, ast: &CommandAst, ctx: &ExecContext) -> Option<Optio
         .and_then(|catalog| catalog.query_rows(&sql).ok())
         .is_some_and(|table| table.rows.len() == 1);
     if !found {
-        ua.error(&format!("invalid client argument: {name}\n"));
+        ua.error_msg(&format!("invalid client argument: {name}\n"));
         return None;
     }
     Some(Some(name.to_string()))
@@ -501,7 +407,7 @@ fn filter_jobids(ua: &mut Ua, ctx: &ExecContext, list: &str) -> Selection {
     loop {
         let jobid = match next_jobid(&mut rest) {
             Err(()) => {
-                ua.error("Invalid JobId in list.\n");
+                ua.error_msg("Invalid JobId in list.\n");
                 return Selection::Abort;
             }
             Ok(None) => break,
@@ -514,23 +420,23 @@ fn filter_jobids(ua: &mut Ua, ctx: &ExecContext, list: &str) -> Selection {
         let name = match job_name(ctx, jobid) {
             Ok(name) => name,
             Err(message) => {
-                ua.error(&format!("Unable to get Job record for JobId={jobid}: ERR={message}\n"));
+                ua.error_msg(&format!("Unable to get Job record for JobId={jobid}: ERR={message}\n"));
                 return Selection::Abort;
             }
         };
         if !acl::access(ctx, Kind::Job, &name) {
-            ua.error(&format!("Access to JobId={jobid} (Job \"{name}\") not authorized. Not selected.\n"));
+            ua.error_msg(&format!("Access to JobId={jobid} (Job \"{name}\") not authorized. Not selected.\n"));
             continue;
         }
         selected.push(jobid);
     }
     if selected.is_empty() {
-        ua.warning("No Jobs selected.\n");
+        ua.warning_msg("No Jobs selected.\n");
         return Selection::Abort;
     }
     let joined = selected.iter().map(u32::to_string).collect::<Vec<_>>().join(",");
     let plural = if selected.len() > 1 { "s" } else { "" };
-    ua.info(&format!("You have selected the following JobId{plural}: {joined}\n"));
+    ua.info_msg(format!("You have selected the following JobId{plural}: {joined}\n"));
     Selection::JobIds(selected)
 }
 
@@ -839,7 +745,7 @@ fn str_to_utime(s: &str) -> i64 {
 
 /// Start the restore worker for a complete selection.
 fn start_restore(ctx: &ExecContext, launch: Launch) -> CommandResult {
-    let Launch { restore_jobid, client: client_name, restore_client, where_path, replace, prefix } = launch;
+    let Launch { restore_jobid, client: client_name, restore_client, where_path, replace } = launch;
     let where_path = where_path.unwrap_or_else(|| "/tmp/bareos-restore".to_string());
     let replace = replace.unwrap_or_else(|| "always".to_string());
 
@@ -934,7 +840,7 @@ fn start_restore(ctx: &ExecContext, launch: Launch) -> CommandResult {
     }
 
     CommandResult::ok(format!(
-        "{prefix}Restore job queued. JobId={job_id}\n\
+        "Restore job queued. JobId={job_id}\n\
          Restore from:  Backup JobId={restore_jobid}\n\
          Client:        {client_name}\n\
          Storage:       {}\n\
@@ -953,6 +859,8 @@ fn now_unix() -> i64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::command_executor::ApiMode;
+    use crate::ua_select::tests::scripted;
     use std::sync::{Arc, Mutex, RwLock};
 
     use crate::catalog_worker::{CatalogHandle, CatalogRequest, CatalogResponse, SqlColumn, SqlTable};
@@ -1020,6 +928,16 @@ Console { Name=limited; Password=pw; CommandACL=*all*; CatalogACL=*all*; ClientA
     }
 
     const USING: &str = "Automatically selected Catalog: MyCatalog\nUsing Catalog \"MyCatalog\"\n";
+    /// DoPrompt without console (batch mode) for the JobId menu.
+    const MENU_BATCH: &str = "13: Cancel\nYour request has multiple choices for \"\". \
+        Selection is not possible in batch mode.\n";
+
+    /// Runs the command with a console answering `answers`: the result and
+    /// the transcript. A launch fails the test.
+    fn dialog(ctx: &ExecContext, line: &str, answers: &[&str]) -> (CommandResult, String) {
+        let (result, console) = scripted(answers, || run(ctx, line));
+        (result, console.transcript())
+    }
 
     #[test]
     fn unknown_keywords_are_rejected_after_opening_the_catalog() {
@@ -1084,7 +1002,7 @@ Console { Name=limited; Password=pw; CommandACL=*all*; CatalogACL=*all*; ClientA
         assert_eq!(run(&ctx, "restore before=\"2020-02-30 10:00:00\"").error_message,
             "Improper date format: 2020-02-30 10:00:00\n");
         // Valid dates lead to the selection menu.
-        assert!(run(&ctx, "restore before=2020-01-01").text_output.ends_with("Select item:  (1-13): "));
+        assert!(run(&ctx, "restore before=2020-01-01").text_output.ends_with(MENU_BATCH));
         // A second date ends the command without a message.
         let (ctx, _) = context("*UserAgent*");
         let result = run(&ctx, "restore current before=x");
@@ -1096,7 +1014,7 @@ Console { Name=limited; Password=pw; CommandACL=*all*; CatalogACL=*all*; ClientA
     fn pool_must_exist_and_be_permitted() {
         let (ctx, _) = context("*UserAgent*");
         assert_eq!(run(&ctx, "restore pool=nosuch").error_message, "Error: Pool resource \"nosuch\" does not exist.\n");
-        assert!(run(&ctx, "restore pool=Full").text_output.ends_with("Select item:  (1-13): "));
+        assert!(run(&ctx, "restore pool=Full").text_output.ends_with(MENU_BATCH));
     }
 
     #[test]
@@ -1118,9 +1036,8 @@ Console { Name=limited; Password=pw; CommandACL=*all*; CatalogACL=*all*; ClientA
     fn job_acl_filters_jobids() {
         let (ctx, _) = context("limited");
         let result = run(&ctx, "restore jobid=2,1");
-        assert_eq!(result.error_message.lines().next(),
-            Some("Access to JobId=2 (Job \"secret\") not authorized. Not selected."));
-        assert!(result.text_output.contains("You have selected the following JobId: 1\n"));
+        assert!(result.text_output.contains("Access to JobId=2 (Job \"secret\") not authorized. Not selected.\n\
+            You have selected the following JobId: 1\n"), "{}", result.text_output);
         let result = run(&ctx, "restore jobid=2");
         assert!(result.text_output.ends_with("No Jobs selected.\n"));
     }
@@ -1132,7 +1049,7 @@ Console { Name=limited; Password=pw; CommandACL=*all*; CatalogACL=*all*; ClientA
         assert_eq!(run(&ctx, "restore client=a!b file=/x").error_message,
             "client argument: Illegal character \"!\" in name.\n");
         // Without file selection the client is not looked at before the menu.
-        assert!(run(&ctx, "restore client=nosuch").text_output.ends_with("Select item:  (1-13): "));
+        assert!(run(&ctx, "restore client=nosuch").text_output.ends_with(MENU_BATCH));
         assert_eq!(run(&ctx, "restore jobid=1 client=nosuch all done yes").error_message,
             "invalid client argument: nosuch\n");
         assert_eq!(run(&ctx, "restore jobid=1 client=fd1 restoreclient=nosuch all done yes").error_message,
@@ -1141,10 +1058,10 @@ Console { Name=limited; Password=pw; CommandACL=*all*; CatalogACL=*all*; ClientA
 
     #[test]
     fn selection_menu() {
-        let (mut ctx, _) = context("*UserAgent*");
-        let result = run(&ctx, "restore");
-        assert!(result.success);
-        assert_eq!(result.text_output, format!("{USING}{INTRO}\
+        // Each run in a new session: "Using Catalog" is shown once per session.
+        let (mut ctx, log) = context("*UserAgent*");
+        let fresh = || context("*UserAgent*").0;
+        let menu = format!("{USING}{INTRO}\
             To select the JobIds, you have the following choices:\n \
             1: List last 20 Jobs run\n \
             2: List Jobs where a given File is saved\n \
@@ -1159,12 +1076,30 @@ Console { Name=limited; Password=pw; CommandACL=*all*; CatalogACL=*all*; ClientA
             11: Enter a list of directories to restore for found JobIds\n\
             12: Select full restore to a specified Job date\n\
             13: Cancel\n\
-            Select item:  (1-13): "));
+            Select item:  (1-13): ");
+        let (result, transcript) = dialog(&ctx, "restore", &["."]);
+        assert!(!result.success);
+        assert_eq!(transcript, format!("{menu}.\nSelection aborted, nothing done.\n"));
+        let (_, transcript) = dialog(&fresh(), "restore", &["13"]);
+        assert_eq!(transcript, format!("{menu}13\n"), "Cancel ends without a message");
+        let (_, transcript) = dialog(&fresh(), "restore", &["3", "."]);
+        assert_eq!(transcript, format!("{menu}3\nEnter JobId(s), comma separated, to restore: .\n"));
+        // Entered JobIds are checked like jobid=; nothing is restored without `all done yes`.
+        let (_, transcript) = dialog(&fresh(), "restore", &["3", "1"]);
+        assert!(transcript.ends_with("restore: 1\nYou have selected the following JobId: 1\n\
+            Interactive file selection is not available yet; give jobid=<id> client=<name> all done yes.\n\
+            Restore not done.\n"), "{transcript}");
+        let (_, transcript) = dialog(&fresh(), "restore", &["1"]);
+        assert!(transcript.ends_with("Select item:  (1-13): 1\nMenu item \"List last 20 Jobs run\" is not available yet; \
+            give jobid=<id> client=<name> all done yes.\nRestore not done.\n"), "{transcript}");
+        assert!(log.lock().unwrap().iter().all(|sql| sql.starts_with("SELECT ")));
+
+        let result = run(&fresh(), "restore");
+        assert_eq!(result.text_output, format!("{}{MENU_BATCH}", menu.strip_suffix("13: Cancel\nSelect item:  (1-13): ").unwrap()));
         ctx.api_mode = ApiMode::Json;
         let result = run(&ctx, "restore");
         assert!(!result.success);
-        assert!(result.text_output.ends_with("13: Cancel\nYour request has multiple choices for \"\". \
-            Selection is not possible in batch mode.\n"));
+        assert!(result.text_output.ends_with(MENU_BATCH));
     }
 
     #[test]
@@ -1192,7 +1127,9 @@ Console { Name=limited; Password=pw; CommandACL=*all*; CatalogACL=*all*; ClientA
 
         let result = run(&ctx, "restore jobid=1 client=fd1 all done");
         assert!(!result.success);
-        assert!(result.text_output.ends_with("You have selected the following JobId: 1\nRestore not done.\n"));
+        assert!(result.text_output.ends_with("You have selected the following JobId: 1\n\
+            Confirmation of the restore job is not available yet; give jobid=<id> client=<name> all done yes.\n\
+            Restore not done.\n"), "{}", result.text_output);
 
         // Control: the complete request reaches the launch with the selection.
         let mut started = None;
@@ -1209,10 +1146,12 @@ Console { Name=limited; Password=pw; CommandACL=*all*; CatalogACL=*all*; ClientA
     fn several_restore_jobs_need_a_selection() {
         let config = format!("{CONFIG}\nJob {{ Name=Other; Type=Restore; Client=fd1 }}");
         let (ctx, _) = context_with("*UserAgent*", &config);
-        let result = run(&ctx, "restore jobid=1 client=fd1 restorejob=nosuch all done yes");
-        assert_eq!(result.error_message, "Error: Restore Job resource \"nosuch\" does not exist.\n");
-        assert!(result.text_output.ends_with("The defined Restore Job resources are:\n1: Other\n2: RestoreFiles\n\
-            Select Restore Job (1-2): "));
+        let (result, transcript) = dialog(&ctx, "restore jobid=1 client=fd1 restorejob=nosuch all done yes", &["."]);
+        assert!(!result.success);
+        assert!(transcript.ends_with("You have selected the following JobId: 1\n\
+            Error: Restore Job resource \"nosuch\" does not exist.\n\
+            The defined Restore Job resources are:\n1: Other\n2: RestoreFiles\n\
+            Select Restore Job (1-2): .\nSelection aborted, nothing done.\n"), "{transcript}");
         let mut started = false;
         restore_with(&crate::session::parse_cli_command("restore jobid=1 client=fd1 restorejob=Other all done yes"),
             &ctx, |_| { started = true; CommandResult::ok(String::new()) });

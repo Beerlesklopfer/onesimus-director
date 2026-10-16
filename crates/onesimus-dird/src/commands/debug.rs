@@ -117,7 +117,7 @@ fn setdebug_dialog_with(
             "store" | "storage" | "sd" => {
                 target = match arg.value.as_deref().filter(|name| exists(true, name)) {
                     Some(name) => Some(DebugTarget::Storage(name.to_string())),
-                    None => get_storage_resource(&mut ua, ast).map(DebugTarget::Storage),
+                    None => ua_select::get_storage_resource(&mut ua, ast, false, false).map(|s| DebugTarget::Storage(s.name)),
                 };
             }
             _ => {}
@@ -133,7 +133,7 @@ fn setdebug_dialog_with(
         }
         target = match ua.do_prompt("", "Select daemon type to set debug level") {
             Some((0, _)) => Some(DebugTarget::Director),
-            Some((1, _)) => get_storage_resource(&mut ua, ast).map(DebugTarget::Storage),
+            Some((1, _)) => ua_select::get_storage_resource(&mut ua, ast, false, false).map(|s| DebugTarget::Storage(s.name)),
             Some((2, _)) => ua_select::select_client_resource(&mut ua).map(DebugTarget::Client),
             Some((3, _)) => Some(DebugTarget::All),
             _ => None,
@@ -159,26 +159,6 @@ fn setdebug_dialog_with(
     let success = result.success;
     ua.send_result(result);
     ua.finish(success)
-}
-
-/// C++ get_storage_resource(ua) as SetdebugCmd uses it (no default
-/// keyword): `storage=`/`sd=` names a resource, otherwise the selection
-/// list. (Job based selection jobid=/job=/ujobid= is not supported here.)
-fn get_storage_resource(ua: &mut crate::ua_select::Ua, ast: &CommandAst) -> Option<String> {
-    let name = ast.arguments.iter()
-        .find(|a| a.key.eq_ignore_ascii_case("storage") || a.key.eq_ignore_ascii_case("sd"))
-        .and_then(|a| a.value.clone());
-    if let Some(name) = name.filter(|n| !n.is_empty()) {
-        let found = ua.ctx.config.as_ref().and_then(|c| c.read().ok())
-            .is_some_and(|c| c.find_storage(&name).is_some());
-        if found && crate::acl::access(ua.ctx, crate::acl::Kind::Storage, &name) {
-            return Some(name);
-        }
-        if !found {
-            ua.error_msg(format!("Storage resource \"{name}\": not found\n"));
-        }
-    }
-    crate::ua_select::select_storage_resource(ua, false)
 }
 
 fn setdebug_with(

@@ -347,7 +347,6 @@ impl<'a> Ua<'a> {
 
     /// C++ GetConfirmation(): `yes` argument, else ask (never in API or
     /// batch mode); without console `fallback`. (Truncate, C-012.)
-    #[allow(dead_code)]
     pub fn get_confirmation(&mut self, ast: &CommandAst, prompt: &str, fallback: bool) -> bool {
         if find_arg(ast, "yes").is_some() {
             return true;
@@ -662,7 +661,6 @@ pub fn select_job_resource(ua: &mut Ua) -> Option<String> {
 }
 
 /// C++ select_restore_job_resource() (for the restore dialog, C-021).
-#[allow(dead_code)]
 pub fn select_restore_job_resource(ua: &mut Ua) -> Option<String> {
     use bareos_config::resources::JobType;
     let names = resource_names(ua.ctx, |c| c.jobs.iter()
@@ -689,26 +687,20 @@ pub fn select_pool_resource(ua: &mut Ua) -> Option<String> {
     select_from(ua, names, Kind::Pool, "The defined Pool resources are:\n", "Pool", "Select Pool resource")
 }
 
-/// C++ select_storage_resource().
+/// C++ select_storage_resource(); see
+/// [`crate::ua_storage_select::select_storage_resource`].
 pub fn select_storage_resource(ua: &mut Ua, autochanger_only: bool) -> Option<String> {
-    let names = resource_names(ua.ctx, |c| c.storages.iter()
-        .filter(|s| !autochanger_only || is_autochanger(c, &s.name))
-        .map(|x| x.name.clone()).collect());
-    let header = if autochanger_only {
-        "The defined Autochanger Storage resources are:\n"
-    } else {
-        "The defined Storage resources are:\n"
-    };
-    select_from(ua, names, Kind::Storage, header, "Storage", "Select Storage resource")
+    let env = crate::ua_storage_select::Env::load(ua.ctx)?;
+    crate::ua_storage_select::select_storage_resource(ua, &env, autochanger_only).map(|s| s.name)
 }
 
-/// `Auto Changer = yes` of a Storage resource (raw configuration view).
+/// `Auto Changer = yes` in the Storage resource (dird_conf.cc "autochanger").
 pub(crate) fn is_autochanger(config: &crate::director_config::DirectorConfig, storage: &str) -> bool {
     config.raw.iter()
         .find(|r| r.norm_type() == "storage" && r.name() == Some(storage))
-        .and_then(|r| r.directives.iter().find(|d| d.norm_key() == "autochanger"))
-        .and_then(|d| d.values().first().map(|v| matches!(v.to_ascii_lowercase().as_str(), "yes" | "true")))
-        .unwrap_or(false)
+        .and_then(|r| r.directives.iter().rev().find(|d| d.norm_key() == "autochanger"))
+        .and_then(|d| d.first())
+        .is_some_and(|v| bareos_config::values::parse_bool(v).is_ok_and(|(_, on)| on))
 }
 
 /// C++ get_client_resource(): `client=`/`fd=` or the selection list.
@@ -742,64 +734,12 @@ pub fn get_pool_resource(ua: &mut Ua, ast: &CommandAst) -> Option<String> {
     select_pool_resource(ua)
 }
 
-/// C++ get_storage_resource(ua, use_default, autochangers_only): `storage=`/
-/// `sd=`, with `use_default` also a bare keyword (except barcode(s),
-/// encrypt, scan, slots, alldrives; "?" forces the list), `jobid=`/`job=`/
-/// `ujobid=` of running jobs (Onesimus keeps no storage per running job:
-/// they count as not running), else select_storage_resource.
-pub fn get_storage_resource(ua: &mut Ua, ast: &CommandAst, use_default: bool, autochangers_only: bool) -> Option<String> {
-    let ctx = ua.ctx;
-    let mut store_name: Option<String> = None;
-    for arg in &ast.arguments {
-        if arg.key.is_empty() {
-            continue;
-        }
-        if use_default && arg.value.is_none() {
-            if ["barcode", "barcodes", "encrypt", "scan", "slots", "alldrives"].iter()
-                .any(|k| arg.key.eq_ignore_ascii_case(k)) {
-                continue;
-            }
-            if store_name.is_some() {
-                ua.error_msg("Storage name given twice.\n");
-                return None;
-            }
-            if arg.key.starts_with('?') {
-                store_name = Some(String::new());
-                break;
-            }
-            store_name = Some(arg.key.clone());
-        } else if arg.key.eq_ignore_ascii_case("storage") || arg.key.eq_ignore_ascii_case("sd") {
-            store_name = arg.value.clone();
-            break;
-        } else if arg.key.eq_ignore_ascii_case("jobid") {
-            let jobid = crate::commands::job::str_to_int64(arg.value.as_deref().unwrap_or(""));
-            if jobid <= 0 {
-                ua.error_msg(format!("Expecting jobid=nn command, got: {}\n", arg.key));
-            } else {
-                ua.error_msg(format!("JobId {jobid} is not running.\n"));
-            }
-            return None;
-        } else if ["job", "jobname", "ujobid"].iter().any(|k| arg.key.eq_ignore_ascii_case(k)) {
-            match &arg.value {
-                None => {
-                    let what = if arg.key.eq_ignore_ascii_case("ujobid") { "ujobid" } else { "job" };
-                    ua.error_msg(format!("Expecting {what}=xxx, got: {}.\n", arg.key));
-                }
-                Some(name) => ua.error_msg(format!("Job \"{name}\" is not running.\n")),
-            }
-            return None;
-        }
-    }
-    if let Some(name) = store_name.filter(|n| !n.is_empty()) {
-        let exists = resource_names(ctx, |c| c.storages.iter().map(|s| s.name.clone()).collect())
-            .iter().any(|n| *n == name);
-        // GetStoreResWithName applies the Storage ACL (ua_acl.cc:279).
-        if exists && acl::access(ctx, Kind::Storage, &name) {
-            return Some(name);
-        }
-        ua.error_msg(format!("Storage resource \"{name}\": not found\n"));
-    }
-    select_storage_resource(ua, autochangers_only)
+/// C++ get_storage_resource(ua, use_default, autochangers_only) (ua_select.cc:1320);
+/// see [`crate::ua_storage_select::select`].
+pub fn get_storage_resource(ua: &mut Ua, ast: &CommandAst, use_default: bool, autochangers_only: bool)
+    -> Option<bareos_config::resources::StorageResource> {
+    let env = crate::ua_storage_select::Env::load(ua.ctx)?;
+    crate::ua_storage_select::select(ua, &ast.arguments, &env, use_default, autochangers_only)
 }
 
 /// C++ GetMediaType(): `mediatype=` or the media types of the storages.
@@ -903,6 +843,54 @@ pub fn select_pool_dbr(ua: &mut Ua, ast: &CommandAst, argk: &str) -> Option<Stri
             ua.error_msg(format!("Could not find Pool \"{name}\": ERR={error}"));
             return None;
         }
+    }
+    Some(name)
+}
+
+/// C++ GetStorageRecord() by name: the StorageId, if there is exactly one.
+fn get_storage_record(ctx: &ExecContext, name: &str) -> Option<i64> {
+    let ids = catalog_column(ctx, &format!("SELECT StorageId FROM Storage WHERE Storage.Name='{}'", sql_escape(name)))?;
+    match ids.as_slice() {
+        [id] => id.parse().ok(),
+        _ => None,
+    }
+}
+
+/// C++ SelectStorageDbr(ua, sr, argk) (ua_select.cc:823): `<argk>=<storage>`
+/// (Storage ACL, catalog record) or the catalog storages in GetStorageIds
+/// order under "Defined Storages:" ("*None*" first for recyclestorage).
+/// Returns the storage name. GetStorageRecord leaves no error text for a
+/// missing record, so ERR= stays empty.
+pub fn select_storage_dbr(ua: &mut Ua, ast: &CommandAst, argk: &str) -> Option<String> {
+    let ctx = ua.ctx;
+    if let Some(name) = ast.arguments.iter()
+        .find(|a| a.key.eq_ignore_ascii_case(argk) && a.value.as_deref().is_some_and(|v| acl::access(ctx, Kind::Storage, v)))
+        .and_then(|a| a.value.clone())
+    {
+        if get_storage_record(ctx, &name).is_some() {
+            return Some(name);
+        }
+        ua.error_msg(format!("Could not find Storage \"{name}\": ERR="));
+    }
+    let Some(storages) = catalog_column(ctx, "SELECT Name FROM Storage") else {
+        ua.error_msg("Error obtaining storage ids. ERR=\n");
+        return None;
+    };
+    if storages.is_empty() {
+        ua.error_msg("No storages defined.\n");
+        return None;
+    }
+    ua.start_prompt("Defined Storages:\n");
+    if argk == "recyclestorage" {
+        ua.add_prompt("*None*");
+    }
+    for storage in storages.iter().filter(|s| acl::access(ctx, Kind::Storage, s)) {
+        ua.add_prompt(storage);
+    }
+    let (_, name) = ua.do_prompt("Storage", "Select the Storage")?;
+    if name != "*None*" && get_storage_record(ctx, &name).is_none() {
+        ua.error_msg(format!("Could not find Storage \"{name}\": ERR="));
+        return None;
     }
     Some(name)
 }

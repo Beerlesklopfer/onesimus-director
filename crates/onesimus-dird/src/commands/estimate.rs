@@ -149,6 +149,7 @@ pub fn cmd_estimate(ast: &CommandAst, ctx: &ExecContext) -> CommandResult {
     let mut listing = false;
     let mut level = Level::Full;
     let mut accurate: Option<bool> = None;
+    let need_job_selection;
     {
         let cfg = match config.read() {
             Ok(cfg) => cfg,
@@ -194,19 +195,9 @@ pub fn cmd_estimate(ast: &CommandAst, ctx: &ExecContext) -> CommandResult {
             }
         }
 
-        if job.is_none() && !(client.is_some() && fileset.is_some()) {
-            // ua_select.cc select_job_resource(): the selection dialog is not
-            // available here; show the list the original prompts with.
-            let names: Vec<&str> = crate::director_config::sort_case_insensitive(
-                cfg.jobs.iter().map(|j| j.name.as_str()).filter(|n| acl::access(ctx, Kind::Job, n)));
-            let mut out = String::from("The defined Job resources are:\n");
-            for (i, name) in names.iter().enumerate() {
-                out.push_str(&format!("{}: {name}\n", i + 1));
-            }
-            out.push_str(&format!("Select Job resource (1-{}): ", names.len()));
-            return CommandResult::ok(out);
-        }
-        if job.is_none() {
+        // select_job_resource() follows below, without the configuration lock.
+        need_job_selection = job.is_none() && !(client.is_some() && fileset.is_some());
+        if job.is_none() && !need_job_selection {
             // job = ua->GetJobResWithName(ua->argk[1])
             let first = ast.arguments.first().map(|a| a.key.as_str()).unwrap_or("");
             if acl::access(ctx, Kind::Job, first) && cfg.find_job(first).is_some() {
@@ -217,6 +208,27 @@ pub fn cmd_estimate(ast: &CommandAst, ctx: &ExecContext) -> CommandResult {
         }
     }
 
+    if !need_job_selection {
+        return estimate_job(ast, ctx, reply, job, client, fileset, listing, level, accurate);
+    }
+    // select_job_resource() (ua_select.cc): the console dialog, after the
+    // ErrorMsg lines of the argument loop.
+    let mut ua = crate::ua_select::Ua::new(ctx);
+    ua.send_result(reply.done());
+    let Some(name) = crate::ua_select::select_job_resource(&mut ua) else { return ua.finish(false) };
+    let result = estimate_job(ast, ctx, Reply::default(), Some(name), client, fileset, listing, level, accurate);
+    let success = result.success;
+    ua.send_result(result);
+    ua.finish(success)
+}
+
+/// EstimateCmd() once the job is known.
+#[allow(clippy::too_many_arguments)]
+fn estimate_job(ast: &CommandAst, ctx: &ExecContext, mut reply: Reply, job: Option<String>, client: Option<String>,
+    fileset: Option<String>, listing: bool, mut level: Level, accurate: Option<bool>) -> CommandResult {
+    let Some(config) = &ctx.config else {
+        return reply.error("No job specified.\n");
+    };
     let plan = {
         let cfg = config.read().unwrap_or_else(|e| e.into_inner());
         let job_res = cfg.find_job(job.as_deref().unwrap_or("")).cloned().unwrap_or_default();
