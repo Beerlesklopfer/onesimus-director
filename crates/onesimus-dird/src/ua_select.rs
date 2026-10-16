@@ -21,7 +21,7 @@ use bareos_bnet::{BnetMessage, BnetSignal, BnetStream};
 use crate::acl::{self, Kind};
 use crate::command_ast::CommandAst;
 use crate::command_executor::{ApiMode, ExecContext};
-use crate::command_queue::CommandResult;
+use crate::command_queue::{CommandResult, MsgKind};
 use crate::director_config::sort_case_insensitive;
 
 /// The console connection a dialog talks to.
@@ -103,6 +103,9 @@ enum Segment {
     Error(String),
     Warning(String),
     Info(String),
+    /// A message whose text is already part of a Text segment (from
+    /// send_result): only its signal and `.api 2` entry remain.
+    Note(MsgKind, String),
 }
 
 /// Output and input of one command, the counterpart of C++ UaContext.
@@ -162,10 +165,27 @@ impl<'a> Ua<'a> {
     /// Append a result produced by not yet ported code (text, then errors
     /// or the other way round as recorded).
     pub fn send_result(&mut self, result: CommandResult) {
+        if result.messages.iter().any(|(kind, _)| *kind == MsgKind::Error) {
+            // Errors recorded per call: the text already holds the rest.
+            let messages = result.messages.into_iter().map(|(kind, text)| match kind {
+                MsgKind::Error => Segment::Error(text),
+                kind => Segment::Note(kind, text),
+            });
+            if !result.text_output.is_empty() && !result.errors_first {
+                self.segments.push(Segment::Text(result.text_output.clone()));
+            }
+            self.segments.extend(messages);
+            if !result.text_output.is_empty() && result.errors_first {
+                self.segments.push(Segment::Text(result.text_output));
+            }
+            return;
+        }
+        let notes = result.messages.into_iter().map(|(kind, text)| Segment::Note(kind, text));
         let text = (!result.text_output.is_empty()).then(|| Segment::Text(result.text_output));
         let error = (!result.error_message.is_empty()).then(|| Segment::Error(result.error_message));
         let parts = if result.errors_first { [error, text] } else { [text, error] };
         self.segments.extend(parts.into_iter().flatten());
+        self.segments.extend(notes);
     }
 
     /// C++ `if (!OpenClientDb(ua, use_private)) return ...`: messages of the
@@ -196,6 +216,14 @@ impl<'a> Ua<'a> {
                     Segment::Error(t) => (Some(BnetSignal::ErrorMsg), t),
                     Segment::Warning(t) => (Some(BnetSignal::WarningMsg), t),
                     Segment::Info(t) => (Some(BnetSignal::InfoMsg), t),
+                    Segment::Note(kind, _) => {
+                        let signal = match kind {
+                            MsgKind::Error => BnetSignal::ErrorMsg,
+                            MsgKind::Warning => BnetSignal::WarningMsg,
+                            MsgKind::Info => BnetSignal::InfoMsg,
+                        };
+                        return !api || console.signal(signal);
+                    }
                 };
                 (!api || signal.is_none_or(|s| console.signal(s))) && console.send(text)
             })
@@ -412,8 +440,20 @@ impl<'a> Ua<'a> {
         result.errors_first = matches!(self.segments.first(), Some(Segment::Error(_)));
         for segment in self.segments {
             match segment {
-                Segment::Error(t) => result.error_message.push_str(&t),
-                Segment::Text(t) | Segment::Warning(t) | Segment::Info(t) => result.text_output.push_str(&t),
+                Segment::Error(t) => {
+                    result.error_message.push_str(&t);
+                    result.messages.push((MsgKind::Error, t));
+                }
+                Segment::Warning(t) => {
+                    result.text_output.push_str(&t);
+                    result.messages.push((MsgKind::Warning, t));
+                }
+                Segment::Info(t) => {
+                    result.text_output.push_str(&t);
+                    result.messages.push((MsgKind::Info, t));
+                }
+                Segment::Note(kind, t) => result.messages.push((kind, t)),
+                Segment::Text(t) => result.text_output.push_str(&t),
             }
         }
         result

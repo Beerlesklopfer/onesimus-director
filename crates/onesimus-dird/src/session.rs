@@ -271,10 +271,18 @@ pub fn handle_console_session_with<S: Read + Write>(
 
         }
 
-        // UaContext::ErrorMsg: in API mode every error message is preceded
-        // by BNET_ERROR_MSG (in JSON mode only the signal goes out directly).
+        // UaContext::vSendMsg: in API mode every ErrorMsg/WarningMsg/InfoMsg
+        // is preceded by BNET_ERROR_MSG/WARNING_MSG/INFO_MSG (in JSON mode
+        // only the signal goes out directly).
         if api_mode != command_executor::ApiMode::Human
-            && result.error_lines().iter().any(|_| bnet.send_signal(BnetSignal::ErrorMsg).is_err()) {
+            && result.message_list().iter().any(|(kind, _)| {
+                let signal = match kind {
+                    crate::command_queue::MsgKind::Error => BnetSignal::ErrorMsg,
+                    crate::command_queue::MsgKind::Warning => BnetSignal::WarningMsg,
+                    crate::command_queue::MsgKind::Info => BnetSignal::InfoMsg,
+                };
+                bnet.send_signal(signal).is_err()
+            }) {
             break;
         }
         if api_mode != command_executor::ApiMode::Human && !invalid {

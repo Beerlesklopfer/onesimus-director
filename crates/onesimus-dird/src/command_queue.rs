@@ -10,6 +10,26 @@ use crossbeam_channel::{Sender, Receiver, bounded, TrySendError};
 
 use crate::command_ast::CommandAst;
 
+/// Message kinds of UaContext::ErrorMsg/WarningMsg/InfoMsg (C++
+/// MSG_TYPE_ERROR/WARNING/INFO; signals BNET_ERROR_MSG/WARNING_MSG/INFO_MSG).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MsgKind {
+    Error,
+    Warning,
+    Info,
+}
+
+impl MsgKind {
+    /// Key of the `.api 2` messages object (output_formatter.h MSG_TYPE_*).
+    pub fn json_key(self) -> &'static str {
+        match self {
+            MsgKind::Error => "error",
+            MsgKind::Warning => "warning",
+            MsgKind::Info => "info",
+        }
+    }
+}
+
 /// Result of command execution.
 ///
 /// `text_output` is the human/API-mode rendering. `json` is the structured
@@ -30,6 +50,11 @@ pub struct CommandResult {
     /// Send `text_output` as is, without the terminating newline the
     /// session otherwise appends (C++ SendMsg of text without "\n").
     pub verbatim: bool,
+    /// Ordered ErrorMsg/WarningMsg/InfoMsg calls (one entry per call). Their
+    /// text is already part of `text_output`/`error_message`; the entries
+    /// drive the message signals and the `.api 2` messages lists. When no
+    /// Error entry is present, the errors come from `error_message`.
+    pub messages: Vec<(MsgKind, String)>,
 }
 
 impl CommandResult {
@@ -57,6 +82,39 @@ impl CommandResult {
     pub fn verbatim(mut self) -> Self {
         self.verbatim = true;
         self
+    }
+
+    /// C++ ua->WarningMsg() after the text so far: the text goes to the
+    /// output, the call is recorded for BNET_WARNING_MSG and the `.api 2`
+    /// "warning" list.
+    pub fn with_warning(mut self, text: impl Into<String>) -> Self {
+        let text = text.into();
+        self.text_output.push_str(&text);
+        self.messages.push((MsgKind::Warning, text));
+        self
+    }
+
+    /// C++ ua->InfoMsg() after the text so far (BNET_INFO_MSG, "info").
+    pub fn with_info(mut self, text: impl Into<String>) -> Self {
+        let text = text.into();
+        self.text_output.push_str(&text);
+        self.messages.push((MsgKind::Info, text));
+        self
+    }
+
+    /// All ErrorMsg/WarningMsg/InfoMsg calls in order. Results without
+    /// recorded Error entries take the errors from `error_message`, placed
+    /// before or after the other messages like the error text itself.
+    pub fn message_list(&self) -> Vec<(MsgKind, String)> {
+        if self.messages.iter().any(|(kind, _)| *kind == MsgKind::Error) {
+            return self.messages.clone();
+        }
+        let errors = self.error_lines().into_iter().map(|line| (MsgKind::Error, line));
+        if self.errors_first {
+            errors.chain(self.messages.iter().cloned()).collect()
+        } else {
+            self.messages.iter().cloned().chain(errors).collect()
+        }
     }
 
     /// One entry per ErrorMsg call: each line keeps its trailing newline.

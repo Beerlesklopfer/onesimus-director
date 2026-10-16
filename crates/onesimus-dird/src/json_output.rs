@@ -14,21 +14,25 @@
 
 use serde_json::{json, Map, Value};
 
-use crate::command_queue::CommandResult;
+use crate::command_queue::{CommandResult, MsgKind};
 
 pub fn envelope(result: &CommandResult, compact: bool) -> String {
     let result_obj = result.json.clone().unwrap_or_else(|| Value::Object(Map::new()));
 
     // JsonFinalizeResult: failed when the command returned false or any
-    // ErrorMsg was emitted. Only error messages are collected; SendMsg text
-    // is dropped, so a failure without ErrorMsg carries "messages": {}.
-    let errors = result.error_lines();
-    let msg = if result.success && errors.is_empty() {
+    // ErrorMsg was emitted. Only Error/Warning/Info messages are collected
+    // (one list per type, in order of first use, JsonAddMessage); SendMsg
+    // text is dropped, so a failure without messages carries "messages": {}.
+    // On success the collected warnings and infos are not shown.
+    let list = result.message_list();
+    let msg = if result.success && !list.iter().any(|(kind, _)| *kind == MsgKind::Error) {
         json!({ "jsonrpc": "2.0", "id": null, "result": result_obj })
     } else {
         let mut messages = Map::new();
-        if !errors.is_empty() {
-            messages.insert("error".into(), Value::Array(errors.into_iter().map(Value::String).collect()));
+        for (kind, text) in list {
+            if let Value::Array(items) = messages.entry(kind.json_key()).or_insert_with(|| Value::Array(Vec::new())) {
+                items.push(Value::String(text));
+            }
         }
         json!({
             "jsonrpc": "2.0",
@@ -181,6 +185,18 @@ mod tests {
         let r = CommandResult { success: false, text_output: "usage\n".into(), ..Default::default() };
         let v: Value = serde_json::from_str(&envelope(&r, false)).unwrap();
         assert_eq!(v["error"]["data"]["messages"], json!({}));
+    }
+
+    #[test]
+    fn warnings_and_infos_only_show_in_failure_envelope() {
+        let r = CommandResult::ok(String::new()).with_warning("careful\n").with_info("note\n");
+        let v: Value = serde_json::from_str(&envelope(&r, false)).unwrap();
+        assert_eq!(v, json!({"jsonrpc": "2.0", "id": null, "result": {}}));
+        let mut r = CommandResult::error("bad\n".into()).with_warning("Illegal jobtype X\n");
+        r.text_output.clear();
+        let s = envelope(&r, true);
+        assert!(s.contains(r#""messages":{"warning":["Illegal jobtype X\n"],"error":["bad\n"]}"#), "{s}");
+        assert_eq!(r.message_list().iter().map(|(k, _)| *k).collect::<Vec<_>>(), [MsgKind::Warning, MsgKind::Error]);
     }
 
     #[test]
