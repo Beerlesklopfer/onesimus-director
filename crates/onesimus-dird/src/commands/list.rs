@@ -11,6 +11,7 @@ use crate::catalog_worker::{CatalogHandle, SqlTable};
 use crate::command_ast::CommandAst;
 use crate::command_executor::{ApiMode, ExecContext};
 use crate::command_queue::CommandResult;
+use crate::acl::Kind;
 use crate::sql_list::{add_commas, json_rows, render_shown, ListType};
 
 pub fn cmd_list(ast: &CommandAst, ctx: &ExecContext) -> CommandResult {
@@ -47,10 +48,12 @@ enum Res {
 }
 
 /// OutputFormatter filter tuples (lib/output_formatter.h) on a row column,
-/// evaluated by ua_output.cc filterit(). The ACL tuple (SetAclFilter) is
-/// added with the console ACLs (compatibility log C-026).
+/// evaluated by ua_output.cc filterit().
 #[derive(Clone, Copy, Debug)]
 enum Filter {
+    /// OF_FILTER_ACL (SetAclFilter): the console may access the resource
+    /// (compatibility log C-026)
+    Acl(usize, crate::acl::Kind),
     /// OF_FILTER_RESOURCE (`current`): the resource is configured
     Resource(usize, Res),
     /// OF_FILTER_ENABLED (`enabled`)
@@ -80,6 +83,14 @@ impl ListOut<'_> {
         self.errors.push_str(&msg.into());
     }
 
+    /// SetAclFilter(): an ACL tuple only when the console's ACL of this
+    /// type has restrictions (ua_output.cc:619).
+    fn acl(&mut self, column: usize, kind: crate::acl::Kind) {
+        if self.ctx.is_some_and(|ctx| crate::acl::has_restrictions(ctx, kind)) {
+            self.filters.push(Filter::Acl(column, kind));
+        }
+    }
+
     /// FilterData() for every row: which rows are shown. Suppressed rows
     /// are counted for meta.range.filtered.
     fn shown(&mut self, t: &SqlTable) -> Vec<bool> {
@@ -87,16 +98,48 @@ impl ListOut<'_> {
             return vec![true; t.rows.len()];
         }
         let config = self.ctx.and_then(|ctx| ctx.config.as_ref()).and_then(|c| c.read().ok()).map(|c| c.clone());
-        let shown: Vec<bool> = t.rows.iter()
-            .map(|row| self.filters.iter().all(|f| self.keep(config.as_ref(), *f, row))).collect();
+        let shown: Vec<bool> = t.rows.iter().map(|row| self.filter_data(config.as_ref(), row)).collect();
         self.filtered += shown.iter().filter(|s| !**s).count() as u64;
         shown
+    }
+
+    /// OutputFormatter::FilterData (lib/output_formatter.cc): any suppressing
+    /// tuple hides the row; ACL tuples are tri-state, so a row whose ACL
+    /// columns are all empty (unknown) and none explicitly allowed is hidden.
+    fn filter_data(&self, config: Option<&crate::director_config::DirectorConfig>, row: &[Option<String>]) -> bool {
+        let (mut acl_show, mut acl_unknown) = (0, 0);
+        for filter in &self.filters {
+            match *filter {
+                Filter::Acl(column, kind) => {
+                    // A column past the row is read out of bounds in C++; suppressed.
+                    let Some(value) = row.get(column) else { return false };
+                    match value.as_deref().filter(|v| !v.is_empty()) {
+                        None => acl_unknown += 1,
+                        Some(name) => {
+                            // AclAccessOk(acltype, value, false)
+                            if !self.ctx.is_some_and(|ctx| crate::acl::access(ctx, kind, name)) {
+                                return false;
+                            }
+                            acl_show += 1;
+                        }
+                    }
+                }
+                f => {
+                    if !self.keep(config, f, row) {
+                        return false;
+                    }
+                }
+            }
+        }
+        !(acl_unknown > 0 && acl_show == 0)
     }
 
     /// filterit(): false = OF_FILTER_STATE_SUPPRESS. An empty column value is
     /// OF_FILTER_STATE_UNKNOWN, which only matters for ACL tuples.
     fn keep(&self, config: Option<&crate::director_config::DirectorConfig>, filter: Filter, row: &[Option<String>]) -> bool {
-        let (Filter::Resource(column, res) | Filter::Enabled(column, res) | Filter::Disabled(column, res)) = filter;
+        let (Filter::Resource(column, res) | Filter::Enabled(column, res) | Filter::Disabled(column, res)) = filter else {
+            return true;
+        };
         // A column past the row (enabled/disabled on the one-column count
         // result) is read out of bounds in C++; observed: suppressed.
         let Some(value) = row.get(column) else { return false };
@@ -114,7 +157,7 @@ impl ListOut<'_> {
             // ua->Get<Res>ResWithName(): with the console ACL
             Filter::Enabled(..) | Filter::Disabled(..) => {
                 let want = matches!(filter, Filter::Enabled(..));
-                use crate::acl::{access, Kind};
+                use crate::acl::access;
                 match res {
                     Res::Job => config.find_job(name).is_some_and(|j| j.enabled == want) && access(ctx, Kind::Job, name),
                     Res::Client => config.find_client(name).is_some_and(|c| c.enabled == want) && access(ctx, Kind::Client, name),
@@ -122,6 +165,7 @@ impl ListOut<'_> {
                     Res::Pool | Res::FileSet => true,
                 }
             }
+            Filter::Acl(..) => true,
         }
     }
 
@@ -273,30 +317,41 @@ fn query_range(args: &Args, out: &mut ListOut) -> String {
     range
 }
 
-/// GetJobidFromCmdline(): 0 = no jobid argument, -1 = not found, else JobId.
-fn jobid_from_cmdline(args: &Args, cat: &CatalogHandle) -> i64 {
+/// GetJobidFromCmdline(): 0 = no jobid argument, -1 = not found or no
+/// access to the job's Job/Client (audited ACL checks), else JobId.
+fn jobid_from_cmdline(args: &Args, ctx: &ExecContext, cat: &CatalogHandle) -> i64 {
+    let select = "SELECT Job.JobId, Job.Name, Job.ClientId, Client.Name FROM Job LEFT JOIN Client ON Client.ClientId=Job.ClientId";
     let sql = if let Some(ujobid) = args.value("ujobid") {
-        format!("SELECT JobId FROM Job WHERE Job='{}'", esc(ujobid))
+        format!("{select} WHERE Job.Job='{}'", esc(ujobid))
     } else if let Some(jobid) = args.value("jobid") {
         let id = str_to_int64(jobid);
-        format!("SELECT JobId FROM Job WHERE JobId={id}")
+        format!("{select} WHERE Job.JobId={id}")
     } else {
         return 0;
     };
-    match cat.query_rows(&sql) {
-        Ok(t) => t.rows.first()
-            .and_then(|r| r[0].as_deref())
-            .and_then(|v| v.parse().ok())
-            .unwrap_or(-1),
-        Err(_) => -1,
+    let Ok(t) = cat.query_rows(&sql) else { return -1 };
+    let Some(row) = t.rows.first() else { return -1 };
+    let field = |i: usize| row.get(i).cloned().flatten().unwrap_or_default();
+    let Ok(jobid) = field(0).parse::<i64>() else { return -1 };
+    if !crate::acl::access_audited(ctx, Kind::Job, &field(1)) {
+        return -1;
     }
+    if str_to_int64(&field(2)) != 0 {
+        // GetClientRecord fails when the client row is gone
+        let Some(client) = row.get(3).cloned().flatten() else { return -1 };
+        if !crate::acl::access_audited(ctx, Kind::Client, &client) {
+            return -1;
+        }
+    }
+    jobid
 }
 
 /// FindClientArgFromDatabase(): Ok(None) no client=, Ok(Some) valid, Err on error.
-fn client_from_db<'a>(args: &Args<'a>, cat: &CatalogHandle, out: &mut ListOut) -> Result<Option<&'a str>, ()> {
+fn client_from_db<'a>(args: &Args<'a>, ctx: &ExecContext, cat: &CatalogHandle, out: &mut ListOut) -> Result<Option<&'a str>, ()> {
     let Some(name) = args.value("client") else { return Ok(None) };
     match cat.query_rows(&format!("SELECT ClientId FROM Client WHERE Name='{}'", esc(name))) {
-        Ok(t) if !t.rows.is_empty() => Ok(Some(name)),
+        // AclAccessOk(Client_ACL, cr.Name): a denial fails silently
+        Ok(t) if !t.rows.is_empty() => if crate::acl::access(ctx, Kind::Client, name) { Ok(Some(name)) } else { Err(()) },
         _ => {
             out.error(format!("invalid client argument: {name}\n"));
             Err(())
@@ -326,7 +381,7 @@ fn do_list(args: &Args, ctx: &ExecContext, cat: &CatalogHandle, ty: ListType, ou
     };
 
     if ["jobs", "job", "jobname", "jobid", "ujobid"].iter().any(|k| args.is(k)) {
-        return list_jobs(args, cat, ty, &opts, out);
+        return list_jobs(args, ctx, cat, ty, &opts, out);
     }
 
     let range = query_range(args, out);
@@ -345,7 +400,7 @@ fn do_list(args: &Args, ctx: &ExecContext, cat: &CatalogHandle, ty: ListType, ou
     }
 
     if args.is("basefiles") || args.is("files") {
-        let jobid = jobid_from_cmdline(args, cat);
+        let jobid = jobid_from_cmdline(args, ctx, cat);
         if jobid <= 0 {
             out.error(JOBID_NOT_FOUND);
             return false;
@@ -373,8 +428,9 @@ fn do_list(args: &Args, ctx: &ExecContext, cat: &CatalogHandle, ty: ListType, ou
 
     if args.is("fileset") {
         let filesetid = args.value("filesetid").map(str_to_int64).unwrap_or(0);
-        let jobid = jobid_from_cmdline(args, cat);
+        let jobid = jobid_from_cmdline(args, ctx, cat);
         if jobid > 0 || filesetid > 0 {
+            out.acl(1, Kind::FileSet);
             if opts.current {
                 out.filters.push(Filter::Resource(1, Res::FileSet));
             }
@@ -394,6 +450,7 @@ fn do_list(args: &Args, ctx: &ExecContext, cat: &CatalogHandle, ty: ListType, ou
     }
 
     if args.is("filesets") {
+        out.acl(1, Kind::FileSet);
         if opts.current {
             out.filters.push(Filter::Resource(1, Res::FileSet));
         }
@@ -405,7 +462,7 @@ fn do_list(args: &Args, ctx: &ExecContext, cat: &CatalogHandle, ty: ListType, ou
     }
 
     if args.is("jobmedia") {
-        let jobid = jobid_from_cmdline(args, cat);
+        let jobid = jobid_from_cmdline(args, ctx, cat);
         if jobid < 0 {
             out.error(JOBID_NOT_FOUND);
             return false;
@@ -425,7 +482,7 @@ fn do_list(args: &Args, ctx: &ExecContext, cat: &CatalogHandle, ty: ListType, ou
     }
 
     if args.is("joblog") {
-        let jobid = jobid_from_cmdline(args, cat);
+        let jobid = jobid_from_cmdline(args, ctx, cat);
         if jobid < 0 {
             out.error(JOBID_NOT_FOUND);
             return false;
@@ -445,7 +502,7 @@ fn do_list(args: &Args, ctx: &ExecContext, cat: &CatalogHandle, ty: ListType, ou
     }
 
     if args.is("log") {
-        let client = match client_from_db(args, cat, out) {
+        let client = match client_from_db(args, ctx, cat, out) {
             Ok(c) => c,
             Err(()) => return false,
         };
@@ -459,6 +516,9 @@ fn do_list(args: &Args, ctx: &ExecContext, cat: &CatalogHandle, ty: ListType, ou
         } else {
             format!("SELECT LogId, JobName, ClientName, Time, LogText FROM ({inner}) AS sub ORDER BY LogId ASC ")
         };
+        // SetHiddenColumnAclFilter / SetAclFilter on JobName and ClientName
+        out.acl(1, Kind::Job);
+        out.acl(2, Kind::Client);
         let Some(t) = query(cat, &sql, out) else { return false };
         let shown = out.shown(&t);
         // Outside JSON mode LogId, JobName, ClientName and Time are hidden columns
@@ -476,6 +536,7 @@ fn do_list(args: &Args, ctx: &ExecContext, cat: &CatalogHandle, ty: ListType, ou
     }
 
     if args.is("poolid") && args.keyword_value().is_some() {
+        out.acl(1, Kind::Pool);
         if opts.current {
             out.filters.push(Filter::Resource(1, Res::Pool));
         }
@@ -487,6 +548,7 @@ fn do_list(args: &Args, ctx: &ExecContext, cat: &CatalogHandle, ty: ListType, ou
     }
 
     if args.is("clients") || (args.is("client") && args.keyword_value().is_some()) {
+        out.acl(1, Kind::Client);
         if opts.current {
             out.filters.push(Filter::Resource(1, Res::Client));
         }
@@ -511,6 +573,7 @@ fn do_list(args: &Args, ctx: &ExecContext, cat: &CatalogHandle, ty: ListType, ou
     }
 
     if args.is("storages") {
+        out.acl(1, Kind::Storage);
         if opts.current {
             out.filters.push(Filter::Resource(1, Res::Storage));
         }
@@ -573,6 +636,8 @@ fn do_list(args: &Args, ctx: &ExecContext, cat: &CatalogHandle, ty: ListType, ou
         if let Some(sql) = list_backups_sql(args, ctx, cat, ty, &range, out) {
             match ty {
                 ListType::Vert => {
+                    out.acl(2, Kind::Job);
+                    out.acl(22, Kind::Pool);
                     if opts.current {
                         out.filters.push(Filter::Resource(2, Res::Job));
                         out.filters.push(Filter::Resource(22, Res::Pool));
@@ -585,6 +650,7 @@ fn do_list(args: &Args, ctx: &ExecContext, cat: &CatalogHandle, ty: ListType, ou
                     }
                 }
                 _ => {
+                    out.acl(1, Kind::Job);
                     if opts.current {
                         out.filters.push(Filter::Resource(1, Res::Job));
                     }
@@ -604,7 +670,7 @@ fn do_list(args: &Args, ctx: &ExecContext, cat: &CatalogHandle, ty: ListType, ou
     }
 
     if args.is("jobstatistics") || args.is("jobstats") {
-        let jobid = jobid_from_cmdline(args, cat);
+        let jobid = jobid_from_cmdline(args, ctx, cat);
         if jobid <= 0 {
             out.error("no jobid given\n");
             return false;
@@ -793,7 +859,7 @@ fn schedtime(args: &Args, now: i64) -> i64 {
     schedtime
 }
 
-fn list_jobs(args: &Args, cat: &CatalogHandle, ty: ListType, opts: &ListOptions, out: &mut ListOut) -> bool {
+fn list_jobs(args: &Args, ctx: &ExecContext, cat: &CatalogHandle, ty: ListType, opts: &ListOptions, out: &mut ListOut) -> bool {
     if args.is("jobs") && args.keyword_value().is_some() {
         out.error("'list jobs' does not allow an jobs parameter\n");
         return false;
@@ -807,7 +873,7 @@ fn list_jobs(args: &Args, cat: &CatalogHandle, ty: ListType, opts: &ListOptions,
         return false;
     }
 
-    let jobid = jobid_from_cmdline(args, cat);
+    let jobid = jobid_from_cmdline(args, ctx, cat);
     if jobid < 0 {
         // Unknown jobid or no permission: empty object, not an error (C++)
         out.json.insert("jobs".into(), json!({}));
@@ -819,13 +885,22 @@ fn list_jobs(args: &Args, cat: &CatalogHandle, ty: ListType, opts: &ListOptions,
 
     let since = schedtime(args, chrono::Utc::now().timestamp());
 
-    let client = match client_from_db(args, cat, out) {
+    let client = match client_from_db(args, ctx, cat, out) {
         Ok(c) => c,
         Err(()) => return false,
     };
 
     // ListJobs: filter tuples on the job/client (pool, fileset) columns
     let (job_col, client_col) = if ty == ListType::Vert { (2, 7) } else { (1, 2) };
+    // count result is one column, no filtering
+    if !opts.count {
+        out.acl(job_col, Kind::Job);
+        out.acl(client_col, Kind::Client);
+        if ty == ListType::Vert {
+            out.acl(22, Kind::Pool);
+            out.acl(25, Kind::FileSet);
+        }
+    }
     if !opts.count && opts.current {
         out.filters.push(Filter::Resource(job_col, Res::Job));
         out.filters.push(Filter::Resource(client_col, Res::Client));
@@ -902,7 +977,7 @@ WHERE Job.JobId > 0
 /// ParseListBackupsCmd(): the list_jobs query, None when an argument is
 /// invalid (the caller then reports "Unknown list keyword").
 fn list_backups_sql(args: &Args, ctx: &ExecContext, cat: &CatalogHandle, ty: ListType, range: &str, out: &mut ListOut) -> Option<String> {
-    let client = match client_from_db(args, cat, out) {
+    let client = match client_from_db(args, ctx, cat, out) {
         Ok(Some(c)) => c,
         Ok(None) => {
             out.error("missing parameter: client\n");
@@ -964,7 +1039,8 @@ fn list_backups_sql(args: &Args, ctx: &ExecContext, cat: &CatalogHandle, ty: Lis
     // parse_fileset_selection_param(listall = true)
     match args.value("fileset") {
         Some(fs) if !fs.eq_ignore_ascii_case("any") => {
-            if !crate::acl::access(ctx, crate::acl::Kind::FileSet, fs) {
+            // AclAccessOk(FileSet_ACL, fileset, true): audited
+            if !crate::acl::access_audited(ctx, Kind::FileSet, fs) {
                 out.error("Access to specified FileSet not allowed.\n");
                 return None;
             }
@@ -1022,6 +1098,7 @@ const POOL_FIELDS: &str = "SELECT PoolId,Name,NumVols,MaxVols,UseOnce,UseCatalog
 /// summary (ua_output.cc EmitPoolFields).
 fn list_pools(args: &Args, ctx: &ExecContext, cat: &CatalogHandle, ty: ListType, opts: &ListOptions, out: &mut ListOut) -> bool {
     let name = args.keyword_value().unwrap_or("");
+    out.acl(1, Kind::Pool); // PoolName
     if opts.current {
         out.filters.push(Filter::Resource(1, Res::Pool));
     }
@@ -1277,7 +1354,7 @@ fn media_of_pool_sql(ty: ListType, count: bool, pool_id: &str, range: &str) -> S
 }
 
 fn list_media(args: &Args, ctx: &ExecContext, cat: &CatalogHandle, ty: ListType, opts: &ListOptions, range: &str, out: &mut ListOut) -> bool {
-    let jobid = jobid_from_cmdline(args, cat);
+    let jobid = jobid_from_cmdline(args, ctx, cat);
     if jobid > 0 {
         let sql = if ty == ListType::Vert {
             format!("SELECT JobMediaId,JobId,Media.MediaId,Media.VolumeName FROM JobMedia,Media \
@@ -1337,6 +1414,13 @@ fn list_media(args: &Args, ctx: &ExecContext, cat: &CatalogHandle, ty: ListType,
 
     // all: flat over all pools
     if args.has_after_keyword("all") {
+        // The flat result has no pool column the Pool ACL could filter on
+        // in the short listing (ua_output.cc ListMedia).
+        if ty != ListType::Vert && crate::acl::has_restrictions(ctx, Kind::Pool) {
+            out.error("Restricted permission. Use the commands 'list media' or 'llist media all' instead\n");
+            return false;
+        }
+        out.acl(4, Kind::Pool); // PoolName
         if opts.current {
             // column 4 is the pool name in the llist query (VolBytes in the list query, as in C++)
             out.filters.push(Filter::Resource(4, Res::Pool));
@@ -1356,6 +1440,9 @@ fn list_media(args: &Args, ctx: &ExecContext, cat: &CatalogHandle, ty: ListType,
     let mut grouped = Map::new();
     for row in &pools.rows {
         let (Some(id), Some(name)) = (&row[0], &row[1]) else { continue };
+        if !crate::acl::access(ctx, Kind::Pool, name) {
+            continue;
+        }
         let Some(t) = query(cat, &media_of_pool_sql(ty, opts.count, id, range), out) else { return false };
         out.text.push_str(&format!("Pool: {name}\n"));
         let shown = out.shown(&t);
@@ -1379,7 +1466,7 @@ fn list_media(args: &Args, ctx: &ExecContext, cat: &CatalogHandle, ty: ListType,
 /// volume up (Append, then Unlabeled; expired volumes are skipped instead of
 /// being marked) and changes nothing in the catalog.
 fn list_nextvol(args: &Args, ctx: &ExecContext, cat: &CatalogHandle, out: &mut ListOut) -> bool {
-    use crate::acl::{access, Kind};
+    use crate::acl::access;
     const MAX_DAYS: i64 = 50; // kDefaultNumberOfDays
     let mut days = 1;
     if let Some(v) = args.value("days") {
@@ -1567,6 +1654,27 @@ mod tests {
         assert_eq!(with_suffix(999), "999 ");
         assert_eq!(with_suffix(1234), "1.234 K");
         assert_eq!(with_suffix(824021543), "824.0 M");
+    }
+
+    #[test]
+    fn acl_filter_tri_state() {
+        let ctx = crate::acl::tests::context(); // JobACL = !blocked, *all*; ClientACL = *all*
+        let mut out = ListOut { ctx: Some(&ctx), ..Default::default() };
+        out.acl(0, Kind::Job);
+        out.acl(1, Kind::Client); // unrestricted: no tuple (SetAclFilter)
+        assert_eq!(out.filters.len(), 1);
+        let s = |v: &str| Some(v.to_string());
+        let column = |name: &str| crate::catalog_worker::SqlColumn { name: name.into(), numeric: false };
+        let mut t = SqlTable { columns: vec![column("job"), column("client")], rows: vec![
+            vec![s("ok"), s("c")], vec![s("blocked"), s("c")], vec![None, s("c")], vec![s(""), None],
+        ] };
+        // an empty ACL column alone is unknown → suppressed
+        assert_eq!(out.shown(&t), vec![true, false, false, false]);
+        assert_eq!(out.filtered, 3);
+        // a second ACL tuple that explicitly allows the row shows it
+        out.filters.push(Filter::Acl(1, Kind::Client));
+        t.rows.truncate(3);
+        assert_eq!(out.shown(&t), vec![true, false, true]);
     }
 
     #[test]
