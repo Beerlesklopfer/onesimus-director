@@ -24,6 +24,25 @@ pub enum ListType {
     Raw,
 }
 
+thread_local! {
+    /// `jcr->gui` of the console whose command is running on this thread
+    /// (set by `gui on`, cats/sql.cc ListResult checks it per value).
+    static GUI: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+/// Run `f` with `jcr->gui` set to `gui` (restored afterwards, like the
+/// gui_save pattern in ua_restore.cc).
+pub fn with_gui<R>(gui: bool, f: impl FnOnce() -> R) -> R {
+    let saved = GUI.with(|g| g.replace(gui));
+    let result = f();
+    GUI.with(|g| g.set(saved));
+    result
+}
+
+fn gui() -> bool {
+    GUI.with(std::cell::Cell::get)
+}
+
 /// Rows as JSON objects; every value is a string, NULL becomes "" (C++ semantics).
 pub fn json_rows(t: &SqlTable) -> Vec<Value> {
     t.rows.iter().map(|row| {
@@ -126,7 +145,9 @@ fn horz<'a>(t: &SqlTable, rows: impl Iterator<Item = &'a Vec<Option<String>>>) -
         for ((col, v), w) in t.columns.iter().zip(row).zip(&widths) {
             let cell = match v {
                 None => format!(" {:<w$} |", "", w = w),
-                Some(v) if col.numeric => {
+                // cats/sql.cc:796: in gui mode numbers are left-aligned
+                // without commas.
+                Some(v) if col.numeric && !gui() => {
                     let v = if is_integer(v) && col.name != "jobid" { add_commas(v) } else { v.clone() };
                     format!(" {:>w$} |", v, w = w)
                 }
@@ -147,7 +168,7 @@ fn vert<'a>(t: &SqlTable, rows: impl Iterator<Item = &'a Vec<Option<String>>>) -
         for (col, v) in t.columns.iter().zip(row) {
             let value = match v {
                 None => String::new(),
-                Some(v) if col.numeric && is_integer(v) && col.name != "jobid" => add_commas(v),
+                Some(v) if col.numeric && !gui() && is_integer(v) && col.name != "jobid" => add_commas(v),
                 Some(v) => v.clone(),
             };
             out.push_str(&format!(" {:>w$}: {value}\n", col.name, w = key_len));
@@ -240,6 +261,19 @@ mod tests {
             rows: vec![vec![Some("-1234".into())]],
         };
         assert_eq!(render(&t, ListType::Vert), " n: -1234\n\n");
+    }
+
+    #[test]
+    fn gui_mode_left_aligns_numbers_without_commas() {
+        let out = with_gui(true, || render(&table(), ListType::Horz));
+        let lines: Vec<&str> = out.lines().collect();
+        assert_eq!(lines[1], "| jobid | name            | jobbytes    |");
+        assert_eq!(lines[3], "| 479   | benchmark-small | 824021543   |");
+        assert_eq!(lines[4], "| 12    |                 | 0           |");
+        let vert = with_gui(true, || render(&table(), ListType::Vert));
+        assert!(vert.starts_with("    jobid: 479\n     name: benchmark-small\n jobbytes: 824021543\n\n"));
+        assert!(!gui());
+        assert!(render(&table(), ListType::Horz).contains("824,021,543"));
     }
 
     #[test]

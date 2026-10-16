@@ -371,7 +371,11 @@ pub fn dispatch_registry(registry: &[CommandDef], ast: &CommandAst, ctx: &ExecCo
     };
     let mut resolved = ast.clone();
     resolved.command_name = name.to_string();
-    (command.handler)(&resolved, ctx)
+    // ua_output.cc gui_cmd: `jcr->gui` changes the catalog list format.
+    let gui = ctx.session_mgr.as_ref()
+        .and_then(|m| m.with_session_catalog(ctx.session_id, |c| c.gui))
+        .unwrap_or(false);
+    crate::sql_list::with_gui(gui, || (command.handler)(&resolved, ctx))
 }
 
 /// UaContext::SendCmdUsage(): "<message>\nUSAGE: <key> <usage>\n" (a SendMsg).
