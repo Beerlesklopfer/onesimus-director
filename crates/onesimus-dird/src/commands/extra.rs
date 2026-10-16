@@ -390,93 +390,222 @@ fn is_a_number(value: &str) -> bool {
         && exponent.is_none_or(|e| !e.is_empty() && digits(e))
 }
 
-/// ua_run.cc reRunCmd()/GetRerunCmdlineArguments(): argument errors are
-/// SendMsg lines and make the command fail.
+/// ua_run.cc reRunCmd(): OpenClientDb, GetRerunCmdlineArguments, then the
+/// jobid list or the selection of failed jobs (since_jobid/days/hours) with
+/// "rerun these jobids? (yes/no): ", and reRunJob() for each job.
 pub fn cmd_rerun(ast: &CommandAst, ctx: &ExecContext) -> CommandResult {
-    // C++ ua_run.cc reRunCmd: OpenClientDb() before anything else. The
-    // catalog lines go out before a run dialog (C-011), otherwise in front.
-    match crate::ua_db::open_client_db(ast, ctx, false) {
-        Ok(mut prefix) => {
-            let result = cmd_rerun_db(ast, ctx, &mut prefix);
-            crate::ua_db::with_prefix(prefix, result)
+    let query = |sql: &str| match &ctx.catalog {
+        Some(cat) => cat.query_rows(sql).map(|t| t.rows),
+        None => Err("no catalog".to_string()),
+    };
+    let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs() as i64).unwrap_or(0);
+    let mut ua = crate::ua_select::Ua::new(ctx);
+    let ok = rerun_dialog(&mut ua, ast, &query, now, crate::commands::job::start_job);
+    ua.finish(ok)
+}
+
+/// RerunArguments (ua_run.h:29); the numbers are C `int`.
+#[derive(Debug, Default, PartialEq)]
+struct RerunArguments {
+    since_jobid: i32,
+    until_jobid: i32,
+    days: i32,
+    hours: i32,
+    yes: bool,
+    jobids: Vec<u32>,
+}
+
+/// GetRerunCmdlineArguments (ua_run.cc:203); None after a parsing error.
+fn rerun_arguments(ua: &mut crate::ua_select::Ua, ast: &CommandAst) -> Option<RerunArguments> {
+    use crate::ua_select::{find_arg, find_arg_with_value};
+    let int = |key: &str| find_arg_with_value(ast, key)
+        .map(|v| crate::commands::job::str_to_int64(v) as i32).unwrap_or(0);
+    let mut args = RerunArguments {
+        since_jobid: int("since_jobid"), until_jobid: int("until_jobid"),
+        days: int("days"), hours: int("hours"), yes: find_arg(ast, "yes").is_some(),
+        jobids: Vec::new(),
+    };
+    let timeframe = args.days != 0 || args.hours != 0;
+    let Some(jobid) = find_arg_with_value(ast, "jobid") else {
+        if !timeframe && args.since_jobid == 0 {
+            ua.send_msg("Please specify jobid, since_jobid, hours or days\n");
+            return None;
         }
-        Err(result) => result,
+        return Some(args);
+    };
+    // split_string() reads with std::getline: a trailing delimiter (or an
+    // empty value) yields no last element.
+    let mut parts: Vec<&str> = jobid.split(',').collect();
+    if jobid.is_empty() || jobid.ends_with(',') {
+        parts.pop();
+    }
+    for part in parts {
+        if !is_a_number(part) {
+            ua.send_msg(format!("Specified jobid \"{part}\" is not valid\n"));
+            return None;
+        }
+        args.jobids.push(crate::commands::job::str_to_int64(part) as u32);
+    }
+    if args.since_jobid != 0 {
+        ua.send_msg("Please specify either jobid or since_jobid (and optionally until_jobid)\n");
+        return None;
+    }
+    if timeframe {
+        ua.send_msg("Please specify either jobid or a timeframe\n");
+        return None;
+    }
+    Some(args)
+}
+
+/// PrepareRerunSqlQuery (ua_run.cc:271) with ConvertDaysHoursToSecs.
+fn rerun_sql(args: &RerunArguments, now: i64) -> String {
+    let secs = args.days.wrapping_mul(86400).wrapping_add(args.hours.wrapping_mul(3600));
+    let schedtime = crate::localtime::strftime("%Y-%m-%d %H:%M:%S", (now - i64::from(secs)) as libc::time_t);
+    let mut select = "SELECT JobId FROM Job WHERE JobStatus = 'f'".to_string();
+    if args.since_jobid != 0 {
+        select += &format!(" AND JobId >= {}", args.since_jobid);
+        if args.until_jobid != 0 {
+            select += &format!(" AND JobId <= {}", args.until_jobid);
+        }
+    } else {
+        select += &format!(" AND SchedTime > '{schedtime}'");
+    }
+    select + " ORDER BY JobId"
+}
+
+type Rows = Vec<Vec<Option<String>>>;
+type StartJob = fn(&CommandAst, &ExecContext, bareos_config::resources::JobResource) -> CommandResult;
+
+/// reRunCmd() (ua_run.cc:300); `query` is the catalog, `start` starts a
+/// confirmed run (job::start_job).
+fn rerun_dialog(
+    ua: &mut crate::ua_select::Ua,
+    ast: &CommandAst,
+    query: &dyn Fn(&str) -> Result<Rows, String>,
+    now: i64,
+    start: StartJob,
+) -> bool {
+    if !ua.open_client_db(ast, false) {
+        return true;
+    }
+    let Some(mut args) = rerun_arguments(ua, ast) else { return false };
+    if args.days != 0 || args.hours != 0 || args.since_jobid != 0 {
+        // GetQueryDbids: a failed query leaves the list empty (Jmsg M_ERROR).
+        let ids: Vec<u32> = query(&rerun_sql(&args, now)).unwrap_or_default().into_iter()
+            .map(|row| row.into_iter().next().flatten()
+                .map(|id| crate::commands::job::str_to_int64(&id) as u32).unwrap_or(0))
+            .collect();
+        if ids.is_empty() {
+            ua.send_msg("No jobids with the specified options were found.\n");
+            return true;
+        }
+        ua.send_msg("The following ids were selected for rerun:\n");
+        for (i, id) in ids.iter().enumerate() {
+            ua.send_msg(if i > 0 { format!(",{}", *id as i32) } else { format!("{}", *id as i32) });
+        }
+        ua.send_msg("\n");
+        if !args.yes && ua.get_yesno("rerun these jobids? (yes/no): ") != Some(true) {
+            return false;
+        }
+        args.jobids.extend(ids);
+    }
+    let when = crate::localtime::strftime("%Y-%m-%d %H:%M:%S", now as libc::time_t);
+    for &jobid in &args.jobids {
+        if !rerun_job(ua, jobid, args.yes, &when, query, start) {
+            return false;
+        }
+    }
+    true
+}
+
+/// JobLevelToString() (dird_conf.cc:2090) for a catalog level code.
+fn job_level_to_string(level: u8) -> String {
+    match level {
+        b'F' => "Full", b'B' => "Base", b'I' => "Incremental", b'D' => "Differential",
+        b'S' => "Since", b'f' => "VirtualFull", b'C' => "Catalog", b'V' => "InitCatalog",
+        b'O' => "VolumeToCatalog", b'd' => "DiskToCatalog", b'A' => "Data", b' ' => " ",
+        other => return format!("{} ({other})", other as char),
+    }.to_string()
+}
+
+/// reRunJob() (ua_run.cc:71): announce, build the run command line, then
+/// RunCmd().
+fn rerun_job(
+    ua: &mut crate::ua_select::Ua,
+    jobid: u32,
+    yes: bool,
+    when: &str,
+    query: &dyn Fn(&str) -> Result<Rows, String>,
+    start: StartJob,
+) -> bool {
+    ua.send_msg(format!("rerunning jobid {}\n", jobid as i32));
+    match rerun_command(ua.ctx, jobid, yes, when, query) {
+        Err(()) => false,
+        Ok(None) => true,
+        Ok(Some(run)) => crate::commands::job::run_with_ua(ua, &run, start),
     }
 }
 
-fn cmd_rerun_db(ast: &CommandAst, ctx: &ExecContext, prefix: &mut String) -> CommandResult {
-    let value = |key: &str| ast.arguments.iter().find(|a| a.key.eq_ignore_ascii_case(key))
-        .and_then(|a| a.value.as_deref());
-    let number = |key: &str| value(key).map(|v| v.trim().parse::<i64>().unwrap_or(0)).unwrap_or(0);
-    let failed = |text: &str| CommandResult { success: false, text_output: text.to_string(), ..Default::default() };
-    let (since_jobid, timeframe) = (number("since_jobid"), number("days") != 0 || number("hours") != 0);
-    let Some(jobids) = value("jobid") else {
-        if !timeframe && since_jobid == 0 {
-            return failed("Please specify jobid, since_jobid, hours or days\n");
-        }
-        return CommandResult::ok("rerun: since_jobid, days and hours are not supported yet\n".to_string());
+/// The run command line of reRunJob() from the Job record and its Client,
+/// Pool and FileSet records. Err: a record is missing (only a job message,
+/// Jmsg M_WARNING, in C++); Ok(None): not a Backup, Copy or Migrate job.
+fn rerun_command(
+    ctx: &ExecContext,
+    jobid: u32,
+    yes: bool,
+    when: &str,
+    query: &dyn Fn(&str) -> Result<Rows, String>,
+) -> Result<Option<CommandAst>, ()> {
+    use crate::command_ast::Argument;
+    let first_row = |sql: String| query(&sql).ok().and_then(|rows| rows.into_iter().next()).ok_or(());
+    let job = first_row(format!(
+        "SELECT Name, Type, Level, ClientId, PoolId, FileSetId FROM Job WHERE JobId={jobid}"))?;
+    let field = |i: usize| job.get(i).cloned().flatten().unwrap_or_default();
+    let id = |i: usize| crate::commands::job::str_to_int64(&field(i));
+    let name = field(0);
+    let job_type = field(1).bytes().next().unwrap_or(0);
+    let level = field(2).bytes().next().unwrap_or(0);
+    if !matches!(job_type, b'B' | b'c' | b'g') {
+        return Ok(None);
+    }
+    let arg = |key: &str, value: String| Argument { key: key.to_string(), value: Some(value) };
+    let mut arguments = vec![arg("job", name.clone())];
+    if level != b' ' {
+        arguments.push(arg("level", job_level_to_string(level)));
+    }
+    let name_of = |table: &str, column: &str, key: &str, value: i64| {
+        first_row(format!("SELECT {column} FROM {table} WHERE {key}={value}"))
+            .map(|row| row.into_iter().next().flatten().unwrap_or_default())
     };
-    let mut ids = Vec::new();
-    for jobid in jobids.split(',') {
-        if !is_a_number(jobid) {
-            return failed(&format!("Specified jobid \"{jobid}\" is not valid\n"));
-        }
-        ids.push(jobid.parse::<i64>().unwrap_or(0));
+    if id(3) != 0 {
+        arguments.push(arg("client", name_of("Client", "Name", "ClientId", id(3))?));
     }
-    if since_jobid != 0 {
-        return failed("Please specify either jobid or since_jobid (and optionally until_jobid)\n");
-    }
-    if timeframe {
-        return failed("Please specify either jobid or a timeframe\n");
-    }
-
-    let mut text = String::new();
-    for id in ids {
-        // reRunJob(): announce, then look up the Job record.
-        text.push_str(&format!("rerunning jobid {id}\n"));
-        let Some(cat) = &ctx.catalog else { return failed(&text) };
-        let job_name = match cat.raw_query(&format!("SELECT name FROM job WHERE jobid = {id}")) {
-            Ok(result) => result.lines().nth(2).map(|l| l.trim().to_string()).unwrap_or_default(),
-            Err(e) => return failed(&format!("{text}Catalog error: {e}\n")),
-        };
-        // C++ reports a missing record only as a job message (Jmsg M_WARNING).
-        if job_name.is_empty() { return failed(&text); }
-        // reRunJob (ua_run.cc:71) builds "run job=<name> ..." and appends
-        // " yes" only when the rerun itself had it (ua_run.cc:200); without
-        // it the run asks "OK to run?" (C-012).
-        let mut arguments = vec![crate::command_ast::Argument { key: "job".to_string(), value: Some(job_name) }];
-        // The record's level, client, pool and fileset (ua_run.cc:97-193).
-        let record = cat.query_rows(&format!("SELECT j.Level, c.Name, p.Name, f.FileSet FROM Job j \
-            LEFT JOIN Client c ON c.ClientId=j.ClientId LEFT JOIN Pool p ON p.PoolId=j.PoolId \
-            LEFT JOIN FileSet f ON f.FileSetId=j.FileSetId WHERE j.JobId={id}")).ok()
-            .and_then(|t| t.rows.into_iter().next()).unwrap_or_default();
-        let level = match record.first().cloned().flatten().as_deref() {
-            Some("F") => Some("Full".to_string()), Some("I") => Some("Incremental".to_string()),
-            Some("D") => Some("Differential".to_string()), _ => None,
-        };
-        for (key, value) in [("level", level), ("client", record.get(1).cloned().flatten()),
-            ("pool", record.get(2).cloned().flatten()), ("fileset", record.get(3).cloned().flatten())] {
-            if let Some(value) = value {
-                arguments.push(crate::command_ast::Argument { key: key.to_string(), value: Some(value) });
+    if id(4) != 0 {
+        let pool = name_of("Pool", "Name", "PoolId", id(4))?;
+        // Copy, Migrate and VirtualFull read from the Job resource's pool
+        // (GetJobResWithName, ACL checked) and write to the record's pool.
+        if matches!(job_type, b'c' | b'g') || level == b'f' {
+            let source = crate::acl::access(ctx, crate::acl::Kind::Job, &name).then(|| {
+                ctx.config.as_ref().and_then(|c| c.read().ok())
+                    .and_then(|c| c.find_job(&name).map(|j| j.pool.clone()))
+            }).flatten();
+            if let Some(source) = source {
+                arguments.push(arg("pool", source));
             }
+            arguments.push(arg("nextpool", pool));
+        } else {
+            arguments.push(arg("pool", pool));
         }
-        if ast.arguments.iter().any(|a| a.key.eq_ignore_ascii_case("yes")) {
-            arguments.push(crate::command_ast::Argument { key: "yes".to_string(), value: None });
-        }
-        let run_ast = crate::command_ast::CommandAst {
-            command_name: "run".to_string(),
-            arguments,
-            ..Default::default()
-        };
-        // The run dialog follows the text so far (C-011).
-        let mut ua = crate::ua_select::Ua::new(ctx);
-        ua.send_msg(std::mem::take(prefix) + &std::mem::take(&mut text));
-        let ok = crate::commands::job::run_with_ua(&mut ua, &run_ast, crate::commands::job::start_job);
-        let run = ua.finish(ok);
-        if !run.success { return run; }
-        text = run.text_output;
     }
-    CommandResult::ok(text)
+    if id(5) != 0 {
+        arguments.push(arg("fileset", name_of("FileSet", "FileSet", "FileSetId", id(5))?));
+    }
+    arguments.push(arg("when", when.to_string()));
+    if yes {
+        arguments.push(Argument { key: "yes".to_string(), value: None });
+    }
+    Ok(Some(CommandAst { command_name: "run".to_string(), arguments, ..Default::default() }))
 }
 
 pub fn cmd_relabel(ast: &CommandAst, ctx: &ExecContext) -> CommandResult {
@@ -1263,5 +1392,184 @@ mod whoami_tests {
         let named = whoami("operator");
         assert_eq!(named.text_output, "operator\n");
         assert_eq!(named.json, Some(serde_json::json!({"whoami": "operator"})));
+    }
+}
+
+#[cfg(test)]
+mod rerun_tests {
+    use super::*;
+    use std::cell::RefCell;
+    use std::sync::{Arc, RwLock};
+
+    thread_local! {
+        /// Requests the start double received (`key=value` per argument).
+        static STARTED: RefCell<Vec<String>> = const { RefCell::new(Vec::new()) };
+    }
+
+    fn line_of(ast: &CommandAst) -> String {
+        ast.arguments.iter()
+            .map(|a| a.value.as_ref().map_or(a.key.clone(), |v| format!("{}={v}", a.key)))
+            .collect::<Vec<_>>().join(" ")
+    }
+
+    /// Job manager double: records the confirmed run instead of starting it.
+    fn start_double(ast: &CommandAst, _: &ExecContext, _: bareos_config::resources::JobResource) -> CommandResult {
+        STARTED.with(|s| s.borrow_mut().push(line_of(ast)));
+        CommandResult::ok(String::new())
+    }
+
+    fn started() -> Vec<String> {
+        STARTED.with(|s| std::mem::take(&mut *s.borrow_mut()))
+    }
+
+    fn context() -> ExecContext {
+        let config = crate::director_config::DirectorConfig::from_str(
+            "Director { Name = dir }\nClient { Name = fd; Address = localhost; Password = x }\n\
+             Storage { Name = File; Address = localhost; Password = x; Device = d; Media Type = File }\n\
+             FileSet { Name = fs; Include { File = /etc } }\nPool { Name = Full; Pool Type = Backup }\n\
+             Pool { Name = Copy; Pool Type = Backup }\n\
+             Job { Name = b1; Type = Backup; Level = Incremental; Client = fd; FileSet = fs; Storage = File; Pool = Full; Messages = m }\n\
+             Job { Name = c1; Type = Copy; Client = fd; FileSet = fs; Storage = File; Pool = Full; Messages = m }"
+        ).unwrap();
+        ExecContext { session_id: 0, config: Some(Arc::new(RwLock::new(config))),
+            session_mgr: None, catalog: None, api_mode: crate::command_executor::ApiMode::Human,
+            bus_rx: None, job_manager: None }
+    }
+
+    /// Catalog double: failed jobs 5, 7 and 9; Job records 5 (Backup), 7
+    /// (Copy), 8 (Restore), 9 (VirtualFull without client and fileset),
+    /// 10 (Copy of a job without resource), 11 (client record missing).
+    fn catalog(sql: &str) -> Result<Rows, String> {
+        let row = |cells: &[&str]| vec![cells.iter().map(|c| Some(c.to_string())).collect::<Vec<_>>()];
+        Ok(match sql {
+            s if s.starts_with("SELECT JobId FROM Job WHERE JobStatus = 'f'") => {
+                if s.contains(">= 100") { vec![] } else { [row(&["5"]), row(&["7"]), row(&["9"])].concat() }
+            }
+            s if s.ends_with("WHERE JobId=5") => row(&["b1", "B", "F", "1", "2", "3"]),
+            s if s.ends_with("WHERE JobId=7") => row(&["c1", "c", "F", "1", "4", "3"]),
+            s if s.ends_with("WHERE JobId=8") => row(&["r1", "R", " ", "1", "0", "0"]),
+            s if s.ends_with("WHERE JobId=9") => row(&["b1", "B", "f", "0", "4", "0"]),
+            s if s.ends_with("WHERE JobId=10") => row(&["gone", "g", "I", "0", "4", "0"]),
+            s if s.ends_with("WHERE JobId=11") => row(&["b1", "B", "D", "99", "2", "3"]),
+            "SELECT Name FROM Client WHERE ClientId=1" => row(&["fd"]),
+            "SELECT Name FROM Pool WHERE PoolId=2" => row(&["Full"]),
+            "SELECT Name FROM Pool WHERE PoolId=4" => row(&["Copy"]),
+            "SELECT FileSet FROM FileSet WHERE FileSetId=3" => row(&["fs"]),
+            _ => vec![],
+        })
+    }
+
+    const NOW: i64 = 1_760_000_000;
+
+    /// Runs `line` with scripted answers: (success, transcript + rest).
+    fn rerun(line: &str, answers: &[&str]) -> (bool, String) {
+        let ctx = context();
+        let ((ok, text), console) = crate::ua_select::tests::scripted(answers, || {
+            let mut ua = crate::ua_select::Ua::new(&ctx);
+            let ok = rerun_dialog(&mut ua, &crate::session::parse_cli_command(line), &catalog, NOW, start_double);
+            let result = ua.finish(ok);
+            (result.success, result.text_output)
+        });
+        (ok, console.transcript() + &text)
+    }
+
+    #[test]
+    fn arguments_follow_get_rerun_cmdline_arguments() {
+        let ctx = context();
+        let parse = |line: &str| {
+            let mut ua = crate::ua_select::Ua::new(&ctx);
+            let args = rerun_arguments(&mut ua, &crate::session::parse_cli_command(line));
+            (args, ua.finish(true).text_output)
+        };
+        assert_eq!(parse("rerun since_jobid=12abc until_jobid=+20 yes").0.unwrap(),
+            RerunArguments { since_jobid: 12, until_jobid: 20, yes: true, ..Default::default() });
+        // std::getline: nothing after a trailing comma, nothing for "".
+        assert_eq!(parse("rerun jobid=3,4,").0.unwrap().jobids, vec![3, 4]);
+        assert_eq!(parse("rerun jobid=").0.unwrap().jobids, Vec::<u32>::new());
+        assert_eq!(parse("rerun jobid=-1,2.7").0.unwrap().jobids, vec![u32::MAX, 2]);
+        assert_eq!(parse("rerun jobid=,1").1, "Specified jobid \"\" is not valid\n");
+        assert_eq!(parse("rerun since_jobid=abc days=0").1, "Please specify jobid, since_jobid, hours or days\n");
+        assert_eq!(parse("rerun hours=x until_jobid=5").1, "Please specify jobid, since_jobid, hours or days\n");
+        assert_eq!(parse("rerun jobid=1 hours=2").1, "Please specify either jobid or a timeframe\n");
+        assert_eq!(parse("rerun days=4294967297").0.unwrap().days, 1, "C int");
+    }
+
+    #[test]
+    fn selection_query_matches_prepare_rerun_sql_query() {
+        let args = |since, until, days, hours| RerunArguments { since_jobid: since, until_jobid: until, days, hours, ..Default::default() };
+        assert_eq!(rerun_sql(&args(10, 0, 1, 0), NOW), "SELECT JobId FROM Job WHERE JobStatus = 'f' AND JobId >= 10 ORDER BY JobId");
+        assert_eq!(rerun_sql(&args(10, 20, 0, 0), NOW),
+            "SELECT JobId FROM Job WHERE JobStatus = 'f' AND JobId >= 10 AND JobId <= 20 ORDER BY JobId");
+        let at = crate::localtime::strftime("%Y-%m-%d %H:%M:%S", (NOW - 2 * 86400 - 3 * 3600) as libc::time_t);
+        assert_eq!(rerun_sql(&args(0, 20, 2, 3), NOW),
+            format!("SELECT JobId FROM Job WHERE JobStatus = 'f' AND SchedTime > '{at}' ORDER BY JobId"));
+    }
+
+    #[test]
+    fn selection_lists_and_asks_without_starting() {
+        started();
+        assert_eq!(rerun("rerun since_jobid=100", &[]), (true, "No jobids with the specified options were found.\n".into()));
+        // The console closes at the question: GetYesno fails.
+        let (ok, text) = rerun("rerun days=1", &[]);
+        assert!(!ok);
+        assert_eq!(text, "The following ids were selected for rerun:\n5,7,9\nrerun these jobids? (yes/no): ");
+        // Without a console GetCmd fails at once.
+        let ctx = context();
+        let result = cmd_rerun(&crate::session::parse_cli_command("rerun days=1"), &ctx);
+        assert_eq!((result.success, result.text_output.as_str()), (true, "No jobids with the specified options were found.\n"),
+            "no catalog: the failed query selects nothing");
+        for answers in [&["no"][..], &["."], &["maybe", "nope", "", "n"]] {
+            let (ok, text) = rerun("rerun hours=3", answers);
+            assert!(!ok, "{answers:?}");
+            assert!(!text.contains("rerunning"), "{answers:?}: {text}");
+        }
+        let (_, text) = rerun("rerun hours=3", &["may", "no"]);
+        assert!(text.ends_with("(yes/no): may\nInvalid response. You must answer yes or no.\n\
+            rerun these jobids? (yes/no): no\n"), "{text}");
+        // "yes" to the selection, then the run dialog of the first job: "no".
+        let (ok, text) = rerun("rerun since_jobid=1", &["yes", "no"]);
+        assert!(!ok);
+        assert!(text.contains("(yes/no): yes\nrerunning jobid 5\nRun Backup job\nJobName:  b1\nLevel:    Full\n"), "{text}");
+        assert!(text.ends_with("OK to run? (yes/mod/no): no\nJob not run.\n"), "{text}");
+        assert!(started().is_empty());
+    }
+
+    #[test]
+    fn yes_reruns_every_selected_job() {
+        started();
+        let (ok, text) = rerun("rerun since_jobid=1 yes", &[]);
+        assert!(ok, "{text}");
+        assert_eq!(text, "The following ids were selected for rerun:\n5,7,9\n\
+            rerunning jobid 5\nrerunning jobid 7\nrerunning jobid 9\n");
+        let started = started();
+        assert_eq!(started.len(), 3, "{started:?}");
+        assert!(started[0].starts_with("job=b1 level=Full client=fd fileset=fs"), "{started:?}");
+        assert!(started[1].starts_with("job=c1 level=Full client=fd fileset=fs"), "{started:?}");
+        assert!(started[2].starts_with("job=b1 level=VirtualFull"), "{started:?}");
+    }
+
+    #[test]
+    fn rerun_command_carries_the_historic_parameters() {
+        let ctx = context();
+        let when = "2025-10-09 08:53:20";
+        let line = |jobid, yes| rerun_command(&ctx, jobid, yes, when, &catalog).map(|ast| ast.as_ref().map(line_of));
+        assert_eq!(line(5, false), Ok(Some(format!("job=b1 level=Full client=fd pool=Full fileset=fs when={when}"))));
+        assert_eq!(line(7, true), Ok(Some(format!("job=c1 level=Full client=fd pool=Full nextpool=Copy fileset=fs when={when} yes"))));
+        assert_eq!(line(9, false), Ok(Some(format!("job=b1 level=VirtualFull pool=Full nextpool=Copy when={when}"))));
+        assert_eq!(line(10, false), Ok(Some(format!("job=gone level=Incremental nextpool=Copy when={when}"))));
+        assert_eq!(line(8, true), Ok(None), "Restore jobs are skipped");
+        assert_eq!(line(6, true), Err(()), "missing Job record");
+        assert_eq!(line(11, true), Err(()), "missing Client record");
+        assert_eq!(job_level_to_string(b'd'), "DiskToCatalog");
+        assert_eq!(job_level_to_string(b'x'), "x (120)");
+    }
+
+    #[test]
+    fn jobid_list_runs_in_order_and_stops_at_a_failure() {
+        started();
+        let (ok, text) = rerun("rerun jobid=8,5,6,7 yes", &[]);
+        assert!(!ok);
+        assert_eq!(text, "rerunning jobid 8\nrerunning jobid 5\nrerunning jobid 6\n");
+        assert_eq!(started().len(), 1);
     }
 }

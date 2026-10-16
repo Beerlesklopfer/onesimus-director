@@ -320,10 +320,19 @@ impl<'a> Ua<'a> {
 
     /// C++ GetYesno(): BNET_YESNO before each question in API mode; answers
     /// longer than three characters or empty are asked again silently.
+    /// The signal goes out in JSON mode too (where GetCmd then fails), past
+    /// the buffered JSON messages.
     pub fn get_yesno(&mut self, prompt: &str) -> Option<bool> {
         loop {
-            if self.api() && !self.batch() && !self.signal(BnetSignal::YesNo) {
-                return None;
+            if self.api() && self.has_console() {
+                let sent = if self.batch() {
+                    with_attached(|c| c.signal(BnetSignal::YesNo)).unwrap_or(false)
+                } else {
+                    self.signal(BnetSignal::YesNo)
+                };
+                if !sent {
+                    return None;
+                }
             }
             let answer = self.get_cmd(prompt)?;
             if answer.is_empty() || answer.len() > 3 {

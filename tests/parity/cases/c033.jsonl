@@ -1,0 +1,28 @@
+# Compatibility log C-033: rerun selection (since_jobid/until_jobid/days/hours, jobid lists).
+# Never starts a job: no `yes` argument; every run dialog ends with "no" (or the selection is empty).
+{"id": "c033-since-none", "steps": ["rerun since_jobid=100000"]}
+{"id": "c033-since-yes-none", "steps": ["rerun since_jobid=100000 yes"]}
+{"id": "c033-since-zero", "steps": ["rerun since_jobid=0"]}
+{"id": "c033-since-text", "steps": ["rerun since_jobid=abc"]}
+{"id": "c033-since-days", "steps": ["rerun since_jobid=100000 days=1"]}
+{"id": "c033-until-only", "steps": ["rerun until_jobid=600"]}
+{"id": "c033-since-until-no", "steps": ["rerun since_jobid=599 until_jobid=600", "no"]}
+{"id": "c033-since-list-no", "steps": ["rerun since_jobid=590", "no"]}
+{"id": "c033-since-prompt-abort", "steps": ["rerun since_jobid=599 until_jobid=599", "."]}
+{"id": "c033-since-invalid-answer", "steps": ["rerun since_jobid=599 until_jobid=599", "maybe", "no"]}
+{"id": "c033-since-long-answer", "steps": ["rerun since_jobid=599 until_jobid=599", "nope", "", "No"]}
+{"id": "c033-since-confirm-run-no", "steps": ["rerun since_jobid=599 until_jobid=599", "yes", "no"], "normalize": ["When:     .*"]}
+{"id": "c033-since-api2", "setup": [".api 2"], "steps": ["rerun since_jobid=599 until_jobid=600", "no"]}
+{"id": "c033-since-api1", "setup": [".api 1"], "steps": ["rerun since_jobid=599 until_jobid=600", "no"]}
+{"id": "c033-days-no", "steps": ["rerun days=3650", "no"]}
+{"id": "c033-days-negative", "steps": ["rerun days=-1"]}
+{"id": "c033-hours-none", "steps": ["rerun hours=1"]}
+{"id": "c033-days-hours-no", "steps": ["rerun days=3000 hours=5", "no"]}
+{"id": "c033-jobid-list-no", "steps": ["rerun jobid=14,599", "no"], "normalize": ["When:     .*"]}
+{"id": "c033-jobid-nopool", "steps": ["rerun jobid=14", "no"], "normalize": ["When:     .*"]}
+{"id": "c033-jobid-fraction", "steps": ["rerun jobid=599.5", "no"], "normalize": ["When:     .*"]}
+{"id": "c033-jobid-trailing-comma", "steps": ["rerun jobid=999999,"]}
+{"id": "c033-jobid-leading-comma", "steps": ["rerun jobid=,999999"]}
+{"id": "c033-jobid-empty", "steps": ["rerun jobid="]}
+{"id": "c033-jobid-negative", "steps": ["rerun jobid=-1"]}
+{"id": "c033-jobid-missing-then-ok", "steps": ["rerun jobid=999999,599"]}
