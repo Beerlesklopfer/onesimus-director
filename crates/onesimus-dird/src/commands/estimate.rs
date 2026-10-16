@@ -369,14 +369,7 @@ fn level_since_time(catalog: &CatalogHandle, plan: &Plan, level: &mut Level, cli
     since.unwrap_or_default()
 }
 
-/// lib/btime.cc StrToUtime(): catalog time as local time.
-fn str_to_utime(text: &str) -> i64 {
-    chrono::NaiveDateTime::parse_from_str(text.get(..19).unwrap_or(text), "%Y-%m-%d %H:%M:%S")
-        .ok()
-        .and_then(|t| chrono::Local.from_local_datetime(&t).earliest())
-        .map(|t| t.timestamp())
-        .unwrap_or(0)
-}
+use crate::btime::str_to_utime;
 
 fn escape(value: &str) -> String {
     value.replace('\'', "''")
@@ -421,7 +414,7 @@ fn estimate_on_fd<S: std::io::Read + std::io::Write>(fd: &mut BnetStream<S>, cat
             let name = if level == Level::Differential { "differential" } else { "incremental" };
             send(fd, &level_cmd(accurate_prefix, name))?;
             // SendSinceTime()
-            send(fd, &format!("level =  since_utime {} mtime_only=0 prev_job={}\n", str_to_utime(&since.0).max(0), since.1))?;
+            send(fd, &format!("level =  since_utime {} mtime_only=0 prev_job={}\n", str_to_utime(&since.0) as u64, since.1))?;
             while fd_protocol::get_dir_msg(fd)?.is_some() {}
         }
         // L_SINCE and verify/virtual levels: Jmsg "Unimplemented backup level", bail out

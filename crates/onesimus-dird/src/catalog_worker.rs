@@ -779,7 +779,7 @@ async fn handle_since_utime(pool: &sqlx::PgPool, client_name: &str, job_name: &s
     // Require a successful Full in the chain, even when selecting a later I/D.
     let level_filter = if level == "D" { "j.level = 'F'" } else { "j.level IN ('F','I','D')" };
     let sql = format!(
-        "SELECT COALESCE(EXTRACT(EPOCH FROM j.starttime)::bigint, 0), j.job \
+        "SELECT COALESCE(j.starttime::text, ''), j.job \
          FROM job j JOIN client c ON j.clientid = c.clientid \
          JOIN fileset f ON j.filesetid = f.filesetid \
          WHERE c.name = $1 AND j.name = $2 AND f.fileset = $3 \
@@ -791,9 +791,11 @@ async fn handle_since_utime(pool: &sqlx::PgPool, client_name: &str, job_name: &s
              AND fulljob.starttime <= j.starttime) \
          ORDER BY j.starttime DESC, j.jobid DESC LIMIT 1"
     );
-    match sqlx::query_as::<_, (i64, String)>(&sql)
+    // dird/fd_cmds.cc SendSinceTime(): StrToUtime() of the catalog text, i.e.
+    // local time (EXTRACT(EPOCH) would read the timestamp as UTC). C-059.
+    match sqlx::query_as::<_, (String, String)>(&sql)
         .bind(client_name).bind(job_name).bind(fileset_name).fetch_optional(pool).await {
-        Ok(Some((ts, prev))) => CatalogResponse::SinceUtime { since_utime: ts, prev_job: prev },
+        Ok(Some((start, prev))) => CatalogResponse::SinceUtime { since_utime: crate::btime::str_to_utime(&start), prev_job: prev },
         Ok(None) => CatalogResponse::SinceUtime { since_utime: 0, prev_job: String::new() },
         Err(error) => CatalogResponse::Error(format!("Backup reference lookup failed: {error}")),
     }

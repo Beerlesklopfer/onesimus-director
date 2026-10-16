@@ -149,7 +149,6 @@ pub fn start_restore_text(job: &str) -> String {
 }
 
 /// admin.cc:58 DoAdmin().
-#[allow(dead_code)] // admin jobs are not run yet (C-043)
 pub fn start_admin_text(job_id: u32, job: &str) -> String {
     format!("Start Admin JobId {job_id}, Job={job}\n")
 }
@@ -218,6 +217,12 @@ pub enum ReportKind {
     #[default]
     Backup,
     Restore,
+    /// AdminCleanup() (C-058).
+    Admin,
+    /// ConsolidateCleanup() (C-058).
+    Consolidate,
+    /// MigrationCleanup() of a Copy (true) or Migrate control job (C-058).
+    MigrateControl(bool),
 }
 
 /// Job data known when the job is started (the JCR resources and their
@@ -245,6 +250,8 @@ pub struct JobReport {
     /// Restore: files of the selection (`jcr->dir_impl->ExpectedFiles`);
     /// None when the restore does not know it.
     pub expected_files: Option<u64>,
+    /// Copy/Migrate control job: jobs were selected (HasSelectedJobs).
+    pub selected: bool,
 }
 
 /// Clients connected since the Director started (ClientResource
@@ -371,7 +378,6 @@ pub fn restore_term_msg(status: char) -> (MsgType, String) {
 }
 
 /// AdminCleanup() term message and message type.
-#[allow(dead_code)] // admin jobs are not run yet (C-043)
 pub fn admin_term_msg(status: char) -> (MsgType, String) {
     match status {
         'T' => (MsgType::Info, "Admin OK".into()),
@@ -559,7 +565,6 @@ pub fn restore_summary(director: &str, report: &JobReport, outcome: &JobOutcome,
 }
 
 /// AdminCleanup() summary (admin.cc:105-121).
-#[allow(dead_code)] // admin jobs are not run yet (C-043)
 pub fn admin_summary(report: &JobReport, outcome: &JobOutcome) -> JobMsg {
     let (msg_type, term_msg) = admin_term_msg(outcome.status);
     let edt = bstrftimes(outcome.end_time);
@@ -571,11 +576,61 @@ pub fn admin_summary(report: &JobReport, outcome: &JobOutcome) -> JobMsg {
         bstrftimes(report.start_time), version::JOBLOG_MESSAGE, report.trigger))
 }
 
+/// The AdminCleanup()-shaped report of ConsolidateCleanup() (consolidate.cc).
+pub fn consolidate_summary(report: &JobReport, outcome: &JobOutcome) -> JobMsg {
+    let (msg_type, term_msg) = match outcome.status {
+        'T' => (MsgType::Info, "Consolidate OK".to_string()),
+        'f' | 'E' => (MsgType::Error, "*** Consolidate Error ***".to_string()),
+        'A' => (MsgType::Info, "Consolidate Canceled".to_string()),
+        other => (MsgType::Info, inappropriate(other)),
+    };
+    let (_, text) = admin_summary(report, outcome);
+    let admin_term = admin_term_msg(outcome.status).1;
+    let text = text.replacen(&format!("  Termination:            {admin_term}\n"),
+        &format!("  Termination:            {term_msg}\n"), 1);
+    (msg_type, text)
+}
+
+/// MigrationCleanup() + GenerateMigrateSummary() of a control job that only
+/// selected jobs (no mig_jcr): "%s OK" etc. with HasSelectedJobs, else
+/// "%s -- no files to %s" (migrate.cc:1813-1846, 1622-1645).
+pub fn migrate_selection_summary(director: &str, report: &JobReport, outcome: &JobOutcome, copy: bool) -> JobMsg {
+    let (operation, action) = if copy { ("Copying", "copy") } else { ("Migration", "migrate") };
+    let (msg_type, term_msg) = if report.selected {
+        match outcome.status {
+            'T' => (MsgType::Info, format!("{operation} OK")),
+            'W' => (MsgType::Info, format!("{operation} OK -- with warnings")),
+            'f' | 'E' => (MsgType::Error, format!("*** {operation} Error ***")),
+            'A' => (MsgType::Info, format!("{operation} Canceled")),
+            _ => (MsgType::Info, format!("Inappropriate {operation} term code")),
+        }
+    } else {
+        (MsgType::Info, format!("{operation} -- no files to {action}"))
+    };
+    let run_time = (outcome.end_time - report.start_time).max(0) as u64;
+    (msg_type, format!(
+        "{head}  OS Information:         {os}\n  Current JobId:          {job_id}\n  Current Job:            {job}\n\
+         \x20 Catalog:                \"{catalog}\" (From {catalog_source})\n  Start time:             {start}\n\
+         \x20 End time:               {end}\n  Elapsed time:           {elapsed}\n  Priority:               {priority}\n\
+         \x20 Bareos binary info:     {binary}\n  Job triggered by:       {trigger}\n  Termination:            {term_msg}\n\n",
+        head = summary_head(director), os = version::os_info(), job_id = outcome.job_id, job = report.job,
+        catalog = report.catalog, catalog_source = report.catalog_source, start = bstrftimes(report.start_time),
+        end = bstrftimes(outcome.end_time), elapsed = crate::ua_select::edit_utime(run_time),
+        priority = report.priority, binary = version::JOBLOG_MESSAGE, trigger = report.trigger))
+}
+
 /// The end-of-job messages of a job: reads the catalog facts and builds the
 /// summary of its kind.
 pub fn end_of_job(director: &str, catalog: Option<&CatalogHandle>, report: &JobReport, outcome: &JobOutcome) -> Vec<JobMsg> {
+    match report.kind {
+        ReportKind::Admin => return vec![admin_summary(report, outcome)],
+        ReportKind::Consolidate => return vec![consolidate_summary(report, outcome)],
+        ReportKind::MigrateControl(copy) => return vec![migrate_selection_summary(director, report, outcome, copy)],
+        _ => {}
+    }
     let facts = catalog_facts(catalog, outcome.job_id, &report.client);
     match report.kind {
+        ReportKind::Admin | ReportKind::Consolidate | ReportKind::MigrateControl(_) => unreachable!(),
         ReportKind::Backup => backup_summary(director, report, outcome, &facts),
         ReportKind::Restore => restore_summary(director, report, outcome, &facts),
     }
@@ -642,6 +697,7 @@ mod tests {
             accurate: false,
             trigger: "Scheduler".into(),
             expected_files: None,
+            selected: false,
         }
     }
 
@@ -811,6 +867,28 @@ mod tests {
             Bareos binary info:     {}\n  Job triggered by:       User\n  Termination:            Admin OK\n\n",
             version::FULL, version::SHORT_DATE, bstrftimes(12), bstrftimes(10), bstrftimes(11), bstrftimes(12),
             version::JOBLOG_MESSAGE));
+    }
+
+    #[test]
+    fn consolidate_and_migrate_control_summaries() {
+        let report = JobReport { job: "c.1".into(), sched_time: 10, start_time: 11, trigger: "User".into(),
+            catalog: "MyCatalog".into(), catalog_source: "Client resource".into(), priority: 10, ..Default::default() };
+        let outcome = JobOutcome { job_id: 3, status: 'T', end_time: 12, ..Default::default() };
+        let (kind, text) = consolidate_summary(&report, &outcome);
+        assert_eq!(kind, MsgType::Info);
+        assert!(text.ends_with("  Termination:            Consolidate OK\n\n"), "{text}");
+        assert_eq!(consolidate_summary(&report, &JobOutcome { status: 'E', ..outcome.clone() }).0, MsgType::Error);
+        let (kind, text) = migrate_selection_summary("dir", &report, &outcome, false);
+        assert_eq!(kind, MsgType::Info);
+        assert_eq!(text, format!("Bareos dir {} ({}):\n  OS Information:         {}\n  Current JobId:          3\n  \
+            Current Job:            c.1\n  Catalog:                \"MyCatalog\" (From Client resource)\n  \
+            Start time:             {}\n  End time:               {}\n  Elapsed time:           1 sec\n  \
+            Priority:               10\n  Bareos binary info:     {}\n  Job triggered by:       User\n  \
+            Termination:            Migration -- no files to migrate\n\n",
+            version::FULL, version::SHORT_DATE, version::os_info(), bstrftimes(11), bstrftimes(12),
+            version::JOBLOG_MESSAGE));
+        let selected = JobReport { selected: true, ..report };
+        assert!(migrate_selection_summary("dir", &selected, &outcome, true).1.ends_with("Termination:            Copying OK\n\n"));
     }
 
     #[test]

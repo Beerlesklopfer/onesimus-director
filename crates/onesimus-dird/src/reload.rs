@@ -12,6 +12,14 @@ use crate::director_config::{DirectorConfig, SharedConfig};
 /// Config path + shared config, for the `reload` console command.
 static RELOAD_TARGET: std::sync::OnceLock<(PathBuf, SharedConfig)> = std::sync::OnceLock::new();
 
+/// Catalog for CheckCatalog(UPDATE_CATALOG) after a reload.
+static RELOAD_CATALOG: std::sync::OnceLock<crate::catalog_worker::CatalogHandle> = std::sync::OnceLock::new();
+
+/// Register the catalog DoReloadConfig() updates (Client/Storage records).
+pub fn register_catalog(catalog: crate::catalog_worker::CatalogHandle) {
+    let _ = RELOAD_CATALOG.set(catalog);
+}
+
 /// Block SIGHUP in the calling thread. Must run in main() before any other
 /// thread is spawned: threads inherit the mask, so only the dir:sighup thread
 /// (sigwait) ever receives it. Without this, SIGHUP hits an arbitrary thread
@@ -57,19 +65,65 @@ pub fn reload_now() -> Result<(), String> {
 
 fn reload_config(config_path: &std::path::Path, shared_config: &SharedConfig) -> Result<(), String> {
     info!("reloading configuration from {}", config_path.display());
-    let new_config = DirectorConfig::load(config_path).map_err(|e| {
-        error!("configuration reload failed: {e}");
-        warn!("keeping previous configuration");
-        e.to_string()
-    })?;
+    let base = crate::config_check::base_config_path(config_path);
+    let loaded = DirectorConfig::load(config_path)
+        .map_err(|e| vec![crate::config_check::Diag::Parser(e.to_string())])
+        .and_then(|config| crate::config_check::check(&config.raw, &base).map(|()| config));
+    let mut new_config = match loaded {
+        Ok(config) => config,
+        Err(diags) => {
+            // DoReloadConfig(): the parser/CheckResources() messages, then
+            // "Please correct ..." and "Resetting ..." through the daemon
+            // messages of the configuration that stays active.
+            let current = shared_config.read().map_err(|e| format!("config lock: {e}"))?;
+            let mut reason = String::new();
+            for diag in &diags {
+                match diag {
+                    crate::config_check::Diag::Job(msg_type, text) => job_msg(&current, *msg_type, text),
+                    crate::config_check::Diag::Daemon(text) => {
+                        crate::audit::daemon_message(&current, crate::message_bus::MsgType::Error, text)
+                    }
+                    crate::config_check::Diag::Parser(text) => {
+                        error!("configuration error: {text}");
+                    }
+                }
+                if reason.is_empty() {
+                    reason = match diag {
+                        crate::config_check::Diag::Job(_, t) | crate::config_check::Diag::Daemon(t)
+                        | crate::config_check::Diag::Parser(t) => t.trim_end().to_string(),
+                    };
+                }
+            }
+            job_msg(&current, crate::message_bus::MsgType::Error, &format!("Please correct the configuration in {base}\n"));
+            job_msg(&current, crate::message_bus::MsgType::Error, "Resetting to previous configuration.\n");
+            error!("configuration reload failed: {reason}");
+            warn!("keeping previous configuration");
+            return Err(reason);
+        }
+    };
+    // C++ CheckResources() set omit_defaults_ at startup: every later parse
+    // leaves unset items without the inherit bit (show prints them).
+    new_config.reloaded = true;
     let mut cfg = shared_config.write().map_err(|e| format!("config lock: {e}"))?;
     *cfg = new_config;
     crate::fd_protocol::reset_handshake_modes();
+    // DoReloadConfig(): CheckCatalog(UPDATE_CATALOG) for the new resources
+    if let Some(catalog) = RELOAD_CATALOG.get() {
+        crate::check_catalog::ensure_basic_records(&cfg, catalog);
+    }
     info!("configuration reloaded: Director '{}', {} clients, {} jobs",
           cfg.director.name, cfg.clients.len(), cfg.jobs.len());
     drop(cfg);
     crate::ovfs::recheck_after_reload();
     Ok(())
+}
+
+/// Jmsg(nullptr, type, 0, text): JobId 0 through the daemon messages.
+fn job_msg(config: &DirectorConfig, msg_type: crate::message_bus::MsgType, text: &str) {
+    let msg = crate::console_msg::job_message_text(&config.director.name, 0, msg_type, text);
+    if let Some(res) = crate::audit::daemon_messages(config) {
+        crate::audit::dispatch(res, crate::audit::code(msg_type), 0, &msg, None);
+    }
 }
 
 #[cfg(unix)]

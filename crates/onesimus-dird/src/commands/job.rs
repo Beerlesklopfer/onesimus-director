@@ -132,6 +132,12 @@ fn run_start(
 ) -> bool {
     let result = start(&jcr.to_ast(), ua.ctx, jcr.job.clone());
     let success = result.success;
+    // ua_run.cc:500: "For interactive runs we send a message to the audit log".
+    if jcr.ignore_level_pool_overrides {
+        if let Some(job_id) = result.json.as_ref().and_then(|j| j["run"]["jobid"].as_str()) {
+            crate::audit::info(ua.ctx, &format!("Job queued. JobId={job_id}"));
+        }
+    }
     ua.send_result(result);
     success
 }
@@ -193,64 +199,7 @@ fn bstrutime(t: i64) -> String {
     crate::localtime::strftime("%Y-%m-%d %H:%M:%S", t as libc::time_t)
 }
 
-/// lib/btime.cc StrToUtime(): `sscanf` is Bareos' bsscanf (baconfig.h:455),
-/// so "%u-%u-%u %u:%u:%u%15s" reads digits without skipping blanks (no
-/// digit is a 0), the blank matches any amount of white space and %15s
-/// reads non-blank characters, which must be none. Then DateIsValid and
-/// mktime(); 0 for every invalid time.
-fn str_to_utime(text: &str) -> i64 {
-    let buf = text.as_bytes();
-    let is_space = |c: u8| matches!(c, b' ' | b'\t' | b'\n' | 0x0b | 0x0c | b'\r');
-    if buf.is_empty() {
-        return 0;
-    }
-    let mut pos = 0;
-    let mut fields = [0i32; 6];
-    for (i, field) in fields.iter_mut().enumerate() {
-        let mut value: u64 = 0;
-        while pos < buf.len() && buf[pos].is_ascii_digit() {
-            value = value.wrapping_mul(10).wrapping_add(u64::from(buf[pos] - b'0'));
-            pos += 1;
-        }
-        *field = value as u32 as i32;
-        match b"-- ::".get(i) {
-            Some(b' ') => while pos < buf.len() && is_space(buf[pos]) {
-                pos += 1;
-            },
-            Some(&literal) => {
-                if buf.get(pos) != Some(&literal) {
-                    return 0;
-                }
-                pos += 1;
-            }
-            None => {}
-        }
-    }
-    if buf.get(pos).is_some_and(|&c| !is_space(c)) {
-        return 0;
-    }
-    let [year, month, day, hour, min, sec] = fields;
-    let (year, month) = (year.wrapping_sub(1900), month.wrapping_sub(1));
-    // DateIsValid()
-    let leap = { let y = year.wrapping_add(1900); y % 4 == 0 && !(y % 100 == 0 && y % 400 != 0) };
-    let days = match month {
-        1 => if leap { 29 } else { 28 },
-        3 | 5 | 8 | 10 => 30,
-        _ => 31,
-    };
-    if year <= 0 || !(0..=11).contains(&month) || day <= 0 || day > days || !(0..=23).contains(&hour)
-        || !(0..=59).contains(&min) || !(0..=59).contains(&sec)
-    {
-        return 0;
-    }
-    let mut tm: libc::tm = unsafe { std::mem::zeroed() };
-    (tm.tm_year, tm.tm_mon, tm.tm_mday, tm.tm_hour, tm.tm_min, tm.tm_sec) = (year, month, day, hour, min, sec);
-    tm.tm_isdst = -1;
-    match unsafe { libc::mktime(&mut tm) } {
-        -1 => 0,
-        time => time as i64,
-    }
-}
+use crate::btime::str_to_utime;
 
 /// Value of an item of a resource's directives (last one wins, aliases of
 /// the job items resolved).
@@ -1088,6 +1037,8 @@ impl Jcr {
                 }
             }
         }
+        // jcr->sched_time (`when=`), internal to the start (C-058).
+        arguments.push(arg("schedtime", &self.sched_time.to_string()));
         arguments.push(Argument { key: "yes".to_string(), value: None });
         CommandAst { command_name: "run".to_string(), arguments, ..Default::default() }
     }
@@ -1604,16 +1555,22 @@ fn run_selected(
     config: std::sync::RwLockReadGuard<'_, crate::director_config::DirectorConfig>,
     job: bareos_config::resources::JobResource,
 ) -> CommandResult {
-    let job_name = job.name.as_str();
     let yes = ast.arguments.iter().any(|a| a.key.eq_ignore_ascii_case("yes"));
 
-    // Only Backup jobs have a job worker; other types are never started as
-    // (bogus) backups.
-    if job.job_type != JobType::Backup {
-        return CommandResult::error(format!("Running {:?} jobs is not available yet.\n", job.job_type));
-    }
-    if !job.enabled {
-        return CommandResult::error(format!("Job '{job_name}' is disabled\n"));
+    // A disabled Job resource only stops the scheduler; `run` starts it
+    // (ua_run.cc has no Enabled check). Compatibility log C-058.
+    // RunJob() per job type (job.cc SetupJob/job_thread). Compatibility log C-058.
+    match job.job_type {
+        JobType::Backup => {}
+        JobType::Admin => return run_admin(ast, ctx, config, job),
+        JobType::Restore => {
+            drop(config);
+            return run_restore(ast, ctx, job);
+        }
+        JobType::Copy => return run_internal(ast, ctx, config, job, crate::internal_jobs::Kind::Copy),
+        JobType::Migrate => return run_internal(ast, ctx, config, job, crate::internal_jobs::Kind::Migrate),
+        JobType::Consolidate => return run_internal(ast, ctx, config, job, crate::internal_jobs::Kind::Consolidate),
+        other => return CommandResult::error(format!("Running {other:?} jobs is not available yet.\n")),
     }
 
     let default_level = format!("{:?}", job.level);
@@ -1776,6 +1733,233 @@ fn run_selected(
     }
 
     job_queued(job_id)
+}
+
+/// CreateUniqueJobName() (job.cc:1464): "<name>.%Y-%m-%d_%H.%M.%S_<seq>"
+/// with a sequence 1..59, then 0.
+pub(crate) fn unique_job_name(base: &str, now: i64) -> String {
+    static SEQ: std::sync::Mutex<u32> = std::sync::Mutex::new(0);
+    let seq = {
+        let mut seq = SEQ.lock().unwrap_or_else(|e| e.into_inner());
+        *seq = if *seq >= 59 { 0 } else { *seq + 1 };
+        *seq
+    };
+    format!("{base}.{}_{seq:02}", crate::localtime::strftime("%Y-%m-%d_%H.%M.%S", now as libc::time_t))
+}
+
+/// SQL string escaping of the catalog (EscapeString: quotes doubled).
+fn sql_esc(text: &str) -> String {
+    text.replace('\'', "''")
+}
+
+/// The first cell of the first row of a query.
+fn first_value(cat: &crate::catalog_worker::CatalogHandle, sql: &str) -> Result<Option<String>, String> {
+    Ok(cat.query_rows(sql)?.rows.into_iter().next().and_then(|r| r.into_iter().next().flatten()))
+}
+
+/// GetOrCreateClientRecord() (job.cc) + CreateJobRecord() (cats/sql_create.cc:55):
+/// the Job row with Job, Name, Type, Level, JobStatus 'C', SchedTime,
+/// JobTDate, ClientId and Comment; everything else keeps its default.
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn create_job_record(ctx: &ExecContext, unique: &str, name: &str, job_type: char, level: char,
+                                client: Option<&str>, sched_time: i64, comment: &str) -> Result<u32, String> {
+    let cat = ctx.catalog.as_ref().ok_or("no catalog")?;
+    let client_id = match client.filter(|c| !c.is_empty()) {
+        Some(client) => match first_value(cat, &format!("SELECT ClientId FROM Client WHERE Name='{}'", sql_esc(client)))? {
+            Some(id) => id,
+            None => first_value(cat, &format!(
+                "INSERT INTO Client (Name,Uname,AutoPrune,FileRetention,JobRetention) \
+                 VALUES ('{}','',0,5184000,15552000) RETURNING ClientId", sql_esc(client)))?
+                .ok_or("CreateClientRecord failed")?,
+        },
+        None => "0".to_string(),
+    };
+    let sql = format!(
+        "INSERT INTO Job (Job,Name,Type,Level,JobStatus,SchedTime,JobTDate,ClientId,Comment) \
+         VALUES ('{}','{}','{job_type}','{level}','C','{}',{sched_time},{client_id},'{}') RETURNING JobId",
+        sql_esc(unique), sql_esc(name), bstrutime(sched_time), sql_esc(comment));
+    first_value(cat, &sql)?.and_then(|id| id.parse().ok()).ok_or_else(|| "Create DB Job record failed".to_string())
+}
+
+/// Worker parameters of a job without daemon contact.
+fn plain_params(job_id: u32, unique: &str, job: &bareos_config::resources::JobResource, job_type: WorkerJobType,
+                level: &str, director: &str, client: &str) -> JobParams {
+    JobParams {
+        job_id, unique_job: unique.to_string(), job_name: job.name.clone(), job_type, level: level.to_string(),
+        fd_address: String::new(), fd_port: 0, fd_password: String::new(), sd_address: String::new(), sd_port: 0,
+        sd_password: String::new(), sd_device: String::new(), sd_media_type: String::new(),
+        director_name: director.to_string(), pool_name: String::new(), fileset_includes: Vec::new(),
+        fileset_excludes: Vec::new(), since_utime: 0, prev_job: String::new(), where_path: None, replace: None,
+        restore_jobid: None, bootstrap: None, client_name: client.to_string(), client_first_connection: false,
+    }
+}
+
+/// Queue a job whose catalog record exists: the "Version:" job message,
+/// then the job queue (or a direct worker without a JobManager).
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn queue_job(ctx: &ExecContext, job: &bareos_config::resources::JobResource, params: JobParams,
+             report: crate::job_messages::JobReport, client: &str, storage: &str, sched_time: i64) -> CommandResult {
+    let job_id = params.job_id;
+    if let Some(smgr) = &ctx.session_mgr {
+        smgr.bus().post(BusMessage::JobStatus {
+            job_id, job_name: job.name.clone(), status: "Queued".to_string(), timestamp: now_unix(),
+        });
+    }
+    if let Some(ref mgr) = ctx.job_manager {
+        let mut mgr = mgr.lock().unwrap();
+        mgr.enqueue_job(job_id, &job.name, crate::job_manager::QueuedStart {
+            params, priority: job.priority, sched_time,
+        }, client, storage);
+        mgr.set_job_report(job_id, report);
+    } else if let Err(e) = job_worker::spawn_job_worker(job_id, &job.name, &params) {
+        return CommandResult::error(format!("Failed to start job: {e}\n"));
+    }
+    job_queued(job_id)
+}
+
+/// RunJob() of an Admin job (job.cc SetupJob, admin.cc DoAdminInit/do_admin/
+/// AdminCleanup): Job record Type 'D' with the level of the run (' ', or
+/// Full after the run dialog) and the Client; no Pool or FileSet. The worker
+/// reports "Start Admin JobId …" and the job ends JS_Terminated with the
+/// AdminCleanup report. Compatibility log C-058.
+fn run_admin(
+    ast: &CommandAst,
+    ctx: &ExecContext,
+    config: std::sync::RwLockReadGuard<'_, crate::director_config::DirectorConfig>,
+    job: bareos_config::resources::JobResource,
+) -> CommandResult {
+    if !ast.arguments.iter().any(|a| a.key.eq_ignore_ascii_case("yes")) {
+        return CommandResult::error("Job not run.\n".to_string());
+    }
+    let value = |key: &str| ast.arguments.iter().find(|a| a.key == key).and_then(|a| a.value.clone());
+    let level = value("level").and_then(|l| level_from_name(&l)).unwrap_or(L_NONE) as char;
+    let client = value("client").unwrap_or_else(|| job.client.clone());
+    // DoAdminInit(): FreeRstorage; the write storage stays for the job queue.
+    let storage = value("storage").unwrap_or_else(|| job.storage.split(',').next().unwrap_or("").trim().to_string());
+    let director = config.director.name.clone();
+    drop(config);
+
+    let now = now_unix_time();
+    let sched_time = value("schedtime").and_then(|t| t.parse().ok()).unwrap_or(now);
+    let unique = unique_job_name(&job.name, now);
+    let job_id = match create_job_record(ctx, &unique, &job.name, 'D', level, Some(&client), sched_time, "") {
+        Ok(id) => id,
+        Err(e) => {
+            tracing::error!("Failed to create job record: {e}");
+            return CommandResult::error("Job failed.\n".to_string());
+        }
+    };
+    let params = plain_params(job_id, &unique, &job, WorkerJobType::Admin, &level.to_string(), &director, &client);
+    let report = crate::job_messages::JobReport {
+        kind: crate::job_messages::ReportKind::Admin, job: unique, client: client.clone(),
+        sched_time, start_time: now, priority: job.priority,
+        trigger: crate::job_messages::TRIGGER_USER.to_string(), ..Default::default()
+    };
+    queue_job(ctx, &job, params, report, &client, &storage, sched_time)
+}
+
+/// The Catalog of a job and its source (SetJcrDefaults: Pool, Job, Client
+/// resource, else the first Catalog).
+fn job_catalog(config: &crate::director_config::DirectorConfig, job: &bareos_config::resources::JobResource,
+               pool: &str, client: &str) -> (String, String) {
+    let raw = |kind: &str, name: &str, key: &str| config.raw.iter()
+        .find(|r| r.norm_type() == kind && r.name().is_some_and(|n| n.eq_ignore_ascii_case(name)))
+        .and_then(|r| r.directives.iter().rev().find(|d| d.norm_key() == key).and_then(|d| d.first()).map(str::to_string));
+    let job_dirs = crate::commands::defaults::job_directives(config, &job.name);
+    let job_catalog = job_dirs.iter().rev().find(|d| d.norm_key() == "catalog").and_then(|d| d.first()).map(str::to_string);
+    if let Some(catalog) = raw("pool", pool, "catalog") {
+        (catalog, "Pool resource".into())
+    } else if let Some(catalog) = job_catalog {
+        (catalog, "Job resource".into())
+    } else {
+        let client_catalog = config.find_client(client).map(|c| c.catalog.clone()).filter(|c| !c.is_empty());
+        (client_catalog.or_else(|| config.catalogs.first().map(|c| c.name.clone())).unwrap_or_default(),
+            "Client resource".into())
+    }
+}
+
+/// RunJob() of a Copy/Migrate control job (migrate.cc DoMigrationInit/
+/// DoMigrationSelection/MigrationCleanup) or a Consolidate job
+/// (consolidate.cc): the Job record (Type 'c'/'g'/'O'), the job queue, then
+/// the Director runs the selection itself (internal_jobs.rs). Not available
+/// yet: the worker jobs of a Copy/Migrate (`jobid=`, and the jobs a control
+/// job selected) and the consolidation of Always Incremental jobs.
+/// Compatibility log C-058.
+fn run_internal(
+    ast: &CommandAst,
+    ctx: &ExecContext,
+    config: std::sync::RwLockReadGuard<'_, crate::director_config::DirectorConfig>,
+    job: bareos_config::resources::JobResource,
+    kind: crate::internal_jobs::Kind,
+) -> CommandResult {
+    use crate::internal_jobs::Kind;
+    if !ast.arguments.iter().any(|a| a.key.eq_ignore_ascii_case("yes")) {
+        return CommandResult::error("Job not run.\n".to_string());
+    }
+    let value = |key: &str| ast.arguments.iter().find(|a| a.key.eq_ignore_ascii_case(key)).and_then(|a| a.value.clone());
+    if kind != Kind::Consolidate && value("jobid").is_some() {
+        return CommandResult::error(format!("Running {:?} jobs for a JobId is not available yet.\n", job.job_type));
+    }
+    if kind == Kind::Consolidate && config.jobs.iter().any(|j| {
+        crate::commands::defaults::bool_directive(&crate::commands::defaults::job_directives(&config, &j.name),
+            "alwaysincremental", false)
+    }) {
+        return CommandResult::error("Consolidating Always Incremental jobs is not available yet.\n".to_string());
+    }
+    let level = value("level").and_then(|l| level_from_name(&l)).unwrap_or(L_FULL) as char;
+    let client = value("client").unwrap_or_else(|| job.client.clone());
+    let pool = value("pool").unwrap_or_else(|| job.pool.clone());
+    let storage = value("storage").unwrap_or_else(|| job.storage.split(',').next().unwrap_or("").trim().to_string());
+    let (catalog, catalog_source) = job_catalog(&config, &job, &pool, &client);
+    let director = config.director.name.clone();
+    drop(config);
+
+    let now = now_unix_time();
+    let sched_time = value("schedtime").and_then(|t| t.parse().ok()).unwrap_or(now);
+    let unique = unique_job_name(&job.name, now);
+    let (type_char, worker_type, report_kind) = match kind {
+        Kind::Copy => ('c', WorkerJobType::Copy, crate::job_messages::ReportKind::MigrateControl(true)),
+        Kind::Migrate => ('g', WorkerJobType::Migrate, crate::job_messages::ReportKind::MigrateControl(false)),
+        Kind::Consolidate => ('O', WorkerJobType::Consolidate, crate::job_messages::ReportKind::Consolidate),
+    };
+    let job_id = match create_job_record(ctx, &unique, &job.name, type_char, level, Some(&client), sched_time, "") {
+        Ok(id) => id,
+        Err(e) => {
+            tracing::error!("Failed to create job record: {e}");
+            return CommandResult::error("Job failed.\n".to_string());
+        }
+    };
+    let mut params = plain_params(job_id, &unique, &job, worker_type, &level.to_string(), &director, &client);
+    params.pool_name = pool;
+    let report = crate::job_messages::JobReport {
+        kind: report_kind, job: unique, client: client.clone(), catalog, catalog_source,
+        sched_time, start_time: now, priority: job.priority,
+        trigger: crate::job_messages::TRIGGER_USER.to_string(), ..Default::default()
+    };
+    queue_job(ctx, &job, params, report, &client, &storage, sched_time)
+}
+
+/// RunJob() of a Restore job started with `run` (jobid= or bootstrap=, as
+/// the run dialog confirmed them): the start of the `restore` command.
+/// Compatibility log C-058.
+fn run_restore(ast: &CommandAst, ctx: &ExecContext, job: bareos_config::resources::JobResource) -> CommandResult {
+    if !ast.arguments.iter().any(|a| a.key.eq_ignore_ascii_case("yes")) {
+        return CommandResult::error("Job not run.\n".to_string());
+    }
+    let value = |key: &str| ast.arguments.iter().find(|a| a.key.eq_ignore_ascii_case(key)).and_then(|a| a.value.clone());
+    let client = value("client").unwrap_or_else(|| job.client.clone());
+    let restore_jobid = value("jobid")
+        .and_then(|list| list.split(',').next().and_then(|id| id.trim().parse().ok())).unwrap_or(0);
+    crate::commands::restore::start_restore(ctx, crate::commands::restore::Launch {
+        restore_jobid,
+        restore_client: value("restoreclient").unwrap_or_else(|| client.clone()),
+        client,
+        where_path: value("where"),
+        replace: value("replace"),
+        bootstrap_path: value("bootstrap"),
+        job: Some(job.name.clone()),
+        storage: value("storage"),
+    })
 }
 
 /// DoRunCmd (ua_run.cc:513): ObjectKeyValue("jobid", …, "Job queued. JobId=%s\n")
@@ -2151,10 +2335,81 @@ mod run_confirmation_tests {
         assert!(text.starts_with("Run Admin Job\nJobName:  a1\nFileSet:  fs\nClient:   fd\nStorage:  File\nWhen:     "),
             "{text}");
         assert!(text.ends_with("Priority: 10\nOK to run? (yes/mod/no): no\nJob not run.\n"), "{text}");
-        let job = ctx.config.as_ref().unwrap().read().unwrap().find_job("a1").cloned().unwrap();
-        let result = start_job(&crate::session::parse_cli_command("run job=a1 yes"), &ctx, job);
+        let ctx = context(&format!("{JOB}\nJob {{ Name = v1; Type = Verify; Client = fd; FileSet = fs; Storage = File; \
+            Pool = Full; Messages = m }}"));
+        let job = ctx.config.as_ref().unwrap().read().unwrap().find_job("v1").cloned().unwrap();
+        let result = start_job(&crate::session::parse_cli_command("run job=v1 yes"), &ctx, job);
         assert!(!result.success);
-        assert_eq!(result.error_message, "Running Admin jobs is not available yet.\n");
+        assert_eq!(result.error_message, "Running Verify jobs is not available yet.\n");
+    }
+
+    /// A catalog double for the Admin start: ClientId 3, the new JobId 77.
+    fn admin_catalog(log: Arc<std::sync::Mutex<Vec<String>>>) -> crate::catalog_worker::CatalogHandle {
+        use crate::catalog_worker::{CatalogRequest, CatalogResponse, SqlColumn, SqlTable};
+        crate::catalog_worker::CatalogHandle::mock(move |request| match request {
+            CatalogRequest::TextRows { sql } => {
+                let value = if sql.starts_with("SELECT ClientId") { "3" } else { "77" };
+                log.lock().unwrap().push(sql);
+                CatalogResponse::Rows(SqlTable { columns: vec![SqlColumn { name: "id".into(), numeric: true }],
+                    rows: vec![vec![Some(value.into())]] })
+            }
+            _ => CatalogResponse::Error("double".into()),
+        })
+    }
+
+    #[test]
+    fn restore_jobs_started_by_run_use_the_restore_start() {
+        let mut ctx = context(RESTORE);
+        let log = Arc::new(std::sync::Mutex::new(Vec::new()));
+        ctx.catalog = Some(admin_catalog(log.clone()));
+        let mut manager = crate::job_manager::JobManager::new(
+            Arc::new(crate::message_bus::MessageBus::new(8)), ctx.config.clone(), None);
+        manager.set_start_delay(std::time::Duration::from_secs(3600));
+        ctx.job_manager = Some(Arc::new(std::sync::Mutex::new(manager)));
+        let bsr = std::env::temp_dir().join(format!("c058-run-restore-{}.bsr", std::process::id()));
+        std::fs::write(&bsr, "Volume=\"v\"\nVolSessionId=1\nVolSessionTime=2\nFileIndex=1-3\n").unwrap();
+        let line = format!("run job=r1 bootstrap={} replace=never yes", bsr.display());
+        let result = cmd_run(&crate::session::parse_cli_command(&line), &ctx);
+        let _ = std::fs::remove_file(&bsr);
+        assert!(result.success, "{}", result.error_message);
+        assert_eq!(result.text_output, "Job queued. JobId=77\n");
+        let sql = log.lock().unwrap().clone();
+        assert!(sql[1].contains("','r1','R','F','C','") && sql[1].ends_with(",3,'') RETURNING JobId"), "{}", sql[1]);
+        let jobs = ctx.job_manager.as_ref().unwrap().lock().unwrap().active_jobs();
+        assert_eq!((jobs[0].id, jobs[0].client.as_str(), jobs[0].storage.as_str()), (77, "fd", "File"));
+    }
+
+    #[test]
+    fn admin_jobs_get_their_job_record_and_are_queued() {
+        let mut ctx = context(&format!("{JOB}\nJob {{ Name = a1; Type = Admin; Client = fd; FileSet = fs; \
+            Storage = File; Pool = Full; Messages = m; Enabled = no }}"));
+        let log = Arc::new(std::sync::Mutex::new(Vec::new()));
+        ctx.catalog = Some(admin_catalog(log.clone()));
+        let mut manager = crate::job_manager::JobManager::new(
+            Arc::new(crate::message_bus::MessageBus::new(8)), ctx.config.clone(), None);
+        // Keep the job in the ready queue (no fork in the test).
+        manager.set_start_delay(std::time::Duration::from_secs(3600));
+        ctx.job_manager = Some(Arc::new(std::sync::Mutex::new(manager)));
+        // A disabled job only stops the scheduler: `run … yes` starts it.
+        let result = cmd_run(&crate::session::parse_cli_command("run job=a1 yes"), &ctx);
+        assert!(result.success, "{}", result.error_message);
+        assert_eq!(result.text_output, "Job queued. JobId=77\n");
+        assert_eq!(result.json, Some(serde_json::json!({"run": {"jobid": "77"}})));
+        let sql = log.lock().unwrap().clone();
+        assert_eq!(sql[0], "SELECT ClientId FROM Client WHERE Name='fd'");
+        assert!(sql[1].starts_with("INSERT INTO Job (Job,Name,Type,Level,JobStatus,SchedTime,JobTDate,ClientId,Comment) \
+            VALUES ('a1."), "{}", sql[1]);
+        assert!(sql[1].contains("','a1','D',' ','C','") && sql[1].ends_with(",3,'') RETURNING JobId"), "{}", sql[1]);
+        let jobs = ctx.job_manager.as_ref().unwrap().lock().unwrap().active_jobs();
+        assert_eq!(jobs.len(), 1);
+        assert_eq!((jobs[0].id, jobs[0].name.as_str(), jobs[0].client.as_str(), jobs[0].storage.as_str()),
+            (77, "a1", "fd", "File"));
+        assert!(jobs[0].unique_name.starts_with("a1.") && jobs[0].unique_name.len() == "a1.2026-10-16_10.00.00_01".len());
+        // After the run dialog the level is Full (DisplayJobParameters).
+        let (ok, _) = crate::ua_select::tests::scripted(&["yes"], || cmd_run(
+            &crate::session::parse_cli_command("run job=a1"), &ctx).success);
+        assert!(ok);
+        assert!(log.lock().unwrap()[3].contains("','a1','D','F','C','"), "{:?}", log.lock().unwrap());
     }
 
     #[test]

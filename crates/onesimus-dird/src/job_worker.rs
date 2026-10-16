@@ -36,6 +36,26 @@ use bareos_bnet::tls_psk;
 pub enum WorkerJobType {
     Backup,
     Restore,
+    /// admin.cc: no daemon contact; the worker only reports the start and
+    /// ends the job (JS_Terminated). Compatibility log C-058.
+    Admin,
+    /// Copy/Migrate control job and Consolidate: run by the Director itself
+    /// (internal_jobs.rs), never forked. Compatibility log C-058.
+    Copy,
+    Migrate,
+    Consolidate,
+}
+
+impl WorkerJobType {
+    /// The Director-side job of this type, if it is one.
+    pub fn internal(self) -> Option<crate::internal_jobs::Kind> {
+        match self {
+            Self::Copy => Some(crate::internal_jobs::Kind::Copy),
+            Self::Migrate => Some(crate::internal_jobs::Kind::Migrate),
+            Self::Consolidate => Some(crate::internal_jobs::Kind::Consolidate),
+            _ => None,
+        }
+    }
 }
 
 /// Parameters passed from Director to Worker.
@@ -269,6 +289,17 @@ pub fn run_worker(
     let mut sd_auth_key = String::new();
     let mut vol_session_id: i32 = 0;
     let mut vol_session_time: i32 = 0;
+
+    // admin.cc do_admin(): "Start Admin JobId %d, Job=%s", then
+    // AdminCleanup(jcr, JS_Terminated) in the Director (job end).
+    if params.job_type == WorkerJobType::Admin {
+        // job.cc job_thread(): "Version: …" when the job runs.
+        worker_jmsg(job_id, M_INFO, crate::job_messages::version_text());
+        worker_jmsg(job_id, M_INFO, crate::job_messages::start_admin_text(job_id, &params.unique_job));
+        pipes.send(&PipeMessage::JobEnd { job_id, term_code: b'T' as i32, files: 0, bytes: 0, errors: 0,
+            vol_session_id: Some(0), vol_session_time: Some(0) });
+        return EXIT_SUCCESS;
+    }
 
     loop {
         let old_name = state.name().to_string();
@@ -569,7 +600,7 @@ fn to_sd_params(p: &JobParams) -> SdJobParams {
         job_id: p.job_id,
         unique_job: p.unique_job.clone(),
         job_name: p.job_name.clone(),
-        job_type: match p.job_type { WorkerJobType::Backup => SdJobType::Backup, WorkerJobType::Restore => SdJobType::Restore },
+        job_type: match p.job_type { WorkerJobType::Restore => SdJobType::Restore, _ => SdJobType::Backup },
         level: p.level.clone(),
         client_address: p.fd_address.clone(),
         media_type: p.sd_media_type.clone(),
