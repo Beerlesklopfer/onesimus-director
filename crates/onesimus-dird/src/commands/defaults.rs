@@ -426,9 +426,12 @@ pub fn cmd_defaults(ast: &CommandAst, ctx: &ExecContext) -> CommandResult {
     }
     defaults(ast, &cfg).unwrap_or_else(|message| {
         if message == ".defaults command requires a parameter.\n" {
+            // DotDefaultsCmd opens ObjectStart("defaults") before the
+            // argument check: API 2 error.data.result is {"defaults": {}} (C-073).
             CommandResult {
                 success: false,
                 text_output: message,
+                json: Some(json!({ "defaults": {} })),
                 ..Default::default()
             }
         } else {

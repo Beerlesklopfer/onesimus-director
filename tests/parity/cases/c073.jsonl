@@ -1,0 +1,5 @@
+# C-073: .defaults without argument opens the "defaults" object before failing.
+{"id": "c073-defaults-noarg-api2", "setup": [".api 2"], "steps": [".defaults", ".defaults job", ".defaults job=nosuch"]}
+{"id": "c073-defaults-noarg-json", "setup": [".api json"], "steps": [".defaults"]}
+{"id": "c073-defaults-noarg-text", "steps": [".defaults"]}
+{"id": "c073-defaults-limited-api2", "console": "parity-limited", "password": "parity-limited-pw", "setup": [".api 2"], "steps": [".defaults", ".defaults job=backup-bareos-fd", ".defaults client=parity-ndmp-fd"]}
