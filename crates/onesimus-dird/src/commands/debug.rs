@@ -117,7 +117,14 @@ fn setdebug_dialog_with(
             "store" | "storage" | "sd" => {
                 target = match arg.value.as_deref().filter(|name| exists(true, name)) {
                     Some(name) => Some(DebugTarget::Storage(name.to_string())),
-                    None => ua_select::get_storage_resource(&mut ua, ast, false, false).map(|s| DebugTarget::Storage(s.name)),
+                    None => match ua_select::get_storage_resource(&mut ua, ast, false, false) {
+                        // ua_cmds.cc:1451: a selected NDMP storage is refused.
+                        Some(s) if s.protocol.is_ndmp() => {
+                            ua.warning_msg("Storage has non-native protocol.\n");
+                            return ua.finish(true);
+                        }
+                        s => s.map(|s| DebugTarget::Storage(s.name)),
+                    },
                 };
             }
             _ => {}
@@ -133,7 +140,14 @@ fn setdebug_dialog_with(
         }
         target = match ua.do_prompt("", "Select daemon type to set debug level") {
             Some((0, _)) => Some(DebugTarget::Director),
-            Some((1, _)) => ua_select::get_storage_resource(&mut ua, ast, false, false).map(|s| DebugTarget::Storage(s.name)),
+            Some((1, _)) => match ua_select::get_storage_resource(&mut ua, ast, false, false) {
+                // ua_cmds.cc:1483: a selected NDMP storage is refused.
+                Some(s) if s.protocol.is_ndmp() => {
+                    ua.warning_msg("Storage has non-native protocol.\n");
+                    return ua.finish(true);
+                }
+                s => s.map(|s| DebugTarget::Storage(s.name)),
+            },
             Some((2, _)) => ua_select::select_client_resource(&mut ua).map(DebugTarget::Client),
             Some((3, _)) => Some(DebugTarget::All),
             _ => None,
@@ -325,6 +339,11 @@ fn setdebug_with(
             errors.push_str(&format!("Storage \"{}\" not found.\n", storage.name));
             continue;
         }
+        // DoStorageSetdebug() (ua_cmds.cc:1128): NDMP storages are skipped
+        // silently (compatibility log C-050).
+        if storage.protocol.is_ndmp() {
+            continue;
+        }
         output.push_str(&format!(
             "Connecting to Storage daemon {} at {}:{}\n",
             storage.name, storage.address, storage.port
@@ -339,6 +358,11 @@ fn setdebug_with(
     for client in clients {
         if !all && !crate::acl::access(ctx, crate::acl::Kind::Client, &client.name) {
             errors.push_str(&format!("Client \"{}\" not found.\n", client.name));
+            continue;
+        }
+        // DoClientSetdebug() (ua_cmds.cc:1183): NDMP clients are skipped
+        // silently (compatibility log C-050).
+        if client.protocol.is_ndmp() {
             continue;
         }
         output.push_str(&format!(

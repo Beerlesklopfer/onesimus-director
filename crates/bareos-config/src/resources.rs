@@ -68,6 +68,18 @@ pub struct ClientResource {
     pub catalog: String,
     pub max_concurrent_jobs: u32,
     pub enabled: bool,
+    /// `Protocol` (dird_conf.cc:202, default Native).
+    pub protocol: AuthProtocol,
+    /// `AuthType` (NDMP authentication, default None).
+    pub auth_type: AuthType,
+    /// `Username` (NDMP account).
+    pub username: Option<String>,
+    /// `NdmpLogLevel` (default 4).
+    pub ndmp_log_level: u32,
+    /// `NdmpBlockSize` (default 64512).
+    pub ndmp_block_size: u32,
+    /// `NdmpUseLmdb` (default true).
+    pub ndmp_use_lmdb: bool,
 }
 
 impl Default for ClientResource {
@@ -80,7 +92,68 @@ impl Default for ClientResource {
             catalog: String::new(),
             max_concurrent_jobs: 1,
             enabled: true,
+            protocol: AuthProtocol::Native,
+            auth_type: AuthType::None,
+            username: None,
+            ndmp_log_level: 4,
+            ndmp_block_size: 64512,
+            ndmp_use_lmdb: true,
         }
+    }
+}
+
+/// Storage/Client `Protocol` (C++ `AuthenticationProtocolType`,
+/// include/auth_protocol_types.h; keywords dird_conf.cc:571 `authprotocols`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum AuthProtocol {
+    #[default]
+    Native,
+    NdmpV2,
+    NdmpV3,
+    NdmpV4,
+}
+
+impl AuthProtocol {
+    /// Case-insensitive keyword lookup (`StoreAuthprotocoltype`).
+    pub fn from_keyword(value: &str) -> Option<Self> {
+        [("Native", Self::Native), ("NDMPV2", Self::NdmpV2), ("NDMPV3", Self::NdmpV3), ("NDMPV4", Self::NdmpV4)]
+            .into_iter()
+            .find(|(name, _)| name.eq_ignore_ascii_case(value))
+            .map(|(_, p)| p)
+    }
+
+    /// `AuthenticationProtocolTypeToString()` (dird_conf.cc:2079).
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Native => "Native",
+            Self::NdmpV2 => "NDMPV2",
+            Self::NdmpV3 => "NDMPV3",
+            Self::NdmpV4 => "NDMPV4",
+        }
+    }
+
+    /// `case APT_NDMPV2: case APT_NDMPV3: case APT_NDMPV4:`
+    pub fn is_ndmp(self) -> bool {
+        self != Self::Native
+    }
+}
+
+/// Storage/Client `AuthType` (keywords dird_conf.cc `authmethods`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum AuthType {
+    #[default]
+    None,
+    Clear,
+    Md5,
+}
+
+impl AuthType {
+    /// Case-insensitive keyword lookup (`StoreAuthtype`).
+    pub fn from_keyword(value: &str) -> Option<Self> {
+        [("None", Self::None), ("Clear", Self::Clear), ("MD5", Self::Md5)]
+            .into_iter()
+            .find(|(name, _)| name.eq_ignore_ascii_case(value))
+            .map(|(_, t)| t)
     }
 }
 
@@ -173,6 +246,16 @@ pub struct StorageResource {
     pub media_type: String,
     pub max_concurrent_jobs: u32,
     pub enabled: bool,
+    /// `Protocol` (dird_conf.cc:237, default Native).
+    pub protocol: AuthProtocol,
+    /// `AuthType` (NDMP authentication, default None).
+    pub auth_type: AuthType,
+    /// `Username` (NDMP account).
+    pub username: Option<String>,
+    /// `PairedStorage`: native storage daemon serving this NDMP storage.
+    pub paired_storage: Option<String>,
+    /// `NdmpChangerDevice` (NDMP_NATIVE robot).
+    pub ndmp_changer_device: Option<String>,
 }
 
 impl Default for StorageResource {
@@ -186,6 +269,11 @@ impl Default for StorageResource {
             media_type: String::new(),
             max_concurrent_jobs: 1,
             enabled: true,
+            protocol: AuthProtocol::Native,
+            auth_type: AuthType::None,
+            username: None,
+            paired_storage: None,
+            ndmp_changer_device: None,
         }
     }
 }

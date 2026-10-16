@@ -1,0 +1,28 @@
+# C-050 Storage/Client Protocol = NDMP (fixtures storage/ParityNdmp.conf, client/parity-ndmp-fd.conf).
+# No case opens an NDMP session: every path stops before the connection.
+{"id": "c050-show-storage", "steps": ["show storage=ParityNdmp"]}
+{"id": "c050-show-client", "steps": ["show client=parity-ndmp-fd"]}
+{"id": "c050-status-client", "steps": ["status client=parity-ndmp-fd"]}
+{"id": "c050-setdevice", "steps": ["setdevice storage=ParityNdmp device=FileStorage autoselect=yes"]}
+{"id": "c050-setdebug-storage", "steps": ["setdebug level=0 storage=ParityNdmp"]}
+{"id": "c050-setdebug-client", "steps": ["setdebug level=0 client=parity-ndmp-fd"]}
+{"id": "c050-setdebug-storage-select", "steps": ["setdebug level=0 storage", "2"]}
+{"id": "c050-setdebug-prompt-storage", "steps": ["setdebug level=0", "2", "2"]}
+{"id": "c050-setbandwidth-storage", "steps": ["setbandwidth storage=ParityNdmp limit=100"]}
+{"id": "c050-estimate", "steps": ["estimate job=backup-bareos-fd client=parity-ndmp-fd"]}
+{"id": "c050-mount", "steps": ["mount storage=ParityNdmp"]}
+{"id": "c050-mount-slot", "steps": ["mount storage=ParityNdmp slot=3 drive=1"]}
+{"id": "c050-unmount", "steps": ["unmount storage=ParityNdmp"]}
+{"id": "c050-release", "steps": ["release storage=ParityNdmp"]}
+{"id": "c050-release-alldrives", "steps": ["release storage=ParityNdmp alldrives"]}
+{"id": "c050-status-storage-paired", "steps": ["status storage=ParityNdmp"], "timeout_ms": 20000}
+{"id": "c050-dot-status-storage-paired", "steps": [".status storage=ParityNdmp header"], "timeout_ms": 20000}
+{"id": "c050-show-storage-native","steps": ["show storage=ParityNdmpNative"]}
+{"id": "c050-status-storage-native", "steps": ["status storage=ParityNdmpNative"]}
+{"id": "c050-dot-status-storage-native", "steps": [".status storage=ParityNdmpNative header"]}
+{"id": "c050-status-client-dot", "steps": [".status client=parity-ndmp-fd header"]}
+{"id": "c050-mount-native", "steps": ["mount storage=ParityNdmpNative slot=2"]}
+{"id": "c050-label-native", "steps": ["label storage=ParityNdmpNative volume=c050vol pool=Scratch"]}
+{"id": "c050-setdevice-native", "steps": ["setdevice storage=ParityNdmpNative device=FileStorage autoselect=no"]}
+{"id": "c050-setbandwidth-native", "steps": ["setbandwidth storage=ParityNdmpNative limit=0"]}
+{"id": "c050-estimate-listing", "steps": ["estimate listing job=backup-bareos-fd client=parity-ndmp-fd level=Full"]}

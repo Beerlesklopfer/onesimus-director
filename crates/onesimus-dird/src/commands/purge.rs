@@ -986,11 +986,7 @@ fn action_on_purge_work(ua: &mut Ua, ast: &CommandAst, db: &dyn Db, sd: &mut dyn
 
     // Choose storage
     let Some(store) = crate::ua_select::get_storage_resource(ua, ast, false, false) else { return };
-    let ndmp = ua.ctx.config.as_ref().and_then(|c| c.read().ok()).is_some_and(|config| config.raw.iter()
-        .find(|r| r.norm_type() == "storage" && r.name() == Some(store.name.as_str()))
-        .and_then(|r| r.directives.iter().rev().find(|d| d.norm_key() == "protocol").and_then(|d| d.first().map(str::to_string)))
-        .is_some_and(|p| p.to_ascii_lowercase().starts_with("ndmp")));
-    if ndmp {
+    if store.protocol.is_ndmp() {
         ua.warning_msg("Storage has non-native protocol.\n");
         return;
     }

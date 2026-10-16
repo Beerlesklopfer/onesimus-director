@@ -116,6 +116,22 @@ pub enum ConfigError {
     },
 }
 
+/// `StoreAuthprotocoltype` (dird_conf.cc:2613).
+fn parse_auth_protocol(value: &str) -> Result<AuthProtocol, ConfigError> {
+    AuthProtocol::from_keyword(value.trim()).ok_or_else(|| ConfigError::InvalidValue {
+        directive: "Protocol".to_string(),
+        message: format!("Expected a Auth Protocol Type keyword, got: {}", value.trim()),
+    })
+}
+
+/// `StoreAuthtype` (dird_conf.cc:2640).
+fn parse_auth_type(value: &str) -> Result<AuthType, ConfigError> {
+    AuthType::from_keyword(value.trim()).ok_or_else(|| ConfigError::InvalidValue {
+        directive: "AuthType".to_string(),
+        message: format!("Expected a Authentication Type keyword, got: {}", value.trim()),
+    })
+}
+
 /// Strip # comments from input.
 fn strip_comments(input: &str) -> String {
     input
@@ -485,6 +501,16 @@ fn convert_raw_resource(raw: &RawResource) -> Result<Resource, ConfigError> {
             if let Some(v) = get("enabled") {
                 client.enabled = parse_bool(v).map(|(_, b)| b).unwrap_or(true);
             }
+            if let Some(v) = get("protocol") { client.protocol = parse_auth_protocol(v)?; }
+            if let Some(v) = get("authtype") { client.auth_type = parse_auth_type(v)?; }
+            if let Some(v) = get("username") { client.username = Some(v.to_string()); }
+            if let Some(v) = get("ndmploglevel") { client.ndmp_log_level = v.parse().unwrap_or(4); }
+            if let Some(v) = get("ndmpblocksize") {
+                client.ndmp_block_size = parse_size(v).map(|(_, n)| n as u32).unwrap_or(64512);
+            }
+            if let Some(v) = get("ndmpuselmdb") {
+                client.ndmp_use_lmdb = parse_bool(v).map(|(_, b)| b).unwrap_or(true);
+            }
             Ok(Resource::Client(client))
         }
 
@@ -509,6 +535,11 @@ fn convert_raw_resource(raw: &RawResource) -> Result<Resource, ConfigError> {
             if let Some(v) = get("maximum concurrent jobs") {
                 stor.max_concurrent_jobs = v.parse().unwrap_or(1);
             }
+            if let Some(v) = get("protocol") { stor.protocol = parse_auth_protocol(v)?; }
+            if let Some(v) = get("authtype") { stor.auth_type = parse_auth_type(v)?; }
+            if let Some(v) = get("username") { stor.username = Some(v.to_string()); }
+            if let Some(v) = get("pairedstorage") { stor.paired_storage = Some(v.to_string()); }
+            if let Some(v) = get("ndmpchangerdevice") { stor.ndmp_changer_device = Some(v.to_string()); }
             Ok(Resource::Storage(stor))
         }
 
@@ -1096,6 +1127,26 @@ Director {
             }
         }
         assert_eq!(seen, 3);
+    }
+
+    /// C-050: Protocol/AuthType keywords (case-insensitive), NDMP items.
+    #[test]
+    fn storage_and_client_protocol() {
+        let input = "Client {\n Name = c\n Protocol = ndmpv3\n AuthType = md5\n Username = u\n Address = h\n \
+            Password = p\n Ndmp Block Size = 1024\n NdmpUseLmdb = no\n}\n\
+            Storage {\n Name = s\n Protocol = NDMPv4\n Address = h\n Password = p\n Device = x\n \
+            Media Type = File\n PairedStorage = File\n NdmpChangerDevice = robot\n}\n\
+            Storage {\n Name = n\n Address = h\n Password = p\n Device = x\n Media Type = File\n}\n";
+        let resources = parse_config(input).unwrap();
+        let Resource::Client(c) = &resources[0] else { panic!() };
+        assert_eq!((c.protocol, c.auth_type, c.username.as_deref()), (AuthProtocol::NdmpV3, AuthType::Md5, Some("u")));
+        assert_eq!((c.ndmp_log_level, c.ndmp_block_size, c.ndmp_use_lmdb), (4, 1024, false));
+        let Resource::Storage(s) = &resources[1] else { panic!() };
+        assert!(s.protocol.is_ndmp());
+        assert_eq!((s.paired_storage.as_deref(), s.ndmp_changer_device.as_deref()), (Some("File"), Some("robot")));
+        let Resource::Storage(n) = &resources[2] else { panic!() };
+        assert_eq!((n.protocol, n.auth_type), (AuthProtocol::Native, AuthType::None));
+        assert!(parse_config("Storage {\n Name = s\n Protocol = NDMP\n Address = h\n Password = p\n}\n").is_err());
     }
 
     #[test]

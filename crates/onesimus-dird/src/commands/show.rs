@@ -779,7 +779,7 @@ fn value(conf: &Conf, kind: Kind, res: &ConfResource, item: &Item, dirs: &[&Dire
             } else { None };
             Val::PoolType(v.unwrap_or_else(|| def.unwrap_or("").to_string()))
         }
-        Ty::Autopassword => Val::Password(if set { last(dirs).map(|p| password_display(kind, item, p)) } else { None }),
+        Ty::Autopassword => Val::Password(if set { last(dirs).map(|p| password_display(kind, res, item, p)) } else { None }),
         Ty::Run => Val::Runs(if set { dirs.iter().map(|d| run_string(&d.tokens)).collect() } else { Vec::new() }),
         Ty::Addresses => Val::Addresses(director_addresses(res)),
         _ => Val::Nothing,
@@ -787,9 +787,15 @@ fn value(conf: &Conf, kind: Kind, res: &ConfResource, item: &Item, dirs: &[&Dire
 }
 
 /// Password as stored by StoreAutopassword: MD5 for most resources, clear
-/// text for the catalog and the director's KeyEncryptionKey.
-fn password_display(kind: Kind, item: &Item, value: &str) -> String {
-    let clear = kind == Kind::Catalog || (kind == Kind::Director && item.code == Some("1"));
+/// text for the catalog, the director's KeyEncryptionKey and NDMP clients
+/// and storages (dird_conf.cc:2711-2758, compatibility log C-050).
+fn password_display(kind: Kind, res: &ConfResource, item: &Item, value: &str) -> String {
+    let ndmp = matches!(kind, Kind::Client | Kind::Storage)
+        && res.directives.iter().rev().find(|d| d.norm_key() == "protocol")
+            .and_then(|d| d.first())
+            .and_then(bareos_config::resources::AuthProtocol::from_keyword)
+            .is_some_and(|p| p.is_ndmp());
+    let clear = ndmp || kind == Kind::Catalog || (kind == Kind::Director && item.code == Some("1"));
     if clear {
         return value.to_string();
     }

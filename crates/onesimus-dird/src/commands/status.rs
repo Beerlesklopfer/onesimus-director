@@ -1312,6 +1312,10 @@ fn client_status(client: &bareos_config::resources::ClientResource, cmd: Option<
     if !client.enabled {
         return format!("Client \"{}\" is disabled; skipping status call\n", client.name);
     }
+    // case APT_NDMPV2..4: DoNdmpClientStatus() (compatibility log C-050)
+    if client.protocol.is_ndmp() {
+        return crate::ndmp::client_status(client);
+    }
     let mut output = String::new();
     if ctx.api_mode == ApiMode::Human {
         output.push_str(&format!("Connecting to Client {} at {}:{}\n", client.name, client.address, client.port));
@@ -1357,10 +1361,26 @@ fn device_names(config: &DirectorConfig, store: &bareos_config::resources::Stora
     devices.join(",")
 }
 
-/// C++ StorageStatus() (storage.cc:501) -> DoNativeStorageStatus()
-/// (sd_cmds.cc:692): connect, print the TLS line, send `status <devices>`
-/// or `.status <cmd>` and relay every message of the SD unchanged.
+/// C++ StorageStatus() (storage.cc:501): native storages, or for NDMP
+/// DoNdmpStorageStatus() (ndmp_dma_storage.cc:216): the paired native
+/// storage daemon if there is one, else the NDMP query (C-050).
 fn storage_status(store: &bareos_config::resources::StorageResource, cmd: Option<&str>, ctx: &ExecContext) -> String {
+    if !store.protocol.is_ndmp() {
+        return native_storage_status(store, cmd, ctx);
+    }
+    let paired = store.paired_storage.as_deref().and_then(|name| {
+        ctx.config.as_ref().and_then(|c| c.read().ok()).and_then(|cfg| cfg.find_storage(name).cloned())
+    });
+    match paired {
+        Some(paired) => native_storage_status(&paired, cmd, ctx),
+        None => crate::ndmp::native_storage_status(store),
+    }
+}
+
+/// C++ DoNativeStorageStatus() (sd_cmds.cc:692): connect, print the TLS
+/// line, send `status <devices>` or `.status <cmd>` and relay every
+/// message of the SD unchanged.
+fn native_storage_status(store: &bareos_config::resources::StorageResource, cmd: Option<&str>, ctx: &ExecContext) -> String {
     use bareos_bnet::{BnetMessage, BnetSignal};
     let Some((director, devices)) = ctx.config.as_ref().and_then(|c| c.read().ok())
         .map(|cfg| (cfg.director.name.clone(), device_names(&cfg, store))) else {

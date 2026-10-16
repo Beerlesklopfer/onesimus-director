@@ -243,6 +243,10 @@ fn estimate_job(ast: &CommandAst, ctx: &ExecContext, mut reply: Reply, job: Opti
         if cfg.find_fileset(&fileset_name).is_none() {
             return reply.error("No fileset specified or selected.\n");
         }
+        // ua_cmds.cc:1850: only native clients (before OpenDb), C-050.
+        if client_res.protocol.is_ndmp() {
+            return reply.error("Estimate is only supported on native clients.\n");
+        }
         let dirs = job_directives(&cfg, &job_res.name);
         let job_fileset_opts = fileset_items(&cfg, &job_res.fileset)
             .map(|f| f.includes.iter().flat_map(|i| i.options.iter().map(|o| o.opts.clone())).collect())

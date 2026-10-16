@@ -51,7 +51,13 @@ pub(crate) fn label_dialog(ua: &mut crate::ua_select::Ua, ast: &CommandAst, rela
     }
     let barcodes = !relabel && ast.arguments.iter()
         .any(|a| a.key.eq_ignore_ascii_case("barcode") || a.key.eq_ignore_ascii_case("barcodes"));
-    let Some(storage) = ua_select::get_storage_resource(ua, ast, true, barcodes).map(|s| s.name) else { return };
+    let Some(store) = ua_select::get_storage_resource(ua, ast, true, barcodes) else { return };
+    // ua_label.cc:432: an NDMP storage served by a native storage daemon
+    // (PairedStorage) is labeled through that daemon (C-050).
+    let storage = match store.paired_storage.as_deref() {
+        Some(paired) if store.protocol.is_ndmp() => paired.to_string(),
+        _ => store.name,
+    };
     let autochanger = ctx.config.as_ref().and_then(|c| c.read().ok())
         .is_some_and(|c| ua_select::is_autochanger(&c, &storage));
     if barcodes {
@@ -127,6 +133,21 @@ fn label_execute(ua: &mut crate::ua_select::Ua, request: LabelRequest) {
         }
         LabelRequest::Label { storage, volume, pool, .. } => (storage, volume, pool),
     };
+    // SendLabelRequest() (ua_label.cc:198) -> NdmpSendLabelRequest() for an
+    // NDMP storage without PairedStorage (C-050).
+    let ndmp = ctx.config.as_ref().and_then(|c| c.read().ok()).and_then(|c| {
+        let store = c.find_storage(&stor_name).filter(|s| s.protocol.is_ndmp())?.clone();
+        Some((crate::ua_select::is_autochanger(&c, &stor_name), store))
+    });
+    if let Some((autochanger, store)) = ndmp {
+        if let Some(message) = crate::ndmp::robot_session(&store, autochanger) {
+            ua.error_msg(message);
+        }
+        ua.error_msg(format!("Label command failed for Volume {v}.\n"));
+        // do_label(): print_reminder stays set without a mount.
+        ua.info_msg("Do not forget to mount the drive!!!\n");
+        return;
+    }
     let mut output = format!("Connecting to Storage daemon {stor_name} ...\n");
     let cmd = format!("label Volume=\"{v}\" PoolName=\"{pool_name}\" MediaType=\"File\" Slot=0 drive=0");
     match sd_command(ctx, &stor_name, &cmd) {
@@ -1715,11 +1736,13 @@ fn truncate_with(
     // ua->GetStoreResWithId(mr.StorageId)->Protocol: upstream dereferences
     // the resource unchecked (a missing one crashes the Director); here the
     // command ends instead.
-    let Some(_store) = truncate_record_name(db, "Storage", first.storage_id)
+    let Some(store) = truncate_record_name(db, "Storage", first.storage_id)
         .and_then(|name| truncate_store(ctx, &name)) else { return ua.finish(false) };
-    // TODO(C-050): Storage Protocol; every storage is native until the
-    // configuration carries it (otherwise WarningMsg "Storage uses a
-    // non-native protocol. Truncate is only supported for native protocols.\n").
+    // Protocol != APT_NATIVE (ua_cmds.cc:2115, C-050).
+    if store.protocol.is_ndmp() {
+        ua.warning_msg("Storage uses a non-native protocol. Truncate is only supported for native protocols.\n");
+        return ua.finish(false);
+    }
     // GetConfirmation (ua_input.cc:165, ua_cmds.cc:2120): `yes`, otherwise
     // the console is asked; API and batch sessions decline silently.
     if !ua.get_confirmation(ast, "Truncate listed volumes (yes/no)? ", false) {

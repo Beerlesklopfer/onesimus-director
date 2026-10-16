@@ -8,6 +8,7 @@ mod acl;
 mod audit;
 mod breg;
 mod catalog_worker;
+mod check_catalog;
 mod catreq;
 mod command_ast;
 mod console_msg;
@@ -30,6 +31,7 @@ mod kill;
 mod localtime;
 mod logging;
 mod mdns;
+mod ndmp;
 mod ovfs;
 mod privileges;
 mod message_bus;
@@ -399,6 +401,10 @@ fn main() {
     let catalog = catalog_handle.as_ref().map(|(h, _)| h.clone());
     if let Some(catalog) = &catalog {
         ovfs::register_for_reload(catalog.clone());
+    }
+    // CheckCatalog(): basic Client/Storage/MediaType records.
+    if let Some(cat) = &catalog {
+        check_catalog::ensure_basic_records(&config, cat);
     }
     // dird.cc: SetDbLogInsertCallback(DirDbLogInsert) — `catalog` message destination
     job_messages::set_catalog(catalog.clone());

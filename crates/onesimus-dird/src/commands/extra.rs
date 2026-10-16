@@ -384,6 +384,11 @@ fn setdevice_with(
     let Some(storage) = storage else {
         return CommandResult::error(format!("Storage \"{name}\" not found.\n"));
     };
+    // SetDeviceCommand::SendToSd() (ua_cmds.cc:1552): an NDMP storage is
+    // skipped silently and counts as success (compatibility log C-050).
+    if storage.protocol.is_ndmp() {
+        return CommandResult::ok(String::new());
+    }
     let director = config.director.name.clone();
     drop(config);
     let command = format!("setdevice device={device} autoselect={autoselect}");
