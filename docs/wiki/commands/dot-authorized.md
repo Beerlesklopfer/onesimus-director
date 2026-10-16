@@ -1,4 +1,4 @@
-# .authorized — Check Command Authorization
+# .authorized — Berechtigung der Konsole prüfen
 
 <!-- bareos-reference:start -->
 ## Aus den Bareos-Originalquellen
@@ -25,59 +25,201 @@ Referenz: [WIP/25.1.2-pre-43-g18be77e68, `18be77e6832e`](https://github.com/bare
 
 Die folgenden vorhandenen Beispiele und Verhaltensbeschreibungen sind lokale Dokumentation; sie sind kein Beleg für vollständige Bareos-Kompatibilität. Bei Widersprüchen gilt der obige Befund.
 <!-- bareos-reference:end -->
-Machine-interface command used by bconsole/oconsole to check whether the current console session has access to a specific resource. Returns `authorized` or `not authorized`.
+
+## Zweck
+
+`.authorized` prüft, ob die eigene Konsole auf eine Ressource oder einen Befehl zugreifen darf, und antwortet `authorized` oder `not authorized`. Grundlage sind die ACLs der Console-Ressource und ihrer Profile (`JobACL`, `ClientACL`, `StorageACL`, `ScheduleACL`, `PoolACL`, `CommandACL`, `FileSetACL`, `CatalogACL`). Oberflächen wie bareos-webui nutzen den Befehl, um Schaltflächen nur bei vorhandener Berechtigung anzuzeigen. Der Befehl liest nur.
 
 ## Syntax
 
+```text
+.authorized job=<job> | client=<client> | storage=<storage> | schedule=<schedule> | pool=<pool> | cmd=<befehl> | fileset=<fileset> | catalog=<katalog> …
 ```
-.authorized job=<name> | client=<name> | storage=<name> | pool=<name> | fileset=<name> | schedule=<name> | catalog=<name> | cmd=<command>
-```
 
-## Arguments
+## Argumente
 
-| Argument | Description |
-|----------|-------------|
-| `job=<name>` | Check access to a Job resource |
-| `client=<name>` | Check access to a Client resource |
-| `storage=<name>` | Check access to a Storage resource |
-| `pool=<name>` | Check access to a Pool resource |
-| `fileset=<name>` | Check access to a FileSet resource |
-| `schedule=<name>` | Check access to a Schedule resource |
-| `catalog=<name>` | Check access to a Catalog resource |
-| `cmd=<command>` | Check access to a console command |
+| Argument | Werte | Bedeutung |
+|---|---|---|
+| `job=<job>` | Jobname | Prüft gegen `JobACL`. |
+| `client=<client>` | Clientname | Prüft gegen `ClientACL`. |
+| `storage=<storage>` | Storage-Name | Prüft gegen `StorageACL`. |
+| `schedule=<schedule>` | Schedule-Name | Prüft gegen `ScheduleACL`. |
+| `pool=<pool>` | Poolname | Prüft gegen `PoolACL`. |
+| `cmd=<befehl>` | Befehlsname | Prüft gegen `CommandACL`. |
+| `fileset=<fileset>` | FileSet-Name | Prüft gegen `FileSetACL`. |
+| `catalog=<katalog>` | Katalogname | Prüft gegen `CatalogACL`. |
 
-Multiple arguments can be combined; all must be authorized for the result to be `authorized`.
+Die Schlüssel sind unabhängig von Groß-/Kleinschreibung. Ob der Name als Ressource existiert, wird nicht geprüft, nur die ACL. Mehrere Argumente sind erlaubt; das Ergebnis bestimmt das **letzte** bekannte Argument, frühere werden überschrieben. Ohne Argument, nur mit unbekannten Schlüsseln oder mit einem Schlüssel ohne Wert lautet die Antwort `not authorized`, auch für eine Konsole ohne Einschränkungen.
 
-## Examples
+## API-Modi
 
-### Check job authorization
-```
-* .authorized job=backup-bareos-fd
+Unter `.api 0` und `.api 1` kommt dieselbe Textzeile. Unter `.api 2` steht das Ergebnis in `result[".authorized"].authorized` (`true`); `not authorized` kommt als JSON-RPC-Fehler `"message": "failed"` mit `error.data.result[".authorized"].authorized` = `false`.
+
+## Beispiele
+
+Die Beispiele verwenden die eingeschränkte Konsole `parity-limited` der Paritätstests. Sie hat `JobACL = backup-bareos-fd`, `ClientACL = bareos-fd`, `PoolACL = Full, Scratch`, `StorageACL = File`, `CatalogACL = MyCatalog`, `FileSetACL = LinuxAll`, `ScheduleACL = WeeklyCycle` und eine `CommandACL` mit `list` und `.authorized`, aber ohne `run` und ohne `.api`.
+
+### Erlaubter Job
+
+Paritätsfall `dot-authorized-job`.
+
+```text
+parity-limited@bareos-dir[25.1.2+onesimus.0.2.0]> .authorized job=backup-bareos-fd
 authorized
+parity-limited@bareos-dir[25.1.2+onesimus.0.2.0]>
 ```
 
-### Check a non-existent resource
-```
-* .authorized client=nonexistent-fd
+### Gesperrter Job
+
+Paritätsfall `dot-authorized-job-denied`.
+
+```text
+parity-limited@bareos-dir[25.1.2+onesimus.0.2.0]> .authorized job=BackupCatalog
 not authorized
+parity-limited@bareos-dir[25.1.2+onesimus.0.2.0]>
 ```
 
-### Check multiple resources at once
-```
-* .authorized job=backup-bareos-fd client=bareos-fd storage=File
+### Client, Storage, Pool und Katalog
+
+Paritätsfälle `dcfg-auth-client-bareos-fd`, `dcfg-auth-storage-File`, `dcfg-auth-pool-Full`, `dcfg-auth-pool-Incremental`, `dcfg-auth-catalog-MyCatalog`.
+
+```text
+parity-limited@bareos-dir[25.1.2+onesimus.0.2.0]> .authorized client=bareos-fd
 authorized
+parity-limited@bareos-dir[25.1.2+onesimus.0.2.0]> .authorized storage=File
+authorized
+parity-limited@bareos-dir[25.1.2+onesimus.0.2.0]> .authorized pool=Full
+authorized
+parity-limited@bareos-dir[25.1.2+onesimus.0.2.0]> .authorized pool=Incremental
+not authorized
+parity-limited@bareos-dir[25.1.2+onesimus.0.2.0]> .authorized catalog=MyCatalog
+authorized
+parity-limited@bareos-dir[25.1.2+onesimus.0.2.0]>
 ```
 
-## Notes
+### Schedule und FileSet
 
-- Returns a single line: either `authorized` or `not authorized`.
-- Output is terminated by the EOD signal.
-- Currently checks whether the named resource exists in the configuration. Full ACL-based checks (per Console resource) are planned.
-- Used by the WebUI to enable/disable UI elements based on the connected console's permissions.
+Nur das FileSet `LinuxAll` ist freigegeben (Paritätsfälle `dcfg-auth-schedule-WeeklyCycle`, `dcfg-auth-fileset-SelfTest`).
 
-## Related Commands
+```text
+parity-limited@bareos-dir[25.1.2+onesimus.0.2.0]> .authorized schedule=WeeklyCycle
+authorized
+parity-limited@bareos-dir[25.1.2+onesimus.0.2.0]> .authorized fileset=SelfTest
+not authorized
+parity-limited@bareos-dir[25.1.2+onesimus.0.2.0]>
+```
 
-- [.consoles](dot-consoles.md) -- List console names
-- [.acl](dot-acl.md) -- Manage console ACLs
-- [.profiles](dot-profiles.md) -- List profile names
-- [whoami](whoami.md) -- Show current console identity
+### Befehl prüfen
+
+Paritätsfälle `dot-authorized-cmd`, `dcfg-auth-cmd-list`.
+
+```text
+parity-limited@bareos-dir[25.1.2+onesimus.0.2.0]> .authorized cmd=run
+not authorized
+parity-limited@bareos-dir[25.1.2+onesimus.0.2.0]> .authorized cmd=list
+authorized
+parity-limited@bareos-dir[25.1.2+onesimus.0.2.0]>
+```
+
+### Mehrere Argumente
+
+Das letzte Argument entscheidet: im zweiten Aufruf ist der Job erlaubt, der Pool aber nicht (Paritätsfälle `dcfg-auth-two`, `dcfg-auth-two-denied`).
+
+```text
+parity-limited@bareos-dir[25.1.2+onesimus.0.2.0]> .authorized job=backup-bareos-fd client=bareos-fd
+authorized
+parity-limited@bareos-dir[25.1.2+onesimus.0.2.0]> .authorized job=backup-bareos-fd pool=Incremental
+not authorized
+parity-limited@bareos-dir[25.1.2+onesimus.0.2.0]>
+```
+
+### Konsole ohne Einschränkungen
+
+Die Standardkonsole darf alles; ohne Argument antwortet aber auch sie `not authorized` (Paritätsfälle `dcfg-auth-job-admin`, `dcfg-auth-noarg`).
+
+```text
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]> .authorized job=BackupCatalog
+authorized
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]> .authorized
+not authorized
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]>
+```
+
+### Unbekannter Schlüssel
+
+Paritätsfall `dcfg-auth-unknown`.
+
+```text
+parity-limited@bareos-dir[25.1.2+onesimus.0.2.0]> .authorized foo=bar
+not authorized
+parity-limited@bareos-dir[25.1.2+onesimus.0.2.0]>
+```
+
+### Prüfung unter `.api 2`
+
+Erlaubt (Paritätsfall `dcfg-auth-job-ok-api2`) und verweigert (`c046-dotauthorized-api2`, ohne Argument), beide mit der Standardkonsole. `parity-limited` kann `.api` nicht verwenden, weil der Befehl in ihrer `CommandACL` fehlt.
+
+```text
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]> .api 2
+{
+  "jsonrpc": "2.0",
+  "id": null,
+  "result": {
+    "api": 2
+  }
+}
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]> .authorized job=BackupCatalog
+{
+  "jsonrpc": "2.0",
+  "id": null,
+  "result": {
+    ".authorized": {
+      "authorized": true
+    }
+  }
+}
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]>
+```
+
+```text
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]> .api 2
+{
+  "jsonrpc": "2.0",
+  "id": null,
+  "result": {
+    "api": 2
+  }
+}
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]> .authorized
+{
+  "jsonrpc": "2.0",
+  "id": null,
+  "error": {
+    "code": 1,
+    "message": "failed",
+    "data": {
+      "result": {
+        ".authorized": {
+          "authorized": false
+        }
+      },
+      "messages": {}
+    }
+  }
+}
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]>
+```
+
+## Fehlermeldungen
+
+| Meldung | Ursache und Abhilfe |
+|---|---|
+| `not authorized` | Die ACL der Konsole erlaubt den Namen nicht, oder es fehlt ein gültiges Argument. |
+| `.authorized: is an invalid command.` | `.authorized` steht nicht in der `CommandACL` der Konsole. |
+
+## Siehe auch
+
+- [whoami](whoami.md) — Namen der eigenen Konsole anzeigen
+- [.consoles](dot-consoles.md) — Namen aller Console-Ressourcen
+- [.profiles](dot-profiles.md) — Namen aller Profile
+- [show](show.md) — `show console=<name>` zeigt die ACLs einer Konsole
