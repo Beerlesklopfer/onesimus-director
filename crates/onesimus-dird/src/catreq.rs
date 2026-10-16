@@ -107,7 +107,7 @@ fn str_to_int64(s: &[u8]) -> i64 {
 }
 
 /// C++ EscapeString (standard_conforming_strings on).
-fn esc(s: &str) -> String {
+pub(crate) fn esc(s: &str) -> String {
     s.replace('\'', "''")
 }
 
@@ -116,7 +116,7 @@ fn now() -> i64 {
 }
 
 /// C++ bstrutime(): local time "%Y-%m-%d %H:%M:%S".
-fn bstrutime(t: i64) -> String {
+pub(crate) fn bstrutime(t: i64) -> String {
     crate::localtime::strftime("%Y-%m-%d %H:%M:%S", t as libc::time_t)
 }
 
@@ -185,13 +185,19 @@ const BATCH_CHUNK: usize = 1000;
 pub type Messages = Vec<(MsgType, String)>;
 
 /// BareosDb with `errmsg` and the Jmsg side effects of QueryDb/UpdateDb/...
-struct Cat<'a> {
+pub(crate) struct Cat<'a> {
     db: &'a dyn Db,
-    errmsg: &'a mut String,
+    pub(crate) errmsg: &'a mut String,
     msgs: &'a mut Messages,
 }
 
-impl Cat<'_> {
+impl<'a> Cat<'a> {
+    /// A catalog session of a console command (ua->db): `errmsg` is what
+    /// strerror() returns; the Jmsg side effects end up in `msgs`.
+    pub(crate) fn new(db: &'a dyn Db, errmsg: &'a mut String, msgs: &'a mut Messages) -> Self {
+        Cat { db, errmsg, msgs }
+    }
+
     fn jmsg(&mut self, t: MsgType, text: String) {
         self.msgs.push((t, text));
     }
@@ -201,7 +207,7 @@ impl Cat<'_> {
     }
 
     /// QueryDb(): rows or None (errmsg set, M_FATAL).
-    fn query_db(&mut self, sql: &str, loc: &str) -> Option<SqlTable> {
+    pub(crate) fn query_db(&mut self, sql: &str, loc: &str) -> Option<SqlTable> {
         match self.db.rows(sql) {
             Ok(t) => Some(t),
             Err(e) => {
@@ -214,7 +220,7 @@ impl Cat<'_> {
     }
 
     /// UpdateDb(): affected rows or -1 (errmsg set, M_ERROR).
-    fn update_db(&mut self, sql: &str, loc: &str) -> i64 {
+    pub(crate) fn update_db(&mut self, sql: &str, loc: &str) -> i64 {
         self.change_db(sql, loc, "update")
     }
 
@@ -254,7 +260,7 @@ impl Cat<'_> {
     }
 
     /// GetSqlRecordMax(): first value of the first row, -1 on failure.
-    fn get_sql_record_max(&mut self, sql: &str) -> i64 {
+    pub(crate) fn get_sql_record_max(&mut self, sql: &str) -> i64 {
         match self.query_db(sql, "sql.cc:323") {
             Some(t) => match t.rows.first() {
                 Some(row) => str_to_int64(row.first().cloned().flatten().unwrap_or_default().as_bytes()),
@@ -273,7 +279,7 @@ impl Cat<'_> {
 
     /// SqlInsertAutokeyRecord(): INSERT plus currval of `<table>_<table>id_seq`
     /// on the same connection; 0 on failure.
-    fn insert_autokey(&mut self, sql: &str, table: &str) -> (u64, Option<String>) {
+    pub(crate) fn insert_autokey(&mut self, sql: &str, table: &str) -> (u64, Option<String>) {
         match self.db.rows(&format!("{sql}; SELECT currval('{table}_{table}id_seq')")) {
             Ok(t) => (t.rows.first().and_then(|r| r.first().cloned().flatten())
                 .map(|v| str_to_uint64(v.as_bytes())).unwrap_or(0), None),
@@ -435,7 +441,7 @@ pub(crate) struct PoolRecord {
 }
 
 /// sql_get.cc GetMediaRecord() (by MediaId when set, else by VolumeName).
-fn get_media_record(cat: &mut Cat, mr: &mut MediaRecord) -> bool {
+pub(crate) fn get_media_record(cat: &mut Cat, mr: &mut MediaRecord) -> bool {
     if mr.media_id == 0 && mr.volume_name.is_empty() {
         mr.media_id = cat.get_sql_record_max("SELECT count(*) from Media");
         return true;
@@ -477,7 +483,7 @@ fn get_media_record(cat: &mut Cat, mr: &mut MediaRecord) -> bool {
 
 /// sql_get.cc GetPoolRecord() (by PoolId when set, else by Name), with the
 /// NumVols correction.
-fn get_pool_record(cat: &mut Cat, pr: &mut PoolRecord) -> bool {
+pub(crate) fn get_pool_record(cat: &mut Cat, pr: &mut PoolRecord) -> bool {
     let columns = "SELECT PoolId,Name,NumVols,MaxVols,UseOnce,UseCatalog,AcceptAnyVolume,\
 AutoPrune,Recycle,VolRetention,VolUseDuration,MaxVolJobs,MaxVolFiles,\
 MaxVolBytes,PoolType,LabelType,LabelFormat,RecyclePoolId,ScratchPoolId,\
@@ -539,7 +545,7 @@ ActionOnPurge,MinBlocksize,MaxBlocksize FROM Pool WHERE ";
 }
 
 /// sql_update.cc UpdatePoolRecord().
-fn update_pool_record(cat: &mut Cat, pr: &mut PoolRecord) -> bool {
+pub(crate) fn update_pool_record(cat: &mut Cat, pr: &mut PoolRecord) -> bool {
     pr.num_vols = cat.get_sql_record_max(&format!("SELECT count(*) from Media WHERE PoolId={}", pr.pool_id)) as u32;
     let sql = format!(
         "UPDATE Pool SET NumVols={},MaxVols={},UseOnce={},UseCatalog={},\
@@ -557,7 +563,7 @@ WHERE PoolId={}",
 }
 
 /// sql_update.cc UpdateMediaRecord() (with MakeInchangerUnique()).
-fn update_media_record(cat: &mut Cat, mr: &MediaRecord) -> bool {
+pub(crate) fn update_media_record(cat: &mut Cat, mr: &MediaRecord) -> bool {
     let name = esc(&mr.volume_name);
     if mr.set_first_written {
         cat.update_db(&format!("UPDATE Media SET FirstWritten='{}' WHERE VolumeName='{name}'",
@@ -595,7 +601,7 @@ WHERE VolumeName='{name}'",
 }
 
 /// sql_update.cc MakeInchangerUnique().
-fn make_inchanger_unique(cat: &mut Cat, mr: &MediaRecord) -> bool {
+pub(crate) fn make_inchanger_unique(cat: &mut Cat, mr: &MediaRecord) -> bool {
     if mr.in_changer != 0 && mr.slot != 0 && mr.storage_id != 0 {
         let sql = if mr.media_id != 0 {
             format!("UPDATE Media SET InChanger=0, Slot=0 WHERE Slot={} AND StorageId={} AND MediaId!={}",
@@ -710,7 +716,7 @@ AND VolStatus='{}' {changer} {order} LIMIT {item}",
 }
 
 /// ua_db.cc SetPoolDbrDefaultsInMediaDbr().
-fn set_pool_defaults(mr: &mut MediaRecord, pr: &PoolRecord) {
+pub(crate) fn set_pool_defaults(mr: &mut MediaRecord, pr: &PoolRecord) {
     mr.pool_id = pr.pool_id;
     mr.vol_status = "Unlabeled".into();
     mr.recycle = pr.recycle;

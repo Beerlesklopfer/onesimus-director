@@ -890,6 +890,28 @@ pub(crate) fn get_storage_record(ctx: &ExecContext, name: &str) -> Option<i64> {
     }
 }
 
+/// C++ GetStorageRecord() by StorageId: the name, if there is exactly one.
+pub(crate) fn get_storage_name(ctx: &ExecContext, storage_id: i64) -> Option<String> {
+    let names = catalog_column(ctx, &format!("SELECT Name FROM Storage WHERE Storage.StorageId={storage_id}"))?;
+    match names.as_slice() {
+        [name] => Some(name.clone()),
+        _ => None,
+    }
+}
+
+/// C++ GetStorageDbr(ua, sr, "storage") (ua_select.cc:674) with the name
+/// filled in: the catalog storage (checked against the Pool ACL, as
+/// upstream does), otherwise "Could not find Storage" and SelectStorageDbr.
+pub fn get_storage_dbr(ua: &mut Ua, ast: &CommandAst, name: &str) -> Option<String> {
+    if !name.is_empty() {
+        if get_storage_record(ua.ctx, name).is_some() && acl::access(ua.ctx, Kind::Pool, name) {
+            return Some(name.to_string());
+        }
+        ua.error_msg(format!("Could not find Storage \"{name}\": ERR="));
+    }
+    select_storage_dbr(ua, ast, "storage")
+}
+
 /// C++ SelectStorageDbr(ua, sr, argk) (ua_select.cc:823): `<argk>=<storage>`
 /// (Storage ACL, catalog record) or the catalog storages in GetStorageIds
 /// order under "Defined Storages:" ("*None*" first for recyclestorage).

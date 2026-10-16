@@ -1,0 +1,52 @@
+{"id": "c066-create-exists", "steps": ["create pool=Full"]}
+{"id": "c066-create-dialog-exists", "steps": ["create", "2"]}
+{"id": "c066-create-api2", "setup": [".api 2"], "steps": ["create pool=Full"]}
+{"id": "c066-update-pool-full", "steps": ["update pool=Full"]}
+{"id": "c066-update-pool-scratch", "steps": ["update pool=Scratch"]}
+{"id": "c066-update-pool-dialog", "steps": ["update", "2", "3"]}
+{"id": "c066-update-vol-pool", "steps": ["update volume=Full-0002 pool=Incremental"]}
+{"id": "c066-update-vol-pool-back", "steps": ["update volume=Full-0002 pool=Full"]}
+{"id": "c066-update-vol-pool-unknown", "steps": ["update volume=Full-0002 pool=Nope", "."]}
+{"id": "c066-update-vol-recyclepool", "steps": ["update volume=Full-0002 recyclepool=Scratch"]}
+{"id": "c066-update-vol-recyclepool-clear", "steps": ["update volume=Full-0002 recyclepool="]}
+{"id": "c066-update-vol-recyclepool-unknown", "steps": ["update volume=Full-0002 recyclepool=Nope", "1"]}
+{"id": "c066-update-vol-actiononpurge", "steps": ["update volume=Full-0002 actiononpurge=Truncate"]}
+{"id": "c066-update-vol-actiononpurge-bad", "steps": ["update volume=Full-0002 actiononpurge=bogus"]}
+{"id": "c066-update-vol-enabled", "steps": ["update volume=Full-0002 enabled=yes"]}
+{"id": "c066-update-vol-storage", "steps": ["update volume=Full-0002 storage=File"]}
+{"id": "c066-update-vol-storage-unknown", "steps": ["update volume=Full-0002 storage=Nope", "1"]}
+{"id": "c066-update-vol-frompool", "steps": ["update volume=Full-0002 frompool=x"]}
+{"id": "c066-update-allfrompool", "steps": ["update volume allfrompool=Full"]}
+{"id": "c066-update-allfrompool-unknown", "steps": ["update volume allfrompool=Nope", "2"]}
+{"id": "c066-update-fromallpools", "steps": ["update volume fromallpools"]}
+{"id": "c066-update-dialog-pool", "steps": ["update volume=Full-0002", "11", "Incremental"]}
+{"id": "c066-update-dialog-pool-back", "steps": ["update volume=Full-0002", "11", "Full"]}
+{"id": "c066-update-dialog-frompool", "steps": ["update volume=Full-0002", "12"]}
+{"id": "c066-update-dialog-allfrompool", "steps": ["update volume=Full-0002", "13", "2"]}
+{"id": "c066-update-dialog-allpools", "steps": ["update volume=Full-0002", "14"]}
+{"id": "c066-update-dialog-recyclepool", "steps": ["update volume=Full-0002", "16", "2"]}
+{"id": "c066-update-dialog-recyclepool-none", "steps": ["update volume=Full-0002", "16", "1"]}
+{"id": "c066-update-dialog-actiononpurge", "steps": ["update volume=Full-0002", "17", "None", "19"]}
+{"id": "c066-update-dialog-storage", "steps": ["update volume=Full-0002", "18", "1"]}
+{"id": "c066-update-dialog-enabled", "steps": ["update volume=Full-0002", "15", "1", "19"]}
+{"id": "c066-update-stats", "steps": ["update stats days=30"]}
+{"id": "c066-update-stats-again", "steps": ["update stats"]}
+{"id": "c066-update-stats-dialog", "steps": ["update", "4"]}
+{"id": "c066-update-jobid-unknown", "steps": ["update jobid=999999 jobname=x"]}
+{"id": "c066-update-jobid-nothing", "steps": ["update jobid=3"]}
+{"id": "c066-update-jobid-zero", "steps": ["update jobid=0 jobname=x"]}
+{"id": "c066-update-jobid-name", "steps": ["update jobid=3 jobname=renamed-job jobtype=B"]}
+{"id": "c066-update-jobid-starttime", "steps": ["update jobid=3 starttime=\"2026-10-14 22:00:03\""]}
+{"id": "c066-update-jobid-starttime-bad", "steps": ["update jobid=3 starttime=bogus"]}
+{"id": "c066-update-jobid-client", "steps": ["update jobid=3 client=bareos-fd filesetid=1"]}
+{"id": "c066-update-jobid-client-unknown", "steps": ["update jobid=3 client=nope", "."]}
+{"id": "c066-update-jobid-api2", "setup": [".api 2"], "steps": ["update jobid=999999 jobname=x"]}
+{"id": "c066-move-storage-file", "steps": ["move storage=File"]}
+{"id": "c066-move-storage-file-slots", "steps": ["move storage=File srcslots=1 dstslots=2"]}
+{"id": "c066-move-api2-file", "setup": [".api 2"], "steps": ["move storage=File"]}
+{"id": "c066-export-storage-file", "steps": ["export storage=File"]}
+{"id": "c066-export-storage-file-volume", "steps": ["export storage=File volume=Full-0001"]}
+{"id": "c066-import-storage-file", "steps": ["import storage=File"]}
+{"id": "c066-import-api1-file", "setup": [".api 1"], "steps": ["import storage=File"]}
+{"id": "c066-label-api2-cancel", "setup": [".api 2"], "steps": ["label", "."]}
+{"id": "c066-label-dot-api1", "setup": [".api 1"], "steps": ["label", "."]}

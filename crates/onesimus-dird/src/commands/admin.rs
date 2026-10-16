@@ -228,8 +228,30 @@ pub fn cmd_update(ast: &CommandAst, ctx: &ExecContext) -> CommandResult {
 enum UpdateAction {
     /// `UPDATE Media SET <column>=<value> WHERE MediaId=<id>`
     Media { media_id: i64, column: &'static str, value: String, message: String },
-    /// Pool record from the Pool resource (UpdatePool).
-    Pool(String),
+    /// Pool record of the catalog pool `pool` from the Pool resource
+    /// `resource` (UpdatePool).
+    Pool { resource: String, pool: String },
+    /// UpdateVolPool: the volume moves to `pool`.
+    VolPool { media_id: i64, old_pool_id: i64, pool: String },
+    /// UpdateVolRecyclepool: None clears it ("*None*"), Some("*None*")
+    /// is the *None* entry of the pool list (PoolId 0, empty name).
+    VolRecyclePool { media_id: i64, pool: Option<String> },
+    /// UpdateVolActiononpurge (UpdateMediaRecord).
+    VolActionOnPurge { media_id: i64, truncate: bool },
+    /// UpdateVolStorage; `announce` adds the dialog's "New Storage is:".
+    VolStorage { media_id: i64, storage: String, announce: bool },
+    /// UpdateVolenabled (UpdateMediaRecord).
+    VolEnabled { media_id: i64, enabled: i64 },
+    /// UpdateVolFromPool.
+    VolFromPool { media_id: i64 },
+    /// UpdateAllVolsFromPool.
+    AllVolsFromPool(String),
+    /// UpdateAllVols (`fromallpools`).
+    AllVols,
+    /// UpdateStats: jobs older than `since` seconds into JobHisto.
+    Stats { since: i64 },
+    /// UpdateJob with the command arguments (key, value).
+    Job { args: Vec<(String, Option<String>)> },
     /// UpdateSlots (ua_update.cc:1075) on the selected storage with the
     /// command arguments (key, value): SD dialog and catalog work.
     Slots { storage: String, args: Vec<(String, Option<String>)> },
@@ -257,7 +279,8 @@ fn update_dialog(ua: &mut crate::ua_select::Ua, ast: &CommandAst,
             if crate::ua_select::find_arg_with_value(ast, "jobid").is_none() {
                 ua.error_msg("Expect JobId keyword, not found.\n");
             } else {
-                act(ua, UpdateAction::Unsupported("update jobid"));
+                let args = ast.arguments.iter().map(|a| (a.key.clone(), a.value.clone())).collect();
+                act(ua, UpdateAction::Job { args });
             }
             return;
         }
@@ -283,26 +306,22 @@ fn update_dialog(ua: &mut crate::ua_select::Ua, ast: &CommandAst,
                 act(ua, UpdateAction::Slots { storage: store.name, args });
             }
         }
-        _ => act(ua, UpdateAction::Unsupported("update stats")),
+        _ => {
+            // UpdateStats: days=<n> (atoi) or every job.
+            let since = crate::ua_select::find_arg_with_value(ast, "days")
+                .map_or(0, |days| i64::from(crate::commands::job::str_to_int64(days) as i32) * 24 * 60 * 60);
+            act(ua, UpdateAction::Stats { since });
+        }
     }
 }
 
 /// UpdatePool (ua_update.cc:940): pool resource, its catalog record, update.
 fn update_pool(ua: &mut crate::ua_select::Ua, ast: &CommandAst, act: UpdateAct) {
     use crate::ua_select;
-    let Some(pool) = ua_select::get_pool_resource(ua, ast) else { return };
+    let Some(resource) = ua_select::get_pool_resource(ua, ast) else { return };
     // GetPoolDbr with the name filled in, otherwise the catalog list.
-    let pool = match ua_select::get_pool_record(ua.ctx, &pool) {
-        Ok(_) => pool,
-        Err(error) => {
-            ua.error_msg(format!("Could not find Pool \"{pool}\": ERR={error}"));
-            match ua_select::select_pool_dbr(ua, ast, "pool") {
-                Some(pool) => pool,
-                None => return,
-            }
-        }
-    };
-    act(ua, UpdateAction::Pool(pool));
+    let Some(pool) = ua_select::get_pool_dbr(ua, ast, &resource, "pool") else { return };
+    act(ua, UpdateAction::Pool { resource, pool });
 }
 
 /// C++ GetEnabled(): yes/true, no/false, archived or 0..2.
@@ -397,7 +416,7 @@ fn update_vol_encryption(ua: &mut crate::ua_select::Ua, value: &str, media: &cra
 /// The Update<Field> helpers of ua_update.cc for one volume.
 fn update_field(ua: &mut crate::ua_select::Ua, ast: &CommandAst, act: UpdateAct, field: usize, value: &str,
     media: &crate::ua_select::MediaRecord) {
-    use crate::ua_select::{edit_utime, get_pool_dbr, is_yesno};
+    use crate::ua_select::{edit_utime, get_pool_dbr, get_storage_dbr, is_yesno};
     let set = |column: &'static str, value: String, message: String|
         UpdateAction::Media { media_id: media.media_id, column, value, message };
     let action = match field {
@@ -448,27 +467,31 @@ fn update_field(ua: &mut crate::ua_select::Ua, ast: &CommandAst, act: UpdateAct,
             set("Slot", slot.to_string(), format!("New Slot is: {slot}\n"))
         }
         12 => match get_enabled(ua, value) {
-            Some(enabled) => set("Enabled", enabled.to_string(), format!("New Enabled is: {enabled}\n")),
+            Some(enabled) => UpdateAction::VolEnabled { media_id: media.media_id, enabled },
             None => return,
         },
         // UpdateVolPool / UpdateAllVolsFromPool: GetPoolDbr(<value>).
         9 => match get_pool_dbr(ua, ast, value, "pool") {
-            Some(_) => UpdateAction::Unsupported("update volume pool"),
+            Some(pool) => UpdateAction::VolPool { media_id: media.media_id, old_pool_id: media.pool_id, pool },
             None => return,
         },
-        10 => UpdateAction::Unsupported("update volume frompool"),
+        10 => UpdateAction::VolFromPool { media_id: media.media_id },
         11 => match get_pool_dbr(ua, ast, value, "pool") {
-            Some(_) => UpdateAction::Unsupported("update volume allfrompool"),
+            Some(pool) => UpdateAction::AllVolsFromPool(pool),
             None => return,
         },
         // UpdateVolRecyclepool: an empty value clears the RecyclePool.
-        13 if value.is_empty() => UpdateAction::Unsupported("update volume recyclepool"),
+        13 if value.is_empty() => UpdateAction::VolRecyclePool { media_id: media.media_id, pool: None },
         13 => match get_pool_dbr(ua, ast, value, "recyclepool") {
-            Some(_) => UpdateAction::Unsupported("update volume recyclepool"),
+            Some(pool) => UpdateAction::VolRecyclePool { media_id: media.media_id, pool: Some(pool) },
             None => return,
         },
-        14 => UpdateAction::Unsupported("update volume actiononpurge"),
-        15 => UpdateAction::Unsupported("update volume storage"),
+        14 => UpdateAction::VolActionOnPurge { media_id: media.media_id, truncate: value.eq_ignore_ascii_case("truncate") },
+        // UpdateVolStorage: GetStorageDbr(<value>); 17 is the dialog.
+        15 | 17 => match get_storage_dbr(ua, ast, value) {
+            Some(storage) => UpdateAction::VolStorage { media_id: media.media_id, storage, announce: field == 17 },
+            None => return,
+        },
         _ => match update_vol_encryption(ua, value, media) {
             Some(action) => action,
             None => return,
@@ -504,7 +527,7 @@ fn update_volume(ua: &mut crate::ua_select::Ua, ast: &CommandAst, act: UpdateAct
         done = true;
     }
     if find_arg(ast, "fromallpools").is_some() {
-        act(ua, UpdateAction::Unsupported("update volume fromallpools"));
+        act(ua, UpdateAction::AllVols);
         return true;
     }
     while !done {
@@ -612,7 +635,7 @@ fn update_volume(ua: &mut crate::ua_select::Ua, ast: &CommandAst, act: UpdateAct
                 return true;
             }
             11 => {
-                act(ua, UpdateAction::Unsupported("update volume frompool"));
+                act(ua, UpdateAction::VolFromPool { media_id: media.media_id });
                 return true;
             }
             12 => {
@@ -622,7 +645,7 @@ fn update_volume(ua: &mut crate::ua_select::Ua, ast: &CommandAst, act: UpdateAct
                 return true;
             }
             13 => {
-                act(ua, UpdateAction::Unsupported("update volume fromallpools"));
+                act(ua, UpdateAction::AllVols);
                 return true;
             }
             14 => {
@@ -639,18 +662,25 @@ fn update_volume(ua: &mut crate::ua_select::Ua, ast: &CommandAst, act: UpdateAct
                     Some(pool) => ua.info_msg(format!("Current RecyclePool is: {pool}\n")),
                     None => ua.info_msg("No current RecyclePool\n"),
                 }
-                if ua_select::select_pool_dbr(ua, ast, "recyclepool").is_none() { return false; }
-                act(ua, UpdateAction::Unsupported("update volume recyclepool"));
+                let Some(pool) = ua_select::select_pool_dbr(ua, ast, "recyclepool") else { return false };
+                // The *None* entry leaves pr.Name empty: the RecyclePool is cleared.
+                let pool = if pool == "*None*" { String::new() } else { pool };
+                update_field(ua, ast, act, 13, &pool, &media);
                 return true;
             }
             16 => {
                 let current = if media.action_on_purge & 1 != 0 { "Truncate" } else { "None" };
                 ua.info_msg(format!("Current ActionOnPurge is: {current}\n"));
-                if ua.get_cmd("Enter new ActionOnPurge (one of: Truncate, None): ").is_none() { return false; }
-                act(ua, UpdateAction::Unsupported("update volume actiononpurge"));
+                let Some(value) = ua.get_cmd("Enter new ActionOnPurge (one of: Truncate, None): ") else { return false };
+                update_field(ua, ast, act, 14, &value, &media);
             }
             17 => {
-                act(ua, UpdateAction::Unsupported("update volume storage"));
+                match ua_select::get_storage_name(ua.ctx, media.storage_id) {
+                    Some(storage) => ua.info_msg(format!("Current Storage is: {storage}\n")),
+                    None => ua.info_msg("Warning, could not find current Storage\n"),
+                }
+                let Some(storage) = ua_select::select_storage_dbr(ua, ast, "storage") else { return false };
+                update_field(ua, ast, act, 17, &storage, &media);
                 return true;
             }
             _ => {
@@ -677,24 +707,32 @@ fn update_execute(ua: &mut crate::ua_select::Ua, action: UpdateAction) {
                 Err(e) => ua.error_msg(format!("Query failed: {sql}: ERR={e}\n")),
             }
         }
-        UpdateAction::Pool(pool_name) => {
-            let pool = ua.ctx.config.as_ref().and_then(|c| c.read().ok()).and_then(|c| c.find_pool(&pool_name).cloned());
-            if let Some(pool) = pool {
-                let sql = format!(
-                    "UPDATE pool SET pooltype='{}', maxvols={}, autoprune={}, volretention={} WHERE name='{}'",
-                    pool.pool_type, pool.maximum_volumes, i32::from(pool.auto_prune),
-                    pool.volume_retention.as_secs(), pool_name.replace('\'', "''"));
-                if let Err(e) = cat.raw_query(&sql) {
-                    ua.error_msg(format!("UpdatePoolRecord returned 0. ERR={e}\n"));
-                }
-            }
-            if let Ok(table) = cat.query_rows(&format!(
-                "SELECT PoolId,Name,NumVols,MaxVols,UseOnce,UseCatalog,AcceptAnyVolume,VolRetention,VolUseDuration,\
-                 MaxVolJobs,MaxVolBytes,AutoPrune,Recycle,PoolType,LabelFormat,Enabled,ScratchPoolId,RecyclePoolId,\
-                 LabelType FROM Pool WHERE Name='{}'", pool_name.replace('\'', "''"))) {
-                ua.send_msg(crate::sql_list::render(&table, crate::sql_list::ListType::Horz));
-            }
-            ua.info_msg("Pool DB record updated from resource.\n");
+        UpdateAction::Pool { resource, pool } => super::update_db::update_pool(ua, &cat, &resource, &pool),
+        UpdateAction::VolPool { media_id, old_pool_id, pool } =>
+            super::update_db::update_vol_pool(ua, &cat, media_id, old_pool_id, &pool),
+        UpdateAction::VolRecyclePool { media_id, pool } =>
+            super::update_db::update_vol_recyclepool(ua, &cat, media_id, pool.as_deref()),
+        UpdateAction::VolActionOnPurge { media_id, truncate } => super::update_db::update_vol_record(ua, &cat, media_id,
+            |mr| mr.action_on_purge = u32::from(truncate), "ActionOnPurge",
+            |mr| format!("New ActionOnPurge is: {}\n", if mr.action_on_purge & 1 != 0 { "Truncate" } else { "None" })),
+        UpdateAction::VolEnabled { media_id, enabled } => super::update_db::update_vol_record(ua, &cat, media_id,
+            |mr| mr.enabled = enabled as i32, "Enabled", |mr| format!("New Enabled is: {}\n", mr.enabled)),
+        UpdateAction::VolStorage { media_id, storage, announce } =>
+            super::update_db::update_vol_storage(ua, &cat, media_id, &storage, announce),
+        UpdateAction::VolFromPool { media_id } => super::update_db::update_vol_from_pool(ua, &cat, media_id),
+        UpdateAction::AllVolsFromPool(pool) => super::update_db::update_all_vols_from_pool(ua, &cat, &pool),
+        UpdateAction::AllVols => super::update_db::update_all_vols(ua, &cat),
+        UpdateAction::Stats { since } => super::update_db::update_stats(ua, &cat, since),
+        UpdateAction::Job { args } => {
+            let ast = CommandAst {
+                command_name: "update".into(),
+                arguments: args.into_iter().map(|(key, value)| crate::command_ast::Argument { key, value }).collect(),
+                session_id: String::new(),
+                source: Default::default(),
+                response_format: Default::default(),
+                raw_line: String::new(),
+            };
+            super::update_db::update_job(ua, &ast, &cat);
         }
         UpdateAction::Slots { storage, args } => {
             use crate::ua_storage_select::{Env, NetSd};
@@ -2078,7 +2116,8 @@ pub(crate) mod side_effect_tests {
         assert!(text.ends_with("Select Pool resource (1-2): .\nSelection aborted, nothing done.\n"), "{text}");
         assert!(acted.is_empty());
         // The long term statistics are never computed here.
-        assert_eq!(update("update stats", &[]).1, vec![UpdateAction::Unsupported("update stats")]);
+        assert_eq!(update("update stats", &[]).1, vec![UpdateAction::Stats { since: 0 }]);
+        assert_eq!(update("update stats days=2", &[]).1, vec![UpdateAction::Stats { since: 172_800 }]);
         assert!(update("update jobid", &[]).1.is_empty());
         let mut media = crate::ua_select::MediaRecord { media_id: 7, ..Default::default() };
         media.volume_name = "v".into();

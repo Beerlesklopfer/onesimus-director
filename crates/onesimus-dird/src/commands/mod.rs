@@ -28,6 +28,8 @@ pub mod resolve;
 pub mod wait;
 
 pub mod defaults;
+pub mod pool_db;
+pub mod update_db;
 
 pub mod configure_usage;
 pub mod prompt;
