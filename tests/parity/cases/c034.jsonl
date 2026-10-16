@@ -1,0 +1,15 @@
+# C-034 cancel: storage daemon cancel and job selection (only non-existent jobs, nothing runs).
+{"id": "c034-storage-nosuch-job", "steps": ["cancel storage=File jobid=999999"]}
+{"id": "c034-storage-nosuch-job-api2", "setup": [".api 2"], "steps": ["cancel storage=File jobid=999999"]}
+{"id": "c034-storage-badjobid", "steps": ["cancel storage=File jobid=abc"]}
+{"id": "c034-storage-nojobid", "steps": ["cancel storage=File"]}
+{"id": "c034-storage-jobid-novalue", "steps": ["cancel storage=File jobid"]}
+{"id": "c034-storage-unknown", "steps": ["cancel storage=nosuch jobid=999998"]}
+{"id": "c034-storage-after-jobid", "steps": ["cancel jobid=999999 storage=File"]}
+{"id": "c034-storage-novalue", "steps": ["cancel storage"]}
+{"id": "c034-sd-keyword", "steps": ["cancel sd=File jobid=999999"]}
+{"id": "c034-state-running", "steps": ["cancel state=running"]}
+{"id": "c034-state-idle", "steps": ["cancel state=idle"]}
+{"id": "c034-state-novalue", "steps": ["cancel state"]}
+{"id": "c034-all-yes", "steps": ["cancel all yes"]}
+{"id": "c034-all-api1", "setup": [".api 1"], "steps": ["cancel all"]}

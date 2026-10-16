@@ -904,7 +904,9 @@ fn start_restore(ctx: &ExecContext, launch: Launch) -> CommandResult {
         Ok(handle) => {
             tracing::info!("Restore {job_id}: worker pid={}, from backup {restore_jobid}", handle.pid);
             if let Some(ref mgr) = ctx.job_manager {
-                mgr.lock().unwrap().add_job(job_id, "RestoreFiles", handle);
+                let mut mgr = mgr.lock().unwrap();
+                mgr.add_job(job_id, "RestoreFiles", handle);
+                mgr.set_job_resources(job_id, &client.name, &storage.name);
             }
         }
         Err(e) => {

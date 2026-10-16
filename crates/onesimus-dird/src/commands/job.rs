@@ -482,6 +482,7 @@ fn run_selected(
         bootstrap: if !job.write_bootstrap.is_empty() { Some(job.write_bootstrap.clone()) } else { None },
     };
 
+    let resources = (client.name.clone(), storage.name.clone());
     drop(config); // Release RwLock before fork
 
     // Post queued status
@@ -504,7 +505,9 @@ fn run_selected(
             tracing::info!("Job {job_id} '{}': worker pid={}", job.name, handle.pid);
             // Register with JobManager — monitor thread polls all jobs
             if let Some(ref mgr) = ctx.job_manager {
-                mgr.lock().unwrap().add_job(job_id, &job.name, handle);
+                let mut mgr = mgr.lock().unwrap();
+                mgr.add_job(job_id, &job.name, handle);
+                mgr.set_job_resources(job_id, &resources.0, &resources.1);
             }
         }
         Err(e) => {
@@ -561,167 +564,6 @@ pub(crate) fn str_to_int64(value: &str) -> i64 {
     let number = digits.bytes().take_while(u8::is_ascii_digit)
         .fold(0i64, |n, d| n.wrapping_mul(10).wrapping_add(i64::from(d - b'0')));
     if negative { -number } else { number }
-}
-
-/// ua_cmds.cc CancelJobs() with ua_select.cc select_jobs(): explicit
-/// jobid/ujobid/job selections first, then "No Jobs running." when nothing
-/// (authorized) runs. ErrorMsg lines precede the SendMsg text.
-pub fn cmd_cancel(ast: &CommandAst, ctx: &ExecContext) -> CommandResult {
-    let active = ctx.job_manager.as_ref()
-        .map(|mgr| mgr.lock().unwrap().active_jobs()).unwrap_or_default();
-    let mut text = String::new();
-    let mut errors = String::new();
-    let mut selected: Vec<u32> = Vec::new();
-    let result = |text: String, errors: String| {
-        let mut result = CommandResult::ok_with_errors(text, errors);
-        result.errors_first = true;
-        result
-    };
-
-    // FindArgKeyword(ua, {"job", "jobid", "ujobid"}) > 0: the first of these
-    // keywords decides, and "job" (index 0) skips the explicit selection.
-    let keyword = ast.arguments.iter().find_map(|arg| ["job", "jobid", "ujobid"].iter()
-        .position(|key| arg.key.eq_ignore_ascii_case(key)));
-    if keyword.is_some_and(|index| index > 0) {
-        for arg in &ast.arguments {
-            let value = arg.value.as_deref();
-            let job = if arg.key.eq_ignore_ascii_case("jobid") {
-                let id = str_to_int64(value.unwrap_or(""));
-                if id == 0 { continue; }
-                match active.iter().find(|job| i64::from(job.id) == id) {
-                    Some(job) => job,
-                    None => {
-                        errors.push_str(&format!("JobId {} is not running. Use Job name to cancel inactive jobs.\n",
-                            value.unwrap_or("")));
-                        continue;
-                    }
-                }
-            } else if arg.key.eq_ignore_ascii_case("job") || arg.key.eq_ignore_ascii_case("ujobid") {
-                let Some(name) = value else { continue };
-                let partial = arg.key.eq_ignore_ascii_case("job");
-                match active.iter().find(|job| if partial { job.unique_name.starts_with(name) } else { job.unique_name == name }) {
-                    Some(job) => job,
-                    None => {
-                        // WarningMsg: no warning channel yet, ordered as text.
-                        text.push_str(&format!("Warning Job {name} is not running. Continuing anyway ...\n"));
-                        continue;
-                    }
-                }
-            } else {
-                continue;
-            };
-            if !crate::acl::access_audited(ctx, crate::acl::Kind::Job, &job.name) {
-                errors.push_str("Unauthorized command from this console.\n");
-                return result(text, errors);
-            }
-            if !selected.contains(&job.id) { selected.push(job.id); }
-        }
-    }
-
-    if selected.is_empty() {
-        let authorized = active.iter().filter(|job| crate::acl::access(ctx, crate::acl::Kind::Job, &job.name)).count();
-        if authorized == 0 {
-            text.push_str(if active.is_empty() { "No Jobs running.\n" } else { "None of your jobs are running.\n" });
-            return result(text, errors);
-        }
-        // select_jobs (ua_select.cc): all/state=..., else the "Select Job:"
-        // dialog with the confirmation for a single running job (C-011).
-        let mut ua = crate::ua_select::Ua::new(ctx);
-        if !errors.is_empty() {
-            ua.error_msg(std::mem::take(&mut errors));
-        }
-        ua.send_msg(std::mem::take(&mut text));
-        let authorized: Vec<&crate::job_manager::ActiveJob> = active.iter()
-            .filter(|job| crate::acl::access(ctx, crate::acl::Kind::Job, &job.name)).collect();
-        let select_all = crate::ua_select::find_arg(ast, "all").is_some();
-        let state = crate::ua_select::find_arg_with_value(ast, "state");
-        if select_all || state.is_some() {
-            use crate::job_manager::DirJobPhase as Phase;
-            let wanted: fn(Phase) -> bool = match state.map(str::to_ascii_lowercase).as_deref() {
-                _ if select_all => |_| true,
-                Some("created") => |phase| phase == Phase::Queued,
-                Some("blocked") => |phase| phase == Phase::Paused,
-                Some("waiting") => |phase| matches!(phase, Phase::WaitingCatReq | Phase::WaitingMedia | Phase::WaitingMount),
-                Some("running") => |phase| phase == Phase::Running,
-                _ => {
-                    ua.error_msg("Illegal state either created, blocked, waiting or running\n");
-                    return ua.finish(true);
-                }
-            };
-            for job in authorized.iter().filter(|job| wanted(job.phase)) {
-                if !selected.contains(&job.id) {
-                    selected.push(job.id);
-                }
-                ua.send_msg(format!("Selected Job {} for cancelling\n", job.id));
-            }
-            if selected.is_empty() {
-                ua.send_msg("No Jobs selected.\n");
-                return ua.finish(true);
-            }
-            if !ua.batch() && crate::ua_select::find_arg(ast, "yes").is_none()
-                && ua.get_yesno("Confirm cancel (yes/no): ") != Some(true) {
-                return ua.finish(true);
-            }
-        } else {
-            ua.start_prompt("Select Job:\n");
-            for job in &authorized {
-                ua.add_prompt(&format!("JobId={} Job={}", job.id, job.unique_name));
-            }
-            let Some((_, choice)) = ua.do_prompt("Job", "Choose Job to cancel") else { return ua.finish(true) };
-            if authorized.len() == 1 {
-                let question = if ua.api() {
-                    format!("Cancel: {choice}\n\nConfirm cancel?")
-                } else {
-                    "Confirm cancel (yes/no): ".to_string()
-                };
-                if ua.get_yesno(&question) != Some(true) {
-                    return ua.finish(true);
-                }
-            }
-            let id = choice.strip_prefix("JobId=").and_then(|rest| rest.split(' ').next())
-                .and_then(|id| id.parse::<u32>().ok());
-            match id.and_then(|id| authorized.iter().find(|job| job.id == id)) {
-                Some(job) => selected.push(job.id),
-                None => {
-                    ua.warning_msg(format!("Job \"{choice}\" not found.\n"));
-                    return ua.finish(true);
-                }
-            }
-        }
-        for id in selected {
-            let canceled = ctx.job_manager.as_ref().is_some_and(|mgr| mgr.lock().unwrap().cancel_job(id));
-            if canceled {
-                if let Some(smgr) = &ctx.session_mgr {
-                    smgr.bus().post(BusMessage::JobStatus {
-                        job_id: id, job_name: String::new(), status: "Canceling".to_string(),
-                        timestamp: now_unix(),
-                    });
-                }
-                ua.send_msg(format!("Job {id} canceled (SIGTERM sent to worker)\n"));
-            } else {
-                ua.send_msg(format!("Job {id} not found or already finished\n"));
-            }
-        }
-        return ua.finish(true);
-    }
-
-    for id in selected {
-        // Send SIGTERM to worker process via JobManager
-        let canceled = ctx.job_manager.as_ref().is_some_and(|mgr| mgr.lock().unwrap().cancel_job(id));
-        if canceled {
-            if let Some(smgr) = &ctx.session_mgr {
-                smgr.bus().post(BusMessage::JobStatus {
-                    job_id: id, job_name: String::new(), status: "Canceling".to_string(),
-                    timestamp: now_unix(),
-                });
-            }
-            // Final status, counters and EndTime are committed after worker exit.
-            text.push_str(&format!("Job {id} canceled (SIGTERM sent to worker)\n"));
-        } else {
-            text.push_str(&format!("Job {id} not found or already finished\n"));
-        }
-    }
-    result(text, errors)
 }
 
 pub fn cmd_enable(ast: &CommandAst, ctx: &ExecContext) -> CommandResult {
@@ -847,24 +689,6 @@ mod error_text_tests {
         let cfg = ctx.config.as_ref().unwrap().read().unwrap();
         assert_eq!(cfg.find_storage("File").unwrap().enabled, storage_state);
         assert!(cfg.jobs.iter().all(|j| j.enabled));
-    }
-
-    #[test]
-    fn cancel_follows_select_jobs() {
-        let ctx = context();
-        let cancel = |line: &str| cmd_cancel(&crate::session::parse_cli_command(line), &ctx);
-        let result = cancel("cancel jobid=999999");
-        assert_eq!((result.error_message.as_str(), result.text_output.as_str()),
-            ("JobId 999999 is not running. Use Job name to cancel inactive jobs.\n", "No Jobs running.\n"));
-        assert!(result.success && result.errors_first);
-        // "job" as first keyword skips the explicit selection; jobid=abc is ignored.
-        for line in ["cancel", "cancel job=nosuch", "cancel jobid=abc", "cancel all"] {
-            let result = cancel(line);
-            assert_eq!((result.error_message.as_str(), result.text_output.as_str()), ("", "No Jobs running.\n"), "{line}");
-        }
-        assert_eq!(cancel("cancel ujobid=nosuch").text_output,
-            "Warning Job nosuch is not running. Continuing anyway ...\nNo Jobs running.\n");
-        assert_eq!((str_to_int64(" 12abc"), str_to_int64("-3"), str_to_int64("abc")), (12, -3, 0));
     }
 }
 

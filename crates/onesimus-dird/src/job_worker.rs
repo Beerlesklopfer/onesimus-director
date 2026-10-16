@@ -816,6 +816,12 @@ impl JobHandle {
         }
     }
 
+    /// A handle without pipes for a process the test owns.
+    #[cfg(test)]
+    pub fn detached(pid: i32, job_id: u32, job_name: &str, unique_job: &str) -> Self {
+        Self { pid, job_id, job_name: job_name.into(), unique_job: unique_job.into(), from_worker: None, to_worker: None }
+    }
+
     pub fn cancel(&self) -> bool { self.pid > 0 && unsafe { libc::kill(self.pid, libc::SIGTERM) == 0 } }
     pub fn pause(&self)  { unsafe { libc::kill(self.pid, libc::SIGUSR1); } }
     pub fn resume(&self) { unsafe { libc::kill(self.pid, libc::SIGUSR2); } }
