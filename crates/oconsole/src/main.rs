@@ -956,6 +956,64 @@ fn read_guarded_dialog(
     }
 }
 
+/// Reply text, colored by keyword.
+fn print_reply(text: &str) {
+    for line in text.lines() {
+        if line.contains("Error") || line.contains("FEHLER") || line.contains("failed") {
+            println!("\x1b[31m{line}\x1b[0m");
+        } else if line.contains("Warning") || line.contains("WARNUNG") {
+            println!("\x1b[33m{line}\x1b[0m");
+        } else if line.contains("OK") || line.contains("success") {
+            println!("\x1b[32m{line}\x1b[0m");
+        } else {
+            println!("{line}");
+        }
+    }
+}
+
+/// API 1 input dialogs of the Director (C-076). DoPrompt() (ua_select.cc)
+/// signals SELECT_INPUT, GetYesno() (ua_input.cc) YESNO; both then call
+/// GetCmd(), which signals TEXT_INPUT and sends the prompt text as the
+/// next data frame ("Select Job resource (1-2): ") — and then waits for
+/// the answer without a SUB_PROMPT. The console therefore takes the data
+/// frame after these signals as the prompt and reads the answer.
+#[derive(Default)]
+struct InputDialog {
+    pending: Option<BnetSignal>,
+}
+
+impl InputDialog {
+    fn signal(&mut self, signal: BnetSignal) {
+        match signal {
+            // TEXT_INPUT keeps the kind announced before it
+            BnetSignal::TextInput if self.pending.is_some() => {}
+            BnetSignal::SelectInput | BnetSignal::YesNo | BnetSignal::TextInput => self.pending = Some(signal),
+            _ => {}
+        }
+    }
+
+    /// For the data frame after an input signal: the text before the last
+    /// line (printed as output) and the last line as the readline prompt.
+    fn prompt(&mut self, text: &str) -> Option<(String, String)> {
+        let kind = self.pending.take()?;
+        let (before, last) = match text.rfind('\n') {
+            Some(pos) if pos + 1 < text.len() => (&text[..=pos], &text[pos + 1..]),
+            _ if text.ends_with('\n') => (text, ""),
+            _ => ("", text),
+        };
+        let prompt = if last.is_empty() {
+            match kind {
+                BnetSignal::YesNo => "(yes/no): ",
+                BnetSignal::SelectInput => "Select: ",
+                _ => "input> ",
+            }.to_string()
+        } else {
+            last.to_string()
+        };
+        Some((before.to_string(), prompt))
+    }
+}
+
 fn interactive_loop(
     mut dir: Box<dyn DirectorConn>,
     console_name: &str,
@@ -1015,6 +1073,7 @@ fn interactive_loop(
 
                 // Read response
                 CTRL_C.store(false, Ordering::SeqCst);
+                let mut dialog = InputDialog::default();
                 loop {
                     if CTRL_C.swap(false, Ordering::SeqCst) {
                         if send_terminal_cancel(dir.as_mut(), &guard) {
@@ -1026,17 +1085,20 @@ fn interactive_loop(
                     let msg = dir.recv_msg();
                     match msg {
                         Some(RecvResult::Data(text)) => {
-                            for line in text.lines() {
-                                if line.contains("Error") || line.contains("FEHLER") || line.contains("failed") {
-                                    println!("\x1b[31m{line}\x1b[0m");
-                                } else if line.contains("Warning") || line.contains("WARNUNG") {
-                                    println!("\x1b[33m{line}\x1b[0m");
-                                } else if line.contains("OK") || line.contains("success") {
-                                    println!("\x1b[32m{line}\x1b[0m");
-                                } else {
-                                    println!("{line}");
+                            if let Some((before, dialog_prompt)) = dialog.prompt(&text) {
+                                print_reply(&before);
+                                if !read_guarded_dialog(&mut rl, dir.as_mut(), &guard, &refresh,
+                                    &dialog_prompt, false) {
+                                    let _ = rl.save_history(&history_file);
+                                    return;
                                 }
+                                continue;
                             }
+                            print_reply(&text);
+                        }
+                        // API 1 input dialogs: the prompt text follows (C-076)
+                        Some(RecvResult::Signal(signal @ (BnetSignal::SelectInput | BnetSignal::YesNo | BnetSignal::TextInput))) => {
+                            dialog.signal(signal);
                         }
                         Some(RecvResult::Signal(BnetSignal::Eod)) => {
                             // api=0: EOD marks end of response, no MainPrompt follows.
@@ -1048,14 +1110,9 @@ fn interactive_loop(
                             let _ = rl.save_history(&history_file);
                             return;
                         }
-                        Some(RecvResult::Signal(signal @ (BnetSignal::YesNo | BnetSignal::SubPrompt | BnetSignal::TextInput))) => {
-                            let dialog_prompt = match signal {
-                                BnetSignal::YesNo => "(yes/no): ",
-                                BnetSignal::SubPrompt => "> ",
-                                _ => "input> ",
-                            };
-                            if !read_guarded_dialog(&mut rl, dir.as_mut(), &guard, &refresh,
-                                dialog_prompt, signal == BnetSignal::SubPrompt) {
+                        // API 0: the prompt text came before the signal
+                        Some(RecvResult::Signal(BnetSignal::SubPrompt)) => {
+                            if !read_guarded_dialog(&mut rl, dir.as_mut(), &guard, &refresh, "> ", true) {
                                 let _ = rl.save_history(&history_file);
                                 return;
                             }
@@ -1298,6 +1355,49 @@ impl mcp::CommandRunner for GrpcRunner {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn select_input_takes_following_text_as_prompt() {
+        // DoPrompt() at API 1: SELECT_INPUT, TEXT_INPUT, prompt text
+        let mut dialog = InputDialog::default();
+        assert_eq!(dialog.prompt("Header:\n"), None, "no input signal yet: plain output");
+        dialog.signal(BnetSignal::SelectInput);
+        dialog.signal(BnetSignal::TextInput);
+        assert_eq!(dialog.prompt("Select Job resource (1-2): "),
+            Some((String::new(), "Select Job resource (1-2): ".to_string())));
+        // answered: the next frame is output again
+        assert_eq!(dialog.prompt("Please enter a number between 1 and 2\n"), None);
+    }
+
+    #[test]
+    fn yesno_and_text_input_prompts() {
+        let mut dialog = InputDialog::default();
+        dialog.signal(BnetSignal::YesNo);
+        dialog.signal(BnetSignal::TextInput);
+        assert_eq!(dialog.prompt(""), Some((String::new(), "(yes/no): ".to_string())));
+        dialog.signal(BnetSignal::TextInput);
+        assert_eq!(dialog.prompt("Enter new Volume name: "),
+            Some((String::new(), "Enter new Volume name: ".to_string())));
+    }
+
+    #[test]
+    fn multiline_prompt_prints_all_but_last_line() {
+        let mut dialog = InputDialog::default();
+        dialog.signal(BnetSignal::SelectInput);
+        assert_eq!(dialog.prompt("Defined Storages:\nSelect Storage (1-3): "),
+            Some(("Defined Storages:\n".to_string(), "Select Storage (1-3): ".to_string())));
+        dialog.signal(BnetSignal::SelectInput);
+        assert_eq!(dialog.prompt("text\n"), Some(("text\n".to_string(), "Select: ".to_string())));
+    }
+
+    #[test]
+    fn other_signals_do_not_open_a_dialog() {
+        let mut dialog = InputDialog::default();
+        for signal in [BnetSignal::Eod, BnetSignal::MainPrompt, BnetSignal::SubPrompt] {
+            dialog.signal(signal);
+        }
+        assert_eq!(dialog.prompt("x"), None);
+    }
 
     #[test]
     fn completion_consumes_original_help_usage_instead_of_names_only() {
