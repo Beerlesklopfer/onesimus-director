@@ -124,6 +124,9 @@ pub struct SqlColumn {
 #[derive(Clone)]
 pub struct CatalogHandle {
     tx: flume::Sender<(CatalogRequest, flume::Sender<CatalogResponse>)>,
+    /// OVFS extension in the catalog database (checked on every new
+    /// connection, on reload and on `.ovfs_status refresh`).
+    ovfs: Arc<std::sync::RwLock<crate::ovfs::Capability>>,
 }
 
 impl CatalogHandle {
@@ -133,7 +136,7 @@ impl CatalogHandle {
         std::thread::spawn(move || while let Ok((request, response)) = rx.recv() {
             let _ = response.send(handle(request));
         });
-        Self { tx }
+        Self { tx, ovfs: Arc::default() }
     }
     /// Send a request and wait for the response (blocking).
     fn request(&self, req: CatalogRequest) -> Result<CatalogResponse, String> {
@@ -259,6 +262,20 @@ impl CatalogHandle {
         }
     }
 
+    /// What the Director last found out about the OVFS extension.
+    pub fn ovfs_capability(&self) -> crate::ovfs::Capability {
+        self.ovfs.read().map(|c| c.clone()).unwrap_or_default()
+    }
+
+    /// Check the OVFS extension again now (reload, `.ovfs_status refresh`,
+    /// failed extension call) and keep the result.
+    pub fn ovfs_recheck(&self) -> crate::ovfs::Capability {
+        let result = self.query_rows(&crate::ovfs::capability::detect_sql());
+        let capability = crate::ovfs::Capability::from_detection(result.as_ref().map_err(String::as_str));
+        record_ovfs(&self.ovfs, capability.clone(), "re-check");
+        capability
+    }
+
     /// Health check.
     pub fn ping(&self) -> bool {
         matches!(self.request(CatalogRequest::Ping), Ok(CatalogResponse::Pong))
@@ -341,7 +358,8 @@ pub fn spawn_catalog_worker(
     shutdown: &'static AtomicBool,
 ) -> (CatalogHandle, std::thread::JoinHandle<()>) {
     let (tx, rx) = flume::bounded::<(CatalogRequest, flume::Sender<CatalogResponse>)>(256);
-    let handle = CatalogHandle { tx };
+    let ovfs: Arc<std::sync::RwLock<crate::ovfs::Capability>> = Arc::default();
+    let handle = CatalogHandle { tx, ovfs: ovfs.clone() };
 
     let join = std::thread::Builder::new()
         .name("dir:catalog".into())
@@ -353,8 +371,19 @@ pub fn spawn_catalog_worker(
 
             let local = tokio::task::LocalSet::new();
             local.block_on(&rt, async {
+                // Every new (or re-established) connection checks the OVFS
+                // extension; a change is logged.
+                let detect_into = ovfs.clone();
                 let pool = match sqlx::postgres::PgPoolOptions::new()
                     .max_connections(8)
+                    .after_connect(move |conn, _meta| {
+                        let target = detect_into.clone();
+                        Box::pin(async move {
+                            let capability = detect_ovfs(conn).await;
+                            record_ovfs(&target, capability, "connect");
+                            Ok(())
+                        })
+                    })
                     .connect(&catalog_url)
                     .await
                 {
@@ -414,6 +443,41 @@ pub fn spawn_catalog_worker(
         .expect("failed to spawn dir:catalog");
 
     (handle, join)
+}
+
+/// Run the OVFS detection on one connection.
+async fn detect_ovfs(conn: &mut sqlx::PgConnection) -> crate::ovfs::Capability {
+    use sqlx::Row;
+    // Every column is text (extended protocol, Send future for after_connect).
+    let sql = crate::ovfs::capability::detect_sql();
+    match sqlx::query(&sql).fetch_all(&mut *conn).await {
+        Ok(rows) => {
+            let table = SqlTable {
+                columns: Vec::new(),
+                rows: rows.iter().map(|row| {
+                    (0..row.len()).map(|i| row.try_get::<Option<String>, _>(i).ok().flatten()).collect()
+                }).collect(),
+            };
+            crate::ovfs::Capability::from_detection(Ok(&table))
+        }
+        Err(e) => crate::ovfs::Capability::from_detection(Err(&e.to_string())),
+    }
+}
+
+/// Keep a detection result; log it when it differs from the previous one.
+fn record_ovfs(target: &std::sync::RwLock<crate::ovfs::Capability>, capability: crate::ovfs::Capability, why: &str) {
+    let Ok(mut current) = target.write() else { return };
+    if *current != capability {
+        let previous = std::mem::replace(&mut *current, capability.clone());
+        let path = capability.path();
+        match (&previous, &capability) {
+            (crate::ovfs::Capability::Unknown, crate::ovfs::Capability::Available { .. }) =>
+                info!("catalog: OVFS extension {capability} ({why}); restore trees use the {path} path"),
+            (crate::ovfs::Capability::Unknown, _) =>
+                info!("catalog: OVFS extension {capability} ({why}); restore trees use the Director {path}"),
+            _ => warn!("catalog: OVFS extension changed from \"{previous}\" to \"{capability}\" ({why}); restore trees use the {path} path"),
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -910,7 +974,7 @@ mod backup_reference_tests {
         for response in [CatalogResponse::SinceUtime { since_utime: 123, prev_job: "base".into() },
             CatalogResponse::Error("query failed".into())] {
             let (tx, rx) = flume::bounded(1);
-            let handle = CatalogHandle { tx };
+            let handle = CatalogHandle { tx, ovfs: Arc::default() };
             let worker = std::thread::spawn(move || {
                 let (request, reply) = rx.recv().unwrap();
                 match request {

@@ -97,9 +97,23 @@ Rolle im Director: BVFS (`.bvfs_*`, `crates/onesimus-dird/src/commands/bvfs.rs`)
 byte-gleich portiert und bleibt nur zur Abwärtskompatibilität für Bareos-Clients erhalten
 (Paritätsfälle `c022`); OVFS ist der Onesimus-Weg.
 
-Offen: Director-Integration — eigene Befehle bzw. MCP-Tools in oconsole auf Basis von
-`ovfs.tree` mit `depth` plus `ovfs.ls` (Nachladen), `ovfs.versions`; Restore-Auswahl über
-die Restore-Kennungen (Bootstrap über `JobMedia`).
+Director-Integration (16.10.2026, Branch der OVFS-Integration): Der Director prüft bei jeder
+neuen Katalogverbindung, nach `reload` und mit `.ovfs_status refresh`, ob `ovfs` in Version
+0.1.x mit allen genutzten Signaturen, Ergebnistypen (`pg_get_function_result`) und
+EXECUTE-Recht vorhanden ist, hält das Ergebnis im Katalog-Handle und protokolliert es.
+Befehle (Onesimus-Erweiterungen, nur exakte Namen, Wiki `docs/wiki/commands/dot-ovfs-*.md`):
+`.ovfs_status`, `.ovfs_latest`, `.ovfs_tree`, `.ovfs_ls`, `.ovfs_versions`; JSON in `.api 2`
+und mit `json`, sonst lesbarer Text; Command-ACL plus Job/Client/FileSet-ACL wie BVFS
+(auditiert). Ohne Extension rechnet der Director dasselbe mit reinem SQL (`src/ovfs/`:
+Kern aus `ovfs-core` portiert, Zeilen per Server-Cursor in 10.000er-Batches);
+Äquivalenztest gegen eine Instanz mit `ovfs` byte-gleich. In oconsole als lesende MCP-Tools
+`ovfs_*` (auch im Produktions-Build). BVFS unverändert.
+
+Offen: Restore-Auswahl über die Restore-Kennungen (Bootstrap über `JobMedia`), Restore-Baum
+im interaktiven `oconsole`; typisierte gRPC-Aufrufe (derzeit über `ExecuteCommand`). Befund
+für das Plugin: In einer `SQL_ASCII`-Datenbank scheitern `ovfs.tree`/`ovfs.ls` mit
+`client_encoding = UTF8`, sobald ein Pfad nicht UTF-8 ist („invalid byte sequence“); der
+Director setzt dafür je Transaktion `SET LOCAL client_encoding TO 'SQL_ASCII'`.
 
 Integration:
 

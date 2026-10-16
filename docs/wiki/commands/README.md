@@ -135,3 +135,18 @@ Used by oconsole/bconsole for tab-completion and automation.
 | [.bvfs_lsfiles](dot-bvfs-lsfiles.md) | List files (BVFS) |
 | [.bvfs_versions](dot-bvfs-versions.md) | List file versions (BVFS) |
 | [.bvfs_restore](dot-bvfs-restore.md) | Restore via BVFS selection |
+
+## OVFS Commands (Onesimus restore trees)
+
+Onesimus extensions without Bareos equivalent. They use the PostgreSQL
+extension `ovfs` when it is installed in the catalog and the Director fallback
+(plain SQL, same results) otherwise. Also available as read-only MCP tools in
+`oconsole` (`ovfs_status`, `ovfs_latest`, `ovfs_tree`, `ovfs_ls`, `ovfs_versions`).
+
+| Command | Description |
+|---------|-------------|
+| [.ovfs_status](dot-ovfs-status.md) | Extension version and which path restore trees use |
+| [.ovfs_latest](dot-ovfs-latest.md) | Job chain of a client's latest state (restore option 5) |
+| [.ovfs_tree](dot-ovfs-tree.md) | Restore tree of a job chain as JSON, with depth |
+| [.ovfs_ls](dot-ovfs-ls.md) | Direct children of one directory |
+| [.ovfs_versions](dot-ovfs-versions.md) | All versions of one file |
