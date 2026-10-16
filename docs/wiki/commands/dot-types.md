@@ -1,4 +1,4 @@
-# .types — List Job Types
+# .types — Jobtypen auflisten
 
 <!-- bareos-reference:start -->
 ## Aus den Bareos-Originalquellen
@@ -21,43 +21,99 @@ Referenz: [WIP/25.1.2-pre-43-g18be77e68, `18be77e6832e`](https://github.com/bare
 
 Die folgenden vorhandenen Beispiele und Verhaltensbeschreibungen sind lokale Dokumentation; sie sind kein Beleg für vollständige Bareos-Kompatibilität. Bei Widersprüchen gilt der obige Befund.
 <!-- bareos-reference:end -->
-Machine-interface command used by bconsole/oconsole for tab-completion. Returns one job type name per line.
+
+## Zweck
+
+`.types` gibt alle Jobtypen aus, die der Director kennt (`Backup`, `Restore`, `Verify` und so weiter). Programme füllen damit Auswahllisten, etwa für `type=` bei [.jobs](dot-jobs.md) oder für `jobtype=` bei `list jobs`. Die Liste ist fest im Director hinterlegt; der Befehl liest weder Konfiguration noch Katalog und verändert nichts.
 
 ## Syntax
 
-```
+```text
 .types
 ```
 
-## Arguments
+## Argumente
 
-None.
+Der Befehl hat keine Argumente. Weitere Wörter werden ignoriert.
 
-## Examples
+## API-Modi
 
-### List all job types
-```
-* .types
+Unter `.api 0` und `.api 1` kommt dieselbe Liste. Unter `.api 2` steht sie als `result.jobtypes`, ein Array von Objekten mit `name`.
+
+## Beispiele
+
+### Jobtypen auflisten
+
+```text
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]> .types
 Backup
-Restore
-Verify
 Admin
 Archive
-Copy
+Verify
+Restore
 Migrate
+Copy
 Consolidate
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]>
 ```
 
-## Notes
+### Im Skriptmodus
 
-- Output is one type name per line, no headers, no formatting.
-- Output is terminated by the EOD signal.
-- Returns a static list of all supported job types.
-- Used by console programs to populate the `type=` argument completion list and to filter `.jobs type=<T>`.
+```text
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]> .api 1
+api: 1
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]> .types
+Backup
+Admin
+Archive
+Verify
+Restore
+Migrate
+Copy
+Consolidate
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]>
+```
 
-## Related Commands
+### Als JSON
 
-- [.jobs](dot-jobs.md) -- List job names (supports `type=` filter)
-- [.levels](dot-levels.md) -- List backup levels
-- [.jobstatus](dot-jobstatus.md) -- List job status codes
-- [run](run.md) -- Run a job
+```text
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]> .api 2
+{
+  "jsonrpc": "2.0",
+  "id": null,
+  "result": {
+    "api": 2
+  }
+}
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]> .types
+{
+  "jsonrpc": "2.0",
+  "id": null,
+  "result": {
+    "jobtypes": [
+      {
+        "name": "Backup"
+      },
+      {
+        "name": "Admin"
+      },
+      {
+[…]
+      }
+    ]
+  }
+}
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]>
+```
+
+## Fehlermeldungen
+
+| Meldung | Ursache und Abhilfe |
+|---|---|
+| `.types: is an invalid command.` | Die `Command ACL` der Konsole erlaubt `.types` nicht. |
+
+## Siehe auch
+
+- [.jobs](dot-jobs.md) — Jobs eines Typs auflisten
+- [.levels](dot-levels.md) — Level je Jobtyp
+- [list](list.md) — `list jobs jobtype=<typ>`

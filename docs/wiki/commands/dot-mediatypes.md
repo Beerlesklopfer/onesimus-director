@@ -1,4 +1,4 @@
-# .mediatypes — List Media Type Names
+# .mediatypes — Medientypen aus dem Katalog auflisten
 
 <!-- bareos-reference:start -->
 ## Aus den Bareos-Originalquellen
@@ -21,42 +21,110 @@ Referenz: [WIP/25.1.2-pre-43-g18be77e68, `18be77e6832e`](https://github.com/bare
 
 Die folgenden vorhandenen Beispiele und Verhaltensbeschreibungen sind lokale Dokumentation; sie sind kein Beleg für vollständige Bareos-Kompatibilität. Bei Widersprüchen gilt der obige Befund.
 <!-- bareos-reference:end -->
-Machine-interface command used by bconsole/oconsole for tab-completion. Returns one unique media type per line, derived from configured Storage resources.
+
+## Zweck
+
+`.mediatypes` gibt die Medientypen aus, die im Katalog eingetragen sind (Tabelle `MediaType`), alphabetisch sortiert und ohne Doppelte. Programme nutzen die Liste etwa beim Labeln oder Hinzufügen von Volumes. Der Befehl liest nur den Katalog und verändert nichts.
 
 ## Syntax
 
-```
+```text
 .mediatypes
 ```
 
-## Arguments
+## Argumente
 
-None.
+| Argument | Werte | Bedeutung |
+|---|---|---|
+| `catalog=<name>` | Name eines Katalogs | diesen Katalog verwenden statt des automatisch gewählten |
 
-## Examples
+Andere Wörter werden ignoriert.
 
-### List all media types
-```
-* .mediatypes
+## API-Modi
+
+- `.api 0`: beim ersten Katalogzugriff der Sitzung stehen die Hinweiszeilen `Automatically selected Catalog: …` und `Using Catalog "…"` vor der Liste.
+- `.api 1`: nur die Namen.
+- `.api 2`: `result.mediatypes`, ein Array von Objekten mit `name`.
+
+## Beispiele
+
+### Alle Medientypen
+
+```text
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]> .mediatypes
+Automatically selected Catalog: MyCatalog
+Using Catalog "MyCatalog"
 File
-LTO-8
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]>
 ```
 
-### Single storage type
-```
-* .mediatypes
+### Zweiter Katalogzugriff in derselben Sitzung
+
+Die Zeile `Automatically selected Catalog` erscheint nur beim ersten Katalogzugriff; danach steht nur noch `Using Catalog`.
+
+```text
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]> list pools
+Automatically selected Catalog: MyCatalog
+Using Catalog "MyCatalog"
++--------+--------------+---------+---------+----------+---------------+
+| poolid | name         | numvols | maxvols | pooltype | labelformat   |
++--------+--------------+---------+---------+----------+---------------+
+|      1 | Scratch      |       0 |       0 | Scratch  | *             |
+|      2 | Incremental  |       1 |     100 | Backup   | Incremental-  |
+|      3 | Full         |       3 |     100 | Backup   | Full-         |
+|      4 | Differential |       1 |     100 | Backup   | Differential- |
++--------+--------------+---------+---------+----------+---------------+
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]> .mediatypes
+Using Catalog "MyCatalog"
 File
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]>
 ```
 
-## Notes
+### Im Skriptmodus
 
-- Output is one name per line, no headers, no formatting.
-- Output is terminated by the EOD signal.
-- Values are extracted from the MediaType directive of all Storage resources, sorted and deduplicated.
-- Used by console programs to populate the `mediatype=` argument completion list.
+```text
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]> .api 1
+api: 1
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]> .mediatypes
+File
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]>
+```
 
-## Related Commands
+### Als JSON
 
-- [.storage](dot-storage.md) -- List storage names
-- [.media](dot-media.md) -- List volume names
-- [.defaults](dot-defaults.md) -- Show storage defaults (includes mediatype)
+```text
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]> .api 2
+{
+  "jsonrpc": "2.0",
+  "id": null,
+  "result": {
+    "api": 2
+  }
+}
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]> .mediatypes
+{
+  "jsonrpc": "2.0",
+  "id": null,
+  "result": {
+    "mediatypes": [
+      {
+        "name": "File"
+      }
+    ]
+  }
+}
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]>
+```
+
+## Fehlermeldungen
+
+| Meldung | Ursache und Abhilfe |
+|---|---|
+| `.mediatypes: is an invalid command.` | Die `Command ACL` der Konsole erlaubt `.mediatypes` nicht. |
+| `List MediaType failed: ERR=…` | Die Abfrage im Katalog ist fehlgeschlagen; der Text hinter `ERR=` kommt von der Datenbank. |
+
+## Siehe auch
+
+- [.storages](dot-storages.md) — Storages, deren Medientyp mit `.defaults storage=` sichtbar wird
+- [.media](dot-media.md) — Volume-Namen
+- [label](label.md) — Volume labeln

@@ -1,4 +1,4 @@
-# .pools — List Pool Names
+# .pools — Namen der Pools auflisten
 
 <!-- bareos-reference:start -->
 ## Aus den Bareos-Originalquellen
@@ -28,49 +28,111 @@ Referenz: [WIP/25.1.2-pre-43-g18be77e68, `18be77e6832e`](https://github.com/bare
 
 Die folgenden vorhandenen Beispiele und Verhaltensbeschreibungen sind lokale Dokumentation; sie sind kein Beleg für vollständige Bareos-Kompatibilität. Bei Widersprüchen gilt der obige Befund.
 <!-- bareos-reference:end -->
-Machine-interface command used by bconsole/oconsole for tab-completion. Returns one pool resource name per line from the Director configuration.
+
+## Zweck
+
+`.pools` gibt die Namen aller Pool-Ressourcen der Director-Konfiguration aus, einen pro Zeile. Programme nutzen ihn für die Vervollständigung von `pool=` und für Auswahllisten. Der Befehl liest nur die Konfiguration, nicht die Pool-Tabelle des Katalogs, und verändert nichts.
+
+Es erscheinen nur Pools, die die Konsole laut `Pool ACL` sehen darf.
 
 ## Syntax
 
+```text
+.pools [ type=<pooltyp> ]
 ```
-.pools [type=<pooltype>]
-```
 
-## Arguments
+## Argumente
 
-| Argument | Description |
-|----------|-------------|
-| *(none)* | List all pools |
-| `type=<pooltype>` | Filter by pool type (e.g., Backup, Scratch) |
+| Argument | Werte | Bedeutung |
+|---|---|---|
+| `type=<pooltyp>` | `Backup`, `Scratch`, `Copy`, `Archive`, … | nur Pools dieses Typs |
 
-## Examples
+Der Vergleich bei `type=` ist unabhängig von Groß- und Kleinschreibung und prüft nur, ob der Pooltyp mit dem angegebenen Text **beginnt**: `type=b`, `type=back` und `type=BACKUP` liefern dasselbe, `type=Backupx` nichts. Ohne Wert (`type`, `type=`) wird nicht gefiltert; es zählt nur das erste `type`-Wort.
 
-### List all pools
-```
-* .pools
-Default
-Full
-Incremental
+## API-Modi
+
+Unter `.api 0` und `.api 1` kommt dieselbe Namensliste. Unter `.api 2` steht sie als `result.pools`, ein Array von Objekten mit `name` (ohne `enabled`).
+
+## Beispiele
+
+### Alle Pools
+
+```text
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]> .pools
 Scratch
-```
-
-### Filter by type
-```
-* .pools type=Backup
-Default
-Full
 Incremental
+Full
+Differential
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]>
 ```
 
-## Notes
+### Nur Backup-Pools
 
-- Output is one name per line, no headers, no formatting.
-- Output is terminated by the EOD signal.
-- The `type=` filter is case-insensitive and matches the PoolType directive.
-- Used by console programs to populate the `pool=` argument completion list.
+```text
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]> .pools type=Backup
+Incremental
+Full
+Differential
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]>
+```
 
-## Related Commands
+### Typ als Anfang des Namens
 
-- [.defaults](dot-defaults.md) -- Show default values for a pool
-- [.media](dot-media.md) -- List volume names
-- [.volstatus](dot-volstatus.md) -- List volume status values
+```text
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]> .pools type=sCr
+Scratch
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]>
+```
+
+### Als JSON
+
+```text
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]> .api 2
+{
+  "jsonrpc": "2.0",
+  "id": null,
+  "result": {
+    "api": 2
+  }
+}
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]> .pools type=Backup
+{
+  "jsonrpc": "2.0",
+  "id": null,
+  "result": {
+    "pools": [
+      {
+        "name": "Incremental"
+      },
+      {
+        "name": "Full"
+      },
+      {
+        "name": "Differential"
+      }
+    ]
+  }
+}
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]>
+```
+
+### Mit eingeschränkter Konsole
+
+```text
+parity-limited@bareos-dir[25.1.2+onesimus.0.2.0]> .pools
+Scratch
+Full
+parity-limited@bareos-dir[25.1.2+onesimus.0.2.0]>
+```
+
+## Fehlermeldungen
+
+| Meldung | Ursache und Abhilfe |
+|---|---|
+| `.pools: is an invalid command.` | Die `Command ACL` der Konsole erlaubt `.pools` nicht. |
+
+## Siehe auch
+
+- [.defaults](dot-defaults.md) — Vorgabewerte eines Pools
+- [.media](dot-media.md) — Volumes im Katalog
+- [list](list.md) — `list pools` zeigt die Pools des Katalogs
