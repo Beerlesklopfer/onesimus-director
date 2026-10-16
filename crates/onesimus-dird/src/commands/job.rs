@@ -480,6 +480,23 @@ fn run_selected(
         replace: None,
         restore_jobid: None,
         bootstrap: if !job.write_bootstrap.is_empty() { Some(job.write_bootstrap.clone()) } else { None },
+        client_name: client.name.clone(),
+        client_first_connection: crate::job_messages::first_client_connection(&client.name),
+    };
+
+    // Job report data (job.cc SetJcrDefaults/ApplyPoolOverrides, GetLevelSinceTime)
+    let requested_name = level_name(requested_level);
+    let upgraded = level_char == "F" && requested_name != "Full";
+    let mut report = crate::job_messages::backup_report(&config, &job, client, storage_name, pool, default_pool,
+        level_char, fileset_name, now.timestamp());
+    report.job = unique_job.clone();
+    report.level = level_name(level_char);
+    report.since = if upgraded {
+        crate::job_messages::upgraded_since(&requested_name)
+    } else if since_utime > 0 {
+        crate::job_messages::since_text(&crate::job_messages::bstrutime(since_utime))
+    } else {
+        String::new()
     };
 
     let resources = (client.name.clone(), storage.name.clone());
@@ -491,20 +508,29 @@ fn run_selected(
             job_id, job_name: job.name.clone(), status: "Queued".to_string(),
             timestamp: now_unix(),
         });
-        crate::console_msg::post_job_message(smgr.bus(), ctx.config.as_ref(), BusMessage::JobMessage {
-            job_id, job_name: job.name.clone(),
-            msg_type: crate::message_bus::MsgType::Info,
-            text: format!("Start Backup JobId={job_id}, Job={}, Level={level}", job.name),
-            timestamp: now_unix(),
-        });
+        let mut texts = Vec::new();
+        if upgraded {
+            texts.push(crate::job_messages::NO_PRIOR_FULL_TEXT.to_string());
+            texts.push(crate::job_messages::UPGRADE_TO_FULL_TEXT.to_string());
+        }
+        texts.push(crate::job_messages::version_text());
+        texts.push(crate::job_messages::start_backup_text(job_id, &unique_job));
+        for text in texts {
+            crate::console_msg::post_job_message(smgr.bus(), ctx.config.as_ref(), BusMessage::JobMessage {
+                job_id, job_name: job.name.clone(), msg_type: crate::message_bus::MsgType::Info, text,
+                timestamp: now_unix(),
+            });
+        }
     }
 
     // RunJob(): the job queue forks the worker once its priority and the
     // Maximum Concurrent Jobs allow it (Compatibility log C-048).
     if let Some(ref mgr) = ctx.job_manager {
-        mgr.lock().unwrap().enqueue_job(job_id, &job.name, crate::job_manager::QueuedStart {
+        let mut mgr = mgr.lock().unwrap();
+        mgr.enqueue_job(job_id, &job.name, crate::job_manager::QueuedStart {
             params, priority: job.priority, sched_time: now.timestamp(),
         }, &resources.0, &resources.1);
+        mgr.set_job_report(job_id, report);
     } else {
         match job_worker::spawn_job_worker(job_id, &job.name, &params) {
             Ok(handle) => tracing::info!("Job {job_id} '{}': worker pid={}", job.name, handle.pid),

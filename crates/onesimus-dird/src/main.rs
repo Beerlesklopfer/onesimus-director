@@ -22,6 +22,7 @@ mod fd_protocol;
 mod fsm;
 mod grpc;
 mod job_manager;
+mod job_messages;
 mod job_worker;
 mod json_output;
 mod kill;
@@ -398,6 +399,8 @@ fn main() {
     if let Some(catalog) = &catalog {
         ovfs::register_for_reload(catalog.clone());
     }
+    // dird.cc: SetDbLogInsertCallback(DirDbLogInsert) — `catalog` message destination
+    job_messages::set_catalog(catalog.clone());
 
     let port = config.director.port;
     let bind_addr = cli.bind_address.clone().unwrap_or_else(|| "0.0.0.0".to_string());

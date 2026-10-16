@@ -579,8 +579,16 @@ fn rerun_command(
 ) -> Result<Option<CommandAst>, ()> {
     use crate::command_ast::Argument;
     let first_row = |sql: String| query(&sql).ok().and_then(|rows| rows.into_iter().next()).ok_or(());
+    // ua_run.cc:80-187: Jmsg(ua->jcr, M_WARNING, ...) of the console JCR
+    let warn = |record: &str, error: String| {
+        if let Some(config) = ctx.config.as_ref().and_then(|c| c.read().ok()) {
+            crate::console_msg::job_message(&config, "-Console-", 0, crate::message_bus::MsgType::Warning, 0,
+                &format!("Error getting {record} record for Job rerun: ERR={error}"));
+        }
+    };
     let job = first_row(format!(
-        "SELECT Name, Type, Level, ClientId, PoolId, FileSetId FROM Job WHERE JobId={jobid}"))?;
+        "SELECT Name, Type, Level, ClientId, PoolId, FileSetId FROM Job WHERE JobId={jobid}"))
+        .inspect_err(|_| warn("Job", format!("No Job found for JobId {jobid}\n")))?;
     let field = |i: usize| job.get(i).cloned().flatten().unwrap_or_default();
     let id = |i: usize| crate::commands::job::str_to_int64(&field(i));
     let name = field(0);
@@ -599,10 +607,13 @@ fn rerun_command(
             .map(|row| row.into_iter().next().flatten().unwrap_or_default())
     };
     if id(3) != 0 {
-        arguments.push(arg("client", name_of("Client", "Name", "ClientId", id(3))?));
+        let client = name_of("Client", "Name", "ClientId", id(3))
+            .inspect_err(|_| warn("Client", "Client record not found in Catalog.\n".to_string()))?;
+        arguments.push(arg("client", client));
     }
     if id(4) != 0 {
-        let pool = name_of("Pool", "Name", "PoolId", id(4))?;
+        // GetPoolRecord leaves errmsg as it was when no row matches
+        let pool = name_of("Pool", "Name", "PoolId", id(4)).inspect_err(|_| warn("Pool", String::new()))?;
         // Copy, Migrate and VirtualFull read from the Job resource's pool
         // (GetJobResWithName, ACL checked) and write to the record's pool.
         if matches!(job_type, b'c' | b'g') || level == b'f' {
@@ -619,7 +630,9 @@ fn rerun_command(
         }
     }
     if id(5) != 0 {
-        arguments.push(arg("fileset", name_of("FileSet", "FileSet", "FileSetId", id(5))?));
+        let fileset = name_of("FileSet", "FileSet", "FileSetId", id(5))
+            .inspect_err(|_| warn("FileSet", "FileSet record \"\" not found.\n".to_string()))?;
+        arguments.push(arg("fileset", fileset));
     }
     arguments.push(arg("when", when.to_string()));
     if yes {

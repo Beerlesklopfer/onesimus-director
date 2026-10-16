@@ -169,29 +169,38 @@ pub fn job_message_text(director: &str, job_id: u32, msg_type: MsgType, text: &s
     format!("{director} JobId {job_id}: {kind}{text}")
 }
 
-/// DispatchMessage() for a message of job `job_name`: queued for the
-/// consoles when the job's Messages resource has a `console` destination
-/// for `msg_type`.
-pub fn job_message(config: &DirectorConfig, job_name: &str, job_id: u32, msg_type: MsgType, text: &str) {
-    let Some(messages) = config.jobs.iter().find(|j| j.name == job_name).map(|j| j.messages.as_str())
-        .filter(|m| !m.is_empty()) else { return };
-    let Some(res) = config.raw.iter()
-        .find(|r| r.norm_type() == "messages" && r.name().is_some_and(|n| n.eq_ignore_ascii_case(messages)))
-    else { return };
-    let bit = 1u32 << crate::audit::code(msg_type);
-    if crate::commands::show::destinations(res).iter().any(|d| d.code == "console" && d.types & bit != 0) {
-        let msg = job_message_text(&config.director.name, job_id, msg_type, text);
-        append(&format!("{} ", crate::audit::timestamp(res)), &msg);
+/// Jmsg(jcr, type, mtime, ...) of job `job_name`: the header of
+/// [`job_message_text`] and DispatchMessage() through the job's Messages
+/// resource (InitJobMsg). A JCR without one of its own — the console JCR
+/// (JobId 0) or a job unknown to the configuration — uses the Director's
+/// Messages resource (`daemon_msgs`).
+pub fn job_message(config: &DirectorConfig, job_name: &str, job_id: u32, msg_type: MsgType, mtime: i64, text: &str) {
+    let msg = job_message_text(&config.director.name, job_id, msg_type, text);
+    dispatch_job_message(config, job_name, job_id, crate::audit::code(msg_type), mtime, &msg);
+}
+
+/// DispatchMessage(jcr, type, mtime, msg) of a complete message (a job
+/// message the File or Storage daemon sent, getmsg.cc) for job `job_name`.
+pub fn dispatch_job_message(config: &DirectorConfig, job_name: &str, job_id: u32, code: u32, mtime: i64, msg: &str) {
+    let job_messages = config.jobs.iter().find(|j| j.name == job_name && job_id != 0)
+        .map(|j| j.messages.as_str()).filter(|m| !m.is_empty());
+    let res = match job_messages {
+        Some(name) => crate::audit::messages_resource(config, name),
+        None => crate::audit::daemon_messages(config),
+    };
+    if let Some(res) = res {
+        crate::audit::dispatch(res, code, mtime, msg, Some(job_id));
     }
 }
 
-/// Post a job message on the bus (gRPC push events) and dispatch it to the
-/// consoles through the job's Messages resource.
+/// Post a job message on the bus (gRPC push events) and dispatch it like
+/// Jmsg() through the job's Messages resource; the bus message's
+/// `timestamp` is the message time.
 pub fn post_job_message(bus: &crate::message_bus::MessageBus, config: Option<&crate::director_config::SharedConfig>,
                         message: crate::message_bus::BusMessage) {
-    if let crate::message_bus::BusMessage::JobMessage { job_id, job_name, msg_type, text, .. } = &message {
+    if let crate::message_bus::BusMessage::JobMessage { job_id, job_name, msg_type, text, timestamp } = &message {
         if let Some(config) = config.and_then(|c| c.read().ok()) {
-            job_message(&config, job_name, *job_id, *msg_type, text);
+            job_message(&config, job_name, *job_id, *msg_type, *timestamp, text);
         }
     }
     bus.post(message);
