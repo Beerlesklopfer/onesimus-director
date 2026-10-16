@@ -65,7 +65,7 @@ Neue Einträge unten anhängen; behobene Einträge bleiben mit Commit stehen.
 | C-044 | 16.10.2026 | .pools type= | — | Typvergleich als Präfix ohne Groß-/Kleinschreibung (`bstrncasecmp` mit Argumentlänge) | Exakter Vergleich | `ua_dotcmds.cc:914` | offen |
 | C-045 | 16.10.2026 | status slots | — (kein Autochanger im Fixture) | `status storage=… slots`: Slottabelle, API-Zeilen `D|`/`S|`, JSON „contents“, Katalog-Lookups | Endet nach der Volume-Liste | `ua_status.cc:1703,1804,1917`, `storage.cc:553` | behoben (Merge 16.10.2026; nur gegen simulierten Autochanger getestet) |
 | C-046 | 16.10.2026 | .api 2 Ergebnisobjekte | `c035-delete-noarg-api2`, `c035-list-nextvol-days-nojob-api2` | `delete` liefert `"deleted": {}`; `list nextvolume` mit unbekanntem Job scheitert im Batchmodus (CMD_FAILED) | Leeres Ergebnis bzw. Erfolg | `ua_cmds.cc:2226`, `ua_output.cc` | offen |
-| C-047 | 16.10.2026 | restore | — | Menüpunkte 1, 2, 4–12 (inkl. `with_gui` für 1/2/4), Dateibaum-Auswahl (mark/cd/ls …), mehrere JobIds, regexwhere | „Menu item … is not available yet“, „Restore not done.“ | `ua_restore.cc:675-835,1294`, `ua_tree.cc` | offen |
+| C-047 | 16.10.2026 | restore | — | Menüpunkte 1, 2, 4–12 (inkl. `with_gui` für 1/2/4), Dateibaum-Auswahl (mark/cd/ls …), mehrere JobIds, regexwhere | „Menu item … is not available yet“, „Restore not done.“ | `ua_restore.cc:675-835,1294`, `ua_tree.cc` | weitgehend behoben (Merge 16.10.2026: Restore-Baum mit 26 Befehlen, alle 13 Menüpunkte, Schlüsselwörter, Bootstrap byte-gleich; offen: Run-Zusammenfassung → C-043, Info-Signale in `.api 2`, Nicht-UTF-8-Namen auf SQL_ASCII) |
 | C-048 | 16.10.2026 | cancel / Jobzustände | — | RunScripts „AfterJob“ bei Cancel, Warte-Zustände (FD/SD/Ressourcen/Priorität), JCR-Liste inkl. beendeter Jobs | Fehlen | `job.cc:684-741`, `director_jcr_impl.h:54` | offen |
 | C-049 | 16.10.2026 | purge action= | — | ActionOnPurge (Relabel über SD) | Lokale Meldung „not supported“ | `ua_purge.cc:690ff` | behoben (Merge 16.10.2026; SD-Relabel nur gegen simulierten SD getestet) |
 | C-050 | 16.10.2026 | Speicherprotokoll | — | NDMP-Storages/-Clients werden gesondert behandelt (setdevice überspringt, Status, Mount) | Kein Protokollfeld in StorageResource, nur natives Protokoll | `ua_cmds.cc:1552`, `storage.cc:727` | offen |
@@ -96,7 +96,7 @@ eindeutige Sortierung), `c015-list-jobs-enabled-count` (undefiniertes Verhalten 
 
 ### Offen
 
-- Einträge mit Status „offen“ in der Tabelle: C-043, C-044, C-046, C-047, C-048, C-050, C-051, C-053, C-054 (Agenten am 16.10.2026 durch das Ausgabenlimit unterbrochen; Arbeitsstand liegt in ihren Worktrees).
+- Einträge mit Status „offen“ in der Tabelle: C-043, C-044, C-046, C-047 (Rest), C-048, C-050, C-051, C-053, C-054 (Agenten am 16.10.2026 durch das Ausgabenlimit unterbrochen; Arbeitsstand liegt in ihren Worktrees).
 - Befehlsstatus im Wiki (`docs/wiki/commands`): 53 `parity_verified`, 31 `partial`, 4 `registered_unverified`, 26 Restore-Baum-Befehle `missing_context` (Stand vor den C-045/C-049/C-055-Merges, Auffrischung offen).
 - OVFS (eigene PostgreSQL-Extension, paralleles Projekt `oenesimus-postgres-plugin`) ist der Onesimus-Weg für Verzeichnisbäume und Restore-Auswahl. BVFS (`commands/bvfs.rs`, byte-gleich portiert, Fälle `c022`) bleibt nur zur Abwärtskompatibilität für Bareos-Clients (z. B. bareos-webui) erhalten und darf sich dabei nicht ändern.
 - Erledigt 16.10.2026: C-012s `update`-Validierung nach dem C-011-Merge geprüft; `maxvoljobs`/`maxvolfiles` war verloren und ist wiederhergestellt (Fälle `t001`).
