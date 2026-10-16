@@ -1,4 +1,4 @@
-# sqlquery — Execute Raw SQL
+# sqlquery — SQL direkt im Katalog ausführen
 
 <!-- bareos-reference:start -->
 ## Aus den Bareos-Originalquellen
@@ -21,85 +21,208 @@ Referenz: [WIP/25.1.2-pre-43-g18be77e68, `18be77e6832e`](https://github.com/bare
 
 Die folgenden vorhandenen Beispiele und Verhaltensbeschreibungen sind lokale Dokumentation; sie sind kein Beleg für vollständige Bareos-Kompatibilität. Bei Widersprüchen gilt der obige Befund.
 <!-- bareos-reference:end -->
-Execute a raw SQL query against the PostgreSQL catalog database.
+
+## Zweck
+
+`sqlquery` öffnet einen SQL-Eingabemodus für den Katalog der Sitzung. Jede Anweisung, die mit `;` endet, wird sofort ausgeführt, und das Ergebnis erscheint als Tabelle. Der Befehl ist für Auswertungen gedacht, die `list` und `query` nicht bieten.
+
+**Vorsicht:** Der Director prüft die Anweisungen nicht. Auch `UPDATE`, `DELETE` oder `DROP` werden ausgeführt und verändern den Katalog dauerhaft. Wer den Befehl benutzen darf, legt die `CommandACL` der Konsole fest.
 
 ## Syntax
 
-```
-sqlquery <SQL statement>
-```
-
-## Examples
-
-### Count jobs
-```
-* sqlquery SELECT COUNT(*) AS total FROM job
-total
---------------------
-10
+```text
+sqlquery [sharedsession]
 ```
 
-### Find large backups
+## Argumente
+
+| Argument | Werte | Bedeutung |
+|---|---|---|
+| `sharedsession` | — | Die gemeinsame Katalogverbindung des Directors verwenden statt einer eigenen für diese Sitzung. Muss nach `sqlquery` stehen. |
+
+Andere Wörter hinter `sqlquery` werden ignoriert; insbesondere wird `sqlquery select 1;` nicht ausgeführt, sondern öffnet nur den Eingabemodus.
+
+## Dialoge
+
+Nach dem Start erscheinen drei Hinweiszeilen und die Frage `Enter SQL query: `.
+
+- Eine Zeile, die mit `;` endet, schließt die Anweisung ab; sie wird ausgeführt, dann folgt wieder `Enter SQL query: `.
+- Eine Zeile ohne `;` am Ende wird gesammelt; der Director fragt `Add to SQL query: ` nach der Fortsetzung. Die Zeilen werden mit einem Leerzeichen verbunden.
+- Eine leere Zeile oder `.` beendet den Modus mit `End query mode.`
+
+## API-Modi
+
+Unter `.api 1` kommen die Fragen als Texteingabe (oconsole zeigt `input> `), der Fragetext erst mit der nächsten Antwort, und Ergebnisse ohne Tabellenrahmen. Unter `.api 2` startet kein Eingabemodus: `sqlquery` liefert sofort ein leeres Ergebnis (`"result": {}`), und eine folgende SQL-Zeile wird als normaler Befehl gelesen und abgelehnt (`select: is an invalid command.`). Für SQL mit JSON-Ausgabe gibt es [`.sql`](dot-sql.md).
+
+## Beispiele
+
+### Eine Abfrage ausführen
+
+```text
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]> sqlquery
+Automatically selected Catalog: MyCatalog
+Using Catalog "MyCatalog"
+Entering SQL query mode.
+Terminate each query with a semicolon.
+Terminate query mode with a blank line.
+Enter SQL query:
+> select poolid, name, NULL as n from pool order by poolid;
++--------+--------------+------+
+| poolid | name         | n    |
++--------+--------------+------+
+|      1 | Scratch      |      |
+|      2 | Incremental  |      |
+|      3 | Full         |      |
+|      4 | Differential |      |
++--------+--------------+------+
+Enter SQL query:
+>
+End query mode.
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]>
 ```
-* sqlquery SELECT jobid, name, jobbytes FROM job WHERE jobbytes > 50000000 ORDER BY jobbytes DESC
-jobid               name                jobbytes
-------------------------------------------------------------
-10                  backup-bareos-fd    71683878
-9                   backup-bareos-fd    71683878
+
+### Anweisung über mehrere Zeilen
+
+```text
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]> sqlquery
+Automatically selected Catalog: MyCatalog
+Using Catalog "MyCatalog"
+Entering SQL query mode.
+Terminate each query with a semicolon.
+Terminate query mode with a blank line.
+Enter SQL query:
+> select count(*)
+Add to SQL query:
+> from pool;
++-------+
+| count |
++-------+
+|     4 |
++-------+
+Enter SQL query:
+>
+End query mode.
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]>
 ```
 
-### Check volume usage
-```
-* sqlquery SELECT volumename, volstatus, volbytes, voljobs FROM media
-volumename          volstatus           volbytes            voljobs
---------------------------------------------------------------------------------
-Full-0001           Append              839002751           4
-```
+### Leeres Ergebnis
 
-### Use views
-```
-* sqlquery SELECT * FROM vw_last_backup_per_client
-clientname          jobid  jobname           level starttime            endtime              jobfiles jobbytes
-------------------------------------------------------------------------------------------------------------------
-bareos-fd           10     backup-bareos-fd  F     2026-03-28 21:20:40  2026-03-28 21:20:42  458      71683878
+```text
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]> sqlquery
+[…]
+Enter SQL query:
+> select poolid from pool where poolid < 0;
+No results to list.
+Enter SQL query:
+>
+End query mode.
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]>
 ```
 
-### Call stored procedures
+### Fehler in der Anweisung
+
+Die Meldung kommt von PostgreSQL in der Sprache des Datenbankservers, hier Deutsch (Paritätsfall `c016-sqlquery-error`). oconsole zeigt die Zeile wegen `failed` rot.
+
+```text
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]> sqlquery
+[…]
+Enter SQL query:
+> selec nothing;
+Query failed: FEHLER:  Syntaxfehler bei >>selec<<
+LINE 1: selec nothing;
+        ^
+
+Enter SQL query:
+>
+End query mode.
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]>
 ```
-* sqlquery SELECT fn_find_appendable_volume('Full')
-fn_find_appendable_volume
---------------------
-Full-0001
 
-* sqlquery SELECT fn_find_latest_backup('bareos-fd')
-fn_find_latest_backup
---------------------
-10
+### Mit `.` beenden
+
+```text
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]> sqlquery
+Automatically selected Catalog: MyCatalog
+Using Catalog "MyCatalog"
+Entering SQL query mode.
+Terminate each query with a semicolon.
+Terminate query mode with a blank line.
+Enter SQL query:
+> .
+End query mode.
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]>
 ```
 
-## Available Views
+### Unter `.api 1`
 
-| View | Description |
-|------|-------------|
-| `vw_job_summary` | Jobs with client + pool names |
-| `vw_volume_status` | Volumes with pool name + fill % |
-| `vw_file_list` | Files with full path |
-| `vw_last_backup_per_client` | Latest successful backup per client |
+```text
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]> .api 1
+api: 1
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]> sqlquery
+Entering SQL query mode.
+Terminate each query with a semicolon.
+Terminate query mode with a blank line.
+input> SELECT poolid, name FROM pool ORDER BY poolid;
+Enter SQL query:
+      1 | Scratch      |
+      2 | Incremental  |
+      3 | Full         |
+      4 | Differential |
+input> .
+Enter SQL query:
+End query mode.
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]>
+```
 
-## Available Functions
+### Unter `.api 2`
 
-| Function | Returns | Description |
-|----------|---------|-------------|
-| `fn_find_appendable_volume(pool)` | `text` | Find writable volume |
-| `fn_find_latest_backup(client)` | `integer` | Latest successful backup JobId |
-| `fn_since_utime(client, level)` | `(bigint, text)` | Reference time for incr/diff |
+```text
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]> .api 2
+{
+  "jsonrpc": "2.0",
+  "id": null,
+  "result": {
+    "api": 2
+  }
+}
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]> sqlquery
+{
+  "jsonrpc": "2.0",
+  "id": null,
+  "result": {}
+}
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]> select count(*) from pool;
+{
+  "jsonrpc": "2.0",
+  "id": null,
+  "error": {
+    "code": 1,
+    "message": "failed",
+    "data": {
+      "result": {},
+      "messages": {
+        "error": [
+          "select: is an invalid command.\n"
+        ]
+      }
+    }
+  }
+}
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]>
+```
 
-## Security
+## Fehlermeldungen
 
-SQL queries run with the Director's database user privileges. Only SELECT is typically safe. INSERT/UPDATE/DELETE can corrupt the catalog.
+| Meldung | Ursache und Abhilfe |
+|---|---|
+| `Query failed: <Fehler der Datenbank>` | Die Anweisung ist fehlerhaft. Der Modus bleibt offen; Anweisung korrigiert neu eingeben. |
+| `No results to list.` | Die Anweisung lieferte keine Zeilen. |
+| `sqlquery: is an invalid command.` | Die `CommandACL` der Konsole erlaubt den Befehl nicht. |
 
-## Related Commands
+## Siehe auch
 
-- [.sql](dot-sql.md) — Dot-command SQL (with sub-commands: tables, schema)
-- [list](list.md) — Structured catalog queries
-- [.sqlcount](dot-sqlcount.md) — Quick record count
+- [query](query.md) — vordefinierte Abfragen
+- [.sql](dot-sql.md) — SQL in einer Zeile, auch mit JSON-Ausgabe
+- [.sqltables](dot-sqltables.md) — Tabellen des Katalogs
+- [list](list.md) — Katalogeinträge ohne SQL
+- [use](use.md) — Katalog wählen

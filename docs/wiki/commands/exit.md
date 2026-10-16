@@ -1,4 +1,4 @@
-# exit
+# exit — Sitzung beenden
 
 <!-- bareos-reference:start -->
 ## Aus den Bareos-Originalquellen
@@ -21,3 +21,55 @@ Referenz: [WIP/25.1.2-pre-43-g18be77e68, `18be77e6832e`](https://github.com/bare
 
 Die folgenden vorhandenen Beispiele und Verhaltensbeschreibungen sind lokale Dokumentation; sie sind kein Beleg für vollständige Bareos-Kompatibilität. Bei Widersprüchen gilt der obige Befund.
 <!-- bareos-reference:end -->
+
+## Zweck
+
+`exit` beendet die Konsolensitzung und ist gleichwertig zu [`quit`](quit.md): Der Director schließt die Verbindung, ohne eine Antwort zu schicken, und oconsole beendet sich. `exit` ist für jede Konsole erlaubt, auch wenn ihre `CommandACL` den Befehl nicht nennt.
+
+## Syntax
+
+```text
+exit
+```
+
+Abgekürzt bedeutet `ex` ebenfalls `exit` (der Director nimmt den ersten passenden Befehl seiner Tabelle; `exit` steht vor `export`). Für `export` muss man daher mindestens `exp` schreiben. oconsole erkennt nur das ausgeschriebene `exit` als Abmeldung und meldet bei der Abkürzung `Connection closed`.
+
+## Argumente
+
+Der Befehl hat keine Argumente. Weitere Wörter hinter `exit` werden ignoriert.
+
+## API-Modi
+
+Wie bei [`quit`](quit.md): Unter `.api 0` und `.api 1` kommt keine Antwort, unter `.api 2` vor dem Schließen ein leeres Ergebnis `{"jsonrpc": "2.0", "id": null, "result": {}}` (mehrzeilig eingerückt).
+
+## Beispiele
+
+### Sitzung beenden
+
+```text
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]> exit
+```
+
+### Eingeschränkte Konsole beendet die Sitzung
+
+Auch die Konsole `parity-limited`, deren Befehlsliste `exit` nicht enthält, kann sich abmelden (Paritätsfall `c004-exit-limited`).
+
+```text
+parity-limited@bareos-dir[25.1.2+onesimus.0.2.0]> exit
+```
+
+### Abkürzung `ex`
+
+```text
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]> ex
+Connection closed
+```
+
+## Fehlermeldungen
+
+`exit` gibt keine Fehlermeldungen aus.
+
+## Siehe auch
+
+- [quit](quit.md) — gleichwertiger Befehl, mit JSON-Beispiel
+- [.quit](dot-quit.md) — Punktbefehl mit derselben Wirkung

@@ -1,4 +1,4 @@
-# help -- List Available Commands
+# help — Befehle und ihre Argumente anzeigen
 
 <!-- bareos-reference:start -->
 ## Aus den Bareos-Originalquellen
@@ -25,67 +25,270 @@ help add autodisplay automount cancel configure create delete disable enable est
 
 Die folgenden vorhandenen Beispiele und Verhaltensbeschreibungen sind lokale Dokumentation; sie sind kein Beleg für vollständige Bareos-Kompatibilität. Bei Widersprüchen gilt der obige Befund.
 <!-- bareos-reference:end -->
-Display a list of all regular (non-dot) console commands with descriptions, or show detailed help for a specific command.
+
+## Zweck
+
+`help` listet die Befehle, die die eigene Konsole benutzen darf, mit einer Kurzbeschreibung. `help <befehl>` zeigt zu einem Befehl zusätzlich die Argumente. Punktbefehle (`.api`, `.jobs`, …) erscheinen in der Liste nicht; für sie gibt es [`.help`](dot-help.md). Der Befehl liest nur.
 
 ## Syntax
 
-```
-help [<command>]
-```
-
-## Arguments
-
-| Argument | Description |
-|----------|-------------|
-| `<command>` | Optional. Show detailed help for a specific command. |
-
-## Examples
-
-### List all regular commands
-```
-* help
-  Available commands:
-
-  add                  Add media to a pool
-  autodisplay          Autodisplay console messages
-  automount            Automount after label
-  cancel               Cancel a job
-  configure            Configure director resources
-  create               Create DB pool from resource
-  delete               Delete catalog records
-  disable              Disable a job/client/schedule
-  enable               Enable a job/client/schedule
-  estimate             Estimate backup size
-  ...
-  whoami               Print the currently logged in user
-
-  Use ".help" for dot-commands. "help <cmd>" for details.
+```text
+help
+help <befehl>
 ```
 
-### Help for a specific command
+## Argumente
+
+| Argument | Werte | Bedeutung |
+|---|---|---|
+| `<befehl>` | voller Befehlsname, Groß- und Kleinschreibung egal | Beschreibung und Argumente dieses Befehls zeigen. Abkürzungen gelten hier nicht (`help ver` findet nichts). Auch Punktbefehle und Befehle, die die Konsole nicht benutzen darf, werden gefunden. |
+
+Mit mehr als einem Wort hinter `help` zeigt der Director die ganze Liste.
+
+Die Liste ist nach der Befehlsliste der `CommandACL` gefiltert: Eine eingeschränkte Konsole sieht nur ihre erlaubten Befehle. Am Ende steht immer der Hinweis, dass ein einzelner Punkt (`.`) an einer Eingabeaufforderung den Befehl abbricht.
+
+## API-Modi
+
+Unter `.api 1` fallen Kopfzeilen und Schlusshinweis weg, und die Argumente von `help <befehl>` stehen in einer langen Zeile. Unter `.api 2` ist `result` ein Objekt mit einem Eintrag je Befehl; jeder Eintrag hat `command`, `description`, `arguments` (eine Zeile) und `permission` (ob die Konsole den Befehl benutzen darf). Für einen unbekannten Befehl ist das Ergebnis leer (`"result": {}`).
+
+## Beispiele
+
+### Alle Befehle
+
+```text
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]> help
+  Command            Description
+  =======            ===========
+  add                Add media to a pool
+  autodisplay        Autodisplay console messages
+  automount          Automount after label
+  cancel             Cancel a job
+  configure          Configure director resources
+  create             Create DB Pool from resource
+  delete             Delete volume, pool or job
+  disable            Disable a job/client/schedule
+  enable             Enable a job/client/schedule
+  estimate           Performs FileSet estimate, listing gives full listing
+  exit               Terminate Bconsole session
+  export             Export volumes from normal slots to import/export slots
+  gui                Switch between interactive (gui off) and non-interactive (gui on) mode
+  help               Print help on specific command
+  import             Import volumes from import/export slots to normal slots
+  label              Label a tape
+  list               List objects from catalog
+  llist              Full or long list like list command
+  messages           Display pending messages
+  memory             Print current memory usage
+  mount              Mount storage
+  move               Move slots in an autochanger
+  prune              Prune records from catalog
+  purge              Purge records from catalog
+  quit               Terminate Bconsole session
+  query              Query catalog
+  restore            Restore files
+  relabel            Relabel a tape
+  release            Release storage
+  reload             Reload conf file
+  rerun              Rerun a job
+  resolve            Resolve a hostname
+  run                Run a job
+  status             Report status
+  setbandwidth       Sets bandwidth
+  setdebug           Sets debug level
+  setdevice          Sets device parameter
+  setip              Sets new client address -- if authorized
+  show               Show resource records
+  sqlquery           Use SQL to query catalog
+  time               Print current time
+  trace              Turn on/off trace to file
+  truncate           Truncate purged volumes
+  unmount            Unmount storage
+  umount             Umount - for old-time Unix guys, see unmount
+  update             Update volume, pool, slots, job or statistics
+  use                Use specific catalog
+  var                Does variable expansion
+  version            Print Director version
+  wait               Wait until no jobs are running
+  whoami             Print the user name associated with this console
+
+When at a prompt, entering a period (.) cancels the command.
+
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]>
 ```
-* help run
-run: Run a job
-  Usage: run [job=<name>] [level=<level>] [client=<name>] [storage=<name>] [pool=<name>] [when=<time>] [yes]
-  Arguments: job,level,client,storage,pool,when,yes
+
+### Ein Befehl mit Argumenten
+
+```text
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]> help run
+  Command            Description
+  =======            ===========
+  run                Run a job
+
+Arguments:
+	job=<job-name> client=<client-name> fileset=<fileset-name>
+	level=<level> storage=<storage-name> where=<directory-prefix>
+	when=<universal-time-specification> pool=<pool-name>
+	pluginoptions=<plugin-options-string> accurate=<yes|no>
+	comment=<text> spooldata=<yes|no> priority=<number>
+	jobid=<jobid> catalog=<catalog> migrationjob=<job-name>
+	backupclient=<client-name> backupformat=<format>
+	nextpool=<pool-name> since=<universal-time-specification>
+	verifyjob=<job-name> verifylist=<verify-list>
+	migrationjob=<complete_name> [ yes ]
+
+When at a prompt, entering a period (.) cancels the command.
+
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]>
 ```
 
-### Help for an unknown command
+### Befehl ohne Argumente
+
+Groß- und Kleinschreibung spielt keine Rolle.
+
+```text
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]> help VERSION
+  Command            Description
+  =======            ===========
+  version            Print Director version
+
+Arguments:
+	
+
+When at a prompt, entering a period (.) cancels the command.
+
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]>
 ```
-* help foobar
-Unknown command: foobar
-Use ".help" for complete command list.
+
+### Hilfe zu `help`
+
+Die Argumentliste von `help` nennt die Befehle, zu denen es ausführliche Hilfe gibt.
+
+```text
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]> help help
+  Command            Description
+  =======            ===========
+  help               Print help on specific command
+
+Arguments:
+	add autodisplay automount cancel configure create
+	delete disable enable estimate exit gui label
+	list llist messages memory mount prune purge
+	quit query restore relabel release reload run
+	status setbandwidth setdebug setip show sqlquery
+	time trace truncate unmount umount update use
+	var version wait
+
+When at a prompt, entering a period (.) cancels the command.
+
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]>
 ```
 
-## Behavior
+### Unbekannter Befehl
 
-- Without arguments, lists all regular commands (non-dot) with short descriptions.
-- With a command name argument, shows usage and argument details for that command.
-- For machine-readable output or dot-command help, use [.help](dot-help.md) instead.
-- The output includes ANSI color codes for terminal readability.
-- This is not an audited command.
+```text
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]> help nosuch
+  Command            Description
+  =======            ===========
 
-## Related Commands
+Can't find nosuch command.
 
-- [.help](dot-help.md) -- Machine-readable help, includes dot-commands
-- [whoami](whoami.md) -- Show current console identity
+
+When at a prompt, entering a period (.) cancels the command.
+
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]>
+```
+
+### Eingeschränkte Konsole
+
+Die Konsole `parity-limited` sieht nur ihre erlaubten Befehle (Paritätsfall `help-limited`).
+
+```text
+parity-limited@bareos-dir[25.1.2+onesimus.0.2.0]> help
+  Command            Description
+  =======            ===========
+  help               Print help on specific command
+  list               List objects from catalog
+  llist              Full or long list like list command
+  status             Report status
+  show               Show resource records
+  time               Print current time
+  version            Print Director version
+  whoami             Print the user name associated with this console
+
+When at a prompt, entering a period (.) cancels the command.
+
+parity-limited@bareos-dir[25.1.2+onesimus.0.2.0]>
+```
+
+### Unter `.api 1`
+
+```text
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]> .api 1
+api: 1
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]> help run
+  run                Run a job
+
+Arguments:
+	job=<job-name> client=<client-name> fileset=<fileset-name> level=<level> storage=<storage-name> where=<directory-prefix> when=<universal-time-specification> pool=<pool-name> pluginoptions=<plugin-options-string> accurate=<yes|no> comment=<text> spooldata=<yes|no> priority=<number> jobid=<jobid> catalog=<catalog> migrationjob=<job-name> backupclient=<client-name> backupformat=<format> nextpool=<pool-name> since=<universal-time-specification> verifyjob=<job-name> verifylist=<verify-list> migrationjob=<complete_name> [ yes ]
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]> help
+  add                Add media to a pool
+  autodisplay        Autodisplay console messages
+  automount          Automount after label
+[…]
+  wait               Wait until no jobs are running
+  whoami             Print the user name associated with this console
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]>
+```
+
+### Unter `.api 2`
+
+```text
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]> .api 2
+{
+  "jsonrpc": "2.0",
+  "id": null,
+  "result": {
+    "api": 2
+  }
+}
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]> help
+{
+  "jsonrpc": "2.0",
+  "id": null,
+  "result": {
+    "add": {
+      "command": "add",
+      "description": "Add media to a pool",
+      "arguments": "pool=<pool-name> storage=<storage-name> jobid=<jobid>",
+      "permission": true
+    },
+[…]
+    "whoami": {
+      "command": "whoami",
+      "description": "Print the user name associated with this console",
+      "arguments": "",
+      "permission": true
+    }
+  }
+}
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]> help nosuch
+{
+  "jsonrpc": "2.0",
+  "id": null,
+  "result": {}
+}
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]>
+```
+
+## Fehlermeldungen
+
+| Meldung | Ursache und Abhilfe |
+|---|---|
+| `Can't find <befehl> command.` | Es gibt keinen Befehl mit genau diesem Namen. Den vollen Namen verwenden; die Liste zeigt `help` ohne Argument. |
+
+## Siehe auch
+
+- [.help](dot-help.md) — Befehlsliste im Maschinenformat, auch mit Punktbefehlen
+- [whoami](whoami.md) — Name der eigenen Konsole
+- [.authorized](dot-authorized.md) — Berechtigung für einen Befehl prüfen
+- [Befehlsübersicht](README.md) — alle Befehle nach Themen
