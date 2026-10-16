@@ -56,44 +56,48 @@ den Bareos-Katalog unverändert und liefert für den Restore den Verzeichnisbaum
 als JSON. Getestet wird gegen die neuesten Versionen: PostgreSQL 19 und
 Bareos 25.1.2-pre (Katalogschema 2250).
 
-In Arbeit: `ovfs.tree(jobid, root)` – ab dem Einstiegsverzeichnis alle Pfade und
-Dateien eines Jobs rekursiv als JSON-Baum (sortiert, deterministisch). Teilbaum
-per Bereichssuche über den B-Tree-Index `path_name_idx` (setzt die
-Bareos-Standard-Collation `C` voraus), Dateien über `file_jpfid_idx`.
+Stand 16.10.2026 (implementiert im Plugin-Repo, dort noch nicht committet/freigegeben):
+Rückgabe als `json` (nicht `jsonb`: ein jsonb-Array ist auf 256 MB begrenzt, ein Baum mit
+1,2 Mio. Einträgen überschreitet das). Drei Restore-Modi:
 
-Aus BVFS nicht mehr nötig:
+1. `ovfs.tree(jobid int, root text, max_entries bigint DEFAULT 1000000)`: genau ein Job,
+   nur dessen Zeilen. Teilbaum per Bereichssuche über `path_name_idx` (Collation `C`),
+   Dateien über `file_jpfid_idx`.
+2. `ovfs.tree(jobids int[], root, max_entries)`: vom Aufrufer übergebene Jobkette. Je
+   (Pfad, Name) gewinnt die neueste JobTDate, `FileIndex = 0` löscht; innerhalb eines Jobs
+   gilt die Hardlink-Regel aus `ua_tree.cc` (letzte Kopie einer Datei, erste eines Hardlinks).
+3. `ovfs.jobids_latest(client text, fileset text DEFAULT NULL) -> int[]` und
+   `ovfs.tree_latest(client, root, fileset DEFAULT NULL, max_entries)`: neuester Stand wie
+   Restore-Option 5 (`uar_last_full_no_pool`, `uar_dif`, `uar_inc`): letzter Full je FileSet,
+   danach letzter Diff, danach die Incrementals; nur JobStatus T/W, Type B,
+   StartTime < now, nur Jobs auf aktivierten Volumes (JobMedia/Media.Enabled). `fileset`
+   NULL nur, wenn der Client Backups genau eines FileSets hat, sonst Fehler mit Liste.
 
-- `PathHierarchy`/`PathVisibility` samt `.bvfs_update`, `.bvfs_clear_cache`,
-  `.bvfs_cleanup`: die Bereichssuche ersetzt den Cache, keine Invalidierung nötig
-- `.bvfs_decode_lstat`: LStat wird in `ovfs-core` dekodiert
-- `.bvfs_lsdirs`/`.bvfs_lsfiles` mit `limit`/`offset`: ersetzt durch `ovfs.tree`
-  mit Obergrenze `max_entries` (Fehler statt stillem Abschneiden)
+Jeder Knoten trägt `jobid` und `fileindex` (Restore-Kennung); `link_fileindex` verweist auf
+denselben Job. Geprüft gegen Bareos `select_recent_version` plus Filter `FileIndex > 0` auf
+1,23 Mio. Einträgen: identisch. Getestet nur mit PostgreSQL 19rc1 und dem DDL von
+25.1.2-pre.
 
-Offen, für Restores nötig:
+Rolle im Director: BVFS (`.bvfs_*`, `crates/onesimus-dird/src/commands/bvfs.rs`) ist
+byte-gleich portiert und bleibt nur zur Abwärtskompatibilität für Bareos-Clients erhalten
+(Paritätsfälle `c022`); OVFS ist der Onesimus-Weg und bekommt eigene Director-Befehle bzw.
+MCP-Tools. Die Jobkette ermittelt der Director (Pool-/FileSet-Regeln) oder
+`ovfs.jobids_latest`.
 
-- Jobkette (`.bvfs_get_jobids`): Ein Incremental enthält nur das Delta. Für den
-  Dateistand zu einem Zeitpunkt `ovfs.tree` mit einer Liste von JobIDs
-  (Full + letztes Differential + folgende Incrementals): neueste Version je
-  Datei gewinnt, Löschungen (`FileIndex = 0`) werden angewendet. Die Kette
-  ermittelt der Director (Pool-/FileSet-Regeln), nicht die Extension.
-- Restore-Kennungen (`.bvfs_restore`): Der Director braucht je Datei
-  (JobId, FileIndex) für den Bootstrap über `JobMedia`. Mit Jobkette zusätzlich
-  `jobid` je Knoten im JSON. Hardlinks: `LinkFI` aus dem LStat verweist auf die
-  Datei mit den Daten, deren FileIndex muss mit in die Auswahl (`link_fileindex`
-  wird bereits ausgegeben).
+Erledigt (aus der früheren Offen-Liste): Jobkette, Restore-Kennungen (jobid/fileindex/
+link_fileindex je Knoten).
 
 Später/optional:
 
 - Versionen einer Datei über mehrere Jobs (`.bvfs_versions`) als eigene
   Funktion, etwa `ovfs.versions`
-- Base-Jobs (`BaseFiles`) und Delta-Dateien (`DeltaSeq`): zunächst erkennen und
-  als nicht unterstützt melden statt falsch darstellen
+- Base-Jobs (`BaseFiles`) und Delta-Dateien (`DeltaSeq`): noch nicht behandelt;
+  zunächst erkennen und als nicht unterstützt melden statt falsch darstellen
 
 Integration:
 
-- Einbinden statt der heutigen BVFS-Stubs in `crates/onesimus-dird/src/commands/dot.rs`
-  (`.bvfs_update`, `.bvfs_lsdirs`, `.bvfs_lsfiles`, `.bvfs_versions` …); die
-  Stubs melden derzeit Erfolg ohne Wirkung („Done.“, „BVFS cache cleared“)
+- Eigene Director-Befehle für OVFS (BVFS bleibt unverändert als Kompatibilitätsschicht,
+  `commands/bvfs.rs`, Paritätsfälle `c022`)
 - Danach als Tools im MCP-Modus von `oconsole` anbieten (Backup-Baum durchsuchen)
 - Restore-Baum im interaktiven `oconsole` wie bei bconsole (`cd`, `ls`, `mark`)
 - Befund am Rande: `crates/bareos-orm/schema/v2250_bareos_catalog.json` setzt
