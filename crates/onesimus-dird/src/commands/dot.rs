@@ -11,6 +11,7 @@ use crate::command_ast::CommandAst;
 use crate::command_executor::{ApiMode, ExecContext};
 use crate::command_queue::CommandResult;
 use serde_json::json;
+use crate::acl::Kind;
 
 /// One resource name per line (text) and `{"<array>": [{"name": .., "enabled": ..}]}`
 /// (JSON), like the C++ dot-commands (ArrayStart/ObjectKeyValue/ObjectKeyValueBool).
@@ -39,6 +40,14 @@ fn with_config(ctx: &ExecContext, array: &str, f: impl FnOnce(&crate::director_c
     }
 }
 
+/// Names that pass `ua->AclAccessOk(acl, name)` (audit_event=false), the
+/// filter of the ua_dotcmds.cc resource listings (compatibility log C-025).
+/// acl::access takes the config lock itself, so this runs before `with_config`.
+fn permitted(ctx: &ExecContext, kind: Kind, names: impl FnOnce(&crate::director_config::DirectorConfig) -> Vec<String>) -> Vec<String> {
+    ctx.config.as_ref().and_then(|c| c.read().ok().map(|cfg| names(&cfg))).unwrap_or_default()
+        .into_iter().filter(|name| crate::acl::access(ctx, kind, name)).collect()
+}
+
 /// Helper: check if "enabled" or "disabled" bare flag is present.
 fn enabled_filter(ast: &CommandAst) -> Option<bool> {
     for a in &ast.arguments {
@@ -63,7 +72,9 @@ pub fn cmd_dot_noop(_ast: &CommandAst, _ctx: &ExecContext) -> CommandResult {
 /// `.clients [enabled|disabled]`
 pub fn cmd_dot_clients(ast: &CommandAst, ctx: &ExecContext) -> CommandResult {
     let filter = enabled_filter(ast);
+    let allowed = permitted(ctx, Kind::Client, |cfg| cfg.clients.iter().map(|c| c.name.clone()).collect());
     with_config(ctx, "clients", |cfg| name_list("clients", "name", cfg.clients.iter()
+        .filter(|c| allowed.contains(&c.name))
         .filter(|c| filter.map_or(true, |want| c.enabled == want))
         .map(|c| (c.name.as_str(), Some(c.enabled)))))
 }
@@ -72,7 +83,9 @@ pub fn cmd_dot_clients(ast: &CommandAst, ctx: &ExecContext) -> CommandResult {
 pub fn cmd_dot_jobs(ast: &CommandAst, ctx: &ExecContext) -> CommandResult {
     let filter = enabled_filter(ast);
     let type_f = type_filter(ast);
+    let allowed = permitted(ctx, Kind::Job, |cfg| cfg.jobs.iter().map(|j| j.name.clone()).collect());
     with_config(ctx, "jobs", |cfg| name_list("jobs", "name", cfg.jobs.iter()
+        .filter(|j| allowed.contains(&j.name))
         .filter(|j| filter.map_or(true, |want| j.enabled == want))
         .filter(|j| match type_f {
             // C++ compares the first character of type= with the job type code
@@ -86,7 +99,9 @@ pub fn cmd_dot_jobs(ast: &CommandAst, ctx: &ExecContext) -> CommandResult {
 /// `.pools [type=<pooltype>]`
 pub fn cmd_dot_pools(ast: &CommandAst, ctx: &ExecContext) -> CommandResult {
     let type_f = type_filter(ast);
+    let allowed = permitted(ctx, Kind::Pool, |cfg| cfg.pools.iter().map(|p| p.name.clone()).collect());
     with_config(ctx, "pools", |cfg| name_list("pools", "name", cfg.pools.iter()
+        .filter(|p| allowed.contains(&p.name))
         .filter(|p| type_f.map_or(true, |t| p.pool_type.eq_ignore_ascii_case(t)))
         .map(|p| (p.name.as_str(), None))))
 }
@@ -94,21 +109,26 @@ pub fn cmd_dot_pools(ast: &CommandAst, ctx: &ExecContext) -> CommandResult {
 /// `.storage` / `.storages [enabled|disabled]`
 pub fn cmd_dot_storage(ast: &CommandAst, ctx: &ExecContext) -> CommandResult {
     let filter = enabled_filter(ast);
+    let allowed = permitted(ctx, Kind::Storage, |cfg| cfg.storages.iter().map(|st| st.name.clone()).collect());
     with_config(ctx, "storages", |cfg| name_list("storages", "name", cfg.storages.iter()
+        .filter(|st| allowed.contains(&st.name))
         .filter(|st| filter.map_or(true, |want| st.enabled == want))
         .map(|st| (st.name.as_str(), Some(st.enabled)))))
 }
 
 /// `.filesets`
 pub fn cmd_dot_filesets(_ast: &CommandAst, ctx: &ExecContext) -> CommandResult {
-    with_config(ctx, "filesets", |cfg| name_list("filesets", "name",
-        cfg.filesets.iter().map(|f| (f.name.as_str(), None))))
+    let allowed = permitted(ctx, Kind::FileSet, |cfg| cfg.filesets.iter().map(|f| f.name.clone()).collect());
+    with_config(ctx, "filesets", |_| name_list("filesets", "name",
+        allowed.iter().map(|name| (name.as_str(), None))))
 }
 
 /// `.schedule [enabled|disabled]`
 pub fn cmd_dot_schedule(ast: &CommandAst, ctx: &ExecContext) -> CommandResult {
     let filter = enabled_filter(ast);
+    let allowed = permitted(ctx, Kind::Schedule, |cfg| cfg.schedules.iter().map(|sc| sc.name.clone()).collect());
     with_config(ctx, "schedules", |cfg| name_list("schedules", "name", cfg.schedules.iter()
+        .filter(|sc| allowed.contains(&sc.name))
         .filter(|sc| filter.map_or(true, |want| sc.enabled == want))
         .map(|sc| (sc.name.as_str(), Some(sc.enabled)))))
 }
@@ -209,8 +229,9 @@ pub fn cmd_dot_authorized(ast: &CommandAst, ctx: &ExecContext) -> CommandResult 
 
 /// `.catalogs`
 pub fn cmd_dot_catalogs(_ast: &CommandAst, ctx: &ExecContext) -> CommandResult {
-    with_config(ctx, "catalogs", |cfg| name_list("catalogs", "name",
-        cfg.catalogs.iter().map(|c| (c.name.as_str(), None))))
+    let allowed = permitted(ctx, Kind::Catalog, |cfg| cfg.catalogs.iter().map(|c| c.name.clone()).collect());
+    with_config(ctx, "catalogs", |_| name_list("catalogs", "name",
+        allowed.iter().map(|name| (name.as_str(), None))))
 }
 
 /// `.consoles` — the Console chain, which ends with the internal `*UserAgent*`
@@ -230,8 +251,9 @@ pub fn cmd_dot_consoles(_ast: &CommandAst, ctx: &ExecContext) -> CommandResult {
 
 /// `.jobdefs`
 pub fn cmd_dot_jobdefs(_ast: &CommandAst, ctx: &ExecContext) -> CommandResult {
-    with_config(ctx, "jobdefs", |cfg| name_list("jobdefs", "name",
-        cfg.jobdefs.iter().map(|j| (j.name.as_str(), None))))
+    let allowed = permitted(ctx, Kind::Job, |cfg| cfg.jobdefs.iter().map(|j| j.name.clone()).collect());
+    with_config(ctx, "jobdefs", |_| name_list("jobdefs", "name",
+        allowed.iter().map(|name| (name.as_str(), None))))
 }
 
 /// `.levels [jobtype]` — C++ joblevels[] table (dird_conf.cc)
@@ -516,6 +538,52 @@ mod users_tests {
         assert_eq!(result.text_output, "zeta\nalpha\n*UserAgent*\n");
         assert_eq!(result.json.unwrap(),
             json!({"consoles":[{"name":"zeta"},{"name":"alpha"},{"name":"*UserAgent*"}]}));
+    }
+
+    /// Compatibility log C-025: the resource listings filter by the
+    /// console's ACL (ua_dotcmds.cc AclAccessOk, no audit event).
+    #[test]
+    fn dot_listings_filter_by_console_acl() {
+        use std::sync::{Arc, RwLock};
+        let config = crate::director_config::DirectorConfig::from_str(r#"
+Director { Name=dir; Password=secret }
+Profile { Name=p; ScheduleACL="Week.*"; CatalogACL=MyCatalog }
+Console { Name=limited; Password=pw; JobACL=!blocked,*all*; PoolACL="Inc.*",Full; ClientACL=fd1; Profile=p }
+Job { Name=blocked; Client=fd1 }
+Job { Name=allowed; Client=fd1 }
+JobDefs { Name=blocked }
+JobDefs { Name=defs }
+Client { Name=fd1; Password=x }
+Client { Name=fd2; Password=x }
+Pool { Name=Full }
+Pool { Name=Scratch }
+Pool { Name=Incremental }
+Storage { Name=File; Address=localhost; Password=x; Device=d; MediaType=m }
+FileSet { Name=fs }
+Schedule { Name=WeeklyCycle }
+Schedule { Name=Nightly }
+Catalog { Name=MyCatalog; DbName=bareos }
+Catalog { Name=Other; DbName=other }
+"#).unwrap();
+        let manager = Arc::new(crate::session_manager::SessionManager::new(Arc::new(
+            crate::message_bus::MessageBus::new(16))));
+        let id = manager.create_session("limited");
+        manager.authenticate_session(id);
+        let ctx = ExecContext { session_id: id, config: Some(Arc::new(RwLock::new(config))),
+            session_mgr: Some(manager), catalog: None, api_mode: ApiMode::Human,
+            bus_rx: None, job_manager: None };
+        let ast = CommandAst::default();
+        let text = |f: fn(&CommandAst, &ExecContext) -> CommandResult| f(&ast, &ctx).text_output;
+        assert_eq!(text(cmd_dot_jobs), "allowed\n");
+        assert_eq!(text(cmd_dot_jobdefs), "defs\n");
+        assert_eq!(text(cmd_dot_clients), "fd1\n");
+        assert_eq!(text(cmd_dot_pools), "Full\nIncremental\n");
+        assert_eq!(text(cmd_dot_storage), "");
+        assert_eq!(text(cmd_dot_filesets), "");
+        assert_eq!(text(cmd_dot_schedule), "WeeklyCycle\n");
+        assert_eq!(text(cmd_dot_catalogs), "MyCatalog\n");
+        assert_eq!(cmd_dot_jobs(&ast, &ctx).json.unwrap(),
+            json!({"jobs":[{"name":"allowed","enabled":true}]}));
     }
 
     #[test]

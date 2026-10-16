@@ -1,0 +1,186 @@
+{"id": "c025-jobs-limited", "steps": [".jobs"], "console": "parity-limited", "password": "parity-limited-pw"}
+{"id": "c025-jobs-limited-api2", "setup": [".api 2"], "steps": [".jobs"], "console": "parity-limited", "password": "parity-limited-pw"}
+{"id": "c025-jobdefs-limited", "steps": [".jobdefs"], "console": "parity-limited", "password": "parity-limited-pw"}
+{"id": "c025-jobdefs-limited-api2", "setup": [".api 2"], "steps": [".jobdefs"], "console": "parity-limited", "password": "parity-limited-pw"}
+{"id": "c025-pools-limited", "steps": [".pools"], "console": "parity-limited", "password": "parity-limited-pw"}
+{"id": "c025-pools-limited-api2", "setup": [".api 2"], "steps": [".pools"], "console": "parity-limited", "password": "parity-limited-pw"}
+{"id": "c025-storages-limited", "steps": [".storages"], "console": "parity-limited", "password": "parity-limited-pw"}
+{"id": "c025-storages-limited-api2", "setup": [".api 2"], "steps": [".storages"], "console": "parity-limited", "password": "parity-limited-pw"}
+{"id": "c025-clients-limited", "steps": [".clients"], "console": "parity-limited", "password": "parity-limited-pw"}
+{"id": "c025-clients-limited-api2", "setup": [".api 2"], "steps": [".clients"], "console": "parity-limited", "password": "parity-limited-pw"}
+{"id": "c025-catalogs-limited", "steps": [".catalogs"], "console": "parity-limited", "password": "parity-limited-pw"}
+{"id": "c025-catalogs-limited-api2", "setup": [".api 2"], "steps": [".catalogs"], "console": "parity-limited", "password": "parity-limited-pw"}
+{"id": "c025-filesets-limited", "steps": [".filesets"], "console": "parity-limited", "password": "parity-limited-pw"}
+{"id": "c025-filesets-limited-api2", "setup": [".api 2"], "steps": [".filesets"], "console": "parity-limited", "password": "parity-limited-pw"}
+{"id": "c025-schedule-limited", "steps": [".schedule"], "console": "parity-limited", "password": "parity-limited-pw"}
+{"id": "c025-schedule-limited-api2", "setup": [".api 2"], "steps": [".schedule"], "console": "parity-limited", "password": "parity-limited-pw"}
+{"id": "c025-consoles-limited", "steps": [".consoles"], "console": "parity-limited", "password": "parity-limited-pw"}
+{"id": "c025-consoles-limited-api2", "setup": [".api 2"], "steps": [".consoles"], "console": "parity-limited", "password": "parity-limited-pw"}
+{"id": "c025-profiles-limited", "steps": [".profiles"], "console": "parity-limited", "password": "parity-limited-pw"}
+{"id": "c025-profiles-limited-api2", "setup": [".api 2"], "steps": [".profiles"], "console": "parity-limited", "password": "parity-limited-pw"}
+{"id": "c025-users-limited", "steps": [".users"], "console": "parity-limited", "password": "parity-limited-pw"}
+{"id": "c025-users-limited-api2", "setup": [".api 2"], "steps": [".users"], "console": "parity-limited", "password": "parity-limited-pw"}
+{"id": "c025-msgs-limited", "steps": [".msgs"], "console": "parity-limited", "password": "parity-limited-pw"}
+{"id": "c025-msgs-limited-api2", "setup": [".api 2"], "steps": [".msgs"], "console": "parity-limited", "password": "parity-limited-pw"}
+{"id": "c025-mediatypes-limited", "steps": [".mediatypes"], "console": "parity-limited", "password": "parity-limited-pw"}
+{"id": "c025-jobs-enabled-limited", "steps": [".jobs enabled"], "console": "parity-limited", "password": "parity-limited-pw"}
+{"id": "c025-jobs-enabled-limited-api2", "setup": [".api 2"], "steps": [".jobs enabled"], "console": "parity-limited", "password": "parity-limited-pw"}
+{"id": "c025-jobs-type-B-limited", "steps": [".jobs type=B"], "console": "parity-limited", "password": "parity-limited-pw"}
+{"id": "c025-jobs-type-B-limited-api2", "setup": [".api 2"], "steps": [".jobs type=B"], "console": "parity-limited", "password": "parity-limited-pw"}
+{"id": "c025-pools-type-Backup-limited", "steps": [".pools type=Backup"], "console": "parity-limited", "password": "parity-limited-pw"}
+{"id": "c025-pools-type-Backup-limited-api2", "setup": [".api 2"], "steps": [".pools type=Backup"], "console": "parity-limited", "password": "parity-limited-pw"}
+{"id": "c025-clients-disabled-limited", "steps": [".clients disabled"], "console": "parity-limited", "password": "parity-limited-pw"}
+{"id": "c025-clients-disabled-limited-api2", "setup": [".api 2"], "steps": [".clients disabled"], "console": "parity-limited", "password": "parity-limited-pw"}
+{"id": "c025-storages-enabled-limited", "steps": [".storages enabled"], "console": "parity-limited", "password": "parity-limited-pw"}
+{"id": "c025-storages-enabled-limited-api2", "setup": [".api 2"], "steps": [".storages enabled"], "console": "parity-limited", "password": "parity-limited-pw"}
+{"id": "c025-schedule-enabled-limited", "steps": [".schedule enabled"], "console": "parity-limited", "password": "parity-limited-pw"}
+{"id": "c025-schedule-enabled-limited-api2", "setup": [".api 2"], "steps": [".schedule enabled"], "console": "parity-limited", "password": "parity-limited-pw"}
+{"id": "c025-jobs-operator", "steps": [".jobs"], "console": "parity-operator", "password": "parity-operator-pw"}
+{"id": "c025-jobs-operator-api2", "setup": [".api 2"], "steps": [".jobs"], "console": "parity-operator", "password": "parity-operator-pw"}
+{"id": "c025-jobdefs-operator", "steps": [".jobdefs"], "console": "parity-operator", "password": "parity-operator-pw"}
+{"id": "c025-jobdefs-operator-api2", "setup": [".api 2"], "steps": [".jobdefs"], "console": "parity-operator", "password": "parity-operator-pw"}
+{"id": "c025-pools-operator", "steps": [".pools"], "console": "parity-operator", "password": "parity-operator-pw"}
+{"id": "c025-pools-operator-api2", "setup": [".api 2"], "steps": [".pools"], "console": "parity-operator", "password": "parity-operator-pw"}
+{"id": "c025-storages-operator", "steps": [".storages"], "console": "parity-operator", "password": "parity-operator-pw"}
+{"id": "c025-storages-operator-api2", "setup": [".api 2"], "steps": [".storages"], "console": "parity-operator", "password": "parity-operator-pw"}
+{"id": "c025-clients-operator", "steps": [".clients"], "console": "parity-operator", "password": "parity-operator-pw"}
+{"id": "c025-clients-operator-api2", "setup": [".api 2"], "steps": [".clients"], "console": "parity-operator", "password": "parity-operator-pw"}
+{"id": "c025-catalogs-operator", "steps": [".catalogs"], "console": "parity-operator", "password": "parity-operator-pw"}
+{"id": "c025-catalogs-operator-api2", "setup": [".api 2"], "steps": [".catalogs"], "console": "parity-operator", "password": "parity-operator-pw"}
+{"id": "c025-filesets-operator", "steps": [".filesets"], "console": "parity-operator", "password": "parity-operator-pw"}
+{"id": "c025-filesets-operator-api2", "setup": [".api 2"], "steps": [".filesets"], "console": "parity-operator", "password": "parity-operator-pw"}
+{"id": "c025-schedule-operator", "steps": [".schedule"], "console": "parity-operator", "password": "parity-operator-pw"}
+{"id": "c025-schedule-operator-api2", "setup": [".api 2"], "steps": [".schedule"], "console": "parity-operator", "password": "parity-operator-pw"}
+{"id": "c025-consoles-operator", "steps": [".consoles"], "console": "parity-operator", "password": "parity-operator-pw"}
+{"id": "c025-consoles-operator-api2", "setup": [".api 2"], "steps": [".consoles"], "console": "parity-operator", "password": "parity-operator-pw"}
+{"id": "c025-profiles-operator", "steps": [".profiles"], "console": "parity-operator", "password": "parity-operator-pw"}
+{"id": "c025-profiles-operator-api2", "setup": [".api 2"], "steps": [".profiles"], "console": "parity-operator", "password": "parity-operator-pw"}
+{"id": "c025-users-operator", "steps": [".users"], "console": "parity-operator", "password": "parity-operator-pw"}
+{"id": "c025-users-operator-api2", "setup": [".api 2"], "steps": [".users"], "console": "parity-operator", "password": "parity-operator-pw"}
+{"id": "c025-msgs-operator", "steps": [".msgs"], "console": "parity-operator", "password": "parity-operator-pw"}
+{"id": "c025-msgs-operator-api2", "setup": [".api 2"], "steps": [".msgs"], "console": "parity-operator", "password": "parity-operator-pw"}
+{"id": "c025-mediatypes-operator", "steps": [".mediatypes"], "console": "parity-operator", "password": "parity-operator-pw"}
+{"id": "c025-jobs-enabled-operator", "steps": [".jobs enabled"], "console": "parity-operator", "password": "parity-operator-pw"}
+{"id": "c025-jobs-enabled-operator-api2", "setup": [".api 2"], "steps": [".jobs enabled"], "console": "parity-operator", "password": "parity-operator-pw"}
+{"id": "c025-jobs-type-B-operator", "steps": [".jobs type=B"], "console": "parity-operator", "password": "parity-operator-pw"}
+{"id": "c025-jobs-type-B-operator-api2", "setup": [".api 2"], "steps": [".jobs type=B"], "console": "parity-operator", "password": "parity-operator-pw"}
+{"id": "c025-pools-type-Backup-operator", "steps": [".pools type=Backup"], "console": "parity-operator", "password": "parity-operator-pw"}
+{"id": "c025-pools-type-Backup-operator-api2", "setup": [".api 2"], "steps": [".pools type=Backup"], "console": "parity-operator", "password": "parity-operator-pw"}
+{"id": "c025-clients-disabled-operator", "steps": [".clients disabled"], "console": "parity-operator", "password": "parity-operator-pw"}
+{"id": "c025-clients-disabled-operator-api2", "setup": [".api 2"], "steps": [".clients disabled"], "console": "parity-operator", "password": "parity-operator-pw"}
+{"id": "c025-storages-enabled-operator", "steps": [".storages enabled"], "console": "parity-operator", "password": "parity-operator-pw"}
+{"id": "c025-storages-enabled-operator-api2", "setup": [".api 2"], "steps": [".storages enabled"], "console": "parity-operator", "password": "parity-operator-pw"}
+{"id": "c025-schedule-enabled-operator", "steps": [".schedule enabled"], "console": "parity-operator", "password": "parity-operator-pw"}
+{"id": "c025-schedule-enabled-operator-api2", "setup": [".api 2"], "steps": [".schedule enabled"], "console": "parity-operator", "password": "parity-operator-pw"}
+{"id": "c025-jobs-bvfs", "steps": [".jobs"], "console": "parity-bvfs", "password": "parity-bvfs-pw"}
+{"id": "c025-jobs-bvfs-api2", "setup": [".api 2"], "steps": [".jobs"], "console": "parity-bvfs", "password": "parity-bvfs-pw"}
+{"id": "c025-jobdefs-bvfs", "steps": [".jobdefs"], "console": "parity-bvfs", "password": "parity-bvfs-pw"}
+{"id": "c025-jobdefs-bvfs-api2", "setup": [".api 2"], "steps": [".jobdefs"], "console": "parity-bvfs", "password": "parity-bvfs-pw"}
+{"id": "c025-pools-bvfs", "steps": [".pools"], "console": "parity-bvfs", "password": "parity-bvfs-pw"}
+{"id": "c025-pools-bvfs-api2", "setup": [".api 2"], "steps": [".pools"], "console": "parity-bvfs", "password": "parity-bvfs-pw"}
+{"id": "c025-storages-bvfs", "steps": [".storages"], "console": "parity-bvfs", "password": "parity-bvfs-pw"}
+{"id": "c025-storages-bvfs-api2", "setup": [".api 2"], "steps": [".storages"], "console": "parity-bvfs", "password": "parity-bvfs-pw"}
+{"id": "c025-clients-bvfs", "steps": [".clients"], "console": "parity-bvfs", "password": "parity-bvfs-pw"}
+{"id": "c025-clients-bvfs-api2", "setup": [".api 2"], "steps": [".clients"], "console": "parity-bvfs", "password": "parity-bvfs-pw"}
+{"id": "c025-catalogs-bvfs", "steps": [".catalogs"], "console": "parity-bvfs", "password": "parity-bvfs-pw"}
+{"id": "c025-catalogs-bvfs-api2", "setup": [".api 2"], "steps": [".catalogs"], "console": "parity-bvfs", "password": "parity-bvfs-pw"}
+{"id": "c025-filesets-bvfs", "steps": [".filesets"], "console": "parity-bvfs", "password": "parity-bvfs-pw"}
+{"id": "c025-filesets-bvfs-api2", "setup": [".api 2"], "steps": [".filesets"], "console": "parity-bvfs", "password": "parity-bvfs-pw"}
+{"id": "c025-schedule-bvfs", "steps": [".schedule"], "console": "parity-bvfs", "password": "parity-bvfs-pw"}
+{"id": "c025-schedule-bvfs-api2", "setup": [".api 2"], "steps": [".schedule"], "console": "parity-bvfs", "password": "parity-bvfs-pw"}
+{"id": "c025-consoles-bvfs", "steps": [".consoles"], "console": "parity-bvfs", "password": "parity-bvfs-pw"}
+{"id": "c025-consoles-bvfs-api2", "setup": [".api 2"], "steps": [".consoles"], "console": "parity-bvfs", "password": "parity-bvfs-pw"}
+{"id": "c025-profiles-bvfs", "steps": [".profiles"], "console": "parity-bvfs", "password": "parity-bvfs-pw"}
+{"id": "c025-profiles-bvfs-api2", "setup": [".api 2"], "steps": [".profiles"], "console": "parity-bvfs", "password": "parity-bvfs-pw"}
+{"id": "c025-users-bvfs", "steps": [".users"], "console": "parity-bvfs", "password": "parity-bvfs-pw"}
+{"id": "c025-users-bvfs-api2", "setup": [".api 2"], "steps": [".users"], "console": "parity-bvfs", "password": "parity-bvfs-pw"}
+{"id": "c025-msgs-bvfs", "steps": [".msgs"], "console": "parity-bvfs", "password": "parity-bvfs-pw"}
+{"id": "c025-msgs-bvfs-api2", "setup": [".api 2"], "steps": [".msgs"], "console": "parity-bvfs", "password": "parity-bvfs-pw"}
+{"id": "c025-mediatypes-bvfs", "steps": [".mediatypes"], "console": "parity-bvfs", "password": "parity-bvfs-pw"}
+{"id": "c025-jobs-enabled-bvfs", "steps": [".jobs enabled"], "console": "parity-bvfs", "password": "parity-bvfs-pw"}
+{"id": "c025-jobs-enabled-bvfs-api2", "setup": [".api 2"], "steps": [".jobs enabled"], "console": "parity-bvfs", "password": "parity-bvfs-pw"}
+{"id": "c025-jobs-type-B-bvfs", "steps": [".jobs type=B"], "console": "parity-bvfs", "password": "parity-bvfs-pw"}
+{"id": "c025-jobs-type-B-bvfs-api2", "setup": [".api 2"], "steps": [".jobs type=B"], "console": "parity-bvfs", "password": "parity-bvfs-pw"}
+{"id": "c025-pools-type-Backup-bvfs", "steps": [".pools type=Backup"], "console": "parity-bvfs", "password": "parity-bvfs-pw"}
+{"id": "c025-pools-type-Backup-bvfs-api2", "setup": [".api 2"], "steps": [".pools type=Backup"], "console": "parity-bvfs", "password": "parity-bvfs-pw"}
+{"id": "c025-clients-disabled-bvfs", "steps": [".clients disabled"], "console": "parity-bvfs", "password": "parity-bvfs-pw"}
+{"id": "c025-clients-disabled-bvfs-api2", "setup": [".api 2"], "steps": [".clients disabled"], "console": "parity-bvfs", "password": "parity-bvfs-pw"}
+{"id": "c025-storages-enabled-bvfs", "steps": [".storages enabled"], "console": "parity-bvfs", "password": "parity-bvfs-pw"}
+{"id": "c025-storages-enabled-bvfs-api2", "setup": [".api 2"], "steps": [".storages enabled"], "console": "parity-bvfs", "password": "parity-bvfs-pw"}
+{"id": "c025-schedule-enabled-bvfs", "steps": [".schedule enabled"], "console": "parity-bvfs", "password": "parity-bvfs-pw"}
+{"id": "c025-schedule-enabled-bvfs-api2", "setup": [".api 2"], "steps": [".schedule enabled"], "console": "parity-bvfs", "password": "parity-bvfs-pw"}
+{"id": "c025-jobs-acl", "steps": [".jobs"], "console": "parity-acl", "password": "parity-acl-pw"}
+{"id": "c025-jobs-acl-api2", "setup": [".api 2"], "steps": [".jobs"], "console": "parity-acl", "password": "parity-acl-pw"}
+{"id": "c025-jobdefs-acl", "steps": [".jobdefs"], "console": "parity-acl", "password": "parity-acl-pw"}
+{"id": "c025-jobdefs-acl-api2", "setup": [".api 2"], "steps": [".jobdefs"], "console": "parity-acl", "password": "parity-acl-pw"}
+{"id": "c025-pools-acl", "steps": [".pools"], "console": "parity-acl", "password": "parity-acl-pw"}
+{"id": "c025-pools-acl-api2", "setup": [".api 2"], "steps": [".pools"], "console": "parity-acl", "password": "parity-acl-pw"}
+{"id": "c025-storages-acl", "steps": [".storages"], "console": "parity-acl", "password": "parity-acl-pw"}
+{"id": "c025-storages-acl-api2", "setup": [".api 2"], "steps": [".storages"], "console": "parity-acl", "password": "parity-acl-pw"}
+{"id": "c025-clients-acl", "steps": [".clients"], "console": "parity-acl", "password": "parity-acl-pw"}
+{"id": "c025-clients-acl-api2", "setup": [".api 2"], "steps": [".clients"], "console": "parity-acl", "password": "parity-acl-pw"}
+{"id": "c025-catalogs-acl", "steps": [".catalogs"], "console": "parity-acl", "password": "parity-acl-pw"}
+{"id": "c025-catalogs-acl-api2", "setup": [".api 2"], "steps": [".catalogs"], "console": "parity-acl", "password": "parity-acl-pw"}
+{"id": "c025-filesets-acl", "steps": [".filesets"], "console": "parity-acl", "password": "parity-acl-pw"}
+{"id": "c025-filesets-acl-api2", "setup": [".api 2"], "steps": [".filesets"], "console": "parity-acl", "password": "parity-acl-pw"}
+{"id": "c025-schedule-acl", "steps": [".schedule"], "console": "parity-acl", "password": "parity-acl-pw"}
+{"id": "c025-schedule-acl-api2", "setup": [".api 2"], "steps": [".schedule"], "console": "parity-acl", "password": "parity-acl-pw"}
+{"id": "c025-consoles-acl", "steps": [".consoles"], "console": "parity-acl", "password": "parity-acl-pw"}
+{"id": "c025-consoles-acl-api2", "setup": [".api 2"], "steps": [".consoles"], "console": "parity-acl", "password": "parity-acl-pw"}
+{"id": "c025-profiles-acl", "steps": [".profiles"], "console": "parity-acl", "password": "parity-acl-pw"}
+{"id": "c025-profiles-acl-api2", "setup": [".api 2"], "steps": [".profiles"], "console": "parity-acl", "password": "parity-acl-pw"}
+{"id": "c025-users-acl", "steps": [".users"], "console": "parity-acl", "password": "parity-acl-pw"}
+{"id": "c025-users-acl-api2", "setup": [".api 2"], "steps": [".users"], "console": "parity-acl", "password": "parity-acl-pw"}
+{"id": "c025-msgs-acl", "steps": [".msgs"], "console": "parity-acl", "password": "parity-acl-pw"}
+{"id": "c025-msgs-acl-api2", "setup": [".api 2"], "steps": [".msgs"], "console": "parity-acl", "password": "parity-acl-pw"}
+{"id": "c025-mediatypes-acl", "steps": [".mediatypes"], "console": "parity-acl", "password": "parity-acl-pw"}
+{"id": "c025-jobs-enabled-acl", "steps": [".jobs enabled"], "console": "parity-acl", "password": "parity-acl-pw"}
+{"id": "c025-jobs-enabled-acl-api2", "setup": [".api 2"], "steps": [".jobs enabled"], "console": "parity-acl", "password": "parity-acl-pw"}
+{"id": "c025-jobs-type-B-acl", "steps": [".jobs type=B"], "console": "parity-acl", "password": "parity-acl-pw"}
+{"id": "c025-jobs-type-B-acl-api2", "setup": [".api 2"], "steps": [".jobs type=B"], "console": "parity-acl", "password": "parity-acl-pw"}
+{"id": "c025-pools-type-Backup-acl", "steps": [".pools type=Backup"], "console": "parity-acl", "password": "parity-acl-pw"}
+{"id": "c025-pools-type-Backup-acl-api2", "setup": [".api 2"], "steps": [".pools type=Backup"], "console": "parity-acl", "password": "parity-acl-pw"}
+{"id": "c025-clients-disabled-acl", "steps": [".clients disabled"], "console": "parity-acl", "password": "parity-acl-pw"}
+{"id": "c025-clients-disabled-acl-api2", "setup": [".api 2"], "steps": [".clients disabled"], "console": "parity-acl", "password": "parity-acl-pw"}
+{"id": "c025-storages-enabled-acl", "steps": [".storages enabled"], "console": "parity-acl", "password": "parity-acl-pw"}
+{"id": "c025-storages-enabled-acl-api2", "setup": [".api 2"], "steps": [".storages enabled"], "console": "parity-acl", "password": "parity-acl-pw"}
+{"id": "c025-schedule-enabled-acl", "steps": [".schedule enabled"], "console": "parity-acl", "password": "parity-acl-pw"}
+{"id": "c025-schedule-enabled-acl-api2", "setup": [".api 2"], "steps": [".schedule enabled"], "console": "parity-acl", "password": "parity-acl-pw"}
+{"id": "c025-run-select-limited", "steps": ["run", "."], "console": "parity-limited", "password": "parity-limited-pw"}
+{"id": "c025-run-select-limited-api2", "setup": [".api 2"], "steps": ["run"], "console": "parity-limited", "password": "parity-limited-pw"}
+{"id": "c025-enable-select-limited", "steps": ["enable", "."], "console": "parity-limited", "password": "parity-limited-pw"}
+{"id": "c025-enable-select-limited-api2", "setup": [".api 2"], "steps": ["enable"], "console": "parity-limited", "password": "parity-limited-pw"}
+{"id": "c025-disable-select-limited", "steps": ["disable", "."], "console": "parity-limited", "password": "parity-limited-pw"}
+{"id": "c025-disable-select-limited-api2", "setup": [".api 2"], "steps": ["disable"], "console": "parity-limited", "password": "parity-limited-pw"}
+{"id": "c025-enable-client-select-limited", "steps": ["enable client", "."], "console": "parity-limited", "password": "parity-limited-pw"}
+{"id": "c025-enable-client-select-limited-api2", "setup": [".api 2"], "steps": ["enable client"], "console": "parity-limited", "password": "parity-limited-pw"}
+{"id": "c025-disable-schedule-select-limited", "steps": ["disable schedule", "."], "console": "parity-limited", "password": "parity-limited-pw"}
+{"id": "c025-disable-schedule-select-limited-api2", "setup": [".api 2"], "steps": ["disable schedule"], "console": "parity-limited", "password": "parity-limited-pw"}
+{"id": "c025-run-select-operator", "steps": ["run", "."], "console": "parity-operator", "password": "parity-operator-pw"}
+{"id": "c025-run-select-operator-api2", "setup": [".api 2"], "steps": ["run"], "console": "parity-operator", "password": "parity-operator-pw"}
+{"id": "c025-enable-select-operator", "steps": ["enable", "."], "console": "parity-operator", "password": "parity-operator-pw"}
+{"id": "c025-enable-select-operator-api2", "setup": [".api 2"], "steps": ["enable"], "console": "parity-operator", "password": "parity-operator-pw"}
+{"id": "c025-disable-select-operator", "steps": ["disable", "."], "console": "parity-operator", "password": "parity-operator-pw"}
+{"id": "c025-disable-select-operator-api2", "setup": [".api 2"], "steps": ["disable"], "console": "parity-operator", "password": "parity-operator-pw"}
+{"id": "c025-enable-client-select-operator", "steps": ["enable client", "."], "console": "parity-operator", "password": "parity-operator-pw"}
+{"id": "c025-enable-client-select-operator-api2", "setup": [".api 2"], "steps": ["enable client"], "console": "parity-operator", "password": "parity-operator-pw"}
+{"id": "c025-run-select-bvfs", "steps": ["run", "."], "console": "parity-bvfs", "password": "parity-bvfs-pw"}
+{"id": "c025-run-select-bvfs-api2", "setup": [".api 2"], "steps": ["run"], "console": "parity-bvfs", "password": "parity-bvfs-pw"}
+{"id": "c025-enable-select-bvfs", "steps": ["enable", "."], "console": "parity-bvfs", "password": "parity-bvfs-pw"}
+{"id": "c025-enable-select-bvfs-api2", "setup": [".api 2"], "steps": ["enable"], "console": "parity-bvfs", "password": "parity-bvfs-pw"}
+{"id": "c025-disable-select-bvfs", "steps": ["disable", "."], "console": "parity-bvfs", "password": "parity-bvfs-pw"}
+{"id": "c025-disable-select-bvfs-api2", "setup": [".api 2"], "steps": ["disable"], "console": "parity-bvfs", "password": "parity-bvfs-pw"}
+{"id": "c025-enable-client-select-bvfs", "steps": ["enable client", "."], "console": "parity-bvfs", "password": "parity-bvfs-pw"}
+{"id": "c025-enable-client-select-bvfs-api2", "setup": [".api 2"], "steps": ["enable client"], "console": "parity-bvfs", "password": "parity-bvfs-pw"}
+{"id": "c025-disable-schedule-select-bvfs", "steps": ["disable schedule", "."], "console": "parity-bvfs", "password": "parity-bvfs-pw"}
+{"id": "c025-disable-schedule-select-bvfs-api2", "setup": [".api 2"], "steps": ["disable schedule"], "console": "parity-bvfs", "password": "parity-bvfs-pw"}
+{"id": "c025-run-select-acl", "steps": ["run", "."], "console": "parity-acl", "password": "parity-acl-pw"}
+{"id": "c025-run-select-acl-api2", "setup": [".api 2"], "steps": ["run"], "console": "parity-acl", "password": "parity-acl-pw"}
+{"id": "c025-enable-select-acl", "steps": ["enable", "."], "console": "parity-acl", "password": "parity-acl-pw"}
+{"id": "c025-enable-select-acl-api2", "setup": [".api 2"], "steps": ["enable"], "console": "parity-acl", "password": "parity-acl-pw"}
+{"id": "c025-disable-select-acl", "steps": ["disable", "."], "console": "parity-acl", "password": "parity-acl-pw"}
+{"id": "c025-disable-select-acl-api2", "setup": [".api 2"], "steps": ["disable"], "console": "parity-acl", "password": "parity-acl-pw"}
+{"id": "c025-enable-client-select-acl", "steps": ["enable client", "."], "console": "parity-acl", "password": "parity-acl-pw"}
+{"id": "c025-enable-client-select-acl-api2", "setup": [".api 2"], "steps": ["enable client"], "console": "parity-acl", "password": "parity-acl-pw"}
+{"id": "c025-disable-schedule-select-acl", "steps": ["disable schedule", "."], "console": "parity-acl", "password": "parity-acl-pw"}
+{"id": "c025-disable-schedule-select-acl-api2", "setup": [".api 2"], "steps": ["disable schedule"], "console": "parity-acl", "password": "parity-acl-pw"}
