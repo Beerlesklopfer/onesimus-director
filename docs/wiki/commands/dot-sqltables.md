@@ -1,51 +1,86 @@
-# .sqltables — List Catalog Table Names
+# .sqltables — Tabellen des Katalogs auflisten
 
-Machine-interface command that lists all table names in the catalog database's public schema. Shortcut for `.sql tables`.
+## Zweck
+
+`.sqltables` listet alle Tabellen im Schema `public` der Katalogdatenbank, alphabetisch sortiert. Das hilft, bevor man mit [.sql](dot-sql.md) eine eigene Abfrage schreibt. Der Befehl liest nur und verändert nichts.
+
+**Onesimus-Erweiterung (nicht im Original, C-074).** Das Bareos-Original kennt den Befehl nicht und antwortet `.sqltables: is an invalid command.`. Ob er bleibt, ist noch nicht entschieden. Die Ausgabe ist eine rohe Datenbanktabelle mit Spaltenkopf `tablename` und Trennlinie, kein gerahmtes Format wie bei `.sql`.
 
 ## Syntax
 
-```
+```text
 .sqltables
 ```
 
-## Arguments
+## Argumente
 
-None.
+| Argument | Werte | Bedeutung |
+|---|---|---|
+| `catalog=<name>` | Name eines Katalogs | diesen Katalog verwenden statt des automatisch gewählten |
 
-## Examples
+## API-Modi
 
-### List all tables
-```
-* .sqltables
+Unter `.api 0` stehen beim ersten Katalogzugriff der Sitzung die Katalog-Hinweiszeilen davor, unter `.api 1` nicht; sonst ist der Text gleich. Unter `.api 2` enthält das JSON-Objekt kein Ergebnis (`"result": {}`).
+
+## Beispiele
+
+### Tabellen auflisten
+
+```text
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]> .sqltables
+Automatically selected Catalog: MyCatalog
+Using Catalog "MyCatalog"
+tablename
+--------------------
+bareos_schema_version
 basefiles
 client
+counters
+device
+devicestats
 file
 fileset
-job
-jobmedia
-log
-media
-path
-pool
+[…]
+status
 storage
+tapealerts
 version
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]>
 ```
 
-### Empty catalog (no tables)
+**Abweichung vom Original:** Das Original antwortet `.sqltables: is an invalid command.` (C-074)
+
+### Als JSON
+
+```text
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]> .api 2
+{
+  "jsonrpc": "2.0",
+  "id": null,
+  "result": {
+    "api": 2
+  }
+}
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]> .sqltables
+{
+  "jsonrpc": "2.0",
+  "id": null,
+  "result": {}
+}
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]>
 ```
-* .sqltables
-```
 
-## Notes
+**Abweichung vom Original:** Das Original antwortet mit einem Fehlerobjekt und der Meldung `.sqltables: is an invalid command.` (C-074)
 
-- Output is one table name per line, no headers, no formatting.
-- Output is terminated by the EOD signal.
-- Internally delegates to `.sql tables`, which runs: `SELECT tablename FROM pg_catalog.pg_tables WHERE schemaname = 'public' ORDER BY tablename`.
-- Requires a catalog database connection.
+## Fehlermeldungen
 
-## Related Commands
+| Meldung | Ursache und Abhilfe |
+|---|---|
+| `.sqltables: is an invalid command.` | Die `Command ACL` der Konsole erlaubt den Befehl nicht. |
+| `SQL error: …` | Die Abfrage ist in der Datenbank fehlgeschlagen. |
 
-- [.sql](dot-sql.md) -- Execute SQL with sub-commands
-- [.sqlschema](dot-sqlschema.md) -- Show full catalog schema
-- [.sqlcount](dot-sqlcount.md) -- Count records in job table
-- [.catalogs](dot-catalogs.md) -- List catalog names
+## Siehe auch
+
+- [.sqlschema](dot-sqlschema.md) — Spalten aller Tabellen
+- [.sql](dot-sql.md) — beliebige SQL-Abfrage
+- [sqlquery](sqlquery.md) — interaktive SQL-Abfrage

@@ -1,4 +1,4 @@
-# .jobs — List Job Names
+# .jobs — Namen der Jobs auflisten
 
 <!-- bareos-reference:start -->
 ## Aus den Bareos-Originalquellen
@@ -25,58 +25,131 @@ Referenz: [WIP/25.1.2-pre-43-g18be77e68, `18be77e6832e`](https://github.com/bare
 
 Die folgenden vorhandenen Beispiele und Verhaltensbeschreibungen sind lokale Dokumentation; sie sind kein Beleg für vollständige Bareos-Kompatibilität. Bei Widersprüchen gilt der obige Befund.
 <!-- bareos-reference:end -->
-Machine-interface command used by bconsole/oconsole for tab-completion. Returns one job resource name per line from the Director configuration.
+
+## Zweck
+
+`.jobs` gibt die Namen aller Job-Ressourcen der Director-Konfiguration aus, einen pro Zeile. Programme nutzen ihn für die Vervollständigung von `job=` und für Auswahllisten, etwa in der WebUI. Der Befehl liest nur die Konfiguration und verändert nichts.
+
+Es erscheinen nur Jobs, die die Konsole laut `Job ACL` sehen darf. Die Reihenfolge ist die der Konfiguration.
 
 ## Syntax
 
+```text
+.jobs [ type=<jobtyp> ] [ enabled | disabled ]
 ```
-.jobs [type=<jobtype>] [enabled|disabled]
-```
 
-## Arguments
+## Argumente
 
-| Argument | Description |
-|----------|-------------|
-| *(none)* | List all jobs |
-| `type=<jobtype>` | Filter by job type (Backup, Restore, Verify, Admin, etc.) |
-| `enabled` | List only enabled jobs |
-| `disabled` | List only disabled jobs |
+| Argument | Werte | Bedeutung |
+|---|---|---|
+| `type=<jobtyp>` | `Backup`, `Restore`, `Verify`, `Admin`, `Copy`, `Migrate`, `Consolidate`, `Archive` oder der Kennbuchstabe | nur Jobs dieses Typs |
+| `enabled` | | nur aktivierte Jobs |
+| `disabled` | | nur deaktivierte Jobs |
 
-## Examples
+Bei `type=` zählt nur der erste Buchstabe des Wertes, und zwar mit Groß- und Kleinschreibung: Er wird mit dem Typ-Kennbuchstaben verglichen (`B` Backup, `R` Restore, `V` Verify, `D` Admin, `c` Copy, `g` Migrate, `O` Consolidate, `A` Archive). Deshalb liefert `type=Backup` und `type=Bogus` die Backup-Jobs, `type=backup` aber nichts. Ein leerer Wert (`type=`) filtert nicht. Der Schlüssel `type` selbst darf groß geschrieben werden.
 
-### List all jobs
-```
-* .jobs
+`enabled` und `disabled` wirken wie bei [.clients](dot-clients.md): ein Wert dahinter wird ignoriert, beide zusammen ergeben eine leere Liste.
+
+## API-Modi
+
+Unter `.api 0` und `.api 1` kommt dieselbe Namensliste. Unter `.api 2` steht sie als `result.jobs`, ein Array von Objekten mit `name` und `enabled`.
+
+## Beispiele
+
+### Alle Jobs
+
+```text
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]> .jobs
+parity-admin
+parity-verify
+parity-copy
+parity-migrate
+parity-consolidate
+parity-restore-regex
 backup-bareos-fd
-backup-webserver
 RestoreFiles
+BackupCatalog
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]>
 ```
 
-### Filter by type
-```
-* .jobs type=Backup
+### Nur Backup-Jobs
+
+```text
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]> .jobs type=B
 backup-bareos-fd
-backup-webserver
+BackupCatalog
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]>
 ```
 
-### List only enabled jobs
+### Typ mit Kleinbuchstaben
+
+`backup` beginnt mit `b`, und diesen Kennbuchstaben gibt es nicht.
+
+```text
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]> .jobs type=backup
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]>
 ```
-* .jobs enabled
-backup-bareos-fd
+
+### Nur Restore-Jobs im Skriptmodus
+
+```text
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]> .api 1
+api: 1
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]> .jobs type=R
+parity-restore-regex
 RestoreFiles
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]>
 ```
 
-## Notes
+### Als JSON
 
-- Output is one name per line, no headers, no formatting.
-- Output is terminated by the EOD signal.
-- The `type=` filter is case-insensitive.
-- Used by console programs to populate the `job=` argument completion list.
+```text
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]> .api 2
+{
+  "jsonrpc": "2.0",
+  "id": null,
+  "result": {
+    "api": 2
+  }
+}
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]> .jobs type=B
+{
+  "jsonrpc": "2.0",
+  "id": null,
+  "result": {
+    "jobs": [
+      {
+        "name": "backup-bareos-fd",
+        "enabled": true
+      },
+      {
+        "name": "BackupCatalog",
+        "enabled": true
+      }
+    ]
+  }
+}
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]>
+```
 
-## Related Commands
+### Mit eingeschränkter Konsole
 
-- [run](run.md) -- Run a job
-- [.defaults](dot-defaults.md) -- Show default values for a job
-- [.types](dot-types.md) -- List all job types
-- [.jobdefs](dot-jobdefs.md) -- List JobDefs names
-- [.clients](dot-clients.md) -- List client names
+```text
+parity-limited@bareos-dir[25.1.2+onesimus.0.2.0]> .jobs
+backup-bareos-fd
+parity-limited@bareos-dir[25.1.2+onesimus.0.2.0]>
+```
+
+## Fehlermeldungen
+
+| Meldung | Ursache und Abhilfe |
+|---|---|
+| `.jobs: is an invalid command.` | Die `Command ACL` der Konsole erlaubt `.jobs` nicht. |
+
+## Siehe auch
+
+- [.types](dot-types.md) — die möglichen Jobtypen
+- [.defaults](dot-defaults.md) — Vorgabewerte eines Jobs
+- [.jobdefs](dot-jobdefs.md) — Namen der JobDefs
+- [run](run.md) — Job starten
+- [show](show.md) — vollständige Job-Ressource anzeigen

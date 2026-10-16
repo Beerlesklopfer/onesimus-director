@@ -1,4 +1,4 @@
-# .jobdefs — List JobDefs Names
+# .jobdefs — Namen der JobDefs auflisten
 
 <!-- bareos-reference:start -->
 ## Aus den Bareos-Originalquellen
@@ -21,42 +21,91 @@ Referenz: [WIP/25.1.2-pre-43-g18be77e68, `18be77e6832e`](https://github.com/bare
 
 Die folgenden vorhandenen Beispiele und Verhaltensbeschreibungen sind lokale Dokumentation; sie sind kein Beleg für vollständige Bareos-Kompatibilität. Bei Widersprüchen gilt der obige Befund.
 <!-- bareos-reference:end -->
-Machine-interface command used by bconsole/oconsole for tab-completion. Returns one JobDefs resource name per line from the Director configuration.
+
+## Zweck
+
+`.jobdefs` gibt die Namen aller JobDefs-Ressourcen der Director-Konfiguration aus, einen pro Zeile. JobDefs sind Vorlagen, von denen Jobs ihre Vorgabewerte erben; Konfigurationswerkzeuge brauchen die Liste etwa beim Anlegen neuer Jobs. Der Befehl liest nur die Konfiguration und verändert nichts.
+
+Es erscheinen nur JobDefs, die die Konsole laut `Job ACL` sehen darf.
 
 ## Syntax
 
-```
+```text
 .jobdefs
 ```
 
-## Arguments
+## Argumente
 
-None.
+Der Befehl hat keine Argumente. Weitere Wörter werden ignoriert.
 
-## Examples
+## API-Modi
 
-### List all jobdefs
-```
-* .jobdefs
+Unter `.api 0` und `.api 1` kommt dieselbe Namensliste. Unter `.api 2` steht sie als `result.jobdefs`, ein Array von Objekten mit `name`.
+
+## Beispiele
+
+### Alle JobDefs
+
+```text
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]> .jobdefs
 DefaultJob
-DefaultRestore
-LinuxBackup
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]>
 ```
 
-### No jobdefs configured
+### Im Skriptmodus
+
+```text
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]> .api 1
+api: 1
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]> .jobdefs
+DefaultJob
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]>
 ```
-* .jobdefs
+
+### Als JSON
+
+```text
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]> .api 2
+{
+  "jsonrpc": "2.0",
+  "id": null,
+  "result": {
+    "api": 2
+  }
+}
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]> .jobdefs
+{
+  "jsonrpc": "2.0",
+  "id": null,
+  "result": {
+    "jobdefs": [
+      {
+        "name": "DefaultJob"
+      }
+    ]
+  }
+}
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]>
 ```
 
-## Notes
+### Ohne Berechtigung
 
-- Output is one name per line, no headers, no formatting.
-- Output is terminated by the EOD signal.
-- JobDefs are template resources from which Job resources inherit directives.
-- Used by console programs to populate the `jobdefs=` argument completion list.
+Die Konsole `parity-limited` hat `.jobdefs` nicht in ihrer `Command ACL`.
 
-## Related Commands
+```text
+parity-limited@bareos-dir[25.1.2+onesimus.0.2.0]> .jobdefs
+.jobdefs: is an invalid command.
+parity-limited@bareos-dir[25.1.2+onesimus.0.2.0]>
+```
 
-- [.jobs](dot-jobs.md) -- List job names
-- [.defaults](dot-defaults.md) -- Show default values for a job
-- [show](show.md) -- Show full resource configuration
+## Fehlermeldungen
+
+| Meldung | Ursache und Abhilfe |
+|---|---|
+| `.jobdefs: is an invalid command.` | Die `Command ACL` der Konsole erlaubt `.jobdefs` nicht. |
+
+## Siehe auch
+
+- [.jobs](dot-jobs.md) — Namen der Jobs
+- [show](show.md) — `show jobdefs=<name>` zeigt die Vorlage
+- [configure](configure.md) — Job anlegen, z. B. mit `jobdefs=`

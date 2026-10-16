@@ -1,4 +1,4 @@
-# .msgs — List Pending Message Types
+# .msgs — Namen der Messages-Ressourcen auflisten
 
 <!-- bareos-reference:start -->
 ## Aus den Bareos-Originalquellen
@@ -21,41 +21,85 @@ Referenz: [WIP/25.1.2-pre-43-g18be77e68, `18be77e6832e`](https://github.com/bare
 
 Die folgenden vorhandenen Beispiele und Verhaltensbeschreibungen sind lokale Dokumentation; sie sind kein Beleg für vollständige Bareos-Kompatibilität. Bei Widersprüchen gilt der obige Befund.
 <!-- bareos-reference:end -->
-Machine-interface command used by bconsole/oconsole. Returns pending messages queued for the current console session.
+
+## Zweck
+
+`.msgs` gibt die Namen aller Messages-Ressourcen der Director-Konfiguration aus, einen pro Zeile. Eine Messages-Ressource legt fest, wohin Job- und Daemon-Meldungen gehen (Konsole, Datei, Mail, Katalog). Konfigurationswerkzeuge brauchen die Liste für die Auswahl von `messages=`. Der Befehl liest nur die Konfiguration und verändert nichts. Nicht zu verwechseln mit [.messages](dot-messages.md), das wartende Meldungen ausgibt.
 
 ## Syntax
 
-```
+```text
 .msgs
 ```
 
-## Arguments
+## Argumente
 
-None.
+Der Befehl hat keine Argumente. Weitere Wörter werden ignoriert.
 
-## Examples
+## API-Modi
 
-### No pending messages
+Unter `.api 0` und `.api 1` kommt dieselbe Namensliste. Unter `.api 2` steht sie als `result.messages`, ein Array von Objekten — anders als bei den übrigen Listen mit dem Feld `text` statt `name`.
+
+## Beispiele
+
+### Alle Messages-Ressourcen
+
+```text
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]> .msgs
+Standard
+Daemon
+c019j
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]>
 ```
-* .msgs
+
+### Im Skriptmodus
+
+```text
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]> .api 1
+api: 1
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]> .msgs
+Standard
+Daemon
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]>
 ```
 
-### Pending messages available
+### Als JSON
+
+```text
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]> .api 2
+{
+  "jsonrpc": "2.0",
+  "id": null,
+  "result": {
+    "api": 2
+  }
+}
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]> .msgs
+{
+  "jsonrpc": "2.0",
+  "id": null,
+  "result": {
+    "messages": [
+      {
+        "text": "Standard"
+      },
+      {
+        "text": "Daemon"
+      }
+    ]
+  }
+}
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]>
 ```
-* .msgs
-28-Mar 21:20 bareos-dir JobId 10: Backup OK
-28-Mar 21:20 bareos-dir JobId 10: Sending spooled attrs to catalog
-```
 
-## Notes
+## Fehlermeldungen
 
-- Output is one message per line (if any), no headers.
-- Output is terminated by the EOD signal.
-- Returns the messages queued for the console, then clears them.
-- Functionally similar to `messages` but in dot-command (machine) format.
+| Meldung | Ursache und Abhilfe |
+|---|---|
+| `.msgs: is an invalid command.` | Die `Command ACL` der Konsole erlaubt `.msgs` nicht. |
 
-## Related Commands
+## Siehe auch
 
-- [messages](messages.md) -- Display pending console messages (human format)
-- [.messages](dot-messages.md) -- List Messages resource names
-- [autodisplay](autodisplay.md) -- Toggle automatic message display
+- [.messages](dot-messages.md) — wartende Meldungen abholen
+- [messages](messages.md) — wartende Meldungen anzeigen
+- [show](show.md) — `show messages` zeigt die Ressourcen vollständig

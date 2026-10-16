@@ -1,4 +1,4 @@
-# .volstatus — List Volume Status Values
+# .volstatus — mögliche Volume-Zustände auflisten
 
 <!-- bareos-reference:start -->
 ## Aus den Bareos-Originalquellen
@@ -21,45 +21,93 @@ Referenz: [WIP/25.1.2-pre-43-g18be77e68, `18be77e6832e`](https://github.com/bare
 
 Die folgenden vorhandenen Beispiele und Verhaltensbeschreibungen sind lokale Dokumentation; sie sind kein Beleg für vollständige Bareos-Kompatibilität. Bei Widersprüchen gilt der obige Befund.
 <!-- bareos-reference:end -->
-Machine-interface command used by bconsole/oconsole for tab-completion. Returns one possible volume status value per line.
+
+## Zweck
+
+`.volstatus` gibt alle Zustände aus, die ein Volume im Katalog haben kann (`Append`, `Full`, `Used`, `Purged` und so weiter). Programme füllen damit die Auswahl für `volstatus=` bei `update volume` oder `truncate`. Die Liste ist fest im Director hinterlegt; der Befehl liest weder Konfiguration noch Katalog und verändert nichts.
 
 ## Syntax
 
-```
+```text
 .volstatus
 ```
 
-## Arguments
+## Argumente
 
-None.
+Der Befehl hat keine Argumente. Weitere Wörter werden ignoriert.
 
-## Examples
+## API-Modi
 
-### List all volume statuses
-```
-* .volstatus
+Unter `.api 0` und `.api 1` kommt dieselbe Liste. Unter `.api 2` steht sie als `result.volstatus`, ein Array von Objekten mit `name`.
+
+## Beispiele
+
+### Zustände auflisten
+
+```text
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]> .volstatus
+Unlabeled
 Append
+Full
+Used
+Recycle
+Purged
+Cleaning
+Error
 Archive
 Disabled
-Error
-Full
-Purged
-Recycle
-Read-Only
-Used
-Cleaning
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]>
 ```
 
-## Notes
+### Als JSON
 
-- Output is one status name per line, no headers, no formatting.
-- Output is terminated by the EOD signal.
-- Returns a static list of all possible VolStatus values in the Media table.
-- Used by console programs to populate the `volstatus=` argument completion list (e.g., for `update volume=... volstatus=`).
+```text
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]> .api 2
+{
+  "jsonrpc": "2.0",
+  "id": null,
+  "result": {
+    "api": 2
+  }
+}
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]> .volstatus
+{
+  "jsonrpc": "2.0",
+  "id": null,
+  "result": {
+    "volstatus": [
+      {
+        "name": "Unlabeled"
+      },
+      {
+        "name": "Append"
+      },
+      {
+[…]
+      }
+    ]
+  }
+}
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]>
+```
 
-## Related Commands
+### Ohne Berechtigung
 
-- [.media](dot-media.md) -- List volume names
-- [.pools](dot-pools.md) -- List pool names
-- [update](update.md) -- Update volume attributes
-- [list](list.md) -- List volumes from catalog
+```text
+parity-limited@bareos-dir[25.1.2+onesimus.0.2.0]> .volstatus
+.volstatus: is an invalid command.
+parity-limited@bareos-dir[25.1.2+onesimus.0.2.0]>
+```
+
+## Fehlermeldungen
+
+| Meldung | Ursache und Abhilfe |
+|---|---|
+| `.volstatus: is an invalid command.` | Die `Command ACL` der Konsole erlaubt `.volstatus` nicht. |
+
+## Siehe auch
+
+- [update](update.md) — `update volume=<name> volstatus=<zustand>`
+- [truncate](truncate.md) — Volumes im Zustand `Purged` kürzen
+- [.actiononpurge](dot-actiononpurge.md) — Aktionen nach dem Purge
+- [.media](dot-media.md) — Volume-Namen im Katalog

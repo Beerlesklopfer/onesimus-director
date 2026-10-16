@@ -1,4 +1,4 @@
-# .messages — List Message Resource Names
+# .messages — wartende Meldungen abholen
 
 <!-- bareos-reference:start -->
 ## Aus den Bareos-Originalquellen
@@ -22,42 +22,90 @@ Referenz: [WIP/25.1.2-pre-43-g18be77e68, `18be77e6832e`](https://github.com/bare
 
 Die folgenden vorhandenen Beispiele und Verhaltensbeschreibungen sind lokale Dokumentation; sie sind kein Beleg für vollständige Bareos-Kompatibilität. Bei Widersprüchen gilt der obige Befund.
 <!-- bareos-reference:end -->
-Machine-interface command used by bconsole/oconsole for tab-completion. Returns one Messages resource name per line from the Director configuration.
+
+## Zweck
+
+`.messages` gibt die Meldungen aus, die seit dem letzten Abholen für die Konsole aufgelaufen sind (Jobberichte, Warnungen der Daemons), und leert damit den Speicher. Anders als [messages](messages.md) antwortet der Befehl ohne Text, wenn nichts wartet. Deshalb eignet er sich für Programme, die regelmäßig nachsehen: bconsole und die WebUI fragen damit zwischendurch nach neuen Meldungen. Der Befehl wirkt unabhängig von `autodisplay` und `gui`.
 
 ## Syntax
 
-```
+```text
 .messages
 ```
 
-## Arguments
+## Argumente
 
-None.
+Der Befehl hat keine Argumente. Weitere Wörter werden ignoriert.
 
-## Examples
+## API-Modi
 
-### List message resources
+Liegen Meldungen vor, werden sie wie bei [messages](messages.md) ausgegeben. Liegt nichts vor, ist die Antwort in jedem Modus leer; unter `.api 2` kommt `{"jsonrpc": "2.0", "id": null, "result": {}}`.
+
+## Beispiele
+
+### Meldungen liegen vor
+
+Beispielausgabe nicht verfügbar: Wartende Meldungen entstehen nur durch echte Jobs, die in Paritätsläufen nicht gestartet werden.
+
+### Nichts wartet
+
+`messages` meldet `You have no messages.`, `.messages` antwortet leer.
+
+```text
+parity-operator@bareos-dir[25.1.2+onesimus.0.2.0]> messages
+You have no messages.
+parity-operator@bareos-dir[25.1.2+onesimus.0.2.0]> .messages
+parity-operator@bareos-dir[25.1.2+onesimus.0.2.0]> whoami
+parity-operator
+parity-operator@bareos-dir[25.1.2+onesimus.0.2.0]>
 ```
-* .messages
-Standard
-Daemon
+
+### Als JSON
+
+```text
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]> .api 2
+{
+  "jsonrpc": "2.0",
+  "id": null,
+  "result": {
+    "api": 2
+  }
+}
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]> messages
+{
+  "jsonrpc": "2.0",
+  "id": null,
+  "result": {}
+}
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]> .messages
+{
+  "jsonrpc": "2.0",
+  "id": null,
+  "result": {}
+}
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]>
 ```
 
-### Single messages resource
+### Ohne Berechtigung
+
+```text
+parity-limited@bareos-dir[25.1.2+onesimus.0.2.0]> messages
+messages: is an invalid command.
+parity-limited@bareos-dir[25.1.2+onesimus.0.2.0]> .messages
+.messages: is an invalid command.
+parity-limited@bareos-dir[25.1.2+onesimus.0.2.0]> autodisplay on
+autodisplay: is an invalid command.
+parity-limited@bareos-dir[25.1.2+onesimus.0.2.0]>
 ```
-* .messages
-Standard
-```
 
-## Notes
+## Fehlermeldungen
 
-- Output is one name per line, no headers, no formatting.
-- Output is terminated by the EOD signal.
-- Messages resources define how and where the Director sends log messages (mail, file, console, etc.).
-- Used by console programs to populate the `messages=` argument completion list.
+| Meldung | Ursache und Abhilfe |
+|---|---|
+| `.messages: is an invalid command.` | Die `Command ACL` der Konsole erlaubt `.messages` nicht. |
 
-## Related Commands
+## Siehe auch
 
-- [messages](messages.md) -- Display pending console messages
-- [.msgs](dot-msgs.md) -- List pending message types
-- [show](show.md) -- Show full resource configuration
+- [messages](messages.md) — wartende Meldungen anzeigen, mit Hinweis wenn keine vorliegen
+- [autodisplay](autodisplay.md) — Meldungen automatisch anzeigen
+- [.msgs](dot-msgs.md) — Namen der Messages-Ressourcen

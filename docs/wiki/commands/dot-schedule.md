@@ -1,4 +1,4 @@
-# .schedule — List Schedule Names
+# .schedule — Namen der Zeitpläne auflisten
 
 <!-- bareos-reference:start -->
 ## Aus den Bareos-Originalquellen
@@ -25,47 +25,113 @@ Referenz: [WIP/25.1.2-pre-43-g18be77e68, `18be77e6832e`](https://github.com/bare
 
 Die folgenden vorhandenen Beispiele und Verhaltensbeschreibungen sind lokale Dokumentation; sie sind kein Beleg für vollständige Bareos-Kompatibilität. Bei Widersprüchen gilt der obige Befund.
 <!-- bareos-reference:end -->
-Machine-interface command used by bconsole/oconsole for tab-completion. Returns one schedule resource name per line from the Director configuration.
+
+## Zweck
+
+`.schedule` gibt die Namen aller Schedule-Ressourcen der Director-Konfiguration aus, einen pro Zeile. Programme nutzen ihn für Auswahllisten, etwa beim Aktivieren oder Deaktivieren eines Zeitplans. Der Befehl liest nur die Konfiguration und verändert nichts.
+
+Es erscheinen nur Zeitpläne, die die Konsole laut `Schedule ACL` sehen darf.
 
 ## Syntax
 
+```text
+.schedule [ enabled | disabled ]
 ```
-.schedule [enabled|disabled]
-```
 
-## Arguments
+## Argumente
 
-| Argument | Description |
-|----------|-------------|
-| *(none)* | List all schedules |
-| `enabled` | List only enabled schedules |
-| `disabled` | List only disabled schedules |
+| Argument | Werte | Bedeutung |
+|---|---|---|
+| `enabled` | | nur aktivierte Zeitpläne |
+| `disabled` | | nur deaktivierte Zeitpläne |
 
-## Examples
+Die Schlüsselwörter sind unabhängig von Groß- und Kleinschreibung; ein Wert dahinter wird ignoriert (`enabled=1` wirkt wie `enabled`). Beide zusammen ergeben eine leere Liste.
 
-### List all schedules
-```
-* .schedule
-WeeklyCycle
+## API-Modi
+
+Unter `.api 0` und `.api 1` kommt dieselbe Namensliste. Unter `.api 2` steht sie als `result.schedules`, ein Array von Objekten mit `name` und `enabled`.
+
+## Beispiele
+
+### Alle Zeitpläne
+
+```text
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]> .schedule
 WeeklyCycleAfterBackup
-MonthlyCycle
-```
-
-### List only enabled schedules
-```
-* .schedule enabled
 WeeklyCycle
-WeeklyCycleAfterBackup
+ParityPreview
+c019h
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]>
 ```
 
-## Notes
+### Nur deaktivierte Zeitpläne
 
-- Output is one name per line, no headers, no formatting.
-- Output is terminated by the EOD signal.
-- Used by console programs to populate the `schedule=` argument completion list.
+```text
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]> .schedule disabled
+WeeklyCycleAfterBackup
+WeeklyCycle
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]>
+```
 
-## Related Commands
+### Im Skriptmodus
 
-- [.jobs](dot-jobs.md) -- List job names
-- [.defaults](dot-defaults.md) -- Show default values for a job (includes schedule)
-- [status](status.md) -- Show scheduled jobs
+```text
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]> .api 1
+api: 1
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]> .schedule
+WeeklyCycleAfterBackup
+WeeklyCycle
+ParityPreview
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]>
+```
+
+### Als JSON
+
+```text
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]> .api 2
+{
+  "jsonrpc": "2.0",
+  "id": null,
+  "result": {
+    "api": 2
+  }
+}
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]> .schedule enabled
+{
+  "jsonrpc": "2.0",
+  "id": null,
+  "result": {
+    "schedules": [
+      {
+        "name": "ParityPreview",
+        "enabled": true
+      },
+      {
+        "name": "c019h",
+        "enabled": true
+      }
+    ]
+  }
+}
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]>
+```
+
+### Mit eingeschränkter Konsole
+
+```text
+parity-limited@bareos-dir[25.1.2+onesimus.0.2.0]> .schedule
+WeeklyCycle
+parity-limited@bareos-dir[25.1.2+onesimus.0.2.0]>
+```
+
+## Fehlermeldungen
+
+| Meldung | Ursache und Abhilfe |
+|---|---|
+| `.schedule: is an invalid command.` | Die `Command ACL` der Konsole erlaubt `.schedule` nicht. |
+
+## Siehe auch
+
+- [status](status.md) — `status scheduler` zeigt, wann welcher Job geplant ist
+- [enable](enable.md) / [disable](disable.md) — Zeitplan aktivieren oder deaktivieren
+- [show](show.md) — `show schedule=<name>` zeigt die Ausführungszeiten

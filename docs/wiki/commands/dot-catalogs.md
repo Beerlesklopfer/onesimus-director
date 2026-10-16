@@ -1,4 +1,4 @@
-# .catalogs — List Catalog Names
+# .catalogs — Namen der Kataloge auflisten
 
 <!-- bareos-reference:start -->
 ## Aus den Bareos-Originalquellen
@@ -21,42 +21,81 @@ Referenz: [WIP/25.1.2-pre-43-g18be77e68, `18be77e6832e`](https://github.com/bare
 
 Die folgenden vorhandenen Beispiele und Verhaltensbeschreibungen sind lokale Dokumentation; sie sind kein Beleg für vollständige Bareos-Kompatibilität. Bei Widersprüchen gilt der obige Befund.
 <!-- bareos-reference:end -->
-Machine-interface command used by bconsole/oconsole for tab-completion. Returns one catalog resource name per line from the Director configuration.
+
+## Zweck
+
+`.catalogs` gibt die Namen aller Catalog-Ressourcen der Director-Konfiguration aus, einen pro Zeile. Programme nutzen ihn für die Vervollständigung von `catalog=`. Der Befehl liest nur die Konfiguration, öffnet keine Datenbankverbindung und verändert nichts.
+
+Es erscheinen nur Kataloge, die die Konsole laut `Catalog ACL` sehen darf.
 
 ## Syntax
 
-```
+```text
 .catalogs
 ```
 
-## Arguments
+## Argumente
 
-None.
+Der Befehl hat keine Argumente. Weitere Wörter werden ignoriert.
 
-## Examples
+## API-Modi
 
-### List all catalogs
-```
-* .catalogs
+Unter `.api 0` und `.api 1` kommt dieselbe Namensliste. Unter `.api 2` steht sie als `result.catalogs`, ein Array von Objekten mit `name`.
+
+## Beispiele
+
+### Alle Kataloge
+
+```text
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]> .catalogs
 MyCatalog
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]>
 ```
 
-### Typical single-catalog setup
+### Im Skriptmodus
+
+```text
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]> .api 1
+api: 1
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]> .catalogs
+MyCatalog
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]>
 ```
-* .catalogs
-bareos
+
+### Als JSON
+
+```text
+parity-operator@bareos-dir[25.1.2+onesimus.0.2.0]> .api 2
+{
+  "jsonrpc": "2.0",
+  "id": null,
+  "result": {
+    "api": 2
+  }
+}
+parity-operator@bareos-dir[25.1.2+onesimus.0.2.0]> .catalogs
+{
+  "jsonrpc": "2.0",
+  "id": null,
+  "result": {
+    "catalogs": [
+      {
+        "name": "MyCatalog"
+      }
+    ]
+  }
+}
+parity-operator@bareos-dir[25.1.2+onesimus.0.2.0]>
 ```
 
-## Notes
+## Fehlermeldungen
 
-- Output is one name per line, no headers, no formatting.
-- Output is terminated by the EOD signal.
-- Most installations have exactly one catalog.
-- Used by console programs to populate the `catalog=` argument completion list.
+| Meldung | Ursache und Abhilfe |
+|---|---|
+| `.catalogs: is an invalid command.` | Die `Command ACL` der Konsole erlaubt `.catalogs` nicht. |
 
-## Related Commands
+## Siehe auch
 
-- [.catalog](dot-catalog.md) -- Catalog schema management
-- [.sql](dot-sql.md) -- Execute SQL against the catalog
-- [.sqltables](dot-sqltables.md) -- List catalog table names
-- [use](use.md) -- Switch active catalog
+- [use](use.md) — Katalog für die Sitzung wählen
+- [.catalog](dot-catalog.md) — Abkürzung, die ebenfalls `.catalogs` ausführt
+- [.sql](dot-sql.md) — SQL-Abfrage im Katalog

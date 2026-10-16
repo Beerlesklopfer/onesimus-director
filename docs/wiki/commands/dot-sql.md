@@ -1,4 +1,4 @@
-# .sql — Execute SQL with Sub-Commands
+# .sql — SQL-Abfrage im Katalog ausführen
 
 <!-- bareos-reference:start -->
 ## Aus den Bareos-Originalquellen
@@ -25,75 +25,229 @@ Referenz: [WIP/25.1.2-pre-43-g18be77e68, `18be77e6832e`](https://github.com/bare
 
 Die folgenden vorhandenen Beispiele und Verhaltensbeschreibungen sind lokale Dokumentation; sie sind kein Beleg für vollständige Bareos-Kompatibilität. Bei Widersprüchen gilt der obige Befund.
 <!-- bareos-reference:end -->
-Machine-interface command to execute raw SQL queries against the catalog database or retrieve schema information.
+
+## Zweck
+
+`.sql` schickt eine beliebige SQL-Anweisung an die Katalogdatenbank und gibt das Ergebnis aus. Die WebUI und Skripte nutzen den Befehl für Auswertungen, die kein anderer Befehl liefert. **Vorsicht:** Die Anweisung wird ohne Prüfung ausgeführt; `UPDATE`, `DELETE` oder `DROP` verändern den Katalog dauerhaft. Für reines Lesen genügt ein `SELECT`.
 
 ## Syntax
 
-```
-.sql query="<SQL statement>"
-.sql tables
-.sql schema
+```text
+.sql query="<sql-anweisung>"
 ```
 
-## Arguments
+## Argumente
 
-| Argument | Description |
-|----------|-------------|
-| `query="<SQL>"` | Execute an arbitrary SQL statement |
-| `tables` | List all public table names (shortcut for `.sqltables`) |
-| `schema` | Show full schema: table_name, column_name, data_type (shortcut for `.sqlschema`) |
+| Argument | Werte | Bedeutung |
+|---|---|---|
+| `query="<sql>"` | SQL-Text in Anführungszeichen | die auszuführende Anweisung |
+| `catalog=<name>` | Name eines Katalogs | diesen Katalog verwenden statt des automatisch gewählten |
 
-## Examples
+Enthält der Text mehrere durch `;` getrennte Anweisungen, werden alle ausgeführt, angezeigt wird nur das Ergebnis der letzten. Ein `;` am Ende schadet nicht. Andere Schlüsselwörter wie `tables` oder `schema` gibt es nicht; für Tabellen und Spalten siehe [.sqltables](dot-sqltables.md) und [.sqlschema](dot-sqlschema.md).
 
-### Execute a query
-```
-* .sql query="SELECT jobid, name, jobstatus FROM job ORDER BY jobid DESC LIMIT 3"
-10	backup-bareos-fd	T
-9	backup-bareos-fd	T
-8	RestoreFiles	T
-```
+## API-Modi
 
-### List tables
-```
-* .sql tables
-basefiles
-client
-file
-fileset
-job
-jobmedia
-log
-media
-path
-pool
-storage
-version
+- `.api 0`: Tabelle mit Rahmen; Zahlen rechtsbündig mit Tausenderpunkten (`1,234,567`), leere Werte als leere Zelle. Beim ersten Katalogzugriff der Sitzung stehen die Hinweiszeilen `Automatically selected Catalog: …` und `Using Catalog "…"` davor. Ohne Treffer: `No results to list.`
+- `.api 1`: alle Zellen tabulatorgetrennt; nach jeder Zeile folgt ein zusätzlicher Tabulator statt eines Zeilenumbruchs, die Antwort ist also eine einzige Zeile. Ohne Treffer kommt nichts.
+- `.api 2`: `result.query`, ein Array mit einem Objekt pro Zeile; Schlüssel sind die Spaltennamen, alle Werte Zeichenketten ohne Tausenderpunkte. Steuerzeichen werden JSON-gerecht maskiert.
+- Unter `gui on` (siehe [gui](gui.md)) stehen Zahlen ohne Tausenderpunkte und linksbündig.
+
+## Beispiele
+
+### Einfache Abfrage
+
+```text
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]> .sql query="select count(*) from job"
+Automatically selected Catalog: MyCatalog
+Using Catalog "MyCatalog"
++-------+
+| count |
++-------+
+|   160 |
++-------+
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]>
 ```
 
-### Show schema
+### Mehrere Spalten und leere Werte
+
+```text
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]> .sql query="select poolid, name, NULL as nothing, 1234567 as big, 'x'::text as t, 1.5 as f, now() is null as b from pool order by poolid"
+Automatically selected Catalog: MyCatalog
+Using Catalog "MyCatalog"
++--------+--------------+---------+-----------+------+------+------+
+| poolid | name         | nothing | big       | t    | f    | b    |
++--------+--------------+---------+-----------+------+------+------+
+|      1 | Scratch      |         | 1,234,567 | x    |  1.5 | f    |
+|      2 | Incremental  |         | 1,234,567 | x    |  1.5 | f    |
+|      3 | Full         |         | 1,234,567 | x    |  1.5 | f    |
+|      4 | Differential |         | 1,234,567 | x    |  1.5 | f    |
++--------+--------------+---------+-----------+------+------+------+
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]>
 ```
-* .sql schema
-basefiles	baseid	bigint
-basefiles	jobid	integer
-basefiles	fileid	bigint
-client	clientid	integer
-client	name	text
-client	uname	text
-...
+
+### Kein Treffer
+
+```text
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]> .sql query="select poolid, name from pool where poolid < 0"
+Automatically selected Catalog: MyCatalog
+Using Catalog "MyCatalog"
+No results to list.
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]>
 ```
 
-## Notes
+### Mehrere Anweisungen
 
-- Query results are returned as tab-separated values, one row per line.
-- Output is terminated by the EOD signal.
-- Requires a catalog database connection. Returns an error if no catalog is configured.
-- The SQL is executed directly against PostgreSQL; use with caution.
-- For read-only exploration, prefer `.sql tables` and `.sql schema` over raw queries.
+Nur das Ergebnis der letzten Anweisung wird gezeigt.
 
-## Related Commands
+```text
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]> .sql query="select 1 as a; select 2 as b"
+Automatically selected Catalog: MyCatalog
+Using Catalog "MyCatalog"
++------+
+| b    |
++------+
+|    2 |
++------+
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]>
+```
 
-- [.sqltables](dot-sqltables.md) -- List catalog table names
-- [.sqlschema](dot-sqlschema.md) -- Show full catalog schema
-- [.sqlcount](dot-sqlcount.md) -- Count records in job table
-- [sqlquery](sqlquery.md) -- Interactive SQL query command
-- [.catalogs](dot-catalogs.md) -- List catalog names
+### Im Skriptmodus
+
+```text
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]> .api 1
+api: 1
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]> .sql query="SELECT poolid, name FROM pool ORDER BY poolid"
+1	Scratch	2	Incremental	3	Full	4	Differential
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]>
+```
+
+### Als JSON
+
+```text
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]> .api 2
+{
+  "jsonrpc": "2.0",
+  "id": null,
+  "result": {
+    "api": 2
+  }
+}
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]> .sql query="select poolid, name, NULL as nothing, 1234567 as big from pool order by poolid"
+{
+  "jsonrpc": "2.0",
+  "id": null,
+  "result": {
+    "query": [
+      {
+        "poolid": "1",
+        "name": "Scratch",
+        "nothing": "",
+        "big": "1234567"
+      },
+      {
+        "poolid": "2",
+        "name": "Incremental",
+        "nothing": "",
+        "big": "1234567"
+      },
+[…]
+    ]
+  }
+}
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]>
+```
+
+### Sonderzeichen im kompakten JSON
+
+```text
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]> .api json compact=yes
+{"jsonrpc":"2.0","id":null,"result":{"api":2}}
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]> .sql query="select 'a/b' || chr(34) || chr(92) || chr(1) || chr(9) || chr(10) || chr(31) || chr(127) || 'äö€' as s"
+{"jsonrpc":"2.0","id":null,"result":{"query":[{"s":"a/b\"\\\u0001\t\n\u001Fäö€"}]}}
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]>
+```
+
+### Unter `gui on`
+
+```text
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]> gui on
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]> .sql query="select count(*) as n, 1234567 as big from pool"
+Using Catalog "MyCatalog"
++------+-----------+
+| n    | big       |
++------+-----------+
+| 4    | 1234567   |
++------+-----------+
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]>
+```
+
+### Syntaxfehler
+
+Die Fehlermeldung der Datenbank wird durchgereicht, hier in der Sprache des Datenbankservers (Deutsch).
+
+```text
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]> .sql query="selec nothing"
+Automatically selected Catalog: MyCatalog
+Using Catalog "MyCatalog"
+Query failed: .sql query="selec nothing". ERR=Query failed: FEHLER:  Syntaxfehler bei >>selec<<
+LINE 1: selec nothing
+        ^
+
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]>
+```
+
+### Fehler als JSON
+
+```text
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]> .api 2
+{
+  "jsonrpc": "2.0",
+  "id": null,
+  "result": {
+    "api": 2
+  }
+}
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]> .sql query="select nosuch from nosuch"
+{
+  "jsonrpc": "2.0",
+  "id": null,
+  "error": {
+    "code": 1,
+    "message": "failed",
+    "data": {
+      "result": {},
+      "messages": {
+        "error": [
+          "Query failed: .sql query=\"select nosuch from nosuch\". ERR=Query failed: FEHLER:  Relation >>nosuch<< existiert nicht\nLINE 1: select nosuch from nosuch\n                           ^\n\n"
+        ]
+      }
+    }
+  }
+}
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]>
+```
+
+### Ohne `query=`
+
+```text
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]> .sql
+Automatically selected Catalog: MyCatalog
+Using Catalog "MyCatalog"
+query keyword not found.
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]>
+```
+
+## Fehlermeldungen
+
+| Meldung | Ursache und Abhilfe |
+|---|---|
+| `query keyword not found.` | `query=` fehlt oder hat keinen Wert (auch bei `.sql tables`). |
+| `Query failed: .sql query="…". ERR=Query failed: …` | Die Datenbank hat die Anweisung abgelehnt; dahinter folgen ihre Meldung, die Zeile mit der Fehlerstelle und gegebenenfalls ein `HINT:`. Unter `.api 1` steht nach `ERR=Query failed:` zusätzlich die Anweisung selbst und `: ERR=`. |
+| `.sql: is an invalid command.` | Die `Command ACL` der Konsole erlaubt `.sql` nicht. |
+
+## Siehe auch
+
+- [sqlquery](sqlquery.md) — interaktive SQL-Eingabe
+- [query](query.md) — vordefinierte Abfragen
+- [.sqltables](dot-sqltables.md), [.sqlschema](dot-sqlschema.md) — Tabellen und Spalten des Katalogs
+- [list](list.md) — fertige Auswertungen von Jobs, Volumes und Pools
