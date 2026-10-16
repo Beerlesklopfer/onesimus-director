@@ -32,6 +32,7 @@ mod message_bus;
 mod reload;
 mod run_time;
 mod scheduler;
+mod sd_label;
 mod sd_protocol;
 mod session;
 mod session_manager;

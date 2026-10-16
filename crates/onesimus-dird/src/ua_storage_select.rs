@@ -234,7 +234,7 @@ impl SdLink for NetSd {
 }
 
 /// StorageResource::dev_name(): the first Device of the storage.
-fn dev_name(store: &StorageResource) -> String {
+pub(crate) fn dev_name(store: &StorageResource) -> String {
     let first = store.device.split(',').next().unwrap_or("").trim().trim_matches('"');
     // BashSpaces()
     first.replace(' ', "\u{1}")
@@ -242,7 +242,7 @@ fn dev_name(store: &StorageResource) -> String {
 
 /// open_sd_bsock() (sd_cmds.cc:165) + one exchange; None if the connection
 /// failed (the error has been printed).
-fn open_and_exchange(ua: &mut Ua, sd: &mut impl SdLink, store: &StorageResource, command: &str)
+pub(crate) fn open_and_exchange(ua: &mut Ua, sd: &mut impl SdLink, store: &StorageResource, command: &str)
     -> Option<Vec<String>> {
     ua.send_msg(format!("Connecting to Storage daemon {} at {}:{} ...\n", store.name, store.address, store.port));
     match sd.exchange(store, command) {
