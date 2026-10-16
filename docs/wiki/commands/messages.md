@@ -1,4 +1,4 @@
-# messages -- Display Pending Console Messages
+# messages — Gesammelte Meldungen anzeigen
 
 <!-- bareos-reference:start -->
 ## Aus den Bareos-Originalquellen
@@ -22,56 +22,103 @@ Referenz: [WIP/25.1.2-pre-43-g18be77e68, `18be77e6832e`](https://github.com/bare
 
 Die folgenden vorhandenen Beispiele und Verhaltensbeschreibungen sind lokale Dokumentation; sie sind kein Beleg für vollständige Bareos-Kompatibilität. Bei Widersprüchen gilt der obige Befund.
 <!-- bareos-reference:end -->
-Drain and display all pending messages from the Director's message bus for the current console session.
+
+## Zweck
+
+`messages` gibt die Meldungen aus, die der Director für die Konsole gesammelt hat, zum Beispiel Job-Berichte, Warnungen und Fehler. Welche Meldungen auf der Konsole landen, legt die `console`-Zeile der Messages-Ressource fest. Ausgegebene Meldungen werden aus der Warteschlange entfernt und erscheinen kein zweites Mal. Der Befehl verändert sonst nichts.
 
 ## Syntax
 
-```
+```text
 messages
 ```
 
-## Arguments
+## Argumente
 
-None.
+Der Befehl hat keine Argumente. Weitere Wörter hinter `messages` werden ignoriert (`messages all` wirkt wie `messages`). Der Befehl kann abgekürzt werden, etwa `mes`.
 
-## Examples
+## API-Modi
 
-### No pending messages
-```
-* messages
-No pending messages.
-```
+Unter `.api 0` steht bei leerer Warteschlange `You have no messages.`. Unter `.api 1` kommt bei leerer Warteschlange gar keine Ausgabe, unter `.api 2` ein leeres `result`. Gleiches gilt für den Punktbefehl `.messages`, der auch im Standardmodus bei leerer Warteschlange nichts ausgibt.
 
-### Messages after running a backup
-```
-* run job=backup-bareos-fd level=Full yes
-Job queued. JobId=15
-* messages
-INFO JobId=15 backup-bareos-fd: Start Backup JobId=15, Job=backup-bareos-fd, Level=full
-INFO JobId=15 backup-bareos-fd: Connected to Storage daemon File at 127.0.0.1:9103
-INFO JobId=15 backup-bareos-fd: Connected to Client bareos-fd at 127.0.0.1:9102
-INFO JobId=15 backup-bareos-fd: Backup OK -- 458 files, 71,683,878 bytes
-JobId=15 backup-bareos-fd: Terminated
+## Beispiele
+
+### Keine Meldungen vorhanden
+
+```text
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]> messages
+You have no messages.
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]>
 ```
 
-### Messages with errors
+### Vorhandene Meldungen abholen
+
+Beispielausgabe nicht verfügbar: Meldungen entstehen vor allem durch Jobs, und in der Testumgebung werden keine Jobs gestartet.
+
+### Mit autodisplay
+
+Ist `autodisplay on` gesetzt, gibt der Director Meldungen nach jedem Befehl von selbst aus; `messages` bleibt trotzdem nutzbar.
+
+```text
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]> autodisplay on
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]> messages
+You have no messages.
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]> .messages
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]>
 ```
-* messages
-ERROR JobId=16 backup-bareos-fd: Fatal error: FD connection refused
-JobId=16 backup-bareos-fd: Canceled
+
+### Unter .api 1
+
+```text
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]> .api 1
+api: 1
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]> messages
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]> .messages
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]>
 ```
 
-## Behavior
+### Unter .api 2
 
-- Drains all queued messages from the session's message bus receiver.
-- Messages include job status changes, info, warnings, errors, and fatal messages.
-- Each message is prefixed with its type (`INFO`, `WARNING`, `ERROR`, `FATAL`, `MOUNT`, etc.) and the JobId/job name if applicable.
-- Once displayed, messages are consumed and will not appear again.
-- If `autodisplay on` is set, messages are displayed automatically after each command.
-- This is not an audited command.
+```text
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]> .api 2
+{
+  "jsonrpc": "2.0",
+  "id": null,
+  "result": {
+    "api": 2
+  }
+}
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]> messages
+{
+  "jsonrpc": "2.0",
+  "id": null,
+  "result": {}
+}
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]>
+```
 
-## Related Commands
+### Eingeschränkte Konsole
 
-- [autodisplay](autodisplay.md) -- Toggle automatic message display
-- [status](status.md) -- Show Director/Client/SD status
-- [.messages](dot-messages.md) -- Machine-readable message retrieval
+```text
+parity-limited@bareos-dir[25.1.2+onesimus.0.2.0]> messages
+messages: is an invalid command.
+parity-limited@bareos-dir[25.1.2+onesimus.0.2.0]> .messages
+.messages: is an invalid command.
+parity-limited@bareos-dir[25.1.2+onesimus.0.2.0]> autodisplay on
+autodisplay: is an invalid command.
+parity-limited@bareos-dir[25.1.2+onesimus.0.2.0]>
+```
+
+## Fehlermeldungen
+
+| Meldung | Ursache und Abhilfe |
+|---|---|
+| `You have no messages.` | Die Warteschlange ist leer; kein Fehler. |
+| `messages: is an invalid command.` | Die Konsole darf `messages` nicht ausführen (Command ACL). |
+
+## Siehe auch
+
+- [autodisplay](autodisplay.md) — Meldungen automatisch nach jedem Befehl ausgeben
+- [.messages](dot-messages.md) — Meldungen für Programme abholen
+- [status](status.md) — Status von Director, Client und Storage
+- [show](show.md) — mit `show messages` die Messages-Ressourcen anzeigen
