@@ -201,6 +201,18 @@ pub fn access(ctx: &ExecContext, kind: Kind, item: &str) -> bool {
         .unwrap_or(false)
 }
 
+/// `access` for a caller that already holds the configuration lock.
+pub fn access_locked(ctx: &ExecContext, config: &DirectorConfig, kind: Kind, item: &str) -> bool {
+    let console = match &ctx.session_mgr {
+        Some(manager) => match manager.authenticated_console(ctx.session_id) {
+            Some(name) => name,
+            None => return false,
+        },
+        None => "*UserAgent*".into(),
+    };
+    allowed(config, &console, kind, item)
+}
+
 /// `UaContext::AclHasRestrictions` (ua_acl.cc:191): the first `!` entry or
 /// `*all*` in the console list, then in its profiles, decides.
 pub fn has_restrictions(ctx: &ExecContext, kind: Kind) -> bool {

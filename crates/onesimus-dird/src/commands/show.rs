@@ -117,6 +117,12 @@ struct Conf<'a> {
     /// first CheckResources()): unset items are not marked inherited, so
     /// every non-default value is printed (compatibility log C-057).
     omit_defaults: bool,
+    /// `hide_sensitive_data` (no access to the `configure` command):
+    /// passwords are printed as "****************" (lib/res.cc).
+    hide: bool,
+    /// Runtime `enabled` state of jobs, clients and schedules (`enable`/`disable`
+    /// change it until the next reload); None: only the configuration.
+    enabled: Option<Vec<(Kind, String, bool)>>,
 }
 
 impl<'a> Conf<'a> {
@@ -125,7 +131,14 @@ impl<'a> Conf<'a> {
             res: raw.iter().filter_map(|r| Kind::from_type(&r.rtype).map(|k| (k, r))).collect(),
             propagated: bareos_config::jobdefs::propagate_raw(raw),
             omit_defaults,
+            hide: false,
+            enabled: None,
         }
+    }
+
+    /// Runtime enabled state of a Job/Client/Schedule, if known.
+    fn runtime_enabled(&self, kind: Kind, name: &str) -> Option<bool> {
+        self.enabled.as_ref()?.iter().find(|(k, n, _)| *k == kind && n == name).map(|(_, _, e)| *e)
     }
 
     /// Directives a Job/JobDefs got from its JobDefs chain (inherit_content_
@@ -158,15 +171,49 @@ impl<'a> Conf<'a> {
 // ---------------------------------------------------------------------------
 
 pub fn cmd_show(ast: &CommandAst, ctx: &ExecContext) -> CommandResult {
-    let (raw, reloaded) = match ctx.config.as_ref().and_then(|c| c.read().ok()) {
-        Some(cfg) => (cfg.raw.clone(), cfg.reloaded),
-        None => (Vec::new(), false),
+    use crate::acl::{access, access_audited, Kind as Acl};
+    let (raw, reloaded, enabled) = match ctx.config.as_ref().and_then(|c| c.read().ok()) {
+        Some(cfg) => {
+            let enabled: Vec<(Kind, String, bool)> = cfg.jobs.iter().map(|j| (Kind::Job, j.name.clone(), j.enabled))
+                .chain(cfg.clients.iter().map(|c| (Kind::Client, c.name.clone(), c.enabled)))
+                .chain(cfg.schedules.iter().map(|s| (Kind::Schedule, s.name.clone(), s.enabled)))
+                .collect();
+            (cfg.raw.clone(), cfg.reloaded, Some(enabled))
+        }
+        None => (Vec::new(), false, None),
     };
-    show(ast, &raw, reloaded)
+    // show_cmd: no access to the configure command → hide_sensitive_data
+    let hide = !access(ctx, Acl::Command, "configure");
+    // UaContext::IsResAllowed / GetResWithName (RcodeToAcltype; resources
+    // without an ACL of their own need the configure command)
+    let allow = |kind: Kind, name: &str, audit: bool| {
+        let acl = match kind {
+            Kind::Client => Acl::Client,
+            Kind::Job | Kind::JobDefs => Acl::Job,
+            Kind::Storage => Acl::Storage,
+            Kind::Catalog => Acl::Catalog,
+            Kind::Schedule => Acl::Schedule,
+            Kind::FileSet => Acl::FileSet,
+            Kind::Pool => Acl::Pool,
+            _ => return !hide,
+        };
+        if audit { access_audited(ctx, acl, name) } else { access(ctx, acl, name) }
+    };
+    let mut conf = Conf::new(&raw, reloaded);
+    conf.hide = hide;
+    conf.enabled = enabled;
+    show_with(ast, &conf, &allow)
 }
 
+/// Resource filter: (kind, name, audit the denial) → allowed
+type Allow<'f> = dyn Fn(Kind, &str, bool) -> bool + 'f;
+
+#[cfg(test)]
 fn show(ast: &CommandAst, raw: &[ConfResource], reloaded: bool) -> CommandResult {
-    let conf = Conf::new(raw, reloaded);
+    show_with(ast, &Conf::new(raw, reloaded), &|_, _, _| true)
+}
+
+fn show_with(ast: &CommandAst, conf: &Conf, allow: &Allow) -> CommandResult {
     let args = &ast.arguments;
     let verbose = args.iter().any(|a| a.key.eq_ignore_ascii_case("verbose"));
     let mut out = Out::default();
@@ -182,7 +229,7 @@ fn show(ast: &CommandAst, raw: &[ConfResource], reloaded: bool) -> CommandResult
 
     if args.is_empty() || args.iter().any(|a| a.key.eq_ignore_ascii_case("all")) {
         for kind in ALL_KINDS {
-            dump_kind(&conf, *kind, None, verbose, &mut out, false);
+            dump_kind(conf, allow, *kind, None, verbose, &mut out, false);
         }
         return out.finish();
     }
@@ -196,7 +243,7 @@ fn show(ast: &CommandAst, raw: &[ConfResource], reloaded: bool) -> CommandResult
         }
         if a.key.eq_ignore_ascii_case("disabled") {
             let next = args.get(i).map(|n| n.key.to_ascii_lowercase());
-            show_disabled(&conf, next.as_deref(), &mut out);
+            show_disabled(conf, allow, next.as_deref(), &mut out);
             return out.finish();
         }
         let len = a.key.len();
@@ -209,25 +256,33 @@ fn show(ast: &CommandAst, raw: &[ConfResource], reloaded: bool) -> CommandResult
         };
         match &a.value {
             Some(name) => {
-                if conf.find(*kind, name).is_none() && !(*kind == Kind::Console && name == "*UserAgent*") {
+                // GetResWithName(type, name, audit_event=true): the ACL first
+                if !allow(*kind, name, true)
+                    || (conf.find(*kind, name).is_none() && !(*kind == Kind::Console && name == "*UserAgent*")) {
                     out.error(format!("{kw} resource {name} not found.\n"));
                     return out.finish();
                 }
-                dump_kind(&conf, *kind, Some(name), verbose, &mut out, true);
+                dump_kind(conf, allow, *kind, Some(name), verbose, &mut out, true);
             }
-            None => dump_kind(&conf, *kind, None, verbose, &mut out, true),
+            None => dump_kind(conf, allow, *kind, None, verbose, &mut out, true),
         }
     }
     out.finish()
 }
 
-fn show_disabled(conf: &Conf, which: Option<&str>, out: &mut Out) {
+fn show_disabled(conf: &Conf, allow: &Allow, which: Option<&str>, out: &mut Out) {
     let mut obj = Map::new();
     let mut list = |kind: Kind, key: &str, title: &str, out: &mut Out| {
+        // ShowDisabled*: AclAccessOk(…, false) and the runtime `enabled` flag
         let names: Vec<String> = conf.of_kind(kind)
-            .filter(|r| r.directives.iter().any(|d| d.norm_key() == "enabled"
-                && d.first().is_some_and(|v| parse_bool(v) == Some(false))))
-            .filter_map(|r| r.name().map(str::to_string))
+            .filter_map(|r| r.name().map(|n| (r, n)))
+            .filter(|(_, n)| allow(kind, n, false))
+            .filter(|(r, n)| match conf.runtime_enabled(kind, n) {
+                Some(enabled) => !enabled,
+                None => r.directives.iter().any(|d| d.norm_key() == "enabled"
+                    && d.first().is_some_and(|v| parse_bool(v) == Some(false))),
+            })
+            .map(|(_, n)| n.to_string())
             .collect();
         // Decoration (ua_output.cc:334,340): not printed in `.api 1`
         let deco = crate::sql_list::decorations();
@@ -259,17 +314,22 @@ fn show_disabled(conf: &Conf, which: Option<&str>, out: &mut Out) {
 }
 
 /// DumpResource for one resource type (all, or the one with `only` name).
-fn dump_kind(conf: &Conf, kind: Kind, only: Option<&str>, verbose: bool, out: &mut Out, report_empty: bool) {
+fn dump_kind(conf: &Conf, allow: &Allow, kind: Kind, only: Option<&str>, verbose: bool, out: &mut Out, report_empty: bool) {
     let mut found = false;
     for res in conf.of_kind(kind) {
         if only.is_some_and(|n| res.name() != Some(n)) {
             continue;
         }
         found = true;
+        // DumpResource: `if (ua && !ua->IsResAllowed(res)) goto bail_out;`
+        if !res.name().is_some_and(|n| allow(kind, n, false)) {
+            continue;
+        }
         print_resource(conf, kind, res, verbose, false, out);
     }
     // internal "*UserAgent*" console (root console), only shown in verbose mode
-    if kind == Kind::Console && verbose && only.map_or(true, |n| n == "*UserAgent*") {
+    if kind == Kind::Console && verbose && only.map_or(true, |n| n == "*UserAgent*")
+        && allow(Kind::Console, "*UserAgent*", false) {
         if let Some(dir) = conf.of_kind(Kind::Director).next() {
             let pw = dir.directives.iter().find(|d| d.norm_key() == "password").and_then(|d| d.first()).unwrap_or("");
             let ua = ConfResource {
@@ -595,7 +655,13 @@ fn print_items(conf: &Conf, kind: Kind, res: &ConfResource, verbose: bool, inter
         if inherited && !verbose {
             continue;
         }
-        let val = value(conf, kind, res, item, &dirs, explicit || !dirs.is_empty());
+        let mut val = value(conf, kind, res, item, &dirs, explicit || !dirs.is_empty());
+        // `enable`/`disable` change the resource's `enabled` member, not its inherit bit
+        if item.name == "Enabled" && matches!(kind, Kind::Job | Kind::Client | Kind::Schedule) {
+            if let Some(enabled) = res.name().and_then(|n| conf.runtime_enabled(kind, n)) {
+                val = Val::Bool(enabled);
+            }
+        }
         let mut comment = inherited;
         let mut print = item.required;
         if is_default(item, &val) {
@@ -790,7 +856,9 @@ fn value(conf: &Conf, kind: Kind, res: &ConfResource, item: &Item, dirs: &[&Dire
             } else { None };
             Val::PoolType(v.unwrap_or_else(|| def.unwrap_or("").to_string()))
         }
-        Ty::Autopassword => Val::Password(if set { last(dirs).map(|p| password_display(kind, res, item, p)) } else { None }),
+        Ty::Autopassword => Val::Password(if set {
+            last(dirs).map(|p| if conf.hide { "****************".to_string() } else { password_display(kind, res, item, p) })
+        } else { None }),
         Ty::Run => Val::Runs(if set { dirs.iter().map(|d| run_string(&d.tokens)).collect() } else { Vec::new() }),
         Ty::Addresses => Val::Addresses(director_addresses(res)),
         _ => Val::Nothing,
@@ -2063,6 +2131,35 @@ Job { Name = J; JobDefs = B; Level = Full; RunAfterJob = "a" }
         assert!(!r.text_output.contains("Schedule"));
         let r = show(&ast(&[("jobdefs", Some("B")), ("verbose", None)]), &raw, false);
         assert!(r.text_output.contains("  # Schedule = \"SC\"\n"));
+    }
+
+    /// C-062: a console without the configure command sees masked passwords
+    /// and only the resources its ACLs allow; C-063: runtime enabled state.
+    #[test]
+    fn restricted_console_filters_and_masks() {
+        let raw = parse_str(CONF, None).unwrap();
+        let mut conf = Conf::new(&raw, false);
+        conf.hide = true;
+        conf.enabled = Some(vec![(Kind::Job, "BackupCatalog".into(), false)]);
+        let allow = |kind: Kind, name: &str, _audit: bool| match kind {
+            Kind::Job | Kind::JobDefs => name == "BackupCatalog",
+            Kind::Pool => false,
+            _ => false,
+        };
+        let r = show_with(&ast(&[]), &conf, &allow);
+        let text = r.text_output.clone();
+        assert!(text.contains("Name = \"BackupCatalog\""));
+        assert!(!text.contains("Director {") && !text.contains("Pool {") && !text.contains("Console {"));
+        let r = show_with(&ast(&[("pool", Some("Incremental"))]), &conf, &allow);
+        assert_eq!(r.error_message, "pools resource Incremental not found.\n");
+        let r = show_with(&ast(&[("disabled", None), ("jobs", None)]), &conf, &allow);
+        assert_eq!(r.text_output, "Disabled Jobs:\n   BackupCatalog\n");
+        // the configure command (no masking) with every resource allowed
+        let r = show_with(&ast(&[("director", None)]), &conf, &|_, _, _| true);
+        assert!(r.text_output.contains("Password = \"****************\""));
+        conf.hide = false;
+        let r = show_with(&ast(&[("director", None)]), &conf, &|_, _, _| true);
+        assert!(r.text_output.contains("Password = \"[md5]"));
     }
 
     #[test]
