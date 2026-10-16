@@ -65,10 +65,11 @@ impl Resources {
     }
 }
 
-/// C++ FindArgWithValue(): first argument with that keyword and a value.
+/// C++ FindArgWithValue(): value of the first argument with that keyword
+/// (None when that one has no value).
 fn find_arg_with_value<'a>(ast: &'a CommandAst, key: &str) -> Option<&'a str> {
     ast.arguments.iter()
-        .find(|a| a.key.eq_ignore_ascii_case(key) && a.value.is_some())
+        .find(|a| a.key.eq_ignore_ascii_case(key))
         .and_then(|a| a.value.as_deref())
 }
 

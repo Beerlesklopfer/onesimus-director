@@ -48,20 +48,20 @@ fn permitted(ctx: &ExecContext, kind: Kind, names: impl FnOnce(&crate::director_
         .into_iter().filter(|name| crate::acl::access(ctx, kind, name)).collect()
 }
 
-/// Helper: check if "enabled" or "disabled" bare flag is present.
-fn enabled_filter(ast: &CommandAst) -> Option<bool> {
-    for a in &ast.arguments {
-        if a.key == "enabled" && a.value.is_none() { return Some(true); }
-        if a.key == "disabled" && a.value.is_none() { return Some(false); }
-    }
-    None
+/// C++ `enabled = FindArg(ua, "enabled") >= 0; disabled = FindArg(ua,
+/// "disabled") >= 0;` (keywords case-insensitive, a value does not matter)
+/// and the loop filter `if (enabled && !res->enabled) continue; if
+/// (disabled && res->enabled) continue;` — both keywords list nothing.
+fn enabled_filter(ast: &CommandAst) -> impl Fn(bool) -> bool {
+    let enabled = crate::ua_select::find_arg(ast, "enabled").is_some();
+    let disabled = crate::ua_select::find_arg(ast, "disabled").is_some();
+    move |is_enabled| !(enabled && !is_enabled) && !(disabled && is_enabled)
 }
 
-/// Helper: get value of type= argument.
+/// C++ FindArgWithValue(ua, "type"): value of the first `type` keyword
+/// (case-insensitive); None when that one has no value.
 fn type_filter<'a>(ast: &'a CommandAst) -> Option<&'a str> {
-    ast.arguments.iter()
-        .find(|a| a.key == "type")
-        .and_then(|a| a.value.as_deref())
+    crate::ua_select::find_arg_with_value(ast, "type")
 }
 
 /// `.` — no op (C++ compatibility)
@@ -75,7 +75,7 @@ pub fn cmd_dot_clients(ast: &CommandAst, ctx: &ExecContext) -> CommandResult {
     let allowed = permitted(ctx, Kind::Client, |cfg| cfg.clients.iter().map(|c| c.name.clone()).collect());
     with_config(ctx, "clients", |cfg| name_list("clients", "name", cfg.clients.iter()
         .filter(|c| allowed.contains(&c.name))
-        .filter(|c| filter.map_or(true, |want| c.enabled == want))
+        .filter(|c| filter(c.enabled))
         .map(|c| (c.name.as_str(), Some(c.enabled)))))
 }
 
@@ -86,13 +86,13 @@ pub fn cmd_dot_jobs(ast: &CommandAst, ctx: &ExecContext) -> CommandResult {
     let allowed = permitted(ctx, Kind::Job, |cfg| cfg.jobs.iter().map(|j| j.name.clone()).collect());
     with_config(ctx, "jobs", |cfg| name_list("jobs", "name", cfg.jobs.iter()
         .filter(|j| allowed.contains(&j.name))
-        .filter(|j| filter.map_or(true, |want| j.enabled == want))
-        .filter(|j| match type_f {
-            // C++ compares the first character of type= with the job type code
-            Some(t) => format!("{:?}", j.job_type).eq_ignore_ascii_case(t)
-                || (t.len() == 1 && job_type_code(&format!("{:?}", j.job_type)) == t.chars().next().map(|c| c as u32)),
+        // C++ `type = ua->argv[pos][0]` compared with the job type code
+        // (case-sensitive, only the first byte; `type=` lists all).
+        .filter(|j| match type_f.and_then(|t| t.bytes().next()) {
+            Some(t) => job_type_code(&format!("{:?}", j.job_type)) == Some(t as u32),
             None => true,
         })
+        .filter(|j| filter(j.enabled))
         .map(|j| (j.name.as_str(), Some(j.enabled)))))
 }
 
@@ -102,7 +102,10 @@ pub fn cmd_dot_pools(ast: &CommandAst, ctx: &ExecContext) -> CommandResult {
     let allowed = permitted(ctx, Kind::Pool, |cfg| cfg.pools.iter().map(|p| p.name.clone()).collect());
     with_config(ctx, "pools", |cfg| name_list("pools", "name", cfg.pools.iter()
         .filter(|p| allowed.contains(&p.name))
-        .filter(|p| type_f.map_or(true, |t| p.pool_type.eq_ignore_ascii_case(t)))
+        // C++ bstrncasecmp(pool_type, type, strlen(type)) (ua_dotcmds.cc:894):
+        // type= is a case-insensitive prefix of the pool type.
+        .filter(|p| type_f.map_or(true, |t| p.pool_type.len() >= t.len()
+            && p.pool_type.as_bytes()[..t.len()].eq_ignore_ascii_case(t.as_bytes())))
         .map(|p| (p.name.as_str(), None))))
 }
 
@@ -112,7 +115,7 @@ pub fn cmd_dot_storage(ast: &CommandAst, ctx: &ExecContext) -> CommandResult {
     let allowed = permitted(ctx, Kind::Storage, |cfg| cfg.storages.iter().map(|st| st.name.clone()).collect());
     with_config(ctx, "storages", |cfg| name_list("storages", "name", cfg.storages.iter()
         .filter(|st| allowed.contains(&st.name))
-        .filter(|st| filter.map_or(true, |want| st.enabled == want))
+        .filter(|st| filter(st.enabled))
         .map(|st| (st.name.as_str(), Some(st.enabled)))))
 }
 
@@ -129,7 +132,7 @@ pub fn cmd_dot_schedule(ast: &CommandAst, ctx: &ExecContext) -> CommandResult {
     let allowed = permitted(ctx, Kind::Schedule, |cfg| cfg.schedules.iter().map(|sc| sc.name.clone()).collect());
     with_config(ctx, "schedules", |cfg| name_list("schedules", "name", cfg.schedules.iter()
         .filter(|sc| allowed.contains(&sc.name))
-        .filter(|sc| filter.map_or(true, |want| sc.enabled == want))
+        .filter(|sc| filter(sc.enabled))
         .map(|sc| (sc.name.as_str(), Some(sc.enabled)))))
 }
 

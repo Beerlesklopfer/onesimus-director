@@ -1007,7 +1007,7 @@ fn move_operation(
         return ua.finish(false);
     };
     let value = |keys: &[&str]| keys.iter().find_map(|key| ast.arguments.iter()
-        .find(|a| a.key.eq_ignore_ascii_case(key) && a.value.is_some())
+        .find(|a| a.key.eq_ignore_ascii_case(key))
         .and_then(|a| a.value.as_deref()));
     let src = value(&["srcslots", "srcslot"]);
     let dst = value(&["dstslots", "dstslot"]);

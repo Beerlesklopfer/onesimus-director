@@ -935,7 +935,7 @@ fn prune_dialog(ua: &mut crate::ua_select::Ua, ast: &CommandAst,
         return false;
     }
     let kw = find_arg_keyword(ast, &KEYWORDS)
-        .or_else(|| ast.arguments.iter().any(|a| a.key.len() >= 6 && a.key[..6].eq_ignore_ascii_case("volume")).then_some(2))
+        .or_else(|| ast.arguments.iter().any(|a| a.key.len() >= 6 && a.key.as_bytes()[..6].eq_ignore_ascii_case(b"volume")).then_some(2))
         .or_else(|| ua.do_keyword_prompt("Choose item to prune", &KEYWORDS));
     // get_pool_resource when pool= is given or the Pool ACL is restricted.
     let pool_of = |ua: &mut crate::ua_select::Ua| {

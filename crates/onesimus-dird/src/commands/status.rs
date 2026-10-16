@@ -12,7 +12,7 @@ use crate::director_config::DirectorConfig;
 /// C++ GetArgValue()/FindArgWithValue(): value of the first `key=value`.
 fn arg_value<'a>(ast: &'a CommandAst, key: &str) -> Option<&'a str> {
     ast.arguments.iter()
-        .find(|a| a.key.eq_ignore_ascii_case(key) && a.value.is_some())
+        .find(|a| a.key.eq_ignore_ascii_case(key))
         .and_then(|a| a.value.as_deref())
 }
 

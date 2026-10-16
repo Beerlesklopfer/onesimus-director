@@ -908,34 +908,76 @@ const TIME_MODS: &[(&str, u64)] = &[
     ("days", 86_400), ("weeks", 604_800), ("quarters", 7_862_400), ("years", 31_536_000),
 ];
 
-/// lib/edit.cc parse_number_with_mod: "1 g", "30 days 2 hours", "10mb/s"
-fn parse_with_mods(s: &str, mods: &[(&str, u64)]) -> Option<u64> {
-    let mut rest = s.trim_start();
-    let mut total: u64 = 0;
-    let mut any = false;
-    while !rest.is_empty() {
-        let num_len = rest.char_indices()
-            .take_while(|(i, c)| c.is_ascii_digit() || *c == '.' || (*i == 0 && (*c == '+' || *c == '-')))
-            .count();
-        if num_len == 0 {
-            break;
-        }
-        let number: f64 = rest[..num_len].parse().ok()?;
-        rest = rest[num_len..].trim_start();
-        let mod_len = rest.chars().take_while(|c| !c.is_ascii_digit() && !c.is_whitespace()).count();
-        let modifier = &rest[..mod_len];
-        rest = rest[mod_len..].trim_start_matches(|c: char| c.is_whitespace() || c == ',');
-        any = true;
-        if modifier.is_empty() {
-            total = total.saturating_add(number as u64);
-        } else {
-            let m = mods.iter().find(|(name, _)| {
-                name.len() >= modifier.len() && name[..modifier.len()].eq_ignore_ascii_case(modifier)
-            })?;
-            total = total.saturating_add((number * m.1 as f64) as u64);
+/// C strtod() on a prefix of `s` (decimal form): leading white space, sign,
+/// digits with an optional fraction and exponent. Returns the value and the
+/// number of bytes consumed; None when no number was found.
+fn strtod_prefix(s: &[u8]) -> Option<(f64, usize)> {
+    let mut i = s.iter().take_while(|b| matches!(b, b' ' | b'\t' | b'\n' | 0x0b | 0x0c | b'\r')).count();
+    let start = i;
+    if matches!(s.get(i), Some(b'+' | b'-')) {
+        i += 1;
+    }
+    let int_digits = s[i..].iter().take_while(|b| b.is_ascii_digit()).count();
+    i += int_digits;
+    let mut frac_digits = 0;
+    if s.get(i) == Some(&b'.') {
+        frac_digits = s[i + 1..].iter().take_while(|b| b.is_ascii_digit()).count();
+        if int_digits + frac_digits > 0 {
+            i += 1 + frac_digits;
         }
     }
-    if any && rest.is_empty() { Some(total) } else { None }
+    if int_digits + frac_digits == 0 {
+        return None;
+    }
+    if matches!(s.get(i), Some(b'e' | b'E')) {
+        let sign = usize::from(matches!(s.get(i + 1), Some(b'+' | b'-')));
+        let exp_digits = s[i + 1 + sign..].iter().take_while(|b| b.is_ascii_digit()).count();
+        if exp_digits > 0 {
+            i += 1 + sign + exp_digits;
+        }
+    }
+    let number = std::str::from_utf8(&s[start..i]).ok()?.parse::<f64>().ok()?;
+    Some((number, i))
+}
+
+/// C++ static_cast<uint64_t>(double) as gcc on x86-64 computes it
+/// (negative values wrap).
+fn double_to_u64(value: f64) -> u64 {
+    if value < 0.0 { value as i64 as u64 } else { value as u64 }
+}
+
+/// lib/edit.cc parse_number_with_mod + IsJunk: "1 g", "30 days 2 hours",
+/// "10mb/s". Each number may be followed by a modifier (everything up to the
+/// next digit or blank) that must be a case-insensitive prefix of one of
+/// `mods` (bstrncasecmp, edit.cc:271; the first table hit wins). Parsing
+/// stops at the first part that is no number; what is left must consist
+/// of blanks/CR/LF only. An empty input is 0.
+fn parse_with_mods(s: &str, mods: &[(&str, u64)]) -> Option<u64> {
+    let bytes = s.as_bytes();
+    let mut total: u64 = 0;
+    let mut pos = 0;
+    while pos < bytes.len() {
+        let Some((number, used)) = strtod_prefix(&bytes[pos..]) else { break };
+        let mut p = pos + used;
+        while bytes.get(p).is_some_and(|b| b.is_ascii_whitespace() || *b == 0x0b) {
+            p += 1;
+        }
+        let mod_start = p;
+        while bytes.get(p).is_some_and(|b| !(b.is_ascii_digit() || b.is_ascii_whitespace() || *b == 0x0b)) {
+            p += 1;
+        }
+        let modifier = &bytes[mod_start..p];
+        if modifier.is_empty() {
+            total = total.wrapping_add(double_to_u64(number));
+        } else {
+            let (_, mult) = mods.iter().find(|(name, _)| {
+                name.len() >= modifier.len() && name.as_bytes()[..modifier.len()].eq_ignore_ascii_case(modifier)
+            })?;
+            total = total.wrapping_add(double_to_u64(number * *mult as f64));
+        }
+        pos = p;
+    }
+    bytes[pos..].iter().all(|b| matches!(b, b'\n' | b'\r' | b' ')).then_some(total)
 }
 
 fn parse_units(s: &str, mods: &[(&str, u64)]) -> Option<u64> {
@@ -2090,5 +2132,28 @@ Job { Name = J; JobDefs = B; Level = Full; RunAfterJob = "a" }
         assert_eq!(parse_duration("30 days"), Some(2_592_000));
         assert_eq!(parse_units("1G", SIZE_MODS), Some(1_073_741_824));
         assert_eq!(parse_units("10 mb/s", SPEED_MODS), Some(10_000_000));
+    }
+
+    /// lib/edit.cc parse_number_with_mod: modifier is a case-insensitive
+    /// prefix (bstrncasecmp, first table hit), rest must be blanks/CR/LF.
+    #[test]
+    fn duration_modifiers_like_edit_cc() {
+        assert_eq!(parse_duration("1 m"), Some(2_592_000)); // "months" before "minutes"
+        assert_eq!(parse_duration("1 mi"), Some(60));
+        assert_eq!(parse_duration("2 DAYS"), Some(172_800));
+        assert_eq!(parse_duration("1d2h"), Some(93_600));
+        assert_eq!(parse_duration("1 dayss"), None);
+        assert_eq!(parse_duration("1 days, 2 hours"), None);
+        assert_eq!(parse_duration("1 day \r\n"), Some(86_400));
+        assert_eq!(parse_duration("1 day\t"), None);
+        assert_eq!(parse_duration(""), Some(0));
+        assert_eq!(parse_duration("  "), Some(0));
+        assert_eq!(parse_duration("x"), None);
+        assert_eq!(parse_duration("1.5 h"), Some(5400));
+        assert_eq!(parse_duration("1e1"), Some(10));
+        // Non-ASCII modifiers are unknown, not a panic.
+        assert_eq!(parse_duration("1 ä"), None);
+        assert_eq!(parse_duration("1 dä"), None);
+        assert_eq!(parse_units("1e", SIZE_MODS), Some(1_152_921_504_606_846_976));
     }
 }
