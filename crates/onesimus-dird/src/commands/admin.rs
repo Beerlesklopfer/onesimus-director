@@ -1122,6 +1122,27 @@ enum PurgeAction {
     JobsOfVolume(String),
     JobsOfPool(String),
     QuotaOfClient(String),
+    /// ActionOnPurgeCmd on the restored arguments (key, value).
+    ActionOnPurge(Vec<(String, Option<String>)>),
+}
+
+/// The console line of the command (C++ `ua->cmd`); commands that did not
+/// come from a text line get it rebuilt from their arguments.
+fn command_line(ast: &CommandAst) -> String {
+    if !ast.raw_line.is_empty() {
+        return ast.raw_line.clone();
+    }
+    let quote = |text: &str| if text.contains(|c: char| c.is_ascii_whitespace()) { format!("\"{text}\"") } else { text.to_string() };
+    let mut line = ast.command_name.clone();
+    for arg in &ast.arguments {
+        line.push(' ');
+        line.push_str(&quote(&arg.key));
+        if let Some(value) = &arg.value {
+            line.push('=');
+            line.push_str(&quote(value));
+        }
+    }
+    line
 }
 
 /// PurgeCmd (ua_purge.cc:65): warning, ACL checks, OpenClientDb, then the
@@ -1190,17 +1211,33 @@ fn purge_dialog(ua: &mut crate::ua_select::Ua, ast: &CommandAst,
         Some(2) => {
             // One SelectMediaDbr per `volume` keyword (each seen keyword is
             // zapped, so the next lookup starts behind it).
+            // cmd_holder: the command line, plus " volume=<name>" for every
+            // selection once ua->cmd holds an answer instead of the line.
+            let mut holder = command_line(ast);
+            ua.cmd = holder.clone();
             let positions: Vec<usize> = ast.arguments.iter().enumerate()
                 .filter(|(_, a)| a.key.eq_ignore_ascii_case("volume")).map(|(i, _)| i).collect();
             for position in positions {
                 let rest = CommandAst { arguments: ast.arguments[position..].to_vec(), ..ast.clone() };
-                if let Some(media) = ua_select::select_media_dbr(ua, &rest) {
-                    act(ua, PurgeAction::JobsOfVolume(media.volume_name));
-                }
+                let name = match ua_select::select_media_dbr_named(ua, &rest) {
+                    Ok(media) => {
+                        let name = media.volume_name.clone();
+                        act(ua, PurgeAction::JobsOfVolume(media.volume_name));
+                        name
+                    }
+                    Err(name) => name,
+                };
                 ua.send_msg("\n");
+                if ua.cmd != holder {
+                    holder.push_str(" volume=");
+                    holder.push_str(&name);
+                }
             }
-            if ua_select::find_arg(ast, "action").is_some() {
-                ua.send_msg("purge action=: ActionOnPurge is not supported\n");
+            // ParseArgs(cmd_holder); ActionOnPurgeCmd (action=truncate).
+            let restored = crate::session::parse_cli_command(&holder);
+            if ua_select::find_arg(&restored, "action").is_some() {
+                act(ua, PurgeAction::ActionOnPurge(restored.arguments.iter()
+                    .map(|a| (a.key.clone(), a.value.clone())).collect()));
             }
             return true;
         }
@@ -1304,6 +1341,15 @@ fn purge_execute(ua: &mut crate::ua_select::Ua, ast: &CommandAst, action: PurgeA
         },
         PurgeAction::JobsOfPool(pool) => purge::purge_jobs_from_pool(ua, ast, &db, &pool),
         PurgeAction::QuotaOfClient(client) => purge::purge_quota_from_client(ua, &db, &client),
+        PurgeAction::ActionOnPurge(arguments) => {
+            let restored = CommandAst {
+                arguments: arguments.into_iter().map(|(key, value)| crate::command_ast::Argument { key, value }).collect(),
+                ..ast.clone()
+            };
+            let director = ua.ctx.config.as_ref().and_then(|c| c.read().ok())
+                .map(|c| c.director.name.clone()).unwrap_or_default();
+            purge::action_on_purge(ua, &restored, &db, &mut purge::NetSdSession::new(director));
+        }
     }
 }
 
@@ -1525,6 +1571,50 @@ pub(crate) mod side_effect_tests {
         let result = truncate_with(&crate::session::parse_cli_command("truncate volstatus=Purged storage=Nope"),
             &ctx, |_, _| panic!("must not contact the SD"));
         assert_eq!((result.success, result.error_message.as_str()), (false, "Failed to open db.\n"));
+    }
+
+    /// PurgeCmd volume branch (ua_purge.cc:156): cmd_holder gets
+    /// " volume=<name>" once ua->cmd holds an answer, then ActionOnPurgeCmd
+    /// runs on the restored arguments (C-049).
+    #[test]
+    fn purge_volume_action_restores_the_command_line() {
+        use crate::catalog_worker::{CatalogRequest, CatalogResponse, SqlColumn, SqlTable};
+        use crate::ua_select::tests::scripted;
+        let mut ctx = context();
+        ctx.catalog = Some(crate::catalog_worker::CatalogHandle::mock(|request| {
+            let rows: Vec<Vec<&str>> = match &request {
+                CatalogRequest::TextRows { sql } if sql == "SELECT Name FROM Pool" => vec![vec!["Full"]],
+                CatalogRequest::TextRows { sql } if sql.starts_with("SELECT PoolId FROM Pool") => vec![vec!["1"]],
+                CatalogRequest::TextRows { .. } => vec![],
+                _ => return CatalogResponse::Error("double".into()),
+            };
+            CatalogResponse::Rows(SqlTable {
+                columns: vec![SqlColumn { name: "c".into(), numeric: false }],
+                rows: rows.into_iter().map(|r| r.into_iter().map(|v| Some(v.to_string())).collect()).collect(),
+            })
+        }));
+        let purge = |line: &str, answers: &[&str]| {
+            let mut acted = Vec::new();
+            scripted(answers, || {
+                let mut ua = crate::ua_select::Ua::new(&ctx);
+                purge_dialog(&mut ua, &crate::session::parse_cli_command(line), |_, action| acted.push(action));
+                ua.finish(true);
+            });
+            acted
+        };
+        let args = |list: &[(&str, Option<&str>)]| PurgeAction::ActionOnPurge(
+            list.iter().map(|(k, v)| (k.to_string(), v.map(str::to_string))).collect());
+        // Named volumes (unknown here): no prompt, the line stays as typed.
+        assert_eq!(purge("purge volume=v1 volume=v2 action=truncate", &[]),
+            vec![args(&[("volume", Some("v1")), ("volume", Some("v2")), ("action", Some("truncate"))])]);
+        // Selected interactively: the typed name is appended.
+        assert_eq!(purge("purge volume action=truncate storage=File", &["v9"]),
+            vec![args(&[("volume", None), ("action", Some("truncate")), ("storage", Some("File")), ("volume", Some("v9"))])]);
+        // A cancelled selection appends an empty name.
+        assert_eq!(purge("purge volume action=truncate", &["."]),
+            vec![args(&[("volume", None), ("action", Some("truncate")), ("volume", Some(""))])]);
+        // Without action= nothing follows the volume purges.
+        assert!(purge("purge volume=v1", &[]).is_empty());
     }
 
     #[test]

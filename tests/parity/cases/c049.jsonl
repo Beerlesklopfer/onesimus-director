@@ -1,0 +1,14 @@
+{"id": "c049-purge-action-truncate-none", "steps": ["purge volume=c049-none action=truncate storage=File pool=Full"]}
+{"id": "c049-purge-action-default-all", "steps": ["purge volume=c049-none storage=File pool=Full"]}
+{"id": "c049-purge-action-allpools", "steps": ["purge volume=c049-none action=all allpools storage=File"]}
+{"id": "c049-purge-action-bogus", "steps": ["purge volume=c049-none action=bogus storage=File pool=Full"]}
+{"id": "c049-purge-action-invalid-name", "steps": ["purge volume=c049-none action=a!b storage=File pool=Full"]}
+{"id": "c049-purge-action-two-volumes", "steps": ["purge volume=c049-a volume=c049-b action=Truncate storage=File pool=Full devicetype=File drive=0"]}
+{"id": "c049-purge-action-pool-unknown-cancel", "steps": ["purge volume=c049-none action=truncate storage=File pool=Nope", "."]}
+{"id": "c049-purge-action-pool-prompt-cancel", "steps": ["purge volume=c049-none action=truncate", "."]}
+{"id": "c049-purge-action-storage-unknown", "steps": ["purge volume=c049-none action=truncate storage=Nope pool=Full"]}
+{"id": "c049-purge-action-volume-typed", "steps": ["purge volume action=truncate storage=File pool=Full", "c049-none"]}
+{"id": "c049-purge-action-volume-bare-and-named", "steps": ["purge volume volume=c049-none action=truncate storage=File pool=Full"]}
+{"id": "c049-purge-action-api1", "setup": [".api 1"], "steps": ["purge volume=c049-none action=truncate storage=File pool=Full"]}
+{"id": "c049-purge-action-api2", "setup": [".api 2"], "steps": ["purge volume=c049-none action=truncate storage=File pool=Full"]}
+{"id": "c049-purge-action-closes-db", "steps": ["purge volume=c049-none action=truncate storage=File pool=Full", "list pools", "purge volume=c049-none action=truncate storage=File pool=Nope", ".", "list pools"]}

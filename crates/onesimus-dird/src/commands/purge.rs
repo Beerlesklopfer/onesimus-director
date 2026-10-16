@@ -780,6 +780,281 @@ pub(crate) fn prune_directory(ua: &mut Ua, db: &dyn Db, client: Option<&str>, pa
     true
 }
 
+// ---------------------------------------------------------------------------
+// ActionOnPurge (ua_purge.cc:690 ActionOnPurgeCmd, :604 do_truncate_on_purge),
+// compatibility log C-049.
+// ---------------------------------------------------------------------------
+
+/// The Storage daemon connection of ActionOnPurgeCmd (`jcr->store_bsock`):
+/// opened once, used for every volume, terminated at the end.
+pub(crate) trait SdSession {
+    /// ConnectToStorageDaemon(); Err when the connection failed.
+    fn connect(&mut self, store: &bareos_config::resources::StorageResource) -> Result<(), String>;
+    /// `sd->fsend(command)` and the `while (sd->recv() >= 0)` loop: every
+    /// message until the next signal.
+    fn exchange(&mut self, command: &str) -> Vec<String>;
+}
+
+/// The real Storage daemon (TLS-PSK as Director); BNET_TERMINATE on drop
+/// (CloseSdBsock).
+pub(crate) struct NetSdSession {
+    director: String,
+    sd: Option<bareos_bnet::BnetStream<bareos_bnet::tls_psk::PskStream>>,
+}
+
+impl NetSdSession {
+    pub(crate) fn new(director: String) -> Self {
+        Self { director, sd: None }
+    }
+}
+
+impl SdSession for NetSdSession {
+    fn connect(&mut self, store: &bareos_config::resources::StorageResource) -> Result<(), String> {
+        self.sd = Some(bareos_stored::connect::connect_sd(&store.address, store.port, &store.password, &self.director)?);
+        Ok(())
+    }
+
+    fn exchange(&mut self, command: &str) -> Vec<String> {
+        use bareos_bnet::{BnetMessage, BnetSignal};
+        let mut messages = Vec::new();
+        let Some(sd) = self.sd.as_mut() else { return messages };
+        // fsend errors are silent upstream; the receive loop then ends.
+        if sd.send_str(command).is_err() {
+            return messages;
+        }
+        loop {
+            match sd.recv() {
+                Ok(BnetMessage::Data(data)) => {
+                    // SendMsg("%s", msg) / sscanf: the text up to the first NUL.
+                    let end = data.iter().position(|&b| b == 0).unwrap_or(data.len());
+                    messages.push(String::from_utf8_lossy(&data[..end]).into_owned());
+                }
+                Ok(BnetMessage::Signal(BnetSignal::Heartbeat)) => {
+                    let _ = sd.send_signal(BnetSignal::HeartbeatResponse);
+                }
+                Ok(BnetMessage::Signal(_)) | Err(_) => break,
+            }
+        }
+        messages
+    }
+}
+
+impl Drop for NetSdSession {
+    fn drop(&mut self) {
+        if let Some(sd) = self.sd.as_mut() {
+            let _ = sd.send_signal(bareos_bnet::BnetSignal::Terminate);
+        }
+    }
+}
+
+/// C atoi(): (int) strtol(text, NULL, 10).
+fn atoi(text: &str) -> i32 {
+    let text = text.trim_start_matches(|c: char| c.is_ascii_whitespace());
+    let (negative, digits) = match text.as_bytes().first() {
+        Some(b'-') => (true, &text[1..]),
+        Some(b'+') => (false, &text[1..]),
+        _ => (false, text),
+    };
+    let mut value: i64 = 0;
+    for d in digits.bytes().take_while(u8::is_ascii_digit) {
+        value = match value.checked_mul(10).and_then(|v| v.checked_add((d - b'0') as i64)) {
+            Some(v) => v,
+            // strtol saturates at LONG_MIN/LONG_MAX.
+            None => return if negative { i64::MIN as i32 } else { i64::MAX as i32 },
+        };
+    }
+    (if negative { -value } else { value }) as i32
+}
+
+/// The Media fields do_truncate_on_purge uses (GetMediaRecord by MediaId).
+struct PurgedMedia {
+    media_id: i64,
+    name: String,
+    media_type: String,
+    slot: i32,
+    min_blocksize: u32,
+    max_blocksize: u32,
+    recycle: i64,
+    action_on_purge: i64,
+    in_changer: i64,
+    storage_id: i64,
+}
+
+fn get_purged_media(db: &dyn Db, media_id: i64) -> Option<PurgedMedia> {
+    let table = db.rows(&format!(
+        "SELECT MediaId,VolumeName,MediaType,Slot,MinBlocksize,MaxBlocksize,Recycle,ActionOnPurge,InChanger,StorageId \
+         FROM Media WHERE MediaId={media_id}")).ok()?;
+    let row = table.rows.into_iter().next()?;
+    let text = |i: usize| row.get(i).cloned().flatten().unwrap_or_default();
+    let int = |i: usize| text(i).parse::<i64>().unwrap_or(0);
+    Some(PurgedMedia {
+        media_id: int(0), name: text(1), media_type: text(2), slot: int(3) as i32,
+        min_blocksize: int(4) as u32, max_blocksize: int(5) as u32, recycle: int(6),
+        action_on_purge: int(7), in_changer: int(8), storage_id: int(9),
+    })
+}
+
+/// ON_PURGE_TRUNCATE (dird_conf.h).
+const ON_PURGE_TRUNCATE: i64 = 1;
+
+/// ua_purge.cc:604 do_truncate_on_purge(): relabel the volume under its own
+/// name (which truncates it), accept the SD reply (crate::sd_label) and
+/// store the new size.
+fn do_truncate_on_purge(ua: &mut Ua, db: &dyn Db, sd: &mut dyn SdSession, media: &PurgedMedia,
+    pool: &str, dev_name: &str, drive: u16) {
+    use crate::sd_label::{bash_spaces, parse_label_ok};
+    if media.recycle == 0 {
+        return;
+    }
+    if media.action_on_purge & ON_PURGE_TRUNCATE == 0 {
+        ua.error_msg(format!("\nThe option \"Action On Purge = Truncate\" was not defined in the Pool resource.\n\
+            Unable to truncate volume \"{}\"\n", media.name));
+        return;
+    }
+    let volume = bash_spaces(&media.name);
+    // drive_number_t printed with PRIi16.
+    let command = format!("relabel {dev_name} OldName={volume} NewName={volume} PoolName={} MediaType={} \
+        Slot={} drive={} MinBlocksize={} MaxBlocksize={}\n",
+        bash_spaces(pool), bash_spaces(&media.media_type), media.slot, drive as i16,
+        media.min_blocksize, media.max_blocksize);
+    let mut ok = false;
+    let mut vol_bytes = 0;
+    for message in sd.exchange(&command) {
+        ua.send_msg(message.clone());
+        if let Some((_, bytes)) = parse_label_ok(&message) {
+            vol_bytes = bytes;
+            ok = true;
+        }
+    }
+    if !ok {
+        ua.warning_msg(format!("Unable to truncate volume \"{}\"\n", media.name));
+        return;
+    }
+    // UpdateMediaRecord writes back the record read before; only VolBytes
+    // and VolFiles changed. MakeInchangerUnique follows.
+    let mut updated = matches!(db.exec(&format!("UPDATE Media SET VolFiles=0,VolBytes={vol_bytes} WHERE VolumeName='{}'",
+        esc(&media.name))), Ok(n) if n > 0);
+    if media.in_changer != 0 && media.slot != 0 && media.storage_id != 0 {
+        updated &= db.exec(&format!("UPDATE Media SET InChanger=0, Slot=0 WHERE Slot={} AND StorageId={} AND MediaId!={}",
+            media.slot, media.storage_id, media.media_id)).is_ok();
+    }
+    if !updated {
+        ua.error_msg("Can't update volume size in the catalog\n");
+    }
+    ua.send_msg(format!("The volume \"{}\" has been truncated\n", media.name));
+}
+
+/// ua_purge.cc:690 ActionOnPurgeCmd(): `purge volume action=... [volume=]
+/// [pool=|allpools] [storage=] [devicetype=] [drive=]` — the Purged,
+/// recyclable, enabled volumes of more than 10000 bytes on the storage are
+/// truncated through the Storage daemon. Always true, like upstream; every
+/// path ends in CloseDb (the next command reopens the catalog).
+pub(crate) fn action_on_purge(ua: &mut Ua, ast: &CommandAst, db: &dyn Db, sd: &mut dyn SdSession) -> bool {
+    action_on_purge_work(ua, ast, db, sd);
+    crate::ua_db::close_db(ua.ctx);
+    true
+}
+
+fn action_on_purge_work(ua: &mut Ua, ast: &CommandAst, db: &dyn Db, sd: &mut dyn SdSession) {
+    use crate::acl::valid_name;
+    let mut allpools = false;
+    let mut drive: u16 = u16::MAX; // kInvalidSlotNumber
+    let mut volumes = String::new();
+    let mut media_type = String::new();
+    let mut action = "all".to_string();
+    for arg in &ast.arguments {
+        let key = arg.key.as_str();
+        let value = arg.value.as_deref();
+        if key.eq_ignore_ascii_case("allpools") {
+            allpools = true;
+        } else if key.eq_ignore_ascii_case("volume") && value.is_some_and(valid_name) {
+            if !volumes.is_empty() {
+                volumes.push(',');
+            }
+            volumes.push_str(&format!("'{}'", esc(value.unwrap_or_default())));
+        } else if key.eq_ignore_ascii_case("devicetype") && value.is_some() {
+            // bstrncpy into MediaType[MAX_NAME_LENGTH].
+            let mut text = value.unwrap_or_default().to_string();
+            while text.len() > 127 { text.pop(); }
+            media_type = text;
+        } else if key.eq_ignore_ascii_case("drive") && value.is_some() {
+            drive = atoi(value.unwrap_or_default()) as u16;
+        } else if key.eq_ignore_ascii_case("action") && value.is_some_and(valid_name) {
+            action = value.unwrap_or_default().to_string();
+        }
+    }
+
+    // Choose storage
+    let Some(store) = crate::ua_select::get_storage_resource(ua, ast, false, false) else { return };
+    let ndmp = ua.ctx.config.as_ref().and_then(|c| c.read().ok()).is_some_and(|config| config.raw.iter()
+        .find(|r| r.norm_type() == "storage" && r.name() == Some(store.name.as_str()))
+        .and_then(|r| r.directives.iter().rev().find(|d| d.norm_key() == "protocol").and_then(|d| d.first().map(str::to_string)))
+        .is_some_and(|p| p.to_ascii_lowercase().starts_with("ndmp")));
+    if ndmp {
+        ua.warning_msg("Storage has non-native protocol.\n");
+        return;
+    }
+    // OpenDb(ua): the shared connection ("Using Catalog" once more after
+    // PurgeCmd's private one).
+    match crate::ua_db::open_db(ast, ua.ctx) {
+        Ok(prefix) => ua.send_msg(prefix),
+        Err(result) => {
+            ua.send_result(result);
+            return;
+        }
+    }
+
+    let mut pool_name = String::new();
+    let mut pool_id = 0i64;
+    if !allpools {
+        // Force pool selection
+        let Some(pool) = crate::ua_select::get_pool_resource(ua, ast) else { return };
+        let Some(id) = column0(db, &format!("SELECT PoolId FROM Pool WHERE Name='{}'", esc(&pool))).ok()
+            .and_then(|ids| ids.first().and_then(|id| id.parse::<i64>().ok())) else { return };
+        pool_name = pool;
+        pool_id = id;
+    }
+    // store->StorageId: the catalog record of the storage resource.
+    let storage_id = column0(db, &format!("SELECT StorageId FROM Storage WHERE Name='{}'", esc(&store.name))).ok()
+        .and_then(|ids| ids.first().and_then(|id| id.parse::<i64>().ok())).unwrap_or(0);
+
+    // GetMediaIds / PrepareMediaSqlQuery: Purged volumes that can be
+    // recycled, are enabled and have more than 10,000 bytes.
+    let mut query = String::from("SELECT DISTINCT MediaId FROM Media WHERE Recycle=1 AND Enabled=1 ");
+    if !media_type.is_empty() {
+        query.push_str(&format!("AND MediaType='{}' ", esc(&media_type)));
+    }
+    if storage_id != 0 {
+        query.push_str(&format!("AND StorageId={storage_id} "));
+    }
+    if pool_id != 0 {
+        query.push_str(&format!("AND PoolId={pool_id} "));
+    }
+    query.push_str("AND VolBytes > 10000 AND VolStatus = 'Purged' ");
+    if !volumes.is_empty() {
+        query.push_str(&format!("AND VolumeName IN ({volumes}) "));
+    }
+    let Ok(ids) = column0(db, &query) else { return };
+    if ids.is_empty() {
+        ua.send_msg(format!("No Volumes found to perform {action} action.\n"));
+        return;
+    }
+
+    // open_sd_bsock()
+    ua.send_msg(format!("Connecting to Storage daemon {} at {}:{} ...\n", store.name, store.address, store.port));
+    if sd.connect(&store).is_err() {
+        ua.error_msg("Failed to connect to Storage daemon.\n");
+        return;
+    }
+    let dev_name = crate::ua_storage_select::dev_name(&store);
+    for id in ids {
+        let Some(media) = get_purged_media(db, id.parse().unwrap_or(0)) else { continue };
+        if action.eq_ignore_ascii_case("truncate") || action.eq_ignore_ascii_case("all") {
+            do_truncate_on_purge(ua, db, sd, &media, &pool_name, &dev_name, drive);
+        }
+    }
+}
+
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
@@ -1026,5 +1301,153 @@ pub(crate) mod tests {
         assert_eq!(job_status_selection(&ast("purge jobstatus=T,error,f")), Some(vec!['T', 'E', 'f']));
         assert_eq!(job_status_selection(&ast("purge jobstatus=xx")), None);
         assert!(is_a_number_list("1,2,3") && !is_a_number_list("1,,2") && !is_a_number_list("x"));
+    }
+    /// Storage daemon double: records the commands, scripted replies, never
+    /// touches the network.
+    #[derive(Default)]
+    struct FakeSd {
+        refuse: bool,
+        connects: usize,
+        replies: std::collections::VecDeque<Vec<&'static str>>,
+        sent: Vec<String>,
+    }
+
+    impl SdSession for FakeSd {
+        fn connect(&mut self, _store: &bareos_config::resources::StorageResource) -> Result<(), String> {
+            self.connects += 1;
+            if self.refuse { Err("refused".into()) } else { Ok(()) }
+        }
+        fn exchange(&mut self, command: &str) -> Vec<String> {
+            self.sent.push(command.to_string());
+            self.replies.pop_front().unwrap_or_default().into_iter().map(str::to_string).collect()
+        }
+    }
+
+    fn aop_ctx(protocol: &str) -> ExecContext {
+        crate::ua_select::tests::context(&format!(
+            "Director {{ Name = dir }}\nCatalog {{ Name = MyCatalog; DbName = x }}\n\
+             Pool {{ Name = Full; Pool Type = Backup }}\nPool {{ Name = Inc; Pool Type = Backup }}\n\
+             Storage {{ Name = File; Address = sd1; Password = x; Device = \"File Storage\"; Media Type = File{protocol} }}\n\
+             Storage {{ Name = Tape; Address = sd2; Password = x; Device = LTO; Media Type = LTO }}"),
+            crate::command_executor::ApiMode::Human)
+    }
+
+    /// (MediaId row): MediaId,VolumeName,MediaType,Slot,MinBlocksize,
+    /// MaxBlocksize,Recycle,ActionOnPurge,InChanger,StorageId.
+    fn aop_db(ids: Vec<Vec<&'static str>>) -> FakeDb {
+        FakeDb::new(vec![
+            ("FROM Pool WHERE Name='Full'", vec![vec!["3"]]),
+            ("FROM Storage WHERE Name='File'", vec![vec!["2"]]),
+            ("SELECT DISTINCT MediaId FROM Media", ids),
+            ("WHERE MediaId=7", vec![vec!["7", "Full-0007", "File", "4", "0", "0", "1", "1", "1", "2"]]),
+            ("WHERE MediaId=8", vec![vec!["8", "Full 0008", "File", "0", "512", "1024", "1", "0", "0", "2"]]),
+            ("WHERE MediaId=9", vec![vec!["9", "Full-0009", "File", "0", "0", "0", "1", "1", "0", "2"]]),
+        ])
+    }
+
+    fn run_aop(ctx: &ExecContext, line: &str, db: &FakeDb, sd: &mut FakeSd, answers: &[&str]) -> String {
+        let (result, console) = crate::ua_select::tests::scripted(answers, || {
+            let mut ua = Ua::new(ctx);
+            action_on_purge(&mut ua, &ast(line), db, sd);
+            ua.finish(true)
+        });
+        // Unflushed output: in call order (errors_inline) or as two blocks.
+        let rest = if result.errors_inline {
+            result.text_output
+        } else if result.errors_first {
+            format!("{}{}", result.error_message, result.text_output)
+        } else {
+            format!("{}{}", result.text_output, result.error_message)
+        };
+        console.transcript() + &rest
+    }
+
+    /// ActionOnPurgeCmd + do_truncate_on_purge (ua_purge.cc:604/690), C-049.
+    #[test]
+    fn action_on_purge_truncates_through_sd_relabel() {
+        let ctx = aop_ctx("");
+        let db = aop_db(vec![vec!["7"], vec!["8"], vec!["9"]]);
+        let mut sd = FakeSd::default();
+        sd.replies.push_back(vec!["3000 OK label. VolFiles=0 VolBytes=225 Volume=\"Full-0007\" Device=\"File Storage\" (/var/lib/bareos/storage)\n"]);
+        sd.replies.push_back(vec!["3912 Failed to label Volume: ERR=busy\n"]);
+        let text = run_aop(&ctx, "purge volume action=truncate storage=File pool=Full volume=Full-0007 volume=Full-0009", &db, &mut sd, &[]);
+        assert_eq!(text, "Connecting to Storage daemon File at sd1:9103 ...\n\
+            3000 OK label. VolFiles=0 VolBytes=225 Volume=\"Full-0007\" Device=\"File Storage\" (/var/lib/bareos/storage)\n\
+            The volume \"Full-0007\" has been truncated\n\
+            \nThe option \"Action On Purge = Truncate\" was not defined in the Pool resource.\n\
+            Unable to truncate volume \"Full 0008\"\n\
+            3912 Failed to label Volume: ERR=busy\n\
+            Unable to truncate volume \"Full-0009\"\n");
+        assert_eq!(sd.connects, 1, "one connection for all volumes");
+        assert_eq!(sd.sent, vec![
+            "relabel File\u{1}Storage OldName=Full-0007 NewName=Full-0007 PoolName=Full MediaType=File Slot=4 drive=-1 MinBlocksize=0 MaxBlocksize=0\n",
+            "relabel File\u{1}Storage OldName=Full-0009 NewName=Full-0009 PoolName=Full MediaType=File Slot=0 drive=-1 MinBlocksize=0 MaxBlocksize=0\n",
+        ]);
+        let log = db.log.lock().unwrap().clone();
+        assert!(log.contains(&"SELECT DISTINCT MediaId FROM Media WHERE Recycle=1 AND Enabled=1 AND StorageId=2 AND PoolId=3 \
+            AND VolBytes > 10000 AND VolStatus = 'Purged' AND VolumeName IN ('Full-0007','Full-0009') ".to_string()), "{log:?}");
+        assert_eq!(db.writes(), vec![
+            "UPDATE Media SET VolFiles=0,VolBytes=225 WHERE VolumeName='Full-0007'".to_string(),
+            "UPDATE Media SET InChanger=0, Slot=0 WHERE Slot=4 AND StorageId=2 AND MediaId!=7".to_string(),
+        ]);
+
+        // The older reply form, allpools (empty PoolName), devicetype and drive.
+        let db = aop_db(vec![vec!["8"]]);
+        let db = FakeDb::new(db.answers.into_iter().map(|(f, rows)| if f == "WHERE MediaId=8" {
+            (f, vec![vec!["8", "Full 0008", "File", "0", "512", "1024", "1", "1", "0", "2"]])
+        } else { (f, rows) }).collect());
+        let mut sd = FakeSd::default();
+        sd.replies.push_back(vec!["3000 OK label. VolBytes=64512 Volume=\"Full 0008\" Device=\"File Storage\"\n"]);
+        let text = run_aop(&ctx, "purge volume allpools storage=File devicetype=File drive=1", &db, &mut sd, &[]);
+        assert!(text.ends_with("The volume \"Full 0008\" has been truncated\n"), "{text}");
+        assert_eq!(sd.sent, vec!["relabel File\u{1}Storage OldName=Full\u{1}0008 NewName=Full\u{1}0008 PoolName= MediaType=File \
+            Slot=0 drive=1 MinBlocksize=512 MaxBlocksize=1024\n"]);
+        assert!(db.log.lock().unwrap().iter().any(|q| q == "SELECT DISTINCT MediaId FROM Media WHERE Recycle=1 AND Enabled=1 \
+            AND MediaType='File' AND StorageId=2 AND VolBytes > 10000 AND VolStatus = 'Purged' "));
+        assert_eq!(db.writes(), vec!["UPDATE Media SET VolFiles=0,VolBytes=64512 WHERE VolumeName='Full 0008'".to_string()]);
+    }
+
+    #[test]
+    fn action_on_purge_without_candidates_or_sd_changes_nothing() {
+        let ctx = aop_ctx("");
+        // No volume: the action name is reported, the SD is not contacted.
+        let db = aop_db(vec![]);
+        let mut sd = FakeSd::default();
+        assert_eq!(run_aop(&ctx, "purge volume action=Truncate storage=File pool=Full", &db, &mut sd, &[]),
+            "No Volumes found to perform Truncate action.\n");
+        assert_eq!(run_aop(&ctx, "purge volume storage=File pool=Full", &db, &mut sd, &[]),
+            "No Volumes found to perform all action.\n");
+        assert_eq!((sd.connects, db.writes().len()), (0, 0));
+        // An unknown action connects but sends nothing.
+        let db = aop_db(vec![vec!["7"]]);
+        let text = run_aop(&ctx, "purge volume action=bogus storage=File pool=Full", &db, &mut sd, &[]);
+        assert_eq!(text, "Connecting to Storage daemon File at sd1:9103 ...\n");
+        assert!(sd.sent.is_empty() && db.writes().is_empty());
+        // Refused connection.
+        let mut sd = FakeSd { refuse: true, ..FakeSd::default() };
+        let text = run_aop(&ctx, "purge volume storage=File pool=Full", &db, &mut sd, &[]);
+        assert_eq!(text, "Connecting to Storage daemon File at sd1:9103 ...\nFailed to connect to Storage daemon.\n");
+        assert!(sd.sent.is_empty() && db.writes().is_empty());
+        // Cancelled storage and pool selections.
+        let mut sd = FakeSd::default();
+        let text = run_aop(&ctx, "purge volume action=truncate", &db, &mut sd, &["."]);
+        assert_eq!(text, "The defined Storage resources are:\n1: File\n2: Tape\nSelect Storage resource (1-2): .\n\
+            Selection aborted, nothing done.\n");
+        let text = run_aop(&ctx, "purge volume action=truncate storage=File pool=Nope", &db, &mut sd, &["."]);
+        assert_eq!(text, "Error: Pool resource \"Nope\" does not exist.\nThe defined Pool resources are:\n1: Full\n2: Inc\n\
+            Select Pool resource (1-2): .\nSelection aborted, nothing done.\n");
+        // Unknown storage name, then the list.
+        let text = run_aop(&ctx, "purge volume storage=Nope", &db, &mut sd, &["."]);
+        assert!(text.starts_with("Storage resource \"Nope\": not found\nThe defined Storage resources are:\n"), "{text}");
+        assert_eq!((sd.connects, sd.sent.len(), db.writes().len()), (0, 0, 0));
+        // NDMP storage.
+        let ctx = aop_ctx("; Protocol = NDMPv4");
+        let text = run_aop(&ctx, "purge volume storage=File pool=Full", &db, &mut sd, &[]);
+        assert_eq!(text, "Storage has non-native protocol.\n");
+        assert_eq!(sd.connects, 0);
+        assert_eq!(atoi(" -3x"), -3);
+        assert_eq!(atoi("99999999999"), 1_215_752_191);
+        assert_eq!(atoi("99999999999999999999"), i64::MAX as i32);
+        assert_eq!(atoi("x"), 0);
     }
 }

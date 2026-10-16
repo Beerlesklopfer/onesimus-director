@@ -980,11 +980,18 @@ pub fn get_media_record(ctx: &ExecContext, media_id: i64, name: &str) -> Result<
 /// its volume list and 'E.g. "full-0001" or "*42": '. Catalog errors are
 /// reported as ErrorMsg.
 pub fn select_media_dbr(ua: &mut Ua, ast: &CommandAst) -> Option<MediaRecord> {
+    select_media_dbr_named(ua, ast).ok()
+}
+
+/// SelectMediaDbr() with the `mr->VolumeName` a failed selection leaves
+/// behind (empty, or the given/typed name the catalog does not know); the
+/// volume branch of PurgeCmd appends it to the command line.
+pub fn select_media_dbr_named(ua: &mut Ua, ast: &CommandAst) -> Result<MediaRecord, String> {
     let ctx = ua.ctx;
     let (mut media_id, mut name) = (0, String::new());
     if let Some(volume) = find_arg_with_value(ast, "volume") {
         if !acl::valid_name(volume) {
-            return None;
+            return Err(String::new());
         }
         name = volume.to_string();
     }
@@ -994,7 +1001,7 @@ pub fn select_media_dbr(ua: &mut Ua, ast: &CommandAst) -> Option<MediaRecord> {
             if !ua.db_error.is_empty() {
                 ua.error_msg(ua.db_error.clone());
             }
-            return None;
+            return Err(String::new());
         };
         let pool_id = get_pool_record(ctx, &pool).unwrap_or(0);
         if let Some(table) = ctx.catalog.as_ref().and_then(|cat| cat.query_rows(&format!("{} WHERE PoolId={pool_id} ORDER BY MediaId",
@@ -1002,19 +1009,19 @@ pub fn select_media_dbr(ua: &mut Ua, ast: &CommandAst) -> Option<MediaRecord> {
             ua.send_msg(crate::sql_list::render(&table, crate::sql_list::ListType::Horz));
         }
         ua.send_msg("Enter the volume name or MediaId of the volume prefixed with an asterisk (*).\n");
-        let answer = ua.get_cmd("E.g. \"full-0001\" or \"*42\": ")?;
+        let answer = ua.get_cmd("E.g. \"full-0001\" or \"*42\": ").ok_or_else(String::new)?;
         match answer.strip_prefix('*').filter(|n| parse_number(n).is_some()) {
             Some(number) => media_id = crate::commands::job::str_to_int64(number),
             None if acl::valid_name(&answer) => name = answer,
-            None => return None,
+            None => return Err(String::new()),
         }
     }
     match get_media_record(ctx, media_id, &name) {
-        Ok(record) => Some(record),
+        Ok(record) => Ok(record),
         Err(error) => {
             ua.error_msg(error.clone());
             ua.db_error = error;
-            None
+            Err(name)
         }
     }
 }
