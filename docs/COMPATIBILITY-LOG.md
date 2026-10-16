@@ -89,6 +89,10 @@ Neue Einträge unten anhängen; behobene Einträge bleiben mit Commit stehen.
 | C-068 | 17.10.2026 | update pool | `ds-update-pool` | Pool-Tabelle nach `update pool=` mit allen Spalten (maxvolfiles, actiononpurge, nextpoolid, min/maxblocksize, migration*) | Weniger Spalten | `ua_update.cc` UpdatePool, `cats/sql_list.cc` | offen |
 | C-069 | 17.10.2026 | move | `ds-move-*` | `move storage=…` fragt zuerst den SD nach Slots („is not an autochanger“, „No slots in changer.“) | Fehlermeldung ohne SD-Kontakt | `ua_label.cc`/`ua_impexp.cc` move_cmd | offen |
 | C-070 | 17.10.2026 | label, API 2 | `ds-label-api2` | Signale [-16, -16, -15, -15, -18] | [-16, -15, -18], Ausgabe gleich | wie C-061 (Befehl rahmt sich selbst) | offen |
+| C-071 | 17.10.2026 | export/import | `ds-export-file` | Fragen zuerst den SD nach Slots („is not an autochanger“, „No slots in changer.“) | `export`: Fehler zur Quellauswahl ohne SD-Kontakt; `import`: sendet „import“ an den SD („3900 Invalid command“) | `ua_impexp.cc` | offen |
+| C-072 | 17.10.2026 | restore, API 2 | Vorfall `dr2-api2-done-no` | `.api 2` + vollständige Restore-Auswahl startet den Job ohne Rückfrage, Antwort `{"result":{"run":{"jobid":"630"}}}` | Antwort `{"result":{}}`; Worktree-Stand ohne C-058 (JobId 10000) | `ua_restore.cc`, `ua_run.cc` | offen |
+
+Vorfall 17.10.2026 (Doku-Agent): Ein Paritätsfall mit `.api 2` und `restore … all done` startete im Original einen echten Restore (JobId 630 in der Wegwerfkopie, 180 Dateien nach `/tmp/bareos-restores` gegen die echten FD/SD); Onesimus startete ebenfalls, endete mit „Restore Error“. `bareos_cppref` unberührt. Seitdem weist `parity.py` (`unsafe_job_start`) Fälle ab, die unter `.api 2/json` oder mit `yes` einen Job außerhalb der sicheren Testjobs starten können; bekannte Fehlerfälle tragen `"api_job_safe": true`.
 
 Hinweis C-057: Ursache war nicht ein anderer Ladeweg, sondern `omit_defaults_`: das erste CheckResources() setzt es, danach markiert der Parser ungesetzte Direktiven nicht mehr als geerbt, und `show` druckt nach einem `reload` jeden Nicht-Default-Wert (Client-`Catalog`, leere Res-Verweise `""`, `LabelType`, `ActionOnPurge`, …; in `verbose` entfallen dafür die leeren `# X = `-Listen). Onesimus führt das als `DirectorConfig::reloaded`. Der Fehlerpfad prüft jetzt wie das Original (`config_check.rs`: unbekannte Direktiven, Pflichtdirektiven, doppelte Namen, unauflösbare Verweise, CheckResources-Regeln) und antwortet nur „failed to reload“ (API 2: `error` „failed“); Jmsg-Texte und „Please correct …/Resetting …“ gehen ins Daemon-Log. Ein erfolgreicher `reload` legt wie CheckCatalog(UPDATE_CATALOG) die Client/Storage-Sätze neuer Ressourcen an. Offen: die Lexer-Diagnosen (scan_err mit Zeile/Spalte) schreibt Onesimus nicht ins Log; der Start prüft weiterhin nicht (eine beim Start ungültige Konfiguration wird geladen). Fälle `c057`, Harness-Felder `config`/`restore_reload`/`log`.
 
@@ -116,7 +120,7 @@ eindeutige Sortierung), `c015-list-jobs-enabled-count` (undefiniertes Verhalten 
 
 ### Offen
 
-- Offen (17.10.2026): C-062 … C-070 (Funde der Doku-Agenten).
+- Offen (17.10.2026): C-062 … C-072 (Funde der Doku-Agenten).
 - C-058 teilweise behoben (17.10.2026); offen: Verify, Copy/Migrate-Arbeitsjobs, PoolOccupancy, Consolidate mit Always-Incremental-Jobs, RunScripts (siehe Hinweis C-058).
 - Befehlsstatus im Wiki (`docs/wiki/commands`): 53 `parity_verified`, 31 `partial`, 4 `registered_unverified`, 26 Restore-Baum-Befehle `missing_context` (Stand vor den C-045/C-049/C-055-Merges, Auffrischung offen).
 - OVFS-Integration im Director gemergt (16.10.2026): Erkennung beim Connect (Version 0.1.x + Signaturen), Befehle `.ovfs_status/_latest/_tree/_ls/_versions`, MCP-Tools in oconsole, SQL-Rückfall byte-gleich zur Extension (Äquivalenztest mit gebauter Extension auf PG 17).

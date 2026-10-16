@@ -55,8 +55,8 @@
 {"id": "c043-restore-api1-bootstrap-no", "steps": ["run job=RestoreFiles bootstrap=/nonexistent/c043.bsr", "no"], "setup": [".api 1"], "normalize": ["When: +[0-9: -]+"]}
 {"id": "c043-restore-api1-bootstrap-regex-no", "steps": ["run job=RestoreFiles bootstrap=/nonexistent/c043.bsr regexwhere=!a!b!", "no"], "setup": [".api 1"], "normalize": ["When: +[0-9: -]+"]}
 {"id": "c043-restore-api1-prompt-cancel", "steps": ["run job=RestoreFiles", "."], "setup": [".api 1"], "normalize": ["When: +[0-9: -]+"]}
-{"id": "c043-restore-api2-level-bogus", "steps": ["run job=RestoreFiles level=bogus"], "setup": [".api 2"], "normalize": ["When: +[0-9: -]+"]}
-{"id": "c043-restore-api2-jid-unknown", "steps": ["run job=RestoreFiles jobid=999999"], "setup": [".api 2"], "normalize": ["When: +[0-9: -]+"]}
+{"id": "c043-restore-api2-level-bogus", "steps": ["run job=RestoreFiles level=bogus"], "setup": [".api 2"], "normalize": ["When: +[0-9: -]+"], "api_job_safe": true}
+{"id": "c043-restore-api2-jid-unknown", "steps": ["run job=RestoreFiles jobid=999999"], "setup": [".api 2"], "normalize": ["When: +[0-9: -]+"], "api_job_safe": true}
 {"id": "c043-restore-regexjob-no", "steps": ["run job=parity-restore-regex", "no"], "normalize": ["When: +[0-9: -]+"]}
 {"id": "c043-restore-regexjob-where-no", "steps": ["run job=parity-restore-regex where=/w", "no"], "normalize": ["When: +[0-9: -]+"]}
 {"id": "c043-restore-regexjob-mod-jobid-no", "steps": ["run job=parity-restore-regex", "mod", "13", "no"], "normalize": ["When: +[0-9: -]+"]}
@@ -101,7 +101,7 @@
 {"id": "c043-backup-storage-nosuch-no", "steps": ["run job=backup-bareos-fd storage=nosuch", "no"], "normalize": ["When: +[0-9: -]+"]}
 {"id": "c043-backup-client-nosuch-no", "steps": ["run job=backup-bareos-fd client=nosuch", "no"], "normalize": ["When: +[0-9: -]+"]}
 {"id": "c043-backup-job-twice", "steps": ["run job=backup-bareos-fd job=RestoreFiles"], "normalize": ["When: +[0-9: -]+"]}
-{"id": "c043-backup-yes-level-bogus", "steps": ["run job=backup-bareos-fd level=bogus yes"], "normalize": ["When: +[0-9: -]+"]}
+{"id": "c043-backup-yes-level-bogus", "steps": ["run job=backup-bareos-fd level=bogus yes"], "normalize": ["When: +[0-9: -]+"], "api_job_safe": true}
 {"id": "c043-backup-vfull-nonextpool", "steps": ["run job=backup-bareos-fd level=VirtualFull", "no"], "normalize": ["When: +[0-9: -]+"]}
 {"id": "c043-when-exact-no", "steps": ["run job=backup-bareos-fd when=\"2030-01-02 03:04:05\"", "no"], "normalize": []}
 {"id": "c043-when-space-garbage-no", "steps": ["run job=backup-bareos-fd when=\"2030-1-2 3:4:5 x\"", "no"], "normalize": []}
