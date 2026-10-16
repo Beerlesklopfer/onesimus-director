@@ -50,17 +50,55 @@ Folge: `status director` liefert `scheduled: []`.
 
 ## Postgres-Plugin für Verzeichnisbäume (OVFS)
 
-Ein fertiges Postgres-Plugin-Crate (auf crates.io, Name noch eintragen) löst die
-Verzeichnisbäume im Catalog direkt in PostgreSQL auf. Damit lässt sich im
-Restore-Baum navigieren, wie es bconsole tut (`cd`, `ls`, `mark`).
+Statt eines fremden Crates entsteht eine eigene PostgreSQL-Extension `ovfs`
+(Rust/pgrx, Repo `oenesimus-postgres-plugin`, Verzeichnis `ovfs/`). Sie liest
+den Bareos-Katalog unverändert und liefert für den Restore den Verzeichnisbaum
+als JSON. Getestet wird gegen die neuesten Versionen: PostgreSQL 19 und
+Bareos 25.1.2-pre (Katalogschema 2250).
 
-- Crate-Name offen. Globale crates.io-Suche (13.10.2026, Begriffe: bareos, bacula,
-  bvfs, path hierarchy, ltree, pg tree, restore tree …) ohne eindeutigen Treffer;
-  entfernt ähnlich: `closure-tree`, `diesel_ltree`, `ltree2viz`.
+In Arbeit: `ovfs.tree(jobid, root)` – ab dem Einstiegsverzeichnis alle Pfade und
+Dateien eines Jobs rekursiv als JSON-Baum (sortiert, deterministisch). Teilbaum
+per Bereichssuche über den B-Tree-Index `path_name_idx` (setzt die
+Bareos-Standard-Collation `C` voraus), Dateien über `file_jpfid_idx`.
+
+Aus BVFS nicht mehr nötig:
+
+- `PathHierarchy`/`PathVisibility` samt `.bvfs_update`, `.bvfs_clear_cache`,
+  `.bvfs_cleanup`: die Bereichssuche ersetzt den Cache, keine Invalidierung nötig
+- `.bvfs_decode_lstat`: LStat wird in `ovfs-core` dekodiert
+- `.bvfs_lsdirs`/`.bvfs_lsfiles` mit `limit`/`offset`: ersetzt durch `ovfs.tree`
+  mit Obergrenze `max_entries` (Fehler statt stillem Abschneiden)
+
+Offen, für Restores nötig:
+
+- Jobkette (`.bvfs_get_jobids`): Ein Incremental enthält nur das Delta. Für den
+  Dateistand zu einem Zeitpunkt `ovfs.tree` mit einer Liste von JobIDs
+  (Full + letztes Differential + folgende Incrementals): neueste Version je
+  Datei gewinnt, Löschungen (`FileIndex = 0`) werden angewendet. Die Kette
+  ermittelt der Director (Pool-/FileSet-Regeln), nicht die Extension.
+- Restore-Kennungen (`.bvfs_restore`): Der Director braucht je Datei
+  (JobId, FileIndex) für den Bootstrap über `JobMedia`. Mit Jobkette zusätzlich
+  `jobid` je Knoten im JSON. Hardlinks: `LinkFI` aus dem LStat verweist auf die
+  Datei mit den Daten, deren FileIndex muss mit in die Auswahl (`link_fileindex`
+  wird bereits ausgegeben).
+
+Später/optional:
+
+- Versionen einer Datei über mehrere Jobs (`.bvfs_versions`) als eigene
+  Funktion, etwa `ovfs.versions`
+- Base-Jobs (`BaseFiles`) und Delta-Dateien (`DeltaSeq`): zunächst erkennen und
+  als nicht unterstützt melden statt falsch darstellen
+
+Integration:
+
 - Einbinden statt der heutigen BVFS-Stubs in `crates/onesimus-dird/src/commands/dot.rs`
-  (`.bvfs_update`, `.bvfs_lsdirs`, `.bvfs_lsfiles`, `.bvfs_versions` …)
+  (`.bvfs_update`, `.bvfs_lsdirs`, `.bvfs_lsfiles`, `.bvfs_versions` …); die
+  Stubs melden derzeit Erfolg ohne Wirkung („Done.“, „BVFS cache cleared“)
 - Danach als Tools im MCP-Modus von `oconsole` anbieten (Backup-Baum durchsuchen)
-- Restore-Baum im interaktiven `oconsole` wie bei bconsole
+- Restore-Baum im interaktiven `oconsole` wie bei bconsole (`cd`, `ls`, `mark`)
+- Befund am Rande: `crates/bareos-orm/schema/v2250_bareos_catalog.json` setzt
+  den Primärschlüssel von `pathvisibility` auf `jobid`; im Bareos-DDL ist er
+  `(JobId, PathId)`
 
 ## JSON-Ausgabe: Rest
 
