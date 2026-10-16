@@ -4,7 +4,7 @@ use crate::{command_ast::CommandAst, command_executor::ExecContext, command_queu
     job_manager::{ActiveJob, DirJobPhase}};
 
 enum Selection { All, Id(u32), Name(String), Unique(String), Mount }
-struct Options { selection: Selection, timeout: Option<Duration> }
+struct Options { selection: Selection, timeout: Option<i64> }
 
 trait Backend {
     /// C++ wait_cmd OpenClientDb(); Ok carries the catalog messages.
@@ -47,36 +47,29 @@ pub fn cmd_wait(ast: &CommandAst, ctx: &ExecContext) -> CommandResult {
     wait_with(ast, &mut Director { ctx, started: Instant::now() })
 }
 
-fn parse(ast: &CommandAst) -> Result<Options, String> {
-    let mut selection = None;
-    let mut timeout = None;
-    for argument in &ast.arguments {
-        let value = || argument.value.as_deref().filter(|value| !value.is_empty())
-            .ok_or_else(|| format!("wait: {} requires a value\n", argument.key));
-        let next = match argument.key.to_ascii_lowercase().as_str() {
-            "jobid" => Selection::Id(value()?.parse::<u32>().ok().filter(|id| *id > 0)
-                .ok_or("wait: jobid must be a positive integer\n")?),
-            "jobname" | "job" => Selection::Name(value()?.to_string()),
-            "ujobid" => Selection::Unique(value()?.to_string()),
-            "mount" => {
-                if argument.value.is_some() { return Err("wait: mount takes no value\n".into()); }
-                Selection::Mount
-            }
-            "timeout" => {
-                if timeout.is_some() { return Err("wait: duplicate timeout\n".into()); }
-                let seconds = value()?.parse::<u64>().map_err(|_| "wait: invalid timeout\n")?;
-                let duration = Duration::from_secs(seconds);
-                if Instant::now().checked_add(duration).is_none() { return Err("wait: timeout is too large\n".into()); }
-                timeout = Some(duration);
-                continue;
-            }
-            _ => return Err(format!("wait: unknown argument {}\n", argument.key)),
-        };
-        if selection.is_some() { return Err("wait: specify only one job selector or mount\n".into()); }
-        selection = Some(next);
+/// wait_cmd (ua_cmds.cc:2618): no arguments waits for all jobs; otherwise
+/// `timeout=` (str_to_int64 seconds, mount only) and the first of
+/// jobid/jobname/job/ujobid/mount decide. Anything else leaves JobId 0
+/// ("Job was not found").
+fn parse(ast: &CommandAst) -> Options {
+    if ast.arguments.is_empty() {
+        return Options { selection: Selection::All, timeout: None };
     }
-    if selection.is_none() && timeout.is_some() { return Err("wait: timeout requires a job selector or mount\n".into()); }
-    Ok(Options { selection: selection.unwrap_or(Selection::All), timeout })
+    let timeout = ast.arguments.iter().find(|a| a.key.eq_ignore_ascii_case("timeout"))
+        .and_then(|a| a.value.as_deref()).map(crate::commands::job::str_to_int64);
+    let mut selection = Selection::Id(0);
+    for argument in &ast.arguments {
+        let value = argument.value.clone();
+        selection = match argument.key.to_ascii_lowercase().as_str() {
+            "jobid" => Selection::Id(value.map_or(0, |v| crate::commands::job::str_to_int64(&v) as u32)),
+            "jobname" | "job" => value.map_or(Selection::Id(0), Selection::Name),
+            "ujobid" => value.map_or(Selection::Id(0), Selection::Unique),
+            "mount" => Selection::Mount,
+            _ => continue,
+        };
+        break;
+    }
+    Options { selection, timeout }
 }
 
 fn wait_with(ast: &CommandAst, backend: &mut impl Backend) -> CommandResult {
@@ -86,14 +79,18 @@ fn wait_with(ast: &CommandAst, backend: &mut impl Backend) -> CommandResult {
 }
 
 fn wait_selected(ast: &CommandAst, backend: &mut impl Backend, prefix: &mut String) -> CommandResult {
-    let options = match parse(ast) { Ok(options) => options, Err(error) => return CommandResult::error(error) };
+    // wait_cmd returns true on every path; the Job selection errors are
+    // ErrorMsg only.
+    let not_found = || { let mut r = CommandResult::error("ERR: Job was not found\n".into()); r.success = true; r };
+    let options = parse(ast);
     if !matches!(options.selection, Selection::All) {
         match backend.require_catalog(ast) {
             Ok(messages) => *prefix = messages,
-            Err(error) => return CommandResult::error(error),
+            Err(error) => { let mut r = CommandResult::error(error); r.success = true; return r; }
         }
     }
     let selected_id = match options.selection {
+        Selection::Id(0) => return not_found(),
         Selection::Id(id) => Some(id),
         Selection::Name(ref name) | Selection::Unique(ref name) => {
             let jobs = match backend.active_jobs() { Ok(jobs) => jobs, Err(error) => return CommandResult::error(error) };
@@ -103,7 +100,7 @@ fn wait_selected(ast: &CommandAst, backend: &mut impl Backend, prefix: &mut Stri
             });
             match selected {
                 Some(job) => Some(job.id),
-                None => return CommandResult::error("ERR: Job was not found\n".into()),
+                None => return not_found(),
             }
         }
         _ => None,
@@ -137,7 +134,7 @@ fn wait_selected(ast: &CommandAst, backend: &mut impl Backend, prefix: &mut Stri
             break;
         }
         // As upstream, timeout applies to mount waits only.
-        if matches!(options.selection, Selection::Mount) && options.timeout.is_some_and(|timeout| backend.elapsed() >= timeout) {
+        if matches!(options.selection, Selection::Mount) && options.timeout.is_some_and(|timeout| timeout <= 0 || backend.elapsed() >= Duration::from_secs(timeout as u64)) {
             return CommandResult::ok(String::new()).with_warning("Wait on mount timed out\n");
         }
         backend.sleep(Duration::from_secs(1));
@@ -237,16 +234,31 @@ mod tests {
     }
     #[test]
     fn invalid_input_missing_jobs_and_catalog_errors_never_claim_completion() {
-        for line in ["wait jobid=0","wait jobid=bad","wait jobname","wait mount=yes","wait jobid=1 jobid=2","wait mount timeout=-1"] {
+        // wait_cmd: JobId 0 (no usable selector) is "Job was not found",
+        // an ErrorMsg of a command that still returns true.
+        for line in ["wait jobid=0","wait jobid=bad","wait jobname","wait jobid","wait foo","wait timeout=5"] {
             let mut fake=backend(vec![vec![job(DirJobPhase::Running)]]);
-            assert!(!wait_with(&crate::session::parse_cli_command(line),&mut fake).success,"{line}");
+            let result=wait_with(&crate::session::parse_cli_command(line),&mut fake);
+            assert!(result.success,"{line}"); assert_eq!(result.error_message,"ERR: Job was not found\n","{line}");
             assert_eq!(fake.snapshots.len(),1); assert!(fake.queried.is_empty());
         }
         let mut fake=backend(vec![vec![]]);
-        assert!(!wait_with(&crate::session::parse_cli_command("wait jobname=missing"),&mut fake).success);
-        let mut fake=backend(vec![vec![]]);fake.catalog=Err("database unavailable".into());
-        assert!(!wait_with(&crate::session::parse_cli_command("wait jobid=42"),&mut fake).success);
+        let result=wait_with(&crate::session::parse_cli_command("wait jobname=missing"),&mut fake);
+        assert!(result.success); assert_eq!(result.error_message,"ERR: Job was not found\n");
+        let mut fake=backend(vec![vec![]]);fake.catalog=Err("ERR: Can't open db\n".into());
+        let result=wait_with(&crate::session::parse_cli_command("wait jobid=42"),&mut fake);
+        assert!(result.success); assert_eq!(result.error_message,"ERR: Can't open db\n");
         assert_eq!(fake.snapshots.len(),1);
+        // The first selector decides; `mount` ignores a value; a negative
+        // timeout has already expired.
+        let mut fake=backend(vec![vec![job(DirJobPhase::Running)],vec![]]);
+        assert!(wait_with(&crate::session::parse_cli_command("wait jobid=42 jobid=2"),&mut fake).success);
+        assert_eq!(fake.queried,vec![42]);
+        let mut fake=backend(vec![vec![job(DirJobPhase::WaitingMount)]]);
+        assert_eq!(wait_with(&crate::session::parse_cli_command("wait mount=yes"),&mut fake).text_output,"");
+        let mut fake=backend(vec![vec![]]);
+        assert_eq!(wait_with(&crate::session::parse_cli_command("wait mount timeout=-1"),&mut fake).text_output,
+            "Wait on mount timed out\n");
         let mut fake=backend(vec![vec![]]);fake.status=Err("status query failed".into());
         let result=wait_with(&crate::session::parse_cli_command("wait jobid=42"),&mut fake);
         assert!(!result.success);assert_eq!(result.error_message,"status query failed");

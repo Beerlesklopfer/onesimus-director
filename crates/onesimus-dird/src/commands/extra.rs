@@ -656,14 +656,19 @@ fn relabel_execute(ua: &mut crate::ua_select::Ua, request: crate::commands::admi
 
 pub fn cmd_delete(ast: &CommandAst, ctx: &ExecContext) -> CommandResult {
     let mut ua = crate::ua_select::Ua::new(ctx);
-    let ok = delete_dialog(&mut ua, ast, delete_execute);
-    ua.finish(ok)
+    let mut deleted = None;
+    let ok = delete_dialog(&mut ua, ast, &mut deleted, delete_execute);
+    let result = ua.finish(ok);
+    match deleted {
+        Some(deleted) => result.with_json(serde_json::json!({ "deleted": deleted })),
+        None => result,
+    }
 }
 
 /// What a confirmed delete removes from the catalog.
 #[derive(Debug, PartialEq, Eq)]
 enum DeleteAction {
-    Volume { name: String, purged: bool },
+    Volume { name: String, media_id: i64, purged: bool },
     Pool(String),
     Job(u64),
     Storage(String),
@@ -672,15 +677,19 @@ enum DeleteAction {
 /// DeleteCmd (ua_cmds.cc:2220): OpenClientDb, keyword (or the warning and
 /// "Choose catalog item to delete"), then DeleteVolume/DeletePool/DeleteJob/
 /// DeleteStorage with their selections and confirmations. `act` runs only
-/// for a selected and confirmed item.
+/// for a selected and confirmed item. `deleted` is the `.api 2` result
+/// object (ObjectStart("deleted") after OpenClientDb); the "jobids" array
+/// of `delete jobid=` is filled here, `act` adds its own arrays.
 fn delete_dialog(ua: &mut crate::ua_select::Ua, ast: &CommandAst,
-    mut act: impl FnMut(&mut crate::ua_select::Ua, DeleteAction)) -> bool {
+    deleted: &mut Option<serde_json::Map<String, serde_json::Value>>,
+    mut act: impl FnMut(&mut crate::ua_select::Ua, DeleteAction, &mut serde_json::Map<String, serde_json::Value>)) -> bool {
     use crate::ua_select::{self, find_arg, find_arg_with_value};
     const KEYWORDS: [&str; 4] = ["volume", "pool", "jobid", "storage"];
     let ctx = ua.ctx;
     if !ua.open_client_db(ast, true) {
         return true;
     }
+    let deleted = deleted.insert(serde_json::Map::new());
     let keyword = match ast.arguments.iter().find_map(|a| KEYWORDS.iter().position(|k| a.key.eq_ignore_ascii_case(k))) {
         Some(keyword) => Some(keyword),
         None => {
@@ -701,28 +710,38 @@ fn delete_dialog(ua: &mut crate::ua_select::Ua, ast: &CommandAst,
                     return true;
                 }
             }
-            act(ua, DeleteAction::Volume { purged: media.vol_status == "Purged", name: media.volume_name });
+            act(ua, DeleteAction::Volume { purged: media.vol_status == "Purged", media_id: media.media_id,
+                name: media.volume_name }, deleted);
         }
         Some(1) => {
             // DeletePool
             if ua.batch() {
+                // DeletePool's false is ignored by DeleteCmd.
                 ua.error_msg("Deleting pools from the catalog is not supported in batch mode.\n");
-                return false;
+                return true;
             }
             let Some(pool) = ua_select::select_pool_dbr(ua, ast, "pool") else { return true };
             let question = format!("Are you sure you want to delete Pool \"{pool}\"? (yes/no): ");
             if ua.get_yesno(&question) == Some(true) {
-                act(ua, DeleteAction::Pool(pool));
+                act(ua, DeleteAction::Pool(pool), deleted);
             }
         }
         Some(2) => {
             // DeleteJob
             if find_arg_with_value(ast, "jobid").is_none() {
+                // DoJobDelete's ArrayItem without an array is dropped.
                 if let Some(jobid) = ua.get_pint("Enter JobId to delete: ") {
-                    act(ua, DeleteAction::Job(u64::from(jobid)));
+                    act(ua, DeleteAction::Job(u64::from(jobid)), deleted);
                 }
                 return true;
             }
+            deleted.insert("jobids".into(), serde_json::Value::Array(Vec::new()));
+            let mut job_delete = |ua: &mut crate::ua_select::Ua, deleted: &mut serde_json::Map<String, serde_json::Value>, jobid: u64| {
+                act(ua, DeleteAction::Job(jobid), deleted);
+                if let Some(serde_json::Value::Array(ids)) = deleted.get_mut("jobids") {
+                    ids.push(serde_json::Value::String((jobid as u32).to_string()));
+                }
+            };
             let number = |s: &str| ua_select::is_a_number(s);
             for value in ast.arguments.iter().filter(|a| a.key.eq_ignore_ascii_case("jobid")).filter_map(|a| a.value.clone()) {
                 for token in value.split(',') {
@@ -745,10 +764,10 @@ fn delete_dialog(ua: &mut crate::ua_select::Ua, ast: &CommandAst,
                             }
                         }
                         for jobid in first..=last {
-                            act(ua, DeleteAction::Job(jobid));
+                            job_delete(ua, deleted, jobid);
                         }
                     } else if number(token) {
-                        act(ua, DeleteAction::Job(crate::commands::job::str_to_int64(token) as u64));
+                        job_delete(ua, deleted, crate::commands::job::str_to_int64(token) as u64);
                     } else {
                         ua.error_msg(format!("Illegal JobId {token} ignored\n"));
                     }
@@ -773,37 +792,60 @@ fn delete_dialog(ua: &mut crate::ua_select::Ua, ast: &CommandAst,
                     the configuration. In order to remove a storage from the catalog, its configuration must be removed first.\n"));
                 return true;
             }
-            act(ua, DeleteAction::Storage(given));
+            act(ua, DeleteAction::Storage(given), deleted);
         }
         None => ua.warning_msg("Nothing done.\n"),
     }
     true
 }
 
-/// The catalog work of a confirmed delete.
-fn delete_execute(ua: &mut crate::ua_select::Ua, action: DeleteAction) {
+/// The catalog work of a confirmed delete (DeleteVolume after the
+/// confirmation, DoJobDelete; pool and storage deletion are not ported).
+fn delete_execute(ua: &mut crate::ua_select::Ua, action: DeleteAction,
+    deleted: &mut serde_json::Map<String, serde_json::Value>) {
+    use serde_json::Value;
     let Some(cat) = ua.ctx.catalog.clone() else {
         ua.send_msg("No catalog configured\n");
         return;
     };
     match action {
-        DeleteAction::Volume { name, .. } => {
-            let vol = name.replace('\'', "''");
-            // Delete jobmedia first (FK), then media record
-            let _ = cat.raw_query(&format!(
-                "DELETE FROM jobmedia WHERE mediaid IN (SELECT mediaid FROM media WHERE volumename = '{vol}')"));
-            match cat.raw_query(&format!("DELETE FROM media WHERE volumename = '{vol}'")) {
-                Ok(_) => ua.send_msg(format!("Volume {name} deleted.\n")),
-                Err(e) => ua.error_msg(format!("Delete error: {e}\n")),
+        DeleteAction::Volume { name, media_id, purged } => {
+            if !purged {
+                // GetVolumeJobids, PurgeJobsFromCatalog.
+                let Ok(table) = cat.query_rows(&format!("SELECT DISTINCT JobId FROM JobMedia WHERE MediaId={media_id}")) else {
+                    ua.error_msg("Can't list jobs on this volume\n");
+                    return;
+                };
+                let jobids: Vec<String> = table.rows.into_iter().filter_map(|r| r.into_iter().next().flatten()).collect();
+                if !jobids.is_empty() {
+                    let list = jobids.join(",");
+                    if let Ok(db) = cat.dedicated() {
+                        super::purge::purge_jobs(&db, &list);
+                    }
+                    deleted.insert("jobids".into(), Value::Array(jobids.iter().cloned().map(Value::String).collect()));
+                    ua.info_msg(format!("Deleted {} jobs and associated records deleted from the catalog (jobids: {list}).\n",
+                        jobids.len()));
+                }
+                // DeleteMediaRecord: DoMediaPurge of a not purged volume.
+                if let Ok(table) = cat.query_rows(&format!("SELECT JobId from JobMedia WHERE MediaId={media_id}")) {
+                    for jobid in table.rows.into_iter().filter_map(|r| r.into_iter().next().flatten()) {
+                        for table in ["Job", "File", "JobMedia"] {
+                            let _ = cat.raw_query(&format!("DELETE FROM {table} WHERE JobId={jobid}"));
+                        }
+                    }
+                }
             }
+            let _ = cat.raw_query(&format!("DELETE FROM Media WHERE MediaId={media_id}"));
+            deleted.insert("volumes".into(), Value::Array(vec![Value::String(name.clone())]));
+            ua.send_msg(format!("Volume {name} deleted.\n"));
         }
         DeleteAction::Job(id) => {
-            let _ = cat.raw_query(&format!("DELETE FROM jobmedia WHERE jobid = {id}"));
-            let _ = cat.raw_query(&format!("DELETE FROM file WHERE jobid = {id}"));
-            match cat.raw_query(&format!("DELETE FROM job WHERE jobid = {id}")) {
-                Ok(_) => ua.send_msg(format!("Jobid {id} and associated records deleted from the catalog.\n")),
-                Err(e) => ua.error_msg(format!("Delete error: {e}\n")),
+            // PurgeJobsFromCatalog.
+            match cat.dedicated() {
+                Ok(db) => super::purge::purge_jobs(&db, &id.to_string()),
+                Err(e) => ua.error_msg(format!("{e}\n")),
             }
+            ua.send_msg(format!("Jobid {id} and associated records deleted from the catalog.\n"));
         }
         DeleteAction::Pool(_) => ua.send_msg("delete pool: not supported\n"),
         DeleteAction::Storage(_) => ua.send_msg("delete storage: not supported\n"),
@@ -1194,7 +1236,7 @@ mod move_operation_tests {
             let mut acted = Vec::new();
             let (_, console) = scripted(answers, || {
                 let mut ua = crate::ua_select::Ua::new(&ctx);
-                delete_dialog(&mut ua, &crate::session::parse_cli_command(line), |_, action| acted.push(action));
+                delete_dialog(&mut ua, &crate::session::parse_cli_command(line), &mut None, |_, action, _| acted.push(action));
                 ua.finish(true);
             });
             (console.transcript(), acted)
@@ -1219,9 +1261,27 @@ mod move_operation_tests {
         }
         // Batch mode: no question can be answered.
         let mut ua = crate::ua_select::Ua::new(&ctx);
-        delete_dialog(&mut ua, &crate::session::parse_cli_command("delete"), |_, _| panic!("batch"));
+        delete_dialog(&mut ua, &crate::session::parse_cli_command("delete"), &mut None, |_, _, _| panic!("batch"));
         let result = ua.finish(true);
         assert!(result.text_output.contains("Your request has multiple choices for \"\""), "{}", result.text_output);
+    }
+
+    #[test]
+    fn delete_result_object_matches_delete_cmd() {
+        // DeleteCmd: ObjectStart("deleted") after OpenClientDb; `jobid=`
+        // opens the "jobids" array and DoJobDelete adds each JobId string.
+        let ctx = context("Pool { Name = Full; Pool Type = Backup }");
+        let deleted = |line: &str| {
+            let mut ua = crate::ua_select::Ua::new(&ctx);
+            let mut deleted = None;
+            delete_dialog(&mut ua, &crate::session::parse_cli_command(line), &mut deleted, |_, _, _| {});
+            ua.finish(true);
+            deleted.map(serde_json::Value::Object)
+        };
+        assert_eq!(deleted("delete"), Some(serde_json::json!({})));
+        assert_eq!(deleted("delete jobid=3,5-7,x,9-8"), Some(serde_json::json!({"jobids": ["3", "5", "6", "7"]})));
+        assert_eq!(deleted("delete jobid=x"), Some(serde_json::json!({"jobids": []})));
+        assert_eq!(deleted("delete storage=nosuch"), Some(serde_json::json!({})));
     }
 
     #[test]

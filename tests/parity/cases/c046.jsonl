@@ -1,0 +1,150 @@
+{"id": "c046-delete-jobid-illegal-api2", "setup": [".api 2"], "steps": ["delete jobid=x"]}
+{"id": "c046-delete-jobid-range-decreasing-api2", "setup": [".api 2"], "steps": ["delete jobid=9-8"]}
+{"id": "c046-delete-jobid-range-illegal-api2", "setup": [".api 2"], "steps": ["delete jobid=a-b,x"]}
+{"id": "c046-delete-jobid-novalue-api2", "setup": [".api 2"], "steps": ["delete jobid"]}
+{"id": "c046-delete-volume-nosuch-api2", "setup": [".api 2"], "steps": ["delete volume=nosuch"]}
+{"id": "c046-delete-volume-noname-api2", "setup": [".api 2"], "steps": ["delete volume"]}
+{"id": "c046-delete-pool-api2", "setup": [".api 2"], "steps": ["delete pool=Full"]}
+{"id": "c046-delete-storage-nosuch-api2", "setup": [".api 2"], "steps": ["delete storage=nosuch"]}
+{"id": "c046-delete-storage-configured-api2", "setup": [".api 2"], "steps": ["delete storage=File"]}
+{"id": "c046-delete-catalog-nosuch-api2", "setup": [".api 2"], "steps": ["delete catalog=nosuch jobid=1"]}
+{"id": "c046-time-api2", "setup": [".api 2"], "steps": ["time"], "normalize": ["\"full\": \"[^\"]*\"", "\"(year|month|day|hour|minute|second)\": \"\\d+\""]}
+{"id": "c046-help-api2", "setup": [".api 2"], "steps": ["help"]}
+{"id": "c046-help-list-api2", "setup": [".api 2"], "steps": ["help list"]}
+{"id": "c046-help-nosuch-api2", "setup": [".api 2"], "steps": ["help nosuch"]}
+{"id": "c046-dothelp-api2", "setup": [".api 2"], "steps": [".help"]}
+{"id": "c046-dothelp-all-api2", "setup": [".api 2"], "steps": [".help all"]}
+{"id": "c046-dothelp-item-api2", "setup": [".api 2"], "steps": [".help item=list"]}
+{"id": "c046-dothelp-item-nosuch-api2", "setup": [".api 2"], "steps": [".help item=nosuch"]}
+{"id": "c046-show-disabled-api2", "setup": [".api 2"], "steps": ["show disabled"]}
+{"id": "c046-show-disabled-jobs-api2", "setup": [".api 2"], "steps": ["show disabled jobs"]}
+{"id": "c046-show-disabled-clients-api2", "setup": [".api 2"], "steps": ["show disabled clients"]}
+{"id": "c046-show-disabled-schedules-api2", "setup": [".api 2"], "steps": ["show disabled schedules"]}
+{"id": "c046-show-fileset-api2", "setup": [".api 2"], "steps": ["show fileset=LinuxAll"]}
+{"id": "c046-show-filesets-api2", "setup": [".api 2"], "steps": ["show filesets"]}
+{"id": "c046-show-job-nosuch-api2", "setup": [".api 2"], "steps": ["show job=nosuch"]}
+{"id": "c046-show-nosuch-api2", "setup": [".api 2"], "steps": ["show nosuch"]}
+{"id": "c046-show-schedule-api2", "setup": [".api 2"], "steps": ["show schedule=WeeklyCycle"]}
+{"id": "c046-show-client-verbose-api2", "setup": [".api 2"], "steps": ["show client=bareos-fd verbose"]}
+{"id": "c046-show-job-api2", "setup": [".api 2"], "steps": ["show job=backup-bareos-fd"]}
+{"id": "c046-show-jobdefs-api2", "setup": [".api 2"], "steps": ["show jobdefs"]}
+{"id": "c046-show-pools-api2", "setup": [".api 2"], "steps": ["show pools"]}
+{"id": "c046-show-storages-api2", "setup": [".api 2"], "steps": ["show storages"]}
+{"id": "c046-show-director-api2", "setup": [".api 2"], "steps": ["show director"]}
+{"id": "c046-show-messages-api2", "setup": [".api 2"], "steps": ["show messages"]}
+{"id": "c046-show-profiles-api2", "setup": [".api 2"], "steps": ["show profiles"]}
+{"id": "c046-show-consoles-api2", "setup": [".api 2"], "steps": ["show consoles"]}
+{"id": "c046-show-catalogs-api2", "setup": [".api 2"], "steps": ["show catalogs"]}
+{"id": "c046-show-all-api2", "setup": [".api 2"], "steps": ["show all"]}
+{"id": "c046-dotauthorized-api2", "setup": [".api 2"], "steps": [".authorized"]}
+{"id": "c046-dotaop-api2", "setup": [".api 2"], "steps": [".aop"]}
+{"id": "c046-dotapi-step-api2", "setup": [".api 2"], "steps": [".api 2"]}
+{"id": "c046-configure-noarg-api2", "setup": [".api 2"], "steps": ["configure"]}
+{"id": "c046-configure-export-client-api2", "setup": [".api 2"], "steps": ["configure export client=bareos-fd"]}
+{"id": "c046-configure-export-nosuch-api2", "setup": [".api 2"], "steps": ["configure export client=nosuch"]}
+{"id": "c046-configure-export-noarg-api2", "setup": [".api 2"], "steps": ["configure export"]}
+{"id": "c046-configure-add-noarg-api2", "setup": [".api 2"], "steps": ["configure add"]}
+{"id": "c046-configure-add-incomplete-api2", "setup": [".api 2"], "steps": ["configure add client"]}
+{"id": "c046-run-job-nosuch-api2", "setup": [".api 2"], "steps": ["run job=nosuch"]}
+{"id": "c046-run-noarg-api2", "setup": [".api 2"], "steps": ["run"]}
+{"id": "c046-wait-jobid-nosuch-api2", "setup": [".api 2"], "steps": ["wait jobid=99999"]}
+{"id": "c046-wait-job-nosuch-api2", "setup": [".api 2"], "steps": ["wait job=nosuch"]}
+{"id": "c046-wait-jobname-nosuch-api2", "setup": [".api 2"], "steps": ["wait jobname=nosuch"]}
+{"id": "c046-wait-ujobid-nosuch-api2", "setup": [".api 2"], "steps": ["wait ujobid=nosuch"]}
+{"id": "c046-enable-noarg-api2", "setup": [".api 2"], "steps": ["enable"]}
+{"id": "c046-disable-noarg-api2", "setup": [".api 2"], "steps": ["disable"]}
+{"id": "c046-enable-schedule-api2", "setup": [".api 2"], "steps": ["enable schedule=ParityPreview"]}
+{"id": "c046-enable-client-api2", "setup": [".api 2"], "steps": ["enable client=bareos-fd"]}
+{"id": "c046-status-noarg-api2", "setup": [".api 2"], "steps": ["status"]}
+{"id": "c046-status-scheduler-api2", "setup": [".api 2"], "steps": ["status scheduler"]}
+{"id": "c046-status-scheduler-job-api2", "setup": [".api 2"], "steps": ["status scheduler job=backup-bareos-fd days=2"]}
+{"id": "c046-status-scheduler-client-api2", "setup": [".api 2"], "steps": ["status scheduler client=bareos-fd days=2"]}
+{"id": "c046-status-configuration-api2", "setup": [".api 2"], "steps": ["status configuration"]}
+{"id": "c046-dotstatus-header-api2", "setup": [".api 2"], "steps": [".status dir header"], "normalize": ["25\\.1\\.2[~+][\\w.]+", "\"\\d\\d \\w+ \\d{4}\"", "\\d\\d-\\w{3}-\\d\\d \\d\\d:\\d\\d", "\"binary_info\": \"[^\"]*\""]}
+{"id": "c046-dotstatus-bad-api2", "setup": [".api 2"], "steps": [".status dir nosuch"]}
+{"id": "c046-dotstatus-noarg-api2", "setup": [".api 2"], "steps": [".status"]}
+{"id": "c046-list-jobs-count-api2", "setup": [".api 2"], "steps": ["list jobs count"]}
+{"id": "c046-list-files-noarg-api2", "setup": [".api 2"], "steps": ["list files"]}
+{"id": "c046-list-nosuch-api2", "setup": [".api 2"], "steps": ["list nosuch"]}
+{"id": "c046-list-noarg-api2", "setup": [".api 2"], "steps": ["list"]}
+{"id": "c046-llist-pools-api2", "setup": [".api 2"], "steps": ["llist pools"]}
+{"id": "c046-list-volumes-pool-api2", "setup": [".api 2"], "steps": ["list volumes pool=Full"]}
+{"id": "c046-list-media-api2", "setup": [".api 2"], "steps": ["list media"]}
+{"id": "c046-list-jobtotals-api2", "setup": [".api 2"], "steps": ["list jobtotals"]}
+{"id": "c046-list-backups-client-api2", "setup": [".api 2"], "steps": ["list backups client=bareos-fd"]}
+{"id": "c046-list-copies-api2", "setup": [".api 2"], "steps": ["list copies"]}
+{"id": "c046-list-jobmedia-api2", "setup": [".api 2"], "steps": ["list jobmedia"]}
+{"id": "c046-list-filesets-api2", "setup": [".api 2"], "steps": ["list filesets"]}
+{"id": "c046-list-clients-api2", "setup": [".api 2"], "steps": ["list clients"]}
+{"id": "c046-list-storages-api2", "setup": [".api 2"], "steps": ["list storages"]}
+{"id": "c046-list-pool-nosuch-api2", "setup": [".api 2"], "steps": ["list pool=nosuch"]}
+{"id": "c046-list-jobs-last-api2", "setup": [".api 2"], "steps": ["list jobs last"]}
+{"id": "c046-list-jobs-jobstatus-api2", "setup": [".api 2"], "steps": ["list jobs jobstatus=T"]}
+{"id": "c046-list-jobid-nosuch-api2", "setup": [".api 2"], "steps": ["list jobid=999999"]}
+{"id": "c046-list-joblog-nosuch-api2", "setup": [".api 2"], "steps": ["list joblog jobid=999999"]}
+{"id": "c046-list-basefiles-api2", "setup": [".api 2"], "steps": ["list basefiles jobid=1"]}
+{"id": "c046-list-volume-nosuch-api2", "setup": [".api 2"], "steps": ["list volume=nosuch"]}
+{"id": "c046-dotbvfs-get-jobids-nosuch-api2", "setup": [".api 2"], "steps": [".bvfs_get_jobids jobid=999999"]}
+{"id": "c046-dotdefaults-client-api2", "setup": [".api 2"], "steps": [".defaults client=bareos-fd"]}
+{"id": "c046-dotdefaults-job-api2", "setup": [".api 2"], "steps": [".defaults job=backup-bareos-fd"]}
+{"id": "c046-dotdefaults-pool-api2", "setup": [".api 2"], "steps": [".defaults pool=Full"]}
+{"id": "c046-dotdefaults-storage-api2", "setup": [".api 2"], "steps": [".defaults storage=File"]}
+{"id": "c046-dotdefaults-nosuch-api2", "setup": [".api 2"], "steps": [".defaults job=nosuch"]}
+{"id": "c046-dotlevels-type-api2", "setup": [".api 2"], "steps": [".levels type=B"]}
+{"id": "c046-dotlevels-restore-api2", "setup": [".api 2"], "steps": [".levels type=R"]}
+{"id": "c046-dotjobs-type-api2", "setup": [".api 2"], "steps": [".jobs type=B"]}
+{"id": "c046-dotjobs-enabled-api2", "setup": [".api 2"], "steps": [".jobs enabled"]}
+{"id": "c046-dotjobs-disabled-api2", "setup": [".api 2"], "steps": [".jobs disabled"]}
+{"id": "c046-dotclients-enabled-api2", "setup": [".api 2"], "steps": [".clients enabled"]}
+{"id": "c046-dotschedule-enabled-api2", "setup": [".api 2"], "steps": [".schedule enabled"]}
+{"id": "c046-dotschedule-disabled-api2", "setup": [".api 2"], "steps": [".schedule disabled"]}
+{"id": "c046-dotschedule-name-api2", "setup": [".api 2"], "steps": [".schedule=WeeklyCycle"]}
+{"id": "c046-dotpools-type-api2", "setup": [".api 2"], "steps": [".pools type=Backup"]}
+{"id": "c046-dotstorages-enabled-api2", "setup": [".api 2"], "steps": [".storages enabled"]}
+{"id": "c046-dotsql-noquery-api2", "setup": [".api 2"], "steps": [".sql"]}
+{"id": "c046-dotsql-error-api2", "setup": [".api 2"], "steps": [".sql query=\"select nosuch from nosuch\""]}
+{"id": "c046-dotvolstatus-api2", "setup": [".api 2"], "steps": [".volstatus"]}
+{"id": "c046-estimate-nosuch-api2", "setup": [".api 2"], "steps": ["estimate job=nosuch"]}
+{"id": "c046-prune-noarg-api2", "setup": [".api 2"], "steps": ["prune"]}
+{"id": "c046-purge-noarg-api2", "setup": [".api 2"], "steps": ["purge"]}
+{"id": "c046-update-noarg-api2", "setup": [".api 2"], "steps": ["update"]}
+{"id": "c046-restore-noarg-api2", "setup": [".api 2"], "steps": ["restore"]}
+{"id": "c046-use-nosuch-api2", "setup": [".api 2"], "steps": ["use catalog=nosuch"]}
+{"id": "c046-use-noarg-api2", "setup": [".api 2"], "steps": ["use"]}
+{"id": "c046-sqlquery-api2", "setup": [".api 2"], "steps": ["sqlquery"]}
+{"id": "c046-query-api2", "setup": [".api 2"], "steps": ["query"]}
+{"id": "c046-noop-api2", "setup": [".api 2"], "steps": ["noop"]}
+{"id": "c046-setip-api2", "setup": [".api 2"], "steps": ["setip"]}
+{"id": "c046-autodisplay-noarg-api2", "setup": [".api 2"], "steps": ["autodisplay"]}
+{"id": "c046-rerun-noarg-api2", "setup": [".api 2"], "steps": ["rerun"]}
+{"id": "c046-configure-add-exists-api2", "setup": [".api 2"], "steps": ["configure add client name=bareos-fd address=localhost password=x"]}
+{"id": "c046-configure-add-director-api2", "setup": [".api 2"], "steps": ["configure add director name=x"]}
+{"id": "c046-configure-add-nosuch-api2", "setup": [".api 2"], "steps": ["configure add nosuch name=x"]}
+{"id": "c046-configure-badsub-api2", "setup": [".api 2"], "steps": ["configure foo bar"]}
+{"id": "c046-configure-export-novalue-api2", "setup": [".api 2"], "steps": ["configure export client"]}
+{"id": "c046-wait-unknown-arg-api2", "setup": [".api 2"], "steps": ["wait foo"]}
+{"id": "c046-wait-jobid-novalue-api2", "setup": [".api 2"], "steps": ["wait jobid"]}
+{"id": "c046-wait-jobid-bad-api2", "setup": [".api 2"], "steps": ["wait jobid=abc"]}
+{"id": "c046-wait-timeout-only-api2", "setup": [".api 2"], "steps": ["wait timeout=5"]}
+{"id": "c046-wait-jobid-zero-api2", "setup": [".api 2"], "steps": ["wait jobid=0"]}
+{"id": "c046-show-disabled-nosuch-api2", "setup": [".api 2"], "steps": ["show disabled nosuch"]}
+{"id": "c046-show-job-nosuch-then-valid-api2", "setup": [".api 2"], "steps": ["show job=nosuch client=bareos-fd"]}
+{"id": "c046-show-nosuch-then-valid-api2", "setup": [".api 2"], "steps": ["show nosuch client=bareos-fd"]}
+{"id": "c046-list-pool-full-api2", "setup": [".api 2"], "steps": ["list pool=Full"]}
+{"id": "c046-list-pool-incremental-api2", "setup": [".api 2"], "steps": ["list pool=Incremental"]}
+{"id": "c046-list-pools-api2", "setup": [".api 2"], "steps": ["list pools"]}
+{"id": "c046-llist-pool-full-api2", "setup": [".api 2"], "steps": ["llist pool=Full"]}
+{"id": "c046-list-poolid-api2", "setup": [".api 2"], "steps": ["list poolid=1"]}
+{"id": "c046-status-prompt-cancel", "steps": ["status", "."]}
+{"id": "c046-status-prompt-scheduler", "steps": ["status", "4"], "normalize": ["\\d\\d-\\w{3}-\\d\\d \\d\\d:\\d\\d"]}
+{"id": "c046-status-prompt-api1-cancel", "setup": [".api 1"], "steps": ["status", "."]}
+{"id": "c046-status-prompt-api1-scheduler", "setup": [".api 1"], "steps": ["status", "4"], "normalize": ["\\d\\d-\\w{3}-\\d\\d \\d\\d:\\d\\d"]}
+{"id": "c046-status-prompt-badnumber", "steps": ["status", "9", "."]}
+{"id": "c046-show-job-nosuch-api1", "setup": [".api 1"], "steps": ["show job=nosuch"]}
+{"id": "c046-show-nosuch-api1", "setup": [".api 1"], "steps": ["show nosuch"]}
+{"id": "c046-wait-job-nosuch-api1", "setup": [".api 1"], "steps": ["wait job=nosuch"]}
+{"id": "c046-wait-unknown-arg", "steps": ["wait foo"]}
+{"id": "c046-wait-jobid-bad-api1", "setup": [".api 1"], "steps": ["wait jobid=abc"]}
+{"id": "c046-configure-noarg-api1", "setup": [".api 1"], "steps": ["configure"]}
+{"id": "c046-delete-noarg-api1", "setup": [".api 1"], "steps": ["delete"]}
+{"id": "c046-delete-jobid-illegal-api1", "setup": [".api 1"], "steps": ["delete jobid=x"]}
