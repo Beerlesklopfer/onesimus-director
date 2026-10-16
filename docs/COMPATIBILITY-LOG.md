@@ -38,7 +38,7 @@ Neue Einträge unten anhängen; behobene Einträge bleiben mit Commit stehen.
 | C-018 | 15.10.2026 | resolve | `resolve`, `resolve client=` | Reihenfolge ipv6 vor ipv4, doppelte Adresse wie getaddrinfo, TLS-Handshakezeile | Andere Reihenfolge, Duplikate entfernt, keine Handshakezeile | `ua_cmds.cc` `ResolveCmd` | behoben (in development, 15.10.2026) |
 | C-019 | 15.10.2026 | configure | `configure export`, `configure nosuch`, `help configure` | Export in Datei unter `bareos-dir-export/`, Original-Usage, Profile-ACL-Direktiven in Usage | Inline-Ausgabe, eigene CRUD-Usage, ACL-Direktiven fehlen | `ua_configure.cc`, `dird_conf.cc` | behoben (in development, 15.10.2026) |
 | C-020 | 15.10.2026 | .api json | `.api json compact=yes` | Kompaktes JSON | Pretty-Print | `ua_dotcmds.cc` | behoben (in development, 15.10.2026) |
-| C-021 | 15.10.2026 | restore | `restore help` | `Unknown keyword: help` | Versucht Bootstrap zu erzeugen | `ua_restore.cc` | offen |
+| C-021 | 15.10.2026 | restore | `restore help` | `Unknown keyword: help` | Versucht Bootstrap zu erzeugen | `ua_restore.cc` | behoben (Merge 16.10.2026; Restore-Menü → C-011-Dialog in `restore.rs prompt_menu()` anbinden; Dateibaum-Auswahl offen) |
 | C-022 | 15.10.2026 | bvfs | `.bvfs_get_jobids`, `.bvfs_lsdirs`, `.bvfs_lsfiles`, `.bvfs_versions` | Echte Katalogabfrage | Echo des Befehls (Platzhalter) | `ua_dotcmds.cc` | offen |
 | C-023 | 15.10.2026 | var / use / memory | `var`, `use catalog=…`, `memory` | `var`: Leerzeile; `use`: keine Ausgabe; `memory`: Statuskopf | Eigene Texte bzw. `/proc`-Werte | `ua_cmds.cc` | behoben (in development, 15.10.2026) |
 | C-024 | 15.10.2026 | Client-Status | `status client=…` | `Probing client protocol…`, Handshakezeile | `Connected to Client … Version: 54` | `ua_status.cc` | behoben (in development, 15.10.2026) |
@@ -72,13 +72,12 @@ Noch nicht gemergte Agent-Branches (Worktrees unter `.claude/worktrees/`, Commit
 
 | Eintrag | Branch-Commits | Hinweis |
 | --- | --- | --- |
-| C-021 restore | `9a6402e` | Konflikt (admin.rs, C-012-Guards) |
 | C-022 bvfs | `5c9ec82 0a58b6c` | Konflikt |
 | C-037 Audit-Log | `021b78d` | Konflikt (parity.py: jetzt Katalogkopien pro Seite) |
 
 C-011 gemergt (Merge-Commit): Konflikte in `admin.rs`/`extra.rs` (update/label/relabel) zugunsten der C-011-Dialoge gelöst — prüfen, ob C-012s spätere Wertvalidierung für `update` (`3500719`) vollständig erhalten ist; C-011-Ersatz für `list_sql_query` durch C-016-Version ersetzt. Voller Paritätslauf nach dem Merge steht aus.
 
-Nach C-011/C-015/C-017-Merge: C-011-Dialog in `estimate` (Hook C-017) und `list volumes pool=<unbekannt>` (C-015) anbinden.
+Nach C-011/C-015/C-017-Merge: C-011-Dialog in `estimate` (Hook C-017) und `list volumes pool=<unbekannt>` (C-015) anbinden; ebenso `restore.rs prompt_menu()` (C-021, 4 Fälle).
 
 Offen ohne Agent: C-025..C-030, C-031..C-036, C-024-Rest, Umstellung Referenz auf `18be77e6`.
 Voraussetzung: `sudo -u postgres psql -c 'ALTER ROLE "joerg.bernau" CREATEDB'` — sonst

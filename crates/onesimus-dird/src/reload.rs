@@ -42,16 +42,17 @@ pub fn setup_sighup_handler(
         .expect("failed to spawn SIGHUP handler");
 }
 
+/// Configuration path the Director was started with (C++
+/// `my_config->get_base_config_path()`); None before startup and in tests.
+pub fn config_path() -> Option<PathBuf> {
+    RELOAD_TARGET.get().map(|target| target.0.clone())
+}
+
 /// Reload the configuration now (console `reload`, SIGHUP).
 /// On error the previous configuration stays active.
 pub fn reload_now() -> Result<(), String> {
     let (path, shared) = RELOAD_TARGET.get().ok_or("reload not initialized")?;
     reload_config(path, shared)
-}
-
-/// The `-c` path the configuration was loaded from (None before startup).
-pub fn config_path() -> Option<PathBuf> {
-    RELOAD_TARGET.get().map(|(path, _)| path.clone())
 }
 
 fn reload_config(config_path: &std::path::Path, shared_config: &SharedConfig) -> Result<(), String> {
