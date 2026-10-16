@@ -1,6 +1,6 @@
 # Read-only/interactive-entry parity cases; one JSON object per line.
-{"id": "banner", "steps": [], "banner": true}
-{"id": "banner-limited", "steps": [], "banner": true, "console": "parity-limited", "password": "parity-limited-pw"}
+{"id": "banner", "steps": [], "banner": true, "normalize": ["(?<=Version: )\\S+", "\\(\\d\\d \\w+ \\d{4}\\)"]}
+{"id": "banner-limited", "steps": [], "banner": true, "console": "parity-limited", "password": "parity-limited-pw", "normalize": ["(?<=Version: )\\S+", "\\(\\d\\d \\w+ \\d{4}\\)", "Bareos community build \\(UNSUPPORTED\\)\\.\\nGet professional support from https://www\\.bareos\\.com|Onesimus build\\.\\nSupport: https://onesimus\\.io"]}
 {"id": "version", "steps": ["version"], "normalize": ["25\\.1\\.2[~+][\\w.]+", "\\(\\d\\d \\w+ \\d{4}\\)"]}
 {"id": "time", "steps": ["time"], "normalize": ["\\d\\d-\\w{3}-\\d{4} \\d\\d:\\d\\d:\\d\\d", "^\\w{2,3} "]}
 {"id": "whoami", "steps": ["whoami"]}
@@ -156,12 +156,12 @@
 {"id": "status-storage", "steps": ["status storage=File"], "normalize": ["\\d\\d-\\w{3}-\\d\\d \\d\\d:\\d\\d"], "timeout_ms": 20000}
 {"id": "status-scheduler", "steps": ["status scheduler"], "normalize": ["\\d\\d-\\w{3}-\\d\\d \\d\\d:\\d\\d"]}
 {"id": "status-scheduler-job", "steps": ["status scheduler job=backup-bareos-fd days=3"], "normalize": ["\\d\\d-\\w{3}-\\d\\d \\d\\d:\\d\\d"]}
-{"id": "status-subscriptions", "steps": ["status subscriptions"]}
+{"id": "status-subscriptions", "steps": ["status subscriptions"], "normalize": ["25\\.1\\.2[~+][\\w.]+", "Report time: .*", "Checksum: .*", "Binary info: .*"]}
 {"id": "status-configuration", "steps": ["status configuration"]}
-{"id": "status-dir", "steps": ["status director"], "normalize": ["\\d\\d-\\w{3}-\\d\\d \\d\\d:\\d\\d", "Heap: .*", "pid \\d+"]}
+{"id": "status-dir", "steps": ["status director"], "normalize": ["25\\.1\\.2[~+][\\w.]+", "\\(\\d\\d \\w+ \\d{4}\\)", "\\d\\d-\\w{3}-\\d\\d \\d\\d:\\d\\d", "Heap: .*", "pid \\d+", "(Bareos community|Onesimus) binary"]}
 {"id": "status-bogus", "steps": ["status nosuch"]}
 {"id": "dot-status-dir-header", "steps": [".status dir header"], "normalize": ["25\\.1\\.2[~+][\\w.]+", "\\(\\d\\d \\w+ \\d{4}\\)", "(Bareos community|Onesimus) binary", "\\d\\d-\\w{3}-\\d\\d \\d\\d:\\d\\d", "pid \\d+"]}
-{"id": "dot-status-dir-running", "steps": [".status dir running"]}
+{"id": "dot-status-dir-running", "steps": [".status dir running"], "normalize": ["\\d\\d-\\w{3}-\\d\\d \\d\\d:\\d\\d"]}
 {"id": "dot-status-dir-scheduled", "steps": [".status dir scheduled"], "normalize": ["\\d\\d-\\w{3}-\\d\\d \\d\\d:\\d\\d"]}
 {"id": "dot-status-dir-terminated", "steps": [".status dir terminated"]}
 {"id": "messages", "steps": ["messages"]}
