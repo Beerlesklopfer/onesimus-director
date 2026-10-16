@@ -59,33 +59,51 @@ Neue Einträge unten anhängen; behobene Einträge bleiben mit Commit stehen.
 | C-039 | 15.10.2026 | **Katalog-Jobid-Sequenz** | Katalog `bareos_cppref` | Jobids steigen monoton (Sequenz ≥ max(jobid)) | `job_jobid_seq` steht bei 8 trotz max(jobid)=629 — seit 13.10. werden alte Jobids wiederverwendet (JobId 1: Log von März, Jobzeile von Oktober). Verdacht: Rust-ORM-Migration auf Schema 2252 | `cats/ddl`, `crates/bareos-orm` | Ursache: manueller Katalogimport am 13.10.2026 (COPY mit expliziten IDs ohne setval) in einer früheren Sitzung, nicht Rust-Code; Schutz in `bareos-orm` (keine destruktiven Migrationen, Sequenzprüfung mit Warnung) übernommen; Katalog am 15.10.2026 mit Freigabe repariert: 7 Sequenzen (path, job, fileset, jobmedia, media, pool, log) per setval auf max(id) |
 | C-040 | 15.10.2026 | Lokale Erweiterungen | — | — (keine Entsprechung) | `.catalog reset` / `.catalog drop` führen `DROP TABLE … CASCADE` aus, nur durch ACL-TODO geschützt | `crates/onesimus-dird/src/commands/catalog.rs:290,340` | behoben (in development, 15.10.2026) |
 | C-041 | 15.10.2026 | Konfiguration JobDefs | `c011-run-select-no` | Explizites `Level = Full` im Job hat Vorrang vor JobDefs | JobDefs-Merge in `director_config` überschreibt das explizite Level (BackupCatalog zeigt Incremental) | `dird_conf.cc` (JobDefs-Vererbung) | behoben (Merge 16.10.2026; gemeinsame JobDefs-Vererbung in `bareos-config/src/jobdefs.rs`) |
-| C-042 | 16.10.2026 | Storage-Status | `status-storage`, `status-bogus`, `c014-status-all` | SD-Statusbericht nach `Connecting to Storage daemon File at …` mit Verschlüsselungszeile und Original-Einrückung (StorageStatus, ua_status.cc) | „Connecting to Storage File …“, „Connected to Storage“, NUL-Bytes, fehlende Abschnitte | `ua_status.cc` DoStorageStatus | offen |
+| C-042 | 16.10.2026 | Storage-Status | `status-storage`, `status-bogus`, `c014-status-all` | SD-Statusbericht nach `Connecting to Storage daemon File at …` mit Verschlüsselungszeile und Original-Einrückung (StorageStatus, ua_status.cc) | „Connecting to Storage File …“, „Connected to Storage“, NUL-Bytes, fehlende Abschnitte | `ua_status.cc` DoStorageStatus | behoben (Merge 16.10.2026; Autochanger-Slottabelle → C-045) |
 | C-043 | 16.10.2026 | run Restore-Job | — | `run job=RestoreFiles` fragt „Please enter a JobId for restore:“; `no` → „Expected a positive integer, got: no“ | Direkt „OK to run?“, dann „Job not run.“ | `ua_run.cc` (Restore-Job-Prompts) | offen |
 | C-044 | 16.10.2026 | .pools type= | — | Typvergleich als Präfix ohne Groß-/Kleinschreibung (`bstrncasecmp` mit Argumentlänge) | Exakter Vergleich | `ua_dotcmds.cc:914` | offen |
+| C-045 | 16.10.2026 | status slots | — (kein Autochanger im Fixture) | `status storage=… slots`: Slottabelle, API-Zeilen `D|`/`S|`, JSON „contents“, Katalog-Lookups | Endet nach der Volume-Liste | `ua_status.cc:1703,1804,1917`, `storage.cc:553` | offen |
+| C-046 | 16.10.2026 | .api 2 Ergebnisobjekte | `c035-delete-noarg-api2`, `c035-list-nextvol-days-nojob-api2` | `delete` liefert `"deleted": {}`; `list nextvolume` mit unbekanntem Job scheitert im Batchmodus (CMD_FAILED) | Leeres Ergebnis bzw. Erfolg | `ua_cmds.cc:2226`, `ua_output.cc` | offen |
+| C-047 | 16.10.2026 | restore | — | Menüpunkte 1, 2, 4–12 (inkl. `with_gui` für 1/2/4), Dateibaum-Auswahl (mark/cd/ls …), mehrere JobIds, regexwhere | „Menu item … is not available yet“, „Restore not done.“ | `ua_restore.cc:675-835,1294`, `ua_tree.cc` | offen |
+| C-048 | 16.10.2026 | cancel / Jobzustände | — | RunScripts „AfterJob“ bei Cancel, Warte-Zustände (FD/SD/Ressourcen/Priorität), JCR-Liste inkl. beendeter Jobs | Fehlen | `job.cc:684-741`, `director_jcr_impl.h:54` | offen |
+| C-049 | 16.10.2026 | purge action= | — | ActionOnPurge (Relabel über SD) | Lokale Meldung „not supported“ | `ua_purge.cc:690ff` | offen |
+| C-050 | 16.10.2026 | Speicherprotokoll | — | NDMP-Storages/-Clients werden gesondert behandelt (setdevice überspringt, Status, Mount) | Kein Protokollfeld in StorageResource, nur natives Protokoll | `ua_cmds.cc:1552`, `storage.cc:727` | offen |
+| C-051 | 16.10.2026 | Jobmeldungen | — | Originaltexte der Jobmeldungen („Start Backup JobId …“, Abschlussbericht), Jmsg der Konsolen-JCR | Eigene Texte (nur Kopf und Routing wie Original) | `backup.cc`, `job.cc`, `ua_run.cc:80-187` | offen |
 
 Hinweis C-002: Text-Sitzungen über gRPC/Command-Queue nutzen denselben SessionManager und erhalten die Katalogzeilen jetzt ebenfalls einmal pro Sitzung (konsistent mit dem Original, aber neue Ausgabe an dieser Schnittstelle).
 
-## Übergabe 15.10.2026 (Sitzungsende)
+## Stand 16.10.2026
 
-`development` = `c3b0099`, Tests grün (onesimus-dird 265+4, oconsole 26, bnet 46, config 29).
-Letzter voller Paritätslauf (vor den letzten Merges): 285/344 identisch, keine Regression.
+`development` = `1b074e1` (gepusht nach `origin/development`). Alle Agent-Branches beider
+Runden sind gemergt. Tests grün: onesimus-dird 365 + 4, oconsole 26, bareos-config 37,
+bareos-bnet 46. Letzter voller Paritätslauf eines Agenten auf dem Endstand: 1436 von 1443
+Fällen byte-identisch, keine Regression.
 
-Stand 16.10.2026: alle Agent-Branches gemergt; voller Paritätslauf 860/885 (+ audit-log), keine Regression.
+Verbleibende Unterschiede im Paritätslauf: `banner`, `banner-limited`, `status-dir`,
+`status-subscriptions`, `dot-status-dir-running` (nur fehlende Normalisierung von
+Version/Zeit in alten Fällen), `var` (Original gibt bei nacktem `var` Speicherreste aus),
+`c035-delete-noarg-api2` (C-046).
 
-Früher nicht gemergte Agent-Branches (erledigt) (Worktrees unter `.claude/worktrees/`, Commits per
-`git cherry-pick`; bei Konflikt Branch auf `development` rebasen):
+Instabile Fälle (gelegentlich rot, allein grün): `status-client` (echter FD wird von
+mehreren Directors gleichzeitig benutzt), `list-jobs` (Jobs mit gleicher Startzeit ohne
+eindeutige Sortierung), `c015-list-jobs-enabled-count` (undefiniertes Verhalten im Original).
 
-| Eintrag | Branch-Commits | Hinweis |
-| --- | --- | --- |
+### Offen
 
-C-011 gemergt (Merge-Commit): Konflikte in `admin.rs`/`extra.rs` (update/label/relabel) zugunsten der C-011-Dialoge gelöst — prüfen, ob C-012s spätere Wertvalidierung für `update` (`3500719`) vollständig erhalten ist; C-011-Ersatz für `list_sql_query` durch C-016-Version ersetzt. Voller Paritätslauf nach dem Merge steht aus.
+- Einträge mit Status „offen“ in der Tabelle: C-042-Rest → C-045, C-043, C-044, C-045 bis C-051.
+- Prüfen, ob C-012s Wertvalidierung für `update` (`3500719`) nach dem C-011-Merge vollständig erhalten ist.
+- Normalisierung der alten Fälle (`banner*`, `status-dir`, `status-subscriptions`,
+  `dot-status-dir-running`) auf Versionstoken/Zeit, damit sie grün werden.
+- Referenzquelle auf `18be77e6` umstellen (exakter Stand des installierten `bareos-dir`).
 
-Dialoganbindung (estimate, list volumes pool=, restore-Menü, truncate, import/export/move, eine Storage-Auswahl) am 16.10.2026 gemergt; offen: Restore-Menüpunkte 1, 2, 4–12.
+### Testumgebung und Regeln
 
-Offen ohne Agent: C-025..C-030, C-031..C-036, C-024-Rest, Umstellung Referenz auf `18be77e6`.
-Voraussetzung: `sudo -u postgres psql -c 'ALTER ROLE "joerg.bernau" CREATEDB'` — sonst
-`parity.py run --shared-db` verwenden (dann nur lesende/abbrechende Fälle!).
-Katalog `bareos_cppref` am 15.10. bereinigt: Jobs 7/8 gelöscht, 7 Sequenzen repariert,
-JobHisto geleert, JobRetention bareos-fd auf 180 Tage zurückgesetzt.
-
-Hinweis 16.10.2026: Katalogkopien isolieren nur die Datenbank. FD/SD sind echt und gemeinsam — ein Agententest hinterließ `bwlimit=100kB/s` am echten FD (mit Freigabe auf 0 zurückgesetzt). Regel: keine zustandsändernden FD/SD-Befehle live (setbandwidth mit Limit, setdebug client/storage, setdevice auf echte Geräte, unmount/label, cancel an Daemons).
+- Paritätslauf: `python3 tests/parity/parity.py run`; jede Seite arbeitet auf einer eigenen
+  Wegwerfkopie des Katalog-Templates `bareos_cppref` (CREATE DATABASE … TEMPLATE, Rolle
+  `joerg.bernau` hat CREATEDB). `--shared-db` nur für rein lesende Fälle.
+- Lokale CI: `ci/local-ci.py`; jeder Check ein eigener Schritt, Fehler werden nur berichtet.
+- Katalogkopien isolieren nur die Datenbank. FD/SD sind echt und gemeinsam: keine
+  zustandsändernden FD/SD-Befehle live (setbandwidth mit Limit, setdebug client/storage,
+  setdevice auf echte Geräte, unmount/label, cancel an Daemons).
+- Bereinigungen am Testkatalog nur mit Freigabe des Nutzers. Am 15./16.10.2026 bereinigt:
+  Jobs 7/8, 7 Sequenzen, JobHisto, JobRetention bareos-fd, `bwlimit` am echten FD.
