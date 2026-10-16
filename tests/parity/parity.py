@@ -259,6 +259,46 @@ def compare(case, results, out):
     return record
 
 
+# Jobs that may be started for real: they touch neither the live FD nor SD.
+SAFE_JOBS = {'parity-admin', 'parity-migrate', 'parity-consolidate'}
+
+
+def unsafe_job_start(case):
+    """Refuse cases that can start a real job against the live FD/SD.
+
+    Under `.api 2`/`.api json` the original starts `run job=…` and a finished
+    restore selection without the yes/mod/no question (incident 17.10.2026:
+    a real restore ran). In every mode `yes` on a run/restore does the same.
+    Cases that are known to fail before the start set "api_job_safe": true.
+    """
+    if case.get('api_job_safe'):
+        return None
+    api2 = False
+    pending = None  # (command, job) of the last run/restore dialog
+    for step in list(case.get('setup', [])) + list(case['steps']):
+        if not isinstance(step, str):
+            continue
+        words = step.split()
+        first = words[0] if words else ''
+        mode = re.match(r'\s*\.api\s+(\S+)', step)
+        if mode:
+            api2 = mode.group(1) in ('2', 'json')
+            continue
+        if first in ('run', 'restore'):
+            job = next((w.split('=', 1)[1] for w in words
+                        if w.startswith(('job=', 'restorejob='))), None)
+            pending = (first, job)
+            if job in SAFE_JOBS:
+                continue
+            if 'yes' in words or (api2 and ('done' in words or 'all' in words
+                                            or (first == 'run' and job))):
+                return f'step {step!r} can start a real job'
+        elif pending and pending[1] not in SAFE_JOBS:
+            if first == 'yes' or (api2 and first == 'done' and pending[0] == 'restore'):
+                return f'step {step!r} starts the {pending[0]} job'
+    return None
+
+
 def load_cases(files, selected):
     cases = []
     for file in files:
@@ -269,6 +309,9 @@ def load_cases(files, selected):
                 except json.JSONDecodeError as error:
                     sys.exit(f'{file}:{number}: {error}')
                 if not selected or any(re.search(s, case['id']) for s in selected):
+                    problem = unsafe_job_start(case)
+                    if problem:
+                        sys.exit(f'{file}:{number}: {case["id"]}: {problem}')
                     cases.append(case)
     ids = [case['id'] for case in cases]
     duplicates = {i for i in ids if ids.count(i) > 1}

@@ -197,7 +197,7 @@
 {"id": "release-dialog", "steps": ["release"]}
 {"id": "restore-help", "steps": ["restore help"]}
 {"id": "run-noargs", "steps": ["run"]}
-{"id": "run-unknownjob", "steps": ["run job=nosuch yes"]}
+{"id": "run-unknownjob", "steps": ["run job=nosuch yes"], "api_job_safe": true}
 {"id": "rerun-noargs", "steps": ["rerun"]}
 {"id": "rerun-badid", "steps": ["rerun jobid=999999"]}
 {"id": "import-noargs", "steps": ["import"]}

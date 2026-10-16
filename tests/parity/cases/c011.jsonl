@@ -42,7 +42,7 @@
 {"id": "c011-setbandwidth-api2", "setup": [".api 2"], "steps": ["setbandwidth"]}
 {"id": "c011-run-job-no", "steps": ["run job=backup-bareos-fd", "no"], "normalize": ["When: +[0-9: -]+"]}
 {"id": "c011-run-job-cancel", "steps": ["run job=backup-bareos-fd", "."], "normalize": ["When: +[0-9: -]+"]}
-{"id": "c011-run-job-illegal-no", "steps": ["run job=backup-bareos-fd", "yes please", "n"], "normalize": ["When: +[0-9: -]+"]}
+{"id": "c011-run-job-illegal-no", "steps": ["run job=backup-bareos-fd", "yes please", "n"], "normalize": ["When: +[0-9: -]+"], "api_job_safe": true}
 {"id": "c011-run-job-mod-cancel", "steps": ["run job=backup-bareos-fd", "mod", "."], "normalize": ["When: +[0-9: -]+"]}
 {"id": "c011-run-job-mod-level-no", "steps": ["run job=backup-bareos-fd", "mod", "1", "1", "no"], "normalize": ["When: +[0-9: -]+"]}
 {"id": "c011-run-job-mod-priority-no", "steps": ["run job=backup-bareos-fd", "mod", "8", "0", "mod", "8", "7", "no"], "normalize": ["When: +[0-9: -]+"]}

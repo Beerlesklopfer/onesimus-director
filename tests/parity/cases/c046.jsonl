@@ -45,7 +45,7 @@
 {"id": "c046-configure-export-noarg-api2", "setup": [".api 2"], "steps": ["configure export"]}
 {"id": "c046-configure-add-noarg-api2", "setup": [".api 2"], "steps": ["configure add"]}
 {"id": "c046-configure-add-incomplete-api2", "setup": [".api 2"], "steps": ["configure add client"]}
-{"id": "c046-run-job-nosuch-api2", "setup": [".api 2"], "steps": ["run job=nosuch"]}
+{"id": "c046-run-job-nosuch-api2", "setup": [".api 2"], "steps": ["run job=nosuch"], "api_job_safe": true}
 {"id": "c046-run-noarg-api2", "setup": [".api 2"], "steps": ["run"]}
 {"id": "c046-wait-jobid-nosuch-api2", "setup": [".api 2"], "steps": ["wait jobid=99999"]}
 {"id": "c046-wait-job-nosuch-api2", "setup": [".api 2"], "steps": ["wait job=nosuch"]}
