@@ -1504,25 +1504,78 @@ fn purge_execute(ua: &mut crate::ua_select::Ua, ast: &CommandAst, action: PurgeA
 }
 
 /// `truncate volstatus=Purged [storage=] [pool=] [volume=] [drive=] [yes]`
-/// (ua_cmds.cc:1972 TruncateCmd). Arguments are validated exactly like
+/// (ua_cmds.cc:1974 TruncateCmd). Arguments are validated exactly like
 /// upstream before the catalog or a Storage Daemon is touched; truncating
-/// needs the confirmation (`yes`), compatibility log C-012.
+/// needs the confirmation (`yes`), compatibility log C-012. Every selected
+/// volume is truncated by an SD `relabel` (DoTruncate -> SendLabelRequest),
+/// compatibility log C-053.
 pub fn cmd_truncate(ast: &CommandAst, ctx: &ExecContext) -> CommandResult {
-    truncate_with(ast, ctx, |storage, command| sd_command(ctx, storage, command))
+    let director = ctx.config.as_ref().and_then(|c| c.read().ok())
+        .map(|c| c.director.name.clone()).unwrap_or_default();
+    // Terminated when dropped at the end of the command (TruncateCmd bail_out).
+    let mut sd = super::purge::NetSdSession::new(director);
+    truncate_with(ast, ctx, &mut sd, |ua| private_db(ua).map(|db| Box::new(db) as Box<dyn super::bvfs::Db>))
+}
+
+/// The Media record fields DoTruncate/SendLabelRequest use (MediaDbRecord).
+#[derive(Debug, Clone, Default)]
+struct TruncateMedia {
+    media_id: i64,
+    volume_name: String,
+    pool_id: i64,
+    storage_id: i64,
+    vol_status: String,
+    media_type: String,
+    slot: i32,
+    min_blocksize: u32,
+    max_blocksize: u32,
+}
+
+/// GetMediaRecord() by MediaId (only the fields truncate needs).
+fn truncate_media(db: &dyn super::bvfs::Db, media_id: i64) -> Option<TruncateMedia> {
+    let table = db.rows(&format!("SELECT MediaId,VolumeName,PoolId,StorageId,VolStatus,MediaType,Slot,\
+        MinBlocksize,MaxBlocksize FROM Media WHERE MediaId={media_id}")).ok()?;
+    if table.rows.len() != 1 { return None; }
+    let row = &table.rows[0];
+    let text = |i: usize| row.get(i).cloned().flatten().unwrap_or_default();
+    let number = |i: usize| crate::commands::job::str_to_int64(&text(i));
+    Some(TruncateMedia {
+        media_id: number(0), volume_name: text(1), pool_id: number(2), storage_id: number(3),
+        vol_status: text(4), media_type: text(5), slot: number(6) as i32,
+        min_blocksize: number(7) as u32, max_blocksize: number(8) as u32,
+    })
+}
+
+/// The Name of GetStorageRecord()/GetPoolRecord() by id (by the empty name
+/// when the id is 0); None unless exactly one row.
+fn truncate_record_name(db: &dyn super::bvfs::Db, table: &str, id: i64) -> Option<String> {
+    let filter = if id != 0 { format!("{table}Id={id}") } else { "Name=''".to_string() };
+    let rows = db.rows(&format!("SELECT {table}Id,Name FROM {table} WHERE {filter}")).ok()?.rows;
+    if rows.len() != 1 { return None; }
+    rows[0].get(1).cloned().flatten()
+}
+
+/// `ua->GetStoreResWithName(name)`: Storage ACL, then the configured resource.
+fn truncate_store(ctx: &ExecContext, name: &str) -> Option<bareos_config::resources::StorageResource> {
+    if !crate::acl::access(ctx, crate::acl::Kind::Storage, name) { return None; }
+    ctx.config.as_ref()?.read().ok()?.storages.iter().find(|s| s.name == name).cloned()
 }
 
 fn truncate_with(
     ast: &CommandAst,
     ctx: &ExecContext,
-    mut send: impl FnMut(&str, &str) -> Result<String, String>,
+    sd: &mut dyn super::purge::SdSession,
+    open: impl FnOnce(&mut crate::ua_select::Ua) -> Option<Box<dyn super::bvfs::Db>>,
 ) -> CommandResult {
     use super::prompt::usage;
     use crate::acl::{self, Kind};
     if ast.arguments.is_empty() {
         return CommandResult::error(usage("truncate", "missing parameter"));
     }
+    // FindArgWithValue (ua_select.cc:119): the first argument with this
+    // keyword decides; without a value it counts as missing.
     let value = |key: &str| ast.arguments.iter()
-        .find(|a| a.key.eq_ignore_ascii_case(key) && a.value.is_some())
+        .find(|a| a.key.eq_ignore_ascii_case(key))
         .and_then(|a| a.value.as_deref());
     let yes = ast.arguments.iter().any(|a| a.key.eq_ignore_ascii_case("yes"));
     match value("volstatus") {
@@ -1533,8 +1586,13 @@ fn truncate_with(
     }
     // OpenDb (ua_cmds.cc:2008) precedes the remaining checks.
     let mut ua = crate::ua_select::Ua::new(ctx);
-    if !ua.open_client_db(ast, false) {
-        return ua.finish(false);
+    match crate::ua_db::open_db(ast, ctx) {
+        Ok(prefix) => ua.send_msg(prefix),
+        Err(result) => {
+            ua.send_result(result);
+            ua.error_msg("Failed to open db.\n");
+            return ua.finish(false);
+        }
     }
     let mut parsed = 2; // the command itself and volstatus, as upstream counts
     let mut storage = value("storage").map(str::to_string);
@@ -1568,11 +1626,14 @@ fn truncate_with(
     }
     let volume = value("volume").filter(|name| acl::valid_name(name));
     if volume.is_some() { parsed += 1; }
-    if let Some(drive) = value("drive") {
-        if drive.parse::<i32>().is_ok() && !drive.starts_with('+') {
+    let mut drive: u16 = 0;
+    if let Some(text) = value("drive") {
+        // IsAnInteger(): digits only; atoi() into a drive_number_t.
+        if !text.is_empty() && text.bytes().all(|b| b.is_ascii_digit()) {
+            drive = crate::commands::job::str_to_int64(text) as i32 as u16;
             parsed += 1;
         } else {
-            ua.error_msg(usage("truncate", &format!("Drive number must be integer but was : {drive}\n")));
+            ua.error_msg(usage("truncate", &format!("Drive number must be integer but was : {text}\n")));
         }
     }
     if yes { parsed += 1; }
@@ -1581,12 +1642,14 @@ fn truncate_with(
         return ua.finish(false);
     }
 
-    let Some(cat) = &ctx.catalog else {
+    if ctx.catalog.is_none() {
         ua.error_msg("Failed to open db.\n");
         return ua.finish(false);
-    };
+    }
+    let Some(db) = open(&mut ua) else { return ua.finish(false) };
+    let db = db.as_ref();
     let quote = |v: &str| v.replace('\'', "''");
-    // PrepareMediaSqlQuery (sql_get.cc:1781) with Recycle=1, Enabled=1,
+    // PrepareMediaSqlQuery (sql_get.cc:1789) with Recycle=1, Enabled=1,
     // VolBytes > 64512 and VolStatus Purged.
     let mut query = String::from("SELECT DISTINCT Media.MediaId,Media.VolumeName,Pool.Name AS Pool,\
         Storage.Name AS Storage,Media.MediaType,Media.LastWritten,Media.VolFiles,Media.VolBytes,\
@@ -1600,46 +1663,163 @@ fn truncate_with(
     }
     query.push_str("AND Media.VolBytes > 64512 AND Media.VolStatus = 'Purged' ");
     if let Some(v) = volume { query.push_str(&format!("AND Media.VolumeName IN ('{}') ", quote(v))); }
-    // ListSqlQuery (HORZ_LIST "volumes"), then the listed volumes.
-    let table = match cat.query_rows(&query) {
+    let table = match db.rows(&query) {
         Ok(table) => table,
         Err(e) => {
             ua.error_msg(format!("{e}\n"));
             return ua.finish(false);
         }
     };
-    ua.send_msg(crate::sql_list::render(&table, crate::sql_list::ListType::Horz));
-    let volumes: Vec<String> = table.rows.into_iter().filter_map(|row| row.into_iter().nth(1).flatten()).collect();
-    if volumes.is_empty() {
+    // ListSqlQuery (HORZ_LIST "volumes") under the filter tuples
+    // AddAclFilterTuple(2, Pool_ACL) and (3, Storage_ACL) (ua_cmds.cc:2013):
+    // a row is hidden if the console may not access its Pool or Storage, or
+    // if both are empty (tri-state FilterData).
+    let shown: Vec<bool> = table.rows.iter().map(|row| {
+        let (mut show, mut unknown) = (0, 0);
+        for (column, kind) in [(2, Kind::Pool), (3, Kind::Storage)] {
+            match row.get(column).cloned().flatten().filter(|v| !v.is_empty()) {
+                None => unknown += 1,
+                Some(name) if acl::access(ctx, kind, &name) => show += 1,
+                Some(_) => return false,
+            }
+        }
+        !(unknown > 0 && show == 0)
+    }).collect();
+    ua.send_msg(crate::sql_list::render_shown(&table, crate::sql_list::ListType::Horz, &shown));
+    // GetQueryDbids: every MediaId of the query (the filters only hide rows).
+    let media_ids: Vec<i64> = table.rows.iter()
+        .filter_map(|row| row.first().cloned().flatten())
+        .map(|id| crate::commands::job::str_to_int64(&id)).collect();
+    if media_ids.is_empty() {
         return ua.finish(true);
     }
+    // VerifyMediaIdsFromSingleStorage (sql_get.cc:1874).
+    let mut single = true;
+    let mut first_storage = None;
+    for &id in &media_ids {
+        match truncate_media(db, id) {
+            None => { single = false; break; }
+            Some(media) => match first_storage {
+                None => first_storage = Some(media.storage_id),
+                Some(storage_id) if storage_id != media.storage_id => { single = false; break; }
+                Some(_) => {}
+            },
+        }
+    }
+    if !single {
+        ua.error_msg("Selected volumes are from different storages. This is not supported. \
+            Please choose only volumes from a single storage.\n");
+        return ua.finish(false);
+    }
+    let Some(first) = truncate_media(db, media_ids[0]) else { return ua.finish(false) };
+    // ua->GetStoreResWithId(mr.StorageId)->Protocol: upstream dereferences
+    // the resource unchecked (a missing one crashes the Director); here the
+    // command ends instead.
+    let Some(_store) = truncate_record_name(db, "Storage", first.storage_id)
+        .and_then(|name| truncate_store(ctx, &name)) else { return ua.finish(false) };
+    // TODO(C-050): Storage Protocol; every storage is native until the
+    // configuration carries it (otherwise WarningMsg "Storage uses a
+    // non-native protocol. Truncate is only supported for native protocols.\n").
     // GetConfirmation (ua_input.cc:165, ua_cmds.cc:2120): `yes`, otherwise
     // the console is asked; API and batch sessions decline silently.
     if !ua.get_confirmation(ast, "Truncate listed volumes (yes/no)? ", false) {
         return ua.finish(false);
     }
-    let stor = match storage {
-        Some(s) => s,
-        None => match ctx.config.as_ref().and_then(|c| c.read().ok())
-            .filter(|cfg| cfg.storages.len() == 1).map(|cfg| cfg.storages[0].name.clone()) {
-            Some(s) => s,
-            None => {
-                ua.error_msg("truncate: specify storage=<name>\n");
-                return ua.finish(false);
-            }
-        },
-    };
-    for vol in volumes {
-        match send(&stor, &format!("truncate Volume=\"{vol}\"")) {
-            Ok(resp) => {
-                let _ = cat.raw_query(&format!(
-                    "UPDATE media SET volbytes=0, volfiles=0 WHERE volumename='{}'", quote(&vol)));
-                ua.send_msg(format!("Truncate Volume \"{vol}\" on Storage \"{stor}\":\n{resp}\n"));
-            }
-            Err(e) => ua.send_msg(format!("truncate {vol}: {e}\n")),
+    // Loop over the candidate Volumes and actually truncate them; the SD
+    // connection (ua->jcr->store_bsock) is opened once.
+    let mut connected = false;
+    for &id in &media_ids {
+        if let Some(media) = truncate_media(db, id) {
+            do_truncate(&mut ua, db, sd, &mut connected, media, drive);
         }
     }
     ua.finish(true)
+}
+
+/// ua_cmds.cc:2145 DoTruncate(): relabel the volume to itself.
+fn do_truncate(ua: &mut crate::ua_select::Ua, db: &dyn super::bvfs::Db, sd: &mut dyn super::purge::SdSession,
+    connected: &mut bool, mut mr: TruncateMedia, drive: u16) -> bool {
+    let Some(storage_name) = truncate_record_name(db, "Storage", mr.storage_id) else {
+        ua.error_msg(format!("failed to determine storage for id {}\n", mr.storage_id));
+        return false;
+    };
+    let Some(pool_name) = truncate_record_name(db, "Pool", mr.pool_id) else {
+        ua.error_msg(format!("failed to determine pool for id {}\n", mr.pool_id));
+        return false;
+    };
+    let Some(store) = truncate_store(ua.ctx, &storage_name) else {
+        ua.error_msg(format!("failed to determine storage resource by name {storage_name}\n"));
+        return false;
+    };
+    // SendLabelRequest(media_record_exists = true, relabel = true, slot 0)
+    // -> native_send_label_request (ua_label.cc:104), omr == mr.
+    let mut vol_files = 0u32;
+    let mut vol_bytes = 0u64;
+    let mut ok = false;
+    // open_sd_bsock() (sd_cmds.cc:159): connect while there is no
+    // connection (ua->jcr->store_bsock), otherwise reuse it.
+    if !*connected {
+        ua.send_msg(format!("Connecting to Storage daemon {} at {}:{} ...\n", store.name, store.address, store.port));
+        if sd.connect(&store).is_err() {
+            ua.error_msg("Failed to connect to Storage daemon.\n");
+        } else {
+            *connected = true;
+        }
+    }
+    if *connected {
+        let bash = crate::sd_label::bash_spaces;
+        let command = format!("relabel {} OldName={} NewName={} PoolName={} MediaType={} Slot={} drive={} \
+            MinBlocksize={} MaxBlocksize={}", crate::ua_storage_select::dev_name(&store), bash(&mr.volume_name),
+            bash(&mr.volume_name), bash(&pool_name), bash(&mr.media_type), mr.slot as i16, drive as i16,
+            mr.min_blocksize as i32, mr.max_blocksize as i32);
+        let messages = sd.exchange(&command);
+        ua.send_msg(format!("Sending relabel command from \"{0}\" to \"{0}\" ...\n", bash(&mr.volume_name)));
+        for message in messages {
+            ua.send_msg(message.clone());
+            if let Some((files, bytes)) = crate::sd_label::parse_label_ok(&message) {
+                if let Some(files) = files { vol_files = files; }
+                vol_bytes = bytes;
+                ok = true;
+            }
+        }
+    }
+    if !ok {
+        ua.error_msg(format!("Label command failed for Volume {}.\n", mr.volume_name));
+        return false;
+    }
+    // update_database() (ua_label.cc:57) for an existing record, then
+    // UpdateMediaRecord (sql_update.cc:284): LabelDate, VolFiles, VolBytes,
+    // VolStatus, InChanger and StorageId change; the other columns are
+    // written back as read.
+    if vol_bytes > 0 && mr.vol_status == "Unlabeled" {
+        mr.vol_status = "Append".into();
+    }
+    let in_changer = i32::from(mr.slot > 0);
+    let quote = |v: &str| v.replace('\'', "''");
+    let name = quote(&mr.volume_name);
+    let label_date = crate::localtime::strftime("%Y-%m-%d %H:%M:%S", unsafe { libc::time(std::ptr::null_mut()) });
+    let updated = db.exec(&format!("UPDATE Media SET LabelDate='{label_date}' WHERE VolumeName='{name}'"))
+        .and_then(|_| db.exec(&format!("UPDATE Media SET VolFiles={vol_files},VolBytes={vol_bytes},VolStatus='{}',\
+            InChanger={in_changer},StorageId={},EncryptionKey=COALESCE(EncryptionKey,'') WHERE VolumeName='{name}'",
+            quote(&mr.vol_status), mr.storage_id)))
+        .and_then(|affected| {
+            // MakeInchangerUnique()
+            if in_changer != 0 && mr.slot != 0 && mr.storage_id != 0 {
+                db.exec(&format!("UPDATE Media SET InChanger=0, Slot=0 WHERE Slot={} AND StorageId={} AND MediaId!={}",
+                    mr.slot, mr.storage_id, mr.media_id))?;
+            }
+            Ok(affected > 0)
+        });
+    match updated {
+        Ok(true) => {}
+        Ok(false) => return false,
+        Err(error) => {
+            ua.error_msg(if error.ends_with('\n') { error } else { format!("{error}\n") });
+            return false;
+        }
+    }
+    ua.send_msg(format!("The volume '{}' has been truncated.\n", mr.volume_name));
+    true
 }
 
 /// `reload` — re-read the configuration (C++ ReloadCmd: {"reload": {"success": bool}}).
@@ -1712,14 +1892,12 @@ pub(crate) mod side_effect_tests {
             ("truncate volstatus=Purged drive=x", format!("Drive number must be integer but was : x\n\n{USAGE}Invalid parameter.\n{USAGE}")),
             ("truncate volstatus=Purged storage=File yes", "Failed to open db.\n".to_string()),
         ] {
-            let result = truncate_with(&crate::session::parse_cli_command(line), &ctx,
-                |_, _| panic!("{line}: must not contact the SD"));
+            let result = truncate_untouched(&crate::session::parse_cli_command(line), &ctx);
             assert!(!result.success, "{line}");
             assert_eq!(result.error_message, expected, "{line}");
         }
         // The storage selection needs the catalog (OpenDb).
-        let result = truncate_with(&crate::session::parse_cli_command("truncate volstatus=Purged storage=Nope"),
-            &ctx, |_, _| panic!("must not contact the SD"));
+        let result = truncate_untouched(&crate::session::parse_cli_command("truncate volstatus=Purged storage=Nope"), &ctx);
         assert_eq!((result.success, result.error_message.as_str()), (false, "Failed to open db.\n"));
     }
 
@@ -1837,7 +2015,7 @@ pub(crate) mod side_effect_tests {
             scripted(&["."], || cmd_purge(&ast(line), &ctx));
         }
         for line in ["truncate", "truncate volstatus=Purged bogus=1"] {
-            truncate_with(&ast(line), &ctx, |_, _| panic!("{line}: must not contact the SD"));
+            truncate_untouched(&ast(line), &ctx);
         }
         let writes = |log: &Vec<String>| log.iter().filter(|q| !q.trim_start().to_ascii_uppercase().starts_with("SELECT")).count();
         assert_eq!(writes(&log.lock().unwrap()), 0, "{:?}", log.lock().unwrap());
@@ -2159,40 +2337,227 @@ pub(crate) mod side_effect_tests {
         (handle, log)
     }
 
+    /// Storage daemon double for truncate: refuses the first `refuse`
+    /// connections, records connects and commands, answers from `replies`.
+    #[derive(Default)]
+    struct TruncSd {
+        refuse: usize,
+        connects: Vec<String>,
+        sent: Vec<String>,
+        replies: std::collections::VecDeque<Vec<&'static str>>,
+    }
+
+    impl super::super::purge::SdSession for TruncSd {
+        fn connect(&mut self, store: &bareos_config::resources::StorageResource) -> Result<(), String> {
+            self.connects.push(store.name.clone());
+            if self.refuse > 0 {
+                self.refuse -= 1;
+                return Err("refused".into());
+            }
+            Ok(())
+        }
+        fn exchange(&mut self, command: &str) -> Vec<String> {
+            self.sent.push(command.to_string());
+            self.replies.pop_front().unwrap_or_default().into_iter().map(String::from).collect()
+        }
+    }
+
+    /// An SD that must never be contacted.
+    struct PanicSd;
+
+    impl super::super::purge::SdSession for PanicSd {
+        fn connect(&mut self, store: &bareos_config::resources::StorageResource) -> Result<(), String> {
+            panic!("must not contact the SD: {}", store.name)
+        }
+        fn exchange(&mut self, command: &str) -> Vec<String> {
+            panic!("must not contact the SD: {command}")
+        }
+    }
+
+    /// truncate where neither the catalog work nor the SD may be reached.
+    fn truncate_untouched(ast: &CommandAst, ctx: &ExecContext) -> CommandResult {
+        truncate_with(ast, ctx, &mut PanicSd, |_| panic!("must not reach the catalog work"))
+    }
+
+    /// Catalog double of the truncate work: `answer` gives the rows of a
+    /// query; every statement is logged; UPDATEs affect one row.
+    struct TruncDb {
+        log: Arc<std::sync::Mutex<Vec<String>>>,
+        answer: fn(&str) -> Vec<Vec<Option<&'static str>>>,
+    }
+
+    impl super::super::bvfs::Db for TruncDb {
+        fn rows(&self, sql: &str) -> Result<crate::catalog_worker::SqlTable, String> {
+            use crate::catalog_worker::{SqlColumn, SqlTable};
+            self.log.lock().unwrap().push(sql.to_string());
+            let rows = (self.answer)(sql);
+            let names: Vec<String> = if sql.starts_with("SELECT DISTINCT Media.MediaId") {
+                ["mediaid", "volumename", "pool", "storage", "mediatype", "lastwritten", "volfiles", "volbytes",
+                 "volstatus", "actiononpurge", "comment"].iter().map(|s| s.to_string()).collect()
+            } else {
+                (0..rows.first().map_or(1, Vec::len)).map(|i| format!("c{i}")).collect()
+            };
+            Ok(SqlTable {
+                columns: names.into_iter().map(|name| SqlColumn { numeric: name == "mediaid", name }).collect(),
+                rows: rows.into_iter().map(|r| r.into_iter().map(|v| v.map(String::from)).collect()).collect(),
+            })
+        }
+        fn exec(&self, sql: &str) -> Result<u64, String> {
+            self.log.lock().unwrap().push(sql.to_string());
+            Ok(1)
+        }
+    }
+
+    /// Volumes 7 (v1) and 8 (v2, slot 3), both Purged on Storage 1 (File)
+    /// in Pool 1 (Full); the listing row of v2 has neither Pool nor Storage.
+    fn truncate_rows(sql: &str) -> Vec<Vec<Option<&'static str>>> {
+        let row = |v: &[Option<&'static str>]| v.to_vec();
+        if sql.starts_with("SELECT DISTINCT Media.MediaId") {
+            vec![row(&[Some("7"), Some("v1"), Some("Full"), Some("File"), Some("File"), None, Some("3"),
+                        Some("1000000"), Some("Purged"), Some("1"), Some("")]),
+                 row(&[Some("8"), Some("v2"), None, None, Some("File"), None, Some("1"),
+                        Some("2000000"), Some("Purged"), Some("1"), Some("")])]
+        } else if sql.ends_with("FROM Media WHERE MediaId=7") {
+            vec![row(&[Some("7"), Some("v1"), Some("1"), Some("1"), Some("Purged"), Some("File"), Some("0"), Some("0"), Some("0")])]
+        } else if sql.ends_with("FROM Media WHERE MediaId=8") {
+            vec![row(&[Some("8"), Some("v2"), Some("1"), Some("1"), Some("Purged"), Some("File"), Some("3"), Some("0"), Some("0")])]
+        } else if sql == "SELECT StorageId,Name FROM Storage WHERE StorageId=1" {
+            vec![row(&[Some("1"), Some("File")])]
+        } else if sql == "SELECT PoolId,Name FROM Pool WHERE PoolId=1" {
+            vec![row(&[Some("1"), Some("Full")])]
+        } else {
+            vec![]
+        }
+    }
+
+    /// Context with the storage File (Device FileStorage) and the catalog
+    /// double of the selections.
+    fn truncate_context() -> ExecContext {
+        let config = crate::director_config::DirectorConfig::from_str(
+            "Director { Name = dir }\nStorage { Name = File; Address = 192.0.2.1; Port = 9103; Device = FileStorage; \
+             Media Type = File }\nPool { Name = Full; Pool Type = Backup }").unwrap();
+        let (catalog, _) = truncate_catalog();
+        ExecContext { session_id: 0, config: Some(Arc::new(RwLock::new(config))), session_mgr: None,
+            catalog: Some(catalog), api_mode: crate::command_executor::ApiMode::Human, bus_rx: None, job_manager: None }
+    }
+
+    /// One truncate with console answers: (success, transcript, catalog writes).
+    fn run_truncate(line: &str, answers: &[&str], sd: &mut TruncSd, answer: fn(&str) -> Vec<Vec<Option<&'static str>>>)
+        -> (bool, String, Vec<String>) {
+        let ctx = truncate_context();
+        let log = Arc::new(std::sync::Mutex::new(Vec::new()));
+        let db = TruncDb { log: log.clone(), answer };
+        let (result, console) = crate::ua_select::tests::scripted(answers, || truncate_with(
+            &crate::session::parse_cli_command(line), &ctx, sd, move |_| Some(Box::new(db))));
+        let writes = log.lock().unwrap().iter().filter(|q| !q.starts_with("SELECT")).cloned().collect();
+        // Without a dialog the output comes back in the result.
+        let output = if result.errors_inline {
+            result.text_output.clone()
+        } else if result.errors_first {
+            format!("{}{}", result.error_message, result.text_output)
+        } else {
+            format!("{}{}", result.text_output, result.error_message)
+        };
+        (result.success, format!("{}{output}", console.transcript()), writes)
+    }
+
     #[test]
     fn truncate_dialogs_change_nothing_when_cancelled() {
         use crate::ua_select::tests::scripted;
         let mut ctx = context();
-        let (catalog, log) = truncate_catalog();
+        let (catalog, _) = truncate_catalog();
         ctx.catalog = Some(catalog);
         let ast = |line: &str| crate::session::parse_cli_command(line);
         // Unknown storage: SelectStorageDbr offers the catalog storages.
-        let (result, console) = scripted(&["."], || truncate_with(&ast("truncate volstatus=Purged storage=Nope"),
-            &ctx, |_, _| panic!("must not contact the SD")));
+        let (result, console) = scripted(&["."], || truncate_untouched(&ast("truncate volstatus=Purged storage=Nope"), &ctx));
         assert!(!result.success);
         assert_eq!(console.transcript(), "Could not find Storage \"Nope\": ERR=Defined Storages:\n1: File\n2: Tape\n\
             Select the Storage (1-2): .\nSelection aborted, nothing done.\n");
         // The confirmation: "no" and a cancel decline.
         for answer in ["no", "."] {
-            let (result, console) = scripted(&[answer], || truncate_with(&ast("truncate volstatus=Purged storage=File"),
-                &ctx, |_, _| panic!("{answer}: must not contact the SD")));
-            assert!(!result.success);
-            assert!(console.transcript().ends_with(&format!("|       7 | v1         |\n\
-                +---------+------------+\nTruncate listed volumes (yes/no)? {answer}\n")), "{}", console.transcript());
+            let (ok, transcript, writes) = run_truncate("truncate volstatus=Purged storage=File", &[answer],
+                &mut TruncSd::default(), truncate_rows);
+            assert!(!ok);
+            assert!(transcript.ends_with(&format!("Truncate listed volumes (yes/no)? {answer}\n")), "{transcript}");
+            assert!(writes.is_empty(), "{writes:?}");
         }
         // Without console (and in API mode) nothing is asked and nothing done.
-        let result = truncate_with(&ast("truncate volstatus=Purged storage=File"), &ctx, |_, _| panic!("no console"));
+        let ctx = truncate_context();
+        let log = Arc::new(std::sync::Mutex::new(Vec::new()));
+        let db = TruncDb { log: log.clone(), answer: truncate_rows };
+        let result = truncate_with(&ast("truncate volstatus=Purged storage=File"), &ctx, &mut PanicSd,
+            move |_| Some(Box::new(db)));
         assert!(!result.success);
-        let writes = |log: &Vec<String>| log.iter().filter(|q| q.starts_with("UPDATE")).count();
-        assert_eq!(writes(&log.lock().unwrap()), 0);
-        // Control: "yes" truncates.
-        let mut sent = Vec::new();
-        scripted(&["yes"], || truncate_with(&ast("truncate volstatus=Purged storage=File"), &ctx, |storage, command| {
-            sent.push(format!("{storage}: {command}"));
-            Ok(String::new())
-        }));
-        assert_eq!(sent, vec!["File: truncate Volume=\"v1\""]);
-        assert_eq!(writes(&log.lock().unwrap()), 1);
+        assert!(log.lock().unwrap().iter().all(|q| q.starts_with("SELECT")));
+    }
+
+    /// DoTruncate (ua_cmds.cc:2145): one relabel per volume over one SD
+    /// connection; the 18be77e6 reply `3000 OK label. VolFiles=.. VolBytes=..`
+    /// counts as success and the catalog gets the new size (C-053).
+    #[test]
+    fn truncate_relabels_every_volume_and_updates_the_catalog() {
+        let mut sd = TruncSd::default();
+        sd.replies.push_back(vec!["3000 OK label. VolFiles=0 VolBytes=225 Volume=\"v1\" Device=\"FileStorage\" (/s)\n"]);
+        sd.replies.push_back(vec!["3000 OK label. VolBytes=226 Volume=\"v2\" Device=x\n"]);
+        let (ok, transcript, writes) = run_truncate("truncate volstatus=Purged storage=File drive=2", &["yes"], &mut sd, truncate_rows);
+        assert!(ok);
+        assert_eq!(sd.connects, vec!["File"]);
+        assert_eq!(sd.sent, vec![
+            "relabel FileStorage OldName=v1 NewName=v1 PoolName=Full MediaType=File Slot=0 drive=2 MinBlocksize=0 MaxBlocksize=0",
+            "relabel FileStorage OldName=v2 NewName=v2 PoolName=Full MediaType=File Slot=3 drive=2 MinBlocksize=0 MaxBlocksize=0",
+        ]);
+        // The row without Pool and Storage is hidden by the ACL filter tuples
+        // but truncated all the same (GetQueryDbids is unfiltered).
+        assert!(transcript.contains("| v1 ") && !transcript.contains("| v2 "), "{transcript}");
+        assert!(transcript.ends_with("Truncate listed volumes (yes/no)? yes\n\
+            Connecting to Storage daemon File at 192.0.2.1:9103 ...\n\
+            Sending relabel command from \"v1\" to \"v1\" ...\n\
+            3000 OK label. VolFiles=0 VolBytes=225 Volume=\"v1\" Device=\"FileStorage\" (/s)\n\
+            The volume 'v1' has been truncated.\n\
+            Sending relabel command from \"v2\" to \"v2\" ...\n\
+            3000 OK label. VolBytes=226 Volume=\"v2\" Device=x\n\
+            The volume 'v2' has been truncated.\n"), "{transcript}");
+        assert_eq!(writes.len(), 5, "{writes:?}");
+        assert!(writes[0].starts_with("UPDATE Media SET LabelDate='") && writes[0].ends_with("' WHERE VolumeName='v1'"));
+        assert_eq!(writes[1], "UPDATE Media SET VolFiles=0,VolBytes=225,VolStatus='Purged',InChanger=0,StorageId=1,\
+            EncryptionKey=COALESCE(EncryptionKey,'') WHERE VolumeName='v1'");
+        assert_eq!(writes[3], "UPDATE Media SET VolFiles=0,VolBytes=226,VolStatus='Purged',InChanger=1,StorageId=1,\
+            EncryptionKey=COALESCE(EncryptionKey,'') WHERE VolumeName='v2'");
+        // MakeInchangerUnique for the volume in slot 3.
+        assert_eq!(writes[4], "UPDATE Media SET InChanger=0, Slot=0 WHERE Slot=3 AND StorageId=1 AND MediaId!=8");
+    }
+
+    #[test]
+    fn truncate_failures_leave_the_catalog_alone() {
+        // Connection refused for v1 (so "Connecting" again for v2), a
+        // Storage daemon error for v2.
+        let mut sd = TruncSd { refuse: 1, ..Default::default() };
+        sd.replies.push_back(vec!["3912 Failed to label Volume: ERR=busy\n"]);
+        let (ok, transcript, writes) = run_truncate("truncate volstatus=Purged storage=File yes", &[], &mut sd, truncate_rows);
+        assert!(ok);
+        assert_eq!((sd.connects.len(), sd.sent.len()), (2, 1));
+        assert!(writes.is_empty(), "{writes:?}");
+        assert!(transcript.ends_with("Connecting to Storage daemon File at 192.0.2.1:9103 ...\n\
+            Failed to connect to Storage daemon.\nLabel command failed for Volume v1.\n\
+            Connecting to Storage daemon File at 192.0.2.1:9103 ...\n\
+            Sending relabel command from \"v2\" to \"v2\" ...\n3912 Failed to label Volume: ERR=busy\n\
+            Label command failed for Volume v2.\n"), "{transcript}");
+        // Volumes of different storages are refused before the confirmation.
+        fn two_storages(sql: &str) -> Vec<Vec<Option<&'static str>>> {
+            if sql.ends_with("FROM Media WHERE MediaId=8") {
+                vec![vec![Some("8"), Some("v2"), Some("1"), Some("2"), Some("Purged"), Some("File"), Some("0"), Some("0"), Some("0")]]
+            } else {
+                truncate_rows(sql)
+            }
+        }
+        let (ok, transcript, writes) = run_truncate("truncate volstatus=Purged storage=File", &[], &mut TruncSd::default(), two_storages);
+        assert!(!ok && writes.is_empty());
+        assert!(transcript.ends_with("Selected volumes are from different storages. This is not supported. \
+            Please choose only volumes from a single storage.\n"), "{transcript}");
+        // No candidates: the empty listing, success, nothing else.
+        let (ok, transcript, _) = run_truncate("truncate volstatus=Purged storage=File", &[], &mut TruncSd::default(), |_| vec![]);
+        assert!(ok);
+        assert_eq!(transcript, "No results to list.\n");
     }
 }
 
