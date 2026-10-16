@@ -113,13 +113,18 @@ struct Conf<'a> {
     res: Vec<(Kind, &'a ConfResource)>,
     /// Job/JobDefs after PopulateJobdefaults()
     propagated: bareos_config::jobdefs::Propagated,
+    /// Configuration parsed by a `reload` (C++ `omit_defaults_`, set by the
+    /// first CheckResources()): unset items are not marked inherited, so
+    /// every non-default value is printed (compatibility log C-057).
+    omit_defaults: bool,
 }
 
 impl<'a> Conf<'a> {
-    fn new(raw: &'a [ConfResource]) -> Self {
+    fn new(raw: &'a [ConfResource], omit_defaults: bool) -> Self {
         Self {
             res: raw.iter().filter_map(|r| Kind::from_type(&r.rtype).map(|k| (k, r))).collect(),
             propagated: bareos_config::jobdefs::propagate_raw(raw),
+            omit_defaults,
         }
     }
 
@@ -153,15 +158,15 @@ impl<'a> Conf<'a> {
 // ---------------------------------------------------------------------------
 
 pub fn cmd_show(ast: &CommandAst, ctx: &ExecContext) -> CommandResult {
-    let raw = match ctx.config.as_ref().and_then(|c| c.read().ok()) {
-        Some(cfg) => cfg.raw.clone(),
-        None => Vec::new(),
+    let (raw, reloaded) = match ctx.config.as_ref().and_then(|c| c.read().ok()) {
+        Some(cfg) => (cfg.raw.clone(), cfg.reloaded),
+        None => (Vec::new(), false),
     };
-    show(ast, &raw)
+    show(ast, &raw, reloaded)
 }
 
-fn show(ast: &CommandAst, raw: &[ConfResource]) -> CommandResult {
-    let conf = Conf::new(raw);
+fn show(ast: &CommandAst, raw: &[ConfResource], reloaded: bool) -> CommandResult {
+    let conf = Conf::new(raw, reloaded);
     let args = &ast.arguments;
     let verbose = args.iter().any(|a| a.key.eq_ignore_ascii_case("verbose"));
     let mut out = Out::default();
@@ -563,24 +568,30 @@ fn print_items(conf: &Conf, kind: Kind, res: &ConfResource, verbose: bool, inter
                 if let Some(jd) = jobdefs {
                     all.extend(runscripts(jd).into_iter().map(|s| (s, true)));
                 }
-                print_runscripts(item, &all, !explicit, verbose, w);
+                // run scripts carry no inherit bit of their own (from_jobdef per script)
+                let inherited = if conf.omit_defaults { internal } else { !explicit };
+                print_runscripts(item, &all, inherited, verbose, w);
                 continue;
             }
             _ => {}
         }
 
+        let mut from_jobdefs = false;
         if !explicit {
             if let Some(jd) = jobdefs {
                 if propagates(item.ty) {
                     let inh = matching(jd, item);
                     if !inh.is_empty() {
                         dirs = inh;
+                        from_jobdefs = true;
                     }
                 }
             }
         }
 
-        let inherited = !explicit;
+        // Startup: every item starts inherited (SetAllResourceDefaults) until
+        // it is stored. After a reload only PropagateResource() sets the bit.
+        let inherited = if conf.omit_defaults { internal || from_jobdefs } else { !explicit };
         if inherited && !verbose {
             continue;
         }
@@ -2016,7 +2027,7 @@ FileSet {
 "#;
 
     fn run(args: &[(&str, Option<&str>)]) -> CommandResult {
-        show(&ast(args), &parse_str(CONF, None).unwrap())
+        show(&ast(args), &parse_str(CONF, None).unwrap(), false)
     }
 
     #[test]
@@ -2041,16 +2052,16 @@ JobDefs { Name = B; JobDefs = C; Level = Differential; Priority = 5 }
 Job { Name = J; JobDefs = B; Level = Full; RunAfterJob = "a" }
 "#;
         let raw = parse_str(conf, None).unwrap();
-        let r = show(&ast(&[("job", Some("J"))]), &raw);
+        let r = show(&ast(&[("job", Some("J"))]), &raw, false);
         assert_eq!(r.text_output, "Job {\n  Name = \"J\"\n  Level = Full\n  JobDefs = \"B\"\n  RunAfterJob = \"a\"\n}\n\n");
-        let r = show(&ast(&[("job", Some("J")), ("verbose", None)]), &raw);
+        let r = show(&ast(&[("job", Some("J")), ("verbose", None)]), &raw, false);
         assert!(r.text_output.contains("  # Schedule = \"SC\"\n"), "{}", r.text_output);
         assert!(r.text_output.contains("  # Priority = 5\n"));
         assert!(r.text_output.contains("  # RunBeforeJob = \"c\"\n"));
         assert!(!r.text_output.contains("Level = Differential"));
-        let r = show(&ast(&[("jobdefs", Some("B"))]), &raw);
+        let r = show(&ast(&[("jobdefs", Some("B"))]), &raw, false);
         assert!(!r.text_output.contains("Schedule"));
-        let r = show(&ast(&[("jobdefs", Some("B")), ("verbose", None)]), &raw);
+        let r = show(&ast(&[("jobdefs", Some("B")), ("verbose", None)]), &raw, false);
         assert!(r.text_output.contains("  # Schedule = \"SC\"\n"));
     }
 
