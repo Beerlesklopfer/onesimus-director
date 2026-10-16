@@ -1,4 +1,4 @@
-# memory -- Show Memory Usage Information
+# memory — Kopfzeilen des Director-Status anzeigen
 
 <!-- bareos-reference:start -->
 ## Aus den Bareos-Originalquellen
@@ -21,47 +21,75 @@ Referenz: [WIP/25.1.2-pre-43-g18be77e68, `18be77e6832e`](https://github.com/bare
 
 Die folgenden vorhandenen Beispiele und Verhaltensbeschreibungen sind lokale Dokumentation; sie sind kein Beleg für vollständige Bareos-Kompatibilität. Bei Widersprüchen gilt der obige Befund.
 <!-- bareos-reference:end -->
-Display memory usage statistics of the Director daemon.
+
+## Zweck
+
+`memory` heißt laut Beschreibung „Print current memory usage“, gibt aber wie das Original nur die Kopfzeilen von `status director` aus: Name, Version, Build-Datum und Betriebssystem des Directors, Startzeit, Zahl der gelaufenen und laufenden Jobs, Datenbanktyp und Art des Binärprogramms. Angaben zum Speicherverbrauch gibt es nicht. Der Befehl liest nur.
 
 ## Syntax
 
-```
+```text
 memory
 ```
 
-## Arguments
+## Argumente
 
-None.
+Der Befehl hat keine Argumente. Weitere Wörter hinter `memory` werden ignoriert.
 
-## Examples
+## API-Modi
 
-### Show memory usage
-```
-* memory
-Memory usage information not available (Rust runtime)
-```
+Unter `.api 0` und `.api 1` kommen dieselben zwei Zeilen. Unter `.api 2` steht die Information im Objekt `result.header` mit den Feldern `director`, `version`, `release_date`, `os`, `binary_info`, `daemon_started`, `jobs_run`, `jobs_running` und `config_warnings`.
 
-### In C++ Bareos
-```
-* memory
-Pool Bytes     Max Bytes  Max Used  Get         Free
-Main  1234567  2345678    1890000   45678       44000
-```
+## Beispiele
 
-### Check after extended operation
-```
-* memory
-Memory usage information not available (Rust runtime)
+### Kopfzeilen anzeigen
+
+```text
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]> memory
+bareos-dir Version: 25.1.2+onesimus.0.2.0 (15 October 2026) Debian GNU/Linux 13 (trixie)
+Daemon started 16-Oct-26 16:41. Jobs: run=0, running=0 db:postgresql, Onesimus binary
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]>
 ```
 
-## Behavior
+Beim Original steht am Ende `Bareos community binary` statt `Onesimus binary`; das ist die Kennung des jeweiligen Programms, keine Abweichung im Verhalten.
 
-- In C++ Bareos, displays the internal memory pool allocator statistics including current bytes, maximum bytes, and allocation/free counts.
-- In the Rust implementation, Rust uses its own memory allocator (jemalloc or system malloc) which does not expose the same pool-based statistics, so this command reports that detailed info is not available.
-- Useful for diagnosing memory leaks or capacity issues in long-running Director instances.
-- This is not an audited command.
+### Kopfzeilen als JSON
 
-## Related Commands
+```text
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]> .api 2
+{
+  "jsonrpc": "2.0",
+  "id": null,
+  "result": {
+    "api": 2
+  }
+}
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]> memory
+{
+  "jsonrpc": "2.0",
+  "id": null,
+  "result": {
+    "header": {
+      "director": "bareos-dir",
+      "version": "25.1.2+onesimus.0.2.0",
+      "release_date": "15 October 2026",
+      "os": "Debian GNU/Linux 13 (trixie)",
+      "binary_info": "Onesimus",
+      "daemon_started": "16-Oct-26 16:41",
+      "jobs_run": 0,
+      "jobs_running": 0,
+      "config_warnings": false
+    }
+  }
+}
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]>
+```
 
-- [status](status.md) -- Show Director status
-- [version](version.md) -- Show Director version
+## Fehlermeldungen
+
+`memory` gibt keine eigenen Fehlermeldungen aus.
+
+## Siehe auch
+
+- [status](status.md) — vollständiger Status des Directors (`status director`)
+- [version](version.md) — nur die Versionszeile

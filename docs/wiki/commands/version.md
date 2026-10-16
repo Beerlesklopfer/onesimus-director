@@ -1,4 +1,4 @@
-# version — Show Director Version
+# version — Version des Directors anzeigen
 
 <!-- bareos-reference:start -->
 ## Aus den Bareos-Originalquellen
@@ -21,21 +21,85 @@ Referenz: [WIP/25.1.2-pre-43-g18be77e68, `18be77e6832e`](https://github.com/bare
 
 Die folgenden vorhandenen Beispiele und Verhaltensbeschreibungen sind lokale Dokumentation; sie sind kein Beleg für vollständige Bareos-Kompatibilität. Bei Widersprüchen gilt der obige Befund.
 <!-- bareos-reference:end -->
-Display the Director daemon version, build info, and operating system.
+
+## Zweck
+
+`version` zeigt Name, Version und Build-Datum des Directors sowie das Betriebssystem, auf dem er läuft. Der Befehl liest nur und verändert nichts. Man braucht ihn zum Beispiel für Fehlerberichte oder um nach einem Update zu prüfen, ob der neue Director läuft.
 
 ## Syntax
 
-```
+```text
 version
 ```
 
-## Example
+## Argumente
 
+Der Befehl hat keine Argumente. Weitere Wörter hinter `version` werden ignoriert.
+
+## API-Modi
+
+Unter `.api 0` und `.api 1` kommt dieselbe Textzeile. Unter `.api 2` steht die Information als JSON-Objekt `result.version` mit den Feldern `name`, `type`, `version`, `bdate`, `operatingsystem`, `distname`, `distversion` und `customversionid`. Mit `.api json compact=yes` kommt dasselbe JSON in einer Zeile.
+
+## Beispiele
+
+### Version anzeigen
+
+```text
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]> version
+bareos-dir Version: 25.1.2+onesimus.0.2.0 (15 October 2026) Debian GNU/Linux 13 (trixie) debian Debian GNU/Linux 13 (trixie)
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]>
 ```
-* version
-bareos-dir Version: 25.1.2+onesimus.0.2.0 (Debian GNU/Linux 13 (trixie))
+
+### Version als JSON
+
+```text
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]> .api 2
+{
+  "jsonrpc": "2.0",
+  "id": null,
+  "result": {
+    "api": 2
+  }
+}
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]> version
+{
+  "jsonrpc": "2.0",
+  "id": null,
+  "result": {
+    "version": {
+      "name": "bareos-dir",
+      "type": "bareos-director",
+      "version": "25.1.2+onesimus.0.2.0",
+      "bdate": "15 October 2026",
+      "operatingsystem": "Debian GNU/Linux 13 (trixie)",
+      "distname": "debian",
+      "distversion": "Debian GNU/Linux 13 (trixie)",
+      "customversionid": ""
+    }
+  }
+}
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]>
 ```
 
-## Notes
+### Version als kompaktes JSON
 
-The version string format is `bareos-dir Version: <version> (<os>)` for protocol compatibility with C++ bconsole and Bareos WebUI. The actual daemon binary is `onesimus-dird`.
+Mit `compact=yes` steht die ganze Antwort in einer Zeile (Paritätsfall `c020-compact-version`).
+
+```text
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]> .api json compact=yes
+{"jsonrpc":"2.0","id":null,"result":{"api":2}}
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]> version
+{"jsonrpc":"2.0","id":null,"result":{"version":{"name":"bareos-dir","type":"bareos-director","version":"25.1.2+onesimus.0.2.0","bdate":"15 October 2026","operatingsystem":"Debian GNU/Linux 13 (trixie)","distname":"debian","distversion":"Debian GNU/Linux 13 (trixie)","customversionid":""}}}
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]>
+```
+
+## Fehlermeldungen
+
+`version` gibt keine eigenen Fehlermeldungen aus.
+
+## Siehe auch
+
+- [status](status.md) — Status des Directors mit Startzeit und laufenden Jobs
+- [memory](memory.md) — Kopfzeilen des Director-Status
+- [time](time.md) — aktuelle Uhrzeit des Directors
+- [.api](dot-api.md) — API-Modus umschalten

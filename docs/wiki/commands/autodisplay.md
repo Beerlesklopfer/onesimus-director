@@ -1,4 +1,4 @@
-# autodisplay -- Toggle Automatic Message Display
+# autodisplay — Nachrichten automatisch anzeigen
 
 <!-- bareos-reference:start -->
 ## Aus den Bareos-Originalquellen
@@ -25,50 +25,110 @@ autodisplay on | off
 
 Die folgenden vorhandenen Beispiele und Verhaltensbeschreibungen sind lokale Dokumentation; sie sind kein Beleg für vollständige Bareos-Kompatibilität. Bei Widersprüchen gilt der obige Befund.
 <!-- bareos-reference:end -->
-Enable or disable automatic display of console messages after each command.
+
+## Zweck
+
+Der Director sammelt Nachrichten für die Konsole, etwa Jobberichte oder Aufforderungen zum Einlegen eines Volumes. Normalerweise (`autodisplay off`) weist er nach einem Befehl nur mit `You have messages.` darauf hin, und man holt sie mit [`messages`](messages.md) ab. Mit `autodisplay on` gibt der Director wartende Nachrichten nach jedem Befehl selbst aus. Die Einstellung gilt nur für die eigene Sitzung. Voraussetzung ist, dass die Konsole den Befehl `messages` benutzen darf.
 
 ## Syntax
 
-```
-autodisplay [on|off]
-```
-
-## Arguments
-
-| Argument | Description |
-|----------|-------------|
-| `on` | Enable automatic message display (default) |
-| `off` | Disable automatic message display |
-
-## Examples
-
-### Enable autodisplay
-```
-* autodisplay on
-autodisplay on
+```text
+autodisplay on | off
 ```
 
-### Disable autodisplay
+## Argumente
+
+| Argument | Werte | Bedeutung |
+|---|---|---|
+| `on` | — | Wartende Nachrichten nach jedem Befehl automatisch ausgeben |
+| `off` | — | Nur den Hinweis `You have messages.` zeigen (Standard) |
+
+Groß- und Kleinschreibung ist egal (`autodisplay ON`). Der Director nimmt das erste Wort hinter `autodisplay`, das `on` oder `off` heißt (`autodisplay foo off` schaltet aus); ein Wert wie `on=1` zählt als `on`.
+
+## API-Modi
+
+Erfolgreich kommt in keinem Modus Text zurück; unter `.api 2` ist es ein leeres Ergebnis (`"result": {}`). Fehlt `on`/`off`, kommt unter `.api 0` und `.api 1` die Zeile `ON or OFF keyword missing.`, unter `.api 2` ein JSON-Fehler mit dieser Meldung.
+
+## Beispiele
+
+### Automatische Anzeige einschalten
+
+Der Befehl antwortet ohne Text. Liegen keine Nachrichten vor, meldet `messages` danach wie gewohnt `You have no messages.` (Paritätsfall `c036-autodisplay-on-messages`).
+
+```text
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]> autodisplay on
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]> messages
+You have no messages.
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]>
 ```
-* autodisplay off
-autodisplay off
+
+Eine automatisch ausgegebene Nachricht selbst: Beispielausgabe nicht verfügbar, weil dafür ein Job laufen müsste.
+
+### Automatische Anzeige ausschalten
+
+```text
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]> autodisplay off
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]>
 ```
 
-### Default (enable)
+### Schlüsselwort fehlt
+
+```text
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]> autodisplay foo
+ON or OFF keyword missing.
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]>
 ```
-* autodisplay
-autodisplay on
+
+### Schlüsselwort fehlt, JSON
+
+```text
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]> .api 2
+{
+  "jsonrpc": "2.0",
+  "id": null,
+  "result": {
+    "api": 2
+  }
+}
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]> autodisplay
+{
+  "jsonrpc": "2.0",
+  "id": null,
+  "error": {
+    "code": 1,
+    "message": "failed",
+    "data": {
+      "result": {},
+      "messages": {
+        "error": [
+          "ON or OFF keyword missing.\n"
+        ]
+      }
+    }
+  }
+}
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]>
 ```
 
-## Behavior
+### Konsole ohne Berechtigung
 
-- When `on`, the Director automatically sends any pending messages to the console after each command completes, without requiring an explicit `messages` command.
-- When `off`, messages accumulate and must be retrieved manually with `messages`.
-- The default state is `on`.
-- This setting is per-session -- it does not affect other connected consoles.
-- This is not an audited command.
+Die Konsole `parity-limited` darf weder `messages` noch `autodisplay` benutzen (Paritätsfall `c036-messages-limited`).
 
-## Related Commands
+```text
+parity-limited@bareos-dir[25.1.2+onesimus.0.2.0]> autodisplay on
+autodisplay: is an invalid command.
+parity-limited@bareos-dir[25.1.2+onesimus.0.2.0]>
+```
 
-- [messages](messages.md) -- Manually display pending messages
-- [gui](gui.md) -- Switch to GUI mode (also affects message display)
+## Fehlermeldungen
+
+| Meldung | Ursache und Abhilfe |
+|---|---|
+| `ON or OFF keyword missing.` | Hinter `autodisplay` steht weder `on` noch `off`. Befehl mit `on` oder `off` wiederholen. |
+| `autodisplay: is an invalid command.` | Die `CommandACL` der Konsole erlaubt den Befehl nicht. |
+
+## Siehe auch
+
+- [messages](messages.md) — wartende Nachrichten abholen
+- [.messages](dot-messages.md) — Nachrichten im Maschinenformat
+- [gui](gui.md) — GUI-Modus, unterdrückt den Hinweis `You have messages.`

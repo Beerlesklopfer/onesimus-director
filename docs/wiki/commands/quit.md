@@ -1,4 +1,4 @@
-# quit -- Disconnect from Director
+# quit — Sitzung beenden
 
 <!-- bareos-reference:start -->
 ## Aus den Bareos-Originalquellen
@@ -21,49 +21,87 @@ Referenz: [WIP/25.1.2-pre-43-g18be77e68, `18be77e6832e`](https://github.com/bare
 
 Die folgenden vorhandenen Beispiele und Verhaltensbeschreibungen sind lokale Dokumentation; sie sind kein Beleg für vollständige Bareos-Kompatibilität. Bei Widersprüchen gilt der obige Befund.
 <!-- bareos-reference:end -->
-Terminate the current bconsole session and close the connection to the Director.
+
+## Zweck
+
+`quit` beendet die Konsolensitzung. Der Director schließt die Verbindung, ohne vorher eine Antwort zu schicken; oconsole beendet sich danach. Laufende Jobs, Einstellungen anderer Sitzungen und die Konfiguration bleiben unberührt. [`exit`](exit.md) und der Punktbefehl [`.quit`](dot-quit.md) wirken genauso.
 
 ## Syntax
 
-```
+```text
 quit
-exit
-.quit
 ```
 
-## Arguments
+Wie jeder Befehl darf `quit` abgekürzt werden; der Director nimmt den ersten Befehl seiner Tabelle, der mit dem Eingegebenen beginnt. `q` und `qu` bedeuten `quit` (nicht `query`). oconsole erkennt nur die ausgeschriebenen Formen `quit`, `exit` und `.quit` als Abmeldung; bei einer Abkürzung schließt der Director die Verbindung trotzdem, und oconsole meldet dann `Connection closed`.
 
-None.
+`quit` und `exit` sind immer erlaubt, auch wenn die `CommandACL` einer Konsole sie nicht nennt.
 
-## Examples
+## Argumente
 
-### Normal disconnect
+Der Befehl hat keine Argumente. Weitere Wörter hinter `quit` werden ignoriert.
+
+## Dialoge
+
+`quit` fragt nicht nach. Steht man gerade in einem Dialog eines anderen Befehls (Prompt `> `), wird `quit` dort als Antwort gelesen und nicht als Befehl; zuerst mit `.` abbrechen.
+
+## API-Modi
+
+Unter `.api 0` und `.api 1` schickt der Director nichts und schließt die Verbindung. Unter `.api 2` schickt er vorher noch ein leeres Ergebnis:
+
+```text
+{
+  "jsonrpc": "2.0",
+  "id": null,
+  "result": {}
+}
 ```
-* quit
-bye
+
+## Beispiele
+
+### Sitzung beenden
+
+Nach `quit` kehrt oconsole zur Shell zurück.
+
+```text
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]> version
+bareos-dir Version: 25.1.2+onesimus.0.2.0 (15 October 2026) Debian GNU/Linux 13 (trixie) debian Debian GNU/Linux 13 (trixie)
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]> quit
 ```
 
-### Using exit alias
-```
-* exit
-bye
-```
+### Mit Abkürzung beenden
 
-### Using dot-command variant
-```
-* .quit
-bye
+Der Director beendet die Sitzung auch bei `q` (Paritätsfall `c004-quit-abbrev`); die letzte Zeile stammt von oconsole.
+
+```text
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]> q
+Connection closed
 ```
 
-## Behavior
+### Sitzung im JSON-Modus beenden
 
-- All three forms (`quit`, `exit`, `.quit`) are equivalent and handled by the same code path.
-- The Director responds with `bye` and closes the connection.
-- Any running jobs are **not** affected -- they continue in the background.
-- The session is removed from the Director's session manager.
-- This is not an audited command.
+```text
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]> .api 2
+{
+  "jsonrpc": "2.0",
+  "id": null,
+  "result": {
+    "api": 2
+  }
+}
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]> quit
+{
+  "jsonrpc": "2.0",
+  "id": null,
+  "result": {}
+}
+```
 
-## Related Commands
+## Fehlermeldungen
 
-- [whoami](whoami.md) -- Show current console identity before disconnecting
-- [status](status.md) -- Check running jobs before quitting
+`quit` gibt keine Fehlermeldungen aus. Meldungen nach dem Beenden kommen von oconsole selbst, etwa `Connection closed`, wenn die Verbindung unerwartet abbricht.
+
+## Siehe auch
+
+- [exit](exit.md) — gleichwertiger Befehl
+- [.quit](dot-quit.md) — Punktbefehl mit derselben Wirkung
+- [wait](wait.md) — vor dem Beenden auf laufende Jobs warten

@@ -1,4 +1,4 @@
-# trace -- Toggle Trace File Output
+# trace — Debug-Ausgaben in eine Datei schreiben
 
 <!-- bareos-reference:start -->
 ## Aus den Bareos-Originalquellen
@@ -26,56 +26,79 @@ trace on | off
 
 Die folgenden vorhandenen Beispiele und Verhaltensbeschreibungen sind lokale Dokumentation; sie sind kein Beleg für vollständige Bareos-Kompatibilität. Bei Widersprüchen gilt der obige Befund.
 <!-- bareos-reference:end -->
-Enable or disable writing Director output to a trace file for debugging purposes.
+
+## Zweck
+
+`trace on` lässt den Director seine Debug-Ausgaben in die Datei `bareos-dir.trace` im Arbeitsverzeichnis des Directors (`WorkingDirectory`, ohne Angabe `/var/lib/bareos`) schreiben; `trace off` beendet das und schließt die Datei. Wie viel geschrieben wird, bestimmt der Debug-Level, der mit [`setdebug`](setdebug.md) eingestellt wird. Die Einstellung gilt für den ganzen Director, nicht nur für die eigene Sitzung, und bleibt bis zum Ausschalten oder Neustart bestehen.
 
 ## Syntax
 
-```
-trace [on|off]
-```
-
-## Arguments
-
-| Argument | Description |
-|----------|-------------|
-| `on` | Enable trace file output |
-| `off` | Disable trace file output |
-
-## Examples
-
-### Enable trace
-```
-* trace on
-trace on
+```text
+trace on | off
+trace
 ```
 
-### Disable trace
+## Argumente
+
+| Argument | Werte | Bedeutung |
+|---|---|---|
+| `off` | — | Trace ausschalten (Groß- und Kleinschreibung egal) |
+| `on` | — | Trace einschalten |
+
+Nur `off` schaltet aus; **jedes andere Wort schaltet ein**, auch Tippfehler wie `trace of`. Steht nicht genau ein Wort hinter `trace` (kein Wort oder mehrere), fragt der Director nach (siehe Dialoge).
+
+## Dialoge
+
+Ohne Argument (oder mit mehr als einem) fragt der Director `Turn on or off?`. Die Antwort `off` schaltet aus, jede andere Antwort ein. Ein einzelner `.` bricht ab, ohne etwas zu ändern.
+
+```text
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]> trace
+Turn on or off?
+> off
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]>
 ```
-* trace off
-trace off
+
+## API-Modi
+
+Erfolgreich kommt in keinem Modus Text zurück. Unter `.api 1` und `.api 2` kommt die Frage als Texteingabe (oconsole zeigt `input> `). Wie im Original schickt der Director den Fragetext dabei erst nach der Antwort; im Terminal erscheint `Turn on or off?` also hinter der Eingabe (Paritätsfall `c011-trace-api1-cancel`).
+
+## Beispiele
+
+### Trace ein- und ausschalten
+
+```text
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]> trace on
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]> trace off
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]>
 ```
 
-### Typical debugging workflow
-```
-* trace on
-trace on
-* run job=backup-bareos-fd level=Full yes
-Job queued. JobId=15
-* wait jobid=15
-* trace off
-trace off
+### Nachfrage abbrechen
+
+```text
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]> trace
+Turn on or off?
+> .
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]>
 ```
 
-## Behavior
+### Nachfrage unter `.api 1`
 
-- When enabled, the Director writes a copy of all console output to a trace file in the working directory (typically `/var/lib/bareos/bareos-dir.<pid>.trace`).
-- Useful for capturing command output and debugging information for later analysis.
-- The trace file is appended to -- it is not truncated when tracing is re-enabled.
-- This setting is per-session and does not affect other connected consoles.
-- For daemon-level debug tracing, use `setdebug` with the `trace` option instead.
-- This is not an audited command.
+```text
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]> .api 1
+api: 1
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]> trace
+input> .
+Turn on or off?
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]>
+```
 
-## Related Commands
+## Fehlermeldungen
 
-- [setdebug](setdebug.md) -- Set debug level with trace option
-- [messages](messages.md) -- Display pending messages
+| Meldung | Ursache und Abhilfe |
+|---|---|
+| `trace: <pfad>: <Fehler>` | Nur Onesimus: Die Trace-Datei lässt sich nicht öffnen, etwa weil das Arbeitsverzeichnis fehlt oder nicht beschreibbar ist. Rechte von `WorkingDirectory` prüfen. Das Original meldet hier nichts. Beispielausgabe nicht verfügbar: Der Testaufbau hat ein beschreibbares Arbeitsverzeichnis. |
+
+## Siehe auch
+
+- [setdebug](setdebug.md) — Debug-Level einstellen, auch `trace=1` für Client und Storage
+- [status](status.md) — Status des Directors

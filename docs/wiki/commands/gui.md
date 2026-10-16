@@ -1,4 +1,4 @@
-# gui -- Enable/Disable GUI Mode
+# gui — Modus für Programme ein- oder ausschalten
 
 <!-- bareos-reference:start -->
 ## Aus den Bareos-Originalquellen
@@ -25,52 +25,127 @@ gui on | off
 
 Die folgenden vorhandenen Beispiele und Verhaltensbeschreibungen sind lokale Dokumentation; sie sind kein Beleg für vollständige Bareos-Kompatibilität. Bei Widersprüchen gilt der obige Befund.
 <!-- bareos-reference:end -->
-Switch the console session to GUI mode, which modifies output formatting for use by graphical user interfaces.
+
+## Zweck
+
+`gui on` schaltet die Sitzung in einen Modus für grafische Oberflächen und Skripte, `gui off` zurück in den interaktiven Normalmodus (Standard). Die Einstellung gilt nur für die eigene Sitzung bis zu deren Ende. Im GUI-Modus ändert sich:
+
+- **Katalogauswahl:** Ohne `catalog=` nimmt der Director stillschweigend den ersten Katalog der Konfiguration. Die Zeile `Automatically selected Catalog: …` und die Auswahlliste bei mehreren Katalogen entfallen.
+- **Zahlen in Tabellen:** Zahlen aus dem Katalog erscheinen ohne Tausenderpunkte und linksbündig (`824021543` statt `824,021,543`).
+- **Nachrichtenhinweis:** Der Hinweis `You have messages.` nach einem Befehl entfällt.
 
 ## Syntax
 
-```
-gui [on|off]
-```
-
-## Arguments
-
-| Argument | Description |
-|----------|-------------|
-| `on` | Enable GUI mode |
-| `off` | Disable GUI mode (return to interactive mode) |
-
-## Examples
-
-### Enable GUI mode
-```
-* gui on
-gui mode on
+```text
+gui on | off
 ```
 
-### Disable GUI mode
+## Argumente
+
+| Argument | Werte | Bedeutung |
+|---|---|---|
+| `on` | — | GUI-Modus einschalten |
+| `off` | — | GUI-Modus ausschalten (Standard) |
+
+Groß- und Kleinschreibung ist egal (`gui OFF`). Der Director sucht unter allen Wörtern hinter `gui` das erste, das `on` oder `off` heißt; andere Wörter davor werden übersprungen. Ein Wert wie `on=1` zählt als `on`.
+
+## API-Modi
+
+Erfolgreich kommt in keinem Modus Text zurück; unter `.api 2` ist es ein leeres Ergebnis (`"result": {}`). Fehlt `on`/`off`, kommt unter `.api 0` und `.api 1` die Zeile `ON or OFF keyword missing.`, unter `.api 2` ein JSON-Fehler mit dieser Meldung (siehe Beispiel).
+
+## Beispiele
+
+### GUI-Modus einschalten und eine Liste abrufen
+
+Nach `gui on` erscheinen die Zahlen ohne Formatierung und linksbündig, und der Katalog wird ohne Hinweis gewählt (Paritätsfall `c027-gui-list-pools`).
+
+```text
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]> gui on
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]> list pools
+Using Catalog "MyCatalog"
++--------+--------------+---------+---------+----------+---------------+
+| poolid | name         | numvols | maxvols | pooltype | labelformat   |
++--------+--------------+---------+---------+----------+---------------+
+| 1      | Scratch      | 0       | 0       | Scratch  | *             |
+| 2      | Incremental  | 1       | 100     | Backup   | Incremental-  |
+| 3      | Full         | 3       | 100     | Backup   | Full-         |
+| 4      | Differential | 1       | 100     | Backup   | Differential- |
++--------+--------------+---------+---------+----------+---------------+
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]>
 ```
-* gui off
-gui mode off
+
+### GUI-Modus ausschalten
+
+Nach `gui off` sind die Zahlen wieder rechtsbündig.
+
+```text
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]> gui off
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]> list pools
++--------+--------------+---------+---------+----------+---------------+
+| poolid | name         | numvols | maxvols | pooltype | labelformat   |
++--------+--------------+---------+---------+----------+---------------+
+|      1 | Scratch      |       0 |       0 | Scratch  | *             |
+|      2 | Incremental  |       1 |     100 | Backup   | Incremental-  |
+|      3 | Full         |       3 |     100 | Backup   | Full-         |
+|      4 | Differential |       1 |     100 | Backup   | Differential- |
++--------+--------------+---------+---------+----------+---------------+
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]>
 ```
 
-### Default (enable)
+### Schlüsselwort fehlt
+
+```text
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]> gui
+ON or OFF keyword missing.
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]>
 ```
-* gui
-gui mode on
+
+### Schlüsselwort fehlt, JSON
+
+```text
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]> .api 2
+{
+  "jsonrpc": "2.0",
+  "id": null,
+  "result": {
+    "api": 2
+  }
+}
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]> gui foo
+{
+  "jsonrpc": "2.0",
+  "id": null,
+  "error": {
+    "code": 1,
+    "message": "failed",
+    "data": {
+      "result": {},
+      "messages": {
+        "error": [
+          "ON or OFF keyword missing.\n"
+        ]
+      }
+    }
+  }
+}
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]> gui on
+{
+  "jsonrpc": "2.0",
+  "id": null,
+  "result": {}
+}
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]>
 ```
 
-## Behavior
+## Fehlermeldungen
 
-- In GUI mode, the Director modifies output to be more suitable for parsing by graphical frontends:
-  - Suppresses interactive prompts
-  - Disables ANSI color codes
-  - Sends messages automatically (implicitly enables `autodisplay`)
-- Used by tools like `bat` (Bareos Administration Tool) and web-based interfaces.
-- This setting is per-session.
-- This is not an audited command.
+| Meldung | Ursache und Abhilfe |
+|---|---|
+| `ON or OFF keyword missing.` | Hinter `gui` steht weder `on` noch `off`. Befehl mit `on` oder `off` wiederholen. |
 
-## Related Commands
+## Siehe auch
 
-- [autodisplay](autodisplay.md) -- Control automatic message display
-- [.api](dot-api.md) -- Switch between API output modes (0/1/2)
+- [autodisplay](autodisplay.md) — Nachrichten automatisch anzeigen
+- [.api](dot-api.md) — Maschinenformate für Programme (`.api 1`, `.api 2`)
+- [use](use.md) — Katalog ausdrücklich wählen
+- [list](list.md) — Katalogeinträge auflisten

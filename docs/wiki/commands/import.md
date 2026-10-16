@@ -1,4 +1,4 @@
-# import -- Import Volumes from Autochanger Magazine
+# import — Volumes aus den Import/Export-Slots eines Autochangers holen
 
 <!-- bareos-reference:start -->
 ## Aus den Bareos-Originalquellen
@@ -28,55 +28,110 @@ import storage=<storage-name> [ srcslots=<slot-selection> dstslots=<slot-selecti
 
 Die folgenden vorhandenen Beispiele und Verhaltensbeschreibungen sind lokale Dokumentation; sie sind kein Beleg für vollständige Bareos-Kompatibilität. Bei Widersprüchen gilt der obige Befund.
 <!-- bareos-reference:end -->
-Import volumes from the autochanger's import/export (mail) slots into storage slots.
+
+## Zweck
+
+`import` lässt einen Autochanger (Bandbibliothek) Volumes, die in seine Import/Export-Slots (Mailslots) eingelegt wurden, in freie normale Slots bringen. Der Director beauftragt dazu den Storage Daemon, der den Roboter bewegt, und trägt die Slots danach im Katalog ein. Der Befehl verändert also den Zustand der Bibliothek und des Katalogs. Er funktioniert nur mit Storages, die als Autochanger konfiguriert sind. Das Gegenstück ist [`export`](export.md).
 
 ## Syntax
 
-```
-import storage=<name> [srcslots=<slot-selection>] [dstslots=<slot-selection>] [scan]
-```
-
-## Arguments
-
-| Argument | Description |
-|----------|-------------|
-| `storage=<name>` | Storage daemon with autochanger (required) |
-| `srcslots=<slot-selection>` | Source slot numbers (e.g. `1-5` or `1,3,5`) |
-| `dstslots=<slot-selection>` | Destination slot numbers |
-| `scan` | Scan barcodes after import |
-
-## Examples
-
-### Import from default mail slots
-```
-* import storage=Tape
-Import from storage Tape
+```text
+import storage=<storage> [srcslots=<slots>] [dstslots=<slots>] [volume=<name>|<name>…] [scan]
 ```
 
-### Import specific slots with scan
+## Argumente
+
+| Argument | Werte | Bedeutung |
+|---|---|---|
+| `storage=<storage>` | Autochanger-Storage | Die Bibliothek. Fehlt die Angabe, fragt der Director nach (siehe Dialoge). |
+| `srcslots=<slots>` (auch `srcslot=`) | Slotliste, z.B. `3`, `1-4`, `1,5,7-9` | Belegte Import/Export-Slots als Quelle. Ohne Angabe nimmt der Director alle belegten Import/Export-Slots. |
+| `dstslots=<slots>` (auch `dstslot=`) | Slotliste | Leere normale Slots als Ziel. Ohne Angabe nimmt der Director freie Slots der Reihe nach. |
+| `volume=<name>\|<name>…` | Volume-Namen, durch `\|` getrennt | Nur diese Volumes importieren. |
+| `scan` | — | Volume-Namen nicht aus den Barcodes nehmen, sondern die Bänder im Laufwerk lesen. Dafür fragt der Director nach dem Laufwerk. |
+
+Slotlisten: Zahlen ab 1, Bereiche mit `-`, mehrere Einträge mit `,`.
+
+## Dialoge
+
+Wie bei [`export`](export.md): Ohne `storage=` listet der Director die Autochanger-Storages und fragt nach der Nummer; gibt es keinen, endet der Befehl mit `Selection list for "Storage" is empty!`. Mit `scan` fragt er bei mehreren Laufwerken nach dem Laufwerk. Beispielausgabe für die Auswahl nicht verfügbar: Der Testaufbau hat keinen Autochanger.
+
+## API-Modi
+
+Unter `.api 0` und `.api 1` kommen die Meldungen als Text. Unter `.api 2` endet ein Fehlschlag als JSON-Fehler ohne die Meldungen:
+
+```text
+{
+  "jsonrpc": "2.0",
+  "id": null,
+  "error": {
+    "code": 1,
+    "message": "failed",
+    "data": {
+      "result": {},
+      "messages": {}
+    }
+  }
+}
 ```
-* import storage=Tape srcslots=1-5 scan
-Import from storage Tape
-Scanning imported volumes...
+
+## Beispiele
+
+Ein erfolgreicher Import: Beispielausgabe nicht verfügbar, weil der Testaufbau keinen Autochanger hat und der Befehl die Bibliothek bewegen würde.
+
+### Kein Autochanger konfiguriert
+
+```text
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]> import
+The defined Autochanger Storage resources are:
+Selection list for "Storage" is empty!
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]>
 ```
 
-### Import to specific destination slots
+### Unbekannter Storage
+
+```text
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]> import storage=Nope
+Storage resource "Nope": not found
+The defined Autochanger Storage resources are:
+Selection list for "Storage" is empty!
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]>
 ```
-* import storage=Tape srcslots=101-105 dstslots=1-5
-Import from storage Tape
+
+### Storage ohne Autochanger
+
+`File` ist ein Datei-Storage ohne Slots (Paritätsfall `ds-export-file`). Onesimus schickt hier den Befehl an den Storage Daemon, der ihn ablehnt; an der Bibliothek ändert sich nichts.
+
+```text
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]> import storage=File
+import on storage File:
+3900 Invalid command: import
+
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]>
 ```
 
-## Behavior
+**Abweichung vom Original:** Das Original fragt nur die Slots ab und antwortet `Connecting to Storage daemon File at …:9103 ...`, `3998 Device ""FileStorage" (/srv/BACKUP/bareos-storage)" is not an autochanger.`, `Device "FileStorage" has 0 slots.`, `No slots in changer.` (C-071)
 
-- The Director instructs the SD to move volumes from the autochanger's import/export slots (mail slots) to regular storage slots.
-- If `srcslots` is not specified, the SD uses the configured import/export slot range.
-- The `scan` option triggers a barcode scan after the import, automatically labeling unregistered volumes.
-- This command is only relevant for tape autochangers (libraries) -- file-based storage does not use import.
-- This is an audited command.
+## Fehlermeldungen
 
-## Related Commands
+Die Meldungen ab der dritten Zeile stammen aus dem Originalquelltext; Beispielausgabe nicht verfügbar, weil sie einen Autochanger voraussetzen.
 
-- [export](export.md) -- Export volumes to autochanger mail slots
-- [label](label.md) -- Label imported volumes
-- [update](update.md) -- Update slot information (`update slots`)
-- [move](move.md) -- Move volumes between slots
+| Meldung | Ursache und Abhilfe |
+|---|---|
+| `Selection list for "Storage" is empty!` | Es gibt keinen Autochanger-Storage (oder die Konsole darf keinen benutzen). |
+| `Storage resource "<name>": not found` | Unbekannter Storage-Name; danach folgt die Auswahl. |
+| `No slots in changer.` | Der Storage Daemon meldet keine Slots, das Gerät ist kein Autochanger. |
+| `No Volumes found, or no barcodes.` | Die Bibliothek meldet keinen Inhalt. Ggf. mit `scan` arbeiten. |
+| `Not all slots in source selection are import slots and filled.` | Ein Quellslot ist kein belegter Import/Export-Slot. |
+| `Not all slots in destination selection are normal slots and empty.` | Ein Zielslot ist kein freier normaler Slot. |
+| `Not enough free slots available to import <n> volumes` | Zu wenige freie Slots in der Bibliothek. |
+| `Source slot selection doesn't fit into destination slot selection.` | Mehr Quell- als Zielslots angegeben. |
+| `Source slot selection and destination slot selection overlap.` | Ein Slot steht in beiden Listen. |
+| `No volume named <name> in changer or in selected source slots.` | Ein Volume aus `volume=` steckt nicht in den gewählten Slots. |
+| `Negative numbers not permitted`, `Range end is not integer.`, `Range start is not an integer.`, `Range end not bigger than start.`, `Input value is not an integer.`, `Values must be be greater than zero.`, `Slot too large.` | Fehler in einer Slotliste. |
+
+## Siehe auch
+
+- [export](export.md) — Volumes in die Mailslots legen
+- [move](move.md) — Volumes zwischen Slots bewegen
+- [update](update.md) — `update slots` gleicht den Katalog mit der Bibliothek ab
+- [label](label.md) — neue Bänder nach dem Import beschriften
