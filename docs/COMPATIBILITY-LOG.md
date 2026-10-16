@@ -6,10 +6,11 @@ durch onesimus-dird. Quelle jedes Eintrags ist ein Paritätsfall aus
 `tests/parity/parity.py run`, Rohdaten unter `target/parity/out/`) oder ein
 Befund beim Aufbau der Testumgebung.
 
-Referenz: Original `bareos-dir 25.1.2~pre43.18be77e68`, Quellstand
-`fc2c79b6` (`WIP/25.1.2-pre`). Der exakte Quellstand des installierten Binaries ist
-`18be77e6` (lokaler Checkout aus früherer Sitzung vorhanden) — Umstellung offen. Beide Directors laufen nacheinander mit
-byte-identischer Konfiguration, demselben Katalog, `LC_ALL=C`, `TZ=UTC`.
+Referenz: Original `bareos-dir 25.1.2~pre43.18be77e68`, Quellstand `18be77e6`
+(`WIP/25.1.2-pre-43-g18be77e68`, Checkout `/tmp/bareos-director-reference-18be77e6`) seit
+16.10.2026; vorher `fc2c79b6` (43 Commits älter, Unterschiede in `docs/TODO-COMMANDS.md`).
+Beide Directors laufen nacheinander mit byte-identischer Konfiguration, jede Seite auf einer
+eigenen Kopie des Katalog-Templates, `LC_ALL=C`, `TZ=UTC`.
 
 Status: **offen** · **behoben** (Commit) · **Entscheidung** (bewusste
 Abweichung, braucht Freigabe) · **Harness** (Fehler lag in der Testumgebung).
@@ -70,6 +71,9 @@ Neue Einträge unten anhängen; behobene Einträge bleiben mit Commit stehen.
 | C-050 | 16.10.2026 | Speicherprotokoll | — | NDMP-Storages/-Clients werden gesondert behandelt (setdevice überspringt, Status, Mount) | Kein Protokollfeld in StorageResource, nur natives Protokoll | `ua_cmds.cc:1552`, `storage.cc:727` | offen |
 | C-051 | 16.10.2026 | Jobmeldungen | — | Originaltexte der Jobmeldungen („Start Backup JobId …“, Abschlussbericht), Jmsg der Konsolen-JCR | Eigene Texte (nur Kopf und Routing wie Original) | `backup.cc`, `job.cc`, `ua_run.cc:80-187` | offen |
 | C-052 | 16.10.2026 | Katalogschema (ORM) | — | `PathVisibility` Primärschlüssel `(JobId, PathId)` | Schemabeschreibung `crates/bareos-orm/schema/v2250_bareos_catalog.json` nennt nur `jobid` (wirkt nur, wenn Rust das Schema selbst anlegt; Testkatalog korrekt aus Original-DDL) | `ddl/creates/postgresql.sql:356-362` | offen |
+| C-053 | 16.10.2026 | truncate / purge action=truncate | — | Truncate über SD-Relabel; Antwort `3000 OK label. VolFiles=… VolBytes=…` gilt als Erfolg (18be77e6) | `truncate` sendet nicht-Bareos-Befehl `truncate Volume=`, wertet keine Relabel-Antwort aus; `action=truncate` fehlt | `ua_purge.cc:654` | offen |
+| C-054 | 16.10.2026 | update slots | — | Slots aus dem Autochanger, `MakeInchangerUnique`, Warnung „Could not set inchanger to 0 for slot %d.“ | „not supported“ | `ua_update.cc:1228`, `sql_update.cc:364,445` | offen |
+| C-055 | 16.10.2026 | CatReq UpdateMedia | — | Plausibilitätsprüfungen beim Medien-Update (VolFiles rückwärts → VolBlocks zurücksetzen, „Ignoring Volume Blocks…“) | Keine Prüfungen, VolBlocks nicht behandelt | `catreq.cc:258-280` | offen |
 
 Hinweis C-002: Text-Sitzungen über gRPC/Command-Queue nutzen denselben SessionManager und erhalten die Katalogzeilen jetzt ebenfalls einmal pro Sitzung (konsistent mit dem Original, aber neue Ausgabe an dieser Schnittstelle).
 
@@ -92,10 +96,10 @@ eindeutige Sortierung), `c015-list-jobs-enabled-count` (undefiniertes Verhalten 
 
 ### Offen
 
-- Einträge mit Status „offen“ in der Tabelle: C-043 bis C-052.
+- Einträge mit Status „offen“ in der Tabelle: C-043 bis C-055.
 - OVFS (eigene PostgreSQL-Extension, paralleles Projekt `oenesimus-postgres-plugin`) ist der Onesimus-Weg für Verzeichnisbäume und Restore-Auswahl. BVFS (`commands/bvfs.rs`, byte-gleich portiert, Fälle `c022`) bleibt nur zur Abwärtskompatibilität für Bareos-Clients (z. B. bareos-webui) erhalten und darf sich dabei nicht ändern.
 - Erledigt 16.10.2026: C-012s `update`-Validierung nach dem C-011-Merge geprüft; `maxvoljobs`/`maxvolfiles` war verloren und ist wiederhergestellt (Fälle `t001`).
-- Referenzquelle auf `18be77e6` umstellen (exakter Stand des installierten `bareos-dir`).
+- Erledigt 16.10.2026: Referenzquelle auf `18be77e6` umgestellt; Generatoren neu erzeugt, bvfs-Pfad-Escaping und query-Prompts angepasst.
 
 ### Testumgebung und Regeln
 
