@@ -223,6 +223,13 @@ pub fn handle_console_session_with<S: Read + Write>(
         }
         if api_mode != command_executor::ApiMode::Human && !invalid {
             if bnet.send_signal(BnetSignal::CmdBegin).is_err() { break; }
+            // C++ noop_cmd (ua_cmds.cc): the no-op signals CMD_BEGIN and
+            // CMD_OK itself, inside the frame Do_a_command already opened.
+            if ast.command_name == "."
+                && (bnet.send_signal(BnetSignal::CmdBegin).is_err()
+                    || bnet.send_signal(BnetSignal::CmdOk).is_err()) {
+                break;
+            }
         }
         if command_allowed && ast.command_name == ".api" {
             if let Some((mode, compact)) = crate::commands::dot::parse_dot_api(&ast) {
@@ -894,6 +901,18 @@ mod console_message_tests {
         assert_eq!(command(&mut bnet, "", BnetSignal::MainPrompt), ["<MainPrompt>"]);
         assert_eq!(command(&mut bnet, "messages", BnetSignal::MainPrompt),
             ["<CmdBegin>", "first\n", "<CmdOk>", "<MainPrompt>"]);
+        close(bnet, server);
+    }
+
+    #[test]
+    fn noop_frames_itself_inside_the_command_frame() {
+        let queue = crate::console_msg::test_queue("noop");
+        let (mut bnet, server) = session(&queue, "admin", "*all*");
+        assert_eq!(command(&mut bnet, ".", BnetSignal::Eod), ["<Eod>"]);
+        command(&mut bnet, ".api 1", BnetSignal::MainPrompt);
+        assert_eq!(command(&mut bnet, ". foo", BnetSignal::MainPrompt),
+            ["<CmdBegin>", "<CmdBegin>", "<CmdOk>", "<CmdOk>", "<MainPrompt>"]);
+        assert_eq!(command(&mut bnet, "  ", BnetSignal::MainPrompt), ["<MainPrompt>"]);
         close(bnet, server);
     }
 }
