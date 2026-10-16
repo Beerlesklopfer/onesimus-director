@@ -274,7 +274,7 @@ impl<'a> Args<'a> {
     /// GetArgValue / FindArgWithValue
     fn value(&self, name: &str) -> Option<&'a str> {
         self.0.arguments.iter()
-            .find(|a| a.key.eq_ignore_ascii_case(name) && a.value.is_some())
+            .find(|a| a.key.eq_ignore_ascii_case(name))
             .and_then(|a| a.value.as_deref())
     }
 }

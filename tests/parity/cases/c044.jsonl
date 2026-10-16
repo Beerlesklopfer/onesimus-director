@@ -1,0 +1,57 @@
+# C-044 keyword/name matching semantics: bstrncasecmp prefixes, Bstrcasecmp keywords,
+# FindArg/FindArgWithValue (first keyword match decides). Read-only.
+# .pools type= (ua_dotcmds.cc:894): case-insensitive prefix of the pool type.
+{"id": "c044-pools-type-exact", "steps": [".pools type=Backup"]}
+{"id": "c044-pools-type-prefix", "steps": [".pools type=back"]}
+{"id": "c044-pools-type-upper", "steps": [".pools type=BACKUP"]}
+{"id": "c044-pools-type-one", "steps": [".pools type=b"]}
+{"id": "c044-pools-type-longer", "steps": [".pools type=Backupx"]}
+{"id": "c044-pools-type-other", "steps": [".pools type=sCr"]}
+{"id": "c044-pools-type-empty", "steps": [".pools type="]}
+{"id": "c044-pools-type-novalue", "steps": [".pools type"]}
+{"id": "c044-pools-type-first-novalue", "steps": [".pools type type=Scratch"]}
+{"id": "c044-pools-type-key-upper", "steps": [".pools TYPE=Scratch"]}
+{"id": "c044-pools-type-prefix-json", "steps": [".pools type=bAc"], "setup": [".api json"]}
+# .jobs type= (ua_dotcmds.cc:720): only the first byte, compared case-sensitively with the job type code.
+{"id": "c044-jobs-type-B", "steps": [".jobs type=B"]}
+{"id": "c044-jobs-type-Backup", "steps": [".jobs type=Backup"]}
+{"id": "c044-jobs-type-backup", "steps": [".jobs type=backup"]}
+{"id": "c044-jobs-type-Bogus", "steps": [".jobs type=Bogus"]}
+{"id": "c044-jobs-type-R", "steps": [".jobs type=Restore"]}
+{"id": "c044-jobs-type-D", "steps": [".jobs type=D"]}
+{"id": "c044-jobs-type-x", "steps": [".jobs type=x"]}
+{"id": "c044-jobs-type-empty", "steps": [".jobs type="]}
+{"id": "c044-jobs-type-key-upper", "steps": [".jobs Type=R"]}
+{"id": "c044-jobs-type-json", "steps": [".jobs type=Backup"], "setup": [".api json"]}
+# enabled/disabled (FindArg, ua_dotcmds.cc:722,814,912,1122): case-insensitive, value allowed, both list nothing.
+{"id": "c044-jobs-enabled-disabled", "steps": [".jobs enabled disabled"]}
+{"id": "c044-jobs-disabled-enabled", "steps": [".jobs disabled enabled"]}
+{"id": "c044-jobs-enabled-upper", "steps": [".jobs ENABLED"]}
+{"id": "c044-jobs-disabled-value", "steps": [".jobs disabled=no"]}
+{"id": "c044-jobs-enabled-type", "steps": [".jobs enabled type=B"]}
+{"id": "c044-clients-enabled-disabled", "steps": [".clients enabled disabled"]}
+{"id": "c044-clients-enabled-upper", "steps": [".clients Enabled"]}
+{"id": "c044-clients-disabled-value", "steps": [".clients disabled=yes"]}
+{"id": "c044-storages-enabled-disabled", "steps": [".storages enabled disabled"]}
+{"id": "c044-storages-enabled-value", "steps": [".storages enabled=x"]}
+{"id": "c044-storages-disabled-upper", "steps": [".storages DISABLED"]}
+{"id": "c044-schedule-enabled-disabled", "steps": [".schedule enabled disabled"]}
+{"id": "c044-schedule-disabled-upper", "steps": [".schedule Disabled"]}
+{"id": "c044-schedule-enabled-value", "steps": [".schedule enabled=1"]}
+{"id": "c044-schedule-enabled-disabled-json", "steps": [".schedule enabled disabled"], "setup": [".api json"]}
+# .levels (ua_dotcmds.cc:1176): Bstrcasecmp on the job type name.
+{"id": "c044-levels-upper", "steps": [".levels BACKUP"]}
+{"id": "c044-levels-prefix", "steps": [".levels back"]}
+# command lookup (ua_cmds.cc:558) and status keywords (ua_status.cc:185-197).
+{"id": "c044-command-prefix-upper", "steps": [".POO"]}
+{"id": "c044-status-sched-upper", "steps": ["status SCHEDULER days=1"]}
+{"id": "c044-status-sched-days-first-novalue", "steps": ["status sched days days=1"]}
+{"id": "c044-status-conf-prefix", "steps": ["status ConfigurationX"]}
+# show resource keyword (ua_output.cc:486,496): case-insensitive prefix.
+{"id": "c044-show-prefix-upper", "steps": ["show POO"]}
+{"id": "c044-show-prefix-name", "steps": ["show Fi=LinuxAll"]}
+# list (ua_output.cc:1400,1492; FindArgWithValue).
+{"id": "c044-list-jobs-order-prefix-upper", "steps": ["list jobs order=DESC limit=2"]}
+{"id": "c044-list-jobs-client-first-novalue", "steps": ["list jobs client client=nonexistent limit=1"]}
+{"id": "c044-list-jobs-limit-first-novalue", "steps": ["list jobs job=BackupCatalog limit limit=1"]}
+{"id": "c044-list-jobs-keyword-upper", "steps": ["list jobs LIMIT=1 ORDER=asc"]}

@@ -192,7 +192,7 @@ pub fn select_storage_resource(ua: &mut Ua, env: &Env, autochanger_only: bool) -
 
 /// C++ FindArgWithValue() + atoi().
 fn arg_number(args: &[Argument], key: &str) -> Option<i16> {
-    args.iter().find(|a| a.key.eq_ignore_ascii_case(key) && a.value.is_some())
+    args.iter().find(|a| a.key.eq_ignore_ascii_case(key))
         .and_then(|a| a.value.as_deref()).map(|v| str_to_int64(v) as i32 as i16)
 }
 
