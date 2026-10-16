@@ -6,6 +6,7 @@
 mod accept;
 mod acl;
 mod audit;
+mod breg;
 mod catalog_worker;
 mod catreq;
 mod command_ast;

@@ -1890,7 +1890,7 @@ Client { Name=fd1; Password=x }
 Pool { Name=Full; Pool Type=Backup }
 Storage { Name=File; Address=localhost; Password=x; Device=FileStorage; Media Type=File }
 Job { Name=job1; Type=Backup; Client=fd1 }
-Job { Name=RestoreFiles; Type=Restore; Client=fd1 }
+Job { Name=RestoreFiles; Type=Restore; Client=fd1; Pool=Full; Storage=File }
 Console { Name=limited; Password=pw; CommandACL=*all*; CatalogACL=*all*; ClientACL=*all*; PoolACL=*all*; JobACL=job1; WhereACL=/tmp/ok }
 "#;
 
@@ -2155,7 +2155,7 @@ Console { Name=limited; Password=pw; CommandACL=*all*; CatalogACL=*all*; ClientA
 
     #[test]
     fn no_restore_job_resource() {
-        let config = CONFIG.replace("Job { Name=RestoreFiles; Type=Restore; Client=fd1 }", "");
+        let config = CONFIG.replace("Job { Name=RestoreFiles; Type=Restore; Client=fd1; Pool=Full; Storage=File }", "");
         let (ctx, _) = context_with("*UserAgent*", &config);
         let result = run(&ctx, "restore help");
         assert!(result.error_message.starts_with("No Restore Job Resource found in "));
@@ -2218,7 +2218,7 @@ Console { Name=limited; Password=pw; CommandACL=*all*; CatalogACL=*all*; ClientA
 
     #[test]
     fn several_restore_jobs_need_a_selection() {
-        let config = format!("{CONFIG}\nJob {{ Name=Other; Type=Restore; Client=fd1 }}");
+        let config = format!("{CONFIG}\nJob {{ Name=Other; Type=Restore; Client=fd1; Pool=Full; Storage=File }}");
         let (ctx, _) = context_with("*UserAgent*", &config);
         let bootstrap = bootstrap_file("several_restore_jobs");
         let (result, transcript) = dialog(&ctx,

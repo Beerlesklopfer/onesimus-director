@@ -1,0 +1,116 @@
+{"id": "c043-restore-jobid-no", "steps": ["run job=RestoreFiles", "no", "."], "normalize": ["When: +[0-9: -]+"]}
+{"id": "c043-restore-jobid-cancel", "steps": ["run job=RestoreFiles", "."], "normalize": ["When: +[0-9: -]+"]}
+{"id": "c043-restore-jobid-unknown", "steps": ["run job=RestoreFiles", "999999"], "normalize": ["When: +[0-9: -]+"]}
+{"id": "c043-restore-jobid-ok-no", "steps": ["run job=RestoreFiles", "1", "no"], "normalize": ["When: +[0-9: -]+"]}
+{"id": "c043-restore-jid-arg-no", "steps": ["run job=RestoreFiles jobid=1", "no"], "normalize": ["When: +[0-9: -]+"]}
+{"id": "c043-restore-jid-arg-unknown", "steps": ["run job=RestoreFiles jobid=999999"], "normalize": ["When: +[0-9: -]+"]}
+{"id": "c043-restore-jid-list-unknown", "steps": ["run job=RestoreFiles jobid=1,999999"], "normalize": ["When: +[0-9: -]+"]}
+{"id": "c043-restore-bootstrap-no", "steps": ["run job=RestoreFiles bootstrap=/nonexistent/c043.bsr", "no"], "normalize": ["When: +[0-9: -]+"]}
+{"id": "c043-restore-bootstrap-client-no", "steps": ["run job=RestoreFiles bootstrap=/nonexistent/c043.bsr client=bareos-fd where=/tmp/w replace=never", "no"], "normalize": ["When: +[0-9: -]+"]}
+{"id": "c043-restore-bootstrap-regexwhere-no", "steps": ["run job=RestoreFiles bootstrap=/nonexistent/c043.bsr regexwhere=!a!b!", "no"], "normalize": ["When: +[0-9: -]+"]}
+{"id": "c043-restore-jid-regexwhere-no", "steps": ["run job=RestoreFiles jobid=1 regexwhere=!a!b! pluginoptions=x:y", "no"], "normalize": ["When: +[0-9: -]+"]}
+{"id": "c043-restore-replace-bogus", "steps": ["run job=RestoreFiles jobid=1 replace=bogus"], "normalize": ["When: +[0-9: -]+"]}
+{"id": "c043-restore-level-bogus", "steps": ["run job=RestoreFiles jobid=1 level=bogus"], "normalize": ["When: +[0-9: -]+"]}
+{"id": "c043-restore-level-full-no", "steps": ["run job=RestoreFiles jobid=1 level=full", "no"], "normalize": ["When: +[0-9: -]+"]}
+{"id": "c043-restore-when-bogus-no", "steps": ["run job=RestoreFiles jobid=1 when=bogus", "no"], "normalize": ["When: +[0-9: -]+"]}
+{"id": "c043-restore-when-valid-no", "steps": ["run job=RestoreFiles jobid=1 when=\"2030-01-02 03:04:05\"", "no"], "normalize": ["When: +[0-9: -]+"]}
+{"id": "c043-restore-priority-zero-no", "steps": ["run job=RestoreFiles jobid=1 priority=0", "no"], "normalize": ["When: +[0-9: -]+"]}
+{"id": "c043-restore-restoreclient-nosuch-no", "steps": ["run job=RestoreFiles jobid=1 restoreclient=nosuch", "no"], "normalize": ["When: +[0-9: -]+"]}
+{"id": "c043-restore-client-nosuch", "steps": ["run job=RestoreFiles jobid=1 client=nosuch"], "normalize": ["When: +[0-9: -]+"]}
+{"id": "c043-restore-backupclient-no", "steps": ["run job=RestoreFiles jobid=1 backupclient=bareos-fd", "no"], "normalize": ["When: +[0-9: -]+"]}
+{"id": "c043-restore-bogus-keyword", "steps": ["run job=RestoreFiles bogus=1"], "normalize": ["When: +[0-9: -]+"]}
+{"id": "c043-restore-where-twice", "steps": ["run job=RestoreFiles where=/a where=/b"], "normalize": ["When: +[0-9: -]+"]}
+{"id": "c043-restore-regexwhere-where", "steps": ["run job=RestoreFiles regexwhere=!a!b! where=/b"], "normalize": ["When: +[0-9: -]+"]}
+{"id": "c043-restore-catalog-nosuch", "steps": ["run job=RestoreFiles catalog=nosuch"], "normalize": ["When: +[0-9: -]+"]}
+{"id": "c043-restore-catalog-no", "steps": ["run job=RestoreFiles jobid=1 catalog=MyCatalog", "no"], "normalize": ["When: +[0-9: -]+"]}
+{"id": "c043-restore-comment-illegal", "steps": ["run job=RestoreFiles comment=\"a'b\""], "normalize": ["When: +[0-9: -]+"]}
+{"id": "c043-restore-value-missing", "steps": ["run job=RestoreFiles where"], "normalize": ["When: +[0-9: -]+"]}
+{"id": "c043-restore-storage-nosuch-no", "steps": ["run job=RestoreFiles jobid=1 storage=nosuch", "no"], "normalize": ["When: +[0-9: -]+"]}
+{"id": "c043-restore-pool-nosuch-cancel", "steps": ["run job=RestoreFiles jobid=1 pool=nosuch", "."], "normalize": ["When: +[0-9: -]+"]}
+{"id": "c043-restore-fileset-nosuch-cancel", "steps": ["run job=RestoreFiles jobid=1 fileset=nosuch", "."], "normalize": ["When: +[0-9: -]+"]}
+{"id": "c043-restore-spooldata-bogus", "steps": ["run job=RestoreFiles spooldata=maybe"], "normalize": ["When: +[0-9: -]+"]}
+{"id": "c043-restore-accurate-no", "steps": ["run job=RestoreFiles jobid=1 accurate=yes spooldata=no ignoreduplicatecheck=yes files=5 cloned=yes comment=hello", "no"], "normalize": ["When: +[0-9: -]+"]}
+{"id": "c043-restore-mod-cancel", "steps": ["run job=RestoreFiles jobid=1", "mod", "."], "normalize": ["When: +[0-9: -]+"]}
+{"id": "c043-restore-mod-level-no", "steps": ["run job=RestoreFiles jobid=1", "mod", "1", "no"], "normalize": ["When: +[0-9: -]+"]}
+{"id": "c043-restore-mod-where-no", "steps": ["run job=RestoreFiles jobid=1", "mod", "10", "/tmp/new", "no"], "normalize": ["When: +[0-9: -]+"]}
+{"id": "c043-restore-mod-where-slash-no", "steps": ["run job=RestoreFiles jobid=1", "mod", "10", "/", "no"], "normalize": ["When: +[0-9: -]+"]}
+{"id": "c043-restore-mod-replace-no", "steps": ["run job=RestoreFiles jobid=1", "mod", "12", "3", "no"], "normalize": ["When: +[0-9: -]+"]}
+{"id": "c043-restore-mod-jobid-no", "steps": ["run job=RestoreFiles jobid=1", "mod", "13", "1", "no"], "normalize": ["When: +[0-9: -]+"]}
+{"id": "c043-restore-mod-bootstrap-no", "steps": ["run job=RestoreFiles jobid=1", "mod", "9", "/nonexistent/c043.bsr", "no"], "normalize": ["When: +[0-9: -]+"]}
+{"id": "c043-restore-mod-bootstrap-empty-no", "steps": ["run job=RestoreFiles jobid=1", "mod", "9", "", "no"], "normalize": ["When: +[0-9: -]+"]}
+{"id": "c043-restore-mod-reloc-no", "steps": ["run job=RestoreFiles jobid=1", "mod", "11", "1", "/tmp", "2", "/new", "3", ".rst", "5", "/tmp/a/b", ".", "6", "no"], "normalize": ["When: +[0-9: -]+"]}
+{"id": "c043-restore-mod-reloc-regex-no", "steps": ["run job=RestoreFiles jobid=1", "mod", "11", "4", "!x!y!", "5", "/x/z", ".", "6", "no"], "normalize": ["When: +[0-9: -]+"]}
+{"id": "c043-restore-mod-reloc-badregex-no", "steps": ["run job=RestoreFiles jobid=1", "mod", "11", "4", "bad", "5", "6", "no"], "normalize": ["When: +[0-9: -]+"]}
+{"id": "c043-restore-mod-reloc-cancel-no", "steps": ["run job=RestoreFiles jobid=1", "mod", "11", ".", "no"], "normalize": ["When: +[0-9: -]+"]}
+{"id": "c043-restore-mod-client-no", "steps": ["run job=RestoreFiles jobid=1", "mod", "5", "no"], "normalize": ["When: +[0-9: -]+"]}
+{"id": "c043-restore-mod-format-no", "steps": ["run job=RestoreFiles jobid=1", "mod", "6", "Dump", "no"], "normalize": ["When: +[0-9: -]+"]}
+{"id": "c043-restore-mod-plugin-no", "steps": ["run job=RestoreFiles jobid=1", "mod", "14", "p:o", "no"], "normalize": ["When: +[0-9: -]+"]}
+{"id": "c043-restore-mod-job-no", "steps": ["run job=RestoreFiles jobid=1", "mod", "3", ".", "no"], "normalize": ["When: +[0-9: -]+"]}
+{"id": "c043-restore-mod-storage-no", "steps": ["run job=RestoreFiles jobid=1", "mod", "2", "no"], "normalize": ["When: +[0-9: -]+"]}
+{"id": "c043-restore-mod-fileset-cancel-no", "steps": ["run job=RestoreFiles jobid=1", "mod", "4", ".", "no"], "normalize": ["When: +[0-9: -]+"]}
+{"id": "c043-restore-mod-priority-no", "steps": ["run job=RestoreFiles jobid=1", "mod", "8", "0", "mod", "8", "3", "no"], "normalize": ["When: +[0-9: -]+"]}
+{"id": "c043-restore-dotmod-no", "steps": ["run job=RestoreFiles jobid=1", ".mod where=/x replace=ifolder", "no"], "normalize": ["When: +[0-9: -]+"]}
+{"id": "c043-restore-dotmod-jobid-no", "steps": ["run job=RestoreFiles jobid=1", ".mod jobid=2", "no"], "normalize": ["When: +[0-9: -]+"]}
+{"id": "c043-restore-api1-jid-no", "steps": ["run job=RestoreFiles jobid=1", "no"], "setup": [".api 1"], "normalize": ["When: +[0-9: -]+"]}
+{"id": "c043-restore-api1-bootstrap-no", "steps": ["run job=RestoreFiles bootstrap=/nonexistent/c043.bsr", "no"], "setup": [".api 1"], "normalize": ["When: +[0-9: -]+"]}
+{"id": "c043-restore-api1-bootstrap-regex-no", "steps": ["run job=RestoreFiles bootstrap=/nonexistent/c043.bsr regexwhere=!a!b!", "no"], "setup": [".api 1"], "normalize": ["When: +[0-9: -]+"]}
+{"id": "c043-restore-api1-prompt-cancel", "steps": ["run job=RestoreFiles", "."], "setup": [".api 1"], "normalize": ["When: +[0-9: -]+"]}
+{"id": "c043-restore-api2-level-bogus", "steps": ["run job=RestoreFiles level=bogus"], "setup": [".api 2"], "normalize": ["When: +[0-9: -]+"]}
+{"id": "c043-restore-api2-jid-unknown", "steps": ["run job=RestoreFiles jobid=999999"], "setup": [".api 2"], "normalize": ["When: +[0-9: -]+"]}
+{"id": "c043-restore-regexjob-no", "steps": ["run job=parity-restore-regex", "no"], "normalize": ["When: +[0-9: -]+"]}
+{"id": "c043-restore-regexjob-where-no", "steps": ["run job=parity-restore-regex where=/w", "no"], "normalize": ["When: +[0-9: -]+"]}
+{"id": "c043-restore-regexjob-mod-jobid-no", "steps": ["run job=parity-restore-regex", "mod", "13", "no"], "normalize": ["When: +[0-9: -]+"]}
+{"id": "c043-restore-regexjob-api1-no", "steps": ["run job=parity-restore-regex", "no"], "setup": [".api 1"], "normalize": ["When: +[0-9: -]+"]}
+{"id": "c043-admin-no", "steps": ["run job=parity-admin", "no"], "normalize": ["When: +[0-9: -]+"]}
+{"id": "c043-admin-api1-no", "steps": ["run job=parity-admin", "no"], "setup": [".api 1"], "normalize": ["When: +[0-9: -]+"]}
+{"id": "c043-admin-mod-cancel", "steps": ["run job=parity-admin", "mod", "."], "normalize": ["When: +[0-9: -]+"]}
+{"id": "c043-admin-mod-level-no", "steps": ["run job=parity-admin", "mod", "1", "no"], "normalize": ["When: +[0-9: -]+"]}
+{"id": "c043-verify-no", "steps": ["run job=parity-verify", "no"], "normalize": ["When: +[0-9: -]+"]}
+{"id": "c043-verify-api1-no", "steps": ["run job=parity-verify", "no"], "setup": [".api 1"], "normalize": ["When: +[0-9: -]+"]}
+{"id": "c043-verify-mod-cancel", "steps": ["run job=parity-verify", "mod", "."], "normalize": ["When: +[0-9: -]+"]}
+{"id": "c043-verify-mod-level-no", "steps": ["run job=parity-verify", "mod", "1", "4", "no"], "normalize": ["When: +[0-9: -]+"]}
+{"id": "c043-verify-mod-verifyjob-no", "steps": ["run job=parity-verify", "mod", "10", "1", "no"], "normalize": ["When: +[0-9: -]+"]}
+{"id": "c043-verify-mod-pool-no", "steps": ["run job=parity-verify", "mod", "9", "1", "no"], "normalize": ["When: +[0-9: -]+"]}
+{"id": "c043-verify-jobid-no", "steps": ["run job=parity-verify jobid=1 verifylist=pins5", "no"], "normalize": ["When: +[0-9: -]+"]}
+{"id": "c043-verify-verifyjob-nosuch-cancel", "steps": ["run job=parity-verify verifyjob=nosuch", ".", "no"], "normalize": ["When: +[0-9: -]+"]}
+{"id": "c043-verify-level-catalog-no", "steps": ["run job=parity-verify level=catalog", "no"], "normalize": ["When: +[0-9: -]+"]}
+{"id": "c043-copy-no", "steps": ["run job=parity-copy", "no"], "normalize": ["When: +[0-9: -]+"]}
+{"id": "c043-copy-api1-no", "steps": ["run job=parity-copy", "no"], "setup": [".api 1"], "normalize": ["When: +[0-9: -]+"]}
+{"id": "c043-copy-mod-cancel", "steps": ["run job=parity-copy", "mod", "."], "normalize": ["When: +[0-9: -]+"]}
+{"id": "c043-copy-jobid-nextpool-no", "steps": ["run job=parity-copy jobid=1 nextpool=Scratch", "no"], "normalize": ["When: +[0-9: -]+"]}
+{"id": "c043-copy-mod-pool-no", "steps": ["run job=parity-copy", "mod", "9", "1", "no"], "normalize": ["When: +[0-9: -]+"]}
+{"id": "c043-migrate-no", "steps": ["run job=parity-migrate", "no"], "normalize": ["When: +[0-9: -]+"]}
+{"id": "c043-migrate-api1-no", "steps": ["run job=parity-migrate", "no"], "setup": [".api 1"], "normalize": ["When: +[0-9: -]+"]}
+{"id": "c043-migrate-mod-nextpool-no", "steps": ["run job=parity-migrate", "mod", "10", "4", "no"], "normalize": ["When: +[0-9: -]+"]}
+{"id": "c043-migrate-migrationjob-nosuch-cancel", "steps": ["run job=parity-migrate migrationjob=nosuch", ".", "no"], "normalize": ["When: +[0-9: -]+"]}
+{"id": "c043-consolidate-no", "steps": ["run job=parity-consolidate", "no"], "normalize": ["When: +[0-9: -]+"]}
+{"id": "c043-consolidate-api1-no", "steps": ["run job=parity-consolidate", "no"], "setup": [".api 1"], "normalize": ["When: +[0-9: -]+"]}
+{"id": "c043-consolidate-mod-cancel", "steps": ["run job=parity-consolidate", "mod", "."], "normalize": ["When: +[0-9: -]+"]}
+{"id": "c043-backup-vfull-nextpool-no", "steps": ["run job=backup-bareos-fd level=VirtualFull nextpool=Scratch", "no"], "normalize": ["When: +[0-9: -]+"]}
+{"id": "c043-backup-vfull-nextpool-api1-no", "steps": ["run job=backup-bareos-fd level=VirtualFull nextpool=Scratch", "no"], "setup": [".api 1"], "normalize": ["When: +[0-9: -]+"]}
+{"id": "c043-backup-vfull-mod-cancel", "steps": ["run job=backup-bareos-fd level=VirtualFull nextpool=Scratch", "mod", "."], "normalize": ["When: +[0-9: -]+"]}
+{"id": "c043-backup-consolidatejob-notvf", "steps": ["run job=backup-bareos-fd consolidatejob=parity-consolidate"], "normalize": ["When: +[0-9: -]+"]}
+{"id": "c043-backup-consolidatejob-wrongtype", "steps": ["run job=backup-bareos-fd level=VirtualFull nextpool=Scratch consolidatejob=parity-admin"], "normalize": ["When: +[0-9: -]+"]}
+{"id": "c043-backup-since-bogus", "steps": ["run job=backup-bareos-fd since=bogus"], "normalize": ["When: +[0-9: -]+"]}
+{"id": "c043-backup-pluginoptions-no", "steps": ["run job=backup-bareos-fd pluginoptions=a:b", "no"], "normalize": ["When: +[0-9: -]+"]}
+{"id": "c043-backup-pool-cmdline-mod-level-no", "steps": ["run job=backup-bareos-fd pool=Full", "mod", "1", "3", "no"], "normalize": ["When: +[0-9: -]+"]}
+{"id": "c043-backup-mod-level-full-priority-no", "steps": ["run job=backup-bareos-fd", "mod", "1", "1", "mod", "8", "5", "no"], "normalize": ["When: +[0-9: -]+"]}
+{"id": "c043-backup-when-valid-no", "steps": ["run job=backup-bareos-fd when=\"2030-01-02 03:04:05\"", "no"], "normalize": ["When: +[0-9: -]+"]}
+{"id": "c043-backup-mod-when-no", "steps": ["run job=backup-bareos-fd", "mod", "7", "2030-01-02 03:04:05", "no"], "normalize": ["When: +[0-9: -]+"]}
+{"id": "c043-backup-mod-job-restore-no", "steps": ["run job=backup-bareos-fd", "mod", "3", "6", "no", "."], "normalize": ["When: +[0-9: -]+"]}
+{"id": "c043-backup-storage-nosuch-no", "steps": ["run job=backup-bareos-fd storage=nosuch", "no"], "normalize": ["When: +[0-9: -]+"]}
+{"id": "c043-backup-client-nosuch-no", "steps": ["run job=backup-bareos-fd client=nosuch", "no"], "normalize": ["When: +[0-9: -]+"]}
+{"id": "c043-backup-job-twice", "steps": ["run job=backup-bareos-fd job=RestoreFiles"], "normalize": ["When: +[0-9: -]+"]}
+{"id": "c043-backup-yes-level-bogus", "steps": ["run job=backup-bareos-fd level=bogus yes"], "normalize": ["When: +[0-9: -]+"]}
+{"id": "c043-backup-vfull-nonextpool", "steps": ["run job=backup-bareos-fd level=VirtualFull", "no"], "normalize": ["When: +[0-9: -]+"]}
+{"id": "c043-when-exact-no", "steps": ["run job=backup-bareos-fd when=\"2030-01-02 03:04:05\"", "no"], "normalize": []}
+{"id": "c043-when-space-garbage-no", "steps": ["run job=backup-bareos-fd when=\"2030-1-2 3:4:5 x\"", "no"], "normalize": []}
+{"id": "c043-when-zero-padded-no", "steps": ["run job=backup-bareos-fd when=\"2030-001-02 03:04:056\"", "no"], "normalize": []}
+{"id": "c043-when-garbage-no", "steps": ["run job=backup-bareos-fd when=\"2030-01-02 03:04:05x\"", "no"], "normalize": ["When: +[0-9: -]+"]}
+{"id": "c043-when-feb29-no", "steps": ["run job=backup-bareos-fd when=\"2023-02-29 00:00:00\"", "no"], "normalize": ["When: +[0-9: -]+"]}
+{"id": "c043-when-leap-no", "steps": ["run job=backup-bareos-fd when=\"2024-02-29 00:00:00\"", "no"], "normalize": []}
+{"id": "c043-when-short-no", "steps": ["run job=backup-bareos-fd when=\"2030-01-02 03:04\"", "no"], "normalize": ["When: +[0-9: -]+"]}
+{"id": "c043-when-sec60-no", "steps": ["run job=backup-bareos-fd when=\"2030-01-02 23:04:60\"", "no"], "normalize": ["When: +[0-9: -]+"]}
+{"id": "c043-when-leading-space-no", "steps": ["run job=backup-bareos-fd when=\" 2030-01-02 03:04:05\"", "no"], "normalize": ["When: +[0-9: -]+"]}
+{"id": "c043-since-valid-no", "steps": ["run job=backup-bareos-fd since=\"2030-01-02 03:04:05\"", "no"], "normalize": ["When: +[0-9: -]+"]}
+{"id": "c043-mod-when-exact-no", "steps": ["run job=parity-admin", "mod", "7", "2030-01-02 03:04:05", "no"], "normalize": ["When: +20[0-2][0-9]-[0-9: -]+"]}

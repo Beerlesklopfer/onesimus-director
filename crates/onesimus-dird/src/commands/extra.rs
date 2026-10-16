@@ -1527,7 +1527,7 @@ mod rerun_tests {
             "Director { Name = dir }\nClient { Name = fd; Address = localhost; Password = x }\n\
              Storage { Name = File; Address = localhost; Password = x; Device = d; Media Type = File }\n\
              FileSet { Name = fs; Include { File = /etc } }\nPool { Name = Full; Pool Type = Backup }\n\
-             Pool { Name = Copy; Pool Type = Backup }\n\
+             Pool { Name = Copy; Pool Type = Backup; Storage = File }\n\
              Job { Name = b1; Type = Backup; Level = Incremental; Client = fd; FileSet = fs; Storage = File; Pool = Full; Messages = m }\n\
              Job { Name = c1; Type = Copy; Client = fd; FileSet = fs; Storage = File; Pool = Full; Messages = m }"
         ).unwrap();
