@@ -374,21 +374,7 @@ fn list_scheduled_jobs(ua: &mut Ua, ast: &CommandAst, ctx: &ExecContext) {
 
 /// Local time of a catalog timestamp ("YYYY-MM-DD HH:MM:SS"), C++ StrToUtime.
 fn db_time(s: Option<&str>) -> i64 {
-    let Some(s) = s else { return 0 };
-    let parts: Vec<i32> = s.split(|c: char| !c.is_ascii_digit()).filter(|p| !p.is_empty())
-        .map(|p| p.parse().unwrap_or(0)).collect();
-    if parts.len() < 6 {
-        return 0;
-    }
-    let mut tm: libc::tm = unsafe { std::mem::zeroed() };
-    tm.tm_year = parts[0] - 1900;
-    tm.tm_mon = parts[1] - 1;
-    tm.tm_mday = parts[2];
-    tm.tm_hour = parts[3];
-    tm.tm_min = parts[4];
-    tm.tm_sec = parts[5];
-    tm.tm_isdst = -1;
-    unsafe { libc::mktime(&mut tm) as i64 }
+    crate::btime::str_to_utime_opt(s)
 }
 
 /// Volume column of a scheduled backup: C++ PrtRuntime() →

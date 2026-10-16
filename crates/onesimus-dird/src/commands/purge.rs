@@ -35,25 +35,7 @@ fn bstrutime(t: i64) -> String {
     crate::localtime::strftime("%Y-%m-%d %H:%M:%S", t as libc::time_t)
 }
 
-/// C++ StrToUtime(): "YYYY-MM-DD HH:MM:SS" in local time, 0 when empty or
-/// not parseable.
-fn str_to_utime(text: &str) -> i64 {
-    let numbers: Vec<i32> = text.split(|c: char| !c.is_ascii_digit()).filter(|p| !p.is_empty())
-        .take(6).filter_map(|p| p.parse().ok()).collect();
-    if numbers.len() < 6 {
-        return 0;
-    }
-    let mut tm: libc::tm = unsafe { std::mem::zeroed() };
-    tm.tm_year = numbers[0] - 1900;
-    tm.tm_mon = numbers[1] - 1;
-    tm.tm_mday = numbers[2];
-    tm.tm_hour = numbers[3];
-    tm.tm_min = numbers[4];
-    tm.tm_sec = numbers[5];
-    tm.tm_isdst = -1;
-    let t = unsafe { libc::mktime(&mut tm) };
-    if t < 0 { 0 } else { t as i64 }
-}
+use crate::btime::str_to_utime;
 
 /// lib/edit.cc edit_uint64_with_commas().
 fn with_commas(v: u64) -> String {

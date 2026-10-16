@@ -78,6 +78,9 @@ pub(crate) struct Launch {
     pub replace: Option<String>,
     /// The bootstrap file written for this restore.
     pub bootstrap_path: Option<String>,
+    /// The Restore Job resource and the storage of the run (C-058).
+    pub job: Option<String>,
+    pub storage: Option<String>,
 }
 
 pub fn cmd_restore(ast: &CommandAst, ctx: &ExecContext) -> CommandResult {
@@ -363,6 +366,8 @@ pub(crate) fn restore_with(ast: &CommandAst, ctx: &ExecContext,
             where_path: value("where"),
             replace: value("replace"),
             bootstrap_path: value("bootstrap"),
+            job: value("job"),
+            storage: value("storage"),
         })
     });
     ua.finish(true)
@@ -1611,151 +1616,69 @@ fn build_where(strip_prefix: Option<&str>, add_prefix: Option<&str>, add_suffix:
     parts.join(",")
 }
 
-/// One directive of the sscanf formats used by the date parsers.
-#[derive(Clone, Copy)]
-enum Scan {
-    /// %u (stored in the next field)
-    U,
-    /// literal character
-    Lit(u8),
-    /// white space: any amount, also none
-    Ws,
-    /// %15s (or %s): trailing garbage
-    S,
-}
-
-/// glibc sscanf for the directives above. `fields` receives the %u values
-/// in order, `garbage` the %s value; both keep their previous content where
-/// nothing is converted (as the C++ variables do). Returns the number of
-/// conversions, -1 for an input failure before the first one.
-fn sscanf(input: &str, format: &[Scan], fields: &mut [i64; 6], garbage: &mut String) -> i32 {
-    let b = input.as_bytes();
-    let mut pos = 0;
-    let mut count = 0;
-    let mut field = 0;
-    let input_failure = |count: i32| if count == 0 { -1 } else { count };
-    for directive in format {
-        match *directive {
-            Scan::Ws => {
-                while b.get(pos).is_some_and(u8::is_ascii_whitespace) {
-                    pos += 1;
-                }
-            }
-            Scan::Lit(c) => match b.get(pos) {
-                None => return input_failure(count),
-                Some(&x) if x == c => pos += 1,
-                Some(_) => return count,
-            },
-            Scan::U => {
-                while b.get(pos).is_some_and(u8::is_ascii_whitespace) {
-                    pos += 1;
-                }
-                if pos >= b.len() {
-                    return input_failure(count);
-                }
-                let start = pos;
-                if matches!(b[pos], b'+' | b'-') {
-                    pos += 1;
-                }
-                let digits = pos;
-                while b.get(pos).is_some_and(u8::is_ascii_digit) {
-                    pos += 1;
-                }
-                if pos == digits {
-                    return count;
-                }
-                // %u into an int: the unsigned value wraps to 32 bits.
-                fields[field] = i64::from(str_to_int64(&input[start..pos]) as u32 as i32);
-                field += 1;
-                count += 1;
-            }
-            Scan::S => {
-                while b.get(pos).is_some_and(u8::is_ascii_whitespace) {
-                    pos += 1;
-                }
-                if pos >= b.len() {
-                    return input_failure(count);
-                }
-                let start = pos;
-                while pos < b.len() && pos - start < 15 && !b[pos].is_ascii_whitespace() {
-                    pos += 1;
-                }
-                *garbage = String::from_utf8_lossy(&b[start..pos]).into_owned();
-                count += 1;
+/// CompensateShortDate (ua_restore.cc:913): `sscanf` is Bareos' bsscanf,
+/// so a missing trailing field still counts (`%15s` converts nothing at the
+/// end) and every attempt leaves its converted fields in the shared `tm`
+/// for the next one. The first format whose count matches decides; its
+/// trailing garbage must be empty. The fields are printed by strftime()
+/// without normalisation. Verified against the installed libbareos bsscanf
+/// (compatibility log C-059).
+fn compensate_short_date(cmd: &str) -> String {
+    const FORMATS: [(&str, i32); 6] = [
+        ("%u-%u-%u %u:%u:%u%15s", 7),
+        ("%u-%u-%u %u:%u%15s", 6),
+        ("%u-%u-%u %u%15s", 5),
+        ("%u-%u-%u%15s", 4),
+        ("%u-%u%15s", 3),
+        ("%u%s", 2),
+    ];
+    let mut fields = [0i32; 6];
+    let mut garbage = Vec::new();
+    let mut matched = false;
+    for (format, expected) in FORMATS {
+        let (count, values) = crate::scan::bsscanf(cmd.as_bytes(), format);
+        for (i, value) in values.into_iter().enumerate() {
+            match value {
+                crate::scan::Scanned::U(v) => fields[i] = v as u32 as i32,
+                crate::scan::Scanned::S(s) => garbage = s,
+                crate::scan::Scanned::D(_) => {}
             }
         }
+        if count == expected {
+            matched = true;
+            break;
+        }
     }
-    count
-}
-
-use Scan::{Lit, Ws, S, U};
-const FULL_DATE: &[Scan] = &[U, Lit(b'-'), U, Lit(b'-'), U, Ws, U, Lit(b':'), U, Lit(b':'), U, S];
-
-/// CompensateShortDate (ua_restore.cc:913) as the reference binary
-/// (25.1.2~pre43) behaves: four formats, each counted without the trailing
-/// garbage conversion. The 18be77e6 source (unchanged since fc2c79b6) adds
-/// year-month and year-only formats and counts the garbage conversion too,
-/// which (with its StrToUtime) would reject every date; the binary
-/// measurably accepts `2020-01-01`, so the observed behaviour is modelled.
-fn compensate_short_date(cmd: &str) -> String {
-    let mut tm = [0i64; 6];
-    let mut garbage = String::new();
-    let formats: [(&[Scan], i32); 4] = [
-        (FULL_DATE, 6),
-        (&[U, Lit(b'-'), U, Lit(b'-'), U, Ws, U, Lit(b':'), U, S], 5),
-        (&[U, Lit(b'-'), U, Lit(b'-'), U, Ws, U, S], 4),
-        (&[U, Lit(b'-'), U, Lit(b'-'), U, S], 3),
-    ];
-    let matched = formats.iter().any(|(format, n)| sscanf(cmd, format, &mut tm, &mut garbage) == *n);
     if !matched || !garbage.is_empty() {
         return cmd.to_string();
     }
-    let [mut year, mut mon, mut mday, hour, min, sec] = tm;
+    let [year, mut mon, mut mday, hour, min, sec] = fields;
     if mon == 0 {
         mon = 1;
     }
     if mday == 0 {
         mday = 1;
     }
-    if year >= 1900 {
-        year -= 1900;
-    } else {
+    if year < 1900 {
         return cmd.to_string();
     }
     if mon > 0 {
         mon -= 1;
     }
-    format!("{}-{:02}-{:02} {:02}:{:02}:{:02}", year + 1900, mon + 1, mday, hour, min, sec)
+    let mut tm: libc::tm = unsafe { std::mem::zeroed() };
+    (tm.tm_year, tm.tm_mon, tm.tm_mday, tm.tm_hour, tm.tm_min, tm.tm_sec) = (year - 1900, mon, mday, hour, min, sec);
+    crate::btime::strftime_tm("%Y-%m-%d %H:%M:%S", &tm)
 }
 
-/// StrToUtime (lib/btime.cc:161) of the reference binary: six fields, no
-/// trailing garbage, DateIsValid. Returns 0 for a rejected date, otherwise
-/// the local time (only the distinction matters here).
-fn str_to_utime(s: &str) -> i64 {
-    if s.is_empty() {
-        return 0;
-    }
-    let mut tm = [0i64; 6];
-    let mut garbage = String::new();
-    if sscanf(s, FULL_DATE, &mut tm, &mut garbage) != 6 || !garbage.is_empty() {
-        return 0;
-    }
-    let [year, mon, mday, hour, min, sec] = tm;
-    // DateIsValid (lib/btime.cc:128)
-    let valid_time = year > 1900 && (0..=23).contains(&hour) && (0..=59).contains(&min) && (0..=59).contains(&sec);
-    let date = u32::try_from(mon).ok().zip(u32::try_from(mday).ok())
-        .and_then(|(mon, mday)| chrono::NaiveDate::from_ymd_opt(year as i32, mon, mday));
-    match date.and_then(|d| d.and_hms_opt(hour as u32, min as u32, sec as u32)) {
-        Some(datetime) if valid_time => datetime.and_utc().timestamp().max(1),
-        _ => 0,
-    }
-}
+use crate::btime::str_to_utime;
 
-/// Start the restore worker for a complete selection.
-fn start_restore(ctx: &ExecContext, launch: Launch) -> CommandResult {
-    let Launch { restore_jobid, client: client_name, restore_client, where_path, replace, bootstrap_path } = launch;
-    let where_path = where_path.unwrap_or_else(|| "/tmp/bareos-restore".to_string());
-    let replace = replace.unwrap_or_else(|| "always".to_string());
+/// Start a confirmed restore (the `restore` command and `run` of a Restore
+/// job, job.cc RunJob): the Job record (Type 'R', Level 'F', the restore
+/// client), the job queue and the reply "Job queued. JobId=N". The worker
+/// reads the bootstrap the restore wrote, else one generated from the
+/// catalog for `restore_jobid`. Compatibility log C-058.
+pub(crate) fn start_restore(ctx: &ExecContext, launch: Launch) -> CommandResult {
+    let Launch { restore_jobid, client: _, restore_client, where_path, replace, bootstrap_path, job, storage } = launch;
 
     let config = match &ctx.config {
         Some(c) => match c.read() {
@@ -1764,6 +1687,16 @@ fn start_restore(ctx: &ExecContext, launch: Launch) -> CommandResult {
         },
         None => return CommandResult::error("No config loaded\n".to_string()),
     };
+    let job = match job.as_deref().and_then(|name| config.find_job(name))
+        .or_else(|| config.jobs.iter().find(|j| j.job_type == JobType::Restore)) {
+        Some(job) => job.clone(),
+        None => return CommandResult::error("No Restore Job resource found!\n".to_string()),
+    };
+    let job_dirs = crate::commands::defaults::job_directives(&config, &job.name);
+    let job_value = |key: &str| job_dirs.iter().rev().find(|d| d.norm_key() == key).and_then(|d| d.first())
+        .map(str::to_string);
+    let where_path = where_path.or_else(|| job_value("where")).unwrap_or_else(|| "/tmp/bareos-restores".to_string());
+    let replace = replace.or_else(|| job_value("replace")).unwrap_or_else(|| "always".to_string()).to_ascii_lowercase();
 
     let client = match config.find_client(&restore_client) {
         Some(c) => c.clone(),
@@ -1779,21 +1712,35 @@ fn start_restore(ctx: &ExecContext, launch: Launch) -> CommandResult {
         )),
     };
 
-    // Find a storage resource
-    let storage = match config.storages.first() {
+    // The read storage of the run, else the Job's, else the first one.
+    let storage = match storage.as_deref().and_then(|s| config.find_storage(s))
+        .or_else(|| config.find_storage(job.storage.split(',').next().unwrap_or("").trim()))
+        .or_else(|| config.storages.first()) {
         Some(s) => s.clone(),
         None => return CommandResult::error("No storage configured\n".to_string()),
     };
 
     let dir_name = config.director.name.clone();
-    let job_id = NEXT_RESTORE_ID.fetch_add(1, Ordering::Relaxed);
-    let now = chrono::Local::now();
-    let unique_job = format!("RestoreFiles.{}", now.format("%Y-%m-%d_%H.%M.%S_%f"));
+    drop(config); // Release RwLock before fork
+
+    let now = now_unix();
+    let unique_job = crate::commands::job::unique_job_name(&job.name, now);
+    let job_id = if ctx.catalog.is_some() {
+        match crate::commands::job::create_job_record(ctx, &unique_job, &job.name, 'R', 'F', Some(&client.name), now, "") {
+            Ok(id) => id,
+            Err(e) => {
+                tracing::error!("Failed to create job record: {e}");
+                return CommandResult::error("Job failed.\n".to_string());
+            }
+        }
+    } else {
+        NEXT_RESTORE_ID.fetch_add(1, Ordering::Relaxed)
+    };
 
     let params = JobParams {
         job_id,
         unique_job: unique_job.clone(),
-        job_name: "RestoreFiles".to_string(),
+        job_name: job.name.clone(),
         job_type: WorkerJobType::Restore,
         level: "full".to_string(),
         fd_address: client.address.clone(),
@@ -1805,13 +1752,13 @@ fn start_restore(ctx: &ExecContext, launch: Launch) -> CommandResult {
         sd_device: storage.device.clone(),
         sd_media_type: storage.media_type.clone(),
         director_name: dir_name,
-        pool_name: "Full".to_string(),
+        pool_name: job.pool.clone(),
         fileset_includes: vec![],
         fileset_excludes: vec![],
         since_utime: 0,
         prev_job: String::new(),
-        where_path: Some(where_path.clone()),
-        replace: Some(replace.clone()),
+        where_path: Some(where_path),
+        replace: Some(replace),
         restore_jobid: Some(restore_jobid),
         bootstrap: Some(bootstrap),
         client_name: client.name.clone(),
@@ -1819,51 +1766,18 @@ fn start_restore(ctx: &ExecContext, launch: Launch) -> CommandResult {
     };
     let report = crate::job_messages::JobReport {
         kind: crate::job_messages::ReportKind::Restore, job: unique_job.clone(), client: client.name.clone(),
-        sched_time: now.timestamp(), start_time: now.timestamp(),
+        sched_time: now, start_time: now,
         trigger: crate::job_messages::TRIGGER_USER.to_string(), ..Default::default()
     };
 
-    drop(config); // Release RwLock before fork
-
-    // Post queued status
     if let Some(smgr) = &ctx.session_mgr {
-        smgr.bus().post(BusMessage::JobStatus {
-            job_id, job_name: "RestoreFiles".to_string(),
-            status: "Queued".to_string(), timestamp: now_unix(),
-        });
         for text in [crate::job_messages::version_text(), crate::job_messages::start_restore_text(&unique_job)] {
             crate::console_msg::post_job_message(smgr.bus(), ctx.config.as_ref(), BusMessage::JobMessage {
-                job_id, job_name: "RestoreFiles".to_string(), msg_type: MsgType::Info, text, timestamp: now_unix(),
+                job_id, job_name: job.name.clone(), msg_type: MsgType::Info, text, timestamp: now_unix(),
             });
         }
     }
-
-    // Fork the autonomous restore worker
-    match job_worker::spawn_job_worker(job_id, "RestoreFiles", &params) {
-        Ok(handle) => {
-            tracing::info!("Restore {job_id}: worker pid={}, from backup {restore_jobid}", handle.pid);
-            if let Some(ref mgr) = ctx.job_manager {
-                let mut mgr = mgr.lock().unwrap();
-                mgr.add_job(job_id, "RestoreFiles", handle);
-                mgr.set_job_resources(job_id, &client.name, &storage.name);
-                mgr.set_job_report(job_id, report);
-            }
-        }
-        Err(e) => {
-            tracing::error!("Restore {job_id}: fork failed: {e}");
-            return CommandResult::error(format!("Failed to start restore: {e}\n"));
-        }
-    }
-
-    CommandResult::ok(format!(
-        "Restore job queued. JobId={job_id}\n\
-         Restore from:  Backup JobId={restore_jobid}\n\
-         Client:        {client_name}\n\
-         Storage:       {}\n\
-         Where:         {where_path}\n\
-         Replace:       {replace}\n",
-        storage.name,
-    ))
+    crate::commands::job::queue_job(ctx, &job, params, report, &client.name, &storage.name, now)
 }
 
 fn now_unix() -> i64 {
@@ -2044,7 +1958,10 @@ Console { Name=limited; Password=pw; CommandACL=*all*; CatalogACL=*all*; ClientA
     #[test]
     fn dates() {
         let (ctx, _) = context("*UserAgent*");
-        assert_eq!(run(&ctx, "restore before=2020").error_message, "Improper date format: 2020\n");
+        // bsscanf: a year alone is 2020-01-01 00:00:00 (C-059)
+        assert!(run(&ctx, "restore before=2020").text_output.ends_with(MENU_BATCH));
+        assert_eq!(run(&ctx, "restore before=2020x").error_message, "Improper date format: 2020x\n");
+        assert_eq!(run(&ctx, "restore before=1899-01-01").error_message, "Improper date format: 1899-01-01\n");
         assert_eq!(run(&ctx, "restore before=\"2020-02-30 10:00:00\"").error_message,
             "Improper date format: 2020-02-30 10:00:00\n");
         // Valid dates lead to the selection menu.
@@ -2236,13 +2153,59 @@ Console { Name=limited; Password=pw; CommandACL=*all*; CatalogACL=*all*; ClientA
         let _ = std::fs::remove_file(&bootstrap);
     }
 
+    /// Expected values from CompensateShortDate() compiled against the
+    /// installed libbareos bsscanf (C-059).
+    #[test]
+    fn compensate_short_date_like_bsscanf() {
+        for (input, expected) in [
+            ("2020", "2020-01-01 00:00:00"),
+            ("2020-01", "2020-01-01 00:00:00"),
+            ("2020-1", "2020-01-01 00:00:00"),
+            ("2020-01-01", "2020-01-01 00:00:00"),
+            ("2020-1-2 3", "2020-01-02 03:00:00"),
+            ("2026-10-16 12:34", "2026-10-16 12:34:00"),
+            ("2026-10-16 ::", "2026-10-16 00:00:00"),
+            ("2026--16 12:34:56", "2026-01-16 12:34:56"),
+            ("2026-10- 12:34:56", "2026-10-01 12:34:56"),
+            ("2020-00-00", "2020-01-01 00:00:00"),
+            ("2026-00-01 00:00:00", "2026-01-01 00:00:00"),
+            ("2026-1-2 3:4:5", "2026-01-02 03:04:05"),
+            ("02026-010-016 012:034:056", "2026-10-16 12:34:56"),
+            ("2026-10-16 12:34:56 trailing", "2026-10-16 12:34:56"),
+            ("2026-10-16\t12:34:56", "2026-10-16 12:34:56"),
+            ("2026-10-1612:34:56", "2026-10-1612 00:34:56"),
+            ("2026-4294967297-16 12:34:56", "2026-01-16 12:34:56"),
+            ("2026-10-16 12:34:56123456789012345678", "2026-10-16 12:34:1141961550"),
+            ("18446744073709553642-01-01 00:00:00", "2026-01-01 00:00:00"),
+            ("2026-10-16 12:34:56\0garbage", "2026-10-16 12:34:56"),
+            // unchanged: garbage, a sign, a short year, other separators
+            ("2020x", "2020x"),
+            ("2020-01-01x", "2020-01-01x"),
+            ("2020-01-01 garbage", "2020-01-01 garbage"),
+            ("2026-10-16 12:34:56x", "2026-10-16 12:34:56x"),
+            ("2026-10-16 12:34:56.123", "2026-10-16 12:34:56.123"),
+            ("1899-01-01", "1899-01-01"),
+            ("26-10-16 12:34:56", "26-10-16 12:34:56"),
+            ("-10-16 12:34:56", "-10-16 12:34:56"),
+            ("+2026-10-16 12:34:56", "+2026-10-16 12:34:56"),
+            (" 2026-10-16 12:34:56", " 2026-10-16 12:34:56"),
+            ("2026/10/16 12:34:56", "2026/10/16 12:34:56"),
+            ("2026-10-16T12:34:56", "2026-10-16T12:34:56"),
+            ("4294967297-10-16 12:34:56", "4294967297-10-16 12:34:56"),
+            ("x", "x"),
+            ("", ""),
+            // no range check here (StrToUtime rejects them afterwards)
+            ("2026-13-01 00:00:00", "2026-13-01 00:00:00"),
+            ("2020-13-45 99:99:99", "2020-13-45 99:99:99"),
+            ("2023-02-29 00:00:00", "2023-02-29 00:00:00"),
+        ] {
+            assert_eq!(compensate_short_date(input), expected, "{input:?}");
+        }
+    }
+
     #[test]
     fn helpers() {
         assert_eq!(build_where(Some("/a!"), Some("/p"), Some(".s")), "!/a\\!!!i,!([^/])$!$1.s!,!^!/p!");
-        assert_eq!(compensate_short_date("2020"), "2020");
-        assert_eq!(compensate_short_date("2020-01-01"), "2020-01-01 00:00:00");
-        assert_eq!(compensate_short_date("2020-1-2 3"), "2020-01-02 03:00:00");
-        assert_eq!(compensate_short_date("2020-01-01x"), "2020-01-01x");
         assert!(str_to_utime("2020-01-01 10:00:00") > 0);
         assert_eq!(str_to_utime("2020-01-01 10:00:00x"), 0);
         assert_eq!(str_to_utime("2021-02-29 00:00:00"), 0);

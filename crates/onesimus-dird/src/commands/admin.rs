@@ -1850,8 +1850,13 @@ pub fn cmd_reload(_ast: &CommandAst, _ctx: &ExecContext) -> CommandResult {
     match crate::reload::reload_now() {
         Ok(()) => CommandResult::ok("reloaded\n".to_string())
             .with_json(serde_json::json!({ "reload": { "success": true } })),
-        Err(e) => CommandResult::error(format!("failed to reload\n{e}\n"))
-            .with_json(serde_json::json!({ "reload": { "success": false } })),
+        // ReloadCmd: only the result; the reasons go to the daemon messages
+        Err(_) => {
+            let mut result = CommandResult::ok("failed to reload\n".to_string())
+                .with_json(serde_json::json!({ "reload": { "success": false } }));
+            result.success = false; // ReloadCmd returns false: command failed
+            result
+        }
     }
 }
 

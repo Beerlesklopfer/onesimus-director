@@ -1,0 +1,50 @@
+# C-056 setbandwidth (SetbwlimitCmd). No case reaches a daemon: no running jobs,
+# cancelled dialogs, unknown resources and the NDMP storage only.
+{"id": "c056-all", "steps": ["setbandwidth limit=1 all"]}
+{"id": "c056-state-running", "steps": ["setbandwidth limit=1 state=running"]}
+{"id": "c056-state-bogus", "steps": ["setbandwidth limit=1 state=bogus"]}
+{"id": "c056-jobid", "steps": ["setbandwidth limit=1 jobid=999999"]}
+{"id": "c056-jobid-two", "steps": ["setbandwidth limit=5 jobid=999998 jobid=999999"]}
+{"id": "c056-jobid-zero", "steps": ["setbandwidth limit=1 jobid=0"]}
+{"id": "c056-jobid-text", "steps": ["setbandwidth limit=1 jobid=abc"]}
+{"id": "c056-ujobid", "steps": ["setbandwidth limit=1 ujobid=nosuch.2026-10-16_10.00.00_01"]}
+{"id": "c056-ujobid-novalue", "steps": ["setbandwidth limit=1 ujobid"]}
+{"id": "c056-jobid-then-job", "steps": ["setbandwidth limit=1 jobid=999999 job=nosuch"]}
+{"id": "c056-job-first-cancel", "steps": ["setbandwidth limit=1 job=nosuch jobid=999999", "."]}
+{"id": "c056-job-cancel", "steps": ["setbandwidth limit=1 job=backup-bareos-fd", "."]}
+{"id": "c056-nolimit-all", "steps": ["setbandwidth all", "7"]}
+{"id": "c056-prompt-cancel", "steps": ["setbandwidth", "."]}
+{"id": "c056-prompt-bad-cancel", "steps": ["setbandwidth", "abc", "-3", "."]}
+{"id": "c056-limit-text-cancel", "steps": ["setbandwidth limit=abc", "."]}
+{"id": "c056-limit-negative-cancel", "steps": ["setbandwidth limit=-5", "."]}
+{"id": "c056-limit-novalue-cancel", "steps": ["setbandwidth limit", "."]}
+{"id": "c056-client-missing-cancel", "steps": ["setbandwidth limit=1 client=nosuch", "."]}
+{"id": "c056-fd-missing-cancel", "steps": ["setbandwidth limit=1 fd=nosuch", "."]}
+{"id": "c056-client-novalue-cancel", "steps": ["setbandwidth limit=1 client", "."]}
+{"id": "c056-storage-missing-cancel", "steps": ["setbandwidth limit=1 storage=nosuch", "."]}
+{"id": "c056-storage-novalue-cancel", "steps": ["setbandwidth limit=1 storage", "."]}
+{"id": "c056-storage-ndmp", "steps": ["setbandwidth limit=1 storage=ParityNdmp"]}
+{"id": "c056-all-api1", "steps": ["setbandwidth limit=1 all"], "setup": [".api 1"]}
+{"id": "c056-all-api2", "steps": ["setbandwidth limit=1 all"], "setup": [".api 2"]}
+{"id": "c056-state-running-api1", "steps": ["setbandwidth limit=1 state=running"], "setup": [".api 1"]}
+{"id": "c056-state-running-api2", "steps": ["setbandwidth limit=1 state=running"], "setup": [".api 2"]}
+{"id": "c056-state-bogus-api1", "steps": ["setbandwidth limit=1 state=bogus"], "setup": [".api 1"]}
+{"id": "c056-state-bogus-api2", "steps": ["setbandwidth limit=1 state=bogus"], "setup": [".api 2"]}
+{"id": "c056-jobid-api1", "steps": ["setbandwidth limit=1 jobid=999999"], "setup": [".api 1"]}
+{"id": "c056-jobid-api2", "steps": ["setbandwidth limit=1 jobid=999999"], "setup": [".api 2"]}
+{"id": "c056-jobid-two-api1", "steps": ["setbandwidth limit=5 jobid=999998 jobid=999999"], "setup": [".api 1"]}
+{"id": "c056-jobid-two-api2", "steps": ["setbandwidth limit=5 jobid=999998 jobid=999999"], "setup": [".api 2"]}
+{"id": "c056-ujobid-api1", "steps": ["setbandwidth limit=1 ujobid=nosuch.2026-10-16_10.00.00_01"], "setup": [".api 1"]}
+{"id": "c056-ujobid-api2", "steps": ["setbandwidth limit=1 ujobid=nosuch.2026-10-16_10.00.00_01"], "setup": [".api 2"]}
+{"id": "c056-jobid-then-job-api1", "steps": ["setbandwidth limit=1 jobid=999999 job=nosuch"], "setup": [".api 1"]}
+{"id": "c056-jobid-then-job-api2", "steps": ["setbandwidth limit=1 jobid=999999 job=nosuch"], "setup": [".api 2"]}
+{"id": "c056-job-cancel-api1", "steps": ["setbandwidth limit=1 job=backup-bareos-fd", "."], "setup": [".api 1"]}
+{"id": "c056-job-cancel-api2", "steps": ["setbandwidth limit=1 job=backup-bareos-fd"], "setup": [".api 2"]}
+{"id": "c056-prompt-cancel-api1", "steps": ["setbandwidth", "."], "setup": [".api 1"]}
+{"id": "c056-prompt-cancel-api2", "steps": ["setbandwidth"], "setup": [".api 2"]}
+{"id": "c056-client-missing-cancel-api1", "steps": ["setbandwidth limit=1 client=nosuch", "."], "setup": [".api 1"]}
+{"id": "c056-client-missing-cancel-api2", "steps": ["setbandwidth limit=1 client=nosuch"], "setup": [".api 2"]}
+{"id": "c056-storage-missing-cancel-api1", "steps": ["setbandwidth limit=1 storage=nosuch", "."], "setup": [".api 1"]}
+{"id": "c056-storage-missing-cancel-api2", "steps": ["setbandwidth limit=1 storage=nosuch"], "setup": [".api 2"]}
+{"id": "c056-storage-ndmp-api1", "steps": ["setbandwidth limit=1 storage=ParityNdmp"], "setup": [".api 1"]}
+{"id": "c056-storage-ndmp-api2", "steps": ["setbandwidth limit=1 storage=ParityNdmp"], "setup": [".api 2"]}

@@ -1,0 +1,19 @@
+# C-057: reload. Cases with `config` change files of the running Directors (see parity.py);
+# `log` compares the daemon log only where the original writes no lexer diagnostics (scan_err).
+{"id": "c057-show-all-before", "steps": ["show all"]}
+{"id": "c057-reload-show-all", "steps": ["reload", "show all"]}
+{"id": "c057-show-all-verbose-after", "steps": ["show all verbose"]}
+{"id": "c057-show-clients-after-api2", "setup": [".api 2"], "steps": ["show clients", "show client=bareos-fd", "show jobs"]}
+{"id": "c057-reload-again-show-pools", "steps": ["reload", "show pools", "show storages", "show catalogs"]}
+{"id": "c057-reload-syntax-error", "config": {"client/c057-broken.conf": "Client {\n  Name = c057-broken\n  Address = localhost\n"}, "steps": ["reload", "show client=bareos-fd", "show client=c057-broken"]}
+{"id": "c057-reload-unknown-directive", "config": {"client/c057-bogus.conf": "Client {\n  Name = c057-bogus\n  Address = localhost\n  Password = x\n  Bogus = 1\n}\n"}, "steps": ["reload", "show client=c057-bogus"]}
+{"id": "c057-reload-missing-reference", "config": {"job/c057-ref.conf": "Job {\n  Name = c057-ref\n  JobDefs = DefaultJob\n  Client = c057-nosuchclient\n}\n"}, "steps": ["reload", "show job=c057-ref"]}
+{"id": "c057-reload-missing-required", "config": {"client/c057-noaddr.conf": "Client {\n  Name = c057-noaddr\n  Password = x\n}\n"}, "steps": ["reload", "show client=c057-noaddr"]}
+{"id": "c057-reload-duplicate-name", "config": {"client/c057-dup.conf": "Client {\n  Name = bareos-fd\n  Address = otherhost\n  Password = x\n}\n"}, "steps": ["reload", "show client=bareos-fd"]}
+{"id": "c057-reload-check-resources", "config": {"job/c057-cons.conf": "Job {\n  Name = c057-cons\n  JobDefs = DefaultJob\n  Max Full Consolidations = 1\n}\n"}, "log": true, "steps": ["reload", "show job=c057-cons"]}
+{"id": "c057-reload-job-without-fileset", "config": {"job/c057-nofs.conf": "Job {\n  Name = c057-nofs\n  Type = Backup\n  Client = bareos-fd\n  Storage = File\n  Pool = Full\n  Messages = Standard\n}\n"}, "log": true, "steps": ["reload", "show job=c057-nofs"]}
+{"id": "c057-reload-job-without-messages", "config": {"job/c057-nomsg.conf": "Job {\n  Name = c057-nomsg\n  Type = Backup\n  Client = bareos-fd\n  FileSet = SelfTest\n  Storage = File\n  Pool = Full\n}\n"}, "log": true, "steps": ["reload", "show job=c057-nomsg"]}
+{"id": "c057-reload-always-incremental-restore", "config": {"job/c057-ai.conf": "Job {\n  Name = c057-ai\n  JobDefs = DefaultJob\n  Type = Restore\n  Always Incremental = yes\n}\n"}, "log": true, "steps": ["reload"]}
+{"id": "c057-reload-failed-api2", "setup": [".api 2"], "config": {"client/c057-broken.conf": "Client {\n  Name = c057-broken\n"}, "steps": ["reload"]}
+{"id": "c057-reload-add-client", "config": {"client/c057-new.conf": "Client {\n  Name = c057-new\n  Address = localhost\n  Password = \"c057-pw\"\n}\n"}, "restore_reload": true, "log": true, "steps": ["reload", "show client=c057-new", "show clients"]}
+{"id": "c057-after-restore", "steps": ["show clients"]}
