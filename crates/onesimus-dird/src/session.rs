@@ -362,7 +362,7 @@ fn finish_command<S: Read + Write>(
 /// Split a command line like C++ lib/scan.cc next_arg(): whitespace
 /// separates arguments, double quotes group (and are removed), a backslash
 /// takes the next character literally (`fileset="My Set"` -> `fileset=My Set`).
-fn split_args(input: &str) -> Vec<String> {
+pub(crate) fn split_args(input: &str) -> Vec<String> {
     let mut args = Vec::new();
     let mut cur = String::new();
     let mut in_quotes = false;

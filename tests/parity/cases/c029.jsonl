@@ -1,0 +1,35 @@
+# C-029 .jobstatus (catalog Status table, ua_dotcmds.cc DotJobstatusCmd) and the catalog-backed dot listings (.mediatypes/.locations/.media).
+{"id": "c029-jobstatus", "steps": [".jobstatus"]}
+{"id": "c029-jobstatus-T", "steps": [".jobstatus=T"]}
+{"id": "c029-jobstatus-e", "steps": [".jobstatus=e"]}
+{"id": "c029-jobstatus-unknown-char", "steps": [".jobstatus=Z"]}
+{"id": "c029-jobstatus-long", "steps": [".jobstatus=TT"]}
+{"id": "c029-jobstatus-empty", "steps": [".jobstatus="]}
+{"id": "c029-jobstatus-arg-ignored", "steps": [".jobstatus T"]}
+{"id": "c029-jobstatus-kv-ignored", "steps": [".jobstatus status=T"]}
+{"id": "c029-jobstatus-twice", "steps": [".jobstatus=T", ".jobstatus=W"]}
+{"id": "c029-jobstatus-catalog", "steps": [".jobstatus catalog=MyCatalog"]}
+{"id": "c029-jobstatus-catalog-bogus", "steps": [".jobstatus catalog=bogus"]}
+{"id": "c029-jobstatus-api1", "steps": [".jobstatus"], "setup": [".api 1"]}
+{"id": "c029-jobstatus-api1-T", "steps": [".jobstatus=T"], "setup": [".api 1"]}
+{"id": "c029-jobstatus-api1-bad", "steps": [".jobstatus=TT"], "setup": [".api 1"]}
+{"id": "c029-jobstatus-api2", "steps": [".jobstatus"], "setup": [".api 2"]}
+{"id": "c029-jobstatus-api2-T", "steps": [".jobstatus=T"], "setup": [".api 2"]}
+{"id": "c029-jobstatus-api2-Z", "steps": [".jobstatus=Z"], "setup": [".api 2"]}
+{"id": "c029-jobstatus-api2-bad", "steps": [".jobstatus=TT"], "setup": [".api 2"]}
+{"id": "c029-mediatypes", "steps": [".mediatypes"]}
+{"id": "c029-mediatypes-api1", "steps": [".mediatypes"], "setup": [".api 1"]}
+{"id": "c029-mediatypes-api2", "steps": [".mediatypes"], "setup": [".api 2"]}
+{"id": "c029-locations", "steps": [".locations"]}
+{"id": "c029-locations-api2", "steps": [".locations"], "setup": [".api 2"]}
+{"id": "c029-media", "steps": [".media"]}
+{"id": "c029-media-api1", "steps": [".media"], "setup": [".api 1"]}
+{"id": "c029-media-api2", "steps": [".media"], "setup": [".api 2"]}
+{"id": "c029-volstatus-api2", "steps": [".volstatus"], "setup": [".api 2"]}
+{"id": "c029-actiononpurge-api2", "steps": [".actiononpurge"], "setup": [".api 2"]}
+{"id": "c029-types-api2", "steps": [".types"], "setup": [".api 2"]}
+{"id": "c029-levels-api2-type", "steps": [".levels type=Backup"], "setup": [".api 2"]}
+{"id": "c029-levels-backup", "steps": [".levels Backup"]}
+{"id": "c029-levels-two", "steps": [".levels Backup Restore"]}
+{"id": "c029-jobstatus-api1-Z", "steps": [".jobstatus=Z"], "setup": [".api 1"]}
+{"id": "c029-jobstatus-quote", "steps": [".jobstatus='"]}
