@@ -686,9 +686,10 @@ const FULL_DATE: &[Scan] = &[U, Lit(b'-'), U, Lit(b'-'), U, Ws, U, Lit(b':'), U,
 
 /// CompensateShortDate (ua_restore.cc:913) as the reference binary
 /// (25.1.2~pre43) behaves: four formats, each counted without the trailing
-/// garbage conversion. The fc2c79b6 source adds year-month and year-only
-/// formats and counts the garbage conversion too, which (with its
-/// StrToUtime) rejects every date; the binary accepts `2020-01-01`.
+/// garbage conversion. The 18be77e6 source (unchanged since fc2c79b6) adds
+/// year-month and year-only formats and counts the garbage conversion too,
+/// which (with its StrToUtime) would reject every date; the binary
+/// measurably accepts `2020-01-01`, so the observed behaviour is modelled.
 fn compensate_short_date(cmd: &str) -> String {
     let mut tm = [0i64; 6];
     let mut garbage = String::new();

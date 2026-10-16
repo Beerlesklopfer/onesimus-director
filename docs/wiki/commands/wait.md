@@ -3,7 +3,7 @@
 <!-- bareos-reference:start -->
 ## Aus den Bareos-Originalquellen
 
-Referenz: [WIP/25.1.2-pre, `fc2c79b6c43e`](https://github.com/bareos/bareos/blob/fc2c79b6c43eb5752e98ebd86116593dbbbe0c68/core/src/dird/ua_cmds.cc#L523) · [Vollständigkeitsabgleich](bareos-reference.md) · [LLM-JSON](bareos-director-commands.json)
+Referenz: [WIP/25.1.2-pre-43-g18be77e68, `18be77e6832e`](https://github.com/bareos/bareos/blob/18be77e6832e33f5acd64094b9cba6066f2503f9/core/src/dird/ua_cmds.cc#L523) · [Vollständigkeitsabgleich](bareos-reference.md) · [LLM-JSON](bareos-director-commands.json)
 
 **Originalbeschreibung:** Wait until no jobs are running
 
@@ -19,7 +19,7 @@ wait jobname=<name> | jobid=<jobid> | ujobid=<complete_name> | mount [timeout=<n
 
 - Jobauswahl, mount/timeout und Abschlussausgabe sind portiert. Der Lifecycle verarbeitet jetzt echte Worker-Enden vor dem Katalogabschluss; Canceling bleibt aktiv, finale Zähler bleiben erhalten, Bareos-Statusprioritäten einschließlich Incomplete gelten. Fehlgeschlagene Katalog-Endupdates und der Snapshot-Race werden für wait jobid und wait ohne Argument sichtbar abgefangen; Retention beginnt am tatsächlichen Ende. Gegenprüfungen fanden und Regressionstests reproduzieren diese Fehler. Vollständige FD-/SD-Abbruchkoordination, ACL und Live-SHA-256-Parität bleiben offen.
 
-**Lokaler Handler:** [crates/onesimus-dird/src/commands/wait.rs:43](../../../crates/onesimus-dird/src/commands/wait.rs).
+**Lokaler Handler:** [crates/onesimus-dird/src/commands/wait.rs:46](../../../crates/onesimus-dird/src/commands/wait.rs).
 
 Die folgenden vorhandenen Beispiele und Verhaltensbeschreibungen sind lokale Dokumentation; sie sind kein Beleg für vollständige Bareos-Kompatibilität. Bei Widersprüchen gilt der obige Befund.
 <!-- bareos-reference:end -->

@@ -2,11 +2,11 @@
   "$schema": "./bareos-director-commands.schema.json",
   "schema_version": 1,
   "title": "Bareos Director command reference and Onesimus static coverage audit",
-  "reference_date": "2026-10-15",
+  "reference_date": "2026-10-16",
   "upstream": {
     "repository": "https://github.com/bareos/bareos",
-    "tag": "WIP/25.1.2-pre",
-    "commit": "fc2c79b6c43eb5752e98ebd86116593dbbbe0c68",
+    "tag": "WIP/25.1.2-pre-43-g18be77e68",
+    "commit": "18be77e6832e33f5acd64094b9cba6066f2503f9",
     "license": "AGPL-3.0-only",
     "notice": "Command help and usage extracted from Bareos, copyright Bareos GmbH & Co. KG and contributors.",
     "files": [
@@ -36,11 +36,11 @@
       },
       {
         "path": "core/src/dird/authenticate.cc",
-        "sha256": "af963521258f2023269f9cde9ee6c4337b8bd9a6c70dd54a73b6a4d3577d4820"
+        "sha256": "e0ed2a70e3ec89210354c6edb24f3217be783c75a00bbdb170bb493b8deb29e3"
       },
       {
         "path": "core/src/dird/authenticate.h",
-        "sha256": "9010769875da53a8e33f9f854c2d9e16e70464dea3253e5084f5062b84c45c08"
+        "sha256": "a07629ce9c961448aecddd2172b4e85081d1cda906a90a03e836f8ff9f4784c1"
       },
       {
         "path": "core/src/dird/authenticate_console.cc",
@@ -64,7 +64,7 @@
       },
       {
         "path": "core/src/dird/backup.cc",
-        "sha256": "23ba19ddbd116e95403ab0f983fdd2d552d1ee8c7b411a55d7616207b403c229"
+        "sha256": "f9a2cbc26836afbdccf6fa1f86a856b1c0f2988fd01c01dddc05993e439d02fd"
       },
       {
         "path": "core/src/dird/backup.h",
@@ -80,7 +80,7 @@
       },
       {
         "path": "core/src/dird/catreq.cc",
-        "sha256": "5b22e0549b7dcd310b696f21036c86f92db2deb973f617b2096387c30d13b400"
+        "sha256": "e1431c616d0cf1b97495b33b827a2aa725a8446dee8f47d8525104e16e00534d"
       },
       {
         "path": "core/src/dird/catreq.h",
@@ -132,7 +132,7 @@
       },
       {
         "path": "core/src/dird/dbcheck.cc",
-        "sha256": "c7a6efb9c161d58f97b36bacebde829426d0c440101e9fc48c5256369d29f6d5"
+        "sha256": "827a8563b12d7d1a88e491480d9b0ec3261a48b91acfcce8722bb91254ee3f15"
       },
       {
         "path": "core/src/dird/dbcheck_utils.cc",
@@ -152,7 +152,7 @@
       },
       {
         "path": "core/src/dird/dird.cc",
-        "sha256": "ced1fc26700b1f4648689e726d16d08da5fc27886dae65f765a609cc8dd6d31c"
+        "sha256": "ab5453a18a04dc832a894abc37c54ed4b03e8af975b1a16b770363e05abc9873"
       },
       {
         "path": "core/src/dird/dird.h",
@@ -188,11 +188,11 @@
       },
       {
         "path": "core/src/dird/fd_cmds.cc",
-        "sha256": "0d8eaa528787be70df0076abec175e6b587cd844212bc840a224659cd5406a4e"
+        "sha256": "85f5adfaf143b2b6a6b2aaaa59e7a2a6bed26c6eeca9cc202c2b8391042949c2"
       },
       {
         "path": "core/src/dird/fd_cmds.h",
-        "sha256": "198069c7feb24b8de19dd883019d2c8542d7a0d87c0219a283c82e303fe27830"
+        "sha256": "50bb467ad993e12802873882bb771099c664245b64cd3ee543659de7c76d54dc"
       },
       {
         "path": "core/src/dird/fd_sendfileset.cc",
@@ -236,7 +236,7 @@
       },
       {
         "path": "core/src/dird/job.cc",
-        "sha256": "76368f57dd850048f91c15e4ca917b21cacab280fb95a11c26c42e5648f066be"
+        "sha256": "40c704275b7022f73fe6cef5f918c7689bd47b987aa44cad535a9c36f61a00bf"
       },
       {
         "path": "core/src/dird/job.h",
@@ -260,7 +260,7 @@
       },
       {
         "path": "core/src/dird/migrate.cc",
-        "sha256": "521e959d12ea25eb02a93723f8db11bc2c469285343cf9eb0c6e76fe5cf1618f"
+        "sha256": "f97e32e285fd9dceaa50000fb10c4907585d21c0a684576ff861502b14ec1d02"
       },
       {
         "path": "core/src/dird/migration.h",
@@ -284,7 +284,7 @@
       },
       {
         "path": "core/src/dird/ndmp_dma_backup_NDMP_BAREOS.cc",
-        "sha256": "fb15d95bf629f1638506952f48f8be97ae2c47106820db113b3bdb00977e9fe2"
+        "sha256": "5bb15b26a4f17bd5175a3dac6bda6ec95a5bdad915955cc6e51c305ada8cfd61"
       },
       {
         "path": "core/src/dird/ndmp_dma_backup_NDMP_NATIVE.cc",
@@ -312,7 +312,7 @@
       },
       {
         "path": "core/src/dird/ndmp_dma_restore_NDMP_BAREOS.cc",
-        "sha256": "e62939903d4de6e322ac2145a62b6384dd10f7cc88255988661f37cc4d977f97"
+        "sha256": "befc4e4cbaf41c3b483b15f4d32f798f108cfe6ed3f54d0ef436245f4932cf2d"
       },
       {
         "path": "core/src/dird/ndmp_dma_restore_NDMP_BAREOS.h",
@@ -408,7 +408,7 @@
       },
       {
         "path": "core/src/dird/reload.cc",
-        "sha256": "92a7443800954c13df0043db30484c985a261618c1d29dd21ce0922643175553"
+        "sha256": "3b2bb7cc62841e4a97ea086c9aeeec87f5c2b014d7c2c18da25408f0256c818f"
       },
       {
         "path": "core/src/dird/reload.h",
@@ -416,7 +416,7 @@
       },
       {
         "path": "core/src/dird/restore.cc",
-        "sha256": "8e75d4773fbd78aa900580f8ea95476c02e79676cd3afd93376c93b0b6afed15"
+        "sha256": "4a76d759b8147f1cf482f8af7d895b9a2cc9427b0652f7346bf85f89eaf87bb1"
       },
       {
         "path": "core/src/dird/restore.h",
@@ -468,11 +468,11 @@
       },
       {
         "path": "core/src/dird/sd_cmds.cc",
-        "sha256": "3a10670d9386aa75716728a1c283868cf3c04b7cd00cf33078f6d74de8dd4eec"
+        "sha256": "8cb49e293f19d7b9ec133930b202e1fa8b98819de96bdd5aa16267f21af17fde"
       },
       {
         "path": "core/src/dird/sd_cmds.h",
-        "sha256": "0e5a2195db790732ddc6c412aa2b5a017f42f4b327d20a47d5cf75a9915ee418"
+        "sha256": "9db3b00e404fb7c903a6ea3de137a1c24a11d4f939ab1fc91160af807ee33a11"
       },
       {
         "path": "core/src/dird/socket_server.cc",
@@ -484,7 +484,7 @@
       },
       {
         "path": "core/src/dird/stats.cc",
-        "sha256": "5d6342876c6be34df7d29e2e4390cf97a3d8a97d25ed4b0ced5083f8c1e628a6"
+        "sha256": "ca78532e05d6724abb6585aca51e4e770f8656215e8d6f71d8e813868a63bb63"
       },
       {
         "path": "core/src/dird/stats.h",
@@ -516,7 +516,7 @@
       },
       {
         "path": "core/src/dird/ua_cmds.cc",
-        "sha256": "fa824ca59d7abf34fe727c24cbeaed30728440344b8856ac34ae1b05301ef994"
+        "sha256": "fb074a845992ea5b8d68afd97e5c4e6a1dec80461b45ee715ecac44632be956f"
       },
       {
         "path": "core/src/dird/ua_cmds.h",
@@ -568,7 +568,7 @@
       },
       {
         "path": "core/src/dird/ua_output.cc",
-        "sha256": "790c083281b66e61660713f8e1839e1372061222bbe0d15c380eb31ed496d799"
+        "sha256": "058b949063d19b766829cd91d4061b2be5cac195004f4edbfcb0537dc130f503"
       },
       {
         "path": "core/src/dird/ua_output.h",
@@ -576,7 +576,7 @@
       },
       {
         "path": "core/src/dird/ua_prune.cc",
-        "sha256": "7da18345a48a4c7e9fe60af9ce156f95659dea288294ad231495f430eeb39ccb"
+        "sha256": "eeb2b0462740c76bccb9d37ea1a1baa14253a025d7210cedff2f44976c9db17a"
       },
       {
         "path": "core/src/dird/ua_prune.h",
@@ -584,7 +584,7 @@
       },
       {
         "path": "core/src/dird/ua_purge.cc",
-        "sha256": "2f94a5a04cf26d5c4457382b21465ba967d26ebfbd81db4056b23e7a7859a4aa"
+        "sha256": "fd4e3fcd99b25490ee044c2dc397fc80055588438cb135d0f126160c87c4f2b2"
       },
       {
         "path": "core/src/dird/ua_purge.h",
@@ -592,11 +592,11 @@
       },
       {
         "path": "core/src/dird/ua_query.cc",
-        "sha256": "aae6df0fe7e4c939435771a16ba4f46999801b9c8ffdf12f00cfa5ff0b1699fe"
+        "sha256": "d7890de3cb61fcfad2e1f6870d9135b8c4917a2455be16fe56af36e0f13922ef"
       },
       {
         "path": "core/src/dird/ua_restore.cc",
-        "sha256": "a4ba17020d3f9aa5b51cfbde4f8bab8165a52d955ed1ecbb27952df13561f4b4"
+        "sha256": "86b2118f509de8d58d259a7cd2f87bdab6066909cc6607973fbcd19cdbd13e4f"
       },
       {
         "path": "core/src/dird/ua_restore.h",
@@ -644,7 +644,7 @@
       },
       {
         "path": "core/src/dird/ua_update.cc",
-        "sha256": "dddb28de457f6f5035b9a5fa411168b67231e4a702e2d37487b1744580ddd55d"
+        "sha256": "c009be2324397cc6508b23d959cd3fb89a352be165c7cc9334cf12b2a7da9cfa"
       },
       {
         "path": "core/src/dird/ua_update.h",
@@ -652,7 +652,7 @@
       },
       {
         "path": "core/src/dird/vbackup.cc",
-        "sha256": "f1d3fe07b5057cdf1d9b11cbc00c0d8dcbde26d674f43a1a67142356361fed4d"
+        "sha256": "c9552caab0c61da2bfdddc0da74ec05ad8a43e056dbe0ada5798b028e839d71c"
       },
       {
         "path": "core/src/dird/vbackup.h",
@@ -660,7 +660,7 @@
       },
       {
         "path": "core/src/dird/verify.cc",
-        "sha256": "18e7952fa8fc39221e437b4953060b89ebb9444d978c987d5a7581fe60e6b9e3"
+        "sha256": "6db43fd96aa3d21583cafa6dc710562d4ef21c4a36c74c511d2032d7b3178341"
       },
       {
         "path": "core/src/dird/verify.h",
@@ -695,11 +695,11 @@
     },
     {
       "path": "crates/oconsole/src/main.rs",
-      "sha256": "e9d28b885fde0177d025c881ea1631e5056675f84dc83a41f2611bd3622124f9"
+      "sha256": "81912160306646840c3c7cbdcab3d4d5da0e0af04f4542ee447f2c3b8b05b2d2"
     },
     {
       "path": "crates/oconsole/src/mcp.rs",
-      "sha256": "622cdb66b6ab891b18daa281fbeaa9888e1ba4d00291f96150769a54d20fd79c"
+      "sha256": "e2813d38de4b735a46d6ea8e3c3d143c88e3515866e4a92699726776c5c88fdd"
     },
     {
       "path": "crates/oconsole/src/mcp_mirror.rs",
@@ -711,15 +711,15 @@
     },
     {
       "path": "crates/onesimus-dird/src/catalog_worker.rs",
-      "sha256": "42ab2ce1df475717fd41df3f909e6c8c2f487805e90dd1cb835a8d37dc170bce"
+      "sha256": "ec0bbdbffcc89a8728867eb54fceeddfe2ec47d82d0c571243f28d063ec49a9c"
     },
     {
       "path": "crates/onesimus-dird/src/command_executor.rs",
-      "sha256": "f48910bed1f33a06bccc0db49483430e266cf8f0188adceb0d0a1e794b71dc90"
+      "sha256": "351f8b42ad7c3565aa6690ce2a1f71635d48301bc980b65e35f9902ab89a5337"
     },
     {
       "path": "crates/onesimus-dird/src/command_registry.rs",
-      "sha256": "58ccf35565059a0d7ae1ae4199650f60305bcaf311e9e43bf1ad0c0f83b2a7c4"
+      "sha256": "96e207eb5b8d0a822650e6f05f567f2d997044b5d585125b812e26a4ea59814c"
     },
     {
       "path": "crates/onesimus-dird/src/commands/acl.rs",
@@ -727,59 +727,87 @@
     },
     {
       "path": "crates/onesimus-dird/src/commands/admin.rs",
-      "sha256": "8bb0a94fb392326b2b40677fda867e364c688b4f95cc0a2a90343c726e6a9a9b"
+      "sha256": "2746c72f4439a70728e3612bdf41fc12caaa28ee90f0b07469e5b16bcb70d533"
     },
     {
       "path": "crates/onesimus-dird/src/commands/bandwidth.rs",
-      "sha256": "38290998874ebc1271a52dcc62582ce6adf99e6ec5ca16f5aec4441f4104d6f2"
+      "sha256": "b346f4961c6af9be46a580605b9a1333e2905a7b86de57142deb87fa1c73958e"
     },
     {
       "path": "crates/onesimus-dird/src/commands/basic.rs",
-      "sha256": "76359164f4b4d5a00f04e60750faf8a4818e59f41a7d32604ca69c5bf524e512"
+      "sha256": "6135a52033d100cd087708f13b815caa98126847529edeb33870f36efa04fe11"
+    },
+    {
+      "path": "crates/onesimus-dird/src/commands/bvfs.rs",
+      "sha256": "0cfeceaeda8868dc6ca2c921093c14c3f37f873785dbf49b1783100698549d73"
+    },
+    {
+      "path": "crates/onesimus-dird/src/commands/cancel.rs",
+      "sha256": "0d82ef55474f9d251ed928240c0eb65c2c652e958587c9bd51e4bbce69e7d501"
     },
     {
       "path": "crates/onesimus-dird/src/commands/catalog.rs",
-      "sha256": "4a9b1036a27ecc3dc62788949e6d7017d3cc4a5fd243fd159420ffa4f821fefb"
+      "sha256": "1e3930ea2c2928d32ea534fdcfb848df28e4f137562c5a02aa1c0e0ad247e003"
     },
     {
       "path": "crates/onesimus-dird/src/commands/configure.rs",
-      "sha256": "a2dea6be4c2229f9ff904ab778d27f3318208b00a0059ddc162151bfbb742bf0"
+      "sha256": "eb0187db33e4e100db47f037a4cbc0356de995580154b28ac10681a077fe96fe"
+    },
+    {
+      "path": "crates/onesimus-dird/src/commands/configure_usage.rs",
+      "sha256": "f2e7483b7a17659afcdaafb0a997a93697abfbcaddfac6c9b096356485a6aaef"
     },
     {
       "path": "crates/onesimus-dird/src/commands/debug.rs",
-      "sha256": "330b38166dbaf43cbcbb40aa1ee84467755f28e629df098027d4d1def85df774"
+      "sha256": "126e989e155a203e84204ee1b2f717ea2b50d14e95284934cd6ea9e3abb05724"
     },
     {
       "path": "crates/onesimus-dird/src/commands/defaults.rs",
-      "sha256": "c59e0330634b7869b0fb4f1aaf6399239958e0e0ae9c6500354c20bd6f2e9d38"
+      "sha256": "ec548d617b5a6cc20f4aa62ad025fc0d5b57af361eba4599b219a6eaae758c50"
     },
     {
       "path": "crates/onesimus-dird/src/commands/dot.rs",
-      "sha256": "e928c88006296737706ba73328a844c1a9661095082d0769d5a9bef5c866ecd4"
+      "sha256": "f917770accca198ab123902eaed77f752d1e9e64880afe1e0b17cacbbaefac3a"
+    },
+    {
+      "path": "crates/onesimus-dird/src/commands/estimate.rs",
+      "sha256": "ad3cdd6520e997e5f4c08394c91a68dbf89cb799f7dcd23d8a22911769505156"
     },
     {
       "path": "crates/onesimus-dird/src/commands/extra.rs",
-      "sha256": "98e65a628672a7cb8b264c6709c7c0237f9298c16decd0d65009cb364f588411"
+      "sha256": "f80ff5bbd02882443977aa69cf203a47502ee75b50ba600df4c09605c1210229"
     },
     {
       "path": "crates/onesimus-dird/src/commands/job.rs",
-      "sha256": "598ebb93ccc03c4b099dc029fe8a17798968b742bda521db4c3d756401ded3de"
+      "sha256": "bdbb284877e42ab9b1aa902dd56968c143eea2fd56575748c6e349c70e9d10e6"
     },
     {
       "path": "crates/onesimus-dird/src/commands/list.rs",
-      "sha256": "821621cf2e2084ff804874f2604af6b5d968134869877b3051eb13a18e08a3c5"
+      "sha256": "8de90913d047db9ee6fd464c0c837ecdf456c1a3c579e1343bc97ea485680574"
     },
     {
       "path": "crates/onesimus-dird/src/commands/mod.rs",
-      "sha256": "e766aee5a14357ccd1b2c3f661655257a7aec3b83592f1dad23d1e08178cd7d3"
+      "sha256": "adfd77c6dbf67f9c5de27a597a64e17d121e5452dfc853268999da56861da540"
+    },
+    {
+      "path": "crates/onesimus-dird/src/commands/prompt.rs",
+      "sha256": "bd3c6b08ef7203ba2c0a5325eac94ccde87590bf17d7f2039aaa8a3e3af9a4e5"
+    },
+    {
+      "path": "crates/onesimus-dird/src/commands/purge.rs",
+      "sha256": "612e10a3e17aa3d70c678a07d53a82e9d17f6dd3fdf84d2305c2cfbcf9248643"
     },
     {
       "path": "crates/onesimus-dird/src/commands/resolve.rs",
-      "sha256": "82e9115d5b8effafdb814782eac03a2f139f437e19d8033e0dd0f83bf8155c78"
+      "sha256": "236cdb7a61b154f3034316e956d71d294dc813084d985b95256b5ea9797cfd19"
+    },
+    {
+      "path": "crates/onesimus-dird/src/commands/restore.rs",
+      "sha256": "9a60925c37f27559f99f8f33d0ea52e211ad6e942bd8fbfbcabeb506c79beaa3"
     },
     {
       "path": "crates/onesimus-dird/src/commands/show.rs",
-      "sha256": "26e37b2e1ba1cc8db8cd985308787eeeb4f60b5b99b6007c4bf0dbd9c642172d"
+      "sha256": "17428c004100a936a480b8d58396b105523a65e4da0071b3eb3117972ca659bd"
     },
     {
       "path": "crates/onesimus-dird/src/commands/show_items.rs",
@@ -787,27 +815,27 @@
     },
     {
       "path": "crates/onesimus-dird/src/commands/sql.rs",
-      "sha256": "96bde5a5e4073f3f84f2b78fa95c50558be6c9654815a78c24619a0273977031"
+      "sha256": "f3a3e7fc78175c70813f7873816de47e82d5a09a1a83b7256c09c1d8827348b2"
     },
     {
       "path": "crates/onesimus-dird/src/commands/status.rs",
-      "sha256": "b74371c0e704a9544293f4a963e282124c2c43e9194476a1e8de0e2d21a628e1"
+      "sha256": "975226268ad66a5481ea555ce444874fcf35160c29da0eda6b9d1e4897d7e86e"
     },
     {
       "path": "crates/onesimus-dird/src/commands/wait.rs",
-      "sha256": "37b5af684fcc2a20de5478c8221bebadc86f9d71d08a843bf42c4a38ab266368"
+      "sha256": "c33fc7edd788eba8942958126191f041cbb2f5361ed1c648e560117816198c68"
     },
     {
       "path": "crates/onesimus-dird/src/fd_protocol.rs",
-      "sha256": "5f4376e6f496671d218f77f55f4dbf7992788d08d528fa77e8a638bf32fe6eb1"
+      "sha256": "cec91381247bf8b7cfa3c2a28cf6d638c722151ce6c3f153aa70edf3332aacc1"
     },
     {
       "path": "crates/onesimus-dird/src/job_manager.rs",
-      "sha256": "8348ce82b302b6937c8ff11d90f34718bfe1775ce3815cb59521b0a15b61489d"
+      "sha256": "a39b78d373cf322b6b1151aeb4460a467fa61e231b2d41ca8d90bf2c2c01e098"
     },
     {
       "path": "crates/onesimus-dird/src/job_worker.rs",
-      "sha256": "e5eb53928970a681c07069d993672f8df96eb664c679b169460f13cd8a64b2a8"
+      "sha256": "c992b6f8491cbd8d4474788c150f78f26eee94cc0547c0d484441f20ca0b7af8"
     },
     {
       "path": "crates/onesimus-dird/src/logging.rs",
@@ -815,15 +843,15 @@
     },
     {
       "path": "crates/onesimus-dird/src/main.rs",
-      "sha256": "10e6ed0a6fa6760c4548bf769a824b54cd55077f65b3621c6d7c541b8c11b84e"
+      "sha256": "de1e973e673e73c6c1c3bafdbaca656cc99dd99cdd6d2971149a5a565ddad20a"
     },
     {
       "path": "crates/onesimus-dird/src/scheduler.rs",
-      "sha256": "4c798fa4866819d71bb51aaddd3e5e589c7b445ea1c737c80545745352bb3878"
+      "sha256": "96dfa38c0a8fbde4c479f558d57691aabe10ae0a32bcfa8f1fd9362b161eb3bd"
     },
     {
       "path": "crates/onesimus-dird/src/session.rs",
-      "sha256": "a0f34fea6df6443ff90ef2ca7e33b014171a636d131a08ef63f174598689008f"
+      "sha256": "1409da0b6caf4ef986d2a9f54230adfbcd9a3db34b13ce264ef8cf191b3b23d1"
     }
   ],
   "mcp_build_policies": {
@@ -878,7 +906,7 @@
         {
           "file": "core/src/dird/ua_cmds.cc",
           "line": 540,
-          "url": "https://github.com/bareos/bareos/blob/fc2c79b6c43eb5752e98ebd86116593dbbbe0c68/core/src/dird/ua_cmds.cc#L540"
+          "url": "https://github.com/bareos/bareos/blob/18be77e6832e33f5acd64094b9cba6066f2503f9/core/src/dird/ua_cmds.cc#L540"
         },
         {
           "file": "crates/onesimus-dird/src/command_registry.rs",
@@ -928,12 +956,12 @@
       "source": {
         "file": "core/src/dird/ua_cmds.cc",
         "line": 219,
-        "url": "https://github.com/bareos/bareos/blob/fc2c79b6c43eb5752e98ebd86116593dbbbe0c68/core/src/dird/ua_cmds.cc#L219"
+        "url": "https://github.com/bareos/bareos/blob/18be77e6832e33f5acd64094b9cba6066f2503f9/core/src/dird/ua_cmds.cc#L219"
       },
       "handler_source": {
         "file": "core/src/dird/ua_cmds.cc",
-        "line": 2555,
-        "url": "https://github.com/bareos/bareos/blob/fc2c79b6c43eb5752e98ebd86116593dbbbe0c68/core/src/dird/ua_cmds.cc#L2555"
+        "line": 2557,
+        "url": "https://github.com/bareos/bareos/blob/18be77e6832e33f5acd64094b9cba6066f2503f9/core/src/dird/ua_cmds.cc#L2557"
       },
       "audit_event": false,
       "usage": null,
@@ -945,11 +973,11 @@
         "handler": "commands::dot::cmd_dot_noop",
         "registry": {
           "file": "crates/onesimus-dird/src/command_registry.rs",
-          "line": 263
+          "line": 264
         },
         "implementation": {
           "file": "crates/onesimus-dird/src/commands/dot.rs",
-          "line": 59
+          "line": 68
         },
         "declared_arguments": [],
         "status": "registered_unverified",
@@ -966,12 +994,12 @@
       "source": {
         "file": "core/src/dird/ua_cmds.cc",
         "line": 220,
-        "url": "https://github.com/bareos/bareos/blob/fc2c79b6c43eb5752e98ebd86116593dbbbe0c68/core/src/dird/ua_cmds.cc#L220"
+        "url": "https://github.com/bareos/bareos/blob/18be77e6832e33f5acd64094b9cba6066f2503f9/core/src/dird/ua_cmds.cc#L220"
       },
       "handler_source": {
         "file": "core/src/dird/ua_dotcmds.cc",
         "line": 947,
-        "url": "https://github.com/bareos/bareos/blob/fc2c79b6c43eb5752e98ebd86116593dbbbe0c68/core/src/dird/ua_dotcmds.cc#L947"
+        "url": "https://github.com/bareos/bareos/blob/18be77e6832e33f5acd64094b9cba6066f2503f9/core/src/dird/ua_dotcmds.cc#L947"
       },
       "audit_event": false,
       "usage": null,
@@ -983,11 +1011,11 @@
         "handler": "commands::dot::cmd_dot_actiononpurge",
         "registry": {
           "file": "crates/onesimus-dird/src/command_registry.rs",
-          "line": 290
+          "line": 291
         },
         "implementation": {
           "file": "crates/onesimus-dird/src/commands/dot.rs",
-          "line": 343
+          "line": 398
         },
         "declared_arguments": [],
         "status": "registered_unverified",
@@ -1004,12 +1032,12 @@
       "source": {
         "file": "core/src/dird/ua_cmds.cc",
         "line": 222,
-        "url": "https://github.com/bareos/bareos/blob/fc2c79b6c43eb5752e98ebd86116593dbbbe0c68/core/src/dird/ua_cmds.cc#L222"
+        "url": "https://github.com/bareos/bareos/blob/18be77e6832e33f5acd64094b9cba6066f2503f9/core/src/dird/ua_cmds.cc#L222"
       },
       "handler_source": {
         "file": "core/src/dird/ua_dotcmds.cc",
         "line": 981,
-        "url": "https://github.com/bareos/bareos/blob/fc2c79b6c43eb5752e98ebd86116593dbbbe0c68/core/src/dird/ua_dotcmds.cc#L981"
+        "url": "https://github.com/bareos/bareos/blob/18be77e6832e33f5acd64094b9cba6066f2503f9/core/src/dird/ua_dotcmds.cc#L981"
       },
       "audit_event": false,
       "usage": "[ 0 | 1 | 2 | off | on | json ] [compact=<yes|no>]",
@@ -1023,11 +1051,11 @@
         "handler": "commands::dot::cmd_dot_api",
         "registry": {
           "file": "crates/onesimus-dird/src/command_registry.rs",
-          "line": 293
+          "line": 294
         },
         "implementation": {
           "file": "crates/onesimus-dird/src/commands/dot.rs",
-          "line": 355
+          "line": 411
         },
         "declared_arguments": [
           "mode"
@@ -1046,12 +1074,12 @@
       "source": {
         "file": "core/src/dird/ua_cmds.cc",
         "line": 224,
-        "url": "https://github.com/bareos/bareos/blob/fc2c79b6c43eb5752e98ebd86116593dbbbe0c68/core/src/dird/ua_cmds.cc#L224"
+        "url": "https://github.com/bareos/bareos/blob/18be77e6832e33f5acd64094b9cba6066f2503f9/core/src/dird/ua_cmds.cc#L224"
       },
       "handler_source": {
         "file": "core/src/dird/ua_dotcmds.cc",
         "line": 80,
-        "url": "https://github.com/bareos/bareos/blob/fc2c79b6c43eb5752e98ebd86116593dbbbe0c68/core/src/dird/ua_dotcmds.cc#L80"
+        "url": "https://github.com/bareos/bareos/blob/18be77e6832e33f5acd64094b9cba6066f2503f9/core/src/dird/ua_dotcmds.cc#L80"
       },
       "audit_event": false,
       "usage": "job=<job-name> | client=<client-name> | storage=<storage-name> | schedule=<schedule-name> | pool=<pool-name> | cmd=<command> | fileset=<fileset-name> | catalog=<catalog>",
@@ -1072,11 +1100,11 @@
         "handler": "commands::dot::cmd_dot_authorized",
         "registry": {
           "file": "crates/onesimus-dird/src/command_registry.rs",
-          "line": 286
+          "line": 287
         },
         "implementation": {
           "file": "crates/onesimus-dird/src/commands/dot.rs",
-          "line": 175
+          "line": 217
         },
         "declared_arguments": [
           "job"
@@ -1097,12 +1125,12 @@
       "source": {
         "file": "core/src/dird/ua_cmds.cc",
         "line": 229,
-        "url": "https://github.com/bareos/bareos/blob/fc2c79b6c43eb5752e98ebd86116593dbbbe0c68/core/src/dird/ua_cmds.cc#L229"
+        "url": "https://github.com/bareos/bareos/blob/18be77e6832e33f5acd64094b9cba6066f2503f9/core/src/dird/ua_cmds.cc#L229"
       },
       "handler_source": {
         "file": "core/src/dird/ua_dotcmds.cc",
         "line": 791,
-        "url": "https://github.com/bareos/bareos/blob/fc2c79b6c43eb5752e98ebd86116593dbbbe0c68/core/src/dird/ua_dotcmds.cc#L791"
+        "url": "https://github.com/bareos/bareos/blob/18be77e6832e33f5acd64094b9cba6066f2503f9/core/src/dird/ua_dotcmds.cc#L791"
       },
       "audit_event": false,
       "usage": null,
@@ -1114,11 +1142,11 @@
         "handler": "commands::dot::cmd_dot_catalogs",
         "registry": {
           "file": "crates/onesimus-dird/src/command_registry.rs",
-          "line": 272
+          "line": 273
         },
         "implementation": {
           "file": "crates/onesimus-dird/src/commands/dot.rs",
-          "line": 203
+          "line": 231
         },
         "declared_arguments": [],
         "status": "registered_unverified",
@@ -1135,12 +1163,12 @@
       "source": {
         "file": "core/src/dird/ua_cmds.cc",
         "line": 231,
-        "url": "https://github.com/bareos/bareos/blob/fc2c79b6c43eb5752e98ebd86116593dbbbe0c68/core/src/dird/ua_cmds.cc#L231"
+        "url": "https://github.com/bareos/bareos/blob/18be77e6832e33f5acd64094b9cba6066f2503f9/core/src/dird/ua_cmds.cc#L231"
       },
       "handler_source": {
         "file": "core/src/dird/ua_dotcmds.cc",
         "line": 808,
-        "url": "https://github.com/bareos/bareos/blob/fc2c79b6c43eb5752e98ebd86116593dbbbe0c68/core/src/dird/ua_dotcmds.cc#L808"
+        "url": "https://github.com/bareos/bareos/blob/18be77e6832e33f5acd64094b9cba6066f2503f9/core/src/dird/ua_dotcmds.cc#L808"
       },
       "audit_event": false,
       "usage": "[enabled | disabled]",
@@ -1152,11 +1180,11 @@
         "handler": "commands::dot::cmd_dot_clients",
         "registry": {
           "file": "crates/onesimus-dird/src/command_registry.rs",
-          "line": 266
+          "line": 267
         },
         "implementation": {
           "file": "crates/onesimus-dird/src/commands/dot.rs",
-          "line": 64
+          "line": 73
         },
         "declared_arguments": [],
         "status": "registered_unverified",
@@ -1173,12 +1201,12 @@
       "source": {
         "file": "core/src/dird/ua_cmds.cc",
         "line": 233,
-        "url": "https://github.com/bareos/bareos/blob/fc2c79b6c43eb5752e98ebd86116593dbbbe0c68/core/src/dird/ua_cmds.cc#L233"
+        "url": "https://github.com/bareos/bareos/blob/18be77e6832e33f5acd64094b9cba6066f2503f9/core/src/dird/ua_cmds.cc#L233"
       },
       "handler_source": {
         "file": "core/src/dird/ua_dotcmds.cc",
         "line": 834,
-        "url": "https://github.com/bareos/bareos/blob/fc2c79b6c43eb5752e98ebd86116593dbbbe0c68/core/src/dird/ua_dotcmds.cc#L834"
+        "url": "https://github.com/bareos/bareos/blob/18be77e6832e33f5acd64094b9cba6066f2503f9/core/src/dird/ua_dotcmds.cc#L834"
       },
       "audit_event": false,
       "usage": null,
@@ -1190,11 +1218,11 @@
         "handler": "commands::dot::cmd_dot_consoles",
         "registry": {
           "file": "crates/onesimus-dird/src/command_registry.rs",
-          "line": 273
+          "line": 274
         },
         "implementation": {
           "file": "crates/onesimus-dird/src/commands/dot.rs",
-          "line": 209
+          "line": 240
         },
         "declared_arguments": [],
         "status": "registered_unverified",
@@ -1211,12 +1239,12 @@
       "source": {
         "file": "core/src/dird/ua_cmds.cc",
         "line": 235,
-        "url": "https://github.com/bareos/bareos/blob/fc2c79b6c43eb5752e98ebd86116593dbbbe0c68/core/src/dird/ua_cmds.cc#L235"
+        "url": "https://github.com/bareos/bareos/blob/18be77e6832e33f5acd64094b9cba6066f2503f9/core/src/dird/ua_cmds.cc#L235"
       },
       "handler_source": {
         "file": "core/src/dird/ua_dotcmds.cc",
         "line": 849,
-        "url": "https://github.com/bareos/bareos/blob/fc2c79b6c43eb5752e98ebd86116593dbbbe0c68/core/src/dird/ua_dotcmds.cc#L849"
+        "url": "https://github.com/bareos/bareos/blob/18be77e6832e33f5acd64094b9cba6066f2503f9/core/src/dird/ua_dotcmds.cc#L849"
       },
       "audit_event": false,
       "usage": null,
@@ -1228,11 +1256,11 @@
         "handler": "commands::dot::cmd_dot_users",
         "registry": {
           "file": "crates/onesimus-dird/src/command_registry.rs",
-          "line": 281
+          "line": 282
         },
         "implementation": {
           "file": "crates/onesimus-dird/src/commands/dot.rs",
-          "line": 328
+          "line": 383
         },
         "declared_arguments": [],
         "status": "registered_unverified",
@@ -1251,12 +1279,12 @@
       "source": {
         "file": "core/src/dird/ua_cmds.cc",
         "line": 237,
-        "url": "https://github.com/bareos/bareos/blob/fc2c79b6c43eb5752e98ebd86116593dbbbe0c68/core/src/dird/ua_cmds.cc#L237"
+        "url": "https://github.com/bareos/bareos/blob/18be77e6832e33f5acd64094b9cba6066f2503f9/core/src/dird/ua_cmds.cc#L237"
       },
       "handler_source": {
         "file": "core/src/dird/ua_dotcmds.cc",
         "line": 1212,
-        "url": "https://github.com/bareos/bareos/blob/fc2c79b6c43eb5752e98ebd86116593dbbbe0c68/core/src/dird/ua_dotcmds.cc#L1212"
+        "url": "https://github.com/bareos/bareos/blob/18be77e6832e33f5acd64094b9cba6066f2503f9/core/src/dird/ua_dotcmds.cc#L1212"
       },
       "audit_event": false,
       "usage": "job=<job-name> | client=<client-name> | storage=<storage-name> | pool=<pool-name>",
@@ -1273,11 +1301,11 @@
         "handler": "commands::dot::cmd_dot_defaults",
         "registry": {
           "file": "crates/onesimus-dird/src/command_registry.rs",
-          "line": 284
+          "line": 285
         },
         "implementation": {
           "file": "crates/onesimus-dird/src/commands/dot.rs",
-          "line": 119
+          "line": 139
         },
         "declared_arguments": [
           "job"
@@ -1298,12 +1326,12 @@
       "source": {
         "file": "core/src/dird/ua_cmds.cc",
         "line": 241,
-        "url": "https://github.com/bareos/bareos/blob/fc2c79b6c43eb5752e98ebd86116593dbbbe0c68/core/src/dird/ua_cmds.cc#L241"
+        "url": "https://github.com/bareos/bareos/blob/18be77e6832e33f5acd64094b9cba6066f2503f9/core/src/dird/ua_cmds.cc#L241"
       },
       "handler_source": {
         "file": "core/src/dird/ua_dotcmds.cc",
         "line": 774,
-        "url": "https://github.com/bareos/bareos/blob/fc2c79b6c43eb5752e98ebd86116593dbbbe0c68/core/src/dird/ua_dotcmds.cc#L774"
+        "url": "https://github.com/bareos/bareos/blob/18be77e6832e33f5acd64094b9cba6066f2503f9/core/src/dird/ua_dotcmds.cc#L774"
       },
       "audit_event": false,
       "usage": null,
@@ -1315,11 +1343,11 @@
         "handler": "commands::dot::cmd_dot_filesets",
         "registry": {
           "file": "crates/onesimus-dird/src/command_registry.rs",
-          "line": 270
+          "line": 271
         },
         "implementation": {
           "file": "crates/onesimus-dird/src/commands/dot.rs",
-          "line": 103
+          "line": 120
         },
         "declared_arguments": [],
         "status": "registered_unverified",
@@ -1336,12 +1364,12 @@
       "source": {
         "file": "core/src/dird/ua_cmds.cc",
         "line": 243,
-        "url": "https://github.com/bareos/bareos/blob/fc2c79b6c43eb5752e98ebd86116593dbbbe0c68/core/src/dird/ua_cmds.cc#L243"
+        "url": "https://github.com/bareos/bareos/blob/18be77e6832e33f5acd64094b9cba6066f2503f9/core/src/dird/ua_cmds.cc#L243"
       },
       "handler_source": {
         "file": "core/src/dird/ua_cmds.cc",
-        "line": 2804,
-        "url": "https://github.com/bareos/bareos/blob/fc2c79b6c43eb5752e98ebd86116593dbbbe0c68/core/src/dird/ua_cmds.cc#L2804"
+        "line": 2806,
+        "url": "https://github.com/bareos/bareos/blob/18be77e6832e33f5acd64094b9cba6066f2503f9/core/src/dird/ua_cmds.cc#L2806"
       },
       "audit_event": false,
       "usage": "[ all ] [ item=cmd ] [ full ]",
@@ -1355,11 +1383,11 @@
         "handler": "commands::basic::cmd_dot_help",
         "registry": {
           "file": "crates/onesimus-dird/src/command_registry.rs",
-          "line": 260
+          "line": 261
         },
         "implementation": {
           "file": "crates/onesimus-dird/src/commands/basic.rs",
-          "line": 147
+          "line": 161
         },
         "declared_arguments": [],
         "status": "partial",
@@ -1378,12 +1406,12 @@
       "source": {
         "file": "core/src/dird/ua_cmds.cc",
         "line": 245,
-        "url": "https://github.com/bareos/bareos/blob/fc2c79b6c43eb5752e98ebd86116593dbbbe0c68/core/src/dird/ua_cmds.cc#L245"
+        "url": "https://github.com/bareos/bareos/blob/18be77e6832e33f5acd64094b9cba6066f2503f9/core/src/dird/ua_cmds.cc#L245"
       },
       "handler_source": {
         "file": "core/src/dird/ua_dotcmds.cc",
         "line": 691,
-        "url": "https://github.com/bareos/bareos/blob/fc2c79b6c43eb5752e98ebd86116593dbbbe0c68/core/src/dird/ua_dotcmds.cc#L691"
+        "url": "https://github.com/bareos/bareos/blob/18be77e6832e33f5acd64094b9cba6066f2503f9/core/src/dird/ua_dotcmds.cc#L691"
       },
       "audit_event": false,
       "usage": null,
@@ -1395,11 +1423,11 @@
         "handler": "commands::dot::cmd_dot_jobdefs",
         "registry": {
           "file": "crates/onesimus-dird/src/command_registry.rs",
-          "line": 274
+          "line": 275
         },
         "implementation": {
           "file": "crates/onesimus-dird/src/commands/dot.rs",
-          "line": 215
+          "line": 253
         },
         "declared_arguments": [],
         "status": "registered_unverified",
@@ -1416,12 +1444,12 @@
       "source": {
         "file": "core/src/dird/ua_cmds.cc",
         "line": 247,
-        "url": "https://github.com/bareos/bareos/blob/fc2c79b6c43eb5752e98ebd86116593dbbbe0c68/core/src/dird/ua_cmds.cc#L247"
+        "url": "https://github.com/bareos/bareos/blob/18be77e6832e33f5acd64094b9cba6066f2503f9/core/src/dird/ua_cmds.cc#L247"
       },
       "handler_source": {
         "file": "core/src/dird/ua_dotcmds.cc",
         "line": 712,
-        "url": "https://github.com/bareos/bareos/blob/fc2c79b6c43eb5752e98ebd86116593dbbbe0c68/core/src/dird/ua_dotcmds.cc#L712"
+        "url": "https://github.com/bareos/bareos/blob/18be77e6832e33f5acd64094b9cba6066f2503f9/core/src/dird/ua_dotcmds.cc#L712"
       },
       "audit_event": false,
       "usage": "[type=<jobtype>] | [enabled | disabled]",
@@ -1435,11 +1463,11 @@
         "handler": "commands::dot::cmd_dot_jobs",
         "registry": {
           "file": "crates/onesimus-dird/src/command_registry.rs",
-          "line": 267
+          "line": 268
         },
         "implementation": {
           "file": "crates/onesimus-dird/src/commands/dot.rs",
-          "line": 72
+          "line": 83
         },
         "declared_arguments": [],
         "status": "registered_unverified",
@@ -1456,12 +1484,12 @@
       "source": {
         "file": "core/src/dird/ua_cmds.cc",
         "line": 249,
-        "url": "https://github.com/bareos/bareos/blob/fc2c79b6c43eb5752e98ebd86116593dbbbe0c68/core/src/dird/ua_cmds.cc#L249"
+        "url": "https://github.com/bareos/bareos/blob/18be77e6832e33f5acd64094b9cba6066f2503f9/core/src/dird/ua_cmds.cc#L249"
       },
       "handler_source": {
         "file": "core/src/dird/ua_dotcmds.cc",
         "line": 744,
-        "url": "https://github.com/bareos/bareos/blob/fc2c79b6c43eb5752e98ebd86116593dbbbe0c68/core/src/dird/ua_dotcmds.cc#L744"
+        "url": "https://github.com/bareos/bareos/blob/18be77e6832e33f5acd64094b9cba6066f2503f9/core/src/dird/ua_dotcmds.cc#L744"
       },
       "audit_event": false,
       "usage": "[ =<jobstatus> ]",
@@ -1473,11 +1501,11 @@
         "handler": "commands::dot::cmd_dot_jobstatus",
         "registry": {
           "file": "crates/onesimus-dird/src/command_registry.rs",
-          "line": 285
+          "line": 286
         },
         "implementation": {
           "file": "crates/onesimus-dird/src/commands/dot.rs",
-          "line": 127
+          "line": 147
         },
         "declared_arguments": [],
         "status": "registered_unverified",
@@ -1494,12 +1522,12 @@
       "source": {
         "file": "core/src/dird/ua_cmds.cc",
         "line": 251,
-        "url": "https://github.com/bareos/bareos/blob/fc2c79b6c43eb5752e98ebd86116593dbbbe0c68/core/src/dird/ua_cmds.cc#L251"
+        "url": "https://github.com/bareos/bareos/blob/18be77e6832e33f5acd64094b9cba6066f2503f9/core/src/dird/ua_cmds.cc#L251"
       },
       "handler_source": {
         "file": "core/src/dird/ua_dotcmds.cc",
         "line": 1157,
-        "url": "https://github.com/bareos/bareos/blob/fc2c79b6c43eb5752e98ebd86116593dbbbe0c68/core/src/dird/ua_dotcmds.cc#L1157"
+        "url": "https://github.com/bareos/bareos/blob/18be77e6832e33f5acd64094b9cba6066f2503f9/core/src/dird/ua_dotcmds.cc#L1157"
       },
       "audit_event": false,
       "usage": null,
@@ -1511,11 +1539,11 @@
         "handler": "commands::dot::cmd_dot_levels",
         "registry": {
           "file": "crates/onesimus-dird/src/command_registry.rs",
-          "line": 287
+          "line": 288
         },
         "implementation": {
           "file": "crates/onesimus-dird/src/commands/dot.rs",
-          "line": 221
+          "line": 260
         },
         "declared_arguments": [],
         "status": "registered_unverified",
@@ -1532,12 +1560,12 @@
       "source": {
         "file": "core/src/dird/ua_cmds.cc",
         "line": 253,
-        "url": "https://github.com/bareos/bareos/blob/fc2c79b6c43eb5752e98ebd86116593dbbbe0c68/core/src/dird/ua_cmds.cc#L253"
+        "url": "https://github.com/bareos/bareos/blob/18be77e6832e33f5acd64094b9cba6066f2503f9/core/src/dird/ua_cmds.cc#L253"
       },
       "handler_source": {
         "file": "core/src/dird/ua_dotcmds.cc",
         "line": 1142,
-        "url": "https://github.com/bareos/bareos/blob/fc2c79b6c43eb5752e98ebd86116593dbbbe0c68/core/src/dird/ua_dotcmds.cc#L1142"
+        "url": "https://github.com/bareos/bareos/blob/18be77e6832e33f5acd64094b9cba6066f2503f9/core/src/dird/ua_dotcmds.cc#L1142"
       },
       "audit_event": false,
       "usage": null,
@@ -1549,11 +1577,11 @@
         "handler": "commands::dot::cmd_dot_locations",
         "registry": {
           "file": "crates/onesimus-dird/src/command_registry.rs",
-          "line": 276
+          "line": 277
         },
         "implementation": {
           "file": "crates/onesimus-dird/src/commands/dot.rs",
-          "line": 268
+          "line": 312
         },
         "declared_arguments": [],
         "status": "registered_unverified",
@@ -1570,12 +1598,12 @@
       "source": {
         "file": "core/src/dird/ua_cmds.cc",
         "line": 254,
-        "url": "https://github.com/bareos/bareos/blob/fc2c79b6c43eb5752e98ebd86116593dbbbe0c68/core/src/dird/ua_cmds.cc#L254"
+        "url": "https://github.com/bareos/bareos/blob/18be77e6832e33f5acd64094b9cba6066f2503f9/core/src/dird/ua_cmds.cc#L254"
       },
       "handler_source": {
         "file": "core/src/dird/ua_dotcmds.cc",
         "line": 685,
-        "url": "https://github.com/bareos/bareos/blob/fc2c79b6c43eb5752e98ebd86116593dbbbe0c68/core/src/dird/ua_dotcmds.cc#L685"
+        "url": "https://github.com/bareos/bareos/blob/18be77e6832e33f5acd64094b9cba6066f2503f9/core/src/dird/ua_dotcmds.cc#L685"
       },
       "audit_event": false,
       "usage": null,
@@ -1587,11 +1615,11 @@
         "handler": "commands::dot::cmd_dot_messages",
         "registry": {
           "file": "crates/onesimus-dird/src/command_registry.rs",
-          "line": 279
+          "line": 280
         },
         "implementation": {
           "file": "crates/onesimus-dird/src/commands/dot.rs",
-          "line": 306
+          "line": 357
         },
         "declared_arguments": [],
         "status": "partial",
@@ -1610,12 +1638,12 @@
       "source": {
         "file": "core/src/dird/ua_cmds.cc",
         "line": 256,
-        "url": "https://github.com/bareos/bareos/blob/fc2c79b6c43eb5752e98ebd86116593dbbbe0c68/core/src/dird/ua_cmds.cc#L256"
+        "url": "https://github.com/bareos/bareos/blob/18be77e6832e33f5acd64094b9cba6066f2503f9/core/src/dird/ua_cmds.cc#L256"
       },
       "handler_source": {
         "file": "core/src/dird/ua_dotcmds.cc",
         "line": 1101,
-        "url": "https://github.com/bareos/bareos/blob/fc2c79b6c43eb5752e98ebd86116593dbbbe0c68/core/src/dird/ua_dotcmds.cc#L1101"
+        "url": "https://github.com/bareos/bareos/blob/18be77e6832e33f5acd64094b9cba6066f2503f9/core/src/dird/ua_dotcmds.cc#L1101"
       },
       "audit_event": false,
       "usage": null,
@@ -1627,11 +1655,11 @@
         "handler": "commands::dot::cmd_dot_media",
         "registry": {
           "file": "crates/onesimus-dird/src/command_registry.rs",
-          "line": 277
+          "line": 278
         },
         "implementation": {
           "file": "crates/onesimus-dird/src/commands/dot.rs",
-          "line": 274
+          "line": 322
         },
         "declared_arguments": [],
         "status": "registered_unverified",
@@ -1648,12 +1676,12 @@
       "source": {
         "file": "core/src/dird/ua_cmds.cc",
         "line": 257,
-        "url": "https://github.com/bareos/bareos/blob/fc2c79b6c43eb5752e98ebd86116593dbbbe0c68/core/src/dird/ua_cmds.cc#L257"
+        "url": "https://github.com/bareos/bareos/blob/18be77e6832e33f5acd64094b9cba6066f2503f9/core/src/dird/ua_cmds.cc#L257"
       },
       "handler_source": {
         "file": "core/src/dird/ua_dotcmds.cc",
         "line": 1086,
-        "url": "https://github.com/bareos/bareos/blob/fc2c79b6c43eb5752e98ebd86116593dbbbe0c68/core/src/dird/ua_dotcmds.cc#L1086"
+        "url": "https://github.com/bareos/bareos/blob/18be77e6832e33f5acd64094b9cba6066f2503f9/core/src/dird/ua_dotcmds.cc#L1086"
       },
       "audit_event": false,
       "usage": null,
@@ -1665,11 +1693,11 @@
         "handler": "commands::dot::cmd_dot_mediatypes",
         "registry": {
           "file": "crates/onesimus-dird/src/command_registry.rs",
-          "line": 278
+          "line": 279
         },
         "implementation": {
           "file": "crates/onesimus-dird/src/commands/dot.rs",
-          "line": 292
+          "line": 332
         },
         "declared_arguments": [],
         "status": "registered_unverified",
@@ -1686,12 +1714,12 @@
       "source": {
         "file": "core/src/dird/ua_cmds.cc",
         "line": 259,
-        "url": "https://github.com/bareos/bareos/blob/fc2c79b6c43eb5752e98ebd86116593dbbbe0c68/core/src/dird/ua_cmds.cc#L259"
+        "url": "https://github.com/bareos/bareos/blob/18be77e6832e33f5acd64094b9cba6066f2503f9/core/src/dird/ua_cmds.cc#L259"
       },
       "handler_source": {
         "file": "core/src/dird/ua_dotcmds.cc",
         "line": 864,
-        "url": "https://github.com/bareos/bareos/blob/fc2c79b6c43eb5752e98ebd86116593dbbbe0c68/core/src/dird/ua_dotcmds.cc#L864"
+        "url": "https://github.com/bareos/bareos/blob/18be77e6832e33f5acd64094b9cba6066f2503f9/core/src/dird/ua_dotcmds.cc#L864"
       },
       "audit_event": false,
       "usage": null,
@@ -1703,11 +1731,11 @@
         "handler": "commands::dot::cmd_dot_msgs",
         "registry": {
           "file": "crates/onesimus-dird/src/command_registry.rs",
-          "line": 280
+          "line": 281
         },
         "implementation": {
           "file": "crates/onesimus-dird/src/commands/dot.rs",
-          "line": 311
+          "line": 366
         },
         "declared_arguments": [],
         "status": "registered_unverified",
@@ -1724,12 +1752,12 @@
       "source": {
         "file": "core/src/dird/ua_cmds.cc",
         "line": 261,
-        "url": "https://github.com/bareos/bareos/blob/fc2c79b6c43eb5752e98ebd86116593dbbbe0c68/core/src/dird/ua_cmds.cc#L261"
+        "url": "https://github.com/bareos/bareos/blob/18be77e6832e33f5acd64094b9cba6066f2503f9/core/src/dird/ua_cmds.cc#L261"
       },
       "handler_source": {
         "file": "core/src/dird/ua_dotcmds.cc",
         "line": 879,
-        "url": "https://github.com/bareos/bareos/blob/fc2c79b6c43eb5752e98ebd86116593dbbbe0c68/core/src/dird/ua_dotcmds.cc#L879"
+        "url": "https://github.com/bareos/bareos/blob/18be77e6832e33f5acd64094b9cba6066f2503f9/core/src/dird/ua_dotcmds.cc#L879"
       },
       "audit_event": false,
       "usage": "type=<pooltype>",
@@ -1743,11 +1771,11 @@
         "handler": "commands::dot::cmd_dot_pools",
         "registry": {
           "file": "crates/onesimus-dird/src/command_registry.rs",
-          "line": 268
+          "line": 269
         },
         "implementation": {
           "file": "crates/onesimus-dird/src/commands/dot.rs",
-          "line": 87
+          "line": 100
         },
         "declared_arguments": [],
         "status": "registered_unverified",
@@ -1764,12 +1792,12 @@
       "source": {
         "file": "core/src/dird/ua_cmds.cc",
         "line": 263,
-        "url": "https://github.com/bareos/bareos/blob/fc2c79b6c43eb5752e98ebd86116593dbbbe0c68/core/src/dird/ua_cmds.cc#L263"
+        "url": "https://github.com/bareos/bareos/blob/18be77e6832e33f5acd64094b9cba6066f2503f9/core/src/dird/ua_cmds.cc#L263"
       },
       "handler_source": {
         "file": "core/src/dird/ua_dotcmds.cc",
         "line": 932,
-        "url": "https://github.com/bareos/bareos/blob/fc2c79b6c43eb5752e98ebd86116593dbbbe0c68/core/src/dird/ua_dotcmds.cc#L932"
+        "url": "https://github.com/bareos/bareos/blob/18be77e6832e33f5acd64094b9cba6066f2503f9/core/src/dird/ua_dotcmds.cc#L932"
       },
       "audit_event": false,
       "usage": null,
@@ -1781,11 +1809,11 @@
         "handler": "commands::dot::cmd_dot_profiles",
         "registry": {
           "file": "crates/onesimus-dird/src/command_registry.rs",
-          "line": 275
+          "line": 276
         },
         "implementation": {
           "file": "crates/onesimus-dird/src/commands/dot.rs",
-          "line": 317
+          "line": 372
         },
         "declared_arguments": [],
         "status": "registered_unverified",
@@ -1802,12 +1830,12 @@
       "source": {
         "file": "core/src/dird/ua_cmds.cc",
         "line": 265,
-        "url": "https://github.com/bareos/bareos/blob/fc2c79b6c43eb5752e98ebd86116593dbbbe0c68/core/src/dird/ua_cmds.cc#L265"
+        "url": "https://github.com/bareos/bareos/blob/18be77e6832e33f5acd64094b9cba6066f2503f9/core/src/dird/ua_cmds.cc#L265"
       },
       "handler_source": {
         "file": "core/src/dird/ua_cmds.cc",
-        "line": 2594,
-        "url": "https://github.com/bareos/bareos/blob/fc2c79b6c43eb5752e98ebd86116593dbbbe0c68/core/src/dird/ua_cmds.cc#L2594"
+        "line": 2596,
+        "url": "https://github.com/bareos/bareos/blob/18be77e6832e33f5acd64094b9cba6066f2503f9/core/src/dird/ua_cmds.cc#L2596"
       },
       "audit_event": false,
       "usage": null,
@@ -1819,11 +1847,11 @@
         "handler": "commands::basic::cmd_quit",
         "registry": {
           "file": "crates/onesimus-dird/src/command_registry.rs",
-          "line": 261
+          "line": 262
         },
         "implementation": {
           "file": "crates/onesimus-dird/src/commands/basic.rs",
-          "line": 54
+          "line": 62
         },
         "declared_arguments": [],
         "status": "registered_unverified",
@@ -1840,12 +1868,12 @@
       "source": {
         "file": "core/src/dird/ua_cmds.cc",
         "line": 266,
-        "url": "https://github.com/bareos/bareos/blob/fc2c79b6c43eb5752e98ebd86116593dbbbe0c68/core/src/dird/ua_cmds.cc#L266"
+        "url": "https://github.com/bareos/bareos/blob/18be77e6832e33f5acd64094b9cba6066f2503f9/core/src/dird/ua_cmds.cc#L266"
       },
       "handler_source": {
         "file": "core/src/dird/ua_dotcmds.cc",
         "line": 1042,
-        "url": "https://github.com/bareos/bareos/blob/fc2c79b6c43eb5752e98ebd86116593dbbbe0c68/core/src/dird/ua_dotcmds.cc#L1042"
+        "url": "https://github.com/bareos/bareos/blob/18be77e6832e33f5acd64094b9cba6066f2503f9/core/src/dird/ua_dotcmds.cc#L1042"
       },
       "audit_event": true,
       "usage": "query=<sqlquery>",
@@ -1859,11 +1887,11 @@
         "handler": "commands::sql::cmd_dot_sql",
         "registry": {
           "file": "crates/onesimus-dird/src/command_registry.rs",
-          "line": 297
+          "line": 298
         },
         "implementation": {
           "file": "crates/onesimus-dird/src/commands/sql.rs",
-          "line": 9
+          "line": 27
         },
         "declared_arguments": [
           "query"
@@ -1882,12 +1910,12 @@
       "source": {
         "file": "core/src/dird/ua_cmds.cc",
         "line": 268,
-        "url": "https://github.com/bareos/bareos/blob/fc2c79b6c43eb5752e98ebd86116593dbbbe0c68/core/src/dird/ua_cmds.cc#L268"
+        "url": "https://github.com/bareos/bareos/blob/18be77e6832e33f5acd64094b9cba6066f2503f9/core/src/dird/ua_cmds.cc#L268"
       },
       "handler_source": {
         "file": "core/src/dird/ua_dotcmds.cc",
         "line": 1116,
-        "url": "https://github.com/bareos/bareos/blob/fc2c79b6c43eb5752e98ebd86116593dbbbe0c68/core/src/dird/ua_dotcmds.cc#L1116"
+        "url": "https://github.com/bareos/bareos/blob/18be77e6832e33f5acd64094b9cba6066f2503f9/core/src/dird/ua_dotcmds.cc#L1116"
       },
       "audit_event": false,
       "usage": "[enabled | disabled]",
@@ -1899,11 +1927,11 @@
         "handler": "commands::dot::cmd_dot_schedule",
         "registry": {
           "file": "crates/onesimus-dird/src/command_registry.rs",
-          "line": 271
+          "line": 272
         },
         "implementation": {
           "file": "crates/onesimus-dird/src/commands/dot.rs",
-          "line": 109
+          "line": 127
         },
         "declared_arguments": [],
         "status": "registered_unverified",
@@ -1920,12 +1948,12 @@
       "source": {
         "file": "core/src/dird/ua_cmds.cc",
         "line": 270,
-        "url": "https://github.com/bareos/bareos/blob/fc2c79b6c43eb5752e98ebd86116593dbbbe0c68/core/src/dird/ua_cmds.cc#L270"
+        "url": "https://github.com/bareos/bareos/blob/18be77e6832e33f5acd64094b9cba6066f2503f9/core/src/dird/ua_cmds.cc#L270"
       },
       "handler_source": {
         "file": "core/src/dird/ua_status.cc",
         "line": 101,
-        "url": "https://github.com/bareos/bareos/blob/fc2c79b6c43eb5752e98ebd86116593dbbbe0c68/core/src/dird/ua_status.cc#L101"
+        "url": "https://github.com/bareos/bareos/blob/18be77e6832e33f5acd64094b9cba6066f2503f9/core/src/dird/ua_status.cc#L101"
       },
       "audit_event": true,
       "usage": "dir ( current | last | header | scheduled | running | terminated ) | storage=<storage> [ header | waitreservation | devices | volumes | spooling | running | terminated ] | client=<client> [ header | terminated | running ]",
@@ -1940,11 +1968,11 @@
         "handler": "commands::status::cmd_dot_status",
         "registry": {
           "file": "crates/onesimus-dird/src/command_registry.rs",
-          "line": 262
+          "line": 263
         },
         "implementation": {
           "file": "crates/onesimus-dird/src/commands/status.rs",
-          "line": 45
+          "line": 118
         },
         "declared_arguments": [],
         "status": "partial",
@@ -1963,12 +1991,12 @@
       "source": {
         "file": "core/src/dird/ua_cmds.cc",
         "line": 277,
-        "url": "https://github.com/bareos/bareos/blob/fc2c79b6c43eb5752e98ebd86116593dbbbe0c68/core/src/dird/ua_cmds.cc#L277"
+        "url": "https://github.com/bareos/bareos/blob/18be77e6832e33f5acd64094b9cba6066f2503f9/core/src/dird/ua_cmds.cc#L277"
       },
       "handler_source": {
         "file": "core/src/dird/ua_dotcmds.cc",
         "line": 906,
-        "url": "https://github.com/bareos/bareos/blob/fc2c79b6c43eb5752e98ebd86116593dbbbe0c68/core/src/dird/ua_dotcmds.cc#L906"
+        "url": "https://github.com/bareos/bareos/blob/18be77e6832e33f5acd64094b9cba6066f2503f9/core/src/dird/ua_dotcmds.cc#L906"
       },
       "audit_event": false,
       "usage": "[enabled | disabled]",
@@ -1980,11 +2008,11 @@
         "handler": "commands::dot::cmd_dot_storage",
         "registry": {
           "file": "crates/onesimus-dird/src/command_registry.rs",
-          "line": 269
+          "line": 270
         },
         "implementation": {
           "file": "crates/onesimus-dird/src/commands/dot.rs",
-          "line": 95
+          "line": 110
         },
         "declared_arguments": [],
         "status": "registered_unverified",
@@ -2001,12 +2029,12 @@
       "source": {
         "file": "core/src/dird/ua_cmds.cc",
         "line": 279,
-        "url": "https://github.com/bareos/bareos/blob/fc2c79b6c43eb5752e98ebd86116593dbbbe0c68/core/src/dird/ua_cmds.cc#L279"
+        "url": "https://github.com/bareos/bareos/blob/18be77e6832e33f5acd64094b9cba6066f2503f9/core/src/dird/ua_cmds.cc#L279"
       },
       "handler_source": {
         "file": "core/src/dird/ua_dotcmds.cc",
         "line": 960,
-        "url": "https://github.com/bareos/bareos/blob/fc2c79b6c43eb5752e98ebd86116593dbbbe0c68/core/src/dird/ua_dotcmds.cc#L960"
+        "url": "https://github.com/bareos/bareos/blob/18be77e6832e33f5acd64094b9cba6066f2503f9/core/src/dird/ua_dotcmds.cc#L960"
       },
       "audit_event": false,
       "usage": null,
@@ -2018,11 +2046,11 @@
         "handler": "commands::dot::cmd_dot_types",
         "registry": {
           "file": "crates/onesimus-dird/src/command_registry.rs",
-          "line": 288
+          "line": 289
         },
         "implementation": {
           "file": "crates/onesimus-dird/src/commands/dot.rs",
-          "line": 323
+          "line": 378
         },
         "declared_arguments": [],
         "status": "registered_unverified",
@@ -2039,12 +2067,12 @@
       "source": {
         "file": "core/src/dird/ua_cmds.cc",
         "line": 280,
-        "url": "https://github.com/bareos/bareos/blob/fc2c79b6c43eb5752e98ebd86116593dbbbe0c68/core/src/dird/ua_cmds.cc#L280"
+        "url": "https://github.com/bareos/bareos/blob/18be77e6832e33f5acd64094b9cba6066f2503f9/core/src/dird/ua_cmds.cc#L280"
       },
       "handler_source": {
         "file": "core/src/dird/ua_dotcmds.cc",
         "line": 1198,
-        "url": "https://github.com/bareos/bareos/blob/fc2c79b6c43eb5752e98ebd86116593dbbbe0c68/core/src/dird/ua_dotcmds.cc#L1198"
+        "url": "https://github.com/bareos/bareos/blob/18be77e6832e33f5acd64094b9cba6066f2503f9/core/src/dird/ua_dotcmds.cc#L1198"
       },
       "audit_event": false,
       "usage": null,
@@ -2056,11 +2084,11 @@
         "handler": "commands::dot::cmd_dot_volstatus",
         "registry": {
           "file": "crates/onesimus-dird/src/command_registry.rs",
-          "line": 289
+          "line": 290
         },
         "implementation": {
           "file": "crates/onesimus-dird/src/commands/dot.rs",
-          "line": 335
+          "line": 390
         },
         "declared_arguments": [],
         "status": "registered_unverified",
@@ -2077,12 +2105,12 @@
       "source": {
         "file": "core/src/dird/ua_cmds.cc",
         "line": 282,
-        "url": "https://github.com/bareos/bareos/blob/fc2c79b6c43eb5752e98ebd86116593dbbbe0c68/core/src/dird/ua_cmds.cc#L282"
+        "url": "https://github.com/bareos/bareos/blob/18be77e6832e33f5acd64094b9cba6066f2503f9/core/src/dird/ua_cmds.cc#L282"
       },
       "handler_source": {
         "file": "core/src/dird/ua_dotcmds.cc",
         "line": 497,
-        "url": "https://github.com/bareos/bareos/blob/fc2c79b6c43eb5752e98ebd86116593dbbbe0c68/core/src/dird/ua_dotcmds.cc#L497"
+        "url": "https://github.com/bareos/bareos/blob/18be77e6832e33f5acd64094b9cba6066f2503f9/core/src/dird/ua_dotcmds.cc#L497"
       },
       "audit_event": true,
       "usage": "jobid=<jobid> path=<path> | pathid=<pathid> [limit=<limit>] [offset=<offset>]",
@@ -2097,14 +2125,14 @@
       ],
       "onesimus": {
         "canonical_name": ".bvfs_lsdirs",
-        "handler": "commands::dot::cmd_bvfs_lsdirs",
+        "handler": "commands::bvfs::cmd_bvfs_lsdirs",
         "registry": {
           "file": "crates/onesimus-dird/src/command_registry.rs",
-          "line": 313
+          "line": 314
         },
         "implementation": {
-          "file": "crates/onesimus-dird/src/commands/dot.rs",
-          "line": 446
+          "file": "crates/onesimus-dird/src/commands/bvfs.rs",
+          "line": 912
         },
         "declared_arguments": [
           "jobid",
@@ -2126,12 +2154,12 @@
       "source": {
         "file": "core/src/dird/ua_cmds.cc",
         "line": 286,
-        "url": "https://github.com/bareos/bareos/blob/fc2c79b6c43eb5752e98ebd86116593dbbbe0c68/core/src/dird/ua_cmds.cc#L286"
+        "url": "https://github.com/bareos/bareos/blob/18be77e6832e33f5acd64094b9cba6066f2503f9/core/src/dird/ua_cmds.cc#L286"
       },
       "handler_source": {
         "file": "core/src/dird/ua_dotcmds.cc",
         "line": 449,
-        "url": "https://github.com/bareos/bareos/blob/fc2c79b6c43eb5752e98ebd86116593dbbbe0c68/core/src/dird/ua_dotcmds.cc#L449"
+        "url": "https://github.com/bareos/bareos/blob/18be77e6832e33f5acd64094b9cba6066f2503f9/core/src/dird/ua_dotcmds.cc#L449"
       },
       "audit_event": true,
       "usage": "jobid=<jobid> path=<path> | pathid=<pathid> [limit=<limit>] [offset=<offset>]",
@@ -2146,14 +2174,14 @@
       ],
       "onesimus": {
         "canonical_name": ".bvfs_lsfiles",
-        "handler": "commands::dot::cmd_bvfs_lsfiles",
+        "handler": "commands::bvfs::cmd_bvfs_lsfiles",
         "registry": {
           "file": "crates/onesimus-dird/src/command_registry.rs",
-          "line": 314
+          "line": 315
         },
         "implementation": {
-          "file": "crates/onesimus-dird/src/commands/dot.rs",
-          "line": 456
+          "file": "crates/onesimus-dird/src/commands/bvfs.rs",
+          "line": 894
         },
         "declared_arguments": [
           "jobid",
@@ -2175,12 +2203,12 @@
       "source": {
         "file": "core/src/dird/ua_cmds.cc",
         "line": 290,
-        "url": "https://github.com/bareos/bareos/blob/fc2c79b6c43eb5752e98ebd86116593dbbbe0c68/core/src/dird/ua_cmds.cc#L290"
+        "url": "https://github.com/bareos/bareos/blob/18be77e6832e33f5acd64094b9cba6066f2503f9/core/src/dird/ua_cmds.cc#L290"
       },
       "handler_source": {
         "file": "core/src/dird/ua_dotcmds.cc",
         "line": 109,
-        "url": "https://github.com/bareos/bareos/blob/fc2c79b6c43eb5752e98ebd86116593dbbbe0c68/core/src/dird/ua_dotcmds.cc#L109"
+        "url": "https://github.com/bareos/bareos/blob/18be77e6832e33f5acd64094b9cba6066f2503f9/core/src/dird/ua_dotcmds.cc#L109"
       },
       "audit_event": true,
       "usage": "[jobid=<jobid>]",
@@ -2191,14 +2219,14 @@
       ],
       "onesimus": {
         "canonical_name": ".bvfs_update",
-        "handler": "commands::dot::cmd_bvfs_update",
+        "handler": "commands::bvfs::cmd_bvfs_update",
         "registry": {
           "file": "crates/onesimus-dird/src/command_registry.rs",
-          "line": 309
+          "line": 310
         },
         "implementation": {
-          "file": "crates/onesimus-dird/src/commands/dot.rs",
-          "line": 408
+          "file": "crates/onesimus-dird/src/commands/bvfs.rs",
+          "line": 817
         },
         "declared_arguments": [
           "jobid"
@@ -2219,12 +2247,12 @@
       "source": {
         "file": "core/src/dird/ua_cmds.cc",
         "line": 292,
-        "url": "https://github.com/bareos/bareos/blob/fc2c79b6c43eb5752e98ebd86116593dbbbe0c68/core/src/dird/ua_cmds.cc#L292"
+        "url": "https://github.com/bareos/bareos/blob/18be77e6832e33f5acd64094b9cba6066f2503f9/core/src/dird/ua_cmds.cc#L292"
       },
       "handler_source": {
         "file": "core/src/dird/ua_dotcmds.cc",
         "line": 595,
-        "url": "https://github.com/bareos/bareos/blob/fc2c79b6c43eb5752e98ebd86116593dbbbe0c68/core/src/dird/ua_dotcmds.cc#L595"
+        "url": "https://github.com/bareos/bareos/blob/18be77e6832e33f5acd64094b9cba6066f2503f9/core/src/dird/ua_dotcmds.cc#L595"
       },
       "audit_event": true,
       "usage": "jobid=<jobid> | ujobid=<unique-jobid> [all]",
@@ -2236,14 +2264,14 @@
       ],
       "onesimus": {
         "canonical_name": ".bvfs_get_jobids",
-        "handler": "commands::dot::cmd_bvfs_get_jobids",
+        "handler": "commands::bvfs::cmd_bvfs_get_jobids",
         "registry": {
           "file": "crates/onesimus-dird/src/command_registry.rs",
-          "line": 312
+          "line": 313
         },
         "implementation": {
-          "file": "crates/onesimus-dird/src/commands/dot.rs",
-          "line": 433
+          "file": "crates/onesimus-dird/src/commands/bvfs.rs",
+          "line": 978
         },
         "declared_arguments": [
           "jobid"
@@ -2264,12 +2292,12 @@
       "source": {
         "file": "core/src/dird/ua_cmds.cc",
         "line": 295,
-        "url": "https://github.com/bareos/bareos/blob/fc2c79b6c43eb5752e98ebd86116593dbbbe0c68/core/src/dird/ua_cmds.cc#L295"
+        "url": "https://github.com/bareos/bareos/blob/18be77e6832e33f5acd64094b9cba6066f2503f9/core/src/dird/ua_cmds.cc#L295"
       },
       "handler_source": {
         "file": "core/src/dird/ua_dotcmds.cc",
         "line": 546,
-        "url": "https://github.com/bareos/bareos/blob/fc2c79b6c43eb5752e98ebd86116593dbbbe0c68/core/src/dird/ua_dotcmds.cc#L546"
+        "url": "https://github.com/bareos/bareos/blob/18be77e6832e33f5acd64094b9cba6066f2503f9/core/src/dird/ua_dotcmds.cc#L546"
       },
       "audit_event": true,
       "usage": "jobid=0 client=<client-name> pathid=<path-id> filename=<file-name> [copies] [versions]",
@@ -2283,14 +2311,14 @@
       ],
       "onesimus": {
         "canonical_name": ".bvfs_versions",
-        "handler": "commands::dot::cmd_bvfs_versions",
+        "handler": "commands::bvfs::cmd_bvfs_versions",
         "registry": {
           "file": "crates/onesimus-dird/src/command_registry.rs",
-          "line": 315
+          "line": 316
         },
         "implementation": {
-          "file": "crates/onesimus-dird/src/commands/dot.rs",
-          "line": 465
+          "file": "crates/onesimus-dird/src/commands/bvfs.rs",
+          "line": 938
         },
         "declared_arguments": [
           "jobid",
@@ -2313,12 +2341,12 @@
       "source": {
         "file": "core/src/dird/ua_cmds.cc",
         "line": 299,
-        "url": "https://github.com/bareos/bareos/blob/fc2c79b6c43eb5752e98ebd86116593dbbbe0c68/core/src/dird/ua_cmds.cc#L299"
+        "url": "https://github.com/bareos/bareos/blob/18be77e6832e33f5acd64094b9cba6066f2503f9/core/src/dird/ua_cmds.cc#L299"
       },
       "handler_source": {
         "file": "core/src/dird/ua_dotcmds.cc",
         "line": 408,
-        "url": "https://github.com/bareos/bareos/blob/fc2c79b6c43eb5752e98ebd86116593dbbbe0c68/core/src/dird/ua_dotcmds.cc#L408"
+        "url": "https://github.com/bareos/bareos/blob/18be77e6832e33f5acd64094b9cba6066f2503f9/core/src/dird/ua_dotcmds.cc#L408"
       },
       "audit_event": true,
       "usage": "path=<handle> jobid=<jobid> [fileid=<file-id>] [dirid=<dirid>] [hardlink=<hardlink>]",
@@ -2333,14 +2361,14 @@
       ],
       "onesimus": {
         "canonical_name": ".bvfs_restore",
-        "handler": "commands::dot::cmd_bvfs_restore",
+        "handler": "commands::bvfs::cmd_bvfs_restore",
         "registry": {
           "file": "crates/onesimus-dird/src/command_registry.rs",
-          "line": 316
+          "line": 317
         },
         "implementation": {
-          "file": "crates/onesimus-dird/src/commands/dot.rs",
-          "line": 473
+          "file": "crates/onesimus-dird/src/commands/bvfs.rs",
+          "line": 872
         },
         "declared_arguments": [
           "jobid"
@@ -2361,12 +2389,12 @@
       "source": {
         "file": "core/src/dird/ua_cmds.cc",
         "line": 304,
-        "url": "https://github.com/bareos/bareos/blob/fc2c79b6c43eb5752e98ebd86116593dbbbe0c68/core/src/dird/ua_cmds.cc#L304"
+        "url": "https://github.com/bareos/bareos/blob/18be77e6832e33f5acd64094b9cba6066f2503f9/core/src/dird/ua_cmds.cc#L304"
       },
       "handler_source": {
         "file": "core/src/dird/ua_dotcmds.cc",
         "line": 390,
-        "url": "https://github.com/bareos/bareos/blob/fc2c79b6c43eb5752e98ebd86116593dbbbe0c68/core/src/dird/ua_dotcmds.cc#L390"
+        "url": "https://github.com/bareos/bareos/blob/18be77e6832e33f5acd64094b9cba6066f2503f9/core/src/dird/ua_dotcmds.cc#L390"
       },
       "audit_event": true,
       "usage": "path=<handle>",
@@ -2377,14 +2405,14 @@
       ],
       "onesimus": {
         "canonical_name": ".bvfs_cleanup",
-        "handler": "commands::dot::cmd_bvfs_cleanup",
+        "handler": "commands::bvfs::cmd_bvfs_cleanup",
         "registry": {
           "file": "crates/onesimus-dird/src/command_registry.rs",
-          "line": 310
+          "line": 311
         },
         "implementation": {
-          "file": "crates/onesimus-dird/src/commands/dot.rs",
-          "line": 417
+          "file": "crates/onesimus-dird/src/commands/bvfs.rs",
+          "line": 857
         },
         "declared_arguments": [],
         "status": "stub",
@@ -2403,12 +2431,12 @@
       "source": {
         "file": "core/src/dird/ua_cmds.cc",
         "line": 307,
-        "url": "https://github.com/bareos/bareos/blob/fc2c79b6c43eb5752e98ebd86116593dbbbe0c68/core/src/dird/ua_cmds.cc#L307"
+        "url": "https://github.com/bareos/bareos/blob/18be77e6832e33f5acd64094b9cba6066f2503f9/core/src/dird/ua_cmds.cc#L307"
       },
       "handler_source": {
         "file": "core/src/dird/ua_dotcmds.cc",
         "line": 127,
-        "url": "https://github.com/bareos/bareos/blob/fc2c79b6c43eb5752e98ebd86116593dbbbe0c68/core/src/dird/ua_dotcmds.cc#L127"
+        "url": "https://github.com/bareos/bareos/blob/18be77e6832e33f5acd64094b9cba6066f2503f9/core/src/dird/ua_dotcmds.cc#L127"
       },
       "audit_event": true,
       "usage": "yes",
@@ -2417,14 +2445,14 @@
       "argument_keywords_in_help": [],
       "onesimus": {
         "canonical_name": ".bvfs_clear_cache",
-        "handler": "commands::dot::cmd_bvfs_clear_cache",
+        "handler": "commands::bvfs::cmd_bvfs_clear_cache",
         "registry": {
           "file": "crates/onesimus-dird/src/command_registry.rs",
-          "line": 311
+          "line": 312
         },
         "implementation": {
-          "file": "crates/onesimus-dird/src/commands/dot.rs",
-          "line": 423
+          "file": "crates/onesimus-dird/src/commands/bvfs.rs",
+          "line": 839
         },
         "declared_arguments": [
           "yes"
@@ -2445,12 +2473,12 @@
       "source": {
         "file": "core/src/dird/ua_cmds.cc",
         "line": 309,
-        "url": "https://github.com/bareos/bareos/blob/fc2c79b6c43eb5752e98ebd86116593dbbbe0c68/core/src/dird/ua_cmds.cc#L309"
+        "url": "https://github.com/bareos/bareos/blob/18be77e6832e33f5acd64094b9cba6066f2503f9/core/src/dird/ua_cmds.cc#L309"
       },
       "handler_source": {
         "file": "core/src/dird/ua_cmds.cc",
         "line": 611,
-        "url": "https://github.com/bareos/bareos/blob/fc2c79b6c43eb5752e98ebd86116593dbbbe0c68/core/src/dird/ua_cmds.cc#L611"
+        "url": "https://github.com/bareos/bareos/blob/18be77e6832e33f5acd64094b9cba6066f2503f9/core/src/dird/ua_cmds.cc#L611"
       },
       "audit_event": true,
       "usage": "pool=<pool-name> storage=<storage-name> jobid=<jobid>",
@@ -2466,11 +2494,11 @@
         "handler": "commands::extra::cmd_add",
         "registry": {
           "file": "crates/onesimus-dird/src/command_registry.rs",
-          "line": 252
+          "line": 253
         },
         "implementation": {
           "file": "crates/onesimus-dird/src/commands/extra.rs",
-          "line": 366
+          "line": 855
         },
         "declared_arguments": [
           "pool"
@@ -2491,12 +2519,12 @@
       "source": {
         "file": "core/src/dird/ua_cmds.cc",
         "line": 311,
-        "url": "https://github.com/bareos/bareos/blob/fc2c79b6c43eb5752e98ebd86116593dbbbe0c68/core/src/dird/ua_cmds.cc#L311"
+        "url": "https://github.com/bareos/bareos/blob/18be77e6832e33f5acd64094b9cba6066f2503f9/core/src/dird/ua_cmds.cc#L311"
       },
       "handler_source": {
         "file": "core/src/dird/ua_output.cc",
-        "line": 284,
-        "url": "https://github.com/bareos/bareos/blob/fc2c79b6c43eb5752e98ebd86116593dbbbe0c68/core/src/dird/ua_output.cc#L284"
+        "line": 283,
+        "url": "https://github.com/bareos/bareos/blob/18be77e6832e33f5acd64094b9cba6066f2503f9/core/src/dird/ua_output.cc#L283"
       },
       "audit_event": false,
       "usage": "on | off",
@@ -2508,11 +2536,11 @@
         "handler": "commands::extra::cmd_autodisplay",
         "registry": {
           "file": "crates/onesimus-dird/src/command_registry.rs",
-          "line": 220
+          "line": 221
         },
         "implementation": {
           "file": "crates/onesimus-dird/src/commands/extra.rs",
-          "line": 26
+          "line": 50
         },
         "declared_arguments": [],
         "status": "registered_unverified",
@@ -2529,12 +2557,12 @@
       "source": {
         "file": "core/src/dird/ua_cmds.cc",
         "line": 313,
-        "url": "https://github.com/bareos/bareos/blob/fc2c79b6c43eb5752e98ebd86116593dbbbe0c68/core/src/dird/ua_cmds.cc#L313"
+        "url": "https://github.com/bareos/bareos/blob/18be77e6832e33f5acd64094b9cba6066f2503f9/core/src/dird/ua_cmds.cc#L313"
       },
       "handler_source": {
         "file": "core/src/dird/ua_cmds.cc",
         "line": 743,
-        "url": "https://github.com/bareos/bareos/blob/fc2c79b6c43eb5752e98ebd86116593dbbbe0c68/core/src/dird/ua_cmds.cc#L743"
+        "url": "https://github.com/bareos/bareos/blob/18be77e6832e33f5acd64094b9cba6066f2503f9/core/src/dird/ua_cmds.cc#L743"
       },
       "audit_event": true,
       "usage": "on | off",
@@ -2546,11 +2574,11 @@
         "handler": "commands::extra::cmd_automount",
         "registry": {
           "file": "crates/onesimus-dird/src/command_registry.rs",
-          "line": 221
+          "line": 222
         },
         "implementation": {
           "file": "crates/onesimus-dird/src/commands/extra.rs",
-          "line": 31
+          "line": 58
         },
         "declared_arguments": [],
         "status": "stub",
@@ -2569,12 +2597,12 @@
       "source": {
         "file": "core/src/dird/ua_cmds.cc",
         "line": 315,
-        "url": "https://github.com/bareos/bareos/blob/fc2c79b6c43eb5752e98ebd86116593dbbbe0c68/core/src/dird/ua_cmds.cc#L315"
+        "url": "https://github.com/bareos/bareos/blob/18be77e6832e33f5acd64094b9cba6066f2503f9/core/src/dird/ua_cmds.cc#L315"
       },
       "handler_source": {
         "file": "core/src/dird/ua_cmds.cc",
         "line": 803,
-        "url": "https://github.com/bareos/bareos/blob/fc2c79b6c43eb5752e98ebd86116593dbbbe0c68/core/src/dird/ua_cmds.cc#L803"
+        "url": "https://github.com/bareos/bareos/blob/18be77e6832e33f5acd64094b9cba6066f2503f9/core/src/dird/ua_cmds.cc#L803"
       },
       "audit_event": true,
       "usage": "storage=<storage-name> | jobid=<jobid> | job=<job-name> | ujobid=<unique-jobid> | state=<job_state> | all yes",
@@ -2589,14 +2617,14 @@
       ],
       "onesimus": {
         "canonical_name": "cancel",
-        "handler": "commands::job::cmd_cancel",
+        "handler": "commands::cancel::cmd_cancel",
         "registry": {
           "file": "crates/onesimus-dird/src/command_registry.rs",
           "line": 126
         },
         "implementation": {
-          "file": "crates/onesimus-dird/src/commands/job.rs",
-          "line": 220
+          "file": "crates/onesimus-dird/src/commands/cancel.rs",
+          "line": 63
         },
         "declared_arguments": [
           "jobid"
@@ -2617,12 +2645,12 @@
       "source": {
         "file": "core/src/dird/ua_cmds.cc",
         "line": 319,
-        "url": "https://github.com/bareos/bareos/blob/fc2c79b6c43eb5752e98ebd86116593dbbbe0c68/core/src/dird/ua_cmds.cc#L319"
+        "url": "https://github.com/bareos/bareos/blob/18be77e6832e33f5acd64094b9cba6066f2503f9/core/src/dird/ua_cmds.cc#L319"
       },
       "handler_source": {
         "file": "core/src/dird/ua_configure.cc",
         "line": 456,
-        "url": "https://github.com/bareos/bareos/blob/fc2c79b6c43eb5752e98ebd86116593dbbbe0c68/core/src/dird/ua_configure.cc#L456"
+        "url": "https://github.com/bareos/bareos/blob/18be77e6832e33f5acd64094b9cba6066f2503f9/core/src/dird/ua_configure.cc#L456"
       },
       "audit_event": true,
       "usage": null,
@@ -2630,7 +2658,7 @@
       "usage_generator": {
         "file": "core/src/dird/dird_conf.cc",
         "line": 918,
-        "url": "https://github.com/bareos/bareos/blob/fc2c79b6c43eb5752e98ebd86116593dbbbe0c68/core/src/dird/dird_conf.cc#L918"
+        "url": "https://github.com/bareos/bareos/blob/18be77e6832e33f5acd64094b9cba6066f2503f9/core/src/dird/dird_conf.cc#L918"
       },
       "configure_add_resource_types": [
         "client",
@@ -2659,7 +2687,7 @@
         },
         "implementation": {
           "file": "crates/onesimus-dird/src/commands/configure.rs",
-          "line": 42
+          "line": 79
         },
         "declared_arguments": [
           "sub"
@@ -2680,12 +2708,12 @@
       "source": {
         "file": "core/src/dird/ua_cmds.cc",
         "line": 321,
-        "url": "https://github.com/bareos/bareos/blob/fc2c79b6c43eb5752e98ebd86116593dbbbe0c68/core/src/dird/ua_cmds.cc#L321"
+        "url": "https://github.com/bareos/bareos/blob/18be77e6832e33f5acd64094b9cba6066f2503f9/core/src/dird/ua_cmds.cc#L321"
       },
       "handler_source": {
         "file": "core/src/dird/ua_cmds.cc",
         "line": 820,
-        "url": "https://github.com/bareos/bareos/blob/fc2c79b6c43eb5752e98ebd86116593dbbbe0c68/core/src/dird/ua_cmds.cc#L820"
+        "url": "https://github.com/bareos/bareos/blob/18be77e6832e33f5acd64094b9cba6066f2503f9/core/src/dird/ua_cmds.cc#L820"
       },
       "audit_event": true,
       "usage": "pool=<pool-name>",
@@ -2699,11 +2727,11 @@
         "handler": "commands::extra::cmd_create",
         "registry": {
           "file": "crates/onesimus-dird/src/command_registry.rs",
-          "line": 251
+          "line": 252
         },
         "implementation": {
           "file": "crates/onesimus-dird/src/commands/extra.rs",
-          "line": 335
+          "line": 813
         },
         "declared_arguments": [
           "pool"
@@ -2722,12 +2750,12 @@
       "source": {
         "file": "core/src/dird/ua_cmds.cc",
         "line": 323,
-        "url": "https://github.com/bareos/bareos/blob/fc2c79b6c43eb5752e98ebd86116593dbbbe0c68/core/src/dird/ua_cmds.cc#L323"
+        "url": "https://github.com/bareos/bareos/blob/18be77e6832e33f5acd64094b9cba6066f2503f9/core/src/dird/ua_cmds.cc#L323"
       },
       "handler_source": {
         "file": "core/src/dird/ua_cmds.cc",
-        "line": 2220,
-        "url": "https://github.com/bareos/bareos/blob/fc2c79b6c43eb5752e98ebd86116593dbbbe0c68/core/src/dird/ua_cmds.cc#L2220"
+        "line": 2222,
+        "url": "https://github.com/bareos/bareos/blob/18be77e6832e33f5acd64094b9cba6066f2503f9/core/src/dird/ua_cmds.cc#L2222"
       },
       "audit_event": true,
       "usage": "[volume=<vol-name> [yes] | volume pool=<pool-name> [yes] | storage storage=<storage-name> | pool=<pool-name> | jobid=<jobid> | jobid=<jobid1,jobid2,...> | jobid=<jobid1-jobid9>]",
@@ -2748,7 +2776,7 @@
         },
         "implementation": {
           "file": "crates/onesimus-dird/src/commands/extra.rs",
-          "line": 303
+          "line": 657
         },
         "declared_arguments": [
           "volume",
@@ -2768,12 +2796,12 @@
       "source": {
         "file": "core/src/dird/ua_cmds.cc",
         "line": 328,
-        "url": "https://github.com/bareos/bareos/blob/fc2c79b6c43eb5752e98ebd86116593dbbbe0c68/core/src/dird/ua_cmds.cc#L328"
+        "url": "https://github.com/bareos/bareos/blob/18be77e6832e33f5acd64094b9cba6066f2503f9/core/src/dird/ua_cmds.cc#L328"
       },
       "handler_source": {
         "file": "core/src/dird/ua_cmds.cc",
-        "line": 1111,
-        "url": "https://github.com/bareos/bareos/blob/fc2c79b6c43eb5752e98ebd86116593dbbbe0c68/core/src/dird/ua_cmds.cc#L1111"
+        "line": 1112,
+        "url": "https://github.com/bareos/bareos/blob/18be77e6832e33f5acd64094b9cba6066f2503f9/core/src/dird/ua_cmds.cc#L1112"
       },
       "audit_event": true,
       "usage": "job=<job-name> client=<client-name> schedule=<schedule-name>",
@@ -2793,7 +2821,7 @@
         },
         "implementation": {
           "file": "crates/onesimus-dird/src/commands/job.rs",
-          "line": 290
+          "line": 573
         },
         "declared_arguments": [
           "job",
@@ -2815,12 +2843,12 @@
       "source": {
         "file": "core/src/dird/ua_cmds.cc",
         "line": 331,
-        "url": "https://github.com/bareos/bareos/blob/fc2c79b6c43eb5752e98ebd86116593dbbbe0c68/core/src/dird/ua_cmds.cc#L331"
+        "url": "https://github.com/bareos/bareos/blob/18be77e6832e33f5acd64094b9cba6066f2503f9/core/src/dird/ua_cmds.cc#L331"
       },
       "handler_source": {
         "file": "core/src/dird/ua_cmds.cc",
-        "line": 1105,
-        "url": "https://github.com/bareos/bareos/blob/fc2c79b6c43eb5752e98ebd86116593dbbbe0c68/core/src/dird/ua_cmds.cc#L1105"
+        "line": 1106,
+        "url": "https://github.com/bareos/bareos/blob/18be77e6832e33f5acd64094b9cba6066f2503f9/core/src/dird/ua_cmds.cc#L1106"
       },
       "audit_event": true,
       "usage": "job=<job-name> client=<client-name> schedule=<schedule-name>",
@@ -2840,7 +2868,7 @@
         },
         "implementation": {
           "file": "crates/onesimus-dird/src/commands/job.rs",
-          "line": 271
+          "line": 569
         },
         "declared_arguments": [
           "job",
@@ -2862,12 +2890,12 @@
       "source": {
         "file": "core/src/dird/ua_cmds.cc",
         "line": 334,
-        "url": "https://github.com/bareos/bareos/blob/fc2c79b6c43eb5752e98ebd86116593dbbbe0c68/core/src/dird/ua_cmds.cc#L334"
+        "url": "https://github.com/bareos/bareos/blob/18be77e6832e33f5acd64094b9cba6066f2503f9/core/src/dird/ua_cmds.cc#L334"
       },
       "handler_source": {
         "file": "core/src/dird/ua_cmds.cc",
-        "line": 1721,
-        "url": "https://github.com/bareos/bareos/blob/fc2c79b6c43eb5752e98ebd86116593dbbbe0c68/core/src/dird/ua_cmds.cc#L1721"
+        "line": 1723,
+        "url": "https://github.com/bareos/bareos/blob/18be77e6832e33f5acd64094b9cba6066f2503f9/core/src/dird/ua_cmds.cc#L1723"
       },
       "audit_event": true,
       "usage": "fileset=<fileset-name> client=<client-name> level=<level> accurate=<yes/no> job=<job-name> listing",
@@ -2882,14 +2910,14 @@
       ],
       "onesimus": {
         "canonical_name": "estimate",
-        "handler": "commands::admin::cmd_estimate",
+        "handler": "commands::estimate::cmd_estimate",
         "registry": {
           "file": "crates/onesimus-dird/src/command_registry.rs",
           "line": 186
         },
         "implementation": {
-          "file": "crates/onesimus-dird/src/commands/admin.rs",
-          "line": 368
+          "file": "crates/onesimus-dird/src/commands/estimate.rs",
+          "line": 139
         },
         "declared_arguments": [
           "job",
@@ -2913,12 +2941,12 @@
       "source": {
         "file": "core/src/dird/ua_cmds.cc",
         "line": 339,
-        "url": "https://github.com/bareos/bareos/blob/fc2c79b6c43eb5752e98ebd86116593dbbbe0c68/core/src/dird/ua_cmds.cc#L339"
+        "url": "https://github.com/bareos/bareos/blob/18be77e6832e33f5acd64094b9cba6066f2503f9/core/src/dird/ua_cmds.cc#L339"
       },
       "handler_source": {
         "file": "core/src/dird/ua_cmds.cc",
-        "line": 2594,
-        "url": "https://github.com/bareos/bareos/blob/fc2c79b6c43eb5752e98ebd86116593dbbbe0c68/core/src/dird/ua_cmds.cc#L2594"
+        "line": 2596,
+        "url": "https://github.com/bareos/bareos/blob/18be77e6832e33f5acd64094b9cba6066f2503f9/core/src/dird/ua_cmds.cc#L2596"
       },
       "audit_event": false,
       "usage": "",
@@ -2934,7 +2962,7 @@
         },
         "implementation": {
           "file": "crates/onesimus-dird/src/commands/basic.rs",
-          "line": 54
+          "line": 62
         },
         "declared_arguments": [],
         "status": "registered_unverified",
@@ -2951,12 +2979,12 @@
       "source": {
         "file": "core/src/dird/ua_cmds.cc",
         "line": 341,
-        "url": "https://github.com/bareos/bareos/blob/fc2c79b6c43eb5752e98ebd86116593dbbbe0c68/core/src/dird/ua_cmds.cc#L341"
+        "url": "https://github.com/bareos/bareos/blob/18be77e6832e33f5acd64094b9cba6066f2503f9/core/src/dird/ua_cmds.cc#L341"
       },
       "handler_source": {
         "file": "core/src/dird/ua_impexp.cc",
         "line": 1192,
-        "url": "https://github.com/bareos/bareos/blob/fc2c79b6c43eb5752e98ebd86116593dbbbe0c68/core/src/dird/ua_impexp.cc#L1192"
+        "url": "https://github.com/bareos/bareos/blob/18be77e6832e33f5acd64094b9cba6066f2503f9/core/src/dird/ua_impexp.cc#L1192"
       },
       "audit_event": true,
       "usage": "storage=<storage-name> srcslots=<slot-selection> [ dstslots=<slot-selection> volume=<volume-name> scan ]",
@@ -2973,11 +3001,11 @@
         "handler": "commands::extra::cmd_export",
         "registry": {
           "file": "crates/onesimus-dird/src/command_registry.rs",
-          "line": 254
+          "line": 255
         },
         "implementation": {
           "file": "crates/onesimus-dird/src/commands/extra.rs",
-          "line": 403
+          "line": 988
         },
         "declared_arguments": [
           "storage"
@@ -2998,12 +3026,12 @@
       "source": {
         "file": "core/src/dird/ua_cmds.cc",
         "line": 346,
-        "url": "https://github.com/bareos/bareos/blob/fc2c79b6c43eb5752e98ebd86116593dbbbe0c68/core/src/dird/ua_cmds.cc#L346"
+        "url": "https://github.com/bareos/bareos/blob/18be77e6832e33f5acd64094b9cba6066f2503f9/core/src/dird/ua_cmds.cc#L346"
       },
       "handler_source": {
         "file": "core/src/dird/ua_output.cc",
-        "line": 303,
-        "url": "https://github.com/bareos/bareos/blob/fc2c79b6c43eb5752e98ebd86116593dbbbe0c68/core/src/dird/ua_output.cc#L303"
+        "line": 302,
+        "url": "https://github.com/bareos/bareos/blob/18be77e6832e33f5acd64094b9cba6066f2503f9/core/src/dird/ua_output.cc#L302"
       },
       "audit_event": false,
       "usage": "on | off",
@@ -3015,11 +3043,11 @@
         "handler": "commands::extra::cmd_gui",
         "registry": {
           "file": "crates/onesimus-dird/src/command_registry.rs",
-          "line": 222
+          "line": 223
         },
         "implementation": {
           "file": "crates/onesimus-dird/src/commands/extra.rs",
-          "line": 36
+          "line": 66
         },
         "declared_arguments": [],
         "status": "registered_unverified",
@@ -3036,12 +3064,12 @@
       "source": {
         "file": "core/src/dird/ua_cmds.cc",
         "line": 350,
-        "url": "https://github.com/bareos/bareos/blob/fc2c79b6c43eb5752e98ebd86116593dbbbe0c68/core/src/dird/ua_cmds.cc#L350"
+        "url": "https://github.com/bareos/bareos/blob/18be77e6832e33f5acd64094b9cba6066f2503f9/core/src/dird/ua_cmds.cc#L350"
       },
       "handler_source": {
         "file": "core/src/dird/ua_cmds.cc",
-        "line": 2763,
-        "url": "https://github.com/bareos/bareos/blob/fc2c79b6c43eb5752e98ebd86116593dbbbe0c68/core/src/dird/ua_cmds.cc#L2763"
+        "line": 2765,
+        "url": "https://github.com/bareos/bareos/blob/18be77e6832e33f5acd64094b9cba6066f2503f9/core/src/dird/ua_cmds.cc#L2765"
       },
       "audit_event": false,
       "usage": "add autodisplay automount cancel configure create delete disable enable estimate exit gui label list llist messages memory mount prune purge quit query restore relabel release reload run status setbandwidth setdebug setip show sqlquery time trace truncate unmount umount update use var version wait",
@@ -3057,7 +3085,7 @@
         },
         "implementation": {
           "file": "crates/onesimus-dird/src/commands/basic.rs",
-          "line": 118
+          "line": 130
         },
         "declared_arguments": [
           "command"
@@ -3078,12 +3106,12 @@
       "source": {
         "file": "core/src/dird/ua_cmds.cc",
         "line": 358,
-        "url": "https://github.com/bareos/bareos/blob/fc2c79b6c43eb5752e98ebd86116593dbbbe0c68/core/src/dird/ua_cmds.cc#L358"
+        "url": "https://github.com/bareos/bareos/blob/18be77e6832e33f5acd64094b9cba6066f2503f9/core/src/dird/ua_cmds.cc#L358"
       },
       "handler_source": {
         "file": "core/src/dird/ua_impexp.cc",
         "line": 1186,
-        "url": "https://github.com/bareos/bareos/blob/fc2c79b6c43eb5752e98ebd86116593dbbbe0c68/core/src/dird/ua_impexp.cc#L1186"
+        "url": "https://github.com/bareos/bareos/blob/18be77e6832e33f5acd64094b9cba6066f2503f9/core/src/dird/ua_impexp.cc#L1186"
       },
       "audit_event": true,
       "usage": "storage=<storage-name> [ srcslots=<slot-selection> dstslots=<slot-selection> volume=<volume-name> scan ]",
@@ -3100,11 +3128,11 @@
         "handler": "commands::extra::cmd_import",
         "registry": {
           "file": "crates/onesimus-dird/src/command_registry.rs",
-          "line": 253
+          "line": 254
         },
         "implementation": {
           "file": "crates/onesimus-dird/src/commands/extra.rs",
-          "line": 391
+          "line": 984
         },
         "declared_arguments": [
           "storage"
@@ -3125,12 +3153,12 @@
       "source": {
         "file": "core/src/dird/ua_cmds.cc",
         "line": 363,
-        "url": "https://github.com/bareos/bareos/blob/fc2c79b6c43eb5752e98ebd86116593dbbbe0c68/core/src/dird/ua_cmds.cc#L363"
+        "url": "https://github.com/bareos/bareos/blob/18be77e6832e33f5acd64094b9cba6066f2503f9/core/src/dird/ua_cmds.cc#L363"
       },
       "handler_source": {
         "file": "core/src/dird/ua_label.cc",
         "line": 603,
-        "url": "https://github.com/bareos/bareos/blob/fc2c79b6c43eb5752e98ebd86116593dbbbe0c68/core/src/dird/ua_label.cc#L603"
+        "url": "https://github.com/bareos/bareos/blob/18be77e6832e33f5acd64094b9cba6066f2503f9/core/src/dird/ua_label.cc#L603"
       },
       "audit_event": true,
       "usage": "storage=<storage-name> volume=<volume-name> pool=<pool-name> slot=<slot> [ drive = <drivenum>] [ barcodes ] [ encrypt ] [ yes ]",
@@ -3152,7 +3180,7 @@
         },
         "implementation": {
           "file": "crates/onesimus-dird/src/commands/admin.rs",
-          "line": 33
+          "line": 26
         },
         "declared_arguments": [
           "storage",
@@ -3173,12 +3201,12 @@
       "source": {
         "file": "core/src/dird/ua_cmds.cc",
         "line": 367,
-        "url": "https://github.com/bareos/bareos/blob/fc2c79b6c43eb5752e98ebd86116593dbbbe0c68/core/src/dird/ua_cmds.cc#L367"
+        "url": "https://github.com/bareos/bareos/blob/18be77e6832e33f5acd64094b9cba6066f2503f9/core/src/dird/ua_cmds.cc#L367"
       },
       "handler_source": {
         "file": "core/src/dird/ua_output.cc",
-        "line": 556,
-        "url": "https://github.com/bareos/bareos/blob/fc2c79b6c43eb5752e98ebd86116593dbbbe0c68/core/src/dird/ua_output.cc#L556"
+        "line": 555,
+        "url": "https://github.com/bareos/bareos/blob/18be77e6832e33f5acd64094b9cba6066f2503f9/core/src/dird/ua_output.cc#L555"
       },
       "audit_event": true,
       "usage": "basefiles ( jobid=<jobid> | ujobid=<complete_name> ) | backups client=<client-name> [fileset=<fileset-name>] [jobstatus=<status>] [level=<level>] [order=<asc|desc>] [limit=<number>] [days=<number>] [hours=<number>] | client=<client-name> | clients | copies jobid=<jobid> | files jobid=<jobid> | files ujobid=<complete_name> | filesets | fileset [ filesetid=<filesetid> ] | fileset [ jobid=<jobid> ] | fileset [ ujobid=<complete_name> ] | jobs [job=<job-name>] [client=<client-name>] [jobstatus=<status>] [jobtype=<jobtype>] [joblevel=<joblevel>] [volume=<volumename>] [pool=<pool>] [days=<number>] [hours=<number>] [last] [count] | job=<job-name> [client=<client-name>] [jobstatus=<status>] [jobtype=<jobtype>] [joblevel=<joblevel>] [volume=<volumename>] [days=<number>] [hours=<number>] | jobid=<jobid> | ujobid=<complete_name> | joblog jobid=<jobid> [count] | joblog ujobid=<complete_name> [count] | jobmedia jobid=<jobid> | jobmedia ujobid=<complete_name> | jobtotals | jobstatistics jobid=<jobid> | log [client=<client-name>] [reverse] | media [ jobid=<jobid> | ujobid=<complete_name> | pool=<pool-name> | all ] | media=<media-name> | nextvolume job=<job-name> [days=<number>] | pools | pool=<pool-name> | poolid=<poolid> | storages | volumes [ jobid=<jobid> | ujobid=<complete_name> | pool=<pool-name> | all ] [count] | volume=<volume-name> | volumeid=<volumeid> | mediaid=<volumeid> | [current] | [enabled | disabled] | [limit=<number> [offset=<number>]]",
@@ -3216,7 +3244,7 @@
         },
         "implementation": {
           "file": "crates/onesimus-dird/src/commands/list.rs",
-          "line": 15
+          "line": 17
         },
         "declared_arguments": [
           "what",
@@ -3240,12 +3268,12 @@
       "source": {
         "file": "core/src/dird/ua_cmds.cc",
         "line": 369,
-        "url": "https://github.com/bareos/bareos/blob/fc2c79b6c43eb5752e98ebd86116593dbbbe0c68/core/src/dird/ua_cmds.cc#L369"
+        "url": "https://github.com/bareos/bareos/blob/18be77e6832e33f5acd64094b9cba6066f2503f9/core/src/dird/ua_cmds.cc#L369"
       },
       "handler_source": {
         "file": "core/src/dird/ua_output.cc",
-        "line": 550,
-        "url": "https://github.com/bareos/bareos/blob/fc2c79b6c43eb5752e98ebd86116593dbbbe0c68/core/src/dird/ua_output.cc#L550"
+        "line": 549,
+        "url": "https://github.com/bareos/bareos/blob/18be77e6832e33f5acd64094b9cba6066f2503f9/core/src/dird/ua_output.cc#L549"
       },
       "audit_event": true,
       "usage": "basefiles ( jobid=<jobid> | ujobid=<complete_name> ) | backups client=<client-name> [fileset=<fileset-name>] [jobstatus=<status>] [level=<level>] [order=<asc|desc>] [limit=<number>] [days=<number>] [hours=<number>] | client=<client-name> | clients | copies jobid=<jobid> | files jobid=<jobid> | files ujobid=<complete_name> | filesets | fileset [ filesetid=<filesetid> ] | fileset [ jobid=<jobid> ] | fileset [ ujobid=<complete_name> ] | jobs [job=<job-name>] [client=<client-name>] [jobstatus=<status>] [jobtype=<jobtype>] [joblevel=<joblevel>] [volume=<volumename>] [pool=<pool>] [days=<number>] [hours=<number>] [last] [count] | job=<job-name> [client=<client-name>] [jobstatus=<status>] [jobtype=<jobtype>] [joblevel=<joblevel>] [volume=<volumename>] [days=<number>] [hours=<number>] | jobid=<jobid> | ujobid=<complete_name> | joblog jobid=<jobid> [count] | joblog ujobid=<complete_name> [count] | jobmedia jobid=<jobid> | jobmedia ujobid=<complete_name> | jobtotals | jobstatistics jobid=<jobid> | log [client=<client-name>] [reverse] | media [ jobid=<jobid> | ujobid=<complete_name> | pool=<pool-name> | all ] | media=<media-name> | nextvolume job=<job-name> [days=<number>] | pools | pool=<pool-name> | poolid=<poolid> | storages | volumes [ jobid=<jobid> | ujobid=<complete_name> | pool=<pool-name> | all ] [count] | volume=<volume-name> | volumeid=<volumeid> | mediaid=<volumeid> | [current] | [enabled | disabled] | [limit=<number> [offset=<number>]]",
@@ -3283,7 +3311,7 @@
         },
         "implementation": {
           "file": "crates/onesimus-dird/src/commands/list.rs",
-          "line": 15
+          "line": 17
         },
         "declared_arguments": [
           "what",
@@ -3307,12 +3335,12 @@
       "source": {
         "file": "core/src/dird/ua_cmds.cc",
         "line": 371,
-        "url": "https://github.com/bareos/bareos/blob/fc2c79b6c43eb5752e98ebd86116593dbbbe0c68/core/src/dird/ua_cmds.cc#L371"
+        "url": "https://github.com/bareos/bareos/blob/18be77e6832e33f5acd64094b9cba6066f2503f9/core/src/dird/ua_cmds.cc#L371"
       },
       "handler_source": {
         "file": "core/src/dird/ua_output.cc",
-        "line": 1666,
-        "url": "https://github.com/bareos/bareos/blob/fc2c79b6c43eb5752e98ebd86116593dbbbe0c68/core/src/dird/ua_output.cc#L1666"
+        "line": 1665,
+        "url": "https://github.com/bareos/bareos/blob/18be77e6832e33f5acd64094b9cba6066f2503f9/core/src/dird/ua_output.cc#L1665"
       },
       "audit_event": false,
       "usage": "",
@@ -3324,11 +3352,11 @@
         "handler": "commands::extra::cmd_messages",
         "registry": {
           "file": "crates/onesimus-dird/src/command_registry.rs",
-          "line": 223
+          "line": 224
         },
         "implementation": {
           "file": "crates/onesimus-dird/src/commands/extra.rs",
-          "line": 42
+          "line": 87
         },
         "declared_arguments": [],
         "status": "registered_unverified",
@@ -3345,12 +3373,12 @@
       "source": {
         "file": "core/src/dird/ua_cmds.cc",
         "line": 373,
-        "url": "https://github.com/bareos/bareos/blob/fc2c79b6c43eb5752e98ebd86116593dbbbe0c68/core/src/dird/ua_cmds.cc#L373"
+        "url": "https://github.com/bareos/bareos/blob/18be77e6832e33f5acd64094b9cba6066f2503f9/core/src/dird/ua_cmds.cc#L373"
       },
       "handler_source": {
         "file": "core/src/dird/ua_cmds.cc",
-        "line": 2492,
-        "url": "https://github.com/bareos/bareos/blob/fc2c79b6c43eb5752e98ebd86116593dbbbe0c68/core/src/dird/ua_cmds.cc#L2492"
+        "line": 2494,
+        "url": "https://github.com/bareos/bareos/blob/18be77e6832e33f5acd64094b9cba6066f2503f9/core/src/dird/ua_cmds.cc#L2494"
       },
       "audit_event": false,
       "usage": "",
@@ -3362,11 +3390,11 @@
         "handler": "commands::extra::cmd_memory",
         "registry": {
           "file": "crates/onesimus-dird/src/command_registry.rs",
-          "line": 224
+          "line": 225
         },
         "implementation": {
           "file": "crates/onesimus-dird/src/commands/extra.rs",
-          "line": 61
+          "line": 97
         },
         "declared_arguments": [],
         "status": "registered_unverified",
@@ -3383,12 +3411,12 @@
       "source": {
         "file": "core/src/dird/ua_cmds.cc",
         "line": 375,
-        "url": "https://github.com/bareos/bareos/blob/fc2c79b6c43eb5752e98ebd86116593dbbbe0c68/core/src/dird/ua_cmds.cc#L375"
+        "url": "https://github.com/bareos/bareos/blob/18be77e6832e33f5acd64094b9cba6066f2503f9/core/src/dird/ua_cmds.cc#L375"
       },
       "handler_source": {
         "file": "core/src/dird/ua_cmds.cc",
-        "line": 2541,
-        "url": "https://github.com/bareos/bareos/blob/fc2c79b6c43eb5752e98ebd86116593dbbbe0c68/core/src/dird/ua_cmds.cc#L2541"
+        "line": 2543,
+        "url": "https://github.com/bareos/bareos/blob/18be77e6832e33f5acd64094b9cba6066f2503f9/core/src/dird/ua_cmds.cc#L2543"
       },
       "audit_event": true,
       "usage": "storage=<storage-name> slot=<num> drive=<drivenum> jobid=<jobid> | job=<job-name> | ujobid=<complete_name>",
@@ -3411,7 +3439,7 @@
         },
         "implementation": {
           "file": "crates/onesimus-dird/src/commands/admin.rs",
-          "line": 101
+          "line": 171
         },
         "declared_arguments": [
           "storage"
@@ -3430,12 +3458,12 @@
       "source": {
         "file": "core/src/dird/ua_cmds.cc",
         "line": 379,
-        "url": "https://github.com/bareos/bareos/blob/fc2c79b6c43eb5752e98ebd86116593dbbbe0c68/core/src/dird/ua_cmds.cc#L379"
+        "url": "https://github.com/bareos/bareos/blob/18be77e6832e33f5acd64094b9cba6066f2503f9/core/src/dird/ua_cmds.cc#L379"
       },
       "handler_source": {
         "file": "core/src/dird/ua_impexp.cc",
         "line": 1198,
-        "url": "https://github.com/bareos/bareos/blob/fc2c79b6c43eb5752e98ebd86116593dbbbe0c68/core/src/dird/ua_impexp.cc#L1198"
+        "url": "https://github.com/bareos/bareos/blob/18be77e6832e33f5acd64094b9cba6066f2503f9/core/src/dird/ua_impexp.cc#L1198"
       },
       "audit_event": true,
       "usage": "storage=<storage-name> srcslots=<slot-selection> dstslots=<slot-selection>",
@@ -3451,11 +3479,11 @@
         "handler": "commands::extra::cmd_move",
         "registry": {
           "file": "crates/onesimus-dird/src/command_registry.rs",
-          "line": 255
+          "line": 256
         },
         "implementation": {
           "file": "crates/onesimus-dird/src/commands/extra.rs",
-          "line": 415
+          "line": 992
         },
         "declared_arguments": [],
         "status": "semantic_mismatch",
@@ -3474,12 +3502,12 @@
       "source": {
         "file": "core/src/dird/ua_cmds.cc",
         "line": 383,
-        "url": "https://github.com/bareos/bareos/blob/fc2c79b6c43eb5752e98ebd86116593dbbbe0c68/core/src/dird/ua_cmds.cc#L383"
+        "url": "https://github.com/bareos/bareos/blob/18be77e6832e33f5acd64094b9cba6066f2503f9/core/src/dird/ua_cmds.cc#L383"
       },
       "handler_source": {
         "file": "core/src/dird/ua_prune.cc",
-        "line": 362,
-        "url": "https://github.com/bareos/bareos/blob/fc2c79b6c43eb5752e98ebd86116593dbbbe0c68/core/src/dird/ua_prune.cc#L362"
+        "line": 363,
+        "url": "https://github.com/bareos/bareos/blob/18be77e6832e33f5acd64094b9cba6066f2503f9/core/src/dird/ua_prune.cc#L363"
       },
       "audit_event": true,
       "usage": "files [client=<client>] [pool=<pool>] [yes] | jobs [client=<client>] [pool=<pool>] [yes] | volume [all] [=volume] [pool=<pool>] [yes] | stats [yes] | directory [=directory] [client=<client>] [recursive] [yes]",
@@ -3498,7 +3526,7 @@
         },
         "implementation": {
           "file": "crates/onesimus-dird/src/commands/admin.rs",
-          "line": 425
+          "line": 647
         },
         "declared_arguments": [
           "volume",
@@ -3518,12 +3546,12 @@
       "source": {
         "file": "core/src/dird/ua_cmds.cc",
         "line": 390,
-        "url": "https://github.com/bareos/bareos/blob/fc2c79b6c43eb5752e98ebd86116593dbbbe0c68/core/src/dird/ua_cmds.cc#L390"
+        "url": "https://github.com/bareos/bareos/blob/18be77e6832e33f5acd64094b9cba6066f2503f9/core/src/dird/ua_cmds.cc#L390"
       },
       "handler_source": {
         "file": "core/src/dird/ua_purge.cc",
         "line": 65,
-        "url": "https://github.com/bareos/bareos/blob/fc2c79b6c43eb5752e98ebd86116593dbbbe0c68/core/src/dird/ua_purge.cc#L65"
+        "url": "https://github.com/bareos/bareos/blob/18be77e6832e33f5acd64094b9cba6066f2503f9/core/src/dird/ua_purge.cc#L65"
       },
       "audit_event": true,
       "usage": "[files [job=<job> | jobid=<jobid> | client=<client> | volume=<volume>]] | [jobs [client=<client> | volume=<volume>] | pool=<pool>] [jobstatus=<status>]] | [volume[=<volume>] [storage=<storage>] [pool=<pool> | allpools] [devicetype=<type>] [drive=<drivenum>] [action=<action>]] | [quota [client=<client>]]",
@@ -3550,7 +3578,7 @@
         },
         "implementation": {
           "file": "crates/onesimus-dird/src/commands/admin.rs",
-          "line": 457
+          "line": 1017
         },
         "declared_arguments": [
           "volume"
@@ -3569,12 +3597,12 @@
       "source": {
         "file": "core/src/dird/ua_cmds.cc",
         "line": 399,
-        "url": "https://github.com/bareos/bareos/blob/fc2c79b6c43eb5752e98ebd86116593dbbbe0c68/core/src/dird/ua_cmds.cc#L399"
+        "url": "https://github.com/bareos/bareos/blob/18be77e6832e33f5acd64094b9cba6066f2503f9/core/src/dird/ua_cmds.cc#L399"
       },
       "handler_source": {
         "file": "core/src/dird/ua_cmds.cc",
-        "line": 2594,
-        "url": "https://github.com/bareos/bareos/blob/fc2c79b6c43eb5752e98ebd86116593dbbbe0c68/core/src/dird/ua_cmds.cc#L2594"
+        "line": 2596,
+        "url": "https://github.com/bareos/bareos/blob/18be77e6832e33f5acd64094b9cba6066f2503f9/core/src/dird/ua_cmds.cc#L2596"
       },
       "audit_event": false,
       "usage": "",
@@ -3590,7 +3618,7 @@
         },
         "implementation": {
           "file": "crates/onesimus-dird/src/commands/basic.rs",
-          "line": 54
+          "line": 62
         },
         "declared_arguments": [],
         "status": "registered_unverified",
@@ -3607,12 +3635,12 @@
       "source": {
         "file": "core/src/dird/ua_cmds.cc",
         "line": 401,
-        "url": "https://github.com/bareos/bareos/blob/fc2c79b6c43eb5752e98ebd86116593dbbbe0c68/core/src/dird/ua_cmds.cc#L401"
+        "url": "https://github.com/bareos/bareos/blob/18be77e6832e33f5acd64094b9cba6066f2503f9/core/src/dird/ua_cmds.cc#L401"
       },
       "handler_source": {
         "file": "core/src/dird/ua_query.cc",
-        "line": 59,
-        "url": "https://github.com/bareos/bareos/blob/fc2c79b6c43eb5752e98ebd86116593dbbbe0c68/core/src/dird/ua_query.cc#L59"
+        "line": 62,
+        "url": "https://github.com/bareos/bareos/blob/18be77e6832e33f5acd64094b9cba6066f2503f9/core/src/dird/ua_query.cc#L62"
       },
       "audit_event": true,
       "usage": "",
@@ -3620,15 +3648,15 @@
       "allowed_in_runscript": false,
       "argument_keywords_in_help": [],
       "onesimus": {
-        "canonical_name": "sqlquery",
-        "handler": "commands::sql::cmd_sql_query",
+        "canonical_name": "query",
+        "handler": "commands::sql::cmd_query",
         "registry": {
           "file": "crates/onesimus-dird/src/command_registry.rs",
-          "line": 217
+          "line": 218
         },
         "implementation": {
           "file": "crates/onesimus-dird/src/commands/sql.rs",
-          "line": 32
+          "line": 132
         },
         "declared_arguments": [],
         "status": "semantic_mismatch",
@@ -3647,12 +3675,12 @@
       "source": {
         "file": "core/src/dird/ua_cmds.cc",
         "line": 402,
-        "url": "https://github.com/bareos/bareos/blob/fc2c79b6c43eb5752e98ebd86116593dbbbe0c68/core/src/dird/ua_cmds.cc#L402"
+        "url": "https://github.com/bareos/bareos/blob/18be77e6832e33f5acd64094b9cba6066f2503f9/core/src/dird/ua_cmds.cc#L402"
       },
       "handler_source": {
         "file": "core/src/dird/ua_restore.cc",
-        "line": 103,
-        "url": "https://github.com/bareos/bareos/blob/fc2c79b6c43eb5752e98ebd86116593dbbbe0c68/core/src/dird/ua_restore.cc#L103"
+        "line": 104,
+        "url": "https://github.com/bareos/bareos/blob/18be77e6832e33f5acd64094b9cba6066f2503f9/core/src/dird/ua_restore.cc#L104"
       },
       "audit_event": true,
       "usage": "where=</path> client=<client-name> storage=<storage-name> bootstrap=<file> restorejob=<job-name> comment=<text> jobid=<jobid> fileset=<fileset-name> replace=<always|never|ifolder|ifnewer> pluginoptions=<plugin-options-string> regexwhere=<regex> fileregex=<regex> restoreclient=<client-name> backupformat=<format> pool=<pool-name> file=<filename> directory=<directory> before=<date> strip_prefix=<prefix> add_prefix=<prefix> add_suffix=<suffix> select=<date> select before current copies done all",
@@ -3684,14 +3712,14 @@
       ],
       "onesimus": {
         "canonical_name": "restore",
-        "handler": "commands::admin::cmd_restore",
+        "handler": "commands::restore::cmd_restore",
         "registry": {
           "file": "crates/onesimus-dird/src/command_registry.rs",
           "line": 130
         },
         "implementation": {
-          "file": "crates/onesimus-dird/src/commands/admin.rs",
-          "line": 217
+          "file": "crates/onesimus-dird/src/commands/restore.rs",
+          "line": 73
         },
         "declared_arguments": [
           "client",
@@ -3718,12 +3746,12 @@
       "source": {
         "file": "core/src/dird/ua_cmds.cc",
         "line": 416,
-        "url": "https://github.com/bareos/bareos/blob/fc2c79b6c43eb5752e98ebd86116593dbbbe0c68/core/src/dird/ua_cmds.cc#L416"
+        "url": "https://github.com/bareos/bareos/blob/18be77e6832e33f5acd64094b9cba6066f2503f9/core/src/dird/ua_cmds.cc#L416"
       },
       "handler_source": {
         "file": "core/src/dird/ua_label.cc",
         "line": 608,
-        "url": "https://github.com/bareos/bareos/blob/fc2c79b6c43eb5752e98ebd86116593dbbbe0c68/core/src/dird/ua_label.cc#L608"
+        "url": "https://github.com/bareos/bareos/blob/18be77e6832e33f5acd64094b9cba6066f2503f9/core/src/dird/ua_label.cc#L608"
       },
       "audit_event": true,
       "usage": "storage=<storage-name> oldvolume=<old-volume-name>  volume=<new-volume-name> pool=<pool-name> [ encrypt ]",
@@ -3740,11 +3768,11 @@
         "handler": "commands::extra::cmd_relabel",
         "registry": {
           "file": "crates/onesimus-dird/src/command_registry.rs",
-          "line": 250
+          "line": 251
         },
         "implementation": {
           "file": "crates/onesimus-dird/src/commands/extra.rs",
-          "line": 280
+          "line": 631
         },
         "declared_arguments": [
           "storage",
@@ -3764,12 +3792,12 @@
       "source": {
         "file": "core/src/dird/ua_cmds.cc",
         "line": 420,
-        "url": "https://github.com/bareos/bareos/blob/fc2c79b6c43eb5752e98ebd86116593dbbbe0c68/core/src/dird/ua_cmds.cc#L420"
+        "url": "https://github.com/bareos/bareos/blob/18be77e6832e33f5acd64094b9cba6066f2503f9/core/src/dird/ua_cmds.cc#L420"
       },
       "handler_source": {
         "file": "core/src/dird/ua_cmds.cc",
-        "line": 2565,
-        "url": "https://github.com/bareos/bareos/blob/fc2c79b6c43eb5752e98ebd86116593dbbbe0c68/core/src/dird/ua_cmds.cc#L2565"
+        "line": 2567,
+        "url": "https://github.com/bareos/bareos/blob/18be77e6832e33f5acd64094b9cba6066f2503f9/core/src/dird/ua_cmds.cc#L2567"
       },
       "audit_event": true,
       "usage": "storage=<storage-name> [ drive=<drivenum> ] [ alldrives ]",
@@ -3788,7 +3816,7 @@
         },
         "implementation": {
           "file": "crates/onesimus-dird/src/commands/admin.rs",
-          "line": 124
+          "line": 179
         },
         "declared_arguments": [
           "storage"
@@ -3807,12 +3835,12 @@
       "source": {
         "file": "core/src/dird/ua_cmds.cc",
         "line": 423,
-        "url": "https://github.com/bareos/bareos/blob/fc2c79b6c43eb5752e98ebd86116593dbbbe0c68/core/src/dird/ua_cmds.cc#L423"
+        "url": "https://github.com/bareos/bareos/blob/18be77e6832e33f5acd64094b9cba6066f2503f9/core/src/dird/ua_cmds.cc#L423"
       },
       "handler_source": {
         "file": "core/src/dird/ua_cmds.cc",
-        "line": 2196,
-        "url": "https://github.com/bareos/bareos/blob/fc2c79b6c43eb5752e98ebd86116593dbbbe0c68/core/src/dird/ua_cmds.cc#L2196"
+        "line": 2198,
+        "url": "https://github.com/bareos/bareos/blob/18be77e6832e33f5acd64094b9cba6066f2503f9/core/src/dird/ua_cmds.cc#L2198"
       },
       "audit_event": true,
       "usage": "",
@@ -3828,7 +3856,7 @@
         },
         "implementation": {
           "file": "crates/onesimus-dird/src/commands/admin.rs",
-          "line": 566
+          "line": 1358
         },
         "declared_arguments": [],
         "status": "registered_unverified",
@@ -3845,12 +3873,12 @@
       "source": {
         "file": "core/src/dird/ua_cmds.cc",
         "line": 424,
-        "url": "https://github.com/bareos/bareos/blob/fc2c79b6c43eb5752e98ebd86116593dbbbe0c68/core/src/dird/ua_cmds.cc#L424"
+        "url": "https://github.com/bareos/bareos/blob/18be77e6832e33f5acd64094b9cba6066f2503f9/core/src/dird/ua_cmds.cc#L424"
       },
       "handler_source": {
         "file": "core/src/dird/ua_run.cc",
         "line": 307,
-        "url": "https://github.com/bareos/bareos/blob/fc2c79b6c43eb5752e98ebd86116593dbbbe0c68/core/src/dird/ua_run.cc#L307"
+        "url": "https://github.com/bareos/bareos/blob/18be77e6832e33f5acd64094b9cba6066f2503f9/core/src/dird/ua_run.cc#L307"
       },
       "audit_event": true,
       "usage": "jobid=<jobid> | since_jobid=<jobid> [ until_jobid=<jobid> ] | days=<nr_days> | hours=<nr_hours> | yes",
@@ -3868,11 +3896,11 @@
         "handler": "commands::extra::cmd_rerun",
         "registry": {
           "file": "crates/onesimus-dird/src/command_registry.rs",
-          "line": 249
+          "line": 250
         },
         "implementation": {
           "file": "crates/onesimus-dird/src/commands/extra.rs",
-          "line": 246
+          "line": 416
         },
         "declared_arguments": [
           "jobid"
@@ -3893,12 +3921,12 @@
       "source": {
         "file": "core/src/dird/ua_cmds.cc",
         "line": 428,
-        "url": "https://github.com/bareos/bareos/blob/fc2c79b6c43eb5752e98ebd86116593dbbbe0c68/core/src/dird/ua_cmds.cc#L428"
+        "url": "https://github.com/bareos/bareos/blob/18be77e6832e33f5acd64094b9cba6066f2503f9/core/src/dird/ua_cmds.cc#L428"
       },
       "handler_source": {
         "file": "core/src/dird/ua_cmds.cc",
-        "line": 1621,
-        "url": "https://github.com/bareos/bareos/blob/fc2c79b6c43eb5752e98ebd86116593dbbbe0c68/core/src/dird/ua_cmds.cc#L1621"
+        "line": 1623,
+        "url": "https://github.com/bareos/bareos/blob/18be77e6832e33f5acd64094b9cba6066f2503f9/core/src/dird/ua_cmds.cc#L1623"
       },
       "audit_event": true,
       "usage": "client=<client-name> | storage=<storage-name> <host-name>",
@@ -3913,11 +3941,11 @@
         "handler": "commands::resolve::cmd_resolve",
         "registry": {
           "file": "crates/onesimus-dird/src/command_registry.rs",
-          "line": 248
+          "line": 249
         },
         "implementation": {
           "file": "crates/onesimus-dird/src/commands/resolve.rs",
-          "line": 6
+          "line": 7
         },
         "declared_arguments": [
           "client",
@@ -3939,12 +3967,12 @@
       "source": {
         "file": "core/src/dird/ua_cmds.cc",
         "line": 431,
-        "url": "https://github.com/bareos/bareos/blob/fc2c79b6c43eb5752e98ebd86116593dbbbe0c68/core/src/dird/ua_cmds.cc#L431"
+        "url": "https://github.com/bareos/bareos/blob/18be77e6832e33f5acd64094b9cba6066f2503f9/core/src/dird/ua_cmds.cc#L431"
       },
       "handler_source": {
         "file": "core/src/dird/ua_run.cc",
         "line": 529,
-        "url": "https://github.com/bareos/bareos/blob/fc2c79b6c43eb5752e98ebd86116593dbbbe0c68/core/src/dird/ua_run.cc#L529"
+        "url": "https://github.com/bareos/bareos/blob/18be77e6832e33f5acd64094b9cba6066f2503f9/core/src/dird/ua_run.cc#L529"
       },
       "audit_event": true,
       "usage": "job=<job-name> client=<client-name> fileset=<fileset-name> level=<level> storage=<storage-name> where=<directory-prefix> when=<universal-time-specification> pool=<pool-name> pluginoptions=<plugin-options-string> accurate=<yes|no> comment=<text> spooldata=<yes|no> priority=<number> jobid=<jobid> catalog=<catalog> migrationjob=<job-name> backupclient=<client-name> backupformat=<format> nextpool=<pool-name> since=<universal-time-specification> verifyjob=<job-name> verifylist=<verify-list> migrationjob=<complete_name> [ yes ]",
@@ -4012,12 +4040,12 @@
       "source": {
         "file": "core/src/dird/ua_cmds.cc",
         "line": 446,
-        "url": "https://github.com/bareos/bareos/blob/fc2c79b6c43eb5752e98ebd86116593dbbbe0c68/core/src/dird/ua_cmds.cc#L446"
+        "url": "https://github.com/bareos/bareos/blob/18be77e6832e33f5acd64094b9cba6066f2503f9/core/src/dird/ua_cmds.cc#L446"
       },
       "handler_source": {
         "file": "core/src/dird/ua_status.cc",
         "line": 172,
-        "url": "https://github.com/bareos/bareos/blob/fc2c79b6c43eb5752e98ebd86116593dbbbe0c68/core/src/dird/ua_status.cc#L172"
+        "url": "https://github.com/bareos/bareos/blob/18be77e6832e33f5acd64094b9cba6066f2503f9/core/src/dird/ua_status.cc#L172"
       },
       "audit_event": true,
       "usage": "all | dir=<dir-name> | director | scheduler | schedule=<schedule-name> | client=<client-name> | storage=<storage-name> slots | days=<nr_days> | job=<job-name> | subscriptions [clients] [plugins] [all] [anonymize] [client=<client-name>] | configuration",
@@ -4040,7 +4068,7 @@
         },
         "implementation": {
           "file": "crates/onesimus-dird/src/commands/status.rs",
-          "line": 7
+          "line": 91
         },
         "declared_arguments": [
           "dir",
@@ -4063,12 +4091,12 @@
       "source": {
         "file": "core/src/dird/ua_cmds.cc",
         "line": 454,
-        "url": "https://github.com/bareos/bareos/blob/fc2c79b6c43eb5752e98ebd86116593dbbbe0c68/core/src/dird/ua_cmds.cc#L454"
+        "url": "https://github.com/bareos/bareos/blob/18be77e6832e33f5acd64094b9cba6066f2503f9/core/src/dird/ua_cmds.cc#L454"
       },
       "handler_source": {
         "file": "core/src/dird/ua_cmds.cc",
-        "line": 934,
-        "url": "https://github.com/bareos/bareos/blob/fc2c79b6c43eb5752e98ebd86116593dbbbe0c68/core/src/dird/ua_cmds.cc#L934"
+        "line": 935,
+        "url": "https://github.com/bareos/bareos/blob/18be77e6832e33f5acd64094b9cba6066f2503f9/core/src/dird/ua_cmds.cc#L935"
       },
       "audit_event": true,
       "usage": "[ client=<client-name> | storage=<storage-name> | jobid=<jobid> | job=<job-name> | ujobid=<unique-jobid> state=<job_state> | all ] limit=<nn-kbs> [ yes ]",
@@ -4088,11 +4116,11 @@
         "handler": "commands::bandwidth::cmd_setbandwidth",
         "registry": {
           "file": "crates/onesimus-dird/src/command_registry.rs",
-          "line": 245
+          "line": 246
         },
         "implementation": {
           "file": "crates/onesimus-dird/src/commands/bandwidth.rs",
-          "line": 7
+          "line": 10
         },
         "declared_arguments": [
           "client",
@@ -4115,12 +4143,12 @@
       "source": {
         "file": "core/src/dird/ua_cmds.cc",
         "line": 459,
-        "url": "https://github.com/bareos/bareos/blob/fc2c79b6c43eb5752e98ebd86116593dbbbe0c68/core/src/dird/ua_cmds.cc#L459"
+        "url": "https://github.com/bareos/bareos/blob/18be77e6832e33f5acd64094b9cba6066f2503f9/core/src/dird/ua_cmds.cc#L459"
       },
       "handler_source": {
         "file": "core/src/dird/ua_cmds.cc",
-        "line": 1361,
-        "url": "https://github.com/bareos/bareos/blob/fc2c79b6c43eb5752e98ebd86116593dbbbe0c68/core/src/dird/ua_cmds.cc#L1361"
+        "line": 1363,
+        "url": "https://github.com/bareos/bareos/blob/18be77e6832e33f5acd64094b9cba6066f2503f9/core/src/dird/ua_cmds.cc#L1363"
       },
       "audit_event": true,
       "usage": "level=<nn> trace=0/1 timestamp=0/1 client=<client-name> | dir | storage=<storage-name> | all",
@@ -4138,11 +4166,11 @@
         "handler": "commands::debug::cmd_setdebug",
         "registry": {
           "file": "crates/onesimus-dird/src/command_registry.rs",
-          "line": 236
+          "line": 237
         },
         "implementation": {
           "file": "crates/onesimus-dird/src/commands/debug.rs",
-          "line": 20
+          "line": 33
         },
         "declared_arguments": [
           "level",
@@ -4170,12 +4198,12 @@
       "source": {
         "file": "core/src/dird/ua_cmds.cc",
         "line": 463,
-        "url": "https://github.com/bareos/bareos/blob/fc2c79b6c43eb5752e98ebd86116593dbbbe0c68/core/src/dird/ua_cmds.cc#L463"
+        "url": "https://github.com/bareos/bareos/blob/18be77e6832e33f5acd64094b9cba6066f2503f9/core/src/dird/ua_cmds.cc#L463"
       },
       "handler_source": {
         "file": "core/src/dird/ua_cmds.cc",
-        "line": 1591,
-        "url": "https://github.com/bareos/bareos/blob/fc2c79b6c43eb5752e98ebd86116593dbbbe0c68/core/src/dird/ua_cmds.cc#L1591"
+        "line": 1593,
+        "url": "https://github.com/bareos/bareos/blob/18be77e6832e33f5acd64094b9cba6066f2503f9/core/src/dird/ua_cmds.cc#L1593"
       },
       "audit_event": true,
       "usage": "storage=<storage-name> device=<device-name> autoselect=<bool>",
@@ -4191,11 +4219,11 @@
         "handler": "commands::extra::cmd_setdevice",
         "registry": {
           "file": "crates/onesimus-dird/src/command_registry.rs",
-          "line": 247
+          "line": 248
         },
         "implementation": {
           "file": "crates/onesimus-dird/src/commands/extra.rs",
-          "line": 196
+          "line": 321
         },
         "declared_arguments": [
           "storage"
@@ -4216,12 +4244,12 @@
       "source": {
         "file": "core/src/dird/ua_cmds.cc",
         "line": 466,
-        "url": "https://github.com/bareos/bareos/blob/fc2c79b6c43eb5752e98ebd86116593dbbbe0c68/core/src/dird/ua_cmds.cc#L466"
+        "url": "https://github.com/bareos/bareos/blob/18be77e6832e33f5acd64094b9cba6066f2503f9/core/src/dird/ua_cmds.cc#L466"
       },
       "handler_source": {
         "file": "core/src/dird/ua_cmds.cc",
-        "line": 995,
-        "url": "https://github.com/bareos/bareos/blob/fc2c79b6c43eb5752e98ebd86116593dbbbe0c68/core/src/dird/ua_cmds.cc#L995"
+        "line": 996,
+        "url": "https://github.com/bareos/bareos/blob/18be77e6832e33f5acd64094b9cba6066f2503f9/core/src/dird/ua_cmds.cc#L996"
       },
       "audit_event": true,
       "usage": "",
@@ -4233,11 +4261,11 @@
         "handler": "commands::extra::cmd_setip",
         "registry": {
           "file": "crates/onesimus-dird/src/command_registry.rs",
-          "line": 246
+          "line": 247
         },
         "implementation": {
           "file": "crates/onesimus-dird/src/commands/extra.rs",
-          "line": 192
+          "line": 304
         },
         "declared_arguments": [
           "client"
@@ -4258,12 +4286,12 @@
       "source": {
         "file": "core/src/dird/ua_cmds.cc",
         "line": 468,
-        "url": "https://github.com/bareos/bareos/blob/fc2c79b6c43eb5752e98ebd86116593dbbbe0c68/core/src/dird/ua_cmds.cc#L468"
+        "url": "https://github.com/bareos/bareos/blob/18be77e6832e33f5acd64094b9cba6066f2503f9/core/src/dird/ua_cmds.cc#L468"
       },
       "handler_source": {
         "file": "core/src/dird/ua_output.cc",
-        "line": 426,
-        "url": "https://github.com/bareos/bareos/blob/fc2c79b6c43eb5752e98ebd86116593dbbbe0c68/core/src/dird/ua_output.cc#L426"
+        "line": 425,
+        "url": "https://github.com/bareos/bareos/blob/18be77e6832e33f5acd64094b9cba6066f2503f9/core/src/dird/ua_output.cc#L425"
       },
       "audit_event": true,
       "usage": "catalog=<catalog-name> | client=<client-name> | console=<console-name> | director=<director-name> | fileset=<fileset-name> | jobdefs=<job-defaults> | job=<job-name> | message=<message-resource-name> | pool=<pool-name> | profile=<profile-name> | schedule=<schedule-name> | storage=<storage-name> | catalog | clients | consoles | directors | filesets | jobdefs | jobs | messages | pools | profiles | schedules | storages | disabled [ clients | jobs | schedules ] | all [verbose]",
@@ -4288,11 +4316,11 @@
         "handler": "commands::show::cmd_show",
         "registry": {
           "file": "crates/onesimus-dird/src/command_registry.rs",
-          "line": 225
+          "line": 226
         },
         "implementation": {
           "file": "crates/onesimus-dird/src/commands/show.rs",
-          "line": 134
+          "line": 155
         },
         "declared_arguments": [
           "what"
@@ -4311,12 +4339,12 @@
       "source": {
         "file": "core/src/dird/ua_cmds.cc",
         "line": 482,
-        "url": "https://github.com/bareos/bareos/blob/fc2c79b6c43eb5752e98ebd86116593dbbbe0c68/core/src/dird/ua_cmds.cc#L482"
+        "url": "https://github.com/bareos/bareos/blob/18be77e6832e33f5acd64094b9cba6066f2503f9/core/src/dird/ua_cmds.cc#L482"
       },
       "handler_source": {
         "file": "core/src/dird/ua_query.cc",
-        "line": 228,
-        "url": "https://github.com/bareos/bareos/blob/fc2c79b6c43eb5752e98ebd86116593dbbbe0c68/core/src/dird/ua_query.cc#L228"
+        "line": 235,
+        "url": "https://github.com/bareos/bareos/blob/18be77e6832e33f5acd64094b9cba6066f2503f9/core/src/dird/ua_query.cc#L235"
       },
       "audit_event": true,
       "usage": "",
@@ -4332,7 +4360,7 @@
         },
         "implementation": {
           "file": "crates/onesimus-dird/src/commands/sql.rs",
-          "line": 32
+          "line": 92
         },
         "declared_arguments": [],
         "status": "registered_unverified",
@@ -4349,12 +4377,12 @@
       "source": {
         "file": "core/src/dird/ua_cmds.cc",
         "line": 484,
-        "url": "https://github.com/bareos/bareos/blob/fc2c79b6c43eb5752e98ebd86116593dbbbe0c68/core/src/dird/ua_cmds.cc#L484"
+        "url": "https://github.com/bareos/bareos/blob/18be77e6832e33f5acd64094b9cba6066f2503f9/core/src/dird/ua_cmds.cc#L484"
       },
       "handler_source": {
         "file": "core/src/dird/ua_cmds.cc",
-        "line": 1923,
-        "url": "https://github.com/bareos/bareos/blob/fc2c79b6c43eb5752e98ebd86116593dbbbe0c68/core/src/dird/ua_cmds.cc#L1923"
+        "line": 1925,
+        "url": "https://github.com/bareos/bareos/blob/18be77e6832e33f5acd64094b9cba6066f2503f9/core/src/dird/ua_cmds.cc#L1925"
       },
       "audit_event": false,
       "usage": "",
@@ -4370,7 +4398,7 @@
         },
         "implementation": {
           "file": "crates/onesimus-dird/src/commands/basic.rs",
-          "line": 38
+          "line": 45
         },
         "declared_arguments": [],
         "status": "registered_unverified",
@@ -4387,12 +4415,12 @@
       "source": {
         "file": "core/src/dird/ua_cmds.cc",
         "line": 485,
-        "url": "https://github.com/bareos/bareos/blob/fc2c79b6c43eb5752e98ebd86116593dbbbe0c68/core/src/dird/ua_cmds.cc#L485"
+        "url": "https://github.com/bareos/bareos/blob/18be77e6832e33f5acd64094b9cba6066f2503f9/core/src/dird/ua_cmds.cc#L485"
       },
       "handler_source": {
         "file": "core/src/dird/ua_cmds.cc",
-        "line": 1686,
-        "url": "https://github.com/bareos/bareos/blob/fc2c79b6c43eb5752e98ebd86116593dbbbe0c68/core/src/dird/ua_cmds.cc#L1686"
+        "line": 1688,
+        "url": "https://github.com/bareos/bareos/blob/18be77e6832e33f5acd64094b9cba6066f2503f9/core/src/dird/ua_cmds.cc#L1688"
       },
       "audit_event": true,
       "usage": "on | off",
@@ -4404,11 +4432,11 @@
         "handler": "commands::extra::cmd_trace",
         "registry": {
           "file": "crates/onesimus-dird/src/command_registry.rs",
-          "line": 229
+          "line": 230
         },
         "implementation": {
           "file": "crates/onesimus-dird/src/commands/extra.rs",
-          "line": 151
+          "line": 177
         },
         "declared_arguments": [],
         "status": "partial",
@@ -4427,12 +4455,12 @@
       "source": {
         "file": "core/src/dird/ua_cmds.cc",
         "line": 487,
-        "url": "https://github.com/bareos/bareos/blob/fc2c79b6c43eb5752e98ebd86116593dbbbe0c68/core/src/dird/ua_cmds.cc#L487"
+        "url": "https://github.com/bareos/bareos/blob/18be77e6832e33f5acd64094b9cba6066f2503f9/core/src/dird/ua_cmds.cc#L487"
       },
       "handler_source": {
         "file": "core/src/dird/ua_cmds.cc",
-        "line": 1972,
-        "url": "https://github.com/bareos/bareos/blob/fc2c79b6c43eb5752e98ebd86116593dbbbe0c68/core/src/dird/ua_cmds.cc#L1972"
+        "line": 1974,
+        "url": "https://github.com/bareos/bareos/blob/18be77e6832e33f5acd64094b9cba6066f2503f9/core/src/dird/ua_cmds.cc#L1974"
       },
       "audit_event": true,
       "usage": "volstatus=Purged [storage=<storage>] [pool=<pool>] [volume=<volume>] [drive=<drivenum>] [yes]",
@@ -4454,7 +4482,7 @@
         },
         "implementation": {
           "file": "crates/onesimus-dird/src/commands/admin.rs",
-          "line": 502
+          "line": 1222
         },
         "declared_arguments": [
           "storage",
@@ -4474,12 +4502,12 @@
       "source": {
         "file": "core/src/dird/ua_cmds.cc",
         "line": 492,
-        "url": "https://github.com/bareos/bareos/blob/fc2c79b6c43eb5752e98ebd86116593dbbbe0c68/core/src/dird/ua_cmds.cc#L492"
+        "url": "https://github.com/bareos/bareos/blob/18be77e6832e33f5acd64094b9cba6066f2503f9/core/src/dird/ua_cmds.cc#L492"
       },
       "handler_source": {
         "file": "core/src/dird/ua_cmds.cc",
-        "line": 2548,
-        "url": "https://github.com/bareos/bareos/blob/fc2c79b6c43eb5752e98ebd86116593dbbbe0c68/core/src/dird/ua_cmds.cc#L2548"
+        "line": 2550,
+        "url": "https://github.com/bareos/bareos/blob/18be77e6832e33f5acd64094b9cba6066f2503f9/core/src/dird/ua_cmds.cc#L2550"
       },
       "audit_event": true,
       "usage": "storage=<storage-name> [ drive=<drivenum> ] jobid=<jobid> | job=<job-name> | ujobid=<complete_name>",
@@ -4501,7 +4529,7 @@
         },
         "implementation": {
           "file": "crates/onesimus-dird/src/commands/admin.rs",
-          "line": 113
+          "line": 175
         },
         "declared_arguments": [
           "storage"
@@ -4520,12 +4548,12 @@
       "source": {
         "file": "core/src/dird/ua_cmds.cc",
         "line": 496,
-        "url": "https://github.com/bareos/bareos/blob/fc2c79b6c43eb5752e98ebd86116593dbbbe0c68/core/src/dird/ua_cmds.cc#L496"
+        "url": "https://github.com/bareos/bareos/blob/18be77e6832e33f5acd64094b9cba6066f2503f9/core/src/dird/ua_cmds.cc#L496"
       },
       "handler_source": {
         "file": "core/src/dird/ua_cmds.cc",
-        "line": 2548,
-        "url": "https://github.com/bareos/bareos/blob/fc2c79b6c43eb5752e98ebd86116593dbbbe0c68/core/src/dird/ua_cmds.cc#L2548"
+        "line": 2550,
+        "url": "https://github.com/bareos/bareos/blob/18be77e6832e33f5acd64094b9cba6066f2503f9/core/src/dird/ua_cmds.cc#L2550"
       },
       "audit_event": true,
       "usage": "storage=<storage-name> [ drive=<drivenum> ] jobid=<jobid> | job=<job-name> | ujobid=<complete_name>",
@@ -4547,7 +4575,7 @@
         },
         "implementation": {
           "file": "crates/onesimus-dird/src/commands/admin.rs",
-          "line": 113
+          "line": 175
         },
         "declared_arguments": [
           "storage"
@@ -4566,12 +4594,12 @@
       "source": {
         "file": "core/src/dird/ua_cmds.cc",
         "line": 501,
-        "url": "https://github.com/bareos/bareos/blob/fc2c79b6c43eb5752e98ebd86116593dbbbe0c68/core/src/dird/ua_cmds.cc#L501"
+        "url": "https://github.com/bareos/bareos/blob/18be77e6832e33f5acd64094b9cba6066f2503f9/core/src/dird/ua_cmds.cc#L501"
       },
       "handler_source": {
         "file": "core/src/dird/ua_update.cc",
         "line": 71,
-        "url": "https://github.com/bareos/bareos/blob/fc2c79b6c43eb5752e98ebd86116593dbbbe0c68/core/src/dird/ua_update.cc#L71"
+        "url": "https://github.com/bareos/bareos/blob/18be77e6832e33f5acd64094b9cba6066f2503f9/core/src/dird/ua_update.cc#L71"
       },
       "audit_event": true,
       "usage": "[volume=<volume-name> [volstatus=<status>] [volretention=<time-def>] [actiononpurge=<action>] [encrypt=<yes/no/rotate>] [pool=<pool-name>] [recycle=<yes/no>] [slot=<number>] [inchanger=<yes/no>]] | [pool=<pool-name> [maxvolbytes=<size>] [maxvolfiles=<nb>] [maxvoljobs=<nb>][enabled=<yes/no>] [recyclepool=<pool-name>] [actiononpurge=<action>] | slots [storage=<storage-name>] [scan]] | [jobid=<jobid> [jobname=<name>] [starttime=<time-def>] [client=<client-name>] [filesetid=<fileset-id>] [jobtype=<job-type>]] | [stats [days=<number>]]",
@@ -4610,7 +4638,7 @@
         },
         "implementation": {
           "file": "crates/onesimus-dird/src/commands/admin.rs",
-          "line": 134
+          "line": 199
         },
         "declared_arguments": [
           "volume",
@@ -4630,12 +4658,12 @@
       "source": {
         "file": "core/src/dird/ua_cmds.cc",
         "line": 518,
-        "url": "https://github.com/bareos/bareos/blob/fc2c79b6c43eb5752e98ebd86116593dbbbe0c68/core/src/dird/ua_cmds.cc#L518"
+        "url": "https://github.com/bareos/bareos/blob/18be77e6832e33f5acd64094b9cba6066f2503f9/core/src/dird/ua_cmds.cc#L518"
       },
       "handler_source": {
         "file": "core/src/dird/ua_cmds.cc",
-        "line": 2575,
-        "url": "https://github.com/bareos/bareos/blob/fc2c79b6c43eb5752e98ebd86116593dbbbe0c68/core/src/dird/ua_cmds.cc#L2575"
+        "line": 2577,
+        "url": "https://github.com/bareos/bareos/blob/18be77e6832e33f5acd64094b9cba6066f2503f9/core/src/dird/ua_cmds.cc#L2577"
       },
       "audit_event": true,
       "usage": "catalog=<catalog>",
@@ -4649,11 +4677,11 @@
         "handler": "commands::extra::cmd_use",
         "registry": {
           "file": "crates/onesimus-dird/src/command_registry.rs",
-          "line": 235
+          "line": 236
         },
         "implementation": {
           "file": "crates/onesimus-dird/src/commands/extra.rs",
-          "line": 188
+          "line": 297
         },
         "declared_arguments": [
           "catalog"
@@ -4674,12 +4702,12 @@
       "source": {
         "file": "core/src/dird/ua_cmds.cc",
         "line": 520,
-        "url": "https://github.com/bareos/bareos/blob/fc2c79b6c43eb5752e98ebd86116593dbbbe0c68/core/src/dird/ua_cmds.cc#L520"
+        "url": "https://github.com/bareos/bareos/blob/18be77e6832e33f5acd64094b9cba6066f2503f9/core/src/dird/ua_cmds.cc#L520"
       },
       "handler_source": {
         "file": "core/src/dird/ua_cmds.cc",
-        "line": 1702,
-        "url": "https://github.com/bareos/bareos/blob/fc2c79b6c43eb5752e98ebd86116593dbbbe0c68/core/src/dird/ua_cmds.cc#L1702"
+        "line": 1704,
+        "url": "https://github.com/bareos/bareos/blob/18be77e6832e33f5acd64094b9cba6066f2503f9/core/src/dird/ua_cmds.cc#L1704"
       },
       "audit_event": true,
       "usage": "",
@@ -4691,11 +4719,11 @@
         "handler": "commands::extra::cmd_var",
         "registry": {
           "file": "crates/onesimus-dird/src/command_registry.rs",
-          "line": 230
+          "line": 231
         },
         "implementation": {
           "file": "crates/onesimus-dird/src/commands/extra.rs",
-          "line": 173
+          "line": 199
         },
         "declared_arguments": [],
         "status": "stub",
@@ -4714,12 +4742,12 @@
       "source": {
         "file": "core/src/dird/ua_cmds.cc",
         "line": 521,
-        "url": "https://github.com/bareos/bareos/blob/fc2c79b6c43eb5752e98ebd86116593dbbbe0c68/core/src/dird/ua_cmds.cc#L521"
+        "url": "https://github.com/bareos/bareos/blob/18be77e6832e33f5acd64094b9cba6066f2503f9/core/src/dird/ua_cmds.cc#L521"
       },
       "handler_source": {
         "file": "core/src/dird/ua_cmds.cc",
-        "line": 2872,
-        "url": "https://github.com/bareos/bareos/blob/fc2c79b6c43eb5752e98ebd86116593dbbbe0c68/core/src/dird/ua_cmds.cc#L2872"
+        "line": 2874,
+        "url": "https://github.com/bareos/bareos/blob/18be77e6832e33f5acd64094b9cba6066f2503f9/core/src/dird/ua_cmds.cc#L2874"
       },
       "audit_event": false,
       "usage": "",
@@ -4735,7 +4763,7 @@
         },
         "implementation": {
           "file": "crates/onesimus-dird/src/commands/basic.rs",
-          "line": 12
+          "line": 13
         },
         "declared_arguments": [],
         "status": "registered_unverified",
@@ -4752,12 +4780,12 @@
       "source": {
         "file": "core/src/dird/ua_cmds.cc",
         "line": 523,
-        "url": "https://github.com/bareos/bareos/blob/fc2c79b6c43eb5752e98ebd86116593dbbbe0c68/core/src/dird/ua_cmds.cc#L523"
+        "url": "https://github.com/bareos/bareos/blob/18be77e6832e33f5acd64094b9cba6066f2503f9/core/src/dird/ua_cmds.cc#L523"
       },
       "handler_source": {
         "file": "core/src/dird/ua_cmds.cc",
-        "line": 2616,
-        "url": "https://github.com/bareos/bareos/blob/fc2c79b6c43eb5752e98ebd86116593dbbbe0c68/core/src/dird/ua_cmds.cc#L2616"
+        "line": 2618,
+        "url": "https://github.com/bareos/bareos/blob/18be77e6832e33f5acd64094b9cba6066f2503f9/core/src/dird/ua_cmds.cc#L2618"
       },
       "audit_event": false,
       "usage": "jobname=<name> | jobid=<jobid> | ujobid=<complete_name> | mount [timeout=<number>]",
@@ -4774,11 +4802,11 @@
         "handler": "commands::wait::cmd_wait",
         "registry": {
           "file": "crates/onesimus-dird/src/command_registry.rs",
-          "line": 231
+          "line": 232
         },
         "implementation": {
           "file": "crates/onesimus-dird/src/commands/wait.rs",
-          "line": 43
+          "line": 46
         },
         "declared_arguments": [
           "jobid",
@@ -4803,12 +4831,12 @@
       "source": {
         "file": "core/src/dird/ua_cmds.cc",
         "line": 527,
-        "url": "https://github.com/bareos/bareos/blob/fc2c79b6c43eb5752e98ebd86116593dbbbe0c68/core/src/dird/ua_cmds.cc#L527"
+        "url": "https://github.com/bareos/bareos/blob/18be77e6832e33f5acd64094b9cba6066f2503f9/core/src/dird/ua_cmds.cc#L527"
       },
       "handler_source": {
         "file": "core/src/dird/ua_cmds.cc",
-        "line": 2754,
-        "url": "https://github.com/bareos/bareos/blob/fc2c79b6c43eb5752e98ebd86116593dbbbe0c68/core/src/dird/ua_cmds.cc#L2754"
+        "line": 2756,
+        "url": "https://github.com/bareos/bareos/blob/18be77e6832e33f5acd64094b9cba6066f2503f9/core/src/dird/ua_cmds.cc#L2756"
       },
       "audit_event": false,
       "usage": "",
@@ -4820,11 +4848,11 @@
         "handler": "commands::extra::cmd_whoami",
         "registry": {
           "file": "crates/onesimus-dird/src/command_registry.rs",
-          "line": 234
+          "line": 235
         },
         "implementation": {
           "file": "crates/onesimus-dird/src/commands/extra.rs",
-          "line": 178
+          "line": 287
         },
         "declared_arguments": [],
         "status": "registered_unverified",
@@ -4843,12 +4871,12 @@
       "source": {
         "file": "core/src/dird/ua_tree.cc",
         "line": 77,
-        "url": "https://github.com/bareos/bareos/blob/fc2c79b6c43eb5752e98ebd86116593dbbbe0c68/core/src/dird/ua_tree.cc#L77"
+        "url": "https://github.com/bareos/bareos/blob/18be77e6832e33f5acd64094b9cba6066f2503f9/core/src/dird/ua_tree.cc#L77"
       },
       "handler_source": {
         "file": "core/src/dird/ua_tree.cc",
         "line": 1080,
-        "url": "https://github.com/bareos/bareos/blob/fc2c79b6c43eb5752e98ebd86116593dbbbe0c68/core/src/dird/ua_tree.cc#L1080"
+        "url": "https://github.com/bareos/bareos/blob/18be77e6832e33f5acd64094b9cba6066f2503f9/core/src/dird/ua_tree.cc#L1080"
       },
       "audit_event": true,
       "usage": null,
@@ -4860,8 +4888,8 @@
           "Onesimus restore queues a job directly; no interactive restore file-selection shell is implemented."
         ],
         "implementation": {
-          "file": "crates/onesimus-dird/src/commands/admin.rs",
-          "line": 217
+          "file": "crates/onesimus-dird/src/commands/restore.rs",
+          "line": 73
         }
       }
     },
@@ -4873,12 +4901,12 @@
       "source": {
         "file": "core/src/dird/ua_tree.cc",
         "line": 78,
-        "url": "https://github.com/bareos/bareos/blob/fc2c79b6c43eb5752e98ebd86116593dbbbe0c68/core/src/dird/ua_tree.cc#L78"
+        "url": "https://github.com/bareos/bareos/blob/18be77e6832e33f5acd64094b9cba6066f2503f9/core/src/dird/ua_tree.cc#L78"
       },
       "handler_source": {
         "file": "core/src/dird/ua_tree.cc",
         "line": 548,
-        "url": "https://github.com/bareos/bareos/blob/fc2c79b6c43eb5752e98ebd86116593dbbbe0c68/core/src/dird/ua_tree.cc#L548"
+        "url": "https://github.com/bareos/bareos/blob/18be77e6832e33f5acd64094b9cba6066f2503f9/core/src/dird/ua_tree.cc#L548"
       },
       "audit_event": true,
       "usage": null,
@@ -4890,8 +4918,8 @@
           "Onesimus restore queues a job directly; no interactive restore file-selection shell is implemented."
         ],
         "implementation": {
-          "file": "crates/onesimus-dird/src/commands/admin.rs",
-          "line": 217
+          "file": "crates/onesimus-dird/src/commands/restore.rs",
+          "line": 73
         }
       }
     },
@@ -4903,12 +4931,12 @@
       "source": {
         "file": "core/src/dird/ua_tree.cc",
         "line": 80,
-        "url": "https://github.com/bareos/bareos/blob/fc2c79b6c43eb5752e98ebd86116593dbbbe0c68/core/src/dird/ua_tree.cc#L80"
+        "url": "https://github.com/bareos/bareos/blob/18be77e6832e33f5acd64094b9cba6066f2503f9/core/src/dird/ua_tree.cc#L80"
       },
       "handler_source": {
         "file": "core/src/dird/ua_tree.cc",
         "line": 958,
-        "url": "https://github.com/bareos/bareos/blob/fc2c79b6c43eb5752e98ebd86116593dbbbe0c68/core/src/dird/ua_tree.cc#L958"
+        "url": "https://github.com/bareos/bareos/blob/18be77e6832e33f5acd64094b9cba6066f2503f9/core/src/dird/ua_tree.cc#L958"
       },
       "audit_event": true,
       "usage": null,
@@ -4920,8 +4948,8 @@
           "Onesimus restore queues a job directly; no interactive restore file-selection shell is implemented."
         ],
         "implementation": {
-          "file": "crates/onesimus-dird/src/commands/admin.rs",
-          "line": 217
+          "file": "crates/onesimus-dird/src/commands/restore.rs",
+          "line": 73
         }
       }
     },
@@ -4933,12 +4961,12 @@
       "source": {
         "file": "core/src/dird/ua_tree.cc",
         "line": 81,
-        "url": "https://github.com/bareos/bareos/blob/fc2c79b6c43eb5752e98ebd86116593dbbbe0c68/core/src/dird/ua_tree.cc#L81"
+        "url": "https://github.com/bareos/bareos/blob/18be77e6832e33f5acd64094b9cba6066f2503f9/core/src/dird/ua_tree.cc#L81"
       },
       "handler_source": {
         "file": "core/src/dird/ua_tree.cc",
         "line": 604,
-        "url": "https://github.com/bareos/bareos/blob/fc2c79b6c43eb5752e98ebd86116593dbbbe0c68/core/src/dird/ua_tree.cc#L604"
+        "url": "https://github.com/bareos/bareos/blob/18be77e6832e33f5acd64094b9cba6066f2503f9/core/src/dird/ua_tree.cc#L604"
       },
       "audit_event": false,
       "usage": null,
@@ -4950,8 +4978,8 @@
           "Onesimus restore queues a job directly; no interactive restore file-selection shell is implemented."
         ],
         "implementation": {
-          "file": "crates/onesimus-dird/src/commands/admin.rs",
-          "line": 217
+          "file": "crates/onesimus-dird/src/commands/restore.rs",
+          "line": 73
         }
       }
     },
@@ -4963,12 +4991,12 @@
       "source": {
         "file": "core/src/dird/ua_tree.cc",
         "line": 83,
-        "url": "https://github.com/bareos/bareos/blob/fc2c79b6c43eb5752e98ebd86116593dbbbe0c68/core/src/dird/ua_tree.cc#L83"
+        "url": "https://github.com/bareos/bareos/blob/18be77e6832e33f5acd64094b9cba6066f2503f9/core/src/dird/ua_tree.cc#L83"
       },
       "handler_source": {
         "file": "core/src/dird/ua_tree.cc",
         "line": 1022,
-        "url": "https://github.com/bareos/bareos/blob/fc2c79b6c43eb5752e98ebd86116593dbbbe0c68/core/src/dird/ua_tree.cc#L1022"
+        "url": "https://github.com/bareos/bareos/blob/18be77e6832e33f5acd64094b9cba6066f2503f9/core/src/dird/ua_tree.cc#L1022"
       },
       "audit_event": true,
       "usage": null,
@@ -4980,8 +5008,8 @@
           "Onesimus restore queues a job directly; no interactive restore file-selection shell is implemented."
         ],
         "implementation": {
-          "file": "crates/onesimus-dird/src/commands/admin.rs",
-          "line": 217
+          "file": "crates/onesimus-dird/src/commands/restore.rs",
+          "line": 73
         }
       }
     },
@@ -4993,12 +5021,12 @@
       "source": {
         "file": "core/src/dird/ua_tree.cc",
         "line": 85,
-        "url": "https://github.com/bareos/bareos/blob/fc2c79b6c43eb5752e98ebd86116593dbbbe0c68/core/src/dird/ua_tree.cc#L85"
+        "url": "https://github.com/bareos/bareos/blob/18be77e6832e33f5acd64094b9cba6066f2503f9/core/src/dird/ua_tree.cc#L85"
       },
       "handler_source": {
         "file": "core/src/dird/ua_tree.cc",
         "line": 890,
-        "url": "https://github.com/bareos/bareos/blob/fc2c79b6c43eb5752e98ebd86116593dbbbe0c68/core/src/dird/ua_tree.cc#L890"
+        "url": "https://github.com/bareos/bareos/blob/18be77e6832e33f5acd64094b9cba6066f2503f9/core/src/dird/ua_tree.cc#L890"
       },
       "audit_event": false,
       "usage": null,
@@ -5010,8 +5038,8 @@
           "Onesimus restore queues a job directly; no interactive restore file-selection shell is implemented."
         ],
         "implementation": {
-          "file": "crates/onesimus-dird/src/commands/admin.rs",
-          "line": 217
+          "file": "crates/onesimus-dird/src/commands/restore.rs",
+          "line": 73
         }
       }
     },
@@ -5023,12 +5051,12 @@
       "source": {
         "file": "core/src/dird/ua_tree.cc",
         "line": 87,
-        "url": "https://github.com/bareos/bareos/blob/fc2c79b6c43eb5752e98ebd86116593dbbbe0c68/core/src/dird/ua_tree.cc#L87"
+        "url": "https://github.com/bareos/bareos/blob/18be77e6832e33f5acd64094b9cba6066f2503f9/core/src/dird/ua_tree.cc#L87"
       },
       "handler_source": {
         "file": "core/src/dird/ua_tree.cc",
         "line": 885,
-        "url": "https://github.com/bareos/bareos/blob/fc2c79b6c43eb5752e98ebd86116593dbbbe0c68/core/src/dird/ua_tree.cc#L885"
+        "url": "https://github.com/bareos/bareos/blob/18be77e6832e33f5acd64094b9cba6066f2503f9/core/src/dird/ua_tree.cc#L885"
       },
       "audit_event": false,
       "usage": null,
@@ -5040,8 +5068,8 @@
           "Onesimus restore queues a job directly; no interactive restore file-selection shell is implemented."
         ],
         "implementation": {
-          "file": "crates/onesimus-dird/src/commands/admin.rs",
-          "line": 217
+          "file": "crates/onesimus-dird/src/commands/restore.rs",
+          "line": 73
         }
       }
     },
@@ -5053,12 +5081,12 @@
       "source": {
         "file": "core/src/dird/ua_tree.cc",
         "line": 89,
-        "url": "https://github.com/bareos/bareos/blob/fc2c79b6c43eb5752e98ebd86116593dbbbe0c68/core/src/dird/ua_tree.cc#L89"
+        "url": "https://github.com/bareos/bareos/blob/18be77e6832e33f5acd64094b9cba6066f2503f9/core/src/dird/ua_tree.cc#L89"
       },
       "handler_source": {
         "file": "core/src/dird/ua_tree.cc",
         "line": 1078,
-        "url": "https://github.com/bareos/bareos/blob/fc2c79b6c43eb5752e98ebd86116593dbbbe0c68/core/src/dird/ua_tree.cc#L1078"
+        "url": "https://github.com/bareos/bareos/blob/18be77e6832e33f5acd64094b9cba6066f2503f9/core/src/dird/ua_tree.cc#L1078"
       },
       "audit_event": true,
       "usage": null,
@@ -5070,8 +5098,8 @@
           "Onesimus restore queues a job directly; no interactive restore file-selection shell is implemented."
         ],
         "implementation": {
-          "file": "crates/onesimus-dird/src/commands/admin.rs",
-          "line": 217
+          "file": "crates/onesimus-dird/src/commands/restore.rs",
+          "line": 73
         }
       }
     },
@@ -5083,12 +5111,12 @@
       "source": {
         "file": "core/src/dird/ua_tree.cc",
         "line": 90,
-        "url": "https://github.com/bareos/bareos/blob/fc2c79b6c43eb5752e98ebd86116593dbbbe0c68/core/src/dird/ua_tree.cc#L90"
+        "url": "https://github.com/bareos/bareos/blob/18be77e6832e33f5acd64094b9cba6066f2503f9/core/src/dird/ua_tree.cc#L90"
       },
       "handler_source": {
         "file": "core/src/dird/ua_tree.cc",
         "line": 895,
-        "url": "https://github.com/bareos/bareos/blob/fc2c79b6c43eb5752e98ebd86116593dbbbe0c68/core/src/dird/ua_tree.cc#L895"
+        "url": "https://github.com/bareos/bareos/blob/18be77e6832e33f5acd64094b9cba6066f2503f9/core/src/dird/ua_tree.cc#L895"
       },
       "audit_event": false,
       "usage": null,
@@ -5100,8 +5128,8 @@
           "Onesimus restore queues a job directly; no interactive restore file-selection shell is implemented."
         ],
         "implementation": {
-          "file": "crates/onesimus-dird/src/commands/admin.rs",
-          "line": 217
+          "file": "crates/onesimus-dird/src/commands/restore.rs",
+          "line": 73
         }
       }
     },
@@ -5113,12 +5141,12 @@
       "source": {
         "file": "core/src/dird/ua_tree.cc",
         "line": 91,
-        "url": "https://github.com/bareos/bareos/blob/fc2c79b6c43eb5752e98ebd86116593dbbbe0c68/core/src/dird/ua_tree.cc#L91"
+        "url": "https://github.com/bareos/bareos/blob/18be77e6832e33f5acd64094b9cba6066f2503f9/core/src/dird/ua_tree.cc#L91"
       },
       "handler_source": {
         "file": "core/src/dird/ua_tree.cc",
         "line": 1078,
-        "url": "https://github.com/bareos/bareos/blob/fc2c79b6c43eb5752e98ebd86116593dbbbe0c68/core/src/dird/ua_tree.cc#L1078"
+        "url": "https://github.com/bareos/bareos/blob/18be77e6832e33f5acd64094b9cba6066f2503f9/core/src/dird/ua_tree.cc#L1078"
       },
       "audit_event": true,
       "usage": null,
@@ -5130,8 +5158,8 @@
           "Onesimus restore queues a job directly; no interactive restore file-selection shell is implemented."
         ],
         "implementation": {
-          "file": "crates/onesimus-dird/src/commands/admin.rs",
-          "line": 217
+          "file": "crates/onesimus-dird/src/commands/restore.rs",
+          "line": 73
         }
       }
     },
@@ -5143,12 +5171,12 @@
       "source": {
         "file": "core/src/dird/ua_tree.cc",
         "line": 92,
-        "url": "https://github.com/bareos/bareos/blob/fc2c79b6c43eb5752e98ebd86116593dbbbe0c68/core/src/dird/ua_tree.cc#L92"
+        "url": "https://github.com/bareos/bareos/blob/18be77e6832e33f5acd64094b9cba6066f2503f9/core/src/dird/ua_tree.cc#L92"
       },
       "handler_source": {
         "file": "core/src/dird/ua_tree.cc",
         "line": 623,
-        "url": "https://github.com/bareos/bareos/blob/fc2c79b6c43eb5752e98ebd86116593dbbbe0c68/core/src/dird/ua_tree.cc#L623"
+        "url": "https://github.com/bareos/bareos/blob/18be77e6832e33f5acd64094b9cba6066f2503f9/core/src/dird/ua_tree.cc#L623"
       },
       "audit_event": false,
       "usage": null,
@@ -5160,8 +5188,8 @@
           "Onesimus restore queues a job directly; no interactive restore file-selection shell is implemented."
         ],
         "implementation": {
-          "file": "crates/onesimus-dird/src/commands/admin.rs",
-          "line": 217
+          "file": "crates/onesimus-dird/src/commands/restore.rs",
+          "line": 73
         }
       }
     },
@@ -5173,12 +5201,12 @@
       "source": {
         "file": "core/src/dird/ua_tree.cc",
         "line": 93,
-        "url": "https://github.com/bareos/bareos/blob/fc2c79b6c43eb5752e98ebd86116593dbbbe0c68/core/src/dird/ua_tree.cc#L93"
+        "url": "https://github.com/bareos/bareos/blob/18be77e6832e33f5acd64094b9cba6066f2503f9/core/src/dird/ua_tree.cc#L93"
       },
       "handler_source": {
         "file": "core/src/dird/ua_tree.cc",
         "line": 938,
-        "url": "https://github.com/bareos/bareos/blob/fc2c79b6c43eb5752e98ebd86116593dbbbe0c68/core/src/dird/ua_tree.cc#L938"
+        "url": "https://github.com/bareos/bareos/blob/18be77e6832e33f5acd64094b9cba6066f2503f9/core/src/dird/ua_tree.cc#L938"
       },
       "audit_event": false,
       "usage": null,
@@ -5190,8 +5218,8 @@
           "Onesimus restore queues a job directly; no interactive restore file-selection shell is implemented."
         ],
         "implementation": {
-          "file": "crates/onesimus-dird/src/commands/admin.rs",
-          "line": 217
+          "file": "crates/onesimus-dird/src/commands/restore.rs",
+          "line": 73
         }
       }
     },
@@ -5203,12 +5231,12 @@
       "source": {
         "file": "core/src/dird/ua_tree.cc",
         "line": 94,
-        "url": "https://github.com/bareos/bareos/blob/fc2c79b6c43eb5752e98ebd86116593dbbbe0c68/core/src/dird/ua_tree.cc#L94"
+        "url": "https://github.com/bareos/bareos/blob/18be77e6832e33f5acd64094b9cba6066f2503f9/core/src/dird/ua_tree.cc#L94"
       },
       "handler_source": {
         "file": "core/src/dird/ua_tree.cc",
         "line": 693,
-        "url": "https://github.com/bareos/bareos/blob/fc2c79b6c43eb5752e98ebd86116593dbbbe0c68/core/src/dird/ua_tree.cc#L693"
+        "url": "https://github.com/bareos/bareos/blob/18be77e6832e33f5acd64094b9cba6066f2503f9/core/src/dird/ua_tree.cc#L693"
       },
       "audit_event": false,
       "usage": null,
@@ -5220,8 +5248,8 @@
           "Onesimus restore queues a job directly; no interactive restore file-selection shell is implemented."
         ],
         "implementation": {
-          "file": "crates/onesimus-dird/src/commands/admin.rs",
-          "line": 217
+          "file": "crates/onesimus-dird/src/commands/restore.rs",
+          "line": 73
         }
       }
     },
@@ -5233,12 +5261,12 @@
       "source": {
         "file": "core/src/dird/ua_tree.cc",
         "line": 95,
-        "url": "https://github.com/bareos/bareos/blob/fc2c79b6c43eb5752e98ebd86116593dbbbe0c68/core/src/dird/ua_tree.cc#L95"
+        "url": "https://github.com/bareos/bareos/blob/18be77e6832e33f5acd64094b9cba6066f2503f9/core/src/dird/ua_tree.cc#L95"
       },
       "handler_source": {
         "file": "core/src/dird/ua_tree.cc",
         "line": 678,
-        "url": "https://github.com/bareos/bareos/blob/fc2c79b6c43eb5752e98ebd86116593dbbbe0c68/core/src/dird/ua_tree.cc#L678"
+        "url": "https://github.com/bareos/bareos/blob/18be77e6832e33f5acd64094b9cba6066f2503f9/core/src/dird/ua_tree.cc#L678"
       },
       "audit_event": false,
       "usage": null,
@@ -5250,8 +5278,8 @@
           "Onesimus restore queues a job directly; no interactive restore file-selection shell is implemented."
         ],
         "implementation": {
-          "file": "crates/onesimus-dird/src/commands/admin.rs",
-          "line": 217
+          "file": "crates/onesimus-dird/src/commands/restore.rs",
+          "line": 73
         }
       }
     },
@@ -5263,12 +5291,12 @@
       "source": {
         "file": "core/src/dird/ua_tree.cc",
         "line": 97,
-        "url": "https://github.com/bareos/bareos/blob/fc2c79b6c43eb5752e98ebd86116593dbbbe0c68/core/src/dird/ua_tree.cc#L97"
+        "url": "https://github.com/bareos/bareos/blob/18be77e6832e33f5acd64094b9cba6066f2503f9/core/src/dird/ua_tree.cc#L97"
       },
       "handler_source": {
         "file": "core/src/dird/ua_tree.cc",
         "line": 654,
-        "url": "https://github.com/bareos/bareos/blob/fc2c79b6c43eb5752e98ebd86116593dbbbe0c68/core/src/dird/ua_tree.cc#L654"
+        "url": "https://github.com/bareos/bareos/blob/18be77e6832e33f5acd64094b9cba6066f2503f9/core/src/dird/ua_tree.cc#L654"
       },
       "audit_event": false,
       "usage": null,
@@ -5280,8 +5308,8 @@
           "Onesimus restore queues a job directly; no interactive restore file-selection shell is implemented."
         ],
         "implementation": {
-          "file": "crates/onesimus-dird/src/commands/admin.rs",
-          "line": 217
+          "file": "crates/onesimus-dird/src/commands/restore.rs",
+          "line": 73
         }
       }
     },
@@ -5293,12 +5321,12 @@
       "source": {
         "file": "core/src/dird/ua_tree.cc",
         "line": 99,
-        "url": "https://github.com/bareos/bareos/blob/fc2c79b6c43eb5752e98ebd86116593dbbbe0c68/core/src/dird/ua_tree.cc#L99"
+        "url": "https://github.com/bareos/bareos/blob/18be77e6832e33f5acd64094b9cba6066f2503f9/core/src/dird/ua_tree.cc#L99"
       },
       "handler_source": {
         "file": "core/src/dird/ua_tree.cc",
         "line": 765,
-        "url": "https://github.com/bareos/bareos/blob/fc2c79b6c43eb5752e98ebd86116593dbbbe0c68/core/src/dird/ua_tree.cc#L765"
+        "url": "https://github.com/bareos/bareos/blob/18be77e6832e33f5acd64094b9cba6066f2503f9/core/src/dird/ua_tree.cc#L765"
       },
       "audit_event": false,
       "usage": null,
@@ -5310,8 +5338,8 @@
           "Onesimus restore queues a job directly; no interactive restore file-selection shell is implemented."
         ],
         "implementation": {
-          "file": "crates/onesimus-dird/src/commands/admin.rs",
-          "line": 217
+          "file": "crates/onesimus-dird/src/commands/restore.rs",
+          "line": 73
         }
       }
     },
@@ -5323,12 +5351,12 @@
       "source": {
         "file": "core/src/dird/ua_tree.cc",
         "line": 101,
-        "url": "https://github.com/bareos/bareos/blob/fc2c79b6c43eb5752e98ebd86116593dbbbe0c68/core/src/dird/ua_tree.cc#L101"
+        "url": "https://github.com/bareos/bareos/blob/18be77e6832e33f5acd64094b9cba6066f2503f9/core/src/dird/ua_tree.cc#L101"
       },
       "handler_source": {
         "file": "core/src/dird/ua_tree.cc",
         "line": 716,
-        "url": "https://github.com/bareos/bareos/blob/fc2c79b6c43eb5752e98ebd86116593dbbbe0c68/core/src/dird/ua_tree.cc#L716"
+        "url": "https://github.com/bareos/bareos/blob/18be77e6832e33f5acd64094b9cba6066f2503f9/core/src/dird/ua_tree.cc#L716"
       },
       "audit_event": false,
       "usage": null,
@@ -5340,8 +5368,8 @@
           "Onesimus restore queues a job directly; no interactive restore file-selection shell is implemented."
         ],
         "implementation": {
-          "file": "crates/onesimus-dird/src/commands/admin.rs",
-          "line": 217
+          "file": "crates/onesimus-dird/src/commands/restore.rs",
+          "line": 73
         }
       }
     },
@@ -5353,12 +5381,12 @@
       "source": {
         "file": "core/src/dird/ua_tree.cc",
         "line": 102,
-        "url": "https://github.com/bareos/bareos/blob/fc2c79b6c43eb5752e98ebd86116593dbbbe0c68/core/src/dird/ua_tree.cc#L102"
+        "url": "https://github.com/bareos/bareos/blob/18be77e6832e33f5acd64094b9cba6066f2503f9/core/src/dird/ua_tree.cc#L102"
       },
       "handler_source": {
         "file": "core/src/dird/ua_tree.cc",
         "line": 548,
-        "url": "https://github.com/bareos/bareos/blob/fc2c79b6c43eb5752e98ebd86116593dbbbe0c68/core/src/dird/ua_tree.cc#L548"
+        "url": "https://github.com/bareos/bareos/blob/18be77e6832e33f5acd64094b9cba6066f2503f9/core/src/dird/ua_tree.cc#L548"
       },
       "audit_event": true,
       "usage": null,
@@ -5370,8 +5398,8 @@
           "Onesimus restore queues a job directly; no interactive restore file-selection shell is implemented."
         ],
         "implementation": {
-          "file": "crates/onesimus-dird/src/commands/admin.rs",
-          "line": 217
+          "file": "crates/onesimus-dird/src/commands/restore.rs",
+          "line": 73
         }
       }
     },
@@ -5383,12 +5411,12 @@
       "source": {
         "file": "core/src/dird/ua_tree.cc",
         "line": 104,
-        "url": "https://github.com/bareos/bareos/blob/fc2c79b6c43eb5752e98ebd86116593dbbbe0c68/core/src/dird/ua_tree.cc#L104"
+        "url": "https://github.com/bareos/bareos/blob/18be77e6832e33f5acd64094b9cba6066f2503f9/core/src/dird/ua_tree.cc#L104"
       },
       "handler_source": {
         "file": "core/src/dird/ua_tree.cc",
         "line": 571,
-        "url": "https://github.com/bareos/bareos/blob/fc2c79b6c43eb5752e98ebd86116593dbbbe0c68/core/src/dird/ua_tree.cc#L571"
+        "url": "https://github.com/bareos/bareos/blob/18be77e6832e33f5acd64094b9cba6066f2503f9/core/src/dird/ua_tree.cc#L571"
       },
       "audit_event": true,
       "usage": null,
@@ -5400,8 +5428,8 @@
           "Onesimus restore queues a job directly; no interactive restore file-selection shell is implemented."
         ],
         "implementation": {
-          "file": "crates/onesimus-dird/src/commands/admin.rs",
-          "line": 217
+          "file": "crates/onesimus-dird/src/commands/restore.rs",
+          "line": 73
         }
       }
     },
@@ -5413,12 +5441,12 @@
       "source": {
         "file": "core/src/dird/ua_tree.cc",
         "line": 106,
-        "url": "https://github.com/bareos/bareos/blob/fc2c79b6c43eb5752e98ebd86116593dbbbe0c68/core/src/dird/ua_tree.cc#L106"
+        "url": "https://github.com/bareos/bareos/blob/18be77e6832e33f5acd64094b9cba6066f2503f9/core/src/dird/ua_tree.cc#L106"
       },
       "handler_source": {
         "file": "core/src/dird/ua_tree.cc",
         "line": 992,
-        "url": "https://github.com/bareos/bareos/blob/fc2c79b6c43eb5752e98ebd86116593dbbbe0c68/core/src/dird/ua_tree.cc#L992"
+        "url": "https://github.com/bareos/bareos/blob/18be77e6832e33f5acd64094b9cba6066f2503f9/core/src/dird/ua_tree.cc#L992"
       },
       "audit_event": false,
       "usage": null,
@@ -5430,8 +5458,8 @@
           "Onesimus restore queues a job directly; no interactive restore file-selection shell is implemented."
         ],
         "implementation": {
-          "file": "crates/onesimus-dird/src/commands/admin.rs",
-          "line": 217
+          "file": "crates/onesimus-dird/src/commands/restore.rs",
+          "line": 73
         }
       }
     },
@@ -5443,12 +5471,12 @@
       "source": {
         "file": "core/src/dird/ua_tree.cc",
         "line": 107,
-        "url": "https://github.com/bareos/bareos/blob/fc2c79b6c43eb5752e98ebd86116593dbbbe0c68/core/src/dird/ua_tree.cc#L107"
+        "url": "https://github.com/bareos/bareos/blob/18be77e6832e33f5acd64094b9cba6066f2503f9/core/src/dird/ua_tree.cc#L107"
       },
       "handler_source": {
         "file": "core/src/dird/ua_tree.cc",
         "line": 1009,
-        "url": "https://github.com/bareos/bareos/blob/fc2c79b6c43eb5752e98ebd86116593dbbbe0c68/core/src/dird/ua_tree.cc#L1009"
+        "url": "https://github.com/bareos/bareos/blob/18be77e6832e33f5acd64094b9cba6066f2503f9/core/src/dird/ua_tree.cc#L1009"
       },
       "audit_event": false,
       "usage": null,
@@ -5460,8 +5488,8 @@
           "Onesimus restore queues a job directly; no interactive restore file-selection shell is implemented."
         ],
         "implementation": {
-          "file": "crates/onesimus-dird/src/commands/admin.rs",
-          "line": 217
+          "file": "crates/onesimus-dird/src/commands/restore.rs",
+          "line": 73
         }
       }
     },
@@ -5473,12 +5501,12 @@
       "source": {
         "file": "core/src/dird/ua_tree.cc",
         "line": 108,
-        "url": "https://github.com/bareos/bareos/blob/fc2c79b6c43eb5752e98ebd86116593dbbbe0c68/core/src/dird/ua_tree.cc#L108"
+        "url": "https://github.com/bareos/bareos/blob/18be77e6832e33f5acd64094b9cba6066f2503f9/core/src/dird/ua_tree.cc#L108"
       },
       "handler_source": {
         "file": "core/src/dird/ua_tree.cc",
         "line": 1022,
-        "url": "https://github.com/bareos/bareos/blob/fc2c79b6c43eb5752e98ebd86116593dbbbe0c68/core/src/dird/ua_tree.cc#L1022"
+        "url": "https://github.com/bareos/bareos/blob/18be77e6832e33f5acd64094b9cba6066f2503f9/core/src/dird/ua_tree.cc#L1022"
       },
       "audit_event": true,
       "usage": null,
@@ -5490,8 +5518,8 @@
           "Onesimus restore queues a job directly; no interactive restore file-selection shell is implemented."
         ],
         "implementation": {
-          "file": "crates/onesimus-dird/src/commands/admin.rs",
-          "line": 217
+          "file": "crates/onesimus-dird/src/commands/restore.rs",
+          "line": 73
         }
       }
     },
@@ -5503,12 +5531,12 @@
       "source": {
         "file": "core/src/dird/ua_tree.cc",
         "line": 110,
-        "url": "https://github.com/bareos/bareos/blob/fc2c79b6c43eb5752e98ebd86116593dbbbe0c68/core/src/dird/ua_tree.cc#L110"
+        "url": "https://github.com/bareos/bareos/blob/18be77e6832e33f5acd64094b9cba6066f2503f9/core/src/dird/ua_tree.cc#L110"
       },
       "handler_source": {
         "file": "core/src/dird/ua_tree.cc",
         "line": 1045,
-        "url": "https://github.com/bareos/bareos/blob/fc2c79b6c43eb5752e98ebd86116593dbbbe0c68/core/src/dird/ua_tree.cc#L1045"
+        "url": "https://github.com/bareos/bareos/blob/18be77e6832e33f5acd64094b9cba6066f2503f9/core/src/dird/ua_tree.cc#L1045"
       },
       "audit_event": true,
       "usage": null,
@@ -5520,8 +5548,8 @@
           "Onesimus restore queues a job directly; no interactive restore file-selection shell is implemented."
         ],
         "implementation": {
-          "file": "crates/onesimus-dird/src/commands/admin.rs",
-          "line": 217
+          "file": "crates/onesimus-dird/src/commands/restore.rs",
+          "line": 73
         }
       }
     },
@@ -5533,12 +5561,12 @@
       "source": {
         "file": "core/src/dird/ua_tree.cc",
         "line": 112,
-        "url": "https://github.com/bareos/bareos/blob/fc2c79b6c43eb5752e98ebd86116593dbbbe0c68/core/src/dird/ua_tree.cc#L112"
+        "url": "https://github.com/bareos/bareos/blob/18be77e6832e33f5acd64094b9cba6066f2503f9/core/src/dird/ua_tree.cc#L112"
       },
       "handler_source": {
         "file": "core/src/dird/ua_tree.cc",
         "line": 1080,
-        "url": "https://github.com/bareos/bareos/blob/fc2c79b6c43eb5752e98ebd86116593dbbbe0c68/core/src/dird/ua_tree.cc#L1080"
+        "url": "https://github.com/bareos/bareos/blob/18be77e6832e33f5acd64094b9cba6066f2503f9/core/src/dird/ua_tree.cc#L1080"
       },
       "audit_event": true,
       "usage": null,
@@ -5550,8 +5578,8 @@
           "Onesimus restore queues a job directly; no interactive restore file-selection shell is implemented."
         ],
         "implementation": {
-          "file": "crates/onesimus-dird/src/commands/admin.rs",
-          "line": 217
+          "file": "crates/onesimus-dird/src/commands/restore.rs",
+          "line": 73
         }
       }
     },
@@ -5563,12 +5591,12 @@
       "source": {
         "file": "core/src/dird/ua_tree.cc",
         "line": 113,
-        "url": "https://github.com/bareos/bareos/blob/fc2c79b6c43eb5752e98ebd86116593dbbbe0c68/core/src/dird/ua_tree.cc#L113"
+        "url": "https://github.com/bareos/bareos/blob/18be77e6832e33f5acd64094b9cba6066f2503f9/core/src/dird/ua_tree.cc#L113"
       },
       "handler_source": {
         "file": "core/src/dird/ua_tree.cc",
         "line": 669,
-        "url": "https://github.com/bareos/bareos/blob/fc2c79b6c43eb5752e98ebd86116593dbbbe0c68/core/src/dird/ua_tree.cc#L669"
+        "url": "https://github.com/bareos/bareos/blob/18be77e6832e33f5acd64094b9cba6066f2503f9/core/src/dird/ua_tree.cc#L669"
       },
       "audit_event": false,
       "usage": null,
@@ -5580,8 +5608,8 @@
           "Onesimus restore queues a job directly; no interactive restore file-selection shell is implemented."
         ],
         "implementation": {
-          "file": "crates/onesimus-dird/src/commands/admin.rs",
-          "line": 217
+          "file": "crates/onesimus-dird/src/commands/restore.rs",
+          "line": 73
         }
       }
     },
@@ -5593,12 +5621,12 @@
       "source": {
         "file": "core/src/dird/ua_tree.cc",
         "line": 114,
-        "url": "https://github.com/bareos/bareos/blob/fc2c79b6c43eb5752e98ebd86116593dbbbe0c68/core/src/dird/ua_tree.cc#L114"
+        "url": "https://github.com/bareos/bareos/blob/18be77e6832e33f5acd64094b9cba6066f2503f9/core/src/dird/ua_tree.cc#L114"
       },
       "handler_source": {
         "file": "core/src/dird/ua_tree.cc",
         "line": 938,
-        "url": "https://github.com/bareos/bareos/blob/fc2c79b6c43eb5752e98ebd86116593dbbbe0c68/core/src/dird/ua_tree.cc#L938"
+        "url": "https://github.com/bareos/bareos/blob/18be77e6832e33f5acd64094b9cba6066f2503f9/core/src/dird/ua_tree.cc#L938"
       },
       "audit_event": false,
       "usage": null,
@@ -5610,8 +5638,8 @@
           "Onesimus restore queues a job directly; no interactive restore file-selection shell is implemented."
         ],
         "implementation": {
-          "file": "crates/onesimus-dird/src/commands/admin.rs",
-          "line": 217
+          "file": "crates/onesimus-dird/src/commands/restore.rs",
+          "line": 73
         }
       }
     }
@@ -5623,7 +5651,7 @@
       "handler": "commands::acl::cmd_dot_acl",
       "registry": {
         "file": "crates/onesimus-dird/src/command_registry.rs",
-        "line": 303
+        "line": 304
       },
       "implementation": {
         "file": "crates/onesimus-dird/src/commands/acl.rs",
@@ -5637,7 +5665,7 @@
       "handler": "commands::catalog::cmd_dot_catalog",
       "registry": {
         "file": "crates/onesimus-dird/src/command_registry.rs",
-        "line": 306
+        "line": 307
       },
       "implementation": {
         "file": "crates/onesimus-dird/src/commands/catalog.rs",
@@ -5651,11 +5679,11 @@
       "handler": "commands::dot::cmd_dot_grpc",
       "registry": {
         "file": "crates/onesimus-dird/src/command_registry.rs",
-        "line": 294
+        "line": 295
       },
       "implementation": {
         "file": "crates/onesimus-dird/src/commands/dot.rs",
-        "line": 374
+        "line": 451
       },
       "declared_arguments": []
     },
@@ -5665,7 +5693,7 @@
       "handler": "commands::acl::cmd_dot_acl",
       "registry": {
         "file": "crates/onesimus-dird/src/command_registry.rs",
-        "line": 303
+        "line": 304
       },
       "implementation": {
         "file": "crates/onesimus-dird/src/commands/acl.rs",
@@ -5679,11 +5707,11 @@
       "handler": "commands::dot::cmd_dot_sqlcount",
       "registry": {
         "file": "crates/onesimus-dird/src/command_registry.rs",
-        "line": 300
+        "line": 301
       },
       "implementation": {
         "file": "crates/onesimus-dird/src/commands/dot.rs",
-        "line": 515
+        "line": 495
       },
       "declared_arguments": []
     },
@@ -5693,11 +5721,11 @@
       "handler": "commands::dot::cmd_dot_sqlschema",
       "registry": {
         "file": "crates/onesimus-dird/src/command_registry.rs",
-        "line": 299
+        "line": 300
       },
       "implementation": {
         "file": "crates/onesimus-dird/src/commands/dot.rs",
-        "line": 502
+        "line": 490
       },
       "declared_arguments": []
     },
@@ -5707,11 +5735,11 @@
       "handler": "commands::dot::cmd_dot_sqltables",
       "registry": {
         "file": "crates/onesimus-dird/src/command_registry.rs",
-        "line": 298
+        "line": 299
       },
       "implementation": {
         "file": "crates/onesimus-dird/src/commands/dot.rs",
-        "line": 489
+        "line": 485
       },
       "declared_arguments": []
     },
@@ -5721,11 +5749,11 @@
       "handler": "commands::dot::cmd_dot_storage",
       "registry": {
         "file": "crates/onesimus-dird/src/command_registry.rs",
-        "line": 269
+        "line": 270
       },
       "implementation": {
         "file": "crates/onesimus-dird/src/commands/dot.rs",
-        "line": 95
+        "line": 110
       },
       "declared_arguments": []
     }

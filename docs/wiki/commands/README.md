@@ -6,7 +6,7 @@ Command documentation for Onesimus Director and the original Bareos console inte
 - [LLM reference: commands, syntax, descriptions and implementation status (JSON)](bareos-director-commands.json)
 - [JSON Schema](bareos-director-commands.schema.json)
 
-The upstream reference is pinned to Bareos `WIP/25.1.2-pre`, commit `fc2c79b6c43eb5752e98ebd86116593dbbbe0c68`. It contains all 88 top-level commands and the 26 commands of the separate restore file-selection shell. The audit distinguishes handler registration from verified behavior; consult each page's source-derived section before relying on older examples.
+The upstream reference is pinned to Bareos commit `18be77e6832e33f5acd64094b9cba6066f2503f9` (branch `bareos-25`, `WIP/25.1.2-pre-43-g18be77e68`), the exact source of the installed reference binary `bareos-dir 25.1.2~pre43.18be77e68`. It contains all 88 top-level commands and the 26 commands of the separate restore file-selection shell. The audit distinguishes handler registration from verified behavior; consult each page's source-derived section before relying on older examples.
 
 ## Console Commands
 

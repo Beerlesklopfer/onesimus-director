@@ -2,8 +2,8 @@
 
 [LLM-Referenz (JSON)](bareos-director-commands.json) · [JSON-Schema](bareos-director-commands.schema.json) · [Wiki-Übersicht](README.md) · [Audit-Notizen](audit-notes.json)
 
-Stand: 15.10.2026. Originalquelle: [Bareos `WIP/25.1.2-pre`](https://github.com/bareos/bareos/blob/fc2c79b6c43eb5752e98ebd86116593dbbbe0c68/core/src/dird/ua_cmds.cc), Commit `fc2c79b6c43eb5752e98ebd86116593dbbbe0c68`.
-Der Projektstand nennt 25.1.2; upstream existiert hierfür nur der Tag `WIP/25.1.2-pre`, kein Release-Tag 25.1.2. Diese Referenz behauptet daher keine Übereinstimmung mit einem finalen Release.
+Stand: 16.10.2026. Originalquelle: [Bareos `WIP/25.1.2-pre-43-g18be77e68`](https://github.com/bareos/bareos/blob/18be77e6832e33f5acd64094b9cba6066f2503f9/core/src/dird/ua_cmds.cc), Commit `18be77e6832e33f5acd64094b9cba6066f2503f9`.
+Das ist der exakte Quellstand des installierten Referenz-Directors (`bareos-dir --version` → `25.1.2~pre43.18be77e68`): Branch `bareos-25`, 43 Commits nach dem Tag `WIP/25.1.2-pre` (`fc2c79b6`). Einen Release-Tag 25.1.2 gibt es upstream noch nicht; diese Referenz behauptet daher keine Übereinstimmung mit einem finalen Release.
 
 ## Ergebnis
 
@@ -37,7 +37,7 @@ Nur `--no-default-features --features mcp-development` kompiliert `execute` ein;
 
 ## Übergreifende Befunde
 
-- **ACL-Parität fehlt** Das Original prüft Command_ACL vor dem Dispatch. Im lokalen Dispatch ist keine entsprechende Prüfung vorhanden; .authorized prüft Existenz und akzeptiert cmd pauschal. Authentifizierung mit Passwort/Token ist kein Ersatz für diese Autorisierung. [core/src/dird/ua_cmds.cc:540](https://github.com/bareos/bareos/blob/fc2c79b6c43eb5752e98ebd86116593dbbbe0c68/core/src/dird/ua_cmds.cc#L540) · [crates/onesimus-dird/src/command_registry.rs:346](../../../crates/onesimus-dird/src/command_registry.rs) · [crates/onesimus-dird/src/commands/dot.rs:175](../../../crates/onesimus-dird/src/commands/dot.rs)
+- **ACL-Parität fehlt** Das Original prüft Command_ACL vor dem Dispatch. Im lokalen Dispatch ist keine entsprechende Prüfung vorhanden; .authorized prüft Existenz und akzeptiert cmd pauschal. Authentifizierung mit Passwort/Token ist kein Ersatz für diese Autorisierung. [core/src/dird/ua_cmds.cc:540](https://github.com/bareos/bareos/blob/18be77e6832e33f5acd64094b9cba6066f2503f9/core/src/dird/ua_cmds.cc#L540) · [crates/onesimus-dird/src/command_registry.rs:346](../../../crates/onesimus-dird/src/command_registry.rs) · [crates/onesimus-dird/src/commands/dot.rs:175](../../../crates/onesimus-dird/src/commands/dot.rs)
 - **Scheduler startet keine Worker** dispatch_ready_jobs entfernt fällige Jobs und zählt sie, enthält aber weiterhin den TODO zum Fork eines Workers. Geplante Backups sind dadurch nicht funktionsgleich zum Original; dies ist bereits im Backlog dokumentiert. [crates/onesimus-dird/src/scheduler.rs:148](../../../crates/onesimus-dird/src/scheduler.rs) · [docs/BACKLOG.md:41](../../../docs/BACKLOG.md)
 - **Hilfetext ist kein Implementierungsnachweis** Die vorhandene UA_COMMANDS-Tabelle beschreibt Originalsyntax, während die tatsächliche Ausführung über command_registry erfolgt. configure enthält in der lokalen UA-Tabelle einen Generator-Funktionsnamen statt expandierter Syntax, .locations den Text NULL statt eines fehlenden Hilfetextes. [crates/onesimus-dird/src/ua_commands_table.rs:4](../../../crates/onesimus-dird/src/ua_commands_table.rs) · [crates/onesimus-dird/src/command_executor.rs:53](../../../crates/onesimus-dird/src/command_executor.rs)
 
@@ -140,32 +140,32 @@ Diese Befehle stehen in `ua_tree.cc::commands[]`, nicht in der Hauptkonsole. One
 
 | Befehl | Originalbeschreibung | Originalquelle |
 |---|---|---|
-| `abort` | abort and do not do restore | [Handler](https://github.com/bareos/bareos/blob/fc2c79b6c43eb5752e98ebd86116593dbbbe0c68/core/src/dird/ua_tree.cc#L1080) |
-| `add` | add dir/file to be restored recursively, wildcards allowed | [Handler](https://github.com/bareos/bareos/blob/fc2c79b6c43eb5752e98ebd86116593dbbbe0c68/core/src/dird/ua_tree.cc#L548) |
-| `cd` | change current directory | [Handler](https://github.com/bareos/bareos/blob/fc2c79b6c43eb5752e98ebd86116593dbbbe0c68/core/src/dird/ua_tree.cc#L958) |
-| `count` | count marked files in and below the cd | [Handler](https://github.com/bareos/bareos/blob/fc2c79b6c43eb5752e98ebd86116593dbbbe0c68/core/src/dird/ua_tree.cc#L604) |
-| `delete` | delete dir/file to be restored recursively in dir | [Handler](https://github.com/bareos/bareos/blob/fc2c79b6c43eb5752e98ebd86116593dbbbe0c68/core/src/dird/ua_tree.cc#L1022) |
-| `dir` | long list current directory, wildcards allowed | [Handler](https://github.com/bareos/bareos/blob/fc2c79b6c43eb5752e98ebd86116593dbbbe0c68/core/src/dird/ua_tree.cc#L890) |
-| `.dir` | long list current directory, wildcards allowed | [Handler](https://github.com/bareos/bareos/blob/fc2c79b6c43eb5752e98ebd86116593dbbbe0c68/core/src/dird/ua_tree.cc#L885) |
-| `done` | leave file selection mode | [Handler](https://github.com/bareos/bareos/blob/fc2c79b6c43eb5752e98ebd86116593dbbbe0c68/core/src/dird/ua_tree.cc#L1078) |
-| `estimate` | estimate restore size | [Handler](https://github.com/bareos/bareos/blob/fc2c79b6c43eb5752e98ebd86116593dbbbe0c68/core/src/dird/ua_tree.cc#L895) |
-| `exit` | same as done command | [Handler](https://github.com/bareos/bareos/blob/fc2c79b6c43eb5752e98ebd86116593dbbbe0c68/core/src/dird/ua_tree.cc#L1078) |
-| `find` | find files, wildcards allowed | [Handler](https://github.com/bareos/bareos/blob/fc2c79b6c43eb5752e98ebd86116593dbbbe0c68/core/src/dird/ua_tree.cc#L623) |
-| `help` | print help | [Handler](https://github.com/bareos/bareos/blob/fc2c79b6c43eb5752e98ebd86116593dbbbe0c68/core/src/dird/ua_tree.cc#L938) |
-| `ls` | list current directory, wildcards allowed | [Handler](https://github.com/bareos/bareos/blob/fc2c79b6c43eb5752e98ebd86116593dbbbe0c68/core/src/dird/ua_tree.cc#L693) |
-| `.ls` | list current directory, wildcards allowed | [Handler](https://github.com/bareos/bareos/blob/fc2c79b6c43eb5752e98ebd86116593dbbbe0c68/core/src/dird/ua_tree.cc#L678) |
-| `.lsdir` | list subdir in current directory, wildcards allowed | [Handler](https://github.com/bareos/bareos/blob/fc2c79b6c43eb5752e98ebd86116593dbbbe0c68/core/src/dird/ua_tree.cc#L654) |
-| `lsmark` | list the marked files in and below the cd | [Handler](https://github.com/bareos/bareos/blob/fc2c79b6c43eb5752e98ebd86116593dbbbe0c68/core/src/dird/ua_tree.cc#L765) |
-| `.lsmark` | list the marked files in | [Handler](https://github.com/bareos/bareos/blob/fc2c79b6c43eb5752e98ebd86116593dbbbe0c68/core/src/dird/ua_tree.cc#L716) |
-| `mark` | mark dir/file to be restored recursively, wildcards allowed | [Handler](https://github.com/bareos/bareos/blob/fc2c79b6c43eb5752e98ebd86116593dbbbe0c68/core/src/dird/ua_tree.cc#L548) |
-| `markdir` | mark directory name to be restored (no files) | [Handler](https://github.com/bareos/bareos/blob/fc2c79b6c43eb5752e98ebd86116593dbbbe0c68/core/src/dird/ua_tree.cc#L571) |
-| `pwd` | print current working directory | [Handler](https://github.com/bareos/bareos/blob/fc2c79b6c43eb5752e98ebd86116593dbbbe0c68/core/src/dird/ua_tree.cc#L992) |
-| `.pwd` | print current working directory | [Handler](https://github.com/bareos/bareos/blob/fc2c79b6c43eb5752e98ebd86116593dbbbe0c68/core/src/dird/ua_tree.cc#L1009) |
-| `unmark` | unmark dir/file to be restored recursively in dir | [Handler](https://github.com/bareos/bareos/blob/fc2c79b6c43eb5752e98ebd86116593dbbbe0c68/core/src/dird/ua_tree.cc#L1022) |
-| `unmarkdir` | unmark directory name only no recursion | [Handler](https://github.com/bareos/bareos/blob/fc2c79b6c43eb5752e98ebd86116593dbbbe0c68/core/src/dird/ua_tree.cc#L1045) |
-| `quit` | quit and do not do restore | [Handler](https://github.com/bareos/bareos/blob/fc2c79b6c43eb5752e98ebd86116593dbbbe0c68/core/src/dird/ua_tree.cc#L1080) |
-| `.help` | print help | [Handler](https://github.com/bareos/bareos/blob/fc2c79b6c43eb5752e98ebd86116593dbbbe0c68/core/src/dird/ua_tree.cc#L669) |
-| `?` | print help | [Handler](https://github.com/bareos/bareos/blob/fc2c79b6c43eb5752e98ebd86116593dbbbe0c68/core/src/dird/ua_tree.cc#L938) |
+| `abort` | abort and do not do restore | [Handler](https://github.com/bareos/bareos/blob/18be77e6832e33f5acd64094b9cba6066f2503f9/core/src/dird/ua_tree.cc#L1080) |
+| `add` | add dir/file to be restored recursively, wildcards allowed | [Handler](https://github.com/bareos/bareos/blob/18be77e6832e33f5acd64094b9cba6066f2503f9/core/src/dird/ua_tree.cc#L548) |
+| `cd` | change current directory | [Handler](https://github.com/bareos/bareos/blob/18be77e6832e33f5acd64094b9cba6066f2503f9/core/src/dird/ua_tree.cc#L958) |
+| `count` | count marked files in and below the cd | [Handler](https://github.com/bareos/bareos/blob/18be77e6832e33f5acd64094b9cba6066f2503f9/core/src/dird/ua_tree.cc#L604) |
+| `delete` | delete dir/file to be restored recursively in dir | [Handler](https://github.com/bareos/bareos/blob/18be77e6832e33f5acd64094b9cba6066f2503f9/core/src/dird/ua_tree.cc#L1022) |
+| `dir` | long list current directory, wildcards allowed | [Handler](https://github.com/bareos/bareos/blob/18be77e6832e33f5acd64094b9cba6066f2503f9/core/src/dird/ua_tree.cc#L890) |
+| `.dir` | long list current directory, wildcards allowed | [Handler](https://github.com/bareos/bareos/blob/18be77e6832e33f5acd64094b9cba6066f2503f9/core/src/dird/ua_tree.cc#L885) |
+| `done` | leave file selection mode | [Handler](https://github.com/bareos/bareos/blob/18be77e6832e33f5acd64094b9cba6066f2503f9/core/src/dird/ua_tree.cc#L1078) |
+| `estimate` | estimate restore size | [Handler](https://github.com/bareos/bareos/blob/18be77e6832e33f5acd64094b9cba6066f2503f9/core/src/dird/ua_tree.cc#L895) |
+| `exit` | same as done command | [Handler](https://github.com/bareos/bareos/blob/18be77e6832e33f5acd64094b9cba6066f2503f9/core/src/dird/ua_tree.cc#L1078) |
+| `find` | find files, wildcards allowed | [Handler](https://github.com/bareos/bareos/blob/18be77e6832e33f5acd64094b9cba6066f2503f9/core/src/dird/ua_tree.cc#L623) |
+| `help` | print help | [Handler](https://github.com/bareos/bareos/blob/18be77e6832e33f5acd64094b9cba6066f2503f9/core/src/dird/ua_tree.cc#L938) |
+| `ls` | list current directory, wildcards allowed | [Handler](https://github.com/bareos/bareos/blob/18be77e6832e33f5acd64094b9cba6066f2503f9/core/src/dird/ua_tree.cc#L693) |
+| `.ls` | list current directory, wildcards allowed | [Handler](https://github.com/bareos/bareos/blob/18be77e6832e33f5acd64094b9cba6066f2503f9/core/src/dird/ua_tree.cc#L678) |
+| `.lsdir` | list subdir in current directory, wildcards allowed | [Handler](https://github.com/bareos/bareos/blob/18be77e6832e33f5acd64094b9cba6066f2503f9/core/src/dird/ua_tree.cc#L654) |
+| `lsmark` | list the marked files in and below the cd | [Handler](https://github.com/bareos/bareos/blob/18be77e6832e33f5acd64094b9cba6066f2503f9/core/src/dird/ua_tree.cc#L765) |
+| `.lsmark` | list the marked files in | [Handler](https://github.com/bareos/bareos/blob/18be77e6832e33f5acd64094b9cba6066f2503f9/core/src/dird/ua_tree.cc#L716) |
+| `mark` | mark dir/file to be restored recursively, wildcards allowed | [Handler](https://github.com/bareos/bareos/blob/18be77e6832e33f5acd64094b9cba6066f2503f9/core/src/dird/ua_tree.cc#L548) |
+| `markdir` | mark directory name to be restored (no files) | [Handler](https://github.com/bareos/bareos/blob/18be77e6832e33f5acd64094b9cba6066f2503f9/core/src/dird/ua_tree.cc#L571) |
+| `pwd` | print current working directory | [Handler](https://github.com/bareos/bareos/blob/18be77e6832e33f5acd64094b9cba6066f2503f9/core/src/dird/ua_tree.cc#L992) |
+| `.pwd` | print current working directory | [Handler](https://github.com/bareos/bareos/blob/18be77e6832e33f5acd64094b9cba6066f2503f9/core/src/dird/ua_tree.cc#L1009) |
+| `unmark` | unmark dir/file to be restored recursively in dir | [Handler](https://github.com/bareos/bareos/blob/18be77e6832e33f5acd64094b9cba6066f2503f9/core/src/dird/ua_tree.cc#L1022) |
+| `unmarkdir` | unmark directory name only no recursion | [Handler](https://github.com/bareos/bareos/blob/18be77e6832e33f5acd64094b9cba6066f2503f9/core/src/dird/ua_tree.cc#L1045) |
+| `quit` | quit and do not do restore | [Handler](https://github.com/bareos/bareos/blob/18be77e6832e33f5acd64094b9cba6066f2503f9/core/src/dird/ua_tree.cc#L1080) |
+| `.help` | print help | [Handler](https://github.com/bareos/bareos/blob/18be77e6832e33f5acd64094b9cba6066f2503f9/core/src/dird/ua_tree.cc#L669) |
+| `?` | print help | [Handler](https://github.com/bareos/bareos/blob/18be77e6832e33f5acd64094b9cba6066f2503f9/core/src/dird/ua_tree.cc#L938) |
 
 ## Onesimus-Erweiterungen
 
@@ -176,10 +176,12 @@ Zusatznamen sind keine Belege für upstream vorhandene Funktionen. Die JSON enth
 ## Reproduzieren und aktualisieren
 
 ```bash
-git clone --depth 1 --branch WIP/25.1.2-pre --filter=blob:none --sparse https://github.com/bareos/bareos.git /tmp/bareos-reference
-git -C /tmp/bareos-reference sparse-checkout set core/src/dird
-python3 scripts/generate_director_reference.py /tmp/bareos-reference
-python3 scripts/generate_director_reference.py /tmp/bareos-reference --check
+git clone --filter=blob:none --no-checkout --sparse https://github.com/bareos/bareos.git /tmp/bareos-director-reference-18be77e6
+git -C /tmp/bareos-director-reference-18be77e6 sparse-checkout set --no-cone core/src/dird core/src/lib core/src/cats core/src/console core/src/stored core/src/filed core/src/include core/src/findlib
+git -C /tmp/bareos-director-reference-18be77e6 checkout --detach 18be77e6832e33f5acd64094b9cba6066f2503f9
+python3 scripts/generate_director_reference.py /tmp/bareos-director-reference-18be77e6
+python3 scripts/generate_director_reference.py /tmp/bareos-director-reference-18be77e6 --check
+python3 scripts/generate_configure_usage.py /tmp/bareos-director-reference-18be77e6 --check
 ```
 
 Der Generator prüft Commit und unveränderte Originalquellen, extrahiert beide Tabellen samt Handler-Quellen, prüft eindeutige Namen und gleicht die lokale Registry einschließlich Aliase ab. Die SHA-256-Prüfsummen der gelesenen upstream Director-Dateien stehen in der JSON.

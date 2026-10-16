@@ -33,7 +33,8 @@ Teilimplementierungen belegt. Dadurch lautet die aktuelle Aufteilung
 ### Was die Prüfung belegt
 
 - Registry/JSON/Audit wurden gegen die gepinnte Bareos-Tabelle abgeglichen:
-  Commit `fc2c79b6c43eb5752e98ebd86116593dbbbe0c68` (`WIP/25.1.2-pre`).
+  Commit `18be77e6832e33f5acd64094b9cba6066f2503f9` (Branch `bareos-25`,
+  `WIP/25.1.2-pre-43-g18be77e68`; bis 15.10.2026 `fc2c79b6`, `WIP/25.1.2-pre`).
 - Drei unabhängige Agenten prüften Quellen, Gegenbeispiele und Änderungen in
   mehreren Runden. Gegenseitige Reviews ersetzten die jeweiligen eigenen
   positiven Tests ausdrücklich nicht.
@@ -58,11 +59,27 @@ Das ist lokale Regressionsevidenz, noch kein bconsole/oconsole-Rohdatenabgleich.
 ### Grenzen und Referenzversion
 
 Der installierte Original-Director meldet
-`25.1.2~pre43.18be77e68 (09 October 2026)`. Er ist damit nicht derselbe
-Quellstand wie die gepinnte Referenz. Vor einem bindenden SHA-256-Abgleich
-müssen die ausführbaren Referenzversionen und ihre Quellen eindeutig
-zusammengeführt werden. Für diese Roadmap wurde keine erfolgreiche
-Live-Paritätsmatrix behauptet oder erzeugt.
+`25.1.2~pre43.18be77e68 (09 October 2026)`. Seit 16.10.2026 ist die
+gepinnte Quellreferenz genau dieser Stand: Commit
+`18be77e6832e33f5acd64094b9cba6066f2503f9` (Branch `bareos-25`, 43 Commits
+nach `WIP/25.1.2-pre` = `fc2c79b6`). Ausführbare Referenz und Quelltext sind
+damit zusammengeführt; Generatoren (`scripts/generate_director_reference.py`,
+`scripts/generate_configure_usage.py`) prüfen diesen Commit. Lokaler,
+unveränderter Checkout: `/tmp/bareos-director-reference-18be77e6`
+(Reproduktion in [bareos-reference.md](wiki/commands/bareos-reference.md)).
+
+Die Änderungen `fc2c79b6..18be77e6` in `core/src/{dird,lib,cats}` ändern
+weder die Befehlstabellen (`ua_cmds.cc`, `ua_tree.cc`, `ua_dotcmds.cc`) noch
+Hilfetexte oder Ressourcendirektiven (`dird_conf.cc`). Konsolenrelevant sind:
+SQL-Escaping der Filter in `list jobs/clients/log` (`client=`, `volume=`,
+`pool=`), einfaches statt doppeltes Escaping von `path=` in
+`.bvfs_versions`, Prompt-Ersetzung in `query` (wiederholtes `%n` innerhalb
+einer Anweisung), Abbruch bei Escape-Fehlern, `3000 OK label. VolFiles=…`
+bei `purge … action=truncate`, die Warnung `Could not set inchanger to 0 for
+slot %d.` in `update slots`, die VolBlocks-Plausibilitätsprüfung in
+CatReq-`UpdateMedia` und die Nachrichtenverteilung (`Jmsg`-Vorfilter
+entfernt, Job-Code-Callback bleibt nach `reload` erhalten). Die Live-Parität
+vergleicht gegen das installierte Binary; es ist die Grundwahrheit.
 
 ## Reihenfolge und gemeinsame Grundlagen
 

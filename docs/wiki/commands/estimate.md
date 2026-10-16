@@ -3,7 +3,7 @@
 <!-- bareos-reference:start -->
 ## Aus den Bareos-Originalquellen
 
-Referenz: [WIP/25.1.2-pre, `fc2c79b6c43e`](https://github.com/bareos/bareos/blob/fc2c79b6c43eb5752e98ebd86116593dbbbe0c68/core/src/dird/ua_cmds.cc#L334) · [Vollständigkeitsabgleich](bareos-reference.md) · [LLM-JSON](bareos-director-commands.json)
+Referenz: [WIP/25.1.2-pre-43-g18be77e68, `18be77e6832e`](https://github.com/bareos/bareos/blob/18be77e6832e33f5acd64094b9cba6066f2503f9/core/src/dird/ua_cmds.cc#L334) · [Vollständigkeitsabgleich](bareos-reference.md) · [LLM-JSON](bareos-director-commands.json)
 
 **Originalbeschreibung:** Performs FileSet estimate, listing gives full listing
 
@@ -19,7 +19,7 @@ estimate fileset=<fileset-name> client=<client-name> level=<level> accurate=<yes
 
 - Der Handler liest Jobdaten, führt aber keine FD-Schätzung aus; die Ausgabe lautet ausdrücklich Estimate pending.
 
-**Lokaler Handler:** [crates/onesimus-dird/src/commands/admin.rs:368](../../../crates/onesimus-dird/src/commands/admin.rs).
+**Lokaler Handler:** [crates/onesimus-dird/src/commands/estimate.rs:139](../../../crates/onesimus-dird/src/commands/estimate.rs).
 
 Die folgenden vorhandenen Beispiele und Verhaltensbeschreibungen sind lokale Dokumentation; sie sind kein Beleg für vollständige Bareos-Kompatibilität. Bei Widersprüchen gilt der obige Befund.
 <!-- bareos-reference:end -->

@@ -245,7 +245,7 @@
         {
           "file": "core/src/dird/ua_cmds.cc",
           "line": 540,
-          "url": "https://github.com/bareos/bareos/blob/fc2c79b6c43eb5752e98ebd86116593dbbbe0c68/core/src/dird/ua_cmds.cc#L540"
+          "url": "https://github.com/bareos/bareos/blob/18be77e6832e33f5acd64094b9cba6066f2503f9/core/src/dird/ua_cmds.cc#L540"
         },
         {
           "file": "crates/onesimus-dird/src/command_registry.rs",

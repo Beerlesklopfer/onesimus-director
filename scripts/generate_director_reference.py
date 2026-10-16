@@ -15,8 +15,12 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 OUT = ROOT / 'docs/wiki/commands'
-COMMIT = 'fc2c79b6c43eb5752e98ebd86116593dbbbe0c68'
-TAG = 'WIP/25.1.2-pre'
+# Exact source of the installed reference binary
+# (`bareos-dir --version` -> 25.1.2~pre43.18be77e68): branch bareos-25,
+# 43 commits after the tag WIP/25.1.2-pre (fc2c79b6).
+COMMIT = '18be77e6832e33f5acd64094b9cba6066f2503f9'
+TAG = 'WIP/25.1.2-pre-43-g18be77e68'
+BINARY_VERSION = '25.1.2~pre43.18be77e68'
 BASE = f'https://github.com/bareos/bareos/blob/{COMMIT}/'
 STRING = r'"(?:\\.|[^"\\])*"'
 TOKEN = re.compile(STRING + r'|//[^\n]*|/\*[\s\S]*?\*/|.', re.S)
@@ -216,7 +220,7 @@ def main():
         '$schema': './bareos-director-commands.schema.json',
         'schema_version': 1,
         'title': 'Bareos Director command reference and Onesimus static coverage audit',
-        'reference_date': '2026-10-15',
+        'reference_date': '2026-10-16',
         'upstream': {'repository': 'https://github.com/bareos/bareos', 'tag': TAG, 'commit': COMMIT,
                      'license': 'AGPL-3.0-only',
                      'notice': 'Command help and usage extracted from Bareos, copyright Bareos GmbH & Co. KG and contributors.',
@@ -274,8 +278,8 @@ def main():
 
 [LLM-Referenz (JSON)](bareos-director-commands.json) · [JSON-Schema](bareos-director-commands.schema.json) · [Wiki-Übersicht](README.md) · [Audit-Notizen](audit-notes.json)
 
-Stand: 15.10.2026. Originalquelle: [Bareos `{TAG}`]({BASE}core/src/dird/ua_cmds.cc), Commit `{COMMIT}`.
-Der Projektstand nennt 25.1.2; upstream existiert hierfür nur der Tag `WIP/25.1.2-pre`, kein Release-Tag 25.1.2. Diese Referenz behauptet daher keine Übereinstimmung mit einem finalen Release.
+Stand: 16.10.2026. Originalquelle: [Bareos `{TAG}`]({BASE}core/src/dird/ua_cmds.cc), Commit `{COMMIT}`.
+Das ist der exakte Quellstand des installierten Referenz-Directors (`bareos-dir --version` → `{BINARY_VERSION}`): Branch `bareos-25`, 43 Commits nach dem Tag `WIP/25.1.2-pre` (`fc2c79b6`). Einen Release-Tag 25.1.2 gibt es upstream noch nicht; diese Referenz behauptet daher keine Übereinstimmung mit einem finalen Release.
 
 ## Ergebnis
 
@@ -361,10 +365,12 @@ Referenz: [{TAG}, `{COMMIT[:12]}`]({command['source']['url']}) · [Vollständigk
 ## Reproduzieren und aktualisieren
 
 ```bash
-git clone --depth 1 --branch WIP/25.1.2-pre --filter=blob:none --sparse https://github.com/bareos/bareos.git /tmp/bareos-reference
-git -C /tmp/bareos-reference sparse-checkout set core/src/dird
-python3 scripts/generate_director_reference.py /tmp/bareos-reference
-python3 scripts/generate_director_reference.py /tmp/bareos-reference --check
+git clone --filter=blob:none --no-checkout --sparse https://github.com/bareos/bareos.git /tmp/bareos-director-reference-18be77e6
+git -C /tmp/bareos-director-reference-18be77e6 sparse-checkout set --no-cone core/src/dird core/src/lib core/src/cats core/src/console core/src/stored core/src/filed core/src/include core/src/findlib
+git -C /tmp/bareos-director-reference-18be77e6 checkout --detach 18be77e6832e33f5acd64094b9cba6066f2503f9
+python3 scripts/generate_director_reference.py /tmp/bareos-director-reference-18be77e6
+python3 scripts/generate_director_reference.py /tmp/bareos-director-reference-18be77e6 --check
+python3 scripts/generate_configure_usage.py /tmp/bareos-director-reference-18be77e6 --check
 ```
 
 Der Generator prüft Commit und unveränderte Originalquellen, extrahiert beide Tabellen samt Handler-Quellen, prüft eindeutige Namen und gleicht die lokale Registry einschließlich Aliase ab. Die SHA-256-Prüfsummen der gelesenen upstream Director-Dateien stehen in der JSON.

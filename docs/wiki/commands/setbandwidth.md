@@ -3,7 +3,7 @@
 <!-- bareos-reference:start -->
 ## Aus den Bareos-Originalquellen
 
-Referenz: [WIP/25.1.2-pre, `fc2c79b6c43e`](https://github.com/bareos/bareos/blob/fc2c79b6c43eb5752e98ebd86116593dbbbe0c68/core/src/dird/ua_cmds.cc#L454) · [Vollständigkeitsabgleich](bareos-reference.md) · [LLM-JSON](bareos-director-commands.json)
+Referenz: [WIP/25.1.2-pre-43-g18be77e68, `18be77e6832e`](https://github.com/bareos/bareos/blob/18be77e6832e33f5acd64094b9cba6066f2503f9/core/src/dird/ua_cmds.cc#L454) · [Vollständigkeitsabgleich](bareos-reference.md) · [LLM-JSON](bareos-director-commands.json)
 
 **Originalbeschreibung:** Sets bandwidth
 
@@ -19,7 +19,7 @@ setbandwidth [ client=<client-name> | storage=<storage-name> | jobid=<jobid> | j
 
 - client=/storage= senden jetzt tatsächliche setbandwidth-Pakete mit Umrechnung KiB/s zu Bytes/s; 0 hebt die Begrenzung auf. Ungültige Limits, Überlauf und negative Werte werden vor I/O abgelehnt; Erfolg erfordert die Daemon-Bestätigung. job/jobid/ujobid/state/all, interaktive Auswahl, NDMP/Legacy-Protokolle, ACL-Abgleich und Live-SHA-256-Parität bleiben offen. Jobselektoren werden bis dahin ausdrücklich abgelehnt, niemals in globale Limits umgedeutet.
 
-**Lokaler Handler:** [crates/onesimus-dird/src/commands/bandwidth.rs:7](../../../crates/onesimus-dird/src/commands/bandwidth.rs).
+**Lokaler Handler:** [crates/onesimus-dird/src/commands/bandwidth.rs:10](../../../crates/onesimus-dird/src/commands/bandwidth.rs).
 
 Die folgenden vorhandenen Beispiele und Verhaltensbeschreibungen sind lokale Dokumentation; sie sind kein Beleg für vollständige Bareos-Kompatibilität. Bei Widersprüchen gilt der obige Befund.
 <!-- bareos-reference:end -->

@@ -3,7 +3,7 @@
 <!-- bareos-reference:start -->
 ## Aus den Bareos-Originalquellen
 
-Referenz: [WIP/25.1.2-pre, `fc2c79b6c43e`](https://github.com/bareos/bareos/blob/fc2c79b6c43eb5752e98ebd86116593dbbbe0c68/core/src/dird/ua_cmds.cc#L237) · [Vollständigkeitsabgleich](bareos-reference.md) · [LLM-JSON](bareos-director-commands.json)
+Referenz: [WIP/25.1.2-pre-43-g18be77e68, `18be77e6832e`](https://github.com/bareos/bareos/blob/18be77e6832e33f5acd64094b9cba6066f2503f9/core/src/dird/ua_cmds.cc#L237) · [Vollständigkeitsabgleich](bareos-reference.md) · [LLM-JSON](bareos-director-commands.json)
 
 **Originalbeschreibung:** Get default settings
 
@@ -19,7 +19,7 @@ Referenz: [WIP/25.1.2-pre, `fc2c79b6c43e`](https://github.com/bareos/bareos/blob
 
 - Client-Retentions/Autoprune, alle Poolfelder samt Source-Sonderfall purge_oldest_volume=, mehrere Devices, Pool-vor-Job-Storage und Restore Where/Replace/RegexWhere sind aus raw config portiert. JobDefs und explizite Overrides werden aufgelöst. Kontroverse Kreuzreviews fanden Exponenten-/Unterlauf-, PINT32- und Selektorprioritätsfehler; Gegenbeispieltests sichern deren Korrektur ab. Globale ACL-Durchsetzung, vollständige Konfigurationsvalidierung und Live-SHA-256-Abgleich aller Ressourcen-/Vererbungsfälle bleiben offen.
 
-**Lokaler Handler:** [crates/onesimus-dird/src/commands/dot.rs:119](../../../crates/onesimus-dird/src/commands/dot.rs).
+**Lokaler Handler:** [crates/onesimus-dird/src/commands/dot.rs:139](../../../crates/onesimus-dird/src/commands/dot.rs).
 
 Die folgenden vorhandenen Beispiele und Verhaltensbeschreibungen sind lokale Dokumentation; sie sind kein Beleg für vollständige Bareos-Kompatibilität. Bei Widersprüchen gilt der obige Befund.
 <!-- bareos-reference:end -->

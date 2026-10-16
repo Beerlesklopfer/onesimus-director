@@ -3,11 +3,11 @@
 <!-- bareos-reference:start -->
 ## Aus den Bareos-Originalquellen
 
-Referenz: [WIP/25.1.2-pre, `fc2c79b6c43e`](https://github.com/bareos/bareos/blob/fc2c79b6c43eb5752e98ebd86116593dbbbe0c68/core/src/dird/ua_cmds.cc#L319) · [Vollständigkeitsabgleich](bareos-reference.md) · [LLM-JSON](bareos-director-commands.json)
+Referenz: [WIP/25.1.2-pre-43-g18be77e68, `18be77e6832e`](https://github.com/bareos/bareos/blob/18be77e6832e33f5acd64094b9cba6066f2503f9/core/src/dird/ua_cmds.cc#L319) · [Vollständigkeitsabgleich](bareos-reference.md) · [LLM-JSON](bareos-director-commands.json)
 
 **Originalbeschreibung:** Configure director resources
 
-**Dynamische Syntax:** `add <resource-type> <resource-directives> | export client=<client>`. Der [Originalgenerator](https://github.com/bareos/bareos/blob/fc2c79b6c43eb5752e98ebd86116593dbbbe0c68/core/src/dird/dird_conf.cc#L918) leitet Pflichtfelder, optionale Felder und Typen aus Ressourcendirektiven ab.
+**Dynamische Syntax:** `add <resource-type> <resource-directives> | export client=<client>`. Der [Originalgenerator](https://github.com/bareos/bareos/blob/18be77e6832e33f5acd64094b9cba6066f2503f9/core/src/dird/dird_conf.cc#L918) leitet Pflichtfelder, optionale Felder und Typen aus Ressourcendirektiven ab.
 
 Ressourcentypen für `add`: `client`, `jobdefs`, `job`, `storage`, `catalog`, `schedule`, `fileset`, `pool`, `messages`, `counter`, `profile`, `console`, `user`.
 
@@ -17,7 +17,7 @@ Ressourcentypen für `add`: `client`, `jobdefs`, `job`, `storage`, `catalog`, `s
 
 - Lokales CRUD ist eine Erweiterung, kein vollständiger Port aller Bareos-Ressourcendirektiven. Der Persistenzpfad ist auf /etc/bareos festgelegt; Originalsyntax wird dynamisch aus deutlich umfangreicheren Direktiventabellen erzeugt.
 
-**Lokaler Handler:** [crates/onesimus-dird/src/commands/configure.rs:42](../../../crates/onesimus-dird/src/commands/configure.rs).
+**Lokaler Handler:** [crates/onesimus-dird/src/commands/configure.rs:79](../../../crates/onesimus-dird/src/commands/configure.rs).
 
 Die folgenden vorhandenen Beispiele und Verhaltensbeschreibungen sind lokale Dokumentation; sie sind kein Beleg für vollständige Bareos-Kompatibilität. Bei Widersprüchen gilt der obige Befund.
 <!-- bareos-reference:end -->
