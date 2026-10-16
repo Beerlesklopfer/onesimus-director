@@ -17,40 +17,12 @@ fn directive<'a>(dirs: &'a [Directive], key: &str) -> Option<&'a Directive> {
 fn first<'a>(dirs: &'a [Directive], key: &str) -> Option<&'a str> {
     directive(dirs, key).and_then(Directive::first)
 }
-fn inherited(
-    cfg: &DirectorConfig,
-    resource: &ConfResource,
-    seen: &mut Vec<String>,
-) -> Result<Vec<Directive>, String> {
-    let mut dirs = Vec::new();
-    if let Some(name) = first(&resource.directives, "jobdefs") {
-        if seen.iter().any(|n| n == name) {
-            return Err(format!("Cyclic JobDefs reference: {name}"));
-        }
-        seen.push(name.to_string());
-        let defs =
-            raw(cfg, "jobdefs", name).ok_or_else(|| format!("JobDefs \"{name}\" not found."))?;
-        dirs = inherited(cfg, defs, seen)?;
-        seen.pop();
-    }
-    // Scalar overrides and list-resource overrides both replace inherited values.
-    for d in &resource.directives {
-        let key = d.norm_key();
-        dirs.retain(|old| old.norm_key() != key);
-        dirs.extend(
-            resource
-                .directives
-                .iter()
-                .filter(|item| item.norm_key() == key)
-                .cloned(),
-        );
-    }
-    Ok(dirs)
-}
-/// Directives of a Job resource including its JobDefs chain (raw config).
+/// Directives of a Job resource after PopulateJobdefaults() (raw config):
+/// own directives first, then the items and run scripts of its JobDefs
+/// chain (`bareos_config::jobdefs`).
 pub(crate) fn job_directives(cfg: &DirectorConfig, name: &str) -> Vec<Directive> {
-    raw(cfg, "job", name)
-        .and_then(|job| inherited(cfg, job, &mut Vec::new()).ok())
+    bareos_config::jobdefs::effective(&cfg.raw, "job", name)
+        .map(|e| bareos_config::jobdefs::directives(&e))
         .unwrap_or_default()
 }
 /// A time directive in seconds (0 when absent or invalid).
@@ -218,10 +190,7 @@ fn defaults(ast: &CommandAst, cfg: &DirectorConfig) -> Result<CommandResult, Str
             let Some(job) = cfg.find_job(name) else {
                 return Ok(empty());
             };
-            let dirs = match raw(cfg, "job", name) {
-                Some(r) => inherited(cfg, r, &mut Vec::new())?,
-                None => Vec::new(),
-            };
+            let dirs = job_directives(cfg, name);
             let value =
                 |key: &str, fallback: &str| first(&dirs, key).unwrap_or(fallback).to_string();
             let pool = value("pool", &job.pool);
@@ -610,6 +579,26 @@ Job {Name=J; JobDefs=D; Level=Full; RegexWhere="!a!b!"; Replace=Always}
         assert_eq!(j["defaults"]["level"], json!("Full"));
         assert_eq!(j["defaults"]["where"], json!(""));
         assert_eq!(j["defaults"]["replace"], json!("always"));
+    }
+    #[test]
+    fn jobdefs_chain_and_explicit_full() {
+        let cfg = config(
+            r#"
+JobDefs {Name=C; Type=Backup; Level=Incremental; Pool=Backup; Client=fd; Messages=Standard; Where=/c}
+JobDefs {Name=B; JobDefs=C; Level=Differential}
+Job {Name=J; JobDefs=B; Level=Full}
+Job {Name=K; JobDefs=B}
+"#,
+        );
+        let j = run(&cfg, "job", "J").json.unwrap();
+        assert_eq!(j["defaults"]["level"], json!("Full"));
+        assert_eq!(j["defaults"]["client"], json!("fd"));
+        assert_eq!(j["defaults"]["where"], json!("/c"));
+        let k = run(&cfg, "job", "K").json.unwrap();
+        assert_eq!(k["defaults"]["level"], json!("Differential"));
+        assert_eq!(cfg.find_job("J").unwrap().level, bareos_config::JobLevel::Full);
+        assert_eq!(cfg.find_job("K").unwrap().level, bareos_config::JobLevel::Differential);
+        assert_eq!(cfg.find_job("K").unwrap().client, "fd");
     }
     #[test]
     fn strtod_exponents_and_modifiers_match_original_grammar() {

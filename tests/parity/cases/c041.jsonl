@@ -1,0 +1,17 @@
+# C-041 JobDefs inheritance (dird_conf.cc PopulateJobdefaults/PropagateResource): explicit Job items win over the JobDefs.
+{"id": "c041-run-backupcatalog-no", "steps": ["run job=BackupCatalog", "no"], "normalize": ["When: +[0-9: -]+"]}
+{"id": "c041-run-backupcatalog-api1-no", "setup": [".api 1"], "steps": ["run job=BackupCatalog", "no"], "normalize": ["When: +[0-9: -]+"]}
+{"id": "c041-run-backupcatalog-mod-cancel", "steps": ["run job=BackupCatalog", "mod", "."], "normalize": ["When: +[0-9: -]+"]}
+{"id": "c041-run-backupfd-no", "steps": ["run job=backup-bareos-fd", "no"], "normalize": ["When: +[0-9: -]+"]}
+{"id": "c041-show-job-backupcatalog", "steps": ["show job=BackupCatalog"]}
+{"id": "c041-show-job-backupcatalog-verbose", "steps": ["show job=BackupCatalog verbose"]}
+{"id": "c041-show-job-backupfd-verbose", "steps": ["show job=backup-bareos-fd verbose"]}
+{"id": "c041-show-jobdefs-defaultjob", "steps": ["show jobdefs=DefaultJob"]}
+{"id": "c041-show-jobdefs-verbose", "steps": ["show jobdefs verbose"]}
+{"id": "c041-show-job-backupcatalog-api2", "setup": [".api 2"], "steps": ["show job=BackupCatalog"]}
+{"id": "c041-defaults-backupcatalog", "steps": [".defaults job=BackupCatalog"]}
+{"id": "c041-defaults-backupcatalog-api2", "setup": [".api 2"], "steps": [".defaults job=BackupCatalog"]}
+{"id": "c041-defaults-jobdefs", "steps": [".defaults job=DefaultJob"]}
+{"id": "c041-estimate-backupcatalog", "steps": ["estimate job=BackupCatalog"], "timeout_ms": 30000}
+{"id": "c041-estimate-backupfd", "steps": ["estimate job=backup-bareos-fd"], "timeout_ms": 30000}
+{"id": "c041-list-nextvol-backupcatalog", "steps": ["list nextvol job=BackupCatalog days=7"]}

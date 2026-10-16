@@ -369,6 +369,7 @@ fn parse_job_fields(directives: &HashMap<String, String>) -> Result<JobResource,
 
     let mut job = JobResource::default();
     job.name = require("name")?.to_string();
+    job.present = directives.keys().map(|k| crate::jobdefs::item_key(k)).collect();
     if let Some(v) = get("type") {
         job.job_type = match v.to_lowercase().as_str() {
             "backup" => JobType::Backup,

@@ -403,10 +403,11 @@ fn parse_check(cfg: &DirectorConfig, table: &Table, items: &'static [Item], name
 /// JobResource::Validate) for `configure add job`.
 fn job_valid(cfg: &DirectorConfig, lines: &[Line]) -> bool {
     let own = |name: &str| lines.iter().find(|l| l.item.is_some_and(|i| i.name == name)).map(|l| l.value.clone());
-    let jobdefs = own("JobDefs").and_then(|jd| cfg.raw.iter()
-        .find(|r| r.norm_type() == "jobdefs" && r.name() == Some(jd.as_str())).cloned());
-    let get = |name: &str| own(name).or_else(|| jobdefs.as_ref().and_then(|r| r.directives.iter()
-        .find(|d| d.norm_key() == name.to_ascii_lowercase()).and_then(|d| d.first().map(str::to_string))));
+    let jobdefs = own("JobDefs").and_then(|jd| bareos_config::jobdefs::effective(&cfg.raw, "jobdefs", &jd));
+    let get = |name: &str| own(name).or_else(|| jobdefs.as_ref().and_then(|dirs| dirs.iter()
+        .map(|e| &e.directive)
+        .find(|d| bareos_config::jobdefs::item_key(&d.key) == name.to_ascii_lowercase())
+        .and_then(|d| d.first().map(str::to_string))));
     if tables::JOB_ITEMS.iter().any(|i| i.required && get(i.name).is_none()) {
         return false;
     }
@@ -435,14 +436,26 @@ fn append_resource(cfg: &mut DirectorConfig, text: &str, path: &Path) {
             match resource {
                 Resource::Director(_) => {}
                 Resource::Client(c) => cfg.clients.push(c),
-                Resource::Job(j) => cfg.jobs.push(j),
+                // PropagateJobdefs() for the new Job/JobDefs (ua_configure.cc)
+                Resource::Job(mut j) => {
+                    bareos_config::jobdefs::propagate_job(&cfg.jobdefs, &mut j);
+                    cfg.jobs.push(j);
+                }
                 Resource::Storage(s) => cfg.storages.push(s),
                 Resource::Catalog(c) => cfg.catalogs.push(c),
                 Resource::Schedule(s) => cfg.schedules.push(s),
                 Resource::Pool(p) => cfg.pools.push(p),
                 Resource::FileSet(f) => cfg.filesets.push(f),
                 Resource::Console(c) => if !c.name.starts_with("_skip_") { cfg.consoles.push(c) },
-                Resource::JobDefs(j) => cfg.jobdefs.push(j),
+                Resource::JobDefs(mut j) => {
+                    if j.job.jobdefs != j.name {
+                        if let Some(src) = cfg.jobdefs.iter().find(|d| d.name == j.job.jobdefs) {
+                            let src = src.job.clone();
+                            bareos_config::jobdefs::propagate_typed_one(&mut j.job, &src);
+                        }
+                    }
+                    cfg.jobdefs.push(j);
+                }
                 Resource::Messages(m) => cfg.messages.push(m),
                 Resource::Profile(p) => cfg.profiles.push(p),
             }
