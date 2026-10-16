@@ -31,6 +31,10 @@ pub struct DirectorConfig {
     pub loaded_consoles: usize,
     /// Raw directives in C++ resource order (for `show`)
     pub raw: Vec<bareos_config::raw::ConfResource>,
+    /// Parsed by `reload` rather than at startup. The C++ parser then runs
+    /// with `omit_defaults_` (set by the first CheckResources()), which
+    /// changes what `show` prints (compatibility log C-057).
+    pub reloaded: bool,
 }
 
 impl DirectorConfig {
@@ -78,6 +82,7 @@ impl DirectorConfig {
             profiles: Vec::new(),
             loaded_consoles: 0,
             raw: Vec::new(),
+            reloaded: false,
         };
 
         for resource in resources {

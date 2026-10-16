@@ -8,6 +8,14 @@ session on each side via the bnet_capture example; the per-step reply bytes
 (all data frames, concatenated without trimming), the signal sequence and the
 end reason are compared, and SHA-256/byte counts of both sides are recorded.
 
+Configuration changes between commands (e.g. `reload` cases): a case may
+carry `config`, a map of paths relative to bareos-dir.d to file content (or
+null to remove the file). The files are written right before the case and
+restored right after it; `restore_reload: true` then sends one extra `reload`
+(outside the comparison) so later cases see the original configuration
+again. `log: true` appends the Daemon messages log lines written during the
+case as one extra compared step (date/time prefix normalized).
+
 Normalization exists only per case (`normalize`: list of regexes whose
 matches are replaced by "<N>") and is written into the report.
 
@@ -146,6 +154,48 @@ def capture(port, case):
     return data
 
 
+def apply_config(config_dir, changes):
+    """Write a case's `config` files; returns what restore_config needs."""
+    saved = {}
+    for rel, content in changes.items():
+        path = config_dir / rel
+        saved[path] = path.read_bytes() if path.exists() else None
+        if content is None:
+            path.unlink(missing_ok=True)
+        else:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(content)
+    return saved
+
+
+def restore_config(saved):
+    for path, content in saved.items():
+        if content is None:
+            path.unlink(missing_ok=True)
+        else:
+            path.write_bytes(content)
+
+
+def run_case(port, case, config_dir, work):
+    """capture() plus the optional per-case config change and log step."""
+    log = work / 'bareos.log'
+    offset = log.stat().st_size if log.exists() else 0
+    saved = apply_config(config_dir, case.get('config', {}))
+    try:
+        data = capture(port, case)
+    finally:
+        restore_config(saved)
+        if saved and case.get('restore_reload'):
+            capture(port, {'steps': ['reload']})
+    if case.get('log') and 'error' not in data:
+        time.sleep(0.5)  # daemon messages may be written by another thread
+        text = log.read_bytes()[offset:] if log.exists() else b''
+        text = re.sub(AUDIT_TIMESTAMP.encode(), b'<T>', text, flags=re.M)
+        data['steps'].append({'send': '<log>', 'end': 'log',
+                              'frames': [{'data': base64.b64encode(text).decode()}]})
+    return data
+
+
 def reply(step):
     """Concatenated data bytes, signal list and end reason of one step."""
     data = b''.join(base64.b64decode(f['data']) for f in step['frames'] if 'data' in f)
@@ -281,7 +331,9 @@ def run(args):
             with open(args.work / f'{side}.log', 'w') as log:
                 process = start(side, args.work / 'conf' / 'bareos-dir.d', args.port, log)
                 try:
-                    results[side] = {case['id']: capture(args.port, case) for case in cases}
+                    config_dir = args.work / 'conf' / 'bareos-dir.d'
+                    results[side] = {case['id']: run_case(args.port, case, config_dir, work)
+                                     for case in cases}
                 finally:
                     stop(process)
             for name in DAEMON_LOGS:
