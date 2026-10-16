@@ -10,6 +10,146 @@ The upstream reference is pinned to Bareos commit `18be77e6832e33f5acd64094b9cba
 
 Each command's status is derived from the parity comparison (`tests/parity`, original and Onesimus Director on identical fixtures) and the [compatibility log](../../COMPATIBILITY-LOG.md): `parity_verified` means every listed parity case replies byte-identically and no open log entry concerns the command; `partial` names open log entries, differing cases, uncovered variants or side effects only covered by unit tests; `registered_unverified` means there is no parity case yet. Status overview and roadmap: [TODO-COMMANDS.md](../../TODO-COMMANDS.md).
 
+## Aufbau der Befehlsseiten
+
+Jede Seite `<befehl>.md` (Punktbefehle: `dot-<name>.md`) ist Endanwenderdokumentation auf Deutsch. Befehlsnamen, Schlüsselwörter, Ressourcennamen und Ausgaben des Directors bleiben unverändert (meist Englisch). Die Seiten folgen alle demselben Aufbau.
+
+### Reihenfolge der Abschnitte
+
+1. **Titelzeile** `# <befehl> — <deutscher Kurztitel>`, zum Beispiel `# version — Version des Directors anzeigen`. Der Generator lässt die erste Zeile stehen.
+2. **Generierter Block** zwischen `<!-- bareos-reference:start -->` und `<!-- bareos-reference:end -->`. Er wird nicht von Hand geändert; `python3 scripts/generate_director_reference.py --check <bareos-quelle>` muss danach weiter bestehen.
+3. **`## Zweck`**: zwei bis fünf Sätze. Was der Befehl tut, wann man ihn braucht, ob er etwas verändert (Katalog, Konfiguration, Daemon) oder nur liest.
+4. **`## Syntax`**: alle Aufrufformen in einem ```` ```text ````-Block, eine Form pro Zeile. Schreibweise: `<wert>` steht für einen einzusetzenden Wert, `[ … ]` ist optional, `a | b` heißt „genau eins davon“, `…` heißt „wiederholbar“. Schlüsselwörter stehen wörtlich da.
+5. **`## Argumente`**: Tabelle mit allen Schlüsselwörtern und Argumenten, auch selten genutzten und solchen, die nur der Quelltext kennt:
+
+   | Argument | Werte | Bedeutung |
+   |---|---|---|
+   | `jobid=<n>` | Ganzzahl | … |
+
+   Ohne Argumente: der Satz „Der Befehl hat keine Argumente.“ und gegebenenfalls, was mit überzähligen Wörtern geschieht.
+6. **`## Dialoge`** (nur wenn der Befehl nachfragt): welche Frage wann kommt, welche Antworten gelten (Auswahlnummer, Name, `yes`/`mod`/`no`, `.` zum Abbrechen), was bei falscher Eingabe passiert. Jede Frage mit einem echten Beispiel.
+7. **`## API-Modi`**: wie die Antwort unter `.api 0` (Standard, Text), `.api 1` und `.api 2` (JSON, auch `.api json compact=yes`) aussieht. Gleiche Ausgabe in mehreren Modi wird einmal gezeigt und gesagt, dass sie gleich ist. Für reine Textbefehle reicht ein Satz.
+8. **`## Beispiele`**: je Variante ein `### <deutsche Überschrift>` mit einem Satz Einleitung und einem Terminalblock (siehe unten). Jede Form aus „Syntax“ und jeder Dialog bekommt ein Beispiel.
+9. **`## Fehlermeldungen`**: Tabelle `| Meldung | Ursache und Abhilfe |` mit dem genauen Text des Directors, so wie ihn der Benutzer sieht.
+10. **`## Siehe auch`**: Liste verwandter Befehle als relative Links, `- [status](status.md) — Status von Director, Client und Storage`.
+
+Abschnitte ohne Inhalt fallen weg (etwa „Dialoge“ bei `time`). Der alte englische Fließtext und die alten erfundenen Beispiele unter dem Block werden ersetzt.
+
+### Echte Ausgaben
+
+Antworten in Beispielen stammen nur aus echten Läufen: aus den Paritätsfällen (`tests/parity/cases/*.jsonl` für die gesendeten Befehle, `target/parity/out/<fall>.<schritt>.rust.raw` für die Antwort, `target/parity/report.json` für die Signale je Schritt) oder aus einem neuen Paritätslauf. Ausgaben werden Byte für Byte übernommen, nur Passwörter und Schlüssel fallen weg. Lässt sich für eine Variante keine echte Ausgabe erzeugen (sie würde etwa einen Job starten oder einen Daemon verändern), steht dort genau eine Zeile:
+
+```text
+Beispielausgabe nicht verfügbar: <Grund>.
+```
+
+### So sieht oconsole aus
+
+Die Beispiele zeigen eine `oconsole`-Sitzung, so wie sie im Terminal erscheint, mit Prompt und ohne Farbe. Die Farben werden hier einmal beschrieben und in den Seiten nicht nachgebildet:
+
+- **Prompt:** `<console>@bareos-dir[<oconsole-version>]> `. In allen Beispielen wird die Standardkonsole verwendet, die auch die Paritätsläufe nutzen: `*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]> `. Mit einer benannten Konsole steht deren Name vorn, zum Beispiel `parity-limited@bareos-dir[25.1.2+onesimus.0.2.0]> `. Der Prompt ist grün, wenn der nächste Befehl gesendet werden darf, und rot während der Sperrzeit des Command Rate Guards (3 Sekunden zwischen zwei gesendeten Zeilen).
+- **Eingabe:** Beim Tippen ist ein bekannter Befehl grün, ein Punktbefehl gelb und ein unbekannter rot. Bei `schlüssel=wert` ist der Schlüssel cyan und der Wert magenta. Vervollständigungshinweise sind abgeblendet.
+- **Antwort:** Jede Zeile der Antwort wird einzeln ausgegeben. Zeilen mit `Error`, `FEHLER` oder `failed` sind rot, mit `Warning` oder `WARNUNG` gelb, mit `OK` oder `success` grün, alle anderen ohne Farbe. Endet die Antwort ohne Zeilenumbruch (JSON-Antworten, Fragen des Directors), beginnt die nächste Zeile trotzdem neu.
+- **Dialoge:** Stellt der Director eine Frage, erscheint ihr Text als eigene Zeile und darunter ein Eingabeprompt, je nach Signal:
+  - `> ` bei einer Unterfrage (Auswahlliste, „Turn on or off?“ und ähnliche). Ein einzelner `.` bricht den Dialog ab.
+  - `(yes/no): ` bei einer Ja/Nein-Frage.
+  - `input> ` bei freier Texteingabe.
+- **CTRL-C** während einer Antwort schickt einen Abbruch an den Director und zeigt `<CTRL-C> — sending cancel to Director` (gelb).
+- **Meldungen von oconsole selbst** (nicht vom Director) gehen auf stderr, zum Beispiel `Connecting to Director <host>:<port>`, `Director terminated connection` oder `oconsole: Command Rate Guard violation: multiline input discarded.`
+- `NO_COLOR=1` schaltet alle Farben ab; die Antwort bleibt Byte für Byte gleich.
+
+Regeln für die Terminalblöcke:
+
+- Immer ```` ```text ````.
+- Jeder Befehl steht hinter dem vollständigen Prompt, die Antwort ohne Einrückung darunter.
+- Wird ein API-Modus vorher umgeschaltet, steht der `.api`-Befehl mit seiner echten Antwort im selben Block.
+- Der Block endet mit einem leeren Prompt; so sieht man, dass die Antwort vollständig ist.
+- Keine Kommentare im Block; Erklärungen stehen davor oder danach im Text.
+- Lange Ausgaben dürfen mit einer eigenen Zeile `[…]` gekürzt werden. Kopf, Fuß und die Zeilen, um die es geht, bleiben stehen.
+
+Ein Dialog sieht dann so aus (Paritätsfall `c005-automount-prompt-then-command`):
+
+```text
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]> automount
+Turn on or off?
+> off
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]>
+```
+
+### Vollständiges Beispiel
+
+So sieht der Teil unterhalb des generierten Blocks für `version` aus (Paritätsfälle `c009-version`, `c009-version-api1`, `c009-version-json`, `c020-compact-version`):
+
+````markdown
+## Zweck
+
+`version` zeigt Name, Version und Build-Datum des Directors sowie das Betriebssystem, auf dem er läuft. Der Befehl liest nur und verändert nichts. Man braucht ihn zum Beispiel für Fehlerberichte oder um nach einem Update zu prüfen, ob der neue Director läuft.
+
+## Syntax
+
+```text
+version
+```
+
+## Argumente
+
+Der Befehl hat keine Argumente. Weitere Wörter hinter `version` werden ignoriert.
+
+## API-Modi
+
+Unter `.api 0` und `.api 1` kommt dieselbe Textzeile. Unter `.api 2` steht die Information als JSON-Objekt `result.version` mit den Feldern `name`, `type`, `version`, `bdate`, `operatingsystem`, `distname`, `distversion` und `customversionid`. Mit `.api json compact=yes` kommt dasselbe JSON in einer Zeile.
+
+## Beispiele
+
+### Version anzeigen
+
+```text
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]> version
+bareos-dir Version: 25.1.2+onesimus.0.2.0 (15 October 2026) Debian GNU/Linux 13 (trixie) debian Debian GNU/Linux 13 (trixie)
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]>
+```
+
+### Version als JSON
+
+```text
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]> .api 2
+{
+  "jsonrpc": "2.0",
+  "id": null,
+  "result": {
+    "api": 2
+  }
+}
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]> version
+{
+  "jsonrpc": "2.0",
+  "id": null,
+  "result": {
+    "version": {
+      "name": "bareos-dir",
+      "type": "bareos-director",
+      "version": "25.1.2+onesimus.0.2.0",
+      "bdate": "15 October 2026",
+      "operatingsystem": "Debian GNU/Linux 13 (trixie)",
+      "distname": "debian",
+      "distversion": "Debian GNU/Linux 13 (trixie)",
+      "customversionid": ""
+    }
+  }
+}
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]>
+```
+
+## Fehlermeldungen
+
+`version` gibt keine eigenen Fehlermeldungen aus.
+
+## Siehe auch
+
+- [status](status.md) — Status des Directors mit Startzeit und laufenden Jobs
+- [time](time.md) — aktuelle Uhrzeit des Directors
+````
+
 ## Console Commands
 
 | Command | Description |
