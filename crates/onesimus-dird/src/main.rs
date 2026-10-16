@@ -7,6 +7,7 @@ mod accept;
 mod acl;
 mod audit;
 mod breg;
+mod btime;
 mod catalog_worker;
 mod check_catalog;
 mod catreq;
@@ -16,6 +17,7 @@ mod command_executor;
 mod command_queue;
 mod command_registry;
 mod commands;
+mod config_check;
 mod command_worker;
 mod expand;
 mod connection_monitor;
@@ -41,6 +43,7 @@ mod run_time;
 mod runscript;
 mod scheduler;
 mod sd_label;
+mod scan;
 mod sd_protocol;
 mod session;
 mod session_manager;
@@ -402,6 +405,7 @@ fn main() {
     let catalog = catalog_handle.as_ref().map(|(h, _)| h.clone());
     if let Some(catalog) = &catalog {
         ovfs::register_for_reload(catalog.clone());
+        reload::register_catalog(catalog.clone());
     }
     // CheckCatalog(): basic Client/Storage/MediaType records.
     if let Some(cat) = &catalog {
