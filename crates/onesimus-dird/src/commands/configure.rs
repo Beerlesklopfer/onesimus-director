@@ -99,7 +99,8 @@ pub fn cmd_configure(ast: &CommandAst, ctx: &ExecContext) -> CommandResult {
 
     // ua->argc counts the command itself.
     if ast.arguments.len() + 1 < 3 {
-        return with_warning(CommandResult::error(USAGE.to_string()));
+        // One ErrorMsg call (one BNET_ERROR_MSG, one `.api 2` message).
+        return with_warning(CommandResult::error(USAGE.to_string()).with_error_parts());
     }
     let action = ast.arguments[0].key.as_str();
     let result = if action.eq_ignore_ascii_case("add") {
@@ -573,8 +574,13 @@ fn configure_add(ast: &CommandAst, ctx: &ExecContext, layout: Option<&Layout>) -
         Ok(cfg) => cfg,
         Err(_) => return CommandResult::error("Config error\n".to_string()),
     };
+    // ConfigureAdd: ObjectStart("configure") once the resource type is
+    // valid and not the Director, so a later failure keeps "configure": {}.
+    let type_key = ast.arguments[1].key.as_str();
+    let started = table_by_name(type_key).filter(|t| t.items.is_some()).is_some_and(|t| t.rcode != "R_DIRECTOR");
     match add_resource(&mut cfg, layout, &ast.arguments[1..]) {
         Ok((text, json)) => CommandResult::ok(text).with_json(json!({ "configure": json })),
+        Err(errors) if started => CommandResult::error(errors).with_json(json!({ "configure": {} })),
         Err(errors) => CommandResult::error(errors),
     }
 }
@@ -644,7 +650,8 @@ fn configure_export(ast: &CommandAst, ctx: &ExecContext, layout: Option<&Layout>
     };
     match export_client(&cfg, layout, &client) {
         Ok((text, json)) => CommandResult::ok(text).with_json(json!({ "configure": { "export": json } })),
-        Err(errors) => CommandResult::error(errors),
+        // ConfigureExport: ObjectStart("configure") before the export.
+        Err(errors) => CommandResult::error(errors).with_json(json!({ "configure": {} })),
     }
 }
 

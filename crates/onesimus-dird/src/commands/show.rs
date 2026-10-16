@@ -314,7 +314,9 @@ impl Out {
         if self.errors.is_empty() {
             CommandResult::ok(self.text).with_json(json)
         } else {
+            // show_cmd returns true after every ErrorMsg.
             let mut r = CommandResult::error(self.errors);
+            r.success = true;
             r.text_output = self.text.clone();
             r.with_json(json)
         }
@@ -2066,7 +2068,7 @@ Job { Name = J; JobDefs = B; Level = Full; RunAfterJob = "a" }
     #[test]
     fn unknown_resource_is_an_error() {
         let r = run(&[("job", Some("nope"))]);
-        assert!(!r.success);
+        assert!(r.success, "show_cmd returns true");
         assert_eq!(r.error_message, "jobs resource nope not found.\n");
         let r = run(&[("bogus", None)]);
         assert_eq!(r.error_message, "Resource bogus not found\n");

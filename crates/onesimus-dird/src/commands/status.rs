@@ -91,9 +91,7 @@ impl Ua {
 pub fn cmd_status(ast: &CommandAst, ctx: &ExecContext) -> CommandResult {
     // C++ StatusCmd(): the first argument decides, every branch returns.
     let Some(first) = ast.arguments.first() else {
-        // The "Status available for:" selection needs the dialog framework
-        // (compatibility log C-011); show the Director status instead.
-        return status_director(ast, ctx);
+        return status_prompt(ast, ctx);
     };
     let key = first.key.to_ascii_lowercase();
     if key == "all" {
@@ -111,6 +109,43 @@ pub fn cmd_status(ast: &CommandAst, ctx: &ExecContext) -> CommandResult {
     } else {
         status_storage_selected(ast, ctx)
     }
+}
+
+/// StatusCmd without arguments (ua_status.cc:227): "Status available for:"
+/// selection; a failed DoPrompt (batch mode, `.api 2`) does nothing and
+/// still succeeds.
+fn status_prompt(ast: &CommandAst, ctx: &ExecContext) -> CommandResult {
+    use crate::ua_select;
+    let mut ua = ua_select::Ua::new(ctx);
+    ua.start_prompt("Status available for:\n");
+    for item in ["Director", "Storage", "Client", "Scheduler", "All"] {
+        ua.add_prompt(item);
+    }
+    let Some((item, _)) = ua.do_prompt("", "Select daemon type for status") else {
+        return ua.finish(true);
+    };
+    let config = || ctx.config.as_ref().and_then(|c| c.read().ok());
+    match item {
+        0 => ua.send_result(status_director(ast, ctx)),
+        1 => {
+            let store = ua_select::select_storage_resource(&mut ua, false)
+                .and_then(|name| config().and_then(|cfg| cfg.storages.iter().find(|s| s.name == name).cloned()));
+            if let Some(store) = store {
+                ua.send_msg(storage_status(&store, None, ctx));
+            }
+        }
+        2 => {
+            let found = ua_select::select_client_resource(&mut ua).and_then(|name| config().and_then(|cfg| {
+                Some((cfg.clients.iter().find(|c| c.name == name)?.clone(), cfg.director.name.clone()))
+            }));
+            if let Some((client, director)) = found {
+                ua.send_msg(client_status(&client, None, ctx, &director));
+            }
+        }
+        3 => ua.send_result(status_scheduler(ast, ctx)),
+        _ => ua.send_result(status_all(ast, ctx)),
+    }
+    ua.finish(true)
 }
 
 /// C++ DotStatusCmd(): `.status dir header|scheduled|running|terminated|
