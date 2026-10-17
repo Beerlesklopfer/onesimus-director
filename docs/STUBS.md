@@ -27,4 +27,4 @@ Fälle ab, die echte Jobs starten können (`unsafe_job_start`).
 | S-09 | `onesimus-dird/src/commands/restore.rs` | API-2-Restore-Start liefert `{"result":{}}` statt `run.jobid` | C-072, #3 | offen |
 | S-10 | `onesimus-dird/src/commands/acl.rs` | `.acl` nur Platzhalter („(ACL configuration pending)“) | C-074, #4 | blockiert (Entscheidung des Nutzers zu #4) |
 | S-11 | `onesimus-dird/src/commands/extra.rs` (`cmd_show`), `show_items.rs`, `version_strings.rs` | Totes `extra::cmd_show`; dateiweites `allow(dead_code)` verdeckt ungenutzten Code | — | offen |
-| S-12 | `bareos-filed/src/restore.rs`, `accept.rs` | Eigener FD: Restore ist `_placeholder()`; FD-zu-FD-Verbindungen „not supported“ | — | offen |
+| S-12 | `bareos-filed/src/restore.rs`, `accept.rs` | Eigener FD: Restore ist `_placeholder()`; FD-zu-FD-Verbindungen „not supported“ | — | in Arbeit (stub-fd) |
