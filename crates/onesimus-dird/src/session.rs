@@ -723,6 +723,67 @@ mod quit_tests {
         server.join().unwrap();
     }
 
+    /// Frames and texts until (and including) `end`.
+    fn until(bnet: &mut BnetStream<TcpStream>, end: BnetSignal) -> Vec<BnetMessage> {
+        let mut seen = Vec::new();
+        loop {
+            let message = bnet.recv().unwrap();
+            let done = message == BnetMessage::Signal(end);
+            seen.push(message);
+            if done {
+                return seen;
+            }
+        }
+    }
+
+    fn texts(messages: &[BnetMessage]) -> Vec<String> {
+        messages.iter().filter_map(|m| match m {
+            BnetMessage::Data(data) => Some(String::from_utf8_lossy(data).into_owned()),
+            _ => None,
+        }).collect()
+    }
+
+    /// `.grpc` (Onesimus extension, S-10): on switches like `.api` before the
+    /// reply, format=/compact= take effect, off restores the previous mode.
+    #[test]
+    fn grpc_on_off_switches_and_restores_api_mode() {
+        let (mut bnet, server) = session("admin", "*all*");
+        bnet.send_str(".grpc on compact=yes").unwrap();
+        let reply = until(&mut bnet, BnetSignal::MainPrompt);
+        assert_eq!(reply.first(), Some(&BnetMessage::Signal(BnetSignal::CmdOk)));
+        let json = texts(&reply).join("");
+        assert!(!json.contains('\n'), "compact JSON: {json}");
+        let value: serde_json::Value = serde_json::from_str(&json).unwrap();
+        assert_eq!(value["result"]["grpc"]["mode"], "on");
+        assert_eq!(value["result"]["grpc"]["compact"], true);
+        assert_eq!(value["result"]["grpc"]["apimode"], 2);
+        assert_eq!(value["result"]["grpc"]["text"], "gRPC mode: on, format=json, compact=yes\n");
+        // off: back to the human console (no frame after the reply, EOD).
+        bnet.send_str(".grpc off").unwrap();
+        let reply = until(&mut bnet, BnetSignal::Eod);
+        assert_eq!(reply.first(), Some(&BnetMessage::Signal(BnetSignal::CmdBegin)));
+        assert_eq!(texts(&reply), vec!["gRPC mode: off\n".to_string()]);
+        // From API 1: format=text stays in API 1, off returns to API 1.
+        bnet.send_str(".api 1").unwrap();
+        until(&mut bnet, BnetSignal::MainPrompt);
+        bnet.send_str(".grpc on format=text").unwrap();
+        let reply = until(&mut bnet, BnetSignal::MainPrompt);
+        assert_eq!(texts(&reply), vec!["gRPC mode: on, format=text, compact=no\n".to_string()]);
+        bnet.send_str(".grpc on").unwrap();
+        let reply = until(&mut bnet, BnetSignal::MainPrompt);
+        assert!(texts(&reply)[0].contains("\"text\": \"gRPC mode: on, format=json, compact=no\\n\""), "{:?}", texts(&reply));
+        bnet.send_str(".grpc off").unwrap();
+        let reply = until(&mut bnet, BnetSignal::MainPrompt);
+        assert_eq!(texts(&reply), vec!["gRPC mode: off\n".to_string()]);
+        // Invalid arguments change nothing.
+        bnet.send_str(".grpc format=proto").unwrap();
+        let reply = until(&mut bnet, BnetSignal::MainPrompt);
+        assert!(reply.contains(&BnetMessage::Signal(BnetSignal::CmdFailed)));
+        bnet.send_str("quit").unwrap();
+        drop(bnet);
+        server.join().unwrap();
+    }
+
     #[test]
     fn dot_quit_obeys_command_acl_but_quit_is_always_allowed() {
         let (mut bnet, server) = session("limited", "version");

@@ -412,6 +412,55 @@ mod tests {
 }
 
 #[cfg(test)]
+mod extension_tests {
+    //! `.sqltables`, `.sqlschema`, `.sqlcount` (Onesimus extensions, S-10).
+    use super::*;
+    use crate::session::parse_cli_command;
+
+    fn session(acl: &str) -> ExecContext {
+        use std::sync::{Arc, RwLock};
+        let config = crate::director_config::DirectorConfig::from_str(&format!(
+            "Director {{ Name = dir; Password = pw }}\nCatalog {{ Name = MyCatalog; DbName = bareos }}\n\
+             Console {{ Name = c; Password = pw; CommandAcl = {acl}; CatalogAcl = *all* }}")).unwrap();
+        let manager = Arc::new(crate::session_manager::SessionManager::new(Arc::new(
+            crate::message_bus::MessageBus::new(16))));
+        let id = manager.create_session("c");
+        manager.authenticate_session(id);
+        ExecContext { session_id: id, config: Some(Arc::new(RwLock::new(config))), session_mgr: Some(manager),
+            catalog: None, api_mode: ApiMode::Json, bus_rx: None, job_manager: None }
+    }
+
+    #[test]
+    fn raw_catalog_reads_need_sql_or_sqlquery_acl() {
+        for (acl, allowed) in [(".sqlcount, .sqltables, .sqlschema", false), (".sqlcount, .sql", true),
+            (".sqltables, sqlquery", true), ("*all*", true), ("!.sql, !sqlquery, *all*", false)] {
+            let ctx = session(acl);
+            assert_eq!(raw_catalog_allowed(&ctx), allowed, "{acl}");
+            for (line, handler) in [(".sqlcount", cmd_sql_count as fn(&CommandAst, &ExecContext) -> CommandResult),
+                (".sqltables", cmd_sql_tables), (".sqlschema", cmd_sql_schema)] {
+                let result = handler(&parse_cli_command(line), &ctx);
+                assert!(!result.success);
+                let denied = result.error_message == format!(
+                    "{line}: permission denied, reading raw catalog data requires the CommandACL .sql or sqlquery.\n");
+                assert_eq!(denied, !allowed, "{acl} {line}: {}", result.error_message);
+            }
+        }
+    }
+
+    #[test]
+    fn table_argument_is_an_identifier() {
+        let ctx = session("*all*");
+        let result = cmd_sql_count(&parse_cli_command(".sqlcount table=\"job; drop table job\""), &ctx);
+        assert_eq!(result.error_message, ".sqlcount: invalid table name \"job; drop table job\".\n");
+        assert_eq!(identifier(&parse_cli_command(".sqlschema table=Media"), "table"), Ok(Some("media".into())));
+        assert_eq!(identifier(&parse_cli_command(".sqlschema"), "table"), Ok(None));
+        assert_eq!(sqlcount_query(Some("media")), "SELECT 'media' AS tablename, COUNT(*) AS count FROM \"media\"");
+        assert!(sqlcount_query(None).starts_with("SELECT 'client' AS tablename, COUNT(*) AS count FROM \"client\" UNION ALL "));
+        assert!(sqlschema_query(Some("job")).contains("WHERE table_schema = 'public' AND table_name = 'job' ORDER BY"));
+    }
+}
+
+#[cfg(test)]
 mod dialog_tests {
     use super::*;
     use crate::command_executor::ApiMode;
