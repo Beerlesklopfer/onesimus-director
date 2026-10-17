@@ -27,9 +27,7 @@ use crate::command_queue::CommandResult;
 use crate::commands::bvfs::Db;
 use crate::commands::restore_bsr::Bsr;
 use crate::commands::restore_tree::{user_select_files_from_tree, Tree};
-use crate::job_manager;
-use crate::job_worker::{self, JobParams, WorkerJobType};
-use crate::message_bus::{BusMessage, MsgType};
+use crate::job_worker::{JobParams, WorkerJobType};
 use crate::sql_list::{add_commas, ListType};
 use crate::ua_select::Ua;
 
@@ -1680,8 +1678,10 @@ use crate::btime::str_to_utime;
 /// Start a confirmed restore (the `restore` command and `run` of a Restore
 /// job, job.cc RunJob): the Job record (Type 'R', Level 'F', the restore
 /// client), the job queue and the reply "Job queued. JobId=N". The worker
-/// reads the bootstrap the restore wrote, else one generated from the
-/// catalog for `restore_jobid`. Compatibility log C-058.
+/// reads the bootstrap file of the run (`bootstrap=`, else the Job's
+/// Bootstrap directive, job.cc SetJcrDefaults); without one, or when it
+/// does not open, the job fails like restore.cc DoNativeRestore.
+/// Compatibility log C-058.
 pub(crate) fn start_restore(ctx: &ExecContext, launch: Launch) -> CommandResult {
     let Launch { restore_jobid, client: _, restore_client, where_path, replace, bootstrap_path, job, storage } = launch;
 
@@ -1708,14 +1708,9 @@ pub(crate) fn start_restore(ctx: &ExecContext, launch: Launch) -> CommandResult 
         None => return CommandResult::error(format!("Client '{restore_client}' not found\n")),
     };
 
-    // The bootstrap written by the restore command, else from the catalog
-    let written = bootstrap_path.and_then(|path| std::fs::read_to_string(path).ok());
-    let bootstrap = match written.or_else(|| job_manager::generate_bootstrap(&ctx.catalog, restore_jobid)) {
-        Some(bsr) => bsr,
-        None => return CommandResult::error(format!(
-            "Cannot generate bootstrap for JobId={restore_jobid} — no jobmedia records\n"
-        )),
-    };
+    // jcr->RestoreBootstrap: the run's bootstrap=, else the Job's Bootstrap;
+    // the job reads it (job_worker restore_bootstrap).
+    let bootstrap = bootstrap_path.or_else(|| job_value("bootstrap"));
 
     // The read storage of the run, else the Job's, else the first one.
     let storage = match storage.as_deref().and_then(|s| config.find_storage(s))
@@ -1765,7 +1760,7 @@ pub(crate) fn start_restore(ctx: &ExecContext, launch: Launch) -> CommandResult 
         where_path: Some(where_path),
         replace: Some(replace),
         restore_jobid: Some(restore_jobid),
-        bootstrap: Some(bootstrap),
+        bootstrap,
         client_name: client.name.clone(),
         client_first_connection: crate::job_messages::first_client_connection(&client.name),
         copy: None,
@@ -1776,13 +1771,6 @@ pub(crate) fn start_restore(ctx: &ExecContext, launch: Launch) -> CommandResult 
         trigger: crate::job_messages::TRIGGER_USER.to_string(), ..Default::default()
     };
 
-    if let Some(smgr) = &ctx.session_mgr {
-        for text in [crate::job_messages::version_text(), crate::job_messages::start_restore_text(&unique_job)] {
-            crate::console_msg::post_job_message(smgr.bus(), ctx.config.as_ref(), BusMessage::JobMessage {
-                job_id, job_name: job.name.clone(), msg_type: MsgType::Info, text, timestamp: now_unix(),
-            });
-        }
-    }
     crate::commands::job::queue_job(ctx, &job, params, report, &client.name, &storage.name, now)
 }
 

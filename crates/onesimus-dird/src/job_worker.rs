@@ -85,7 +85,8 @@ pub struct JobParams {
     pub where_path: Option<String>,
     pub replace: Option<String>,       // "always", "never", "ifnewer", "ifolder"
     pub restore_jobid: Option<u32>,     // JobId of backup to restore from
-    pub bootstrap: Option<String>,      // Bootstrap data (volumes + file indices)
+    /// Restore: the bootstrap file (jcr->RestoreBootstrap) the job reads.
+    pub bootstrap: Option<String>,
     /// Client resource name (job messages "Connected Client: <name> ...").
     #[serde(default)]
     pub client_name: String,
@@ -129,6 +130,7 @@ pub enum PipeMessage {
 }
 
 /// lib/message.h M_* codes of the worker's own job messages.
+const M_FATAL: u32 = 3;
 pub(crate) const M_ERROR: u32 = 4;
 pub(crate) const M_INFO: u32 = 6;
 
@@ -293,6 +295,7 @@ pub fn run_worker(
     let mut sd_auth_key = String::new();
     let mut vol_session_id: i32 = 0;
     let mut vol_session_time: i32 = 0;
+    let mut bootstrap = String::new();
 
     // admin.cc do_admin(): "Start Admin JobId %d, Job=%s", then
     // AdminCleanup(jcr, JS_Terminated) in the Director (job end).
@@ -313,6 +316,20 @@ pub fn run_worker(
     loop {
         let old_name = state.name().to_string();
         state = match state {
+            // job_thread "Version: …", restore.cc DoNativeRestore: the
+            // bootstrap file is checked and read before any connection.
+            WorkerState::Init if params.job_type == WorkerJobType::Restore => {
+                worker_jmsg(job_id, M_INFO, crate::job_messages::version_text());
+                match restore_bootstrap(job_id, params.bootstrap.as_deref(), &params.unique_job) {
+                    Ok(data) => { bootstrap = data; WorkerState::ConnectingFD }
+                    Err(fatal) => {
+                        worker_jmsg(job_id, M_FATAL, fatal);
+                        pipes.send(&PipeMessage::JobEnd { job_id, term_code: b'f' as i32, files: 0, bytes: 0,
+                            errors: 1, vol_session_id: Some(0), vol_session_time: Some(0) });
+                        return EXIT_FATAL;
+                    }
+                }
+            }
             WorkerState::Init => {
                 WorkerState::ConnectingFD
             }
@@ -383,7 +400,7 @@ pub fn run_worker(
             }
 
             WorkerState::SDBootstrap => {
-                match sd_send_bootstrap(sd.as_mut().unwrap(), params) {
+                match bareos_stored::job::sd_send_bootstrap(sd.as_mut().unwrap(), &bootstrap) {
                     Ok(()) => {
                         debug!("Worker {job_id}: bootstrap sent to SD, sending run");
                         // After bootstrap, SD expects "run" — then enters WaitFD()
@@ -599,9 +616,19 @@ fn sd_use_device(sd: &mut BnetStream<tls_psk::PskStream>, p: &JobParams) -> Resu
     Ok(crate::job_messages::unbash_spaces(device))
 }
 
-fn sd_send_bootstrap(sd: &mut BnetStream<tls_psk::PskStream>, p: &JobParams) -> Result<(), String> {
-    let bsr = p.bootstrap.as_deref().unwrap_or("");
-    bareos_stored::job::sd_send_bootstrap(sd, bsr)
+/// restore.cc DoNativeRestore and bsr.cc OpenBootstrapFile: the bootstrap
+/// file of the restore job (jcr->RestoreBootstrap) and the job messages
+/// around it, "Start Restore Job" once a file is named; `Err` is the
+/// M_FATAL text the job ends with. Never a bootstrap built otherwise.
+fn restore_bootstrap(job_id: u32, path: Option<&str>, unique_job: &str) -> Result<String, String> {
+    let Some(path) = path.filter(|p| !p.is_empty()) else {
+        return Err("Cannot restore without a bootstrap file.\n\
+            You probably ran a restore job directly. All restore jobs must\n\
+            be run using the restore command.\n".to_string());
+    };
+    worker_jmsg(job_id, M_INFO, crate::job_messages::start_restore_text(unique_job));
+    std::fs::read_to_string(path).map_err(|e| format!("Could not open bootstrap file {path}: ERR={}\n",
+        crate::commands::restore::errno_text(&e)))
 }
 
 fn to_sd_params(p: &JobParams) -> SdJobParams {
@@ -1176,6 +1203,24 @@ mod wait_protocol_tests {
 #[cfg(test)]
 mod job_message_tests {
     use super::*;
+
+    /// restore.cc DoNativeRestore / bsr.cc OpenBootstrapFile: the restore
+    /// job's bootstrap file, else the M_FATAL text; never one built otherwise.
+    #[test]
+    fn restore_job_reads_only_its_bootstrap_file() {
+        let fatal = restore_bootstrap(1, None, "r").unwrap_err();
+        assert_eq!(fatal, "Cannot restore without a bootstrap file.\nYou probably ran a restore job directly. \
+            All restore jobs must\nbe run using the restore command.\n");
+        assert_eq!(restore_bootstrap(1, Some(""), "r").unwrap_err(), fatal);
+        let dir = std::env::temp_dir();
+        let missing = dir.join(format!("onesimus-test-{}-missing.bsr", std::process::id())).display().to_string();
+        assert_eq!(restore_bootstrap(1, Some(&missing), "r").unwrap_err(),
+            format!("Could not open bootstrap file {missing}: ERR=No such file or directory\n"));
+        let bsr = dir.join(format!("onesimus-test-{}-read.bsr", std::process::id())).display().to_string();
+        std::fs::write(&bsr, "Storage=\"Tape\"\nVolume=\"V1\"\n").unwrap();
+        assert_eq!(restore_bootstrap(1, Some(&bsr), "r").unwrap(), "Storage=\"Tape\"\nVolume=\"V1\"\n");
+        let _ = std::fs::remove_file(&bsr);
+    }
     use crate::catalog_worker::{CatalogHandle, CatalogRequest, CatalogResponse, SqlColumn, SqlTable};
     use std::sync::{Arc, Mutex, RwLock};
 

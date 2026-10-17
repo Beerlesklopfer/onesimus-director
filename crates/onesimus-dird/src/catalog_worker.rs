@@ -14,7 +14,7 @@
 
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
-use tracing::{info, debug, error, warn};
+use tracing::{info, error, warn};
 
 // ---------------------------------------------------------------------------
 // Request / Response types
@@ -29,8 +29,6 @@ pub enum CatalogRequest {
     /// Statement(s) without result; CatalogResponse::Ok(affected rows)
     /// (C++ UpdateDb/InsertDb/DeleteDb).
     Execute { sql: String },
-    /// Generate bootstrap data for a restore.
-    GenerateBootstrap { job_id: u32 },
     /// Find the most recent successful backup job for a client.
     FindLatestBackupJobId { client_name: String },
     /// Create a new job record in the catalog. Returns the DB JobId.
@@ -84,8 +82,6 @@ pub enum CatalogResponse {
     Text(String),
     /// Query result with text values.
     Rows(SqlTable),
-    /// Optional text (volume info, bootstrap, etc.).
-    OptionalText(Option<String>),
     /// Optional job ID.
     OptionalJobId(Option<u32>),
     /// Job ID (from CreateJob).
@@ -171,14 +167,6 @@ impl CatalogHandle {
             CatalogResponse::Ok(n) => Ok(n),
             CatalogResponse::Error(e) => Err(e),
             other => Err(format!("unexpected response: {:?}", resp_debug(&other))),
-        }
-    }
-
-    /// Generate bootstrap data for a restore.
-    pub fn generate_bootstrap(&self, job_id: u32) -> Option<String> {
-        match self.request(CatalogRequest::GenerateBootstrap { job_id }) {
-            Ok(CatalogResponse::OptionalText(t)) => t,
-            _ => None,
         }
     }
 
@@ -338,7 +326,6 @@ fn resp_debug(r: &CatalogResponse) -> &'static str {
     match r {
         CatalogResponse::Text(_) => "Text",
         CatalogResponse::Rows(_) => "Rows",
-        CatalogResponse::OptionalText(_) => "OptionalText",
         CatalogResponse::OptionalJobId(_) => "OptionalJobId",
         CatalogResponse::JobId(_) => "JobId",
         CatalogResponse::Ok(_) => "Ok",
@@ -409,8 +396,6 @@ pub fn spawn_catalog_worker(
                                 Ok(r) => CatalogResponse::Ok(r.rows_affected()),
                                 Err(e) => CatalogResponse::Error(pq_error_message(&pool, &sql, &e).await),
                             },
-                        CatalogRequest::GenerateBootstrap { job_id } =>
-                            handle_generate_bootstrap(&pool, job_id).await,
                         CatalogRequest::FindLatestBackupJobId { client_name } =>
                             handle_find_latest_backup_jobid(&pool, &client_name).await,
                         CatalogRequest::CreateJob { job_name, name, job_type, level, client_name, pool_name, fileset_name, sched_time } =>
@@ -706,71 +691,6 @@ fn report_error_position(query: &str, loc: usize) -> String {
     let line: String = chars[ibeg..iend].iter().collect();
     let cursor = prefix.chars().count() + loc - ibeg;
     format!("{prefix}{line}{}\n{}^\n", if end_trunc { "..." } else { "" }, " ".repeat(cursor))
-}
-
-async fn handle_generate_bootstrap(pool: &sqlx::PgPool, job_id: u32) -> CatalogResponse {
-    // Get job info
-    let job_row: Option<(i32, i32, String)> = match sqlx::query_as(
-        "SELECT COALESCE(volsessionid,0)::int, COALESCE(volsessiontime,0)::int, \
-         COALESCE(name,'') FROM job WHERE jobid = $1"
-    ).bind(job_id as i32).fetch_optional(pool).await {
-        Ok(r) => r,
-        Err(e) => return CatalogResponse::Error(format!("GenerateBootstrap: {e}")),
-    };
-
-    let Some((vol_session_id, vol_session_time, _job_name)) = job_row else {
-        return CatalogResponse::OptionalText(None);
-    };
-
-    // Get jobmedia records
-    let jm_rows: Vec<(i32, i32, i32, i64, i64)> = match sqlx::query_as(
-        "SELECT jm.mediaid, COALESCE(jm.firstindex,0)::int, COALESCE(jm.lastindex,0)::int, \
-         COALESCE(jm.startblock,0)::bigint, COALESCE(jm.endblock,0)::bigint \
-         FROM jobmedia jm WHERE jm.jobid = $1 ORDER BY jm.jobmediaid"
-    ).bind(job_id as i32).fetch_all(pool).await {
-        Ok(r) => r,
-        Err(e) => return CatalogResponse::Error(format!("GenerateBootstrap jobmedia: {e}")),
-    };
-
-    if jm_rows.is_empty() {
-        info!("No jobmedia records for JobId={job_id}");
-        return CatalogResponse::OptionalText(None);
-    }
-
-    let mut bsr = String::new();
-
-    for (media_id, first_idx, last_idx, start_block, end_block) in &jm_rows {
-        let vol_row: Option<(String, String)> = match sqlx::query_as(
-            "SELECT volumename, COALESCE(mediatype,'File') FROM media WHERE mediaid = $1"
-        ).bind(media_id).fetch_optional(pool).await {
-            Ok(r) => r,
-            Err(e) => return CatalogResponse::Error(format!("GenerateBootstrap media: {e}")),
-        };
-
-        let Some((vol_name, media_type)) = vol_row else {
-            continue;
-        };
-
-        let storage_name = "File"; // TODO: resolve from config
-        let device_name = "FileStorage"; // TODO: resolve from config
-
-        bsr.push_str(&format!("Storage=\"{storage_name}\"\n"));
-        bsr.push_str(&format!("Volume=\"{vol_name}\"\n"));
-        bsr.push_str(&format!("MediaType=\"{media_type}\"\n"));
-        bsr.push_str(&format!("Device=\"{device_name}\"\n"));
-        bsr.push_str(&format!("VolSessionId={vol_session_id}\n"));
-        bsr.push_str(&format!("VolSessionTime={vol_session_time}\n"));
-        if *start_block > 0 || *end_block > 0 {
-            bsr.push_str(&format!("VolAddr={start_block}-{end_block}\n"));
-        }
-        if *first_idx > 0 && *last_idx > 0 {
-            bsr.push_str(&format!("FileIndex={first_idx}-{last_idx}\n"));
-        }
-        bsr.push_str(&format!("Count={}\n", last_idx - first_idx + 1));
-    }
-
-    debug!("Bootstrap for JobId={job_id}: {} lines", bsr.lines().count());
-    CatalogResponse::OptionalText(Some(bsr))
 }
 
 /// Get since_utime for incremental/differential backup.

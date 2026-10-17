@@ -972,10 +972,6 @@ fn post_catreq_messages(bus: &MessageBus, config: Option<&SharedConfig>, job: &D
     }
 }
 
-/// Generate bootstrap data for a restore from a given backup JobId.
-pub fn generate_bootstrap(catalog: &Option<CatalogHandle>, job_id: u32) -> Option<String> {
-    catalog.as_ref()?.generate_bootstrap(job_id)
-}
 
 /// Find the most recent successful backup job for a client.
 pub fn find_latest_backup_jobid(catalog: &Option<CatalogHandle>, client_name: &str) -> Option<u32> {
