@@ -44,6 +44,9 @@ pub enum WorkerJobType {
     Copy,
     Migrate,
     Consolidate,
+    /// verify.cc DoVerify(): FD (and for VolumeToCatalog SD) contact by the
+    /// worker, the catalog comparison by the Director (verify.rs). C-058.
+    Verify,
 }
 
 impl WorkerJobType {
@@ -100,6 +103,9 @@ pub struct JobParams {
     /// (fd_cmds.cc "Probing client protocol..." and the handshake text).
     #[serde(default)]
     pub client_first_connection: bool,
+    /// Verify job data (verify.rs), None for other job types.
+    #[serde(default)]
+    pub verify: Option<crate::verify::VerifyParams>,
     /// SD read+write session of a Copy/Migrate worker job or a VirtualFull
     /// (sd_copy.rs); None for jobs with a File daemon. C-058.
     #[serde(default)]
@@ -133,6 +139,14 @@ pub enum PipeMessage {
     /// otherwise the body the Director puts its Jmsg header in front of.
     #[serde(rename = "jmsg")]
     Jmsg { job_id: u32, msg_type: u32, mtime: i64, text: String, #[serde(default)] raw: bool },
+    /// The writing Storage daemon's job end of an SD-SD Copy/Migrate
+    /// (mig_jcr: VolSessionId/Time from its Job command, SDJobFiles/Bytes/
+    /// Errors/Status from its "3099 Job end"). C-058, S-20.
+    #[serde(rename = "write_session")]
+    WriteSession { job_id: u32, vol_session_id: i32, vol_session_time: i32, files: i64, bytes: i64, errors: i32, status: i32 },
+    /// A Verify job event for the Director (verify.rs).
+    #[serde(rename = "verify")]
+    Verify { job_id: u32, event: crate::verify::Event },
 }
 
 /// lib/message.h M_* codes of the worker's own job messages.
@@ -151,6 +165,8 @@ fn write_pipe_line(file: &mut std::fs::File, msg: &PipeMessage) {
     }
 }
 
+/// One pipe message as one write under the pipe lock: lines of the worker's
+/// threads never interleave (a torn JSON line is dropped by the Director).
 pub(crate) fn send_jmsg(msg: PipeMessage) {
     let mut pipe = JMSG_PIPE.lock().unwrap_or_else(|e| e.into_inner());
     if let Some(file) = pipe.as_mut() {
@@ -261,9 +277,9 @@ pub(crate) struct WorkerPipes {
 
 impl WorkerPipes {
     pub(crate) fn send(&mut self, msg: &PipeMessage) {
-        if let Ok(json) = serde_json::to_string(msg) {
-            let _ = writeln!(self.to_director, "{json}");
-        }
+        // Locked single write (JMSG_PIPE is a clone of to_director): the SD
+        // thread writes to the same pipe.
+        send_jmsg(msg.clone());
     }
 
     fn recv(&mut self) -> Option<PipeMessage> {
@@ -317,6 +333,9 @@ pub fn run_worker(
         pipes.send(&PipeMessage::JobEnd { job_id, term_code: b'T' as i32, files: 0, bytes: 0, errors: 0,
             vol_session_id: Some(0), vol_session_time: Some(0) });
         return EXIT_SUCCESS;
+    }
+    if params.job_type == WorkerJobType::Verify {
+        return crate::verify::run_worker(params, &mut pipes);
     }
 
     loop {
@@ -676,7 +695,7 @@ fn storage_wait_state(message: &str) -> Result<Option<&'static str>, &'static st
     Ok(match storage_job_status(message)? { b'M' => Some("WaitingMount"), b'm' => Some("WaitingMedia"), b'R' => Some("Running"), _ => None })
 }
 
-fn sd_catrec_loop(
+pub(crate) fn sd_catrec_loop(
     sd: &mut BnetStream<tls_psk::PskStream>,
     job_id: u32,
     to_dir: &mut std::fs::File,
@@ -692,16 +711,10 @@ fn sd_catrec_loop(
                 // without an answer, `C`atReq/Catreq and `B`lastAttr to the
                 // Director, which may answer (an empty answer sends nothing).
                 if data.first() == Some(&b'U') {
-                    let pipe_msg = PipeMessage::UpdCat { job_id, data: hex::encode(&data) };
-                    if let Ok(json) = serde_json::to_string(&pipe_msg) {
-                        let _ = writeln!(to_dir, "{json}");
-                    }
+                    send_jmsg(PipeMessage::UpdCat { job_id, data: hex::encode(&data) });
                 } else if matches!(data.first(), Some(b'C' | b'B')) {
                     debug!("Worker {job_id} SD CatReq: {msg}");
-                    let pipe_msg = PipeMessage::CatReq { job_id, request: msg_raw.into_owned() };
-                    if let Ok(json) = serde_json::to_string(&pipe_msg) {
-                        let _ = writeln!(to_dir, "{json}");
-                    }
+                    send_jmsg(PipeMessage::CatReq { job_id, request: msg_raw.into_owned() });
                     // Read CatResp from Director via pipe
                     let mut buf = String::new();
                     let mut reader = BufReader::new(&mut *from_dir);
@@ -733,15 +746,13 @@ fn sd_catrec_loop(
                 } else if msg.starts_with("Status Job=") {
                     match storage_job_status(&msg) {
                         Ok(status) => {
-                            let update = PipeMessage::JobStatus { job_id, status: status as i32 };
-                            if let Ok(json) = serde_json::to_string(&update) { let _ = writeln!(to_dir, "{json}"); }
+                            send_jmsg(PipeMessage::JobStatus { job_id, status: status as i32 });
                         }
                         Err(error) => warn!("Worker {job_id}: {error}"),
                     }
                 } else if msg.starts_with("3099 Job") {
                     if let Some(status) = msg.split_whitespace().find_map(|part| part.strip_prefix("JobStatus=").and_then(|value| value.parse::<u8>().ok())) {
-                        let update = PipeMessage::JobStatus { job_id, status: status as i32 };
-                        if let Ok(json) = serde_json::to_string(&update) { let _ = writeln!(to_dir, "{json}"); }
+                        send_jmsg(PipeMessage::JobStatus { job_id, status: status as i32 });
                     }
                     debug!("Worker {job_id} SD: job end");
                     break;
@@ -867,7 +878,7 @@ fn wait_for_fd_end_job(fd: &mut BnetStream<tls_psk::PskStream>, job_id: u32) -> 
 // Connection helpers
 // ============================================================================
 
-fn connect_fd(p: &JobParams) -> Result<(BnetStream<tls_psk::PskStream>, String), String> {
+pub(crate) fn connect_fd(p: &JobParams) -> Result<(BnetStream<tls_psk::PskStream>, String), String> {
     let sock = resolve_connect(&format!("{}:{}", p.fd_address, p.fd_port), 3)?;
     sock.set_read_timeout(None).ok();
     let psk = tls_psk::password_to_psk(&p.fd_password);
@@ -908,7 +919,7 @@ fn resolve_connect(addr: &str, timeout_secs: u64) -> Result<std::net::TcpStream,
         .map_err(|e| format!("connect {addr}: {e}"))
 }
 
-fn send_expect(bnet: &mut BnetStream<tls_psk::PskStream>, cmd: &str, expect: &str, job_id: u32, label: &str) -> Result<String, String> {
+pub(crate) fn send_expect(bnet: &mut BnetStream<tls_psk::PskStream>, cmd: &str, expect: &str, job_id: u32, label: &str) -> Result<String, String> {
     debug!("Worker {job_id} {label}: sending '{}'", cmd.trim());
     bnet.send_str(cmd).map_err(|e| format!("{label} send: {e}"))?;
     loop {
@@ -950,7 +961,7 @@ fn fd_restore_command(params: &JobParams) -> String {
     format!("restore replace={replace} prelinks={} {key}={value}\n", u8::from(params.prefix_links))
 }
 
-fn now_unix() -> i64 { SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_secs() as i64 }
+pub(crate) fn now_unix() -> i64 { SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_secs() as i64 }
 
 // ============================================================================
 // Signal handlers (worker-side)
@@ -1107,7 +1118,7 @@ mod wait_protocol_tests {
             fileset_includes: vec![], fileset_excludes: vec![], since_utime: 0, prev_job: String::new(),
             where_path: Some("/tmp/with space".into()), regex_where: None, prefix_links: false,
             replace: Some("ifnewer".into()), restore_jobid: None, bootstrap: None,
-            client_name: String::new(), client_first_connection: false, copy: None,
+            client_name: String::new(), client_first_connection: false, copy: None, verify: None,
         };
         assert_eq!(fd_restore_command(&p), "restore replace=w prelinks=0 where=/tmp/with\x01space\n");
         p.regex_where = Some("!/a!/b!".into());
