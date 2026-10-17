@@ -62,7 +62,7 @@ show help
 ## API-Modi
 
 - **`.api 0`** (Standard): Ressourcenblöcke wie in den Konfigurationsdateien, nach jedem Block eine Leerzeile.
-- **`.api 1`**: dieselben Blöcke; bei Ressourcen mit geerbten Werten erscheinen diese zusätzlich (z.B. `Catalog = "MyCatalog"` beim Client). `show disabled` gibt nur die Namen aus, ohne die Überschriften `Disabled …:` und `No disabled …`.
+- **`.api 1`**: dieselben Blöcke wie unter `.api 0`. `show disabled` gibt nur die Namen aus, ohne die Überschriften `Disabled …:` und `No disabled …`.
 - **`.api 2`**: JSON-Objekt unter `result`, gegliedert nach Typ (`jobs`, `clients`, `pools`, `directors`, …) und darin nach Ressourcenname. Die Direktiven heißen klein geschrieben (`labelformat`, `maximumvolumes`), Zahlen und Ja/Nein-Werte haben JSON-Typen, mehrfache Werte sind Listen. `show disabled` liefert `result.disabled` mit den Listen `jobs`, `clients` und `schedules`. `show help` liefert ein leeres `result`. Fehler stehen in `error.data.messages.error`.
 - **`.api json compact=yes`**: dasselbe JSON in einer Zeile.
 
@@ -722,7 +722,6 @@ Client {
   Description = "Client resource of the Director itself."
   Address = "localhost"
   Password = "[…]"
-  Catalog = "MyCatalog"
 }
 
 *UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]> show disabled
@@ -751,14 +750,8 @@ Client {
       "Full": {
         "name": "Full",
         "labelformat": "Full-",
-        "labeltype": "bareos",
-        "actiononpurge": "None",
         "maximumvolumes": 100,
-        "maximumvolumebytes": "50 g",
-        "nextpool": "",
-        "recyclepool": "",
-        "scratchpool": "",
-        "catalog": ""
+        "maximumvolumebytes": "50 g"
       }
     }
   }
@@ -909,7 +902,7 @@ Ein ungültiges Wort vor einer gültigen Angabe: Die gültige Ressource steht un
 *UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]> .api json compact=yes
 {"jsonrpc":"2.0","id":null,"result":{"api":2}}
 *UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]> show pool=Full
-{"jsonrpc":"2.0","id":null,"result":{"pools":{"Full":{"name":"Full","labelformat":"Full-","labeltype":"bareos","actiononpurge":"None","maximumvolumes":100,"maximumvolumebytes":"50 g","nextpool":"","recyclepool":"","scratchpool":"","catalog":""}}}}
+{"jsonrpc":"2.0","id":null,"result":{"pools":{"Full":{"name":"Full","labelformat":"Full-","maximumvolumes":100,"maximumvolumebytes":"50 g"}}}}
 *UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]>
 ```
 
@@ -924,7 +917,6 @@ Client {
   Protocol = NDMPV4
   Address = "localhost"
   Password = "[…]"
-  Catalog = "MyCatalog"
 }
 
 Client {
@@ -932,7 +924,6 @@ Client {
   Description = "Client resource of the Director itself."
   Address = "localhost"
   Password = "[…]"
-  Catalog = "MyCatalog"
 }
 
 parity-limited@bareos-dir[25.1.2+onesimus.0.2.0]>
