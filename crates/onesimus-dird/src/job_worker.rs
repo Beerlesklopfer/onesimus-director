@@ -149,6 +149,19 @@ pub enum PipeMessage {
     /// FD/SD end counters of a native backup, sent before its JobEnd (S-19).
     #[serde(rename = "backup_end")]
     BackupEnd { job_id: u32, end: crate::backup::BackupEnd },
+    /// SendAccurateCurrentFiles(): the worker asks for the accurate list of
+    /// a job started at `start_time` (S-23) ...
+    #[serde(rename = "accurate_request")]
+    AccurateRequest { job_id: u32, start_time: i64 },
+    /// ... and the Director answers with the list file (or the fatal text).
+    #[serde(rename = "accurate_ready")]
+    AccurateReady { path: String, estimate: String, error: Option<String> },
+    /// DoNativeBackup(): CheckHardquotas/CheckSoftquotas in the Director (S-23) ...
+    #[serde(rename = "quota_check")]
+    QuotaCheck { job_id: u32 },
+    /// ... the M_FATAL text of an exceeded quota and FetchRemainingQuotas().
+    #[serde(rename = "quota_checked")]
+    QuotaChecked { fatal: Option<String>, remaining: u64 },
     /// job_thread() RunScripts(jcr, ..., label) in the Director (console
     /// commands need it); the worker waits for [`PipeMessage::RunScriptsDone`].
     #[serde(rename = "run_scripts")]
@@ -386,7 +399,7 @@ impl WorkerPipes {
         send_jmsg(msg.clone());
     }
 
-    fn recv(&mut self) -> Option<PipeMessage> {
+    pub(crate) fn recv(&mut self) -> Option<PipeMessage> {
         let mut buf = String::new();
         let mut reader = BufReader::new(&mut self.from_director);
         match reader.read_line(&mut buf) {
@@ -1040,8 +1053,13 @@ fn resolve_connect(addr: &str, timeout_secs: u64) -> Result<std::net::TcpStream,
     use std::net::ToSocketAddrs;
     let sa = addr.to_socket_addrs().map_err(|e| format!("DNS {addr}: {e}"))?
         .next().ok_or_else(|| format!("DNS {addr}: none"))?;
-    std::net::TcpStream::connect_timeout(&sa, std::time::Duration::from_secs(timeout_secs))
-        .map_err(|e| format!("connect {addr}: {e}"))
+    let sock = std::net::TcpStream::connect_timeout(&sa, std::time::Duration::from_secs(timeout_secs))
+        .map_err(|e| format!("connect {addr}: {e}"))?;
+    register_cancel_fd(std::os::fd::AsRawFd::as_raw_fd(&sock));
+    if WORKER_CANCEL.load(Ordering::SeqCst) {
+        let _ = sock.shutdown(std::net::Shutdown::Both);
+    }
+    Ok(sock)
 }
 
 pub(crate) fn send_expect(bnet: &mut BnetStream<tls_psk::PskStream>, cmd: &str, expect: &str, job_id: u32, label: &str) -> Result<String, String> {
@@ -1105,7 +1123,29 @@ pub fn install_worker_signal_handlers() {
     }
 }
 
-extern "C" fn worker_sigterm(_: libc::c_int) { WORKER_CANCEL.store(true, Ordering::SeqCst); }
+extern "C" fn worker_sigterm(_: libc::c_int) {
+    WORKER_CANCEL.store(true, Ordering::SeqCst);
+    // CancelJob(): a worker blocked on a daemon socket wakes up (shutdown(2)
+    // is async-signal-safe). S-23.
+    for slot in &CANCEL_FDS {
+        let fd = slot.load(Ordering::SeqCst);
+        if fd >= 0 {
+            unsafe { libc::shutdown(fd, libc::SHUT_RDWR); }
+        }
+    }
+}
+
+/// The daemon sockets of the worker, shut down by SIGTERM (S-23).
+static CANCEL_FDS: [std::sync::atomic::AtomicI32; 4] = [const { std::sync::atomic::AtomicI32::new(-1) }; 4];
+
+/// Remember a daemon socket for the SIGTERM handler.
+fn register_cancel_fd(fd: i32) {
+    for slot in &CANCEL_FDS {
+        if slot.compare_exchange(-1, fd, Ordering::SeqCst, Ordering::SeqCst).is_ok() {
+            return;
+        }
+    }
+}
 extern "C" fn worker_sigusr1(_: libc::c_int) { WORKER_PAUSED.store(true, Ordering::SeqCst); }
 extern "C" fn worker_sigusr2(_: libc::c_int) { WORKER_PAUSED.store(false, Ordering::SeqCst); }
 

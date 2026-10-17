@@ -1045,6 +1045,12 @@ impl Jcr {
                 }
             }
         }
+        // A native backup: jcr->dir_impl->plugin_options for SendPluginOptions (S-23).
+        if self.job_type == JobType::Backup && self.level != L_VIRTUAL_FULL {
+            if let Some(options) = &self.plugin_options {
+                arguments.push(arg("pluginoptions", options));
+            }
+        }
         // A VirtualFull: its JobIds and run options (vbackup.rs, S-06).
         if self.job_type == JobType::Backup && self.level == L_VIRTUAL_FULL {
             if let Some(jobids) = &self.vf_jobids {
@@ -1697,6 +1703,38 @@ fn run_selected(
     let pool = run_pool.as_deref().unwrap_or(pool);
     let pool_id = crate::backup::pool_id(cat, pool);
 
+    // Max Virtual Full Interval upgraded the job: it runs as a VirtualFull
+    // with its Job record (job.cc SetupJob → DoNativeVbackupInit). S-23.
+    if level_char == 'V' {
+        let value = |key: &str| ast.arguments.iter().find(|a| a.key.eq_ignore_ascii_case(key)).and_then(|a| a.value.clone());
+        let request = crate::vbackup::Request {
+            job: job.clone(), priority: value("priority").and_then(|p| p.parse().ok()),
+            client: Some(client_name.to_string()), fileset: Some(fileset_name.to_string()),
+            pool: value("pool"), sched_time: now, trigger: crate::job_messages::TRIGGER_USER.to_string(),
+            existing: Some((job_id, unique_job.clone())), ..Default::default()
+        };
+        let started = crate::vbackup::start(&config, Some(cat), &request);
+        drop(config);
+        if let Some(smgr) = &ctx.session_mgr {
+            for (msg_type, text) in setup_messages {
+                crate::console_msg::post_job_message(smgr.bus(), ctx.config.as_ref(), BusMessage::JobMessage {
+                    job_id, job_name: job.name.clone(), msg_type, text, timestamp: now_unix() });
+            }
+        }
+        return match started {
+            Ok(mut child) => {
+                child.report.since = since.since.clone();
+                if let Some(ref mgr) = ctx.job_manager {
+                    enqueue_with_report(mgr, &child.job_name, child.start, &child.client, &child.storage, child.report);
+                } else if let Err(e) = job_worker::spawn_job_worker(job_id, &job.name, &child.start.params) {
+                    return CommandResult::error(format!("Failed to start job: {e}\n"));
+                }
+                job_queued(job_id)
+            }
+            Err(_) => CommandResult::error("Job failed.\n".to_string()),
+        };
+    }
+
     let client = client_res.unwrap();
     let storage = storage_res.unwrap();
     let dir_name = config.director.name.clone();
@@ -1716,6 +1754,10 @@ fn run_selected(
         pool: pool.to_string(),
         pool_type: config.find_pool(pool).map(|p| p.pool_type.clone()).unwrap_or_else(|| "Backup".into()),
     };
+    let client_dirs: Vec<bareos_config::raw::Directive> = crate::commands::defaults::raw(&config, "client", &client.name)
+        .map(|r| r.directives.clone()).unwrap_or_default();
+    let lan_address = |kind: &str, name: &str| crate::job_messages::raw_directive(&config, kind, name, "lanaddress");
+    let (storage_lan, client_lan) = (lan_address("storage", &storage.name), lan_address("client", &client.name));
     let session = crate::backup_worker::BackupSession {
         ids: crate::backup::JobIds { level: level_char, client_id, pool_id, fileset_id: fsr.id },
         since_utime: crate::btime::str_to_utime(&since.stime),
@@ -1731,6 +1773,33 @@ fn run_selected(
             ..Default::default()
         },
         write,
+        // S-23: SendPluginOptions, SendPreviousRestoreObjects, SendBwlimitToFd,
+        // passive client, LanAddress, IsChecksumNeededByFileset.
+        plugin_options: crate::backup::plugin_option_lines(
+            ast.arguments.iter().find(|a| a.key == "pluginoptions").and_then(|a| a.value.as_deref()), &job_dirs),
+        restore_objects: if matches!(level_char, 'I' | 'D') {
+            crate::backup::previous_restore_objects(cat, &since.prev_job)
+        } else {
+            Vec::new()
+        },
+        max_bandwidth: crate::backup::max_bandwidth(&job_dirs, &client_dirs),
+        passive_client: crate::commands::defaults::bool_directive(&client_dirs, "passive", false),
+        storage_contact: match (&storage_lan, &client_lan) {
+            (Some(lan), Some(_)) => lan.clone(),
+            _ => storage.address.clone(),
+        },
+        client_contact: match (&storage_lan, &client_lan) {
+            (Some(_), Some(lan)) => lan.clone(),
+            _ => client.address.clone(),
+        },
+        accurate_checksum: crate::backup::checksum_needed(
+            &crate::commands::estimate::include_option_strings(&config, &job.fileset), level_char),
+        quota: {
+            let mut messages = Vec::new();
+            let quota = crate::backup::Quota::setup(cat, &client_dirs, client_id, retention.job_retention, &mut messages);
+            setup_messages.extend(messages.into_iter().map(|(code, text)| (crate::backup::quota_msg_type(code), text)));
+            quota
+        },
     };
 
     let params = JobParams {
@@ -2086,7 +2155,7 @@ fn run_virtual_full(
         pool: value("pool"),
         next_pool: value("nextpool"),
         sched_time: value("schedtime").and_then(|t| t.parse().ok()).unwrap_or(0),
-        trigger: crate::job_messages::TRIGGER_USER.to_string(),
+        trigger: crate::job_messages::TRIGGER_USER.to_string(), existing: None,
     };
     let started = crate::vbackup::start(&config, ctx.catalog.as_ref(), &request);
     drop(config);

@@ -38,6 +38,29 @@ pub struct BackupSession {
     pub sd_job: crate::sd_copy::CopySession,
     /// The write Storage (ReserveWriteDevice) and its address for the FD.
     pub write: crate::sd_copy::StorageUse,
+    /// SendPluginOptions(): "pluginoptions …" lines (S-23).
+    #[serde(default)]
+    pub plugin_options: Vec<String>,
+    /// SendPreviousRestoreObjects(): header, name and object messages (S-23).
+    #[serde(default)]
+    pub restore_objects: Vec<Vec<u8>>,
+    /// SendBwlimitToFd(): bytes per second, 0 for none (S-23).
+    #[serde(default)]
+    pub max_bandwidth: u64,
+    /// Client Passive = yes: the SD connects to the FD (S-23).
+    #[serde(default)]
+    pub passive_client: bool,
+    /// StorageAddressToContact() / ClientAddressToContact() (LanAddress).
+    #[serde(default)]
+    pub storage_contact: String,
+    #[serde(default)]
+    pub client_contact: String,
+    /// IsChecksumNeededByFileset(): the accurate list carries checksums.
+    #[serde(default)]
+    pub accurate_checksum: bool,
+    /// The client's quota (quota.cc), None without Soft/Hard Quota (S-23).
+    #[serde(default)]
+    pub quota: Option<crate::backup::Quota>,
 }
 
 fn send_catalog(job_id: u32, sql: String) {
@@ -136,7 +159,12 @@ fn state(job_id: u32, name: &str) {
 pub fn run(params: &JobParams, session: &BackupSession, pipes: &mut WorkerPipes) -> i32 {
     let job_id = params.job_id;
     let ids = session.ids;
+    // A canceled job (SIGTERM shut its sockets down) ends JS_Canceled
+    // without the network error it caused (S-23).
     let fail = |text: String, vol: (u32, u32)| {
+        if job_worker::WORKER_CANCEL.load(Ordering::SeqCst) {
+            return finish(job_id, session, b'A', 0, 0, 0, vol, None);
+        }
         if !text.is_empty() {
             jmsg(job_id, M_FATAL, text);
         }
@@ -156,6 +184,23 @@ pub fn run(params: &JobParams, session: &BackupSession, pipes: &mut WorkerPipes)
     let start = now();
     send_catalog(job_id, crate::backup::update_job_start_record_sql(job_id, 'R', &ids, start, 0, 0));
 
+    // CheckHardquotas() / CheckSoftquotas(); FetchRemainingQuotas() for the SD.
+    let mut remaining_quota = 0;
+    if session.quota.is_some() {
+        pipes.send(&PipeMessage::QuotaCheck { job_id });
+        loop {
+            match pipes.recv() {
+                Some(PipeMessage::QuotaChecked { fatal: Some(text), .. }) => return fail(text, (0, 0)),
+                Some(PipeMessage::QuotaChecked { remaining, .. }) => {
+                    remaining_quota = remaining;
+                    break;
+                }
+                Some(_) => continue,
+                None => break,
+            }
+        }
+    }
+
     // ConnectToStorageDaemon() (JS_WaitSD) and StartStorageDaemonJob().
     state(job_id, "BackupConnectingSD");
     let mut sd = match job_worker::connect_sd(params) {
@@ -167,7 +212,7 @@ pub fn run(params: &JobParams, session: &BackupSession, pipes: &mut WorkerPipes)
         Err(e) => return fail(format!("Failed to connect to Storage daemon: {e}\n"), (0, 0)),
     };
     state(job_id, "BackupSDJobSetup");
-    let (vol, auth_key) = match start_sd_job(&mut sd, params, session) {
+    let (vol, auth_key) = match start_sd_job(&mut sd, params, session, remaining_quota) {
         Ok(v) => v,
         Err(e) => {
             let _ = sd.send_signal(BnetSignal::Terminate);
@@ -201,7 +246,15 @@ pub fn run(params: &JobParams, session: &BackupSession, pipes: &mut WorkerPipes)
     }
 
     // The job start record again, after the client run scripts.
-    send_catalog(job_id, crate::backup::update_job_start_record_sql(job_id, 'R', &ids, now(), vol.0, vol.1));
+    let start = now();
+    send_catalog(job_id, crate::backup::update_job_start_record_sql(job_id, 'R', &ids, start, vol.0, vol.1));
+
+    // SendAccurateCurrentFiles()
+    if let Err(e) = send_accurate_files(&mut fd, pipes, job_id, session, start) {
+        let _ = fd.send_signal(BnetSignal::Terminate);
+        let _ = sd.send_signal(BnetSignal::Terminate);
+        return fail(e, vol);
+    }
 
     // ReserveWriteDevice().
     if let Err(e) = reserve_write_device(&mut sd, job_id, &session.write) {
@@ -210,9 +263,19 @@ pub fn run(params: &JobParams, session: &BackupSession, pipes: &mut WorkerPipes)
         return fail(e, vol);
     }
 
-    // ConfigureMessageThread(): the FD's storage address, SD "run", message thread.
-    let storage_cmd = format!("storage address={} port={} ssl=4\n", session.write.address, session.write.port);
-    if let Err(e) = send(&mut fd, &storage_cmd).and_then(|_| response(&mut fd, job_id, "2000 OK storage\n", "Storage")) {
+    // ConfigureMessageThread(): the FD's storage address (or, for a passive
+    // client, the SD connects to the FD), SD "run", message thread.
+    let contact = if session.passive_client {
+        let cmd = format!("passive client address={} port={} ssl=4\n", session.client_contact, params.fd_port);
+        send(&mut sd, &cmd).and_then(|_| {
+            std::thread::sleep(std::time::Duration::from_secs(2));
+            response(&mut sd, job_id, "2000 OK passive client\n", "Passive client")
+        })
+    } else {
+        let cmd = format!("storage address={} port={} ssl=4\n", session.storage_contact, session.write.port);
+        send(&mut fd, &cmd).and_then(|_| response(&mut fd, job_id, "2000 OK storage\n", "Storage"))
+    };
+    if let Err(e) = contact {
         let _ = fd.send_signal(BnetSignal::Terminate);
         let _ = sd.send_signal(BnetSignal::Terminate);
         return fail(e, vol);
@@ -251,7 +314,9 @@ pub fn run(params: &JobParams, session: &BackupSession, pipes: &mut WorkerPipes)
             }
             Ok(None) => break,
             Err(e) => {
-                jmsg(job_id, M_FATAL, format!("Network error with FD during Backup: ERR={e}\n"));
+                if !job_worker::WORKER_CANCEL.load(Ordering::SeqCst) {
+                    jmsg(job_id, M_FATAL, format!("Network error with FD during Backup: ERR={e}\n"));
+                }
                 break;
             }
         }
@@ -275,6 +340,43 @@ pub fn run(params: &JobParams, session: &BackupSession, pipes: &mut WorkerPipes)
         Some((fd_status, read_bytes, &sd_end, vss, encrypt)))
 }
 
+/// backup.cc SendAccurateCurrentFiles(): the Director writes the list
+/// (AccurateGetJobids, GetFileList, "Sending Accurate information ..."), the
+/// worker sends "accurate files=N", the entries and EOD.
+fn send_accurate_files(fd: &mut BnetStream<PskStream>, pipes: &mut WorkerPipes, job_id: u32, session: &BackupSession,
+                       start_time: i64) -> Result<(), String> {
+    if !session.accurate || !matches!(session.ids.level, 'I' | 'D') {
+        return Ok(());
+    }
+    let timer = std::time::Instant::now();
+    pipes.send(&PipeMessage::AccurateRequest { job_id, start_time });
+    let (path, estimate) = loop {
+        match pipes.recv() {
+            Some(PipeMessage::AccurateReady { error: Some(error), .. }) => return Err(error),
+            Some(PipeMessage::AccurateReady { path, estimate, .. }) => break (path, estimate),
+            Some(_) => continue,
+            None => return Err("Cannot find previous jobids.\n".into()),
+        }
+    };
+    let data = std::fs::read(&path);
+    let _ = std::fs::remove_file(&path);
+    let data = data.map_err(|e| format!("Cannot read accurate list {path}: {e}\n"))?;
+    send(fd, &format!("accurate files={estimate}\n"))?;
+    let mut sent = 0u64;
+    let mut at = 0;
+    while at + 4 <= data.len() {
+        let len = u32::from_be_bytes([data[at], data[at + 1], data[at + 2], data[at + 3]]) as usize;
+        let Some(message) = data.get(at + 4..at + 4 + len) else { break };
+        fd.send(message).map_err(|e| format!("Network error: {e}\n"))?;
+        sent += 1;
+        at += 4 + len;
+    }
+    let secs = timer.elapsed().as_secs();
+    jmsg(job_id, M_INFO, format!("Sent Accurate information for {sent} files (skipping 0 deleted files) in {:02}:{:02}:{:02}.\n",
+        secs / 3600, secs / 60 % 60, secs % 60));
+    fd.send_signal(BnetSignal::Eod).map_err(|e| format!("Network error: {e}\n"))
+}
+
 /// EndJob: "2800 End Job TermCode=%d JobFiles=%u ReadBytes=%llu JobBytes=%llu Errors=%u VSS=%d Encrypt=%d"
 fn parse_end_job(msg: &str) -> Option<(u8, u64, u64, u64, u32, bool, bool)> {
     let rest = msg.strip_prefix("2800 End Job ")?;
@@ -286,9 +388,12 @@ fn parse_end_job(msg: &str) -> Option<(u8, u64, u64, u64, u32, bool, bool)> {
 }
 
 /// StartStorageDaemonJob(jcr, send_bsr=false): ((VolSessionId, VolSessionTime), Authorization).
-fn start_sd_job(sd: &mut BnetStream<PskStream>, params: &JobParams, session: &BackupSession) -> Result<((u32, u32), String), String> {
+fn start_sd_job(sd: &mut BnetStream<PskStream>, params: &JobParams, session: &BackupSession, quota: u64)
+    -> Result<((u32, u32), String), String> {
     let job_id = params.job_id;
-    send(sd, &crate::sd_copy::job_command(params, &session.sd_job))?;
+    // The Job command with Quota= of FetchRemainingQuotas().
+    let command = crate::sd_copy::job_command(params, &session.sd_job).replacen(" Quota=0 ", &format!(" Quota={quota} "), 1);
+    send(sd, &command)?;
     let reply = match dir_msg(sd, job_id) {
         Ok(Some(reply)) => reply,
         Ok(None) => return Err("<stored: bad response to Job command: No data available\n".into()),
@@ -348,11 +453,40 @@ fn setup_fd(fd: &mut BnetStream<PskStream>, params: &JobParams, session: &Backup
         response(fd, job_id, "2000 OK include\n", "Include")?;
     }
 
+    // SendPluginOptions()
+    for line in &session.plugin_options {
+        send(fd, line)?;
+        if let Err(e) = response(fd, job_id, "2000 OK PluginOptions\n", "PluginOptions") {
+            jmsg(job_id, M_FATAL, e);
+            return Err("Plugin options failed.\n".into());
+        }
+    }
+
+    // SendPreviousRestoreObjects() (Incremental/Differential).
+    if matches!(session.ids.level, 'I' | 'D') && !session.restore_objects.is_empty() {
+        for object in &session.restore_objects {
+            fd.send(object).map_err(|e| format!("Network error: {e}\n"))?;
+        }
+        send(fd, "restoreobject end\n")?;
+        if let Err(e) = response(fd, job_id, "2000 OK ObjectRestored\n", "RestoreObject") {
+            jmsg(job_id, M_FATAL, e);
+            return Err("RestoreObject failed.\n".into());
+        }
+    }
+
     // SendSecureEraseReqToFd()
     send(fd, "getSecureEraseCmd\n")?;
     if let Some(msg) = dir_msg(fd, job_id).map_err(|e| format!("Network error: {e}\n"))? {
         if !msg.starts_with("2000 OK FDSecureEraseCmd ") {
             jmsg(job_id, M_WARNING, format!("Unexpected Client Secure Erase Cmd: {msg}"));
+        }
+    }
+
+    // SendBwlimitToFd(); a refused limit is only reported.
+    if session.max_bandwidth > 0 {
+        send(fd, &format!("setbandwidth={} Job={}\n", session.max_bandwidth, params.unique_job))?;
+        if let Err(e) = response(fd, job_id, "2000 OK Bandwidth\n", "Bandwidth") {
+            jmsg(job_id, M_FATAL, e);
         }
     }
     // SendRunscriptsCommands(): the client run scripts (S-07); the

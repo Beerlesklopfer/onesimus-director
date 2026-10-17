@@ -44,6 +44,9 @@ pub struct Request {
     pub next_pool: Option<String>,
     pub sched_time: i64,
     pub trigger: String,
+    /// JobId and Job name of a backup upgraded to VirtualFull by Max Virtual
+    /// Full Interval (S-23); None creates the Job record.
+    pub existing: Option<(u32, String)>,
 }
 
 /// Job data NativeVbackupCleanup needs (JobReport.vf).
@@ -172,13 +175,24 @@ pub fn start(config: &DirectorConfig, catalog: Option<&CatalogHandle>, req: &Req
     let (fileset_id, fileset_md5) = fileset_record(catalog, &fileset);
     let now = (unsafe { libc::time(std::ptr::null_mut()) }) as i64;
     let sched_time = if req.sched_time != 0 { req.sched_time } else { now };
-    let unique = crate::commands::job::unique_job_name(&job.name, now);
-    let job_id: u32 = first_value(catalog, &format!(
-        "INSERT INTO Job (Job,Name,Type,Level,JobStatus,SchedTime,JobTDate,ClientId,Comment) \
-         VALUES ('{}','{}','B','f','C','{}',{sched_time},{client_id},'') RETURNING JobId",
-        sql_esc(&unique), sql_esc(&job.name), crate::job_messages::bstrutime(sched_time)))
-        .ok().flatten().and_then(|id| id.parse().ok())
-        .ok_or_else(|| fatal("Create DB Job record failed\n".into()))?;
+    let (job_id, unique) = match &req.existing {
+        // A backup GetLevelSinceTime() upgraded to VirtualFull keeps its
+        // Job record (job.cc SetupJob), now with Level 'f' (S-23).
+        Some((job_id, unique)) => {
+            let _ = catalog.execute(&format!("UPDATE Job SET Level='f' WHERE JobId={job_id}"));
+            (*job_id, unique.clone())
+        }
+        None => {
+            let unique = crate::commands::job::unique_job_name(&job.name, now);
+            let job_id: u32 = first_value(catalog, &format!(
+                "INSERT INTO Job (Job,Name,Type,Level,JobStatus,SchedTime,JobTDate,ClientId,Comment) \
+                 VALUES ('{}','{}','B','f','C','{}',{sched_time},{client_id},'') RETURNING JobId",
+                sql_esc(&unique), sql_esc(&job.name), crate::job_messages::bstrutime(sched_time)))
+                .ok().flatten().and_then(|id| id.parse().ok())
+                .ok_or_else(|| fatal("Create DB Job record failed\n".into()))?;
+            (job_id, unique)
+        }
+    };
 
     // DoNativeVbackupInit() failed: NativeVbackupCleanup(JS_ErrorTerminated)
     // with the write storage of SetJcrDefaults; RunJob() returns 0.

@@ -352,9 +352,383 @@ pub(crate) fn update_job_end_record_sql(job_id: u32, status: char, end_time: i64
         vol_session_id as u32, vol_session_time as u32, end.ids.pool_id, end.ids.fileset_id)
 }
 
+/// lib/edit.cc speed_to_uint64() (CFG_TYPE_SPEED): a number with an
+/// optional `k/s`, `kb/s`, `m/s` or `mb/s` (bytes per second).
+pub(crate) fn speed_value(text: &str) -> Option<u64> {
+    let text = text.trim();
+    let end = text.find(|c: char| !(c.is_ascii_digit() || c == '.')).unwrap_or(text.len());
+    let number: f64 = text[..end].parse().ok()?;
+    let mult = match text[end..].trim().to_ascii_lowercase().as_str() {
+        "" | "*" => 1.0,
+        "k/s" => 1024.0,
+        "kb/s" => 1000.0,
+        "m/s" => 1_048_576.0,
+        "mb/s" => 1_000_000.0,
+        _ => return None,
+    };
+    Some((number * mult) as u64)
+}
+
+/// backup.cc DoNativeBackup(): the Job's Maximum Bandwidth, else the
+/// Client's Maximum Bandwidth Per Job (0: no limit).
+pub(crate) fn max_bandwidth(job_dirs: &[Directive], client_dirs: &[Directive]) -> u64 {
+    let speed = |dirs: &[Directive], key: &str| dirs.iter().rev().find(|d| d.norm_key() == key)
+        .and_then(|d| speed_value(&d.values().join(" "))).unwrap_or(0);
+    match speed(job_dirs, "maximumbandwidth") {
+        0 => speed(client_dirs, "maximumbandwidthperjob"),
+        job => job,
+    }
+}
+
+/// fd_cmds.cc SendPluginOptions(): "pluginoptions %s" for the run's plugin
+/// options and every FD Plugin Options of the Job (spaces bashed).
+pub(crate) fn plugin_option_lines(run_options: Option<&str>, job_dirs: &[Directive]) -> Vec<String> {
+    let bash = crate::catreq::bash_spaces;
+    let mut out: Vec<String> = run_options.map(|o| format!("pluginoptions {}\n", bash(o))).into_iter().collect();
+    for d in job_dirs.iter().filter(|d| d.norm_key() == "fdpluginoptions") {
+        for value in d.values() {
+            out.push(format!("pluginoptions {}\n", bash(value)));
+        }
+    }
+    out
+}
+
+/// PQunescapeBytea() of a bytea column in text form (`\x…` hex or escape).
+fn unescape_bytea(text: &str) -> Vec<u8> {
+    if let Some(hexed) = text.strip_prefix("\\x") {
+        return hex::decode(hexed).unwrap_or_default();
+    }
+    let bytes = text.as_bytes();
+    let mut out = Vec::with_capacity(bytes.len());
+    let mut i = 0;
+    while i < bytes.len() {
+        if bytes[i] == b'\\' && i + 1 < bytes.len() && bytes[i + 1] == b'\\' {
+            out.push(b'\\');
+            i += 2;
+        } else if bytes[i] == b'\\' && i + 3 < bytes.len() && bytes[i + 1..i + 4].iter().all(|c| (b'0'..=b'7').contains(c)) {
+            out.push(((bytes[i + 1] - b'0') << 6) | ((bytes[i + 2] - b'0') << 3) | (bytes[i + 3] - b'0'));
+            i += 4;
+        } else {
+            out.push(bytes[i]);
+            i += 1;
+        }
+    }
+    out
+}
+
+/// fd_cmds.cc SendPreviousRestoreObjects() → SendRestoreObjects(JobId of
+/// the previous job, send_global=false): the messages for the File daemon,
+/// FT_RESTORE_FIRST (25) then FT_PLUGIN_CONFIG (27) objects, each as
+/// "restoreobject JobId=…" header, object name and object; empty without
+/// objects (then "restoreobject end" is not sent either).
+pub(crate) fn previous_restore_objects(cat: &CatalogHandle, prev_job: &str) -> Vec<Vec<u8>> {
+    if prev_job.is_empty() {
+        return Vec::new();
+    }
+    let Some(jobid) = first_row(cat, &format!("SELECT JobId FROM Job WHERE Job='{}'", esc(prev_job))).ok().flatten()
+        .map(|r| cell(&r, 0)).filter(|id| !id.is_empty()) else { return Vec::new() };
+    let mut out = Vec::new();
+    for object_type in [25, 27] {
+        let Ok(table) = cat.query_rows(&format!(
+            "SELECT JobId, ObjectLength, ObjectFullLength, ObjectIndex, ObjectType, ObjectCompression, FileIndex, \
+             ObjectName, RestoreObject, PluginName FROM RestoreObject WHERE JobId IN ({jobid}) AND ObjectType = {object_type} \
+             ORDER BY ObjectIndex ASC")) else { continue };
+        for row in table.rows {
+            let f = |i: usize| cell(&row, i);
+            out.push(format!("restoreobject JobId={} {},{},{},{},{},{},{}\n", f(0), f(1), f(2), f(3), f(4), f(5), f(6),
+                crate::catreq::bash_spaces(&f(9))).into_bytes());
+            out.push(f(7).into_bytes());
+            out.push(unescape_bytea(&f(8)));
+        }
+    }
+    out
+}
+
+/// backup.cc IsChecksumNeededByFileset() of a non-base job: an MD5/SHA1
+/// signature in an Options block with Accurate (`C`) of a non-Full job.
+pub(crate) fn checksum_needed(opts: &[String], level: char) -> bool {
+    for opts in opts {
+        let mut in_block = false;
+        for c in opts.chars() {
+            match c {
+                'V' | ':' => in_block = false,
+                'C' => in_block = level != 'F',
+                '5' | '1' if in_block => return true,
+                _ => {}
+            }
+        }
+    }
+    false
+}
+
+/// backup.cc SendAccurateCurrentFiles() in the Director: AccurateGetJobids()
+/// up to the job's StartTime, the estimate ("SELECT sum(JobFiles) …") and
+/// GetFileList() written to `path` as length-prefixed FD messages
+/// ("path\0LStat\0MD5\0DeltaSeq"). Ok((estimate, sent)); Err: the M_FATAL text.
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn write_accurate_list(cat: &CatalogHandle, job_id: u32, client_id: i64, fileset_id: i64, level: char,
+                                  start_time: i64, use_md5: bool, path: &str) -> Result<(String, u64), String> {
+    let date = crate::job_messages::bstrutime(start_time + 1);
+    let jobids = crate::commands::bvfs::accurate_get_jobids_job(cat, job_id, client_id, 'B', &date, fileset_id,
+        level == 'I', 0).unwrap_or_default();
+    if jobids.is_empty() {
+        return Err("Cannot find previous jobids.\n".into());
+    }
+    let jobids = jobids.join(",");
+    let estimate = first_row(cat, &format!("SELECT sum(JobFiles) FROM Job WHERE JobId IN ({jobids})"))?
+        .map(|r| cell(&r, 0)).unwrap_or_default();
+    let files = cat.query_rows(&format!(
+        "SELECT Path.Path, T1.Name, T1.FileIndex, T1.JobId, LStat, DeltaSeq, MD5, Fhinfo, Fhnode FROM ( \
+         SELECT DISTINCT ON (Name, PathId) JobTDate, JobId, FileId, FileIndex, PathId, FileName AS Name, \
+         LStat, MD5, DeltaSeq, Fhinfo, Fhnode FROM (SELECT FileId, JobId, PathId, Name AS FileName, FileIndex, LStat, MD5, \
+         DeltaSeq, Fhinfo, Fhnode FROM File WHERE JobId IN ({jobids}) UNION ALL SELECT File.FileId, File.JobId, PathId, \
+         File.Name AS FileName, File.FileIndex, LStat, MD5, DeltaSeq, Fhinfo, Fhnode FROM BaseFiles JOIN File USING (FileId) \
+         WHERE BaseFiles.JobId IN ({jobids}) ) AS T JOIN Job USING (JobId) ORDER BY Name, PathId, JobTDate DESC \
+         ) AS T1 JOIN Path ON (Path.PathId = T1.PathId) WHERE FileIndex > 0 ORDER BY T1.JobTDate, FileIndex ASC"))?;
+    let mut out = Vec::new();
+    let mut sent = 0u64;
+    for row in files.rows {
+        let field = |i: usize| cell(&row, i);
+        // AccurateListHandler(): with a checksum unless it is "0".
+        let md5 = field(6);
+        let checksum = if use_md5 && md5.len() > 1 { md5 } else { String::new() };
+        let mut message = format!("{}{}", field(0), field(1)).into_bytes();
+        for part in [field(4), checksum, field(5)] {
+            message.push(0);
+            message.extend_from_slice(part.as_bytes());
+        }
+        out.extend_from_slice(&(message.len() as u32).to_be_bytes());
+        out.extend_from_slice(&message);
+        sent += 1;
+    }
+    std::fs::write(path, out).map_err(|e| format!("Cannot write accurate list {path}: {e}\n"))?;
+    Ok((estimate, sent))
+}
+
+/// sql_get.cc GetJobVolumeParameters() + backup.cc UpdateBootstrapFile()
+/// text for a backup job: the header and one record per JobMedia; the
+/// M_ERROR text "Could not get Job Volume Parameters …" without volumes.
+pub(crate) fn bootstrap_text(cat: &CatalogHandle, job_id: u32, header_job: &str, level_since: &str,
+                             vol_session_id: u32, vol_session_time: u32, now: i64) -> (String, Option<String>) {
+    let rows = cat.query_rows(&format!(
+        "SELECT VolumeName,MediaType,FirstIndex,LastIndex,StartFile,JobMedia.EndFile,StartBlock,JobMedia.EndBlock,Slot \
+         FROM JobMedia,Media WHERE JobMedia.JobId={job_id} AND JobMedia.MediaId=Media.MediaId ORDER BY VolIndex,JobMediaId"))
+        .map(|t| t.rows).unwrap_or_default();
+    let error = rows.is_empty().then(|| format!(
+        "Could not get Job Volume Parameters to update Bootstrap file. ERR=sql_get.cc:414 No volumes found for JobId={job_id}\n"));
+    let mut text = format!("# {} - {header_job} - {level_since}\n", crate::job_messages::bstrftimes(now));
+    for row in rows {
+        let value = |i: usize| cell(&row, i);
+        let n = |i: usize| value(i).parse::<u64>().unwrap_or(0);
+        text.push_str(&format!("Volume=\"{}\"\nMediaType=\"{}\"\n", value(0), value(1)));
+        if n(8) > 0 {
+            text.push_str(&format!("Slot={}\n", n(8)));
+        }
+        let start = (n(4) as u32 as u64) << 32 | n(6) as u32 as u64;
+        let end = (n(5) as u32 as u64) << 32 | n(7) as u32 as u64;
+        text.push_str(&format!("VolSessionId={vol_session_id}\nVolSessionTime={vol_session_time}\nVolAddr={start}-{end}\nFileIndex={}-{}\n",
+            n(2) as i32, n(3) as i32));
+    }
+    (text, error)
+}
+
+/// The quota of a client (dird/quota.cc): its Client resource values, the
+/// Quota record (GraceTime, QuotaLimit) and jr.JobSumTotalBytes once known.
+#[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
+pub struct Quota {
+    pub client_id: i64,
+    pub hard: u64,
+    pub soft: u64,
+    pub grace_period: u64,
+    pub strict: bool,
+    pub include_failed: bool,
+    pub job_retention: u64,
+    pub grace_time: u64,
+    pub quota_limit: u64,
+    pub has_quota: bool,
+    pub sum: u64,
+}
+
+impl Quota {
+    /// job.cc GetOrCreateClientRecord(): with a Soft or Hard Quota the Quota
+    /// record is read (or created, then 0/0). None without quotas.
+    pub(crate) fn setup(cat: &CatalogHandle, client_dirs: &[Directive], client_id: i64, job_retention: u64,
+                        messages: &mut Vec<(char, String)>) -> Option<Self> {
+        let size = |key: &str| crate::commands::defaults::number(client_dirs, key, 0, crate::commands::defaults::SIZES)
+            .unwrap_or(0);
+        let mut quota = Quota {
+            client_id, hard: size("hardquota"), soft: size("softquota"),
+            grace_period: time_directive(client_dirs, "softquotagraceperiod"),
+            strict: bool_directive(client_dirs, "strictquotas", false),
+            include_failed: bool_directive(client_dirs, "quotaincludefailedjobs", true),
+            job_retention, ..Default::default()
+        };
+        if quota.hard == 0 && quota.soft == 0 {
+            return None;
+        }
+        match first_row(cat, &format!("SELECT GraceTime, QuotaLimit FROM Quota WHERE ClientId = {client_id}")) {
+            Ok(Some(row)) => {
+                quota.grace_time = cell(&row, 0).parse().unwrap_or(0);
+                quota.quota_limit = cell(&row, 1).parse::<i64>().unwrap_or(0).max(0) as u64;
+            }
+            _ => {
+                let exists = first_row(cat, &format!("SELECT ClientId FROM Quota WHERE ClientId='{client_id}'")).ok().flatten();
+                if exists.is_none() {
+                    if let Err(e) = cat.execute(&format!(
+                        "INSERT INTO Quota (ClientId, GraceTime, QuotaLimit) VALUES ('{client_id}', '0', 0)")) {
+                        messages.push(('f', format!("Could not create Quota record. ERR={e}\n")));
+                    }
+                }
+            }
+        }
+        Some(quota)
+    }
+
+    /// get_quota_jobbytes[_nofailed](): jr.JobSumTotalBytes once per job.
+    fn load_sum(&mut self, cat: &CatalogHandle, job_id: u32, now: i64, messages: &mut Vec<(char, String)>) -> bool {
+        if self.has_quota {
+            return true;
+        }
+        let since = crate::job_messages::bstrutime(now - self.job_retention as i64 + 5);
+        let failed = if self.include_failed { "" } else { "\n   AND JobStatus NOT IN ('E','f','A')" };
+        let job = if self.include_failed { "JobId" } else { "Job.JobId" };
+        let sql = format!("SELECT SUM(JobBytes)\n  FROM Job\n WHERE ClientId  =  {}\n   AND {job} != {job_id}\n   AND SchedTime >  TIMESTAMP '{since}'{failed}\n",
+            self.client_id);
+        match first_row(cat, &sql) {
+            Ok(row) => self.sum = row.map(|r| cell(&r, 0).parse().unwrap_or(0)).unwrap_or(0),
+            Err(e) => {
+                messages.push(('e', format!("JobBytes sum select failed: ERR={e}\n")));
+                messages.push(('w', format!("Error getting Quota value: ERR=JobBytes sum select failed: ERR={e}\n")));
+                return false;
+            }
+        }
+        self.has_quota = true;
+        true
+    }
+
+    /// quota.cc CheckHardquotas(): true when the Hard Quota is exceeded.
+    pub(crate) fn check_hard(&mut self, cat: &CatalogHandle, job_id: u32, now: i64, messages: &mut Vec<(char, String)>) -> bool {
+        if self.hard == 0 || !self.load_sum(cat, job_id, now, messages) {
+            return false;
+        }
+        self.sum > self.hard
+    }
+
+    /// quota.cc CheckSoftquotas(); `sd_bytes` is SDJobBytes (0 before the job).
+    pub(crate) fn check_soft(&mut self, cat: &CatalogHandle, job_id: u32, now: i64, sd_bytes: u64,
+                             messages: &mut Vec<(char, String)>) -> bool {
+        if self.soft == 0 {
+            return false;
+        }
+        let had_quota = self.has_quota;
+        if !self.load_sum(cat, job_id, now, messages) {
+            return false;
+        }
+        if !had_quota && !self.include_failed {
+            messages.push(('i', "Quota does NOT include Failed Jobs\n".into()));
+        }
+        let now_u = now as u64;
+        let client = self.client_id;
+        if self.sum + sd_bytes > self.soft {
+            if self.grace_time == 0 && self.grace_period > 0 {
+                match cat.execute(&format!("UPDATE Quota SET GraceTime={now} WHERE ClientId='{client}'")) {
+                    Ok(_) => messages.push(('e', "Softquota Exceeded, Grace Period starts now.\n".into())),
+                    Err(e) => messages.push(('w', format!("Error setting Quota gracetime: ERR={e}\n"))),
+                }
+                self.grace_time = now_u;
+                return false;
+            } else if self.grace_period > 0 && now_u.saturating_sub(self.grace_time) < self.grace_period {
+                messages.push(('e', "Softquota Exceeded, will be enforced after Grace Period expires.\n".into()));
+            } else if self.grace_period > 0 && now_u.saturating_sub(self.grace_time) > self.grace_period {
+                if self.quota_limit < 1 {
+                    // UpdateQuotaSoftlimit(): JobSumTotalBytes + jr.JobBytes (0 here).
+                    if let Err(e) = cat.execute(&format!("UPDATE Quota SET QuotaLimit={} WHERE ClientId='{client}'", self.sum)) {
+                        messages.push(('w', format!("Error setting Quota Softlimit: ERR={e}\n")));
+                    }
+                    messages.push(('w', "Softquota Exceeded and Grace Period expired.\n".into()));
+                    messages.push(('i', format!("Setting Burst Quota to {} Bytes.\n", self.sum)));
+                    self.quota_limit = self.sum;
+                    return true;
+                } else if self.strict {
+                    if self.sum > self.soft {
+                        return true;
+                    }
+                } else if self.sum >= self.quota_limit {
+                    messages.push(('w', "Soft Quota exceeded, enforcing Burst Quota Limit.\n".into()));
+                    return true;
+                }
+            }
+        } else if self.grace_time != 0 {
+            match cat.execute(&format!("UPDATE Quota SET GraceTime='0', QuotaLimit='0' WHERE ClientId='{client}'")) {
+                Ok(_) => {
+                    self.grace_time = 0;
+                    messages.push(('i', "Soft Quota reset, Grace Period ends now.\n".into()));
+                }
+                Err(e) => messages.push(('w', format!("Error setting Quota gracetime: ERR={e}\n"))),
+            }
+        }
+        false
+    }
+
+    /// quota.cc FetchRemainingQuotas(): the SD Job command's Quota=.
+    pub(crate) fn remaining(&self, now: i64) -> u64 {
+        if !self.has_quota {
+            return 0;
+        }
+        let now = now as u64;
+        let grace_over = self.soft > 0 && self.grace_time > 0 && self.grace_period > 0
+            && now.saturating_sub(self.grace_time) > self.grace_period;
+        if self.strict && grace_over {
+            self.soft.wrapping_sub(self.sum)
+        } else if !self.strict && grace_over {
+            if self.quota_limit > self.soft { self.quota_limit.wrapping_sub(self.sum) } else { self.soft.wrapping_sub(self.sum) }
+        } else if self.sum < self.hard {
+            self.hard - self.sum
+        } else {
+            0
+        }
+    }
+}
+
+/// Message type of a quota message code ('f' fatal, 'e' error, 'w' warning, 'i' info).
+pub(crate) fn quota_msg_type(code: char) -> crate::message_bus::MsgType {
+    use crate::message_bus::MsgType;
+    match code {
+        'f' => MsgType::Fatal,
+        'e' => MsgType::Error,
+        'w' => MsgType::Warning,
+        _ => MsgType::Info,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn remaining_quota_follows_fetch_remaining_quotas() {
+        let mut q = Quota { hard: 1000, sum: 400, has_quota: true, ..Default::default() };
+        assert_eq!(q.remaining(100), 600);
+        q.sum = 1200;
+        assert_eq!(q.remaining(100), 0);
+        q.has_quota = false;
+        assert_eq!(q.remaining(100), 0);
+        let q = Quota { soft: 500, sum: 100, grace_time: 10, grace_period: 5, strict: true, has_quota: true, ..Default::default() };
+        assert_eq!(q.remaining(100), 400);
+    }
+
+    #[test]
+    fn speed_and_bytea_follow_the_original() {
+        assert_eq!(speed_value("10 mb/s"), Some(10_000_000));
+        assert_eq!(speed_value("2k/s"), Some(2048));
+        assert_eq!(speed_value("500"), Some(500));
+        assert_eq!(speed_value("5 gb/s"), None);
+        assert_eq!(unescape_bytea("\\x41420a"), b"AB\n");
+        assert_eq!(unescape_bytea("a\\\\b\\101"), b"a\\bA");
+        assert!(checksum_needed(&["C5".into()], 'I'));
+        assert!(!checksum_needed(&["C5".into()], 'F'));
+        assert!(!checksum_needed(&["5".into()], 'I'));
+    }
 
     struct Rows(Vec<(&'static str, Option<(String, String)>)>);
     impl SinceDb for Rows {
