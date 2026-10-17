@@ -139,6 +139,15 @@ pub enum PipeMessage {
     /// otherwise the body the Director puts its Jmsg header in front of.
     #[serde(rename = "jmsg")]
     Jmsg { job_id: u32, msg_type: u32, mtime: i64, text: String, #[serde(default)] raw: bool },
+    /// job_thread() RunScripts(jcr, ..., label) in the Director (console
+    /// commands need it); the worker waits for [`PipeMessage::RunScriptsDone`].
+    #[serde(rename = "run_scripts")]
+    RunScripts { job_id: u32, label: String },
+    /// The job status after the scripts, their M_ERROR count, and the
+    /// fd_cmds.cc SendRunscriptsCommands() "Run ..." lines for the client
+    /// (with "RunBeforeNow" when `run_before_now`). S-07.
+    #[serde(rename = "run_scripts_done")]
+    RunScriptsDone { status: i32, errors: u32, client_commands: Vec<String>, run_before_now: bool },
     /// The writing Storage daemon's job end of an SD-SD Copy/Migrate
     /// (mig_jcr: VolSessionId/Time from its Job command, SDJobFiles/Bytes/
     /// Errors/Status from its "3099 Job end"). C-058, S-20.
@@ -149,6 +158,91 @@ pub enum PipeMessage {
     Verify { job_id: u32, event: crate::verify::Event },
 }
 
+/// What the Director's RunScripts "BeforeJob" left for the worker.
+#[derive(Debug, Default)]
+pub(crate) struct BeforeJob {
+    pub(crate) status: char,
+    pub(crate) errors: u32,
+    pub(crate) client_commands: Vec<String>,
+    pub(crate) run_before_now: bool,
+}
+
+/// Ask the Director to run the "BeforeJob" scripts and wait for them.
+pub(crate) fn run_before_job(pipes: &mut WorkerPipes, job_id: u32) -> BeforeJob {
+    pipes.send(&PipeMessage::RunScripts { job_id, label: "BeforeJob".into() });
+    loop {
+        match pipes.recv() {
+            Some(PipeMessage::RunScriptsDone { status, errors, client_commands, run_before_now }) => {
+                return BeforeJob { status: char::from_u32(status as u32).unwrap_or('R'), errors, client_commands, run_before_now };
+            }
+            Some(_) => continue,
+            // The Director is gone: nothing ran.
+            None => return BeforeJob { status: 'R', ..Default::default() },
+        }
+    }
+}
+
+/// The start messages a job prepared at queue time, with job_thread's
+/// RunScripts "BeforeJob" right after its "Version:" message (first when
+/// there is none); the rest only when the scripts did not fail the job.
+pub(crate) fn start_messages_with_before(pipes: &mut WorkerPipes, job_id: u32, messages: &[(u32, String)]) -> BeforeJob {
+    let at = messages.iter().position(|(_, text)| text.starts_with("Version: ")).map_or(0, |i| i + 1);
+    for (code, text) in &messages[..at] {
+        worker_jmsg(job_id, *code, text.clone());
+    }
+    let before = run_before_job(pipes, job_id);
+    if !crate::job_manager::is_job_canceled(before.status) {
+        for (code, text) in &messages[at..] {
+            worker_jmsg(job_id, *code, text.clone());
+        }
+    }
+    before
+}
+
+/// fd_cmds.cc SendRunscriptsCommands(): the client's scripts, then
+/// "RunBeforeNow" (the File daemon runs ClientRunBeforeJob before it
+/// answers). Failure: "Client \"%s\" RunScript failed." (M_FATAL).
+pub(crate) fn send_client_runscripts(fd: &mut BnetStream<tls_psk::PskStream>, p: &JobParams, before: &BeforeJob) -> Result<(), String> {
+    let mut commands: Vec<(&str, &str, &str)> = before.client_commands.iter()
+        .map(|c| (c.as_str(), "2000 OK RunScript\n", "RunScript")).collect();
+    if before.run_before_now {
+        commands.push(("RunBeforeNow\n", "2000 OK RunBeforeNow\n", "RunBeforeNow"));
+    }
+    for (command, resp, name) in commands {
+        if let Err(e) = director_response(fd, p.job_id, command, resp, name) {
+            worker_jmsg(p.job_id, M_FATAL, format!("Client \"{}\" RunScript failed.\n", p.client_name));
+            WORKER_FATAL.store(true, Ordering::SeqCst);
+            return Err(e);
+        }
+    }
+    Ok(())
+}
+
+/// getmsg.cc response(jcr, fd, resp, cmd, DISPLAY_ERROR) after sending
+/// `command`: daemon job messages are dispatched (BgetDirmsg), anything
+/// but `resp` is a fatal "Bad response" error.
+fn director_response(fd: &mut BnetStream<tls_psk::PskStream>, job_id: u32, command: &str, resp: &str, name: &str) -> Result<(), String> {
+    let socket_error = |e: String| {
+        let text = format!("Socket error on {name} command: ERR={e}\n");
+        worker_jmsg(job_id, M_FATAL, text.clone());
+        text
+    };
+    fd.send_str(command).map_err(|e| socket_error(e.to_string()))?;
+    loop {
+        match fd.recv() {
+            Ok(BnetMessage::Data(data)) => {
+                let msg = String::from_utf8_lossy(&data).to_string();
+                if msg.starts_with("Jmsg") { forward_daemon_jmsg(job_id, &msg); continue; }
+                if msg == resp { return Ok(()); }
+                let text = format!("Bad response to {name} command: wanted {resp}, got {msg}\n");
+                worker_jmsg(job_id, M_FATAL, text.clone());
+                return Err(text);
+            }
+            Ok(BnetMessage::Signal(_)) => continue,
+            Err(e) => return Err(socket_error(e.to_string())),
+        }
+    }
+}
 /// lib/message.h M_* codes of the worker's own job messages.
 const M_FATAL: u32 = 3;
 pub(crate) const M_ERROR: u32 = 4;
@@ -329,13 +423,29 @@ pub fn run_worker(
     if params.job_type == WorkerJobType::Admin {
         // job.cc job_thread(): "Version: …" when the job runs.
         worker_jmsg(job_id, M_INFO, crate::job_messages::version_text());
-        worker_jmsg(job_id, M_INFO, crate::job_messages::start_admin_text(job_id, &params.unique_job));
-        pipes.send(&PipeMessage::JobEnd { job_id, term_code: b'T' as i32, files: 0, bytes: 0, errors: 0,
+        let before = run_before_job(&mut pipes, job_id);
+        // A failed BeforeJob script (FailJobOnError) cancels the job:
+        // AdminCleanup(jcr, JS_Canceled) keeps JS_ErrorTerminated.
+        let status = if crate::job_manager::is_job_canceled(before.status) { before.status } else {
+            worker_jmsg(job_id, M_INFO, crate::job_messages::start_admin_text(job_id, &params.unique_job));
+            'T'
+        };
+        pipes.send(&PipeMessage::JobEnd { job_id, term_code: status as i32, files: 0, bytes: 0, errors: before.errors as i32,
             vol_session_id: Some(0), vol_session_time: Some(0) });
-        return EXIT_SUCCESS;
+        return if status == 'T' { EXIT_SUCCESS } else { EXIT_ERROR };
     }
+
+    // Verify: BeforeJob after its "Version:" start message (verify.rs).
     if params.job_type == WorkerJobType::Verify {
         return crate::verify::run_worker(params, &mut pipes);
+    }
+
+    // job_thread(): RunScripts "BeforeJob" before the job contacts a daemon.
+    let before = run_before_job(&mut pipes, job_id);
+    if crate::job_manager::is_job_canceled(before.status) {
+        pipes.send(&PipeMessage::JobEnd { job_id, term_code: before.status as i32, files: 0, bytes: 0,
+            errors: before.errors as i32, vol_session_id: Some(0), vol_session_time: Some(0) });
+        return EXIT_ERROR;
     }
 
     loop {
@@ -442,7 +552,7 @@ pub fn run_worker(
                 } else {
                     fd_job_setup(fd.as_mut().unwrap(), params, &sd_auth_key)
                 };
-                match result {
+                match result.and_then(|()| send_client_runscripts(fd.as_mut().unwrap(), params, &before)) {
                     Ok(()) => WorkerState::FDStorage,
                     Err(e) => WorkerState::Error(format!("FD setup: {e}"))
                 }
@@ -559,7 +669,7 @@ pub fn run_worker(
                 if let Some(ref mut f) = fd { let _ = f.send_signal(BnetSignal::Terminate); }
                 if let Some(ref mut s) = sd { let _ = s.send_signal(BnetSignal::Terminate); }
                 pipes.send(&PipeMessage::JobEnd {
-                    job_id, term_code: if WORKER_CANCEL.load(Ordering::SeqCst) { b'A' as i32 } else { b'E' as i32 }, files: 0, bytes: 0, errors: 1,
+                    job_id, term_code: if WORKER_CANCEL.load(Ordering::SeqCst) { b'A' as i32 } else if WORKER_FATAL.load(Ordering::SeqCst) { b'f' as i32 } else { b'E' as i32 }, files: 0, bytes: 0, errors: 1,
                     vol_session_id: Some(vol_session_id), vol_session_time: Some(vol_session_time),
                 });
                 return EXIT_FATAL;
@@ -968,6 +1078,8 @@ pub(crate) fn now_unix() -> i64 { SystemTime::now().duration_since(UNIX_EPOCH).u
 // ============================================================================
 
 pub(crate) static WORKER_CANCEL: AtomicBool = AtomicBool::new(false);
+/// A Jmsg M_FATAL of the worker set JS_FatalError.
+static WORKER_FATAL: AtomicBool = AtomicBool::new(false);
 static WORKER_PAUSED: AtomicBool = AtomicBool::new(false);
 
 pub fn install_worker_signal_handlers() {
