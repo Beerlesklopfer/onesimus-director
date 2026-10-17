@@ -87,3 +87,185 @@ pub fn ensure_basic_records(config: &DirectorConfig, catalog: &CatalogHandle) {
         }
     }
 }
+
+type CatalogResource = bareos_config::resources::CatalogResource;
+
+/// Connection target of a Catalog resource as the Director connects to it
+/// (main.rs): an empty/local address means the Unix socket directory.
+fn uses_socket(cat: &CatalogResource) -> bool {
+    cat.db_address.is_empty() || cat.db_address == "localhost" || cat.db_address == "127.0.0.1"
+}
+
+const SOCKET_DIR: &str = "/var/run/postgresql";
+
+fn connect_options(cat: &CatalogResource) -> sqlx::postgres::PgConnectOptions {
+    let mut options = sqlx::postgres::PgConnectOptions::new_without_pgpass()
+        .port(cat.db_port)
+        .database(&cat.db_name);
+    options = if uses_socket(cat) {
+        options.socket(SOCKET_DIR)
+    } else {
+        options.host(&cat.db_address)
+    };
+    if !cat.db_user.is_empty() {
+        options = options.username(&cat.db_user);
+    }
+    if !cat.db_password.is_empty() {
+        options = options.password(&cat.db_password);
+    }
+    options
+}
+
+/// PQerrorMessage() of a failed PQconnectdbParams(), including its
+/// trailing newline (libpq 15+ wording).
+fn libpq_error(cat: &CatalogResource, error: &sqlx::Error) -> String {
+    let target = if uses_socket(cat) {
+        format!("on socket \"{SOCKET_DIR}/.s.PGSQL.{}\"", cat.db_port)
+    } else {
+        use std::net::ToSocketAddrs;
+        match (cat.db_address.as_str(), cat.db_port).to_socket_addrs().ok().and_then(|mut a| a.next()) {
+            Some(addr) => format!("at \"{}\" ({}), port {}", cat.db_address, addr.ip(), cat.db_port),
+            None => format!("at \"{}\", port {}", cat.db_address, cat.db_port),
+        }
+    };
+    let reason = match error {
+        sqlx::Error::Database(db) => {
+            use sqlx::postgres::PgSeverity;
+            let severity = db.try_downcast_ref::<sqlx::postgres::PgDatabaseError>()
+                .map(|pg| match pg.severity() {
+                    PgSeverity::Panic => "PANIC",
+                    PgSeverity::Fatal => "FATAL",
+                    PgSeverity::Error => "ERROR",
+                    PgSeverity::Warning => "WARNING",
+                    PgSeverity::Notice => "NOTICE",
+                    PgSeverity::Debug => "DEBUG",
+                    PgSeverity::Info => "INFO",
+                    PgSeverity::Log => "LOG",
+                })
+                .unwrap_or("FATAL");
+            format!("{severity}:  {}", db.message())
+        }
+        sqlx::Error::Io(io) => {
+            let text = io.raw_os_error()
+                .map(|code| nix::errno::Errno::from_raw(code).desc().to_string())
+                .unwrap_or_else(|| io.to_string());
+            if uses_socket(cat) {
+                format!("{text}\n\tIs the server running locally and accepting connections on that socket?")
+            } else {
+                format!("{text}\n\tIs the server running on that host and accepting TCP/IP connections?")
+            }
+        }
+        other => other.to_string(),
+    };
+    format!("connection to server {target} failed: {reason}\n")
+}
+
+/// BareosDbPostgresql::OpenDatabase() (cats/postgresql.cc:288): six
+/// connection attempts, each failure followed by a 5 second pause; the
+/// error text of the last attempt.
+fn open_database(cat: &CatalogResource, pause: std::time::Duration) -> Result<(), String> {
+    let options = connect_options(cat);
+    let attempt = || -> Result<(), sqlx::Error> {
+        let runtime = tokio::runtime::Builder::new_current_thread().enable_all().build()
+            .map_err(sqlx::Error::Io)?;
+        runtime.block_on(async {
+            use sqlx::Connection;
+            let connection = sqlx::postgres::PgConnection::connect_with(&options).await?;
+            connection.close().await
+        })
+    };
+    let mut last = String::new();
+    for _ in 0..6 {
+        // own thread: the caller may run inside a tokio runtime
+        let result = std::thread::scope(|scope| scope.spawn(attempt).join())
+            .unwrap_or_else(|_| Err(sqlx::Error::Protocol("connect thread panicked".into())));
+        match result {
+            Ok(()) => return Ok(()),
+            Err(error) => {
+                tracing::debug!("Could not connect to db: Err={error}");
+                last = format!(
+                    "cats/postgresql.cc:298 Unable to connect to PostgreSQL server. Database={} User={}\n\
+                     Possible causes: SQL server not running; password incorrect; server requires ssl; \
+                     max_connections exceeded.\n({})\n",
+                    cat.db_name, cat.db_user, libpq_error(cat, &error));
+            }
+        }
+        std::thread::sleep(pause);
+    }
+    Err(last)
+}
+
+/// CheckCatalog() connection part (dird/check_catalog.cc:42): every
+/// Catalog resource must open, otherwise the Jmsg(M_FATAL) text of the
+/// first one that fails. Catalogs before it already got their
+/// UPDATE_CATALOG records in the original; `before_failure` runs then.
+pub fn check_connections(config: &DirectorConfig, before_failure: impl FnOnce(&DirectorConfig)) -> Result<(), String> {
+    check_connections_with(config, std::time::Duration::from_secs(5), before_failure)
+}
+
+fn check_connections_with(
+    config: &DirectorConfig,
+    pause: std::time::Duration,
+    before_failure: impl FnOnce(&DirectorConfig),
+) -> Result<(), String> {
+    for (index, cat) in config.catalogs.iter().enumerate() {
+        if let Err(error) = open_database(cat, pause) {
+            tracing::error!("Could not open Catalog \"{}\", database \"{}\": {}", cat.name, cat.db_name, error.trim_end());
+            if index > 0 {
+                before_failure(config);
+            }
+            return Err(format!("Could not open Catalog \"{}\", database \"{}\": {error}\n", cat.name, cat.db_name));
+        }
+    }
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn catalog(name: &str, address: &str, port: u16) -> CatalogResource {
+        CatalogResource {
+            name: name.into(),
+            db_name: "c075_nosuchdb".into(),
+            db_user: "c075_user".into(),
+            db_address: address.into(),
+            db_port: port,
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn io_error_text_matches_libpq() {
+        let cat = catalog("c", "", 5432);
+        let error = sqlx::Error::Io(std::io::Error::from_raw_os_error(2));
+        assert_eq!(libpq_error(&cat, &error),
+            "connection to server on socket \"/var/run/postgresql/.s.PGSQL.5432\" failed: \
+             No such file or directory\n\tIs the server running locally and accepting connections on that socket?\n");
+    }
+
+    #[test]
+    fn tcp_error_names_host_address_and_port() {
+        let cat = catalog("c", "127.0.0.2", 1);
+        let error = sqlx::Error::Io(std::io::Error::from_raw_os_error(111));
+        assert_eq!(libpq_error(&cat, &error),
+            "connection to server at \"127.0.0.2\" (127.0.0.2), port 1 failed: Connection refused\n\
+             \tIs the server running on that host and accepting TCP/IP connections?\n");
+    }
+
+    #[test]
+    fn unreachable_catalog_fails_with_check_catalog_text() {
+        // nothing listens on port 1: every attempt is refused at once
+        let mut config = DirectorConfig::from_str("Director { Name = d\n Password = p\n }").unwrap();
+        config.catalogs = vec![catalog("Bad", "127.0.0.2", 1)];
+        let mut called = false;
+        let error = check_connections_with(&config, std::time::Duration::ZERO, |_| called = true).unwrap_err();
+        assert!(!called, "no catalog before the failing one");
+        assert!(error.starts_with(
+            "Could not open Catalog \"Bad\", database \"c075_nosuchdb\": cats/postgresql.cc:298 \
+             Unable to connect to PostgreSQL server. Database=c075_nosuchdb User=c075_user\n\
+             Possible causes: SQL server not running; password incorrect; server requires ssl; \
+             max_connections exceeded.\n(connection to server at \"127.0.0.2\" (127.0.0.2), port 1 failed: "), "{error}");
+        assert!(error.ends_with(")\n\n"), "{error:?}");
+    }
+}

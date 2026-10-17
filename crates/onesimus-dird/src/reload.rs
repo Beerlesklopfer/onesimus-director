@@ -68,7 +68,17 @@ fn reload_config(config_path: &std::path::Path, shared_config: &SharedConfig) ->
     let base = crate::config_check::base_config_path(config_path);
     let loaded = DirectorConfig::load(config_path)
         .map_err(|e| vec![crate::config_check::Diag::Parser(e.to_string())])
-        .and_then(|config| crate::config_check::check(&config.raw, &base).map(|()| config));
+        .and_then(|config| crate::config_check::check(&config.raw, &base).map(|()| config))
+        // CheckCatalog(UPDATE_CATALOG): every Catalog must open (C-075)
+        .and_then(|config| {
+            crate::check_catalog::check_connections(&config, |partial| {
+                if let Some(catalog) = RELOAD_CATALOG.get() {
+                    crate::check_catalog::ensure_basic_records(partial, catalog);
+                }
+            })
+            .map_err(|text| vec![crate::config_check::Diag::Job(crate::message_bus::MsgType::Fatal, text)])
+            .map(|()| config)
+        });
     let mut new_config = match loaded {
         Ok(config) => config,
         Err(diags) => {
