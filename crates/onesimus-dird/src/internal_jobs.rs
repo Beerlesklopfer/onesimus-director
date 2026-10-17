@@ -53,6 +53,9 @@ pub struct Outcome {
     /// StartNewMigrationJob): their Job records exist; the JobManager
     /// queues them after the run.
     pub children: Vec<ChildStart>,
+    /// Job messages of other jobs (the worker jobs a control job started),
+    /// posted before `messages[at]`: (at, JobId, Job name, type, text). C-058.
+    pub other_messages: Vec<(usize, u32, String, MsgType, String)>,
 }
 
 /// A job a Director-run job started: its catalog record exists (JobId), the
@@ -75,6 +78,7 @@ impl std::fmt::Debug for ChildStart {
 impl std::fmt::Debug for Outcome {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("Outcome").field("status", &self.status).field("messages", &self.messages)
+            .field("other_messages", &self.other_messages)
             .field("selected", &self.selected).field("pool_id", &self.pool_id).field("children", &self.children).finish()
     }
 }
@@ -161,6 +165,13 @@ const SQL_OLDEST_VOL: &str = "SELECT Media.MediaId FROM Media,Pool,JobMedia WHER
 const SQL_JOBIDS_FROM_MEDIAID: &str = "SELECT DISTINCT Job.JobId,Job.StartTime FROM JobMedia,Job WHERE \
     JobMedia.JobId=Job.JobId AND JobMedia.MediaId IN (%s) AND Job.Type IN ('B','C') AND Job.JobStatus IN ('T','W') \
     ORDER by Job.StartTime";
+const SQL_POOL_BYTES: &str = "SELECT SUM(JobBytes) FROM Job WHERE JobId IN (SELECT DISTINCT Job.JobId from \
+    Pool,Job,Media,JobMedia WHERE Pool.Name='%s' AND Media.PoolId=Pool.PoolId AND \
+    VolStatus in ('Full','Used','Error','Append') AND Media.Enabled=1 AND Job.Type IN ('B','C') AND \
+    Job.JobStatus IN ('T','W') AND JobMedia.JobId=Job.JobId AND Job.PoolId=Media.PoolId)";
+const SQL_JOB_BYTES: &str = "SELECT SUM(JobBytes) FROM Job WHERE JobId IN (%s)";
+const SQL_MEDIAIDS: &str = "SELECT MediaId FROM Media,Pool WHERE VolStatus in ('Full','Used','Error') AND \
+    Media.Enabled=1 AND Media.PoolId=Pool.PoolId AND Pool.Name='%s' ORDER BY LastWritten ASC";
 const SQL_POOL_TIME: &str = "SELECT DISTINCT Job.JobId FROM Pool,Job,Media,JobMedia WHERE Pool.Name='%s' AND \
     Media.PoolId=Pool.PoolId AND VolStatus IN ('Full','Used','Error') AND Media.Enabled=1 AND \
     Job.Type IN ('B','C') AND Job.JobStatus IN ('T','W') AND JobMedia.JobId=Job.JobId AND \
@@ -219,6 +230,72 @@ pub fn run(config: &DirectorConfig, catalog: Option<&CatalogHandle>, request: &R
         }
     }
     out
+}
+
+/// The first column of the first row as a number (db_int64_handler):
+/// None without a row or for NULL.
+fn int64_value(catalog: &CatalogHandle, sql: &str) -> Result<Option<i64>, String> {
+    Ok(catalog.query_rows(sql)?.rows.into_iter().next()
+        .and_then(|row| row.into_iter().next().flatten()).map(|v| crate::commands::job::str_to_int64(&v)))
+}
+
+/// MT_POOL_OCCUPANCY of getJobs_to_migrate(): the jobs of the pool's
+/// volumes (oldest first) until the pool would shrink to Migration Low
+/// Bytes, when it holds at least Migration High Bytes. None on error;
+/// an empty list after its "No Volumes found" message.
+fn pool_occupancy(config: &DirectorConfig, catalog: &CatalogHandle, request: &Request, out: &mut Outcome) -> Option<Vec<String>> {
+    let kind = request.kind;
+    let pool = sql_esc(request.pool);
+    let size = |key: &str| crate::job_messages::raw_directive(config, "pool", request.pool, key)
+        .and_then(|v| bareos_config::values::parse_size(&v).ok().map(|(_, n)| n)).unwrap_or(0) as i64;
+    let (high, low) = (size("migrationhighbytes"), size("migrationlowbytes"));
+    let none = |out: &mut Outcome| {
+        out.messages.push((MsgType::Info, format!("No Volumes found to {}.\n", kind.action(false))));
+        Some(Vec::new())
+    };
+    let sql_failed = |out: &mut Outcome, e: String| {
+        out.messages.push((MsgType::Fatal, format!("SQL failed. ERR={e}\n")));
+        None
+    };
+    let mut pool_bytes = match int64_value(catalog, &fill(SQL_POOL_BYTES, &[&pool])) {
+        Ok(Some(bytes)) => bytes,
+        Ok(None) => return none(out),
+        Err(e) => return sql_failed(out, e),
+    };
+    if pool_bytes < high {
+        return none(out);
+    }
+    let media = match unique_ids(catalog, &fill(SQL_MEDIAIDS, &[&pool])) {
+        Ok(media) => media,
+        Err(e) => return sql_failed(out, e),
+    };
+    if media.is_empty() {
+        return none(out);
+    }
+    // FindJobidsFromMediaidList(ids, "Volume")
+    let jobs = match unique_ids(catalog, &fill(SQL_JOBIDS_FROM_MEDIAID, &[&media.join(",")])) {
+        Ok(jobs) => jobs,
+        Err(e) => return sql_failed(out, e),
+    };
+    if jobs.is_empty() {
+        out.messages.push((MsgType::Info, format!("No Volumes found to {}.\n", kind.action(false))));
+    }
+    let mut chosen = Vec::new();
+    for job in jobs {
+        if job.parse::<u64>().is_err() {
+            out.messages.push((MsgType::Fatal, "Invalid JobId found.\n".into()));
+            return None;
+        }
+        chosen.push(job.clone());
+        match int64_value(catalog, &fill(SQL_JOB_BYTES, &[&job])) {
+            Ok(bytes) => pool_bytes -= bytes.unwrap_or(0),
+            Err(e) => return sql_failed(out, e),
+        }
+        if pool_bytes <= low {
+            break;
+        }
+    }
+    Some(chosen)
 }
 
 /// getJobs_to_migrate(): false on error.
@@ -371,11 +448,10 @@ fn select_jobs(config: &DirectorConfig, catalog: &CatalogHandle, request: &Reque
                 }
             }
         }
-        "pooloccupancy" => {
-            // Needs the Pool's Migration High/Low Bytes accounting (open, C-058).
-            fatal(out, format!("{} Selection Type PoolOccupancy is not available yet.\n", kind.operation()));
-            return false;
-        }
+        "pooloccupancy" => match pool_occupancy(config, catalog, request, out) {
+            Some(ids) => ids,
+            None => return false,
+        },
         _ => {
             fatal(out, format!("Unknown {} Selection Type.\n", kind.operation()));
             return false;
@@ -388,15 +464,53 @@ fn select_jobs(config: &DirectorConfig, catalog: &CatalogHandle, request: &Reque
     }
     info(out, format!("The following {} JobId{} chosen to be {}: {}\n", ids.len(),
         if ids.len() < 2 { " was" } else { "s were" }, kind.action(true), ids.join(",")));
-    // StartNewMigrationJob() per JobId (Maximum Concurrent Copies). The
-    // worker jobs that read and write the volumes are not available in
-    // Onesimus yet (C-058): each start fails like a refused DoRunCmd().
+    // StartNewMigrationJob() per JobId (Maximum Concurrent Copies): the
+    // `run job=... jobid=N` of the control job (migrate.rs, S-05).
     let limit = value("maxconcurrentcopies").and_then(|v| v.parse::<usize>().ok()).filter(|l| *l > 0);
-    for _ in ids.iter().take(limit.unwrap_or(usize::MAX)) {
-        out.messages.push((MsgType::Error, "Could not start migration job.\n".into()));
+    for id in ids.iter().take(limit.unwrap_or(usize::MAX)) {
+        let Ok(prev_jobid) = id.parse::<u32>() else {
+            fatal(out, "Invalid JobId found.\n".into());
+            return false;
+        };
+        start_new_migration_job(config, catalog, request, prev_jobid, out);
     }
     out.selected = true;
     true
+}
+
+/// StartNewMigrationJob(): DoRunCmd of `run job="<job>" jobid=N
+/// ignoreduplicatecheck=yes [pool="<pool>"]` without a console — its output
+/// ("Using Catalog", "Job queued. JobId=N") goes to the control job.
+fn start_new_migration_job(config: &DirectorConfig, catalog: &CatalogHandle, request: &Request, prev_jobid: u32,
+                           out: &mut Outcome) {
+    let kind = request.kind;
+    let job = config.find_job(request.job_name);
+    let pool = job.filter(|j| j.pool != request.pool).map(|_| request.pool.to_string());
+    if let Some(job) = job {
+        let client_catalog = config.find_client(&job.client).map(|c| c.catalog.clone()).filter(|c| !c.is_empty());
+        if let Some(name) = client_catalog.or_else(|| config.catalogs.first().map(|c| c.name.clone())) {
+            out.messages.push((MsgType::Info, format!("Using Catalog \"{name}\"\n")));
+        }
+    }
+    let started = crate::migrate::start_worker(config, catalog, &crate::migrate::WorkerRequest {
+        kind, job_name: request.job_name, prev_jobid, pool, next_pool: None,
+        trigger: crate::job_messages::TRIGGER_USER,
+    });
+    let at = out.messages.len();
+    for (msg_type, text) in started.messages {
+        out.other_messages.push((at, started.job_id, started.job_name.clone(), msg_type, text));
+    }
+    match started.child {
+        Some(child) => {
+            out.messages.push((MsgType::Info, format!("Job queued. JobId={}\n", child.job_id)));
+            out.messages.push((MsgType::Info, format!("{} JobId {} started.\n", kind.operation(), child.job_id)));
+            out.children.push(child);
+        }
+        None => {
+            out.messages.push((MsgType::Info, "Job failed.\n".into()));
+            out.messages.push((MsgType::Error, "Could not start migration job.\n".into()));
+        }
+    }
 }
 
 #[cfg(test)]

@@ -1899,8 +1899,43 @@ fn run_internal(
         return CommandResult::error("Job not run.\n".to_string());
     }
     let value = |key: &str| ast.arguments.iter().find(|a| a.key.eq_ignore_ascii_case(key)).and_then(|a| a.value.clone());
-    if kind != Kind::Consolidate && value("jobid").is_some() {
-        return CommandResult::error(format!("Running {:?} jobs for a JobId is not available yet.\n", job.job_type));
+    if kind != Kind::Consolidate {
+        if let Some(jobid) = value("jobid") {
+            // A Copy/Migrate worker job (migrate.cc DoMigrationInit with
+            // MigrateJobId): migrate.rs, C-058/S-05.
+            let Some(cat) = ctx.catalog.clone() else {
+                return CommandResult::error("Job failed.\n".to_string());
+            };
+            let started = crate::migrate::start_worker(&config, &cat, &crate::migrate::WorkerRequest {
+                kind, job_name: &job.name, prev_jobid: str_to_int64(&jobid) as u32,
+                pool: value("pool").filter(|p| *p != job.pool), next_pool: value("nextpool"),
+                trigger: crate::job_messages::TRIGGER_USER,
+            });
+            drop(config);
+            if let Some(smgr) = &ctx.session_mgr {
+                for (msg_type, text) in started.messages {
+                    crate::console_msg::post_job_message(smgr.bus(), ctx.config.as_ref(), BusMessage::JobMessage {
+                        job_id: started.job_id, job_name: started.job_name.clone(), msg_type, text, timestamp: now_unix() });
+                }
+            }
+            let Some(child) = started.child else {
+                return CommandResult::error("Job failed.\n".to_string());
+            };
+            let job_id = child.job_id;
+            if let Some(smgr) = &ctx.session_mgr {
+                smgr.bus().post(BusMessage::JobStatus {
+                    job_id, job_name: child.job_name.clone(), status: "Queued".to_string(), timestamp: now_unix() });
+            }
+            match &ctx.job_manager {
+                Some(mgr) => {
+                    let mut mgr = mgr.lock().unwrap();
+                    mgr.enqueue_job(job_id, &child.job_name, child.start, &child.client, &child.storage);
+                    mgr.set_job_report(job_id, child.report);
+                }
+                None => return CommandResult::error("Job failed.\n".to_string()),
+            }
+            return job_queued(job_id);
+        }
     }
     if kind == Kind::Consolidate && config.jobs.iter().any(|j| {
         crate::commands::defaults::bool_directive(&crate::commands::defaults::job_directives(&config, &j.name),
