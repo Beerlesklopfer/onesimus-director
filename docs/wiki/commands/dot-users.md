@@ -17,7 +17,7 @@ Referenz: [WIP/25.1.2-pre-43-g18be77e68, `18be77e6832e`](https://github.com/bare
 
 **Paritätsfälle (9):** `c025-users-limited`, `c025-users-limited-api2`, `c025-users-operator`, `c025-users-operator-api2`, `c025-users-bvfs`, `c025-users-bvfs-api2`, `c025-users-acl`, `c025-users-acl-api2`, `dot_users`.
 
-**Lokaler Handler:** [crates/onesimus-dird/src/commands/dot.rs:383](../../../crates/onesimus-dird/src/commands/dot.rs).
+**Lokaler Handler:** [crates/onesimus-dird/src/commands/dot.rs:386](../../../crates/onesimus-dird/src/commands/dot.rs).
 
 Die folgenden vorhandenen Beispiele und Verhaltensbeschreibungen sind lokale Dokumentation; sie sind kein Beleg für vollständige Bareos-Kompatibilität. Bei Widersprüchen gilt der obige Befund.
 <!-- bareos-reference:end -->

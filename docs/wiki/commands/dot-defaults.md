@@ -21,7 +21,7 @@ Referenz: [WIP/25.1.2-pre-43-g18be77e68, `18be77e6832e`](https://github.com/bare
 
 **Paritätsfälle (9):** `c041-defaults-backupcatalog`, `c041-defaults-backupcatalog-api2`, `c041-defaults-jobdefs`, `dot-defaults-job`, `dot-defaults-client`, `dot-defaults-storage`, `dot-defaults-pool`, `dot-defaults-restore`, `dot-defaults-job-api2`.
 
-**Lokaler Handler:** [crates/onesimus-dird/src/commands/dot.rs:139](../../../crates/onesimus-dird/src/commands/dot.rs).
+**Lokaler Handler:** [crates/onesimus-dird/src/commands/dot.rs:142](../../../crates/onesimus-dird/src/commands/dot.rs).
 
 Die folgenden vorhandenen Beispiele und Verhaltensbeschreibungen sind lokale Dokumentation; sie sind kein Beleg für vollständige Bareos-Kompatibilität. Bei Widersprüchen gilt der obige Befund.
 <!-- bareos-reference:end -->

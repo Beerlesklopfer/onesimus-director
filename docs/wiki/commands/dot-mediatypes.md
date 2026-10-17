@@ -17,7 +17,7 @@ Referenz: [WIP/25.1.2-pre-43-g18be77e68, `18be77e6832e`](https://github.com/bare
 
 **Paritätsfälle (9):** `c002-private-then-shared`, `c025-mediatypes-limited`, `c025-mediatypes-operator`, `c025-mediatypes-bvfs`, `c025-mediatypes-acl`, `c029-mediatypes`, `c029-mediatypes-api1`, `c029-mediatypes-api2`, `dot_mediatypes`.
 
-**Lokaler Handler:** [crates/onesimus-dird/src/commands/dot.rs:332](../../../crates/onesimus-dird/src/commands/dot.rs).
+**Lokaler Handler:** [crates/onesimus-dird/src/commands/dot.rs:335](../../../crates/onesimus-dird/src/commands/dot.rs).
 
 Die folgenden vorhandenen Beispiele und Verhaltensbeschreibungen sind lokale Dokumentation; sie sind kein Beleg für vollständige Bareos-Kompatibilität. Bei Widersprüchen gilt der obige Befund.
 <!-- bareos-reference:end -->

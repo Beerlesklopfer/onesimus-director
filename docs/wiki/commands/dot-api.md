@@ -21,7 +21,7 @@ Referenz: [WIP/25.1.2-pre-43-g18be77e68, `18be77e6832e`](https://github.com/bare
 
 **Paritätsfälle (28):** `c018-api2`, `c018-api2-client`, `c020-api-noarg`, `c020-api-off`, `c020-api-on`, `c020-api-json`, `c020-api-upper`, `c020-api-invalid`, `c020-api-invalid-api2`, `c020-api-toomany`, `c020-api-compact-yes`, `c020-api-compact-no`, `c020-api-compact-upper`, `c020-api-compact-novalue`, `c020-api-1-compact`, `c020-compact-persists`, `c020-compact-reset`, `c028-api-toggle`, `c042-status-storage-api1`, `c042-status-storage-api2`, `c042-dot-status-storage-api2`, `c042-status-storage-slots-api1`, `c042-status-storage-slots-api2`, `c042-status-storage-api1-twice`, `dot-api-0`, `dot-api-1`, `dot-api-2`, `dot-api-json`.
 
-**Lokaler Handler:** [crates/onesimus-dird/src/commands/dot.rs:411](../../../crates/onesimus-dird/src/commands/dot.rs).
+**Lokaler Handler:** [crates/onesimus-dird/src/commands/dot.rs:414](../../../crates/onesimus-dird/src/commands/dot.rs).
 
 Die folgenden vorhandenen Beispiele und Verhaltensbeschreibungen sind lokale Dokumentation; sie sind kein Beleg für vollständige Bareos-Kompatibilität. Bei Widersprüchen gilt der obige Befund.
 <!-- bareos-reference:end -->

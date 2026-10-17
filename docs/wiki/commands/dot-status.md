@@ -24,7 +24,7 @@ Referenz: [WIP/25.1.2-pre-43-g18be77e68, `18be77e6832e`](https://github.com/bare
 
 **Paritätsfälle (22):** `c009-status-dir-header`, `c009-status-dir-header-json`, `c014-dot-status-dir-header`, `c014-dot-status-dir-current`, `c014-dot-status-dir-last`, `c014-dot-status-dir-running-json`, `c014-dot-status-dir-scheduled-json`, `c014-dot-status-dir-terminated-json`, `c014-dot-status-dir-bogus`, `c014-dot-status-dir-noarg`, `c014-dot-status-noarg`, `c014-dot-status-bogus`, `c014-dot-status-dir-running`, `c042-dot-status-storage`, `c042-dot-status-storage-header`, `c042-dot-status-storage-running`, `c042-dot-status-storage-api2`, `c042-dot-status-client-header`, `dot-status-dir-header`, `dot-status-dir-running`, `dot-status-dir-scheduled`, `dot-status-dir-terminated`.
 
-**Lokaler Handler:** [crates/onesimus-dird/src/commands/status.rs:118](../../../crates/onesimus-dird/src/commands/status.rs).
+**Lokaler Handler:** [crates/onesimus-dird/src/commands/status.rs:153](../../../crates/onesimus-dird/src/commands/status.rs).
 
 Die folgenden vorhandenen Beispiele und Verhaltensbeschreibungen sind lokale Dokumentation; sie sind kein Beleg für vollständige Bareos-Kompatibilität. Bei Widersprüchen gilt der obige Befund.
 <!-- bareos-reference:end -->
@@ -243,7 +243,8 @@ Used Volume status:
 ```text
 *UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]> .status client=bareos-fd header
 Connecting to Client bareos-fd at localhost:9102
-Probing client protocol... (result will be saved until config reload) Handshake: Immediate TLS, Encryption: TLS_CHACHA20_POLY1305_SHA256 TLSv1.3
+Probing client protocol... (result will be saved until config reload)
+ Handshake: Immediate TLS, Encryption: TLS_CHACHA20_POLY1305_SHA256 TLSv1.3
 WS-JOERG.intranet.bernau.family-fd Version: 25.1.2~pre43.18be77e68 (09 October 2026) Debian GNU/Linux 13 (trixie)
 Daemon started 12-Okt-26 13:01. Jobs: run=9 running=0, Bareos community binary
  Sizeof: boffset_t=8 size_t=8 debug=0 trace=0 bwlimit=0kB/s

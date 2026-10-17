@@ -24,7 +24,7 @@ truncate volstatus=Purged [storage=<storage>] [pool=<pool>] [volume=<volume>] [d
 
 **Paritätsfälle (8):** `c012-truncate-yes-only`, `c012-truncate-bad-volstatus`, `c012-truncate-unknown-arg`, `c012-truncate-bad-drive`, `truncate-noargs`, `w011-truncate-storage-cancel`, `w011-truncate-pool-cancel`, `w011-truncate-confirm-no`.
 
-**Lokaler Handler:** [crates/onesimus-dird/src/commands/admin.rs:1360](../../../crates/onesimus-dird/src/commands/admin.rs).
+**Lokaler Handler:** [crates/onesimus-dird/src/commands/admin.rs:1571](../../../crates/onesimus-dird/src/commands/admin.rs).
 
 Die folgenden vorhandenen Beispiele und Verhaltensbeschreibungen sind lokale Dokumentation; sie sind kein Beleg für vollständige Bareos-Kompatibilität. Bei Widersprüchen gilt der obige Befund.
 <!-- bareos-reference:end -->

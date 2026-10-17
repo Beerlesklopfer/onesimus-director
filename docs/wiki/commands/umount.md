@@ -21,7 +21,7 @@ umount storage=<storage-name> [ drive=<drivenum> ] jobid=<jobid> | job=<job-name
 
 **Offene Logeinträge:** `C-050` ([Kompatibilitätslog](../../COMPATIBILITY-LOG.md)).
 
-**Lokaler Handler:** [crates/onesimus-dird/src/commands/admin.rs:175](../../../crates/onesimus-dird/src/commands/admin.rs).
+**Lokaler Handler:** [crates/onesimus-dird/src/commands/admin.rs:196](../../../crates/onesimus-dird/src/commands/admin.rs).
 
 Die folgenden vorhandenen Beispiele und Verhaltensbeschreibungen sind lokale Dokumentation; sie sind kein Beleg für vollständige Bareos-Kompatibilität. Bei Widersprüchen gilt der obige Befund.
 <!-- bareos-reference:end -->

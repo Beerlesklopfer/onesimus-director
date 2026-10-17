@@ -26,7 +26,7 @@ delete [volume=<vol-name> [yes] | volume pool=<pool-name> [yes] | storage storag
 
 **Paritätsfälle (16):** `c011-delete-cancel`, `c011-delete-volume-cancel`, `c011-delete-menu-pool-cancel`, `c011-delete-menu-jobid-cancel`, `c011-delete-jobid-cancel`, `c011-delete-pool-cancel`, `c011-delete-volume-pool-cancel`, `c011-delete-volume-unknown`, `c011-delete-volume-star-unknown`, `c011-delete-volname-unknown`, `c011-delete-storage-empty`, `c011-delete-api1-cancel`, `c012-delete-illegal-jobid`, `c035-delete-noarg-api1`, `c035-delete-noarg-api2`, `delete-dialog`.
 
-**Lokaler Handler:** [crates/onesimus-dird/src/commands/extra.rs:657](../../../crates/onesimus-dird/src/commands/extra.rs).
+**Lokaler Handler:** [crates/onesimus-dird/src/commands/extra.rs:675](../../../crates/onesimus-dird/src/commands/extra.rs).
 
 Die folgenden vorhandenen Beispiele und Verhaltensbeschreibungen sind lokale Dokumentation; sie sind kein Beleg für vollständige Bareos-Kompatibilität. Bei Widersprüchen gilt der obige Befund.
 <!-- bareos-reference:end -->

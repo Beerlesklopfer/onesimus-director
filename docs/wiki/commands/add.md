@@ -22,7 +22,7 @@ add pool=<pool-name> storage=<storage-name> jobid=<jobid>
 
 **Paritätsfälle (9):** `c011-add-cancel`, `c011-add-pool-cancel`, `c011-add-pool-badnumber-cancel`, `c011-add-api1-cancel`, `c030-add-job-cancel`, `c030-add-storage-cancel`, `c030-add-client-cancel`, `c030-add-pool-cancel`, `add-noargs`.
 
-**Lokaler Handler:** [crates/onesimus-dird/src/commands/extra.rs:855](../../../crates/onesimus-dird/src/commands/extra.rs).
+**Lokaler Handler:** [crates/onesimus-dird/src/commands/extra.rs:953](../../../crates/onesimus-dird/src/commands/extra.rs).
 
 Die folgenden vorhandenen Beispiele und Verhaltensbeschreibungen sind lokale Dokumentation; sie sind kein Beleg für vollständige Bareos-Kompatibilität. Bei Widersprüchen gilt der obige Befund.
 <!-- bareos-reference:end -->

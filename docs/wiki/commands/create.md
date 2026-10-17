@@ -22,7 +22,7 @@ create pool=<pool-name>
 
 **Paritätsfälle (4):** `c011-create-cancel`, `c011-create-unknown-cancel`, `c012-create-unknown-pool`, `create-noargs`.
 
-**Lokaler Handler:** [crates/onesimus-dird/src/commands/extra.rs:813](../../../crates/onesimus-dird/src/commands/extra.rs).
+**Lokaler Handler:** [crates/onesimus-dird/src/commands/extra.rs:909](../../../crates/onesimus-dird/src/commands/extra.rs).
 
 Die folgenden vorhandenen Beispiele und Verhaltensbeschreibungen sind lokale Dokumentation; sie sind kein Beleg für vollständige Bareos-Kompatibilität. Bei Widersprüchen gilt der obige Befund.
 <!-- bareos-reference:end -->

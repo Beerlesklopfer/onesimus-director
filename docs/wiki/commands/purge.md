@@ -25,7 +25,7 @@ purge [files [job=<job> | jobid=<jobid> | client=<client> | volume=<volume>]] | 
 
 **Paritätsfälle (34):** `c011-purge-cancel`, `c011-purge-volume-cancel`, `c011-purge-jobs-cancel`, `c011-purge-files-cancel`, `c011-purge-quota-cancel`, `c011-purge-volume-select-cancel`, `c011-purge-api1-cancel`, `c012-purge-jobs-menu`, `c030-purge-job`, `c030-purge-storage`, `c030-purge-client`, `c030-purge-pool`, `c030-purge-client-api1`, `c030-purge-pool-api2`, `c030-purge-jobs-client-no`, `c030-purge-jobs-client-cancel`, `c030-purge-jobs-client-invalid-answer`, `c030-purge-jobs-client-api1`, `c030-purge-jobs-client-api2`, `c030-purge-jobs-client-jobstatus-bad`, `c030-purge-jobs-client-jobstatus-no`, `c030-purge-files-client-no`, `c030-purge-files-menu-client-no`, `c030-purge-jobs-pool-no`, `c030-purge-jobs-pool-incremental-no`, `c030-purge-volume-no`, `c030-purge-volume-error-no`, `c030-purge-volume-jobstatus-bad`, `c030-purge-volume-jobid`, `c030-purge-volume-two-no`, `c030-purge-volume-menu-no`, `c030-purge-volume-api1`, `c030-purge-quota-client`, `purge-dialog`.
 
-**Lokaler Handler:** [crates/onesimus-dird/src/commands/admin.rs:1109](../../../crates/onesimus-dird/src/commands/admin.rs).
+**Lokaler Handler:** [crates/onesimus-dird/src/commands/admin.rs:1318](../../../crates/onesimus-dird/src/commands/admin.rs).
 
 Die folgenden vorhandenen Beispiele und Verhaltensbeschreibungen sind lokale Dokumentation; sie sind kein Beleg für vollständige Bareos-Kompatibilität. Bei Widersprüchen gilt der obige Befund.
 <!-- bareos-reference:end -->
