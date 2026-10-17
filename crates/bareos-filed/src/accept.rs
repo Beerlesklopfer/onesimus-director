@@ -155,7 +155,7 @@ fn handle_session(mut bnet: BnetStream<Box<dyn Rw>>, session_id: u64, config: &F
     };
 
     // CRAM-MD5 two-way authentication (FD is server side)
-    let auth = CramMd5Auth::new(&director.password, &config.name, 0);
+    let auth = CramMd5Auth::new(&director.password, &format!("R_CLIENT::{}", config.name), 2);
     match auth.two_way_authenticate(&mut bnet, true) {
         Ok(result) if result.success => {}
         _ => {

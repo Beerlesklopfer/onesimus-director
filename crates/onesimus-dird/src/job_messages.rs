@@ -223,6 +223,8 @@ pub enum ReportKind {
     Consolidate,
     /// MigrationCleanup() of a Copy (true) or Migrate control job (C-058).
     MigrateControl(bool),
+    /// VerifyCleanup() (verify.rs, C-058).
+    Verify,
     /// MigrationCleanup() of a Copy (true) or Migrate worker job: the report
     /// comes from migrate::cleanup (C-058, S-05).
     MigrateWorker(bool),
@@ -629,12 +631,14 @@ pub fn end_of_job(director: &str, catalog: Option<&CatalogHandle>, report: &JobR
         ReportKind::Admin => return vec![admin_summary(report, outcome)],
         ReportKind::Consolidate => return vec![consolidate_summary(report, outcome)],
         ReportKind::MigrateControl(copy) => return vec![migrate_selection_summary(director, report, outcome, copy)],
+        ReportKind::Verify => return crate::verify::summary(director, report, outcome),
         ReportKind::MigrateWorker(_) => return Vec::new(),
         _ => {}
     }
     let facts = catalog_facts(catalog, outcome.job_id, &report.client);
     match report.kind {
-        ReportKind::Admin | ReportKind::Consolidate | ReportKind::MigrateControl(_) | ReportKind::MigrateWorker(_) => unreachable!(),
+        ReportKind::Admin | ReportKind::Consolidate | ReportKind::MigrateControl(_) | ReportKind::MigrateWorker(_)
+            | ReportKind::Verify => unreachable!(),
         ReportKind::Backup => backup_summary(director, report, outcome, &facts),
         ReportKind::Restore => restore_summary(director, report, outcome, &facts),
     }

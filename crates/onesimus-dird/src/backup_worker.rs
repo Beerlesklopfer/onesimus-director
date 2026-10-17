@@ -136,12 +136,19 @@ pub fn run(params: &JobParams, session: &BackupSession, pipes: &mut WorkerPipes)
     let job_id = params.job_id;
     let ids = session.ids;
     let fail = |text: String, vol: (u32, u32)| {
-        jmsg(job_id, M_FATAL, text);
+        if !text.is_empty() {
+            jmsg(job_id, M_FATAL, text);
+        }
         finish(job_id, session, b'f', 0, 0, 1, vol, None)
     };
 
     // job_thread(): "Version: …"; DoNativeBackup(): "Start Backup JobId %u, Job=%s".
     jmsg(job_id, M_INFO, crate::job_messages::version_text());
+    // job_thread(): RunScripts "BeforeJob" in the Director (S-07).
+    let before = job_worker::run_before_job(pipes, job_id);
+    if crate::job_manager::is_job_canceled(before.status) {
+        return finish(job_id, session, before.status as u8, 0, 0, before.errors as i32, (0, 0), None);
+    }
     jmsg(job_id, M_INFO, crate::job_messages::start_backup_text(job_id, &params.unique_job));
 
     // jcr->setJobStatus(JS_Running); UpdateJobStartRecord().
@@ -186,7 +193,7 @@ pub fn run(params: &JobParams, session: &BackupSession, pipes: &mut WorkerPipes)
         }
     };
     state(job_id, "FDJobSetup");
-    if let Err(e) = setup_fd(&mut fd, params, session, vol, &auth_key) {
+    if let Err(e) = setup_fd(&mut fd, params, session, vol, &auth_key, &before) {
         let _ = fd.send_signal(BnetSignal::Terminate);
         let _ = sd.send_signal(BnetSignal::Terminate);
         return fail(e, vol);
@@ -263,7 +270,7 @@ pub fn run(params: &JobParams, session: &BackupSession, pipes: &mut WorkerPipes)
     };
     // The first error status of Dir, FD or SD.
     let term = if canceled { b'A' } else if fd_status != b'T' { fd_status } else if sd_end.status == 0 { b'E' } else { sd_end.status };
-    finish(job_id, session, term, files as i64, bytes as i64, errors as i32, vol,
+    finish(job_id, session, term, files as i64, bytes as i64, errors as i32 + before.errors as i32, vol,
         Some((fd_status, read_bytes, &sd_end, vss, encrypt)))
 }
 
@@ -300,7 +307,7 @@ fn start_sd_job(sd: &mut BnetStream<PskStream>, params: &JobParams, session: &Ba
 /// SendJobInfoToFileDaemon, SendLevelCommand, SendIncludeExcludeLists,
 /// SendSecureEraseReqToFd (and the spot of SendRunscriptsCommands).
 fn setup_fd(fd: &mut BnetStream<PskStream>, params: &JobParams, session: &BackupSession, vol: (u32, u32),
-            auth_key: &str) -> Result<(), String> {
+            auth_key: &str, before: &job_worker::BeforeJob) -> Result<(), String> {
     let job_id = params.job_id;
     send(fd, &format!("JobId={job_id} Job={} SDid={} SDtime={} Authorization={auth_key} ssl=4\n",
         params.unique_job, vol.0, vol.1))?;
@@ -347,8 +354,9 @@ fn setup_fd(fd: &mut BnetStream<PskStream>, params: &JobParams, session: &Backup
             jmsg(job_id, M_WARNING, format!("Unexpected Client Secure Erase Cmd: {msg}"));
         }
     }
-    // SendRunscriptsCommands(): client run scripts (S-07) go here.
-    Ok(())
+    // SendRunscriptsCommands(): the client run scripts (S-07); the
+    // failure message is emitted there.
+    job_worker::send_client_runscripts(fd, params, before).map_err(|_| String::new())
 }
 
 /// msgchan.cc ReserveWriteDevice(): "Using Device \"%s\" to write."

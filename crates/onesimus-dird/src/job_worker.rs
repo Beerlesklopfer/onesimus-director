@@ -44,6 +44,9 @@ pub enum WorkerJobType {
     Copy,
     Migrate,
     Consolidate,
+    /// verify.cc DoVerify(): FD (and for VolumeToCatalog SD) contact by the
+    /// worker, the catalog comparison by the Director (verify.rs). C-058.
+    Verify,
 }
 
 impl WorkerJobType {
@@ -83,6 +86,12 @@ pub struct JobParams {
     pub prev_job: String,          // unique job name of reference backup (for incr/diff)
     // Restore-specific
     pub where_path: Option<String>,
+    /// RegexWhere of the run or the Job (BuildRestoreCommand: before where).
+    #[serde(default)]
+    pub regex_where: Option<String>,
+    /// Job `Prefix Links` (restore `prelinks=`).
+    #[serde(default)]
+    pub prefix_links: bool,
     pub replace: Option<String>,       // "always", "never", "ifnewer", "ifolder"
     pub restore_jobid: Option<u32>,     // JobId of backup to restore from
     /// Restore: the bootstrap file (jcr->RestoreBootstrap) the job reads.
@@ -94,6 +103,9 @@ pub struct JobParams {
     /// (fd_cmds.cc "Probing client protocol..." and the handshake text).
     #[serde(default)]
     pub client_first_connection: bool,
+    /// Verify job data (verify.rs), None for other job types.
+    #[serde(default)]
+    pub verify: Option<crate::verify::VerifyParams>,
     /// SD read+write session of a Copy/Migrate worker job or a VirtualFull
     /// (sd_copy.rs); None for jobs with a File daemon. C-058.
     #[serde(default)]
@@ -137,8 +149,110 @@ pub enum PipeMessage {
     /// FD/SD end counters of a native backup, sent before its JobEnd (S-19).
     #[serde(rename = "backup_end")]
     BackupEnd { job_id: u32, end: crate::backup::BackupEnd },
+    /// job_thread() RunScripts(jcr, ..., label) in the Director (console
+    /// commands need it); the worker waits for [`PipeMessage::RunScriptsDone`].
+    #[serde(rename = "run_scripts")]
+    RunScripts { job_id: u32, label: String },
+    /// The job status after the scripts, their M_ERROR count, and the
+    /// fd_cmds.cc SendRunscriptsCommands() "Run ..." lines for the client
+    /// (with "RunBeforeNow" when `run_before_now`). S-07.
+    #[serde(rename = "run_scripts_done")]
+    RunScriptsDone { status: i32, errors: u32, client_commands: Vec<String>, run_before_now: bool },
+    /// The writing Storage daemon's job end of an SD-SD Copy/Migrate
+    /// (mig_jcr: VolSessionId/Time from its Job command, SDJobFiles/Bytes/
+    /// Errors/Status from its "3099 Job end"). C-058, S-20.
+    #[serde(rename = "write_session")]
+    WriteSession { job_id: u32, vol_session_id: i32, vol_session_time: i32, files: i64, bytes: i64, errors: i32, status: i32 },
+    /// A Verify job event for the Director (verify.rs).
+    #[serde(rename = "verify")]
+    Verify { job_id: u32, event: crate::verify::Event },
 }
 
+/// What the Director's RunScripts "BeforeJob" left for the worker.
+#[derive(Debug, Default)]
+pub(crate) struct BeforeJob {
+    pub(crate) status: char,
+    pub(crate) errors: u32,
+    pub(crate) client_commands: Vec<String>,
+    pub(crate) run_before_now: bool,
+}
+
+/// Ask the Director to run the "BeforeJob" scripts and wait for them.
+pub(crate) fn run_before_job(pipes: &mut WorkerPipes, job_id: u32) -> BeforeJob {
+    pipes.send(&PipeMessage::RunScripts { job_id, label: "BeforeJob".into() });
+    loop {
+        match pipes.recv() {
+            Some(PipeMessage::RunScriptsDone { status, errors, client_commands, run_before_now }) => {
+                return BeforeJob { status: char::from_u32(status as u32).unwrap_or('R'), errors, client_commands, run_before_now };
+            }
+            Some(_) => continue,
+            // The Director is gone: nothing ran.
+            None => return BeforeJob { status: 'R', ..Default::default() },
+        }
+    }
+}
+
+/// The start messages a job prepared at queue time, with job_thread's
+/// RunScripts "BeforeJob" right after its "Version:" message (first when
+/// there is none); the rest only when the scripts did not fail the job.
+pub(crate) fn start_messages_with_before(pipes: &mut WorkerPipes, job_id: u32, messages: &[(u32, String)]) -> BeforeJob {
+    let at = messages.iter().position(|(_, text)| text.starts_with("Version: ")).map_or(0, |i| i + 1);
+    for (code, text) in &messages[..at] {
+        worker_jmsg(job_id, *code, text.clone());
+    }
+    let before = run_before_job(pipes, job_id);
+    if !crate::job_manager::is_job_canceled(before.status) {
+        for (code, text) in &messages[at..] {
+            worker_jmsg(job_id, *code, text.clone());
+        }
+    }
+    before
+}
+
+/// fd_cmds.cc SendRunscriptsCommands(): the client's scripts, then
+/// "RunBeforeNow" (the File daemon runs ClientRunBeforeJob before it
+/// answers). Failure: "Client \"%s\" RunScript failed." (M_FATAL).
+pub(crate) fn send_client_runscripts(fd: &mut BnetStream<tls_psk::PskStream>, p: &JobParams, before: &BeforeJob) -> Result<(), String> {
+    let mut commands: Vec<(&str, &str, &str)> = before.client_commands.iter()
+        .map(|c| (c.as_str(), "2000 OK RunScript\n", "RunScript")).collect();
+    if before.run_before_now {
+        commands.push(("RunBeforeNow\n", "2000 OK RunBeforeNow\n", "RunBeforeNow"));
+    }
+    for (command, resp, name) in commands {
+        if let Err(e) = director_response(fd, p.job_id, command, resp, name) {
+            worker_jmsg(p.job_id, M_FATAL, format!("Client \"{}\" RunScript failed.\n", p.client_name));
+            WORKER_FATAL.store(true, Ordering::SeqCst);
+            return Err(e);
+        }
+    }
+    Ok(())
+}
+
+/// getmsg.cc response(jcr, fd, resp, cmd, DISPLAY_ERROR) after sending
+/// `command`: daemon job messages are dispatched (BgetDirmsg), anything
+/// but `resp` is a fatal "Bad response" error.
+fn director_response(fd: &mut BnetStream<tls_psk::PskStream>, job_id: u32, command: &str, resp: &str, name: &str) -> Result<(), String> {
+    let socket_error = |e: String| {
+        let text = format!("Socket error on {name} command: ERR={e}\n");
+        worker_jmsg(job_id, M_FATAL, text.clone());
+        text
+    };
+    fd.send_str(command).map_err(|e| socket_error(e.to_string()))?;
+    loop {
+        match fd.recv() {
+            Ok(BnetMessage::Data(data)) => {
+                let msg = String::from_utf8_lossy(&data).to_string();
+                if msg.starts_with("Jmsg") { forward_daemon_jmsg(job_id, &msg); continue; }
+                if msg == resp { return Ok(()); }
+                let text = format!("Bad response to {name} command: wanted {resp}, got {msg}\n");
+                worker_jmsg(job_id, M_FATAL, text.clone());
+                return Err(text);
+            }
+            Ok(BnetMessage::Signal(_)) => continue,
+            Err(e) => return Err(socket_error(e.to_string())),
+        }
+    }
+}
 /// lib/message.h M_* codes of the worker's own job messages.
 const M_FATAL: u32 = 3;
 pub(crate) const M_ERROR: u32 = 4;
@@ -155,6 +269,8 @@ fn write_pipe_line(file: &mut std::fs::File, msg: &PipeMessage) {
     }
 }
 
+/// One pipe message as one write under the pipe lock: lines of the worker's
+/// threads never interleave (a torn JSON line is dropped by the Director).
 pub(crate) fn send_jmsg(msg: PipeMessage) {
     let mut pipe = JMSG_PIPE.lock().unwrap_or_else(|e| e.into_inner());
     if let Some(file) = pipe.as_mut() {
@@ -265,9 +381,9 @@ pub(crate) struct WorkerPipes {
 
 impl WorkerPipes {
     pub(crate) fn send(&mut self, msg: &PipeMessage) {
-        if let Ok(json) = serde_json::to_string(msg) {
-            let _ = writeln!(self.to_director, "{json}");
-        }
+        // Locked single write (JMSG_PIPE is a clone of to_director): the SD
+        // thread writes to the same pipe.
+        send_jmsg(msg.clone());
     }
 
     fn recv(&mut self) -> Option<PipeMessage> {
@@ -322,10 +438,29 @@ pub fn run_worker(
     if params.job_type == WorkerJobType::Admin {
         // job.cc job_thread(): "Version: …" when the job runs.
         worker_jmsg(job_id, M_INFO, crate::job_messages::version_text());
-        worker_jmsg(job_id, M_INFO, crate::job_messages::start_admin_text(job_id, &params.unique_job));
-        pipes.send(&PipeMessage::JobEnd { job_id, term_code: b'T' as i32, files: 0, bytes: 0, errors: 0,
+        let before = run_before_job(&mut pipes, job_id);
+        // A failed BeforeJob script (FailJobOnError) cancels the job:
+        // AdminCleanup(jcr, JS_Canceled) keeps JS_ErrorTerminated.
+        let status = if crate::job_manager::is_job_canceled(before.status) { before.status } else {
+            worker_jmsg(job_id, M_INFO, crate::job_messages::start_admin_text(job_id, &params.unique_job));
+            'T'
+        };
+        pipes.send(&PipeMessage::JobEnd { job_id, term_code: status as i32, files: 0, bytes: 0, errors: before.errors as i32,
             vol_session_id: Some(0), vol_session_time: Some(0) });
-        return EXIT_SUCCESS;
+        return if status == 'T' { EXIT_SUCCESS } else { EXIT_ERROR };
+    }
+
+    // Verify: BeforeJob after its "Version:" start message (verify.rs).
+    if params.job_type == WorkerJobType::Verify {
+        return crate::verify::run_worker(params, &mut pipes);
+    }
+
+    // job_thread(): RunScripts "BeforeJob" before the job contacts a daemon.
+    let before = run_before_job(&mut pipes, job_id);
+    if crate::job_manager::is_job_canceled(before.status) {
+        pipes.send(&PipeMessage::JobEnd { job_id, term_code: before.status as i32, files: 0, bytes: 0,
+            errors: before.errors as i32, vol_session_id: Some(0), vol_session_time: Some(0) });
+        return EXIT_ERROR;
     }
 
     loop {
@@ -432,7 +567,7 @@ pub fn run_worker(
                 } else {
                     fd_job_setup(fd.as_mut().unwrap(), params, &sd_auth_key)
                 };
-                match result {
+                match result.and_then(|()| send_client_runscripts(fd.as_mut().unwrap(), params, &before)) {
                     Ok(()) => WorkerState::FDStorage,
                     Err(e) => WorkerState::Error(format!("FD setup: {e}"))
                 }
@@ -484,14 +619,8 @@ pub fn run_worker(
             }
 
             WorkerState::FDRestore => {
-                let where_path = params.where_path.as_deref().unwrap_or("/tmp/bareos-restore");
-                let replace_char = match params.replace.as_deref() {
-                    Some("never") => 'n',
-                    Some("ifnewer") => 'w', // REPLACE_IFNEWER (baconfig.h)
-                    Some("ifolder") => 'o',
-                    _ => 'a', // always
-                };
-                let cmd = format!("restore replace={replace_char} prelinks=0 where={where_path}\n");
+                let cmd = fd_restore_command(params);
+                let where_path = params.regex_where.as_deref().or(params.where_path.as_deref()).unwrap_or("");
                 match send_expect(fd.as_mut().unwrap(), &cmd, "2000 OK restore", job_id, "FD restore") {
                     Ok(_) => {
                         info!("Worker {job_id}: restore running → {where_path}");
@@ -555,7 +684,7 @@ pub fn run_worker(
                 if let Some(ref mut f) = fd { let _ = f.send_signal(BnetSignal::Terminate); }
                 if let Some(ref mut s) = sd { let _ = s.send_signal(BnetSignal::Terminate); }
                 pipes.send(&PipeMessage::JobEnd {
-                    job_id, term_code: if WORKER_CANCEL.load(Ordering::SeqCst) { b'A' as i32 } else { b'E' as i32 }, files: 0, bytes: 0, errors: 1,
+                    job_id, term_code: if WORKER_CANCEL.load(Ordering::SeqCst) { b'A' as i32 } else if WORKER_FATAL.load(Ordering::SeqCst) { b'f' as i32 } else { b'E' as i32 }, files: 0, bytes: 0, errors: 1,
                     vol_session_id: Some(vol_session_id), vol_session_time: Some(vol_session_time),
                 });
                 return EXIT_FATAL;
@@ -691,7 +820,7 @@ fn storage_wait_state(message: &str) -> Result<Option<&'static str>, &'static st
     Ok(match storage_job_status(message)? { b'M' => Some("WaitingMount"), b'm' => Some("WaitingMedia"), b'R' => Some("Running"), _ => None })
 }
 
-fn sd_catrec_loop(
+pub(crate) fn sd_catrec_loop(
     sd: &mut BnetStream<tls_psk::PskStream>,
     job_id: u32,
     to_dir: &mut std::fs::File,
@@ -707,16 +836,10 @@ fn sd_catrec_loop(
                 // without an answer, `C`atReq/Catreq and `B`lastAttr to the
                 // Director, which may answer (an empty answer sends nothing).
                 if data.first() == Some(&b'U') {
-                    let pipe_msg = PipeMessage::UpdCat { job_id, data: hex::encode(&data) };
-                    if let Ok(json) = serde_json::to_string(&pipe_msg) {
-                        let _ = writeln!(to_dir, "{json}");
-                    }
+                    send_jmsg(PipeMessage::UpdCat { job_id, data: hex::encode(&data) });
                 } else if matches!(data.first(), Some(b'C' | b'B')) {
                     debug!("Worker {job_id} SD CatReq: {msg}");
-                    let pipe_msg = PipeMessage::CatReq { job_id, request: msg_raw.into_owned() };
-                    if let Ok(json) = serde_json::to_string(&pipe_msg) {
-                        let _ = writeln!(to_dir, "{json}");
-                    }
+                    send_jmsg(PipeMessage::CatReq { job_id, request: msg_raw.into_owned() });
                     // Read CatResp from Director via pipe
                     let mut buf = String::new();
                     let mut reader = BufReader::new(&mut *from_dir);
@@ -748,15 +871,13 @@ fn sd_catrec_loop(
                 } else if msg.starts_with("Status Job=") {
                     match storage_job_status(&msg) {
                         Ok(status) => {
-                            let update = PipeMessage::JobStatus { job_id, status: status as i32 };
-                            if let Ok(json) = serde_json::to_string(&update) { let _ = writeln!(to_dir, "{json}"); }
+                            send_jmsg(PipeMessage::JobStatus { job_id, status: status as i32 });
                         }
                         Err(error) => warn!("Worker {job_id}: {error}"),
                     }
                 } else if msg.starts_with("3099 Job") {
                     if let Some(status) = msg.split_whitespace().find_map(|part| part.strip_prefix("JobStatus=").and_then(|value| value.parse::<u8>().ok())) {
-                        let update = PipeMessage::JobStatus { job_id, status: status as i32 };
-                        if let Ok(json) = serde_json::to_string(&update) { let _ = writeln!(to_dir, "{json}"); }
+                        send_jmsg(PipeMessage::JobStatus { job_id, status: status as i32 });
                     }
                     debug!("Worker {job_id} SD: job end");
                     break;
@@ -923,7 +1044,7 @@ fn resolve_connect(addr: &str, timeout_secs: u64) -> Result<std::net::TcpStream,
         .map_err(|e| format!("connect {addr}: {e}"))
 }
 
-fn send_expect(bnet: &mut BnetStream<tls_psk::PskStream>, cmd: &str, expect: &str, job_id: u32, label: &str) -> Result<String, String> {
+pub(crate) fn send_expect(bnet: &mut BnetStream<tls_psk::PskStream>, cmd: &str, expect: &str, job_id: u32, label: &str) -> Result<String, String> {
     debug!("Worker {job_id} {label}: sending '{}'", cmd.trim());
     bnet.send_str(cmd).map_err(|e| format!("{label} send: {e}"))?;
     loop {
@@ -936,19 +1057,44 @@ fn send_expect(bnet: &mut BnetStream<tls_psk::PskStream>, cmd: &str, expect: &st
                 return Err(format!("{label}: {r}"));
             }
             Ok(BnetMessage::Signal(BnetSignal::Eod)) => continue,
+            // getmsg.cc BgetDirmsg(): BNET_BTIME is answered with our time
+            // (the FD's clock sync in LevelCmd for since_utime).
+            Ok(BnetMessage::Signal(BnetSignal::Btime)) => {
+                let now_us = SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_micros()).unwrap_or(0);
+                bnet.send_str(&format!("btime {now_us}\n")).map_err(|e| format!("{label} send: {e}"))?;
+            }
             Ok(BnetMessage::Signal(s)) => { debug!("Worker {job_id} {label}: signal {s:?}"); continue; }
             Err(e) => return Err(format!("{label} recv: {e}")),
         }
     }
 }
 
-fn now_unix() -> i64 { SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_secs() as i64 }
+/// dird/restore.cc BuildRestoreCommand(): "restore replace=%c prelinks=%d
+/// where=%s" or "... regexwhere=%s" (regexwhere wins), spaces bashed.
+fn fd_restore_command(params: &JobParams) -> String {
+    let bash = |s: &str| s.replace(' ', "\x01");
+    let (key, value) = match params.regex_where.as_deref() {
+        Some(r) => ("regexwhere", bash(r)),
+        None => ("where", bash(params.where_path.as_deref().unwrap_or(""))),
+    };
+    let replace = match params.replace.as_deref() {
+        Some("never") => 'n',
+        Some("ifnewer") => 'w', // REPLACE_IFNEWER (baconfig.h)
+        Some("ifolder") => 'o',
+        _ => 'a', // always
+    };
+    format!("restore replace={replace} prelinks={} {key}={value}\n", u8::from(params.prefix_links))
+}
+
+pub(crate) fn now_unix() -> i64 { SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_secs() as i64 }
 
 // ============================================================================
 // Signal handlers (worker-side)
 // ============================================================================
 
 pub(crate) static WORKER_CANCEL: AtomicBool = AtomicBool::new(false);
+/// A Jmsg M_FATAL of the worker set JS_FatalError.
+static WORKER_FATAL: AtomicBool = AtomicBool::new(false);
 static WORKER_PAUSED: AtomicBool = AtomicBool::new(false);
 
 pub fn install_worker_signal_handlers() {
@@ -1089,6 +1235,27 @@ pub fn spawn_job_worker(_: u32, _: &str, _: &JobParams) -> io::Result<JobHandle>
 #[cfg(test)]
 mod wait_protocol_tests {
     use super::*;
+    #[test]
+    fn restore_command_like_build_restore_command() {
+        let mut p = JobParams {
+            job_id: 1, unique_job: "R.1".into(), job_name: "R".into(), job_type: WorkerJobType::Restore,
+            level: "full".into(), fd_address: String::new(), fd_port: 0, fd_password: String::new(),
+            sd_address: String::new(), sd_port: 0, sd_password: String::new(), sd_device: String::new(),
+            sd_media_type: String::new(), director_name: String::new(), pool_name: String::new(),
+            fileset_includes: vec![], fileset_excludes: vec![], since_utime: 0, prev_job: String::new(),
+            where_path: Some("/tmp/with space".into()), regex_where: None, prefix_links: false,
+            replace: Some("ifnewer".into()), restore_jobid: None, bootstrap: None,
+            client_name: String::new(), client_first_connection: false, copy: None, verify: None, backup: None,
+        };
+        assert_eq!(fd_restore_command(&p), "restore replace=w prelinks=0 where=/tmp/with\x01space\n");
+        p.regex_where = Some("!/a!/b!".into());
+        p.prefix_links = true;
+        p.replace = None;
+        assert_eq!(fd_restore_command(&p), "restore replace=a prelinks=1 regexwhere=!/a!/b!\n");
+        p.regex_where = None;
+        p.where_path = None;
+        assert_eq!(fd_restore_command(&p), "restore replace=a prelinks=1 where=\n");
+    }
     #[test]
     fn termination_status_is_not_collapsed_to_success_or_error() {
         for (code, status) in [(0,"T"),(84,"T"),(87,"W"),(101,"e"),(69,"E"),(102,"f"),(65,"A"),(68,"D"),(2,"E"),(3,"A"),(999,"E")] {

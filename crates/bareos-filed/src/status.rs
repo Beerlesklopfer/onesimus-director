@@ -5,7 +5,7 @@
 use crate::config::FdConfig;
 
 /// Generate status output (same format as C++ FD).
-pub fn fd_status(config: &FdConfig) -> String {
+pub fn fd_status(_config: &FdConfig) -> String {
     let version = env!("CARGO_PKG_VERSION");
     let hostname = nix::unistd::gethostname()
         .ok()
@@ -27,7 +27,6 @@ pub fn fd_status(config: &FdConfig) -> String {
     ));
 
     // System info
-    let page_size = unsafe { libc::sysconf(libc::_SC_PAGESIZE) } as u64;
     output.push_str(&format!(
         " Sizeof: boffset_t=8 size_t=8 debug=0 trace=0 bwlimit=0kB/s\n"
     ));
