@@ -3,6 +3,16 @@
 pub mod bareos {
     pub mod director {
         tonic::include_proto!("bareos.director");
+
+        /// Command parameter messages (director_commands.proto)
+        pub mod commands {
+            tonic::include_proto!("bareos.director.commands");
+        }
+
+        /// Typed Director API (director_api.proto)
+        pub mod api {
+            tonic::include_proto!("bareos.director.api");
+        }
     }
 
     pub mod ccc {
@@ -12,3 +22,5 @@ pub mod bareos {
     // bareos_options.proto extends google.protobuf descriptors;
     // the extensions are available via prost descriptor reflection.
 }
+
+pub mod typed;

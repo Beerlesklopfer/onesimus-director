@@ -85,7 +85,7 @@ fn to_response(result: CommandResult) -> CommandResponse {
 }
 
 /// Run a command through the shared queue without blocking the tokio runtime.
-async fn run_command(cmd_queue: &Arc<CommandQueue>, ast: CommandAst, session_id: u64) -> Result<CommandResult, Status> {
+pub(super) async fn run_command(cmd_queue: &Arc<CommandQueue>, ast: CommandAst, session_id: u64) -> Result<CommandResult, Status> {
     let rx = cmd_queue.submit(ast, session_id)
         .ok_or_else(|| Status::resource_exhausted("command queue full"))?;
     tokio::task::spawn_blocking(move || rx.recv())

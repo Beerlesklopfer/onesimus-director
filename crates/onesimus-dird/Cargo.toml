@@ -51,3 +51,9 @@ rand.workspace = true
 openssl.workspace = true
 
 [dev-dependencies]
+# tests/grpc_typed_api.rs (tonic client with pinned TLS)
+prost-types.workspace = true
+tokio-rustls.workspace = true
+hyper-util = { version = "0.1", features = ["tokio"] }
+tower = { version = "0.4", features = ["util"] }
+bytes = "1"

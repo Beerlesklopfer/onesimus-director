@@ -5,6 +5,8 @@
 //! session multiplexing (fixes the >16 connection scaling issue).
 
 pub mod service;
+pub mod api;
+pub mod coverage;
 pub mod auth;
 pub mod push_events;
 pub mod tls;
@@ -20,6 +22,7 @@ use crate::command_queue::CommandQueue;
 
 use service::DirectorServiceImpl;
 use bareos_proto_rs::bareos::director::director_server::DirectorServer;
+use bareos_proto_rs::bareos::director::api::director_api_server::DirectorApiServer;
 
 /// Everything the gRPC server needs besides the shared queues.
 pub struct GrpcSettings {
@@ -65,6 +68,8 @@ pub fn run_grpc_server(
                 return;
             }
         };
+        // Typed API (director_api.proto): same port, TLS, session tokens and ACLs
+        let api = api::DirectorApiImpl::new(q.clone(), settings.auth.clone());
         let svc = DirectorServiceImpl::new(
             b, q, settings.auth, settings.director_name, settings.bnet_port,
         );
@@ -97,6 +102,7 @@ pub fn run_grpc_server(
         };
         let result = builder
             .add_service(DirectorServer::new(svc))
+            .add_service(DirectorApiServer::new(api))
             .serve_with_shutdown(addr, async { let _ = shutdown_rx.await; });
 
         if let Err(e) = result.await {
