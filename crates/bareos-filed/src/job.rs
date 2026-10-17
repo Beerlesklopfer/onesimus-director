@@ -548,3 +548,120 @@ fn next_msg(sd: &mut SdStream) -> Option<String> {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use bareos_bnet::CramMd5Auth;
+    use std::net::{TcpListener, TcpStream};
+
+    fn recv_text<S: Read + Write>(b: &mut BnetStream<S>) -> String {
+        loop {
+            match b.recv().unwrap() {
+                BnetMessage::Data(d) => return String::from_utf8_lossy(&d).into_owned(),
+                BnetMessage::Signal(_) => continue,
+            }
+        }
+    }
+
+    /// A Storage daemon serving one read session with one small file.
+    fn fake_sd(listener: TcpListener, key: &'static str) -> std::thread::JoinHandle<Vec<String>> {
+        std::thread::spawn(move || {
+            let (s, _) = listener.accept().unwrap();
+            let mut sd = BnetStream::new(s);
+            let mut seen = vec![recv_text(&mut sd)];
+            let auth = CramMd5Auth::new_raw(key, "fake-sd", 0);
+            assert!(auth.two_way_authenticate(&mut sd, true).unwrap().success);
+            seen.push(recv_text(&mut sd));
+            sd.send_str("3000 OK open ticket = 7\n").unwrap();
+            seen.push(recv_text(&mut sd));
+            sd.send_str("3000 OK data\n").unwrap();
+            let lstat = "A A IGk B A A A F A A A A A A A";
+            let attr = format!("1 3 /x/file.txt\0{lstat}\0\0\0");
+            for (stream, data) in [(1, attr.as_bytes()), (2, &b"data\n"[..])] {
+                sd.send_str(&format!("rechdr 1 2 1 {stream} {}", data.len())).unwrap();
+                sd.send(data).unwrap();
+            }
+            sd.send_signal(BnetSignal::Eod).unwrap();
+            seen.push(recv_text(&mut sd));
+            sd.send_str("3000 OK close Status = 84\n").unwrap();
+            seen
+        })
+    }
+
+    #[test]
+    fn restore_session_with_simulated_director_and_sd() {
+        let tmp = std::env::temp_dir().join(format!("bareos-filed-session-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&tmp);
+        let sd_listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let sd_port = sd_listener.local_addr().unwrap().port();
+        let sd_thread = fake_sd(sd_listener, "the-sd-key");
+
+        let config = FdConfig::parse("Client {\n Name = test-fd\n}\nDirector {\n Name = test-dir\n Password = pw\n}\n").unwrap();
+        let dir_listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = dir_listener.local_addr().unwrap();
+        let fd_thread = std::thread::spawn(move || {
+            let (s, _) = dir_listener.accept().unwrap();
+            let mut b = BnetStream::new(s);
+            let director = config.directors[0].clone();
+            Session::new(&config, &director, 1).run(&mut b);
+        });
+        let mut dir = BnetStream::new(TcpStream::connect(addr).unwrap());
+        dir.send_str("JobId=42 Job=RestoreFiles.2026-10-17_10.00.00_01 SDid=1 SDtime=2 Authorization=the-sd-key ssl=0\n").unwrap();
+        assert!(recv_text(&mut dir).starts_with("2000 OK Job "));
+        dir.send_str(&format!("storage address=127.0.0.1 port={sd_port} ssl=0 Authorization=the-sd-key\n")).unwrap();
+        let mut replies = Vec::new();
+        loop {
+            let r = recv_text(&mut dir);
+            let done = r.starts_with("2000 OK storage") || r.starts_with("29");
+            replies.push(r);
+            if done {
+                break;
+            }
+        }
+        assert_eq!(replies.last().unwrap(), "2000 OK storage\n", "{replies:?}");
+        dir.send_str(&format!("restore replace=a prelinks=0 where={}\n", tmp.display())).unwrap();
+        let mut texts = Vec::new();
+        loop {
+            let r = recv_text(&mut dir);
+            texts.push(r.clone());
+            if r.starts_with("2000 OK storage end") {
+                break;
+            }
+        }
+        assert!(texts.iter().any(|t| t == "2000 OK restore\n"), "{texts:?}");
+        // Director ends the job (onesimus-dird sends EOD, the original "endrestore")
+        dir.send_str("endrestore").unwrap();
+        let end = loop {
+            let r = recv_text(&mut dir);
+            if r.starts_with("2800 End Job") {
+                break r;
+            }
+        };
+        assert_eq!(end, "2800 End Job TermCode=84 JobFiles=1 ReadBytes=5 JobBytes=5 Errors=0 VSS=0 Encrypt=0\n");
+        fd_thread.join().unwrap();
+        let seen = sd_thread.join().unwrap();
+        assert_eq!(seen[0], "Hello Start Job RestoreFiles.2026-10-17_10.00.00_01\n");
+        assert_eq!(seen[1], "read open session = DummyVolume 1 2 0 0 0 0\n");
+        assert_eq!(seen[2], "read data 7\n");
+        assert_eq!(seen[3], "read close session 7\n");
+        assert_eq!(std::fs::read(tmp.join("x/file.txt")).unwrap(), b"data\n");
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn unknown_command_and_bad_job() {
+        let config = FdConfig::parse("Client {\n Name = test-fd\n}\nDirector {\n Name = test-dir\n Password = pw\n}\n").unwrap();
+        let l = TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = l.local_addr().unwrap();
+        let t = std::thread::spawn(move || {
+            let (s, _) = l.accept().unwrap();
+            let director = config.directors[0].clone();
+            Session::new(&config, &director, 1).run(&mut BnetStream::new(s));
+        });
+        let mut dir = BnetStream::new(TcpStream::connect(addr).unwrap());
+        dir.send_str("nonsense\n").unwrap();
+        assert_eq!(recv_text(&mut dir), "2999 Invalid command\n");
+        t.join().unwrap();
+    }
+}

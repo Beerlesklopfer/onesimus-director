@@ -38,7 +38,7 @@ impl FdConfig {
         Self::parse(&content)
     }
 
-    fn parse(input: &str) -> Result<Self, String> {
+    pub(crate) fn parse(input: &str) -> Result<Self, String> {
         let mut config = FdConfig {
             name: "bareos-fd".to_string(),
             port: 9102,
