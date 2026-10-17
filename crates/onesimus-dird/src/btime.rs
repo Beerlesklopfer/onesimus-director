@@ -216,7 +216,9 @@ mod tests {
         // before 1970: negative, not 0
         assert_eq!(str_to_utime("1901-01-01 00:00:00"), local(1901, 1, 1, 0, 0, 0));
         assert!(str_to_utime("1901-01-01 00:00:00") < 0);
-        assert_eq!(str_to_utime("1969-12-31 23:59:59"), local(1969, 12, 31, 23, 59, 59));
+        // mktime's -1 (1969-12-31 23:59:59 in UTC) is mapped to 0 like StrToUtime
+        let last_before_epoch = local(1969, 12, 31, 23, 59, 59);
+        assert_eq!(str_to_utime("1969-12-31 23:59:59"), if last_before_epoch == -1 { 0 } else { last_before_epoch });
         assert_eq!(str_to_utime("2038-01-19 03:14:08"), local(2038, 1, 19, 3, 14, 8));
         assert_eq!(str_to_utime("9999-12-31 23:59:59"), local(9999, 12, 31, 23, 59, 59));
         assert_eq!(str_to_utime("10000-01-01 00:00:00"), local(10000, 1, 1, 0, 0, 0));
