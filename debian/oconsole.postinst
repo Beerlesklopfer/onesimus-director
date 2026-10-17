@@ -1,45 +1,67 @@
 #!/bin/bash
 set -e
 
+OCONF=/etc/bareos/oconsole.conf
+BCONF=/etc/bareos/bconsole.conf
+
+# Passwort der Director-Ressource (nicht irgendeine Password-Zeile): erste
+# "Director { ... }"-Ressource in bareos-dir.d/director/*.conf bzw. bareos-dir.conf.
+director_password() {
+    local f
+    for f in /etc/bareos/bareos-dir.d/director/*.conf /etc/bareos/bareos-dir.conf; do
+        [ -f "$f" ] || continue
+        awk '
+            { sub(/#.*/, "") }
+            !in_dir && tolower($0) ~ /^[ \t]*director[ \t]*\{/ { in_dir = 1; next }
+            in_dir && /\}/ { exit }
+            in_dir && tolower($0) ~ /^[ \t]*password[ \t]*=/ {
+                v = $0; sub(/^[^=]*=[ \t]*/, "", v); gsub(/^"|"[ \t]*$/, "", v); sub(/[ \t]+$/, "", v)
+                print v; exit
+            }
+        ' "$f" | head -1 | grep . && return 0
+    done
+    return 1
+}
+
 case "$1" in
     configure)
-        # Config-Datei anlegen falls nicht vorhanden
-        if [ ! -f /etc/bareos/oconsole.conf ]; then
-            install -D -m 640 -o root -g bareos \
-                /usr/share/bareos/defaultconfigs/oconsole.conf \
-                /etc/bareos/oconsole.conf 2>/dev/null || true
+        # Eine von älteren Paketversionen erzeugte oconsole.conf (unveränderte
+        # Vorlage: nur Director { Name = bareos-dir, address = localhost,
+        # Port = 9101, Password }) wird beiseitegelegt, wenn eine bconsole.conf
+        # existiert: oconsole liest dann die funktionierende bconsole.conf.
+        if [ -f "$OCONF" ] && [ -f "$BCONF" ] \
+           && [ "$(grep -cvE '^\s*(#.*)?$' "$OCONF")" = 6 ] \
+           && grep -qE '^\s*Name\s*=\s*bareos-dir\s*$' "$OCONF" \
+           && grep -qiE '^\s*address\s*=\s*localhost\s*$' "$OCONF" \
+           && ! grep -qiE '^\s*Console\s*\{' "$OCONF"; then
+            mv "$OCONF" "$OCONF.dpkg-old"
+            echo "oconsole: automatisch erzeugte $OCONF nach $OCONF.dpkg-old verschoben; oconsole nutzt $BCONF."
         fi
 
-        # Passwort IMMER aus Director-Config synchronisieren
-        # 1. Versuch: aus .rndpwd (Neuinstallation)
-        # 2. Versuch: direkt aus Director-Config auslesen (bestehende Installation)
-        DIR_PW=""
-        if [ -f /etc/bareos/.rndpwd ]; then
-            DIR_PW=$(cat /etc/bareos/.rndpwd 2>/dev/null)
-        fi
-
-        if [ -z "$DIR_PW" ]; then
-            # Aus Director-Config extrahieren (C++ oder Rust)
-            for f in /etc/bareos/bareos-dir.d/director/*.conf /etc/bareos/bareos-dir.conf; do
-                if [ -f "$f" ]; then
-                    DIR_PW=$(grep -i 'Password' "$f" 2>/dev/null | head -1 | sed 's/.*"\(.*\)".*/\1/')
-                    if [ -n "$DIR_PW" ]; then
-                        break
-                    fi
-                fi
-            done
-        fi
-
-        if [ -n "$DIR_PW" ]; then
-            # Passwort in oconsole.conf setzen (ersetzt CHANGEME oder altes Passwort)
-            sed -i "s|Password = .*|Password = \"${DIR_PW}\"|" /etc/bareos/oconsole.conf 2>/dev/null || true
-            echo "oconsole: Passwort aus Director-Config synchronisiert."
+        if [ -f "$OCONF" ]; then
+            echo "oconsole: bestehende $OCONF bleibt unverändert."
+        elif [ -f "$BCONF" ]; then
+            echo "oconsole: keine $OCONF — oconsole liest $BCONF."
         else
-            echo "oconsole: WARNUNG — kein Director-Passwort gefunden!"
-            echo "  Bitte manuell setzen: /etc/bareos/oconsole.conf"
+            # Kein Console-Setup vorhanden: aus der Vorlage anlegen und das
+            # Passwort der Director-Ressource eintragen (Anmeldung als *UserAgent*).
+            install -D -m 640 -o root -g bareos \
+                /usr/share/bareos/defaultconfigs/oconsole.conf "$OCONF"
+            DIR_PW=""
+            if [ -f /etc/bareos/.rndpwd ]; then
+                DIR_PW=$(cat /etc/bareos/.rndpwd 2>/dev/null)
+            fi
+            [ -n "$DIR_PW" ] || DIR_PW=$(director_password || true)
+            if [ -n "$DIR_PW" ]; then
+                DIR_PW_ESC=$(printf '%s' "$DIR_PW" | sed 's/[\\&|]/\\&/g')
+                sed -i "s|^\(\s*Password\s*=\s*\).*|\1\"${DIR_PW_ESC}\"|" "$OCONF"
+                echo "oconsole: $OCONF angelegt, Passwort der Director-Ressource eingetragen."
+            else
+                echo "oconsole: WARNUNG — kein Director-Passwort gefunden, bitte $OCONF anpassen."
+            fi
         fi
 
-        echo "brconsole installiert: /usr/bin/oconsole"
+        echo "oconsole installiert: /usr/bin/oconsole"
         ;;
 esac
 

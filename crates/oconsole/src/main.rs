@@ -150,7 +150,35 @@ struct EffCli {
     mcp_host: Vec<String>,
 }
 
-fn load_console_config(path: &str) -> ConsoleConfig {
+/// Default config files, in order: oconsole's own, then bconsole's (the same
+/// format, already set up wherever a Bareos console works).
+const DEFAULT_CONFIGS: [&str; 2] = ["/etc/bareos/oconsole.conf", "/etc/bareos/bconsole.conf"];
+
+fn load_console_config(path: Option<&str>) -> ConsoleConfig {
+    let candidates: Vec<&str> = match path {
+        Some(p) => vec![p],
+        None => DEFAULT_CONFIGS.to_vec(),
+    };
+    let mut last_error = None;
+    for candidate in &candidates {
+        match std::fs::read_to_string(candidate) {
+            Ok(content) => return parse_console_config(&content),
+            Err(e) => last_error = Some((candidate.to_string(), e)),
+        }
+    }
+    if let Some((p, e)) = last_error {
+        eprintln!("\x1b[33mWarnung: Config {} nicht lesbar: {e}\x1b[0m", p);
+        eprintln!("\x1b[33mTipp: Benutzer zur Gruppe 'bareos' hinzufuegen oder sudo verwenden\x1b[0m");
+    }
+    parse_console_config("")
+}
+
+/// console_conf.cc semantics: `Director { Name Address DirPort Password }`
+/// names the Director to connect to; a `Console { Name Password }` resource is
+/// the named console to log in as. Without one the console logs in as
+/// "*UserAgent*" with the Director's password. Director/Console `Name` is never
+/// the login of the other resource.
+fn parse_console_config(content: &str) -> ConsoleConfig {
     let mut cfg = ConsoleConfig {
         address: "localhost".to_string(),
         port: 9101,
@@ -160,37 +188,60 @@ fn load_console_config(path: &str) -> ConsoleConfig {
         grpc_port: None,
         grpc_fingerprint: None,
     };
+    let mut director_password = String::new();
+    let mut console: Option<(String, String)> = None;
+    // Resource we are in: None at top level (flat files of older oconsole
+    // versions are read as Director keys).
+    let mut block: Option<String> = None;
+    let mut depth = 0usize;
 
-    let content = match std::fs::read_to_string(path) {
-        Ok(c) => c,
-        Err(e) => {
-            eprintln!("\x1b[33mWarnung: Config {} nicht lesbar: {e}\x1b[0m", path);
-            eprintln!("\x1b[33mTipp: Benutzer zur Gruppe 'bareos' hinzufuegen oder sudo verwenden\x1b[0m");
-            return cfg;
-        }
-    };
-
-    for line in content.lines() {
-        let line = line.trim();
-        if line.starts_with('#') || line.is_empty() { continue; }
-        if let Some(pos) = line.find('=') {
-            let key = line[..pos].trim().to_lowercase();
-            let val = line[pos+1..].trim().trim_matches('"').to_string();
-            match key.as_str() {
-                "address" => cfg.address = val,
-                "port" | "dirport" => cfg.port = val.parse().unwrap_or(9101),
-                "name" => cfg.name = val,
-                "password" => cfg.password = val,
-                "grpc" => cfg.grpc = matches!(val.to_ascii_lowercase().as_str(), "yes" | "true" | "1" | "on"),
-                "grpc port" | "grpcport" => cfg.grpc_port = val.parse().ok(),
-                "grpc fingerprint" | "grpcfingerprint" => {
-                    cfg.grpc_fingerprint = Some(val.replace(':', "").to_ascii_lowercase())
+    for raw in content.lines() {
+        let line = raw.split('#').next().unwrap_or("").trim();
+        if line.is_empty() { continue; }
+        if depth == 0 {
+            if let Some(open) = line.find('{') {
+                block = Some(line[..open].trim().to_ascii_lowercase());
+                depth = 1;
+                if block.as_deref() == Some("console") && console.is_none() {
+                    console = Some((String::new(), String::new()));
                 }
-                _ => {}
+                continue;
             }
+        } else if line.contains('{') {
+            depth += 1;
+            continue;
+        }
+        if line.starts_with('}') {
+            depth = depth.saturating_sub(1);
+            if depth == 0 { block = None; }
+            continue;
+        }
+        let Some(pos) = line.find('=') else { continue };
+        let key: String = line[..pos].split_whitespace().collect::<Vec<_>>().join(" ").to_lowercase();
+        let val = line[pos + 1..].trim().trim_matches('"').to_string();
+        match (block.as_deref(), key.as_str()) {
+            (Some("console"), "name") => { if let Some(c) = console.as_mut() { c.0 = val } }
+            (Some("console"), "password") => { if let Some(c) = console.as_mut() { c.1 = val } }
+            (Some("console"), _) => {}
+            (_, "address") => cfg.address = val,
+            (_, "port" | "dirport") => cfg.port = val.parse().unwrap_or(9101),
+            (_, "password") => director_password = val,
+            (_, "grpc") => cfg.grpc = matches!(val.to_ascii_lowercase().as_str(), "yes" | "true" | "1" | "on"),
+            (_, "grpc port" | "grpcport") => cfg.grpc_port = val.parse().ok(),
+            (_, "grpc fingerprint" | "grpcfingerprint") => {
+                cfg.grpc_fingerprint = Some(val.replace(':', "").to_ascii_lowercase())
+            }
+            _ => {}
         }
     }
 
+    match console {
+        Some((name, password)) if !name.is_empty() => {
+            cfg.name = name;
+            cfg.password = password;
+        }
+        _ => cfg.password = director_password,
+    }
     cfg
 }
 
@@ -199,9 +250,7 @@ fn main() {
     let mcp_allow_write = cli.mcp_write_enabled();
 
     // Load config file, then override with CLI args
-    let file_cfg = load_console_config(
-        cli.config.as_deref().unwrap_or("/etc/bareos/oconsole.conf")
-    );
+    let file_cfg = load_console_config(cli.config.as_deref());
 
     // CLI args override config file
     let address = cli.address.unwrap_or(file_cfg.address);
@@ -1355,6 +1404,50 @@ impl mcp::CommandRunner for GrpcRunner {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn director_name_is_not_the_login() {
+        // oconsole.conf as the package writes it: the Director's Name must not
+        // become the console name ("unknown console 'bareos-dir'").
+        let cfg = parse_console_config(
+            "Director {\n  Name = bareos-dir\n  address = localhost\n  Port = 9101\n  Password = \"dirpw\"\n}\n");
+        assert_eq!(cfg.name, "*UserAgent*");
+        assert_eq!(cfg.password, "dirpw");
+        assert_eq!(cfg.address, "localhost");
+        assert_eq!(cfg.port, 9101);
+    }
+
+    #[test]
+    fn console_resource_is_the_login() {
+        // bconsole.conf with a named console, as on a typical Bareos host.
+        let cfg = parse_console_config(concat!(
+            "Director {\n  Name = PDC-dir\n  DIRport = 9102\n#  Address = old.example\n",
+            "  Address = 192.0.2.10\n  Password = \"dirpw\"\n\n  # TLS\n  TLS Enable = yes\n}\n\n",
+            "Console {\n  Name = bconsole\n  Password = \"conpw\"\n}\n"));
+        assert_eq!(cfg.name, "bconsole");
+        assert_eq!(cfg.password, "conpw");
+        assert_eq!(cfg.address, "192.0.2.10");
+        assert_eq!(cfg.port, 9102);
+    }
+
+    #[test]
+    fn flat_file_and_grpc_keys_still_work() {
+        let cfg = parse_console_config("address = h\nport = 1\npassword = p\nGrpc = yes\nGrpc Port = 7\n");
+        assert_eq!((cfg.address.as_str(), cfg.port, cfg.name.as_str(), cfg.password.as_str()), ("h", 1, "*UserAgent*", "p"));
+        assert!(cfg.grpc);
+        assert_eq!(cfg.grpc_port, Some(7));
+    }
+
+    #[test]
+    fn explicit_config_path_is_read() {
+        let dir = std::env::temp_dir().join(format!("oconsole-cfg-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let only = dir.join("bconsole.conf");
+        std::fs::write(&only, "Director {\n Address = x\n Password = \"q\"\n}\n").unwrap();
+        let cfg = load_console_config(Some(only.to_str().unwrap()));
+        assert_eq!((cfg.address.as_str(), cfg.password.as_str()), ("x", "q"));
+        std::fs::remove_dir_all(&dir).ok();
+    }
 
     #[test]
     fn select_input_takes_following_text_as_prompt() {
