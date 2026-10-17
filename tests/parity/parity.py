@@ -385,6 +385,10 @@ def run(args):
             args.db = f'parity_{os.getpid()}'  # same name on both sides: show/use print it
             create_catalog_copy(args.db, template)
         try:
+            # Opt-in: reset private daemons (e.g. a private bareos-sd whose
+            # volumes the previous side labeled) before each side.
+            if os.environ.get('PARITY_BEFORE_SIDE'):
+                subprocess.run(os.environ['PARITY_BEFORE_SIDE'], shell=True, check=True)
             setup(args)
             # Cases with "isolated": true start jobs: they run after all other
             # cases in a Director of their own (fresh RecentJobResultsList,
