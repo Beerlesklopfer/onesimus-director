@@ -68,7 +68,7 @@ pub fn bstrutime(t: i64) -> String {
 }
 
 /// edit_uint64_with_commas().
-fn commas(v: u64) -> String {
+pub(crate) fn commas(v: u64) -> String {
     crate::sql_list::add_commas(&v.to_string())
 }
 
@@ -223,6 +223,8 @@ pub enum ReportKind {
     Consolidate,
     /// MigrationCleanup() of a Copy (true) or Migrate control job (C-058).
     MigrateControl(bool),
+    /// VerifyCleanup() (verify.rs, C-058).
+    Verify,
 }
 
 /// Job data known when the job is started (the JCR resources and their
@@ -626,11 +628,12 @@ pub fn end_of_job(director: &str, catalog: Option<&CatalogHandle>, report: &JobR
         ReportKind::Admin => return vec![admin_summary(report, outcome)],
         ReportKind::Consolidate => return vec![consolidate_summary(report, outcome)],
         ReportKind::MigrateControl(copy) => return vec![migrate_selection_summary(director, report, outcome, copy)],
+        ReportKind::Verify => return crate::verify::summary(director, report, outcome),
         _ => {}
     }
     let facts = catalog_facts(catalog, outcome.job_id, &report.client);
     match report.kind {
-        ReportKind::Admin | ReportKind::Consolidate | ReportKind::MigrateControl(_) => unreachable!(),
+        ReportKind::Admin | ReportKind::Consolidate | ReportKind::MigrateControl(_) | ReportKind::Verify => unreachable!(),
         ReportKind::Backup => backup_summary(director, report, outcome, &facts),
         ReportKind::Restore => restore_summary(director, report, outcome, &facts),
     }

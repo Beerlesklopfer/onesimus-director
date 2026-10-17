@@ -29,6 +29,7 @@ mod internal_jobs;
 mod job_manager;
 mod job_messages;
 mod job_worker;
+mod verify;
 mod json_output;
 mod kill;
 mod localtime;
