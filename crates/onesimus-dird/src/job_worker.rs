@@ -148,7 +148,9 @@ fn write_pipe_line(file: &mut std::fs::File, msg: &PipeMessage) {
     }
 }
 
-fn send_jmsg(msg: PipeMessage) {
+/// One pipe message as one write under the pipe lock: lines of the worker's
+/// threads never interleave (a torn JSON line is dropped by the Director).
+pub(crate) fn send_jmsg(msg: PipeMessage) {
     let mut pipe = JMSG_PIPE.lock().unwrap_or_else(|e| e.into_inner());
     if let Some(file) = pipe.as_mut() {
         write_pipe_line(file, &msg);
@@ -258,9 +260,9 @@ pub(crate) struct WorkerPipes {
 
 impl WorkerPipes {
     pub(crate) fn send(&mut self, msg: &PipeMessage) {
-        if let Ok(json) = serde_json::to_string(msg) {
-            let _ = writeln!(self.to_director, "{json}");
-        }
+        // Locked single write (JMSG_PIPE is a clone of to_director): the SD
+        // thread writes to the same pipe.
+        send_jmsg(msg.clone());
     }
 
     fn recv(&mut self) -> Option<PipeMessage> {
@@ -668,16 +670,10 @@ pub(crate) fn sd_catrec_loop(
                 // without an answer, `C`atReq/Catreq and `B`lastAttr to the
                 // Director, which may answer (an empty answer sends nothing).
                 if data.first() == Some(&b'U') {
-                    let pipe_msg = PipeMessage::UpdCat { job_id, data: hex::encode(&data) };
-                    if let Ok(json) = serde_json::to_string(&pipe_msg) {
-                        let _ = writeln!(to_dir, "{json}");
-                    }
+                    send_jmsg(PipeMessage::UpdCat { job_id, data: hex::encode(&data) });
                 } else if matches!(data.first(), Some(b'C' | b'B')) {
                     debug!("Worker {job_id} SD CatReq: {msg}");
-                    let pipe_msg = PipeMessage::CatReq { job_id, request: msg_raw.into_owned() };
-                    if let Ok(json) = serde_json::to_string(&pipe_msg) {
-                        let _ = writeln!(to_dir, "{json}");
-                    }
+                    send_jmsg(PipeMessage::CatReq { job_id, request: msg_raw.into_owned() });
                     // Read CatResp from Director via pipe
                     let mut buf = String::new();
                     let mut reader = BufReader::new(&mut *from_dir);
@@ -709,15 +705,13 @@ pub(crate) fn sd_catrec_loop(
                 } else if msg.starts_with("Status Job=") {
                     match storage_job_status(&msg) {
                         Ok(status) => {
-                            let update = PipeMessage::JobStatus { job_id, status: status as i32 };
-                            if let Ok(json) = serde_json::to_string(&update) { let _ = writeln!(to_dir, "{json}"); }
+                            send_jmsg(PipeMessage::JobStatus { job_id, status: status as i32 });
                         }
                         Err(error) => warn!("Worker {job_id}: {error}"),
                     }
                 } else if msg.starts_with("3099 Job") {
                     if let Some(status) = msg.split_whitespace().find_map(|part| part.strip_prefix("JobStatus=").and_then(|value| value.parse::<u8>().ok())) {
-                        let update = PipeMessage::JobStatus { job_id, status: status as i32 };
-                        if let Ok(json) = serde_json::to_string(&update) { let _ = writeln!(to_dir, "{json}"); }
+                        send_jmsg(PipeMessage::JobStatus { job_id, status: status as i32 });
                     }
                     debug!("Worker {job_id} SD: job end");
                     break;
