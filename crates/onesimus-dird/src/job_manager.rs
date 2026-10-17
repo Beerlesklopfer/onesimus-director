@@ -1030,7 +1030,7 @@ impl JobManager {
                 if job.observed_status == 'T' && ending.errors > 0 && !admin && !crate::verify::is_verify_job(job.job_id) { job.observed_status = 'W'; }
                 // DoNativeBackup(): CheckSoftquotas() after the job ran (S-23).
                 if let (Some(end), Some(cat)) = (job.jcr.backup_end.clone(), self.catalog.as_ref()) {
-                    if let Some(mut quota) = job.jcr.quota.take() {
+                    if let Some(quota) = job.jcr.quota.as_mut() {
                         let mut messages = Vec::new();
                         quota.check_soft(cat, job.job_id, now_unix(), end.sd_bytes, &mut messages);
                         post_catreq_messages(&self.bus, self.config.as_ref(), job,
@@ -1096,6 +1096,8 @@ impl JobManager {
                         vss: job.jcr.backup_end.as_ref().is_some_and(|e| e.vss),
                         encrypt: job.jcr.backup_end.as_ref().is_some_and(|e| e.encrypt),
                         fd_unreached: !job.jcr.fd_reached, sd_unreached: !job.jcr.sd_reached,
+                        quota_info: job.jcr.quota.as_ref().filter(|q| q.has_quota).map(|q| q.summary(
+                            job.jcr.backup_end.as_ref().map(|e| e.sd_bytes).unwrap_or(0))).unwrap_or_default(),
                     };
                     let director = self.config.as_ref().and_then(|c| c.read().ok()).map(|c| c.director.name.clone()).unwrap_or_default();
                     for (msg_type, text) in crate::job_messages::end_of_job(&director, self.catalog.as_ref(), report, &outcome) {
@@ -1154,6 +1156,7 @@ impl DirJob {
             "BackupConnectingSD" => (false, false, Some('S'), false),
             "BackupSDJobSetup" => (false, true, None, false),
             "BackupConnectingFD" => (false, true, Some('F'), false),
+            "BackupFDConnected" => (true, true, Some('R'), false),
             "ConnectingSD" => (true, false, Some('S'), false),
             "SDJobSetup" | "SDUseDevice" | "SDRun" | "SDBootstrap" => (true, true, None, false),
             "FDJobSetup" | "FDStorage" | "FDSession" => (true, true, Some('R'), false),

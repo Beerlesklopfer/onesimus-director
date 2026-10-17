@@ -1758,6 +1758,13 @@ fn run_selected(
         .map(|r| r.directives.clone()).unwrap_or_default();
     let lan_address = |kind: &str, name: &str| crate::job_messages::raw_directive(&config, kind, name, "lanaddress");
     let (storage_lan, client_lan) = (lan_address("storage", &storage.name), lan_address("client", &client.name));
+    let director_dirs: Vec<bareos_config::raw::Directive> = config.raw.iter().find(|r| r.norm_type() == "director")
+        .map(|r| r.directives.clone()).unwrap_or_default();
+    let director_time = |key: &str, default: u64| if director_dirs.iter().any(|d| d.norm_key() == key) {
+        crate::commands::defaults::time_directive(&director_dirs, key)
+    } else {
+        default
+    };
     let session = crate::backup_worker::BackupSession {
         ids: crate::backup::JobIds { level: level_char, client_id, pool_id, fileset_id: fsr.id },
         since_utime: crate::btime::str_to_utime(&since.stime),
@@ -1800,6 +1807,8 @@ fn run_selected(
             setup_messages.extend(messages.into_iter().map(|(code, text)| (crate::backup::quota_msg_type(code), text)));
             quota
         },
+        fd_connect_timeout: director_time("fdconnecttimeout", 180),
+        sd_connect_timeout: director_time("sdconnecttimeout", 1800),
     };
 
     let params = JobParams {

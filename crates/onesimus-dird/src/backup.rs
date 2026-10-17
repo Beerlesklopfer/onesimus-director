@@ -670,6 +670,21 @@ impl Quota {
         false
     }
 
+    /// GenerateBackupSummary(): the quota lines of the job report.
+    pub(crate) fn summary(&self, sd_bytes: u64) -> String {
+        use crate::job_messages::{commas, suffix};
+        let grace = if self.grace_time != 0 {
+            crate::job_messages::bstrftimes((self.grace_time + self.grace_period) as i64)
+        } else {
+            "Soft Quota not exceeded".to_string()
+        };
+        let used = self.sum + sd_bytes;
+        format!("  Quota Used:             {} ({}B)\n  Burst Quota:            {} ({}B)\n  Soft Quota:             {} ({}B)\n\
+                 \x20 Hard Quota:             {} ({}B)\n  Grace Expiry Date:      {grace}\n",
+            commas(used), suffix(used), commas(self.quota_limit), suffix(self.quota_limit), commas(self.soft),
+            suffix(self.soft), commas(self.hard), suffix(self.hard))
+    }
+
     /// quota.cc FetchRemainingQuotas(): the SD Job command's Quota=.
     pub(crate) fn remaining(&self, now: i64) -> u64 {
         if !self.has_quota {

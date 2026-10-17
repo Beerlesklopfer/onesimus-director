@@ -1018,6 +1018,25 @@ fn wait_for_fd_end_job(fd: &mut BnetStream<tls_psk::PskStream>, job_id: u32) -> 
 
 pub(crate) fn connect_fd(p: &JobParams) -> Result<(BnetStream<tls_psk::PskStream>, String), String> {
     let sock = resolve_connect(&format!("{}:{}", p.fd_address, p.fd_port), 3)?;
+    connect_fd_on(p, sock)
+}
+
+/// The TCP connection of a daemon connection (the socket is shut down on
+/// SIGTERM); the io::Error for BareosSocketTCP::connect()'s retry messages.
+pub(crate) fn tcp_connect(host: &str, port: u16) -> std::io::Result<std::net::TcpStream> {
+    use std::net::ToSocketAddrs;
+    let sa = (host, port).to_socket_addrs()?.next()
+        .ok_or_else(|| std::io::Error::from_raw_os_error(libc::EHOSTUNREACH))?;
+    let sock = std::net::TcpStream::connect_timeout(&sa, std::time::Duration::from_secs(3))?;
+    register_cancel_fd(std::os::fd::AsRawFd::as_raw_fd(&sock));
+    if WORKER_CANCEL.load(Ordering::SeqCst) {
+        let _ = sock.shutdown(std::net::Shutdown::Both);
+    }
+    Ok(sock)
+}
+
+/// TLS-PSK, Hello and CRAM-MD5 with the File daemon on a connected socket.
+pub(crate) fn connect_fd_on(p: &JobParams, sock: std::net::TcpStream) -> Result<(BnetStream<tls_psk::PskStream>, String), String> {
     sock.set_read_timeout(None).ok();
     let psk = tls_psk::password_to_psk(&p.fd_password);
     let stream = tls_psk::psk_connect(sock, &format!("R_DIRECTOR\x1e{}", p.director_name), &psk)
@@ -1035,6 +1054,11 @@ pub(crate) fn connect_fd(p: &JobParams) -> Result<(BnetStream<tls_psk::PskStream
 
 pub(crate) fn connect_sd(p: &JobParams) -> Result<(BnetStream<tls_psk::PskStream>, String), String> {
     let sock = resolve_connect(&format!("{}:{}", p.sd_address, p.sd_port), 3)?;
+    connect_sd_on(p, sock)
+}
+
+/// TLS-PSK, Hello and CRAM-MD5 with the Storage daemon on a connected socket.
+pub(crate) fn connect_sd_on(p: &JobParams, sock: std::net::TcpStream) -> Result<(BnetStream<tls_psk::PskStream>, String), String> {
     sock.set_read_timeout(None).ok();
     let psk = tls_psk::password_to_psk(&p.sd_password);
     let stream = tls_psk::psk_connect(sock, &format!("R_DIRECTOR\x1e{}", p.director_name), &psk)
@@ -1120,6 +1144,14 @@ pub fn install_worker_signal_handlers() {
         libc::signal(libc::SIGTERM, worker_sigterm as libc::sighandler_t);
         libc::signal(libc::SIGUSR1, worker_sigusr1 as libc::sighandler_t);
         libc::signal(libc::SIGUSR2, worker_sigusr2 as libc::sighandler_t);
+        // The Director blocks SIGINT/SIGTERM in all its threads (main.rs);
+        // the forked worker inherits that mask and would never see a cancel.
+        let mut set: libc::sigset_t = std::mem::zeroed();
+        libc::sigemptyset(&mut set);
+        for sig in [libc::SIGTERM, libc::SIGUSR1, libc::SIGUSR2] {
+            libc::sigaddset(&mut set, sig);
+        }
+        libc::pthread_sigmask(libc::SIG_UNBLOCK, &set, std::ptr::null_mut());
     }
 }
 

@@ -61,6 +61,44 @@ pub struct BackupSession {
     /// The client's quota (quota.cc), None without Soft/Hard Quota (S-23).
     #[serde(default)]
     pub quota: Option<crate::backup::Quota>,
+    /// Director FD/SD Connect Timeout (max_retry_time of the connections).
+    #[serde(default)]
+    pub fd_connect_timeout: u64,
+    #[serde(default)]
+    pub sd_connect_timeout: u64,
+}
+
+/// lib/bsock_tcp.cc BareosSocketTCP::connect(): the TCP connection, tried
+/// every 10 seconds; the warning comes with the second failure (then every
+/// 5 minutes), the fatal "Unable to connect" after `max_retry` seconds. A
+/// canceled job stops trying (Err with an empty text).
+fn connect_retry(job_id: u32, name: &str, host: &str, port: u16, max_retry: u64) -> Result<std::net::TcpStream, String> {
+    const RETRY_INTERVAL: i64 = 10;
+    let begin = now();
+    let mut i: i64 = 0;
+    loop {
+        let err = match job_worker::tcp_connect(host, port) {
+            Ok(sock) => return Ok(sock),
+            Err(e) => crate::commands::restore::errno_text(&e),
+        };
+        if job_worker::WORKER_CANCEL.load(Ordering::SeqCst) {
+            return Err(String::new());
+        }
+        if i < 0 {
+            i = 60 * 5;
+            jmsg(job_id, M_WARNING, format!("lib/bsock_tcp.cc:171 Could not connect to {name} on {host}:{port}. ERR={err}\nRetrying ...\n"));
+        }
+        for _ in 0..RETRY_INTERVAL {
+            if job_worker::WORKER_CANCEL.load(Ordering::SeqCst) {
+                return Err(String::new());
+            }
+            std::thread::sleep(std::time::Duration::from_secs(1));
+        }
+        if begin + max_retry as i64 <= now() {
+            return Err(format!("lib/bsock_tcp.cc:179 Unable to connect to {name} on {host}:{port}. ERR={err}\n"));
+        }
+        i -= RETRY_INTERVAL;
+    }
 }
 
 fn send_catalog(job_id: u32, sql: String) {
@@ -170,6 +208,16 @@ pub fn run(params: &JobParams, session: &BackupSession, pipes: &mut WorkerPipes)
         }
         finish(job_id, session, b'f', 0, 0, 1, vol, None)
     };
+    // TerminateBackupWithError(): JS_ErrorTerminated, WaitForJobTermination()
+    // without an FD status ("No Job status returned from FD.").
+    let fail_fd = |text: String, vol: (u32, u32)| {
+        if !text.is_empty() {
+            jmsg(job_id, M_FATAL, text);
+        }
+        jmsg(job_id, M_FATAL, "No Job status returned from FD.\n".into());
+        let term = if job_worker::WORKER_CANCEL.load(Ordering::SeqCst) { b'A' } else { b'E' };
+        finish(job_id, session, term, 0, 0, 1, vol, Some((b'E', 0, &SdEnd::default(), false, false)))
+    };
 
     // job_thread(): "Version: …"; DoNativeBackup(): "Start Backup JobId %u, Job=%s".
     jmsg(job_id, M_INFO, crate::job_messages::version_text());
@@ -203,13 +251,15 @@ pub fn run(params: &JobParams, session: &BackupSession, pipes: &mut WorkerPipes)
 
     // ConnectToStorageDaemon() (JS_WaitSD) and StartStorageDaemonJob().
     state(job_id, "BackupConnectingSD");
-    let mut sd = match job_worker::connect_sd(params) {
+    let sd = connect_retry(job_id, "Storage daemon", &params.sd_address, params.sd_port, session.sd_connect_timeout)
+        .and_then(|sock| job_worker::connect_sd_on(params, sock).map_err(|e| format!("Failed to connect to Storage daemon: {e}\n")));
+    let mut sd = match sd {
         Ok((sd, cipher)) => {
             jmsg(job_id, M_INFO, crate::job_messages::connected_text("Storage daemon", &params.sd_address, params.sd_port, Some(&cipher)));
             jmsg(job_id, M_INFO, crate::job_messages::cipher_text(Some(&cipher)));
             sd
         }
-        Err(e) => return fail(format!("Failed to connect to Storage daemon: {e}\n"), (0, 0)),
+        Err(e) => return fail(e, (0, 0)),
     };
     state(job_id, "BackupSDJobSetup");
     let (vol, auth_key) = match start_sd_job(&mut sd, params, session, remaining_quota) {
@@ -225,7 +275,15 @@ pub fn run(params: &JobParams, session: &BackupSession, pipes: &mut WorkerPipes)
     if params.client_first_connection {
         jmsg(job_id, M_INFO, crate::job_messages::PROBING_TEXT.to_string());
     }
-    let mut fd = match job_worker::connect_fd(params) {
+    let who = format!("Client: {}", params.client_name);
+    let fd = connect_retry(job_id, &who, &params.fd_address, params.fd_port, session.fd_connect_timeout)
+        .and_then(|sock| {
+            // jcr->file_bsock is set once the TCP connection stands (a cancel
+            // now goes to the File daemon).
+            state(job_id, "BackupFDConnected");
+            job_worker::connect_fd_on(params, sock).map_err(|e| format!("Failed to connect to File daemon: {e}\n"))
+        });
+    let mut fd = match fd {
         Ok((fd, cipher)) => {
             let who = format!("Client: {}", params.client_name);
             jmsg(job_id, M_INFO, crate::job_messages::connected_text(&who, &params.fd_address, params.fd_port, Some(&cipher)));
@@ -235,14 +293,18 @@ pub fn run(params: &JobParams, session: &BackupSession, pipes: &mut WorkerPipes)
         }
         Err(e) => {
             let _ = sd.send_signal(BnetSignal::Terminate);
-            return fail(format!("Failed to connect to File daemon: {e}\n"), vol);
+            // ConnectToFileDaemon(): "\nFailed to connect to client \"%s\".\n"
+            if !e.is_empty() {
+                jmsg(job_id, M_FATAL, e);
+            }
+            return fail_fd(format!("\nFailed to connect to client \"{}\".\n", params.client_name), vol);
         }
     };
     state(job_id, "FDJobSetup");
     if let Err(e) = setup_fd(&mut fd, params, session, vol, &auth_key, &before) {
         let _ = fd.send_signal(BnetSignal::Terminate);
         let _ = sd.send_signal(BnetSignal::Terminate);
-        return fail(e, vol);
+        return fail_fd(e, vol);
     }
 
     // The job start record again, after the client run scripts.
@@ -253,7 +315,7 @@ pub fn run(params: &JobParams, session: &BackupSession, pipes: &mut WorkerPipes)
     if let Err(e) = send_accurate_files(&mut fd, pipes, job_id, session, start) {
         let _ = fd.send_signal(BnetSignal::Terminate);
         let _ = sd.send_signal(BnetSignal::Terminate);
-        return fail(e, vol);
+        return fail_fd(e, vol);
     }
 
     // ReserveWriteDevice().
@@ -278,7 +340,7 @@ pub fn run(params: &JobParams, session: &BackupSession, pipes: &mut WorkerPipes)
     if let Err(e) = contact {
         let _ = fd.send_signal(BnetSignal::Terminate);
         let _ = sd.send_signal(BnetSignal::Terminate);
-        return fail(e, vol);
+        return fail_fd(e, vol);
     }
     if sd.send_str("run").is_err() {
         let _ = fd.send_signal(BnetSignal::Terminate);
