@@ -21,6 +21,13 @@ pub fn cmd_run(ast: &CommandAst, ctx: &ExecContext) -> CommandResult {
 /// Start the job of a confirmed run: the resolved request (job, level,
 /// client, fileset, storage, pool and `yes`) goes through run_selected.
 pub(crate) fn start_job(ast: &CommandAst, ctx: &ExecContext, job: bareos_config::resources::JobResource) -> CommandResult {
+    // ua_run.cc: jcr->dir_impl->IgnoreDuplicateJobChecking (S-22).
+    let ignore = crate::ua_select::find_arg_with_value(ast, "ignoreduplicatecheck")
+        .and_then(crate::ua_select::is_yesno).unwrap_or(false);
+    crate::scheduled_run::with_ignore_duplicate_check(ignore, || start_job_with_config(ast, ctx, job))
+}
+
+fn start_job_with_config(ast: &CommandAst, ctx: &ExecContext, job: bareos_config::resources::JobResource) -> CommandResult {
     match ctx.config.as_ref().map(|c| c.read()) {
         Some(Ok(config)) => run_selected(ast, ctx, config, job),
         Some(Err(_)) => CommandResult::error("Config read error\n".to_string()),
@@ -1824,7 +1831,7 @@ fn enqueue_with_report(mgr: &std::sync::Mutex<crate::job_manager::JobManager>, j
     let job_id = start.params.job_id;
     crate::scheduled_run::apply(job_id, &mut start.priority, &mut report);
     let mut mgr = mgr.lock().unwrap();
-    mgr.enqueue_job(job_id, job_name, start, client, storage);
+    mgr.enqueue_job_with(job_id, job_name, start, client, storage, crate::scheduled_run::start_flags());
     mgr.set_job_report(job_id, report);
 }
 

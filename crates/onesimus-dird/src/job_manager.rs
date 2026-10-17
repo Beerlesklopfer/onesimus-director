@@ -12,6 +12,9 @@ use tracing::{info, debug, warn, error};
 use crate::catalog_worker::CatalogHandle;
 use crate::commands::bvfs::Db;
 use crate::job_worker::{JobHandle, PipeMessage};
+
+mod limits;
+pub use limits::StartFlags;
 use crate::message_bus::{MessageBus, BusMessage};
 use crate::director_config::SharedConfig;
 
@@ -66,6 +69,8 @@ struct JcrState {
     /// Job report data (resources and their sources), set when the job is
     /// started; None for jobs without an end-of-job report. C-051.
     report: Option<crate::job_messages::JobReport>,
+    /// Time limits and duplicate checks (limits.rs, S-22).
+    limits: limits::LimitState,
 }
 
 /// What a queued job needs to start (jobq.cc JobqAdd). Compatibility log C-048.
@@ -232,6 +237,8 @@ pub struct JobManager {
     wait_interval: std::time::Duration,
     /// sched_wait() "waiting N seconds" job messages not yet posted.
     wait_messages: Vec<(u32, std::time::Instant, String)>,
+    /// JobMonitorWatchdog timer (limits.rs, S-22).
+    monitor: limits::Monitor,
 }
 
 /// RecentJobResultsList max_count_recent_job_results.
@@ -247,7 +254,7 @@ impl JobManager {
             start_delay: std::time::Duration::from_secs(if cfg!(test) { 0 } else { 2 }),
             wait_check: std::collections::HashMap::new(),
             wait_interval: std::time::Duration::from_secs(if cfg!(test) { 0 } else { 30 }),
-            wait_messages: Vec::new() }
+            wait_messages: Vec::new(), monitor: Default::default() }
     }
 
     /// The jobq_server pause before a ready job runs (tests).
@@ -316,6 +323,13 @@ impl JobManager {
     /// priority and the Director/Job/Client/Storage Maximum Concurrent Jobs
     /// before its worker is forked. Compatibility log C-048.
     pub fn enqueue_job(&mut self, job_id: u32, job_name: &str, start: QueuedStart, client: &str, storage: &str) {
+        self.enqueue_job_with(job_id, job_name, start, client, storage, StartFlags::default());
+    }
+
+    /// [`Self::enqueue_job`] with the run's duplicate-check flag and
+    /// MaxRunSchedTime: SetupJob() runs AllowDuplicateJob() first (S-22).
+    pub fn enqueue_job_with(&mut self, job_id: u32, job_name: &str, start: QueuedStart, client: &str, storage: &str,
+                            flags: StartFlags) {
         let handle = JobHandle::pending(job_id, job_name, &start.params.unique_job);
         let allow_mixed_priority = self.allow_mixed_priority(job_name);
         let delayed = start.sched_time > now_unix();
@@ -327,7 +341,14 @@ impl JobManager {
             jcr: JcrState { priority: start.priority, allow_mixed_priority, sched_time: start.sched_time,
                 params: Some(start.params), ..Default::default() },
         });
-        if delayed {
+        // StartServer(): a server thread started for this job runs the
+        // jobs already in the ready queue at once (jobq.cc).
+        for id in &self.ready { self.ready_at.remove(id); }
+        if self.admit_job(job_id, flags) {
+            // JobqAdd() of a canceled job: to the front of the ready queue.
+            if let Some(job) = self.jobs.iter_mut().find(|j| j.job_id == job_id) { job.observed_status = 'A'; }
+            self.ready.push_front(job_id);
+        } else if delayed {
             // jobq.cc sched_wait(): the message, then a look every 30 seconds.
             let wtime = self.get_job(job_id).map_or(0, |j| j.jcr.sched_time - now_unix()).max(0);
             let unique = self.get_job(job_id).map(|j| j.handle.unique_job.clone()).unwrap_or_default();
@@ -497,6 +518,9 @@ impl JobManager {
                 if self.running().count() >= max_workers { break; }
                 if self.ready_at.get(&id).is_some_and(|at| *at > std::time::Instant::now()) { break; }
             }
+            // job_thread(): Max Start Delay, MaxRunSchedTime (limits.rs).
+            let start_fatals = if canceled { Vec::new() } else { self.start_checks(id) };
+            let canceled = canceled || !start_fatals.is_empty();
             self.ready.pop_front();
             self.ready_at.remove(&id);
             let spawner = self.spawner;
@@ -511,6 +535,9 @@ impl JobManager {
                         job_id: id, job_name: job.job_name.clone(), msg_type: crate::message_bus::MsgType::Info,
                         text: crate::job_messages::version_text(), timestamp: now_unix() });
                 }
+                let name = job.job_name.clone();
+                self.post_start_fatals(id, &name, start_fatals);
+                let Some(job) = self.jobs.iter_mut().find(|j| j.job_id == id) else { continue };
                 job.pending_end = Some(JobEnd { term_code: b'A' as i32, files: 0, bytes: 0, errors: 0,
                     vol_session_id: 0, vol_session_time: 0 });
                 job.worker_exit = Some(0);
@@ -705,6 +732,7 @@ impl JobManager {
     /// Poll all active worker pipes. Non-blocking.
     /// Handles CatReq, status updates, state changes, job completion.
     pub fn poll_all(&mut self) {
+        self.job_monitor();
         if !self.wait_messages.is_empty() {
             let now = std::time::Instant::now();
             let (due, later): (Vec<_>, Vec<_>) = std::mem::take(&mut self.wait_messages).into_iter().partition(|m| m.1 <= now);
@@ -1127,6 +1155,89 @@ Job { Name = single; Client = fd1; Storage = File }
     fn kill_all(m: &mut JobManager) {
         let ids: Vec<u32> = m.jobs.iter().filter(|j| j.handle.spawned() && j.completed_at.is_none()).map(|j| j.job_id).collect();
         for id in ids { finish(m, id); }
+    }
+
+    /// S-22 (limits.rs): a job of `name` queued with `sched_time` and flags.
+    fn enqueue_at(m: &mut JobManager, id: u32, name: &str, sched_time: i64, flags: StartFlags) {
+        m.enqueue_job_with(id, name, QueuedStart { params: params(id, name), priority: 10, sched_time }, "fd1", "File", flags);
+    }
+
+    fn limits_config(job: &str) -> String {
+        format!("{CONFIG}Job {{ Name = lim; Client = fd1; Storage = File; Maximum Concurrent Jobs = 10; {job} }}\n")
+    }
+
+    /// The job ended canceled without a worker (JS_Canceled end).
+    fn ended_canceled(m: &JobManager, id: u32) -> bool {
+        let job = m.get_job(id).unwrap();
+        !job.handle.spawned() && job.pending_end.as_ref().is_some_and(|e| e.term_code == b'A' as i32)
+    }
+
+    #[test]
+    fn s22_duplicate_not_allowed_cancels_the_new_job() {
+        let mut m = manager(&limits_config("Allow Duplicate Jobs = no"));
+        enqueue_at(&mut m, 1, "lim", now_unix() + 3600, StartFlags::default());
+        enqueue_at(&mut m, 2, "lim", now_unix(), StartFlags::default());
+        assert!(ended_canceled(&m, 2));
+        assert_eq!(state(&m, 1), ('t', false));
+        // ignoreduplicatecheck=yes runs it
+        enqueue_at(&mut m, 3, "lim", now_unix(), StartFlags { ignore_duplicate_check: true, ..Default::default() });
+        assert_eq!(state(&m, 3), ('R', true));
+        kill_all(&mut m);
+    }
+
+    #[test]
+    fn s22_cancel_queued_duplicates_cancels_the_waiting_job() {
+        let mut m = manager(&limits_config("Allow Duplicate Jobs = no; Cancel Queued Duplicates = yes"));
+        enqueue_at(&mut m, 1, "lim", now_unix() + 3600, StartFlags::default());
+        enqueue_at(&mut m, 2, "lim", now_unix(), StartFlags::default());
+        assert_eq!(state(&m, 2), ('R', true));
+        assert!(is_job_canceled(m.get_job(1).unwrap().status()));
+        kill_all(&mut m);
+    }
+
+    #[test]
+    fn s22_max_start_delay_and_run_sched_time_cancel_at_start() {
+        let mut m = manager(&limits_config("Max Start Delay = 60"));
+        enqueue_at(&mut m, 1, "lim", now_unix() - 120, StartFlags::default());
+        assert!(ended_canceled(&m, 1));
+        enqueue_at(&mut m, 2, "lim", now_unix() - 30, StartFlags::default());
+        assert_eq!(state(&m, 2), ('R', true));
+        // the Job's MaxRunSchedTime has no effect, a Run's has
+        let mut m2 = manager(&limits_config("Max Run Sched Time = 60"));
+        enqueue_at(&mut m2, 3, "lim", now_unix() - 120, StartFlags::default());
+        assert_eq!(state(&m2, 3), ('R', true));
+        enqueue_at(&mut m2, 4, "lim", now_unix() - 120, StartFlags { max_run_sched_time: 60, ..Default::default() });
+        assert!(ended_canceled(&m2, 4));
+        kill_all(&mut m);
+        kill_all(&mut m2);
+    }
+
+    #[test]
+    fn s22_job_monitor_cancels_after_max_run_time() {
+        let mut m = manager(&limits_config("Max Run Time = 10"));
+        enqueue_at(&mut m, 1, "lim", now_unix(), StartFlags::default());
+        m.set_phase(1, DirJobPhase::Running);
+        m.fire_job_monitor();
+        assert_eq!(state(&m, 1).0, 'R');
+        m.jobs.iter_mut().find(|j| j.job_id == 1).unwrap().start_time -= 11;
+        m.fire_job_monitor();
+        assert_eq!(m.get_job(1).unwrap().status(), 'A');
+        assert_eq!(m.get_job(1).unwrap().phase, DirJobPhase::Canceling);
+        kill_all(&mut m);
+    }
+
+    #[test]
+    fn s22_new_queue_server_starts_ready_jobs_at_once() {
+        // jobq.cc: the server of a second JobqAdd takes the first job from the
+        // ready queue without the 2-second pause.
+        let mut m = manager(CONFIG);
+        m.set_start_delay(std::time::Duration::from_secs(30));
+        enqueue(&mut m, 1, "a", 5, "fd1", "File");
+        assert_eq!(state(&m, 1), ('C', false));
+        enqueue(&mut m, 2, "a", 10, "fd1", "File");
+        assert_eq!(state(&m, 1), ('R', true));
+        assert_eq!(state(&m, 2).1, false);
+        kill_all(&mut m);
     }
 
     #[test]
