@@ -113,10 +113,9 @@ fn connect_file_daemon(params: &JobParams, session: &BackupSession) -> Result<Bn
                 return Ok(fd);
             }
             Err(FdHandshakeError::Tls(error)) => {
-                if job_worker::WORKER_CANCEL.load(Ordering::SeqCst) {
-                    return Err(String::new());
-                }
-                // OpensslPostErrors(): one message per OpenSSL error.
+                // OpensslPostErrors(): one message per OpenSSL error. (A cancel
+                // shut the socket down; the original's handshake fails when the
+                // connection breaks, the same way.)
                 for err in openssl_errors(&error) {
                     jmsg(job_id, M_FATAL, format!("lib/tls_openssl_private.cc:403 Connect failure: ERR={err}\n"));
                 }
@@ -137,7 +136,12 @@ fn connect_file_daemon(params: &JobParams, session: &BackupSession) -> Result<Bn
         // JS_Running again and falls back to cleartext unless the client
         // requires TLS; cleartext has failed.
         if tls {
+            // jcr->setJobStatus(JS_Running): also a cancel is forgotten.
             FIRST_ERROR.store(0, Ordering::SeqCst);
+            if job_worker::WORKER_CANCEL.load(Ordering::SeqCst) {
+                job_worker::forget_cancel();
+            }
+            job_worker::send_jmsg(PipeMessage::ResetStatus { job_id });
             if session.client_tls_required {
                 break;
             }

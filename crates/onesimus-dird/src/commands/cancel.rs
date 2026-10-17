@@ -33,7 +33,8 @@ impl CancelLinks for NetLinks {
     fn file_daemon(&mut self, client: &ClientResource, director: &str, command: &str)
         -> (String, Result<Vec<String>, String>) {
         let (info, fd) = crate::fd_protocol::connect_fd_console(
-            &client.address, client.port, &client.password, director, &client.name);
+            &client.address, client.port, &client.password, director, &client.name,
+            (client.tls_enable, client.tls_require));
         let reply = fd.map(|mut fd| {
             let mut messages = Vec::new();
             // `while (fd->recv() >= 0)`: data frames up to the first signal.

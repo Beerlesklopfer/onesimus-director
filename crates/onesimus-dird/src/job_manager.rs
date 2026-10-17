@@ -988,6 +988,11 @@ impl JobManager {
                         }
                     }
 
+                    PipeMessage::ResetStatus { .. } => {
+                        job.observed_status = 'R';
+                        job.phase = DirJobPhase::Running;
+                    }
+
                     PipeMessage::ClientHandshake { client, cleartext, .. } => {
                         crate::fd_protocol::store_client_handshake(&client, cleartext);
                     }

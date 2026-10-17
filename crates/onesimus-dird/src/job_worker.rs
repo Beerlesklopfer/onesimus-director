@@ -166,6 +166,10 @@ pub enum PipeMessage {
     /// (connection_successful_handshake_; cleartext or immediate TLS). S-27.
     #[serde(rename = "client_handshake")]
     ClientHandshake { job_id: u32, client: String, cleartext: bool },
+    /// jcr->setJobStatus(JS_Running) without the priority check (fd_cmds.cc
+    /// UpdateFailedConnectionHandshakeMode): even a cancel is forgotten. S-28.
+    #[serde(rename = "reset_status")]
+    ResetStatus { job_id: u32 },
     /// job_thread() RunScripts(jcr, ..., label) in the Director (console
     /// commands need it); the worker waits for [`PipeMessage::RunScriptsDone`].
     #[serde(rename = "run_scripts")]
@@ -1182,6 +1186,12 @@ pub(crate) fn now_unix() -> i64 { SystemTime::now().duration_since(UNIX_EPOCH).u
 // ============================================================================
 
 pub(crate) static WORKER_CANCEL: AtomicBool = AtomicBool::new(false);
+
+/// The job's status was set back to JS_Running after a cancel (S-28): the
+/// worker goes on as if it had not been canceled.
+pub(crate) fn forget_cancel() {
+    WORKER_CANCEL.store(false, Ordering::SeqCst);
+}
 /// A Jmsg M_FATAL of the worker set JS_FatalError.
 static WORKER_FATAL: AtomicBool = AtomicBool::new(false);
 static WORKER_PAUSED: AtomicBool = AtomicBool::new(false);

@@ -514,6 +514,12 @@ fn convert_raw_resource(raw: &RawResource) -> Result<Resource, ConfigError> {
             if let Some(v) = get("ndmpuselmdb") {
                 client.ndmp_use_lmdb = parse_bool(v).map(|(_, b)| b).unwrap_or(true);
             }
+            if let Some(v) = get("tlsenable") {
+                client.tls_enable = parse_bool(v).map(|(_, b)| b).unwrap_or(true);
+            }
+            if let Some(v) = get("tlsrequire") {
+                client.tls_require = parse_bool(v).map(|(_, b)| b).unwrap_or(true);
+            }
             Ok(Resource::Client(client))
         }
 

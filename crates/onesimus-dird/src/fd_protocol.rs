@@ -255,16 +255,18 @@ fn store_handshake(client: &str, mode: HandshakeMode) {
 /// console text it produces (OutputMessageForConnectionTry,
 /// SendInfoSuccess, SendInfoChosenCipher) and the authenticated connection.
 /// The text is also returned when the connection fails.
-pub fn connect_fd_console(address: &str, port: u16, password: &str, director_name: &str, client_name: &str)
+pub fn connect_fd_console(address: &str, port: u16, password: &str, director_name: &str, client_name: &str,
+                          tls: (bool, bool))
     -> (String, Result<BnetStream<bareos_bnet::stream::AnyStream>, String>) {
+    let (tls_enable, tls_require) = tls;
     let stored = stored_handshake(client_name);
     let mut info = String::new();
     if stored.is_none() {
         info.push_str("Probing client protocol... (result will be saved until config reload)");
     }
-    // Clients are TLS-configured by default (TLS Enable = yes), so probing
-    // starts with immediate TLS and falls back to cleartext.
-    let mut mode = stored.unwrap_or(HandshakeMode::TlsFirst);
+    // SetConnectionHandshakeMode(): the stored mode, else immediate TLS for a
+    // TLS-configured client (TLS Enable, default yes), else cleartext.
+    let mut mode = stored.unwrap_or(if tls_enable { HandshakeMode::TlsFirst } else { HandshakeMode::CleartextFirst });
     let mut last_error;
     loop {
         match connect_fd_mode(address, port, password, director_name, mode) {
@@ -282,7 +284,9 @@ pub fn connect_fd_console(address: &str, port: u16, password: &str, director_nam
             Err(error) => last_error = error,
         }
         if last_error.starts_with("connect:") || mode == HandshakeMode::CleartextFirst { break; }
-        // UpdateFailedConnectionHandshakeMode: TLS is not required by default.
+        // UpdateFailedConnectionHandshakeMode(): no cleartext when the client
+        // requires TLS (TLS Require, default yes). S-28.
+        if tls_enable && tls_require { break; }
         mode = HandshakeMode::CleartextFirst;
     }
     (info, Err(last_error))

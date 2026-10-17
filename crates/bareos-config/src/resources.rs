@@ -84,6 +84,10 @@ pub struct ClientResource {
     pub ndmp_block_size: u32,
     /// `NdmpUseLmdb` (default true).
     pub ndmp_use_lmdb: bool,
+    /// `TLS Enable` / `TLS Require` (lib/tls_resource_items.h, both default
+    /// yes): the handshake modes the Director may try.
+    pub tls_enable: bool,
+    pub tls_require: bool,
 }
 
 impl Default for ClientResource {
@@ -102,6 +106,8 @@ impl Default for ClientResource {
             ndmp_log_level: 4,
             ndmp_block_size: 64512,
             ndmp_use_lmdb: true,
+            tls_enable: true,
+            tls_require: true,
         }
     }
 }

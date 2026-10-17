@@ -8,7 +8,8 @@ pub fn cmd_resolve(ast: &CommandAst, ctx: &ExecContext) -> CommandResult {
     resolve_with(ast, ctx, host_to_ip_addrs,
         |client, director, commands| {
             let (info, fd) = crate::fd_protocol::connect_fd_console(&client.address,
-                client.port, &client.password, director, &client.name);
+                client.port, &client.password, director, &client.name,
+            (client.tls_enable, client.tls_require));
             (info, fd.and_then(|fd| crate::fd_protocol::fd_query_commands(fd, commands)))
         },
         |storage, director, commands| bareos_stored::command::sd_query_commands(&storage.address,

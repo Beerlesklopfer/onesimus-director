@@ -1307,7 +1307,8 @@ fn client_status(client: &bareos_config::resources::ClientResource, cmd: Option<
         output.push_str(&format!("Connecting to Client {} at {}:{}\n", client.name, client.address, client.port));
     }
     let (info, fd) = crate::fd_protocol::connect_fd_console(
-        &client.address, client.port, &client.password, director, &client.name);
+        &client.address, client.port, &client.password, director, &client.name,
+            (client.tls_enable, client.tls_require));
     output.push_str(&info);
     let command = match cmd {
         Some(cmd) => format!(".status {cmd}"),
