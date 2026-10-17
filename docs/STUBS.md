@@ -23,8 +23,8 @@ Fälle ab, die echte Jobs starten können (`unsafe_job_start`).
 | S-05 | `onesimus-dird/src/commands/job.rs`, `internal_jobs.rs` | Copy/Migrate-Arbeitsjobs: `run job=<Copy> jobid=N` abgewiesen, Steuerjob meldet „Could not start migration job.“ | C-058, #1 | offen |
 | S-06 | `onesimus-dird/src/commands/job.rs` | Consolidate mit Always-Incremental-Jobs „not available yet“ | C-058, #1 | offen |
 | S-07 | Job-Ablauf (alle Jobtypen) | RunScripts (RunBeforeJob/RunAfterJob, Client-/Console-Skripte) laufen nicht | C-058, #1 | offen |
-| S-08 | `onesimus-dird/src/commands/admin.rs` (`UpdateAction::Unsupported`) | `update volume encrypt=` „not supported“ | C-067, #2 | offen |
-| S-09 | `onesimus-dird/src/commands/restore.rs` | API-2-Restore-Start liefert `{"result":{}}` statt `run.jobid` | C-072, #3 | offen |
+| S-08 | `onesimus-dird/src/commands/admin.rs` (`UpdateAction::Unsupported`) | `update volume encrypt=` „not supported“ | C-067, #2 | erledigt (9fa0aad, ba5396f; neues Modul `volume_key.rs`, Fälle `s08-encrypt-*`; offen außerhalb S-08: `label`/`relabel … encrypt` erzeugt noch keinen Schlüssel) |
+| S-09 | `onesimus-dird/src/commands/restore.rs` | API-2-Restore-Start liefert `{"result":{}}` statt `run.jobid` | C-072, #3 | erledigt (238b6b4: seit C-058 korrekt, belegt durch Einheitentests `api2_restore_*`) |
 | S-10 | `onesimus-dird/src/commands/acl.rs` | `.acl` nur Platzhalter („(ACL configuration pending)“) | C-074, #4 | blockiert (Entscheidung des Nutzers zu #4) |
 | S-11 | `onesimus-dird/src/commands/extra.rs` (`cmd_show`), `show_items.rs`, `version_strings.rs` | Totes `extra::cmd_show`; dateiweites `allow(dead_code)` verdeckt ungenutzten Code | — | offen |
 | S-12 | `bareos-filed/src/restore.rs`, `accept.rs` | Eigener FD: Restore ist `_placeholder()`; FD-zu-FD-Verbindungen „not supported“ | — | offen |
