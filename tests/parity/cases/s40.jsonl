@@ -1,0 +1,5 @@
+# S-40: update jobid= on a job that never started (StartTime/EndTime NULL, as
+# CreateJobRecord leaves them). The job row is inserted into the per-side
+# throw-away catalog and removed again; no daemon is contacted.
+{"id": "s40-update-job-never-started", "setup": [".sql query=\"INSERT INTO Job (JobId,Job,Name,Type,Level,ClientId,JobStatus,SchedTime,JobTDate) VALUES (100040,'s40-never.2026-01-01_00.00.00_01','s40-never','B','F',1,'C','2026-01-01 00:00:00',0)\""], "steps": ["update jobid=100040 jobname=s40-renamed", "update jobid=100040 starttime=\"2026-02-01 00:00:00\"", ".sql query=\"SELECT Name,StartTime,SchedTime,EndTime,JobTDate FROM Job WHERE JobId=100040\"", ".sql query=\"DELETE FROM Job WHERE JobId=100040\""]}
+{"id": "s40-update-job-never-started-api2", "setup": [".sql query=\"INSERT INTO Job (JobId,Job,Name,Type,Level,ClientId,JobStatus,SchedTime,JobTDate) VALUES (100041,'s40-never.2026-01-01_00.00.00_02','s40-never','B','F',1,'C','2026-01-01 00:00:00',0)\"", ".api 2"], "steps": ["update jobid=100041 jobname=s40-renamed", "update jobid=100041 client=bareos-fd", ".sql query=\"DELETE FROM Job WHERE JobId=100041\""]}

@@ -274,7 +274,8 @@ def session(rig, transport, restore_dir, report):
     ]
     for name, args in reads:
         call(name, args)
-    # the Director answers "Could not find next Volume" for a file device pool without LabelFormat
+    # job Bk has no Schedule: both Directors answer "Could not find next Volume for Job Bk."
+    # (ListNextvol only looks at the schedule's runs; S-41, tests/parity/cases/s41.jsonl)
     call("list_nextvolume", {"job": "Bk"}, transport == "bnet", "no appendable volume found by the Director")
     # BVFS
     call("bvfs_update", {"jobids": [backup]})
