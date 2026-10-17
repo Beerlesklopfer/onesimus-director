@@ -218,7 +218,7 @@ pub(crate) fn get_level_since_time(db: &dyn SinceDb, job_name: &str, client_id: 
     let found: Result<(String, String), String> = (|| {
         let cmd = if level == 'I' {
             match db.row(&full_query) {
-                Err(e) => return Err(format!("Query error for start time request: ERR={e}\nCMD={full_query}\n")),
+                Err(e) => return Err(format!("cats/sql_find.cc:94 Query error for start time request: ERR={e}\nCMD={full_query}\n")),
                 Ok(None) => return Err("No prior Full backup Job record found.\n".into()),
                 Ok(Some(_)) => format!(
                     "SELECT StartTime, Job FROM Job WHERE JobStatus IN ('T','W') AND Type='B' AND Level IN ('I','D','F') \
@@ -228,8 +228,9 @@ pub(crate) fn get_level_since_time(db: &dyn SinceDb, job_name: &str, client_id: 
             full_query.clone()
         };
         match db.row(&cmd) {
-            Err(e) => Err(format!("Query error for start time request: ERR={e}\nCMD={cmd}\n")),
-            Ok(None) => Err(format!("No Job record found: ERR=\nCMD={cmd}\n")),
+            // Mmsg2() puts "file:line " in front of the text.
+            Err(e) => Err(format!("cats/sql_find.cc:125 Query error for start time request: ERR={e}\nCMD={cmd}\n")),
+            Ok(None) => Err(format!("cats/sql_find.cc:131 No Job record found: ERR=\nCMD={cmd}\n")),
             Ok(Some(row)) => Ok(row),
         }
     })();
@@ -380,7 +381,7 @@ mod tests {
         assert_eq!(inc.messages, vec!["No prior Full backup Job record found.\n".to_string(),
             "No prior or suitable Full backup found in catalog. Doing FULL backup.\n".to_string()]);
         let diff = get_level_since_time(&none, "j", 2, 5, 'D', LevelPolicy::default(), 100);
-        assert!(diff.messages[0].starts_with("No Job record found: ERR=\nCMD=SELECT StartTime, Job FROM Job WHERE"));
+        assert!(diff.messages[0].starts_with("cats/sql_find.cc:131 No Job record found: ERR=\nCMD=SELECT StartTime, Job FROM Job WHERE"));
         let full = Some(("2026-10-17 07:20:10".to_string(), "j.2026-10-17_07.20.08_03".to_string()));
         let db = Rows(vec![("Level='F'", full.clone()), ("Level IN ('I','D','F')", full)]);
         let inc = get_level_since_time(&db, "j", 2, 5, 'I', LevelPolicy::default(), 100);

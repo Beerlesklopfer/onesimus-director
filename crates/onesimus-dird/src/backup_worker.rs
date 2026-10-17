@@ -140,6 +140,10 @@ pub fn run(params: &JobParams, session: &BackupSession, pipes: &mut WorkerPipes)
         finish(job_id, session, b'f', 0, 0, 1, vol, None)
     };
 
+    // job_thread(): "Version: …"; DoNativeBackup(): "Start Backup JobId %u, Job=%s".
+    jmsg(job_id, M_INFO, crate::job_messages::version_text());
+    jmsg(job_id, M_INFO, crate::job_messages::start_backup_text(job_id, &params.unique_job));
+
     // jcr->setJobStatus(JS_Running); UpdateJobStartRecord().
     let start = now();
     send_catalog(job_id, crate::backup::update_job_start_record_sql(job_id, 'R', &ids, start, 0, 0));

@@ -1741,8 +1741,8 @@ fn run_selected(
             job_id, job_name: job.name.clone(), status: "Queued".to_string(),
             timestamp: now_unix(),
         });
-        setup_messages.push((crate::message_bus::MsgType::Info, crate::job_messages::version_text()));
-        setup_messages.push((crate::message_bus::MsgType::Info, crate::job_messages::start_backup_text(job_id, &unique_job)));
+        // "Version:" (job_thread) and "Start Backup" (DoNativeBackup) come
+        // from the worker when the job runs (backup_worker.rs).
         for (msg_type, text) in setup_messages {
             crate::console_msg::post_job_message(smgr.bus(), ctx.config.as_ref(), BusMessage::JobMessage {
                 job_id, job_name: job.name.clone(), msg_type, text,
@@ -1782,6 +1782,12 @@ pub(crate) fn unique_job_name(base: &str, now: i64) -> String {
         *seq
     };
     format!("{base}.{}_{seq:02}", crate::localtime::strftime("%Y-%m-%d_%H.%M.%S", now as libc::time_t))
+}
+
+/// ua_server.cc new_control_jcr(): a control JCR's unique job name; it
+/// shares the CreateUniqueJobName() sequence with the jobs (S-19).
+pub(crate) fn new_control_jcr_name(base: &str) -> String {
+    unique_job_name(base, now_unix_time())
 }
 
 /// SQL string escaping of the catalog (EscapeString: quotes doubled).
@@ -2266,6 +2272,10 @@ mod run_confirmation_tests {
 
     #[test]
     fn run_rerun_without_yes_create_and_start_nothing() {
+        // SetupJob's first catalog step (GetOrCreateClientRecord) or the job record.
+        fn job_setup(request: &str) -> bool {
+            request == "CreateJob" || request.contains("FROM Client WHERE Name") || request.starts_with("INSERT INTO Job")
+        }
         let (ctx, log) = recording_context(JOB);
         // No console: GetCmd fails, "Job not run.".
         for line in ["run", "run job=b1", "run job=b1 level=Full pool=Full", "run job=nosuch"] {
@@ -2279,18 +2289,18 @@ mod run_confirmation_tests {
                 &crate::session::parse_cli_command("run job=b1"), &ctx2).success);
             assert!(!ok, "{answers:?}");
             assert!(console.text().ends_with("Job not run.\n"), "{answers:?}: {}", console.text());
-            assert!(!log2.lock().unwrap().iter().any(|request| request == "CreateJob"), "{answers:?}");
+            assert!(!log2.lock().unwrap().iter().any(|request| job_setup(request)), "{answers:?}");
         }
         let rerun = crate::commands::extra::cmd_rerun(&crate::session::parse_cli_command("rerun jobid=1"), &ctx);
         // The double has no Job record: reRunJob stops after the announcement.
         assert_eq!(rerun.text_output, "rerunning jobid 1\n");
-        assert!(!log.lock().unwrap().iter().any(|request| request == "CreateJob"), "{:?}", log.lock().unwrap());
+        assert!(!log.lock().unwrap().iter().any(|request| job_setup(request)), "{:?}", log.lock().unwrap());
         assert!(ctx.job_manager.as_ref().unwrap().lock().unwrap().running_jobs().is_empty());
         // Control: with `yes` the double sees the job record request (and
         // refuses it, so nothing is forked).
         let started = cmd_run(&crate::session::parse_cli_command("run job=b1 level=Full yes"), &ctx);
         assert!(!started.success);
-        assert!(log.lock().unwrap().iter().any(|request| request == "CreateJob"));
+        assert!(log.lock().unwrap().iter().any(|request| job_setup(request)));
     }
 
     #[test]
