@@ -6,7 +6,7 @@
 //! through the same command queue, registry and console ACLs as
 //! `ExecuteCommand`/BNET (no second SQL path), in API 2 JSON mode; the JSON
 //! result is converted into the typed response by the descriptor-driven
-//! codec in `bareos_proto_rs::typed`. Commands without an API 2 result run
+//! codec in `onesimus_proto_rs::typed`. Commands without an API 2 result run
 //! in text mode and fill the `text` field.
 //!
 //! RPCs not listed in [`read_rpcs`] (write, session and restore-tree RPCs)
@@ -20,9 +20,9 @@ use prost::Message;
 use serde_json::{Map, Value};
 use tonic::{Request, Response, Status};
 
-use bareos_proto_rs::bareos::director::api::{self as pb, director_api_server::DirectorApi};
-use bareos_proto_rs::bareos::director::commands as cmd;
-use bareos_proto_rs::typed;
+use onesimus_proto_rs::onesimus::director::api::{self as pb, director_api_server::DirectorApi};
+use onesimus_proto_rs::onesimus::director::commands as cmd;
+use onesimus_proto_rs::typed;
 
 use super::auth::AuthState;
 use super::service::run_command;

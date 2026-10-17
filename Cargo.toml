@@ -4,7 +4,7 @@ members = [
     "crates/bareos-bnet",
     "crates/bareos-config",
     "crates/bareos-catalog",
-    "crates/bareos-proto-rs",
+    "crates/onesimus-proto-rs",
     "crates/onesimus-dird",
     "crates/oconsole",
     "crates/bareos-orm",
@@ -99,4 +99,4 @@ thiserror = "2"
 bareos-bnet = { path = "crates/bareos-bnet" }
 bareos-config = { path = "crates/bareos-config" }
 bareos-catalog = { path = "crates/bareos-catalog" }
-bareos-proto-rs = { path = "crates/bareos-proto-rs" }
+onesimus-proto-rs = { path = "crates/onesimus-proto-rs" }

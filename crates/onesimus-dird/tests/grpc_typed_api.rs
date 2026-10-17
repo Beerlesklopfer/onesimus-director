@@ -37,13 +37,13 @@ use tonic::metadata::MetadataValue;
 use tonic::transport::{Channel, Endpoint, Uri};
 use tonic::{Code, Request, Status};
 
-use bareos_proto_rs::bareos::director::api::{self as pb, director_api_client::DirectorApiClient};
-use bareos_proto_rs::bareos::director::commands as cmd;
-use bareos_proto_rs::bareos::director::{
+use onesimus_proto_rs::onesimus::director::api::{self as pb, director_api_client::DirectorApiClient};
+use onesimus_proto_rs::onesimus::director::commands as cmd;
+use onesimus_proto_rs::onesimus::director::{
     director_client::DirectorClient, ChallengeRequest, CommandRequest, ListCommandsRequest, LoginRequest,
     ResponseFormat,
 };
-use bareos_proto_rs::typed::{self, field_name, DIRECTOR_API_SERVICE};
+use onesimus_proto_rs::typed::{self, field_name, DIRECTOR_API_SERVICE};
 
 const ROOT: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../..");
 const PASSWORD: &str = "parity-dir-pw";

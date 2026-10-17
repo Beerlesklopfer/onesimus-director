@@ -36,10 +36,10 @@ use prost_types::{DescriptorProto, EnumDescriptorProto, FieldDescriptorProto, Fi
 use serde_json::{Map, Value};
 
 /// Serialized `FileDescriptorSet` of all compiled protos (with imports).
-pub const DESCRIPTOR_SET: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/bareos_descriptor.bin"));
+pub const DESCRIPTOR_SET: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/onesimus_descriptor.bin"));
 
 /// Full name of the typed service.
-pub const DIRECTOR_API_SERVICE: &str = "bareos.director.api.DirectorApi";
+pub const DIRECTOR_API_SERVICE: &str = "onesimus.director.api.DirectorApi";
 
 pub struct Registry {
     messages: HashMap<String, DescriptorProto>,
@@ -647,7 +647,7 @@ fn decode_value(bytes: &[u8]) -> Value {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::bareos::director::api::{
+    use crate::onesimus::director::api::{
         JobLevel, JobStatus, JobType, ListJobsResponse, ListVolumesResponse, ShowResponse, VolumeStatus,
     };
     use serde_json::json;
@@ -659,7 +659,7 @@ mod tests {
 
     #[test]
     fn job_records_map_with_enums_counts_and_extra_fields() {
-        let (r, unmapped): (ListJobsResponse, _) = decode(".bareos.director.api.ListJobsResponse", json!({
+        let (r, unmapped): (ListJobsResponse, _) = decode(".onesimus.director.api.ListJobsResponse", json!({
             "jobs": [{"jobid": "479", "name": "benchmark-small", "type": "B", "level": "F",
                       "jobstatus": "T", "jobbytes": "824021543", "purgedfiles": "0", "duration": "00:00:02",
                       "jobtdate": "", "newcolumn": "x"}],
@@ -677,7 +677,7 @@ mod tests {
         assert_eq!(job.extra_fields.get("newcolumn").map(String::as_str), Some("x"));
         assert_eq!(r.meta.unwrap().range.unwrap().limit, 2);
 
-        let (r, _): (ListJobsResponse, _) = decode(".bareos.director.api.ListJobsResponse",
+        let (r, _): (ListJobsResponse, _) = decode(".onesimus.director.api.ListJobsResponse",
             json!({"jobs": [{"count": "161"}]}));
         assert_eq!(r.count, Some(161));
         assert!(r.jobs.is_empty());
@@ -685,7 +685,7 @@ mod tests {
 
     #[test]
     fn lossless_numbers_and_enum_names() {
-        let (r, _): (ListJobsResponse, _) = decode(".bareos.director.api.ListJobsResponse",
+        let (r, _): (ListJobsResponse, _) = decode(".onesimus.director.api.ListJobsResponse",
             json!({"jobs": [{"jobid": "0042", "level": "VirtualFull", "type": "Job Copy"}]}));
         assert_eq!(r.jobs[0].jobid, 0);
         assert_eq!(r.jobs[0].extra_fields["jobid"], "0042");
@@ -695,7 +695,7 @@ mod tests {
 
     #[test]
     fn volumes_by_pool_with_count_wrapper() {
-        let (r, unmapped): (ListVolumesResponse, _) = decode(".bareos.director.api.ListVolumesResponse", json!({
+        let (r, unmapped): (ListVolumesResponse, _) = decode(".onesimus.director.api.ListVolumesResponse", json!({
             "pools": {"full": [{"mediaid": "1", "volumename": "Full-0001", "volstatus": "Read-Only"}],
                       "scratch": [{"count": "0"}]}}));
         assert!(unmapped.is_empty(), "{unmapped:?}");
@@ -708,10 +708,10 @@ mod tests {
         let client = json!({"name": "fd", "address": "localhost", "fdport": 9102, "enabled": true,
                             "tls": {"enable": true}, "list": ["a", 1]});
         let value = json!({"clients": {"fd": client.clone()}});
-        let encoded = json_to_message("bareos.director.api.ShowResponse", &value);
+        let encoded = json_to_message("onesimus.director.api.ShowResponse", &value);
         let r = ShowResponse::decode(encoded.bytes.as_slice()).unwrap();
         assert_eq!(r.clients["fd"].fdport, 9102);
-        let back = message_to_json("bareos.director.api.ShowResponse", &encoded.bytes);
+        let back = message_to_json("onesimus.director.api.ShowResponse", &encoded.bytes);
         assert_eq!(back["clients"]["fd"]["directives"], client);
         assert_eq!(back["clients"]["fd"]["address"], json!("localhost"));
     }
@@ -721,7 +721,7 @@ mod tests {
         let r = registry();
         assert!(r.rpc_names(DIRECTOR_API_SERVICE).iter().any(|n| n == "ListJobs"));
         let (input, output) = r.rpc_types(DIRECTOR_API_SERVICE, "GetVersion").unwrap();
-        assert_eq!(input, ".bareos.director.commands.VersionCommand");
-        assert_eq!(output, ".bareos.director.api.VersionResponse");
+        assert_eq!(input, ".onesimus.director.commands.VersionCommand");
+        assert_eq!(output, ".onesimus.director.api.VersionResponse");
     }
 }

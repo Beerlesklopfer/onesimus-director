@@ -177,7 +177,7 @@ Abnahme: Tests für beide Buildvarianten, Produktions-CLI ohne Schreibschalter, 
 
 **Stand:** 15.10.2026  
 **Status:** Geplant / Implementierung offen  
-**Geltungsbereich:** `crates/bareos-filed`, `crates/onesimus-dird`, `proto` (Submodule `baReos-proto`)
+**Geltungsbereich:** `crates/bareos-filed`, `crates/onesimus-dird`, `proto` (Submodule `onesimus-proto`)
 
 ### Zielsetzung
 
