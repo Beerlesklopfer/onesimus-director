@@ -142,6 +142,11 @@ pub enum PipeMessage {
     /// A Verify job event for the Director (verify.rs).
     #[serde(rename = "verify")]
     Verify { job_id: u32, event: crate::verify::Event },
+    /// The writing Storage daemon's job end of an SD-SD Copy/Migrate
+    /// (mig_jcr: VolSessionId/Time from its Job command, SDJobFiles/Bytes/
+    /// Errors/Status from its "3099 Job end"). C-058, S-20.
+    #[serde(rename = "write_session")]
+    WriteSession { job_id: u32, vol_session_id: i32, vol_session_time: i32, files: i64, bytes: i64, errors: i32, status: i32 },
 }
 
 /// lib/message.h M_* codes of the worker's own job messages.
