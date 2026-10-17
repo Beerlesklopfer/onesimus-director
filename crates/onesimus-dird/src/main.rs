@@ -42,6 +42,7 @@ mod reload;
 mod run_time;
 mod runscript;
 mod scheduler;
+mod sd_copy;
 mod sd_label;
 mod scan;
 mod sd_protocol;
