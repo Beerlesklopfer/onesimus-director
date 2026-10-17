@@ -367,9 +367,6 @@ fn main() {
         info!("running as uid={} gid={}", nix::unistd::getuid(), nix::unistd::getgid());
     }
 
-    // dird.cc: InitConsoleMsg(working_directory) — console message queue
-    console_msg::init(std::path::Path::new(&config.director.working_directory), &config.director.name);
-
     // Build catalog URL and auto-migrate
     let catalog_db_url = config.catalogs.first().map(|cat| {
         if cat.db_address.is_empty() || cat.db_address == "localhost" || cat.db_address == "127.0.0.1" {
@@ -420,6 +417,9 @@ fn main() {
     if let Some(cat) = &catalog {
         check_catalog::ensure_basic_records(&config, cat);
     }
+    // dird.cc: InitConsoleMsg(working_directory) after CheckCatalog() — the
+    // console message queue (start-up messages before it reach no console).
+    console_msg::init(std::path::Path::new(&config.director.working_directory), &config.director.name);
     // dird.cc: SetDbLogInsertCallback(DirDbLogInsert) — `catalog` message destination
     job_messages::set_catalog(catalog.clone());
 

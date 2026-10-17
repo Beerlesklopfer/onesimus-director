@@ -202,6 +202,11 @@ impl<'a> Cat<'a> {
         self.msgs.push((t, text));
     }
 
+    /// Jmsg() of the session's JCR (collected with the other messages).
+    pub(crate) fn jmsg_pub(&mut self, t: MsgType, text: String) {
+        self.jmsg(t, text);
+    }
+
     fn sql_error(error: &str) -> String {
         error.to_string()
     }
@@ -764,6 +769,9 @@ pub struct JobContext {
     pub mig_job_id: Option<u32>,
     /// Job Prune Volumes or Pool AutoPrune (PruneVolumes). S-27.
     pub prune_volumes: bool,
+    /// Pool Purge Oldest Volume / Recycle Oldest Volume (next_vol.cc 8/9). S-28.
+    pub purge_oldest_volume: bool,
+    pub recycle_oldest_volume: bool,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -811,6 +819,12 @@ pub fn load_context(db: &dyn Db, config: Option<&crate::director_config::SharedC
     };
     // PruneVolumes(): jcr->dir_impl->res.job->PruneVolumes || pool->AutoPrune
     let job_name = job.get(2).cloned().unwrap_or_default();
+    let pool_flag = |key: &str| config.as_ref().is_some_and(|c| {
+        let pool_dirs: Vec<bareos_config::raw::Directive> = crate::commands::defaults::raw(c, "pool", &pool_name)
+            .map(|r| r.directives.clone()).unwrap_or_default();
+        crate::commands::defaults::bool_directive(&pool_dirs, key, false)
+    });
+    let (purge_oldest_volume, recycle_oldest_volume) = (pool_flag("purgeoldestvolume"), pool_flag("recycleoldestvolume"));
     let prune_volumes = config.as_ref().is_some_and(|c| {
         let job_dirs = crate::commands::defaults::job_directives(c, &job_name);
         let pool_dirs: Vec<bareos_config::raw::Directive> = crate::commands::defaults::raw(c, "pool", &pool_name)
@@ -819,7 +833,7 @@ pub fn load_context(db: &dyn Db, config: Option<&crate::director_config::SharedC
             || crate::commands::defaults::bool_directive(&pool_dirs, "autoprune", true)
     });
     JobContext { job_id, start_time, pool_id, pool_name, catalog_files, write_storage,
-        mig_job_id: crate::migrate::new_job_of(job_id), prune_volumes }
+        mig_job_id: crate::migrate::new_job_of(job_id), prune_volumes, purge_oldest_volume, recycle_oldest_volume }
 }
 
 // ---------------------------------------------------------------------------
@@ -1478,7 +1492,24 @@ fn find_next_volume_for_append(cat: &mut Cat, ctx: &JobContext, mr: &mut MediaRe
                 // 7. a new volume by LabelFormat
                 ok = new_volume(cat, mr, store);
             }
-            // 8./9. PurgeOldestVolume/RecycleOldestVolume are not ported.
+            // 8./9. Purge Oldest Volume / Recycle Oldest Volume of the pool (S-28)
+            if !ok && (ctx.purge_oldest_volume || ctx.recycle_oldest_volume) {
+                set_storage_id(store, mr);
+                ok = find_next_volume(cat, -1, in_changer, mr, unwanted) != 0;
+                set_storage_id(store, mr);
+                if ok {
+                    if ctx.purge_oldest_volume {
+                        cat.jmsg(MsgType::Info, format!("Purging oldest volume \"{}\"\n", mr.volume_name));
+                        ok = purge_jobs_from_volume(cat, ctx, mr);
+                    } else {
+                        cat.jmsg(MsgType::Info, format!("Pruning oldest volume \"{}\"\n", mr.volume_name));
+                        ok = prune_volume(cat, ctx, mr);
+                    }
+                    if ok {
+                        ok = recycle_volume(cat, mr);
+                    }
+                }
+            }
         }
         if ok && mr.vol_status == "Append" && has_volume_expired(cat, mr) {
             let again = retry < 200;
@@ -1561,6 +1592,70 @@ fn prune_volumes(cat: &mut Cat, ctx: &JobContext, in_changer: bool, mr: &mut Med
     }
 }
 
+/// ua_purge.cc PurgeJobsFromVolume(ua, mr) of a UaContext without console:
+/// all jobs of the volume, confirmed automatically.
+fn purge_jobs_from_volume(cat: &mut Cat, ctx: &JobContext, mr: &mut MediaRecord) -> bool {
+    if !matches!(mr.vol_status.as_str(), "Append" | "Full" | "Used" | "Error") {
+        cat.jmsg(MsgType::Info, format!("\nVolume \"{}\" has VolStatus \"{}\" and cannot be purged.\n\
+            The VolStatus must be: Append, Full, Used or Error to be purged.\n", mr.volume_name, mr.vol_status));
+        return false;
+    }
+    let ids: Vec<String> = match cat.db.rows(&format!("SELECT DISTINCT JobId FROM JobMedia WHERE MediaId={}", mr.media_id)) {
+        Ok(table) => table.rows.iter().filter_map(|r| r.first().cloned().flatten()).collect(),
+        Err(error) => {
+            cat.jmsg(MsgType::Info, format!("{error}\n"));
+            return false;
+        }
+    };
+    if ids.is_empty() {
+        cat.jmsg(MsgType::Info, format!("No Jobs found for media {} to purge from catalog.\n", mr.volume_name));
+    } else {
+        cat.jmsg(MsgType::Info, format!("Found {} Jobs for media \"{}\" in catalog.\n", ids.len(), mr.volume_name));
+        crate::commands::purge::purge_jobs(cat.db, &ids.join(","));
+        cat.jmsg(MsgType::Info, format!("{} Jobs{} on Volume \"{}\" purged from catalog.\n", ids.len(),
+            if ids.len() <= 1 { "" } else { "s" }, mr.volume_name));
+    }
+    is_volume_purged(cat, ctx, mr)
+}
+
+/// ua_prune.cc PruneVolume(ua, mr) of a UaContext without console.
+fn prune_volume(cat: &mut Cat, ctx: &JobContext, mr: &mut MediaRecord) -> bool {
+    if mr.enabled == 2 {
+        return false;
+    }
+    let empty = mr.first_written == 0 && mr.last_written == 0;
+    if !(mr.vol_status == "Full" || mr.vol_status == "Used" || has_volume_expired(cat, mr)) {
+        cat.jmsg(MsgType::Info, format!("Pruning volume {}: cannot prune as Volstatus is {} but needs to be Full or Used.\n",
+            mr.volume_name, mr.vol_status));
+        return false;
+    }
+    if empty {
+        cat.jmsg(MsgType::Info, format!("Volume \"{0}\" seems to be empty.  Make sure that it is not currently in use, \
+            then call 'purge volume=\"{0}\"'", mr.volume_name));
+        return false;
+    }
+    let running = RUNNING_JOBIDS.lock().map(|r| r.clone()).unwrap_or_default();
+    let list = crate::commands::purge::prune_candidates_db(cat.db, mr.media_id, mr.vol_retention.max(0) as u64,
+        mr.enabled as i64, &running).unwrap_or_default();
+    if !list.is_empty() {
+        cat.jmsg(MsgType::Info, format!("Volume \"{}\" has Volume Retention of {} sec. and has {} jobs that will be pruned\n",
+            mr.volume_name, mr.vol_retention, list.len()));
+    }
+    cat.jmsg(MsgType::Info, format!("Pruning volume {}: {} Jobs have expired and can be pruned.\n", mr.volume_name, list.len()));
+    if !list.is_empty() {
+        let jobids = list.iter().map(u32::to_string).collect::<Vec<_>>().join(",");
+        cat.jmsg(MsgType::Info, format!("Purging the following {} JobIds: {jobids}\n", list.len()));
+        crate::commands::purge::purge_jobs(cat.db, &jobids);
+    }
+    let now_empty = is_volume_purged(cat, ctx, mr);
+    cat.jmsg(MsgType::Info, if now_empty {
+        format!("Volume \"{}\" contains no jobs after pruning.\n", mr.volume_name)
+    } else {
+        format!("Volume \"{}\" still contains jobs after pruning.\n", mr.volume_name)
+    });
+    now_empty
+}
+
 /// ua_purge.cc IsVolumePurged() (force=false) with MarkMediaPurged().
 fn is_volume_purged(cat: &mut Cat, ctx: &JobContext, mr: &mut MediaRecord) -> bool {
     if mr.first_written == 0 || mr.last_written == 0 {
@@ -1589,6 +1684,37 @@ fn is_volume_purged(cat: &mut Cat, ctx: &JobContext, mr: &mut MediaRecord) -> bo
         let error = cat.errmsg.clone();
         cat.jmsg(MsgType::Info, error);
         return false;
+    }
+    // MarkMediaPurged(): a RecyclePool other than the volume's pool takes it
+    // (UpdateVolPool) unless that pool is full. S-28.
+    if mr.recycle_pool_id != 0 && mr.recycle_pool_id != mr.pool_id {
+        let pool = |id: i64| cat.db.rows(&format!("SELECT Name,MaxVols,NumVols FROM Pool WHERE PoolId={id}")).ok()
+            .and_then(|t| t.rows.into_iter().next())
+            .map(|r| (r.first().cloned().flatten().unwrap_or_default(),
+                      r.get(1).cloned().flatten().and_then(|v| v.parse::<i64>().ok()).unwrap_or(0),
+                      r.get(2).cloned().flatten().and_then(|v| v.parse::<i64>().ok()).unwrap_or(0)));
+        match (pool(mr.pool_id), pool(mr.recycle_pool_id)) {
+            (Some(_), Some((name, max_vols, num_vols))) => {
+                if max_vols > 0 && num_vols >= max_vols {
+                    cat.jmsg(MsgType::Info, format!("Unable move recycled Volume in full Pool \"{name}\" MaxVols={max_vols}\n"));
+                } else {
+                    let old = mr.pool_id;
+                    let new = mr.recycle_pool_id;
+                    match cat.db.exec(&format!("UPDATE Media SET PoolId={new} WHERE MediaId={}", mr.media_id)) {
+                        Ok(_) => {
+                            mr.pool_id = new;
+                            cat.jmsg(MsgType::Info, format!("New Pool is: {name}\n"));
+                            for id in [old, new] {
+                                let _ = cat.db.exec(&format!(
+                                    "UPDATE Pool SET NumVols=(SELECT count(*) FROM Media WHERE PoolId={id}) WHERE PoolId={id}"));
+                            }
+                        }
+                        Err(error) => cat.jmsg(MsgType::Info, format!("{error}\n")),
+                    }
+                }
+            }
+            _ => cat.jmsg(MsgType::Info, "\n".into()),
+        }
     }
     if ctx.job_id > 0 {
         cat.jmsg(MsgType::Info, format!("All records pruned from Volume \"{}\"; marking it \"Purged\"\n", mr.volume_name));

@@ -82,6 +82,11 @@ pub fn ensure_basic_records(config: &DirectorConfig, catalog: &CatalogHandle) {
         crate::commands::pool_db::update_pool_references(&mut cat, pool);
     }
     drop(cat);
+    // Jmsg() of the start-up JCR (JobId 0): e.g. SetPooldbrReferences()'s
+    // "Can't set … RecyclePool to …" (S-28).
+    for (msg_type, text) in msgs {
+        crate::console_msg::job_message(config, "*JobMonitor*", 0, msg_type, 0, &text);
+    }
     for client in &config.clients {
         // client->catalog defaults to the first Catalog resource.
         if !client.catalog.is_empty() && client.catalog != first.name {

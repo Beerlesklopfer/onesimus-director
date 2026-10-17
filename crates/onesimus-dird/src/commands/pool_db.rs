@@ -112,6 +112,9 @@ pub(crate) fn set_pooldbr_references(cat: &mut Cat, pr: &mut PoolRecord, pool: &
                 if catreq::get_pool_record(cat, &mut rpool) {
                     Some(rpool.pool_id)
                 } else {
+                    cat.jmsg_pub(crate::message_bus::MsgType::Warning, format!(
+                        "Can't set {0} {what} to {name}, {name} is not in database.\nTry to update it with 'update pool={0}'\n",
+                        pool.name));
                     ok = false;
                     None
                 }
