@@ -186,21 +186,17 @@ impl<'a> Pipe<'a> {
         self.0.lock().unwrap_or_else(|e| e.into_inner())
     }
 
-    /// One pipe message, written as one line in a single write.
+    /// One pipe message, written as one line in a single write under the
+    /// worker's pipe lock (job_worker::send_jmsg, also used by worker_jmsg).
     fn send(&self, msg: &PipeMessage) {
-        if let Ok(mut line) = serde_json::to_string(msg) {
-            line.push('\n');
-            let _ = self.lock().to_director.write_all(line.as_bytes());
-        }
+        let _guard = self.lock();
+        crate::job_worker::send_jmsg(msg.clone());
     }
 
     /// A catalog request and the Director's answer.
     fn catreq(&self, msg: &PipeMessage) -> String {
         let mut pipes = self.lock();
-        if let Ok(mut line) = serde_json::to_string(msg) {
-            line.push('\n');
-            let _ = pipes.to_director.write_all(line.as_bytes());
-        }
+        crate::job_worker::send_jmsg(msg.clone());
         read_response(&mut pipes.from_director)
     }
 }
