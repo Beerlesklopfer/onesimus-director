@@ -66,24 +66,31 @@ impl Ord for ScheduledJob {
     }
 }
 
-/// Scheduler state (visible to watchdog).
+/// Scheduler state (visible to the watchdog).
 pub struct SchedulerState {
+    /// Unix time the scheduler thread last showed life (0: not running).
     pub last_heartbeat: AtomicI64,
     pub jobs_dispatched: AtomicI64,
 }
 
 impl SchedulerState {
-    pub fn new() -> Self {
-        Self {
-            last_heartbeat: AtomicI64::new(now_unix()),
-            jobs_dispatched: AtomicI64::new(0),
-        }
+    pub const fn new() -> Self {
+        Self { last_heartbeat: AtomicI64::new(0), jobs_dispatched: AtomicI64::new(0) }
     }
 
     pub fn heartbeat(&self) {
         self.last_heartbeat.store(now_unix(), Ordering::Relaxed);
     }
 }
+
+impl Default for SchedulerState {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+/// The state of the dir:scheduler thread.
+pub static STATE: SchedulerState = SchedulerState::new();
 
 /// SchedulerTimeAdapter's time source: SystemTime() and SleepFor().
 pub trait TimeSource {
@@ -104,6 +111,7 @@ impl TimeSource for SystemTimeSource<'_> {
 
     fn sleep_for(&self, seconds: i64) -> bool {
         sleep_interruptible(Duration::from_secs(seconds.max(0) as u64), self.shutdown);
+        STATE.heartbeat();
         !self.shutdown.load(Ordering::Relaxed)
     }
 }
@@ -229,16 +237,28 @@ fn automatic_scheduler_schedule<'a>(cfg: &'a DirectorConfig, job: &bareos_config
     Some(schedule)
 }
 
-/// Main scheduler loop (Scheduler::Run). Runs in the dir:scheduler named thread.
-pub fn scheduler_loop(config: Option<SharedConfig>, shutdown: &AtomicBool) {
-    let state = SchedulerState::new();
+/// The Run directive of a queued item in the current configuration.
+pub fn run_directive(cfg: &DirectorConfig, run: &RunKey) -> Option<bareos_config::resources::RunDirective> {
+    cfg.schedules.iter().find(|s| s.name == run.schedule).and_then(|s| s.runs.get(run.index)).cloned()
+}
+
+/// Main scheduler loop (Scheduler::Run). Runs in the dir:scheduler named
+/// thread; ExecuteJob() starts each due job like `run` does
+/// (scheduled_run.rs).
+pub fn scheduler_loop(launcher: Option<crate::scheduled_run::Launcher>, shutdown: &AtomicBool) {
+    let state = &STATE;
+    state.heartbeat();
     info!("scheduler started");
-    if let Some(config) = config {
+    if let Some(launcher) = launcher {
+        let config = launcher.config.clone();
         let mut scheduler = Scheduler::new(SystemTimeSource { shutdown });
         let mut execute = |job: ScheduledJob| {
             debug!("dispatching job '{}' (level={}, priority={})", job.job_name, job.level, job.priority);
-            // TODO(R6-full): Fork worker process via job_worker::spawn_job_worker
-            state.jobs_dispatched.fetch_add(1, Ordering::Relaxed);
+            let run = job.run.as_ref().and_then(|run| config.read().ok().and_then(|cfg| run_directive(&cfg, run)));
+            if launcher.execute(&job.job_name, run.as_ref(), now_unix()) != 0 {
+                state.jobs_dispatched.fetch_add(1, Ordering::Relaxed);
+            }
+            state.heartbeat();
         };
         while !shutdown.load(Ordering::Relaxed) {
             state.heartbeat();
@@ -247,6 +267,7 @@ pub fn scheduler_loop(config: Option<SharedConfig>, shutdown: &AtomicBool) {
             }
         }
     }
+    state.last_heartbeat.store(0, Ordering::Relaxed);
     info!("scheduler stopped, dispatched {} jobs total",
           state.jobs_dispatched.load(Ordering::Relaxed));
 }
@@ -433,8 +454,8 @@ Messages { Name=Standard }
     #[test]
     fn scheduler_state_heartbeat() {
         let state = SchedulerState::new();
-        let t1 = state.last_heartbeat.load(Ordering::Relaxed);
+        assert_eq!(state.last_heartbeat.load(Ordering::Relaxed), 0);
         state.heartbeat();
-        assert!(state.last_heartbeat.load(Ordering::Relaxed) >= t1);
+        assert!(state.last_heartbeat.load(Ordering::Relaxed) > 0);
     }
 }
