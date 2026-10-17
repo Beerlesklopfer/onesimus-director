@@ -20,6 +20,7 @@ mod command_queue;
 mod command_registry;
 mod commands;
 mod config_check;
+mod config_test;
 mod consolidate;
 mod command_worker;
 mod expand;
@@ -235,6 +236,18 @@ fn main() {
     // Keep "bareos-dir" for BNET protocol compatibility (C++ FD/SD expect it)
     bareos_bnet::debug::set_daemon_name("bareos-dir");
 
+    // -t: ParseConfigOrExit, CheckResources, CheckCatalog(CHECK_CONNECTION)
+    // and exit like bareos-dir -t (C-057, S-29).
+    if cli.test_config {
+        // bareos-dir -t writes only the messages below: no log lines
+        let (text, code) = tracing::subscriber::with_default(tracing::subscriber::NoSubscriber::default(),
+            || config_test::run(&cli.config));
+        print!("{text}");
+        use std::io::Write;
+        let _ = std::io::stdout().flush();
+        std::process::exit(code);
+    }
+
     info!("Onesimus Director Version {} starting", env!("CARGO_PKG_VERSION"));
     if cli.debug_level > 0 {
         info!("debug level set to {}", cli.debug_level);
@@ -256,14 +269,6 @@ fn main() {
         warn!("config file {} not found, using defaults", cli.config.display());
         DirectorConfig::from_str("Director { Name = bareos-dir\n Port = 9101\n Password = default\n }").unwrap()
     };
-
-    // --test-config: validate and exit
-    if cli.test_config {
-        println!("configuration OK: Director '{}', {} clients, {} jobs, {} storages, {} pools, {} schedules",
-              config.director.name, config.clients.len(), config.jobs.len(),
-              config.storages.len(), config.pools.len(), config.schedules.len());
-        std::process::exit(0);
-    }
 
     // --export-schema: print JSON schema and exit
     if cli.export_schema {

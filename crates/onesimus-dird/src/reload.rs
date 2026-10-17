@@ -93,15 +93,12 @@ fn reload_config(config_path: &std::path::Path, shared_config: &SharedConfig) ->
                     crate::config_check::Diag::Daemon(text) => {
                         crate::audit::daemon_message(&current, crate::message_bus::MsgType::Error, text)
                     }
-                    crate::config_check::Diag::Parser(text) => {
-                        error!("configuration error: {text}");
+                    crate::config_check::Diag::Parser(_) | crate::config_check::Diag::Config(_) => {
+                        error!("configuration error: {}", diag.text());
                     }
                 }
                 if reason.is_empty() {
-                    reason = match diag {
-                        crate::config_check::Diag::Job(_, t) | crate::config_check::Diag::Daemon(t)
-                        | crate::config_check::Diag::Parser(t) => t.trim_end().to_string(),
-                    };
+                    reason = diag.text().trim_end().to_string();
                 }
             }
             job_msg(&current, crate::message_bus::MsgType::Error, &format!("Please correct the configuration in {base}\n"));

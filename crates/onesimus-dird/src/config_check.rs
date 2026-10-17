@@ -33,8 +33,51 @@ pub enum Diag {
     Job(MsgType, String),
     /// Emsg(M_ERROR, ...): "<director>: ERROR in <file>:<line> text"
     Daemon(String),
-    /// Lexer diagnostic (scan_err), not reproduced; text for the log only.
+    /// Lexer diagnostic without a position; text for the log only.
     Parser(String),
+    /// scan_err() of the parser (M_CONFIG_ERROR, `-t` exits 42): located in
+    /// the configuration file by `config_test`.
+    Config(ConfigError),
+}
+
+/// A parser error of the original with what locates it in the file.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ConfigError {
+    /// Source position of the scan_err() call ("lib/res.cc:626").
+    pub at: &'static str,
+    /// The message; for [`Anchor::Value`] the original appends
+    /// " on line L: <line>\n".
+    pub message: String,
+    /// Index of the resource in the raw view.
+    pub resource: usize,
+    pub anchor: Anchor,
+}
+
+/// Where the lexer stood when the error was raised.
+#[derive(Debug, Clone, PartialEq)]
+pub enum Anchor {
+    /// After the directive keyword.
+    Keyword(String),
+    /// After the value `value` of directive `key`.
+    Value { key: String, value: String },
+    /// At the closing brace of the resource.
+    End,
+}
+
+impl Diag {
+    /// The text of the diagnostic (log, reload reason).
+    pub fn text(&self) -> &str {
+        match self {
+            Diag::Job(_, t) | Diag::Daemon(t) | Diag::Parser(t) => t,
+            Diag::Config(e) => &e.message,
+        }
+    }
+}
+
+/// SaveResource() failed: scan_err at the closing brace.
+fn save_resource_failed(resource: usize) -> Diag {
+    Diag::Config(ConfigError { at: "lib/parse_conf_state_machine.cc:184", message: "SaveResource failed".into(),
+        resource, anchor: Anchor::End })
 }
 
 /// Resource types of the Director: (normalized type, C++ name, items, R_ code).
@@ -97,15 +140,18 @@ fn of<'a>(raw: &'a [ConfResource], k: &'static str) -> impl Iterator<Item = &'a 
 pub fn check(raw: &[ConfResource], base: &str) -> Result<(), Vec<Diag>> {
     // ---- pass 1 -------------------------------------------------------
     let mut seen: Vec<(&str, &str)> = Vec::new();
-    for res in raw {
+    for (index, res) in raw.iter().enumerate() {
         let Some(&(norm, cname, items, _)) = kind(&res.rtype) else {
             return Err(vec![Diag::Parser(format!("unknown resource type {}", res.rtype))]);
         };
         if let Some(d) = res.directives.iter().find(|d| {
             item_of(items, &d.key).is_none() && !EXTENSIONS.contains(&(norm, d.norm_key().as_str()))
         }) {
-            return Err(vec![Diag::Parser(format!(
-                "Keyword \"{}\" not permitted in this resource.", d.key))]);
+            return Err(vec![Diag::Config(ConfigError {
+                at: "lib/parse_conf_state_machine.cc:162",
+                message: format!("Keyword \"{}\" not permitted in this resource.\n\
+                    Perhaps you left the trailing brace off of the previous resource.", d.key),
+                resource: index, anchor: Anchor::Keyword(d.key.clone()) })]);
         }
         let Some(name) = res.name() else {
             return Err(vec![Diag::Daemon(format!(
@@ -118,7 +164,7 @@ pub fn check(raw: &[ConfResource], base: &str) -> Result<(), Vec<Diag>> {
                 return Err(vec![
                     Diag::Job(MsgType::Error, format!(
                         "\"{}\" directive in {cname} \"{name}\" resource is required, but not found.\n", item.name)),
-                    Diag::Parser("SaveResource failed".into()),
+                    save_resource_failed(index),
                 ]);
             }
         }
@@ -126,7 +172,7 @@ pub fn check(raw: &[ConfResource], base: &str) -> Result<(), Vec<Diag>> {
             return Err(vec![
                 Diag::Daemon(format!(
                     "ERROR in lib/parse_conf.cc:276 Attempt to define second {cname} resource named \"{name}\" is not permitted.\n")),
-                Diag::Parser("SaveResource failed".into()),
+                save_resource_failed(index),
             ]);
         }
         seen.push((norm, name));
@@ -136,7 +182,7 @@ pub fn check(raw: &[ConfResource], base: &str) -> Result<(), Vec<Diag>> {
     let exists = |kind: &str, name: &str| raw.iter().any(|r| {
         normalize_key(&r.rtype) == kind && r.name() == Some(name)
     });
-    for res in raw {
+    for (index, res) in raw.iter().enumerate() {
         let Some(&(_, _, items, _)) = kind(&res.rtype) else { continue };
         for d in &res.directives {
             let Some(item) = item_of(items, &d.key) else { continue };
@@ -146,8 +192,10 @@ pub fn check(raw: &[ConfResource], base: &str) -> Result<(), Vec<Diag>> {
             let Some(target) = item.code.and_then(kind_of_code) else { continue };
             for v in d.values() {
                 if !exists(target, v) {
-                    return Err(vec![Diag::Parser(format!(
-                        "Could not find config resource \"{v}\" referenced by {}", d.key))]);
+                    return Err(vec![Diag::Config(ConfigError {
+                        at: "lib/res.cc:626",
+                        message: format!("Could not find config resource \"{v}\" referenced"),
+                        resource: index, anchor: Anchor::Value { key: d.key.clone(), value: v.to_string() } })]);
                 }
             }
         }
@@ -292,8 +340,10 @@ Job { Name = j; JobDefs = DefaultJob }
 
     #[test]
     fn parse_errors_are_reported() {
-        assert!(matches!(run("Client { Name = b; Address = a; Password = p; Bogus = 1 }").unwrap_err()[0], Diag::Parser(_)));
-        assert!(matches!(run("Job { Name = r; JobDefs = DefaultJob; Client = nosuch }").unwrap_err()[0], Diag::Parser(_)));
+        assert!(matches!(&run("Client { Name = b; Address = a; Password = p; Bogus = 1 }").unwrap_err()[0],
+            Diag::Config(ConfigError { anchor: Anchor::Keyword(k), resource: 9, .. }) if k == "Bogus"));
+        assert!(matches!(&run("Job { Name = r; JobDefs = DefaultJob; Client = nosuch }").unwrap_err()[0],
+            Diag::Config(ConfigError { at: "lib/res.cc:626", anchor: Anchor::Value { value, .. }, .. }) if value == "nosuch"));
         assert_eq!(run("Client { Name = fd; Address = b; Password = p }").unwrap_err()[0],
             Diag::Daemon("ERROR in lib/parse_conf.cc:276 Attempt to define second Client resource named \"fd\" is not permitted.\n".into()));
         assert_eq!(run("Client { Name = n; Password = p }").unwrap_err()[0],

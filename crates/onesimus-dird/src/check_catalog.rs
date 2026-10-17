@@ -224,7 +224,7 @@ pub fn check_connections(config: &DirectorConfig, before_failure: impl FnOnce(&D
     check_connections_with(config, std::time::Duration::from_secs(5), before_failure)
 }
 
-fn check_connections_with(
+pub(crate) fn check_connections_with(
     config: &DirectorConfig,
     pause: std::time::Duration,
     before_failure: impl FnOnce(&DirectorConfig),
