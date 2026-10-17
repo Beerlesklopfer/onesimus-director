@@ -129,8 +129,8 @@ pub enum PipeMessage {
 }
 
 /// lib/message.h M_* codes of the worker's own job messages.
-const M_ERROR: u32 = 4;
-const M_INFO: u32 = 6;
+pub(crate) const M_ERROR: u32 = 4;
+pub(crate) const M_INFO: u32 = 6;
 
 /// The worker's pipe to the Director for job messages (any thread).
 static JMSG_PIPE: std::sync::Mutex<Option<std::fs::File>> = std::sync::Mutex::new(None);
@@ -143,7 +143,7 @@ fn write_pipe_line(file: &mut std::fs::File, msg: &PipeMessage) {
     }
 }
 
-fn send_jmsg(msg: PipeMessage) {
+pub(crate) fn send_jmsg(msg: PipeMessage) {
     let mut pipe = JMSG_PIPE.lock().unwrap_or_else(|e| e.into_inner());
     if let Some(file) = pipe.as_mut() {
         write_pipe_line(file, &msg);
@@ -151,7 +151,7 @@ fn send_jmsg(msg: PipeMessage) {
 }
 
 /// Jmsg(jcr, type, 0, text) of the worker's job.
-fn worker_jmsg(job_id: u32, msg_type: u32, text: String) {
+pub(crate) fn worker_jmsg(job_id: u32, msg_type: u32, text: String) {
     send_jmsg(PipeMessage::Jmsg { job_id, msg_type, mtime: 0, text, raw: false });
 }
 
@@ -174,7 +174,7 @@ fn parse_daemon_jmsg(line: &str) -> Option<(u32, i64, String)> {
 
 /// A job message line of the File or Storage daemon: dispatched by the
 /// Director as it is; "Malformed message: %s\n" (M_ERROR) otherwise.
-fn forward_daemon_jmsg(job_id: u32, line: &str) {
+pub(crate) fn forward_daemon_jmsg(job_id: u32, line: &str) {
     match parse_daemon_jmsg(line) {
         Some((msg_type, mtime, text)) => send_jmsg(PipeMessage::Jmsg { job_id, msg_type, mtime, text, raw: true }),
         None => worker_jmsg(job_id, M_ERROR, format!("Malformed message: {line}\n")),
@@ -246,13 +246,13 @@ impl WorkerState {
 }
 
 /// Pipes for Worker↔Director communication.
-struct WorkerPipes {
-    to_director: std::fs::File,
-    from_director: std::fs::File,
+pub(crate) struct WorkerPipes {
+    pub(crate) to_director: std::fs::File,
+    pub(crate) from_director: std::fs::File,
 }
 
 impl WorkerPipes {
-    fn send(&mut self, msg: &PipeMessage) {
+    pub(crate) fn send(&mut self, msg: &PipeMessage) {
         if let Ok(json) = serde_json::to_string(msg) {
             let _ = writeln!(self.to_director, "{json}");
         }
@@ -296,6 +296,11 @@ pub fn run_worker(
 
     // admin.cc do_admin(): "Start Admin JobId %d, Job=%s", then
     // AdminCleanup(jcr, JS_Terminated) in the Director (job end).
+    // Copy/Migrate worker jobs and VirtualFull: SD read+write session (C-058).
+    if let Some(copy) = &params.copy {
+        return crate::sd_copy::run(params, copy, &mut pipes);
+    }
+
     if params.job_type == WorkerJobType::Admin {
         // job.cc job_thread(): "Version: …" when the job runs.
         worker_jmsg(job_id, M_INFO, crate::job_messages::version_text());
@@ -628,7 +633,7 @@ fn fd_restore_setup(fd: &mut BnetStream<tls_psk::PskStream>, p: &JobParams, sd_a
 }
 
 // Bareos getmsg.cc: Status Job=%127s JobStatus=%d; job_status.h: M/m/R.
-fn storage_job_status(message: &str) -> Result<u8, &'static str> {
+pub(crate) fn storage_job_status(message: &str) -> Result<u8, &'static str> {
     let parts: Vec<_> = message.split_whitespace().collect();
     if parts.len() != 3 || parts[0] != "Status"
         || !parts[1].starts_with("Job=") || parts[1].len() == 4 {
@@ -852,7 +857,7 @@ fn connect_fd(p: &JobParams) -> Result<(BnetStream<tls_psk::PskStream>, String),
     Ok((bnet, cipher))
 }
 
-fn connect_sd(p: &JobParams) -> Result<(BnetStream<tls_psk::PskStream>, String), String> {
+pub(crate) fn connect_sd(p: &JobParams) -> Result<(BnetStream<tls_psk::PskStream>, String), String> {
     let sock = resolve_connect(&format!("{}:{}", p.sd_address, p.sd_port), 3)?;
     sock.set_read_timeout(None).ok();
     let psk = tls_psk::password_to_psk(&p.sd_password);
@@ -901,7 +906,7 @@ fn now_unix() -> i64 { SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_de
 // Signal handlers (worker-side)
 // ============================================================================
 
-static WORKER_CANCEL: AtomicBool = AtomicBool::new(false);
+pub(crate) static WORKER_CANCEL: AtomicBool = AtomicBool::new(false);
 static WORKER_PAUSED: AtomicBool = AtomicBool::new(false);
 
 pub fn install_worker_signal_handlers() {
