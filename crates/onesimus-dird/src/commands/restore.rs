@@ -1145,8 +1145,13 @@ fn get_client_name(ua: &mut Ua, ast: &CommandAst, rx: &mut Rx) -> bool {
 /// GetClientDbr (ua_select.cc:572) without a preset name: `client=`/`fd=`
 /// or SelectClientDbr. Returns (ClientId, Name).
 fn get_client_dbr(ua: &mut Ua, ast: &CommandAst, rx: &Rx) -> Option<(i64, String)> {
+    get_client_dbr_with(ua, ast, &rx.db)
+}
+
+/// GetClientDbr without a preset name on any catalog connection.
+pub(crate) fn get_client_dbr_with(ua: &mut Ua, ast: &CommandAst, db: &dyn Db) -> Option<(i64, String)> {
     let ctx = ua.ctx;
-    let record = |name: &str| rx.db.rows(&format!(
+    let record = |name: &str| db.rows(&format!(
         "SELECT ClientId,Name,Uname,AutoPrune,FileRetention,JobRetention FROM Client WHERE Client.Name='{}'",
         escape(name))).ok().filter(|t| t.rows.len() == 1)
         .and_then(|t| t.rows.into_iter().next())
@@ -1166,7 +1171,7 @@ fn get_client_dbr(ua: &mut Ua, ast: &CommandAst, rx: &Rx) -> Option<(i64, String
         }
     }
     // SelectClientDbr
-    let names = match rx.db.rows("SELECT Name FROM Client ORDER BY Name") {
+    let names = match db.rows("SELECT Name FROM Client ORDER BY Name") {
         Ok(table) => table.rows.into_iter().filter_map(|r| r.into_iter().next().flatten()).collect::<Vec<_>>(),
         Err(e) => {
             ua.error_msg(format!("Error obtaining client ids. ERR={e}\n"));

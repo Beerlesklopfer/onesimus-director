@@ -6,7 +6,7 @@ use crate::{
 use bareos_config::raw::{ConfResource, Directive};
 use serde_json::{Value, json};
 
-fn raw<'a>(cfg: &'a DirectorConfig, kind: &str, name: &str) -> Option<&'a ConfResource> {
+pub(crate) fn raw<'a>(cfg: &'a DirectorConfig, kind: &str, name: &str) -> Option<&'a ConfResource> {
     cfg.raw
         .iter()
         .find(|r| r.norm_type() == kind && r.name() == Some(name))
@@ -14,7 +14,7 @@ fn raw<'a>(cfg: &'a DirectorConfig, kind: &str, name: &str) -> Option<&'a ConfRe
 fn directive<'a>(dirs: &'a [Directive], key: &str) -> Option<&'a Directive> {
     dirs.iter().rev().find(|d| d.norm_key() == key)
 }
-fn first<'a>(dirs: &'a [Directive], key: &str) -> Option<&'a str> {
+pub(crate) fn first<'a>(dirs: &'a [Directive], key: &str) -> Option<&'a str> {
     directive(dirs, key).and_then(Directive::first)
 }
 /// Directives of a Job resource after PopulateJobdefaults() (raw config):
@@ -33,7 +33,7 @@ pub(crate) fn time_directive(dirs: &[Directive], key: &str) -> u64 {
 pub(crate) fn bool_directive(dirs: &[Directive], key: &str, default: bool) -> bool {
     boolean(dirs, key, default).map(|v| v != 0).unwrap_or(default)
 }
-const TIMES: &[(&str, u64)] = &[
+pub(crate) const TIMES: &[(&str, u64)] = &[
     ("n", 60),
     ("seconds", 1),
     ("months", 2592000),
@@ -45,7 +45,7 @@ const TIMES: &[(&str, u64)] = &[
     ("quarters", 7862400),
     ("years", 31536000),
 ];
-const SIZES: &[(&str, u64)] = &[
+pub(crate) const SIZES: &[(&str, u64)] = &[
     ("k", 1024),
     ("kb", 1000),
     ("m", 1048576),
@@ -110,7 +110,7 @@ fn quantity(input: &str, mods: &[(&str, u64)]) -> Result<u64, String> {
         Err(format!("Invalid quantity: {input}"))
     }
 }
-fn number(
+pub(crate) fn number(
     dirs: &[Directive],
     key: &str,
     default: u64,
@@ -122,7 +122,7 @@ fn number(
     }
 }
 // CFG_TYPE_PINT32 is an unsigned integer directive, not a time/size.
-fn pint32(dirs: &[Directive], key: &str, default: u32) -> Result<u32, String> {
+pub(crate) fn pint32(dirs: &[Directive], key: &str, default: u32) -> Result<u32, String> {
     match directive(dirs, key) {
         None => Ok(default),
         Some(d) => d
@@ -132,7 +132,7 @@ fn pint32(dirs: &[Directive], key: &str, default: u32) -> Result<u32, String> {
             .map_err(|_| format!("Invalid unsigned 32-bit directive {key}")),
     }
 }
-fn boolean(dirs: &[Directive], key: &str, default: bool) -> Result<i32, String> {
+pub(crate) fn boolean(dirs: &[Directive], key: &str, default: bool) -> Result<i32, String> {
     match first(dirs, key) {
         Some(v) => bareos_config::values::parse_bool(v).map(|(_, v)| v as i32),
         None => Ok(default as i32),

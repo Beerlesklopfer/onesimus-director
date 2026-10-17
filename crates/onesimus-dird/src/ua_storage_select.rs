@@ -257,7 +257,7 @@ pub(crate) fn open_and_exchange(ua: &mut Ua, sd: &mut impl SdLink, store: &Stora
 /// GetRobotElementStatus() of an NDMP storage (C-050): returns before a
 /// session unless it is an autochanger with NdmpChangerDevice and a
 /// complete agent configuration; the session itself is not supported.
-fn ndmp_robot_session(ua: &mut Ua, store: &StorageResource) {
+pub(crate) fn ndmp_robot_session(ua: &mut Ua, store: &StorageResource) {
     let autochanger = ua.ctx.config.as_ref().and_then(|c| c.read().ok())
         .is_some_and(|c| crate::ua_select::is_autochanger(&c, &store.name));
     if let Some(message) = crate::ndmp::robot_session(store, autochanger) {
@@ -638,15 +638,15 @@ fn get_storage_slot(ua: &mut Ua, args: &[Argument], env: &Env, store: &StorageRe
 
 /// NativeAutochangerVolumeOperation() (sd_cmds.cc:793): the SD answer is
 /// relayed unchanged.
-fn volume_operation(ua: &mut Ua, sd: &mut impl SdLink, store: &StorageResource, operation: &str, drive: i16,
-    slot: i16) {
+pub(crate) fn volume_operation(ua: &mut Ua, sd: &mut impl SdLink, store: &StorageResource, operation: &str, drive: i16,
+    slot: i16) -> bool {
     if store.protocol.is_ndmp() {
         // NdmpAutochangerVolumeOperation() (ndmp_dma_storage.cc:815), C-050:
         // mount/unmount/release are legal operations; the element mapping
         // needs the robot session.
         ua.warning_msg(format!("NdmpAutochangerVolumeOperation: operation {operation}, drive {drive}, slot {slot}\n"));
         ndmp_robot_session(ua, store);
-        return;
+        return false;
     }
     // IsSlotNumberValid() on the slot_number_t.
     let command = if is_slot_number_valid(slot as u16) {
@@ -654,11 +654,11 @@ fn volume_operation(ua: &mut Ua, sd: &mut impl SdLink, store: &StorageResource, 
     } else {
         format!("{operation} {} drive={drive}\n", dev_name(store))
     };
-    if let Some(messages) = open_and_exchange(ua, sd, store, &command) {
-        for message in messages {
-            ua.send_msg(message);
-        }
+    let Some(messages) = open_and_exchange(ua, sd, store, &command) else { return false };
+    for message in messages {
+        ua.send_msg(message);
     }
+    true
 }
 
 /// C++ DoMountCmd() (ua_cmds.cc:2498) after OpenClientDb(): `cmd` is

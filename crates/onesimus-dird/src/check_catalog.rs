@@ -66,6 +66,22 @@ fn create_storage_record(catalog: &CatalogHandle, name: &str, autochanger: bool)
 /// Clients of the (first) catalog, then storages, in resource order.
 pub fn ensure_basic_records(config: &DirectorConfig, catalog: &CatalogHandle) {
     let Some(first) = config.catalogs.first() else { return };
+    // Pools of this catalog: CreatePool(POOL_OP_UPDATE), then
+    // UpdatePoolReferences (C-066: every pool record is rewritten at start).
+    let pools: Vec<_> = config.pools.iter().filter(|pool| {
+        crate::commands::defaults::raw(config, "pool", &pool.name)
+            .and_then(|r| crate::commands::defaults::first(&r.directives, "catalog"))
+            .is_none_or(|catalog| catalog == first.name)
+    }).filter_map(|pool| crate::commands::pool_db::pool_settings(config, &pool.name)).collect();
+    let (mut errmsg, mut msgs) = (String::new(), Vec::new());
+    let mut cat = crate::catreq::Cat::new(catalog, &mut errmsg, &mut msgs);
+    for pool in &pools {
+        crate::commands::pool_db::create_pool(&mut cat, pool, false);
+    }
+    for pool in &pools {
+        crate::commands::pool_db::update_pool_references(&mut cat, pool);
+    }
+    drop(cat);
     for client in &config.clients {
         // client->catalog defaults to the first Catalog resource.
         if !client.catalog.is_empty() && client.catalog != first.name {

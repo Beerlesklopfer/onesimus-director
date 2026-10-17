@@ -818,7 +818,7 @@ fn delete_dialog(ua: &mut crate::ua_select::Ua, ast: &CommandAst,
 }
 
 /// The catalog work of a confirmed delete (DeleteVolume after the
-/// confirmation, DoJobDelete; pool and storage deletion are not ported).
+/// confirmation, DoJobDelete, DeletePoolRecord, delete_storages).
 fn delete_execute(ua: &mut crate::ua_select::Ua, action: DeleteAction,
     deleted: &mut serde_json::Map<String, serde_json::Value>) {
     use serde_json::Value;
@@ -865,8 +865,44 @@ fn delete_execute(ua: &mut crate::ua_select::Ua, action: DeleteAction,
             }
             ua.send_msg(format!("Jobid {id} and associated records deleted from the catalog.\n"));
         }
-        DeleteAction::Pool(_) => ua.send_msg("delete pool: not supported\n"),
-        DeleteAction::Storage(_) => ua.send_msg("delete storage: not supported\n"),
+        DeleteAction::Pool(pool) => {
+            // BareosDb::DeletePoolRecord(): its volumes, then the pool (no
+            // message, errors only in the catalog's errmsg).
+            let id = cat.query_rows(&format!("SELECT PoolId FROM Pool WHERE Name='{}'", pool.replace('\'', "''")))
+                .ok().filter(|t| t.rows.len() == 1)
+                .and_then(|t| t.rows.into_iter().next())
+                .map(|row| super::job::str_to_int64(row.first().cloned().flatten().as_deref().unwrap_or("")));
+            if let Some(id) = id {
+                let id = id as i32;
+                let _ = cat.execute(&format!("DELETE FROM Media WHERE Media.PoolId = {id}"));
+                let _ = cat.execute(&format!("DELETE FROM Pool WHERE Pool.PoolId = {id}"));
+            }
+        }
+        DeleteAction::Storage(storage) => {
+            // get_deletable_storageids() (dbcheck_utils.cc:168): only
+            // storages no volume or device refers to; the Emsg warnings go
+            // to the daemon log.
+            let column = |sql: &str| cat.query_rows(sql).map(|t| t.rows.into_iter()
+                .filter_map(|r| r.into_iter().next().flatten()).collect::<Vec<_>>()).unwrap_or_default();
+            let mut deletable = Vec::new();
+            for id in column(&format!("SELECT storageid FROM storage WHERE Name in ('{storage}')")) {
+                let volumes = column(&format!("SELECT volumename FROM media WHERE storageid={id}"));
+                let devices = column(&format!("SELECT name FROM device WHERE storageid={id}"));
+                for (what, name) in volumes.iter().map(|v| ("volume", v)).chain(devices.iter().map(|d| ("device", d))) {
+                    tracing::warn!("Orphaned storage '{storage}' is being used by {what} '{name}'. \
+                        An orphaned storage will only be removed when it is no longer referenced.");
+                }
+                if volumes.is_empty() && devices.is_empty() {
+                    deletable.push(id);
+                }
+            }
+            if !deletable.is_empty() {
+                ua.send_msg(format!("Deleting {} orphaned storage record(s).\n", deletable.len()));
+                for id in deletable {
+                    let _ = cat.execute(&format!("DELETE FROM storage WHERE storageid={id}"));
+                }
+            }
+        }
     }
 }
 
@@ -892,22 +928,24 @@ fn create_dialog(ua: &mut crate::ua_select::Ua, ast: &CommandAst,
     }
 }
 
-/// CreatePool(POOL_OP_CREATE) and the "Pool %s created." message.
+/// CreatePool(POOL_OP_CREATE) (ua_cmds.cc:831) and the "Pool %s created."
+/// message, which follows even the errors (C-066).
 fn create_pool(ua: &mut crate::ua_select::Ua, pool: bareos_config::resources::PoolResource) {
+    use crate::commands::pool_db;
     let Some(cat) = ua.ctx.catalog.clone() else {
         ua.send_msg("No catalog configured\n");
         return;
     };
-    let sql = format!(
-        "INSERT INTO pool (name, pooltype, maxvols, autoprune, volretention, fileretention, jobretention, numvols) \
-         VALUES ('{}', '{}', {}, {}, {}, {}, {}, 0) ON CONFLICT (name) DO NOTHING",
-        pool.name.replace('\'', "''"), pool.pool_type, pool.maximum_volumes,
-        if pool.auto_prune { 1 } else { 0 },
-        pool.volume_retention.as_secs(), 0, 0,
-    );
-    // ua_cmds.cc:845 (the "already exists" case is not distinguished yet).
-    if let Err(e) = cat.raw_query(&sql) {
-        ua.error_msg(format!("{e}\n"));
+    let settings = ua.ctx.config.as_ref().and_then(|c| c.read().ok())
+        .and_then(|c| pool_db::pool_settings(&c, &pool.name));
+    if let Some(settings) = settings {
+        let (mut errmsg, mut msgs) = (String::new(), Vec::new());
+        let mut db = crate::catreq::Cat::new(&cat, &mut errmsg, &mut msgs);
+        match pool_db::create_pool(&mut db, &settings, true) {
+            0 => ua.error_msg(format!("Error: Pool {} already exists.\nUse update to change it.\n", pool.name)),
+            -1 => ua.error_msg(errmsg),
+            _ => {}
+        }
     }
     ua.send_msg(format!("Pool {} created.\n", pool.name));
 }
@@ -1042,62 +1080,23 @@ fn add_volumes(ua: &mut crate::ua_select::Ua, volumes: AddVolumes) {
 }
 
 pub fn cmd_import(ast: &CommandAst, ctx: &ExecContext) -> CommandResult {
-    move_operation(ast, ctx, "import", |stor, command| sd_cmd_via_config(ctx, stor, command))
+    move_operation(ast, ctx, crate::ua_impexp::MoveOp::Import)
 }
 
 pub fn cmd_export(ast: &CommandAst, ctx: &ExecContext) -> CommandResult {
-    move_operation(ast, ctx, "export", |stor, command| sd_cmd_via_config(ctx, stor, command))
+    move_operation(ast, ctx, crate::ua_impexp::MoveOp::Export)
 }
 
 pub fn cmd_move(ast: &CommandAst, ctx: &ExecContext) -> CommandResult {
-    move_operation(ast, ctx, "move", |stor, command| sd_cmd_via_config(ctx, stor, command))
+    move_operation(ast, ctx, crate::ua_impexp::MoveOp::Move)
 }
 
-/// PerformMoveOperation (ua_impexp.cc:897): the storage comes from
-/// get_storage_resource(ua, false, true) — never a default — and export/move
-/// refuse to run without the slot selection they need (C-012).
-fn move_operation(
-    ast: &CommandAst,
-    ctx: &ExecContext,
-    operation: &str,
-    send: impl FnOnce(&str, &str) -> Result<String, String>,
-) -> CommandResult {
+/// ImportCmd/ExportCmd/move_cmd (ua_impexp.cc:1186): PerformMoveOperation
+/// with the Storage daemon (C-069/C-071).
+fn move_operation(ast: &CommandAst, ctx: &ExecContext, op: crate::ua_impexp::MoveOp) -> CommandResult {
     let mut ua = crate::ua_select::Ua::new(ctx);
-    let Some(store) = crate::ua_select::get_storage_resource(&mut ua, ast, false, true) else {
-        return ua.finish(false);
-    };
-    let value = |keys: &[&str]| keys.iter().find_map(|key| ast.arguments.iter()
-        .find(|a| a.key.eq_ignore_ascii_case(key))
-        .and_then(|a| a.value.as_deref()));
-    let src = value(&["srcslots", "srcslot"]);
-    let dst = value(&["dstslots", "dstslot"]);
-    let volume = value(&["volume"]);
-    // ua_impexp.cc:1042-1058 operation specific checks.
-    let refusal = match operation {
-        "export" if src.is_none() && volume.is_none() =>
-            Some("Cannot perform an export operation without source slot selection\n"),
-        "move" if src.is_none() || dst.is_none() =>
-            Some("Cannot perform a move operation without source and/or destination selection\n"),
-        _ => None,
-    };
-    if let Some(refusal) = refusal {
-        ua.error_msg(refusal);
-        return ua.finish(false);
-    }
-    let mut command = operation.to_string();
-    for (key, value) in [("srcslots", src), ("dstslots", dst), ("volume", volume)] {
-        if let Some(value) = value { command.push_str(&format!(" {key}={value}")); }
-    }
-    match send(&store.name, &command) {
-        Ok(resp) => {
-            ua.send_msg(format!("{operation} on storage {}:\n{resp}\n", store.name));
-            ua.finish(true)
-        }
-        Err(e) => {
-            ua.error_msg(format!("{operation} {}: {e}\n", store.name));
-            ua.finish(false)
-        }
-    }
+    let ok = crate::ua_impexp::move_cmd(&mut ua, ast, op);
+    ua.finish(ok)
 }
 
 #[cfg(test)]
@@ -1217,10 +1216,26 @@ mod move_operation_tests {
             bus_rx: None, job_manager: None }
     }
 
+    struct NoSd;
+
+    impl crate::ua_storage_select::SdLink for NoSd {
+        fn exchange(&mut self, _store: &bareos_config::resources::StorageResource, command: &str)
+            -> Result<Vec<String>, String> {
+            panic!("{command}: must not contact the SD")
+        }
+    }
+
     fn run(line: &str, ctx: &ExecContext) -> CommandResult {
+        use crate::ua_impexp::MoveOp;
         let ast = crate::session::parse_cli_command(line);
-        let operation = ast.command_name.clone();
-        move_operation(&ast, ctx, &operation, |_, _| panic!("{line}: must not contact the SD"))
+        let op = match ast.command_name.as_str() {
+            "import" => MoveOp::Import,
+            "export" => MoveOp::Export,
+            _ => MoveOp::Move,
+        };
+        let mut ua = crate::ua_select::Ua::new(ctx);
+        let ok = crate::ua_impexp::move_command(&mut ua, &ast, op, &mut NoSd, &mut crate::ua_impexp::NoCatalog);
+        ua.finish(ok)
     }
 
     #[test]
@@ -1329,21 +1344,6 @@ mod move_operation_tests {
         assert!(console.answers.len() == 1, "nothing asked without catalog");
     }
 
-    #[test]
-    fn export_and_move_need_slot_selection() {
-        let ctx = context("Storage { Name = Tape; Address = localhost; Auto Changer = yes }");
-        let export = run("export", &ctx);
-        assert_eq!(export.text_output, "Automatically selected Storage: Tape\n");
-        assert_eq!(export.error_message, "Cannot perform an export operation without source slot selection\n");
-        let moved = run("move srcslots=1", &ctx);
-        assert_eq!(moved.error_message, "Cannot perform a move operation without source and/or destination selection\n");
-        let ast = crate::session::parse_cli_command("import");
-        let result = move_operation(&ast, &ctx, "import", |storage, command| {
-            assert_eq!((storage, command), ("Tape", "import"));
-            Ok("ok".into())
-        });
-        assert!(result.success);
-    }
 }
 
 #[cfg(test)]
