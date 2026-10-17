@@ -202,9 +202,9 @@ pub fn start(config: &DirectorConfig, catalog: Option<&CatalogHandle>, req: &Req
             None => (first_item(&rpool_dirs, "storage").unwrap_or_default(), "Pool resource"),
         };
         let _ = catalog.execute(&format!(
-            "UPDATE Job SET JobStatus='f',StartTime=to_timestamp({now}),EndTime=to_timestamp({now}),\
-             RealEndTime=to_timestamp({now}),JobTDate={now},PoolId={pool_id},FileSetId={fileset_id},\
-             ClientId={client_id} WHERE JobId={job_id}"));
+            "UPDATE Job SET JobStatus='f',StartTime='{t}',EndTime='{t}',\
+             RealEndTime='{t}',JobTDate={now},PoolId={pool_id},FileSetId={fileset_id},\
+             ClientId={client_id} WHERE JobId={job_id}", t = crate::job_messages::bstrutime(now)));
         let mut report = crate::job_messages::backup_report(config, job, client_res, &storage, pool, pool, "f",
             &fileset, sched_time);
         report.job = unique.clone();

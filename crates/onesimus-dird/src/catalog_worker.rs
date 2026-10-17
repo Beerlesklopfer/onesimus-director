@@ -366,6 +366,7 @@ pub fn spawn_catalog_worker(
                     .after_connect(move |conn, _meta| {
                         let target = detect_into.clone();
                         Box::pin(async move {
+                            server_time_zone(conn).await;
                             let capability = detect_ovfs(conn).await;
                             record_ovfs(&target, capability, "connect");
                             Ok(())
@@ -766,22 +767,14 @@ async fn handle_create_job(
     job_name: &str, name: &str, job_type: &str, level: &str,
     client_name: &str, pool_name: &str, fileset_name: &str, sched_time: i64,
 ) -> CatalogResponse {
-    // Use stored procedure: create_job_record(job, name, type, level, client, pool, fileset, sched_time)
-    let job_id: i32 = match sqlx::query_scalar(
-        "SELECT sp_create_job_record($1, $2, $3, $4, $5, $6, $7, $8)"
-    )
-    .bind(job_name).bind(name).bind(job_type).bind(level)
-    .bind(client_name).bind(pool_name).bind(fileset_name).bind(sched_time)
-    .fetch_one(pool).await {
-        Ok(id) => id,
-        Err(e) => {
-            // Fallback: SP not yet installed, use inline SQL
-            warn!("SP sp_create_job_record not available ({e}), using inline SQL");
-            return handle_create_job_inline(
-                pool, job_name, name, job_type, level,
-                client_name, pool_name, fileset_name, sched_time,
-            ).await;
-        }
+    // sql_create.cc CreateJobRecord writes SchedTime as local time text;
+    // sp_create_job_record converts an epoch in the database's time zone
+    // (C-082), so the inline statement is used.
+    let job_id = match handle_create_job_inline(
+        pool, job_name, name, job_type, level, client_name, pool_name, fileset_name, sched_time,
+    ).await {
+        CatalogResponse::JobId(id) => id,
+        other => return other,
     };
 
     info!("Created job record: JobId={job_id} name={name} type={job_type} level={level}");
@@ -794,37 +787,48 @@ async fn handle_update_job_end(
     job_files: i64, job_bytes: i64, job_errors: i32,
     vol_session_id: i32, vol_session_time: i32,
 ) -> CatalogResponse {
-    // Try SP first, fallback to inline SQL
-    let result = sqlx::query(
-        "SELECT sp_update_job_end($1, $2, $3, $4, $5, $6, $7, $8)"
+    // cats/sql_update.cc UpdateJobEndRecord: EndTime/RealEndTime as the
+    // Director's local time text (bstrutime), not an epoch the database
+    // converts in its own time zone (C-082; sp_update_job_end does that).
+    let end = crate::job_messages::bstrutime(end_time);
+    match sqlx::query(
+        "UPDATE Job SET JobStatus=$2, EndTime=$3::text::timestamp, \
+         RealEndTime=$3::text::timestamp, JobFiles=$4, JobBytes=$5, \
+         JobErrors=$6, VolSessionId=$7, VolSessionTime=$8 WHERE JobId=$1"
     )
-    .bind(job_id).bind(status).bind(end_time)
+    .bind(job_id).bind(status).bind(&end)
     .bind(job_files).bind(job_bytes).bind(job_errors)
     .bind(vol_session_id).bind(vol_session_time)
-    .execute(pool).await;
-
-    match result {
+    .execute(pool).await {
         Ok(_) => {
             info!("Updated job {job_id}: status={status} files={job_files} bytes={job_bytes}");
             CatalogResponse::Ok(1)
         }
-        Err(_) => {
-            // Fallback: SP not installed
-            match sqlx::query(
-                "UPDATE Job SET JobStatus=$2, EndTime=to_timestamp($3::float8), \
-                 RealEndTime=to_timestamp($3::float8), JobFiles=$4, JobBytes=$5, \
-                 JobErrors=$6, VolSessionId=$7, VolSessionTime=$8 WHERE JobId=$1"
-            )
-            .bind(job_id).bind(status).bind(end_time)
-            .bind(job_files).bind(job_bytes).bind(job_errors)
-            .bind(vol_session_id).bind(vol_session_time)
-            .execute(pool).await {
-                Ok(_) => {
-                    info!("Updated job {job_id}: status={status} files={job_files} bytes={job_bytes} (inline)");
-                    CatalogResponse::Ok(1)
-                }
-                Err(e) => CatalogResponse::Error(format!("UpdateJobEnd: {e}")),
-            }
+        Err(e) => CatalogResponse::Error(format!("UpdateJobEnd: {e}")),
+    }
+}
+
+/// libpq (the original's catalog backend) sends no TimeZone unless PGTZ is
+/// set, so the session runs in the server's zone and CURRENT_TIMESTAMP,
+/// `now()` and the durations of `list jobs` are in that zone. sqlx always
+/// starts with "TimeZone=UTC": set the zone libpq would have (PGTZ, else a
+/// per-role/database setting, else the server's log_timezone, which initdb
+/// sets to the same zone as timezone). C-082.
+async fn server_time_zone(conn: &mut sqlx::PgConnection) {
+    let zone: Option<String> = match std::env::var("PGTZ") {
+        Ok(zone) if !zone.is_empty() => Some(zone),
+        _ => sqlx::query_scalar(
+            "SELECT COALESCE((SELECT substr(cfg, 10) FROM pg_db_role_setting s, unnest(s.setconfig) cfg \
+               WHERE s.setdatabase IN (0, (SELECT oid FROM pg_database WHERE datname = current_database())) \
+                 AND s.setrole IN (0, (SELECT oid FROM pg_roles WHERE rolname = current_user)) \
+                 AND lower(cfg) LIKE 'timezone=%' \
+               ORDER BY s.setrole DESC, s.setdatabase DESC LIMIT 1), current_setting('log_timezone'))")
+            .fetch_one(&mut *conn).await.ok(),
+    };
+    if let Some(zone) = zone {
+        let sql = format!("SET TIME ZONE '{}'", zone.replace('\'', "''"));
+        if let Err(e) = sqlx::query(&sql).execute(&mut *conn).await {
+            warn!("catalog: {sql}: {e}");
         }
     }
 }
@@ -844,12 +848,13 @@ async fn handle_create_job_inline(
          StartTime, RealEndTime, JobTDate, VolSessionId, VolSessionTime, \
          JobFiles, JobBytes, JobErrors, PoolId, FileSetId, PriorJobId, \
          HasBase, HasCache, Reviewed, Comment) \
-         VALUES ($1, $2, $3, $4, $5, 'C', to_timestamp($6::float8), to_timestamp($6::float8), \
-                 to_timestamp($6::float8), $6, 0, 0, 0, 0, 0, $7, $8, 0, 0, 0, 0, '') \
+         VALUES ($1, $2, $3, $4, $5, 'C', $9::text::timestamp, $9::text::timestamp, \
+                 $9::text::timestamp, $6, 0, 0, 0, 0, 0, $7, $8, 0, 0, 0, 0, '') \
          RETURNING JobId"
     )
     .bind(job_name).bind(name).bind(job_type).bind(level)
     .bind(client_id).bind(sched_time).bind(pool_id).bind(fileset_id)
+    .bind(crate::job_messages::bstrutime(sched_time))
     .fetch_one(pool).await {
         Ok(id) => id,
         Err(e) => return CatalogResponse::Error(format!("CreateJob inline: {e}")),
