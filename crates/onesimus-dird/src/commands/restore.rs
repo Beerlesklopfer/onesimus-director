@@ -1768,6 +1768,7 @@ pub(crate) fn start_restore(ctx: &ExecContext, launch: Launch) -> CommandResult 
         bootstrap: Some(bootstrap),
         client_name: client.name.clone(),
         client_first_connection: crate::job_messages::first_client_connection(&client.name),
+        copy: None,
     };
     let report = crate::job_messages::JobReport {
         kind: crate::job_messages::ReportKind::Restore, job: unique_job.clone(), client: client.name.clone(),
