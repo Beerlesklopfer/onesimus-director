@@ -41,6 +41,8 @@ pub struct DirJob {
 /// Compatibility log C-048.
 #[derive(Default)]
 struct JcrState {
+    /// FD/SD end counters of a native backup (backup_worker.rs, S-19).
+    backup_end: Option<crate::backup::BackupEnd>,
     /// Worker parameters of a queued job, kept for the job codes of its
     /// run scripts afterwards.
     params: Option<crate::job_worker::JobParams>,
@@ -801,6 +803,19 @@ impl JobManager {
                             vol_session_id: vol_session_id.unwrap_or(0), vol_session_time: vol_session_time.unwrap_or(0)});
                     }
 
+                    PipeMessage::CatalogSql { sql, .. } => {
+                        if let Some(cat) = self.catalog.as_ref() {
+                            if let Err(e) = cat.execute(&sql) {
+                                error!("JobManager: job {} catalog update failed: {e}", job.job_id);
+                            }
+                        }
+                    }
+
+                    PipeMessage::BackupEnd { end, .. } => {
+                        job.jcr.sd_status = end.sd_status;
+                        job.jcr.backup_end = Some(end);
+                    }
+
                     PipeMessage::Jmsg { msg_type, mtime, text, raw, .. } => {
                         if let Some(config) = self.config.as_ref().and_then(|c| c.read().ok()) {
                             if raw {
@@ -855,10 +870,21 @@ impl JobManager {
                 }
                 // NativeBackupCleanup: terminated with errors is JS_Warnings
                 if job.observed_status == 'T' && ending.errors > 0 { job.observed_status = 'W'; }
+                // NativeBackupCleanup: SD errors also make it JS_Warnings.
+                if let Some(end) = &job.jcr.backup_end {
+                    if job.observed_status == 'T' && end.sd_errors > 0 { job.observed_status = 'W'; }
+                }
                 let db_status = job.observed_status.to_string();
-                let result = self.catalog.as_ref().ok_or_else(|| "catalog is unavailable".to_string()).and_then(|cat| cat.update_job_end(
-                    job.job_id as i32, &db_status, now_unix(), ending.files, ending.bytes, ending.errors,
-                    ending.vol_session_id, ending.vol_session_time));
+                let result = self.catalog.as_ref().ok_or_else(|| "catalog is unavailable".to_string()).and_then(|cat| {
+                    match &job.jcr.backup_end {
+                        // job.cc UpdateJobEndRecord() (S-19)
+                        Some(end) => cat.execute(&crate::backup::update_job_end_record_sql(job.job_id,
+                            job.observed_status, now_unix(), ending.files, ending.bytes, ending.errors,
+                            ending.vol_session_id, ending.vol_session_time, end)).map(|_| ()),
+                        None => cat.update_job_end(job.job_id as i32, &db_status, now_unix(), ending.files,
+                            ending.bytes, ending.errors, ending.vol_session_id, ending.vol_session_time),
+                    }
+                });
                 job.completion_error = result.err();
                 if let Some(error) = &job.completion_error { error!("JobManager: job {} final catalog update failed: {error}", job.job_id); }
                 let success = job.completion_error.is_none() && matches!(job.observed_status, 'T' | 'W');
@@ -872,10 +898,16 @@ impl JobManager {
                     let outcome = crate::job_messages::JobOutcome {
                         job_id: job.job_id, status: job.observed_status, end_time,
                         files: ending.files.max(0) as u64, bytes: ending.bytes.max(0) as u64,
-                        read_bytes: ending.bytes.max(0) as u64, sd_files: ending.files.max(0) as u64,
-                        sd_bytes: ending.bytes.max(0) as u64, errors: ending.errors.max(0) as u32, sd_errors: 0,
+                        read_bytes: job.jcr.backup_end.as_ref().map(|e| e.read_bytes).unwrap_or(ending.bytes.max(0) as u64),
+                        sd_files: job.jcr.backup_end.as_ref().map(|e| e.sd_files).unwrap_or(ending.files.max(0) as u64),
+                        sd_bytes: job.jcr.backup_end.as_ref().map(|e| e.sd_bytes).unwrap_or(ending.bytes.max(0) as u64),
+                        errors: ending.errors.max(0) as u32,
+                        sd_errors: job.jcr.backup_end.as_ref().map(|e| e.sd_errors).unwrap_or(0),
                         vol_session_id: ending.vol_session_id, vol_session_time: ending.vol_session_time,
-                        fd_status, sd_status: job.jcr.sd_status, vss: false, encrypt: false,
+                        fd_status: job.jcr.backup_end.as_ref().map(|e| e.fd_status).unwrap_or(fd_status),
+                        sd_status: job.jcr.sd_status,
+                        vss: job.jcr.backup_end.as_ref().is_some_and(|e| e.vss),
+                        encrypt: job.jcr.backup_end.as_ref().is_some_and(|e| e.encrypt),
                     };
                     let director = self.config.as_ref().and_then(|c| c.read().ok()).map(|c| c.director.name.clone()).unwrap_or_default();
                     for (msg_type, text) in crate::job_messages::end_of_job(&director, self.catalog.as_ref(), report, &outcome) {
@@ -1052,7 +1084,7 @@ Job { Name = single; Client = fd1; Storage = File }
             sd_device: String::new(), sd_media_type: String::new(), director_name: "dir".into(), pool_name: "Full".into(),
             fileset_includes: Vec::new(), fileset_excludes: Vec::new(), since_utime: 0, prev_job: String::new(),
             where_path: None, replace: None, restore_jobid: None, bootstrap: None,
-            client_name: String::new(), client_first_connection: false, copy: None }
+            client_name: String::new(), client_first_connection: false, copy: None, backup: None }
     }
 
     fn enqueue(m: &mut JobManager, id: u32, name: &str, priority: i32, client: &str, storage: &str) {

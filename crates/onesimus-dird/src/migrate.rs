@@ -368,7 +368,7 @@ pub fn start_worker(config: &DirectorConfig, catalog: &CatalogHandle, req: &Work
         director_name: config.director.name.clone(), pool_name: next_pool.clone(),
         fileset_includes: Vec::new(), fileset_excludes: Vec::new(), since_utime: 0, prev_job: String::new(),
         where_path: None, replace: None, restore_jobid: None, bootstrap: None, client_name: client.clone(),
-        client_first_connection: false, copy: Some(copy_session),
+        client_first_connection: false, copy: Some(copy_session), backup: None,
     };
     let report = job_messages::JobReport {
         kind: ReportKind::MigrateWorker(copy), job: unique.clone(), level: level_name(job_level).into(),

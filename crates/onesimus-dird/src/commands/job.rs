@@ -1,6 +1,5 @@
 //! Job control commands: run, cancel, enable, disable
 
-use std::sync::atomic::{AtomicU32, Ordering};
 use tracing::info;
 
 use crate::command_ast::CommandAst;
@@ -10,7 +9,6 @@ use crate::job_worker::{self, JobParams, WorkerJobType};
 use crate::message_bus::BusMessage;
 use bareos_config::resources::JobType;
 
-static NEXT_JOB_ID: AtomicU32 = AtomicU32::new(1);
 
 pub fn cmd_run(ast: &CommandAst, ctx: &ExecContext) -> CommandResult {
     let mut ua = crate::ua_select::Ua::new(ctx);
@@ -1606,56 +1604,103 @@ fn run_selected(
         return CommandResult::error("Job not run.\n".to_string());
     }
 
-    let (level, level_char, since_utime, prev_job) = match backup_level(requested_level, |level| {
-        let cat = ctx.catalog.as_ref().ok_or("A catalog is required for incremental/differential backups")?;
-        cat.since_utime(client_name, &job.name, fileset_name, level)
-    }) {
-        Ok(value) => value,
-        Err(error) => return CommandResult::error(format!("run: {error}\n")),
+    // job.cc SetupJob() for JT_BACKUP (S-19): GetOrCreateClientRecord,
+    // CreateJobRecord with the requested level, GetOrCreateFilesetRecord,
+    // GetLevelSinceTime and ApplyPoolOverrides; DoNativeBackupInit (PoolId).
+    let requested = match requested_level.to_ascii_lowercase().as_str() {
+        "full" | "f" => 'F',
+        "incremental" | "i" => 'I',
+        "differential" | "d" => 'D',
+        _ => return CommandResult::error(format!("run: Unsupported backup level: {requested_level}\n")),
     };
-    // Use the effective level's pool after any missing-base upgrade to Full.
+    let Some(cat) = ctx.catalog.as_ref() else {
+        return CommandResult::error("Job failed.\n".to_string());
+    };
+    let now = now_unix_time();
+    let job_failed = |error: String| {
+        tracing::error!("Backup job setup failed: {error}");
+        CommandResult::error("Job failed.\n".to_string())
+    };
+    let retention = crate::backup::client_retention(&config, client_name);
+    let client_id = match crate::backup::get_or_create_client_record(cat, client_name, retention) {
+        Ok(id) => id,
+        Err(e) => return job_failed(e),
+    };
+    let unique_job = unique_job_name(&job.name, now);
+    let job_id = match create_job_record(ctx, &unique_job, &job.name, 'B', requested, Some(client_name), now, "") {
+        Ok(id) => id,
+        Err(e) => return job_failed(e),
+    };
+    let Some(fileset_raw) = crate::commands::defaults::raw(&config, "fileset", fileset_name) else {
+        return job_failed(format!("FileSet {fileset_name} not found"));
+    };
+    let mut setup_messages: Vec<(crate::message_bus::MsgType, String)> = Vec::new();
+    let fsr = match crate::backup::get_or_create_fileset_record(cat, fileset_raw, now) {
+        Ok(fsr) => fsr,
+        Err(e) => return job_failed(e),
+    };
+    if let Some(warning) = &fsr.warning {
+        setup_messages.push((crate::message_bus::MsgType::Warning, warning.clone()));
+    }
+    let job_dirs = crate::commands::defaults::job_directives(&config, &job.name);
+    let since = crate::backup::get_level_since_time(cat, &job.name, client_id, fsr.id, requested,
+        crate::backup::LevelPolicy::of_job(&job_dirs), now);
+    setup_messages.extend(since.messages.iter().map(|m| (crate::message_bus::MsgType::Info, m.clone())));
+    let level_char = since.level;
+    let level = crate::backup::level_to_string(level_char).to_string();
+    // ApplyPoolOverrides(): the pool of the effective level.
     let default_pool = match level_char {
-        "F" if !job.full_backup_pool.is_empty() => &job.full_backup_pool,
-        "D" if !job.differential_backup_pool.is_empty() => &job.differential_backup_pool,
-        "I" if !job.incremental_backup_pool.is_empty() => &job.incremental_backup_pool,
+        'F' if !job.full_backup_pool.is_empty() => &job.full_backup_pool,
+        'D' if !job.differential_backup_pool.is_empty() => &job.differential_backup_pool,
+        'I' if !job.incremental_backup_pool.is_empty() => &job.incremental_backup_pool,
         _ => &job.pool,
     };
     let pool = ast.arguments.iter().find(|a| a.key == "pool")
         .and_then(|a| a.value.as_deref()).unwrap_or(default_pool);
+    let pool_id = crate::backup::pool_id(cat, pool);
 
     let client = client_res.unwrap();
     let storage = storage_res.unwrap();
     let dir_name = config.director.name.clone();
+    let level_str = level_char.to_string();
 
-    // Unique job name
-    let now = chrono::Local::now();
-    let unique_job = format!("{}.{}", job.name, now.format("%Y-%m-%d_%H.%M.%S_%f"));
-
-    // Create job record in DB — JobId comes from the database
-    let job_type_str = match job.job_type { JobType::Backup => "B", JobType::Restore => "R", _ => "B" };
-    let job_id = if let Some(cat) = &ctx.catalog {
-        match cat.create_job(
-            &unique_job, &job.name, job_type_str, level_char,
-            client_name, pool, fileset_name, now.timestamp(),
-        ) {
-            Ok(id) => id as u32,
-            Err(e) => {
-                tracing::error!("Failed to create job record: {e}");
-                // RunJob() returned JobId 0 (ua_run.cc:509).
-                return CommandResult::error("Job failed.\n".to_string());
-            }
-        }
-    } else {
-        NEXT_JOB_ID.fetch_add(1, Ordering::Relaxed)
+    let catalog_files = crate::job_messages::raw_directive(&config, "pool", pool, "catalogfiles")
+        .and_then(|v| bareos_config::values::parse_bool(&v).ok().map(|(_, on)| on)).unwrap_or(true);
+    let bool_dir = |key: &str, default: bool| crate::commands::defaults::bool_directive(&job_dirs, key, default);
+    let fileset_lines = match crate::commands::estimate::fileset_lines(&config, fileset_name) {
+        Ok(lines) => lines,
+        Err(e) => return job_failed(e),
+    };
+    let write = crate::sd_copy::StorageUse {
+        name: storage.name.clone(), address: storage.address.clone(), port: storage.port,
+        password: storage.password.clone(), media_type: storage.media_type.clone(),
+        devices: storage.device.split(',').map(|d| d.trim().to_string()).filter(|d| !d.is_empty()).collect(),
+        pool: pool.to_string(),
+        pool_type: config.find_pool(pool).map(|p| p.pool_type.clone()).unwrap_or_else(|| "Backup".into()),
+    };
+    let session = crate::backup_worker::BackupSession {
+        ids: crate::backup::JobIds { level: level_char, client_id, pool_id, fileset_id: fsr.id },
+        since_utime: crate::btime::str_to_utime(&since.stime),
+        prev_job: since.prev_job.clone(),
+        accurate: bool_dir("accurate", false),
+        client_retention: retention,
+        fileset_lines,
+        sd_job: crate::sd_copy::CopySession {
+            job_type: 'B', level: level_char, job_resource: job.name.clone(), client: client.name.clone(),
+            fileset: fileset_name.to_string(), fileset_md5: fsr.md5.clone(), no_attributes: !catalog_files,
+            spool_attributes: bool_dir("spoolattributes", false), spool_data: bool_dir("spooldata", false),
+            prefer_mounted_volumes: bool_dir("prefermountedvolumes", true),
+            ..Default::default()
+        },
+        write,
     };
 
-    // Build JobParams for the autonomous worker
     let params = JobParams {
         job_id,
         unique_job: unique_job.clone(),
         job_name: job.name.clone(),
         job_type: WorkerJobType::Backup,
-        level: level.clone(),
+        level: level_str,
         fd_address: client.address.clone(),
         fd_port: client.port,
         fd_password: client.password.clone(),
@@ -1666,11 +1711,10 @@ fn run_selected(
         sd_media_type: storage.media_type.clone(),
         director_name: dir_name,
         pool_name: pool.to_string(),
-        fileset_includes: fileset_res.map(|f| f.include_blocks.clone()).unwrap_or_default(),
-        fileset_excludes: fileset_res.map(|f| f.exclude_blocks.clone()).unwrap_or_default(),
-        since_utime,
-        prev_job,
-        // Write Bootstrap from job config
+        fileset_includes: Vec::new(),
+        fileset_excludes: Vec::new(),
+        since_utime: crate::btime::str_to_utime(&since.stime),
+        prev_job: since.prev_job.clone(),
         where_path: None,
         replace: None,
         restore_jobid: None,
@@ -1678,22 +1722,15 @@ fn run_selected(
         client_name: client.name.clone(),
         client_first_connection: crate::job_messages::first_client_connection(&client.name),
         copy: None,
+        backup: Some(session),
     };
 
     // Job report data (job.cc SetJcrDefaults/ApplyPoolOverrides, GetLevelSinceTime)
-    let requested_name = level_name(requested_level);
-    let upgraded = level_char == "F" && requested_name != "Full";
     let mut report = crate::job_messages::backup_report(&config, &job, client, storage_name, pool, default_pool,
-        level_char, fileset_name, now.timestamp());
+        &level_char.to_string(), fileset_name, now);
     report.job = unique_job.clone();
-    report.level = level_name(level_char);
-    report.since = if upgraded {
-        crate::job_messages::upgraded_since(&requested_name)
-    } else if since_utime > 0 {
-        crate::job_messages::since_text(&crate::job_messages::bstrutime(since_utime))
-    } else {
-        String::new()
-    };
+    report.level = level;
+    report.since = since.since.clone();
 
     let resources = (client.name.clone(), storage.name.clone());
     drop(config); // Release RwLock before fork
@@ -1704,16 +1741,11 @@ fn run_selected(
             job_id, job_name: job.name.clone(), status: "Queued".to_string(),
             timestamp: now_unix(),
         });
-        let mut texts = Vec::new();
-        if upgraded {
-            texts.push(crate::job_messages::NO_PRIOR_FULL_TEXT.to_string());
-            texts.push(crate::job_messages::UPGRADE_TO_FULL_TEXT.to_string());
-        }
-        texts.push(crate::job_messages::version_text());
-        texts.push(crate::job_messages::start_backup_text(job_id, &unique_job));
-        for text in texts {
+        setup_messages.push((crate::message_bus::MsgType::Info, crate::job_messages::version_text()));
+        setup_messages.push((crate::message_bus::MsgType::Info, crate::job_messages::start_backup_text(job_id, &unique_job)));
+        for (msg_type, text) in setup_messages {
             crate::console_msg::post_job_message(smgr.bus(), ctx.config.as_ref(), BusMessage::JobMessage {
-                job_id, job_name: job.name.clone(), msg_type: crate::message_bus::MsgType::Info, text,
+                job_id, job_name: job.name.clone(), msg_type, text,
                 timestamp: now_unix(),
             });
         }
@@ -1724,7 +1756,7 @@ fn run_selected(
     if let Some(ref mgr) = ctx.job_manager {
         let mut mgr = mgr.lock().unwrap();
         mgr.enqueue_job(job_id, &job.name, crate::job_manager::QueuedStart {
-            params, priority: job.priority, sched_time: now.timestamp(),
+            params, priority: job.priority, sched_time: now,
         }, &resources.0, &resources.1);
         mgr.set_job_report(job_id, report);
     } else {
@@ -1796,7 +1828,7 @@ fn plain_params(job_id: u32, unique: &str, job: &bareos_config::resources::JobRe
         director_name: director.to_string(), pool_name: String::new(), fileset_includes: Vec::new(),
         fileset_excludes: Vec::new(), since_utime: 0, prev_job: String::new(), where_path: None, replace: None,
         restore_jobid: None, bootstrap: None, client_name: client.to_string(), client_first_connection: false,
-        copy: None,
+        copy: None, backup: None,
     }
 }
 
@@ -2008,27 +2040,6 @@ fn run_restore(ast: &CommandAst, ctx: &ExecContext, job: bareos_config::resource
 fn job_queued(job_id: u32) -> CommandResult {
     CommandResult::ok(format!("Job queued. JobId={job_id}\n"))
         .with_json(serde_json::json!({"run": {"jobid": job_id.to_string()}}))
-}
-
-/// Decide the effective backup level before creating its catalog record or worker.
-fn backup_level(
-    requested: &str,
-    mut lookup: impl FnMut(&str) -> Result<Option<(i64, String)>, String>,
-) -> Result<(String, &'static str, i64, String), String> {
-    let (name, code) = match requested.to_ascii_lowercase().as_str() {
-        "full" | "f" => ("full", "F"),
-        "incremental" | "i" => ("incremental", "I"),
-        "differential" | "d" => ("differential", "D"),
-        _ => return Err(format!("Unsupported backup level: {requested}")),
-    };
-    if code == "F" { return Ok((name.into(), code, 0, String::new())); }
-    match lookup(code)? {
-        Some((timestamp, previous)) if timestamp > 0 => Ok((name.into(), code, timestamp, previous)),
-        _ => {
-            info!("No matching Full backup chain for {name}; upgrading to Full");
-            Ok(("full".into(), "F", 0, String::new()))
-        }
-    }
 }
 
 /// Bareos str_to_int64(): leading blanks, optional sign, leading digits.
@@ -2481,26 +2492,3 @@ mod run_confirmation_tests {
     }
 }
 
-#[cfg(test)]
-mod backup_level_tests {
-    use super::*;
-
-    #[test]
-    fn valid_incremental_and_differential_keep_their_reference() {
-        for (requested, code) in [("Incremental", "I"), ("D", "D")] {
-            let (_, effective, since, previous) = backup_level(requested, |selected| {
-                assert_eq!(selected, code);
-                Ok(Some((123456, "previous-job".into())))
-            }).unwrap();
-            assert_eq!((effective, since, previous.as_str()), (code, 123456, "previous-job"));
-        }
-    }
-
-    #[test]
-    fn missing_chain_upgrades_but_errors_do_not_become_full_backups() {
-        assert_eq!(backup_level("I", |_| Ok(None)).unwrap().1, "F");
-        assert!(backup_level("D", |_| Err("catalog unavailable".into())).is_err());
-        assert!(backup_level("VirtualFull", |_| panic!("invalid level must not query")).is_err());
-        assert_eq!(backup_level("Full", |_| panic!("full must not query")).unwrap().1, "F");
-    }
-}

@@ -98,6 +98,9 @@ pub struct JobParams {
     /// (sd_copy.rs); None for jobs with a File daemon. C-058.
     #[serde(default)]
     pub copy: Option<crate::sd_copy::CopySession>,
+    /// Native Backup: the DoNativeBackup session (backup_worker.rs, S-19).
+    #[serde(default)]
+    pub backup: Option<crate::backup_worker::BackupSession>,
 }
 
 /// Messages on the Worker↔Director pipe (JSON, one per line).
@@ -127,6 +130,13 @@ pub enum PipeMessage {
     /// otherwise the body the Director puts its Jmsg header in front of.
     #[serde(rename = "jmsg")]
     Jmsg { job_id: u32, msg_type: u32, mtime: i64, text: String, #[serde(default)] raw: bool },
+    /// A catalog statement of the job the Director runs for the worker
+    /// (UpdateJobStartRecord, UpdateClientRecord; backup_worker.rs, S-19).
+    #[serde(rename = "catalog_sql")]
+    CatalogSql { job_id: u32, sql: String },
+    /// FD/SD end counters of a native backup, sent before its JobEnd (S-19).
+    #[serde(rename = "backup_end")]
+    BackupEnd { job_id: u32, end: crate::backup::BackupEnd },
 }
 
 /// lib/message.h M_* codes of the worker's own job messages.
@@ -302,6 +312,11 @@ pub fn run_worker(
     // Copy/Migrate worker jobs and VirtualFull: SD read+write session (C-058).
     if let Some(copy) = &params.copy {
         return crate::sd_copy::run(params, copy, &mut pipes);
+    }
+
+    // backup.cc DoNativeBackup() (S-19).
+    if let Some(backup) = &params.backup {
+        return crate::backup_worker::run(params, backup, &mut pipes);
     }
 
     if params.job_type == WorkerJobType::Admin {
@@ -867,7 +882,7 @@ fn wait_for_fd_end_job(fd: &mut BnetStream<tls_psk::PskStream>, job_id: u32) -> 
 // Connection helpers
 // ============================================================================
 
-fn connect_fd(p: &JobParams) -> Result<(BnetStream<tls_psk::PskStream>, String), String> {
+pub(crate) fn connect_fd(p: &JobParams) -> Result<(BnetStream<tls_psk::PskStream>, String), String> {
     let sock = resolve_connect(&format!("{}:{}", p.fd_address, p.fd_port), 3)?;
     sock.set_read_timeout(None).ok();
     let psk = tls_psk::password_to_psk(&p.fd_password);
