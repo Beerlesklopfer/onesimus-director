@@ -16,7 +16,69 @@
 
 use serde_json::{Value, json};
 
-use crate::mcp::CommandRunner;
+use std::sync::Mutex;
+
+use crate::mcp::{CommandRunner, run_plain, tool_result};
+
+mod ovfs;
+pub(crate) mod query;
+
+/// Every read tool for tools/list, in this order: the generic `query`, the
+/// `ovfs_*` tools, the typed tools.
+pub fn all_tools() -> Vec<Value> {
+    let mut all = vec![query::tool()];
+    all.extend(ovfs::tools());
+    all.extend(tools());
+    all
+}
+
+/// Handle a tools/call of a read tool; `None` if `name` is none of them.
+/// `write_enabled` only words the refusal of a writing `query` command.
+pub fn call<R: CommandRunner>(
+    name: &str,
+    arguments: &Value,
+    write_enabled: bool,
+    runner: &Mutex<R>,
+) -> Option<Result<Value, (i64, String)>> {
+    if let Some(built) = command(name, arguments) {
+        return Some(match built {
+            Ok(command) => runner
+                .lock()
+                .map_err(|_| (-32603, "Director runner unavailable".to_string()))
+                .map(|mut runner| run(&mut *runner, &command)),
+            Err(msg) => Ok(tool_result(&msg, true)),
+        });
+    }
+    if name.starts_with("ovfs_") {
+        return match ovfs::command(name, arguments) {
+            Ok(Some(command)) => Some(run_plain(runner, &command)),
+            Ok(None) => None,
+            Err(msg) => Some(Ok(tool_result(&msg, true))),
+        };
+    }
+    if name != "query" {
+        return None;
+    }
+    let command = query::command_arg(arguments);
+    // Tool-level problems are reported as tool results so the model can react
+    if let Err(msg) = query::validate_command(command) {
+        return Some(Ok(tool_result(&msg, true)));
+    }
+    if !query::is_read_only(command) {
+        return Some(Ok(tool_result(
+            &format!(
+                "'{command}' is not a read-only command. {}",
+                if write_enabled {
+                    "Use the 'execute' tool."
+                } else {
+                    "Write access is unavailable in this build or disabled."
+                }
+            ),
+            true,
+        )));
+    }
+    Some(run_plain(runner, command))
+}
 
 /// One checked command line and how to run it.
 #[derive(Debug, Clone, PartialEq)]

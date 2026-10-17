@@ -16,9 +16,61 @@
 //! truncate) carry `destructiveHint`; relabel/prune/purge/delete/truncate
 //! additionally require the argument `confirm: true`.
 
+use std::sync::Mutex;
+
 use serde_json::{Map, Value, json};
 
-use crate::mcp::CommandRunner;
+use crate::mcp::{CommandRunner, run_plain, tool_result};
+use crate::mcp_read::query::{command_arg, validate_command};
+
+/// Every write tool for tools/list: the typed tools, then the generic `execute`.
+pub fn all_tools() -> Vec<Value> {
+    let mut all = tools();
+    all.push(execute_tool());
+    all
+}
+
+/// The generic `execute` tool: any single command line.
+fn execute_tool() -> Value {
+    json!({
+        "name": "execute",
+        "title": "Execute a Director command",
+        "description": "Run any bconsole command on the Director, including ones that change \
+            state: run, cancel, label, mount, update, prune, purge, delete, configure. \
+            Prefer 'query' for read-only commands. Confirm destructive actions with the user first.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "command": { "type": "string", "description": "bconsole command line" }
+            },
+            "required": ["command"]
+        },
+        "annotations": { "readOnlyHint": false, "destructiveHint": true, "openWorldHint": false }
+    })
+}
+
+/// Handle a tools/call of a write tool; `None` if `name` is none of them.
+/// The caller only asks with write access enabled.
+pub fn call<R: CommandRunner>(
+    name: &str,
+    arguments: &Value,
+    runner: &Mutex<R>,
+) -> Option<Result<Value, (i64, String)>> {
+    if name == "execute" {
+        let command = command_arg(arguments);
+        return Some(match validate_command(command) {
+            Err(msg) => Ok(tool_result(&msg, true)),
+            Ok(()) => run_plain(runner, command),
+        });
+    }
+    let plan = plan(name, arguments)?;
+    Some(
+        runner
+            .lock()
+            .map_err(|_| (-32603, "Director runner unavailable".to_string()))
+            .map(|mut runner| execute(&mut *runner, plan)),
+    )
+}
 
 /// One Director command and the questions the tool may answer with "yes".
 #[derive(Debug, PartialEq)]
