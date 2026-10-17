@@ -218,6 +218,19 @@ pub struct Outcome {
     pub errors: u32,
 }
 
+/// The job messages the text of a console command becomes: one per
+/// OutputFormatter flush where the output marks them (ListResult tables:
+/// header and first row, each further row, the rest at FinalizeResult),
+/// otherwise one per line (one SendMsg each).
+fn console_output_messages(text: &str) -> Vec<String> {
+    let mark = crate::sql_list::FLUSH_MARK;
+    if text.contains(mark) {
+        text.split(mark).filter(|part| !part.is_empty()).map(str::to_string).collect()
+    } else {
+        text.split_inclusive('\n').map(str::to_string).collect()
+    }
+}
+
 /// job.cc RunConsoleCommand(): Do_a_command() in a UA context without
 /// console (ua->runscript): its output goes to the "-RunScript-" control
 /// JCR (JobId 0, the Director's Messages resource), one message per send.
@@ -249,9 +262,9 @@ pub fn run_console_command(host: &Host, cmd: &str) -> bool {
         api_mode: crate::command_executor::ApiMode::Human, bus_rx: None,
         job_manager: host.job_manager.as_ref().and_then(|m| m.upgrade()),
     };
-    let result = crate::command_executor::dispatch(&ast, &ctx);
+    let result = crate::sql_list::with_flush_marks(true, || crate::command_executor::dispatch(&ast, &ctx));
     let errors: Vec<String> = if result.errors_inline { Vec::new() } else { result.error_lines() };
-    let text: Vec<String> = result.text_output.split_inclusive('\n').map(str::to_string).collect();
+    let text = console_output_messages(&result.text_output);
     let (first, second) = if result.errors_first { (errors, text) } else { (text, errors) };
     for part in first.iter().chain(second.iter()) {
         emit(part);
@@ -627,6 +640,23 @@ Job { Name = adm; Type = Admin; Client = fd1
         let config = host.config.as_ref().unwrap().read().unwrap();
         assert_eq!(client_commands(&config, &job), Some((vec![
             "Run OnSuccess=1 OnFailure=0 AbortOnError=1 When=2 Command=/bin/echo\x01client\n".to_string()], true)));
+    }
+
+    #[test]
+    fn table_output_is_sent_per_outputformatter_flush() {
+        use crate::catalog_worker::{SqlColumn, SqlTable};
+        let table = SqlTable {
+            columns: vec![SqlColumn { name: "id".into(), numeric: true }, SqlColumn { name: "name".into(), numeric: false }],
+            rows: vec![vec![Some("1".into()), Some("a".into())], vec![Some("2".into()), Some("b".into())]],
+        };
+        let text = crate::sql_list::with_flush_marks(true, || crate::sql_list::render(&table, crate::sql_list::ListType::Horz));
+        let parts = console_output_messages(&format!("{text}\nPrune details:\n"));
+        assert_eq!(parts, vec![
+            "+------+------+\n| id   | name |\n+------+------+\n|    1 | a    |\n".to_string(),
+            "|    2 | b    |\n".to_string(),
+            "+------+------+\n\nPrune details:\n".to_string()]);
+        assert_eq!(console_output_messages("a\nb\n"), vec!["a\n".to_string(), "b\n".to_string()]);
+        assert!(!crate::sql_list::render(&table, crate::sql_list::ListType::Horz).contains(crate::sql_list::FLUSH_MARK));
     }
 
     #[test]

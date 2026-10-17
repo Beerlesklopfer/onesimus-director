@@ -2052,6 +2052,7 @@
  "s08-encrypt-yes": "match",
  "s08-encrypt-yes-again": "match",
  "s17-dot-catalog": "match",
+ "s24-runscript-copy-control": "match",
  "setbandwidth-noargs": "match",
  "setdebug-dir": "match",
  "setdebug-noargs": "match",

@@ -30,6 +30,28 @@ thread_local! {
     static GUI: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
     /// `.api 1` of the running command (set by command_executor::dispatch).
     static API1: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+    /// Mark the OutputFormatter flushes (ObjectEnd after each row) in the
+    /// output: a console command of a run script sends each flush as one
+    /// job message (S-24).
+    static FLUSH_MARKS: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+/// Marks an OutputFormatter::ProcessTextBuffer() point under [`with_flush_marks`].
+pub const FLUSH_MARK: char = '\u{1d}';
+
+/// Run `f` with the row flushes of ListResult marked by [`FLUSH_MARK`].
+pub fn with_flush_marks<R>(on: bool, f: impl FnOnce() -> R) -> R {
+    let old = FLUSH_MARKS.with(|c| c.replace(on));
+    let r = f();
+    FLUSH_MARKS.with(|c| c.set(old));
+    r
+}
+
+/// ListResult's send->ObjectEnd() after a row: the text so far is sent.
+fn object_end(out: &mut String) {
+    if FLUSH_MARKS.with(std::cell::Cell::get) {
+        out.push(FLUSH_MARK);
+    }
 }
 
 /// Run `f` with `jcr->gui` set to `gui` (restored afterwards, like the
@@ -98,6 +120,7 @@ pub fn render_shown(t: &SqlTable, ty: ListType, shown: &[bool]) -> String {
                 if ty == ListType::Nf && decorations() {
                     out.push('\n');
                 }
+                object_end(&mut out);
             }
             out
         }
@@ -180,6 +203,7 @@ fn horz<'a>(t: &SqlTable, rows: impl Iterator<Item = &'a Vec<Option<String>>>) -
             out.push_str(&cell);
         }
         out.push('\n');
+        object_end(&mut out);
     }
     if deco {
         out.push_str(&dashes(&widths));
@@ -202,6 +226,7 @@ fn vert<'a>(t: &SqlTable, rows: impl Iterator<Item = &'a Vec<Option<String>>>) -
         if decorations() {
             out.push('\n');
         }
+        object_end(&mut out);
     }
     out
 }
