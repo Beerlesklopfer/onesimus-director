@@ -696,21 +696,11 @@ Commands used for maintenance, troubleshooting, and catalog management.
 - **DB/SP**: config-only
 - **UPGRADE**: Persist ACLs in ConsoleResource, enforce during command dispatch
 
-#### 78. `.catalog` [IMPL]
+#### 78. `.catalog` [ORIGINAL]
 ```
-*.catalog schema
-*.catalog version
-*.catalog tables
-*.catalog describe table=job
-*.catalog ddl
-*.catalog validate
-*.catalog diff
-*.catalog codegen
-*.catalog migrate
+*.catalog
 ```
-- **Expected**: Schema management operations (JSON schema, DDL, validation)
-- **DB/SP**: Schema files in `catalog/schema/`
-- **Validate**: DDL output is valid SQL, describe shows correct columns
+- **Expected**: same as `.catalogs` (first prefix match in the Bareos command table, as the original); the former local schema subcommands were unreachable and are removed (S-17)
 
 #### 79. `setdebug` [LITE]
 ```

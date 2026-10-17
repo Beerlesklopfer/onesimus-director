@@ -186,21 +186,17 @@ impl<'a> Pipe<'a> {
         self.0.lock().unwrap_or_else(|e| e.into_inner())
     }
 
-    /// One pipe message, written as one line in a single write.
+    /// One pipe message, written as one line in a single write under the
+    /// worker's pipe lock (job_worker::send_jmsg, also used by worker_jmsg).
     fn send(&self, msg: &PipeMessage) {
-        if let Ok(mut line) = serde_json::to_string(msg) {
-            line.push('\n');
-            let _ = self.lock().to_director.write_all(line.as_bytes());
-        }
+        let _guard = self.lock();
+        crate::job_worker::send_jmsg(msg.clone());
     }
 
     /// A catalog request and the Director's answer.
     fn catreq(&self, msg: &PipeMessage) -> String {
         let mut pipes = self.lock();
-        if let Ok(mut line) = serde_json::to_string(msg) {
-            line.push('\n');
-            let _ = pipes.to_director.write_all(line.as_bytes());
-        }
+        crate::job_worker::send_jmsg(msg.clone());
         read_response(&mut pipes.from_director)
     }
 }
@@ -223,8 +219,12 @@ fn connect(params: &JobParams, store: &StorageUse, msg_job: u32) -> Result<BnetS
 /// The worker part of the job: start messages, SD session, job end.
 pub fn run(params: &JobParams, copy: &CopySession, pipes: &mut WorkerPipes) -> i32 {
     let job_id = params.job_id;
-    for (code, text) in &copy.start_messages {
-        job_worker::worker_jmsg(job_id, *code, text.clone());
+    // job_thread(): "Version:", RunScripts "BeforeJob", then the job (S-07).
+    let before = job_worker::start_messages_with_before(pipes, job_id, &copy.start_messages);
+    if crate::job_manager::is_job_canceled(before.status) {
+        pipes.send(&PipeMessage::JobEnd { job_id, term_code: before.status as i32, files: 0, bytes: 0,
+            errors: before.errors as i32, vol_session_id: Some(0), vol_session_time: Some(0) });
+        return job_worker::EXIT_ERROR;
     }
     let pipe = Pipe(Mutex::new(pipes));
     let state = |name: &str| pipe.send(&PipeMessage::State { job_id, state: name.into() });

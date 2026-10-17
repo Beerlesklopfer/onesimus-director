@@ -267,7 +267,9 @@ def compare(case, results, out):
 # Jobs that may be started for real: they touch neither the live FD nor SD.
 SAFE_JOBS = {'parity-admin', 'parity-migrate', 'parity-consolidate',
              # S-22 (cases/s22.jsonl defines them as Type = Admin)
-             'parity-s22-nodup', 'parity-s22-cq', 'parity-s22-cr', 'parity-s22-delay', 'parity-s22-rst'}
+             'parity-s22-nodup', 'parity-s22-cq', 'parity-s22-cr', 'parity-s22-delay', 'parity-s22-rst',
+             # Admin jobs with Director-side RunScripts (fixture/job/parity-runscript.conf)
+             'parity-admin-rs', 'parity-admin-rs-fail', 'parity-admin-rs-noerr'}
 
 
 def unsafe_job_start(case):

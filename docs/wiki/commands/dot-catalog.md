@@ -4,7 +4,7 @@
 
 Wer in der Konsole `.catalog` eingibt, bekommt die Liste der Kataloge, genau wie bei [`.catalogs`](dot-catalogs.md). Der Director akzeptiert wie das Bareos-Original jeden Anfang eines Befehlsnamens und nimmt den ersten passenden Eintrag der Befehlstabelle; `.catalog` ist der Anfang von `.catalogs`. Alle Wörter dahinter werden ignoriert. Der Befehl liest nur die Konfiguration und verändert nichts.
 
-Onesimus enthält außerdem eine eigene Schemaverwaltung unter dem Namen `.catalog` (Unterbefehle `schema`, `version`, `tables`, `describe`, `ddl`, `validate`, `migrate`, `diff`, `codegen` und die abgesicherten Befehle `create`, `drop`, `reset`; Kompatibilitätslog C-040). Sie ist aus einer Konsolensitzung derzeit **nicht erreichbar**, weil die Eingabe vorher als `.catalogs` erkannt wird. Die Absicherung von `drop` und `reset` (ausdrückliche Freigabe in der `Command ACL`, `yes confirm=<datenbank>`, bei vorhandenen Jobs zusätzlich `force`) gilt für jeden Weg, der den Handler doch erreicht.
+Eine frühere eigene Schemaverwaltung unter dem Namen `.catalog` (Kompatibilitätslog C-040) war aus keiner Sitzung erreichbar, weil die Eingabe immer als `.catalogs` erkannt wird, und ist entfernt (S-17). Das Katalogschema legt allein die Migration beim Start des Directors an.
 
 ## Syntax
 

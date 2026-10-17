@@ -18,6 +18,7 @@ mod command_queue;
 mod command_registry;
 mod commands;
 mod config_check;
+mod consolidate;
 mod command_worker;
 mod expand;
 mod director_config;
@@ -56,6 +57,7 @@ mod ua_db;
 mod ua_impexp;
 mod ua_storage_select;
 mod ua_select;
+mod vbackup;
 mod version_strings;
 mod volume_key;
 mod watchdog;
@@ -445,6 +447,7 @@ fn main() {
     let job_mgr = Arc::new(std::sync::Mutex::new(
         job_manager::JobManager::new(bus.clone(), Some(shared_config.clone()), catalog.clone())
     ));
+    job_mgr.lock().unwrap().set_self_ref(Arc::downgrade(&job_mgr));
 
     info!("Director '{}' listening on port {}", dir_name, port);
 

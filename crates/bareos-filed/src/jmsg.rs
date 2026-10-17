@@ -47,7 +47,14 @@ pub struct JobMsgs {
     pub job_warnings: u32,
     /// Complete "Jmsg Job=..." lines not yet sent to the Director.
     queued: Vec<String>,
+    /// Message types for the Director (Messages resource `director =`).
+    pub director_types: u64,
+    /// Messages resource `append = file = types`.
+    pub append: Vec<(String, u64)>,
 }
+
+/// Without a Messages resource: all, !skipped, !restored, !saved.
+pub const DEFAULT_DIRECTOR_TYPES: u64 = ((1u64 << 18) - 2) & !(1 << M_SKIPPED) & !(1 << M_RESTORED) & !(1 << M_SAVED);
 
 impl JobMsgs {
     pub fn new(my_name: &str) -> Self {
@@ -59,7 +66,18 @@ impl JobMsgs {
             job_errors: 0,
             job_warnings: 0,
             queued: Vec::new(),
+            director_types: DEFAULT_DIRECTOR_TYPES,
+            append: Vec::new(),
         }
+    }
+
+    /// The Messages resource of the Client.
+    pub fn with_messages(mut self, m: Option<&crate::config::MessagesRes>) -> Self {
+        if let Some(m) = m {
+            self.director_types = m.director_types;
+            self.append = m.append.clone();
+        }
+        self
     }
 
     pub fn status(&self) -> u8 {
@@ -80,9 +98,13 @@ impl JobMsgs {
     }
 
     /// Jmsg(jcr, type, 0, text): prefix, counters, and the message for the
-    /// Director. Like the default FD Messages resource ("director = all,
-    /// !skipped, !restored, !saved") skipped/restored/saved lines stay local.
+    /// Director (types of the Messages resource) and the append files.
     pub fn jmsg(&mut self, msg_type: i32, text: &str) {
+        // A console session (JobId 0, e.g. estimate): the text as it is.
+        if self.job_id == 0 {
+            self.queued.push(text.to_string());
+            return;
+        }
         let prefix = match msg_type {
             M_FATAL => {
                 self.set_status(JS_FATAL_ERROR);
@@ -102,7 +124,16 @@ impl JobMsgs {
             _ => format!("{} JobId {}: ", self.my_name, self.job_id),
         };
         tracing::debug!("jmsg type={msg_type}: {}", text.trim_end());
-        if matches!(msg_type, M_SKIPPED | M_RESTORED | M_SAVED) {
+        for (file, types) in &self.append {
+            if types & (1u64 << msg_type) != 0 {
+                use std::io::Write as _;
+                let dt = chrono::Local::now().format("%d-%b %H:%M ");
+                if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open(file) {
+                    let _ = write!(f, "{dt}{prefix}{text}");
+                }
+            }
+        }
+        if !(0..64).contains(&msg_type) || self.director_types & (1u64 << msg_type) == 0 {
             return;
         }
         let mtime = chrono::Utc::now().timestamp();

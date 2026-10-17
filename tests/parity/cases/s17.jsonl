@@ -1,0 +1,1 @@
+{"id": "s17-dot-catalog", "steps": [".catalog", ".catalog validate", ".catalog reset yes confirm=bareos"]}
