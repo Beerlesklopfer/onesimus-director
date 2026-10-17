@@ -1661,6 +1661,9 @@ fn run_selected(
         "full" | "f" => 'F',
         "incremental" | "i" => 'I',
         "differential" | "d" => 'D',
+        // L_BASE ("level = base"); the configuration has no Base jobs, so
+        // GetBaseJobids() never finds one (S-28).
+        "base" | "b" => 'B',
         _ => return CommandResult::error(format!("run: Unsupported backup level: {requested_level}\n")),
     };
     let Some(cat) = ctx.catalog.as_ref() else {
