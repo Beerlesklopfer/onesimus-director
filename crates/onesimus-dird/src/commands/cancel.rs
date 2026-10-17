@@ -276,8 +276,9 @@ fn cancel_job(ua: &mut Ua, job: &ActiveJob, links: &mut dyn CancelLinks) {
     if ok {
         let script_job = ctx.job_manager.as_ref().and_then(|mgr| mgr.lock().unwrap().take_post_scripts(job.id));
         if let Some(script_job) = script_job {
-            crate::runscript::run_job_scripts(ctx.config.as_ref(), ctx.session_mgr.as_ref().map(|s| s.bus()),
-                &script_job, "AfterJob");
+            let host = crate::runscript::Host { config: ctx.config.clone(), catalog: ctx.catalog.clone(),
+                job_manager: ctx.job_manager.as_ref().map(std::sync::Arc::downgrade) };
+            crate::runscript::run_scripts(&host, ctx.session_mgr.as_ref().map(|s| s.bus()), &script_job, "AfterJob");
         }
     }
 }

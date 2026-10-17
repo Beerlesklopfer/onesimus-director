@@ -122,9 +122,63 @@ pub enum PipeMessage {
     /// otherwise the body the Director puts its Jmsg header in front of.
     #[serde(rename = "jmsg")]
     Jmsg { job_id: u32, msg_type: u32, mtime: i64, text: String, #[serde(default)] raw: bool },
+    /// job_thread() RunScripts(jcr, ..., label) in the Director (console
+    /// commands need it); the worker waits for [`PipeMessage::RunScriptsDone`].
+    #[serde(rename = "run_scripts")]
+    RunScripts { job_id: u32, label: String },
+    /// The job status after the scripts, their M_ERROR count, and the
+    /// fd_cmds.cc SendRunscriptsCommands() "Run ..." lines for the client
+    /// (with "RunBeforeNow" when `run_before_now`). S-07.
+    #[serde(rename = "run_scripts_done")]
+    RunScriptsDone { status: i32, errors: u32, client_commands: Vec<String>, run_before_now: bool },
+}
+
+/// What the Director's RunScripts "BeforeJob" left for the worker.
+#[derive(Debug, Default)]
+struct BeforeJob {
+    status: char,
+    errors: u32,
+    client_commands: Vec<String>,
+    run_before_now: bool,
+}
+
+/// Ask the Director to run the "BeforeJob" scripts and wait for them.
+fn run_before_job(pipes: &mut WorkerPipes, job_id: u32) -> BeforeJob {
+    pipes.send(&PipeMessage::RunScripts { job_id, label: "BeforeJob".into() });
+    loop {
+        match pipes.recv() {
+            Some(PipeMessage::RunScriptsDone { status, errors, client_commands, run_before_now }) => {
+                return BeforeJob { status: char::from_u32(status as u32).unwrap_or('R'), errors, client_commands, run_before_now };
+            }
+            Some(_) => continue,
+            // The Director is gone: nothing ran.
+            None => return BeforeJob { status: 'R', ..Default::default() },
+        }
+    }
+}
+
+/// fd_cmds.cc SendRunscriptsCommands(): the client's scripts, then
+/// "RunBeforeNow" (the File daemon runs ClientRunBeforeJob before it
+/// answers). Failure: "Client \"%s\" RunScript failed." (M_FATAL).
+fn send_client_runscripts(fd: &mut BnetStream<tls_psk::PskStream>, p: &JobParams, before: &BeforeJob) -> Result<(), String> {
+    let result: Result<(), String> = (|| {
+        for command in &before.client_commands {
+            send_expect(fd, command, "2000 OK RunScript", p.job_id, "RunScript")?;
+        }
+        if before.run_before_now {
+            send_expect(fd, "RunBeforeNow\n", "2000 OK RunBeforeNow", p.job_id, "RunBeforeNow")?;
+        }
+        Ok(())
+    })();
+    if let Err(e) = &result {
+        worker_jmsg(p.job_id, M_FATAL, format!("Client \"{}\" RunScript failed.\n", p.client_name));
+        return Err(e.clone());
+    }
+    result
 }
 
 /// lib/message.h M_* codes of the worker's own job messages.
+const M_FATAL: u32 = 3;
 const M_ERROR: u32 = 4;
 const M_INFO: u32 = 6;
 
@@ -295,10 +349,24 @@ pub fn run_worker(
     if params.job_type == WorkerJobType::Admin {
         // job.cc job_thread(): "Version: …" when the job runs.
         worker_jmsg(job_id, M_INFO, crate::job_messages::version_text());
-        worker_jmsg(job_id, M_INFO, crate::job_messages::start_admin_text(job_id, &params.unique_job));
-        pipes.send(&PipeMessage::JobEnd { job_id, term_code: b'T' as i32, files: 0, bytes: 0, errors: 0,
+        let before = run_before_job(&mut pipes, job_id);
+        // A failed BeforeJob script (FailJobOnError) cancels the job:
+        // AdminCleanup(jcr, JS_Canceled) keeps JS_ErrorTerminated.
+        let status = if crate::job_manager::is_job_canceled(before.status) { before.status } else {
+            worker_jmsg(job_id, M_INFO, crate::job_messages::start_admin_text(job_id, &params.unique_job));
+            'T'
+        };
+        pipes.send(&PipeMessage::JobEnd { job_id, term_code: status as i32, files: 0, bytes: 0, errors: before.errors as i32,
             vol_session_id: Some(0), vol_session_time: Some(0) });
-        return EXIT_SUCCESS;
+        return if status == 'T' { EXIT_SUCCESS } else { EXIT_ERROR };
+    }
+
+    // job_thread(): RunScripts "BeforeJob" before the job contacts a daemon.
+    let before = run_before_job(&mut pipes, job_id);
+    if crate::job_manager::is_job_canceled(before.status) {
+        pipes.send(&PipeMessage::JobEnd { job_id, term_code: before.status as i32, files: 0, bytes: 0,
+            errors: before.errors as i32, vol_session_id: Some(0), vol_session_time: Some(0) });
+        return EXIT_ERROR;
     }
 
     loop {
@@ -391,7 +459,7 @@ pub fn run_worker(
                 } else {
                     fd_job_setup(fd.as_mut().unwrap(), params, &sd_auth_key)
                 };
-                match result {
+                match result.and_then(|()| send_client_runscripts(fd.as_mut().unwrap(), params, &before)) {
                     Ok(()) => WorkerState::FDStorage,
                     Err(e) => WorkerState::Error(format!("FD setup: {e}"))
                 }

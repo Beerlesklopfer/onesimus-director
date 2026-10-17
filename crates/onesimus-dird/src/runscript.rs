@@ -1,16 +1,25 @@
 //! Director-side RunScripts: lib/runscript.cc RunScripts() and
 //! RunScript::Run(), lib/util.cc edit_job_codes() with
 //! dird_conf.cc job_code_callback_director(), lib/bpipe_unix.cc
-//! OpenBpipe()/CloseBpipe() and lib/berrno.cc. Used for the "AfterJob"
-//! scripts `cancel` runs (job.cc:741). Compatibility log C-048.
+//! OpenBpipe()/CloseBpipe() and lib/berrno.cc, console commands as
+//! job.cc RunConsoleCommand(), and the client scripts fd_cmds.cc
+//! SendRunscriptsCommands() sends to the File daemon.
+//!
+//! Callers: job_thread "BeforeJob" (the worker asks the Director, see
+//! `PipeMessage::RunScripts`), "AfterJob" at the end of every job
+//! (job_manager.rs) and in `cancel` (job.cc:741). Compatibility log C-048,
+//! C-058, S-07.
 
 use std::io::{BufRead, BufReader};
+use std::sync::{Mutex, Weak};
 
 use bareos_config::raw::ConfResource;
 
+use crate::catalog_worker::CatalogHandle;
 use crate::commands::show::{runscripts, Script};
-use crate::director_config::SharedConfig;
-use crate::job_manager::ScriptJob;
+use crate::director_config::{DirectorConfig, SharedConfig};
+use crate::job_manager::{JobManager, ScriptJob};
+use crate::job_worker::WorkerJobType;
 use crate::message_bus::{BusMessage, MessageBus, MsgType};
 
 /// The values edit_job_codes() substitutes for a job.
@@ -30,6 +39,8 @@ pub struct JobCodes {
     pub fileset: String,
     pub pool: String,
     pub storage: String,
+    /// jcr->VolumeName (%v, %V); None: no JCR buffer ("*None*").
+    pub volume: Option<String>,
 }
 
 const NONE: &str = "*None*";
@@ -83,7 +94,8 @@ pub fn edit_job_codes(input: &str, codes: &JobCodes, to: &str) -> String {
                 name.into()
             }
             'r' => to.into(),
-            's' | 'v' | 'V' | 'O' | 'N' => NONE.into(),
+            'v' | 'V' => codes.volume.clone().unwrap_or_else(|| NONE.into()),
+            's' | 'O' | 'N' => NONE.into(),
             't' => codes.job_type.clone(),
             // job_code_callback_director()
             'f' if !codes.fileset.is_empty() => codes.fileset.clone(),
@@ -134,31 +146,117 @@ pub fn job_scripts(raw: &[ConfResource], job_name: &str) -> Vec<Script> {
     runscripts(&ConfResource { rtype: "Job".into(), directives: bareos_config::jobdefs::directives(&effective), source: None })
 }
 
-/// RunScripts(): the scripts `label` runs for a job in `status` (local
-/// scripts only; console commands are not supported by Onesimus).
-pub fn selected<'a>(scripts: &'a [Script], label: &str, status: char) -> Vec<&'a Script> {
-    const AFTER: u8 = 1;
-    const BEFORE: u8 = 2;
-    const AFTER_VSS: u8 = 4;
-    let when = if label.contains("Before") { BEFORE } else if label == "ClientAfterVSS" { AFTER_VSS } else { AFTER };
+/// lib/runscript.h SCRIPT_After / SCRIPT_Before / SCRIPT_AfterVSS.
+const SCRIPT_AFTER: u8 = 1;
+const SCRIPT_BEFORE: u8 = 2;
+const SCRIPT_AFTER_VSS: u8 = 4;
+
+/// RunScript::when.
+fn script_when(script: &Script) -> u8 {
+    match script.when {
+        Some("before") => SCRIPT_BEFORE,
+        Some("after") => SCRIPT_AFTER,
+        Some("aftervss") => SCRIPT_AFTER_VSS,
+        Some("always") => SCRIPT_BEFORE | SCRIPT_AFTER,
+        _ => 0,
+    }
+}
+
+/// RunScripts(): the `when` a label stands for.
+fn label_when(label: &str) -> u8 {
+    if label.contains("Before") { SCRIPT_BEFORE } else if label == "ClientAfterVSS" { SCRIPT_AFTER_VSS } else { SCRIPT_AFTER }
+}
+
+/// RunScripts(): whether a local script runs for `when` in job `status`.
+fn runs(script: &Script, when: u8, status: char) -> bool {
     let canceled = crate::job_manager::is_job_canceled(status);
-    scripts.iter().filter(|script| {
-        if !script.target.is_empty() || script.console {
-            return false;
+    let sw = script_when(script);
+    let on = |cond_success: bool| (script.on_success && cond_success) || (script.on_failure && (canceled || status == 'D'));
+    (sw & SCRIPT_BEFORE != 0 && when & SCRIPT_BEFORE != 0 && on(matches!(status, 'R' | 'C')))
+        || (sw & SCRIPT_AFTER_VSS != 0 && when & SCRIPT_AFTER_VSS != 0
+            && ((script.on_success && status == 'B') || (script.on_failure && canceled)))
+        || (sw & SCRIPT_AFTER != 0 && when & SCRIPT_AFTER != 0 && on(matches!(status, 'T' | 'W')))
+}
+
+/// RunScripts(): the local scripts `label` runs for a job whose status
+/// stays `status` (no script fails).
+pub fn selected<'a>(scripts: &'a [Script], label: &str, status: char) -> Vec<&'a Script> {
+    let when = label_when(label);
+    scripts.iter().filter(|script| script.target.is_empty() && runs(script, when, status)).collect()
+}
+
+/// Whether the Job resource (with its JobDefs) has any RunScript.
+pub fn has_scripts(config: &DirectorConfig, job_name: &str) -> bool {
+    !job_scripts(&config.raw, job_name).is_empty()
+}
+
+/// ua_cmds.cc commands[] with allowed_in_runscript = true.
+const RUNSCRIPT_COMMANDS: &[&str] = &[
+    ".", ".actiononpurge", ".clients", ".consoles", ".users", ".jobdefs", ".jobs", ".jobstatus", ".locations",
+    ".media", ".mediatypes", ".pools", ".profiles", ".storages", ".volstatus", ".bvfs_lsdirs", ".bvfs_lsfiles",
+    ".bvfs_update", ".bvfs_get_jobids", ".bvfs_versions", ".bvfs_restore", ".bvfs_cleanup", "delete", "disable",
+    "enable", "estimate", "export", "import", "list", "llist", "memory", "move", "prune", "purge", "release",
+    "reload", "status", "setbandwidth", "setdebug", "setdevice", "show", "time", "trace", "truncate", "update",
+    "version", "whoami",
+];
+
+/// What console commands of run scripts need besides the configuration.
+#[derive(Clone, Default)]
+pub struct Host {
+    pub config: Option<SharedConfig>,
+    pub catalog: Option<CatalogHandle>,
+    /// None while the caller holds the JobManager lock (the command then
+    /// runs without job information instead of deadlocking).
+    pub job_manager: Option<Weak<Mutex<JobManager>>>,
+}
+
+/// The job status after RunScripts() and the M_ERROR job messages it
+/// produced (jcr->JobErrors).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Outcome {
+    pub status: char,
+    pub errors: u32,
+}
+
+/// job.cc RunConsoleCommand(): Do_a_command() in a UA context without
+/// console (ua->runscript): its output goes to the "-RunScript-" control
+/// JCR (JobId 0, the Director's Messages resource), one message per send.
+pub fn run_console_command(host: &Host, cmd: &str) -> bool {
+    let emit = |text: &str| {
+        if let Some(config) = host.config.as_ref().and_then(|c| c.read().ok()) {
+            crate::console_msg::job_message(&config, "-RunScript-", 0, MsgType::Info, 0, text);
         }
-        let script_when = match script.when {
-            Some("before") => BEFORE,
-            Some("after") => AFTER,
-            Some("aftervss") => AFTER_VSS,
-            Some("always") => BEFORE | AFTER,
-            _ => 0,
-        };
-        let on = |cond_success: bool| (script.on_success && cond_success) || (script.on_failure && (canceled || status == 'D'));
-        (script_when & BEFORE != 0 && when & BEFORE != 0 && on(matches!(status, 'R' | 'C')))
-            || (script_when & AFTER_VSS != 0 && when & AFTER_VSS != 0
-                && ((script.on_success && status == 'B') || (script.on_failure && canceled)))
-            || (script_when & AFTER != 0 && when & AFTER != 0 && on(matches!(status, 'T' | 'W')))
-    }).collect()
+    };
+    let mut ast = crate::session::parse_cli_command(cmd);
+    ast.raw_line = cmd.to_string();
+    if ast.command_name.is_empty() {
+        return false;
+    }
+    let typed = ast.command_name.clone();
+    let lower = typed.to_ascii_lowercase();
+    let Some(key) = crate::ua_commands_table::UA_COMMANDS.iter().map(|e| e.0).find(|k| k.starts_with(&lower)) else {
+        emit(&format!("{typed}: is an invalid command.\n"));
+        return false;
+    };
+    if !RUNSCRIPT_COMMANDS.contains(&key) {
+        emit(&format!("Can't use {key} command in a runscript"));
+        emit(&format!("{typed}: is an invalid command.\n"));
+        return false;
+    }
+    ast.command_name = key.to_string();
+    let ctx = crate::command_executor::ExecContext {
+        session_id: 0, config: host.config.clone(), session_mgr: None, catalog: host.catalog.clone(),
+        api_mode: crate::command_executor::ApiMode::Human, bus_rx: None,
+        job_manager: host.job_manager.as_ref().and_then(|m| m.upgrade()),
+    };
+    let result = crate::command_executor::dispatch(&ast, &ctx);
+    let errors: Vec<String> = if result.errors_inline { Vec::new() } else { result.error_lines() };
+    let text: Vec<String> = result.text_output.split_inclusive('\n').map(str::to_string).collect();
+    let (first, second) = if result.errors_first { (errors, text) } else { (text, errors) };
+    for part in first.iter().chain(second.iter()) {
+        emit(part);
+    }
+    result.success
 }
 
 /// lib/signal.cc sig_names.
@@ -204,45 +302,55 @@ fn exit_error(code: i32, signal: bool) -> (i32, String) {
 }
 
 /// RunScript::Run() of a shell command: the Jmsg texts it produces in order.
+/// OpenBpipe(cmd, 0, "r") gives the child's stdout and stderr in one pipe;
+/// a failing execvp() prints perror("Program execution failed") into it
+/// and the child exits 255.
 pub fn run_shell_command(command: &str, name: &str) -> Vec<(MsgType, String)> {
     let mut messages = vec![(MsgType::Info, format!("shell command: run {name} \"{command}\"\n"))];
     let argv = build_argv(command);
-    let status = match argv.split_first() {
-        // execvp(NULL, ...) fails with EFAULT
-        None => Err(202),
-        Some((program, args)) => match std::process::Command::new(program).args(args)
-            .stdout(std::process::Stdio::piped()).spawn() {
-            Ok(mut child) => {
-                if let Some(stdout) = child.stdout.take() {
-                    let mut reader = BufReader::new(stdout);
-                    let mut line = Vec::new();
-                    // fgets() into a PM_NAME buffer (130 bytes).
-                    while reader.read_until(b'\n', &mut line).is_ok_and(|n| n > 0) {
-                        for chunk in line.chunks(129) {
-                            let mut chunk = chunk;
-                            while let [rest @ .., b' ' | b'\n' | b'\r'] = chunk { chunk = rest; }
-                            messages.push((MsgType::Info, format!("{name}: {}\n", String::from_utf8_lossy(chunk))));
-                        }
-                        line.clear();
-                    }
-                }
-                match child.wait() {
-                    Ok(exit) => {
-                        use std::os::unix::process::ExitStatusExt;
-                        match (exit.code(), exit.signal()) {
-                            (Some(0), _) => Ok(()),
-                            (Some(code), _) => Err(code),
-                            (None, Some(signal)) => Err(-signal),
-                            (None, None) => Err(255),
-                        }
-                    }
-                    Err(_) => Err(255),
-                }
+    let spawned = (|| {
+        let (reader, writer) = std::io::pipe()?;
+        let stderr = writer.try_clone()?;
+        let child = match argv.split_first() {
+            // execvp(NULL, ...) fails with EFAULT
+            None => return Ok(Err(std::io::Error::from_raw_os_error(libc::EFAULT))),
+            Some((program, args)) => std::process::Command::new(program).args(args)
+                .stdin(std::process::Stdio::null()).stdout(writer).stderr(stderr).spawn(),
+        };
+        // The Command (and with it the pipe's write ends) is gone here.
+        Ok::<_, std::io::Error>(child.map(|child| (child, reader)))
+    })();
+    let mut output: Vec<u8> = Vec::new();
+    let status = match spawned {
+        Ok(Ok((mut child, reader))) => {
+            let mut reader = BufReader::new(reader);
+            while reader.read_until(b'\n', &mut output).is_ok_and(|n| n > 0) {
+                push_output_lines(&mut messages, name, &output);
+                output.clear();
             }
-            Err(error) => Err(error.raw_os_error()
-                .and_then(|errno| EXECVP_ERRORS.iter().position(|e| *e == errno))
-                .map_or(255, |index| 200 + index as i32)),
-        },
+            match child.wait() {
+                Ok(exit) => {
+                    use std::os::unix::process::ExitStatusExt;
+                    match (exit.code(), exit.signal()) {
+                        (Some(0), _) => Ok(()),
+                        (Some(code), _) => Err(code),
+                        (None, Some(signal)) => Err(-signal),
+                        (None, None) => Err(255),
+                    }
+                }
+                Err(_) => Err(255),
+            }
+        }
+        Ok(Err(error)) => {
+            let text = error.to_string();
+            let text = text.split(" (os error").next().unwrap_or_default();
+            push_output_lines(&mut messages, name, format!("Program execution failed: {text}\n").as_bytes());
+            Err(255)
+        }
+        Err(error) => {
+            messages.push((MsgType::Error, format!("Runscript: {name} could not execute. ERR={error}\n")));
+            return messages;
+        }
     };
     if let Err(code) = status {
         let (code, text) = if code < 0 { exit_error(-code, true) } else { exit_error(code, false) };
@@ -251,52 +359,129 @@ pub fn run_shell_command(command: &str, name: &str) -> Vec<(MsgType, String)> {
     messages
 }
 
+/// fgets() into a PM_NAME buffer (130 bytes), StripTrailingJunk(), one
+/// "<name>: <line>" message per read.
+fn push_output_lines(messages: &mut Vec<(MsgType, String)>, name: &str, line: &[u8]) {
+    for chunk in line.chunks(129) {
+        let mut chunk = chunk;
+        while let [rest @ .., b' ' | b'\n' | b'\r'] = chunk { chunk = rest; }
+        messages.push((MsgType::Info, format!("{name}: {}\n", String::from_utf8_lossy(chunk))));
+    }
+}
+
+/// The job codes of a job of the JobManager.
+fn job_codes(config: &DirectorConfig, job: &ScriptJob) -> JobCodes {
+    let resource = config.find_job(&job.job_name);
+    let client = config.find_client(&job.client);
+    let level = job.params.as_ref().map(|p| p.level.clone()).unwrap_or_default();
+    JobCodes {
+        job_id: job.job_id,
+        job: job.unique_job.clone(),
+        client: job.client.clone(),
+        client_address: client.map(|c| c.address.clone()).unwrap_or_default(),
+        // job_level_to_str(L_NONE)
+        level: if level.trim().is_empty() { " ".into() } else { level },
+        job_type: match job.params.as_ref().map(|p| p.job_type) {
+            Some(WorkerJobType::Restore) => "Restore".into(),
+            Some(WorkerJobType::Admin) => "Admin".into(),
+            Some(WorkerJobType::Copy) => "Copy".into(),
+            Some(WorkerJobType::Migrate) => "Migrate".into(),
+            Some(WorkerJobType::Consolidate) => "Consolidate".into(),
+            _ => "Backup".into(),
+        },
+        files: job.files,
+        bytes: job.bytes,
+        status: job.status,
+        director: config.director.name.clone(),
+        fileset: resource.map(|r| r.fileset.clone()).unwrap_or_default(),
+        // jcr->dir_impl->res.pool: the job's pool unless the run chose one
+        pool: job.params.as_ref().map(|p| p.pool_name.clone()).filter(|p| !p.is_empty())
+            .or_else(|| resource.map(|r| r.pool.clone())).unwrap_or_default(),
+        storage: job.storage.clone(),
+        volume: Some(String::new()),
+    }
+}
+
 /// RunScripts(jcr, job->RunScripts, label) for a job of the JobManager:
-/// runs the selected scripts and posts their messages as job messages.
-pub fn run_job_scripts(config: Option<&SharedConfig>, bus: Option<&MessageBus>, job: &ScriptJob, label: &str)
-    -> Vec<(MsgType, String)> {
-    let Some((scripts, codes)) = config.and_then(|c| c.read().ok()).map(|config| {
-        let resource = config.find_job(&job.job_name);
-        let client = config.find_client(&job.client);
-        let codes = JobCodes {
-            job_id: job.job_id,
-            job: job.unique_job.clone(),
-            client: job.client.clone(),
-            client_address: client.map(|c| c.address.clone()).unwrap_or_default(),
-            level: job.params.as_ref().map(|p| p.level.clone()).unwrap_or_default(),
-            job_type: match job.params.as_ref().map(|p| p.job_type) {
-                Some(crate::job_worker::WorkerJobType::Restore) => "Restore".into(),
-                Some(crate::job_worker::WorkerJobType::Admin) => "Admin".into(),
-                Some(crate::job_worker::WorkerJobType::Copy) => "Copy".into(),
-                Some(crate::job_worker::WorkerJobType::Migrate) => "Migrate".into(),
-                Some(crate::job_worker::WorkerJobType::Consolidate) => "Consolidate".into(),
-                _ => "Backup".into(),
-            },
-            files: job.files,
-            bytes: job.bytes,
-            status: job.status,
-            director: config.director.name.clone(),
-            fileset: resource.map(|r| r.fileset.clone()).unwrap_or_default(),
-            pool: job.params.as_ref().map(|p| p.pool_name.clone()).unwrap_or_default(),
-            storage: job.storage.clone(),
+/// runs the selected scripts in configuration order and posts their job
+/// messages. A failing script with FailJobOnError sets JS_ErrorTerminated,
+/// which already decides about the scripts after it.
+pub fn run_scripts(host: &Host, bus: Option<&MessageBus>, job: &ScriptJob, label: &str) -> Outcome {
+    let mut outcome = Outcome { status: job.status, errors: 0 };
+    let Some((scripts, mut codes)) = host.config.as_ref().and_then(|c| c.read().ok())
+        .map(|config| (job_scripts(&config.raw, &job.job_name), job_codes(&config, job))) else { return outcome };
+    let post = |msg_type: MsgType, text: String| {
+        let message = BusMessage::JobMessage {
+            job_id: job.job_id, job_name: job.job_name.clone(), msg_type, text,
+            timestamp: std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default().as_secs() as i64,
         };
-        (job_scripts(&config.raw, &job.job_name), codes)
-    }) else { return Vec::new() };
-    let mut all = Vec::new();
-    for script in selected(&scripts, label, job.status) {
-        let command = edit_job_codes(&script.command, &codes, "");
-        for (msg_type, text) in run_shell_command(&command, label) {
-            if let Some(bus) = bus {
-                crate::console_msg::post_job_message(bus, config, BusMessage::JobMessage {
-                    job_id: job.job_id, job_name: job.job_name.clone(), msg_type, text: text.clone(),
-                    timestamp: std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH)
-                        .unwrap_or_default().as_secs() as i64,
-                });
+        match bus {
+            Some(bus) => crate::console_msg::post_job_message(bus, host.config.as_ref(), message),
+            None => if let (BusMessage::JobMessage { job_id, job_name, msg_type, text, timestamp }, Some(config)) =
+                (&message, host.config.as_ref().and_then(|c| c.read().ok())) {
+                crate::console_msg::job_message(&config, job_name, *job_id, *msg_type, *timestamp, text);
+            },
+        }
+    };
+    let admin = job.params.as_ref().is_some_and(|p| p.job_type == WorkerJobType::Admin);
+    let when = label_when(label);
+    for script in &scripts {
+        if !script.target.is_empty() {
+            if admin {
+                post(MsgType::Warning, format!(
+                    "Invalid runscript definition (command={}). Admin Jobs only support local runscripts.\n", script.command));
             }
-            all.push((msg_type, text));
+            continue;
+        }
+        if !runs(script, when, outcome.status) {
+            continue;
+        }
+        codes.status = outcome.status;
+        let command = edit_job_codes(&script.command, &codes, "");
+        let ok = if script.console {
+            post(MsgType::Info, format!("console command: run {label} \"{command}\"\n"));
+            run_console_command(host, &command)
+        } else {
+            let mut ok = true;
+            for (msg_type, text) in run_shell_command(&command, label) {
+                if msg_type == MsgType::Error {
+                    ok = false;
+                    outcome.errors += 1;
+                }
+                post(msg_type, text);
+            }
+            ok
+        };
+        if !ok && script.fail_on_error {
+            outcome.status = crate::job_manager::merge_status(outcome.status, 'E');
         }
     }
-    all
+    outcome
+}
+
+/// fd_cmds.cc SendRunscriptsCommands(): the "Run ..." commands for the
+/// scripts whose target is the job's client, and whether "RunBeforeNow"
+/// follows. None when the job has no client scripts (HaveClientRunscripts).
+pub fn client_commands(config: &DirectorConfig, job: &ScriptJob) -> Option<(Vec<String>, bool)> {
+    let scripts = job_scripts(&config.raw, &job.job_name);
+    if scripts.iter().all(|s| s.target.is_empty()) {
+        return None;
+    }
+    let codes = job_codes(config, job);
+    let mut commands = Vec::new();
+    let mut before = false;
+    for script in &scripts {
+        if !script.target.is_empty() && edit_job_codes(&script.target, &codes, "") == job.client {
+            commands.push(format!("Run OnSuccess={} OnFailure={} AbortOnError={} When={} Command={}\n",
+                script.on_success as u8, script.on_failure as u8, script.fail_on_error as u8,
+                script_when(script), script.command.replace(' ', "\x01")));
+        }
+        if script_when(script) & (SCRIPT_BEFORE | SCRIPT_AFTER_VSS) != 0 {
+            before = true;
+        }
+    }
+    Some((commands, before))
 }
 
 #[cfg(test)]
@@ -308,7 +493,7 @@ mod tests {
         let codes = JobCodes { job_id: 7, job: "backup.2026-10-16_10.00.00_07".into(), client: "fd1".into(),
             client_address: "fd.example".into(), level: "Full".into(), job_type: "Backup".into(), files: 3,
             bytes: 1_500_000, status: 'A', director: "dir".into(), fileset: "fs".into(), pool: "Full".into(),
-            storage: "File".into() };
+            storage: "File".into(), volume: None };
         assert_eq!(edit_job_codes("%i %j %n %c %h %l %t %e %F %b %B %d %D %f %p %w %x %C %v %s %r %q %% %", &codes, "to"),
             "7 backup.2026-10-16_10.00.00_07 backup fd1 fd.example Full Backup Canceled 3 1500000 1.500 MB dir dir fs \
              Full File no no *None* *None* to %q % %");
@@ -342,8 +527,8 @@ Job { Name = backup; JobDefs = d
 }
 "#);
         let commands = |status| selected(&all, "AfterJob", status).iter().map(|s| s.command.clone()).collect::<Vec<_>>();
-        assert_eq!(commands('A'), vec!["/bin/echo failure", "/bin/echo always", "/bin/echo inherited"]);
-        assert_eq!(commands('T'), vec!["/bin/echo success", "/bin/echo failure"]);
+        assert_eq!(commands('A'), vec!["/bin/echo failure", "/bin/echo always", "status dir", "/bin/echo inherited"]);
+        assert_eq!(commands('T'), vec!["/bin/echo success", "/bin/echo failure", "status dir"]);
         assert_eq!(commands('I'), Vec::<String>::new());
         let before: Vec<_> = selected(&all, "BeforeJob", 'R').iter().map(|s| s.command.clone()).collect();
         assert_eq!(before, vec!["/bin/echo before"]);
@@ -358,9 +543,59 @@ Job { Name = backup; JobDefs = d
         assert_eq!((long.len(), long[1].1.len(), long[2].1.len()), (3, "AfterJob: \n".len() + 129, "AfterJob: \n".len() + 71));
         assert_eq!(run_shell_command("/bin/sh -c 'exit 3'", "AfterJob")[1],
             (MsgType::Error, "Runscript: AfterJob returned non-zero status=3. ERR=Child exited with code 3\n".into()));
-        assert_eq!(run_shell_command("/nonexistent/prog", "AfterJob")[1],
-            (MsgType::Error, "Runscript: AfterJob returned non-zero status=208. ERR=No such file or directory\n".into()));
+        assert_eq!(run_shell_command("/nonexistent/prog", "AfterJob")[2],
+            (MsgType::Error, "Runscript: AfterJob returned non-zero status=255. ERR=Unknown error during program execvp\n".into()));
         assert_eq!(run_shell_command("/bin/sh -c 'kill -TERM $$'", "AfterJob")[1],
             (MsgType::Error, "Runscript: AfterJob returned non-zero status=15. ERR=Child died from signal 15: Termination\n".into()));
+        // stderr shares the pipe; a failing execvp prints perror() and exits 255
+        assert_eq!(run_shell_command("/bin/sh -c 'echo err >&2'", "BeforeJob")[1],
+            (MsgType::Info, "BeforeJob: err\n".into()));
+        assert_eq!(run_shell_command("/nonexistent/prog", "BeforeJob")[1],
+            (MsgType::Info, "BeforeJob: Program execution failed: No such file or directory\n".into()));
+    }
+
+    fn script_job(name: &str, status: char, job_type: WorkerJobType) -> ScriptJob {
+        let params = crate::job_worker::JobParams {
+            job_id: 5, unique_job: format!("{name}.2026-10-17_06.50.25_03"), job_name: name.into(), job_type,
+            level: String::new(), fd_address: String::new(), fd_port: 0, fd_password: String::new(),
+            sd_address: String::new(), sd_port: 0, sd_password: String::new(), sd_device: String::new(),
+            sd_media_type: String::new(), director_name: "dir".into(), pool_name: "Incremental".into(),
+            fileset_includes: Vec::new(), fileset_excludes: Vec::new(), since_utime: 0, prev_job: String::new(),
+            where_path: None, replace: None, restore_jobid: None, bootstrap: None, client_name: "fd1".into(),
+            client_first_connection: false };
+        ScriptJob { job_id: 5, job_name: name.into(), unique_job: params.unique_job.clone(), status, files: 0, bytes: 0,
+            client: "fd1".into(), storage: "File".into(), params: Some(params) }
+    }
+
+    fn host(config: &str) -> Host {
+        let config = crate::director_config::DirectorConfig::from_str(config).unwrap();
+        Host { config: Some(std::sync::Arc::new(std::sync::RwLock::new(config))), ..Default::default() }
+    }
+
+    #[test]
+    fn failing_script_changes_the_status_for_the_scripts_after_it() {
+        let host = host(r#"
+Director { Name = dir; Password = x }
+Client { Name = fd1; Address = fd.example; Password = x }
+Job { Name = adm; Type = Admin; Client = fd1
+  RunBeforeJob = "/bin/sh -c 'exit 2'"
+  RunBeforeJob = "/bin/echo second"
+  ClientRunBeforeJob = "/bin/echo client"
+  RunScript { RunsWhen = Before; RunsOnFailure = yes; RunsOnSuccess = no; RunsOnClient = no; Command = "/bin/echo failed %e" }
+}
+"#);
+        let job = script_job("adm", 'R', WorkerJobType::Admin);
+        assert_eq!(run_scripts(&host, None, &job, "BeforeJob"), Outcome { status: 'E', errors: 1 });
+        let config = host.config.as_ref().unwrap().read().unwrap();
+        assert_eq!(client_commands(&config, &job), Some((vec![
+            "Run OnSuccess=1 OnFailure=0 AbortOnError=1 When=2 Command=/bin/echo\x01client\n".to_string()], true)));
+    }
+
+    #[test]
+    fn console_commands_outside_the_runscript_list_fail() {
+        let host = host("Director { Name = dir; Password = x }\n");
+        assert!(!run_console_command(&host, "wait"));
+        assert!(!run_console_command(&host, "nosuchcommand"));
+        assert!(!run_console_command(&host, ""));
     }
 }

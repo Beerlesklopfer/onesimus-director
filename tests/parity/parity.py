@@ -265,7 +265,9 @@ def compare(case, results, out):
 
 
 # Jobs that may be started for real: they touch neither the live FD nor SD.
-SAFE_JOBS = {'parity-admin', 'parity-migrate', 'parity-consolidate'}
+SAFE_JOBS = {'parity-admin', 'parity-migrate', 'parity-consolidate',
+             # Admin jobs with Director-side RunScripts (fixture/job/parity-runscript.conf)
+             'parity-admin-rs', 'parity-admin-rs-fail', 'parity-admin-rs-noerr'}
 
 
 def unsafe_job_start(case):
