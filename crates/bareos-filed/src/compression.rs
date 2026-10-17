@@ -310,13 +310,7 @@ fn lzo(last_fname: &str, data: &[u8]) -> Result<Vec<u8>, String> {
 /// The compressed payload (without comp_stream_header) of one block.
 pub fn compress_data(algo: u32, level: i32, data: &[u8]) -> Result<Vec<u8>, String> {
     match algo {
-        COMPRESS_GZIP => {
-            use std::io::Write as _;
-            let lvl = level.clamp(0, 9) as u32;
-            let mut enc = flate2::write::ZlibEncoder::new(Vec::with_capacity(data.len() / 2 + 64), flate2::Compression::new(lvl));
-            enc.write_all(data).map_err(|e| format!("Compression deflate error: {e}\n"))?;
-            enc.finish().map_err(|e| format!("Compression deflate error: {e}\n"))
-        }
+        COMPRESS_GZIP => gzip_compress(level, data),
         COMPRESS_LZO1X => lzo_compress(data),
         COMPRESS_FZFZ => Ok(fastlzlib_compress(data, false)),
         COMPRESS_FZ4L | COMPRESS_FZ4H => Ok(fastlzlib_compress(data, true)),
@@ -462,58 +456,180 @@ pub fn lz4_compress_block(src: &[u8]) -> Vec<u8> {
     out
 }
 
-/// A greedy FastLZ level 1 block compressor (13 bit distances, matches of
-/// 3..264 bytes, literal runs of up to 32 bytes; the first instruction is
-/// always a literal run, so the level bits of the first byte are 0).
+/// fastlz1_compress() of core/src/fastlz/src/fastlz.c, byte for byte.
 pub fn fastlz1_compress_block(src: &[u8]) -> Vec<u8> {
     const MAX_COPY: usize = 32;
     const MAX_LEN: usize = 264;
     const MAX_DISTANCE: usize = 8192;
-    let n = src.len();
-    let mut out = Vec::with_capacity(n + n / 32 + 16);
-    let mut table = vec![usize::MAX; 1 << 13];
-    let mut lit: Vec<u8> = Vec::new();
-    let flush_lit = |out: &mut Vec<u8>, lit: &mut Vec<u8>| {
-        for chunk in lit.chunks(MAX_COPY) {
-            out.push((chunk.len() - 1) as u8);
-            out.extend_from_slice(chunk);
+    const HASH_MASK: u32 = (1 << 13) - 1;
+    let length = src.len();
+    let mut out = Vec::with_capacity(length + length / 16 + 16);
+    if length < 4 {
+        if length > 0 {
+            out.push((length - 1) as u8);
+            out.extend_from_slice(src);
         }
-        lit.clear();
+        return out;
+    }
+    let ip_bound = length - 2;
+    let ip_limit = length as isize - 12 - 1;
+    let r16 = |p: usize| u32::from(u16::from_le_bytes([src[p], src[p + 1]]));
+    let hash = |p: usize| {
+        let mut v = r16(p);
+        v ^= r16(p + 1) ^ (v >> (16 - 13));
+        (v & HASH_MASK) as usize
     };
-    let mut i = 0;
-    while i < n {
-        let mut matched = false;
-        if i > 0 && i + 3 <= n {
-            let v = u32::from(src[i]) | (u32::from(src[i + 1]) << 8) | (u32::from(src[i + 2]) << 16);
-            let h = hash_bits(v, 13);
-            let cand = table[h];
-            table[h] = i;
-            if cand != usize::MAX && i - cand <= MAX_DISTANCE && src[cand..cand + 3] == src[i..i + 3] {
-                let mut m = 3;
-                while i + m < n && m < MAX_LEN && src[cand + m] == src[i + m] {
-                    m += 1;
+    let mut htab = vec![0usize; 1 << 13];
+    let mut copy: usize = 2;
+    out.push((MAX_COPY - 1) as u8);
+    out.push(src[0]);
+    out.push(src[1]);
+    let mut ip = 2usize;
+    while (ip as isize) < ip_limit {
+        let anchor = ip;
+        let hval = hash(ip);
+        let mut rf = htab[hval];
+        let mut distance = anchor - rf;
+        htab[hval] = anchor;
+        if distance == 0
+            || distance >= MAX_DISTANCE
+            || src[rf] != src[ip]
+            || src[rf + 1] != src[ip + 1]
+            || src[rf + 2] != src[ip + 2]
+        {
+            // literal
+            out.push(src[anchor]);
+            ip = anchor + 1;
+            copy += 1;
+            if copy == MAX_COPY {
+                copy = 0;
+                out.push((MAX_COPY - 1) as u8);
+            }
+            continue;
+        }
+        rf += 3;
+        ip = anchor + 3;
+        distance -= 1;
+        if distance == 0 {
+            // a run
+            let x = src[ip - 1];
+            while ip < ip_bound {
+                let eq = src[rf] == x;
+                rf += 1;
+                if !eq {
+                    break;
                 }
-                flush_lit(&mut out, &mut lit);
-                let dist = i - cand - 1;
-                let l = m - 2;
-                if l < 7 {
-                    out.push(((l as u8) << 5) | (dist >> 8) as u8);
-                } else {
-                    out.push((7u8 << 5) | (dist >> 8) as u8);
-                    out.push((l - 7) as u8);
+                ip += 1;
+            }
+        } else {
+            let mut all = true;
+            for _ in 0..8 {
+                let eq = src[rf] == src[ip];
+                rf += 1;
+                ip += 1;
+                if !eq {
+                    all = false;
+                    break;
                 }
-                out.push((dist & 255) as u8);
-                i += m;
-                matched = true;
+            }
+            if all {
+                while ip < ip_bound {
+                    let eq = src[rf] == src[ip];
+                    rf += 1;
+                    ip += 1;
+                    if !eq {
+                        break;
+                    }
+                }
             }
         }
-        if !matched {
-            lit.push(src[i]);
-            i += 1;
+        if copy > 0 {
+            let idx = out.len() - copy - 1;
+            out[idx] = (copy - 1) as u8;
+        } else {
+            out.pop();
+        }
+        copy = 0;
+        ip -= 3;
+        let mut len = ip - anchor;
+        while len > MAX_LEN - 2 {
+            out.push(((7 << 5) + (distance >> 8)) as u8);
+            out.push((MAX_LEN - 2 - 7 - 2) as u8);
+            out.push((distance & 255) as u8);
+            len -= MAX_LEN - 2;
+        }
+        if len < 7 {
+            out.push(((len << 5) + (distance >> 8)) as u8);
+            out.push((distance & 255) as u8);
+        } else {
+            out.push(((7 << 5) + (distance >> 8)) as u8);
+            out.push((len - 7) as u8);
+            out.push((distance & 255) as u8);
+        }
+        let h = hash(ip);
+        htab[h] = ip;
+        ip += 1;
+        let h = hash(ip);
+        htab[h] = ip;
+        ip += 1;
+        out.push((MAX_COPY - 1) as u8);
+    }
+    while ip <= ip_bound + 1 {
+        out.push(src[ip]);
+        ip += 1;
+        copy += 1;
+        if copy == MAX_COPY {
+            copy = 0;
+            out.push((MAX_COPY - 1) as u8);
         }
     }
-    flush_lit(&mut out, &mut lit);
+    if copy > 0 {
+        let idx = out.len() - copy - 1;
+        out[idx] = (copy - 1) as u8;
+    } else {
+        out.pop();
+    }
     out
+}
+
+type ZCompress2 = unsafe extern "C" fn(*mut u8, *mut libc::c_ulong, *const u8, libc::c_ulong, libc::c_int) -> libc::c_int;
+
+/// compress2() of the system zlib (what the original's deflate() on a
+/// fresh stream produces); None without libz.
+fn zlib_compress2() -> Option<ZCompress2> {
+    static F: std::sync::OnceLock<Option<usize>> = std::sync::OnceLock::new();
+    let addr = *F.get_or_init(|| unsafe {
+        for lib in [c"libz.so.1", c"libz.so"] {
+            let h = libc::dlopen(lib.as_ptr(), libc::RTLD_NOW);
+            if !h.is_null() {
+                let s = libc::dlsym(h, c"compress2".as_ptr());
+                if !s.is_null() {
+                    return Some(s as usize);
+                }
+            }
+        }
+        None
+    });
+    addr.map(|a| unsafe { std::mem::transmute::<usize, ZCompress2>(a) })
+}
+
+/// GZIP block: zlib deflate at `level` (the system zlib when present).
+fn gzip_compress(level: i32, data: &[u8]) -> Result<Vec<u8>, String> {
+    if let Some(f) = zlib_compress2() {
+        let mut out = vec![0u8; data.len() + data.len() / 1000 + 64 + 18];
+        let mut len = out.len() as libc::c_ulong;
+        let r = unsafe { f(out.as_mut_ptr(), &mut len, data.as_ptr(), data.len() as libc::c_ulong, level) };
+        if r != 0 {
+            return Err(format!("Compression deflate error: {r}\n"));
+        }
+        out.truncate(len as usize);
+        return Ok(out);
+    }
+    use std::io::Write as _;
+    let lvl = level.clamp(0, 9) as u32;
+    let mut enc = flate2::write::ZlibEncoder::new(Vec::with_capacity(data.len() / 2 + 64), flate2::Compression::new(lvl));
+    enc.write_all(data).map_err(|e| format!("Compression deflate error: {e}\n"))?;
+    enc.finish().map_err(|e| format!("Compression deflate error: {e}\n"))
 }
 
 type LzoCompress = unsafe extern "C" fn(*const u8, usize, *mut u8, *mut usize, *mut libc::c_void) -> libc::c_int;
