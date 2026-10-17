@@ -582,30 +582,32 @@ pub(crate) fn prune_jobs(ua: &mut Ua, db: &dyn Db, client: &str, pool: Option<&s
 /// GetPruneCandidatesForVolume(): expired jobs of the volume plus the
 /// copy/migration jobs of them, running jobs excluded. None on a query error.
 fn prune_candidates(ua: &mut Ua, db: &dyn Db, volume: &Volume) -> Option<Vec<u32>> {
-    if volume.enabled == VOL_ARCHIVED {
-        return Some(Vec::new());
-    }
-    let mut list = match column0(db, &format!("SELECT DISTINCT JobMedia.JobId\n   FROM JobMedia, Job\n   WHERE MediaId      = {}\n   \
-        AND Job.JobId    = JobMedia.JobId\n   AND Job.JobTDate < {}\n   ORDER BY JobId\n",
-        volume.media_id, now() - volume.retention as i64)) {
-        Ok(ids) => parse_ids(ids),
+    let running = running_jobids(ua.ctx);
+    match prune_candidates_db(db, volume.media_id, volume.retention, volume.enabled, &running) {
+        Ok(list) => Some(list),
         Err(error) => {
             ua.error_msg(db_error(&error));
-            return None;
-        }
-    };
-    if !list.is_empty() {
-        let ids = list.iter().map(u32::to_string).collect::<Vec<_>>().join(",");
-        match column0(db, &format!("SELECT JobId from Job WHERE type in ('c','g') AND priorjobid in ({ids})")) {
-            Ok(more) => list.extend(parse_ids(more)),
-            Err(error) => {
-                ua.error_msg(db_error(&error));
-                return None;
-            }
+            None
         }
     }
-    exclude_running_jobs(ua.ctx, &mut list);
-    Some(list)
+}
+
+/// GetPruneCandidatesForVolume() without a console: `running` are the
+/// JobIds of the running jobs (ExcludeRunningJobsFromList). S-27.
+pub(crate) fn prune_candidates_db(db: &dyn Db, media_id: i64, retention: u64, enabled: i64, running: &[u32])
+    -> Result<Vec<u32>, String> {
+    if enabled == VOL_ARCHIVED {
+        return Ok(Vec::new());
+    }
+    let mut list = parse_ids(column0(db, &format!("SELECT DISTINCT JobMedia.JobId\n   FROM JobMedia, Job\n   WHERE MediaId      = {}\n   \
+        AND Job.JobId    = JobMedia.JobId\n   AND Job.JobTDate < {}\n   ORDER BY JobId\n",
+        media_id, now() - retention as i64))?);
+    if !list.is_empty() {
+        let ids = list.iter().map(u32::to_string).collect::<Vec<_>>().join(",");
+        list.extend(parse_ids(column0(db, &format!("SELECT JobId from Job WHERE type in ('c','g') AND priorjobid in ({ids})"))?));
+    }
+    list.retain(|id| *id != 0 && !running.contains(id));
+    Ok(list)
 }
 
 /// next_vol.cc HasVolumeExpired(): an Append volume past one of its limits

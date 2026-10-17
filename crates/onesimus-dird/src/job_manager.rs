@@ -780,6 +780,10 @@ impl JobManager {
     /// Poll all active worker pipes. Non-blocking.
     /// Handles CatReq, status updates, state changes, job completion.
     pub fn poll_all(&mut self) {
+        // ExcludeRunningJobsFromList() of the catalog requests (catreq.rs PruneVolumes, S-27).
+        if let Ok(mut running) = crate::catreq::RUNNING_JOBIDS.lock() {
+            *running = self.running_jobs().into_iter().map(|(id, _, _)| id).collect();
+        }
         self.job_monitor();
         if !self.wait_messages.is_empty() {
             let now = std::time::Instant::now();
