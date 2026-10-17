@@ -19,6 +19,8 @@ mod grpc_client;
 mod mcp;
 mod mcp_read;
 mod mcp_mirror;
+#[cfg(feature = "mcp-development")]
+mod mcp_write;
 mod mcp_token;
 mod rate_guard;
 
@@ -419,13 +421,33 @@ struct BnetRunner<S: std::io::Read + std::io::Write> {
 }
 
 impl<S: std::io::Read + std::io::Write + Send + 'static> mcp::CommandRunner for BnetRunner<S> {
+    /// Any question of the Director is cancelled with "." so that a command
+    /// never leaves the session waiting for input.
     fn run(&mut self, command: &str) -> anyhow::Result<String> {
+        self.run_dialog(command, &mut |_| None)
+    }
+
+    /// Plain console: a question is the prompt text followed by
+    /// BNET_SUB_PROMPT, then the Director waits for one answer line.
+    fn run_dialog(&mut self, command: &str, answer: &mut dyn FnMut(&str) -> Option<String>) -> anyhow::Result<String> {
         self.bnet.send_str(command)?;
         let mut output = String::new();
+        let mut questions = 0;
         loop {
             match self.bnet.recv() {
                 Ok(BnetMessage::Data(data)) => output.push_str(&String::from_utf8_lossy(&data)),
+                Ok(BnetMessage::Signal(BnetSignal::SubPrompt)) => {
+                    questions += 1;
+                    let reply = if questions > mcp::MAX_QUESTIONS { None } else { answer(&output) };
+                    let reply = reply.unwrap_or_else(|| ".".into());
+                    output.push_str(&format!("{reply}\n"));
+                    self.bnet.send_str(&reply)?;
+                }
                 Ok(BnetMessage::Signal(BnetSignal::Eod)) | Ok(BnetMessage::Signal(BnetSignal::MainPrompt)) => break,
+                // The socket's 30 s read timeout only means the command is still
+                // running (wait, a long restore selection): keep reading, or the
+                // late reply would become the answer to the next tool call.
+                Err(e) if is_read_timeout(&e) => continue,
                 Ok(BnetMessage::Signal(BnetSignal::Terminate)) => anyhow::bail!("Director closed the connection"),
                 Ok(BnetMessage::Signal(_)) => continue,
                 Err(e) => anyhow::bail!("connection error: {e}"),
@@ -1226,6 +1248,18 @@ extern "C" fn sigint_handler(_sig: libc::c_int) {
     CTRL_C.store(true, Ordering::SeqCst);
 }
 
+/// A read that timed out (EAGAIN/EWOULDBLOCK, ETIMEDOUT) or was interrupted
+/// before data arrived: not fatal, read again.
+fn is_read_timeout(e: &BnetError) -> bool {
+    match e {
+        BnetError::Io(io_err) => matches!(
+            io_err.kind(),
+            std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut | std::io::ErrorKind::Interrupted
+        ),
+        other => other.to_string().contains("os error 11"),
+    }
+}
+
 /// Check if a BnetError wraps an EINTR (interrupted by signal).
 fn is_interrupted(e: &BnetError) -> bool {
     match e {
@@ -1415,6 +1449,87 @@ impl mcp::CommandRunner for GrpcRunner {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A Director side for BnetRunner: canned reads (Err = a read timeout), recorded writes.
+    struct Scripted {
+        reads: std::collections::VecDeque<Result<Vec<u8>, std::io::ErrorKind>>,
+        written: Vec<u8>,
+    }
+    impl std::io::Read for Scripted {
+        fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+            match self.reads.pop_front() {
+                None => Ok(0),
+                Some(Err(kind)) => Err(kind.into()),
+                Some(Ok(mut chunk)) => {
+                    let n = chunk.len().min(buf.len());
+                    buf[..n].copy_from_slice(&chunk[..n]);
+                    if n < chunk.len() {
+                        self.reads.push_front(Ok(chunk.split_off(n)));
+                    }
+                    Ok(n)
+                }
+            }
+        }
+    }
+    impl std::io::Write for Scripted {
+        fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+            self.written.extend_from_slice(buf);
+            Ok(buf.len())
+        }
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
+    fn frame(text: &str) -> Result<Vec<u8>, std::io::ErrorKind> {
+        let mut f = (text.len() as i32).to_be_bytes().to_vec();
+        f.extend_from_slice(text.as_bytes());
+        Ok(f)
+    }
+    fn signal(sig: BnetSignal) -> Result<Vec<u8>, std::io::ErrorKind> {
+        Ok((sig as i32).to_be_bytes().to_vec())
+    }
+    fn sent_lines(written: &[u8]) -> Vec<String> {
+        let mut lines = Vec::new();
+        let mut rest = written;
+        while rest.len() >= 4 {
+            let len = i32::from_be_bytes(rest[..4].try_into().unwrap());
+            rest = &rest[4..];
+            if len > 0 {
+                lines.push(String::from_utf8_lossy(&rest[..len as usize]).to_string());
+                rest = &rest[len as usize..];
+            }
+        }
+        lines
+    }
+
+    #[test]
+    fn mcp_runner_waits_through_read_timeouts() {
+        use mcp::CommandRunner;
+        let reads = vec![
+            Err(std::io::ErrorKind::WouldBlock),
+            Err(std::io::ErrorKind::TimedOut),
+            frame("JobId=7\nJobStatus=OK (T)\n"),
+            signal(BnetSignal::Eod),
+        ];
+        let mut runner = BnetRunner { bnet: BnetStream::new(Scripted { reads: reads.into(), written: vec![] }) };
+        assert_eq!(runner.run("wait jobid=7").unwrap(), "JobId=7\nJobStatus=OK (T)\n");
+    }
+
+    #[test]
+    fn mcp_runner_answers_or_cancels_questions() {
+        use mcp::CommandRunner;
+        let reads = vec![
+            frame("Found 1 Jobs\n"), frame("Purge (yes/no)? "), signal(BnetSignal::SubPrompt),
+            frame("Select Pool (1-2): "), signal(BnetSignal::SubPrompt),
+            frame("done\n"), signal(BnetSignal::Eod),
+        ];
+        let mut runner = BnetRunner { bnet: BnetStream::new(Scripted { reads: reads.into(), written: vec![] }) };
+        let out = runner
+            .run_dialog("purge volume=A", &mut |out| out.ends_with("Purge (yes/no)? ").then(|| "yes".to_string()))
+            .unwrap();
+        assert_eq!(out, "Found 1 Jobs\nPurge (yes/no)? yes\nSelect Pool (1-2): .\ndone\n");
+        assert_eq!(sent_lines(&runner.bnet.into_inner().written), vec!["purge volume=A", "yes", "."]);
+    }
 
     #[test]
     fn director_name_is_not_the_login() {

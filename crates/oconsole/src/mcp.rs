@@ -6,12 +6,13 @@
 //! and login as the interactive console. stdout carries protocol only; all
 //! diagnostics go to stderr.
 //!
-//! Tools:
-//!   query   — read-only commands (list, show, status, dot-commands, …)
-//!   ovfs_status, ovfs_latest, ovfs_tree, ovfs_ls, ovfs_versions
-//!           — read-only restore-tree browsing (Director `.ovfs_*` commands,
-//!             JSON output); always available, also in the production build
-//!   execute — any command; only with --mcp-allow-write
+//! This module is the server, transport and protocol part; the tools live in
+//! their modules and tools_list/tools_call only dispatch:
+//!   mcp_read.rs  — every build: `query` (read-only allowlist, mcp_read/query.rs),
+//!                  `ovfs_*` restore-tree browsing (mcp_read/ovfs.rs) and the
+//!                  typed read tools (list_*, show, status_*, dot_*, …)
+//!   mcp_write.rs — development build (`mcp-development`) with
+//!                  --mcp-allow-write only: typed write/restore tools and `execute`
 
 use std::sync::{Arc, Mutex};
 
@@ -33,7 +34,22 @@ pub trait CommandRunner: Send + 'static {
         self.run(".api 0")?;
         out
     }
+
+    /// Runs one command and answers the Director's questions: `answer`
+    /// gets the output so far (ending with the question) and returns the
+    /// reply, or None to cancel with ".". Runners without dialogs (gRPC)
+    /// run the command plainly.
+    fn run_dialog(
+        &mut self,
+        command: &str,
+        _answer: &mut dyn FnMut(&str) -> Option<String>,
+    ) -> anyhow::Result<String> {
+        self.run(command)
+    }
 }
+
+/// Most Director questions answered within one command; later ones are cancelled.
+pub const MAX_QUESTIONS: usize = 20;
 
 pub struct McpServer<R: CommandRunner> {
     runner: Arc<Mutex<R>>,
@@ -205,285 +221,56 @@ impl<R: CommandRunner> McpServer<R> {
         .expect("valid server metadata")
     }
 
+    /// All tools of this build and mode, in a fixed order: the read tools
+    /// (mcp_read.rs: query, ovfs_*, typed), then — development build with
+    /// --mcp-allow-write only — the write tools (mcp_write.rs: typed, execute).
     fn tools_list(&self) -> Value {
-        let mut tools = vec![json!({
-            "name": "query",
-            "title": "Query the Director (read-only)",
-            "description": "Run a read-only bconsole command on the Director and return its output. \
-                Allowed: status, list, llist, show, version, help, time, messages, estimate, \
-                and dot-commands such as .jobs, .clients, .pools, .storages, .filesets, .help. \
-                Examples: 'status dir', 'list jobs', 'llist jobid=42', 'show fileset=Linux'.",
-            "inputSchema": {
-                "type": "object",
-                "properties": {
-                    "command": { "type": "string", "description": "bconsole command line" }
-                },
-                "required": ["command"]
-            },
-            "annotations": { "readOnlyHint": true, "openWorldHint": false }
-        })];
-        tools.extend(ovfs_tools());
-        tools.extend(crate::mcp_read::tools());
+        #[allow(unused_mut)]
+        let mut tools = crate::mcp_read::all_tools();
         #[cfg(feature = "mcp-development")]
         if self.write_enabled() {
-            tools.push(json!({
-                "name": "execute",
-                "title": "Execute a Director command",
-                "description": "Run any bconsole command on the Director, including ones that change \
-                    state: run, cancel, label, mount, update, prune, purge, delete, configure. \
-                    Prefer 'query' for read-only commands. Confirm destructive actions with the user first.",
-                "inputSchema": {
-                    "type": "object",
-                    "properties": {
-                        "command": { "type": "string", "description": "bconsole command line" }
-                    },
-                    "required": ["command"]
-                },
-                "annotations": { "readOnlyHint": false, "destructiveHint": true, "openWorldHint": false }
-            }));
+            tools.extend(crate::mcp_write::all_tools());
         }
         json!({ "tools": tools })
     }
 
+    /// Dispatch a tools/call to the module owning the tool; a name no module
+    /// claims is a JSON-RPC error (-32602).
     fn tools_call(&self, params: &Value) -> Result<Value, (i64, String)> {
         let name = params.get("name").and_then(Value::as_str).unwrap_or("");
-        {
-            // Typed read-only tools (mcp_read.rs), in every build
-            let arguments = params.get("arguments").cloned().unwrap_or_else(|| json!({}));
-            if let Some(built) = crate::mcp_read::command(name, &arguments) {
-                return match built {
-                    Ok(command) => {
-                        let mut runner = self.runner.lock().map_err(|_| (-32603, "Director runner unavailable".to_string()))?;
-                        Ok(crate::mcp_read::run(&mut *runner, &command))
-                    }
-                    Err(msg) => Ok(tool_result(&msg, true)),
-                };
+        let arguments = params.get("arguments").cloned().unwrap_or_else(|| json!({}));
+        #[cfg(feature = "mcp-development")]
+        if self.write_enabled() {
+            if let Some(result) = crate::mcp_write::call(name, &arguments, &self.runner) {
+                return result;
             }
         }
-        if name.starts_with("ovfs_") {
-            let arguments = params.get("arguments").cloned().unwrap_or_else(|| json!({}));
-            let command = match ovfs_command(name, &arguments) {
-                Ok(Some(command)) => command,
-                Ok(None) => return Err((-32602, format!("unknown tool: {name}"))),
-                Err(msg) => return Ok(tool_result(&msg, true)),
-            };
-            return self.run_read_only(&command);
+        if let Some(result) = crate::mcp_read::call(name, &arguments, self.write_enabled(), &self.runner) {
+            return result;
         }
-        let command = params
-            .get("arguments")
-            .and_then(|a| a.get("command"))
-            .and_then(Value::as_str)
-            .map(str::trim)
-            .unwrap_or("");
-
         match name {
-            "query" => {}
-            #[cfg(feature = "mcp-development")]
-            "execute" if self.write_enabled() => {}
-            "execute" => {
-                return Err((
-                    -32602,
-                    "tool 'execute' is unavailable in this build or disabled".into(),
-                ));
-            }
-            _ => return Err((-32602, format!("unknown tool: {name}"))),
-        }
-
-        // Tool-level problems are reported as tool results so the model can react
-        if let Err(msg) = validate_command(command) {
-            return Ok(tool_result(&msg, true));
-        }
-        if name == "query" && !is_read_only(command) {
-            return Ok(tool_result(
-                &format!(
-                    "'{command}' is not a read-only command. {}",
-                    if self.write_enabled() {
-                        "Use the 'execute' tool."
-                    } else {
-                        "Write access is unavailable in this build or disabled."
-                    }
-                ),
-                true,
-            ));
-        }
-
-        self.run_read_only(command)
-    }
-
-    /// Run a command line that passed the tool's checks.
-    fn run_read_only(&self, command: &str) -> Result<Value, (i64, String)> {
-        match self
-            .runner
-            .lock()
-            .map_err(|_| (-32603, "Director runner unavailable".into()))?
-            .run(command)
-        {
-            Ok(out) if out.trim().is_empty() => Ok(tool_result("(no output)", false)),
-            Ok(out) => Ok(tool_result(&out, false)),
-            Err(e) => Ok(tool_result(&format!("Director error: {e}"), true)),
+            "execute" => Err((-32602, "tool 'execute' is unavailable in this build or disabled".into())),
+            _ => Err((-32602, format!("unknown tool: {name}"))),
         }
     }
 }
 
-/// The read-only OVFS tools (Director `.ovfs_*` commands, Onesimus
-/// extension): browse restore trees lazily — `ovfs_latest` or a job list,
-/// `ovfs_tree` with a small depth, `ovfs_ls` per expanded directory.
-fn ovfs_tools() -> Vec<Value> {
-    let chain = json!({
-        "jobids": { "type": "string", "description": "comma-separated JobIds of the chain (Full, Differential, Incrementals); or use client" },
-        "client": { "type": "string", "description": "client name: the chain of its latest state (restore option 5)" },
-        "fileset": { "type": "string", "description": "FileSet name, needed if the client has backups of several FileSets" }
-    });
-    let with = |extra: Value| {
-        let mut properties = chain.as_object().unwrap().clone();
-        properties.extend(extra.as_object().unwrap().clone());
-        Value::Object(properties)
-    };
-    let annotations = json!({ "readOnlyHint": true, "openWorldHint": false });
-    vec![
-        json!({
-            "name": "ovfs_status",
-            "title": "Restore-tree backend status",
-            "description": "Whether the catalog has the OVFS PostgreSQL extension (version) and whether \
-                restore trees use it or the Director fallback. Results are the same either way.",
-            "inputSchema": { "type": "object", "properties": {} },
-            "annotations": annotations,
-        }),
-        json!({
-            "name": "ovfs_latest",
-            "title": "Job chain of a client's latest backup",
-            "description": "JobIds (Full, Differential, Incrementals) that restore the client's latest state, \
-                as Bareos restore option 5 selects them. Pass them to ovfs_tree/ovfs_ls.",
-            "inputSchema": { "type": "object", "properties": {
-                "client": { "type": "string", "description": "client name" },
-                "fileset": { "type": "string", "description": "FileSet name (if the client has several)" }
-            }, "required": ["client"] },
-            "annotations": annotations,
-        }),
-        json!({
-            "name": "ovfs_tree",
-            "title": "Restore tree of a job chain",
-            "description": "Directory tree below root as JSON, depth levels deep (1 = root and its children). \
-                Directories at the depth limit carry 'entries' instead of children; expand them with ovfs_ls. \
-                Every node carries jobid/fileindex (restore identity). Keep depth small.",
-            "inputSchema": { "type": "object", "properties": with(json!({
-                "root": { "type": "string", "description": "directory, default /" },
-                "depth": { "type": "integer", "minimum": 0, "description": "levels below root, default 1" },
-                "max_entries": { "type": "integer", "minimum": 1, "description": "most nodes in the result, default 100000" }
-            })) },
-            "annotations": annotations,
-        }),
-        json!({
-            "name": "ovfs_ls",
-            "title": "List one directory of a job chain",
-            "description": "Direct children of one directory (files first, then directories with 'entries' counts).",
-            "inputSchema": { "type": "object", "properties": with(json!({
-                "path": { "type": "string", "description": "directory, e.g. /home/anna/" }
-            })), "required": ["path"] },
-            "annotations": annotations,
-        }),
-        json!({
-            "name": "ovfs_versions",
-            "title": "Versions of one file",
-            "description": "All backed-up versions of a file of a client, newest first, with volumes.",
-            "inputSchema": { "type": "object", "properties": {
-                "client": { "type": "string", "description": "client name" },
-                "path": { "type": "string", "description": "directory of the file, e.g. /etc/" },
-                "name": { "type": "string", "description": "file name; empty for the directory itself" },
-                "copies": { "type": "boolean", "description": "include copy jobs" }
-            }, "required": ["client", "path"] },
-            "annotations": annotations,
-        }),
-    ]
-}
-
-/// `key="value"` with the console's quoting (backslash escapes).
-fn ovfs_arg(key: &str, value: &str) -> Result<String, String> {
-    if value.chars().any(char::is_control) {
-        return Err(format!("{key} must not contain control characters"));
-    }
-    Ok(format!("{key}=\"{}\"", value.replace('\\', "\\\\").replace('"', "\\\"")))
-}
-
-/// The Director command line of an OVFS tool; `Ok(None)` for an unknown tool.
-fn ovfs_command(tool: &str, arguments: &Value) -> Result<Option<String>, String> {
-    let text = |key: &str| -> Result<Option<String>, String> {
-        match arguments.get(key) {
-            None | Some(Value::Null) => Ok(None),
-            Some(Value::String(s)) => Ok(Some(s.clone())),
-            Some(Value::Number(n)) => Ok(Some(n.to_string())),
-            Some(_) => Err(format!("{key} must be a string")),
-        }
-    };
-    let number = |key: &str| -> Result<Option<i64>, String> {
-        match arguments.get(key) {
-            None | Some(Value::Null) => Ok(None),
-            Some(v) => v.as_i64().map(Some).ok_or_else(|| format!("{key} must be an integer")),
-        }
-    };
-    let required = |key: &str| -> Result<String, String> {
-        text(key)?.filter(|v| !v.is_empty()).ok_or_else(|| format!("{key} is required"))
-    };
-    let mut parts: Vec<String> = Vec::new();
-    let chain = |parts: &mut Vec<String>| -> Result<(), String> {
-        if let Some(jobids) = text("jobids")? {
-            if jobids.is_empty() || !jobids.split(',').all(|id| !id.trim().is_empty() && id.trim().bytes().all(|b| b.is_ascii_digit())) {
-                return Err("jobids must be comma-separated JobIds".into());
-            }
-            parts.push(format!("jobid={}", jobids.replace(' ', "")));
-        } else if let Some(client) = text("client")? {
-            parts.push(ovfs_arg("client", &client)?);
-        } else {
-            return Err("jobids or client is required".into());
-        }
-        if let Some(fileset) = text("fileset")? {
-            parts.push(ovfs_arg("fileset", &fileset)?);
-        }
-        Ok(())
-    };
-    let command = match tool {
-        "ovfs_status" => ".ovfs_status".to_string(),
-        "ovfs_latest" => {
-            parts.push(ovfs_arg("client", &required("client")?)?);
-            if let Some(fileset) = text("fileset")? {
-                parts.push(ovfs_arg("fileset", &fileset)?);
-            }
-            format!(".ovfs_latest {}", parts.join(" "))
-        }
-        "ovfs_tree" => {
-            chain(&mut parts)?;
-            if let Some(root) = text("root")? {
-                parts.push(ovfs_arg("root", &root)?);
-            }
-            if let Some(depth) = number("depth")? {
-                parts.push(format!("depth={depth}"));
-            }
-            if let Some(max) = number("max_entries")? {
-                parts.push(format!("max_entries={max}"));
-            }
-            format!(".ovfs_tree {}", parts.join(" "))
-        }
-        "ovfs_ls" => {
-            chain(&mut parts)?;
-            parts.push(ovfs_arg("path", &required("path")?)?);
-            format!(".ovfs_ls {}", parts.join(" "))
-        }
-        "ovfs_versions" => {
-            parts.push(ovfs_arg("client", &required("client")?)?);
-            parts.push(ovfs_arg("path", &required("path")?)?);
-            parts.push(ovfs_arg("name", &text("name")?.unwrap_or_default())?);
-            if arguments.get("copies").and_then(Value::as_bool) == Some(true) {
-                parts.push("copies".into());
-            }
-            format!(".ovfs_versions {}", parts.join(" "))
-        }
-        _ => return Ok(None),
-    };
-    Ok(Some(format!("{} json", command.trim_end())))
-}
-
-fn tool_result(text: &str, is_error: bool) -> Value {
+/// A tool result with one text item.
+pub(crate) fn tool_result(text: &str, is_error: bool) -> Value {
     json!({ "content": [{ "type": "text", "text": text }], "isError": is_error })
+}
+
+/// Run a command line that passed the tool's checks; its text is the result.
+pub(crate) fn run_plain<R: CommandRunner>(runner: &Mutex<R>, command: &str) -> Result<Value, (i64, String)> {
+    match runner
+        .lock()
+        .map_err(|_| (-32603, "Director runner unavailable".into()))?
+        .run(command)
+    {
+        Ok(out) if out.trim().is_empty() => Ok(tool_result("(no output)", false)),
+        Ok(out) => Ok(tool_result(&out, false)),
+        Err(e) => Ok(tool_result(&format!("Director error: {e}"), true)),
+    }
 }
 
 impl<R: CommandRunner> ServerHandler for McpServer<R> {
@@ -524,92 +311,6 @@ impl<R: CommandRunner> ServerHandler for McpServer<R> {
     }
 }
 
-/// One single command line, no control characters (BNET would take them literally).
-fn validate_command(command: &str) -> Result<(), String> {
-    if command.is_empty() {
-        return Err("empty command".into());
-    }
-    if command.chars().any(|c| c.is_control()) {
-        return Err("command must be a single line without control characters".into());
-    }
-    let first = command
-        .split_whitespace()
-        .next()
-        .unwrap_or("")
-        .to_ascii_lowercase();
-    if matches!(first.as_str(), "quit" | "exit" | ".quit" | ".api" | "@exit")
-        || first.starts_with('@')
-    {
-        return Err(format!("'{first}' is not available via MCP"));
-    }
-    Ok(())
-}
-
-/// Commands that only read Director/catalog state.
-fn is_read_only(command: &str) -> bool {
-    let first = command
-        .split_whitespace()
-        .next()
-        .unwrap_or("")
-        .to_ascii_lowercase();
-    if first.starts_with('.') {
-        // Full names only: a prefix could resolve to a mutating command.
-        return matches!(
-            first.as_str(),
-            "." | ".actiononpurge"
-                | ".authorized"
-                | ".catalogs"
-                | ".clients"
-                | ".consoles"
-                | ".defaults"
-                | ".filesets"
-                | ".help"
-                | ".jobdefs"
-                | ".jobs"
-                | ".jobstatus"
-                | ".levels"
-                | ".locations"
-                | ".messages"
-                | ".media"
-                | ".mediatypes"
-                | ".msgs"
-                | ".pools"
-                | ".profiles"
-                | ".schedule"
-                | ".status"
-                | ".storage"
-                | ".storages"
-                | ".types"
-                | ".users"
-                | ".volstatus"
-                | ".bvfs_get_jobids"
-                | ".bvfs_lsdirs"
-                | ".bvfs_lsfiles"
-                | ".bvfs_versions"
-                | ".sqltables"
-                | ".sqlschema"
-                | ".sqlcount"
-                | ".ovfs_status"
-                | ".ovfs_latest"
-                | ".ovfs_tree"
-                | ".ovfs_ls"
-                | ".ovfs_versions"
-        );
-    }
-    matches!(
-        first.as_str(),
-        "status"
-            | "list"
-            | "llist"
-            | "show"
-            | "version"
-            | "help"
-            | "time"
-            | "messages"
-            | "estimate"
-    )
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -638,6 +339,68 @@ mod tests {
 
     fn tool_call(tool: &str, cmd: &str) -> Value {
         json!({"method":"tools/call","params":{"name":tool,"arguments":{"command":cmd}}})
+    }
+
+    /// Compare with (or, with UPDATE_MCP_SNAPSHOTS set, write) a JSON file
+    /// in crates/oconsole/testdata/.
+    fn snapshot(file: &str, actual: &Value) {
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("testdata").join(file);
+        let text = serde_json::to_string_pretty(actual).unwrap() + "\n";
+        if std::env::var_os("UPDATE_MCP_SNAPSHOTS").is_some() {
+            std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+            std::fs::write(&path, &text).unwrap();
+        }
+        let expected = std::fs::read_to_string(&path).unwrap_or_else(|e| panic!("{}: {e}", path.display()));
+        assert!(expected == text, "{file} changed; diff it against the snapshot");
+    }
+
+    /// The modes of this build: production ignores the write request.
+    fn modes() -> Vec<(&'static str, bool)> {
+        #[cfg(feature = "mcp-production")]
+        return vec![("production", false), ("production-write-request", true)];
+        #[cfg(feature = "mcp-development")]
+        return vec![("development", false), ("development-write", true)];
+    }
+
+    /// tools/list must stay byte-identical (names, schemas, annotations, order).
+    #[test]
+    fn tools_list_matches_snapshot() {
+        for (mode, allow_write) in modes() {
+            let srv = McpServer::new(Echo(vec![]), allow_write, "dir".into());
+            snapshot(&format!("tools_list_{mode}.json"), &srv.tools_list());
+        }
+    }
+
+    /// Results and Director command lines of a fixed set of calls (generic
+    /// query/execute, ovfs, typed read and write tools, refusals).
+    #[test]
+    fn tool_calls_match_snapshot() {
+        let calls = [
+            tool_call("query", "list jobs"),
+            tool_call("query", "delete volume=x yes"),
+            tool_call("query", ".ovfs_status"),
+            tool_call("query", "list jobs\nquit"),
+            tool_call("query", "status fail"),
+            tool_call("execute", "run job=Backup yes"),
+            tool_call("execute", "quit"),
+            json!({"method":"tools/call","params":{"name":"ovfs_tree","arguments":{"jobids":"1,2","depth":2}}}),
+            json!({"method":"tools/call","params":{"name":"ovfs_ls","arguments":{"jobids":"1"}}}),
+            json!({"method":"tools/call","params":{"name":"ovfs_versions","arguments":{"client":"fd","path":"/etc/","name":"passwd"}}}),
+            json!({"method":"tools/call","params":{"name":"ovfs_nosuch","arguments":{}}}),
+            json!({"method":"tools/call","params":{"name":"list_jobs","arguments":{"client":"fd"}}}),
+            json!({"method":"tools/call","params":{"name":"show","arguments":{"resource":"job","name":"x;y"}}}),
+            json!({"method":"tools/call","params":{"name":"run_job","arguments":{"job":"Backup","level":"Full"}}}),
+            json!({"method":"tools/call","params":{"name":"purge","arguments":{"kind":"volume","volume":"V"}}}),
+            json!({"method":"tools/call","params":{"name":"delete","arguments":{"kind":"jobid","jobids":[3],"confirm":true}}}),
+            json!({"method":"tools/call","params":{"name":"nosuch","arguments":{}}}),
+        ];
+        for (mode, allow_write) in modes() {
+            let mut srv = McpServer::new(Echo(vec![]), allow_write, "dir".into());
+            let results: Vec<Value> = calls.iter().map(|c| call(&mut srv, c.clone())).collect();
+            let ran = srv.runner.lock().unwrap().0.clone();
+            snapshot(&format!("tool_calls_{mode}.json"),
+                &json!({ "results": results, "director_commands": ran }));
+        }
     }
 
     #[test]
@@ -797,13 +560,69 @@ mod tests {
     #[cfg(feature = "mcp-development")]
     #[test]
     fn development_lists_execute_only_after_runtime_opt_in() {
-        let srv = McpServer::new(Echo(vec![]), true, "dir".into());
-        let tools = srv.tools_list();
-        let writing: Vec<_> = tools["tools"].as_array().unwrap().iter()
-            .filter(|t| t["annotations"]["readOnlyHint"] != true).map(|t| t["name"].clone()).collect();
-        assert!(writing.contains(&json!("execute")));
+        let names =|srv: &McpServer<Echo>| -> Vec<String> {
+            srv.tools_list()["tools"].as_array().unwrap().iter()
+                .map(|t| t["name"].as_str().unwrap().to_string()).collect()
+        };
+        let on = names(&McpServer::new(Echo(vec![]), true, "dir".into()));
+        let off = names(&McpServer::new(Echo(vec![]), false, "dir".into()));
+        for tool in WRITE_TOOLS.iter().chain(["execute"].iter()) {
+            assert!(on.iter().any(|n| n == tool), "{tool} listed with --mcp-allow-write");
+            assert!(!off.iter().any(|n| n == tool), "{tool} hidden without --mcp-allow-write");
+        }
+        assert_eq!(on.len(), off.len() + WRITE_TOOLS.len() + 1);
         let without = McpServer::new(Echo(vec![]), false, "dir".into()).tools_list();
         assert!(without["tools"].as_array().unwrap().iter().all(|t| t["annotations"]["readOnlyHint"] == true));
+    }
+
+    /// The typed write/restore tools of mcp_write.rs (S-31). Spelled out here
+    /// because the production build does not compile that module.
+    const WRITE_TOOLS: [&str; 23] = [
+        "run_job", "rerun_job", "cancel_job", "wait_job", "restore", "label_volume",
+        "relabel_volume", "mount_storage", "unmount_storage", "release_storage",
+        "update_volume", "update_pool", "prune", "purge", "delete", "truncate", "enable",
+        "disable", "configure_add", "configure_export", "reload", "setdebug", "setbandwidth",
+    ];
+
+    /// Plausible arguments, so a refusal is about the tool, not the arguments.
+    fn write_call(tool: &str) -> Value {
+        json!({"method":"tools/call","params":{"name":tool,"arguments":{
+            "job":"Backup","client":"fd","jobids":[1],"all":true,"storage":"File","volume":"V",
+            "pool":"Full","kind":"volume","confirm":true,"resource":"job","name":"Backup",
+            "level":1,"target":"dir","limit":1,"jobid":1}}})
+    }
+
+    /// Production build, and the development build without --mcp-allow-write:
+    /// no write tool is listed, every call is refused before the Director.
+    #[test]
+    fn write_tools_absent_and_refused_without_write_access() {
+        #[cfg(feature = "mcp-production")]
+        let modes = [false, true]; // production ignores even an internal write request
+        #[cfg(feature = "mcp-development")]
+        let modes = [false];
+        for allow_write in modes {
+            let mut srv = McpServer::new(Echo(vec![]), allow_write, "dir".into());
+            let tools = srv.tools_list();
+            for tool in WRITE_TOOLS {
+                assert!(tools["tools"].as_array().unwrap().iter().all(|t| t["name"] != tool), "{tool} listed");
+                let r = call(&mut srv, write_call(tool));
+                assert!(r["error"]["message"].as_str().unwrap().contains("unknown tool"), "{tool}: {r}");
+            }
+            assert!(srv.runner.lock().unwrap().0.is_empty());
+        }
+    }
+
+    #[cfg(feature = "mcp-development")]
+    #[test]
+    fn write_tools_run_with_write_access() {
+        let mut srv = McpServer::new(Echo(vec![]), true, "dir".into());
+        let r = call(&mut srv, json!({"method":"tools/call","params":{"name":"run_job","arguments":{"job":"Backup"}}}));
+        assert_eq!(r["result"]["isError"], false, "{r}");
+        let r = call(&mut srv, json!({"method":"tools/call","params":{"name":"delete","arguments":{"kind":"jobid","jobids":[3]}}}));
+        assert_eq!(r["result"]["isError"], true, "no confirm: {r}");
+        let r = call(&mut srv, json!({"method":"tools/call","params":{"name":"delete","arguments":{"kind":"jobid","jobids":[3],"confirm":true}}}));
+        assert_eq!(r["result"]["isError"], false, "{r}");
+        assert_eq!(srv.runner.lock().unwrap().0, vec!["run job=Backup yes", "delete jobid=3"]);
     }
 
     #[tokio::test]

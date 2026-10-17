@@ -7,61 +7,84 @@ use crate::command_ast::CommandAst;
 use crate::command_executor::ExecContext;
 use crate::command_queue::CommandResult;
 
-/// Send a command to a named Storage Daemon (resolves from config).
-fn sd_command(ctx: &ExecContext, storage_name: &str, command: &str) -> Result<String, String> {
-    let config = ctx.config.as_ref()
-        .and_then(|c| c.read().ok())
-        .ok_or("No config")?;
-    let stor = config.storages.iter().find(|s| s.name == storage_name)
-        .ok_or(format!("Storage '{storage_name}' not found"))?;
-    let dir_name = config.director.name.clone();
-    let addr = stor.address.clone();
-    let port = stor.port;
-    let password = stor.password.clone();
-    drop(config);
-
-    bareos_stored::command::sd_command(&addr, port, &password, &dir_name, command)
+pub fn cmd_label(ast: &CommandAst, ctx: &ExecContext) -> CommandResult {
+    label_or_relabel(ast, ctx, false)
 }
 
-pub fn cmd_label(ast: &CommandAst, ctx: &ExecContext) -> CommandResult {
+/// LabelCmd/RelabelCmd: the dialog, then SendLabelRequest and the catalog
+/// work on one SD connection (closed at the end, CloseSdBsock).
+pub(crate) fn label_or_relabel(ast: &CommandAst, ctx: &ExecContext, relabel: bool) -> CommandResult {
+    let director = ctx.config.as_ref().and_then(|c| c.read().ok())
+        .map(|c| c.director.name.clone()).unwrap_or_default();
+    let mut link = crate::ua_storage_select::NetSd { director: director.clone() };
     let mut ua = crate::ua_select::Ua::new(ctx);
-    label_dialog(&mut ua, ast, false, label_execute);
+    let mut request = None;
+    label_dialog_with(&mut ua, ast, relabel, &mut link, |_, r| request = Some(r));
+    if let Some(request) = request {
+        let mut sd = super::purge::NetSdSession::new(director);
+        super::label::label_execute(&mut ua, request, &mut sd, &mut link);
+    }
     ua.finish(true)
 }
 
 /// A complete label/relabel request (ua_label.cc do_label).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum LabelRequest {
-    Barcodes { storage: String },
-    Label { storage: String, volume: String, pool: String, old_volume: Option<String> },
+    /// label_from_barcodes with the command arguments (slots=, pool=).
+    Barcodes { storage: String, drive: i16, yes: bool, args: Vec<(String, Option<String>)> },
+    /// `existing`: a not yet labeled Media record of that name exists.
+    Label { storage: String, volume: String, pool: String, old_volume: Option<String>, slot: i32, drive: i16,
+        existing: bool },
+}
+
+/// do_label (ua_label.cc:393) with the real Storage daemon for the drive
+/// question.
+#[cfg(test)]
+pub(crate) fn label_dialog(ua: &mut crate::ua_select::Ua, ast: &CommandAst, relabel: bool,
+    act: impl FnOnce(&mut crate::ua_select::Ua, LabelRequest)) {
+    let director = ua.ctx.config.as_ref().and_then(|c| c.read().ok())
+        .map(|c| c.director.name.clone()).unwrap_or_default();
+    label_dialog_with(ua, ast, relabel, &mut crate::ua_storage_select::NetSd { director }, act);
 }
 
 /// do_label (ua_label.cc:393): OpenClientDb, storage (get_storage_resource
-/// with the default keyword), for relabel the old volume (`oldvolume=` or
-/// SelectMediaDbr; it must be Purged or Recycled), the new name (`volume=`
-/// or "Enter new Volume name: " until legal and unused), the slot for
-/// autochangers and the pool (SelectPoolDbr). `act` runs only for a
-/// complete request.
-pub(crate) fn label_dialog(ua: &mut crate::ua_select::Ua, ast: &CommandAst, relabel: bool,
-    act: impl FnOnce(&mut crate::ua_select::Ua, LabelRequest)) {
-    use crate::ua_select::{self, find_arg_with_value};
+/// with the default keyword), GetStorageDrive, for relabel the old volume
+/// (`oldvolume=` or SelectMediaDbr; it must be Purged or Recycled), the new
+/// name (`volume=` or "Enter new Volume name: " until legal and unused),
+/// the slot (`slot=` or asked for autochangers) and the pool
+/// (SelectPoolDbr). `act` runs only for a complete request.
+pub(crate) fn label_dialog_with(ua: &mut crate::ua_select::Ua, ast: &CommandAst, relabel: bool,
+    link: &mut impl crate::ua_storage_select::SdLink, act: impl FnOnce(&mut crate::ua_select::Ua, LabelRequest)) {
+    use crate::ua_select::{self, find_arg, find_arg_with_value};
     let ctx = ua.ctx;
     if !ua.open_client_db(ast, false) {
         return;
     }
+    let yes = ua.batch() || find_arg(ast, "yes").is_some();
     let barcodes = !relabel && ast.arguments.iter()
         .any(|a| a.key.eq_ignore_ascii_case("barcode") || a.key.eq_ignore_ascii_case("barcodes"));
     let Some(store) = ua_select::get_storage_resource(ua, ast, true, barcodes) else { return };
     // ua_label.cc:432: an NDMP storage served by a native storage daemon
     // (PairedStorage) is labeled through that daemon (C-050).
-    let storage = match store.paired_storage.as_deref() {
-        Some(paired) if store.protocol.is_ndmp() => paired.to_string(),
-        _ => store.name,
+    let store = match store.paired_storage.as_deref() {
+        Some(paired) if store.protocol.is_ndmp() => ctx.config.as_ref().and_then(|c| c.read().ok())
+            .and_then(|c| c.find_storage(paired).cloned()).unwrap_or(store),
+        _ => store,
     };
+    let storage = store.name.clone();
     let autochanger = ctx.config.as_ref().and_then(|c| c.read().ok())
         .is_some_and(|c| ua_select::is_autochanger(&c, &storage));
+    // GetStorageDrive (kInvalidDriveNumber when the selection is cancelled).
+    let drive = match crate::ua_storage_select::Env::load(ctx) {
+        Some(env) => crate::ua_storage_select::get_storage_drive(ua, &ast.arguments, &env, link, &store).unwrap_or(-1),
+        None => 0,
+    };
     if barcodes {
-        act(ua, LabelRequest::Barcodes { storage });
+        // The barcode keyword is zapped before slots=/pool= are looked up.
+        let args = ast.arguments.iter()
+            .filter(|a| !a.key.eq_ignore_ascii_case("barcode") && !a.key.eq_ignore_ascii_case("barcodes"))
+            .map(|a| (a.key.clone(), a.value.clone())).collect();
+        act(ua, LabelRequest::Barcodes { storage, drive, yes, args });
         return;
     }
     let mut old_volume = None;
@@ -91,7 +114,7 @@ pub(crate) fn label_dialog(ua: &mut crate::ua_select::Ua, ast: &CommandAst, rela
         old_volume = Some(old.volume_name);
     }
     let mut given = find_arg_with_value(ast, "volume").map(str::to_string);
-    let volume = loop {
+    let (volume, existing) = loop {
         let name = match given.take() {
             Some(name) => name,
             None => match ua.get_cmd("Enter new Volume name: ") {
@@ -103,90 +126,30 @@ pub(crate) fn label_dialog(ua: &mut crate::ua_select::Ua, ast: &CommandAst, rela
             continue;
         }
         // An existing record is only reused while it is not labeled (VolBytes 0).
-        let used = ctx.catalog.as_ref()
+        let bytes = ctx.catalog.as_ref()
             .and_then(|cat| cat.query_rows(&format!("SELECT VolBytes FROM Media WHERE VolumeName='{}'",
                 name.replace('\'', "''"))).ok())
             .and_then(|t| t.rows.into_iter().next())
-            .and_then(|row| row.into_iter().next().flatten())
-            .is_some_and(|bytes| bytes != "0");
-        if used {
+            .and_then(|row| row.into_iter().next().flatten());
+        if bytes.as_deref().is_some_and(|bytes| bytes != "0") {
             ua.error_msg(format!("Media record for new Volume \"{name}\" already exists.\n"));
             continue;
         }
-        break name;
+        break (name, bytes.is_some());
     };
-    if find_arg_with_value(ast, "slot").is_none() && autochanger
-        && ua.get_pint("Enter slot (0 or Enter for none): ").is_none() {
-        return;
-    }
+    let slot = if let Some(value) = find_arg_with_value(ast, "slot") {
+        // atoi() into the slot_number_t, negative becomes 0.
+        (crate::commands::job::str_to_int64(value) as i32 as i16).max(0) as i32
+    } else if autochanger {
+        match ua.get_pint("Enter slot (0 or Enter for none): ") {
+            Some(slot) => (slot as i16).max(0) as i32,
+            None => return,
+        }
+    } else {
+        0
+    };
     let Some(pool) = ua_select::select_pool_dbr(ua, ast, "pool") else { return };
-    act(ua, LabelRequest::Label { storage, volume, pool, old_volume });
-}
-
-/// SendLabelRequest and the catalog/automount work of a complete label.
-fn label_execute(ua: &mut crate::ua_select::Ua, request: LabelRequest) {
-    let ctx = ua.ctx;
-    let (stor_name, v, pool_name) = match request {
-        LabelRequest::Barcodes { storage } => {
-            ua.send_msg(format!("Sending barcode label command to Storage {storage}...\n"));
-            return;
-        }
-        LabelRequest::Label { storage, volume, pool, .. } => (storage, volume, pool),
-    };
-    // SendLabelRequest() (ua_label.cc:198) -> NdmpSendLabelRequest() for an
-    // NDMP storage without PairedStorage (C-050).
-    let ndmp = ctx.config.as_ref().and_then(|c| c.read().ok()).and_then(|c| {
-        let store = c.find_storage(&stor_name).filter(|s| s.protocol.is_ndmp())?.clone();
-        Some((crate::ua_select::is_autochanger(&c, &stor_name), store))
-    });
-    if let Some((autochanger, store)) = ndmp {
-        if let Some(message) = crate::ndmp::robot_session(&store, autochanger) {
-            ua.error_msg(message);
-        }
-        ua.error_msg(format!("Label command failed for Volume {v}.\n"));
-        // do_label(): print_reminder stays set without a mount.
-        ua.info_msg("Do not forget to mount the drive!!!\n");
-        return;
-    }
-    let mut output = format!("Connecting to Storage daemon {stor_name} ...\n");
-    let cmd = format!("label Volume=\"{v}\" PoolName=\"{pool_name}\" MediaType=\"File\" Slot=0 drive=0");
-    match sd_command(ctx, &stor_name, &cmd) {
-        Ok(resp) => {
-            output.push_str(&format!("Label Volume \"{v}\" Pool \"{pool_name}\":\n"));
-            output.push_str(&resp);
-            // Create media record in catalog
-            if let Some(cat) = &ctx.catalog {
-                let _ = cat.raw_query(&format!(
-                    "INSERT INTO media (volumename, mediatype, poolid, volstatus, volbytes, voljobs, volfiles, maxvolbytes) \
-                     SELECT '{v}', 'File', poolid, 'Append', 0, 0, 0, 0 FROM pool WHERE name = '{pool_name}' \
-                     ON CONFLICT DO NOTHING"
-                ));
-            }
-            output.push_str(&format!("\nVolume \"{v}\" labeled and added to catalog.\n"));
-            // C++ ua_label.cc:557: mount the new volume unless `automount off`.
-            if ctx.session_mgr.as_ref().is_none_or(|mgr| mgr.session_automount(ctx.session_id)) {
-                output.push_str(&automount_after_label(ctx, &stor_name));
-            }
-        }
-        Err(e) => {
-            output.push_str(&format!("SD label failed: {e}\n"));
-        }
-    }
-    ua.send_msg(output);
-}
-
-/// C++ ua_label.cc:557 automount: "Requesting to mount <dev> ..." and
-/// `mount <dev> drive=0` (spaces bashed to 0x01) to the SD, echoing its reply.
-fn automount_after_label(ctx: &ExecContext, stor_name: &str) -> String {
-    let device = ctx.config.as_ref().and_then(|c| c.read().ok())
-        .and_then(|cfg| cfg.find_storage(stor_name).map(|s| s.device.clone()))
-        .unwrap_or_default();
-    let mut output = format!("Requesting to mount {device} ...\n");
-    match sd_command(ctx, stor_name, &format!("mount {} drive=0", device.replace(' ', "\x01"))) {
-        Ok(resp) => output.push_str(&resp),
-        Err(e) => output.push_str(&format!("mount {stor_name}: {e}\n")),
-    }
-    output
+    act(ua, LabelRequest::Label { storage, volume, pool, old_volume, slot, drive, existing });
 }
 
 pub fn cmd_mount(ast: &CommandAst, ctx: &ExecContext) -> CommandResult {

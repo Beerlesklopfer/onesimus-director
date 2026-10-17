@@ -1,0 +1,3145 @@
+{
+  "tools": [
+    {
+      "name": "query",
+      "title": "Query the Director (read-only)",
+      "description": "Run a read-only bconsole command on the Director and return its output. Allowed: status, list, llist, show, version, help, time, messages, estimate, and dot-commands such as .jobs, .clients, .pools, .storages, .filesets, .help. Examples: 'status dir', 'list jobs', 'llist jobid=42', 'show fileset=Linux'.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "command": {
+            "type": "string",
+            "description": "bconsole command line"
+          }
+        },
+        "required": [
+          "command"
+        ]
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "ovfs_status",
+      "title": "Restore-tree backend status",
+      "description": "Whether the catalog has the OVFS PostgreSQL extension (version) and whether restore trees use it or the Director fallback. Results are the same either way.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {}
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "ovfs_latest",
+      "title": "Job chain of a client's latest backup",
+      "description": "JobIds (Full, Differential, Incrementals) that restore the client's latest state, as Bareos restore option 5 selects them. Pass them to ovfs_tree/ovfs_ls.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "client": {
+            "type": "string",
+            "description": "client name"
+          },
+          "fileset": {
+            "type": "string",
+            "description": "FileSet name (if the client has several)"
+          }
+        },
+        "required": [
+          "client"
+        ]
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "ovfs_tree",
+      "title": "Restore tree of a job chain",
+      "description": "Directory tree below root as JSON, depth levels deep (1 = root and its children). Directories at the depth limit carry 'entries' instead of children; expand them with ovfs_ls. Every node carries jobid/fileindex (restore identity). Keep depth small.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "jobids": {
+            "type": "string",
+            "description": "comma-separated JobIds of the chain (Full, Differential, Incrementals); or use client"
+          },
+          "client": {
+            "type": "string",
+            "description": "client name: the chain of its latest state (restore option 5)"
+          },
+          "fileset": {
+            "type": "string",
+            "description": "FileSet name, needed if the client has backups of several FileSets"
+          },
+          "root": {
+            "type": "string",
+            "description": "directory, default /"
+          },
+          "depth": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "levels below root, default 1"
+          },
+          "max_entries": {
+            "type": "integer",
+            "minimum": 1,
+            "description": "most nodes in the result, default 100000"
+          }
+        }
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "ovfs_ls",
+      "title": "List one directory of a job chain",
+      "description": "Direct children of one directory (files first, then directories with 'entries' counts).",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "jobids": {
+            "type": "string",
+            "description": "comma-separated JobIds of the chain (Full, Differential, Incrementals); or use client"
+          },
+          "client": {
+            "type": "string",
+            "description": "client name: the chain of its latest state (restore option 5)"
+          },
+          "fileset": {
+            "type": "string",
+            "description": "FileSet name, needed if the client has backups of several FileSets"
+          },
+          "path": {
+            "type": "string",
+            "description": "directory, e.g. /home/anna/"
+          }
+        },
+        "required": [
+          "path"
+        ]
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "ovfs_versions",
+      "title": "Versions of one file",
+      "description": "All backed-up versions of a file of a client, newest first, with volumes.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "client": {
+            "type": "string",
+            "description": "client name"
+          },
+          "path": {
+            "type": "string",
+            "description": "directory of the file, e.g. /etc/"
+          },
+          "name": {
+            "type": "string",
+            "description": "file name; empty for the directory itself"
+          },
+          "copies": {
+            "type": "boolean",
+            "description": "include copy jobs"
+          }
+        },
+        "required": [
+          "client",
+          "path"
+        ]
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "list_jobs",
+      "title": "List jobs from the catalog",
+      "description": "Jobs from the catalog (list jobs / llist jobs), newest last. Filters combine. Example: {\"client\":\"bareos-fd\",\"jobstatus\":[\"T\",\"W\"],\"limit\":10}.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "job": {
+            "type": "string",
+            "description": "only jobs with this job name"
+          },
+          "client": {
+            "type": "string",
+            "description": "only jobs of this client"
+          },
+          "jobstatus": {
+            "description": "job status letter(s) or name(s): T terminated, W warnings, E error, f fatal, A canceled, R running, …",
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "C",
+                  "R",
+                  "B",
+                  "T",
+                  "W",
+                  "E",
+                  "e",
+                  "f",
+                  "D",
+                  "A",
+                  "I",
+                  "L",
+                  "F",
+                  "S",
+                  "m",
+                  "M",
+                  "s",
+                  "j",
+                  "c",
+                  "d",
+                  "t",
+                  "p",
+                  "a",
+                  "i",
+                  "terminated",
+                  "warnings",
+                  "error",
+                  "fatal",
+                  "canceled",
+                  "running"
+                ]
+              },
+              {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "enum": [
+                    "C",
+                    "R",
+                    "B",
+                    "T",
+                    "W",
+                    "E",
+                    "e",
+                    "f",
+                    "D",
+                    "A",
+                    "I",
+                    "L",
+                    "F",
+                    "S",
+                    "m",
+                    "M",
+                    "s",
+                    "j",
+                    "c",
+                    "d",
+                    "t",
+                    "p",
+                    "a",
+                    "i",
+                    "terminated",
+                    "warnings",
+                    "error",
+                    "fatal",
+                    "canceled",
+                    "running"
+                  ]
+                }
+              }
+            ]
+          },
+          "jobtype": {
+            "description": "job type letter(s) or exact name(s): B/Backup, R/Restore, V/Verify, D/Admin, c/Copy, g/Migrate, O/Consolidate, A/Archive",
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "B",
+                  "R",
+                  "V",
+                  "D",
+                  "C",
+                  "c",
+                  "M",
+                  "g",
+                  "O",
+                  "A",
+                  "S",
+                  "U",
+                  "I",
+                  "Backup",
+                  "Restore",
+                  "Verify",
+                  "Admin",
+                  "Copy",
+                  "Migrate",
+                  "Consolidate",
+                  "Archive"
+                ]
+              },
+              {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "enum": [
+                    "B",
+                    "R",
+                    "V",
+                    "D",
+                    "C",
+                    "c",
+                    "M",
+                    "g",
+                    "O",
+                    "A",
+                    "S",
+                    "U",
+                    "I",
+                    "Backup",
+                    "Restore",
+                    "Verify",
+                    "Admin",
+                    "Copy",
+                    "Migrate",
+                    "Consolidate",
+                    "Archive"
+                  ]
+                }
+              }
+            ]
+          },
+          "level": {
+            "description": "job level(s): F/Full, I/Incremental, D/Differential, f/VirtualFull, B/Base",
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "F",
+                  "I",
+                  "D",
+                  "f",
+                  "B",
+                  "S",
+                  "C",
+                  "V",
+                  "O",
+                  "d",
+                  "A",
+                  "Full",
+                  "Incremental",
+                  "Differential",
+                  "VirtualFull",
+                  "Base"
+                ]
+              },
+              {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "enum": [
+                    "F",
+                    "I",
+                    "D",
+                    "f",
+                    "B",
+                    "S",
+                    "C",
+                    "V",
+                    "O",
+                    "d",
+                    "A",
+                    "Full",
+                    "Incremental",
+                    "Differential",
+                    "VirtualFull",
+                    "Base"
+                  ]
+                }
+              }
+            ]
+          },
+          "volume": {
+            "type": "string",
+            "description": "only jobs that wrote to this volume"
+          },
+          "pool": {
+            "type": "string",
+            "description": "only jobs of this pool"
+          },
+          "days": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 100000,
+            "description": "only jobs started in the last n days"
+          },
+          "hours": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 10000000,
+            "description": "only jobs started in the last n hours"
+          },
+          "last": {
+            "type": "boolean",
+            "description": "only the last run of each job name"
+          },
+          "count": {
+            "type": "boolean",
+            "description": "only the number of matching jobs"
+          },
+          "order": {
+            "type": "string",
+            "enum": [
+              "asc",
+              "desc"
+            ],
+            "description": "sort by start time"
+          },
+          "long": {
+            "type": "boolean",
+            "description": "true: llist (all fields of every record) instead of list"
+          },
+          "limit": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 1000000,
+            "description": "at most this many rows"
+          },
+          "offset": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9223372036854775807,
+            "description": "skip this many rows (with limit)"
+          },
+          "format": {
+            "type": "string",
+            "enum": [
+              "json",
+              "text"
+            ],
+            "default": "json",
+            "description": "json (default): the Director's JSON API result; text: the bconsole text output"
+          }
+        },
+        "required": [],
+        "additionalProperties": false
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "list_job",
+      "title": "One job record",
+      "description": "One job from the catalog by JobId or unique job name (list jobid= / llist jobid=).",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "jobid": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 9223372036854775807,
+            "description": "JobId"
+          },
+          "ujobid": {
+            "type": "string",
+            "description": "unique job name, e.g. backup-bareos-fd.2026-10-13_21.00.00_09"
+          },
+          "long": {
+            "type": "boolean",
+            "description": "true: llist (all fields of every record) instead of list"
+          },
+          "format": {
+            "type": "string",
+            "enum": [
+              "json",
+              "text"
+            ],
+            "default": "json",
+            "description": "json (default): the Director's JSON API result; text: the bconsole text output"
+          }
+        },
+        "required": [],
+        "additionalProperties": false
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "list_joblog",
+      "title": "Log of one job",
+      "description": "The stored job log with timestamps (list joblog jobid=).",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "jobid": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 9223372036854775807,
+            "description": "JobId"
+          },
+          "ujobid": {
+            "type": "string",
+            "description": "unique job name"
+          },
+          "count": {
+            "type": "boolean",
+            "description": "only the number of log lines"
+          },
+          "limit": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 1000000,
+            "description": "at most this many rows"
+          },
+          "offset": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9223372036854775807,
+            "description": "skip this many rows (with limit)"
+          },
+          "format": {
+            "type": "string",
+            "enum": [
+              "json",
+              "text"
+            ],
+            "default": "json",
+            "description": "json (default): the Director's JSON API result; text: the bconsole text output"
+          }
+        },
+        "required": [],
+        "additionalProperties": false
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "list_jobmedia",
+      "title": "Volumes written by jobs",
+      "description": "JobMedia records: which volumes a job (or every job) wrote (list jobmedia).",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "jobid": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 9223372036854775807,
+            "description": "JobId; all jobs if omitted"
+          },
+          "ujobid": {
+            "type": "string",
+            "description": "unique job name"
+          },
+          "long": {
+            "type": "boolean",
+            "description": "true: llist (all fields of every record) instead of list"
+          },
+          "format": {
+            "type": "string",
+            "enum": [
+              "json",
+              "text"
+            ],
+            "default": "json",
+            "description": "json (default): the Director's JSON API result; text: the bconsole text output"
+          }
+        },
+        "required": [],
+        "additionalProperties": false
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "list_files",
+      "title": "Files of one job",
+      "description": "Paths backed up by one job (list files jobid=). Use limit for big jobs.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "jobid": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 9223372036854775807,
+            "description": "JobId"
+          },
+          "ujobid": {
+            "type": "string",
+            "description": "unique job name"
+          },
+          "limit": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 1000000,
+            "description": "at most this many rows"
+          },
+          "offset": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9223372036854775807,
+            "description": "skip this many rows (with limit)"
+          },
+          "format": {
+            "type": "string",
+            "enum": [
+              "json",
+              "text"
+            ],
+            "default": "json",
+            "description": "json (default): the Director's JSON API result; text: the bconsole text output"
+          }
+        },
+        "required": [],
+        "additionalProperties": false
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "list_volumes",
+      "title": "List volumes (media)",
+      "description": "Volumes grouped by pool (list volumes). With pool: only that pool; with jobid: the volumes of that job; with volume: one volume record; all: one table.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "pool": {
+            "type": "string",
+            "description": "only volumes of this pool"
+          },
+          "jobid": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 9223372036854775807,
+            "description": "only the volumes this job used"
+          },
+          "volume": {
+            "type": "string",
+            "description": "one volume by name"
+          },
+          "all": {
+            "type": "boolean",
+            "description": "all volumes in one table"
+          },
+          "count": {
+            "type": "boolean",
+            "description": "only the number of volumes"
+          },
+          "long": {
+            "type": "boolean",
+            "description": "true: llist (all fields of every record) instead of list"
+          },
+          "limit": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 1000000,
+            "description": "at most this many rows"
+          },
+          "offset": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9223372036854775807,
+            "description": "skip this many rows (with limit)"
+          },
+          "format": {
+            "type": "string",
+            "enum": [
+              "json",
+              "text"
+            ],
+            "default": "json",
+            "description": "json (default): the Director's JSON API result; text: the bconsole text output"
+          }
+        },
+        "required": [],
+        "additionalProperties": false
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "list_pools",
+      "title": "List pools",
+      "description": "Pool records from the catalog (list pools), or one pool with its prune details.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "pool": {
+            "type": "string",
+            "description": "one pool by name"
+          },
+          "long": {
+            "type": "boolean",
+            "description": "true: llist (all fields of every record) instead of list"
+          },
+          "format": {
+            "type": "string",
+            "enum": [
+              "json",
+              "text"
+            ],
+            "default": "json",
+            "description": "json (default): the Director's JSON API result; text: the bconsole text output"
+          }
+        },
+        "required": [],
+        "additionalProperties": false
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "list_clients",
+      "title": "List clients",
+      "description": "Client records from the catalog (list clients), or one client.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "client": {
+            "type": "string",
+            "description": "one client by name"
+          },
+          "long": {
+            "type": "boolean",
+            "description": "true: llist (all fields of every record) instead of list"
+          },
+          "format": {
+            "type": "string",
+            "enum": [
+              "json",
+              "text"
+            ],
+            "default": "json",
+            "description": "json (default): the Director's JSON API result; text: the bconsole text output"
+          }
+        },
+        "required": [],
+        "additionalProperties": false
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "list_storages",
+      "title": "List storages",
+      "description": "Storage records from the catalog (list storages).",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "long": {
+            "type": "boolean",
+            "description": "true: llist (all fields of every record) instead of list"
+          },
+          "format": {
+            "type": "string",
+            "enum": [
+              "json",
+              "text"
+            ],
+            "default": "json",
+            "description": "json (default): the Director's JSON API result; text: the bconsole text output"
+          }
+        },
+        "required": [],
+        "additionalProperties": false
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "list_filesets",
+      "title": "List filesets",
+      "description": "FileSet records (list filesets); with jobid or filesetid one FileSet with its stored text.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "jobid": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 9223372036854775807,
+            "description": "FileSet of this job"
+          },
+          "filesetid": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 9223372036854775807,
+            "description": "FileSet by id"
+          },
+          "long": {
+            "type": "boolean",
+            "description": "true: llist (all fields of every record) instead of list"
+          },
+          "format": {
+            "type": "string",
+            "enum": [
+              "json",
+              "text"
+            ],
+            "default": "json",
+            "description": "json (default): the Director's JSON API result; text: the bconsole text output"
+          }
+        },
+        "required": [],
+        "additionalProperties": false
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "list_jobtotals",
+      "title": "Job totals",
+      "description": "Number of jobs, files and bytes per job name and in total (list jobtotals).",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "format": {
+            "type": "string",
+            "enum": [
+              "json",
+              "text"
+            ],
+            "default": "json",
+            "description": "json (default): the Director's JSON API result; text: the bconsole text output"
+          }
+        },
+        "required": [],
+        "additionalProperties": false
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "list_copies",
+      "title": "Copy jobs",
+      "description": "Copy jobs, optionally only those of the given original JobIds (list copies).",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "jobids": {
+            "type": "array",
+            "items": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "description": "original JobIds"
+          },
+          "long": {
+            "type": "boolean",
+            "description": "true: llist (all fields of every record) instead of list"
+          },
+          "format": {
+            "type": "string",
+            "enum": [
+              "json",
+              "text"
+            ],
+            "default": "json",
+            "description": "json (default): the Director's JSON API result; text: the bconsole text output"
+          }
+        },
+        "required": [],
+        "additionalProperties": false
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "list_backups",
+      "title": "Backups of a client",
+      "description": "Backups of one client (list backups client=), optionally of one FileSet.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "client": {
+            "type": "string",
+            "description": "client name"
+          },
+          "fileset": {
+            "type": "string",
+            "description": "FileSet name, or 'any'"
+          },
+          "jobstatus": {
+            "description": "job status letter(s) or name(s)",
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "C",
+                  "R",
+                  "B",
+                  "T",
+                  "W",
+                  "E",
+                  "e",
+                  "f",
+                  "D",
+                  "A",
+                  "I",
+                  "L",
+                  "F",
+                  "S",
+                  "m",
+                  "M",
+                  "s",
+                  "j",
+                  "c",
+                  "d",
+                  "t",
+                  "p",
+                  "a",
+                  "i",
+                  "terminated",
+                  "warnings",
+                  "error",
+                  "fatal",
+                  "canceled",
+                  "running"
+                ]
+              },
+              {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "enum": [
+                    "C",
+                    "R",
+                    "B",
+                    "T",
+                    "W",
+                    "E",
+                    "e",
+                    "f",
+                    "D",
+                    "A",
+                    "I",
+                    "L",
+                    "F",
+                    "S",
+                    "m",
+                    "M",
+                    "s",
+                    "j",
+                    "c",
+                    "d",
+                    "t",
+                    "p",
+                    "a",
+                    "i",
+                    "terminated",
+                    "warnings",
+                    "error",
+                    "fatal",
+                    "canceled",
+                    "running"
+                  ]
+                }
+              }
+            ]
+          },
+          "level": {
+            "description": "job level(s)",
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "F",
+                  "I",
+                  "D",
+                  "f",
+                  "B",
+                  "S",
+                  "C",
+                  "V",
+                  "O",
+                  "d",
+                  "A",
+                  "Full",
+                  "Incremental",
+                  "Differential",
+                  "VirtualFull",
+                  "Base"
+                ]
+              },
+              {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "enum": [
+                    "F",
+                    "I",
+                    "D",
+                    "f",
+                    "B",
+                    "S",
+                    "C",
+                    "V",
+                    "O",
+                    "d",
+                    "A",
+                    "Full",
+                    "Incremental",
+                    "Differential",
+                    "VirtualFull",
+                    "Base"
+                  ]
+                }
+              }
+            ]
+          },
+          "order": {
+            "type": "string",
+            "enum": [
+              "asc",
+              "desc"
+            ],
+            "description": "sort by start time"
+          },
+          "days": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 100000,
+            "description": "only backups of the last n days"
+          },
+          "hours": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 10000000,
+            "description": "only backups of the last n hours"
+          },
+          "long": {
+            "type": "boolean",
+            "description": "true: llist (all fields of every record) instead of list"
+          },
+          "limit": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 1000000,
+            "description": "at most this many rows"
+          },
+          "offset": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9223372036854775807,
+            "description": "skip this many rows (with limit)"
+          },
+          "format": {
+            "type": "string",
+            "enum": [
+              "json",
+              "text"
+            ],
+            "default": "json",
+            "description": "json (default): the Director's JSON API result; text: the bconsole text output"
+          }
+        },
+        "required": [
+          "client"
+        ],
+        "additionalProperties": false
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "list_nextvolume",
+      "title": "Next volume of a job",
+      "description": "Which volume the job would write next (list nextvolume job=).",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "job": {
+            "type": "string",
+            "description": "job name"
+          },
+          "days": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 50,
+            "description": "days ahead (at most 50)"
+          }
+        },
+        "required": [
+          "job"
+        ],
+        "additionalProperties": false
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "show",
+      "title": "Show configuration resources",
+      "description": "Resources as configured in the Director (show). resource with name: one resource; without name: all of that type; 'all': everything; 'disabled': disabled jobs, clients and schedules. Passwords are not shown.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "resource": {
+            "type": "string",
+            "enum": [
+              "director",
+              "client",
+              "job",
+              "jobdefs",
+              "storage",
+              "catalog",
+              "schedule",
+              "fileset",
+              "pool",
+              "messages",
+              "counter",
+              "profile",
+              "console",
+              "user",
+              "all",
+              "disabled"
+            ],
+            "description": "resource type"
+          },
+          "name": {
+            "type": "string",
+            "description": "resource name; omit for all resources of the type"
+          },
+          "disabled_type": {
+            "type": "string",
+            "enum": [
+              "jobs",
+              "clients",
+              "schedules"
+            ],
+            "description": "with resource=disabled: only this type"
+          },
+          "verbose": {
+            "type": "boolean",
+            "description": "also directives with default values"
+          },
+          "format": {
+            "type": "string",
+            "enum": [
+              "json",
+              "text"
+            ],
+            "default": "json",
+            "description": "json (default): the Director's JSON API result; text: the bconsole text output"
+          }
+        },
+        "required": [
+          "resource"
+        ],
+        "additionalProperties": false
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "status_director",
+      "title": "Director status",
+      "description": "Director status: header, scheduled, running and terminated jobs, client connections (status director).",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "days": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 500,
+            "description": "days of scheduled jobs, default 1"
+          },
+          "format": {
+            "type": "string",
+            "enum": [
+              "json",
+              "text"
+            ],
+            "default": "json",
+            "description": "json (default): the Director's JSON API result; text: the bconsole text output"
+          }
+        },
+        "required": [],
+        "additionalProperties": false
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "status_client",
+      "title": "File daemon status",
+      "description": "Status report of one File Daemon (status client=), as text. Contacts the client.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "client": {
+            "type": "string",
+            "description": "client name"
+          }
+        },
+        "required": [
+          "client"
+        ],
+        "additionalProperties": false
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "status_storage",
+      "title": "Storage daemon status",
+      "description": "Status report of one Storage Daemon (status storage=), as text; slots: the autochanger slot table.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "storage": {
+            "type": "string",
+            "description": "storage name"
+          },
+          "slots": {
+            "type": "boolean",
+            "description": "autochanger slot table"
+          }
+        },
+        "required": [
+          "storage"
+        ],
+        "additionalProperties": false
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "status_scheduler",
+      "title": "Scheduler preview",
+      "description": "Which schedules trigger which jobs and a preview of the next runs (status scheduler).",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "days": {
+            "type": "integer",
+            "minimum": -365,
+            "maximum": 365,
+            "description": "preview for n days (negative: past days), default 7"
+          },
+          "days_from": {
+            "type": "integer",
+            "minimum": -366,
+            "maximum": 366,
+            "description": "start of the range in days relative to now (with days_to)"
+          },
+          "days_to": {
+            "type": "integer",
+            "minimum": -366,
+            "maximum": 366,
+            "description": "end of the range in days relative to now (with days_from)"
+          },
+          "job": {
+            "type": "string",
+            "description": "only this job"
+          },
+          "client": {
+            "type": "string",
+            "description": "only jobs of this client"
+          },
+          "schedule": {
+            "type": "string",
+            "description": "only this schedule"
+          },
+          "format": {
+            "type": "string",
+            "enum": [
+              "json",
+              "text"
+            ],
+            "default": "json",
+            "description": "json (default): the Director's JSON API result; text: the bconsole text output"
+          }
+        },
+        "required": [],
+        "additionalProperties": false
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "status_subscriptions",
+      "title": "Subscription report",
+      "description": "Backup units for subscriptions, from the catalog (status subscriptions).",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "clients": {
+            "type": "boolean",
+            "description": "summary per client"
+          },
+          "plugins": {
+            "type": "boolean",
+            "description": "summary per plugin"
+          },
+          "all": {
+            "type": "boolean",
+            "description": "all partial reports"
+          },
+          "anonymize": {
+            "type": "boolean",
+            "description": "replace client names by 'Client 1', 'Client 2', …"
+          },
+          "client": {
+            "type": "string",
+            "description": "detail per FileSet of this client"
+          },
+          "format": {
+            "type": "string",
+            "enum": [
+              "json",
+              "text"
+            ],
+            "default": "json",
+            "description": "json (default): the Director's JSON API result; text: the bconsole text output"
+          }
+        },
+        "required": [],
+        "additionalProperties": false
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "status_configuration",
+      "title": "Configuration check",
+      "description": "Checks the configuration for deprecated settings (status configuration), as text.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "required": [],
+        "additionalProperties": false
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "messages",
+      "title": "Pending Director messages",
+      "description": "Returns the console's queued Director messages (job reports, warnings). Reading empties the queue.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "format": {
+            "type": "string",
+            "enum": [
+              "json",
+              "text"
+            ],
+            "default": "json",
+            "description": "json (default): the Director's JSON API result; text: the bconsole text output"
+          }
+        },
+        "required": [],
+        "additionalProperties": false
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "version",
+      "title": "Director version",
+      "description": "Version of the Director (version).",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "format": {
+            "type": "string",
+            "enum": [
+              "json",
+              "text"
+            ],
+            "default": "json",
+            "description": "json (default): the Director's JSON API result; text: the bconsole text output"
+          }
+        },
+        "required": [],
+        "additionalProperties": false
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "time",
+      "title": "Director time",
+      "description": "Current time on the Director (time).",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "format": {
+            "type": "string",
+            "enum": [
+              "json",
+              "text"
+            ],
+            "default": "json",
+            "description": "json (default): the Director's JSON API result; text: the bconsole text output"
+          }
+        },
+        "required": [],
+        "additionalProperties": false
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "dot_jobs",
+      "title": "Job names",
+      "description": "Names of the configured jobs (.jobs).",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "type": {
+            "type": "string",
+            "enum": [
+              "Backup",
+              "Restore",
+              "Verify",
+              "Admin",
+              "Copy",
+              "Migrate",
+              "Consolidate",
+              "Archive"
+            ],
+            "description": "only jobs of this type"
+          },
+          "state": {
+            "type": "string",
+            "enum": [
+              "enabled",
+              "disabled"
+            ],
+            "description": "only enabled or only disabled resources"
+          },
+          "format": {
+            "type": "string",
+            "enum": [
+              "json",
+              "text"
+            ],
+            "default": "json",
+            "description": "json (default): the Director's JSON API result; text: the bconsole text output"
+          }
+        },
+        "required": [],
+        "additionalProperties": false
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "dot_clients",
+      "title": "Client names",
+      "description": "Names of the configured clients (.clients).",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "state": {
+            "type": "string",
+            "enum": [
+              "enabled",
+              "disabled"
+            ],
+            "description": "only enabled or only disabled resources"
+          },
+          "format": {
+            "type": "string",
+            "enum": [
+              "json",
+              "text"
+            ],
+            "default": "json",
+            "description": "json (default): the Director's JSON API result; text: the bconsole text output"
+          }
+        },
+        "required": [],
+        "additionalProperties": false
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "dot_pools",
+      "title": "Pool names",
+      "description": "Names of the configured pools (.pools).",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "type": {
+            "type": "string",
+            "enum": [
+              "Backup",
+              "Scratch",
+              "Copy",
+              "Archive",
+              "Cloned",
+              "Migration",
+              "Save"
+            ],
+            "description": "only pools of this type"
+          },
+          "format": {
+            "type": "string",
+            "enum": [
+              "json",
+              "text"
+            ],
+            "default": "json",
+            "description": "json (default): the Director's JSON API result; text: the bconsole text output"
+          }
+        },
+        "required": [],
+        "additionalProperties": false
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "dot_storages",
+      "title": "Storage names",
+      "description": "Names of the configured storages (.storages).",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "state": {
+            "type": "string",
+            "enum": [
+              "enabled",
+              "disabled"
+            ],
+            "description": "only enabled or only disabled resources"
+          },
+          "format": {
+            "type": "string",
+            "enum": [
+              "json",
+              "text"
+            ],
+            "default": "json",
+            "description": "json (default): the Director's JSON API result; text: the bconsole text output"
+          }
+        },
+        "required": [],
+        "additionalProperties": false
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "dot_filesets",
+      "title": "FileSet names",
+      "description": "Names of the configured FileSets (.filesets).",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "format": {
+            "type": "string",
+            "enum": [
+              "json",
+              "text"
+            ],
+            "default": "json",
+            "description": "json (default): the Director's JSON API result; text: the bconsole text output"
+          }
+        },
+        "required": [],
+        "additionalProperties": false
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "dot_schedule",
+      "title": "Schedule names",
+      "description": "Names of the configured schedules (.schedule).",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "state": {
+            "type": "string",
+            "enum": [
+              "enabled",
+              "disabled"
+            ],
+            "description": "only enabled or only disabled resources"
+          },
+          "format": {
+            "type": "string",
+            "enum": [
+              "json",
+              "text"
+            ],
+            "default": "json",
+            "description": "json (default): the Director's JSON API result; text: the bconsole text output"
+          }
+        },
+        "required": [],
+        "additionalProperties": false
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "dot_levels",
+      "title": "Job levels",
+      "description": "Job levels, optionally of one job type (.levels).",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "jobtype": {
+            "type": "string",
+            "enum": [
+              "Backup",
+              "Restore",
+              "Verify",
+              "Admin",
+              "Copy",
+              "Migrate",
+              "Consolidate",
+              "Archive"
+            ],
+            "description": "only the levels of this job type"
+          },
+          "format": {
+            "type": "string",
+            "enum": [
+              "json",
+              "text"
+            ],
+            "default": "json",
+            "description": "json (default): the Director's JSON API result; text: the bconsole text output"
+          }
+        },
+        "required": [],
+        "additionalProperties": false
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "dot_types",
+      "title": "Job types",
+      "description": "Job types (.types).",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "format": {
+            "type": "string",
+            "enum": [
+              "json",
+              "text"
+            ],
+            "default": "json",
+            "description": "json (default): the Director's JSON API result; text: the bconsole text output"
+          }
+        },
+        "required": [],
+        "additionalProperties": false
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "dot_msgs",
+      "title": "Messages resources",
+      "description": "Names of the Messages resources (.msgs).",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "format": {
+            "type": "string",
+            "enum": [
+              "json",
+              "text"
+            ],
+            "default": "json",
+            "description": "json (default): the Director's JSON API result; text: the bconsole text output"
+          }
+        },
+        "required": [],
+        "additionalProperties": false
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "dot_defaults",
+      "title": "Resource defaults",
+      "description": "Defaults of one job, client, storage or pool as key/value pairs (.defaults), e.g. what a run of the job would use.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "resource": {
+            "type": "string",
+            "enum": [
+              "job",
+              "client",
+              "storage",
+              "pool"
+            ],
+            "description": "resource type, default job"
+          },
+          "name": {
+            "type": "string",
+            "description": "resource name"
+          },
+          "format": {
+            "type": "string",
+            "enum": [
+              "json",
+              "text"
+            ],
+            "default": "json",
+            "description": "json (default): the Director's JSON API result; text: the bconsole text output"
+          }
+        },
+        "required": [
+          "name"
+        ],
+        "additionalProperties": false
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "dot_jobstatus",
+      "title": "Job status codes",
+      "description": "Job status codes with their meaning (.jobstatus), or one code.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "code": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 1,
+            "description": "one status letter, e.g. T"
+          },
+          "format": {
+            "type": "string",
+            "enum": [
+              "json",
+              "text"
+            ],
+            "default": "json",
+            "description": "json (default): the Director's JSON API result; text: the bconsole text output"
+          }
+        },
+        "required": [],
+        "additionalProperties": false
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "run_job",
+      "title": "Start a job",
+      "description": "Start a configured job now or at a given time (bconsole 'run … yes', never interactive). Every override is optional; the job resource supplies the rest. Returns the Director's reply with 'Job queued. JobId=N'; follow it with wait_job or list tools.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "job": {
+            "type": "string",
+            "description": "Job resource name"
+          },
+          "level": {
+            "type": "string",
+            "enum": [
+              "Full",
+              "Incremental",
+              "Differential",
+              "Since",
+              "VirtualFull",
+              "InitCatalog",
+              "Catalog",
+              "VolumeToCatalog",
+              "DiskToCatalog",
+              "Data"
+            ],
+            "description": "level override (backup or verify level)"
+          },
+          "client": {
+            "type": "string",
+            "description": "Client override"
+          },
+          "fileset": {
+            "type": "string",
+            "description": "FileSet override"
+          },
+          "pool": {
+            "type": "string",
+            "description": "Pool override"
+          },
+          "nextpool": {
+            "type": "string",
+            "description": "Next Pool (VirtualFull, Copy, Migrate)"
+          },
+          "storage": {
+            "type": "string",
+            "description": "Storage override"
+          },
+          "when": {
+            "type": "string",
+            "description": "start time 'YYYY-MM-DD HH:MM:SS' (default: now)"
+          },
+          "since": {
+            "type": "string",
+            "description": "with level Since: 'YYYY-MM-DD HH:MM:SS'"
+          },
+          "priority": {
+            "type": "integer",
+            "minimum": 1,
+            "description": "job priority (lower runs first)"
+          },
+          "spooldata": {
+            "type": "boolean",
+            "description": "data spooling for this run"
+          },
+          "accurate": {
+            "type": "boolean",
+            "description": "accurate mode for this run"
+          },
+          "jobid": {
+            "type": "integer",
+            "minimum": 1,
+            "description": "Verify/Copy/Migrate: the job to verify or copy"
+          },
+          "comment": {
+            "type": "string",
+            "description": "comment stored with the job"
+          }
+        },
+        "required": [
+          "job"
+        ],
+        "additionalProperties": false
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "idempotentHint": false,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "rerun_job",
+      "title": "Rerun failed jobs",
+      "description": "Start jobs again with their original parameters (bconsole 'rerun … yes'). Give jobids, or since_jobid (optionally until_jobid), or days/hours (failed jobs of that period).",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "jobids": {
+            "type": "array",
+            "items": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "minItems": 1,
+            "description": "JobIds to rerun"
+          },
+          "since_jobid": {
+            "type": "integer",
+            "minimum": 1,
+            "description": "all failed jobs from this JobId on"
+          },
+          "until_jobid": {
+            "type": "integer",
+            "minimum": 1,
+            "description": "upper bound for since_jobid"
+          },
+          "days": {
+            "type": "integer",
+            "minimum": 1,
+            "description": "failed jobs of the last n days"
+          },
+          "hours": {
+            "type": "integer",
+            "minimum": 1,
+            "description": "failed jobs of the last n hours"
+          }
+        },
+        "required": [],
+        "additionalProperties": false
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "idempotentHint": false,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "cancel_job",
+      "title": "Cancel jobs",
+      "description": "Cancel running or waiting jobs (bconsole 'cancel … yes'). Exactly one of jobid, job, ujobid, all=true or state. Confirm with the user before cancelling.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "jobid": {
+            "type": "integer",
+            "minimum": 1,
+            "description": "JobId of the job to cancel"
+          },
+          "job": {
+            "type": "string",
+            "description": "cancel the running jobs of this job name"
+          },
+          "ujobid": {
+            "type": "string",
+            "description": "unique job name, e.g. Backup.2026-10-17_10.00.00_05"
+          },
+          "all": {
+            "type": "boolean",
+            "description": "cancel all running and waiting jobs"
+          },
+          "state": {
+            "type": "string",
+            "enum": [
+              "created",
+              "blocked",
+              "waiting",
+              "running"
+            ],
+            "description": "cancel all jobs in this state"
+          },
+          "storage": {
+            "type": "string",
+            "description": "with jobid: cancel directly in this Storage daemon"
+          }
+        },
+        "required": [],
+        "additionalProperties": false
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": true,
+        "idempotentHint": false,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "wait_job",
+      "title": "Wait for a job",
+      "description": "Block until the job has finished and return its JobStatus (bconsole 'wait'). Exactly one of jobid, job, ujobid, or mount=true (wait until a job waits for a mount; with timeout seconds). Holds the Director session while waiting.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "jobid": {
+            "type": "integer",
+            "minimum": 1,
+            "description": "JobId"
+          },
+          "job": {
+            "type": "string",
+            "description": "running job whose name starts with this"
+          },
+          "ujobid": {
+            "type": "string",
+            "description": "unique job name"
+          },
+          "mount": {
+            "type": "boolean",
+            "description": "wait until a running job waits for a volume mount"
+          },
+          "timeout": {
+            "type": "integer",
+            "minimum": 1,
+            "description": "with mount: give up after this many seconds"
+          }
+        },
+        "required": [],
+        "additionalProperties": false
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "restore",
+      "title": "Restore files",
+      "description": "Start a restore job in one non-interactive line ('restore … done yes'). Select the backups with jobids, or with before (state at that time) or the latest state (default) of client+fileset. Select files with all=true, files (full paths) or directories (with a trailing /; needs jobids), or fileregex. Browse first with ovfs_latest / ovfs_tree / ovfs_ls / ovfs_versions to find paths. Target: where (prefix, '/' = original place) or regexwhere or strip_prefix/add_prefix/add_suffix; replace decides about existing files. Confirm with the user where files go and what replace does.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "client": {
+            "type": "string",
+            "description": "Client whose backup is restored (also the target unless restoreclient)"
+          },
+          "jobids": {
+            "type": "array",
+            "items": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "minItems": 1,
+            "description": "JobIds whose files form the tree (Full, Differential, Incrementals)"
+          },
+          "fileset": {
+            "type": "string",
+            "description": "FileSet for latest/before selection"
+          },
+          "before": {
+            "type": "string",
+            "description": "state before 'YYYY-MM-DD HH:MM:SS' (instead of jobids)"
+          },
+          "all": {
+            "type": "boolean",
+            "description": "restore every file of the selection"
+          },
+          "files": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "minItems": 1,
+            "description": "full file paths to restore (latest version within the selection)"
+          },
+          "directories": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "minItems": 1,
+            "description": "whole directories (path ending in /); needs jobids"
+          },
+          "fileregex": {
+            "type": "string",
+            "description": "only files whose path matches this POSIX regex"
+          },
+          "where": {
+            "type": "string",
+            "description": "target directory prefixed to every path; '/' restores in place"
+          },
+          "regexwhere": {
+            "type": "string",
+            "description": "path rewrite, e.g. !/home/!/tmp/home/! (instead of where)"
+          },
+          "strip_prefix": {
+            "type": "string",
+            "description": "remove this prefix from every path"
+          },
+          "add_prefix": {
+            "type": "string",
+            "description": "put this prefix before every path"
+          },
+          "add_suffix": {
+            "type": "string",
+            "description": "append this to every file name"
+          },
+          "replace": {
+            "type": "string",
+            "enum": [
+              "always",
+              "ifnewer",
+              "ifolder",
+              "never"
+            ],
+            "description": "existing files at the target"
+          },
+          "restoreclient": {
+            "type": "string",
+            "description": "target client if different from client"
+          },
+          "restorejob": {
+            "type": "string",
+            "description": "Restore job resource (needed if several exist)"
+          },
+          "storage": {
+            "type": "string",
+            "description": "read from this Storage"
+          },
+          "pool": {
+            "type": "string",
+            "description": "only jobs on volumes of this pool"
+          },
+          "comment": {
+            "type": "string",
+            "description": "comment of the restore job"
+          }
+        },
+        "required": [
+          "client"
+        ],
+        "additionalProperties": false
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": true,
+        "idempotentHint": false,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "label_volume",
+      "title": "Label a new volume",
+      "description": "Write a label to a new volume in a storage device and create it in the catalog (bconsole 'label … yes').",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "storage": {
+            "type": "string",
+            "description": "Storage resource"
+          },
+          "volume": {
+            "type": "string",
+            "description": "new volume name (letters, digits, :.-_/)"
+          },
+          "pool": {
+            "type": "string",
+            "description": "pool of the new volume"
+          },
+          "slot": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "autochanger slot"
+          },
+          "drive": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "drive number"
+          },
+          "encrypt": {
+            "type": "boolean",
+            "description": "create a hardware-encryption key (LTO)"
+          }
+        },
+        "required": [
+          "storage",
+          "volume",
+          "pool"
+        ],
+        "additionalProperties": false
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "idempotentHint": false,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "relabel_volume",
+      "title": "Relabel a volume",
+      "description": "Overwrite the label of an existing volume (Purged/Recycle status) with a new name: its old contents are lost. Requires confirm=true.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "storage": {
+            "type": "string",
+            "description": "Storage resource"
+          },
+          "oldvolume": {
+            "type": "string",
+            "description": "existing volume"
+          },
+          "volume": {
+            "type": "string",
+            "description": "new volume name"
+          },
+          "pool": {
+            "type": "string",
+            "description": "pool of the old volume"
+          },
+          "slot": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "autochanger slot"
+          },
+          "drive": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "drive number"
+          },
+          "encrypt": {
+            "type": "boolean",
+            "description": "create a hardware-encryption key"
+          },
+          "confirm": {
+            "type": "boolean",
+            "const": true,
+            "description": "must be true: the user explicitly confirmed this destructive action"
+          }
+        },
+        "required": [
+          "storage",
+          "oldvolume",
+          "volume",
+          "confirm"
+        ],
+        "additionalProperties": false
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": true,
+        "idempotentHint": false,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "mount_storage",
+      "title": "Mount a storage device",
+      "description": "Mount the volume in a storage device (bconsole 'mount'). Give storage or a running job.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "storage": {
+            "type": "string",
+            "description": "Storage resource name"
+          },
+          "drive": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "drive number (default 0)"
+          },
+          "jobid": {
+            "type": "integer",
+            "minimum": 1,
+            "description": "use the storage of this running job instead"
+          },
+          "job": {
+            "type": "string",
+            "description": "use the storage of the running job with this name"
+          },
+          "ujobid": {
+            "type": "string",
+            "description": "use the storage of the running job with this unique name"
+          },
+          "slot": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "autochanger slot to load first"
+          }
+        },
+        "required": [],
+        "additionalProperties": false
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "unmount_storage",
+      "title": "Unmount a storage device",
+      "description": "Unmount a storage device so the volume can be removed (bconsole 'unmount').",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "storage": {
+            "type": "string",
+            "description": "Storage resource name"
+          },
+          "drive": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "drive number (default 0)"
+          },
+          "jobid": {
+            "type": "integer",
+            "minimum": 1,
+            "description": "use the storage of this running job instead"
+          },
+          "job": {
+            "type": "string",
+            "description": "use the storage of the running job with this name"
+          },
+          "ujobid": {
+            "type": "string",
+            "description": "use the storage of the running job with this unique name"
+          },
+          "alldrives": {
+            "type": "boolean",
+            "description": "all drives of the storage"
+          }
+        },
+        "required": [],
+        "additionalProperties": false
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "release_storage",
+      "title": "Release a storage device",
+      "description": "Release a storage device: close the volume, keep the device usable (bconsole 'release').",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "storage": {
+            "type": "string",
+            "description": "Storage resource name"
+          },
+          "drive": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "drive number (default 0)"
+          },
+          "jobid": {
+            "type": "integer",
+            "minimum": 1,
+            "description": "use the storage of this running job instead"
+          },
+          "job": {
+            "type": "string",
+            "description": "use the storage of the running job with this name"
+          },
+          "ujobid": {
+            "type": "string",
+            "description": "use the storage of the running job with this unique name"
+          },
+          "alldrives": {
+            "type": "boolean",
+            "description": "all drives of the storage"
+          }
+        },
+        "required": [],
+        "additionalProperties": false
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "update_volume",
+      "title": "Change volume properties",
+      "description": "Change catalog properties of one volume (bconsole 'update volume=…'), or reset volumes from their pool (frompool, allfrompool, fromallpools). At least one change.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "volume": {
+            "type": "string",
+            "description": "volume name"
+          },
+          "volstatus": {
+            "type": "string",
+            "enum": [
+              "Append",
+              "Archive",
+              "Disabled",
+              "Full",
+              "Used",
+              "Cleaning",
+              "Recycle",
+              "Read-Only",
+              "Error"
+            ],
+            "description": "new volume status"
+          },
+          "volretention": {
+            "type": "string",
+            "description": "retention, e.g. '30 days'"
+          },
+          "voluse": {
+            "type": "string",
+            "description": "use duration, e.g. '1 day'"
+          },
+          "maxvoljobs": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "maximum jobs (0 = unlimited)"
+          },
+          "maxvolfiles": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "maximum files"
+          },
+          "maxvolbytes": {
+            "type": "string",
+            "description": "maximum size, e.g. 10G"
+          },
+          "recycle": {
+            "type": "boolean",
+            "description": "may be recycled"
+          },
+          "inchanger": {
+            "type": "boolean",
+            "description": "volume is in the autochanger"
+          },
+          "slot": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "autochanger slot"
+          },
+          "enabled": {
+            "type": "string",
+            "enum": [
+              "yes",
+              "no",
+              "archived"
+            ],
+            "description": "enabled for new jobs"
+          },
+          "pool": {
+            "type": "string",
+            "description": "move to this pool"
+          },
+          "recyclepool": {
+            "type": "string",
+            "description": "pool the volume goes to when recycled"
+          },
+          "actiononpurge": {
+            "type": "string",
+            "enum": [
+              "None",
+              "Truncate"
+            ],
+            "description": "action when purged"
+          },
+          "storage": {
+            "type": "string",
+            "description": "storage of the volume"
+          },
+          "frompool": {
+            "type": "boolean",
+            "description": "reset the volume's defaults from its pool"
+          },
+          "allfrompool": {
+            "type": "string",
+            "description": "reset all volumes of this pool from the pool (instead of volume)"
+          },
+          "fromallpools": {
+            "type": "boolean",
+            "description": "reset all volumes of all pools (instead of volume)"
+          }
+        },
+        "required": [],
+        "additionalProperties": false
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "update_pool",
+      "title": "Update a pool from the configuration",
+      "description": "Write the Pool resource of the configuration into the catalog (bconsole 'update pool=…').",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "pool": {
+            "type": "string",
+            "description": "Pool resource name"
+          }
+        },
+        "required": [
+          "pool"
+        ],
+        "additionalProperties": false
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "prune",
+      "title": "Prune catalog records",
+      "description": "Remove catalog records whose retention has expired (bconsole 'prune … yes'): files, jobs, volume (one, or all_volumes), stats or directory. Requires confirm=true.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "kind": {
+            "type": "string",
+            "enum": [
+              "files",
+              "jobs",
+              "volume",
+              "stats",
+              "directory"
+            ],
+            "description": "what to prune"
+          },
+          "client": {
+            "type": "string",
+            "description": "client (files, jobs, directory)"
+          },
+          "pool": {
+            "type": "string",
+            "description": "pool (files, jobs, volume)"
+          },
+          "volume": {
+            "type": "string",
+            "description": "volume (kind volume)"
+          },
+          "all_volumes": {
+            "type": "boolean",
+            "description": "kind volume: all volumes (of pool)"
+          },
+          "directory": {
+            "type": "string",
+            "description": "kind directory: path"
+          },
+          "recursive": {
+            "type": "boolean",
+            "description": "kind directory: include subdirectories"
+          },
+          "confirm": {
+            "type": "boolean",
+            "const": true,
+            "description": "must be true: the user explicitly confirmed this destructive action"
+          }
+        },
+        "required": [
+          "kind",
+          "confirm"
+        ],
+        "additionalProperties": false
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": true,
+        "idempotentHint": true,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "purge",
+      "title": "Purge catalog records",
+      "description": "Remove catalog records regardless of retention (bconsole 'purge'; the Director's 'Purge (yes/no)?' is answered yes): files of a job/client/volume, jobs of a client/volume/pool, volumes (optionally with action truncate), or quota. Requires confirm=true.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "kind": {
+            "type": "string",
+            "enum": [
+              "files",
+              "jobs",
+              "volume",
+              "quota"
+            ],
+            "description": "what to purge"
+          },
+          "jobid": {
+            "type": "integer",
+            "minimum": 1,
+            "description": "files: of this job"
+          },
+          "job": {
+            "type": "string",
+            "description": "files: of this job name"
+          },
+          "client": {
+            "type": "string",
+            "description": "files/jobs/quota: of this client"
+          },
+          "volume": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "minItems": 1,
+            "description": "files/jobs: of this volume (one); volume: these volumes"
+          },
+          "pool": {
+            "type": "string",
+            "description": "jobs: of this pool; volume with action: volumes of this pool"
+          },
+          "jobstatus": {
+            "type": "string",
+            "description": "jobs/volume: only jobs with these status letters, comma-separated, e.g. E,f"
+          },
+          "action": {
+            "type": "string",
+            "enum": [
+              "truncate",
+              "all"
+            ],
+            "description": "volume: run ActionOnPurge for purged volumes"
+          },
+          "storage": {
+            "type": "string",
+            "description": "with action: storage"
+          },
+          "allpools": {
+            "type": "boolean",
+            "description": "with action: volumes of all pools"
+          },
+          "drive": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "with action: drive"
+          },
+          "confirm": {
+            "type": "boolean",
+            "const": true,
+            "description": "must be true: the user explicitly confirmed this destructive action"
+          }
+        },
+        "required": [
+          "kind",
+          "confirm"
+        ],
+        "additionalProperties": false
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": true,
+        "idempotentHint": true,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "delete",
+      "title": "Delete catalog entries",
+      "description": "Delete a volume (and its jobs), a pool, jobs or a storage entry from the catalog (bconsole 'delete'). Requires confirm=true.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "kind": {
+            "type": "string",
+            "enum": [
+              "volume",
+              "pool",
+              "jobid",
+              "storage"
+            ],
+            "description": "what to delete"
+          },
+          "volume": {
+            "type": "string",
+            "description": "volume name"
+          },
+          "pool": {
+            "type": "string",
+            "description": "pool name (kind pool; or the pool of the volume)"
+          },
+          "jobids": {
+            "type": "array",
+            "items": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "minItems": 1,
+            "description": "JobIds (kind jobid)"
+          },
+          "storage": {
+            "type": "string",
+            "description": "storage entry (kind storage)"
+          },
+          "confirm": {
+            "type": "boolean",
+            "const": true,
+            "description": "must be true: the user explicitly confirmed this destructive action"
+          }
+        },
+        "required": [
+          "kind",
+          "confirm"
+        ],
+        "additionalProperties": false
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": true,
+        "idempotentHint": true,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "truncate",
+      "title": "Truncate purged volumes",
+      "description": "Free the space of volumes in status Purged (bconsole 'truncate volstatus=Purged … yes'). Requires confirm=true.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "storage": {
+            "type": "string",
+            "description": "only volumes of this storage"
+          },
+          "pool": {
+            "type": "string",
+            "description": "only volumes of this pool"
+          },
+          "volume": {
+            "type": "string",
+            "description": "only this volume"
+          },
+          "drive": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "drive"
+          },
+          "confirm": {
+            "type": "boolean",
+            "const": true,
+            "description": "must be true: the user explicitly confirmed this destructive action"
+          }
+        },
+        "required": [
+          "confirm"
+        ],
+        "additionalProperties": false
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": true,
+        "idempotentHint": true,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "enable",
+      "title": "Enable a job, client or schedule",
+      "description": "Enable a job, client or schedule in the running Director (until reload).",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "resource": {
+            "type": "string",
+            "enum": [
+              "job",
+              "client",
+              "schedule"
+            ],
+            "description": "resource type"
+          },
+          "name": {
+            "type": "string",
+            "description": "resource name"
+          }
+        },
+        "required": [
+          "resource",
+          "name"
+        ],
+        "additionalProperties": false
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "disable",
+      "title": "Disable a job, client or schedule",
+      "description": "Disable a job, client or schedule in the running Director (until reload): no scheduled runs.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "resource": {
+            "type": "string",
+            "enum": [
+              "job",
+              "client",
+              "schedule"
+            ],
+            "description": "resource type"
+          },
+          "name": {
+            "type": "string",
+            "description": "resource name"
+          }
+        },
+        "required": [
+          "resource",
+          "name"
+        ],
+        "additionalProperties": false
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "configure_add",
+      "title": "Add a configuration resource",
+      "description": "Create a Director resource and write it to bareos-dir.d/<type>/<name>.conf (bconsole 'configure add'). directives: lowercase directive names without spaces (e.g. {\"address\":\"host\",\"password\":\"x\"}); an array value repeats the directive. Mandatory per type: client address+password; job/jobdefs type, messages, pool (or jobdefs); storage address, password, device, mediatype; catalog dbname, dbuser; console password.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "resource": {
+            "type": "string",
+            "enum": [
+              "client",
+              "jobdefs",
+              "job",
+              "storage",
+              "catalog",
+              "schedule",
+              "fileset",
+              "pool",
+              "messages",
+              "counter",
+              "profile",
+              "console",
+              "user"
+            ],
+            "description": "resource type"
+          },
+          "name": {
+            "type": "string",
+            "description": "resource name"
+          },
+          "directives": {
+            "type": "object",
+            "description": "directive -> value (string, number, boolean or array)",
+            "additionalProperties": {
+              "type": [
+                "string",
+                "number",
+                "boolean",
+                "array"
+              ]
+            }
+          }
+        },
+        "required": [
+          "resource",
+          "name"
+        ],
+        "additionalProperties": false
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "idempotentHint": false,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "configure_export",
+      "title": "Export a client's Director resource",
+      "description": "Write the Director resource a client's File Daemon needs (bconsole 'configure export client=…').",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "client": {
+            "type": "string",
+            "description": "Client resource name"
+          }
+        },
+        "required": [
+          "client"
+        ],
+        "additionalProperties": false
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "reload",
+      "title": "Reload the Director configuration",
+      "description": "Re-read the Director configuration (bconsole 'reload'). Running jobs keep their resources.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "required": [],
+        "additionalProperties": false
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "setdebug",
+      "title": "Set a daemon's debug level",
+      "description": "Set the debug level of the Director, a File or Storage daemon, or all (bconsole 'setdebug').",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "level": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "debug level, 0 = off"
+          },
+          "target": {
+            "type": "string",
+            "enum": [
+              "dir",
+              "client",
+              "storage",
+              "all"
+            ],
+            "description": "which daemon"
+          },
+          "name": {
+            "type": "string",
+            "description": "client or storage name (target client/storage)"
+          },
+          "trace": {
+            "type": "boolean",
+            "description": "write debug output to a trace file"
+          },
+          "timestamp": {
+            "type": "boolean",
+            "description": "timestamp every debug line"
+          },
+          "hangup": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "File daemon test aid: drop the connection after n files"
+          }
+        },
+        "required": [
+          "level",
+          "target"
+        ],
+        "additionalProperties": false
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "setbandwidth",
+      "title": "Limit bandwidth",
+      "description": "Set the bandwidth limit (kB/s, 0 = none) of a client, a storage or running jobs (bconsole 'setbandwidth'). Exactly one of client, storage, jobid, job, ujobid, all=true, state.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "limit": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "limit in kB/s, 0 removes it"
+          },
+          "client": {
+            "type": "string",
+            "description": "Client resource"
+          },
+          "storage": {
+            "type": "string",
+            "description": "Storage resource"
+          },
+          "jobid": {
+            "type": "integer",
+            "minimum": 1,
+            "description": "running job"
+          },
+          "job": {
+            "type": "string",
+            "description": "running job name"
+          },
+          "ujobid": {
+            "type": "string",
+            "description": "unique job name"
+          },
+          "all": {
+            "type": "boolean",
+            "description": "all running jobs"
+          },
+          "state": {
+            "type": "string",
+            "enum": [
+              "created",
+              "blocked",
+              "waiting",
+              "running"
+            ],
+            "description": "running jobs in this state"
+          }
+        },
+        "required": [
+          "limit"
+        ],
+        "additionalProperties": false
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "execute",
+      "title": "Execute a Director command",
+      "description": "Run any bconsole command on the Director, including ones that change state: run, cancel, label, mount, update, prune, purge, delete, configure. Prefer 'query' for read-only commands. Confirm destructive actions with the user first.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "command": {
+            "type": "string",
+            "description": "bconsole command line"
+          }
+        },
+        "required": [
+          "command"
+        ]
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": true,
+        "openWorldHint": false
+      }
+    }
+  ]
+}

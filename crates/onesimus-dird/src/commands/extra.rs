@@ -6,21 +6,6 @@ use crate::command_ast::CommandAst;
 use crate::command_executor::ExecContext;
 use crate::command_queue::CommandResult;
 
-/// Send SD command via bareos-stored crate (resolves storage from config).
-fn sd_cmd_via_config(ctx: &ExecContext, storage_name: &str, command: &str) -> Result<String, String> {
-    let config = ctx.config.as_ref()
-        .and_then(|c| c.read().ok())
-        .ok_or("No config")?;
-    let stor = config.storages.iter().find(|s| s.name == storage_name)
-        .ok_or(format!("Storage '{storage_name}' not found"))?;
-    let dir_name = config.director.name.clone();
-    let addr = stor.address.clone();
-    let port = stor.port;
-    let password = stor.password.clone();
-    drop(config);
-    bareos_stored::command::sd_command(&addr, port, &password, &dir_name, command)
-}
-
 // --- Interactive/session commands ---
 
 /// C++ FindArgKeyword(ua, {"on", "off"}): first argument keyword (case
@@ -574,29 +559,7 @@ fn rerun_command(
 }
 
 pub fn cmd_relabel(ast: &CommandAst, ctx: &ExecContext) -> CommandResult {
-    let mut ua = crate::ua_select::Ua::new(ctx);
-    crate::commands::admin::label_dialog(&mut ua, ast, true, |ua, request| {
-        relabel_execute(ua, request, |stor, command| sd_cmd_via_config(ctx, stor, command));
-    });
-    ua.finish(true)
-}
-
-/// The SD relabel and the catalog rename of a complete relabel request.
-fn relabel_execute(ua: &mut crate::ua_select::Ua, request: crate::commands::admin::LabelRequest,
-    send: impl FnOnce(&str, &str) -> Result<String, String>) {
-    let crate::commands::admin::LabelRequest::Label { storage, volume: newname, old_volume: Some(oldvol), .. } = request else {
-        return;
-    };
-    match send(&storage, &format!("relabel OldVolume=\"{oldvol}\" Volume=\"{newname}\"")) {
-        Ok(resp) => {
-            if let Some(cat) = &ua.ctx.catalog {
-                let _ = cat.raw_query(&format!("UPDATE media SET volumename='{}' WHERE volumename='{}'",
-                    newname.replace('\'', "''"), oldvol.replace('\'', "''")));
-            }
-            ua.send_msg(format!("Relabel {oldvol} → {newname}:\n{resp}\n"));
-        }
-        Err(e) => ua.error_msg(format!("relabel: {e}\n")),
-    }
+    crate::commands::admin::label_or_relabel(ast, ctx, true)
 }
 
 pub fn cmd_delete(ast: &CommandAst, ctx: &ExecContext) -> CommandResult {

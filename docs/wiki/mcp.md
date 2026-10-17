@@ -1717,4 +1717,159 @@ Werte, die eine zweite Anweisung einschleusen könnten, erreichen den Director n
 
 ## Entwicklungs-Build: Schreib- und Restore-Tools
 
-<!-- mcp-write ergänzt diesen Abschnitt (S-31). -->
+Diese Tools sind nur im Entwicklungs-Build einkompiliert (`cargo build -p oconsole --no-default-features --features mcp-development`, Modul `oconsole/src/mcp_write.rs`) und erscheinen dort nur, wenn oconsole mit `--mcp --mcp-allow-write` startet. Im Produktions-Build fehlen sie im Programm: `tools/list` nennt sie nicht, ein `tools/call` endet mit dem JSON-RPC-Fehler `-32602 unknown tool: <name>`, und es geht kein Befehl an den Director. Im Entwicklungs-Build ohne `--mcp-allow-write` gilt dasselbe.
+
+### Gemeinsame Regeln
+
+- **Eine Zeile pro Aufruf.** Jedes Tool baut aus den Parametern genau eine Konsolenzeile und hängt `yes` an, wo der Befehl das Schlüsselwort kennt (`run`, `rerun`, `cancel`, `restore`, `label`, `relabel`, `prune`, `delete volume`, `truncate`). Es läuft im normalen Konsolenmodus (nicht unter der JSON-API), die Ausgabe ist der Text des Directors. Vor der Ausgabe steht die gesendete Zeile mit `> `.
+- **Prüfung vor dem Senden.** Namen von Ressourcen und Volumes: Buchstaben, Ziffern, `: . - _ /` und Leerzeichen im Inneren, höchstens 127 Zeichen, kein `/` am Anfang. Pfade, reguläre Ausdrücke und Kommentare werden in Anführungszeichen gesetzt (`\` und `"` maskiert), Steuerzeichen sind verboten. Zeitpunkte nur als `JJJJ-MM-TT HH:MM[:SS]`, JobIds als Ganzzahlen ≥ 1. Unbekannte Parameter, fehlende Pflichtangaben oder widersprüchliche Kombinationen liefern ein Tool-Ergebnis mit `isError: true`. In diesem Fall erreicht kein Befehl den Director.
+- **Rückfragen des Directors.** Ein Tool beantwortet nur die Frage, die zu seinem Zweck gehört, mit `yes`: `Purge (yes/no)?` bei `purge` und `Are you sure you want to delete …` bei `delete`. Jede andere Frage (Auswahlliste bei einem unbekannten Namen, fehlender Restore-Job …) bricht oconsole mit `.` ab. Das Ergebnis ist dann `isError: true` mit dem Hinweis, welcher Parameter fehlt. Die Sitzung bleibt in jedem Fall bedienbar. Über `--grpc` gibt es keine Rückfragen; `purge` und `delete pool` brauchen deshalb BNET.
+- **Bestätigung.** `relabel_volume`, `prune`, `purge`, `delete` und `truncate` verlangen den Parameter `confirm: true`. Ohne ihn lautet die Antwort `<tool> is destructive: ask the user, then call it again with confirm=true`, und nichts wird ausgeführt. Diese Tools sowie `cancel_job` und `restore` tragen `destructiveHint: true`.
+- **Gestartete Jobs.** Bei `run_job`, `rerun_job` und `restore` enthält das Ergebnis zusätzlich `structuredContent: {"jobids": [n, …]}` aus den Zeilen `Job queued. JobId=n`.
+- **Lange Befehle.** `wait_job` und große Restores belegen die Director-Sitzung, bis der Director antwortet. Läuft ein Befehl länger als das 30-Sekunden-Lesezeitlimit des Sockets, wartet oconsole einfach weiter.
+
+### Übersicht
+
+| Tool | Director-Befehl | Annotationen | `confirm` |
+|---|---|---|---|
+| `run_job` | `run job=… [level= client= fileset= pool= nextpool= storage= when= since= priority= jobid= spooldata= accurate= comment=] yes` | schreibend | – |
+| `rerun_job` | `rerun jobid=…` \| `since_jobid= [until_jobid=]` \| `days= hours=` `yes` | schreibend | – |
+| `cancel_job` | `cancel jobid=` \| `job=` \| `ujobid=` \| `all` \| `state=` `[storage=] yes` | destruktiv | – |
+| `wait_job` | `wait jobid=` \| `job=` \| `ujobid=` \| `mount [timeout=]` | lesend, idempotent | – |
+| `restore` | `restore … done … yes` (siehe unten) | destruktiv | – |
+| `label_volume` | `label storage= volume= pool= [slot= drive= encrypt] yes` | schreibend | – |
+| `relabel_volume` | `relabel storage= oldvolume= volume= [pool= slot= drive= encrypt] yes` | destruktiv | ja |
+| `mount_storage` | `mount storage=\|jobid=\|job=\|ujobid= [drive= slot=]` | idempotent | – |
+| `unmount_storage` | `unmount … [drive=] [alldrives]` | idempotent | – |
+| `release_storage` | `release … [drive=] [alldrives]` | idempotent | – |
+| `update_volume` | `update volume=… volstatus= volretention= voluse= maxvoljobs= maxvolfiles= maxvolbytes= recycle= inchanger= slot= enabled= pool= recyclepool= actiononpurge= storage= frompool=yes`; `update volume allfrompool=…`; `update volume fromallpools` | idempotent | – |
+| `update_pool` | `update pool=…` | idempotent | – |
+| `prune` | `prune files\|jobs [client= pool=]`, `prune volume=… \| volume all [pool=]`, `prune stats`, `prune directory=… client= [recursive]`, jeweils `yes` | destruktiv | ja |
+| `purge` | `purge files jobid=\|job=\|client=\|volume=`, `purge jobs client=\|volume=\|pool= [jobstatus=]`, `purge volume=… [volume=…] [jobstatus=] [action= storage= pool=\|allpools drive=]`, `purge quota [client=]` | destruktiv | ja |
+| `delete` | `delete volume=… [pool=] yes`, `delete pool=…`, `delete jobid=1,2,…`, `delete storage=…` | destruktiv | ja |
+| `truncate` | `truncate volstatus=Purged [storage= pool= volume= drive=] yes` | destruktiv | ja |
+| `enable`, `disable` | `enable\|disable job=\|client=\|schedule=…` | idempotent | – |
+| `configure_add` | `configure add <typ> name=… <direktive>="…" …` | schreibend | – |
+| `configure_export` | `configure export client=…` | idempotent | – |
+| `reload` | `reload` | idempotent | – |
+| `setdebug` | `setdebug level= [trace=0\|1 timestamp=0\|1 hangup=] dir\|client=…\|storage=…\|all` | idempotent | – |
+| `setbandwidth` | `setbandwidth limit= client=\|storage=\|jobid=\|job=\|ujobid=\|all\|state=` | idempotent | – |
+| `execute` | beliebige einzelne Zeile (nicht `quit`, `.api`, `@…`) | destruktiv | – |
+
+Die Befehle selbst beschreiben [run](commands/run.md), [rerun](commands/rerun.md), [cancel](commands/cancel.md), [wait](commands/wait.md), [restore](commands/restore.md), [label](commands/label.md), [relabel](commands/relabel.md), [mount](commands/mount.md), [unmount](commands/unmount.md), [release](commands/release.md), [update](commands/update.md), [prune](commands/prune.md), [purge](commands/purge.md), [delete](commands/delete.md), [truncate](commands/truncate.md), [enable](commands/enable.md), [disable](commands/disable.md), [configure](commands/configure.md), [reload](commands/reload.md), [setdebug](commands/setdebug.md) und [setbandwidth](commands/setbandwidth.md).
+
+Einschränkungen in den Parametern: `wait_job` verlangt eine Auswahl (ohne Auswahl würde `wait` auf alle Jobs warten). `setdebug` mit `target` `client` oder `storage` braucht `name`, und `setbandwidth` braucht ein Ziel; ohne diese Angaben würde der Director eine Auswahlliste öffnen. Bei `configure_add` sind die Direktivennamen klein und ohne Leerzeichen (`maximumvolumejobs`), Werte vom Typ Liste wiederholen die Direktive, und `@` sowie `;` in Werten werden abgelehnt.
+
+### restore
+
+Die Auswahl der Jobs und Dateien steht vollständig in einer Zeile; der Dateibaum wird nie interaktiv geöffnet:
+
+| Auswahl | Parameter | Zeile |
+|---|---|---|
+| Jobs | `jobids: [630]` | `restore jobid=630 client=…` |
+| neuester Stand | `fileset` ohne `jobids` | `restore select current client=… fileset=…` |
+| Stand vor einem Zeitpunkt | `before: "2030-01-01 00:00:00"`, `fileset` | `restore select before="…" client=… fileset=…` |
+| alle Dateien | `all: true` | `… all done` |
+| einzelne Dateien | `files: ["/etc/passwd", …]` (ohne `jobids`: neueste Version) | `… file="/etc/passwd" … done` |
+| Verzeichnisse | `directories: ["/etc/"]` (nur mit `jobids`) | `… directory="/etc/" done` |
+| reguläre Ausdrücke | `fileregex: "\\.conf$"` | `… fileregex="\\.conf$" done` |
+
+Genau eine der vier Dateiauswahlen ist erlaubt. Für das Ziel gilt genau eine der Varianten `where`, `regexwhere` oder `strip_prefix`/`add_prefix`/`add_suffix`. Dazu kommen `replace` (`always`, `ifnewer`, `ifolder`, `never`), `restoreclient`, `restorejob` (nötig, wenn mehrere Restore-Jobs definiert sind; sonst fragt der Director, und das Tool bricht ab), `storage`, `pool` und `comment`. Pfade findet man vorher mit `ovfs_latest`, `ovfs_tree`, `ovfs_ls` und `ovfs_versions`.
+
+### Beispiele
+
+Die Ausgaben stammen aus dem Integrationslauf vom 17.10.2026 gegen onesimus-dird mit eigenem bareos-fd und bareos-sd (25.1.2) und einer Wegwerfkopie des Katalogs.
+
+Backup starten (Ergebnis gekürzt auf Text und `structuredContent`):
+
+```json
+→ {"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"run_job","arguments":{"job":"McpwBackup","level":"Full","client":"mcpw-fd","fileset":"McpwSet","pool":"McpwFull","storage":"McpwFile","priority":10,"spooldata":false,"accurate":true,"comment":"mcp-write test"}}}
+```
+
+```text
+> run job=McpwBackup level=Full client=mcpw-fd fileset=McpwSet pool=McpwFull storage=McpwFile priority=10 spooldata=no accurate=yes comment="mcp-write test" yes
+Using Catalog "MyCatalog"
+Job queued. JobId=630
+```
+
+`structuredContent`: `{"jobids":[630]}`. Danach `wait_job` mit `{"jobid":630}`:
+
+```text
+> wait jobid=630
+JobId=630
+JobStatus=OK (T)
+```
+
+Zwei Dateien aus diesem Backup zurückschreiben:
+
+```json
+{"name":"restore","arguments":{"client":"mcpw-fd","jobids":[630],"files":["/tmp/claude-10001/mcpw/data/a.txt","/tmp/claude-10001/mcpw/data/sub/c.txt"],"where":"/tmp/claude-10001/mcpw/restore/mcp1","restorejob":"McpwRestore","replace":"always","comment":"mcp restore 1"}}
+```
+
+```text
+> restore jobid=630 client=mcpw-fd file="/tmp/claude-10001/mcpw/data/a.txt" file="/tmp/claude-10001/mcpw/data/sub/c.txt" done where="/tmp/claude-10001/mcpw/restore/mcp1" replace=always restorejob=McpwRestore comment="mcp restore 1" yes
+Using Catalog "MyCatalog"
+Bootstrap records written to /tmp/claude-10001/mcpw/dirwork/mcpw-dir.restore.1.bsr
+
+The job will require the following
+   Volume(s)                 Storage(s)                SD Device(s)
+===========================================================================
+   
+    McpwFull-47324            McpwFile                  McpwFile                 
+
+Volumes marked with "*" are online.
+
+
+2 files selected to be restored.
+
+Job queued. JobId=631
+```
+
+Purge mit Bestätigung. Die Frage des Directors beantwortet das Tool mit `yes`:
+
+```json
+{"name":"purge","arguments":{"kind":"jobs","volume":["McpwFull-47324"],"confirm":true}}
+```
+
+```text
+> purge jobs volume=McpwFull-47324
+
+This command can be DANGEROUS!!!
+
+It purges (deletes) all Files from a Job,
+JobId, Client or Volume; or it purges (deletes)
+all Jobs from a Client or Volume without regard
+to retention periods. Normally you should use the
+PRUNE command, which respects retention periods.
+This command requires full access to all resources.
+Found 2 Jobs for media "McpwFull-47324" in catalog.
+Purge (yes/no)? yes
+2 Jobss on Volume "McpwFull-47324" purged from catalog.
+There are no more Jobs associated with Volume "McpwFull-47324". Marking it purged.
+```
+
+Ohne `confirm` (`{"name":"prune","arguments":{"kind":"jobs","client":"mcpw-fd"}}`), `isError: true`:
+
+```text
+prune is destructive: ask the user, then call it again with confirm=true
+```
+
+Unbekannter Job: Die Auswahlliste des Directors wird mit `.` abgebrochen, `isError: true`:
+
+```text
+> run job=NoSuchJob yes
+Job "NoSuchJob" not found
+The defined Job resources are:
+1: McpwBackup
+2: McpwRestore
+Select Job resource (1-2): .
+Selection aborted, nothing done.
+
+[oconsole] The Director asked 'Select Job resource (1-2):', which this tool does not answer; it was cancelled. Give the missing argument (e.g. a valid name) and call the tool again.
+```
+
+### Tests
+
+- Einheitentests (`cargo test -p oconsole` und `cargo test -p oconsole --no-default-features --features mcp-development`): Schemas und Annotationen, erzeugte Zeilen aller Tools, abgelehnte Eingaben, `confirm`, beantwortete und abgebrochene Rückfragen, Weiterlesen nach dem Socket-Zeitlimit. Dazu die Freigabe: Im Produktions-Build und im Entwicklungs-Build ohne `--mcp-allow-write` ist keines der Schreib-Tools gelistet, und jeder Aufruf endet mit `unknown tool`, ohne den Director zu erreichen. Die Snapshots `crates/oconsole/testdata/tools_list_*.json` und `tool_calls_*.json` halten `tools/list` und die Ergebnisse fester Aufrufe je Build fest.
+- Integrationslauf: onesimus-dird mit privatem `bareos-fd` und `bareos-sd` (eigene Ports, Storage-Verzeichnis im Scratchpad) und einer Wegwerfkopie des Katalogs, oconsole `--mcp` über stdio mit einem Skript. Produktions-Build: Keines der 23 Schreib-Tools und `execute` ist gelistet, alle Aufrufe enden mit `unknown tool`, und die Binärdatei enthält die Toolnamen nicht. Entwicklungs-Build mit `--mcp-allow-write`: Jedes Tool wurde mindestens einmal aufgerufen (62 Prüfungen). Dazu gehören ein Backup, vier Restores ins Scratchpad (`files`, `all` mit `strip_prefix`/`add_prefix`, `directories` mit `regexwhere`, `before` mit `fileregex`), deren Dateien danach geprüft wurden, sowie label, mount, unmount und release auf einem File-Gerät. Außerdem: update volume/pool, Abbruch eines auf 2030 eingeplanten Jobs, enable/disable für Job, Client und Schedule, setdebug, setbandwidth, `configure add` und `export`, reload, rerun, prune, purge (mit beantworteter Rückfrage), relabel, truncate und delete (jobid, volume, pool).
+- Befund am Director: `label` und `relabel` schicken dem Storage Daemon einen falschen Befehl (`3903 Error scanning label command`) und schreiben den Katalog trotzdem ([C-084](../COMPATIBILITY-LOG.md), S-32). Die Tools geben diese Ausgabe unverändert weiter.
