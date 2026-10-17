@@ -89,17 +89,17 @@ Selection aborted, nothing done.
 
 ### Pool steht schon im Katalog
 
-Steht der Pool schon im Katalog, scheitert Onesimus derzeit an einer Katalogabfrage (Spalte `fileretention`) und meldet trotzdem `Pool Full created.`:
+Steht der Pool schon im Katalog, meldet `create` das als Fehler. Die anschließende Zeile `Pool Full created.` kommt trotzdem; so verhält sich auch das Original. Am Katalog ändert sich nichts.
 
 ```text
 *UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]> create pool=Full
 Automatically selected Catalog: MyCatalog
 Using Catalog "MyCatalog"
-Query: error returned from database: Spalte >>fileretention<< von Relation >>pool<< existiert nicht
+Error: Pool Full already exists.
+Use update to change it.
 Pool Full created.
 *UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]>
 ```
-**Abweichung vom Original:** Das Original meldet `Error: Pool Full already exists.`, `Use update to change it.` und danach `Pool Full created.` (C-066)
 
 Dasselbe über die Auswahlliste:
 
@@ -114,13 +114,13 @@ The defined Pool resources are:
 4: Scratch
 Select Pool resource (1-4):
 > 2
-Query: error returned from database: Spalte >>fileretention<< von Relation >>pool<< existiert nicht
+Error: Pool Full already exists.
+Use update to change it.
 Pool Full created.
 *UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]>
 ```
-**Abweichung vom Original:** Das Original meldet `Error: Pool Full already exists.`, `Use update to change it.` und danach `Pool Full created.` (C-066)
 
-Unter `.api 2`:
+Unter `.api 2` steht nur die Fehlermeldung im JSON-Fehlerobjekt:
 
 ```text
 *UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]> .api 2
@@ -142,7 +142,7 @@ Unter `.api 2`:
       "result": {},
       "messages": {
         "error": [
-          "Query: error returned from database: Spalte >>fileretention<< von Relation >>pool<< existiert nicht\n"
+          "Error: Pool Full already exists.\nUse update to change it.\n"
         ]
       }
     }
@@ -150,7 +150,6 @@ Unter `.api 2`:
 }
 *UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]>
 ```
-**Abweichung vom Original:** Das Original liefert als Fehlermeldung `Error: Pool Full already exists.\nUse update to change it.\n` (C-066)
 
 ### Neuen Pool anlegen
 
@@ -163,8 +162,8 @@ Beispielausgabe nicht verfügbar: alle Pool-Ressourcen der Testkonfiguration ste
 | Meldung | Ursache und Abhilfe |
 |---|---|
 | `Error: Pool resource "<name>" does not exist.` | Es gibt keine Pool-Ressource dieses Namens in der Konfiguration. Pool aus der folgenden Liste wählen oder die Konfiguration prüfen (`show pools`). |
-| `Error: Pool <name> already exists.` / `Use update to change it.` | Der Pool steht schon im Katalog (Bareos-Verhalten). Änderungen mit `update pool=<name>` übernehmen. |
-| `Query: error returned from database: …` | Der Katalog hat die Abfrage abgewiesen. Bei Onesimus derzeit für vorhandene Pools, siehe oben. |
+| `Error: Pool <name> already exists.` / `Use update to change it.` | Der Pool steht schon im Katalog. Änderungen der Konfiguration mit `update pool=<name>` übernehmen. |
+| `Query: error returned from database: …` | Der Katalog hat die Abfrage abgewiesen; die Datenbankmeldung steht dahinter. |
 | `Selection aborted, nothing done.` | Die Auswahl wurde mit `.` abgebrochen. |
 
 ## Siehe auch

@@ -77,13 +77,13 @@ Mehrere Parameter dürfen in einer Zeile stehen; jeder wird einzeln geprüft und
 | `slot=<n>` | 0 bis `Maximum Volumes` des Pools | Slot im Autochanger. |
 | `enabled=<wert>` | `yes`, `no`, `archived`, `0`, `1`, `2` | Volume für neue Jobs freigeben, sperren oder als archiviert markieren. |
 | `encrypt=<wert>` | `yes`, `no`, `rotate` | Schlüssel für Hardware-Verschlüsselung setzen, entfernen oder erneuern. Nur bei Volumes mit Schlüssel. |
-| `pool=<pool>` | Pool-Name | Volume in einen anderen Pool verschieben. In Onesimus derzeit nicht unterstützt (C-067). |
-| `recyclepool=<pool>` | Pool-Name | Pool, in den das Volume beim Recyceln wandert. In Onesimus derzeit nicht unterstützt (C-067). |
-| `actiononpurge=<wert>` | `None`, `Truncate` | Was beim Leeren mit dem Volume geschieht. In Onesimus derzeit nicht unterstützt (C-067). |
-| `storage=<storage>` | Storage-Name | Storage-Zuordnung des Volumes. In Onesimus derzeit nicht unterstützt (C-067). |
+| `pool=<pool>` | Pool-Name | Volume in einen anderen Pool verschieben. |
+| `recyclepool=<pool>` | Pool-Name | Pool, in den das Volume beim Recyceln wandert. |
+| `actiononpurge=<wert>` | `None`, `Truncate` | Was beim Leeren mit dem Volume geschieht. |
+| `storage=<storage>` | Storage-Name | Storage-Zuordnung des Volumes. |
 | `frompool=<beliebig>` | — | Volume-Standardwerte erneut aus seinem Pool übernehmen. Ohne `=` und Wert öffnet sich stattdessen das Menü. |
-| `allfrompool=<pool>` | Pool-Name | Standardwerte aller Volumes dieses Pools neu setzen. In Onesimus derzeit nicht unterstützt (C-067). |
-| `fromallpools` | — | Standardwerte aller Volumes aller Pools neu setzen. In Onesimus derzeit nicht unterstützt (C-067). |
+| `allfrompool=<pool>` | Pool-Name | Standardwerte aller Volumes dieses Pools neu setzen. |
+| `fromallpools` | — | Standardwerte aller Volumes aller Pools neu setzen. |
 
 ### Parameter für `update slots`, `update jobid` und `update stats`
 
@@ -99,8 +99,6 @@ Mehrere Parameter dürfen in einer Zeile stehen; jeder wird einzeln geprüft und
 | `jobname=<name>` | Job-Name | Neuer Job-Name. |
 | `jobtype=<typ>` | Job-Typ-Buchstabe | Neuer Job-Typ. |
 | `days=<tage>` | Ganzzahl | Nur Jobs der letzten `<tage>` Tage in die Statistik übernehmen. |
-
-`update jobid` und `update stats` sind in Onesimus derzeit nicht umgesetzt (C-067).
 
 ## Dialoge
 
@@ -597,15 +595,14 @@ Selection aborted, nothing done.
 *UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]> update pool=Full
 Automatically selected Catalog: MyCatalog
 Using Catalog "MyCatalog"
-+--------+------+---------+---------+---------+------------+-----------------+--------------+----------------+------------+----------------+-----------+---------+----------+-------------+---------+---------------+---------------+-----------+
-| poolid | name | numvols | maxvols | useonce | usecatalog | acceptanyvolume | volretention | voluseduration | maxvoljobs | maxvolbytes    | autoprune | recycle | pooltype | labelformat | enabled | scratchpoolid | recyclepoolid | labeltype |
-+--------+------+---------+---------+---------+------------+-----------------+--------------+----------------+------------+----------------+-----------+---------+----------+-------------+---------+---------------+---------------+-----------+
-|      3 | Full |       6 |     100 |       0 |          1 |               0 |   31,536,000 |              0 |          0 | 53,687,091,200 |         1 |       1 | Backup   | Full-       |       1 |             0 |             0 |         0 |
-+--------+------+---------+---------+---------+------------+-----------------+--------------+----------------+------------+----------------+-----------+---------+----------+-------------+---------+---------------+---------------+-----------+
++--------+------+---------+---------+---------+------------+-----------------+--------------+----------------+------------+-------------+----------------+-----------+---------+---------------+----------+-----------+-------------+---------+---------------+---------------+------------+--------------+--------------+--------------------+-------------------+---------------+
+| poolid | name | numvols | maxvols | useonce | usecatalog | acceptanyvolume | volretention | voluseduration | maxvoljobs | maxvolfiles | maxvolbytes    | autoprune | recycle | actiononpurge | pooltype | labeltype | labelformat | enabled | scratchpoolid | recyclepoolid | nextpoolid | minblocksize | maxblocksize | migrationhighbytes | migrationlowbytes | migrationtime |
++--------+------+---------+---------+---------+------------+-----------------+--------------+----------------+------------+-------------+----------------+-----------+---------+---------------+----------+-----------+-------------+---------+---------------+---------------+------------+--------------+--------------+--------------------+-------------------+---------------+
+|      3 | Full |       5 |     100 |       0 |          1 |               0 |   31,536,000 |              0 |          0 |           0 | 53,687,091,200 |         1 |       1 |             0 | Backup   |         0 | Full-       |       1 |             0 |             0 |          0 |            0 |            0 |                  0 |                 0 |             0 |
++--------+------+---------+---------+---------+------------+-----------------+--------------+----------------+------------+-------------+----------------+-----------+---------+---------------+----------+-----------+-------------+---------+---------------+---------------+------------+--------------+--------------+--------------------+-------------------+---------------+
 Pool DB record updated from resource.
 *UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]>
 ```
-**Abweichung vom Original:** Die Tabelle des Originals hat zusätzlich die Spalten `maxvolfiles`, `actiononpurge`, `nextpoolid`, `minblocksize`, `maxblocksize`, `migrationhighbytes`, `migrationlowbytes` und `migrationtime`. (C-068)
 
 Ohne Namen erscheint die Auswahl der Pool-Ressourcen:
 
@@ -670,45 +667,140 @@ Unter `.api 2`:
 *UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]>
 ```
 
-### Nicht unterstützte Varianten
-
-`update volume … pool=`, `recyclepool=`, `actiononpurge=`, `storage=`, `allfrompool=`, `fromallpools`, `update stats` und `update jobid=<id> …` melden in Onesimus derzeit `not supported`.
+### Volume in einen anderen Pool verschieben
 
 ```text
 *UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]> update volume=Full-0001 pool=Incremental
 Automatically selected Catalog: MyCatalog
 Using Catalog "MyCatalog"
-update volume pool: not supported
+New Pool is: Incremental
 *UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]>
 ```
-**Abweichung vom Original:** Das Original verschiebt das Volume und meldet `New Pool is: Incremental`. (C-067)
+
+### Recycle-Pool, Action On Purge und Storage setzen
+
+```text
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]> update volume=Full-0001 recyclepool=Scratch
+Automatically selected Catalog: MyCatalog
+Using Catalog "MyCatalog"
+New RecyclePool is: Scratch
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]>
+```
+
+```text
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]> update volume=Full-0001 actiononpurge=Truncate
+Automatically selected Catalog: MyCatalog
+Using Catalog "MyCatalog"
+New ActionOnPurge is: Truncate
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]>
+```
+
+Ein unbekannter Wert für `actiononpurge=` setzt `None`:
+
+```text
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]> update volume=Full-0001 actiononpurge=bogus
+Automatically selected Catalog: MyCatalog
+Using Catalog "MyCatalog"
+New ActionOnPurge is: None
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]>
+```
+
+`storage=` ändert die Storage-Zuordnung ohne Bestätigung:
+
+```text
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]> update volume=Full-0001 storage=File
+Automatically selected Catalog: MyCatalog
+Using Catalog "MyCatalog"
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]>
+```
+
+### Standardwerte aus dem Pool übernehmen
+
+`allfrompool=<pool>` setzt Aufbewahrung, Grenzen und Recycle-Einstellungen aller Volumes eines Pools auf die Werte des Pool-Eintrags, `fromallpools` tut das für alle Pools:
 
 ```text
 *UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]> update volume allfrompool=Full
 Automatically selected Catalog: MyCatalog
 Using Catalog "MyCatalog"
-update volume allfrompool: not supported
+All Volume defaults updated from "Full" Pool record.
 *UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]>
 ```
-**Abweichung vom Original:** Das Original meldet `All Volume defaults updated from "Full" Pool record.` (C-067)
+
+```text
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]> update volume fromallpools
+Automatically selected Catalog: MyCatalog
+Using Catalog "MyCatalog"
+All Volume defaults updated from "Differential" Pool record.
+All Volume defaults updated from "Scratch" Pool record.
+All Volume defaults updated from "Full" Pool record.
+All Volume defaults updated from "Incremental" Pool record.
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]>
+```
+
+### Langzeitstatistik fortschreiben
 
 ```text
 *UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]> update stats days=30
 Automatically selected Catalog: MyCatalog
 Using Catalog "MyCatalog"
-update stats: not supported
+Updating 148 job(s).
 *UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]>
 ```
-**Abweichung vom Original:** Das Original schreibt die Statistik fort und meldet `Updating 148 job(s).` (C-067)
+
+Über das Hauptmenü (Punkt 4) ohne `days=`:
+
+```text
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]> update
+Automatically selected Catalog: MyCatalog
+Using Catalog "MyCatalog"
+Update choice:
+1: Volume parameters
+2: Pool from resource
+3: Slots from autochanger
+4: Long term statistics
+Choose catalog item to update (1-4):
+> 4
+Updating 13 job(s).
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]>
+```
+
+### Job-Eintrag ändern
+
+`update jobid=<id>` ändert die angegebenen Felder ohne Bestätigung. Werte mit Leerzeichen stehen in Anführungszeichen.
+
+```text
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]> update jobid=506 jobname=DocsRenamed
+Automatically selected Catalog: MyCatalog
+Using Catalog "MyCatalog"
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]>
+```
+
+```text
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]> update jobid=506 starttime="2026-10-01 10:00:00"
+Automatically selected Catalog: MyCatalog
+Using Catalog "MyCatalog"
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]>
+```
+
+Ohne Feld meldet der Director, was fehlt:
+
+```text
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]> update jobid=506
+Automatically selected Catalog: MyCatalog
+Using Catalog "MyCatalog"
+Neither Client, StartTime, Filesetid, JobType nor Name specified.
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]>
+```
+
+Eine unbekannte Job-ID meldet der Katalog:
 
 ```text
 *UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]> update jobid=999999 jobname=x
 Automatically selected Catalog: MyCatalog
 Using Catalog "MyCatalog"
-update jobid: not supported
+cats/sql_get.cc:275 No Job found for JobId 999999
 *UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]>
 ```
-**Abweichung vom Original:** Das Original meldet für eine unbekannte Job-ID `cats/sql_get.cc:275 No Job found for JobId 999999`. (C-067)
 
 Fehlt bei `update jobid` die Job-ID, kommt die Meldung aus dem Original:
 
@@ -739,9 +831,10 @@ Expect JobId keyword, not found.
 | `Error: Pool resource "<name>" does not exist.` | `update pool=` mit einem Namen, den die Konfiguration nicht kennt. |
 | `Expected a positive integer, got: <eingabe>` / `Please enter a number between 1 and 19` | Im Menü wurde keine gültige Nummer eingegeben. |
 | `Expect JobId keyword, not found.` | `update jobid` ohne `=<jobid>`. |
+| `Neither Client, StartTime, Filesetid, JobType nor Name specified.` | `update jobid=<id>` ohne eines der Felder `client=`, `starttime=`, `filesetid=`, `jobtype=`, `jobname=`. |
 | `The defined Autochanger Storage resources are:` / `Selection list for "Storage" is empty!` | `update slots` ohne Autochanger in der Konfiguration. |
 | `3998 Device "…" is not an autochanger.` / `No slots in changer to scan.` | Antwort des Storage Daemons: das Gerät ist kein Autochanger. |
-| `<variante>: not supported` | Diese Variante ist in Onesimus noch nicht umgesetzt (C-067). |
+| `cats/sql_get.cc:275 No Job found for JobId <n>` | `update jobid=` mit einer Job-ID, die nicht im Katalog steht. |
 | `Selection aborted, nothing done.` | Der Dialog wurde mit `.` abgebrochen. |
 
 ## Siehe auch

@@ -113,14 +113,18 @@ Selection list for "Storage" is empty!
 *UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]>
 ```
 
-### Storage ohne Slotauswahl
+### Storage ohne Autochanger
+
+Mit `storage=` fragt `move` zuerst den Storage Daemon nach der Zahl der Slots. Das Datei-Gerät der Testkonfiguration ist kein Autochanger:
 
 ```text
 *UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]> move storage=File
-Cannot perform a move operation without source and/or destination selection
+Connecting to Storage daemon File at WS-JOERG.intranet.bernau.family:9103 ...
+3998 Device ""FileStorage" (/srv/BACKUP/bareos-storage)" is not an autochanger.
+Device "FileStorage" has 0 slots.
+No slots in changer.
 *UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]>
 ```
-**Abweichung vom Original:** Das Original fragt zuerst den Storage Daemon nach den Slots und antwortet `3998 Device ""FileStorage" (/srv/BACKUP/bareos-storage)" is not an autochanger.`, `Device "FileStorage" has 0 slots.` und `No slots in changer.` (C-069)
 
 ### Storage über einen Job bestimmen
 
