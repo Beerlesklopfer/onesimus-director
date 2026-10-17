@@ -137,7 +137,8 @@ pub fn handle_console_session_with<S: Read + Write>(
     // Session flags (set by gui, trace, .grpc commands; autodisplay and the
     // "You have messages." flag live in the SessionManager)
     let mut gui_mode = false;     // gui on/off
-    let mut grpc_mode = false;    // .grpc on/off
+    // `.grpc on`: API mode and compact flag before it, restored by `.grpc off`
+    let mut grpc_previous: Option<(command_executor::ApiMode, bool)> = None;
     let mut json_compact = false; // .api json compact=yes|no (OutputFormatter::SetCompact)
 
     // EOD after init messages — signals "ready for commands" to the console.
@@ -237,6 +238,28 @@ pub fn handle_console_session_with<S: Read + Write>(
                 json_compact = compact.unwrap_or(json_compact);
             }
         }
+        // `.grpc` (Onesimus extension) switches like `.api` before it runs.
+        if command_allowed && ast.command_name == ".grpc" {
+            use crate::commands::dot::GrpcRequest;
+            match crate::commands::dot::parse_dot_grpc(&ast) {
+                Ok(GrpcRequest::On { format, compact }) => {
+                    if grpc_previous.is_none() {
+                        grpc_previous = Some((ctx.api_mode, json_compact));
+                    }
+                    ctx.api_mode = format.api_mode();
+                    json_compact = compact;
+                    session_mgr.set_session_grpc(mgr_session_id, Some((format.name(), compact)));
+                }
+                Ok(GrpcRequest::Off) => {
+                    if let Some((mode, compact)) = grpc_previous.take() {
+                        ctx.api_mode = mode;
+                        json_compact = compact;
+                    }
+                    session_mgr.set_session_grpc(mgr_session_id, None);
+                }
+                Ok(GrpcRequest::Status) | Err(_) => {}
+            }
+        }
 
         // C++ AutomountCmd: without exactly one argument the value is asked
         // for (GetCmd); no answer (lone dot, lost connection) keeps the flag.
@@ -265,12 +288,6 @@ pub fn handle_console_session_with<S: Read + Write>(
                     gui_mode = on;
                     session_mgr.set_session_gui(mgr_session_id, gui_mode);
                 }
-            }
-            ".grpc" => {
-                let on = ast.arguments.iter().any(|a| a.key == "on");
-                let off = ast.arguments.iter().any(|a| a.key == "off");
-                if on { grpc_mode = true; api_mode = command_executor::ApiMode::Json; }
-                if off { grpc_mode = false; }
             }
             _ => {}
         }
@@ -703,6 +720,67 @@ mod quit_tests {
         let json: serde_json::Value = serde_json::from_str(&bnet.recv_str().unwrap()).unwrap();
         assert_eq!(json["result"], serde_json::json!({}));
         assert!(bnet.recv().is_err(), "expected close without MainPrompt or TERMINATE");
+        server.join().unwrap();
+    }
+
+    /// Frames and texts until (and including) `end`.
+    fn until(bnet: &mut BnetStream<TcpStream>, end: BnetSignal) -> Vec<BnetMessage> {
+        let mut seen = Vec::new();
+        loop {
+            let message = bnet.recv().unwrap();
+            let done = message == BnetMessage::Signal(end);
+            seen.push(message);
+            if done {
+                return seen;
+            }
+        }
+    }
+
+    fn texts(messages: &[BnetMessage]) -> Vec<String> {
+        messages.iter().filter_map(|m| match m {
+            BnetMessage::Data(data) => Some(String::from_utf8_lossy(data).into_owned()),
+            _ => None,
+        }).collect()
+    }
+
+    /// `.grpc` (Onesimus extension, S-10): on switches like `.api` before the
+    /// reply, format=/compact= take effect, off restores the previous mode.
+    #[test]
+    fn grpc_on_off_switches_and_restores_api_mode() {
+        let (mut bnet, server) = session("admin", "*all*");
+        bnet.send_str(".grpc on compact=yes").unwrap();
+        let reply = until(&mut bnet, BnetSignal::MainPrompt);
+        assert_eq!(reply.first(), Some(&BnetMessage::Signal(BnetSignal::CmdOk)));
+        let json = texts(&reply).join("");
+        assert!(!json.contains('\n'), "compact JSON: {json}");
+        let value: serde_json::Value = serde_json::from_str(&json).unwrap();
+        assert_eq!(value["result"]["grpc"]["mode"], "on");
+        assert_eq!(value["result"]["grpc"]["compact"], true);
+        assert_eq!(value["result"]["grpc"]["apimode"], 2);
+        assert_eq!(value["result"]["grpc"]["text"], "gRPC mode: on, format=json, compact=yes\n");
+        // off: back to the human console (no frame after the reply, EOD).
+        bnet.send_str(".grpc off").unwrap();
+        let reply = until(&mut bnet, BnetSignal::Eod);
+        assert_eq!(reply.first(), Some(&BnetMessage::Signal(BnetSignal::CmdBegin)));
+        assert_eq!(texts(&reply), vec!["gRPC mode: off\n".to_string()]);
+        // From API 1: format=text stays in API 1, off returns to API 1.
+        bnet.send_str(".api 1").unwrap();
+        until(&mut bnet, BnetSignal::MainPrompt);
+        bnet.send_str(".grpc on format=text").unwrap();
+        let reply = until(&mut bnet, BnetSignal::MainPrompt);
+        assert_eq!(texts(&reply), vec!["gRPC mode: on, format=text, compact=no\n".to_string()]);
+        bnet.send_str(".grpc on").unwrap();
+        let reply = until(&mut bnet, BnetSignal::MainPrompt);
+        assert!(texts(&reply)[0].contains("\"text\": \"gRPC mode: on, format=json, compact=no\\n\""), "{:?}", texts(&reply));
+        bnet.send_str(".grpc off").unwrap();
+        let reply = until(&mut bnet, BnetSignal::MainPrompt);
+        assert_eq!(texts(&reply), vec!["gRPC mode: off\n".to_string()]);
+        // Invalid arguments change nothing.
+        bnet.send_str(".grpc format=proto").unwrap();
+        let reply = until(&mut bnet, BnetSignal::MainPrompt);
+        assert!(reply.contains(&BnetMessage::Signal(BnetSignal::CmdFailed)));
+        bnet.send_str("quit").unwrap();
+        drop(bnet);
         server.join().unwrap();
     }
 

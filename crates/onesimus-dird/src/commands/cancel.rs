@@ -100,7 +100,9 @@ fn cancel_storage_daemon_job(ua: &mut Ua, ast: &CommandAst, links: &mut dyn Canc
     if !ua_select::is_a_number(jobid) {
         ua.warning_msg(format!("JobId {jobid} not a number\n"));
     }
-    // sd_cmds.cc CancelStorageDaemonJob(ua, store, JobId) (:590).
+    // sd_cmds.cc CancelStorageDaemonJob(ua, store, JobId) (:590): its
+    // "*JobCancel*" control JCR takes a job name number (S-26).
+    let _ = crate::commands::job::new_control_jcr_name("*JobCancel*");
     match links.storage_daemon(&store, &director_name(ctx), &format!("cancel Job={jobid}\n")) {
         Ok(messages) => messages.into_iter().for_each(|message| ua.send_msg(message)),
         Err(_) => ua.error_msg("Failed to connect to Storage daemon.\n"),

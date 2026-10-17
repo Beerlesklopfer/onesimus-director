@@ -175,8 +175,40 @@ pub fn job_message_text(director: &str, job_id: u32, msg_type: MsgType, text: &s
 /// (JobId 0) or a job unknown to the configuration — uses the Director's
 /// Messages resource (`daemon_msgs`).
 pub fn job_message(config: &DirectorConfig, job_name: &str, job_id: u32, msg_type: MsgType, mtime: i64, text: &str) {
+    // "Dequeue messages to keep the original order" (message.cc Jmsg).
+    dequeue_messages(config, job_id);
     let msg = job_message_text(&config.director.name, job_id, msg_type, text);
     dispatch_job_message(config, job_name, job_id, crate::audit::code(msg_type), mtime, &msg);
+}
+
+/// A job message queued with [`qmsg`]: (job name, type, time, text).
+type Queued = (String, MsgType, i64, String);
+
+/// jcr->msg_queue of the jobs (Qmsg), per JobId.
+static MSG_QUEUE: std::sync::Mutex<std::collections::BTreeMap<u32, Vec<Queued>>> =
+    std::sync::Mutex::new(std::collections::BTreeMap::new());
+
+/// Qmsg(jcr, type, mtime, ...): a message of a thread that may not send
+/// it itself (the watchdog); it goes out before the job's next Director
+/// message (Jmsg dequeues first) or with its end (UpdateJobEnd).
+pub fn qmsg(bus: &crate::message_bus::MessageBus, job_id: u32, job_name: &str, msg_type: MsgType, text: String) {
+    let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_secs() as i64;
+    MSG_QUEUE.lock().unwrap_or_else(|e| e.into_inner()).entry(job_id).or_default()
+        .push((job_name.to_string(), msg_type, now, text.clone()));
+    bus.post(crate::message_bus::BusMessage::JobMessage { job_id, job_name: job_name.to_string(), msg_type, text,
+        timestamp: now });
+}
+
+/// DequeueMessages(jcr): dispatch the queued messages of JobId `job_id`.
+pub fn dequeue_messages(config: &DirectorConfig, job_id: u32) {
+    if job_id == 0 {
+        return;
+    }
+    let queued = MSG_QUEUE.lock().unwrap_or_else(|e| e.into_inner()).remove(&job_id);
+    for (job_name, msg_type, mtime, text) in queued.unwrap_or_default() {
+        let msg = job_message_text(&config.director.name, job_id, msg_type, &text);
+        dispatch_job_message(config, &job_name, job_id, crate::audit::code(msg_type), mtime, &msg);
+    }
 }
 
 /// DispatchMessage(jcr, type, mtime, msg) of a complete message (a job

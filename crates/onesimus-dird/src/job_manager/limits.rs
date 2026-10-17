@@ -29,6 +29,8 @@ pub struct StartFlags {
     pub ignore_duplicate_check: bool,
     /// Seconds; 0 = none.
     pub max_run_sched_time: i64,
+    /// jcr->dir_impl->reschedule_count of a job rerun by RescheduleJob().
+    pub reschedule_count: u32,
 }
 
 /// The directives of the Job resource (with JobDefs) the checks use.
@@ -48,6 +50,10 @@ pub(super) struct JobLimits {
     always_incremental: bool,
     backup: bool,
     fileset: String,
+    reschedule_on_error: bool,
+    reschedule_incomplete: bool,
+    reschedule_interval: i64,
+    reschedule_times: u32,
 }
 
 impl Default for JobLimits {
@@ -55,7 +61,8 @@ impl Default for JobLimits {
         Self { max_wait_time: 0, max_run_time: 0, full_max_run_time: 0, inc_max_run_time: 0, diff_max_run_time: 0,
             max_start_delay: 0, allow_duplicate_jobs: true, cancel_lower_level: false, cancel_queued: false,
             cancel_running: false, duplicate_job_proximity: 0, always_incremental: false, backup: false,
-            fileset: String::new() }
+            fileset: String::new(), reschedule_on_error: false, reschedule_incomplete: true,
+            reschedule_interval: 1800, reschedule_times: 5 }
     }
 }
 
@@ -71,6 +78,16 @@ pub(super) struct LimitState {
     /// jcr->wait_time / wait_time_sum.
     wait_since: Option<i64>,
     wait_sum: i64,
+    /// RescheduleJob() looked at the ended job.
+    reschedule_checked: bool,
+}
+
+impl LimitState {
+    /// jcr->dir_impl->reschedule_count (tests).
+    #[cfg(test)]
+    pub(super) fn reschedule_count(&self) -> u32 {
+        self.flags.reschedule_count
+    }
 }
 
 /// The 60-second JobMonitorWatchdog timer.
@@ -80,6 +97,27 @@ pub(super) struct Monitor {
     /// Jobs the watchdog cancels: CancelJob() (commands/cancel.rs) runs
     /// outside the JobManager lock (monitor_loop).
     cancel: Vec<u32>,
+    /// Jobs RescheduleJob() reruns with a new JobId (outside the lock).
+    reruns: Vec<Rerun>,
+}
+
+/// A rescheduled job that wrote data: RunJob() of a new JCR (jobq.cc:640).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Rerun {
+    pub job_name: String,
+    pub level: String,
+    pub pool: String,
+    pub storage: String,
+    pub sched_time: i64,
+    pub reschedule_count: u32,
+}
+
+/// RescheduleJob()'s condition (jobq.cc:574) for an ended job.
+fn wants_reschedule(l: &JobLimits, count: u32, status: char, level: char) -> bool {
+    (l.reschedule_times == 0 || count < l.reschedule_times)
+        && l.backup
+        && ((l.reschedule_incomplete && status == 'I' && level != 'B')
+            || (l.reschedule_on_error && !matches!(status, 'T' | 'W') && status != 'A'))
 }
 
 /// JobMonitorWatchdog interval (job.cc InitJobServer: wd->interval = 60).
@@ -114,6 +152,10 @@ pub(super) fn job_limits(config: &crate::director_config::DirectorConfig, job_na
         always_incremental: yes(get("alwaysincremental").as_deref(), false),
         backup: job.is_some_and(|j| j.job_type == bareos_config::resources::JobType::Backup),
         fileset: job.map(|j| j.fileset.clone()).unwrap_or_default(),
+        reschedule_on_error: yes(get("rescheduleonerror").as_deref(), false),
+        reschedule_incomplete: yes(get("rescheduleincompletejobs").as_deref(), true),
+        reschedule_interval: get("rescheduleinterval").map_or(1800, |v| seconds(Some(&v))),
+        reschedule_times: get("rescheduletimes").and_then(|v| v.trim().parse().ok()).unwrap_or(5),
     }
 }
 
@@ -348,7 +390,8 @@ impl JobManager {
         }
         for (id, name, text) in cancel {
             self.set_status(id, 'A');
-            self.post_info(id, &name, crate::message_bus::MsgType::Fatal, text.to_string());
+            // "The watchdog thread can't use Jmsg directly, we always queued it."
+            crate::console_msg::qmsg(&self.bus, id, &name, crate::message_bus::MsgType::Fatal, text.to_string());
             self.monitor.cancel.push(id);
         }
     }
@@ -361,6 +404,60 @@ impl JobManager {
     /// The catalog the JobManager uses.
     pub fn catalog(&self) -> Option<CatalogHandle> {
         self.catalog.clone()
+    }
+
+    /// RescheduleJob() (jobq.cc:567) of the jobs that ended: a job without
+    /// data is queued again under its JobId (JS_WaitStartTime, sched_wait),
+    /// one that wrote data is rerun as a new job ([`Self::take_reruns`]).
+    pub(super) fn reschedule_jobs(&mut self) {
+        let ended: Vec<u32> = self.jobs.iter()
+            .filter(|j| j.completed_at.is_some() && !j.jcr.recorded && !j.jcr.limits.reschedule_checked)
+            .map(|j| j.job_id).collect();
+        for id in ended {
+            let Some(at) = self.jobs.iter().position(|j| j.job_id == id) else { continue };
+            self.jobs[at].jcr.limits.reschedule_checked = true;
+            let job = &self.jobs[at];
+            let state = &job.jcr.limits;
+            if !wants_reschedule(&state.limits, state.flags.reschedule_count, job.status(), state.level) {
+                continue;
+            }
+            let now = now_unix();
+            let sched_time = now + state.limits.reschedule_interval;
+            let unique = job.handle.unique_job.clone();
+            let name = job.job_name.clone();
+            let count = state.flags.reschedule_count + 1;
+            let fmt = |t: i64| crate::localtime::strftime("%d-%b-%Y %H:%M", t as libc::time_t);
+            let text = format!("Rescheduled Job {unique} at {} to re-run in {} seconds ({}).\n",
+                fmt(now), state.limits.reschedule_interval, fmt(sched_time));
+            self.post_info(id, &name, crate::message_bus::MsgType::Info, text);
+            let job = self.jobs.remove(at);
+            let (client, storage) = job.resources.clone().unwrap_or_default();
+            let Some(params) = job.jcr.params.clone() else { continue };
+            if job.last_bytes != 0 {
+                self.monitor.reruns.push(Rerun { job_name: name, level: params.level.clone(),
+                    pool: params.pool_name.clone(), storage, sched_time, reschedule_count: count });
+                self.jobs.insert(at, job);
+                continue;
+            }
+            // UpdateJobEnd(jcr, JS_WaitStartTime), then JobqAdd() of the same JCR.
+            if let Some(cat) = &self.catalog {
+                if let Err(e) = cat.raw_query(&format!("UPDATE Job SET JobStatus='t' WHERE JobId={id}")) {
+                    warn!("Job {id}: UpdateJobEnd: {e}");
+                }
+            }
+            let mut flags = job.jcr.limits.flags;
+            flags.reschedule_count = count;
+            let mut report = job.jcr.report.clone();
+            if let Some(report) = report.as_mut() { report.sched_time = sched_time; }
+            self.enqueue_job_with(id, &name, QueuedStart { params, priority: job.jcr.priority, sched_time },
+                &client, &storage, flags);
+            if let Some(report) = report { self.set_job_report(id, report); }
+        }
+    }
+
+    /// The new-JobId reruns RescheduleJob() decided since the last call.
+    pub fn take_reruns(&mut self) -> Vec<Rerun> {
+        std::mem::take(&mut self.monitor.reruns)
     }
 
     /// The jobs the watchdog decided to cancel since the last call.
@@ -457,6 +554,23 @@ mod tests {
         s.flags.max_run_sched_time = 60;
         assert!(!run_sched_time_exceeded(&s, 1059));
         assert!(run_sched_time_exceeded(&s, 1060));
+    }
+
+    #[test]
+    fn reschedule_conditions() {
+        let l = JobLimits { backup: true, reschedule_on_error: true, reschedule_times: 2, ..Default::default() };
+        assert!(wants_reschedule(&l, 0, 'E', 'F'));
+        assert!(wants_reschedule(&l, 1, 'f', 'I'));
+        assert!(!wants_reschedule(&l, 2, 'E', 'F'));
+        assert!(!wants_reschedule(&l, 0, 'T', 'F'));
+        assert!(!wants_reschedule(&l, 0, 'A', 'F'));
+        assert!(wants_reschedule(&JobLimits { reschedule_times: 0, ..l.clone() }, 100, 'E', 'F'));
+        assert!(!wants_reschedule(&JobLimits { backup: false, ..l.clone() }, 0, 'E', 'F'));
+        // incomplete backups by default, not Base
+        let d = JobLimits { backup: true, ..Default::default() };
+        assert!(wants_reschedule(&d, 0, 'I', 'F'));
+        assert!(!wants_reschedule(&d, 0, 'I', 'B'));
+        assert!(!wants_reschedule(&d, 0, 'E', 'F'));
     }
 
     #[test]
