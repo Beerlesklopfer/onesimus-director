@@ -82,6 +82,32 @@ thread_local! {
     static CURRENT: RefCell<Option<RunOverrides>> = const { RefCell::new(None) };
     /// `ignoreduplicatecheck=` of the run the current thread starts.
     static IGNORE_DUPLICATE_CHECK: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+    /// reschedule_count of a job RescheduleJob() reruns as a new job.
+    static RESCHEDULE_COUNT: std::cell::Cell<u32> = const { std::cell::Cell::new(0) };
+}
+
+/// RescheduleJob() of a job that wrote data (jobq.cc:640): RunJob() of a
+/// new JCR with the job's level, pool, write storage and sched_time.
+pub fn rerun(manager: &Arc<Mutex<crate::job_manager::JobManager>>, rerun: &crate::job_manager::Rerun) {
+    let (config, catalog) = {
+        let mgr = manager.lock().unwrap();
+        (mgr.config(), mgr.catalog())
+    };
+    let Some(config) = config else { return };
+    let Some(job) = config.read().ok().and_then(|c| c.find_job(&rerun.job_name).cloned()) else { return };
+    let arg = |key: &str, value: &str| Argument { key: key.to_string(), value: Some(value.to_string()) };
+    let mut arguments = vec![arg("job", &rerun.job_name), arg("level", &rerun.level)];
+    if !rerun.pool.is_empty() { arguments.push(arg("pool", &rerun.pool)); }
+    if !rerun.storage.is_empty() { arguments.push(arg("storage", &rerun.storage)); }
+    arguments.push(arg("schedtime", &rerun.sched_time.to_string()));
+    arguments.push(Argument { key: "yes".to_string(), value: None });
+    let ast = CommandAst { command_name: "run".to_string(), arguments, ..Default::default() };
+    let ctx = ExecContext { session_id: 0, config: Some(config), session_mgr: None, catalog,
+        api_mode: ApiMode::Human, bus_rx: None, job_manager: Some(manager.clone()) };
+    RESCHEDULE_COUNT.with(|c| c.set(rerun.reschedule_count));
+    let result = crate::commands::job::start_job(&ast, &ctx, job);
+    RESCHEDULE_COUNT.with(|c| c.set(0));
+    tracing::info!("RescheduleJob: {} rerun: {}", rerun.job_name, result.text_output.trim_end());
 }
 
 /// Run `f` (a job start) with the run's `ignoreduplicatecheck=` flag.
@@ -103,6 +129,7 @@ pub fn start_flags() -> crate::job_manager::StartFlags {
     crate::job_manager::StartFlags {
         ignore_duplicate_check: IGNORE_DUPLICATE_CHECK.with(|c| c.get()),
         max_run_sched_time: current(|o| o.max_run_sched_time).flatten().unwrap_or(0) as i64,
+        reschedule_count: RESCHEDULE_COUNT.with(|c| c.get()),
     }
 }
 

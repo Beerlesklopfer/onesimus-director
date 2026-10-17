@@ -1661,6 +1661,9 @@ fn run_selected(
         return CommandResult::error("Job failed.\n".to_string());
     };
     let now = now_unix_time();
+    // jcr->sched_time: `when=` of the run (schedtime), else now; the job
+    // waits for it in the queue (JS_WaitStartTime).
+    let sched_time = crate::ua_select::find_arg_with_value(ast, "schedtime").and_then(|t| t.parse().ok()).unwrap_or(now);
     let job_failed = |error: String| {
         tracing::error!("Backup job setup failed: {error}");
         CommandResult::error("Job failed.\n".to_string())
@@ -1671,7 +1674,7 @@ fn run_selected(
         Err(e) => return job_failed(e),
     };
     let unique_job = unique_job_name(&job.name, now);
-    let job_id = match create_job_record(ctx, &unique_job, &job.name, 'B', requested, Some(client_name), now, "") {
+    let job_id = match create_job_record(ctx, &unique_job, &job.name, 'B', requested, Some(client_name), sched_time, "") {
         Ok(id) => id,
         Err(e) => return job_failed(e),
     };
@@ -1787,6 +1790,7 @@ fn run_selected(
     // Job report data (job.cc SetJcrDefaults/ApplyPoolOverrides, GetLevelSinceTime)
     let mut report = crate::job_messages::backup_report(&config, &job, client, storage_name, pool, default_pool,
         &level_char.to_string(), fileset_name, now);
+    report.sched_time = sched_time;
     report.accurate = accurate;
     report.job = unique_job.clone();
     report.level = level;
@@ -1815,7 +1819,7 @@ fn run_selected(
     // Maximum Concurrent Jobs allow it (Compatibility log C-048).
     if let Some(ref mgr) = ctx.job_manager {
         enqueue_with_report(mgr, &job.name, crate::job_manager::QueuedStart {
-            params, priority: job.priority, sched_time: now,
+            params, priority: job.priority, sched_time,
         }, &resources.0, &resources.1, report);
     } else {
         match job_worker::spawn_job_worker(job_id, &job.name, &params) {

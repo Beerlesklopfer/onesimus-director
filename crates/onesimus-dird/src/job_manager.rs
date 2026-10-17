@@ -14,7 +14,7 @@ use crate::commands::bvfs::Db;
 use crate::job_worker::{JobHandle, PipeMessage};
 
 mod limits;
-pub use limits::StartFlags;
+pub use limits::{Rerun, StartFlags};
 use crate::message_bus::{MessageBus, BusMessage};
 use crate::director_config::SharedConfig;
 
@@ -958,6 +958,7 @@ impl JobManager {
                             } else if let Some(kind) = crate::job_messages::msg_type_of(msg_type) {
                                 // A message of mig_jcr (SD-SD Copy/Migrate, S-20) carries
                                 // its JobId and goes out through the worker job's Messages.
+                                crate::console_msg::dequeue_messages(&config, job.job_id);
                                 let header = if from != 0 { from } else { job.job_id };
                                 let msg = crate::console_msg::job_message_text(&config.director.name, header, kind, &text);
                                 crate::console_msg::dispatch_job_message(&config, &job.job_name, job.job_id, msg_type, mtime, &msg);
@@ -1096,6 +1097,8 @@ impl JobManager {
             self.set_job_report(child.job_id, child.report);
         }
 
+        // RescheduleJob() before the JCR is freed (limits.rs, S-26).
+        self.reschedule_jobs();
         // JcrCleanup(): num_jobs_run and RecentJobResultsList (C-048).
         let jobs_run = self.jobs_run;
         for job in self.jobs.iter_mut().filter(|j| j.completed_at.is_some() && !j.jcr.recorded) {
@@ -1306,6 +1309,7 @@ pub fn monitor_loop(
     while !shutdown.load(Ordering::Relaxed) {
         let had_work;
         let watchdog_cancels;
+        let reruns;
         {
             let mut mgr = manager.lock().unwrap();
             // Queued jobs need no fast polling (jobq looks every 2 seconds).
@@ -1313,6 +1317,11 @@ pub fn monitor_loop(
             mgr.poll_all();
             had_work = before > 0;
             watchdog_cancels = mgr.take_watchdog_cancels();
+            reruns = mgr.take_reruns();
+        }
+        // RescheduleJob() of a job that wrote data: a new job (S-26).
+        for rerun in reruns {
+            crate::scheduled_run::rerun(&manager, &rerun);
         }
         // JobMonitorWatchdog: CancelJob() of the jobs over a time limit (S-22).
         if !watchdog_cancels.is_empty() {
@@ -1476,6 +1485,26 @@ Job { Name = single; Client = fd1; Storage = File }
         m.cancel_job(1);
         assert_eq!(m.get_job(1).unwrap().phase, DirJobPhase::Canceling);
         kill_all(&mut m);
+    }
+
+    #[test]
+    fn s26_reschedule_on_error_requeues_the_same_job_id() {
+        let mut m = manager(&limits_config("Type = Backup; Reschedule On Error = yes; Reschedule Interval = 3600; Reschedule Times = 1"));
+        enqueue_at(&mut m, 1, "lim", now_unix(), StartFlags::default());
+        assert_eq!(state(&m, 1), ('R', true));
+        let pid = m.get_job(1).unwrap().handle.pid;
+        unsafe { libc::kill(pid, libc::SIGKILL); }
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        while m.get_job(1).is_none_or(|j| j.handle.spawned()) {
+            m.poll_all();
+            assert!(std::time::Instant::now() < deadline, "job 1 was not rescheduled");
+            std::thread::sleep(std::time::Duration::from_millis(5));
+        }
+        // queued again under its JobId, waiting for its start time; not counted as ended
+        assert_eq!(state(&m, 1), ('t', false));
+        assert_eq!(m.get_job(1).unwrap().jcr.limits.reschedule_count(), 1);
+        assert_eq!(m.finished_count(), 0);
+        assert!(m.take_reruns().is_empty());
     }
 
     #[test]
