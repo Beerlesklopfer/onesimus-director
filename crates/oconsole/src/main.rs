@@ -52,8 +52,9 @@ use bareos_bnet::cram_md5::CramMd5Auth;
     about = "The Onesimus Console.\n\nCopyright (C) 2026 Onesimus.io"
 )]
 struct Cli {
-    /// Use <path> as configuration file.
-    #[arg(short, long, default_value = "/etc/bareos/oconsole.conf")]
+    /// Use <path> as configuration file [default: /etc/bareos/oconsole.conf,
+    /// then /etc/bareos/bconsole.conf].
+    #[arg(short, long)]
     config: Option<String>,
 
     /// Director address (overrides config)
@@ -1436,6 +1437,13 @@ mod tests {
         assert_eq!((cfg.address.as_str(), cfg.port, cfg.name.as_str(), cfg.password.as_str()), ("h", 1, "*UserAgent*", "p"));
         assert!(cfg.grpc);
         assert_eq!(cfg.grpc_port, Some(7));
+    }
+
+    #[test]
+    fn no_config_option_means_default_search() {
+        // A clap default would always set --config and skip bconsole.conf.
+        let cli = Cli::try_parse_from(["oconsole"]).unwrap();
+        assert!(cli.config.is_none());
     }
 
     #[test]
