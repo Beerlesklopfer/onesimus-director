@@ -41,7 +41,7 @@ Drop-in replacement for the Bareos Director daemon — independent project after
 | `bareos-catalog` | Protocol | PostgreSQL catalog queries (sqlx) |
 | `bareos-orm` | Protocol | ORM + schema migration + codegen |
 | `bareos-stored` | Protocol | SD protocol library (connect, job, catrec, status) |
-| `bareos-proto-rs` | Protocol | gRPC codegen from proto definitions |
+| `onesimus-proto-rs` | Protocol | gRPC codegen from the onesimus-proto definitions (submodule `proto/`) |
 | `bareos-filed` | Protocol | File Daemon skeleton |
 | `bareos-plugins` | Protocol | Python plugin system (PyO3) |
 

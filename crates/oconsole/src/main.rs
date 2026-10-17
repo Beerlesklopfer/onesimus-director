@@ -1277,7 +1277,7 @@ fn dirs_home() -> std::path::PathBuf {
 // drain_signals removed — now part of DirectorConn::drain()
 
 fn run_grpc_mode(cli: &EffCli) {
-    use bareos_proto_rs::bareos::director::ResponseFormat;
+    use onesimus_proto_rs::onesimus::director::ResponseFormat;
 
     let host = cli.address.clone();
     let port = cli.grpc_port;
@@ -1372,7 +1372,7 @@ struct GrpcConn {
 }
 
 impl GrpcConn {
-    fn execute(&mut self, cmd: &str, format: bareos_proto_rs::bareos::director::ResponseFormat) -> Result<String, String> {
+    fn execute(&mut self, cmd: &str, format: onesimus_proto_rs::onesimus::director::ResponseFormat) -> Result<String, String> {
         let out = self.rt.block_on(self.session.execute(cmd, format)).map_err(|e| format!("gRPC error: {e}"))?;
         Ok(if out.error.is_empty() { out.text } else { format!("{}{}", out.text, out.error) })
     }
@@ -1380,7 +1380,7 @@ impl GrpcConn {
 
 impl DirectorConn for GrpcConn {
     fn query(&mut self, cmd: &str) -> Vec<String> {
-        use bareos_proto_rs::bareos::director::ResponseFormat;
+        use onesimus_proto_rs::onesimus::director::ResponseFormat;
         // Stateless calls: .api has no effect; machine format is chosen per request
         if cmd.is_empty() || cmd.starts_with(".api") {
             return Vec::new();
@@ -1393,7 +1393,7 @@ impl DirectorConn for GrpcConn {
     }
 
     fn send_cmd(&mut self, cmd: &str) -> bool {
-        use bareos_proto_rs::bareos::director::ResponseFormat;
+        use onesimus_proto_rs::onesimus::director::ResponseFormat;
         if matches!(cmd, "quit" | "exit" | ".quit") {
             // Like the BNET Director: quit produces no output
             self.pending = vec![RecvResult::Closed];
@@ -1428,7 +1428,7 @@ struct GrpcRunner {
 
 impl mcp::CommandRunner for GrpcRunner {
     fn run(&mut self, command: &str) -> anyhow::Result<String> {
-        use bareos_proto_rs::bareos::director::ResponseFormat;
+        use onesimus_proto_rs::onesimus::director::ResponseFormat;
         let out = self.rt.block_on(self.session.execute(command, ResponseFormat::Text))?;
         if !out.success && out.text.is_empty() {
             anyhow::bail!("{}", out.error.trim_end());
@@ -1437,7 +1437,7 @@ impl mcp::CommandRunner for GrpcRunner {
     }
 
     fn run_json(&mut self, command: &str) -> anyhow::Result<String> {
-        use bareos_proto_rs::bareos::director::ResponseFormat;
+        use onesimus_proto_rs::onesimus::director::ResponseFormat;
         let out = self.rt.block_on(self.session.execute(command, ResponseFormat::Json))?;
         if !out.success && out.text.is_empty() {
             anyhow::bail!("{}", out.error.trim_end());

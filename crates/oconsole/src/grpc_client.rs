@@ -18,7 +18,7 @@ use sha2::{Digest, Sha256};
 use tonic::metadata::MetadataValue;
 use tonic::transport::{Channel, Endpoint, Uri};
 
-use bareos_proto_rs::bareos::director::{
+use onesimus_proto_rs::onesimus::director::{
     director_client::DirectorClient, ChallengeRequest, CommandRequest, LoginRequest,
     ResponseFormat,
 };

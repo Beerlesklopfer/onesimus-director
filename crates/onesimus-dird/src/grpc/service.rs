@@ -7,7 +7,7 @@ use tokio_stream::wrappers::ReceiverStream;
 use tonic::{Request, Response, Status, Streaming};
 use tracing::{info, warn};
 
-use bareos_proto_rs::bareos::director::{
+use onesimus_proto_rs::onesimus::director::{
     director_server::Director,
     command_argument, session_message,
     ChallengeRequest, ChallengeResponse, CommandInfo, CommandRequest, CommandResponse,

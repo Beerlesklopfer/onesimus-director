@@ -1,6 +1,6 @@
 //! Convert BusMessage to gRPC PushEvent.
 
-use bareos_proto_rs::bareos::director::{
+use onesimus_proto_rs::onesimus::director::{
     PushEvent, push_event,
     ConsoleTextEvent, FdConnectedEvent, FdDisconnectedEvent, FdStatusEvent,
     SdConnectedEvent, SdDisconnectedEvent, SdStatusEvent, JobStatusEvent,

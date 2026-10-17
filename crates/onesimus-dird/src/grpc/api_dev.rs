@@ -13,8 +13,8 @@ use serde_json::{json, Map, Value};
 use tonic::{Request, Response, Status};
 
 use bareos_bnet::BnetSignal;
-use bareos_proto_rs::bareos::director::api as pb;
-use bareos_proto_rs::typed;
+use onesimus_proto_rs::onesimus::director::api as pb;
+use onesimus_proto_rs::typed;
 
 use super::api::DirectorApiImpl;
 use super::api_write::{self, AnswerConsole, Follow, Mode, Plan};
