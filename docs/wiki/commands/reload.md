@@ -15,7 +15,7 @@ Referenz: [WIP/25.1.2-pre-43-g18be77e68, `18be77e6832e`](https://github.com/bare
 
 - Kein Paritätsfall (Reload ändert die laufende Konfiguration beider Directors).
 
-**Lokaler Handler:** [crates/onesimus-dird/src/commands/admin.rs:1887](../../../crates/onesimus-dird/src/commands/admin.rs).
+**Lokaler Handler:** [crates/onesimus-dird/src/commands/admin.rs:1841](../../../crates/onesimus-dird/src/commands/admin.rs).
 
 Die folgenden vorhandenen Beispiele und Verhaltensbeschreibungen sind lokale Dokumentation; sie sind kein Beleg für vollständige Bareos-Kompatibilität. Bei Widersprüchen gilt der obige Befund.
 <!-- bareos-reference:end -->

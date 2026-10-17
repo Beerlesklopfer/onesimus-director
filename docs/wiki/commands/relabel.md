@@ -24,7 +24,7 @@ relabel storage=<storage-name> oldvolume=<old-volume-name>  volume=<new-volume-n
 
 **Paritätsfälle (8):** `c011-relabel-cancel`, `c011-relabel-pool-cancel`, `c011-relabel-status`, `c011-relabel-unknown-cancel`, `c012-relabel-unknown-old`, `relabel-noargs`, `t001-relabel-not-purged`, `t001-relabel-old-unknown-cancel`.
 
-**Lokaler Handler:** [crates/onesimus-dird/src/commands/extra.rs:649](../../../crates/onesimus-dird/src/commands/extra.rs).
+**Lokaler Handler:** [crates/onesimus-dird/src/commands/extra.rs:576](../../../crates/onesimus-dird/src/commands/extra.rs).
 
 Die folgenden vorhandenen Beispiele und Verhaltensbeschreibungen sind lokale Dokumentation; sie sind kein Beleg für vollständige Bareos-Kompatibilität. Bei Widersprüchen gilt der obige Befund.
 <!-- bareos-reference:end -->

@@ -18,7 +18,7 @@ Referenz: [WIP/25.1.2-pre-43-g18be77e68, `18be77e6832e`](https://github.com/bare
 
 **Paritätsfälle (2):** `c012-setip-limited`, `setip`.
 
-**Lokaler Handler:** [crates/onesimus-dird/src/commands/extra.rs:304](../../../crates/onesimus-dird/src/commands/extra.rs).
+**Lokaler Handler:** [crates/onesimus-dird/src/commands/extra.rs:231](../../../crates/onesimus-dird/src/commands/extra.rs).
 
 Die folgenden vorhandenen Beispiele und Verhaltensbeschreibungen sind lokale Dokumentation; sie sind kein Beleg für vollständige Bareos-Kompatibilität. Bei Widersprüchen gilt der obige Befund.
 <!-- bareos-reference:end -->

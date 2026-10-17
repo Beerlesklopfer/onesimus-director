@@ -24,7 +24,7 @@ setdevice storage=<storage-name> device=<device-name> autoselect=<bool>
 
 **Paritätsfälle (23):** `c006-setdevice-noargs-api2`, `c006-setdevice-wrongarg`, `c006-setdevice-nostorage`, `c006-setdevice-badbool`, `c031-setdevice-forbidden`, `c031-setdevice-forbidden-unknown`, `c031-setdevice-forbidden-api1`, `c031-setdevice-forbidden-api2`, `c031-setdevice-permitted-nodev`, `c031-setdevice-permitted-nodev-api2`, `c031-setdevice-limited-nocmd`, `c031-setdevice-nodev`, `c031-setdevice-nodev-api1`, `c031-setdevice-nodev-api2`, `c031-setdevice-nostorage-api2`, `c031-setdevice-autoselect-upper`, `c031-setdevice-autoselect-on`, `c031-setdevice-key-upper`, `c031-setdevice-key-novalue`, `c031-setdevice-empty-value`, `c031-setdevice-missing-two`, `c031-setdevice-wrongarg-api2`, `setdevice-noargs`.
 
-**Lokaler Handler:** [crates/onesimus-dird/src/commands/extra.rs:321](../../../crates/onesimus-dird/src/commands/extra.rs).
+**Lokaler Handler:** [crates/onesimus-dird/src/commands/extra.rs:248](../../../crates/onesimus-dird/src/commands/extra.rs).
 
 Die folgenden vorhandenen Beispiele und Verhaltensbeschreibungen sind lokale Dokumentation; sie sind kein Beleg für vollständige Bareos-Kompatibilität. Bei Widersprüchen gilt der obige Befund.
 <!-- bareos-reference:end -->

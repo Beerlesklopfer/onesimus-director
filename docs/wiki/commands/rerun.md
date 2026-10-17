@@ -24,7 +24,7 @@ rerun jobid=<jobid> | since_jobid=<jobid> [ until_jobid=<jobid> ] | days=<nr_day
 
 **Paritätsfälle (32):** `c006-rerun-noargs-api2`, `c006-rerun-badid-api2`, `c006-rerun-invalidid`, `c012-rerun-confirm`, `c033-since-none`, `c033-since-yes-none`, `c033-since-zero`, `c033-since-text`, `c033-since-days`, `c033-until-only`, `c033-since-until-no`, `c033-since-list-no`, `c033-since-prompt-abort`, `c033-since-invalid-answer`, `c033-since-long-answer`, `c033-since-confirm-run-no`, `c033-since-api2`, `c033-since-api1`, `c033-days-no`, `c033-days-negative`, `c033-hours-none`, `c033-days-hours-no`, `c033-jobid-list-no`, `c033-jobid-nopool`, `c033-jobid-fraction`, `c033-jobid-trailing-comma`, `c033-jobid-leading-comma`, `c033-jobid-empty`, `c033-jobid-negative`, `c033-jobid-missing-then-ok`, `rerun-noargs`, `rerun-badid`.
 
-**Lokaler Handler:** [crates/onesimus-dird/src/commands/extra.rs:421](../../../crates/onesimus-dird/src/commands/extra.rs).
+**Lokaler Handler:** [crates/onesimus-dird/src/commands/extra.rs:348](../../../crates/onesimus-dird/src/commands/extra.rs).
 
 Die folgenden vorhandenen Beispiele und Verhaltensbeschreibungen sind lokale Dokumentation; sie sind kein Beleg für vollständige Bareos-Kompatibilität. Bei Widersprüchen gilt der obige Befund.
 <!-- bareos-reference:end -->
