@@ -43,10 +43,12 @@ impl DirectorServiceImpl {
 
 /// Convert a CommandRequest into a CommandAst.
 /// Clients may send the whole command line in `command_name` (as typed in a
-/// console); it is then parsed exactly like a BNET console line.
+/// console); it is then parsed exactly like a BNET console line. A single
+/// word with `=` (`.jobstatus=T`, `status=…`) is a console line, too.
 fn command_request_to_ast(req: &CommandRequest, session_id: &str) -> CommandAst {
-    let mut ast = if req.arguments.is_empty() && req.command_name.trim().contains(char::is_whitespace) {
-        parse_cli_command(req.command_name.trim())
+    let line = req.command_name.trim();
+    let mut ast = if req.arguments.is_empty() && (line.contains(char::is_whitespace) || line.contains('=')) {
+        parse_cli_command(line)
     } else {
         CommandAst {
             command_name: req.command_name.clone(),
@@ -303,5 +305,21 @@ mod acl_binding_tests {
         let mut execute_ctx=ctx;execute_ctx.session_id=queued.session_id;
         let result=crate::command_executor::dispatch(&queued.ast,&execute_ctx);assert!(!result.success);
         queued.result_tx.send(result).unwrap();assert!(!task.await.unwrap().success);
+    }
+}
+
+#[cfg(test)]
+mod request_tests {
+    use super::*;
+
+    #[test]
+    fn single_word_with_value_is_parsed_like_a_console_line() {
+        let req = CommandRequest { command_name: ".jobstatus=T".into(), ..Default::default() };
+        let bnet = parse_cli_command(".jobstatus=T");
+        let ast = command_request_to_ast(&req, "s");
+        assert_eq!(ast.command_name, bnet.command_name);
+        assert_eq!(ast.arguments.len(), bnet.arguments.len());
+        let req = CommandRequest { command_name: "version".into(), ..Default::default() };
+        assert_eq!(command_request_to_ast(&req, "s").command_name, "version");
     }
 }
