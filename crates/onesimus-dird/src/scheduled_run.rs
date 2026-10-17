@@ -9,11 +9,10 @@
 //! `commands::job::start_job`, the start of the `run` command; the parts of
 //! the Run directive a command line cannot express (job trigger
 //! "Scheduler", the level pool overrides and their pool source, the
-//! Messages override, Accurate) are the [`RunOverrides`] of the current
+//! Messages override, Accurate, SpoolData) are the [`RunOverrides`] of the current
 //! thread while the job starts. The Next Pool goes in the request
-//! (`nextpool=`). Spool Data and MaxRunSchedTime of a Run are parsed but
-//! have no effect: the job workers do not spool and the job queue has no
-//! Max*Time checks yet (docs/STUBS.md).
+//! (`nextpool=`); MaxRunSchedTime reaches the job queue's checks
+//! (job_manager/limits.rs) through [`start_flags`].
 //!
 //! Unlike an interactive run, a scheduled run writes no "Job queued" audit
 //! event and sends no console output (ua_run.cc:500 only audits runs with
@@ -43,6 +42,10 @@ pub struct RunOverrides {
     pub messages: Option<String>,
     pub priority: Option<i32>,
     pub accurate: Option<bool>,
+    /// jcr->dir_impl->spool_data.
+    pub spool_data: Option<bool>,
+    /// jcr->dir_impl->MaxRunSchedTime (seconds).
+    pub max_run_sched_time: Option<u64>,
     /// jcr->dir_impl->res.pool_source after ApplyPoolOverrides().
     pool_source: Option<String>,
 }
@@ -68,6 +71,8 @@ impl RunOverrides {
             // `if (run->Priority != 0) jcr->JobPriority = run->Priority;`
             priority: run.priority.filter(|p| *p != 0),
             accurate: run.accurate,
+            spool_data: run.spool_data,
+            max_run_sched_time: run.max_run_sched_time,
             pool_source: None,
         }
     }
@@ -75,6 +80,30 @@ impl RunOverrides {
 
 thread_local! {
     static CURRENT: RefCell<Option<RunOverrides>> = const { RefCell::new(None) };
+    /// `ignoreduplicatecheck=` of the run the current thread starts.
+    static IGNORE_DUPLICATE_CHECK: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+/// Run `f` (a job start) with the run's `ignoreduplicatecheck=` flag.
+pub fn with_ignore_duplicate_check<R>(ignore: bool, f: impl FnOnce() -> R) -> R {
+    struct Reset;
+    impl Drop for Reset {
+        fn drop(&mut self) {
+            IGNORE_DUPLICATE_CHECK.with(|c| c.set(false));
+        }
+    }
+    IGNORE_DUPLICATE_CHECK.with(|c| c.set(ignore));
+    let _reset = Reset;
+    f()
+}
+
+/// The JCR fields of the job the current thread starts that the job
+/// queue's duplicate and time checks need (S-22).
+pub fn start_flags() -> crate::job_manager::StartFlags {
+    crate::job_manager::StartFlags {
+        ignore_duplicate_check: IGNORE_DUPLICATE_CHECK.with(|c| c.get()),
+        max_run_sched_time: current(|o| o.max_run_sched_time).flatten().unwrap_or(0) as i64,
+    }
 }
 
 /// Run `f` with `overrides` as the Run directive of the job it starts.
@@ -92,6 +121,16 @@ pub fn with_overrides<R>(overrides: RunOverrides, f: impl FnOnce() -> R) -> R {
 
 fn current<R>(f: impl FnOnce(&mut RunOverrides) -> R) -> Option<R> {
     CURRENT.with(|c| c.borrow_mut().as_mut().map(f))
+}
+
+/// The Run directive's SpoolData of the job the current thread starts.
+pub fn spool_data() -> Option<bool> {
+    current(|o| o.spool_data).flatten()
+}
+
+/// The Run directive's Accurate of the job the current thread starts.
+pub fn accurate() -> Option<bool> {
+    current(|o| o.accurate).flatten()
 }
 
 /// The job trigger of the job the current thread starts (None: a console

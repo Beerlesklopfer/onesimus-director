@@ -19,6 +19,13 @@ pub fn cmd_run(ast: &CommandAst, ctx: &ExecContext) -> CommandResult {
 /// Start the job of a confirmed run: the resolved request (job, level,
 /// client, fileset, storage, pool and `yes`) goes through run_selected.
 pub(crate) fn start_job(ast: &CommandAst, ctx: &ExecContext, job: bareos_config::resources::JobResource) -> CommandResult {
+    // ua_run.cc: jcr->dir_impl->IgnoreDuplicateJobChecking (S-22).
+    let ignore = crate::ua_select::find_arg_with_value(ast, "ignoreduplicatecheck")
+        .and_then(crate::ua_select::is_yesno).unwrap_or(false);
+    crate::scheduled_run::with_ignore_duplicate_check(ignore, || start_job_with_config(ast, ctx, job))
+}
+
+fn start_job_with_config(ast: &CommandAst, ctx: &ExecContext, job: bareos_config::resources::JobResource) -> CommandResult {
     match ctx.config.as_ref().map(|c| c.read()) {
         Some(Ok(config)) => run_selected(ast, ctx, config, job),
         Some(Err(_)) => CommandResult::error("Config read error\n".to_string()),
@@ -1045,15 +1052,17 @@ impl Jcr {
                 }
             }
         }
+        // spooldata=/accurate=/ignoreduplicatecheck= of the run (vbackup.rs
+        // S-06; the job queue's duplicate check S-22).
+        for (key, value) in &self.run_flags {
+            arguments.push(arg(key, value));
+        }
         // A VirtualFull: its JobIds and run options (vbackup.rs, S-06).
         if self.job_type == JobType::Backup && self.level == L_VIRTUAL_FULL {
             if let Some(jobids) = &self.vf_jobids {
                 arguments.push(arg("jobid", jobids));
             }
             arguments.push(arg("priority", &self.priority.to_string()));
-            for (key, value) in &self.run_flags {
-                arguments.push(arg(key, value));
-            }
             if let Some(consolidate) = &self.consolidate_job {
                 arguments.push(arg("consolidatejob", consolidate));
             }
@@ -1705,6 +1714,15 @@ fn run_selected(
     let catalog_files = crate::job_messages::raw_directive(&config, "pool", pool, "catalogfiles")
         .and_then(|v| bareos_config::values::parse_bool(&v).ok().map(|(_, on)| on)).unwrap_or(true);
     let bool_dir = |key: &str, default: bool| crate::commands::defaults::bool_directive(&job_dirs, key, default);
+    // SetJcrDefaults(), then a Run directive's override (scheduled_run) or
+    // the run command's `spooldata=`/`accurate=` (ua_run.cc) (S-22).
+    let run_flag = |key: &str| crate::ua_select::find_arg_with_value(ast, key).and_then(crate::ua_select::is_yesno);
+    let spool_data = run_flag("spooldata").or_else(crate::scheduled_run::spool_data)
+        .unwrap_or_else(|| bool_dir("spooldata", false));
+    let accurate = run_flag("accurate").or_else(crate::scheduled_run::accurate)
+        .unwrap_or_else(|| bool_dir("accurate", false));
+    let spool_size = job_dirs.iter().rev().find(|d| d.norm_key() == "spoolsize").and_then(|d| d.first())
+        .and_then(|v| bareos_config::values::parse_size(v).ok()).map_or(0, |(_, size)| size as i64);
     let fileset_lines = match crate::commands::estimate::include_exclude_messages(&config, fileset_name) {
         Ok(lines) => lines,
         Err(e) => return job_failed(e),
@@ -1720,13 +1738,13 @@ fn run_selected(
         ids: crate::backup::JobIds { level: level_char, client_id, pool_id, fileset_id: fsr.id },
         since_utime: crate::btime::str_to_utime(&since.stime),
         prev_job: since.prev_job.clone(),
-        accurate: bool_dir("accurate", false),
+        accurate,
         client_retention: retention,
         fileset_lines,
         sd_job: crate::sd_copy::CopySession {
             job_type: 'B', level: level_char, job_resource: job.name.clone(), client: client.name.clone(),
             fileset: fileset_name.to_string(), fileset_md5: fsr.md5.clone(), no_attributes: !catalog_files,
-            spool_attributes: bool_dir("spoolattributes", false), spool_data: bool_dir("spooldata", false),
+            spool_attributes: bool_dir("spoolattributes", false), spool_data, spool_size,
             prefer_mounted_volumes: bool_dir("prefermountedvolumes", true),
             ..Default::default()
         },
@@ -1769,6 +1787,7 @@ fn run_selected(
     // Job report data (job.cc SetJcrDefaults/ApplyPoolOverrides, GetLevelSinceTime)
     let mut report = crate::job_messages::backup_report(&config, &job, client, storage_name, pool, default_pool,
         &level_char.to_string(), fileset_name, now);
+    report.accurate = accurate;
     report.job = unique_job.clone();
     report.level = level;
     report.since = since.since.clone();
@@ -1887,7 +1906,7 @@ fn enqueue_with_report(mgr: &std::sync::Mutex<crate::job_manager::JobManager>, j
     let job_id = start.params.job_id;
     crate::scheduled_run::apply(job_id, &mut start.priority, &mut report);
     let mut mgr = mgr.lock().unwrap();
-    mgr.enqueue_job(job_id, job_name, start, client, storage);
+    mgr.enqueue_job_with(job_id, job_name, start, client, storage, crate::scheduled_run::start_flags());
     mgr.set_job_report(job_id, report);
 }
 
