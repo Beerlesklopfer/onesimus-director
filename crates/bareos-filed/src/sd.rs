@@ -163,7 +163,9 @@ impl JobShared {
     pub fn cancel(&self) {
         self.canceled.store(true, Ordering::SeqCst);
         if let Some(s) = self.sd_socket.lock().unwrap_or_else(|e| e.into_inner()).as_ref() {
-            let _ = s.shutdown(std::net::Shutdown::Both);
+            // SetTimedOut()/SetTerminated() + kTimeoutSignal: wake a blocked
+            // read, but do not close the connection to the SD.
+            let _ = s.shutdown(std::net::Shutdown::Read);
         }
         self.cv.notify_all();
     }
@@ -249,7 +251,10 @@ pub fn connect_storage(
     let stream: Box<dyn Rw> = Box::new(Limited { inner: stream, bw: shared.bw.clone() });
     let mut sd: SdStream = BnetStream::new(stream);
     sd.send_str(&format!("Hello Start Job {job}\n")).map_err(|e| e.to_string())?;
-    let auth = CramMd5Auth::new_raw(auth_key, client_name, tls_policy);
+    // CramMd5Handshake with the own qualified name and the local TLS policy
+    // (TLS required: ssl=2)
+    let auth = CramMd5Auth::new_raw(auth_key, &format!("R_CLIENT::{client_name}"), 2);
+    let _ = tls_policy;
     match auth.two_way_authenticate(&mut sd, false) {
         Ok(r) if r.success => Ok(Connected { sd, infos }),
         _ => Err("auth".into()),
@@ -268,7 +273,7 @@ pub fn handle_stored_connection(mut sd: SdStream, hello: &str, client_name: &str
         return;
     };
     let key = shared.sd_auth_key.lock().unwrap_or_else(|e| e.into_inner()).clone();
-    let auth = CramMd5Auth::new_raw(&key, client_name, 0);
+    let auth = CramMd5Auth::new_raw(&key, &format!("R_CLIENT::{client_name}"), 2);
     match auth.two_way_authenticate(&mut sd, true) {
         Ok(r) if r.success => {
             tracing::debug!("OK Authentication Job {job}");

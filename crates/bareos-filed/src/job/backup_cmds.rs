@@ -404,6 +404,12 @@ impl Session<'_> {
         }
         self.msgs.set_status(JS_BLOCKED);
         self.job_type = b'B';
+        if self.sd.is_none() {
+            // Passive client: the SD connects to us after "run".
+            if let Some(shared) = self.shared.clone() {
+                self.sd = shared.wait_passive_sd(super::PASSIVE_SD_WAIT);
+            }
+        }
         let Some(mut sd) = self.sd.take() else {
             self.msgs.jmsg(M_FATAL, "Cannot contact Storage daemon\n");
             self.reply(dir, "2902 Bad backup\n");
@@ -491,7 +497,7 @@ impl Session<'_> {
         let workers = self.config.max_workers_per_job;
         let mut flush = |m: &mut JobMsgs| m.flush(dir);
         let mut b = Backup {
-            sd: SdSender { sd, msgs: &mut self.msgs, counters: &mut self.counters },
+            sd: SdSender { sd, msgs: &mut self.msgs, counters: &mut self.counters, canceled },
             env: JobEnv { canceled, accurate: if accurate { list.as_mut() } else { None }, level_full, rerunning, base_size: 0 },
             flush: &mut flush,
             buf_size,

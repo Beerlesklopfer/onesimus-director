@@ -110,12 +110,23 @@ pub struct SdSender<'a, S: Read + Write> {
     pub sd: &'a mut BnetStream<S>,
     pub msgs: &'a mut JobMsgs,
     pub counters: &'a mut Counters,
+    /// CancelCmd() marks the socket terminated: sends fail, without a
+    /// message (IsJobCanceled()).
+    pub canceled: &'a AtomicBool,
 }
 
 impl<S: Read + Write> SdSender<'_, S> {
+    fn is_canceled(&self) -> bool {
+        self.canceled.load(Ordering::Relaxed) || self.msgs.is_canceled()
+    }
     fn send(&mut self, data: &[u8]) -> bool {
+        if self.is_canceled() {
+            return false;
+        }
         if self.sd.send(data).is_err() {
-            self.msgs.jmsg(M_FATAL, "Network send error to SD. ERR=Broken pipe\n");
+            if !self.is_canceled() {
+                self.msgs.jmsg(M_FATAL, "Network send error to SD. ERR=Broken pipe\n");
+            }
             return false;
         }
         true
@@ -125,8 +136,13 @@ impl<S: Read + Write> SdSender<'_, S> {
         self.send(h.as_bytes())
     }
     fn eod(&mut self) -> bool {
+        if self.is_canceled() {
+            return false;
+        }
         if self.sd.send_signal(BnetSignal::Eod).is_err() {
-            self.msgs.jmsg(M_FATAL, "Network send error to SD. ERR=Broken pipe\n");
+            if !self.is_canceled() {
+                self.msgs.jmsg(M_FATAL, "Network send error to SD. ERR=Broken pipe\n");
+            }
             return false;
         }
         true
