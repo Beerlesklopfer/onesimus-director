@@ -24,7 +24,22 @@ use serde_json::{Value, json};
 /// Runs one command line against the Director and returns its text output.
 pub trait CommandRunner: Send + 'static {
     fn run(&mut self, command: &str) -> anyhow::Result<String>;
+
+    /// Runs one command and answers the Director's questions: `answer`
+    /// gets the output so far (ending with the question) and returns the
+    /// reply, or None to cancel with ".". Runners without dialogs (gRPC)
+    /// run the command plainly.
+    fn run_dialog(
+        &mut self,
+        command: &str,
+        _answer: &mut dyn FnMut(&str) -> Option<String>,
+    ) -> anyhow::Result<String> {
+        self.run(command)
+    }
 }
+
+/// Most Director questions answered within one command; later ones are cancelled.
+pub const MAX_QUESTIONS: usize = 20;
 
 pub struct McpServer<R: CommandRunner> {
     runner: Arc<Mutex<R>>,
@@ -214,6 +229,7 @@ impl<R: CommandRunner> McpServer<R> {
         tools.extend(ovfs_tools());
         #[cfg(feature = "mcp-development")]
         if self.write_enabled() {
+            tools.extend(crate::mcp_write::tools());
             tools.push(json!({
                 "name": "execute",
                 "title": "Execute a Director command",
@@ -235,6 +251,18 @@ impl<R: CommandRunner> McpServer<R> {
 
     fn tools_call(&self, params: &Value) -> Result<Value, (i64, String)> {
         let name = params.get("name").and_then(Value::as_str).unwrap_or("");
+        // Typed write/restore tools: development build and --mcp-allow-write only
+        #[cfg(feature = "mcp-development")]
+        if self.write_enabled() {
+            let arguments = params.get("arguments").cloned().unwrap_or_else(|| json!({}));
+            if let Some(plan) = crate::mcp_write::plan(name, &arguments) {
+                let mut runner = self
+                    .runner
+                    .lock()
+                    .map_err(|_| (-32603, "Director runner unavailable".to_string()))?;
+                return Ok(crate::mcp_write::execute(&mut *runner, plan));
+            }
+        }
         if name.starts_with("ovfs_") {
             let arguments = params.get("arguments").cloned().unwrap_or_else(|| json!({}));
             let command = match ovfs_command(name, &arguments) {
@@ -769,8 +797,67 @@ mod tests {
     #[cfg(feature = "mcp-development")]
     #[test]
     fn development_lists_execute_only_after_runtime_opt_in() {
-        let srv = McpServer::new(Echo(vec![]), true, "dir".into());
-        assert_eq!(srv.tools_list()["tools"].as_array().unwrap().len(), 7);
+        let names = |srv: &McpServer<Echo>| -> Vec<String> {
+            srv.tools_list()["tools"].as_array().unwrap().iter()
+                .map(|t| t["name"].as_str().unwrap().to_string()).collect()
+        };
+        let on = names(&McpServer::new(Echo(vec![]), true, "dir".into()));
+        let off = names(&McpServer::new(Echo(vec![]), false, "dir".into()));
+        for tool in WRITE_TOOLS.iter().chain(["execute"].iter()) {
+            assert!(on.iter().any(|n| n == tool), "{tool} listed with --mcp-allow-write");
+            assert!(!off.iter().any(|n| n == tool), "{tool} hidden without --mcp-allow-write");
+        }
+        assert_eq!(on.len(), off.len() + WRITE_TOOLS.len() + 1);
+    }
+
+    /// The typed write/restore tools of mcp_write.rs (S-31). Spelled out here
+    /// because the production build does not compile that module.
+    const WRITE_TOOLS: [&str; 23] = [
+        "run_job", "rerun_job", "cancel_job", "wait_job", "restore", "label_volume",
+        "relabel_volume", "mount_storage", "unmount_storage", "release_storage",
+        "update_volume", "update_pool", "prune", "purge", "delete", "truncate", "enable",
+        "disable", "configure_add", "configure_export", "reload", "setdebug", "setbandwidth",
+    ];
+
+    /// Plausible arguments, so a refusal is about the tool, not the arguments.
+    fn write_call(tool: &str) -> Value {
+        json!({"method":"tools/call","params":{"name":tool,"arguments":{
+            "job":"Backup","client":"fd","jobids":[1],"all":true,"storage":"File","volume":"V",
+            "pool":"Full","kind":"volume","confirm":true,"resource":"job","name":"Backup",
+            "level":1,"target":"dir","limit":1,"jobid":1}}})
+    }
+
+    /// Production build, and the development build without --mcp-allow-write:
+    /// no write tool is listed, every call is refused before the Director.
+    #[test]
+    fn write_tools_absent_and_refused_without_write_access() {
+        #[cfg(feature = "mcp-production")]
+        let modes = [false, true]; // production ignores even an internal write request
+        #[cfg(feature = "mcp-development")]
+        let modes = [false];
+        for allow_write in modes {
+            let mut srv = McpServer::new(Echo(vec![]), allow_write, "dir".into());
+            let tools = srv.tools_list();
+            for tool in WRITE_TOOLS {
+                assert!(tools["tools"].as_array().unwrap().iter().all(|t| t["name"] != tool), "{tool} listed");
+                let r = call(&mut srv, write_call(tool));
+                assert!(r["error"]["message"].as_str().unwrap().contains("unknown tool"), "{tool}: {r}");
+            }
+            assert!(srv.runner.lock().unwrap().0.is_empty());
+        }
+    }
+
+    #[cfg(feature = "mcp-development")]
+    #[test]
+    fn write_tools_run_with_write_access() {
+        let mut srv = McpServer::new(Echo(vec![]), true, "dir".into());
+        let r = call(&mut srv, json!({"method":"tools/call","params":{"name":"run_job","arguments":{"job":"Backup"}}}));
+        assert_eq!(r["result"]["isError"], false, "{r}");
+        let r = call(&mut srv, json!({"method":"tools/call","params":{"name":"delete","arguments":{"kind":"jobid","jobids":[3]}}}));
+        assert_eq!(r["result"]["isError"], true, "no confirm: {r}");
+        let r = call(&mut srv, json!({"method":"tools/call","params":{"name":"delete","arguments":{"kind":"jobid","jobids":[3],"confirm":true}}}));
+        assert_eq!(r["result"]["isError"], false, "{r}");
+        assert_eq!(srv.runner.lock().unwrap().0, vec!["run job=Backup yes", "delete jobid=3"]);
     }
 
     #[tokio::test]

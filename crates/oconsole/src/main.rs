@@ -18,6 +18,8 @@ macro_rules! eprintln { () => { std::eprintln!() }; ($($arg:tt)*) => { std::epri
 mod grpc_client;
 mod mcp;
 mod mcp_mirror;
+#[cfg(feature = "mcp-development")]
+mod mcp_write;
 mod mcp_token;
 mod rate_guard;
 
@@ -418,12 +420,28 @@ struct BnetRunner<S: std::io::Read + std::io::Write> {
 }
 
 impl<S: std::io::Read + std::io::Write + Send + 'static> mcp::CommandRunner for BnetRunner<S> {
+    /// Any question of the Director is cancelled with "." so that a command
+    /// never leaves the session waiting for input.
     fn run(&mut self, command: &str) -> anyhow::Result<String> {
+        self.run_dialog(command, &mut |_| None)
+    }
+
+    /// Plain console: a question is the prompt text followed by
+    /// BNET_SUB_PROMPT, then the Director waits for one answer line.
+    fn run_dialog(&mut self, command: &str, answer: &mut dyn FnMut(&str) -> Option<String>) -> anyhow::Result<String> {
         self.bnet.send_str(command)?;
         let mut output = String::new();
+        let mut questions = 0;
         loop {
             match self.bnet.recv() {
                 Ok(BnetMessage::Data(data)) => output.push_str(&String::from_utf8_lossy(&data)),
+                Ok(BnetMessage::Signal(BnetSignal::SubPrompt)) => {
+                    questions += 1;
+                    let reply = if questions > mcp::MAX_QUESTIONS { None } else { answer(&output) };
+                    let reply = reply.unwrap_or_else(|| ".".into());
+                    output.push_str(&format!("{reply}\n"));
+                    self.bnet.send_str(&reply)?;
+                }
                 Ok(BnetMessage::Signal(BnetSignal::Eod)) | Ok(BnetMessage::Signal(BnetSignal::MainPrompt)) => break,
                 Ok(BnetMessage::Signal(BnetSignal::Terminate)) => anyhow::bail!("Director closed the connection"),
                 Ok(BnetMessage::Signal(_)) => continue,
