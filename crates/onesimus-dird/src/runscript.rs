@@ -369,6 +369,43 @@ fn push_output_lines(messages: &mut Vec<(MsgType, String)>, name: &str, line: &[
     }
 }
 
+/// lib/util.cc job_level_to_str() of a level as the worker parameters
+/// carry it (letter, name in any case, or empty for L_NONE).
+fn job_level_to_str(level: &str) -> String {
+    let level = level.trim();
+    // job_level.h letters (case matters: 'D' Differential, 'd' DiskToCatalog)
+    let by_letter = match level {
+        "" | " " => Some(" "),
+        "B" => Some("Base"),
+        "F" => Some("Full"),
+        "I" => Some("Incremental"),
+        "D" => Some("Differential"),
+        "S" => Some("Since"),
+        "C" => Some("Verify Catalog"),
+        "V" => Some("Verify Init Catalog"),
+        "O" => Some("Verify Volume to Catalog"),
+        "d" => Some("Verify Disk to Catalog"),
+        "A" => Some("Verify Data"),
+        "f" => Some("Virtual Full"),
+        _ => None,
+    };
+    let by_name = || match level.to_ascii_lowercase().replace(' ', "").as_str() {
+        "base" => "Base",
+        "full" => "Full",
+        "incremental" => "Incremental",
+        "differential" => "Differential",
+        "since" => "Since",
+        "catalog" => "Verify Catalog",
+        "initcatalog" => "Verify Init Catalog",
+        "volumetocatalog" => "Verify Volume to Catalog",
+        "disktocatalog" => "Verify Disk to Catalog",
+        "data" => "Verify Data",
+        "virtualfull" => "Virtual Full",
+        _ => level,
+    }.to_string();
+    by_letter.map(str::to_string).unwrap_or_else(by_name)
+}
+
 /// The job codes of a job of the JobManager.
 fn job_codes(config: &DirectorConfig, job: &ScriptJob) -> JobCodes {
     let resource = config.find_job(&job.job_name);
@@ -379,8 +416,7 @@ fn job_codes(config: &DirectorConfig, job: &ScriptJob) -> JobCodes {
         job: job.unique_job.clone(),
         client: job.client.clone(),
         client_address: client.map(|c| c.address.clone()).unwrap_or_default(),
-        // job_level_to_str(L_NONE)
-        level: if level.trim().is_empty() { " ".into() } else { level },
+        level: job_level_to_str(&level),
         job_type: match job.params.as_ref().map(|p| p.job_type) {
             Some(WorkerJobType::Restore) => "Restore".into(),
             Some(WorkerJobType::Admin) => "Admin".into(),

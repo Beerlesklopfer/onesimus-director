@@ -135,15 +135,15 @@ pub enum PipeMessage {
 
 /// What the Director's RunScripts "BeforeJob" left for the worker.
 #[derive(Debug, Default)]
-struct BeforeJob {
-    status: char,
-    errors: u32,
-    client_commands: Vec<String>,
-    run_before_now: bool,
+pub(crate) struct BeforeJob {
+    pub(crate) status: char,
+    pub(crate) errors: u32,
+    pub(crate) client_commands: Vec<String>,
+    pub(crate) run_before_now: bool,
 }
 
 /// Ask the Director to run the "BeforeJob" scripts and wait for them.
-fn run_before_job(pipes: &mut WorkerPipes, job_id: u32) -> BeforeJob {
+pub(crate) fn run_before_job(pipes: &mut WorkerPipes, job_id: u32) -> BeforeJob {
     pipes.send(&PipeMessage::RunScripts { job_id, label: "BeforeJob".into() });
     loop {
         match pipes.recv() {
@@ -160,23 +160,47 @@ fn run_before_job(pipes: &mut WorkerPipes, job_id: u32) -> BeforeJob {
 /// fd_cmds.cc SendRunscriptsCommands(): the client's scripts, then
 /// "RunBeforeNow" (the File daemon runs ClientRunBeforeJob before it
 /// answers). Failure: "Client \"%s\" RunScript failed." (M_FATAL).
-fn send_client_runscripts(fd: &mut BnetStream<tls_psk::PskStream>, p: &JobParams, before: &BeforeJob) -> Result<(), String> {
-    let result: Result<(), String> = (|| {
-        for command in &before.client_commands {
-            send_expect(fd, command, "2000 OK RunScript", p.job_id, "RunScript")?;
-        }
-        if before.run_before_now {
-            send_expect(fd, "RunBeforeNow\n", "2000 OK RunBeforeNow", p.job_id, "RunBeforeNow")?;
-        }
-        Ok(())
-    })();
-    if let Err(e) = &result {
-        worker_jmsg(p.job_id, M_FATAL, format!("Client \"{}\" RunScript failed.\n", p.client_name));
-        return Err(e.clone());
+pub(crate) fn send_client_runscripts(fd: &mut BnetStream<tls_psk::PskStream>, p: &JobParams, before: &BeforeJob) -> Result<(), String> {
+    let mut commands: Vec<(&str, &str, &str)> = before.client_commands.iter()
+        .map(|c| (c.as_str(), "2000 OK RunScript\n", "RunScript")).collect();
+    if before.run_before_now {
+        commands.push(("RunBeforeNow\n", "2000 OK RunBeforeNow\n", "RunBeforeNow"));
     }
-    result
+    for (command, resp, name) in commands {
+        if let Err(e) = director_response(fd, p.job_id, command, resp, name) {
+            worker_jmsg(p.job_id, M_FATAL, format!("Client \"{}\" RunScript failed.\n", p.client_name));
+            WORKER_FATAL.store(true, Ordering::SeqCst);
+            return Err(e);
+        }
+    }
+    Ok(())
 }
 
+/// getmsg.cc response(jcr, fd, resp, cmd, DISPLAY_ERROR) after sending
+/// `command`: daemon job messages are dispatched (BgetDirmsg), anything
+/// but `resp` is a fatal "Bad response" error.
+fn director_response(fd: &mut BnetStream<tls_psk::PskStream>, job_id: u32, command: &str, resp: &str, name: &str) -> Result<(), String> {
+    let socket_error = |e: String| {
+        let text = format!("Socket error on {name} command: ERR={e}\n");
+        worker_jmsg(job_id, M_FATAL, text.clone());
+        text
+    };
+    fd.send_str(command).map_err(|e| socket_error(e.to_string()))?;
+    loop {
+        match fd.recv() {
+            Ok(BnetMessage::Data(data)) => {
+                let msg = String::from_utf8_lossy(&data).to_string();
+                if msg.starts_with("Jmsg") { forward_daemon_jmsg(job_id, &msg); continue; }
+                if msg == resp { return Ok(()); }
+                let text = format!("Bad response to {name} command: wanted {resp}, got {msg}\n");
+                worker_jmsg(job_id, M_FATAL, text.clone());
+                return Err(text);
+            }
+            Ok(BnetMessage::Signal(_)) => continue,
+            Err(e) => return Err(socket_error(e.to_string())),
+        }
+    }
+}
 /// lib/message.h M_* codes of the worker's own job messages.
 const M_FATAL: u32 = 3;
 const M_ERROR: u32 = 4;
@@ -296,7 +320,7 @@ impl WorkerState {
 }
 
 /// Pipes for Worker↔Director communication.
-struct WorkerPipes {
+pub(crate) struct WorkerPipes {
     to_director: std::fs::File,
     from_director: std::fs::File,
 }
@@ -582,7 +606,7 @@ pub fn run_worker(
                 if let Some(ref mut f) = fd { let _ = f.send_signal(BnetSignal::Terminate); }
                 if let Some(ref mut s) = sd { let _ = s.send_signal(BnetSignal::Terminate); }
                 pipes.send(&PipeMessage::JobEnd {
-                    job_id, term_code: if WORKER_CANCEL.load(Ordering::SeqCst) { b'A' as i32 } else { b'E' as i32 }, files: 0, bytes: 0, errors: 1,
+                    job_id, term_code: if WORKER_CANCEL.load(Ordering::SeqCst) { b'A' as i32 } else if WORKER_FATAL.load(Ordering::SeqCst) { b'f' as i32 } else { b'E' as i32 }, files: 0, bytes: 0, errors: 1,
                     vol_session_id: Some(vol_session_id), vol_session_time: Some(vol_session_time),
                 });
                 return EXIT_FATAL;
@@ -966,6 +990,8 @@ fn now_unix() -> i64 { SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_de
 // ============================================================================
 
 static WORKER_CANCEL: AtomicBool = AtomicBool::new(false);
+/// A Jmsg M_FATAL of the worker set JS_FatalError.
+static WORKER_FATAL: AtomicBool = AtomicBool::new(false);
 static WORKER_PAUSED: AtomicBool = AtomicBool::new(false);
 
 pub fn install_worker_signal_handlers() {
