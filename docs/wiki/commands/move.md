@@ -1,4 +1,4 @@
-# move -- Move Volume Between Autochanger Slots
+# move — Volumes im Autochanger umsetzen
 
 <!-- bareos-reference:start -->
 ## Aus den Bareos-Originalquellen
@@ -28,53 +28,128 @@ move storage=<storage-name> srcslots=<slot-selection> dstslots=<slot-selection>
 
 Die folgenden vorhandenen Beispiele und Verhaltensbeschreibungen sind lokale Dokumentation; sie sind kein Beleg für vollständige Bareos-Kompatibilität. Bei Widersprüchen gilt der obige Befund.
 <!-- bareos-reference:end -->
-Move a volume from one autochanger slot to another within the same autochanger.
+## Zweck
+
+`move` lässt den Autochanger Volumes von einem Slot in einen anderen umsetzen. Quell- und Zielslots gibt man als Slotlisten an; der Director prüft vorher am Storage Daemon, welche Slots belegt sind, und setzt nur belegte Quellslots in freie Zielslots um. Der Befehl verändert die Belegung des Autochangers und die Slot-Angaben im Katalog. Er funktioniert nur mit Autochanger-Storages.
 
 ## Syntax
 
-```
-move [storage=<name>] srcslot=<num> dstslot=<num>
-```
-
-## Arguments
-
-| Argument | Description |
-|----------|-------------|
-| `storage=<name>` | Storage daemon with autochanger |
-| `srcslot=<num>` | Source slot number (required) |
-| `dstslot=<num>` | Destination slot number (required) |
-
-## Examples
-
-### Move a volume between slots
-```
-* move storage=Tape srcslot=3 dstslot=7
-Moving media from slot 3 to 7
+```text
+move [ storage=<storage> ] srcslots=<slotliste> dstslots=<slotliste> [ scan [ drive=<laufwerk> ] ]
 ```
 
-### Move within default storage
+## Argumente
+
+| Argument | Werte | Bedeutung |
+|---|---|---|
+| `storage=<storage>` | Autochanger-Storage | Autochanger, in dem umgesetzt wird. Fehlt die Angabe, erscheint eine Auswahl der Autochanger-Storages. |
+| `srcslots=<slotliste>` (auch `srcslot=`) | z. B. `1-3,7` | Slots, aus denen Volumes genommen werden. Leere Slots in der Liste werden übergangen. |
+| `dstslots=<slotliste>` (auch `dstslot=`) | z. B. `10-12` | Slots, in die die Volumes kommen. |
+| `scan` | — | Die Volume-Namen nicht aus den Barcodes nehmen, sondern jedes Volume ins Laufwerk laden und das Label lesen. |
+| `drive=<laufwerk>` | Ganzzahl ab 0 | Laufwerk für `scan`. |
+
+Ohne Quell- oder Zielauswahl führt `move` nichts aus.
+
+## Dialoge
+
+Ohne `storage=` fragt `move` nach einem Autochanger-Storage. Gibt es keinen, endet der Befehl mit `Selection list for "Storage" is empty!`.
+
+## API-Modi
+
+Unter `.api 0` und `.api 1` kommt die Antwort als Text. Unter `.api 2` endet ein fehlgeschlagenes `move` mit einem JSON-Fehlerobjekt ohne Meldungstext:
+
+```text
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]> .api 2
+{
+  "jsonrpc": "2.0",
+  "id": null,
+  "result": {
+    "api": 2
+  }
+}
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]> move
+{
+  "jsonrpc": "2.0",
+  "id": null,
+  "error": {
+    "code": 1,
+    "message": "failed",
+    "data": {
+      "result": {},
+      "messages": {}
+    }
+  }
+}
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]>
 ```
-* move srcslot=1 dstslot=10
-Moving media from slot 1 to 10
+
+## Beispiele
+
+### Ohne Autochanger in der Konfiguration
+
+Die Testkonfiguration hat keinen Autochanger; die Auswahl bleibt leer.
+
+```text
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]> move
+The defined Autochanger Storage resources are:
+Selection list for "Storage" is empty!
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]>
 ```
 
-### Reorganize after import
+```text
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]> move srcslots=1 dstslots=2
+The defined Autochanger Storage resources are:
+Selection list for "Storage" is empty!
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]>
 ```
-* import storage=Tape srcslots=101-103
-* move storage=Tape srcslot=1 dstslot=20
-Moving media from slot 1 to 20
+
+### Unbekannter Storage
+
+```text
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]> move storage=Nope srcslots=1 dstslots=2
+Storage resource "Nope": not found
+The defined Autochanger Storage resources are:
+Selection list for "Storage" is empty!
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]>
 ```
 
-## Behavior
+### Storage ohne Slotauswahl
 
-- The Director instructs the SD to use the autochanger robot to physically move a volume between slots.
-- The destination slot must be empty.
-- The catalog slot assignment is updated automatically.
-- This command is only relevant for tape autochangers.
-- This is an audited command.
+```text
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]> move storage=File
+Cannot perform a move operation without source and/or destination selection
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]>
+```
+**Abweichung vom Original:** Das Original fragt zuerst den Storage Daemon nach den Slots und antwortet `3998 Device ""FileStorage" (/srv/BACKUP/bareos-storage)" is not an autochanger.`, `Device "FileStorage" has 0 slots.` und `No slots in changer.` (C-069)
 
-## Related Commands
+### Storage über einen Job bestimmen
 
-- [import](import.md) -- Import volumes from mail slots
-- [export](export.md) -- Export volumes to mail slots
-- [update](update.md) -- Update slot information (`update slots`)
+```text
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]> move job=nosuch
+Job "nosuch" is not running.
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]>
+```
+
+### Volumes umsetzen
+
+```text
+Beispielausgabe nicht verfügbar: die Testumgebung hat keinen Autochanger, und Bewegungen in einem echten Autochanger sind im Testbetrieb nicht erlaubt.
+```
+
+## Fehlermeldungen
+
+| Meldung | Ursache und Abhilfe |
+|---|---|
+| `The defined Autochanger Storage resources are:` / `Selection list for "Storage" is empty!` | Kein Autochanger-Storage konfiguriert oder für die Konsole erlaubt. |
+| `Storage resource "<name>": not found` | Unbekannter Storage. |
+| `Cannot perform a move operation without source and/or destination selection` | `srcslots=` oder `dstslots=` fehlt. |
+| `No slots in changer.` | Der Storage Daemon meldet keine Slots; das Gerät ist kein Autochanger. |
+| `No Volumes found, or no barcodes.` | Der Autochanger meldet keine Volumes. Mit `scan` die Labels lesen lassen. |
+| `Job "<name>" is not running.` | Zu `job=` läuft kein Job. |
+
+## Siehe auch
+
+- [export](export.md) — Volumes in Ausgabe-Slots (Import/Export) bringen
+- [import](import.md) — Volumes aus Ausgabe-Slots holen
+- [update](update.md) — Slot-Belegung im Katalog aktualisieren (`update slots`)
+- [status](status.md) — Slots anzeigen (`status storage=<storage> slots`)

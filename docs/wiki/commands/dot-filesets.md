@@ -1,4 +1,4 @@
-# .filesets — List FileSet Names
+# .filesets — Namen der FileSets auflisten
 
 <!-- bareos-reference:start -->
 ## Aus den Bareos-Originalquellen
@@ -21,37 +21,110 @@ Referenz: [WIP/25.1.2-pre-43-g18be77e68, `18be77e6832e`](https://github.com/bare
 
 Die folgenden vorhandenen Beispiele und Verhaltensbeschreibungen sind lokale Dokumentation; sie sind kein Beleg für vollständige Bareos-Kompatibilität. Bei Widersprüchen gilt der obige Befund.
 <!-- bareos-reference:end -->
-Machine-interface command used by bconsole/oconsole for tab-completion. Returns one FileSet resource name per line from the Director configuration.
+
+## Zweck
+
+`.filesets` gibt die Namen aller FileSet-Ressourcen der Director-Konfiguration aus, einen pro Zeile. Programme nutzen ihn für die Vervollständigung von `fileset=` (etwa bei `run` oder `restore`) und für Auswahllisten. Der Befehl liest nur die Konfiguration und verändert nichts.
+
+Es erscheinen nur FileSets, die die Konsole laut `FileSet ACL` sehen darf.
 
 ## Syntax
 
-```
+```text
 .filesets
 ```
 
-## Arguments
+## Argumente
 
-None.
+Der Befehl hat keine Argumente. Weitere Wörter werden ignoriert.
 
-## Examples
+## API-Modi
 
-### List all filesets
-```
-* .filesets
-LinuxAll
+Unter `.api 0` und `.api 1` kommt dieselbe Namensliste. Unter `.api 2` steht sie als `result.filesets`, ein Array von Objekten mit `name`.
+
+## Beispiele
+
+### Alle FileSets
+
+```text
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]> .filesets
+Windows All Drives
 SelfTest
-WindowsAll
+LinuxAll
+Catalog
+c019r
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]>
 ```
 
-## Notes
+### Im Skriptmodus
 
-- Output is one name per line, no headers, no formatting.
-- Output is terminated by the EOD signal.
-- No filtering options are available for this command.
-- Used by console programs to populate the `fileset=` argument completion list.
+```text
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]> .api 1
+api: 1
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]> .filesets
+Windows All Drives
+SelfTest
+LinuxAll
+Catalog
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]>
+```
 
-## Related Commands
+### Als JSON
 
-- [.jobs](dot-jobs.md) -- List job names
-- [.defaults](dot-defaults.md) -- Show default values for a job (includes fileset)
-- [show](show.md) -- Show full resource configuration
+```text
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]> .api 2
+{
+  "jsonrpc": "2.0",
+  "id": null,
+  "result": {
+    "api": 2
+  }
+}
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]> .filesets
+{
+  "jsonrpc": "2.0",
+  "id": null,
+  "result": {
+    "filesets": [
+      {
+        "name": "Windows All Drives"
+      },
+      {
+        "name": "SelfTest"
+      },
+      {
+        "name": "LinuxAll"
+      },
+      {
+        "name": "Catalog"
+      }
+    ]
+  }
+}
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]>
+```
+
+### Mit eingeschränkter Konsole
+
+Die `FileSet ACL` der Konsole `parity-acl` schließt das FileSet `Catalog` aus.
+
+```text
+parity-acl@bareos-dir[25.1.2+onesimus.0.2.0]> .filesets
+Windows All Drives
+SelfTest
+LinuxAll
+c019r
+parity-acl@bareos-dir[25.1.2+onesimus.0.2.0]>
+```
+
+## Fehlermeldungen
+
+| Meldung | Ursache und Abhilfe |
+|---|---|
+| `.filesets: is an invalid command.` | Die `Command ACL` der Konsole erlaubt `.filesets` nicht. |
+
+## Siehe auch
+
+- [show](show.md) — `show fileset=<name>` zeigt Inhalt und Optionen eines FileSets
+- [list](list.md) — `list filesets` zeigt die FileSets im Katalog
+- [.jobs](dot-jobs.md) — Namen der Jobs

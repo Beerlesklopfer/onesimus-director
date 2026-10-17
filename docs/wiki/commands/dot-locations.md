@@ -1,4 +1,4 @@
-# .locations — List Location Names
+# .locations — Lagerorte aus dem Katalog auflisten
 
 <!-- bareos-reference:start -->
 ## Aus den Bareos-Originalquellen
@@ -21,40 +21,83 @@ Referenz: [WIP/25.1.2-pre-43-g18be77e68, `18be77e6832e`](https://github.com/bare
 
 Die folgenden vorhandenen Beispiele und Verhaltensbeschreibungen sind lokale Dokumentation; sie sind kein Beleg für vollständige Bareos-Kompatibilität. Bei Widersprüchen gilt der obige Befund.
 <!-- bareos-reference:end -->
-Machine-interface command used by bconsole/oconsole for tab-completion. Returns one location resource name per line from the Director configuration.
+
+## Zweck
+
+`.locations` gibt die Lagerorte (Tabelle `Location` des Katalogs) aus, alphabetisch sortiert und ohne Doppelte. Lagerorte beschreiben, wo sich ein Band physisch befindet, etwa „Tresor“ oder „Außenlager“. Der Befehl liest nur den Katalog und verändert nichts. Gibt es keine Lagerorte, ist die Liste leer.
 
 ## Syntax
 
-```
+```text
 .locations
 ```
 
-## Arguments
+## Argumente
 
-None.
+| Argument | Werte | Bedeutung |
+|---|---|---|
+| `catalog=<name>` | Name eines Katalogs | diesen Katalog verwenden statt des automatisch gewählten |
 
-## Examples
+Andere Wörter werden ignoriert.
 
-### List locations
+## API-Modi
+
+- `.api 0`: beim ersten Katalogzugriff der Sitzung stehen die Hinweiszeilen `Automatically selected Catalog: …` und `Using Catalog "…"` vor der Liste.
+- `.api 1`: nur die Namen.
+- `.api 2`: `result.locations`, ein Array von Objekten mit `name`.
+
+## Beispiele
+
+Im Testkatalog ist kein Lagerort eingetragen.
+
+### Lagerorte auflisten
+
+```text
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]> .locations
+Automatically selected Catalog: MyCatalog
+Using Catalog "MyCatalog"
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]>
 ```
-* .locations
-Vault-A
-Offsite-B
+
+### Im Skriptmodus
+
+```text
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]> .api 1
+api: 1
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]> .locations
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]>
 ```
 
-### No locations configured (typical)
+### Als JSON
+
+```text
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]> .api 2
+{
+  "jsonrpc": "2.0",
+  "id": null,
+  "result": {
+    "api": 2
+  }
+}
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]> .locations
+{
+  "jsonrpc": "2.0",
+  "id": null,
+  "result": {
+    "locations": []
+  }
+}
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]>
 ```
-* .locations
-```
 
-## Notes
+## Fehlermeldungen
 
-- Output is one name per line, no headers, no formatting.
-- Output is terminated by the EOD signal.
-- Location resources are rarely used in modern Bareos installations. They map to physical volume storage locations.
-- Returns empty output when no Location resources are configured.
+| Meldung | Ursache und Abhilfe |
+|---|---|
+| `.locations: is an invalid command.` | Die `Command ACL` der Konsole erlaubt `.locations` nicht. |
+| `List Location failed: ERR=…` | Die Abfrage im Katalog ist fehlgeschlagen; der Text hinter `ERR=` kommt von der Datenbank. |
 
-## Related Commands
+## Siehe auch
 
-- [.media](dot-media.md) -- List volume names
-- [.storage](dot-storage.md) -- List storage names
+- [.media](dot-media.md) — Volume-Namen
+- [list](list.md) — `list volumes`

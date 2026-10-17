@@ -1,4 +1,4 @@
-# .media — List Volume/Media Names
+# .media — Volume-Namen aus dem Katalog auflisten
 
 <!-- bareos-reference:start -->
 ## Aus den Bareos-Originalquellen
@@ -21,46 +21,117 @@ Referenz: [WIP/25.1.2-pre-43-g18be77e68, `18be77e6832e`](https://github.com/bare
 
 Die folgenden vorhandenen Beispiele und Verhaltensbeschreibungen sind lokale Dokumentation; sie sind kein Beleg für vollständige Bareos-Kompatibilität. Bei Widersprüchen gilt der obige Befund.
 <!-- bareos-reference:end -->
-Machine-interface command used by bconsole/oconsole for tab-completion. Returns one volume name per line from the catalog database.
+
+## Zweck
+
+`.media` gibt die Namen aller Volumes aus, die im Katalog stehen, alphabetisch sortiert und ohne Doppelte. Programme nutzen die Liste für die Vervollständigung von `volume=` und für Auswahllisten. Der Befehl liest die Tabelle `Media` des Katalogs und verändert nichts.
 
 ## Syntax
 
-```
+```text
 .media
 ```
 
-## Arguments
+## Argumente
 
-None.
+| Argument | Werte | Bedeutung |
+|---|---|---|
+| `catalog=<name>` | Name eines Katalogs | diesen Katalog verwenden statt des automatisch gewählten |
 
-## Examples
+Andere Wörter werden ignoriert.
 
-### List all volumes
-```
-* .media
+## API-Modi
+
+- `.api 0`: beim ersten Katalogzugriff der Sitzung stehen die Hinweiszeilen `Automatically selected Catalog: …` und `Using Catalog "…"` vor der Liste.
+- `.api 1`: nur die Namen, ohne Hinweiszeilen.
+- `.api 2`: `result.media`, ein Array von Objekten mit `name`.
+
+## Beispiele
+
+### Alle Volumes
+
+```text
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]> .media
+Automatically selected Catalog: MyCatalog
+Using Catalog "MyCatalog"
+Differential-47323
 Full-0001
 Full-0002
-Incremental-0001
-Incremental-0002
+Full-47321
+Incremental-47322
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]>
 ```
 
-### No volumes labeled yet
+### Im Skriptmodus
+
+```text
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]> .api 1
+api: 1
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]> .media
+Differential-47323
+Full-0001
+Full-0002
+Full-47321
+Incremental-47322
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]>
 ```
-* .media
+
+### Als JSON
+
+```text
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]> .api 2
+{
+  "jsonrpc": "2.0",
+  "id": null,
+  "result": {
+    "api": 2
+  }
+}
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]> .media
+{
+  "jsonrpc": "2.0",
+  "id": null,
+  "result": {
+    "media": [
+      {
+        "name": "Differential-47323"
+      },
+      {
+        "name": "Full-0001"
+      },
+      {
+        "name": "Full-0002"
+      },
+      {
+        "name": "Full-47321"
+      },
+      {
+        "name": "Incremental-47322"
+      }
+    ]
+  }
+}
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]>
 ```
 
-## Notes
+### Ohne Berechtigung
 
-- Output is one name per line, no headers, no formatting.
-- Output is terminated by the EOD signal.
-- Requires a catalog database connection. Returns empty output if no catalog is configured.
-- Lists volumes (media) registered in the catalog, not just currently mounted ones.
-- Used by console programs to populate the `volume=` argument completion list.
+```text
+parity-limited@bareos-dir[25.1.2+onesimus.0.2.0]> .media
+.media: is an invalid command.
+parity-limited@bareos-dir[25.1.2+onesimus.0.2.0]>
+```
 
-## Related Commands
+## Fehlermeldungen
 
-- [.mediatypes](dot-mediatypes.md) -- List media type names
-- [.volstatus](dot-volstatus.md) -- List volume status values
-- [.pools](dot-pools.md) -- List pool names
-- [label](label.md) -- Label a new volume
-- [list](list.md) -- List volumes from catalog
+| Meldung | Ursache und Abhilfe |
+|---|---|
+| `.media: is an invalid command.` | Die `Command ACL` der Konsole erlaubt `.media` nicht. |
+| `List Media failed: ERR=…` | Die Abfrage im Katalog ist fehlgeschlagen; der Text hinter `ERR=` kommt von der Datenbank. |
+
+## Siehe auch
+
+- [list](list.md) — `list volumes` mit allen Details
+- [.volstatus](dot-volstatus.md) — mögliche Volume-Zustände
+- [.mediatypes](dot-mediatypes.md) — Medientypen im Katalog
+- [.pools](dot-pools.md) — Namen der Pools

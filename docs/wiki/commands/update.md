@@ -1,4 +1,4 @@
-# update -- Update Volume, Pool, or Slot Attributes
+# update — Volumes, Pools, Slots und Statistik im Katalog ändern
 
 <!-- bareos-reference:start -->
 ## Aus den Bareos-Originalquellen
@@ -28,55 +28,727 @@ update [volume=<volume-name> [volstatus=<status>] [volretention=<time-def>] [act
 
 Die folgenden vorhandenen Beispiele und Verhaltensbeschreibungen sind lokale Dokumentation; sie sind kein Beleg für vollständige Bareos-Kompatibilität. Bei Widersprüchen gilt der obige Befund.
 <!-- bareos-reference:end -->
-Modify volume or pool attributes in the catalog, or update slot information from an autochanger.
+## Zweck
+
+`update` ändert Einträge im Katalog: die Eigenschaften eines Volumes (Status, Aufbewahrung, Grenzen, Slot, Pool …), den Pool-Eintrag nach einer Konfigurationsänderung, die Slot-Belegung eines Autochangers, einzelne Felder eines Jobs und die Langzeitstatistik. Bis auf `update slots`, das den Storage Daemon nach dem Inhalt des Autochangers fragt, arbeitet der Befehl nur im Katalog. Ohne Argumente fragt er im Menü, was geändert werden soll.
 
 ## Syntax
 
-```
-update [volume=<name>|pool=<name>|slots storage=<name>]
-```
-
-## Arguments
-
-| Argument | Description |
-|----------|-------------|
-| `volume=<name>` | Update attributes for this volume |
-| `pool=<name>` | Update pool record from the resource definition |
-| `slots` | Scan autochanger and update slot assignments |
-| `storage=<name>` | Storage daemon for slot updates |
-
-## Examples
-
-### Update a volume
-```
-* update volume=Full-0001
-Volume "Full-0001" updated in catalog
+```text
+update
+update volume [ volume=<volume> ] [ <parameter>=<wert> … ]
+update volume=<volume> <parameter>=<wert> …
+update volume allfrompool=<pool>
+update volume fromallpools
+update pool[=<pool>]
+update slots[=<slotliste>] [ storage=<storage> ] [ drive=<laufwerk> ] [ scan ] [ enabled=<wert> ]
+update jobid=<jobid> [ starttime=<zeit> ] [ client=<client> ] [ filesetid=<id> ] [ jobname=<name> ] [ jobtype=<typ> ]
+update stats [ days=<tage> ]
 ```
 
-### Update a pool from resource definition
+`media` ist gleichbedeutend mit `volume`, `slot` mit `slots`.
+
+## Argumente
+
+### Was geändert wird
+
+| Argument | Werte | Bedeutung |
+|---|---|---|
+| `volume`, `volume=<volume>` (auch `media`) | Volume-Name | Volume-Eigenschaften ändern. Ohne Namen wählt man das Volume im Dialog. |
+| `pool`, `pool=<pool>` | Pool-Name | Pool-Eintrag im Katalog aus der Pool-Ressource der Konfiguration aktualisieren. |
+| `slots`, `slots=<slotliste>` (auch `slot`) | z. B. `1-3,7` | Slot-Belegung aus dem Autochanger übernehmen. |
+| `jobid=<jobid>` | Job-ID | Felder eines Job-Eintrags ändern. |
+| `stats` | — | Langzeitstatistik der Jobs fortschreiben. |
+
+### Parameter für `update volume`
+
+Mehrere Parameter dürfen in einer Zeile stehen; jeder wird einzeln geprüft und gemeldet.
+
+| Argument | Werte | Bedeutung |
+|---|---|---|
+| `volstatus=<status>` | `Append`, `Archive`, `Disabled`, `Full`, `Used`, `Cleaning`, `Recycle`, `Read-Only`, `Error` | Neuer Volume-Status. Groß-/Kleinschreibung egal. |
+| `volretention=<dauer>` | Zeitangabe, z. B. `30days`, `6months` | Aufbewahrungszeit des Volumes. |
+| `voluse=<dauer>` | Zeitangabe | Wie lange das Volume nach dem ersten Schreiben benutzt werden darf. |
+| `maxvoljobs=<n>` | Ganzzahl | Höchstzahl der Jobs auf dem Volume (0 = unbegrenzt). |
+| `maxvolfiles=<n>` | Ganzzahl | Höchstzahl der Dateien. |
+| `maxvolbytes=<größe>` | Größe, z. B. `10G`, `500M` | Höchstgröße des Volumes. |
+| `recycle=<yes\|no>` | `yes`, `no` | Ob das Volume wiederverwendet werden darf. |
+| `inchanger=<yes\|no>` | `yes`, `no` | Ob das Volume im Autochanger liegt. |
+| `slot=<n>` | 0 bis `Maximum Volumes` des Pools | Slot im Autochanger. |
+| `enabled=<wert>` | `yes`, `no`, `archived`, `0`, `1`, `2` | Volume für neue Jobs freigeben, sperren oder als archiviert markieren. |
+| `encrypt=<wert>` | `yes`, `no`, `rotate` | Schlüssel für Hardware-Verschlüsselung setzen, entfernen oder erneuern. Nur bei Volumes mit Schlüssel. |
+| `pool=<pool>` | Pool-Name | Volume in einen anderen Pool verschieben. In Onesimus derzeit nicht unterstützt (C-067). |
+| `recyclepool=<pool>` | Pool-Name | Pool, in den das Volume beim Recyceln wandert. In Onesimus derzeit nicht unterstützt (C-067). |
+| `actiononpurge=<wert>` | `None`, `Truncate` | Was beim Leeren mit dem Volume geschieht. In Onesimus derzeit nicht unterstützt (C-067). |
+| `storage=<storage>` | Storage-Name | Storage-Zuordnung des Volumes. In Onesimus derzeit nicht unterstützt (C-067). |
+| `frompool=<beliebig>` | — | Volume-Standardwerte erneut aus seinem Pool übernehmen. Ohne `=` und Wert öffnet sich stattdessen das Menü. |
+| `allfrompool=<pool>` | Pool-Name | Standardwerte aller Volumes dieses Pools neu setzen. In Onesimus derzeit nicht unterstützt (C-067). |
+| `fromallpools` | — | Standardwerte aller Volumes aller Pools neu setzen. In Onesimus derzeit nicht unterstützt (C-067). |
+
+### Parameter für `update slots`, `update jobid` und `update stats`
+
+| Argument | Werte | Bedeutung |
+|---|---|---|
+| `storage=<storage>` | Autochanger-Storage | Autochanger, dessen Slots gelesen werden. Auch der Name allein ist möglich (`update slots File`). |
+| `drive=<laufwerk>` | Ganzzahl ab 0 | Laufwerk für `scan`. |
+| `scan` | — | Volumes ohne Barcode-Leser einzeln ins Laufwerk laden und das Label lesen. |
+| `enabled=<wert>` | `yes`, `no`, `archived`, `0`, `1`, `2` | Enabled-Wert für die gefundenen Volumes. |
+| `starttime=<zeit>` | `JJJJ-MM-TT hh:mm:ss` | Neue Startzeit des Jobs. |
+| `client=<client>` | Client-Name | Neuer Client des Jobs. |
+| `filesetid=<id>` | Ganzzahl | Neues FileSet des Jobs. |
+| `jobname=<name>` | Job-Name | Neuer Job-Name. |
+| `jobtype=<typ>` | Job-Typ-Buchstabe | Neuer Job-Typ. |
+| `days=<tage>` | Ganzzahl | Nur Jobs der letzten `<tage>` Tage in die Statistik übernehmen. |
+
+`update jobid` und `update stats` sind in Onesimus derzeit nicht umgesetzt (C-067).
+
+## Dialoge
+
+### Hauptmenü
+
+Ohne Schlüsselwort zeigt `update` das Menü `Update choice:` mit `Volume parameters`, `Pool from resource`, `Slots from autochanger` und `Long term statistics` und fragt `Choose catalog item to update (1-4):`.
+
+### Parametermenü für Volumes
+
+Bei `update volume` ohne `<parameter>=<wert>` erscheint `Parameters to modify:` mit 19 Punkten und der Frage `Select parameter to modify (1-19):`. Nach jeder Änderung kommt das Menü erneut, bis man `19` (`Done`) wählt; der Director bestätigt das mit `Selection terminated.`. Ist noch kein Volume gewählt, fragt der Director nach dem gewählten Punkt zuerst den Pool (`Select the Pool (1-<n>):`) und dann das Volume (`Enter the volume name or MediaId of the volume prefixed with an asterisk (*).`) ab.
+
+Die Fragen der einzelnen Punkte:
+
+| Punkt | Frage | Gültige Antworten |
+|---|---|---|
+| 1 Volume Status | `Choose new Volume Status (1-7):` | Nummer aus der Liste `Append` … `Read-Only` |
+| 2 Volume Retention Period | `Enter Volume Retention period:` | Zeitangabe, z. B. `60days` |
+| 3 Volume Use Duration | `Enter Volume Use Duration:` | Zeitangabe |
+| 4 Maximum Volume Jobs | `Enter new Maximum Jobs:` | Ganzzahl ≥ 0 |
+| 5 Maximum Volume Files | `Enter new Maximum Files:` | Ganzzahl ≥ 0 |
+| 6 Maximum Volume Bytes | `Enter new Maximum Bytes:` | Größe, z. B. `10G` |
+| 7 Recycle Flag | `Enter new Recycle status:` | `yes` oder `no`; andere Eingaben führen zur selben Frage |
+| 8 Slot | `Enter new Slot:` | 0 bis `Maximum Volumes` des Pools |
+| 9 InChanger Flag | `Set InChanger flag for Volume "<name>": yes/no:` | `yes` oder `no` |
+| 10 Volume Files | `Enter new number of Files for Volume:`, danach `Increase Volume Files? (yes/no):` | Ganzzahl, dann `yes`/`no` |
+| 11 Pool | `Enter new Pool name:` | Pool-Name; ein unbekannter Name führt zur Pool-Auswahl |
+| 15 Enabled | `Enter new Enabled:` | `yes`, `no`, `archived`, `0`, `1`, `2` |
+| 16 RecyclePool | `Select the Pool (1-<n>):` | Nummer; `*None*` entfernt den Recycle-Pool |
+
+Ein `.` bricht die gerade gestellte Frage ab. Im Parametermenü beendet `.` die Auswahl wie `19`; war noch kein Volume gewählt, folgt trotzdem die Pool-Auswahl, die man erneut mit `.` abbricht. Dieses Verhalten entspricht dem Original.
+
+### Auswahl für `update pool`
+
+`update pool` ohne Namen fragt mit `Select Pool resource (1-<n>):` nach der Pool-Ressource.
+
+## API-Modi
+
+Unter `.api 0` kommen Bestätigungen und Fehler als Text. Unter `.api 1` kommt dieselbe Textzeile ohne die Katalogzeilen `Automatically selected Catalog: …`:
+
+```text
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]> .api 1
+api: 1
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]> update volume=Full-0001 volstatus=Used
+New Volume status is: Used
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]>
 ```
-* update pool=Full
-Pool "Full" updated from resource
+
+Unter `.api 2` gibt ein erfolgreiches `update` ein leeres Ergebnis zurück; Fehler stehen im JSON-Fehlerobjekt:
+
+```text
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]> .api 2
+{
+  "jsonrpc": "2.0",
+  "id": null,
+  "result": {
+    "api": 2
+  }
+}
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]> update volume=Full-0001 volstatus=Used
+{
+  "jsonrpc": "2.0",
+  "id": null,
+  "result": {}
+}
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]>
 ```
 
-### Update autochanger slots
+```text
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]> .api 2
+{
+  "jsonrpc": "2.0",
+  "id": null,
+  "result": {
+    "api": 2
+  }
+}
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]> update volume=Full-0001 volstatus=Bogus
+{
+  "jsonrpc": "2.0",
+  "id": null,
+  "error": {
+    "code": 1,
+    "message": "failed",
+    "data": {
+      "result": {},
+      "messages": {
+        "error": [
+          "Invalid VolStatus specified: Bogus\n"
+        ]
+      }
+    }
+  }
+}
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]>
 ```
-* update slots storage=Tape
-Updating slots for storage Tape...
-Done.
+
+Auch das Menü ohne Argumente beantwortet `.api 2` sofort mit einem leeren Ergebnis:
+
+```text
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]> .api 2
+{
+  "jsonrpc": "2.0",
+  "id": null,
+  "result": {
+    "api": 2
+  }
+}
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]> update
+{
+  "jsonrpc": "2.0",
+  "id": null,
+  "result": {}
+}
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]>
 ```
 
-## Behavior
+Unter `.api 1` schickt der Director das Hauptmenü ohne Nummern als einzelne Einträge (`Update choice:` gefolgt von `Volume parameters`, `Pool from resource`, `Slots from autochanger`, `Long term statistics`) und wartet auf eine Auswahl; diese Form ist für Programme gedacht.
 
-- `update volume`: opens an interactive dialog (in C++ Bareos) to change volume attributes such as VolStatus, MaxVolBytes, MaxVolJobs, Recycle, Retention, etc. With the Director, the catalog record is updated directly.
-- `update pool`: synchronizes the catalog pool record with the current Pool resource definition (e.g. after editing and reloading the config).
-- `update slots`: queries the autochanger for current slot contents and updates the catalog accordingly.
-- Without arguments, prints available sub-commands.
-- This is an audited command.
+## Beispiele
 
-## Related Commands
+### Hauptmenü und Abbruch
 
-- [label](label.md) -- Label a new volume
-- [list](list.md) -- List volumes to see current attributes
-- [show](show.md) -- Show pool resource definitions
-- [reload](reload.md) -- Reload config before updating pools
+```text
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]> update
+Automatically selected Catalog: MyCatalog
+Using Catalog "MyCatalog"
+Update choice:
+1: Volume parameters
+2: Pool from resource
+3: Slots from autochanger
+4: Long term statistics
+Choose catalog item to update (1-4):
+> .
+Selection aborted, nothing done.
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]>
+```
+
+### Volume-Status direkt setzen
+
+```text
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]> update volume=Full-0001 volstatus=Used
+Automatically selected Catalog: MyCatalog
+Using Catalog "MyCatalog"
+New Volume status is: Used
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]>
+```
+
+### Mehrere Werte in einer Zeile
+
+```text
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]> update volume=Full-0001 volretention=30days voluse=1day maxvoljobs=5 maxvolfiles=10 maxvolbytes=10G recycle=no
+Automatically selected Catalog: MyCatalog
+Using Catalog "MyCatalog"
+New retention period is: 1 month
+New use duration is: 1 day
+New max jobs is: 5
+New max files is: 10
+New Max bytes is: 10737418240
+New Recycle flag is: no
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]>
+```
+
+```text
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]> update volume=Full-0001 inchanger=yes slot=3 enabled=no
+Automatically selected Catalog: MyCatalog
+Using Catalog "MyCatalog"
+New InChanger flag is: yes
+New Slot is: 3
+New Enabled is: 0
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]>
+```
+
+### Volume im Menü ändern
+
+`update volume=<name>` ohne Parameter öffnet das Parametermenü. Hier wird der Status auf `Used` gesetzt (Punkt 1, dann 5) und das Menü mit `19` verlassen.
+
+```text
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]> update volume=Full-0001
+Automatically selected Catalog: MyCatalog
+Using Catalog "MyCatalog"
+Parameters to modify:
+ 1: Volume Status
+ 2: Volume Retention Period
+ 3: Volume Use Duration
+ 4: Maximum Volume Jobs
+ 5: Maximum Volume Files
+ 6: Maximum Volume Bytes
+ 7: Recycle Flag
+ 8: Slot
+ 9: InChanger Flag
+10: Volume Files
+11: Pool
+12: Volume from Pool
+13: All Volumes from Pool
+14: All Volumes from all Pools
+15: Enabled
+16: RecyclePool
+17: Action On Purge
+18: Storage
+19: Done
+Select parameter to modify (1-19):
+> 1
+Updating Volume "Full-0001"
+Current Volume status is: Used
+Possible Values are:
+1: Append
+2: Archive
+3: Disabled
+4: Full
+5: Used
+6: Cleaning
+7: Read-Only
+Choose new Volume Status (1-7):
+> 5
+New Volume status is: Used
+Parameters to modify:
+ 1: Volume Status
+ 2: Volume Retention Period
+ 3: Volume Use Duration
+ 4: Maximum Volume Jobs
+ 5: Maximum Volume Files
+ 6: Maximum Volume Bytes
+ 7: Recycle Flag
+ 8: Slot
+ 9: InChanger Flag
+10: Volume Files
+11: Pool
+12: Volume from Pool
+13: All Volumes from Pool
+14: All Volumes from all Pools
+15: Enabled
+16: RecyclePool
+17: Action On Purge
+18: Storage
+19: Done
+Select parameter to modify (1-19):
+> 19
+Selection terminated.
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]>
+```
+
+Weitere Punkte des Menüs (Menü gekürzt):
+
+```text
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]> update volume=Full-0001
+Automatically selected Catalog: MyCatalog
+Using Catalog "MyCatalog"
+Parameters to modify:
+ 1: Volume Status
+[…]
+19: Done
+Select parameter to modify (1-19):
+> 2
+Updating Volume "Full-0001"
+Current retention period is: 1 month
+Enter Volume Retention period:
+> 60days
+New retention period is: 2 months
+Parameters to modify:
+ 1: Volume Status
+[…]
+19: Done
+Select parameter to modify (1-19):
+> 19
+Selection terminated.
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]>
+```
+
+```text
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]> update volume=Full-0001
+Automatically selected Catalog: MyCatalog
+Using Catalog "MyCatalog"
+Parameters to modify:
+ 1: Volume Status
+[…]
+19: Done
+Select parameter to modify (1-19):
+> 10
+Updating Volume "Full-0001"
+Warning changing Volume Files can result
+in loss of data on your Volume
+
+Current Volume Files is: 5
+Enter new number of Files for Volume:
+> 5
+Normally, you should only increase Volume Files by one!
+Increase Volume Files? (yes/no):
+> no
+Parameters to modify:
+ 1: Volume Status
+[…]
+19: Done
+Select parameter to modify (1-19):
+> .
+Selection aborted, nothing done.
+Updating Volume "Full-0001"
+Selection terminated.
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]>
+```
+
+### Volume erst auswählen
+
+Ohne Volume-Namen fragt `update volume` nach dem Parameter, dann nach Pool und Volume. Ein `.` im Parametermenü führt hier zur Pool-Auswahl.
+
+```text
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]> update volume
+Automatically selected Catalog: MyCatalog
+Using Catalog "MyCatalog"
+Parameters to modify:
+ 1: Volume Status
+[…]
+19: Done
+Select parameter to modify (1-19):
+> 1
+Defined Pools:
+1: Incremental
+2: Full
+3: Differential
+4: Scratch
+Select the Pool (1-4):
+> 2
++---------+------------+-----------+---------+----------------+----------+--------------+---------+------+-----------+-----------+---------------------+---------+------------------+
+| mediaid | volumename | volstatus | enabled | volbytes       | volfiles | volretention | recycle | slot | inchanger | mediatype | lastwritten         | storage | hasencryptionkey |
++---------+------------+-----------+---------+----------------+----------+--------------+---------+------+-----------+-----------+---------------------+---------+------------------+
+|  47,318 | Full-0001  | Error     |       1 | 23,902,210,671 |        5 |            0 |       1 |    0 |         0 | File      | 2026-03-30 22:54:15 | File    |                0 |
+|  47,320 | Full-0002  | Error     |       1 |    124,004,811 |        0 |            0 |       1 |    0 |         0 | File      |                     |         |                0 |
+|  47,321 | Full-47321 | Append    |       1 |    158,201,165 |        0 |   31,536,000 |       1 |    0 |         0 | File      | 2026-07-10 21:10:05 | File    |                0 |
++---------+------------+-----------+---------+----------------+----------+--------------+---------+------+-----------+-----------+---------------------+---------+------------------+
+Enter the volume name or MediaId of the volume prefixed with an asterisk (*).
+E.g. "full-0001" or "*42":
+> .
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]>
+```
+
+```text
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]> update volume
+Automatically selected Catalog: MyCatalog
+Using Catalog "MyCatalog"
+Parameters to modify:
+ 1: Volume Status
+[…]
+19: Done
+Select parameter to modify (1-19):
+> .
+Selection aborted, nothing done.
+Defined Pools:
+1: Incremental
+2: Full
+3: Differential
+4: Scratch
+Select the Pool (1-4):
+>
+```
+
+### Fehleingaben im Menü
+
+Im Parametermenü gelten nur Nummern von 1 bis 19:
+
+```text
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]> update volume
+Automatically selected Catalog: MyCatalog
+Using Catalog "MyCatalog"
+Parameters to modify:
+ 1: Volume Status
+[…]
+19: Done
+Select parameter to modify (1-19):
+> 0
+Please enter a number between 1 and 19
+Select parameter to modify (1-19):
+> x
+Expected a positive integer, got: x
+Select parameter to modify (1-19):
+> .
+Selection aborted, nothing done.
+Defined Pools:
+1: Incremental
+2: Full
+3: Differential
+4: Scratch
+Select the Pool (1-4):
+>
+```
+
+Ungültige Werte melden einen Fehler und führen zurück ins Menü:
+
+```text
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]> update volume=Full-0001
+Automatically selected Catalog: MyCatalog
+Using Catalog "MyCatalog"
+Parameters to modify:
+ 1: Volume Status
+[…]
+19: Done
+Select parameter to modify (1-19):
+> 2
+Updating Volume "Full-0001"
+Current retention period is: 0 secs
+Enter Volume Retention period:
+> bogus
+Invalid retention period specified: bogus
+Parameters to modify:
+ 1: Volume Status
+[…]
+19: Done
+Select parameter to modify (1-19):
+> .
+Selection aborted, nothing done.
+Updating Volume "Full-0001"
+Selection terminated.
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]>
+```
+
+Bei Ja/Nein-Fragen wiederholt der Director die Frage ohne Meldung:
+
+```text
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]> update volume=Full-0001
+Automatically selected Catalog: MyCatalog
+Using Catalog "MyCatalog"
+Parameters to modify:
+ 1: Volume Status
+[…]
+19: Done
+Select parameter to modify (1-19):
+> 9
+Updating Volume "Full-0001"
+Current InChanger flag is: 0
+Set InChanger flag for Volume "Full-0001": yes/no:
+> maybe
+Set InChanger flag for Volume "Full-0001": yes/no:
+> .
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]>
+```
+
+Ein unbekannter Pool-Name führt zur Pool-Auswahl:
+
+```text
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]> update volume=Full-0001
+Automatically selected Catalog: MyCatalog
+Using Catalog "MyCatalog"
+Parameters to modify:
+ 1: Volume Status
+[…]
+19: Done
+Select parameter to modify (1-19):
+> 11
+Updating Volume "Full-0001"
+Current Pool is: Full
+Enter new Pool name:
+> t001nosuch
+Could not find Pool "t001nosuch": ERR=Pool record not found in Catalog.
+Defined Pools:
+1: Incremental
+2: Full
+3: Differential
+4: Scratch
+Select the Pool (1-4):
+> .
+Selection aborted, nothing done.
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]>
+```
+
+### Recycle-Pool wählen
+
+```text
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]> update volume=Full-0001
+Automatically selected Catalog: MyCatalog
+Using Catalog "MyCatalog"
+Parameters to modify:
+ 1: Volume Status
+[…]
+19: Done
+Select parameter to modify (1-19):
+> 16
+Updating Volume "Full-0001"
+No current RecyclePool
+Defined Pools:
+1: *None*
+2: Incremental
+3: Full
+4: Differential
+5: Scratch
+Select the Pool (1-5):
+> .
+Selection aborted, nothing done.
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]>
+```
+
+### Pool-Eintrag aus der Konfiguration aktualisieren
+
+`update pool=<pool>` übernimmt die Werte der Pool-Ressource in den Katalog und zeigt den Eintrag danach.
+
+```text
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]> update pool=Full
+Automatically selected Catalog: MyCatalog
+Using Catalog "MyCatalog"
++--------+------+---------+---------+---------+------------+-----------------+--------------+----------------+------------+----------------+-----------+---------+----------+-------------+---------+---------------+---------------+-----------+
+| poolid | name | numvols | maxvols | useonce | usecatalog | acceptanyvolume | volretention | voluseduration | maxvoljobs | maxvolbytes    | autoprune | recycle | pooltype | labelformat | enabled | scratchpoolid | recyclepoolid | labeltype |
++--------+------+---------+---------+---------+------------+-----------------+--------------+----------------+------------+----------------+-----------+---------+----------+-------------+---------+---------------+---------------+-----------+
+|      3 | Full |       6 |     100 |       0 |          1 |               0 |   31,536,000 |              0 |          0 | 53,687,091,200 |         1 |       1 | Backup   | Full-       |       1 |             0 |             0 |         0 |
++--------+------+---------+---------+---------+------------+-----------------+--------------+----------------+------------+----------------+-----------+---------+----------+-------------+---------+---------------+---------------+-----------+
+Pool DB record updated from resource.
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]>
+```
+**Abweichung vom Original:** Die Tabelle des Originals hat zusätzlich die Spalten `maxvolfiles`, `actiononpurge`, `nextpoolid`, `minblocksize`, `maxblocksize`, `migrationhighbytes`, `migrationlowbytes` und `migrationtime`. (C-068)
+
+Ohne Namen erscheint die Auswahl der Pool-Ressourcen:
+
+```text
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]> update pool
+Automatically selected Catalog: MyCatalog
+Using Catalog "MyCatalog"
+The defined Pool resources are:
+1: Differential
+2: Full
+3: Incremental
+4: Scratch
+Select Pool resource (1-4):
+> .
+Selection aborted, nothing done.
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]>
+```
+
+### Slots eines Autochangers aktualisieren
+
+`update slots` fragt den Storage Daemon nach dem Inhalt des Autochangers. Das Datei-Gerät der Testkonfiguration ist kein Autochanger:
+
+```text
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]> update slots storage=File
+Automatically selected Catalog: MyCatalog
+Using Catalog "MyCatalog"
+Connecting to Storage daemon File at WS-JOERG.intranet.bernau.family:9103 ...
+3998 Device ""FileStorage" (/srv/BACKUP/bareos-storage)" is not an autochanger.
+Device "FileStorage" has 0 slots.
+No slots in changer to scan.
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]>
+```
+
+Ohne `storage=` bietet `update slots` nur Autochanger-Storages an; in der Testkonfiguration gibt es keinen:
+
+```text
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]> update slots
+Automatically selected Catalog: MyCatalog
+Using Catalog "MyCatalog"
+The defined Autochanger Storage resources are:
+Selection list for "Storage" is empty!
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]>
+```
+
+Unter `.api 2`:
+
+```text
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]> .api 2
+{
+  "jsonrpc": "2.0",
+  "id": null,
+  "result": {
+    "api": 2
+  }
+}
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]> update slots storage=File
+{
+  "jsonrpc": "2.0",
+  "id": null,
+  "result": {}
+}
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]>
+```
+
+### Nicht unterstützte Varianten
+
+`update volume … pool=`, `recyclepool=`, `actiononpurge=`, `storage=`, `allfrompool=`, `fromallpools`, `update stats` und `update jobid=<id> …` melden in Onesimus derzeit `not supported`.
+
+```text
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]> update volume=Full-0001 pool=Incremental
+Automatically selected Catalog: MyCatalog
+Using Catalog "MyCatalog"
+update volume pool: not supported
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]>
+```
+**Abweichung vom Original:** Das Original verschiebt das Volume und meldet `New Pool is: Incremental`. (C-067)
+
+```text
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]> update volume allfrompool=Full
+Automatically selected Catalog: MyCatalog
+Using Catalog "MyCatalog"
+update volume allfrompool: not supported
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]>
+```
+**Abweichung vom Original:** Das Original meldet `All Volume defaults updated from "Full" Pool record.` (C-067)
+
+```text
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]> update stats days=30
+Automatically selected Catalog: MyCatalog
+Using Catalog "MyCatalog"
+update stats: not supported
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]>
+```
+**Abweichung vom Original:** Das Original schreibt die Statistik fort und meldet `Updating 148 job(s).` (C-067)
+
+```text
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]> update jobid=999999 jobname=x
+Automatically selected Catalog: MyCatalog
+Using Catalog "MyCatalog"
+update jobid: not supported
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]>
+```
+**Abweichung vom Original:** Das Original meldet für eine unbekannte Job-ID `cats/sql_get.cc:275 No Job found for JobId 999999`. (C-067)
+
+Fehlt bei `update jobid` die Job-ID, kommt die Meldung aus dem Original:
+
+```text
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]> update jobid
+Automatically selected Catalog: MyCatalog
+Using Catalog "MyCatalog"
+Expect JobId keyword, not found.
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]>
+```
+
+## Fehlermeldungen
+
+| Meldung | Ursache und Abhilfe |
+|---|---|
+| `cats/sql_get.cc:1177 Media record for Volume "<name>" not found.` | Das Volume gibt es nicht. Namen mit `list volumes` prüfen. Weitere Parameter derselben Zeile werden dann nicht mehr geprüft. |
+| `Invalid VolStatus specified: <wert>` | Unbekannter Status, siehe Tabelle oben. |
+| `Invalid retention period specified: <wert>` | Keine gültige Zeitangabe (z. B. `30days`). |
+| `Invalid use duration specified: <wert>` | Keine gültige Zeitangabe. |
+| `Invalid max. bytes specification: <wert>` | Keine gültige Größe (z. B. `10G`). |
+| `Query failed: UPDATE Media SET MaxVolJobs=<wert> … ERR=…` | `maxvoljobs=` oder `maxvolfiles=` mit einem Wert, der keine Zahl ist. Der Wert geht ungeprüft an die Datenbank, die ihn abweist (wie im Original). |
+| `Invalid value. It must be yes or no.` | `recycle=` oder `inchanger=` mit anderem Wert als `yes`/`no`. |
+| `Invalid slot, it must be between 0 and MaxVols=<n>` | Slot außerhalb des erlaubten Bereichs. |
+| `Invalid Enabled value, it must be yes, no, archived, 0, 1, or 2` | Ungültiger `enabled=`-Wert (auch bei `update slots`). |
+| `Valid values for Encrypt are yes/no/rotate` | Ungültiger `encrypt=`-Wert. |
+| `No encryption key for volume '<name>' configured.` | Das Volume hat keinen Verschlüsselungsschlüssel. |
+| `Could not find Pool "<name>": ERR=Pool record not found in Catalog.` | Unbekannter Pool bei `pool=`, `recyclepool=` oder `allfrompool=`; die Pool-Auswahl folgt. |
+| `Error: Pool resource "<name>" does not exist.` | `update pool=` mit einem Namen, den die Konfiguration nicht kennt. |
+| `Expected a positive integer, got: <eingabe>` / `Please enter a number between 1 and 19` | Im Menü wurde keine gültige Nummer eingegeben. |
+| `Expect JobId keyword, not found.` | `update jobid` ohne `=<jobid>`. |
+| `The defined Autochanger Storage resources are:` / `Selection list for "Storage" is empty!` | `update slots` ohne Autochanger in der Konfiguration. |
+| `3998 Device "…" is not an autochanger.` / `No slots in changer to scan.` | Antwort des Storage Daemons: das Gerät ist kein Autochanger. |
+| `<variante>: not supported` | Diese Variante ist in Onesimus noch nicht umgesetzt (C-067). |
+| `Selection aborted, nothing done.` | Der Dialog wurde mit `.` abgebrochen. |
+
+## Siehe auch
+
+- [list](list.md) — Volumes, Pools und Jobs anzeigen
+- [llist](llist.md) — alle Felder eines Volumes anzeigen
+- [create](create.md) — Pool-Eintrag neu anlegen
+- [label](label.md) — Volume beschriften
+- [purge](purge.md) — Volume leeren
+- [status](status.md) — Slots eines Autochangers anzeigen (`status storage=<storage> slots`)

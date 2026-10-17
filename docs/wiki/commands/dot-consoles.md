@@ -1,4 +1,4 @@
-# .consoles — List Console Names
+# .consoles — Namen der Konsolen auflisten
 
 <!-- bareos-reference:start -->
 ## Aus den Bareos-Originalquellen
@@ -21,43 +21,110 @@ Referenz: [WIP/25.1.2-pre-43-g18be77e68, `18be77e6832e`](https://github.com/bare
 
 Die folgenden vorhandenen Beispiele und Verhaltensbeschreibungen sind lokale Dokumentation; sie sind kein Beleg für vollständige Bareos-Kompatibilität. Bei Widersprüchen gilt der obige Befund.
 <!-- bareos-reference:end -->
-Machine-interface command used by bconsole/oconsole for tab-completion. Returns one console resource name per line from the Director configuration.
+
+## Zweck
+
+`.consoles` listet die Namen aller Console-Ressourcen des Directors, einen pro Zeile. Oberflächen und die Tab-Vervollständigung nutzen den Befehl. Die Liste enthält auch die eingebaute Standardkonsole `*UserAgent*` und Konsolen, die mit [configure](configure.md) zur Laufzeit angelegt wurden. Der Befehl liest nur.
 
 ## Syntax
 
-```
+```text
 .consoles
 ```
 
-## Arguments
+## Argumente
 
-None.
+Der Befehl hat keine Argumente. Weitere Wörter werden ignoriert (Paritätsfall `dcfg-consoles-arg`).
 
-## Examples
+Die Reihenfolge ist die interne Reihenfolge der Konfiguration, nicht alphabetisch. Die Liste wird nicht nach ACLs gefiltert: wer `.consoles` ausführen darf, sieht alle Konsolen.
 
-### List all consoles
-```
-* .consoles
+## API-Modi
+
+Unter `.api 0` und `.api 1` kommt dieselbe Liste. Unter `.api 2` steht sie in `result.consoles` als Array von Objekten mit dem Feld `name`.
+
+## Beispiele
+
+### Konsolen auflisten
+
+Paritätsfall `dot_consoles`. `c019e` und `c019f` wurden vorher mit `configure add console` angelegt und stehen deshalb am Ende.
+
+```text
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]> .consoles
+parity-operator
+parity-listacl
+parity-limited
+parity-device
+parity-c030-job
+parity-c030-storage
+parity-c030-client
+parity-c030-pool
+parity-bvfs
+parity-acl
 bareos-mon
-admin-console
-webui-console
+*UserAgent*
+c019e
+c019f
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]>
 ```
 
-### Single console setup
+### Konsolen als JSON
+
+Paritätsfall `c003-dot_consoles-api2`.
+
+```text
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]> .api 2
+{
+  "jsonrpc": "2.0",
+  "id": null,
+  "result": {
+    "api": 2
+  }
+}
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]> .consoles
+{
+  "jsonrpc": "2.0",
+  "id": null,
+  "result": {
+    "consoles": [
+      {
+        "name": "parity-operator"
+      },
+      {
+        "name": "parity-listacl"
+      },
+[…]
+      {
+        "name": "bareos-mon"
+      },
+      {
+        "name": "*UserAgent*"
+      }
+    ]
+  }
+}
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]>
 ```
-* .consoles
-bareos-mon
+
+### Konsole ohne Berechtigung
+
+`parity-limited` hat `.consoles` nicht in der `CommandACL` (Paritätsfall `c025-consoles-limited`).
+
+```text
+parity-limited@bareos-dir[25.1.2+onesimus.0.2.0]> .consoles
+.consoles: is an invalid command.
+parity-limited@bareos-dir[25.1.2+onesimus.0.2.0]>
 ```
 
-## Notes
+## Fehlermeldungen
 
-- Output is one name per line, no headers, no formatting.
-- Output is terminated by the EOD signal.
-- Console resources define named console connections with optional ACL restrictions.
-- The default console (no Console resource match) connects as `*UserAgent*` with full access.
+| Meldung | Ursache und Abhilfe |
+|---|---|
+| `.consoles: is an invalid command.` | Die Konsole darf `.consoles` nicht ausführen (`CommandACL`). |
 
-## Related Commands
+## Siehe auch
 
-- [.acl](dot-acl.md) -- Manage console ACLs
-- [.profiles](dot-profiles.md) -- List profile names
-- [whoami](whoami.md) -- Show current console identity
+- [.profiles](dot-profiles.md) — Namen aller Profile
+- [.users](dot-users.md) — Namen aller User-Ressourcen
+- [show](show.md) — `show consoles` zeigt die Konsolen mit allen Direktiven
+- [configure](configure.md) — Konsole zur Laufzeit anlegen
+- [whoami](whoami.md) — Namen der eigenen Konsole anzeigen

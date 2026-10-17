@@ -1,4 +1,4 @@
-# setbandwidth -- Set Bandwidth Limit
+# setbandwidth — Bandbreite begrenzen
 
 <!-- bareos-reference:start -->
 ## Aus den Bareos-Originalquellen
@@ -28,53 +28,174 @@ setbandwidth [ client=<client-name> | storage=<storage-name> | jobid=<jobid> | j
 
 Die folgenden vorhandenen Beispiele und Verhaltensbeschreibungen sind lokale Dokumentation; sie sind kein Beleg für vollständige Bareos-Kompatibilität. Bei Widersprüchen gilt der obige Befund.
 <!-- bareos-reference:end -->
-Set a bandwidth limit for data transfer to/from a specific client or running job.
+
+## Zweck
+
+`setbandwidth` begrenzt die Bandbreite eines File Daemons, eines Storage Daemons oder laufender Jobs, ohne die Konfiguration zu ändern. Der Director baut dazu eine Verbindung zum Daemon auf und übermittelt das neue Limit; es gilt bis zum nächsten Neustart des Daemons bzw. bis zum Ende des Jobs. Ein Limit von 0 hebt die Begrenzung auf.
 
 ## Syntax
 
-```
-setbandwidth limit=<speed> [client=<name>] [jobid=<id>]
-```
-
-## Arguments
-
-| Argument | Description |
-|----------|-------------|
-| `limit=<speed>` | Bandwidth limit in bytes/second (required). Use suffixes: `k` (KB/s), `m` (MB/s) |
-| `client=<name>` | Apply limit to all jobs for this client |
-| `jobid=<id>` | Apply limit to this specific running job |
-
-## Examples
-
-### Limit a client to 10 MB/s
-```
-* setbandwidth limit=10m client=bareos-fd
-Bandwidth limit set to 10m
+```text
+setbandwidth [limit=<kb/s>] client[=<client-name>]
+setbandwidth [limit=<kb/s>] storage[=<storage-name>]
+setbandwidth [limit=<kb/s>] job=<job-name> | jobid=<jobid> | ujobid=<unique-job-name> | all | state=<zustand>
+setbandwidth [limit=<kb/s>]
 ```
 
-### Limit a specific running job
+## Argumente
+
+| Argument | Werte | Bedeutung |
+|---|---|---|
+| `limit=<kb/s>` | Ganzzahl in kB/s | Neues Limit; 0 hebt es auf. Fehlt es, fragt der Director danach. |
+| `client=<client-name>` | Name einer Client-Ressource | Limit für diesen File Daemon. Ohne Wert oder bei unbekanntem Namen erscheint die Auswahlliste der Clients. |
+| `storage=<storage-name>` | Name einer Storage-Ressource | Limit für diesen Storage Daemon. NDMP-Storages lassen sich nicht begrenzen. |
+| `job=<job-name>`, `jobid=<jobid>`, `ujobid=<unique-job-name>` | Name, JobId oder eindeutiger Jobname | Laufende Jobs auswählen, deren Bandbreite begrenzt wird. Bei Backup und Restore gilt das Limit über den File Daemon, bei Copy und Migrate über den lesenden Storage Daemon. Läuft der Job nicht, wird kein Job begrenzt; bei `job=` folgt dann die Auswahl des Clients. |
+| `all`, `state=<zustand>` | – | Alle laufenden Jobs bzw. laufende Jobs in einem Zustand. |
+
+Ohne `client`, `storage` oder Job-Auswahl fragt der Director nach dem Client.
+
+## Dialoge
+
+Fehlt `limit=`, fragt der Director `Enter new bandwidth limit kb/s:`. Erwartet wird eine nicht negative Ganzzahl; andere Eingaben werden abgelehnt und die Frage wiederholt. `.` bricht ab.
+
+```text
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]> setbandwidth
+Enter new bandwidth limit kb/s: 
+> x
+Expected a positive integer, got: x
+Enter new bandwidth limit kb/s: 
+> .
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]>
 ```
-* setbandwidth limit=5m jobid=15
-Bandwidth limit set to 5m
+
+Fehlt das Ziel, erscheint die Auswahlliste der Clients; `.` bricht ab.
+
+```text
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]> setbandwidth limit=100
+The defined Client resources are:
+1: bareos-fd
+2: parity-ndmp-fd
+Select Client (File daemon) resource (1-2): 
+> .
+Selection aborted, nothing done.
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]>
 ```
 
-### Remove bandwidth limit
+## API-Modi
+
+Unter `.api 1` kommen dieselben Texte wie im Standardmodus. Unter `.api 2` fragt der Director nicht nach: `setbandwidth` ohne Limit endet sofort mit leerem `result`.
+
+## Beispiele
+
+### Limit für einen Client oder Storage setzen
+
+Beispielausgabe nicht verfügbar: der Befehl würde das Bandbreitenlimit des produktiven File Daemons bzw. Storage Daemons ändern.
+
+### Unbekannter Client
+
+```text
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]> setbandwidth limit=100 client=nosuch
+Error: Client resource nosuch does not exist.
+The defined Client resources are:
+1: bareos-fd
+2: parity-ndmp-fd
+Select Client (File daemon) resource (1-2): 
+> .
+Selection aborted, nothing done.
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]>
 ```
-* setbandwidth limit=0 client=bareos-fd
-Bandwidth limit set to 0
+
+### Unbekannter Storage
+
+```text
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]> setbandwidth limit=100 storage=nosuch
+Storage resource "nosuch": not found
+The defined Storage resources are:
+1: File
+2: ParityNdmp
+3: ParityNdmpNative
+Select Storage resource (1-3): 
+> .
+Selection aborted, nothing done.
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]>
 ```
 
-## Behavior
+### NDMP-Storage
 
-- The Director sends the bandwidth limit to the File Daemon via TLS-PSK.
-- When `client` is specified, the limit applies to all current and future jobs for that client.
-- When `jobid` is specified, the limit applies only to that specific running job.
-- Setting `limit=0` removes the bandwidth restriction.
-- The limit is not persistent -- it resets when the FD restarts or the job completes.
-- Useful for throttling backups during business hours to reduce network impact.
-- This is an audited command.
+Für NDMP-Storages lässt sich kein Limit setzen.
 
-## Related Commands
+```text
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]> setbandwidth storage=ParityNdmp limit=100
+Storage selected is NDMP storage which cannot have a bandwidth limit
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]>
+```
 
-- [status](status.md) -- Check running jobs and their throughput
-- [setdebug](setdebug.md) -- Set debug level on daemons
+### Limit für laufende Jobs
+
+Läuft der angegebene Job nicht, meldet der Director das. Bei `job=` fragt er anschließend nach dem Client.
+
+```text
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]> setbandwidth limit=100 jobid=999999
+JobId 999999 is not running. Use Job name to limit inactive jobs.
+No Jobs running.
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]>
+```
+
+```text
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]> setbandwidth limit=100 job=backup-bareos-fd
+The defined Client resources are:
+1: bareos-fd
+2: parity-ndmp-fd
+Select Client (File daemon) resource (1-2): 
+> .
+Selection aborted, nothing done.
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]>
+```
+
+### Unter .api 2 ohne Argumente
+
+```text
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]> .api 2
+{
+  "jsonrpc": "2.0",
+  "id": null,
+  "result": {
+    "api": 2
+  }
+}
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]> setbandwidth
+{
+  "jsonrpc": "2.0",
+  "id": null,
+  "result": {}
+}
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]>
+```
+
+### Eingeschränkte Konsole
+
+```text
+parity-limited@bareos-dir[25.1.2+onesimus.0.2.0]> setbandwidth limit=100
+setbandwidth: is an invalid command.
+parity-limited@bareos-dir[25.1.2+onesimus.0.2.0]>
+```
+
+## Fehlermeldungen
+
+| Meldung | Ursache und Abhilfe |
+|---|---|
+| `Expected a positive integer, got: <eingabe>` | Bei der Frage nach dem Limit wurde keine nicht negative Ganzzahl eingegeben. |
+| `Error: Client resource <name> does not exist.` | Den Client gibt es nicht oder die Konsole darf ihn nicht sehen. Es folgt die Auswahlliste. |
+| `Selection aborted, nothing done.` | Auswahl mit `.` abgebrochen. |
+| `Storage resource "<name>": not found` | Den Storage gibt es nicht oder die Konsole darf ihn nicht sehen. Es folgt die Auswahlliste. |
+| `JobId <n> is not running. Use Job name to limit inactive jobs.` / `No Jobs running.` | Bei `jobid=` läuft kein solcher Job. |
+| `Storage selected is NDMP storage which cannot have a bandwidth limit` | Der gewählte Storage spricht NDMP; dort gibt es kein Bandbreitenlimit. |
+| `Failed to connect to Client.` / `Failed to connect to Storage daemon.` | Der Daemon ist nicht erreichbar. Adresse und Port der Ressource sowie den Daemon prüfen. |
+| `Failed to set bandwidth limit on Client.` | Der File Daemon hat das Limit abgelehnt. Im Erfolgsfall meldet der Director `OK Limiting bandwidth to <n>kb/s <job>`. |
+| `setbandwidth: is an invalid command.` | Die Konsole darf `setbandwidth` nicht ausführen (Command ACL). |
+
+## Siehe auch
+
+- [status](status.md) — zeigt beim Client und Storage das aktuelle `bwlimit`
+- [setdebug](setdebug.md) — Debug-Level von Director, Client und Storage setzen
+- [run](run.md) — Jobs starten

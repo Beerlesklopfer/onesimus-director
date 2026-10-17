@@ -1,55 +1,87 @@
-# .sqlschema — Show Full Catalog Schema
+# .sqlschema — Spalten aller Katalogtabellen anzeigen
 
-Machine-interface command that shows the complete schema of the catalog database: table name, column name, and data type for every column. Shortcut for `.sql schema`.
+## Zweck
+
+`.sqlschema` zeigt für jede Tabelle im Schema `public` der Katalogdatenbank alle Spalten mit ihrem Datentyp, sortiert nach Tabelle und Spaltenreihenfolge. Das hilft beim Schreiben eigener Abfragen mit [.sql](dot-sql.md). Der Befehl liest nur und verändert nichts.
+
+**Onesimus-Erweiterung (nicht im Original, C-074).** Das Bareos-Original kennt den Befehl nicht und antwortet `.sqlschema: is an invalid command.`. Ob er bleibt, ist noch nicht entschieden. Die Ausgabe ist eine rohe Datenbanktabelle mit festen Spaltenbreiten von 20 Zeichen; längere Namen laufen ohne Abstand in die nächste Spalte (`bareos_schema_versionversion`).
 
 ## Syntax
 
-```
+```text
 .sqlschema
 ```
 
-## Arguments
+## Argumente
 
-None.
+| Argument | Werte | Bedeutung |
+|---|---|---|
+| `catalog=<name>` | Name eines Katalogs | diesen Katalog verwenden statt des automatisch gewählten |
 
-## Examples
+## API-Modi
 
-### Show schema
+Unter `.api 0` stehen beim ersten Katalogzugriff der Sitzung die Katalog-Hinweiszeilen davor, unter `.api 1` nicht; sonst ist der Text gleich. Unter `.api 2` enthält das JSON-Objekt kein Ergebnis (`"result": {}`).
+
+## Beispiele
+
+### Schema anzeigen
+
+```text
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]> .sqlschema
+Automatically selected Catalog: MyCatalog
+Using Catalog "MyCatalog"
+table_name          column_name         data_type
+------------------------------------------------------------
+bareos_schema_versionversion             integer
+bareos_schema_versionapplied_at          timestamp without time zone
+basefiles           baseid              bigint
+basefiles           jobid               integer
+basefiles           fileid              bigint
+basefiles           fileindex           integer
+basefiles           basejobid           integer
+client              clientid            integer
+client              name                text
+client              uname               text
+[…]
+vw_volume_status    slot                bigint
+vw_volume_status    poolname            text
+vw_volume_status    pct_full            numeric
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]>
 ```
-* .sqlschema
-basefiles	baseid	bigint
-basefiles	jobid	integer
-basefiles	fileid	bigint
-client	clientid	integer
-client	name	text
-client	uname	text
-file	fileid	bigint
-file	fileindex	integer
-file	jobid	integer
-file	pathid	integer
-file	markid	integer
-file	lstat	text
-file	md5	text
-...
+
+**Abweichung vom Original:** Das Original antwortet `.sqlschema: is an invalid command.` (C-074)
+
+### Als JSON
+
+```text
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]> .api 2
+{
+  "jsonrpc": "2.0",
+  "id": null,
+  "result": {
+    "api": 2
+  }
+}
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]> .sqlschema
+{
+  "jsonrpc": "2.0",
+  "id": null,
+  "result": {}
+}
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]>
 ```
 
-### No catalog connected
-```
-* .sqlschema
-No catalog configured. Query: SELECT table_name, column_name, data_type FROM information_schema.columns WHERE table_schema = 'public' ORDER BY table_name, ordinal_position
-```
+**Abweichung vom Original:** Das Original antwortet mit einem Fehlerobjekt und der Meldung `.sqlschema: is an invalid command.` (C-074)
 
-## Notes
+## Fehlermeldungen
 
-- Output is tab-separated: `table_name\tcolumn_name\tdata_type`, one column per line.
-- Output is terminated by the EOD signal.
-- Internally delegates to `.sql schema`, which queries `information_schema.columns`.
-- Results are ordered by table name, then ordinal position (column order in CREATE TABLE).
-- Requires a catalog database connection.
+| Meldung | Ursache und Abhilfe |
+|---|---|
+| `.sqlschema: is an invalid command.` | Die `Command ACL` der Konsole erlaubt den Befehl nicht. |
+| `SQL error: …` | Die Abfrage ist in der Datenbank fehlgeschlagen. |
 
-## Related Commands
+## Siehe auch
 
-- [.sql](dot-sql.md) -- Execute SQL with sub-commands
-- [.sqltables](dot-sqltables.md) -- List catalog table names
-- [.sqlcount](dot-sqlcount.md) -- Count records in job table
-- [.catalog](dot-catalog.md) -- Catalog schema management (describe, ddl, validate)
+- [.sqltables](dot-sqltables.md) — nur die Tabellennamen
+- [.sql](dot-sql.md) — beliebige SQL-Abfrage
+- [.catalog](dot-catalog.md) — Hinweis zur Schemaverwaltung

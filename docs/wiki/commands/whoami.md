@@ -1,4 +1,4 @@
-# whoami -- Show Current Console Identity
+# whoami — Name der eigenen Konsole anzeigen
 
 <!-- bareos-reference:start -->
 ## Aus den Bareos-Originalquellen
@@ -21,48 +21,83 @@ Referenz: [WIP/25.1.2-pre-43-g18be77e68, `18be77e6832e`](https://github.com/bare
 
 Die folgenden vorhandenen Beispiele und Verhaltensbeschreibungen sind lokale Dokumentation; sie sind kein Beleg für vollständige Bareos-Kompatibilität. Bei Widersprüchen gilt der obige Befund.
 <!-- bareos-reference:end -->
-Display the name of the console resource that is currently logged in.
+
+## Zweck
+
+`whoami` zeigt, unter welchem Namen die aktuelle Sitzung beim Director angemeldet ist. Bei einer benannten Konsole (`Console`-Ressource, auch über ein `User`/Profil) ist das deren Name. Bei der Standardkonsole, die sich mit dem Director-Passwort anmeldet und keine Rechtebeschränkung hat, lautet die Antwort `root`. Der Befehl liest nur.
 
 ## Syntax
 
-```
+```text
 whoami
 ```
 
-## Arguments
+## Argumente
 
-None.
+Der Befehl hat keine Argumente. Weitere Wörter hinter `whoami` werden ignoriert.
 
-## Examples
+## API-Modi
 
-### Default console
-```
-* whoami
-*UserAgent*
-```
+Unter `.api 0` und `.api 1` kommt der Name als eine Zeile. Unter `.api 2` steht er als Zeichenkette in `result.whoami`.
 
-### Named console
-```
-* whoami
-admin-console
-```
+## Beispiele
 
-### Restricted console
-```
-* whoami
-readonly-console
+### Standardkonsole
+
+```text
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]> whoami
+root
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]>
 ```
 
-## Behavior
+### Benannte Konsole
 
-- Returns the name of the Console resource used to authenticate the current session.
-- `*UserAgent*` indicates the default console (connected with the Director's password, not a named Console resource).
-- Named consoles have ACLs that restrict which commands and resources they can access.
-- Useful for verifying which identity is in use, especially when multiple Console resources are configured.
-- This is not an audited command.
+Angemeldet als Konsole `parity-operator` (Paritätsfall `c010-whoami-named`):
 
-## Related Commands
+```text
+parity-operator@bareos-dir[25.1.2+onesimus.0.2.0]> whoami
+parity-operator
+parity-operator@bareos-dir[25.1.2+onesimus.0.2.0]>
+```
 
-- [help](help.md) -- List available commands for the current console
-- [quit](quit.md) -- Disconnect the current session
-- [.authorized](dot-authorized.md) -- Check ACL authorization for specific resources
+### Name als JSON
+
+```text
+parity-operator@bareos-dir[25.1.2+onesimus.0.2.0]> .api 2
+{
+  "jsonrpc": "2.0",
+  "id": null,
+  "result": {
+    "api": 2
+  }
+}
+parity-operator@bareos-dir[25.1.2+onesimus.0.2.0]> whoami
+{
+  "jsonrpc": "2.0",
+  "id": null,
+  "result": {
+    "whoami": "parity-operator"
+  }
+}
+parity-operator@bareos-dir[25.1.2+onesimus.0.2.0]>
+```
+
+Kompakt (`.api json compact=yes`, Standardkonsole):
+
+```text
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]> .api json compact=yes
+{"jsonrpc":"2.0","id":null,"result":{"api":2}}
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]> whoami
+{"jsonrpc":"2.0","id":null,"result":{"whoami":"root"}}
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]>
+```
+
+## Fehlermeldungen
+
+`whoami` gibt keine Fehlermeldungen aus. Der Befehl ist für jede Konsole erlaubt, auch wenn ihre `CommandACL` ihn nicht nennt (wie `quit` und `exit`).
+
+## Siehe auch
+
+- [help](help.md) — welche Befehle die eigene Konsole benutzen darf
+- [.authorized](dot-authorized.md) — Berechtigung für einen Befehl prüfen
+- [.consoles](dot-consoles.md) — Namen der Konsolen-Ressourcen

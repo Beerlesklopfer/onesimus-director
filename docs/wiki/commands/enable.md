@@ -1,4 +1,4 @@
-# enable -- Enable a Job, Client, Schedule, or Storage
+# enable — Job, Client oder Zeitplan einschalten
 
 <!-- bareos-reference:start -->
 ## Aus den Bareos-Originalquellen
@@ -25,54 +25,260 @@ enable job=<job-name> client=<client-name> schedule=<schedule-name>
 
 Die folgenden vorhandenen Beispiele und Verhaltensbeschreibungen sind lokale Dokumentation; sie sind kein Beleg für vollständige Bareos-Kompatibilität. Bei Widersprüchen gilt der obige Befund.
 <!-- bareos-reference:end -->
-Re-enable a previously disabled resource so it can participate in scheduled and manual operations again.
+## Zweck
+
+`enable` schaltet einen zuvor mit [disable](disable.md) abgeschalteten Job, Client oder Zeitplan (Schedule) wieder ein. Ein eingeschalteter Job wird vom Zeitplan wieder gestartet, ein eingeschalteter Client wieder gesichert. Die Änderung gilt nur im Speicher des laufenden Directors und geht beim nächsten [reload](reload.md) oder Neustart verloren; dauerhaft wirkt nur die Direktive `Enabled` in der Konfiguration. Der Katalog wird nicht verändert.
 
 ## Syntax
 
-```
-enable [job=<name>|client=<name>|schedule=<name>|storage=<name>]
-```
-
-## Arguments
-
-| Argument | Description |
-|----------|-------------|
-| `job=<name>` | Enable a Job resource |
-| `client=<name>` | Enable a Client resource |
-| `schedule=<name>` | Enable a Schedule resource |
-| `storage=<name>` | Enable a Storage resource |
-
-## Examples
-
-### Enable a job
-```
-* enable job=backup-bareos-fd
-Job 'backup-bareos-fd' enabled
+```text
+enable
+enable job=<job>
+enable client=<client>
+enable schedule=<schedule>
+enable job | client | schedule
 ```
 
-### Enable a client
+## Argumente
+
+| Argument | Werte | Bedeutung |
+|---|---|---|
+| `job=<job>` | Name einer Job-Ressource | Diesen Job einschalten. |
+| `client=<client>` | Name einer Client-Ressource | Diesen Client einschalten. |
+| `schedule=<schedule>` | Name einer Schedule-Ressource | Diesen Zeitplan einschalten. |
+| `job`, `client`, `schedule` ohne Wert | – | Auswahl unter den abgeschalteten Ressourcen dieser Art. |
+
+Ohne Argument wählt `enable` unter den abgeschalteten Jobs. Andere Wörter (etwa `storage=`) werden übergangen; dann gilt ebenfalls die Jobauswahl.
+
+## Dialoge
+
+Die Auswahlliste enthält nur abgeschaltete Ressourcen, die die Konsole sehen darf. Ist es genau eine, wählt der Director sie ohne Frage (`Automatically selected Job: …`). Ist es keine, meldet er `Selection list for "Job" is empty!` und beendet den Befehl. Sonst fragt er `Select Job resource (1-n):`; `.` bricht ab.
+
+## API-Modi
+
+Unter `.api 0` und `.api 1` kommt derselbe Text. Unter `.api 2` steht das Ergebnis in `result.enable` mit den Listen `jobs`, `clients` bzw. `schedules`; eine leere Auswahl liefert ein leeres `result`, ein unbekannter Name einen JSON-RPC-Fehler.
+
+## Beispiele
+
+### Job ein- und ausschalten
+
+```text
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]> disable job=backup-bareos-fd
+Job "backup-bareos-fd" disabled
+Disabling is a temporary operation until the director reloads.
+For a permanent setting, please set the value of the "Enabled"
+directive in the relevant configuration resource file.
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]> enable job=backup-bareos-fd
+Job "backup-bareos-fd" enabled
+Enabling is a temporary operation until the director reloads.
+For a permanent setting, please set the value of the "Enabled"
+directive in the relevant configuration resource file.
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]>
 ```
-* enable client=bareos-fd
-Client 'bareos-fd' enabled
+
+### Aus mehreren abgeschalteten Jobs auswählen
+
+```text
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]> disable job=BackupCatalog
+Job "BackupCatalog" disabled
+Disabling is a temporary operation until the director reloads.
+For a permanent setting, please set the value of the "Enabled"
+directive in the relevant configuration resource file.
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]> disable job=parity-admin
+Job "parity-admin" disabled
+Disabling is a temporary operation until the director reloads.
+For a permanent setting, please set the value of the "Enabled"
+directive in the relevant configuration resource file.
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]> enable
+The defined Job resources are:
+1: BackupCatalog
+2: parity-admin
+Select Job resource (1-2):
+> 2
+Job "parity-admin" enabled
+Enabling is a temporary operation until the director reloads.
+For a permanent setting, please set the value of the "Enabled"
+directive in the relevant configuration resource file.
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]> enable job=BackupCatalog
+Job "BackupCatalog" enabled
+Enabling is a temporary operation until the director reloads.
+For a permanent setting, please set the value of the "Enabled"
+directive in the relevant configuration resource file.
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]>
 ```
 
-### Enable a schedule
+### Einzigen abgeschalteten Job automatisch wählen
+
+```text
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]> disable
+The defined Job resources are:
+ 1: backup-bareos-fd
+ 2: BackupCatalog
+ 3: parity-admin
+ 4: parity-consolidate
+ 5: parity-copy
+ 6: parity-migrate
+ 7: parity-restore-regex
+ 8: parity-verify
+ 9: RestoreFiles
+Select Job resource (1-9):
+> 1
+Job "backup-bareos-fd" disabled
+Disabling is a temporary operation until the director reloads.
+For a permanent setting, please set the value of the "Enabled"
+directive in the relevant configuration resource file.
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]> enable
+Automatically selected Job: backup-bareos-fd
+Job "backup-bareos-fd" enabled
+Enabling is a temporary operation until the director reloads.
+For a permanent setting, please set the value of the "Enabled"
+directive in the relevant configuration resource file.
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]>
 ```
-* enable schedule=WeeklyCycle
-Schedule 'WeeklyCycle' enabled
+
+### Nichts abgeschaltet
+
+```text
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]> enable
+The defined Job resources are:
+Selection list for "Job" is empty!
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]>
 ```
 
-## Behavior
+### Client einschalten
 
-- Sets the `Enabled` flag to `yes` in the in-memory configuration for the named resource.
-- The change is effective immediately but does not persist across Director restarts unless the configuration is also saved (via `configure` or manual edit).
-- Enabling an already-enabled resource succeeds silently.
-- If the resource name is not found, an error is returned.
-- Without arguments, the command prints usage help.
-- This is an audited command.
+```text
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]> disable client=bareos-fd
+Client "bareos-fd" disabled
+Disabling is a temporary operation until the director reloads.
+For a permanent setting, please set the value of the "Enabled"
+directive in the relevant configuration resource file.
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]> enable client=bareos-fd
+Client "bareos-fd" enabled
+Enabling is a temporary operation until the director reloads.
+For a permanent setting, please set the value of the "Enabled"
+directive in the relevant configuration resource file.
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]>
+```
 
-## Related Commands
+### Zeitplan einschalten
 
-- [disable](disable.md) -- Disable a job/client/schedule/storage
-- [show](show.md) -- Show resource configuration (includes enabled state)
-- [reload](reload.md) -- Reload configuration from disk
+```text
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]> disable schedule=WeeklyCycle
+Schedule "WeeklyCycle" disabled
+Disabling is a temporary operation until the director reloads.
+For a permanent setting, please set the value of the "Enabled"
+directive in the relevant configuration resource file.
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]> enable schedule=WeeklyCycle
+Schedule "WeeklyCycle" enabled
+Enabling is a temporary operation until the director reloads.
+For a permanent setting, please set the value of the "Enabled"
+directive in the relevant configuration resource file.
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]>
+```
+
+### Unter .api 2
+
+```text
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]> .api 2
+{
+  "jsonrpc": "2.0",
+  "id": null,
+  "result": {
+    "api": 2
+  }
+}
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]> enable client=bareos-fd
+{
+  "jsonrpc": "2.0",
+  "id": null,
+  "result": {
+    "enable": {
+      "clients": [
+        "bareos-fd"
+      ]
+    }
+  }
+}
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]>
+```
+
+```text
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]> .api 2
+{
+  "jsonrpc": "2.0",
+  "id": null,
+  "result": {
+    "api": 2
+  }
+}
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]> enable schedule=ParityPreview
+{
+  "jsonrpc": "2.0",
+  "id": null,
+  "result": {
+    "enable": {
+      "schedules": [
+        "ParityPreview"
+      ]
+    }
+  }
+}
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]>
+```
+
+### Unbekannter Job unter .api 2
+
+```text
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]> .api 2
+{
+  "jsonrpc": "2.0",
+  "id": null,
+  "result": {
+    "api": 2
+  }
+}
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]> enable job=nosuch
+{
+  "jsonrpc": "2.0",
+  "id": null,
+  "error": {
+    "code": 1,
+    "message": "failed",
+    "data": {
+      "result": {},
+      "messages": {
+        "error": [
+          "Job \"nosuch\" not found.\n"
+        ]
+      }
+    }
+  }
+}
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]>
+```
+
+### Konsole ohne enable-Recht
+
+```text
+parity-limited@bareos-dir[25.1.2+onesimus.0.2.0]> enable
+enable: is an invalid command.
+parity-limited@bareos-dir[25.1.2+onesimus.0.2.0]>
+```
+
+## Fehlermeldungen
+
+| Meldung | Ursache und Abhilfe |
+|---|---|
+| `Job "<name>" not found.` | Unbekannter oder für die Konsole nicht sichtbarer Job. |
+| `Client "<name>" not found.` | Unbekannter oder nicht sichtbarer Client. |
+| `Schedule "<name>" not found.` | Unbekannter oder nicht sichtbarer Zeitplan. |
+| `Selection list for "Job" is empty!` | Es ist kein Job abgeschaltet (entsprechend für Client und Schedule). |
+| `enable: is an invalid command.` | Die Konsole darf `enable` nicht ausführen (Command ACL). |
+
+## Siehe auch
+
+- [disable](disable.md) — Job, Client oder Zeitplan abschalten
+- [show](show.md) — Konfiguration und `Enabled`-Zustand anzeigen
+- [reload](reload.md) — Konfiguration neu laden (setzt `enable`/`disable` zurück)
+- [run](run.md) — Job von Hand starten (auch wenn er abgeschaltet ist)

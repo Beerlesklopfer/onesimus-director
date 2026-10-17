@@ -1,4 +1,4 @@
-# estimate -- Estimate Backup Size
+# estimate — Umfang eines Backups schätzen
 
 <!-- bareos-reference:start -->
 ## Aus den Bareos-Originalquellen
@@ -26,64 +26,222 @@ estimate fileset=<fileset-name> client=<client-name> level=<level> accurate=<yes
 
 Die folgenden vorhandenen Beispiele und Verhaltensbeschreibungen sind lokale Dokumentation; sie sind kein Beleg für vollständige Bareos-Kompatibilität. Bei Widersprüchen gilt der obige Befund.
 <!-- bareos-reference:end -->
-Contact the File Daemon to estimate the number of files and bytes that would be backed up, without actually running a backup job.
+## Zweck
+
+`estimate` fragt den File Daemon, wie viele Dateien und Bytes ein Backup-Job mit dem gewählten Level sichern würde, ohne einen Job zu starten. Der Director verbindet sich dazu mit dem Client, übergibt FileSet und Level und gibt die Antwort des File Daemons aus. Mit `listing` kommt zusätzlich jede Datei, die gesichert würde. Der Befehl verändert weder Katalog noch Daten; für Incremental und Differential liest er nur den letzten passenden Job aus dem Katalog.
 
 ## Syntax
 
-```
-estimate [job=<name>] [client=<name>] [listing]
-```
-
-## Arguments
-
-| Argument | Description |
-|----------|-------------|
-| `job=<name>` | Job resource to estimate (required) |
-| `client=<name>` | Override the client from the Job resource |
-| `listing` | Show individual file listing with sizes |
-
-## Examples
-
-### Basic estimate
-```
-* estimate job=backup-bareos-fd
-Connecting to Client "bareos-fd" for estimate...
-Job: backup-bareos-fd
-FileSet: SelfTest
-2,458 files, 156,234,567 bytes (149.0 MB)
+```text
+estimate
+estimate job=<job> [level=<level>] [client=<client>] [fileset=<fileset>] [accurate=yes|no] [listing]
 ```
 
-### Estimate with file listing
+## Argumente
+
+| Argument | Werte | Bedeutung |
+|---|---|---|
+| `job=<job>` | Name eines Backup-Jobs | Job, dessen Client, FileSet und Level verwendet werden. Pflicht; fehlt er, folgt eine Auswahl. |
+| `level=<level>` | `Full`, `Incremental`, `Differential` | Level der Schätzung; ohne Angabe das Level des Jobs. |
+| `client=<client>`, `fd=<client>` | Name einer Client-Ressource | Anderer Client als im Job. Nur native Clients (kein NDMP). |
+| `fileset=<fileset>` | Name einer FileSet-Ressource | Anderes FileSet als im Job. |
+| `accurate=yes\|no` | `yes`, `no` | Accurate-Modus für die Schätzung. |
+| `listing` | – | Jede Datei ausgeben. |
+
+## Dialoge
+
+Ohne `job=` zeigt der Director alle Jobs und fragt `Select Job resource (1-n):`. Eine Nummer startet die Schätzung, `0` oder eine zu große Zahl führt zu `Please enter a number between 1 and n`, `.` bricht ab.
+
+## API-Modi
+
+Unter `.api 0` und `.api 1` kommt dieselbe Ausgabe. Unter `.api 2` liefert eine erfolgreiche Schätzung ein leeres `result` (wie im Original); Fehler kommen als JSON-RPC-Fehler mit dem Text in `messages.error`.
+
+## Beispiele
+
+### Schätzung für einen Job
+
+```text
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]> estimate job=backup-bareos-fd
+Using Catalog "MyCatalog"
+Connecting to Client bareos-fd at localhost:9102
+2000 OK estimate files=597 bytes=176,344,408
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]>
 ```
-* estimate job=backup-bareos-fd listing
-Connecting to Client "bareos-fd" for estimate...
-Job: backup-bareos-fd
-FileSet: SelfTest
-Listing mode enabled
-/usr/sbin/bareos-dird      1,234,567
-/usr/sbin/bconsole           456,789
-/usr/sbin/bareos-fd          987,654
-...
-2,458 files, 156,234,567 bytes (149.0 MB)
+
+### Bestimmtes Level
+
+```text
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]> estimate job=backup-bareos-fd level=Full
+Using Catalog "MyCatalog"
+Connecting to Client bareos-fd at localhost:9102
+2000 OK estimate files=597 bytes=176,344,408
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]>
 ```
 
-### Without arguments (shows available jobs)
+```text
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]> estimate job=backup-bareos-fd level=Differential
+Using Catalog "MyCatalog"
+Connecting to Client bareos-fd at localhost:9102
+2000 OK estimate files=181 bytes=126,957,165
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]>
 ```
-* estimate
-estimate: specify job=<name>
-Backup jobs: backup-bareos-fd, BackupCatalog
+
+### Anderes FileSet
+
+```text
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]> estimate job=backup-bareos-fd fileset=Catalog
+Using Catalog "MyCatalog"
+Connecting to Client bareos-fd at localhost:9102
+2000 OK estimate files=68 bytes=15,675
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]>
 ```
 
-## Behavior
+### Mit Dateiliste
 
-- The Director connects to the File Daemon via TLS-PSK and requests a file listing based on the Job's FileSet.
-- No data is transferred to the Storage Daemon -- this is a dry run.
-- The `listing` flag causes individual files and their sizes to be printed.
-- Useful for capacity planning and verifying FileSet Include/Exclude patterns.
-- This is not an audited command.
+Die Liste ist hier gekürzt.
 
-## Related Commands
+```text
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]> estimate job=BackupCatalog listing
+Using Catalog "MyCatalog"
+Connecting to Client bareos-fd at localhost:9102
+drwxr-xr-x   1 bareos   bareos             0 2026-03-21 10:38:56  /etc/bareos/bareos-dir-export/client
+drwxr-xr-x   1 bareos   bareos            12 2026-03-21 10:38:56  /etc/bareos/bareos-dir-export
+-rw-r-----   1 bareos   bareos            94 2026-03-21 16:06:13  /etc/bareos/bareos-dir.d/catalog/MyCatalog.conf
+[…]
+drwxr-sr-x   1 bareos   bareos           258 2026-10-15 13:48:03  /etc/bareos
+2000 OK estimate files=68 bytes=15,675
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]>
+```
 
-- [run](run.md) -- Actually run the backup job
-- [show](show.md) -- Show FileSet configuration
-- [status](status.md) -- Check client connectivity
+### Job aus der Liste wählen
+
+```text
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]> estimate
+The defined Job resources are:
+ 1: backup-bareos-fd
+ 2: BackupCatalog
+ 3: parity-admin
+ 4: parity-consolidate
+ 5: parity-copy
+ 6: parity-migrate
+ 7: parity-restore-regex
+ 8: parity-verify
+ 9: RestoreFiles
+Select Job resource (1-9):
+> 2
+Using Catalog "MyCatalog"
+Connecting to Client bareos-fd at localhost:9102
+2000 OK estimate files=68 bytes=15,675
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]>
+```
+
+### Ungültige Werte
+
+Ein ungültiges Level oder ein ungültiger Accurate-Wert wird gemeldet; die Schätzung läuft dann mit den Werten des Jobs.
+
+```text
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]> estimate job=backup-bareos-fd level=bogus
+Level "bogus" not valid.
+Using Catalog "MyCatalog"
+Connecting to Client bareos-fd at localhost:9102
+2000 OK estimate files=597 bytes=176,344,408
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]>
+```
+
+```text
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]> estimate job=backup-bareos-fd accurate=maybe
+Invalid value for accurate. It must be yes or no.
+Using Catalog "MyCatalog"
+Connecting to Client bareos-fd at localhost:9102
+2000 OK estimate files=597 bytes=176,344,408
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]>
+```
+
+### Fehlende Werte und falsche Jobtypen
+
+```text
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]> estimate job=backup-bareos-fd level
+Level value missing.
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]>
+```
+
+```text
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]> estimate job=RestoreFiles
+Wrong job specified of type Restore.
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]>
+```
+
+```text
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]> estimate job=backup-bareos-fd client=parity-ndmp-fd
+Estimate is only supported on native clients.
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]>
+```
+
+### Unter .api 2
+
+```text
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]> .api 2
+{
+  "jsonrpc": "2.0",
+  "id": null,
+  "result": {
+    "api": 2
+  }
+}
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]> estimate job=backup-bareos-fd
+{
+  "jsonrpc": "2.0",
+  "id": null,
+  "result": {}
+}
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]>
+```
+
+```text
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]> .api 2
+{
+  "jsonrpc": "2.0",
+  "id": null,
+  "result": {
+    "api": 2
+  }
+}
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]> estimate job=nosuch
+{
+  "jsonrpc": "2.0",
+  "id": null,
+  "error": {
+    "code": 1,
+    "message": "failed",
+    "data": {
+      "result": {},
+      "messages": {
+        "error": [
+          "Job \"nosuch\" not found.\n"
+        ]
+      }
+    }
+  }
+}
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]>
+```
+
+## Fehlermeldungen
+
+| Meldung | Ursache und Abhilfe |
+|---|---|
+| `Job "<name>" not found.` | Unbekannter Job. |
+| `Job name missing.` / `Client name missing.` / `Fileset name missing.` / `Level value missing.` / `Accurate value missing.` | Schlüsselwort ohne `=wert`. |
+| `Client "<name>" not found.` / `Fileset "<name>" not found.` | Unbekannter Client bzw. unbekanntes FileSet. |
+| `Level "<level>" not valid.` | Ungültiges Level; die Schätzung nutzt das Level des Jobs. |
+| `Invalid value for accurate. It must be yes or no.` | `accurate=` mit anderem Wert; der Wert des Jobs gilt. |
+| `No job specified.` | `client=`/`fileset=` ohne `job=`. |
+| `Wrong job specified of type Restore.` | Nur Backup-Jobs lassen sich schätzen. |
+| `Estimate is only supported on native clients.` | Der Client spricht NDMP. |
+| `2000 OK estimate files=<n> bytes=<n>` | Erfolgreiche Antwort des File Daemons. |
+
+## Siehe auch
+
+- [run](run.md) — Backup tatsächlich starten
+- [status](status.md) — Client-Status abfragen (`status client=<client>`)
+- [show](show.md) — FileSet-Definition ansehen

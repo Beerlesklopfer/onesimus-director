@@ -1,4 +1,4 @@
-# time -- Show Current Date and Time
+# time — Uhrzeit des Directors anzeigen
 
 <!-- bareos-reference:start -->
 ## Aus den Bareos-Originalquellen
@@ -21,47 +21,83 @@ Referenz: [WIP/25.1.2-pre-43-g18be77e68, `18be77e6832e`](https://github.com/bare
 
 Die folgenden vorhandenen Beispiele und Verhaltensbeschreibungen sind lokale Dokumentation; sie sind kein Beleg für vollständige Bareos-Kompatibilität. Bei Widersprüchen gilt der obige Befund.
 <!-- bareos-reference:end -->
-Display the Director's current local date and time.
+
+## Zweck
+
+`time` zeigt Datum und Uhrzeit des Rechners, auf dem der Director läuft, in dessen lokaler Zeitzone. Der Befehl liest nur. Er hilft, wenn Zeitpläne (`Schedule`) oder Zeitangaben in Joblisten nicht zur eigenen Uhr passen, etwa bei abweichender Zeitzone.
 
 ## Syntax
 
-```
+```text
 time
 ```
 
-## Arguments
+## Argumente
 
-None.
+Der Befehl hat keine Argumente. Weitere Wörter hinter `time` werden ignoriert.
 
-## Examples
+## API-Modi
 
-### Show current time
-```
-* time
-2026-03-29 14:35:22
-```
+Unter `.api 0` und `.api 1` kommt eine Zeile im Format `<Wochentag> <TT>-<Monat>-<JJJJ> <hh>:<mm>:<ss>`, zum Beispiel `Fri 16-Oct-2026 16:53:39`. Wochentag und Monat sind englisch abgekürzt.
 
-### Use in a script to timestamp output
-```
-* time
-2026-03-29 01:00:00
-* run job=backup-bareos-fd level=Full yes
-Job queued. JobId=15
-```
+Unter `.api 2` steht die Zeit im Objekt `result.time`: `full` enthält dieselbe Zeile wie im Textmodus, `year`, `month`, `day`, `hour`, `minute` und `second` die einzelnen Teile als zweistellige Zeichenketten (Jahr vierstellig).
 
-### Verify timezone after Director restart
-```
-* time
-2026-03-29 22:10:05
+## Beispiele
+
+### Uhrzeit anzeigen
+
+```text
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]> time
+Fri 16-Oct-2026 16:53:39
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]>
 ```
 
-## Behavior
+### Uhrzeit als JSON
 
-- Returns the Director's local system time in `YYYY-MM-DD HH:MM:SS` format.
-- The timezone is the Director host's configured timezone (not UTC).
-- No arguments are accepted; any extra input is ignored.
+```text
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]> .api 2
+{
+  "jsonrpc": "2.0",
+  "id": null,
+  "result": {
+    "api": 2
+  }
+}
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]> time
+{
+  "jsonrpc": "2.0",
+  "id": null,
+  "result": {
+    "time": {
+      "full": "Fri 16-Oct-2026 16:51:48",
+      "year": "2026",
+      "month": "10",
+      "day": "16",
+      "hour": "16",
+      "minute": "51",
+      "second": "48"
+    }
+  }
+}
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]>
+```
 
-## Related Commands
+### Uhrzeit als kompaktes JSON
 
-- [version](version.md) -- Show Director version
-- [status](status.md) -- Show Director status including uptime
+```text
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]> .api json compact=yes
+{"jsonrpc":"2.0","id":null,"result":{"api":2}}
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]> time
+{"jsonrpc":"2.0","id":null,"result":{"time":{"full":"Fri 16-Oct-2026 23:09:35","year":"2026","month":"10","day":"16","hour":"23","minute":"09","second":"35"}}}
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]>
+```
+
+## Fehlermeldungen
+
+`time` gibt keine eigenen Fehlermeldungen aus.
+
+## Siehe auch
+
+- [version](version.md) — Version des Directors
+- [status](status.md) — Status des Directors mit Startzeit und geplanten Jobs
+- [var](var.md) — Variablen wie `${Year}` oder `${Hour}` auflösen

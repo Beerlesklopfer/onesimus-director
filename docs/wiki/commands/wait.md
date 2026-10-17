@@ -1,4 +1,4 @@
-# wait -- Wait for a Job to Complete
+# wait — auf Jobs warten
 
 <!-- bareos-reference:start -->
 ## Aus den Bareos-Originalquellen
@@ -28,59 +28,158 @@ wait jobname=<name> | jobid=<jobid> | ujobid=<complete_name> | mount [timeout=<n
 
 Die folgenden vorhandenen Beispiele und Verhaltensbeschreibungen sind lokale Dokumentation; sie sind kein Beleg für vollständige Bareos-Kompatibilität. Bei Widersprüchen gilt der obige Befund.
 <!-- bareos-reference:end -->
-Block the console session until a specific job or all jobs have completed.
+
+## Zweck
+
+`wait` blockiert die Sitzung, bis Jobs fertig sind. Ohne Argument wartet der Befehl, bis kein Job mehr läuft; mit einer Jobangabe wartet er auf diesen einen Job und meldet danach dessen Endstatus; mit `mount` wartet er, bis ein Job auf ein Volume wartet. Der Befehl verändert nichts und ist vor allem für Skripte gedacht, etwa nach `run … yes` vor der Auswertung.
 
 ## Syntax
 
-```
-wait [jobid=<id>] [jobuid=<unique-id>]
-```
-
-## Arguments
-
-| Argument | Description |
-|----------|-------------|
-| `jobid=<id>` | Wait for this specific job to finish |
-| `jobuid=<unique-id>` | Wait for the job with this unique job ID |
-
-## Examples
-
-### Wait for all jobs to complete
-```
-* wait
-No jobs running or queued.
+```text
+wait
+wait jobid=<jobid> | job=<jobname> | jobname=<jobname> | ujobid=<eindeutiger-jobname>
+wait mount [timeout=<sekunden>]
 ```
 
-### Wait for a specific job
+## Argumente
+
+| Argument | Werte | Bedeutung |
+|---|---|---|
+| (keins) | — | Warten, bis kein Job mehr läuft. Läuft keiner, kehrt der Befehl nach etwa 0,2 Sekunden ohne Ausgabe zurück. |
+| `jobid=<jobid>` | Zahl | Auf diesen Job warten. Die Zahl muss nicht zu einem laufenden Job gehören; der Status wird dann sofort aus dem Katalog gelesen. |
+| `job=<jobname>`, `jobname=<jobname>` | Jobname, Anfang genügt | Auf den laufenden Job warten, dessen Name so beginnt. |
+| `ujobid=<name>` | eindeutiger Jobname (`backup-fd.2026-10-13_21.00.00_09`) | Auf diesen laufenden Job warten. |
+| `mount` | — | Warten, bis ein laufender Job auf ein Volume oder einen Mount wartet. |
+| `timeout=<sekunden>` | Zahl | Nur mit `mount`: höchstens so lange warten, dann `Wait on mount timed out`. |
+
+Ausgewertet wird das erste Argument, das `jobid`, `job`, `jobname`, `ujobid` oder `mount` heißt; alles danach wird ignoriert. Mit einer Jobangabe oder `mount` öffnet der Befehl den Katalog (beim ersten Mal mit den Zeilen `Automatically selected Catalog: …` und `Using Catalog "…"`).
+
+Nach dem Warten auf einen Job meldet der Director `JobId=<n>` und `JobStatus=<text> (<code>)`. Zusätzlich gibt es einen Ausgangswert `ExitStatus` (nur im JSON sichtbar): `0` = OK (Status `T` oder `W`), `1` = Warnung (`e`, nicht fataler Fehler), `2` = kritisch (`E`, `f`, `A`), `3` = unbekannt (alle anderen Codes).
+
+## API-Modi
+
+Unter `.api 0` und `.api 1` kommt der Text wie beschrieben (unter `.api 1` ohne die Katalogzeilen). Unter `.api 2` steht das Ergebnis eines Jobs im Objekt `result.job` mit `jobid`, `jobstatuslong`, `jobstatus` und `exitstatus`. Fehler kommen als JSON-Fehler. Die Zeitüberschreitung bei `mount` ist unter `.api 2` ein leeres Ergebnis (`"result": {}`).
+
+## Beispiele
+
+### Warten, bis kein Job mehr läuft
+
+Läuft kein Job, kehrt der Befehl sofort ohne Ausgabe zurück.
+
+```text
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]> wait
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]>
 ```
-* run job=backup-bareos-fd level=Full yes
-Job queued. JobId=15
-* wait jobid=15
-JobId 15 terminated with status OK.
+
+### Status eines Jobs abfragen
+
+JobId 1 läuft nicht und steht nicht im Katalog; deshalb ist der Status unbekannt. Für einen tatsächlich laufenden Job: Beispielausgabe nicht verfügbar, weil dafür ein echter Job gestartet werden müsste.
+
+```text
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]> wait jobid=1
+Automatically selected Catalog: MyCatalog
+Using Catalog "MyCatalog"
+JobId=1
+JobStatus=Unknown term code (?)
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]>
 ```
 
-### Use in a scripting workflow
+### Status als JSON
+
+```text
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]> .api 2
+{
+  "jsonrpc": "2.0",
+  "id": null,
+  "result": {
+    "api": 2
+  }
+}
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]> wait jobid=99999
+{
+  "jsonrpc": "2.0",
+  "id": null,
+  "result": {
+    "job": {
+      "jobid": 99999,
+      "jobstatuslong": "Unknown term code",
+      "jobstatus": "?",
+      "exitstatus": 3
+    }
+  }
+}
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]>
 ```
-* run job=backup-bareos-fd level=Full yes
-Job queued. JobId=15
-* wait jobid=15
-JobId 15 terminated with status OK.
-* list jobid=15
-jobid  name              type level jobstatus starttime            endtime              jobfiles jobbytes
-15     backup-bareos-fd  B    F     T         2026-03-29 01:00:00  2026-03-29 01:02:15  458      71683878
+
+### Auf eine Mount-Anforderung warten
+
+Mit `timeout=1` gibt der Director nach einer Sekunde auf.
+
+```text
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]> wait mount timeout=1
+Automatically selected Catalog: MyCatalog
+Using Catalog "MyCatalog"
+Wait on mount timed out
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]>
 ```
 
-## Behavior
+### Job nicht gefunden
 
-- Without arguments, waits until no jobs are running or queued, then returns.
-- With `jobid` or `jobuid`, waits only for that specific job.
-- The console is blocked during the wait -- no other commands can be entered.
-- Returns immediately if the specified job has already terminated or if no jobs are running.
-- Useful in batch scripts that need to sequence operations after a backup completes.
-- This is not an audited command.
+Jobnamen ohne laufenden Job, `jobid=0`, `jobid=abc`, ein fehlender Wert oder nur `timeout=` ergeben dieselbe Meldung (Paritätsfälle `ds-wait-text`, `c046-wait-*`).
 
-## Related Commands
+```text
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]> wait job=nosuch
+Automatically selected Catalog: MyCatalog
+Using Catalog "MyCatalog"
+ERR: Job was not found
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]> wait timeout=5
+ERR: Job was not found
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]>
+```
 
-- [run](run.md) -- Start a job
-- [cancel](cancel.md) -- Cancel a running job
-- [status](status.md) -- Check job status without blocking
+### Job nicht gefunden, JSON
+
+```text
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]> .api 2
+{
+  "jsonrpc": "2.0",
+  "id": null,
+  "result": {
+    "api": 2
+  }
+}
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]> wait job=nosuch
+{
+  "jsonrpc": "2.0",
+  "id": null,
+  "error": {
+    "code": 1,
+    "message": "failed",
+    "data": {
+      "result": {},
+      "messages": {
+        "error": [
+          "ERR: Job was not found\n"
+        ]
+      }
+    }
+  }
+}
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]>
+```
+
+## Fehlermeldungen
+
+| Meldung | Ursache und Abhilfe |
+|---|---|
+| `ERR: Job was not found` | Kein laufender Job passt zu `job=`/`jobname=`/`ujobid=`, die JobId ist `0` oder keine Zahl, oder es fehlt jede Jobangabe (z.B. nur `timeout=`). Mit [`status director`](status.md) laufende Jobs ansehen. |
+| `Wait on mount timed out` | Warnung: Bei `wait mount timeout=…` hat innerhalb der Zeit kein Job auf ein Volume gewartet. |
+| `ERR: Can't open db` | Der Katalog ließ sich nicht öffnen. Beispielausgabe nicht verfügbar. |
+
+## Siehe auch
+
+- [status](status.md) — laufende Jobs ansehen
+- [run](run.md) — Job starten
+- [cancel](cancel.md) — Job abbrechen
+- [mount](mount.md) — Volume einlegen, wenn ein Job wartet
+- [.jobstatus](dot-jobstatus.md) — Bedeutung der Statuscodes

@@ -91,6 +91,11 @@ Neue Einträge unten anhängen; behobene Einträge bleiben mit Commit stehen.
 | C-070 | 17.10.2026 | label, API 2 | `ds-label-api2` | Signale [-16, -16, -15, -15, -18] | [-16, -15, -18], Ausgabe gleich | wie C-061 (Befehl rahmt sich selbst) | offen |
 | C-071 | 17.10.2026 | export/import | `ds-export-file` | Fragen zuerst den SD nach Slots („is not an autochanger“, „No slots in changer.“) | `export`: Fehler zur Quellauswahl ohne SD-Kontakt; `import`: sendet „import“ an den SD („3900 Invalid command“) | `ua_impexp.cc` | offen |
 | C-072 | 17.10.2026 | restore, API 2 | Vorfall `dr2-api2-done-no` | `.api 2` + vollständige Restore-Auswahl startet den Job ohne Rückfrage, Antwort `{"result":{"run":{"jobid":"630"}}}` | Antwort `{"result":{}}`; Worktree-Stand ohne C-058 (JobId 10000) | `ua_restore.cc`, `ua_run.cc` | offen |
+| C-073 | 17.10.2026 | .defaults, API 2 | `dd-defaults-noarg-api2` | Ohne Argument: `error.data.result` = `{"defaults": {}}` | `"result": {}` (Text und Signale gleich) | `ua_dotcmds.cc` DefaultsCmd | offen |
+| C-074 | 17.10.2026 | .sqlcount/.sqltables/.sqlschema | `dd-sql*` | Gibt es nicht: „<cmd>: is an invalid command.“ | Onesimus-eigene Befehle mit psql-artiger Ausgabe, unter API 2 leeres Ergebnis | — | offen (Entscheidung nötig: Onesimus-Erweiterung behalten und dokumentieren oder entfernen) |
+| C-075 | 17.10.2026 | reload, Katalog | `dcfg-zz-reload-after-catalog` | `reload` prüft neue Catalog-Ressourcen per Verbindungsaufbau (CheckCatalog); nicht erreichbarer Katalog → „failed to reload“, Log „Could not open Catalog …“, alte Konfiguration bleibt | Antwortet sofort „reloaded“ ohne Katalogprüfung | `dird.cc`/`reload.cc` CheckCatalog | offen |
+| C-076 | 17.10.2026 | oconsole, API 1 | `status`/`setdebug`/`add`/`release` mit Auswahl | — (Onesimus-Konsole) Auswahldialoge enden mit Signal SELECT_INPUT (-19) und erwarten eine Eingabe | oconsole behandelt -19 nicht und zeigt keinen Eingabeprompt | `console/console.cc` | offen |
+| C-077 | 17.10.2026 | delete pool/storage | `dj-delete-pool*` | `delete pool=…`/`delete storage=…` löschen nach Rückfrage den Katalogeintrag | „delete pool: not supported“ / „delete storage: not supported“ | `ua_cmds.cc` DeleteCmd (delete_pool, delete_storage) | offen |
 
 Vorfall 17.10.2026 (Doku-Agent): Ein Paritätsfall mit `.api 2` und `restore … all done` startete im Original einen echten Restore (JobId 630 in der Wegwerfkopie, 180 Dateien nach `/tmp/bareos-restores` gegen die echten FD/SD); Onesimus startete ebenfalls, endete mit „Restore Error“. `bareos_cppref` unberührt. Seitdem weist `parity.py` (`unsafe_job_start`) Fälle ab, die unter `.api 2/json` oder mit `yes` einen Job außerhalb der sicheren Testjobs starten können; bekannte Fehlerfälle tragen `"api_job_safe": true`.
 
@@ -120,7 +125,7 @@ eindeutige Sortierung), `c015-list-jobs-enabled-count` (undefiniertes Verhalten 
 
 ### Offen
 
-- Offen (17.10.2026): C-062 … C-072 (Funde der Doku-Agenten).
+- Offen (17.10.2026): C-062 … C-077 (Funde der Doku-Agenten).
 - C-058 teilweise behoben (17.10.2026); offen: Verify, Copy/Migrate-Arbeitsjobs, PoolOccupancy, Consolidate mit Always-Incremental-Jobs, RunScripts (siehe Hinweis C-058).
 - Befehlsstatus im Wiki (`docs/wiki/commands`): 53 `parity_verified`, 31 `partial`, 4 `registered_unverified`, 26 Restore-Baum-Befehle `missing_context` (Stand vor den C-045/C-049/C-055-Merges, Auffrischung offen).
 - OVFS-Integration im Director gemergt (16.10.2026): Erkennung beim Connect (Version 0.1.x + Signaturen), Befehle `.ovfs_status/_latest/_tree/_ls/_versions`, MCP-Tools in oconsole, SQL-Rückfall byte-gleich zur Extension (Äquivalenztest mit gebauter Extension auf PG 17).

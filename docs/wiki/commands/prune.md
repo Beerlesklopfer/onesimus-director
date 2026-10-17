@@ -1,4 +1,4 @@
-# prune -- Prune Expired Records from Catalog
+# prune — Abgelaufene Einträge aus dem Katalog entfernen
 
 <!-- bareos-reference:start -->
 ## Aus den Bareos-Originalquellen
@@ -26,62 +26,222 @@ prune files [client=<client>] [pool=<pool>] [yes] | jobs [client=<client>] [pool
 
 Die folgenden vorhandenen Beispiele und Verhaltensbeschreibungen sind lokale Dokumentation; sie sind kein Beleg für vollständige Bareos-Kompatibilität. Bei Widersprüchen gilt der obige Befund.
 <!-- bareos-reference:end -->
-Remove expired file, job, or volume records from the catalog based on configured retention periods.
+## Zweck
+
+`prune` entfernt Katalogeinträge, deren Aufbewahrungszeit abgelaufen ist: Dateieinträge (File Retention), Jobs (Job Retention), Jobs eines Volumes (Volume Retention), Statistiken (Statistics Retention) oder einzelne Verzeichnisse. Anders als [purge](purge.md) beachtet `prune` die konfigurierten Aufbewahrungszeiten. Die Daten auf den Volumes bleiben unberührt. Der Director zeigt vor dem Löschen die gültige Aufbewahrungszeit und fragt nach; mit `yes` entfällt die Frage. Je nach Art braucht die Konsole vollen Zugriff (ACL ohne Einschränkung) auf Jobs, Clients, Storages bzw. Pools; sonst antwortet der Director mit `Permission denied`.
 
 ## Syntax
 
-```
-prune [files|jobs|volumes] [client=<name>] [pool=<name>] [volume=<name>]
-```
-
-## Arguments
-
-| Argument | Description |
-|----------|-------------|
-| `files` | Prune expired file records |
-| `jobs` | Prune expired job records |
-| `volumes` | Prune expired volume records |
-| `client=<name>` | Restrict pruning to this client |
-| `pool=<name>` | Restrict pruning to this pool |
-| `volume=<name>` | Prune records for this specific volume |
-
-## Examples
-
-### Prune expired file records for a client
-```
-* prune files client=bareos-fd
-Pruning files for client bareos-fd...
-Pruned 1,234 files, 5 jobs from catalog.
+```text
+prune
+prune files [client=<client>] [pool=<pool>] [yes]
+prune jobs [client=<client>] [pool=<pool>] [yes]
+prune volume[=<volume>] [pool=<pool>] [yes]
+prune volume all [pool=<pool>] [yes]
+prune stats [yes]
+prune directory[=<pfad>] [client=<client>] [recursive] [yes]
 ```
 
-### Prune expired job records
+## Argumente
+
+| Argument | Werte | Bedeutung |
+|---|---|---|
+| `files` | – | Dateieinträge nach File Retention des Clients entfernen. |
+| `jobs` | – | Jobs nach Job Retention des Clients entfernen. |
+| `volume[=<volume>]` | Volume-Name | Jobs des Volumes nach dessen Volume Retention entfernen; ohne Wert Auswahl. |
+| `all` | – | Mit `volume`: alle Volumes (eines Pools). |
+| `stats` | – | JobHisto, DeviceStats und JobStats nach Statistics Retention bereinigen. |
+| `directory[=<pfad>]` | Pfad | Dateieinträge unterhalb eines Verzeichnisses entfernen. |
+| `recursive` | – | Mit `directory`: auch Unterverzeichnisse. |
+| `client=<client>` | Client | Client, dessen Einträge bereinigt werden; sonst Auswahl. |
+| `pool=<pool>` | Pool | Pool, dessen Aufbewahrungszeit gilt bzw. dessen Volumes gemeint sind. |
+| `yes` | – | Ohne Rückfrage ausführen. |
+
+## Dialoge
+
+- Ohne Argument: `Choose item to prune (1-5):` mit Files, Jobs, Volume, Stats, Directory. `.` bricht ab.
+- Fehlt der Client, folgt die Client-Auswahl, bei Volume die Pool- und Volume-Auswahl.
+- Vor dem Löschen: `The current <Art> retention period is: <zeit>` und `Continue? (yes/mod/no):`. `yes` führt aus, `no` und `.` beenden ohne Meldung. `mod` fragt `Enter new retention period:` und zeigt danach die neue Zeit; die geänderte Zeit gilt für den laufenden Director, bis die Konfiguration neu geladen wird.
+- `prune directory` ohne Client fragt zuerst `No client restriction given really remove directory for all clients (yes/no):` und dann `Please enter the full path to remove:`.
+
+## API-Modi
+
+Unter `.api 0` und `.api 1` kommen dieselben Texte. Unter `.api 2` wird nicht nachgefragt; fehlende Angaben führen zu einem leeren `result`, fehlende Rechte zu einem JSON-RPC-Fehler mit dem Text in `messages.error`.
+
+## Beispiele
+
+### Dateieinträge eines Clients
+
+```text
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]> prune files client=bareos-fd yes
+Using Catalog "MyCatalog"
+The current File retention period is: 2 months
+Begin pruning Files.
+Pruned Files from 92 Jobs for client bareos-fd from catalog.
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]>
 ```
-* prune jobs client=bareos-fd
-Pruning jobs for client bareos-fd...
-Pruned 3 jobs from catalog.
+
+### Mit Rückfrage und geänderter Aufbewahrungszeit
+
+```text
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]> prune files client=bareos-fd
+Using Catalog "MyCatalog"
+The current File retention period is: 2 months
+Continue? (yes/mod/no):
+> mod
+Enter new retention period:
+> 3 months
+The current File retention period is: 3 months
+Continue? (yes/mod/no):
+> no
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]>
 ```
 
-### Prune expired volume records
+### Jobs eines Clients
+
+```text
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]> prune jobs client=bareos-fd yes
+Using Catalog "MyCatalog"
+The current Job retention period is: 6 months
+Begin pruning Jobs older than 6 months .
+Purging the following 43 JobIds: 479,480,481,482,483,484,485,486,487,488,489,490,491,492,493,494,495,496,497,498,499,500,501,502,503,504,505,506,510,512,513,514,515,516,517,518,519,520,521,522,523,524,525
+Pruned 43 Jobs for client bareos-fd from catalog.
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]>
 ```
-* prune volumes pool=Full
-Pruning volumes in pool Full...
-Pruned 2 volumes from catalog.
+
+### Volume
+
+```text
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]> prune volume=Full-0001 yes
+Automatically selected Catalog: MyCatalog
+Using Catalog "MyCatalog"
+The current Volume (Full-0001) retention period is: 0 secs
+Pruning volume Full-0001: cannot prune as Volstatus is Error but needs to be Full or Used.
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]>
 ```
 
-## Behavior
+```text
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]> prune volume all pool=Full
+Automatically selected Catalog: MyCatalog
+Using Catalog "MyCatalog"
+The current Volume (Full-0001) retention period is: 0 secs
+Continue? (yes/mod/no):
+> no
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]>
+```
 
-- Prune respects the retention periods configured in the Client, Pool, and Volume resources:
-  - `File Retention`: how long to keep file records
-  - `Job Retention`: how long to keep job records
-  - `Volume Retention`: how long before a volume can be recycled
-- Records older than the retention period are removed from the catalog.
-- Pruning does not delete physical data from volumes -- it only cleans up the catalog.
-- Volumes whose records have all been pruned are set to `Purged` status, making them eligible for reuse.
-- Without arguments, prints available sub-commands.
-- This is an audited command.
+```text
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]> prune volume pool=Incremental
+Automatically selected Catalog: MyCatalog
+Using Catalog "MyCatalog"
+No prunable volumes found in Pool "Incremental".
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]>
+```
 
-## Related Commands
+### Statistiken
 
-- [purge](purge.md) -- Forcefully purge all records (ignores retention)
-- [delete](delete.md) -- Delete specific records by name/id
-- [list](list.md) -- List records before pruning
+```text
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]> prune stats yes
+Automatically selected Catalog: MyCatalog
+Using Catalog "MyCatalog"
+The current Statistics retention period is: 5 years 1 month 5 days
+Pruned Jobs from JobHisto in catalog.
+Pruned Statistics from DeviceStats in catalog.
+Pruned Statistics from JobStats in catalog.
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]>
+```
+
+### Auswahlmenü
+
+```text
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]> prune
+Automatically selected Catalog: MyCatalog
+Using Catalog "MyCatalog"
+You have the following choices:
+1: Files
+2: Jobs
+3: Volume
+4: Stats
+5: Directory
+Choose item to prune (1-5):
+> 1
+The defined Client resources are:
+1: bareos-fd
+2: parity-ndmp-fd
+Select Client (File daemon) resource (1-2):
+> .
+Selection aborted, nothing done.
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]>
+```
+
+### Verzeichnis
+
+```text
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]> prune directory
+Automatically selected Catalog: MyCatalog
+Using Catalog "MyCatalog"
+No client restriction given really remove directory for all clients (yes/no):
+> no
+The defined Client resources are:
+1: bareos-fd
+2: parity-ndmp-fd
+Select Client (File daemon) resource (1-2):
+> .
+Selection aborted, nothing done.
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]>
+```
+
+### Fehlende Rechte
+
+```text
+parity-c030-job@bareos-dir[25.1.2+onesimus.0.2.0]> prune
+Permission denied: need full job permission.
+parity-c030-job@bareos-dir[25.1.2+onesimus.0.2.0]>
+```
+
+```text
+parity-c030-storage@bareos-dir[25.1.2+onesimus.0.2.0]> .api 2
+{
+  "jsonrpc": "2.0",
+  "id": null,
+  "result": {
+    "api": 2
+  }
+}
+parity-c030-storage@bareos-dir[25.1.2+onesimus.0.2.0]> prune
+{
+  "jsonrpc": "2.0",
+  "id": null,
+  "error": {
+    "code": 1,
+    "message": "failed",
+    "data": {
+      "result": {},
+      "messages": {
+        "error": [
+          "Permission denied: need full storage permission.\n"
+        ]
+      }
+    }
+  }
+}
+parity-c030-storage@bareos-dir[25.1.2+onesimus.0.2.0]>
+```
+
+## Fehlermeldungen
+
+| Meldung | Ursache und Abhilfe |
+|---|---|
+| `Permission denied: need full <job\|client\|storage\|pool> permission.` | Der Konsole fehlt der volle Zugriff auf diese Ressourcenart. |
+| `cats/sql_get.cc:1177 Media record for Volume "<name>" not found.` | Volume nicht im Katalog. |
+| `Volume "<name>" is not in Pool "<pool>".` | Volume und Pool passen nicht zusammen. |
+| `No prunable volumes found in Pool "<pool>".` | Kein Volume des Pools hat abgelaufene Jobs. |
+| `Pruning volume <name>: cannot prune as Volstatus is <status> but needs to be Full or Used.` | Nur volle oder benutzte Volumes lassen sich prunen. |
+| `Selection aborted, nothing done.` | Auswahl mit `.` abgebrochen. |
+
+## Siehe auch
+
+- [purge](purge.md) — Einträge ohne Rücksicht auf Aufbewahrungszeiten entfernen
+- [delete](delete.md) — einzelne Volumes, Jobs oder Pools löschen
+- [list](list.md) — Jobs und Volumes anzeigen
+- [show](show.md) — Aufbewahrungszeiten in Client- und Pool-Ressourcen ansehen
