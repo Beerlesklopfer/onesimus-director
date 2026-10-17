@@ -28,7 +28,6 @@ use crate::commands::bvfs::Db;
 use crate::commands::restore_bsr::Bsr;
 use crate::commands::restore_tree::{user_select_files_from_tree, Tree};
 use crate::job_worker::{JobParams, WorkerJobType};
-use crate::message_bus::{BusMessage, MsgType};
 use crate::sql_list::{add_commas, ListType};
 use crate::ua_select::Ua;
 
@@ -1680,8 +1679,9 @@ use crate::btime::str_to_utime;
 /// job, job.cc RunJob): the Job record (Type 'R', Level 'F', the restore
 /// client), the job queue and the reply "Job queued. JobId=N". The worker
 /// reads the bootstrap file of the run (`bootstrap=`, else the Job's
-/// Bootstrap directive, job.cc SetJcrDefaults); without one the job fails
-/// like restore.cc DoNativeRestore. Compatibility log C-058.
+/// Bootstrap directive, job.cc SetJcrDefaults); without one, or when it
+/// does not open, the job fails like restore.cc DoNativeRestore.
+/// Compatibility log C-058.
 pub(crate) fn start_restore(ctx: &ExecContext, launch: Launch) -> CommandResult {
     let Launch { restore_jobid, client: _, restore_client, where_path, replace, bootstrap_path, job, storage } = launch;
 
@@ -1708,8 +1708,9 @@ pub(crate) fn start_restore(ctx: &ExecContext, launch: Launch) -> CommandResult 
         None => return CommandResult::error(format!("Client '{restore_client}' not found\n")),
     };
 
-    // jcr->RestoreBootstrap: the run's bootstrap=, else the Job's Bootstrap.
-    let bootstrap = read_bootstrap(bootstrap_path.or_else(|| job_value("bootstrap")).as_deref());
+    // jcr->RestoreBootstrap: the run's bootstrap=, else the Job's Bootstrap;
+    // the job reads it (job_worker restore_bootstrap).
+    let bootstrap = bootstrap_path.or_else(|| job_value("bootstrap"));
 
     // The read storage of the run, else the Job's, else the first one.
     let storage = match storage.as_deref().and_then(|s| config.find_storage(s))
@@ -1759,7 +1760,7 @@ pub(crate) fn start_restore(ctx: &ExecContext, launch: Launch) -> CommandResult 
         where_path: Some(where_path),
         replace: Some(replace),
         restore_jobid: Some(restore_jobid),
-        bootstrap: bootstrap.as_ref().ok().cloned(),
+        bootstrap,
         client_name: client.name.clone(),
         client_first_connection: crate::job_messages::first_client_connection(&client.name),
     };
@@ -1769,34 +1770,7 @@ pub(crate) fn start_restore(ctx: &ExecContext, launch: Launch) -> CommandResult 
         trigger: crate::job_messages::TRIGGER_USER.to_string(), ..Default::default()
     };
 
-    if let Some(smgr) = &ctx.session_mgr {
-        // job_thread "Version: …", then DoNativeRestore: the bootstrap check
-        // (M_FATAL, the job ends in error) before "Start Restore Job".
-        let texts = match &bootstrap {
-            Ok(_) => [(MsgType::Info, crate::job_messages::version_text()),
-                (MsgType::Info, crate::job_messages::start_restore_text(&unique_job))],
-            Err(fatal) => [(MsgType::Info, crate::job_messages::version_text()), (MsgType::Fatal, fatal.clone())],
-        };
-        for (msg_type, text) in texts {
-            crate::console_msg::post_job_message(smgr.bus(), ctx.config.as_ref(), BusMessage::JobMessage {
-                job_id, job_name: job.name.clone(), msg_type, text, timestamp: now_unix(),
-            });
-        }
-    }
     crate::commands::job::queue_job(ctx, &job, params, report, &client.name, &storage.name, now)
-}
-
-/// The bootstrap of a restore job (jcr->RestoreBootstrap read by
-/// restore.cc DoNativeRestore / bsr.cc OpenBootstrapFile), else the M_FATAL
-/// text the job ends with.
-fn read_bootstrap(path: Option<&str>) -> Result<String, String> {
-    let Some(path) = path.filter(|p| !p.is_empty()) else {
-        return Err("Cannot restore without a bootstrap file.\n\
-            You probably ran a restore job directly. All restore jobs must\n\
-            be run using the restore command.\n".to_string());
-    };
-    std::fs::read_to_string(path)
-        .map_err(|e| format!("Could not open bootstrap file {path}: ERR={}\n", errno_text(&e)))
 }
 
 fn now_unix() -> i64 {
@@ -1916,23 +1890,6 @@ Console { Name=limited; Password=pw; CommandACL=*all*; CatalogACL=*all*; ClientA
     fn dialog(ctx: &ExecContext, line: &str, answers: &[&str]) -> (CommandResult, String) {
         let (result, console) = scripted(answers, || run(ctx, line));
         (result, console.transcript())
-    }
-
-    /// restore.cc DoNativeRestore / bsr.cc OpenBootstrapFile: the job's
-    /// bootstrap file, else the M_FATAL text; never one built otherwise.
-    #[test]
-    fn restore_job_reads_only_its_bootstrap_file() {
-        let fatal = read_bootstrap(None).unwrap_err();
-        assert_eq!(fatal, "Cannot restore without a bootstrap file.\nYou probably ran a restore job directly. \
-            All restore jobs must\nbe run using the restore command.\n");
-        assert_eq!(read_bootstrap(Some("")).unwrap_err(), fatal);
-        let missing = bootstrap_file("missing_bootstrap");
-        assert_eq!(read_bootstrap(Some(&missing)).unwrap_err(),
-            format!("Could not open bootstrap file {missing}: ERR=No such file or directory\n"));
-        let bsr = bootstrap_file("read_bootstrap");
-        std::fs::write(&bsr, "Storage=\"Tape\"\nVolume=\"V1\"\n").unwrap();
-        assert_eq!(read_bootstrap(Some(&bsr)).unwrap(), "Storage=\"Tape\"\nVolume=\"V1\"\n");
-        let _ = std::fs::remove_file(&bsr);
     }
 
     #[test]
