@@ -83,6 +83,12 @@ pub struct JobParams {
     pub prev_job: String,          // unique job name of reference backup (for incr/diff)
     // Restore-specific
     pub where_path: Option<String>,
+    /// RegexWhere of the run or the Job (BuildRestoreCommand: before where).
+    #[serde(default)]
+    pub regex_where: Option<String>,
+    /// Job `Prefix Links` (restore `prelinks=`).
+    #[serde(default)]
+    pub prefix_links: bool,
     pub replace: Option<String>,       // "always", "never", "ifnewer", "ifolder"
     pub restore_jobid: Option<u32>,     // JobId of backup to restore from
     pub bootstrap: Option<String>,      // Bootstrap data (volumes + file indices)
@@ -443,14 +449,8 @@ pub fn run_worker(
             }
 
             WorkerState::FDRestore => {
-                let where_path = params.where_path.as_deref().unwrap_or("/tmp/bareos-restore");
-                let replace_char = match params.replace.as_deref() {
-                    Some("never") => 'n',
-                    Some("ifnewer") => 'w', // REPLACE_IFNEWER (baconfig.h)
-                    Some("ifolder") => 'o',
-                    _ => 'a', // always
-                };
-                let cmd = format!("restore replace={replace_char} prelinks=0 where={where_path}\n");
+                let cmd = fd_restore_command(params);
+                let where_path = params.regex_where.as_deref().or(params.where_path.as_deref()).unwrap_or("");
                 match send_expect(fd.as_mut().unwrap(), &cmd, "2000 OK restore", job_id, "FD restore") {
                     Ok(_) => {
                         info!("Worker {job_id}: restore running → {where_path}");
@@ -891,6 +891,23 @@ fn send_expect(bnet: &mut BnetStream<tls_psk::PskStream>, cmd: &str, expect: &st
     }
 }
 
+/// dird/restore.cc BuildRestoreCommand(): "restore replace=%c prelinks=%d
+/// where=%s" or "... regexwhere=%s" (regexwhere wins), spaces bashed.
+fn fd_restore_command(params: &JobParams) -> String {
+    let bash = |s: &str| s.replace(' ', "\x01");
+    let (key, value) = match params.regex_where.as_deref() {
+        Some(r) => ("regexwhere", bash(r)),
+        None => ("where", bash(params.where_path.as_deref().unwrap_or(""))),
+    };
+    let replace = match params.replace.as_deref() {
+        Some("never") => 'n',
+        Some("ifnewer") => 'w', // REPLACE_IFNEWER (baconfig.h)
+        Some("ifolder") => 'o',
+        _ => 'a', // always
+    };
+    format!("restore replace={replace} prelinks={} {key}={value}\n", u8::from(params.prefix_links))
+}
+
 fn now_unix() -> i64 { SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_secs() as i64 }
 
 // ============================================================================
@@ -1038,6 +1055,27 @@ pub fn spawn_job_worker(_: u32, _: &str, _: &JobParams) -> io::Result<JobHandle>
 #[cfg(test)]
 mod wait_protocol_tests {
     use super::*;
+    #[test]
+    fn restore_command_like_build_restore_command() {
+        let mut p = JobParams {
+            job_id: 1, unique_job: "R.1".into(), job_name: "R".into(), job_type: WorkerJobType::Restore,
+            level: "full".into(), fd_address: String::new(), fd_port: 0, fd_password: String::new(),
+            sd_address: String::new(), sd_port: 0, sd_password: String::new(), sd_device: String::new(),
+            sd_media_type: String::new(), director_name: String::new(), pool_name: String::new(),
+            fileset_includes: vec![], fileset_excludes: vec![], since_utime: 0, prev_job: String::new(),
+            where_path: Some("/tmp/with space".into()), regex_where: None, prefix_links: false,
+            replace: Some("ifnewer".into()), restore_jobid: None, bootstrap: None,
+            client_name: String::new(), client_first_connection: false,
+        };
+        assert_eq!(fd_restore_command(&p), "restore replace=w prelinks=0 where=/tmp/with\x01space\n");
+        p.regex_where = Some("!/a!/b!".into());
+        p.prefix_links = true;
+        p.replace = None;
+        assert_eq!(fd_restore_command(&p), "restore replace=a prelinks=1 regexwhere=!/a!/b!\n");
+        p.regex_where = None;
+        p.where_path = None;
+        assert_eq!(fd_restore_command(&p), "restore replace=a prelinks=1 where=\n");
+    }
     #[test]
     fn termination_status_is_not_collapsed_to_success_or_error() {
         for (code, status) in [(0,"T"),(84,"T"),(87,"W"),(101,"e"),(69,"E"),(102,"f"),(65,"A"),(68,"D"),(2,"E"),(3,"A"),(999,"E")] {

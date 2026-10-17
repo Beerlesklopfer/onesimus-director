@@ -75,7 +75,11 @@ pub(crate) struct Launch {
     pub client: String,
     pub restore_client: String,
     pub where_path: Option<String>,
+    /// `regexwhere=` (also built from strip_prefix/add_prefix/add_suffix).
+    pub regex_where: Option<String>,
     pub replace: Option<String>,
+    /// `files=` of the run command (jcr->dir_impl->ExpectedFiles = rc.files).
+    pub expected_files: u64,
     /// The bootstrap file written for this restore.
     pub bootstrap_path: Option<String>,
     /// The Restore Job resource and the storage of the run (C-058).
@@ -364,7 +368,9 @@ pub(crate) fn restore_with(ast: &CommandAst, ctx: &ExecContext,
             client: value("client").unwrap_or_default(),
             restore_client: value("restoreclient").unwrap_or_default(),
             where_path: value("where"),
+            regex_where: value("regexwhere"),
             replace: value("replace"),
+            expected_files: atoi(value("files").as_deref()),
             bootstrap_path: value("bootstrap"),
             job: value("job"),
             storage: value("storage"),
@@ -1683,7 +1689,7 @@ use crate::btime::str_to_utime;
 /// reads the bootstrap the restore wrote, else one generated from the
 /// catalog for `restore_jobid`. Compatibility log C-058.
 pub(crate) fn start_restore(ctx: &ExecContext, launch: Launch) -> CommandResult {
-    let Launch { restore_jobid, client: _, restore_client, where_path, replace, bootstrap_path, job, storage } = launch;
+    let Launch { restore_jobid, client: _, restore_client, where_path, regex_where, replace, expected_files, bootstrap_path, job, storage } = launch;
 
     let config = match &ctx.config {
         Some(c) => match c.read() {
@@ -1700,8 +1706,21 @@ pub(crate) fn start_restore(ctx: &ExecContext, launch: Launch) -> CommandResult 
     let job_dirs = crate::commands::defaults::job_directives(&config, &job.name);
     let job_value = |key: &str| job_dirs.iter().rev().find(|d| d.norm_key() == key).and_then(|d| d.first())
         .map(str::to_string);
-    let where_path = where_path.or_else(|| job_value("where")).unwrap_or_else(|| "/tmp/bareos-restores".to_string());
+    // BuildRestoreCommand(): the run's RegexWhere, the Job's RegexWhere
+    // (dird_conf.cc builds it from StripPrefix/AddPrefix/AddSuffix and then
+    // drops the Job's Where), the run's Where, the Job's Where, else empty.
+    let job_regex_where = job_value("regexwhere").or_else(|| {
+        let (strip, add, suffix) = (job_value("stripprefix"), job_value("addprefix"), job_value("addsuffix"));
+        (strip.is_some() || add.is_some() || suffix.is_some())
+            .then(|| crate::breg::build_where(strip.as_deref(), add.as_deref(), suffix.as_deref()))
+    });
+    let (where_path, regex_where) = match (regex_where, job_regex_where) {
+        (Some(r), _) => (None, Some(r)),
+        (None, Some(r)) => (None, Some(r)),
+        (None, None) => (Some(where_path.or_else(|| job_value("where")).unwrap_or_default()), None),
+    };
     let replace = replace.or_else(|| job_value("replace")).unwrap_or_else(|| "always".to_string()).to_ascii_lowercase();
+    let prefix_links = crate::commands::defaults::bool_directive(&job_dirs, "prefixlinks", false);
 
     let client = match config.find_client(&restore_client) {
         Some(c) => c.clone(),
@@ -1762,7 +1781,9 @@ pub(crate) fn start_restore(ctx: &ExecContext, launch: Launch) -> CommandResult 
         fileset_excludes: vec![],
         since_utime: 0,
         prev_job: String::new(),
-        where_path: Some(where_path),
+        where_path,
+        regex_where,
+        prefix_links,
         replace: Some(replace),
         restore_jobid: Some(restore_jobid),
         bootstrap: Some(bootstrap),
@@ -1771,7 +1792,7 @@ pub(crate) fn start_restore(ctx: &ExecContext, launch: Launch) -> CommandResult 
     };
     let report = crate::job_messages::JobReport {
         kind: crate::job_messages::ReportKind::Restore, job: unique_job.clone(), client: client.name.clone(),
-        sched_time: now, start_time: now,
+        sched_time: now, start_time: now, expected_files: Some(expected_files),
         trigger: crate::job_messages::TRIGGER_USER.to_string(), ..Default::default()
     };
 
@@ -1783,6 +1804,13 @@ pub(crate) fn start_restore(ctx: &ExecContext, launch: Launch) -> CommandResult 
         }
     }
     crate::commands::job::queue_job(ctx, &job, params, report, &client.name, &storage.name, now)
+}
+
+/// atoi() of an optional argument (0 when absent or not a number).
+pub(crate) fn atoi(v: Option<&str>) -> u64 {
+    let v = v.unwrap_or("").trim_start();
+    let digits: String = v.chars().take_while(|c| c.is_ascii_digit()).collect();
+    digits.parse().unwrap_or(0)
 }
 
 fn now_unix() -> i64 {
