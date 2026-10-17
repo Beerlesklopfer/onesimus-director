@@ -224,9 +224,13 @@ impl Attributes {
 /// UnpackAttributesRecord(): Err(message) for "Error scanning attributes".
 pub fn unpack_attributes_record(stream: i32, rec: &[u8]) -> Result<Attributes, String> {
     let bad = || format!("Error scanning attributes: {}\n", String::from_utf8_lossy(rec.split(|&b| b == 0).next().unwrap_or(&[])));
+    let v = crate::scan::scan(rec, "%d %d", 2).ok_or_else(bad)?;
+    let file_index = v[0].int() as i32;
+    let mut type_ = v[1].int() as i32;
+    // skip record file index and type (up to and including their blanks)
     let mut fields = rec.splitn(3, |&b| b == b' ');
-    let file_index: i32 = fields.next().and_then(|f| std::str::from_utf8(f).ok()).and_then(|f| f.parse().ok()).ok_or_else(bad)?;
-    let mut type_: i32 = fields.next().and_then(|f| std::str::from_utf8(f).ok()).and_then(|f| f.parse().ok()).ok_or_else(bad)?;
+    fields.next();
+    fields.next();
     let rest = fields.next().unwrap_or(&[]);
     let mut a = Attributes { stream, file_index, ..Default::default() };
     a.data_stream = i32::from(type_ & AR_DATA_STREAM != 0);
@@ -503,7 +507,8 @@ mod tests {
         let list = crate::breg::get_bregexps("!/a!/b!").unwrap();
         build_attr_output_fnames(&mut a, &Where::Regex(list), false);
         assert_eq!((a.ofname.as_slice(), a.olname.as_slice()), (&b"/b/hard"[..], &b"/b/orig"[..]));
-        assert!(unpack_attributes_record(1, b"x y").is_err());
+        // bsscanf: numbers without digits are 0 and still count
+        assert_eq!(unpack_attributes_record(1, b"x y").unwrap().file_index, 0);
     }
 
     #[test]

@@ -23,18 +23,13 @@ pub struct RunScript {
 /// RunscriptCmd() parsing (sscanf with `Command=%s`: up to the first blank,
 /// then UnbashSpaces).
 pub fn parse_runscript(cmd: &str) -> Option<RunScript> {
-    let rest = cmd.strip_prefix("Run OnSuccess=")?;
-    let (on_success, rest) = rest.split_once(" OnFailure=")?;
-    let (on_failure, rest) = rest.split_once(" AbortOnError=")?;
-    let (abort, rest) = rest.split_once(" When=")?;
-    let (when, rest) = rest.split_once(" Command=")?;
-    let command = rest.split_whitespace().next()?.replace('\x01', " ");
+    let v = crate::scan::scan(cmd.as_bytes(), "Run OnSuccess=%d OnFailure=%d AbortOnError=%d When=%d Command=%s", 5)?;
     Some(RunScript {
-        on_success: on_success.trim().parse::<i32>().ok()? != 0,
-        on_failure: on_failure.trim().parse::<i32>().ok()? != 0,
-        fail_on_error: abort.trim().parse::<i32>().ok()? != 0,
-        when: when.trim().parse().ok()?,
-        command,
+        on_success: v[0].int() != 0,
+        on_failure: v[1].int() != 0,
+        fail_on_error: v[2].int() != 0,
+        when: v[3].int() as i32,
+        command: v[4].text().replace('\x01', " "),
     })
 }
 

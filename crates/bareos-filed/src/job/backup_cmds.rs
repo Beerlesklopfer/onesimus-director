@@ -9,7 +9,8 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use bareos_bnet::{BnetMessage, BnetSignal, BnetStream};
 use tracing::debug;
 
-use super::{Session, arg};
+use super::Session;
+use crate::scan::scan;
 use crate::accurate::FileList;
 use crate::backup::{Backup, BackupHandler, EstimateHandler, JobEnv, SdSender, VerifyHandler};
 use crate::compression;
@@ -208,17 +209,11 @@ impl Session<'_> {
 
     /// SetbandwidthCmd(): "setbandwidth=%lld Job=%127s"
     pub(super) fn setbandwidth_cmd<S: Read + Write>(&mut self, dir: &mut BnetStream<S>, cmd: &str) -> bool {
-        let line = cmd.trim_end_matches(['\n', '\0']);
-        let bw = line.strip_prefix("setbandwidth=").and_then(|r| r.split_whitespace().next()).and_then(|v| v.parse::<i64>().ok());
-        let job = arg(line, "Job").map(str::to_string);
-        let (Some(bw), Some(job)) = (bw, job) else {
-            self.reply(dir, &format!("2991 Bad setbandwidth command: {line}\n"));
+        let v = scan(cmd.as_bytes(), "setbandwidth=%lld Job=%127s", 2);
+        let Some((bw, job)) = v.map(|v| (v[0].int(), v[1].text())).filter(|(bw, _)| *bw >= 0) else {
+            self.reply(dir, &format!("2991 Bad setbandwidth command: {cmd}\n"));
             return false;
         };
-        if bw < 0 {
-            self.reply(dir, &format!("2991 Bad setbandwidth command: {line}\n"));
-            return false;
-        }
         if !job.is_empty() {
             match crate::sd::find(&job) {
                 Some(shared) => {
@@ -243,7 +238,7 @@ impl Session<'_> {
             self.rerunning = true;
         }
         let bad = |s: &mut Self, dir: &mut BnetStream<S>| {
-            s.msgs.jmsg(M_FATAL, &format!("Bad level command: {cmd}"));
+            s.msgs.jmsg(M_FATAL, &format!("Bad level command: {cmd}\n"));
             let _ = dir;
             false
         };
@@ -341,7 +336,7 @@ impl Session<'_> {
         if self.is_canceled() {
             return true;
         }
-        let Some(count) = arg(cmd.trim_end(), "files").and_then(|v| v.parse::<usize>().ok()) else {
+        let Some(count) = scan(cmd.as_bytes(), "accurate files=%u", 1).map(|v| v[0].int() as usize) else {
             self.reply(dir, "2991 Bad accurate command\n");
             return false;
         };
@@ -367,8 +362,8 @@ impl Session<'_> {
         if !self.validate_command("backup") {
             return false;
         }
-        if let Some(fi) = cmd.trim_end().strip_prefix("backup FileIndex=").and_then(|v| v.parse::<u32>().ok()) {
-            self.counters.job_files = fi;
+        if let Some(v) = scan(cmd.as_bytes(), "backup FileIndex=%ld\n", 1) {
+            self.counters.job_files = v[0].int() as u32;
         }
         let mut fs = self.fileset.take().unwrap_or_default();
         // ClearCompressionFlagInFileset(), LogFlagStatus()
@@ -417,8 +412,8 @@ impl Session<'_> {
         self.reply(dir, "2000 OK backup\n");
 
         let ticket = match send_and_get(&mut sd, "append open session\n") {
-            Some(m) => match m.trim_end_matches(['\n', '\0']).strip_prefix("3000 OK open ticket = ").and_then(|t| t.trim().parse::<i32>().ok()) {
-                Some(t) => t,
+            Some(m) => match scan(m.as_bytes(), "3000 OK open ticket = %d", 1) {
+                Some(v) => v[0].int() as i32,
                 None => {
                     self.msgs.jmsg(M_FATAL, &format!("Bad response to append open: {m}\n"));
                     self.sd = Some(sd);
@@ -461,8 +456,8 @@ impl Session<'_> {
                 }
                 let mut status = None;
                 while let Some(m) = next_data(&mut sd) {
-                    if let Some(s) = m.trim_end_matches(['\n', '\0']).strip_prefix("3000 OK close Status = ").and_then(|v| v.trim().parse::<i32>().ok()) {
-                        status = Some(s);
+                    if let Some(v) = scan(m.as_bytes(), "3000 OK close Status = %d\n", 1) {
+                        status = Some(v[0].int() as i32);
                     }
                 }
                 match status {
@@ -563,8 +558,8 @@ impl Session<'_> {
             self.reply(dir, "2992 Bad estimate command.\n");
             return false;
         }
-        let Some(listing) = cmd.trim_end().strip_prefix("estimate listing=").and_then(|v| v.trim().parse::<i32>().ok()) else {
-            self.msgs.jmsg(M_FATAL, &format!("Bad estimate command: {cmd}"));
+        let Some(listing) = scan(cmd.as_bytes(), "estimate listing=%d", 1).map(|v| v[0].int()) else {
+            self.msgs.jmsg(M_FATAL, &format!("Bad estimate command: {cmd}\n"));
             self.reply(dir, "2992 Bad estimate command.\n");
             return false;
         };
@@ -601,7 +596,8 @@ impl Session<'_> {
             return false;
         }
         self.job_type = b'V';
-        let Some(level) = line.strip_prefix("verify level=").and_then(|v| v.split_whitespace().next()) else {
+        let level = scan(line.as_bytes(), "verify level=%30s", 1).map(|v| v[0].text());
+        let Some(level) = level.as_deref() else {
             self.reply(dir, &format!("2994 Bad verify command: {cmd}\n"));
             return false;
         };
@@ -668,9 +664,8 @@ impl Session<'_> {
             self.msgs.flush(dir);
             let Some(hdr) = next_raw(sd) else { break true };
             let h = String::from_utf8_lossy(&hdr).into_owned();
-            let f: Vec<&str> = h.split_whitespace().collect();
-            let parsed = (f.first() == Some(&"rechdr") && f.len() >= 6).then(|| (f[4].parse::<i32>().ok(), f[5].parse::<u32>().ok()));
-            let Some((Some(stream), Some(size))) = parsed else {
+            let parsed = scan(&hdr, "rechdr %u %u %d %d %u", 5).map(|v| (v[3].int() as i32, v[4].int() as u32));
+            let Some((stream, size)) = parsed else {
                 self.msgs.jmsg(M_FATAL, &format!("Record header scan error: {h}\n"));
                 break false;
             };
@@ -694,7 +689,8 @@ impl Session<'_> {
                 STREAM_UNIX_ATTRIBUTES | STREAM_UNIX_ATTRIBUTES_EX => {
                     let mut parts = data.splitn(3, |&b| b == b' ');
                     let _fi = parts.next();
-                    let Some(t) = parts.next().and_then(|t| std::str::from_utf8(t).ok()).and_then(|t| t.parse::<i32>().ok()) else {
+                    let _ty = parts.next();
+                    let Some(t) = scan(&data, "%d %d", 2).map(|v| v[1].int() as i32) else {
                         self.msgs.jmsg(M_FATAL, &format!("Error scanning record header: {h}\n"));
                         break false;
                     };

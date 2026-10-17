@@ -22,6 +22,7 @@ use crate::config::{DirectorAuth, FdConfig};
 use crate::create_file::{CreateState, REPLACE_NEVER};
 use crate::jmsg::*;
 use crate::restore::{Counters, Restore, RestoreParams};
+use crate::scan::scan;
 use crate::sd::{self, JobShared, SdStream};
 use crate::status;
 
@@ -70,11 +71,6 @@ pub struct Session<'a> {
 
 /// Command handler: false ends the command loop.
 type Handler<'a, S> = fn(&mut Session<'a>, &mut BnetStream<S>, &str) -> bool;
-
-/// A token "key=value" of a command line.
-fn arg<'b>(cmd: &'b str, key: &str) -> Option<&'b str> {
-    cmd.split_whitespace().find_map(|t| t.strip_prefix(key)?.strip_prefix('='))
-}
 
 /// UnbashSpaces(): 0x01 back to a space.
 fn unbash(s: &str) -> String {
@@ -218,25 +214,36 @@ impl<'a> Session<'a> {
 
     // --- commands --------------------------------------------------------
 
-    /// job_cmd(): "JobId=%d Job=%127s SDid=%d SDtime=%d Authorization=%100s ssl=%d"
+    /// job_cmd() with JobCommand (evaluate_job_command.cc):
+    /// "JobId=%d Job=%127s SDid=%u SDtime=%u Authorization=%100s ssl=%d"
+    /// or without ssl= (before 18.2, no TLS).
     fn job_cmd<S: Read + Write>(&mut self, dir: &mut BnetStream<S>, cmd: &str) -> bool {
-        let job_id = arg(cmd, "JobId").and_then(|v| v.parse::<u32>().ok());
-        let job = arg(cmd, "Job");
-        let (Some(job_id), Some(job)) = (job_id, job) else {
-            self.msgs.jmsg(M_FATAL, &format!("Bad Job Command: {cmd}"));
-            self.reply(dir, "2901 Bad Job\n");
-            return false;
+        let m = cmd.as_bytes();
+        let (vals, tls) = match scan(m, "JobId=%d Job=%127s SDid=%u SDtime=%u Authorization=%100s ssl=%d\n", 6) {
+            Some(v) => {
+                let t = v[5].int() as i32;
+                (v, t)
+            }
+            None => match scan(m, "JobId=%d Job=%127s SDid=%u SDtime=%u Authorization=%100s", 5) {
+                Some(v) => (v, 0),
+                None => {
+                    self.msgs.jmsg(M_FATAL, &format!("Bad Job Command: {cmd}\n"));
+                    self.reply(dir, "2901 Bad Job\n");
+                    return false;
+                }
+            },
         };
+        let job_id = vals[0].int() as u32;
+        let job = vals[1].text();
         self.msgs.job_id = job_id;
-        self.msgs.job = job.to_string();
-        self.vol_session_id = arg(cmd, "SDid").and_then(|v| v.parse().ok()).unwrap_or(0);
-        self.vol_session_time = arg(cmd, "SDtime").and_then(|v| v.parse().ok()).unwrap_or(0);
-        let tls = arg(cmd, "ssl").and_then(|v| v.parse().ok()).unwrap_or(0);
+        self.msgs.job = job.clone();
+        self.vol_session_id = vals[2].int() as u32;
+        self.vol_session_time = vals[3].int() as u32;
         if let Some(old) = self.shared.take() {
             sd::unregister(&old.job);
         }
-        self.shared = Some(sd::register(job, ""));
-        self.set_storage_auth_key(arg(cmd, "Authorization").unwrap_or(""), tls);
+        self.shared = Some(sd::register(&job, ""));
+        self.set_storage_auth_key(&vals[4].text(), tls);
         info!("session {}: job {job_id} '{job}'", self.session_id);
         // The Director stores the text after "2000 OK Job" as the uname.
         self.reply(dir, &format!("2000 OK Job {} ({}) {},{}", crate::version::FULL, crate::version::SHORT_DATE,
@@ -266,12 +273,12 @@ impl<'a> Session<'a> {
 
     /// SetauthorizationCmd() (passive client)
     fn setauthorization_cmd<S: Read + Write>(&mut self, dir: &mut BnetStream<S>, cmd: &str) -> bool {
-        let Some(key) = arg(cmd, "Authorization") else {
+        let Some(v) = scan(cmd.as_bytes(), "setauthorization Authorization=%100s", 1) else {
             self.reply(dir, "2902 Bad setauthorization\n");
             return false;
         };
         let policy = self.sd_tls_policy;
-        self.set_storage_auth_key(key, policy);
+        self.set_storage_auth_key(&v[0].text(), policy);
         self.reply(dir, "2000 OK Authorization\n")
     }
 
@@ -293,7 +300,8 @@ impl<'a> Session<'a> {
 
     /// CancelCmd(): "cancel Job=%127s"
     fn cancel_cmd<S: Read + Write>(&mut self, dir: &mut BnetStream<S>, cmd: &str) -> bool {
-        match cmd.trim_end().strip_prefix("cancel Job=").map(|j| j.split_whitespace().next().unwrap_or("")) {
+        let job = scan(cmd.as_bytes(), "cancel Job=%127s", 1).map(|v| v[0].text());
+        match job.as_deref() {
             Some(job) => match sd::find(job) {
                 Some(shared) => {
                     shared.cancel();
@@ -313,15 +321,20 @@ impl<'a> Session<'a> {
 
     /// StorageCmd(): "storage address=%s port=%d ssl=%d [Authorization=%100s]"
     fn storage_cmd<S: Read + Write>(&mut self, dir: &mut BnetStream<S>, cmd: &str) -> bool {
-        let addr = arg(cmd, "address");
-        let port = arg(cmd, "port").and_then(|p| p.parse::<u16>().ok());
-        let tls = arg(cmd, "ssl").and_then(|p| p.parse::<i32>().ok());
-        let (Some(addr), Some(port), Some(tls)) = (addr, port, tls) else {
-            self.msgs.jmsg(M_FATAL, &format!("Bad storage command: {cmd}"));
+        let m = cmd.as_bytes();
+        let Some(v) = scan(m, "storage address=%s port=%d ssl=%d Authorization=%100s", 4)
+            .or_else(|| scan(m, "storage address=%s port=%d ssl=%d", 3))
+        else {
+            self.msgs.jmsg(M_FATAL, &format!("Bad storage command: {cmd}\n"));
             self.reply(dir, "2902 Bad storage\n");
             return false;
         };
-        self.set_storage_auth_key(arg(cmd, "Authorization").unwrap_or(""), tls);
+        let addr = v[0].text();
+        let addr = addr.as_str();
+        let port = v[1].int() as u16;
+        let tls = v[2].int() as i32;
+        let key = v.get(3).map(|k| k.text()).unwrap_or_default();
+        self.set_storage_auth_key(&key, tls);
         let Some(shared) = self.shared.clone() else {
             self.msgs.jmsg(M_FATAL, "Improper calling sequence.\n");
             self.reply(dir, "2902 Bad storage\n");
@@ -365,16 +378,15 @@ impl<'a> Session<'a> {
 
     /// SessionCmd(): "session %127s %ld %ld %ld %ld %ld %ld"
     fn session_cmd<S: Read + Write>(&mut self, dir: &mut BnetStream<S>, cmd: &str) -> bool {
-        let f: Vec<&str> = cmd.split_whitespace().collect();
-        let n = |i: usize| f.get(i).and_then(|v| v.parse::<u32>().ok());
-        match (n(2), n(3), n(4), n(5), n(6), n(7)) {
-            (Some(a), Some(b), Some(c), Some(d), Some(e), Some(g)) => {
-                (self.vol_session_id, self.vol_session_time) = (a, b);
-                (self.start_file, self.end_file, self.start_block, self.end_block) = (c, d, e, g);
+        match scan(cmd.as_bytes(), "session %127s %ld %ld %ld %ld %ld %ld\n", 7) {
+            Some(v) => {
+                (self.vol_session_id, self.vol_session_time) = (v[1].int() as u32, v[2].int() as u32);
+                (self.start_file, self.end_file) = (v[3].int() as u32, v[4].int() as u32);
+                (self.start_block, self.end_block) = (v[5].int() as u32, v[6].int() as u32);
                 self.reply(dir, "2000 OK session\n")
             }
-            _ => {
-                self.msgs.jmsg(M_FATAL, &format!("Bad session command: {cmd}"));
+            None => {
+                self.msgs.jmsg(M_FATAL, &format!("Bad session command: {cmd}\n"));
                 false
             }
         }
@@ -403,8 +415,13 @@ impl<'a> Session<'a> {
         true
     }
 
-    /// PluginoptionsCmd(): no plugins to pass them to.
-    fn pluginoptions_cmd<S: Read + Write>(&mut self, dir: &mut BnetStream<S>, _cmd: &str) -> bool {
+    /// PluginoptionsCmd(): no plugins to pass the options to.
+    fn pluginoptions_cmd<S: Read + Write>(&mut self, dir: &mut BnetStream<S>, cmd: &str) -> bool {
+        if scan(cmd.as_bytes(), "pluginoptions %s", 1).is_none() {
+            self.msgs.jmsg(M_FATAL, &format!("Bad Plugin Options command: {cmd}\n"));
+            self.reply(dir, "2905 Bad PluginOptions command.\n");
+            return false;
+        }
         self.reply(dir, "2000 OK PluginOptions\n")
     }
 
@@ -420,19 +437,29 @@ impl<'a> Session<'a> {
             return false;
         }
         self.job_type = b'R';
-        let line = cmd.trim_end_matches(['\n', '\0']);
-        let replace = arg(line, "replace").and_then(|r| r.bytes().next());
-        let prelinks = arg(line, "prelinks").and_then(|p| p.parse::<i32>().ok());
-        let (where_arg, regex) = match (line.split_once(" where="), line.split_once(" regexwhere=")) {
-            (Some((_, w)), _) => (w.split_whitespace().next().unwrap_or("").to_string(), false),
-            (None, Some((_, w))) => (w.split_whitespace().next().unwrap_or("").to_string(), true),
-            (None, None) => (String::new(), false),
+        let m = cmd.as_bytes();
+        let (vals, regex) = match scan(m, "restore replace=%c prelinks=%d where=%s\n", 3) {
+            Some(v) => (v, false),
+            None => match scan(m, "restore replace=%c prelinks=%d regexwhere=%s\n", 3) {
+                Some(v) => (v, true),
+                None => match scan(m, "restore replace=%c prelinks=%d where=\n", 2) {
+                    Some(mut v) => {
+                        v.push(crate::scan::Val::Str(Vec::new()));
+                        (v, true)
+                    }
+                    None => {
+                        self.msgs.jmsg(M_FATAL, &format!("Bad replace command. CMD={cmd}\n"));
+                        return false;
+                    }
+                },
+            },
         };
-        let has_where = line.contains(" where=") || line.contains(" regexwhere=");
-        let (Some(replace), Some(prelinks), true) = (replace, prelinks, has_where) else {
-            self.msgs.jmsg(M_FATAL, &format!("Bad replace command. CMD={cmd}"));
-            return false;
+        let replace = match vals[0] {
+            crate::scan::Val::Char(c) => c,
+            _ => b'a',
         };
+        let prelinks = vals[1].int();
+        let where_arg = vals[2].text();
         let mut args = where_arg;
         if args == "/" {
             args.clear();
@@ -520,8 +547,8 @@ impl<'a> Session<'a> {
             return false;
         }
         match next_msg(sd) {
-            Some(m) => match m.trim_end_matches(['\n', '\0']).strip_prefix("3000 OK open ticket = ").and_then(|t| t.trim().parse().ok()) {
-                Some(t) => *ticket = t,
+            Some(m) => match scan(m.as_bytes(), "3000 OK open ticket = %d", 1) {
+                Some(v) => *ticket = v[0].int() as i32,
                 None => {
                     self.msgs.jmsg(M_FATAL, &format!("Bad response to SD read open: {m}\n"));
                     return false;

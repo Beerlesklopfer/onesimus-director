@@ -921,6 +921,12 @@ fn send_expect(bnet: &mut BnetStream<tls_psk::PskStream>, cmd: &str, expect: &st
                 return Err(format!("{label}: {r}"));
             }
             Ok(BnetMessage::Signal(BnetSignal::Eod)) => continue,
+            // getmsg.cc BgetDirmsg(): BNET_BTIME is answered with our time
+            // (the FD's clock sync in LevelCmd for since_utime).
+            Ok(BnetMessage::Signal(BnetSignal::Btime)) => {
+                let now_us = SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_micros()).unwrap_or(0);
+                bnet.send_str(&format!("btime {now_us}\n")).map_err(|e| format!("{label} send: {e}"))?;
+            }
             Ok(BnetMessage::Signal(s)) => { debug!("Worker {job_id} {label}: signal {s:?}"); continue; }
             Err(e) => return Err(format!("{label} recv: {e}")),
         }

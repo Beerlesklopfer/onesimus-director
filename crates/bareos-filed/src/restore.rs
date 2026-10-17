@@ -146,13 +146,8 @@ fn bget_msg<S: Read + Write>(sd: &mut BnetStream<S>) -> Result<Vec<u8>, String> 
 }
 
 fn parse_rechdr(msg: &[u8]) -> Option<(u32, u32, i32, i32, u32)> {
-    let s = std::str::from_utf8(msg).ok()?;
-    let mut it = s.trim_end_matches(['\0', '\n']).split_whitespace();
-    if it.next()? != "rechdr" {
-        return None;
-    }
-    Some((it.next()?.parse().ok()?, it.next()?.parse().ok()?, it.next()?.parse().ok()?,
-        it.next()?.parse().ok()?, it.next()?.parse().ok()?))
+    let v = crate::scan::scan(msg, "rechdr %u %u %d %d %u", 5)?;
+    Some((v[0].int() as u32, v[1].int() as u32, v[2].int() as i32, v[3].int() as i32, v[4].int() as u32))
 }
 
 /// The restore of one SD read session.

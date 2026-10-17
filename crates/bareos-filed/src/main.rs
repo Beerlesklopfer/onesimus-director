@@ -26,6 +26,7 @@ mod jmsg;
 mod job;
 mod restore;
 mod runscript;
+mod scan;
 mod sd;
 mod status;
 mod streams;
@@ -37,7 +38,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::thread;
 
 use clap::Parser;
-use tracing::{info, error, warn};
+use tracing::{info, error};
 use tracing_subscriber::EnvFilter;
 
 /// Global shutdown flag.
