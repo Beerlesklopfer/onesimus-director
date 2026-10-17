@@ -162,6 +162,10 @@ pub enum PipeMessage {
     /// ... the M_FATAL text of an exceeded quota and FetchRemainingQuotas().
     #[serde(rename = "quota_checked")]
     QuotaChecked { fatal: Option<String>, remaining: u64 },
+    /// The handshake mode the client connection succeeded with
+    /// (connection_successful_handshake_; cleartext or immediate TLS). S-27.
+    #[serde(rename = "client_handshake")]
+    ClientHandshake { job_id: u32, client: String, cleartext: bool },
     /// job_thread() RunScripts(jcr, ..., label) in the Director (console
     /// commands need it); the worker waits for [`PipeMessage::RunScriptsDone`].
     #[serde(rename = "run_scripts")]
@@ -225,7 +229,7 @@ pub(crate) fn start_messages_with_before(pipes: &mut WorkerPipes, job_id: u32, m
 /// fd_cmds.cc SendRunscriptsCommands(): the client's scripts, then
 /// "RunBeforeNow" (the File daemon runs ClientRunBeforeJob before it
 /// answers). Failure: "Client \"%s\" RunScript failed." (M_FATAL).
-pub(crate) fn send_client_runscripts(fd: &mut BnetStream<tls_psk::PskStream>, p: &JobParams, before: &BeforeJob) -> Result<(), String> {
+pub(crate) fn send_client_runscripts<S: std::io::Read + std::io::Write>(fd: &mut BnetStream<S>, p: &JobParams, before: &BeforeJob) -> Result<(), String> {
     let mut commands: Vec<(&str, &str, &str)> = before.client_commands.iter()
         .map(|c| (c.as_str(), "2000 OK RunScript\n", "RunScript")).collect();
     if before.run_before_now {
@@ -244,7 +248,7 @@ pub(crate) fn send_client_runscripts(fd: &mut BnetStream<tls_psk::PskStream>, p:
 /// getmsg.cc response(jcr, fd, resp, cmd, DISPLAY_ERROR) after sending
 /// `command`: daemon job messages are dispatched (BgetDirmsg), anything
 /// but `resp` is a fatal "Bad response" error.
-fn director_response(fd: &mut BnetStream<tls_psk::PskStream>, job_id: u32, command: &str, resp: &str, name: &str) -> Result<(), String> {
+fn director_response<S: std::io::Read + std::io::Write>(fd: &mut BnetStream<S>, job_id: u32, command: &str, resp: &str, name: &str) -> Result<(), String> {
     let socket_error = |e: String| {
         let text = format!("Socket error on {name} command: ERR={e}\n");
         worker_jmsg(job_id, M_FATAL, text.clone());
@@ -1033,6 +1037,49 @@ pub(crate) fn tcp_connect(host: &str, port: u16) -> std::io::Result<std::net::Tc
         let _ = sock.shutdown(std::net::Shutdown::Both);
     }
     Ok(sock)
+}
+
+/// Why ConnectToFileDaemon() failed on a connected socket (S-27).
+#[derive(Debug)]
+pub(crate) enum FdHandshakeError {
+    /// DoTlsHandshake() failed.
+    Tls(String),
+    /// Sending the Hello failed.
+    Hello(String),
+    /// AuthenticateOutboundConnection() failed.
+    Auth,
+    /// No answer to the Hello.
+    Response(String),
+}
+
+/// fd_cmds.cc ConnectToFileDaemon() / authenticate.cc
+/// AuthenticateWithFileDaemon() in one handshake mode: immediate TLS
+/// (`tls`) or cleartext, then Hello and CRAM-MD5 (S-27).
+pub(crate) fn connect_fd_mode_on(p: &JobParams, sock: std::net::TcpStream, tls: bool)
+    -> Result<(BnetStream<bareos_bnet::stream::AnyStream>, Option<String>), FdHandshakeError> {
+    use bareos_bnet::stream::AnyStream;
+    sock.set_read_timeout(None).ok();
+    let (stream, cipher) = if tls {
+        let psk = tls_psk::password_to_psk(&p.fd_password);
+        let stream = tls_psk::psk_connect(sock, &format!("R_DIRECTOR\x1e{}", p.director_name), &psk)
+            .map_err(|e| FdHandshakeError::Tls(e.to_string()))?;
+        let cipher = stream.cipher_name();
+        (AnyStream::Psk(stream), Some(cipher))
+    } else {
+        (AnyStream::Plain(sock), None)
+    };
+    let mut bnet = BnetStream::new(stream);
+    bnet.send_str(&make_director_hello(&p.director_name)).map_err(|e| FdHandshakeError::Hello(e.to_string()))?;
+    let auth = CramMd5Auth::new(&p.fd_password, &p.director_name, 2);
+    match auth.two_way_authenticate(&mut bnet, false) {
+        Ok(r) if r.success => {}
+        _ => return Err(FdHandshakeError::Auth),
+    }
+    match bnet.recv_str() {
+        Ok(hello) if hello.contains("2000 OK Hello") => Ok((bnet, cipher)),
+        Ok(hello) => Err(FdHandshakeError::Response(hello)),
+        Err(e) => Err(FdHandshakeError::Response(e.to_string())),
+    }
 }
 
 /// TLS-PSK, Hello and CRAM-MD5 with the File daemon on a connected socket.

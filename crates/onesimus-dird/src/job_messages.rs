@@ -261,15 +261,13 @@ pub struct JobReport {
     pub vf: Option<crate::vbackup::VfInfo>,
 }
 
-/// Clients connected since the Director started (ClientResource
-/// `connection_successful_handshake_`).
-static CONNECTED_CLIENTS: Mutex<Option<std::collections::HashSet<String>>> = Mutex::new(None);
 
 /// True for the first job connection to client `name` (then the Director
 /// probes the client protocol).
 pub fn first_client_connection(name: &str) -> bool {
-    CONNECTED_CLIENTS.lock().unwrap_or_else(|e| e.into_inner())
-        .get_or_insert_with(Default::default).insert(name.to_string())
+    // The handshake mode is stored when a connection succeeded (fd_protocol,
+    // shared with the console; reset by `reload`). S-27.
+    crate::fd_protocol::stored_cleartext(name).is_none()
 }
 
 pub(crate) fn raw_directive(config: &crate::director_config::DirectorConfig, kind: &str, name: &str, key: &str) -> Option<String> {

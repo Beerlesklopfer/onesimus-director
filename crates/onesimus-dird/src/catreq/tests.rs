@@ -84,7 +84,7 @@ fn context() -> JobContext {
     JobContext {
         job_id: 42, start_time: 1_781_000_000, pool_id: 3, pool_name: "Full".into(), catalog_files: true,
         write_storage: Some(WriteStorage { media_type: "File".into(), storage_id: 1, autochanger: false }),
-        mig_job_id: None,
+        mig_job_id: None, prune_volumes: false,
     }
 }
 
@@ -514,7 +514,7 @@ fn real_catalog_round_trip() {
 VALUES ('c055.test','c055','B','F','R',3,1); SELECT currval('job_jobid_seq')").unwrap().rows[0][0].clone().unwrap().parse().unwrap();
     let storage_id: i64 = cat.query_rows("SELECT StorageId FROM Storage WHERE Name='File'").unwrap().rows[0][0].clone().unwrap().parse().unwrap();
     let ctx = JobContext { job_id, start_time: now(), pool_id: 3, pool_name: "Full".into(), catalog_files: true,
-        write_storage: Some(WriteStorage { media_type: "File".into(), storage_id, autochanger: false }), mig_job_id: None };
+        write_storage: Some(WriteStorage { media_type: "File".into(), storage_id, autochanger: false }), mig_job_id: None, prune_volumes: false };
     let mut job = CatReqJob::new(ctx);
     let opener = || cat.dedicated().ok().map(|c| Box::new(c) as Box<dyn Db + Send>);
     let db: &dyn Db = &cat;

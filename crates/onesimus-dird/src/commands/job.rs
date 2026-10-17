@@ -1825,6 +1825,8 @@ fn run_selected(
             setup_messages.extend(messages.into_iter().map(|(code, text)| (crate::backup::quota_msg_type(code), text)));
             quota
         },
+        handshake_cleartext: crate::fd_protocol::stored_cleartext(&client.name) == Some(true),
+        client_tls_required: crate::commands::defaults::bool_directive(&client_dirs, "tlsrequire", false),
         fd_connect_timeout: director_time("fdconnecttimeout", 180),
         sd_connect_timeout: director_time("sdconnecttimeout", 1800),
     };

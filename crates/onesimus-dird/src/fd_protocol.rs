@@ -233,6 +233,17 @@ pub(crate) fn note_tls_handshake(client: &str) {
     }
 }
 
+/// The stored handshake mode of a client: Some(true) cleartext, Some(false)
+/// immediate TLS, None not connected yet (probing). S-27.
+pub(crate) fn stored_cleartext(client: &str) -> Option<bool> {
+    stored_handshake(client).map(|mode| mode == HandshakeMode::CleartextFirst)
+}
+
+/// A job connection succeeded (connection_successful_handshake_). S-27.
+pub(crate) fn store_client_handshake(client: &str, cleartext: bool) {
+    store_handshake(client, if cleartext { HandshakeMode::CleartextFirst } else { HandshakeMode::TlsFirst });
+}
+
 fn store_handshake(client: &str, mode: HandshakeMode) {
     if let Ok(mut modes) = SUCCESSFUL_HANDSHAKE.lock() {
         modes.get_or_insert_with(Default::default).insert(client.to_string(), mode);

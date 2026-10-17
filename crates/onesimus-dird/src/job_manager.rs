@@ -832,6 +832,14 @@ impl JobManager {
                     PipeMessage::State { state, .. } => {
                         debug!("JobManager: job {} state={state}", job.job_id);
                         job.worker_state(&state);
+                        // A worker other than the backup's reached the FD with
+                        // immediate TLS (connection_successful_handshake_). S-27.
+                        if job.jcr.fd_connected && job.jcr.params.as_ref().is_some_and(|p| p.backup.is_none())
+                            && !state.starts_with("Backup") {
+                            if let Some((client, _)) = &job.resources {
+                                crate::fd_protocol::note_tls_handshake(client);
+                            }
+                        }
                         if matches!(job.observed_status, 'A' | 'I' | 'E' | 'f' | 'e' | 'D')
                             && matches!(state.as_str(), "Running" | "Paused" | "WaitingMedia" | "WaitMedia" | "WaitingMount" | "WaitMount") { continue; }
                         job.phase = match state.as_str() {
@@ -962,6 +970,10 @@ impl JobManager {
                             Err(error) => PipeMessage::AccurateReady { path, estimate: String::new(), error: Some(error) },
                         };
                         job.handle.send_message(&reply);
+                    }
+
+                    PipeMessage::ClientHandshake { client, cleartext, .. } => {
+                        crate::fd_protocol::store_client_handshake(&client, cleartext);
                     }
 
                     // DoNativeBackup(): CheckHardquotas() and CheckSoftquotas() (S-23).

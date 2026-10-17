@@ -8,9 +8,10 @@
 //! ("storage address=", SD "run", message thread), "backup FileIndex=0"
 //! and WaitForJobTermination (FD "2800 End Job", SD "3099 Job end").
 
-use std::io::{BufRead, BufReader};
+use std::io::{BufRead, BufReader, Read, Write};
 use std::sync::atomic::Ordering;
 
+use bareos_bnet::stream::AnyStream;
 use bareos_bnet::tls_psk::PskStream;
 use bareos_bnet::{BnetMessage, BnetSignal, BnetStream};
 use tracing::{debug, warn};
@@ -61,11 +62,80 @@ pub struct BackupSession {
     /// The client's quota (quota.cc), None without Soft/Hard Quota (S-23).
     #[serde(default)]
     pub quota: Option<crate::backup::Quota>,
+    /// The stored handshake mode of the client is cleartext; the client
+    /// requires TLS (no cleartext fallback). S-27.
+    #[serde(default)]
+    pub handshake_cleartext: bool,
+    #[serde(default)]
+    pub client_tls_required: bool,
     /// Director FD/SD Connect Timeout (max_retry_time of the connections).
     #[serde(default)]
     pub fd_connect_timeout: u64,
     #[serde(default)]
     pub sd_connect_timeout: u64,
+}
+
+/// fd_cmds.cc ConnectToFileDaemon(): the TCP connection (retried), then the
+/// handshake in the stored mode or, probing, immediate TLS first and after
+/// a TLS failure cleartext (UpdateFailedConnectionHandshakeMode), at most
+/// three tries. Err: the fatal text TerminateBackupWithError starts with
+/// (empty when the messages were already sent). S-27.
+fn connect_file_daemon(params: &JobParams, session: &BackupSession) -> Result<BnetStream<AnyStream>, String> {
+    use job_worker::FdHandshakeError;
+    let job_id = params.job_id;
+    let probing = params.client_first_connection;
+    let mut tls = !session.handshake_cleartext;
+    let who = format!("Client: {}", params.client_name);
+    for _ in 0..3 {
+        let sock = match connect_retry(job_id, &who, &params.fd_address, params.fd_port, session.fd_connect_timeout) {
+            Ok(sock) => sock,
+            Err(e) => {
+                if !e.is_empty() {
+                    jmsg(job_id, M_FATAL, e);
+                }
+                return Err(format!("\nFailed to connect to client \"{}\".\n", params.client_name));
+            }
+        };
+        // jcr->file_bsock is set once the TCP connection stands (a cancel
+        // now goes to the File daemon).
+        state(job_id, "BackupFDConnected");
+        match job_worker::connect_fd_mode_on(params, sock, tls) {
+            Ok((fd, cipher)) => {
+                jmsg(job_id, M_INFO, crate::job_messages::connected_text(&who, &params.fd_address, params.fd_port, cipher.as_deref()));
+                // SendInfoSuccess(), SendInfoChosenCipher()
+                let mode = if tls { "Immediate TLS" } else { "Cleartext" };
+                let text = format!("{} Handshake: {mode},", if probing { "\r\u{b}" } else { "" });
+                jmsg(job_id, M_INFO, format!("{}\n", text.replace(['\r', '\u{b}', ','], " ")));
+                jmsg(job_id, M_INFO, crate::job_messages::cipher_text(cipher.as_deref()));
+                job_worker::send_jmsg(PipeMessage::ClientHandshake { job_id, client: params.client_name.clone(), cleartext: !tls });
+                return Ok(fd);
+            }
+            Err(FdHandshakeError::Tls(_)) => {
+                if job_worker::WORKER_CANCEL.load(Ordering::SeqCst) {
+                    return Err(String::new());
+                }
+                if probing {
+                    jmsg(job_id, M_INFO, "TLS negotiation failed (while probing client protocol)\n".into());
+                } else {
+                    jmsg(job_id, M_FATAL, "TLS negotiation failed\n".into());
+                }
+            }
+            Err(FdHandshakeError::Hello(e)) => jmsg(job_id, M_FATAL, format!(
+                "Error sending Hello to File daemon at \"{}:{}\". ERR={e}\n", params.fd_address, params.fd_port)),
+            Err(FdHandshakeError::Auth) => jmsg(job_id, M_FATAL, format!(
+                "Unable to authenticate with File daemon at \"{}:{}\"\n", params.fd_address, params.fd_port)),
+            Err(FdHandshakeError::Response(e)) => jmsg(job_id, M_FATAL, format!(
+                "Bad response from File daemon at \"{}:{}\" to Hello command: ERR={e}\n", params.fd_address, params.fd_port)),
+        }
+        // UpdateFailedConnectionHandshakeMode(): TLS first falls back to
+        // cleartext (unless the client requires TLS); cleartext has failed.
+        if tls && !session.client_tls_required {
+            tls = false;
+        } else {
+            break;
+        }
+    }
+    Err(String::new())
 }
 
 /// lib/bsock_tcp.cc BareosSocketTCP::connect(): the TCP connection, tried
@@ -115,7 +185,7 @@ fn now() -> i64 {
 
 /// getmsg.cc BgetDirmsg(): the next message that is not a job message;
 /// signals are answered (BTIME, POLL, STATUS) or returned as None.
-fn dir_msg(bs: &mut BnetStream<PskStream>, job_id: u32) -> Result<Option<String>, String> {
+fn dir_msg<S: Read + Write>(bs: &mut BnetStream<S>, job_id: u32) -> Result<Option<String>, String> {
     loop {
         match bs.recv().map_err(|e| e.to_string())? {
             BnetMessage::Data(data) => {
@@ -147,7 +217,7 @@ fn dir_msg(bs: &mut BnetStream<PskStream>, job_id: u32) -> Result<Option<String>
 
 /// getmsg.cc response(): the next message must be `expected`; otherwise
 /// "<cmd> command: wanted …, got …" (M_FATAL, DISPLAY_ERROR).
-fn response(bs: &mut BnetStream<PskStream>, job_id: u32, expected: &str, cmd: &str) -> Result<(), String> {
+fn response<S: Read + Write>(bs: &mut BnetStream<S>, job_id: u32, expected: &str, cmd: &str) -> Result<(), String> {
     match dir_msg(bs, job_id) {
         Ok(Some(msg)) if msg == expected => Ok(()),
         Ok(Some(msg)) => Err(format!("Bad response to {cmd} command: wanted {expected}, got {msg}\n")),
@@ -156,7 +226,7 @@ fn response(bs: &mut BnetStream<PskStream>, job_id: u32, expected: &str, cmd: &s
     }
 }
 
-fn send(bs: &mut BnetStream<PskStream>, text: &str) -> Result<(), String> {
+fn send<S: Read + Write>(bs: &mut BnetStream<S>, text: &str) -> Result<(), String> {
     bs.send_str(text).map_err(|e| format!("Network error: {e}\n"))
 }
 
@@ -275,29 +345,11 @@ pub fn run(params: &JobParams, session: &BackupSession, pipes: &mut WorkerPipes)
     if params.client_first_connection {
         jmsg(job_id, M_INFO, crate::job_messages::PROBING_TEXT.to_string());
     }
-    let who = format!("Client: {}", params.client_name);
-    let fd = connect_retry(job_id, &who, &params.fd_address, params.fd_port, session.fd_connect_timeout)
-        .and_then(|sock| {
-            // jcr->file_bsock is set once the TCP connection stands (a cancel
-            // now goes to the File daemon).
-            state(job_id, "BackupFDConnected");
-            job_worker::connect_fd_on(params, sock).map_err(|e| format!("Failed to connect to File daemon: {e}\n"))
-        });
-    let mut fd = match fd {
-        Ok((fd, cipher)) => {
-            let who = format!("Client: {}", params.client_name);
-            jmsg(job_id, M_INFO, crate::job_messages::connected_text(&who, &params.fd_address, params.fd_port, Some(&cipher)));
-            jmsg(job_id, M_INFO, crate::job_messages::handshake_text(params.client_first_connection));
-            jmsg(job_id, M_INFO, crate::job_messages::cipher_text(Some(&cipher)));
-            fd
-        }
-        Err(e) => {
+    let mut fd = match connect_file_daemon(params, session) {
+        Ok(fd) => fd,
+        Err(text) => {
             let _ = sd.send_signal(BnetSignal::Terminate);
-            // ConnectToFileDaemon(): "\nFailed to connect to client \"%s\".\n"
-            if !e.is_empty() {
-                jmsg(job_id, M_FATAL, e);
-            }
-            return fail_fd(format!("\nFailed to connect to client \"{}\".\n", params.client_name), vol);
+            return fail_fd(text, vol);
         }
     };
     state(job_id, "FDJobSetup");
@@ -405,7 +457,7 @@ pub fn run(params: &JobParams, session: &BackupSession, pipes: &mut WorkerPipes)
 /// backup.cc SendAccurateCurrentFiles(): the Director writes the list
 /// (AccurateGetJobids, GetFileList, "Sending Accurate information ..."), the
 /// worker sends "accurate files=N", the entries and EOD.
-fn send_accurate_files(fd: &mut BnetStream<PskStream>, pipes: &mut WorkerPipes, job_id: u32, session: &BackupSession,
+fn send_accurate_files(fd: &mut BnetStream<AnyStream>, pipes: &mut WorkerPipes, job_id: u32, session: &BackupSession,
                        start_time: i64) -> Result<(), String> {
     if !session.accurate || !matches!(session.ids.level, 'I' | 'D') {
         return Ok(());
@@ -474,7 +526,7 @@ fn start_sd_job(sd: &mut BnetStream<PskStream>, params: &JobParams, session: &Ba
 
 /// SendJobInfoToFileDaemon, SendLevelCommand, SendIncludeExcludeLists,
 /// SendSecureEraseReqToFd (and the spot of SendRunscriptsCommands).
-fn setup_fd(fd: &mut BnetStream<PskStream>, params: &JobParams, session: &BackupSession, vol: (u32, u32),
+fn setup_fd(fd: &mut BnetStream<AnyStream>, params: &JobParams, session: &BackupSession, vol: (u32, u32),
             auth_key: &str, before: &job_worker::BeforeJob) -> Result<(), String> {
     let job_id = params.job_id;
     send(fd, &format!("JobId={job_id} Job={} SDid={} SDtime={} Authorization={auth_key} ssl=4\n",
