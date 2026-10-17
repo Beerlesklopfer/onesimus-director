@@ -222,6 +222,8 @@ pub struct Outcome {
 /// console (ua->runscript): its output goes to the "-RunScript-" control
 /// JCR (JobId 0, the Director's Messages resource), one message per send.
 pub fn run_console_command(host: &Host, cmd: &str) -> bool {
+    // new_control_jcr("-RunScript-"): takes a job name sequence number (S-22).
+    let _ = crate::commands::job::new_control_jcr_name("-RunScript-");
     let emit = |text: &str| {
         if let Some(config) = host.config.as_ref().and_then(|c| c.read().ok()) {
             crate::console_msg::job_message(&config, "-RunScript-", 0, MsgType::Info, 0, text);

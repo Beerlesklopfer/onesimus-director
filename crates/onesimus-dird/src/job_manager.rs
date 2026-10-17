@@ -1254,12 +1254,18 @@ pub fn monitor_loop(
     debug!("job monitor started");
     while !shutdown.load(Ordering::Relaxed) {
         let had_work;
+        let watchdog_cancels;
         {
             let mut mgr = manager.lock().unwrap();
             // Queued jobs need no fast polling (jobq looks every 2 seconds).
             let before = mgr.running().count();
             mgr.poll_all();
             had_work = before > 0;
+            watchdog_cancels = mgr.take_watchdog_cancels();
+        }
+        // JobMonitorWatchdog: CancelJob() of the jobs over a time limit (S-22).
+        if !watchdog_cancels.is_empty() {
+            crate::commands::cancel::cancel_from_watchdog(&manager, &watchdog_cancels);
         }
         // Adaptive sleep: 0.1ms when jobs running (low latency CatReq),
         // 50ms when idle (save CPU)
@@ -1415,6 +1421,8 @@ Job { Name = single; Client = fd1; Storage = File }
         m.jobs.iter_mut().find(|j| j.job_id == 1).unwrap().start_time -= 11;
         m.fire_job_monitor();
         assert_eq!(m.get_job(1).unwrap().status(), 'A');
+        assert_eq!(m.take_watchdog_cancels(), vec![1]);
+        m.cancel_job(1);
         assert_eq!(m.get_job(1).unwrap().phase, DirJobPhase::Canceling);
         kill_all(&mut m);
     }

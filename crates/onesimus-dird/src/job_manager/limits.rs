@@ -17,7 +17,8 @@
 //!   start: Max Wait Time (time in wait states after the job started), Max
 //!   Run Time / Full/Incremental/Differential Max Runtime, Max Run Sched
 //!   Time; a hit is "Fatal error: Max … time exceeded. Job canceled." and
-//!   CancelJob().
+//!   CancelJob() — the one of the `cancel` command (FD/SD `cancel Job=`),
+//!   run by monitor_loop outside the JobManager lock.
 
 use super::*;
 
@@ -76,6 +77,9 @@ pub(super) struct LimitState {
 #[derive(Debug, Default)]
 pub(super) struct Monitor {
     next: Option<std::time::Instant>,
+    /// Jobs the watchdog cancels: CancelJob() (commands/cancel.rs) runs
+    /// outside the JobManager lock (monitor_loop).
+    cancel: Vec<u32>,
 }
 
 /// JobMonitorWatchdog interval (job.cc InitJobServer: wd->interval = 60).
@@ -345,8 +349,23 @@ impl JobManager {
         for (id, name, text) in cancel {
             self.set_status(id, 'A');
             self.post_info(id, &name, crate::message_bus::MsgType::Fatal, text.to_string());
-            self.cancel_job(id);
+            self.monitor.cancel.push(id);
         }
+    }
+
+    /// The configuration the JobManager uses.
+    pub fn config(&self) -> Option<SharedConfig> {
+        self.config.clone()
+    }
+
+    /// The catalog the JobManager uses.
+    pub fn catalog(&self) -> Option<CatalogHandle> {
+        self.catalog.clone()
+    }
+
+    /// The jobs the watchdog decided to cancel since the last call.
+    pub fn take_watchdog_cancels(&mut self) -> Vec<u32> {
+        std::mem::take(&mut self.monitor.cancel)
     }
 
     /// Run the JobMonitorWatchdog check now (tests).

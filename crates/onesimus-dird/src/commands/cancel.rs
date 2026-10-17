@@ -231,6 +231,21 @@ pub fn select_jobs(ua: &mut Ua, ast: &CommandAst, active: &[ActiveJob], reason: 
 /// case (C++ setJobStatus(JS_Canceled) plus the thread signal); the job's own
 /// report follows when it has ended. When the daemons took the cancel, the
 /// job's RunScripts "AfterJob" run (job.cc:741). Compatibility log C-034, C-048.
+/// CancelJob() of the JobMonitorWatchdog (job.cc:752): a UA context of the
+/// "*JobMonitor*" control JCR without console — its output goes nowhere.
+pub fn cancel_from_watchdog(manager: &std::sync::Arc<std::sync::Mutex<crate::job_manager::JobManager>>, ids: &[u32]) {
+    let (config, catalog, active) = {
+        let mgr = manager.lock().unwrap();
+        (mgr.config(), mgr.catalog(), mgr.active_jobs())
+    };
+    let ctx = ExecContext { session_id: 0, config, session_mgr: None, catalog, api_mode: Default::default(),
+        bus_rx: None, job_manager: Some(manager.clone()) };
+    let mut ua = Ua::new(&ctx);
+    for job in active.iter().filter(|j| ids.contains(&j.id)) {
+        cancel_job(&mut ua, job, &mut NetLinks);
+    }
+}
+
 fn cancel_job(ua: &mut Ua, job: &ActiveJob, links: &mut dyn CancelLinks) {
     let ctx = ua.ctx;
     let mut ok = true;
