@@ -1,0 +1,130 @@
+# Tests und Debian-Pakete.
+#   test    – cargo test der Workspace-Crates (Director, Konsole, Konfiguration, FD)
+#   package – nur wenn test grün ist: dpkg-buildpackage auf Debian 13 (trixie),
+#             Pakete onesimus-dird und oconsole als Artefakt; bei einem Tag v*
+#             zusätzlich an ein GitHub-Release gehängt.
+# Die Paritätsprüfung gegen den Original-Director (tests/parity, ci/local-ci.py)
+# braucht Bareos, PostgreSQL und laufende FD/SD und bleibt in der lokalen CI.
+name: Paket
+
+on:
+  push:
+    branches: [development, main]
+    tags: ["v*"]
+  pull_request:
+    branches: [development, main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: package-${{ github.ref }}
+  cancel-in-progress: true
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  test:
+    runs-on: ubuntu-24.04
+    container: debian:trixie
+    steps:
+      - name: Werkzeuge
+        run: |
+          apt-get update -q >/dev/null
+          apt-get install -y -q --no-install-recommends \
+            ca-certificates curl git build-essential pkg-config protobuf-compiler \
+            libssl-dev zlib1g-dev liblzo2-dev libacl1-dev >/dev/null
+          curl -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal --default-toolchain stable
+          echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
+
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+          persist-credentials: false
+
+      - name: Cache
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry/index
+            ~/.cargo/registry/cache
+            ~/.cargo/git/db
+            target
+          key: test-${{ hashFiles('Cargo.lock') }}
+          restore-keys: test-
+
+      - name: Tests
+        run: |
+          cargo test --locked \
+            -p onesimus-dird -p oconsole -p bareos-config -p bareos-filed \
+            --no-default-features --features oconsole/mcp-production
+
+  package:
+    needs: test
+    runs-on: ubuntu-24.04
+    container: debian:trixie
+    permissions:
+      contents: write
+    steps:
+      - name: Werkzeuge
+        run: |
+          apt-get update -q >/dev/null
+          apt-get install -y -q --no-install-recommends \
+            ca-certificates curl git build-essential devscripts debhelper \
+            pkg-config protobuf-compiler libssl-dev >/dev/null
+          curl -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal --default-toolchain stable
+          echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
+
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+          persist-credentials: false
+
+      - name: Cache
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry/index
+            ~/.cargo/registry/cache
+            ~/.cargo/git/db
+          key: package-${{ hashFiles('Cargo.lock') }}
+          restore-keys: package-
+
+      - name: Pakete bauen
+        # Die Tests liefen im Job test; dh_auto_test hier nicht wiederholen.
+        env:
+          DEB_BUILD_OPTIONS: nocheck
+        run: |
+          dpkg-buildpackage -us -uc -b
+          mkdir -p dist
+          mv ../*.deb ../*.buildinfo ../*.changes dist/
+          ls -l dist
+
+      - name: Artefakt
+        uses: actions/upload-artifact@v4
+        with:
+          name: onesimus-debs-${{ github.sha }}
+          path: dist/
+          if-no-files-found: error
+
+      - name: Release
+        if: startsWith(github.ref, 'refs/tags/v')
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          apt-get install -y -q --no-install-recommends gh >/dev/null 2>&1 || {
+            curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg \
+              -o /usr/share/keyrings/githubcli-archive-keyring.gpg
+            echo "deb [signed-by=/usr/share/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" \
+              > /etc/apt/sources.list.d/github-cli.list
+            apt-get update -q >/dev/null && apt-get install -y -q gh >/dev/null
+          }
+          gh release view "${GITHUB_REF_NAME}" >/dev/null 2>&1 \
+            || gh release create "${GITHUB_REF_NAME}" --title "${GITHUB_REF_NAME}" --generate-notes
+          gh release upload "${GITHUB_REF_NAME}" dist/*.deb --clobber
