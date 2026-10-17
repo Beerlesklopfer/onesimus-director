@@ -46,6 +46,19 @@ Was Onesimus heute starten kann (Kompatibilitätslog C-058):
 
 Before- und AfterJob-RunScripts laufen für keinen Jobtyp.
 
+### Zeitgrenzen und Warten auf ein Volume
+
+Ein gestarteter Job unterliegt den Zeitgrenzen seiner Job-Ressource. Der Director prüft sie wie das Original alle 60 Sekunden und bricht einen Job, der eine Grenze überschreitet, ab wie mit [cancel](cancel.md):
+
+| Direktive | Wirkung |
+|---|---|
+| `Max Wait Time` | Höchstdauer, die ein laufender Job insgesamt in Wartezuständen verbringt (auf File oder Storage Daemon, auf ein Volume oder einen Mount). Meldung `Fatal error: Max wait time exceeded. Job canceled.` |
+| `Max Run Time`, `Full/Incremental/Differential Max Runtime` | Höchstdauer seit dem Start des Jobs, wahlweise je Level. |
+| `Max Start Delay` | Wie lange ein Job nach seiner geplanten Startzeit noch starten darf. |
+| `Max Run Sched Time` (in einer `Run`-Direktive) | Höchstdauer seit der geplanten Startzeit. |
+
+**Onesimus-Standard (abweichend vom Original):** Hat der Job keine `Max Wait Time`, wartet er im Original unbegrenzt auf ein Volume (etwa bei `Please mount append Volume … or label a new one` des Storage Daemons). Onesimus bricht einen solchen Job ab, sobald er insgesamt 10 Minuten (600 Sekunden) blockiert auf ein Volume gewartet hat. Gezählt wird nur die Zeit, in der der Job oder sein Storage-Daemon-Job auf Medien wartet (Status „waiting for media“ / „waiting for mount“). Die Meldung lautet `Fatal error: Max wait time exceeded. Job canceled. (Onesimus default: no Max Wait Time configured, the job waited 600 seconds for a volume)`. Eine konfigurierte `Max Wait Time` hat immer Vorrang; wer unbegrenzt warten will, setzt einen großen Wert. (Kompatibilitätslog C-085)
+
 ## Syntax
 
 ```text

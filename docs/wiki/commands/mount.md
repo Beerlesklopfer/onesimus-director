@@ -32,6 +32,8 @@ Die folgenden vorhandenen Beispiele und Verhaltensbeschreibungen sind lokale Dok
 
 `mount` bittet den Storage Daemon, ein Gerät wieder zu benutzen: bei Bandlaufwerken das eingelegte Band zu lesen und für Jobs freizugeben, bei Autochangern zuvor ein Volume aus einem Slot zu laden. Man braucht den Befehl nach einem `unmount`, nach dem Einlegen eines Bandes oder wenn ein Job auf ein Volume wartet. Der Befehl ändert den Zustand des Geräts im Storage Daemon, nicht den Katalog. Datei-Geräte sind immer eingebunden.
 
+Wartet ein Job auf ein Volume und hat seine Job-Ressource keine `Max Wait Time`, bricht Onesimus ihn nach 10 Minuten Wartezeit ab (Onesimus-Standard, im Original unbegrenzt; siehe [run](run.md#zeitgrenzen-und-warten-auf-ein-volume)). Bis dahin genügt `mount` oder ein neu gelabeltes Volume, damit der Job weiterläuft.
+
 ## Syntax
 
 ```text
