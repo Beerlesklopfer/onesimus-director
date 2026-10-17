@@ -789,6 +789,27 @@ mod tests {
     }
 
     #[test]
+    fn virtual_full_summary_shows_sd_data_and_the_newest_job_times() {
+        let facts = CatalogFacts {
+            uname: Ok("u".into()), fs_create_time: "2026-10-17 07:03:10".into(),
+            volume_names: Ok("AI-Consolidated-47328".into()), last_vol_bytes: Ok(91_973),
+        };
+        let report = JobReport {
+            vf: Some(crate::vbackup::VfInfo { previous: Some(("2026-07-09 21:00:02".into(), "2026-07-09 21:00:02".into(), 0)),
+                ..Default::default() }),
+            accurate: true, ..report_626()
+        };
+        let messages = backup_summary("bareos-dir", &report, &outcome_626(), &facts);
+        let text = &messages[0].1;
+        assert!(text.contains("  Backup Level:           Virtual Full\n  Client:"), "{text}");
+        assert!(text.contains(&format!("  Start time:             {}\n  End time:               {}\n  Elapsed time:           0 secs\n",
+            bstrftimes(local("2026-07-09 21:00:02")), bstrftimes(local("2026-07-09 21:00:02")))), "{text}");
+        assert!(text.contains("  SD Files Written:       5\n  SD Bytes Written:       24,154,607 (24.15 MB)\n  Rate:"), "{text}");
+        assert!(text.contains("  Last Volume Bytes:      91,973 (91.97 KB)\n  SD Errors:              0\n  \
+            SD termination status:  OK\n  Accurate:               yes\n  Bareos binary info:"), "{text}");
+    }
+
+    #[test]
     fn backup_errors_follow_native_backup_cleanup() {
         let facts = CatalogFacts {
             uname: Err("Client record not found in Catalog.\n".into()),

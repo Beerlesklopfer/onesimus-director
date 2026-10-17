@@ -178,3 +178,81 @@ pub fn consolidate_jobs(config: &DirectorConfig, catalog: &CatalogHandle, reques
     }
     true
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::catalog_worker::{CatalogRequest, CatalogResponse, SqlColumn, SqlTable};
+    use crate::internal_jobs::Kind;
+
+    fn rows(values: &[&str]) -> CatalogResponse {
+        CatalogResponse::Rows(SqlTable {
+            columns: vec![SqlColumn { name: "x".into(), numeric: false }],
+            rows: values.iter().map(|v| vec![Some(v.to_string())]).collect(),
+        })
+    }
+
+    /// Two Always Incremental jobs (FileSets fs1/fs2) with old Full jobs.
+    fn catalog() -> CatalogHandle {
+        let mut fileset = 0;
+        CatalogHandle::mock(move |request| match request {
+            CatalogRequest::Execute { sql } => {
+                if let Some(at) = sql.find("FileSet.FileSetId = ") {
+                    fileset = sql[at + 20..].chars().next().unwrap().to_digit(10).unwrap();
+                }
+                CatalogResponse::Ok(0)
+            }
+            CatalogRequest::TextRows { sql } => {
+                if sql.contains("FileSet='fs1'") {
+                    rows(&["1"])
+                } else if sql.contains("FileSet='fs2'") {
+                    rows(&["2"])
+                } else if sql.starts_with("SELECT ClientId") {
+                    rows(&["1"])
+                } else if sql.starts_with("SELECT JobId FROM btemp3") {
+                    let all: &[&str] = if fileset == 1 { &["10", "11", "12", "13"] } else { &["20", "21", "22"] };
+                    let limit = sql.split("LIMIT ").nth(1).map(|l| l.trim().parse().unwrap()).unwrap_or(all.len());
+                    rows(&all[..limit.min(all.len())])
+                } else if sql.starts_with("SELECT JobId FROM Job WHERE JobFiles = 0") {
+                    rows(if fileset == 1 { &["13"] } else { &[] })
+                } else if sql.starts_with("SELECT JobTDate") {
+                    rows(&["1000"])
+                } else {
+                    rows(&[])
+                }
+            }
+            _ => CatalogResponse::Error("unexpected".into()),
+        })
+    }
+
+    #[test]
+    fn selection_with_max_full_age_and_max_full_consolidations() {
+        let job = |name: &str, fileset: &str| format!("Job {{ Name = {name}; Type = Backup; Client = c; FileSet = {fileset}; \
+            Pool = p; Always Incremental = yes; Always Incremental Max Full Age = 1 day }}\n");
+        let config = DirectorConfig::from_str(&format!("Director {{ Name = dir }}\nClient {{ Name = c; Address = x; Password = y }}\n\
+            Pool {{ Name = p; Pool Type = Backup }}\n{}{}Job {{ Name = cons; Type = Consolidate; Max Full Consolidations = 1 }}\n",
+            job("a1", "fs1"), job("a2", "fs2"))).unwrap();
+        let request = Request { kind: Kind::Consolidate, job_id: 9, unique_job: "cons.x", job_name: "cons", pool: "p" };
+        let mut out = Outcome::default();
+        assert!(consolidate_jobs(&config, &catalog(), &request, &mut out));
+        let texts: Vec<&str> = out.messages.iter().map(|(_, t)| t.as_str()).collect();
+        assert!(texts[3].starts_with("check full age: full is "), "{texts:?}");
+        assert_eq!(texts, [
+            "Looking at always incremental job a1\n",
+            "a1: purging empty jobids 13\n",
+            "before ConsolidateFull: jobids: 10,11,12\n",
+            texts[3],
+            "Full is older than AlwaysIncrementalMaxFullAge -> also consolidating Full jobid 10\n",
+            "after ConsolidateFull: jobids: 10,11,12\n",
+            "a1: Start new consolidation\n",
+            "Could not start Consolidating job.\n",
+            "Looking at always incremental job a2\n",
+            "before ConsolidateFull: jobids: 20,21,22\n",
+            texts[10],
+            "1 AlwaysIncrementalFullConsolidations reached -> skipping first jobid 20 independent of age\n",
+            "after ConsolidateFull: jobids: 21,22\n",
+            "a2: Start new consolidation\n",
+            "Could not start Consolidating job.\n",
+        ]);
+    }
+}
