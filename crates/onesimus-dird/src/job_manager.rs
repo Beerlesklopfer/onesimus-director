@@ -580,8 +580,8 @@ impl JobManager {
                 if let (true, Some(cat)) = (has_scripts, &self.catalog) {
                     let start = job.start_time;
                     if let Err(e) = cat.raw_query(&format!(
-                        "UPDATE Job SET JobStatus='{}',StartTime=to_timestamp({start}),JobTDate={start} WHERE JobId={id}",
-                        job.observed_status)) {
+                        "UPDATE Job SET JobStatus='{}',StartTime='{}',JobTDate={start} WHERE JobId={id}",
+                        job.observed_status, crate::job_messages::bstrutime(start))) {
                         warn!("Job {id}: UpdateJobStartRecord: {e}");
                     }
                 }
@@ -614,8 +614,8 @@ impl JobManager {
                     if let Some(cat) = &self.catalog {
                         let start = job.start_time;
                         if let Err(e) = cat.raw_query(&format!(
-                            "UPDATE Job SET JobStatus='{}',StartTime=to_timestamp({start}),JobTDate={start} WHERE JobId={id}",
-                            job.observed_status)) {
+                            "UPDATE Job SET JobStatus='{}',StartTime='{}',JobTDate={start} WHERE JobId={id}",
+                            job.observed_status, crate::job_messages::bstrutime(start))) {
                             warn!("Job {id}: UpdateJobStartRecord: {e}");
                         }
                     }
@@ -1138,8 +1138,8 @@ fn run_internal_job(job: &mut DirJob, kind: crate::internal_jobs::Kind, params: 
         let start = job.start_time;
         let pool = outcome.pool_id.as_deref().map(|p| format!(",PoolId={p}")).unwrap_or_default();
         if let Err(e) = cat.raw_query(&format!(
-            "UPDATE Job SET JobStatus='{}',StartTime=to_timestamp({start}),JobTDate={start}{pool} WHERE JobId={id}",
-            job.observed_status)) {
+            "UPDATE Job SET JobStatus='{}',StartTime='{}',JobTDate={start}{pool} WHERE JobId={id}",
+            job.observed_status, crate::job_messages::bstrutime(start))) {
             warn!("Job {id}: UpdateJobStartRecord: {e}");
         }
     }

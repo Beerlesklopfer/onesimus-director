@@ -563,9 +563,10 @@ pub fn cleanup(director: &str, catalog: Option<&CatalogHandle>, job_id: u32, end
         let now = end.end_time;
         // UpdateJobEnd(jcr)
         let _ = cat.execute(&format!(
-            "UPDATE Job SET JobStatus='{status}',EndTime=to_timestamp({now}),JobBytes=0,ReadBytes=0,JobFiles=0,\
-             JobErrors={},VolSessionId={vol_id},VolSessionTime={vol_time},PoolId={},RealEndTime=to_timestamp({now}) \
-             WHERE JobId={job_id}", end.job_errors, if info.next_pool_id.is_empty() { "0" } else { &info.next_pool_id }));
+            "UPDATE Job SET JobStatus='{status}',EndTime='{t}',JobBytes=0,ReadBytes=0,JobFiles=0,\
+             JobErrors={},VolSessionId={vol_id},VolSessionTime={vol_time},PoolId={},RealEndTime='{t}' \
+             WHERE JobId={job_id}", end.job_errors, if info.next_pool_id.is_empty() { "0" } else { &info.next_pool_id },
+             t = job_messages::bstrutime(now)));
         if info.new_job_id.is_some() {
             let _ = cat.execute(&format!("UPDATE Job SET priorjobid='{new}' WHERE JobId={job_id}"));
             let mig_status = if status == 'T' && (end.job_errors > 0 || end.sd_errors > 0) { 'W' } else { status };
@@ -578,10 +579,10 @@ pub fn cleanup(director: &str, catalog: Option<&CatalogHandle>, job_id: u32, end
             };
             // UpdateJobEnd(mig_jcr)
             let _ = cat.execute(&format!(
-                "UPDATE Job SET JobStatus='{mig_status}',EndTime=to_timestamp({now}),JobBytes={sd_bytes},ReadBytes=0,\
+                "UPDATE Job SET JobStatus='{mig_status}',EndTime='{t}',JobBytes={sd_bytes},ReadBytes=0,\
                  JobFiles={sd_files},JobErrors=0,VolSessionId={vol_id},VolSessionTime={vol_time},\
-                 RealEndTime=to_timestamp({now}),PriorJobId={old},HasBase={hb},PurgedFiles={pf} WHERE JobId={new}",
-                hb = num(&info.prev.has_base), pf = num(&info.prev.purged_files)));
+                 RealEndTime='{t}',PriorJobId={old},HasBase={hb},PurgedFiles={pf} WHERE JobId={new}",
+                hb = num(&info.prev.has_base), pf = num(&info.prev.purged_files), t = job_messages::bstrutime(now)));
             let _ = cat.execute(&format!("UPDATE Job SET StartTime='{}',EndTime='{}',JobTDate={} WHERE JobId={new}",
                 info.prev.start_time, info.prev.end_time, if info.prev.job_tdate.is_empty() { "0" } else { &info.prev.job_tdate }));
             if matches!(status, 'T' | 'W') {
