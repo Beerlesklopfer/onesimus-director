@@ -18,6 +18,7 @@ mod command_queue;
 mod command_registry;
 mod commands;
 mod config_check;
+mod consolidate;
 mod command_worker;
 mod expand;
 mod connection_monitor;

@@ -1,7 +1,7 @@
 //! Jobs the Director runs itself without daemon contact (Compatibility log
 //! C-058): the selection of a Copy/Migrate control job (migrate.cc
-//! DoMigrationSelection/getJobs_to_migrate) and a Consolidate job without
-//! Always Incremental jobs (consolidate.cc DoConsolidate). The JobManager
+//! DoMigrationSelection/getJobs_to_migrate) and a Consolidate job
+//! (consolidate.cc DoConsolidate, consolidate.rs). The JobManager
 //! runs them when the job leaves the job queue (job_thread); the end of the
 //! job (UpdateJobEnd and the report) is the JobManager's as for workers.
 
@@ -194,6 +194,15 @@ pub fn run(config: &DirectorConfig, catalog: Option<&CatalogHandle>, request: &R
             // the Always Incremental jobs (refused before the job was queued).
             out.messages.push((MsgType::Info,
                 format!("Start Consolidate JobId {}, Job={}\n", request.job_id, request.unique_job)));
+            if let Some(catalog) = catalog {
+                if !crate::consolidate::consolidate_jobs(config, catalog, request, &mut out) {
+                    out.status = 'E';
+                }
+            }
+            // Jmsg(M_FATAL) sets JS_FatalError, which the end keeps.
+            if out.messages.iter().any(|(t, _)| *t == MsgType::Fatal) {
+                out.status = 'f';
+            }
         }
         Kind::Copy | Kind::Migrate => {
             let Some(catalog) = catalog else {

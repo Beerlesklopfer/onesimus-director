@@ -716,6 +716,7 @@ mod tests {
             trigger: "Scheduler".into(),
             expected_files: None,
             selected: false,
+            vf: None,
         }
     }
 
