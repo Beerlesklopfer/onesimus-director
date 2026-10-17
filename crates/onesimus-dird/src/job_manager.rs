@@ -344,6 +344,14 @@ impl JobManager {
         // StartServer(): a server thread started for this job runs the
         // jobs already in the ready queue at once (jobq.cc).
         for id in &self.ready { self.ready_at.remove(id); }
+        // sched_wait() of an earlier job has posted its "waiting" message
+        // by the time a later job is set up.
+        let earlier: Vec<(u32, String)> = std::mem::take(&mut self.wait_messages).into_iter().map(|m| (m.0, m.2)).collect();
+        for (id, text) in earlier {
+            let name = self.get_job(id).map(|j| j.job_name.clone()).unwrap_or_default();
+            crate::console_msg::post_job_message(&self.bus, self.config.as_ref(), BusMessage::JobMessage {
+                job_id: id, job_name: name, msg_type: crate::message_bus::MsgType::Info, text, timestamp: now_unix() });
+        }
         if self.admit_job(job_id, flags) {
             // JobqAdd() of a canceled job: to the front of the ready queue.
             if let Some(job) = self.jobs.iter_mut().find(|j| j.job_id == job_id) { job.observed_status = 'A'; }
@@ -538,6 +546,9 @@ impl JobManager {
                 let name = job.job_name.clone();
                 self.post_start_fatals(id, &name, start_fatals);
                 let Some(job) = self.jobs.iter_mut().find(|j| j.job_id == id) else { continue };
+                // job_thread(): jcr->start_time = time(NULL) for a canceled job too.
+                job.start_time = now_unix();
+                if let Some(report) = job.jcr.report.as_mut() { report.start_time = job.start_time; }
                 job.pending_end = Some(JobEnd { term_code: b'A' as i32, files: 0, bytes: 0, errors: 0,
                     vol_session_id: 0, vol_session_time: 0 });
                 job.worker_exit = Some(0);
