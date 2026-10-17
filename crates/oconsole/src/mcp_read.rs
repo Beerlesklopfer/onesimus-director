@@ -12,13 +12,17 @@
 //! Under the JSON API the Director never asks for input, so a missing or
 //! unknown name comes back as a JSON error instead of a selection list.
 //!
-//! These tools exist in every build (production and development).
+//! These tools exist in every build (production and development) and on
+//! every transport. Over gRPC each tool first calls its typed DirectorApi
+//! RPC (mcp_typed.rs; result = the typed response as JSON); the console
+//! line above is the route over BNET and the fallback.
 
 use serde_json::{Value, json};
 
 use std::sync::Mutex;
 
 use crate::mcp::{CommandRunner, run_plain, tool_result};
+use crate::mcp_typed::{self, Outcome};
 
 mod ovfs;
 pub(crate) mod query;
@@ -45,13 +49,22 @@ pub fn call<R: CommandRunner>(
             Ok(command) => runner
                 .lock()
                 .map_err(|_| (-32603, "Director runner unavailable".to_string()))
-                .map(|mut runner| run(&mut *runner, &command)),
+                .map(|mut runner| match typed(&mut *runner, name, arguments) {
+                    Some(result) => result,
+                    None => run(&mut *runner, &command),
+                }),
             Err(msg) => Ok(tool_result(&msg, true)),
         });
     }
     if name.starts_with("ovfs_") {
         return match ovfs::command(name, arguments) {
-            Ok(Some(command)) => Some(run_plain(runner, &command)),
+            Ok(Some(command)) => {
+                let typed_result = runner.lock().ok().and_then(|mut r| typed(&mut *r, name, arguments));
+                Some(match typed_result {
+                    Some(result) => Ok(result),
+                    None => run_plain(runner, &command),
+                })
+            }
             Ok(None) => None,
             Err(msg) => Some(Ok(tool_result(&msg, true))),
         };
@@ -78,6 +91,30 @@ pub fn call<R: CommandRunner>(
         )));
     }
     Some(run_plain(runner, command))
+}
+
+/// The typed DirectorApi result of a tool whose arguments were accepted;
+/// `None`: use the console line (BNET, UNIMPLEMENTED, unmapped argument).
+fn typed<R: CommandRunner + ?Sized>(runner: &mut R, name: &str, arguments: &Value) -> Option<Value> {
+    let (rpc, request) = mcp_typed::request(name, arguments)?;
+    match mcp_typed::call(runner, rpc, &request) {
+        Outcome::Done(result) => Some(result),
+        Outcome::Fallback => None,
+    }
+}
+
+/// The console line of a typed or OVFS read tool (coverage test).
+#[cfg(test)]
+pub fn console_line(name: &str, arguments: &Value) -> Option<Result<String, String>> {
+    if let Some(built) = command(name, arguments) {
+        return Some(built.map(|c| c.line));
+    }
+    ovfs::command(name, arguments).transpose()
+}
+
+/// Whether `name` is a read tool (query, ovfs_*, typed).
+pub fn is_tool(name: &str) -> bool {
+    name == "query" || ovfs::tools().iter().any(|t| t["name"] == name) || tools_names().contains(&name)
 }
 
 /// One checked command line and how to run it.
@@ -260,6 +297,13 @@ fn boolean(description: &str) -> Value {
     json!({ "type": "boolean", "description": description })
 }
 
+const DOT_STATUS_KEYWORDS: &[&str] = &[
+    "current", "last", "header", "scheduled", "running", "terminated", "waitreservation", "devices", "volumes", "spooling",
+];
+const DOT_LISTS: &[&str] = &[
+    "catalogs", "consoles", "users", "jobdefs", "profiles", "locations", "media", "mediatypes", "volstatus", "actiononpurge",
+];
+
 const LONG: &str = "true: llist (all fields of every record) instead of list";
 
 /// The typed read-only tools for tools/list.
@@ -328,13 +372,17 @@ pub fn tools() -> Vec<Value> {
                 "pool": string("only volumes of this pool"),
                 "jobid": integer(1, i64::MAX, "only the volumes this job used"),
                 "volume": string("one volume by name"),
+                "volumeid": integer(1, i64::MAX, "one volume by MediaId (list volumeid=)"),
+                "mediaid": integer(1, i64::MAX, "one volume by MediaId (list mediaid=)"),
+                "media": boolean("use the alias 'list media' / 'media=' instead of volumes / volume="),
                 "all": boolean("all volumes in one table"),
                 "count": boolean("only the number of volumes"),
                 "long": boolean(LONG),
             }), &page), &[], true),
         tool("list_pools", "List pools",
             "Pool records from the catalog (list pools), or one pool with its prune details.",
-            props(json!({ "pool": string("one pool by name"), "long": boolean(LONG) })), &[], true),
+            props(json!({ "pool": string("one pool by name"), "poolid": integer(1, i64::MAX, "one pool by PoolId"),
+                "long": boolean(LONG) })), &[], true),
         tool("list_clients", "List clients",
             "Client records from the catalog (list clients), or one client.",
             props(json!({ "client": string("one client by name"), "long": boolean(LONG) })), &[], true),
@@ -373,6 +421,15 @@ pub fn tools() -> Vec<Value> {
                 "job": string("job name"),
                 "days": integer(0, 50, "days ahead (at most 50)"),
             })), &["job"], false),
+        tool("list_basefiles", "Base files of a job",
+            "Files a job took from its Base job (list basefiles).",
+            props(json!({ "jobid": integer(1, i64::MAX, "JobId"), "ujobid": string("unique job name") })), &[], true),
+        tool("list_jobstatistics", "Statistics of a job",
+            "Statistics samples of one job (list jobstatistics jobid=).",
+            props(json!({ "jobid": integer(1, i64::MAX, "JobId") })), &["jobid"], true),
+        tool("list_log", "Director log from the catalog",
+            "Log records of the catalog (list log), optionally of one client, newest first with reverse.",
+            with(json!({ "client": string("only this client"), "reverse": boolean("newest first") }), &page), &[], true),
         tool("show", "Show configuration resources",
             "Resources as configured in the Director (show). resource with name: one resource; \
              without name: all of that type; 'all': everything; 'disabled': disabled jobs, \
@@ -389,6 +446,20 @@ pub fn tools() -> Vec<Value> {
         tool("status_director", "Director status",
             "Director status: header, scheduled, running and terminated jobs, client connections (status director).",
             props(json!({ "days": integer(0, 500, "days of scheduled jobs, default 1") })), &[], true),
+        tool("status_all", "Status of all daemons",
+            "Status of the Director, every storage and every client (status all). Contacts the daemons.",
+            props(json!({})), &[], true),
+        tool("status_job", "Status of a job resource",
+            "Status of one job resource: running and scheduled runs (status job=), as text.",
+            props(json!({ "job": string("job name") })), &["job"], false),
+        tool("dot_status", "Machine status of a daemon",
+            "Short status for programs (.status): target dir with keyword current/last/header/scheduled/running/terminated; \
+             client=<name> with header/terminated/running; storage=<name> with header/waitreservation/devices/volumes/spooling/running/terminated.",
+            props(json!({
+                "target": { "type": "string", "enum": ["dir", "client", "storage"], "description": "which daemon" },
+                "name": string("client or storage name (target client/storage)"),
+                "keyword": { "type": "string", "enum": DOT_STATUS_KEYWORDS, "description": "which part" },
+            })), &["target", "keyword"], true),
         tool("status_client", "File daemon status",
             "Status report of one File Daemon (status client=), as text. Contacts the client.",
             props(json!({ "client": string("client name") })), &["client"], false),
@@ -422,7 +493,31 @@ pub fn tools() -> Vec<Value> {
             "Returns the console's queued Director messages (job reports, warnings). \
              Reading empties the queue.",
             props(json!({})), &[], true),
+        tool("dot_messages", "Pending messages (.messages)",
+            "The console's queued Director messages in the dot form (.messages). Reading empties the queue.",
+            props(json!({})), &[], true),
         tool("version", "Director version", "Version of the Director (version).", props(json!({})), &[], true),
+        tool("whoami", "Console name", "Name of the console of this session (whoami).", props(json!({})), &[], true),
+        tool("memory", "Director memory", "Memory and header information of the Director (memory).", props(json!({})), &[], true),
+        tool("dot_noop", "No operation", "Does nothing (the '.' command); checks that the session answers.",
+            props(json!({})), &[], true),
+        tool("help", "Command help", "Help of all console commands or of one (help [command]).",
+            props(json!({ "command": string("command name, e.g. list") })), &[], true),
+        tool("dot_help", "Command help for programs",
+            "Command list and arguments for programs (.help [all] [item=<cmd>] [full]).",
+            props(json!({ "all": boolean("all commands"), "item": string("one command"), "full": boolean("all arguments") })), &[], true),
+        tool("resolve", "Resolve a host name",
+            "Resolve a host name on the Director, a client or a storage daemon (resolve).",
+            props(json!({ "hostname": string("host name"), "client": string("resolve on this client"),
+                "storage": string("resolve on this storage daemon") })), &["hostname"], false),
+        tool("var_expand", "Expand variables",
+            "Expand Director variables and counters in a text (var), e.g. ${Year}. Counters are incremented.",
+            props(json!({ "text": string("text with variables") })), &["text"], false),
+        tool("estimate", "Estimate a backup",
+            "Files and bytes a backup of the job would save (estimate); asks the client. listing: also the file names.",
+            props(json!({ "job": string("job name"), "client": string("client override"), "fileset": string("FileSet override"),
+                "level": { "type": "string", "enum": ["Full", "Incremental", "Differential"], "description": "level" },
+                "accurate": boolean("accurate mode"), "listing": boolean("list the files") })), &["job"], false),
         tool("time", "Director time", "Current time on the Director (time).", props(json!({})), &[], true),
         tool("dot_jobs", "Job names",
             "Names of the configured jobs (.jobs).",
@@ -453,6 +548,40 @@ pub fn tools() -> Vec<Value> {
                     "description": "resource type, default job" },
                 "name": string("resource name"),
             })), &["name"], true),
+        tool("dot_list", "Further name lists",
+            "Names for programs: catalogs, consoles, users, jobdefs, profiles, locations, media (volume names), \
+             mediatypes, volstatus (volume states), actiononpurge (.catalogs, .consoles, …).",
+            props(json!({ "kind": { "type": "string", "enum": DOT_LISTS, "description": "which list" } })), &["kind"], true),
+        tool("dot_authorized", "ACL check",
+            "Whether this console may use a resource or command (.authorized job=…, cmd=…). Give exactly one.",
+            props(json!({ "job": string("job"), "client": string("client"), "storage": string("storage"),
+                "schedule": string("schedule"), "pool": string("pool"), "cmd": string("command"),
+                "fileset": string("FileSet"), "catalog": string("catalog") })), &[], true),
+        tool("sql_meta", "Catalog tables",
+            "Catalog metadata (Onesimus .sqltables / .sqlcount / .sqlschema): tables, row counts or columns.",
+            props(json!({ "kind": { "type": "string", "enum": ["tables", "count", "schema"], "description": "what" },
+                "table": string("one table (count, schema)"), "catalog": string("catalog") })), &["kind"], true),
+        tool("acl_list", "Console ACLs", "ACLs of a console (Onesimus .acl list).",
+            props(json!({ "console": string("console; default: this one") })), &[], true),
+        tool("profile_list", "Profiles", "Profiles with their ACLs (Onesimus .profile list).", props(json!({})), &[], true),
+        tool("bvfs_get_jobids", "BVFS job chain",
+            "JobIds needed to restore a job (Full + Diff + Incrementals; .bvfs_get_jobids).",
+            props(json!({ "jobid": integer(1, i64::MAX, "JobId"), "ujobid": string("unique job name"),
+                "all": boolean("all jobs of the FileSet, not only the chain") })), &[], true),
+        tool("bvfs_lsdirs", "BVFS directories",
+            "Directories of a path in the BVFS cache (.bvfs_lsdirs); run bvfs_update first.",
+            with(json!({ "jobids": { "type": "array", "items": { "type": "integer", "minimum": 1 }, "minItems": 1, "description": "JobIds" },
+                "path": string("path, e.g. /etc/"), "pathid": integer(1, i64::MAX, "PathId instead of path") }), &page),
+            &["jobids"], true),
+        tool("bvfs_lsfiles", "BVFS files",
+            "Files of a path in the BVFS cache (.bvfs_lsfiles).",
+            with(json!({ "jobids": { "type": "array", "items": { "type": "integer", "minimum": 1 }, "minItems": 1, "description": "JobIds" },
+                "path": string("path, e.g. /etc/"), "pathid": integer(1, i64::MAX, "PathId instead of path") }), &page),
+            &["jobids"], true),
+        tool("bvfs_versions", "BVFS versions of a file",
+            "All versions of a file of a client (.bvfs_versions).",
+            props(json!({ "client": string("client"), "pathid": integer(1, i64::MAX, "PathId"), "filename": string("file name"),
+                "copies": boolean("include copies"), "versions": boolean("all versions") })), &["client", "pathid", "filename"], true),
         tool("dot_jobstatus", "Job status codes",
             "Job status codes with their meaning (.jobstatus), or one code.",
             props(json!({ "code": { "type": "string", "minLength": 1, "maxLength": 1,
@@ -490,6 +619,10 @@ fn tools_names() -> &'static [&'static str] {
         "status_configuration", "messages", "version", "time", "dot_jobs", "dot_clients",
         "dot_pools", "dot_storages", "dot_filesets", "dot_schedule", "dot_levels", "dot_types",
         "dot_msgs", "dot_defaults", "dot_jobstatus",
+        "list_basefiles", "list_jobstatistics", "list_log", "status_all", "status_job", "dot_status",
+        "dot_messages", "whoami", "memory", "dot_noop", "help", "dot_help", "resolve", "var_expand", "estimate",
+        "dot_list", "dot_authorized", "sql_meta", "acl_list", "profile_list", "bvfs_get_jobids", "bvfs_lsdirs",
+        "bvfs_lsfiles", "bvfs_versions",
     ]
 }
 
@@ -575,15 +708,23 @@ fn build(tool: &str, a: &Args) -> Result<ReadCommand, String> {
             let verb = verb(a)?;
             let pool = a.name("pool")?;
             let jobid = a.int("jobid", 1, i64::MAX)?;
-            let volume = a.name("volume")?;
+            let media = a.flag("media")?;
+            let volume = if media { a.name_as("volume", "media")? } else { a.name("volume")? };
+            let volumeid = a.int("volumeid", 1, i64::MAX)?;
+            let mediaid = a.int("mediaid", 1, i64::MAX)?;
             let all = a.flag("all")?;
-            if [pool.is_some(), jobid.is_some(), volume.is_some(), all].iter().filter(|b| **b).count() > 1 {
-                return Err("give at most one of pool, jobid, volume, all".into());
+            if [pool.is_some(), jobid.is_some(), volume.is_some(), volumeid.is_some(), mediaid.is_some(), all]
+                .iter().filter(|b| **b).count() > 1 {
+                return Err("give at most one of pool, jobid, volume, volumeid, mediaid, all".into());
             }
             if let Some(volume) = volume {
                 parts.push(format!("{verb} {volume}"));
+            } else if let Some(id) = volumeid {
+                parts.push(format!("{verb} volumeid={id}"));
+            } else if let Some(id) = mediaid {
+                parts.push(format!("{verb} mediaid={id}"));
             } else {
-                parts.push(format!("{verb} volumes"));
+                parts.push(format!("{verb} {}", if media { "media" } else { "volumes" }));
                 parts.extend(pool);
                 parts.extend(jobid.map(|id| format!("jobid={id}")));
                 if all { parts.push("all".into()); }
@@ -592,9 +733,11 @@ fn build(tool: &str, a: &Args) -> Result<ReadCommand, String> {
             page(a, &mut parts)?;
             parts.join(" ")
         }
-        "list_pools" => match a.name("pool")? {
-            Some(pool) => format!("{} {pool}", verb(a)?),
-            None => format!("{} pools", verb(a)?),
+        "list_pools" => match (a.name("pool")?, a.int("poolid", 1, i64::MAX)?) {
+            (Some(_), Some(_)) => return Err("give pool or poolid, not both".into()),
+            (Some(pool), None) => format!("{} {pool}", verb(a)?),
+            (None, Some(id)) => format!("{} poolid={id}", verb(a)?),
+            (None, None) => format!("{} pools", verb(a)?),
         },
         "list_clients" => match a.name("client")? {
             Some(client) => format!("{} {client}", verb(a)?),
@@ -756,6 +899,159 @@ fn build(tool: &str, a: &Args) -> Result<ReadCommand, String> {
             let name = a.name_as("name", &kind)?.ok_or("name is required")?;
             format!(".defaults {name}")
         }
+        "list_basefiles" => {
+            parts.push("list basefiles".into());
+            job_ref(a, &mut parts, true)?;
+            parts.join(" ")
+        }
+        "list_jobstatistics" => format!("list jobstatistics jobid={}", a.int("jobid", 1, i64::MAX)?.ok_or("jobid is required")?),
+        "list_log" => {
+            parts.push("list log".into());
+            parts.extend(a.name("client")?);
+            if a.flag("reverse")? { parts.push("reverse".into()); }
+            page(a, &mut parts)?;
+            parts.join(" ")
+        }
+        "status_all" => "status all".into(),
+        "status_job" => {
+            json = false;
+            format!("status {}", a.required_name("job")?)
+        }
+        "dot_status" => {
+            let target = a.choice("target", &["dir", "client", "storage"])?.ok_or("target is required")?;
+            let keyword = a.choice("keyword", DOT_STATUS_KEYWORDS)?.ok_or("keyword is required")?;
+            let allowed: &[&str] = match target.as_str() {
+                "dir" => &["current", "last", "header", "scheduled", "running", "terminated"],
+                "client" => &["header", "terminated", "running"],
+                _ => &["header", "waitreservation", "devices", "volumes", "spooling", "running", "terminated"],
+            };
+            if !allowed.contains(&keyword.as_str()) {
+                return Err(format!("keyword for {target}: one of {}", allowed.join(", ")));
+            }
+            if target == "dir" {
+                if a.get("name").is_some() { return Err("name only for client or storage".into()); }
+                format!(".status dir {keyword}")
+            } else {
+                json = false;
+                format!(".status {} {keyword}", a.name_as("name", &target)?.ok_or("name is required")?)
+            }
+        }
+        "dot_messages" => ".messages".into(),
+        "whoami" => "whoami".into(),
+        "memory" => "memory".into(),
+        "dot_noop" => ".".into(),
+        "help" => match a.get("command") {
+            None => "help".into(),
+            Some(Value::String(c)) if !c.is_empty() && c.chars().all(|c| c.is_ascii_lowercase() || c == '.' || c == '_') => format!("help {c}"),
+            Some(_) => return Err("command must be a command name".into()),
+        },
+        "dot_help" => {
+            parts.push(".help".into());
+            if a.flag("all")? { parts.push("all".into()); }
+            match a.get("item") {
+                None => {}
+                Some(Value::String(c)) if !c.is_empty() && c.chars().all(|c| c.is_ascii_lowercase() || c == '.' || c == '_') => parts.push(format!("item={c}")),
+                Some(_) => return Err("item must be a command name".into()),
+            }
+            if a.flag("full")? { parts.push("full".into()); }
+            parts.join(" ")
+        }
+        "resolve" => {
+            json = false;
+            parts.push("resolve".into());
+            let (client, storage) = (a.name("client")?, a.name("storage")?);
+            if client.is_some() && storage.is_some() { return Err("give client or storage, not both".into()); }
+            parts.extend(client);
+            parts.extend(storage);
+            match a.get("hostname") {
+                Some(Value::String(h)) if !h.is_empty() && h.chars().all(|c| c.is_ascii_alphanumeric() || ".-:_".contains(c)) => parts.push(h.clone()),
+                _ => return Err("hostname must be a host name or address".into()),
+            }
+            parts.join(" ")
+        }
+        "var_expand" => {
+            json = false;
+            match a.get("text") {
+                Some(Value::String(t)) if !t.is_empty() && !t.chars().any(|c| c.is_control() || c == '"' || c == ';') => format!("var {t}"),
+                _ => return Err("text must be a single line without '\"' or ';'".into()),
+            }
+        }
+        "estimate" => {
+            json = false;
+            parts.push("estimate".into());
+            parts.push(a.required_name("job")?);
+            parts.extend(a.name("client")?);
+            parts.extend(a.name("fileset")?);
+            parts.extend(a.choice("level", &["Full", "Incremental", "Differential"])?.map(|l| format!("level={l}")));
+            if let Some(Value::Bool(v)) = a.get("accurate") { parts.push(format!("accurate={}", if *v { "yes" } else { "no" })); }
+            if a.flag("listing")? { parts.push("listing".into()); }
+            parts.join(" ")
+        }
+        "dot_list" => format!(".{}", a.choice("kind", DOT_LISTS)?.ok_or("kind is required")?),
+        "dot_authorized" => {
+            let keys = ["job", "client", "storage", "schedule", "pool", "cmd", "fileset", "catalog"];
+            let given: Vec<&str> = keys.iter().copied().filter(|k| a.get(k).is_some()).collect();
+            let [key] = given.as_slice() else { return Err(format!("give exactly one of {}", keys.join(", "))) };
+            if *key == "cmd" {
+                match a.get("cmd") {
+                    Some(Value::String(c)) if !c.is_empty() && c.chars().all(|c| c.is_ascii_lowercase() || c == '.' || c == '_') => format!(".authorized cmd={c}"),
+                    _ => return Err("cmd must be a command name".into()),
+                }
+            } else {
+                format!(".authorized {}", a.required_name(key)?)
+            }
+        }
+        "sql_meta" => {
+            let kind = a.choice("kind", &["tables", "count", "schema"])?.ok_or("kind is required")?;
+            parts.push(format!(".sql{kind}"));
+            if kind == "tables" && a.get("table").is_some() { return Err("table not with kind tables".into()); }
+            parts.extend(a.name("table")?);
+            parts.extend(a.name("catalog")?);
+            parts.join(" ")
+        }
+        "acl_list" => {
+            parts.push(".acl list".into());
+            parts.extend(a.name("console")?);
+            parts.join(" ")
+        }
+        "profile_list" => ".profile list".into(),
+        "bvfs_get_jobids" => {
+            parts.push(".bvfs_get_jobids".into());
+            job_ref(a, &mut parts, true)?;
+            if a.flag("all")? { parts.push("all".into()); }
+            parts.join(" ")
+        }
+        "bvfs_lsdirs" | "bvfs_lsfiles" => {
+            parts.push(format!(".{tool}"));
+            let ids = match a.get("jobids") {
+                Some(Value::Array(ids)) if !ids.is_empty() => ids.iter()
+                    .map(|v| v.as_i64().filter(|n| *n > 0).map(|n| n.to_string()))
+                    .collect::<Option<Vec<_>>>().ok_or("jobids must be positive integers")?,
+                _ => return Err("jobids is required".into()),
+            };
+            parts.push(format!("jobid={}", ids.join(",")));
+            match (a.get("path"), a.int("pathid", 1, i64::MAX)?) {
+                (Some(Value::String(p)), None) if !p.chars().any(|c| c.is_control()) =>
+                    parts.push(format!("path=\"{}\"", p.replace('\\', "\\\\").replace('"', "\\\""))),
+                (None, Some(id)) => parts.push(format!("pathid={id}")),
+                _ => return Err("give path or pathid".into()),
+            }
+            page(a, &mut parts)?;
+            parts.join(" ")
+        }
+        "bvfs_versions" => {
+            parts.push(".bvfs_versions jobid=0".into());
+            parts.push(a.required_name("client")?);
+            parts.push(format!("pathid={}", a.int("pathid", 1, i64::MAX)?.ok_or("pathid is required")?));
+            match a.get("filename") {
+                Some(Value::String(f)) if !f.is_empty() && !f.chars().any(|c| c.is_control()) =>
+                    parts.push(format!("filename=\"{}\"", f.replace('\\', "\\\\").replace('"', "\\\""))),
+                _ => return Err("filename is required".into()),
+            }
+            if a.flag("copies")? { parts.push("copies".into()); }
+            if a.flag("versions")? { parts.push("versions".into()); }
+            parts.join(" ")
+        }
         "dot_jobstatus" => match a.get("code") {
             None => ".jobstatus".into(),
             Some(Value::String(c)) if c.chars().count() == 1 && c.chars().all(|c| c.is_ascii_alphabetic()) => {
@@ -832,11 +1128,20 @@ mod tests {
             let mut args = json!({});
             for key in t["inputSchema"]["required"].as_array().unwrap() {
                 let key = key.as_str().unwrap();
-                args[key] = json!(if key == "resource" { "job" } else { "bareos-fd" });
+                let schema = &t["inputSchema"]["properties"][key];
+                args[key] = match schema["type"].as_str() {
+                    Some("integer") => json!(1),
+                    Some("array") => json!([1]),
+                    _ if key == "resource" => json!("job"),
+                    _ if schema["enum"].is_array() => schema["enum"][0].clone(),
+                    _ => json!("bareos-fd"),
+                };
             }
-            if ["list_job", "list_joblog", "list_files"].contains(&name) {
+            if ["list_job", "list_joblog", "list_files", "list_basefiles", "bvfs_get_jobids"].contains(&name) {
                 args["jobid"] = json!(1);
             }
+            if name == "dot_authorized" { args["job"] = json!("j"); }
+            if name.starts_with("bvfs_ls") { args["path"] = json!("/"); }
             assert!(command(name, &args).unwrap().is_ok(), "{name}");
         }
         assert!(command("query", &json!({})).is_none());

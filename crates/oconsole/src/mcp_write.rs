@@ -1,9 +1,16 @@
-//! Typed write and restore MCP tools (S-31).
+//! Typed write and restore MCP tools (S-31, S-36).
 //!
-//! Compiled only into the development build (`--no-default-features
-//! --features mcp-development`, see main.rs) and offered only with
-//! `--mcp-allow-write`. The production build contains none of these tools:
-//! their names are unknown there and refused like any unknown tool.
+//! Offered with write access (C-087): local stdio in every build (unless
+//! `--mcp-read-only`), Streamable HTTP only in the development build with
+//! `--mcp-allow-write`. The generic `execute` exists only in the development
+//! build. Further write tools for the remaining commands (add, create,
+//! export/import/move, update slots/job/stats, sqlquery, query, .sql, .bvfs_*,
+//! .acl/.profile changes, configure delete/update, use, setdevice, session
+//! options) are in mcp_write/admin.rs; the restore file selection in mcp_tree.rs.
+//!
+//! Route: over gRPC the typed DirectorApi RPC (mcp_typed.rs); a Director
+//! that answers UNIMPLEMENTED (production build) gets the console line via
+//! ExecuteCommand; over BNET the console line with its dialog.
 //!
 //! Every tool builds exactly one non-interactive bconsole command line
 //! (`… yes` where the command knows it) from typed, validated arguments, so
@@ -20,17 +27,38 @@ use std::sync::Mutex;
 
 use serde_json::{Map, Value, json};
 
-use crate::mcp::{CommandRunner, run_plain, tool_result};
+use crate::mcp::CommandRunner;
+#[cfg(feature = "mcp-development")]
+use crate::mcp::{run_plain, tool_result};
+#[cfg(feature = "mcp-development")]
 use crate::mcp_read::query::{command_arg, validate_command};
+use crate::mcp_typed::{self, Outcome};
 
-/// Every write tool for tools/list: the typed tools, then the generic `execute`.
+mod admin;
+
+/// Every write tool for tools/list: the typed tools, the admin tools, the
+/// restore file selection, then (development build) the generic `execute`.
 pub fn all_tools() -> Vec<Value> {
     let mut all = tools();
+    all.extend(admin::tools());
+    all.extend(crate::mcp_tree::tools());
+    #[cfg(feature = "mcp-development")]
     all.push(execute_tool());
     all
 }
 
+/// Whether `name` is a write tool of this build (for the BNET dialog guard).
+pub fn is_tool(name: &str) -> bool {
+    all_tools().iter().any(|t| t["name"] == name)
+}
+
+/// Schema of a typed write tool (tools() or admin::tools()).
+fn schema(name: &str) -> Option<Value> {
+    tools().into_iter().chain(admin::tools()).find(|t| t["name"] == name)
+}
+
 /// The generic `execute` tool: any single command line.
+#[cfg(feature = "mcp-development")]
 fn execute_tool() -> Value {
     json!({
         "name": "execute",
@@ -56,6 +84,7 @@ pub fn call<R: CommandRunner>(
     arguments: &Value,
     runner: &Mutex<R>,
 ) -> Option<Result<Value, (i64, String)>> {
+    #[cfg(feature = "mcp-development")]
     if name == "execute" {
         let command = command_arg(arguments);
         return Some(match validate_command(command) {
@@ -68,20 +97,37 @@ pub fn call<R: CommandRunner>(
         runner
             .lock()
             .map_err(|_| (-32603, "Director runner unavailable".to_string()))
-            .map(|mut runner| execute(&mut *runner, plan)),
+            .map(|mut runner| {
+                // Typed DirectorApi first (gRPC), only for valid arguments.
+                if plan.is_ok() {
+                    if let Some((rpc, request)) = mcp_typed::request(name, arguments) {
+                        if let Outcome::Done(result) = mcp_typed::call(&mut *runner, rpc, &request) {
+                            return result;
+                        }
+                    }
+                }
+                execute(&mut *runner, plan)
+            }),
     )
 }
 
-/// One Director command and the questions the tool may answer with "yes".
+/// One Director command and the questions the tool may answer.
 #[derive(Debug, PartialEq)]
 pub struct Plan {
     pub command: String,
+    /// Questions answered with "yes".
     pub yes_to: &'static [&'static str],
+    /// Further answers, used in order: (part of the question, reply); an
+    /// empty part matches any question.
+    pub answers: Vec<(&'static str, String)>,
+    /// Over ExecuteCommand (gRPC, no dialog) append this word instead of
+    /// answering (e.g. `yes` for GetConfirmation).
+    pub grpc_suffix: Option<&'static str>,
 }
 
 impl Plan {
     fn new(command: String) -> Self {
-        Self { command, yes_to: &[] }
+        Self { command, yes_to: &[], answers: Vec::new(), grpc_suffix: None }
     }
 }
 
@@ -431,11 +477,8 @@ impl<'a> Args<'a> {
 
     /// Unknown argument names are errors, not silently ignored.
     fn check_known(&self) -> Result<(), String> {
-        let tools = tools();
-        let known = tools
-            .iter()
-            .find(|t| t["name"] == self.tool)
-            .and_then(|t| t["inputSchema"]["properties"].as_object());
+        let tool = schema(self.tool);
+        let known = tool.as_ref().and_then(|t| t["inputSchema"]["properties"].as_object());
         for key in self.map.keys() {
             if !known.is_some_and(|k| k.contains_key(key)) {
                 return Err(format!("unknown argument '{key}' for {}", self.tool));
@@ -636,7 +679,7 @@ pub fn plan(tool: &str, arguments: &Value) -> Option<Result<Plan, String>> {
         "reload" => |_| Ok(Plan::new("reload".into())),
         "setdebug" => setdebug,
         "setbandwidth" => setbandwidth,
-        _ => return None,
+        _ => return admin::plan(tool, arguments),
     };
     Some(Args::new(tool, arguments).and_then(|args| {
         args.check_known()?;
@@ -1051,7 +1094,7 @@ fn purge(a: &Args) -> Result<Plan, String> {
             return Err("storage, pool, allpools and drive need action".into());
         }
     }
-    Ok(Plan { command: p.join(" "), yes_to: &["Purge (yes/no)?"] })
+    Ok(Plan { command: p.join(" "), yes_to: &["Purge (yes/no)?"], answers: Vec::new(), grpc_suffix: Some("yes") })
 }
 
 fn delete(a: &Args) -> Result<Plan, String> {
@@ -1085,6 +1128,8 @@ fn delete(a: &Args) -> Result<Plan, String> {
     Ok(Plan {
         command: p.join(" "),
         yes_to: &["Are you sure you want to delete"],
+        answers: Vec::new(),
+        grpc_suffix: None,
     })
 }
 
@@ -1186,17 +1231,30 @@ pub fn execute<R: CommandRunner + ?Sized>(runner: &mut R, plan: Result<Plan, Str
         Ok(plan) => plan,
         Err(msg) => return result(&msg, true, None),
     };
+    let command = match plan.grpc_suffix {
+        Some(word) if runner.is_grpc() => format!("{} {word}", plan.command),
+        _ => plan.command.clone(),
+    };
     let mut cancelled: Vec<String> = Vec::new();
+    let mut answers = plan.answers.iter();
     let mut answer = |output: &str| {
         let q = question(output);
         if plan.yes_to.iter().any(|p| q.contains(p)) {
-            Some("yes".to_string())
-        } else {
-            cancelled.push(q.to_string());
-            None
+            return Some("yes".to_string());
+        }
+        let next = answers.clone().next();
+        match next {
+            Some((part, reply)) if part.is_empty() || q.contains(part) => {
+                answers.next();
+                Some(reply.clone())
+            }
+            _ => {
+                cancelled.push(q.to_string());
+                None
+            }
         }
     };
-    match runner.run_dialog(&plan.command, &mut answer) {
+    match runner.run_dialog(&command, &mut answer) {
         Ok(out) => {
             let jobids = queued_jobids(&out);
             let mut text = if out.trim().is_empty() { "(no output)".to_string() } else { out };
@@ -1207,7 +1265,7 @@ pub fn execute<R: CommandRunner + ?Sized>(runner: &mut R, plan: Result<Plan, Str
                     cancelled[0]
                 ));
             }
-            text = format!("> {}\n{text}", plan.command);
+            text = format!("> {command}\n{text}");
             result(&text, !cancelled.is_empty(), (!jobids.is_empty()).then_some(jobids))
         }
         Err(e) => result(&format!("Director error: {e}"), true, None),

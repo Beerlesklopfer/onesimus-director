@@ -1717,6 +1717,7 @@ dependencies = [
  "axum 0.8.9",
  "bareos-bnet",
  "bareos-proto-rs",
+ "bytes",
  "clap",
  "crossbeam-channel",
  "hex",

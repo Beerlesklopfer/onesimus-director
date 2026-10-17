@@ -42,3 +42,4 @@ rmcp = { version = "3.5.1", default-features = false, features = ["server", "tra
 axum = "0.8"
 http-body-util = "0.1"
 rand.workspace = true
+bytes = "1"

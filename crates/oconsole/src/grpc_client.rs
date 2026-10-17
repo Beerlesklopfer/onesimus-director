@@ -27,6 +27,7 @@ pub const SESSION_HEADER: &str = "x-onesimus-session";
 
 pub struct GrpcSession {
     client: DirectorClient<Channel>,
+    channel: Channel,
     token: MetadataValue<tonic::metadata::Ascii>,
     pub director_name: String,
     pub version: String,
@@ -69,7 +70,7 @@ impl GrpcSession {
             .connect_with_connector(connector)
             .await
             .map_err(|e| anyhow::anyhow!("gRPC connect to {host}:{port} failed: {}", error_chain(&e)))?;
-        let mut client = DirectorClient::new(channel);
+        let mut client = DirectorClient::new(channel.clone());
 
         let nonce = client
             .get_challenge(ChallengeRequest { console_name: console_name.to_string() })
@@ -87,6 +88,7 @@ impl GrpcSession {
 
         Ok(Self {
             client,
+            channel,
             token: login.session_token.parse()?,
             director_name: login.director_name,
             version: login.version,
@@ -103,6 +105,60 @@ impl GrpcSession {
         req.metadata_mut().insert(SESSION_HEADER, self.token.clone());
         let resp = self.client.execute_command(req).await?.into_inner();
         Ok(CommandOutput { success: resp.success, text: resp.text_output, error: resp.error_message })
+    }
+}
+
+impl GrpcSession {
+    /// Call one RPC of the typed `DirectorApi` with an encoded request and
+    /// return the encoded response (S-36: the MCP tools encode/decode with
+    /// the descriptors of `bareos_proto_rs::typed`).
+    pub async fn call_typed(&mut self, rpc: &str, request: Vec<u8>) -> Result<Vec<u8>, tonic::Status> {
+        let mut grpc = tonic::client::Grpc::new(self.channel.clone());
+        grpc.ready().await.map_err(|e| tonic::Status::unavailable(format!("gRPC channel not ready: {e}")))?;
+        let path = format!("/{}/{rpc}", bareos_proto_rs::typed::DIRECTOR_API_SERVICE);
+        let path = tonic::codegen::http::uri::PathAndQuery::try_from(path)
+            .map_err(|e| tonic::Status::invalid_argument(format!("RPC name {rpc}: {e}")))?;
+        let mut req = tonic::Request::new(request);
+        req.metadata_mut().insert(SESSION_HEADER, self.token.clone());
+        Ok(grpc.unary(req, path, RawCodec).await?.into_inner())
+    }
+}
+
+/// Passes the protobuf wire bytes through unchanged.
+#[derive(Clone, Copy, Default)]
+struct RawCodec;
+
+impl tonic::codec::Codec for RawCodec {
+    type Encode = Vec<u8>;
+    type Decode = Vec<u8>;
+    type Encoder = RawCodec;
+    type Decoder = RawCodec;
+    fn encoder(&mut self) -> Self::Encoder {
+        RawCodec
+    }
+    fn decoder(&mut self) -> Self::Decoder {
+        RawCodec
+    }
+}
+
+impl tonic::codec::Encoder for RawCodec {
+    type Item = Vec<u8>;
+    type Error = tonic::Status;
+    fn encode(&mut self, item: Vec<u8>, dst: &mut tonic::codec::EncodeBuf<'_>) -> Result<(), tonic::Status> {
+        use bytes::BufMut;
+        dst.put_slice(&item);
+        Ok(())
+    }
+}
+
+impl tonic::codec::Decoder for RawCodec {
+    type Item = Vec<u8>;
+    type Error = tonic::Status;
+    fn decode(&mut self, src: &mut tonic::codec::DecodeBuf<'_>) -> Result<Option<Vec<u8>>, tonic::Status> {
+        use bytes::Buf;
+        let mut out = vec![0u8; src.remaining()];
+        src.copy_to_slice(&mut out);
+        Ok(Some(out))
     }
 }
 

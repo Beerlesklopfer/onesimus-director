@@ -19,8 +19,11 @@ mod grpc_client;
 mod mcp;
 mod mcp_read;
 mod mcp_mirror;
-#[cfg(feature = "mcp-development")]
 mod mcp_write;
+mod mcp_tree;
+mod mcp_typed;
+#[cfg(test)]
+mod mcp_coverage;
 mod mcp_token;
 mod rate_guard;
 
@@ -105,10 +108,15 @@ struct Cli {
     #[arg(long, requires = "mcp_http")]
     mcp_host: Vec<String>,
 
-    /// Development builds only: also offer the state-changing execute tool
+    /// Development builds only: offer the write and restore tools over
+    /// --mcp-http too (stdio offers them in every build)
     #[cfg(feature = "mcp-development")]
     #[arg(long, requires = "mcp")]
     mcp_allow_write: bool,
+
+    /// MCP: offer only the read tools, also on stdio
+    #[arg(long, requires = "mcp")]
+    mcp_read_only: bool,
 
     /// Execute single command and exit
     #[arg(short = 'e', long)]
@@ -116,11 +124,14 @@ struct Cli {
 }
 
 impl Cli {
+    /// Write and restore tools for this MCP transport (C-087): stdio unless
+    /// --mcp-read-only; HTTP only in a development build with --mcp-allow-write.
     fn mcp_write_enabled(&self) -> bool {
         #[cfg(feature = "mcp-development")]
-        { self.mcp_allow_write }
+        let allow = self.mcp_allow_write;
         #[cfg(feature = "mcp-production")]
-        { false }
+        let allow = false;
+        self.mcp && mcp::write_access(self.mcp_http.is_some(), allow, self.mcp_read_only)
     }
 }
 
@@ -400,8 +411,8 @@ fn run_bnet_session<S: std::io::Read + std::io::Write + Send + 'static>(cli: &Ef
 
     // MCP server mode
     if cli.mcp {
-        eprintln!("oconsole: serving MCP{}", if cli.mcp_allow_write { " (write access enabled)" } else { " (read-only)" });
-        mcp::McpServer::new(BnetRunner { bnet }, cli.mcp_allow_write, "bareos-dir".to_string()).serve_transport(cli.mcp_http, cli.mcp_token_file.clone(), cli.mcp_host.clone()).unwrap_or_else(|e| { eprintln!("MCP: {e}"); std::process::exit(1) });
+        eprintln!("oconsole: serving MCP{}", if cli.mcp_allow_write { " (read and write tools)" } else { " (read-only tools)" });
+        mcp::McpServer::new(BnetRunner { bnet, dialog: false }, cli.mcp_allow_write, "bareos-dir".to_string()).serve_transport(cli.mcp_http, cli.mcp_token_file.clone(), cli.mcp_host.clone()).unwrap_or_else(|e| { eprintln!("MCP: {e}"); std::process::exit(1) });
         return;
     }
 
@@ -418,6 +429,32 @@ fn run_bnet_session<S: std::io::Read + std::io::Write + Send + 'static>(cli: &Ef
 /// MCP command runner over an authenticated BNET session (api=0: response ends with EOD).
 struct BnetRunner<S: std::io::Read + std::io::Write> {
     bnet: BnetStream<S>,
+    /// A dialog (restore file selection) waits for an answer.
+    dialog: bool,
+}
+
+impl<S: std::io::Read + std::io::Write> BnetRunner<S> {
+    /// Read up to the next question (SubPrompt) or the end of the command.
+    fn read_step(&mut self) -> anyhow::Result<mcp::Dialog> {
+        let mut output = String::new();
+        loop {
+            match self.bnet.recv() {
+                Ok(BnetMessage::Data(data)) => output.push_str(&String::from_utf8_lossy(&data)),
+                Ok(BnetMessage::Signal(BnetSignal::SubPrompt)) => {
+                    self.dialog = true;
+                    return Ok(mcp::Dialog { output, waiting: true });
+                }
+                Ok(BnetMessage::Signal(BnetSignal::Eod)) | Ok(BnetMessage::Signal(BnetSignal::MainPrompt)) => {
+                    self.dialog = false;
+                    return Ok(mcp::Dialog { output, waiting: false });
+                }
+                Err(e) if is_read_timeout(&e) => continue,
+                Ok(BnetMessage::Signal(BnetSignal::Terminate)) => anyhow::bail!("Director closed the connection"),
+                Ok(BnetMessage::Signal(_)) => continue,
+                Err(e) => anyhow::bail!("connection error: {e}"),
+            }
+        }
+    }
 }
 
 impl<S: std::io::Read + std::io::Write + Send + 'static> mcp::CommandRunner for BnetRunner<S> {
@@ -425,6 +462,22 @@ impl<S: std::io::Read + std::io::Write + Send + 'static> mcp::CommandRunner for 
     /// never leaves the session waiting for input.
     fn run(&mut self, command: &str) -> anyhow::Result<String> {
         self.run_dialog(command, &mut |_| None)
+    }
+
+    fn dialog_start(&mut self, command: &str) -> anyhow::Result<mcp::Dialog> {
+        if self.dialog {
+            anyhow::bail!("a Director dialog is still open");
+        }
+        self.bnet.send_str(command)?;
+        self.read_step()
+    }
+
+    fn dialog_send(&mut self, reply: &str) -> anyhow::Result<mcp::Dialog> {
+        if !self.dialog {
+            anyhow::bail!("no Director dialog is open");
+        }
+        self.bnet.send_str(reply)?;
+        self.read_step()
     }
 
     /// Plain console: a question is the prompt text followed by
@@ -1327,9 +1380,9 @@ fn run_grpc_mode(cli: &EffCli) {
     eprintln!("Connected to Director {} {} via gRPC ({host}:{port}, TLS)", session.director_name, session.version);
 
     if cli.mcp {
-        eprintln!("oconsole: serving MCP{}", if cli.mcp_allow_write { " (write access enabled)" } else { " (read-only)" });
+        eprintln!("oconsole: serving MCP{}", if cli.mcp_allow_write { " (read and write tools)" } else { " (read-only tools)" });
         let name = session.director_name.clone();
-        let runner = GrpcRunner { rt, session };
+        let runner = GrpcRunner { rt, session, unimplemented: Default::default() };
         mcp::McpServer::new(runner, cli.mcp_allow_write, name).serve_transport(cli.mcp_http, cli.mcp_token_file.clone(), cli.mcp_host.clone()).unwrap_or_else(|e| { eprintln!("MCP: {e}"); std::process::exit(1) });
         return;
     }
@@ -1424,6 +1477,8 @@ impl DirectorConn for GrpcConn {
 struct GrpcRunner {
     rt: tokio::runtime::Runtime,
     session: grpc_client::GrpcSession,
+    /// RPCs the Director answered with UNIMPLEMENTED (asked once).
+    unimplemented: std::collections::HashSet<String>,
 }
 
 impl mcp::CommandRunner for GrpcRunner {
@@ -1443,6 +1498,24 @@ impl mcp::CommandRunner for GrpcRunner {
             anyhow::bail!("{}", out.error.trim_end());
         }
         Ok(out.text)
+    }
+
+    fn is_grpc(&self) -> bool {
+        true
+    }
+
+    fn typed_call(&mut self, rpc: &str, request: Vec<u8>) -> Option<Result<Vec<u8>, mcp::TypedError>> {
+        if self.unimplemented.contains(rpc) {
+            return Some(Err(mcp::TypedError::Unimplemented));
+        }
+        Some(match self.rt.block_on(self.session.call_typed(rpc, request)) {
+            Ok(bytes) => Ok(bytes),
+            Err(status) if status.code() == tonic::Code::Unimplemented => {
+                self.unimplemented.insert(rpc.to_string());
+                Err(mcp::TypedError::Unimplemented)
+            }
+            Err(status) => Err(mcp::TypedError::Status(format!("{:?}", status.code()), status.message().to_string())),
+        })
     }
 }
 
@@ -1511,7 +1584,7 @@ mod tests {
             frame("JobId=7\nJobStatus=OK (T)\n"),
             signal(BnetSignal::Eod),
         ];
-        let mut runner = BnetRunner { bnet: BnetStream::new(Scripted { reads: reads.into(), written: vec![] }) };
+        let mut runner = BnetRunner { bnet: BnetStream::new(Scripted { reads: reads.into(), written: vec![] }), dialog: false };
         assert_eq!(runner.run("wait jobid=7").unwrap(), "JobId=7\nJobStatus=OK (T)\n");
     }
 
@@ -1523,7 +1596,7 @@ mod tests {
             frame("Select Pool (1-2): "), signal(BnetSignal::SubPrompt),
             frame("done\n"), signal(BnetSignal::Eod),
         ];
-        let mut runner = BnetRunner { bnet: BnetStream::new(Scripted { reads: reads.into(), written: vec![] }) };
+        let mut runner = BnetRunner { bnet: BnetStream::new(Scripted { reads: reads.into(), written: vec![] }), dialog: false };
         let out = runner
             .run_dialog("purge volume=A", &mut |out| out.ends_with("Purge (yes/no)? ").then(|| "yes".to_string()))
             .unwrap();
@@ -1651,20 +1724,31 @@ mod tests {
         assert!(!cli.mcp_write_enabled());
     }
 
+    /// C-087: stdio offers the write tools in every build; --mcp-read-only
+    /// turns them off.
+    #[test]
+    fn stdio_writes_unless_read_only() {
+        assert!(Cli::parse_from(["oconsole", "--mcp"]).mcp_write_enabled());
+        assert!(!Cli::parse_from(["oconsole", "--mcp", "--mcp-read-only"]).mcp_write_enabled());
+        assert!(Cli::try_parse_from(["oconsole", "--mcp-read-only"]).is_err());
+    }
+
     #[cfg(feature = "mcp-development")]
     #[test]
     fn mcp_allow_write_requires_mcp() {
         assert!(Cli::try_parse_from(["oconsole", "--mcp-allow-write"]).is_err());
         let cli = Cli::parse_from(["oconsole", "--mcp", "--mcp-allow-write", "--grpc"]);
         assert!(cli.mcp && cli.mcp_write_enabled() && cli.grpc);
+        // HTTP: write only with the flag
+        assert!(Cli::parse_from(["oconsole", "--mcp", "--mcp-http", "127.0.0.1:9104", "--mcp-allow-write"]).mcp_write_enabled());
+        assert!(!Cli::parse_from(["oconsole", "--mcp", "--mcp-http", "127.0.0.1:9104"]).mcp_write_enabled());
     }
 
     #[cfg(feature = "mcp-production")]
     #[test]
-    fn production_has_no_write_flag() {
+    fn production_http_is_read_only() {
         assert!(Cli::try_parse_from(["oconsole", "--mcp", "--mcp-allow-write"]).is_err());
-        let cli = Cli::parse_from(["oconsole", "--mcp"]);
-        assert!(!cli.mcp_write_enabled());
+        assert!(!Cli::parse_from(["oconsole", "--mcp", "--mcp-http", "127.0.0.1:9104"]).mcp_write_enabled());
     }
 
     #[test]

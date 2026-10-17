@@ -646,6 +646,22 @@
             "type": "string",
             "description": "one volume by name"
           },
+          "volumeid": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 9223372036854775807,
+            "description": "one volume by MediaId (list volumeid=)"
+          },
+          "mediaid": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 9223372036854775807,
+            "description": "one volume by MediaId (list mediaid=)"
+          },
+          "media": {
+            "type": "boolean",
+            "description": "use the alias 'list media' / 'media=' instead of volumes / volume="
+          },
           "all": {
             "type": "boolean",
             "description": "all volumes in one table"
@@ -700,6 +716,12 @@
           "pool": {
             "type": "string",
             "description": "one pool by name"
+          },
+          "poolid": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 9223372036854775807,
+            "description": "one pool by PoolId"
           },
           "long": {
             "type": "boolean",
@@ -1132,6 +1154,125 @@
       }
     },
     {
+      "name": "list_basefiles",
+      "title": "Base files of a job",
+      "description": "Files a job took from its Base job (list basefiles).",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "jobid": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 9223372036854775807,
+            "description": "JobId"
+          },
+          "ujobid": {
+            "type": "string",
+            "description": "unique job name"
+          },
+          "format": {
+            "type": "string",
+            "enum": [
+              "json",
+              "text"
+            ],
+            "default": "json",
+            "description": "json (default): the Director's JSON API result; text: the bconsole text output"
+          }
+        },
+        "required": [],
+        "additionalProperties": false
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "list_jobstatistics",
+      "title": "Statistics of a job",
+      "description": "Statistics samples of one job (list jobstatistics jobid=).",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "jobid": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 9223372036854775807,
+            "description": "JobId"
+          },
+          "format": {
+            "type": "string",
+            "enum": [
+              "json",
+              "text"
+            ],
+            "default": "json",
+            "description": "json (default): the Director's JSON API result; text: the bconsole text output"
+          }
+        },
+        "required": [
+          "jobid"
+        ],
+        "additionalProperties": false
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "list_log",
+      "title": "Director log from the catalog",
+      "description": "Log records of the catalog (list log), optionally of one client, newest first with reverse.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "client": {
+            "type": "string",
+            "description": "only this client"
+          },
+          "reverse": {
+            "type": "boolean",
+            "description": "newest first"
+          },
+          "limit": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 1000000,
+            "description": "at most this many rows"
+          },
+          "offset": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9223372036854775807,
+            "description": "skip this many rows (with limit)"
+          },
+          "format": {
+            "type": "string",
+            "enum": [
+              "json",
+              "text"
+            ],
+            "default": "json",
+            "description": "json (default): the Director's JSON API result; text: the bconsole text output"
+          }
+        },
+        "required": [],
+        "additionalProperties": false
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false
+      }
+    },
+    {
       "name": "show",
       "title": "Show configuration resources",
       "description": "Resources as configured in the Director (show). resource with name: one resource; without name: all of that type; 'all': everything; 'disabled': disabled jobs, clients and schedules. Passwords are not shown.",
@@ -1223,6 +1364,116 @@
           }
         },
         "required": [],
+        "additionalProperties": false
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "status_all",
+      "title": "Status of all daemons",
+      "description": "Status of the Director, every storage and every client (status all). Contacts the daemons.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "format": {
+            "type": "string",
+            "enum": [
+              "json",
+              "text"
+            ],
+            "default": "json",
+            "description": "json (default): the Director's JSON API result; text: the bconsole text output"
+          }
+        },
+        "required": [],
+        "additionalProperties": false
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "status_job",
+      "title": "Status of a job resource",
+      "description": "Status of one job resource: running and scheduled runs (status job=), as text.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "job": {
+            "type": "string",
+            "description": "job name"
+          }
+        },
+        "required": [
+          "job"
+        ],
+        "additionalProperties": false
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "dot_status",
+      "title": "Machine status of a daemon",
+      "description": "Short status for programs (.status): target dir with keyword current/last/header/scheduled/running/terminated; client=<name> with header/terminated/running; storage=<name> with header/waitreservation/devices/volumes/spooling/running/terminated.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "target": {
+            "type": "string",
+            "enum": [
+              "dir",
+              "client",
+              "storage"
+            ],
+            "description": "which daemon"
+          },
+          "name": {
+            "type": "string",
+            "description": "client or storage name (target client/storage)"
+          },
+          "keyword": {
+            "type": "string",
+            "enum": [
+              "current",
+              "last",
+              "header",
+              "scheduled",
+              "running",
+              "terminated",
+              "waitreservation",
+              "devices",
+              "volumes",
+              "spooling"
+            ],
+            "description": "which part"
+          },
+          "format": {
+            "type": "string",
+            "enum": [
+              "json",
+              "text"
+            ],
+            "default": "json",
+            "description": "json (default): the Director's JSON API result; text: the bconsole text output"
+          }
+        },
+        "required": [
+          "target",
+          "keyword"
+        ],
         "additionalProperties": false
       },
       "annotations": {
@@ -1433,6 +1684,33 @@
       }
     },
     {
+      "name": "dot_messages",
+      "title": "Pending messages (.messages)",
+      "description": "The console's queued Director messages in the dot form (.messages). Reading empties the queue.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "format": {
+            "type": "string",
+            "enum": [
+              "json",
+              "text"
+            ],
+            "default": "json",
+            "description": "json (default): the Director's JSON API result; text: the bconsole text output"
+          }
+        },
+        "required": [],
+        "additionalProperties": false
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false
+      }
+    },
+    {
       "name": "version",
       "title": "Director version",
       "description": "Version of the Director (version).",
@@ -1450,6 +1728,262 @@
           }
         },
         "required": [],
+        "additionalProperties": false
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "whoami",
+      "title": "Console name",
+      "description": "Name of the console of this session (whoami).",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "format": {
+            "type": "string",
+            "enum": [
+              "json",
+              "text"
+            ],
+            "default": "json",
+            "description": "json (default): the Director's JSON API result; text: the bconsole text output"
+          }
+        },
+        "required": [],
+        "additionalProperties": false
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "memory",
+      "title": "Director memory",
+      "description": "Memory and header information of the Director (memory).",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "format": {
+            "type": "string",
+            "enum": [
+              "json",
+              "text"
+            ],
+            "default": "json",
+            "description": "json (default): the Director's JSON API result; text: the bconsole text output"
+          }
+        },
+        "required": [],
+        "additionalProperties": false
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "dot_noop",
+      "title": "No operation",
+      "description": "Does nothing (the '.' command); checks that the session answers.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "format": {
+            "type": "string",
+            "enum": [
+              "json",
+              "text"
+            ],
+            "default": "json",
+            "description": "json (default): the Director's JSON API result; text: the bconsole text output"
+          }
+        },
+        "required": [],
+        "additionalProperties": false
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "help",
+      "title": "Command help",
+      "description": "Help of all console commands or of one (help [command]).",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "command": {
+            "type": "string",
+            "description": "command name, e.g. list"
+          },
+          "format": {
+            "type": "string",
+            "enum": [
+              "json",
+              "text"
+            ],
+            "default": "json",
+            "description": "json (default): the Director's JSON API result; text: the bconsole text output"
+          }
+        },
+        "required": [],
+        "additionalProperties": false
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "dot_help",
+      "title": "Command help for programs",
+      "description": "Command list and arguments for programs (.help [all] [item=<cmd>] [full]).",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "all": {
+            "type": "boolean",
+            "description": "all commands"
+          },
+          "item": {
+            "type": "string",
+            "description": "one command"
+          },
+          "full": {
+            "type": "boolean",
+            "description": "all arguments"
+          },
+          "format": {
+            "type": "string",
+            "enum": [
+              "json",
+              "text"
+            ],
+            "default": "json",
+            "description": "json (default): the Director's JSON API result; text: the bconsole text output"
+          }
+        },
+        "required": [],
+        "additionalProperties": false
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "resolve",
+      "title": "Resolve a host name",
+      "description": "Resolve a host name on the Director, a client or a storage daemon (resolve).",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "hostname": {
+            "type": "string",
+            "description": "host name"
+          },
+          "client": {
+            "type": "string",
+            "description": "resolve on this client"
+          },
+          "storage": {
+            "type": "string",
+            "description": "resolve on this storage daemon"
+          }
+        },
+        "required": [
+          "hostname"
+        ],
+        "additionalProperties": false
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "var_expand",
+      "title": "Expand variables",
+      "description": "Expand Director variables and counters in a text (var), e.g. ${Year}. Counters are incremented.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "text": {
+            "type": "string",
+            "description": "text with variables"
+          }
+        },
+        "required": [
+          "text"
+        ],
+        "additionalProperties": false
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "estimate",
+      "title": "Estimate a backup",
+      "description": "Files and bytes a backup of the job would save (estimate); asks the client. listing: also the file names.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "job": {
+            "type": "string",
+            "description": "job name"
+          },
+          "client": {
+            "type": "string",
+            "description": "client override"
+          },
+          "fileset": {
+            "type": "string",
+            "description": "FileSet override"
+          },
+          "level": {
+            "type": "string",
+            "enum": [
+              "Full",
+              "Incremental",
+              "Differential"
+            ],
+            "description": "level"
+          },
+          "accurate": {
+            "type": "boolean",
+            "description": "accurate mode"
+          },
+          "listing": {
+            "type": "boolean",
+            "description": "list the files"
+          }
+        },
+        "required": [
+          "job"
+        ],
         "additionalProperties": false
       },
       "annotations": {
@@ -1835,6 +2369,428 @@
         },
         "required": [
           "name"
+        ],
+        "additionalProperties": false
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "dot_list",
+      "title": "Further name lists",
+      "description": "Names for programs: catalogs, consoles, users, jobdefs, profiles, locations, media (volume names), mediatypes, volstatus (volume states), actiononpurge (.catalogs, .consoles, …).",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "kind": {
+            "type": "string",
+            "enum": [
+              "catalogs",
+              "consoles",
+              "users",
+              "jobdefs",
+              "profiles",
+              "locations",
+              "media",
+              "mediatypes",
+              "volstatus",
+              "actiononpurge"
+            ],
+            "description": "which list"
+          },
+          "format": {
+            "type": "string",
+            "enum": [
+              "json",
+              "text"
+            ],
+            "default": "json",
+            "description": "json (default): the Director's JSON API result; text: the bconsole text output"
+          }
+        },
+        "required": [
+          "kind"
+        ],
+        "additionalProperties": false
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "dot_authorized",
+      "title": "ACL check",
+      "description": "Whether this console may use a resource or command (.authorized job=…, cmd=…). Give exactly one.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "job": {
+            "type": "string",
+            "description": "job"
+          },
+          "client": {
+            "type": "string",
+            "description": "client"
+          },
+          "storage": {
+            "type": "string",
+            "description": "storage"
+          },
+          "schedule": {
+            "type": "string",
+            "description": "schedule"
+          },
+          "pool": {
+            "type": "string",
+            "description": "pool"
+          },
+          "cmd": {
+            "type": "string",
+            "description": "command"
+          },
+          "fileset": {
+            "type": "string",
+            "description": "FileSet"
+          },
+          "catalog": {
+            "type": "string",
+            "description": "catalog"
+          },
+          "format": {
+            "type": "string",
+            "enum": [
+              "json",
+              "text"
+            ],
+            "default": "json",
+            "description": "json (default): the Director's JSON API result; text: the bconsole text output"
+          }
+        },
+        "required": [],
+        "additionalProperties": false
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "sql_meta",
+      "title": "Catalog tables",
+      "description": "Catalog metadata (Onesimus .sqltables / .sqlcount / .sqlschema): tables, row counts or columns.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "kind": {
+            "type": "string",
+            "enum": [
+              "tables",
+              "count",
+              "schema"
+            ],
+            "description": "what"
+          },
+          "table": {
+            "type": "string",
+            "description": "one table (count, schema)"
+          },
+          "catalog": {
+            "type": "string",
+            "description": "catalog"
+          },
+          "format": {
+            "type": "string",
+            "enum": [
+              "json",
+              "text"
+            ],
+            "default": "json",
+            "description": "json (default): the Director's JSON API result; text: the bconsole text output"
+          }
+        },
+        "required": [
+          "kind"
+        ],
+        "additionalProperties": false
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "acl_list",
+      "title": "Console ACLs",
+      "description": "ACLs of a console (Onesimus .acl list).",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "console": {
+            "type": "string",
+            "description": "console; default: this one"
+          },
+          "format": {
+            "type": "string",
+            "enum": [
+              "json",
+              "text"
+            ],
+            "default": "json",
+            "description": "json (default): the Director's JSON API result; text: the bconsole text output"
+          }
+        },
+        "required": [],
+        "additionalProperties": false
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "profile_list",
+      "title": "Profiles",
+      "description": "Profiles with their ACLs (Onesimus .profile list).",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "format": {
+            "type": "string",
+            "enum": [
+              "json",
+              "text"
+            ],
+            "default": "json",
+            "description": "json (default): the Director's JSON API result; text: the bconsole text output"
+          }
+        },
+        "required": [],
+        "additionalProperties": false
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "bvfs_get_jobids",
+      "title": "BVFS job chain",
+      "description": "JobIds needed to restore a job (Full + Diff + Incrementals; .bvfs_get_jobids).",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "jobid": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 9223372036854775807,
+            "description": "JobId"
+          },
+          "ujobid": {
+            "type": "string",
+            "description": "unique job name"
+          },
+          "all": {
+            "type": "boolean",
+            "description": "all jobs of the FileSet, not only the chain"
+          },
+          "format": {
+            "type": "string",
+            "enum": [
+              "json",
+              "text"
+            ],
+            "default": "json",
+            "description": "json (default): the Director's JSON API result; text: the bconsole text output"
+          }
+        },
+        "required": [],
+        "additionalProperties": false
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "bvfs_lsdirs",
+      "title": "BVFS directories",
+      "description": "Directories of a path in the BVFS cache (.bvfs_lsdirs); run bvfs_update first.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "jobids": {
+            "type": "array",
+            "items": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "minItems": 1,
+            "description": "JobIds"
+          },
+          "path": {
+            "type": "string",
+            "description": "path, e.g. /etc/"
+          },
+          "pathid": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 9223372036854775807,
+            "description": "PathId instead of path"
+          },
+          "limit": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 1000000,
+            "description": "at most this many rows"
+          },
+          "offset": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9223372036854775807,
+            "description": "skip this many rows (with limit)"
+          },
+          "format": {
+            "type": "string",
+            "enum": [
+              "json",
+              "text"
+            ],
+            "default": "json",
+            "description": "json (default): the Director's JSON API result; text: the bconsole text output"
+          }
+        },
+        "required": [
+          "jobids"
+        ],
+        "additionalProperties": false
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "bvfs_lsfiles",
+      "title": "BVFS files",
+      "description": "Files of a path in the BVFS cache (.bvfs_lsfiles).",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "jobids": {
+            "type": "array",
+            "items": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "minItems": 1,
+            "description": "JobIds"
+          },
+          "path": {
+            "type": "string",
+            "description": "path, e.g. /etc/"
+          },
+          "pathid": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 9223372036854775807,
+            "description": "PathId instead of path"
+          },
+          "limit": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 1000000,
+            "description": "at most this many rows"
+          },
+          "offset": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9223372036854775807,
+            "description": "skip this many rows (with limit)"
+          },
+          "format": {
+            "type": "string",
+            "enum": [
+              "json",
+              "text"
+            ],
+            "default": "json",
+            "description": "json (default): the Director's JSON API result; text: the bconsole text output"
+          }
+        },
+        "required": [
+          "jobids"
+        ],
+        "additionalProperties": false
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "bvfs_versions",
+      "title": "BVFS versions of a file",
+      "description": "All versions of a file of a client (.bvfs_versions).",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "client": {
+            "type": "string",
+            "description": "client"
+          },
+          "pathid": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 9223372036854775807,
+            "description": "PathId"
+          },
+          "filename": {
+            "type": "string",
+            "description": "file name"
+          },
+          "copies": {
+            "type": "boolean",
+            "description": "include copies"
+          },
+          "versions": {
+            "type": "boolean",
+            "description": "all versions"
+          },
+          "format": {
+            "type": "string",
+            "enum": [
+              "json",
+              "text"
+            ],
+            "default": "json",
+            "description": "json (default): the Director's JSON API result; text: the bconsole text output"
+          }
+        },
+        "required": [
+          "client",
+          "pathid",
+          "filename"
         ],
         "additionalProperties": false
       },

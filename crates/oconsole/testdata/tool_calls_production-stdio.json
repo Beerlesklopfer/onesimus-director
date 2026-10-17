@@ -16,7 +16,7 @@
         "content": [
           {
             "type": "text",
-            "text": "'delete volume=x yes' is not a read-only command. Write access is unavailable in this build or disabled."
+            "text": "'delete volume=x yes' is not a read-only command. Use the 'execute' tool."
           }
         ],
         "isError": true
@@ -129,21 +129,36 @@
       }
     },
     {
-      "error": {
-        "code": -32602,
-        "message": "unknown tool: run_job"
+      "result": {
+        "content": [
+          {
+            "type": "text",
+            "text": "> run job=Backup level=Full yes\nran run job=Backup level=Full yes\n"
+          }
+        ],
+        "isError": false
       }
     },
     {
-      "error": {
-        "code": -32602,
-        "message": "unknown tool: purge"
+      "result": {
+        "content": [
+          {
+            "type": "text",
+            "text": "purge is destructive: ask the user, then call it again with confirm=true"
+          }
+        ],
+        "isError": true
       }
     },
     {
-      "error": {
-        "code": -32602,
-        "message": "unknown tool: delete"
+      "result": {
+        "content": [
+          {
+            "type": "text",
+            "text": "> delete jobid=3\nran delete jobid=3\n"
+          }
+        ],
+        "isError": false
       }
     },
     {
@@ -161,6 +176,8 @@
     ".ovfs_versions client=\"fd\" path=\"/etc/\" name=\"passwd\" json",
     ".api json compact=yes",
     "list jobs client=fd",
-    ".api 0"
+    ".api 0",
+    "run job=Backup level=Full yes",
+    "delete jobid=3"
   ]
 }
