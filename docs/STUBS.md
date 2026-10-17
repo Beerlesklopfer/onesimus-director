@@ -19,7 +19,7 @@ Fälle ab, die echte Jobs starten können (`unsafe_job_start`).
 | S-01 | `onesimus-dird/src/catalog_worker.rs` (GenerateBootstrap) | `Storage="File"`, `Device="FileStorage"` fest verdrahtet; Rückfallweg von `restore` (`commands/restore.rs`), wenn keine Bootstrap-Datei geschrieben wurde | — | offen |
 | S-02 | `onesimus-dird/src/scheduler.rs` | `already_queued = false; // TODO: proper dedup` – keine Prüfung auf bereits eingereihte Jobs | — | offen |
 | S-03 | `onesimus-dird/src/internal_jobs.rs` | Selection Type PoolOccupancy „not available yet“ | C-058, #1 | offen |
-| S-04 | `onesimus-dird/src/commands/job.rs` | Verify-Jobs (alle Level) „not available yet“; Menüpunkt „Verify Volume Data (not yet implemented)“ | C-058, #1 | offen |
+| S-04 | `onesimus-dird/src/commands/job.rs` | Verify-Jobs (alle Level) „not available yet“; Menüpunkt „Verify Volume Data (not yet implemented)“ | C-058, #1 | erledigt (da20bef); Menütext „(not yet implemented)“ bleibt, das Original zeigt ihn genauso |
 | S-05 | `onesimus-dird/src/commands/job.rs`, `internal_jobs.rs` | Copy/Migrate-Arbeitsjobs: `run job=<Copy> jobid=N` abgewiesen, Steuerjob meldet „Could not start migration job.“ | C-058, #1 | offen |
 | S-06 | `onesimus-dird/src/commands/job.rs` | Consolidate mit Always-Incremental-Jobs „not available yet“ | C-058, #1 | offen |
 | S-07 | Job-Ablauf (alle Jobtypen) | RunScripts (RunBeforeJob/RunAfterJob, Client-/Console-Skripte) laufen nicht | C-058, #1 | offen |
