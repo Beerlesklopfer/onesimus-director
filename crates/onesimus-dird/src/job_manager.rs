@@ -46,6 +46,8 @@ pub struct DirJob {
 struct JcrState {
     /// FD/SD end counters of a native backup (backup_worker.rs, S-19).
     backup_end: Option<crate::backup::BackupEnd>,
+    /// The client's quota state of a native backup (quota.cc, S-23).
+    quota: Option<crate::backup::Quota>,
     /// Worker parameters of a queued job, kept for the job codes of its
     /// run scripts afterwards.
     params: Option<crate::job_worker::JobParams>,
@@ -937,6 +939,48 @@ impl JobManager {
                         }
                     }
 
+                    // backup.cc SendAccurateCurrentFiles(): the list for the worker (S-23).
+                    PipeMessage::AccurateRequest { start_time, .. } => {
+                        let session = job.jcr.params.as_ref().and_then(|p| p.backup.clone()).unwrap_or_default();
+                        let unique = job.jcr.params.as_ref().map(|p| p.unique_job.clone()).unwrap_or_default();
+                        let workdir = self.config.as_ref().and_then(|c| c.read().ok())
+                            .map(|c| c.director.working_directory.clone()).unwrap_or_else(|| "/tmp".into());
+                        let path = format!("{workdir}/{unique}.accurate");
+                        let result = self.catalog.as_ref().ok_or_else(|| "Cannot find previous jobids.\n".to_string())
+                            .and_then(|cat| crate::backup::write_accurate_list(cat, job.job_id, session.ids.client_id,
+                                session.ids.fileset_id, session.ids.level, start_time, session.accurate_checksum, &path));
+                        let reply = match result {
+                            Ok((estimate, _)) => {
+                                post_catreq_messages(&self.bus, self.config.as_ref(), job, vec![(crate::message_bus::MsgType::Info,
+                                    format!("Sending Accurate information (estimated {estimate} files).\n"))]);
+                                PipeMessage::AccurateReady { path, estimate, error: None }
+                            }
+                            Err(error) => PipeMessage::AccurateReady { path, estimate: String::new(), error: Some(error) },
+                        };
+                        job.handle.send_message(&reply);
+                    }
+
+                    // DoNativeBackup(): CheckHardquotas() and CheckSoftquotas() (S-23).
+                    PipeMessage::QuotaCheck { .. } => {
+                        let mut quota = job.jcr.quota.take()
+                            .or_else(|| job.jcr.params.as_ref().and_then(|p| p.backup.as_ref()).and_then(|b| b.quota.clone()));
+                        let mut messages = Vec::new();
+                        let now = now_unix();
+                        let mut fatal = None;
+                        if let (Some(q), Some(cat)) = (quota.as_mut(), self.catalog.as_ref()) {
+                            if q.check_hard(cat, job.job_id, now, &mut messages) {
+                                fatal = Some("Quota Exceeded. Job terminated.\n".to_string());
+                            } else if q.check_soft(cat, job.job_id, now, 0, &mut messages) {
+                                fatal = Some("Soft Quota exceeded / Grace Time expired. Job terminated.\n".to_string());
+                            }
+                        }
+                        let remaining = quota.as_ref().map(|q| q.remaining(now)).unwrap_or(0);
+                        post_catreq_messages(&self.bus, self.config.as_ref(), job,
+                            messages.into_iter().map(|(code, text)| (crate::backup::quota_msg_type(code), text)).collect());
+                        job.jcr.quota = quota;
+                        job.handle.send_message(&PipeMessage::QuotaChecked { fatal, remaining });
+                    }
+
                     PipeMessage::BackupEnd { end, .. } => {
                         job.jcr.sd_status = end.sd_status;
                         job.jcr.backup_end = Some(end);
@@ -1020,6 +1064,15 @@ impl JobManager {
                 let admin = job.jcr.params.as_ref().is_some_and(|p| p.job_type == crate::job_worker::WorkerJobType::Admin);
                 let internal = job.jcr.params.as_ref().is_some_and(|p| p.job_type.internal().is_some());
                 if job.observed_status == 'T' && ending.errors > 0 && !admin && !internal && !crate::verify::is_verify_job(job.job_id) { job.observed_status = 'W'; }
+                // DoNativeBackup(): CheckSoftquotas() after the job ran (S-23).
+                if let (Some(end), Some(cat)) = (job.jcr.backup_end.clone(), self.catalog.as_ref()) {
+                    if let Some(quota) = job.jcr.quota.as_mut() {
+                        let mut messages = Vec::new();
+                        quota.check_soft(cat, job.job_id, now_unix(), end.sd_bytes, &mut messages);
+                        post_catreq_messages(&self.bus, self.config.as_ref(), job,
+                            messages.into_iter().map(|(code, text)| (crate::backup::quota_msg_type(code), text)).collect());
+                    }
+                }
                 // NativeBackupCleanup: SD errors also make it JS_Warnings.
                 if let Some(end) = &job.jcr.backup_end {
                     if job.observed_status == 'T' && end.sd_errors > 0 { job.observed_status = 'W'; }
@@ -1045,6 +1098,12 @@ impl JobManager {
                 if let Some(vf) = &vf {
                     let messages = crate::vbackup::after_job_end(self.catalog.as_ref(), job.job_id, vf, job.observed_status);
                     post_catreq_messages(&self.bus, self.config.as_ref(), job, messages);
+                }
+                // NativeBackupCleanup(): UpdateBootstrapFile() (S-23).
+                if job.jcr.backup_end.is_some() {
+                    if let Some(status) = update_bootstrap_file(&self.bus, self.config.as_ref(), self.catalog.as_ref(), job, &ending) {
+                        job.observed_status = status;
+                    }
                 }
                 if let Some(error) = &job.completion_error { error!("JobManager: job {} final catalog update failed: {error}", job.job_id); }
                 let success = job.completion_error.is_none() && matches!(job.observed_status, 'T' | 'W');
@@ -1073,6 +1132,8 @@ impl JobManager {
                         vss: job.jcr.backup_end.as_ref().is_some_and(|e| e.vss),
                         encrypt: job.jcr.backup_end.as_ref().is_some_and(|e| e.encrypt),
                         fd_unreached: !job.jcr.fd_reached, sd_unreached: !job.jcr.sd_reached,
+                        quota_info: job.jcr.quota.as_ref().filter(|q| q.has_quota).map(|q| q.summary(
+                            job.jcr.backup_end.as_ref().map(|e| e.sd_bytes).unwrap_or(0))).unwrap_or_default(),
                     };
                     let director = self.config.as_ref().and_then(|c| c.read().ok()).map(|c| c.director.name.clone()).unwrap_or_default();
                     for (msg_type, text) in crate::job_messages::end_of_job(&director, self.catalog.as_ref(), report, &outcome) {
@@ -1138,6 +1199,7 @@ impl DirJob {
             "BackupConnectingSD" => (false, false, Some('S'), false),
             "BackupSDJobSetup" => (false, true, None, false),
             "BackupConnectingFD" => (false, true, Some('F'), false),
+            "BackupFDConnected" => (true, true, Some('R'), false),
             "ConnectingSD" => (true, false, Some('S'), false),
             "SDJobSetup" | "SDUseDevice" | "SDRun" | "SDBootstrap" => (true, true, None, false),
             "FDJobSetup" | "FDStorage" | "FDSession" => (true, true, Some('R'), false),
@@ -1237,6 +1299,75 @@ fn script_job(job: &DirJob) -> ScriptJob {
     ScriptJob { job_id: job.job_id, job_name: job.job_name.clone(), unique_job: job.handle.unique_job.clone(),
         status: job.status(), files: job.last_files, bytes: job.last_bytes, client, storage,
         params: job.jcr.params.clone() }
+}
+
+/// backup.cc UpdateBootstrapFile() of a native backup that terminated OK
+/// with data and has Write Bootstrap: the volumes of the job, written to
+/// the file ("w+b" for Full, else "a+b") or `|program`; errors are M_ERROR
+/// and make the job JS_ErrorTerminated (the returned status). S-23.
+fn update_bootstrap_file(bus: &MessageBus, config: Option<&SharedConfig>, catalog: Option<&CatalogHandle>,
+                         job: &DirJob, ending: &JobEnd) -> Option<char> {
+    let params = job.jcr.params.as_ref()?;
+    let write_bootstrap = params.bootstrap.as_deref().filter(|b| !b.is_empty())?;
+    let session = params.backup.as_ref()?;
+    if !matches!(job.observed_status, 'T' | 'W') || ending.bytes <= 0 {
+        return None;
+    }
+    let cat = catalog?;
+    let codes = {
+        let cfg = config?.read().ok()?;
+        crate::runscript::job_codes(&cfg, &script_job(job))
+    };
+    let fname = crate::runscript::edit_job_codes(write_bootstrap, &codes, "");
+    let level = crate::backup::level_to_string(session.ids.level);
+    let since = job.jcr.report.as_ref().map(|r| r.since.clone()).unwrap_or_default();
+    let (text, volume_error) = crate::backup::bootstrap_text(cat, job.job_id, &params.unique_job,
+        &format!("{level}{since}"), ending.vol_session_id as u32, ending.vol_session_time as u32, now_unix());
+    let mut messages = Vec::new();
+    let mut status = None;
+    use std::io::Write;
+    if let Some(program) = fname.strip_prefix('|') {
+        if let Some(error) = volume_error {
+            messages.push((crate::message_bus::MsgType::Error, error));
+            if job.jcr.backup_end.as_ref().is_some_and(|e| e.sd_files != 0) { status = Some('E'); }
+        }
+        let argv = crate::runscript::build_argv(program);
+        let result = argv.first().ok_or_else(|| std::io::Error::from_raw_os_error(libc::ENOENT)).and_then(|cmd| {
+            let mut child = std::process::Command::new(cmd).args(&argv[1..]).stdin(std::process::Stdio::piped()).spawn()?;
+            if let Some(stdin) = child.stdin.as_mut() {
+                let _ = stdin.write_all(text.as_bytes());
+            }
+            child.wait()
+        });
+        let failure = match result {
+            Ok(exit) if exit.success() => None,
+            Ok(exit) => Some(format!("Child exited with code {}", exit.code().unwrap_or(1))),
+            Err(e) => Some(crate::commands::restore::errno_text(&e)),
+        };
+        if let Some(err) = failure {
+            messages.push((crate::message_bus::MsgType::Error,
+                format!("Error running program when updating bootstrap file: {fname}: ERR={err}\n")));
+            status = Some('E');
+        }
+    } else {
+        let full = session.ids.level == 'F';
+        match std::fs::OpenOptions::new().create(true).write(true).truncate(full).append(!full).open(&fname) {
+            Ok(mut file) => {
+                if let Some(error) = volume_error {
+                    messages.push((crate::message_bus::MsgType::Error, error));
+                    if job.jcr.backup_end.as_ref().is_some_and(|e| e.sd_files != 0) { status = Some('E'); }
+                }
+                let _ = file.write_all(text.as_bytes());
+            }
+            Err(e) => {
+                messages.push((crate::message_bus::MsgType::Error, format!(
+                    "Could not open WriteBootstrap file:\n{fname}: ERR={}\n", crate::commands::restore::errno_text(&e))));
+                status = Some('E');
+            }
+        }
+    }
+    post_catreq_messages(bus, config, job, messages);
+    status.map(|s| merge_status(job.observed_status, s))
 }
 
 /// RunScripts(jcr, ..., label) on a thread of its own.

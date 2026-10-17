@@ -356,6 +356,8 @@ pub struct JobOutcome {
     /// command was never asked for (NULL, printed "(null)").
     pub fd_unreached: bool,
     pub sd_unreached: bool,
+    /// GenerateBackupSummary() quota_info lines (jcr->dir_impl->HasQuota). S-23.
+    pub quota_info: String,
 }
 
 /// One Jmsg of the job report sequence.
@@ -524,6 +526,10 @@ pub fn backup_summary(director: &str, report: &JobReport, outcome: &JobOutcome, 
     let daemon_status = format!(
         "  Non-fatal FD errors:    {}\n  SD Errors:              {}\n  FD termination status:  {}\n  SD termination status:  {}\n",
         outcome.errors, outcome.sd_errors, job_status_to_ascii(outcome.fd_status), job_status_to_ascii(outcome.sd_status));
+    // FDSecureEraseCmd / SDSecureEraseCmd never asked for: NULL, "(null)" (S-23).
+    let daemon_status = format!("{daemon_status}{}{}",
+        if outcome.fd_unreached { "  FD  Secure Erase Cmd:   (null)\n" } else { "" },
+        if outcome.sd_unreached { "  SD  Secure Erase Cmd:   (null)\n" } else { "" });
     (level_info, statistics, client_options, daemon_status)
     };
     let text = format!(
@@ -532,7 +538,7 @@ pub fn backup_summary(director: &str, report: &JobReport, outcome: &JobOutcome, 
          \x20 Pool:                   \"{pool}\" (From {pool_source})\n  Catalog:                \"{catalog}\" (From {catalog_source})\n\
          \x20 Storage:                \"{storage}\" (From {storage_source})\n  Scheduled time:         {sched}\n\
          \x20 Start time:             {start}\n  End time:               {end}\n  Elapsed time:           {elapsed}\n\
-         \x20 Priority:               {priority}\n  Allow Mixed Priority:   {mixed}\n{statistics}\
+         \x20 Priority:               {priority}\n  Allow Mixed Priority:   {mixed}\n{statistics}{quota_info}\
          \x20 Rate:                   {rate} KB/s\n{client_options}  Volume name(s):         {volume_names}\n\
          \x20 Volume Session Id:      {vsid}\n  Volume Session Time:    {vstime}\n  Last Volume Bytes:      {lvb} ({lvbs}B)\n\
          {daemon_status}  Bareos binary info:     {binary}\n  Job triggered by:       {trigger}\n  Termination:            {term_msg}\n\n",
@@ -543,6 +549,7 @@ pub fn backup_summary(director: &str, report: &JobReport, outcome: &JobOutcome, 
         sched = bstrftimes(report.sched_time), start = bstrftimes(start_time), end = bstrftimes(end_time),
         elapsed = crate::ua_select::edit_utime(run_time.max(0) as u64), priority = report.priority,
         mixed = yes_no(report.allow_mixed_priority), rate = fixed1(kbps), vsid = outcome.vol_session_id,
+        quota_info = outcome.quota_info,
         vstime = outcome.vol_session_time, lvb = commas(last_vol_bytes), lvbs = suffix(last_vol_bytes),
         binary = version::JOBLOG_MESSAGE, trigger = report.trigger);
     messages.push((msg_type, text));
@@ -741,7 +748,7 @@ mod tests {
             job_id: 626, status: 'T', end_time: local("2026-07-09 21:00:03"), files: 5, bytes: 24_154_072,
             read_bytes: 24_154_072, sd_files: 5, sd_bytes: 24_154_607, errors: 0, sd_errors: 0,
             vol_session_id: 1, vol_session_time: 1_783_588_680, fd_status: 'T', sd_status: 'T',
-            vss: false, encrypt: false, fd_unreached: false, sd_unreached: false,
+            vss: false, encrypt: false, fd_unreached: false, sd_unreached: false, quota_info: String::new(),
         }
     }
 

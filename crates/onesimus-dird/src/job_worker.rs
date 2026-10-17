@@ -149,6 +149,19 @@ pub enum PipeMessage {
     /// FD/SD end counters of a native backup, sent before its JobEnd (S-19).
     #[serde(rename = "backup_end")]
     BackupEnd { job_id: u32, end: crate::backup::BackupEnd },
+    /// SendAccurateCurrentFiles(): the worker asks for the accurate list of
+    /// a job started at `start_time` (S-23) ...
+    #[serde(rename = "accurate_request")]
+    AccurateRequest { job_id: u32, start_time: i64 },
+    /// ... and the Director answers with the list file (or the fatal text).
+    #[serde(rename = "accurate_ready")]
+    AccurateReady { path: String, estimate: String, error: Option<String> },
+    /// DoNativeBackup(): CheckHardquotas/CheckSoftquotas in the Director (S-23) ...
+    #[serde(rename = "quota_check")]
+    QuotaCheck { job_id: u32 },
+    /// ... the M_FATAL text of an exceeded quota and FetchRemainingQuotas().
+    #[serde(rename = "quota_checked")]
+    QuotaChecked { fatal: Option<String>, remaining: u64 },
     /// job_thread() RunScripts(jcr, ..., label) in the Director (console
     /// commands need it); the worker waits for [`PipeMessage::RunScriptsDone`].
     #[serde(rename = "run_scripts")]
@@ -386,7 +399,7 @@ impl WorkerPipes {
         send_jmsg(msg.clone());
     }
 
-    fn recv(&mut self) -> Option<PipeMessage> {
+    pub(crate) fn recv(&mut self) -> Option<PipeMessage> {
         let mut buf = String::new();
         let mut reader = BufReader::new(&mut self.from_director);
         match reader.read_line(&mut buf) {
@@ -1005,6 +1018,25 @@ fn wait_for_fd_end_job(fd: &mut BnetStream<tls_psk::PskStream>, job_id: u32) -> 
 
 pub(crate) fn connect_fd(p: &JobParams) -> Result<(BnetStream<tls_psk::PskStream>, String), String> {
     let sock = resolve_connect(&format!("{}:{}", p.fd_address, p.fd_port), 3)?;
+    connect_fd_on(p, sock)
+}
+
+/// The TCP connection of a daemon connection (the socket is shut down on
+/// SIGTERM); the io::Error for BareosSocketTCP::connect()'s retry messages.
+pub(crate) fn tcp_connect(host: &str, port: u16) -> std::io::Result<std::net::TcpStream> {
+    use std::net::ToSocketAddrs;
+    let sa = (host, port).to_socket_addrs()?.next()
+        .ok_or_else(|| std::io::Error::from_raw_os_error(libc::EHOSTUNREACH))?;
+    let sock = std::net::TcpStream::connect_timeout(&sa, std::time::Duration::from_secs(3))?;
+    register_cancel_fd(std::os::fd::AsRawFd::as_raw_fd(&sock));
+    if WORKER_CANCEL.load(Ordering::SeqCst) {
+        let _ = sock.shutdown(std::net::Shutdown::Both);
+    }
+    Ok(sock)
+}
+
+/// TLS-PSK, Hello and CRAM-MD5 with the File daemon on a connected socket.
+pub(crate) fn connect_fd_on(p: &JobParams, sock: std::net::TcpStream) -> Result<(BnetStream<tls_psk::PskStream>, String), String> {
     sock.set_read_timeout(None).ok();
     let psk = tls_psk::password_to_psk(&p.fd_password);
     let stream = tls_psk::psk_connect(sock, &format!("R_DIRECTOR\x1e{}", p.director_name), &psk)
@@ -1022,6 +1054,11 @@ pub(crate) fn connect_fd(p: &JobParams) -> Result<(BnetStream<tls_psk::PskStream
 
 pub(crate) fn connect_sd(p: &JobParams) -> Result<(BnetStream<tls_psk::PskStream>, String), String> {
     let sock = resolve_connect(&format!("{}:{}", p.sd_address, p.sd_port), 3)?;
+    connect_sd_on(p, sock)
+}
+
+/// TLS-PSK, Hello and CRAM-MD5 with the Storage daemon on a connected socket.
+pub(crate) fn connect_sd_on(p: &JobParams, sock: std::net::TcpStream) -> Result<(BnetStream<tls_psk::PskStream>, String), String> {
     sock.set_read_timeout(None).ok();
     let psk = tls_psk::password_to_psk(&p.sd_password);
     let stream = tls_psk::psk_connect(sock, &format!("R_DIRECTOR\x1e{}", p.director_name), &psk)
@@ -1040,8 +1077,13 @@ fn resolve_connect(addr: &str, timeout_secs: u64) -> Result<std::net::TcpStream,
     use std::net::ToSocketAddrs;
     let sa = addr.to_socket_addrs().map_err(|e| format!("DNS {addr}: {e}"))?
         .next().ok_or_else(|| format!("DNS {addr}: none"))?;
-    std::net::TcpStream::connect_timeout(&sa, std::time::Duration::from_secs(timeout_secs))
-        .map_err(|e| format!("connect {addr}: {e}"))
+    let sock = std::net::TcpStream::connect_timeout(&sa, std::time::Duration::from_secs(timeout_secs))
+        .map_err(|e| format!("connect {addr}: {e}"))?;
+    register_cancel_fd(std::os::fd::AsRawFd::as_raw_fd(&sock));
+    if WORKER_CANCEL.load(Ordering::SeqCst) {
+        let _ = sock.shutdown(std::net::Shutdown::Both);
+    }
+    Ok(sock)
 }
 
 pub(crate) fn send_expect(bnet: &mut BnetStream<tls_psk::PskStream>, cmd: &str, expect: &str, job_id: u32, label: &str) -> Result<String, String> {
@@ -1102,10 +1144,40 @@ pub fn install_worker_signal_handlers() {
         libc::signal(libc::SIGTERM, worker_sigterm as libc::sighandler_t);
         libc::signal(libc::SIGUSR1, worker_sigusr1 as libc::sighandler_t);
         libc::signal(libc::SIGUSR2, worker_sigusr2 as libc::sighandler_t);
+        // The Director blocks SIGINT/SIGTERM in all its threads (main.rs);
+        // the forked worker inherits that mask and would never see a cancel.
+        let mut set: libc::sigset_t = std::mem::zeroed();
+        libc::sigemptyset(&mut set);
+        for sig in [libc::SIGTERM, libc::SIGUSR1, libc::SIGUSR2] {
+            libc::sigaddset(&mut set, sig);
+        }
+        libc::pthread_sigmask(libc::SIG_UNBLOCK, &set, std::ptr::null_mut());
     }
 }
 
-extern "C" fn worker_sigterm(_: libc::c_int) { WORKER_CANCEL.store(true, Ordering::SeqCst); }
+extern "C" fn worker_sigterm(_: libc::c_int) {
+    WORKER_CANCEL.store(true, Ordering::SeqCst);
+    // CancelJob(): a worker blocked on a daemon socket wakes up (shutdown(2)
+    // is async-signal-safe). S-23.
+    for slot in &CANCEL_FDS {
+        let fd = slot.load(Ordering::SeqCst);
+        if fd >= 0 {
+            unsafe { libc::shutdown(fd, libc::SHUT_RDWR); }
+        }
+    }
+}
+
+/// The daemon sockets of the worker, shut down by SIGTERM (S-23).
+static CANCEL_FDS: [std::sync::atomic::AtomicI32; 4] = [const { std::sync::atomic::AtomicI32::new(-1) }; 4];
+
+/// Remember a daemon socket for the SIGTERM handler.
+fn register_cancel_fd(fd: i32) {
+    for slot in &CANCEL_FDS {
+        if slot.compare_exchange(-1, fd, Ordering::SeqCst, Ordering::SeqCst).is_ok() {
+            return;
+        }
+    }
+}
 extern "C" fn worker_sigusr1(_: libc::c_int) { WORKER_PAUSED.store(true, Ordering::SeqCst); }
 extern "C" fn worker_sigusr2(_: libc::c_int) { WORKER_PAUSED.store(false, Ordering::SeqCst); }
 
