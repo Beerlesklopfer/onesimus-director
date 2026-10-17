@@ -478,4 +478,20 @@ mod tests {
             "use storage=SrcStore media_type=FileSrc pool_name=MigSrc pool_type=Backup append=0 copy=0 stripe=0\n".to_string(),
             "use device=SrcDev\n".to_string()]);
     }
+
+    #[test]
+    fn remote_replicate_commands_follow_migrate_cc() {
+        let copy = CopySession { prefer_mounted_volumes: true, ..Default::default() };
+        let remote = RemoteWrite { job_id: 634, unique_job: "mig-backup.2026-10-17_07.21.14_05".into(),
+            job_resource: "mig-backup".into(), client: "mig-fd".into(), fileset: "MigSet".into(),
+            fileset_md5: "91+oUS+n23wyQ7+EpB50DA".into(), job_type: 'B', level: 'F', tls_need: 4 };
+        // sd2.log of the original: the Job command of mig_jcr on the writing SD.
+        assert_eq!(remote_job_command(&remote, &copy),
+            "JobId=634 job=mig-backup.2026-10-17_07.21.14_05 job_name=mig-backup client_name=mig-fd type=66 level=70 \
+             FileSet=MigSet NoAttr=0 SpoolAttr=0 FileSetMD5=91+oUS+n23wyQ7+EpB50DA SpoolData=0 PreferMountedVols=1 \
+             SpoolSize=0 rerunning=0 VolSessionId=0 VolSessionTime=0 Quota=0 Protocol=0 BackupFormat=Native\n");
+        let write = StorageUse { address: "127.0.0.1".into(), port: 39196, ..Default::default() };
+        assert_eq!(replicate_command(&remote, &write, "DOCI-AJPJ"),
+            "replicate JobId=634 Job=mig-backup.2026-10-17_07.21.14_05 address=127.0.0.1 port=39196 ssl=4 Authorization=DOCI-AJPJ\n");
+    }
 }

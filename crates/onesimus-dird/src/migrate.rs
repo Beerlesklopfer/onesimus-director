@@ -65,6 +65,16 @@ pub struct WorkerInfo {
     pub remote: bool,
     /// The writing SD's job end of a remote replicate (mig_jcr).
     pub write_session: Option<WriteSession>,
+    /// mig_jcr->Job and the Write Bootstrap of its Job resource (the
+    /// previous job's): UpdateBootstrapFile(mig_jcr).
+    pub new_job: String,
+    pub write_bootstrap: String,
+    pub new_client: String,
+    /// The worker job's Client speaks NDMP (Protocol NDMPv2/3/4): the
+    /// File records of the previous job move/copy to the new job.
+    pub ndmp: bool,
+    /// jcr->RestoreBootstrap: removed once sent to the SD (unlink_bsr).
+    pub bootstrap_file: String,
 }
 
 /// mig_jcr's Storage daemon session of an SD-SD Copy/Migrate (S-20).
@@ -354,7 +364,11 @@ pub fn start_worker(config: &DirectorConfig, catalog: &CatalogHandle, req: &Work
         priority: job.priority, trigger: req.trigger.to_string(), next_pool_id: next_pool_id.clone(),
         purge_migrate_job: crate::commands::defaults::bool_directive(
             &crate::commands::defaults::job_directives(config, &job.name), "purgemigrationjob", false),
-        terminated_early: false, remote: false, write_session: None,
+        terminated_early: false, remote: false, write_session: None, new_job: new_unique.clone(),
+        write_bootstrap: prev_job.write_bootstrap.clone(),
+        new_client: if prev_job.client.is_empty() { client.clone() } else { prev_job.client.clone() },
+        bootstrap_file: fname.clone(),
+        ndmp: config.find_client(&client).is_some_and(|c| c.protocol != bareos_config::resources::AuthProtocol::Native),
     };
 
     // DoActualMigration() before the SD: Version (job_thread), the checks,
@@ -449,6 +463,67 @@ fn catalog_of(config: &DirectorConfig, job: &bareos_config::resources::JobResour
     }
 }
 
+/// backup.cc UpdateBootstrapFile() of the new job: the Write Bootstrap
+/// file (or `|program`) of its Job resource gets the volumes of the copy.
+fn update_bootstrap_file(cat: &CatalogHandle, info: &WorkerInfo, codes: &crate::runscript::JobCodes,
+                         vol_id: i32, vol_time: i32, msgs: &mut Vec<JobMsg>) {
+    let fname = crate::runscript::edit_job_codes(&info.write_bootstrap, codes, "");
+    // GetJobVolumeParameters()
+    let rows = cat.query_rows(&format!(
+        "SELECT VolumeName,MediaType,FirstIndex,LastIndex,StartFile,JobMedia.EndFile,StartBlock,JobMedia.EndBlock,Slot \
+         FROM JobMedia,Media WHERE JobMedia.JobId={} AND JobMedia.MediaId=Media.MediaId ORDER BY VolIndex,JobMediaId",
+        codes.job_id)).map(|t| t.rows).unwrap_or_default();
+    if rows.is_empty() {
+        msgs.push((MsgType::Error, format!(
+            "Could not get Job Volume Parameters to update Bootstrap file. ERR=sql_get.cc:414 No volumes found for JobId={}\n",
+            codes.job_id)));
+    }
+    // jr.Job: mig_jcr->dir_impl->jr is a copy of the previous job record.
+    let mut text = format!("# {} - {} - {}\n", job_messages::bstrftimes(unsafe { libc::time(std::ptr::null_mut()) } as i64), info.prev.job, codes.level);
+    for row in rows {
+        let value = |i: usize| row.get(i).cloned().flatten().unwrap_or_default();
+        let n = |i: usize| value(i).parse::<u64>().unwrap_or(0);
+        text.push_str(&format!("Volume=\"{}\"\nMediaType=\"{}\"\n", value(0), value(1)));
+        if n(8) > 0 {
+            text.push_str(&format!("Slot={}\n", n(8)));
+        }
+        let start = (n(4) as u32 as u64) << 32 | n(6) as u32 as u64;
+        let end = (n(5) as u32 as u64) << 32 | n(7) as u32 as u64;
+        text.push_str(&format!("VolSessionId={}\nVolSessionTime={}\nVolAddr={start}-{end}\nFileIndex={}-{}\n",
+            vol_id as u32, vol_time as u32, n(2) as i32, n(3) as i32));
+    }
+    use std::io::Write;
+    if let Some(program) = fname.strip_prefix('|') {
+        let argv = crate::runscript::build_argv(program);
+        let result = argv.first().ok_or_else(|| std::io::Error::from_raw_os_error(libc::ENOENT)).and_then(|cmd| {
+            let mut child = std::process::Command::new(cmd).args(&argv[1..]).stdin(std::process::Stdio::piped()).spawn()?;
+            if let Some(stdin) = child.stdin.as_mut() {
+                let _ = stdin.write_all(text.as_bytes());
+            }
+            child.wait()
+        });
+        match result {
+            Ok(status) if status.success() => {}
+            Ok(status) => msgs.push((MsgType::Error, format!(
+                "Error running program when updating bootstrap file: {fname}: ERR=Child exited with code {}\n",
+                status.code().unwrap_or(1)))),
+            Err(e) => msgs.push((MsgType::Error, format!(
+                "Error running program when updating bootstrap file: {fname}: ERR={}\n", crate::commands::restore::errno_text(&e)))),
+        }
+    } else {
+        // Full: "w+b", else "a+b".
+        let file = std::fs::OpenOptions::new().create(true).write(true)
+            .truncate(info.level == 'F').append(info.level != 'F').open(&fname);
+        match file {
+            Ok(mut file) => {
+                let _ = file.write_all(text.as_bytes());
+            }
+            Err(e) => msgs.push((MsgType::Error, format!(
+                "Could not open WriteBootstrap file:\n{fname}: ERR={}\n", crate::commands::restore::errno_text(&e)))),
+        }
+    }
+}
+
 /// The end of a worker job as the SD reported it.
 pub struct WorkerEnd {
     pub status: char,
@@ -468,6 +543,10 @@ pub struct WorkerEnd {
 /// final JobStatus and the job messages.
 pub fn cleanup(director: &str, catalog: Option<&CatalogHandle>, job_id: u32, end: &WorkerEnd) -> Option<(char, Vec<JobMsg>)> {
     let info = workers().as_mut()?.remove(&job_id)?;
+    // SendBootstrapFileToSd(): the bootstrap file goes once the SD has it.
+    if !info.terminated_early && end.sd_status != '\0' && !info.bootstrap_file.is_empty() {
+        let _ = std::fs::remove_file(&info.bootstrap_file);
+    }
     let mut msgs = Vec::new();
     let mut status = if info.terminated_early { 'T' } else { end.status };
     let (operation, action) = if info.copy { ("Copying", "copy") } else { ("Migration", "migrate") };
@@ -509,16 +588,38 @@ pub fn cleanup(director: &str, catalog: Option<&CatalogHandle>, job_id: u32, end
                 if info.copy {
                     let _ = cat.execute(&format!(
                         "INSERT INTO Log (JobId, Time, LogText ) SELECT {new}, Time, LogText FROM Log WHERE JobId={old}"));
+                    if info.ndmp {
+                        // sql_copy_ndmp_metadata
+                        let _ = cat.execute(&format!(
+                            "INSERT INTO File (FileIndex, JobId, PathId, Name, DeltaSeq, MarkId, LStat, MD5) \
+                             SELECT FileIndex, {new}, PathId, Name, DeltaSeq, MarkId, LStat, MD5 FROM File \
+                             WHERE JobId={old} AND Name NOT IN (SELECT Name FROM File WHERE JobId={new})"));
+                    }
                     let _ = cat.execute(&format!("UPDATE Job SET Type='C' WHERE JobId={new}"));
                 } else {
                     let _ = cat.execute(&format!("UPDATE Job SET Type='M' WHERE JobId={old}"));
                     let _ = cat.execute(&format!("UPDATE Log SET JobId={new} WHERE JobId={old}"));
+                    if info.ndmp {
+                        // sql_migrate_ndmp_metadata
+                        let _ = cat.execute(&format!(
+                            "UPDATE File SET JobId={new} WHERE JobId={old} AND Name NOT IN (SELECT Name FROM File WHERE JobId={new})"));
+                    }
                     match cat.dedicated() {
                         Ok(db) if info.purge_migrate_job => crate::commands::purge::purge_jobs(&db, &old.to_string()),
                         Ok(db) => crate::commands::purge::purge_files(&db, &old.to_string()),
                         Err(e) => msgs.push((MsgType::Error, format!("{e}\n"))),
                     }
                 }
+            }
+            // UpdateBootstrapFile(mig_jcr)
+            if matches!(mig_status, 'T' | 'W') && sd_bytes > 0 && !info.write_bootstrap.is_empty() {
+                let codes = crate::runscript::JobCodes {
+                    job_id: new, job: info.new_job.clone(), client: info.new_client.clone(), level: level_name(info.level).into(),
+                    job_type: "Backup".into(), files: sd_files as i64, bytes: sd_bytes as i64, status: mig_status,
+                    director: director.to_string(), fileset: info.fileset.clone(), pool: info.write_pool.0.clone(),
+                    storage: info.write_storage.0.clone(), ..Default::default()
+                };
+                update_bootstrap_file(cat, &info, &codes, vol_id, vol_time, &mut msgs);
             }
             // GetJobVolumeNames(mig_jcr) and the last volume's Media record.
             if let Ok(table) = cat.query_rows(&format!(
