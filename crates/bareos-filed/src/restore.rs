@@ -431,7 +431,7 @@ impl Restore<'_> {
                 r.file_addr = faddr;
                 let f = r.bfd.as_mut()?;
                 if let Err(e) = f.seek(SeekFrom::Start(faddr)) {
-                    self.jmsg(M_ERROR, format!("Seek to {faddr} error on {fname}: ERR={e}\n"));
+                    self.jmsg(M_ERROR, format!("Seek to {faddr} error on {fname}: ERR={}\n", crate::berrno::s(&e)));
                     return None;
                 }
             }
@@ -452,8 +452,8 @@ impl Restore<'_> {
         }
         let f = r.bfd.as_mut()?;
         let res = match r.win32.as_mut() {
-            Some(w) => w.process(data, f).map_err(|e| format!("Write error in Win32 Block Decomposition on {fname}: {e}\n")),
-            None => f.write_all(data).map_err(|e| format!("Write error on {fname}: {e}\n")),
+            Some(w) => w.process(data, f).map_err(|e| format!("Write error in Win32 Block Decomposition on {fname}: {}\n", crate::berrno::s(&e))),
+            None => f.write_all(data).map_err(|e| format!("Write error on {fname}: {}\n", crate::berrno::s(&e))),
         };
         if let Err(m) = res {
             self.jmsg(M_ERROR, m);
@@ -641,6 +641,7 @@ mod tests {
         let mut sd = BnetStream::new(FakeSd { input: Cursor::new(r.0) });
         let params = RestoreParams { where_: Where::Prefix(tmp.as_os_str().as_encoded_bytes().to_vec()), replace: b'a', prefix_links: false };
         let mut msgs = JobMsgs::new("test-fd");
+        msgs.job_id = 1;
         let mut counters = Counters::default();
         let mut create = CreateState::default();
         let canceled = AtomicBool::new(false);
@@ -676,6 +677,7 @@ mod tests {
         let mut sd = BnetStream::new(FakeSd { input: Cursor::new(r2.0) });
         let params = RestoreParams { replace: b'n', ..params };
         let mut msgs = JobMsgs::new("test-fd");
+        msgs.job_id = 1;
         let mut sent = Vec::new();
         Restore { params: &params, msgs: &mut msgs, counters: &mut Counters::default(), create: &mut CreateState { keep_path_list: true, ..Default::default() }, canceled: &canceled }
             .run(&mut sd, &mut |m: &mut JobMsgs| sent.extend(m.take_queued()));
@@ -692,6 +694,7 @@ mod tests {
         let mut sd = BnetStream::new(FakeSd { input: Cursor::new(v) });
         let params = RestoreParams { where_: Where::Prefix(b"/nonexistent".to_vec()), replace: b'a', prefix_links: false };
         let mut msgs = JobMsgs::new("t");
+        msgs.job_id = 1;
         let canceled = AtomicBool::new(false);
         let mut sent = Vec::new();
         Restore { params: &params, msgs: &mut msgs, counters: &mut Counters::default(), create: &mut CreateState::default(), canceled: &canceled }

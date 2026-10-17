@@ -123,7 +123,7 @@ impl Session<'_> {
         };
         let allowed = self.allowed_script_dirs();
         for script in self.runscripts.clone() {
-            let canceled = self.is_canceled();
+            let canceled = self.job_canceled();
             if !runscript::should_run(&script, when, self.msgs.status(), canceled) {
                 continue;
             }
@@ -141,8 +141,17 @@ impl Session<'_> {
                         self.msgs.jmsg(M_INFO, &format!("{label}: {}\n", line.trim_end()));
                     }
                     if status != 0 {
-                        // b_errno_exit: codes >= 200 are execvp errors
-                        let err = std::io::Error::other(format!("Child exited with code {status}")).to_string();
+                        // BErrNo::bstrerror() of b_errno_exit: codes >= 200 are execvp errors
+                        const EXECVP: [i32; 9] = [libc::EACCES, libc::ENOEXEC, libc::EFAULT, libc::EINTR, libc::E2BIG,
+                            libc::ENAMETOOLONG, libc::ENOMEM, libc::ETXTBSY, libc::ENOENT];
+                        let err = if status >= 200 {
+                            match EXECVP.get((status - 200) as usize) {
+                                Some(e) => crate::berrno::BErr(*e).to_string(),
+                                None => "Unknown error during program execvp".to_string(),
+                            }
+                        } else {
+                            format!("Child exited with code {status}")
+                        };
                         self.msgs.jmsg(M_ERROR, &format!("Runscript: {label} returned non-zero status={status}. ERR={err}\n"));
                         false
                     } else {
@@ -189,7 +198,7 @@ impl Session<'_> {
     /// RunbeforenowCmd()
     pub(super) fn run_before_now_cmd<S: Read + Write>(&mut self, dir: &mut BnetStream<S>, _cmd: &str) -> bool {
         self.run_scripts("ClientBeforeJob");
-        if self.is_canceled() || matches!(self.msgs.status(), JS_ERROR_TERMINATED | JS_FATAL_ERROR) {
+        if self.job_canceled() {
             self.reply(dir, "2905 Failed RunScript\n");
             false
         } else {
@@ -621,6 +630,7 @@ impl Session<'_> {
                     let _ = sd.recv();
                 }
                 let _ = sd.send_signal(BnetSignal::Terminate);
+                self.old_sd.push(sd);
             }
             _ => {
                 self.reply(dir, &format!("2994 Bad verify level: {cmd}\n"));

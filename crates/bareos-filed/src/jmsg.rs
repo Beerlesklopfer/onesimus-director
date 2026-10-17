@@ -100,6 +100,11 @@ impl JobMsgs {
     /// Jmsg(jcr, type, 0, text): prefix, counters, and the message for the
     /// Director (types of the Messages resource) and the append files.
     pub fn jmsg(&mut self, msg_type: i32, text: &str) {
+        // A console session (JobId 0, e.g. estimate): the text as it is.
+        if self.job_id == 0 {
+            self.queued.push(text.to_string());
+            return;
+        }
         let prefix = match msg_type {
             M_FATAL => {
                 self.set_status(JS_FATAL_ERROR);

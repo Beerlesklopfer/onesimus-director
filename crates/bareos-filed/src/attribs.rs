@@ -307,7 +307,7 @@ fn encode_mode(mode: u32) -> String {
         libc::S_IFDIR => 'd',
         libc::S_IFCHR => 'c',
         libc::S_IFBLK => 'b',
-        libc::S_IFIFO => 'p',
+        libc::S_IFIFO => 'f',
         libc::S_IFLNK => 'l',
         libc::S_IFSOCK => 's',
         _ => '-',
@@ -369,7 +369,7 @@ pub fn set_attributes(attr: &Attributes, ofd: Option<std::fs::File>) -> Vec<Stri
     let suppress = !nix::unistd::getuid().is_root();
     let name = cpath(&attr.ofname);
     let oname = attr.ofname_str();
-    let errno = || std::io::Error::last_os_error();
+    let errno = crate::berrno::BErr::last;
     let old_mask = unsafe { libc::umask(0) };
 
     let size = match &ofd {

@@ -122,8 +122,8 @@ fn cpath(p: &[u8]) -> CString {
     CString::new(p.to_vec()).unwrap_or_default()
 }
 
-fn errno() -> std::io::Error {
-    std::io::Error::last_os_error()
+fn errno() -> crate::berrno::BErr {
+    crate::berrno::BErr::last()
 }
 
 /// parse_acl_streams() for Linux. `content` is the ACL text with its

@@ -86,7 +86,18 @@ pub fn run_program(cmd: &str) -> std::io::Result<(String, i32)> {
     };
     let (r, w) = std::io::pipe()?;
     let w2 = w.try_clone()?;
-    let mut child = Command::new(prog).args(args).stdin(Stdio::null()).stdout(w).stderr(w2).spawn()?;
+    let mut child = match Command::new(prog).args(args).stdin(Stdio::null()).stdout(w).stderr(w2).spawn() {
+        Ok(c) => c,
+        Err(e) => {
+            // The child of OpenBpipe(): perror() and exit(200 + index of
+            // execvp_errors) when execvp() fails.
+            const EXECVP: [i32; 9] = [libc::EACCES, libc::ENOEXEC, libc::EFAULT, libc::EINTR, libc::E2BIG,
+                libc::ENAMETOOLONG, libc::ENOMEM, libc::ETXTBSY, libc::ENOENT];
+            let errno = e.raw_os_error().unwrap_or(0);
+            let code = EXECVP.iter().position(|&x| x == errno).map(|i| 200 + i as i32).unwrap_or(255);
+            return Ok((format!("Program execution failed: {}\n", crate::berrno::BErr(errno)), code));
+        }
+    };
     let mut out = String::new();
     use std::io::Read;
     let mut r = r;

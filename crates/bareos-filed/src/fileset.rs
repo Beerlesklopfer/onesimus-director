@@ -367,7 +367,7 @@ impl FileSet {
             Some(b'<') => match std::fs::File::open(&fname[1..]) {
                 Ok(f) => entries.extend(std::io::BufReader::new(f).lines().map_while(Result::ok).map(|l| l.trim_end().to_string())),
                 Err(e) => {
-                    fatal(format!("Cannot open FileSet input file: {}. ERR={e}\n", &fname[1..]));
+                    fatal(format!("Cannot open FileSet input file: {}. ERR={}\n", &fname[1..], crate::berrno::s(&e)));
                     return;
                 }
             },

@@ -64,6 +64,8 @@ pub struct Session<'a> {
     max_bandwidth: u64,
     /// Job type ('B' backup, 'R' restore, 'V' verify)
     job_type: u8,
+    /// SD connections already told BNET_TERMINATE; closed with the session.
+    old_sd: Vec<SdStream>,
 }
 
 /// Command handler: false ends the command loop.
@@ -112,6 +114,7 @@ impl<'a> Session<'a> {
             post_scripts_ran: false,
             max_bandwidth: 0,
             job_type: b' ',
+            old_sd: Vec::new(),
         }
     }
 
@@ -119,6 +122,11 @@ impl<'a> Session<'a> {
     fn reply<S: Read + Write>(&mut self, dir: &mut BnetStream<S>, text: &str) -> bool {
         self.msgs.flush(dir);
         dir.send_str(text).is_ok()
+    }
+
+    /// jcr->IsJobCanceled(): canceled, or ended in an error.
+    fn job_canceled(&self) -> bool {
+        self.is_canceled() || matches!(self.msgs.status(), JS_ERROR_TERMINATED | JS_FATAL_ERROR)
     }
 
     fn is_canceled(&self) -> bool {
@@ -182,9 +190,12 @@ impl<'a> Session<'a> {
                 break;
             }
         }
-        if let Some(mut sd) = self.sd.take() {
+        // Inform the Storage daemon that we are done; the connection itself
+        // stays open until the job is freed (FiledFreeJcr).
+        let _sd_kept = self.sd.take().map(|mut sd| {
             let _ = sd.send_signal(BnetSignal::Terminate);
-        }
+            sd
+        });
         self.run_scripts("ClientAfterJob");
         if self.msgs.job_id != 0 {
             if self.is_canceled() {
@@ -469,6 +480,7 @@ impl<'a> Session<'a> {
                 let _ = sd.recv();
             }
             let _ = sd.send_signal(BnetSignal::Terminate);
+            self.old_sd.push(sd);
             *shared.sd_socket.lock().unwrap_or_else(|e| e.into_inner()) = None;
         } else {
             self.msgs.set_status(JS_ERROR_TERMINATED);
@@ -481,7 +493,7 @@ impl<'a> Session<'a> {
             self.reply(dir, "2000 OK storage end\n");
             go_on = true;
         }
-        if self.is_canceled() {
+        if self.job_canceled() {
             go_on = false;
         }
         go_on

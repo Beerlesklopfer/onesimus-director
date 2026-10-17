@@ -157,7 +157,7 @@ pub fn file_checksum(ff: &FfPkt, counters: &mut Counters, msgs: &mut JobMsgs, is
     let mut f = match opts.open(std::ffi::OsStr::from_bytes(&ff.fname)) {
         Ok(f) => f,
         Err(e) => {
-            msgs.jmsg(M_ERROR, &format!("     Cannot open {fname}: ERR={e}.\n"));
+            msgs.jmsg(M_ERROR, &format!("     Cannot open {fname}: ERR={}.\n", crate::berrno::s(&e)));
             msgs.job_errors += 1;
             return Some(None);
         }
@@ -185,7 +185,7 @@ pub fn file_checksum(ff: &FfPkt, counters: &mut Counters, msgs: &mut JobMsgs, is
                 counters.read_bytes += n as u64;
             }
             Err(e) => {
-                msgs.jmsg(M_ERROR, &format!("Error reading file {fname}: ERR={e}\n"));
+                msgs.jmsg(M_ERROR, &format!("Error reading file {fname}: ERR={}\n", crate::berrno::s(&e)));
                 msgs.job_errors += 1;
                 return Some(None);
             }
@@ -309,7 +309,7 @@ impl<S: Read + Write> Backup<'_, '_, S> {
         self.sd.counters.num_files_examined += 1;
         let fname = String::from_utf8_lossy(&ff.fname).into_owned();
         let top = String::from_utf8_lossy(&ff.top_fname).into_owned();
-        let errno_text = |e: i32| std::io::Error::from_raw_os_error(e).to_string();
+        let errno_text = |e: i32| crate::berrno::BErr(e).to_string();
         let mut has_file_data = false;
         match ff.type_ {
             FT_LNKSAVED | FT_LNK | FT_RESTORE_FIRST | FT_PLUGIN_CONFIG | FT_REPARSE | FT_JUNCTION | FT_DIREND | FT_FIFO
@@ -402,7 +402,7 @@ impl<S: Read + Write> Backup<'_, '_, S> {
                 }
                 Err(e) => {
                     ff.ff_errno = e.raw_os_error().unwrap_or(0);
-                    self.jmsg(M_NOTSAVED, format!("     Cannot open \"{fname}\": ERR={e}.\n"));
+                    self.jmsg(M_NOTSAVED, format!("     Cannot open \"{fname}\": ERR={}.\n", crate::berrno::s(&e)));
                     self.sd.msgs.job_errors += 1;
                     return self.good_rtn();
                 }
@@ -488,7 +488,7 @@ impl<S: Read + Write> Backup<'_, '_, S> {
         }
         let fname = String::from_utf8_lossy(&ff.fname).into_owned();
         match lstat(&ff.fname) {
-            Err(e) => self.jmsg(M_WARNING, format!("Cannot stat file {fname}: ERR={}\n", std::io::Error::from_raw_os_error(e))),
+            Err(e) => self.jmsg(M_WARNING, format!("Cannot stat file {fname}: ERR={}\n", crate::berrno::BErr(e))),
             Ok(st) => {
                 let st = stat_from(&st);
                 if st.mtime != ff.statp.mtime {
@@ -591,7 +591,7 @@ impl<S: Read + Write> Backup<'_, '_, S> {
         }
         if let Some(e) = read_error {
             let fname = String::from_utf8_lossy(&ff.fname).into_owned();
-            self.jmsg(M_ERROR, format!("Read error on file {fname}. ERR={e}\n"));
+            self.jmsg(M_ERROR, format!("Read error on file {fname}. ERR={}\n", crate::berrno::s(&e)));
             let errs = self.sd.msgs.job_errors;
             self.sd.msgs.job_errors += 1;
             if errs > 1000 {
@@ -747,7 +747,7 @@ impl<D: Read + Write> Handler for VerifyHandler<'_, D> {
         self.msgs.flush(self.dir);
         self.counters.num_files_examined += 1;
         let fname = String::from_utf8_lossy(&ff.fname).into_owned();
-        let errno_text = |e: i32| std::io::Error::from_raw_os_error(e).to_string();
+        let errno_text = |e: i32| crate::berrno::BErr(e).to_string();
         match ff.type_ {
             FT_LNKSAVED | FT_REGE | FT_REG | FT_LNK | FT_REPARSE | FT_JUNCTION | FT_DIREND | FT_SPEC | FT_RAW | FT_FIFO => {}
             FT_DIRBEGIN => {
