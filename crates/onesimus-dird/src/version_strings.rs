@@ -4,9 +4,6 @@
 //! Every place the Director prints version information uses these values in
 //! the Bareos format; only the version token itself is Onesimus' own
 //! (workspace version `25.1.2+onesimus.<x>`). Dates come from build.rs.
-//! The complete set is kept even where no caller exists yet (connection
-//! banner, job reports, `status subscriptions`).
-#![allow(dead_code)]
 
 use std::sync::OnceLock;
 
@@ -16,10 +13,6 @@ pub const FULL: &str = env!("CARGO_PKG_VERSION");
 pub const DATE: &str = env!("ONESIMUS_BUILD_DATE");
 /// kBareosVersionStrings.ShortDate, "%d%b%y" (e.g. "09Oct26").
 pub const SHORT_DATE: &str = env!("ONESIMUS_BUILD_SHORT_DATE");
-/// kBareosVersionStrings.ProgDateTime, "%Y-%m-%d %H:%M:%S".
-pub const PROG_DATE_TIME: &str = env!("ONESIMUS_BUILD_PROG_DATE_TIME");
-/// kBareosVersionStrings.Year.
-pub const YEAR: &str = env!("ONESIMUS_BUILD_YEAR");
 /// kBareosVersionStrings.BinaryInfo. Own wording in the upstream position:
 /// the status header appends " binary" ("..., Onesimus binary"), `status
 /// subscriptions` prints "Binary info: Onesimus".
@@ -35,11 +28,6 @@ pub const JOBLOG_MESSAGE: &str = "Onesimus build: Support: https://onesimus.io";
 pub const PLATFORM: &str = env!("ONESIMUS_BUILD_PLATFORM");
 /// Configure-time DISTVER (os-release PRETTY_NAME of the build host).
 pub const DISTVER: &str = env!("ONESIMUS_BUILD_DISTVER");
-
-/// kBareosVersionStrings.FullWithDate: "<Full> (<Date>)".
-pub fn full_with_date() -> String {
-    format!("{FULL} ({DATE})")
-}
 
 /// kBareosVersionStrings.GetOsInfo(): os-release PRETTY_NAME of the running
 /// host, read once. Falls back to uname, then to "built on <DISTVER>".
@@ -141,23 +129,20 @@ mod tests {
     #[test]
     fn full_is_workspace_version() {
         assert!(FULL.starts_with("25.1.2+onesimus."), "{FULL}");
-        assert_eq!(full_with_date(), format!("{FULL} ({DATE})"));
     }
 
     #[test]
     fn dates_use_bareos_formats() {
-        // "%d %B %Y", "%d%b%y", "%Y-%m-%d %H:%M:%S"
+        // "%d %B %Y", "%d%b%y"
         let date: Vec<&str> = DATE.split(' ').collect();
         assert_eq!(date.len(), 3, "{DATE}");
         assert_eq!(date[0].len(), 2);
         assert!(date[1].chars().all(|c| c.is_ascii_alphabetic()));
-        assert_eq!(date[2], YEAR);
+        assert_eq!(date[2].len(), 4);
         assert_eq!(SHORT_DATE.len(), 7, "{SHORT_DATE}");
         assert_eq!(&SHORT_DATE[..2], date[0]);
         assert_eq!(&SHORT_DATE[2..5], &date[1][..3]);
-        assert_eq!(&SHORT_DATE[5..], &YEAR[2..]);
-        assert_eq!(PROG_DATE_TIME.len(), 19, "{PROG_DATE_TIME}");
-        assert!(PROG_DATE_TIME.starts_with(YEAR));
+        assert_eq!(&SHORT_DATE[5..], &date[2][2..]);
     }
 
     #[test]

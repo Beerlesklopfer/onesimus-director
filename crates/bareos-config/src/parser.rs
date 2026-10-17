@@ -482,6 +482,9 @@ fn convert_raw_resource(raw: &RawResource) -> Result<Resource, ConfigError> {
             if let Some(v) = get_any(&["working directory", "workingdirectory"]) {
                 dir.working_directory = v.to_string();
             }
+            if let Some(v) = get("key encryption key") {
+                dir.key_encryption_key = Some(v.to_string());
+            }
             if let Some(v) = get("heartbeat interval") {
                 dir.heartbeat_interval = parse_time(v).map(|(_, d)| d).unwrap_or_default();
             }
@@ -806,10 +809,15 @@ fn store_run(input: &str) -> Result<RunDirective, String> {
     let mut run = RunDirective {
         level: None,
         pool: None,
+        full_pool: None,
+        incremental_pool: None,
+        differential_pool: None,
+        next_pool: None,
         storage: None,
         messages: None,
         priority: None,
         spool_data: None,
+        max_run_sched_time: None,
         accurate: None,
         hour: 0,
         minute: 0,
@@ -844,7 +852,13 @@ fn store_run(input: &str) -> Result<RunDirective, String> {
                 "pool" => run.pool = Some(value),
                 "storage" => run.storage = Some(value),
                 "messages" => run.messages = Some(value),
-                _ => {} // level pools and MaxRunSchedTime are not modelled
+                "fullpool" => run.full_pool = Some(value),
+                "incrementalpool" => run.incremental_pool = Some(value),
+                "differentialpool" => run.differential_pool = Some(value),
+                "nextpool" => run.next_pool = Some(value),
+                "maxrunschedtime" => run.max_run_sched_time = Some(crate::values::parse_time(&value)
+                    .map_err(|_| format!("expected a time period, got: {value}"))?.1.as_secs()),
+                _ => {}
             }
             continue;
         }
@@ -1453,6 +1467,17 @@ Console {
         assert_eq!(run.level, Some(JobLevel::Full));
         assert_eq!(run.hour, 23);
         assert_eq!(run.minute, 45);
+    }
+
+    #[test]
+    fn parse_run_with_level_pools_and_max_run_sched_time() {
+        let run = parse_run_directive("Incremental FullPool=F IncrementalPool=I DifferentialPool=D NextPool=N \
+            MaxRunSchedTime=7200 daily at 1:00").unwrap();
+        assert_eq!(run.full_pool.as_deref(), Some("F"));
+        assert_eq!(run.incremental_pool.as_deref(), Some("I"));
+        assert_eq!(run.differential_pool.as_deref(), Some("D"));
+        assert_eq!(run.next_pool.as_deref(), Some("N"));
+        assert_eq!(run.max_run_sched_time, Some(7200));
     }
 
     #[test]

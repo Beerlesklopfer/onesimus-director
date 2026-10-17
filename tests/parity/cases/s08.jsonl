@@ -1,0 +1,10 @@
+{"id": "s08-encrypt-add", "steps": ["add pool=Full storage=File", "0", "s08-vol", "llist volume=s08-vol"]}
+{"id": "s08-encrypt-yes", "steps": ["update volume=s08-vol encrypt=yes", "llist volume=s08-vol"]}
+{"id": "s08-encrypt-yes-again", "steps": ["update volume=s08-vol encrypt=YES"]}
+{"id": "s08-encrypt-not-purged", "steps": ["update volume=s08-vol encrypt=rotate", "update volume=s08-vol encrypt=no"]}
+{"id": "s08-encrypt-purge", "steps": ["update volume=s08-vol volstatus=Append", "purge volume=s08-vol storage=File pool=Full", "llist volume=s08-vol"]}
+{"id": "s08-encrypt-rotate", "steps": ["update volume=s08-vol encrypt=Rotate", "llist volume=s08-vol"]}
+{"id": "s08-encrypt-no", "steps": ["update volume=s08-vol encrypt=no", "llist volume=s08-vol"]}
+{"id": "s08-encrypt-none-left", "steps": ["update volume=s08-vol encrypt=no", "update volume=s08-vol encrypt=rotate", "update volume=s08-vol encrypt=maybe"]}
+{"id": "s08-encrypt-api2", "setup": [".api 2"], "steps": ["update volume=s08-vol encrypt=yes", "update volume=s08-vol encrypt=yes"]}
+{"id": "s08-encrypt-cleanup", "steps": ["delete volume=s08-vol yes", "list volume=s08-vol"]}

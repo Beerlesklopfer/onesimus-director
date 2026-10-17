@@ -276,7 +276,7 @@ pub fn start(config: &DirectorConfig, catalog: Option<&CatalogHandle>, req: &Req
         spool_data, prefer_mounted_volumes: bool_directive(&dirs, "prefermountedvolumes", true),
         spool_size: crate::commands::defaults::number(&dirs, "spoolsize", 0, crate::commands::defaults::SIZES)
             .unwrap_or(0) as i64,
-        start_messages: messages, fail_before_sd,
+        start_messages: messages, fail_before_sd, remote: None,
     };
     let params = crate::job_worker::JobParams {
         job_id, unique_job: unique.clone(), job_name: job.name.clone(),
@@ -287,7 +287,7 @@ pub fn start(config: &DirectorConfig, catalog: Option<&CatalogHandle>, req: &Req
         director_name: config.director.name.clone(), pool_name: wpool.clone(), fileset_includes: Vec::new(),
         fileset_excludes: Vec::new(), since_utime: 0, prev_job: String::new(), where_path: None, replace: None,
         restore_jobid: None, bootstrap: None, client_name: client.clone(), client_first_connection: false,
-        copy: Some(session),
+        copy: Some(session), regex_where: None, prefix_links: false, verify: None,
     };
 
     let mut report = crate::job_messages::backup_report(config, job, client_res, &wstore, &rpool, &rpool, "f",

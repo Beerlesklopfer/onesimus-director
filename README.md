@@ -22,7 +22,7 @@ Drop-in replacement for the Bareos Director daemon — independent project after
 
 ## Architecture
 
-- **Named threads** (`dir:accept`, `dir:catalog`, `dir:scheduler`, `dir:watchdog`, `dir:grpc`, `dir:monitor`)
+- **Named threads** (`dir:accept`, `dir:catalog`, `dir:scheduler`, `dir:watchdog`, `dir:grpc`)
 - **fork() per job** for process isolation
 - **flume MPSC** for catalog queries, crossbeam channels for command queue
 - **BNET + gRPC** dual protocol (native Rust, no FFI)

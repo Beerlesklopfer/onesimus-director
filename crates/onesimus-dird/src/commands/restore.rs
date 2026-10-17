@@ -27,9 +27,7 @@ use crate::command_queue::CommandResult;
 use crate::commands::bvfs::Db;
 use crate::commands::restore_bsr::Bsr;
 use crate::commands::restore_tree::{user_select_files_from_tree, Tree};
-use crate::job_manager;
-use crate::job_worker::{self, JobParams, WorkerJobType};
-use crate::message_bus::{BusMessage, MsgType};
+use crate::job_worker::{JobParams, WorkerJobType};
 use crate::sql_list::{add_commas, ListType};
 use crate::ua_select::Ua;
 
@@ -75,7 +73,11 @@ pub(crate) struct Launch {
     pub client: String,
     pub restore_client: String,
     pub where_path: Option<String>,
+    /// `regexwhere=` (also built from strip_prefix/add_prefix/add_suffix).
+    pub regex_where: Option<String>,
     pub replace: Option<String>,
+    /// `files=` of the run command (jcr->dir_impl->ExpectedFiles = rc.files).
+    pub expected_files: u64,
     /// The bootstrap file written for this restore.
     pub bootstrap_path: Option<String>,
     /// The Restore Job resource and the storage of the run (C-058).
@@ -364,7 +366,9 @@ pub(crate) fn restore_with(ast: &CommandAst, ctx: &ExecContext,
             client: value("client").unwrap_or_default(),
             restore_client: value("restoreclient").unwrap_or_default(),
             where_path: value("where"),
+            regex_where: value("regexwhere"),
             replace: value("replace"),
+            expected_files: atoi(value("files").as_deref()),
             bootstrap_path: value("bootstrap"),
             job: value("job"),
             storage: value("storage"),
@@ -1680,10 +1684,12 @@ use crate::btime::str_to_utime;
 /// Start a confirmed restore (the `restore` command and `run` of a Restore
 /// job, job.cc RunJob): the Job record (Type 'R', Level 'F', the restore
 /// client), the job queue and the reply "Job queued. JobId=N". The worker
-/// reads the bootstrap the restore wrote, else one generated from the
-/// catalog for `restore_jobid`. Compatibility log C-058.
+/// reads the bootstrap file of the run (`bootstrap=`, else the Job's
+/// Bootstrap directive, job.cc SetJcrDefaults); without one, or when it
+/// does not open, the job fails like restore.cc DoNativeRestore.
+/// Compatibility log C-058.
 pub(crate) fn start_restore(ctx: &ExecContext, launch: Launch) -> CommandResult {
-    let Launch { restore_jobid, client: _, restore_client, where_path, replace, bootstrap_path, job, storage } = launch;
+    let Launch { restore_jobid, client: _, restore_client, where_path, regex_where, replace, expected_files, bootstrap_path, job, storage } = launch;
 
     let config = match &ctx.config {
         Some(c) => match c.read() {
@@ -1700,22 +1706,30 @@ pub(crate) fn start_restore(ctx: &ExecContext, launch: Launch) -> CommandResult 
     let job_dirs = crate::commands::defaults::job_directives(&config, &job.name);
     let job_value = |key: &str| job_dirs.iter().rev().find(|d| d.norm_key() == key).and_then(|d| d.first())
         .map(str::to_string);
-    let where_path = where_path.or_else(|| job_value("where")).unwrap_or_else(|| "/tmp/bareos-restores".to_string());
+    // BuildRestoreCommand(): the run's RegexWhere, the Job's RegexWhere
+    // (dird_conf.cc builds it from StripPrefix/AddPrefix/AddSuffix and then
+    // drops the Job's Where), the run's Where, the Job's Where, else empty.
+    let job_regex_where = job_value("regexwhere").or_else(|| {
+        let (strip, add, suffix) = (job_value("stripprefix"), job_value("addprefix"), job_value("addsuffix"));
+        (strip.is_some() || add.is_some() || suffix.is_some())
+            .then(|| crate::breg::build_where(strip.as_deref(), add.as_deref(), suffix.as_deref()))
+    });
+    let (where_path, regex_where) = match (regex_where, job_regex_where) {
+        (Some(r), _) => (None, Some(r)),
+        (None, Some(r)) => (None, Some(r)),
+        (None, None) => (Some(where_path.or_else(|| job_value("where")).unwrap_or_default()), None),
+    };
     let replace = replace.or_else(|| job_value("replace")).unwrap_or_else(|| "always".to_string()).to_ascii_lowercase();
+    let prefix_links = crate::commands::defaults::bool_directive(&job_dirs, "prefixlinks", false);
 
     let client = match config.find_client(&restore_client) {
         Some(c) => c.clone(),
         None => return CommandResult::error(format!("Client '{restore_client}' not found\n")),
     };
 
-    // The bootstrap written by the restore command, else from the catalog
-    let written = bootstrap_path.and_then(|path| std::fs::read_to_string(path).ok());
-    let bootstrap = match written.or_else(|| job_manager::generate_bootstrap(&ctx.catalog, restore_jobid)) {
-        Some(bsr) => bsr,
-        None => return CommandResult::error(format!(
-            "Cannot generate bootstrap for JobId={restore_jobid} — no jobmedia records\n"
-        )),
-    };
+    // jcr->RestoreBootstrap: the run's bootstrap=, else the Job's Bootstrap;
+    // the job reads it (job_worker restore_bootstrap).
+    let bootstrap = bootstrap_path.or_else(|| job_value("bootstrap"));
 
     // The read storage of the run, else the Job's, else the first one.
     let storage = match storage.as_deref().and_then(|s| config.find_storage(s))
@@ -1762,28 +1776,31 @@ pub(crate) fn start_restore(ctx: &ExecContext, launch: Launch) -> CommandResult 
         fileset_excludes: vec![],
         since_utime: 0,
         prev_job: String::new(),
-        where_path: Some(where_path),
+        where_path,
+        regex_where,
+        prefix_links,
         replace: Some(replace),
         restore_jobid: Some(restore_jobid),
-        bootstrap: Some(bootstrap),
+        bootstrap,
         client_name: client.name.clone(),
         client_first_connection: crate::job_messages::first_client_connection(&client.name),
         copy: None,
+        verify: None,
     };
     let report = crate::job_messages::JobReport {
         kind: crate::job_messages::ReportKind::Restore, job: unique_job.clone(), client: client.name.clone(),
-        sched_time: now, start_time: now,
+        sched_time: now, start_time: now, expected_files: Some(expected_files),
         trigger: crate::job_messages::TRIGGER_USER.to_string(), ..Default::default()
     };
 
-    if let Some(smgr) = &ctx.session_mgr {
-        for text in [crate::job_messages::version_text(), crate::job_messages::start_restore_text(&unique_job)] {
-            crate::console_msg::post_job_message(smgr.bus(), ctx.config.as_ref(), BusMessage::JobMessage {
-                job_id, job_name: job.name.clone(), msg_type: MsgType::Info, text, timestamp: now_unix(),
-            });
-        }
-    }
     crate::commands::job::queue_job(ctx, &job, params, report, &client.name, &storage.name, now)
+}
+
+/// atoi() of an optional argument (0 when absent or not a number).
+pub(crate) fn atoi(v: Option<&str>) -> u64 {
+    let v = v.unwrap_or("").trim_start();
+    let digits: String = v.chars().take_while(|c| c.is_ascii_digit()).collect();
+    digits.parse().unwrap_or(0)
 }
 
 fn now_unix() -> i64 {
@@ -2116,6 +2133,62 @@ Console { Name=limited; Password=pw; CommandACL=*all*; CatalogACL=*all*; ClientA
             });
         assert!(result.success);
         assert_eq!(started, Some((1, "fd1".into(), "fd1".into(), Some("/tmp/x".into()), Some(bootstrap.clone()))));
+        let _ = std::fs::remove_file(&bootstrap);
+    }
+
+    /// `.api 2`: a complete selection starts the restore without a question
+    /// (batch mode) and the result carries DoRunCmd's "run" object, also
+    /// after the tree dialog on the console (C-072, S-09).
+    #[test]
+    fn api2_restore_result_has_the_jobid() {
+        let (mut ctx, _) = context("*UserAgent*");
+        ctx.api_mode = ApiMode::Json;
+        let bootstrap = bootstrap_file("api2_jobid");
+        let queued = || CommandResult::ok("Job queued. JobId=630\n".to_string())
+            .with_json(serde_json::json!({"run": {"jobid": "630"}}));
+        for (line, answers) in [
+            (format!("restore jobid=1 client=fd1 all done bootstrap={bootstrap}"), vec![]),
+            (format!("restore jobid=1 client=fd1 bootstrap={bootstrap}"), vec!["mark *", "done"]),
+        ] {
+            let mut started = false;
+            let (result, transcript) = scripted(&answers, || restore_with(&crate::session::parse_cli_command(&line),
+                &ctx, |_| { started = true; queued() }));
+            let transcript = transcript.transcript();
+            assert!(started, "{line}: {transcript}");
+            assert!(result.success, "{line}");
+            assert_eq!(result.json, Some(serde_json::json!({"run": {"jobid": "630"}})), "{line}: {transcript}");
+            assert!(!transcript.contains("OK to run?"), "{line}: {transcript}");
+        }
+        let _ = std::fs::remove_file(&bootstrap);
+    }
+
+    /// The whole command under `.api 2` (start_restore, queue_job with a
+    /// spawner that never forks): the json-rpc result is DoRunCmd's
+    /// {"run":{"jobid":"N"}} (C-072, S-09).
+    #[test]
+    fn api2_restore_envelope_has_the_jobid() {
+        let (mut ctx, _) = context("*UserAgent*");
+        ctx.api_mode = ApiMode::Json;
+        ctx.catalog = Some(CatalogHandle::mock(|request| match request {
+            CatalogRequest::TextRows { sql } if sql.starts_with("SELECT ClientId FROM Client") =>
+                CatalogResponse::Rows(table(&["1"])),
+            CatalogRequest::TextRows { sql } if sql.starts_with("INSERT INTO Job ") =>
+                CatalogResponse::Rows(table(&["630"])),
+            CatalogRequest::TextRows { sql } => CatalogResponse::Rows(answer(&sql)),
+            _ => CatalogResponse::Error("mock".into()),
+        }));
+        fn no_fork(_: u32, _: &str, _: &crate::job_worker::JobParams) -> std::io::Result<crate::job_worker::JobHandle> {
+            Err(std::io::Error::other("no fork in this test"))
+        }
+        let mut manager = crate::job_manager::JobManager::new(
+            Arc::new(crate::message_bus::MessageBus::new(16)), ctx.config.clone(), ctx.catalog.clone());
+        manager.set_spawner(no_fork);
+        ctx.job_manager = Some(Arc::new(Mutex::new(manager)));
+        let bootstrap = bootstrap_file("api2_envelope");
+        let result = cmd_restore(&crate::session::parse_cli_command(
+            &format!("restore jobid=1 client=fd1 all done bootstrap={bootstrap}")), &ctx);
+        let envelope: serde_json::Value = serde_json::from_str(&crate::json_output::envelope(&result, false)).unwrap();
+        assert_eq!(envelope["result"], serde_json::json!({"run": {"jobid": "630"}}), "{result:?}");
         let _ = std::fs::remove_file(&bootstrap);
     }
 

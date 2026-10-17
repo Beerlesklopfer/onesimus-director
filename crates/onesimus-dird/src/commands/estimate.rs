@@ -452,37 +452,57 @@ fn estimate_on_fd<S: std::io::Read + std::io::Write>(fd: &mut BnetStream<S>, cat
 
 /// fd_sendfileset.cc SendFilesetIgnoredir/SendFilesetOptions/SendFilesetFileAndPlugin.
 fn send_item<S: std::io::Read + std::io::Write>(fd: &mut BnetStream<S>, item: &Item) -> Result<(), String> {
+    emit_item(&mut |m: &str| send(fd, m), item)
+}
+
+/// fd_sendfileset.cc SendIncludeExcludeLists(): the messages before the EOD
+/// (the "fileset" command and the items), for a job worker to send. None
+/// when the FileSet has nothing to send (!fileset->new_include).
+pub(crate) fn include_exclude_messages(cfg: &DirectorConfig, fileset: &str) -> Result<Option<Vec<String>>, String> {
+    let Some(items) = fileset_items(cfg, fileset) else { return Ok(None) };
+    let mut out = vec![format!("fileset{}\n", if items.enable_vss { " vss=1" } else { "" })];
+    let mut sink = |m: &str| { out.push(m.to_string()); Ok(()) };
+    for (code, list) in [("I\n", &items.includes), ("E\n", &items.excludes)] {
+        for item in list {
+            sink(code)?;
+            emit_item(&mut sink, item)?;
+        }
+    }
+    Ok(Some(out))
+}
+
+fn emit_item(send_msg: &mut dyn FnMut(&str) -> Result<(), String>, item: &Item) -> Result<(), String> {
     for dir in &item.ignoredir {
-        send(fd, &format!("Z {dir}\n"))?;
+        send_msg(&format!("Z {dir}\n"))?;
     }
     for fo in &item.options {
         let enhanced_wild = fo.opts.contains('W');
-        send(fd, &format!("O {}\n", fo.opts))?;
+        send_msg(&format!("O {}\n", fo.opts))?;
         let lists: [(&str, &Vec<String>); 9] = [("R", &fo.regex), ("RD", &fo.regexdir), ("RF", &fo.regexfile),
             ("W", &fo.wild), ("WD", &fo.wilddir), ("WF", &fo.wildfile),
             (if enhanced_wild { "WB" } else { "WF" }, &fo.wildbase), ("X", &fo.fstype), ("XD", &fo.drivetype)];
         for (code, values) in lists {
             for value in values {
-                send(fd, &format!("{code} {value}\n"))?;
+                send_msg(&format!("{code} {value}\n"))?;
             }
         }
         if let Some(plugin) = &fo.plugin {
-            send(fd, &format!("G {plugin}\n"))?;
+            send_msg(&format!("G {plugin}\n"))?;
         }
-        send(fd, "N\n")?;
+        send_msg("N\n")?;
     }
     for file in &item.files {
-        send_list_item(fd, "F ", file)?;
+        send_list_item(send_msg, "F ", file)?;
     }
-    send(fd, "N\n")?;
+    send_msg("N\n")?;
     for plugin in &item.plugins {
-        send_list_item(fd, "P ", plugin)?;
+        send_list_item(send_msg, "P ", plugin)?;
     }
-    send(fd, "N\n")
+    send_msg("N\n")
 }
 
 /// fd_sendfileset.cc SendListItem(): `|program`, `<file` or a plain name.
-fn send_list_item<S: std::io::Read + std::io::Write>(fd: &mut BnetStream<S>, code: &str, item: &str) -> Result<(), String> {
+fn send_list_item(send_msg: &mut dyn FnMut(&str) -> Result<(), String>, code: &str, item: &str) -> Result<(), String> {
     let lines = |text: String| -> Vec<String> { text.split_inclusive('\n').map(|l| format!("{code}{l}")).collect() };
     let messages = if let Some(program) = item.strip_prefix('|') {
         let output = std::process::Command::new("/bin/sh").arg("-c").arg(program).output()
@@ -497,7 +517,7 @@ fn send_list_item<S: std::io::Read + std::io::Write>(fd: &mut BnetStream<S>, cod
         vec![format!("{code}{}", item.strip_prefix('\\').unwrap_or(item))]
     };
     for message in messages {
-        send(fd, &message)?;
+        send_msg(&message)?;
     }
     Ok(())
 }
