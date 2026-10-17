@@ -9,7 +9,7 @@ export PATH := $(HOME)/.cargo/bin:$(PATH)
 override_dh_auto_build:
 	@command -v cargo >/dev/null || { echo "cargo not found: install rustup (https://rustup.rs) or 'apt install cargo rustc'"; exit 1; }
 	@test -f proto/director_service.proto || { echo "proto submodule missing: run 'git submodule update --init'"; exit 1; }
-	cargo build --release -p onesimus-dird -p oconsole --no-default-features --features oconsole/mcp-production
+	cargo build --release --locked -p onesimus-dird -p oconsole --no-default-features --features oconsole/mcp-production
 
 override_dh_auto_install:
 	# === onesimus-dird package ===
@@ -30,7 +30,7 @@ override_dh_auto_install:
 	install -D -m 644 config/brconsole.conf debian/oconsole/usr/share/bareos/defaultconfigs/oconsole.conf
 
 override_dh_auto_test:
-	cargo test --release --no-default-features --features oconsole/mcp-production
+	cargo test --release --locked --no-default-features --features oconsole/mcp-production
 
 override_dh_strip:
 	strip debian/onesimus-dird/usr/sbin/onesimus-dird

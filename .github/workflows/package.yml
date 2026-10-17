@@ -54,12 +54,12 @@ jobs:
             ~/.cargo/registry/cache
             ~/.cargo/git/db
             target
-          key: test-${{ hashFiles('**/Cargo.toml') }}
+          key: test-${{ hashFiles('Cargo.lock') }}
           restore-keys: test-
 
       - name: Tests
         run: |
-          cargo test \
+          cargo test --locked \
             -p onesimus-dird -p oconsole -p bareos-config -p bareos-filed \
             --no-default-features --features oconsole/mcp-production
 
@@ -92,8 +92,24 @@ jobs:
             ~/.cargo/registry/index
             ~/.cargo/registry/cache
             ~/.cargo/git/db
-          key: package-${{ hashFiles('**/Cargo.toml') }}
+          key: package-${{ hashFiles('Cargo.lock') }}
           restore-keys: package-
+
+      - name: Versionsnummer
+        # Tags v* bauen die Version aus debian/changelog. Alle anderen Läufe
+        # bekommen eine Build-Nummer: <Version>~dev<Lauf>.g<Commit>; "~" sortiert
+        # vor der Release-Version, ein späteres Release ersetzt den Entwicklungsstand.
+        if: "!startsWith(github.ref, 'refs/tags/v')"
+        env:
+          DEBEMAIL: ci@onesimus.io
+          DEBFULLNAME: Onesimus CI
+        run: |
+          git config --global --add safe.directory "$GITHUB_WORKSPACE"
+          base=$(dpkg-parsechangelog -S Version)
+          version="${base}~dev${GITHUB_RUN_NUMBER}.g$(git rev-parse --short=8 HEAD)"
+          dch --newversion "$version" --distribution UNRELEASED --force-distribution \
+            "CI build ${GITHUB_RUN_NUMBER} of ${GITHUB_REF_NAME} ($(git rev-parse --short=8 HEAD))"
+          echo "Paketversion: $version"
 
       - name: Pakete bauen
         # Die Tests liefen im Job test; dh_auto_test hier nicht wiederholen.
