@@ -127,6 +127,22 @@ pub(crate) fn update_vol_record(ua: &mut Ua, db: &dyn Db, media_id: i64, change:
     }
 }
 
+/// ReplaceVolEncryptionKey / RemoveVolEncryptionKey (ua_update.cc:318):
+/// the new EncrKey through UpdateMediaRecord.
+pub(crate) fn update_vol_encryption_key(ua: &mut Ua, db: &dyn Db, media_id: i64, volume: &str, key: String,
+    generated: bool) {
+    let mut session = Session::new(db);
+    let mut mr = session.media(media_id).unwrap_or(MediaRecord { media_id, ..Default::default() });
+    mr.encr_key = key;
+    if !catreq::update_media_record(&mut session.cat(), &mr) {
+        ua.error_msg(format!("Error updating media record: ERR={}", session.errmsg));
+    } else if generated {
+        ua.info_msg(format!("Generated new encryption key for volume '{volume}' in catalog.\n"));
+    } else {
+        ua.info_msg(format!("Removed encryption key for volume '{volume}' from catalog.\n"));
+    }
+}
+
 /// UpdateVolStorage after GetStorageDbr (the dialog announces the new
 /// storage afterwards).
 pub(crate) fn update_vol_storage(ua: &mut Ua, db: &dyn Db, media_id: i64, storage: &str, announce: bool) {

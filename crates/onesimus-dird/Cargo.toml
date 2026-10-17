@@ -48,5 +48,6 @@ hex.workspace = true
 rustls-pemfile.workspace = true
 md-5.workspace = true
 rand.workspace = true
+openssl.workspace = true
 
 [dev-dependencies]

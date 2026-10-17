@@ -482,6 +482,9 @@ fn convert_raw_resource(raw: &RawResource) -> Result<Resource, ConfigError> {
             if let Some(v) = get_any(&["working directory", "workingdirectory"]) {
                 dir.working_directory = v.to_string();
             }
+            if let Some(v) = get("key encryption key") {
+                dir.key_encryption_key = Some(v.to_string());
+            }
             if let Some(v) = get("heartbeat interval") {
                 dir.heartbeat_interval = parse_time(v).map(|(_, d)| d).unwrap_or_default();
             }
