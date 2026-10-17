@@ -54,6 +54,7 @@ mod ua_impexp;
 mod ua_storage_select;
 mod ua_select;
 mod version_strings;
+mod volume_key;
 mod watchdog;
 
 use std::path::PathBuf;

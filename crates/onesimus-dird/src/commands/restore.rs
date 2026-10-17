@@ -2118,6 +2118,62 @@ Console { Name=limited; Password=pw; CommandACL=*all*; CatalogACL=*all*; ClientA
         let _ = std::fs::remove_file(&bootstrap);
     }
 
+    /// `.api 2`: a complete selection starts the restore without a question
+    /// (batch mode) and the result carries DoRunCmd's "run" object, also
+    /// after the tree dialog on the console (C-072, S-09).
+    #[test]
+    fn api2_restore_result_has_the_jobid() {
+        let (mut ctx, _) = context("*UserAgent*");
+        ctx.api_mode = ApiMode::Json;
+        let bootstrap = bootstrap_file("api2_jobid");
+        let queued = || CommandResult::ok("Job queued. JobId=630\n".to_string())
+            .with_json(serde_json::json!({"run": {"jobid": "630"}}));
+        for (line, answers) in [
+            (format!("restore jobid=1 client=fd1 all done bootstrap={bootstrap}"), vec![]),
+            (format!("restore jobid=1 client=fd1 bootstrap={bootstrap}"), vec!["mark *", "done"]),
+        ] {
+            let mut started = false;
+            let (result, transcript) = scripted(&answers, || restore_with(&crate::session::parse_cli_command(&line),
+                &ctx, |_| { started = true; queued() }));
+            let transcript = transcript.transcript();
+            assert!(started, "{line}: {transcript}");
+            assert!(result.success, "{line}");
+            assert_eq!(result.json, Some(serde_json::json!({"run": {"jobid": "630"}})), "{line}: {transcript}");
+            assert!(!transcript.contains("OK to run?"), "{line}: {transcript}");
+        }
+        let _ = std::fs::remove_file(&bootstrap);
+    }
+
+    /// The whole command under `.api 2` (start_restore, queue_job with a
+    /// spawner that never forks): the json-rpc result is DoRunCmd's
+    /// {"run":{"jobid":"N"}} (C-072, S-09).
+    #[test]
+    fn api2_restore_envelope_has_the_jobid() {
+        let (mut ctx, _) = context("*UserAgent*");
+        ctx.api_mode = ApiMode::Json;
+        ctx.catalog = Some(CatalogHandle::mock(|request| match request {
+            CatalogRequest::TextRows { sql } if sql.starts_with("SELECT ClientId FROM Client") =>
+                CatalogResponse::Rows(table(&["1"])),
+            CatalogRequest::TextRows { sql } if sql.starts_with("INSERT INTO Job ") =>
+                CatalogResponse::Rows(table(&["630"])),
+            CatalogRequest::TextRows { sql } => CatalogResponse::Rows(answer(&sql)),
+            _ => CatalogResponse::Error("mock".into()),
+        }));
+        fn no_fork(_: u32, _: &str, _: &crate::job_worker::JobParams) -> std::io::Result<crate::job_worker::JobHandle> {
+            Err(std::io::Error::other("no fork in this test"))
+        }
+        let mut manager = crate::job_manager::JobManager::new(
+            Arc::new(crate::message_bus::MessageBus::new(16)), ctx.config.clone(), ctx.catalog.clone());
+        manager.set_spawner(no_fork);
+        ctx.job_manager = Some(Arc::new(Mutex::new(manager)));
+        let bootstrap = bootstrap_file("api2_envelope");
+        let result = cmd_restore(&crate::session::parse_cli_command(
+            &format!("restore jobid=1 client=fd1 all done bootstrap={bootstrap}")), &ctx);
+        let envelope: serde_json::Value = serde_json::from_str(&crate::json_output::envelope(&result, false)).unwrap();
+        assert_eq!(envelope["result"], serde_json::json!({"run": {"jobid": "630"}}), "{result:?}");
+        let _ = std::fs::remove_file(&bootstrap);
+    }
+
     #[test]
     fn file_selection_tree_dialog() {
         let (ctx, _) = context("*UserAgent*");

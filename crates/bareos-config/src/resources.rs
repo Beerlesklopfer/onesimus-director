@@ -37,6 +37,9 @@ pub struct DirectorResource {
     /// Announce the Director via mDNS (_onesimus-dir._tcp)
     pub mdns_advertise: bool,
     pub working_directory: String,
+    /// `Key Encryption Key` (dird_conf.cc:142, stored in clear): wraps
+    /// generated volume encryption keys.
+    pub key_encryption_key: Option<String>,
 }
 
 impl Default for DirectorResource {
@@ -55,6 +58,7 @@ impl Default for DirectorResource {
             grpc_tls_key: None,
             mdns_advertise: true,
             working_directory: "/var/lib/bareos".to_string(),
+            key_encryption_key: None,
         }
     }
 }

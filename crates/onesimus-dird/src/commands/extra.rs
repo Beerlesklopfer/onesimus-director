@@ -965,6 +965,8 @@ struct AddVolumes {
     names: Vec<String>,
     slot: i64,
     in_changer: bool,
+    /// SetStorageidInMr: StorageId of the selected storage (0 without).
+    storage_id: i64,
 }
 
 /// add_cmd (ua_cmds.cc:611): hint, OpenClientDb, GetPoolDbr, maximum check,
@@ -1048,7 +1050,8 @@ fn add_questions(ua: &mut crate::ua_select::Ua, ast: &CommandAst) -> Option<AddV
     let names = (start..start + count)
         .map(|i| if num > 0 { format!("{base}{i:04}") } else { base.clone() })
         .collect();
-    Some(AddVolumes { pool, pool_id, media_type, names, slot, in_changer })
+    let storage_id = storage.as_deref().and_then(|name| crate::ua_select::get_storage_record(ctx, name)).unwrap_or(0);
+    Some(AddVolumes { pool, pool_id, media_type, names, slot, in_changer, storage_id })
 }
 
 /// CreateMediaRecord for each volume (pool defaults, VolStatus Unlabeled)
@@ -1061,11 +1064,11 @@ fn add_volumes(ua: &mut crate::ua_select::Ua, volumes: AddVolumes) {
     for (index, name) in volumes.names.iter().enumerate() {
         let sql = format!(
             "INSERT INTO Media (VolumeName, MediaType, PoolId, VolStatus, Enabled, Slot, InChanger, Recycle, \
-             VolRetention, VolUseDuration, MaxVolJobs, MaxVolFiles, MaxVolBytes, RecyclePoolId, ActionOnPurge) \
+             VolRetention, VolUseDuration, MaxVolJobs, MaxVolFiles, MaxVolBytes, RecyclePoolId, ActionOnPurge, StorageId) \
              SELECT '{}', '{}', PoolId, 'Unlabeled', 1, {}, {}, Recycle, VolRetention, VolUseDuration, \
-             MaxVolJobs, MaxVolFiles, MaxVolBytes, RecyclePoolId, ActionOnPurge FROM Pool WHERE PoolId={}",
+             MaxVolJobs, MaxVolFiles, MaxVolBytes, RecyclePoolId, ActionOnPurge, {} FROM Pool WHERE PoolId={}",
             name.replace('\'', "''"), volumes.media_type.replace('\'', "''"),
-            volumes.slot + index as i64, i32::from(volumes.in_changer), volumes.pool_id);
+            volumes.slot + index as i64, i32::from(volumes.in_changer), volumes.storage_id, volumes.pool_id);
         if let Err(e) = cat.raw_query(&sql) {
             ua.error_msg(format!("{e}\n"));
             return;
