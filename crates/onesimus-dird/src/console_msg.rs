@@ -182,8 +182,10 @@ pub fn job_message(config: &DirectorConfig, job_name: &str, job_id: u32, msg_typ
 /// DispatchMessage(jcr, type, mtime, msg) of a complete message (a job
 /// message the File or Storage daemon sent, getmsg.cc) for job `job_name`.
 pub fn dispatch_job_message(config: &DirectorConfig, job_name: &str, job_id: u32, code: u32, mtime: i64, msg: &str) {
-    let job_messages = config.jobs.iter().find(|j| j.name == job_name && job_id != 0)
-        .map(|j| j.messages.as_str()).filter(|m| !m.is_empty());
+    // A Run directive's Messages override (scheduled_run.rs, S-15).
+    let run_messages = crate::scheduled_run::job_messages(job_id);
+    let job_messages = run_messages.as_deref().or_else(|| config.jobs.iter().find(|j| j.name == job_name && job_id != 0)
+        .map(|j| j.messages.as_str())).filter(|m| !m.is_empty());
     let res = match job_messages {
         Some(name) => crate::audit::messages_resource(config, name),
         None => crate::audit::daemon_messages(config),

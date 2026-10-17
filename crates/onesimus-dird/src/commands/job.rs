@@ -1622,6 +1622,9 @@ fn run_selected(
     };
     let pool = ast.arguments.iter().find(|a| a.key == "pool")
         .and_then(|a| a.value.as_deref()).unwrap_or(default_pool);
+    // A scheduled run: the pool overrides of its Run directive (S-15).
+    let run_pool = crate::scheduled_run::backup_pool(&job, level_char);
+    let pool = run_pool.as_deref().unwrap_or(pool);
 
     let client = client_res.unwrap();
     let storage = storage_res.unwrap();
@@ -1722,11 +1725,9 @@ fn run_selected(
     // RunJob(): the job queue forks the worker once its priority and the
     // Maximum Concurrent Jobs allow it (Compatibility log C-048).
     if let Some(ref mgr) = ctx.job_manager {
-        let mut mgr = mgr.lock().unwrap();
-        mgr.enqueue_job(job_id, &job.name, crate::job_manager::QueuedStart {
+        enqueue_with_report(mgr, &job.name, crate::job_manager::QueuedStart {
             params, priority: job.priority, sched_time: now.timestamp(),
-        }, &resources.0, &resources.1);
-        mgr.set_job_report(job_id, report);
+        }, &resources.0, &resources.1, report);
     } else {
         match job_worker::spawn_job_worker(job_id, &job.name, &params) {
             Ok(handle) => tracing::info!("Job {job_id} '{}': worker pid={}", job.name, handle.pid),
@@ -1800,6 +1801,19 @@ fn plain_params(job_id: u32, unique: &str, job: &bareos_config::resources::JobRe
     }
 }
 
+/// JobqAdd(): the job and its report into the job queue. A job the
+/// scheduler starts gets the JobPriority, trigger and sources of its Run
+/// directive (scheduled_run.rs, S-15).
+fn enqueue_with_report(mgr: &std::sync::Mutex<crate::job_manager::JobManager>, job_name: &str,
+                       mut start: crate::job_manager::QueuedStart, client: &str, storage: &str,
+                       mut report: crate::job_messages::JobReport) {
+    let job_id = start.params.job_id;
+    crate::scheduled_run::apply(job_id, &mut start.priority, &mut report);
+    let mut mgr = mgr.lock().unwrap();
+    mgr.enqueue_job(job_id, job_name, start, client, storage);
+    mgr.set_job_report(job_id, report);
+}
+
 /// Queue a job whose catalog record exists: the "Version:" job message,
 /// then the job queue (or a direct worker without a JobManager).
 #[allow(clippy::too_many_arguments)]
@@ -1812,11 +1826,9 @@ pub(crate) fn queue_job(ctx: &ExecContext, job: &bareos_config::resources::JobRe
         });
     }
     if let Some(ref mgr) = ctx.job_manager {
-        let mut mgr = mgr.lock().unwrap();
-        mgr.enqueue_job(job_id, &job.name, crate::job_manager::QueuedStart {
+        enqueue_with_report(mgr, &job.name, crate::job_manager::QueuedStart {
             params, priority: job.priority, sched_time,
-        }, client, storage);
-        mgr.set_job_report(job_id, report);
+        }, client, storage, report);
     } else if let Err(e) = job_worker::spawn_job_worker(job_id, &job.name, &params) {
         return CommandResult::error(format!("Failed to start job: {e}\n"));
     }
@@ -1931,11 +1943,8 @@ fn run_internal(
                     job_id, job_name: child.job_name.clone(), status: "Queued".to_string(), timestamp: now_unix() });
             }
             match &ctx.job_manager {
-                Some(mgr) => {
-                    let mut mgr = mgr.lock().unwrap();
-                    mgr.enqueue_job(job_id, &child.job_name, child.start, &child.client, &child.storage);
-                    mgr.set_job_report(job_id, child.report);
-                }
+                Some(mgr) => enqueue_with_report(mgr, &child.job_name, child.start, &child.client, &child.storage,
+                    child.report),
                 None => return CommandResult::error("Job failed.\n".to_string()),
             }
             return job_queued(job_id);

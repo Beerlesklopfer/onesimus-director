@@ -20,7 +20,6 @@ mod commands;
 mod config_check;
 mod command_worker;
 mod expand;
-mod connection_monitor;
 mod director_config;
 mod fd_protocol;
 mod fsm;
@@ -41,6 +40,7 @@ mod message_bus;
 mod reload;
 mod run_time;
 mod runscript;
+mod scheduled_run;
 mod scheduler;
 mod migrate;
 mod sd_copy;
@@ -531,11 +531,16 @@ fn spawn_named_threads(
 
     // dir:scheduler — job scheduling
     {
-        let sched_config = config.clone();
+        let launcher = scheduled_run::Launcher {
+            config: config.clone(),
+            session_mgr: Some(session_mgr.clone()),
+            catalog: catalog.clone(),
+            job_manager: Some(job_mgr.clone()),
+        };
         let handle = thread::Builder::new()
             .name("dir:scheduler".into())
             .spawn(move || {
-                scheduler::scheduler_loop(Some(sched_config), &SHUTDOWN);
+                scheduler::scheduler_loop(Some(launcher), &SHUTDOWN);
             })
             .expect("failed to spawn dir:scheduler");
         threads.push(("dir:scheduler".into(), handle));
@@ -625,19 +630,6 @@ fn spawn_named_threads(
             })
             .expect("failed to spawn dir:cmdworker");
         threads.push(("dir:cmdworker".into(), handle));
-    }
-
-    // dir:monitor — FD/SD connection health checks
-    {
-        let smgr = session_mgr;
-        let b = bus;
-        let handle = thread::Builder::new()
-            .name("dir:monitor".into())
-            .spawn(move || {
-                connection_monitor::monitor_loop(&smgr, &b, &SHUTDOWN);
-            })
-            .expect("failed to spawn dir:monitor");
-        threads.push(("dir:monitor".into(), handle));
     }
 
     threads
