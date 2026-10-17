@@ -267,23 +267,28 @@ pub fn start_worker(config: &DirectorConfig, catalog: &CatalogHandle, req: &Work
         None => (prev_job.storage.split(',').next().unwrap_or("").trim().to_string(), "previous Job"),
     };
 
-    // mig_jcr: the new backup job (SetJcrDefaults(prev_job), SetupJob).
-    let new_unique = crate::commands::job::unique_job_name(&prev.name, now);
-    let prev_client = if prev_job.client.is_empty() { client.clone() } else { prev_job.client.clone() };
-    let Ok(new_cid) = client_id(catalog, &prev_client) else { return started };
-    let new_job_id = match create_job_record(catalog, &new_unique, &prev.name, 'B', job_level, &new_cid, now) {
-        Ok(id) => id,
-        Err(_) => {
-            fatal(msgs, "setup job failed.\n".into());
-            return started;
-        }
-    };
-    // UpdateJobStartRecord() parts the catalog requests rely on: the write
-    // pool of both jobs, the previous job's level/FileSet for the new one.
+    // UpdateJobStartRecord() parts the catalog requests rely on: the write pool.
     let _ = catalog.execute(&format!("UPDATE Job SET Level='{job_level}',PoolId={next_pool_id} WHERE JobId={job_id}"));
-    let _ = catalog.execute(&format!(
-        "UPDATE Job SET Level=(SELECT Level FROM Job WHERE JobId={p}),PoolId={next_pool_id},FileSetId={f} WHERE JobId={new_job_id}",
-        p = prev.job_id, f = if prev.fileset_id.is_empty() { "0" } else { &prev.fileset_id }));
+    // mig_jcr: the new backup job (SetJcrDefaults(prev_job), SetupJob) —
+    // not when the previous job has no data ("no work").
+    let new_job_id = if expected == 0 {
+        None
+    } else {
+        let new_unique = crate::commands::job::unique_job_name(&prev.name, now);
+        let prev_client = if prev_job.client.is_empty() { client.clone() } else { prev_job.client.clone() };
+        let Ok(new_cid) = client_id(catalog, &prev_client) else { return started };
+        let new_job_id = match create_job_record(catalog, &new_unique, &prev.name, 'B', job_level, &new_cid, now) {
+            Ok(id) => id,
+            Err(_) => {
+                fatal(msgs, "setup job failed.\n".into());
+                return started;
+            }
+        };
+        let _ = catalog.execute(&format!(
+            "UPDATE Job SET Level=(SELECT Level FROM Job WHERE JobId={p}),PoolId={next_pool_id},FileSetId={f} WHERE JobId={new_job_id}",
+            p = prev.job_id, f = num(&prev.fileset_id)));
+        Some(new_job_id)
+    };
 
     let (catalog_name, catalog_source) = catalog_of(config, &job, &read_pool, &client);
     let store = |name: &str, pool: &str| -> Option<crate::sd_copy::StorageUse> {
@@ -302,7 +307,7 @@ pub fn start_worker(config: &DirectorConfig, catalog: &CatalogHandle, req: &Work
     };
 
     let mut info = WorkerInfo {
-        copy, job: unique.clone(), job_resource: job.name.clone(), prev: prev.clone(), new_job_id: Some(new_job_id),
+        copy, job: unique.clone(), job_resource: job.name.clone(), prev: prev.clone(), new_job_id,
         level: job_level, client: client.clone(), fileset: fileset.clone(),
         read_pool: (read_pool.clone(), read_pool_source.into()),
         read_storage: (read_store.clone(), read_store_source.into()),
@@ -473,6 +478,8 @@ pub fn cleanup(director: &str, catalog: Option<&CatalogHandle>, job_id: u32, end
         }
     }
     let (msg_type, term) = match status {
+        // No mig_jcr (and no HasSelectedJobs): "%s -- no files to %s".
+        _ if info.new_job_id.is_none() => (MsgType::Info, format!("{operation} -- no files to {action}")),
         'T' => (MsgType::Info, format!("{operation} OK")),
         'W' => (MsgType::Info, format!("{operation} OK -- with warnings")),
         'A' => (MsgType::Info, format!("{operation} Canceled")),
@@ -482,7 +489,9 @@ pub fn cleanup(director: &str, catalog: Option<&CatalogHandle>, job_id: u32, end
             (MsgType::Info, format!("Inappropriate {operation} term code"))
         }
     };
-    let _ = action;
+    if info.new_job_id.is_none() {
+        volumes = "*None*".into();
+    }
     let run_time = end.end_time - end.start_time;
     let kbps = if run_time <= 0 { 0.0 } else { sd_bytes as f64 / (1000.0 * run_time as f64) };
     let opt = |id: Option<u32>| id.map_or("*None*".to_string(), |i| i.to_string());
