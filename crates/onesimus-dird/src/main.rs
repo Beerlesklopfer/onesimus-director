@@ -54,6 +54,7 @@ mod ua_db;
 mod ua_impexp;
 mod ua_storage_select;
 mod ua_select;
+mod vbackup;
 mod version_strings;
 mod watchdog;
 

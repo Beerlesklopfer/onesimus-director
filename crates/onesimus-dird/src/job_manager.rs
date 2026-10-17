@@ -819,11 +819,21 @@ impl JobManager {
                 if exit_code != 0 { job.observed_status = merge_status(job.observed_status, 'E'); }
                 // NativeBackupCleanup: terminated with errors is JS_Warnings
                 if job.observed_status == 'T' && ending.errors > 0 { job.observed_status = 'W'; }
+                // NativeVbackupCleanup() of a VirtualFull (vbackup.rs, S-06).
+                let vf = job.jcr.report.as_ref().and_then(|r| r.vf.clone());
+                if let Some(vf) = &vf {
+                    let messages = crate::vbackup::before_job_end(vf, &mut job.observed_status);
+                    post_catreq_messages(&self.bus, self.config.as_ref(), job, messages);
+                }
                 let db_status = job.observed_status.to_string();
                 let result = self.catalog.as_ref().ok_or_else(|| "catalog is unavailable".to_string()).and_then(|cat| cat.update_job_end(
                     job.job_id as i32, &db_status, now_unix(), ending.files, ending.bytes, ending.errors,
                     ending.vol_session_id, ending.vol_session_time));
                 job.completion_error = result.err();
+                if let Some(vf) = &vf {
+                    let messages = crate::vbackup::after_job_end(self.catalog.as_ref(), job.job_id, vf, job.observed_status);
+                    post_catreq_messages(&self.bus, self.config.as_ref(), job, messages);
+                }
                 if let Some(error) = &job.completion_error { error!("JobManager: job {} final catalog update failed: {error}", job.job_id); }
                 let success = job.completion_error.is_none() && matches!(job.observed_status, 'T' | 'W');
                 job.phase = if success { DirJobPhase::Completed } else { DirJobPhase::Error };
@@ -846,6 +856,10 @@ impl JobManager {
                         crate::console_msg::post_job_message(&self.bus, self.config.as_ref(), BusMessage::JobMessage {
                             job_id: job.job_id, job_name: job.job_name.clone(), msg_type, text, timestamp: end_time });
                     }
+                }
+                if let Some(vf) = &vf {
+                    let messages = crate::vbackup::after_report(self.catalog.as_ref(), job.job_id, vf, job.observed_status);
+                    post_catreq_messages(&self.bus, self.config.as_ref(), job, messages);
                 }
                 self.bus.post(BusMessage::JobStatus {job_id: job.job_id, job_name: job.job_name.clone(), status: status.into(), timestamp: now_unix()});
                 info!("JobManager: job {} worker exited (code={exit_code}), catalog status={db_status}", job.job_id);

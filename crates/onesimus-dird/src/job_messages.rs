@@ -252,6 +252,8 @@ pub struct JobReport {
     pub expected_files: Option<u64>,
     /// Copy/Migrate control job: jobs were selected (HasSelectedJobs).
     pub selected: bool,
+    /// A VirtualFull backup (vbackup.rs): NativeVbackupCleanup data.
+    pub vf: Option<crate::vbackup::VfInfo>,
 }
 
 /// Clients connected since the Director started (ClientResource
@@ -461,7 +463,13 @@ pub fn backup_summary(director: &str, report: &JobReport, outcome: &JobOutcome, 
         }
     };
     let (msg_type, term_msg) = backup_term_msg(outcome.status);
-    let run_time = outcome.end_time - report.start_time;
+    // A VirtualFull reports the times of the newest consolidated job
+    // (NativeVbackupCleanup sets them before GetJobRecord).
+    let (start_time, end_time) = match report.vf.as_ref().and_then(|vf| vf.previous.as_ref()) {
+        Some((start, end, _)) => (crate::btime::str_to_utime(start), crate::btime::str_to_utime(end)),
+        None => (report.start_time, outcome.end_time),
+    };
+    let run_time = end_time - start_time;
     let kbps = if run_time <= 0 { 0.0 } else { outcome.bytes as f64 / (1000.0 * run_time as f64) };
     let terminated_ok = matches!(outcome.status, 'T' | 'W');
     let volume_names = match &facts.volume_names {
@@ -486,19 +494,29 @@ pub fn backup_summary(director: &str, report: &JobReport, outcome: &JobOutcome, 
             }
         }
     };
+    let yes_no = |b: bool| if b { "yes" } else { "no" };
+    let (level_info, statistics, client_options, daemon_status) = if report.vf.is_some() {
+        ("  Backup Level:           Virtual Full\n".to_string(),
+         format!("  SD Files Written:       {}\n  SD Bytes Written:       {} ({}B)\n",
+            commas(outcome.sd_files), commas(outcome.sd_bytes), suffix(outcome.sd_bytes)),
+         String::new(),
+         format!("  SD Errors:              {}\n  SD termination status:  {}\n  Accurate:               {}\n",
+            outcome.sd_errors, job_status_to_ascii(outcome.sd_status), yes_no(report.accurate)))
+    } else {
     let level_info = format!("  Backup Level:           {}{}\n", report.level, report.since);
     let statistics = format!(
         "  FD Files Written:       {}\n  SD Files Written:       {}\n  FD Bytes Read:          {} ({}B)\n\
          \x20 FD Bytes Written:       {} ({}B)\n  SD Bytes Written:       {} ({}B)\n",
         commas(outcome.files), commas(outcome.sd_files), commas(outcome.read_bytes), suffix(outcome.read_bytes),
         commas(outcome.bytes), suffix(outcome.bytes), commas(outcome.sd_bytes), suffix(outcome.sd_bytes));
-    let yes_no = |b: bool| if b { "yes" } else { "no" };
     let client_options = format!(
         "  Software Compression:   {}\n  VSS:                    {}\n  Encryption:             {}\n  Accurate:               {}\n",
         "None", yes_no(outcome.vss), yes_no(outcome.encrypt), yes_no(report.accurate));
     let daemon_status = format!(
         "  Non-fatal FD errors:    {}\n  SD Errors:              {}\n  FD termination status:  {}\n  SD termination status:  {}\n",
         outcome.errors, outcome.sd_errors, job_status_to_ascii(outcome.fd_status), job_status_to_ascii(outcome.sd_status));
+    (level_info, statistics, client_options, daemon_status)
+    };
     let text = format!(
         "{head}  OS Information:         {os}\n  JobId:                  {job_id}\n  Job:                    {job}\n\
          {level_info}  Client:                 \"{client}\" {uname}\n  FileSet:                \"{fileset}\" {fs_time}\n\
@@ -513,7 +531,7 @@ pub fn backup_summary(director: &str, report: &JobReport, outcome: &JobOutcome, 
         client = report.client, fileset = report.fileset, fs_time = facts.fs_create_time,
         pool = report.pool, pool_source = report.pool_source, catalog = report.catalog,
         catalog_source = report.catalog_source, storage = report.storage, storage_source = report.storage_source,
-        sched = bstrftimes(report.sched_time), start = bstrftimes(report.start_time), end = bstrftimes(outcome.end_time),
+        sched = bstrftimes(report.sched_time), start = bstrftimes(start_time), end = bstrftimes(end_time),
         elapsed = crate::ua_select::edit_utime(run_time.max(0) as u64), priority = report.priority,
         mixed = yes_no(report.allow_mixed_priority), rate = fixed1(kbps), vsid = outcome.vol_session_id,
         vstime = outcome.vol_session_time, lvb = commas(last_vol_bytes), lvbs = suffix(last_vol_bytes),
