@@ -2,13 +2,15 @@
 
 ## Zweck
 
-`.grpc` ist eine Onesimus-Erweiterung für gRPC-Oberflächen; das Original kennt den Befehl nicht und antwortet `.grpc: is an invalid command.`. Ohne Argument meldet der Befehl, ob gRPC im Director eingeschaltet ist (`Enable gRPC = yes` in der Director-Ressource). `.grpc on` markiert die Sitzung als gRPC-Sitzung und schaltet sie dabei auf JSON-Antworten (wie `.api 2`) um. Ein eigener gRPC-Datenstrom wird über diese Konsolenverbindung derzeit nicht aufgebaut. Der Befehl ändert nur den Zustand der eigenen Sitzung.
+`.grpc` schaltet eine Konsolensitzung in den maschinenlesbaren Modus, den gRPC-Oberflächen erwarten, und wieder zurück. Ohne Argument meldet der Befehl den Zustand der Sitzung und ob der gRPC-Dienst des Directors eingeschaltet ist (`Enable gRPC = yes` in der Director-Ressource). Ein eigener gRPC-Datenstrom wird über die Konsolenverbindung nicht aufgebaut; der gRPC-Dienst läuft auf seinem eigenen Port. Der Befehl ändert nur den Zustand der eigenen Sitzung.
+
+**Onesimus-Erweiterung, nicht im Original (C-074, Entscheidung in [#4](https://github.com/Beerlesklopfer/onesimus-director/issues/4): bleibt als dokumentierte Erweiterung).** Das Bareos-Original kennt den Befehl nicht und antwortet `.grpc: is an invalid command.`.
 
 ## Syntax
 
 ```text
 .grpc
-.grpc on [format=<proto|json|text>] [compact=<yes|no>]
+.grpc on [format=<json|text>] [compact=<yes|no>]
 .grpc off
 ```
 
@@ -16,95 +18,76 @@
 
 | Argument | Werte | Bedeutung |
 |---|---|---|
-| ohne | – | gRPC-Verfügbarkeit melden. |
-| `on` | – | gRPC-Modus der Sitzung einschalten; alle folgenden Antworten kommen als JSON. |
-| `off` | – | gRPC-Modus der Sitzung ausschalten. Der JSON-Modus bleibt bestehen; zurück zum Text geht es mit `.api 0`. |
-| `format=<…>` | `proto`, `json`, `text` | Wird angenommen, wirkt sich derzeit nicht auf die Antworten aus. |
-| `compact=<…>` | `yes`, `no` | Wird angenommen, wirkt sich derzeit nicht auf die Antworten aus. |
+| ohne | – | Zustand der Sitzung und Verfügbarkeit des gRPC-Dienstes melden. |
+| `on` | – | gRPC-Modus einschalten. Der vorherige API-Modus und die Compact-Einstellung werden gemerkt. |
+| `off` | – | gRPC-Modus ausschalten und zum API-Modus von vor `.grpc on` zurückkehren (z. B. Text nach `.api 0`, API 1 nach `.api 1`). |
+| `format=<…>` | `json` (Standard), `text` | `json`: Antworten wie unter `.api 2`; `text`: Antworten wie unter `.api 1`. `proto` gibt es nur am gRPC-Port und wird abgelehnt. |
+| `compact=<…>` | `yes`, `no` (Standard) | Nur bei `format=json`: JSON ohne Einrückung wie `.api json compact=yes`. |
+
+`format=` oder `compact=` ohne `on` schalten ebenfalls ein bzw. ändern die Einstellungen eines eingeschalteten gRPC-Modus. Wie bei `.api` gilt der neue Modus schon für die Antwort auf den Befehl selbst. Ungültige Argumente ändern nichts.
 
 ## API-Modi
 
-Unter `.api 0` und `.api 1` antworten `.grpc` und `.grpc off` mit einer Textzeile. Unter `.api 2` und nach `.grpc on` ist die Antwort ein leeres Ergebnis `"result": {}`; der Text geht verloren.
+Unter `.api 0` und `.api 1` antwortet der Befehl mit Textzeilen. Unter `.api 2` (und im gRPC-Modus mit `format=json`) steht das Ergebnis unter `grpc`: `mode` (`on`/`off`), bei eingeschaltetem Modus `format` und `compact`, `apimode` (0, 1 oder 2), `available` und `text` mit der Textantwort.
 
 ## Beispiele
 
-### Verfügbarkeit abfragen
+Die Beispiele stammen aus einem Onesimus-Director mit der Paritätskonfiguration; dort ist gRPC nicht eingeschaltet.
 
-In der Testkonfiguration ist gRPC nicht eingeschaltet (Paritätsfall `dcfg-grpc-grpc`).
+### Zustand abfragen
+
+Paritätsfall `c074-dot-grpc`.
 
 ```text
 *UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]> .grpc
-gRPC: not configured (set 'Enable gRPC = yes' in Director resource)
+gRPC mode: off
+gRPC service: not configured (set 'Enable gRPC = yes' in Director resource)
 *UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]>
 ```
 
-**Abweichung vom Original:** Das Original kennt `.grpc` nicht und antwortet `.grpc: is an invalid command.` (Onesimus-Erweiterung, kein Kompatibilitätseintrag).
+**Abweichung vom Original:** Das Original antwortet `.grpc: is an invalid command.` (C-074, Onesimus-Erweiterung; Paritätsfälle `c074-dot-grpc*` als erwartete Abweichung).
 
-Beispielausgabe nicht verfügbar: für `Enable gRPC = yes` gibt es keinen Paritätsfall.
-
-### gRPC-Modus einschalten
-
-Schon die Antwort auf `.grpc on` kommt als JSON, ebenso jeder folgende Befehl (Paritätsfall `dcfg-grpc-on-then`). Mit `format=proto compact=yes` ist die Antwort dieselbe (`dcfg-grpc-grpc_on_format-proto_compact-yes`).
+### Einschalten mit kompaktem JSON und zurück
 
 ```text
-*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]> .grpc on
-{
-  "jsonrpc": "2.0",
-  "id": null,
-  "result": {}
-}
-*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]> version
-{
-  "jsonrpc": "2.0",
-  "id": null,
-  "result": {
-    "version": {
-      "name": "bareos-dir",
-      "type": "bareos-director",
-      "version": "25.1.2+onesimus.0.2.0",
-      "bdate": "16 October 2026",
-      "operatingsystem": "Debian GNU/Linux 13 (trixie)",
-      "distname": "debian",
-      "distversion": "Debian GNU/Linux 13 (trixie)",
-      "customversionid": ""
-    }
-  }
-}
-*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]>
-```
-
-### gRPC-Modus ausschalten
-
-In einer Textsitzung antwortet `.grpc off` mit einer Zeile (Paritätsfall `dcfg-grpc-grpc_off`).
-
-```text
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]> .grpc on compact=yes
+{"jsonrpc":"2.0","id":null,"result":{"grpc":{"mode":"on","format":"json","compact":true,"apimode":2,"available":false,"text":"gRPC mode: on, format=json, compact=yes\n"}}}
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]> .grpc
+{"jsonrpc":"2.0","id":null,"result":{"grpc":{"mode":"on","format":"json","compact":true,"apimode":2,"available":false,"text":"gRPC mode: on, format=json, compact=yes\ngRPC service: not configured (set 'Enable gRPC = yes' in Director resource)\n"}}}
 *UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]> .grpc off
 gRPC mode: off
 *UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]>
 ```
 
-Nach `.grpc on` bleibt die Sitzung auch nach `.grpc off` im JSON-Modus (Paritätsfall `dcfg2-grpc-on-off-version`).
+### Textformat aus API 1
 
 ```text
-*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]> .grpc on
-{
-  "jsonrpc": "2.0",
-  "id": null,
-  "result": {}
-}
-*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]> .grpc off
-{
-  "jsonrpc": "2.0",
-  "id": null,
-  "result": {}
-}
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]> .api 1
+api: 1
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]> .grpc on format=text
+gRPC mode: on, format=text, compact=no
 *UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]> version
+bareos-dir Version: 25.1.2+onesimus.0.2.0 (17 October 2026) Debian GNU/Linux 13 (trixie) debian Debian GNU/Linux 13 (trixie) 
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]> .grpc off
+gRPC mode: off
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]>
+```
+
+### Unter `.api 2`
+
+Paritätsfall `c074-dot-grpc-api2`.
+
+```text
+*UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]> .grpc
 {
   "jsonrpc": "2.0",
   "id": null,
   "result": {
-    "version": {
-[…]
+    "grpc": {
+      "mode": "off",
+      "apimode": 2,
+      "available": false,
+      "text": "gRPC mode: off\ngRPC service: not configured (set 'Enable gRPC = yes' in Director resource)\n"
     }
   }
 }
@@ -113,7 +96,14 @@ Nach `.grpc on` bleibt die Sitzung auch nach `.grpc off` im JSON-Modus (Parität
 
 ## Fehlermeldungen
 
-`.grpc` gibt keine eigenen Fehlermeldungen aus. Unbekannte Argumente werden ignoriert.
+| Meldung | Ursache und Abhilfe |
+|---|---|
+| `.grpc: is an invalid command.` | `.grpc` ist in der `Command ACL` nicht erlaubt (im Original: den Befehl gibt es nicht). |
+| `.grpc: format=proto is only available on the gRPC port, not on a console connection.` | Protobuf gibt es nur am gRPC-Port. |
+| `.grpc: format must be json or text.` / `.grpc: compact must be yes or no.` | Ungültiger Wert. |
+| `.grpc: specify either on or off.` | `on` und `off` zugleich. |
+| `.grpc: format= and compact= only apply to .grpc on.` | `off` mit `format=`/`compact=`. |
+| `.grpc: unknown argument "…".` | Unbekanntes Argument. |
 
 ## Siehe auch
 

@@ -97,7 +97,7 @@ pub fn cmd_dot_acl(ast: &CommandAst, ctx: &ExecContext) -> CommandResult {
     match action.as_deref() {
         None | Some("list") => acl_list(ast, ctx),
         Some(action @ ("set" | "delete" | "clear" | "copy")) => acl_change(action, ast, ctx),
-        Some(_) => CommandResult::error(USAGE.to_string()),
+        Some(_) => CommandResult::error(USAGE.to_string()).with_error_parts(),
     }
 }
 
