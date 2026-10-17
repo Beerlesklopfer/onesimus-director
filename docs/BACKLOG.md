@@ -1,42 +1,79 @@
 # Backlog
 
-## Aktueller Fokus: die 21 teilweise implementierten Hauptbefehle
+## Aktueller Fokus (17.10.2026)
 
-Priorität vom 15.10.2026: Zuerst alle offenen Unterbefehle, Optionen und
-Ablaufketten dieser 21 Hauptbefehle vervollständigen. Andere Platzhalter und
-die 26 Befehle der Restore-Dateiauswahl folgen danach; Abhängigkeiten, die
-für einen dieser 21 Befehle erforderlich sind, gehören zu dessen Umsetzung.
+Die Liste der 21 teilweise implementierten Hauptbefehle vom 15.10.2026 ist
+abgearbeitet (Abgleich unten). Offen sind nur noch die folgenden Punkte. Die
+Belege stehen im [Kompatibilitätslog](COMPATIBILITY-LOG.md), in
+[STUBS.md](STUBS.md) und in [TODO-COMMANDS.md](TODO-COMMANDS.md).
 
-Die verbindlichen Einzelbefunde stehen in
-[audit-notes.json](wiki/commands/audit-notes.json). Der Status bleibt offen,
-bis auch Fehlerpfade, Seiteneffekte und SHA-256-Ausgabeparität geprüft sind.
+### Offene Stubs
 
-| Hauptbefehl | Offene Teilabläufe / Abnahme |
+| ID | Punkt |
 | --- | --- |
-| `wait` | Job-/Namensauswahl, Mount-/Medienzustände, Timeout, tatsächlicher Katalogabschluss |
-| `.authorized` | Command- und Ressourcen-ACL statt bloßer Existenzprüfung |
-| `setdevice` | Storage-ACL, vollständige Daemon-Antwort und Fehlerpfade |
-| `trace` | Dialogauswahl und ursprünglicher Trace-Pfad |
-| `setdebug` | Dialogauswahl, NDMP und ACL |
-| `setbandwidth` | Jobselektoren, Zustandsfilter, all, Dialog, NDMP/Legacy und ACL |
-| `resolve` | ACL sowie Legacy-/Nicht-TLS-Verbindungen |
-| `.messages` | Globale Spool-Semantik und gRPC-Sitzungsqueue |
-| `.defaults` | Vollständige Ressourcen- und Restore-Defaults |
-| `help` | Originalsyntax, Textlayout und ACL-gefilterte Hilfe |
-| `run` | Accurate/VirtualFull, FileSet-Änderungen und weitere Originaloptionen |
-| `rerun` | Jobbereiche, Zeitfilter und Mehrfachauswahl |
-| `restore` | Dateiauswahl, Storage-/Client-Overrides und fileregex |
-| `status` | Scheduler/subscriptions/configuration, geplante und beendete Jobs |
-| `.status` | Original-Unterabschnitte und deren eigenes Ausgabeformat |
-| `import` | dstslots, volume und scan |
-| `export` | dstslots, volume und scan |
-| `configure` | Vollständige Direktiven und konfigurierbarer Persistenzpfad |
-| `list` | Originalfilter, Ausgabefelder und Pool-Prune-Summen |
-| `llist` | Originalfilter, Ausgabefelder und Pool-Prune-Summen |
-| `add` | Originaldialog, storage/jobid und vollständige Kataloganlage |
+| [S-37](STUBS.md) | `.profile create/set/delete/assign/unassign` werden angenommen, wirken aber nicht (`.profile` ist Alias von `.acl`) |
+| [S-38](STUBS.md) | gRPC `ConfigureUpdate`, `ConfigureDelete`, `DeleteStorage` bauen Konsolenzeilen, die die eigenen Befehle ablehnen |
+| [S-39](STUBS.md) | `SetBandwidth` mit `limit=0` in proto3 nicht übertragbar; Feld als `optional` |
+| [S-40](STUBS.md) | `update jobid=…` auf einen nie gestarteten Job: SQL-Fehler wegen leerer StartTime |
+| [S-41](STUBS.md) | `list nextvolume` findet in einem Pool mit frisch gelabeltem Volume keins (gegen das Original prüfen) |
+| [S-13](STUBS.md) (Rest) | Eigener FD `bareos-filed`: PKI-Verschlüsselung/Signaturen, Plugins, Heartbeat, client-initiierte Verbindungen, LMDB für Accurate, VSS/Windows/macOS; `breg.rs` noch als Kopie |
 
-Für jede Tabellenzeile gilt zusätzlich der unten definierte SHA-256-Abgleich.
-Je Hauptbefehl bleibt ein eigener Commit vorgeschrieben.
+### Offene Reste an Befehlen
+
+| Befehl | Offen | Bezug |
+| --- | --- | --- |
+| `status` | SD-Teil von `status all`/`status storage`; typisierte RPCs für `status client/storage` liefern nur Text | [C-014](COMPATIBILITY-LOG.md), S-34 |
+| `configure` | `configure update/delete` (Onesimus-Erweiterungen) prüfen die Ressourcen-ACL nicht; dazu S-38 | Hinweis [C-062](COMPATIBILITY-LOG.md) |
+| `setbandwidth` | `max_bandwidth` laufender Jobs; Jmsg bei Connect-/Antwortfehlern | [C-056](COMPATIBILITY-LOG.md), S-39 |
+| `label`, `relabel` | Option `encrypt` erzeugt noch keinen Volume-Schlüssel | [C-084](COMPATIBILITY-LOG.md), S-08 |
+| `update` | `update jobid=… starttime=` fehlt; S-40 | Hinweis [C-059](COMPATIBILITY-LOG.md) |
+| `list`, `llist` | `nextvolume` nach frischem Label (S-41) | S-41 |
+| `restore` | Nicht-UTF-8-Dateinamen auf SQL_ASCII-Katalogen | [C-047](COMPATIBILITY-LOG.md) |
+| `cancel` | Cancel-Dialog ohne Paritätsfall; `*JobCancel*` des Job-Threads ohne Jobnamen-Nummer; Berichtszeilen „Director's comm line to SD dropped“/SD termination status beim Cancel | [C-011](COMPATIBILITY-LOG.md), S-26 |
+| Konfigurationsstart | Normaler Start prüft nicht wie `-t`; Lexer-Diagnosen nicht im Log | [C-057](COMPATIBILITY-LOG.md) |
+
+Nur Testlücken, keine bekannte Abweichung: Wirkung von `setdebug`, `trace`,
+`wait` auf echte Jobenden, `add`/`create`/`prune`-Katalogzustand danach,
+`import`/`export`/`move` an einem echten Autochanger (bisher simuliert),
+`resolve` gegen Legacy-/Nicht-TLS-Daemons, `.messages` über die
+gRPC-Sitzungsqueue, `.bvfs_restore`/`.bvfs_cleanup`/`.bvfs_clear_cache yes`.
+
+### Infrastruktur
+
+- **onesimus-proto:** Branch `director-typed-api` (typisierte `DirectorApi`,
+  S-34/S-35) nach `main` mergen und das Submodul danach auf `main` stellen.
+- **Wiki-Status:** `bareos-director-commands.json`/`audit-notes.json` nach dem
+  Paritätsvolllauf vom 17.10.2026 neu erzeugen (siehe TODO-COMMANDS, P6).
+
+### Abgleich der 21 Hauptbefehle vom 15.10.2026
+
+| Hauptbefehl | Damals offen | Stand 17.10.2026 |
+| --- | --- | --- |
+| `wait` | Job-/Namensauswahl, Mount-/Medienzustände, Timeout, Katalogabschluss | erledigt (C-048, Jobqueue wie `jobq.cc`; `wait`-Fälle in der Baseline); Warten auf echte Jobenden nur mit privaten Daemons belegt (S-31, S-36) |
+| `.authorized` | Command- und Ressourcen-ACL | erledigt (Fälle mit eingeschränkter Konsole `parity-limited`, alle gleich) |
+| `setdevice` | Storage-ACL, Daemon-Antwort, Fehlerpfade | erledigt (C-031, C-050; 23 Fälle) |
+| `trace` | Dialogauswahl, Trace-Pfad | erledigt (C-011-Dialog; Trace-Datei nur Einheitentests) |
+| `setdebug` | Dialogauswahl, NDMP, ACL | erledigt (C-011, C-050); FD/SD-Wirkung nur Einheitentests |
+| `setbandwidth` | Jobselektoren, Zustandsfilter, `all`, Dialog, NDMP/Legacy, ACL | erledigt (C-056, C-050); Rest siehe oben |
+| `resolve` | ACL, Legacy-/Nicht-TLS-Verbindungen | erledigt (C-018; 19 Fälle); Legacy/Nicht-TLS ungetestet (kein solcher Daemon im Fixture) |
+| `.messages` | Globale Spool-Semantik, gRPC-Sitzungsqueue | Spool erledigt (8 Fälle, alle API-Modi); gRPC-Sitzungsqueue nicht eigens belegt |
+| `.defaults` | Ressourcen- und Restore-Defaults | erledigt (C-073; Fälle für job/client/storage/pool und `job=RestoreFiles`) |
+| `help` | Originalsyntax, Layout, ACL-Filter | erledigt (Fälle inkl. `parity-limited`, `help configure`) |
+| `run` | Accurate/VirtualFull, FileSet-Änderungen, weitere Optionen | erledigt (C-043, C-058, S-19, S-22, S-23: Accurate, Aufstufung zu VirtualFull, Quotas, Write Bootstrap; geändertes FileSet über die FileSetId der Vorgängersuche in `backup.rs`) |
+| `rerun` | Jobbereiche, Zeitfilter, Mehrfachauswahl | erledigt (C-033; 32 Fälle) |
+| `restore` | Dateiauswahl, Storage-/Client-Overrides, fileregex | erledigt (C-047 Baum/Menü, C-079 regexwhere, S-01, S-14; `c047`-Fälle); Rest Nicht-UTF-8 |
+| `status` | Scheduler/subscriptions/configuration, geplante und beendete Jobs | erledigt (C-014, C-042, C-045, C-048); Rest SD-Teil (C-014) |
+| `.status` | Original-Unterabschnitte | erledigt (C-014, C-048) |
+| `import` | dstslots, volume, scan | erledigt (C-071, `ua_impexp.rs` PerformMoveOperation inkl. `scan`); nur simulierter Autochanger |
+| `export` | dstslots, volume, scan | erledigt (C-071); nur simulierter Autochanger |
+| `configure` | Direktiven, Persistenzpfad | erledigt (C-019, C-057, C-062, C-075); Rest ACL bei `update/delete` und S-38 |
+| `list` | Originalfilter, Ausgabefelder, Pool-Prune-Summen | erledigt (C-015, C-026, C-044, C-046; `prunablevolumes`/`-jobs` in `list.rs`); Rest S-41 |
+| `llist` | wie `list` | erledigt wie `list`; Rest S-41 |
+| `add` | Originaldialog, storage/jobid, Kataloganlage | erledigt (C-011, C-012, C-030-ACL); Katalogzustand danach nicht verglichen |
+
+Für Änderungen an Befehlen gilt weiter: ein Commit je Hauptbefehl mit Tests,
+Wiki-/JSON-Status und Changelog-Eintrag (siehe „Arbeitsfolge und Git-Anker“) und
+der SHA-256-Abgleich unten.
 
 ## Erledigt: Scheduler startet Jobs (17.10.2026)
 
@@ -139,11 +176,11 @@ client/storage/pool und Restore-Jobs (where/replace) — brauchen die rohen
 Direktiven aus dem show-Port; Reihenfolge der Ressourcen wie C++ (Ladereihenfolge).
 `status director`: terminated-Liste (Jobs seit Start) wird nicht geführt.
 
-## `llist pools`: prunablevolumes/-jobs/-bytes
+## Erledigt: `llist pools`: prunablevolumes/-jobs/-bytes
 
 Bareos 25.1 gibt bei `llist pools` zusätzlich eine Prune-Zusammenfassung pro
-Pool aus (ua_output.cc `PoolPruneSummary`, Auswertung der Aufbewahrungsfristen).
-onesimus-dird liefert die Felder noch nicht.
+Pool aus (ua_output.cc `PoolPruneSummary`). onesimus-dird liefert die Felder
+inzwischen (`commands/list.rs`); die `llist pools`-Fälle der Baseline sind gleich.
 
 ## Quellbasierter Director-Vollständigkeitsabgleich
 
