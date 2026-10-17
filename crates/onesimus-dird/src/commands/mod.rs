@@ -9,6 +9,7 @@ pub mod job;
 pub mod cancel;
 pub mod list;
 pub mod admin;
+pub mod label;
 pub mod estimate;
 pub mod restore;
 pub mod restore_bsr;
