@@ -54,12 +54,12 @@ jobs:
             ~/.cargo/registry/cache
             ~/.cargo/git/db
             target
-          key: test-${{ hashFiles('Cargo.lock') }}
+          key: test-${{ hashFiles('**/Cargo.toml') }}
           restore-keys: test-
 
       - name: Tests
         run: |
-          cargo test --locked \
+          cargo test \
             -p onesimus-dird -p oconsole -p bareos-config -p bareos-filed \
             --no-default-features --features oconsole/mcp-production
 
@@ -92,7 +92,7 @@ jobs:
             ~/.cargo/registry/index
             ~/.cargo/registry/cache
             ~/.cargo/git/db
-          key: package-${{ hashFiles('Cargo.lock') }}
+          key: package-${{ hashFiles('**/Cargo.toml') }}
           restore-keys: package-
 
       - name: Pakete bauen
