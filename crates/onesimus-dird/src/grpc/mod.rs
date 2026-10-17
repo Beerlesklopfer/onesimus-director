@@ -7,6 +7,10 @@
 pub mod service;
 pub mod api;
 pub mod coverage;
+#[cfg(feature = "grpc-development")]
+pub mod api_write;
+#[cfg(feature = "grpc-development")]
+pub mod api_dev;
 pub mod auth;
 pub mod push_events;
 pub mod tls;
@@ -24,6 +28,32 @@ use service::DirectorServiceImpl;
 use bareos_proto_rs::bareos::director::director_server::DirectorServer;
 use bareos_proto_rs::bareos::director::api::director_api_server::DirectorApiServer;
 
+/// What a command needs to run outside the command worker (typed API:
+/// restore sessions, blocking commands), like a console session.
+#[derive(Clone)]
+#[cfg_attr(not(feature = "grpc-development"), allow(dead_code))]
+pub struct ExecParts {
+    pub config: crate::director_config::SharedConfig,
+    pub session_mgr: Arc<crate::session_manager::SessionManager>,
+    pub catalog: Option<crate::catalog_worker::CatalogHandle>,
+    pub job_manager: Option<Arc<std::sync::Mutex<crate::job_manager::JobManager>>>,
+}
+
+impl ExecParts {
+    #[cfg_attr(not(feature = "grpc-development"), allow(dead_code))]
+    pub fn context(&self, session_id: u64, api_mode: crate::command_executor::ApiMode) -> crate::command_executor::ExecContext {
+        crate::command_executor::ExecContext {
+            session_id,
+            config: Some(self.config.clone()),
+            session_mgr: Some(self.session_mgr.clone()),
+            catalog: self.catalog.clone(),
+            api_mode,
+            bus_rx: None,
+            job_manager: self.job_manager.clone(),
+        }
+    }
+}
+
 /// Everything the gRPC server needs besides the shared queues.
 pub struct GrpcSettings {
     pub bind_address: String,
@@ -32,6 +62,7 @@ pub struct GrpcSettings {
     pub director_name: String,
     pub identity: tls::GrpcIdentity,
     pub auth: Arc<auth::AuthState>,
+    pub exec: ExecParts,
 }
 
 /// Run the gRPC server (TLS only). Called from the dir:grpc named thread.
@@ -69,7 +100,7 @@ pub fn run_grpc_server(
             }
         };
         // Typed API (director_api.proto): same port, TLS, session tokens and ACLs
-        let api = api::DirectorApiImpl::new(q.clone(), settings.auth.clone());
+        let api = api::DirectorApiImpl::new(q.clone(), settings.auth.clone()).with_exec(settings.exec.clone());
         let svc = DirectorServiceImpl::new(
             b, q, settings.auth, settings.director_name, settings.bnet_port,
         );

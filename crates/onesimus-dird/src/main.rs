@@ -605,6 +605,12 @@ fn spawn_named_threads(
             director_name: dir_name.clone(),
             identity,
             auth: Arc::new(grpc::auth::AuthState::new(config.clone(), session_mgr.clone())),
+            exec: grpc::ExecParts {
+                config: config.clone(),
+                session_mgr: session_mgr.clone(),
+                catalog: catalog.clone(),
+                job_manager: Some(job_mgr.clone()),
+            },
         };
         let handle = thread::Builder::new()
             .name("dir:grpc".into())

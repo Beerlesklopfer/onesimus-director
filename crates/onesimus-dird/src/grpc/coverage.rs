@@ -9,6 +9,8 @@
 //! Subcommand notation: `key=` is the `key=<value>` form, a bare word the
 //! keyword form; `add <type>` for configure; empty = the command itself.
 
+#![cfg_attr(not(test), allow(dead_code))]
+
 /// (command, subcommand, RPC)
 pub const COVERAGE: &[(&str, &str, &str)] = &[
     (".", "", "Noop"),
@@ -280,9 +282,28 @@ pub const RESTORE_TREE: &[(&str, &str)] = &[
     ("?", "RestoreTreeHelp"),
 ];
 
-/// Implementation state of an RPC for the documentation.
+/// RPCs that do not apply to the typed API (FAILED_PRECONDITION in the
+/// development build) and why.
+pub const NOT_APPLICABLE: &[(&str, &str)] = &[
+    ("Gui", "gui on/off only changes how a bconsole session prompts; the typed API never prompts"),
+    ("DotApi", "the output format of the typed API is fixed by the RPC"),
+    ("DotGrpc", "the output format of the typed API is fixed by the RPC"),
+    ("SetIp", "setip takes the address of a BNET console connection; the gRPC path has none"),
+];
+
+/// RPCs that end the session (session token invalid afterwards).
+pub const LOGOUT: &[&str] = &["Quit", "Exit", "DotQuit"];
+
+/// Implementation state of an RPC for the documentation (independent of the
+/// build: read RPCs everywhere, all others in the development build).
 pub fn state(rpc: &str) -> &'static str {
-    if super::api::IMPLEMENTED.iter().any(|(name, _)| *name == rpc) { "implementiert" } else { "definiert (S-35)" }
+    if super::api::READ_IMPLEMENTED.iter().any(|(name, _)| *name == rpc) {
+        "implementiert"
+    } else if NOT_APPLICABLE.iter().any(|(name, _)| *name == rpc) {
+        "nicht anwendbar (Entwicklungs-Build: FAILED_PRECONDITION)"
+    } else {
+        "Entwicklungs-Build (`grpc-development`)"
+    }
 }
 
 /// Markdown coverage table (docs/wiki/grpc-api.md).
@@ -445,7 +466,7 @@ mod tests {
         assert!(unused.is_empty(), "RPCs without a command row: {unused:?}");
         // every implemented RPC has a spec, a trait method of the same name
         // and exists in the proto; every spec is implemented
-        for (rpc, method) in super::super::api::IMPLEMENTED {
+        for (rpc, method) in super::super::api::READ_IMPLEMENTED {
             assert!(rpcs.contains(*rpc), "{rpc}");
             assert!(super::super::api::find_rpc(rpc).is_some(), "{rpc} has no ReadRpc spec");
             let snake: String = rpc.chars().enumerate().flat_map(|(i, c)| {
@@ -454,8 +475,24 @@ mod tests {
             }).collect();
             assert_eq!(&snake, method, "{rpc}");
         }
+        // every other RPC is implemented in the development build (S-35)
+        let read: BTreeSet<&str> = super::super::api::READ_IMPLEMENTED.iter().map(|(r, _)| *r).collect();
+        let dev: BTreeSet<&str> = super::super::api::DEV_IMPLEMENTED.iter().map(|(r, _)| *r).collect();
+        assert!(read.is_disjoint(&dev));
+        let all: BTreeSet<String> = read.union(&dev).map(|r| r.to_string()).collect();
+        assert_eq!(all, rpcs, "every RPC must be a read RPC or a development-build RPC");
+        for (rpc, _) in NOT_APPLICABLE {
+            assert!(dev.contains(rpc), "{rpc}");
+        }
+        for (rpc, method) in super::super::api::DEV_IMPLEMENTED {
+            let snake: String = rpc.chars().enumerate().flat_map(|(i, c)| {
+                let lower = c.to_ascii_lowercase();
+                if c.is_ascii_uppercase() && i > 0 { vec!['_', lower] } else { vec![lower] }
+            }).collect();
+            assert_eq!(&snake, method, "{rpc}");
+        }
         for spec in super::super::api::read_rpcs() {
-            assert!(super::super::api::IMPLEMENTED.iter().any(|(r, _)| *r == spec.rpc), "{} not wired", spec.rpc);
+            assert!(super::super::api::READ_IMPLEMENTED.iter().any(|(r, _)| *r == spec.rpc), "{} not wired", spec.rpc);
         }
     }
 

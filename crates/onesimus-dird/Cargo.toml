@@ -11,6 +11,11 @@ name = "onesimus-dird"
 path = "src/main.rs"
 # Drop-in: /usr/sbin/onesimus-dird (C++ bareos-dir can stay installed side-by-side)
 
+[features]
+# Typed gRPC write/session/restore RPCs (DirectorApi, S-35). Development
+# build only; the production build answers UNIMPLEMENTED for them.
+grpc-development = []
+
 [dependencies]
 bareos-bnet.workspace = true
 bareos-config.workspace = true

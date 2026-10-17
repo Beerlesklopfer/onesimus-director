@@ -63,6 +63,12 @@ jobs:
             -p onesimus-dird -p oconsole -p bareos-config -p bareos-filed \
             --no-default-features --features oconsole/mcp-production
 
+      # Entwicklungs-Build der typisierten gRPC-API (S-35): nur Tests, die
+      # Pakete bleiben Produktions-Builds
+      - name: Tests gRPC-Entwicklungs-Build
+        run: |
+          cargo test --locked -p onesimus-dird --features grpc-development
+
   package:
     needs: test
     runs-on: ubuntu-24.04

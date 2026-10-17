@@ -151,6 +151,9 @@ pub struct QueuedCommand {
     pub ast: CommandAst,
     pub session_id: u64,
     pub result_tx: Sender<CommandResult>,
+    /// Console for dialogs while the command runs (typed gRPC write RPCs
+    /// answer selected questions); None = no console (batch).
+    pub console: Option<Box<dyn crate::ua_select::Console + Send>>,
 }
 
 /// MPSC command queue.
@@ -173,12 +176,21 @@ impl CommandQueue {
     /// Submit a command and get a Receiver for the result.
     /// Returns None if the queue is full or shut down.
     pub fn submit(&self, ast: CommandAst, session_id: u64) -> Option<Receiver<CommandResult>> {
+        self.submit_with_console(ast, session_id, None)
+    }
+
+    /// Like [`submit`](Self::submit), with a console the command's dialogs
+    /// talk to.
+    #[cfg_attr(not(feature = "grpc-development"), allow(dead_code))]
+    pub fn submit_with_console(&self, ast: CommandAst, session_id: u64,
+                               console: Option<Box<dyn crate::ua_select::Console + Send>>)
+        -> Option<Receiver<CommandResult>> {
         if self.shutdown.load(Ordering::Relaxed) {
             return None;
         }
 
         let (result_tx, result_rx) = bounded(1);
-        let cmd = QueuedCommand { ast, session_id, result_tx };
+        let cmd = QueuedCommand { ast, session_id, result_tx, console };
 
         match self.tx.try_send(cmd) {
             Ok(()) => Some(result_rx),

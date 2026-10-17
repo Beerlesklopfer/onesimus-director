@@ -44,7 +44,11 @@ pub fn command_worker_loop(
             };
 
             debug!("executing command '{}' from queue", cmd.ast.command_name);
-            let mut result = command_executor::dispatch(&cmd.ast, &ctx);
+            let mut cmd = cmd;
+            let mut result = match cmd.console.as_mut() {
+                Some(console) => crate::ua_select::with_console(console.as_mut(), || command_executor::dispatch(&cmd.ast, &ctx)),
+                None => command_executor::dispatch(&cmd.ast, &ctx),
+            };
             // JSON clients get the same json-rpc envelope as BNET `.api 2`
             if ctx.api_mode == ApiMode::Json {
                 result.text_output = crate::json_output::envelope(&result, false);

@@ -112,6 +112,14 @@ impl AuthState {
         }
     }
 
+    /// End the session of a token (Quit/Exit RPCs).
+    #[cfg_attr(not(feature = "grpc-development"), allow(dead_code))]
+    pub fn logout(&self, token: &str) {
+        if let Some(session) = self.sessions.lock().unwrap().remove(token) {
+            self.session_mgr.remove_session(session.session_id);
+        }
+    }
+
     #[cfg(test)]
     pub(crate) fn expire_for_test(&self, token:&str) {
         self.sessions.lock().unwrap().get_mut(token).unwrap().last_used=Instant::now()-SESSION_IDLE_TTL-Duration::from_secs(1);

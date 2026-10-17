@@ -1,6 +1,6 @@
 # Typisierte gRPC-API (`DirectorApi`)
 
-Der Director bietet neben dem Dienst `Director` (`ExecuteCommand` mit Text-/JSON-Ausgabe) den typisierten Dienst `bareos.director.api.DirectorApi` an: je Konsolenbefehl bzw. Unterbefehl eine RPC, deren Antwort eine strukturierte Protobuf-Message ist. Definiert in [`proto/director_api.proto`](https://github.com/Beerlesklopfer/baReos-proto/blob/director-typed-api/director_api.proto) (Repository baReos-proto, Branch `director-typed-api`), implementiert in `crates/onesimus-dird/src/grpc/api.rs` (Stand S-34: alle lesenden RPCs; schreibende RPCs folgen mit S-35).
+Der Director bietet neben dem Dienst `Director` (`ExecuteCommand` mit Text-/JSON-Ausgabe) den typisierten Dienst `bareos.director.api.DirectorApi` an: je Konsolenbefehl bzw. Unterbefehl eine RPC, deren Antwort eine strukturierte Protobuf-Message ist. Definiert in [`proto/director_api.proto`](https://github.com/Beerlesklopfer/baReos-proto/blob/director-typed-api/director_api.proto) (Repository baReos-proto, Branch `director-typed-api`), implementiert in `crates/onesimus-dird/src/grpc/api.rs` (lesende RPCs im Produktions-Build, S-34; schreibende, Sitzungs- und Restore-RPCs nur im Entwicklungs-Build mit dem Cargo-Feature `grpc-development`, S-35).
 
 ## Konventionen der Proto-Dateien
 
@@ -38,7 +38,7 @@ Jede neue Message wurde gegen diese Liste geprüft. Abweichungen mit Begründung
 - Der gRPC-Server läuft, wenn im Director-Ressource `Enable Grpc = yes` steht (Port: `Grpc Port`, sonst DirPort + 1000).
 - Gleicher Port, gleiches TLS (selbst signiertes Zertifikat, Fingerprint-Pinning) und gleiche Anmeldung wie der Dienst `Director`: `GetChallenge` + `Login`, danach Session-Token im Metadata-Header `x-onesimus-session`.
 - Jede RPC baut eine Konsolenzeile und lässt sie durch dieselbe Befehlsimplementierung laufen wie die Konsole (gleiche SQL-Abfragen, gleiche ACL-Filter). Eine Konsole sieht über die RPC also genau das, was `list`/`show`/`status` ihr zeigen.
-- Fehler: Befehl nicht in der CommandACL → `PERMISSION_DENIED`; Befehl fehlgeschlagen → `FAILED_PRECONDITION` mit den Fehlermeldungen des Directors (wie `error.data.messages.error` bei `.api 2`); kein/abgelaufener Token → `UNAUTHENTICATED`; noch nicht implementiert → `UNIMPLEMENTED`.
+- Fehler: Befehl nicht in der CommandACL → `PERMISSION_DENIED`; Befehl fehlgeschlagen → `FAILED_PRECONDITION` mit den Fehlermeldungen des Directors (wie `error.data.messages.error` bei `.api 2`); kein/abgelaufener Token → `UNAUTHENTICATED`; im Produktions-Build nicht enthalten → `UNIMPLEMENTED`; ungültige Parameter oder fehlendes `confirm` (Entwicklungs-Build) → `INVALID_ARGUMENT`.
 
 ## Abbildung der API-2-Ausgabe
 
@@ -101,16 +101,55 @@ for job in api.list_jobs(req).await?.into_inner().jobs {
 
 ## Stand der Implementierung
 
-- **Implementiert (Produktions-Build):** alle lesenden RPCs – Info/Hilfe, `list`/`llist` aller Formen, `status`/`.status`, `show` aller Ressourcentypen, die Punkt-Auflistungen, `.sql*`-Metadaten, `.acl`/`.profile` (Liste), BVFS-Abfragen und OVFS.
-- **Definiert, Antwort `UNIMPLEMENTED` (S-35, nur Entwicklungs-Build geplant):** schreibende Befehle (run, rerun, cancel, restore, label, relabel, mount/unmount/release, update, prune, purge, delete, truncate, enable/disable, configure, reload, setdebug, setbandwidth, setdevice, setip, `.sql`, sqlquery, query, `.bvfs_update/restore/cleanup/clear_cache`, `.acl`/`.profile`-Änderungen), Sitzungsbefehle (use, wait, gui, autodisplay, automount, trace, `.api`, `.grpc`, quit/exit/`.quit`) und die Dateiauswahl der interaktiven Wiederherstellung (`StartRestoreSession`, `RestoreTree*`).
-- Bis dahin gehen Schreibbefehle weiter über `Director/ExecuteCommand`.
+- **Produktions-Build** (Paket, Vorgabe): alle lesenden RPCs – Info/Hilfe, `list`/`llist` aller Formen, `status`/`.status`, `show` aller Ressourcentypen, die Punkt-Auflistungen, `.sql*`-Metadaten, `.acl`/`.profile` (Liste), BVFS-Abfragen und OVFS. Alle übrigen RPCs antworten `UNIMPLEMENTED` (ihr Code ist nicht einkompiliert), wie die MCP-Schreib-Tools von oconsole.
+- **Entwicklungs-Build** (`cargo build -p onesimus-dird --features grpc-development`, S-35): zusätzlich die schreibenden Befehle, die Sitzungsbefehle und die interaktive Wiederherstellung.
 
-Tests: Abbildungs-Tests in `crates/bareos-proto-rs/src/typed.rs` und `crates/onesimus-dird/src/grpc/api.rs`; Abdeckungstest `crates/onesimus-dird/src/grpc/coverage.rs` (prüft gegen [`commands/bareos-director-commands.json`](commands/bareos-director-commands.json), dass jeder Befehl und jedes Unterkommando eine RPC hat, und hält die Tabellen unten aktuell); Integrationstest `crates/onesimus-dird/tests/grpc_typed_api.rs` (startet den Director mit der Parity-Konfiguration auf einer Wegwerf-Kopie von `bareos_cppref` und vergleicht jede Lese-RPC mit der `.api 2`-Ausgabe derselben Konsolenzeile, auch für eine eingeschränkte Konsole):
+### Schreibende RPCs (Entwicklungs-Build)
+
+- Jede RPC baut genau eine Konsolenzeile aus dem typisierten Request (`… yes`, wo der Befehl es kennt). Die Werte gehen unverändert als Argumente in den Befehl; Steuerzeichen und `"` werden abgelehnt (`INVALID_ARGUMENT`), ebenso unvollständige oder widersprüchliche Angaben (z.B. `Cancel` mit `jobid` und `job`).
+- Der Befehl läuft über die Befehlswarteschlange mit den ACLs der angemeldeten Konsole, im Textmodus mit einer Konsole, die nur die Rückfragen beantwortet, die die RPC nennt: `Purge (yes/no)?` (Purge*), `Are you sure you want to delete` (Delete*), die vorgegebenen Antworten von `SqlQuery` (Abfrage, Leerzeile) und `Query` (Nummer, Parameter). Jede andere Rückfrage wird abgebrochen und steht in `ActionResponse.question` (`success = false`).
+- **Zerstörende RPCs** (`Relabel`, `Prune*`, `Purge*`, `Delete*`, `Truncate`) verlangen `confirm = true`, sonst `INVALID_ARGUMENT` – wie die MCP-Tools mit `confirm`.
+- Antwort `ActionResponse`: `success`, `text` (Ausgabe wie in der Konsole), `errors`, `warnings`, `command` (ausgeführte Zeile), `jobids` (aus „Job queued. JobId=N“ bzw. dem Request) und die typisierten Datensätze nach der Änderung: `jobs` (Run, Rerun, Restore, RestoreTreeDone, UpdateJob, Cancel), `volumes` (Label, Relabel, UpdateVolume, PruneVolume, PurgeVolume, Truncate mit `volume`), `pools` (CreatePool, UpdatePool); `.bvfs_*`/`.acl` liefern das API-2-Ergebnis in `result`. Ein fehlgeschlagener Befehl ist `success = false` mit den Meldungen, kein gRPC-Fehler.
+- Neue Request-Messages, wo die Messages aus `director_commands.proto` Parameter nicht kennen: `RunJobCommand`, `RerunJobCommand`, `RestoreJobCommand`, `RestoreSessionCommand`, `LabelVolumeCommand`, `RelabelVolumeCommand`, `DeleteObjectCommand`, `PruneTargetCommand`, `PurgeTargetCommand`, `UpdateVolumeCommand`, `TruncateVolumesCommand`, `SetDebugLevelCommand`; `PruneVolumeCommand`/`PruneDirectoryCommand` haben `confirm` bekommen.
+- `Wait` läuft in einem eigenen Thread (es blockiert bis zum Jobende), alle anderen über die Warteschlange.
+
+### Sitzungsbefehle (Entwicklungs-Build)
+
+| RPC | Wirkung |
+|---|---|
+| `UseCatalog`, `Autodisplay`, `Automount`, `Trace` | wie der Konsolenbefehl, für die Sitzung des Session-Tokens |
+| `Wait` | wartet auf den Job bzw. alle Jobs |
+| `Quit`, `Exit`, `DotQuit` | beenden die Sitzung: der Session-Token wird ungültig, offene Restore-Sitzungen enden |
+| `Gui`, `DotApi`, `DotGrpc`, `SetIp` | nicht anwendbar → `FAILED_PRECONDITION`: das Antwortformat legt die RPC fest, das typisierte API fragt nie nach, und `setip` braucht die Adresse einer BNET-Konsole |
+
+### Interaktive Wiederherstellung (Entwicklungs-Build)
+
+`StartRestoreSession` führt `restore … ` bis zur Dateiauswahl aus (dieselbe Implementierung wie in der Konsole, `commands/restore.rs`/`restore_tree.rs`) und liefert eine `session_id`, die Zahl der Dateien im Baum und das Arbeitsverzeichnis. Ohne `jobid` braucht es `fileset` (jüngster Stand) oder `before`. Fragt der Restore vor der Dateiauswahl etwas (z.B. weil ein Parameter fehlt), wird abgebrochen (`FAILED_PRECONDITION` mit der Frage).
+
+Die `RestoreTree*`-RPCs entsprechen den Befehlen der Dateiauswahl: `Cd`, `Ls` (ls/dir), `LsDir`, `LsMark`, `Pwd`, `Find` liefern `RestoreTreeListResponse` (`cwd`, `entries` mit `name`, `is_dir`, `marked`, dazu `text`); `Mark`, `Unmark`, `MarkDir`, `UnmarkDir`, `Count`, `Estimate` liefern `RestoreTreeCountResponse` (`marked` = neu markiert bzw. markiert, `total`, `bytes`). `RestoreTreeDone` beendet die Auswahl, beantwortet „OK to run?“ mit yes und liefert die JobId des Restore-Jobs; `RestoreTreeAbort` verwirft. Die Sitzung gehört zum Session-Token (andere Logins bekommen `NOT_FOUND`) und endet nach 10 Minuten ohne Aufruf.
+
+```sh
+grpcurl … -d '{"client":"fd1","jobid":[631],"where":"/tmp/restore"}' $DIR bareos.director.api.DirectorApi/StartRestoreSession
+grpcurl … -d '{"session_id":"<id>","path":"/etc/"}' $DIR bareos.director.api.DirectorApi/RestoreTreeCd
+grpcurl … -d '{"session_id":"<id>","path":"hosts"}' $DIR bareos.director.api.DirectorApi/RestoreTreeMark
+grpcurl … -d '{"session_id":"<id>"}' $DIR bareos.director.api.DirectorApi/RestoreTreeDone
+```
+
+### Tests
+
+Abbildungs-Tests in `crates/bareos-proto-rs/src/typed.rs` und `crates/onesimus-dird/src/grpc/api.rs`; Konsolenzeilen und Sperren jeder Schreib-RPC in `grpc/api_write.rs` (nur Entwicklungs-Build); `UNIMPLEMENTED` im Produktions-Build und Warteschlange/Folgeabfrage/Abmeldung im Entwicklungs-Build in `grpc/api.rs`; Abdeckungstest `grpc/coverage.rs` (prüft gegen [`commands/bareos-director-commands.json`](commands/bareos-director-commands.json), dass jeder Befehl und jedes Unterkommando eine RPC hat, dass jede RPC entweder Lese-RPC oder im Entwicklungs-Build implementiert ist, und hält die Tabellen unten aktuell). Integrationstests in `crates/onesimus-dird/tests/grpc_typed_api.rs`:
+
+- `typed_api_matches_console_api2`: Director mit der Parity-Konfiguration auf einer Wegwerf-Kopie von `bareos_cppref`, jede Lese-RPC gegen die `.api 2`-Ausgabe derselben Konsolenzeile, auch für eine eingeschränkte Konsole;
+- `typed_api_writes_on_private_daemons` (nur Entwicklungs-Build): eigener Katalog (Bareos-DDL), **private** `bareos-fd`/`bareos-sd` mit eigener Konfiguration, eigenen Ports und Dateigerät (nie die laufenden Daemons): Label, Backup über `Run`, Restore über `Restore` und über eine interaktive `RestoreTree`-Sitzung (Inhalt der wiederhergestellten Dateien geprüft), Abbruch einer Sitzung, Mount/Unmount/Release, UpdateVolume, Purge/Truncate/Delete mit `confirm`, Cancel, DeleteJob, Enable/Disable, ConfigureAdd, Reload, `.sql`, sqlquery, nicht anwendbare RPCs, Abmeldung.
 
 ```sh
 cargo build -p onesimus-dird && cargo build -p bareos-bnet --example bnet_capture
 cargo test -p onesimus-dird --test grpc_typed_api -- --ignored --nocapture
+# Entwicklungs-Build; Ports 39240 (Director), +1 FD, +2 SD, +3 gRPC; Restore-Ziel TYPED_API_RESTORE_DIR
+cargo test -p onesimus-dird --features grpc-development --test grpc_typed_api -- --ignored --nocapture
 ```
+
+Die CI (`.github/workflows/package.yml`) testet beide Builds; die Pakete bleiben Produktions-Builds.
 
 ## RPCs
 
@@ -211,93 +250,93 @@ cargo test -p onesimus-dird --test grpc_typed_api -- --ignored --nocapture
 | `DotOvfsTree` | `api.DotOvfsTreeCommand` | `api.OvfsTreeResponse` | implementiert |
 | `DotOvfsLs` | `api.DotOvfsLsCommand` | `api.OvfsLsResponse` | implementiert |
 | `DotOvfsVersions` | `api.DotOvfsVersionsCommand` | `api.OvfsVersionsResponse` | implementiert |
-| `Run` | `commands.RunCommand` | `api.ActionResponse` | definiert (S-35) |
-| `Rerun` | `commands.RerunCommand` | `api.ActionResponse` | definiert (S-35) |
-| `Cancel` | `commands.CancelCommand` | `api.ActionResponse` | definiert (S-35) |
-| `Restore` | `commands.RestoreCommand` | `api.ActionResponse` | definiert (S-35) |
-| `Label` | `commands.LabelCommand` | `api.ActionResponse` | definiert (S-35) |
-| `Relabel` | `commands.RelabelCommand` | `api.ActionResponse` | definiert (S-35) |
-| `Mount` | `commands.MountCommand` | `api.ActionResponse` | definiert (S-35) |
-| `Unmount` | `commands.UnmountCommand` | `api.ActionResponse` | definiert (S-35) |
-| `Release` | `commands.ReleaseCommand` | `api.ActionResponse` | definiert (S-35) |
-| `AddVolumes` | `commands.AddCommand` | `api.ActionResponse` | definiert (S-35) |
-| `CreatePool` | `commands.CreateCommand` | `api.ActionResponse` | definiert (S-35) |
-| `DeleteVolume` | `commands.DeleteCommand` | `api.ActionResponse` | definiert (S-35) |
-| `DeletePool` | `commands.DeleteCommand` | `api.ActionResponse` | definiert (S-35) |
-| `DeleteJob` | `commands.DeleteCommand` | `api.ActionResponse` | definiert (S-35) |
-| `DeleteStorage` | `commands.DeleteCommand` | `api.ActionResponse` | definiert (S-35) |
-| `Enable` | `commands.EnableCommand` | `api.ActionResponse` | definiert (S-35) |
-| `Disable` | `commands.DisableCommand` | `api.ActionResponse` | definiert (S-35) |
-| `ExportVolumes` | `commands.ExportCommand` | `api.ActionResponse` | definiert (S-35) |
-| `ImportVolumes` | `commands.ImportCommand` | `api.ActionResponse` | definiert (S-35) |
-| `MoveVolumes` | `commands.MoveCommand` | `api.ActionResponse` | definiert (S-35) |
-| `PruneFiles` | `commands.PruneCommand` | `api.ActionResponse` | definiert (S-35) |
-| `PruneJobs` | `commands.PruneCommand` | `api.ActionResponse` | definiert (S-35) |
-| `PruneVolume` | `api.PruneVolumeCommand` | `api.ActionResponse` | definiert (S-35) |
-| `PruneStats` | `commands.PruneCommand` | `api.ActionResponse` | definiert (S-35) |
-| `PruneDirectory` | `api.PruneDirectoryCommand` | `api.ActionResponse` | definiert (S-35) |
-| `PurgeFiles` | `commands.PurgeCommand` | `api.ActionResponse` | definiert (S-35) |
-| `PurgeJobs` | `commands.PurgeCommand` | `api.ActionResponse` | definiert (S-35) |
-| `PurgeVolume` | `commands.PurgeCommand` | `api.ActionResponse` | definiert (S-35) |
-| `PurgeQuota` | `commands.PurgeCommand` | `api.ActionResponse` | definiert (S-35) |
-| `UpdateVolume` | `commands.UpdateCommand` | `api.ActionResponse` | definiert (S-35) |
-| `UpdatePool` | `commands.UpdateCommand` | `api.ActionResponse` | definiert (S-35) |
-| `UpdateSlots` | `api.UpdateSlotsCommand` | `api.ActionResponse` | definiert (S-35) |
-| `UpdateJob` | `commands.UpdateCommand` | `api.ActionResponse` | definiert (S-35) |
-| `UpdateStats` | `commands.UpdateCommand` | `api.ActionResponse` | definiert (S-35) |
-| `Truncate` | `commands.TruncateCommand` | `api.ActionResponse` | definiert (S-35) |
-| `ConfigureAdd` | `commands.ConfigureAddCommand` | `api.ActionResponse` | definiert (S-35) |
-| `ConfigureExport` | `commands.ConfigureExportCommand` | `api.ActionResponse` | definiert (S-35) |
-| `ConfigureDelete` | `commands.ConfigureDeleteCommand` | `api.ActionResponse` | definiert (S-35) |
-| `ConfigureUpdate` | `commands.ConfigureUpdateCommand` | `api.ActionResponse` | definiert (S-35) |
-| `Reload` | `commands.ReloadCommand` | `api.ActionResponse` | definiert (S-35) |
-| `SetDebug` | `commands.SetdebugCommand` | `api.ActionResponse` | definiert (S-35) |
-| `SetBandwidth` | `commands.SetbandwidthCommand` | `api.ActionResponse` | definiert (S-35) |
-| `SetDevice` | `commands.SetdeviceCommand` | `api.ActionResponse` | definiert (S-35) |
-| `SetIp` | `commands.SetipCommand` | `api.ActionResponse` | definiert (S-35) |
-| `Trace` | `api.TraceSwitchCommand` | `api.ActionResponse` | definiert (S-35) |
-| `DotSql` | `commands.DotSqlCommand` | `api.SqlQueryResponse` | definiert (S-35) |
-| `SqlQuery` | `commands.SqlQueryCommand` | `api.SqlQueryResponse` | definiert (S-35) |
-| `Query` | `api.QueryRunCommand` | `api.SqlQueryResponse` | definiert (S-35) |
-| `DotBvfsUpdate` | `commands.DotBvfsUpdateCommand` | `api.ActionResponse` | definiert (S-35) |
-| `DotBvfsRestore` | `commands.DotBvfsRestoreCommand` | `api.ActionResponse` | definiert (S-35) |
-| `DotBvfsCleanup` | `commands.DotBvfsCleanupCommand` | `api.ActionResponse` | definiert (S-35) |
-| `DotBvfsClearCache` | `commands.DotBvfsClearCacheCommand` | `api.ActionResponse` | definiert (S-35) |
-| `DotAclSet` | `commands.DotAclSetCommand` | `api.ActionResponse` | definiert (S-35) |
-| `DotAclDelete` | `commands.DotAclDeleteCommand` | `api.ActionResponse` | definiert (S-35) |
-| `DotAclClear` | `commands.DotAclClearCommand` | `api.ActionResponse` | definiert (S-35) |
-| `DotAclCopy` | `commands.DotAclCopyCommand` | `api.ActionResponse` | definiert (S-35) |
-| `DotProfileCreate` | `commands.DotProfileCreateCommand` | `api.ActionResponse` | definiert (S-35) |
-| `DotProfileSet` | `commands.DotProfileSetCommand` | `api.ActionResponse` | definiert (S-35) |
-| `DotProfileDelete` | `commands.DotProfileDeleteCommand` | `api.ActionResponse` | definiert (S-35) |
-| `DotProfileAssign` | `commands.DotProfileAssignCommand` | `api.ActionResponse` | definiert (S-35) |
-| `DotProfileUnassign` | `commands.DotProfileUnassignCommand` | `api.ActionResponse` | definiert (S-35) |
-| `UseCatalog` | `commands.UseCommand` | `api.ActionResponse` | definiert (S-35) |
-| `Wait` | `commands.WaitCommand` | `api.ActionResponse` | definiert (S-35) |
-| `Gui` | `api.GuiSwitchCommand` | `api.ActionResponse` | definiert (S-35) |
-| `Autodisplay` | `api.AutodisplaySwitchCommand` | `api.ActionResponse` | definiert (S-35) |
-| `Automount` | `api.AutomountSwitchCommand` | `api.ActionResponse` | definiert (S-35) |
-| `DotApi` | `api.DotApiModeCommand` | `api.ActionResponse` | definiert (S-35) |
-| `DotGrpc` | `commands.DotGrpcCommand` | `api.ActionResponse` | definiert (S-35) |
-| `Quit` | `commands.QuitCommand` | `api.ActionResponse` | definiert (S-35) |
-| `Exit` | `commands.ExitCommand` | `api.ActionResponse` | definiert (S-35) |
-| `DotQuit` | `commands.DotQuitCommand` | `api.ActionResponse` | definiert (S-35) |
-| `StartRestoreSession` | `commands.RestoreCommand` | `api.RestoreSessionResponse` | definiert (S-35) |
-| `RestoreTreeCd` | `api.RestoreTreePathCommand` | `api.RestoreTreeListResponse` | definiert (S-35) |
-| `RestoreTreeLs` | `api.RestoreTreePathCommand` | `api.RestoreTreeListResponse` | definiert (S-35) |
-| `RestoreTreeLsDir` | `api.RestoreTreePathCommand` | `api.RestoreTreeListResponse` | definiert (S-35) |
-| `RestoreTreeLsMark` | `api.RestoreTreePathCommand` | `api.RestoreTreeListResponse` | definiert (S-35) |
-| `RestoreTreePwd` | `api.RestoreTreeSessionCommand` | `api.RestoreTreeListResponse` | definiert (S-35) |
-| `RestoreTreeMark` | `api.RestoreTreePathCommand` | `api.RestoreTreeCountResponse` | definiert (S-35) |
-| `RestoreTreeUnmark` | `api.RestoreTreePathCommand` | `api.RestoreTreeCountResponse` | definiert (S-35) |
-| `RestoreTreeMarkDir` | `api.RestoreTreePathCommand` | `api.RestoreTreeCountResponse` | definiert (S-35) |
-| `RestoreTreeUnmarkDir` | `api.RestoreTreePathCommand` | `api.RestoreTreeCountResponse` | definiert (S-35) |
-| `RestoreTreeCount` | `api.RestoreTreeSessionCommand` | `api.RestoreTreeCountResponse` | definiert (S-35) |
-| `RestoreTreeFind` | `api.RestoreTreePathCommand` | `api.RestoreTreeListResponse` | definiert (S-35) |
-| `RestoreTreeEstimate` | `api.RestoreTreeSessionCommand` | `api.RestoreTreeCountResponse` | definiert (S-35) |
-| `RestoreTreeHelp` | `api.RestoreTreeSessionCommand` | `api.HelpResponse` | definiert (S-35) |
-| `RestoreTreeDone` | `api.RestoreTreeSessionCommand` | `api.ActionResponse` | definiert (S-35) |
-| `RestoreTreeAbort` | `api.RestoreTreeSessionCommand` | `api.ActionResponse` | definiert (S-35) |
+| `Run` | `api.RunJobCommand` | `api.ActionResponse` | Entwicklungs-Build (`grpc-development`) |
+| `Rerun` | `api.RerunJobCommand` | `api.ActionResponse` | Entwicklungs-Build (`grpc-development`) |
+| `Cancel` | `commands.CancelCommand` | `api.ActionResponse` | Entwicklungs-Build (`grpc-development`) |
+| `Restore` | `api.RestoreJobCommand` | `api.ActionResponse` | Entwicklungs-Build (`grpc-development`) |
+| `Label` | `api.LabelVolumeCommand` | `api.ActionResponse` | Entwicklungs-Build (`grpc-development`) |
+| `Relabel` | `api.RelabelVolumeCommand` | `api.ActionResponse` | Entwicklungs-Build (`grpc-development`) |
+| `Mount` | `commands.MountCommand` | `api.ActionResponse` | Entwicklungs-Build (`grpc-development`) |
+| `Unmount` | `commands.UnmountCommand` | `api.ActionResponse` | Entwicklungs-Build (`grpc-development`) |
+| `Release` | `commands.ReleaseCommand` | `api.ActionResponse` | Entwicklungs-Build (`grpc-development`) |
+| `AddVolumes` | `commands.AddCommand` | `api.ActionResponse` | Entwicklungs-Build (`grpc-development`) |
+| `CreatePool` | `commands.CreateCommand` | `api.ActionResponse` | Entwicklungs-Build (`grpc-development`) |
+| `DeleteVolume` | `api.DeleteObjectCommand` | `api.ActionResponse` | Entwicklungs-Build (`grpc-development`) |
+| `DeletePool` | `api.DeleteObjectCommand` | `api.ActionResponse` | Entwicklungs-Build (`grpc-development`) |
+| `DeleteJob` | `api.DeleteObjectCommand` | `api.ActionResponse` | Entwicklungs-Build (`grpc-development`) |
+| `DeleteStorage` | `api.DeleteObjectCommand` | `api.ActionResponse` | Entwicklungs-Build (`grpc-development`) |
+| `Enable` | `commands.EnableCommand` | `api.ActionResponse` | Entwicklungs-Build (`grpc-development`) |
+| `Disable` | `commands.DisableCommand` | `api.ActionResponse` | Entwicklungs-Build (`grpc-development`) |
+| `ExportVolumes` | `commands.ExportCommand` | `api.ActionResponse` | Entwicklungs-Build (`grpc-development`) |
+| `ImportVolumes` | `commands.ImportCommand` | `api.ActionResponse` | Entwicklungs-Build (`grpc-development`) |
+| `MoveVolumes` | `commands.MoveCommand` | `api.ActionResponse` | Entwicklungs-Build (`grpc-development`) |
+| `PruneFiles` | `api.PruneTargetCommand` | `api.ActionResponse` | Entwicklungs-Build (`grpc-development`) |
+| `PruneJobs` | `api.PruneTargetCommand` | `api.ActionResponse` | Entwicklungs-Build (`grpc-development`) |
+| `PruneVolume` | `api.PruneVolumeCommand` | `api.ActionResponse` | Entwicklungs-Build (`grpc-development`) |
+| `PruneStats` | `api.PruneTargetCommand` | `api.ActionResponse` | Entwicklungs-Build (`grpc-development`) |
+| `PruneDirectory` | `api.PruneDirectoryCommand` | `api.ActionResponse` | Entwicklungs-Build (`grpc-development`) |
+| `PurgeFiles` | `api.PurgeTargetCommand` | `api.ActionResponse` | Entwicklungs-Build (`grpc-development`) |
+| `PurgeJobs` | `api.PurgeTargetCommand` | `api.ActionResponse` | Entwicklungs-Build (`grpc-development`) |
+| `PurgeVolume` | `api.PurgeTargetCommand` | `api.ActionResponse` | Entwicklungs-Build (`grpc-development`) |
+| `PurgeQuota` | `api.PurgeTargetCommand` | `api.ActionResponse` | Entwicklungs-Build (`grpc-development`) |
+| `UpdateVolume` | `api.UpdateVolumeCommand` | `api.ActionResponse` | Entwicklungs-Build (`grpc-development`) |
+| `UpdatePool` | `commands.UpdateCommand` | `api.ActionResponse` | Entwicklungs-Build (`grpc-development`) |
+| `UpdateSlots` | `api.UpdateSlotsCommand` | `api.ActionResponse` | Entwicklungs-Build (`grpc-development`) |
+| `UpdateJob` | `commands.UpdateCommand` | `api.ActionResponse` | Entwicklungs-Build (`grpc-development`) |
+| `UpdateStats` | `commands.UpdateCommand` | `api.ActionResponse` | Entwicklungs-Build (`grpc-development`) |
+| `Truncate` | `api.TruncateVolumesCommand` | `api.ActionResponse` | Entwicklungs-Build (`grpc-development`) |
+| `ConfigureAdd` | `commands.ConfigureAddCommand` | `api.ActionResponse` | Entwicklungs-Build (`grpc-development`) |
+| `ConfigureExport` | `commands.ConfigureExportCommand` | `api.ActionResponse` | Entwicklungs-Build (`grpc-development`) |
+| `ConfigureDelete` | `commands.ConfigureDeleteCommand` | `api.ActionResponse` | Entwicklungs-Build (`grpc-development`) |
+| `ConfigureUpdate` | `commands.ConfigureUpdateCommand` | `api.ActionResponse` | Entwicklungs-Build (`grpc-development`) |
+| `Reload` | `commands.ReloadCommand` | `api.ActionResponse` | Entwicklungs-Build (`grpc-development`) |
+| `SetDebug` | `api.SetDebugLevelCommand` | `api.ActionResponse` | Entwicklungs-Build (`grpc-development`) |
+| `SetBandwidth` | `commands.SetbandwidthCommand` | `api.ActionResponse` | Entwicklungs-Build (`grpc-development`) |
+| `SetDevice` | `commands.SetdeviceCommand` | `api.ActionResponse` | Entwicklungs-Build (`grpc-development`) |
+| `SetIp` | `commands.SetipCommand` | `api.ActionResponse` | nicht anwendbar (Entwicklungs-Build: FAILED_PRECONDITION) |
+| `Trace` | `api.TraceSwitchCommand` | `api.ActionResponse` | Entwicklungs-Build (`grpc-development`) |
+| `DotSql` | `commands.DotSqlCommand` | `api.SqlQueryResponse` | Entwicklungs-Build (`grpc-development`) |
+| `SqlQuery` | `commands.SqlQueryCommand` | `api.SqlQueryResponse` | Entwicklungs-Build (`grpc-development`) |
+| `Query` | `api.QueryRunCommand` | `api.SqlQueryResponse` | Entwicklungs-Build (`grpc-development`) |
+| `DotBvfsUpdate` | `commands.DotBvfsUpdateCommand` | `api.ActionResponse` | Entwicklungs-Build (`grpc-development`) |
+| `DotBvfsRestore` | `commands.DotBvfsRestoreCommand` | `api.ActionResponse` | Entwicklungs-Build (`grpc-development`) |
+| `DotBvfsCleanup` | `commands.DotBvfsCleanupCommand` | `api.ActionResponse` | Entwicklungs-Build (`grpc-development`) |
+| `DotBvfsClearCache` | `commands.DotBvfsClearCacheCommand` | `api.ActionResponse` | Entwicklungs-Build (`grpc-development`) |
+| `DotAclSet` | `commands.DotAclSetCommand` | `api.ActionResponse` | Entwicklungs-Build (`grpc-development`) |
+| `DotAclDelete` | `commands.DotAclDeleteCommand` | `api.ActionResponse` | Entwicklungs-Build (`grpc-development`) |
+| `DotAclClear` | `commands.DotAclClearCommand` | `api.ActionResponse` | Entwicklungs-Build (`grpc-development`) |
+| `DotAclCopy` | `commands.DotAclCopyCommand` | `api.ActionResponse` | Entwicklungs-Build (`grpc-development`) |
+| `DotProfileCreate` | `commands.DotProfileCreateCommand` | `api.ActionResponse` | Entwicklungs-Build (`grpc-development`) |
+| `DotProfileSet` | `commands.DotProfileSetCommand` | `api.ActionResponse` | Entwicklungs-Build (`grpc-development`) |
+| `DotProfileDelete` | `commands.DotProfileDeleteCommand` | `api.ActionResponse` | Entwicklungs-Build (`grpc-development`) |
+| `DotProfileAssign` | `commands.DotProfileAssignCommand` | `api.ActionResponse` | Entwicklungs-Build (`grpc-development`) |
+| `DotProfileUnassign` | `commands.DotProfileUnassignCommand` | `api.ActionResponse` | Entwicklungs-Build (`grpc-development`) |
+| `UseCatalog` | `commands.UseCommand` | `api.ActionResponse` | Entwicklungs-Build (`grpc-development`) |
+| `Wait` | `commands.WaitCommand` | `api.ActionResponse` | Entwicklungs-Build (`grpc-development`) |
+| `Gui` | `api.GuiSwitchCommand` | `api.ActionResponse` | nicht anwendbar (Entwicklungs-Build: FAILED_PRECONDITION) |
+| `Autodisplay` | `api.AutodisplaySwitchCommand` | `api.ActionResponse` | Entwicklungs-Build (`grpc-development`) |
+| `Automount` | `api.AutomountSwitchCommand` | `api.ActionResponse` | Entwicklungs-Build (`grpc-development`) |
+| `DotApi` | `api.DotApiModeCommand` | `api.ActionResponse` | nicht anwendbar (Entwicklungs-Build: FAILED_PRECONDITION) |
+| `DotGrpc` | `commands.DotGrpcCommand` | `api.ActionResponse` | nicht anwendbar (Entwicklungs-Build: FAILED_PRECONDITION) |
+| `Quit` | `commands.QuitCommand` | `api.ActionResponse` | Entwicklungs-Build (`grpc-development`) |
+| `Exit` | `commands.ExitCommand` | `api.ActionResponse` | Entwicklungs-Build (`grpc-development`) |
+| `DotQuit` | `commands.DotQuitCommand` | `api.ActionResponse` | Entwicklungs-Build (`grpc-development`) |
+| `StartRestoreSession` | `api.RestoreSessionCommand` | `api.RestoreSessionResponse` | Entwicklungs-Build (`grpc-development`) |
+| `RestoreTreeCd` | `api.RestoreTreePathCommand` | `api.RestoreTreeListResponse` | Entwicklungs-Build (`grpc-development`) |
+| `RestoreTreeLs` | `api.RestoreTreePathCommand` | `api.RestoreTreeListResponse` | Entwicklungs-Build (`grpc-development`) |
+| `RestoreTreeLsDir` | `api.RestoreTreePathCommand` | `api.RestoreTreeListResponse` | Entwicklungs-Build (`grpc-development`) |
+| `RestoreTreeLsMark` | `api.RestoreTreePathCommand` | `api.RestoreTreeListResponse` | Entwicklungs-Build (`grpc-development`) |
+| `RestoreTreePwd` | `api.RestoreTreeSessionCommand` | `api.RestoreTreeListResponse` | Entwicklungs-Build (`grpc-development`) |
+| `RestoreTreeMark` | `api.RestoreTreePathCommand` | `api.RestoreTreeCountResponse` | Entwicklungs-Build (`grpc-development`) |
+| `RestoreTreeUnmark` | `api.RestoreTreePathCommand` | `api.RestoreTreeCountResponse` | Entwicklungs-Build (`grpc-development`) |
+| `RestoreTreeMarkDir` | `api.RestoreTreePathCommand` | `api.RestoreTreeCountResponse` | Entwicklungs-Build (`grpc-development`) |
+| `RestoreTreeUnmarkDir` | `api.RestoreTreePathCommand` | `api.RestoreTreeCountResponse` | Entwicklungs-Build (`grpc-development`) |
+| `RestoreTreeCount` | `api.RestoreTreeSessionCommand` | `api.RestoreTreeCountResponse` | Entwicklungs-Build (`grpc-development`) |
+| `RestoreTreeFind` | `api.RestoreTreePathCommand` | `api.RestoreTreeListResponse` | Entwicklungs-Build (`grpc-development`) |
+| `RestoreTreeEstimate` | `api.RestoreTreeSessionCommand` | `api.RestoreTreeCountResponse` | Entwicklungs-Build (`grpc-development`) |
+| `RestoreTreeHelp` | `api.RestoreTreeSessionCommand` | `api.HelpResponse` | Entwicklungs-Build (`grpc-development`) |
+| `RestoreTreeDone` | `api.RestoreTreeSessionCommand` | `api.ActionResponse` | Entwicklungs-Build (`grpc-development`) |
+| `RestoreTreeAbort` | `api.RestoreTreeSessionCommand` | `api.ActionResponse` | Entwicklungs-Build (`grpc-development`) |
 <!-- rpcs:end -->
 
 ## Abdeckung: Befehl → RPC
@@ -309,7 +348,7 @@ Unterbefehl `key=` steht für die Form `key=<wert>`, ein Wort für das Schlüsse
 |---|---|---|---|
 | `.` | – | `Noop` | implementiert |
 | `.actiononpurge` | – | `DotActiononpurge` | implementiert |
-| `.api` | – | `DotApi` | definiert (S-35) |
+| `.api` | – | `DotApi` | nicht anwendbar (Entwicklungs-Build: FAILED_PRECONDITION) |
 | `.authorized` | – | `DotAuthorized` | implementiert |
 | `.catalogs` | – | `DotCatalogs` | implementiert |
 | `.clients` | – | `DotClients` | implementiert |
@@ -329,8 +368,8 @@ Unterbefehl `key=` steht für die Form `key=<wert>`, ein Wort für das Schlüsse
 | `.msgs` | – | `DotMsgs` | implementiert |
 | `.pools` | – | `DotPools` | implementiert |
 | `.profiles` | – | `DotProfiles` | implementiert |
-| `.quit` | – | `DotQuit` | definiert (S-35) |
-| `.sql` | – | `DotSql` | definiert (S-35) |
+| `.quit` | – | `DotQuit` | Entwicklungs-Build (`grpc-development`) |
+| `.sql` | – | `DotSql` | Entwicklungs-Build (`grpc-development`) |
 | `.schedule` | – | `DotSchedule` | implementiert |
 | `.status` | `dir` | `DotStatusDirector` | implementiert |
 | `.status` | `storage=` | `DotStatusStorage` | implementiert |
@@ -340,47 +379,47 @@ Unterbefehl `key=` steht für die Form `key=<wert>`, ein Wort für das Schlüsse
 | `.volstatus` | – | `DotVolstatus` | implementiert |
 | `.bvfs_lsdirs` | – | `DotBvfsLsdirs` | implementiert |
 | `.bvfs_lsfiles` | – | `DotBvfsLsfiles` | implementiert |
-| `.bvfs_update` | – | `DotBvfsUpdate` | definiert (S-35) |
+| `.bvfs_update` | – | `DotBvfsUpdate` | Entwicklungs-Build (`grpc-development`) |
 | `.bvfs_get_jobids` | – | `DotBvfsGetJobids` | implementiert |
 | `.bvfs_versions` | – | `DotBvfsVersions` | implementiert |
-| `.bvfs_restore` | – | `DotBvfsRestore` | definiert (S-35) |
-| `.bvfs_cleanup` | – | `DotBvfsCleanup` | definiert (S-35) |
-| `.bvfs_clear_cache` | – | `DotBvfsClearCache` | definiert (S-35) |
-| `add` | – | `AddVolumes` | definiert (S-35) |
-| `autodisplay` | – | `Autodisplay` | definiert (S-35) |
-| `automount` | – | `Automount` | definiert (S-35) |
-| `cancel` | – | `Cancel` | definiert (S-35) |
-| `configure` | `add client` | `ConfigureAdd` | definiert (S-35) |
-| `configure` | `add jobdefs` | `ConfigureAdd` | definiert (S-35) |
-| `configure` | `add job` | `ConfigureAdd` | definiert (S-35) |
-| `configure` | `add storage` | `ConfigureAdd` | definiert (S-35) |
-| `configure` | `add catalog` | `ConfigureAdd` | definiert (S-35) |
-| `configure` | `add schedule` | `ConfigureAdd` | definiert (S-35) |
-| `configure` | `add fileset` | `ConfigureAdd` | definiert (S-35) |
-| `configure` | `add pool` | `ConfigureAdd` | definiert (S-35) |
-| `configure` | `add messages` | `ConfigureAdd` | definiert (S-35) |
-| `configure` | `add counter` | `ConfigureAdd` | definiert (S-35) |
-| `configure` | `add profile` | `ConfigureAdd` | definiert (S-35) |
-| `configure` | `add console` | `ConfigureAdd` | definiert (S-35) |
-| `configure` | `add user` | `ConfigureAdd` | definiert (S-35) |
-| `configure` | `export` | `ConfigureExport` | definiert (S-35) |
-| `configure` | `delete` | `ConfigureDelete` | definiert (S-35) |
-| `configure` | `update` | `ConfigureUpdate` | definiert (S-35) |
-| `create` | – | `CreatePool` | definiert (S-35) |
-| `delete` | `volume=` | `DeleteVolume` | definiert (S-35) |
-| `delete` | `volume` | `DeleteVolume` | definiert (S-35) |
-| `delete` | `pool=` | `DeletePool` | definiert (S-35) |
-| `delete` | `jobid=` | `DeleteJob` | definiert (S-35) |
-| `delete` | `storage` | `DeleteStorage` | definiert (S-35) |
-| `disable` | – | `Disable` | definiert (S-35) |
-| `enable` | – | `Enable` | definiert (S-35) |
+| `.bvfs_restore` | – | `DotBvfsRestore` | Entwicklungs-Build (`grpc-development`) |
+| `.bvfs_cleanup` | – | `DotBvfsCleanup` | Entwicklungs-Build (`grpc-development`) |
+| `.bvfs_clear_cache` | – | `DotBvfsClearCache` | Entwicklungs-Build (`grpc-development`) |
+| `add` | – | `AddVolumes` | Entwicklungs-Build (`grpc-development`) |
+| `autodisplay` | – | `Autodisplay` | Entwicklungs-Build (`grpc-development`) |
+| `automount` | – | `Automount` | Entwicklungs-Build (`grpc-development`) |
+| `cancel` | – | `Cancel` | Entwicklungs-Build (`grpc-development`) |
+| `configure` | `add client` | `ConfigureAdd` | Entwicklungs-Build (`grpc-development`) |
+| `configure` | `add jobdefs` | `ConfigureAdd` | Entwicklungs-Build (`grpc-development`) |
+| `configure` | `add job` | `ConfigureAdd` | Entwicklungs-Build (`grpc-development`) |
+| `configure` | `add storage` | `ConfigureAdd` | Entwicklungs-Build (`grpc-development`) |
+| `configure` | `add catalog` | `ConfigureAdd` | Entwicklungs-Build (`grpc-development`) |
+| `configure` | `add schedule` | `ConfigureAdd` | Entwicklungs-Build (`grpc-development`) |
+| `configure` | `add fileset` | `ConfigureAdd` | Entwicklungs-Build (`grpc-development`) |
+| `configure` | `add pool` | `ConfigureAdd` | Entwicklungs-Build (`grpc-development`) |
+| `configure` | `add messages` | `ConfigureAdd` | Entwicklungs-Build (`grpc-development`) |
+| `configure` | `add counter` | `ConfigureAdd` | Entwicklungs-Build (`grpc-development`) |
+| `configure` | `add profile` | `ConfigureAdd` | Entwicklungs-Build (`grpc-development`) |
+| `configure` | `add console` | `ConfigureAdd` | Entwicklungs-Build (`grpc-development`) |
+| `configure` | `add user` | `ConfigureAdd` | Entwicklungs-Build (`grpc-development`) |
+| `configure` | `export` | `ConfigureExport` | Entwicklungs-Build (`grpc-development`) |
+| `configure` | `delete` | `ConfigureDelete` | Entwicklungs-Build (`grpc-development`) |
+| `configure` | `update` | `ConfigureUpdate` | Entwicklungs-Build (`grpc-development`) |
+| `create` | – | `CreatePool` | Entwicklungs-Build (`grpc-development`) |
+| `delete` | `volume=` | `DeleteVolume` | Entwicklungs-Build (`grpc-development`) |
+| `delete` | `volume` | `DeleteVolume` | Entwicklungs-Build (`grpc-development`) |
+| `delete` | `pool=` | `DeletePool` | Entwicklungs-Build (`grpc-development`) |
+| `delete` | `jobid=` | `DeleteJob` | Entwicklungs-Build (`grpc-development`) |
+| `delete` | `storage` | `DeleteStorage` | Entwicklungs-Build (`grpc-development`) |
+| `disable` | – | `Disable` | Entwicklungs-Build (`grpc-development`) |
+| `enable` | – | `Enable` | Entwicklungs-Build (`grpc-development`) |
 | `estimate` | – | `Estimate` | implementiert |
-| `exit` | – | `Exit` | definiert (S-35) |
-| `export` | – | `ExportVolumes` | definiert (S-35) |
-| `gui` | – | `Gui` | definiert (S-35) |
+| `exit` | – | `Exit` | Entwicklungs-Build (`grpc-development`) |
+| `export` | – | `ExportVolumes` | Entwicklungs-Build (`grpc-development`) |
+| `gui` | – | `Gui` | nicht anwendbar (Entwicklungs-Build: FAILED_PRECONDITION) |
 | `help` | – | `Help` | implementiert |
-| `import` | – | `ImportVolumes` | definiert (S-35) |
-| `label` | – | `Label` | definiert (S-35) |
+| `import` | – | `ImportVolumes` | Entwicklungs-Build (`grpc-development`) |
+| `label` | – | `Label` | Entwicklungs-Build (`grpc-development`) |
 | `list` | `basefiles` | `ListBaseFiles` | implementiert |
 | `list` | `backups` | `ListBackups` | implementiert |
 | `list` | `client=` | `ListClients` | implementiert |
@@ -439,27 +478,27 @@ Unterbefehl `key=` steht für die Form `key=<wert>`, ein Wort für das Schlüsse
 | `llist` | `mediaid=` | `GetVolume` | implementiert |
 | `messages` | – | `GetMessages` | implementiert |
 | `memory` | – | `GetMemory` | implementiert |
-| `mount` | – | `Mount` | definiert (S-35) |
-| `move` | – | `MoveVolumes` | definiert (S-35) |
-| `prune` | `files` | `PruneFiles` | definiert (S-35) |
-| `prune` | `jobs` | `PruneJobs` | definiert (S-35) |
-| `prune` | `volume` | `PruneVolume` | definiert (S-35) |
-| `prune` | `stats` | `PruneStats` | definiert (S-35) |
-| `prune` | `directory` | `PruneDirectory` | definiert (S-35) |
-| `purge` | `files` | `PurgeFiles` | definiert (S-35) |
-| `purge` | `jobs` | `PurgeJobs` | definiert (S-35) |
-| `purge` | `volume` | `PurgeVolume` | definiert (S-35) |
-| `purge` | `quota` | `PurgeQuota` | definiert (S-35) |
-| `quit` | – | `Quit` | definiert (S-35) |
-| `query` | – | `Query` | definiert (S-35) |
-| `restore` | – | `Restore` | definiert (S-35) |
-| `restore` | `interaktive Dateiauswahl` | `StartRestoreSession` | definiert (S-35) |
-| `relabel` | – | `Relabel` | definiert (S-35) |
-| `release` | – | `Release` | definiert (S-35) |
-| `reload` | – | `Reload` | definiert (S-35) |
-| `rerun` | – | `Rerun` | definiert (S-35) |
+| `mount` | – | `Mount` | Entwicklungs-Build (`grpc-development`) |
+| `move` | – | `MoveVolumes` | Entwicklungs-Build (`grpc-development`) |
+| `prune` | `files` | `PruneFiles` | Entwicklungs-Build (`grpc-development`) |
+| `prune` | `jobs` | `PruneJobs` | Entwicklungs-Build (`grpc-development`) |
+| `prune` | `volume` | `PruneVolume` | Entwicklungs-Build (`grpc-development`) |
+| `prune` | `stats` | `PruneStats` | Entwicklungs-Build (`grpc-development`) |
+| `prune` | `directory` | `PruneDirectory` | Entwicklungs-Build (`grpc-development`) |
+| `purge` | `files` | `PurgeFiles` | Entwicklungs-Build (`grpc-development`) |
+| `purge` | `jobs` | `PurgeJobs` | Entwicklungs-Build (`grpc-development`) |
+| `purge` | `volume` | `PurgeVolume` | Entwicklungs-Build (`grpc-development`) |
+| `purge` | `quota` | `PurgeQuota` | Entwicklungs-Build (`grpc-development`) |
+| `quit` | – | `Quit` | Entwicklungs-Build (`grpc-development`) |
+| `query` | – | `Query` | Entwicklungs-Build (`grpc-development`) |
+| `restore` | – | `Restore` | Entwicklungs-Build (`grpc-development`) |
+| `restore` | `interaktive Dateiauswahl` | `StartRestoreSession` | Entwicklungs-Build (`grpc-development`) |
+| `relabel` | – | `Relabel` | Entwicklungs-Build (`grpc-development`) |
+| `release` | – | `Release` | Entwicklungs-Build (`grpc-development`) |
+| `reload` | – | `Reload` | Entwicklungs-Build (`grpc-development`) |
+| `rerun` | – | `Rerun` | Entwicklungs-Build (`grpc-development`) |
 | `resolve` | – | `Resolve` | implementiert |
-| `run` | – | `Run` | definiert (S-35) |
+| `run` | – | `Run` | Entwicklungs-Build (`grpc-development`) |
 | `status` | `all` | `GetStatusAll` | implementiert |
 | `status` | `dir=` | `GetDirectorStatus` | implementiert |
 | `status` | `dir` | `GetDirectorStatus` | implementiert |
@@ -472,10 +511,10 @@ Unterbefehl `key=` steht für die Form `key=<wert>`, ein Wort für das Schlüsse
 | `status` | `job=` | `GetJobStatus` | implementiert |
 | `status` | `subscriptions` | `GetSubscriptions` | implementiert |
 | `status` | `configuration` | `GetConfigurationStatus` | implementiert |
-| `setbandwidth` | – | `SetBandwidth` | definiert (S-35) |
-| `setdebug` | – | `SetDebug` | definiert (S-35) |
-| `setdevice` | – | `SetDevice` | definiert (S-35) |
-| `setip` | – | `SetIp` | definiert (S-35) |
+| `setbandwidth` | – | `SetBandwidth` | Entwicklungs-Build (`grpc-development`) |
+| `setdebug` | – | `SetDebug` | Entwicklungs-Build (`grpc-development`) |
+| `setdevice` | – | `SetDevice` | Entwicklungs-Build (`grpc-development`) |
+| `setip` | – | `SetIp` | nicht anwendbar (Entwicklungs-Build: FAILED_PRECONDITION) |
 | `show` | `catalog=` | `ShowCatalogs` | implementiert |
 | `show` | `client=` | `ShowClients` | implementiert |
 | `show` | `console=` | `ShowConsoles` | implementiert |
@@ -506,67 +545,67 @@ Unterbefehl `key=` steht für die Form `key=<wert>`, ein Wort für das Schlüsse
 | `show` | `counters` | `ShowCounters` | implementiert |
 | `show` | `disabled` | `ShowDisabled` | implementiert |
 | `show` | `all` | `ShowAll` | implementiert |
-| `sqlquery` | – | `SqlQuery` | definiert (S-35) |
+| `sqlquery` | – | `SqlQuery` | Entwicklungs-Build (`grpc-development`) |
 | `time` | – | `GetTime` | implementiert |
-| `trace` | – | `Trace` | definiert (S-35) |
-| `truncate` | – | `Truncate` | definiert (S-35) |
-| `unmount` | – | `Unmount` | definiert (S-35) |
-| `umount` | – | `Unmount` | definiert (S-35) |
-| `update` | `volume=` | `UpdateVolume` | definiert (S-35) |
-| `update` | `pool=` | `UpdatePool` | definiert (S-35) |
-| `update` | `slots` | `UpdateSlots` | definiert (S-35) |
-| `update` | `jobid=` | `UpdateJob` | definiert (S-35) |
-| `update` | `stats` | `UpdateStats` | definiert (S-35) |
-| `use` | – | `UseCatalog` | definiert (S-35) |
+| `trace` | – | `Trace` | Entwicklungs-Build (`grpc-development`) |
+| `truncate` | – | `Truncate` | Entwicklungs-Build (`grpc-development`) |
+| `unmount` | – | `Unmount` | Entwicklungs-Build (`grpc-development`) |
+| `umount` | – | `Unmount` | Entwicklungs-Build (`grpc-development`) |
+| `update` | `volume=` | `UpdateVolume` | Entwicklungs-Build (`grpc-development`) |
+| `update` | `pool=` | `UpdatePool` | Entwicklungs-Build (`grpc-development`) |
+| `update` | `slots` | `UpdateSlots` | Entwicklungs-Build (`grpc-development`) |
+| `update` | `jobid=` | `UpdateJob` | Entwicklungs-Build (`grpc-development`) |
+| `update` | `stats` | `UpdateStats` | Entwicklungs-Build (`grpc-development`) |
+| `use` | – | `UseCatalog` | Entwicklungs-Build (`grpc-development`) |
 | `var` | – | `ExpandVariables` | implementiert |
 | `version` | – | `GetVersion` | implementiert |
-| `wait` | – | `Wait` | definiert (S-35) |
+| `wait` | – | `Wait` | Entwicklungs-Build (`grpc-development`) |
 | `whoami` | – | `Whoami` | implementiert |
 | `.acl` | `list` | `DotAclList` | implementiert |
-| `.acl` | `set` | `DotAclSet` | definiert (S-35) |
-| `.acl` | `delete` | `DotAclDelete` | definiert (S-35) |
-| `.acl` | `clear` | `DotAclClear` | definiert (S-35) |
-| `.acl` | `copy` | `DotAclCopy` | definiert (S-35) |
-| `.grpc` | – | `DotGrpc` | definiert (S-35) |
+| `.acl` | `set` | `DotAclSet` | Entwicklungs-Build (`grpc-development`) |
+| `.acl` | `delete` | `DotAclDelete` | Entwicklungs-Build (`grpc-development`) |
+| `.acl` | `clear` | `DotAclClear` | Entwicklungs-Build (`grpc-development`) |
+| `.acl` | `copy` | `DotAclCopy` | Entwicklungs-Build (`grpc-development`) |
+| `.grpc` | – | `DotGrpc` | nicht anwendbar (Entwicklungs-Build: FAILED_PRECONDITION) |
 | `.ovfs_latest` | – | `DotOvfsLatest` | implementiert |
 | `.ovfs_ls` | – | `DotOvfsLs` | implementiert |
 | `.ovfs_status` | – | `DotOvfsStatus` | implementiert |
 | `.ovfs_tree` | – | `DotOvfsTree` | implementiert |
 | `.ovfs_versions` | – | `DotOvfsVersions` | implementiert |
 | `.profile` | `list` | `DotProfileList` | implementiert |
-| `.profile` | `create` | `DotProfileCreate` | definiert (S-35) |
-| `.profile` | `set` | `DotProfileSet` | definiert (S-35) |
-| `.profile` | `delete` | `DotProfileDelete` | definiert (S-35) |
-| `.profile` | `assign` | `DotProfileAssign` | definiert (S-35) |
-| `.profile` | `unassign` | `DotProfileUnassign` | definiert (S-35) |
+| `.profile` | `create` | `DotProfileCreate` | Entwicklungs-Build (`grpc-development`) |
+| `.profile` | `set` | `DotProfileSet` | Entwicklungs-Build (`grpc-development`) |
+| `.profile` | `delete` | `DotProfileDelete` | Entwicklungs-Build (`grpc-development`) |
+| `.profile` | `assign` | `DotProfileAssign` | Entwicklungs-Build (`grpc-development`) |
+| `.profile` | `unassign` | `DotProfileUnassign` | Entwicklungs-Build (`grpc-development`) |
 | `.sqlcount` | – | `DotSqlCount` | implementiert |
 | `.sqlschema` | – | `DotSqlSchema` | implementiert |
 | `.sqltables` | – | `DotSqlTables` | implementiert |
 | `.storage` | – | `DotStorages` | implementiert |
-| Restore-Baum: `abort` | – | `RestoreTreeAbort` | definiert (S-35) |
-| Restore-Baum: `add` | – | `RestoreTreeMark` | definiert (S-35) |
-| Restore-Baum: `cd` | – | `RestoreTreeCd` | definiert (S-35) |
-| Restore-Baum: `count` | – | `RestoreTreeCount` | definiert (S-35) |
-| Restore-Baum: `delete` | – | `RestoreTreeUnmark` | definiert (S-35) |
-| Restore-Baum: `dir` | – | `RestoreTreeLs` | definiert (S-35) |
-| Restore-Baum: `.dir` | – | `RestoreTreeLs` | definiert (S-35) |
-| Restore-Baum: `done` | – | `RestoreTreeDone` | definiert (S-35) |
-| Restore-Baum: `estimate` | – | `RestoreTreeEstimate` | definiert (S-35) |
-| Restore-Baum: `exit` | – | `RestoreTreeDone` | definiert (S-35) |
-| Restore-Baum: `find` | – | `RestoreTreeFind` | definiert (S-35) |
-| Restore-Baum: `help` | – | `RestoreTreeHelp` | definiert (S-35) |
-| Restore-Baum: `ls` | – | `RestoreTreeLs` | definiert (S-35) |
-| Restore-Baum: `.ls` | – | `RestoreTreeLs` | definiert (S-35) |
-| Restore-Baum: `.lsdir` | – | `RestoreTreeLsDir` | definiert (S-35) |
-| Restore-Baum: `lsmark` | – | `RestoreTreeLsMark` | definiert (S-35) |
-| Restore-Baum: `.lsmark` | – | `RestoreTreeLsMark` | definiert (S-35) |
-| Restore-Baum: `mark` | – | `RestoreTreeMark` | definiert (S-35) |
-| Restore-Baum: `markdir` | – | `RestoreTreeMarkDir` | definiert (S-35) |
-| Restore-Baum: `pwd` | – | `RestoreTreePwd` | definiert (S-35) |
-| Restore-Baum: `.pwd` | – | `RestoreTreePwd` | definiert (S-35) |
-| Restore-Baum: `unmark` | – | `RestoreTreeUnmark` | definiert (S-35) |
-| Restore-Baum: `unmarkdir` | – | `RestoreTreeUnmarkDir` | definiert (S-35) |
-| Restore-Baum: `quit` | – | `RestoreTreeAbort` | definiert (S-35) |
-| Restore-Baum: `.help` | – | `RestoreTreeHelp` | definiert (S-35) |
-| Restore-Baum: `?` | – | `RestoreTreeHelp` | definiert (S-35) |
+| Restore-Baum: `abort` | – | `RestoreTreeAbort` | Entwicklungs-Build (`grpc-development`) |
+| Restore-Baum: `add` | – | `RestoreTreeMark` | Entwicklungs-Build (`grpc-development`) |
+| Restore-Baum: `cd` | – | `RestoreTreeCd` | Entwicklungs-Build (`grpc-development`) |
+| Restore-Baum: `count` | – | `RestoreTreeCount` | Entwicklungs-Build (`grpc-development`) |
+| Restore-Baum: `delete` | – | `RestoreTreeUnmark` | Entwicklungs-Build (`grpc-development`) |
+| Restore-Baum: `dir` | – | `RestoreTreeLs` | Entwicklungs-Build (`grpc-development`) |
+| Restore-Baum: `.dir` | – | `RestoreTreeLs` | Entwicklungs-Build (`grpc-development`) |
+| Restore-Baum: `done` | – | `RestoreTreeDone` | Entwicklungs-Build (`grpc-development`) |
+| Restore-Baum: `estimate` | – | `RestoreTreeEstimate` | Entwicklungs-Build (`grpc-development`) |
+| Restore-Baum: `exit` | – | `RestoreTreeDone` | Entwicklungs-Build (`grpc-development`) |
+| Restore-Baum: `find` | – | `RestoreTreeFind` | Entwicklungs-Build (`grpc-development`) |
+| Restore-Baum: `help` | – | `RestoreTreeHelp` | Entwicklungs-Build (`grpc-development`) |
+| Restore-Baum: `ls` | – | `RestoreTreeLs` | Entwicklungs-Build (`grpc-development`) |
+| Restore-Baum: `.ls` | – | `RestoreTreeLs` | Entwicklungs-Build (`grpc-development`) |
+| Restore-Baum: `.lsdir` | – | `RestoreTreeLsDir` | Entwicklungs-Build (`grpc-development`) |
+| Restore-Baum: `lsmark` | – | `RestoreTreeLsMark` | Entwicklungs-Build (`grpc-development`) |
+| Restore-Baum: `.lsmark` | – | `RestoreTreeLsMark` | Entwicklungs-Build (`grpc-development`) |
+| Restore-Baum: `mark` | – | `RestoreTreeMark` | Entwicklungs-Build (`grpc-development`) |
+| Restore-Baum: `markdir` | – | `RestoreTreeMarkDir` | Entwicklungs-Build (`grpc-development`) |
+| Restore-Baum: `pwd` | – | `RestoreTreePwd` | Entwicklungs-Build (`grpc-development`) |
+| Restore-Baum: `.pwd` | – | `RestoreTreePwd` | Entwicklungs-Build (`grpc-development`) |
+| Restore-Baum: `unmark` | – | `RestoreTreeUnmark` | Entwicklungs-Build (`grpc-development`) |
+| Restore-Baum: `unmarkdir` | – | `RestoreTreeUnmarkDir` | Entwicklungs-Build (`grpc-development`) |
+| Restore-Baum: `quit` | – | `RestoreTreeAbort` | Entwicklungs-Build (`grpc-development`) |
+| Restore-Baum: `.help` | – | `RestoreTreeHelp` | Entwicklungs-Build (`grpc-development`) |
+| Restore-Baum: `?` | – | `RestoreTreeHelp` | Entwicklungs-Build (`grpc-development`) |
 <!-- coverage:end -->

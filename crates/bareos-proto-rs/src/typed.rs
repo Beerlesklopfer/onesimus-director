@@ -200,8 +200,8 @@ impl Encoder<'_> {
                 continue;
             }
             let name = field_name(key);
-            let field = desc.field.iter()
-                .find(|f| f.name() == name && f.name() != "extra_fields" && f.name() != "directives");
+            let special = |f: &FieldDescriptorProto| [extra, directives].iter().flatten().any(|s| s.number() == f.number());
+            let field = desc.field.iter().find(|f| f.name() == name && !special(f));
             let mut converted = false;
             if let Some(field) = field {
                 if let (Value::Array(items), Some(count)) = (value, count) {

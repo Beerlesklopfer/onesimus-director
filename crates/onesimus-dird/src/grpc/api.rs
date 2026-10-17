@@ -10,8 +10,9 @@
 //! in text mode and fill the `text` field.
 //!
 //! RPCs not listed in [`read_rpcs`] (write, session and restore-tree RPCs)
-//! are answered with UNIMPLEMENTED by the generated default stubs until
-//! S-35.
+//! exist only with the cargo feature `grpc-development` (api_write.rs,
+//! api_dev.rs, S-35); in the production build the generated default stubs
+//! answer UNIMPLEMENTED.
 
 use std::sync::{Arc, OnceLock};
 
@@ -30,13 +31,30 @@ use crate::command_queue::{CommandQueue, CommandResult, MsgKind};
 use crate::session::parse_cli_command;
 
 pub struct DirectorApiImpl {
-    cmd_queue: Arc<CommandQueue>,
-    auth: Arc<AuthState>,
+    pub(super) cmd_queue: Arc<CommandQueue>,
+    pub(super) auth: Arc<AuthState>,
+    /// Context for commands outside the command worker (restore sessions,
+    /// wait); only used by the development build.
+    #[cfg_attr(not(feature = "grpc-development"), allow(dead_code))]
+    pub(super) exec: Option<super::ExecParts>,
+    #[cfg(feature = "grpc-development")]
+    pub(super) restore_sessions: Arc<super::api_dev::RestoreSessions>,
 }
 
 impl DirectorApiImpl {
     pub fn new(cmd_queue: Arc<CommandQueue>, auth: Arc<AuthState>) -> Self {
-        Self { cmd_queue, auth }
+        Self {
+            cmd_queue,
+            auth,
+            exec: None,
+            #[cfg(feature = "grpc-development")]
+            restore_sessions: Arc::default(),
+        }
+    }
+
+    pub fn with_exec(mut self, exec: super::ExecParts) -> Self {
+        self.exec = Some(exec);
+        self
     }
 }
 
@@ -381,10 +399,15 @@ impl DirectorApiImpl {
     }
 }
 
-/// Implements the listed RPCs via [`DirectorApiImpl::call`]; all other RPCs
-/// keep the generated UNIMPLEMENTED default.
-macro_rules! read_rpc_impls {
-    ($( $method:ident ( $req:ty ) -> $resp:ty = $name:literal; )*) => {
+/// Implements the read RPCs via [`DirectorApiImpl::call`] and, with the
+/// feature `grpc-development`, the write/session/restore RPCs via the named
+/// handler of api_dev.rs; all other RPCs keep the generated UNIMPLEMENTED
+/// default.
+macro_rules! rpc_impls {
+    (
+        read { $( $method:ident ( $req:ty ) -> $resp:ty = $name:literal; )* }
+        dev { $( $dmethod:ident ( $dreq:ty ) -> $dresp:ty = $dname:literal via $handler:ident; )* }
+    ) => {
         #[tonic::async_trait]
         impl DirectorApi for DirectorApiImpl {
             $(
@@ -392,14 +415,30 @@ macro_rules! read_rpc_impls {
                     self.call(request, $name).await
                 }
             )*
+            $(
+                #[cfg(feature = "grpc-development")]
+                async fn $dmethod(&self, request: Request<$dreq>) -> Result<Response<$dresp>, Status> {
+                    rpc_impls!(@call self, request, $dname, $handler)
+                }
+            )*
         }
 
-        /// (RPC name, trait method) of every implemented RPC
-        pub const IMPLEMENTED: &[(&str, &str)] = &[$( ($name, stringify!($method)) ),*];
+        /// (RPC name, trait method) of every read RPC (production build)
+        #[allow(dead_code)]
+        pub const READ_IMPLEMENTED: &[(&str, &str)] = &[$( ($name, stringify!($method)) ),*];
+
+        /// (RPC name, trait method) of the write, session and restore-tree
+        /// RPCs (only implemented with `grpc-development`)
+        #[allow(dead_code)]
+        pub const DEV_IMPLEMENTED: &[(&str, &str)] = &[$( ($dname, stringify!($dmethod)) ),*];
     };
+    (@call $self:ident, $request:ident, $name:literal, start_restore_session) => { $self.start_restore_session($request).await };
+    (@call $self:ident, $request:ident, $name:literal, tree_help) => { $self.tree_help($request).await };
+    (@call $self:ident, $request:ident, $name:literal, $handler:ident) => { $self.$handler($request, $name).await };
 }
 
-read_rpc_impls! {
+rpc_impls! {
+read {
     get_version(cmd::VersionCommand) -> pb::VersionResponse = "GetVersion";
     get_time(cmd::TimeCommand) -> pb::TimeResponse = "GetTime";
     whoami(cmd::WhoamiCommand) -> pb::WhoamiResponse = "Whoami";
@@ -494,6 +533,96 @@ read_rpc_impls! {
     dot_ovfs_tree(pb::DotOvfsTreeCommand) -> pb::OvfsTreeResponse = "DotOvfsTree";
     dot_ovfs_ls(pb::DotOvfsLsCommand) -> pb::OvfsLsResponse = "DotOvfsLs";
     dot_ovfs_versions(pb::DotOvfsVersionsCommand) -> pb::OvfsVersionsResponse = "DotOvfsVersions";
+}
+dev {
+    run(pb::RunJobCommand) -> pb::ActionResponse = "Run" via write;
+    rerun(pb::RerunJobCommand) -> pb::ActionResponse = "Rerun" via write;
+    cancel(cmd::CancelCommand) -> pb::ActionResponse = "Cancel" via write;
+    restore(pb::RestoreJobCommand) -> pb::ActionResponse = "Restore" via write;
+    label(pb::LabelVolumeCommand) -> pb::ActionResponse = "Label" via write;
+    relabel(pb::RelabelVolumeCommand) -> pb::ActionResponse = "Relabel" via write;
+    mount(cmd::MountCommand) -> pb::ActionResponse = "Mount" via write;
+    unmount(cmd::UnmountCommand) -> pb::ActionResponse = "Unmount" via write;
+    release(cmd::ReleaseCommand) -> pb::ActionResponse = "Release" via write;
+    add_volumes(cmd::AddCommand) -> pb::ActionResponse = "AddVolumes" via write;
+    create_pool(cmd::CreateCommand) -> pb::ActionResponse = "CreatePool" via write;
+    delete_volume(pb::DeleteObjectCommand) -> pb::ActionResponse = "DeleteVolume" via write;
+    delete_pool(pb::DeleteObjectCommand) -> pb::ActionResponse = "DeletePool" via write;
+    delete_job(pb::DeleteObjectCommand) -> pb::ActionResponse = "DeleteJob" via write;
+    delete_storage(pb::DeleteObjectCommand) -> pb::ActionResponse = "DeleteStorage" via write;
+    enable(cmd::EnableCommand) -> pb::ActionResponse = "Enable" via write;
+    disable(cmd::DisableCommand) -> pb::ActionResponse = "Disable" via write;
+    export_volumes(cmd::ExportCommand) -> pb::ActionResponse = "ExportVolumes" via write;
+    import_volumes(cmd::ImportCommand) -> pb::ActionResponse = "ImportVolumes" via write;
+    move_volumes(cmd::MoveCommand) -> pb::ActionResponse = "MoveVolumes" via write;
+    prune_files(pb::PruneTargetCommand) -> pb::ActionResponse = "PruneFiles" via write;
+    prune_jobs(pb::PruneTargetCommand) -> pb::ActionResponse = "PruneJobs" via write;
+    prune_volume(pb::PruneVolumeCommand) -> pb::ActionResponse = "PruneVolume" via write;
+    prune_stats(pb::PruneTargetCommand) -> pb::ActionResponse = "PruneStats" via write;
+    prune_directory(pb::PruneDirectoryCommand) -> pb::ActionResponse = "PruneDirectory" via write;
+    purge_files(pb::PurgeTargetCommand) -> pb::ActionResponse = "PurgeFiles" via write;
+    purge_jobs(pb::PurgeTargetCommand) -> pb::ActionResponse = "PurgeJobs" via write;
+    purge_volume(pb::PurgeTargetCommand) -> pb::ActionResponse = "PurgeVolume" via write;
+    purge_quota(pb::PurgeTargetCommand) -> pb::ActionResponse = "PurgeQuota" via write;
+    update_volume(pb::UpdateVolumeCommand) -> pb::ActionResponse = "UpdateVolume" via write;
+    update_pool(cmd::UpdateCommand) -> pb::ActionResponse = "UpdatePool" via write;
+    update_slots(pb::UpdateSlotsCommand) -> pb::ActionResponse = "UpdateSlots" via write;
+    update_job(cmd::UpdateCommand) -> pb::ActionResponse = "UpdateJob" via write;
+    update_stats(cmd::UpdateCommand) -> pb::ActionResponse = "UpdateStats" via write;
+    truncate(pb::TruncateVolumesCommand) -> pb::ActionResponse = "Truncate" via write;
+    configure_add(cmd::ConfigureAddCommand) -> pb::ActionResponse = "ConfigureAdd" via write;
+    configure_export(cmd::ConfigureExportCommand) -> pb::ActionResponse = "ConfigureExport" via write;
+    configure_delete(cmd::ConfigureDeleteCommand) -> pb::ActionResponse = "ConfigureDelete" via write;
+    configure_update(cmd::ConfigureUpdateCommand) -> pb::ActionResponse = "ConfigureUpdate" via write;
+    reload(cmd::ReloadCommand) -> pb::ActionResponse = "Reload" via write;
+    set_debug(pb::SetDebugLevelCommand) -> pb::ActionResponse = "SetDebug" via write;
+    set_bandwidth(cmd::SetbandwidthCommand) -> pb::ActionResponse = "SetBandwidth" via write;
+    set_device(cmd::SetdeviceCommand) -> pb::ActionResponse = "SetDevice" via write;
+    set_ip(cmd::SetipCommand) -> pb::ActionResponse = "SetIp" via write;
+    trace(pb::TraceSwitchCommand) -> pb::ActionResponse = "Trace" via write;
+    dot_sql(cmd::DotSqlCommand) -> pb::SqlQueryResponse = "DotSql" via sql;
+    sql_query(cmd::SqlQueryCommand) -> pb::SqlQueryResponse = "SqlQuery" via sql;
+    query(pb::QueryRunCommand) -> pb::SqlQueryResponse = "Query" via sql;
+    dot_bvfs_update(cmd::DotBvfsUpdateCommand) -> pb::ActionResponse = "DotBvfsUpdate" via write;
+    dot_bvfs_restore(cmd::DotBvfsRestoreCommand) -> pb::ActionResponse = "DotBvfsRestore" via write;
+    dot_bvfs_cleanup(cmd::DotBvfsCleanupCommand) -> pb::ActionResponse = "DotBvfsCleanup" via write;
+    dot_bvfs_clear_cache(cmd::DotBvfsClearCacheCommand) -> pb::ActionResponse = "DotBvfsClearCache" via write;
+    dot_acl_set(cmd::DotAclSetCommand) -> pb::ActionResponse = "DotAclSet" via write;
+    dot_acl_delete(cmd::DotAclDeleteCommand) -> pb::ActionResponse = "DotAclDelete" via write;
+    dot_acl_clear(cmd::DotAclClearCommand) -> pb::ActionResponse = "DotAclClear" via write;
+    dot_acl_copy(cmd::DotAclCopyCommand) -> pb::ActionResponse = "DotAclCopy" via write;
+    dot_profile_create(cmd::DotProfileCreateCommand) -> pb::ActionResponse = "DotProfileCreate" via write;
+    dot_profile_set(cmd::DotProfileSetCommand) -> pb::ActionResponse = "DotProfileSet" via write;
+    dot_profile_delete(cmd::DotProfileDeleteCommand) -> pb::ActionResponse = "DotProfileDelete" via write;
+    dot_profile_assign(cmd::DotProfileAssignCommand) -> pb::ActionResponse = "DotProfileAssign" via write;
+    dot_profile_unassign(cmd::DotProfileUnassignCommand) -> pb::ActionResponse = "DotProfileUnassign" via write;
+    use_catalog(cmd::UseCommand) -> pb::ActionResponse = "UseCatalog" via write;
+    wait(cmd::WaitCommand) -> pb::ActionResponse = "Wait" via write;
+    gui(pb::GuiSwitchCommand) -> pb::ActionResponse = "Gui" via write;
+    autodisplay(pb::AutodisplaySwitchCommand) -> pb::ActionResponse = "Autodisplay" via write;
+    automount(pb::AutomountSwitchCommand) -> pb::ActionResponse = "Automount" via write;
+    dot_api(pb::DotApiModeCommand) -> pb::ActionResponse = "DotApi" via write;
+    dot_grpc(cmd::DotGrpcCommand) -> pb::ActionResponse = "DotGrpc" via write;
+    quit(cmd::QuitCommand) -> pb::ActionResponse = "Quit" via write;
+    exit(cmd::ExitCommand) -> pb::ActionResponse = "Exit" via write;
+    dot_quit(cmd::DotQuitCommand) -> pb::ActionResponse = "DotQuit" via write;
+    start_restore_session(pb::RestoreSessionCommand) -> pb::RestoreSessionResponse = "StartRestoreSession" via start_restore_session;
+    restore_tree_cd(pb::RestoreTreePathCommand) -> pb::RestoreTreeListResponse = "RestoreTreeCd" via tree_list;
+    restore_tree_ls(pb::RestoreTreePathCommand) -> pb::RestoreTreeListResponse = "RestoreTreeLs" via tree_list;
+    restore_tree_ls_dir(pb::RestoreTreePathCommand) -> pb::RestoreTreeListResponse = "RestoreTreeLsDir" via tree_list;
+    restore_tree_ls_mark(pb::RestoreTreePathCommand) -> pb::RestoreTreeListResponse = "RestoreTreeLsMark" via tree_list;
+    restore_tree_pwd(pb::RestoreTreeSessionCommand) -> pb::RestoreTreeListResponse = "RestoreTreePwd" via tree_list;
+    restore_tree_mark(pb::RestoreTreePathCommand) -> pb::RestoreTreeCountResponse = "RestoreTreeMark" via tree_count;
+    restore_tree_unmark(pb::RestoreTreePathCommand) -> pb::RestoreTreeCountResponse = "RestoreTreeUnmark" via tree_count;
+    restore_tree_mark_dir(pb::RestoreTreePathCommand) -> pb::RestoreTreeCountResponse = "RestoreTreeMarkDir" via tree_count;
+    restore_tree_unmark_dir(pb::RestoreTreePathCommand) -> pb::RestoreTreeCountResponse = "RestoreTreeUnmarkDir" via tree_count;
+    restore_tree_count(pb::RestoreTreeSessionCommand) -> pb::RestoreTreeCountResponse = "RestoreTreeCount" via tree_count;
+    restore_tree_find(pb::RestoreTreePathCommand) -> pb::RestoreTreeListResponse = "RestoreTreeFind" via tree_list;
+    restore_tree_estimate(pb::RestoreTreeSessionCommand) -> pb::RestoreTreeCountResponse = "RestoreTreeEstimate" via tree_count;
+    restore_tree_help(pb::RestoreTreeSessionCommand) -> pb::HelpResponse = "RestoreTreeHelp" via tree_help;
+    restore_tree_done(pb::RestoreTreeSessionCommand) -> pb::ActionResponse = "RestoreTreeDone" via tree_finish;
+    restore_tree_abort(pb::RestoreTreeSessionCommand) -> pb::ActionResponse = "RestoreTreeAbort" via tree_finish;
+}
 }
 
 #[cfg(test)]
@@ -675,10 +804,81 @@ mod tests {
         assert_eq!(err.code(), tonic::Code::FailedPrecondition);
         assert_eq!(err.message(), "Job \"x\" is not running.");
 
-        let (api, _, _, token) = service();
-        let err = api.run(with_token(cmd::RunCommand::default(), &token)).await.unwrap_err();
+    }
+
+    /// Production build: write, session and restore-tree RPCs are not there.
+    #[cfg(not(feature = "grpc-development"))]
+    #[tokio::test]
+    async fn write_rpcs_are_unimplemented_in_production() {
+        let (api, _, _, token) = service_for("*UserAgent*", "secret");
+        let err = api.run(with_token(pb::RunJobCommand { job: "x".into(), ..Default::default() }, &token)).await.unwrap_err();
+        assert_eq!(err.code(), tonic::Code::Unimplemented);
+        let err = api.delete_volume(with_token(pb::DeleteObjectCommand { volume: "v".into(), confirm: true, ..Default::default() }, &token))
+            .await.unwrap_err();
         assert_eq!(err.code(), tonic::Code::Unimplemented);
         let err = api.restore_tree_cd(with_token(pb::RestoreTreePathCommand::default(), &token)).await.unwrap_err();
         assert_eq!(err.code(), tonic::Code::Unimplemented);
+        let err = api.quit(with_token(cmd::QuitCommand {}, &token)).await.unwrap_err();
+        assert_eq!(err.code(), tonic::Code::Unimplemented);
+    }
+
+    /// Development build: gating (arguments, confirm, ACL, not applicable),
+    /// the queue with an answering console and the follow-up records.
+    #[cfg(feature = "grpc-development")]
+    #[tokio::test]
+    async fn write_rpcs_in_the_development_build() {
+        let (api, _, _, token) = service();
+        // CommandACL of "limited" has no run/delete
+        let err = api.run(with_token(pb::RunJobCommand { job: "x".into(), ..Default::default() }, &token)).await.unwrap_err();
+        assert_eq!(err.code(), tonic::Code::PermissionDenied);
+        let err = api.run(with_token(pb::RunJobCommand::default(), &token)).await.unwrap_err();
+        assert_eq!(err.code(), tonic::Code::InvalidArgument);
+        let err = api.delete_volume(with_token(pb::DeleteObjectCommand { volume: "v".into(), ..Default::default() }, &token))
+            .await.unwrap_err();
+        assert_eq!(err.code(), tonic::Code::InvalidArgument);
+        assert!(err.message().contains("confirm"));
+        let err = api.gui(with_token(pb::GuiSwitchCommand { on: true, off: false }, &token)).await.unwrap_err();
+        assert_eq!(err.code(), tonic::Code::FailedPrecondition);
+        let err = api.restore_tree_ls(with_token(pb::RestoreTreePathCommand { session_id: "nope".into(), path: String::new() }, &token))
+            .await.unwrap_err();
+        assert_eq!(err.code(), tonic::Code::NotFound);
+
+        // run through the queue: console attached, text mode, JobId from the reply, llist jobid= afterwards
+        let (api, queue, _, token) = service_for("*UserAgent*", "secret");
+        let api = Arc::new(api);
+        let call_api = api.clone();
+        let call_token = token.clone();
+        let task = tokio::spawn(async move {
+            call_api.run(with_token(pb::RunJobCommand { job: "backup-bareos-fd".into(), level: "Full".into(), ..Default::default() },
+                &call_token)).await
+        });
+        let q = queue.clone();
+        let mut queued = tokio::task::spawn_blocking(move || loop {
+            if let Some(c) = q.take() { break c; }
+        }).await.unwrap();
+        assert_eq!(queued.ast.raw_line, "run job=backup-bareos-fd level=Full yes");
+        assert_eq!(queued.ast.response_format, ResponseFormat::Text);
+        let console = queued.console.as_mut().expect("answering console");
+        console.send("Using Catalog \"MyCatalog\"\n");
+        queued.result_tx.send(CommandResult::ok("Job queued. JobId=12\n".into())).unwrap();
+        let q = queue.clone();
+        let follow = tokio::task::spawn_blocking(move || loop {
+            if let Some(c) = q.take() { break c; }
+        }).await.unwrap();
+        assert_eq!(follow.ast.command_name, "llist");
+        assert_eq!(follow.ast.response_format, ResponseFormat::Json);
+        follow.result_tx.send(CommandResult::ok(String::new())
+            .with_json(json!({"jobs": [{"jobid": "12", "name": "backup-bareos-fd", "jobstatus": "C", "level": "F"}]}))).unwrap();
+        let response = task.await.unwrap().unwrap().into_inner();
+        assert!(response.success, "{response:?}");
+        assert_eq!(response.jobids, vec![12]);
+        assert_eq!(response.text, "Using Catalog \"MyCatalog\"\nJob queued. JobId=12\n");
+        assert_eq!(response.command, "run job=backup-bareos-fd level=Full yes");
+        assert_eq!(response.jobs[0].jobstatus(), pb::JobStatus::Created);
+
+        // logout ends the session token
+        api.quit(with_token(cmd::QuitCommand {}, &token)).await.unwrap();
+        let err = api.get_version(with_token(cmd::VersionCommand {}, &token)).await.unwrap_err();
+        assert_eq!(err.code(), tonic::Code::Unauthenticated);
     }
 }
