@@ -599,7 +599,7 @@ Job { Name = backup; JobDefs = d
             sd_media_type: String::new(), director_name: "dir".into(), pool_name: "Incremental".into(),
             fileset_includes: Vec::new(), fileset_excludes: Vec::new(), since_utime: 0, prev_job: String::new(),
             where_path: None, regex_where: None, prefix_links: false, replace: None, restore_jobid: None, bootstrap: None,
-            client_name: "fd1".into(), copy: None, verify: None,
+            client_name: "fd1".into(), copy: None, verify: None, backup: None,
             client_first_connection: false };
         ScriptJob { job_id: 5, job_name: name.into(), unique_job: params.unique_job.clone(), status, files: 0, bytes: 0,
             client: "fd1".into(), storage: "File".into(), params: Some(params) }

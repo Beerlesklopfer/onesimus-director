@@ -110,6 +110,9 @@ pub struct JobParams {
     /// (sd_copy.rs); None for jobs with a File daemon. C-058.
     #[serde(default)]
     pub copy: Option<crate::sd_copy::CopySession>,
+    /// Native Backup: the DoNativeBackup session (backup_worker.rs, S-19).
+    #[serde(default)]
+    pub backup: Option<crate::backup_worker::BackupSession>,
 }
 
 /// Messages on the Worker↔Director pipe (JSON, one per line).
@@ -139,6 +142,13 @@ pub enum PipeMessage {
     /// otherwise the body the Director puts its Jmsg header in front of.
     #[serde(rename = "jmsg")]
     Jmsg { job_id: u32, msg_type: u32, mtime: i64, text: String, #[serde(default)] raw: bool },
+    /// A catalog statement of the job the Director runs for the worker
+    /// (UpdateJobStartRecord, UpdateClientRecord; backup_worker.rs, S-19).
+    #[serde(rename = "catalog_sql")]
+    CatalogSql { job_id: u32, sql: String },
+    /// FD/SD end counters of a native backup, sent before its JobEnd (S-19).
+    #[serde(rename = "backup_end")]
+    BackupEnd { job_id: u32, end: crate::backup::BackupEnd },
     /// job_thread() RunScripts(jcr, ..., label) in the Director (console
     /// commands need it); the worker waits for [`PipeMessage::RunScriptsDone`].
     #[serde(rename = "run_scripts")]
@@ -418,6 +428,11 @@ pub fn run_worker(
     // Copy/Migrate worker jobs and VirtualFull: SD read+write session (C-058).
     if let Some(copy) = &params.copy {
         return crate::sd_copy::run(params, copy, &mut pipes);
+    }
+
+    // backup.cc DoNativeBackup() (S-19).
+    if let Some(backup) = &params.backup {
+        return crate::backup_worker::run(params, backup, &mut pipes);
     }
 
     if params.job_type == WorkerJobType::Admin {
@@ -1230,7 +1245,7 @@ mod wait_protocol_tests {
             fileset_includes: vec![], fileset_excludes: vec![], since_utime: 0, prev_job: String::new(),
             where_path: Some("/tmp/with space".into()), regex_where: None, prefix_links: false,
             replace: Some("ifnewer".into()), restore_jobid: None, bootstrap: None,
-            client_name: String::new(), client_first_connection: false, copy: None, verify: None,
+            client_name: String::new(), client_first_connection: false, copy: None, verify: None, backup: None,
         };
         assert_eq!(fd_restore_command(&p), "restore replace=w prelinks=0 where=/tmp/with\x01space\n");
         p.regex_where = Some("!/a!/b!".into());

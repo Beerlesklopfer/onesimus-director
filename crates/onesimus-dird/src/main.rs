@@ -6,6 +6,8 @@
 mod accept;
 mod acl;
 mod audit;
+mod backup;
+mod backup_worker;
 mod breg;
 mod btime;
 mod catalog_worker;
@@ -550,6 +552,9 @@ fn spawn_named_threads(
         threads.push(("dir:scheduler".into(), handle));
     }
 
+    // job.cc InitJobServer(): the *JobMonitor* control JCR takes the first
+    // CreateUniqueJobName() sequence number (S-19).
+    let _ = commands::job::new_control_jcr_name("*JobMonitor*");
     // dir:watchdog — health monitoring
     {
         let handle = thread::Builder::new()

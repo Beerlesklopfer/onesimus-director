@@ -1958,6 +1958,15 @@ fn print_options(fo: &FileOptions, w: &mut W) {
     w.sub_end(false);
 }
 
+/// FilesetResource::PrintConfig(hide_sensitive=false, verbose=false) as
+/// job.cc GetOrCreateFilesetRecord() stores it in FileSet.FileSetText.
+pub(crate) fn fileset_text(res: &ConfResource) -> String {
+    let mut w = W::new();
+    print_fileset(res, &mut w);
+    let (body, _) = w.into_obj();
+    format!("FileSet {{\n{body}}}\n\n")
+}
+
 fn print_fileset(res: &ConfResource, w: &mut W) {
     w.quoted("Name", res.name(), false);
     if let Some(d) = res.directives.iter().rev().find(|d| d.norm_key() == "description").and_then(|d| d.first()) {

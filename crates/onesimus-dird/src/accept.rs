@@ -242,6 +242,9 @@ fn handle_hello<S: std::io::Read + std::io::Write>(
         Hello::FileDaemon { .. } => None,
     };
     if let Some(name) = console_name {
+        // ua_server.cc HandleUserAgentClientRequest(): new_control_jcr("-Console-")
+        // takes a CreateUniqueJobName() sequence number before authentication.
+        let _ = crate::commands::job::new_control_jcr_name("-Console-");
         // The Hello must name the console the TLS-PSK key belongs to
         if let Some(id) = &tls_identity {
             if *id != format!("R_CONSOLE\x1e{name}") {

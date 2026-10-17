@@ -44,6 +44,8 @@ pub struct DirJob {
 /// Compatibility log C-048.
 #[derive(Default)]
 struct JcrState {
+    /// FD/SD end counters of a native backup (backup_worker.rs, S-19).
+    backup_end: Option<crate::backup::BackupEnd>,
     /// Worker parameters of a queued job, kept for the job codes of its
     /// run scripts afterwards.
     params: Option<crate::job_worker::JobParams>,
@@ -908,6 +910,14 @@ impl JobManager {
                             vol_session_id: vol_session_id.unwrap_or(0), vol_session_time: vol_session_time.unwrap_or(0)});
                     }
 
+                    PipeMessage::CatalogSql { sql, .. } => {
+                        if let Some(cat) = self.catalog.as_ref() {
+                            if let Err(e) = cat.execute(&sql) {
+                                error!("JobManager: job {} catalog update failed: {e}", job.job_id);
+                            }
+                        }
+                    }
+
                     // job_thread(): RunScripts "BeforeJob" after "Version:"; the
                     // worker waits for RunScriptsDone (S-07).
                     PipeMessage::RunScripts { .. } => {
@@ -929,6 +939,11 @@ impl JobManager {
                                     errors: 0, client_commands, run_before_now });
                             }
                         }
+                    }
+
+                    PipeMessage::BackupEnd { end, .. } => {
+                        job.jcr.sd_status = end.sd_status;
+                        job.jcr.backup_end = Some(end);
                     }
 
                     PipeMessage::Verify { event, .. } => {
@@ -1008,6 +1023,10 @@ impl JobManager {
                 // scripts only count, S-07).
                 let admin = job.jcr.params.as_ref().is_some_and(|p| p.job_type == crate::job_worker::WorkerJobType::Admin);
                 if job.observed_status == 'T' && ending.errors > 0 && !admin && !crate::verify::is_verify_job(job.job_id) { job.observed_status = 'W'; }
+                // NativeBackupCleanup: SD errors also make it JS_Warnings.
+                if let Some(end) = &job.jcr.backup_end {
+                    if job.observed_status == 'T' && end.sd_errors > 0 { job.observed_status = 'W'; }
+                }
                 // NativeVbackupCleanup() of a VirtualFull (vbackup.rs, S-06).
                 let vf = job.jcr.report.as_ref().and_then(|r| r.vf.clone());
                 if let Some(vf) = &vf {
@@ -1015,9 +1034,16 @@ impl JobManager {
                     post_catreq_messages(&self.bus, self.config.as_ref(), job, messages);
                 }
                 let db_status = job.observed_status.to_string();
-                let result = self.catalog.as_ref().ok_or_else(|| "catalog is unavailable".to_string()).and_then(|cat| cat.update_job_end(
-                    job.job_id as i32, &db_status, now_unix(), ending.files, ending.bytes, ending.errors,
-                    ending.vol_session_id, ending.vol_session_time));
+                let result = self.catalog.as_ref().ok_or_else(|| "catalog is unavailable".to_string()).and_then(|cat| {
+                    match &job.jcr.backup_end {
+                        // job.cc UpdateJobEndRecord() (S-19)
+                        Some(end) => cat.execute(&crate::backup::update_job_end_record_sql(job.job_id,
+                            job.observed_status, now_unix(), ending.files, ending.bytes, ending.errors,
+                            ending.vol_session_id, ending.vol_session_time, end)).map(|_| ()),
+                        None => cat.update_job_end(job.job_id as i32, &db_status, now_unix(), ending.files,
+                            ending.bytes, ending.errors, ending.vol_session_id, ending.vol_session_time),
+                    }
+                });
                 job.completion_error = result.err();
                 if let Some(vf) = &vf {
                     let messages = crate::vbackup::after_job_end(self.catalog.as_ref(), job.job_id, vf, job.observed_status);
@@ -1039,10 +1065,16 @@ impl JobManager {
                     let outcome = crate::job_messages::JobOutcome {
                         job_id: job.job_id, status: job.observed_status, end_time,
                         files: ending.files.max(0) as u64, bytes: ending.bytes.max(0) as u64,
-                        read_bytes: ending.bytes.max(0) as u64, sd_files: ending.files.max(0) as u64,
-                        sd_bytes: ending.bytes.max(0) as u64, errors: ending.errors.max(0) as u32, sd_errors: 0,
+                        read_bytes: job.jcr.backup_end.as_ref().map(|e| e.read_bytes).unwrap_or(ending.bytes.max(0) as u64),
+                        sd_files: job.jcr.backup_end.as_ref().map(|e| e.sd_files).unwrap_or(ending.files.max(0) as u64),
+                        sd_bytes: job.jcr.backup_end.as_ref().map(|e| e.sd_bytes).unwrap_or(ending.bytes.max(0) as u64),
+                        errors: ending.errors.max(0) as u32,
+                        sd_errors: job.jcr.backup_end.as_ref().map(|e| e.sd_errors).unwrap_or(0),
                         vol_session_id: ending.vol_session_id, vol_session_time: ending.vol_session_time,
-                        fd_status, sd_status: job.jcr.sd_status, vss: false, encrypt: false,
+                        fd_status: job.jcr.backup_end.as_ref().map(|e| e.fd_status).filter(|c| *c != '\0').unwrap_or(fd_status),
+                        sd_status: job.jcr.sd_status,
+                        vss: job.jcr.backup_end.as_ref().is_some_and(|e| e.vss),
+                        encrypt: job.jcr.backup_end.as_ref().is_some_and(|e| e.encrypt),
                         fd_unreached: !job.jcr.fd_reached, sd_unreached: !job.jcr.sd_reached,
                     };
                     let director = self.config.as_ref().and_then(|c| c.read().ok()).map(|c| c.director.name.clone()).unwrap_or_default();
@@ -1098,6 +1130,10 @@ impl DirJob {
     fn worker_state(&mut self, state: &str) {
         let (fd, sd, status, started) = match state {
             "ConnectingFD" => (false, false, Some('F'), false),
+            // backup.cc DoNativeBackup: the Storage daemon first (S-19).
+            "BackupConnectingSD" => (false, false, Some('S'), false),
+            "BackupSDJobSetup" => (false, true, None, false),
+            "BackupConnectingFD" => (false, true, Some('F'), false),
             "ConnectingSD" => (true, false, Some('S'), false),
             "SDJobSetup" | "SDUseDevice" | "SDRun" | "SDBootstrap" => (true, true, None, false),
             "FDJobSetup" | "FDStorage" | "FDSession" => (true, true, Some('R'), false),
@@ -1284,7 +1320,7 @@ Job { Name = single; Client = fd1; Storage = File }
             sd_device: String::new(), sd_media_type: String::new(), director_name: "dir".into(), pool_name: "Full".into(),
             fileset_includes: Vec::new(), fileset_excludes: Vec::new(), since_utime: 0, prev_job: String::new(),
             where_path: None, regex_where: None, prefix_links: false, replace: None, restore_jobid: None, bootstrap: None,
-            client_name: String::new(), client_first_connection: false, copy: None, verify: None }
+            client_name: String::new(), client_first_connection: false, copy: None, verify: None, backup: None }
     }
 
     fn enqueue(m: &mut JobManager, id: u32, name: &str, priority: i32, client: &str, storage: &str) {
