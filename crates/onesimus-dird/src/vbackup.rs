@@ -166,8 +166,53 @@ pub fn start(config: &DirectorConfig, catalog: Option<&CatalogHandle>, req: &Req
         (None, None) => (job.pool.clone(), "Job resource".to_string()),
     };
     let rpool_dirs = raw_dirs(config, "pool", &rpool);
+
+    // SetupJob(): GetOrCreateClientRecord, CreateJobRecord.
+    let client_id = client_id(catalog, &client).map_err(|e| fatal(format!("{e}\n")))?;
+    let (fileset_id, fileset_md5) = fileset_record(catalog, &fileset);
+    let now = (unsafe { libc::time(std::ptr::null_mut()) }) as i64;
+    let sched_time = if req.sched_time != 0 { req.sched_time } else { now };
+    let unique = crate::commands::job::unique_job_name(&job.name, now);
+    let job_id: u32 = first_value(catalog, &format!(
+        "INSERT INTO Job (Job,Name,Type,Level,JobStatus,SchedTime,JobTDate,ClientId,Comment) \
+         VALUES ('{}','{}','B','f','C','{}',{sched_time},{client_id},'') RETURNING JobId",
+        sql_esc(&unique), sql_esc(&job.name), crate::job_messages::bstrutime(sched_time)))
+        .ok().flatten().and_then(|id| id.parse().ok())
+        .ok_or_else(|| fatal("Create DB Job record failed\n".into()))?;
+
+    // DoNativeVbackupInit() failed: NativeVbackupCleanup(JS_ErrorTerminated)
+    // with the write storage of SetJcrDefaults; RunJob() returns 0.
+    let fail_init = |text: String, pool: &str, pool_source: &str, pool_id: i64| {
+        let (storage, storage_source) = match first_item(&dirs, "storage") {
+            Some(store) => (store, "Job resource"),
+            None => (first_item(&rpool_dirs, "storage").unwrap_or_default(), "Pool resource"),
+        };
+        let _ = catalog.execute(&format!(
+            "UPDATE Job SET JobStatus='f',StartTime=to_timestamp({now}),EndTime=to_timestamp({now}),\
+             RealEndTime=to_timestamp({now}),JobTDate={now},PoolId={pool_id},FileSetId={fileset_id},\
+             ClientId={client_id} WHERE JobId={job_id}"));
+        let mut report = crate::job_messages::backup_report(config, job, client_res, &storage, pool, pool, "f",
+            &fileset, sched_time);
+        report.job = unique.clone();
+        report.pool_source = pool_source.to_string();
+        report.storage_source = storage_source.to_string();
+        report.start_time = now;
+        report.accurate = req.accurate.unwrap_or_else(|| bool_directive(&dirs, "accurate", false));
+        report.priority = req.priority.unwrap_or(job.priority);
+        // jcr->dir_impl->job_trigger is set after RunJob() returned.
+        report.trigger = "Unknown".to_string();
+        report.vf = Some(VfInfo::default());
+        let outcome = crate::job_messages::JobOutcome { job_id, status: 'f', end_time: now, fd_status: 'f',
+            ..Default::default() };
+        let mut messages = vec![(MsgType::Fatal, text)];
+        messages.extend(crate::job_messages::end_of_job(&config.director.name, Some(catalog), &report, &outcome));
+        for (msg_type, text) in &messages {
+            crate::console_msg::job_message(config, &job.name, job_id, *msg_type, now, text);
+        }
+        Vec::new()
+    };
     let Some(rpool_id) = pool_id(catalog, &rpool) else {
-        return Err(fatal("Could not get or create a Pool record.\n".into()));
+        return Err(fail_init("Could not get or create a Pool record.\n".into(), &rpool, &rpool_source, 0));
     };
     // If pool storage specified, use it for restore (CopyRstorage).
     let (rstore, _rstore_source) = match first_item(&rpool_dirs, "storage") {
@@ -184,29 +229,21 @@ pub fn start(config: &DirectorConfig, catalog: Option<&CatalogHandle>, req: &Req
     };
     // SetMigrationWstorage()
     let Some(wpool) = next_pool else {
-        return Err(fatal(format!("No Next Pool specification found in Pool \"{rpool}\".\n")));
+        return Err(fail_init(format!("No Next Pool specification found in Pool \"{rpool}\".\n"), &rpool,
+            npool_source, rpool_id));
     };
     let wpool_dirs = raw_dirs(config, "pool", &wpool);
     let Some(wstore) = first_item(&wpool_dirs, "storage") else {
-        return Err(fatal(format!("No Storage specification found in Next Pool \"{wpool}\".\n")));
+        return Err(fail_init(format!("No Storage specification found in Next Pool \"{wpool}\".\n"), &rpool,
+            npool_source, rpool_id));
     };
-    let read = storage_use(config, &rstore, &rpool).map_err(fatal)?;
-    let write = storage_use(config, &wstore, &wpool).map_err(fatal)?;
+    let read = storage_use(config, &rstore, &rpool)
+        .map_err(|e| fail_init(e, &rpool, npool_source, rpool_id))?;
+    let write = storage_use(config, &wstore, &wpool)
+        .map_err(|e| fail_init(e, &rpool, npool_source, rpool_id))?;
     let wpool_id = pool_id(catalog, &wpool).unwrap_or(rpool_id);
-
-    // SetupJob(): GetOrCreateClientRecord, CreateJobRecord; then
-    // UpdateJobStartRecord (PoolId, FileSetId, ClientId).
-    let client_id = client_id(catalog, &client).map_err(|e| fatal(format!("{e}\n")))?;
-    let (fileset_id, fileset_md5) = fileset_record(catalog, &fileset);
-    let now = unsafe { libc::time(std::ptr::null_mut()) } as i64;
-    let sched_time = if req.sched_time != 0 { req.sched_time } else { now };
-    let unique = crate::commands::job::unique_job_name(&job.name, now);
-    let job_id: u32 = first_value(catalog, &format!(
-        "INSERT INTO Job (Job,Name,Type,Level,JobStatus,SchedTime,JobTDate,ClientId,Comment) \
-         VALUES ('{}','{}','B','f','C','{}',{sched_time},{client_id},'') RETURNING JobId",
-        sql_esc(&unique), sql_esc(&job.name), crate::job_messages::bstrutime(sched_time)))
-        .ok().flatten().and_then(|id| id.parse().ok())
-        .ok_or_else(|| fatal("Create DB Job record failed\n".into()))?;
+    // UpdateJobStartRecord (PoolId, FileSetId, ClientId); the write pool,
+    // which the catalog requests of the Storage daemon check.
     let _ = catalog.execute(&format!(
         "UPDATE Job SET PoolId={wpool_id},FileSetId={fileset_id},ClientId={client_id} WHERE JobId={job_id}"));
 
