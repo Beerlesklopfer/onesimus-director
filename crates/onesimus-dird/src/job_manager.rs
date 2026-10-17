@@ -958,18 +958,34 @@ impl JobManager {
                         let workdir = self.config.as_ref().and_then(|c| c.read().ok())
                             .map(|c| c.director.working_directory.clone()).unwrap_or_else(|| "/tmp".into());
                         let path = format!("{workdir}/{unique}.accurate");
-                        let result = self.catalog.as_ref().ok_or_else(|| "Cannot find previous jobids.\n".to_string())
-                            .and_then(|cat| crate::backup::write_accurate_list(cat, job.job_id, session.ids.client_id,
-                                session.ids.fileset_id, session.ids.level, start_time, session.accurate_checksum, &path));
-                        let reply = match result {
-                            Ok((estimate, _)) => {
-                                post_catreq_messages(&self.bus, self.config.as_ref(), job, vec![(crate::message_bus::MsgType::Info,
-                                    format!("Sending Accurate information (estimated {estimate} files).\n"))]);
-                                PipeMessage::AccurateReady { path, estimate, error: None }
+                        // The list query runs on a thread of its own, not in the
+                        // JobManager (S-27); the worker waits for the answer.
+                        let (catalog, bus, config, sender) = (self.catalog.clone(), self.bus.clone(), self.config.clone(),
+                            job.handle.sender());
+                        let (job_id, job_name) = (job.job_id, job.job_name.clone());
+                        let spawned = thread::Builder::new().name(format!("dir:accurate-{job_id}")).spawn(move || {
+                            let result = catalog.as_ref().ok_or_else(|| "Cannot find previous jobids.\n".to_string())
+                                .and_then(|cat| crate::backup::write_accurate_list(cat, job_id, session.ids.client_id,
+                                    session.ids.fileset_id, session.ids.level, start_time, session.accurate_checksum, &path));
+                            let reply = match result {
+                                Ok((estimate, _)) => {
+                                    crate::console_msg::post_job_message(&bus, config.as_ref(), BusMessage::JobMessage {
+                                        job_id, job_name, msg_type: crate::message_bus::MsgType::Info,
+                                        text: format!("Sending Accurate information (estimated {estimate} files).\n"),
+                                        timestamp: now_unix() });
+                                    PipeMessage::AccurateReady { path, estimate, error: None }
+                                }
+                                Err(error) => PipeMessage::AccurateReady { path, estimate: String::new(), error: Some(error) },
+                            };
+                            if let (Some(mut sender), Ok(json)) = (sender, serde_json::to_string(&reply)) {
+                                use std::io::Write;
+                                let _ = writeln!(sender, "{json}");
                             }
-                            Err(error) => PipeMessage::AccurateReady { path, estimate: String::new(), error: Some(error) },
-                        };
-                        job.handle.send_message(&reply);
+                        });
+                        if spawned.is_err() {
+                            job.handle.send_message(&PipeMessage::AccurateReady { path: String::new(), estimate: String::new(),
+                                error: Some("Cannot find previous jobids.\n".into()) });
+                        }
                     }
 
                     PipeMessage::ClientHandshake { client, cleartext, .. } => {
@@ -1147,7 +1163,8 @@ impl JobManager {
                         sd_status: job.jcr.sd_status,
                         vss: job.jcr.backup_end.as_ref().is_some_and(|e| e.vss),
                         encrypt: job.jcr.backup_end.as_ref().is_some_and(|e| e.encrypt),
-                        fd_unreached: !job.jcr.fd_reached, sd_unreached: !job.jcr.sd_reached,
+                        fd_unreached: job.jcr.backup_end.as_ref().map(|e| !e.fd_erase_asked).unwrap_or(!job.jcr.fd_reached),
+                        sd_unreached: job.jcr.backup_end.as_ref().map(|e| !e.sd_erase_asked).unwrap_or(!job.jcr.sd_reached),
                         quota_info: job.jcr.quota.as_ref().filter(|q| q.has_quota).map(|q| q.summary(
                             job.jcr.backup_end.as_ref().map(|e| e.sd_bytes).unwrap_or(0))).unwrap_or_default(),
                     };

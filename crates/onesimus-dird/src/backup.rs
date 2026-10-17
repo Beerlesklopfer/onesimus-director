@@ -338,6 +338,12 @@ pub struct BackupEnd {
     pub sd_errors: u32,
     pub vss: bool,
     pub encrypt: bool,
+    /// FDSecureEraseCmd / SDSecureEraseCmd were asked for (else the report
+    /// shows "(null)"). S-27.
+    #[serde(default)]
+    pub fd_erase_asked: bool,
+    #[serde(default)]
+    pub sd_erase_asked: bool,
 }
 
 /// job.cc UpdateJobEndRecord() / sql_update.cc UpdateJobEndRecord().

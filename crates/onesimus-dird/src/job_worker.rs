@@ -1262,6 +1262,12 @@ impl JobHandle {
         }
     }
 
+    /// A second handle on the pipe to the worker, for an answer prepared
+    /// on another thread while the worker waits for nothing else (S-27).
+    pub fn sender(&self) -> Option<std::fs::File> {
+        self.to_worker.as_ref().and_then(|w| w.try_clone().ok())
+    }
+
     pub fn send_message(&mut self, msg: &PipeMessage) -> bool {
         if let Some(w) = &mut self.to_worker {
             if let Ok(json) = serde_json::to_string(msg) { return writeln!(w, "{json}").is_ok(); }

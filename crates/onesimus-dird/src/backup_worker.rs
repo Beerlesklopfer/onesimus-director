@@ -21,6 +21,7 @@ use crate::job_worker::{self, JobParams, PipeMessage, WorkerPipes, M_INFO};
 
 const M_FATAL: u32 = 3;
 const M_WARNING: u32 = 5;
+const M_ERROR: u32 = 4;
 
 /// What the worker needs beyond JobParams (JobParams.backup).
 #[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
@@ -62,8 +63,9 @@ pub struct BackupSession {
     /// The client's quota (quota.cc), None without Soft/Hard Quota (S-23).
     #[serde(default)]
     pub quota: Option<crate::backup::Quota>,
-    /// The stored handshake mode of the client is cleartext; the client
-    /// requires TLS (no cleartext fallback). S-27.
+    /// The handshake mode to start with is cleartext (stored, or the client
+    /// has TLS Enable = no); the client requires TLS (TLS Require, default
+    /// yes: no cleartext fallback). S-27.
     #[serde(default)]
     pub handshake_cleartext: bool,
     #[serde(default)]
@@ -110,9 +112,13 @@ fn connect_file_daemon(params: &JobParams, session: &BackupSession) -> Result<Bn
                 job_worker::send_jmsg(PipeMessage::ClientHandshake { job_id, client: params.client_name.clone(), cleartext: !tls });
                 return Ok(fd);
             }
-            Err(FdHandshakeError::Tls(_)) => {
+            Err(FdHandshakeError::Tls(error)) => {
                 if job_worker::WORKER_CANCEL.load(Ordering::SeqCst) {
                     return Err(String::new());
+                }
+                // OpensslPostErrors(): one message per OpenSSL error.
+                for err in openssl_errors(&error) {
+                    jmsg(job_id, M_FATAL, format!("lib/tls_openssl_private.cc:403 Connect failure: ERR={err}\n"));
                 }
                 if probing {
                     jmsg(job_id, M_INFO, "TLS negotiation failed (while probing client protocol)\n".into());
@@ -127,15 +133,36 @@ fn connect_file_daemon(params: &JobParams, session: &BackupSession) -> Result<Bn
             Err(FdHandshakeError::Response(e)) => jmsg(job_id, M_FATAL, format!(
                 "Bad response from File daemon at \"{}:{}\" to Hello command: ERR={e}\n", params.fd_address, params.fd_port)),
         }
-        // UpdateFailedConnectionHandshakeMode(): TLS first falls back to
-        // cleartext (unless the client requires TLS); cleartext has failed.
-        if tls && !session.client_tls_required {
+        // UpdateFailedConnectionHandshakeMode(): after TLS first the job is
+        // JS_Running again and falls back to cleartext unless the client
+        // requires TLS; cleartext has failed.
+        if tls {
+            FIRST_ERROR.store(0, Ordering::SeqCst);
+            if session.client_tls_required {
+                break;
+            }
             tls = false;
         } else {
             break;
         }
     }
     Err(String::new())
+}
+
+/// ERR_error_string_n() of each OpenSSL error in a handshake failure text
+/// ("error:0A00041B:SSL routines::tlsv1 alert decrypt error").
+fn openssl_errors(text: &str) -> Vec<String> {
+    let mut out = Vec::new();
+    let mut rest = text;
+    while let Some(at) = rest.find("error:") {
+        let fields: Vec<&str> = rest[at..].splitn(6, ':').collect();
+        if fields.len() >= 5 && fields[1].len() == 8 && fields[1].chars().all(|c| c.is_ascii_hexdigit()) {
+            // OpenSSL 3 has no function names in ERR_error_string_n().
+            out.push(format!("{}:{}:{}::{}", fields[0], fields[1], fields[2], fields[4]));
+        }
+        rest = &rest[at + 6..];
+    }
+    out
 }
 
 /// lib/bsock_tcp.cc BareosSocketTCP::connect(): the TCP connection, tried
@@ -176,7 +203,52 @@ fn send_catalog(job_id: u32, sql: String) {
 }
 
 fn jmsg(job_id: u32, msg_type: u32, text: String) {
+    note_type(msg_type);
     job_worker::worker_jmsg(job_id, msg_type, text);
+}
+
+/// SendSecureEraseReqToFd / SendSecureEraseReqToSd ran.
+static FD_ERASE_ASKED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+static SD_ERASE_ASKED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// jcr->JobStatus of the job: the first error status wins
+/// (setJobStatusWithPriorityCheck); 0 while there is none.
+static FIRST_ERROR: std::sync::atomic::AtomicU8 = std::sync::atomic::AtomicU8::new(0);
+/// jcr->JobErrors: a fatal message makes it at least 1, every error adds one.
+static JOB_ERRORS: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+
+fn set_status(status: u8) {
+    let _ = FIRST_ERROR.compare_exchange(0, status, Ordering::SeqCst, Ordering::SeqCst);
+}
+
+fn canceled() -> bool {
+    let canceled = job_worker::WORKER_CANCEL.load(Ordering::SeqCst);
+    if canceled {
+        set_status(b'A');
+    }
+    canceled
+}
+
+/// lib/message.cc Jmsg(): M_FATAL sets JS_FatalError (and JobErrors to at
+/// least 1), M_ERROR counts a job error; also for daemon job messages.
+fn note_type(msg_type: u32) {
+    canceled();
+    match msg_type {
+        M_FATAL => {
+            set_status(b'f');
+            let _ = JOB_ERRORS.compare_exchange(0, 1, Ordering::SeqCst, Ordering::SeqCst);
+        }
+        M_ERROR => {
+            JOB_ERRORS.fetch_add(1, Ordering::SeqCst);
+        }
+        _ => {}
+    }
+}
+
+/// A daemon's "Jmsg Job=.. type=.. level=.." line: BgetDirmsg() hands it to
+/// DispatchMessage(), which leaves JobStatus and JobErrors alone.
+fn forward(job_id: u32, line: &str) {
+    job_worker::forward_daemon_jmsg(job_id, line);
 }
 
 fn now() -> i64 {
@@ -191,7 +263,7 @@ fn dir_msg<S: Read + Write>(bs: &mut BnetStream<S>, job_id: u32) -> Result<Optio
             BnetMessage::Data(data) => {
                 let text = String::from_utf8_lossy(&data).into_owned();
                 if text.starts_with("Jmsg") {
-                    job_worker::forward_daemon_jmsg(job_id, &text);
+                    forward(job_id, &text);
                     continue;
                 }
                 return Ok(Some(text));
@@ -253,6 +325,7 @@ fn finish(job_id: u32, session: &BackupSession, term: u8, files: i64, bytes: i64
         sd_status: sd.map(|s| s.status as char).unwrap_or('\0'),
         sd_files: sd.map(|s| s.files).unwrap_or(0), sd_bytes: sd.map(|s| s.bytes).unwrap_or(0),
         sd_errors: sd.map(|s| s.errors).unwrap_or(0), vss, encrypt,
+        fd_erase_asked: FD_ERASE_ASKED.load(Ordering::SeqCst), sd_erase_asked: SD_ERASE_ASKED.load(Ordering::SeqCst),
     }});
     job_worker::send_jmsg(PipeMessage::JobEnd { job_id, term_code: term as i32, files, bytes, errors,
         vol_session_id: Some(vol.0 as i32), vol_session_time: Some(vol.1 as i32) });
@@ -267,26 +340,15 @@ fn state(job_id: u32, name: &str) {
 pub fn run(params: &JobParams, session: &BackupSession, pipes: &mut WorkerPipes) -> i32 {
     let job_id = params.job_id;
     let ids = session.ids;
-    // A canceled job (SIGTERM shut its sockets down) ends JS_Canceled
-    // without the network error it caused (S-23).
+    // DoNativeBackup() returned false: NativeBackupCleanup(JS_ErrorTerminated)
+    // with the status the job already has (a fatal message: JS_FatalError).
     let fail = |text: String, vol: (u32, u32)| {
-        if job_worker::WORKER_CANCEL.load(Ordering::SeqCst) {
-            return finish(job_id, session, b'A', 0, 0, 0, vol, None);
-        }
-        if !text.is_empty() {
+        if !text.is_empty() && !canceled() {
             jmsg(job_id, M_FATAL, text);
         }
-        finish(job_id, session, b'f', 0, 0, 1, vol, None)
-    };
-    // TerminateBackupWithError(): JS_ErrorTerminated, WaitForJobTermination()
-    // without an FD status ("No Job status returned from FD.").
-    let fail_fd = |text: String, vol: (u32, u32)| {
-        if !text.is_empty() {
-            jmsg(job_id, M_FATAL, text);
-        }
-        jmsg(job_id, M_FATAL, "No Job status returned from FD.\n".into());
-        let term = if job_worker::WORKER_CANCEL.load(Ordering::SeqCst) { b'A' } else { b'E' };
-        finish(job_id, session, term, 0, 0, 1, vol, Some((b'E', 0, &SdEnd::default(), false, false)))
+        set_status(b'E');
+        let status = FIRST_ERROR.load(Ordering::SeqCst);
+        finish(job_id, session, status, 0, 0, JOB_ERRORS.load(Ordering::SeqCst) as i32, vol, None)
     };
 
     // job_thread(): "Version: …"; DoNativeBackup(): "Start Backup JobId %u, Job=%s".
@@ -348,15 +410,19 @@ pub fn run(params: &JobParams, session: &BackupSession, pipes: &mut WorkerPipes)
     let mut fd = match connect_file_daemon(params, session) {
         Ok(fd) => fd,
         Err(text) => {
-            let _ = sd.send_signal(BnetSignal::Terminate);
-            return fail_fd(text, vol);
+            if !text.is_empty() {
+                jmsg(job_id, M_FATAL, text);
+            }
+            return terminate(job_id, session, None, None, Some(sd), vol, before.errors);
         }
     };
     state(job_id, "FDJobSetup");
     if let Err(e) = setup_fd(&mut fd, params, session, vol, &auth_key, &before) {
-        let _ = fd.send_signal(BnetSignal::Terminate);
-        let _ = sd.send_signal(BnetSignal::Terminate);
-        return fail_fd(e, vol);
+        // TerminateBackupWithError(): WaitForJobTermination() on the FD.
+        if !e.is_empty() {
+            jmsg(job_id, M_FATAL, e);
+        }
+        return terminate(job_id, session, Some(&mut fd), None, Some(sd), vol, before.errors);
     }
 
     // The job start record again, after the client run scripts.
@@ -365,9 +431,11 @@ pub fn run(params: &JobParams, session: &BackupSession, pipes: &mut WorkerPipes)
 
     // SendAccurateCurrentFiles()
     if let Err(e) = send_accurate_files(&mut fd, pipes, job_id, session, start) {
-        let _ = fd.send_signal(BnetSignal::Terminate);
-        let _ = sd.send_signal(BnetSignal::Terminate);
-        return fail_fd(e, vol);
+        // TerminateBackupWithError(): WaitForJobTermination() on the FD.
+        if !e.is_empty() {
+            jmsg(job_id, M_FATAL, e);
+        }
+        return terminate(job_id, session, Some(&mut fd), None, Some(sd), vol, before.errors);
     }
 
     // ReserveWriteDevice().
@@ -390,9 +458,11 @@ pub fn run(params: &JobParams, session: &BackupSession, pipes: &mut WorkerPipes)
         send(&mut fd, &cmd).and_then(|_| response(&mut fd, job_id, "2000 OK storage\n", "Storage"))
     };
     if let Err(e) = contact {
-        let _ = fd.send_signal(BnetSignal::Terminate);
-        let _ = sd.send_signal(BnetSignal::Terminate);
-        return fail_fd(e, vol);
+        // TerminateBackupWithError(): WaitForJobTermination() on the FD.
+        if !e.is_empty() {
+            jmsg(job_id, M_FATAL, e);
+        }
+        return terminate(job_id, session, Some(&mut fd), None, Some(sd), vol, before.errors);
     }
     if sd.send_str("run").is_err() {
         let _ = fd.send_signal(BnetSignal::Terminate);
@@ -416,41 +486,92 @@ pub fn run(params: &JobParams, session: &BackupSession, pipes: &mut WorkerPipes)
         state(job_id, "Running");
     }
 
-    // WaitForJobTermination()
+    terminate(job_id, session, Some(&mut fd), Some(sd_thread), None, vol, before.errors)
+}
+
+/// backup.cc WaitForJobTermination() and the status NativeBackupCleanup
+/// gets: the FD's messages up to its end ("2800 End Job", "Unexpected Client
+/// Job message", "Network error with FD …"), TERMINATE, the SD message
+/// thread, "No Job status returned from FD."; the first error status of the
+/// Director, FD or SD. `sd` is the SD connection without message thread.
+#[allow(clippy::too_many_arguments)]
+fn terminate(job_id: u32, session: &BackupSession, fd: Option<&mut BnetStream<AnyStream>>,
+             sd_thread: Option<std::thread::JoinHandle<Option<SdEnd>>>, sd: Option<BnetStream<PskStream>>,
+             vol: (u32, u32), before_errors: u32) -> i32 {
+    if sd_thread.is_none() {
+        // TerminateBackupWithError(): JS_ErrorTerminated.
+        set_status(b'E');
+    }
     let mut fd_end: Option<(u8, u64, u64, u64, u32, bool, bool)> = None;
-    loop {
-        match dir_msg(&mut fd, job_id) {
-            Ok(Some(msg)) => {
-                match fd_end.is_none().then(|| parse_end_job(&msg)).flatten() {
-                    Some(end) => fd_end = Some(end),
-                    None => jmsg(job_id, M_WARNING, format!("Unexpected Client Job message: {msg}")),
+    let mut fd_error = None;
+    if let Some(fd) = fd {
+        loop {
+            match dir_msg(fd, job_id) {
+                Ok(Some(msg)) => {
+                    match fd_end.is_none().then(|| parse_end_job(&msg)).flatten() {
+                        Some(end) => fd_end = Some(end),
+                        None => jmsg(job_id, M_WARNING, format!("Unexpected Client Job message: {msg}")),
+                    }
+                }
+                Ok(None) => break,
+                Err(e) => {
+                    fd_error = Some(e);
+                    break;
                 }
             }
-            Ok(None) => break,
-            Err(e) => {
-                if !job_worker::WORKER_CANCEL.load(Ordering::SeqCst) {
-                    jmsg(job_id, M_FATAL, format!("Network error with FD during Backup: ERR={e}\n"));
-                }
+            if canceled() {
                 break;
             }
         }
-        if job_worker::WORKER_CANCEL.load(Ordering::SeqCst) {
-            break;
+        // A canceled job's SD connection dropped first (its message thread
+        // reports that before the FD's network error).
+        // A socket the cancel shut down reads like the original's timed-out one.
+        if canceled() && fd_error.is_some() {
+            fd_error = Some("Resource temporarily unavailable".into());
         }
+        if fd_error.is_none() || !canceled() {
+            if let Some(e) = fd_error.take() {
+                jmsg(job_id, M_FATAL, format!("Network error with FD during Backup: ERR={e}\n"));
+            }
+        }
+        let _ = fd.send_signal(BnetSignal::Terminate);
+        state(job_id, "Finishing");
+        let sd_end = sd_thread.and_then(|t| t.join().ok().flatten());
+        if let Some(e) = fd_error {
+            jmsg(job_id, M_FATAL, format!("Network error with FD during Backup: ERR={e}\n"));
+        }
+        return finish_wait(job_id, session, fd_end, sd_end, vol, before_errors);
     }
-    let _ = fd.send_signal(BnetSignal::Terminate);
-    let canceled = job_worker::WORKER_CANCEL.load(Ordering::SeqCst);
+    if let Some(mut sd) = sd {
+        let _ = sd.send_signal(BnetSignal::Terminate);
+    }
     state(job_id, "Finishing");
-    let sd_end = sd_thread.join().ok().flatten().unwrap_or_default();
+    let sd_end = sd_thread.and_then(|t| t.join().ok().flatten());
+    finish_wait(job_id, session, None, sd_end, vol, before_errors)
+}
 
+/// The end of WaitForJobTermination(): the FD's counters or "No Job status
+/// returned from FD." (FDJobStatus JS_ErrorTerminated), then the status.
+fn finish_wait(job_id: u32, session: &BackupSession, fd_end: Option<(u8, u64, u64, u64, u32, bool, bool)>,
+               sd_end: Option<SdEnd>, vol: (u32, u32), before_errors: u32) -> i32 {
+    let sd_end = sd_end.unwrap_or_default();
     let Some((fd_status, files, read_bytes, bytes, errors, vss, encrypt)) = fd_end else {
         jmsg(job_id, M_FATAL, "No Job status returned from FD.\n".into());
-        let term = if canceled { b'A' } else { b'E' };
-        return finish(job_id, session, term, 0, 0, 1, vol, Some((b'E', 0, &sd_end, false, false)));
+        canceled();
+        let status = FIRST_ERROR.load(Ordering::SeqCst);
+        let errors = JOB_ERRORS.load(Ordering::SeqCst) + before_errors;
+        return finish(job_id, session, status, 0, 0, errors as i32, vol, Some((b'E', 0, &sd_end, false, false)));
     };
+    canceled();
     // The first error status of Dir, FD or SD.
-    let term = if canceled { b'A' } else if fd_status != b'T' { fd_status } else if sd_end.status == 0 { b'E' } else { sd_end.status };
-    finish(job_id, session, term, files as i64, bytes as i64, errors as i32 + before.errors as i32, vol,
+    let status = match FIRST_ERROR.load(Ordering::SeqCst) {
+        0 if fd_status != b'T' => fd_status,
+        0 if sd_end.status == 0 => b'E',
+        0 => sd_end.status,
+        first => first,
+    };
+    let errors = JOB_ERRORS.load(Ordering::SeqCst) + errors + before_errors;
+    finish(job_id, session, status, files as i64, bytes as i64, errors as i32, vol,
         Some((fd_status, read_bytes, &sd_end, vss, encrypt)))
 }
 
@@ -520,6 +641,7 @@ fn start_sd_job(sd: &mut BnetStream<PskStream>, params: &JobParams, session: &Ba
     };
     // SendSecureEraseReqToSd()
     send(sd, "getSecureEraseCmd\n")?;
+    SD_ERASE_ASKED.store(true, Ordering::SeqCst);
     let _ = dir_msg(sd, job_id);
     Ok(result)
 }
@@ -590,6 +712,7 @@ fn setup_fd(fd: &mut BnetStream<AnyStream>, params: &JobParams, session: &Backup
 
     // SendSecureEraseReqToFd()
     send(fd, "getSecureEraseCmd\n")?;
+    FD_ERASE_ASKED.store(true, Ordering::SeqCst);
     if let Some(msg) = dir_msg(fd, job_id).map_err(|e| format!("Network error: {e}\n"))? {
         if !msg.starts_with("2000 OK FDSecureEraseCmd ") {
             jmsg(job_id, M_WARNING, format!("Unexpected Client Secure Erase Cmd: {msg}"));
@@ -644,7 +767,7 @@ fn message_thread(sd: &mut BnetStream<PskStream>, job_id: u32, mut from_director
                             let _ = sd.send_str(&response);
                         }
                     }
-                    _ if raw.starts_with("Jmsg") => job_worker::forward_daemon_jmsg(job_id, &raw),
+                    _ if raw.starts_with("Jmsg") => forward(job_id, &raw),
                     _ if raw.starts_with("Status Job=") => {
                         if let Ok(status) = job_worker::storage_job_status(raw.trim()) {
                             job_worker::send_jmsg(PipeMessage::JobStatus { job_id, status: status as i32 });
@@ -664,8 +787,10 @@ fn message_thread(sd: &mut BnetStream<PskStream>, job_id: u32, mut from_director
             Ok(BnetMessage::Signal(BnetSignal::Terminate)) => break None,
             Ok(BnetMessage::Signal(_)) => {}
             Err(e) => {
+                // msgchan.cc msg_thread(): BNET_HARDEOF; IsBnetError: JS_ErrorTerminated.
                 warn!("Worker {job_id} SD recv: {e}");
-                break None;
+                jmsg(job_id, M_FATAL, "Director's comm line to SD dropped.\n".into());
+                break Some(SdEnd { status: b'E', ..Default::default() });
             }
         }
     };
