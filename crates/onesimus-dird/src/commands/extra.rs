@@ -98,79 +98,6 @@ pub fn cmd_memory(_ast: &CommandAst, ctx: &ExecContext) -> CommandResult {
     crate::commands::status::dir_status_header(ctx)
 }
 
-pub fn cmd_show(ast: &CommandAst, ctx: &ExecContext) -> CommandResult {
-    let what = ast.arguments.first().map(|a| a.key.as_str()).unwrap_or("all");
-
-    if let Some(config) = &ctx.config {
-        if let Ok(cfg) = config.read() {
-            let mut output = String::new();
-            match what {
-                "director" | "dir" => {
-                    output.push_str(&format!("Director: name={} port={} maxjobs={}\n",
-                        cfg.director.name, cfg.director.port, cfg.director.max_concurrent_jobs));
-                }
-                "clients" | "client" => {
-                    for c in &cfg.clients {
-                        output.push_str(&format!("Client: name={} address={} port={} enabled={}\n",
-                            c.name, c.address, c.port, c.enabled));
-                    }
-                }
-                "jobs" | "job" => {
-                    for j in &cfg.jobs {
-                        output.push_str(&format!("Job {{\n  Name = \"{}\"\n  Type = {:?}\n  Level = {:?}\n  Client = {}\n  FileSet = \"{}\"\n  Storage = {}\n  Pool = {}\n  Messages = {}\n  Priority = {}\n",
-                            j.name, j.job_type, j.level, j.client, j.fileset, j.storage, j.pool, j.messages, j.priority));
-                        if !j.schedule.is_empty() { output.push_str(&format!("  Schedule = \"{}\"\n", j.schedule)); }
-                        if !j.full_backup_pool.is_empty() { output.push_str(&format!("  Full Backup Pool = {}\n", j.full_backup_pool)); }
-                        if !j.differential_backup_pool.is_empty() { output.push_str(&format!("  Differential Backup Pool = {}\n", j.differential_backup_pool)); }
-                        if !j.incremental_backup_pool.is_empty() { output.push_str(&format!("  Incremental Backup Pool = {}\n", j.incremental_backup_pool)); }
-                        if !j.write_bootstrap.is_empty() { output.push_str(&format!("  Write Bootstrap = \"{}\"\n", j.write_bootstrap)); }
-                        output.push_str(&format!("  Enabled = {}\n}}\n\n", if j.enabled { "yes" } else { "no" }));
-                    }
-                }
-                "jobdefs" | "jobdef" => {
-                    for jd in &cfg.jobdefs {
-                        let j = &jd.job;
-                        output.push_str(&format!("JobDefs {{\n  Name = \"{}\"\n  Type = {:?}\n  Level = {:?}\n  Client = {}\n  FileSet = \"{}\"\n  Storage = {}\n  Pool = {}\n  Messages = {}\n  Priority = {}\n",
-                            jd.name, j.job_type, j.level, j.client, j.fileset, j.storage, j.pool, j.messages, j.priority));
-                        if !j.schedule.is_empty() { output.push_str(&format!("  Schedule = \"{}\"\n", j.schedule)); }
-                        if !j.full_backup_pool.is_empty() { output.push_str(&format!("  Full Backup Pool = {}\n", j.full_backup_pool)); }
-                        if !j.differential_backup_pool.is_empty() { output.push_str(&format!("  Differential Backup Pool = {}\n", j.differential_backup_pool)); }
-                        if !j.incremental_backup_pool.is_empty() { output.push_str(&format!("  Incremental Backup Pool = {}\n", j.incremental_backup_pool)); }
-                        if !j.write_bootstrap.is_empty() { output.push_str(&format!("  Write Bootstrap = \"{}\"\n", j.write_bootstrap)); }
-                        output.push_str(&format!("  Enabled = {}\n}}\n\n", if j.enabled { "yes" } else { "no" }));
-                    }
-                }
-                "storages" | "storage" => {
-                    for s in &cfg.storages {
-                        output.push_str(&format!("Storage: name={} address={} port={} device={} mediatype={}\n",
-                            s.name, s.address, s.port, s.device, s.media_type));
-                    }
-                }
-                "pools" | "pool" => {
-                    for p in &cfg.pools {
-                        output.push_str(&format!("Pool: name={} type={} recycle={} maxvols={}\n",
-                            p.name, p.pool_type, p.recycle, p.maximum_volumes));
-                    }
-                }
-                "all" => {
-                    output.push_str(&format!("Director: {}\n", cfg.director.name));
-                    output.push_str(&format!("Clients: {}\n", cfg.clients.len()));
-                    output.push_str(&format!("Jobs: {}\n", cfg.jobs.len()));
-                    output.push_str(&format!("JobDefs: {}\n", cfg.jobdefs.len()));
-                    output.push_str(&format!("Storages: {}\n", cfg.storages.len()));
-                    output.push_str(&format!("Pools: {}\n", cfg.pools.len()));
-                    output.push_str(&format!("FileSets: {}\n", cfg.filesets.len()));
-                    output.push_str(&format!("Schedules: {}\n", cfg.schedules.len()));
-                    output.push_str(&format!("Consoles: {}\n", cfg.consoles.len()));
-                }
-                other => output.push_str(&format!("show {other}: try director, clients, jobs, jobdefs, storages, pools, all\n")),
-            }
-            return CommandResult::ok(output);
-        }
-    }
-    CommandResult::ok("No config\n".to_string())
-}
-
 /// C++ ua_cmds.cc TraceCmd(): with not exactly one argument the value is
 /// asked for (GetCmd "Turn on or off? "); anything but "off" turns tracing
 /// on. No answer (lone dot, batch mode) changes nothing. Silent.
@@ -965,6 +892,8 @@ struct AddVolumes {
     names: Vec<String>,
     slot: i64,
     in_changer: bool,
+    /// SetStorageidInMr: StorageId of the selected storage (0 without).
+    storage_id: i64,
 }
 
 /// add_cmd (ua_cmds.cc:611): hint, OpenClientDb, GetPoolDbr, maximum check,
@@ -1048,7 +977,8 @@ fn add_questions(ua: &mut crate::ua_select::Ua, ast: &CommandAst) -> Option<AddV
     let names = (start..start + count)
         .map(|i| if num > 0 { format!("{base}{i:04}") } else { base.clone() })
         .collect();
-    Some(AddVolumes { pool, pool_id, media_type, names, slot, in_changer })
+    let storage_id = storage.as_deref().and_then(|name| crate::ua_select::get_storage_record(ctx, name)).unwrap_or(0);
+    Some(AddVolumes { pool, pool_id, media_type, names, slot, in_changer, storage_id })
 }
 
 /// CreateMediaRecord for each volume (pool defaults, VolStatus Unlabeled)
@@ -1061,11 +991,11 @@ fn add_volumes(ua: &mut crate::ua_select::Ua, volumes: AddVolumes) {
     for (index, name) in volumes.names.iter().enumerate() {
         let sql = format!(
             "INSERT INTO Media (VolumeName, MediaType, PoolId, VolStatus, Enabled, Slot, InChanger, Recycle, \
-             VolRetention, VolUseDuration, MaxVolJobs, MaxVolFiles, MaxVolBytes, RecyclePoolId, ActionOnPurge) \
+             VolRetention, VolUseDuration, MaxVolJobs, MaxVolFiles, MaxVolBytes, RecyclePoolId, ActionOnPurge, StorageId) \
              SELECT '{}', '{}', PoolId, 'Unlabeled', 1, {}, {}, Recycle, VolRetention, VolUseDuration, \
-             MaxVolJobs, MaxVolFiles, MaxVolBytes, RecyclePoolId, ActionOnPurge FROM Pool WHERE PoolId={}",
+             MaxVolJobs, MaxVolFiles, MaxVolBytes, RecyclePoolId, ActionOnPurge, {} FROM Pool WHERE PoolId={}",
             name.replace('\'', "''"), volumes.media_type.replace('\'', "''"),
-            volumes.slot + index as i64, i32::from(volumes.in_changer), volumes.pool_id);
+            volumes.slot + index as i64, i32::from(volumes.in_changer), volumes.storage_id, volumes.pool_id);
         if let Err(e) = cat.raw_query(&sql) {
             ua.error_msg(format!("{e}\n"));
             return;

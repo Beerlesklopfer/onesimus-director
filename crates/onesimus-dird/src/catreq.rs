@@ -758,6 +758,10 @@ pub struct JobContext {
     pub catalog_files: bool,
     /// jcr->dir_impl->res.write_storage (None for restore/verify jobs)
     pub write_storage: Option<WriteStorage>,
+    /// jcr->dir_impl->mig_jcr->JobId of a Copy/Migrate worker job: the
+    /// JobMedia, File and RestoreObject records are the new job's
+    /// (catreq.cc:352/542/567). C-058.
+    pub mig_job_id: Option<u32>,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -803,7 +807,8 @@ pub fn load_context(db: &dyn Db, config: Option<&crate::director_config::SharedC
             Some(WriteStorage { media_type, storage_id, autochanger })
         }
     };
-    JobContext { job_id, start_time, pool_id, pool_name, catalog_files, write_storage }
+    JobContext { job_id, start_time, pool_id, pool_name, catalog_files, write_storage,
+        mig_job_id: crate::migrate::new_job_of(job_id) }
 }
 
 // ---------------------------------------------------------------------------
@@ -972,7 +977,7 @@ VolFirstWritten=%lld\n");
 StartBlock=%u EndBlock=%u Copy=%d Strip=%d MediaId=%lld\n");
         if n == 10 {
             let mut cat = Cat { db, errmsg: &mut self.errmsg, msgs: &mut reply.messages };
-            if !create_jobmedia_record(&mut cat, ctx.job_id, &v) {
+            if !create_jobmedia_record(&mut cat, ctx.mig_job_id.unwrap_or(ctx.job_id), &v) {
                 let error = cat.errmsg.clone();
                 cat.jmsg(MsgType::Fatal, format!("Catalog error creating JobMedia record. {error}\n"));
                 reply.to_sd = "1992 Create JobMedia error\n".into();
@@ -1108,7 +1113,7 @@ StartBlock=%u EndBlock=%u Copy=%d Strip=%d MediaId=%lld\n");
                 }
                 self.ar = AttrRecord {
                     file_index: if file_type == FT_DELETED { 0 } else { file_index as u32 },
-                    file_type, fname, attr, stream, job_id: self.ctx.job_id, digest: None, delta_seq, file_id: self.ar.file_id,
+                    file_type, fname, attr, stream, job_id: self.ctx.mig_job_id.unwrap_or(self.ctx.job_id), digest: None, delta_seq, file_id: self.ar.file_id,
                 };
                 self.cached_attribute = true;
             }
@@ -1176,7 +1181,7 @@ ObjectCompression,FileIndex,JobId) \
 VALUES ('{}','{}','\\x{}',{},{},{},{},{},{},{})",
             esc(&String::from_utf8_lossy(&object_name)), esc(&String::from_utf8_lossy(&plugin_name)),
             hex::encode(&object), object_len, object_full_len, object_index, file_type, object_compression,
-            file_index, self.ctx.job_id);
+            file_index, self.ctx.mig_job_id.unwrap_or(self.ctx.job_id));
         let _ = stream;
         let mut cat = Cat { db, errmsg: &mut self.errmsg, msgs };
         let (id, error) = cat.insert_autokey(&sql, "RestoreObject");

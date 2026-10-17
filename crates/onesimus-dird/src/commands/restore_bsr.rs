@@ -130,18 +130,26 @@ impl Bsr {
     /// AddVolumeInformationToBsr()
     pub fn add_volume_information(&mut self, ua: &mut Ua) -> bool {
         let Some(catalog) = ua.ctx.catalog.clone() else { return false };
+        match self.add_volume_information_db(&catalog) {
+            Ok(()) => true,
+            Err(e) => {
+                ua.error_msg(e);
+                false
+            }
+        }
+    }
+
+    /// AddVolumeInformationToBsr() without a console: Err is the text the
+    /// console would get as error message.
+    pub fn add_volume_information_db(&mut self, catalog: &crate::catalog_worker::CatalogHandle) -> Result<(), String> {
         for record in &mut self.records {
             let sql = format!("SELECT VolSessionId,VolSessionTime,JobFiles FROM Job WHERE JobId={}", record.job_id);
             let row = match catalog.query_rows(&sql) {
                 Ok(table) => table.rows.into_iter().next(),
-                Err(e) => {
-                    ua.error_msg(format!("Unable to get Job record. ERR={e}\n"));
-                    return false;
-                }
+                Err(e) => return Err(format!("Unable to get Job record. ERR={e}\n")),
             };
             let Some(row) = row else {
-                ua.error_msg(format!("Unable to get Job record. ERR=cats/sql_get.cc:275 No Job found for JobId {}\n", record.job_id));
-                return false;
+                return Err(format!("Unable to get Job record. ERR=cats/sql_get.cc:275 No Job found for JobId {}\n", record.job_id));
             };
             let value = |i: usize| row.get(i).cloned().flatten().unwrap_or_default();
             record.vol_session_id = to_u64(&value(0)) as u32;
@@ -151,15 +159,54 @@ impl Bsr {
                 record.vols.clear();
                 continue;
             }
-            match job_volume_parameters(&catalog, record.job_id) {
+            match job_volume_parameters(catalog, record.job_id) {
                 Ok(vols) => record.vols = vols,
-                Err(e) => {
-                    ua.error_msg(format!("Unable to get Job Volume Parameters. ERR={e}"));
-                    return false;
-                }
+                Err(e) => return Err(format!("Unable to get Job Volume Parameters. ERR={e}")),
             }
         }
-        true
+        Ok(())
+    }
+
+    /// WriteBsrFile() of a job (UaContext without console, ua->jcr set):
+    /// every console message becomes an M_INFO job message (`messages`).
+    /// Returns the number of files (0: nothing written or an error) and the
+    /// bootstrap file name (MakeUniqueRestoreFilename).
+    pub fn write_file_for_job(&mut self, config: &crate::director_config::DirectorConfig, job_ids: &str,
+        messages: &mut Vec<String>) -> (u32, String) {
+        let uniq = UNIQ.fetch_add(1, Ordering::SeqCst) + 1;
+        let fname = format!("{}/{}.restore.{uniq}.bsr", config.director.working_directory, config.director.name);
+        let mut env = ConfigEnv { config, store: None, messages: Vec::new() };
+        let mut buffer = String::new();
+        let count = self.write_env(&mut env, job_ids, &mut buffer);
+        messages.append(&mut env.messages);
+        if let Err(e) = std::fs::write(&fname, &buffer) {
+            if !std::path::Path::new(&fname).exists() {
+                messages.push(format!("Unable to create bootstrap file {fname}. ERR={}\n",
+                    crate::commands::restore::errno_text(&e)));
+                return (0, fname);
+            }
+            if count != 0 {
+                messages.push("Error writing bsr file.\n".to_string());
+                return (0, fname);
+            }
+        }
+        if count == 0 {
+            messages.push("No files found to read. No bootstrap file written.\n".to_string());
+            return (0, fname);
+        }
+        messages.push(format!("Bootstrap records written to {fname}\n"));
+        (count, fname)
+    }
+
+    /// WriteBsr() without a console: the bootstrap text and its file count;
+    /// `messages` gets the FindStorageResource warnings.
+    pub fn write_text(&mut self, config: &crate::director_config::DirectorConfig, job_ids: &str,
+        messages: &mut Vec<String>) -> (String, u32) {
+        let mut env = ConfigEnv { config, store: None, messages: Vec::new() };
+        let mut buffer = String::new();
+        let count = self.write_env(&mut env, job_ids, &mut buffer);
+        messages.append(&mut env.messages);
+        (buffer, count)
     }
 
     /// WriteBsrFile(): the number of files in the bootstrap (0: nothing
@@ -200,6 +247,11 @@ impl Bsr {
     /// WriteBsr(): records in the order of the JobId list.
     fn write(&mut self, ua: &mut Ua, ast: &CommandAst, job_ids: &str, store: &mut Option<String>,
         buffer: &mut String) -> u32 {
+        let mut env = UaEnv { ua, ast, store };
+        self.write_env(&mut env, job_ids, buffer)
+    }
+
+    fn write_env(&mut self, env: &mut dyn BsrEnv, job_ids: &str, buffer: &mut String) -> u32 {
         let mut first = true;
         let mut last_index = 0u32;
         let mut total = 0u32;
@@ -220,7 +272,7 @@ impl Bsr {
                 // cannot compare indices between jobs
                 last_index = 0;
             }
-            total = total.wrapping_add(write_bsr_item(record, ua, ast, store, buffer, &mut first, &mut last_index));
+            total = total.wrapping_add(write_bsr_item(record, env, buffer, &mut first, &mut last_index));
             last_job = Some(this_job);
         }
         total
@@ -353,7 +405,62 @@ fn write_findex(ranges: &[(i32, i32)], first_index: &mut u32, last_index: &mut u
 }
 
 /// write_bsr_item()
-fn write_bsr_item(record: &mut Record, ua: &mut Ua, ast: &CommandAst, store: &mut Option<String>,
+/// What WriteBsr() needs from its UaContext: FindStorageResource() for the
+/// first selected volume and GetStorageDevice().
+trait BsrEnv {
+    fn find_storage(&mut self, storage: &str, media_type: &str);
+    fn device(&self, storage: &str) -> Option<String>;
+}
+
+struct UaEnv<'a, 'b, 'c> {
+    ua: &'a mut Ua<'b>,
+    ast: &'a CommandAst,
+    store: &'c mut Option<String>,
+}
+
+impl BsrEnv for UaEnv<'_, '_, '_> {
+    fn find_storage(&mut self, storage: &str, media_type: &str) {
+        if self.store.is_none() {
+            *self.store = find_storage_resource(self.ua, self.ast, storage, media_type);
+        }
+    }
+    fn device(&self, storage: &str) -> Option<String> {
+        storage_device(self.ua, storage)
+    }
+}
+
+/// A UaContext of a job (no console, all permissions): its messages are
+/// job messages.
+struct ConfigEnv<'a> {
+    config: &'a crate::director_config::DirectorConfig,
+    store: Option<String>,
+    messages: Vec<String>,
+}
+
+impl BsrEnv for ConfigEnv<'_> {
+    fn find_storage(&mut self, storage: &str, media_type: &str) {
+        if self.store.is_some() {
+            return;
+        }
+        if self.config.storages.iter().any(|s| s.name == storage) {
+            self.store = Some(storage.to_string());
+        } else if let Some(s) = self.config.storages.iter().find(|s| s.media_type == media_type) {
+            self.messages.push(format!("Storage \"{storage}\" not found, using Storage \"{}\" from MediaType \"{media_type}\".\n", s.name));
+            self.store = Some(s.name.clone());
+        } else {
+            self.messages.push(format!("\nUnable to find Storage resource for\nMediaType \"{media_type}\", needed by the Jobs you selected.\n"));
+        }
+    }
+    fn device(&self, storage: &str) -> Option<String> {
+        if storage.is_empty() {
+            return None;
+        }
+        let store = self.config.storages.iter().find(|s| s.name == storage)?;
+        (!store.device.is_empty()).then(|| store.device.clone())
+    }
+}
+
+fn write_bsr_item(record: &mut Record, env: &mut dyn BsrEnv,
     buffer: &mut String, first: &mut bool, last_index: &mut u32) -> u32 {
     let ranges = record.ranges();
     let mut total = 0u32;
@@ -363,16 +470,14 @@ fn write_bsr_item(record: &mut Record, ua: &mut Ua, ast: &CommandAst, store: &mu
             record.vols[i].volume_name.clear(); // zap VolumeName
             continue;
         }
-        if store.is_none() {
-            *store = find_storage_resource(ua, ast, &vol.storage, &vol.media_type);
-        }
+        env.find_storage(&vol.storage, &vol.media_type);
         let vol = &record.vols[i];
         buffer.push_str(&format!("Storage=\"{}\"\nVolume=\"{}\"\nMediaType=\"{}\"\n",
             vol.storage, vol.volume_name, vol.media_type));
         if let Some(regex) = &record.fileregex {
             buffer.push_str(&format!("FileRegex={regex}\n"));
         }
-        if let Some(device) = storage_device(ua, &vol.storage) {
+        if let Some(device) = env.device(&vol.storage) {
             buffer.push_str(&format!("Device=\"{device}\"\n"));
         }
         if vol.slot > 0 {

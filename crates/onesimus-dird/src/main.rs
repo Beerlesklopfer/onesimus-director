@@ -43,6 +43,8 @@ mod reload;
 mod run_time;
 mod runscript;
 mod scheduler;
+mod migrate;
+mod sd_copy;
 mod sd_label;
 mod scan;
 mod sd_protocol;
@@ -55,6 +57,7 @@ mod ua_impexp;
 mod ua_storage_select;
 mod ua_select;
 mod version_strings;
+mod volume_key;
 mod watchdog;
 
 use std::path::PathBuf;

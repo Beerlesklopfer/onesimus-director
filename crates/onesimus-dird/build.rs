@@ -6,20 +6,19 @@ fn main() {
     println!("cargo:rerun-if-env-changed=SOURCE_DATE_EPOCH");
     println!("cargo:rerun-if-changed=/etc/os-release");
 
-    // One timestamp for all date strings: Date "%d %B %Y", ShortDate
-    // "%d%b%y", ProgDateTime "%Y-%m-%d %H:%M:%S", Year "%Y".
+    // One timestamp for both date strings: Date "%d %B %Y", ShortDate
+    // "%d%b%y".
     let mut cmd = std::process::Command::new("date");
     cmd.env("LC_ALL", "C").arg("-u");
     if let Ok(epoch) = std::env::var("SOURCE_DATE_EPOCH") {
         cmd.arg("-d").arg(format!("@{epoch}"));
     }
-    let stamp = cmd.arg("+%d %B %Y|%d%b%y|%Y-%m-%d %H:%M:%S|%Y").output().ok()
+    let stamp = cmd.arg("+%d %B %Y|%d%b%y").output().ok()
         .filter(|o| o.status.success())
         .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
         .unwrap_or_default();
     let mut parts = stamp.split('|');
-    for key in ["ONESIMUS_BUILD_DATE", "ONESIMUS_BUILD_SHORT_DATE",
-                "ONESIMUS_BUILD_PROG_DATE_TIME", "ONESIMUS_BUILD_YEAR"] {
+    for key in ["ONESIMUS_BUILD_DATE", "ONESIMUS_BUILD_SHORT_DATE"] {
         println!("cargo:rustc-env={key}={}", parts.next().unwrap_or(""));
     }
 

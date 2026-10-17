@@ -255,8 +255,9 @@ enum UpdateAction {
     /// UpdateSlots (ua_update.cc:1075) on the selected storage with the
     /// command arguments (key, value): SD dialog and catalog work.
     Slots { storage: String, args: Vec<(String, Option<String>)> },
-    /// An update kind without catalog support yet.
-    Unsupported(&'static str),
+    /// UpdateVolEncryption: a new key (`generate`) or none
+    /// (ReplaceVolEncryptionKey / RemoveVolEncryptionKey).
+    VolEncryptionKey { media_id: i64, volume: String, generate: bool },
 }
 
 type UpdateAct<'f> = &'f mut dyn FnMut(&mut crate::ua_select::Ua, UpdateAction);
@@ -391,6 +392,7 @@ fn update_vol_encryption(ua: &mut crate::ua_select::Ua, value: &str, media: &cra
     let key_present = has_encryption_key(ua.ctx, media.media_id);
     let purged = media.vol_status == "Purged";
     let name = &media.volume_name;
+    let generate = !value.eq_ignore_ascii_case("no");
     if value.eq_ignore_ascii_case("yes") {
         if key_present {
             ua.warning_msg(format!("Encryption key for volume '{name}' already configured.\n"));
@@ -406,11 +408,12 @@ fn update_vol_encryption(ua: &mut crate::ua_select::Ua, value: &str, media: &cra
             ua.error_msg(format!("{what} volume '{name}' requires volstatus=Purged\n"));
             return None;
         }
+        ua.warning_msg("If the volume is currently mounted, remount before use!\n");
     } else {
         ua.error_msg("Valid values for Encrypt are yes/no/rotate\n");
         return None;
     }
-    Some(UpdateAction::Unsupported("update volume encrypt"))
+    Some(UpdateAction::VolEncryptionKey { media_id: media.media_id, volume: name.clone(), generate })
 }
 
 /// The Update<Field> helpers of ua_update.cc for one volume.
@@ -744,7 +747,19 @@ fn update_execute(ua: &mut crate::ua_select::Ua, action: UpdateAction) {
                 .map(|c| c.director.name.clone()).unwrap_or_default();
             update_slots(ua, &args, &env, &store, &mut NetSd { director });
         }
-        UpdateAction::Unsupported(what) => ua.send_msg(format!("{what}: not supported\n")),
+        UpdateAction::VolEncryptionKey { media_id, volume, generate } => {
+            let key = if generate {
+                let kek = ua.ctx.config.as_ref().and_then(|c| c.read().ok())
+                    .and_then(|c| c.director.key_encryption_key.clone());
+                match crate::volume_key::generate_new_encryption_key(&volume, kek.as_deref()) {
+                    Ok(key) => key,
+                    Err(message) => return ua.error_msg(message),
+                }
+            } else {
+                String::new()
+            };
+            super::update_db::update_vol_encryption_key(ua, &cat, media_id, &volume, key, generate);
+        }
     }
 }
 
@@ -2162,11 +2177,12 @@ pub(crate) mod side_effect_tests {
                 "0", "0", "0", "0", "0", "0"].map(str::to_string);
             CatalogResponse::Rows(if sql.starts_with("SELECT MediaId, VolumeName") {
                 let row = if sql.contains("'v1'") { Some(media("7", "v1", "Error")) }
-                    else if sql.contains("'v2'") { Some(media("8", "v2", "Append")) } else { None };
+                    else if sql.contains("'v2'") { Some(media("8", "v2", "Append")) }
+                    else if sql.contains("'v3'") { Some(media("9", "v3", "Purged")) } else { None };
                 SqlTable { columns: vec![SqlColumn { name: "c".into(), numeric: false }; 17],
                     rows: row.into_iter().map(|r| r.into_iter().map(Some).collect()).collect() }
             } else if sql.starts_with("SELECT EncryptionKey") {
-                table(&[&[if sql.ends_with("=8") { "key" } else { "" }]])
+                table(&[&[if sql.ends_with("=8") || sql.ends_with("=9") { "key" } else { "" }]])
             } else if sql.starts_with("SELECT MaxVols") {
                 table(&[&["100"]])
             } else if sql.starts_with("SELECT VolBytes FROM Media") {
@@ -2238,6 +2254,13 @@ pub(crate) mod side_effect_tests {
         error("update volume=v2 encrypt=yes", "Encryption key for volume 'v2' already configured.\n");
         error("update volume=v2 encrypt=no", "Removing encryption key from volume 'v2' requires volstatus=Purged\n");
         error("update volume=v2 encrypt=rotate", "Rotating encryption key for volume 'v2' requires volstatus=Purged\n");
+        // A key is generated (yes, rotate) or removed (no) (C-067, S-08).
+        let encryption = |media_id, volume: &str, generate|
+            vec![UpdateAction::VolEncryptionKey { media_id, volume: volume.into(), generate }];
+        assert_eq!(run("update volume=v1 encrypt=YES", &[]), (String::new(), encryption(7, "v1", true)));
+        let remount = "If the volume is currently mounted, remount before use!\n".to_string();
+        assert_eq!(run("update volume=v3 encrypt=rotate", &[]), (remount.clone(), encryption(9, "v3", true)));
+        assert_eq!(run("update volume=v3 encrypt=no", &[]), (remount, encryption(9, "v3", false)));
         // GetPoolDbr: unknown pools lead to the pool selection.
         let (text, acted) = run("update volume=v1 pool=nosuch", &["."]);
         assert_eq!(text, "Could not find Pool \"nosuch\": ERR=Pool record not found in Catalog.\n\
