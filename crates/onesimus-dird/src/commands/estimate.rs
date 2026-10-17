@@ -104,6 +104,13 @@ struct Item {
     plugins: Vec<String>,
 }
 
+/// The option strings of a FileSet's Include blocks (IsChecksumNeededByFileset).
+pub(crate) fn include_option_strings(cfg: &DirectorConfig, name: &str) -> Vec<String> {
+    fileset_items(cfg, name)
+        .map(|f| f.includes.iter().flat_map(|i| i.options.iter().map(|o| o.opts.clone())).collect())
+        .unwrap_or_default()
+}
+
 fn fileset_items(cfg: &DirectorConfig, name: &str) -> Option<FilesetItems> {
     let res = cfg.raw.iter().find(|r| r.norm_type() == "fileset" && r.name() == Some(name))?;
     let item = |body: &Vec<Directive>| {

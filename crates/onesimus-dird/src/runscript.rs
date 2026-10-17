@@ -422,7 +422,7 @@ fn job_level_to_str(level: &str) -> String {
 }
 
 /// The job codes of a job of the JobManager.
-fn job_codes(config: &DirectorConfig, job: &ScriptJob) -> JobCodes {
+pub(crate) fn job_codes(config: &DirectorConfig, job: &ScriptJob) -> JobCodes {
     let resource = config.find_job(&job.job_name);
     let client = config.find_client(&job.client);
     let level = job.params.as_ref().map(|p| p.level.clone()).unwrap_or_default();
