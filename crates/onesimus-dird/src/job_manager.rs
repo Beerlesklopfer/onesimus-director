@@ -1677,6 +1677,42 @@ Job { Name = single; Client = fd1; Storage = File }
     }
 
     #[test]
+    fn s33_default_media_wait_cancels_a_job_blocked_on_a_volume() {
+        // no Max Wait Time: canceled after 600 s blocked on media (C-085)
+        let mut m = manager(&limits_config(""));
+        enqueue_at(&mut m, 1, "lim", now_unix(), StartFlags::default());
+        m.set_phase(1, DirJobPhase::WaitingMedia);
+        m.fire_job_monitor();
+        assert_eq!(state(&m, 1).0, 'R');
+        m.jobs.iter_mut().find(|j| j.job_id == 1).unwrap().jcr.limits.shift_media_wait(590);
+        m.fire_job_monitor();
+        assert!(m.take_watchdog_cancels().is_empty());
+        m.jobs.iter_mut().find(|j| j.job_id == 1).unwrap().jcr.limits.shift_media_wait(10);
+        m.fire_job_monitor();
+        assert_eq!(m.get_job(1).unwrap().status(), 'A');
+        assert_eq!(m.take_watchdog_cancels(), vec![1]);
+        // a running (not waiting) job is never canceled by the default
+        enqueue_at(&mut m, 2, "lim", now_unix(), StartFlags::default());
+        m.set_phase(2, DirJobPhase::Running);
+        m.fire_job_monitor();
+        m.jobs.iter_mut().find(|j| j.job_id == 2).unwrap().jcr.limits.shift_media_wait(10_000);
+        m.fire_job_monitor();
+        assert!(m.take_watchdog_cancels().is_empty());
+        // a configured Max Wait Time wins
+        let mut m2 = manager(&limits_config("Max Wait Time = 7200"));
+        enqueue_at(&mut m2, 3, "lim", now_unix(), StartFlags::default());
+        m2.set_phase(3, DirJobPhase::WaitingMedia);
+        m2.fire_job_monitor();
+        m2.jobs.iter_mut().find(|j| j.job_id == 3).unwrap().jcr.limits.shift_media_wait(3600);
+        m2.fire_job_monitor();
+        assert!(m2.take_watchdog_cancels().is_empty());
+        for id in [1, 2] { m.cancel_job(id); }
+        m2.cancel_job(3);
+        kill_all(&mut m);
+        kill_all(&mut m2);
+    }
+
+    #[test]
     fn s22_new_queue_server_starts_ready_jobs_at_once() {
         // jobq.cc: the server of a second JobqAdd takes the first job from the
         // ready queue without the 2-second pause.

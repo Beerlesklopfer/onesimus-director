@@ -19,6 +19,13 @@
 //!   Time; a hit is "Fatal error: Max … time exceeded. Job canceled." and
 //!   CancelJob() — the one of the `cancel` command (FD/SD `cancel Job=`),
 //!   run by monitor_loop outside the JobManager lock.
+//! - Onesimus default (C-085, S-33, not in the original): a job without a
+//!   configured Max Wait Time that is blocked waiting for a volume (Director
+//!   or SD job status WaitMedia/WaitMount, e.g. "Please mount append Volume
+//!   … or label a new one") is canceled the same way once it has waited
+//!   [`DEFAULT_MEDIA_WAIT`] seconds in total; the original waits forever.
+//!   Only the time actually blocked on media counts. A configured Max Wait
+//!   Time always wins (it measures all wait states, as in the original).
 
 use super::*;
 
@@ -78,11 +85,21 @@ pub(super) struct LimitState {
     /// jcr->wait_time / wait_time_sum.
     wait_since: Option<i64>,
     wait_sum: i64,
+    /// Time blocked waiting for media (C-085): start of the current
+    /// stretch and the sum of the earlier ones.
+    media_wait_since: Option<i64>,
+    media_wait_sum: i64,
     /// RescheduleJob() looked at the ended job.
     reschedule_checked: bool,
 }
 
 impl LimitState {
+    /// Move the start of the current media wait `seconds` back (tests).
+    #[cfg(test)]
+    pub(super) fn shift_media_wait(&mut self, seconds: i64) {
+        if let Some(since) = self.media_wait_since.as_mut() { *since -= seconds; }
+    }
+
     /// jcr->dir_impl->reschedule_count (tests).
     #[cfg(test)]
     pub(super) fn reschedule_count(&self) -> u32 {
@@ -118,6 +135,18 @@ fn wants_reschedule(l: &JobLimits, count: u32, status: char, level: char) -> boo
         && l.backup
         && ((l.reschedule_incomplete && status == 'I' && level != 'B')
             || (l.reschedule_on_error && !matches!(status, 'T' | 'W') && status != 'A'))
+}
+
+/// Onesimus default (C-085): seconds a job without Max Wait Time may wait
+/// for a volume before the watchdog cancels it. The original has no limit.
+pub const DEFAULT_MEDIA_WAIT: i64 = 600;
+
+/// [`DEFAULT_MEDIA_WAIT`], or for tests on private daemons the seconds in
+/// `ONESIMUS_DEFAULT_MEDIA_WAIT` (read once; not meant for production).
+fn default_media_wait() -> i64 {
+    static VALUE: std::sync::OnceLock<i64> = std::sync::OnceLock::new();
+    *VALUE.get_or_init(|| std::env::var("ONESIMUS_DEFAULT_MEDIA_WAIT").ok()
+        .and_then(|v| v.trim().parse().ok()).filter(|v: &i64| *v > 0).unwrap_or(DEFAULT_MEDIA_WAIT))
 }
 
 /// JobMonitorWatchdog interval (job.cc InitJobServer: wd->interval = 60).
@@ -268,6 +297,28 @@ fn wait_state(status: char, sd_status: char) -> bool {
     matches!(status, 'F' | 'S' | 'm' | 'M' | 's' | 'j' | 'c' | 'd' | 'p') || matches!(sd_status, 'm' | 'M' | 'q' | 'd')
 }
 
+/// Blocked waiting for a volume: JS_WaitMedia / JS_WaitMount of the job
+/// or of its Storage daemon job (C-085).
+fn media_wait_state(status: char, sd_status: char) -> bool {
+    matches!(status, 'm' | 'M') || matches!(sd_status, 'm' | 'M')
+}
+
+/// The Onesimus default (C-085) is reached: no Max Wait Time configured and
+/// `default` seconds blocked on media in total at `now`.
+fn default_media_wait_exceeded(state: &LimitState, now: i64, default: i64) -> bool {
+    state.limits.max_wait_time == 0
+        && state.media_wait_since.map_or(0, |s| now - s) + state.media_wait_sum >= default
+}
+
+/// Track one wait kind: start a stretch, or add an ended one to the sum.
+fn track(waiting: bool, since: &mut Option<i64>, sum: &mut i64, now: i64) {
+    match (waiting, *since) {
+        (true, None) => *since = Some(now),
+        (false, Some(start)) => { *sum += now - start; *since = None; }
+        _ => {}
+    }
+}
+
 impl JobManager {
     fn post_info(&self, job_id: u32, job_name: &str, msg_type: crate::message_bus::MsgType, text: String) {
         crate::console_msg::post_job_message(&self.bus, self.config.as_ref(), BusMessage::JobMessage {
@@ -354,13 +405,11 @@ impl JobManager {
     pub(super) fn job_monitor(&mut self) {
         let now = now_unix();
         for job in &mut self.jobs {
-            let waiting = wait_state(job.status(), job.jcr.sd_status);
+            let (status, sd_status, started) = (job.status(), job.jcr.sd_status, job.jcr.job_started);
             let state = &mut job.jcr.limits;
-            match (waiting, state.wait_since) {
-                (true, None) => state.wait_since = Some(now),
-                (false, Some(since)) => { state.wait_sum += now - since; state.wait_since = None; }
-                _ => {}
-            }
+            track(wait_state(status, sd_status), &mut state.wait_since, &mut state.wait_sum, now);
+            track(started && media_wait_state(status, sd_status), &mut state.media_wait_since,
+                &mut state.media_wait_sum, now);
         }
         let instant = std::time::Instant::now();
         let next = *self.monitor.next.get_or_insert(instant + MONITOR_INTERVAL);
@@ -375,14 +424,20 @@ impl JobManager {
                 continue;
             }
             let state = &job.jcr.limits;
+            let default = default_media_wait();
             let text = if job.jcr.job_started && wait_state(job.status(), job.jcr.sd_status)
                 && state.limits.max_wait_time != 0
                 && state.wait_since.map_or(0, |s| now - s) + state.wait_sum >= state.limits.max_wait_time {
-                "Max wait time exceeded. Job canceled.\n"
+                "Max wait time exceeded. Job canceled.\n".to_string()
+            } else if job.jcr.job_started && media_wait_state(job.status(), job.jcr.sd_status)
+                && default_media_wait_exceeded(state, now, default) {
+                // C-085: the Onesimus default for jobs without Max Wait Time.
+                format!("Max wait time exceeded. Job canceled. (Onesimus default: no Max Wait Time \
+                    configured, the job waited {default} seconds for a volume)\n")
             } else if job.jcr.job_started && run_time_exceeded(state, now - job.start_time) {
-                "Max run time exceeded. Job canceled.\n"
+                "Max run time exceeded. Job canceled.\n".to_string()
             } else if run_sched_time_exceeded(state, now) {
-                "Max run sched time exceeded. Job canceled.\n"
+                "Max run sched time exceeded. Job canceled.\n".to_string()
             } else {
                 continue;
             };
@@ -391,7 +446,7 @@ impl JobManager {
         for (id, name, text) in cancel {
             self.set_status(id, 'A');
             // "The watchdog thread can't use Jmsg directly, we always queued it."
-            crate::console_msg::qmsg(&self.bus, id, &name, crate::message_bus::MsgType::Fatal, text.to_string());
+            crate::console_msg::qmsg(&self.bus, id, &name, crate::message_bus::MsgType::Fatal, text);
             self.monitor.cancel.push(id);
         }
     }
@@ -571,6 +626,34 @@ mod tests {
         assert!(wants_reschedule(&d, 0, 'I', 'F'));
         assert!(!wants_reschedule(&d, 0, 'I', 'B'));
         assert!(!wants_reschedule(&d, 0, 'E', 'F'));
+    }
+
+    /// Fake clock: the media wait counts only blocked stretches (C-085).
+    #[test]
+    fn default_media_wait_counts_only_time_blocked_on_media() {
+        let mut s = me(JobLimits::default(), 'F');
+        // t=1000..1300 blocked on media, 1300..2000 running, 2000.. blocked again
+        track(true, &mut s.media_wait_since, &mut s.media_wait_sum, 1000);
+        assert!(!default_media_wait_exceeded(&s, 1299, 600));
+        track(false, &mut s.media_wait_since, &mut s.media_wait_sum, 1300);
+        assert!(!default_media_wait_exceeded(&s, 1900, 600));
+        track(true, &mut s.media_wait_since, &mut s.media_wait_sum, 2000);
+        assert!(!default_media_wait_exceeded(&s, 2299, 600));
+        assert!(default_media_wait_exceeded(&s, 2300, 600));
+        // a configured Max Wait Time wins over the default
+        s.limits.max_wait_time = 3600;
+        assert!(!default_media_wait_exceeded(&s, 9999, 600));
+    }
+
+    #[test]
+    fn media_wait_states() {
+        assert!(media_wait_state('m', '\0'));
+        assert!(media_wait_state('M', '\0'));
+        assert!(media_wait_state('R', 'm'));
+        assert!(media_wait_state('R', 'M'));
+        assert!(!media_wait_state('F', '\0'));
+        assert!(!media_wait_state('R', 'q'));
+        assert_eq!(DEFAULT_MEDIA_WAIT, 600);
     }
 
     #[test]
