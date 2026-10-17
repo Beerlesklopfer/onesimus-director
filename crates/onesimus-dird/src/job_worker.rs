@@ -446,7 +446,7 @@ pub fn run_worker(
                 let where_path = params.where_path.as_deref().unwrap_or("/tmp/bareos-restore");
                 let replace_char = match params.replace.as_deref() {
                     Some("never") => 'n',
-                    Some("ifnewer") => 'i',
+                    Some("ifnewer") => 'w', // REPLACE_IFNEWER (baconfig.h)
                     Some("ifolder") => 'o',
                     _ => 'a', // always
                 };
