@@ -114,7 +114,8 @@ fn finish(job_id: u32, session: &BackupSession, term: u8, files: i64, bytes: i64
           vol: (u32, u32), counts: Option<(u8, u64, &SdEnd, bool, bool)>) -> i32 {
     let (fd_status, read_bytes, sd, vss, encrypt) = match counts {
         Some((fd, read, sd, vss, enc)) => (fd as char, read, Some(sd), vss, enc),
-        None => ('E', 0, None, false, false),
+        // No "2800 End Job": the Director decides (FD reached or not).
+        None => ('\0', 0, None, false, false),
     };
     job_worker::send_jmsg(PipeMessage::BackupEnd { job_id, end: BackupEnd {
         ids: session.ids, fd_status, read_bytes,
@@ -156,7 +157,7 @@ pub fn run(params: &JobParams, session: &BackupSession, pipes: &mut WorkerPipes)
     send_catalog(job_id, crate::backup::update_job_start_record_sql(job_id, 'R', &ids, start, 0, 0));
 
     // ConnectToStorageDaemon() (JS_WaitSD) and StartStorageDaemonJob().
-    state(job_id, "ConnectingSD");
+    state(job_id, "BackupConnectingSD");
     let mut sd = match job_worker::connect_sd(params) {
         Ok((sd, cipher)) => {
             jmsg(job_id, M_INFO, crate::job_messages::connected_text("Storage daemon", &params.sd_address, params.sd_port, Some(&cipher)));
@@ -165,7 +166,7 @@ pub fn run(params: &JobParams, session: &BackupSession, pipes: &mut WorkerPipes)
         }
         Err(e) => return fail(format!("Failed to connect to Storage daemon: {e}\n"), (0, 0)),
     };
-    state(job_id, "SDJobSetup");
+    state(job_id, "BackupSDJobSetup");
     let (vol, auth_key) = match start_sd_job(&mut sd, params, session) {
         Ok(v) => v,
         Err(e) => {
@@ -175,7 +176,7 @@ pub fn run(params: &JobParams, session: &BackupSession, pipes: &mut WorkerPipes)
     };
 
     // ConnectToFileDaemon() (JS_WaitFD).
-    state(job_id, "ConnectingFD");
+    state(job_id, "BackupConnectingFD");
     if params.client_first_connection {
         jmsg(job_id, M_INFO, crate::job_messages::PROBING_TEXT.to_string());
     }

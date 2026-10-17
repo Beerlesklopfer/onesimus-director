@@ -241,32 +241,6 @@ pub fn has_restrictions(ctx: &ExecContext, kind: Kind) -> bool {
     true
 }
 
-/// Local extension (compatibility log C-040, no Bareos equivalent): a
-/// destructive extension command needs `item` named literally in the
-/// console's own CommandACL or in one of its profiles, on top of the normal
-/// check. `*all*` and regular expressions never grant it. The default console
-/// (`*UserAgent*`) and internal contexts have no ACL in Bareos and pass.
-pub fn lists_command(ctx: &ExecContext, item: &str) -> bool {
-    if !access(ctx, Kind::Command, item) {
-        return false;
-    }
-    let Some(manager) = &ctx.session_mgr else { return true };
-    let Some(console) = manager.authenticated_console(ctx.session_id) else { return false };
-    if console == "*UserAgent*" {
-        return true;
-    }
-    let Some(config) = ctx.config.as_ref().and_then(|c| c.read().ok()) else { return false };
-    let Some(resource) = config.raw.iter()
-        .find(|r| r.norm_type() == "console" && r.name() == Some(console.as_str())) else { return false };
-    let literal = |resource: &ConfResource| resource.directives.iter()
-        .filter(|d| d.norm_key() == Kind::Command.key()).flat_map(|d| d.values())
-        .any(|v| v.eq_ignore_ascii_case(item));
-    literal(resource)
-        || resource.directives.iter().filter(|d| d.norm_key() == "profile").flat_map(|d| d.values())
-            .filter_map(|name| config.raw.iter().find(|r| r.norm_type() == "profile" && r.name() == Some(name)))
-            .any(literal)
-}
-
 /// AclAccessOk(acl, item, audit_event=true): a denial is written to the
 /// audit log (UaContext::LogAuditEventAclFailure).
 pub fn access_audited(ctx: &ExecContext, kind: Kind, item: &str) -> bool {
@@ -438,33 +412,6 @@ User {Name=limited; CommandACL=*all*}"#).unwrap();
             Kind::PluginOptions,
             "key=value"
         ));
-    }
-    #[test]
-    fn lists_command_needs_a_literal_entry_in_console_or_profile() {
-        use std::sync::{Arc, RwLock};
-        let config = DirectorConfig::from_str(r#"Director {Name=dir; Password=secret}
-Profile {Name=admin; CommandACL=.CATALOG}
-Console {Name=viaprofile; Password=pw; CommandACL=status; Profile=admin}
-Console {Name=wildcard; Password=pw; CommandACL=*all*,.cat.*}
-Console {Name=denied; Password=pw; CommandACL=!.catalog,.catalog}"#).unwrap();
-        let manager = Arc::new(crate::session_manager::SessionManager::new(Arc::new(
-            crate::message_bus::MessageBus::new(16),
-        )));
-        let mut ctx = ExecContext {
-            session_id: 0,
-            config: Some(Arc::new(RwLock::new(config))),
-            session_mgr: Some(manager.clone()),
-            catalog: None,
-            api_mode: crate::command_executor::ApiMode::Human,
-            bus_rx: None,
-            job_manager: None,
-        };
-        for (console, expected) in [("viaprofile", true), ("wildcard", false), ("denied", false), ("*UserAgent*", true)] {
-            ctx.session_id = manager.create_session(console);
-            assert!(!lists_command(&ctx, ".catalog"), "{console} unauthenticated");
-            manager.authenticate_session(ctx.session_id);
-            assert_eq!(lists_command(&ctx, ".catalog"), expected, "{console}");
-        }
     }
     #[test]
     fn queued_command_is_denied_after_grpc_manager_expiry_without_other_requests() {

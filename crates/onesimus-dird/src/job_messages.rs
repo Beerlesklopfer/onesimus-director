@@ -257,6 +257,8 @@ pub struct JobReport {
     pub expected_files: Option<u64>,
     /// Copy/Migrate control job: jobs were selected (HasSelectedJobs).
     pub selected: bool,
+    /// A VirtualFull backup (vbackup.rs): NativeVbackupCleanup data.
+    pub vf: Option<crate::vbackup::VfInfo>,
 }
 
 /// Clients connected since the Director started (ClientResource
@@ -350,6 +352,10 @@ pub struct JobOutcome {
     pub sd_status: char,
     pub vss: bool,
     pub encrypt: bool,
+    /// The File / Storage daemon was never reached: its secure erase
+    /// command was never asked for (NULL, printed "(null)").
+    pub fd_unreached: bool,
+    pub sd_unreached: bool,
 }
 
 /// One Jmsg of the job report sequence.
@@ -466,7 +472,13 @@ pub fn backup_summary(director: &str, report: &JobReport, outcome: &JobOutcome, 
         }
     };
     let (msg_type, term_msg) = backup_term_msg(outcome.status);
-    let run_time = outcome.end_time - report.start_time;
+    // A VirtualFull reports the times of the newest consolidated job
+    // (NativeVbackupCleanup sets them before GetJobRecord).
+    let (start_time, end_time) = match report.vf.as_ref().and_then(|vf| vf.previous.as_ref()) {
+        Some((start, end, _)) => (crate::btime::str_to_utime(start), crate::btime::str_to_utime(end)),
+        None => (report.start_time, outcome.end_time),
+    };
+    let run_time = end_time - start_time;
     let kbps = if run_time <= 0 { 0.0 } else { outcome.bytes as f64 / (1000.0 * run_time as f64) };
     let terminated_ok = matches!(outcome.status, 'T' | 'W');
     let volume_names = match &facts.volume_names {
@@ -491,19 +503,29 @@ pub fn backup_summary(director: &str, report: &JobReport, outcome: &JobOutcome, 
             }
         }
     };
+    let yes_no = |b: bool| if b { "yes" } else { "no" };
+    let (level_info, statistics, client_options, daemon_status) = if report.vf.is_some() {
+        ("  Backup Level:           Virtual Full\n".to_string(),
+         format!("  SD Files Written:       {}\n  SD Bytes Written:       {} ({}B)\n",
+            commas(outcome.sd_files), commas(outcome.sd_bytes), suffix(outcome.sd_bytes)),
+         String::new(),
+         format!("  SD Errors:              {}\n  SD termination status:  {}\n  Accurate:               {}\n",
+            outcome.sd_errors, job_status_to_ascii(outcome.sd_status), yes_no(report.accurate)))
+    } else {
     let level_info = format!("  Backup Level:           {}{}\n", report.level, report.since);
     let statistics = format!(
         "  FD Files Written:       {}\n  SD Files Written:       {}\n  FD Bytes Read:          {} ({}B)\n\
          \x20 FD Bytes Written:       {} ({}B)\n  SD Bytes Written:       {} ({}B)\n",
         commas(outcome.files), commas(outcome.sd_files), commas(outcome.read_bytes), suffix(outcome.read_bytes),
         commas(outcome.bytes), suffix(outcome.bytes), commas(outcome.sd_bytes), suffix(outcome.sd_bytes));
-    let yes_no = |b: bool| if b { "yes" } else { "no" };
     let client_options = format!(
         "  Software Compression:   {}\n  VSS:                    {}\n  Encryption:             {}\n  Accurate:               {}\n",
         "None", yes_no(outcome.vss), yes_no(outcome.encrypt), yes_no(report.accurate));
     let daemon_status = format!(
         "  Non-fatal FD errors:    {}\n  SD Errors:              {}\n  FD termination status:  {}\n  SD termination status:  {}\n",
         outcome.errors, outcome.sd_errors, job_status_to_ascii(outcome.fd_status), job_status_to_ascii(outcome.sd_status));
+    (level_info, statistics, client_options, daemon_status)
+    };
     let text = format!(
         "{head}  OS Information:         {os}\n  JobId:                  {job_id}\n  Job:                    {job}\n\
          {level_info}  Client:                 \"{client}\" {uname}\n  FileSet:                \"{fileset}\" {fs_time}\n\
@@ -518,7 +540,7 @@ pub fn backup_summary(director: &str, report: &JobReport, outcome: &JobOutcome, 
         client = report.client, fileset = report.fileset, fs_time = facts.fs_create_time,
         pool = report.pool, pool_source = report.pool_source, catalog = report.catalog,
         catalog_source = report.catalog_source, storage = report.storage, storage_source = report.storage_source,
-        sched = bstrftimes(report.sched_time), start = bstrftimes(report.start_time), end = bstrftimes(outcome.end_time),
+        sched = bstrftimes(report.sched_time), start = bstrftimes(start_time), end = bstrftimes(end_time),
         elapsed = crate::ua_select::edit_utime(run_time.max(0) as u64), priority = report.priority,
         mixed = yes_no(report.allow_mixed_priority), rate = fixed1(kbps), vsid = outcome.vol_session_id,
         vstime = outcome.vol_session_time, lvb = commas(last_vol_bytes), lvbs = suffix(last_vol_bytes),
@@ -528,7 +550,8 @@ pub fn backup_summary(director: &str, report: &JobReport, outcome: &JobOutcome, 
 }
 
 /// NativeRestoreCleanup() and GenerateRestoreSummary() (restore.cc:419-602)
-/// for a native restore without secure erase.
+/// for a native restore. The daemons' secure erase commands are "*None*"
+/// once they were reached; one never reached prints its NULL command.
 pub fn restore_summary(director: &str, report: &JobReport, outcome: &JobOutcome, facts: &CatalogFacts) -> Vec<JobMsg> {
     let mut messages = Vec::new();
     let mut status = outcome.status;
@@ -556,9 +579,12 @@ pub fn restore_summary(director: &str, report: &JobReport, outcome: &JobOutcome,
          \x20 Restore Client:         \"{client}\" {uname}\n  Start time:             {start}\n  End time:               {end}\n\
          \x20 Elapsed time:           {elapsed}\n  Files Expected:         {expected}\n  Files Restored:         {files}\n\
          \x20 Bytes Restored:         {bytes}\n  Rate:                   {rate} KB/s\n  FD Errors:              {errors}\n\
-         \x20 FD termination status:  {fd}\n  SD termination status:  {sd}\n  Bareos binary info:     {binary}\n\
+         \x20 FD termination status:  {fd}\n  SD termination status:  {sd}\n{secure_erase}  Bareos binary info:     {binary}\n\
          \x20 Job triggered by:       {trigger}\n  Termination:            {term_msg}\n\n",
         head = summary_head(director), os = version::os_info(), job_id = outcome.job_id, job = report.job,
+        secure_erase = format!("{}{}",
+            if outcome.fd_unreached { "  FD  Secure Erase Cmd:   (null)\n" } else { "" },
+            if outcome.sd_unreached { "  SD  Secure Erase Cmd:   (null)\n" } else { "" }),
         client = report.client, start = bstrftimes(report.start_time), end = bstrftimes(outcome.end_time),
         elapsed = crate::ua_select::edit_utime(run_time.max(0) as u64),
         expected = commas(report.expected_files.unwrap_or(0)), files = commas(outcome.files),
@@ -706,6 +732,7 @@ mod tests {
             trigger: "Scheduler".into(),
             expected_files: None,
             selected: false,
+            vf: None,
         }
     }
 
@@ -714,7 +741,7 @@ mod tests {
             job_id: 626, status: 'T', end_time: local("2026-07-09 21:00:03"), files: 5, bytes: 24_154_072,
             read_bytes: 24_154_072, sd_files: 5, sd_bytes: 24_154_607, errors: 0, sd_errors: 0,
             vol_session_id: 1, vol_session_time: 1_783_588_680, fd_status: 'T', sd_status: 'T',
-            vss: false, encrypt: false,
+            vss: false, encrypt: false, fd_unreached: false, sd_unreached: false,
         }
     }
 
@@ -771,6 +798,27 @@ mod tests {
         assert_eq!(log.lock().unwrap()[2],
             "SELECT VolumeName,MAX(VolIndex) FROM JobMedia,Media WHERE JobMedia.JobId=626 \
              AND JobMedia.MediaId=Media.MediaId GROUP BY VolumeName ORDER BY 2 ASC");
+    }
+
+    #[test]
+    fn virtual_full_summary_shows_sd_data_and_the_newest_job_times() {
+        let facts = CatalogFacts {
+            uname: Ok("u".into()), fs_create_time: "2026-10-17 07:03:10".into(),
+            volume_names: Ok("AI-Consolidated-47328".into()), last_vol_bytes: Ok(91_973),
+        };
+        let report = JobReport {
+            vf: Some(crate::vbackup::VfInfo { previous: Some(("2026-07-09 21:00:02".into(), "2026-07-09 21:00:02".into(), 0)),
+                ..Default::default() }),
+            accurate: true, ..report_626()
+        };
+        let messages = backup_summary("bareos-dir", &report, &outcome_626(), &facts);
+        let text = &messages[0].1;
+        assert!(text.contains("  Backup Level:           Virtual Full\n  Client:"), "{text}");
+        assert!(text.contains(&format!("  Start time:             {}\n  End time:               {}\n  Elapsed time:           0 secs\n",
+            bstrftimes(local("2026-07-09 21:00:02")), bstrftimes(local("2026-07-09 21:00:02")))), "{text}");
+        assert!(text.contains("  SD Files Written:       5\n  SD Bytes Written:       24,154,607 (24.15 MB)\n  Rate:"), "{text}");
+        assert!(text.contains("  Last Volume Bytes:      91,973 (91.97 KB)\n  SD Errors:              0\n  \
+            SD termination status:  OK\n  Accurate:               yes\n  Bareos binary info:"), "{text}");
     }
 
     #[test]
@@ -862,6 +910,28 @@ mod tests {
 
 ", version::FULL, version::SHORT_DATE, version::os_info(), bstrftimes(1000), bstrftimes(1001), radix(),
             version::JOBLOG_MESSAGE));
+    }
+
+    /// restore.cc GenerateRestoreSummary: daemons never reached (a restore
+    /// failing before any connection) have no termination status and print
+    /// their NULL secure erase command. Compatibility log C-058, S-18.
+    #[test]
+    fn restore_summary_without_daemon_contact() {
+        let report = JobReport { kind: ReportKind::Restore, job: "RestoreFiles.1".into(), client: "bareos-fd".into(),
+            start_time: 1000, trigger: TRIGGER_USER.into(), ..Default::default() };
+        let outcome = JobOutcome { job_id: 9, status: 'f', end_time: 1000, errors: 1, fd_unreached: true,
+            sd_unreached: true, ..Default::default() };
+        let facts = CatalogFacts { uname: Ok("u".into()), fs_create_time: String::new(), volume_names: Ok(String::new()), last_vol_bytes: Ok(0) };
+        let messages = restore_summary("bareos-dir", &report, &outcome, &facts);
+        assert_eq!(messages[0].0, MsgType::Error);
+        assert!(messages[0].1.contains("  FD Errors:              1\n  FD termination status:  \n  SD termination status:  \n\
+            \x20 FD  Secure Erase Cmd:   (null)\n  SD  Secure Erase Cmd:   (null)\n  Bareos binary info:     "), "{}", messages[0].1);
+        assert!(messages[0].1.ends_with("  Termination:            *** Restore Error ***\n\n"));
+        // only the SD never reached
+        let outcome = JobOutcome { fd_unreached: false, fd_status: 'f', ..outcome };
+        let text = &restore_summary("bareos-dir", &report, &outcome, &facts)[0].1;
+        assert!(text.contains("  FD termination status:  Fatal Error\n  SD termination status:  \n\
+            \x20 SD  Secure Erase Cmd:   (null)\n  Bareos binary info:"), "{text}");
     }
 
     #[test]

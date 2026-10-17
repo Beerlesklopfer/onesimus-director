@@ -424,7 +424,8 @@ fn mark_media_purged(ua: &mut Ua, db: &dyn Db, volume: &mut Volume) -> bool {
         ua.error_msg(db_error(&error));
         return false;
     }
-    // TODO(C-030): GeneratePluginEvent(bDirEventVolumePurged) - no Director plugins.
+    // GeneratePluginEvent(bDirEventVolumePurged): Onesimus loads no Director
+    // plugins (compatibility log C-030), so there is no receiver.
     if volume.recycle_pool_id != 0 && volume.recycle_pool_id != volume.pool_id {
         match (pool_record(db, volume.pool_id), pool_record(db, volume.recycle_pool_id)) {
             (Some(_), Some((name, max_vols, num_vols))) => {
@@ -608,25 +609,42 @@ fn prune_candidates(ua: &mut Ua, db: &dyn Db, volume: &Volume) -> Option<Vec<u32
 }
 
 /// next_vol.cc HasVolumeExpired(): an Append volume past one of its limits
-/// becomes Full/Used (catalog updated).
-fn has_volume_expired(db: &dyn Db, volume: &mut Volume) -> bool {
+/// becomes Full/Used (catalog updated), announced with Jmsg(M_INFO) of the
+/// console JCR (JobId 0, the Director's Messages resource).
+fn has_volume_expired(ctx: &ExecContext, db: &dyn Db, volume: &mut Volume) -> bool {
     if volume.status != "Append" || volume.vol_jobs <= 0 {
         return false;
     }
-    // TODO(C-030): the Jmsg(M_INFO) "Max Volume ... exceeded. Marking Volume
-    // ..." of the console JCR is not delivered.
-    let status = if volume.max_vol_bytes > 0 && volume.vol_bytes >= volume.max_vol_bytes {
-        "Full"
-    } else if (volume.max_vol_jobs > 0 && volume.max_vol_jobs <= volume.vol_jobs)
-        || (volume.max_vol_files > 0 && volume.max_vol_files <= volume.vol_files)
-        || (volume.use_duration > 0 && volume.use_duration as i64 <= now() - volume.first_written) {
-        "Used"
+    let commas = crate::job_messages::commas;
+    let (status, text) = if volume.max_vol_bytes > 0 && volume.vol_bytes >= volume.max_vol_bytes {
+        ("Full", format!("Max Volume bytes={} exceeded. Marking Volume \"{}\" as Full.\n",
+            commas(volume.max_vol_bytes), volume.name))
+    } else if volume.max_vol_jobs > 0 && volume.max_vol_jobs <= volume.vol_jobs {
+        ("Used", format!("Max Volume jobs={} exceeded. Marking Volume \"{}\" as Used.\n",
+            commas(volume.max_vol_jobs as u64), volume.name))
+    } else if volume.max_vol_files > 0 && volume.max_vol_files <= volume.vol_files {
+        ("Used", format!("Max Volume files={} exceeded. Marking Volume \"{}\" as Used.\n",
+            commas(volume.max_vol_files as u64), volume.name))
+    } else if volume.use_duration > 0 && volume.use_duration as i64 <= now() - volume.first_written {
+        ("Used", format!("Max configured use duration={} sec. exceeded. Marking Volume \"{}\" as Used.\n",
+            commas(volume.use_duration), volume.name))
     } else {
         return false;
     };
+    console_jmsg(ctx, crate::message_bus::MsgType::Info, &text);
     volume.status = status.into();
-    let _ = db.exec(&format!("UPDATE Media SET VolStatus='{status}' WHERE VolumeName='{}'", esc(&volume.name)));
+    if let Err(error) = db.exec(&format!("UPDATE Media SET VolStatus='{status}' WHERE VolumeName='{}'", esc(&volume.name))) {
+        console_jmsg(ctx, crate::message_bus::MsgType::Error,
+            &format!("Catalog error updating volume \"{}\". ERR={}", volume.name, db_error(&error)));
+    }
     true
+}
+
+/// Jmsg(ua->jcr, type, 0, text) of the console JCR (JobId 0).
+fn console_jmsg(ctx: &ExecContext, msg_type: crate::message_bus::MsgType, text: &str) {
+    if let Some(config) = ctx.config.as_ref().and_then(|c| c.read().ok()) {
+        crate::console_msg::job_message(&config, "-Console-", 0, msg_type, 0, text);
+    }
 }
 
 /// ua_prune.cc PruneVolume(); true when the volume is empty afterwards.
@@ -635,7 +653,7 @@ pub(crate) fn prune_volume(ua: &mut Ua, db: &dyn Db, volume: &mut Volume) -> boo
         return false;
     }
     let empty = volume.first_written == 0 && volume.last_written == 0;
-    if !(volume.status == "Full" || volume.status == "Used" || has_volume_expired(db, volume)) {
+    if !(volume.status == "Full" || volume.status == "Used" || has_volume_expired(ua.ctx, db, volume)) {
         ua.send_msg(format!("Pruning volume {}: cannot prune as Volstatus is {} but needs to be Full or Used.\n",
             volume.name, volume.status));
         return false;
@@ -1197,6 +1215,43 @@ pub(crate) mod tests {
         let db = FakeDb::new(vec![]);
         assert!(!purge_jobs_from_volume(&mut ua, &ast("purge volume=A yes"), &db, &mut archive, true));
         assert!(db.writes().is_empty());
+    }
+
+    /// next_vol.cc HasVolumeExpired(): the first exceeded limit marks the
+    /// volume and is announced by Jmsg(M_INFO) of the console JCR.
+    #[test]
+    fn expired_append_volume_is_marked_with_console_job_message() {
+        let _queue = crate::console_msg::test_queue("purge-expired");
+        let ctx = crate::ua_select::tests::context(
+            "Director { Name = dir; Messages = Daemon }\nCatalog { Name = MyCatalog; DbName = x }\n\
+             Messages { Name = Daemon; Console = all }", crate::command_executor::ApiMode::Human);
+        let cases: [(&'static str, &[usize], &str, &str); 4] = [
+            // MaxVolBytes=1000 reached by VolBytes (MaxVolJobs=1000 is not)
+            ("1000", &[9, 10], "Full", "Max Volume bytes=1,000 exceeded. Marking Volume \"Full-0007\" as Full.\n"),
+            ("3", &[10], "Used", "Max Volume jobs=3 exceeded. Marking Volume \"Full-0007\" as Used.\n"),
+            ("1", &[11], "Used", "Max Volume files=1 exceeded. Marking Volume \"Full-0007\" as Used.\n"),
+            ("3600", &[12], "Used", "Max configured use duration=3,600 sec. exceeded. Marking Volume \"Full-0007\" as Used.\n"),
+        ];
+        for (limit, columns, status, text) in cases {
+            let mut row = volume_row("Append");
+            for column in columns {
+                row[*column] = limit;
+            }
+            let db = FakeDb::new(vec![(MEDIA, vec![row])]);
+            let mut volume = get_volume(&db, 7).unwrap();
+            assert!(has_volume_expired(&ctx, &db, &mut volume));
+            assert_eq!(volume.status, status);
+            assert_eq!(db.writes(), vec![format!("UPDATE Media SET VolStatus='{status}' WHERE VolumeName='Full-0007'")]);
+            let messages: Vec<String> = crate::console_msg::take().iter()
+                .map(|m| String::from_utf8_lossy(m).into_owned()).collect();
+            assert_eq!(messages.len(), 1);
+            assert!(messages[0].ends_with(&format!("dir JobId 0: {text}")), "{messages:?}");
+        }
+        // within all limits: nothing
+        let db = FakeDb::new(vec![(MEDIA, vec![volume_row("Append")])]);
+        let mut volume = get_volume(&db, 7).unwrap();
+        assert!(!has_volume_expired(&ctx, &db, &mut volume));
+        assert!(db.writes().is_empty() && !crate::console_msg::pending());
     }
 
     #[test]

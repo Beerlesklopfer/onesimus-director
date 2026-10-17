@@ -304,7 +304,6 @@ pub fn build_registry() -> Vec<CommandDef> {
         CommandDef { name: ".acl", aliases: &[".profile"], description: "Manage console ACLs", args: vec![], handler: commands::acl::cmd_dot_acl, dot_command: true },
 
         // Catalog
-        CommandDef { name: ".catalog", aliases: &[], description: "Catalog management", args: vec![], handler: commands::catalog::cmd_dot_catalog, dot_command: true },
 
         // BVFS
         CommandDef { name: ".bvfs_update", aliases: &[], description: "Update BVFS cache", args: vec![arg_int("jobid", "Job ID")], handler: commands::bvfs::cmd_bvfs_update, dot_command: true },
