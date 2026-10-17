@@ -123,11 +123,14 @@ pub struct Plan {
     /// Over ExecuteCommand (gRPC, no dialog) append this word instead of
     /// answering (e.g. `yes` for GetConfirmation).
     pub grpc_suffix: Option<&'static str>,
+    /// The command only works as a console dialog (its questions have no
+    /// command-line form): over gRPC only the typed RPC can run it.
+    pub dialog: bool,
 }
 
 impl Plan {
     fn new(command: String) -> Self {
-        Self { command, yes_to: &[], answers: Vec::new(), grpc_suffix: None }
+        Self { command, yes_to: &[], answers: Vec::new(), grpc_suffix: None, dialog: false }
     }
 }
 
@@ -1094,12 +1097,13 @@ fn purge(a: &Args) -> Result<Plan, String> {
             return Err("storage, pool, allpools and drive need action".into());
         }
     }
-    Ok(Plan { command: p.join(" "), yes_to: &["Purge (yes/no)?"], answers: Vec::new(), grpc_suffix: Some("yes") })
+    Ok(Plan { command: p.join(" "), yes_to: &["Purge (yes/no)?"], answers: Vec::new(), grpc_suffix: Some("yes"), dialog: false })
 }
 
 fn delete(a: &Args) -> Result<Plan, String> {
     a.confirmed()?;
     let kind = a.choice("kind", &["volume", "pool", "jobid", "storage"])?.ok_or("kind is required")?;
+    let dialog = kind == "pool";
     let p = match kind.as_str() {
         "volume" => {
             let mut p = vec!["delete".to_string(), name_arg("volume", &req(a, "volume")?)?];
@@ -1130,6 +1134,7 @@ fn delete(a: &Args) -> Result<Plan, String> {
         yes_to: &["Are you sure you want to delete"],
         answers: Vec::new(),
         grpc_suffix: None,
+        dialog,
     })
 }
 
@@ -1231,6 +1236,13 @@ pub fn execute<R: CommandRunner + ?Sized>(runner: &mut R, plan: Result<Plan, Str
         Ok(plan) => plan,
         Err(msg) => return result(&msg, true, None),
     };
+    if plan.dialog && runner.is_grpc() {
+        return result(&format!(
+            "'{}' needs the Director's console dialog, which ExecuteCommand cannot answer, and this Director \
+             does not offer the typed RPC (production build). Connect oconsole via BNET for this tool{}.",
+            plan.command,
+            if plan.command == "sqlquery" { ", or use dot_sql" } else { "" }), true, None);
+    }
     let command = match plan.grpc_suffix {
         Some(word) if runner.is_grpc() => format!("{} {word}", plan.command),
         _ => plan.command.clone(),
@@ -1536,5 +1548,60 @@ mod tests {
         let r = execute(&mut d, plan("cancel_job", &json!({})).unwrap());
         assert_eq!(r["isError"], true);
         assert_eq!(d.commands.len(), 1, "invalid arguments never reach the Director");
+    }
+
+    /// Route order: typed RPC (gRPC) → ExecuteCommand (gRPC, UNIMPLEMENTED)
+    /// → console dialog (BNET).
+    #[derive(Clone, Copy, PartialEq)]
+    enum Mode { Typed, Unimplemented, Bnet }
+    struct Route { mode: Mode, log: Vec<String> }
+    impl CommandRunner for Route {
+        fn run(&mut self, c: &str) -> anyhow::Result<String> {
+            self.run_dialog(c, &mut |_| None)
+        }
+        fn run_dialog(&mut self, c: &str, answer: &mut dyn FnMut(&str) -> Option<String>) -> anyhow::Result<String> {
+            self.log.push(format!("line {c}"));
+            if self.mode == Mode::Bnet && c.starts_with("purge") {
+                let reply = answer("Purge (yes/no)? ").unwrap_or_default();
+                self.log.push(format!("answer {reply}"));
+            }
+            Ok("done\n".into())
+        }
+        fn is_grpc(&self) -> bool { self.mode != Mode::Bnet }
+        fn typed_call(&mut self, rpc: &str, _r: Vec<u8>) -> Option<Result<Vec<u8>, crate::mcp::TypedError>> {
+            match self.mode {
+                Mode::Bnet => None,
+                Mode::Unimplemented => { self.log.push(format!("rpc {rpc} unimplemented")); Some(Err(crate::mcp::TypedError::Unimplemented)) }
+                Mode::Typed => {
+                    self.log.push(format!("rpc {rpc}"));
+                    let (_, out) = mcp_typed::rpc_types(rpc).unwrap();
+                    Some(Ok(bareos_proto_rs::typed::json_to_message(&out, &json!({"success":true,"text":"typed","command":"purge volume=A yes"})).bytes))
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn fallback_order_typed_executecommand_bnet() {
+        let args = json!({"kind":"volume","volume":["A"],"confirm":true});
+        let expect = [
+            (Mode::Typed, vec!["rpc PurgeVolume"]),
+            (Mode::Unimplemented, vec!["rpc PurgeVolume unimplemented", "line purge volume=A yes"]),
+            (Mode::Bnet, vec!["line purge volume=A", "answer yes"]),
+        ];
+        for (mode, log) in expect {
+            let runner = Mutex::new(Route { mode, log: vec![] });
+            let r = call("purge", &args, &runner).unwrap().unwrap();
+            assert_eq!(r["isError"], false, "{r}");
+            assert_eq!(runner.lock().unwrap().log, log);
+            if mode == Mode::Typed {
+                assert_eq!(r["structuredContent"]["text"], "typed");
+            }
+        }
+        // invalid arguments reach no route at all
+        let runner = Mutex::new(Route { mode: Mode::Typed, log: vec![] });
+        let r = call("purge", &json!({"kind":"volume","volume":["A"]}), &runner).unwrap().unwrap();
+        assert_eq!(r["isError"], true);
+        assert!(runner.lock().unwrap().log.is_empty());
     }
 }

@@ -210,6 +210,7 @@ pub(super) fn plan(tool: &str, arguments: &Value) -> Option<Result<Plan, String>
                 query.push(';');
             }
             let mut plan = Plan::new("sqlquery".into());
+            plan.dialog = true;
             plan.answers = vec![("Enter SQL query", query), ("Enter SQL query", String::new())];
             Ok(plan)
         },
@@ -221,6 +222,7 @@ pub(super) fn plan(tool: &str, arguments: &Value) -> Option<Result<Plan, String>
         "run_query" => |a| {
             let number = a.int("number", 1)?.ok_or("number is required")?;
             let mut plan = Plan::new("query".into());
+            plan.dialog = true;
             plan.answers.push(("Choose a query", number.to_string()));
             for v in a.strings("parameters")?.unwrap_or_default() {
                 if v.chars().any(char::is_control) {
@@ -290,6 +292,7 @@ fn add_volumes(a: &Args) -> Result<Plan, String> {
         return Err("name must be a volume name without blanks".into());
     }
     let mut plan = Plan::new(p.join(" "));
+    plan.dialog = true;
     plan.answers.push(("number of Volumes", count.to_string()));
     plan.answers.push(("olume name", name));
     if count > 0 {

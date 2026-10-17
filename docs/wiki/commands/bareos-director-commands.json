@@ -877,6 +877,7 @@
   "mcp_build_policies": {
     "default": "mcp-production",
     "mutually_exclusive": true,
+    "decision": "C-087 (17.10.2026): full command set as typed MCP tools; stdio offers the write and restore tools in every build, Streamable HTTP is read-only unless mcp-development + --mcp-allow-write",
     "production": {
       "feature": "mcp-production",
       "tools": [
@@ -887,7 +888,10 @@
         "ovfs_ls",
         "ovfs_versions"
       ],
-      "write_handler_compiled": false
+      "typed_tools": "all typed read, write and restore_tree_* tools (docs/wiki/mcp.md)",
+      "write_handler_compiled": true,
+      "stdio": "read and write (--mcp-read-only: read only)",
+      "http": "read only"
     },
     "development": {
       "feature": "mcp-development",
@@ -900,7 +904,10 @@
         "ovfs_versions",
         "execute"
       ],
+      "typed_tools": "all typed read, write and restore_tree_* tools (docs/wiki/mcp.md)",
       "write_handler_compiled": true,
+      "stdio": "read and write, execute (--mcp-read-only: read only)",
+      "http": "read only; read and write with --mcp-allow-write",
       "runtime_opt_in": "--mcp-allow-write"
     }
   },

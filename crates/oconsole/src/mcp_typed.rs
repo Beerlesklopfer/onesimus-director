@@ -420,6 +420,9 @@ pub fn request(tool: &str, arguments: &Value) -> Option<(&'static str, Value)> {
         }
         "delete" => {
             let rpc = match r.str("kind")? { "volume" => "DeleteVolume", "pool" => "DeletePool", "jobid" => "DeleteJob", _ => "DeleteStorage" };
+            // DeleteStorage sends `delete storage storage=<n>`, which asks for the
+            // name again: console line (see configure_update).
+            let r = if rpc == "DeleteStorage" { r.set("__console_line", json!(true)) } else { r };
             r.list("jobids", "jobid").copy(&["volume", "pool", "storage", "confirm"]).done(rpc)
         }
         "dot_sql" => r.copy(&["query"]).done("DotSql"),
@@ -447,6 +450,13 @@ pub fn request(tool: &str, arguments: &Value) -> Option<(&'static str, Value)> {
             if tool == "configure_delete" {
                 r = r.set("yes", json!(true));
             }
+            if tool != "configure_add" {
+                // The Director's ConfigureUpdate/ConfigureDelete build
+                // `configure update|delete <type> name=<n>`, which its own
+                // configure command rejects (it wants <type>=<name>): use the
+                // console line until that is fixed.
+                r = r.set("__console_line", json!(true));
+            }
             if let Some(Value::Object(directives)) = r.get("directives") {
                 let mut map = Map::new();
                 for (key, value) in directives {
@@ -472,7 +482,12 @@ pub fn request(tool: &str, arguments: &Value) -> Option<(&'static str, Value)> {
                 t => r.set(t, json!(true)).done("SetDebug"),
             }
         }
-        "setbandwidth" => r.copy(&["limit", "client", "storage", "jobid", "job", "ujobid", "state"]).keep_unmapped(&["all"]).done("SetBandwidth"),
+        "setbandwidth" => {
+            // proto3 cannot send limit=0 (it is the absent default): console line
+            let zero = r.get("limit").and_then(Value::as_i64) == Some(0);
+            let r = if zero { r.set("__limit", json!(0)) } else { r };
+            r.copy(&["limit", "client", "storage", "jobid", "job", "ujobid", "state"]).keep_unmapped(&["all"]).done("SetBandwidth")
+        }
         "setdevice" => r.copy(&["storage", "device"]).yes_no("autoselect").done("SetDevice"),
         "session_option" => {
             let rpc = match r.str("option")? { "autodisplay" => "Autodisplay", "automount" => "Automount", _ => "Trace" };

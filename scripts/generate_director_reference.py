@@ -254,13 +254,7 @@ def main():
                 ROOT / 'crates/oconsole/Cargo.toml',
             })
         ],
-        'mcp_build_policies': {
-            'default': 'mcp-production',
-            'mutually_exclusive': True,
-            'production': {'feature': 'mcp-production', 'tools': ['query', 'ovfs_status', 'ovfs_latest', 'ovfs_tree', 'ovfs_ls', 'ovfs_versions'], 'write_handler_compiled': False},
-            'development': {'feature': 'mcp-development', 'tools': ['query', 'ovfs_status', 'ovfs_latest', 'ovfs_tree', 'ovfs_ls', 'ovfs_versions', 'execute'],
-                            'write_handler_compiled': True, 'runtime_opt_in': '--mcp-allow-write'},
-        },
+        'mcp_build_policies': {'default': 'mcp-production', 'mutually_exclusive': True, 'decision': 'C-087 (17.10.2026): full command set as typed MCP tools; stdio offers the write and restore tools in every build, Streamable HTTP is read-only unless mcp-development + --mcp-allow-write', 'production': {'feature': 'mcp-production', 'tools': ['query', 'ovfs_status', 'ovfs_latest', 'ovfs_tree', 'ovfs_ls', 'ovfs_versions'], 'typed_tools': 'all typed read, write and restore_tree_* tools (docs/wiki/mcp.md)', 'write_handler_compiled': True, 'stdio': 'read and write (--mcp-read-only: read only)', 'http': 'read only'}, 'development': {'feature': 'mcp-development', 'tools': ['query', 'ovfs_status', 'ovfs_latest', 'ovfs_tree', 'ovfs_ls', 'ovfs_versions', 'execute'], 'typed_tools': 'all typed read, write and restore_tree_* tools (docs/wiki/mcp.md)', 'write_handler_compiled': True, 'stdio': 'read and write, execute (--mcp-read-only: read only)', 'http': 'read only; read and write with --mcp-allow-write', 'runtime_opt_in': '--mcp-allow-write'}},
         'scope': 'All top-level commands[] entries in ua_cmds.cc and restore file-selection commands[] entries in ua_tree.cc. Not FD/SD wire commands, bconsole @commands or every internal keyword/prompt.',
         'llm_instructions': [
             'Prefer full command names; Onesimus now resolves Bareos prefixes in the original table order, while local extensions remain exact matches.',

@@ -2,14 +2,32 @@
 
 `oconsole --mcp` stellt den Director über das [Model Context Protocol](https://modelcontextprotocol.io) bereit (JSON-RPC 2.0; stdio oder mit `--mcp-http` Streamable HTTP mit Bearer-Token). Die Verbindung zum Director (BNET oder `--grpc`) und die Anmeldung sind dieselben wie in der interaktiven Konsole.
 
-## Builds und Rechte
+## Transport und Rechte
 
-| Build | Tools |
-|---|---|
-| Produktion (Vorgabe, Feature `mcp-production`) | `query` (Read-only-Allowlist), `ovfs_*`, alle typisierten Lese-Tools dieser Seite |
-| Entwicklung (`--no-default-features --features mcp-development`) | dazu nur mit `--mcp-allow-write`: `execute` und die Schreib- und Restore-Tools (siehe Abschnitt am Ende) |
+Entscheidung [C-087](../COMPATIBILITY-LOG.md) (17.10.2026, S-36): Das lokale MCP über stdio bekommt den vollen Befehlssatz, auch im Produktions-Build; MCP über HTTP bleibt lesend.
 
-Im Produktions-Build sind die Schreib-Tools nicht einkompiliert; ein Aufruf liefert `unknown tool`.
+| Build | `--mcp` (stdio) | `--mcp --mcp-read-only` | `--mcp --mcp-http …` | `--mcp --mcp-http … --mcp-allow-write` |
+|---|---|---|---|---|
+| Produktion (Vorgabe, Feature `mcp-production`, Pakete) | Lese-, Schreib- und Restore-Tools (122) | nur Lese-Tools (65) | nur Lese-Tools (65) | Option nicht vorhanden (Aufruf wird abgelehnt) |
+| Entwicklung (`--no-default-features --features mcp-development`) | Lese-, Schreib-, Restore-Tools und `execute` (123) | nur Lese-Tools | nur Lese-Tools | Lese-, Schreib-, Restore-Tools und `execute` |
+
+- **stdio** gilt als lokal (der Prozess läuft mit den Rechten und der Konsolen-Anmeldung des Aufrufers): die Schreib- und Restore-Tools sind ohne weitere Option da. `--mcp-read-only` schaltet sie ab. `--mcp-allow-write` bleibt die Option des Entwicklungs-Builds für HTTP; für stdio ist sie die Vorgabe.
+- **HTTP** (`--mcp-http`, Bearer-Token) ist im Produktions-Build immer lesend: Der Server streicht die Schreibrechte für jede HTTP-Sitzung, auch wenn intern etwas anderes angefordert würde. Schreib-Tools über HTTP gibt es nur im Entwicklungs-Build mit `--mcp-allow-write`.
+- **`execute`** (beliebige Zeile) bleibt ein Werkzeug des Entwicklungs-Builds; im Produktions-Build ist es nicht einkompiliert.
+- Ohne Schreibrechte nennt `tools/list` kein Schreib-Tool, und ein Aufruf endet mit dem JSON-RPC-Fehler `-32602 unknown tool: <name>`, ohne dass ein Befehl an den Director geht.
+- Zerstörende Tools verlangen weiter `confirm: true` (siehe unten), unabhängig vom Transport.
+
+### Weg zum Director
+
+Jedes Tool prüft zuerst seine Parameter und baut daraus die Konsolenzeile. Dann:
+
+1. **gRPC** (`--grpc` oder `Grpc = yes` in der Konfiguration): Das Tool ruft die typisierte RPC der [`DirectorApi`](grpc-api.md) auf (Request aus den Parametern, Antwort als typisierte Message). Das Ergebnis ist die Antwort als JSON mit den Feldnamen der Proto-Datei, einmal als Text und als `structuredContent`. Bei `ActionResponse` (Schreib-RPCs) ist der Text die Ausgabe des Directors mit der gesendeten Zeile davor, `isError` folgt `success`.
+2. **gRPC, RPC nicht verfügbar**: Antwortet der Director mit `UNIMPLEMENTED` (Produktions-Director: alle Schreib-, Sitzungs- und Restore-Baum-RPCs, S-35) oder hat ein Parameter kein Feld im Request (z. B. `order` bei `list_jobs`, `state` bei `dot_jobs`, `limit=0` bei `setbandwidth`), läuft die Konsolenzeile über `ExecuteCommand` derselben gRPC-Sitzung. oconsole merkt sich `UNIMPLEMENTED` je RPC und fragt nicht erneut. Rückfragen kann `ExecuteCommand` nicht beantworten: `purge` hängt deshalb `yes` an (GetConfirmation), und Tools, die nur als Dialog funktionieren (`add_volumes`, `sqlquery`, `run_query`, `delete` eines Pools, `restore_tree_*`), melden über diesen Weg einen Fehler mit Hinweis auf BNET bzw. `dot_sql`.
+3. **BNET** (z. B. zum Original-bareos-dir): die Konsolenzeile wie bisher, Lese-Tools unter `.api json compact=yes`, Schreib-Tools im Textmodus mit den Antworten auf die Rückfragen, die das Tool nennt.
+
+Über gRPC sind die Ergebnisse der Lese-Tools also typisierte Messages (z. B. `ListJobsResponse` mit `jobs[].jobstatus` als Enum `JOB_STATUS_TERMINATED`), über BNET das JSON-RPC-Objekt der Director-JSON-API. `"format": "text"` erzwingt bei Lese-Tools die Konsolenzeile.
+
+Drei RPCs des Entwicklungs-Directors bauen derzeit eine Zeile, die sein eigener Befehl nicht annimmt (`ConfigureUpdate`/`ConfigureDelete`: `configure update|delete <typ> name=…` statt `<typ>=…`; `DeleteStorage`: `delete storage storage=…`). `configure_update`, `configure_delete` und `delete` mit `kind: storage` nehmen deshalb immer die Konsolenzeile.
 
 ## Typisierte Lese-Tools
 
@@ -58,6 +76,25 @@ Fehler in den Parametern kommen als Tool-Ergebnis mit `isError: true` zurück, e
 | [`dot_msgs`](#dot_msgs) | `.msgs` | JSON (oder Text) |
 | [`dot_defaults`](#dot_defaults) | `.defaults job=\|client=\|storage=\|pool=` | JSON (oder Text) |
 | [`dot_jobstatus`](#dot_jobstatus) | `.jobstatus[=code]` | JSON (oder Text) |
+| `list_basefiles` | `list basefiles jobid=\|ujobid=` | JSON (oder Text) |
+| `list_jobstatistics` | `list jobstatistics jobid=` | JSON (oder Text) |
+| `list_log` | `list log [client=] [reverse] [limit= offset=]` | JSON (oder Text) |
+| `status_all` | `status all` | JSON (oder Text) |
+| `status_job` | `status job=` | Text |
+| `dot_status` | `.status dir <wort>` / `.status client=… <wort>` / `.status storage=… <wort>` | JSON (dir) bzw. Text |
+| `dot_messages` | `.messages` | JSON (oder Text) |
+| `whoami`, `memory`, `dot_noop` | `whoami`, `memory`, `.` | JSON (oder Text) |
+| `help`, `dot_help` | `help [befehl]`, `.help [all] [item=] [full]` | JSON (oder Text) |
+| `resolve` | `resolve [client=\|storage=] <host>` | Text |
+| `var_expand` | `var <text>` | Text |
+| `estimate` | `estimate job= [client= fileset= level= accurate= listing]` | Text |
+| `dot_list` | `.catalogs`, `.consoles`, `.users`, `.jobdefs`, `.profiles`, `.locations`, `.media`, `.mediatypes`, `.volstatus`, `.actiononpurge` (Parameter `kind`) | JSON (oder Text) |
+| `dot_authorized` | `.authorized job=\|client=\|…\|cmd=` | JSON (oder Text) |
+| `sql_meta` | `.sqltables`, `.sqlcount [table=]`, `.sqlschema [table=]` | JSON (oder Text) |
+| `acl_list`, `profile_list` | `.acl list [console=]`, `.profile list` | JSON (oder Text) |
+| `bvfs_get_jobids`, `bvfs_lsdirs`, `bvfs_lsfiles`, `bvfs_versions` | `.bvfs_get_jobids`, `.bvfs_lsdirs`, `.bvfs_lsfiles`, `.bvfs_versions` | JSON (oder Text) |
+
+`list_volumes` kennt zusätzlich `volumeid`, `mediaid` und `media: true` (Alias `list media` / `media=`), `list_pools` zusätzlich `poolid`.
 
 ### Beispielsitzung: Anmeldung und Toolliste
 
@@ -1715,15 +1752,15 @@ Werte, die eine zweite Anweisung einschleusen könnten, erreichen den Director n
 - `query`: beliebiger Read-only-Befehl als Zeile (Allowlist: `status`, `list`, `llist`, `show`, `version`, `help`, `time`, `messages`, `estimate` und lesende Punktbefehle).
 - `ovfs_status`, `ovfs_latest`, `ovfs_tree`, `ovfs_ls`, `ovfs_versions`: Wiederherstellungsbäume durchsuchen (siehe [.ovfs_tree](commands/dot-ovfs-tree.md)).
 
-## Entwicklungs-Build: Schreib- und Restore-Tools
+## Schreib- und Restore-Tools
 
-Diese Tools sind nur im Entwicklungs-Build einkompiliert (`cargo build -p oconsole --no-default-features --features mcp-development`, Modul `oconsole/src/mcp_write.rs`) und erscheinen dort nur, wenn oconsole mit `--mcp --mcp-allow-write` startet. Im Produktions-Build fehlen sie im Programm: `tools/list` nennt sie nicht, ein `tools/call` endet mit dem JSON-RPC-Fehler `-32602 unknown tool: <name>`, und es geht kein Befehl an den Director. Im Entwicklungs-Build ohne `--mcp-allow-write` gilt dasselbe.
+Module `oconsole/src/mcp_write.rs`, `mcp_write/admin.rs` (weitere Befehle) und `mcp_tree.rs` (interaktive Wiederherstellung). Sie stehen bereit, wenn der Transport Schreibrechte hat (siehe [Transport und Rechte](#transport-und-rechte)): über stdio in jedem Build, über HTTP nur im Entwicklungs-Build mit `--mcp-allow-write`.
 
 ### Gemeinsame Regeln
 
 - **Eine Zeile pro Aufruf.** Jedes Tool baut aus den Parametern genau eine Konsolenzeile und hängt `yes` an, wo der Befehl das Schlüsselwort kennt (`run`, `rerun`, `cancel`, `restore`, `label`, `relabel`, `prune`, `delete volume`, `truncate`). Es läuft im normalen Konsolenmodus (nicht unter der JSON-API), die Ausgabe ist der Text des Directors. Vor der Ausgabe steht die gesendete Zeile mit `> `.
 - **Prüfung vor dem Senden.** Namen von Ressourcen und Volumes: Buchstaben, Ziffern, `: . - _ /` und Leerzeichen im Inneren, höchstens 127 Zeichen, kein `/` am Anfang. Pfade, reguläre Ausdrücke und Kommentare werden in Anführungszeichen gesetzt (`\` und `"` maskiert), Steuerzeichen sind verboten. Zeitpunkte nur als `JJJJ-MM-TT HH:MM[:SS]`, JobIds als Ganzzahlen ≥ 1. Unbekannte Parameter, fehlende Pflichtangaben oder widersprüchliche Kombinationen liefern ein Tool-Ergebnis mit `isError: true`. In diesem Fall erreicht kein Befehl den Director.
-- **Rückfragen des Directors.** Ein Tool beantwortet nur die Frage, die zu seinem Zweck gehört, mit `yes`: `Purge (yes/no)?` bei `purge` und `Are you sure you want to delete …` bei `delete`. Jede andere Frage (Auswahlliste bei einem unbekannten Namen, fehlender Restore-Job …) bricht oconsole mit `.` ab. Das Ergebnis ist dann `isError: true` mit dem Hinweis, welcher Parameter fehlt. Die Sitzung bleibt in jedem Fall bedienbar. Über `--grpc` gibt es keine Rückfragen; `purge` und `delete pool` brauchen deshalb BNET.
+- **Rückfragen des Directors.** Ein Tool beantwortet nur die Fragen, die zu seinem Zweck gehören: `Purge (yes/no)?` bei `purge` und `Are you sure you want to delete …` bei `delete` mit `yes`; `add_volumes`, `sqlquery` und `run_query` beantworten die Fragen ihres Dialogs aus ihren Parametern (Anzahl/Name/Startnummer/Slot; SQL-Anweisung und Leerzeile; Nummer der Abfrage und ihre Parameter). Jede andere Frage (Auswahlliste bei einem unbekannten Namen, fehlender Restore-Job …) bricht oconsole mit `.` ab. Das Ergebnis ist dann `isError: true` mit dem Hinweis, welcher Parameter fehlt. Die Sitzung bleibt in jedem Fall bedienbar. Über gRPC beantwortet die typisierte RPC des Entwicklungs-Directors diese Fragen selbst; über `ExecuteCommand` (Produktions-Director) gibt es keine Rückfragen (siehe [Weg zum Director](#weg-zum-director)).
 - **Bestätigung.** `relabel_volume`, `prune`, `purge`, `delete` und `truncate` verlangen den Parameter `confirm: true`. Ohne ihn lautet die Antwort `<tool> is destructive: ask the user, then call it again with confirm=true`, und nichts wird ausgeführt. Diese Tools sowie `cancel_job` und `restore` tragen `destructiveHint: true`.
 - **Gestartete Jobs.** Bei `run_job`, `rerun_job` und `restore` enthält das Ergebnis zusätzlich `structuredContent: {"jobids": [n, …]}` aus den Zeilen `Job queued. JobId=n`.
 - **Lange Befehle.** `wait_job` und große Restores belegen die Director-Sitzung, bis der Director antwortet. Läuft ein Befehl länger als das 30-Sekunden-Lesezeitlimit des Sockets, wartet oconsole einfach weiter.
@@ -1754,7 +1791,25 @@ Diese Tools sind nur im Entwicklungs-Build einkompiliert (`cargo build -p oconso
 | `reload` | `reload` | idempotent | – |
 | `setdebug` | `setdebug level= [trace=0\|1 timestamp=0\|1 hangup=] dir\|client=…\|storage=…\|all` | idempotent | – |
 | `setbandwidth` | `setbandwidth limit= client=\|storage=\|jobid=\|job=\|ujobid=\|all\|state=` | idempotent | – |
-| `execute` | beliebige einzelne Zeile (nicht `quit`, `.api`, `@…`) | destruktiv | – |
+| `add_volumes` | `add pool= storage=` + Dialog (Anzahl, Name, Startnummer, Slot, InChanger) | schreibend | – |
+| `create_pool` | `create pool=` | idempotent | – |
+| `export_volumes`, `import_volumes`, `move_volumes` | `export\|import storage= [srcslots= dstslots= volume= scan]`, `move storage= srcslots= dstslots=` | schreibend | – |
+| `update_slots` | `update slots storage= [scan] [drive=]` | idempotent | – |
+| `update_job` | `update jobid= [jobname= starttime= client= filesetid= jobtype=]` | idempotent | – |
+| `update_stats` | `update stats [days=]` | idempotent | – |
+| `sqlquery` | `sqlquery` + Anweisung im Dialog | destruktiv (ungeprüftes SQL) | – |
+| `dot_sql` | `.sql query="…" [catalog=]` | destruktiv (ungeprüftes SQL) | – |
+| `run_query` | `query` + Nummer und Parameter im Dialog | idempotent | – |
+| `bvfs_update`, `bvfs_restore`, `bvfs_cleanup`, `bvfs_clear_cache` | `.bvfs_update [jobid=]`, `.bvfs_restore path= jobid= [fileid= dirid= hardlink=]`, `.bvfs_cleanup path=`, `.bvfs_clear_cache yes` | schreibend | – |
+| `acl_modify` | `.acl set\|delete console= <typ>acl=…`, `.acl clear console=`, `.acl copy from= to=` | destruktiv | – |
+| `profile_modify` | `.profile create\|set\|delete\|assign\|unassign …` | destruktiv | – |
+| `configure_update` | `configure update <typ>=<name> <direktive>="…" …` | idempotent | – |
+| `configure_delete` | `configure delete <typ>=<name> yes` | destruktiv | ja |
+| `use_catalog` | `use catalog=` | idempotent | – |
+| `setdevice` | `setdevice storage= device= [autoselect=yes\|no]` | idempotent | – |
+| `session_option` | `autodisplay\|automount\|trace on\|off` | idempotent | – |
+| `restore_tree_*` | interaktive Dateiauswahl, siehe unten | – | – |
+| `execute` (nur Entwicklungs-Build) | beliebige einzelne Zeile (nicht `quit`, `.api`, `@…`) | destruktiv | – |
 
 Die Befehle selbst beschreiben [run](commands/run.md), [rerun](commands/rerun.md), [cancel](commands/cancel.md), [wait](commands/wait.md), [restore](commands/restore.md), [label](commands/label.md), [relabel](commands/relabel.md), [mount](commands/mount.md), [unmount](commands/unmount.md), [release](commands/release.md), [update](commands/update.md), [prune](commands/prune.md), [purge](commands/purge.md), [delete](commands/delete.md), [truncate](commands/truncate.md), [enable](commands/enable.md), [disable](commands/disable.md), [configure](commands/configure.md), [reload](commands/reload.md), [setdebug](commands/setdebug.md) und [setbandwidth](commands/setbandwidth.md).
 
@@ -1775,6 +1830,32 @@ Die Auswahl der Jobs und Dateien steht vollständig in einer Zeile; der Dateibau
 | reguläre Ausdrücke | `fileregex: "\\.conf$"` | `… fileregex="\\.conf$" done` |
 
 Genau eine der vier Dateiauswahlen ist erlaubt. Für das Ziel gilt genau eine der Varianten `where`, `regexwhere` oder `strip_prefix`/`add_prefix`/`add_suffix`. Dazu kommen `replace` (`always`, `ifnewer`, `ifolder`, `never`), `restoreclient`, `restorejob` (nötig, wenn mehrere Restore-Jobs definiert sind; sonst fragt der Director, und das Tool bricht ab), `storage`, `pool` und `comment`. Pfade findet man vorher mit `ovfs_latest`, `ovfs_tree`, `ovfs_ls` und `ovfs_versions`.
+
+### Interaktive Wiederherstellung (`restore_tree_*`)
+
+Die 26 Befehle der Dateiauswahl (`ua_tree.cc`) als Tools. `restore_tree_start` nimmt dieselben Parameter wie `restore` ohne Dateiauswahl (`client`, `jobids` oder `fileset` für den neuesten Stand bzw. `before`, Ziel- und Ersetzungsoptionen) und liefert eine `session_id`, die Zahl der Dateien im Baum und das Arbeitsverzeichnis. Alle weiteren Tools nehmen diese `session_id`.
+
+| Tool | Befehle der Dateiauswahl | Ergebnis |
+|---|---|---|
+| `restore_tree_start` | `restore …` bis zur Dateiauswahl | `session_id`, `jobids`, `files`, `cwd`, `text` |
+| `restore_tree_cd` (`path`) | `cd` | `cwd` |
+| `restore_tree_pwd` | `pwd`, `.pwd` | `cwd` |
+| `restore_tree_ls` (`pattern`, `mode`: `all`/`dirs`/`marked`) | `ls`, `dir`, `.ls`, `.dir` / `.lsdir` / `lsmark`, `.lsmark` | `cwd`, `entries[]` (`name`, `is_dir`, `marked`) |
+| `restore_tree_mark` (`pattern`, `dirs_only`) | `mark`, `add` / `markdir` | `marked` |
+| `restore_tree_unmark` (`pattern`, `dirs_only`) | `unmark`, `delete` / `unmarkdir` | `marked` |
+| `restore_tree_count` | `count` | `total`, `marked` |
+| `restore_tree_find` (`pattern`) | `find` | `entries[]` |
+| `restore_tree_estimate` | `estimate` | `total`, `marked`, `bytes` |
+| `restore_tree_help` | `help`, `.help`, `?` | `text` |
+| `restore_tree_done` | `done`, `exit` (beantwortet „OK to run?“ mit yes) | `jobids` des Restore-Jobs (`destructiveHint`) |
+| `restore_tree_abort` | `abort`, `quit` | kein Job |
+
+- **gRPC**: `StartRestoreSession` und `RestoreTree*` der DirectorApi; die Sitzung gehört zur Anmeldung und endet nach 10 Minuten ohne Aufruf. Ein Produktions-Director bietet diese RPCs nicht (`UNIMPLEMENTED`), und `ExecuteCommand` hat keinen Dialog: Die Tools melden dann einen Fehler und verweisen auf das einzeilige `restore` oder BNET.
+- **BNET**: der Dialog der Konsole selbst. Solange die Auswahl offen ist, steht die Verbindung im Dialog; der Server lehnt dann jedes andere Tool mit einem Hinweis ab, bis `restore_tree_done` oder `restore_tree_abort` kommt.
+
+### Abdeckung
+
+`crates/oconsole/src/mcp_coverage.rs` ordnet jeder RPC der DirectorApi ein Tool mit Beispielparametern zu und prüft gegen [grpc-api.md](grpc-api.md#abdeckung-befehl--rpc) und [`commands/bareos-director-commands.json`](commands/bareos-director-commands.json), dass alle 88 Befehle mit ihren Unterbefehlen, die Onesimus-Erweiterungen und die 26 Befehle der Dateiauswahl ein Tool haben, dass jedes Tool aus den Beispielparametern seine Zeile baut und auf genau diese RPC abbildet, ohne einen Parameter zu verlieren. Ausgenommen sind nur Sitzungsbefehle, die die Sitzung des MCP-Servers selbst beenden oder umschalten würden: `quit`, `exit`, `.quit`, `.api`, `.grpc`, `gui` und `setip` (die DirectorApi beantwortet die letzten vier ebenfalls mit FAILED_PRECONDITION). Die Zuordnung Befehl → Tool folgt der RPC-Tabelle in grpc-api.md; Tools, die mehrere RPCs abdecken, wählen sie über ihre Parameter (`show` `resource`, `prune`/`purge`/`delete` `kind`, `dot_status` `target`, `dot_list` `kind`, `sql_meta` `kind`, `acl_modify`/`profile_modify` `action`, `session_option` `option`, `restore_tree_ls` `mode`, `restore_tree_mark`/`_unmark` `dirs_only`).
 
 ### Beispiele
 
@@ -1869,6 +1950,14 @@ Selection aborted, nothing done.
 ```
 
 ### Tests
+
+- S-36 (C-087): Einheitentests für die Routen mit Fake-Runnern (typisierte RPC → `ExecuteCommand` bei `UNIMPLEMENTED` → BNET-Dialog, Purge mit `yes` über gRPC), typisierte Requests und Ergebnisse, Restore-Baum über BNET-Dialog und gRPC, Freigabe-Matrix (Produktion stdio: Schreib-Tools da, `execute` nicht; HTTP in Produktion: keine Schreib-Tools, auch nicht auf Anfrage; Entwicklung HTTP mit `--mcp-allow-write`: vorhanden) und der Abdeckungstest. Integrationslauf mit `tests/mcp/mcp_rig.py` (privater `bareos-fd`/`bareos-sd`, eigener Wegwerf-Katalog aus der Bareos-DDL, Restore-Ziel im Scratchpad), jedes der 122 bzw. 123 Tools mindestens einmal über BNET und über gRPC, je 170 Aufrufe: Produktions-Director (Schreib-Tools über `ExecuteCommand`, Lese-Tools typisiert) mit Produktions-oconsole über stdio, und `grpc-development`-Director (alle Tools typisiert außer `add_volumes`, `list_nextvolume` und den Konsolenzeilen oben) mit Produktions- und Entwicklungs-oconsole. Backup, Restore in einer Zeile und interaktiver Restore (eine von drei Dateien markiert) mit Prüfung der zurückgeschriebenen Dateien; ohne unerwartete Fehler.
+
+  ```sh
+  cargo build -p onesimus-dird && cargo build -p oconsole
+  python3 tests/mcp/mcp_rig.py --director target/debug/onesimus-dird --oconsole target/debug/oconsole \
+      --base /tmp/m36 --port 39250 --restore-dir /tmp/m36-restored --production --report /tmp/m36.json
+  ```
 
 - Einheitentests (`cargo test -p oconsole` und `cargo test -p oconsole --no-default-features --features mcp-development`): Schemas und Annotationen, erzeugte Zeilen aller Tools, abgelehnte Eingaben, `confirm`, beantwortete und abgebrochene Rückfragen, Weiterlesen nach dem Socket-Zeitlimit. Dazu die Freigabe: Im Produktions-Build und im Entwicklungs-Build ohne `--mcp-allow-write` ist keines der Schreib-Tools gelistet, und jeder Aufruf endet mit `unknown tool`, ohne den Director zu erreichen. Die Snapshots `crates/oconsole/testdata/tools_list_*.json` und `tool_calls_*.json` halten `tools/list` und die Ergebnisse fester Aufrufe je Build fest.
 - Integrationslauf: onesimus-dird mit privatem `bareos-fd` und `bareos-sd` (eigene Ports, Storage-Verzeichnis im Scratchpad) und einer Wegwerfkopie des Katalogs, oconsole `--mcp` über stdio mit einem Skript. Produktions-Build: Keines der 23 Schreib-Tools und `execute` ist gelistet, alle Aufrufe enden mit `unknown tool`, und die Binärdatei enthält die Toolnamen nicht. Entwicklungs-Build mit `--mcp-allow-write`: Jedes Tool wurde mindestens einmal aufgerufen (62 Prüfungen). Dazu gehören ein Backup, vier Restores ins Scratchpad (`files`, `all` mit `strip_prefix`/`add_prefix`, `directories` mit `regexwhere`, `before` mit `fileregex`), deren Dateien danach geprüft wurden, sowie label, mount, unmount und release auf einem File-Gerät. Außerdem: update volume/pool, Abbruch eines auf 2030 eingeplanten Jobs, enable/disable für Job, Client und Schedule, setdebug, setbandwidth, `configure add` und `export`, reload, rerun, prune, purge (mit beantworteter Rückfrage), relabel, truncate und delete (jobid, volume, pool).

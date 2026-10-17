@@ -254,19 +254,34 @@
           "required": [
             "feature",
             "tools",
-            "write_handler_compiled"
+            "write_handler_compiled",
+            "stdio",
+            "http"
           ],
           "properties": {
             "feature": {
               "const": "mcp-production"
             },
             "tools": {
-              "const": [
-                "query"
-              ]
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "typed_tools": {
+              "type": "string"
             },
             "write_handler_compiled": {
-              "const": false
+              "type": "boolean"
+            },
+            "stdio": {
+              "type": "string"
+            },
+            "http": {
+              "type": "string"
+            },
+            "runtime_opt_in": {
+              "type": "string"
             }
           },
           "additionalProperties": false
@@ -277,26 +292,39 @@
             "feature",
             "tools",
             "write_handler_compiled",
-            "runtime_opt_in"
+            "stdio",
+            "http"
           ],
           "properties": {
             "feature": {
               "const": "mcp-development"
             },
             "tools": {
-              "const": [
-                "query",
-                "execute"
-              ]
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "typed_tools": {
+              "type": "string"
             },
             "write_handler_compiled": {
-              "const": true
+              "type": "boolean"
+            },
+            "stdio": {
+              "type": "string"
+            },
+            "http": {
+              "type": "string"
             },
             "runtime_opt_in": {
-              "const": "--mcp-allow-write"
+              "type": "string"
             }
           },
           "additionalProperties": false
+        },
+        "decision": {
+          "type": "string"
         }
       },
       "additionalProperties": false
