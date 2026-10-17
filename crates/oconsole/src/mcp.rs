@@ -24,6 +24,15 @@ use serde_json::{Value, json};
 /// Runs one command line against the Director and returns its text output.
 pub trait CommandRunner: Send + 'static {
     fn run(&mut self, command: &str) -> anyhow::Result<String>;
+
+    /// Runs one command under the Director's JSON API (`.api json compact=yes`,
+    /// then `.api 0` again, so the session stays in plain console mode).
+    fn run_json(&mut self, command: &str) -> anyhow::Result<String> {
+        self.run(".api json compact=yes")?;
+        let out = self.run(command);
+        self.run(".api 0")?;
+        out
+    }
 }
 
 pub struct McpServer<R: CommandRunner> {
@@ -187,6 +196,8 @@ impl<R: CommandRunner> McpServer<R> {
                  Commands are bconsole command lines, e.g. 'status dir', 'list jobs', \
                  'list volumes', 'show client=NAME', 'llist jobid=42'. \
                  Use 'help' or '.help all' to discover commands. \
+                 Prefer the typed read-only tools (list_*, show, status_*, dot_*, version, time, messages); \
+                 they return the Director's JSON. \
                  Browse backup contents with the ovfs_* tools (ovfs_latest, ovfs_tree, ovfs_ls, ovfs_versions).",
                 self.director_name
             ),
@@ -212,6 +223,7 @@ impl<R: CommandRunner> McpServer<R> {
             "annotations": { "readOnlyHint": true, "openWorldHint": false }
         })];
         tools.extend(ovfs_tools());
+        tools.extend(crate::mcp_read::tools());
         #[cfg(feature = "mcp-development")]
         if self.write_enabled() {
             tools.push(json!({
@@ -235,6 +247,19 @@ impl<R: CommandRunner> McpServer<R> {
 
     fn tools_call(&self, params: &Value) -> Result<Value, (i64, String)> {
         let name = params.get("name").and_then(Value::as_str).unwrap_or("");
+        {
+            // Typed read-only tools (mcp_read.rs), in every build
+            let arguments = params.get("arguments").cloned().unwrap_or_else(|| json!({}));
+            if let Some(built) = crate::mcp_read::command(name, &arguments) {
+                return match built {
+                    Ok(command) => {
+                        let mut runner = self.runner.lock().map_err(|_| (-32603, "Director runner unavailable".to_string()))?;
+                        Ok(crate::mcp_read::run(&mut *runner, &command))
+                    }
+                    Err(msg) => Ok(tool_result(&msg, true)),
+                };
+            }
+        }
         if name.starts_with("ovfs_") {
             let arguments = params.get("arguments").cloned().unwrap_or_else(|| json!({}));
             let command = match ovfs_command(name, &arguments) {
@@ -628,8 +653,11 @@ mod tests {
             .iter()
             .map(|t| t["name"].clone())
             .collect();
-        assert_eq!(names, vec![json!("query"), json!("ovfs_status"), json!("ovfs_latest"),
+        assert_eq!(names[..6], [json!("query"), json!("ovfs_status"), json!("ovfs_latest"),
             json!("ovfs_tree"), json!("ovfs_ls"), json!("ovfs_versions")]);
+        // then the typed read-only tools (mcp_read.rs)
+        assert_eq!(names.len(), 6 + crate::mcp_read::tools().len());
+        assert!(names.contains(&json!("list_jobs")) && names.contains(&json!("dot_jobstatus")));
         for tool in r["result"]["tools"].as_array().unwrap() {
             assert_eq!(tool["annotations"]["readOnlyHint"], true, "{}", tool["name"]);
         }
@@ -770,7 +798,12 @@ mod tests {
     #[test]
     fn development_lists_execute_only_after_runtime_opt_in() {
         let srv = McpServer::new(Echo(vec![]), true, "dir".into());
-        assert_eq!(srv.tools_list()["tools"].as_array().unwrap().len(), 7);
+        let tools = srv.tools_list();
+        let writing: Vec<_> = tools["tools"].as_array().unwrap().iter()
+            .filter(|t| t["annotations"]["readOnlyHint"] != true).map(|t| t["name"].clone()).collect();
+        assert!(writing.contains(&json!("execute")));
+        let without = McpServer::new(Echo(vec![]), false, "dir".into()).tools_list();
+        assert!(without["tools"].as_array().unwrap().iter().all(|t| t["annotations"]["readOnlyHint"] == true));
     }
 
     #[tokio::test]
@@ -827,7 +860,8 @@ mod tests {
                 serde_json::from_str(&lines.next_line().await.unwrap().unwrap()).unwrap();
             assert_eq!(reply["id"], id);
             match id {
-                2 => assert_eq!(reply["result"]["tools"].as_array().unwrap().len(), 6), // query + 5 read-only OVFS tools
+                // query + 5 read-only OVFS tools + typed read-only tools
+                2 => assert_eq!(reply["result"]["tools"].as_array().unwrap().len(), 6 + crate::mcp_read::tools().len()),
                 3 => assert_eq!(reply["result"]["content"][0]["text"], "ran list jobs\n"),
                 4 => assert!(reply["error"].is_object()),
                 _ => unreachable!(),

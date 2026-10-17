@@ -161,7 +161,8 @@ The MCP server uses the official Rust SDK `rmcp` (requires Rust 1.88 or newer).
 # stored in ~/.config/oconsole/known_directors)
 oconsole --grpc -a dir.example.org -n admin -w secret
 
-# MCP server on stdio for AI assistants (read-only: tool "query")
+# MCP server on stdio for AI assistants (read-only: typed tools list_*, show,
+# status_*, dot_*, … plus "query" and ovfs_*; see docs/wiki/mcp.md)
 oconsole --mcp
 # Development build only: also allow state-changing commands (tool "execute")
 # Build first with --no-default-features --features mcp-development

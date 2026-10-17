@@ -17,6 +17,7 @@ macro_rules! eprintln { () => { std::eprintln!() }; ($($arg:tt)*) => { std::epri
 
 mod grpc_client;
 mod mcp;
+mod mcp_read;
 mod mcp_mirror;
 mod mcp_token;
 mod rate_guard;
@@ -1399,6 +1400,15 @@ impl mcp::CommandRunner for GrpcRunner {
             anyhow::bail!("{}", out.error.trim_end());
         }
         Ok(if out.error.is_empty() { out.text } else { format!("{}{}", out.text, out.error) })
+    }
+
+    fn run_json(&mut self, command: &str) -> anyhow::Result<String> {
+        use bareos_proto_rs::bareos::director::ResponseFormat;
+        let out = self.rt.block_on(self.session.execute(command, ResponseFormat::Json))?;
+        if !out.success && out.text.is_empty() {
+            anyhow::bail!("{}", out.error.trim_end());
+        }
+        Ok(out.text)
     }
 }
 
