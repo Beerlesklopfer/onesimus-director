@@ -668,6 +668,68 @@ mod tests {
         json!({"method":"tools/call","params":{"name":tool,"arguments":{"command":cmd}}})
     }
 
+    /// Compare with (or, with UPDATE_MCP_SNAPSHOTS set, write) a JSON file
+    /// in crates/oconsole/testdata/.
+    fn snapshot(file: &str, actual: &Value) {
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("testdata").join(file);
+        let text = serde_json::to_string_pretty(actual).unwrap() + "\n";
+        if std::env::var_os("UPDATE_MCP_SNAPSHOTS").is_some() {
+            std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+            std::fs::write(&path, &text).unwrap();
+        }
+        let expected = std::fs::read_to_string(&path).unwrap_or_else(|e| panic!("{}: {e}", path.display()));
+        assert!(expected == text, "{file} changed; diff it against the snapshot");
+    }
+
+    /// The modes of this build: production ignores the write request.
+    fn modes() -> Vec<(&'static str, bool)> {
+        #[cfg(feature = "mcp-production")]
+        return vec![("production", false), ("production-write-request", true)];
+        #[cfg(feature = "mcp-development")]
+        return vec![("development", false), ("development-write", true)];
+    }
+
+    /// tools/list must stay byte-identical (names, schemas, annotations, order).
+    #[test]
+    fn tools_list_matches_snapshot() {
+        for (mode, allow_write) in modes() {
+            let srv = McpServer::new(Echo(vec![]), allow_write, "dir".into());
+            snapshot(&format!("tools_list_{mode}.json"), &srv.tools_list());
+        }
+    }
+
+    /// Results and Director command lines of a fixed set of calls (generic
+    /// query/execute, ovfs, typed read and write tools, refusals).
+    #[test]
+    fn tool_calls_match_snapshot() {
+        let calls = [
+            tool_call("query", "list jobs"),
+            tool_call("query", "delete volume=x yes"),
+            tool_call("query", ".ovfs_status"),
+            tool_call("query", "list jobs\nquit"),
+            tool_call("query", "status fail"),
+            tool_call("execute", "run job=Backup yes"),
+            tool_call("execute", "quit"),
+            json!({"method":"tools/call","params":{"name":"ovfs_tree","arguments":{"jobids":"1,2","depth":2}}}),
+            json!({"method":"tools/call","params":{"name":"ovfs_ls","arguments":{"jobids":"1"}}}),
+            json!({"method":"tools/call","params":{"name":"ovfs_versions","arguments":{"client":"fd","path":"/etc/","name":"passwd"}}}),
+            json!({"method":"tools/call","params":{"name":"ovfs_nosuch","arguments":{}}}),
+            json!({"method":"tools/call","params":{"name":"list_jobs","arguments":{"client":"fd"}}}),
+            json!({"method":"tools/call","params":{"name":"show","arguments":{"resource":"job","name":"x;y"}}}),
+            json!({"method":"tools/call","params":{"name":"run_job","arguments":{"job":"Backup","level":"Full"}}}),
+            json!({"method":"tools/call","params":{"name":"purge","arguments":{"kind":"volume","volume":"V"}}}),
+            json!({"method":"tools/call","params":{"name":"delete","arguments":{"kind":"jobid","jobids":[3],"confirm":true}}}),
+            json!({"method":"tools/call","params":{"name":"nosuch","arguments":{}}}),
+        ];
+        for (mode, allow_write) in modes() {
+            let mut srv = McpServer::new(Echo(vec![]), allow_write, "dir".into());
+            let results: Vec<Value> = calls.iter().map(|c| call(&mut srv, c.clone())).collect();
+            let ran = srv.runner.lock().unwrap().0.clone();
+            snapshot(&format!("tool_calls_{mode}.json"),
+                &json!({ "results": results, "director_commands": ran }));
+        }
+    }
+
     #[test]
     fn read_only_mode_lists_only_query() {
         let mut srv = McpServer::new(Echo(vec![]), false, "dir".into());

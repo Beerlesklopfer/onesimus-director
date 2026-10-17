@@ -1,0 +1,194 @@
+{
+  "results": [
+    {
+      "result": {
+        "content": [
+          {
+            "type": "text",
+            "text": "ran list jobs\n"
+          }
+        ],
+        "isError": false
+      }
+    },
+    {
+      "result": {
+        "content": [
+          {
+            "type": "text",
+            "text": "'delete volume=x yes' is not a read-only command. Use the 'execute' tool."
+          }
+        ],
+        "isError": true
+      }
+    },
+    {
+      "result": {
+        "content": [
+          {
+            "type": "text",
+            "text": "ran .ovfs_status\n"
+          }
+        ],
+        "isError": false
+      }
+    },
+    {
+      "result": {
+        "content": [
+          {
+            "type": "text",
+            "text": "command must be a single line without control characters"
+          }
+        ],
+        "isError": true
+      }
+    },
+    {
+      "result": {
+        "content": [
+          {
+            "type": "text",
+            "text": "Director error: test Director unavailable"
+          }
+        ],
+        "isError": true
+      }
+    },
+    {
+      "result": {
+        "content": [
+          {
+            "type": "text",
+            "text": "ran run job=Backup yes\n"
+          }
+        ],
+        "isError": false
+      }
+    },
+    {
+      "result": {
+        "content": [
+          {
+            "type": "text",
+            "text": "'quit' is not available via MCP"
+          }
+        ],
+        "isError": true
+      }
+    },
+    {
+      "result": {
+        "content": [
+          {
+            "type": "text",
+            "text": "ran .ovfs_tree jobid=1,2 depth=2 json\n"
+          }
+        ],
+        "isError": false
+      }
+    },
+    {
+      "result": {
+        "content": [
+          {
+            "type": "text",
+            "text": "path is required"
+          }
+        ],
+        "isError": true
+      }
+    },
+    {
+      "result": {
+        "content": [
+          {
+            "type": "text",
+            "text": "ran .ovfs_versions client=\"fd\" path=\"/etc/\" name=\"passwd\" json\n"
+          }
+        ],
+        "isError": false
+      }
+    },
+    {
+      "error": {
+        "code": -32602,
+        "message": "unknown tool: ovfs_nosuch"
+      }
+    },
+    {
+      "result": {
+        "content": [
+          {
+            "type": "text",
+            "text": "ran list jobs client=fd"
+          }
+        ],
+        "isError": false
+      }
+    },
+    {
+      "result": {
+        "content": [
+          {
+            "type": "text",
+            "text": "name: 'x;y' is not a valid name (letters, digits and : . - _ / space, at most 127 characters)"
+          }
+        ],
+        "isError": true
+      }
+    },
+    {
+      "result": {
+        "content": [
+          {
+            "type": "text",
+            "text": "> run job=Backup level=Full yes\nran run job=Backup level=Full yes\n"
+          }
+        ],
+        "isError": false
+      }
+    },
+    {
+      "result": {
+        "content": [
+          {
+            "type": "text",
+            "text": "purge is destructive: ask the user, then call it again with confirm=true"
+          }
+        ],
+        "isError": true
+      }
+    },
+    {
+      "result": {
+        "content": [
+          {
+            "type": "text",
+            "text": "> delete jobid=3\nran delete jobid=3\n"
+          }
+        ],
+        "isError": false
+      }
+    },
+    {
+      "error": {
+        "code": -32602,
+        "message": "unknown tool: nosuch"
+      }
+    }
+  ],
+  "director_commands": [
+    "list jobs",
+    ".ovfs_status",
+    "status fail",
+    "run job=Backup yes",
+    ".ovfs_tree jobid=1,2 depth=2 json",
+    ".ovfs_versions client=\"fd\" path=\"/etc/\" name=\"passwd\" json",
+    ".api json compact=yes",
+    "list jobs client=fd",
+    ".api 0",
+    "run job=Backup level=Full yes",
+    "delete jobid=3"
+  ]
+}
