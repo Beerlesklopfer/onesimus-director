@@ -44,10 +44,7 @@ fn cmd_dot_sql_db(ast: &CommandAst, ctx: &ExecContext) -> CommandResult {
     match cat.query_rows(query) {
         Ok(t) => match ctx.api_mode {
             // API_MODE_ON: SqlQuery() with SqlHandler, "value\t" per field
-            ApiMode::Api => CommandResult::ok(t.rows.iter()
-                .filter(|row| !row.is_empty())
-                .map(|row| row.iter().map(|v| format!("{}\t", v.as_deref().unwrap_or(""))).collect::<String>())
-                .collect()).verbatim(),
+            ApiMode::Api => CommandResult::ok(api1_rows(&t)).verbatim(),
             // ListSqlQuery(..., HORZ_LIST, false): ArrayStart("query") + ListResult
             _ => {
                 let mut result = Map::new();
@@ -293,31 +290,109 @@ fn substitute_prompts(ua: &mut crate::ua_select::Ua, query: &str, prompts: &[Str
     out
 }
 
-fn execute_sql(query: &str, ctx: &ExecContext) -> CommandResult {
-    match &ctx.catalog {
-        Some(cat) => match cat.raw_query(query) {
-            Ok(output) => CommandResult::ok(output),
-            Err(e) => CommandResult::error(format!("SQL error: {e}\n")),
-        },
-        None => CommandResult::ok(format!("No catalog configured. Query: {query}\n")),
+/// Onesimus extensions `.sqltables`, `.sqlschema` and `.sqlcount` (no Bareos
+/// counterpart; the original answers "<cmd>: is an invalid command."). They
+/// read raw catalog data, so besides their own CommandACL a console needs
+/// what the original requires for raw catalog reads: the CommandACL `.sql`
+/// or `sqlquery`. The catalog itself is chosen like `.sql` (OpenClientDb,
+/// CatalogACL, `catalog=`).
+pub(crate) fn raw_catalog_allowed(ctx: &ExecContext) -> bool {
+    crate::acl::access(ctx, crate::acl::Kind::Command, ".sql")
+        || crate::acl::access(ctx, crate::acl::Kind::Command, "sqlquery")
+}
+
+/// Table and column names accepted by `table=` (unquoted PostgreSQL identifiers).
+fn identifier(ast: &CommandAst, key: &str) -> Result<Option<String>, String> {
+    let Some(value) = ast.arguments.iter()
+        .find(|a| a.key.eq_ignore_ascii_case(key))
+        .map(|a| a.value.clone().unwrap_or_default()) else { return Ok(None) };
+    let value = value.to_ascii_lowercase();
+    let mut chars = value.chars();
+    let valid = chars.next().is_some_and(|c| c.is_ascii_lowercase() || c == '_')
+        && chars.all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_');
+    if !valid {
+        return Err(format!("{}: invalid table name \"{value}\".\n", ast.command_name));
     }
+    Ok(Some(value))
 }
 
-/// `.sqltables` (onesimus extension, no Bareos counterpart)
+/// Run one catalog query of a `.sql*` extension and answer like `.sql`:
+/// API 0 a table (ListSqlQuery HORZ_LIST), API 1 "value\t" per field and a
+/// newline-free row stream, API 2 the rows as objects under `key`.
+fn catalog_rows(ast: &CommandAst, ctx: &ExecContext, key: &str, sql: Result<String, String>) -> CommandResult {
+    if !raw_catalog_allowed(ctx) {
+        return CommandResult::error(format!(
+            "{}: permission denied, reading raw catalog data requires the CommandACL .sql or sqlquery.\n",
+            ast.command_name));
+    }
+    let sql = match sql {
+        Ok(sql) => sql,
+        Err(e) => return CommandResult::error(e),
+    };
+    crate::ua_db::with_client_db(ast, ctx, true, || {
+        let Some(cat) = &ctx.catalog else {
+            return CommandResult::error("Could not open catalog database.\n".to_string());
+        };
+        match cat.query_rows(&sql) {
+            Ok(t) => match ctx.api_mode {
+                ApiMode::Api => CommandResult::ok(api1_rows(&t)).verbatim(),
+                _ => {
+                    let mut result = Map::new();
+                    result.insert(key.into(), Value::Array(json_rows(&t)));
+                    CommandResult::ok(render(&t, ListType::Horz)).with_json(Value::Object(result))
+                }
+            },
+            Err(e) => CommandResult::error(format!("Query failed: {e}\n")),
+        }
+    })
+}
+
+/// API 1 rows of `.sql`: "value\t" per field, rows concatenated.
+fn api1_rows(t: &crate::catalog_worker::SqlTable) -> String {
+    t.rows.iter()
+        .filter(|row| !row.is_empty())
+        .map(|row| row.iter().map(|v| format!("{}\t", v.as_deref().unwrap_or(""))).collect::<String>())
+        .collect()
+}
+
+const SQLTABLES: &str = "SELECT tablename FROM pg_catalog.pg_tables WHERE schemaname = 'public' ORDER BY tablename";
+
+fn sqlschema_query(table: Option<&str>) -> String {
+    let filter = table.map(|t| format!(" AND table_name = '{t}'")).unwrap_or_default();
+    format!("SELECT table_name, column_name, data_type FROM information_schema.columns \
+             WHERE table_schema = 'public'{filter} ORDER BY table_name, ordinal_position")
+}
+
+/// Tables counted by `.sqlcount` without `table=` (File/Path are left out:
+/// counting them takes long on large catalogs).
+const SQLCOUNT_TABLES: &[&str] = &["client", "fileset", "job", "jobmedia", "media", "pool", "storage"];
+
+fn sqlcount_query(table: Option<&str>) -> String {
+    let tables: Vec<&str> = match table {
+        Some(t) => vec![t],
+        None => SQLCOUNT_TABLES.to_vec(),
+    };
+    tables.iter()
+        .map(|t| format!("SELECT '{t}' AS tablename, COUNT(*) AS count FROM \"{t}\""))
+        .collect::<Vec<_>>()
+        .join(" UNION ALL ")
+}
+
+/// `.sqltables [catalog=<name>]` (Onesimus extension)
 pub fn cmd_sql_tables(ast: &CommandAst, ctx: &ExecContext) -> CommandResult {
-    crate::ua_db::with_client_db(ast, ctx, true, || execute_sql(
-        "SELECT tablename FROM pg_catalog.pg_tables WHERE schemaname = 'public' ORDER BY tablename",
-        ctx,
-    ))
+    catalog_rows(ast, ctx, "sqltables", Ok(SQLTABLES.to_string()))
 }
 
-/// `.sqlschema` (onesimus extension, no Bareos counterpart)
+/// `.sqlschema [table=<name>] [catalog=<name>]` (Onesimus extension)
 pub fn cmd_sql_schema(ast: &CommandAst, ctx: &ExecContext) -> CommandResult {
-    crate::ua_db::with_client_db(ast, ctx, true, || execute_sql(
-        "SELECT table_name, column_name, data_type FROM information_schema.columns \
-         WHERE table_schema = 'public' ORDER BY table_name, ordinal_position",
-        ctx,
-    ))
+    let sql = identifier(ast, "table").map(|t| sqlschema_query(t.as_deref()));
+    catalog_rows(ast, ctx, "sqlschema", sql)
+}
+
+/// `.sqlcount [table=<name>] [catalog=<name>]` (Onesimus extension)
+pub fn cmd_sql_count(ast: &CommandAst, ctx: &ExecContext) -> CommandResult {
+    let sql = identifier(ast, "table").map(|t| sqlcount_query(t.as_deref()));
+    catalog_rows(ast, ctx, "sqlcount", sql)
 }
 
 #[cfg(test)]

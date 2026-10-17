@@ -137,7 +137,8 @@ pub fn handle_console_session_with<S: Read + Write>(
     // Session flags (set by gui, trace, .grpc commands; autodisplay and the
     // "You have messages." flag live in the SessionManager)
     let mut gui_mode = false;     // gui on/off
-    let mut grpc_mode = false;    // .grpc on/off
+    // `.grpc on`: API mode and compact flag before it, restored by `.grpc off`
+    let mut grpc_previous: Option<(command_executor::ApiMode, bool)> = None;
     let mut json_compact = false; // .api json compact=yes|no (OutputFormatter::SetCompact)
 
     // EOD after init messages — signals "ready for commands" to the console.
@@ -237,6 +238,28 @@ pub fn handle_console_session_with<S: Read + Write>(
                 json_compact = compact.unwrap_or(json_compact);
             }
         }
+        // `.grpc` (Onesimus extension) switches like `.api` before it runs.
+        if command_allowed && ast.command_name == ".grpc" {
+            use crate::commands::dot::GrpcRequest;
+            match crate::commands::dot::parse_dot_grpc(&ast) {
+                Ok(GrpcRequest::On { format, compact }) => {
+                    if grpc_previous.is_none() {
+                        grpc_previous = Some((ctx.api_mode, json_compact));
+                    }
+                    ctx.api_mode = format.api_mode();
+                    json_compact = compact;
+                    session_mgr.set_session_grpc(mgr_session_id, Some((format.name(), compact)));
+                }
+                Ok(GrpcRequest::Off) => {
+                    if let Some((mode, compact)) = grpc_previous.take() {
+                        ctx.api_mode = mode;
+                        json_compact = compact;
+                    }
+                    session_mgr.set_session_grpc(mgr_session_id, None);
+                }
+                Ok(GrpcRequest::Status) | Err(_) => {}
+            }
+        }
 
         // C++ AutomountCmd: without exactly one argument the value is asked
         // for (GetCmd); no answer (lone dot, lost connection) keeps the flag.
@@ -265,12 +288,6 @@ pub fn handle_console_session_with<S: Read + Write>(
                     gui_mode = on;
                     session_mgr.set_session_gui(mgr_session_id, gui_mode);
                 }
-            }
-            ".grpc" => {
-                let on = ast.arguments.iter().any(|a| a.key == "on");
-                let off = ast.arguments.iter().any(|a| a.key == "off");
-                if on { grpc_mode = true; api_mode = command_executor::ApiMode::Json; }
-                if off { grpc_mode = false; }
             }
             _ => {}
         }

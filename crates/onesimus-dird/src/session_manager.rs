@@ -33,6 +33,9 @@ pub struct SessionInfo {
     pub user_notified_msg_pending: bool,
     /// Unix time the console connected (C++ console jcr->start_time).
     pub connected_at: i64,
+    /// `.grpc on` (Onesimus extension): format name and JSON compact flag
+    /// while the session runs in gRPC mode.
+    pub grpc: Option<(&'static str, bool)>,
 }
 
 /// Per-session catalog selection, like the C++ UaContext fields `catalog`,
@@ -100,6 +103,7 @@ impl SessionManager {
             auto_display: false,
             user_notified_msg_pending: false,
             connected_at: now_unix(),
+            grpc: None,
         });
         id
     }
@@ -184,6 +188,17 @@ impl SessionManager {
     /// Autodisplay flag of a session (C++ default off, ua.cc:47).
     pub fn session_auto_display(&self, id: u64) -> bool {
         self.sessions.get(&id).is_some_and(|session| session.auto_display)
+    }
+
+    /// `.grpc on|off` (Onesimus extension).
+    pub fn set_session_grpc(&self, id: u64, grpc: Option<(&'static str, bool)>) {
+        if let Some(mut session) = self.sessions.get_mut(&id) {
+            session.grpc = grpc;
+        }
+    }
+
+    pub fn session_grpc(&self, id: u64) -> Option<(&'static str, bool)> {
+        self.sessions.get(&id).and_then(|session| session.grpc)
     }
 
     /// C++ `ua->user_notified_msg_pending`.
