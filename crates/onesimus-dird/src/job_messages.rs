@@ -348,6 +348,10 @@ pub struct JobOutcome {
     pub sd_status: char,
     pub vss: bool,
     pub encrypt: bool,
+    /// The File / Storage daemon was never reached: its secure erase
+    /// command was never asked for (NULL, printed "(null)").
+    pub fd_unreached: bool,
+    pub sd_unreached: bool,
 }
 
 /// One Jmsg of the job report sequence.
@@ -526,7 +530,8 @@ pub fn backup_summary(director: &str, report: &JobReport, outcome: &JobOutcome, 
 }
 
 /// NativeRestoreCleanup() and GenerateRestoreSummary() (restore.cc:419-602)
-/// for a native restore without secure erase.
+/// for a native restore. The daemons' secure erase commands are "*None*"
+/// once they were reached; one never reached prints its NULL command.
 pub fn restore_summary(director: &str, report: &JobReport, outcome: &JobOutcome, facts: &CatalogFacts) -> Vec<JobMsg> {
     let mut messages = Vec::new();
     let mut status = outcome.status;
@@ -554,9 +559,12 @@ pub fn restore_summary(director: &str, report: &JobReport, outcome: &JobOutcome,
          \x20 Restore Client:         \"{client}\" {uname}\n  Start time:             {start}\n  End time:               {end}\n\
          \x20 Elapsed time:           {elapsed}\n  Files Expected:         {expected}\n  Files Restored:         {files}\n\
          \x20 Bytes Restored:         {bytes}\n  Rate:                   {rate} KB/s\n  FD Errors:              {errors}\n\
-         \x20 FD termination status:  {fd}\n  SD termination status:  {sd}\n  Bareos binary info:     {binary}\n\
+         \x20 FD termination status:  {fd}\n  SD termination status:  {sd}\n{secure_erase}  Bareos binary info:     {binary}\n\
          \x20 Job triggered by:       {trigger}\n  Termination:            {term_msg}\n\n",
         head = summary_head(director), os = version::os_info(), job_id = outcome.job_id, job = report.job,
+        secure_erase = format!("{}{}",
+            if outcome.fd_unreached { "  FD  Secure Erase Cmd:   (null)\n" } else { "" },
+            if outcome.sd_unreached { "  SD  Secure Erase Cmd:   (null)\n" } else { "" }),
         client = report.client, start = bstrftimes(report.start_time), end = bstrftimes(outcome.end_time),
         elapsed = crate::ua_select::edit_utime(run_time.max(0) as u64),
         expected = commas(report.expected_files.unwrap_or(0)), files = commas(outcome.files),
@@ -710,7 +718,7 @@ mod tests {
             job_id: 626, status: 'T', end_time: local("2026-07-09 21:00:03"), files: 5, bytes: 24_154_072,
             read_bytes: 24_154_072, sd_files: 5, sd_bytes: 24_154_607, errors: 0, sd_errors: 0,
             vol_session_id: 1, vol_session_time: 1_783_588_680, fd_status: 'T', sd_status: 'T',
-            vss: false, encrypt: false,
+            vss: false, encrypt: false, fd_unreached: false, sd_unreached: false,
         }
     }
 
@@ -858,6 +866,28 @@ mod tests {
 
 ", version::FULL, version::SHORT_DATE, version::os_info(), bstrftimes(1000), bstrftimes(1001), radix(),
             version::JOBLOG_MESSAGE));
+    }
+
+    /// restore.cc GenerateRestoreSummary: daemons never reached (a restore
+    /// failing before any connection) have no termination status and print
+    /// their NULL secure erase command. Compatibility log C-058, S-18.
+    #[test]
+    fn restore_summary_without_daemon_contact() {
+        let report = JobReport { kind: ReportKind::Restore, job: "RestoreFiles.1".into(), client: "bareos-fd".into(),
+            start_time: 1000, trigger: TRIGGER_USER.into(), ..Default::default() };
+        let outcome = JobOutcome { job_id: 9, status: 'f', end_time: 1000, errors: 1, fd_unreached: true,
+            sd_unreached: true, ..Default::default() };
+        let facts = CatalogFacts { uname: Ok("u".into()), fs_create_time: String::new(), volume_names: Ok(String::new()), last_vol_bytes: Ok(0) };
+        let messages = restore_summary("bareos-dir", &report, &outcome, &facts);
+        assert_eq!(messages[0].0, MsgType::Error);
+        assert!(messages[0].1.contains("  FD Errors:              1\n  FD termination status:  \n  SD termination status:  \n\
+            \x20 FD  Secure Erase Cmd:   (null)\n  SD  Secure Erase Cmd:   (null)\n  Bareos binary info:     "), "{}", messages[0].1);
+        assert!(messages[0].1.ends_with("  Termination:            *** Restore Error ***\n\n"));
+        // only the SD never reached
+        let outcome = JobOutcome { fd_unreached: false, fd_status: 'f', ..outcome };
+        let text = &restore_summary("bareos-dir", &report, &outcome, &facts)[0].1;
+        assert!(text.contains("  FD termination status:  Fatal Error\n  SD termination status:  \n\
+            \x20 SD  Secure Erase Cmd:   (null)\n  Bareos binary info:"), "{text}");
     }
 
     #[test]

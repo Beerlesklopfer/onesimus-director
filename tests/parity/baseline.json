@@ -2035,6 +2035,8 @@
  "restore-help": "match",
  "run-noargs": "match",
  "run-unknownjob": "match",
+ "s01-restore-bootstrap-unreadable": "match",
+ "s01-restore-no-bootstrap": "match",
  "s08-encrypt-add": "match",
  "s08-encrypt-api2": "match",
  "s08-encrypt-cleanup": "match",

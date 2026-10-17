@@ -57,6 +57,11 @@ struct JcrState {
     /// jcr->file_bsock / jcr->store_bsock are set.
     fd_connected: bool,
     sd_connected: bool,
+    /// The worker reached the File / Storage daemon at some point (C++
+    /// FDSecureEraseCmd / SDSecureEraseCmd are set after the connection;
+    /// without one the FD status stays 0). Compatibility log C-058, S-18.
+    fd_reached: bool,
+    sd_reached: bool,
     /// jcr->dir_impl->SDJobStatus ('\0' none).
     sd_status: char,
     /// jcr->post_scripts_ran (RunScripts "AfterJob" happens once).
@@ -868,7 +873,12 @@ impl JobManager {
                 // NativeBackupCleanup / NativeRestoreCleanup: the job report
                 if let Some(report) = &job.jcr.report {
                     let end_time = now_unix();
-                    let fd_status = crate::job_worker::catalog_job_status(ending.term_code).chars().next().unwrap_or('E');
+                    // FDJobStatus stays 0 when the File daemon was never reached.
+                    let fd_status = if job.jcr.fd_reached {
+                        crate::job_worker::catalog_job_status(ending.term_code).chars().next().unwrap_or('E')
+                    } else {
+                        '\0'
+                    };
                     let outcome = crate::job_messages::JobOutcome {
                         job_id: job.job_id, status: job.observed_status, end_time,
                         files: ending.files.max(0) as u64, bytes: ending.bytes.max(0) as u64,
@@ -876,6 +886,7 @@ impl JobManager {
                         sd_bytes: ending.bytes.max(0) as u64, errors: ending.errors.max(0) as u32, sd_errors: 0,
                         vol_session_id: ending.vol_session_id, vol_session_time: ending.vol_session_time,
                         fd_status, sd_status: job.jcr.sd_status, vss: false, encrypt: false,
+                        fd_unreached: !job.jcr.fd_reached, sd_unreached: !job.jcr.sd_reached,
                     };
                     let director = self.config.as_ref().and_then(|c| c.read().ok()).map(|c| c.director.name.clone()).unwrap_or_default();
                     for (msg_type, text) in crate::job_messages::end_of_job(&director, self.catalog.as_ref(), report, &outcome) {
@@ -937,6 +948,8 @@ impl DirJob {
         };
         self.jcr.fd_connected = fd;
         self.jcr.sd_connected = sd;
+        self.jcr.fd_reached |= fd;
+        self.jcr.sd_reached |= sd;
         self.jcr.job_started = started;
         if let Some(status) = status {
             self.observed_status = merge_status(self.observed_status, status);
@@ -1183,6 +1196,11 @@ Job { Name = single; Client = fd1; Storage = File }
         let mut job_manager = manager(CONFIG);
         enqueue(&mut job_manager, 1, "a", 10, "fd1", "File");
         let job = job_manager.jobs.iter_mut().find(|j| j.job_id == 1).unwrap();
+        // a worker that ends before its first connection reaches neither daemon
+        job.worker_state("ConnectingFD");
+        job.worker_state("Error");
+        assert!(!job.jcr.fd_reached && !job.jcr.sd_reached);
+        job.observed_status = '\0';
         let mut seen = Vec::new();
         for state in ["ConnectingFD", "ConnectingSD", "SDJobSetup", "FDJobSetup", "FDBackup", "Running", "Error"] {
             job.worker_state(state);
@@ -1190,6 +1208,8 @@ Job { Name = single; Client = fd1; Storage = File }
         }
         assert_eq!(seen, vec![('F', false, false, false), ('S', true, false, false), ('S', true, true, false),
             ('R', true, true, false), ('R', true, true, true), ('R', true, true, true), ('R', false, false, true)]);
+        // the daemons stay "reached" after the worker closed its connections
+        assert!(job.jcr.fd_reached && job.jcr.sd_reached);
         // A canceled job keeps JS_Canceled.
         job.observed_status = 'A';
         job.worker_state("ConnectingFD");
