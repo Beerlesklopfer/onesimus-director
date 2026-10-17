@@ -16,8 +16,8 @@ Fälle ab, die echte Jobs starten können (`unsafe_job_start`).
 
 | ID | Ort | Stub | Bezug | Status |
 |---|---|---|---|---|
-| S-01 | `onesimus-dird/src/catalog_worker.rs` (GenerateBootstrap) | `Storage="File"`, `Device="FileStorage"` fest verdrahtet; Rückfallweg von `restore` (`commands/restore.rs`), wenn keine Bootstrap-Datei geschrieben wurde | — | offen |
-| S-02 | `onesimus-dird/src/scheduler.rs` | `already_queued = false; // TODO: proper dedup` – keine Prüfung auf bereits eingereihte Jobs | — | offen |
+| S-01 | `onesimus-dird/src/catalog_worker.rs` (GenerateBootstrap) | `Storage="File"`, `Device="FileStorage"` fest verdrahtet; Rückfallweg von `restore` (`commands/restore.rs`), wenn keine Bootstrap-Datei geschrieben wurde | C-058 | erledigt (a92041f, be15449): das Original baut für einen Restore-Job nie einen Bootstrap aus dem Katalog; GenerateBootstrap entfernt, der Job liest `bootstrap=` bzw. die Job-Direktive `Bootstrap` im Worker, ohne Datei M_FATAL „Cannot restore without a bootstrap file“, nicht lesbar „Could not open bootstrap file“ (Fälle `s01-*`; offen: Berichtszeilen „FD termination status“ leer und „FD/SD Secure Erase Cmd: (null)“ bei Jobs ohne FD-Kontakt, job_manager/job_messages) |
+| S-02 | `onesimus-dird/src/scheduler.rs` | `already_queued = false; // TODO: proper dedup` – keine Prüfung auf bereits eingereihte Jobs | — | erledigt (54f5df6): Warteschlange nach `scheduler_private.cc` (Füllen nur bei leerer Queue, `scheduled_last`/61 s, +59 s, Enabled von Job/Schedule/Client); Einheitentests mit Fake-Uhr. Unverändert offen: der Scheduler startet fällige Jobs nicht (`TODO(R6-full)`, kein ExecuteJob) |
 | S-03 | `onesimus-dird/src/internal_jobs.rs` | Selection Type PoolOccupancy „not available yet“ | C-058, #1 | offen |
 | S-04 | `onesimus-dird/src/commands/job.rs` | Verify-Jobs (alle Level) „not available yet“; Menüpunkt „Verify Volume Data (not yet implemented)“ | C-058, #1 | offen |
 | S-05 | `onesimus-dird/src/commands/job.rs`, `internal_jobs.rs` | Copy/Migrate-Arbeitsjobs: `run job=<Copy> jobid=N` abgewiesen, Steuerjob meldet „Could not start migration job.“ | C-058, #1 | offen |
@@ -26,5 +26,5 @@ Fälle ab, die echte Jobs starten können (`unsafe_job_start`).
 | S-08 | `onesimus-dird/src/commands/admin.rs` (`UpdateAction::Unsupported`) | `update volume encrypt=` „not supported“ | C-067, #2 | offen |
 | S-09 | `onesimus-dird/src/commands/restore.rs` | API-2-Restore-Start liefert `{"result":{}}` statt `run.jobid` | C-072, #3 | offen |
 | S-10 | `onesimus-dird/src/commands/acl.rs` | `.acl` nur Platzhalter („(ACL configuration pending)“) | C-074, #4 | blockiert (Entscheidung des Nutzers zu #4) |
-| S-11 | `onesimus-dird/src/commands/extra.rs` (`cmd_show`), `show_items.rs`, `version_strings.rs` | Totes `extra::cmd_show`; dateiweites `allow(dead_code)` verdeckt ungenutzten Code | — | offen |
+| S-11 | `onesimus-dird/src/commands/extra.rs` (`cmd_show`), `show_items.rs`, `version_strings.rs` | Totes `extra::cmd_show`; dateiweites `allow(dead_code)` verdeckt ungenutzten Code | — | erledigt (7c09687): `extra::cmd_show` entfernt, dateiweite `allow(dead_code)` entfernt, ungenutzte `PROG_DATE_TIME`, `YEAR`, `full_with_date` entfernt; keine Warnungen in diesen Dateien |
 | S-12 | `bareos-filed/src/restore.rs`, `accept.rs` | Eigener FD: Restore ist `_placeholder()`; FD-zu-FD-Verbindungen „not supported“ | — | offen |
