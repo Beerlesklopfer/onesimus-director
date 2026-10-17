@@ -269,7 +269,9 @@ SAFE_JOBS = {'parity-admin', 'parity-migrate', 'parity-consolidate',
              # S-22 (cases/s22.jsonl defines them as Type = Admin)
              'parity-s22-nodup', 'parity-s22-cq', 'parity-s22-cr', 'parity-s22-delay', 'parity-s22-rst',
              # Admin jobs with Director-side RunScripts (fixture/job/parity-runscript.conf)
-             'parity-admin-rs', 'parity-admin-rs-fail', 'parity-admin-rs-noerr'}
+             'parity-admin-rs', 'parity-admin-rs-fail', 'parity-admin-rs-noerr',
+             # Copy control job selecting nothing, with Director-side RunScripts (S-24)
+             'parity-copy-rs'}
 
 
 def unsafe_job_start(case):
