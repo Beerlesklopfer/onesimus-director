@@ -93,6 +93,10 @@ pub struct JobParams {
     /// (fd_cmds.cc "Probing client protocol..." and the handshake text).
     #[serde(default)]
     pub client_first_connection: bool,
+    /// SD read+write session of a Copy/Migrate worker job or a VirtualFull
+    /// (sd_copy.rs); None for jobs with a File daemon. C-058.
+    #[serde(default)]
+    pub copy: Option<crate::sd_copy::CopySession>,
 }
 
 /// Messages on the Worker↔Director pipe (JSON, one per line).

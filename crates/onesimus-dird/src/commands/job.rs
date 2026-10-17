@@ -1673,6 +1673,7 @@ fn run_selected(
         bootstrap: if !job.write_bootstrap.is_empty() { Some(job.write_bootstrap.clone()) } else { None },
         client_name: client.name.clone(),
         client_first_connection: crate::job_messages::first_client_connection(&client.name),
+        copy: None,
     };
 
     // Job report data (job.cc SetJcrDefaults/ApplyPoolOverrides, GetLevelSinceTime)
@@ -1791,6 +1792,7 @@ fn plain_params(job_id: u32, unique: &str, job: &bareos_config::resources::JobRe
         director_name: director.to_string(), pool_name: String::new(), fileset_includes: Vec::new(),
         fileset_excludes: Vec::new(), since_utime: 0, prev_job: String::new(), where_path: None, replace: None,
         restore_jobid: None, bootstrap: None, client_name: client.to_string(), client_first_connection: false,
+        copy: None,
     }
 }
 
