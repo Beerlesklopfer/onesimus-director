@@ -133,6 +133,11 @@ pub enum PipeMessage {
     /// otherwise the body the Director puts its Jmsg header in front of.
     #[serde(rename = "jmsg")]
     Jmsg { job_id: u32, msg_type: u32, mtime: i64, text: String, #[serde(default)] raw: bool },
+    /// The writing Storage daemon's job end of an SD-SD Copy/Migrate
+    /// (mig_jcr: VolSessionId/Time from its Job command, SDJobFiles/Bytes/
+    /// Errors/Status from its "3099 Job end"). C-058, S-20.
+    #[serde(rename = "write_session")]
+    WriteSession { job_id: u32, vol_session_id: i32, vol_session_time: i32, files: i64, bytes: i64, errors: i32, status: i32 },
 }
 
 /// lib/message.h M_* codes of the worker's own job messages.
