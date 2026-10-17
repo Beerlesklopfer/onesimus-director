@@ -556,7 +556,7 @@ mod tests {
     }
 
     #[test]
-    fn job_selection_with_matches_and_children_not_available() {
+    fn job_selection_starts_one_worker_per_jobid() {
         let log = Arc::new(Mutex::new(Vec::new()));
         let cat = catalog(vec![("SELECT PoolId", vec!["3"]), ("SELECT DISTINCT Job.Name", vec!["backup-a", "other"]),
             ("SELECT DISTINCT Job.JobId", vec!["5|t", "7|t", "5|t"])], log.clone());
@@ -565,8 +565,32 @@ mod tests {
         assert_eq!(out.status, 'T');
         assert!(out.selected, "{:?} {:?}", out.messages, log.lock().unwrap());
         assert_eq!(out.messages[0], (MsgType::Info, "The following 2 JobIds were chosen to be copied: 5,7\n".to_string()));
-        assert_eq!(out.messages.len(), 3);
+        // The double has no Client record: each DoRunCmd fails.
+        assert_eq!(out.messages[1..], [(MsgType::Info, "Job failed.\n".to_string()),
+            (MsgType::Error, "Could not start migration job.\n".to_string()),
+            (MsgType::Info, "Job failed.\n".to_string()), (MsgType::Error, "Could not start migration job.\n".to_string())]);
+        assert!(out.children.is_empty());
         assert!(log.lock().unwrap()[2].starts_with("SELECT DISTINCT Job.JobId,Job.StartTime FROM Job,Pool WHERE Job.Name='backup-a'"));
+    }
+
+    #[test]
+    fn pool_occupancy_selects_jobs_until_low_bytes() {
+        let log = Arc::new(Mutex::new(Vec::new()));
+        let cat = catalog(vec![("SELECT PoolId", vec!["3"]), ("SELECT SUM(JobBytes) FROM Job WHERE JobId IN (SELECT", vec!["300"]),
+            ("SELECT MediaId FROM Media", vec!["11", "12"]), ("SELECT DISTINCT Job.JobId,Job.StartTime FROM JobMedia", vec!["5|t", "6|t", "7|t"]),
+            ("SELECT SUM(JobBytes) FROM Job WHERE JobId IN (", vec!["100"])], log.clone());
+        let cfg = DirectorConfig::from_str("Director { Name = dir }\nPool { Name = Full; Pool Type = Backup; \
+            Migration High Bytes = 200; Migration Low Bytes = 150 }\n\
+            Job { Name = m; Type = Migrate; Selection Type = PoolOccupancy }").unwrap();
+        let out = run(&cfg, Some(&cat), &request(Kind::Migrate, "m"));
+        assert_eq!(out.messages[0], (MsgType::Info, "The following 2 JobIds were chosen to be migrated: 5,6\n".to_string()));
+        let log = log.lock().unwrap();
+        assert!(log.iter().any(|q| q.contains("JobMedia.MediaId IN (11,12)")), "{log:?}");
+        // Below Migration High Bytes nothing is selected.
+        let small = catalog(vec![("SELECT PoolId", vec!["3"]), ("SELECT SUM(JobBytes)", vec!["100"])], Arc::new(Mutex::new(Vec::new())));
+        let out = run(&cfg, Some(&small), &request(Kind::Migrate, "m"));
+        assert_eq!(out.messages, vec![(MsgType::Info, "No Volumes found to migrate.\n".to_string()),
+            (MsgType::Info, "No JobIds found to migrate.\n".to_string())]);
     }
 
     #[test]

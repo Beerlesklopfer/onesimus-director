@@ -32,6 +32,8 @@ pub struct PrevJob {
     pub job_tdate: String,
     pub fileset_id: String,
     pub client_id: String,
+    pub purged_files: String,
+    pub has_base: String,
 }
 
 /// What MigrationCleanup() needs of a worker job (its jcr and mig_jcr).
@@ -71,6 +73,11 @@ fn workers() -> std::sync::MutexGuard<'static, Option<HashMap<u32, WorkerInfo>>>
 /// Storage daemon write JobMedia and File records for it (catreq.cc:352/542).
 pub fn new_job_of(worker: u32) -> Option<u32> {
     workers().as_ref()?.get(&worker)?.new_job_id
+}
+
+/// A catalog number for SQL (0 when empty).
+fn num(text: &str) -> &str {
+    if text.is_empty() { "0" } else { text }
 }
 
 fn esc(text: &str) -> String {
@@ -144,12 +151,14 @@ fn create_job_record(catalog: &CatalogHandle, unique: &str, name: &str, job_type
 /// GetJobRecord() of the previous job.
 fn previous_job(catalog: &CatalogHandle, job_id: u32) -> Result<PrevJob, String> {
     let row = first_row(catalog, &format!(
-        "SELECT JobId,Job,Name,Type,JobFiles,StartTime,EndTime,JobTDate,FileSetId,ClientId FROM Job WHERE JobId={job_id}"))?
+        "SELECT JobId,Job,Name,Type,JobFiles,StartTime,EndTime,JobTDate,FileSetId,ClientId,PurgedFiles,HasBase \
+         FROM Job WHERE JobId={job_id}"))?
         .ok_or_else(|| format!("sql_get.cc:298 No Job found for JobId {job_id}\n"))?;
     Ok(PrevJob {
         job_id, job: row[1].clone(), name: row[2].clone(), job_type: row[3].chars().next().unwrap_or(' '),
         job_files: row[4].parse().unwrap_or(0), start_time: row[5].clone(), end_time: row[6].clone(),
         job_tdate: row[7].clone(), fileset_id: row[8].clone(), client_id: row[9].clone(),
+        purged_files: row[10].clone(), has_base: row[11].clone(),
     })
 }
 
@@ -431,7 +440,8 @@ pub fn cleanup(director: &str, catalog: Option<&CatalogHandle>, job_id: u32, end
             let _ = cat.execute(&format!(
                 "UPDATE Job SET JobStatus='{mig_status}',EndTime=to_timestamp({now}),JobBytes={sd_bytes},ReadBytes=0,\
                  JobFiles={sd_files},JobErrors=0,VolSessionId={vol_id},VolSessionTime={vol_time},\
-                 RealEndTime=to_timestamp({now}),PriorJobId={old},HasBase=0,PurgedFiles=0 WHERE JobId={new}"));
+                 RealEndTime=to_timestamp({now}),PriorJobId={old},HasBase={hb},PurgedFiles={pf} WHERE JobId={new}",
+                hb = num(&info.prev.has_base), pf = num(&info.prev.purged_files)));
             let _ = cat.execute(&format!("UPDATE Job SET StartTime='{}',EndTime='{}',JobTDate={} WHERE JobId={new}",
                 info.prev.start_time, info.prev.end_time, if info.prev.job_tdate.is_empty() { "0" } else { &info.prev.job_tdate }));
             if matches!(status, 'T' | 'W') {

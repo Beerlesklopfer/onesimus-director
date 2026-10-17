@@ -1037,6 +1037,10 @@ impl Jcr {
                 }
             }
         }
+        // MigrateJobId of a Copy/Migrate worker job (S-05).
+        if matches!(self.job_type, JobType::Copy | JobType::Migrate) && self.restore_job_id != 0 {
+            arguments.push(arg("jobid", &self.restore_job_id.to_string()));
+        }
         // jcr->sched_time (`when=`), internal to the start (C-058).
         arguments.push(arg("schedtime", &self.sched_time.to_string()));
         arguments.push(Argument { key: "yes".to_string(), value: None });
