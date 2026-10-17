@@ -479,8 +479,11 @@ impl JobManager {
         let holders = |pred: &dyn Fn(&DirJob) -> bool| self.jobs.iter()
             .filter(|j| j.jcr.holds_resources && !matches!(j.phase, DirJobPhase::Completed | DirJobPhase::Error) && pred(j))
             .count();
+        // jobq.cc IncReadStore + IncWriteStore: a Verify Level=Data job
+        // counts as reader and writer of its storage (verify.rs).
+        let uses = job.jcr.params.as_ref().map_or(1, crate::verify::storage_uses).max(1);
         let status = if !storage.is_empty()
-            && holders(&|j| j.resources.as_ref().is_some_and(|r| r.1 == storage)) >= max_storage {
+            && holders(&|j| j.resources.as_ref().is_some_and(|r| r.1 == storage)) + uses > max_storage {
             's'
         } else if !client.is_empty()
             && holders(&|j| j.resources.as_ref().is_some_and(|r| r.0 == client)) >= max_client {
@@ -505,6 +508,18 @@ impl JobManager {
     /// Fork the workers of ready jobs while fewer than the Director's
     /// Maximum Concurrent Jobs run. A canceled job ends without a worker.
     fn start_ready(&mut self) {
+        let mut children = Vec::new();
+        self.start_ready_jobs(&mut children);
+        // Jobs a Director-run job started (internal_jobs::ChildStart): JobqAdd.
+        for child in children {
+            self.bus.post(BusMessage::JobStatus { job_id: child.job_id, job_name: child.job_name.clone(),
+                status: "Queued".to_string(), timestamp: now_unix() });
+            self.enqueue_job(child.job_id, &child.job_name, child.start, &child.client, &child.storage);
+            self.set_job_report(child.job_id, child.report);
+        }
+    }
+
+    fn start_ready_jobs(&mut self, children: &mut Vec<crate::internal_jobs::ChildStart>) {
         while let Some(&id) = self.ready.front() {
             let canceled = self.get_job(id).is_some_and(|j| is_job_canceled(j.observed_status));
             if !canceled {
@@ -521,7 +536,7 @@ impl JobManager {
                 // job_thread() of a canceled job: no daemons, only its cleanup.
                 // Job types whose "Version:" message comes from job_thread()
                 // (not at queue time) get it here as well.
-                if job.jcr.params.as_ref().is_some_and(|p| p.job_type == crate::job_worker::WorkerJobType::Admin
+                if job.jcr.params.as_ref().is_some_and(|p| matches!(p.job_type, crate::job_worker::WorkerJobType::Admin | crate::job_worker::WorkerJobType::Verify)
                     || p.job_type.internal().is_some()) {
                     crate::console_msg::post_job_message(&self.bus, self.config.as_ref(), BusMessage::JobMessage {
                         job_id: id, job_name: job.job_name.clone(), msg_type: crate::message_bus::MsgType::Info,
@@ -566,9 +581,21 @@ impl JobManager {
                     }
                 }
                 let messages = outcome.messages;
-                for (msg_type, text) in messages {
+                children.extend(outcome.children);
+                // Messages of the worker jobs a control job started go
+                // between its own (outcome.other_messages, C-058).
+                let mut others = outcome.other_messages.into_iter().peekable();
+                for (i, (msg_type, text)) in messages.into_iter().enumerate() {
+                    while let Some((_, other_id, other_name, other_type, other_text)) = others.next_if(|o| o.0 + 1 <= i) {
+                        crate::console_msg::post_job_message(&self.bus, self.config.as_ref(), BusMessage::JobMessage {
+                            job_id: other_id, job_name: other_name, msg_type: other_type, text: other_text, timestamp: now_unix() });
+                    }
                     crate::console_msg::post_job_message(&self.bus, self.config.as_ref(), BusMessage::JobMessage {
                         job_id: id, job_name: job.job_name.clone(), msg_type, text, timestamp: now_unix() });
+                }
+                for (_, other_id, other_name, msg_type, text) in others {
+                    crate::console_msg::post_job_message(&self.bus, self.config.as_ref(), BusMessage::JobMessage {
+                        job_id: other_id, job_name: other_name, msg_type, text, timestamp: now_unix() });
                 }
                 if let Some(report) = job.jcr.report.as_mut() { report.selected = outcome.selected; }
                 job.pending_end = Some(JobEnd { term_code: outcome.status as i32, files: 0, bytes: 0, errors: 0,
@@ -796,7 +823,7 @@ impl JobManager {
                         job.last_bytes = bytes;
                     }
 
-                    PipeMessage::CatReq { request, .. } => {
+                    PipeMessage::CatReq { request, job_id: from } => {
                         debug!("JobManager: job {} CatReq: {}", job.job_id, request.chars().take(60).collect::<String>());
                         let previous_phase = job.phase;
                         job.phase = DirJobPhase::WaitingCatReq;
@@ -806,16 +833,22 @@ impl JobManager {
                             job.last_files = files as i64;
                             job.last_bytes = bytes as i64;
                         }
-                        post_catreq_messages(&self.bus, self.config.as_ref(), job, reply.messages);
+                        post_catreq_messages_of(&self.bus, self.config.as_ref(), job, from, reply.messages);
                         job.handle.send_message(&PipeMessage::CatResp { response: reply.to_sd });
                         job.phase = previous_phase;
                     }
 
-                    PipeMessage::UpdCat { data, .. } => {
+                    PipeMessage::UpdCat { data, job_id: from } => {
                         let data = hex::decode(&data).unwrap_or_default();
                         let reply = catreq_session(&mut self.catreq_jobs, &self.catalog, &self.config, job)
                             .dispatch(self.catalog.as_ref().map(|c| c as &dyn Db), &batch_opener(&self.catalog), &data);
-                        post_catreq_messages(&self.bus, self.config.as_ref(), job, reply.messages);
+                        post_catreq_messages_of(&self.bus, self.config.as_ref(), job, from, reply.messages);
+                    }
+
+                    PipeMessage::WriteSession { vol_session_id, vol_session_time, files, bytes, errors, status, .. } => {
+                        crate::migrate::set_write_session(job.job_id, crate::migrate::WriteSession {
+                            vol_session_id, vol_session_time, files: files.max(0) as u64, bytes: bytes.max(0) as u64,
+                            errors: errors.max(0) as u32, status: char::from_u32(status as u32).unwrap_or('\0') });
                     }
 
                     PipeMessage::JobEnd { term_code, files, bytes, errors,
@@ -854,13 +887,25 @@ impl JobManager {
                         }
                     }
 
-                    PipeMessage::Jmsg { msg_type, mtime, text, raw, .. } => {
+                    PipeMessage::Verify { event, .. } => {
+                        let (messages, status) = crate::verify::event(self.catalog.as_ref(), job.job_id, &event);
+                        post_catreq_messages(&self.bus, self.config.as_ref(), job, messages);
+                        if let Some(status) = status {
+                            job.observed_status = merge_status(job.observed_status, status);
+                        }
+                    }
+
+                    PipeMessage::Jmsg { msg_type, mtime, text, raw, job_id: from } => {
                         if let Some(config) = self.config.as_ref().and_then(|c| c.read().ok()) {
                             if raw {
                                 // getmsg.cc: a daemon's "Jmsg Job=.. type=.. level=.." line
                                 crate::console_msg::dispatch_job_message(&config, &job.job_name, job.job_id, msg_type, mtime, &text);
                             } else if let Some(kind) = crate::job_messages::msg_type_of(msg_type) {
-                                crate::console_msg::job_message(&config, &job.job_name, job.job_id, kind, mtime, &text);
+                                // A message of mig_jcr (SD-SD Copy/Migrate, S-20) carries
+                                // its JobId and goes out through the worker job's Messages.
+                                let header = if from != 0 { from } else { job.job_id };
+                                let msg = crate::console_msg::job_message_text(&config.director.name, header, kind, &text);
+                                crate::console_msg::dispatch_job_message(&config, &job.job_name, job.job_id, msg_type, mtime, &msg);
                             }
                         }
                     }
@@ -873,20 +918,52 @@ impl JobManager {
                 // msgchan.cc EndTransaction() and backup.cc WriteBatchFileRecords().
                 if let Some(mut state) = self.catreq_jobs.remove(&job.job_id) {
                     let messages = state.end_of_job(self.catalog.as_ref().map(|c| c as &dyn Db), &batch_opener(&self.catalog));
-                    post_catreq_messages(&self.bus, self.config.as_ref(), job, messages);
+                    // SD-SD Copy/Migrate: the attributes are mig_jcr's (S-20).
+                    let owner = crate::migrate::remote_new_job(job.job_id).unwrap_or(job.job_id);
+                    post_catreq_messages_of(&self.bus, self.config.as_ref(), job, owner, messages);
                 }
-                let ending = job.pending_end.take().unwrap_or_else(|| JobEnd {
+                let mut ending = job.pending_end.take().unwrap_or_else(|| JobEnd {
                     term_code: b'E' as i32, files: job.last_files, bytes: job.last_bytes,
                     errors: 1, vol_session_id: 0, vol_session_time: 0,
                 });
+                // VerifyCleanup(): Director-side JobErrors and TermCode (verify.rs).
+                if let Some(end) = crate::verify::finish(self.catalog.as_ref(), job.job_id, ending.files) {
+                    ending.errors += end.errors;
+                    if let Some(status) = end.status {
+                        job.observed_status = merge_status(job.observed_status, status);
+                    }
+                }
                 job.observed_status = merge_status(job.observed_status,
                     crate::job_worker::catalog_job_status(ending.term_code).chars().next().unwrap());
                 if exit_code != 0 { job.observed_status = merge_status(job.observed_status, 'E'); }
+                // MigrationCleanup() of a Copy/Migrate worker job (migrate.rs, C-058).
+                if let Some(start_time) = job.jcr.report.as_ref()
+                    .filter(|r| matches!(r.kind, crate::job_messages::ReportKind::MigrateWorker(_))).map(|r| r.start_time) {
+                    let end_time = now_unix();
+                    let end = crate::migrate::WorkerEnd {
+                        status: job.observed_status, sd_status: job.jcr.sd_status,
+                        sd_files: ending.files.max(0) as u64, sd_bytes: ending.bytes.max(0) as u64,
+                        sd_errors: ending.errors.max(0) as u32, job_errors: 0,
+                        vol_session_id: ending.vol_session_id, vol_session_time: ending.vol_session_time,
+                        start_time, end_time };
+                    let director = self.config.as_ref().and_then(|c| c.read().ok()).map(|c| c.director.name.clone()).unwrap_or_default();
+                    if let Some((status, messages)) = crate::migrate::cleanup(&director, self.catalog.as_ref(), job.job_id, &end) {
+                        job.observed_status = status;
+                        for (msg_type, text) in messages {
+                            crate::console_msg::post_job_message(&self.bus, self.config.as_ref(), BusMessage::JobMessage {
+                                job_id: job.job_id, job_name: job.job_name.clone(), msg_type, text, timestamp: end_time });
+                        }
+                        let success = matches!(status, 'T' | 'W');
+                        let phase = if success { DirJobPhase::Completed } else { DirJobPhase::Error };
+                        start_after_scripts(job, &host, &self.bus, self.config.as_ref(), phase, if success { "Success" } else { "Error" });
+                        continue;
+                    }
+                }
                 // NativeBackupCleanup: terminated with errors is JS_Warnings
                 // (AdminCleanup keeps JS_Terminated: the errors of its run
                 // scripts only count, S-07).
                 let admin = job.jcr.params.as_ref().is_some_and(|p| p.job_type == crate::job_worker::WorkerJobType::Admin);
-                if job.observed_status == 'T' && ending.errors > 0 && !admin { job.observed_status = 'W'; }
+                if job.observed_status == 'T' && ending.errors > 0 && !admin && !crate::verify::is_verify_job(job.job_id) { job.observed_status = 'W'; }
                 let db_status = job.observed_status.to_string();
                 let result = self.catalog.as_ref().ok_or_else(|| "catalog is unavailable".to_string()).and_then(|cat| cat.update_job_end(
                     job.job_id as i32, &db_status, now_unix(), ending.files, ending.bytes, ending.errors,
@@ -915,21 +992,7 @@ impl JobManager {
                     }
                 }
                 info!("JobManager: job {} worker exited (code={exit_code}), catalog status={db_status}", job.job_id);
-                // job_thread(): RunScripts "AfterJob" after the cleanup and its
-                // report, once (post_scripts_ran; `cancel` may have run them).
-                let has_scripts = !job.jcr.post_scripts_ran && self.config.as_ref().and_then(|c| c.read().ok())
-                    .is_some_and(|config| crate::runscript::has_scripts(&config, &job.job_name));
-                let spawned = if has_scripts {
-                    job.jcr.post_scripts_ran = true;
-                    spawn_scripts(host.clone(), self.bus.clone(), script_job(job), "AfterJob").ok()
-                } else {
-                    None
-                };
-                match spawned {
-                    Some(handle) => job.jcr.script_run = Some(ScriptRun { handle,
-                        kind: ScriptRunKind::After { phase: final_phase, status } }),
-                    None => finish_job(job, &self.bus, final_phase, status),
-                }
+                start_after_scripts(job, &host, &self.bus, self.config.as_ref(), final_phase, status);
             }
         }
 
@@ -996,6 +1059,25 @@ fn finish_job(job: &mut DirJob, bus: &MessageBus, phase: DirJobPhase, status: &s
     bus.post(BusMessage::JobStatus { job_id: job.job_id, job_name: job.job_name.clone(), status: status.into(), timestamp: now_unix() });
 }
 
+/// job_thread(): RunScripts "AfterJob" after the cleanup and its report,
+/// once (post_scripts_ran; `cancel` may have run them), on a thread of
+/// their own; the job is complete when they are done.
+fn start_after_scripts(job: &mut DirJob, host: &crate::runscript::Host, bus: &Arc<MessageBus>,
+                       config: Option<&SharedConfig>, phase: DirJobPhase, status: &'static str) {
+    let has_scripts = !job.jcr.post_scripts_ran && config.and_then(|c| c.read().ok())
+        .is_some_and(|config| crate::runscript::has_scripts(&config, &job.job_name));
+    let spawned = if has_scripts {
+        job.jcr.post_scripts_ran = true;
+        spawn_scripts(host.clone(), bus.clone(), script_job(job), "AfterJob").ok()
+    } else {
+        None
+    };
+    match spawned {
+        Some(handle) => job.jcr.script_run = Some(ScriptRun { handle, kind: ScriptRunKind::After { phase, status } }),
+        None => finish_job(job, bus, phase, status),
+    }
+}
+
 /// The job data for its run scripts.
 fn script_job(job: &DirJob) -> ScriptJob {
     let (client, storage) = job.resources.clone().unwrap_or_default();
@@ -1031,6 +1113,23 @@ fn batch_opener(catalog: &Option<CatalogHandle>) -> impl Fn() -> Option<Box<dyn 
     move || catalog.as_ref()?.dedicated().ok().map(|c| Box::new(c) as Box<dyn Db + Send>)
 }
 
+/// Jmsg() of the catalog requests of JCR `from`: the job's own, or another
+/// JCR the worker drives (mig_jcr, S-20) through the Director's Messages.
+fn post_catreq_messages_of(bus: &MessageBus, config: Option<&SharedConfig>, job: &DirJob, from: u32,
+                           messages: crate::catreq::Messages) {
+    if from == job.job_id || from == 0 {
+        return post_catreq_messages(bus, config, job, messages);
+    }
+    // mig_jcr's messages carry its JobId and go through the worker's Messages.
+    for (msg_type, text) in messages {
+        if let Some(config) = config.and_then(|c| c.read().ok()) {
+            let msg = crate::console_msg::job_message_text(&config.director.name, from, msg_type, &text);
+            crate::console_msg::dispatch_job_message(&config, &job.job_name, job.job_id, crate::audit::code(msg_type), now_unix(), &msg);
+        }
+        bus.post(BusMessage::JobMessage { job_id: job.job_id, job_name: job.job_name.clone(), msg_type, text, timestamp: now_unix() });
+    }
+}
+
 /// Jmsg() of the catalog requests to the job's messages.
 fn post_catreq_messages(bus: &MessageBus, config: Option<&SharedConfig>, job: &DirJob, messages: crate::catreq::Messages) {
     for (msg_type, text) in messages {
@@ -1039,10 +1138,6 @@ fn post_catreq_messages(bus: &MessageBus, config: Option<&SharedConfig>, job: &D
     }
 }
 
-/// Generate bootstrap data for a restore from a given backup JobId.
-pub fn generate_bootstrap(catalog: &Option<CatalogHandle>, job_id: u32) -> Option<String> {
-    catalog.as_ref()?.generate_bootstrap(job_id)
-}
 
 /// Find the most recent successful backup job for a client.
 pub fn find_latest_backup_jobid(catalog: &Option<CatalogHandle>, client_name: &str) -> Option<u32> {
@@ -1122,8 +1217,8 @@ Job { Name = single; Client = fd1; Storage = File }
             fd_password: String::new(), sd_address: String::new(), sd_port: 0, sd_password: String::new(),
             sd_device: String::new(), sd_media_type: String::new(), director_name: "dir".into(), pool_name: "Full".into(),
             fileset_includes: Vec::new(), fileset_excludes: Vec::new(), since_utime: 0, prev_job: String::new(),
-            where_path: None, replace: None, restore_jobid: None, bootstrap: None,
-            client_name: String::new(), client_first_connection: false }
+            where_path: None, regex_where: None, prefix_links: false, replace: None, restore_jobid: None, bootstrap: None,
+            client_name: String::new(), client_first_connection: false, copy: None, verify: None }
     }
 
     fn enqueue(m: &mut JobManager, id: u32, name: &str, priority: i32, client: &str, storage: &str) {

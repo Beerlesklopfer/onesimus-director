@@ -68,12 +68,12 @@ pub fn bstrutime(t: i64) -> String {
 }
 
 /// edit_uint64_with_commas().
-fn commas(v: u64) -> String {
+pub(crate) fn commas(v: u64) -> String {
     crate::sql_list::add_commas(&v.to_string())
 }
 
 /// edit_uint64_with_suffix().
-fn suffix(v: u64) -> String {
+pub(crate) fn suffix(v: u64) -> String {
     crate::commands::status::edit_uint64_with_suffix(v)
 }
 
@@ -100,7 +100,7 @@ fn radix() -> char {
 }
 
 /// printf("%.1f") in the process locale.
-fn fixed1(v: f64) -> String {
+pub(crate) fn fixed1(v: f64) -> String {
     format!("{v:.1}").replace('.', &radix().to_string())
 }
 
@@ -223,6 +223,11 @@ pub enum ReportKind {
     Consolidate,
     /// MigrationCleanup() of a Copy (true) or Migrate control job (C-058).
     MigrateControl(bool),
+    /// VerifyCleanup() (verify.rs, C-058).
+    Verify,
+    /// MigrationCleanup() of a Copy (true) or Migrate worker job: the report
+    /// comes from migrate::cleanup (C-058, S-05).
+    MigrateWorker(bool),
 }
 
 /// Job data known when the job is started (the JCR resources and their
@@ -265,7 +270,7 @@ pub fn first_client_connection(name: &str) -> bool {
         .get_or_insert_with(Default::default).insert(name.to_string())
 }
 
-fn raw_directive(config: &crate::director_config::DirectorConfig, kind: &str, name: &str, key: &str) -> Option<String> {
+pub(crate) fn raw_directive(config: &crate::director_config::DirectorConfig, kind: &str, name: &str, key: &str) -> Option<String> {
     config.raw.iter().find(|r| r.norm_type() == kind && r.name().is_some_and(|n| n.eq_ignore_ascii_case(name)))?
         .directives.iter().rev().find(|d| d.norm_key() == key).and_then(|d| d.first()).map(str::to_string)
 }
@@ -444,7 +449,7 @@ pub fn catalog_facts(catalog: Option<&CatalogHandle>, job_id: u32, client: &str)
 
 /// The header line of the summaries: "%s %s %s (%s):\n" (BAREOS, my_name,
 /// Full, ShortDate).
-fn summary_head(director: &str) -> String {
+pub(crate) fn summary_head(director: &str) -> String {
     format!("Bareos {director} {} ({}):\n", version::FULL, version::SHORT_DATE)
 }
 
@@ -626,11 +631,14 @@ pub fn end_of_job(director: &str, catalog: Option<&CatalogHandle>, report: &JobR
         ReportKind::Admin => return vec![admin_summary(report, outcome)],
         ReportKind::Consolidate => return vec![consolidate_summary(report, outcome)],
         ReportKind::MigrateControl(copy) => return vec![migrate_selection_summary(director, report, outcome, copy)],
+        ReportKind::Verify => return crate::verify::summary(director, report, outcome),
+        ReportKind::MigrateWorker(_) => return Vec::new(),
         _ => {}
     }
     let facts = catalog_facts(catalog, outcome.job_id, &report.client);
     match report.kind {
-        ReportKind::Admin | ReportKind::Consolidate | ReportKind::MigrateControl(_) => unreachable!(),
+        ReportKind::Admin | ReportKind::Consolidate | ReportKind::MigrateControl(_) | ReportKind::MigrateWorker(_)
+            | ReportKind::Verify => unreachable!(),
         ReportKind::Backup => backup_summary(director, report, outcome, &facts),
         ReportKind::Restore => restore_summary(director, report, outcome, &facts),
     }

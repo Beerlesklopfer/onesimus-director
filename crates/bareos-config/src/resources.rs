@@ -37,6 +37,9 @@ pub struct DirectorResource {
     /// Announce the Director via mDNS (_onesimus-dir._tcp)
     pub mdns_advertise: bool,
     pub working_directory: String,
+    /// `Key Encryption Key` (dird_conf.cc:142, stored in clear): wraps
+    /// generated volume encryption keys.
+    pub key_encryption_key: Option<String>,
 }
 
 impl Default for DirectorResource {
@@ -55,6 +58,7 @@ impl Default for DirectorResource {
             grpc_tls_key: None,
             mdns_advertise: true,
             working_directory: "/var/lib/bareos".to_string(),
+            key_encryption_key: None,
         }
     }
 }
@@ -314,10 +318,18 @@ pub struct ScheduleResource {
 pub struct RunDirective {
     pub level: Option<JobLevel>,
     pub pool: Option<String>,
+    /// FullPool / IncrementalPool / DifferentialPool / NextPool overrides
+    /// (run_conf.cc RunFields 'f', 'i', 'd', 'n').
+    pub full_pool: Option<String>,
+    pub incremental_pool: Option<String>,
+    pub differential_pool: Option<String>,
+    pub next_pool: Option<String>,
     pub storage: Option<String>,
     pub messages: Option<String>,
     pub priority: Option<i32>,
     pub spool_data: Option<bool>,
+    /// MaxRunSchedTime in seconds (RunFields 'm').
+    pub max_run_sched_time: Option<u64>,
     pub accurate: Option<bool>,
     /// First hour of `at HH:MM` (0 without `at`); the full set is `mask.hour`.
     pub hour: u32,

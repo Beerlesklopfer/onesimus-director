@@ -9,11 +9,21 @@
 //! - fd:heartbeat — periodic keepalive
 
 mod accept;
-mod config;
+mod acl_xattr;
+mod attribs;
 mod backup;
-mod restore;
-mod status;
+mod breg;
+mod compression;
+mod config;
+mod create_file;
 mod heartbeat;
+mod jmsg;
+mod job;
+mod restore;
+mod sd;
+mod status;
+mod streams;
+mod version;
 
 use std::path::PathBuf;
 use std::sync::Arc;

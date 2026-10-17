@@ -19,6 +19,8 @@ pub struct FdConfig {
     pub max_concurrent_jobs: u32,
     pub directors: Vec<DirectorAuth>,
     pub heartbeat_interval_secs: u64,
+    /// "SD Connect Timeout" (default 30 min)
+    pub sd_connect_timeout_secs: u64,
 }
 
 impl FdConfig {
@@ -36,13 +38,14 @@ impl FdConfig {
         Self::parse(&content)
     }
 
-    fn parse(input: &str) -> Result<Self, String> {
+    pub(crate) fn parse(input: &str) -> Result<Self, String> {
         let mut config = FdConfig {
             name: "bareos-fd".to_string(),
             port: 9102,
             max_concurrent_jobs: 20,
             directors: Vec::new(),
             heartbeat_interval_secs: 0,
+            sd_connect_timeout_secs: 1800,
         };
 
         // Simple block parser (reuse logic from bareos-config)
@@ -132,6 +135,9 @@ fn parse_block(block_type: &str, content: &str, config: &mut FdConfig) {
                 };
                 config.heartbeat_interval_secs = secs;
             }
+            if let Some(v) = directives.get("sd connect timeout") {
+                config.sd_connect_timeout_secs = parse_duration_secs(v).unwrap_or(1800);
+            }
         }
         "director" => {
             let name = directives.get("name").cloned().unwrap_or_default();
@@ -149,6 +155,25 @@ fn parse_block(block_type: &str, content: &str, config: &mut FdConfig) {
             debug!("FD config: skipping unknown block type '{other}'");
         }
     }
+}
+
+/// A Bareos time value: "N", "N sec", "N min", "N hours" ... in seconds.
+fn parse_duration_secs(v: &str) -> Option<u64> {
+    let v = v.trim().to_lowercase();
+    let digits: String = v.chars().take_while(|c| c.is_ascii_digit()).collect();
+    let n: u64 = digits.parse().ok()?;
+    let unit = v[digits.len()..].trim();
+    let mult = match unit.chars().next() {
+        None | Some('s') => 1,
+        Some('m') if unit.starts_with("mo") => 30 * 86400,
+        Some('m') => 60,
+        Some('h') => 3600,
+        Some('d') => 86400,
+        Some('w') => 7 * 86400,
+        Some('y') => 365 * 86400,
+        _ => return None,
+    };
+    Some(n * mult)
 }
 
 fn parse_directives(content: &str) -> std::collections::HashMap<String, String> {

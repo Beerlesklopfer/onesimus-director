@@ -44,6 +44,9 @@ pub enum WorkerJobType {
     Copy,
     Migrate,
     Consolidate,
+    /// verify.cc DoVerify(): FD (and for VolumeToCatalog SD) contact by the
+    /// worker, the catalog comparison by the Director (verify.rs). C-058.
+    Verify,
 }
 
 impl WorkerJobType {
@@ -83,9 +86,16 @@ pub struct JobParams {
     pub prev_job: String,          // unique job name of reference backup (for incr/diff)
     // Restore-specific
     pub where_path: Option<String>,
+    /// RegexWhere of the run or the Job (BuildRestoreCommand: before where).
+    #[serde(default)]
+    pub regex_where: Option<String>,
+    /// Job `Prefix Links` (restore `prelinks=`).
+    #[serde(default)]
+    pub prefix_links: bool,
     pub replace: Option<String>,       // "always", "never", "ifnewer", "ifolder"
     pub restore_jobid: Option<u32>,     // JobId of backup to restore from
-    pub bootstrap: Option<String>,      // Bootstrap data (volumes + file indices)
+    /// Restore: the bootstrap file (jcr->RestoreBootstrap) the job reads.
+    pub bootstrap: Option<String>,
     /// Client resource name (job messages "Connected Client: <name> ...").
     #[serde(default)]
     pub client_name: String,
@@ -93,6 +103,13 @@ pub struct JobParams {
     /// (fd_cmds.cc "Probing client protocol..." and the handshake text).
     #[serde(default)]
     pub client_first_connection: bool,
+    /// Verify job data (verify.rs), None for other job types.
+    #[serde(default)]
+    pub verify: Option<crate::verify::VerifyParams>,
+    /// SD read+write session of a Copy/Migrate worker job or a VirtualFull
+    /// (sd_copy.rs); None for jobs with a File daemon. C-058.
+    #[serde(default)]
+    pub copy: Option<crate::sd_copy::CopySession>,
 }
 
 /// Messages on the Worker↔Director pipe (JSON, one per line).
@@ -131,6 +148,14 @@ pub enum PipeMessage {
     /// (with "RunBeforeNow" when `run_before_now`). S-07.
     #[serde(rename = "run_scripts_done")]
     RunScriptsDone { status: i32, errors: u32, client_commands: Vec<String>, run_before_now: bool },
+    /// The writing Storage daemon's job end of an SD-SD Copy/Migrate
+    /// (mig_jcr: VolSessionId/Time from its Job command, SDJobFiles/Bytes/
+    /// Errors/Status from its "3099 Job end"). C-058, S-20.
+    #[serde(rename = "write_session")]
+    WriteSession { job_id: u32, vol_session_id: i32, vol_session_time: i32, files: i64, bytes: i64, errors: i32, status: i32 },
+    /// A Verify job event for the Director (verify.rs).
+    #[serde(rename = "verify")]
+    Verify { job_id: u32, event: crate::verify::Event },
 }
 
 /// What the Director's RunScripts "BeforeJob" left for the worker.
@@ -155,6 +180,23 @@ pub(crate) fn run_before_job(pipes: &mut WorkerPipes, job_id: u32) -> BeforeJob 
             None => return BeforeJob { status: 'R', ..Default::default() },
         }
     }
+}
+
+/// The start messages a job prepared at queue time, with job_thread's
+/// RunScripts "BeforeJob" right after its "Version:" message (first when
+/// there is none); the rest only when the scripts did not fail the job.
+pub(crate) fn start_messages_with_before(pipes: &mut WorkerPipes, job_id: u32, messages: &[(u32, String)]) -> BeforeJob {
+    let at = messages.iter().position(|(_, text)| text.starts_with("Version: ")).map_or(0, |i| i + 1);
+    for (code, text) in &messages[..at] {
+        worker_jmsg(job_id, *code, text.clone());
+    }
+    let before = run_before_job(pipes, job_id);
+    if !crate::job_manager::is_job_canceled(before.status) {
+        for (code, text) in &messages[at..] {
+            worker_jmsg(job_id, *code, text.clone());
+        }
+    }
+    before
 }
 
 /// fd_cmds.cc SendRunscriptsCommands(): the client's scripts, then
@@ -203,8 +245,8 @@ fn director_response(fd: &mut BnetStream<tls_psk::PskStream>, job_id: u32, comma
 }
 /// lib/message.h M_* codes of the worker's own job messages.
 const M_FATAL: u32 = 3;
-const M_ERROR: u32 = 4;
-const M_INFO: u32 = 6;
+pub(crate) const M_ERROR: u32 = 4;
+pub(crate) const M_INFO: u32 = 6;
 
 /// The worker's pipe to the Director for job messages (any thread).
 static JMSG_PIPE: std::sync::Mutex<Option<std::fs::File>> = std::sync::Mutex::new(None);
@@ -217,7 +259,9 @@ fn write_pipe_line(file: &mut std::fs::File, msg: &PipeMessage) {
     }
 }
 
-fn send_jmsg(msg: PipeMessage) {
+/// One pipe message as one write under the pipe lock: lines of the worker's
+/// threads never interleave (a torn JSON line is dropped by the Director).
+pub(crate) fn send_jmsg(msg: PipeMessage) {
     let mut pipe = JMSG_PIPE.lock().unwrap_or_else(|e| e.into_inner());
     if let Some(file) = pipe.as_mut() {
         write_pipe_line(file, &msg);
@@ -225,7 +269,7 @@ fn send_jmsg(msg: PipeMessage) {
 }
 
 /// Jmsg(jcr, type, 0, text) of the worker's job.
-fn worker_jmsg(job_id: u32, msg_type: u32, text: String) {
+pub(crate) fn worker_jmsg(job_id: u32, msg_type: u32, text: String) {
     send_jmsg(PipeMessage::Jmsg { job_id, msg_type, mtime: 0, text, raw: false });
 }
 
@@ -248,7 +292,7 @@ fn parse_daemon_jmsg(line: &str) -> Option<(u32, i64, String)> {
 
 /// A job message line of the File or Storage daemon: dispatched by the
 /// Director as it is; "Malformed message: %s\n" (M_ERROR) otherwise.
-fn forward_daemon_jmsg(job_id: u32, line: &str) {
+pub(crate) fn forward_daemon_jmsg(job_id: u32, line: &str) {
     match parse_daemon_jmsg(line) {
         Some((msg_type, mtime, text)) => send_jmsg(PipeMessage::Jmsg { job_id, msg_type, mtime, text, raw: true }),
         None => worker_jmsg(job_id, M_ERROR, format!("Malformed message: {line}\n")),
@@ -321,15 +365,15 @@ impl WorkerState {
 
 /// Pipes for Worker↔Director communication.
 pub(crate) struct WorkerPipes {
-    to_director: std::fs::File,
-    from_director: std::fs::File,
+    pub(crate) to_director: std::fs::File,
+    pub(crate) from_director: std::fs::File,
 }
 
 impl WorkerPipes {
-    fn send(&mut self, msg: &PipeMessage) {
-        if let Ok(json) = serde_json::to_string(msg) {
-            let _ = writeln!(self.to_director, "{json}");
-        }
+    pub(crate) fn send(&mut self, msg: &PipeMessage) {
+        // Locked single write (JMSG_PIPE is a clone of to_director): the SD
+        // thread writes to the same pipe.
+        send_jmsg(msg.clone());
     }
 
     fn recv(&mut self) -> Option<PipeMessage> {
@@ -367,9 +411,15 @@ pub fn run_worker(
     let mut sd_auth_key = String::new();
     let mut vol_session_id: i32 = 0;
     let mut vol_session_time: i32 = 0;
+    let mut bootstrap = String::new();
 
     // admin.cc do_admin(): "Start Admin JobId %d, Job=%s", then
     // AdminCleanup(jcr, JS_Terminated) in the Director (job end).
+    // Copy/Migrate worker jobs and VirtualFull: SD read+write session (C-058).
+    if let Some(copy) = &params.copy {
+        return crate::sd_copy::run(params, copy, &mut pipes);
+    }
+
     if params.job_type == WorkerJobType::Admin {
         // job.cc job_thread(): "Version: …" when the job runs.
         worker_jmsg(job_id, M_INFO, crate::job_messages::version_text());
@@ -385,6 +435,11 @@ pub fn run_worker(
         return if status == 'T' { EXIT_SUCCESS } else { EXIT_ERROR };
     }
 
+    // Verify: BeforeJob after its "Version:" start message (verify.rs).
+    if params.job_type == WorkerJobType::Verify {
+        return crate::verify::run_worker(params, &mut pipes);
+    }
+
     // job_thread(): RunScripts "BeforeJob" before the job contacts a daemon.
     let before = run_before_job(&mut pipes, job_id);
     if crate::job_manager::is_job_canceled(before.status) {
@@ -396,6 +451,20 @@ pub fn run_worker(
     loop {
         let old_name = state.name().to_string();
         state = match state {
+            // job_thread "Version: …", restore.cc DoNativeRestore: the
+            // bootstrap file is checked and read before any connection.
+            WorkerState::Init if params.job_type == WorkerJobType::Restore => {
+                worker_jmsg(job_id, M_INFO, crate::job_messages::version_text());
+                match restore_bootstrap(job_id, params.bootstrap.as_deref(), &params.unique_job) {
+                    Ok(data) => { bootstrap = data; WorkerState::ConnectingFD }
+                    Err(fatal) => {
+                        worker_jmsg(job_id, M_FATAL, fatal);
+                        pipes.send(&PipeMessage::JobEnd { job_id, term_code: b'f' as i32, files: 0, bytes: 0,
+                            errors: 1, vol_session_id: Some(0), vol_session_time: Some(0) });
+                        return EXIT_FATAL;
+                    }
+                }
+            }
             WorkerState::Init => {
                 WorkerState::ConnectingFD
             }
@@ -466,7 +535,7 @@ pub fn run_worker(
             }
 
             WorkerState::SDBootstrap => {
-                match sd_send_bootstrap(sd.as_mut().unwrap(), params) {
+                match bareos_stored::job::sd_send_bootstrap(sd.as_mut().unwrap(), &bootstrap) {
                     Ok(()) => {
                         debug!("Worker {job_id}: bootstrap sent to SD, sending run");
                         // After bootstrap, SD expects "run" — then enters WaitFD()
@@ -535,14 +604,8 @@ pub fn run_worker(
             }
 
             WorkerState::FDRestore => {
-                let where_path = params.where_path.as_deref().unwrap_or("/tmp/bareos-restore");
-                let replace_char = match params.replace.as_deref() {
-                    Some("never") => 'n',
-                    Some("ifnewer") => 'i',
-                    Some("ifolder") => 'o',
-                    _ => 'a', // always
-                };
-                let cmd = format!("restore replace={replace_char} prelinks=0 where={where_path}\n");
+                let cmd = fd_restore_command(params);
+                let where_path = params.regex_where.as_deref().or(params.where_path.as_deref()).unwrap_or("");
                 match send_expect(fd.as_mut().unwrap(), &cmd, "2000 OK restore", job_id, "FD restore") {
                     Ok(_) => {
                         info!("Worker {job_id}: restore running → {where_path}");
@@ -682,9 +745,19 @@ fn sd_use_device(sd: &mut BnetStream<tls_psk::PskStream>, p: &JobParams) -> Resu
     Ok(crate::job_messages::unbash_spaces(device))
 }
 
-fn sd_send_bootstrap(sd: &mut BnetStream<tls_psk::PskStream>, p: &JobParams) -> Result<(), String> {
-    let bsr = p.bootstrap.as_deref().unwrap_or("");
-    bareos_stored::job::sd_send_bootstrap(sd, bsr)
+/// restore.cc DoNativeRestore and bsr.cc OpenBootstrapFile: the bootstrap
+/// file of the restore job (jcr->RestoreBootstrap) and the job messages
+/// around it, "Start Restore Job" once a file is named; `Err` is the
+/// M_FATAL text the job ends with. Never a bootstrap built otherwise.
+fn restore_bootstrap(job_id: u32, path: Option<&str>, unique_job: &str) -> Result<String, String> {
+    let Some(path) = path.filter(|p| !p.is_empty()) else {
+        return Err("Cannot restore without a bootstrap file.\n\
+            You probably ran a restore job directly. All restore jobs must\n\
+            be run using the restore command.\n".to_string());
+    };
+    worker_jmsg(job_id, M_INFO, crate::job_messages::start_restore_text(unique_job));
+    std::fs::read_to_string(path).map_err(|e| format!("Could not open bootstrap file {path}: ERR={}\n",
+        crate::commands::restore::errno_text(&e)))
 }
 
 fn to_sd_params(p: &JobParams) -> SdJobParams {
@@ -716,7 +789,7 @@ fn fd_restore_setup(fd: &mut BnetStream<tls_psk::PskStream>, p: &JobParams, sd_a
 }
 
 // Bareos getmsg.cc: Status Job=%127s JobStatus=%d; job_status.h: M/m/R.
-fn storage_job_status(message: &str) -> Result<u8, &'static str> {
+pub(crate) fn storage_job_status(message: &str) -> Result<u8, &'static str> {
     let parts: Vec<_> = message.split_whitespace().collect();
     if parts.len() != 3 || parts[0] != "Status"
         || !parts[1].starts_with("Job=") || parts[1].len() == 4 {
@@ -732,7 +805,7 @@ fn storage_wait_state(message: &str) -> Result<Option<&'static str>, &'static st
     Ok(match storage_job_status(message)? { b'M' => Some("WaitingMount"), b'm' => Some("WaitingMedia"), b'R' => Some("Running"), _ => None })
 }
 
-fn sd_catrec_loop(
+pub(crate) fn sd_catrec_loop(
     sd: &mut BnetStream<tls_psk::PskStream>,
     job_id: u32,
     to_dir: &mut std::fs::File,
@@ -748,16 +821,10 @@ fn sd_catrec_loop(
                 // without an answer, `C`atReq/Catreq and `B`lastAttr to the
                 // Director, which may answer (an empty answer sends nothing).
                 if data.first() == Some(&b'U') {
-                    let pipe_msg = PipeMessage::UpdCat { job_id, data: hex::encode(&data) };
-                    if let Ok(json) = serde_json::to_string(&pipe_msg) {
-                        let _ = writeln!(to_dir, "{json}");
-                    }
+                    send_jmsg(PipeMessage::UpdCat { job_id, data: hex::encode(&data) });
                 } else if matches!(data.first(), Some(b'C' | b'B')) {
                     debug!("Worker {job_id} SD CatReq: {msg}");
-                    let pipe_msg = PipeMessage::CatReq { job_id, request: msg_raw.into_owned() };
-                    if let Ok(json) = serde_json::to_string(&pipe_msg) {
-                        let _ = writeln!(to_dir, "{json}");
-                    }
+                    send_jmsg(PipeMessage::CatReq { job_id, request: msg_raw.into_owned() });
                     // Read CatResp from Director via pipe
                     let mut buf = String::new();
                     let mut reader = BufReader::new(&mut *from_dir);
@@ -789,15 +856,13 @@ fn sd_catrec_loop(
                 } else if msg.starts_with("Status Job=") {
                     match storage_job_status(&msg) {
                         Ok(status) => {
-                            let update = PipeMessage::JobStatus { job_id, status: status as i32 };
-                            if let Ok(json) = serde_json::to_string(&update) { let _ = writeln!(to_dir, "{json}"); }
+                            send_jmsg(PipeMessage::JobStatus { job_id, status: status as i32 });
                         }
                         Err(error) => warn!("Worker {job_id}: {error}"),
                     }
                 } else if msg.starts_with("3099 Job") {
                     if let Some(status) = msg.split_whitespace().find_map(|part| part.strip_prefix("JobStatus=").and_then(|value| value.parse::<u8>().ok())) {
-                        let update = PipeMessage::JobStatus { job_id, status: status as i32 };
-                        if let Ok(json) = serde_json::to_string(&update) { let _ = writeln!(to_dir, "{json}"); }
+                        send_jmsg(PipeMessage::JobStatus { job_id, status: status as i32 });
                     }
                     debug!("Worker {job_id} SD: job end");
                     break;
@@ -923,7 +988,7 @@ fn wait_for_fd_end_job(fd: &mut BnetStream<tls_psk::PskStream>, job_id: u32) -> 
 // Connection helpers
 // ============================================================================
 
-fn connect_fd(p: &JobParams) -> Result<(BnetStream<tls_psk::PskStream>, String), String> {
+pub(crate) fn connect_fd(p: &JobParams) -> Result<(BnetStream<tls_psk::PskStream>, String), String> {
     let sock = resolve_connect(&format!("{}:{}", p.fd_address, p.fd_port), 3)?;
     sock.set_read_timeout(None).ok();
     let psk = tls_psk::password_to_psk(&p.fd_password);
@@ -940,7 +1005,7 @@ fn connect_fd(p: &JobParams) -> Result<(BnetStream<tls_psk::PskStream>, String),
     Ok((bnet, cipher))
 }
 
-fn connect_sd(p: &JobParams) -> Result<(BnetStream<tls_psk::PskStream>, String), String> {
+pub(crate) fn connect_sd(p: &JobParams) -> Result<(BnetStream<tls_psk::PskStream>, String), String> {
     let sock = resolve_connect(&format!("{}:{}", p.sd_address, p.sd_port), 3)?;
     sock.set_read_timeout(None).ok();
     let psk = tls_psk::password_to_psk(&p.sd_password);
@@ -964,7 +1029,7 @@ fn resolve_connect(addr: &str, timeout_secs: u64) -> Result<std::net::TcpStream,
         .map_err(|e| format!("connect {addr}: {e}"))
 }
 
-fn send_expect(bnet: &mut BnetStream<tls_psk::PskStream>, cmd: &str, expect: &str, job_id: u32, label: &str) -> Result<String, String> {
+pub(crate) fn send_expect(bnet: &mut BnetStream<tls_psk::PskStream>, cmd: &str, expect: &str, job_id: u32, label: &str) -> Result<String, String> {
     debug!("Worker {job_id} {label}: sending '{}'", cmd.trim());
     bnet.send_str(cmd).map_err(|e| format!("{label} send: {e}"))?;
     loop {
@@ -983,13 +1048,30 @@ fn send_expect(bnet: &mut BnetStream<tls_psk::PskStream>, cmd: &str, expect: &st
     }
 }
 
-fn now_unix() -> i64 { SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_secs() as i64 }
+/// dird/restore.cc BuildRestoreCommand(): "restore replace=%c prelinks=%d
+/// where=%s" or "... regexwhere=%s" (regexwhere wins), spaces bashed.
+fn fd_restore_command(params: &JobParams) -> String {
+    let bash = |s: &str| s.replace(' ', "\x01");
+    let (key, value) = match params.regex_where.as_deref() {
+        Some(r) => ("regexwhere", bash(r)),
+        None => ("where", bash(params.where_path.as_deref().unwrap_or(""))),
+    };
+    let replace = match params.replace.as_deref() {
+        Some("never") => 'n',
+        Some("ifnewer") => 'w', // REPLACE_IFNEWER (baconfig.h)
+        Some("ifolder") => 'o',
+        _ => 'a', // always
+    };
+    format!("restore replace={replace} prelinks={} {key}={value}\n", u8::from(params.prefix_links))
+}
+
+pub(crate) fn now_unix() -> i64 { SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_secs() as i64 }
 
 // ============================================================================
 // Signal handlers (worker-side)
 // ============================================================================
 
-static WORKER_CANCEL: AtomicBool = AtomicBool::new(false);
+pub(crate) static WORKER_CANCEL: AtomicBool = AtomicBool::new(false);
 /// A Jmsg M_FATAL of the worker set JS_FatalError.
 static WORKER_FATAL: AtomicBool = AtomicBool::new(false);
 static WORKER_PAUSED: AtomicBool = AtomicBool::new(false);
@@ -1133,6 +1215,27 @@ pub fn spawn_job_worker(_: u32, _: &str, _: &JobParams) -> io::Result<JobHandle>
 mod wait_protocol_tests {
     use super::*;
     #[test]
+    fn restore_command_like_build_restore_command() {
+        let mut p = JobParams {
+            job_id: 1, unique_job: "R.1".into(), job_name: "R".into(), job_type: WorkerJobType::Restore,
+            level: "full".into(), fd_address: String::new(), fd_port: 0, fd_password: String::new(),
+            sd_address: String::new(), sd_port: 0, sd_password: String::new(), sd_device: String::new(),
+            sd_media_type: String::new(), director_name: String::new(), pool_name: String::new(),
+            fileset_includes: vec![], fileset_excludes: vec![], since_utime: 0, prev_job: String::new(),
+            where_path: Some("/tmp/with space".into()), regex_where: None, prefix_links: false,
+            replace: Some("ifnewer".into()), restore_jobid: None, bootstrap: None,
+            client_name: String::new(), client_first_connection: false, copy: None, verify: None,
+        };
+        assert_eq!(fd_restore_command(&p), "restore replace=w prelinks=0 where=/tmp/with\x01space\n");
+        p.regex_where = Some("!/a!/b!".into());
+        p.prefix_links = true;
+        p.replace = None;
+        assert_eq!(fd_restore_command(&p), "restore replace=a prelinks=1 regexwhere=!/a!/b!\n");
+        p.regex_where = None;
+        p.where_path = None;
+        assert_eq!(fd_restore_command(&p), "restore replace=a prelinks=1 where=\n");
+    }
+    #[test]
     fn termination_status_is_not_collapsed_to_success_or_error() {
         for (code, status) in [(0,"T"),(84,"T"),(87,"W"),(101,"e"),(69,"E"),(102,"f"),(65,"A"),(68,"D"),(2,"E"),(3,"A"),(999,"E")] {
             assert_eq!(catalog_job_status(code), status);
@@ -1261,6 +1364,24 @@ mod wait_protocol_tests {
 #[cfg(test)]
 mod job_message_tests {
     use super::*;
+
+    /// restore.cc DoNativeRestore / bsr.cc OpenBootstrapFile: the restore
+    /// job's bootstrap file, else the M_FATAL text; never one built otherwise.
+    #[test]
+    fn restore_job_reads_only_its_bootstrap_file() {
+        let fatal = restore_bootstrap(1, None, "r").unwrap_err();
+        assert_eq!(fatal, "Cannot restore without a bootstrap file.\nYou probably ran a restore job directly. \
+            All restore jobs must\nbe run using the restore command.\n");
+        assert_eq!(restore_bootstrap(1, Some(""), "r").unwrap_err(), fatal);
+        let dir = std::env::temp_dir();
+        let missing = dir.join(format!("onesimus-test-{}-missing.bsr", std::process::id())).display().to_string();
+        assert_eq!(restore_bootstrap(1, Some(&missing), "r").unwrap_err(),
+            format!("Could not open bootstrap file {missing}: ERR=No such file or directory\n"));
+        let bsr = dir.join(format!("onesimus-test-{}-read.bsr", std::process::id())).display().to_string();
+        std::fs::write(&bsr, "Storage=\"Tape\"\nVolume=\"V1\"\n").unwrap();
+        assert_eq!(restore_bootstrap(1, Some(&bsr), "r").unwrap(), "Storage=\"Tape\"\nVolume=\"V1\"\n");
+        let _ = std::fs::remove_file(&bsr);
+    }
     use crate::catalog_worker::{CatalogHandle, CatalogRequest, CatalogResponse, SqlColumn, SqlTable};
     use std::sync::{Arc, Mutex, RwLock};
 
