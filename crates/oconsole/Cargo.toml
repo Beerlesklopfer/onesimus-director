@@ -18,7 +18,7 @@ mcp-development = []
 
 [dependencies]
 bareos-bnet.workspace = true
-bareos-proto-rs.workspace = true
+onesimus-proto-rs.workspace = true
 
 anyhow.workspace = true
 tracing.workspace = true

@@ -1575,7 +1575,7 @@ mod tests {
                 Mode::Typed => {
                     self.log.push(format!("rpc {rpc}"));
                     let (_, out) = mcp_typed::rpc_types(rpc).unwrap();
-                    Some(Ok(bareos_proto_rs::typed::json_to_message(&out, &json!({"success":true,"text":"typed","command":"purge volume=A yes"})).bytes))
+                    Some(Ok(onesimus_proto_rs::typed::json_to_message(&out, &json!({"success":true,"text":"typed","command":"purge volume=A yes"})).bytes))
                 }
             }
         }

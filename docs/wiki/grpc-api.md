@@ -1,23 +1,25 @@
 # Typisierte gRPC-API (`DirectorApi`)
 
-Der Director bietet neben dem Dienst `Director` (`ExecuteCommand` mit Text-/JSON-Ausgabe) den typisierten Dienst `bareos.director.api.DirectorApi` an: je Konsolenbefehl bzw. Unterbefehl eine RPC, deren Antwort eine strukturierte Protobuf-Message ist. Definiert in [`proto/director_api.proto`](https://github.com/Beerlesklopfer/baReos-proto/blob/director-typed-api/director_api.proto) (Repository baReos-proto, Branch `director-typed-api`), implementiert in `crates/onesimus-dird/src/grpc/api.rs` (lesende RPCs im Produktions-Build, S-34; schreibende, Sitzungs- und Restore-RPCs nur im Entwicklungs-Build mit dem Cargo-Feature `grpc-development`, S-35).
+Der Director bietet neben dem Dienst `Director` (`ExecuteCommand` mit Text-/JSON-Ausgabe) den typisierten Dienst `onesimus.director.api.DirectorApi` an: je Konsolenbefehl bzw. Unterbefehl eine RPC, deren Antwort eine strukturierte Protobuf-Message ist. Definiert in [`proto/director_api.proto`](https://github.com/Beerlesklopfer/onesimus-proto/blob/director-typed-api/director_api.proto) (Repository onesimus-proto, Branch `director-typed-api`), implementiert in `crates/onesimus-dird/src/grpc/api.rs` (lesende RPCs im Produktions-Build, S-34; schreibende, Sitzungs- und Restore-RPCs nur im Entwicklungs-Build mit dem Cargo-Feature `grpc-development`, S-35).
+
+Protobuf-Pakete (seit 17.10.2026, ohne Übergangszeit; vorher `bareos.*`): `onesimus` (Optionen in `onesimus_options.proto`), `onesimus.director` (Dienst `Director`), `onesimus.director.commands`, `onesimus.director.api` (Dienst `DirectorApi`), `onesimus.ccc`. Repository [onesimus-proto](https://github.com/Beerlesklopfer/onesimus-proto); Rust-Typen im Crate `onesimus-proto-rs` (`onesimus_proto_rs::onesimus::director::…`). Die BNET-Konsolenschnittstelle bleibt mit der Bareos-Konsole kompatibel.
 
 ## Konventionen der Proto-Dateien
 
-Zusammenfassung der bestehenden Dateien (`director_service.proto`, `director_commands.proto`, `bareos_options.proto`) und wie `director_api.proto` ihnen folgt:
+Zusammenfassung der bestehenden Dateien (`director_service.proto`, `director_commands.proto`, `onesimus_options.proto`) und wie `director_api.proto` ihnen folgt:
 
 | Konvention (bestehend) | `director_api.proto` |
 |---|---|
 | Kopf: `SPDX-License-Identifier: AGPL-3.0-only`, Zeile `BAREOS® - Backup Archiving REcovery Open Sourced`, Copyright-Zeile, Leerzeile, Kurzbeschreibung | gleich |
-| `syntax = "proto3"`, Paketschema `bareos.director[.*]` | Paket `bareos.director.api` |
+| `syntax = "proto3"`, Paketschema `onesimus.director[.*]` | Paket `onesimus.director.api` |
 | Abschnitte mit `// ====…` und Titel, Befehle als `// name — Beschreibung` | gleich |
 | Kommentare deutsch, Umlaute als ae/oe/ue (service), Feldkommentare am Zeilenende | gleich |
-| Requests sind `*Command`-Messages mit `option (bareos.command_name)`, `help_text`, `usage`, `allowed_in_runscript`, `audit_event`; Felder mit `bare_flag`, `required` | jede neue Request-Message trägt die Optionen; `command_name` enthält das Unterkommando wie bei `ConfigureAddCommand` (`"configure add"`) |
+| Requests sind `*Command`-Messages mit `option (onesimus.command_name)`, `help_text`, `usage`, `allowed_in_runscript`, `audit_event`; Felder mit `bare_flag`, `required` | jede neue Request-Message trägt die Optionen; `command_name` enthält das Unterkommando wie bei `ConfigureAddCommand` (`"configure add"`) |
 | Request-Feldnamen = Konsolen-Schlüsselwörter (`jobid`, `since_jobid`, `oldvolume`) | gleich; zusätzlich `llist` (Langform) |
 | Antworten `*Response`, Datensätze `*Info` (`ServerInfo`, `CommandInfo`) | gleich |
 | Ergebnis-Feldnamen snake_case | snake_case = Schlüssel der API-2-JSON-Ausgabe (`jobid`, `volbytes`, `client_connection`) |
 | Enums: `<PREFIX>_UNSPECIFIED = 0` (bzw. `RESPONSE_FORMAT_DEFAULT = 0`) | `JOB_STATUS_UNSPECIFIED = 0` usw.; Werte von `JobStatus`/`JobType`/`JobLevel` = ASCII-Code des Katalogzeichens |
-| Zeitstempel als `int64` (Unix-Zeit), keine Well-Known-Types im Dienst; `bareos_options.proto` importiert `google/protobuf/descriptor.proto` | Unix-Zeiten `int64`; Katalog-Zeitpunkte als Text (Ortszeit des Directors, ohne Zeitzone gespeichert); `google.protobuf.Struct`/`Value` nur für frei geformte Inhalte (Direktiven von `show`, OVFS-Baum) |
+| Zeitstempel als `int64` (Unix-Zeit), keine Well-Known-Types im Dienst; `onesimus_options.proto` importiert `google/protobuf/descriptor.proto` | Unix-Zeiten `int64`; Katalog-Zeitpunkte als Text (Ortszeit des Directors, ohne Zeitzone gespeichert); `google.protobuf.Struct`/`Value` nur für frei geformte Inhalte (Direktiven von `show`, OVFS-Baum) |
 | Wiederverwendung statt Duplikat | wo eine `*Command`-Message aus `director_commands.proto` alle Parameter einer Unterform hat, wird sie verwendet (`VersionCommand`, `StatusCommand`, `ShowCommand`, `Dot*Command`, `RunCommand` …); neue Requests nur, wo keine passt |
 
 Jede neue Message wurde gegen diese Liste geprüft. Abweichungen mit Begründung: die ASCII-Code-Nummerierung der Job-Enums (die Werte sind so ohne Tabelle in das Katalogzeichen umrechenbar), Katalog-Zeitpunkte als Text (eine Umrechnung in UTC bräuchte die Zeitzone des Katalogs) und `google.protobuf.Struct` für Direktiven (ihre Form hängt vom Ressourcentyp ab).
@@ -42,7 +44,7 @@ Jede neue Message wurde gegen diese Liste geprüft. Abweichungen mit Begründung
 
 ## Abbildung der API-2-Ausgabe
 
-Die Lese-RPCs führen den Befehl im JSON-Modus aus (wie `.api 2`) und wandeln das `result`-Objekt generisch anhand der Protobuf-Deskriptoren um (`crates/bareos-proto-rs/src/typed.rs`):
+Die Lese-RPCs führen den Befehl im JSON-Modus aus (wie `.api 2`) und wandeln das `result`-Objekt generisch anhand der Protobuf-Deskriptoren um (`crates/onesimus-proto-rs/src/typed.rs`):
 
 - JSON-Schlüssel → gleichnamiges Feld (Kleinschreibung, `-` → `_`, führender `.` entfällt).
 - Zeichenketten werden nur verlustfrei umgewandelt (`"0042"` bleibt Text); Wahrheitswerte aus `1/0`, `t/f`, `true/false`, `yes/no`.
@@ -59,14 +61,14 @@ Mit `grpcurl` (ohne Server-Reflection, daher mit den Proto-Dateien; Port = DirPo
 ```sh
 DIR=localhost:10101
 PROTO="-import-path proto -proto director_service.proto -proto director_api.proto"
-NONCE=$(grpcurl -insecure $PROTO -d '{"console_name":"admin"}' $DIR bareos.director.Director/GetChallenge | jq -r .nonce)
+NONCE=$(grpcurl -insecure $PROTO -d '{"console_name":"admin"}' $DIR onesimus.director.Director/GetChallenge | jq -r .nonce)
 KEY=$(printf '%s' "$PASSWORD" | md5sum | cut -d' ' -f1)
 PROOF=$(printf '%s' "$NONCE" | openssl dgst -sha256 -hmac "$KEY" | cut -d' ' -f2)
 TOKEN=$(grpcurl -insecure $PROTO -d "{\"console_name\":\"admin\",\"nonce\":\"$NONCE\",\"proof\":\"$PROOF\"}" \
-        $DIR bareos.director.Director/Login | jq -r .sessionToken)
+        $DIR onesimus.director.Director/Login | jq -r .sessionToken)
 
 grpcurl -insecure $PROTO -H "x-onesimus-session: $TOKEN" -d '{"limit": 2, "llist": true}' \
-        $DIR bareos.director.api.DirectorApi/ListJobs
+        $DIR onesimus.director.api.DirectorApi/ListJobs
 ```
 
 Antwort (gekürzt):
@@ -88,7 +90,7 @@ Antwort (gekürzt):
 In Rust mit tonic (wie im Integrationstest `crates/onesimus-dird/tests/grpc_typed_api.rs`):
 
 ```rust
-use bareos_proto_rs::bareos::director::api::{director_api_client::DirectorApiClient, ListJobsCommand, JobStatus};
+use onesimus_proto_rs::onesimus::director::api::{director_api_client::DirectorApiClient, ListJobsCommand, JobStatus};
 
 let mut api = DirectorApiClient::new(channel.clone());          // gleicher Kanal wie DirectorClient
 let mut req = tonic::Request::new(ListJobsCommand { client: "bareos-fd".into(), limit: 20, ..Default::default() });
@@ -112,6 +114,7 @@ for job in api.list_jobs(req).await?.into_inner().jobs {
 - Antwort `ActionResponse`: `success`, `text` (Ausgabe wie in der Konsole), `errors`, `warnings`, `command` (ausgeführte Zeile), `jobids` (aus „Job queued. JobId=N“ bzw. dem Request) und die typisierten Datensätze nach der Änderung: `jobs` (Run, Rerun, Restore, RestoreTreeDone, UpdateJob, Cancel), `volumes` (Label, Relabel, UpdateVolume, PruneVolume, PurgeVolume, Truncate mit `volume`), `pools` (CreatePool, UpdatePool); `.bvfs_*`/`.acl` liefern das API-2-Ergebnis in `result`. Ein fehlgeschlagener Befehl ist `success = false` mit den Meldungen, kein gRPC-Fehler.
 - Neue Request-Messages, wo die Messages aus `director_commands.proto` Parameter nicht kennen: `RunJobCommand`, `RerunJobCommand`, `RestoreJobCommand`, `RestoreSessionCommand`, `LabelVolumeCommand`, `RelabelVolumeCommand`, `DeleteObjectCommand`, `PruneTargetCommand`, `PurgeTargetCommand`, `UpdateVolumeCommand`, `TruncateVolumesCommand`, `SetDebugLevelCommand`; `PruneVolumeCommand`/`PruneDirectoryCommand` haben `confirm` bekommen.
 - `Wait` läuft in einem eigenen Thread (es blockiert bis zum Jobende), alle anderen über die Warteschlange.
+- **`.profile`-Änderungen ohne Wirkung:** `DotProfileCreate`, `DotProfileSet`, `DotProfileDelete`, `DotProfileAssign` und `DotProfileUnassign` werden angenommen und laufen durch, ändern aber nichts: `.profile` ist im Director ein Alias von `.acl`, der diese Unterbefehle nicht kennt. Profile bleiben Konfigurationsressourcen (`configure add profile`, `reload`). Offen als [S-37](../STUBS.md).
 
 ### Sitzungsbefehle (Entwicklungs-Build)
 
@@ -129,15 +132,15 @@ for job in api.list_jobs(req).await?.into_inner().jobs {
 Die `RestoreTree*`-RPCs entsprechen den Befehlen der Dateiauswahl: `Cd`, `Ls` (ls/dir), `LsDir`, `LsMark`, `Pwd`, `Find` liefern `RestoreTreeListResponse` (`cwd`, `entries` mit `name`, `is_dir`, `marked`, dazu `text`); `Mark`, `Unmark`, `MarkDir`, `UnmarkDir`, `Count`, `Estimate` liefern `RestoreTreeCountResponse` (`marked` = neu markiert bzw. markiert, `total`, `bytes`). `RestoreTreeDone` beendet die Auswahl, beantwortet „OK to run?“ mit yes und liefert die JobId des Restore-Jobs; `RestoreTreeAbort` verwirft. Die Sitzung gehört zum Session-Token (andere Logins bekommen `NOT_FOUND`) und endet nach 10 Minuten ohne Aufruf.
 
 ```sh
-grpcurl … -d '{"client":"fd1","jobid":[631],"where":"/tmp/restore"}' $DIR bareos.director.api.DirectorApi/StartRestoreSession
-grpcurl … -d '{"session_id":"<id>","path":"/etc/"}' $DIR bareos.director.api.DirectorApi/RestoreTreeCd
-grpcurl … -d '{"session_id":"<id>","path":"hosts"}' $DIR bareos.director.api.DirectorApi/RestoreTreeMark
-grpcurl … -d '{"session_id":"<id>"}' $DIR bareos.director.api.DirectorApi/RestoreTreeDone
+grpcurl … -d '{"client":"fd1","jobid":[631],"where":"/tmp/restore"}' $DIR onesimus.director.api.DirectorApi/StartRestoreSession
+grpcurl … -d '{"session_id":"<id>","path":"/etc/"}' $DIR onesimus.director.api.DirectorApi/RestoreTreeCd
+grpcurl … -d '{"session_id":"<id>","path":"hosts"}' $DIR onesimus.director.api.DirectorApi/RestoreTreeMark
+grpcurl … -d '{"session_id":"<id>"}' $DIR onesimus.director.api.DirectorApi/RestoreTreeDone
 ```
 
 ### Tests
 
-Abbildungs-Tests in `crates/bareos-proto-rs/src/typed.rs` und `crates/onesimus-dird/src/grpc/api.rs`; Konsolenzeilen und Sperren jeder Schreib-RPC in `grpc/api_write.rs` (nur Entwicklungs-Build); `UNIMPLEMENTED` im Produktions-Build und Warteschlange/Folgeabfrage/Abmeldung im Entwicklungs-Build in `grpc/api.rs`; Abdeckungstest `grpc/coverage.rs` (prüft gegen [`commands/bareos-director-commands.json`](commands/bareos-director-commands.json), dass jeder Befehl und jedes Unterkommando eine RPC hat, dass jede RPC entweder Lese-RPC oder im Entwicklungs-Build implementiert ist, und hält die Tabellen unten aktuell). Integrationstests in `crates/onesimus-dird/tests/grpc_typed_api.rs`:
+Abbildungs-Tests in `crates/onesimus-proto-rs/src/typed.rs` und `crates/onesimus-dird/src/grpc/api.rs`; Konsolenzeilen und Sperren jeder Schreib-RPC in `grpc/api_write.rs` (nur Entwicklungs-Build); `UNIMPLEMENTED` im Produktions-Build und Warteschlange/Folgeabfrage/Abmeldung im Entwicklungs-Build in `grpc/api.rs`; Abdeckungstest `grpc/coverage.rs` (prüft gegen [`commands/bareos-director-commands.json`](commands/bareos-director-commands.json), dass jeder Befehl und jedes Unterkommando eine RPC hat, dass jede RPC entweder Lese-RPC oder im Entwicklungs-Build implementiert ist, und hält die Tabellen unten aktuell). Integrationstests in `crates/onesimus-dird/tests/grpc_typed_api.rs`:
 
 - `typed_api_matches_console_api2`: Director mit der Parity-Konfiguration auf einer Wegwerf-Kopie von `bareos_cppref`, jede Lese-RPC gegen die `.api 2`-Ausgabe derselben Konsolenzeile, auch für eine eingeschränkte Konsole;
 - `typed_api_writes_on_private_daemons` (nur Entwicklungs-Build): eigener Katalog (Bareos-DDL), **private** `bareos-fd`/`bareos-sd` mit eigener Konfiguration, eigenen Ports und Dateigerät (nie die laufenden Daemons): Label, Backup über `Run`, Restore über `Restore` und über eine interaktive `RestoreTree`-Sitzung (Inhalt der wiederhergestellten Dateien geprüft), Abbruch einer Sitzung, Mount/Unmount/Release, UpdateVolume, Purge/Truncate/Delete mit `confirm`, Cancel, DeleteJob, Enable/Disable, ConfigureAdd, Reload, `.sql`, sqlquery, nicht anwendbare RPCs, Abmeldung.

@@ -368,7 +368,7 @@ mod tests {
     use super::*;
     use std::collections::BTreeSet;
 
-    use bareos_proto_rs::typed::{registry, DIRECTOR_API_SERVICE};
+    use onesimus_proto_rs::typed::{registry, DIRECTOR_API_SERVICE};
     use serde_json::Value;
 
     const INVENTORY: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../../docs/wiki/commands/bareos-director-commands.json");
@@ -524,7 +524,7 @@ mod tests {
     /// All RPCs with request and response type (from the descriptors).
     fn rpc_table() -> String {
         let service = registry().service(DIRECTOR_API_SERVICE).unwrap();
-        let short = |t: &str| t.trim_start_matches(".bareos.director.").to_string();
+        let short = |t: &str| t.trim_start_matches(".onesimus.director.").to_string();
         let mut out = String::from("| RPC | Request | Response | Stand |\n|---|---|---|---|\n");
         for method in &service.method {
             out.push_str(&format!("| `{}` | `{}` | `{}` | {} |\n", method.name(),

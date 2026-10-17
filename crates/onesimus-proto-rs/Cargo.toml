@@ -1,6 +1,6 @@
 [package]
-name = "bareos-proto-rs"
-description = "Generated Rust types from Bareos gRPC protocol definitions"
+name = "onesimus-proto-rs"
+description = "Generated Rust types from the Onesimus gRPC protocol definitions (onesimus-proto)"
 version.workspace = true
 edition.workspace = true
 authors.workspace = true

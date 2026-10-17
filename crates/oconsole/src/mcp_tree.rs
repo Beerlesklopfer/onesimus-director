@@ -501,7 +501,7 @@ mod tests {
                 "StartRestoreSession" => json!({"session_id":"abc","files":3,"cwd":"/"}),
                 _ => json!({"marked":1}),
             };
-            Some(Ok(bareos_proto_rs::typed::json_to_message(&out, &reply).bytes))
+            Some(Ok(onesimus_proto_rs::typed::json_to_message(&out, &reply).bytes))
         }
     }
 

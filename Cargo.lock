@@ -352,17 +352,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "bareos-proto-rs"
-version = "25.1.2+onesimus.0.2.0"
-dependencies = [
- "prost",
- "prost-types",
- "serde_json",
- "tonic",
- "tonic-build",
-]
-
-[[package]]
 name = "bareos-stored"
 version = "25.1.2+onesimus.0.2.0"
 dependencies = [
@@ -1716,7 +1705,6 @@ dependencies = [
  "anyhow",
  "axum 0.8.9",
  "bareos-bnet",
- "bareos-proto-rs",
  "bytes",
  "clap",
  "crossbeam-channel",
@@ -1725,6 +1713,7 @@ dependencies = [
  "http-body-util",
  "hyper-util",
  "libc",
+ "onesimus-proto-rs",
  "rand 0.8.8",
  "rmcp",
  "rustls",
@@ -1760,7 +1749,6 @@ dependencies = [
  "bareos-catalog",
  "bareos-config",
  "bareos-orm",
- "bareos-proto-rs",
  "bareos-stored",
  "base64 0.22.1",
  "bytes",
@@ -1777,6 +1765,7 @@ dependencies = [
  "md-5",
  "mdns-sd",
  "nix 0.29.0",
+ "onesimus-proto-rs",
  "openssl",
  "prost",
  "prost-types",
@@ -1796,6 +1785,17 @@ dependencies = [
  "tower 0.4.13",
  "tracing",
  "tracing-subscriber",
+]
+
+[[package]]
+name = "onesimus-proto-rs"
+version = "25.1.2+onesimus.0.2.0"
+dependencies = [
+ "prost",
+ "prost-types",
+ "serde_json",
+ "tonic",
+ "tonic-build",
 ]
 
 [[package]]

@@ -5,7 +5,7 @@
 //! become the request message, the typed response becomes the tool result
 //! (`structuredContent` = the response as JSON with the proto field names).
 //! Requests and responses are encoded with the descriptors of
-//! `bareos_proto_rs::typed`, so one generic call serves every RPC.
+//! `onesimus_proto_rs::typed`, so one generic call serves every RPC.
 //!
 //! Order of the routes (see [`call`]):
 //! 1. gRPC, typed RPC implemented → typed result;
@@ -19,7 +19,7 @@
 
 use serde_json::{Map, Value, json};
 
-use bareos_proto_rs::typed;
+use onesimus_proto_rs::typed;
 
 use crate::mcp::{CommandRunner, TypedError};
 

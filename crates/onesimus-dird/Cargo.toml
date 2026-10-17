@@ -20,7 +20,7 @@ grpc-development = []
 bareos-bnet.workspace = true
 bareos-config.workspace = true
 bareos-catalog.workspace = true
-bareos-proto-rs.workspace = true
+onesimus-proto-rs.workspace = true
 bareos-orm = { path = "../bareos-orm" }
 bareos-stored = { path = "../bareos-stored" }
 

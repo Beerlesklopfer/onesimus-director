@@ -18,7 +18,7 @@ use sha2::{Digest, Sha256};
 use tonic::metadata::MetadataValue;
 use tonic::transport::{Channel, Endpoint, Uri};
 
-use bareos_proto_rs::bareos::director::{
+use onesimus_proto_rs::onesimus::director::{
     director_client::DirectorClient, ChallengeRequest, CommandRequest, LoginRequest,
     ResponseFormat,
 };
@@ -111,11 +111,11 @@ impl GrpcSession {
 impl GrpcSession {
     /// Call one RPC of the typed `DirectorApi` with an encoded request and
     /// return the encoded response (S-36: the MCP tools encode/decode with
-    /// the descriptors of `bareos_proto_rs::typed`).
+    /// the descriptors of `onesimus_proto_rs::typed`).
     pub async fn call_typed(&mut self, rpc: &str, request: Vec<u8>) -> Result<Vec<u8>, tonic::Status> {
         let mut grpc = tonic::client::Grpc::new(self.channel.clone());
         grpc.ready().await.map_err(|e| tonic::Status::unavailable(format!("gRPC channel not ready: {e}")))?;
-        let path = format!("/{}/{rpc}", bareos_proto_rs::typed::DIRECTOR_API_SERVICE);
+        let path = format!("/{}/{rpc}", onesimus_proto_rs::typed::DIRECTOR_API_SERVICE);
         let path = tonic::codegen::http::uri::PathAndQuery::try_from(path)
             .map_err(|e| tonic::Status::invalid_argument(format!("RPC name {rpc}: {e}")))?;
         let mut req = tonic::Request::new(request);

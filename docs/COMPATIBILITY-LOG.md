@@ -76,7 +76,7 @@ Neue Einträge unten anhängen; behobene Einträge bleiben mit Commit stehen.
 | C-055 | 16.10.2026 | CatReq UpdateMedia | — | Plausibilitätsprüfungen beim Medien-Update (VolFiles rückwärts → VolBlocks zurücksetzen, „Ignoring Volume Blocks…“) | Keine Prüfungen, VolBlocks nicht behandelt | `catreq.cc:258-280` | behoben (Merge 16.10.2026; PruneVolumes/Purge-/Recycle-Oldest und LabelFormat mit Variablen offen) |
 | C-056 | 16.10.2026 | setbandwidth | — | `SetbwlimitCmd`: Auswahl per job/jobid/ujobid/all/state, Original-Fehlertexte | Nur `client=`/`storage=` mit `limit=`, eigene Fehlertexte | `ua_cmds.cc:935` | behoben (16.10.2026; SetbwlimitCmd portiert: atoi-Limit, FindArgKeyword, select_jobs("limit"), Original-Texte; Storage-Zweig verbindet nur, sendet wie das Original nichts (SendBwlimitToFd über file_bsock); Fälle `c056` nur ohne Daemon-Kontakt; offen: jcr->max_bandwidth laufender Jobs, Jmsg-Fehlermeldungen der Connect-/Antwortfehler) |
 | C-057 | 16.10.2026 | reload | — | Nach `reload` zeigt `show clients` beim Client `Catalog = "MyCatalog"` | Zeile fehlt nach `reload`; Fehlerpfad von reload nicht verglichen | `reload.cc` CheckResources/DoReloadConfig, `lib/parse_conf_init_resource.cc`, `dird_conf.cc` ValidateResource | behoben (16.10.2026); S-29 (17.10.2026): `-t` prüft und endet wie das Original (Exit 42/1/0); der normale Start lädt weiterhin ohne Prüfung |
-| C-058 | 16.10.2026 | Jobstart anderer Jobtypen | `c058-*` | `run … yes` startet Restore/Verify/Admin/Copy/Migrate/Consolidate (RunJob) | „Running X jobs is not available yet.“ (Restore über `restore` funktioniert) | `job.cc` RunJob, `migrate.cc`, `verify.cc`, `admin.cc`, `consolidate.cc`, `jobq.cc` | teilweise behoben (16.10.2026): Admin, Restore über `run`, Copy/Migrate-Steuerjob (Auswahl), Consolidate ohne Always-Incremental-Jobs; offen siehe Hinweis C-058 |
+| C-058 | 16.10.2026 | Jobstart anderer Jobtypen | `c058-*` | `run … yes` startet Restore/Verify/Admin/Copy/Migrate/Consolidate (RunJob) | „Running X jobs is not available yet.“ (Restore über `restore` funktioniert) | `job.cc` RunJob, `migrate.cc`, `verify.cc`, `admin.cc`, `consolidate.cc`, `jobq.cc` | teilweise behoben (16.10.2026): Admin, Restore über `run`, Copy/Migrate-Steuerjob (Auswahl), Consolidate ohne Always-Incremental-Jobs; offen siehe Hinweis C-058; Nachtrag 17.10.2026: alle Teilpunkte über S-03 … S-07, S-19 … S-28 umgesetzt, Reste siehe Abschnitt „Offen“ |
 | C-059 | 16.10.2026 | Zeitangaben | `c059-*` | StrToUtime/CompensateShortDate mit Bareos-eigenem `bsscanf` (installierte libbareos): `%u` ohne Vorzeichen/Leerzeichen, leeres Feld = 0, Überlauf modulo 2^32, Text nach Leerzeichen erlaubt, Jahr allein/Jahr-Monat werden ergänzt, Zeiten vor 1970 negativ | Sieben eigene Ports (`purge.rs`, `estimate.rs`, `catreq.rs`, `status.rs`, `list.rs`, `bvfs.rs`, `restore.rs`) mit libc-/chrono-Semantik; `restore before=2020` bzw. `2020-01` abgelehnt; Since-Zeit echter Backups per `EXTRACT(EPOCH)` als UTC statt Ortszeit (FD bekam die Since-Zeit um den UTC-Versatz zu spät) | `lib/btime.cc`, `lib/scan.cc`, `ua_restore.cc` CompensateShortDate, `fd_cmds.cc` SendSinceTime | behoben (16.10.2026): ein gemeinsamer Port `btime.rs` auf `scan.rs` (bsscanf), Erwartungswerte per C++-Harness gegen die installierte libbareos geprüft |
 | C-060 | 16.10.2026 | Handshake-Modus | `c018-client` nach `c017-*` | Ein erfolgreicher FD-Connect ohne Konsole (z. B. `estimate`) speichert den Handshake-Modus; der nächste Konsolen-Connect probt nicht mehr | `estimate` speicherte nichts → „Probing client protocol…“ erneut | `fd_cmds.cc` ConnectToFileDaemon | behoben (16.10.2026) |
 | C-061 | 16.10.2026 | No-op `.` im API-Modus | `c061-dot-api2` | `.` unter `.api 1`/`.api 2` liefert Signale CMD_BEGIN, CMD_BEGIN, CMD_OK, CMD_OK, MAIN_PROMPT: `noop_cmd` signalisiert selbst noch einmal BEGIN/OK innerhalb des Rahmens von `Do_a_command` | Nur ein BEGIN/OK-Paar | `ua_cmds.cc:2557` noop_cmd, `ua_cmds.cc:585-588` | behoben (16.10.2026; `session.rs` sendet das innere Paar; Leerzeile/Leerraum/Tab ohne Signale, `..`/`#`/`;` als „invalid command“ ohne Rahmen, `. args`, `.api json` bereits bzw. jetzt gleich – Fälle `c061` für API 0/1/2) |
@@ -132,28 +132,69 @@ Hinweis C-002: Text-Sitzungen über gRPC/Command-Queue nutzen denselben SessionM
 
 Hinweis C-059: Die übrigen StrToUtime-Aufrufer des Originals (`update jobid=… starttime=`, Run On Incoming Connect Interval) sind in Onesimus nicht implementiert; sie müssen bei ihrer Portierung `crate::btime::str_to_utime` verwenden.
 
-## Stand 16.10.2026
+## Stand 17.10.2026
 
-`development` = `1b074e1` (gepusht nach `origin/development`). Alle Agent-Branches beider
-Runden sind gemergt. Tests grün: onesimus-dird 365 + 4, oconsole 26, bareos-config 37,
-bareos-bnet 46. Voller Paritätslauf auf dem Endstand (16.10.2026, Baseline aktualisiert): 1436 von 1443
-Fällen byte-identisch, keine Regression.
+`development` = `c6d042d`. Alle Stub-Agenten (S-01 … S-35) sind gemergt; offen in
+[STUBS.md](STUBS.md) sind nur S-36 (MCP-Vollausbau nach C-087) und S-37
+(`.profile`-Änderungen ohne Wirkung). Paritäts-Ratsche `tests/parity/baseline.json`:
+2164 Einträge, alle `match` (die 15 Fälle `c074-*` stehen nach Entscheidung C-074
+bewusst außerhalb). Ein Volllauf auf diesem Stand ist beauftragt; seine Zahlen
+werden hier und in `docs/wiki/commands` nachgetragen.
 
-Verbleibende Unterschiede im Paritätslauf: nur noch `c035-delete-noarg-api2` (C-046).
-Die alten Fälle `banner*`, `status-dir`, `status-subscriptions`, `dot-status-dir-running`
-normalisieren seit 16.10.2026 Versionstoken, Build-Datum, Binary-Info und Zeiten wie die
-neueren Fälle. `var`: das Original gibt bei nacktem `var` undefinierte Speicherreste aus;
-der Fall prüft daher nur noch die Katalogzeilen davor (Hinweis im Fall, Commit `dd377c0`).
+Seit dem 16.10.2026 erledigt: alle Jobtypen über `run` und Scheduler (Verify S-04,
+Copy/Migrate S-03/S-05/S-20, Consolidate S-06, RunScripts S-07/S-24), der native
+Backup-Ablauf (S-19, S-23, S-27, S-28), Scheduler (S-15/S-16, C-081), Jobqueue und
+Joblimits (S-22/S-26, C-083), label/relabel zum SD (S-32, C-084), Standard-Wartezeit
+auf Volumes (S-33, C-085), eigener FD `bareos-filed` (S-12, S-13), `-t` wie
+`bareos-dir -t` (S-29), typisierte gRPC-API (S-34, S-35) und MCP-Tools (S-30, S-31).
+Übersicht je Befehl: [TODO-COMMANDS.md](TODO-COMMANDS.md).
 
 Instabile Fälle (gelegentlich rot, allein grün): `status-client` (echter FD wird von
 mehreren Directors gleichzeitig benutzt), `list-jobs` (Jobs mit gleicher Startzeit ohne
-eindeutige Sortierung), `c015-list-jobs-enabled-count` (undefiniertes Verhalten im Original).
+eindeutige Sortierung), `c015-list-jobs-enabled-count` (undefiniertes Verhalten im Original),
+`c042-status-client-star` (zusätzliche Director-Verbindung am gemeinsamen echten FD).
+
+Verlauf 16.10.2026: `development` = `1b074e1`; Tests grün (onesimus-dird 365 + 4,
+oconsole 26, bareos-config 37, bareos-bnet 46); Volllauf 1436 von 1443 Fällen
+byte-identisch, verbleibender Unterschied nur `c035-delete-noarg-api2` (C-046, inzwischen
+behoben). Die alten Fälle `banner*`, `status-dir`, `status-subscriptions`,
+`dot-status-dir-running` normalisieren seit 16.10.2026 Versionstoken, Build-Datum,
+Binary-Info und Zeiten wie die neueren Fälle. `var`: das Original gibt bei nacktem `var`
+undefinierte Speicherreste aus; der Fall prüft daher nur noch die Katalogzeilen davor
+(Hinweis im Fall, Commit `dd377c0`).
 
 ### Offen
 
-- Offen (17.10.2026, nach Merge aller Agenten): C-074 entschieden und umgesetzt (S-10: Onesimus-Erweiterungen `.sql*`, `.acl`, `.grpc`), C-058 teilweise (Copy/Migrate-Arbeitsjobs, PoolOccupancy, RunScripts; Consolidate mit AI-Jobs behoben, S-06), C-067 ohne `label`/`relabel … encrypt`, C-080 (`run` eines Restore-Jobs ohne Bootstrap); behoben: C-056 … C-071, C-073, C-075 … C-079.
-- C-058 teilweise behoben (17.10.2026); offen: RunScripts (siehe Hinweis C-058); Consolidate mit Always-Incremental-Jobs behoben (S-06). Copy/Migrate-Arbeitsjobs und PoolOccupancy: Branch `worktree-agent-a346f0f19a14d5238` (stub-migrate).
-- Befehlsstatus im Wiki (`docs/wiki/commands`): 53 `parity_verified`, 31 `partial`, 4 `registered_unverified`, 26 Restore-Baum-Befehle `missing_context` (Stand vor den C-045/C-049/C-055-Merges, Auffrischung offen).
+Stand 17.10.2026; nur Punkte, die in einem Eintrag ausdrücklich offen stehen:
+
+- C-058: alle Teilpunkte umgesetzt (Admin, Restore über `run`, Verify S-04, Copy/Migrate
+  und PoolOccupancy S-03/S-05/S-20, Consolidate S-06, RunScripts S-07/S-24, Backup-Ablauf
+  S-19/S-23/S-27/S-28). Rest: beim Cancel die Berichtszeilen „Director's comm line to SD
+  dropped“/„Network error with FD …“ und SD termination status; `*JobCancel*` des
+  Job-Threads verbraucht keine Jobnamen-Nummer (S-26); passive Clients beim Backup
+  ungeprüft (S-23).
+- C-084 / S-08: `label`/`relabel … encrypt` erzeugt noch keinen Volume-Schlüssel.
+- C-087 / S-36: MCP-Vollausbau (alle Befehle lokal über stdio, HTTP lesend) offen.
+- S-37: `.profile create/set/delete/assign/unassign` ohne Wirkung (`.profile` ist Alias von `.acl`).
+- C-057: der normale Start prüft die Konfiguration nicht wie `-t`; Lexer-Diagnosen nicht im Log.
+- C-062 (Hinweis): `configure update/delete` (Erweiterungen) prüfen die Ressourcen-ACL nicht.
+- C-056: `max_bandwidth` laufender Jobs, Jmsg bei Connect-/Antwortfehlern von `setbandwidth`.
+- C-014: SD-Teil von `status all`/`status storage`.
+- C-047: Nicht-UTF-8-Dateinamen auf SQL_ASCII-Katalogen.
+- C-059 (Hinweis): `update jobid=… starttime=` und Run On Incoming Connect Interval fehlen.
+- C-086: auf PDC per Katalogabfrage klären, warum `list volumes pool=BGLAGE` nur BGLAGE-0015 zeigte.
+- S-13: eigener FD ohne PKI, Plugins, Heartbeat, client-initiierte Verbindungen, LMDB-Accurate.
+- Befehlsstatus im Wiki (`docs/wiki/commands`): noch 53 `parity_verified`, 31 `partial`,
+  4 `registered_unverified`, 26 Restore-Baum-Befehle `missing_context` vom 16.10.2026;
+  Auffrischung nach dem laufenden Volllauf.
+
+Erledigt seit der letzten Fassung dieses Abschnitts: C-074 entschieden und umgesetzt (S-10),
+C-080 behoben (S-01: Restore ohne Bootstrap endet wie im Original), RunScripts (S-07),
+Copy/Migrate-Arbeitsjobs und PoolOccupancy (S-03/S-05, Branch stub-migrate gemergt),
+C-056 … C-073, C-075 … C-086 bis auf die oben genannten Reste.
+
+Weiterhin gültig:
+
 - OVFS-Integration im Director gemergt (16.10.2026): Erkennung beim Connect (Version 0.1.x + Signaturen), Befehle `.ovfs_status/_latest/_tree/_ls/_versions`, MCP-Tools in oconsole, SQL-Rückfall byte-gleich zur Extension (Äquivalenztest mit gebauter Extension auf PG 17).
 - OVFS (eigene PostgreSQL-Extension, paralleles Projekt `oenesimus-postgres-plugin`) ist der Onesimus-Weg für Verzeichnisbäume und Restore-Auswahl. BVFS (`commands/bvfs.rs`, byte-gleich portiert, Fälle `c022`) bleibt nur zur Abwärtskompatibilität für Bareos-Clients (z. B. bareos-webui) erhalten und darf sich dabei nicht ändern.
 - Erledigt 16.10.2026: C-012s `update`-Validierung nach dem C-011-Merge geprüft; `maxvoljobs`/`maxvolfiles` war verloren und ist wiederhergestellt (Fälle `t001`).

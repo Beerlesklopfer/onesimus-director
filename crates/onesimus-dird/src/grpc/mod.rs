@@ -25,8 +25,8 @@ use crate::message_bus::MessageBus;
 use crate::command_queue::CommandQueue;
 
 use service::DirectorServiceImpl;
-use bareos_proto_rs::bareos::director::director_server::DirectorServer;
-use bareos_proto_rs::bareos::director::api::director_api_server::DirectorApiServer;
+use onesimus_proto_rs::onesimus::director::director_server::DirectorServer;
+use onesimus_proto_rs::onesimus::director::api::director_api_server::DirectorApiServer;
 
 /// What a command needs to run outside the command worker (typed API:
 /// restore sessions, blocking commands), like a console session.

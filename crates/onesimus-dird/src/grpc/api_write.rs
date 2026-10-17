@@ -791,8 +791,8 @@ fn truncate(r: &Req) -> Result<Plan, String> {
 /// ConfigureResourceType number -> configure keyword.
 fn resource_type(r: &Req) -> Result<String, String> {
     let number = r.0.get("resource_type").and_then(Value::as_i64).unwrap_or(0) as i32;
-    let registry = bareos_proto_rs::typed::registry();
-    let e = registry.enumeration(".bareos.director.commands.ConfigureResourceType").ok_or("no enum")?;
+    let registry = onesimus_proto_rs::typed::registry();
+    let e = registry.enumeration(".onesimus.director.commands.ConfigureResourceType").ok_or("no enum")?;
     e.value.iter().find(|v| v.number() == number && number != 0)
         .map(|v| v.name().trim_start_matches("CONFIGURE_RESOURCE_").to_ascii_lowercase())
         .ok_or_else(|| "resource_type is required".to_string())
