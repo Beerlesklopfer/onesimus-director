@@ -3,8 +3,6 @@
 //! GENERATED from bareos core/src/dird/dird_conf.cc, lib/tls_resource_items.h
 //! and lib/messages_resource_items.h by scratchpad gen_items.py — do not edit.
 
-#![allow(dead_code)]
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Ty {
     Acl,

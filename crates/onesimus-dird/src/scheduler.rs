@@ -298,12 +298,17 @@ mod tests {
     }
 
     /// Local time of today's `hour`:`minute`.
+    /// Local time of `hour`:`minute` on Wednesday 2026-10-14 (inside `tz`).
     fn local(hour: i32, minute: i32) -> i64 {
-        let t = now_unix() as libc::time_t;
         let mut tm: libc::tm = unsafe { std::mem::zeroed() };
-        unsafe { libc::localtime_r(&t, &mut tm) };
+        (tm.tm_year, tm.tm_mon, tm.tm_mday) = (126, 9, 14);
         (tm.tm_hour, tm.tm_min, tm.tm_sec, tm.tm_isdst) = (hour, minute, 0, -1);
         unsafe { libc::mktime(&mut tm) as i64 }
+    }
+
+    /// Runs `f` in a fixed time zone (holding the TZ lock of the TZ tests).
+    fn tz<R>(f: impl FnOnce() -> R) -> R {
+        crate::run_time::tests::with_tz("Europe/Berlin", f)
     }
 
     const BASE: &str = r#"
@@ -335,68 +340,80 @@ Messages { Name=Standard }
 
     #[test]
     fn hourly_run_starts_once_per_hour() {
-        let cfg = config(&format!("{BASE}Schedule {{ Name=hourly; Run = Full hourly at 0:10 }}\n{}",
-            job("a", "hourly", "")));
-        let start = local(9, 0);
-        let started = run_scheduler(&cfg, start, start + 3 * 3600);
-        let times: Vec<i64> = started.iter().map(|s| s.1).collect();
-        assert_eq!(times, vec![local(9, 10), local(10, 10), local(11, 10)]);
+        tz(|| {
+            let cfg = config(&format!("{BASE}Schedule {{ Name=hourly; Run = Full hourly at 0:10 }}\n{}",
+                job("a", "hourly", "")));
+            let start = local(9, 0);
+            let started = run_scheduler(&cfg, start, start + 3 * 3600);
+            let times: Vec<i64> = started.iter().map(|s| s.1).collect();
+            assert_eq!(times, vec![local(9, 10), local(10, 10), local(11, 10)]);
+        })
     }
 
     #[test]
     fn same_run_is_not_queued_twice() {
-        // daily run; the scheduler refills the queue every minute after it
-        // ran, without starting the job a second time.
-        let cfg = config(&format!("{BASE}Schedule {{ Name=daily; Run = Full daily at 10:30 }}\n{}",
-            job("a", "daily", "")));
-        let start = local(10, 0);
-        let started = run_scheduler(&cfg, start, start + 2 * 3600);
-        assert_eq!(started, vec![("a".to_string(), local(10, 30), "Full".to_string(), 10)]);
+        tz(|| {
+            // daily run; the scheduler refills the queue every minute after it
+            // ran, without starting the job a second time.
+            let cfg = config(&format!("{BASE}Schedule {{ Name=daily; Run = Full daily at 10:30 }}\n{}",
+                job("a", "daily", "")));
+            let start = local(10, 0);
+            let started = run_scheduler(&cfg, start, start + 2 * 3600);
+            assert_eq!(started, vec![("a".to_string(), local(10, 30), "Full".to_string(), 10)]);
+        })
     }
 
     #[test]
     fn missed_run_older_than_a_minute_is_skipped() {
-        let cfg = config(&format!("{BASE}Schedule {{ Name=daily; Run = Full daily at 10:30 }}\n{}",
-            job("a", "daily", "")));
-        assert!(run_scheduler(&cfg, local(10, 31), local(10, 59)).is_empty());
-        // within the minute it still runs
-        let started = run_scheduler(&cfg, local(10, 30) + 59, local(10, 59));
-        assert_eq!(started.len(), 1);
+        tz(|| {
+            let cfg = config(&format!("{BASE}Schedule {{ Name=daily; Run = Full daily at 10:30 }}\n{}",
+                job("a", "daily", "")));
+            assert!(run_scheduler(&cfg, local(10, 31), local(10, 59)).is_empty());
+            // within the minute it still runs
+            let started = run_scheduler(&cfg, local(10, 30) + 59, local(10, 59));
+            assert_eq!(started.len(), 1);
+        })
     }
 
     #[test]
     fn earlier_runtime_then_lower_priority_runs_first() {
-        let cfg = config(&format!("{BASE}Schedule {{ Name=s; Run = Full daily at 10:30 }}\n\
-            Schedule {{ Name=p; Run = Incremental Priority=5 daily at 10:30 }}\n\
-            Schedule {{ Name=e; Run = Full daily at 10:20 }}\n{}{}{}",
-            job("low", "s", "Priority=20"), job("high", "p", ""), job("early", "e", "Priority=50")));
-        let started = run_scheduler(&cfg, local(10, 0), local(11, 0));
-        let order: Vec<(&str, &str, i32)> = started.iter().map(|s| (s.0.as_str(), s.2.as_str(), s.3)).collect();
-        assert_eq!(order, vec![("early", "Full", 50), ("high", "Incremental", 5), ("low", "Full", 20)]);
+        tz(|| {
+            let cfg = config(&format!("{BASE}Schedule {{ Name=s; Run = Full daily at 10:30 }}\n\
+                Schedule {{ Name=p; Run = Incremental Priority=5 daily at 10:30 }}\n\
+                Schedule {{ Name=e; Run = Full daily at 10:20 }}\n{}{}{}",
+                job("low", "s", "Priority=20"), job("high", "p", ""), job("early", "e", "Priority=50")));
+            let started = run_scheduler(&cfg, local(10, 0), local(11, 0));
+            let order: Vec<(&str, &str, i32)> = started.iter().map(|s| (s.0.as_str(), s.2.as_str(), s.3)).collect();
+            assert_eq!(order, vec![("early", "Full", 50), ("high", "Incremental", 5), ("low", "Full", 20)]);
+        })
     }
 
     #[test]
     fn disabled_job_schedule_or_client_is_not_scheduled() {
-        let cfg = config(&format!("{BASE}Schedule {{ Name=s; Run = Full daily at 10:30 }}\n\
-            Schedule {{ Name=off; Enabled=no; Run = Full daily at 10:30 }}\n{}{}{}",
-            job("job_off", "s", "Enabled=no"), job("sched_off", "off", ""),
-            job("client_off", "s", "").replace("Client=fd1", "Client=off")));
-        assert!(run_scheduler(&cfg, local(10, 0), local(11, 0)).is_empty());
+        tz(|| {
+            let cfg = config(&format!("{BASE}Schedule {{ Name=s; Run = Full daily at 10:30 }}\n\
+                Schedule {{ Name=off; Enabled=no; Run = Full daily at 10:30 }}\n{}{}{}",
+                job("job_off", "s", "Enabled=no"), job("sched_off", "off", ""),
+                job("client_off", "s", "").replace("Client=fd1", "Client=off")));
+            assert!(run_scheduler(&cfg, local(10, 0), local(11, 0)).is_empty());
+        })
     }
 
     #[test]
     fn job_disabled_while_queued_does_not_run() {
-        let cfg = config(&format!("{BASE}Schedule {{ Name=s; Run = Full daily at 10:30 }}\n{}", job("a", "s", "")));
-        let now = Cell::new(local(10, 0));
-        let mut scheduler = Scheduler::new(FakeClock { now: &now, limit: local(10, 1) });
-        let mut started = 0;
-        scheduler.fill_queue_or_sleep(&cfg);
-        assert_eq!(scheduler.queue.len(), 1);
-        cfg.write().unwrap().jobs[0].enabled = false;
-        now.set(local(10, 30));
-        scheduler.wait_for_jobs_to_run(&cfg, &mut |_| started += 1);
-        assert_eq!(started, 0);
-        assert!(scheduler.queue.is_empty());
+        tz(|| {
+            let cfg = config(&format!("{BASE}Schedule {{ Name=s; Run = Full daily at 10:30 }}\n{}", job("a", "s", "")));
+            let now = Cell::new(local(10, 0));
+            let mut scheduler = Scheduler::new(FakeClock { now: &now, limit: local(10, 1) });
+            let mut started = 0;
+            scheduler.fill_queue_or_sleep(&cfg);
+            assert_eq!(scheduler.queue.len(), 1);
+            cfg.write().unwrap().jobs[0].enabled = false;
+            now.set(local(10, 30));
+            scheduler.wait_for_jobs_to_run(&cfg, &mut |_| started += 1);
+            assert_eq!(started, 0);
+            assert!(scheduler.queue.is_empty());
+        })
     }
 
     #[test]
