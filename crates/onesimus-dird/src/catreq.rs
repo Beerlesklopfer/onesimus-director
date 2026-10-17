@@ -623,7 +623,7 @@ pub(crate) fn make_inchanger_unique(cat: &mut Cat, mr: &MediaRecord) -> bool {
 }
 
 /// sql_create.cc CreateMediaRecord().
-fn create_media_record(cat: &mut Cat, mr: &mut MediaRecord) -> bool {
+pub(crate) fn create_media_record(cat: &mut Cat, mr: &mut MediaRecord) -> bool {
     let name = esc(&mr.volume_name);
     if let Some(t) = cat.query_db(&format!("SELECT MediaId FROM Media WHERE VolumeName='{name}'"), "sql_create.cc:401") {
         if !t.rows.is_empty() {
