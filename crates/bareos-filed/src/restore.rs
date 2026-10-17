@@ -146,13 +146,8 @@ fn bget_msg<S: Read + Write>(sd: &mut BnetStream<S>) -> Result<Vec<u8>, String> 
 }
 
 fn parse_rechdr(msg: &[u8]) -> Option<(u32, u32, i32, i32, u32)> {
-    let s = std::str::from_utf8(msg).ok()?;
-    let mut it = s.trim_end_matches(['\0', '\n']).split_whitespace();
-    if it.next()? != "rechdr" {
-        return None;
-    }
-    Some((it.next()?.parse().ok()?, it.next()?.parse().ok()?, it.next()?.parse().ok()?,
-        it.next()?.parse().ok()?, it.next()?.parse().ok()?))
+    let v = crate::scan::scan(msg, "rechdr %u %u %d %d %u", 5)?;
+    Some((v[0].int() as u32, v[1].int() as u32, v[2].int() as i32, v[3].int() as i32, v[4].int() as u32))
 }
 
 /// The restore of one SD read session.
@@ -431,7 +426,7 @@ impl Restore<'_> {
                 r.file_addr = faddr;
                 let f = r.bfd.as_mut()?;
                 if let Err(e) = f.seek(SeekFrom::Start(faddr)) {
-                    self.jmsg(M_ERROR, format!("Seek to {faddr} error on {fname}: ERR={e}\n"));
+                    self.jmsg(M_ERROR, format!("Seek to {faddr} error on {fname}: ERR={}\n", crate::berrno::s(&e)));
                     return None;
                 }
             }
@@ -452,8 +447,8 @@ impl Restore<'_> {
         }
         let f = r.bfd.as_mut()?;
         let res = match r.win32.as_mut() {
-            Some(w) => w.process(data, f).map_err(|e| format!("Write error in Win32 Block Decomposition on {fname}: {e}\n")),
-            None => f.write_all(data).map_err(|e| format!("Write error on {fname}: {e}\n")),
+            Some(w) => w.process(data, f).map_err(|e| format!("Write error in Win32 Block Decomposition on {fname}: {}\n", crate::berrno::s(&e))),
+            None => f.write_all(data).map_err(|e| format!("Write error on {fname}: {}\n", crate::berrno::s(&e))),
         };
         if let Err(m) = res {
             self.jmsg(M_ERROR, m);
@@ -641,6 +636,7 @@ mod tests {
         let mut sd = BnetStream::new(FakeSd { input: Cursor::new(r.0) });
         let params = RestoreParams { where_: Where::Prefix(tmp.as_os_str().as_encoded_bytes().to_vec()), replace: b'a', prefix_links: false };
         let mut msgs = JobMsgs::new("test-fd");
+        msgs.job_id = 1;
         let mut counters = Counters::default();
         let mut create = CreateState::default();
         let canceled = AtomicBool::new(false);
@@ -676,6 +672,7 @@ mod tests {
         let mut sd = BnetStream::new(FakeSd { input: Cursor::new(r2.0) });
         let params = RestoreParams { replace: b'n', ..params };
         let mut msgs = JobMsgs::new("test-fd");
+        msgs.job_id = 1;
         let mut sent = Vec::new();
         Restore { params: &params, msgs: &mut msgs, counters: &mut Counters::default(), create: &mut CreateState { keep_path_list: true, ..Default::default() }, canceled: &canceled }
             .run(&mut sd, &mut |m: &mut JobMsgs| sent.extend(m.take_queued()));
@@ -692,6 +689,7 @@ mod tests {
         let mut sd = BnetStream::new(FakeSd { input: Cursor::new(v) });
         let params = RestoreParams { where_: Where::Prefix(b"/nonexistent".to_vec()), replace: b'a', prefix_links: false };
         let mut msgs = JobMsgs::new("t");
+        msgs.job_id = 1;
         let canceled = AtomicBool::new(false);
         let mut sent = Vec::new();
         Restore { params: &params, msgs: &mut msgs, counters: &mut Counters::default(), create: &mut CreateState::default(), canceled: &canceled }

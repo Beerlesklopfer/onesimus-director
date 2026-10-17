@@ -447,6 +447,7 @@ fn main() {
     let job_mgr = Arc::new(std::sync::Mutex::new(
         job_manager::JobManager::new(bus.clone(), Some(shared_config.clone()), catalog.clone())
     ));
+    job_mgr.lock().unwrap().set_self_ref(Arc::downgrade(&job_mgr));
 
     info!("Director '{}' listening on port {}", dir_name, port);
 

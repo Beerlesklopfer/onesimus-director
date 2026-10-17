@@ -3,8 +3,10 @@
 //! (JobId, storage, session, setauthorization, bootstrap, restoreobject,
 //! pluginoptions, restore, endrestore, cancel) and the EndJob report.
 //!
-//! Backup, estimate and verify are not implemented by this File Daemon:
-//! `backup`/`verify` end the job with a fatal error (see docs/STUBS.md).
+//! The backup side (level, fileset, accurate, backup, estimate, verify,
+//! run scripts, bandwidth) is in job/backup_cmds.rs.
+
+mod backup_cmds;
 
 use std::io::{Read, Write};
 use std::sync::Arc;
@@ -20,8 +22,9 @@ use crate::config::{DirectorAuth, FdConfig};
 use crate::create_file::{CreateState, REPLACE_NEVER};
 use crate::jmsg::*;
 use crate::restore::{Counters, Restore, RestoreParams};
+use crate::scan::scan;
 use crate::sd::{self, JobShared, SdStream};
-use crate::{backup, status};
+use crate::status;
 
 /// How long `restore` waits for a passive Storage daemon connection.
 const PASSIVE_SD_WAIT: Duration = Duration::from_secs(60);
@@ -45,15 +48,29 @@ pub struct Session<'a> {
     start_block: u32,
     end_block: u32,
     bootstrap: Vec<String>,
+    // Backup side
+    fileset: Option<crate::fileset::FileSet>,
+    /// Job level ('F', 'I', 'D', 'B', 'S' since, ' ' none)
+    level: u8,
+    incremental: bool,
+    since_time: i64,
+    accurate: bool,
+    rerunning: bool,
+    prev_job: String,
+    file_list: Option<crate::accurate::FileList>,
+    runscripts: Vec<crate::runscript::RunScript>,
+    pre_scripts_ran: bool,
+    post_scripts_ran: bool,
+    /// jcr->max_bandwidth
+    max_bandwidth: u64,
+    /// Job type ('B' backup, 'R' restore, 'V' verify)
+    job_type: u8,
+    /// SD connections already told BNET_TERMINATE; closed with the session.
+    old_sd: Vec<SdStream>,
 }
 
 /// Command handler: false ends the command loop.
 type Handler<'a, S> = fn(&mut Session<'a>, &mut BnetStream<S>, &str) -> bool;
-
-/// A token "key=value" of a command line.
-fn arg<'b>(cmd: &'b str, key: &str) -> Option<&'b str> {
-    cmd.split_whitespace().find_map(|t| t.strip_prefix(key)?.strip_prefix('='))
-}
 
 /// UnbashSpaces(): 0x01 back to a space.
 fn unbash(s: &str) -> String {
@@ -66,7 +83,7 @@ impl<'a> Session<'a> {
             config,
             director,
             session_id,
-            msgs: JobMsgs::new(&config.name),
+            msgs: JobMsgs::new(&config.name).with_messages(config.messages.as_ref()),
             counters: Counters::default(),
             shared: None,
             sd_auth_key: String::new(),
@@ -80,6 +97,20 @@ impl<'a> Session<'a> {
             start_block: 0,
             end_block: 0,
             bootstrap: Vec::new(),
+            fileset: None,
+            level: b' ',
+            incremental: false,
+            since_time: 0,
+            accurate: false,
+            rerunning: false,
+            prev_job: String::new(),
+            file_list: None,
+            runscripts: Vec::new(),
+            pre_scripts_ran: false,
+            post_scripts_ran: false,
+            max_bandwidth: 0,
+            job_type: b' ',
+            old_sd: Vec::new(),
         }
     }
 
@@ -87,6 +118,11 @@ impl<'a> Session<'a> {
     fn reply<S: Read + Write>(&mut self, dir: &mut BnetStream<S>, text: &str) -> bool {
         self.msgs.flush(dir);
         dir.send_str(text).is_ok()
+    }
+
+    /// jcr->IsJobCanceled(): canceled, or ended in an error.
+    fn job_canceled(&self) -> bool {
+        self.is_canceled() || matches!(self.msgs.status(), JS_ERROR_TERMINATED | JS_FATAL_ERROR)
     }
 
     fn is_canceled(&self) -> bool {
@@ -150,9 +186,13 @@ impl<'a> Session<'a> {
                 break;
             }
         }
-        if let Some(mut sd) = self.sd.take() {
+        // Inform the Storage daemon that we are done; the connection itself
+        // stays open until the job is freed (FiledFreeJcr).
+        let _sd_kept = self.sd.take().map(|mut sd| {
             let _ = sd.send_signal(BnetSignal::Terminate);
-        }
+            sd
+        });
+        self.run_scripts("ClientAfterJob");
         if self.msgs.job_id != 0 {
             if self.is_canceled() {
                 self.msgs.set_status(JS_CANCELED);
@@ -174,25 +214,36 @@ impl<'a> Session<'a> {
 
     // --- commands --------------------------------------------------------
 
-    /// job_cmd(): "JobId=%d Job=%127s SDid=%d SDtime=%d Authorization=%100s ssl=%d"
+    /// job_cmd() with JobCommand (evaluate_job_command.cc):
+    /// "JobId=%d Job=%127s SDid=%u SDtime=%u Authorization=%100s ssl=%d"
+    /// or without ssl= (before 18.2, no TLS).
     fn job_cmd<S: Read + Write>(&mut self, dir: &mut BnetStream<S>, cmd: &str) -> bool {
-        let job_id = arg(cmd, "JobId").and_then(|v| v.parse::<u32>().ok());
-        let job = arg(cmd, "Job");
-        let (Some(job_id), Some(job)) = (job_id, job) else {
-            self.msgs.jmsg(M_FATAL, &format!("Bad Job Command: {cmd}"));
-            self.reply(dir, "2901 Bad Job\n");
-            return false;
+        let m = cmd.as_bytes();
+        let (vals, tls) = match scan(m, "JobId=%d Job=%127s SDid=%u SDtime=%u Authorization=%100s ssl=%d\n", 6) {
+            Some(v) => {
+                let t = v[5].int() as i32;
+                (v, t)
+            }
+            None => match scan(m, "JobId=%d Job=%127s SDid=%u SDtime=%u Authorization=%100s", 5) {
+                Some(v) => (v, 0),
+                None => {
+                    self.msgs.jmsg(M_FATAL, &format!("Bad Job Command: {cmd}\n"));
+                    self.reply(dir, "2901 Bad Job\n");
+                    return false;
+                }
+            },
         };
+        let job_id = vals[0].int() as u32;
+        let job = vals[1].text();
         self.msgs.job_id = job_id;
-        self.msgs.job = job.to_string();
-        self.vol_session_id = arg(cmd, "SDid").and_then(|v| v.parse().ok()).unwrap_or(0);
-        self.vol_session_time = arg(cmd, "SDtime").and_then(|v| v.parse().ok()).unwrap_or(0);
-        let tls = arg(cmd, "ssl").and_then(|v| v.parse().ok()).unwrap_or(0);
+        self.msgs.job = job.clone();
+        self.vol_session_id = vals[2].int() as u32;
+        self.vol_session_time = vals[3].int() as u32;
         if let Some(old) = self.shared.take() {
             sd::unregister(&old.job);
         }
-        self.shared = Some(sd::register(job, ""));
-        self.set_storage_auth_key(arg(cmd, "Authorization").unwrap_or(""), tls);
+        self.shared = Some(sd::register(&job, ""));
+        self.set_storage_auth_key(&vals[4].text(), tls);
         info!("session {}: job {job_id} '{job}'", self.session_id);
         // The Director stores the text after "2000 OK Job" as the uname.
         self.reply(dir, &format!("2000 OK Job {} ({}) {},{}", crate::version::FULL, crate::version::SHORT_DATE,
@@ -222,18 +273,13 @@ impl<'a> Session<'a> {
 
     /// SetauthorizationCmd() (passive client)
     fn setauthorization_cmd<S: Read + Write>(&mut self, dir: &mut BnetStream<S>, cmd: &str) -> bool {
-        let Some(key) = arg(cmd, "Authorization") else {
+        let Some(v) = scan(cmd.as_bytes(), "setauthorization Authorization=%100s", 1) else {
             self.reply(dir, "2902 Bad setauthorization\n");
             return false;
         };
         let policy = self.sd_tls_policy;
-        self.set_storage_auth_key(key, policy);
+        self.set_storage_auth_key(&v[0].text(), policy);
         self.reply(dir, "2000 OK Authorization\n")
-    }
-
-    /// SetbandwidthCmd(): accepted; this File Daemon does not limit.
-    fn setbandwidth_cmd<S: Read + Write>(&mut self, dir: &mut BnetStream<S>, _cmd: &str) -> bool {
-        self.reply(dir, "2000 OK Bandwidth\n")
     }
 
     fn setdebug_cmd<S: Read + Write>(&mut self, dir: &mut BnetStream<S>, _cmd: &str) -> bool {
@@ -254,7 +300,8 @@ impl<'a> Session<'a> {
 
     /// CancelCmd(): "cancel Job=%127s"
     fn cancel_cmd<S: Read + Write>(&mut self, dir: &mut BnetStream<S>, cmd: &str) -> bool {
-        match cmd.trim_end().strip_prefix("cancel Job=").map(|j| j.split_whitespace().next().unwrap_or("")) {
+        let job = scan(cmd.as_bytes(), "cancel Job=%127s", 1).map(|v| v[0].text());
+        match job.as_deref() {
             Some(job) => match sd::find(job) {
                 Some(shared) => {
                     shared.cancel();
@@ -274,20 +321,35 @@ impl<'a> Session<'a> {
 
     /// StorageCmd(): "storage address=%s port=%d ssl=%d [Authorization=%100s]"
     fn storage_cmd<S: Read + Write>(&mut self, dir: &mut BnetStream<S>, cmd: &str) -> bool {
-        let addr = arg(cmd, "address");
-        let port = arg(cmd, "port").and_then(|p| p.parse::<u16>().ok());
-        let tls = arg(cmd, "ssl").and_then(|p| p.parse::<i32>().ok());
-        let (Some(addr), Some(port), Some(tls)) = (addr, port, tls) else {
-            self.msgs.jmsg(M_FATAL, &format!("Bad storage command: {cmd}"));
+        let m = cmd.as_bytes();
+        let Some(v) = scan(m, "storage address=%s port=%d ssl=%d Authorization=%100s", 4)
+            .or_else(|| scan(m, "storage address=%s port=%d ssl=%d", 3))
+        else {
+            self.msgs.jmsg(M_FATAL, &format!("Bad storage command: {cmd}\n"));
             self.reply(dir, "2902 Bad storage\n");
             return false;
         };
-        self.set_storage_auth_key(arg(cmd, "Authorization").unwrap_or(""), tls);
+        let addr = v[0].text();
+        let addr = addr.as_str();
+        let port = v[1].int() as u16;
+        let tls = v[2].int() as i32;
+        let key = v.get(3).map(|k| k.text()).unwrap_or_default();
+        self.set_storage_auth_key(&key, tls);
         let Some(shared) = self.shared.clone() else {
             self.msgs.jmsg(M_FATAL, "Improper calling sequence.\n");
             self.reply(dir, "2902 Bad storage\n");
             return false;
         };
+        // jcr->max_bandwidth: the Director's, else the Client's limit
+        if self.max_bandwidth == 0 {
+            self.max_bandwidth = if self.director.max_bandwidth_per_job > 0 {
+                self.director.max_bandwidth_per_job
+            } else {
+                self.config.max_bandwidth_per_job
+            };
+        }
+        shared.bw.limit.store(self.max_bandwidth, Ordering::Relaxed);
+        shared.bw.bursting.store(self.config.allow_bw_bursting, Ordering::Relaxed);
         debug!("Open storage: {addr}:{port} ssl={tls}");
         let timeout = Duration::from_secs(self.config.sd_connect_timeout_secs);
         match sd::connect_storage(addr, port, tls, &self.msgs.job, &self.sd_auth_key, &self.config.name, timeout, &shared) {
@@ -316,16 +378,15 @@ impl<'a> Session<'a> {
 
     /// SessionCmd(): "session %127s %ld %ld %ld %ld %ld %ld"
     fn session_cmd<S: Read + Write>(&mut self, dir: &mut BnetStream<S>, cmd: &str) -> bool {
-        let f: Vec<&str> = cmd.split_whitespace().collect();
-        let n = |i: usize| f.get(i).and_then(|v| v.parse::<u32>().ok());
-        match (n(2), n(3), n(4), n(5), n(6), n(7)) {
-            (Some(a), Some(b), Some(c), Some(d), Some(e), Some(g)) => {
-                (self.vol_session_id, self.vol_session_time) = (a, b);
-                (self.start_file, self.end_file, self.start_block, self.end_block) = (c, d, e, g);
+        match scan(cmd.as_bytes(), "session %127s %ld %ld %ld %ld %ld %ld\n", 7) {
+            Some(v) => {
+                (self.vol_session_id, self.vol_session_time) = (v[1].int() as u32, v[2].int() as u32);
+                (self.start_file, self.end_file) = (v[3].int() as u32, v[4].int() as u32);
+                (self.start_block, self.end_block) = (v[5].int() as u32, v[6].int() as u32);
                 self.reply(dir, "2000 OK session\n")
             }
-            _ => {
-                self.msgs.jmsg(M_FATAL, &format!("Bad session command: {cmd}"));
+            None => {
+                self.msgs.jmsg(M_FATAL, &format!("Bad session command: {cmd}\n"));
                 false
             }
         }
@@ -354,20 +415,14 @@ impl<'a> Session<'a> {
         true
     }
 
-    /// PluginoptionsCmd(): no plugins to pass them to.
-    fn pluginoptions_cmd<S: Read + Write>(&mut self, dir: &mut BnetStream<S>, _cmd: &str) -> bool {
+    /// PluginoptionsCmd(): no plugins to pass the options to.
+    fn pluginoptions_cmd<S: Read + Write>(&mut self, dir: &mut BnetStream<S>, cmd: &str) -> bool {
+        if scan(cmd.as_bytes(), "pluginoptions %s", 1).is_none() {
+            self.msgs.jmsg(M_FATAL, &format!("Bad Plugin Options command: {cmd}\n"));
+            self.reply(dir, "2905 Bad PluginOptions command.\n");
+            return false;
+        }
         self.reply(dir, "2000 OK PluginOptions\n")
-    }
-
-    fn run_before_now_cmd<S: Read + Write>(&mut self, dir: &mut BnetStream<S>, _cmd: &str) -> bool {
-        self.reply(dir, "2000 OK RunBeforeNow\n")
-    }
-
-    /// RunscriptCmd(): client run scripts are not run by this File Daemon.
-    fn runscript_cmd<S: Read + Write>(&mut self, dir: &mut BnetStream<S>, cmd: &str) -> bool {
-        let command = cmd.split_once("Command=").map(|(_, c)| unbash(c.trim_end())).unwrap_or_default();
-        self.msgs.jmsg(M_WARNING, &format!("Client RunScript not supported by this File Daemon, not run: {command}\n"));
-        self.reply(dir, "2000 OK RunScript\n")
     }
 
     fn end_restore_cmd<S: Read + Write>(&mut self, _dir: &mut BnetStream<S>, _cmd: &str) -> bool {
@@ -375,53 +430,36 @@ impl<'a> Session<'a> {
         false
     }
 
-    // Backup side (not implemented, see backup.rs)
-    fn level_cmd<S: Read + Write>(&mut self, dir: &mut BnetStream<S>, _cmd: &str) -> bool {
-        self.reply(dir, "2000 OK level\n")
-    }
-    fn fileset_cmd<S: Read + Write>(&mut self, dir: &mut BnetStream<S>, _cmd: &str) -> bool {
-        while let Ok(BnetMessage::Data(_)) = dir.recv() {}
-        self.reply(dir, "2000 OK include\n")
-    }
-    fn accurate_cmd<S: Read + Write>(&mut self, dir: &mut BnetStream<S>, _cmd: &str) -> bool {
-        while let Ok(BnetMessage::Data(_)) = dir.recv() {}
-        self.reply(dir, "2000 OK accurate\n")
-    }
-    fn estimate_cmd<S: Read + Write>(&mut self, dir: &mut BnetStream<S>, _cmd: &str) -> bool {
-        backup::estimate(self, dir)
-    }
-    fn backup_cmd<S: Read + Write>(&mut self, dir: &mut BnetStream<S>, _cmd: &str) -> bool {
-        backup::backup(self, dir)
-    }
-    fn verify_cmd<S: Read + Write>(&mut self, _dir: &mut BnetStream<S>, _cmd: &str) -> bool {
-        self.msgs.jmsg(M_FATAL, "Verify jobs are not supported by this File Daemon.\n");
-        false
-    }
-
-    /// For backup.rs: reply and job messages.
-    pub fn send_reply<S: Read + Write>(&mut self, dir: &mut BnetStream<S>, text: &str) -> bool {
-        self.reply(dir, text)
-    }
-    pub fn job_msg(&mut self, t: i32, text: &str) {
-        self.msgs.jmsg(t, text);
-    }
-
     /// RestoreCmd(): "restore replace=%c prelinks=%d where=%s" or
     /// "... regexwhere=%s"; then the SD read session and DoRestore().
     fn restore_cmd<S: Read + Write>(&mut self, dir: &mut BnetStream<S>, cmd: &str) -> bool {
-        let line = cmd.trim_end_matches(['\n', '\0']);
-        let replace = arg(line, "replace").and_then(|r| r.bytes().next());
-        let prelinks = arg(line, "prelinks").and_then(|p| p.parse::<i32>().ok());
-        let (where_arg, regex) = match (line.split_once(" where="), line.split_once(" regexwhere=")) {
-            (Some((_, w)), _) => (w.split_whitespace().next().unwrap_or("").to_string(), false),
-            (None, Some((_, w))) => (w.split_whitespace().next().unwrap_or("").to_string(), true),
-            (None, None) => (String::new(), false),
-        };
-        let has_where = line.contains(" where=") || line.contains(" regexwhere=");
-        let (Some(replace), Some(prelinks), true) = (replace, prelinks, has_where) else {
-            self.msgs.jmsg(M_FATAL, &format!("Bad replace command. CMD={cmd}"));
+        if !self.validate_command("restore") {
             return false;
+        }
+        self.job_type = b'R';
+        let m = cmd.as_bytes();
+        let (vals, regex) = match scan(m, "restore replace=%c prelinks=%d where=%s\n", 3) {
+            Some(v) => (v, false),
+            None => match scan(m, "restore replace=%c prelinks=%d regexwhere=%s\n", 3) {
+                Some(v) => (v, true),
+                None => match scan(m, "restore replace=%c prelinks=%d where=\n", 2) {
+                    Some(mut v) => {
+                        v.push(crate::scan::Val::Str(Vec::new()));
+                        (v, true)
+                    }
+                    None => {
+                        self.msgs.jmsg(M_FATAL, &format!("Bad replace command. CMD={cmd}\n"));
+                        return false;
+                    }
+                },
+            },
         };
+        let replace = match vals[0] {
+            crate::scan::Val::Char(c) => c,
+            _ => b'a',
+        };
+        let prelinks = vals[1].int();
+        let where_arg = vals[2].text();
         let mut args = where_arg;
         if args == "/" {
             args.clear();
@@ -469,6 +507,7 @@ impl<'a> Session<'a> {
                 let _ = sd.recv();
             }
             let _ = sd.send_signal(BnetSignal::Terminate);
+            self.old_sd.push(sd);
             *shared.sd_socket.lock().unwrap_or_else(|e| e.into_inner()) = None;
         } else {
             self.msgs.set_status(JS_ERROR_TERMINATED);
@@ -481,7 +520,7 @@ impl<'a> Session<'a> {
             self.reply(dir, "2000 OK storage end\n");
             go_on = true;
         }
-        if self.is_canceled() {
+        if self.job_canceled() {
             go_on = false;
         }
         go_on
@@ -508,8 +547,8 @@ impl<'a> Session<'a> {
             return false;
         }
         match next_msg(sd) {
-            Some(m) => match m.trim_end_matches(['\n', '\0']).strip_prefix("3000 OK open ticket = ").and_then(|t| t.trim().parse().ok()) {
-                Some(t) => *ticket = t,
+            Some(m) => match scan(m.as_bytes(), "3000 OK open ticket = %d", 1) {
+                Some(v) => *ticket = v[0].int() as i32,
                 None => {
                     self.msgs.jmsg(M_FATAL, &format!("Bad response to SD read open: {m}\n"));
                     return false;

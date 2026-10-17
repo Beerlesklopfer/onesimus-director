@@ -61,6 +61,11 @@ struct JcrState {
     sd_status: char,
     /// jcr->post_scripts_ran (RunScripts "AfterJob" happens once).
     post_scripts_ran: bool,
+    /// The end of the job (UpdateJobEnd, report) is done; the job is
+    /// complete once its AfterJob scripts ran (S-07).
+    end_processed: bool,
+    /// RunScripts running on a thread of their own (S-07).
+    script_run: Option<ScriptRun>,
     /// Counted in num_jobs_run / RecentJobResultsList.
     recorded: bool,
     /// Job report data (resources and their sources), set when the job is
@@ -92,13 +97,27 @@ pub struct ScriptJob {
     pub params: Option<crate::job_worker::JobParams>,
 }
 
+/// RunScripts of a job on their own thread: console commands may need the
+/// JobManager lock (status, list), shell scripts may take long.
+struct ScriptRun {
+    handle: thread::JoinHandle<crate::runscript::Outcome>,
+    /// BeforeJob: the worker waits for the answer (client scripts for the
+    /// File daemon with it); AfterJob: the phase and bus status to publish.
+    kind: ScriptRunKind,
+}
+
+enum ScriptRunKind {
+    Before { client: Option<(Vec<String>, bool)> },
+    After { phase: DirJobPhase, status: &'static str },
+}
+
 struct JobEnd {
     term_code: i32, files: i64, bytes: i64, errors: i32,
     vol_session_id: i32, vol_session_time: i32,
 }
 
 /// Bareos lib/jcr.cc: retain the first equal-priority error; Incomplete wins.
-fn merge_status(previous: char, next: char) -> char {
+pub(crate) fn merge_status(previous: char, next: char) -> char {
     let priority = status_priority;
     if priority(next) > priority(previous) || (priority(next) == 0 && priority(previous) == 0) { next } else { previous }
 }
@@ -232,6 +251,8 @@ pub struct JobManager {
     wait_interval: std::time::Duration,
     /// sched_wait() "waiting N seconds" job messages not yet posted.
     wait_messages: Vec<(u32, std::time::Instant, String)>,
+    /// The shared JobManager itself, for console commands of run scripts.
+    self_ref: Option<std::sync::Weak<Mutex<JobManager>>>,
 }
 
 /// RecentJobResultsList max_count_recent_job_results.
@@ -247,7 +268,17 @@ impl JobManager {
             start_delay: std::time::Duration::from_secs(if cfg!(test) { 0 } else { 2 }),
             wait_check: std::collections::HashMap::new(),
             wait_interval: std::time::Duration::from_secs(if cfg!(test) { 0 } else { 30 }),
-            wait_messages: Vec::new() }
+            wait_messages: Vec::new(), self_ref: None }
+    }
+
+    /// Let console commands of run scripts see this JobManager (`status`).
+    pub fn set_self_ref(&mut self, manager: std::sync::Weak<Mutex<JobManager>>) {
+        self.self_ref = Some(manager);
+    }
+
+    /// What run scripts on a thread of their own need.
+    fn script_host(&self) -> crate::runscript::Host {
+        crate::runscript::Host { config: self.config.clone(), catalog: self.catalog.clone(), job_manager: self.self_ref.clone() }
     }
 
     /// The jobq_server pause before a ready job runs (tests).
@@ -526,7 +557,16 @@ impl JobManager {
                 job.jcr.started_seq = self.next_seq;
                 job.jcr.job_started = true;
                 job.observed_status = merge_status(job.observed_status, 'R');
+                // "Version:", then RunScripts "BeforeJob" (S-07). They run here,
+                // under the JobManager lock: console commands see no jobs.
+                crate::console_msg::post_job_message(&self.bus, self.config.as_ref(), BusMessage::JobMessage {
+                    job_id: id, job_name: job.job_name.clone(), msg_type: crate::message_bus::MsgType::Info,
+                    text: crate::job_messages::version_text(), timestamp: now_unix() });
+                let host = crate::runscript::Host { config: self.config.clone(), catalog: self.catalog.clone(), job_manager: None };
+                let before = crate::runscript::run_scripts(&host, Some(&self.bus), &script_job(job), "BeforeJob");
+                job.observed_status = merge_status(job.observed_status, before.status);
                 let outcome = match self.config.as_ref().and_then(|c| c.read().ok()) {
+                    _ if is_job_canceled(before.status) => crate::internal_jobs::Outcome { status: before.status, ..Default::default() },
                     Some(config) => crate::internal_jobs::run(&config, self.catalog.as_ref(), &crate::internal_jobs::Request {
                         kind, job_id: id, unique_job: &params.unique_job, job_name: &job.job_name, pool: &params.pool_name }),
                     None => crate::internal_jobs::Outcome { status: 'f', ..Default::default() },
@@ -540,8 +580,7 @@ impl JobManager {
                         warn!("Job {id}: UpdateJobStartRecord: {e}");
                     }
                 }
-                let mut messages = vec![(crate::message_bus::MsgType::Info, crate::job_messages::version_text())];
-                messages.extend(outcome.messages);
+                let messages = outcome.messages;
                 children.extend(outcome.children);
                 // Messages of the worker jobs a control job started go
                 // between its own (outcome.other_messages, C-058).
@@ -600,10 +639,7 @@ impl JobManager {
     pub fn take_post_scripts(&mut self, job_id: u32) -> Option<ScriptJob> {
         let job = self.jobs.iter_mut().find(|j| j.job_id == job_id)?;
         if std::mem::replace(&mut job.jcr.post_scripts_ran, true) { return None; }
-        let (client, storage) = job.resources.clone().unwrap_or_default();
-        Some(ScriptJob { job_id, job_name: job.job_name.clone(), unique_job: job.handle.unique_job.clone(),
-            status: job.status(), files: job.last_files, bytes: job.last_bytes, client, storage,
-            params: job.jcr.params.clone() })
+        Some(script_job(job))
     }
 
     /// Record the Client and Storage resource names a started job uses.
@@ -668,6 +704,9 @@ impl JobManager {
             self.schedule();
             return true;
         }
+        // The worker is gone (its AfterJob scripts run): no signal to a
+        // reaped process id.
+        if job.jcr.end_processed { return false; }
         if !job.handle.cancel() { return false; }
         job.observed_status = merge_status(job.observed_status, 'A');
         job.phase = DirJobPhase::Canceling;
@@ -715,7 +754,22 @@ impl JobManager {
                     job_id, job_name, msg_type: crate::message_bus::MsgType::Info, text, timestamp: now_unix() });
             }
         }
+        let host = self.script_host();
         for job in &mut self.jobs {
+            // RunScripts of the job that ended on their thread (S-07).
+            if job.jcr.script_run.as_ref().is_some_and(|run| run.handle.is_finished()) {
+                let run = job.jcr.script_run.take().unwrap();
+                let outcome = run.handle.join().unwrap_or(crate::runscript::Outcome { status: 'f', errors: 0 });
+                match run.kind {
+                    ScriptRunKind::Before { client } => {
+                        job.observed_status = merge_status(job.observed_status, outcome.status);
+                        let (client_commands, run_before_now) = client.unwrap_or_default();
+                        job.handle.send_message(&PipeMessage::RunScriptsDone { status: outcome.status as i32,
+                            errors: outcome.errors, client_commands, run_before_now });
+                    }
+                    ScriptRunKind::After { phase, status } => finish_job(job, &self.bus, phase, status),
+                }
+            }
             if matches!(job.phase, DirJobPhase::Completed | DirJobPhase::Error) {
                 job.handle.try_wait();
                 continue;
@@ -810,6 +864,29 @@ impl JobManager {
                             vol_session_id: vol_session_id.unwrap_or(0), vol_session_time: vol_session_time.unwrap_or(0)});
                     }
 
+                    // job_thread(): RunScripts "BeforeJob" after "Version:"; the
+                    // worker waits for RunScriptsDone (S-07).
+                    PipeMessage::RunScripts { .. } => {
+                        let script_job = script_job(job);
+                        let (has_scripts, client) = self.config.as_ref().and_then(|c| c.read().ok())
+                            .map(|config| (crate::runscript::has_scripts(&config, &job.job_name),
+                                crate::runscript::client_commands(&config, &script_job)))
+                            .unwrap_or_default();
+                        let spawned = if has_scripts {
+                            spawn_scripts(host.clone(), self.bus.clone(), script_job, "BeforeJob").ok()
+                        } else {
+                            None
+                        };
+                        match spawned {
+                            Some(handle) => job.jcr.script_run = Some(ScriptRun { handle, kind: ScriptRunKind::Before { client } }),
+                            None => {
+                                let (client_commands, run_before_now) = client.unwrap_or_default();
+                                job.handle.send_message(&PipeMessage::RunScriptsDone { status: job.status() as i32,
+                                    errors: 0, client_commands, run_before_now });
+                            }
+                        }
+                    }
+
                     PipeMessage::Verify { event, .. } => {
                         let (messages, status) = crate::verify::event(self.catalog.as_ref(), job.job_id, &event);
                         post_catreq_messages(&self.bus, self.config.as_ref(), job, messages);
@@ -836,7 +913,8 @@ impl JobManager {
                     _ => {}
                 }
             }
-            if let Some(exit_code) = job.worker_exit {
+            if let Some(exit_code) = job.worker_exit.filter(|_| !job.jcr.end_processed) {
+                job.jcr.end_processed = true;
                 // msgchan.cc EndTransaction() and backup.cc WriteBatchFileRecords().
                 if let Some(mut state) = self.catreq_jobs.remove(&job.job_id) {
                     let messages = state.end_of_job(self.catalog.as_ref().map(|c| c as &dyn Db), &batch_opener(&self.catalog));
@@ -876,15 +954,16 @@ impl JobManager {
                                 job_id: job.job_id, job_name: job.job_name.clone(), msg_type, text, timestamp: end_time });
                         }
                         let success = matches!(status, 'T' | 'W');
-                        job.phase = if success { DirJobPhase::Completed } else { DirJobPhase::Error };
-                        job.completed_at = Some(std::time::Instant::now());
-                        self.bus.post(BusMessage::JobStatus { job_id: job.job_id, job_name: job.job_name.clone(),
-                            status: if success { "Success" } else { "Error" }.into(), timestamp: end_time });
+                        let phase = if success { DirJobPhase::Completed } else { DirJobPhase::Error };
+                        start_after_scripts(job, &host, &self.bus, self.config.as_ref(), phase, if success { "Success" } else { "Error" });
                         continue;
                     }
                 }
                 // NativeBackupCleanup: terminated with errors is JS_Warnings
-                if job.observed_status == 'T' && ending.errors > 0 && !crate::verify::is_verify_job(job.job_id) { job.observed_status = 'W'; }
+                // (AdminCleanup keeps JS_Terminated: the errors of its run
+                // scripts only count, S-07).
+                let admin = job.jcr.params.as_ref().is_some_and(|p| p.job_type == crate::job_worker::WorkerJobType::Admin);
+                if job.observed_status == 'T' && ending.errors > 0 && !admin && !crate::verify::is_verify_job(job.job_id) { job.observed_status = 'W'; }
                 // NativeVbackupCleanup() of a VirtualFull (vbackup.rs, S-06).
                 let vf = job.jcr.report.as_ref().and_then(|r| r.vf.clone());
                 if let Some(vf) = &vf {
@@ -902,8 +981,7 @@ impl JobManager {
                 }
                 if let Some(error) = &job.completion_error { error!("JobManager: job {} final catalog update failed: {error}", job.job_id); }
                 let success = job.completion_error.is_none() && matches!(job.observed_status, 'T' | 'W');
-                job.phase = if success { DirJobPhase::Completed } else { DirJobPhase::Error };
-                job.completed_at = Some(std::time::Instant::now());
+                let final_phase = if success { DirJobPhase::Completed } else { DirJobPhase::Error };
                 let status = if success { "Success" } else { "Error" };
                 // NativeBackupCleanup / NativeRestoreCleanup: the job report
                 if let Some(report) = &job.jcr.report {
@@ -927,8 +1005,8 @@ impl JobManager {
                     let messages = crate::vbackup::after_report(self.catalog.as_ref(), job.job_id, vf, job.observed_status);
                     post_catreq_messages(&self.bus, self.config.as_ref(), job, messages);
                 }
-                self.bus.post(BusMessage::JobStatus {job_id: job.job_id, job_name: job.job_name.clone(), status: status.into(), timestamp: now_unix()});
                 info!("JobManager: job {} worker exited (code={exit_code}), catalog status={db_status}", job.job_id);
+                start_after_scripts(job, &host, &self.bus, self.config.as_ref(), final_phase, status);
             }
         }
 
@@ -986,6 +1064,47 @@ impl DirJob {
             self.observed_status = merge_status(self.observed_status, status);
         }
     }
+}
+
+/// The job is complete: `wait` and the queue see it ended.
+fn finish_job(job: &mut DirJob, bus: &MessageBus, phase: DirJobPhase, status: &str) {
+    job.phase = phase;
+    job.completed_at = Some(std::time::Instant::now());
+    bus.post(BusMessage::JobStatus { job_id: job.job_id, job_name: job.job_name.clone(), status: status.into(), timestamp: now_unix() });
+}
+
+/// job_thread(): RunScripts "AfterJob" after the cleanup and its report,
+/// once (post_scripts_ran; `cancel` may have run them), on a thread of
+/// their own; the job is complete when they are done.
+fn start_after_scripts(job: &mut DirJob, host: &crate::runscript::Host, bus: &Arc<MessageBus>,
+                       config: Option<&SharedConfig>, phase: DirJobPhase, status: &'static str) {
+    let has_scripts = !job.jcr.post_scripts_ran && config.and_then(|c| c.read().ok())
+        .is_some_and(|config| crate::runscript::has_scripts(&config, &job.job_name));
+    let spawned = if has_scripts {
+        job.jcr.post_scripts_ran = true;
+        spawn_scripts(host.clone(), bus.clone(), script_job(job), "AfterJob").ok()
+    } else {
+        None
+    };
+    match spawned {
+        Some(handle) => job.jcr.script_run = Some(ScriptRun { handle, kind: ScriptRunKind::After { phase, status } }),
+        None => finish_job(job, bus, phase, status),
+    }
+}
+
+/// The job data for its run scripts.
+fn script_job(job: &DirJob) -> ScriptJob {
+    let (client, storage) = job.resources.clone().unwrap_or_default();
+    ScriptJob { job_id: job.job_id, job_name: job.job_name.clone(), unique_job: job.handle.unique_job.clone(),
+        status: job.status(), files: job.last_files, bytes: job.last_bytes, client, storage,
+        params: job.jcr.params.clone() }
+}
+
+/// RunScripts(jcr, ..., label) on a thread of its own.
+fn spawn_scripts(host: crate::runscript::Host, bus: Arc<MessageBus>, job: ScriptJob, label: &'static str)
+    -> std::io::Result<thread::JoinHandle<crate::runscript::Outcome>> {
+    thread::Builder::new().name(format!("dir:runscript-{}", job.job_id))
+        .spawn(move || crate::runscript::run_scripts(&host, Some(&bus), &job, label))
 }
 
 /// The catreq.rs state of a job, created with its context on first use.

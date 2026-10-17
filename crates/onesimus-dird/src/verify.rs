@@ -901,14 +901,16 @@ pub(crate) fn run_worker(p: &JobParams, pipes: &mut WorkerPipes) -> i32 {
     let job_id = p.job_id;
     let v = p.verify.clone().unwrap_or_default();
     let level = v.level as u8;
-    for (code, text) in &v.start_messages {
-        crate::job_worker::worker_jmsg(job_id, *code, text.clone());
-    }
+    // job_thread(): "Version:", RunScripts "BeforeJob", then DoVerify (S-07).
+    let before = crate::job_worker::start_messages_with_before(pipes, job_id, &v.start_messages);
     let end = |pipes: &mut WorkerPipes, status: u8, files: i64, bytes: i64, errors: i32, sdid: i32, sdtime: i32| {
         pipes.send(&PipeMessage::JobEnd { job_id, term_code: status as i32, files, bytes, errors,
             vol_session_id: Some(sdid), vol_session_time: Some(sdtime) });
         if matches!(status, b'T' | b'W') { EXIT_SUCCESS } else { EXIT_ERROR }
     };
+    if crate::job_manager::is_job_canceled(before.status) {
+        return end(pipes, before.status as u8, 0, 0, before.errors as i32, 0, 0);
+    }
     if v.failed {
         return end(pipes, b'f', 0, 0, 0, 0, 0);
     }
@@ -996,6 +998,12 @@ pub(crate) fn run_worker(p: &JobParams, pipes: &mut WorkerPipes) -> i32 {
         if let Err(e) = response(&mut fd, job_id, "2000 OK storage", "Storage") {
             return bail(pipes, &mut fd, e);
         }
+    }
+    // SendRunscriptsCommands() (S-07)
+    if let Err(e) = crate::job_worker::send_client_runscripts(&mut fd, p, &before) {
+        tracing::debug!("Worker {job_id}: client runscripts: {e}");
+        let _ = fd.send_signal(BnetSignal::Terminate);
+        return end(pipes, b'f', 0, 0, 1, sdid, sdtime);
     }
     let _ = fd.send_str(&format!("verify level={}\n", fd_level(level)));
     if let Err(e) = response(&mut fd, job_id, "2000 OK verify", "Verify") {

@@ -87,6 +87,51 @@ fn base64_value(c: u8) -> u64 {
     }
 }
 
+/// ToBase64()
+pub fn to_base64(value: i64) -> String {
+    const MAP: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    let mut out = Vec::new();
+    let mut val = if value < 0 { value.wrapping_neg() as u64 } else { value as u64 };
+    loop {
+        out.push(MAP[(val & 0x3f) as usize]);
+        val >>= 6;
+        if val == 0 {
+            break;
+        }
+    }
+    if value < 0 {
+        out.push(b'-');
+    }
+    out.reverse();
+    String::from_utf8(out).unwrap_or_default()
+}
+
+/// EncodeStat(): the base64 attribute string with LinkFI and data stream.
+pub fn encode_stat(st: &Stat, link_fi: i32, data_stream: i32) -> String {
+    [
+        st.dev as i64,
+        st.ino as i64,
+        i64::from(st.mode),
+        st.nlink as i64,
+        i64::from(st.uid),
+        i64::from(st.gid),
+        st.rdev as i64,
+        st.size,
+        st.blksize,
+        st.blocks,
+        st.atime,
+        st.mtime,
+        st.ctime,
+        i64::from(link_fi),
+        0,
+        i64::from(data_stream),
+    ]
+    .iter()
+    .map(|v| to_base64(*v))
+    .collect::<Vec<_>>()
+    .join(" ")
+}
+
 /// DecodeStat(): the stat fields, LinkFI and the data stream id.
 pub fn decode_stat(buf: &[u8]) -> (Stat, i32, i32) {
     let mut st = Stat::default();
@@ -179,9 +224,13 @@ impl Attributes {
 /// UnpackAttributesRecord(): Err(message) for "Error scanning attributes".
 pub fn unpack_attributes_record(stream: i32, rec: &[u8]) -> Result<Attributes, String> {
     let bad = || format!("Error scanning attributes: {}\n", String::from_utf8_lossy(rec.split(|&b| b == 0).next().unwrap_or(&[])));
+    let v = crate::scan::scan(rec, "%d %d", 2).ok_or_else(bad)?;
+    let file_index = v[0].int() as i32;
+    let mut type_ = v[1].int() as i32;
+    // skip record file index and type (up to and including their blanks)
     let mut fields = rec.splitn(3, |&b| b == b' ');
-    let file_index: i32 = fields.next().and_then(|f| std::str::from_utf8(f).ok()).and_then(|f| f.parse().ok()).ok_or_else(bad)?;
-    let mut type_: i32 = fields.next().and_then(|f| std::str::from_utf8(f).ok()).and_then(|f| f.parse().ok()).ok_or_else(bad)?;
+    fields.next();
+    fields.next();
     let rest = fields.next().unwrap_or(&[]);
     let mut a = Attributes { stream, file_index, ..Default::default() };
     a.data_stream = i32::from(type_ & AR_DATA_STREAM != 0);
@@ -262,7 +311,7 @@ fn encode_mode(mode: u32) -> String {
         libc::S_IFDIR => 'd',
         libc::S_IFCHR => 'c',
         libc::S_IFBLK => 'b',
-        libc::S_IFIFO => 'p',
+        libc::S_IFIFO => 'f',
         libc::S_IFLNK => 'l',
         libc::S_IFSOCK => 's',
         _ => '-',
@@ -324,7 +373,7 @@ pub fn set_attributes(attr: &Attributes, ofd: Option<std::fs::File>) -> Vec<Stri
     let suppress = !nix::unistd::getuid().is_root();
     let name = cpath(&attr.ofname);
     let oname = attr.ofname_str();
-    let errno = || std::io::Error::last_os_error();
+    let errno = crate::berrno::BErr::last;
     let old_mask = unsafe { libc::umask(0) };
 
     let size = match &ofd {
@@ -458,7 +507,8 @@ mod tests {
         let list = crate::breg::get_bregexps("!/a!/b!").unwrap();
         build_attr_output_fnames(&mut a, &Where::Regex(list), false);
         assert_eq!((a.ofname.as_slice(), a.olname.as_slice()), (&b"/b/hard"[..], &b"/b/orig"[..]));
-        assert!(unpack_attributes_record(1, b"x y").is_err());
+        // bsscanf: numbers without digits are 0 and still count
+        assert_eq!(unpack_attributes_record(1, b"x y").unwrap().file_index, 0);
     }
 
     #[test]

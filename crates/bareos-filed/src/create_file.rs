@@ -41,8 +41,8 @@ fn cpath(p: &[u8]) -> CString {
     CString::new(p.to_vec()).unwrap_or_default()
 }
 
-fn errno() -> std::io::Error {
-    std::io::Error::last_os_error()
+fn errno() -> crate::berrno::BErr {
+    crate::berrno::BErr::last()
 }
 
 fn lstat(p: &[u8]) -> Option<libc::stat> {
@@ -168,7 +168,7 @@ fn create_typed(attr: &mut Attributes, exists: bool, msg: &mut dyn FnMut(i32, St
         FT_REGE | FT_REG => match open_write(true) {
             Ok(f) => Cf::Extract(f),
             Err(e) => {
-                msg(M_ERROR, format!("Could not create {oname}: ERR={e}\n"));
+                msg(M_ERROR, format!("Could not create {oname}: ERR={}\n", crate::berrno::s(&e)));
                 Cf::Error
             }
         },
@@ -212,7 +212,7 @@ fn create_typed(attr: &mut Attributes, exists: bool, msg: &mut dyn FnMut(i32, St
                 return match r {
                     Ok(f) => Cf::Extract(f),
                     Err(e) => {
-                        msg(M_ERROR, format!("Could not open {oname}: ERR={e}\n"));
+                        msg(M_ERROR, format!("Could not open {oname}: ERR={}\n", crate::berrno::s(&e)));
                         Cf::Error
                     }
                 };

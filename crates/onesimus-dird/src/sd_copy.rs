@@ -219,8 +219,12 @@ fn connect(params: &JobParams, store: &StorageUse, msg_job: u32) -> Result<BnetS
 /// The worker part of the job: start messages, SD session, job end.
 pub fn run(params: &JobParams, copy: &CopySession, pipes: &mut WorkerPipes) -> i32 {
     let job_id = params.job_id;
-    for (code, text) in &copy.start_messages {
-        job_worker::worker_jmsg(job_id, *code, text.clone());
+    // job_thread(): "Version:", RunScripts "BeforeJob", then the job (S-07).
+    let before = job_worker::start_messages_with_before(pipes, job_id, &copy.start_messages);
+    if crate::job_manager::is_job_canceled(before.status) {
+        pipes.send(&PipeMessage::JobEnd { job_id, term_code: before.status as i32, files: 0, bytes: 0,
+            errors: before.errors as i32, vol_session_id: Some(0), vol_session_time: Some(0) });
+        return job_worker::EXIT_ERROR;
     }
     let pipe = Pipe(Mutex::new(pipes));
     let state = |name: &str| pipe.send(&PipeMessage::State { job_id, state: name.into() });
