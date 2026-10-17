@@ -788,7 +788,16 @@ fn compute_restore_list(db: &dyn Db, jobids: &str, fileid: &str, dirid: &str, ha
 /// C++ BareosDb::AccurateGetJobids() for the console (jcr->JobId 0):
 /// Full + Differential + Incrementals up to `date`.
 pub(crate) fn accurate_get_jobids(db: &dyn Db, client_id: i64, job_type: char, date: &str, fileset_id: i64) -> Option<Vec<String>> {
-    let jobid = 0;
+    accurate_get_jobids_job(db, 0, client_id, job_type, date, fileset_id, true, 0)
+}
+
+/// C++ BareosDb::AccurateGetJobids() of a job (`jobid` = jcr->JobId names
+/// the temporary table): Full, and with `incremental` (JobLevel
+/// Incremental or VirtualFull) the last Differential and the Incrementals
+/// after it; `limit` (jr->limit) 0 for all.
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn accurate_get_jobids_job(db: &dyn Db, jobid: u32, client_id: i64, job_type: char, date: &str,
+                                      fileset_id: i64, incremental: bool, limit: u64) -> Option<Vec<String>> {
     let retval = 'bail: {
         let create = format!(
             "CREATE TABLE btemp3{jobid} AS\nSELECT JobId,\n       StartTime,\n       EndTime,\n       JobTDate,\n       PurgedFiles\nFROM Job\nJOIN FileSet USING (FileSetId)\nWHERE ClientId = {client_id}\n  AND Level = 'F'\n  AND JobStatus IN ('T',\n                    'W')\n  AND Type = '{job_type}'\n  AND StartTime < '{date}'\n  AND FileSet.FileSetId = {fileset_id}\nORDER BY Job.JobId DESC,\n         Job.JobTDate DESC\nLIMIT 1\n"
@@ -796,7 +805,9 @@ pub(crate) fn accurate_get_jobids(db: &dyn Db, client_id: i64, job_type: char, d
         if db.exec(&create).is_err() {
             break 'bail None;
         }
-        // jr->JobLevel is L_INCREMENTAL here.
+        if !incremental {
+            break 'bail Some(column0(db, &list_query(jobid, limit)).unwrap_or_default());
+        }
         let diff = format!("INSERT INTO btemp3{jobid} (JobId, StartTime, EndTime, JobTDate, PurgedFiles) SELECT JobId, StartTime, EndTime, JobTDate, PurgedFiles FROM Job JOIN FileSet USING (FileSetId) WHERE ClientId = {client_id} AND JobFiles > 0 AND Level='D' AND JobStatus IN ('T','W') AND Type='{job_type}' AND StartTime > (SELECT EndTime FROM btemp3{jobid} ORDER BY EndTime DESC LIMIT 1) AND StartTime < '{date}' AND FileSet.FileSet= (SELECT FileSet FROM FileSet WHERE FileSetId = {fileset_id}) ORDER BY Job.JobTDate DESC LIMIT 1 ");
         if db.exec(&diff).is_err() {
             break 'bail None;
@@ -805,10 +816,19 @@ pub(crate) fn accurate_get_jobids(db: &dyn Db, client_id: i64, job_type: char, d
         if db.exec(&incr).is_err() {
             break 'bail None;
         }
-        Some(column0(db, &format!("SELECT JobId FROM btemp3{jobid} ORDER by JobTDate ASC")).unwrap_or_default())
+        Some(column0(db, &list_query(jobid, limit)).unwrap_or_default())
     };
     let _ = db.exec(&format!("DROP TABLE IF EXISTS btemp3{jobid}"));
     retval
+}
+
+/// The jobid list query of AccurateGetJobids().
+fn list_query(jobid: u32, limit: u64) -> String {
+    if limit != 0 {
+        format!("SELECT JobId FROM btemp3{jobid} ORDER by JobTDate ASC LIMIT {limit}")
+    } else {
+        format!("SELECT JobId FROM btemp3{jobid} ORDER by JobTDate ASC")
+    }
 }
 
 // --- commands ------------------------------------------------------------------------

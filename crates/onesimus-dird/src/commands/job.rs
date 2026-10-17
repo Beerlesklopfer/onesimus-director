@@ -310,6 +310,8 @@ struct RunContext {
     since: Option<String>,
     verify_list: Option<String>,
     ignoreduplicatecheck_set: bool,
+    /// The values of spooldata=/accurate=/ignoreduplicatecheck= (yes/no).
+    flag_values: Vec<(String, String)>,
     consolidate_job: Option<bareos_config::resources::JobResource>,
     // Resources
     job: Option<bareos_config::resources::JobResource>,
@@ -352,6 +354,7 @@ impl RunContext {
         self.previous_job_name = None;
         self.accurate_set = false;
         self.spool_data_set = false;
+        self.flag_values.clear();
         self.backup_format = None;
         let mut comment: Option<String> = None;
         let mut consolidate_job_name: Option<String> = None;
@@ -483,6 +486,7 @@ impl RunContext {
                         if crate::ua_select::is_yesno(&value).is_some() {
                             *set = true;
                             kw_ok = true;
+                            self.flag_values.push((keyword.to_string(), value.clone()));
                         } else {
                             ua.send_msg(invalid);
                         }
@@ -813,6 +817,8 @@ impl RunContext {
             ua.send_msg("Consolidate Job option is only valid for virtual full jobs.\n");
             return false;
         }
+        jcr.run_flags = self.flag_values.clone();
+        jcr.consolidate_job = self.consolidate_job.as_ref().map(|j| j.name.clone());
         true
     }
 }
@@ -904,6 +910,9 @@ struct Jcr {
     restore_job_id: u32,
     vf_jobids: Option<String>,
     ignore_level_pool_overrides: bool,
+    /// spooldata=/accurate=/ignoreduplicatecheck= of the run command.
+    run_flags: Vec<(String, String)>,
+    consolidate_job: Option<String>,
 }
 
 impl Jcr {
@@ -916,6 +925,7 @@ impl Jcr {
             catalog: None, priority: 0, sched_time: now_unix_time(), backup_format: String::new(),
             restore_bootstrap: None, verify_job: None, where_: None, regex_where: None, plugin_options: None,
             replace: 0, restore_job_id: 0, vf_jobids: None, ignore_level_pool_overrides: false,
+            run_flags: Vec::new(), consolidate_job: None,
         };
         jcr.set_defaults(ctx, job);
         jcr
@@ -1035,6 +1045,19 @@ impl Jcr {
                 if let Some(value) = value {
                     arguments.push(arg(key, value));
                 }
+            }
+        }
+        // A VirtualFull: its JobIds and run options (vbackup.rs, S-06).
+        if self.job_type == JobType::Backup && self.level == L_VIRTUAL_FULL {
+            if let Some(jobids) = &self.vf_jobids {
+                arguments.push(arg("jobid", jobids));
+            }
+            arguments.push(arg("priority", &self.priority.to_string()));
+            for (key, value) in &self.run_flags {
+                arguments.push(arg(key, value));
+            }
+            if let Some(consolidate) = &self.consolidate_job {
+                arguments.push(arg("consolidatejob", consolidate));
             }
         }
         // Verify: VerifyJob and the JobId to verify against (verify.cc).
@@ -1574,6 +1597,8 @@ fn run_selected(
     // (ua_run.cc has no Enabled check). Compatibility log C-058.
     // RunJob() per job type (job.cc SetupJob/job_thread). Compatibility log C-058.
     match job.job_type {
+        JobType::Backup if ast.arguments.iter().find(|a| a.key == "level").and_then(|a| a.value.as_deref())
+            .and_then(level_from_name) == Some(L_VIRTUAL_FULL) => return run_virtual_full(ast, ctx, config, job),
         JobType::Backup => {}
         JobType::Admin => return run_admin(ast, ctx, config, job),
         JobType::Restore => {
@@ -1913,10 +1938,10 @@ fn job_catalog(config: &crate::director_config::DirectorConfig, job: &bareos_con
 /// RunJob() of a Copy/Migrate control job (migrate.cc DoMigrationInit/
 /// DoMigrationSelection/MigrationCleanup) or a Consolidate job
 /// (consolidate.cc): the Job record (Type 'c'/'g'/'O'), the job queue, then
-/// the Director runs the selection itself (internal_jobs.rs). Not available
+/// the Director runs the selection itself (internal_jobs.rs, consolidate.rs;
+/// a Consolidate job starts VirtualFull jobs, vbackup.rs). Not available
 /// yet: the worker jobs of a Copy/Migrate (`jobid=`, and the jobs a control
-/// job selected) and the consolidation of Always Incremental jobs.
-/// Compatibility log C-058.
+/// job selected). Compatibility log C-058.
 fn run_internal(
     ast: &CommandAst,
     ctx: &ExecContext,
@@ -1964,12 +1989,6 @@ fn run_internal(
             return job_queued(job_id);
         }
     }
-    if kind == Kind::Consolidate && config.jobs.iter().any(|j| {
-        crate::commands::defaults::bool_directive(&crate::commands::defaults::job_directives(&config, &j.name),
-            "alwaysincremental", false)
-    }) {
-        return CommandResult::error("Consolidating Always Incremental jobs is not available yet.\n".to_string());
-    }
     let level = value("level").and_then(|l| level_from_name(&l)).unwrap_or(L_FULL) as char;
     let client = value("client").unwrap_or_else(|| job.client.clone());
     let pool = value("pool").unwrap_or_else(|| job.pool.clone());
@@ -2001,6 +2020,62 @@ fn run_internal(
         trigger: crate::job_messages::TRIGGER_USER.to_string(), ..Default::default()
     };
     queue_job(ctx, &job, params, report, &client, &storage, sched_time)
+}
+
+/// RunJob() of a VirtualFull backup (vbackup.rs): the Job record and the
+/// job queue; the Storage daemon session runs in the worker (sd_copy.rs).
+/// Compatibility log C-058, S-06.
+fn run_virtual_full(
+    ast: &CommandAst,
+    ctx: &ExecContext,
+    config: std::sync::RwLockReadGuard<'_, crate::director_config::DirectorConfig>,
+    job: bareos_config::resources::JobResource,
+) -> CommandResult {
+    if !ast.arguments.iter().any(|a| a.key.eq_ignore_ascii_case("yes")) {
+        return CommandResult::error("Job not run.\n".to_string());
+    }
+    let value = |key: &str| ast.arguments.iter().find(|a| a.key.eq_ignore_ascii_case(key)).and_then(|a| a.value.clone());
+    let flag = |key: &str| value(key).and_then(|v| crate::ua_select::is_yesno(&v));
+    let request = crate::vbackup::Request {
+        job: job.clone(),
+        jobids: value("jobid"),
+        priority: value("priority").and_then(|p| p.parse().ok()),
+        accurate: flag("accurate"),
+        spool_data: flag("spooldata"),
+        consolidate_job: value("consolidatejob"),
+        client: value("client"),
+        fileset: value("fileset"),
+        pool: value("pool"),
+        next_pool: value("nextpool"),
+        sched_time: value("schedtime").and_then(|t| t.parse().ok()).unwrap_or(0),
+        trigger: crate::job_messages::TRIGGER_USER.to_string(),
+    };
+    let started = crate::vbackup::start(&config, ctx.catalog.as_ref(), &request);
+    drop(config);
+    match started {
+        Ok(child) => {
+            if let Some(smgr) = &ctx.session_mgr {
+                smgr.bus().post(BusMessage::JobStatus {
+                    job_id: child.job_id, job_name: job.name.clone(), status: "Queued".to_string(), timestamp: now_unix(),
+                });
+            }
+            let job_id = child.job_id;
+            if let Some(ref mgr) = ctx.job_manager {
+                enqueue_with_report(mgr, &child.job_name, child.start, &child.client, &child.storage, child.report);
+            } else if let Err(e) = job_worker::spawn_job_worker(job_id, &job.name, &child.start.params) {
+                return CommandResult::error(format!("Failed to start job: {e}\n"));
+            }
+            job_queued(job_id)
+        }
+        Err(messages) => {
+            for (_, text) in &messages {
+                tracing::warn!("VirtualFull of {}: {}", job.name, text.trim_end());
+            }
+            let mut text: String = messages.into_iter().map(|(_, t)| t).collect();
+            text.push_str("Job failed.\n");
+            CommandResult::error(text)
+        }
+    }
 }
 
 /// RunJob() of a Restore job started with `run` (jobid= or bootstrap=, as
