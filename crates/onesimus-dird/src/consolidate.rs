@@ -163,6 +163,10 @@ pub fn consolidate_jobs(config: &DirectorConfig, catalog: &CatalogHandle, reques
         };
         match crate::vbackup::start(config, Some(catalog), &vf) {
             Ok(child) => {
+                // The batch UaContext of DoRunCmd() has no console: its
+                // messages (OpenClientDb, "Job queued.") are job messages.
+                info(out, format!("Using Catalog \"{}\"\n", child.report.catalog));
+                info(out, format!("Job queued. JobId={}\n", child.job_id));
                 info(out, format!("Consolidating JobId {} started.\n", child.job_id));
                 out.children.push(child);
             }
