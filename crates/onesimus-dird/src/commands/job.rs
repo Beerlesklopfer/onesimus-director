@@ -1672,6 +1672,8 @@ fn run_selected(
         prev_job,
         // Write Bootstrap from job config
         where_path: None,
+        regex_where: None,
+        prefix_links: false,
         replace: None,
         restore_jobid: None,
         bootstrap: if !job.write_bootstrap.is_empty() { Some(job.write_bootstrap.clone()) } else { None },
@@ -1794,7 +1796,7 @@ fn plain_params(job_id: u32, unique: &str, job: &bareos_config::resources::JobRe
         fd_address: String::new(), fd_port: 0, fd_password: String::new(), sd_address: String::new(), sd_port: 0,
         sd_password: String::new(), sd_device: String::new(), sd_media_type: String::new(),
         director_name: director.to_string(), pool_name: String::new(), fileset_includes: Vec::new(),
-        fileset_excludes: Vec::new(), since_utime: 0, prev_job: String::new(), where_path: None, replace: None,
+        fileset_excludes: Vec::new(), since_utime: 0, prev_job: String::new(), where_path: None, regex_where: None, prefix_links: false, replace: None,
         restore_jobid: None, bootstrap: None, client_name: client.to_string(), client_first_connection: false,
         copy: None,
     }
@@ -1996,7 +1998,9 @@ fn run_restore(ast: &CommandAst, ctx: &ExecContext, job: bareos_config::resource
         restore_client: value("restoreclient").unwrap_or_else(|| client.clone()),
         client,
         where_path: value("where"),
+        regex_where: value("regexwhere"),
         replace: value("replace"),
+        expected_files: crate::commands::restore::atoi(value("files").as_deref()),
         bootstrap_path: value("bootstrap"),
         job: Some(job.name.clone()),
         storage: value("storage"),
