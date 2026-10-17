@@ -474,6 +474,18 @@ impl JobManager {
     /// Fork the workers of ready jobs while fewer than the Director's
     /// Maximum Concurrent Jobs run. A canceled job ends without a worker.
     fn start_ready(&mut self) {
+        let mut children = Vec::new();
+        self.start_ready_jobs(&mut children);
+        // Jobs a Director-run job started (internal_jobs::ChildStart): JobqAdd.
+        for child in children {
+            self.bus.post(BusMessage::JobStatus { job_id: child.job_id, job_name: child.job_name.clone(),
+                status: "Queued".to_string(), timestamp: now_unix() });
+            self.enqueue_job(child.job_id, &child.job_name, child.start, &child.client, &child.storage);
+            self.set_job_report(child.job_id, child.report);
+        }
+    }
+
+    fn start_ready_jobs(&mut self, children: &mut Vec<crate::internal_jobs::ChildStart>) {
         while let Some(&id) = self.ready.front() {
             let canceled = self.get_job(id).is_some_and(|j| is_job_canceled(j.observed_status));
             if !canceled {
@@ -527,6 +539,7 @@ impl JobManager {
                 }
                 let mut messages = vec![(crate::message_bus::MsgType::Info, crate::job_messages::version_text())];
                 messages.extend(outcome.messages);
+                children.extend(outcome.children);
                 for (msg_type, text) in messages {
                     crate::console_msg::post_job_message(&self.bus, self.config.as_ref(), BusMessage::JobMessage {
                         job_id: id, job_name: job.job_name.clone(), msg_type, text, timestamp: now_unix() });

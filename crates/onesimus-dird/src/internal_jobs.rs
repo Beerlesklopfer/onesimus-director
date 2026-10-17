@@ -41,14 +41,42 @@ impl Kind {
 }
 
 /// The result of a run: final JobStatus, the job messages in order, whether
-/// the control job selected jobs (jcr->dir_impl->HasSelectedJobs) and the
-/// Job record's PoolId (UpdateJobStartRecord).
-#[derive(Debug, Default)]
+/// the control job selected jobs (jcr->dir_impl->HasSelectedJobs), the
+/// Job record's PoolId (UpdateJobStartRecord) and the jobs it started.
+#[derive(Default)]
 pub struct Outcome {
     pub status: char,
     pub messages: Vec<(MsgType, String)>,
     pub selected: bool,
     pub pool_id: Option<String>,
+    /// Jobs started during the run (DoRunCmd of StartNewConsolidationJob /
+    /// StartNewMigrationJob): their Job records exist; the JobManager
+    /// queues them after the run.
+    pub children: Vec<ChildStart>,
+}
+
+/// A job a Director-run job started: its catalog record exists (JobId), the
+/// JobManager puts it in the job queue (JobqAdd).
+pub struct ChildStart {
+    pub job_id: u32,
+    pub job_name: String,
+    pub start: crate::job_manager::QueuedStart,
+    pub report: crate::job_messages::JobReport,
+    pub client: String,
+    pub storage: String,
+}
+
+impl std::fmt::Debug for ChildStart {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ChildStart").field("job_id", &self.job_id).field("job_name", &self.job_name).finish()
+    }
+}
+
+impl std::fmt::Debug for Outcome {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Outcome").field("status", &self.status).field("messages", &self.messages)
+            .field("selected", &self.selected).field("pool_id", &self.pool_id).field("children", &self.children).finish()
+    }
 }
 
 /// What the run needs to know about the job.
