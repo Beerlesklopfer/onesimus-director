@@ -766,7 +766,7 @@ impl JobManager {
                         job.last_bytes = bytes;
                     }
 
-                    PipeMessage::CatReq { request, .. } => {
+                    PipeMessage::CatReq { request, job_id: from } => {
                         debug!("JobManager: job {} CatReq: {}", job.job_id, request.chars().take(60).collect::<String>());
                         let previous_phase = job.phase;
                         job.phase = DirJobPhase::WaitingCatReq;
@@ -776,16 +776,22 @@ impl JobManager {
                             job.last_files = files as i64;
                             job.last_bytes = bytes as i64;
                         }
-                        post_catreq_messages(&self.bus, self.config.as_ref(), job, reply.messages);
+                        post_catreq_messages_of(&self.bus, self.config.as_ref(), job, from, reply.messages);
                         job.handle.send_message(&PipeMessage::CatResp { response: reply.to_sd });
                         job.phase = previous_phase;
                     }
 
-                    PipeMessage::UpdCat { data, .. } => {
+                    PipeMessage::UpdCat { data, job_id: from } => {
                         let data = hex::decode(&data).unwrap_or_default();
                         let reply = catreq_session(&mut self.catreq_jobs, &self.catalog, &self.config, job)
                             .dispatch(self.catalog.as_ref().map(|c| c as &dyn Db), &batch_opener(&self.catalog), &data);
-                        post_catreq_messages(&self.bus, self.config.as_ref(), job, reply.messages);
+                        post_catreq_messages_of(&self.bus, self.config.as_ref(), job, from, reply.messages);
+                    }
+
+                    PipeMessage::WriteSession { vol_session_id, vol_session_time, files, bytes, errors, status, .. } => {
+                        crate::migrate::set_write_session(job.job_id, crate::migrate::WriteSession {
+                            vol_session_id, vol_session_time, files: files.max(0) as u64, bytes: bytes.max(0) as u64,
+                            errors: errors.max(0) as u32, status: char::from_u32(status as u32).unwrap_or('\0') });
                     }
 
                     PipeMessage::JobEnd { term_code, files, bytes, errors,
@@ -801,13 +807,17 @@ impl JobManager {
                             vol_session_id: vol_session_id.unwrap_or(0), vol_session_time: vol_session_time.unwrap_or(0)});
                     }
 
-                    PipeMessage::Jmsg { msg_type, mtime, text, raw, .. } => {
+                    PipeMessage::Jmsg { msg_type, mtime, text, raw, job_id: from } => {
                         if let Some(config) = self.config.as_ref().and_then(|c| c.read().ok()) {
                             if raw {
                                 // getmsg.cc: a daemon's "Jmsg Job=.. type=.. level=.." line
                                 crate::console_msg::dispatch_job_message(&config, &job.job_name, job.job_id, msg_type, mtime, &text);
                             } else if let Some(kind) = crate::job_messages::msg_type_of(msg_type) {
-                                crate::console_msg::job_message(&config, &job.job_name, job.job_id, kind, mtime, &text);
+                                // A message of mig_jcr (SD-SD Copy/Migrate, S-20) carries
+                                // its JobId and goes out through the worker job's Messages.
+                                let header = if from != 0 { from } else { job.job_id };
+                                let msg = crate::console_msg::job_message_text(&config.director.name, header, kind, &text);
+                                crate::console_msg::dispatch_job_message(&config, &job.job_name, job.job_id, msg_type, mtime, &msg);
                             }
                         }
                     }
@@ -819,7 +829,9 @@ impl JobManager {
                 // msgchan.cc EndTransaction() and backup.cc WriteBatchFileRecords().
                 if let Some(mut state) = self.catreq_jobs.remove(&job.job_id) {
                     let messages = state.end_of_job(self.catalog.as_ref().map(|c| c as &dyn Db), &batch_opener(&self.catalog));
-                    post_catreq_messages(&self.bus, self.config.as_ref(), job, messages);
+                    // SD-SD Copy/Migrate: the attributes are mig_jcr's (S-20).
+                    let owner = crate::migrate::remote_new_job(job.job_id).unwrap_or(job.job_id);
+                    post_catreq_messages_of(&self.bus, self.config.as_ref(), job, owner, messages);
                 }
                 let ending = job.pending_end.take().unwrap_or_else(|| JobEnd {
                     term_code: b'E' as i32, files: job.last_files, bytes: job.last_bytes,
@@ -962,6 +974,23 @@ fn catreq_session<'a>(sessions: &'a mut std::collections::HashMap<u32, crate::ca
 /// A private catalog connection for the batch file insert (jcr->db_batch).
 fn batch_opener(catalog: &Option<CatalogHandle>) -> impl Fn() -> Option<Box<dyn Db + Send>> + '_ {
     move || catalog.as_ref()?.dedicated().ok().map(|c| Box::new(c) as Box<dyn Db + Send>)
+}
+
+/// Jmsg() of the catalog requests of JCR `from`: the job's own, or another
+/// JCR the worker drives (mig_jcr, S-20) through the Director's Messages.
+fn post_catreq_messages_of(bus: &MessageBus, config: Option<&SharedConfig>, job: &DirJob, from: u32,
+                           messages: crate::catreq::Messages) {
+    if from == job.job_id || from == 0 {
+        return post_catreq_messages(bus, config, job, messages);
+    }
+    // mig_jcr's messages carry its JobId and go through the worker's Messages.
+    for (msg_type, text) in messages {
+        if let Some(config) = config.and_then(|c| c.read().ok()) {
+            let msg = crate::console_msg::job_message_text(&config.director.name, from, msg_type, &text);
+            crate::console_msg::dispatch_job_message(&config, &job.job_name, job.job_id, crate::audit::code(msg_type), now_unix(), &msg);
+        }
+        bus.post(BusMessage::JobMessage { job_id: job.job_id, job_name: job.job_name.clone(), msg_type, text, timestamp: now_unix() });
+    }
 }
 
 /// Jmsg() of the catalog requests to the job's messages.
