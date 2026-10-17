@@ -448,8 +448,11 @@ impl JobManager {
         let holders = |pred: &dyn Fn(&DirJob) -> bool| self.jobs.iter()
             .filter(|j| j.jcr.holds_resources && !matches!(j.phase, DirJobPhase::Completed | DirJobPhase::Error) && pred(j))
             .count();
+        // jobq.cc IncReadStore + IncWriteStore: a Verify Level=Data job
+        // counts as reader and writer of its storage (verify.rs).
+        let uses = job.jcr.params.as_ref().map_or(1, crate::verify::storage_uses).max(1);
         let status = if !storage.is_empty()
-            && holders(&|j| j.resources.as_ref().is_some_and(|r| r.1 == storage)) >= max_storage {
+            && holders(&|j| j.resources.as_ref().is_some_and(|r| r.1 == storage)) + uses > max_storage {
             's'
         } else if !client.is_empty()
             && holders(&|j| j.resources.as_ref().is_some_and(|r| r.0 == client)) >= max_client {
@@ -502,7 +505,7 @@ impl JobManager {
                 // job_thread() of a canceled job: no daemons, only its cleanup.
                 // Job types whose "Version:" message comes from job_thread()
                 // (not at queue time) get it here as well.
-                if job.jcr.params.as_ref().is_some_and(|p| p.job_type == crate::job_worker::WorkerJobType::Admin
+                if job.jcr.params.as_ref().is_some_and(|p| matches!(p.job_type, crate::job_worker::WorkerJobType::Admin | crate::job_worker::WorkerJobType::Verify)
                     || p.job_type.internal().is_some()) {
                     crate::console_msg::post_job_message(&self.bus, self.config.as_ref(), BusMessage::JobMessage {
                         job_id: id, job_name: job.job_name.clone(), msg_type: crate::message_bus::MsgType::Info,
@@ -807,6 +810,14 @@ impl JobManager {
                             vol_session_id: vol_session_id.unwrap_or(0), vol_session_time: vol_session_time.unwrap_or(0)});
                     }
 
+                    PipeMessage::Verify { event, .. } => {
+                        let (messages, status) = crate::verify::event(self.catalog.as_ref(), job.job_id, &event);
+                        post_catreq_messages(&self.bus, self.config.as_ref(), job, messages);
+                        if let Some(status) = status {
+                            job.observed_status = merge_status(job.observed_status, status);
+                        }
+                    }
+
                     PipeMessage::Jmsg { msg_type, mtime, text, raw, job_id: from } => {
                         if let Some(config) = self.config.as_ref().and_then(|c| c.read().ok()) {
                             if raw {
@@ -833,10 +844,17 @@ impl JobManager {
                     let owner = crate::migrate::remote_new_job(job.job_id).unwrap_or(job.job_id);
                     post_catreq_messages_of(&self.bus, self.config.as_ref(), job, owner, messages);
                 }
-                let ending = job.pending_end.take().unwrap_or_else(|| JobEnd {
+                let mut ending = job.pending_end.take().unwrap_or_else(|| JobEnd {
                     term_code: b'E' as i32, files: job.last_files, bytes: job.last_bytes,
                     errors: 1, vol_session_id: 0, vol_session_time: 0,
                 });
+                // VerifyCleanup(): Director-side JobErrors and TermCode (verify.rs).
+                if let Some(end) = crate::verify::finish(self.catalog.as_ref(), job.job_id, ending.files) {
+                    ending.errors += end.errors;
+                    if let Some(status) = end.status {
+                        job.observed_status = merge_status(job.observed_status, status);
+                    }
+                }
                 job.observed_status = merge_status(job.observed_status,
                     crate::job_worker::catalog_job_status(ending.term_code).chars().next().unwrap());
                 if exit_code != 0 { job.observed_status = merge_status(job.observed_status, 'E'); }
@@ -866,7 +884,7 @@ impl JobManager {
                     }
                 }
                 // NativeBackupCleanup: terminated with errors is JS_Warnings
-                if job.observed_status == 'T' && ending.errors > 0 { job.observed_status = 'W'; }
+                if job.observed_status == 'T' && ending.errors > 0 && !crate::verify::is_verify_job(job.job_id) { job.observed_status = 'W'; }
                 let db_status = job.observed_status.to_string();
                 let result = self.catalog.as_ref().ok_or_else(|| "catalog is unavailable".to_string()).and_then(|cat| cat.update_job_end(
                     job.job_id as i32, &db_status, now_unix(), ending.files, ending.bytes, ending.errors,
@@ -1081,7 +1099,7 @@ Job { Name = single; Client = fd1; Storage = File }
             sd_device: String::new(), sd_media_type: String::new(), director_name: "dir".into(), pool_name: "Full".into(),
             fileset_includes: Vec::new(), fileset_excludes: Vec::new(), since_utime: 0, prev_job: String::new(),
             where_path: None, regex_where: None, prefix_links: false, replace: None, restore_jobid: None, bootstrap: None,
-            client_name: String::new(), client_first_connection: false, copy: None }
+            client_name: String::new(), client_first_connection: false, copy: None, verify: None }
     }
 
     fn enqueue(m: &mut JobManager, id: u32, name: &str, priority: i32, client: &str, storage: &str) {
