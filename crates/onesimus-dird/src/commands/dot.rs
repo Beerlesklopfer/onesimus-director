@@ -446,40 +446,125 @@ pub fn parse_dot_api(ast: &CommandAst) -> Option<(ApiMode, Option<bool>)> {
     Some((mode, compact))
 }
 
-/// `.grpc [on|off] [format=<proto|json|text>] [compact=<yes|no>]`
-///
-/// Switches this session to gRPC streaming mode.
-/// When on, responses are sent as protobuf/JSON via the gRPC push_events stream
-/// instead of BNET text. The session.rs loop checks the grpc_mode flag.
-pub fn cmd_dot_grpc(ast: &CommandAst, ctx: &ExecContext) -> CommandResult {
-    let on = ast.arguments.iter().any(|a| a.key == "on");
-    let off = ast.arguments.iter().any(|a| a.key == "off");
-    let format = get_arg(ast, "format").unwrap_or("json");
-    let compact = get_arg(ast, "compact").unwrap_or("no") == "yes";
+/// Output format of `.grpc on` on a console connection.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum GrpcFormat {
+    /// JSON results (API mode 2), the default
+    Json,
+    /// Framed text (API mode 1)
+    Text,
+}
 
-    if off {
-        // Signal to session: grpc_mode = false (handled in session.rs match block)
-        CommandResult::ok("gRPC mode: off\n".to_string())
-    } else if on {
-        // Signal to session: grpc_mode = true
-        // The actual gRPC stream is established by the session when it sees this flag.
-        // For now, we switch to JSON API mode as a stepping stone.
-        CommandResult::ok(format!(
-            "gRPC mode: on, format={format}, compact={compact}\n\
-             Note: gRPC push_events stream will be used for responses.\n"
-        ))
-    } else {
-        // Query current state
-        let grpc_available = ctx.config.as_ref()
-            .and_then(|c| c.read().ok())
-            .map(|c| c.director.enable_grpc)
-            .unwrap_or(false);
-        if grpc_available {
-            CommandResult::ok("gRPC: available (use .grpc on to activate)\n".to_string())
-        } else {
-            CommandResult::ok("gRPC: not configured (set 'Enable gRPC = yes' in Director resource)\n".to_string())
+impl GrpcFormat {
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::Json => "json",
+            Self::Text => "text",
         }
     }
+
+    /// The API mode the session switches to.
+    pub fn api_mode(self) -> ApiMode {
+        match self {
+            Self::Json => ApiMode::Json,
+            Self::Text => ApiMode::Api,
+        }
+    }
+}
+
+/// A parsed `.grpc` command line.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum GrpcRequest {
+    /// `.grpc`: report the state
+    Status,
+    /// `.grpc on [format=json|text] [compact=yes|no]`; `format=`/`compact=`
+    /// alone also switch on (or change the settings of an active gRPC mode)
+    On { format: GrpcFormat, compact: bool },
+    /// `.grpc off`: back to the API mode before `.grpc on`
+    Off,
+}
+
+/// Parse `.grpc [on|off] [format=json|text] [compact=yes|no]` (Onesimus
+/// extension). The session applies the mode switch before the command runs
+/// (like `.api`), so the reply already uses the new mode.
+pub fn parse_dot_grpc(ast: &CommandAst) -> Result<GrpcRequest, String> {
+    let mut on = false;
+    let mut off = false;
+    let mut format = None;
+    let mut compact = None;
+    for arg in &ast.arguments {
+        let key = arg.key.to_ascii_lowercase();
+        let value = arg.value.as_deref().map(str::to_ascii_lowercase);
+        match (key.as_str(), value.as_deref()) {
+            ("on", None) => on = true,
+            ("off", None) => off = true,
+            ("format", Some("json")) => format = Some(GrpcFormat::Json),
+            ("format", Some("text")) => format = Some(GrpcFormat::Text),
+            ("format", Some("proto")) => return Err(
+                ".grpc: format=proto is only available on the gRPC port, not on a console connection.\n".into()),
+            ("format", _) => return Err(".grpc: format must be json or text.\n".into()),
+            ("compact", Some("yes")) => compact = Some(true),
+            ("compact", Some("no")) => compact = Some(false),
+            ("compact", _) => return Err(".grpc: compact must be yes or no.\n".into()),
+            _ => return Err(format!(".grpc: unknown argument \"{}\".\n", arg.key)),
+        }
+    }
+    if on && off {
+        return Err(".grpc: specify either on or off.\n".into());
+    }
+    if off {
+        if format.is_some() || compact.is_some() {
+            return Err(".grpc: format= and compact= only apply to .grpc on.\n".into());
+        }
+        return Ok(GrpcRequest::Off);
+    }
+    if on || format.is_some() || compact.is_some() {
+        return Ok(GrpcRequest::On { format: format.unwrap_or(GrpcFormat::Json), compact: compact.unwrap_or(false) });
+    }
+    Ok(GrpcRequest::Status)
+}
+
+/// `.grpc [on|off] [format=json|text] [compact=yes|no]` (Onesimus extension)
+///
+/// On a console connection `.grpc on` switches the session to the
+/// machine-readable mode the gRPC clients use (format=json: API mode 2 with
+/// optional compact JSON; format=text: API mode 1), `.grpc off` restores the
+/// API mode and compact flag from before. The switch itself is done by the
+/// session (session.rs) before this handler runs; the handler reports it.
+/// API 2 results carry the text reply under `grpc.text`.
+pub fn cmd_dot_grpc(ast: &CommandAst, ctx: &ExecContext) -> CommandResult {
+    let request = match parse_dot_grpc(ast) {
+        Ok(request) => request,
+        Err(e) => return CommandResult::error(e),
+    };
+    let available = ctx.config.as_ref()
+        .and_then(|c| c.read().ok())
+        .map(|c| c.director.enable_grpc)
+        .unwrap_or(false);
+    let state = ctx.session_mgr.as_ref().and_then(|m| m.session_grpc(ctx.session_id));
+    let yes_no = |b: bool| if b { "yes" } else { "no" };
+    let mode_line = match state {
+        Some((format, compact)) => format!("gRPC mode: on, format={format}, compact={}\n", yes_no(compact)),
+        None => "gRPC mode: off\n".to_string(),
+    };
+    let text = match request {
+        GrpcRequest::Status => format!("{mode_line}{}", if available {
+            "gRPC service: enabled (use .grpc on to activate)\n"
+        } else {
+            "gRPC service: not configured (set 'Enable gRPC = yes' in Director resource)\n"
+        }),
+        GrpcRequest::On { .. } | GrpcRequest::Off => mode_line,
+    };
+    let mut object = serde_json::Map::new();
+    object.insert("mode".into(), (if state.is_some() { "on" } else { "off" }).into());
+    if let Some((format, compact)) = state {
+        object.insert("format".into(), format.into());
+        object.insert("compact".into(), compact.into());
+    }
+    object.insert("apimode".into(), (ctx.api_mode as i64).into());
+    object.insert("available".into(), available.into());
+    object.insert("text".into(), text.clone().into());
+    CommandResult::ok(text).with_json(serde_json::json!({ "grpc": object }))
 }
 
 // --- SQL dot-commands (delegate to sql module) ---
@@ -495,14 +580,8 @@ pub fn cmd_dot_sqlschema(ast: &CommandAst, ctx: &ExecContext) -> CommandResult {
 }
 
 /// `.sqlcount [table=<name>] [catalog=<name>]`
-pub fn cmd_dot_sqlcount(_ast: &CommandAst, ctx: &ExecContext) -> CommandResult {
-    match &ctx.catalog {
-        Some(cat) => match cat.raw_query("SELECT COUNT(*) FROM job") {
-            Ok(output) => CommandResult::ok(format!("Jobs: {}\n", output.trim())),
-            Err(e) => CommandResult::error(format!("SQL error: {e}\n")),
-        },
-        None => CommandResult::ok("No catalog\n".to_string()),
-    }
+pub fn cmd_dot_sqlcount(ast: &CommandAst, ctx: &ExecContext) -> CommandResult {
+    crate::commands::sql::cmd_sql_count(ast, ctx)
 }
 
 fn get_arg<'a>(ast: &'a CommandAst, key: &str) -> Option<&'a str> {

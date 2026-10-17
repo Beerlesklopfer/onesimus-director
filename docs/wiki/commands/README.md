@@ -300,9 +300,9 @@ Diese Befehle gibt es nur im Onesimus Director.
 |---|---|
 | [.grpc](dot-grpc.md) | gRPC-Modus der Sitzung |
 | [.sqltables](dot-sqltables.md) | Tabellen des Katalogs |
-| [.sqlschema](dot-sqlschema.md) | Vollständiges Schema des Katalogs |
-| [.sqlcount](dot-sqlcount.md) | Zahl der Einträge in der Job-Tabelle |
-| [.acl](dot-acl.md) | ACLs von Konsolen verwalten |
+| [.sqlschema](dot-sqlschema.md) | Spalten der Katalogtabellen |
+| [.sqlcount](dot-sqlcount.md) | Zeilen von Katalogtabellen zählen |
+| [.acl](dot-acl.md) | ACLs von Konsolen anzeigen und ändern |
 | [.catalog](dot-catalog.md) | Katalogschema verwalten (Prüfung, Migration, …) |
 
 ### OVFS: Restore-Bäume (Onesimus)
