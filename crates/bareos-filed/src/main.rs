@@ -9,6 +9,7 @@
 //! - fd:heartbeat — periodic keepalive
 
 mod accept;
+mod accurate;
 mod acl_xattr;
 mod attribs;
 mod backup;
@@ -16,10 +17,14 @@ mod breg;
 mod compression;
 mod config;
 mod create_file;
+mod digest;
+mod fileset;
+mod find;
 mod heartbeat;
 mod jmsg;
 mod job;
 mod restore;
+mod runscript;
 mod sd;
 mod status;
 mod streams;

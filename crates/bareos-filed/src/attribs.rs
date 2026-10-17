@@ -87,6 +87,51 @@ fn base64_value(c: u8) -> u64 {
     }
 }
 
+/// ToBase64()
+pub fn to_base64(value: i64) -> String {
+    const MAP: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    let mut out = Vec::new();
+    let mut val = if value < 0 { value.wrapping_neg() as u64 } else { value as u64 };
+    loop {
+        out.push(MAP[(val & 0x3f) as usize]);
+        val >>= 6;
+        if val == 0 {
+            break;
+        }
+    }
+    if value < 0 {
+        out.push(b'-');
+    }
+    out.reverse();
+    String::from_utf8(out).unwrap_or_default()
+}
+
+/// EncodeStat(): the base64 attribute string with LinkFI and data stream.
+pub fn encode_stat(st: &Stat, link_fi: i32, data_stream: i32) -> String {
+    [
+        st.dev as i64,
+        st.ino as i64,
+        i64::from(st.mode),
+        st.nlink as i64,
+        i64::from(st.uid),
+        i64::from(st.gid),
+        st.rdev as i64,
+        st.size,
+        st.blksize,
+        st.blocks,
+        st.atime,
+        st.mtime,
+        st.ctime,
+        i64::from(link_fi),
+        0,
+        i64::from(data_stream),
+    ]
+    .iter()
+    .map(|v| to_base64(*v))
+    .collect::<Vec<_>>()
+    .join(" ")
+}
+
 /// DecodeStat(): the stat fields, LinkFI and the data stream id.
 pub fn decode_stat(buf: &[u8]) -> (Stat, i32, i32) {
     let mut st = Stat::default();

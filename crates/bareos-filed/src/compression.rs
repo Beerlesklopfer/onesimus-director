@@ -302,10 +302,275 @@ fn lzo(last_fname: &str, data: &[u8]) -> Result<Vec<u8>, String> {
     }
 }
 
+// ---------------------------------------------------------------------------
+// Compression (backup side): lib/compression.cc CompressData() and the
+// comp_stream_header of filed/compression.cc SetupCompressionContext().
+// ---------------------------------------------------------------------------
+
+/// The compressed payload (without comp_stream_header) of one block.
+pub fn compress_data(algo: u32, level: i32, data: &[u8]) -> Result<Vec<u8>, String> {
+    match algo {
+        COMPRESS_GZIP => {
+            use std::io::Write as _;
+            let lvl = level.clamp(0, 9) as u32;
+            let mut enc = flate2::write::ZlibEncoder::new(Vec::with_capacity(data.len() / 2 + 64), flate2::Compression::new(lvl));
+            enc.write_all(data).map_err(|e| format!("Compression deflate error: {e}\n"))?;
+            enc.finish().map_err(|e| format!("Compression deflate error: {e}\n"))
+        }
+        COMPRESS_LZO1X => lzo_compress(data),
+        COMPRESS_FZFZ => Ok(fastlzlib_compress(data, false)),
+        COMPRESS_FZ4L | COMPRESS_FZ4H => Ok(fastlzlib_compress(data, true)),
+        _ => Err(format!("Unknown compression algorithm: {algo}")),
+    }
+}
+
+/// The record data: comp_stream_header (magic, compressed length, level,
+/// version 1; network order) and the compressed payload. The level is 0
+/// for LZO (SetupCompressionContext only sets it for GZIP and FastLZ/LZ4).
+pub fn with_header(algo: u32, level: i32, payload: &[u8]) -> Vec<u8> {
+    let lvl: u16 = match algo {
+        COMPRESS_GZIP | COMPRESS_FZFZ | COMPRESS_FZ4L | COMPRESS_FZ4H => level as u16,
+        _ => 0,
+    };
+    let mut v = Vec::with_capacity(payload.len() + COMP_HEADER_SIZE);
+    v.extend_from_slice(&algo.to_be_bytes());
+    v.extend_from_slice(&(payload.len() as u32).to_be_bytes());
+    v.extend_from_slice(&lvl.to_be_bytes());
+    v.extend_from_slice(&COMP_HEAD_VERSION.to_be_bytes());
+    v.extend_from_slice(payload);
+    v
+}
+
+/// The compression algorithm can be used (ClearCompressionFlagInFileset).
+pub fn compressor_available(algo: u32) -> bool {
+    match algo {
+        COMPRESS_GZIP | COMPRESS_FZFZ | COMPRESS_FZ4L | COMPRESS_FZ4H => true,
+        COMPRESS_LZO1X => lzo_compress_fn().is_some(),
+        _ => false,
+    }
+}
+
+/// CompressorName()
+pub fn compressor_name(algo: u32) -> &'static str {
+    match algo {
+        COMPRESS_GZIP => "GZIP",
+        COMPRESS_LZO1X => "LZO",
+        COMPRESS_FZFZ => "FASTLZ",
+        COMPRESS_FZ4L => "LZ4",
+        COMPRESS_FZ4H => "LZ4HC",
+        _ => "Unknown",
+    }
+}
+
+const FLZ_DEFAULT_BLOCK_SIZE: usize = 262144;
+const FLZ_MIN_BLOCK_SIZE: usize = 64;
+
+/// fastlzlibCompress(Z_FINISH) over a whole buffer (fastlz_compress_hdr per
+/// block of 256 KiB, then the EOF marker).
+pub fn fastlzlib_compress(input: &[u8], lz4: bool) -> Vec<u8> {
+    let mut out = Vec::with_capacity(input.len() + input.len() / 10 + 64);
+    let header = |out: &mut Vec<u8>, t: u8, c: usize, o: usize| {
+        out.extend_from_slice(b"FastLZ\0");
+        out.push(t + 8); // 2^(10+8) = 256 KiB block size
+        out.extend_from_slice(&(c as u32).to_le_bytes());
+        out.extend_from_slice(&(o as u32).to_le_bytes());
+    };
+    for block in input.chunks(FLZ_DEFAULT_BLOCK_SIZE) {
+        let compressed = if block.len() > FLZ_MIN_BLOCK_SIZE {
+            let c = if lz4 { lz4_compress_block(block) } else { fastlz1_compress_block(block) };
+            (c.len() < block.len()).then_some(c)
+        } else {
+            None
+        };
+        match compressed {
+            Some(c) => {
+                header(&mut out, BLOCK_TYPE_COMPRESSED, c.len(), block.len());
+                out.extend_from_slice(&c);
+            }
+            None => {
+                header(&mut out, BLOCK_TYPE_RAW, block.len(), block.len());
+                out.extend_from_slice(block);
+            }
+        }
+    }
+    header(&mut out, BLOCK_TYPE_COMPRESSED, 0, 0);
+    out
+}
+
+fn hash_bits(v: u32, bits: u32) -> usize {
+    (v.wrapping_mul(2654435761) >> (32 - bits)) as usize
+}
+
+fn read_u32(b: &[u8], i: usize) -> u32 {
+    u32::from_le_bytes([b[i], b[i + 1], b[i + 2], b[i + 3]])
+}
+
+fn push_len(out: &mut Vec<u8>, mut r: usize) {
+    while r >= 255 {
+        out.push(255);
+        r -= 255;
+    }
+    out.push(r as u8);
+}
+
+/// A greedy LZ4 block compressor (output for LZ4_decompress_safe: the last
+/// 5 bytes are literals, no match starts in the last 12 bytes).
+pub fn lz4_compress_block(src: &[u8]) -> Vec<u8> {
+    const MIN_MATCH: usize = 4;
+    const LAST_LITERALS: usize = 5;
+    const MF_LIMIT: usize = 12;
+    let n = src.len();
+    let mut out = Vec::with_capacity(n + n / 255 + 16);
+    let mut table = vec![usize::MAX; 1 << 16];
+    let mut anchor = 0;
+    let mut i = 0;
+    let emit = |out: &mut Vec<u8>, lit: &[u8], mtch: Option<(usize, usize)>| {
+        let ll = lit.len();
+        let ml = mtch.map(|(m, _)| m - MIN_MATCH).unwrap_or(0);
+        out.push(((ll.min(15) as u8) << 4) | (ml.min(15) as u8));
+        if ll >= 15 {
+            push_len(out, ll - 15);
+        }
+        out.extend_from_slice(lit);
+        if let Some((_, off)) = mtch {
+            out.extend_from_slice(&(off as u16).to_le_bytes());
+            if ml >= 15 {
+                push_len(out, ml - 15);
+            }
+        }
+    };
+    if n > MF_LIMIT {
+        let match_limit = n - LAST_LITERALS;
+        while i + MF_LIMIT < n {
+            let h = hash_bits(read_u32(src, i), 16);
+            let cand = table[h];
+            table[h] = i;
+            if cand != usize::MAX && i - cand <= 65535 && read_u32(src, cand) == read_u32(src, i) {
+                let mut m = MIN_MATCH;
+                while i + m < match_limit && src[cand + m] == src[i + m] {
+                    m += 1;
+                }
+                emit(&mut out, &src[anchor..i], Some((m, i - cand)));
+                i += m;
+                anchor = i;
+            } else {
+                i += 1;
+            }
+        }
+    }
+    emit(&mut out, &src[anchor..], None);
+    out
+}
+
+/// A greedy FastLZ level 1 block compressor (13 bit distances, matches of
+/// 3..264 bytes, literal runs of up to 32 bytes; the first instruction is
+/// always a literal run, so the level bits of the first byte are 0).
+pub fn fastlz1_compress_block(src: &[u8]) -> Vec<u8> {
+    const MAX_COPY: usize = 32;
+    const MAX_LEN: usize = 264;
+    const MAX_DISTANCE: usize = 8192;
+    let n = src.len();
+    let mut out = Vec::with_capacity(n + n / 32 + 16);
+    let mut table = vec![usize::MAX; 1 << 13];
+    let mut lit: Vec<u8> = Vec::new();
+    let flush_lit = |out: &mut Vec<u8>, lit: &mut Vec<u8>| {
+        for chunk in lit.chunks(MAX_COPY) {
+            out.push((chunk.len() - 1) as u8);
+            out.extend_from_slice(chunk);
+        }
+        lit.clear();
+    };
+    let mut i = 0;
+    while i < n {
+        let mut matched = false;
+        if i > 0 && i + 3 <= n {
+            let v = u32::from(src[i]) | (u32::from(src[i + 1]) << 8) | (u32::from(src[i + 2]) << 16);
+            let h = hash_bits(v, 13);
+            let cand = table[h];
+            table[h] = i;
+            if cand != usize::MAX && i - cand <= MAX_DISTANCE && src[cand..cand + 3] == src[i..i + 3] {
+                let mut m = 3;
+                while i + m < n && m < MAX_LEN && src[cand + m] == src[i + m] {
+                    m += 1;
+                }
+                flush_lit(&mut out, &mut lit);
+                let dist = i - cand - 1;
+                let l = m - 2;
+                if l < 7 {
+                    out.push(((l as u8) << 5) | (dist >> 8) as u8);
+                } else {
+                    out.push((7u8 << 5) | (dist >> 8) as u8);
+                    out.push((l - 7) as u8);
+                }
+                out.push((dist & 255) as u8);
+                i += m;
+                matched = true;
+            }
+        }
+        if !matched {
+            lit.push(src[i]);
+            i += 1;
+        }
+    }
+    flush_lit(&mut out, &mut lit);
+    out
+}
+
+type LzoCompress = unsafe extern "C" fn(*const u8, usize, *mut u8, *mut usize, *mut libc::c_void) -> libc::c_int;
+
+fn lzo_compress_fn() -> Option<LzoCompress> {
+    static F: std::sync::OnceLock<Option<usize>> = std::sync::OnceLock::new();
+    let addr = *F.get_or_init(|| unsafe {
+        for lib in [c"liblzo2.so.2", c"liblzo2.so"] {
+            let h = libc::dlopen(lib.as_ptr(), libc::RTLD_NOW);
+            if !h.is_null() {
+                let s = libc::dlsym(h, c"lzo1x_1_compress".as_ptr());
+                if !s.is_null() {
+                    return Some(s as usize);
+                }
+            }
+        }
+        None
+    });
+    addr.map(|a| unsafe { std::mem::transmute::<usize, LzoCompress>(a) })
+}
+
+/// lzo1x_1_compress() of liblzo2.
+fn lzo_compress(data: &[u8]) -> Result<Vec<u8>, String> {
+    let f = lzo_compress_fn().ok_or_else(|| "Compression LZO error: -1\n".to_string())?;
+    // LZO1X_1_MEM_COMPRESS = 16384 * sizeof(lzo_dict_t)
+    let mut wrkmem = vec![0u8; 16384 * 8];
+    let mut out = vec![0u8; data.len() + data.len() / 16 + 64 + 3];
+    let mut len = 0usize;
+    let r = unsafe { f(data.as_ptr(), data.len(), out.as_mut_ptr(), &mut len, wrkmem.as_mut_ptr().cast()) };
+    if r != 0 || len > out.len() {
+        return Err(format!("Compression LZO error: {r}\n"));
+    }
+    out.truncate(len);
+    Ok(out)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use std::io::Write;
+
+    #[test]
+    fn compressors_roundtrip() {
+        let mut data = b"bareos backup data ".repeat(20_000);
+        data.extend((0..70_000u32).map(|i| (i.wrapping_mul(2654435761) >> 13) as u8));
+        data.extend(std::iter::repeat_n(0u8, 5000));
+        for algo in [COMPRESS_GZIP, COMPRESS_FZFZ, COMPRESS_FZ4L, COMPRESS_FZ4H, COMPRESS_LZO1X] {
+            if !compressor_available(algo) {
+                continue;
+            }
+            for input in [&data[..], &data[..100], &data[..7]] {
+                let c = compress_data(algo, 6, input).unwrap();
+                let rec = with_header(algo, 6, &c);
+                assert_eq!(decompress_data("f", STREAM_COMPRESSED_DATA, &rec).unwrap(), input, "{}", compressor_name(algo));
+            }
+        }
+    }
 
     fn header(magic: u32, payload: &[u8]) -> Vec<u8> {
         let mut v = Vec::new();
