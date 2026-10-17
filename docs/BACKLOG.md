@@ -38,14 +38,19 @@ bis auch Fehlerpfade, Seiteneffekte und SHA-256-Ausgabeparität geprüft sind.
 Für jede Tabellenzeile gilt zusätzlich der unten definierte SHA-256-Abgleich.
 Je Hauptbefehl bleibt ein eigener Commit vorgeschrieben.
 
-## KRITISCH: Scheduler startet keine Jobs
+## Erledigt: Scheduler startet Jobs (17.10.2026)
 
-`scheduler.rs`: `dispatch_ready_jobs()` erhöht nur einen Zähler
-(`TODO(R6-full): Fork worker process`). Zusätzlich vergleicht
-`fill_queue_from_config()` Stunde/Minute in UTC statt Ortszeit, ignoriert
-Tages-/Wochen-/Monatsangaben der Run-Direktive ("1st Sat", "mon-fri") und
-dedupliziert nicht. Geplante Backups laufen mit onesimus-dird derzeit nicht.
-Folge: `status director` liefert `scheduled: []`.
+Früher „KRITISCH“: `dispatch_ready_jobs()` zählte fällige Jobs nur
+(`TODO(R6-full)`), verglich in UTC, ignorierte Tages-/Wochen-/Monatsangaben der
+Run-Direktive und deduplizierte nicht. Erledigt:
+
+- Run-Direktiven und Laufzeitberechnung in Ortszeit wie `date_time.cc`/
+  `NextScheduleTime` (`run_time.rs`, `5cc3789`).
+- Warteschlange und Deduplizierung wie `scheduler_private.cc`
+  ([S-02](STUBS.md), `54f5df6`).
+- Fällige Jobs starten über denselben Weg wie `run … yes`, mit Run-Overrides
+  ([S-15](STUBS.md), `8e653fc`); Watchdog und Zombie-Einsammeln ([S-16](STUBS.md)).
+- Gegen das Original mit privatem FD/SD geprüft ([C-081](COMPATIBILITY-LOG.md)).
 
 
 ## Postgres-Plugin für Verzeichnisbäume (OVFS)

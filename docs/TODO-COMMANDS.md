@@ -22,7 +22,7 @@ Weitere Architekturvorhaben stehen im [Backlog](BACKLOG.md).
 | Letzter dokumentierter Volllauf | 16.10.2026 auf `7993ce6`: 1479/1481 gleich; beide Unterschiede stehen inzwischen als `match` in der Baseline | JSON `parity_evidence` |
 | Wiki-Status (Stand 16.10., **nicht aufgefrischt**) | 53 `parity_verified`, 31 `partial`, 4 `registered_unverified` | JSON `summary` |
 | Kompatibilitätslog C-001 … C-087 | 81 behoben, 3 Entscheidung (C-074, C-085, C-087), 1 geprüft (C-086), 1 Vorfall/Ursache (C-039), 1 „teilweise behoben“ (C-058) | COMPATIBILITY-LOG |
-| Stubs S-01 … S-36 | 35 erledigt/behoben, 1 offen (S-36) | STUBS |
+| Stubs S-01 … S-37 | 35 erledigt/behoben, 2 offen (S-36, S-37) | STUBS |
 | Typisierte gRPC-RPCs (`DirectorApi`) | 181 definiert: 94 lesend im Produktions-Build, 87 schreibend/Sitzung/Restore-Baum nur mit `grpc-development` (davon 4 nicht anwendbar: Gui, `.api`, `.grpc`, SetIp) | grpc-api.md |
 | MCP-Tools Produktions-Build | 35 typisierte Lese-Tools + `query` + 5 `ovfs_*` | mcp.md |
 | MCP-Tools Entwicklungs-Build (`--mcp-allow-write`) | zusätzlich 23 Schreib-/Restore-Tools + `execute` | mcp.md |
@@ -61,8 +61,7 @@ Nur Punkte, die in den Quellen ausdrücklich als offen stehen:
   Stand (Schreib-Tools nur im Entwicklungs-Build).
 - **`.profile create/set/delete/assign/unassign`** (Onesimus-Erweiterung): die
   RPCs laufen durch, der Director kennt die Unterbefehle nicht (`.profile` ist
-  Alias von `.acl`) — [S-35](STUBS.md). [grpc-api.md](wiki/grpc-api.md) führt die
-  RPCs nur als „Entwicklungs-Build“ ohne diesen Hinweis.
+  Alias von `.acl`) — [S-37](STUBS.md), Hinweis in [grpc-api.md](wiki/grpc-api.md).
 - **`label`/`relabel … encrypt`:** erzeugt noch keinen Volume-Schlüssel
   ([C-084](COMPATIBILITY-LOG.md), [S-08](STUBS.md); `update volume encrypt=` ist erledigt).
 - **C-058:** Tabellenstatus im Log „teilweise behoben“, die Teilpunkte (Verify,
@@ -170,7 +169,7 @@ Wiki-Status aber nicht ändert.
 | `.mediatypes` | ja | parity_verified | 9 / 9 | — | Prod: `DotMediatypes` | `query` |
 | `.msgs` | ja | parity_verified | 10 / 10 | — | Prod: `DotMsgs` | `dot_msgs`, `query` |
 | `.pools` | ja | partial | 21 / 34 | [C-044](COMPATIBILITY-LOG.md) behoben, Wiki-Status veraltet | Prod: `DotPools` | `dot_pools`, `query` |
-| `.profiles` | ja | parity_verified | 10 / 10 | Erweiterung `.profile create/set/…` wirkt nicht ([S-35](STUBS.md)) | Prod: `DotProfiles` | `query` |
+| `.profiles` | ja | parity_verified | 10 / 10 | Erweiterung `.profile create/set/…` wirkt nicht ([S-37](STUBS.md)) | Prod: `DotProfiles` | `query` |
 | `.quit` | ja | parity_verified | 3 / 3 | — | Entw.: `DotQuit` | – |
 | `.sql` | ja | parity_verified | 30 / 32 | — | Entw.: `DotSql` | Entw.: nur `execute` |
 | `.schedule` | ja | parity_verified | 18 / 24 | — | Prod: `DotSchedule` | `dot_schedule`, `query` |
@@ -263,7 +262,7 @@ stehen bewusst außerhalb der Baseline (Entscheidung [C-074](COMPATIBILITY-LOG.m
 Nacharbeit S-10 erledigt). gRPC: Lese-RPCs im Produktions-Build (`.acl list`,
 `.profile list`, `.sql*`, `.storage`, OVFS), Änderungen an `.acl`/`.profile` nur im
 Entwicklungs-Build; `.grpc` nicht anwendbar. MCP: `ovfs_*` in jedem Build,
-`.sql*`/`.storage` über `query`. Offen: `.profile create/set/…` wirkt nicht (S-35).
+`.sql*`/`.storage` über `query`. Offen: `.profile create/set/…` wirkt nicht (S-37).
 
 ## Roadmap
 
@@ -279,7 +278,7 @@ Entwicklungs-Build; `.grpc` nicht anwendbar. MCP: `ovfs_*` in jedem Build,
 | P1.7 | Katalog-Nebenpfade ohne Konsolenbefehl | erledigt (C-052, C-055, S-27, S-28) |
 | P2 | Seiteneffekte belegen | teilweise: private FD/SD-Prüfstände für Backup, Restore, Verify, Copy/Migrate, Consolidate, Scheduler, Joblimits, label/relabel, gRPC- und MCP-Schreibpfade; Paritätsfälle mit Folgeschritten und Neubewertung im Wiki offen |
 | P3 | Fehlende Fälle | `reload` erledigt (`c057`, `c075`); offen: `.bvfs_restore`, `.bvfs_cleanup` mit Handle-Tabelle, `.bvfs_clear_cache yes`, `umount` |
-| P4 | Scheduler | erledigt (S-02, S-15, S-16, C-081); [BACKLOG.md](BACKLOG.md) führt den Punkt noch als „KRITISCH“ |
+| P4 | Scheduler | erledigt (S-02, S-15, S-16, C-081; [BACKLOG.md](BACKLOG.md) nachgezogen) |
 | P5 | Typisierte Schnittstellen | gRPC erledigt (S-34, S-35); MCP-Lese-/Schreib-Tools erledigt (S-30, S-31); Vollausbau nach C-087 offen (S-36) |
 | P6 | Statusauffrischung | Paritätsvolllauf, `audit-notes.json` und Referenz neu erzeugen; Wiki-Status von 16.10. auf aktuellen Stand bringen |
 
@@ -298,18 +297,11 @@ und `--check`.
   Restore-Baum steht auf `missing_context`, obwohl C-047 behoben ist;
   `cross_cutting_findings` nennt noch „Scheduler startet keine Worker“;
   `mcp_build_policies` kennt die typisierten MCP-Tools nicht.
-- Kompatibilitätslog: Tabellenzeile C-058 „teilweise behoben“ und der Abschnitt
-  „Offen“ (C-058-RunScripts offen, C-080 offen) widersprechen den späteren
-  Einträgen (S-07 erledigt, C-080 behoben). Der Abschnitt „Stand 16.10.2026“
-  ist nicht fortgeschrieben.
-- STUBS: S-02 „Unverändert offen: der Scheduler startet fällige Jobs nicht“ ist
-  durch S-15 überholt; S-14 „Befund C-080 offen“ durch S-01/C-080 behoben.
-- [mcp.md](wiki/mcp.md) (Abschnitt Tests) nennt den label/relabel-Befund als
-  aktuell; er ist mit C-084/S-32 behoben.
-- [BACKLOG.md](BACKLOG.md) „KRITISCH: Scheduler startet keine Jobs“ ist durch
-  S-15 überholt.
-- `.profile`-Änderungen: S-35 sagt „laufen durch, der Director kennt sie nicht“;
-  [grpc-api.md](wiki/grpc-api.md) erwähnt das nicht.
+- Behoben am 17.10.2026 an den Quellen selbst: Abschnitte „Stand“/„Offen“ und
+  Zeile C-058 im Kompatibilitätslog, S-01/S-02/S-14 in STUBS (überholte
+  „offen“-Notizen), label/relabel-Befund in [mcp.md](wiki/mcp.md),
+  Scheduler-Punkt in [BACKLOG.md](BACKLOG.md), `.profile`-Hinweis in
+  [grpc-api.md](wiki/grpc-api.md) und neue Zeile S-37.
 
 ## Abnahme pro Befehl / Teilablauf
 
