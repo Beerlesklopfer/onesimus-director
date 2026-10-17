@@ -97,8 +97,8 @@ jobs:
 
       - name: Versionsnummer
         # Tags v* bauen die Version aus debian/changelog. Alle anderen Läufe
-        # bekommen eine Build-Nummer: <Version>~dev<Lauf>.g<Commit>; "~" sortiert
-        # vor der Release-Version, ein späteres Release ersetzt den Entwicklungsstand.
+        # bekommen eine Build-Nummer: <Version>+dev<Lauf>.g<Commit>; sie sortiert
+        # nach dem letzten Release in debian/changelog und vor dem nächsten.
         if: "!startsWith(github.ref, 'refs/tags/v')"
         env:
           DEBEMAIL: ci@onesimus.io
@@ -106,7 +106,7 @@ jobs:
         run: |
           git config --global --add safe.directory "$GITHUB_WORKSPACE"
           base=$(dpkg-parsechangelog -S Version)
-          version="${base}~dev${GITHUB_RUN_NUMBER}.g$(git rev-parse --short=8 HEAD)"
+          version="${base}+dev${GITHUB_RUN_NUMBER}.g$(git rev-parse --short=8 HEAD)"
           dch --newversion "$version" --distribution UNRELEASED --force-distribution \
             "CI build ${GITHUB_RUN_NUMBER} of ${GITHUB_REF_NAME} ($(git rev-parse --short=8 HEAD))"
           echo "Paketversion: $version"
