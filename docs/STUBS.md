@@ -22,7 +22,7 @@ Fälle ab, die echte Jobs starten können (`unsafe_job_start`).
 | S-04 | `onesimus-dird/src/commands/job.rs` | Verify-Jobs (alle Level) „not available yet“; Menüpunkt „Verify Volume Data (not yet implemented)“ | C-058, #1 | offen |
 | S-05 | `onesimus-dird/src/commands/job.rs`, `internal_jobs.rs` | Copy/Migrate-Arbeitsjobs: `run job=<Copy> jobid=N` abgewiesen, Steuerjob meldet „Could not start migration job.“ | C-058, #1 | offen |
 | S-06 | `onesimus-dird/src/commands/job.rs` | Consolidate mit Always-Incremental-Jobs „not available yet“ | C-058, #1 | offen |
-| S-07 | Job-Ablauf (alle Jobtypen) | RunScripts (RunBeforeJob/RunAfterJob, Client-/Console-Skripte) laufen nicht | C-058, #1 | erledigt (siehe Hinweis S-07 im Kompatibilitätslog; offen: Verify sendet noch keine Client-Skripte (S-04), Tabellenausgabe von Konsolenbefehlen wird anders auf Meldungen verteilt) |
+| S-07 | Job-Ablauf (alle Jobtypen) | RunScripts (RunBeforeJob/RunAfterJob, Client-/Console-Skripte) laufen nicht | C-058, #1 | erledigt (d1675d2, 0f0198b; siehe Hinweis S-07 im Kompatibilitätslog; offen: Verify sendet noch keine Client-Skripte (S-04), Tabellenausgabe von Konsolenbefehlen wird anders auf Meldungen verteilt) |
 | S-08 | `onesimus-dird/src/commands/admin.rs` (`UpdateAction::Unsupported`) | `update volume encrypt=` „not supported“ | C-067, #2 | offen |
 | S-09 | `onesimus-dird/src/commands/restore.rs` | API-2-Restore-Start liefert `{"result":{}}` statt `run.jobid` | C-072, #3 | offen |
 | S-10 | `onesimus-dird/src/commands/acl.rs` | `.acl` nur Platzhalter („(ACL configuration pending)“) | C-074, #4 | blockiert (Entscheidung des Nutzers zu #4) |
