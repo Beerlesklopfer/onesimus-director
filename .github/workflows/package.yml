@@ -35,7 +35,7 @@ jobs:
         run: |
           apt-get update -q >/dev/null
           apt-get install -y -q --no-install-recommends \
-            ca-certificates curl git build-essential pkg-config protobuf-compiler \
+            ca-certificates curl git build-essential pkg-config protobuf-compiler libprotobuf-dev \
             libssl-dev zlib1g-dev liblzo2-dev libacl1-dev >/dev/null
           curl -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal --default-toolchain stable
           echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
@@ -75,7 +75,7 @@ jobs:
           apt-get update -q >/dev/null
           apt-get install -y -q --no-install-recommends \
             ca-certificates curl git build-essential devscripts debhelper \
-            pkg-config protobuf-compiler libssl-dev >/dev/null
+            pkg-config protobuf-compiler libprotobuf-dev libssl-dev >/dev/null
           curl -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal --default-toolchain stable
           echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
 

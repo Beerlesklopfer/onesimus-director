@@ -2,7 +2,7 @@ Source: onesimus
 Section: admin
 Priority: optional
 Maintainer: Joerg Bernau <joerg@bernau.family>
-Build-Depends: debhelper-compat (= 13), protobuf-compiler
+Build-Depends: debhelper-compat (= 13), protobuf-compiler, libprotobuf-dev
 Standards-Version: 4.6.2
 Homepage: https://github.com/Beerlesklopfer/onesimus-director
 
