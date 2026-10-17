@@ -1,0 +1,20 @@
+# C-062..C-065: show — console ACL filter and password masking, runtime enabled state, api 1/json defaults.
+{"id": "c062-limited-types", "console": "parity-limited", "password": "parity-limited-pw", "steps": ["show jobs", "show jobdefs", "show pools", "show clients", "show storages", "show schedules", "show catalogs", "show filesets", "show directors", "show messages", "show consoles", "show profiles", "show counters", "show users"]}
+{"id": "c062-limited-all", "console": "parity-limited", "password": "parity-limited-pw", "steps": ["show", "show all", "show all verbose", "show clients verbose"]}
+{"id": "c062-limited-named", "console": "parity-limited", "password": "parity-limited-pw", "steps": ["show client=bareos-fd", "show client=parity-ndmp-fd", "show job=backup-bareos-fd", "show job=parity-admin", "show storage=File", "show storage=ParityNdmp", "show pool=Incremental", "show director=bareos-dir", "show console=parity-limited", "show console=*UserAgent*", "show catalog=MyCatalog", "show schedule=WeeklyCycleAfterBackup", "show pool=Full client=bareos-fd job=parity-admin"]}
+{"id": "c062-limited-disabled", "console": "parity-limited", "password": "parity-limited-pw", "steps": ["show disabled", "show disabled schedules"]}
+{"id": "c062-limited-api2", "console": "parity-limited", "password": "parity-limited-pw", "setup": [".api 2"], "steps": ["show clients", "show storages", "show client=parity-ndmp-fd", "show disabled"]}
+{"id": "c062-limited-json", "console": "parity-limited", "password": "parity-limited-pw", "setup": [".api json"], "steps": ["show all", "show pool=Full"]}
+{"id": "c062-limited-api1", "console": "parity-limited", "password": "parity-limited-pw", "setup": [".api 1"], "steps": ["show clients", "show storage=File"]}
+{"id": "c062-operator", "console": "parity-operator", "password": "parity-operator-pw", "steps": ["show clients", "show storages", "show directors"]}
+{"id": "c064-api1-client", "setup": [".api 1"], "steps": ["show client=bareos-fd", "show disabled"]}
+{"id": "c065-json-pool", "setup": [".api json"], "steps": ["show pool=Full"]}
+{"id": "c065-json-pool-compact", "setup": [".api json compact=yes"], "steps": ["show pool=Full"]}
+{"id": "c063-disable-show", "steps": ["show disabled", "disable job=backup-bareos-fd", "show disabled jobs", "show job=backup-bareos-fd", "show job=backup-bareos-fd verbose", "disable client=bareos-fd", "show disabled clients", "show client=bareos-fd", "enable schedule=WeeklyCycle", "show disabled schedules", "show schedule=WeeklyCycle", "show disabled", "enable job=backup-bareos-fd", "enable client=bareos-fd", "disable schedule=WeeklyCycle", "show disabled"]}
+{"id": "c063-disable-api2", "setup": [".api 2"], "steps": ["disable job=backup-bareos-fd", "show disabled", "enable job=backup-bareos-fd", "show disabled jobs"]}
+{"id": "c063-limited-after-disable", "console": "parity-limited", "password": "parity-limited-pw", "steps": ["show disabled"]}
+{"id": "c062-reload", "steps": ["reload"]}
+{"id": "c064-api1-client-reloaded", "setup": [".api 1"], "steps": ["show client=bareos-fd", "show disabled"]}
+{"id": "c065-json-pool-reloaded", "setup": [".api json"], "steps": ["show pool=Full"]}
+{"id": "c062-limited-reloaded", "console": "parity-limited", "password": "parity-limited-pw", "steps": ["show jobs", "show pools", "show clients", "show storages", "show schedules", "show all verbose"]}
+{"id": "c063-disable-reloaded", "steps": ["disable job=backup-bareos-fd", "show disabled jobs", "show job=backup-bareos-fd", "reload", "show disabled jobs"]}

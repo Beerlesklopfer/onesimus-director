@@ -718,8 +718,13 @@ fn configure_read(ast: &CommandAst, ctx: &ExecContext) -> CommandResult {
         ast.arguments.iter().find(|a| a.key == key).and_then(|a| a.value.as_deref())
     };
 
+    // Same resource ACLs as `show <type>=<name>` (IsResAllowed): a denied
+    // resource reads like an unknown one (compatibility log C-062).
+    use crate::acl::{access_locked, Kind as Acl};
+    let ok = |kind: Acl, name: &str| access_locked(ctx, &config, kind, name);
+
     if let Some(name) = get_arg("client") {
-        if let Some(c) = config.find_client(name) {
+        if let Some(c) = config.find_client(name).filter(|_| ok(Acl::Client, name)) {
             return CommandResult::ok(format!(
                 "Client {{\n  Name = \"{}\"\n  Address = \"{}\"\n  Port = {}\n  Enabled = {}\n}}\n",
                 c.name, c.address, c.port, if c.enabled { "yes" } else { "no" }
@@ -728,7 +733,7 @@ fn configure_read(ast: &CommandAst, ctx: &ExecContext) -> CommandResult {
         return CommandResult::error(format!("Client '{name}' not found\n"));
     }
     if let Some(name) = get_arg("job") {
-        if let Some(j) = config.find_job(name) {
+        if let Some(j) = config.find_job(name).filter(|_| ok(Acl::Job, name)) {
             return CommandResult::ok(format!(
                 "Job {{\n  Name = \"{}\"\n  Type = {:?}\n  Level = {:?}\n  Client = \"{}\"\n  \
                  Storage = \"{}\"\n  Pool = \"{}\"\n  FileSet = \"{}\"\n  Priority = {}\n  Enabled = {}\n}}\n",
@@ -739,7 +744,7 @@ fn configure_read(ast: &CommandAst, ctx: &ExecContext) -> CommandResult {
         return CommandResult::error(format!("Job '{name}' not found\n"));
     }
     if let Some(name) = get_arg("pool") {
-        if let Some(p) = config.find_pool(name) {
+        if let Some(p) = config.find_pool(name).filter(|_| ok(Acl::Pool, name)) {
             return CommandResult::ok(format!(
                 "Pool {{\n  Name = \"{}\"\n  Pool Type = \"{}\"\n  Recycle = {}\n  \
                  Auto Prune = {}\n  Maximum Volumes = {}\n}}\n",
@@ -750,7 +755,7 @@ fn configure_read(ast: &CommandAst, ctx: &ExecContext) -> CommandResult {
         return CommandResult::error(format!("Pool '{name}' not found\n"));
     }
     if let Some(name) = get_arg("storage") {
-        if let Some(s) = config.find_storage(name) {
+        if let Some(s) = config.find_storage(name).filter(|_| ok(Acl::Storage, name)) {
             return CommandResult::ok(format!(
                 "Storage {{\n  Name = \"{}\"\n  Address = \"{}\"\n  Port = {}\n  \
                  Device = \"{}\"\n  Media Type = \"{}\"\n}}\n",
