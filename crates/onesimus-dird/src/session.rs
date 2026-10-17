@@ -317,13 +317,13 @@ pub fn handle_console_session_with<S: Read + Write>(
         if api_mode == command_executor::ApiMode::Json {
             if bnet.send_str(&crate::json_output::envelope(&result, json_compact)).is_err() { break; }
         } else {
-            let with_newline = |text: &str| if text.ends_with('\n') || result.verbatim { text.to_string() } else { format!("{text}\n") };
             let no_errors = String::new();
             let errors = if result.errors_inline { &no_errors } else { &result.error_message };
             let mut parts = [&result.text_output, errors];
             if result.errors_first { parts.reverse(); }
-            if parts.iter().filter(|part| !part.is_empty())
-                .any(|part| bnet.send_str(&with_newline(part)).is_err()) {
+            let parts: Vec<&String> = parts.into_iter().filter(|part| !part.is_empty()).collect();
+            if (0..parts.len()).any(|i| bnet.send_str(&reply_part(parts[i], parts.get(i + 1).map(|p| p.as_str()),
+                result.verbatim)).is_err()) {
                 break;
             }
         }
@@ -342,6 +342,19 @@ pub fn handle_console_session_with<S: Read + Write>(
     // Cleanup
     session_mgr.remove_session(mgr_session_id);
     info!("session {session_id} ({console_name}) ended");
+}
+
+/// One part of a console reply as it goes on the wire. A part without a
+/// final newline gets one, unless the reply is verbatim or the next part
+/// starts a new line itself: the original sends each SendMsg/ErrorMsg as it
+/// is ("Probing client protocol..." then "\nFailed to connect to File
+/// daemon.\n", one line break).
+fn reply_part(text: &str, next: Option<&str>, verbatim: bool) -> String {
+    if text.ends_with('\n') || verbatim || next.is_some_and(|n| n.starts_with('\n')) {
+        text.to_string()
+    } else {
+        format!("{text}\n")
+    }
 }
 
 /// Tail of one console loop iteration (C++ ua_server.cc
@@ -859,6 +872,19 @@ mod console_message_tests {
     //! once ("You have messages." / BNET_MSGS_PENDING), shown directly with
     //! autodisplay on, and only for consoles that may run `messages`.
     use super::*;
+
+    /// A part without line break gets one, except before a part that
+    /// starts with its own (cancel: "Probing client protocol..." +
+    /// "\nFailed to connect to File daemon.\n").
+    #[test]
+    fn reply_parts_join_like_separate_messages() {
+        assert_eq!(reply_part("Probing client protocol...", Some("\nFailed to connect to File daemon.\n"), false),
+            "Probing client protocol...");
+        assert_eq!(reply_part("text", Some("error\n"), false), "text\n");
+        assert_eq!(reply_part("text", None, false), "text\n");
+        assert_eq!(reply_part("text", None, true), "text");
+        assert_eq!(reply_part("line\n", Some("\nx"), false), "line\n");
+    }
     use crate::console_msg::ConsoleQueue;
     use std::net::{TcpListener, TcpStream};
     use std::sync::RwLock;
