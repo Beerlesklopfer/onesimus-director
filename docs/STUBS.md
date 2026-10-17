@@ -21,7 +21,7 @@ Fälle ab, die echte Jobs starten können (`unsafe_job_start`).
 | S-03 | `onesimus-dird/src/internal_jobs.rs` | Selection Type PoolOccupancy „not available yet“ | C-058, #1 | offen |
 | S-04 | `onesimus-dird/src/commands/job.rs` | Verify-Jobs (alle Level) „not available yet“; Menüpunkt „Verify Volume Data (not yet implemented)“ | C-058, #1 | offen |
 | S-05 | `onesimus-dird/src/commands/job.rs`, `internal_jobs.rs` | Copy/Migrate-Arbeitsjobs: `run job=<Copy> jobid=N` abgewiesen, Steuerjob meldet „Could not start migration job.“ | C-058, #1 | offen |
-| S-06 | `onesimus-dird/src/commands/job.rs` | Consolidate mit Always-Incremental-Jobs „not available yet“ | C-058, #1 | offen |
+| S-06 | `onesimus-dird/src/commands/job.rs` | Consolidate mit Always-Incremental-Jobs „not available yet“ | C-058, #1 | erledigt (68d72c1; `consolidate.rs`, `vbackup.rs`, SD-Sitzung `sd_copy.rs` aus S-05) |
 | S-07 | Job-Ablauf (alle Jobtypen) | RunScripts (RunBeforeJob/RunAfterJob, Client-/Console-Skripte) laufen nicht | C-058, #1 | offen |
 | S-08 | `onesimus-dird/src/commands/admin.rs` (`UpdateAction::Unsupported`) | `update volume encrypt=` „not supported“ | C-067, #2 | offen |
 | S-09 | `onesimus-dird/src/commands/restore.rs` | API-2-Restore-Start liefert `{"result":{}}` statt `run.jobid` | C-072, #3 | offen |
