@@ -304,6 +304,10 @@ pub fn run_worker(
     loop {
         let old_name = state.name().to_string();
         state = match state {
+            // restore.cc DoNativeRestore: no bootstrap, no connection (the
+            // Director sent the M_FATAL text with the job).
+            WorkerState::Init if params.job_type == WorkerJobType::Restore && params.bootstrap.is_none() =>
+                WorkerState::Error("Cannot restore without a bootstrap file".to_string()),
             WorkerState::Init => {
                 WorkerState::ConnectingFD
             }
