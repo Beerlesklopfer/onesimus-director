@@ -25,6 +25,15 @@ use serde_json::{Value, json};
 pub trait CommandRunner: Send + 'static {
     fn run(&mut self, command: &str) -> anyhow::Result<String>;
 
+    /// Runs one command under the Director's JSON API (`.api json compact=yes`,
+    /// then `.api 0` again, so the session stays in plain console mode).
+    fn run_json(&mut self, command: &str) -> anyhow::Result<String> {
+        self.run(".api json compact=yes")?;
+        let out = self.run(command);
+        self.run(".api 0")?;
+        out
+    }
+
     /// Runs one command and answers the Director's questions: `answer`
     /// gets the output so far (ending with the question) and returns the
     /// reply, or None to cancel with ".". Runners without dialogs (gRPC)
@@ -202,6 +211,8 @@ impl<R: CommandRunner> McpServer<R> {
                  Commands are bconsole command lines, e.g. 'status dir', 'list jobs', \
                  'list volumes', 'show client=NAME', 'llist jobid=42'. \
                  Use 'help' or '.help all' to discover commands. \
+                 Prefer the typed read-only tools (list_*, show, status_*, dot_*, version, time, messages); \
+                 they return the Director's JSON. \
                  Browse backup contents with the ovfs_* tools (ovfs_latest, ovfs_tree, ovfs_ls, ovfs_versions).",
                 self.director_name
             ),
@@ -227,6 +238,7 @@ impl<R: CommandRunner> McpServer<R> {
             "annotations": { "readOnlyHint": true, "openWorldHint": false }
         })];
         tools.extend(ovfs_tools());
+        tools.extend(crate::mcp_read::tools());
         #[cfg(feature = "mcp-development")]
         if self.write_enabled() {
             tools.extend(crate::mcp_write::tools());
@@ -261,6 +273,19 @@ impl<R: CommandRunner> McpServer<R> {
                     .lock()
                     .map_err(|_| (-32603, "Director runner unavailable".to_string()))?;
                 return Ok(crate::mcp_write::execute(&mut *runner, plan));
+            }
+        }
+        {
+            // Typed read-only tools (mcp_read.rs), in every build
+            let arguments = params.get("arguments").cloned().unwrap_or_else(|| json!({}));
+            if let Some(built) = crate::mcp_read::command(name, &arguments) {
+                return match built {
+                    Ok(command) => {
+                        let mut runner = self.runner.lock().map_err(|_| (-32603, "Director runner unavailable".to_string()))?;
+                        Ok(crate::mcp_read::run(&mut *runner, &command))
+                    }
+                    Err(msg) => Ok(tool_result(&msg, true)),
+                };
             }
         }
         if name.starts_with("ovfs_") {
@@ -656,8 +681,11 @@ mod tests {
             .iter()
             .map(|t| t["name"].clone())
             .collect();
-        assert_eq!(names, vec![json!("query"), json!("ovfs_status"), json!("ovfs_latest"),
+        assert_eq!(names[..6], [json!("query"), json!("ovfs_status"), json!("ovfs_latest"),
             json!("ovfs_tree"), json!("ovfs_ls"), json!("ovfs_versions")]);
+        // then the typed read-only tools (mcp_read.rs)
+        assert_eq!(names.len(), 6 + crate::mcp_read::tools().len());
+        assert!(names.contains(&json!("list_jobs")) && names.contains(&json!("dot_jobstatus")));
         for tool in r["result"]["tools"].as_array().unwrap() {
             assert_eq!(tool["annotations"]["readOnlyHint"], true, "{}", tool["name"]);
         }
@@ -797,7 +825,7 @@ mod tests {
     #[cfg(feature = "mcp-development")]
     #[test]
     fn development_lists_execute_only_after_runtime_opt_in() {
-        let names = |srv: &McpServer<Echo>| -> Vec<String> {
+        let names =|srv: &McpServer<Echo>| -> Vec<String> {
             srv.tools_list()["tools"].as_array().unwrap().iter()
                 .map(|t| t["name"].as_str().unwrap().to_string()).collect()
         };
@@ -808,6 +836,8 @@ mod tests {
             assert!(!off.iter().any(|n| n == tool), "{tool} hidden without --mcp-allow-write");
         }
         assert_eq!(on.len(), off.len() + WRITE_TOOLS.len() + 1);
+        let without = McpServer::new(Echo(vec![]), false, "dir".into()).tools_list();
+        assert!(without["tools"].as_array().unwrap().iter().all(|t| t["annotations"]["readOnlyHint"] == true));
     }
 
     /// The typed write/restore tools of mcp_write.rs (S-31). Spelled out here
@@ -914,7 +944,8 @@ mod tests {
                 serde_json::from_str(&lines.next_line().await.unwrap().unwrap()).unwrap();
             assert_eq!(reply["id"], id);
             match id {
-                2 => assert_eq!(reply["result"]["tools"].as_array().unwrap().len(), 6), // query + 5 read-only OVFS tools
+                // query + 5 read-only OVFS tools + typed read-only tools
+                2 => assert_eq!(reply["result"]["tools"].as_array().unwrap().len(), 6 + crate::mcp_read::tools().len()),
                 3 => assert_eq!(reply["result"]["content"][0]["text"], "ran list jobs\n"),
                 4 => assert!(reply["error"].is_object()),
                 _ => unreachable!(),
