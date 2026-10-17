@@ -420,9 +420,6 @@ pub fn request(tool: &str, arguments: &Value) -> Option<(&'static str, Value)> {
         }
         "delete" => {
             let rpc = match r.str("kind")? { "volume" => "DeleteVolume", "pool" => "DeletePool", "jobid" => "DeleteJob", _ => "DeleteStorage" };
-            // DeleteStorage sends `delete storage storage=<n>`, which asks for the
-            // name again: console line (see configure_update).
-            let r = if rpc == "DeleteStorage" { r.set("__console_line", json!(true)) } else { r };
             r.list("jobids", "jobid").copy(&["volume", "pool", "storage", "confirm"]).done(rpc)
         }
         "dot_sql" => r.copy(&["query"]).done("DotSql"),
@@ -450,13 +447,6 @@ pub fn request(tool: &str, arguments: &Value) -> Option<(&'static str, Value)> {
             if tool == "configure_delete" {
                 r = r.set("yes", json!(true));
             }
-            if tool != "configure_add" {
-                // The Director's ConfigureUpdate/ConfigureDelete build
-                // `configure update|delete <type> name=<n>`, which its own
-                // configure command rejects (it wants <type>=<name>): use the
-                // console line until that is fixed.
-                r = r.set("__console_line", json!(true));
-            }
             if let Some(Value::Object(directives)) = r.get("directives") {
                 let mut map = Map::new();
                 for (key, value) in directives {
@@ -483,10 +473,8 @@ pub fn request(tool: &str, arguments: &Value) -> Option<(&'static str, Value)> {
             }
         }
         "setbandwidth" => {
-            // proto3 cannot send limit=0 (it is the absent default): console line
-            let zero = r.get("limit").and_then(Value::as_i64) == Some(0);
-            let r = if zero { r.set("__limit", json!(0)) } else { r };
-            r.copy(&["limit", "client", "storage", "jobid", "job", "ujobid", "state"]).keep_unmapped(&["all"]).done("SetBandwidth")
+            // limit is optional in SetBandwidthLimitCommand: 0 goes over the wire (S-39)
+            r.copy(&["limit", "client", "storage", "jobid", "job", "ujobid", "state", "all"]).done("SetBandwidth")
         }
         "setdevice" => r.copy(&["storage", "device"]).yes_no("autoselect").done("SetDevice"),
         "session_option" => {
@@ -568,6 +556,27 @@ mod tests {
         // arguments without a request field force the console line
         let (rpc, req) = request("list_jobs", &json!({"order":"desc"})).unwrap();
         assert!(encode(rpc, &req).is_err());
+    }
+
+    /// S-38/S-39: configure update/delete, delete storage and setbandwidth
+    /// (also limit=0 and all) take the typed route; limit=0 reaches the
+    /// Director as a present field.
+    #[test]
+    fn fixed_director_rpcs_are_typed() {
+        let typed = |tool: &str, args: Value| {
+            let (rpc, req) = request(tool, &args).unwrap();
+            let bytes = encode(rpc, &req).unwrap_or_else(|e| panic!("{tool}: {e}"));
+            let (input, _) = rpc_types(rpc).unwrap();
+            (rpc, typed::message_to_json(&input, &bytes))
+        };
+        let (rpc, req) = typed("configure_update", json!({"resource":"client","name":"fd","directives":{"address":"h","port":9102}}));
+        assert_eq!((rpc, req["name"].clone(), req["directives"]["port"].clone()), ("ConfigureUpdate", json!("fd"), json!("9102")));
+        let (rpc, req) = typed("configure_delete", json!({"resource":"schedule","name":"s","confirm":true}));
+        assert_eq!((rpc, req["yes"].clone()), ("ConfigureDelete", json!(true)));
+        let (rpc, req) = typed("delete", json!({"kind":"storage","storage":"S","confirm":true}));
+        assert_eq!((rpc, req), ("DeleteStorage", json!({"storage":"S","confirm":true})));
+        assert_eq!(typed("setbandwidth", json!({"limit":0,"client":"fd"})), ("SetBandwidth", json!({"client":"fd","limit":0})));
+        assert_eq!(typed("setbandwidth", json!({"limit":5,"all":true})), ("SetBandwidth", json!({"limit":5,"all":true})));
     }
 
     /// Fake gRPC Director: canned typed replies, or a status.

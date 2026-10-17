@@ -576,7 +576,7 @@ dev {
     configure_update(cmd::ConfigureUpdateCommand) -> pb::ActionResponse = "ConfigureUpdate" via write;
     reload(cmd::ReloadCommand) -> pb::ActionResponse = "Reload" via write;
     set_debug(pb::SetDebugLevelCommand) -> pb::ActionResponse = "SetDebug" via write;
-    set_bandwidth(cmd::SetbandwidthCommand) -> pb::ActionResponse = "SetBandwidth" via write;
+    set_bandwidth(pb::SetBandwidthLimitCommand) -> pb::ActionResponse = "SetBandwidth" via write;
     set_device(cmd::SetdeviceCommand) -> pb::ActionResponse = "SetDevice" via write;
     set_ip(cmd::SetipCommand) -> pb::ActionResponse = "SetIp" via write;
     trace(pb::TraceSwitchCommand) -> pb::ActionResponse = "Trace" via write;

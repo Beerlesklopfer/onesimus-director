@@ -296,8 +296,8 @@ pub fn plan(rpc: &str, m: &Map<String, Value>) -> Option<Result<Plan, String>> {
             l.kv("client", r.req("client")?);
             Ok(Plan::new(l))
         },
-        "ConfigureDelete" => |r| configure(r, "delete"),
-        "ConfigureUpdate" => |r| configure(r, "update"),
+        "ConfigureDelete" => configure_delete,
+        "ConfigureUpdate" => configure_update,
         "Reload" => |_| Ok(Plan::new(Line::new("reload"))),
         "SetDebug" => setdebug,
         "SetBandwidth" => setbandwidth,
@@ -596,7 +596,9 @@ fn delete(r: &Req, kind: &str) -> Result<Plan, String> {
         }
         _ => {
             r.reject(&["volume", "pool", "jobid"], "DeleteStorage")?;
-            l.word("storage").kv("storage", r.req("storage")?);
+            // S-38: `delete storage=<n>` — a bare `storage` before it would
+            // make FindArgWithValue stop at the keyword and prompt.
+            l.kv("storage", r.req("storage")?);
             Plan::new(l)
         }
     };
@@ -814,8 +816,55 @@ fn configure(r: &Req, action: &str) -> Result<Plan, String> {
             l.kv(key, value);
         }
     }
-    if action == "delete" && r.flag("yes") {
+    Ok(Plan::new(l))
+}
+
+/// Resource types `configure delete` removes (commands/configure.rs).
+const CONFIGURE_DELETE_TYPES: &[&str] = &["client", "job", "pool", "storage", "console", "schedule"];
+/// Resource types and directives `configure update` changes.
+const CONFIGURE_UPDATE: &[(&str, &[&str])] = &[
+    ("client", &["address", "port", "password"]),
+    ("job", &["newclient", "newstorage", "newpool"]),
+];
+
+/// S-38: `configure delete <type>=<name> [yes]`, the line the command
+/// accepts (it takes the first `<type>=<name>` argument).
+fn configure_delete(r: &Req) -> Result<Plan, String> {
+    let kind = resource_type(r)?;
+    if !CONFIGURE_DELETE_TYPES.contains(&kind.as_str()) {
+        return Err(format!("configure delete supports resource types {}", CONFIGURE_DELETE_TYPES.join(", ")));
+    }
+    let mut l = Line::new("configure delete");
+    l.kv(&kind, r.req("name")?);
+    if r.flag("yes") {
         l.word("yes");
+    }
+    Ok(Plan::new(l))
+}
+
+/// S-38: `configure update client=<n> address=… port=… password=…` or
+/// `configure update job=<n> newclient=… newstorage=… newpool=…`, the
+/// lines the command accepts.
+fn configure_update(r: &Req) -> Result<Plan, String> {
+    let kind = resource_type(r)?;
+    let (_, allowed) = CONFIGURE_UPDATE.iter().find(|(k, _)| *k == kind)
+        .ok_or_else(|| format!("configure update supports resource types {}",
+            CONFIGURE_UPDATE.iter().map(|(k, _)| *k).collect::<Vec<_>>().join(", ")))?;
+    let mut l = Line::new("configure update");
+    l.kv(&kind, r.req("name")?);
+    let Some(Value::Object(directives)) = r.0.get("directives").filter(|d| d.as_object().is_some_and(|m| !m.is_empty())) else {
+        return Err(format!("directives: give at least one of {}", allowed.join(", ")));
+    };
+    for key in *allowed {
+        let Some(value) = directives.get(*key) else { continue };
+        let value = value.as_str().unwrap_or("");
+        if value.is_empty() || value.chars().any(|c| c.is_control() || c == '"' || c == '@' || c == ';') {
+            return Err(format!("directive '{key}': empty value or not allowed characters"));
+        }
+        l.kv(key, value);
+    }
+    if let Some(key) = directives.keys().find(|k| !allowed.contains(&k.as_str())) {
+        return Err(format!("directive '{key}' does not apply to {kind} (allowed: {})", allowed.join(", ")));
     }
     Ok(Plan::new(l))
 }
@@ -842,11 +891,14 @@ fn setdebug(r: &Req) -> Result<Plan, String> {
     Ok(Plan::new(l))
 }
 
+/// S-39: `limit` is `optional` in SetBandwidthLimitCommand, so 0 (no
+/// limit) arrives as a present field.
 fn setbandwidth(r: &Req) -> Result<Plan, String> {
     let limit = r.0.get("limit").and_then(Value::as_i64).filter(|l| *l >= 0).ok_or("limit is required")?;
     let mut l = Line::new("setbandwidth");
     l.kv("limit", limit.to_string());
-    match r.one_of(&["client", "storage", "jobid", "job", "ujobid", "state"])?.as_str() {
+    match r.one_of(&["client", "storage", "jobid", "job", "ujobid", "state", "all"])?.as_str() {
+        "all" => { l.word("all"); }
         "jobid" => { l.kv("jobid", r.0.get("jobid").and_then(Value::as_i64).unwrap_or(0).to_string()); }
         "state" => { l.kv("state", r.choice("state", CANCEL_STATES)?.unwrap_or_default()); }
         key => { l.kv(key, r.req(key)?); }
@@ -1071,7 +1123,7 @@ mod tests {
         assert_eq!(line("DeleteVolume", json!({"volume": "A", "pool": "Full", "confirm": true})), "delete volume=A pool=Full yes");
         assert_eq!(line("DeletePool", json!({"pool": "Old", "confirm": true})), "delete pool=Old");
         assert_eq!(line("DeleteJob", json!({"jobid": [1, 2], "confirm": true})), "delete jobid=1,2");
-        assert_eq!(line("DeleteStorage", json!({"storage": "S", "confirm": true})), "delete storage storage=S");
+        assert_eq!(line("DeleteStorage", json!({"storage": "S", "confirm": true})), "delete storage=S");
         assert!(err("DeletePool", json!({"pool": "Old", "jobid": [1], "confirm": true})).contains("does not apply"));
         let p = plan("DeleteJob", json!({"jobid": [1], "confirm": true}).as_object().unwrap()).unwrap().unwrap();
         assert_eq!(p.yes_to, &["Are you sure you want to delete"]);
@@ -1097,10 +1149,23 @@ mod tests {
         assert_eq!(line("MoveVolumes", json!({"storage": "T", "srcslots": "1", "dstslots": "2"})), "move storage=T srcslots=1 dstslots=2");
         assert_eq!(line("ConfigureAdd", json!({"resource_type": 1, "name": "c1", "directives": {"address": "h", "password": "p"}})),
                    "configure add client name=c1 address=h password=p");
+        // S-38: the lines `configure update|delete` accept
+        assert_eq!(line("ConfigureUpdate", json!({"resource_type": 1, "name": "c1", "directives": {"port": "9102", "address": "h"}})),
+                   "configure update client=c1 address=h port=9102");
+        assert_eq!(line("ConfigureUpdate", json!({"resource_type": 3, "name": "j", "directives": {"newpool": "Full"}})),
+                   "configure update job=j newpool=Full");
+        assert!(err("ConfigureUpdate", json!({"resource_type": 1, "name": "c1"})).contains("at least one"));
+        assert!(err("ConfigureUpdate", json!({"resource_type": 1, "name": "c1", "directives": {"enabled": "no"}})).contains("does not apply"));
+        assert!(err("ConfigureUpdate", json!({"resource_type": 8, "name": "p", "directives": {"x": "y"}})).contains("supports"));
+        assert_eq!(line("ConfigureDelete", json!({"resource_type": 6, "name": "s1", "yes": true})), "configure delete schedule=s1 yes");
+        assert_eq!(line("ConfigureDelete", json!({"resource_type": 8, "name": "p"})), "configure delete pool=p");
+        assert!(err("ConfigureDelete", json!({"resource_type": 7, "name": "fs"})).contains("supports"));
         assert_eq!(line("ConfigureExport", json!({"client": "fd"})), "configure export client=fd");
         assert_eq!(line("SetDebug", json!({"level": 100, "trace": true, "dir": true})), "setdebug level=100 trace=1 dir");
         assert_eq!(line("SetDebug", json!({"level": 0, "client": "fd"})), "setdebug level=0 client=fd");
         assert_eq!(line("SetBandwidth", json!({"limit": 1000, "client": "fd"})), "setbandwidth limit=1000 client=fd yes");
+        assert_eq!(line("SetBandwidth", json!({"limit": 0, "all": true})), "setbandwidth limit=0 all yes");
+        assert!(err("SetBandwidth", json!({"client": "fd"})).contains("limit is required"));
         assert_eq!(line("SetDevice", json!({"storage": "S", "device": "D", "autoselect": "no"})), "setdevice storage=S device=D autoselect=no");
         assert_eq!(line("Trace", json!({"on": true})), "trace on");
         assert_eq!(line("Automount", json!({"off": true})), "automount off");
@@ -1116,6 +1181,56 @@ mod tests {
         assert_eq!(line("DotAclSet", json!({"console": "c", "type": "JobAcl", "value": "a,b"})), ".acl set console=c jobacl=a,b");
         assert_eq!(line("DotAclDelete", json!({"console": "c", "type": "job"})), ".acl delete console=c jobacl");
         assert_eq!(line("DotAclCopy", json!({"from": "a", "to": "b"})), ".acl copy from=a to=b");
+    }
+
+    /// S-38: the planned lines run through `configure` itself and change
+    /// the running configuration (no config path in tests: nothing on disk).
+    #[test]
+    fn configure_update_delete_lines_are_accepted() {
+        use std::sync::{Arc, RwLock};
+        let config = crate::director_config::DirectorConfig::from_str(
+            "Director { Name = dir }\nClient { Name = c1; Address = old; Password = pw }\n\
+             Pool { Name = Full; Pool Type = Backup }\nSchedule { Name = s1 }\n\
+             Job { Name = j; Type = Backup; Client = c1; Pool = Full; Messages = Standard }"
+        ).unwrap();
+        let config = Arc::new(RwLock::new(config));
+        let ctx = crate::command_executor::ExecContext { session_id: 0, config: Some(config.clone()),
+            session_mgr: None, catalog: None, api_mode: crate::command_executor::ApiMode::Human,
+            bus_rx: None, job_manager: None };
+        let run = |rpc: &str, request: Value| {
+            let p = plan(rpc, request.as_object().unwrap()).unwrap().unwrap();
+            let result = crate::commands::configure::cmd_configure(&p.ast, &ctx);
+            format!("{}{}", result.text_output, result.error_message)
+        };
+        assert_eq!(run("ConfigureUpdate", json!({"resource_type": 1, "name": "c1", "directives": {"address": "new", "port": "9112"}})),
+                   "Client 'c1' updated: address=new, port=9112\n");
+        assert_eq!(config.read().unwrap().find_client("c1").unwrap().address, "new");
+        assert_eq!(run("ConfigureUpdate", json!({"resource_type": 3, "name": "j", "directives": {"newpool": "Full"}})),
+                   "Job 'j' updated: pool=Full\n");
+        assert_eq!(run("ConfigureDelete", json!({"resource_type": 6, "name": "s1", "yes": true})), "Deleted Schedule 's1'\n");
+        assert!(config.read().unwrap().schedules.iter().all(|s| s.name != "s1"));
+        assert_eq!(run("ConfigureDelete", json!({"resource_type": 1, "name": "nosuch"})), "Client 'nosuch' not found\n");
+    }
+
+    /// S-39: limit=0 survives the wire (optional field) and becomes
+    /// `limit=0` in the line.
+    #[test]
+    fn setbandwidth_limit_zero_on_the_wire() {
+        use onesimus_proto_rs::onesimus::director::api::SetBandwidthLimitCommand;
+        use onesimus_proto_rs::typed;
+        use prost::Message;
+        let (input, _) = typed::registry().rpc_types(typed::DIRECTOR_API_SERVICE, "SetBandwidth").unwrap();
+        assert!(input.ends_with("SetBandwidthLimitCommand"), "{input}");
+        let encoded = typed::json_to_message(&input, &json!({"limit": 0, "client": "fd"}));
+        assert!(encoded.unmapped.is_empty());
+        let request = SetBandwidthLimitCommand::decode(encoded.bytes.as_slice()).unwrap();
+        assert_eq!(request.limit, Some(0));
+        let Value::Object(m) = typed::message_to_json(&input, &request.encode_to_vec()) else { panic!() };
+        assert_eq!(plan("SetBandwidth", &m).unwrap().unwrap().line(), "setbandwidth limit=0 client=fd yes");
+        // absent limit stays an error
+        let request = SetBandwidthLimitCommand { client: "fd".into(), ..Default::default() };
+        let Value::Object(m) = typed::message_to_json(&input, &request.encode_to_vec()) else { panic!() };
+        assert!(plan("SetBandwidth", &m).unwrap().unwrap_err().contains("limit is required"));
     }
 
     #[test]
