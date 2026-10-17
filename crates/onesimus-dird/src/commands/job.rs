@@ -1714,6 +1714,15 @@ fn run_selected(
     let catalog_files = crate::job_messages::raw_directive(&config, "pool", pool, "catalogfiles")
         .and_then(|v| bareos_config::values::parse_bool(&v).ok().map(|(_, on)| on)).unwrap_or(true);
     let bool_dir = |key: &str, default: bool| crate::commands::defaults::bool_directive(&job_dirs, key, default);
+    // SetJcrDefaults(), then a Run directive's override (scheduled_run) or
+    // the run command's `spooldata=`/`accurate=` (ua_run.cc) (S-22).
+    let run_flag = |key: &str| crate::ua_select::find_arg_with_value(ast, key).and_then(crate::ua_select::is_yesno);
+    let spool_data = run_flag("spooldata").or_else(crate::scheduled_run::spool_data)
+        .unwrap_or_else(|| bool_dir("spooldata", false));
+    let accurate = run_flag("accurate").or_else(crate::scheduled_run::accurate)
+        .unwrap_or_else(|| bool_dir("accurate", false));
+    let spool_size = job_dirs.iter().rev().find(|d| d.norm_key() == "spoolsize").and_then(|d| d.first())
+        .and_then(|v| bareos_config::values::parse_size(v).ok()).map_or(0, |(_, size)| size as i64);
     let fileset_lines = match crate::commands::estimate::include_exclude_messages(&config, fileset_name) {
         Ok(lines) => lines,
         Err(e) => return job_failed(e),
@@ -1729,13 +1738,13 @@ fn run_selected(
         ids: crate::backup::JobIds { level: level_char, client_id, pool_id, fileset_id: fsr.id },
         since_utime: crate::btime::str_to_utime(&since.stime),
         prev_job: since.prev_job.clone(),
-        accurate: bool_dir("accurate", false),
+        accurate,
         client_retention: retention,
         fileset_lines,
         sd_job: crate::sd_copy::CopySession {
             job_type: 'B', level: level_char, job_resource: job.name.clone(), client: client.name.clone(),
             fileset: fileset_name.to_string(), fileset_md5: fsr.md5.clone(), no_attributes: !catalog_files,
-            spool_attributes: bool_dir("spoolattributes", false), spool_data: bool_dir("spooldata", false),
+            spool_attributes: bool_dir("spoolattributes", false), spool_data, spool_size,
             prefer_mounted_volumes: bool_dir("prefermountedvolumes", true),
             ..Default::default()
         },
@@ -1778,6 +1787,7 @@ fn run_selected(
     // Job report data (job.cc SetJcrDefaults/ApplyPoolOverrides, GetLevelSinceTime)
     let mut report = crate::job_messages::backup_report(&config, &job, client, storage_name, pool, default_pool,
         &level_char.to_string(), fileset_name, now);
+    report.accurate = accurate;
     report.job = unique_job.clone();
     report.level = level;
     report.since = since.since.clone();

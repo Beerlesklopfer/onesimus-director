@@ -9,7 +9,7 @@
 //! `commands::job::start_job`, the start of the `run` command; the parts of
 //! the Run directive a command line cannot express (job trigger
 //! "Scheduler", the level pool overrides and their pool source, the
-//! Messages override, Accurate) are the [`RunOverrides`] of the current
+//! Messages override, Accurate, SpoolData) are the [`RunOverrides`] of the current
 //! thread while the job starts. The Next Pool goes in the request
 //! (`nextpool=`); MaxRunSchedTime reaches the job queue's checks
 //! (job_manager/limits.rs) through [`start_flags`].
@@ -42,6 +42,8 @@ pub struct RunOverrides {
     pub messages: Option<String>,
     pub priority: Option<i32>,
     pub accurate: Option<bool>,
+    /// jcr->dir_impl->spool_data.
+    pub spool_data: Option<bool>,
     /// jcr->dir_impl->MaxRunSchedTime (seconds).
     pub max_run_sched_time: Option<u64>,
     /// jcr->dir_impl->res.pool_source after ApplyPoolOverrides().
@@ -69,6 +71,7 @@ impl RunOverrides {
             // `if (run->Priority != 0) jcr->JobPriority = run->Priority;`
             priority: run.priority.filter(|p| *p != 0),
             accurate: run.accurate,
+            spool_data: run.spool_data,
             max_run_sched_time: run.max_run_sched_time,
             pool_source: None,
         }
@@ -118,6 +121,16 @@ pub fn with_overrides<R>(overrides: RunOverrides, f: impl FnOnce() -> R) -> R {
 
 fn current<R>(f: impl FnOnce(&mut RunOverrides) -> R) -> Option<R> {
     CURRENT.with(|c| c.borrow_mut().as_mut().map(f))
+}
+
+/// The Run directive's SpoolData of the job the current thread starts.
+pub fn spool_data() -> Option<bool> {
+    current(|o| o.spool_data).flatten()
+}
+
+/// The Run directive's Accurate of the job the current thread starts.
+pub fn accurate() -> Option<bool> {
+    current(|o| o.accurate).flatten()
 }
 
 /// The job trigger of the job the current thread starts (None: a console
