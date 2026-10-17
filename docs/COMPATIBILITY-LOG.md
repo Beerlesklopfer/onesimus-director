@@ -127,7 +127,7 @@ eindeutige Sortierung), `c015-list-jobs-enabled-count` (undefiniertes Verhalten 
 
 ### Offen
 
-- Offen (17.10.2026): C-062 … C-077 (Funde der Doku-Agenten); behoben: C-066 … C-071, C-077 (C-067 ohne `encrypt=`).
+- Offen (17.10.2026, nach Merge aller Agenten): C-072 (API-2-Restore-Antwort ohne JobId), C-074 (Entscheidung: Onesimus-Erweiterungen `.sql*`, `.acl`, `.grpc`), C-058 teilweise (Verify, Copy/Migrate-Arbeitsjobs, PoolOccupancy, Consolidate mit AI-Jobs, RunScripts), C-067 ohne `update volume encrypt=`; behoben: C-056 … C-071, C-073, C-075 … C-077.
 - C-058 teilweise behoben (17.10.2026); offen: Verify, Copy/Migrate-Arbeitsjobs, PoolOccupancy, Consolidate mit Always-Incremental-Jobs, RunScripts (siehe Hinweis C-058).
 - Befehlsstatus im Wiki (`docs/wiki/commands`): 53 `parity_verified`, 31 `partial`, 4 `registered_unverified`, 26 Restore-Baum-Befehle `missing_context` (Stand vor den C-045/C-049/C-055-Merges, Auffrischung offen).
 - OVFS-Integration im Director gemergt (16.10.2026): Erkennung beim Connect (Version 0.1.x + Signaturen), Befehle `.ovfs_status/_latest/_tree/_ls/_versions`, MCP-Tools in oconsole, SQL-Rückfall byte-gleich zur Extension (Äquivalenztest mit gebauter Extension auf PG 17).
