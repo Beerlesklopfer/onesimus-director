@@ -94,6 +94,13 @@ fn current<R>(f: impl FnOnce(&mut RunOverrides) -> R) -> Option<R> {
     CURRENT.with(|c| c.borrow_mut().as_mut().map(f))
 }
 
+/// The job trigger of the job the current thread starts (None: a console
+/// `run`, JobTrigger::kUser).
+#[allow(dead_code)]
+pub fn trigger() -> Option<&'static str> {
+    current(|o| o.trigger)
+}
+
 /// ApplyPoolOverrides(jcr, false) of a scheduled backup (job.cc:1213) for
 /// the effective level `level` ("F", "I", "D", "f"): the pool and its
 /// source, when the Run directive overrides a pool; None leaves the pool
