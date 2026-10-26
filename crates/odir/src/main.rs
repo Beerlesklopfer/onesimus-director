@@ -287,6 +287,10 @@ fn main() {
         DirectorConfig::from_str("Director { Name = bareos-dir\n Port = 9101\n Password = default\n }").unwrap()
     };
 
+    for note in config_test::deprecated_notes(&config.raw) {
+        warn!("{note}");
+    }
+
     // --export-schema: print JSON schema and exit
     if cli.export_schema {
         let schema_dir = std::path::Path::new("/usr/lib/bareos/scripts/ddl");

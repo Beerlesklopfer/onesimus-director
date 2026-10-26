@@ -111,6 +111,9 @@ fn reload_config(config_path: &std::path::Path, shared_config: &SharedConfig) ->
     // C++ CheckResources() set omit_defaults_ at startup: every later parse
     // leaves unset items without the inherit bit (show prints them).
     new_config.reloaded = true;
+    for note in crate::config_test::deprecated_notes(&new_config.raw) {
+        warn!("{note}");
+    }
     let mut cfg = shared_config.write().map_err(|e| format!("config lock: {e}"))?;
     crate::fd_grpc::configure(&new_config);
     *cfg = new_config;

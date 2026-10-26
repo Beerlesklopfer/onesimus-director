@@ -114,8 +114,13 @@ fn kind_of_code(code: &str) -> Option<&'static str> {
     KINDS.iter().find(|k| k.3 == code).map(|k| k.0)
 }
 
+/// The directive table of a resource type (as written).
+pub fn items_of(rtype: &str) -> Option<&'static [Item]> {
+    kind(rtype).map(|k| k.2)
+}
+
 /// Item of `items` a directive key names (name or alias).
-fn item_of<'a>(items: &'a [Item], key: &str) -> Option<&'a Item> {
+pub fn item_of<'a>(items: &'a [Item], key: &str) -> Option<&'a Item> {
     let key = normalize_key(key);
     items.iter().find(|i| normalize_key(i.name) == key
         || i.aliases.iter().any(|a| normalize_key(a) == key))

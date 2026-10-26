@@ -32,15 +32,18 @@ fn run_with(path: &std::path::Path, pause: std::time::Duration) -> (String, i32)
         Ok(config) => config,
         Err(error) => return (config_error("lib/parse_conf.cc", &error.to_string(), None), EXIT_CONFIG_ERROR),
     };
+    // The parser prints deprecated keywords while it reads the files, before any error.
+    let notes: String = deprecated_notes(&config.raw).iter().map(|n| format!(" * {n}\n")).collect();
     if let Err(diags) = crate::config_check::check(&config.raw, &base) {
-        return report(&config.raw, &diags, &base);
+        let (text, code) = report(&config.raw, &diags, &base);
+        return (format!("{notes}{text}"), code);
     }
     // CheckCatalog(CHECK_CONNECTION): Pmsg2(000, ...) of the first catalog
     // that does not open.
     if let Err(text) = crate::check_catalog::check_connections_with(&config, pause, |_| {}) {
-        return (format!("{MY_NAME}: dird/check_catalog.cc:72-0 {text}{}", error_term(&base)), 1);
+        return (format!("{notes}{MY_NAME}: dird/check_catalog.cc:72-0 {text}{}", error_term(&base)), 1);
     }
-    (String::new(), 0)
+    (notes, 0)
 }
 
 /// The messages of a rejected configuration and the exit code.
@@ -145,18 +148,26 @@ fn keyword_end(line: &str, key: &str) -> Option<usize> {
     None
 }
 
-/// Finds the resource of `error` in its file (the n-th resource of its type
-/// there) and the line/column where the original's lexer stood.
-fn locate(raw: &[ConfResource], error: &ConfigError) -> Option<Position> {
-    let res = raw.get(error.resource)?;
-    let source = res.source.as_ref()?;
-    let content = std::fs::read_to_string(source).ok()?;
-    let lines: Vec<&str> = content.lines().collect();
-    let nth = raw[..error.resource].iter()
+/// A resource in its file: the lines of the file, the line of `Type {` and
+/// the line and column of the closing brace.
+struct Span {
+    source: std::path::PathBuf,
+    lines: Vec<String>,
+    start: usize,
+    end: (usize, usize),
+}
+
+/// Finds resource `index` of `raw` in its file (the n-th resource of its type there).
+fn span(raw: &[ConfResource], index: usize) -> Option<Span> {
+    let res = raw.get(index)?;
+    let source = res.source.clone()?;
+    let content = std::fs::read_to_string(&source).ok()?;
+    let lines: Vec<String> = content.lines().map(str::to_string).collect();
+    let nth = raw[..index].iter()
         .filter(|r| r.source == res.source && r.norm_type() == res.norm_type()).count();
     let rtype = res.norm_type();
-    let starts = lines.iter().enumerate().filter(|(_, l)| keyword_end(code(l), &rtype).is_some()).map(|(i, _)| i);
-    let start = starts.clone().nth(nth)?;
+    let start = lines.iter().enumerate().filter(|(_, l)| keyword_end(code(l), &rtype).is_some())
+        .map(|(i, _)| i).nth(nth)?;
     // closing brace of the resource
     let mut depth = 0i32;
     let mut end = None;
@@ -177,16 +188,51 @@ fn locate(raw: &[ConfResource], error: &ConfigError) -> Option<Position> {
             }
         }
     }
-    let (end_line, end_col) = end?;
+    Some(Span { source, lines, start, end: end? })
+}
+
+/// "using deprecated keyword K on line L of file F" for every directive the
+/// item tables of the reference Bareos version mark deprecated (the parser
+/// prints them while it reads the files; `-t` shows them as " * <text>").
+pub fn deprecated_notes(raw: &[ConfResource]) -> Vec<String> {
+    let mut notes = Vec::new();
+    for (index, res) in raw.iter().enumerate() {
+        let Some(items) = crate::config_check::items_of(&res.rtype) else { continue };
+        let deprecated: Vec<(&str, &str)> = res.directives.iter()
+            .filter_map(|d| crate::config_check::item_of(items, &d.key).filter(|i| i.deprecated).map(|i| (i.name, d.key.as_str())))
+            .collect();
+        if deprecated.is_empty() {
+            continue;
+        }
+        let Some(span) = span(raw, index) else { continue };
+        let mut used = std::collections::HashSet::new();
+        for (name, key) in deprecated {
+            let found = (span.start + 1..=span.end.0)
+                .find(|i| !used.contains(i) && keyword_end(code(&span.lines[*i]), key).is_some());
+            if let Some(line) = found {
+                used.insert(line);
+                notes.push(format!("using deprecated keyword {name} on line {} of file {}", line + 1, span.source.display()));
+            }
+        }
+    }
+    notes
+}
+
+/// Finds the resource of `error` in its file (the n-th resource of its type
+/// there) and the line/column where the original's lexer stood.
+fn locate(raw: &[ConfResource], error: &ConfigError) -> Option<Position> {
+    let res = raw.get(error.resource)?;
+    let Span { source, lines, start, end: (end_line, end_col) } = span(raw, error.resource)?;
+    let _ = res;
     let position = |line: usize, col: usize| Some(Position {
         file: source.display().to_string(), line: line + 1, col: col + 1, text: lines[line].to_string() });
     match &error.anchor {
         Anchor::End => position(end_line, end_col),
         Anchor::Keyword(key) => (start..=end_line)
-            .find_map(|i| keyword_end(code(lines[i]), key).filter(|_| i != start).map(|col| (i, col)))
+            .find_map(|i| keyword_end(code(&lines[i]), key).filter(|_| i != start).map(|col| (i, col)))
             .and_then(|(i, col)| position(i, col)),
         Anchor::Value { key, value } => (start + 1..=end_line).find_map(|i| {
-            let line = code(lines[i]);
+            let line = code(&lines[i]);
             let after = keyword_end(line, key)?;
             let at = after + line[after..].find(value.as_str())?;
             let mut col = at + value.len();
@@ -225,6 +271,31 @@ mod tests {
 
     fn file(dir: &std::path::Path) -> String {
         dir.join("bareos-dir.d/job/x.conf").display().to_string()
+    }
+
+    #[test]
+    fn deprecated_keywords_are_reported_with_line_and_file() {
+        let dir = config_dir("deprecated", JOB);
+        let client = dir.join("bareos-dir.d/client/x.conf");
+        std::fs::write(&client, "Client {\n  Name = fd\n  Address = localhost\n  Password = p\n  AutoPrune = yes\n  # comment\n  File Retention = 30 days\n  JobRetention = 6 months\n}\n").unwrap();
+        let config = DirectorConfig::load(&dir).unwrap();
+        let f = client.display();
+        assert_eq!(deprecated_notes(&config.raw), vec![
+            format!("using deprecated keyword AutoPrune on line 5 of file {f}"),
+            format!("using deprecated keyword FileRetention on line 7 of file {f}"),
+            format!("using deprecated keyword JobRetention on line 8 of file {f}"),
+        ]);
+        // -t prints them first, also when the test fails later (catalog unreachable)
+        let (out, code) = run_with(&dir, std::time::Duration::ZERO);
+        assert_eq!(code, 1);
+        assert!(out.starts_with(&format!(" * using deprecated keyword AutoPrune on line 5 of file {f}\n \
+            * using deprecated keyword FileRetention on line 7 of file {f}\n * using deprecated keyword JobRetention on line 8 of file {f}\n")), "{out}");
+    }
+
+    #[test]
+    fn configuration_without_deprecated_keywords_has_no_notes() {
+        let dir = config_dir("clean", JOB);
+        assert!(deprecated_notes(&DirectorConfig::load(&dir).unwrap().raw).is_empty());
     }
 
     #[test]
