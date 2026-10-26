@@ -21,7 +21,7 @@ help add autodisplay automount cancel configure create delete disable enable est
 
 **Paritätsfälle (7):** `c028-help`, `c028-help-run`, `help`, `help-run`, `help-configure`, `help-unknown`, `help-limited`.
 
-**Lokaler Handler:** [crates/onesimus-dird/src/commands/basic.rs:130](../../../crates/onesimus-dird/src/commands/basic.rs).
+**Lokaler Handler:** [crates/odir/src/commands/basic.rs:130](../../../crates/odir/src/commands/basic.rs).
 
 Die folgenden vorhandenen Beispiele und Verhaltensbeschreibungen sind lokale Dokumentation; sie sind kein Beleg für vollständige Bareos-Kompatibilität. Bei Widersprüchen gilt der obige Befund.
 <!-- bareos-reference:end -->

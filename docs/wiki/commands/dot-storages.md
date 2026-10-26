@@ -21,7 +21,7 @@ Referenz: [WIP/25.1.2-pre-43-g18be77e68, `18be77e6832e`](https://github.com/bare
 
 **Paritätsfälle (18):** `c025-storages-limited`, `c025-storages-limited-api2`, `c025-storages-enabled-limited`, `c025-storages-enabled-limited-api2`, `c025-storages-operator`, `c025-storages-operator-api2`, `c025-storages-enabled-operator`, `c025-storages-enabled-operator-api2`, `c025-storages-bvfs`, `c025-storages-bvfs-api2`, `c025-storages-enabled-bvfs`, `c025-storages-enabled-bvfs-api2`, `c025-storages-acl`, `c025-storages-acl-api2`, `c025-storages-enabled-acl`, `c025-storages-enabled-acl-api2`, `dot_storages`, `dot_storages-limited`.
 
-**Lokaler Handler:** [crates/onesimus-dird/src/commands/dot.rs:113](../../../crates/onesimus-dird/src/commands/dot.rs).
+**Lokaler Handler:** [crates/odir/src/commands/dot.rs:113](../../../crates/odir/src/commands/dot.rs).
 
 Die folgenden vorhandenen Beispiele und Verhaltensbeschreibungen sind lokale Dokumentation; sie sind kein Beleg für vollständige Bareos-Kompatibilität. Bei Widersprüchen gilt der obige Befund.
 <!-- bareos-reference:end -->

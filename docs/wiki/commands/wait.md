@@ -24,7 +24,7 @@ wait jobname=<name> | jobid=<jobid> | ujobid=<complete_name> | mount [timeout=<n
 
 **Paritätsfälle (5):** `c035-wait-mount-timeout`, `c035-wait-mount-timeout-api1`, `c035-wait-mount-timeout-api2`, `wait-idle`, `wait-jobid`.
 
-**Lokaler Handler:** [crates/onesimus-dird/src/commands/wait.rs:46](../../../crates/onesimus-dird/src/commands/wait.rs).
+**Lokaler Handler:** [crates/odir/src/commands/wait.rs:46](../../../crates/odir/src/commands/wait.rs).
 
 Die folgenden vorhandenen Beispiele und Verhaltensbeschreibungen sind lokale Dokumentation; sie sind kein Beleg für vollständige Bareos-Kompatibilität. Bei Widersprüchen gilt der obige Befund.
 <!-- bareos-reference:end -->

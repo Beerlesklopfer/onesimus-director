@@ -17,7 +17,7 @@ Referenz: [WIP/25.1.2-pre-43-g18be77e68, `18be77e6832e`](https://github.com/bare
 
 **Paritätsfälle (6):** `c029-levels-api2-type`, `c029-levels-backup`, `c029-levels-two`, `dot_levels`, `dot_levels-type-Backup`, `dot_levels-api2`.
 
-**Lokaler Handler:** [crates/onesimus-dird/src/commands/dot.rs:263](../../../crates/onesimus-dird/src/commands/dot.rs).
+**Lokaler Handler:** [crates/odir/src/commands/dot.rs:263](../../../crates/odir/src/commands/dot.rs).
 
 Die folgenden vorhandenen Beispiele und Verhaltensbeschreibungen sind lokale Dokumentation; sie sind kein Beleg für vollständige Bareos-Kompatibilität. Bei Widersprüchen gilt der obige Befund.
 <!-- bareos-reference:end -->

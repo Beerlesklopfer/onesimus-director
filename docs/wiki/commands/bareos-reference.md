@@ -37,7 +37,7 @@ Nur `--no-default-features --features mcp-development` kompiliert `execute` ein;
 
 ## Übergreifende Befunde
 
-- **Scheduler startet keine Worker** dispatch_ready_jobs entfernt fällige Jobs und zählt sie, enthält aber weiterhin den TODO zum Fork eines Workers. Geplante Backups sind dadurch nicht funktionsgleich zum Original; dies ist im Backlog dokumentiert und vom Paritätslauf nicht erfasst. [crates/onesimus-dird/src/scheduler.rs:165](../../../crates/onesimus-dird/src/scheduler.rs) · [docs/BACKLOG.md:41](../../../docs/BACKLOG.md)
+- **Scheduler startet keine Worker** dispatch_ready_jobs entfernt fällige Jobs und zählt sie, enthält aber weiterhin den TODO zum Fork eines Workers. Geplante Backups sind dadurch nicht funktionsgleich zum Original; dies ist im Backlog dokumentiert und vom Paritätslauf nicht erfasst. [crates/odir/src/scheduler.rs:165](../../../crates/odir/src/scheduler.rs) · [docs/BACKLOG.md:41](../../../docs/BACKLOG.md)
 - **Daemon-Seiteneffekte nicht im Paritätslauf** FD und SD sind im Paritätslauf echt und gemeinsam. Zustandsändernde Daemonbefehle (Labeln, Unmount, Bandbreiten- und Debuglimits, Cancel laufender Jobs, echte Backup-/Restore-Jobs) werden deshalb nicht live verglichen; ihre Wirkung ist nur durch Einheitentests belegt. Betroffene Befehle stehen höchstens auf partial. [docs/COMPATIBILITY-LOG.md:110](../../../docs/COMPATIBILITY-LOG.md)
 - **Katalogwirkung wird nicht verglichen** Der Paritätsvergleich prüft Antwortbytes, Signale und Endgrund je Schritt sowie das Audit-Log, nicht den Katalogzustand nach einem Befehl. Katalogändernde Befehle sind nur so weit belegt, wie Folgeschritte im selben Fall (z. B. list/show) die Wirkung sichtbar machen. [tests/parity/parity.py:162](../../../tests/parity/parity.py)
 

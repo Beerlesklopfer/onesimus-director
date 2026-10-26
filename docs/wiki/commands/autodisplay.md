@@ -21,7 +21,7 @@ autodisplay on | off
 
 **Paritätsfälle (16):** `c005-autodisplay-noarg`, `c005-autodisplay-foo`, `c005-autodisplay-upper`, `c005-autodisplay-later-kw`, `c005-autodisplay-kv`, `c005-autodisplay-off-on`, `c005-autodisplay-foo-api1`, `c005-autodisplay-off-api1`, `c005-autodisplay-foo-api2`, `c005-autodisplay-off-api2`, `c036-autodisplay-on-messages`, `c036-autodisplay-on-api1`, `c036-getcmd-dot-messages-autodisplay`, `c036-messages-limited`, `autodisplay-off`, `autodisplay-on`.
 
-**Lokaler Handler:** [crates/onesimus-dird/src/commands/extra.rs:50](../../../crates/onesimus-dird/src/commands/extra.rs).
+**Lokaler Handler:** [crates/odir/src/commands/extra.rs:50](../../../crates/odir/src/commands/extra.rs).
 
 Die folgenden vorhandenen Beispiele und Verhaltensbeschreibungen sind lokale Dokumentation; sie sind kein Beleg für vollständige Bareos-Kompatibilität. Bei Widersprüchen gilt der obige Befund.
 <!-- bareos-reference:end -->

@@ -24,7 +24,7 @@ Referenz: [WIP/25.1.2-pre-43-g18be77e68, `18be77e6832e`](https://github.com/bare
 
 **Paritätsfälle (21):** `c025-pools-limited`, `c025-pools-limited-api2`, `c025-pools-type-Backup-limited`, `c025-pools-type-Backup-limited-api2`, `c025-pools-operator`, `c025-pools-operator-api2`, `c025-pools-type-Backup-operator`, `c025-pools-type-Backup-operator-api2`, `c025-pools-bvfs`, `c025-pools-bvfs-api2`, `c025-pools-type-Backup-bvfs`, `c025-pools-type-Backup-bvfs-api2`, `c025-pools-acl`, `c025-pools-acl-api2`, `c025-pools-type-Backup-acl`, `c025-pools-type-Backup-acl-api2`, `c028-dot-pools`, `dot_pools`, `dot_pools-type-Backup`, `dot_pools-limited`, `dot_pools-api2`.
 
-**Lokaler Handler:** [crates/onesimus-dird/src/commands/dot.rs:100](../../../crates/onesimus-dird/src/commands/dot.rs).
+**Lokaler Handler:** [crates/odir/src/commands/dot.rs:100](../../../crates/odir/src/commands/dot.rs).
 
 Die folgenden vorhandenen Beispiele und Verhaltensbeschreibungen sind lokale Dokumentation; sie sind kein Beleg für vollständige Bareos-Kompatibilität. Bei Widersprüchen gilt der obige Befund.
 <!-- bareos-reference:end -->

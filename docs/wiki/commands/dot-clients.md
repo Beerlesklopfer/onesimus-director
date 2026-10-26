@@ -21,7 +21,7 @@ Referenz: [WIP/25.1.2-pre-43-g18be77e68, `18be77e6832e`](https://github.com/bare
 
 **Paritätsfälle (20):** `c025-clients-limited`, `c025-clients-limited-api2`, `c025-clients-disabled-limited`, `c025-clients-disabled-limited-api2`, `c025-clients-operator`, `c025-clients-operator-api2`, `c025-clients-disabled-operator`, `c025-clients-disabled-operator-api2`, `c025-clients-bvfs`, `c025-clients-bvfs-api2`, `c025-clients-disabled-bvfs`, `c025-clients-disabled-bvfs-api2`, `c025-clients-acl`, `c025-clients-acl-api2`, `c025-clients-disabled-acl`, `c025-clients-disabled-acl-api2`, `c028-dot-clients`, `dot_clients`, `dot_clients-limited`, `dot_clients-api2`.
 
-**Lokaler Handler:** [crates/onesimus-dird/src/commands/dot.rs:73](../../../crates/onesimus-dird/src/commands/dot.rs).
+**Lokaler Handler:** [crates/odir/src/commands/dot.rs:73](../../../crates/odir/src/commands/dot.rs).
 
 Die folgenden vorhandenen Beispiele und Verhaltensbeschreibungen sind lokale Dokumentation; sie sind kein Beleg für vollständige Bareos-Kompatibilität. Bei Widersprüchen gilt der obige Befund.
 <!-- bareos-reference:end -->

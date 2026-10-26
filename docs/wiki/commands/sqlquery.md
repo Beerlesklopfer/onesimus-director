@@ -17,7 +17,7 @@ Referenz: [WIP/25.1.2-pre-43-g18be77e68, `18be77e6832e`](https://github.com/bare
 
 **Paritätsfälle (13):** `c006-unknown-limited`, `c011-sqlquery-cancel`, `c011-sqlquery-empty`, `c011-sqlquery-multiline`, `c011-sqlquery-args-ignored`, `c016-sqlquery-select`, `c016-sqlquery-multiline`, `c016-sqlquery-error`, `c016-sqlquery-empty`, `c016-sqlquery-args-ignored`, `c016-sqlquery-api2`, `c028-sqlquery`, `sqlquery-select`.
 
-**Lokaler Handler:** [crates/onesimus-dird/src/commands/sql.rs:89](../../../crates/onesimus-dird/src/commands/sql.rs).
+**Lokaler Handler:** [crates/odir/src/commands/sql.rs:89](../../../crates/odir/src/commands/sql.rs).
 
 Die folgenden vorhandenen Beispiele und Verhaltensbeschreibungen sind lokale Dokumentation; sie sind kein Beleg für vollständige Bareos-Kompatibilität. Bei Widersprüchen gilt der obige Befund.
 <!-- bareos-reference:end -->

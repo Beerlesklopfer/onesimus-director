@@ -21,7 +21,7 @@ Referenz: [WIP/25.1.2-pre-43-g18be77e68, `18be77e6832e`](https://github.com/bare
 
 **Paritätsfälle (31):** `c003-dot_jobs-enabled`, `c020-compact-jobs`, `c025-jobs-limited`, `c025-jobs-limited-api2`, `c025-jobs-enabled-limited`, `c025-jobs-enabled-limited-api2`, `c025-jobs-type-B-limited`, `c025-jobs-type-B-limited-api2`, `c025-jobs-operator`, `c025-jobs-operator-api2`, `c025-jobs-enabled-operator`, `c025-jobs-enabled-operator-api2`, `c025-jobs-type-B-operator`, `c025-jobs-type-B-operator-api2`, `c025-jobs-bvfs`, `c025-jobs-bvfs-api2`, `c025-jobs-enabled-bvfs`, `c025-jobs-enabled-bvfs-api2`, `c025-jobs-type-B-bvfs`, `c025-jobs-type-B-bvfs-api2`, `c025-jobs-acl`, `c025-jobs-acl-api2`, `c025-jobs-enabled-acl`, `c025-jobs-enabled-acl-api2`, `c025-jobs-type-B-acl`, `c025-jobs-type-B-acl-api2`, `c028-dot-jobs`, `dot_jobs`, `dot_jobs-type-B`, `dot_jobs-limited`, `dot_jobs-api2`.
 
-**Lokaler Handler:** [crates/onesimus-dird/src/commands/dot.rs:83](../../../crates/onesimus-dird/src/commands/dot.rs).
+**Lokaler Handler:** [crates/odir/src/commands/dot.rs:83](../../../crates/odir/src/commands/dot.rs).
 
 Die folgenden vorhandenen Beispiele und Verhaltensbeschreibungen sind lokale Dokumentation; sie sind kein Beleg für vollständige Bareos-Kompatibilität. Bei Widersprüchen gilt der obige Befund.
 <!-- bareos-reference:end -->

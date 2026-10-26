@@ -22,7 +22,7 @@ label storage=<storage-name> volume=<volume-name> pool=<pool-name> slot=<slot> [
 
 **Paritätsfälle (13):** `c011-label-cancel`, `c011-label-name-cancel`, `c011-label-pool-cancel`, `c011-label-illegal-cancel`, `c011-label-used-cancel`, `c011-label-barcodes`, `c011-label-unknown-storage-cancel`, `c011-label-api1-cancel`, `c012-label-no-pool`, `label-nostorage`, `t001-label-existing-cancel`, `t001-label-illegal-arg-cancel`, `t001-label-illegal-char-cancel`.
 
-**Lokaler Handler:** [crates/onesimus-dird/src/commands/admin.rs:26](../../../crates/onesimus-dird/src/commands/admin.rs).
+**Lokaler Handler:** [crates/odir/src/commands/admin.rs:26](../../../crates/odir/src/commands/admin.rs).
 
 Die folgenden vorhandenen Beispiele und Verhaltensbeschreibungen sind lokale Dokumentation; sie sind kein Beleg für vollständige Bareos-Kompatibilität. Bei Widersprüchen gilt der obige Befund.
 <!-- bareos-reference:end -->

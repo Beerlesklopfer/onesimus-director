@@ -22,7 +22,7 @@ resolve client=<client-name> | storage=<storage-name> <host-name>
 
 **Paritätsfälle (19):** `c018-localhost`, `c018-ipv4-literal`, `c018-ipv6-literal`, `c018-multiple`, `c018-unknown`, `c018-unknown-after-known`, `c018-keyword-value`, `c018-no-args`, `c018-client-missing-name`, `c018-client-unknown`, `c018-storage-unknown`, `c018-client`, `c018-client-twice`, `c018-storage`, `c018-client-storage`, `c018-api2`, `c018-api2-client`, `resolve-local`, `resolve-client`.
 
-**Lokaler Handler:** [crates/onesimus-dird/src/commands/resolve.rs:7](../../../crates/onesimus-dird/src/commands/resolve.rs).
+**Lokaler Handler:** [crates/odir/src/commands/resolve.rs:7](../../../crates/odir/src/commands/resolve.rs).
 
 Die folgenden vorhandenen Beispiele und Verhaltensbeschreibungen sind lokale Dokumentation; sie sind kein Beleg für vollständige Bareos-Kompatibilität. Bei Widersprüchen gilt der obige Befund.
 <!-- bareos-reference:end -->

@@ -17,7 +17,7 @@ Referenz: [WIP/25.1.2-pre-43-g18be77e68, `18be77e6832e`](https://github.com/bare
 
 **Paritätsfälle (3):** `c009-memory`, `c009-memory-json`, `memory`.
 
-**Lokaler Handler:** [crates/onesimus-dird/src/commands/extra.rs:97](../../../crates/onesimus-dird/src/commands/extra.rs).
+**Lokaler Handler:** [crates/odir/src/commands/extra.rs:97](../../../crates/odir/src/commands/extra.rs).
 
 Die folgenden vorhandenen Beispiele und Verhaltensbeschreibungen sind lokale Dokumentation; sie sind kein Beleg für vollständige Bareos-Kompatibilität. Bei Widersprüchen gilt der obige Befund.
 <!-- bareos-reference:end -->

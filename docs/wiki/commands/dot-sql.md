@@ -21,7 +21,7 @@ Referenz: [WIP/25.1.2-pre-43-g18be77e68, `18be77e6832e`](https://github.com/bare
 
 **Paritätsfälle (30):** `c002-sql-then-list`, `c016-sql-count`, `c016-sql-multicol-null`, `c016-sql-empty`, `c016-sql-syntax-error`, `c016-sql-unknown-table`, `c016-sql-no-query`, `c016-sql-no-value`, `c016-sql-semicolons`, `c016-sql-trailing-semicolon`, `c016-sql-api1`, `c016-sql-api1-empty`, `c016-sql-api1-error`, `c016-sql-api2`, `c016-sql-api2-empty`, `c016-sql-api2-error`, `c016-sql-api2-noquery`, `c016-sql-error-truncated`, `c016-sql-error-end-of-input`, `c016-sql-error-runtime`, `c016-sql-error-hint`, `c016-sql-jobid-bytes`, `c016-sql-api1-semicolons`, `c016-sql-api2-error-hint`, `c020-compact-sql`, `c020-json-sql`, `c027-gui-sql`, `c028-sql`, `c028-sql-bad`, `dot-sql`.
 
-**Lokaler Handler:** [crates/onesimus-dird/src/commands/sql.rs:27](../../../crates/onesimus-dird/src/commands/sql.rs).
+**Lokaler Handler:** [crates/odir/src/commands/sql.rs:27](../../../crates/odir/src/commands/sql.rs).
 
 Die folgenden vorhandenen Beispiele und Verhaltensbeschreibungen sind lokale Dokumentation; sie sind kein Beleg für vollständige Bareos-Kompatibilität. Bei Widersprüchen gilt der obige Befund.
 <!-- bareos-reference:end -->

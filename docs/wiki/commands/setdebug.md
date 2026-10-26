@@ -24,7 +24,7 @@ setdebug level=<nn> trace=0/1 timestamp=0/1 client=<client-name> | dir | storage
 
 **Paritätsfälle (7):** `c011-setdebug-cancel`, `c011-setdebug-badlevel-cancel`, `c011-setdebug-daemon-cancel`, `c011-setdebug-daemon-api1-cancel`, `c011-setdebug-daemon-badnumber`, `setdebug-dir`, `setdebug-noargs`.
 
-**Lokaler Handler:** [crates/onesimus-dird/src/commands/debug.rs:33](../../../crates/onesimus-dird/src/commands/debug.rs).
+**Lokaler Handler:** [crates/odir/src/commands/debug.rs:33](../../../crates/odir/src/commands/debug.rs).
 
 Die folgenden vorhandenen Beispiele und Verhaltensbeschreibungen sind lokale Dokumentation; sie sind kein Beleg für vollständige Bareos-Kompatibilität. Bei Widersprüchen gilt der obige Befund.
 <!-- bareos-reference:end -->

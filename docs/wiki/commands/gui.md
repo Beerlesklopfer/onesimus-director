@@ -21,7 +21,7 @@ gui on | off
 
 **Paritätsfälle (30):** `c005-gui-noarg`, `c005-gui-foo`, `c005-gui-upper`, `c005-gui-on-off`, `c005-gui-foo-api2`, `c005-gui-on-api2`, `c005-automount-prompt-then-command`, `c027-gui-list-pools`, `c027-gui-llist-pools`, `c027-gui-list-jobs`, `c027-gui-llist-jobs`, `c027-gui-list-media`, `c027-gui-llist-media`, `c027-gui-list-clients`, `c027-gui-list-jobtotals`, `c027-gui-list-jobmedia`, `c027-gui-list-filesets`, `c027-gui-list-log`, `c027-gui-sql`, `c027-gui-sqlquery-keyword`, `c027-gui-status-dir`, `c027-gui-show`, `c027-gui-messages`, `c027-gui-off-again`, `c027-gui-noarg`, `c027-gui-api1`, `c027-gui-api2`, `c036-gui-on-messages`, `gui-on`, `gui-off`.
 
-**Lokaler Handler:** [crates/onesimus-dird/src/commands/extra.rs:66](../../../crates/onesimus-dird/src/commands/extra.rs).
+**Lokaler Handler:** [crates/odir/src/commands/extra.rs:66](../../../crates/odir/src/commands/extra.rs).
 
 Die folgenden vorhandenen Beispiele und Verhaltensbeschreibungen sind lokale Dokumentation; sie sind kein Beleg für vollständige Bareos-Kompatibilität. Bei Widersprüchen gilt der obige Befund.
 <!-- bareos-reference:end -->

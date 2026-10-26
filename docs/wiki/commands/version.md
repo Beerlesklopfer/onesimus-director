@@ -17,7 +17,7 @@ Referenz: [WIP/25.1.2-pre-43-g18be77e68, `18be77e6832e`](https://github.com/bare
 
 **Paritätsfälle (9):** `c004-quit-after-command`, `c009-version`, `c009-version-json`, `c009-version-api1`, `c020-compact-version`, `c020-json-version`, `c020-compact-persists`, `c020-compact-reset`, `version`.
 
-**Lokaler Handler:** [crates/onesimus-dird/src/commands/basic.rs:13](../../../crates/onesimus-dird/src/commands/basic.rs).
+**Lokaler Handler:** [crates/odir/src/commands/basic.rs:13](../../../crates/odir/src/commands/basic.rs).
 
 Die folgenden vorhandenen Beispiele und Verhaltensbeschreibungen sind lokale Dokumentation; sie sind kein Beleg für vollständige Bareos-Kompatibilität. Bei Widersprüchen gilt der obige Befund.
 <!-- bareos-reference:end -->

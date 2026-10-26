@@ -16,7 +16,7 @@ Belege stehen im [Kompatibilitätslog](COMPATIBILITY-LOG.md), in
 | [S-39](STUBS.md) | `SetBandwidth` mit `limit=0` in proto3 nicht übertragbar; Feld als `optional` |
 | [S-40](STUBS.md) | `update jobid=…` auf einen nie gestarteten Job: SQL-Fehler wegen leerer StartTime |
 | [S-41](STUBS.md) | `list nextvolume` findet in einem Pool mit frisch gelabeltem Volume keins (gegen das Original prüfen) |
-| [S-13](STUBS.md) (Rest) | Eigener FD `bareos-filed`: PKI-Verschlüsselung/Signaturen, Plugins, Heartbeat, client-initiierte Verbindungen, LMDB für Accurate, VSS/Windows/macOS; `breg.rs` noch als Kopie |
+| [S-13](STUBS.md) (Rest) | Eigener FD `ofd`: PKI-Verschlüsselung/Signaturen, Plugins, Heartbeat, client-initiierte Verbindungen, LMDB für Accurate, VSS/Windows/macOS; `breg.rs` noch als Kopie |
 
 ### Offene Reste an Befehlen
 
@@ -135,7 +135,7 @@ Rückgabe als `json` (nicht `jsonb`: jsonb-Arrays sind auf 256 MB begrenzt).
   denselben Job. Parität gegen die Bareos-Restore-Abfrage auf 1.230.502 Einträgen: identisch.
   Getestet mit PostgreSQL 19rc1 und dem DDL von 25.1.2-pre.
 
-Rolle im Director: BVFS (`.bvfs_*`, `crates/onesimus-dird/src/commands/bvfs.rs`) ist
+Rolle im Director: BVFS (`.bvfs_*`, `crates/odir/src/commands/bvfs.rs`) ist
 byte-gleich portiert und bleibt nur zur Abwärtskompatibilität für Bareos-Clients erhalten
 (Paritätsfälle `c022`); OVFS ist der Onesimus-Weg.
 
@@ -179,7 +179,7 @@ Direktiven aus dem show-Port; Reihenfolge der Ressourcen wie C++ (Ladereihenfolg
 ## Erledigt: `llist pools`: prunablevolumes/-jobs/-bytes
 
 Bareos 25.1 gibt bei `llist pools` zusätzlich eine Prune-Zusammenfassung pro
-Pool aus (ua_output.cc `PoolPruneSummary`). onesimus-dird liefert die Felder
+Pool aus (ua_output.cc `PoolPruneSummary`). odir liefert die Felder
 inzwischen (`commands/list.rs`); die `llist pools`-Fälle der Baseline sind gleich.
 
 ## Quellbasierter Director-Vollständigkeitsabgleich
@@ -219,7 +219,7 @@ Abnahme: Tests für beide Buildvarianten, Produktions-CLI ohne Schreibschalter, 
 
 **Stand:** 15.10.2026  
 **Status:** Geplant / Implementierung offen  
-**Geltungsbereich:** `crates/bareos-filed`, `crates/onesimus-dird`, `proto` (Submodule `onesimus-proto`)
+**Geltungsbereich:** `crates/ofd`, `crates/odir`, `proto` (Submodule `onesimus-proto`)
 
 ### Zielsetzung
 
@@ -231,7 +231,7 @@ Die vorhandene BNET-Kompatibilität bleibt während der Migration erhalten. Best
 
 ### 1. Ist-Zustand des Rust File Daemon
 
-Das Crate `crates/bareos-filed` enthält bereits:
+Das Crate `crates/ofd` enthält bereits:
 
 - TCP-Accept-Loop und Session-Threads (`accept.rs`)
 - BNET-Kommunikation mit TLS-PSK- und CRAM-MD5-Authentifizierungspfaden
@@ -328,11 +328,22 @@ Deshalb muss zwischen der Zertifizierung eines Plugins und seinen tatsächlichen
 - [ ] Plugin-Ladevorgänge und sicherheitsrelevante Aktionen protokollieren.
 - [ ] Sichere Aktualisierung und Deaktivierung von Plugins implementieren.
 
-**Bevorzugte Architektur:** Rust-Plugins als WebAssembly-Komponenten mit einem kontrollierten Host-Interface und Capability-basierter Freigabe.
+**Festgelegte Architektur (18.10.2026):** Rust-Plugins als WebAssembly-Komponenten mit einem kontrollierten Host-Interface und Capability-basierter Freigabe.
 
 Native Rust-Plugins über dynamische Bibliotheken sind nicht automatisch speichersicher gegenüber dem Hostprozess. Eine Zertifizierung ersetzt keine Prozess- oder Sandbox-Isolation.
 
-Die endgültige Laufzeitform ist vor der Implementierung verbindlich festzulegen.
+**Thread-Modell (18.10.2026):** Plugin-Worker laufen parallel zu Device-Workern.
+Pro Job-/Device-Bindung getrennte Instanzen und WASM-Stores; geordnete Aufrufe
+innerhalb einer Instanz, begrenzte Queues und separater Cancel-/Shutdown-Pfad.
+Keine globalen Locks über Plugin-Ausführung oder blockierendes I/O.
+[Ausführungsvertrag und Abnahmetests](wiki/plugin-architektur.md#threaded-environment-plugins-parallel-zu-devices).
+
+- [ ] Plugin-Worker, Instanzverwaltung und begrenzte Queues implementieren.
+- [ ] Device-/Plugin-Parallelität und isolierte Fehlerpfade testen.
+- [ ] Abbruch bei blockierender Ausführung und voller Queue testen.
+
+Die Laufzeitform ist auf WebAssembly-Komponenten festgelegt; die konkrete WASM-Engine
+und ihre Host-Einbindung sind noch umzusetzen.
 
 ### 5. Zertifizierungs- und Vertrauensmodell
 
@@ -349,12 +360,15 @@ Die Zertifizierung soll nicht nur die Herkunft eines Plugins bestätigen, sonder
 
 ### 6. Migration des bestehenden Plugin-Systems
 
-Das bisherige Crate `crates/bareos-plugins` verwendet PyO3 für Python-Plugins.
+Das bisherige ungenutzte Crate `crates/bareos-plugins` wurde am 18.10.2026 entfernt.
+`crates/onesimus-plugins` enthält die Signatur-/Policy-Prüfung für Rust-/WASM-Komponenten;
+WASM-Host und Einbindung in die Job-Engine sind noch offen. Siehe
+[Plugin-Architektur](wiki/plugin-architektur.md).
 
 - [ ] Bestehende Plugin-Schnittstellen und Anwendungsfälle inventarisieren.
-- [ ] Python-/PyO3-Abhängigkeiten aus der zukünftigen Plugin-Architektur entfernen.
+- [x] Python-/PyO3-Abhängigkeiten aus der Plugin-Architektur entfernen.
 - [ ] Neue Rust-Plugin-API entwickeln.
-- [ ] Zertifizierungsmanifest und Signaturprüfung implementieren.
+- [x] Zertifizierungsmanifest und Ed25519-Signaturprüfung mit Artefakthash implementieren (`onesimus-plugins`).
 - [ ] Plugin-Loader mit Fail-closed-Verhalten entwickeln.
 - [ ] Benötigte bestehende Plugin-Funktionen nach Rust portieren.
 - [ ] Nicht migrierte Python-Plugins ausdrücklich als nicht unterstützt kennzeichnen.
@@ -388,3 +402,38 @@ Das neue Plugin-System gilt erst dann als abgeschlossen, wenn:
 7. Alle negativen Sicherheitsprüfungen automatisiert getestet sind.
 
 **Verbindlicher Architekturgrundsatz:** Plugin-Ausführung ist eine explizit gewährte Berechtigung, keine Eigenschaft einer installierten Datei. Die Zertifizierung ist notwendig, aber nicht allein hinreichend; zusätzlich gelten Laufzeitisolation und lokale Berechtigungsrichtlinien.
+### Umsetzung File-Daemon-gRPC (18.10.2026)
+
+Zusätzlicher TLS-gRPC-Steuerkanal mit vorhandener gegenseitiger Anmeldung und
+geteilter Job-Engine implementiert. BNET bleibt immer als Verbindungsfallback;
+FD↔SD bleibt BNET. Konfiguration und Grenzen: [File Daemon](wiki/file-daemon.md).
+Der ältere Ist-Zustand im Addendum vom 15.10.2026 ist historisch; Backup/Restore
+sind inzwischen gemäß S-12/S-13 umgesetzt.
+
+## Container-Plugins: Planung (18.10.2026)
+
+- [Docker-Plugin](plans/DOCKER-PLUGIN.md): drei kontroverse Perspektiven, lokales Full-Backup und gestageter Restore.
+- [Podman-Plugin](plans/PODMAN-PLUGIN.md): drei kontroverse Perspektiven, per-UID-Broker und kontenübergreifende conmon-Discovery.
+
+Beide Plugins sind geplant, noch nicht implementiert. Voraussetzungen sind WASM-Host,
+begrenzte Worker-/Datenqueues, typisierte Brokerrechte und ein vollständiger
+Metadatenvertrag. BNET bleibt dauerhaft Fallback; FD↔SD bleibt BNET.
+
+### Freigabe und Infrastrukturfortschritt (18.10.2026)
+
+Beide Container-Plugin-Pläne sind vom Nutzer freigegeben. Die Umsetzung beginnt
+mit der gemeinsamen Grundlage: `onesimus-plugins::executor` implementiert
+Instanz-Worker, begrenzte Queues, direkte Interrupts und Deadline-Watchdog;
+`onesimus-plugins::discovery` findet read-only conmon-Kandidaten je Host-UID.
+FD-Aufruf: `ofd --discover-podman`. WASM-Engine, per-UID-Broker,
+persistente Kontoregistry und produktive Docker-/Podman-Backup-/Restorepfade
+sind noch offen. D0/P0 sind begonnen, noch nicht abgenommen.
+
+### X.509-Plugin-Signierung bestätigt und Verifier umgestellt (18.10.2026)
+
+Privater Schlüssel nur beim Build, öffentliche Prüfung beim Laden. Manifest
+verwendet den SPKI-Fingerprint; Code-Signing-Kette, Zertifikats-/Schlüsselwiderrufe,
+Herausgeber-/Plugin-/Capability-Freigaben und Offline-Policygültigkeit werden
+geprüft. Zertifikatserneuerung und Schlüsselrotation haben eigene Regressionstests.
+Automatische CRL-/OCSP-Verteilung und die Anbindung an den produktiven WASM-Loader
+sind noch offen. Siehe [Vertrag](wiki/plugin-architektur.md).

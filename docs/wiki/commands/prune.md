@@ -22,7 +22,7 @@ prune files [client=<client>] [pool=<pool>] [yes] | jobs [client=<client>] [pool
 
 **Paritätsfälle (35):** `c011-prune-cancel`, `c011-prune-api1-cancel`, `c011-prune-files-cancel`, `c011-prune-volume-cancel`, `c011-prune-jobs-cancel`, `c011-prune-jobs-mod-no`, `c011-prune-stats-cancel`, `c011-prune-volume-select-cancel`, `c011-prune-volume-unknown`, `c011-prune-directory-cancel`, `c012-prune-jobs-confirm`, `c030-prune-job`, `c030-prune-storage`, `c030-prune-client`, `c030-prune-pool`, `c030-prune-volume-client`, `c030-prune-stats-client`, `c030-prune-stats-pool`, `c030-prune-directory-pool`, `c030-prune-directory-client-cancel`, `c030-prune-files-pool-cancel`, `c030-prune-jobs-pool-cancel`, `c030-prune-volume-pool-cancel`, `c030-prune-job-api1`, `c030-prune-storage-api2`, `c030-prune-volume-pool-report`, `c030-prune-volume-all-no`, `c030-prune-volume-all-pool-no`, `c030-prune-volume-wrong-pool-no`, `c030-prune-volume-invalid-name`, `c030-prune-files-no`, `c030-prune-files-pool-no`, `c030-prune-directory-client-no-path`, `c030-prune-volume-pool-api1`, `prune-dialog`.
 
-**Lokaler Handler:** [crates/onesimus-dird/src/commands/admin.rs:902](../../../crates/onesimus-dird/src/commands/admin.rs).
+**Lokaler Handler:** [crates/odir/src/commands/admin.rs:902](../../../crates/odir/src/commands/admin.rs).
 
 Die folgenden vorhandenen Beispiele und Verhaltensbeschreibungen sind lokale Dokumentation; sie sind kein Beleg für vollständige Bareos-Kompatibilität. Bei Widersprüchen gilt der obige Befund.
 <!-- bareos-reference:end -->

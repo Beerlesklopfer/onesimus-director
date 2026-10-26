@@ -17,7 +17,7 @@ Referenz: [WIP/25.1.2-pre-43-g18be77e68, `18be77e6832e`](https://github.com/bare
 
 **Paritätsfälle (8):** `c011-query-cancel`, `c011-query-badnumber`, `c011-query-prompt-cancel`, `c011-query-client`, `c011-query-api1-cancel`, `c016-query-menu`, `c028-query-1`, `query-list`.
 
-**Lokaler Handler:** [crates/onesimus-dird/src/commands/sql.rs:129](../../../crates/onesimus-dird/src/commands/sql.rs).
+**Lokaler Handler:** [crates/odir/src/commands/sql.rs:129](../../../crates/odir/src/commands/sql.rs).
 
 Die folgenden vorhandenen Beispiele und Verhaltensbeschreibungen sind lokale Dokumentation; sie sind kein Beleg für vollständige Bareos-Kompatibilität. Bei Widersprüchen gilt der obige Befund.
 <!-- bareos-reference:end -->

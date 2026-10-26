@@ -17,7 +17,7 @@ Referenz: [WIP/25.1.2-pre-43-g18be77e68, `18be77e6832e`](https://github.com/bare
 
 **Paritätsfälle (10):** `c003-dot_msgs-api2`, `c025-msgs-limited`, `c025-msgs-limited-api2`, `c025-msgs-operator`, `c025-msgs-operator-api2`, `c025-msgs-bvfs`, `c025-msgs-bvfs-api2`, `c025-msgs-acl`, `c025-msgs-acl-api2`, `dot_msgs`.
 
-**Lokaler Handler:** [crates/onesimus-dird/src/commands/dot.rs:369](../../../crates/onesimus-dird/src/commands/dot.rs).
+**Lokaler Handler:** [crates/odir/src/commands/dot.rs:369](../../../crates/odir/src/commands/dot.rs).
 
 Die folgenden vorhandenen Beispiele und Verhaltensbeschreibungen sind lokale Dokumentation; sie sind kein Beleg für vollständige Bareos-Kompatibilität. Bei Widersprüchen gilt der obige Befund.
 <!-- bareos-reference:end -->

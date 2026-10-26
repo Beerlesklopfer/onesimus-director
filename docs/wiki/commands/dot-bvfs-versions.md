@@ -21,7 +21,7 @@ Referenz: [WIP/25.1.2-pre-43-g18be77e68, `18be77e6832e`](https://github.com/bare
 
 **Paritätsfälle (5):** `c022-versions`, `c022-versions-errors`, `c022-versions-api2`, `c022-negative-limit`, `bvfs-versions`.
 
-**Lokaler Handler:** [crates/onesimus-dird/src/commands/bvfs.rs:958](../../../crates/onesimus-dird/src/commands/bvfs.rs).
+**Lokaler Handler:** [crates/odir/src/commands/bvfs.rs:958](../../../crates/odir/src/commands/bvfs.rs).
 
 Die folgenden vorhandenen Beispiele und Verhaltensbeschreibungen sind lokale Dokumentation; sie sind kein Beleg für vollständige Bareos-Kompatibilität. Bei Widersprüchen gilt der obige Befund.
 <!-- bareos-reference:end -->

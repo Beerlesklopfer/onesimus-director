@@ -21,7 +21,7 @@ use catalog=<catalog>
 
 **Paritätsfälle (7):** `c002-use-then-list`, `c002-use-noargs`, `c023-use`, `c023-use-var`, `c023-limited`, `c023-operator`, `use`.
 
-**Lokaler Handler:** [crates/onesimus-dird/src/commands/extra.rs:224](../../../crates/onesimus-dird/src/commands/extra.rs).
+**Lokaler Handler:** [crates/odir/src/commands/extra.rs:224](../../../crates/odir/src/commands/extra.rs).
 
 Die folgenden vorhandenen Beispiele und Verhaltensbeschreibungen sind lokale Dokumentation; sie sind kein Beleg für vollständige Bareos-Kompatibilität. Bei Widersprüchen gilt der obige Befund.
 <!-- bareos-reference:end -->

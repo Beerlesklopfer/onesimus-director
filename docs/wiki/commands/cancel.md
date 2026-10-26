@@ -25,7 +25,7 @@ cancel storage=<storage-name> | jobid=<jobid> | job=<job-name> | ujobid=<unique-
 
 **Paritätsfälle (24):** `c006-cancel-none-api2`, `c006-cancel-noargs-api2`, `c006-cancel-job`, `c006-cancel-ujobid`, `c006-cancel-badjobid`, `c006-cancel-all`, `c034-storage-nosuch-job`, `c034-storage-nosuch-job-api2`, `c034-storage-badjobid`, `c034-storage-nojobid`, `c034-storage-jobid-novalue`, `c034-storage-unknown`, `c034-storage-after-jobid`, `c034-storage-novalue`, `c034-sd-keyword`, `c034-state-running`, `c034-state-idle`, `c034-state-novalue`, `c034-all-yes`, `c034-all-api1`, `c035-cancel-job-nosuch-api1`, `c035-cancel-job-nosuch-api2`, `cancel-none`, `cancel-dialog`.
 
-**Lokaler Handler:** [crates/onesimus-dird/src/commands/cancel.rs:64](../../../crates/onesimus-dird/src/commands/cancel.rs).
+**Lokaler Handler:** [crates/odir/src/commands/cancel.rs:64](../../../crates/odir/src/commands/cancel.rs).
 
 Die folgenden vorhandenen Beispiele und Verhaltensbeschreibungen sind lokale Dokumentation; sie sind kein Beleg für vollständige Bareos-Kompatibilität. Bei Widersprüchen gilt der obige Befund.
 <!-- bareos-reference:end -->

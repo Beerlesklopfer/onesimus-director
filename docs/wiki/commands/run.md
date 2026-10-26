@@ -25,7 +25,7 @@ run job=<job-name> client=<client-name> fileset=<fileset-name> level=<level> sto
 
 **Paritätsfälle (30):** `c011-run-cancel`, `c011-run-badnumber`, `c011-run-api1-cancel`, `c011-run-api2`, `c011-run-job-no`, `c011-run-job-cancel`, `c011-run-job-illegal-no`, `c011-run-job-mod-cancel`, `c011-run-job-mod-level-no`, `c011-run-job-mod-priority-no`, `c011-run-job-mod-pool-no`, `c011-run-job-dotmod-no`, `c011-run-select-no`, `c011-run-job-api1-no`, `c012-run-unknown-noyes`, `c012-run-confirm`, `c025-run-select-limited`, `c025-run-select-limited-api2`, `c025-run-select-operator`, `c025-run-select-operator-api2`, `c025-run-select-bvfs`, `c025-run-select-bvfs-api2`, `c025-run-select-acl`, `c025-run-select-acl-api2`, `c041-run-backupcatalog-no`, `c041-run-backupcatalog-api1-no`, `c041-run-backupcatalog-mod-cancel`, `c041-run-backupfd-no`, `run-noargs`, `run-unknownjob`.
 
-**Lokaler Handler:** [crates/onesimus-dird/src/commands/job.rs:13](../../../crates/onesimus-dird/src/commands/job.rs).
+**Lokaler Handler:** [crates/odir/src/commands/job.rs:13](../../../crates/odir/src/commands/job.rs).
 
 Die folgenden vorhandenen Beispiele und Verhaltensbeschreibungen sind lokale Dokumentation; sie sind kein Beleg für vollständige Bareos-Kompatibilität. Bei Widersprüchen gilt der obige Befund.
 <!-- bareos-reference:end -->

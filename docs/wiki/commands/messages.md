@@ -18,7 +18,7 @@ Referenz: [WIP/25.1.2-pre-43-g18be77e68, `18be77e6832e`](https://github.com/bare
 
 **Paritätsfälle (13):** `c027-gui-messages`, `c028-messages`, `c036-messages-twice`, `c036-messages-abbrev`, `c036-messages-args`, `c036-autodisplay-on-messages`, `c036-gui-on-messages`, `c036-messages-api1`, `c036-messages-api2`, `c036-autodisplay-on-api1`, `c036-messages-limited`, `c036-messages-operator`, `messages`.
 
-**Lokaler Handler:** [crates/onesimus-dird/src/commands/extra.rs:87](../../../crates/onesimus-dird/src/commands/extra.rs).
+**Lokaler Handler:** [crates/odir/src/commands/extra.rs:87](../../../crates/odir/src/commands/extra.rs).
 
 Die folgenden vorhandenen Beispiele und Verhaltensbeschreibungen sind lokale Dokumentation; sie sind kein Beleg für vollständige Bareos-Kompatibilität. Bei Widersprüchen gilt der obige Befund.
 <!-- bareos-reference:end -->

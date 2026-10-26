@@ -98,7 +98,7 @@ Fehler in den Parametern kommen als Tool-Ergebnis mit `isError: true` zurück, e
 
 ### Beispielsitzung: Anmeldung und Toolliste
 
-Die Beispiele stammen aus einem Integrationslauf vom 17.10.2026 gegen onesimus-dird mit der Paritätskonfiguration (`tests/parity/parity.py setup`) und einer Wegwerfkopie des Testkatalogs. Lange Listen sind gekürzt (`… n weitere`).
+Die Beispiele stammen aus einem Integrationslauf vom 17.10.2026 gegen odir mit der Paritätskonfiguration (`tests/parity/parity.py setup`) und einer Wegwerfkopie des Testkatalogs. Lange Listen sind gekürzt (`… n weitere`).
 
 ```json
 → {"jsonrpc": "2.0", "method": "initialize", "params": {"protocolVersion": "2025-06-18", "capabilities": {}, "clientInfo": {"name": "mcp-read-test", "version": "1"}}, "id": 1}
@@ -1859,7 +1859,7 @@ Die 26 Befehle der Dateiauswahl (`ua_tree.cc`) als Tools. `restore_tree_start` n
 
 ### Beispiele
 
-Die Ausgaben stammen aus dem Integrationslauf vom 17.10.2026 gegen onesimus-dird mit eigenem bareos-fd und bareos-sd (25.1.2) und einer Wegwerfkopie des Katalogs.
+Die Ausgaben stammen aus dem Integrationslauf vom 17.10.2026 gegen odir mit eigenem bareos-fd und bareos-sd (25.1.2) und einer Wegwerfkopie des Katalogs.
 
 Backup starten (Ergebnis gekürzt auf Text und `structuredContent`):
 
@@ -1954,11 +1954,11 @@ Selection aborted, nothing done.
 - S-36 (C-087): Einheitentests für die Routen mit Fake-Runnern (typisierte RPC → `ExecuteCommand` bei `UNIMPLEMENTED` → BNET-Dialog, Purge mit `yes` über gRPC), typisierte Requests und Ergebnisse, Restore-Baum über BNET-Dialog und gRPC, Freigabe-Matrix (Produktion stdio: Schreib-Tools da, `execute` nicht; HTTP in Produktion: keine Schreib-Tools, auch nicht auf Anfrage; Entwicklung HTTP mit `--mcp-allow-write`: vorhanden) und der Abdeckungstest. Integrationslauf mit `tests/mcp/mcp_rig.py` (privater `bareos-fd`/`bareos-sd`, eigener Wegwerf-Katalog aus der Bareos-DDL, Restore-Ziel im Scratchpad), jedes der 122 bzw. 123 Tools mindestens einmal über BNET und über gRPC, je 170 Aufrufe: Produktions-Director (Schreib-Tools über `ExecuteCommand`, Lese-Tools typisiert) mit Produktions-oconsole über stdio, und `grpc-development`-Director (alle Tools typisiert außer `add_volumes`, `list_nextvolume` und den damaligen Konsolenzeilen für `configure_update`/`configure_delete`/`delete storage`/`setbandwidth limit=0`, seit S-38/S-39 typisiert) mit Produktions- und Entwicklungs-oconsole. Backup, Restore in einer Zeile und interaktiver Restore (eine von drei Dateien markiert) mit Prüfung der zurückgeschriebenen Dateien; ohne unerwartete Fehler.
 
   ```sh
-  cargo build -p onesimus-dird && cargo build -p oconsole
-  python3 tests/mcp/mcp_rig.py --director target/debug/onesimus-dird --oconsole target/debug/oconsole \
+  cargo build -p odir && cargo build -p oconsole
+  python3 tests/mcp/mcp_rig.py --director target/debug/odir --oconsole target/debug/oconsole \
       --base /tmp/m36 --port 39250 --restore-dir /tmp/m36-restored --production --report /tmp/m36.json
   ```
 
 - S-31 (Stand vor C-087), Einheitentests (`cargo test -p oconsole` und `cargo test -p oconsole --no-default-features --features mcp-development`): Schemas und Annotationen, erzeugte Zeilen aller Tools, abgelehnte Eingaben, `confirm`, beantwortete und abgebrochene Rückfragen, Weiterlesen nach dem Socket-Zeitlimit. Dazu die Freigabe: Im Produktions-Build und im Entwicklungs-Build ohne `--mcp-allow-write` ist keines der Schreib-Tools gelistet, und jeder Aufruf endet mit `unknown tool`, ohne den Director zu erreichen. Die Snapshots `crates/oconsole/testdata/tools_list_*.json` und `tool_calls_*.json` halten `tools/list` und die Ergebnisse fester Aufrufe je Build fest.
-- S-31 (Stand vor C-087), Integrationslauf: onesimus-dird mit privatem `bareos-fd` und `bareos-sd` (eigene Ports, Storage-Verzeichnis im Scratchpad) und einer Wegwerfkopie des Katalogs, oconsole `--mcp` über stdio mit einem Skript. Produktions-Build (damals): Keines der 23 Schreib-Tools und `execute` ist gelistet, alle Aufrufe enden mit `unknown tool`, und die Binärdatei enthält die Toolnamen nicht. Entwicklungs-Build mit `--mcp-allow-write`: Jedes Tool wurde mindestens einmal aufgerufen (62 Prüfungen). Dazu gehören ein Backup, vier Restores ins Scratchpad (`files`, `all` mit `strip_prefix`/`add_prefix`, `directories` mit `regexwhere`, `before` mit `fileregex`), deren Dateien danach geprüft wurden, sowie label, mount, unmount und release auf einem File-Gerät. Außerdem: update volume/pool, Abbruch eines auf 2030 eingeplanten Jobs, enable/disable für Job, Client und Schedule, setdebug, setbandwidth, `configure add` und `export`, reload, rerun, prune, purge (mit beantworteter Rückfrage), relabel, truncate und delete (jobid, volume, pool).
+- S-31 (Stand vor C-087), Integrationslauf: odir mit privatem `bareos-fd` und `bareos-sd` (eigene Ports, Storage-Verzeichnis im Scratchpad) und einer Wegwerfkopie des Katalogs, oconsole `--mcp` über stdio mit einem Skript. Produktions-Build (damals): Keines der 23 Schreib-Tools und `execute` ist gelistet, alle Aufrufe enden mit `unknown tool`, und die Binärdatei enthält die Toolnamen nicht. Entwicklungs-Build mit `--mcp-allow-write`: Jedes Tool wurde mindestens einmal aufgerufen (62 Prüfungen). Dazu gehören ein Backup, vier Restores ins Scratchpad (`files`, `all` mit `strip_prefix`/`add_prefix`, `directories` mit `regexwhere`, `before` mit `fileregex`), deren Dateien danach geprüft wurden, sowie label, mount, unmount und release auf einem File-Gerät. Außerdem: update volume/pool, Abbruch eines auf 2030 eingeplanten Jobs, enable/disable für Job, Client und Schedule, setdebug, setbandwidth, `configure add` und `export`, reload, rerun, prune, purge (mit beantworteter Rückfrage), relabel, truncate und delete (jobid, volume, pool).
 - Befund am Director (behoben): `label` und `relabel` schickten dem Storage Daemon einen falschen Befehl (`3903 Error scanning label command`) und schrieben den Katalog trotzdem. Seit [C-084](../COMPATIBILITY-LOG.md)/[S-32](../STUBS.md) sendet der Director die Original-Anfrage und schreibt den Katalog erst nach `3000 OK label`; geprüft gegen einen privaten `bareos-sd`. `label_volume`/`relabel_volume` geben die Ausgabe des Directors unverändert weiter. Offen bleibt nur die Option `encrypt` (erzeugt noch keinen Volume-Schlüssel).

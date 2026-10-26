@@ -36,7 +36,7 @@ Quotas, Write Bootstrap, Volume-Pruning und Purge/Recycle Oldest Volume
 (S-19, S-23, S-27, S-28); Scheduler startet fällige Jobs (S-15, S-16, C-081);
 Joblimits, Duplikatprüfung, Watchdog, Reschedule (S-22, S-26, C-083);
 Standard-Wartezeit 10 min auf ein Volume (S-33, C-085); label/relabel-Protokoll
-zum SD (S-32, C-084); eigener FD `bareos-filed` mit Sicherung, Restore, Estimate,
+zum SD (S-32, C-084); eigener FD `ofd` mit Sicherung, Restore, Estimate,
 Verify (S-12, S-13); `-t` wie `bareos-dir -t` (S-29); typisierte gRPC-API (S-34,
 S-35) und typisierte MCP-Tools (S-30, S-31).
 
@@ -70,7 +70,7 @@ Nur Punkte, die in den Quellen ausdrücklich als offen stehen:
   „Director's comm line to SD dropped“/„Network error with FD …“ und SD
   termination status beim Cancel sowie `*JobCancel*` des Job-Threads ohne
   Jobnamen-Nummer ([S-26](STUBS.md)); passive Clients beim Backup „ungeprüft“ ([S-23](STUBS.md)).
-- **Eigener FD `bareos-filed`:** PKI-Verschlüsselung/Signaturen, Plugins,
+- **Eigener FD `ofd`:** PKI-Verschlüsselung/Signaturen, Plugins,
   Heartbeat, client-initiierte Verbindungen, LMDB für Accurate, VSS/Windows/macOS;
   `breg.rs` noch als Kopie ([S-13](STUBS.md)).
 - **`configure update/delete`** (Erweiterungen) prüfen die Ressourcen-ACL nicht

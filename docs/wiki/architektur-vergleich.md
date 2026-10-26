@@ -8,14 +8,14 @@ Verglichen werden:
   (Checkout `/tmp/bareos-director-reference-18be77e6`, Verzeichnisse `core/src/dird`, `lib`,
   `cats`, `console`, `stored`, `filed`, `include`, `findlib`). Pfade unten relativ zu `core/src/`.
 - **Onesimus:** dieses Repository, vor allem
-  [`crates/onesimus-dird`](../../crates/onesimus-dird/src/main.rs) und die Crates
+  [`crates/odir`](../../crates/odir/src/main.rs) und die Crates
   [`bareos-bnet`](../../crates/bareos-bnet/src/lib.rs),
   [`bareos-config`](../../crates/bareos-config/src/lib.rs),
   [`bareos-orm`](../../crates/bareos-orm/src/lib.rs),
   [`bareos-catalog`](../../crates/bareos-catalog/src/lib.rs),
   [`onesimus-proto-rs`](../../crates/onesimus-proto-rs/src/lib.rs),
   [`oconsole`](../../crates/oconsole/src/main.rs),
-  [`bareos-filed`](../../crates/bareos-filed/src/main.rs).
+  [`ofd`](../../crates/ofd/src/main.rs).
 
 Jede Aussage nennt Datei und Funktion. Wo eine Aussage auf einer Lesart des Codes
 beruht und nicht durch einen Test oder Paritätsfall belegt ist, steht das dabei
@@ -43,7 +43,7 @@ beruht und nicht durch einen Test oder Paritätsfall belegt ist, steht das dabei
 
 | | Bareos (C++) | Onesimus (Rust) |
 |---|---|---|
-| Prozesse | ein Prozess `bareos-dir` | ein Director-Prozess `onesimus-dird` **plus ein geforkter Prozess je laufendem Job** mit Daemon-Kontakt (`job:<id>`) |
+| Prozesse | ein Prozess `bareos-dir` | ein Director-Prozess `odir` **plus ein geforkter Prozess je laufendem Job** mit Daemon-Kontakt (`job:<id>`) |
 | Jobs | ein POSIX-Thread je laufendem Job aus `jobq.cc` (`jobq_server`, höchstens `MaxConcurrentJobs` Threads) | Warteschlange im `JobManager` (`job_manager.rs`), Ausführung im geforkten Worker (`job_worker.rs::spawn_job_worker`); Copy/Migrate-Steuerjobs und Consolidate laufen im Director selbst (`internal_jobs.rs`) |
 | Jobzustand | `JobControlRecord` (JCR, `lib/jcr.h`, `dird/director_jcr_impl.h`), globale JCR-Kette | `DirJob` + `JcrState` im `JobManager` (Director), `JobParams` (serialisiert in den Worker) |
 | Konsolen | ein Thread je Verbindung aus `lib/thread_list.cc` (`BnetThreadServerTcp`, `lib/bnet_server_tcp.cc`) | ein benannter Thread je Verbindung `dir:session:<n>` (`accept.rs::accept_loop`) |
@@ -96,13 +96,13 @@ einem Job-Thread beendet den gesamten Director (Signalhandler `InitStackDump`,
 
 ### Prozess- und Threadmodell Onesimus (Rust)
 
-Quelle: [`main.rs`](../../crates/onesimus-dird/src/main.rs) (`main`, `spawn_named_threads`),
-[`job_worker.rs`](../../crates/onesimus-dird/src/job_worker.rs) (`spawn_job_worker`),
-[`catalog_worker.rs`](../../crates/onesimus-dird/src/catalog_worker.rs) (`spawn_catalog_worker`).
+Quelle: [`main.rs`](../../crates/odir/src/main.rs) (`main`, `spawn_named_threads`),
+[`job_worker.rs`](../../crates/odir/src/job_worker.rs) (`spawn_job_worker`),
+[`catalog_worker.rs`](../../crates/odir/src/catalog_worker.rs) (`spawn_catalog_worker`).
 
 ```mermaid
 flowchart TB
-    subgraph D["Prozess onesimus-dird"]
+    subgraph D["Prozess odir"]
         MAIN["main<br/>wait_for_shutdown<br/>SIGTERM, SIGINT"]
         HUP["dir:sighup<br/>reload.rs sighup_loop"]
         ACC["dir:accept<br/>accept.rs accept_loop"]
@@ -224,11 +224,11 @@ flowchart LR
         ORM["bareos-orm<br/>JSON-Schema, Migrator"]
         CATC["bareos-catalog<br/>im Director nicht benutzt"]
         PROTO["onesimus-proto-rs<br/>tonic, typed.rs Codec"]
-        STO["bareos-stored<br/>SD-Protokollhilfen"]
+        STO["osd<br/>SD-Protokollhilfen"]
         OCON["oconsole<br/>Konsole, gRPC-Client, MCP"]
-        FILED["bareos-filed<br/>Rust-FD"]
+        FILED["ofd<br/>Rust-FD"]
     end
-    subgraph dird["onesimus-dird/src"]
+    subgraph dird["odir/src"]
         ACC["accept.rs, session.rs,<br/>session_manager.rs"]
         REG["command_registry.rs,<br/>command_executor.rs, commands/*"]
         UAS["ua_select.rs, acl.rs, audit.rs"]
@@ -262,7 +262,7 @@ flowchart LR
     CWK -. "Start: Migrator" .-> ORM
 ```
 
-`bareos-catalog` ist als Abhängigkeit eingetragen, im Code von `onesimus-dird` gibt es aber
+`bareos-catalog` ist als Abhängigkeit eingetragen, im Code von `odir` gibt es aber
 keinen Aufruf `bareos_catalog::` (Suche vom 17.10.2026). Von `bareos-orm` nutzt der Director
 nur den `Migrator` beim Start (`main.rs`).
 
@@ -460,8 +460,8 @@ sequenceDiagram
 - **Transport/Anmeldung:** TLS (rustls, Zertifikat aus Konfiguration oder selbst erzeugt per
   `rcgen`, `grpc/tls.rs`), Login per Challenge/Response (Schlüssel = MD5 des Konsolen-
   Passworts, Beweis = HMAC-SHA256 über eine Nonce), danach Sitzungstoken im Header
-  `x-onesimus-session` (`grpc/auth.rs`). Port `Grpc Port` bzw. DirPort + 1000, nur mit
-  `Enable Grpc = yes`. Entdeckung per mDNS (`mdns.rs`, `_onesimus-dir._tcp.local.` mit
+  `x-onesimus-session` (`grpc/auth.rs`). Port `--grpc-port` bzw. DirPort + 1000, immer an
+  (`--disable-grpc` schaltet ab). Entdeckung per mDNS (`mdns.rs`, `_onesimus-dir._tcp.local.` mit
   Zertifikats-Fingerprint als Hinweis).
 - **MCP:** `oconsole --mcp` (stdio oder Streamable HTTP mit Bearer-Token). Werkzeuge rufen
   erst die typisierte RPC, bei `UNIMPLEMENTED` `ExecuteCommand`, ohne gRPC die BNET-Zeile.
@@ -645,7 +645,7 @@ stateDiagram-v2
   `msgchan.cc` (`StartStorageDaemonJob`, `msg_thread`), `getmsg.cc` (`BgetDirmsg` verteilt
   `C`atalog, `U`pdCat, `B`lastAttr), `catreq.cc` (`CatalogRequest` Zeile 117,
   `CatalogUpdate` Zeile 687), `next_vol.cc`, `newvol.cc`, `recycle.cc`, `autoprune.cc`.
-- **Rust:** `fd_protocol.rs`, `sd_protocol.rs` (dünne Hülle um `bareos-stored`),
+- **Rust:** `fd_protocol.rs`, `sd_protocol.rs` (dünne Hülle um `osd`),
   `backup_worker.rs`, `sd_copy.rs`, `catreq.rs` (Port von `catreq.cc`, der Verteilung aus
   `getmsg.cc` und den aufgerufenen Teilen von `next_vol.cc`, `recycle.cc`, `newvol.cc` und
   `cats/`; Nachrichten werden mit einem Port von `bsscanf`, `lib/scan.cc`, zerlegt, C-055).
@@ -834,8 +834,8 @@ flowchart TB
 
 | | C++ | Rust |
 |---|---|---|
-| Director-Plugins | `dird/dir_plugins.cc` (`LoadDirPlugins` beim Start, Ereignisse wie Job-Start/-Ende), Python-Director-Plugins über `python-dir` (im Sparse-Checkout nicht enthalten) | **keine** im Director. Das Crate `bareos-plugins` (PyO3, Nachbau des `bareosdir`-Moduls) ist kein Workspace-Mitglied (`Cargo.toml`, `optional-members`) und wird von `onesimus-dird` nicht benutzt. Folge im Code: Plugin-Ereignisse entfallen, z. B. beim Prune (C-030, S-21) |
-| FD-Plugins | `filed/fd_plugins.cc`, Python-FD-Plugins (`python-fd`) | eigener FD `bareos-filed` ohne Plugins (S-13 offen); der Onesimus-Director arbeitet mit dem Original-`bareos-fd` samt dessen Python-Plugins, da das Protokoll gleich bleibt |
+| Director-Plugins | `dird/dir_plugins.cc` (`LoadDirPlugins` beim Start, Ereignisse wie Job-Start/-Ende), Python-Director-Plugins über `python-dir` (im Sparse-Checkout nicht enthalten) | **keine** im Director. Das frühere Crate `bareos-plugins` (PyO3) wurde entfernt. `onesimus-plugins` prüft signierte Rust-/WASM-Artefakte; ein ausführender Host ist noch offen ([Architektur](plugin-architektur.md)). Folge im Code: Plugin-Ereignisse entfallen, z. B. beim Prune (C-030, S-21) |
+| FD-Plugins | `filed/fd_plugins.cc`, Python-FD-Plugins (`python-fd`) | eigener FD `ofd` ohne Plugins (S-13 offen); der Onesimus-Director arbeitet mit dem Original-`bareos-fd` samt dessen Python-Plugins, da das Protokoll gleich bleibt |
 | Plan | — | [BACKLOG](../BACKLOG.md), Addendum „Rust-only Plugin-System mit verpflichtender Zertifizierung“: nur zertifizierte Rust-Plugins, kein PyO3/Python mehr, fail-closed beim Laden. Status: Entscheidung, Umsetzung offen |
 | Externe Schnittstellen | BNET + `.api 2` | zusätzlich gRPC (`Director`, `DirectorApi`), MCP, mDNS; `.help` aus der Registry |
 | Konfigurierbare Befehle | `ua_cmds.cc commands[]` | `command_registry.rs` als zentrale Liste (Argumente, Vervollständigung in oconsole, Hilfe) |

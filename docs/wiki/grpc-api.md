@@ -1,6 +1,6 @@
 # Typisierte gRPC-API (`DirectorApi`)
 
-Der Director bietet neben dem Dienst `Director` (`ExecuteCommand` mit Text-/JSON-Ausgabe) den typisierten Dienst `onesimus.director.api.DirectorApi` an: je Konsolenbefehl bzw. Unterbefehl eine RPC, deren Antwort eine strukturierte Protobuf-Message ist. Definiert in [`proto/director_api.proto`](https://github.com/Beerlesklopfer/onesimus-proto/blob/director-typed-api/director_api.proto) (Repository onesimus-proto, Branch `director-typed-api`), implementiert in `crates/onesimus-dird/src/grpc/api.rs` (lesende RPCs im Produktions-Build, S-34; schreibende, Sitzungs- und Restore-RPCs nur im Entwicklungs-Build mit dem Cargo-Feature `grpc-development`, S-35).
+Der Director bietet neben dem Dienst `Director` (`ExecuteCommand` mit Text-/JSON-Ausgabe) den typisierten Dienst `onesimus.director.api.DirectorApi` an: je Konsolenbefehl bzw. Unterbefehl eine RPC, deren Antwort eine strukturierte Protobuf-Message ist. Definiert in [`proto/director_api.proto`](https://github.com/Beerlesklopfer/onesimus-proto/blob/director-typed-api/director_api.proto) (Repository onesimus-proto, Branch `director-typed-api`), implementiert in `crates/odir/src/grpc/api.rs` (lesende RPCs im Produktions-Build, S-34; schreibende, Sitzungs- und Restore-RPCs nur im Entwicklungs-Build mit dem Cargo-Feature `grpc-development`, S-35).
 
 Protobuf-Pakete (seit 17.10.2026, ohne Übergangszeit; vorher `bareos.*`): `onesimus` (Optionen in `onesimus_options.proto`), `onesimus.director` (Dienst `Director`), `onesimus.director.commands`, `onesimus.director.api` (Dienst `DirectorApi`), `onesimus.ccc`. Repository [onesimus-proto](https://github.com/Beerlesklopfer/onesimus-proto); Rust-Typen im Crate `onesimus-proto-rs` (`onesimus_proto_rs::onesimus::director::…`). Die BNET-Konsolenschnittstelle bleibt mit der Bareos-Konsole kompatibel.
 
@@ -37,7 +37,7 @@ Jede neue Message wurde gegen diese Liste geprüft. Abweichungen mit Begründung
 
 ## Verbindung, Anmeldung, Rechte
 
-- Der gRPC-Server läuft, wenn im Director-Ressource `Enable Grpc = yes` steht (Port: `Grpc Port`, sonst DirPort + 1000).
+- Der gRPC-Server läuft standardmäßig (Port: DirPort + 1000, Zertifikat im Working Directory). `odir --disable-grpc` schaltet ihn ab; `--grpc-port`, `--grpc-cert`/`--grpc-key` stellen Port und Zertifikat ein. Die Config braucht dafür keine Direktive und bleibt Bareos-kompatibel.
 - Gleicher Port, gleiches TLS (selbst signiertes Zertifikat, Fingerprint-Pinning) und gleiche Anmeldung wie der Dienst `Director`: `GetChallenge` + `Login`, danach Session-Token im Metadata-Header `x-onesimus-session`.
 - Jede RPC baut eine Konsolenzeile und lässt sie durch dieselbe Befehlsimplementierung laufen wie die Konsole (gleiche SQL-Abfragen, gleiche ACL-Filter). Eine Konsole sieht über die RPC also genau das, was `list`/`show`/`status` ihr zeigen.
 - Fehler: Befehl nicht in der CommandACL → `PERMISSION_DENIED`; Befehl fehlgeschlagen → `FAILED_PRECONDITION` mit den Fehlermeldungen des Directors (wie `error.data.messages.error` bei `.api 2`); kein/abgelaufener Token → `UNAUTHENTICATED`; im Produktions-Build nicht enthalten → `UNIMPLEMENTED`; ungültige Parameter oder fehlendes `confirm` (Entwicklungs-Build) → `INVALID_ARGUMENT`.
@@ -87,7 +87,7 @@ Antwort (gekürzt):
 
 (`-insecure` nur zum Ausprobieren; produktiv den Fingerprint des Zertifikats pinnen, siehe `oconsole --grpc`.)
 
-In Rust mit tonic (wie im Integrationstest `crates/onesimus-dird/tests/grpc_typed_api.rs`):
+In Rust mit tonic (wie im Integrationstest `crates/odir/tests/grpc_typed_api.rs`):
 
 ```rust
 use onesimus_proto_rs::onesimus::director::api::{director_api_client::DirectorApiClient, ListJobsCommand, JobStatus};
@@ -104,7 +104,7 @@ for job in api.list_jobs(req).await?.into_inner().jobs {
 ## Stand der Implementierung
 
 - **Produktions-Build** (Paket, Vorgabe): alle lesenden RPCs – Info/Hilfe, `list`/`llist` aller Formen, `status`/`.status`, `show` aller Ressourcentypen, die Punkt-Auflistungen, `.sql*`-Metadaten, `.acl`/`.profile` (Liste), BVFS-Abfragen und OVFS. Alle übrigen RPCs antworten `UNIMPLEMENTED` (ihr Code ist nicht einkompiliert), wie die MCP-Schreib-Tools von oconsole.
-- **Entwicklungs-Build** (`cargo build -p onesimus-dird --features grpc-development`, S-35): zusätzlich die schreibenden Befehle, die Sitzungsbefehle und die interaktive Wiederherstellung.
+- **Entwicklungs-Build** (`cargo build -p odir --features grpc-development`, S-35): zusätzlich die schreibenden Befehle, die Sitzungsbefehle und die interaktive Wiederherstellung.
 
 ### Schreibende RPCs (Entwicklungs-Build)
 
@@ -141,23 +141,23 @@ grpcurl … -d '{"session_id":"<id>"}' $DIR onesimus.director.api.DirectorApi/Re
 
 ### Tests
 
-Abbildungs-Tests in `crates/onesimus-proto-rs/src/typed.rs` und `crates/onesimus-dird/src/grpc/api.rs`; Konsolenzeilen und Sperren jeder Schreib-RPC in `grpc/api_write.rs` (nur Entwicklungs-Build); `UNIMPLEMENTED` im Produktions-Build und Warteschlange/Folgeabfrage/Abmeldung im Entwicklungs-Build in `grpc/api.rs`; Abdeckungstest `grpc/coverage.rs` (prüft gegen [`commands/bareos-director-commands.json`](commands/bareos-director-commands.json), dass jeder Befehl und jedes Unterkommando eine RPC hat, dass jede RPC entweder Lese-RPC oder im Entwicklungs-Build implementiert ist, und hält die Tabellen unten aktuell). Integrationstests in `crates/onesimus-dird/tests/grpc_typed_api.rs`:
+Abbildungs-Tests in `crates/onesimus-proto-rs/src/typed.rs` und `crates/odir/src/grpc/api.rs`; Konsolenzeilen und Sperren jeder Schreib-RPC in `grpc/api_write.rs` (nur Entwicklungs-Build); `UNIMPLEMENTED` im Produktions-Build und Warteschlange/Folgeabfrage/Abmeldung im Entwicklungs-Build in `grpc/api.rs`; Abdeckungstest `grpc/coverage.rs` (prüft gegen [`commands/bareos-director-commands.json`](commands/bareos-director-commands.json), dass jeder Befehl und jedes Unterkommando eine RPC hat, dass jede RPC entweder Lese-RPC oder im Entwicklungs-Build implementiert ist, und hält die Tabellen unten aktuell). Integrationstests in `crates/odir/tests/grpc_typed_api.rs`:
 
 - `typed_api_matches_console_api2`: Director mit der Parity-Konfiguration auf einer Wegwerf-Kopie von `bareos_cppref`, jede Lese-RPC gegen die `.api 2`-Ausgabe derselben Konsolenzeile, auch für eine eingeschränkte Konsole;
 - `typed_api_writes_on_private_daemons` (nur Entwicklungs-Build): eigener Katalog (Bareos-DDL), **private** `bareos-fd`/`bareos-sd` mit eigener Konfiguration, eigenen Ports und Dateigerät (nie die laufenden Daemons): Label, Backup über `Run`, Restore über `Restore` und über eine interaktive `RestoreTree`-Sitzung (Inhalt der wiederhergestellten Dateien geprüft), Abbruch einer Sitzung, Mount/Unmount/Release, UpdateVolume, Purge/Truncate/Delete mit `confirm`, Cancel, DeleteJob, Enable/Disable, ConfigureAdd, Reload, `.sql`, sqlquery, nicht anwendbare RPCs, Abmeldung.
 
 ```sh
-cargo build -p onesimus-dird && cargo build -p bareos-bnet --example bnet_capture
-cargo test -p onesimus-dird --test grpc_typed_api -- --ignored --nocapture
+cargo build -p odir && cargo build -p bareos-bnet --example bnet_capture
+cargo test -p odir --test grpc_typed_api -- --ignored --nocapture
 # Entwicklungs-Build; Ports 39240 (Director), +1 FD, +2 SD, +3 gRPC; Restore-Ziel TYPED_API_RESTORE_DIR
-cargo test -p onesimus-dird --features grpc-development --test grpc_typed_api -- --ignored --nocapture
+cargo test -p odir --features grpc-development --test grpc_typed_api -- --ignored --nocapture
 ```
 
 Die CI (`.github/workflows/package.yml`) testet beide Builds; die Pakete bleiben Produktions-Builds.
 
 ## RPCs
 
-<!-- rpcs:begin (generiert, crates/onesimus-dird/src/grpc/coverage.rs) -->
+<!-- rpcs:begin (generiert, crates/odir/src/grpc/coverage.rs) -->
 | RPC | Request | Response | Stand |
 |---|---|---|---|
 | `GetVersion` | `commands.VersionCommand` | `api.VersionResponse` | implementiert |
@@ -347,7 +347,7 @@ Die CI (`.github/workflows/package.yml`) testet beide Builds; die Pakete bleiben
 
 Unterbefehl `key=` steht für die Form `key=<wert>`, ein Wort für das Schlüsselwort; `–` für den Befehl selbst.
 
-<!-- coverage:begin (generiert, crates/onesimus-dird/src/grpc/coverage.rs) -->
+<!-- coverage:begin (generiert, crates/odir/src/grpc/coverage.rs) -->
 | Befehl | Unterbefehl | RPC | Stand |
 |---|---|---|---|
 | `.` | – | `Noop` | implementiert |

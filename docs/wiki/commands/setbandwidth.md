@@ -24,7 +24,7 @@ setbandwidth [ client=<client-name> | storage=<storage-name> | jobid=<jobid> | j
 
 **Paritätsfälle (6):** `c011-setbandwidth-cancel`, `c011-setbandwidth-badlimit-cancel`, `c011-setbandwidth-api2`, `c035-setbandwidth-api1`, `c035-setbandwidth-api2`, `setbandwidth-noargs`.
 
-**Lokaler Handler:** [crates/onesimus-dird/src/commands/bandwidth.rs:78](../../../crates/onesimus-dird/src/commands/bandwidth.rs).
+**Lokaler Handler:** [crates/odir/src/commands/bandwidth.rs:78](../../../crates/odir/src/commands/bandwidth.rs).
 
 Die folgenden vorhandenen Beispiele und Verhaltensbeschreibungen sind lokale Dokumentation; sie sind kein Beleg für vollständige Bareos-Kompatibilität. Bei Widersprüchen gilt der obige Befund.
 <!-- bareos-reference:end -->

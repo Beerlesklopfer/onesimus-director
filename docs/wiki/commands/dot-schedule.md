@@ -21,7 +21,7 @@ Referenz: [WIP/25.1.2-pre-43-g18be77e68, `18be77e6832e`](https://github.com/bare
 
 **Paritätsfälle (18):** `c003-dot_schedule-api2`, `c025-schedule-limited`, `c025-schedule-limited-api2`, `c025-schedule-enabled-limited`, `c025-schedule-enabled-limited-api2`, `c025-schedule-operator`, `c025-schedule-operator-api2`, `c025-schedule-enabled-operator`, `c025-schedule-enabled-operator-api2`, `c025-schedule-bvfs`, `c025-schedule-bvfs-api2`, `c025-schedule-enabled-bvfs`, `c025-schedule-enabled-bvfs-api2`, `c025-schedule-acl`, `c025-schedule-acl-api2`, `c025-schedule-enabled-acl`, `c025-schedule-enabled-acl-api2`, `dot_schedule`.
 
-**Lokaler Handler:** [crates/onesimus-dird/src/commands/dot.rs:130](../../../crates/onesimus-dird/src/commands/dot.rs).
+**Lokaler Handler:** [crates/odir/src/commands/dot.rs:130](../../../crates/odir/src/commands/dot.rs).
 
 Die folgenden vorhandenen Beispiele und Verhaltensbeschreibungen sind lokale Dokumentation; sie sind kein Beleg für vollständige Bareos-Kompatibilität. Bei Widersprüchen gilt der obige Befund.
 <!-- bareos-reference:end -->

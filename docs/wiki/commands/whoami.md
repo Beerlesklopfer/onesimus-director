@@ -17,7 +17,7 @@ Referenz: [WIP/25.1.2-pre-43-g18be77e68, `18be77e6832e`](https://github.com/bare
 
 **Paritätsfälle (9):** `c010-whoami-default`, `c010-whoami-named`, `c010-whoami-limited`, `c010-whoami-json`, `c010-whoami-json-named`, `c010-whoami-api1`, `c036-messages-operator`, `whoami`, `whoami-limited`.
 
-**Lokaler Handler:** [crates/onesimus-dird/src/commands/extra.rs:214](../../../crates/onesimus-dird/src/commands/extra.rs).
+**Lokaler Handler:** [crates/odir/src/commands/extra.rs:214](../../../crates/odir/src/commands/extra.rs).
 
 Die folgenden vorhandenen Beispiele und Verhaltensbeschreibungen sind lokale Dokumentation; sie sind kein Beleg für vollständige Bareos-Kompatibilität. Bei Widersprüchen gilt der obige Befund.
 <!-- bareos-reference:end -->

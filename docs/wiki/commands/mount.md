@@ -24,7 +24,7 @@ mount storage=<storage-name> slot=<num> drive=<drivenum> jobid=<jobid> | job=<jo
 
 **Paritätsfälle (16):** `c013-mount-auto`, `c013-mount-positional`, `c013-mount-storage`, `c013-mount-sd-drive`, `c013-mount-slot`, `c013-mount-twice`, `c013-mount-question`, `c013-mount-notfound`, `c013-mount-bare-storage`, `c013-mount-jobid-bad`, `c013-mount-jobid-notrunning`, `c013-mount-job-notrunning`, `c013-mount-job-novalue`, `c013-mount-ujobid-notrunning`, `c013-release-then-mount`, `mount-dialog`.
 
-**Lokaler Handler:** [crates/onesimus-dird/src/commands/admin.rs:192](../../../crates/onesimus-dird/src/commands/admin.rs).
+**Lokaler Handler:** [crates/odir/src/commands/admin.rs:192](../../../crates/odir/src/commands/admin.rs).
 
 Die folgenden vorhandenen Beispiele und Verhaltensbeschreibungen sind lokale Dokumentation; sie sind kein Beleg für vollständige Bareos-Kompatibilität. Bei Widersprüchen gilt der obige Befund.
 <!-- bareos-reference:end -->

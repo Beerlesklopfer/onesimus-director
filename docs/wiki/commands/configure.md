@@ -20,7 +20,7 @@ Ressourcentypen für `add`: `client`, `jobdefs`, `job`, `storage`, `catalog`, `s
 
 **Paritätsfälle (31):** `c019-configure-bare`, `c019-configure-add-only`, `c019-configure-export-only`, `c019-configure-invalid-sub`, `c019-export-no-client-arg`, `c019-export-unknown-client`, `c019-export-twice`, `c019-add-invalid-type`, `c019-add-director`, `c019-add-device`, `c019-add-unknown-directive`, `c019-add-forbidden-char`, `c019-add-missing-name`, `c019-add-missing-value`, `c019-add-missing-required`, `c019-add-console`, `c019-add-console-type-name`, `c019-add-duplicate-existing`, `c019-add-profile`, `c019-add-schedule`, `c019-add-schedule-invalid`, `c019-add-messages`, `c019-add-invalid-name`, `c019-add-unknown-profile`, `c019-add-empty-password`, `c019-add-counter-invalid`, `c019-add-user`, `c019-add-fileset`, `c019-add-case-keys`, `configure-export`, `configure-bad`.
 
-**Lokaler Handler:** [crates/onesimus-dird/src/commands/configure.rs:79](../../../crates/onesimus-dird/src/commands/configure.rs).
+**Lokaler Handler:** [crates/odir/src/commands/configure.rs:79](../../../crates/odir/src/commands/configure.rs).
 
 Die folgenden vorhandenen Beispiele und Verhaltensbeschreibungen sind lokale Dokumentation; sie sind kein Beleg für vollständige Bareos-Kompatibilität. Bei Widersprüchen gilt der obige Befund.
 <!-- bareos-reference:end -->

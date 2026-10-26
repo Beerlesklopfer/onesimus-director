@@ -22,7 +22,7 @@ trace on | off
 
 **Paritätsfälle (3):** `c011-trace-cancel`, `c011-trace-api1-cancel`, `trace-noargs`.
 
-**Lokaler Handler:** [crates/onesimus-dird/src/commands/extra.rs:104](../../../crates/onesimus-dird/src/commands/extra.rs).
+**Lokaler Handler:** [crates/odir/src/commands/extra.rs:104](../../../crates/odir/src/commands/extra.rs).
 
 Die folgenden vorhandenen Beispiele und Verhaltensbeschreibungen sind lokale Dokumentation; sie sind kein Beleg für vollständige Bareos-Kompatibilität. Bei Widersprüchen gilt der obige Befund.
 <!-- bareos-reference:end -->

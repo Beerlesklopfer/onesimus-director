@@ -24,7 +24,7 @@ import storage=<storage-name> [ srcslots=<slot-selection> dstslots=<slot-selecti
 
 **Paritätsfälle (2):** `c012-import-unknown-storage`, `import-noargs`.
 
-**Lokaler Handler:** [crates/onesimus-dird/src/commands/extra.rs:1012](../../../crates/onesimus-dird/src/commands/extra.rs).
+**Lokaler Handler:** [crates/odir/src/commands/extra.rs:1012](../../../crates/odir/src/commands/extra.rs).
 
 Die folgenden vorhandenen Beispiele und Verhaltensbeschreibungen sind lokale Dokumentation; sie sind kein Beleg für vollständige Bareos-Kompatibilität. Bei Widersprüchen gilt der obige Befund.
 <!-- bareos-reference:end -->

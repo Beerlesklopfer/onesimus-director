@@ -25,7 +25,7 @@ restore where=</path> client=<client-name> storage=<storage-name> bootstrap=<fil
 
 **Paritätsfälle (28):** `c012-restore-menu`, `c021-unknown-keyword`, `c021-unknown-backupformat`, `c021-unknown-keyword-json`, `c021-missing-jobid-value`, `c021-missing-file-value`, `c021-jobid-not-a-number`, `c021-jobid-list-invalid`, `c021-jobid-unknown`, `c021-jobid-zero`, `c021-two-dates`, `c021-before-short-date`, `c021-before-garbage`, `c021-pool-unknown`, `c021-fileregex-invalid`, `c021-comment-illegal`, `c021-comment-empty`, `c021-client-unknown`, `c021-client-invalid-name`, `c021-limited-console`, `c021-cancel-menu`, `c021-cancel-menu-client`, `restore-help`, `w011-restore-item-cancel`, `w011-restore-badnumber-cancel`, `w011-restore-jobids-cancel`, `w011-restore-api1-cancel`, `w011-restore-api2`.
 
-**Lokaler Handler:** [crates/onesimus-dird/src/commands/restore.rs:88](../../../crates/onesimus-dird/src/commands/restore.rs).
+**Lokaler Handler:** [crates/odir/src/commands/restore.rs:88](../../../crates/odir/src/commands/restore.rs).
 
 Die folgenden vorhandenen Beispiele und Verhaltensbeschreibungen sind lokale Dokumentation; sie sind kein Beleg für vollständige Bareos-Kompatibilität. Bei Widersprüchen gilt der obige Befund.
 <!-- bareos-reference:end -->

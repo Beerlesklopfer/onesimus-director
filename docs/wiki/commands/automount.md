@@ -21,7 +21,7 @@ automount on | off
 
 **Paritätsfälle (14):** `c005-automount-off`, `c005-automount-foo`, `c005-automount-upper`, `c005-automount-noarg`, `c005-automount-noarg-dot`, `c005-automount-twoargs`, `c005-automount-on-api1`, `c005-automount-noarg-api1`, `c005-automount-on-api2`, `c005-automount-noarg-api2`, `c005-automount-prompt-then-command`, `c036-getcmd-dot-messages`, `c036-getcmd-dot-messages-autodisplay`, `automount`.
 
-**Lokaler Handler:** [crates/onesimus-dird/src/commands/extra.rs:58](../../../crates/onesimus-dird/src/commands/extra.rs).
+**Lokaler Handler:** [crates/odir/src/commands/extra.rs:58](../../../crates/odir/src/commands/extra.rs).
 
 Die folgenden vorhandenen Beispiele und Verhaltensbeschreibungen sind lokale Dokumentation; sie sind kein Beleg für vollständige Bareos-Kompatibilität. Bei Widersprüchen gilt der obige Befund.
 <!-- bareos-reference:end -->

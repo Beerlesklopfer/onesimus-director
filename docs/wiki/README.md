@@ -1,6 +1,9 @@
 # Director Wiki
 
 - [Vollständigkeitsprüfung und Roadmap](../TODO-COMMANDS.md)
+- [Kommandozeilenparameter: Director, Konsole und File Daemon](kommandozeile.md)
+- [File Daemon: gRPC mit dauerhaftem BNET-Fallback](file-daemon.md)
+- [Signierbare Plugin-Architektur](plugin-architektur.md)
 - [Befehlsübersicht](commands/README.md)
 - [MCP-Server von oconsole (Tools mit Beispielen)](mcp.md)
 - [Typisierte gRPC-API (DirectorApi)](grpc-api.md)

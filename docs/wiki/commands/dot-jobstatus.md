@@ -21,7 +21,7 @@ Referenz: [WIP/25.1.2-pre-43-g18be77e68, `18be77e6832e`](https://github.com/bare
 
 **Paritätsfälle (21):** `c029-jobstatus`, `c029-jobstatus-T`, `c029-jobstatus-e`, `c029-jobstatus-unknown-char`, `c029-jobstatus-long`, `c029-jobstatus-empty`, `c029-jobstatus-arg-ignored`, `c029-jobstatus-kv-ignored`, `c029-jobstatus-twice`, `c029-jobstatus-catalog`, `c029-jobstatus-catalog-bogus`, `c029-jobstatus-api1`, `c029-jobstatus-api1-T`, `c029-jobstatus-api1-bad`, `c029-jobstatus-api2`, `c029-jobstatus-api2-T`, `c029-jobstatus-api2-Z`, `c029-jobstatus-api2-bad`, `c029-jobstatus-api1-Z`, `c029-jobstatus-quote`, `dot-jobstatus`.
 
-**Lokaler Handler:** [crates/onesimus-dird/src/commands/dot.rs:150](../../../crates/onesimus-dird/src/commands/dot.rs).
+**Lokaler Handler:** [crates/odir/src/commands/dot.rs:150](../../../crates/odir/src/commands/dot.rs).
 
 Die folgenden vorhandenen Beispiele und Verhaltensbeschreibungen sind lokale Dokumentation; sie sind kein Beleg für vollständige Bareos-Kompatibilität. Bei Widersprüchen gilt der obige Befund.
 <!-- bareos-reference:end -->

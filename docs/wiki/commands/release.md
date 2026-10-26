@@ -24,7 +24,7 @@ release storage=<storage-name> [ drive=<drivenum> ] [ alldrives ]
 
 **Paritätsfälle (7):** `c013-release-auto`, `c013-release-positional`, `c013-release-drive`, `c013-release-alldrives`, `c013-release-notfound`, `c013-release-then-mount`, `release-dialog`.
 
-**Lokaler Handler:** [crates/onesimus-dird/src/commands/admin.rs:200](../../../crates/onesimus-dird/src/commands/admin.rs).
+**Lokaler Handler:** [crates/odir/src/commands/admin.rs:200](../../../crates/odir/src/commands/admin.rs).
 
 Die folgenden vorhandenen Beispiele und Verhaltensbeschreibungen sind lokale Dokumentation; sie sind kein Beleg für vollständige Bareos-Kompatibilität. Bei Widersprüchen gilt der obige Befund.
 <!-- bareos-reference:end -->
