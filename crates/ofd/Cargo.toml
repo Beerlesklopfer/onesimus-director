@@ -38,10 +38,10 @@ flate2 = "1"
 md5 = { package = "md-5", version = "0.10" }
 sha1 = "0.10"
 sha2.workspace = true
+rcgen.workspace = true
 twox-hash = { version = "2", default-features = false, features = ["xxhash3_128", "std"] }
 
 [dev-dependencies]
-rcgen.workspace = true
 openssl.workspace = true
 wat = "1"
 prost.workspace = true

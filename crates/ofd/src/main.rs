@@ -23,6 +23,7 @@ mod fileset;
 mod find;
 mod heartbeat;
 mod grpc;
+mod grpc_tls;
 mod jmsg;
 mod job;
 mod restore;
@@ -39,7 +40,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::thread;
 
 use clap::Parser;
-use tracing::{info, error};
+use tracing::{info, error, warn};
 use tracing_subscriber::EnvFilter;
 
 /// Global shutdown flag.
@@ -76,17 +77,21 @@ struct Cli {
     #[arg(long, requires = "discover_podman")]
     conmon_executable: Vec<PathBuf>,
 
-    /// Additional TLS gRPC control listener; BNET always remains available.
-    #[arg(long, requires_all = ["grpc_cert", "grpc_key"])]
+    /// TLS gRPC control listener (default: [::]:<port + 1000>); BNET always remains available.
+    #[arg(long)]
     grpc_listen: Option<std::net::SocketAddr>,
 
-    /// PEM server certificate for --grpc-listen.
-    #[arg(long, requires = "grpc_listen")]
+    /// PEM server certificate for gRPC (default: generated in the working directory).
+    #[arg(long, requires = "grpc_key")]
     grpc_cert: Option<PathBuf>,
 
-    /// PEM private key for --grpc-listen.
-    #[arg(long, requires = "grpc_listen")]
+    /// PEM private key for gRPC.
+    #[arg(long, requires = "grpc_cert")]
     grpc_key: Option<PathBuf>,
+
+    /// Do not start the gRPC listener (BNET only).
+    #[arg(long, conflicts_with = "grpc_listen")]
+    disable_grpc: bool,
 
     /// Use <path> as configuration file or directory.
     #[arg(short, long, default_value = "/etc/bareos/bareos-fd.d")]
@@ -215,13 +220,35 @@ fn main() {
     let port = fd_config.port;
     let shared_config = Arc::new(fd_config);
 
-    let grpc_handle = cli.grpc_listen.map(|address| {
-        grpc::start(shared_config.clone(), address, cli.grpc_cert.as_deref().unwrap(),
-            cli.grpc_key.as_deref().unwrap(), &SHUTDOWN).unwrap_or_else(|error| {
+    // gRPC is the default control channel; it is started with a certificate
+    // generated once in the working directory unless one is given. A listener
+    // asked for explicitly must start, the default one only warns.
+    let grpc_handle = if cli.disable_grpc {
+        None
+    } else {
+        let explicit = cli.grpc_listen.is_some();
+        let address = cli.grpc_listen.unwrap_or_else(|| {
+            std::net::SocketAddr::from(([0u16; 8], port.saturating_add(1000)))
+        });
+        let files = match (&cli.grpc_cert, &cli.grpc_key) {
+            (Some(cert), Some(key)) => Ok((cert.clone(), key.clone())),
+            _ => grpc_tls::load_or_generate(&shared_config.working_directory, &shared_config.name),
+        };
+        match files.and_then(|(cert, key)| grpc::start(shared_config.clone(), address, &cert, &key, &SHUTDOWN)) {
+            Ok(started) => {
+                info!("FD gRPC (TLS) listening on {}", started.0);
+                Some(started)
+            }
+            Err(error) if explicit => {
                 error!("cannot start FD gRPC listener: {error}");
                 std::process::exit(1);
-            })
-    });
+            }
+            Err(error) => {
+                warn!("FD gRPC listener on {address} not started, BNET only: {error}");
+                None
+            }
+        }
+    };
 
     info!("FD '{}' listening on BNET port {} (fallback always enabled)", shared_config.name, port);
 
