@@ -65,7 +65,7 @@ conflicts = "bareos-filedaemon"
 replaces = "bareos-filedaemon"
 provides = "bareos-filedaemon"
 maintainer-scripts = "../../packaging/ofd"
-systemd-units = { unit-name = "ofd", unit-scripts = "../../packaging/ofd", enable = false, start = false }
+systemd-units = { unit-name = "ofd", unit-scripts = "../../packaging/ofd", enable = true, start = true }
 assets = [
     ["target/release/ofd", "usr/sbin/ofd", "755"],
     ["../../config/bareos-fd.d/**/*.conf", "usr/share/bareos/defaultconfigs/bareos-fd.d/", "644"],

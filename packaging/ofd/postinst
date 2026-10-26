@@ -39,7 +39,7 @@ case "$1" in
         echo "Onesimus File Daemon installiert."
         echo "  File Daemon: /usr/sbin/ofd"
         echo "  Config:      /etc/bareos/bareos-fd.d/"
-        echo "  Service:     systemctl start ofd"
+        echo "  Service:     systemctl status ofd"
         ;;
 esac
 
