@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Integration run of oconsole's MCP tools (S-36) against a Rust Director.
 
-Starts onesimus-dird with a PRIVATE bareos-fd/bareos-sd (own configs, ports,
+Starts odir with a PRIVATE bareos-fd/bareos-sd (own configs, ports,
 file device and working directories under --base) and a throw-away catalog
 (new database from the Bareos DDL, dropped at the end), then drives
 `oconsole --mcp` over stdio with JSON-RPC: tools/list and every tool at least
@@ -10,7 +10,7 @@ interactive restore (restore_tree_*) into --restore-dir.
 
 Never touches the live daemons or bareos_cppref.
 
-  python3 tests/mcp/mcp_rig.py --director target/debug/onesimus-dird \\
+  python3 tests/mcp/mcp_rig.py --director target/debug/odir \\
       --oconsole target/debug/oconsole --base /tmp/claude-10001/m36 \\
       --port 39250 --restore-dir <dir> --transports bnet,grpc --report out.json
 
@@ -89,7 +89,7 @@ class Rig:
         work = self.path("dirwork")
         files = {
             "director/bareos-dir.conf": f"Director {{\n  Name = bareos-dir\n  Password = \"{PASSWORD}\"\n  Messages = Daemon\n"
-                f"  Working Directory = {work}\n  DirPort = {self.port}\n  Enable Grpc = yes\n  Grpc Port = {self.grpc_port}\n"
+                f"  Working Directory = {work}\n  DirPort = {self.port}\n"
                 "  Maximum Concurrent Jobs = 10\n  QueryFile = \"/usr/lib/bareos/scripts/query.sql\"\n}\n",
             "catalog/MyCatalog.conf": f"Catalog {{\n  Name = MyCatalog\n  dbname = \"{self.db}\"\n  dbuser = \"{user}\"\n  dbpassword = \"\"\n}}\n",
             "messages/Daemon.conf": f"Messages {{\n  Name = Daemon\n  append = \"{work}/daemon.log\" = all, !skipped, !saved, !audit\n}}\n",
@@ -127,7 +127,7 @@ class Rig:
         self.spawn(["/usr/sbin/bareos-fd", "-f", "-c", self.path("fd", "bareos-fd.conf")], "fd.out")
         self.spawn(["/usr/sbin/bareos-sd", "-f", "-c", self.path("sd", "bareos-sd.conf")], "sd.out")
         assert wait_port(self.fd_port) and wait_port(self.sd_port), "private daemons did not start"
-        self.spawn([self.args.director, "-f", "-c", self.path("dir", "bareos-dir.d")], "dir.out")
+        self.spawn([self.args.director, "-f", "--grpc-port", str(self.grpc_port), "-c", self.path("dir", "bareos-dir.d")], "dir.out")
         assert wait_port(self.port) and wait_port(self.grpc_port), "Director did not open its ports"
         cert = self.path("dirwork", "onesimus-grpc.crt")
         der = subprocess.run(["openssl", "x509", "-in", cert, "-outform", "der"], capture_output=True).stdout

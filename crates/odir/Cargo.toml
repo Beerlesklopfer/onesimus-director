@@ -1,0 +1,87 @@
+[package]
+name = "odir"
+description = "Onesimus Director — Drop-in replacement for the Bareos Director daemon"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "odir"
+path = "src/main.rs"
+# Drop-in: /usr/sbin/odir (C++ bareos-dir can stay installed side-by-side)
+
+[features]
+# Typed gRPC write/session/restore RPCs (DirectorApi, S-35). Development
+# build only; the production build answers UNIMPLEMENTED for them.
+grpc-development = []
+
+[dependencies]
+bareos-bnet.workspace = true
+bareos-config.workspace = true
+bareos-catalog.workspace = true
+onesimus-proto-rs.workspace = true
+bareos-orm = { path = "../bareos-orm" }
+osd = { path = "../osd" }
+
+anyhow.workspace = true
+thiserror.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+tokio.workspace = true
+tonic.workspace = true
+prost.workspace = true
+crossbeam-channel.workspace = true
+flume.workspace = true
+dashmap.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+base64.workspace = true
+hmac.workspace = true
+sha2.workspace = true
+nix.workspace = true
+rustls.workspace = true
+libc.workspace = true
+daemonize.workspace = true
+clap.workspace = true
+tokio-stream = "0.1"
+sqlx.workspace = true
+chrono = "0.4"
+rcgen.workspace = true
+mdns-sd.workspace = true
+hex.workspace = true
+rustls-pemfile.workspace = true
+md-5.workspace = true
+rand.workspace = true
+openssl.workspace = true
+
+[dev-dependencies]
+# tests/grpc_typed_api.rs (tonic client with pinned TLS)
+prost-types.workspace = true
+tokio-rustls.workspace = true
+hyper-util = { version = "0.1", features = ["tokio"] }
+tower = { version = "0.4", features = ["util"] }
+bytes = "1"
+
+[package.metadata.deb]
+name = "odir"
+maintainer = "Joerg Bernau <joerg@bernau.family>"
+copyright = "2026, Joerg Bernau"
+license-file = ["../../packaging/copyright", "0"]
+extended-description = """\
+High-performance Director daemon written in Rust.
+Reads /etc/bareos/bareos-dir.d/ config tree (Bareos-compatible).
+.
+Binary: /usr/sbin/odir"""
+section = "admin"
+priority = "optional"
+depends = "$auto, bareos-common"
+breaks = "onesimusd (<< 0.25.0-3~), onesimus-dird"
+replaces = "onesimusd (<< 0.25.0-3~), onesimus-dird"
+maintainer-scripts = "../../packaging/odir"
+systemd-units = { unit-name = "odir", unit-scripts = "../../packaging/odir", enable = true, start = true }
+assets = [
+    ["target/release/odir", "usr/sbin/odir", "755"],
+    ["../bareos-orm/schema/*.json", "usr/lib/bareos/scripts/ddl/", "644"],
+    ["../../config/bareos-dir.d/**/*.conf", "usr/share/bareos/defaultconfigs/bareos-dir.d/", "644"],
+]

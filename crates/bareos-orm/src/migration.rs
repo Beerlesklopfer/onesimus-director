@@ -405,7 +405,7 @@ fn is_onesimus_extension(schema: &CatalogSchema) -> bool {
     schema.author.eq_ignore_ascii_case("onesimus")
 }
 
-/// Repair catalogs where an older onesimus-dird wrote an extension version
+/// Repair catalogs where an older odir wrote an extension version
 /// into the Bareos `version` table: reset it to the newest Bareos base
 /// version so the C++ Director can open the catalog again.
 pub async fn repair_cpp_version(pool: &sqlx::PgPool, versions: &[CatalogSchema]) -> Result<(), OrmError> {

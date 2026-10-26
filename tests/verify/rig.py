@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Verify jobs (S-04, C-058): original bareos-dir vs onesimus-dird against
+"""Verify jobs (S-04, C-058): original bareos-dir vs odir against
 PRIVATE bareos-fd/bareos-sd daemons (own config, ports, storage, working
 directories), never the live ones and never bareos_cppref.
 
@@ -19,7 +19,7 @@ from pathlib import Path
 HERE = Path(os.environ.get('VERIFY_RIG_DIR', '/tmp/verify-rig'))
 REPO = Path(__file__).resolve().parents[2]
 CAPTURE = REPO / 'target/debug/examples/bnet_capture'
-RUST = REPO / 'target/debug/onesimus-dird'
+RUST = REPO / 'target/debug/odir'
 CPP = Path('/usr/sbin/bareos-dir')
 DIRPORT = int(os.environ.get('VERIFY_RIG_PORT', '39191'))
 FDPORT, SDPORT = DIRPORT + 1, DIRPORT + 2

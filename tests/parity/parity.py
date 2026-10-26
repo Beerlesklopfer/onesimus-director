@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Director parity: original bareos-dir vs. onesimus-dird on identical fixtures.
+"""Director parity: original bareos-dir vs. odir on identical fixtures.
 
 Both Directors get the same configuration (derived from --source, default
 /etc/bareos/bareos-dir.d, plus tests/parity/fixture overrides), the same
@@ -49,7 +49,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[2]
 HERE = ROOT / 'tests/parity'
 CAPTURE = ROOT / 'target/debug/examples/bnet_capture'
-RUST_DIR = ROOT / 'target/debug/onesimus-dird'
+RUST_DIR = ROOT / 'target/debug/odir'
 CPP_DIR = Path('/usr/sbin/bareos-dir')
 PASSWORD = 'parity-dir-pw'
 ENV = {**os.environ, 'LC_ALL': 'C', 'LANG': 'C', 'TZ': 'UTC', 'NO_COLOR': '1'}
@@ -364,7 +364,7 @@ def setup(args):
 def run(args):
     for binary in (CAPTURE, RUST_DIR, CPP_DIR):
         if not binary.exists():
-            sys.exit(f'missing {binary} (cargo build -p onesimus-dird && cargo build -p bareos-bnet --example bnet_capture)')
+            sys.exit(f'missing {binary} (cargo build -p odir && cargo build -p bareos-bnet --example bnet_capture)')
     cases = load_cases(args.cases, args.only)
     out = args.work / 'out'
     if out.exists():

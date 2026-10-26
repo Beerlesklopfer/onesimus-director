@@ -108,7 +108,7 @@ def definitions(source, handler):
 
 
 def registry():
-    path = 'crates/onesimus-dird/src/command_registry.rs'
+    path = 'crates/odir/src/command_registry.rs'
     text = clean((ROOT / path).read_text())
     result = {}
     for match in re.finditer(r'CommandDef\s*\{\s*name:\s*(' + STRING + ')', text):
@@ -118,7 +118,7 @@ def registry():
         aliases = re.search(r'aliases:\s*&\[([^]]*)\]', block)[1]
         handler = re.search(r'handler:\s*commands::(\w+)::(\w+)', block)
         module, function = handler.groups()
-        handler_path = f'crates/onesimus-dird/src/commands/{module}.rs'
+        handler_path = f'crates/odir/src/commands/{module}.rs'
         code = (ROOT / handler_path).read_text()
         definition = re.search(r'pub fn ' + function + r'\b', code)
         item = {
@@ -233,19 +233,19 @@ def main():
                                for p in sorted((source / 'core/src/dird').glob('*')) if p.suffix in ('.cc', '.h')]},
         'local_source_files': [
             {'path': str(p.relative_to(ROOT)), 'sha256': hashlib.sha256(p.read_bytes()).hexdigest()}
-            for p in sorted(set((ROOT / 'crates/onesimus-dird/src/commands').glob('*.rs')) | {
-                ROOT / 'crates/onesimus-dird/src/command_registry.rs',
-                ROOT / 'crates/onesimus-dird/src/command_executor.rs',
+            for p in sorted(set((ROOT / 'crates/odir/src/commands').glob('*.rs')) | {
+                ROOT / 'crates/odir/src/command_registry.rs',
+                ROOT / 'crates/odir/src/command_executor.rs',
                 ROOT / 'crates/bareos-bnet/src/debug.rs',
-                ROOT / 'crates/onesimus-dird/src/main.rs',
-                ROOT / 'crates/onesimus-dird/src/fd_protocol.rs',
-                ROOT / 'crates/onesimus-dird/src/logging.rs',
-                ROOT / 'crates/bareos-stored/src/command.rs',
-                ROOT / 'crates/onesimus-dird/src/catalog_worker.rs',
-                ROOT / 'crates/onesimus-dird/src/job_worker.rs',
-                ROOT / 'crates/onesimus-dird/src/job_manager.rs',
-                ROOT / 'crates/onesimus-dird/src/session.rs',
-                ROOT / 'crates/onesimus-dird/src/scheduler.rs',
+                ROOT / 'crates/odir/src/main.rs',
+                ROOT / 'crates/odir/src/fd_protocol.rs',
+                ROOT / 'crates/odir/src/logging.rs',
+                ROOT / 'crates/osd/src/command.rs',
+                ROOT / 'crates/odir/src/catalog_worker.rs',
+                ROOT / 'crates/odir/src/job_worker.rs',
+                ROOT / 'crates/odir/src/job_manager.rs',
+                ROOT / 'crates/odir/src/session.rs',
+                ROOT / 'crates/odir/src/scheduler.rs',
                 ROOT / 'crates/oconsole/src/mcp.rs',
                 ROOT / 'crates/oconsole/src/mcp_mirror.rs',
                 ROOT / 'crates/oconsole/src/rate_guard.rs',

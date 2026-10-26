@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Local CI for onesimus-dird: every check is a separate step.
+"""Local CI for odir: every check is a separate step.
 
 A failing step is reported, never a reason to stop: all steps always run, so
 each one can be monitored over time. Steps:

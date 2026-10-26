@@ -14,7 +14,7 @@ from pathlib import Path
 from generate_director_reference import COMMIT, TAG, clean, literal, table
 
 ROOT = Path(__file__).resolve().parents[1]
-OUTPUT = ROOT / 'crates/onesimus-dird/src/commands/configure_usage.rs'
+OUTPUT = ROOT / 'crates/odir/src/commands/configure_usage.rs'
 SOURCES = ('core/src/dird/dird_conf.cc', 'core/src/lib/tls_resource_items.h',
            'core/src/lib/messages_resource_items.h', 'core/src/lib/res.cc',
            'core/src/lib/resource_item.h')

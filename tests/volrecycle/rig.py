@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Volume recycling / autolabel on file volumes (C-085): original bareos-dir
-vs onesimus-dird against PRIVATE bareos-fd/bareos-sd daemons (own config,
+vs odir against PRIVATE bareos-fd/bareos-sd daemons (own config,
 ports, storage, working directories), never the live ones and never
 bareos_cppref. Reproduces the PDC job 779 situation: expired volumes that
 are pruned and recycled, a recycled volume whose file is missing, an Append
@@ -22,7 +22,7 @@ from pathlib import Path
 HERE = Path(os.environ.get('VOLRIG_DIR', '/tmp/vr39230'))
 REPO = Path(__file__).resolve().parents[2]
 CAPTURE = REPO / 'target/debug/examples/bnet_capture'
-RUST = REPO / 'target/debug/onesimus-dird'
+RUST = REPO / 'target/debug/odir'
 CPP = Path('/usr/sbin/bareos-dir')
 DIRPORT = int(os.environ.get('VOLRIG_PORT', '39230'))
 FDPORT, SDPORT = DIRPORT + 1, DIRPORT + 2

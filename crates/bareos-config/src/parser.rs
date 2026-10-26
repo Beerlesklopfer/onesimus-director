@@ -268,7 +268,7 @@ fn parse_raw_resources_inner(input: &str) -> Result<Vec<RawResource>, (String, u
 fn parse_directive_key(input: &str) -> Result<(String, &str), String> {
     let eq_pos = input.find('=');
     let brace_pos = input.find('}');
-    let nl_pos = input.find('\n');
+    let _nl_pos = input.find('\n');
 
     // If closing brace comes before = or newline, this isn't a directive
     if let Some(bp) = brace_pos {
@@ -460,12 +460,6 @@ fn convert_raw_resource(raw: &RawResource) -> Result<Resource, ConfigError> {
             if let Some(v) = get("maximum concurrent jobs") {
                 dir.max_concurrent_jobs = v.parse().unwrap_or(1);
             }
-            if let Some(v) = get("enablegrpc") {
-                dir.enable_grpc = parse_bool(v).map(|(_, b)| b).unwrap_or(false);
-            }
-            if let Some(v) = get("enable grpc") {
-                dir.enable_grpc = parse_bool(v).map(|(_, b)| b).unwrap_or(false);
-            }
             let get_any = |keys: &[&str]| keys.iter().find_map(|k| get(k));
             if let Some(v) = get_any(&["grpc port", "grpcport"]) {
                 dir.grpc_port = v.parse().ok();
@@ -591,7 +585,7 @@ fn convert_raw_resource(raw: &RawResource) -> Result<Resource, ConfigError> {
         }
 
         "pool" => {
-            let mut pool = PoolResource {
+            let pool = PoolResource {
                 name: require("name")?.to_string(),
                 pool_type: get("pool type").unwrap_or("Backup").to_string(),
                 recycle: get("recycle")
@@ -1110,7 +1104,6 @@ Director {
   Port = 9101
   Password = "secret"
   Maximum Concurrent Jobs = 10
-  Enable Grpc = yes
 }
 "#;
         let resources = parse_config(input).unwrap();
@@ -1121,7 +1114,6 @@ Director {
                 assert_eq!(d.port, 9101);
                 assert_eq!(d.password, "secret");
                 assert_eq!(d.max_concurrent_jobs, 10);
-                assert!(d.enable_grpc);
                 assert_eq!(d.grpc_port, None);
                 assert!(d.mdns_advertise);
                 assert_eq!(d.working_directory, "/var/lib/bareos");

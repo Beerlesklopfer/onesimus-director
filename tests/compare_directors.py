@@ -2,7 +2,7 @@
 """
 Onesimus Director — Quantitative Comparison Test Suite
 
-Runs identical commands against C++ bareos-dir and Rust onesimus-dird,
+Runs identical commands against C++ bareos-dir and Rust odir,
 compares outputs, measures response times, produces JSON + PDF report.
 
 Usage:
@@ -453,9 +453,9 @@ def gather_system_info() -> dict:
                 break
     except Exception:
         pass
-    # Rust onesimus-dird version
+    # Rust odir version
     try:
-        out = subprocess.check_output(["target/debug/onesimus-dird", "--version"],
+        out = subprocess.check_output(["target/debug/odir", "--version"],
                                        stderr=subprocess.STDOUT, text=True, timeout=3)
         info["rust_version"] = out.strip()
     except Exception:

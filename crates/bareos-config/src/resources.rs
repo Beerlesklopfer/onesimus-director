@@ -28,7 +28,6 @@ pub struct DirectorResource {
     pub fd_connect_timeout: Duration,
     pub sd_connect_timeout: Duration,
     pub heartbeat_interval: Duration,
-    pub enable_grpc: bool,
     /// gRPC port; None = BNET port + 1000
     pub grpc_port: Option<u16>,
     /// PEM files for the gRPC TLS endpoint; None = self-signed, generated on first start
@@ -52,7 +51,6 @@ impl Default for DirectorResource {
             fd_connect_timeout: Duration::from_secs(180),
             sd_connect_timeout: Duration::from_secs(1800),
             heartbeat_interval: Duration::ZERO,
-            enable_grpc: false,
             grpc_port: None,
             grpc_tls_certificate: None,
             grpc_tls_key: None,

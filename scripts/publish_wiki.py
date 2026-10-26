@@ -72,10 +72,33 @@ def rewrite(text: str, rel: str, mapping: dict, blob: str) -> str:
 def sidebar(mapping: dict) -> str:
     top = [n for r, n in mapping.items() if "/" not in r and n != "Home"]
     commands = sorted(n for r, n in mapping.items() if r.startswith("commands/") and n != "Commands")
-    lines = ["**[Home](Home)**", "", "**Themen**", ""]
+    # GitHub Markdown supports native details/summary, including nested groups.
+    # Blank lines around Markdown content inside HTML blocks are required.
+    lines = ["**[Home](Home)**", "", "<details>", "<summary>Themen</summary>", ""]
     lines += [f"- [{n}]({n})" for n in sorted(top)]
-    lines += ["", "**[Befehle](Commands)**", ""]
-    lines += [f"- [{n}]({n})" for n in commands]
+    lines += ["", "</details>", "", "<details>", "<summary>Befehle</summary>", "",
+              "- [Befehlsübersicht](Commands)"]
+    groups = {"Konsolenbefehle": [], "Punktbefehle": [], "BVFS": [], "OVFS": []}
+    for name in commands:
+        if name == "bareos-reference":
+            lines.append(f"- [Bareos-Originalreferenz]({name})")
+        elif name.startswith("dot-bvfs-"):
+            groups["BVFS"].append(name)
+        elif name.startswith("dot-ovfs-"):
+            groups["OVFS"].append(name)
+        elif name.startswith("dot-"):
+            groups["Punktbefehle"].append(name)
+        else:
+            groups["Konsolenbefehle"].append(name)
+    for title, names in groups.items():
+        if not names:
+            continue
+        lines += ["", "<details>", f"<summary>{title}</summary>", ""]
+        for name in names:
+            label = "." + name[4:].replace("-", "_") if name.startswith("dot-") else name
+            lines.append(f"- [{label}]({name})")
+        lines += ["", "</details>"]
+    lines += ["", "</details>"]
     return "\n".join(lines) + "\n"
 
 

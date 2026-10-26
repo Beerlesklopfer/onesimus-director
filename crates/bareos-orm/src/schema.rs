@@ -1,6 +1,5 @@
 //! Schema-Definition aus JSON-Dateien.
 
-use std::collections::HashMap;
 use std::path::Path;
 
 use serde::{Deserialize, Serialize};

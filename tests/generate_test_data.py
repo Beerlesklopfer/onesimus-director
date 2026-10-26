@@ -184,7 +184,6 @@ name = bareos-dir
 port = 9101
 maximum_concurrent_jobs = 10
 heartbeat_interval = 0
-enable_grpc = yes
 
 [logging]
 level = info

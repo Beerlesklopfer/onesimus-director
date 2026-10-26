@@ -1,6 +1,6 @@
 //! Code-Generator: erzeugt Rust-Structs aus JSON-Schema.
 
-use crate::schema::{CatalogSchema, TableDef, ColumnDef};
+use crate::schema::{CatalogSchema, TableDef};
 
 /// Generiere Rust-Code für alle Tabellen im Schema.
 pub fn generate_rust_models(schema: &CatalogSchema) -> String {
