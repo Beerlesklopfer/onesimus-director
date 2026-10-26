@@ -1,0 +1,49 @@
+#!/bin/bash
+set -e
+
+case "$1" in
+    configure)
+        if ! getent group bareos >/dev/null 2>&1; then
+            addgroup --system bareos
+        fi
+        if ! getent passwd bareos >/dev/null 2>&1; then
+            adduser --system --home /var/lib/bareos --no-create-home \
+                    --ingroup bareos --shell /usr/sbin/nologin bareos
+        fi
+        install -d -m 750 -o bareos -g bareos /var/lib/bareos
+        install -d -m 750 -o bareos -g bareos /var/log/bareos
+        install -d -m 750 -o bareos -g bareos /etc/bareos
+
+        # Vorhandene Konfiguration bleibt; sonst Vorlage anlegen. Name des Directors:
+        # OFD_DIRECTOR_NAME (Vorgabe bareos-dir), Passwort zufaellig.
+        if [ ! -d /etc/bareos/bareos-fd.d ] || [ -z "$(find /etc/bareos/bareos-fd.d/ -name '*.conf' 2>/dev/null)" ]; then
+            echo "Installiere Default-Konfiguration nach /etc/bareos/bareos-fd.d/ ..."
+            cp -r /usr/share/bareos/defaultconfigs/bareos-fd.d /etc/bareos/
+            DIR_NAME="${OFD_DIRECTOR_NAME:-bareos-dir}"
+            CLIENT_NAME="$(hostname -s 2>/dev/null || hostname)-fd"
+            DIR_PW=$(openssl rand -base64 32 2>/dev/null || head -c 32 /dev/urandom | base64)
+            DIR_PW_ESC=$(printf '%s' "$DIR_PW" | sed 's/[\\&|]/\\&/g')
+            sed -i -e "s|@DIRECTOR_NAME@|${DIR_NAME}|g" -e "s|@CLIENT_NAME@|${CLIENT_NAME}|g" \
+                   -e "s|CHANGEME|${DIR_PW_ESC}|" /etc/bareos/bareos-fd.d/*/*.conf
+            chown -R root:bareos /etc/bareos/bareos-fd.d
+            chmod -R u=rwX,g=rX,o= /etc/bareos/bareos-fd.d
+            echo "Default-Konfiguration installiert: Director '${DIR_NAME}', Client '${CLIENT_NAME}'."
+            echo "Das Passwort steht in /etc/bareos/bareos-fd.d/director/bareos-dir.conf und muss"
+            echo "in der Client-Ressource des Directors eingetragen werden."
+        else
+            echo "Bestehende Konfiguration in /etc/bareos/bareos-fd.d/ gefunden — nicht veraendert."
+        fi
+
+        systemctl daemon-reload 2>/dev/null || true
+        echo ""
+        echo "Onesimus File Daemon installiert."
+        echo "  File Daemon: /usr/sbin/ofd"
+        echo "  Config:      /etc/bareos/bareos-fd.d/"
+        echo "  Service:     systemctl start ofd"
+        ;;
+esac
+
+
+#DEBHELPER#
+
+exit 0

@@ -43,15 +43,8 @@ bareos-dir.d.tar
 *.deb
 *.buildinfo
 *.changes
-debian/.debhelper/
-debian/onesimusd/
-debian/onesimus-dird/
-debian/oconsole/
-debian/files
-debian/*.substvars
-debian/*.debhelper
-debian/debhelper-build-stamp
 
 # Claude Code worktrees/session data
 .claude/
 __pycache__/
+/oconsole.conf

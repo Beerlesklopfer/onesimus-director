@@ -1,0 +1,24 @@
+[Unit]
+Description=Onesimus File Daemon
+Documentation=https://github.com/Beerlesklopfer/onesimus-director
+Requires=network.target nss-lookup.target time-sync.target
+After=network-online.target nss-lookup.target local-fs.target remote-fs.target time-sync.target
+ConditionPathExists=/var/lib/bareos
+StartLimitIntervalSec=1d
+
+[Service]
+Type=simple
+User=root
+Group=bareos
+WorkingDirectory=/var/lib/bareos
+ExecStart=/usr/sbin/ofd -f -c /etc/bareos/bareos-fd.d
+SuccessExitStatus=0 15
+LimitNOFILE=8192:524288
+Restart=on-failure
+RestartSec=30
+StartLimitBurst=10
+RestartPreventExitStatus=41 42
+
+[Install]
+Alias=bareos-fd.service
+WantedBy=multi-user.target

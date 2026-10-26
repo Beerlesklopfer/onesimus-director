@@ -12,7 +12,7 @@ Copyright: 2025 Bareos GmbH & Co. KG
 License: AGPL-3.0-only
 Comment: Shared protocol submodule; original notices are preserved.
 
-Files: docs/wiki/commands/* crates/onesimus-dird/src/ua_commands_table.rs
+Files: docs/wiki/commands/* crates/odir/src/ua_commands_table.rs
 Copyright: 2026 Joerg Bernau <Joerg.Bernau@onesimus.io>
            2000-2012 Free Software Foundation Europe e.V.
            2011-2016 Planets Communications B.V.

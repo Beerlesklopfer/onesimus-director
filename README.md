@@ -1,4 +1,4 @@
-# Onesimus — Director (onesimus-dird) & Console (oconsole)
+# Onesimus — Director (odir) & Console (oconsole)
 
 Drop-in replacement for the Bareos Director daemon — independent project after Bareos rejected the Rust rewrite.
 
@@ -34,16 +34,16 @@ Drop-in replacement for the Bareos Director daemon — independent project after
 
 | Crate | Type | Description |
 |-------|------|-------------|
-| `onesimus-dird` | Product | Director daemon binary |
+| `odir` | Product | Director daemon binary |
 | `oconsole` | Product | `oconsole` — interactive console client |
 | `bareos-bnet` | Protocol | BNET wire protocol, TLS-PSK, CRAM-MD5 |
 | `bareos-config` | Protocol | Bareos configuration parser |
 | `bareos-catalog` | Protocol | PostgreSQL catalog queries (sqlx) |
 | `bareos-orm` | Protocol | ORM + schema migration + codegen |
-| `bareos-stored` | Protocol | SD protocol library (connect, job, catrec, status) |
+| `osd` | Protocol | SD protocol library (connect, job, catrec, status) |
 | `onesimus-proto-rs` | Protocol | gRPC codegen from the onesimus-proto definitions (submodule `proto/`) |
-| `bareos-filed` | Protocol | File Daemon skeleton |
-| `bareos-plugins` | Protocol | Python plugin system (PyO3) |
+| `ofd` | Protocol | File Daemon skeleton |
+| `onesimus-plugins` | Security | Signed Rust/WebAssembly plugin verification; no Python runtime |
 
 ## Build & Run
 
@@ -52,7 +52,7 @@ cargo build
 cargo test
 
 # Run with test config (requires PostgreSQL + bareos-fd + bareos-sd)
-target/debug/onesimus-dird -c tests/ -f --port 29101 --name bareos-dir
+target/debug/odir -c tests/ -f --port 29101 --name bareos-dir
 
 # Connect with C++ bconsole
 echo "version" | bconsole -c tests/bconsole.conf
@@ -76,16 +76,12 @@ offers gRPC (`proto/director_service.proto`) for the Onesimus GUI:
   port = BNET port, TXT `grpc`, `tls`, `fp`, `version`, `product`).
   Check with `avahi-browse -rt _onesimus-dir._tcp`.
 
+gRPC is on by default (port: DirPort + 1000, self-signed certificate in the working
+directory). The configuration needs no extra directive; options are on the command line:
+
 ```
-Director {
-  ...
-  Enable Grpc = yes                 # gRPC endpoint (TLS)
-  Grpc Port = 10101                 # default: Port + 1000
-  # Grpc Tls Certificate = /etc/bareos/tls/dir.crt   # default: self-signed
-  # Grpc Tls Key = /etc/bareos/tls/dir.key
-  Mdns Advertise = yes              # default: yes
-  Working Directory = /var/lib/bareos
-}
+odir -f --grpc-port 10101 --grpc-cert /etc/bareos/tls/dir.crt --grpc-key /etc/bareos/tls/dir.key
+odir -f --disable-grpc
 ```
 
 Set `NO_COLOR=1` to disable oconsole styling, including prompts, hints and diagnostics.
@@ -123,7 +119,7 @@ measured, not assumed.
   retained for analysis.
 
 **Tooling.** `tests/compare_directors.py` (wrapper `tests/compare_directors.sh`)
-runs identical commands against C++ `bareos-dir` and Rust `onesimus-dird`,
+runs identical commands against C++ `bareos-dir` and Rust `odir`,
 compares outputs, measures response times, and emits JSON + PDF reports.
 
 **Anchoring.** Work is anchored to `director-parity-anchor-20261015` (`fb5242f`),
@@ -237,12 +233,17 @@ Both packages can be installed side-by-side, only one runs at a time:
 | | Binary | Package |
 |--|--------|---------|
 | C++ | `/usr/sbin/bareos-dir` | `bareos-director` |
-| Onesimus | `/usr/sbin/onesimus-dird` | `onesimus-dird` |
+| Onesimus | `/usr/sbin/odir` | `odir` |
 
 ## Build Debian packages
 
+Packages are built with [cargo-deb](https://crates.io/crates/cargo-deb)
+(`[package.metadata.deb]` in `crates/{odir,ofd,oconsole}/Cargo.toml`, scripts and
+units in `packaging/`):
+
 ```bash
-dpkg-buildpackage -us -uc -b
+cargo build --release -p odir -p ofd -p oconsole --no-default-features --features oconsole/mcp-production
+for p in odir ofd oconsole; do cargo deb -p $p --no-build; done   # -> target/debian/
 ```
 
 ## License

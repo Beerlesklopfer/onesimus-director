@@ -42,12 +42,13 @@ case "$1" in
         systemctl daemon-reload 2>/dev/null || true
         echo ""
         echo "Onesimus Director installiert."
-        echo "  Director: /usr/sbin/onesimus-dird"
+        echo "  Director: /usr/sbin/odir"
         echo "  Console:  /usr/bin/oconsole"
         echo "  Config:   /etc/bareos/bareos-dir.d/"
-        echo "  Service:  systemctl start onesimus-dird"
+        echo "  Service:  systemctl start odir"
         ;;
 esac
+
 
 #DEBHELPER#
 
