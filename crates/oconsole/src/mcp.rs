@@ -170,7 +170,8 @@ impl<R: CommandRunner> McpServer<R> {
             .transpose()?;
         // Keep the runner alive outside the runtime (GrpcRunner owns a runtime).
         let runner = self.runner.clone();
-        let result = tokio::runtime::Runtime::new()?.block_on(async move {
+        let runtime = tokio::runtime::Runtime::new()?;
+        let result = runtime.block_on(async move {
             if let Some((address, token)) = http {
                 let listener = tokio::net::TcpListener::bind(address).await?;
                 axum::serve(listener, self.http_router(token, hosts))
@@ -190,12 +191,34 @@ impl<R: CommandRunner> McpServer<R> {
                     crate::mcp_mirror::MirrorIo::new(read, access.clone(), "request"),
                     crate::mcp_mirror::MirrorIo::new(write, access, "response"),
                 );
-                let service = ServiceExt::serve(self, transport).await?;
-                service.waiting().await?;
+                // End on Ctrl-D (end of stdin: the transport closes) and on Ctrl-C, also
+                // while the client has not sent "initialize" yet.
+                let interrupted = async {
+                    while !crate::CTRL_C.load(std::sync::atomic::Ordering::Relaxed) {
+                        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+                    }
+                };
+                tokio::pin!(interrupted);
+                tokio::select! {
+                    started = ServiceExt::serve(self, transport) => match started {
+                        Ok(service) => {
+                            tokio::select! {
+                                result = service.waiting() => { result?; }
+                                _ = &mut interrupted => {}
+                            }
+                        }
+                        // stdin ended before the first request: a normal end
+                        Err(e) if e.to_string().starts_with("connection closed") => {}
+                        Err(e) => return Err(e.into()),
+                    },
+                    _ = &mut interrupted => {}
+                }
             }
             Ok(())
         });
         drop(runner);
+        // The blocking read of stdin cannot be interrupted: do not wait for it.
+        runtime.shutdown_background();
         result
     }
 

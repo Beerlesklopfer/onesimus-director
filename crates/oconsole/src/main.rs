@@ -30,11 +30,10 @@ mod rate_guard;
 use std::io::{self, BufRead, Write};
 use std::net::TcpStream;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use clap::Parser;
-use tracing::{info, error, debug};
+use tracing::debug;
 use tracing_subscriber::EnvFilter;
 
 /// Global CTRL-C flag — set by signal handler, checked in recv loop.
@@ -79,9 +78,14 @@ struct Cli {
     #[arg(short = 'w', long)]
     password: Option<String>,
 
-    /// Use gRPC protocol (onesimus-dird only)
-    #[arg(long)]
+    /// Use gRPC (default: tried first, classic BNET when the Director's gRPC port is
+    /// not reachable); with this option there is no fallback
+    #[arg(long, conflicts_with = "bnet")]
     grpc: bool,
+
+    /// Use the classic Bareos console protocol (BNET) only
+    #[arg(long)]
+    bnet: bool,
 
     /// gRPC port (default: Director port + 1000)
     #[arg(long)]
@@ -142,8 +146,8 @@ struct ConsoleConfig {
     name: String,
     password: String,
     /// oconsole extensions (written by the Onesimus GUI): Grpc = yes,
-    /// Grpc Port = <n>, Grpc Fingerprint = <sha256 hex>
-    grpc: bool,
+    /// Grpc Port = <n>, Grpc Fingerprint = <sha256 hex>; `Grpc = no` selects BNET
+    grpc: Option<bool>,
     grpc_port: Option<u16>,
     grpc_fingerprint: Option<String>,
 }
@@ -155,6 +159,8 @@ struct EffCli {
     name: String,
     password: String,
     grpc: bool,
+    /// gRPC was asked for (--grpc, `Grpc = yes`): no fallback to BNET.
+    grpc_required: bool,
     grpc_port: u16,
     grpc_fingerprint: Option<String>,
     command: Option<String>,
@@ -199,7 +205,7 @@ fn parse_console_config(content: &str) -> ConsoleConfig {
         port: 9101,
         name: "*UserAgent*".to_string(),
         password: String::new(),
-        grpc: false,
+        grpc: None,
         grpc_port: None,
         grpc_fingerprint: None,
     };
@@ -241,7 +247,7 @@ fn parse_console_config(content: &str) -> ConsoleConfig {
             (_, "address") => cfg.address = val,
             (_, "port" | "dirport") => cfg.port = val.parse().unwrap_or(9101),
             (_, "password") => director_password = val,
-            (_, "grpc") => cfg.grpc = matches!(val.to_ascii_lowercase().as_str(), "yes" | "true" | "1" | "on"),
+            (_, "grpc") => cfg.grpc = Some(matches!(val.to_ascii_lowercase().as_str(), "yes" | "true" | "1" | "on")),
             (_, "grpc port" | "grpcport") => cfg.grpc_port = val.parse().ok(),
             (_, "grpc fingerprint" | "grpcfingerprint") => {
                 cfg.grpc_fingerprint = Some(val.replace(':', "").to_ascii_lowercase())
@@ -288,7 +294,8 @@ fn main() {
         port,
         name: name.clone(),
         password: password.clone(),
-        grpc: cli.grpc || file_cfg.grpc,
+        grpc: !cli.bnet && (cli.grpc || file_cfg.grpc != Some(false)),
+        grpc_required: !cli.bnet && (cli.grpc || file_cfg.grpc == Some(true)),
         grpc_port: cli.grpc_port.or(file_cfg.grpc_port).unwrap_or(port.saturating_add(1000)),
         grpc_fingerprint: cli.grpc_fingerprint.clone().or(file_cfg.grpc_fingerprint.clone()),
         command: cli.command.clone(),
@@ -302,16 +309,29 @@ fn main() {
     // SIGINT handler: set flag instead of killing process.
     // rustyline handles SIGINT at the prompt; we handle it during recv().
     unsafe {
-        libc::signal(libc::SIGINT, sigint_handler as libc::sighandler_t);
+        libc::signal(libc::SIGINT, sigint_handler as *const () as libc::sighandler_t);
     }
 
     let addr = format!("{}:{}", eff.address, eff.port);
 
-    if eff.grpc {
+    // gRPC is the default; a Director without it (classic Bareos) is reached by BNET.
+    let grpc_addr = format!("{}:{}", eff.address, eff.grpc_port);
+    if eff.grpc && !eff.grpc_required && !port_reachable(&grpc_addr) {
+        eprintln!("oconsole: no gRPC on {grpc_addr}, using the classic console protocol (BNET)");
+        run_bnet_mode(&EffCli { grpc: false, ..eff }, &addr);
+    } else if eff.grpc {
         run_grpc_mode(&eff);
     } else {
         run_bnet_mode(&eff, &addr);
     }
+}
+
+/// A TCP connect to `addr` works within a few seconds.
+fn port_reachable(addr: &str) -> bool {
+    use std::net::ToSocketAddrs;
+    addr.to_socket_addrs().ok().is_some_and(|mut all| {
+        all.any(|a| TcpStream::connect_timeout(&a, Duration::from_secs(3)).is_ok())
+    })
 }
 
 fn run_bnet_mode(cli: &EffCli, addr: &str) {
@@ -333,7 +353,7 @@ fn run_bnet_mode(cli: &EffCli, addr: &str) {
         match bareos_bnet::tls_psk::psk_connect(stream, &psk_identity, &psk) {
             Ok(psk_stream) => {
                 eprintln!(" Encryption: TLS-PSK");
-                let mut bnet = BnetStream::new(psk_stream);
+                let bnet = BnetStream::new(psk_stream);
                 run_bnet_session(cli, bnet);
                 return;
             }
@@ -341,13 +361,13 @@ fn run_bnet_mode(cli: &EffCli, addr: &str) {
                 debug!("TLS-PSK failed ({e}), reconnecting plaintext");
                 let stream2 = TcpStream::connect(addr).unwrap();
                 stream2.set_read_timeout(Some(Duration::from_secs(30))).ok();
-                let mut bnet = BnetStream::new(stream2);
+                let bnet = BnetStream::new(stream2);
                 run_bnet_session(cli, bnet);
                 return;
             }
         }
     }
-    let mut bnet = BnetStream::new(stream);
+    let bnet = BnetStream::new(stream);
     run_bnet_session(cli, bnet);
 }
 
@@ -727,9 +747,9 @@ impl BareosHelper {
             (fields.next()?.trim(), fields.next().unwrap_or(""), fields.next().unwrap_or(""),
                 Some(fields.next().unwrap_or("")))
         } else {
-            let (header, usage) = line.split_once(" -- ")?;
+            let (header, usage) = line.rsplit_once(" --")?;
             let (name, description) = header.split_once(' ')?;
-            (name.trim(), description, usage, None)
+            (name.trim(), description, usage.trim(), None)
         };
         if name.is_empty() || !name.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'.' || b == b'_') { return None; }
         let source_arguments;
@@ -745,15 +765,32 @@ impl BareosHelper {
     }
 
     fn usage_arguments(usage: &str, command: &str) -> String {
-        let mut arguments=Vec::new();
-        for token in usage.split_whitespace() {
-            let token=token.trim_matches(|c:char| matches!(c,'['|']'|'('|')'|'|'|','));
-            if token.is_empty() || token==command { continue; }
-            let argument = if let Some((key,_))=token.split_once('=') {
-                if key.is_empty() || !key.bytes().all(|b|b.is_ascii_alphanumeric() || b==b'_') { continue; }
-                key.to_string()
+        let mut arguments = Vec::new();
+        // Placeholders may contain alternatives, spaces and punctuation. Ignore
+        // their contents, but retain the surrounding grammar (including adjacent
+        // optional groups such as `[maxvoljobs=<nb>][enabled=<yes/no>]`).
+        let mut grammar = String::new();
+        let mut placeholder = false;
+        for ch in usage.chars() {
+            match ch {
+                '<' => { placeholder = true; grammar.push_str(" <value> "); }
+                '>' => placeholder = false,
+                _ if placeholder => {},
+                '[' | ']' | '(' | ')' | '|' | ',' => grammar.push(' '),
+                '=' => grammar.push_str(" = "),
+                _ => grammar.push(ch),
+            }
+        }
+        let tokens: Vec<_> = grammar.split_whitespace().collect();
+        for (index, token) in tokens.iter().enumerate() {
+            if *token == command || !token.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'_' || b == b'-') {
+                continue;
+            }
+            // Literal values (e.g. trace=0/1 or jobid=0) are not subcommands.
+            if index > 0 && tokens[index - 1] == "=" { continue; }
+            let argument = if tokens.get(index + 1) == Some(&"=") {
+                token.to_string()
             } else {
-                if !token.bytes().all(|b|b.is_ascii_alphanumeric() || b==b'_' || b==b'-') { continue; }
                 format!("!{token}")
             };
             if !arguments.contains(&argument) { arguments.push(argument); }
@@ -821,9 +858,9 @@ impl Completer for BareosHelper {
     fn complete(&self, line: &str, pos: usize, _ctx: &Context<'_>) -> rustyline::Result<(usize, Vec<Pair>)> {
         let line = &line[..pos];
         let parts: Vec<&str> = line.split_whitespace().collect();
-        let arg_pos = if line.ends_with(' ') { parts.len() } else { parts.len().saturating_sub(1) };
-        let prefix = if line.ends_with(' ') { "" } else { parts.last().copied().unwrap_or("") };
-        let start = if line.ends_with(' ') { pos } else { pos - prefix.len() };
+        let arg_pos = if line.chars().last().is_some_and(char::is_whitespace) { parts.len() } else { parts.len().saturating_sub(1) };
+        let prefix = if line.chars().last().is_some_and(char::is_whitespace) { "" } else { parts.last().copied().unwrap_or("") };
+        let start = if line.chars().last().is_some_and(char::is_whitespace) { pos } else { pos - prefix.len() };
 
         // === Position 0: Command name ===
         if arg_pos == 0 {
@@ -884,7 +921,7 @@ impl Completer for BareosHelper {
 
         // === Position 1+: Arguments (bare keywords + key= args) ===
         // Filter out args already typed
-        let already_typed: Vec<&str> = parts[1..].iter()
+        let already_typed: Vec<&str> = parts[1..arg_pos].iter()
             .map(|p| p.split('=').next().unwrap_or(""))
             .collect();
 
@@ -986,7 +1023,7 @@ impl Hinter for BareosHelper {
             return None;
         }
 
-        if parts.len() == 1 && !line.ends_with(' ') {
+        if parts.len() == 1 && !line.chars().last().is_some_and(char::is_whitespace) {
             // Ghost-Text fuer Command-Name: "sta" → grau "tus"
             let prefix = parts[0];
             let best = self.command_names()
@@ -995,7 +1032,7 @@ impl Hinter for BareosHelper {
             return Some(best[prefix.len()..].to_string());
         }
 
-        if parts.len() >= 1 && line.ends_with(' ') {
+        if parts.len() >= 1 && line.chars().last().is_some_and(char::is_whitespace) {
             // Nach Command + Space: Ghost-Text fuer erstes Argument
             let cmd = parts[0];
             if let Some(entry) = self.find_command(cmd) {
@@ -1633,7 +1670,7 @@ mod tests {
     fn flat_file_and_grpc_keys_still_work() {
         let cfg = parse_console_config("address = h\nport = 1\npassword = p\nGrpc = yes\nGrpc Port = 7\n");
         assert_eq!((cfg.address.as_str(), cfg.port, cfg.name.as_str(), cfg.password.as_str()), ("h", 1, "*UserAgent*", "p"));
-        assert!(cfg.grpc);
+        assert_eq!(cfg.grpc, Some(true));
         assert_eq!(cfg.grpc_port, Some(7));
     }
 
@@ -1710,6 +1747,63 @@ mod tests {
         assert!(BareosHelper::parse_help_line("run").is_none());
         let legacy=BareosHelper::parse_help_line("status\tReport status\tstatus [dir]\t!dir,client").unwrap();
         assert!(legacy.completions.contains(&"dir".to_string()));
+    }
+
+    #[test]
+    fn completion_accepts_every_director_help_entry() {
+        mod source {
+            include!("../../odir/src/ua_commands_table.rs");
+        }
+        let mut helper = BareosHelper::new();
+        for (name, description, usage) in source::UA_COMMANDS {
+            // query() trims responses, including the space after an empty usage.
+            let line = format!("{name} {description} -- {usage}");
+            let entry = BareosHelper::parse_help_line(line.trim()).unwrap();
+            assert_eq!(&entry.name, name);
+            helper.entries.push(entry);
+        }
+        for (command, keywords) in [
+            ("list", vec!["jobs", "backups", "volumes", "jobstatistics"]),
+            ("show", vec!["disabled", "clients", "all"]),
+            ("status", vec!["scheduler", "subscriptions", "configuration"]),
+            ("update", vec!["slots", "stats", "enabled=", "recyclepool="]),
+            ("purge", vec!["volume=", "quota", "action="]),
+        ] {
+            let entry = helper.find_command(command).unwrap();
+            for keyword in keywords {
+                assert!(entry.completions.iter().any(|c| c == keyword), "{command}: {keyword}");
+            }
+        }
+    }
+
+    #[test]
+    fn completion_parses_adjacent_groups_and_spaced_assignments() {
+        let entry = BareosHelper::parse_help_line(
+            "update Update volumes -- [maxvoljobs=<nb>][enabled=<yes/no>] | volume[=<volume>] [ drive = <drivenum>] trace=0/1"
+        ).unwrap();
+        for key in ["maxvoljobs=", "enabled=", "volume=", "drive=", "trace="] {
+            assert!(entry.completions.iter().any(|c| c == key), "missing {key}");
+        }
+        assert_eq!(entry.completions.len(), 5);
+    }
+
+    #[test]
+    fn completion_keeps_partial_keys_and_handles_tabs() {
+        let mut helper = BareosHelper::new();
+        helper.entries.push(BareosHelper::parse_help_line(
+            "run Run job -- job=<job-name> client=<client-name> yes"
+        ).unwrap());
+        let history = rustyline::history::DefaultHistory::new();
+        let ctx = Context::new(&history);
+        for line in ["run client", "run\tclient"] {
+            let (start, matches) = helper.complete(line, line.len(), &ctx).unwrap();
+            assert_eq!(start, 4);
+            assert_eq!(matches[0].replacement, "client=");
+        }
+        let line = "run client=example\t";
+        let (_, matches) = helper.complete(line, line.len(), &ctx).unwrap();
+        assert!(!matches.iter().any(|p| p.replacement == "client="));
+        assert!(matches.iter().any(|p| p.replacement == "job="));
     }
 
     #[test]

@@ -43,3 +43,23 @@ axum = "0.8"
 http-body-util = "0.1"
 rand.workspace = true
 bytes = "1"
+
+[package.metadata.deb]
+name = "oconsole"
+maintainer = "Joerg Bernau <joerg@bernau.family>"
+copyright = "2026, Joerg Bernau"
+license-file = ["../../packaging/copyright", "0"]
+extended-description = """\
+Interactive console for the Director with readline,
+tab-completion from Director AST, and syntax coloring.
+.
+Binary: /usr/bin/oconsole
+Config: /etc/bareos/oconsole.conf"""
+section = "admin"
+priority = "optional"
+depends = "$auto"
+maintainer-scripts = "../../packaging/oconsole"
+assets = [
+    ["target/release/oconsole", "usr/bin/oconsole", "755"],
+    ["../../config/brconsole.conf", "usr/share/bareos/defaultconfigs/oconsole.conf", "644"],
+]
