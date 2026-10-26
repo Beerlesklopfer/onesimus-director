@@ -1,4 +1,4 @@
-//! gRPC client for onesimus-dird: TLS with certificate pinning + console login.
+//! gRPC client for odir: TLS with certificate pinning + console login.
 //!
 //! The Director uses a self-signed certificate. Instead of CA validation the
 //! client pins the SHA-256 fingerprint of the certificate (trust on first use,
@@ -26,6 +26,13 @@ use onesimus_proto_rs::onesimus::director::{
 pub const SESSION_HEADER: &str = "x-onesimus-session";
 
 pub struct GrpcSession {
+    /// Connection data kept to log in again after the Director restarted
+    /// (its sessions and our channel do not survive that).
+    host: String,
+    port: u16,
+    fingerprint: String,
+    console_name: String,
+    password: String,
     client: DirectorClient<Channel>,
     channel: Channel,
     token: MetadataValue<tonic::metadata::Ascii>,
@@ -87,6 +94,11 @@ impl GrpcSession {
         }
 
         Ok(Self {
+            host: host.to_string(),
+            port,
+            fingerprint: fingerprint.to_string(),
+            console_name: console_name.to_string(),
+            password: password.to_string(),
             client,
             channel,
             token: login.session_token.parse()?,
@@ -95,8 +107,30 @@ impl GrpcSession {
         })
     }
 
-    /// Execute a full command line ("list jobs", ".clients", ...).
+    /// Connect and log in again (Director restarted, connection lost).
+    async fn reconnect(&mut self) -> anyhow::Result<()> {
+        let fresh = Self::connect(&self.host, self.port, &self.fingerprint, &self.console_name, &self.password).await?;
+        self.client = fresh.client;
+        self.channel = fresh.channel;
+        self.token = fresh.token;
+        self.director_name = fresh.director_name;
+        self.version = fresh.version;
+        Ok(())
+    }
+
+    /// Execute a full command line ("list jobs", ".clients", ...); once more on a
+    /// new connection when the old one is gone.
     pub async fn execute(&mut self, command: &str, format: ResponseFormat) -> anyhow::Result<CommandOutput> {
+        match self.execute_once(command, format).await {
+            Err(status) if connection_lost(&status) => {
+                self.reconnect().await?;
+                Ok(self.execute_once(command, format).await?)
+            }
+            other => Ok(other?),
+        }
+    }
+
+    async fn execute_once(&mut self, command: &str, format: ResponseFormat) -> Result<CommandOutput, tonic::Status> {
         let mut req = tonic::Request::new(CommandRequest {
             command_name: command.to_string(),
             response_format: format as i32,
@@ -113,6 +147,16 @@ impl GrpcSession {
     /// return the encoded response (S-36: the MCP tools encode/decode with
     /// the descriptors of `onesimus_proto_rs::typed`).
     pub async fn call_typed(&mut self, rpc: &str, request: Vec<u8>) -> Result<Vec<u8>, tonic::Status> {
+        match self.call_typed_once(rpc, request.clone()).await {
+            Err(status) if connection_lost(&status) => {
+                self.reconnect().await.map_err(|e| tonic::Status::unavailable(format!("reconnect failed: {e}")))?;
+                self.call_typed_once(rpc, request).await
+            }
+            other => other,
+        }
+    }
+
+    async fn call_typed_once(&mut self, rpc: &str, request: Vec<u8>) -> Result<Vec<u8>, tonic::Status> {
         let mut grpc = tonic::client::Grpc::new(self.channel.clone());
         grpc.ready().await.map_err(|e| tonic::Status::unavailable(format!("gRPC channel not ready: {e}")))?;
         let path = format!("/{}/{rpc}", onesimus_proto_rs::typed::DIRECTOR_API_SERVICE);
@@ -122,6 +166,13 @@ impl GrpcSession {
         req.metadata_mut().insert(SESSION_HEADER, self.token.clone());
         Ok(grpc.unary(req, path, RawCodec).await?.into_inner())
     }
+}
+
+/// The connection or the login is gone (Director restart, network): worth one
+/// reconnect. Other statuses are answers of the Director and stay as they are.
+fn connection_lost(status: &tonic::Status) -> bool {
+    use tonic::Code::{Unauthenticated, Unavailable, Unknown};
+    matches!(status.code(), Unavailable | Unauthenticated | Unknown)
 }
 
 /// Passes the protobuf wire bytes through unchanged.
