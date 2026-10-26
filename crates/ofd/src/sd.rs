@@ -218,6 +218,11 @@ pub fn connect_storage(
     shared: &JobShared,
 ) -> Result<Connected, String> {
     let deadline = Instant::now() + timeout;
+    // A refused connection means nothing listens there (wrong address, e.g.
+    // localhost seen from the client): give up after a few tries instead of
+    // retrying until `timeout`.
+    const MAX_REFUSED: u32 = 3;
+    let mut refused = 0;
     let tcp = loop {
         let attempt = (addr, port).to_socket_addrs().map_err(|e| e.to_string()).and_then(|mut a| {
             let sa = a.next().ok_or_else(|| "no address".to_string())?;
@@ -226,6 +231,11 @@ pub fn connect_storage(
         match attempt {
             Ok(s) => break s,
             Err(e) => {
+                refused += u32::from(e.to_ascii_lowercase().contains("connection refused"));
+                if refused >= MAX_REFUSED {
+                    return Err(format!("Unable to connect to Storage daemon on {addr}:{port}. ERR={e} \
+                        (refused {refused} times; check the Storage Address as seen from this client, or set Client Passive = yes)"));
+                }
                 tracing::warn!("Could not connect to Storage daemon on {addr}:{port}. ERR={e} Retrying ...");
                 if Instant::now() + Duration::from_secs(10) > deadline || shared.canceled.load(Ordering::SeqCst) {
                     return Err(e);

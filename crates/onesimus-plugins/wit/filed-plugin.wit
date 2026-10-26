@@ -1,0 +1,18 @@
+package onesimus:filed-plugin@1.0.0;
+
+/// Component ABI for the protobuf service onesimus.filed.plugin.v1.
+/// Each byte list holds exactly the corresponding protobuf request/response.
+/// Method selection is typed by these exports, never by a guest-provided URL.
+/// No ambient WASI, filesystem, socket, process, environment or native imports.
+/// Cancel/shutdown interrupt the owning store out of band, not through a queued
+/// guest call. The shutdown hook is reserved for a later idle cleanup adapter;
+/// traps/cancellation always release the store without relying on guest code.
+world plugin {
+    export initialize: func(request: list<u8>) -> list<u8>;
+    export handle-event: func(request: list<u8>) -> list<u8>;
+    export next-file: func(request: list<u8>) -> list<u8>;
+    export read-file: func(request: list<u8>) -> list<u8>;
+    export write-file: func(request: list<u8>) -> list<u8>;
+    export close-file: func(request: list<u8>) -> list<u8>;
+    export shutdown: func(request: list<u8>) -> list<u8>;
+}

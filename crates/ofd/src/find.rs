@@ -448,7 +448,7 @@ mod tests {
 
     #[test]
     fn walks_like_find_one() {
-        let tmp = std::env::temp_dir().join(format!("bareos-filed-find-{}", std::process::id()));
+        let tmp = std::env::temp_dir().join(format!("ofd-find-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&tmp);
         std::fs::create_dir_all(tmp.join("d/sub")).unwrap();
         std::fs::write(tmp.join("d/a.txt"), b"x").unwrap();

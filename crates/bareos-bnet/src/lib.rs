@@ -11,6 +11,7 @@
 //! 4. **Hello** — first message identifies connection type
 //! 5. **CRAM-MD5** — two-way authentication
 
+pub mod fd_grpc;
 pub mod debug;
 pub mod wire;
 pub mod signal;

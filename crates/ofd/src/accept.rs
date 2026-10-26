@@ -121,11 +121,11 @@ fn handle_connection(stream: TcpStream, session_id: u64, config: Arc<FdConfig>) 
             return;
         }
     };
-    handle_session(bnet, session_id, &config, &tcp);
+    handle_session(bnet, session_id, &config, Some(&tcp), || {});
 }
 
 /// Authenticate the peer and run its session.
-fn handle_session(mut bnet: BnetStream<Box<dyn Rw>>, session_id: u64, config: &FdConfig, tcp: &TcpStream) {
+pub(crate) fn handle_session(mut bnet: BnetStream<Box<dyn Rw>>, session_id: u64, config: &FdConfig, tcp: Option<&TcpStream>, on_authenticated: impl FnOnce()) {
     let hello = match bnet.recv_str() {
         Ok(msg) => msg,
         Err(e) => {
@@ -135,8 +135,9 @@ fn handle_session(mut bnet: BnetStream<Box<dyn Rw>>, session_id: u64, config: &F
     };
 
     if hello.starts_with("Hello Storage") {
+        if tcp.is_none() { return; }
         // Passive client: the SD connects for a running job.
-        tcp.set_read_timeout(None).ok();
+        if let Some(tcp) = tcp { tcp.set_read_timeout(None).ok(); }
         sd::handle_stored_connection(bnet, &hello, &config.name);
         return;
     }
@@ -168,9 +169,10 @@ fn handle_session(mut bnet: BnetStream<Box<dyn Rw>>, session_id: u64, config: &F
         return;
     }
     // Jobs wait for the Director as long as it takes (mount requests ...).
-    tcp.set_read_timeout(None).ok();
+    if let Some(tcp) = tcp { tcp.set_read_timeout(None).ok(); }
     info!("session {session_id}: director '{dir_name}' authenticated");
 
+    on_authenticated();
     Session::new(config, director, session_id).run(&mut bnet);
     info!("session {session_id} ({dir_name}) ended");
 }

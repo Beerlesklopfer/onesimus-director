@@ -595,7 +595,7 @@ mod tests {
 
     #[test]
     fn restores_files_dirs_links_sparse_and_gzip() {
-        let tmp = std::env::temp_dir().join(format!("bareos-filed-restore-test-{}", std::process::id()));
+        let tmp = std::env::temp_dir().join(format!("ofd-restore-test-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&tmp);
         std::fs::create_dir_all(&tmp).unwrap();
         let mut r = Rec(Vec::new());
@@ -700,7 +700,7 @@ mod tests {
 
     #[test]
     fn win32_decomposition() {
-        let tmp = std::env::temp_dir().join(format!("bareos-filed-w32-{}", std::process::id()));
+        let tmp = std::env::temp_dir().join(format!("ofd-w32-{}", std::process::id()));
         let mut s = Vec::new();
         // a security stream (id 3) with a name, then BACKUP_DATA
         for (id, name, content) in [(3u32, &b"n\0a\0"[..], &b"SEC"[..]), (1, b"", b"payload")] {

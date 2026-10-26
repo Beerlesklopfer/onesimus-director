@@ -1,0 +1,72 @@
+[package]
+name = "ofd"
+description = "Onesimus File Daemon — Rust rewrite of the Bareos File Daemon"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "ofd"
+path = "src/main.rs"
+
+[dependencies]
+onesimus-plugins = { path = "../onesimus-plugins" }
+tonic.workspace = true
+tokio.workspace = true
+onesimus-proto-rs.workspace = true
+tokio-stream = { version = "0.1", features = ["net"] }
+bareos-bnet.workspace = true
+bareos-config.workspace = true
+
+anyhow.workspace = true
+thiserror.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+crossbeam-channel.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+nix.workspace = true
+rustls.workspace = true
+libc.workspace = true
+ctrlc.workspace = true
+daemonize.workspace = true
+clap.workspace = true
+chrono = "0.4"
+walkdir = "2"
+flate2 = "1"
+md5 = { package = "md-5", version = "0.10" }
+sha1 = "0.10"
+sha2.workspace = true
+twox-hash = { version = "2", default-features = false, features = ["xxhash3_128", "std"] }
+
+[dev-dependencies]
+rcgen.workspace = true
+openssl.workspace = true
+wat = "1"
+prost.workspace = true
+
+[package.metadata.deb]
+name = "ofd"
+maintainer = "Joerg Bernau <joerg@bernau.family>"
+copyright = "2026, Joerg Bernau"
+license-file = ["../../packaging/copyright", "0"]
+extended-description = """\
+File Daemon written in Rust, speaks the Bareos protocol (BNET) and
+the Onesimus gRPC protocol.
+Reads /etc/bareos/bareos-fd.d/ config tree (Bareos-compatible).
+.
+Binary: /usr/sbin/ofd
+Service: ofd.service (alias bareos-fd.service)"""
+section = "admin"
+priority = "optional"
+depends = "$auto, bareos-common"
+conflicts = "bareos-filedaemon"
+replaces = "bareos-filedaemon"
+provides = "bareos-filedaemon"
+maintainer-scripts = "../../packaging/ofd"
+systemd-units = { unit-name = "ofd", unit-scripts = "../../packaging/ofd", enable = false, start = false }
+assets = [
+    ["target/release/ofd", "usr/sbin/ofd", "755"],
+    ["../../config/bareos-fd.d/**/*.conf", "usr/share/bareos/defaultconfigs/bareos-fd.d/", "644"],
+]

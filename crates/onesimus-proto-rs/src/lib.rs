@@ -1,6 +1,14 @@
 // Generated protobuf/gRPC types for the Onesimus Director service (onesimus-proto).
 
 pub mod onesimus {
+    pub mod filed {
+        tonic::include_proto!("onesimus.filed");
+        pub mod plugin {
+            pub mod v1 {
+                tonic::include_proto!("onesimus.filed.plugin.v1");
+            }
+        }
+    }
     pub mod director {
         tonic::include_proto!("onesimus.director");
 

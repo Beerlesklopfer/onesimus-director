@@ -369,7 +369,7 @@ impl<'a> Session<'a> {
             }
             Err(e) => {
                 debug!("Failed to connect to Storage daemon: {addr}:{port}: {e}");
-                self.msgs.jmsg(M_FATAL, &format!("Failed to connect to Storage daemon: {addr}:{port}\n"));
+                self.msgs.jmsg(M_FATAL, &format!("Failed to connect to Storage daemon: {addr}:{port}: {e}\n"));
                 self.reply(dir, "2902 Bad storage\n");
                 false
             }
@@ -589,7 +589,7 @@ fn next_msg(sd: &mut SdStream) -> Option<String> {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use bareos_bnet::CramMd5Auth;
     use std::net::{TcpListener, TcpStream};
@@ -604,7 +604,7 @@ mod tests {
     }
 
     /// A Storage daemon serving one read session with one small file.
-    fn fake_sd(listener: TcpListener, key: &'static str) -> std::thread::JoinHandle<Vec<String>> {
+    pub(crate) fn fake_sd(listener: TcpListener, key: &'static str) -> std::thread::JoinHandle<Vec<String>> {
         std::thread::spawn(move || {
             let (s, _) = listener.accept().unwrap();
             let mut sd = BnetStream::new(s);
@@ -630,7 +630,7 @@ mod tests {
 
     #[test]
     fn restore_session_with_simulated_director_and_sd() {
-        let tmp = std::env::temp_dir().join(format!("bareos-filed-session-{}", std::process::id()));
+        let tmp = std::env::temp_dir().join(format!("ofd-session-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&tmp);
         let sd_listener = TcpListener::bind("127.0.0.1:0").unwrap();
         let sd_port = sd_listener.local_addr().unwrap().port();
@@ -669,7 +669,7 @@ mod tests {
             }
         }
         assert!(texts.iter().any(|t| t == "2000 OK restore\n"), "{texts:?}");
-        // Director ends the job (onesimus-dird sends EOD, the original "endrestore")
+        // Director ends the job (odir sends EOD, the original "endrestore")
         dir.send_str("endrestore").unwrap();
         let end = loop {
             let r = recv_text(&mut dir);

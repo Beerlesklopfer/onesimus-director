@@ -1,0 +1,23 @@
+[package]
+name = "onesimus-plugins"
+description = "Signed plugin verification, instance workers and container discovery for Onesimus"
+version.workspace = true
+edition.workspace = true
+rust-version = "1.96"
+authors.workspace = true
+license.workspace = true
+
+[dependencies]
+serde.workspace = true
+serde_json.workspace = true
+openssl.workspace = true
+sha2.workspace = true
+hex.workspace = true
+x509-parser = "0.18"
+thiserror.workspace = true
+prost.workspace = true
+onesimus-proto-rs.workspace = true
+wasmtime = { version = "=49.0.3", default-features = false, features = ["std", "runtime", "cranelift", "component-model"] }
+
+[dev-dependencies]
+wat = "1"

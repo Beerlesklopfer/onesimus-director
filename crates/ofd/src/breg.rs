@@ -1,6 +1,6 @@
 //! lib/breg.cc: the `!from!to!opts` file name manipulation of restores
 //! (`restore ... regexwhere=`) with POSIX regcomp/regexec like the C
-//! original. Same code as onesimus-dird/src/breg.rs, on bytes (file names
+//! original. Same code as odir/src/breg.rs, on bytes (file names
 //! need not be UTF-8).
 
 use std::ffi::CString;

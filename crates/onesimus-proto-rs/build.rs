@@ -10,6 +10,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 &format!("{proto_dir}/director_service.proto"),
                 &format!("{proto_dir}/director_commands.proto"),
                 &format!("{proto_dir}/plugin_ccc.proto"),
+                &format!("{proto_dir}/filed_service.proto"),
+                &format!("{proto_dir}/filed_plugin.proto"),
             ],
             &[proto_dir],
         )?;
@@ -24,6 +26,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         // Descriptors (with imports) for the typed API codec (typed.rs)
         .file_descriptor_set_path(out_dir.join("onesimus_descriptor.bin"))
         .compile_protos(&[format!("{proto_dir}/director_api.proto")], &[proto_dir])?;
+
+    println!("cargo:rerun-if-changed={proto_dir}/filed_service.proto");
+    println!("cargo:rerun-if-changed={proto_dir}/filed_plugin.proto");
 
     // Rebuild if protos change
     println!("cargo:rerun-if-changed={proto_dir}/director_service.proto");

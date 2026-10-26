@@ -273,7 +273,7 @@ mod tests {
 
     #[test]
     fn hard_eof_on_disconnect() {
-        let (mut a, mut b) = make_pair();
+        let (a, mut b) = make_pair();
         drop(a); // Close sender
         match b.recv() {
             Err(BnetError::HardEof) => {} // expected

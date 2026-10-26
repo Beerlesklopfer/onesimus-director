@@ -192,6 +192,7 @@ impl CramMd5Auth {
 }
 
 /// Compute HMAC-MD5 and return Base64-encoded result (standard encoding).
+#[cfg(test)]
 fn compute_hmac_md5_base64(challenge: &[u8], password: &[u8]) -> String {
     let mut mac = HmacMd5::new_from_slice(password)
         .expect("HMAC accepts any key length");
@@ -229,7 +230,7 @@ pub fn bareos_bin_to_base64(bin: &[u8], compatible: bool) -> String {
             } else {
                 // C++: reg |= (int8_t)bin[i];
                 // int8_t sign-extends negative values, wrapping in u32
-                reg |= (bin[i] as i8 as i32 as u32);
+                reg |= bin[i] as i8 as i32 as u32;
             }
             i += 1;
             rem += 8;
@@ -449,7 +450,7 @@ mod tests {
         });
 
         let client_auth = CramMd5Auth::new("wrong_pass", "client-fd", 0);
-        let client_result = client_auth
+        let _client_result = client_auth
             .two_way_authenticate(&mut client_stream, false)
             .unwrap();
 
