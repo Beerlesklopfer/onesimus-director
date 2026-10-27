@@ -75,7 +75,7 @@ Reads /etc/bareos/bareos-dir.d/ config tree (Bareos-compatible).
 Binary: /usr/sbin/odir"""
 section = "admin"
 priority = "optional"
-depends = "$auto, bareos-common"
+depends = "$auto"
 breaks = "onesimusd (<< 0.25.0-3~), onesimus-dird"
 replaces = "onesimusd (<< 0.25.0-3~), onesimus-dird"
 maintainer-scripts = "../../packaging/odir"

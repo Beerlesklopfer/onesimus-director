@@ -60,7 +60,7 @@ Binary: /usr/sbin/ofd
 Service: ofd.service (alias bareos-fd.service)"""
 section = "admin"
 priority = "optional"
-depends = "$auto, bareos-common"
+depends = "$auto"
 conflicts = "bareos-filedaemon"
 replaces = "bareos-filedaemon"
 provides = "bareos-filedaemon"
