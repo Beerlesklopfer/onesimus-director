@@ -4,19 +4,19 @@
 //! - parser errors (scan_err, M_CONFIG_ERROR): "bareos-dir: CONFIG ERROR at
 //!   <src>" with the file position, exit 42;
 //! - CheckResources()/CheckCatalog() failures: their messages, then
-//!   M_ERROR_TERM "bareos-dir ERROR TERMINATION" / "Please correct the
+//!   M_ERROR_TERM "odir ERROR TERMINATION" / "Please correct the
 //!   configuration in <base>", exit 1;
 //! - success: no output, exit 0.
 //!
 //! Before InitDaemonMsg() every message goes to stdout; `my_name` is still
-//! "bareos-dir". Compatibility log C-057, S-29.
+//! "odir". Compatibility log C-057, S-29.
 
 use crate::config_check::{Anchor, ConfigError, Diag};
 use crate::director_config::DirectorConfig;
 use bareos_config::raw::{normalize_key, ConfResource};
 
 /// my_name before the Director resource names the daemon.
-const MY_NAME: &str = "bareos-dir";
+const MY_NAME: &str = "odir";
 /// BEXIT_CONFIG_ERROR
 const EXIT_CONFIG_ERROR: i32 = 42;
 
@@ -301,7 +301,7 @@ mod tests {
     #[test]
     fn unknown_keyword_is_a_config_error_with_position() {
         let dir = config_dir("keyword", &JOB.replace("  Type = Backup\n", "  Base = a\n  Type = Backup\n"));
-        assert_eq!(run_with(&dir, std::time::Duration::ZERO), (format!("bareos-dir: CONFIG ERROR at lib/parse_conf_state_machine.cc:162\n\
+        assert_eq!(run_with(&dir, std::time::Duration::ZERO), (format!("odir: CONFIG ERROR at lib/parse_conf_state_machine.cc:162\n\
             Config error: Keyword \"Base\" not permitted in this resource.\n\
             Perhaps you left the trailing brace off of the previous resource.\n            : line 4, col 7 of file {}\n\
             \x20 Base = a\n\n", file(&dir)), 42));
@@ -310,7 +310,7 @@ mod tests {
     #[test]
     fn unknown_reference_names_the_line() {
         let dir = config_dir("reference", &JOB.replace("Pool = Full", "Pool = NoSuchPool"));
-        assert_eq!(run_with(&dir, std::time::Duration::ZERO), (format!("bareos-dir: CONFIG ERROR at lib/res.cc:626\n\
+        assert_eq!(run_with(&dir, std::time::Duration::ZERO), (format!("odir: CONFIG ERROR at lib/res.cc:626\n\
             Config error: Could not find config resource \"NoSuchPool\" referenced on line 8:   Pool = NoSuchPool\n\n\
             \x20           : line 8, col 20 of file {}\n  Pool = NoSuchPool\n\n", file(&dir)), 42));
     }
@@ -320,8 +320,8 @@ mod tests {
         let dir = config_dir("duplicate", &format!("{JOB}{JOB}"));
         let (out, code) = run_with(&dir, std::time::Duration::ZERO);
         assert_eq!(code, 42);
-        assert!(out.ends_with(&format!(" bareos-dir: ERROR in lib/parse_conf.cc:276 Attempt to define second Job resource \
-            named \"a\" is not permitted.\nbareos-dir: CONFIG ERROR at lib/parse_conf_state_machine.cc:184\n\
+        assert!(out.ends_with(&format!(" odir: ERROR in lib/parse_conf.cc:276 Attempt to define second Job resource \
+            named \"a\" is not permitted.\nodir: CONFIG ERROR at lib/parse_conf_state_machine.cc:184\n\
             Config error: SaveResource failed\n            : line 20, col 1 of file {}\n}}\n\n", file(&dir))), "{out}");
     }
 
@@ -330,8 +330,8 @@ mod tests {
         let dir = config_dir("required", &JOB.replace("  FileSet = \"fs\"\n", ""));
         let (out, code) = run_with(&dir, std::time::Duration::ZERO);
         assert_eq!(code, 1);
-        assert!(out.ends_with(&format!(" bareos-dir JobId 0: Error: \"fileset\" directive in Job \"a\" resource is required, \
-            but not found.\nbareos-dir ERROR TERMINATION\nPlease correct the configuration in {}/bareos-dir.d/*/*.conf\n",
+        assert!(out.ends_with(&format!(" odir JobId 0: Error: \"fileset\" directive in Job \"a\" resource is required, \
+            but not found.\nodir ERROR TERMINATION\nPlease correct the configuration in {}/bareos-dir.d/*/*.conf\n",
             dir.display())), "{out}");
     }
 
@@ -340,9 +340,9 @@ mod tests {
         let dir = config_dir("catalog", JOB);
         let (out, code) = run_with(&dir, std::time::Duration::ZERO);
         assert_eq!(code, 1);
-        assert!(out.starts_with("bareos-dir: dird/check_catalog.cc:72-0 Could not open Catalog \"MyCatalog\", \
+        assert!(out.starts_with("odir: dird/check_catalog.cc:72-0 Could not open Catalog \"MyCatalog\", \
             database \"onesimus_config_test_nosuchdb\": "), "{out}");
-        assert!(out.ends_with("bareos-dir ERROR TERMINATION\nPlease correct the configuration in ")
-            || out.contains(")\n\nbareos-dir ERROR TERMINATION\n"), "{out}");
+        assert!(out.ends_with("odir ERROR TERMINATION\nPlease correct the configuration in ")
+            || out.contains(")\n\nodir ERROR TERMINATION\n"), "{out}");
     }
 }
