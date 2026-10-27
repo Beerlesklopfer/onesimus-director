@@ -176,7 +176,11 @@ impl<'a> Finder<'a> {
                 }
             }
             if !incexe.plugins.is_empty() {
-                h.jmsg(crate::jmsg::M_FATAL, format!("Plugin: \"{}\" not found.\n", crate::secrets::mask_plugin_secrets(&incexe.plugins[0])));
+                // One message per plugin, so a second missing plugin is not
+                // found out only after the first one is fixed.
+                for plugin in &incexe.plugins {
+                    h.jmsg(crate::jmsg::M_FATAL, format!("Plugin: \"{}\" not found.\n", crate::secrets::mask_plugin_secrets(plugin)));
+                }
                 return 0;
             }
         }
@@ -444,6 +448,30 @@ mod tests {
             1
         }
         fn jmsg(&mut self, _t: i32, _text: String) {}
+    }
+
+    struct Messages(Vec<(i32, String)>);
+    impl Handler for Messages {
+        fn handle(&mut self, _ff: &mut FfPkt, _l: &mut HashMap<(u64, u64), CurLink>, _top: bool) -> i32 {
+            1
+        }
+        fn jmsg(&mut self, t: i32, text: String) {
+            self.0.push((t, text));
+        }
+    }
+
+    #[test]
+    fn every_missing_plugin_of_an_include_is_reported() {
+        let mut fs = FileSet::default();
+        for l in ["I", "N", "P python:module_name=a:password=not-a-real-secret", "P other:module_name=b", "N"] {
+            fs.add(l, &mut |m| panic!("{m}"), &|s| s.to_string());
+        }
+        let mut m = Messages(Vec::new());
+        assert_eq!(Finder::new(&fs).find_files(&mut FfPkt::default(), &mut m), 0);
+        assert_eq!(m.0, vec![
+            (crate::jmsg::M_FATAL, "Plugin: \"python:module_name=a:password=*****\" not found.\n".to_string()),
+            (crate::jmsg::M_FATAL, "Plugin: \"other:module_name=b\" not found.\n".to_string()),
+        ]);
     }
 
     #[test]
