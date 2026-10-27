@@ -176,7 +176,7 @@ impl<'a> Finder<'a> {
                 }
             }
             if !incexe.plugins.is_empty() {
-                h.jmsg(crate::jmsg::M_FATAL, format!("Plugin: \"{}\" not found.\n", incexe.plugins[0]));
+                h.jmsg(crate::jmsg::M_FATAL, format!("Plugin: \"{}\" not found.\n", crate::secrets::mask_plugin_secrets(&incexe.plugins[0])));
                 return 0;
             }
         }

@@ -29,6 +29,7 @@ mod job;
 mod restore;
 mod runscript;
 mod scan;
+mod secrets;
 mod sd;
 mod status;
 mod streams;

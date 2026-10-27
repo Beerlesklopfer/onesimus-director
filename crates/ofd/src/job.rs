@@ -169,7 +169,7 @@ impl<'a> Session<'a> {
                 // dir->recv() < 0: signal or connection terminated
                 Ok(BnetMessage::Signal(_)) | Err(_) => break,
             };
-            debug!("session {}: <dird: {}", self.session_id, cmd.trim_end());
+            debug!("session {}: <dird: {}", self.session_id, crate::secrets::mask_plugin_secrets(cmd.trim_end()));
             let Some((handler, monitor_access)) = Self::select::<S>(&cmd) else {
                 debug!("Command \"{}\" not found.", cmd.trim_end());
                 self.reply(dir, "2999 Invalid command\n");
