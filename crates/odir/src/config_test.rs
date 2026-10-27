@@ -298,6 +298,28 @@ mod tests {
         assert!(deprecated_notes(&DirectorConfig::load(&dir).unwrap().raw).is_empty());
     }
 
+    /// The directives `bareos-dir --xs` (25.1.2) marks "deprecated": true.
+    #[test]
+    fn deprecated_directives_match_the_original_schema() {
+        let expected = [
+            ("Director", "StatisticsRetention"), ("Director", "StatisticsCollectInterval"),
+            ("Client", "FileRetention"), ("Client", "JobRetention"), ("Client", "AutoPrune"),
+            ("JobDefs", "WriteVerifyList"), ("JobDefs", "AllowHigherDuplicates"),
+            ("Job", "WriteVerifyList"), ("Job", "AllowHigherDuplicates"),
+            ("Storage", "CollectStatistics"),
+            ("Catalog", "MultipleConnections"), ("Catalog", "DisableBatchInsert"),
+            ("Pool", "LabelType"), ("Pool", "FileRetention"), ("Pool", "JobRetention"),
+        ];
+        let mut found = Vec::new();
+        for rtype in ["Director", "Client", "JobDefs", "Job", "Storage", "Catalog", "Schedule", "FileSet",
+                      "Pool", "Messages", "Counter", "Profile", "Console", "User"] {
+            for item in crate::config_check::items_of(rtype).unwrap().iter().filter(|i| i.deprecated) {
+                found.push((rtype, item.name));
+            }
+        }
+        assert_eq!(found, expected);
+    }
+
     #[test]
     fn unknown_keyword_is_a_config_error_with_position() {
         let dir = config_dir("keyword", &JOB.replace("  Type = Backup\n", "  Base = a\n  Type = Backup\n"));
