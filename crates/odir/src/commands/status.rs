@@ -456,9 +456,11 @@ fn list_running_jobs(ua: &mut Ua, ctx: &ExecContext) {
         ua.send(&format!("{}\n", "=".repeat(70)));
     }
     let cfg = ctx.config.as_ref().and_then(|c| c.read().ok().map(|c| c.clone()));
+    let progress = running_progress(cfg.as_ref(), &jobs);
     let mut rows = Vec::new();
     for job in jobs.iter().filter(|j| acl::access(ctx, Kind::Job, &j.name)) {
         let msg = running_job_status(job);
+        let live = progress.get(&job.id);
         let res = cfg.as_ref().and_then(|c| c.jobs.iter().find(|j| j.name == job.name).cloned());
         let level = match res.as_ref().map(|r| r.job_type) {
             Some(JobType::Admin | JobType::Archive | JobType::Restore) => "      ".to_string(),
@@ -469,10 +471,27 @@ fn list_running_jobs(ua: &mut Ua, ctx: &ExecContext) {
             ApiMode::Json => {
                 let job_type = res.as_ref().map_or("Backup", |r| job_type_str(r.job_type));
                 rows.push(json!({ "jobid": job.id, "name": unique, "level": level, "type": job_type,
-                                  "status": msg, "files": 0, "bytes": 0 }));
+                                  "status": msg, "files": live.map_or(0, |p| p.files), "bytes": live.map_or(0, |p| p.bytes),
+                                  "bytes_per_sec": live.map_or(0, |p| p.bytes_per_sec),
+                                  "files_examined": live.map_or(0, |p| p.files_examined),
+                                  "errors": live.map_or(0, |p| p.errors),
+                                  "current_file": live.map_or("", |p| p.current_file.as_str()),
+                                  "last_progress": live.map_or("", |p| p.last_update.as_str()) }));
             }
             ApiMode::Api => ua.send(&format!("{:6}\t{level:<6}\t{unique:<20}\t{msg}\t\n", job.id)),
-            ApiMode::Human => ua.send(&format!("{:6} {level:<6}  {unique:<20} {msg}\n", job.id)),
+            ApiMode::Human => {
+                ua.send(&format!("{:6} {level:<6}  {unique:<20} {msg}\n", job.id));
+                if let Some(p) = live {
+                    ua.send(&format!("       Files={} Bytes={} Bytes/sec={} Errors={}\n",
+                        with_commas(p.files), with_commas(p.bytes), with_commas(p.bytes_per_sec), p.errors));
+                    if !p.current_file.is_empty() {
+                        ua.send(&format!("       Processing file: {}\n", p.current_file));
+                    }
+                    if !p.last_update.is_empty() {
+                        ua.send(&format!("       Last progress update: {}\n", p.last_update));
+                    }
+                }
+            }
         }
     }
     match ua.api {
@@ -480,6 +499,39 @@ fn list_running_jobs(ua: &mut Ua, ctx: &ExecContext) {
         ApiMode::Human => ua.send("====\n"),
         ApiMode::Api => {}
     }
+}
+
+/// 1234567 -> "1,234,567".
+fn with_commas(n: u64) -> String {
+    let digits = n.to_string();
+    let mut out = String::new();
+    for (i, c) in digits.chars().enumerate() {
+        if i > 0 && (digits.len() - i) % 3 == 0 {
+            out.push(',');
+        }
+        out.push(c);
+    }
+    out
+}
+
+/// Files and bytes of the running jobs that move data, from the status of
+/// their File daemons (one query per client, in parallel; issue #6).
+fn running_progress(cfg: Option<&DirectorConfig>, jobs: &[crate::job_manager::ActiveJob])
+    -> std::collections::HashMap<u32, crate::fd_progress::FdProgress> {
+    let Some(cfg) = cfg else { return Default::default() };
+    let mut clients: Vec<&str> = jobs.iter().filter(|j| j.status == 'R' && j.fd_connected && !j.client.is_empty())
+        .map(|j| j.client.as_str()).collect();
+    clients.sort_unstable();
+    clients.dedup();
+    let mut all = std::collections::HashMap::new();
+    std::thread::scope(|scope| {
+        let queries: Vec<_> = clients.iter().filter_map(|name| cfg.clients.iter().find(|c| c.name == *name))
+            .map(|client| scope.spawn(|| crate::fd_progress::query(client, &cfg.director.name))).collect();
+        for q in queries {
+            all.extend(q.join().unwrap_or_default());
+        }
+    });
+    all
 }
 
 /// ListRunningJobs(): the status text of a job from its JobStatus and the

@@ -1011,7 +1011,7 @@ name: 'x\nrun job=backup-bareos-fd yes' is not a valid name (letters, digits and
 
 ### status_director
 
-**Director-Status** – Director-Befehl `status director` ([Befehlsseite](commands/status.md)). Kopfzeile, geplante, laufende und beendete Jobs und Client-Verbindungen.
+**Director-Status** – Director-Befehl `status director` ([Befehlsseite](commands/status.md)). Kopfzeile, geplante, laufende und beendete Jobs und Client-Verbindungen. Bei laufenden Jobs fragt der Director den `status` des File Daemons (`ofd`) und ergänzt die Zähler: in JSON `files`, `bytes`, `bytes_per_sec`, `files_examined`, `errors`, `current_file` und `last_progress` (Zeitpunkt der letzten Fortschrittsmeldung, daran erkennt ein Aufrufer einen stehenden Job); als Text je eine Zeile `Files=… Bytes=… Bytes/sec=… Errors=…`, `Processing file:` und `Last progress update:`. Ohne erreichbaren oder ohne `ofd`-FD bleiben die Zähler 0. Das Protokoll des laufenden Jobs steht schon während des Laufs im Katalog: `list_joblog` mit `jobid` (und `limit`/`offset`) liefert die bisherigen Zeilen, ein Aufrufer fragt es wiederholt ab.
 
 | Parameter | Typ | Bedeutung |
 |---|---|---|

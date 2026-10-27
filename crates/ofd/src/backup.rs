@@ -113,9 +113,21 @@ pub struct SdSender<'a, S: Read + Write> {
     /// CancelCmd() marks the socket terminated: sends fail, without a
     /// message (IsJobCanceled()).
     pub canceled: &'a AtomicBool,
+    /// `status` shows these numbers while the job runs.
+    pub progress: Option<&'a crate::sd::Progress>,
 }
 
 impl<S: Read + Write> SdSender<'_, S> {
+    /// Publishes the counters (and the file being saved) for `status`.
+    fn publish(&self, file: Option<&str>) {
+        if let Some(p) = self.progress {
+            let c = &*self.counters;
+            p.update(c.job_files, c.job_bytes, c.num_files_examined, self.msgs.job_errors);
+            if let Some(f) = file {
+                p.set_file(f);
+            }
+        }
+    }
     fn is_canceled(&self) -> bool {
         self.canceled.load(Ordering::Relaxed) || self.msgs.is_canceled()
     }
@@ -325,6 +337,7 @@ impl<S: Read + Write> Backup<'_, '_, S> {
         self.sd.counters.num_files_examined += 1;
         let fname = String::from_utf8_lossy(&ff.fname).into_owned();
         let top = String::from_utf8_lossy(&ff.top_fname).into_owned();
+        self.sd.publish(Some(&fname));
         let errno_text = |e: i32| crate::berrno::BErr(e).to_string();
         let mut has_file_data = false;
         match ff.type_ {
@@ -601,6 +614,7 @@ impl<S: Read + Write> Backup<'_, '_, S> {
             if !self.send_block(ff, header, data) {
                 return false;
             }
+            self.sd.publish(None);
         }
         if pipelined {
             self.sd.counters.read_bytes += bytes_read;

@@ -27,6 +27,7 @@ mod expand;
 mod director_config;
 mod fd_protocol;
 mod fd_grpc;
+mod fd_progress;
 mod fsm;
 mod grpc;
 mod internal_jobs;

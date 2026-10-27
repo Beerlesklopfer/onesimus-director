@@ -31,6 +31,61 @@ pub struct JobShared {
     pub sd_socket: Mutex<Option<TcpStream>>,
     /// Bandwidth limit of the SD connection (setbandwidth Job=).
     pub bw: Arc<BwState>,
+    /// What `status` reports about the running job.
+    pub progress: Progress,
+}
+
+/// Live counters of a running job (the jcr counters `status` prints under
+/// "Running Jobs:"), published by the backup while it runs.
+#[derive(Default)]
+pub struct Progress {
+    pub job_id: AtomicU64,
+    pub files: AtomicU64,
+    pub bytes: AtomicU64,
+    pub files_examined: AtomicU64,
+    pub errors: AtomicU64,
+    /// Unix seconds; 0 until the data transfer starts.
+    pub started: AtomicU64,
+    pub last_update: AtomicU64,
+    /// "Full Backup", "Incremental Backup", ...
+    pub kind: Mutex<String>,
+    pub current_file: Mutex<String>,
+}
+
+fn unix_now() -> u64 {
+    std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0)
+}
+
+impl Progress {
+    /// The data transfer of `kind` (e.g. "Full Backup") of `job_id` starts.
+    pub fn start(&self, job_id: u32, kind: &str) {
+        self.job_id.store(u64::from(job_id), Ordering::Relaxed);
+        *self.kind.lock().unwrap_or_else(|e| e.into_inner()) = kind.to_string();
+        self.started.store(unix_now(), Ordering::Relaxed);
+        self.last_update.store(unix_now(), Ordering::Relaxed);
+    }
+
+    pub fn update(&self, files: u32, bytes: u64, examined: u32, errors: u32) {
+        self.files.store(u64::from(files), Ordering::Relaxed);
+        self.bytes.store(bytes, Ordering::Relaxed);
+        self.files_examined.store(u64::from(examined), Ordering::Relaxed);
+        self.errors.store(u64::from(errors), Ordering::Relaxed);
+        self.last_update.store(unix_now(), Ordering::Relaxed);
+    }
+
+    pub fn set_file(&self, name: &str) {
+        let mut cur = self.current_file.lock().unwrap_or_else(|e| e.into_inner());
+        cur.clear();
+        cur.push_str(name);
+    }
+}
+
+/// The jobs whose data transfer is running, by JobId.
+pub fn running() -> Vec<Arc<JobShared>> {
+    let mut v: Vec<_> = JOBS.lock().unwrap_or_else(|e| e.into_inner()).values()
+        .filter(|j| j.progress.started.load(Ordering::Relaxed) != 0).cloned().collect();
+    v.sort_by_key(|j| j.progress.job_id.load(Ordering::Relaxed));
+    v
 }
 
 /// BareosSocket bwlimit state (SetBwlimit, ControlBwlimit).
@@ -136,6 +191,7 @@ pub fn register(job: &str, sd_auth_key: &str) -> Arc<JobShared> {
         canceled: AtomicBool::new(false),
         sd_socket: Mutex::new(None),
         bw: Arc::new(BwState::default()),
+        progress: Progress::default(),
     });
     JOBS.lock().unwrap_or_else(|e| e.into_inner()).insert(job.to_string(), shared.clone());
     shared

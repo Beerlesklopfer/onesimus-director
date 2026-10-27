@@ -495,9 +495,14 @@ impl Session<'_> {
         let accurate = self.accurate;
         let buf_size = self.config.buf_size();
         let workers = self.config.max_workers_per_job;
+        let shared = self.shared.clone();
+        if let Some(s) = &shared {
+            s.progress.start(self.msgs.job_id, &format!("{} Backup", level_str(self.level)));
+        }
         let mut flush = |m: &mut JobMsgs| m.flush(dir);
         let mut b = Backup {
-            sd: SdSender { sd, msgs: &mut self.msgs, counters: &mut self.counters, canceled },
+            sd: SdSender { sd, msgs: &mut self.msgs, counters: &mut self.counters, canceled,
+                           progress: shared.as_ref().map(|s| &s.progress) },
             env: JobEnv { canceled, accurate: if accurate { list.as_mut() } else { None }, level_full, rerunning, base_size: 0 },
             flush: &mut flush,
             buf_size,
