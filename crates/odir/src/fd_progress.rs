@@ -17,6 +17,8 @@ pub struct FdProgress {
     pub current_file: String,
     /// "26-Oct-26 21:25:01" as the FD prints it; empty when it does not say.
     pub last_update: String,
+    /// Seconds since the FD last published counters; `None` when it does not say.
+    pub seconds_since_progress: Option<u64>,
 }
 
 fn number(text: &str) -> u64 {
@@ -52,6 +54,8 @@ pub fn parse(status: &str) -> HashMap<u32, FdProgress> {
             p.files_examined = number(v);
         } else if let Some(v) = line.strip_prefix("Processing file: ") {
             p.current_file = v.to_string();
+        } else if let Some(v) = line.strip_prefix("Seconds since last progress: ") {
+            p.seconds_since_progress = Some(number(v));
         } else if let Some(v) = line.strip_prefix("Last progress update: ") {
             p.last_update = v.to_string();
         } else if line.is_empty() || line.starts_with("====") {
@@ -87,6 +91,7 @@ JobId 862 Job forgejo.2026-10-26_20.21.09_09 is running.\n\
     Files Examined=25,010\n\
     Processing file: /srv/forgejo/data/a b.bin\n\
     Last progress update: 26-Oct-26 20:25:01\n\
+    Seconds since last progress: 4\n\
 JobId 863 Job other.2026-10-26_20.21.10_10 is running.\n\
     Incremental Backup Job started: 26-Oct-26 20:21:10\n\
     Files=3 Bytes=40 Bytes/sec=1 Errors=0\n\
@@ -98,7 +103,8 @@ JobId 863 Job other.2026-10-26_20.21.10_10 is running.\n\
         assert_eq!(jobs.len(), 2);
         assert_eq!(jobs[&862], FdProgress {
             files: 24506, bytes: 4134111858, bytes_per_sec: 17000000, errors: 1, files_examined: 25010,
-            current_file: "/srv/forgejo/data/a b.bin".into(), last_update: "26-Oct-26 20:25:01".into() });
+            current_file: "/srv/forgejo/data/a b.bin".into(), last_update: "26-Oct-26 20:25:01".into(),
+            seconds_since_progress: Some(4) });
         assert_eq!((jobs[&863].files, jobs[&863].bytes), (3, 40));
     }
 

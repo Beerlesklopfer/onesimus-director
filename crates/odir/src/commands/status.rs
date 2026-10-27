@@ -476,7 +476,8 @@ fn list_running_jobs(ua: &mut Ua, ctx: &ExecContext) {
                                   "files_examined": live.map_or(0, |p| p.files_examined),
                                   "errors": live.map_or(0, |p| p.errors),
                                   "current_file": live.map_or("", |p| p.current_file.as_str()),
-                                  "last_progress": live.map_or("", |p| p.last_update.as_str()) }));
+                                  "last_progress": live.map_or("", |p| p.last_update.as_str()),
+                                  "seconds_since_progress": live.and_then(|p| p.seconds_since_progress) }));
             }
             ApiMode::Api => ua.send(&format!("{:6}\t{level:<6}\t{unique:<20}\t{msg}\t\n", job.id)),
             ApiMode::Human => {
@@ -487,8 +488,8 @@ fn list_running_jobs(ua: &mut Ua, ctx: &ExecContext) {
                     if !p.current_file.is_empty() {
                         ua.send(&format!("       Processing file: {}\n", p.current_file));
                     }
-                    if !p.last_update.is_empty() {
-                        ua.send(&format!("       Last progress update: {}\n", p.last_update));
+                    if let Some(age) = p.seconds_since_progress {
+                        ua.send(&format!("       Last progress update: {age} seconds ago\n"));
                     }
                 }
             }

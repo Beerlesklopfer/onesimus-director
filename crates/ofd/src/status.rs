@@ -78,7 +78,10 @@ fn running_jobs() -> String {
         if !file.is_empty() {
             out.push_str(&format!("    Processing file: {file}\n"));
         }
-        out.push_str(&format!("    Last progress update: {}\n", time(p.last_update.load(Relaxed))));
+        let updated = p.last_update.load(Relaxed);
+        out.push_str(&format!("    Last progress update: {}\n", time(updated)));
+        // The age does not depend on the time zones of the FD and the Director.
+        out.push_str(&format!("    Seconds since last progress: {}\n", now.saturating_sub(updated)));
     }
     out
 }
@@ -108,5 +111,6 @@ mod tests {
         assert!(text.contains("    Files=24,506 Bytes=4,134,111,858 Bytes/sec="), "{text}");
         assert!(text.contains(" Errors=2\n    Files Examined=25,000\n    Processing file: /srv/data/file.bin\n"), "{text}");
         assert!(text.contains("    Last progress update: "), "{text}");
+        assert!(text.contains("    Seconds since last progress: 0\n"), "{text}");
     }
 }
