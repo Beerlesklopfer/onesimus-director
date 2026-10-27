@@ -5,25 +5,23 @@
 use crate::config::FdConfig;
 
 /// Generate status output (same format as C++ FD).
-pub fn fd_status(_config: &FdConfig) -> String {
+pub fn fd_status(config: &FdConfig) -> String {
     let version = env!("CARGO_PKG_VERSION");
-    let hostname = nix::unistd::gethostname()
-        .ok()
-        .and_then(|h| h.into_string().ok())
-        .unwrap_or_else(|| "unknown".to_string());
     let now = chrono::Local::now();
 
     let mut output = String::new();
 
     // Header — same format as C++ FD
     output.push_str(&format!(
-        "{hostname}-fd Version: {version} ({}) {}\n",
+        "{} Version: {version} ({}) {}\n",
+        config.name,
         now.format("%d %B %Y"),
         std::env::consts::OS,
     ));
     output.push_str(&format!(
-        "Daemon started {}. Jobs: run=0 running=0, Bareos Rust binary\n",
+        "Daemon started {}. Jobs: run=0 running={}, Bareos Rust binary\n",
         now.format("%d-%b-%Y %H:%M"),
+        crate::sd::running().len(),
     ));
 
     // System info
