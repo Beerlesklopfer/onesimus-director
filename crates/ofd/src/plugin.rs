@@ -181,7 +181,7 @@ fn policy_ca_files(policy: &Path) -> Result<Vec<PathBuf>, PluginError> {
 
 /// `path` and every directory above it up to `top` (as written and after
 /// resolving links) are owned by `owner` and not writable by group or others.
-fn check_trusted(path: &Path, owner: u32, directory: bool, top: &Path) -> Result<(), PluginError> {
+pub(crate) fn check_trusted(path: &Path, owner: u32, directory: bool, top: &Path) -> Result<(), PluginError> {
     let untrusted = |p: &Path, reason: String| PluginError::Untrusted { path: p.to_path_buf(), reason };
     if !path.is_absolute() {
         return Err(untrusted(path, "path is not absolute".into()));

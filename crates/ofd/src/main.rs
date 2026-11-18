@@ -15,6 +15,7 @@ mod attribs;
 mod backup;
 mod berrno;
 mod breg;
+mod broker;
 mod compression;
 mod config;
 mod create_file;
