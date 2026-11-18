@@ -96,7 +96,50 @@ Signaturnachweis für genau sein Artefakt. Python und PyO3 gehören nicht zur ne
 Schnittstelle. Ein Original-Bareos-FD mit eigenen Python-Plugins bleibt als
 externer BNET-Client unabhängig davon nutzbar.
 
-Der bisherige ungenutzte Python-Plugin-Code des Projekts wird entfernt. Der
-Entwurf für Manifest, Trust Store und Host-Schnittstelle steht unter
-[Plugin-Architektur](plugin-architektur.md). Die Ausführung von Komponenten wird
-getrennt von der Transportumstellung umgesetzt.
+Manifest, Trust Store und Host-Schnittstelle stehen unter
+[Plugin-Architektur](plugin-architektur.md).
+
+### Einrichtung
+
+Jedes Plugin ist ein eigenes Debian-Paket und legt sein signiertes Bundle unter
+`/usr/lib/onesimus/plugins/<name>.pb` ab. Freigegeben wird es in der
+Client-Ressource:
+
+```
+Client {
+  Plugin Directory = /usr/lib/onesimus/plugins
+  Plugin Names = postgresql
+  Plugin Policy = /etc/onesimus/plugin-policy.json
+}
+```
+
+- `Plugin Names` ist eine Positivliste; ein installiertes, aber nicht genanntes
+  Plugin läuft nicht.
+- Ohne `Plugin Policy` läuft kein Plugin („Plugin … not found“ wie bisher).
+- Policy, Plugin-Verzeichnis und Bundle müssen root gehören und dürfen für
+  Gruppe und Andere nicht schreibbar sein, ebenso jedes Verzeichnis darüber.
+  Sonst verweigert `ofd` das Plugin.
+- Signatur, Policy und Widerruf werden bei jedem Job neu geprüft.
+
+### Im FileSet
+
+```
+Include {
+  Plugin = "postgresql:instance=main:databases=*"
+}
+```
+
+Die Dateien eines Plugins erscheinen im Katalog unter ihrem virtuellen Pfad
+(`/@postgresql/main/…`). Auf dem Volume steht die Plugin-Zeile mit maskierten
+Passwörtern. Eine Schätzung (`estimate`) führt keine Plugins aus.
+
+### Wiederherstellung
+
+- **In Dateien (Vorgabe):** Mit `Where` schreibt `ofd` die Dateien unter
+  `<Where>/@postgresql/…`, ohne Plugin-Code auszuführen. Das geht auch, wenn das
+  Plugin fehlt, gesperrt oder abgelaufen ist.
+- **Online:** Restore-Job mit Plugin Options `postgresql:restore_mode=online`
+  (und gegebenenfalls Zugangsdaten); die Dateien gehen an das Plugin. Passwörter
+  kommen nur aus dem Restore-Job, nie vom Volume.
+- Ohne `Where` und ohne Online-Modus bricht der Restore ab, statt unter `/` zu
+  schreiben.

@@ -16,12 +16,18 @@ muss diese Bytes verwenden, statt einen Dateipfad nach der Prüfung erneut zu
 
 Der [Protobuf-Vertrag](../../proto/filed_plugin.proto) beschreibt Lebenszyklus,
 Job-Ereignisse, Dateiaufzählung und blockweisen Backup-/Restore-Zugriff. Er ist
-in `onesimus-proto-rs` generiert. Die File-Daemon-Komponente führt derzeit noch
-keine WASM-Plugins aus. Der Worker-Kern mit begrenzten Queues, Instanzlimits,
-Job-/Device-Bindung, Deadline-Watchdog und direktem Abbruch ist implementiert und
-getestet. WASM-Runtime, konkrete Host-/Broker-Implementierung, Engine-Ressourcenlimits
-und Einbindung in die Job-Engine sind weitere Implementierungsschritte. Eine
-gültige Signatur allein aktiviert kein Plugin.
+in `onesimus-proto-rs` generiert. Seit Phase 1
+([Plan](../plans/PLUGIN-PHASE1.md)) führt `ofd` signierte Plugins in Jobs aus
+(`crates/ofd/src/plugin.rs`): je `Plugin =`-Zeile eine Instanz mit eigenem
+Wasmtime-Store, Fuel- und Speichergrenze, Abbruch über den Job. Sicherung über
+`NextFile`/`ReadFile` in den SD-Strom (Bareos-Format mit `STREAM_PLUGIN_NAME`),
+Wiederherstellung in Dateien ohne Plugin-Code oder online über
+`WriteFile`/`CloseFile`. `FileEntry` kennt virtuelle Dateien
+(`FILE_KIND_VIRTUAL`) und begrenzte Anzeige-Attribute. Ein Broker für Zugriffe
+des Gasts auf Dienste des Hosts fehlt noch; er kommt mit dem ersten
+produktiven Plugin ([PostgreSQL](../plans/POSTGRESQL-PLUGIN.md)). Eine gültige
+Signatur allein aktiviert kein Plugin: Es muss zusätzlich in `Plugin Names`
+stehen, und Policy und Bundle müssen root-eigen sein.
 
 ## X.509, Build-Signierung und Ladeprüfung
 

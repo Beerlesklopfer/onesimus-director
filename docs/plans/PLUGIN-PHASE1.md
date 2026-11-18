@@ -1,6 +1,6 @@
 # Planung: Phase 1 – Plugins in ofd ausführen
 
-Stand: 18.11.2026. Status: **Entwurf zur Freigabe.**
+Stand: 18.11.2026. Status: **Freigegeben (18.11.2026); Schritte 1 bis 5 und 7 umgesetzt, Schritt 6 offen.**
 
 Gemeinsame Voraussetzung für [PostgreSQL](POSTGRESQL-PLUGIN.md) (zuerst),
 [OpenLDAP](OPENLDAP-PLUGIN.md), [Docker](DOCKER-PLUGIN.md) und
@@ -68,6 +68,28 @@ Damit die Signatur nicht umgangen werden kann, gilt zusätzlich:
   wie `pg-dump-all.sh` sind unsigniert; sie bleiben nur bis zur Abnahme des
   jeweiligen Plugins und liegen in einem root-eigenen Verzeichnis aus
   `Allowed Script Dir`.
+
+## Verteilung: ein Debian-Paket je Plugin
+
+Entscheidung vom 18.11.2026: Jedes Plugin ist ein eigenes Debian-Paket
+(`onesimus-plugin-<name>`).
+
+- Das Paket installiert nur `/usr/lib/onesimus/plugins/<name>.pb`. dpkg legt es
+  als `root:root`, Modus `0644` an; das erfüllt die Rechteprüfung ohne Zutun.
+- **Das Paket gibt sich nicht selbst frei.** Es ändert weder `Plugin Names` noch
+  die Policy. Freigabe ist ein Schritt des Administrators (oder seiner
+  Konfigurationsverwaltung). Ein installiertes Paket allein führt keinen Code aus.
+- **Die Trust-Policy gehört nicht in ein Plugin-Paket.** Sie kommt aus einem
+  eigenen Paket (Vorschlag `onesimus-plugin-trust`, Conffile
+  `/etc/onesimus/plugin-policy.json` mit den CA-Zertifikaten) oder vom
+  Administrator. Sonst könnte jedes Paket seine eigene CA mitbringen.
+- `Depends: ofd (>= <Version mit Phase 1>)`; das Paket prüft im `postinst` das
+  Bundle mit `ofd --check-plugin` und meldet einen Fehler, bricht die
+  Installation aber nicht ab (die Policy kann später kommen).
+- Das Bundle ist bereits signiert, wenn es ins Paket kommt; der Paketbau
+  braucht keinen Signierschlüssel. Updates ersetzen die Datei atomar
+  (dpkg schreibt neu und benennt um); ein laufender Job behält die bereits
+  geprüften Bytes.
 
 ## Phase 0: Vertragserweiterung
 
