@@ -22,6 +22,11 @@ use crate::compression;
 use crate::create_file::{self, Cf, CreateState};
 use crate::jmsg::*;
 use crate::streams::*;
+use crate::plugin::{self, PluginError, PluginLine, Session};
+use onesimus_proto_rs::onesimus::filed::plugin::v1 as pb;
+
+/// Largest block an online-restore plugin receives per WriteFile.
+const ONLINE_CHUNK: u32 = 256 * 1024;
 
 /// What the `restore` command asked for.
 pub struct RestoreParams {
@@ -87,6 +92,12 @@ impl Win32Decomp {
 struct Rctx {
     /// The (masked) plugin line of the files between two plugin-name records.
     plugin: Option<String>,
+    /// The plugin name when the current plugin files restore online.
+    online: Option<String>,
+    /// Open online-restore sessions by plugin name, finished at the end.
+    sessions: std::collections::BTreeMap<String, Session>,
+    /// The file being written through its plugin.
+    online_file: Option<OnlineFile>,
     stream: i32,
     prev_stream: i32,
     size: u32,
@@ -159,6 +170,52 @@ pub struct Restore<'a> {
     pub counters: &'a mut Counters,
     pub create: &'a mut CreateState,
     pub canceled: &'a AtomicBool,
+    /// Plugin directives; None: plugin files restore only to files.
+    pub config: Option<&'a crate::config::FdConfig>,
+    /// "pluginoptions" lines of the job (restore_mode=online and its options).
+    pub plugin_options: &'a [String],
+}
+
+/// The file being restored through a plugin and the next write offset.
+struct OnlineFile {
+    plugin: String,
+    entry: pb::FileEntry,
+    offset: u64,
+}
+
+/// The plugin line of a "pluginoptions" entry that asks for an online
+/// restore of plugin `stored.name`, merged over the masked line from the
+/// backup: masked values are dropped, the restore options win.
+fn online_line(stored: &PluginLine, plugin_options: &[String]) -> Option<PluginLine> {
+    let wanted = plugin_options.iter().filter_map(|o| plugin::parse_line(o).ok()).find(|o| {
+        o.name == stored.name && o.options.get("restore_mode").map(String::as_str) == Some("online")
+    })?;
+    let mut merged = stored.clone();
+    merged.options.retain(|_, v| v != crate::secrets::MASK);
+    merged.options.extend(wanted.options);
+    Some(merged)
+}
+
+/// The FileEntry a plugin receives for a restored file.
+fn plugin_entry(attr: &Attributes) -> pb::FileEntry {
+    let kind = match attr.type_ {
+        FT_DIREND | FT_DIRBEGIN => pb::FileKind::Directory,
+        FT_LNK => pb::FileKind::Symlink,
+        _ => pb::FileKind::Virtual,
+    };
+    let mut path = attr.fname.clone();
+    if kind == pb::FileKind::Directory && path.len() > 1 && path.last() == Some(&b'/') {
+        path.pop();
+    }
+    pb::FileEntry {
+        path,
+        kind: kind as i32,
+        size: u64::try_from(attr.statp.size).unwrap_or(0),
+        modified_unix_nanos: attr.statp.mtime.saturating_mul(1_000_000_000),
+        mode: attr.statp.mode & 0o7777,
+        symlink_target: if kind == pb::FileKind::Symlink { attr.lname.clone() } else { Vec::new() },
+        attributes: Default::default(),
+    }
 }
 
 impl Restore<'_> {
@@ -217,6 +274,19 @@ impl Restore<'_> {
             }
             self.close_previous_stream(&mut r, &mut ax)
         };
+        // Report the result to every online-restore plugin and stop it.
+        let mut ok = ok;
+        if r.online_file.is_some() {
+            ok &= self.close_online(&mut r, true);
+        }
+        for (name, session) in std::mem::take(&mut r.sessions) {
+            if let Err(e) = session.finish(ok) {
+                if ok {
+                    self.jmsg(M_FATAL, format!("Plugin: \"{name}\": finish: {e}\n"));
+                    ok = false;
+                }
+            }
+        }
         self.msgs.set_status(if ok { JS_TERMINATED } else { JS_ERROR_TERMINATED });
 
         if ax.acl_errors > 0 {
@@ -275,13 +345,17 @@ impl Restore<'_> {
                     ns.data += 1;
                     return true;
                 }
+                if let Some(name) = r.online.clone() {
+                    return self.open_online_file(r, name, attr);
+                }
                 if let Some(line) = &r.plugin {
                     // Without Where a plugin file would be written to its
-                    // virtual path below /. Online restore is not available.
+                    // virtual path below /.
                     if matches!(&self.params.where_, Where::Prefix(w) if w.is_empty()) {
                         let name = String::from_utf8_lossy(&attr.fname).into_owned();
                         self.jmsg(M_FATAL, format!(
-                            "Plugin: \"{line}\": \"{name}\" can only be restored to files: set Where.\n"));
+                            "Plugin: \"{line}\": \"{name}\" can only be restored to files: set Where, \
+                             or restore online with Plugin Options \"<plugin>:restore_mode=online\".\n"));
                         return false;
                     }
                 }
@@ -417,6 +491,12 @@ impl Restore<'_> {
                     (Some("1"), Some(line)) => Some(crate::secrets::mask_plugin_secrets(line)),
                     _ => None,
                 };
+                r.online = None;
+                if let Some(shown) = r.plugin.clone() {
+                    if !self.start_online(r, &shown) {
+                        return false;
+                    }
+                }
             }
 
             STREAM_RESTORE_OBJECT => {}
@@ -431,6 +511,116 @@ impl Restore<'_> {
         true
     }
 
+    /// A plugin-name record opened plugin files: when the job asked for an
+    /// online restore of this plugin, start (or reuse) its session.
+    fn start_online(&mut self, r: &mut Rctx, shown: &str) -> bool {
+        let Ok(stored) = plugin::parse_line(shown) else { return true };
+        let Some(line) = online_line(&stored, self.plugin_options) else { return true };
+        if !r.sessions.contains_key(&line.name) {
+            let Some(config) = self.config else {
+                self.jmsg(M_FATAL, format!("Plugin: \"{shown}\": online restore is not available here.\n"));
+                return false;
+            };
+            let job = pb::JobContext {
+                job_id: u64::from(self.msgs.job_id),
+                job_name: if self.msgs.job.is_empty() { "restore".into() } else { self.msgs.job.clone() },
+                operation: pb::JobOperation::Restore as i32,
+            };
+            let opened = self.open_session(config, &line, job, r.sessions.len());
+            match opened {
+                Ok(session) => {
+                    self.jmsg(M_INFO, format!("Plugin: \"{shown}\": restoring online through {}.\n", session.plugin_id));
+                    r.sessions.insert(line.name.clone(), session);
+                }
+                Err(e) => {
+                    self.jmsg(M_FATAL, format!("Plugin: \"{shown}\": online restore: {e}\n"));
+                    return false;
+                }
+            }
+        }
+        r.online = Some(line.name);
+        true
+    }
+
+    fn open_session(&self, config: &crate::config::FdConfig, line: &PluginLine, job: pb::JobContext, index: usize)
+        -> Result<Session, PluginError> {
+        let flag: &AtomicBool = self.canceled;
+        let canceled = move || flag.load(Ordering::Relaxed);
+        #[cfg(test)]
+        if let Some(open) = test_hook::take() {
+            let mut s = open(line, job, index)?;
+            s.start(&canceled)?;
+            return Ok(s);
+        }
+        let mut s = Session::open(config, line, job, index, ONLINE_CHUNK)?;
+        s.start(&canceled)?;
+        Ok(s)
+    }
+
+    /// The attributes of a plugin file in an online restore: no file on
+    /// disk; directories and links are passed to the plugin at once.
+    fn open_online_file(&mut self, r: &mut Rctx, plugin: String, attr: Attributes) -> bool {
+        let entry = plugin_entry(&attr);
+        self.counters.num_files_examined += 1;
+        r.last_fname = attr.fname.clone();
+        r.last_type = attr.type_;
+        self.jmsg(M_RESTORED, ls_output(&attr));
+        self.counters.job_files += 1;
+        r.attr = attr;
+        if entry.kind == pb::FileKind::Virtual as i32 {
+            r.extract = true;
+            r.file_addr = 0;
+            r.online_file = Some(OnlineFile { plugin, entry, offset: 0 });
+            return true;
+        }
+        let flag: &AtomicBool = self.canceled;
+        let canceled = move || flag.load(Ordering::Relaxed);
+        let Some(session) = r.sessions.get(&plugin) else { return false };
+        let done = session.write(&entry, 0, &[], &canceled).and_then(|()| session.close(&entry.path, false, &canceled));
+        self.online_result(done, &entry.path)
+    }
+
+    fn online_result(&mut self, result: Result<(), PluginError>, path: &[u8]) -> bool {
+        match result {
+            Ok(()) => true,
+            Err(PluginError::Canceled) => false,
+            Err(e) => {
+                let name = String::from_utf8_lossy(path).into_owned();
+                self.jmsg(M_FATAL, format!("Plugin: online restore of \"{name}\": {e}\n"));
+                false
+            }
+        }
+    }
+
+    /// One block of an online-restored file to its plugin.
+    fn write_online(&mut self, r: &mut Rctx, data: &[u8]) -> bool {
+        let flag: &AtomicBool = self.canceled;
+        let canceled = move || flag.load(Ordering::Relaxed);
+        let Some(of) = r.online_file.as_mut() else { return false };
+        let Some(session) = r.sessions.get(&of.plugin) else { return false };
+        let mut result = Ok(());
+        for block in data.chunks(session.chunk as usize) {
+            result = session.write(&of.entry, of.offset, block, &canceled);
+            if result.is_err() {
+                break;
+            }
+            of.offset += block.len() as u64;
+        }
+        let path = of.entry.path.clone();
+        self.counters.job_bytes += data.len() as u64;
+        self.online_result(result, &path)
+    }
+
+    /// The end of an online-restored file: CloseFile (abort when it failed).
+    fn close_online(&mut self, r: &mut Rctx, abort: bool) -> bool {
+        let Some(of) = r.online_file.take() else { return true };
+        let flag: &AtomicBool = self.canceled;
+        let canceled = move || flag.load(Ordering::Relaxed);
+        let Some(session) = r.sessions.get(&of.plugin) else { return false };
+        let result = session.close(&of.entry.path, abort, &canceled);
+        self.online_result(result, &of.entry.path)
+    }
+
     /// ExtractData(); None on errors (already reported).
     fn extract_data(&mut self, r: &mut Rctx, buf: &[u8]) -> Option<usize> {
         self.counters.read_bytes += buf.len() as u64;
@@ -442,6 +632,10 @@ impl Restore<'_> {
                 return None;
             }
             let faddr = u64::from_be_bytes(data[..8].try_into().unwrap());
+            if let Some(of) = r.online_file.as_mut() {
+                of.offset = faddr;
+                r.file_addr = faddr;
+            }
             if r.file_addr != faddr {
                 r.file_addr = faddr;
                 let f = r.bfd.as_mut()?;
@@ -464,6 +658,10 @@ impl Restore<'_> {
                     return None;
                 }
             }
+        }
+        if r.online_file.is_some() {
+            let n = data.len();
+            return self.write_online(r, data).then_some(n);
         }
         let f = r.bfd.as_mut()?;
         let res = match r.win32.as_mut() {
@@ -521,6 +719,12 @@ impl Restore<'_> {
 
     /// ClosePreviousStream()
     fn close_previous_stream(&mut self, r: &mut Rctx, ax: &mut AclXattrState) -> bool {
+        if r.online_file.is_some() {
+            r.extract = false;
+            r.type_ = r.attr.type_;
+            r.delayed.clear();
+            return self.close_online(r, false);
+        }
         if r.extract {
             if r.size > 0 && r.bfd.is_none() {
                 self.jmsg(M_ERROR, "Logic error: output file should be open\n");
@@ -550,6 +754,21 @@ impl Restore<'_> {
         }
         r.delayed.clear();
         true
+    }
+}
+
+/// Tests open online-restore sessions from a test bundle (outside the
+/// root-owned plugin directory) through this hook.
+#[cfg(test)]
+mod test_hook {
+    use super::*;
+    type Open = Box<dyn FnOnce(&PluginLine, pb::JobContext, usize) -> Result<Session, PluginError>>;
+    thread_local!(static OPEN: std::cell::RefCell<Option<Open>> = const { std::cell::RefCell::new(None) });
+    pub fn set(open: Open) {
+        OPEN.with(|o| *o.borrow_mut() = Some(open));
+    }
+    pub fn take() -> Option<Open> {
+        OPEN.with(|o| o.borrow_mut().take())
     }
 }
 
@@ -661,7 +880,7 @@ mod tests {
         let mut create = CreateState::default();
         let canceled = AtomicBool::new(false);
         let mut sent = Vec::new();
-        Restore { params: &params, msgs: &mut msgs, counters: &mut counters, create: &mut create, canceled: &canceled }
+        Restore { params: &params, msgs: &mut msgs, counters: &mut counters, create: &mut create, canceled: &canceled, config: None, plugin_options: &[] }
             .run(&mut sd, &mut |m: &mut JobMsgs| sent.extend(m.take_queued()));
         assert_eq!(msgs.status(), JS_TERMINATED, "{sent:?}");
         assert_eq!(msgs.job_errors, 0, "{sent:?}");
@@ -694,7 +913,7 @@ mod tests {
         let mut msgs = JobMsgs::new("test-fd");
         msgs.job_id = 1;
         let mut sent = Vec::new();
-        Restore { params: &params, msgs: &mut msgs, counters: &mut Counters::default(), create: &mut CreateState { keep_path_list: true, ..Default::default() }, canceled: &canceled }
+        Restore { params: &params, msgs: &mut msgs, counters: &mut Counters::default(), create: &mut CreateState { keep_path_list: true, ..Default::default() }, canceled: &canceled, config: None, plugin_options: &[] }
             .run(&mut sd, &mut |m: &mut JobMsgs| sent.extend(m.take_queued()));
         assert!(sent.iter().any(|m| m.contains("File skipped. Already exists:")), "{sent:?}");
         assert_eq!(std::fs::read(root.join("a.txt")).unwrap(), b"hello world");
@@ -723,7 +942,7 @@ mod tests {
         let mut counters = Counters::default();
         let canceled = AtomicBool::new(false);
         let mut sent = Vec::new();
-        Restore { params: &params, msgs: &mut msgs, counters: &mut counters, create: &mut CreateState::default(), canceled: &canceled }
+        Restore { params: &params, msgs: &mut msgs, counters: &mut counters, create: &mut CreateState::default(), canceled: &canceled, config: None, plugin_options: &[] }
             .run(&mut sd, &mut |m: &mut JobMsgs| sent.extend(m.take_queued()));
         (msgs, counters, sent)
     }
@@ -741,6 +960,53 @@ mod tests {
         assert_eq!(std::fs::read(tmp.join("@postgresql/main/db/a/a.dump")).unwrap(), b"hello");
         assert_eq!(std::fs::read(tmp.join("@postgresql/main/globals.sql")).unwrap(), b"sql");
         let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn online_options_replace_masked_values() {
+        let stored = plugin::parse_line("postgresql:instance=main:password=*****").unwrap();
+        let opts = vec!["openldap:restore_mode=online".to_string(),
+            "postgresql:restore_mode=online:password=neu:target_db=x".to_string()];
+        let line = online_line(&stored, &opts).unwrap();
+        assert_eq!(line.options["instance"], "main");
+        assert_eq!(line.options["password"], "neu");
+        assert_eq!(line.options["target_db"], "x");
+        assert!(online_line(&stored, &["postgresql:target_db=x".to_string()]).is_none());
+    }
+
+    #[test]
+    fn plugin_files_restore_online_through_the_plugin() {
+        use crate::plugin::testkit::*;
+        let dir = std::env::temp_dir().join(format!("ofd-restore-online-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let resolved = signed_plugin(&dir, "postgresql", &Script::default());
+        let opened = std::rc::Rc::new(std::cell::Cell::new(None::<String>));
+        let seen = opened.clone();
+        test_hook::set(Box::new(move |line, job, index| {
+            seen.set(Some(format!("{}:{}", line.name, line.options.get("password").cloned().unwrap_or_default())));
+            let runtime = onesimus_plugins::wasm::RuntimeLimits { max_chunk_bytes: 4, ..Default::default() };
+            Session::open_resolved(&resolved, line, job, index, runtime)
+        }));
+        let config = crate::config::FdConfig::parse("Director { Name = d; Password = p }").unwrap();
+        let options = vec!["postgresql:restore_mode=online:password=neu".to_string()];
+        let mut sd = BnetStream::new(FakeSd { input: Cursor::new(plugin_records(1_600_000_000)) });
+        let params = RestoreParams { where_: Where::Prefix(Vec::new()), replace: b'a', prefix_links: false };
+        let mut msgs = JobMsgs::new("test-fd");
+        msgs.job_id = 77;
+        let mut counters = Counters::default();
+        let canceled = AtomicBool::new(false);
+        let mut sent = Vec::new();
+        Restore { params: &params, msgs: &mut msgs, counters: &mut counters, create: &mut CreateState::default(),
+            canceled: &canceled, config: Some(&config), plugin_options: &options }
+            .run(&mut sd, &mut |m: &mut JobMsgs| sent.extend(m.take_queued()));
+        assert_eq!(msgs.status(), JS_TERMINATED, "{sent:?}");
+        assert_eq!(counters.job_files, 2);
+        // Blocks larger than the plugin's chunk (5 bytes, chunk 4) are split.
+        assert_eq!(counters.job_bytes, 8);
+        assert_eq!(opened.take().as_deref(), Some("postgresql:neu"));
+        assert!(sent.iter().any(|m| m.contains("restoring online through test.postgresql")), "{sent:?}");
+        assert!(!std::path::Path::new("/@postgresql").exists());
+        std::fs::remove_dir_all(&dir).unwrap();
     }
 
     #[test]
@@ -763,7 +1029,7 @@ mod tests {
         msgs.job_id = 1;
         let canceled = AtomicBool::new(false);
         let mut sent = Vec::new();
-        Restore { params: &params, msgs: &mut msgs, counters: &mut Counters::default(), create: &mut CreateState::default(), canceled: &canceled }
+        Restore { params: &params, msgs: &mut msgs, counters: &mut Counters::default(), create: &mut CreateState::default(), canceled: &canceled, config: None, plugin_options: &[] }
             .run(&mut sd, &mut |m: &mut JobMsgs| sent.extend(m.take_queued()));
         assert_eq!(msgs.status(), JS_FATAL_ERROR);
         assert!(sent.iter().any(|m| m.contains("Fatal error: Record header scan error: bogus")), "{sent:?}");

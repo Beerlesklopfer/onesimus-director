@@ -67,6 +67,8 @@ pub struct Session<'a> {
     job_type: u8,
     /// SD connections already told BNET_TERMINATE; closed with the session.
     old_sd: Vec<SdStream>,
+    /// "pluginoptions" of a restore: plugin lines with restore options.
+    plugin_options: Vec<String>,
 }
 
 /// Command handler: false ends the command loop.
@@ -111,6 +113,7 @@ impl<'a> Session<'a> {
             max_bandwidth: 0,
             job_type: b' ',
             old_sd: Vec::new(),
+            plugin_options: Vec::new(),
         }
     }
 
@@ -415,13 +418,15 @@ impl<'a> Session<'a> {
         true
     }
 
-    /// PluginoptionsCmd(): no plugins to pass the options to.
+    /// PluginoptionsCmd(): plugin lines with options for the next restore
+    /// (e.g. restore_mode=online); kept for the restore of this job.
     fn pluginoptions_cmd<S: Read + Write>(&mut self, dir: &mut BnetStream<S>, cmd: &str) -> bool {
-        if scan(cmd.as_bytes(), "pluginoptions %s", 1).is_none() {
-            self.msgs.jmsg(M_FATAL, &format!("Bad Plugin Options command: {cmd}\n"));
+        let Some(v) = scan(cmd.as_bytes(), "pluginoptions %s", 1) else {
+            self.msgs.jmsg(M_FATAL, &format!("Bad Plugin Options command: {}\n", crate::secrets::mask_plugin_secrets(cmd)));
             self.reply(dir, "2905 Bad PluginOptions command.\n");
             return false;
-        }
+        };
+        self.plugin_options.push(unbash(&v[0].text()));
         self.reply(dir, "2000 OK PluginOptions\n")
     }
 
@@ -495,6 +500,8 @@ impl<'a> Session<'a> {
                     counters: &mut self.counters,
                     create: &mut create,
                     canceled: &shared.canceled,
+                    config: Some(self.config),
+                    plugin_options: &self.plugin_options,
                 }
                 .run(&mut sd, &mut flush);
             }
