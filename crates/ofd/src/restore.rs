@@ -98,6 +98,9 @@ struct Rctx {
     sessions: std::collections::BTreeMap<String, Session>,
     /// The file being written through its plugin.
     online_file: Option<OnlineFile>,
+    /// Directories of plugin files: their attributes are set at the end, so
+    /// files created in them later do not change their times again.
+    deferred_dirs: Vec<Attributes>,
     stream: i32,
     prev_stream: i32,
     size: u32,
@@ -274,6 +277,14 @@ impl Restore<'_> {
             }
             self.close_previous_stream(&mut r, &mut ax)
         };
+        // Deepest first, so a parent's time is set after its children's.
+        let mut dirs = std::mem::take(&mut r.deferred_dirs);
+        dirs.sort_by_key(|a| std::cmp::Reverse(a.ofname.len()));
+        for attr in dirs {
+            for e in set_attributes(&attr, None) {
+                self.jmsg(M_ERROR, e);
+            }
+        }
         // Report the result to every online-restore plugin and stop it.
         let mut ok = ok;
         if r.online_file.is_some() {
@@ -384,8 +395,14 @@ impl Restore<'_> {
                         r.file_addr = 0;
                         self.jmsg(M_RESTORED, ls_output(&attr));
                         self.counters.job_files += 1;
-                        for e in set_attributes(&attr, None) {
-                            self.jmsg(M_ERROR, e);
+                        // A plugin may list a directory before its content
+                        // (the Bareos FD sends it after, as FT_DIREND).
+                        if r.plugin.is_some() && attr.type_ == FT_DIREND {
+                            r.deferred_dirs.push(attr.clone());
+                        } else {
+                            for e in set_attributes(&attr, None) {
+                                self.jmsg(M_ERROR, e);
+                            }
                         }
                     }
                 }
@@ -923,6 +940,10 @@ mod tests {
     fn plugin_records(t: i64) -> Vec<u8> {
         let mut r = Rec(Vec::new());
         let line = "postgresql:instance=main:password=*****";
+        // The directory first, as a plugin may list it.
+        r.add(9, STREAM_PLUGIN_NAME, format!("9 1 1 {line}\0").as_bytes());
+        r.attr(9, FT_DIREND, "/@postgresql/main/db/a", &lstat(0o040750, 0, t, 0), "/@postgresql/main/db/a/");
+        r.add(9, STREAM_PLUGIN_NAME, b"9 0");
         r.add(1, STREAM_PLUGIN_NAME, format!("1 1 1 {line}\0").as_bytes());
         r.attr(1, FT_REG, "/@postgresql/main/db/a/a.dump", &lstat(0o100600, 5, t, STREAM_FILE_DATA), "");
         r.add(1, STREAM_FILE_DATA, b"hello");
@@ -956,8 +977,11 @@ mod tests {
         std::fs::create_dir_all(&tmp).unwrap();
         let (msgs, counters, sent) = run_restore(plugin_records(1_600_000_000), tmp.as_os_str().as_encoded_bytes().to_vec());
         assert_eq!(msgs.status(), JS_TERMINATED, "{sent:?}");
-        assert_eq!(counters.job_files, 2);
+        assert_eq!(counters.job_files, 3);
         assert_eq!(std::fs::read(tmp.join("@postgresql/main/db/a/a.dump")).unwrap(), b"hello");
+        use std::os::unix::fs::MetadataExt;
+        let dir = std::fs::metadata(tmp.join("@postgresql/main/db/a")).unwrap();
+        assert_eq!((dir.mode() & 0o7777, dir.mtime()), (0o750, 1_600_000_000), "directory attributes set after its content");
         assert_eq!(std::fs::read(tmp.join("@postgresql/main/globals.sql")).unwrap(), b"sql");
         let _ = std::fs::remove_dir_all(&tmp);
     }
@@ -1000,7 +1024,7 @@ mod tests {
             canceled: &canceled, config: Some(&config), plugin_options: &options }
             .run(&mut sd, &mut |m: &mut JobMsgs| sent.extend(m.take_queued()));
         assert_eq!(msgs.status(), JS_TERMINATED, "{sent:?}");
-        assert_eq!(counters.job_files, 2);
+        assert_eq!(counters.job_files, 3);
         // Blocks larger than the plugin's chunk (5 bytes, chunk 4) are split.
         assert_eq!(counters.job_bytes, 8);
         assert_eq!(opened.take().as_deref(), Some("postgresql:neu"));
