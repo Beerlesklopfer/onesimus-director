@@ -24,20 +24,21 @@ Zwei getrennte Signaturebenen, beide nötig:
   TPM importiert. Dasselbe Verfahren für den Plugin- und den Paket-
   Signierschlüssel: offline erzeugen, verschlüsselt sichern, mit `tpm2_import`
   in den TPM des Build-Rechners laden.
+- **Algorithmus und Werkzeug wie beim Kernel** (Nutzer, 19.11.2026):
+  **RSA 4096**, signiert über den **OpenSSL-Provider `tpm2`**.
 
 ## Schlüssel und wo sie liegen
 
 | Schlüssel | Ort | Gebraucht |
 | --- | --- | --- |
 | Plugin-CA (Ed25519) | **offline**, zwei verschlüsselte Kopien an verschiedenen Orten (z. B. USB-Stick zu Hause, Papier/zweiter Stick außer Haus) | selten: Signierzertifikat ausstellen, widerrufen |
-| Plugin-Signierschlüssel (ECDSA P-256 oder RSA, wie beim Kernel) | offline erzeugt, zwei verschlüsselte Kopien; **in den TPM des Build-Rechners importiert** | bei jedem Plugin-Build |
+| Plugin-Signierschlüssel (RSA 4096, wie beim Kernel) | offline erzeugt, zwei verschlüsselte Kopien; **in den TPM des Build-Rechners importiert** | bei jedem Plugin-Build |
 | OpenPGP-Hauptschlüssel | offline, bei der CA | selten: Unterschlüssel erzeugen/widerrufen |
 | OpenPGP-Signier-Unterschlüssel | offline erzeugt und gesichert, in den TPM importiert (GnuPG ≥ 2.3 `keytotpm`) | bei jedem Paket-/Repository-Build |
 | OpenPGP-Reserve-Unterschlüssel | offline, bereits im Keyring-Paket veröffentlicht | nur bei Kompromittierung des Signier-Unterschlüssels |
 
-ECDSA P-256 oder RSA für den Signierschlüssel, weil die meisten TPMs (gerade
-Firmware-TPMs) kein Ed25519 können; vorzugsweise derselbe Algorithmus und
-dieselben Werkzeuge wie bei der Kernel-Signatur. Die CA bleibt Ed25519.
+RSA 4096 für den Signierschlüssel, wie bei der Kernel-Signatur (TPMs können
+meist kein Ed25519). Die CA bleibt Ed25519.
 
 ## Zerstörung oder Diebstahl des Build-Rechners
 
@@ -65,9 +66,18 @@ dieselben Werkzeuge wie bei der Kernel-Signatur. Die CA bleibt Ed25519.
    erlaubten Plugin-IDs und Capabilities in einer X.509-Erweiterung des
    Signierzertifikats (eigene OID); `ofd` vertraut der einkompilierten CA und
    liest die Grants aus der geprüften Kette.
-2. **ECDSA P-256 und/oder RSA-PSS** für Manifest-Signaturen und Leaf-Schlüssel
-   zusätzlich zu Ed25519 (Verifier; `sign-component` über PKCS#11 /
-   `tpm2-pkcs11` oder den OpenSSL-Provider `tpm2`, wie bei der Kernel-Signatur).
+2. **RSA 4096 mit RSA-PSS/SHA-256** für Manifest-Signaturen zusätzlich zu
+   Ed25519. Der Verifier wählt das Verfahren nach dem Schlüsseltyp des
+   geprüften Leaf-Zertifikats (Ed25519: 64 Byte; RSA: genau 4096 Bit, PSS,
+   SHA-256, Salt-Länge = Digest-Länge; andere Längen und PKCS#1 v1.5 werden
+   abgelehnt). Das Proto-Feld `ed25519_signature` trägt dann die jeweilige
+   Signatur; der Name wird in einer späteren Proto-Version bereinigt.
+   **`sign-component` bekommt nie einen privaten Schlüssel:** Es wird geteilt
+   in `prepare` (Manifest-Bytes erzeugen) und `assemble` (Bundle aus Manifest,
+   externer Signaturdatei und Zertifikatskette). Signiert wird dazwischen mit
+   `openssl dgst -sha256 -sign handle:<TPM-Handle> -provider tpm2
+   -provider default -sigopt rsa_padding_mode:pss -sigopt rsa_pss_saltlen:digest`,
+   wie bei der Kernel-Signatur. `assemble` prüft die Signatur vor dem Schreiben.
 3. **Einkompilierte Vertrauensbasis:** Pfad zum CA-Zertifikat (und
    Widerrufsliste) als Build-Variable (`ONESIMUS_PLUGIN_CA`), `include_bytes!`.
    Ohne sie hat ein Build keine eingebaute Vertrauensbasis (nur Tests mit
@@ -104,8 +114,6 @@ dieselben Werkzeuge wie bei der Kernel-Signatur. Die CA bleibt Ed25519.
 
 1. Freigabe des Modells (CA offline, Signierschlüssel offline erzeugt und in
    den TPM importiert).
-1a. Welcher Algorithmus und welche Werkzeuge bei der Kernel-Signatur im
-    Einsatz sind (RSA oder ECDSA, `tpm2-pkcs11` oder OpenSSL-Provider), damit
-    Plugins und Pakete dasselbe nutzen.
+1a. ~~Algorithmus und Werkzeug~~ – entschieden: RSA 4096, OpenSSL-Provider `tpm2`.
 2. Laufzeit der Signierzertifikate (Vorschlag 3 Jahre) oder Zeitstempeldienst.
 3. Wo die zweite Offline-Kopie liegt.
