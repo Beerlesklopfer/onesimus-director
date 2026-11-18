@@ -1,0 +1,17 @@
+[package]
+name = "onesimus-pg-broker"
+description = "Broker of the signed PostgreSQL plugin for ofd: runs as the instance user, fixed pg_dump/psql calls over the local socket"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license = "AGPL-3.0-only"
+
+[[bin]]
+name = "onesimus-pg-broker"
+path = "src/main.rs"
+
+[dependencies]
+onesimus-proto-rs.workspace = true
+prost.workspace = true
+serde_json.workspace = true
+libc.workspace = true

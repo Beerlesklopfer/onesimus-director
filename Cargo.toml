@@ -11,6 +11,7 @@ members = [
     "crates/osd",
     "crates/ofd",
     "crates/onesimus-plugins",
+    "crates/onesimus-pg-broker",
 ]
 
 [workspace.package]

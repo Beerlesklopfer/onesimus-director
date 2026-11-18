@@ -8,6 +8,13 @@ pub mod onesimus {
                 tonic::include_proto!("onesimus.filed.plugin.v1");
             }
         }
+        pub mod broker {
+            pub mod postgresql {
+                pub mod v1 {
+                    tonic::include_proto!("onesimus.filed.broker.postgresql.v1");
+                }
+            }
+        }
     }
     pub mod director {
         tonic::include_proto!("onesimus.director");
