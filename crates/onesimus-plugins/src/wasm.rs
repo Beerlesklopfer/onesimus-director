@@ -1,5 +1,8 @@
 //! Verified Component Model host. No ambient WASI or raw engine imports are
 //! linked. All guest exports use the protobuf contract carried by the WIT ABI.
+//! The only import a guest may get is a typed broker interface (e.g.
+//! `onesimus:filed-plugin/postgresql`), linked only when the verified
+//! manifest carries its capability and the host supplies a broker port.
 use crate::{
     TrustPolicy, VerifiedComponent, VerifyError,
     executor::{self, Backend, Binding, BoundedMessage, Context, Host, Interrupt, Worker},
@@ -48,6 +51,87 @@ pub struct LoadOptions {
     pub options: BTreeMap<String, String>,
     pub worker: executor::Limits,
     pub runtime: RuntimeLimits,
+    /// The host side of a broker import; None: the guest gets no import.
+    pub broker: Option<BrokerHandle>,
+}
+
+/// One function of a typed broker import. Each takes and returns one
+/// encoded message of the broker's protobuf contract.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BrokerFunction {
+    PostgresqlInfo,
+    PostgresqlDatabaseInfo,
+    PostgresqlDumpOpen,
+    PostgresqlDumpRead,
+    PostgresqlDumpClose,
+}
+
+/// The host's implementation of a broker import. It checks every request
+/// before passing it to the broker process.
+pub trait BrokerPort: Send {
+    /// The capability the manifest must carry for the import to be linked.
+    fn capability(&self) -> &'static str;
+    fn call(&mut self, function: BrokerFunction, request: &[u8]) -> Result<Vec<u8>, String>;
+}
+
+/// A shareable broker port (LoadOptions stays Clone).
+#[derive(Clone)]
+pub struct BrokerHandle(pub Arc<Mutex<Box<dyn BrokerPort>>>);
+impl std::fmt::Debug for BrokerHandle {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("BrokerHandle")
+    }
+}
+
+/// The capability of the PostgreSQL broker import.
+pub const POSTGRESQL_READ: &str = "postgresql.read";
+const POSTGRESQL_IMPORT: &str = "onesimus:filed-plugin/postgresql@1.0.0";
+/// Largest broker request a guest may send.
+const MAX_BROKER_REQUEST: usize = 64 * 1024;
+
+/// Store data: memory limits and the broker port of this instance.
+pub struct HostState {
+    limits: StoreLimits,
+    broker: Option<BrokerHandle>,
+    max_broker_response: usize,
+}
+
+fn broker_call(state: &mut HostState, function: BrokerFunction, request: Vec<u8>) -> Result<Vec<u8>, String> {
+    if request.len() > MAX_BROKER_REQUEST {
+        return Err("broker request too large".into());
+    }
+    let handle = state.broker.as_ref().ok_or("no broker")?;
+    let response = handle.0.lock().map_err(|_| "broker unavailable".to_string())?.call(function, &request)?;
+    if response.len() > state.max_broker_response {
+        return Err("broker response too large".into());
+    }
+    Ok(response)
+}
+
+/// Links the PostgreSQL broker import: only with the capability in the
+/// verified manifest and a port of the same capability.
+fn link_brokers(linker: &mut Linker<HostState>, manifest: &crate::Manifest, broker: Option<&BrokerHandle>)
+    -> Result<(), executor::Error> {
+    let Some(handle) = broker else { return Ok(()) };
+    let capability = handle.0.lock().map_err(|_| backend("broker unavailable"))?.capability();
+    if capability != POSTGRESQL_READ || !manifest.capabilities.iter().any(|c| c == POSTGRESQL_READ) {
+        return Err(backend(format!("broker {capability} not granted to this plugin")));
+    }
+    let mut instance = linker.instance(POSTGRESQL_IMPORT).map_err(backend)?;
+    for (name, function) in [
+        ("info", BrokerFunction::PostgresqlInfo),
+        ("database-info", BrokerFunction::PostgresqlDatabaseInfo),
+        ("dump-open", BrokerFunction::PostgresqlDumpOpen),
+        ("dump-read", BrokerFunction::PostgresqlDumpRead),
+        ("dump-close", BrokerFunction::PostgresqlDumpClose),
+    ] {
+        instance
+            .func_wrap(name, move |mut caller: wasmtime::StoreContextMut<'_, HostState>, (request,): (Vec<u8>,)| {
+                Ok((broker_call(caller.data_mut(), function, request),))
+            })
+            .map_err(backend)?;
+    }
+    Ok(())
 }
 #[derive(Debug, thiserror::Error)]
 pub enum LoadError {
@@ -220,7 +304,7 @@ enum Phase {
     Finished,
 }
 pub struct WasmBackend {
-    store: Store<StoreLimits>,
+    store: Store<HostState>,
     interrupt: Arc<EngineInterrupt>,
     event: Function,
     next: Function,
@@ -300,13 +384,16 @@ impl WasmBackend {
             .instances(16)
             .trap_on_grow_failure(true)
             .build();
-        let mut store = Store::new(&engine, limits);
-        store.limiter(|limits| limits);
+        let max_broker_response = options.runtime.max_chunk_bytes as usize + 64 * 1024;
+        let mut store = Store::new(&engine, HostState { limits, broker: options.broker.clone(), max_broker_response });
+        store.limiter(|state| &mut state.limits);
         store
             .set_fuel(options.runtime.fuel_per_operation)
             .map_err(backend)?;
         store.set_epoch_deadline(1);
-        let linker = Linker::new(&engine); // Deliberately no WASI or other host imports.
+        // Deliberately no WASI or other host imports; at most a granted broker.
+        let mut linker = Linker::new(&engine);
+        link_brokers(&mut linker, component.manifest(), options.broker.as_ref())?;
         let instance = linker.instantiate(&mut store, &compiled).map_err(backend)?;
         let initialize = instance
             .get_typed_func::<(Vec<u8>,), (Vec<u8>,)>(&mut store, "initialize")

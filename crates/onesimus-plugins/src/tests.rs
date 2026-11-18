@@ -402,7 +402,24 @@ pub(crate) fn signed_component(
     onesimus_proto_rs::onesimus::filed::plugin::v1::SignedPluginArtifact,
     TrustPolicy,
 ) {
+    signed_component_with(component, &["file.read"])
+}
+
+/// Like `signed_component` with these capabilities in manifest and policy.
+pub(crate) fn signed_component_with(
+    component: Vec<u8>,
+    capabilities: &[&str],
+) -> (
+    onesimus_proto_rs::onesimus::filed::plugin::v1::SignedPluginArtifact,
+    TrustPolicy,
+) {
     let mut f = Fixture::new();
+    f.manifest.capabilities = capabilities.iter().map(|c| c.to_string()).collect();
+    let caps: std::collections::BTreeSet<String> = f.manifest.capabilities.iter().cloned().collect();
+    f.policy.allowed_capabilities = caps.clone();
+    for grant in f.policy.signers.values_mut() {
+        grant.capabilities = caps.clone();
+    }
     f.manifest.artifact_sha256 = hex::encode(Sha256::digest(&component));
     let (manifest_bytes, ed25519_signature) = f.signed();
     (

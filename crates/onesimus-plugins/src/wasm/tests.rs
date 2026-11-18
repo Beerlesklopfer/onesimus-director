@@ -11,12 +11,31 @@ enum Behavior {
     VirtualFile,
     BadAttribute,
 }
+const UNKNOWN_IMPORT: &str = "(import \"ungranted-host-access\" (func))";
+/// The PostgreSQL broker import, declared (one function) but not called.
+const PG_IMPORT: &str = "(import \"onesimus:filed-plugin/postgresql@1.0.0\" (instance \
+    (export \"info\" (func (param \"request\" (list u8)) (result (result (list u8) (error string)))))))";
+
+/// A broker port that answers every call with the request reversed.
+struct EchoPort(&'static str);
+impl BrokerPort for EchoPort {
+    fn capability(&self) -> &'static str {
+        self.0
+    }
+    fn call(&mut self, _function: BrokerFunction, request: &[u8]) -> Result<Vec<u8>, String> {
+        Ok(request.iter().rev().copied().collect())
+    }
+}
+fn port(capability: &'static str) -> Option<BrokerHandle> {
+    Some(BrokerHandle(Arc::new(Mutex::new(Box::new(EchoPort(capability))))))
+}
+
 fn escaped(bytes: &[u8]) -> String {
     bytes.iter().map(|b| format!("\\{b:02x}")).collect()
 }
 fn fixture(
     behavior: Behavior,
-    unknown_import: bool,
+    import: &str,
     wrong_metadata: bool,
     core_start_loop: bool,
 ) -> Vec<u8> {
@@ -109,11 +128,7 @@ fn fixture(
                 (canon lift (core func ${name}) (memory $mem) (realloc $realloc)))"#
         ));
     }
-    let import = if unknown_import {
-        "(import \"ungranted-host-access\" (func))"
-    } else {
-        ""
-    };
+
     let start = if core_start_loop {
         "(func $start (loop $forever (br $forever))) (start $start)"
     } else {
@@ -157,10 +172,11 @@ fn options(id: &str) -> LoadOptions {
             max_chunk_bytes: 1024,
             ..Default::default()
         },
+        broker: None,
     }
 }
 fn load(host: &Host, behavior: Behavior, opts: LoadOptions) -> Worker<WasmBackend> {
-    let (bundle, policy) = crate::tests::signed_component(fixture(behavior, false, false, false));
+    let (bundle, policy) = crate::tests::signed_component(fixture(behavior, "", false, false));
     load_signed_at(host, bundle, &policy, opts, 150).unwrap()
 }
 fn start(worker: &Worker<WasmBackend>, opts: &LoadOptions) {
@@ -222,7 +238,7 @@ fn signed_real_component_initializes_and_serves_typed_protobuf_calls() {
 fn signature_verification_happens_before_component_compilation() {
     let host = Host::new(1).unwrap();
     let (mut bundle, policy) =
-        crate::tests::signed_component(fixture(Behavior::Complete, false, false, false));
+        crate::tests::signed_component(fixture(Behavior::Complete, "", false, false));
     bundle.artifact_bytes.push(0);
     assert!(matches!(
         load_signed_at(&host, bundle, &policy, options("tampered"), 150),
@@ -233,9 +249,9 @@ fn signature_verification_happens_before_component_compilation() {
 #[test]
 fn unknown_imports_bad_metadata_and_core_modules_are_rejected() {
     let host = Host::new(1).unwrap();
-    for (imports, metadata) in [(true, false), (false, true)] {
+    for (import, metadata) in [(UNKNOWN_IMPORT, false), ("", true)] {
         let (bundle, policy) =
-            crate::tests::signed_component(fixture(Behavior::Complete, imports, metadata, false));
+            crate::tests::signed_component(fixture(Behavior::Complete, import, metadata, false));
         assert!(matches!(
             load_signed_at(&host, bundle, &policy, options("rejected"), 150),
             Err(LoadError::Runtime(_))
@@ -343,7 +359,7 @@ fn initialization_start_function_is_fuel_limited() {
     let mut opts = options("init-loop");
     opts.runtime.fuel_per_operation = 100_000;
     let (bundle, policy) =
-        crate::tests::signed_component(fixture(Behavior::Complete, false, false, true));
+        crate::tests::signed_component(fixture(Behavior::Complete, "", false, true));
     assert!(matches!(
         load_signed_at(&host, bundle, &policy, opts, 150),
         Err(LoadError::Runtime(_))
@@ -392,7 +408,7 @@ fn initialization_epoch_deadline_reclaims_the_instance_slot() {
     opts.runtime.fuel_per_operation = u64::MAX;
     opts.runtime.initialization_timeout = Duration::from_millis(50);
     let (bundle, policy) =
-        crate::tests::signed_component(fixture(Behavior::Complete, false, false, true));
+        crate::tests::signed_component(fixture(Behavior::Complete, "", false, true));
     assert!(matches!(
         load_signed_at(&host, bundle, &policy, opts, 150),
         Err(LoadError::Runtime(_))
@@ -443,4 +459,37 @@ fn attribute_bounds() {
     assert!(attributes(&one("k", "line\nbreak")).is_err());
     let many: HashMap<_, _> = (0..=MAX_ATTRIBUTES).map(|i| (format!("k{i}"), String::new())).collect();
     assert!(attributes(&many).is_err());
+}
+
+#[test]
+fn the_broker_import_needs_the_capability_and_a_port() {
+    let host = Host::new(1).unwrap();
+    let load = |caps: &[&str], broker: Option<BrokerHandle>, id: &str| {
+        let (bundle, policy) =
+            crate::tests::signed_component_with(fixture(Behavior::Complete, PG_IMPORT, false, false), caps);
+        let mut opts = options(id);
+        opts.broker = broker;
+        load_signed_at(&host, bundle, &policy, opts, 150).map(|mut w| w.shutdown(Duration::from_secs(1)).unwrap())
+    };
+    // Granted and supplied: the guest instantiates.
+    assert!(load(&["file.read", POSTGRESQL_READ], port(POSTGRESQL_READ), "pg-ok").is_ok());
+    // Without the capability the port is refused, without the port the import is missing.
+    assert!(matches!(load(&["file.read"], port(POSTGRESQL_READ), "pg-nocap"), Err(LoadError::Runtime(_))));
+    assert!(matches!(load(&["file.read", POSTGRESQL_READ], None, "pg-noport"), Err(LoadError::Runtime(_))));
+    // A port of another capability is not linked as PostgreSQL.
+    assert!(matches!(load(&["file.read", POSTGRESQL_READ], port("docker.read"), "pg-other"), Err(LoadError::Runtime(_))));
+}
+
+#[test]
+fn broker_calls_are_bounded() {
+    let mut state = HostState {
+        limits: StoreLimitsBuilder::new().build(),
+        broker: port(POSTGRESQL_READ),
+        max_broker_response: 8,
+    };
+    assert_eq!(broker_call(&mut state, BrokerFunction::PostgresqlInfo, b"abc".to_vec()).unwrap(), b"cba");
+    assert!(broker_call(&mut state, BrokerFunction::PostgresqlInfo, vec![0; 9]).unwrap_err().contains("response"));
+    assert!(broker_call(&mut state, BrokerFunction::PostgresqlInfo, vec![0; MAX_BROKER_REQUEST + 1]).unwrap_err().contains("request"));
+    state.broker = None;
+    assert!(broker_call(&mut state, BrokerFunction::PostgresqlInfo, Vec::new()).is_err());
 }

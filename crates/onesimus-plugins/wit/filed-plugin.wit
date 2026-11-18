@@ -16,3 +16,20 @@ world plugin {
     export close-file: func(request: list<u8>) -> list<u8>;
     export shutdown: func(request: list<u8>) -> list<u8>;
 }
+
+/// The PostgreSQL broker (proto/postgresql_broker.proto). Each function takes
+/// and returns one encoded message; the host checks every request and links
+/// this interface only for plugins granted "postgresql.read".
+interface postgresql {
+    info: func(request: list<u8>) -> result<list<u8>, string>;
+    database-info: func(request: list<u8>) -> result<list<u8>, string>;
+    dump-open: func(request: list<u8>) -> result<list<u8>, string>;
+    dump-read: func(request: list<u8>) -> result<list<u8>, string>;
+    dump-close: func(request: list<u8>) -> result<list<u8>, string>;
+}
+
+/// A plugin with the PostgreSQL broker import.
+world postgresql-plugin {
+    include plugin;
+    import postgresql;
+}

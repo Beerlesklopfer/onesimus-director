@@ -317,7 +317,7 @@ fn check_plugin(path: &std::path::Path, policy: &std::path::Path,
             PluginCheckOperation::Backup => JobOperation::Backup, PluginCheckOperation::Restore => JobOperation::Restore,
         } as i32 }, options: Default::default(),
         worker: Limits { max_pending_operations: 1, max_request_bytes: 256 * 1024,
-            max_response_bytes: 256 * 1024, operation_timeout: std::time::Duration::from_secs(5) }, runtime,
+            max_response_bytes: 256 * 1024, operation_timeout: std::time::Duration::from_secs(5) }, runtime, broker: None,
     })?;
     worker.shutdown(std::time::Duration::from_secs(2))?;
     println!("Plugin {} {}: X.509, signature, component ABI and initialization OK", manifest.plugin_id, manifest.version);

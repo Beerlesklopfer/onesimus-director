@@ -272,6 +272,7 @@ impl Session {
                 operation_timeout: OPERATION_TIMEOUT,
             },
             runtime,
+            broker: None,
         })
         .map_err(|e| load(&e))?;
         Ok(Self { worker, binding, job, line: line.clone(), plugin_id: manifest.plugin_id, chunk, started: false })
