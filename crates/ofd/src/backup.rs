@@ -8,7 +8,6 @@
 //! available in this File Daemon (no keys or plugins can be configured).
 
 use std::collections::HashMap;
-use std::fs::File;
 use std::io::{Read, Write};
 use std::os::unix::ffi::OsStrExt;
 use std::os::unix::fs::OpenOptionsExt;
@@ -26,6 +25,9 @@ use crate::find::*;
 use crate::jmsg::*;
 use crate::restore::Counters;
 use crate::streams::*;
+use crate::config::FdConfig;
+use crate::plugin::{self, PluginError, Session};
+use onesimus_proto_rs::onesimus::filed::plugin::v1 as pb;
 
 pub const M_NOTSAVED: i32 = 8;
 
@@ -275,6 +277,46 @@ pub struct Backup<'a, 'b, S: Read + Write> {
     pub acl_errors: u32,
     pub xattr_errors: u32,
     pub xattr_disabled: bool,
+    /// The File Daemon configuration (plugin directives).
+    pub config: &'b FdConfig,
+    /// Plugin lines started in this job: the instance index of the next one.
+    pub plugin_index: usize,
+}
+
+/// ReadFile of a plugin as a reader for send_data().
+struct PluginReader<'s, 'c> {
+    session: &'s Session,
+    path: Vec<u8>,
+    offset: u64,
+    eof: bool,
+    canceled: &'c dyn Fn() -> bool,
+    error: Option<PluginError>,
+}
+
+impl Read for PluginReader<'_, '_> {
+    fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+        // A block larger than buf would be lost: ask for at most buf.len()
+        // by reading only when buf can take a whole chunk.
+        if self.eof || buf.is_empty() {
+            return Ok(0);
+        }
+        if buf.len() < self.session.chunk as usize {
+            return Err(std::io::Error::other("plugin read buffer smaller than its chunk"));
+        }
+        match self.session.read(&self.path, self.offset, self.canceled) {
+            Ok((data, eof)) => {
+                self.eof = eof;
+                self.offset += data.len() as u64;
+                buf[..data.len()].copy_from_slice(&data);
+                Ok(data.len())
+            }
+            Err(e) => {
+                let text = e.to_string();
+                self.error = Some(e);
+                Err(std::io::Error::other(text))
+            }
+        }
+    }
 }
 
 impl<S: Read + Write> Backup<'_, '_, S> {
@@ -558,7 +600,7 @@ impl<S: Read + Write> Backup<'_, '_, S> {
     }
 
     /// send_data(): the data stream of an open file.
-    fn send_data(&mut self, stream: i32, ff: &FfPkt, file: &mut File, mut digest: Option<&mut Digest>) -> bool {
+    fn send_data(&mut self, stream: i32, ff: &FfPkt, file: &mut dyn Read, mut digest: Option<&mut Digest>) -> bool {
         if !self.sd.header(stream) {
             return false;
         }
@@ -631,6 +673,117 @@ impl<S: Read + Write> Backup<'_, '_, S> {
         self.sd.eod()
     }
 
+    /// A `Plugin =` line: start the signed plugin and save every file it
+    /// lists, each framed by plugin-name records like the Bareos FD.
+    pub fn save_plugin(&mut self, include: &FfPkt, text: &str) -> i32 {
+        let shown = crate::secrets::mask_plugin_secrets(text);
+        let line = match plugin::parse_line(text) {
+            Ok(l) => l,
+            Err(e) => {
+                self.jmsg(M_FATAL, format!("Plugin: \"{shown}\": {e}\n"));
+                return 0;
+            }
+        };
+        let job = pb::JobContext {
+            job_id: u64::from(self.sd.msgs.job_id),
+            job_name: if self.sd.msgs.job.is_empty() { "backup".into() } else { self.sd.msgs.job.clone() },
+            operation: pb::JobOperation::Backup as i32,
+        };
+        // The send buffer must take a whole block (send_data reads buf_size).
+        let chunk = self.buf_size.clamp(4096, 256 * 1024) as u32;
+        let index = self.plugin_index;
+        self.plugin_index += 1;
+        match Session::open(self.config, &line, job, index, chunk) {
+            Ok(session) => self.run_plugin(include, &shown, session),
+            Err(e) => {
+                self.jmsg(M_FATAL, format!("Plugin: \"{shown}\": {e}\n"));
+                0
+            }
+        }
+    }
+
+    /// The files of an opened plugin session into the SD stream.
+    fn run_plugin(&mut self, include: &FfPkt, shown: &str, mut session: Session) -> i32 {
+        let flag: &AtomicBool = self.env.canceled;
+        let canceled = move || flag.load(Ordering::Relaxed);
+        let mut ok = match session.start(&canceled) {
+            Ok(()) => true,
+            Err(e) => {
+                self.jmsg(M_FATAL, format!("Plugin: \"{shown}\": start: {e}\n"));
+                false
+            }
+        };
+        while ok {
+            match session.next_file(&canceled) {
+                Ok(None) => break,
+                Ok(Some(entry)) => ok = self.save_plugin_file(&session, include, shown, entry, &canceled),
+                Err(PluginError::Canceled) => ok = false,
+                Err(e) => {
+                    self.jmsg(M_FATAL, format!("Plugin: \"{shown}\": {e}\n"));
+                    ok = false;
+                }
+            }
+        }
+        if let Err(e) = session.finish(ok) {
+            if ok {
+                self.jmsg(M_FATAL, format!("Plugin: \"{shown}\": finish: {e}\n"));
+                ok = false;
+            }
+        }
+        i32::from(ok)
+    }
+
+    /// One file of a plugin: plugin name, attributes, data, digest, end.
+    fn save_plugin_file(&mut self, session: &Session, include: &FfPkt, shown: &str, entry: pb::FileEntry,
+        canceled: &dyn Fn() -> bool) -> bool {
+        let Some(mut ff) = plugin_ff(include, &entry) else {
+            let path = String::from_utf8_lossy(&entry.path).into_owned();
+            self.jmsg(M_FATAL, format!("Plugin: \"{shown}\": unsupported entry \"{path}\"\n"));
+            return false;
+        };
+        let fname = String::from_utf8_lossy(&ff.fname).into_owned();
+        self.sd.counters.num_files_examined += 1;
+        self.sd.publish(Some(&fname));
+        if !self.send_plugin_name(shown, true) {
+            return false;
+        }
+        let regular = ff.type_ == FT_REG;
+        let mut digest = if regular { Digest::for_flags(ff.opts.flags) } else { None };
+        let Some(stream) = self.encode_and_send_attributes(&mut ff) else { return false };
+        if regular {
+            let mut reader = PluginReader { session, path: entry.path.clone(), offset: 0, eof: false, canceled, error: None };
+            let sent = self.send_data(stream, &ff, &mut reader, digest.as_mut().map(|(d, _)| d));
+            if let Some(e) = reader.error {
+                if e != PluginError::Canceled {
+                    self.jmsg(M_FATAL, format!("Plugin: \"{shown}\": reading \"{fname}\": {e}\n"));
+                }
+                return false;
+            }
+            if !sent {
+                return false;
+            }
+        }
+        if let Some((d, stream)) = digest.take() {
+            let bytes = d.finalize();
+            if !(self.sd.header(stream) && self.sd.send(&bytes) && self.sd.eod()) {
+                return false;
+            }
+        }
+        self.send_plugin_name(shown, false)
+    }
+
+    /// send_plugin_name(): "<index> 1 1 <line>\0" before a plugin file,
+    /// "<index> 0" after it. The line is stored masked: no secret on a volume.
+    fn send_plugin_name(&mut self, shown: &str, start: bool) -> bool {
+        let index = self.sd.counters.job_files + u32::from(start);
+        let header = format!("{index} {STREAM_PLUGIN_NAME} 0");
+        let mut data = if start { format!("{index} 1 1 {shown}").into_bytes() } else { format!("{index} 0").into_bytes() };
+        if start {
+            data.push(0);
+        }
+        self.sd.send(header.as_bytes()) && self.sd.send(&data) && self.sd.eod()
+    }
+
     /// AccurateFinish(): the deleted files (Incremental/Differential) or
     /// the base files (Full) to the SD.
     pub fn accurate_finish(&mut self) -> bool {
@@ -665,7 +818,7 @@ impl<S: Read + Write> Backup<'_, '_, S> {
 }
 
 /// bread() of a regular file: read() until the buffer is full or EOF.
-fn read_full(f: &mut File, buf: &mut [u8]) -> std::io::Result<usize> {
+fn read_full(f: &mut (impl Read + ?Sized), buf: &mut [u8]) -> std::io::Result<usize> {
     let mut n = 0;
     while n < buf.len() {
         match f.read(&mut buf[n..]) {
@@ -689,7 +842,47 @@ pub struct BackupHandler<'x, 'a, 'b, S: Read + Write> {
     pub fileset: &'x FileSet,
 }
 
+/// The FfPkt of a plugin entry: its virtual path, type and attributes, with
+/// the include's options minus those that need a real file (sparse,
+/// offsets, ACLs, xattrs, change check). None for an unsupported kind.
+pub fn plugin_ff(include: &FfPkt, entry: &pb::FileEntry) -> Option<FfPkt> {
+    let mut opts = include.opts.clone();
+    for bit in [FO_SPARSE, FO_OFFSETS, FO_ACL, FO_XATTR, FO_CHKCHANGES] {
+        opts.flags.clear(bit);
+    }
+    let secs = entry.modified_unix_nanos.div_euclid(1_000_000_000);
+    // SAFETY: geteuid/getegid have no preconditions and cannot fail.
+    let (uid, gid) = unsafe { (libc::geteuid(), libc::getegid()) };
+    let perm = entry.mode & 0o7777;
+    let mut statp = Stat { nlink: 1, uid, gid, atime: secs, mtime: secs, ctime: secs, blksize: 4096, ..Default::default() };
+    let path = entry.path.clone();
+    let (type_, link) = match pb::FileKind::try_from(entry.kind).ok()? {
+        pb::FileKind::Regular | pb::FileKind::Virtual => {
+            statp.mode = libc::S_IFREG | if perm == 0 { 0o600 } else { perm };
+            statp.size = i64::try_from(entry.size).ok()?;
+            (FT_REG, path.clone())
+        }
+        pb::FileKind::Directory => {
+            statp.mode = libc::S_IFDIR | if perm == 0 { 0o700 } else { perm };
+            let mut dir = path.clone();
+            if dir.last() != Some(&b'/') {
+                dir.push(b'/');
+            }
+            (FT_DIREND, dir)
+        }
+        pb::FileKind::Symlink => {
+            statp.mode = libc::S_IFLNK | 0o777;
+            (FT_LNK, entry.symlink_target.clone())
+        }
+        pb::FileKind::Unspecified => return None,
+    };
+    Some(FfPkt { fname: path.clone(), link, top_fname: path, statp, type_, opts, ..Default::default() })
+}
+
 impl<S: Read + Write> Handler for BackupHandler<'_, '_, '_, S> {
+    fn plugin(&mut self, ff: &mut FfPkt, line: &str) -> i32 {
+        self.b.save_plugin(ff, line)
+    }
     fn handle(&mut self, ff: &mut FfPkt, links: &mut HashMap<(u64, u64), CurLink>, _top: bool) -> i32 {
         if ff.type_ == FT_NOFSCHG && !is_in_fileset(self.fileset, &ff.fname) {
             let fname = String::from_utf8_lossy(&ff.fname).into_owned();
@@ -722,6 +915,12 @@ pub struct EstimateHandler<'x, 'b> {
 }
 
 impl Handler for EstimateHandler<'_, '_> {
+    /// Estimating would run the plugin; it is counted as zero files.
+    fn plugin(&mut self, _ff: &mut FfPkt, line: &str) -> i32 {
+        let shown = crate::secrets::mask_plugin_secrets(line);
+        self.msgs.jmsg(M_INFO, &format!("Plugin: \"{shown}\": not included in the estimate.\n"));
+        1
+    }
     fn handle(&mut self, ff: &mut FfPkt, _l: &mut HashMap<(u64, u64), CurLink>, _top: bool) -> i32 {
         if self.env.canceled.load(Ordering::Relaxed) {
             return 0;
@@ -882,6 +1081,96 @@ impl<D: Read + Write> Handler for VerifyHandler<'_, D> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// BNET frames written to the SD: data records and signals.
+    #[derive(Debug, PartialEq)]
+    enum Frame {
+        Data(Vec<u8>),
+        Signal(i32),
+    }
+    fn frames(mut b: &[u8]) -> Vec<Frame> {
+        let mut out = Vec::new();
+        while b.len() >= 4 {
+            let n = i32::from_be_bytes(b[..4].try_into().unwrap());
+            b = &b[4..];
+            if n < 0 {
+                out.push(Frame::Signal(n));
+            } else {
+                out.push(Frame::Data(b[..n as usize].to_vec()));
+                b = &b[n as usize..];
+            }
+        }
+        out
+    }
+    fn text(f: &Frame) -> String {
+        match f {
+            Frame::Data(d) => String::from_utf8_lossy(d).into_owned(),
+            Frame::Signal(s) => format!("<{s}>"),
+        }
+    }
+
+    #[test]
+    fn plugin_files_are_framed_like_the_bareos_fd() {
+        use crate::plugin::testkit::*;
+        let d = std::env::temp_dir().join(format!("ofd-backup-plugin-{}", std::process::id()));
+        std::fs::create_dir_all(&d).unwrap();
+        let script = Script {
+            next: vec![file_step(b"@test/main/a.dump", 5), file_step(b"@test/main/empty", 0), complete_step()],
+            read: vec![data_step(b"hel", false), data_step(b"lo", true), data_step(b"", true)],
+            ..Default::default()
+        };
+        let resolved = signed_plugin(&d, "test", &script);
+        let line = crate::plugin::parse_line("test:instance=main:password=geheim").unwrap();
+        let job = pb::JobContext { job_id: 5, job_name: "j".into(), operation: pb::JobOperation::Backup as i32 };
+        let runtime = onesimus_plugins::wasm::RuntimeLimits { max_chunk_bytes: 4096, ..Default::default() };
+        let session = Session::open_resolved(&resolved, &line, job, 0, runtime).unwrap();
+
+        let config = FdConfig::parse("Director { Name = d; Password = p }").unwrap();
+        let canceled = AtomicBool::new(false);
+        let mut sd = BnetStream::new(std::io::Cursor::new(Vec::new()));
+        let mut msgs = JobMsgs::new("test-fd");
+        let mut counters = Counters::default();
+        let mut flush = |_: &mut JobMsgs| {};
+        let shown = crate::secrets::mask_plugin_secrets("test:instance=main:password=geheim");
+        let ok = {
+            let mut b = Backup {
+                sd: SdSender { sd: &mut sd, msgs: &mut msgs, counters: &mut counters, canceled: &canceled, progress: None },
+                env: JobEnv { canceled: &canceled, accurate: None, level_full: true, rerunning: false, base_size: 0 },
+                flush: &mut flush,
+                buf_size: 4096,
+                workers: 0,
+                acl_errors: 0,
+                xattr_errors: 0,
+                xattr_disabled: false,
+                config: &config,
+                plugin_index: 0,
+            };
+            b.run_plugin(&FfPkt::default(), &shown, session)
+        };
+        assert_eq!(ok, 1);
+        assert_eq!(counters.job_files, 2);
+        let f = frames(&sd.into_inner().into_inner());
+        let t: Vec<String> = f.iter().map(text).collect();
+        let eod = "<-1>".to_string();
+        // File 1: plugin name, attributes, data, end.
+        assert_eq!(t[0], "1 26 0");
+        assert_eq!(t[1], "1 1 1 test:instance=main:password=*****\0");
+        assert_eq!(t[2], eod);
+        assert_eq!(t[3], "1 1 0");
+        assert!(t[4].starts_with("1 3 @test/main/a.dump\0"), "{}", t[4]);
+        assert_eq!(t[5], eod);
+        assert_eq!(t[6], "1 2 0");
+        assert_eq!(t[7], "hel");
+        assert_eq!(t[8], "lo");
+        assert_eq!(t[9], eod);
+        assert_eq!(t[10..13], ["1 26 0".to_string(), "1 0".to_string(), eod.clone()]);
+        // File 2: an empty file still has a (empty) data stream.
+        assert_eq!(t[13], "2 26 0");
+        assert_eq!(t[16], "2 1 0");
+        assert!(t[17].starts_with("2 3 @test/main/empty\0"), "{}", t[17]);
+        assert!(!t.iter().any(|x| x.contains("geheim")), "a secret reached the volume");
+        std::fs::remove_dir_all(&d).unwrap();
+    }
 
     #[test]
     fn strip_and_streams() {

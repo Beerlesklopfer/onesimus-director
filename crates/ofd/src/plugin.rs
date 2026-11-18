@@ -226,7 +226,7 @@ impl Session {
         Self::open_resolved(&resolved, line, job, index, runtime)
     }
 
-    fn open_resolved(resolved: &Resolved, line: &PluginLine, job: pb::JobContext, index: usize, runtime: RuntimeLimits)
+    pub(crate) fn open_resolved(resolved: &Resolved, line: &PluginLine, job: pb::JobContext, index: usize, runtime: RuntimeLimits)
         -> Result<Self, PluginError> {
         let load = |e: &dyn fmt::Display| PluginError::Load(e.to_string());
         let chunk = runtime.max_chunk_bytes;

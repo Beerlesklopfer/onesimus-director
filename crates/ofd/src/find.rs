@@ -67,6 +67,12 @@ pub trait Handler {
     }
     /// Jmsg of the find library.
     fn jmsg(&mut self, t: i32, text: String);
+    /// A `Plugin =` line of the include `ff` belongs to: 1 ok, 0 error.
+    /// Handlers without plugin support report it as not found.
+    fn plugin(&mut self, _ff: &mut FfPkt, line: &str) -> i32 {
+        self.jmsg(crate::jmsg::M_FATAL, format!("Plugin: \"{}\" not found.\n", crate::secrets::mask_plugin_secrets(line)));
+        0
+    }
 }
 
 pub fn stat_from(st: &libc::stat) -> Stat {
@@ -176,12 +182,18 @@ impl<'a> Finder<'a> {
                 }
             }
             if !incexe.plugins.is_empty() {
-                // One message per plugin, so a second missing plugin is not
-                // found out only after the first one is fixed.
+                // Every line runs (or is reported), so a second failing
+                // plugin is not found out only after the first one is fixed.
+                let mut ok = true;
                 for plugin in &incexe.plugins {
-                    h.jmsg(crate::jmsg::M_FATAL, format!("Plugin: \"{}\" not found.\n", crate::secrets::mask_plugin_secrets(plugin)));
+                    if h.canceled() {
+                        return 0;
+                    }
+                    ok &= h.plugin(ff, plugin) != 0;
                 }
-                return 0;
+                if !ok {
+                    return 0;
+                }
             }
         }
         1

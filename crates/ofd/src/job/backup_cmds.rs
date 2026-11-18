@@ -510,6 +510,8 @@ impl Session<'_> {
             acl_errors: 0,
             xattr_errors: 0,
             xattr_disabled: false,
+            config: self.config,
+            plugin_index: 0,
         };
         let mut ok = {
             let mut h = BackupHandler { b: &mut b, fileset: fs };
