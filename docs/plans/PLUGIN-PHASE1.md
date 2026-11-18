@@ -189,3 +189,24 @@ Prüfsummen in `CloseFile`.
 5. Restore-Pfad in `restore.rs`: Dateien-Modus, dann Online-Modus.
 6. Gast `example-tree`, Signatur mit Test-CA, Ende-zu-Ende-Tests.
 7. Doku: `docs/wiki/plugin-architektur.md` (Ist-Stand), `file-daemon.md`.
+
+## Ende-zu-Ende-Lauf (18.11.2026)
+
+`odir` + `bareos-sd` 25.1.3 + `ofd` mit dem signierten Gast `example-tree`:
+Sicherung (5 Dateien), Wiederherstellung in Dateien ohne Plugin (Inhalt
+identisch, Modus und Zeit der Dateien wie geliefert), Online-Wiederherstellung
+über das Plugin, Abweisung eines Bundles einer fremden CA und eines Bundles mit
+verändertem WASM-Code (Fatal Error, 0 Dateien). Kein Plugin-Passwort auf dem
+Volume oder im Joblog.
+
+Behoben dabei: Prüfung der CA-Dateien der Policy (`ofd`), Weitergabe von
+`pluginoptions` beim Restore (`odir`).
+
+Offen:
+- Verzeichniszeit: Liefert ein Plugin ein Verzeichnis vor seinem Inhalt, setzt
+  das spätere Anlegen der Dateien die Zeit des Verzeichnisses neu. `ofd` soll
+  Verzeichnis-Attribute beim Restore erst nach dem Inhalt setzen.
+- `odir` und `ofd` binden trotz `DirAddress`/`FDAddress` an alle Schnittstellen;
+  `odir` kündigt sich zudem per mDNS an.
+- Der Job-Bericht zeigt „Software Compression: None“, obwohl LZ4 aktiv war.
+
