@@ -1872,7 +1872,7 @@ fn run_selected(
         passive_client: false,
         copy: None,
         backup: Some(session),
-        verify: None,
+        verify: None, plugin_options: Vec::new(),
     };
 
     // Job report data (job.cc SetJcrDefaults/ApplyPoolOverrides, GetLevelSinceTime)
@@ -1985,7 +1985,7 @@ pub(crate) fn plain_params(job_id: u32, unique: &str, job: &bareos_config::resou
         fileset_excludes: Vec::new(), since_utime: 0, prev_job: String::new(), where_path: None, regex_where: None, prefix_links: false, replace: None,
         restore_jobid: None, bootstrap: None, client_name: client.to_string(), client_first_connection: false, passive_client: false,
         copy: None, backup: None,
-        verify: None,
+        verify: None, plugin_options: Vec::new(),
     }
 }
 
@@ -2249,6 +2249,7 @@ fn run_restore(ast: &CommandAst, ctx: &ExecContext, job: bareos_config::resource
         bootstrap_path: value("bootstrap"),
         job: Some(job.name.clone()),
         storage: value("storage"),
+        plugin_options: value("pluginoptions"),
     })
 }
 

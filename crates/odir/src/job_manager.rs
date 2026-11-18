@@ -1555,7 +1555,7 @@ Job { Name = single; Client = fd1; Storage = File }
             sd_device: String::new(), sd_media_type: String::new(), director_name: "dir".into(), pool_name: "Full".into(),
             fileset_includes: Vec::new(), fileset_excludes: Vec::new(), since_utime: 0, prev_job: String::new(),
             where_path: None, regex_where: None, prefix_links: false, replace: None, restore_jobid: None, bootstrap: None,
-            client_name: String::new(), client_first_connection: false, passive_client: false, copy: None, verify: None, backup: None }
+            client_name: String::new(), client_first_connection: false, passive_client: false, copy: None, verify: None, plugin_options: Vec::new(), backup: None }
     }
 
     fn enqueue(m: &mut JobManager, id: u32, name: &str, priority: i32, client: &str, storage: &str) {

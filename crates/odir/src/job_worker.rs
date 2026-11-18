@@ -64,6 +64,9 @@ impl WorkerJobType {
 /// Parameters passed from Director to Worker.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct JobParams {
+    /// Restore: "pluginoptions …" lines for the FD (SendPluginOptions()).
+    #[serde(default)]
+    pub plugin_options: Vec<String>,
     pub job_id: u32,
     pub unique_job: String,
     pub job_name: String,
@@ -845,6 +848,10 @@ fn fd_restore_setup(fd: &mut BnetStream<bareos_bnet::AnyStream>, p: &JobParams, 
     // getSecureEraseCmd
     fd.send_str("getSecureEraseCmd\n").map_err(|e| format!("send secErase: {e}"))?;
     let _ = fd.recv_str(); // 2000 OK FDSecureEraseCmd *None*
+    // SendPluginOptions(): the restore's plugin options (e.g. restore_mode=online).
+    for line in &p.plugin_options {
+        send_expect(fd, line, "2000 OK PluginOptions", p.job_id, "FD PluginOptions")?;
+    }
     // Restore: NO level command, NO fileset — go straight to storage
     Ok(())
 }
@@ -1409,7 +1416,7 @@ mod wait_protocol_tests {
             fileset_includes: vec![], fileset_excludes: vec![], since_utime: 0, prev_job: String::new(),
             where_path: Some("/tmp/with space".into()), regex_where: None, prefix_links: false,
             replace: Some("ifnewer".into()), restore_jobid: None, bootstrap: None,
-            client_name: String::new(), client_first_connection: false, passive_client: false, copy: None, verify: None, backup: None,
+            client_name: String::new(), client_first_connection: false, passive_client: false, copy: None, verify: None, plugin_options: Vec::new(), backup: None,
         };
         assert_eq!(fd_restore_command(&p), "restore replace=w prelinks=0 where=/tmp/with\x01space\n");
         p.regex_where = Some("!/a!/b!".into());

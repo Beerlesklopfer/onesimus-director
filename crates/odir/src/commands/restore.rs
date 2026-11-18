@@ -83,6 +83,8 @@ pub(crate) struct Launch {
     /// The Restore Job resource and the storage of the run (C-058).
     pub job: Option<String>,
     pub storage: Option<String>,
+    /// `pluginoptions=` of the run (sent to the FD before the restore).
+    pub plugin_options: Option<String>,
 }
 
 pub fn cmd_restore(ast: &CommandAst, ctx: &ExecContext) -> CommandResult {
@@ -386,6 +388,7 @@ pub(crate) fn restore_with(ast: &CommandAst, ctx: &ExecContext,
             bootstrap_path: value("bootstrap"),
             job: value("job"),
             storage: value("storage"),
+            plugin_options: value("pluginoptions"),
         })
     });
     ua.finish(true)
@@ -1740,7 +1743,8 @@ use crate::btime::str_to_utime;
 /// does not open, the job fails like restore.cc DoNativeRestore.
 /// Compatibility log C-058.
 pub(crate) fn start_restore(ctx: &ExecContext, launch: Launch) -> CommandResult {
-    let Launch { restore_jobid, client: _, restore_client, where_path, regex_where, replace, expected_files, bootstrap_path, job, storage } = launch;
+    let Launch { restore_jobid, client: _, restore_client, where_path, regex_where, replace, expected_files, bootstrap_path, job, storage,
+        plugin_options } = launch;
 
     let config = match &ctx.config {
         Some(c) => match c.read() {
@@ -1844,6 +1848,7 @@ pub(crate) fn start_restore(ctx: &ExecContext, launch: Launch) -> CommandResult 
         passive_client,
         copy: None,
         verify: None, backup: None,
+        plugin_options: crate::backup::plugin_option_lines(plugin_options.as_deref(), &job_dirs),
     };
     let report = crate::job_messages::JobReport {
         kind: crate::job_messages::ReportKind::Restore, job: unique_job.clone(), client: client.name.clone(),
