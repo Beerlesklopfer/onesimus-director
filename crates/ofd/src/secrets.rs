@@ -3,12 +3,12 @@
 //! (e.g. `password=` of the LDAP plugin), and the Job log is readable by
 //! every console with access to the job.
 
-const MASK: &str = "*****";
+pub(crate) const MASK: &str = "*****";
 
 /// Substrings of an option name whose value is a secret.
 const SECRET_KEYS: &[&str] = &["pass", "pwd", "secret", "token", "credential", "apikey", "api_key"];
 
-fn is_secret(key: &str) -> bool {
+pub(crate) fn is_secret(key: &str) -> bool {
     let key = key.to_ascii_lowercase();
     SECRET_KEYS.iter().any(|s| key.contains(s))
 }

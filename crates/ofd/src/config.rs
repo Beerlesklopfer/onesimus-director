@@ -47,6 +47,12 @@ pub struct FdConfig {
     pub allow_bw_bursting: bool,
     pub allowed_script_dirs: Vec<String>,
     pub allowed_job_cmds: Vec<String>,
+    /// "Plugin Directory": signed bundles `<name>.pb` (Bareos name).
+    pub plugin_directory: Option<std::path::PathBuf>,
+    /// "Plugin Names": the plugins a FileSet may use (Bareos name).
+    pub plugin_names: Vec<String>,
+    /// "Plugin Policy": public X.509 trust policy JSON. Without it no plugin runs.
+    pub plugin_policy: Option<std::path::PathBuf>,
     /// Client `Messages =`, else the first Messages resource.
     pub messages: Option<MessagesRes>,
     messages_name: Option<String>,
@@ -83,6 +89,9 @@ impl FdConfig {
             allow_bw_bursting: false,
             allowed_script_dirs: Vec::new(),
             allowed_job_cmds: Vec::new(),
+            plugin_directory: None,
+            plugin_names: Vec::new(),
+            plugin_policy: None,
             messages: None,
             messages_name: None,
             all_messages: Vec::new(),
@@ -271,6 +280,9 @@ fn parse_block(block_type: &str, content: &str, config: &mut FdConfig) {
             }
             config.allowed_script_dirs = all("allowedscriptdir");
             config.allowed_job_cmds = all("allowedjobcommand");
+            if let Some(v) = get("plugindirectory") { config.plugin_directory = Some(v.into()); }
+            config.plugin_names = all("pluginnames");
+            if let Some(v) = get("pluginpolicy") { config.plugin_policy = Some(v.into()); }
             if let Some(v) = get("messages") { config.messages_name = Some(v); }
         }
         "director" => {
@@ -447,5 +459,25 @@ Messages {
         assert!(m.director_types & (1 << 9) == 0);
         assert!(m.director_types & (1 << 13) == 0);
         assert_eq!(m.append[0].0, "/tmp/x.log");
+    }
+
+    #[test]
+    fn parse_plugin_directives() {
+        let input = r#"
+Client {
+  Name = c-fd
+  Plugin Directory = /usr/lib/onesimus/plugins
+  Plugin Names = postgresql, openldap
+  Plugin Names = "podman"
+  Plugin Policy = /etc/onesimus/plugin-policy.json
+}
+Director { Name = d; Password = "p" }
+"#;
+        let c = FdConfig::parse(input).unwrap();
+        assert_eq!(c.plugin_directory.as_deref(), Some(Path::new("/usr/lib/onesimus/plugins")));
+        assert_eq!(c.plugin_names, vec!["postgresql", "openldap", "podman"]);
+        assert_eq!(c.plugin_policy.as_deref(), Some(Path::new("/etc/onesimus/plugin-policy.json")));
+        let bare = FdConfig::parse("Director { Name = d; Password = p }").unwrap();
+        assert!(bare.plugin_directory.is_none() && bare.plugin_names.is_empty() && bare.plugin_policy.is_none());
     }
 }

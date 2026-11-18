@@ -26,6 +26,7 @@ mod grpc;
 mod grpc_tls;
 mod jmsg;
 mod job;
+mod plugin;
 mod restore;
 mod runscript;
 mod scan;
