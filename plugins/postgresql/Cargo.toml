@@ -1,0 +1,24 @@
+[package]
+name = "onesimus-plugin-postgresql"
+version = "1.0.0"
+edition = "2024"
+description = "Signed ofd plugin: logical backups of every database of a PostgreSQL instance through its broker"
+license = "AGPL-3.0-only"
+publish = false
+
+# Built for wasm32-wasip2 on its own, not part of the host workspace.
+[workspace]
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+wit-bindgen = { version = "0.51", default-features = false, features = ["macros"] }
+prost = { version = "0.13", default-features = false, features = ["derive"] }
+onesimus-guest-runtime = { path = "../guest-runtime" }
+
+[profile.release]
+opt-level = "s"
+lto = true
+panic = "abort"
+strip = true

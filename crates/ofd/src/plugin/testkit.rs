@@ -155,6 +155,13 @@ pub fn signed_plugin(dir: &Path, name: &str, script: &Script) -> Resolved {
 
 /// Like `signed_plugin` for a given component (e.g. a built Rust guest).
 pub fn signed_artifact(dir: &Path, name: &str, artifact: Vec<u8>) -> Resolved {
+    signed_artifact_with(dir, name, artifact, &["file.read", "file.write"], Default::default())
+}
+
+/// A signed bundle with these capabilities and native parts (schema 2 when
+/// `native` is not empty).
+pub fn signed_artifact_with(dir: &Path, name: &str, artifact: Vec<u8>, caps: &[&str],
+    native: std::collections::BTreeMap<String, Vec<onesimus_plugins::NativePart>>) -> Resolved {
     let now = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs();
     let ca_key = KeyPair::generate_for(&PKCS_ED25519).unwrap();
     let mut ca = CertificateParams::default();
@@ -173,9 +180,9 @@ pub fn signed_artifact(dir: &Path, name: &str, artifact: Vec<u8>) -> Resolved {
 
     let key_id = onesimus_plugins::signing_key_id(leaf.der()).unwrap();
     let plugin_id = format!("test.{name}");
-    let capabilities = vec!["file.read".to_string(), "file.write".to_string()];
+    let capabilities: Vec<String> = caps.iter().map(|c| c.to_string()).collect();
     let manifest = onesimus_plugins::Manifest {
-        schema_version: 1,
+        schema_version: if native.is_empty() { 1 } else { 2 },
         plugin_id: plugin_id.clone(),
         version: "1.0.0".into(),
         api_version: 1,
@@ -185,7 +192,7 @@ pub fn signed_artifact(dir: &Path, name: &str, artifact: Vec<u8>) -> Resolved {
         not_after: now + 300,
         capabilities: capabilities.clone(),
         target: "wasm32-wasip2".into(),
-        native: Default::default(),
+        native,
     };
     let manifest_bytes = serde_json::to_vec(&manifest).unwrap();
     let signature = Signer::new_without_digest(&key).unwrap().sign_oneshot_to_vec(&manifest_bytes).unwrap();

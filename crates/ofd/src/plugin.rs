@@ -757,7 +757,7 @@ mod guest {
 
     /// FD->SD frames ("<fi> <stream> 0", data, EOD) as the SD sends them back
     /// on restore ("rechdr <vsid> <vst> <fi> <stream> <len>", data).
-    fn as_read_back(written: &[u8]) -> Vec<u8> {
+    pub(super) fn as_read_back(written: &[u8]) -> Vec<u8> {
         let mut frames = Vec::new();
         let mut b = written;
         while b.len() >= 4 {
@@ -792,7 +792,7 @@ mod guest {
         out
     }
 
-    struct Duplex(Cursor<Vec<u8>>);
+    pub(super) struct Duplex(pub Cursor<Vec<u8>>);
     impl Read for Duplex {
         fn read(&mut self, b: &mut [u8]) -> std::io::Result<usize> {
             self.0.read(b)
@@ -897,4 +897,114 @@ mod guest {
         assert!(sent.iter().any(|m| m.contains("restoring online through test.example")), "{sent:?}");
         std::fs::remove_dir_all(&dir).unwrap();
     }
+
+    /// The PostgreSQL plugin end to end: signed guest (schema 2 with the
+    /// broker), broker as the cluster's user, backup into the SD stream,
+    /// restore to files, pg_restore of a restored dump. Build first:
+    /// plugins/postgresql (wasm32-wasip2) and `cargo build -p onesimus-pg-broker`.
+    #[test]
+    #[ignore = "needs the built postgresql guest and onesimus-pg-broker"]
+    fn postgresql_backs_up_every_allowed_database() {
+        use super::testkit::signed_artifact_with;
+        use std::process::Command;
+        let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+        let wasm = std::fs::read(root.join("target/plugins/wasm32-wasip2/release/onesimus_plugin_postgresql.wasm"))
+            .expect("build plugins/postgresql first");
+        let broker_bin = root.join("target/debug/onesimus-pg-broker");
+        assert!(broker_bin.is_file(), "cargo build -p onesimus-pg-broker first");
+        let Some(c) = crate::pg_instance::testcluster::start("plugin-e2e", 55434) else { return };
+        c.sql("postgres", "CREATE DATABASE \"app-1\"");
+        c.sql("postgres", "CREATE DATABASE bareos");
+        c.sql("postgres", "CREATE DATABASE test_scratch");
+        c.sql("postgres", "CREATE ROLE reader NOLOGIN");
+        c.sql("app-1", "CREATE TABLE t (id int primary key, v text); INSERT INTO t SELECT g, repeat('x', 200) FROM generate_series(1, 20000) g");
+
+        // Plugin directory: bundle and broker, signed together.
+        let d = std::env::temp_dir().join(format!("ofd-pg-plugin-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&d);
+        let plugins = d.join("plugins");
+        std::fs::create_dir_all(plugins.join("postgresql")).unwrap();
+        use std::os::unix::fs::PermissionsExt;
+        for p in [&d, &plugins, &plugins.join("postgresql")] {
+            std::fs::set_permissions(p, std::fs::Permissions::from_mode(0o755)).unwrap();
+        }
+        let broker_path = plugins.join("postgresql/onesimus-pg-broker");
+        std::fs::copy(&broker_bin, &broker_path).unwrap();
+        std::fs::set_permissions(&broker_path, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let sha: String = {
+            use sha2::Digest;
+            sha2::Sha256::digest(std::fs::read(&broker_path).unwrap()).iter().map(|b| format!("{b:02x}")).collect()
+        };
+        let triplet = "test-triplet".to_string();
+        let native = [(triplet.clone(), vec![onesimus_plugins::NativePart { path: "postgresql/onesimus-pg-broker".into(), sha256: sha }])].into();
+        let resolved = signed_artifact_with(&plugins, "postgresql", wasm, &["file.read", "file.write", "postgresql.read"], native);
+
+        let line = PluginLine {
+            name: "postgresql".into(),
+            options: [("instance", "main".to_string()), ("socket", c.sockets().display().to_string()),
+                ("port", c.port.to_string()), ("exclude", "test_*".to_string())]
+                .into_iter().map(|(k, v)| (k.to_string(), v)).collect(),
+        };
+        let chunk = 64 * 1024;
+        let me = me_uid();
+        let prepared = prepare_broker(&resolved, &line, &plugins, &triplet, chunk, me, &d).unwrap().expect("a broker");
+        let job = pb::JobContext { job_id: 9101, job_name: "pg".into(), operation: pb::JobOperation::Backup as i32 };
+        let runtime = RuntimeLimits { max_chunk_bytes: chunk, ..RuntimeLimits::default() };
+        let session = Session::open_with(&resolved, &line, job, 0, runtime, Some(prepared)).unwrap();
+
+        // Backup through the real send path.
+        let config = crate::config::FdConfig::parse("Director { Name = d; Password = p }").unwrap();
+        let canceled = std::sync::atomic::AtomicBool::new(false);
+        let mut sd = bareos_bnet::BnetStream::new(std::io::Cursor::new(Vec::new()));
+        let mut msgs = crate::jmsg::JobMsgs::new("test-fd");
+        let mut counters = crate::restore::Counters::default();
+        let mut flush = |_: &mut crate::jmsg::JobMsgs| {};
+        let ok = crate::backup::Backup {
+            sd: crate::backup::SdSender { sd: &mut sd, msgs: &mut msgs, counters: &mut counters, canceled: &canceled, progress: None },
+            env: crate::backup::JobEnv { canceled: &canceled, accurate: None, level_full: true, rerunning: false, base_size: 0 },
+            flush: &mut flush, buf_size: chunk as usize, workers: 0, acl_errors: 0, xattr_errors: 0, xattr_disabled: false,
+            config: &config, plugin_index: 0,
+        }
+        .run_plugin(&crate::find::FfPkt::default(), "postgresql:instance=main", session);
+        assert_eq!(ok, 1, "{:?}", msgs.take_queued());
+        let volume = sd.into_inner().into_inner();
+
+        // Restore to files.
+        let target = d.join("restore");
+        std::fs::create_dir_all(&target).unwrap();
+        let mut rsd = bareos_bnet::BnetStream::new(Duplex(std::io::Cursor::new(as_read_back(&volume))));
+        let params = crate::restore::RestoreParams {
+            where_: crate::attribs::Where::Prefix(target.as_os_str().as_encoded_bytes().to_vec()), replace: b'a', prefix_links: false };
+        let mut rmsgs = crate::jmsg::JobMsgs::new("test-fd");
+        rmsgs.job_id = 9102;
+        let mut sent = Vec::new();
+        crate::restore::Restore { params: &params, msgs: &mut rmsgs, counters: &mut crate::restore::Counters::default(),
+            create: &mut crate::create_file::CreateState::default(), canceled: &canceled, config: None, plugin_options: &[] }
+            .run(&mut rsd, &mut |m: &mut crate::jmsg::JobMsgs| sent.extend(m.take_queued()));
+        assert_eq!(rmsgs.status(), crate::jmsg::JS_TERMINATED, "{sent:?}");
+
+        let base = target.join("@postgresql/main");
+        assert!(base.join("db/app-1/app-1.dump").is_file());
+        assert!(base.join("db/postgres/postgres.dump").is_file());
+        assert!(!base.join("db/bareos").exists(), "the catalog is never backed up");
+        assert!(!base.join("db/test_scratch").exists(), "excluded by the plugin line");
+        assert!(std::fs::read_to_string(base.join("globals.sql")).unwrap().contains("CREATE ROLE reader"));
+        let cluster = std::fs::read_to_string(base.join("_info.json")).unwrap();
+        assert!(cluster.contains("\"dumped\":[\"app-1\",\"postgres\"]"), "{cluster}");
+        assert!(std::fs::read_to_string(base.join("db/app-1/_info.json")).unwrap().contains("\"name\":\"t\""));
+
+        // The restored dump gives back the rows.
+        c.sql("postgres", "CREATE DATABASE restored");
+        let r = Command::new(c.bin.join("pg_restore")).arg("-h").arg(c.sockets()).args(["-p", &c.port.to_string(), "-d", "restored"])
+            .arg(base.join("db/app-1/app-1.dump")).output().unwrap();
+        assert!(r.status.success(), "{}", String::from_utf8_lossy(&r.stderr));
+        assert_eq!(c.sql("restored", "SELECT count(*) FROM t").trim(), "20000");
+        std::fs::remove_dir_all(&d).unwrap();
+    }
+
+    fn me_uid() -> u32 {
+        // SAFETY: getuid has no preconditions.
+        unsafe { libc::getuid() }
+    }
 }
+

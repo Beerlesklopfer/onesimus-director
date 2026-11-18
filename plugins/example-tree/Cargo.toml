@@ -15,6 +15,7 @@ crate-type = ["cdylib"]
 [dependencies]
 wit-bindgen = { version = "0.51", default-features = false, features = ["macros"] }
 prost = { version = "0.13", default-features = false, features = ["derive"] }
+onesimus-guest-runtime = { path = "../guest-runtime" }
 
 [profile.release]
 opt-level = "s"
