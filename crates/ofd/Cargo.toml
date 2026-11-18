@@ -15,6 +15,7 @@ onesimus-plugins = { path = "../onesimus-plugins" }
 tonic.workspace = true
 tokio.workspace = true
 onesimus-proto-rs.workspace = true
+prost.workspace = true
 tokio-stream = { version = "0.1", features = ["net"] }
 bareos-bnet.workspace = true
 bareos-config.workspace = true
@@ -44,7 +45,6 @@ twox-hash = { version = "2", default-features = false, features = ["xxhash3_128"
 [dev-dependencies]
 openssl.workspace = true
 wat = "1"
-prost.workspace = true
 
 [package.metadata.deb]
 name = "ofd"

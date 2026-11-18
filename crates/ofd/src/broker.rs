@@ -55,7 +55,7 @@ pub fn launch(plugin_dir: &Path, manifest: &onesimus_plugins::Manifest, part: &s
 }
 
 #[allow(clippy::too_many_arguments)]
-fn launch_checked(plugin_dir: &Path, manifest: &onesimus_plugins::Manifest, triplet: &str, part: &str, run_as: RunAs,
+pub(crate) fn launch_checked(plugin_dir: &Path, manifest: &onesimus_plugins::Manifest, triplet: &str, part: &str, run_as: RunAs,
     args: &[String], owner: u32, top: &Path) -> Result<Broker, PluginError> {
     let entry = manifest.native_part(triplet, part)
         .ok_or_else(|| PluginError::Load(format!("the signed manifest lists no {part} for {triplet}")))?;

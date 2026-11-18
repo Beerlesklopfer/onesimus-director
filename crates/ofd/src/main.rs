@@ -28,6 +28,7 @@ mod grpc_tls;
 mod jmsg;
 mod job;
 mod pg_instance;
+mod pg_port;
 mod plugin;
 mod restore;
 mod runscript;

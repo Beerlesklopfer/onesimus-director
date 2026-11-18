@@ -234,6 +234,57 @@ pub struct Session {
     /// Largest block ReadFile/WriteFile may carry.
     pub chunk: u32,
     started: bool,
+    /// The native broker of this session (stopped with it) and a second
+    /// handle on its socket: shutting it down unblocks a waiting broker call.
+    broker: Option<(crate::broker::Broker, std::os::unix::net::UnixStream)>,
+}
+
+/// A started broker and the port the guest's import calls go through.
+pub(crate) struct PreparedBroker {
+    handle: onesimus_plugins::wasm::BrokerHandle,
+    broker: crate::broker::Broker,
+    cancel: std::os::unix::net::UnixStream,
+}
+
+/// The broker a plugin needs, from its *verified* manifest: for
+/// `postgresql.read` the instance named by `socket=`/`port=` (default
+/// /var/run/postgresql, 5432), its user, and `<name>/onesimus-pg-broker`.
+/// `owner`/`top`: the ownership rule (root and / in production).
+pub(crate) fn prepare_broker(resolved: &Resolved, line: &PluginLine, plugin_dir: &Path, triplet: &str, chunk: u32,
+    owner: u32, top: &Path) -> Result<Option<PreparedBroker>, PluginError> {
+    use onesimus_plugins::wasm::{BrokerHandle, POSTGRESQL_READ};
+    let load = |e: &dyn fmt::Display| PluginError::Load(e.to_string());
+    let bundle = bundle::read_bundle(&resolved.bundle, RuntimeLimits::default().max_component_bytes).map_err(|e| load(&e))?;
+    let policy = bundle::read_policy(&resolved.policy).map_err(|e| load(&e))?;
+    let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_err(|e| load(&e))?.as_secs();
+    // The broker decision rests on the verified manifest only.
+    let verified = onesimus_plugins::verify(&bundle.manifest_bytes, &bundle.ed25519_signature, bundle.artifact_bytes,
+        &bundle.x509_certificate_chain_der, &policy, now).map_err(|e| load(&e))?;
+    let manifest = verified.manifest();
+    if !manifest.capabilities.iter().any(|c| c == POSTGRESQL_READ) {
+        return Ok(None);
+    }
+    let socket_dir = PathBuf::from(line.options.get("socket").map(String::as_str).unwrap_or("/var/run/postgresql"));
+    let port: u16 = match line.options.get("port") {
+        Some(p) => p.parse().map_err(|_| PluginError::Syntax(format!("port \"{p}\" is not a number")))?,
+        None => 5432,
+    };
+    let instance = crate::pg_instance::discover(&socket_dir, port)?;
+    let bin = PathBuf::from(format!("/usr/lib/postgresql/{}/bin", instance.major));
+    // The client programs the broker runs are system files: root-owned always.
+    check_trusted(&bin.join("pg_dump"), 0, false, Path::new("/"))?;
+    let args = vec![
+        "--socket-dir".to_string(), socket_dir.display().to_string(),
+        "--port".to_string(), port.to_string(),
+        "--bin".to_string(), bin.display().to_string(),
+    ];
+    let part = format!("{}/onesimus-pg-broker", line.name);
+    let broker = crate::broker::launch_checked(plugin_dir, manifest, triplet, &part, instance.run_as, &args, owner, top)?;
+    let io = |e: std::io::Error| PluginError::Load(format!("broker socket: {e}"));
+    let cancel = broker.socket.try_clone().map_err(io)?;
+    let port = crate::pg_port::PgPort::new(broker.socket.try_clone().map_err(io)?, &line.options, chunk)
+        .map_err(PluginError::Load)?;
+    Ok(Some(PreparedBroker { handle: BrokerHandle(std::sync::Arc::new(std::sync::Mutex::new(Box::new(port)))), broker, cancel }))
 }
 
 impl Session {
@@ -243,11 +294,20 @@ impl Session {
         -> Result<Self, PluginError> {
         let resolved = resolve(config, line)?;
         let runtime = RuntimeLimits { max_chunk_bytes: chunk, ..RuntimeLimits::default() };
-        Self::open_resolved(&resolved, line, job, index, runtime)
+        let broker = match (&config.plugin_directory, crate::config::multiarch_triplet()) {
+            (Some(dir), Some(triplet)) => prepare_broker(&resolved, line, dir, triplet, chunk, 0, Path::new("/"))?,
+            _ => None,
+        };
+        Self::open_with(&resolved, line, job, index, runtime, broker)
     }
 
     pub(crate) fn open_resolved(resolved: &Resolved, line: &PluginLine, job: pb::JobContext, index: usize, runtime: RuntimeLimits)
         -> Result<Self, PluginError> {
+        Self::open_with(resolved, line, job, index, runtime, None)
+    }
+
+    pub(crate) fn open_with(resolved: &Resolved, line: &PluginLine, job: pb::JobContext, index: usize, runtime: RuntimeLimits,
+        prepared: Option<PreparedBroker>) -> Result<Self, PluginError> {
         let load = |e: &dyn fmt::Display| PluginError::Load(e.to_string());
         let chunk = runtime.max_chunk_bytes;
         let bundle = bundle::read_bundle(&resolved.bundle, runtime.max_component_bytes).map_err(|e| load(&e))?;
@@ -272,10 +332,11 @@ impl Session {
                 operation_timeout: OPERATION_TIMEOUT,
             },
             runtime,
-            broker: None,
+            broker: prepared.as_ref().map(|p| p.handle.clone()),
         })
         .map_err(|e| load(&e))?;
-        Ok(Self { worker, binding, job, line: line.clone(), plugin_id: manifest.plugin_id, chunk, started: false })
+        let broker = prepared.map(|p| (p.broker, p.cancel));
+        Ok(Self { worker, binding, job, line: line.clone(), plugin_id: manifest.plugin_id, chunk, started: false, broker })
     }
 
     /// One call, waiting until it answers or `canceled()` turns true.
@@ -287,6 +348,11 @@ impl Session {
                 Err(mpsc::RecvTimeoutError::Timeout) => {
                     if canceled() {
                         self.worker.cancel();
+                        // A guest waiting in a broker call is not interruptible
+                        // by the engine; closing the socket ends that call.
+                        if let Some((_, socket)) = &self.broker {
+                            let _ = socket.shutdown(std::net::Shutdown::Both);
+                        }
                         return Err(PluginError::Canceled);
                     }
                 }
@@ -379,6 +445,9 @@ impl Session {
             Ok(())
         };
         let stopped = self.worker.shutdown(Duration::from_secs(5)).map_err(|e| PluginError::Runtime(e.to_string()));
+        if let Some((mut broker, _)) = self.broker.take() {
+            broker.stop(Duration::from_secs(5));
+        }
         reported.and(stopped)
     }
 }
