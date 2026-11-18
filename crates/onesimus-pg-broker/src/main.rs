@@ -26,6 +26,11 @@ use prost::Message;
 const MAX_FRAME: usize = 1024 * 1024;
 const MAX_READ: u32 = 1024 * 1024;
 const MAX_DUMPS: usize = 4;
+/// Info queries never wait long for a lock or run long.
+const QUERY_SETTINGS: &str = "SET lock_timeout = '10s'; SET statement_timeout = '120s';";
+/// pg_dump waits at most this long for a table lock, then fails with a
+/// message instead of blocking the backup without end.
+const DUMP_LOCK_WAIT: &str = "--lock-wait-timeout=300s";
 
 struct Args {
     socket_dir: PathBuf,
@@ -89,6 +94,7 @@ impl Broker {
         let out = self.client("psql")
             .args(["-X", "-A", "-t", "-q", "-v", "ON_ERROR_STOP=1"])
             .arg("-d").arg(conninfo(database))
+            .arg("-c").arg(QUERY_SETTINGS)
             .arg("-c").arg(sql)
             .stdin(Stdio::null())
             .output()
@@ -106,7 +112,8 @@ impl Broker {
             'dbs', (SELECT coalesce(json_agg(json_build_object(
                 'name', d.datname, 'owner', pg_get_userbyid(d.datdba),
                 'encoding', pg_encoding_to_char(d.encoding),
-                'size', CASE WHEN d.datallowconn THEN pg_database_size(d.oid) ELSE 0 END,
+                'size', CASE WHEN d.datallowconn AND has_database_privilege(d.oid, 'CONNECT')
+                             THEN pg_database_size(d.oid) ELSE 0 END,
                 'allow', d.datallowconn, 'template', d.datistemplate) ORDER BY d.datname), '[]')
               FROM pg_database d))")?;
         let v: serde_json::Value = serde_json::from_str(&json).map_err(|e| format!("info JSON: {e}"))?;
@@ -132,7 +139,9 @@ impl Broker {
                         WHERE nspname NOT LIKE 'pg\\_%' AND nspname <> 'information_schema'),
             'tables', (SELECT coalesce(json_agg(json_build_object(
                     'schema', n.nspname, 'name', c.relname,
-                    'rows', greatest(c.reltuples, 0)::bigint, 'size', pg_total_relation_size(c.oid))
+                    'rows', greatest(c.reltuples, 0)::bigint,
+                    -- From the catalog: pg_total_relation_size would lock the table.
+                    'size', c.relpages::bigint * current_setting('block_size')::bigint)
                     ORDER BY n.nspname, c.relname), '[]')
                 FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
                 WHERE c.relkind IN ('r', 'p', 'm') AND n.nspname NOT LIKE 'pg\\_%'
@@ -156,12 +165,12 @@ impl Broker {
         let mut cmd = match what {
             Some(pb::dump_open_request::What::Database(db)) => {
                 let mut c = self.client("pg_dump");
-                c.arg("-Fc").arg("-d").arg(conninfo(&db));
+                c.arg("-Fc").arg(DUMP_LOCK_WAIT).arg("-d").arg(conninfo(&db));
                 c
             }
             Some(pb::dump_open_request::What::Globals(_)) => {
                 let mut c = self.client("pg_dumpall");
-                c.arg("--globals-only").arg("-d").arg(conninfo("postgres"));
+                c.arg("--globals-only").arg(DUMP_LOCK_WAIT).arg("-d").arg(conninfo("postgres"));
                 c
             }
             None => return Err("dump of what?".into()),

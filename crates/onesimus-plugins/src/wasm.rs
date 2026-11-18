@@ -344,11 +344,18 @@ fn attributes(map: &std::collections::HashMap<String, String>) -> Result<(), exe
     }
     Ok(())
 }
+/// Longest plugin diagnostic passed on to the job log.
+const MAX_DIAGNOSTIC: usize = 512;
 fn ok(result: Option<&pb::OperationResult>) -> Result<(), executor::Error> {
-    if result.is_some_and(|r| r.code == ReturnCode::RcOk as i32) {
-        Ok(())
-    } else {
-        Err(backend("plugin returned an unsuccessful or missing result"))
+    match result {
+        Some(r) if r.code == ReturnCode::RcOk as i32 => Ok(()),
+        Some(r) if !r.diagnostic.is_empty() => {
+            // The plugin's own words, bounded and without control characters.
+            let text: String = r.diagnostic.chars().map(|c| if c.is_control() { ' ' } else { c })
+                .take(MAX_DIAGNOSTIC).collect();
+            Err(backend(format!("plugin: {}", text.trim())))
+        }
+        _ => Err(backend("plugin returned an unsuccessful or missing result")),
     }
 }
 impl WasmBackend {
@@ -646,3 +653,18 @@ impl Backend for WasmBackend {
 }
 #[cfg(test)]
 mod tests;
+
+#[cfg(test)]
+mod diagnostic_tests {
+    use super::*;
+    #[test]
+    fn plugin_diagnostics_reach_the_log_bounded_and_clean() {
+        let r = |code: ReturnCode, d: &str| pb::OperationResult { code: code as i32, diagnostic: d.into() };
+        assert!(ok(Some(&r(ReturnCode::RcOk, "fine"))).is_ok());
+        let e = ok(Some(&r(ReturnCode::RcError, "dump failed:\nconnection lost"))).unwrap_err().to_string();
+        assert!(e.contains("plugin: dump failed: connection lost"), "{e}");
+        let long = "x".repeat(5000);
+        assert!(ok(Some(&r(ReturnCode::RcError, &long))).unwrap_err().to_string().len() < MAX_DIAGNOSTIC + 64);
+        assert!(ok(None).unwrap_err().to_string().contains("missing"));
+    }
+}

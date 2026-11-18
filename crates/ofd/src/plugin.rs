@@ -898,34 +898,33 @@ mod guest {
         std::fs::remove_dir_all(&dir).unwrap();
     }
 
-    /// The PostgreSQL plugin end to end: signed guest (schema 2 with the
-    /// broker), broker as the cluster's user, backup into the SD stream,
-    /// restore to files, pg_restore of a restored dump. Build first:
-    /// plugins/postgresql (wasm32-wasip2) and `cargo build -p onesimus-pg-broker`.
-    #[test]
-    #[ignore = "needs the built postgresql guest and onesimus-pg-broker"]
-    fn postgresql_backs_up_every_allowed_database() {
+    /// A signed PostgreSQL plugin (schema 2 with the broker) in a fresh
+    /// plugin directory, for a throwaway cluster. Needs the built guest and
+    /// broker (see plugins/postgresql/README.md).
+    struct PgSetup {
+        cluster: crate::pg_instance::testcluster::Cluster,
+        dir: PathBuf,
+        plugins: PathBuf,
+        resolved: Resolved,
+        line: PluginLine,
+    }
+    const TRIPLET: &str = "test-triplet";
+    const CHUNK: u32 = 64 * 1024;
+
+    fn pg_setup(tag: &str, port: u16) -> Option<PgSetup> {
         use super::testkit::signed_artifact_with;
-        use std::process::Command;
+        use std::os::unix::fs::PermissionsExt;
         let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
         let wasm = std::fs::read(root.join("target/plugins/wasm32-wasip2/release/onesimus_plugin_postgresql.wasm"))
             .expect("build plugins/postgresql first");
         let broker_bin = root.join("target/debug/onesimus-pg-broker");
         assert!(broker_bin.is_file(), "cargo build -p onesimus-pg-broker first");
-        let Some(c) = crate::pg_instance::testcluster::start("plugin-e2e", 55434) else { return };
-        c.sql("postgres", "CREATE DATABASE \"app-1\"");
-        c.sql("postgres", "CREATE DATABASE bareos");
-        c.sql("postgres", "CREATE DATABASE test_scratch");
-        c.sql("postgres", "CREATE ROLE reader NOLOGIN");
-        c.sql("app-1", "CREATE TABLE t (id int primary key, v text); INSERT INTO t SELECT g, repeat('x', 200) FROM generate_series(1, 20000) g");
-
-        // Plugin directory: bundle and broker, signed together.
-        let d = std::env::temp_dir().join(format!("ofd-pg-plugin-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&d);
-        let plugins = d.join("plugins");
+        let cluster = crate::pg_instance::testcluster::start(tag, port)?;
+        let dir = std::env::temp_dir().join(format!("ofd-pg-{tag}-plugin-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let plugins = dir.join("plugins");
         std::fs::create_dir_all(plugins.join("postgresql")).unwrap();
-        use std::os::unix::fs::PermissionsExt;
-        for p in [&d, &plugins, &plugins.join("postgresql")] {
+        for p in [&dir, &plugins, &plugins.join("postgresql")] {
             std::fs::set_permissions(p, std::fs::Permissions::from_mode(0o755)).unwrap();
         }
         let broker_path = plugins.join("postgresql/onesimus-pg-broker");
@@ -935,39 +934,83 @@ mod guest {
             use sha2::Digest;
             sha2::Sha256::digest(std::fs::read(&broker_path).unwrap()).iter().map(|b| format!("{b:02x}")).collect()
         };
-        let triplet = "test-triplet".to_string();
-        let native = [(triplet.clone(), vec![onesimus_plugins::NativePart { path: "postgresql/onesimus-pg-broker".into(), sha256: sha }])].into();
+        let native = [(TRIPLET.to_string(), vec![onesimus_plugins::NativePart { path: "postgresql/onesimus-pg-broker".into(), sha256: sha }])].into();
         let resolved = signed_artifact_with(&plugins, "postgresql", wasm, &["file.read", "file.write", "postgresql.read"], native);
-
         let line = PluginLine {
             name: "postgresql".into(),
-            options: [("instance", "main".to_string()), ("socket", c.sockets().display().to_string()),
-                ("port", c.port.to_string()), ("exclude", "test_*".to_string())]
+            options: [("instance", "main".to_string()), ("socket", cluster.sockets().display().to_string()),
+                ("port", cluster.port.to_string()), ("exclude", "test_*".to_string())]
                 .into_iter().map(|(k, v)| (k.to_string(), v)).collect(),
         };
-        let chunk = 64 * 1024;
-        let me = me_uid();
-        let prepared = prepare_broker(&resolved, &line, &plugins, &triplet, chunk, me, &d).unwrap().expect("a broker");
-        let job = pb::JobContext { job_id: 9101, job_name: "pg".into(), operation: pb::JobOperation::Backup as i32 };
-        let runtime = RuntimeLimits { max_chunk_bytes: chunk, ..RuntimeLimits::default() };
-        let session = Session::open_with(&resolved, &line, job, 0, runtime, Some(prepared)).unwrap();
+        Some(PgSetup { cluster, dir, plugins, resolved, line })
+    }
 
-        // Backup through the real send path.
-        let config = crate::config::FdConfig::parse("Director { Name = d; Password = p }").unwrap();
-        let canceled = std::sync::atomic::AtomicBool::new(false);
-        let mut sd = bareos_bnet::BnetStream::new(std::io::Cursor::new(Vec::new()));
-        let mut msgs = crate::jmsg::JobMsgs::new("test-fd");
-        let mut counters = crate::restore::Counters::default();
-        let mut flush = |_: &mut crate::jmsg::JobMsgs| {};
-        let ok = crate::backup::Backup {
-            sd: crate::backup::SdSender { sd: &mut sd, msgs: &mut msgs, counters: &mut counters, canceled: &canceled, progress: None },
-            env: crate::backup::JobEnv { canceled: &canceled, accurate: None, level_full: true, rerunning: false, base_size: 0 },
-            flush: &mut flush, buf_size: chunk as usize, workers: 0, acl_errors: 0, xattr_errors: 0, xattr_disabled: false,
-            config: &config, plugin_index: 0,
+    impl PgSetup {
+        fn session(&self, job_id: u64) -> Session {
+            let prepared = prepare_broker(&self.resolved, &self.line, &self.plugins, TRIPLET, CHUNK, me_uid(), &self.dir)
+                .unwrap().expect("a broker");
+            let job = pb::JobContext { job_id, job_name: "pg".into(), operation: pb::JobOperation::Backup as i32 };
+            let runtime = RuntimeLimits { max_chunk_bytes: CHUNK, ..RuntimeLimits::default() };
+            Session::open_with(&self.resolved, &self.line, job, 0, runtime, Some(prepared)).unwrap()
         }
-        .run_plugin(&crate::find::FfPkt::default(), "postgresql:instance=main", session);
-        assert_eq!(ok, 1, "{:?}", msgs.take_queued());
-        let volume = sd.into_inner().into_inner();
+        /// Backup of one session into a BNET buffer: (result, volume, messages).
+        fn backup(&self, session: Session, canceled: &std::sync::atomic::AtomicBool) -> (i32, Vec<u8>, Vec<String>) {
+            let config = crate::config::FdConfig::parse("Director { Name = d; Password = p }").unwrap();
+            let mut sd = bareos_bnet::BnetStream::new(std::io::Cursor::new(Vec::new()));
+            let mut msgs = crate::jmsg::JobMsgs::new("test-fd");
+            let mut counters = crate::restore::Counters::default();
+            let mut flush = |_: &mut crate::jmsg::JobMsgs| {};
+            let ok = crate::backup::Backup {
+                sd: crate::backup::SdSender { sd: &mut sd, msgs: &mut msgs, counters: &mut counters, canceled, progress: None },
+                env: crate::backup::JobEnv { canceled, accurate: None, level_full: true, rerunning: false, base_size: 0 },
+                flush: &mut flush, buf_size: CHUNK as usize, workers: 0, acl_errors: 0, xattr_errors: 0, xattr_disabled: false,
+                config: &config, plugin_index: 0,
+            }
+            .run_plugin(&crate::find::FfPkt::default(), "postgresql:instance=main", session);
+            let sent = msgs.take_queued();
+            (ok, sd.into_inner().into_inner(), sent)
+        }
+    }
+    impl Drop for PgSetup {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.dir);
+        }
+    }
+
+    /// Processes of this test user whose command line mentions `needle`.
+    fn processes_with(needle: &str) -> Vec<String> {
+        let me = me_uid();
+        std::fs::read_dir("/proc").unwrap().filter_map(|e| e.ok()).filter_map(|e| {
+            let p = e.path();
+            use std::os::unix::fs::MetadataExt;
+            if std::fs::metadata(&p).ok()?.uid() != me {
+                return None;
+            }
+            let cmd = std::fs::read(p.join("cmdline")).ok()?;
+            let cmd = String::from_utf8_lossy(&cmd).replace('\0', " ");
+            cmd.contains(needle).then_some(cmd)
+        }).collect()
+    }
+
+    /// The PostgreSQL plugin end to end: signed guest (schema 2 with the
+    /// broker), broker as the cluster's user, backup into the SD stream,
+    /// restore to files, pg_restore of a restored dump.
+    #[test]
+    #[ignore = "needs the built postgresql guest and onesimus-pg-broker"]
+    fn postgresql_backs_up_every_allowed_database() {
+        use std::process::Command;
+        let Some(setup) = pg_setup("e2e", 55434) else { return };
+        let c = &setup.cluster;
+        let d = setup.dir.clone();
+        c.sql("postgres", "CREATE DATABASE \"app-1\"");
+        c.sql("postgres", "CREATE DATABASE bareos");
+        c.sql("postgres", "CREATE DATABASE test_scratch");
+        c.sql("postgres", "CREATE ROLE reader NOLOGIN");
+        c.sql("app-1", "CREATE TABLE t (id int primary key, v text); INSERT INTO t SELECT g, repeat('x', 200) FROM generate_series(1, 20000) g");
+        let canceled = std::sync::atomic::AtomicBool::new(false);
+        let (ok, volume, sent) = setup.backup(setup.session(9101), &canceled);
+        assert_eq!(ok, 1, "{sent:?}");
+
 
         // Restore to files.
         let target = d.join("restore");
@@ -999,7 +1042,88 @@ mod guest {
             .arg(base.join("db/app-1/app-1.dump")).output().unwrap();
         assert!(r.status.success(), "{}", String::from_utf8_lossy(&r.stderr));
         assert_eq!(c.sql("restored", "SELECT count(*) FROM t").trim(), "20000");
-        std::fs::remove_dir_all(&d).unwrap();
+    }
+
+    /// pg_dump waits for a lock another session holds; the job is canceled.
+    /// The backup ends within seconds and neither broker nor pg_dump is left.
+    #[test]
+    #[ignore = "needs the built postgresql guest and onesimus-pg-broker"]
+    fn cancel_during_pg_dump_leaves_no_process() {
+        use std::process::{Command, Stdio};
+        use std::sync::atomic::{AtomicBool, Ordering};
+        let Some(setup) = pg_setup("cancel", 55435) else { return };
+        let c = &setup.cluster;
+        c.sql("postgres", "CREATE DATABASE app");
+        c.sql("app", "CREATE TABLE t (id int)");
+        // Holds ACCESS EXCLUSIVE on t for 60 s: pg_dump blocks on it.
+        let mut locker = Command::new(c.bin.join("psql")).args(["-X", "-q", "-h"]).arg(c.sockets())
+            .args(["-p", &c.port.to_string(), "-d", "app", "-c", "BEGIN; LOCK TABLE t IN ACCESS EXCLUSIVE MODE; SELECT pg_sleep(60);"])
+            .stdout(Stdio::null()).spawn().unwrap();
+        std::thread::sleep(std::time::Duration::from_millis(500));
+        let canceled = std::sync::Arc::new(AtomicBool::new(false));
+        let flag = canceled.clone();
+        let sockets = c.sockets().display().to_string();
+        let waiter = std::thread::spawn(move || {
+            // Cancel once pg_dump is running and waiting.
+            for _ in 0..100 {
+                if processes_with("pg_dump").iter().any(|p| p.contains(&sockets)) {
+                    std::thread::sleep(std::time::Duration::from_millis(300));
+                    flag.store(true, Ordering::Relaxed);
+                    return true;
+                }
+                std::thread::sleep(std::time::Duration::from_millis(100));
+            }
+            false
+        });
+        let begin = std::time::Instant::now();
+        let (ok, _, _) = setup.backup(setup.session(9201), &canceled);
+        assert!(waiter.join().unwrap(), "pg_dump never started");
+        assert_eq!(ok, 0);
+        assert!(begin.elapsed() < std::time::Duration::from_secs(20), "cancel took {:?}", begin.elapsed());
+        std::thread::sleep(std::time::Duration::from_millis(500));
+        let sockets = c.sockets().display().to_string();
+        let left: Vec<String> = processes_with("pg_dump").into_iter().chain(processes_with("onesimus-pg-broker"))
+            .filter(|p| p.contains(&sockets)).collect();
+        assert!(left.is_empty(), "left over: {left:?}");
+        let _ = locker.kill();
+        let _ = locker.wait();
+    }
+
+    /// The server stops while pg_dump waits: the backup fails with the dump
+    /// program's diagnostic instead of storing a truncated dump as good.
+    #[test]
+    #[ignore = "needs the built postgresql guest and onesimus-pg-broker"]
+    fn a_server_failure_fails_the_backup() {
+        use std::process::{Command, Stdio};
+        let Some(setup) = pg_setup("failure", 55436) else { return };
+        let c = &setup.cluster;
+        c.sql("postgres", "CREATE DATABASE app");
+        c.sql("app", "CREATE TABLE t (id int)");
+        let mut locker = Command::new(c.bin.join("psql")).args(["-X", "-q", "-h"]).arg(c.sockets())
+            .args(["-p", &c.port.to_string(), "-d", "app", "-c", "BEGIN; LOCK TABLE t IN ACCESS EXCLUSIVE MODE; SELECT pg_sleep(60);"])
+            .stdout(Stdio::null()).stderr(Stdio::null()).spawn().unwrap();
+        std::thread::sleep(std::time::Duration::from_millis(500));
+        let bin = c.bin.clone();
+        let data = c.data();
+        let sockets = c.sockets().display().to_string();
+        let killer = std::thread::spawn(move || {
+            for _ in 0..100 {
+                if processes_with("pg_dump").iter().any(|p| p.contains(&sockets)) {
+                    std::thread::sleep(std::time::Duration::from_millis(300));
+                    let _ = Command::new(bin.join("pg_ctl")).arg("-D").arg(&data).args(["-m", "immediate", "stop"]).output();
+                    return true;
+                }
+                std::thread::sleep(std::time::Duration::from_millis(100));
+            }
+            false
+        });
+        let canceled = std::sync::atomic::AtomicBool::new(false);
+        let (ok, _, sent) = setup.backup(setup.session(9301), &canceled);
+        assert!(killer.join().unwrap(), "pg_dump never started");
+        assert_eq!(ok, 0, "{sent:?}");
+        assert!(sent.iter().any(|m| m.contains("dump failed")), "{sent:?}");
+        let _ = locker.kill();
+        let _ = locker.wait();
     }
 
     fn me_uid() -> u32 {
