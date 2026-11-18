@@ -154,9 +154,29 @@ fn resolve_checked(config: &FdConfig, line: &PluginLine, owner: u32, top: &Path)
     }
     let bundle = directory.join(format!("{}.pb", line.name));
     check_trusted(policy, owner, false, top)?;
+    // The CA files the policy names decide whom to trust, like the policy.
+    for ca in policy_ca_files(policy)? {
+        check_trusted(&ca, owner, false, top)?;
+    }
     check_trusted(directory, owner, true, top)?;
     check_trusted(&bundle, owner, false, top)?;
     Ok(Resolved { bundle, policy: policy.clone() })
+}
+
+/// The CA certificate files a policy names, resolved like `bundle::read_policy`
+/// does (relative to the policy's directory).
+fn policy_ca_files(policy: &Path) -> Result<Vec<PathBuf>, PluginError> {
+    let untrusted = |reason: String| PluginError::Untrusted { path: policy.to_path_buf(), reason };
+    let bytes = onesimus_plugins::bundle::read_bounded(policy, 1024 * 1024).map_err(|e| untrusted(e.to_string()))?;
+    let value: serde_json::Value = serde_json::from_slice(&bytes).map_err(|_| untrusted("invalid policy JSON".into()))?;
+    let base = policy.parent().unwrap_or(Path::new("/"));
+    value
+        .get("ca_certificates")
+        .and_then(|v| v.as_array())
+        .ok_or_else(|| untrusted("no ca_certificates".into()))?
+        .iter()
+        .map(|v| v.as_str().map(|s| base.join(s)).ok_or_else(|| untrusted("ca_certificates holds a non-string".into())))
+        .collect()
 }
 
 /// `path` and every directory above it up to `top` (as written and after
@@ -413,8 +433,10 @@ mod tests {
         let d = dir();
         std::fs::create_dir(d.join("plugins")).unwrap();
         mode(&d.join("plugins"), 0o755);
-        std::fs::write(d.join("policy.json"), b"{}").unwrap();
+        std::fs::write(d.join("policy.json"), br#"{"ca_certificates":["ca.pem"]}"#).unwrap();
         mode(&d.join("policy.json"), 0o644);
+        std::fs::write(d.join("ca.pem"), b"ca").unwrap();
+        mode(&d.join("ca.pem"), 0o644);
         std::fs::write(d.join("plugins/postgresql.pb"), b"x").unwrap();
         mode(&d.join("plugins/postgresql.pb"), 0o644);
         let mut c = FdConfig::parse("Director { Name = d; Password = p }").unwrap();
@@ -450,7 +472,7 @@ mod tests {
         assert_eq!(resolve_checked(&c, &line, me(), &d).unwrap().bundle, d.join("plugins/postgresql.pb"));
         // Someone else's tree: wrong owner.
         assert!(matches!(resolve_checked(&c, &line, me() + 1, &d), Err(PluginError::Untrusted { .. })));
-        for (part, bad) in [("policy.json", 0o664), ("plugins/postgresql.pb", 0o646), ("plugins", 0o775)] {
+        for (part, bad) in [("policy.json", 0o664), ("ca.pem", 0o666), ("plugins/postgresql.pb", 0o646), ("plugins", 0o775)] {
             mode(&d.join(part), bad);
             assert!(untrusted(resolve_checked(&c, &line, me(), &d), part), "{part} {bad:o}");
             mode(&d.join(part), if part == "plugins" { 0o755 } else { 0o644 });
@@ -469,6 +491,20 @@ mod tests {
     }
 
     #[test]
+    fn a_ca_file_outside_the_trusted_tree_is_refused() {
+        let (d, c) = tree();
+        let line = parse_line("postgresql").unwrap();
+        std::fs::create_dir(d.join("open")).unwrap();
+        mode(&d.join("open"), 0o777);
+        std::fs::write(d.join("open/evil.pem"), b"x").unwrap();
+        std::fs::write(d.join("policy.json"), br#"{"ca_certificates":["ca.pem","open/evil.pem"]}"#).unwrap();
+        assert!(matches!(resolve_checked(&c, &line, me(), &d), Err(PluginError::Untrusted { path, .. }) if path.ends_with("open")));
+        std::fs::write(d.join("policy.json"), b"{}").unwrap();
+        assert!(matches!(resolve_checked(&c, &line, me(), &d), Err(PluginError::Untrusted { reason, .. }) if reason.contains("ca_certificates")));
+        std::fs::remove_dir_all(&d).unwrap();
+    }
+
+    #[test]
     fn a_link_is_checked_as_written_and_as_resolved() {
         let (d, mut c) = tree();
         let line = parse_line("postgresql").unwrap();
@@ -476,6 +512,8 @@ mod tests {
         std::fs::create_dir(d.join("open")).unwrap();
         mode(&d.join("open"), 0o777);
         std::os::unix::fs::symlink(d.join("policy.json"), d.join("open/policy.json")).unwrap();
+        // CA paths resolve next to the policy as named, here through a link too.
+        std::os::unix::fs::symlink(d.join("ca.pem"), d.join("open/ca.pem")).unwrap();
         c.plugin_policy = Some(d.join("open/policy.json"));
         assert!(matches!(resolve_checked(&c, &line, me(), &d), Err(PluginError::Untrusted { path, .. }) if path.ends_with("open")));
         mode(&d.join("open"), 0o755);
