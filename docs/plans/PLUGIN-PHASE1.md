@@ -1,6 +1,6 @@
 # Planung: Phase 1 – Plugins in ofd ausführen
 
-Stand: 18.11.2026. Status: **Freigegeben (18.11.2026); Schritte 1 bis 5 und 7 umgesetzt, Schritt 6 offen.**
+Stand: 18.11.2026. Status: **Freigegeben (18.11.2026); Schritte 1 bis 7 umgesetzt. Offen: Lauf gegen einen echten Bareos-SD und Director.**
 
 Gemeinsame Voraussetzung für [PostgreSQL](POSTGRESQL-PLUGIN.md) (zuerst),
 [OpenLDAP](OPENLDAP-PLUGIN.md), [Docker](DOCKER-PLUGIN.md) und

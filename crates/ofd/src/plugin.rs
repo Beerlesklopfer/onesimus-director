@@ -614,3 +614,179 @@ mod tests {
         }
     }
 }
+
+/// End to end with the real Rust guest `plugins/example-tree`: backup into a
+/// BNET stream, the stream as the SD returns it, restore to files and online.
+/// Build the guest first (see plugins/example-tree/README.md), then
+/// `cargo test -p ofd -- --ignored example_tree`.
+#[cfg(test)]
+mod guest {
+    use super::testkit::signed_artifact;
+    use super::*;
+    use crate::backup::{Backup, JobEnv, SdSender};
+    use crate::find::FfPkt;
+    use crate::jmsg::JobMsgs;
+    use crate::restore::{Counters, Restore, RestoreParams};
+    use bareos_bnet::BnetStream;
+    use std::io::{Cursor, Read, Write};
+    use std::sync::atomic::AtomicBool;
+
+    fn guest_wasm() -> Vec<u8> {
+        let path = std::env::var_os("ONESIMUS_EXAMPLE_TREE_WASM").map(PathBuf::from).unwrap_or_else(|| {
+            Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("../../target/plugins/wasm32-wasip2/release/onesimus_plugin_example_tree.wasm")
+        });
+        std::fs::read(&path).unwrap_or_else(|e| panic!("{}: {e}; build plugins/example-tree first", path.display()))
+    }
+
+    fn session(dir: &Path, op: pb::JobOperation, job_id: u64) -> Session {
+        let resolved = signed_artifact(dir, "example", guest_wasm());
+        let line = parse_line("example:instance=main:password=geheim").unwrap();
+        let job = pb::JobContext { job_id, job_name: "example".into(), operation: op as i32 };
+        let runtime = RuntimeLimits { max_chunk_bytes: 64 * 1024, ..RuntimeLimits::default() };
+        Session::open_resolved(&resolved, &line, job, 0, runtime).unwrap()
+    }
+
+    /// FD->SD frames ("<fi> <stream> 0", data, EOD) as the SD sends them back
+    /// on restore ("rechdr <vsid> <vst> <fi> <stream> <len>", data).
+    fn as_read_back(written: &[u8]) -> Vec<u8> {
+        let mut frames = Vec::new();
+        let mut b = written;
+        while b.len() >= 4 {
+            let n = i32::from_be_bytes(b[..4].try_into().unwrap());
+            b = &b[4..];
+            if n < 0 {
+                frames.push(None);
+            } else {
+                frames.push(Some(b[..n as usize].to_vec()));
+                b = &b[n as usize..];
+            }
+        }
+        let mut out = Vec::new();
+        let mut put = |m: &[u8]| {
+            out.extend_from_slice(&(m.len() as i32).to_be_bytes());
+            out.extend_from_slice(m);
+        };
+        let mut i = 0;
+        while i < frames.len() {
+            let Some(header) = frames[i].clone() else { i += 1; continue };
+            let text = String::from_utf8(header).unwrap();
+            let mut f = text.split(' ');
+            let (fi, stream) = (f.next().unwrap().to_string(), f.next().unwrap().to_string());
+            i += 1;
+            while let Some(Some(data)) = frames.get(i) {
+                put(format!("rechdr 1 2 {fi} {stream} {}", data.len()).as_bytes());
+                put(data);
+                i += 1;
+            }
+        }
+        out.extend_from_slice(&(bareos_bnet::BnetSignal::Eod as i32).to_be_bytes());
+        out
+    }
+
+    struct Duplex(Cursor<Vec<u8>>);
+    impl Read for Duplex {
+        fn read(&mut self, b: &mut [u8]) -> std::io::Result<usize> {
+            self.0.read(b)
+        }
+    }
+    impl Write for Duplex {
+        fn write(&mut self, b: &[u8]) -> std::io::Result<usize> {
+            Ok(b.len())
+        }
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
+
+    #[test]
+    #[ignore = "needs the built plugins/example-tree guest"]
+    fn example_tree_backs_up_and_restores() {
+        let dir = std::env::temp_dir().join(format!("ofd-example-tree-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(dir.join("restore")).unwrap();
+        let never = || false;
+
+        // The guest lists its tree; the large file comes in several blocks.
+        let mut s = session(&dir, pb::JobOperation::Backup, 9001);
+        s.start(&never).unwrap();
+        let mut names = Vec::new();
+        while let Some(f) = s.next_file(&never).unwrap() {
+            assert_eq!(f.attributes.get("instance").map(String::as_str), Some("main"));
+            names.push(f.path);
+        }
+        assert_eq!(names.len(), 5);
+        assert!(names.iter().any(|n| n.ends_with(b"latin1-\xE9")));
+        s.finish(true).unwrap();
+
+        // Backup through the real send path.
+        let config = crate::config::FdConfig::parse("Director { Name = d; Password = p }").unwrap();
+        let canceled = AtomicBool::new(false);
+        let mut sd = BnetStream::new(Cursor::new(Vec::new()));
+        let mut msgs = JobMsgs::new("test-fd");
+        let mut counters = Counters::default();
+        let mut flush = |_: &mut JobMsgs| {};
+        let shown = crate::secrets::mask_plugin_secrets("example:instance=main:password=geheim");
+        let ok = Backup {
+            sd: SdSender { sd: &mut sd, msgs: &mut msgs, counters: &mut counters, canceled: &canceled, progress: None },
+            env: JobEnv { canceled: &canceled, accurate: None, level_full: true, rerunning: false, base_size: 0 },
+            flush: &mut flush,
+            buf_size: 64 * 1024,
+            workers: 0,
+            acl_errors: 0,
+            xattr_errors: 0,
+            xattr_disabled: false,
+            config: &config,
+            plugin_index: 0,
+        }
+        .run_plugin(&FfPkt::default(), &shown, session(&dir, pb::JobOperation::Backup, 9002));
+        assert_eq!(ok, 1, "{:?}", msgs.take_queued());
+        assert_eq!(counters.job_files, 5);
+        let volume = sd.into_inner().into_inner();
+        assert!(!volume.windows(6).any(|w| w == b"geheim"), "a secret reached the volume");
+
+        // Restore to files, without the plugin.
+        let restore = |where_: Vec<u8>, options: &[String], hook: bool| {
+            let mut sd = BnetStream::new(Duplex(Cursor::new(as_read_back(&volume))));
+            let params = RestoreParams { where_: crate::attribs::Where::Prefix(where_), replace: b'a', prefix_links: false };
+            let mut msgs = JobMsgs::new("test-fd");
+            msgs.job_id = 9003;
+            let mut counters = Counters::default();
+            let mut sent = Vec::new();
+            if hook {
+                let d = dir.clone();
+                crate::restore::test_hook::set(Box::new(move |_line, job, index| {
+                    let resolved = signed_artifact(&d, "example", guest_wasm());
+                    let line = parse_line("example:instance=main").unwrap();
+                    let runtime = RuntimeLimits { max_chunk_bytes: 64 * 1024, ..RuntimeLimits::default() };
+                    Session::open_resolved(&resolved, &line, job, index, runtime)
+                }));
+            }
+            Restore { params: &params, msgs: &mut msgs, counters: &mut counters,
+                create: &mut crate::create_file::CreateState::default(), canceled: &canceled,
+                config: Some(&config), plugin_options: options }
+                .run(&mut sd, &mut |m: &mut JobMsgs| sent.extend(m.take_queued()));
+            (msgs.status(), counters, sent)
+        };
+        let target = dir.join("restore");
+        let (status, c, sent) = restore(target.as_os_str().as_encoded_bytes().to_vec(), &[], false);
+        assert_eq!(status, crate::jmsg::JS_TERMINATED, "{sent:?}");
+        assert_eq!(c.job_files, 5);
+        let base = target.join("@example/main");
+        let big = std::fs::read(base.join("big.bin")).unwrap();
+        assert_eq!(big.len(), 300 * 1024);
+        assert!(big.iter().enumerate().all(|(i, b)| *b == (i % 251) as u8));
+        assert_eq!(std::fs::read(base.join("small.txt")).unwrap(), b"hello from the example plugin\n");
+        assert_eq!(std::fs::read(base.join("empty")).unwrap(), b"");
+        use std::os::unix::ffi::OsStrExt;
+        let odd = base.join(std::ffi::OsStr::from_bytes(b"latin1-\xE9"));
+        assert_eq!(std::fs::read(odd).unwrap(), b"latin-1 name");
+
+        // Online restore through the guest.
+        let (status, c, sent) = restore(Vec::new(), &["example:restore_mode=online".to_string()], true);
+        assert_eq!(status, crate::jmsg::JS_TERMINATED, "{sent:?}");
+        assert_eq!(c.job_files, 5);
+        assert!(sent.iter().any(|m| m.contains("restoring online through test.example")), "{sent:?}");
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+}

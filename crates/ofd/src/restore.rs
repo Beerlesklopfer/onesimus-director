@@ -760,7 +760,7 @@ impl Restore<'_> {
 /// Tests open online-restore sessions from a test bundle (outside the
 /// root-owned plugin directory) through this hook.
 #[cfg(test)]
-mod test_hook {
+pub(crate) mod test_hook {
     use super::*;
     type Open = Box<dyn FnOnce(&PluginLine, pb::JobContext, usize) -> Result<Session, PluginError>>;
     thread_local!(static OPEN: std::cell::RefCell<Option<Open>> = const { std::cell::RefCell::new(None) });

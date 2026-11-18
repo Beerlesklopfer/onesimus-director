@@ -150,6 +150,11 @@ fn escaped(bytes: &[u8]) -> String {
 /// guest running `script`, signed by a fresh test CA, with capabilities
 /// file.read and file.write.
 pub fn signed_plugin(dir: &Path, name: &str, script: &Script) -> Resolved {
+    signed_artifact(dir, name, component(script))
+}
+
+/// Like `signed_plugin` for a given component (e.g. a built Rust guest).
+pub fn signed_artifact(dir: &Path, name: &str, artifact: Vec<u8>) -> Resolved {
     let now = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs();
     let ca_key = KeyPair::generate_for(&PKCS_ED25519).unwrap();
     let mut ca = CertificateParams::default();
@@ -166,7 +171,6 @@ pub fn signed_plugin(dir: &Path, name: &str, script: &Script) -> Resolved {
     let leaf = leaf.signed_by(&signing_key, &ca, &ca_key).unwrap();
     let key = PKey::private_key_from_der(&signing_key.serialize_der()).unwrap();
 
-    let artifact = component(script);
     let key_id = onesimus_plugins::signing_key_id(leaf.der()).unwrap();
     let plugin_id = format!("test.{name}");
     let capabilities = vec!["file.read".to_string(), "file.write".to_string()];

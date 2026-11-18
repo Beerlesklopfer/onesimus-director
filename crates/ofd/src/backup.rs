@@ -703,7 +703,7 @@ impl<S: Read + Write> Backup<'_, '_, S> {
     }
 
     /// The files of an opened plugin session into the SD stream.
-    fn run_plugin(&mut self, include: &FfPkt, shown: &str, mut session: Session) -> i32 {
+    pub(crate) fn run_plugin(&mut self, include: &FfPkt, shown: &str, mut session: Session) -> i32 {
         let flag: &AtomicBool = self.env.canceled;
         let canceled = move || flag.load(Ordering::Relaxed);
         let mut ok = match session.start(&canceled) {
