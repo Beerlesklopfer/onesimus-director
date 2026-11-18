@@ -35,6 +35,10 @@ pub struct DirectorResource {
     pub grpc_tls_key: Option<String>,
     /// Announce the Director via mDNS (_onesimus-dir._tcp)
     pub mdns_advertise: bool,
+    /// `DirAddress`: the one address to listen on (all when unset).
+    pub address: Option<String>,
+    /// `DirAddresses` (block form) was given; not supported.
+    pub addresses_given: bool,
     pub working_directory: String,
     /// `Key Encryption Key` (dird_conf.cc:142, stored in clear): wraps
     /// generated volume encryption keys.
@@ -55,6 +59,8 @@ impl Default for DirectorResource {
             grpc_tls_certificate: None,
             grpc_tls_key: None,
             mdns_advertise: true,
+            address: None,
+            addresses_given: false,
             working_directory: "/var/lib/bareos".to_string(),
             key_encryption_key: None,
         }

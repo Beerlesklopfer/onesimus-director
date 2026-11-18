@@ -473,6 +473,10 @@ fn convert_raw_resource(raw: &RawResource) -> Result<Resource, ConfigError> {
             if let Some(v) = get_any(&["mdns advertise", "mdnsadvertise"]) {
                 dir.mdns_advertise = parse_bool(v).map(|(_, b)| b).unwrap_or(true);
             }
+            if let Some(v) = get_any(&["dir address", "diraddress"]) {
+                dir.address = Some(v.to_string());
+            }
+            dir.addresses_given = get_any(&["dir addresses", "diraddresses"]).is_some();
             if let Some(v) = get_any(&["working directory", "workingdirectory"]) {
                 dir.working_directory = v.to_string();
             }

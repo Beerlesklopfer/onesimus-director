@@ -197,6 +197,36 @@ struct Cli {
     grpc_key: Option<String>,
 }
 
+/// The listen address of the Director as "ip" or "[ipv6]": the address a
+/// name resolves to first (Bareos behaviour), 0.0.0.0 when none is given.
+fn bind_address_for(given: Option<&str>, port: u16) -> Result<String, String> {
+    use std::net::ToSocketAddrs;
+    let Some(host) = given else { return Ok("0.0.0.0".to_string()) };
+    let host = host.trim_start_matches('[').trim_end_matches(']');
+    let first = (host, port).to_socket_addrs().map_err(|e| format!("DirAddress {host}: {e}"))?.next()
+        .ok_or_else(|| format!("DirAddress {host}: no address"))?;
+    Ok(match first.ip() {
+        std::net::IpAddr::V4(ip) => ip.to_string(),
+        std::net::IpAddr::V6(ip) => format!("[{ip}]"),
+    })
+}
+
+#[cfg(test)]
+mod bind_address_tests {
+    use super::bind_address_for;
+
+    #[test]
+    fn dir_address_becomes_a_parsable_listen_address() {
+        assert_eq!(bind_address_for(None, 9101).unwrap(), "0.0.0.0");
+        assert_eq!(bind_address_for(Some("127.0.0.1"), 9101).unwrap(), "127.0.0.1");
+        assert_eq!(bind_address_for(Some("::1"), 9101).unwrap(), "[::1]");
+        assert_eq!(bind_address_for(Some("[::1]"), 9101).unwrap(), "[::1]");
+        let a = bind_address_for(Some("::1"), 9101).unwrap();
+        assert!(format!("{a}:9101").parse::<std::net::SocketAddr>().is_ok());
+        assert!(bind_address_for(Some("no.such.host.invalid"), 9101).is_err());
+    }
+}
+
 fn main() {
     let cli = Cli::parse();
     localtime::init_locale();
@@ -458,7 +488,20 @@ fn main() {
     job_messages::set_catalog(catalog.clone());
 
     let port = config.director.port;
-    let bind_addr = cli.bind_address.clone().unwrap_or_else(|| "0.0.0.0".to_string());
+    // --bind-address, else DirAddress, else every interface. A name is
+    // resolved once; the result is written so "{addr}:{port}" parses.
+    if config.director.addresses_given {
+        eprintln!("DirAddresses is not supported; use DirAddress");
+        std::process::exit(1);
+    }
+    let bind_addr = match bind_address_for(cli.bind_address.as_deref().or(config.director.address.as_deref()), port) {
+        Ok(a) => a,
+        Err(e) => {
+            eprintln!("{e}");
+            std::process::exit(1);
+        }
+    };
+
     let grpc_enabled = !cli.disable_grpc;
     let dir_name = config.director.name.clone();
     let dir_password = config.director.password.clone();
@@ -650,7 +693,14 @@ fn spawn_named_threads(
         threads.push(("dir:grpc".into(), handle));
     }
 
-    if mdns_advertise {
+    // A Director bound to loopback is not reachable from the network:
+    // announcing it there would only advertise its name and ports.
+    let bound_to_loopback = bind_address.trim_matches(|c| c == '[' || c == ']')
+        .parse::<std::net::IpAddr>().is_ok_and(|ip| ip.is_loopback());
+    if mdns_advertise && bound_to_loopback {
+        info!("mDNS: not announcing, Director listens on loopback only");
+    }
+    if mdns_advertise && !bound_to_loopback {
         let ann = mdns::Announcement {
             director_name: dir_name,
             bnet_port: port,
