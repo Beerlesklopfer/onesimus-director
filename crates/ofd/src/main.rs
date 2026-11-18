@@ -229,9 +229,17 @@ fn main() {
         None
     } else {
         let explicit = cli.grpc_listen.is_some();
-        let address = cli.grpc_listen.unwrap_or_else(|| {
-            std::net::SocketAddr::from(([0u16; 8], port.saturating_add(1000)))
-        });
+        // Default: the BNET address (FD Address) on port + 1000.
+        let address = match cli.grpc_listen {
+            Some(a) => a,
+            None => match shared_config.listen_addresses(port.saturating_add(1000)) {
+                Ok(a) => a[0],
+                Err(e) => {
+                    error!("{e}");
+                    std::process::exit(1);
+                }
+            },
+        };
         let files = match (&cli.grpc_cert, &cli.grpc_key) {
             (Some(cert), Some(key)) => Ok((cert.clone(), key.clone())),
             _ => grpc_tls::load_or_generate(&shared_config.working_directory, &shared_config.name),

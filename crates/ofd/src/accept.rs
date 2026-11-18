@@ -35,10 +35,16 @@ const DIR_SORRY: &str = "2999 Authentication failed.\n";
 
 /// Main accept loop for the File Daemon.
 pub fn accept_loop(config: &Arc<FdConfig>, shutdown: &AtomicBool) {
-    // Bind dual-stack (IPv4 + IPv6) — localhost kann ::1 oder 127.0.0.1 sein
-    let addr = format!("[::]:{}", config.port);
+    // FD Address, else dual-stack (IPv4 + IPv6) on every interface.
+    let addr = match config.listen_addresses(config.port) {
+        Ok(a) => a[0],
+        Err(e) => {
+            error!("FATAL: {e}");
+            std::process::exit(1);
+        }
+    };
 
-    let listener = match TcpListener::bind(&addr) {
+    let listener = match TcpListener::bind(addr) {
         Ok(l) => {
             info!("listening on {addr}");
             l

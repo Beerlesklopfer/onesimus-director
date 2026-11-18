@@ -33,6 +33,11 @@ pub struct MessagesRes {
 pub struct FdConfig {
     pub name: String,
     pub port: u16,
+    /// "FD Address": the one address to listen on (all when unset).
+    pub fd_address: Option<String>,
+    /// "FD Addresses" was given: not supported, so ofd refuses to start
+    /// instead of silently listening on every interface.
+    pub fd_addresses_given: bool,
     pub max_concurrent_jobs: u32,
     pub directors: Vec<DirectorAuth>,
     pub heartbeat_interval_secs: u64,
@@ -79,6 +84,8 @@ impl FdConfig {
         let mut config = FdConfig {
             name: "bareos-fd".to_string(),
             port: 9102,
+            fd_address: None,
+            fd_addresses_given: false,
             max_concurrent_jobs: 20,
             directors: Vec::new(),
             heartbeat_interval_secs: 0,
@@ -150,6 +157,28 @@ impl FdConfig {
     }
 
     /// Find director auth by name.
+    /// The socket addresses to listen on for `port`: FD Address resolved, or
+    /// the dual-stack wildcard when none is configured.
+    pub fn listen_addresses(&self, port: u16) -> Result<Vec<std::net::SocketAddr>, String> {
+        use std::net::ToSocketAddrs;
+        if self.fd_addresses_given {
+            return Err("FD Addresses is not supported; use FD Address".to_string());
+        }
+        match &self.fd_address {
+            None => Ok(vec![std::net::SocketAddr::from(([0u16; 8], port))]),
+            Some(host) => {
+                let host = host.trim_start_matches('[').trim_end_matches(']');
+                let found: Vec<_> = (host, port).to_socket_addrs()
+                    .map_err(|e| format!("FD Address {host}: {e}"))?.collect();
+                match found.first() {
+                    // Bareos binds the first address the name resolves to.
+                    Some(a) => Ok(vec![*a]),
+                    None => Err(format!("FD Address {host}: no address")),
+                }
+            }
+        }
+    }
+
     pub fn find_director(&self, name: &str) -> Option<&DirectorAuth> {
         self.directors.iter().find(|d| d.name == name)
     }
@@ -257,6 +286,8 @@ fn parse_block(block_type: &str, content: &str, config: &mut FdConfig) {
             if let Some(v) = get("port").or_else(|| get("fdport")) {
                 config.port = v.parse().unwrap_or(9102);
             }
+            if let Some(v) = get("fdaddress") { config.fd_address = Some(v); }
+            config.fd_addresses_given |= get("fdaddresses").is_some();
             if let Some(v) = get("maximumconcurrentjobs") {
                 config.max_concurrent_jobs = v.parse().unwrap_or(20);
             }
@@ -506,4 +537,20 @@ Director { Name = d; Password = "p" }
         #[cfg(all(target_arch = "x86_64", target_os = "linux", target_env = "gnu"))]
         assert_eq!(default_plugin_directory().as_deref(), Some("/usr/lib/x86_64-linux-gnu/onesimus/plugins"));
     }
+
+    #[test]
+    fn fd_address_limits_the_listener() {
+        let c = FdConfig::parse("Client { FD Address = 127.0.0.1\n FDPort = 29102 }\nDirector { Name = d; Password = p }").unwrap();
+        assert_eq!(c.listen_addresses(29102).unwrap(), vec!["127.0.0.1:29102".parse().unwrap()]);
+        assert_eq!(c.listen_addresses(30102).unwrap(), vec!["127.0.0.1:30102".parse().unwrap()]);
+        let c = FdConfig::parse("Client { FDAddress = ::1 }\nDirector { Name = d; Password = p }").unwrap();
+        assert_eq!(c.listen_addresses(9102).unwrap(), vec!["[::1]:9102".parse().unwrap()]);
+        let all = FdConfig::parse("Director { Name = d; Password = p }").unwrap();
+        assert_eq!(all.listen_addresses(9102).unwrap(), vec!["[::]:9102".parse().unwrap()]);
+        let multi = FdConfig::parse("Client {\n FD Addresses = {\n ipv4 = { addr = 127.0.0.1 }\n }\n}\nDirector { Name = d; Password = p }").unwrap();
+        assert!(multi.listen_addresses(9102).unwrap_err().contains("not supported"));
+        let bad = FdConfig::parse("Client { FD Address = no.such.host.invalid }\nDirector { Name = d; Password = p }").unwrap();
+        assert!(bad.listen_addresses(9102).is_err());
+    }
 }
+
