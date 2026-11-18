@@ -85,6 +85,8 @@ impl Win32Decomp {
 /// r_ctx
 #[derive(Default)]
 struct Rctx {
+    /// The (masked) plugin line of the files between two plugin-name records.
+    plugin: Option<String>,
     stream: i32,
     prev_stream: i32,
     size: u32,
@@ -273,6 +275,16 @@ impl Restore<'_> {
                     ns.data += 1;
                     return true;
                 }
+                if let Some(line) = &r.plugin {
+                    // Without Where a plugin file would be written to its
+                    // virtual path below /. Online restore is not available.
+                    if matches!(&self.params.where_, Where::Prefix(w) if w.is_empty()) {
+                        let name = String::from_utf8_lossy(&attr.fname).into_owned();
+                        self.jmsg(M_FATAL, format!(
+                            "Plugin: \"{line}\": \"{name}\" can only be restored to files: set Where.\n"));
+                        return false;
+                    }
+                }
                 build_attr_output_fnames(&mut attr, &self.params.where_, self.params.prefix_links);
                 self.counters.num_files_examined += 1;
                 r.extract = false;
@@ -393,10 +405,18 @@ impl Restore<'_> {
             }
 
             STREAM_PLUGIN_NAME => {
-                // PluginNameStream() without loaded plugins does nothing.
                 if !self.close_previous_stream(r, ax) {
                     return false;
                 }
+                // "<index> 1 <portable> <line>\0" opens, "<index> 0" closes.
+                let text = String::from_utf8_lossy(data);
+                let text = text.trim_end_matches('\0');
+                let mut fields = text.splitn(4, ' ');
+                let _index = fields.next();
+                r.plugin = match (fields.next(), fields.nth(1)) {
+                    (Some("1"), Some(line)) => Some(crate::secrets::mask_plugin_secrets(line)),
+                    _ => None,
+                };
             }
 
             STREAM_RESTORE_OBJECT => {}
@@ -679,6 +699,57 @@ mod tests {
         assert!(sent.iter().any(|m| m.contains("File skipped. Already exists:")), "{sent:?}");
         assert_eq!(std::fs::read(root.join("a.txt")).unwrap(), b"hello world");
         let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    fn plugin_records(t: i64) -> Vec<u8> {
+        let mut r = Rec(Vec::new());
+        let line = "postgresql:instance=main:password=*****";
+        r.add(1, STREAM_PLUGIN_NAME, format!("1 1 1 {line}\0").as_bytes());
+        r.attr(1, FT_REG, "/@postgresql/main/db/a/a.dump", &lstat(0o100600, 5, t, STREAM_FILE_DATA), "");
+        r.add(1, STREAM_FILE_DATA, b"hello");
+        r.add(1, STREAM_PLUGIN_NAME, b"1 0");
+        r.add(2, STREAM_PLUGIN_NAME, format!("2 1 1 {line}\0").as_bytes());
+        r.attr(2, FT_REG, "/@postgresql/main/globals.sql", &lstat(0o100600, 3, t, STREAM_FILE_DATA), "");
+        r.add(2, STREAM_FILE_DATA, b"sql");
+        r.add(2, STREAM_PLUGIN_NAME, b"2 0");
+        r.0.extend_from_slice(&(BnetSignal::Eod as i32).to_be_bytes());
+        r.0
+    }
+    fn run_restore(input: Vec<u8>, where_: Vec<u8>) -> (JobMsgs, Counters, Vec<String>) {
+        let mut sd = BnetStream::new(FakeSd { input: Cursor::new(input) });
+        let params = RestoreParams { where_: Where::Prefix(where_), replace: b'a', prefix_links: false };
+        let mut msgs = JobMsgs::new("test-fd");
+        msgs.job_id = 1;
+        let mut counters = Counters::default();
+        let canceled = AtomicBool::new(false);
+        let mut sent = Vec::new();
+        Restore { params: &params, msgs: &mut msgs, counters: &mut counters, create: &mut CreateState::default(), canceled: &canceled }
+            .run(&mut sd, &mut |m: &mut JobMsgs| sent.extend(m.take_queued()));
+        (msgs, counters, sent)
+    }
+
+    /// Plugin files restore to files below Where without loading the plugin:
+    /// a backup stays restorable when the plugin is missing or revoked.
+    #[test]
+    fn plugin_files_restore_to_where_without_the_plugin() {
+        let tmp = std::env::temp_dir().join(format!("ofd-restore-plugin-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&tmp);
+        std::fs::create_dir_all(&tmp).unwrap();
+        let (msgs, counters, sent) = run_restore(plugin_records(1_600_000_000), tmp.as_os_str().as_encoded_bytes().to_vec());
+        assert_eq!(msgs.status(), JS_TERMINATED, "{sent:?}");
+        assert_eq!(counters.job_files, 2);
+        assert_eq!(std::fs::read(tmp.join("@postgresql/main/db/a/a.dump")).unwrap(), b"hello");
+        assert_eq!(std::fs::read(tmp.join("@postgresql/main/globals.sql")).unwrap(), b"sql");
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn plugin_files_without_where_are_refused() {
+        let (msgs, counters, sent) = run_restore(plugin_records(1_600_000_000), Vec::new());
+        assert_ne!(msgs.status(), JS_TERMINATED);
+        assert_eq!(counters.job_files, 0);
+        assert!(sent.iter().any(|m| m.contains("can only be restored to files: set Where")), "{sent:?}");
+        assert!(!std::path::Path::new("/@postgresql").exists());
     }
 
     #[test]

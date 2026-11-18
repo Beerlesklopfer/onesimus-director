@@ -842,6 +842,20 @@ pub struct BackupHandler<'x, 'a, 'b, S: Read + Write> {
     pub fileset: &'x FileSet,
 }
 
+/// A plugin path as stored: absolute, without `.`, `..` or empty parts, so a
+/// restore to `Where` stays below `Where`. None when it cannot be made so.
+pub fn plugin_path(raw: &[u8]) -> Option<Vec<u8>> {
+    let inner = raw.strip_prefix(b"/").unwrap_or(raw);
+    let inner = inner.strip_suffix(b"/").unwrap_or(inner);
+    if inner.is_empty() || inner.split(|&b| b == b'/').any(|c| c.is_empty() || c == b"." || c == b"..") {
+        return None;
+    }
+    let mut out = Vec::with_capacity(inner.len() + 1);
+    out.push(b'/');
+    out.extend_from_slice(inner);
+    Some(out)
+}
+
 /// The FfPkt of a plugin entry: its virtual path, type and attributes, with
 /// the include's options minus those that need a real file (sparse,
 /// offsets, ACLs, xattrs, change check). None for an unsupported kind.
@@ -855,7 +869,7 @@ pub fn plugin_ff(include: &FfPkt, entry: &pb::FileEntry) -> Option<FfPkt> {
     let (uid, gid) = unsafe { (libc::geteuid(), libc::getegid()) };
     let perm = entry.mode & 0o7777;
     let mut statp = Stat { nlink: 1, uid, gid, atime: secs, mtime: secs, ctime: secs, blksize: 4096, ..Default::default() };
-    let path = entry.path.clone();
+    let path = plugin_path(&entry.path)?;
     let (type_, link) = match pb::FileKind::try_from(entry.kind).ok()? {
         pb::FileKind::Regular | pb::FileKind::Virtual => {
             statp.mode = libc::S_IFREG | if perm == 0 { 0o600 } else { perm };
@@ -1157,7 +1171,7 @@ mod tests {
         assert_eq!(t[1], "1 1 1 test:instance=main:password=*****\0");
         assert_eq!(t[2], eod);
         assert_eq!(t[3], "1 1 0");
-        assert!(t[4].starts_with("1 3 @test/main/a.dump\0"), "{}", t[4]);
+        assert!(t[4].starts_with("1 3 /@test/main/a.dump\0"), "{}", t[4]);
         assert_eq!(t[5], eod);
         assert_eq!(t[6], "1 2 0");
         assert_eq!(t[7], "hel");
@@ -1167,9 +1181,18 @@ mod tests {
         // File 2: an empty file still has a (empty) data stream.
         assert_eq!(t[13], "2 26 0");
         assert_eq!(t[16], "2 1 0");
-        assert!(t[17].starts_with("2 3 @test/main/empty\0"), "{}", t[17]);
+        assert!(t[17].starts_with("2 3 /@test/main/empty\0"), "{}", t[17]);
         assert!(!t.iter().any(|x| x.contains("geheim")), "a secret reached the volume");
         std::fs::remove_dir_all(&d).unwrap();
+    }
+
+    #[test]
+    fn plugin_paths_stay_below_where() {
+        assert_eq!(plugin_path(b"@pg/main/a.dump").unwrap(), b"/@pg/main/a.dump");
+        assert_eq!(plugin_path(b"/@pg/main/").unwrap(), b"/@pg/main");
+        for bad in [&b""[..], b"/", b"a/../b", b"../a", b"a/./b", b"a//b", b"/.."] {
+            assert_eq!(plugin_path(bad), None, "{}", String::from_utf8_lossy(bad));
+        }
     }
 
     #[test]
