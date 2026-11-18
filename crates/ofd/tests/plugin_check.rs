@@ -92,7 +92,7 @@ fn fd_checks_a_signed_component_and_rejects_a_tampered_signature() {
         .map(|b| format!("{b:02x}"))
         .collect();
     let manifest = Manifest {
-        schema_version: onesimus_plugins::MANIFEST_SCHEMA_VERSION,
+        schema_version: 1,
         plugin_id: "test.cli".into(),
         version: "1.0.0".into(),
         api_version: 1,
@@ -102,6 +102,7 @@ fn fd_checks_a_signed_component_and_rejects_a_tampered_signature() {
         not_after: now.as_secs() + 300,
         capabilities: vec![],
         target: "wasm32-wasip2".into(),
+        native: Default::default(),
     };
     let manifest_bytes = serde_json::to_vec(&manifest).unwrap();
     let signature = Signer::new_without_digest(&key)

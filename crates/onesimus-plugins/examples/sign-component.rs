@@ -24,7 +24,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         return Err("requires Ed25519 signing key and leaf-first X.509 chain".into());
     }
     let chain: Vec<_> = certs.iter().map(|c| c.to_der()).collect::<Result<_, _>>()?;
-    if manifest.schema_version != onesimus_plugins::MANIFEST_SCHEMA_VERSION
+    if !(1..=onesimus_plugins::MANIFEST_SCHEMA_VERSION).contains(&manifest.schema_version)
         || manifest.api_version != onesimus_plugins::API_VERSION
         || manifest.signing_key_id != signing_key_id(&chain[0])?
         || key.public_key_to_der()? != certs[0].public_key()?.public_key_to_der()?

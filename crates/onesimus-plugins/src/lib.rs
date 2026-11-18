@@ -14,7 +14,8 @@ use sha2::{Digest, Sha256};
 use std::collections::{BTreeMap, BTreeSet};
 
 pub const API_VERSION: u32 = 1;
-pub const MANIFEST_SCHEMA_VERSION: u32 = 1;
+/// Newest manifest schema: 2 adds native parts; 1 is still accepted.
+pub const MANIFEST_SCHEMA_VERSION: u32 = 2;
 const MAX_MANIFEST: usize = 64 * 1024;
 const COMPONENT_HEADER: &[u8] = b"\0asm\x0d\0\x01\0";
 
@@ -34,6 +35,66 @@ pub struct Manifest {
     pub capabilities: Vec<String>,
     /// Host target, e.g. wasm32-wasip2. The verifier compares it to host policy.
     pub target: String,
+    /// Schema 2: native parts per Debian multiarch triplet (e.g. a broker),
+    /// each bound to its SHA-256. Empty and absent in schema 1.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub native: BTreeMap<String, Vec<NativePart>>,
+}
+
+/// One native file of a plugin package: a path below the plugin directory
+/// and the SHA-256 the host checks on the open file before running it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct NativePart {
+    pub path: String,
+    pub sha256: String,
+}
+
+impl Manifest {
+    /// The native part `path` for `triplet`, if the signed manifest lists it.
+    pub fn native_part(&self, triplet: &str, path: &str) -> Option<&NativePart> {
+        self.native.get(triplet)?.iter().find(|p| p.path == path)
+    }
+}
+
+const MAX_TRIPLETS: usize = 16;
+const MAX_PARTS: usize = 8;
+
+/// Schema 2 native parts: lowercase triplets, safe relative paths, hex hashes.
+fn check_native(native: &BTreeMap<String, Vec<NativePart>>) -> Result<(), VerifyError> {
+    let bad = |why: &str| Err(VerifyError::Manifest(format!("native: {why}")));
+    if native.is_empty() {
+        return bad("schema 2 needs at least one triplet");
+    }
+    if native.len() > MAX_TRIPLETS {
+        return bad("too many triplets");
+    }
+    for (triplet, parts) in native {
+        let triplet_ok = !triplet.is_empty()
+            && triplet.len() <= 64
+            && triplet.bytes().all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || matches!(b, b'_' | b'-'));
+        if !triplet_ok {
+            return bad("invalid triplet");
+        }
+        if parts.is_empty() || parts.len() > MAX_PARTS {
+            return bad("each triplet needs 1 to 8 parts");
+        }
+        for part in parts {
+            let path_ok = !part.path.is_empty()
+                && part.path.len() <= 255
+                && !part.path.starts_with('/')
+                && part.path.split('/').all(|c| !c.is_empty() && c != "." && c != "..")
+                && part.path.bytes().all(|b| b.is_ascii_alphanumeric() || matches!(b, b'/' | b'_' | b'-' | b'.'));
+            if !path_ok {
+                return bad("invalid path");
+            }
+            let hash_ok = part.sha256.len() == 64 && part.sha256.bytes().all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b));
+            if !hash_ok {
+                return bad("sha256 must be 64 lowercase hex digits");
+            }
+        }
+    }
+    Ok(())
 }
 
 #[derive(Default, Serialize, Deserialize)]
@@ -121,8 +182,11 @@ pub fn verify(
             "identity, version and signing key are required".into(),
         ));
     }
-    if manifest.schema_version != MANIFEST_SCHEMA_VERSION {
-        return Err(VerifyError::Compatibility);
+    match manifest.schema_version {
+        1 if manifest.native.is_empty() => {}
+        1 => return Err(VerifyError::Manifest("native parts need schema 2".into())),
+        MANIFEST_SCHEMA_VERSION => check_native(&manifest.native)?,
+        _ => return Err(VerifyError::Compatibility),
     }
     let (key, certificate_sha256) =
         certificate::verify_chain(certificate_chain_der, policy, now_unix)?;

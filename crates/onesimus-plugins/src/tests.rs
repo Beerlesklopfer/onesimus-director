@@ -120,6 +120,7 @@ impl Fixture {
             not_after: 300,
             capabilities: vec!["file.read".into()],
             target: "wasm32-wasip2".into(),
+            native: Default::default(),
         };
         let policy = TrustPolicy {
             trust_anchors_der: vec![root.to_der().unwrap()],
@@ -413,4 +414,36 @@ pub(crate) fn signed_component(
         },
         f.policy,
     )
+}
+
+#[test]
+fn schema_2_binds_native_parts_and_schema_1_stays_valid() {
+    let hash = "ab".repeat(32);
+    let part = |path: &str, sha: &str| NativePart { path: path.into(), sha256: sha.into() };
+    let mut f = Fixture::new();
+    assert!(f.check(200).is_ok(), "schema 1 without native parts");
+    f.manifest.schema_version = 2;
+    f.manifest.native = [("x86_64-linux-gnu".to_string(), vec![part("postgresql/onesimus-pg-broker", &hash)])].into();
+    let verified = f.check(200).unwrap();
+    assert_eq!(verified.manifest().native_part("x86_64-linux-gnu", "postgresql/onesimus-pg-broker").unwrap().sha256, hash);
+    assert!(verified.manifest().native_part("aarch64-linux-gnu", "postgresql/onesimus-pg-broker").is_none());
+    for (triplet, p) in [
+        ("x86_64-linux-gnu", part("../evil", &hash)),
+        ("x86_64-linux-gnu", part("/usr/bin/evil", &hash)),
+        ("x86_64-linux-gnu", part("a//b", &hash)),
+        ("x86_64-linux-gnu", part("broker", "AB")),
+        ("x86_64-linux-gnu", part("broker", &"AB".repeat(32))),
+        ("X86_64", part("broker", &hash)),
+    ] {
+        f.manifest.native = [(triplet.to_string(), vec![p.clone()])].into();
+        assert!(matches!(f.check(200), Err(VerifyError::Manifest(_))), "{triplet} {p:?}");
+    }
+    f.manifest.native.clear();
+    assert!(matches!(f.check(200), Err(VerifyError::Manifest(_))), "schema 2 needs parts");
+    f.manifest.schema_version = 1;
+    f.manifest.native = [("x86_64-linux-gnu".to_string(), vec![part("broker", &hash)])].into();
+    assert!(matches!(f.check(200), Err(VerifyError::Manifest(_))), "parts need schema 2");
+    f.manifest.native.clear();
+    f.manifest.schema_version = 3;
+    assert!(matches!(f.check(200), Err(VerifyError::Compatibility)));
 }

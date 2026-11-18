@@ -515,7 +515,7 @@ mod tests {
     fn component() -> VerifiedComponent {
         VerifiedComponent {
             manifest: crate::Manifest {
-                schema_version: crate::MANIFEST_SCHEMA_VERSION,
+                schema_version: 1,
                 plugin_id: "test".into(),
                 version: "1".into(),
                 api_version: 1,
@@ -525,6 +525,7 @@ mod tests {
                 not_after: u64::MAX,
                 capabilities: vec![],
                 target: "test".into(),
+                native: Default::default(),
             },
             component: Vec::new(),
             certificate_sha256: "test".into(),

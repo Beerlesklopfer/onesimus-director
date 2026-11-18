@@ -64,6 +64,12 @@ im Manifest ist Ed25519.
 }
 ```
 
+Schema 2 ergänzt `native`: je Debian-Triplet die Binärteile des Plugin-Pakets
+(z. B. einen Broker) mit relativem Pfad und SHA-256, etwa
+`"native": {"x86_64-linux-gnu": [{"path": "postgresql/onesimus-pg-broker", "sha256": "…"}]}`.
+Schema 1 bleibt gültig und darf keine Binärteile nennen. Ein Binärteil läuft
+nur, wenn sein Hash auf dem geöffneten Deskriptor zum geprüften Manifest passt.
+
 Hashes sind hexadezimal; die Schlüssel-ID ist kanonisch in Kleinbuchstaben.
 Die Signatur umfasst die gesamten gespeicherten Manifestbytes einschließlich
 Leerzeichen. Vor der Prüfung darf das JSON nicht erneut serialisiert werden.
