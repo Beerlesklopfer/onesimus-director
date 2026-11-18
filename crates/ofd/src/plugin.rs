@@ -12,6 +12,14 @@ use std::fmt;
 use std::os::unix::fs::MetadataExt;
 use std::path::{Path, PathBuf};
 
+use std::sync::{mpsc, OnceLock};
+use std::time::Duration;
+
+use onesimus_plugins::bundle;
+use onesimus_plugins::executor::{Binding, Host, Limits, Worker};
+use onesimus_plugins::wasm::{self, LoadOptions, Operation, Reply, RuntimeLimits, WasmBackend};
+use onesimus_proto_rs::onesimus::filed::plugin::v1 as pb;
+
 use crate::config::FdConfig;
 use crate::secrets::{is_secret, MASK};
 
@@ -44,6 +52,12 @@ pub enum PluginError {
     NotAllowed(String),
     /// A path fails the ownership and permission check.
     Untrusted { path: PathBuf, reason: String },
+    /// Reading, verifying or starting the bundle failed; nothing ran.
+    Load(String),
+    /// A call into a running plugin failed (trap, timeout, refused reply).
+    Runtime(String),
+    /// The job was canceled while the plugin worked.
+    Canceled,
 }
 
 impl fmt::Display for PluginError {
@@ -53,6 +67,9 @@ impl fmt::Display for PluginError {
             Self::NotConfigured => write!(f, "no Plugin Policy and Plugin Directory configured"),
             Self::NotAllowed(name) => write!(f, "plugin \"{name}\" is not in Plugin Names"),
             Self::Untrusted { path, reason } => write!(f, "{}: {reason}", path.display()),
+            Self::Load(why) => write!(f, "cannot load: {why}"),
+            Self::Runtime(why) => write!(f, "{why}"),
+            Self::Canceled => write!(f, "canceled"),
         }
     }
 }
@@ -132,7 +149,7 @@ fn resolve_checked(config: &FdConfig, line: &PluginLine, owner: u32, top: &Path)
     let (Some(policy), Some(directory)) = (&config.plugin_policy, &config.plugin_directory) else {
         return Err(PluginError::NotConfigured);
     };
-    if !config.plugin_names.iter().any(|n| *n == line.name) {
+    if !config.plugin_names.contains(&line.name) {
         return Err(PluginError::NotAllowed(line.name.clone()));
     }
     let bundle = directory.join(format!("{}.pb", line.name));
@@ -170,6 +187,183 @@ fn check_trusted(path: &Path, owner: u32, directory: bool, top: &Path) -> Result
     }
     Ok(())
 }
+
+/// Most plugin instances one File Daemon runs at the same time.
+const MAX_INSTANCES: usize = 16;
+/// How often a waiting call looks at the job's cancel flag.
+const CANCEL_POLL: Duration = Duration::from_millis(100);
+/// Longest single plugin operation (one NextFile, one block of ReadFile).
+const OPERATION_TIMEOUT: Duration = Duration::from_secs(300);
+
+/// The admission limit shared by every job of this process.
+fn host() -> Result<&'static Host, PluginError> {
+    static HOST: OnceLock<Result<Host, String>> = OnceLock::new();
+    HOST.get_or_init(|| Host::new(MAX_INSTANCES).map_err(|e| e.to_string()))
+        .as_ref()
+        .map_err(|e| PluginError::Load(e.clone()))
+}
+
+/// One running plugin instance, bound to one job and one `Plugin =` line.
+/// Dropping it stops the worker; `finish` reports the job result first.
+pub struct Session {
+    worker: Worker<WasmBackend>,
+    binding: Binding,
+    job: pb::JobContext,
+    pub line: PluginLine,
+    pub plugin_id: String,
+    /// Largest block ReadFile/WriteFile may carry.
+    pub chunk: u32,
+    started: bool,
+}
+
+impl Session {
+    /// Checks, verifies and starts the plugin of `line` for this job.
+    /// `index` numbers the plugin lines of the job (instance identity).
+    pub fn open(config: &FdConfig, line: &PluginLine, job: pb::JobContext, index: usize, chunk: u32)
+        -> Result<Self, PluginError> {
+        let resolved = resolve(config, line)?;
+        let runtime = RuntimeLimits { max_chunk_bytes: chunk, ..RuntimeLimits::default() };
+        Self::open_resolved(&resolved, line, job, index, runtime)
+    }
+
+    fn open_resolved(resolved: &Resolved, line: &PluginLine, job: pb::JobContext, index: usize, runtime: RuntimeLimits)
+        -> Result<Self, PluginError> {
+        let load = |e: &dyn fmt::Display| PluginError::Load(e.to_string());
+        let chunk = runtime.max_chunk_bytes;
+        let bundle = bundle::read_bundle(&resolved.bundle, runtime.max_component_bytes).map_err(|e| load(&e))?;
+        let policy = bundle::read_policy(&resolved.policy).map_err(|e| load(&e))?;
+        let manifest: onesimus_plugins::Manifest =
+            serde_json::from_slice(&bundle.manifest_bytes).map_err(|e| load(&e))?;
+        let binding = Binding {
+            instance_id: format!("{}-{index}-{}", job.job_id, line.name),
+            job_id: job.job_id,
+            device_id: format!("plugin:{}", line.name),
+            worker_id: format!("ofd-{}-{index}", job.job_id),
+        };
+        let overhead = 64 * 1024;
+        let worker = wasm::load_signed(host()?, bundle, &policy, LoadOptions {
+            binding: binding.clone(),
+            job: job.clone(),
+            options: line.options.clone(),
+            worker: Limits {
+                max_pending_operations: 1,
+                max_request_bytes: chunk as usize + overhead,
+                max_response_bytes: chunk as usize + overhead,
+                operation_timeout: OPERATION_TIMEOUT,
+            },
+            runtime,
+        })
+        .map_err(|e| load(&e))?;
+        Ok(Self { worker, binding, job, line: line.clone(), plugin_id: manifest.plugin_id, chunk, started: false })
+    }
+
+    /// One call, waiting until it answers or `canceled()` turns true.
+    fn call(&self, op: Operation, canceled: &dyn Fn() -> bool) -> Result<Reply, PluginError> {
+        let ticket = self.worker.submit(&self.binding, op).map_err(|e| PluginError::Runtime(e.to_string()))?;
+        loop {
+            match ticket.wait_timeout(CANCEL_POLL) {
+                Ok(reply) => return reply.map_err(|e| PluginError::Runtime(e.to_string())),
+                Err(mpsc::RecvTimeoutError::Timeout) => {
+                    if canceled() {
+                        self.worker.cancel();
+                        return Err(PluginError::Canceled);
+                    }
+                }
+                Err(mpsc::RecvTimeoutError::Disconnected) => {
+                    return Err(PluginError::Runtime("plugin worker stopped".into()));
+                }
+            }
+        }
+    }
+
+    fn event(&self, event: pb::event_request::Event, canceled: &dyn Fn() -> bool) -> Result<(), PluginError> {
+        self.call(Operation::Event(pb::EventRequest {
+            instance_id: self.binding.instance_id.clone(),
+            job: Some(self.job.clone()),
+            event: Some(event),
+        }), canceled)
+        .map(drop)
+    }
+
+    /// JobStarted: from here on file operations are allowed.
+    pub fn start(&mut self, canceled: &dyn Fn() -> bool) -> Result<(), PluginError> {
+        self.event(pb::event_request::Event::Started(pb::JobStarted {}), canceled)?;
+        self.started = true;
+        Ok(())
+    }
+
+    /// The next file of a backup, `None` when the plugin has no more.
+    pub fn next_file(&self, canceled: &dyn Fn() -> bool) -> Result<Option<pb::FileEntry>, PluginError> {
+        let op = Operation::NextFile(pb::NextFileRequest {
+            instance_id: self.binding.instance_id.clone(),
+            job_id: self.job.job_id,
+        });
+        match self.call(op, canceled)? {
+            Reply::NextFile(pb::NextFileResponse { item: Some(pb::next_file_response::Item::File(f)), .. }) => Ok(Some(f)),
+            Reply::NextFile(pb::NextFileResponse { item: Some(pb::next_file_response::Item::Complete(_)), .. }) => Ok(None),
+            _ => Err(PluginError::Runtime("unexpected reply to NextFile".into())),
+        }
+    }
+
+    /// Up to `chunk` bytes of `path` from `offset`; `true` at the end.
+    pub fn read(&self, path: &[u8], offset: u64, canceled: &dyn Fn() -> bool) -> Result<(Vec<u8>, bool), PluginError> {
+        let op = Operation::ReadFile(pb::ReadFileRequest {
+            instance_id: self.binding.instance_id.clone(),
+            job_id: self.job.job_id,
+            path: path.to_vec(),
+            offset,
+            max_bytes: self.chunk,
+        });
+        match self.call(op, canceled)? {
+            Reply::ReadFile(r) => Ok((r.data, r.eof)),
+            _ => Err(PluginError::Runtime("unexpected reply to ReadFile".into())),
+        }
+    }
+
+    /// One block of a file during an online restore.
+    pub fn write(&self, file: &pb::FileEntry, offset: u64, data: &[u8], canceled: &dyn Fn() -> bool)
+        -> Result<(), PluginError> {
+        self.call(Operation::WriteFile(pb::WriteFileRequest {
+            instance_id: self.binding.instance_id.clone(),
+            job_id: self.job.job_id,
+            file: Some(file.clone()),
+            offset,
+            data: data.to_vec(),
+        }), canceled)
+        .map(drop)
+    }
+
+    /// Completes (or with `abort` discards) one restored file.
+    pub fn close(&self, path: &[u8], abort: bool, canceled: &dyn Fn() -> bool) -> Result<(), PluginError> {
+        self.call(Operation::CloseFile(pb::CloseFileRequest {
+            instance_id: self.binding.instance_id.clone(),
+            job_id: self.job.job_id,
+            path: path.to_vec(),
+            abort,
+        }), canceled)
+        .map(drop)
+    }
+
+    /// Reports the end of the job to the plugin and stops the worker.
+    pub fn finish(mut self, succeeded: bool) -> Result<(), PluginError> {
+        let never = || false;
+        let reported = if self.started {
+            let event = if succeeded {
+                pb::event_request::Event::Finished(pb::JobFinished { succeeded })
+            } else {
+                pb::event_request::Event::Cancelled(pb::JobCancelled { reason: "job failed or canceled".into() })
+            };
+            self.event(event, &never)
+        } else {
+            Ok(())
+        };
+        let stopped = self.worker.shutdown(Duration::from_secs(5)).map_err(|e| PluginError::Runtime(e.to_string()));
+        reported.and(stopped)
+    }
+}
+
+#[cfg(test)]
+pub(crate) mod testkit;
 
 #[cfg(test)]
 mod tests {
@@ -297,5 +491,126 @@ mod tests {
         std::fs::remove_dir_all(&d).unwrap();
         // Root-owned system paths pass.
         assert_eq!(check_trusted(Path::new("/usr/lib"), 0, true, Path::new("/")), Ok(()));
+    }
+
+    mod session {
+        use super::super::testkit::*;
+        use super::super::*;
+        use std::time::Instant;
+
+        /// A fresh job id per call: the host refuses two instances with the
+        /// same identity, as two jobs never share one.
+        fn job(op: pb::JobOperation) -> pb::JobContext {
+            use std::sync::atomic::{AtomicU64, Ordering};
+            static ID: AtomicU64 = AtomicU64::new(1000);
+            pb::JobContext { job_id: ID.fetch_add(1, Ordering::Relaxed), job_name: "pg-test".into(), operation: op as i32 }
+        }
+        fn limits() -> RuntimeLimits {
+            RuntimeLimits { max_chunk_bytes: 1024, ..RuntimeLimits::default() }
+        }
+        fn open_with(script: &Script, op: pb::JobOperation, runtime: RuntimeLimits) -> (PathBuf, Result<Session, PluginError>) {
+            let d = super::dir();
+            let resolved = signed_plugin(&d, "postgresql", script);
+            let line = parse_line("postgresql:instance=main:password=secret").unwrap();
+            let s = Session::open_resolved(&resolved, &line, job(op), 0, runtime);
+            (d, s)
+        }
+        fn open(script: &Script, op: pb::JobOperation) -> (PathBuf, Result<Session, PluginError>) {
+            open_with(script, op, limits())
+        }
+        const NEVER: fn() -> bool = || false;
+
+        #[test]
+        fn backup_lists_and_reads_files() {
+            let script = Script {
+                next: vec![file_step(b"@postgresql/main/db/a/a.dump", 5), complete_step()],
+                read: vec![data_step(b"hello", true)],
+                ..Default::default()
+            };
+            let (d, s) = open(&script, pb::JobOperation::Backup);
+            let mut s = s.unwrap();
+            assert_eq!(s.plugin_id, "test.postgresql");
+            s.start(&NEVER).unwrap();
+            let f = s.next_file(&NEVER).unwrap().unwrap();
+            assert_eq!(f.path, b"@postgresql/main/db/a/a.dump");
+            assert_eq!(s.read(&f.path, 0, &NEVER).unwrap(), (b"hello".to_vec(), true));
+            assert_eq!(s.next_file(&NEVER).unwrap(), None);
+            s.finish(true).unwrap();
+            std::fs::remove_dir_all(&d).unwrap();
+        }
+
+        #[test]
+        fn restore_writes_and_closes() {
+            let (d, s) = open(&Script::default(), pb::JobOperation::Restore);
+            let mut s = s.unwrap();
+            s.start(&NEVER).unwrap();
+            let f = pb::FileEntry { path: b"x".to_vec(), kind: pb::FileKind::Virtual as i32, ..Default::default() };
+            s.write(&f, 0, b"data", &NEVER).unwrap();
+            s.close(b"x", false, &NEVER).unwrap();
+            // A backup call in a restore job is refused by the host.
+            assert!(matches!(s.next_file(&NEVER), Err(PluginError::Runtime(_))));
+            let _ = s.finish(false);
+            std::fs::remove_dir_all(&d).unwrap();
+        }
+
+        #[test]
+        fn a_changed_bundle_is_refused_before_any_guest_code_runs() {
+            let d = super::dir();
+            let resolved = signed_plugin(&d, "postgresql", &Script::default());
+            let mut bytes = std::fs::read(&resolved.bundle).unwrap();
+            let last = bytes.len() - 1;
+            bytes[last] ^= 0x01;
+            std::fs::write(&resolved.bundle, &bytes).unwrap();
+            let line = parse_line("postgresql").unwrap();
+            assert!(matches!(Session::open_resolved(&resolved, &line, job(pb::JobOperation::Backup), 0, limits()),
+                Err(PluginError::Load(_))));
+            std::fs::remove_dir_all(&d).unwrap();
+        }
+
+        #[test]
+        fn an_endless_loop_runs_out_of_fuel() {
+            let script = Script { next: vec![Step::Loop], ..Default::default() };
+            let (d, s) = open(&script, pb::JobOperation::Backup);
+            let mut s = s.unwrap();
+            s.start(&NEVER).unwrap();
+            assert!(matches!(s.next_file(&NEVER), Err(PluginError::Runtime(_))));
+            let _ = s.finish(false);
+            std::fs::remove_dir_all(&d).unwrap();
+        }
+
+        #[test]
+        fn a_trap_ends_only_this_session() {
+            let script = Script { next: vec![Step::Trap], ..Default::default() };
+            let (d, s) = open(&script, pb::JobOperation::Backup);
+            let mut s = s.unwrap();
+            s.start(&NEVER).unwrap();
+            assert!(matches!(s.next_file(&NEVER), Err(PluginError::Runtime(_))));
+            let _ = s.finish(false);
+            // A second session of the same process still works.
+            let ok = Script { next: vec![complete_step()], ..Default::default() };
+            let (d2, s2) = open(&ok, pb::JobOperation::Backup);
+            let mut s2 = s2.unwrap();
+            s2.start(&NEVER).unwrap();
+            assert_eq!(s2.next_file(&NEVER).unwrap(), None);
+            s2.finish(true).unwrap();
+            std::fs::remove_dir_all(&d).unwrap();
+            std::fs::remove_dir_all(&d2).unwrap();
+        }
+
+        #[test]
+        fn cancel_stops_a_hanging_plugin() {
+            // Enough fuel that the loop runs until the cancel, not out of fuel.
+            let script = Script { next: vec![Step::Loop], ..Default::default() };
+            let runtime = RuntimeLimits { fuel_per_operation: u64::MAX / 4, ..limits() };
+            let (d, s) = open_with(&script, pb::JobOperation::Backup, runtime);
+            let mut s = s.unwrap();
+            s.start(&NEVER).unwrap();
+            let begin = Instant::now();
+            let cancel = move || begin.elapsed() > Duration::from_millis(300);
+            assert_eq!(s.next_file(&cancel), Err(PluginError::Canceled));
+            assert!(begin.elapsed() < Duration::from_secs(5));
+            let _ = s.finish(false);
+            std::fs::remove_dir_all(&d).unwrap();
+        }
     }
 }
