@@ -11,7 +11,7 @@ Stand: 18.11.2026. Status: **Freigegeben (18.11.2026, alle drei Vorschläge); A 
 | E Broker | `1876efa` | fertig, gegen Wegwerf-Cluster inkl. `pg_restore` |
 | F Gast | `2b21768` | fertig, Ende-zu-Ende inkl. `pg_restore` |
 | G Paket | – | offen |
-| H Tests | – | offen: Cancel während `pg_dump`, Lauf gegen `odir`/`bareos-sd`, Server-Ausfall |
+| H Tests | `d7bb6c5` | Cancel und Server-Ausfall (Wegwerf-Cluster); echter Lauf siehe unten |
 
 Setzt [Phase 1](PLUGIN-PHASE1.md) voraus (abgenommen im Ende-zu-Ende-Lauf) und
 den [PostgreSQL-Plan](POSTGRESQL-PLUGIN.md) mit seinen Entscheidungen: Broker
@@ -120,3 +120,25 @@ Datenbank `<db>.dump` über `dump-read`, `_info.json` zuletzt.
    der Gast sieht die Daten nicht und kann sie nicht beschreiben/prüfen).
 3. **seccomp für den Broker** jetzt oder in einer späteren Phase (Vorschlag:
    später; `NO_NEW_PRIVS`, eigener Benutzer, leere Umgebung sind Pflicht).
+
+## Echter Lauf (18./19.11.2026)
+
+`odir` + `bareos-sd` 25.1.3 + `ofd` (Release) als root, lokaler PostgreSQL-17-
+Cluster, Broker als Benutzer `postgres`, Plugin-Zeile
+`postgresql:instance=main:exclude=parity_*,bareos_*,bk_*`:
+Backup OK (15 Dateien), Restore in Dateien OK (15 Dateien, 589 454 Bytes);
+jeder Dump ist ein gültiges `pg_restore`-Archiv, `globals.sql` enthält die
+Rollen, die per Muster ausgeschlossenen Datenbanken fehlen.
+
+Befunde:
+- **Katalog-Datenbank:** Der eingebaute Ausschluss kennt nur den Namen
+  `bareos`. Die Katalog-Datenbank des Test-Directors hieß `ofd_e2e` und wurde
+  mitgesichert. Der FD kennt den Katalog seines Directors nicht. Lösung offen:
+  Director übermittelt den Katalognamen, oder die Ausschlussregel ist Pflicht.
+- **`ofd --check-plugin`** kann ein Plugin mit Broker-Import nicht
+  instanziieren (kein Broker im Prüfmodus). Für solche Plugins soll der Check
+  bei Signatur, Manifest und Binärteil-Hashes enden.
+- **Vertrauensbasis:** Entscheidung des Nutzers: CA-Zertifikat und Grants
+  werden in `ofd` einkompiliert; die lokale Policy darf nur einschränken.
+  Ort des privaten CA-Schlüssels offen.
+
