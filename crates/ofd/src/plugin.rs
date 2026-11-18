@@ -999,11 +999,14 @@ mod guest {
     #[ignore = "needs the built postgresql guest and onesimus-pg-broker"]
     fn postgresql_backs_up_every_allowed_database() {
         use std::process::Command;
-        let Some(setup) = pg_setup("e2e", 55434) else { return };
+        let Some(mut setup) = pg_setup("e2e", 55434) else { return };
+        // As odir adds it: the Director's catalog under its own name.
+        setup.line.options.insert("catalog_database".into(), "dircat".into());
         let c = &setup.cluster;
         let d = setup.dir.clone();
         c.sql("postgres", "CREATE DATABASE \"app-1\"");
         c.sql("postgres", "CREATE DATABASE bareos");
+        c.sql("postgres", "CREATE DATABASE dircat");
         c.sql("postgres", "CREATE DATABASE test_scratch");
         c.sql("postgres", "CREATE ROLE reader NOLOGIN");
         c.sql("app-1", "CREATE TABLE t (id int primary key, v text); INSERT INTO t SELECT g, repeat('x', 200) FROM generate_series(1, 20000) g");
@@ -1030,10 +1033,12 @@ mod guest {
         assert!(base.join("db/app-1/app-1.dump").is_file());
         assert!(base.join("db/postgres/postgres.dump").is_file());
         assert!(!base.join("db/bareos").exists(), "the catalog is never backed up");
+        assert!(!base.join("db/dircat").exists(), "nor the Director's catalog under another name");
         assert!(!base.join("db/test_scratch").exists(), "excluded by the plugin line");
         assert!(std::fs::read_to_string(base.join("globals.sql")).unwrap().contains("CREATE ROLE reader"));
         let cluster = std::fs::read_to_string(base.join("_info.json")).unwrap();
         assert!(cluster.contains("\"dumped\":[\"app-1\",\"postgres\"]"), "{cluster}");
+        assert!(cluster.contains("\"excluded_catalogs\":[\"bareos\",\"dircat\"]"), "{cluster}");
         assert!(std::fs::read_to_string(base.join("db/app-1/_info.json")).unwrap().contains("\"name\":\"t\""));
 
         // The restored dump gives back the rows.

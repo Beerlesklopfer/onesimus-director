@@ -246,6 +246,8 @@ struct OpenDump {
 
 struct State {
     instance: String,
+    /// The Director's catalog database (from odir), never backed up.
+    catalog: String,
     globals: bool,
     tree: Option<Vec<Entry>>,
     next: usize,
@@ -256,7 +258,7 @@ struct State {
 
 impl State {
     const fn new() -> Self {
-        Self { instance: String::new(), globals: true, tree: None, next: 0, open: None, info: None, dumped: Vec::new() }
+        Self { instance: String::new(), catalog: String::new(), globals: true, tree: None, next: 0, open: None, info: None, dumped: Vec::new() }
     }
 }
 
@@ -367,9 +369,13 @@ fn cluster_json(state: &State) -> Vec<u8> {
     let info = state.info.clone().unwrap_or_default();
     let dbs = info.databases.iter().map(|d| js(&d.name)).collect::<Vec<_>>().join(",");
     let dumped = state.dumped.iter().map(|d| js(d)).collect::<Vec<_>>().join(",");
+    let mut excluded = vec![js("bareos")];
+    if !state.catalog.is_empty() && state.catalog != "bareos" {
+        excluded.push(js(&state.catalog));
+    }
     format!(
-        "{{\"instance\":{},\"server_version\":{},\"major\":{},\"class\":\"logical\",\"databases\":[{}],\"dumped\":[{}],\"globals\":{},\"excluded_always\":[\"bareos\"]}}\n",
-        js(&state.instance), js(&info.server_version), info.major, dbs, dumped, state.globals
+        "{{\"instance\":{},\"server_version\":{},\"major\":{},\"class\":\"logical\",\"databases\":[{}],\"dumped\":[{}],\"globals\":{},\"excluded_catalogs\":[{}]}}\n",
+        js(&state.instance), js(&info.server_version), info.major, dbs, dumped, state.globals, excluded.join(",")
     ).into_bytes()
 }
 
@@ -382,9 +388,11 @@ impl Guest for Plugin {
         let valid = !instance.is_empty() && instance.len() <= 64
             && instance.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'_' || b == b'-');
         let globals = req.options.get("globals").map(|v| !matches!(v.as_str(), "no" | "false" | "0")).unwrap_or(true);
+        let catalog = req.options.get("catalog_database").cloned().unwrap_or_default();
         with_state(|s| {
             s.instance = instance;
             s.globals = globals;
+            s.catalog = catalog;
         });
         let result = if valid { ok() } else { Some(result(RC_ERROR, "instance must be [A-Za-z0-9_-]{1,64}")) };
         pb::InitializeResponse {

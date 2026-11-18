@@ -65,6 +65,23 @@ pub(crate) fn update_client_record_sql(name: &str, ret: ClientRetention, uname: 
         ret.auto_prune as i32, ret.file_retention, ret.job_retention, esc(uname), esc(name))
 }
 
+/// Plugin lines ("P postgresql:…") of the FileSet sent to the FD gain
+/// `catalog_database=<name>`: the FD cannot know the Director's catalog,
+/// and its PostgreSQL plugin must never back it up. A line that already
+/// names one is left as it is; other plugins are unchanged.
+pub(crate) fn with_catalog_database(lines: Vec<String>, database: &str) -> Vec<String> {
+    let value = database.replace('\\', "\\\\").replace(':', "\\:");
+    lines.into_iter().map(|line| {
+        let Some(plugin) = line.strip_prefix("P ") else { return line };
+        let body = plugin.trim_end_matches('\n');
+        let is_postgresql = body == "postgresql" || body.starts_with("postgresql:");
+        if !is_postgresql || body.contains("catalog_database=") || database.is_empty() {
+            return line;
+        }
+        format!("P {body}:catalog_database={value}\n")
+    }).collect()
+}
+
 /// inc_conf.cc: the FileSet MD5 is updated with every `File =` and
 /// `Plugin =` name of the Include/Exclude blocks (pass 1, in file order);
 /// job.cc GetOrCreateFilesetRecord: BinToBase64(digest, compatible=false).
@@ -794,5 +811,23 @@ mod tests {
         let end = BackupEnd { ids, read_bytes: 20029, ..Default::default() };
         let sql = update_job_end_record_sql(631, 'T', 0, 3, 20029, 0, 2, 1792221542, &end);
         assert!(sql.contains(",JobBytes=20029,ReadBytes=20029,JobFiles=3,JobErrors=0,VolSessionId=2,VolSessionTime=1792221542,PoolId=5,FileSetId=7,JobTDate=0,"));
+    }
+}
+
+#[cfg(test)]
+mod catalog_database_tests {
+    use super::with_catalog_database;
+
+    #[test]
+    fn postgresql_plugin_lines_name_the_catalog() {
+        let lines = vec!["fileset\n".to_string(), "I\n".to_string(), "P postgresql:instance=main\n".to_string(),
+            "P postgresql\n".to_string(), "P openldap:uri=x\n".to_string(),
+            "P postgresql:catalog_database=own\n".to_string(), "N\n".to_string()];
+        let out = with_catalog_database(lines, "bar:eos");
+        assert_eq!(out[2], "P postgresql:instance=main:catalog_database=bar\\:eos\n");
+        assert_eq!(out[3], "P postgresql:catalog_database=bar\\:eos\n");
+        assert_eq!(out[4], "P openldap:uri=x\n");
+        assert_eq!(out[5], "P postgresql:catalog_database=own\n");
+        assert_eq!(out[0], "fileset\n");
     }
 }

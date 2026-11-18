@@ -131,10 +131,12 @@ jeder Dump ist ein gültiges `pg_restore`-Archiv, `globals.sql` enthält die
 Rollen, die per Muster ausgeschlossenen Datenbanken fehlen.
 
 Befunde:
-- **Katalog-Datenbank:** Der eingebaute Ausschluss kennt nur den Namen
-  `bareos`. Die Katalog-Datenbank des Test-Directors hieß `ofd_e2e` und wurde
-  mitgesichert. Der FD kennt den Katalog seines Directors nicht. Lösung offen:
-  Director übermittelt den Katalognamen, oder die Ausschlussregel ist Pflicht.
+- **Katalog-Datenbank:** Der eingebaute Ausschluss kannte nur den Namen
+  `bareos`; die Katalog-Datenbank des Test-Directors (`ofd_e2e`) wurde
+  mitgesichert. **Behoben (Entscheidung 19.11.2026):** `odir` hängt an jede
+  `postgresql`-Plugin-Zeile `catalog_database=<DB des Katalogs>` an (der des
+  Clients, sonst der erste); `ofd` schließt sie zusätzlich zu `bareos` aus.
+  Ein Original-Bareos-Director sendet das nicht; dann bleibt `bareos`.
 - **`ofd --check-plugin`** kann ein Plugin mit Broker-Import nicht
   instanziieren (kein Broker im Prüfmodus). Für solche Plugins soll der Check
   bei Signatur, Manifest und Binärteil-Hashes enden.

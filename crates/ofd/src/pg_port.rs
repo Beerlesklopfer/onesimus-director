@@ -49,7 +49,10 @@ pub fn allowed_databases(info: &pb::InfoResponse, options: &BTreeMap<String, Str
     let wanted = list(options.get("databases"));
     let wanted: Vec<String> = if wanted.is_empty() { vec!["*".into()] } else { wanted };
     let exclude = list(options.get("exclude"));
-    let usable = |d: &pb::Database| d.allow_connections && !d.is_template && d.name != CATALOG_DATABASE;
+    // The Director names its catalog (catalog_database=, added by odir);
+    // "bareos" is excluded in any case.
+    let catalog = options.get("catalog_database").map(String::as_str).unwrap_or(CATALOG_DATABASE);
+    let usable = |d: &pb::Database| d.allow_connections && !d.is_template && d.name != CATALOG_DATABASE && d.name != catalog;
     let mut allowed = BTreeSet::new();
     for pattern in &wanted {
         let matches: Vec<&pb::Database> = info.databases.iter().filter(|d| glob(pattern, &d.name)).collect();
@@ -263,6 +266,10 @@ mod tests {
         assert!(allowed_databases(&info(), &opts(&[("databases", "bareos")])).is_err(), "catalog by name");
         assert!(allowed_databases(&info(), &opts(&[("databases", "template1")])).is_err());
         assert!(glob("a*b*c", "aXbYc") && !glob("a*b", "ab_") && glob("*", "") && !glob("x", "y"));
+        // The Director's catalog under another name is excluded too.
+        let named = allowed_databases(&info(), &opts(&[("catalog_database", "multigpt")])).unwrap();
+        assert!(!named.contains("multigpt") && !named.contains("bareos") && named.contains("EleLa"));
+        assert!(allowed_databases(&info(), &opts(&[("catalog_database", "EleLa"), ("databases", "EleLa")])).is_err());
     }
 
     #[test]

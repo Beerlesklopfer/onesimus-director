@@ -1770,6 +1770,10 @@ fn run_selected(
         Ok(lines) => lines,
         Err(e) => return job_failed(e),
     };
+    // The catalog this Director writes to (the client's, else the first).
+    let catalog_database = config.catalogs.iter().find(|c| c.name == client.catalog)
+        .or_else(|| config.catalogs.first()).map(|c| c.db_name.clone()).unwrap_or_default();
+    let fileset_lines = fileset_lines.map(|lines| crate::backup::with_catalog_database(lines, &catalog_database));
     let write = crate::sd_copy::StorageUse {
         name: storage.name.clone(), address: storage.address.clone(), port: storage.port,
         password: storage.password.clone(), media_type: storage.media_type.clone(),
