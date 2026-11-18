@@ -202,11 +202,9 @@ Volume oder im Joblog.
 Behoben dabei: Prüfung der CA-Dateien der Policy (`ofd`), Weitergabe von
 `pluginoptions` beim Restore (`odir`).
 
-Offen:
-- Verzeichniszeit: Liefert ein Plugin ein Verzeichnis vor seinem Inhalt, setzt
-  das spätere Anlegen der Dateien die Zeit des Verzeichnisses neu. `ofd` soll
-  Verzeichnis-Attribute beim Restore erst nach dem Inhalt setzen.
-- `odir` und `ofd` binden trotz `DirAddress`/`FDAddress` an alle Schnittstellen;
-  `odir` kündigt sich zudem per mDNS an.
-- Der Job-Bericht zeigt „Software Compression: None“, obwohl LZ4 aktiv war.
+Danach behoben: Verzeichniszeit von Plugin-Verzeichnissen (Attribute nach dem
+Inhalt), `FD Address` und `DirAddress` werden beachtet, kein mDNS für einen
+Director auf Loopback.
+
+Offen: Der Job-Bericht zeigt „Software Compression: None“, obwohl LZ4 aktiv war.
 
