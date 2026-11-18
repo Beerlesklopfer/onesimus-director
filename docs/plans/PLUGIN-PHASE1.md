@@ -24,7 +24,7 @@ Namen wie im Bareos-FD, damit vorhandene Konfigurationen lesbar bleiben:
 
 ```
 Client {
-  Plugin Directory = /usr/lib/onesimus/plugins     # <name>.pb Bundles
+  Plugin Directory = /usr/lib/x86_64-linux-gnu/onesimus/plugins  # Vorgabe: Multiarch-Pfad
   Plugin Names = postgresql                         # Positivliste
   Plugin Policy = /etc/onesimus/plugin-policy.json  # öffentliche Trust-Policy
 }
@@ -74,8 +74,13 @@ Damit die Signatur nicht umgangen werden kann, gilt zusätzlich:
 Entscheidung vom 18.11.2026: Jedes Plugin ist ein eigenes Debian-Paket
 (`onesimus-plugin-<name>`).
 
-- Das Paket installiert nur `/usr/lib/onesimus/plugins/<name>.pb`. dpkg legt es
-  als `root:root`, Modus `0644` an; das erfüllt die Rechteprüfung ohne Zutun.
+- **Multiarch (Entscheidung 18.11.2026):** Ein Plugin bringt Binärteile je
+  Architektur mit (z. B. seinen Broker), das Paket ist also
+  `Architecture: any` und `Multi-Arch: same`. Das Bundle liegt unter
+  `/usr/lib/<triplet>/onesimus/plugins/<name>.pb`; das ist die Vorgabe von
+  `Plugin Directory` (Triplet der Architektur, für die `ofd` gebaut ist).
+  dpkg legt die Dateien als `root:root`, Modus `0644` an; das erfüllt die
+  Rechteprüfung ohne Zutun.
 - **Das Paket gibt sich nicht selbst frei.** Es ändert weder `Plugin Names` noch
   die Policy. Freigabe ist ein Schritt des Administrators (oder seiner
   Konfigurationsverwaltung). Ein installiertes Paket allein führt keinen Code aus.
@@ -90,6 +95,17 @@ Entscheidung vom 18.11.2026: Jedes Plugin ist ein eigenes Debian-Paket
   braucht keinen Signierschlüssel. Updates ersetzen die Datei atomar
   (dpkg schreibt neu und benennt um); ein laufender Job behält die bereits
   geprüften Bytes.
+
+### Offen: Signatur der Binärteile
+
+Der WASM-Teil ist signiert und wird bei jedem Laden geprüft. Ein nativer Teil
+eines Plugin-Pakets (Broker) läuft dagegen als echter Prozess, nicht in der
+Sandbox. Ohne eigene Prüfung wäre er genau der unsignierte Ausführungspfad,
+den die Architektur ausschließt. Vorschlag zur Entscheidung: Das signierte
+Manifest nennt je Triplet den SHA-256 jedes Binärteils (Schemaversion 2);
+`ofd` startet einen Broker nur, wenn Datei, Eigentümer/Modus und Hash zum
+geprüften Manifest passen, und führt ihn aus dem geöffneten Dateideskriptor
+aus (`fexecve`), nicht erneut über den Pfad.
 
 ## Phase 0: Vertragserweiterung
 

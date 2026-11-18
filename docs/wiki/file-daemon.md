@@ -101,13 +101,14 @@ Manifest, Trust Store und Host-Schnittstelle stehen unter
 
 ### Einrichtung
 
-Jedes Plugin ist ein eigenes Debian-Paket und legt sein signiertes Bundle unter
-`/usr/lib/onesimus/plugins/<name>.pb` ab. Freigegeben wird es in der
-Client-Ressource:
+Jedes Plugin ist ein eigenes Debian-Paket je Architektur und legt sein
+signiertes Bundle im Multiarch-Baum ab, z. B.
+`/usr/lib/x86_64-linux-gnu/onesimus/plugins/<name>.pb`. Dieses Verzeichnis ist
+die Vorgabe von `Plugin Directory`; es muss nur angegeben werden, wenn die
+Bundles woanders liegen. Freigegeben wird ein Plugin in der Client-Ressource:
 
 ```
 Client {
-  Plugin Directory = /usr/lib/onesimus/plugins
   Plugin Names = postgresql
   Plugin Policy = /etc/onesimus/plugin-policy.json
 }

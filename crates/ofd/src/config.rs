@@ -48,6 +48,7 @@ pub struct FdConfig {
     pub allowed_script_dirs: Vec<String>,
     pub allowed_job_cmds: Vec<String>,
     /// "Plugin Directory": signed bundles `<name>.pb` (Bareos name).
+    /// Default: the multiarch directory of this build, see `default_plugin_directory`.
     pub plugin_directory: Option<std::path::PathBuf>,
     /// "Plugin Names": the plugins a FileSet may use (Bareos name).
     pub plugin_names: Vec<String>,
@@ -89,7 +90,7 @@ impl FdConfig {
             allow_bw_bursting: false,
             allowed_script_dirs: Vec::new(),
             allowed_job_cmds: Vec::new(),
-            plugin_directory: None,
+            plugin_directory: default_plugin_directory().map(Into::into),
             plugin_names: Vec::new(),
             plugin_policy: None,
             messages: None,
@@ -326,6 +327,28 @@ fn parse_block(block_type: &str, content: &str, config: &mut FdConfig) {
     }
 }
 
+/// The Debian multiarch triplet of the architecture ofd was built for.
+pub fn multiarch_triplet() -> Option<&'static str> {
+    Some(match (std::env::consts::ARCH, cfg!(target_env = "gnu")) {
+        ("x86_64", true) => "x86_64-linux-gnu",
+        ("aarch64", true) => "aarch64-linux-gnu",
+        ("arm", true) if cfg!(target_abi = "eabihf") => "arm-linux-gnueabihf",
+        ("arm", true) => "arm-linux-gnueabi",
+        ("x86", true) => "i386-linux-gnu",
+        ("riscv64", true) => "riscv64-linux-gnu",
+        ("powerpc64", true) if cfg!(target_endian = "little") => "powerpc64le-linux-gnu",
+        ("s390x", true) => "s390x-linux-gnu",
+        ("loongarch64", true) => "loongarch64-linux-gnu",
+        _ => return None,
+    })
+}
+
+/// `/usr/lib/<triplet>/onesimus/plugins`: plugin packages are per
+/// architecture (Architecture: any), so their files live in the multiarch tree.
+pub fn default_plugin_directory() -> Option<String> {
+    multiarch_triplet().map(|t| format!("/usr/lib/{t}/onesimus/plugins"))
+}
+
 fn is_yes(v: &str) -> bool {
     matches!(v.to_ascii_lowercase().as_str(), "yes" | "true" | "1" | "on")
 }
@@ -466,7 +489,7 @@ Messages {
         let input = r#"
 Client {
   Name = c-fd
-  Plugin Directory = /usr/lib/onesimus/plugins
+  Plugin Directory = /usr/lib/x86_64-linux-gnu/onesimus/plugins
   Plugin Names = postgresql, openldap
   Plugin Names = "podman"
   Plugin Policy = /etc/onesimus/plugin-policy.json
@@ -474,10 +497,13 @@ Client {
 Director { Name = d; Password = "p" }
 "#;
         let c = FdConfig::parse(input).unwrap();
-        assert_eq!(c.plugin_directory.as_deref(), Some(Path::new("/usr/lib/onesimus/plugins")));
+        assert_eq!(c.plugin_directory.as_deref(), Some(Path::new("/usr/lib/x86_64-linux-gnu/onesimus/plugins")));
         assert_eq!(c.plugin_names, vec!["postgresql", "openldap", "podman"]);
         assert_eq!(c.plugin_policy.as_deref(), Some(Path::new("/etc/onesimus/plugin-policy.json")));
         let bare = FdConfig::parse("Director { Name = d; Password = p }").unwrap();
-        assert!(bare.plugin_directory.is_none() && bare.plugin_names.is_empty() && bare.plugin_policy.is_none());
+        assert_eq!(bare.plugin_directory.map(|p| p.display().to_string()), default_plugin_directory());
+        assert!(bare.plugin_names.is_empty() && bare.plugin_policy.is_none());
+        #[cfg(all(target_arch = "x86_64", target_os = "linux", target_env = "gnu"))]
+        assert_eq!(default_plugin_directory().as_deref(), Some("/usr/lib/x86_64-linux-gnu/onesimus/plugins"));
     }
 }
