@@ -8,6 +8,8 @@ enum Behavior {
     Grow,
     Trap,
     WrongResult,
+    VirtualFile,
+    BadAttribute,
 }
 fn escaped(bytes: &[u8]) -> String {
     bytes.iter().map(|b| format!("\\{b:02x}")).collect()
@@ -36,9 +38,22 @@ fn fixture(
         }),
     }
     .encode_to_vec();
+    let item = match behavior {
+        Behavior::VirtualFile | Behavior::BadAttribute => {
+            let key = if matches!(behavior, Behavior::BadAttribute) { "bad key" } else { "database" };
+            pb::next_file_response::Item::File(pb::FileEntry {
+                path: b"@postgresql/main/db/EleLa/EleLa.dump".to_vec(),
+                kind: pb::FileKind::Virtual as i32,
+                size: 12,
+                attributes: [(key.to_string(), "EleLa".to_string())].into(),
+                ..Default::default()
+            })
+        }
+        _ => pb::next_file_response::Item::Complete(pb::ScanComplete {}),
+    };
     let next = pb::NextFileResponse {
         result: Some(result.clone()),
-        item: Some(pb::next_file_response::Item::Complete(pb::ScanComplete {})),
+        item: Some(item),
     }
     .encode_to_vec();
     let read = pb::ReadFileResponse {
@@ -390,4 +405,42 @@ fn initialization_epoch_deadline_reclaims_the_instance_slot() {
         );
         std::thread::sleep(Duration::from_millis(1));
     }
+}
+
+#[test]
+fn virtual_file_entries_carry_bounded_attributes() {
+    let host = Host::new(1).unwrap();
+    let opts = options("virtual");
+    let mut worker = load(&host, Behavior::VirtualFile, opts.clone());
+    start(&worker, &opts);
+    let reply = worker.submit(&opts.binding, next(&opts)).unwrap().wait().unwrap();
+    let Reply::NextFile(pb::NextFileResponse { item: Some(pb::next_file_response::Item::File(file)), .. }) = reply
+    else {
+        panic!("expected a file entry");
+    };
+    assert_eq!(file.kind, pb::FileKind::Virtual as i32);
+    assert_eq!(file.attributes.get("database").map(String::as_str), Some("EleLa"));
+    worker.shutdown(Duration::from_secs(1)).unwrap();
+
+    let mut worker = load(&host, Behavior::BadAttribute, opts.clone());
+    start(&worker, &opts);
+    assert!(matches!(
+        worker.submit(&opts.binding, next(&opts)).unwrap().wait(),
+        Err(Error::Backend(message)) if message.contains("attribute name")
+    ));
+    worker.shutdown(Duration::from_secs(1)).unwrap();
+}
+
+#[test]
+fn attribute_bounds() {
+    use std::collections::HashMap;
+    let one = |k: &str, v: &str| HashMap::from([(k.to_string(), v.to_string())]);
+    assert!(attributes(&one("db.name-1_x", "EleLa")).is_ok());
+    assert!(attributes(&one("", "x")).is_err());
+    assert!(attributes(&one("a/b", "x")).is_err());
+    assert!(attributes(&one(&"k".repeat(MAX_ATTRIBUTE_KEY + 1), "x")).is_err());
+    assert!(attributes(&one("k", &"v".repeat(MAX_ATTRIBUTE_VALUE + 1))).is_err());
+    assert!(attributes(&one("k", "line\nbreak")).is_err());
+    let many: HashMap<_, _> = (0..=MAX_ATTRIBUTES).map(|i| (format!("k{i}"), String::new())).collect();
+    assert!(attributes(&many).is_err());
 }

@@ -237,6 +237,29 @@ pub struct WasmBackend {
 fn backend(error: impl std::fmt::Display) -> executor::Error {
     executor::Error::Backend(error.to_string())
 }
+/// Bounds of `FileEntry.attributes`: display metadata, not a data channel.
+pub const MAX_ATTRIBUTES: usize = 32;
+pub const MAX_ATTRIBUTE_KEY: usize = 64;
+pub const MAX_ATTRIBUTE_VALUE: usize = 1024;
+fn attributes(map: &std::collections::HashMap<String, String>) -> Result<(), executor::Error> {
+    if map.len() > MAX_ATTRIBUTES {
+        return Err(backend("too many file attributes"));
+    }
+    for (key, value) in map {
+        let key_ok = !key.is_empty()
+            && key.len() <= MAX_ATTRIBUTE_KEY
+            && key
+                .bytes()
+                .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'_' | b'.' | b'-'));
+        if !key_ok {
+            return Err(backend("invalid file attribute name"));
+        }
+        if value.len() > MAX_ATTRIBUTE_VALUE || value.chars().any(char::is_control) {
+            return Err(backend("invalid file attribute value"));
+        }
+    }
+    Ok(())
+}
 fn ok(result: Option<&pb::OperationResult>) -> Result<(), executor::Error> {
     if result.is_some_and(|r| r.code == ReturnCode::RcOk as i32) {
         Ok(())
@@ -463,10 +486,12 @@ impl Backend for WasmBackend {
                             pb::FileKind::try_from(file.kind),
                             Ok(pb::FileKind::Regular
                                 | pb::FileKind::Directory
-                                | pb::FileKind::Symlink)
+                                | pb::FileKind::Symlink
+                                | pb::FileKind::Virtual)
                         ) {
                             return Err(backend("unsupported file kind"));
                         }
+                        attributes(&file.attributes)?;
                     }
                     Some(pb::next_file_response::Item::Complete(_)) => {}
                     None => return Err(backend("missing scan item")),
@@ -506,6 +531,9 @@ impl Backend for WasmBackend {
                         .ok_or_else(|| backend("missing file metadata"))?
                         .path,
                 )?;
+                if let Some(file) = request.file.as_ref() {
+                    attributes(&file.attributes)?;
+                }
                 if request.data.len() > self.limits.max_chunk_bytes as usize
                     || request
                         .offset
