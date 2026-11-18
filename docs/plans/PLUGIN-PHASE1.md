@@ -96,16 +96,26 @@ Entscheidung vom 18.11.2026: Jedes Plugin ist ein eigenes Debian-Paket
   (dpkg schreibt neu und benennt um); ein laufender Job behält die bereits
   geprüften Bytes.
 
-### Offen: Signatur der Binärteile
+### Signatur der Binärteile (Entscheidung 18.11.2026, umzusetzen mit dem ersten Broker)
 
 Der WASM-Teil ist signiert und wird bei jedem Laden geprüft. Ein nativer Teil
 eines Plugin-Pakets (Broker) läuft dagegen als echter Prozess, nicht in der
 Sandbox. Ohne eigene Prüfung wäre er genau der unsignierte Ausführungspfad,
-den die Architektur ausschließt. Vorschlag zur Entscheidung: Das signierte
-Manifest nennt je Triplet den SHA-256 jedes Binärteils (Schemaversion 2);
-`ofd` startet einen Broker nur, wenn Datei, Eigentümer/Modus und Hash zum
-geprüften Manifest passen, und führt ihn aus dem geöffneten Dateideskriptor
-aus (`fexecve`), nicht erneut über den Pfad.
+den die Architektur ausschließt. Deshalb:
+
+1. **Echtheit über X.509:** Das signierte Manifest (Schemaversion 2) nennt je
+   Triplet den SHA-256 jedes Binärteils. Ein ausgetauschter Broker hat einen
+   anderen Hash und startet nicht, gleich wem die Datei gehört.
+2. **Dateisystem als zweite Schicht:** Binärteil und jedes Verzeichnis darüber
+   gehören root und sind für Gruppe und Andere nicht schreibbar (dieselbe
+   Prüfung wie für Policy und Bundle). Das meldet Fehlkonfigurationen früh.
+3. **Kein Austausch zwischen Prüfung und Start:** `ofd` öffnet die Datei, prüft
+   Hash und `fstat` auf dem offenen Deskriptor und startet genau ihn
+   (`fexecve`), nicht erneut über den Pfad.
+
+Die Trust-Policy selbst kann nicht per X.509 geschützt werden, denn sie legt
+fest, welchen CAs vertraut wird; für sie ist die Eigentümer- und Rechteprüfung
+die einzige Schutzschicht.
 
 ## Phase 0: Vertragserweiterung
 

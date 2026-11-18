@@ -253,7 +253,7 @@ Der Gast bleibt ohne Netz und ohne Prozesse. Ein Broker auf dem Host (Teil von
 | --- | --- | --- |
 | 0 | gemeinsam mit OpenLDAP: `FileEntry.attributes`, `FILE_KIND_VIRTUAL` | Roundtrip in Protobuf und Katalog getestet |
 | 1 | gemeinsam mit OpenLDAP: `Plugin =` in `ofd` laden, `NextFile`/`ReadFile` in den SD-Strom, `WriteFile` beim Restore, Cancel | Testplugin sichert und stellt wieder her |
-| 2 | Broker `pg.*` (lokal, peer), Plugin `postgresql`, Klasse `logical`, Restore in Dateien | Wegwerf-Cluster: alle Datenbanken, `globals.sql`, `_info.json`; `pg_restore` des Ergebnisses ergibt identische Daten |
+| 2 | Signierte Binärteile (Manifest v2, Hash je Triplet, `fexecve`, siehe [Phase 1](PLUGIN-PHASE1.md)), Broker `pg.*` (lokal, peer), Plugin `postgresql`, Klasse `logical`, Restore in Dateien | Wegwerf-Cluster: alle Datenbanken, `globals.sql`, `_info.json`; `pg_restore` des Ergebnisses ergibt identische Daten |
 | 3 | Online-Restore in neue Datenbank, entfernter Server mit TLS | Roundtrip: sichern, löschen, wiederherstellen, Vergleich |
 | 4 | Klasse `logical-tables`, Durchsuchen in der Oberfläche | Tabelle einzeln wiederhergestellt; DB-/Tabellenanzeige statt Pfad |
 | 5 | Ablösung der `RunScript`-Dumps auf PDC und CLOUD | Alle Jobs ohne Passwort; Übergangsskript entfernt |
