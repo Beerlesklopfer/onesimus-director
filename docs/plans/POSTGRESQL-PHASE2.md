@@ -1,6 +1,17 @@
 # Planung: PostgreSQL Phase 2 – signierte Binärteile, Broker, Plugin
 
-Stand: 18.11.2026. Status: **Entwurf zur Freigabe.**
+Stand: 18.11.2026. Status: **Freigegeben (18.11.2026, alle drei Vorschläge); A bis F umgesetzt.**
+
+| Schritt | Commit | Stand |
+| --- | --- | --- |
+| A Manifest v2 | `77e2c8e` | fertig, getestet |
+| B Broker-Start | `1a8809e` | fertig: Deskriptor-Prüfung, `fexecve`, Benutzerwechsel, Prozessgruppe |
+| C Instanz/Benutzer | `a4046a8` | fertig, gegen Wegwerf-Cluster |
+| D Import + Port | `6838be1`, `5cbccbd` | fertig: Import nur mit Capability, Port prüft jede Anfrage |
+| E Broker | `1876efa` | fertig, gegen Wegwerf-Cluster inkl. `pg_restore` |
+| F Gast | `2b21768` | fertig, Ende-zu-Ende inkl. `pg_restore` |
+| G Paket | – | offen |
+| H Tests | – | offen: Cancel während `pg_dump`, Lauf gegen `odir`/`bareos-sd`, Server-Ausfall |
 
 Setzt [Phase 1](PLUGIN-PHASE1.md) voraus (abgenommen im Ende-zu-Ende-Lauf) und
 den [PostgreSQL-Plan](POSTGRESQL-PLUGIN.md) mit seinen Entscheidungen: Broker
