@@ -1,5 +1,11 @@
 onesimus (25.1.2+onesimus.0.2.0-2) UNRELEASED; urgency=medium
 
+  * odir: jobs left created or running by an earlier run end as fatal at
+    start, as CheckCatalog(UPDATE_AND_FIX) does (J-3): C -> f with
+    Start/EndTime = SchedTime, R -> f with EndTime = StartTime. Only at
+    start, not on reload. Before, every restart (also the package
+    upgrade) left such jobs "running" for good.
+
   * odir: catalog at start and while running (J-5, T-13). The start checks
     every catalog like CheckCatalog() and ends with exit 1 when one does
     not open (before: it ran on without a catalog or hung forever). The

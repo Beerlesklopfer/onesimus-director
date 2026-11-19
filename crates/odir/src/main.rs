@@ -458,6 +458,9 @@ fn main() {
     // CheckCatalog(): basic Client/Storage/MediaType records.
     if let Some(cat) = &catalog {
         check_catalog::ensure_basic_records(&config, cat);
+        // CheckCatalog(UPDATE_AND_FIX): jobs of an earlier run left in C/R
+        // end as fatal, before the scheduler starts (J-3).
+        check_catalog::cleanup_old_job_records(cat);
     }
     // dird.cc: InitConsoleMsg(working_directory) after CheckCatalog() — the
     // console message queue (start-up messages before it reach no console).

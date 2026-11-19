@@ -109,6 +109,27 @@ pub fn ensure_basic_records(config: &DirectorConfig, catalog: &CatalogHandle) {
     }
 }
 
+/// CheckCatalog(UPDATE_AND_FIX) "cleanup old job records"
+/// (dird/check_catalog.cc:193, cats/dml/0002_cleanup_created_job and
+/// 0003_cleanup_running_job): jobs a stopped Director left created or
+/// running end as fatal. Only at start, never on reload (UPDATE_CATALOG),
+/// where such jobs may really run (J-3). Errors are logged, as SqlQuery()'s
+/// result is not checked upstream.
+pub const CLEANUP_CREATED_JOB: &str =
+    "UPDATE Job SET JobStatus = 'f', StartTime = SchedTime, EndTime = SchedTime WHERE JobStatus = 'C'";
+pub const CLEANUP_RUNNING_JOB: &str =
+    "UPDATE Job SET JobStatus = 'f', EndTime = StartTime WHERE JobStatus = 'R'";
+
+pub fn cleanup_old_job_records(catalog: &CatalogHandle) {
+    for (what, sql) in [("created", CLEANUP_CREATED_JOB), ("running", CLEANUP_RUNNING_JOB)] {
+        match catalog.execute(sql) {
+            Ok(0) => {}
+            Ok(n) => tracing::info!("catalog: {n} {what} job(s) of an earlier run marked as failed"),
+            Err(error) => tracing::warn!("catalog: cleanup of {what} jobs failed: {error}"),
+        }
+    }
+}
+
 type CatalogResource = bareos_config::resources::CatalogResource;
 
 /// Connection target of a Catalog resource as the Director connects to it
@@ -257,6 +278,20 @@ mod tests {
             db_port: port,
             ..Default::default()
         }
+    }
+
+    #[test]
+    fn cleanup_of_old_job_records_runs_both_statements_of_the_original() {
+        let seen = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+        let log = seen.clone();
+        let catalog = CatalogHandle::mock(move |request| {
+            if let crate::catalog_worker::CatalogRequest::Execute { sql } = request {
+                log.lock().unwrap().push(sql);
+            }
+            crate::catalog_worker::CatalogResponse::Ok(1)
+        });
+        cleanup_old_job_records(&catalog);
+        assert_eq!(*seen.lock().unwrap(), vec![CLEANUP_CREATED_JOB.to_string(), CLEANUP_RUNNING_JOB.to_string()]);
     }
 
     #[test]
