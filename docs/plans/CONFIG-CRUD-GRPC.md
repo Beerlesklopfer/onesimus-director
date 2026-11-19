@@ -1,6 +1,6 @@
 # Planung: Ressourcen lesen, anlegen, ändern, löschen über gRPC (CRUD)
 
-Stand: 19.11.2026. Status: **Mit der GUI abgestimmt (19.11.2026), Umsetzung läuft.**
+Stand: 19.11.2026. Status: **Mit der GUI abgestimmt (19.11.2026); erste Ausbaustufe (Schedule, Job, JobDefs) umgesetzt.**
 
 Auftrag des Nutzers: volles CRUD für Ressourcen der Director-Konfiguration,
 zuerst für Zeitpläne („Weekly Cycle kein CRUD möglich“, „ein drag führt zu einem
@@ -273,3 +273,70 @@ entscheidet der Nutzer.
    (Zeile/Spalte); Verweis auf einen gelöschten Zeitplan verhindert; geteilte
    Datei mit zwei Ressourcen; Kommentare und unbekannte Direktiven bleiben
    erhalten; Reload-Fehler stellt den alten Stand wieder her; ACL.
+
+### Stand der Umsetzung (19.11.2026, erste Ausbaustufe)
+
+Umgesetzt: `GetConfigCapabilities`, `ReadResource`, `CreateResource`,
+`UpdateResource`, `DeleteResource`, `ListResources` für Schedule, Job und
+JobDefs (READ_RAW, CREATE_RAW, UPDATE_RAW, DELETE); `RenameResource` und die
+übrigen Typen antworten `UNIMPLEMENTED`. proto-Submodul auf `config-crud`
+(3b2b468).
+
+- Code: `crates/odir/src/config_edit.rs` (Bereich, Prüfung, Schreiben,
+  Reload, Referenzen, Sperre), `crates/odir/src/grpc/api_config.rs` (RPCs,
+  ACL, Capabilities); `config_test` liest Dateien jetzt über einen Leser
+  (Datei oder geänderte Kopie im Speicher), `DirectorConfig::from_files`,
+  `bareos_config::parser::parse_config_named`, `acl::any_allowed`.
+- Prüfung wie `odir -t` ohne Katalog: Parser, `config_check::check`
+  (CheckResources, Verweise, Pflichtdirektiven), Listen-Adressen.
+  `problem.text` ist die Ausgabe von `-t`; Zeile/Spalte, wo `-t` sie kennt
+  (scan_err); bei Fehlern des typisierten Parsers nur die Zeile (Spalte 0).
+- Reload über `reload::reload_now` (derselbe Weg wie `reload`, J-9).
+- Protokoll: `tracing::info` und Director-Meldung (Typ Info) über die
+  Messages-Ressource des Directors (`audit::daemon_message`); bei
+  RELOAD_FAILED als Warnung mit dem Ergebnis der Wiederherstellung.
+- `followups` bleibt leer (Kommentar mit Verweis auf Grundsatz 15).
+- Tests: `config_edit/tests.rs` (14), `grpc/api_config.rs` (2), dazu ein
+  Block im Integrationstest `tests/grpc_typed_api.rs` (Rohtext-CRUD eines
+  Zeitplans gegen den echten Director mit Reload und Katalog).
+
+Entscheidungen, die der Plan offen ließ (konservativ):
+
+1. Die Konfigurations-RPCs gibt es in jedem Build (nicht nur mit
+   `grpc-development` wie die S-35-Schreib-RPCs): sie haben eigene
+   Schutzmechanismen (Sperre, `-t`-Prüfung, Rückfall) und die GUI braucht sie
+   im Paket. Leicht umzustellen, falls nicht gewünscht.
+2. Auch `ReadResource` und `ListResources` verlangen die Command-ACL
+   `configure` (der Rohtext ist nicht geschwärzt wie `show` ohne
+   `configure`). `GetConfigCapabilities` braucht nur die Sitzung und nennt
+   ohne `configure` keine Typen; ein Typ erscheint, wenn seine ACL
+   (Konsole, dann Profile) mindestens einen positiven Eintrag hat.
+3. Der Bereich schließt Leerzeichen und einen Kommentar hinter der
+   schließenden Klammer auf derselben Zeile ein; Kommentare vor dem Typwort
+   gehören zur Datei, nicht zur Ressource.
+4. Der übergebene Text muss genau eine Ressource des Typs sein, die den
+   ganzen Text ausfüllt; fehlt nur das letzte Zeilenende, wird es im Stil
+   der Datei (LF/CRLF) ergänzt. Leerer bzw. falscher `expected_sha256` →
+   CONFLICT.
+5. Löschen in einer geteilten Datei entfernt nur den Bereich; bleibt nur
+   Leerraum/Kommentar, wird die Datei entfernt (sonst blockiert ein
+   verwaister `<Name>.conf` ein späteres Create desselben Namens, und der
+   Kommentar beschreibt eine Ressource, die es nicht mehr gibt).
+6. Referenzen: generisch über die Direktiventabellen aller Ressourcentypen
+   (`Schedule =`, `JobDefs =`, `Job To Verify =`); `run job=<name>` in
+   RunScript-`Console` und Job-`Run` nur bei wörtlichem Namen (keine `%`/`$`
+   Variablen). Nicht gezählt: ACL-Einträge (Muster, keine Verweise) und
+   Selection Pattern von Copy/Migrate (reguläre Ausdrücke).
+7. Create nur im Verzeichnis-Layout (`bareos-dir.d`); bei einer einzelnen
+   Konfigurationsdatei INVALID mit Hinweis. Neue Dateien: Rechte/Eigentümer
+   der ersten `.conf` im Typverzeichnis, sonst der Nachbarverzeichnisse,
+   sonst 0640 und Eigentümer des Verzeichnisses; fehlt das Typverzeichnis,
+   wird es angelegt.
+8. Namen: zusätzlich zu `/`, `..` und Steuerzeichen auch `\` und ein
+   führender Punkt abgelehnt; außerdem die Bareos-Namensregeln
+   (`IsNameValid`).
+9. `@include` wird wie im Rohparser übersprungen (nicht verfolgt).
+
+Offen: RENAME (Grundsatz 9), weitere Typen (Grundsatz 17) mit `followups`
+für Pool (Grundsatz 15), ob die alten Konsolenerweiterungen
+`configure update/delete/read` entfernt werden.

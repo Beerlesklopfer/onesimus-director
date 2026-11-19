@@ -103,7 +103,7 @@ for job in api.list_jobs(req).await?.into_inner().jobs {
 
 ## Stand der Implementierung
 
-- **Produktions-Build** (Paket, Vorgabe): alle lesenden RPCs – Info/Hilfe, `list`/`llist` aller Formen, `status`/`.status`, `show` aller Ressourcentypen, die Punkt-Auflistungen, `.sql*`-Metadaten, `.acl`/`.profile` (Liste), BVFS-Abfragen und OVFS. Alle übrigen RPCs antworten `UNIMPLEMENTED` (ihr Code ist nicht einkompiliert), wie die MCP-Schreib-Tools von oconsole.
+- **Produktions-Build** (Paket, Vorgabe): alle lesenden RPCs – Info/Hilfe, `list`/`llist` aller Formen, `status`/`.status`, `show` aller Ressourcentypen, die Punkt-Auflistungen, `.sql*`-Metadaten, `.acl`/`.profile` (Liste), BVFS-Abfragen und OVFS; dazu die Konfigurations-RPCs (Rohtext-CRUD, siehe unten). Alle übrigen RPCs antworten `UNIMPLEMENTED` (ihr Code ist nicht einkompiliert), wie die MCP-Schreib-Tools von oconsole.
 - **Entwicklungs-Build** (`cargo build -p odir --features grpc-development`, S-35): zusätzlich die schreibenden Befehle, die Sitzungsbefehle und die interaktive Wiederherstellung.
 
 ### Schreibende RPCs (Entwicklungs-Build)
@@ -139,11 +139,94 @@ grpcurl … -d '{"session_id":"<id>","path":"hosts"}' $DIR onesimus.director.api
 grpcurl … -d '{"session_id":"<id>"}' $DIR onesimus.director.api.DirectorApi/RestoreTreeDone
 ```
 
+### Konfiguration als Rohtext (CRUD, jeder Build)
+
+Onesimus-Erweiterung ohne Gegenstück in bareos-dir (Planung: [CONFIG-CRUD-GRPC.md](../plans/CONFIG-CRUD-GRPC.md); Code `crates/odir/src/config_edit.rs`, `grpc/api_config.rs`). Erste Ausbaustufe: `Schedule`, `Job`, `JobDefs`. Der Konsolen-Befehlssatz bleibt unverändert.
+
+- **Text und SHA-256:** `text` ist der Bereich der Ressource in ihrer Datei, Byte für Byte: vom Typwort bis zur schließenden Klammer samt Leerzeichen/Kommentar dahinter auf derselben Zeile und dem Zeilenende (CRLF bleibt CRLF). `sha256` ist der SHA-256 (hex) genau dieser Bytes. Kommentare, Reihenfolge und Direktiven, die ein Client nicht kennt, bleiben erhalten; geschriebener Text wird unverändert übernommen (fehlt nur das letzte Zeilenende, wird es im Stil der Datei ergänzt).
+- **Optimistische Sperre:** `UpdateResource` und `DeleteResource` verlangen `expected_sha256`; passt er nicht (auch leer), antwortet der Director `CONFIG_STATUS_CONFLICT` mit `text`/`sha256` des aktuellen Stands und ändert nichts.
+- **Prüfen vor Schreiben:** Die geänderte Gesamtkonfiguration wird im Speicher geparst und wie `odir -t` geprüft (ohne Katalogverbindung). Fehler: `CONFIG_STATUS_INVALID` mit `problem` (Datei, Zeile, Spalte, Text wie bei `-t`). Der Name im Text muss bei `UpdateResource` `resource.name` sein (Umbenennen: `RenameResource`, später, bis dahin `UNIMPLEMENTED`).
+- **Schreiben:** `CreateResource` legt `bareos-dir.d/<typ>/<Name>.conf` an (Rechte und Eigentümer wie die übrigen `.conf`-Dateien; Namen mit `/`, `\`, `..`, führendem Punkt oder Steuerzeichen → `INVALID`; vergebener Name → `EXISTS`). Geschrieben wird atomar (temporäre Datei im selben Verzeichnis, fsync, rename, Rechte/Eigentümer der alten Datei). In einer Datei mit mehreren Ressourcen (`shared_file`) wird nur der Bereich ersetzt bzw. entfernt; bleibt nach dem Löschen nur Kommentar übrig, wird die Datei entfernt.
+- **Neu laden:** danach `reload` wie der Konsolenbefehl (Scheduler plant neu). Scheitert er, wird der alte Stand zurückgeschrieben und erneut geladen: `CONFIG_STATUS_RELOAD_FAILED`.
+- **Referenzen:** `DeleteResource` verweigert mit `CONFIG_STATUS_REFERENCED` und `referenced_by`, solange andere Ressourcen die Ressource nennen (`Schedule =`, `JobDefs =`, `Job To Verify =`, bei Jobs auch `run job=<name>` in RunScript-`Console`-Befehlen und Job-`Run`, wenn der Name wörtlich dasteht).
+- **`validate_only`:** dieselbe Antwort wie der echte Aufruf, `validated_only = true`, nichts geschrieben, kein Reload.
+- **Rechte:** Sitzung nötig; `ReadResource`, `CreateResource`, `UpdateResource`, `DeleteResource` und `ListResources` verlangen die Command-ACL `configure` (sonst gRPC `PERMISSION_DENIED`), dazu je Name die Ressourcen-ACL des Typs wie bei `show` (Schedule-ACL; Job-ACL für Job und JobDefs): `CONFIG_STATUS_DENIED`, `ListResources` lässt Verweigertes weg. `GetConfigCapabilities` spiegelt das je Sitzung.
+- **Protokoll:** jede schreibende Operation (nicht `validate_only`) als Info ins Journal und als Director-Meldung über die Messages-Ressource des Directors: `Console [<name>] config update Schedule "WeeklyCycle": old sha256 …, new sha256 …, file …`.
+- Gleichzeitige Aufrufe werden serialisiert (eine Sperre um Lesen, Prüfen, Schreiben und Reload).
+
+`GetConfigCapabilities` – was diese Sitzung bearbeiten darf (ohne `configure`: keine Typen):
+
+```sh
+grpcurl … -d '{}' $DIR onesimus.director.api.DirectorApi/GetConfigCapabilities
+```
+```json
+{ "interfaceVersion": 1,
+  "types": [ { "type": "RESOURCE_TYPE_SCHEDULE", "operations": ["CONFIG_OPERATION_READ_RAW", "CONFIG_OPERATION_CREATE_RAW", "CONFIG_OPERATION_UPDATE_RAW", "CONFIG_OPERATION_DELETE"] },
+             { "type": "RESOURCE_TYPE_JOB", "operations": ["…"] }, { "type": "RESOURCE_TYPE_JOBDEFS", "operations": ["…"] } ] }
+```
+
+`ListResources` – Name, Datei und SHA-256 je Ressource (Ressourcenreihenfolge des Directors):
+
+```sh
+grpcurl … -d '{"type":"RESOURCE_TYPE_SCHEDULE"}' $DIR onesimus.director.api.DirectorApi/ListResources
+```
+```json
+{ "resources": [ { "resource": { "type": "RESOURCE_TYPE_SCHEDULE", "name": "WeeklyCycle" },
+                   "file": "/etc/bareos/bareos-dir.d/schedule/WeeklyCycle.conf", "sha256": "9f2c…" } ] }
+```
+
+`ReadResource`:
+
+```sh
+grpcurl … -d '{"resource":{"type":"RESOURCE_TYPE_SCHEDULE","name":"WeeklyCycle"}}' $DIR onesimus.director.api.DirectorApi/ReadResource
+```
+```json
+{ "status": "CONFIG_STATUS_OK", "resource": { "type": "RESOURCE_TYPE_SCHEDULE", "name": "WeeklyCycle" },
+  "file": "/etc/bareos/bareos-dir.d/schedule/WeeklyCycle.conf",
+  "text": "Schedule {\n  Name = \"WeeklyCycle\"\n  Run = Full 1st sat at 21:00\n}\n", "sha256": "9f2c…" }
+```
+
+`CreateResource` (mit `"validate_only": true` nur prüfen):
+
+```sh
+grpcurl … -d '{"type":"RESOURCE_TYPE_SCHEDULE","text":"Schedule {\n  Name = \"Nightly\"\n  Run = Incremental mon-fri at 23:10\n}\n"}' \
+        $DIR onesimus.director.api.DirectorApi/CreateResource
+```
+```json
+{ "status": "CONFIG_STATUS_OK", "message": "Schedule \"Nightly\" created", "file": "/etc/bareos/bareos-dir.d/schedule/Nightly.conf",
+  "text": "Schedule {\n  Name = \"Nightly\"\n  Run = Incremental mon-fri at 23:10\n}\n", "sha256": "41d0…", "reloaded": true }
+```
+
+`UpdateResource` mit ungültigem Text:
+
+```sh
+grpcurl … -d '{"resource":{"type":"RESOURCE_TYPE_SCHEDULE","name":"Nightly"},"expected_sha256":"41d0…",
+               "text":"Schedule {\n  Name = \"Nightly\"\n  Frequently = often\n}\n"}' $DIR onesimus.director.api.DirectorApi/UpdateResource
+```
+```json
+{ "status": "CONFIG_STATUS_INVALID", "message": "configuration invalid: Keyword \"Frequently\" not permitted in this resource.",
+  "problem": { "file": "/etc/bareos/bareos-dir.d/schedule/Nightly.conf", "line": 3, "column": 13,
+               "text": "odir: CONFIG ERROR at lib/parse_conf_state_machine.cc:162\nConfig error: Keyword \"Frequently\" not permitted …" } }
+```
+
+`DeleteResource`, noch verwendet:
+
+```sh
+grpcurl … -d '{"resource":{"type":"RESOURCE_TYPE_SCHEDULE","name":"WeeklyCycle"},"expected_sha256":"9f2c…"}' \
+        $DIR onesimus.director.api.DirectorApi/DeleteResource
+```
+```json
+{ "status": "CONFIG_STATUS_REFERENCED", "message": "Schedule \"WeeklyCycle\" is used by 2 resources",
+  "referenced_by": [ { "type": "RESOURCE_TYPE_JOB", "name": "forgejo" }, { "type": "RESOURCE_TYPE_JOB", "name": "BackupMail" } ] }
+```
+
+`RenameResource` antwortet bis zur nächsten Ausbaustufe `UNIMPLEMENTED`; andere Ressourcentypen ebenfalls (`UNIMPLEMENTED`, ohne Typ `INVALID_ARGUMENT`).
+
 ### Tests
 
 Abbildungs-Tests in `crates/onesimus-proto-rs/src/typed.rs` und `crates/odir/src/grpc/api.rs`; Konsolenzeilen und Sperren jeder Schreib-RPC in `grpc/api_write.rs` (nur Entwicklungs-Build); `UNIMPLEMENTED` im Produktions-Build und Warteschlange/Folgeabfrage/Abmeldung im Entwicklungs-Build in `grpc/api.rs`; Abdeckungstest `grpc/coverage.rs` (prüft gegen [`commands/bareos-director-commands.json`](commands/bareos-director-commands.json), dass jeder Befehl und jedes Unterkommando eine RPC hat, dass jede RPC entweder Lese-RPC oder im Entwicklungs-Build implementiert ist, und hält die Tabellen unten aktuell). Integrationstests in `crates/odir/tests/grpc_typed_api.rs`:
 
-- `typed_api_matches_console_api2`: Director mit der Parity-Konfiguration auf einer Wegwerf-Kopie von `bareos_cppref`, jede Lese-RPC gegen die `.api 2`-Ausgabe derselben Konsolenzeile, auch für eine eingeschränkte Konsole;
+- `typed_api_matches_console_api2`: Director mit der Parity-Konfiguration auf einer Wegwerf-Kopie von `bareos_cppref`, jede Lese-RPC gegen die `.api 2`-Ausgabe derselben Konsolenzeile, auch für eine eingeschränkte Konsole; dazu Rohtext-CRUD eines Zeitplans mit echtem Reload (Konfigurations-RPCs; Unit-Tests in `config_edit/tests.rs` und `grpc/api_config.rs`);
 - `typed_api_writes_on_private_daemons` (nur Entwicklungs-Build): eigener Katalog (Bareos-DDL), **private** `bareos-fd`/`bareos-sd` mit eigener Konfiguration, eigenen Ports und Dateigerät (nie die laufenden Daemons): Label, Backup über `Run`, Restore über `Restore` und über eine interaktive `RestoreTree`-Sitzung (Inhalt der wiederhergestellten Dateien geprüft), Abbruch einer Sitzung, Mount/Unmount/Release, UpdateVolume, Purge/Truncate/Delete mit `confirm`, Cancel, DeleteJob, Enable/Disable, ConfigureAdd, Reload, `.sql`, sqlquery, nicht anwendbare RPCs, Abmeldung.
 
 ```sh
