@@ -792,9 +792,20 @@ fn compute_restore_list(db: &dyn Db, jobids: &str, fileid: &str, dirid: &str, ha
 }
 
 /// C++ BareosDb::AccurateGetJobids() for the console (jcr->JobId 0):
-/// Full + Differential + Incrementals up to `date`.
+/// Full + Differential + Incrementals up to `date`; None when a statement
+/// failed.
+///
+/// Bareos names the work table after the JobId (sql_get.cc:1331, query
+/// 0011 `CREATE TABLE btemp3%s`), for every console the same btemp30. Two
+/// consoles at once, or a btemp30 left over by a crash, make the CREATE
+/// fail, and PruneJobs (ua_prune.cc:1112) ignores that: the list of jobs
+/// to keep is empty and the latest Full chain is pruned (J-11). Here each
+/// call gets a table of its own (btemp30_<pid>_<n>).
 pub(crate) fn accurate_get_jobids(db: &dyn Db, client_id: i64, job_type: char, date: &str, fileset_id: i64) -> Option<Vec<String>> {
-    accurate_get_jobids_job(db, 0, client_id, job_type, date, fileset_id, true, 0)
+    static SEQUENCE: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+    let n = SEQUENCE.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    let suffix = format!("0_{}_{n}", std::process::id());
+    accurate_get_jobids_in(db, &suffix, client_id, job_type, date, fileset_id, true, 0)
 }
 
 /// C++ BareosDb::AccurateGetJobids() of a job (`jobid` = jcr->JobId names
@@ -804,6 +815,13 @@ pub(crate) fn accurate_get_jobids(db: &dyn Db, client_id: i64, job_type: char, d
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn accurate_get_jobids_job(db: &dyn Db, jobid: u32, client_id: i64, job_type: char, date: &str,
                                       fileset_id: i64, incremental: bool, limit: u64) -> Option<Vec<String>> {
+    accurate_get_jobids_in(db, &jobid.to_string(), client_id, job_type, date, fileset_id, incremental, limit)
+}
+
+/// AccurateGetJobids() with the work table btemp3<jobid>.
+#[allow(clippy::too_many_arguments)]
+fn accurate_get_jobids_in(db: &dyn Db, jobid: &str, client_id: i64, job_type: char, date: &str,
+                          fileset_id: i64, incremental: bool, limit: u64) -> Option<Vec<String>> {
     let retval = 'bail: {
         let create = format!(
             "CREATE TABLE btemp3{jobid} AS\nSELECT JobId,\n       StartTime,\n       EndTime,\n       JobTDate,\n       PurgedFiles\nFROM Job\nJOIN FileSet USING (FileSetId)\nWHERE ClientId = {client_id}\n  AND Level = 'F'\n  AND JobStatus IN ('T',\n                    'W')\n  AND Type = '{job_type}'\n  AND StartTime < '{date}'\n  AND FileSet.FileSetId = {fileset_id}\nORDER BY Job.JobId DESC,\n         Job.JobTDate DESC\nLIMIT 1\n"
@@ -829,7 +847,7 @@ pub(crate) fn accurate_get_jobids_job(db: &dyn Db, jobid: u32, client_id: i64, j
 }
 
 /// The jobid list query of AccurateGetJobids().
-fn list_query(jobid: u32, limit: u64) -> String {
+fn list_query(jobid: &str, limit: u64) -> String {
     if limit != 0 {
         format!("SELECT JobId FROM btemp3{jobid} ORDER by JobTDate ASC LIMIT {limit}")
     } else {
@@ -1310,9 +1328,14 @@ SELECT Job.JobId, JobTDate, FileIndex, Name, PathId, FileId FROM File JOIN Job U
         let db = Fake::new(vec![("SELECT JobId FROM btemp30", vec![vec!["600"], vec!["628"]])]);
         assert_eq!(accurate_get_jobids(&db, 1, 'B', "2026-07-10 21:00:03", 1), Some(vec!["600".into(), "628".into()]));
         let log = db.log();
-        assert!(log[0].starts_with("CREATE TABLE btemp30 AS\n") && log[0].contains("StartTime < '2026-07-10 21:00:03'"));
+        let table = log[0].strip_prefix("CREATE TABLE ").and_then(|rest| rest.split_once(" AS\n")).unwrap().0.to_string();
+        assert!(table.starts_with(&format!("btemp30_{}_", std::process::id())), "{table}");
+        assert!(log[0].contains("StartTime < '2026-07-10 21:00:03'"));
         assert!(log[1].contains("Level='D'") && log[2].contains("Level='I'"));
-        assert_eq!(log[4], "DROP TABLE IF EXISTS btemp30");
+        assert_eq!(log[4], format!("DROP TABLE IF EXISTS {table}"));
+        // the next console call uses another table
+        accurate_get_jobids(&db, 1, 'B', "2026-07-10 21:00:03", 1);
+        assert!(!db.log()[5].contains(&format!("{table} ")));
         assert_eq!(accurate_date("2026-07-10 21:00:02"), "2026-07-10 21:00:03");
         assert_eq!(accurate_date("2026-12-31 23:59:59"), "2027-01-01 00:00:00");
         // not a StrToUtime time: the current time

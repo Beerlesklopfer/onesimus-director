@@ -553,7 +553,16 @@ pub(crate) fn prune_files(ua: &mut Ua, db: &dyn Db, client: &str, pool: Option<&
     ua.info_msg(format!("Pruned Files from {} Jobs for client {client} from catalog.\n", with_commas(list.len() as u64)));
 }
 
-/// ua_prune.cc PruneJobs() with the confirmed retention.
+/// ua_prune.cc PruneJobs() (ua_prune.cc:1021) with the confirmed retention.
+///
+/// The jobs needed to restore the latest Full chain of every configured
+/// client/FileSet (AccurateGetJobids, level Incremental, ua_prune.cc:1100-
+/// 1114) and the latest Verify InitCatalog stay. Deviation (J-11): Bareos
+/// only sends the error of the JobSelectHandler and Verify queries
+/// (ua_prune.cc:1095, 1127) and ignores a failed AccurateGetJobids
+/// (ua_prune.cc:1112); with an incomplete keep list it would prune the
+/// latest chain. Here every failure while the keep list is built aborts
+/// the prune before anything is deleted.
 pub(crate) fn prune_jobs(ua: &mut Ua, db: &dyn Db, client: &str, pool: Option<&str>, period: u64) -> bool {
     let (from, filter) = prune_filter(Some(client), pool, period);
     let drop = |db: &dyn Db| { let _ = db.exec("DROP TABLE IF EXISTS DelCandidates\n"); };
@@ -590,26 +599,47 @@ pub(crate) fn prune_jobs(ua: &mut Ua, db: &dyn Db, client: &str, pool: Option<&s
                 checks.push((text(3).parse().unwrap_or(0), text(4).parse().unwrap_or(0)));
             }
         }
-        Err(error) => ua.error_msg(db_error(&error)),
+        Err(error) => {
+            ua.error_msg(db_error(&error));
+            drop(db);
+            return true;
+        }
     }
     // Jobs needed for an accurate restore (AccurateGetJobids, level Incremental).
     let date = bstrutime(now() + 1);
     let mut keep: Vec<String> = Vec::new();
     for (fileset_id, client_id) in checks {
-        keep.extend(crate::commands::bvfs::accurate_get_jobids(db, client_id, 'B', &date, fileset_id).unwrap_or_default());
+        match crate::commands::bvfs::accurate_get_jobids(db, client_id, 'B', &date, fileset_id) {
+            Some(ids) => keep.extend(ids),
+            None => {
+                ua.error_msg(format!("Cannot find the jobs to keep for ClientId {client_id} FileSetId {fileset_id}; \
+                    nothing pruned.\n"));
+                drop(db);
+                return true;
+            }
+        }
     }
     // The latest Verify InitCatalog job.
     match column0(db, &format!("SELECT JobId, JobTDate FROM Job {from} WHERE Type='V'    AND Level='V'  {filter} \
         ORDER BY JobTDate DESC LIMIT 1")) {
         Ok(ids) => keep.extend(ids),
-        Err(error) => ua.error_msg(db_error(&error)),
+        Err(error) => {
+            ua.error_msg(db_error(&error));
+            drop(db);
+            return true;
+        }
     }
     if !keep.is_empty() {
         let list = keep.join(",");
         // GetUsedBaseJobids
-        if let Ok(base) = column0(db, &format!("SELECT DISTINCT BaseJobId   FROM Job JOIN BaseFiles USING (JobId)  \
+        match column0(db, &format!("SELECT DISTINCT BaseJobId   FROM Job JOIN BaseFiles USING (JobId)  \
             WHERE Job.HasBase = 1    AND Job.JobId IN ({list}) ")) {
-            keep.extend(base);
+            Ok(base) => keep.extend(base),
+            Err(error) => {
+                ua.error_msg(db_error(&error));
+                drop(db);
+                return true;
+            }
         }
         if let Err(error) = db.exec(&format!("DELETE FROM DelCandidates WHERE JobId IN ({}) AND JobFiles!=0", keep.join(","))) {
             ua.error_msg(db_error(&error));
@@ -1440,6 +1470,40 @@ pub(crate) mod tests {
         let mut ua = Ua::new(&ctx);
         prune_jobs(&mut ua, &db, "fd1", None, 180 * 86_400);
         assert_eq!(ua.finish(true).text_output, "Begin pruning Jobs older than 6 months .\nNo jobids found to be purged\n");
+    }
+
+    /// J-11: the latest Full chain stays; when the keep list cannot be
+    /// built (AccurateGetJobids fails, e.g. its work table exists), nothing
+    /// is pruned.
+    #[test]
+    fn prune_jobs_keeps_the_latest_chain_and_aborts_without_it() {
+        let ctx = crate::ua_select::tests::context(
+            "Director { Name = dir }\nCatalog { Name = MyCatalog; DbName = x }\nClient { Name = fd1; Password = x }\n\
+             Pool { Name = Full; Pool Type = Backup }\nFileSet { Name = fs; Include { File = /etc } }\n\
+             Storage { Name = File; Address = sd; Password = x; Device = d; Media Type = File }\n\
+             Messages { Name = Standard }\n\
+             Job { Name = j; Type = Backup; Client = fd1; FileSet = fs; Pool = Full; Storage = File; Messages = Standard }",
+            crate::command_executor::ApiMode::Human);
+        let answers = || vec![
+            ("SELECT DISTINCT Job.Name, FileSet", vec![vec!["j", "fs", "fd1", "3", "4", "B"]]),
+            ("SELECT JobId FROM btemp3", vec![vec!["20"], vec!["21"]]),
+            ("SELECT DISTINCT DelCandidates.JobId", vec![vec!["9"]]),
+        ];
+        let db = FakeDb::new(answers());
+        let mut ua = Ua::new(&ctx);
+        prune_jobs(&mut ua, &db, "fd1", None, 180 * 86_400);
+        let writes = db.writes();
+        assert!(writes.contains(&"DELETE FROM DelCandidates WHERE JobId IN (20,21) AND JobFiles!=0".to_string()), "{writes:?}");
+        assert!(writes.contains(&"DELETE FROM Job WHERE JobId IN (9)".to_string()));
+
+        let mut db = FakeDb::new(answers());
+        db.fail = Some("CREATE TABLE btemp3");
+        let mut ua = Ua::new(&ctx);
+        prune_jobs(&mut ua, &db, "fd1", None, 180 * 86_400);
+        let result = ua.finish(true);
+        assert!(result.error_message.contains("nothing pruned"), "{}", result.error_message);
+        assert!(!db.writes().iter().any(|w| w.starts_with("DELETE FROM Job") || w.starts_with("DELETE FROM File")),
+            "{:?}", db.writes());
     }
 
     #[test]
