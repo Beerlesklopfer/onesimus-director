@@ -1,5 +1,13 @@
 onesimus (25.1.2+onesimus.0.2.0-2) UNRELEASED; urgency=medium
 
+  * odir: no schema migration at start (K-3, J-14). The Director checks
+    every catalog at start as CheckCatalog()/CheckTablesVersion() do:
+    it must open and have VersionId 2250, else the start ends with
+    'Version error for database "…". Wanted 2250, got N' (exit 1). The
+    Director never changes the schema or the Version table; before, a
+    development build could align columns and set Version to 2250, and
+    an unreachable catalog at start left the Director hanging.
+
   * odir: time and size directives are read with every word of the value
     and the Bareos units (K-1). Max Run Time, Full/Incremental/Differential
     Max Run Time, Max Wait Time, Max Start Delay, Duplicate Job Proximity

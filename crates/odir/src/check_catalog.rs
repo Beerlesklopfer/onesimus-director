@@ -181,18 +181,37 @@ fn libpq_error(cat: &CatalogResource, error: &sqlx::Error) -> String {
     format!("connection to server {target} failed: {reason}\n")
 }
 
+/// BDB_VERSION (cats/cats.h): the catalog schema this Director works with.
+pub const BDB_VERSION: u32 = 2250;
+
+/// BareosDb::CheckTablesVersion() (cats/sql.cc:172): the error text, or None.
+fn tables_version_error(db_name: &str, version: Result<Option<i64>, sqlx::Error>) -> Option<String> {
+    match version {
+        Err(e) => Some(format!("Could not query the database version: {e}\n")),
+        Ok(v) if v == Some(BDB_VERSION as i64) => None,
+        Ok(v) => Some(format!("Version error for database \"{db_name}\". Wanted {BDB_VERSION}, got {}\n",
+            v.unwrap_or(0))),
+    }
+}
+
 /// BareosDbPostgresql::OpenDatabase() (cats/postgresql.cc:288): six
 /// connection attempts, each failure followed by a 5 second pause; the
-/// error text of the last attempt.
+/// error text of the last attempt. Once connected, CheckTablesVersion():
+/// a catalog that is not at BDB_VERSION does not open (no retry). The
+/// Director never changes the schema or the Version table (K-3, J-14).
 fn open_database(cat: &CatalogResource, pause: std::time::Duration) -> Result<(), String> {
     let options = connect_options(cat);
-    let attempt = || -> Result<(), sqlx::Error> {
+    let attempt = || -> Result<Option<String>, sqlx::Error> {
         let runtime = tokio::runtime::Builder::new_current_thread().enable_all().build()
             .map_err(sqlx::Error::Io)?;
         runtime.block_on(async {
             use sqlx::Connection;
-            let connection = sqlx::postgres::PgConnection::connect_with(&options).await?;
-            connection.close().await
+            let mut connection = sqlx::postgres::PgConnection::connect_with(&options).await?;
+            let version = sqlx::query_scalar::<_, i64>("SELECT VersionId::bigint FROM Version")
+                .fetch_optional(&mut connection).await;
+            let error = tables_version_error(&cat.db_name, version);
+            let _ = connection.close().await;
+            Ok(error)
         })
     };
     let mut last = String::new();
@@ -201,7 +220,8 @@ fn open_database(cat: &CatalogResource, pause: std::time::Duration) -> Result<()
         let result = std::thread::scope(|scope| scope.spawn(attempt).join())
             .unwrap_or_else(|_| Err(sqlx::Error::Protocol("connect thread panicked".into())));
         match result {
-            Ok(()) => return Ok(()),
+            Ok(None) => return Ok(()),
+            Ok(Some(version_error)) => return Err(version_error),
             Err(error) => {
                 tracing::debug!("Could not connect to db: Err={error}");
                 last = format!(
@@ -254,6 +274,17 @@ mod tests {
             db_port: port,
             ..Default::default()
         }
+    }
+
+    #[test]
+    fn tables_version_as_check_tables_version() {
+        assert_eq!(tables_version_error("bareos", Ok(Some(2250))), None);
+        assert_eq!(tables_version_error("bareos", Ok(Some(2171))).unwrap(),
+            "Version error for database \"bareos\". Wanted 2250, got 2171\n");
+        assert_eq!(tables_version_error("bareos", Ok(None)).unwrap(),
+            "Version error for database \"bareos\". Wanted 2250, got 0\n");
+        assert!(tables_version_error("bareos", Err(sqlx::Error::RowNotFound)).unwrap()
+            .starts_with("Could not query the database version: "));
     }
 
     #[test]
