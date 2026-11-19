@@ -92,7 +92,8 @@ impl AuthState {
     pub fn check_session(&self, metadata: &MetadataMap) -> Result<u64, Status> {
         self.identity(metadata).map(|(_,id)|id)
     }
-    fn identity(&self, metadata: &MetadataMap) -> Result<(String,u64), Status> {
+    /// Console name and session id of the session header.
+    pub fn identity(&self, metadata: &MetadataMap) -> Result<(String,u64), Status> {
         let token = metadata
             .get(SESSION_HEADER)
             .ok_or_else(|| Status::unauthenticated("not logged in"))?
@@ -127,6 +128,11 @@ impl AuthState {
     pub fn allowed(&self, id:u64, kind:crate::acl::Kind, item:&str) -> bool {
         let Some(console)=self.session_mgr.authenticated_console(id) else {return false;};
         self.config.read().map(|cfg|crate::acl::allowed(&cfg,&console,kind,item)).unwrap_or(false)
+    }
+
+    /// Whether the ACL `kind` of `console` allows any resource (acl::any_allowed).
+    pub fn any_allowed(&self, console: &str, kind: crate::acl::Kind) -> bool {
+        self.config.read().map(|cfg| crate::acl::any_allowed(&cfg, console, kind)).unwrap_or(false)
     }
 
     /// MD5 key for a console: Director password for the default console,

@@ -25,7 +25,7 @@
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
-use bareos_config::raw::{normalize_key, ConfResource, Directive};
+use bareos_config::raw::{ConfResource, Directive};
 use sha2::{Digest, Sha256};
 
 use crate::director_config::DirectorConfig;
@@ -418,10 +418,9 @@ fn check(tree: &Tree, base: &str) -> Result<DirectorConfig, Problem> {
             problem.file = p.file;
             problem.line = p.line as u32;
             problem.column = p.col as u32;
-        } else if let Some(crate::config_check::Diag::Config(error)) = diags.first() {
-            if let Some(source) = config.raw.get(error.resource).and_then(|r| r.source.as_ref()) {
-                problem.file = source.display().to_string();
-            }
+        } else if let Some(crate::config_check::Diag::Config(error)) = diags.first()
+            && let Some(source) = config.raw.get(error.resource).and_then(|r| r.source.as_ref()) {
+            problem.file = source.display().to_string();
         }
         return Err(problem);
     }
@@ -464,10 +463,9 @@ pub fn references(raw: &[ConfResource], rtype: RType, name: &str) -> Vec<(String
         }
         let items = crate::config_check::items_of(&res.rtype);
         let names_it = |d: &Directive| -> bool {
-            if let Some(item) = items.and_then(|items| crate::config_check::item_of(items, &d.key)) {
-                if item.code == Some(rtype.rcode()) && d.values().contains(&name) {
-                    return true;
-                }
+            if let Some(item) = items.and_then(|items| crate::config_check::item_of(items, &d.key))
+                && item.code == Some(rtype.rcode()) && d.values().contains(&name) {
+                return true;
             }
             if rtype == RType::Job && matches!(res.norm_type().as_str(), "job" | "jobdefs") {
                 if d.norm_key() == "run" && d.values().iter().any(|v| run_job_name(v).as_deref() == Some(name)) {
@@ -578,10 +576,9 @@ fn atomic_write(path: &Path, content: &str, owner: Option<Owner>) -> Result<(), 
 
 fn remove_file(path: &Path) -> Result<(), String> {
     std::fs::remove_file(path).map_err(|e| format!("remove {}: {e}", path.display()))?;
-    if let Some(dir) = path.parent() {
-        if let Ok(d) = std::fs::File::open(dir) {
-            let _ = d.sync_all();
-        }
+    if let Some(dir) = path.parent()
+        && let Ok(d) = std::fs::File::open(dir) {
+        let _ = d.sync_all();
     }
     Ok(())
 }
@@ -735,6 +732,7 @@ impl ConfigEditor {
 
     /// The submitted text of one resource of `rtype`: its name and the text
     /// to write (a missing final line end is added in the file's style).
+    #[allow(clippy::result_large_err)]
     fn submitted(rtype: RType, text: &str, file: &str, line_end: &str) -> Result<(String, String), Outcome> {
         let invalid = |message: String, problem: Option<Problem>| {
             let mut o = Outcome::new(Status::Invalid, "", message);
@@ -822,6 +820,7 @@ impl ConfigEditor {
     }
 
     /// UpdateResource.
+    #[allow(clippy::too_many_arguments)]
     pub fn update(&self, rtype: RType, name: &str, expected_sha256: &str, text: &str, validate_only: bool,
                   console: &str, allow: Allow) -> Result<Outcome, String> {
         if !allow(name) {
@@ -978,13 +977,12 @@ impl ConfigEditor {
                 o.file = file;
                 o.old_sha256 = outcome.old_sha256.clone();
                 // current (restored) state
-                if let Ok(tree) = self.tree() {
-                    if let Some(found) = tree.find(rtype, &outcome.name) {
-                        let current = Self::found_outcome(&tree, &found, &outcome.name, Status::ReloadFailed, String::new());
-                        o.text = current.text;
-                        o.sha256 = current.sha256;
-                        o.shared_file = current.shared_file;
-                    }
+                if let Ok(tree) = self.tree()
+                    && let Some(found) = tree.find(rtype, &outcome.name) {
+                    let current = Self::found_outcome(&tree, &found, &outcome.name, Status::ReloadFailed, String::new());
+                    o.text = current.text;
+                    o.sha256 = current.sha256;
+                    o.shared_file = current.shared_file;
                 }
                 if let Err(e) = restored {
                     o.message = format!("reload failed: {reason}; restoring the previous state failed: {e}");
@@ -1016,10 +1014,5 @@ fn invalid_outcome(name: &str, problem: Problem) -> Outcome {
     o
 }
 
-/// Normalized type of the raw view → RType (only the types of this stage).
-pub fn rtype_of_norm(norm: &str) -> Option<RType> {
-    RType::ALL.into_iter().find(|t| t.norm() == normalize_key(norm))
-}
-
 #[cfg(test)]
-mod tests;
+pub(crate) mod tests;

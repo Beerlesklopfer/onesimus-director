@@ -72,6 +72,14 @@ pub const COVERAGE: &[(&str, &str, &str)] = &[
     ("configure", "export", "ConfigureExport"),
     ("configure", "delete", "ConfigureDelete"),
     ("configure", "update", "ConfigureUpdate"),
+    // configuration CRUD as raw text (gRPC only, no console command)
+    ("configure", "capabilities (gRPC)", "GetConfigCapabilities"),
+    ("configure", "read (gRPC)", "ReadResource"),
+    ("configure", "create (gRPC)", "CreateResource"),
+    ("configure", "update (gRPC)", "UpdateResource"),
+    ("configure", "delete (gRPC)", "DeleteResource"),
+    ("configure", "rename (gRPC)", "RenameResource"),
+    ("configure", "list (gRPC)", "ListResources"),
     ("create", "", "CreatePool"),
     ("delete", "volume=", "DeleteVolume"),
     ("delete", "volume", "DeleteVolume"),
@@ -291,6 +299,11 @@ pub const NOT_APPLICABLE: &[(&str, &str)] = &[
     ("SetIp", "setip takes the address of a BNET console connection; the gRPC path has none"),
 ];
 
+/// RPCs of a later stage: UNIMPLEMENTED in every build.
+pub const LATER: &[(&str, &str)] = &[
+    ("RenameResource", "renaming with all references comes later (CONFIG-CRUD-GRPC.md, principle 9)"),
+];
+
 /// RPCs that end the session (session token invalid afterwards).
 pub const LOGOUT: &[&str] = &["Quit", "Exit", "DotQuit"];
 
@@ -299,6 +312,10 @@ pub const LOGOUT: &[&str] = &["Quit", "Exit", "DotQuit"];
 pub fn state(rpc: &str) -> &'static str {
     if super::api::READ_IMPLEMENTED.iter().any(|(name, _)| *name == rpc) {
         "implementiert"
+    } else if super::api::CONFIG_IMPLEMENTED.iter().any(|(name, _)| *name == rpc) {
+        "implementiert (Konfiguration als Rohtext, jeder Build)"
+    } else if LATER.iter().any(|(name, _)| *name == rpc) {
+        "später (`UNIMPLEMENTED`)"
     } else if NOT_APPLICABLE.iter().any(|(name, _)| *name == rpc) {
         "nicht anwendbar (Entwicklungs-Build: FAILED_PRECONDITION)"
     } else {
@@ -478,9 +495,19 @@ mod tests {
         // every other RPC is implemented in the development build (S-35)
         let read: BTreeSet<&str> = super::super::api::READ_IMPLEMENTED.iter().map(|(r, _)| *r).collect();
         let dev: BTreeSet<&str> = super::super::api::DEV_IMPLEMENTED.iter().map(|(r, _)| *r).collect();
-        assert!(read.is_disjoint(&dev));
-        let all: BTreeSet<String> = read.union(&dev).map(|r| r.to_string()).collect();
-        assert_eq!(all, rpcs, "every RPC must be a read RPC or a development-build RPC");
+        let config: BTreeSet<&str> = super::super::api::CONFIG_IMPLEMENTED.iter().map(|(r, _)| *r).collect();
+        let later: BTreeSet<&str> = LATER.iter().map(|(r, _)| *r).collect();
+        assert!(read.is_disjoint(&dev) && read.is_disjoint(&config) && dev.is_disjoint(&config));
+        assert!(later.iter().all(|r| !read.contains(r) && !dev.contains(r) && !config.contains(r)));
+        let all: BTreeSet<String> = read.iter().chain(&dev).chain(&config).chain(&later).map(|r| r.to_string()).collect();
+        assert_eq!(all, rpcs, "every RPC must be a read, configuration, development-build or later RPC");
+        for (rpc, method) in super::super::api::CONFIG_IMPLEMENTED {
+            let snake: String = rpc.chars().enumerate().flat_map(|(i, c)| {
+                let lower = c.to_ascii_lowercase();
+                if c.is_ascii_uppercase() && i > 0 { vec!['_', lower] } else { vec![lower] }
+            }).collect();
+            assert_eq!(&snake, method, "{rpc}");
+        }
         for (rpc, _) in NOT_APPLICABLE {
             assert!(dev.contains(rpc), "{rpc}");
         }

@@ -6,6 +6,7 @@
 
 pub mod service;
 pub mod api;
+pub mod api_config;
 pub mod coverage;
 #[cfg(feature = "grpc-development")]
 pub mod api_write;

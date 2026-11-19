@@ -293,6 +293,13 @@ Die CI (`.github/workflows/package.yml`) testet beide Builds; die Pakete bleiben
 | `ConfigureExport` | `commands.ConfigureExportCommand` | `api.ActionResponse` | Entwicklungs-Build (`grpc-development`) |
 | `ConfigureDelete` | `commands.ConfigureDeleteCommand` | `api.ActionResponse` | Entwicklungs-Build (`grpc-development`) |
 | `ConfigureUpdate` | `commands.ConfigureUpdateCommand` | `api.ActionResponse` | Entwicklungs-Build (`grpc-development`) |
+| `GetConfigCapabilities` | `api.ConfigCapabilitiesRequest` | `api.ConfigCapabilitiesResponse` | implementiert (Konfiguration als Rohtext, jeder Build) |
+| `ReadResource` | `api.ReadResourceRequest` | `api.ResourceResponse` | implementiert (Konfiguration als Rohtext, jeder Build) |
+| `CreateResource` | `api.CreateResourceRequest` | `api.ResourceResponse` | implementiert (Konfiguration als Rohtext, jeder Build) |
+| `UpdateResource` | `api.UpdateResourceRequest` | `api.ResourceResponse` | implementiert (Konfiguration als Rohtext, jeder Build) |
+| `DeleteResource` | `api.DeleteResourceRequest` | `api.ResourceResponse` | implementiert (Konfiguration als Rohtext, jeder Build) |
+| `RenameResource` | `api.RenameResourceRequest` | `api.ResourceResponse` | später (`UNIMPLEMENTED`) |
+| `ListResources` | `api.ListResourcesRequest` | `api.ListResourcesResponse` | implementiert (Konfiguration als Rohtext, jeder Build) |
 | `Reload` | `commands.ReloadCommand` | `api.ActionResponse` | Entwicklungs-Build (`grpc-development`) |
 | `SetDebug` | `api.SetDebugLevelCommand` | `api.ActionResponse` | Entwicklungs-Build (`grpc-development`) |
 | `SetBandwidth` | `api.SetBandwidthLimitCommand` | `api.ActionResponse` | Entwicklungs-Build (`grpc-development`) |
@@ -409,6 +416,13 @@ Unterbefehl `key=` steht für die Form `key=<wert>`, ein Wort für das Schlüsse
 | `configure` | `export` | `ConfigureExport` | Entwicklungs-Build (`grpc-development`) |
 | `configure` | `delete` | `ConfigureDelete` | Entwicklungs-Build (`grpc-development`) |
 | `configure` | `update` | `ConfigureUpdate` | Entwicklungs-Build (`grpc-development`) |
+| `configure` | `capabilities (gRPC)` | `GetConfigCapabilities` | implementiert (Konfiguration als Rohtext, jeder Build) |
+| `configure` | `read (gRPC)` | `ReadResource` | implementiert (Konfiguration als Rohtext, jeder Build) |
+| `configure` | `create (gRPC)` | `CreateResource` | implementiert (Konfiguration als Rohtext, jeder Build) |
+| `configure` | `update (gRPC)` | `UpdateResource` | implementiert (Konfiguration als Rohtext, jeder Build) |
+| `configure` | `delete (gRPC)` | `DeleteResource` | implementiert (Konfiguration als Rohtext, jeder Build) |
+| `configure` | `rename (gRPC)` | `RenameResource` | später (`UNIMPLEMENTED`) |
+| `configure` | `list (gRPC)` | `ListResources` | implementiert (Konfiguration als Rohtext, jeder Build) |
 | `create` | – | `CreatePool` | Entwicklungs-Build (`grpc-development`) |
 | `delete` | `volume=` | `DeleteVolume` | Entwicklungs-Build (`grpc-development`) |
 | `delete` | `volume` | `DeleteVolume` | Entwicklungs-Build (`grpc-development`) |

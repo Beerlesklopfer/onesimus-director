@@ -39,6 +39,9 @@ pub struct DirectorApiImpl {
     pub(super) exec: Option<super::ExecParts>,
     #[cfg(feature = "grpc-development")]
     pub(super) restore_sessions: Arc<super::api_dev::RestoreSessions>,
+    /// Configuration CRUD (api_config.rs); set by `with_config_editor`
+    /// (tests) or on first use from the Director's configuration path.
+    pub(super) config_editor: OnceLock<Arc<crate::config_edit::ConfigEditor>>,
 }
 
 impl DirectorApiImpl {
@@ -49,7 +52,15 @@ impl DirectorApiImpl {
             exec: None,
             #[cfg(feature = "grpc-development")]
             restore_sessions: Arc::default(),
+            config_editor: OnceLock::new(),
         }
+    }
+
+    /// Use `editor` for the configuration CRUD RPCs.
+    #[cfg_attr(not(test), allow(dead_code))]
+    pub fn with_config_editor(self, editor: Arc<crate::config_edit::ConfigEditor>) -> Self {
+        let _ = self.config_editor.set(editor);
+        self
     }
 
     pub fn with_exec(mut self, exec: super::ExecParts) -> Self {
@@ -406,6 +417,7 @@ impl DirectorApiImpl {
 macro_rules! rpc_impls {
     (
         read { $( $method:ident ( $req:ty ) -> $resp:ty = $name:literal; )* }
+        config { $( $cmethod:ident ( $creq:ty ) -> $cresp:ty = $cname:literal via $chandler:ident; )* }
         dev { $( $dmethod:ident ( $dreq:ty ) -> $dresp:ty = $dname:literal via $handler:ident; )* }
     ) => {
         #[tonic::async_trait]
@@ -413,6 +425,11 @@ macro_rules! rpc_impls {
             $(
                 async fn $method(&self, request: Request<$req>) -> Result<Response<$resp>, Status> {
                     self.call(request, $name).await
+                }
+            )*
+            $(
+                async fn $cmethod(&self, request: Request<$creq>) -> Result<Response<$cresp>, Status> {
+                    self.$chandler(request).await
                 }
             )*
             $(
@@ -429,6 +446,10 @@ macro_rules! rpc_impls {
 
         /// (RPC name, trait method) of the write, session and restore-tree
         /// RPCs (only implemented with `grpc-development`)
+        /// Configuration CRUD RPCs (api_config.rs, every build).
+        #[allow(dead_code)]
+        pub const CONFIG_IMPLEMENTED: &[(&str, &str)] = &[$( ($cname, stringify!($cmethod)) ),*];
+
         #[allow(dead_code)]
         pub const DEV_IMPLEMENTED: &[(&str, &str)] = &[$( ($dname, stringify!($dmethod)) ),*];
     };
@@ -533,6 +554,14 @@ read {
     dot_ovfs_tree(pb::DotOvfsTreeCommand) -> pb::OvfsTreeResponse = "DotOvfsTree";
     dot_ovfs_ls(pb::DotOvfsLsCommand) -> pb::OvfsLsResponse = "DotOvfsLs";
     dot_ovfs_versions(pb::DotOvfsVersionsCommand) -> pb::OvfsVersionsResponse = "DotOvfsVersions";
+}
+config {
+    get_config_capabilities(pb::ConfigCapabilitiesRequest) -> pb::ConfigCapabilitiesResponse = "GetConfigCapabilities" via config_capabilities;
+    read_resource(pb::ReadResourceRequest) -> pb::ResourceResponse = "ReadResource" via config_read;
+    create_resource(pb::CreateResourceRequest) -> pb::ResourceResponse = "CreateResource" via config_create;
+    update_resource(pb::UpdateResourceRequest) -> pb::ResourceResponse = "UpdateResource" via config_update;
+    delete_resource(pb::DeleteResourceRequest) -> pb::ResourceResponse = "DeleteResource" via config_delete;
+    list_resources(pb::ListResourcesRequest) -> pb::ListResourcesResponse = "ListResources" via config_list;
 }
 dev {
     run(pb::RunJobCommand) -> pb::ActionResponse = "Run" via write;
