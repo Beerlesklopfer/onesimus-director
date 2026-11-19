@@ -168,7 +168,7 @@ impl Backend for RootfulBackend {
     fn request(&mut self, request: pb::BrokerRequest) -> Result<pb::BrokerResponse, String> {
         use pb::broker_request::Request;
         use pb::broker_response::Response;
-        let mut answer = || -> Result<Response, pb::BrokerResponse> {
+        let answer = || -> Result<Response, pb::BrokerResponse> {
             Ok(match request.request {
                 Some(Request::EngineIdentify(_)) => Response::EngineIdentify(pb::EngineIdentifyResponse {
                     info_json: self.run(&Operation::Info, MAX_INSPECT)?,

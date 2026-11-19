@@ -451,6 +451,48 @@ pub fn broker_args(account: &AccountEntry) -> Vec<String> {
     a
 }
 
+/// `systemctl --user show` with the fixed property list as the account's
+/// uid, **outside** the broker's namespace (V-8): `PR_SET_NO_NEW_PRIVS`,
+/// an empty environment plus `XDG_RUNTIME_DIR`, stdin and stderr on
+/// /dev/null. As root `ofd` switches to the account first; otherwise only
+/// its own uid is possible.
+pub fn unit_show_as_account(uid: u32, gid: u32, runtime: &Path, units: &[String]) -> Result<Vec<u8>, String> {
+    use std::os::unix::process::CommandExt;
+    let argv = onesimus_podman_core::exec::Operation::UnitShow { user: true, units: units.to_vec() }.argv(&Storage::default())?;
+    // SAFETY: geteuid has no preconditions.
+    let euid = unsafe { libc::geteuid() };
+    if euid != 0 && euid != uid {
+        return Err(format!("cannot act as uid {uid}"));
+    }
+    if uid == 0 {
+        return Err("systemctl --user is never run as root".into());
+    }
+    let mut cmd = std::process::Command::new(&argv[0]);
+    cmd.args(&argv[1..])
+        .env_clear()
+        .env("XDG_RUNTIME_DIR", runtime)
+        .stdin(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null());
+    let switch = euid == 0;
+    // SAFETY: only async-signal-safe calls between fork and exec.
+    unsafe {
+        cmd.pre_exec(move || {
+            if switch && (libc::setgroups(0, std::ptr::null()) < 0 || libc::setresgid(gid, gid, gid) < 0 || libc::setresuid(uid, uid, uid) < 0) {
+                return Err(std::io::Error::last_os_error());
+            }
+            if libc::prctl(libc::PR_SET_NO_NEW_PRIVS, 1, 0, 0, 0) < 0 {
+                return Err(std::io::Error::last_os_error());
+            }
+            Ok(())
+        });
+    }
+    let out = cmd.output().map_err(|e| e.to_string())?;
+    if !out.status.success() {
+        return Err(format!("systemctl --user show failed ({})", out.status));
+    }
+    Ok(out.stdout)
+}
+
 /// `podman.inventory` granted to org.onesimus.podman: check the line, start
 /// the broker (rootless) or the rootful backend, confirm the engine.
 #[allow(clippy::too_many_arguments)]
@@ -493,4 +535,4 @@ pub(crate) fn prepare(manifest: &onesimus_plugins::Manifest, line: &PluginLine, 
 }
 
 #[cfg(test)]
-mod tests;
+pub(crate) mod tests;

@@ -34,6 +34,8 @@ mod job;
 mod pg_instance;
 mod pg_port;
 mod plugin;
+#[cfg(test)]
+mod podman_e2e;
 mod podman_port;
 mod podman_rootful;
 mod podman_scan;

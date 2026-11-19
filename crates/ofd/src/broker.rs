@@ -356,6 +356,11 @@ unsafe fn child_exec(exe: i32, sock: i32, null: i32, switch: bool, run_as: RunAs
 }
 
 impl Broker {
+    /// The broker's process id (also its process group).
+    pub fn pid(&self) -> libc::pid_t {
+        self.pid
+    }
+
     /// Stops the broker's process group: SIGTERM, after `grace` SIGKILL.
     pub fn stop(&mut self, grace: Duration) -> Option<i32> {
         if self.reaped {
