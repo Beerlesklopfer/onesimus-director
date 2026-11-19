@@ -867,7 +867,9 @@ pub fn plugin_ff(include: &FfPkt, entry: &pb::FileEntry) -> Option<FfPkt> {
     let secs = entry.modified_unix_nanos.div_euclid(1_000_000_000);
     // SAFETY: geteuid/getegid have no preconditions and cannot fail.
     let (uid, gid) = unsafe { (libc::geteuid(), libc::getegid()) };
-    let perm = entry.mode & 0o7777;
+    // Only permission bits from the guest: setuid, setgid and sticky would
+    // come back as root-owned special files on a restore to files (S-13).
+    let perm = entry.mode & 0o777;
     let mut statp = Stat { nlink: 1, uid, gid, atime: secs, mtime: secs, ctime: secs, blksize: 4096, ..Default::default() };
     let path = plugin_path(&entry.path)?;
     let (type_, link) = match pb::FileKind::try_from(entry.kind).ok()? {
@@ -1094,6 +1096,19 @@ impl<D: Read + Write> Handler for VerifyHandler<'_, D> {
 
 #[cfg(test)]
 mod tests {
+
+    /// S-13: a plugin cannot create setuid/setgid/sticky files.
+    #[test]
+    fn plugin_entry_mode_keeps_only_permission_bits() {
+        let include = FfPkt::default();
+        let entry = |mode| pb::FileEntry { path: b"/@t/x".to_vec(), kind: pb::FileKind::Regular as i32, size: 1, mode, ..Default::default() };
+        let ff = plugin_ff(&include, &entry(0o4755)).unwrap();
+        assert_eq!(ff.statp.mode, libc::S_IFREG | 0o755);
+        let ff = plugin_ff(&include, &entry(0o7000)).unwrap();
+        assert_eq!(ff.statp.mode, libc::S_IFREG | 0o600, "only special bits: default permissions");
+        let dir = pb::FileEntry { kind: pb::FileKind::Directory as i32, ..entry(0o3775) };
+        assert_eq!(plugin_ff(&include, &dir).unwrap().statp.mode, libc::S_IFDIR | 0o775);
+    }
     use super::*;
 
     /// BNET frames written to the SD: data records and signals.
