@@ -2111,6 +2111,7 @@ dependencies = [
  "md-5",
  "nix 0.29.0",
  "onesimus-plugins",
+ "onesimus-podman-core",
  "onesimus-proto-rs",
  "openssl",
  "prost",

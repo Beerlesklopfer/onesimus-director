@@ -27,6 +27,8 @@ pub struct Script {
     pub read: Vec<Step>,
     pub write: Vec<Step>,
     pub close: Vec<Step>,
+    /// Contract version the guest reports (0 = 1).
+    pub interface_version: u32,
 }
 
 pub fn ok() -> pb::OperationResult {
@@ -65,7 +67,7 @@ const DATA_START: usize = 512 * 1024;
 fn component(script: &Script) -> Vec<u8> {
     let init = pb::InitializeResponse {
         result: Some(ok()),
-        metadata: Some(PluginMetadata { version: "1.0.0".into(), interface_version: 1, ..Default::default() }),
+        metadata: Some(PluginMetadata { version: "1.0.0".into(), interface_version: script.interface_version.max(1), ..Default::default() }),
     }
     .encode_to_vec();
     let exports: [(&str, Vec<Step>); 7] = [
@@ -148,6 +150,36 @@ fn escaped(bytes: &[u8]) -> String {
 /// file.read and file.write.
 pub fn signed_plugin(dir: &Path, name: &str, script: &Script) -> Resolved {
     signed_artifact(dir, name, component(script))
+}
+
+/// A scripted guest signed for `plugin_id` (not `test.<name>`) with these
+/// capabilities, e.g. org.onesimus.podman with contract 2.
+pub fn signed_plugin_as(dir: &Path, name: &str, plugin_id: &str, caps: &[&str], script: &Script) -> Resolved {
+    let now = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs();
+    let bundle = testca::signed_bundle(component(script), plugin_id, caps, Default::default(), now);
+    let bundle_path = dir.join(format!("{name}.pb"));
+    std::fs::write(&bundle_path, bundle.encode_to_vec()).unwrap();
+    std::fs::write(dir.join("ca.pem"), testca::TestCa::shared().root.to_pem().unwrap()).unwrap();
+    let policy = serde_json::json!({ "ca_certificates": ["ca.pem"], "target": "wasm32-wasip2" });
+    let policy_path = dir.join("policy.json");
+    std::fs::write(&policy_path, serde_json::to_vec(&policy).unwrap()).unwrap();
+    Resolved { bundle: bundle_path, policy: policy_path }
+}
+
+/// A NextFile step with a scan reference (contract 2).
+pub fn ref_step(path: &[u8], kind: pb::FileKind, source_ref: &[u8], size: u64, mode: u32) -> Step {
+    Step::Reply(pb::NextFileResponse {
+        result: Some(ok()),
+        item: Some(pb::next_file_response::Item::File(pb::FileEntry {
+            path: path.to_vec(),
+            kind: kind as i32,
+            size,
+            mode,
+            source_ref: source_ref.to_vec(),
+            ..Default::default()
+        })),
+    }
+    .encode_to_vec())
 }
 
 /// Like `signed_plugin` for a given component (e.g. a built Rust guest).

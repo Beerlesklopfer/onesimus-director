@@ -743,6 +743,9 @@ impl<S: Read + Write> Backup<'_, '_, S> {
     /// One file of a plugin: plugin name, attributes, data, digest, end.
     fn save_plugin_file(&mut self, session: &Session, include: &FfPkt, shown: &str, entry: pb::FileEntry,
         canceled: &dyn Fn() -> bool) -> bool {
+        if !entry.source_ref.is_empty() {
+            return self.save_scan_file(session, include, shown, &entry);
+        }
         let Some(mut ff) = plugin_ff(include, &entry) else {
             let path = String::from_utf8_lossy(&entry.path).into_owned();
             self.jmsg(M_FATAL, format!("Plugin: \"{shown}\": unsupported entry \"{path}\"\n"));
@@ -776,6 +779,107 @@ impl<S: Read + Write> Backup<'_, '_, S> {
                 return false;
             }
         }
+        self.send_plugin_name(shown, false)
+    }
+
+    /// One host scan entry (docs/plans/PODMAN-PLUGIN.md, "Erweiterung von
+    /// FileEntry"): the guest chose only whether and when; stat, ACL,
+    /// xattrs and bytes come from the host's own scan table. ReadFile is
+    /// never called, and the guest's size, mode and time are ignored. The
+    /// stream carries host IDs, mode & 0o777, only `user.*` xattrs and no
+    /// devices (V-1, S-13).
+    fn save_scan_file(&mut self, session: &Session, include: &FfPkt, shown: &str, entry: &pb::FileEntry) -> bool {
+        use crate::podman_scan::EntryKind;
+        let taken = match session.take_scan(entry) {
+            Ok(t) => t,
+            Err(e) => {
+                let path = String::from_utf8_lossy(&entry.path).into_owned();
+                self.jmsg(M_FATAL, format!("Plugin: \"{shown}\": \"{path}\": {e}\n"));
+                return false;
+            }
+        };
+        let e = &taken.entry;
+        let mut opts = include.opts.clone();
+        // ACL and xattrs come from the scan, not from a path lookup.
+        for bit in [FO_SPARSE, FO_OFFSETS, FO_ACL, FO_XATTR, FO_CHKCHANGES] {
+            opts.flags.clear(bit);
+        }
+        let path = e.path.clone();
+        let (type_, link, link_fi) = match &e.kind {
+            EntryKind::Regular | EntryKind::Ownership(_) => (FT_REG, path.clone(), 0),
+            EntryKind::Directory => {
+                let mut d = path.clone();
+                d.push(b'/');
+                (FT_DIREND, d, 0)
+            }
+            EntryKind::Symlink(target) => (FT_LNK, target.clone(), 0),
+            EntryKind::Fifo => (FT_SPEC, path.clone(), 0),
+            EntryKind::Hardlink(_) => {
+                let target = taken.link_target.clone().unwrap_or_default();
+                let fi = session.saved_index(&target).unwrap_or(0);
+                (FT_LNKSAVED, target, fi)
+            }
+        };
+        let mut ff = FfPkt { fname: path.clone(), link, top_fname: path.clone(), statp: e.stat.clone(), type_, link_fi, opts,
+            ..Default::default() };
+        let fname = String::from_utf8_lossy(&ff.fname).into_owned();
+        self.sd.counters.num_files_examined += 1;
+        self.sd.publish(Some(&fname));
+        if !self.send_plugin_name(shown, true) {
+            return false;
+        }
+        let regular = ff.type_ == FT_REG;
+        let mut digest = if regular { Digest::for_flags(ff.opts.flags) } else { None };
+        let Some(stream) = self.encode_and_send_attributes(&mut ff) else { return false };
+        if regular {
+            let sent = match (&e.kind, taken.file) {
+                (EntryKind::Ownership(bytes), _) => {
+                    self.send_data(stream, &ff, &mut std::io::Cursor::new(bytes.clone()), digest.as_mut().map(|(d, _)| d))
+                }
+                (_, Some(mut file)) => {
+                    let ok = self.send_data(stream, &ff, &mut file, digest.as_mut().map(|(d, _)| d));
+                    // consistency=crash: a file that changed while read is a warning.
+                    if let Ok(m) = file.metadata() {
+                        use std::os::unix::fs::MetadataExt;
+                        if m.size() as i64 != e.stat.size || m.mtime() != e.stat.mtime {
+                            self.jmsg(M_WARNING, format!("Plugin: \"{shown}\": \"{fname}\" changed during backup\n"));
+                        }
+                    }
+                    ok
+                }
+                (_, None) => false,
+            };
+            if !sent {
+                return false;
+            }
+        }
+        let mut extra = Vec::new();
+        if !e.acl_access.is_empty() {
+            extra.push((STREAM_ACL_LINUX_ACCESS_ACL, crate::podman_scan::acl_stream_text(&e.acl_access)));
+        }
+        if !e.acl_default.is_empty() && type_ == FT_DIREND {
+            extra.push((STREAM_ACL_LINUX_DEFAULT_ACL, crate::podman_scan::acl_stream_text(&e.acl_default)));
+        }
+        for (stream, text) in extra {
+            let mut v = text.into_bytes();
+            v.push(0);
+            if !(self.sd.header(stream) && self.sd.send(&v) && self.sd.eod()) {
+                return false;
+            }
+        }
+        if !e.xattrs.is_empty() {
+            let content = acl_xattr::serialize_xattrs(&e.xattrs);
+            if !(self.sd.header(STREAM_XATTR_LINUX) && self.sd.send(&content) && self.sd.eod()) {
+                return false;
+            }
+        }
+        if let Some((d, stream)) = digest.take() {
+            let bytes = d.finalize();
+            if !(self.sd.header(stream) && self.sd.send(&bytes) && self.sd.eod()) {
+                return false;
+            }
+        }
+        session.mark_saved(&path, ff.file_index);
         self.send_plugin_name(shown, false)
     }
 

@@ -243,15 +243,21 @@ pub struct Session {
     port: Option<onesimus_plugins::wasm::BrokerHandle>,
     /// Warnings from preparing the broker, for the job log.
     pub warnings: Vec<String>,
+    /// Host scan table of this instance (Podman): the only source of
+    /// entries with `source_ref`.
+    pub(crate) scans: Option<crate::podman_scan::SharedScans>,
 }
 
 /// A started broker and the port the guest's import calls go through.
 pub(crate) struct PreparedBroker {
     pub(crate) handle: onesimus_plugins::wasm::BrokerHandle,
-    pub(crate) broker: crate::broker::Broker,
+    /// The broker process; None for the rootful Podman backend in ofd.
+    pub(crate) broker: Option<crate::broker::Broker>,
     pub(crate) cancel: std::os::unix::net::UnixStream,
     /// Warnings for the job log (e.g. TLS files the FileSet misses).
     pub(crate) warnings: Vec<String>,
+    /// Host scans whose references the guest may list (Podman, contract 2).
+    pub(crate) scans: Option<crate::podman_scan::SharedScans>,
 }
 
 /// What a broker needs to know about its job besides the plugin line.
@@ -291,7 +297,11 @@ pub(crate) fn prepare_broker_for(resolved: &Resolved, line: &PluginLine, plugin_
         &bundle.x509_certificate_chain_der, &policy, now).map_err(|e| load(&e))?;
     let manifest = verified.manifest();
     let has = |c: &str| manifest.capabilities.iter().any(|m| m == c);
-    if has(POSTGRESQL_READ) {
+    if has(onesimus_plugins::wasm::PODMAN_INVENTORY) {
+        // Fixed binding (V-11): only org.onesimus.podman with contract 2.
+        let files = crate::podman_port::HostFiles::system();
+        crate::podman_port::prepare(manifest, line, plugin_dir, triplet, chunk, owner, top, context, &files).map(Some)
+    } else if has(POSTGRESQL_READ) {
         prepare_postgresql(manifest, line, plugin_dir, triplet, chunk, owner, top).map(Some)
     } else if has(OPENLDAP_READ) {
         crate::ldap_port::prepare(manifest, line, plugin_dir, triplet, chunk, owner, top, context).map(Some)
@@ -327,9 +337,10 @@ fn prepare_postgresql(manifest: &onesimus_plugins::Manifest, line: &PluginLine, 
         .map_err(PluginError::Load)?;
     Ok(PreparedBroker {
         handle: BrokerHandle(std::sync::Arc::new(std::sync::Mutex::new(Box::new(port)))),
-        broker,
+        broker: Some(broker),
         cancel,
         warnings: Vec::new(),
+        scans: None,
     })
 }
 
@@ -393,9 +404,10 @@ impl Session {
         .map_err(|e| load(&e))?;
         let port = prepared.as_ref().map(|p| p.handle.clone());
         let warnings = prepared.as_ref().map(|p| p.warnings.clone()).unwrap_or_default();
-        let broker = prepared.map(|p| (p.broker, p.cancel));
+        let scans = prepared.as_ref().and_then(|p| p.scans.clone());
+        let broker = prepared.and_then(|p| p.broker.map(|b| (b, p.cancel)));
         Ok(Self { worker, binding, job, line: line.clone(), plugin_id: manifest.plugin_id, chunk, started: false, broker,
-            port, warnings })
+            port, warnings, scans })
     }
 
     /// One call, waiting until it answers or `canceled()` turns true.
@@ -488,6 +500,26 @@ impl Session {
             abort,
         }), canceled)
         .map(drop)
+    }
+
+    /// The host scan entry of a listed `FileEntry` with `source_ref`:
+    /// unknown, reused, foreign path or wrong kind are refused (P0 (2)).
+    pub(crate) fn take_scan(&self, entry: &pb::FileEntry) -> Result<crate::podman_scan::Taken, PluginError> {
+        let scans = self.scans.as_ref().ok_or_else(|| PluginError::Runtime("scan reference without a host scan".into()))?;
+        let mut table = scans.lock().map_err(|_| PluginError::Runtime("scan table unavailable".into()))?;
+        table.take(&entry.source_ref, &entry.path, entry.kind).map_err(PluginError::Runtime)
+    }
+
+    /// Records the file index of a saved scan entry (target of hard links).
+    pub(crate) fn mark_saved(&self, path: &[u8], file_index: i32) {
+        if let Some(Ok(mut t)) = self.scans.as_ref().map(|s| s.lock()) {
+            t.mark_saved(path.to_vec(), file_index);
+        }
+    }
+
+    /// The file index of a saved scan entry.
+    pub(crate) fn saved_index(&self, path: &[u8]) -> Option<i32> {
+        self.scans.as_ref()?.lock().ok()?.saved_index(path)
     }
 
     /// Reports the end of the job to the plugin and stops the worker.

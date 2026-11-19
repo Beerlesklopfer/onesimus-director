@@ -67,6 +67,14 @@ pub(crate) fn launch_checked(plugin_dir: &Path, manifest: &onesimus_plugins::Man
     if euid != 0 && euid != run_as.uid {
         return Err(PluginError::Load(format!("cannot switch from uid {euid} to uid {}", run_as.uid)));
     }
+    let file = open_part(plugin_dir, entry, part, owner, top)?;
+    spawn(&file, run_as, part, args).map_err(|e| PluginError::Load(format!("starting {part}: {e}")))
+}
+
+/// Opens the native part once, checks owner, mode and the signed SHA-256
+/// on the open descriptor; every later step uses this descriptor.
+fn open_part(plugin_dir: &Path, entry: &onesimus_plugins::NativePart, part: &str, owner: u32, top: &Path)
+    -> Result<File, PluginError> {
     let path = plugin_dir.join(part);
     check_trusted(&path, owner, false, top)?;
 
@@ -84,7 +92,155 @@ pub(crate) fn launch_checked(plugin_dir: &Path, manifest: &onesimus_plugins::Man
     if digest != entry.sha256 {
         return Err(refuse(&path, "SHA-256 does not match the signed manifest"));
     }
-    spawn(&file, run_as, part, args).map_err(|e| PluginError::Load(format!("starting {part}: {e}")))
+    Ok(file)
+}
+
+/// The user namespace of a rootless Podman broker
+/// (docs/plans/PODMAN-PLUGIN.md, "Namespace und Start").
+#[derive(Debug, Clone)]
+pub struct UserNs {
+    /// Text for `/proc/<pid>/uid_map` (`0 <uid> 1`, `1 <subuid> <count>`).
+    pub uid_map: String,
+    /// Text for `/proc/<pid>/gid_map`.
+    pub gid_map: String,
+    /// The broker's environment (HOME, XDG_RUNTIME_DIR, PATH, LANG and the
+    /// three `_CONTAINERS_*` variables), nothing else.
+    pub env: Vec<(String, String)>,
+}
+
+/// Starts a native part inside a user and mount namespace that **root
+/// owns**: the child calls `unshare(CLONE_NEWUSER | CLONE_NEWNS)` while
+/// still root, `ofd` writes the maps from `/etc/subuid`/`/etc/subgid`, the
+/// child switches to ns-UID/GID 0 (= the account), drops supplementary
+/// groups, makes its mounts private, sets `PR_SET_NO_NEW_PRIVS`,
+/// `PR_SET_PDEATHSIG`, `RLIMIT_CORE` 0 and execs the checked descriptor.
+/// The account has no capability in a namespace it does not own, so it
+/// cannot `ptrace` the broker (V-3); the broker also sets
+/// `PR_SET_DUMPABLE(0)` itself. A pause process of the account is never
+/// joined: its namespace belongs to the account.
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn launch_in_userns(plugin_dir: &Path, manifest: &onesimus_plugins::Manifest, triplet: &str, part: &str,
+    ns: &UserNs, args: &[String], owner: u32, top: &Path) -> Result<Broker, PluginError> {
+    let entry = manifest.native_part(triplet, part)
+        .ok_or_else(|| PluginError::Load(format!("the signed manifest lists no {part} for {triplet}")))?;
+    // SAFETY: geteuid has no preconditions and cannot fail.
+    if unsafe { libc::geteuid() } != 0 {
+        return Err(PluginError::Load("a root-owned user namespace needs ofd as root".into()));
+    }
+    if ns.uid_map.lines().next().is_some_and(|l| l.split_whitespace().nth(1) == Some("0")) {
+        return Err(PluginError::Load("a broker never runs as root".into()));
+    }
+    let file = open_part(plugin_dir, entry, part, owner, top)?;
+    spawn_userns(&file, part, args, ns).map_err(|e| PluginError::Load(format!("starting {part}: {e}")))
+}
+
+/// fork; the child unshares as root and waits; the parent writes the maps;
+/// the child switches to ns-root and execs. Everything the child needs is
+/// prepared before fork.
+fn spawn_userns(file: &File, name: &str, args: &[String], ns: &UserNs) -> std::io::Result<Broker> {
+    let (parent, child) = UnixStream::pair()?;
+    let devnull = File::options().write(true).open("/dev/null")?;
+    let cstr = |s: &str| CString::new(s).map_err(|_| std::io::Error::other("NUL"));
+    let argv_owned: Vec<CString> = std::iter::once(name).chain(args.iter().map(String::as_str)).map(cstr).collect::<Result<_, _>>()?;
+    let mut argv: Vec<*const libc::c_char> = argv_owned.iter().map(|a| a.as_ptr()).collect();
+    argv.push(std::ptr::null());
+    let env_owned: Vec<CString> = ns.env.iter().map(|(k, v)| cstr(&format!("{k}={v}"))).collect::<Result<_, _>>()?;
+    let mut envp: Vec<*const libc::c_char> = env_owned.iter().map(|e| e.as_ptr()).collect();
+    envp.push(std::ptr::null());
+    // Two pipes: child -> parent "unshared", parent -> child "maps written".
+    let (mut ready, mut go) = ([0i32; 2], [0i32; 2]);
+    // SAFETY: arrays of two descriptors.
+    if unsafe { libc::pipe2(ready.as_mut_ptr(), libc::O_CLOEXEC) } < 0 || unsafe { libc::pipe2(go.as_mut_ptr(), libc::O_CLOEXEC) } < 0 {
+        return Err(std::io::Error::last_os_error());
+    }
+    let (exe, sock, null) = (file.as_raw_fd(), child.as_raw_fd(), devnull.as_raw_fd());
+    // SAFETY: the child only makes raw system calls on prepared data.
+    let pid = unsafe { libc::fork() };
+    if pid < 0 {
+        return Err(std::io::Error::last_os_error());
+    }
+    if pid == 0 {
+        // SAFETY: child process between fork and exec.
+        unsafe { child_userns(exe, sock, null, ready[1], go[0], &argv, &envp) }
+    }
+    // SAFETY: closing the child's ends in the parent.
+    unsafe {
+        libc::close(ready[1]);
+        libc::close(go[0]);
+    }
+    let mut byte = [0u8; 1];
+    // SAFETY: reading one byte from our pipe end.
+    let n = unsafe { libc::read(ready[0], byte.as_mut_ptr().cast(), 1) };
+    let result = (|| {
+        if n != 1 {
+            return Err(std::io::Error::other("the broker child did not unshare"));
+        }
+        std::fs::write(format!("/proc/{pid}/uid_map"), &ns.uid_map)?;
+        std::fs::write(format!("/proc/{pid}/gid_map"), &ns.gid_map)?;
+        // SAFETY: writing one byte to our pipe end.
+        if unsafe { libc::write(go[1], b"g".as_ptr().cast(), 1) } != 1 {
+            return Err(std::io::Error::last_os_error());
+        }
+        Ok(())
+    })();
+    // SAFETY: closing our pipe ends.
+    unsafe {
+        libc::close(ready[0]);
+        libc::close(go[1]);
+    }
+    drop(child);
+    let broker = Broker { socket: parent, pid, reaped: false };
+    result.map(|_| broker)
+}
+
+/// The child side of `spawn_userns`; never returns.
+///
+/// # Safety
+/// Only between fork and exec, with pointers valid in the parent's image.
+unsafe fn child_userns(exe: i32, sock: i32, null: i32, ready: i32, go: i32, argv: &[*const libc::c_char],
+    envp: &[*const libc::c_char]) -> ! {
+    // SAFETY: raw system calls on valid descriptors and pointers.
+    unsafe {
+        let fail = |_step: u8| -> ! { libc::_exit(127) };
+        let keep = |fd: i32| if fd <= 2 { libc::fcntl(fd, libc::F_DUPFD_CLOEXEC, 3) } else { fd };
+        let (exe_fd, ready, go) = (keep(exe), keep(ready), keep(go));
+        if libc::dup2(sock, 0) < 0 || libc::dup2(sock, 1) < 0 || libc::dup2(null, 2) < 0 {
+            fail(1);
+        }
+        let max = libc::sysconf(libc::_SC_OPEN_MAX).clamp(64, 65536) as i32;
+        for fd in 3..max {
+            if fd != exe_fd && fd != ready && fd != go {
+                libc::close(fd);
+            }
+        }
+        if libc::setpgid(0, 0) < 0 || libc::prctl(libc::PR_SET_PDEATHSIG, libc::SIGKILL as libc::c_ulong, 0, 0, 0) < 0 {
+            fail(2);
+        }
+        // Still root: the new user namespace belongs to root.
+        if libc::unshare(libc::CLONE_NEWUSER | libc::CLONE_NEWNS) < 0 {
+            fail(3);
+        }
+        let mut b = [0u8; 1];
+        if libc::write(ready, b"r".as_ptr().cast(), 1) != 1 || libc::read(go, b.as_mut_ptr().cast(), 1) != 1 {
+            fail(4);
+        }
+        libc::close(ready);
+        libc::close(go);
+        // Mounts of podman stay in this namespace.
+        if libc::mount(std::ptr::null(), c"/".as_ptr(), std::ptr::null(), libc::MS_REC | libc::MS_PRIVATE, std::ptr::null()) < 0 {
+            fail(5);
+        }
+        if libc::setgroups(0, std::ptr::null()) < 0 || libc::setresgid(0, 0, 0) < 0 || libc::setresuid(0, 0, 0) < 0 {
+            fail(6);
+        }
+        if libc::prctl(libc::PR_SET_NO_NEW_PRIVS, 1, 0, 0, 0) < 0 {
+            fail(7);
+        }
+        let core = libc::rlimit { rlim_cur: 0, rlim_max: 0 };
+        libc::setrlimit(libc::RLIMIT_CORE, &core);
+        libc::fexecve(exe_fd, argv.as_ptr(), envp.as_ptr());
+        fail(8)
+    }
 }
 
 /// For `ofd --check-plugin`: every native part the verified manifest lists

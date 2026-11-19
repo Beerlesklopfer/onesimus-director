@@ -992,9 +992,10 @@ pub(crate) fn prepare(manifest: &onesimus_plugins::Manifest, line: &PluginLine, 
     let warnings = port.warnings.clone();
     Ok(PreparedBroker {
         handle: BrokerHandle(std::sync::Arc::new(std::sync::Mutex::new(Box::new(port)))),
-        broker,
+        broker: Some(broker),
         cancel,
         warnings,
+        scans: None,
     })
 }
 

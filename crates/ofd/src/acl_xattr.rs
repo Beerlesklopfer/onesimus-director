@@ -383,6 +383,21 @@ pub fn build_acl_streams(fname: &[u8], is_dir: bool) -> (Vec<(i32, Vec<u8>)>, Ve
     (streams, errors)
 }
 
+/// A STREAM_XATTR_LINUX record of `list` (name, value), as
+/// `build_xattr_stream` writes it; used for the cleaned `user.*` xattrs of
+/// host scan entries (podman_scan).
+pub fn serialize_xattrs(list: &[(Vec<u8>, Vec<u8>)]) -> Vec<u8> {
+    let mut out = Vec::new();
+    for (name, value) in list {
+        out.extend_from_slice(&XATTR_MAGIC.to_be_bytes());
+        out.extend_from_slice(&(name.len() as u32).to_be_bytes());
+        out.extend_from_slice(name);
+        out.extend_from_slice(&(value.len() as u32).to_be_bytes());
+        out.extend_from_slice(value);
+    }
+    out
+}
+
 /// generic_build_xattr_streams(): Ok(Some(serialized STREAM_XATTR_LINUX))
 /// / Ok(None) / Err((is_info, message)).
 pub fn build_xattr_stream(fname: &[u8], skip_acl_names: bool) -> Result<Option<Vec<u8>>, (bool, String)> {

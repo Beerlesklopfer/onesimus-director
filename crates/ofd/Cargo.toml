@@ -12,6 +12,7 @@ path = "src/main.rs"
 
 [dependencies]
 onesimus-plugins = { path = "../onesimus-plugins" }
+onesimus-podman-core = { path = "../onesimus-podman-core" }
 tonic.workspace = true
 tokio.workspace = true
 onesimus-proto-rs.workspace = true
