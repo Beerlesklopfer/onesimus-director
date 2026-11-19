@@ -15,7 +15,12 @@ case "$1" in
         # Verzeichnisse
         install -d -m 750 -o bareos -g bareos /var/lib/bareos
         install -d -m 750 -o bareos -g bareos /var/log/bareos
-        install -d -m 750 -o bareos -g bareos /etc/bareos
+        # /etc/bareos nur anlegen, wenn es fehlt: bestehende Rechte und
+        # Eigentuemer bleiben (bareos-common setzt Gruppe bareos und 2755,
+        # bconsole.conf muss fuer Benutzer ausserhalb der Gruppe lesbar bleiben)
+        if [ ! -d /etc/bareos ]; then
+            install -d -m 750 -o bareos -g bareos /etc/bareos
+        fi
 
         # Default-Configs nur installieren wenn bareos-dir.d/ leer oder nicht existiert
         if [ ! -d /etc/bareos/bareos-dir.d ] || [ -z "$(find /etc/bareos/bareos-dir.d/ -name '*.conf' 2>/dev/null)" ]; then
