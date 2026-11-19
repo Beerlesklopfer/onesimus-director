@@ -433,7 +433,7 @@ pub(crate) fn purge_jobs_from_volume(ua: &mut Ua, ast: &CommandAst, db: &dyn Db,
 }
 
 /// C++ Is_a_number_list().
-fn is_a_number_list(text: &str) -> bool {
+pub(crate) fn is_a_number_list(text: &str) -> bool {
     let (mut previous_digit, mut digit_seen) = (false, false);
     for c in text.chars() {
         if c.is_ascii_digit() {

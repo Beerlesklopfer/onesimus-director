@@ -520,6 +520,11 @@ fn user_select_jobids_or_files(ua: &mut Ua, ast: &CommandAst, rx: &mut Rx) -> i3
             0 => {
                 // jobid
                 let Some(value) = has_value(ua, &arg.key, value) else { return 0 };
+                // ua_restore.cc:567: only a list of numbers goes into the SQL
+                if !crate::commands::purge::is_a_number_list(value) {
+                    ua.error_msg("Invalid JobId in list.\n");
+                    return 0;
+                }
                 if !rx.job_ids.is_empty() {
                     rx.job_ids.push(',');
                 }
@@ -975,8 +980,10 @@ fn insert_dir_into_findex_list(ua: &mut Ua, rx: &mut Rx, dir: &str) -> bool {
         return false;
     }
     let client = rx.client_name.clone().unwrap_or_default();
+    // ua_restore.cc:1082: the directory is escaped (EscapeString).
+    let escaped = escape(&dir);
     let sql = format!("SELECT Job.JobId,\n       File.FileIndex\nFROM Job,\n     File,\n     Path,\n     Client\n\
-        WHERE Job.JobId IN ({})\n  AND Job.JobId=File.JobId\n  AND Path.Path='{dir}'\n  AND Client.Name='{client}'\n  \
+        WHERE Job.JobId IN ({})\n  AND Job.JobId=File.JobId\n  AND Path.Path='{escaped}'\n  AND Client.Name='{client}'\n  \
         AND Job.ClientId=Client.ClientId\n  AND Path.PathId=File.Pathid\n", rx.job_ids);
     if !jobid_fileindex(ua, rx, &sql) {
         ua.error_msg(format!("No database record found for: {dir}\n"));
@@ -2305,6 +2312,19 @@ Console { Name=limited; Password=pw; CommandACL=*all*; CatalogACL=*all*; ClientA
         let (_, transcript) = dialog(&ctx, &line, &["quit"]);
         assert!(transcript.ends_with("$ quit\nRestore not done.\n"), "{transcript}");
         let _ = std::fs::remove_file(&bootstrap);
+    }
+
+    /// J-17: jobid= is checked before it reaches any SQL (ua_restore.cc:567),
+    /// directory= is escaped (ua_restore.cc:1082).
+    #[test]
+    fn jobid_and_directory_do_not_reach_sql_unescaped() {
+        let (ctx, log) = context("*UserAgent*");
+        let result = run(&ctx, "restore \"jobid=1) OR (1=1\" file=/etc/passwd client=fd1");
+        assert_eq!(result.error_message, "Invalid JobId in list.\n");
+        assert!(!log.lock().unwrap().iter().any(|sql| sql.contains("1=1")), "{:?}", log.lock().unwrap());
+        let (ctx, log) = context("*UserAgent*");
+        run(&ctx, "restore jobid=1 client=fd1 \"directory=/it's/\"");
+        assert!(log.lock().unwrap().iter().any(|sql| sql.contains("Path.Path='/it''s/'")), "{:?}", log.lock().unwrap());
     }
 
     /// J-16: a catalog error while the file list is read stops the restore
