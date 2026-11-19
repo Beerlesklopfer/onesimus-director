@@ -96,6 +96,14 @@ pub fn command(ctx: &ExecContext, key: &str, typed: &str, cmdline: &str) {
         let (console, host) = who(ctx);
         // ua->cmd is a C string
         let cmdline = cmdline.split('\0').next().unwrap_or("");
+        // `.config create/update`: the resource text may carry passwords
+        let masked;
+        let cmdline = if key == ".config" {
+            masked = crate::commands::config_crud::mask_cmdline(cmdline);
+            masked.as_str()
+        } else {
+            cmdline
+        };
         daemon_message(config, MsgType::Audit, &format!("Console [{console}] from [{host}] cmdline {cmdline}\n"));
     });
 }

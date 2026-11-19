@@ -131,10 +131,9 @@ impl DirectorApiImpl {
         if let Some(editor) = self.config_editor.get() {
             return Ok(editor.clone());
         }
-        let (Some(path), Some(exec)) = (crate::reload::config_path(), self.exec.as_ref()) else {
-            return Err(Status::failed_precondition("configuration editing is not available (no configuration path)"));
-        };
-        Ok(self.config_editor.get_or_init(|| Arc::new(ConfigEditor::production(path, exec.config.clone()))).clone())
+        // the editor of the `.config` console command (one lock for both paths)
+        self.exec.as_ref().and_then(|exec| config_edit::shared_editor(&exec.config))
+            .ok_or_else(|| Status::failed_precondition("configuration editing is not available (no configuration path)"))
     }
 
     /// Session check, Command ACL `configure`, the resource ACL of `rtype`.

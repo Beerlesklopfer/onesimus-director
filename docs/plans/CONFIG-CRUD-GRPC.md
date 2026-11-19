@@ -358,6 +358,39 @@ die Client-ACL wie `show client`.
 - Hinweis: `referenced_by` nennt auch Ressourcen, die die ACL der Konsole
   nicht zeigt (wie bei Schedule); die Löschung wird dadurch nur verhindert.
 
+### BNET-Weg (19.11.2026)
+
+Entscheidung des Nutzers: „Das CRUD läuft auch über BNET.“ oconsole und der
+MCP-Server sprechen den Director auch über die klassische Konsole, wenn gRPC
+nicht verfügbar ist. Dafür gibt es den Onesimus-Punktbefehl `.config`
+(`crates/odir/src/commands/config_crud.rs`, Doku
+[dot-config.md](../wiki/commands/dot-config.md)):
+
+```text
+.config capabilities
+.config list   type=<typ>
+.config read   type=<typ> name=<name>
+.config create type=<typ> text64=<base64> [validate_only]
+.config update type=<typ> name=<name> sha256=<alt> text64=<base64> [validate_only]
+.config delete type=<typ> name=<name> sha256=<alt> [validate_only]
+```
+
+- Name: `.config` kollidiert mit keinem Bareos-Befehl (kein Eintrag der
+  Bareos-Befehlstabelle beginnt mit `.config`, die Präfixauflösung bleibt
+  eindeutig; `configure` unverändert). Test
+  `the_command_is_registered_without_a_bareos_name_clash`.
+- Dieselbe Kernlogik und dieselbe Editor-Instanz wie die RPCs
+  (`config_edit::shared_editor`, eine Sperre für beide Wege).
+- Text als Base64 (`text64=`), weil eine Konsolenzeile keine Zeilenenden
+  trägt; die Antwort trägt ihn als UTF-8 im JSON.
+- Antwort im `.api 2`-JSON mit den Feldern von `ResourceResponse`,
+  `ListResourcesResponse` bzw. `ConfigCapabilitiesResponse`; `status`, Typen
+  und Operationen als Text (`OK`, `CONFLICT`, …; `CLIENT`; `READ_RAW`).
+- Rechte (konservativ): Command-ACL `.config` wie jeder Befehl **und**
+  `configure` wie die RPCs; Ressourcen-ACL je Name wie beim gRPC-Weg.
+  Protokoll wie beim gRPC-Weg; im Audit-Protokoll der Befehlszeile wird
+  `text64=` durch die Länge ersetzt (Passwörter im Text).
+
 Offen: RENAME (Grundsatz 9), weitere Typen (Grundsatz 17) mit `followups`
 für Pool (Grundsatz 15), ob die alten Konsolenerweiterungen
 `configure update/delete/read` entfernt werden.

@@ -5,6 +5,10 @@ onesimus (25.1.2+onesimus.0.2.0-2) UNRELEASED; urgency=medium
     GetConfigCapabilities when the Client ACL allows a client. Delete
     answers REFERENCED while a Job/JobDefs names the client (Client =,
     client= in Run and RunScript console commands).
+  * odir: console dot command ".config" (Onesimus extension): the same
+    configuration CRUD over BNET (capabilities, list, read, create,
+    update, delete; text as base64 in text64=), same core logic and lock
+    as the gRPC RPCs; needs the Command ACL ".config" and "configure".
 
   * odir: secrets in FileSet plugin lines (password=, bind_pw= ...) are
     masked in FileSet.FileSetText and in "show fileset" (S-3). bareos-dir

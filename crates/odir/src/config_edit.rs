@@ -691,6 +691,17 @@ pub fn name_error(name: &str) -> Option<String> {
     None
 }
 
+/// The production editor shared by the gRPC RPCs and the `.config` console
+/// command (one lock for both paths); None without a configuration path.
+pub fn shared_editor(config: &crate::director_config::SharedConfig) -> Option<std::sync::Arc<ConfigEditor>> {
+    static SHARED: std::sync::OnceLock<std::sync::Arc<ConfigEditor>> = std::sync::OnceLock::new();
+    if let Some(editor) = SHARED.get() {
+        return Some(editor.clone());
+    }
+    let path = crate::reload::config_path()?;
+    Some(SHARED.get_or_init(|| std::sync::Arc::new(ConfigEditor::production(path, config.clone()))).clone())
+}
+
 /// The ACL decision of the caller for a resource name.
 pub type Allow<'a> = &'a dyn Fn(&str) -> bool;
 

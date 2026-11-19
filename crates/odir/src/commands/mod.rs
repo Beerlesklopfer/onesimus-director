@@ -15,6 +15,7 @@ pub mod restore;
 pub mod restore_bsr;
 pub mod restore_tree;
 pub mod configure;
+pub mod config_crud;
 pub mod sql;
 pub mod acl;
 pub mod catalog;

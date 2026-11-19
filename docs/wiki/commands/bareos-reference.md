@@ -171,7 +171,7 @@ Diese Befehle stehen in `ua_tree.cc::commands[]`, nicht in der Hauptkonsole. Gle
 
 Zusatznamen sind keine Belege für upstream vorhandene Funktionen. Die JSON enthält ihre lokalen Handler und Aliase.
 
-`.acl`, `.grpc`, `.ovfs_latest`, `.ovfs_ls`, `.ovfs_status`, `.ovfs_tree`, `.ovfs_versions`, `.profile`, `.sqlcount`, `.sqlschema`, `.sqltables`, `.storage`.
+`.acl`, `.config`, `.grpc`, `.ovfs_latest`, `.ovfs_ls`, `.ovfs_status`, `.ovfs_tree`, `.ovfs_versions`, `.profile`, `.sqlcount`, `.sqlschema`, `.sqltables`, `.storage`.
 
 ## Reproduzieren und aktualisieren
 
