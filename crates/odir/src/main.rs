@@ -21,6 +21,7 @@ mod command_registry;
 mod commands;
 mod config_check;
 mod config_test;
+mod config_edit;
 mod consolidate;
 mod command_worker;
 mod expand;

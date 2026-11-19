@@ -50,8 +50,23 @@ fn run_with(path: &std::path::Path, pause: std::time::Duration) -> (String, i32)
     (notes, 0)
 }
 
+/// Reads a configuration file (from disk, or the changed copy of config_edit).
+pub(crate) type Reader<'a> = &'a dyn Fn(&std::path::Path) -> Option<String>;
+
+fn read_file(path: &std::path::Path) -> Option<String> {
+    std::fs::read_to_string(path).ok()
+}
+
 /// The messages of a rejected configuration and the exit code.
 fn report(raw: &[ConfResource], diags: &[Diag], base: &str) -> (String, i32) {
+    let (text, code, _) = report_in(raw, diags, base, &read_file);
+    (text, code)
+}
+
+/// [`report`] with the files read through `read`; also the position of a
+/// located parser error.
+pub(crate) fn report_in(raw: &[ConfResource], diags: &[Diag], base: &str, read: Reader)
+    -> (String, i32, Option<Position>) {
     let mut out = String::new();
     for diag in diags {
         match diag {
@@ -60,16 +75,17 @@ fn report(raw: &[ConfResource], diags: &[Diag], base: &str) -> (String, i32) {
             Diag::Daemon(text) => out.push_str(&format!("{} {MY_NAME}: {text}", date())),
             Diag::Parser(text) => {
                 out.push_str(&config_error("lib/parse_conf.cc", text, None));
-                return (out, EXIT_CONFIG_ERROR);
+                return (out, EXIT_CONFIG_ERROR, None);
             }
             Diag::Config(error) => {
-                out.push_str(&located_error(raw, error));
-                return (out, EXIT_CONFIG_ERROR);
+                let (text, position) = located_error(raw, error, read);
+                out.push_str(&text);
+                return (out, EXIT_CONFIG_ERROR, position);
             }
         }
     }
     out.push_str(&error_term(base));
-    (out, 1)
+    (out, 1, None)
 }
 
 /// Jmsg(M_ERROR_TERM, "Please correct the configuration in %s\n").
@@ -87,7 +103,7 @@ fn date() -> String {
 
 /// scan_err() output: "Config error: <msg>\n            : line L, col C of
 /// file F\n<line>\n" after the M_CONFIG_ERROR header.
-fn config_error(at: &str, message: &str, position: Option<&Position>) -> String {
+pub(crate) fn config_error(at: &str, message: &str, position: Option<&Position>) -> String {
     let mut out = format!("{MY_NAME}: CONFIG ERROR at {at}\nConfig error: {message}\n");
     if let Some(p) = position {
         out.push_str(&format!("            : line {}, col {} of file {}\n{}\n", p.line, p.col, p.file, p.text));
@@ -96,22 +112,22 @@ fn config_error(at: &str, message: &str, position: Option<&Position>) -> String 
     out
 }
 
-fn located_error(raw: &[ConfResource], error: &ConfigError) -> String {
-    let position = locate(raw, error);
+fn located_error(raw: &[ConfResource], error: &ConfigError, read: Reader) -> (String, Option<Position>) {
+    let position = locate(raw, error, read);
     let message = match (&error.anchor, &position) {
         (Anchor::Value { .. }, Some(p)) => format!("{} on line {}: {}\n", error.message, p.line, p.text),
         _ => error.message.clone(),
     };
-    config_error(error.at, &message, position.as_ref())
+    (config_error(error.at, &message, position.as_ref()), position)
 }
 
 /// The lexer position of an error in its file.
 #[derive(Debug, PartialEq)]
-struct Position {
-    file: String,
-    line: usize,
-    col: usize,
-    text: String,
+pub(crate) struct Position {
+    pub(crate) file: String,
+    pub(crate) line: usize,
+    pub(crate) col: usize,
+    pub(crate) text: String,
 }
 
 /// Text of `line` without a comment (`#` outside quotes).
@@ -162,10 +178,10 @@ struct Span {
 }
 
 /// Finds resource `index` of `raw` in its file (the n-th resource of its type there).
-fn span(raw: &[ConfResource], index: usize) -> Option<Span> {
+fn span(raw: &[ConfResource], index: usize, read: Reader) -> Option<Span> {
     let res = raw.get(index)?;
     let source = res.source.clone()?;
-    let content = std::fs::read_to_string(&source).ok()?;
+    let content = read(&source)?;
     let lines: Vec<String> = content.lines().map(str::to_string).collect();
     let nth = raw[..index].iter()
         .filter(|r| r.source == res.source && r.norm_type() == res.norm_type()).count();
@@ -208,7 +224,7 @@ pub fn deprecated_notes(raw: &[ConfResource]) -> Vec<String> {
         if deprecated.is_empty() {
             continue;
         }
-        let Some(span) = span(raw, index) else { continue };
+        let Some(span) = span(raw, index, &read_file) else { continue };
         let mut used = std::collections::HashSet::new();
         for (name, key) in deprecated {
             let found = (span.start + 1..=span.end.0)
@@ -224,9 +240,9 @@ pub fn deprecated_notes(raw: &[ConfResource]) -> Vec<String> {
 
 /// Finds the resource of `error` in its file (the n-th resource of its type
 /// there) and the line/column where the original's lexer stood.
-fn locate(raw: &[ConfResource], error: &ConfigError) -> Option<Position> {
+fn locate(raw: &[ConfResource], error: &ConfigError, read: Reader) -> Option<Position> {
     let res = raw.get(error.resource)?;
-    let Span { source, lines, start, end: (end_line, end_col) } = span(raw, error.resource)?;
+    let Span { source, lines, start, end: (end_line, end_col) } = span(raw, error.resource, read)?;
     let _ = res;
     let position = |line: usize, col: usize| Some(Position {
         file: source.display().to_string(), line: line + 1, col: col + 1, text: lines[line].to_string() });

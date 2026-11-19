@@ -68,7 +68,13 @@ pub fn parse_config_dir(dir: &std::path::Path) -> Result<Vec<Resource>, ConfigEr
 pub fn parse_config_file(path: &std::path::Path) -> Result<Vec<Resource>, ConfigError> {
     let content = std::fs::read_to_string(path)
         .map_err(|e| ConfigError::ParseError(format!("read {}: {e}", path.display())))?;
-    parse_config(&content).map_err(|e| match e {
+    parse_config_named(&content, path)
+}
+
+/// Parse the text of config file `path` (in memory); errors are prefixed
+/// with "<file>: " like [`parse_config_file`].
+pub fn parse_config_named(content: &str, path: &std::path::Path) -> Result<Vec<Resource>, ConfigError> {
+    parse_config(content).map_err(|e| match e {
         ConfigError::ParseError(msg) => ConfigError::ParseError(format!("{}: {msg}", path.display())),
         ConfigError::MissingRequired { resource_type, directive } => ConfigError::ParseError(format!(
             "{}: missing required directive '{directive}' in {resource_type}", path.display())),

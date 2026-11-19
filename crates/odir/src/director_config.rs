@@ -57,6 +57,22 @@ impl DirectorConfig {
         Ok(config)
     }
 
+    /// Parse configuration files given in memory, in read order (for the
+    /// directory layout: reverse glob order like [`Self::load`]). Used to
+    /// check a changed configuration before it is written (config_edit).
+    pub fn from_files(files: &[(std::path::PathBuf, String)]) -> Result<Self, ConfigError> {
+        let mut resources = Vec::new();
+        let mut raw = Vec::new();
+        for (path, content) in files {
+            resources.extend(parser::parse_config_named(content, path)?);
+            raw.extend(bareos_config::raw::parse_str(content, Some(path))
+                .map_err(|e| ConfigError::ParseError(format!("{}: {e}", path.display())))?);
+        }
+        let mut config = Self::from_resources(resources)?;
+        config.raw = raw;
+        Ok(config)
+    }
+
     /// Parse configuration from a string.
     pub fn from_str(input: &str) -> Result<Self, ConfigError> {
         let resources = parser::parse_config(input)?;

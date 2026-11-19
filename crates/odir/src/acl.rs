@@ -141,6 +141,33 @@ pub fn allowed(config: &DirectorConfig, console: &str, kind: Kind, item: &str) -
     false
 }
 
+/// Whether the ACL `kind` of `console` (its own list, then its profiles)
+/// allows any resource at all: one entry that is not a `!` negation. The
+/// default console allows everything. Used by GetConfigCapabilities (a
+/// type without any allowed resource is not offered).
+pub fn any_allowed(config: &DirectorConfig, console: &str, kind: Kind) -> bool {
+    if console == "*UserAgent*" {
+        return true;
+    }
+    let Some(resource) = config.raw.iter()
+        .find(|r| r.norm_type() == "console" && r.name() == Some(console))
+    else {
+        return false;
+    };
+    let positive = |res: &ConfResource| res.directives.iter()
+        .filter(|d| d.norm_key() == kind.key())
+        .flat_map(|d| d.values())
+        .any(|v| !v.starts_with('!'));
+    if positive(resource) {
+        return true;
+    }
+    resource.directives.iter()
+        .filter(|d| d.norm_key() == "profile")
+        .flat_map(|d| d.values())
+        .filter_map(|name| config.raw.iter().find(|r| r.norm_type() == "profile" && r.name() == Some(name)))
+        .any(positive)
+}
+
 /// C++ ua_acl.cc UaContext::AclNoRestrictions(): the first `!` entry means
 /// restricted, the first `*all*` unrestricted (console list, then profiles);
 /// the default console is unrestricted.
