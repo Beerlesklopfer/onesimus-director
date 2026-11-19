@@ -1,20 +1,28 @@
 # Planung: Podman-Plugin für ofd
 
 Stand: 19.11.2026. Status: **Grundplan freigegeben (18.10.2026), am 19.11.2026
-nach drei Teamberichten und vier neuen Entscheidungen des Nutzers neu gefasst.**
-Produktiver Code existiert noch nicht; vorhanden sind Worker-Kern und
-read-only conmon-Discovery (Abschnitt „Umsetzungsstand“).
+nach drei Teamberichten und vier Entscheidungen des Nutzers neu gefasst und am
+selben Tag nach zwei Verifikationsberichten überarbeitet.** Produktiver Code
+existiert noch nicht; vorhanden sind Worker-Kern und read-only
+conmon-Discovery (Abschnitt „Umsetzungsstand“).
 
 Kennzeichnung in diesem Plan:
 
 - **(Nutzer, TT.MM.JJJJ)**: verbindliche Entscheidung des Nutzers.
 - **Vorschlag, offen**: Ergebnis der Planung, noch nicht freigegeben.
-- Belege verweisen auf die Teamberichte vom 19.11.2026 (Arbeitspapiere der
-  Planungssitzung, nicht im Repository): **[S]** Storage, Images, Volumes;
-  **[A]** API, Erkennung, Abhängigkeiten; **[K]** Konsistenz, Restore,
-  Broker-Vertrag; jeweils mit Abschnitt, z. B. [S §1]. Alle Versuche liefen
-  mit Podman 5.4.2 (netavark, sqlite) rootless in Wegwerf-Speicher;
-  forgeiec.io wurde nur lesend untersucht.
+- Belege verweisen auf Arbeitspapiere der Planungssitzung vom 19.11.2026
+  (nicht im Repository):
+  - Teamberichte **[S]** Storage, Images, Volumes; **[A]** API, Erkennung,
+    Abhängigkeiten; **[K]** Konsistenz, Restore, Broker-Vertrag; jeweils mit
+    Abschnitt, z. B. [S §1].
+  - Verifikation der Architektur, Befunde **(V-1)** bis **(V-21)**; V-1
+    blockierend, V-2 bis V-8 und V-13 hoch.
+  - Praxisprüfung mit sieben Versuchen, zitiert als **(Praxis 1)** bis
+    **(Praxis 7)**.
+
+  Alle Versuche liefen mit Podman 5.4.2 (netavark, sqlite), systemd 257 und
+  Kernel 6.12 rootless in Wegwerf-Speicher; forgeiec.io wurde nur lesend
+  untersucht.
 
 ## Ziel und Rahmen
 
@@ -30,14 +38,16 @@ aus [STAND-2026-11-19](STAND-2026-11-19.md): nur signierte Plugins, der Gast
 hat keine Datei-, Netz- oder Prozess-Importe, nur einen typisierten
 Broker-Import, wenn Manifest und Policy die Capability gewähren; der Host
 prüft jede Broker-Anfrage; **Broker laufen nie als root**; Restore in Dateien
-führt keinen Plugin-Code aus. Grants stehen im Signierzertifikat, die lokale
-Policy schränkt nur ein ([Signier-Infrastruktur](SIGNIER-INFRASTRUKTUR.md)).
-Das Broker-Muster folgt [PostgreSQL Phase 2](POSTGRESQL-PHASE2.md): nativer
-Broker aus geprüftem Deskriptor, `fexecve`, leere Umgebung,
-`PR_SET_NO_NEW_PRIVS`, `PR_SET_PDEATHSIG`, Protobuf über `socketpair`.
-Gemeinsame Bausteine (Journal, Writergruppe, Stagingvolume, Restore-Verfahren)
-teilt das Plugin mit dem [Docker-Plugin](DOCKER-PLUGIN.md); UID-Domänen,
-Pods, Quadlet und Namespaces bleiben Podman-spezifisch.
+führt keinen Plugin-Code aus; **S-13**: Plugin-Einträge tragen im Strom nur
+die Rechte-Bits `0o777` (`plugin_ff`, `e1ecd00`). Grants stehen im
+Signierzertifikat, die lokale Policy schränkt nur ein
+([Signier-Infrastruktur](SIGNIER-INFRASTRUKTUR.md)). Das Broker-Muster folgt
+[PostgreSQL Phase 2](POSTGRESQL-PHASE2.md): nativer Broker aus geprüftem
+Deskriptor, `fexecve`, leere Umgebung, `PR_SET_NO_NEW_PRIVS`,
+`PR_SET_PDEATHSIG`, Protobuf über `socketpair`. Gemeinsame Bausteine (Journal,
+Writergruppe, Stagingvolume, Restore-Verfahren) teilt das Plugin mit dem
+[Docker-Plugin](DOCKER-PLUGIN.md); UID-Domänen, Pods, Quadlet und Namespaces
+bleiben Podman-spezifisch.
 
 Paket: `ofd-plugin-podman` (`Architecture: any`, `Depends: ofd (= <Version>)`)
 mit `/usr/lib/<triplet>/onesimus/plugins/podman.pb` und dem Broker
@@ -52,7 +62,7 @@ Das [Container-Dump-Skript](../wiki/container-dump.md) bleibt Übergangshilfe.
 | conmon-Erkennung | hostweite read-only Erkennung von Konten mit Podman über conmon; ergänzt registrierte Konten, gewährt keine Rechte (Nutzer, 18.10.2026) |
 | Parameter | Auswahl und Umfang stehen in der FileSet-Plugin-Zeile; eine Zeile gilt genau einem Konto (Nutzer, 19.11.2026) |
 | Arbeitsweise | wie ein Dateisystem: virtueller Dateibaum im SD-Strom, jede Einheit eine eigene Datei, **kein zusätzliches tar** (Nutzer, 19.11.2026) |
-| Container | nur Inspect-Daten, kein `podman export` des Container-Dateisystems; Writable Layer bleibt ausgeschlossen (Nutzer, 19.11.2026) |
+| Container | nur Inspect-Daten und Quellen, kein `podman export` des Container-Dateisystems; Writable Layer bleibt ausgeschlossen (Nutzer, 19.11.2026) |
 | Images | wählbar (`images=`), nicht Pflicht (Nutzer, 19.11.2026) |
 | Netze | die verwendeten Netze gehören zur Sicherung (Nutzer, 19.11.2026) |
 | Zusammenhänge | erkennt das Plugin selbst; der Administrator wählt nur aus, was er sichern will (Nutzer, 19.11.2026) |
@@ -69,58 +79,74 @@ Stops; eigener Adapter statt Docker-Kompatibilitätsschicht.
 
 ## Zusammenspiel von Gast, Host und Broker
 
-Der Gast (WASM, signiert) ist in beiden Profilen derselbe: Er baut aus den
-Antworten des typisierten Imports `onesimus:broker/podman` den Dateibaum und
-das Manifest. Er sieht nur, was der Host für diesen Job freigibt. Hinter dem
-Import steht je nach Profil ein anderes Backend; der Gast kann das nicht
-unterscheiden und braucht es nicht.
+Grundsatz nach der Verifikation (V-2, V-3, V-9, V-17): **Alle Entscheidungen,
+die Sicherheit betreffen, trifft der Host.** Der Host berechnet die erlaubte
+Objektmenge, steuert den Lifecycle, liest die Bytes und Attribute von
+Volume-Dateien und Image-Blobs selbst und erzeugt die bereinigten Dokumente.
+Der Gast (WASM, signiert, in beiden Profilen derselbe) bestimmt Format,
+Dateibaum, Manifest und Reihenfolge. Er sieht nur, was der Host für diesen Job
+freigibt.
+
+**Verhältnis zu „Broker als Konto“ (V-2, V-3):** Der rootless Broker läuft
+weiter als Konto-UID, aber in einem User-Namespace, **den root besitzt**.
+Beim Sichern liefert er nur noch **Metadaten**: Inventar, Inspect,
+`generate spec`, `quadlet -dryrun -user`. Er liefert **keine Bytes und keine
+Attribute**. Alles, was der Broker meldet, gilt als Angabe des Kontos und
+damit als nicht vertrauenswürdig. Ein Konto kann seinen Broker nicht so
+steuern, dass er Eigentümer, Sonderbits oder Gerätedateien erfindet, weil der
+Host diese Werte selbst per `openat2`/`fstatat` vom Datenträger liest. Beim
+Online-Restore schreibt der Broker im Ziel-Namespace; welche Attribute er
+setzt, bestimmt der Host (V-9).
 
 ```mermaid
 flowchart LR
-    G[WASM-Gast podman<br/>signiert, ohne WASI] -- typisierter Import<br/>onesimus:broker/podman --> P[ofd: Podman-Port<br/>Grants, erlaubte Objektmenge,<br/>Journal, Leases, Attributkontrolle]
-    P -- user=konto: Protobuf über socketpair --> B[onesimus-podman-broker<br/>als Konto-UID, im User-Namespace<br/>den ofd angelegt hat]
-    B -- feste Argumente, --format json --> C1[podman / quadlet -dryrun -user /<br/>systemctl --user]
-    B -- openat2 im Namespace --> D1[(Storage des Kontos:<br/>Volumes, Layer, tar-split)]
+    G[WASM-Gast podman<br/>signiert, ohne WASI<br/>Baum, Manifest, Reihenfolge] -- typisierter Import<br/>onesimus:filed-plugin/podman --> P[ofd: Podman-Port<br/>Grants, Plugin-ID, Objektmenge,<br/>Lifecycle, Journal, Leases]
+    P -- Scan-Handle: openat2 als root<br/>RESOLVE_BENEATH, NO_SYMLINKS, NO_XDEV --> D[(Storage der Domäne:<br/>Volumes, Layer, tar-split)]
+    P -- user=konto: Protobuf über socketpair --> B[onesimus-podman-broker<br/>Konto-UID im root-eigenen<br/>User- und Mount-Namespace<br/>nur Metadaten]
+    B -- feste Argumente, --format json --> C1[podman / quadlet -dryrun -user]
+    P -- user=konto: feste Argumente,<br/>als Konto-UID ohne Namespace --> S1[systemctl --user /<br/>systemd-run --user]
     P -- user=root: feste Logik in ofd --> R[Rootful-Backend in ofd<br/>kein Plugin-Code]
     R -- feste Argumente, leere Umgebung --> C2[podman / quadlet -dryrun /<br/>systemctl]
-    R -- openat2 als root --> D2[(/var/lib/containers/storage,<br/>/etc/containers)]
     P --> SD[(SD-Strom, Bareos-Format)]
 ```
 
 | Aufgabe | Gast (WASM) | Host `ofd` (root) | Broker (rootless, Konto-UID) |
 | --- | --- | --- | --- |
-| Plugin-Zeile auswerten | Auswahl, Baum, Manifest | Zeile prüfen, Konto gegen Kontopolicy, Grants gegen Zeile | – |
-| Inventar, Inspect | fordert an | prüft jede Anfrage; berechnet die erlaubte Objektmenge selbst (Auswahl plus Zusammenhänge, derselbe Algorithmus wie im Gast, im Host maßgeblich); filtert Env-Werte bei `env=omit` | ruft `podman … --format json` mit fester Argumentliste |
-| Quadlet, systemd | ordnet zu | prüft Pfade gegen Quadlet-Suchpfade | `quadlet -dryrun -user`, `systemctl --user show` |
-| Volume-Daten, Layer | liefert Einträge mit Verweis | übernimmt Eigentümer, Modus, xattrs **aus eigener Tabelle**, nicht vom Gast | liest im User-Namespace (`openat2`), rekonstruiert Layer aus tar-split |
-| Stop/Wiederanlauf | – | Journal, Lifecycle-Lease, Recovery | `systemctl --user mask --runtime`/`stop`/`start`, `podman stop/start` |
-| Restore online | Plan, Reihenfolge | prüft jede Anlage (Suffix, keine neuen Rechte), Restore-Journal | legt Netze, Volumes, Container an, schreibt Volume-Dateien im Ziel-Namespace |
+| Plugin-Zeile auswerten | Baum, Manifest | Zeile prüfen, Konto gegen Kontopolicy, Grants und Plugin-ID prüfen | – |
+| Inventar, Inspect, Zusammenhänge | ordnet die gelieferte Menge in den Baum | berechnet die maßgebliche Objektmenge (V-17), erzeugt bereinigte Dokumente über eine Positivliste (V-6) | ruft `podman … --format json` mit fester Argumentliste |
+| Quadlet, systemd | ordnet zu | prüft Pfade gegen Quadlet-Suchpfade; ruft `systemctl --user show` mit fester Property-Liste als Konto-UID außerhalb des Namespace (V-8) | `quadlet -dryrun -user` |
+| Volume-Daten, Layer | nimmt Einträge per `source_ref` auf, bestimmt die Reihenfolge | liest Bytes **und** Attribute selbst über den Scan-Handle (V-2, V-3), erzeugt `ownership.tsv` | – |
+| Stop/Wiederanlauf | höchstens `member-state` lesend (V-9) | allein: Journal, Lifecycle-Lease, Totmannschalter, Recovery | `podman stop` einfacher Container |
+| Restore online | Plan, Reihenfolge | prüft jede Anlage (Suffix, keine neuen Rechte), Attribute aus dem Strom und `ownership.tsv` (V-9), Restore-Journal | legt Netze, Volumes, Container an, schreibt Volume-Dateien im Ziel-Namespace |
 
 **Rootless** (`user=<konto>`): `ofd` prüft Konto, `/etc/subuid` und
-`/etc/subgid`, legt den User-Namespace an und schreibt `uid_map`/`gid_map`
-selbst als root, bevor der Broker als Konto-UID startet (Abschnitt „Broker“).
-Der Broker ist im Namespace UID 0 und hat Rechte nur über die IDs des Kontos,
-genau wie `podman unshare` [S §2, K §3.1]. Lifecycle-Aufrufe gehen über den
-Benutzermanager des Kontos.
+`/etc/subgid` und legt den User-Namespace als root an, bevor der Broker als
+Konto-UID darin startet (Abschnitt „Broker und Rootful-Backend“). Der Broker
+ist im Namespace UID 0 und hat Rechte nur über die IDs des Kontos, genau wie
+`podman unshare` [S §2, K §3.1]. Lifecycle-Aufrufe gehen über den
+Benutzermanager des Kontos, außerhalb des Namespace (V-8).
 
 **Rootful** (`user=root`, Nutzer, 19.11.2026): kein Brokerprozess. Das
 Rootful-Backend ist Teil des signierten `ofd`-Releases (nicht des
 Plugin-Pakets) und implementiert dieselben Operationen mit fester Logik:
 `podman` und `/usr/libexec/podman/quadlet -dryrun` als root mit fester
-Argumentliste und leerer Umgebung, `systemctl` gegen den Systemmanager,
-Layer-Rekonstruktion aus `/var/lib/containers/storage` und Volume-Daten per
-`openat2` mit echten Host-IDs. Begründung: rootful Storage (0700 root) und
-`/run/podman/podman.sock` sind root-äquivalent; ein Nicht-root-Broker mit
-Capabilities wäre nur formal nicht root [S §2, A §1, K §3.4]. Kosten:
-Podman-Client-Code im Kern von `ofd`. Begrenzung: keine Shell, kein
-generisches Exec, nur die Operationen der Tabelle im Abschnitt „Broker“,
-nie `--showsecret`, nie `system reset|migrate|renumber`, Programmpfade
-root-eigen und nicht beschreibbar geprüft, JSON-Größen begrenzt.
+Argumentliste und leerer Umgebung, `systemctl` gegen den Systemmanager.
+Begründung: rootful Storage (0700 root) und `/run/podman/podman.sock` sind
+root-äquivalent; ein Nicht-root-Broker mit Capabilities wäre nur formal nicht
+root [S §2, A §1, K §3.4]. Kosten: Podman-Client-Code im Kern von `ofd`.
+Begrenzung: keine Shell, kein generisches Exec, nur die Operationen der
+Tabelle im Abschnitt „Broker und Rootful-Backend“, nie `--showsecret`, nie
+`system reset|migrate|renumber`, Programmpfade root-eigen und nicht
+beschreibbar geprüft, JSON-Größen begrenzt. Kindprozesse mit `close_range`,
+eigener Prozessgruppe und RLIMITs wie in `broker.rs` (V-21).
 
-Vorschlag, offen: Gemeinsamer Code von Broker und Rootful-Backend
-(tar-split-Leser, Inventar-Parser, Zusammenhangs-Algorithmus, Positivliste
-für `CreateCommand`) in einem Crate `onesimus-podman-core`, das `ofd` und
-`onesimus-podman-broker` gleichermaßen einbinden.
+**Bindung an das Plugin** (V-11): Der Podman-Import und das Rootful-Backend
+werden nur für die Plugin-ID `org.onesimus.podman` verknüpft; die Prüfung
+steht fest im Code von `ofd`, zusätzlich zu den Grants. Vorschlag, offen.
+
+Vorschlag, offen: Gemeinsamer Code von Broker und Host (Inventar-Parser,
+Zusammenhangs-Algorithmus, Positivlisten, tar-split-Leser) in einem Crate
+`onesimus-podman-core`, das `ofd` und `onesimus-podman-broker` einbinden.
 
 ### Grants
 
@@ -130,32 +156,51 @@ Muster `postgresql.read`):
 | Grant | erlaubt | rootless | rootful |
 | --- | --- | --- | --- |
 | `podman.inventory` | Engine-Identität, Inventar, Inspect, Quadlet-Quellen, Unit-Eigenschaften | Pflicht | Pflicht |
-| `podman.image.read` | Image-Metadaten und Blobs (`images=blobs`) | bei `images=blobs` | bei `images=blobs` |
-| `podman.volume.read` | Volume-Daten mit erweiterten Attributen | bei `volumes=yes` | bei `volumes=yes` |
-| `podman.lifecycle` | Stop und Wiederanlauf der Writergruppe | bei `consistency=stop` | bei `consistency=stop` |
+| `podman.image.read` | Image-Metadaten und Blobs (`images=blobs`), vom Host gelesen | bei `images=blobs` | bei `images=blobs` |
+| `podman.volume.read` | Volume-Daten mit Attributen, vom Host gelesen | bei `volumes=yes` | bei `volumes=yes` |
+| `podman.lifecycle` | Host stoppt und startet die Writergruppe dieser Zeile | bei `consistency=stop` | bei `consistency=stop` |
 | `podman.restore` | Online-Restore: Netze, Volumes, Images, Pods, Container anlegen, Quadlet stagen | Restore | Restore |
 | `podman.rootful` | Zugriff auf das Rootful-Backend in `ofd` | – | **Pflicht, zusätzlich** |
 
-Das rootful Profil braucht also im Zertifikat `podman.rootful` plus die
-funktionalen Grants des gewünschten Umfangs; für die forgeiec-Sicherung
-(Inspect, Quadlet, Image-Blobs, Stop) sind das `podman.rootful`,
-`podman.inventory`, `podman.image.read` und `podman.lifecycle`, für den
-Restore zusätzlich `podman.restore`. Die lokale Policy kann jeden Grant
-entziehen, z. B. `podman.rootful` auf Hosts ohne rootful Podman. Der Host
-verknüpft den Import nur, wenn mindestens `podman.inventory` gewährt ist, und
-prüft jede Funktion gegen ihren Grant. Fehlt ein Grant, den die Zeile
-braucht (etwa `podman.lifecycle` bei `consistency=stop`), ist das ein
-Planfehler, kein stiller Wechsel zu `crash`.
+Grants sind **keine Auswahl je Job** (V-11): Das Manifest des Plugins fordert
+alle Grants an, die es überhaupt nutzen kann; die lokale Policy schränkt je
+Host ein, z. B. `podman.rootful` auf Hosts ohne rootful Podman. Wer
+`podman.restore` entzieht, kann auf diesem Host nur `restore_mode=files`
+nutzen. Der Host verknüpft den Import nur, wenn mindestens `podman.inventory`
+gewährt ist, und prüft jede Funktion gegen ihren Grant. Fehlt ein Grant, den
+die Zeile braucht (etwa `podman.lifecycle` bei `consistency=stop`), ist das
+ein Planfehler, kein stiller Wechsel zu `crash`; bei `consistency_scope=job`
+fällt diese Prüfung in den Vorlauf vor dem ersten Stop (V-5).
+
+**Offen (V-11):** Das Signierzertifikat gewährt seine Capabilities heute jeder
+seiner Plugin-IDs (`verify`: Capability ∈ `chain.grants.capabilities`). Ein
+Suite-Zertifikat macht `podman.rootful` damit für jedes Plugin anforderbar,
+das danach fragt. Die feste Bindung an `org.onesimus.podman` (oben) schließt
+das für die Podman-Grants. Die allgemeine Lösung, Grants je Plugin-ID im
+Zertifikat, gehört in die [Signier-Infrastruktur](SIGNIER-INFRASTRUKTUR.md)
+und ist dort offen.
+
+### Vertragsversion
+
+`FileEntry` v2 (Abschnitt „Attribute“) braucht `api_version` 2. Heute prüft
+`verify` Gleichheit mit `API_VERSION = 1`; ein Plugin mit 2 scheitert daher,
+ebenso jedes Plugin mit 1 nach einem Wechsel (V-16). Vorschlag, offen: `ofd`
+akzeptiert eine Menge unterstützter Versionen (`{1, 2}`); das
+PostgreSQL-Plugin bleibt bei 1, Podman verlangt 2. Der Import heißt nach dem
+vorhandenen Muster `onesimus:filed-plugin/podman`, die Welt `podman-plugin`;
+`link_brokers` (heute eine Capability je Import, fest `postgresql.read`) wird
+auf Grants je Funktionsgruppe umgebaut (V-16).
 
 ### Kontopolicy
 
 Welche Konten gesichert werden dürfen, legt der Administrator in einer
 root-eigenen Kontopolicy fest (Vorschlag, offen: eigene Datei neben der
 `Plugin Policy`, weil deren Format unbekannte Felder ablehnt). Inhalt je
-Konto: Name und UID, erlaubte Storage-Domänen, `rootful: true` nur für
-`root`, `volume_bind_roots` (erlaubte `device`-Präfixe für `o=bind`-Volumes),
-erlaubte Registries für den Restore per Pull. Ein Konto, das nur die
-Discovery kennt, ist nicht freigegeben.
+Konto: Name und UID, erlaubte Storage-Domänen mit `graphroot` (realer Pfad),
+`rootful: true` nur für `root`, `volume_bind_roots` (erlaubte
+`device`-Präfixe für `o=bind`-Volumes beim Sichern), erlaubte Registries für
+den Restore per Pull. Ein Konto, das nur die Discovery kennt, ist nicht
+freigegeben.
 
 ## Erkennung der Konten
 
@@ -169,11 +214,18 @@ Indizien ohne Inhalte zu lesen und ohne Kontowechsel:
 | --- | --- | --- |
 | conmon-Prozess | `/proc`, Host-UID, Executable über Device/Inode | nein |
 | Speicherort aus conmon | `--exit-command-arg --root/--runroot/--tmpdir/--volumepath/--db-backend` in `/proc/<pid>/cmdline`; vom Benutzer bestimmt, nur Hinweis, Pfade müssen der UID gehören, sonst `suspicious` | – |
-| Storage | `stat` auf `<home>/.local/share/containers/storage/db.sql` bzw. `bolt_state.db`, rootful `/var/lib/containers/storage` | ja |
-| Quadlet-Orte | `/etc/containers/systemd/users/<UID>/`, `<home>/.config/containers/systemd/` | ja (Units) |
+| Storage | `db.sql` bzw. `bolt_state.db` unter `<home>/.local/share/containers/storage`, rootful `/var/lib/containers/storage` | ja |
+| Quadlet-Orte | `/etc/containers/systemd/users/<UID>/`, `<home>/.config/containers/systemd/` (`readdir`) | ja (Units) |
 | Linger | `/var/lib/systemd/linger/<name>` | Hinweis |
 | Sub-IDs | `/etc/subuid`, `/etc/subgid` | Hinweis |
 | Laufzeitreste | `/run/user/<uid>/libpod`, `/tmp/storage-run-<uid>` | seit dem Boot benutzt |
+
+Zugriff als root in Verzeichnissen der Konten (V-15): nur `lstat` bzw.
+`openat2(RESOLVE_NO_SYMLINKS)`, nie einem Symlink folgen, Zeitlimit je
+Zugriff (Automount- und NFS-Homes), Konfigurationsdateien der Konten
+(`storage.conf`, `containers.conf`) werden **nie** als root ausgewertet. Für
+abweichende Speicherorte gelten nur conmon-Hinweis und der Eintrag des
+Administrators in der Kontopolicy.
 
 Zustände: `discovered_unconfirmed` (Discovery) → `confirmed_podman` erst durch
 den Broker des freigegebenen Kontos bzw. das Rootful-Backend
@@ -183,7 +235,8 @@ DB- und Netz-Backend, ID-Mappings, Version). Die Registry hält
 zur Identität, weil sich mehrere Speicher eines Kontos `tmpdir` und
 Lock-Tabelle teilen [K §0]. Eine UID mit mehreren Speichern ergibt mehrere
 Domänen. Bestätigte Konten werden auch ohne aktuellen conmon-Fund weiter
-inventarisiert.
+inventarisiert. Der graphroot, den der Broker meldet, muss mit Pfad und Inode
+dem Eintrag der Kontopolicy entsprechen; sonst Planfehler.
 
 Nicht freigegebene Konten werden angezeigt, nie heimlich gesichert. Beispiel
 forgeiec.io: `www-data` (Matomo, vermutlich Compose) mit Linger, Sub-IDs,
@@ -212,20 +265,20 @@ Plugin = "podman:user=root:quadlet=tapir-*:images=blobs"
 | Schlüssel | Werte | Vorgabe | Bedeutung |
 | --- | --- | --- | --- |
 | `user` | Kontoname, UID, `root` | – (Pflicht) | Konto der Sicherung; muss in der Kontopolicy freigegeben sein. `root` ist das rootful Profil. |
-| `pods`, `containers`, `quadlet` | Namen oder Globs | – | genau eine Auswahl ist Pflicht; `*` wählt alles dieses Kontos. Ohne Auswahl Planfehler, damit eine leere Zeile nicht ungewollt alles sichert. |
-| `exclude` | Namen oder Globs | – | von der Auswahl abgezogen; schließt keine automatisch erkannten Abhängigkeiten aus. |
+| `pods`, `containers`, `quadlet` | Namen oder Globs | – | **mindestens einer** der drei Schlüssel ist Pflicht, mehrere werden vereinigt (V-18); `*` wählt alles dieses Kontos. Ohne Auswahl Planfehler, damit eine leere Zeile nicht ungewollt alles sichert. |
+| `exclude` | Namen oder Globs | – | von der Auswahl abgezogen; schließt keine automatisch erkannten Abhängigkeiten aus und **keine Mitglieder eines Pods**, der wegen „Pods immer ganz“ dazugehört (Manifest: `exclude_overridden_by_pod`, V-18). |
 | `volumes` | `yes`, `no` | `yes` | Named Volumes der Auswahl. Bind Mounts nie, die sichert der FD (eigene `File =`-Zeile). |
 | `images` | `reference`, `blobs` | `reference` | `reference`: Image-Inspect im Baum, Restore per Pull. `blobs`: zusätzlich Config, Original-Manifest, Index und Layer als einzelne Dateien, je DiffID einmal. |
 | `networks` | `yes`, `no` | `yes` | die verwendeten Netze als Inspect-Daten plus Zuordnung je Container. |
-| `quadlet_sources` | `yes`, `no` | `yes` | Quadlet-Quellen, Quadlet-Drop-ins, systemd-Drop-ins und verwandte lokale Units (z. B. `*.target`). |
+| `quadlet_sources` | `yes`, `no` | `yes` | Quadlet-Quellen, Quadlet-Drop-ins, systemd-Drop-ins und verwandte lokale Units (z. B. `*.target`); bei `env=omit` mit geschwärzten Werten. |
 | `env` | `omit`, `keep` | `omit` (Nutzer, 19.11.2026) | `omit`: nur Namen und Verweise auf EnvironmentFiles. `keep`: Werte nur auf dem Volume. |
 | `consistency` | `stop`, `crash` | `stop` | `stop`: autorisierter Stop der Writergruppe mit Journal. `crash`: Kopie im laufenden Betrieb, im Manifest als abgeschwächt vermerkt. |
 | `consistency_scope` | `job`, `plugin` | `job` (Nutzer, 19.11.2026) | `job`: Stop vor der ersten Datei des Jobs, Wiederanlauf nach der letzten; umfasst die FD-Dateisicherung der Bind Mounts. `plugin`: nur für die Dateien dieser Zeile. |
 | `stop_timeout` | Sekunden | `StopTimeout` bzw. `TimeoutStopSec` | Obergrenze je Unit oder Container. |
-| `max_downtime` | Sekunden | keine | überschritten: Abbruch und Wiederanlauf (eigenes Zeitbudget). |
+| `max_downtime` | Sekunden | **7200** (Vorschlag, offen, V-4) | Obergrenze der Ausfallzeit ab dem ersten Stop; bei `consistency_scope=job` Pflicht, `0` (unbegrenzt) unzulässig. Überschritten: Cancel und Wiederanlauf durch `ofd`, fällt `ofd` aus, durch den Totmannschalter. |
 | `clean_exit_codes` | Liste | `0,143` | Exit-Codes, die als sauberer Stop gelten. |
 | `on_unclean` | `fail`, `warn` | `fail` | `fail`: Job-Fehler, Daten trotzdem gesichert und im Manifest als `crash` markiert. |
-| `external` | `warn`, `error` | `warn` | Bind-Quellen und EnvironmentFiles, die keine `File =`-Zeile des FileSets abdeckt. |
+| `external` | `warn`, `error` | `warn` | Bind-Quellen, EnvironmentFiles und geschwärzte Quadlet-Quellen, die keine `File =`-Zeile des FileSets abdeckt. |
 | `secrets` | `reference` | `reference` | Secrets nur als Verweis, nie ihr Inhalt; kein anderer Wert zulässig. |
 | `endpoint` | – | – | erst Remote (P4); im MVP unzulässig. |
 
@@ -244,19 +297,20 @@ Restore-Parameter (`pluginoptions=` des Restore-Jobs), Vorschlag, offen:
 
 | Schlüssel | Werte | Vorgabe | Bedeutung |
 | --- | --- | --- | --- |
-| `restore_mode` | `files`, `online` | `files` | `files`: Baum unter `Where`, ohne Plugin-Code. `online`: gestagter Restore in neue, gestoppte Ressourcen (im Plan „stage“). In `ofd` heißt der Online-Restore bereits `restore_mode=online` (`restore.rs`); `stage` als Synonym ist offen. |
+| `restore_mode` | `files`, `online` | `files` | `files`: Baum unter `Where`, ohne Plugin-Code. `online`: gestagter Restore in neue, gestoppte Ressourcen. Der Name `online` gilt in `ofd` bereits (`restore.rs`); kein Synonym `stage`. |
 | `target_user` | Kontoname, UID, `root` | Original | Zielkonto; muss freigegeben sein; `root` braucht `podman.rootful`. |
 | `suffix` | Text | `-restored` | Namenszusatz aller neuen Objekte. |
 | `networks` | `create`, `existing` | `create` | fehlende Netze anlegen bzw. nur vorhandene gleichen Namens mit passendem Subnetz nutzen. |
 | `network_subnet` | `keep`, `auto` | `keep` | `keep` mit Überlappung: Planfehler. `auto`: Podman wählt, statische IPs entfallen (Warnung). |
 | `restore_ip` | `auto`, `keep`, `drop` | `auto` | `auto`: statische IP/MAC nur, wenn als statisch belegt. |
 | `ports` | `keep`, `drop` | `keep` | Portfreigaben übernehmen; Konflikte stehen im Plan. |
-| `bind_map` | `<alt>=<neu>`, mehrfach | – | Bind Mounts nur über diese Zuordnung, sonst Planfehler. |
-| `image_pin` | `yes`, `no` | `yes` bei veränderlichem Tag | Quadlet-Staging bekommt ein Drop-in `Image=<name>@<digest>` mit dem im Ziel tatsächlich vorhandenen Digest. |
+| `bind_map` | `<alt>=<neu>`, mehrfach | – | Bind Mounts von Containern **und** Hostpfade in Quadlet-`Volume=`/`Mount=` nur über diese Zuordnung, sonst Planfehler; die Identität `<pfad>=<pfad>` ist zulässig, muss aber ausdrücklich angegeben sein (V-13). |
+| `image_pin` | `yes`, `no` | `yes` bei veränderlichem Tag | Quadlet-Staging bekommt ein Drop-in `Image=<name>@<digest>` mit dem Digest, der im Ziel tatsächlich vorhanden ist (Abschnitt Images). |
 | `image_digest` | `new`, `original` | `new` | `original` nur mit zertifizierter Version (Abschnitt Images). |
 | `selinux` | `relabel`, `keep`, `drop` | `relabel` | `relabel`: Label nicht schreiben, Podman labelt über `:z`/`:Z`. |
-| `files_owner` | `ns`, `host:<konto>` | `ns` | nur `restore_mode=files`, siehe Abschnitt Attribute. |
-| `files_special` | `drop`, `keep` | `drop` | nur `restore_mode=files`: setuid/setgid und `security.capability` aus Volume-Daten. |
+
+Die früheren Schalter `files_owner` und `files_special` entfallen: Der Strom
+enthält Host-IDs und nie Sonderbits oder Capabilities (V-1, V-12).
 
 ## Dateibaum und Manifest
 
@@ -269,25 +323,25 @@ zusätzlicher Container um andere Dateien [S §1, A §4].
 
 ```text
 /@podman/<domäne>/engine/info.json                     gefiltertes podman info/version
-/@podman/<domäne>/containers/<name>/inspect.json       Inspect, Env-Werte nach env=
-/@podman/<domäne>/containers/<name>/create-command.json CreateCommand, falls vorhanden; Podman-Optionen getrennt, -e-Werte nach env=
-/@podman/<domäne>/containers/<name>/spec.json          podman generate spec, Env-Werte nach env=
+/@podman/<domäne>/containers/<name>/inspect.json       Inspect nach Positivliste, Env nach env=
+/@podman/<domäne>/containers/<name>/create-command.json CreateCommand geparst (Positivliste), Env nach env=
+/@podman/<domäne>/containers/<name>/spec.json          podman generate spec nach Positivliste, Env nach env=
 /@podman/<domäne>/containers/<name>/env.json           Namen, Herkunft, EnvironmentFiles; Werte nur bei env=keep
-/@podman/<domäne>/containers/<name>/systemd.json       Unit-Eigenschaften bei PODMAN_SYSTEMD_UNIT
+/@podman/<domäne>/containers/<name>/systemd.json       Unit-Eigenschaften (feste Property-Liste) bei PODMAN_SYSTEMD_UNIT
 /@podman/<domäne>/pods/<name>/inspect.json, spec.json
 /@podman/<domäne>/networks/<netz>/inspect.json         network inspect ohne "containers"
 /@podman/<domäne>/networks/<netz>/used-by.json         Zuordnung je Container (abgeleitet)
 /@podman/<domäne>/volumes/<vol>/inspect.json
-/@podman/<domäne>/volumes/<vol>/data/<pfad>            Dateien des Volumes; data/ trägt den Stat der Volume-Wurzel
-/@podman/<domäne>/volumes/<vol>/ownership.tsv          ns-UID/GID, Sonderbits und Caps je Pfad (für restore_mode=files)
+/@podman/<domäne>/volumes/<vol>/data/<pfad>            Dateien des Volumes, Host-Sicht, ohne Sonderbits/Caps; data/ trägt den Stat der Volume-Wurzel
+/@podman/<domäne>/volumes/<vol>/ownership.tsv          vom Host erzeugt, nach data/: Maps, ns-Sicht, Sonderbits, Caps, ACL
 /@podman/<domäne>/images/<image-id>/inspect.json       Namen stehen im Manifest
 /@podman/<domäne>/images/layers.json                   je DiffID: Layer-ID, compressed-diff-digest, Größen, uid/gidset
 /@podman/<domäne>/images/oci/oci-layout                nur images=blobs
 /@podman/<domäne>/images/oci/index.json                erzeugtes Manifest je Image, ref.name = name:tag
 /@podman/<domäne>/images/oci/blobs/sha256/<digest>     Config (= Image-ID), Original-Manifest, Original-Index, erzeugtes Manifest, Layer (= DiffID)
 /@podman/<domäne>/secrets/<name>/inspect.json          nur Metadaten
-/@podman/<domäne>/quadlet/<suchpfad-kürzel>/<rel.pfad> z. B. etc/web.container, etc/web.container.d/10.conf
-/@podman/<domäne>/systemd/<unit>                       verwandte Nicht-Quadlet-Units, z. B. *.target
+/@podman/<domäne>/quadlet/<suchpfad-kürzel>/<rel.pfad> z. B. etc/web.container; bei env=omit Vorlage mit Platzhaltern
+/@podman/<domäne>/systemd/<unit>                       verwandte Nicht-Quadlet-Units, z. B. *.target; Drop-ins bei env=omit geschwärzt
 /@podman/<domäne>/manifest.json                        zuletzt
 ```
 
@@ -297,10 +351,11 @@ zusätzlicher Container um andere Dateien [S §1, A §4].
   zeigen auf dieselbe ID [A §4].
 - `images/oci/` ist ein gültiges OCI-Layout; nach `restore_mode=files` genügt
   `podman pull oci:<Where>/@podman/<domäne>/images/oci:<name>` ohne
-  Plugin-Code [S §1, K §2.3].
-- Alle Dateien außer den Volume-Daten haben synthetische Attribute (Regel
-  S-13, Abschnitt Attribute); Blobs: Modus 0444, `mtime = ctime =` `created`
-  der Layer, vorbereitet für Accurate [S §4].
+  Plugin-Code; Pfade mit `@` und Ref-Namen mit `:` funktionieren
+  [S §1, K §2.3, Praxis 1].
+- Alle Dateien außer den Volume-Daten haben synthetische Attribute nach S-13;
+  Blobs: Modus 0444, `mtime = ctime =` `created` der Layer, vorbereitet für
+  Accurate [S §4]. `ownership.tsv`: synthetisch, Modus 0600.
 
 ### manifest.json
 
@@ -313,15 +368,18 @@ Restore-Reihenfolge [A §4]. Ausschnitt für forgeiec.io:
   "format": "onesimus-podman/1",
   "domain": {"host": "forgeiec.io", "host_uid": 0, "user": "root", "domain_id": "sha256(host|uid|graphroot|inode|runroot|tmpdir)",
              "engine": {"version": "5.4.2", "network_backend": "netavark", "db_backend": "sqlite", "graph_driver": "overlay",
-                        "graphroot": "/var/lib/containers/storage", "rootless": false, "uid_map": null, "gid_map": null}},
-  "selection": {"quadlet": ["tapir-*"], "env": "omit", "images": "blobs", "consistency": "stop", "consistency_scope": "job"},
+                        "cgroup_manager": "systemd", "graphroot": "/var/lib/containers/storage", "rootless": false,
+                        "uid_map": null, "gid_map": null}},
+  "selection": {"quadlet": ["tapir-*"], "env": "omit", "images": "blobs", "consistency": "stop", "consistency_scope": "job",
+                "max_downtime": 7200},
   "objects": [
     {"kind": "quadlet", "id": "/etc/containers/systemd/tapir-ackervielfalt-web.container", "generated_unit": "tapir-ackervielfalt-web.service",
-     "fingerprint": "sha256:…", "reason": "selected"},
+     "fingerprint": "sha256:…", "redacted": false, "reason": "selected"},
     {"kind": "container", "id": "<64hex>", "name": "tapir-ackervielfalt-web", "state": "running",
      "restore_strategy": "quadlet", "lossy_fields": ["RestartPolicy"], "env_names": ["SECRET_KEY", "…"],
      "reason": "created_by:quadlet:tapir-ackervielfalt-web.service"},
     {"kind": "image", "id": "8efa6985d967…", "names": ["ghcr.io/…/wirgarten-tapir:latest"], "image_digest": "sha256:b8bb8759…",
+     "restore_digest": "sha256:<sha256 des erzeugten Manifests>",
      "diff_ids": ["sha256:…"], "platform": "linux/amd64", "mode": "blobs", "mutable_tag": true, "used_by": ["<web>", "<worker>", "<beat>"]},
     {"kind": "systemd_unit", "id": "tapir-ackervielfalt.target", "source": "/etc/systemd/system/tapir-ackervielfalt.target", "reason": "PartOf"}
   ],
@@ -338,9 +396,11 @@ Restore-Reihenfolge [A §4]. Ausschnitt für forgeiec.io:
   "dependents_not_selected": [],
   "writer_groups": [{"members": ["tapir-ackervielfalt-web.service", "tapir-ackervielfalt-worker.service", "tapir-ackervielfalt-beat.service"],
                      "shared": ["/var/lib/tapir/ackervielfalt"], "stop_order": ["web", "worker", "beat", "tapir-redis"]}],
-  "restore_order": ["network", "volume", "image", "secret_ref", "pod", "container", "quadlet"],
+  "restore_order": ["network", "volume", "image", "secret_ref", "pod", "container", "quadlet", "systemd_unit"],
   "exclusions": ["writable_layer"],
+  "rejected": [],
   "consistency_result": "clean",
+  "downtime_seconds": 0,
   "warnings": ["mutable_tag:ghcr.io/…:latest"],
   "discovery": {"source": "registry", "conmon_seen": true, "incomplete": []}
 }
@@ -350,63 +410,119 @@ Restore-Reihenfolge [A §4]. Ausschnitt für forgeiec.io:
 
 ### Container: Inspect und Quellen-Rangfolge
 
-Je Container nur Inspect-Daten, kein Container-Dateisystem (Nutzer,
-19.11.2026). Inspect zeigt aber den *resultierenden* Zustand: Vorgaben aus
-Image und Laufzeit sind eingemischt, manches fehlt ganz (statisch oder
-dynamisch vergebene IP/MAC, Ziel von Env- und Mount-Secrets, pasta-Optionen,
-`--userns keep-id` aufgelöst, Image- und Container-Labels vermischt,
-Quadlet `Restart=always` erscheint als `RestartPolicy: no`) [A §2].
-`podman container clone` und `kube generate` verlieren noch mehr und
-scheiden aus [A §2]. Deshalb gilt für den Restore eine feste
-Quellen-Rangfolge; das Manifest nennt je Container die gewählte
-`restore_strategy`:
+Je Container nur Inspect-Daten und Quellen, kein Container-Dateisystem
+(Nutzer, 19.11.2026). Für den Neuaufbau gilt eine feste Rangfolge nach der
+Verlusttreue, gemessen in Praxis 3; das Manifest nennt je Container die
+gewählte `restore_strategy`:
 
 1. **`quadlet`**: Quadlet-Datei samt Drop-ins, wenn der Container das Label
    `PODMAN_SYSTEMD_UNIT` trägt und die Quelle gefunden wurde. Sie ist die
    Quelle der Wahrheit, weil Quadlet den Container bei jedem Start neu
-   erzeugt (`--rm --replace`).
+   erzeugt (`--rm --replace`). Auch Quadlet-Container haben ein
+   `CreateCommand` (die `podman run`-Zeile der Unit, Praxis 3); es wird mit
+   gesichert und dient beim Restore als Gegenprobe.
 2. **`create-command`**: `Config.CreateCommand` bei CLI-erzeugten
-   Containern, geparst gegen eine **Positivliste** der `podman create`-Optionen.
-   Podman-Optionen (`--root`, `--runroot`, `--tmpdir`, `--replace`, `--rm`,
-   `--cidfile`) werden verworfen, Namen, Netze, Volumes und Pod beim Restore
-   umgeschrieben. Eine unbekannte Option ist ein Planfehler, nie ein rohes
-   Replay. API- oder Compose-erzeugte Container haben kein `CreateCommand`
-   [A §1].
-3. **`inspect`**: `spec.json` aus `podman generate spec` mit der Liste der
-   verlorenen Felder (`lossy_fields`) im Manifest und im Restore-Plan.
+   Containern, fast verlustfrei: Neu angelegt aus dem `CreateCommand`
+   unterschied sich im Versuch nur der automatische Alias (Praxis 3). Geparst
+   gegen eine **Positivliste** der `podman create`-Optionen; Podman-Optionen
+   (`--root`, `--runroot`, `--tmpdir`, `--replace`, `--rm`, `--cidfile`)
+   werden verworfen, Namen, Netze, Volumes und Pod beim Restore umgeschrieben.
+   Eine unbekannte Option ist ein Planfehler, nie ein rohes Replay. API- oder
+   Compose-erzeugte Container haben kein `CreateCommand` (bestätigt, Praxis 3).
+3. **`spec`**: `spec.json` aus `podman generate spec`, **ergänzt** um die
+   Felder, die Spec verliert, aus Inspect (Positivliste); fehlt eine nötige
+   Angabe in beiden, ist das ein Planfehler.
+
+Was die Quellen verlieren (Praxis 3, ersetzt die frühere Liste):
+
+| Quelle | verliert | behält |
+| --- | --- | --- |
+| Inspect | statische IP/MAC (`NetworkSettings` leer), Secret-Ziele (`Config.Secrets` nur Name/ID), pasta-Optionen (`NetworkMode: "pasta"`); Quadlet `Restart=always` erscheint als `RestartPolicy: no` | `keep-id` als Annotation `io.podman.annotations.userns`, Sicherheitsfelder, Healthcheck, Hostname, DNS |
+| `generate spec` | Annotations, Hostname, WorkingDir, StopSignal, StopTimeout, Healthcheck, CapAdd, CapDrop, Dns, ExtraHosts, ReadonlyRootfs, `no-new-privileges`, Ulimits, LogConfig, Init, Secret-Name (`Source: ""`) | statische IP/MAC, pasta-Optionen, Secret-Ziel, `userns: keep-id`, Ports, Mounts mit `Z`, Restart-Policy, Ressourcenlimits |
+
+Spec schleppt außerdem die konkreten `idmappings` des Quellhosts und den
+automatischen Alias des Originals mit; beides verwirft der Host. Bekannter
+Fehler (Podman 5.4.2): `generate spec` scheitert bei
+`--secret …,type=env` („cannot unmarshal object … secret_env“). Solche
+Container brauchen `quadlet` oder `create-command`, sonst Planfehler
+(Praxis 3).
+
+**Sicherheitsfelder als Pflichtvergleich** (Praxis 3): CapAdd, CapDrop,
+`no-new-privileges`, ReadonlyRootfs, Ulimits, SecurityOpt (seccomp, AppArmor,
+Label), Devices, Privileged sowie die Namespace-Modi (pid, ipc, net, uts,
+userns, cgroupns). Der Host vergleicht sie zweimal mit dem Original-Inspect:
+im Restore-Plan für die berechnete Anlage und nach dem Anlegen (vor jedem
+Start) am Inspect des neuen Containers. **Hat der Restore mehr Rechte als das
+Original, ist das ein Planfehler**; nach dem Anlegen bedeutet es Rückbau
+dieses Containers. Schon eine verlorene Einschränkung (fehlendes CapDrop,
+fehlendes `no-new-privileges`, `ReadonlyRootfs` false statt true, höhere
+Ulimits) zählt als „mehr Rechte“.
 
 Laufzeitfelder werden beim Neuaufbau nie übernommen: `Id`, `Created`,
 `State`, `Pid`, Pfade unter `StaticDir`, `GraphDriver`, `NetworkSettings`
 (Istwerte), `EffectiveCaps`, `Mounts[].Source` bei Volumes, automatisch
-vergebene Aliase [A §2]. Die libpod-Datenbank (`db.sql`) wäre die einzige
-verlustfreie Quelle, ist aber intern und unversioniert; das Plugin baut nicht
-darauf [A §2].
+vergebene Aliase, Quell-`idmappings` [A §2, Praxis 3]. Die libpod-Datenbank
+(`db.sql`) ist intern und unversioniert; das Plugin baut nicht darauf [A §2].
+`podman container clone` und `kube generate` verlieren mehr und scheiden aus
+[A §2].
 
-**Inspect vor dem Stop**: Quadlet-Container sind nach `systemctl stop`
-gelöscht [K §1.1, A §5]. Inspect, `generate spec` und Unit-Eigenschaften
-werden deshalb im Zustand `PREPARED` erfasst, vor jeder Mutation. Bei
-`consistency_scope=job` hält der Host sie bis zur Plugin-Sitzung in einem
-begrenzten Puffer.
+**Vor dem Stop** (Praxis 4, V-5): Quadlet-Container sind nach `systemctl
+stop` gelöscht [K §1.1, A §5]. Inventar (`ps -a`, `pod ps`, …), Inspect,
+`CreateCommand`, `generate spec` und Unit-Eigenschaften werden deshalb im
+Zustand `PREPARED` erfasst, vor jeder Mutation. Bei
+`consistency_scope=job` hält der Host diesen Schnappschuss bis zur
+Plugin-Sitzung in einem begrenzten Puffer; der Gast arbeitet auf dem
+Schnappschuss, nicht auf einem neuen Inventar.
 
 ### Umgebungsvariablen
 
 Inspect-Daten enthalten Klartext-Kennwörter: Werte aus `--env-file` bzw.
 `EnvironmentFile=` stehen in `Config.Env` (forgeiec: `KC_DB_PASSWORD`,
-`SECRET_KEY` u. a.; Werte nicht ausgegeben) [A §2, K §3.1].
+`SECRET_KEY` u. a.; Werte nicht ausgegeben) [A §2, K §3.1]. Werte stehen an
+mehr Stellen als zuerst geplant (V-6, Praxis 5).
 
-- **`env=omit`** (Vorgabe, Nutzer, 19.11.2026): Der **Host** entfernt die
-  Werte, bevor der Gast die Daten sieht: in `Config.Env` von Inspect und
-  Spec, in `-e K=V` des `CreateCommand` (wird `-e K`) und in `ExecStart` des
-  Quadlet-Dryruns. `env.json` enthält je Variable Name und Herkunft (`image`,
-  wenn der Wert dem Image-Env gleicht, was der Host vergleicht, ohne ihn
-  weiterzugeben; `podman`; `user`) sowie die Verweise auf EnvironmentFiles
-  (Pfad, Eigentümer, Modus, vorhanden, `covered_by_fd`). Der Inhalt der
-  EnvironmentFiles wird nie vom Broker gelesen; der FD sichert die Dateien
-  normal über eine `File =`-Zeile. Beim Restore listet der Plan Variablen
-  ohne Wert, die weder aus dem Image noch aus einer EnvironmentFile kommen.
-- **`env=keep`** (Option): Werte stehen in `env.json`, Inspect und Spec, nur
-  auf dem Volume; nie in Joblog, Katalog oder `FileEntry.attributes`.
-  Meldungen nennen nur Namen. Das Manifest vermerkt `env_values: keep`.
+**`env=omit`** (Vorgabe, Nutzer, 19.11.2026). Der Host übernimmt aus den
+Antworten des Brokers bzw. des Rootful-Backends **nur Felder einer
+Positivliste** (V-6), statt Werte aus der vollen Antwort herauszufiltern.
+Unbekannte Felder entfallen; die Liste gehört zum zertifizierten
+Versionsprofil. Erst das Ergebnis sieht der Gast.
+
+| Ort | Behandlung bei `env=omit` |
+| --- | --- |
+| `Config.Env` (Inspect), `env` (Spec) | nur Namen |
+| `CreateCommand` (Inspect) und `containerCreateCommand` (Spec), auch von Quadlet-Containern | nur geparst gespeichert; jede Env-Form (`-e K=V`, `-eK=V`, `--env K=V`, `--env=K=V`) wird zum Namen in `env.json`, `--env-file <pfad>` bleibt Verweis |
+| Quadlet-Quelle und Quadlet-Drop-ins `Environment=` | Werte geschwärzt, Datei wird **Vorlage mit Platzhaltern** (`Environment=K=@@ONESIMUS_ENV:K@@`), Manifest `redacted: true` |
+| systemd-Drop-ins `[Service] Environment=` (unter `systemd/`) | ebenso geschwärzt |
+| `quadlet -dryrun` (`ExecStart … --env K=V`) | nur zur Zuordnung im Host verwendet, nie gespeichert |
+| `systemctl show` (`unit-info`) | feste Property-Liste **ohne** `Environment`, `ExecStart*`, `ExecStop*`, `SetCredential*`, `LoadCredential*`; `EnvironmentFiles` nur als Pfade |
+| Healthcheck (`Config.Healthcheck.Test`), `Cmd`, `Entrypoint`, `Args`, Quadlet `Exec=`, Labels, Annotations | **Wertabgleich**: Kommt ein Env-Wert des Containers darin wörtlich vor (ab 4 Zeichen), ersetzt der Host ihn durch `${K}`; der Wert verlässt den Host nie. Andere Literale bleiben, weil der Restore sie braucht (Vorschlag, offen; siehe Nutzerentscheidungen) |
+| stderr von `podman`/`systemctl` | nie roh in Joblog oder Manifest, nur feste Meldungstexte mit Exit-Code (V-6) |
+| erzeugte Unit unter `/run/…/systemd/generator/` | wird nicht gelesen |
+
+`env.json` enthält je Variable Namen und Herkunft: `image` (der Host
+vergleicht mit dem Image-Env, ohne den Wert weiterzugeben), `envfile` (rootful
+liest der Host nur die **Namen** aus root-eigenen, nicht fremd beschreibbaren
+EnvironmentFiles; rootless nie), sonst `unknown`, denn Werte aus
+`--env-file` stehen in `Config.Env` ununterscheidbar (Praxis 5). Dazu die
+Verweise auf EnvironmentFiles (Pfad, Eigentümer, Modus, vorhanden,
+`covered_by_fd`). Den Inhalt der EnvironmentFiles liest der Broker nie; der FD
+sichert sie über eine `File =`-Zeile. Den Originaltext geschwärzter
+Quadlet-Quellen deckt der FD ab, wenn der Administrator
+`/etc/containers/systemd` als `File =` aufnimmt; fehlt das, meldet
+`external=warn|error` die Quelle.
+
+**Restore ohne Werte** (Praxis 5): `-e K` ohne Wert übernimmt den Wert aus
+der Umgebung des aufrufenden Prozesses oder lässt die Variable weg; die frühere
+Regel „`-e K=V` wird `-e K`“ ist deshalb gestrichen. Variablen ohne Wert
+werden beim Restore **weggelassen** und im Bericht mit Namen genannt;
+`--env-file <pfad>` bzw. `EnvironmentFile=` bleibt Verweis und wirkt im Ziel.
+Eine gestagte Quadlet-Vorlage mit Platzhaltern wird nicht promoviert, solange
+ein Platzhalter offen ist.
+
+**`env=keep`** (Option): Werte stehen in `env.json`, Inspect, Spec und
+Quadlet-Quellen, nur auf dem Volume; nie in Joblog, Katalog oder
+`FileEntry.attributes`. Meldungen nennen nur Namen. Das Manifest vermerkt
+`env_values: keep`.
 
 ### Pods
 
@@ -428,38 +544,54 @@ byte-genau, die Layer aber **nur unkomprimiert** als Verzeichnisbaum plus
 - **`images=blobs`**: Config (= Image-ID), Original-Manifest und -Index
   byte-genau; jede Layer **bit-genau als Stream** aus `tar-split.gz` und dem
   Layer-Verzeichnis rekonstruiert, ohne Zwischenspeicher, Größe vorab bekannt
-  (`diff-size`), SHA-256 beim Lesen mitgerechnet; Abweichung von der DiffID ist
-  ein Fehler und meldet die Layer als beschädigt [S §1]. Benennung nach
-  **DiffID**, je Digest einmal pro Job über alle Objekte der Zeile; die
-  Layer-ID gleicht der DiffID nur bei Basis-Layern, die Zuordnung steht in
+  (`diff-size`), SHA-256 beim Lesen mitgerechnet. Bestätigt für vfs, overlay
+  (rootless nativ) und btrfs mit Whiteouts, Hardlink, Symlink, FIFO, setuid,
+  Sparse-Datei, Name mit 0xff und xattr (Praxis 1). Benennung nach
+  **DiffID**, je Digest einmal pro Job; die Zuordnung zur Layer-ID steht in
   `layers.json` [S §1]. Kein `podman save`: `oci-archive` komprimiert neu,
   `oci-dir --uncompressed` braucht Spool in Imagegröße [S §1, K §2.1].
+- **Wer liest** (V-2, V-10): Die Blobs liest der Host selbst, rootful und
+  rootless, über einen Scan-Handle ab dem Deskriptor des graphroot. Die
+  tar-split-Einträge sind Daten des Kontos: Nutzlast nur über
+  `openat2(RESOLVE_BENEATH|RESOLVE_NO_SYMLINKS|RESOLVE_NO_XDEV)` ab dem
+  Deskriptor des Layer-Verzeichnisses, nur reguläre Dateien, Typ und Größe
+  werden **vor** dem ersten Byte gegen tar-split geprüft. Eine Abweichung
+  meldet die Layer als beschädigt, bevor Daten fließen; die DiffID-Prüfung am
+  Ende bleibt zusätzlich. Der tar-split-Leser ist begrenzt (Eintragsgröße,
+  Anzahl, Namenslänge).
 - Storage-Treiber im MVP: overlay, btrfs, vfs. zfs, `additionalimagestores`
-  und Layer ohne `tar-split.gz` (etwa nach partieller zstd:chunked-Übernahme,
-  Vermutung) sind Planfehler mit Nennung der Layer [S §1].
+  und Layer ohne `tar-split.gz` sind Planfehler mit Nennung der Layer [S §1].
 - Sperren: Lese-Sperren (`fcntl`) auf `storage.lock`, `layers.lock`,
   `images.lock` wie Podman, während des Metadatenlesens und je Layer-Stream
-  [S §1]. Ob ein langer Stream `rmi`/`pull` zu lange blockiert, ist offen;
-  Alternative: nach dem Stream prüfen, ob die Layer noch existiert.
+  [S §1]. Ob ein langer Stream `rmi`/`pull` zu lange blockiert, ist offen.
 
-**Restore** [S §1, A §4, K §2.1]: gleiche Image-ID und gleiche DiffIDs, aber
-ein **neuer Manifest-Digest**, weil die gzip-Bytes nicht reproduzierbar sind
-und Podman beim Import ein neues Manifest schreibt. Geprüft wird deshalb über
-die Kette Original-Manifest-Digest → Config-Digest (= Image-ID) → DiffIDs →
-Layer-Dateien; nur die gzip-Digests im Manifest lassen sich offline nicht
-nachrechnen, das steht so im Manifest.
+**Restore** [S §1, A §4, K §2.1, Praxis 1]: gleiche Image-ID und gleiche
+DiffIDs, aber ein **neuer Manifest-Digest**. Podman übernimmt beim Import aus
+`oci:` das vom Plugin erzeugte Manifest byte-gleich; der Digest im Ziel ist
+`sha256(erzeugtes Manifest)`. Er ist damit **deterministisch und schon beim
+Backup bekannt** und steht als `restore_digest` im Manifest und in
+`images/oci/index.json` (Praxis 1). Geprüft wird über die Kette
+Original-Manifest-Digest → Config-Digest (= Image-ID) → DiffIDs →
+Layer-Dateien; nur die gzip-Digests im Original-Manifest lassen sich offline
+nicht nachrechnen, das steht so im Manifest.
 
+- **Vorhandene Image-ID im Ziel: nicht pullen** (Praxis 1). Ein `pull oci:`
+  in einen Speicher, der das Image schon hat, ändert Digest und RepoDigests
+  des bestehenden Images. Der Restore referenziert dann nur das vorhandene
+  Image; der Original-Digest bleibt auflösbar.
 - `image_digest=new` (Vorgabe): Der Restore-Plan meldet jeden Container und
-  jede Quadlet-Unit, die das Image per `@sha256:` des Originals referenziert.
+  jede Quadlet-Unit, die das Image per `@sha256:` des Originals referenziert,
+  mit dem `restore_digest` als Ersatz.
 - `image_digest=original` (Vorschlag, offen, frühestens P4): Original-Index und
   -Manifest zusätzlich unter ihren Digests einspielen; geht nur über den
-  internen Blob-Info-Cache von c/image (eine `DigestUncompressedPairs`-Zeile je
-  Layer in einem eigenen Cache des Pull-Prozesses, nie im Cache des Kontos),
-  daher nur mit zertifizierter Podman-Version [S §1].
+  internen Blob-Info-Cache von c/image in einem eigenen Cache des
+  Pull-Prozesses, daher nur mit zertifizierter Podman-Version [S §1].
 - `image_pin`: Bei veränderlichen Tags (forgeiec: `:latest`) zieht eine
-  unveränderte Quadlet-Datei ein **anderes** Image. Das Staging legt ein
-  Drop-in `Image=<name>@<digest>` an, mit dem Digest, der im Ziel nach dem
-  Restore tatsächlich vorhanden ist [A §4]. Für veränderliche Tags wird
+  unveränderte Quadlet-Datei ein **anderes** Image [A §4]. Das Staging legt ein
+  Drop-in `Image=<name>@<digest>` an: `restore_digest`, wenn importiert wurde,
+  sonst der Digest des vorhandenen Images. Nachweis in P3, dass Quadlet
+  (`Pull=missing`) diesen lokal vorhandenen Digest ohne Registry auflöst;
+  sonst Pin über die Image-ID (V-13). Für veränderliche Tags wird
   `images=blobs` empfohlen, weil die Registry den alten Digest löschen kann.
 
 ### Netze
@@ -468,36 +600,49 @@ nachrechnen, das steht so im Manifest.
   `/etc/containers/networks/<netz>.json`. Das Standardnetz `podman` ist
   **keine Datei**, sondern wird aus `containers.conf` erzeugt (`created` =
   Abfragezeit); es wird nur referenziert, mit Subnetz [A §3].
-- Gesichert: `network inspect` ohne den Block `containers` (gleich dem
-  Dateiinhalt: Name, ID, Treiber, Interface, Subnetze mit Gateway und
-  Lease-Bereich, IPv6, internal, DNS, Labels, Optionen, IPAM-Optionen).
+- Gesichert: `network inspect` ohne den Block `containers` (Name, ID, Treiber,
+  Interface, Subnetze mit Gateway und Lease-Bereich, IPv6, internal, DNS,
+  Labels, Optionen, IPAM-Optionen).
 - Zuordnung **vom Container her**: `network inspect .containers` listet nur
   laufende, `ps --filter network=` verfehlt `--network container:` [A §3].
   Die gewünschte Zuordnung (Netz, statische IP/MAC, eigene Aliase,
-  Interface-Name, Ports) kommt aus Quadlet `Network=` bzw. `CreateCommand`;
-  ohne beides aus den Istwerten mit `static: unknown`.
-- Nicht gesichert: aardvark-dns, `ipam.db`, `rootless-netns` (Laufzeit).
+  Interface-Name, Ports) kommt aus Quadlet `Network=`, `CreateCommand` oder
+  Spec; Inspect allein kennt keine statischen Angaben (`static: unknown`).
+- Nicht gesichert: aardvark-dns, `ipam.db`, `rootless-netns` (Laufzeit; liegt
+  je runroot, Praxis 7).
 - `host`, `none`, `pasta`, `slirp4netns`, `container:<id>` sind Netzmodi,
   keine Netzobjekte; `ns:<pfad>` ist ein Planfehler.
-- Falle `--ignore`: Quadlet legt Netze mit `podman network create --ignore`
-  an, das ein vorhandenes Netz gleichen Namens auch bei anderen Parametern
-  stillschweigend behält. Der Restore-Plan prüft das ausdrücklich [A §3, A §5].
+- Falle `--ignore` (bestätigt, Praxis 7): Quadlet legt Netze mit `podman
+  network create --ignore` an, das ein vorhandenes Netz gleichen Namens auch
+  bei anderem Subnetz stillschweigend behält. Der Restore-Plan prüft das
+  ausdrücklich.
 
 ### Named Volumes
 
 - Daten in `volume_path/<name>/_data` (rootless `<graphroot>/volumes`,
-  rootful `/var/lib/containers/storage/volumes`, änderbar in
-  `containers.conf`) [S §2].
-- **Rootless im User-Namespace lesen**: Die Dateien gehören Sub-UIDs; als
-  Konto-UID scheitert das Lesen, in einem Namespace mit demselben Mapping wie
-  Podman gelingt es [S §2, K §2.1]. Die **IDs werden im Storage-Namespace**
-  gesichert (Containersicht, z. B. 0, 1000); das Manifest hält Quell-`uid_map`
-  und `gid_map` sowie je Volume die vorkommenden IDs (`uidset`, `gidset`),
-  damit der Restore vorab prüfen kann, ob das Ziel sie abbilden kann. ACL und
-  `security.capability` stehen auf der Platte in Host-IDs (Caps v3 mit
-  rootid) und werden deshalb ebenfalls im Namespace gelesen [S §3].
-- Rootful: echte Host-IDs, `ofd` liest direkt; Container mit `--userns=auto`
-  oder `--uidmap` haben ihre Dateien trotzdem im Init-Namespace beschrieben.
+  rootful `/var/lib/containers/storage/volumes`) [S §2]. Im MVP nur der
+  Standardort unter dem bestätigten graphroot; ein abweichender `volume_path`
+  aus `containers.conf` ist ein Planfehler, außer die Kontopolicy nennt ihn.
+- **Der Host liest Daten und Attribute selbst** (V-2, V-3), rootful wie
+  rootless: `ofd` öffnet als root den graphroot aus der Kontopolicy (Pfad und
+  Inode geprüft) und von dort `volumes/<name>/_data` mit
+  `openat2(RESOLVE_BENEATH|RESOLVE_NO_SYMLINKS|RESOLVE_NO_XDEV)`; Gerät und
+  Inode des `_data`-Deskriptors prüft er gegen das Inventar. Root kann die
+  Dateien der Sub-UIDs lesen; ein User-Namespace ist zum Lesen nicht nötig.
+  Der Scan liefert den echten Stat vom Datenträger, also **Host-IDs**; ACL und
+  `security.capability` stehen auf der Platte ebenfalls in Host-IDs (Caps v3
+  mit rootid = Konto-UID, bestätigt in Praxis 2).
+- Rootless prüft der Host jede ID gegen die Quell-Map (Konto-UID und
+  Sub-ID-Bereich). Eine Datei mit einer ID außerhalb, auch in einem
+  ACL-Eintrag, wird nicht gesichert und unter `rejected` vermerkt; ebenso
+  **Gerätedateien (CHAR/BLOCK) aus rootless Domänen**, die grundsätzlich
+  abgelehnt werden (V-1, V-3). Job-Status dann „mit Warnungen“.
+- Das Manifest hält Quell-`uid_map` und `gid_map` sowie je Volume die
+  vorkommenden IDs in Namespace-Sicht (`uidset`, `gidset`), **einschließlich
+  der IDs aus ACL-Einträgen** (Access und Default), damit der Restore vorab
+  prüfen kann, ob das Ziel sie abbilden kann (Praxis 2).
+- Rootful: echte Host-IDs; Container mit `--userns=auto` oder `--uidmap`
+  haben ihre Dateien trotzdem im Init-Namespace beschrieben.
 - Treiber und Optionen [S §2]:
 
 | Fall | Behandlung |
@@ -510,10 +655,10 @@ nachrechnen, das steht so im Manifest.
 | fremde Treiber (Volume-Plugins) | Planfehler |
 | anonymes Volume (64-Hex-Name) | wie ein Named Volume, Warnung |
 
-Lesen: Tiefensuche über `openat2(RESOLVE_BENEATH|RESOLVE_NO_SYMLINKS|RESOLVE_NO_XDEV)`
-ab dem `_data`-Deskriptor, dessen Gerät/Inode der Host gegen das Inventar
-prüft; Hardlinks je Volume über `(st_dev, st_ino)`, Löcher über
-`SEEK_DATA`/`SEEK_HOLE`; Stat beim Schließen erneut vergleichen [S §2, S §3].
+Lesen: Tiefensuche ab dem `_data`-Deskriptor; Hardlinks je Volume über
+`(st_dev, st_ino)`, Löcher über `SEEK_DATA`/`SEEK_HOLE`; Stat beim Schließen
+erneut vergleichen [S §2, S §3]. Jeder Scan-Eintrag bekommt eine
+`source_ref`, die nur einmal verwendbar ist (Abschnitt „Attribute“).
 
 ### Quadlet und systemd
 
@@ -524,26 +669,32 @@ prüft; Hardlinks je Volume über `(st_dev, st_ino)`, Löcher über
   `.container`, `.pod`, `.network`, `.volume`, `.kube`, `.image`, `.build`
   [A §5].
 - **Zuordnung** Container → Unit über das Label `PODMAN_SYSTEMD_UNIT`, dann
-  `systemctl [--user] show -p SourcePath,FragmentPath,DropInPaths`: `SourcePath`
-  ist die Quadlet-Datei; `DropInPaths` nennt nur systemd-Drop-ins, keine
+  `systemctl [--user] show` mit fester Property-Liste: `SourcePath` ist die
+  Quadlet-Datei; `DropInPaths` nennt nur systemd-Drop-ins, keine
   Quadlet-Drop-ins [A §5, K §1.3].
+- **Feste Property-Liste** für `unit-info` (V-6): `Id`, `Names`,
+  `SourcePath`, `FragmentPath`, `DropInPaths`, `LoadState`, `ActiveState`,
+  `SubState`, `UnitFileState`, `InvocationID`, `ActiveEnterTimestampMonotonic`,
+  `Result`, `ExecMainCode`, `ExecMainStatus`, `NRestarts`, `Restart`,
+  `TimeoutStopUSec`, `KillMode`, `Requires`, `Wants`, `BindsTo`, `PartOf`,
+  `After`, `Before`, `WantedBy`, `EnvironmentFiles` (nur Pfade).
 - **Vollständige Quellen** über `/usr/libexec/podman/quadlet -dryrun [-user]`
   mit leerer Umgebung (ohne `QUADLET_UNIT_DIRS`): schreibt nichts, gibt die
   erzeugten Units aus und nennt jede geladene Quelle und jedes Drop-in. So
   bleibt die Drop-in-Logik bei Podman [A §5].
 - Gesichert unter `quadlet/` mit erhaltenem relativem Pfad je Suchpfad, dazu
-  verwandte lokale Units (z. B. `tapir-ackervielfalt.target`) unter
-  `systemd/`. Fingerprint je Unit: SHA-256 über Quelle, Drop-ins und
-  erzeugte Unit (für das Journal).
-- Quadlet-Quellen können selbst Werte enthalten (`Environment=PASSWORD=…`)
-  [A §5]; Behandlung bei `env=omit` siehe „Offene Punkte“.
+  verwandte lokale Units (z. B. `tapir-ackervielfalt.target`) und ihre
+  Drop-ins unter `systemd/`; bei `env=omit` mit geschwärzten
+  `Environment=`-Werten (Abschnitt Umgebungsvariablen). Fingerprint je Unit:
+  SHA-256 über die **Originale** von Quelle, Drop-ins und erzeugter Unit,
+  vom Host berechnet und nur im Journal und Manifest geführt.
 - Ohne laufenden Benutzermanager genügt der Dryrun; der Unit-Zustand ist dann
   `unknown`.
 
 ### Secrets, Bind Mounts, externe Abhängigkeiten
 
 - Secrets nur als Metadaten und Verweis (Name, ID, Treiber, Ziele aus
-  `CreateCommand`/Quadlet `Secret=`); nie `--showsecret` [A §1].
+  `CreateCommand`, Spec oder Quadlet `Secret=`); nie `--showsecret` [A §1].
 - Bind Mounts und EnvironmentFiles sind `external` im Manifest. Der Host kennt
   das FileSet und setzt `covered_by_fd`; nicht abgedeckte Pfade nach
   `external=warn|error`. Auf Inspect-Pfade greift das Plugin nie zu.
@@ -551,6 +702,12 @@ prüft; Hardlinks je Volume über `(st_dev, st_ino)`, Löcher über
   Manifest, ohne Stop.
 
 ### Automatische Zusammenhänge
+
+Der **Host** rechnet den Algorithmus auf den Inventardaten (in
+`onesimus-podman-core`) und übergibt dem Gast die maßgebliche Objektmenge
+samt Kanten; der Gast baut daraus nur Baum und Manifest (V-17). Jede spätere
+Anfrage prüft der Host gegen diese Menge (ID **und** Name; geänderte ID
+bedeutet Abweisung) [K §3.2].
 
 Vom Ausgewählten aus **vorwärts** als Hülle (was es braucht); rückwärts nur
 zur Information und für die Writergruppe. Jedes Objekt wird über
@@ -561,7 +718,7 @@ Eingabe: Domäne D, Auswahl S, exclude E
 1. Inventar: ps -a, pod ps, network ls, volume ls, images, secret ls, quadlet -dryrun
 2. W := Treffer(S) − E                   (leer → Planfehler)
 3. solange W nicht leer: x := pop(W), schon besucht → weiter
-   Container: Pod (ganz) → W; Dependencies → W (requires | volumes-from |
+   Container: Pod (ganz, auch gegen E) → W; Dependencies → W (requires | volumes-from |
      netns/ipc/pid/uts container:<id> | pod-infra, unterschieden über HostConfig);
      Image; Mounts volume → volume, bind → external, image → image;
      Netze (außer Modi); Secrets → secret_ref; PODMAN_SYSTEMD_UNIT → Quadlet über SourcePath
@@ -574,154 +731,197 @@ Eingabe: Domäne D, Auswahl S, exclude E
 4. Rückwärts: weitere Benutzer jedes Volumes/Netzes → dependents_not_selected;
    Mitbenutzer → Writergruppe
 5. Ausgabe: Objekte, Kanten, Restore-Reihenfolge (network, volume, image,
-   secret_ref, pod, container, quadlet), Warnungen, Planfehler
+   secret_ref, pod, container, quadlet, systemd_unit), Warnungen, Planfehler
 ```
-
-Der Host rechnet denselben Algorithmus auf den Inventardaten nach; seine
-Objektmenge ist maßgeblich, jede spätere Anfrage wird gegen sie geprüft
-(ID **und** Name; geänderte ID bedeutet Abweisung) [K §3.2].
 
 ## Attribute der Volume-Dateien
 
 Das Bareos-Format trägt alles (voller Stat, `FT_LNKSAVED`, FIFO/Geräte,
 Sparse mit Offset, ACL-Text, xattrs), der Plugin-Weg heute nicht: `plugin_ff`
 setzt UID/GID auf euid/egid von `ofd`, löscht `FO_SPARSE`, `FO_ACL`,
-`FO_XATTR`, `FO_CHKCHANGES`, kennt nur REG, DIR, LNK; seit dem Fix zu S-13
-(`e1ecd00`) übernimmt es aus Plugin-Einträgen nur die Rechte-Bits `0o777`,
-damit ein Restore in Dateien keine root-eigenen setuid-Dateien aus
-Plugin-Daten erzeugt [S §3]. Für Podman-Volumes braucht es echte Eigentümer,
-Sonderbits, Caps und Dateitypen, **unter Kontrolle des Hosts**.
+`FO_XATTR`, `FO_CHKCHANGES`, kennt nur REG, DIR, LNK und übernimmt seit S-13
+(`e1ecd00`) nur die Rechte-Bits `0o777` [S §3].
 
-### Erweiterung von `FileEntry` (versioniert, `api_version` 2)
+### Grundsatz: beim Sichern bereinigen (V-1)
+
+Ein Restore in Dateien läuft ohne Plugin-Code, oft mit einem anderen FD
+(Bareos, älteres `ofd`), und kennt nur den Attributsatz des Stroms. Ob eine
+Datei aus einem rootless Konto stammt, ist dort nicht mehr erkennbar. Ein
+Restore-Schalter schützt deshalb nicht; der Schutz muss beim Sichern
+greifen. Sonst legt ein Konto, das im Namespace root ist, eine Datei mit
+ns-UID 0 und Modus 4755 oder `cap_setuid+ep` an, und ein späterer Restore in
+Dateien erzeugt daraus eine root-eigene setuid- oder Cap-Datei auf dem Host.
+
+Regeln für Volume-Dateien im **Bareos-Strom** (rootless und rootful gleich,
+damit auch V-19 erledigt ist):
+
+- **IDs in Host-Sicht**: rootless die echten Sub-UIDs/Sub-GIDs vom
+  Datenträger (ns 0 → Konto-UID, ns n → Sub-ID), rootful die Host-IDs.
+  `podman unshare cp -a --sparse=always` kann eine solche Kopie auf demselben
+  Host direkt übernehmen [K §2.3].
+- **Modus nach S-13**: nur `0o777`; setuid, setgid und sticky stehen nie im
+  Strom.
+- **Nie `security.capability`**, nie `trusted.*`; xattrs nur `user.*`;
+  `security.selinux` nur informativ in `ownership.tsv`.
+- **ACL** als ACL-Stream mit numerischen Host-IDs (so wie auf der Platte).
+- Dateitypen: REG, DIR, LNK, FIFO, Hardlink (`FT_LNKSAVED`). CHAR/BLOCK nie
+  im Strom: rootless abgelehnt (oben), rootful im MVP ausgelassen und unter
+  `rejected` vermerkt. Sockets werden nicht gesichert.
+- Sparse mit Offsets (`FO_SPARSE`), Zeiten aus dem Scan.
+
+**`ownership.tsv`** je Volume enthält die Namespace-Sicht. Der **Host**
+erzeugt sie, nicht der Gast, und sie folgt im Strom auf `data/`. Kopf:
+Domäne, Quell-`uid_map` und `gid_map`; damit ist die ns-Sicht jeder ID im
+Strom eindeutig bestimmt. Je Pfad eine Zeile für jeden Eintrag mit
+Sonderbits, Caps oder ACL: ns-UID, ns-GID, voller Modus, Caps (Text und
+Rohwert in ns-Sicht, v2), ACL in ns-IDs, SELinux-Label. Grenze der
+Zeilenzahl konfigurierbar, darüber Fehler. Angewandt wird `ownership.tsv`
+**nur beim Online-Restore unter Kontrolle des Hosts**. Ein Restore in Dateien
+legt sie als gewöhnliche Datei (0600, euid) ab; der Restore-Bericht nennt
+die Zahl der nicht angewandten Sonderbits und Caps.
+
+### Erweiterung von `FileEntry` (`api_version` 2)
+
+Der Gast liefert für Volume-Dateien und Blobs **weder Bytes noch Attribute**
+(V-2), sondern nur den Verweis auf einen Scan-Eintrag des Hosts:
 
 ```protobuf
 message FileEntry {
   // Felder 1–7 unverändert (path, kind, size, modified_unix_nanos, mode, symlink_target, attributes)
-  uint32 uid = 8;  uint32 gid = 9;           // im Storage-Namespace
-  IdView id_view = 10;                       // SYNTHETIC (heute) | STORAGE_NS | HOST
-  int64 atime_unix_nanos = 11; int64 ctime_unix_nanos = 12;
-  uint64 rdev = 13;                          // FIFO/CHAR/BLOCK
-  bytes hardlink_target = 14;                // Kind HARDLINK: früherer Pfad desselben Laufs
-  repeated Xattr xattrs = 15;                // ohne system.posix_acl_*, ohne security.selinux
-  bytes acl_access_text = 16;                // numerisch (kein NSS)
-  bytes acl_default_text = 17;               // nur Verzeichnisse
-  bytes selinux_label = 18;                  // nur informativ
-  bool sparse = 19;
-  bytes source_ref = 20;                     // Verweis auf den Scan-Eintrag des Brokers/Backends
+  bytes source_ref = 8;   // Scan-Eintrag des Hosts (Volume-Datei, Blob, ownership.tsv); leer = synthetischer Eintrag
 }
-// FileKind: FIFO = 5, CHAR = 6, BLOCK = 7, HARDLINK = 8; Sockets werden nicht gesichert.
-message ReadFileResponse { … uint64 data_offset = 4; }   // Lücke vor data_offset = Loch
+// FileKind: FIFO = 5, HARDLINK = 6 (nur mit source_ref)
 ```
 
-Vorschlag, offen: Feld `source_ref` statt Vertrauen in die vom Gast
-gelieferten Werte (siehe unten). `JobContext` bleibt in P2 unverändert (ohne
-Level/Since).
+- Synthetische Einträge (Inspect, Manifest usw.) bleiben wie heute: Bytes vom
+  Gast über `ReadFile`, Attribute nach S-13.
+- Einträge mit `source_ref`: Pfad = Präfix des Objekts
+  (`/@podman/<domäne>/volumes/<vol>/data/` bzw. `images/oci/blobs/sha256/`)
+  plus `relpath` bzw. Digest des Scan-Eintrags; eine Abweichung ist ein
+  Fehler. Jede `source_ref` gilt einmal und nur in diesem Job und dieser
+  Instanz. Der Host liest die Bytes selbst über den Scan-Handle, `ReadFile`
+  wird für solche Einträge nicht aufgerufen, und `plugin_ff` baut Stat,
+  ACL-, xattr- und Sparse-Angaben aus der eigenen Tabelle nach den Regeln
+  oben. Der Gast bestimmt nur, **ob** und **in welcher Reihenfolge** ein
+  Eintrag aufgenommen wird.
+- Voraussetzungen: das Plugin hat `podman.volume.read` bzw.
+  `podman.image.read`, das Objekt gehört zur erlaubten Objektmenge.
+- `JobContext` bleibt in P2 unverändert (ohne Level/Since).
 
-### Wie der Host begrenzt
+### Restore online: Attribute und Reihenfolge je Datei
 
-- **Vorgabe bleibt S-13**: Für jeden Eintrag gilt `id_view = SYNTHETIC`,
-  UID/GID = euid/egid, Modus `& 0o777`, keine xattrs, nur REG/DIR/LNK.
-- Erweiterte Attribute übernimmt der Host **nur**, wenn alles zutrifft:
-  das Plugin hat `podman.volume.read`; der Pfad liegt unter
-  `/@podman/<domäne>/volumes/<vol>/data/` eines Volumes der erlaubten
-  Objektmenge; der Eintrag verweist per `source_ref` auf einen Scan-Eintrag,
-  den Broker bzw. Rootful-Backend in diesem Job geliefert haben.
-- Eigentümer, Modus (einschließlich setuid/setgid/sticky), Zeiten, `rdev`,
-  xattrs, ACL und Sparse-Angabe nimmt der Host **aus seiner eigenen Tabelle**
-  (Antwort des Brokers bzw. eigener `fstatat`), nicht vom Gast; weichen die
-  Gastwerte ab, ist das ein Fehler. Der Gast kann so keine root-eigene
-  setuid-Datei erfinden.
-- Grenzen: rootless UID/GID kleiner als die Größe des Mappings; xattr-Namen aus
-  Erlaubnisliste (`user.*`, `security.capability`, ACL nur als ACL-Stream,
-  `security.selinux` nur informativ); xattr höchstens 64 KiB; Pfad höchstens
-  4096 Byte, ohne `..`.
-- `plugin_ff` setzt `FO_ACL`, `FO_XATTR`, `FO_SPARSE` aus diesen Feldern und
-  schreibt die Streams selbst (ACL-Text, xattr im Bareos-Format, Sparse mit
-  `data_offset`); `HARDLINK` wird `FT_LNKSAVED`. Das Volume-Format bleibt
-  Bareos-kompatibel.
-- **Restore in Dateien** (ohne Plugin-Code, `ofd` schreibt als root): Ein
-  rootless Container-root (ns-UID 0) würde sonst echtes root. Vorschlag,
-  offen: Bei `id_view = STORAGE_NS` setzt `ofd` setuid/setgid und
-  `security.capability` nicht (`files_special=drop`, Vorgabe) und vermerkt sie
-  im Restore-Bericht; die vollständigen Angaben stehen in `ownership.tsv`.
-  IDs werden zahlengleich geschrieben (`files_owner=ns`) oder über das Mapping
-  eines Kontos verschoben (`files_owner=host:<konto>`), dann genügt
-  `podman unshare cp -a --sparse=always` ohne Nacharbeit [K §2.3].
-- **Restore online**: rootless schreibt der Broker im Ziel-Namespace, der
-  Kernel bildet die IDs auf den Zielbereich ab; rootful schreibt `ofd` echte
-  IDs, aber nur in ein in diesem Job neu angelegtes Volume.
+Die Attribute bestimmt der Host aus dem Attributsatz des Stroms und aus
+`ownership.tsv`, nicht aus der Anfrage des Gastes (V-9). Die Bytes fließen
+aus dem Strom über den Host zum Schreiber; der Gast plant nur. IDs rechnet
+der Host über die Quell-Map in die ns-Sicht um. Rootless schreibt der
+Broker im Ziel-Namespace, der Kernel bildet die IDs auf den Zielbereich ab
+und schreibt Caps als v3 mit der rootid des Ziels um (bestätigt, Praxis 2).
+Rootful schreibt `ofd` echte IDs, nur in ein in diesem Job neu angelegtes
+Volume.
 
-### Restore-Reihenfolge je Datei
+Relativ zum `_data`-Deskriptor mit
+`openat2(RESOLVE_BENEATH|RESOLVE_NO_SYMLINKS)` und `O_EXCL` [S §3, K §2.2]:
 
-Im Ziel-Namespace bzw. als root im neuen Volume, relativ zum `_data`-Deskriptor
-mit `openat2(RESOLVE_BENEATH|RESOLVE_NO_MAGICLINKS)` und `O_EXCL` [S §3, K §2.2]:
-
-1. `mknod`/`mkfifo`/`open(O_EXCL)`; Symlink-Ziel unverändert, nie verfolgt
+1. `mkfifo`/`open(O_EXCL)`; Symlink-Ziel unverändert, nie verfolgt
 2. Daten, Löcher per `ftruncate` und `pwrite`
 3. `fchown`
-4. `fchmod` (nach `chown`, sonst fehlen setuid/setgid)
-5. xattrs
-6. `security.capability` (nach `chown`, das sie löscht)
-7. ACL
-8. `utimensat`; Verzeichniszeiten ganz zum Schluss, wie `restore.rs`
+4. `fchmod` mit den Rechte-Bits
+5. `user.*`-xattrs
+6. ACL
+7. `utimensat`; Verzeichniszeiten ganz zum Schluss, wie `restore.rs`
+8. Zweiter Durchgang nach `ownership.tsv` (folgt im Strom auf `data/`):
+   setuid/setgid/sticky per `fchmod` und `security.capability`, beides nach
+   dem `chown` des ersten Durchgangs, über erneut per `openat2` geöffnete
+   Deskriptoren; danach `utimensat` erneut für diese Einträge.
 
-Gerätedateien gehen rootless nicht (`mknod` im User-Namespace verboten):
-Planfehler, oder mit Option übersprungen und vermerkt. Hardlinks über
-Volume-Grenzen werden nicht erhalten und vermerkt. SELinux nach
-`selinux=relabel|keep|drop`; MCS-Kategorien von `:z`/`:Z` gelten auf einem
-anderen Host nicht [S §3].
+Hardlinks über Volume-Grenzen werden nicht erhalten und vermerkt. SELinux
+nach `selinux=relabel|keep|drop`; MCS-Kategorien von `:z`/`:Z` gelten auf
+einem anderen Host nicht [S §3].
 
 ## Broker und Rootful-Backend
 
 **libpod über die CLI** (Vorschlag, offen; ersetzt die REST-Variante aus
-[K §3.2]): `podman` mit `--format json`, fester Argumentliste und leerer
-Umgebung, statt eines Sockets. Begründung: REST und CLI liefern byte-gleiche Inspect-Daten;
-`podman.socket` ist auf forgeiec.io deaktiviert und darf nicht aktiviert
-werden; `podman info` meldet `RemoteSocket.Exists: true` auch ohne Socket
-[A §1]. Umgebung: nur `HOME` (aus passwd), `XDG_RUNTIME_DIR=/run/user/<uid>`
-falls vorhanden, festes `PATH`, `LANG=C`; nie `CONTAINERS_CONF`,
-`CONTAINERS_STORAGE_CONF`, `QUADLET_UNIT_DIRS`, `DOCKER_HOST`. Die libpod-DB
-erzwingt die passende Speicherkonfiguration („database run root … does not
-match“), stilles Arbeiten auf falschem Speicher ist damit ausgeschlossen
-[A §1, A §6].
+[K §3.2]): `podman` mit `--format json`, fester Argumentliste und fester
+Umgebung, statt eines Sockets. Begründung: REST und CLI liefern byte-gleiche
+Inspect-Daten; `podman.socket` ist auf forgeiec.io deaktiviert und darf nicht
+aktiviert werden; `podman info` meldet `RemoteSocket.Exists: true` auch ohne
+Socket [A §1]. Die libpod-DB erzwingt die passende Speicherkonfiguration
+(„database run root … does not match“) [A §1, A §6].
 
-**NNP und `newuidmap`** [K §3.1]: `PR_SET_NO_NEW_PRIVS` blockiert die
-setuid-Helfer `newuidmap`/`newgidmap`; rootless Podman scheitert dann, wenn
-noch kein Pause-Prozess existiert. Lösung: **`ofd` legt den User-Namespace vor
-dem Benutzerwechsel an** und schreibt `uid_map`/`gid_map` als root nach
-`/etc/subuid`/`/etc/subgid`; läuft ein Pause-Prozess, vergleicht `ofd` die
-Maps mit dessen `/proc/<pid>/uid_map` und bricht bei Abweichung ab. Der Broker
-startet danach wie in `broker.rs` (Deskriptor, Hash, `fexecve`, leere
-Umgebung, NNP, PDEATHSIG) als Konto-UID im Namespace und braucht weder
-`newuidmap` noch den Pause-Prozess. Offen und in P0 nachzuweisen: Eigentümer
-des Namespace (Konto-UID), ob die Podman-CLI den vorbereiteten Namespace
-annimmt (interne Variable `_CONTAINERS_USERNS_CONFIGURED`, Vermutung) und wie
-sie mit einem vorhandenen Pause-Prozess und dessen Mount-Namespace
-zusammenspielt.
+**Umgebung des rootless Brokers** (V-8, Praxis 6): `HOME` (aus passwd),
+`XDG_RUNTIME_DIR=/run/user/<uid>` falls vorhanden, festes `PATH`, `LANG=C`
+und **alle drei** internen Variablen
+`_CONTAINERS_USERNS_CONFIGURED=done`, `_CONTAINERS_ROOTLESS_UID=<uid>`,
+`_CONTAINERS_ROOTLESS_GID=<gid>`. Mit nur einer davon hält sich Podman für
+rootful und benutzt `/run/libpod`, `/var/cache/containers` usw. (Praxis 6).
+Die Variablen sind intern und gehören zum zertifizierten Versionsprofil. Nie
+`CONTAINERS_CONF`, `CONTAINERS_STORAGE_CONF`, `QUADLET_UNIT_DIRS`,
+`DOCKER_HOST`.
+
+**Namespace und Start** (V-3, V-8, Praxis 6): `PR_SET_NO_NEW_PRIVS`
+blockiert `newuidmap`/`newgidmap`; ohne Pause-Prozess scheitert rootless
+Podman dann (bestätigt, Praxis 6). Deshalb legt `ofd` den Namespace selbst an:
+
+1. Ein Kind von `ofd` ruft **als root** `unshare(CLONE_NEWUSER|CLONE_NEWNS)`.
+   Damit **gehört der Namespace root**, und das Konto hat darin kein
+   `CAP_SYS_PTRACE`. Der eigene Mount-Namespace ist nötig, sonst scheitert
+   z. B. das shm-Mount von `podman run` (Praxis 6).
+2. `ofd` schreibt `uid_map`/`gid_map` aus `/etc/subuid`/`/etc/subgid`
+   (`0 <uid> 1`, `1 <subuid> <anzahl>`).
+3. Das Kind wechselt im Namespace auf ns-UID/GID 0 (= Konto-UID/GID),
+   `setgroups([])`, setzt NNP, `PR_SET_PDEATHSIG`, RLIMIT_CORE 0 und
+   startet den Broker per `fexecve` aus dem geprüften Deskriptor.
+4. Der Broker setzt als **erste Handlung `PR_SET_DUMPABLE(0)`**, weil
+   `execve` dumpable wieder auf 1 setzt (V-3).
+
+Einem vorhandenen Pause-Prozess tritt `ofd` **nicht** bei: dessen Namespace
+gehört dem Konto. Der Broker braucht weder `newuidmap` noch den
+Pause-Prozess; im Versuch blieben nach `podman stop` aus einem fremden
+Namespace keine verwaisten Mounts (Praxis 6). Die Praxisprüfung lief mit dem
+Konto als Eigentümer des Namespace; P0 muss die Reihenfolge mit root als
+Eigentümer nachweisen (Exitkriterium P0).
+
+**systemd und Start von Containern außerhalb des Namespace** (V-8): Aus dem
+Namespace heraus kann `systemctl --user` an der D-Bus-Authentisierung
+scheitern, und ein `podman start` legte die Mounts im Namespace des Brokers
+an, der mit ihm verschwindet. Deshalb ruft `ofd` als Konto-UID **ohne**
+User-Namespace, mit NNP, leerer Umgebung plus `XDG_RUNTIME_DIR` und fester
+Argumentliste:
+
+- `systemctl --user show|stop|mask --runtime|unmask --runtime|start`;
+- für einfache Container ohne Unit `systemd-run --user --wait --collect
+  podman start <id>`, damit der Container unter dem Benutzermanager im
+  Namespace des Pause-Prozesses startet.
+
+Ohne laufenden Benutzermanager ist `consistency=stop` für diese Domäne ein
+Planfehler (Vorschlag, offen). Rootful prüft das Profil
+`cgroup_manager=systemd`; sonst ist `podman start` aus `ofd` ein Planfehler,
+weil conmon und Container in der cgroup von `ofd.service` blieben und mit
+`KillMode=control-group` beim nächsten Neustart von `ofd` endeten (V-21).
 
 Ein Broker je (Job, Host-UID, Domäne). Nachrichten in
 `proto/podman_broker.proto` (Paket `onesimus.filed.broker.podman.v1`), Rahmen
-wie PostgreSQL: 4 Byte Länge + Nachricht, `MAX_FRAME` 2 MiB, Daten höchstens
-ein Chunk (`buf_size`, höchstens 256 KiB) [K §3.3]. Das Rootful-Backend
-implementiert dieselben Operationen in `ofd`.
+wie PostgreSQL: 4 Byte Länge + Nachricht, `MAX_FRAME` 2 MiB [K §3.3]. Das
+Rootful-Backend implementiert dieselben Operationen in `ofd`.
 
 | Operation | Ausführung (fest) | Grant | Host-Prüfung |
 | --- | --- | --- | --- |
-| `engine-identify` | `podman info/version --format json` | `podman.inventory` | UID, Maps gegen `/etc/subuid`, Version/Treiber gegen zertifiziertes Profil, Domänen-ID |
-| `inventory` | `ps -a`, `pod ps`, `network ls`, `volume ls`, `images`, `secret ls` (`--format json`) | `podman.inventory` | erlaubte Objektmenge berechnen, Antwort an den Gast filtern |
-| `inspect(kind, ids)` | `container/pod/network/volume/image/secret inspect`, `generate spec`; nie `--showsecret` | `podman.inventory` | ID in der Menge, Größe ≤ 1 MiB, Env nach `env=` |
-| `quadlet-resolve` | `quadlet -dryrun [-user]` | `podman.inventory` | – |
-| `unit-info(units)` | `systemctl [--user] show -p <feste Liste>` | `podman.inventory` | Unit gehört zur Menge |
-| `quadlet-read(unit, path)` | Datei lesen | `podman.inventory` | Pfad aus Dryrun bzw. `SourcePath` **und** unter einem Suchpfad; EnvironmentFiles nie |
-| `image-list`, `image-bigdata-open` | `images.json`/`layers.json` unter Lese-Sperre, gegen `image inspect` geprüft | `podman.image.read` | Digest vor Auslieferung geprüft |
-| `layer-open/read/close(diff_id)` | tar-split-Rekonstruktion, nur sequentiell | `podman.image.read` | DiffID in der Menge; SHA-256 am Ende |
-| `volume-open/scan/read/xattr/close` | `openat2` ab `_data` | `podman.volume.read` | (dev, ino) gegen Inventar; Einträge in Host-Tabelle |
-| `member-state`, `stop-unit`, `stop-container`, `resume-*`, `unmask` | `systemctl [--user] mask --runtime/stop/unmask/start`, `podman stop/start` | `podman.lifecycle` | nur nach Journal-Eintrag; erwartete InvocationID/StartedAt |
-| `preflight`, `create-network/volume/pod/container`, `volume-write-*`, `image-import-*`, `pull`, `stage-quadlet`, `rollback` | siehe Restore | `podman.restore` | Suffix, keine neuen Rechte, Restore-Label |
+| `engine-identify` | Broker/Backend: `podman info/version --format json` | `podman.inventory` | UID, Maps gegen `/etc/subuid`, graphroot gegen Kontopolicy, Version/Treiber/`cgroup_manager` gegen zertifiziertes Profil, Domänen-ID |
+| `inventory` | Broker/Backend: `ps -a`, `pod ps`, `network ls`, `volume ls`, `images`, `secret ls` | `podman.inventory` | Objektmenge berechnen, Schnappschuss für `PREPARED` |
+| `inspect(kind, ids)` | Broker/Backend: `… inspect`, `generate spec`; nie `--showsecret` | `podman.inventory` | ID in der Menge, Größe ≤ 1 MiB, Positivliste, Env nach `env=` |
+| `quadlet-resolve` | Broker/Backend: `quadlet -dryrun [-user]` | `podman.inventory` | nur Zuordnung, nie gespeichert |
+| `unit-info(units)` | Host: `systemctl [--user] show -p <feste Liste>` | `podman.inventory` | Unit gehört zur Menge |
+| `quadlet-read(unit, path)` | Host: `openat2` ab dem Suchpfad | `podman.inventory` | Pfad aus Dryrun bzw. `SourcePath` **und** unter einem Suchpfad; EnvironmentFiles nie; Schwärzung bei `env=omit` |
+| `blob-scan`, `layer-stream` | Host: `images.json`/`layers.json` unter Lese-Sperre, tar-split, `openat2` ab Layer-Verzeichnis | `podman.image.read` | DiffID in der Menge; Typ und Größe vorab, SHA-256 am Ende |
+| `volume-scan` | Host: `openat2` ab `_data` | `podman.volume.read` | (dev, ino) gegen Inventar; IDs gegen Quell-Map; CHAR/BLOCK rootless abgelehnt |
+| `member-state` | Host: `systemctl show`, `podman inspect` | `podman.inventory` | lesend, auch für den Gast |
+| Stop, Maske, Wiederanlauf | **nur Host**, nie Gastfunktion (V-9): `systemctl [--user] stop`, `mask --runtime`, `unmask --runtime`, `start`; `podman stop/start` | `podman.lifecycle` | nur nach Journal-Eintrag; erwartete InvocationID/StartedAt |
+| `preflight`, `create-network/volume/pod/container`, `volume-write-*`, `image-import`, `pull`, `stage-quadlet`, `stage-unit`, `rollback` | siehe Restore | `podman.restore` | Suffix, Pflichtvergleich der Sicherheitsfelder, Attribute vom Host, Restore-Label |
 
 Der Broker ruft nie `system reset`, `system migrate` oder `system renumber`
-auf [K §0]. Ein rootless CLI-Aufruf kann den Pause-Prozess (catatonit)
-starten; das ist eine sichtbare Nebenwirkung, keine Rechteausweitung [A §1].
+auf [K §0]. Für das Rootful-Backend protokolliert `ofd` jede ausgeführte
+Argumentliste (Exec-Protokoll); der Test vergleicht es mit dieser Tabelle
+(V-18).
 
 ## Konsistenz
 
@@ -731,36 +931,107 @@ Pod, `--volumes-from`, systemd `Requires/Wants/BindsTo/PartOf` zwischen Units
 mit `PODMAN_SYSTEMD_UNIT` und Quadlet-`.volume`/`.network`-Verweise. Units
 außerhalb von Podman (z. B. `postgresql.service`) nur als Information.
 
-**Stop-Verfahren** [K §1.1]:
+### Stop-Verfahren
 
-- Container mit `PODMAN_SYSTEMD_UNIT`: **`systemctl [--user] mask --runtime
-  <unit>`, dann `stop`**. Ein `podman stop` auf einen Quadlet-Container ist
-  wirkungslos (systemd startet mit neuer Container-ID neu). Die Laufzeit-Maske
-  liegt vor `/run/systemd/generator`, wirkt gegen `Restart=`, gegen `Wants=`
-  anderer Units, Timer, manuelles `start` und `podman auto-update`, und
-  verschwindet beim Neustart von selbst.
-- Container ohne Unit: `podman stop -t <stop_timeout>`; `StoppedByUser`
-  verhindert die Restart-Policy. `podman-restart.service` startet beim Boot
-  auch vom Benutzer gestoppte Container (Recovery berücksichtigt das).
+Gemessen (Praxis 4): `mask --runtime` löst ein `daemon-reload` aus. Danach
+sind bei der maskierten, noch laufenden Unit `ExecStop=podman rm …`,
+`KillMode=mixed`, `TimeoutStopSec` und `ExecStopPost` weg. systemd schickt
+SIGTERM an die ganze cgroup, wartet die Vorgabe von 90 s und schickt
+SIGKILL; die libpod-DB behält „Up“, `--rm` läuft nicht. Die frühere
+Reihenfolge „erst maskieren, dann stoppen“ ist damit **widerlegt** und
+gestrichen. forgeiec.io hat dieselbe Lage (systemd 257, alle tapir-Units mit
+`ExecStop=/usr/bin/podman rm -v -f -i --cidfile=…`, `KillMode=mixed`,
+`TimeoutStopUSec=1min 30s`).
+
+- **Container mit `PODMAN_SYSTEMD_UNIT`** (Vorschlag, offen; siehe
+  Nutzerentscheidungen):
+  1. Zustand der Maske **vorher** ins Journal (`mask_before`: keine, runtime,
+     persistent; V-5). Eine vorher vorhandene Maske ist nie die eigene; ist
+     eine Unit der Gruppe vorab maskiert, ist das ein Planfehler.
+  2. `systemctl [--user] stop <unit>` mit intakter Unit-Definition, also über
+     ExecStop, KillMode und TimeoutStopSec (sauber in 2,2 s im Versuch).
+  3. `systemctl [--user] mask --runtime <unit>`.
+  4. Prüfen: `LoadState=masked`, `ActiveState=inactive`, keine neue
+     InvocationID. Hat ein `Wants=`, ein Timer oder ein Bediener die Unit im
+     kurzen Fenster zwischen 2 und 3 gestartet, gilt das als
+     `consistency_violated`: Maske entfernen, kein zweiter Stop, Job fehlerhaft.
+
+  Die Alternative `mask --runtime --no-reload` → `stop` → `daemon-reload`
+  hält ebenfalls sauber an; die Maske wirkt aber erst nach dem Reload, das
+  ungeschützte Fenster umfasst also die ganze Stop-Dauer (bis 90 s) statt
+  Millisekunden (Praxis 4). Ein `podman stop` auf einen Quadlet-Container ist
+  wirkungslos: systemd startet mit neuer Container-ID neu (bestätigt,
+  Praxis 4). Die Laufzeit-Maske liegt vor `/run/systemd/generator`, wirkt
+  gegen `Restart=`, `Wants=` anderer Units, Timer, manuelles `start` und
+  `podman auto-update`, verschwindet beim Neustart von selbst und **bleibt
+  nach einem Absturz des steuernden Prozesses bestehen** (bestätigt,
+  Praxis 4).
+- **Wiederanlauf**: `systemctl [--user] unmask --runtime <unit>`, dann
+  `start`. Ausdrücklich `--runtime`, weil `unmask` ohne diese Option auch
+  eine dauerhafte Maske des Administrators entfernt (V-5).
+- **Container ohne Unit**: `podman stop -t <stop_timeout>`; `StoppedByUser`
+  verhindert die Restart-Policy; Wiederanlauf über den Benutzermanager bzw.
+  rootful mit `cgroup_manager=systemd` (Abschnitt Broker).
+  `podman-restart.service` startet beim Boot auch vom Benutzer gestoppte
+  Container (Recovery berücksichtigt das).
 - Reihenfolge: abhängige Units zuerst (ackervielfalt-web/worker/beat vor
   redis), Wiederanlauf umgekehrt, jeweils auf `ActiveState=active` warten.
 - **Sauberkeitsnachweis**: Exit-Code in `clean_exit_codes`, kein SIGKILL nach
   Frist (137), systemd `Result=success`. Sonst `on_unclean`.
-- Pause/Freeze ergibt nur einen Absturzzeitpunkt bei voller Ausfallzeit, Podman
-  und systemd sehen dann verschiedene Zustände; App-Hooks brauchen Exec. Beides
-  P4 [K §1.2].
+- Pause/Freeze ergibt nur einen Absturzzeitpunkt bei voller Ausfallzeit; P4
+  [K §1.2].
 
-**`consistency_scope=job`** (Vorgabe, Nutzer, 19.11.2026): tapir hat keine
-Named Volumes; seine Daten liegen in Bind Mounts, die der FD als Dateien
-sichert. Ein Stop nur für die Dateien der Plugin-Zeile schützte sie nicht
-[K §1.2]. Heute öffnet `ofd` eine Plugin-Sitzung erst, wenn die Traversierung
-die Plugin-Zeile erreicht, und sendet erst dann `JobStarted`
-(`backup.rs` `save_plugin`/`run_plugin`). Nötige Host-Änderung: Vor der ersten
-Datei des Jobs wertet `ofd` alle Podman-Zeilen mit `scope=job` aus
-(Inventar, Inspect, Journal `PREPARED`, Stop), hält die erfassten Daten
-begrenzt bis zur Plugin-Sitzung und fährt die Gruppen nach der letzten Datei
-des Jobs wieder an, ebenso bei Fehler und Cancel. Mehrere Zeilen mit
-überschneidenden Gruppen bilden eine Lifecycle-Gruppe.
+### `consistency_scope=job`
+
+Vorgabe (Nutzer, 19.11.2026): tapir hat keine Named Volumes; seine Daten
+liegen in Bind Mounts, die der FD als Dateien sichert. Heute öffnet `ofd`
+eine Plugin-Sitzung erst, wenn die Traversierung die Plugin-Zeile erreicht
+(`backup.rs` `save_plugin`/`run_plugin`). Nötige Host-Änderungen (V-5):
+
+1. **Einhängepunkt** in `job/backup_cmds.rs` `blast_data()` **vor**
+   `Finder::find_files`.
+2. **Vorlauf für alle Zeilen vor dem ersten Stop**: Bundle und Signatur,
+   Plugin-ID, Grants (`podman.lifecycle`, `podman.rootful`), Kontopolicy,
+   Broker starten, Inventar-Schnappschuss, Inspect, Plan rechnen, Journal
+   `PREPARED` für jede Gruppe. Ein Planfehler in irgendeiner Zeile bricht ab,
+   bevor eine Gruppe gestoppt ist.
+3. **SD bereit**: Der Stop beginnt erst, wenn das SD die Schreibsitzung
+   angenommen hat (Gerät reserviert, Volume eingelegt), damit ein Warten auf
+   ein Medium nicht in die Ausfallzeit fällt (V-4). Welche SD-Antwort das
+   garantiert, wird in P2 nachgewiesen.
+4. **Wiederanlauf als Guard**: ein Guard-Objekt fährt die Gruppen nach der
+   letzten Datei des Jobs wieder an, ebenso bei frühem `return`, Cancel,
+   SD-Fehler und Panik (`ofd` baut mit `panic=unwind`, heute Vorgabe; mit
+   `abort` bliebe nur der Totmannschalter).
+5. **SIGTERM** (`systemctl stop ofd`, auch beim Paket-Upgrade wegen
+   `Depends: ofd (= Version)`): SIGTERM setzt das Cancel-Flag, der Guard fährt
+   innerhalb von `cancel_timeout` wieder an, erst dann endet `ofd`.
+   `TimeoutStopSec` von `ofd.service` muss größer sein als `cancel_timeout`
+   plus Wiederanlauf aller Gruppen (Paketierung anpassen).
+6. **Estimate und Verify stoppen nie** (`EstimateHandler::plugin` meldet
+   heute nur „not included“; bleibt Regel).
+7. Mehrere Zeilen mit überschneidenden Gruppen bilden eine Lifecycle-Gruppe.
+
+**Obergrenze und Totmannschalter** (V-4): `max_downtime` (Vorgabe 7200 s,
+Vorschlag, offen) zählt ab dem ersten Stop. Wird sie erreicht, bricht `ofd`
+den Job ab und fährt wieder an. Damit das auch gilt, wenn `ofd` hängt (etwa
+blockiert im Senden an das SD) oder stirbt, legt `ofd` **vor** dem ersten Stop
+einen Totmannschalter an:
+
+```sh
+systemd-run --unit=onesimus-podman-recover-<jobid> --on-active=<max_downtime> \
+  --timer-property=AccuracySec=1s /usr/sbin/ofd --podman-recover <domäne>/<jobid>
+```
+
+`ofd --podman-recover` führt **dieselbe Recovery** aus wie der Start von
+`ofd`, mit derselben Fingerprint-Prüfung; das frühere Gegenargument („prüft
+keinen Fingerprint“ [K §1.3]) entfällt damit. Eine Sperre (`flock`) auf der
+Journaldatei verhindert doppelte Ausführung. Der Timer steht im Journal und
+wird bei `RESUMED` entfernt. Hat der Timer wieder angefahren, während `ofd`
+noch sichert, sieht `ofd` den Journalzustand und beendet den Job als
+`consistency_violated`. Bei `kill -9` von `ofd` greift zusätzlich die
+Recovery beim Neustart (`Restart=on-failure`); nach `StartLimitBurst` bleibt
+der Timer der einzige Weg, deshalb ist er Pflicht.
 
 `consistency=crash`: keine Mutation; je Datei `size`/`mtime`/`ctime` vor und
 nach dem Lesen vergleichen, Änderungen als `changed_during_backup` im
@@ -772,19 +1043,21 @@ Beim Host, nicht im Broker oder Gast: root-eigene Datei
 `/var/lib/onesimus/ofd/podman-journal/<domäne>/<jobid>.json`, `fsync` und
 `rename`, geschrieben **vor** jeder Mutation, für rootless und rootful
 gleich [K §1.3]. Inhalt: Boot-ID, Job und Instanz, Host-UID und Domäne
-(einschließlich `tmpdir`), je Mitglied Art, Name, Unit-`InvocationID` bzw.
+(einschließlich `tmpdir`), Name des Totmannschalters, Zeit des ersten Stops,
+je Mitglied Art, Name, Unit-`InvocationID` und `ActiveEnterTimestamp` bzw.
 Container-ID und `StartedAt`, Definitions-Fingerprint (Quadlet-Quelle,
-Drop-ins, erzeugte Unit bzw. Spec), Ursprungszustand, eigene Maske (ja/nein),
-Stop-Ergebnis (Exit-Code, sauber, Zeit).
+Drop-ins, erzeugte Unit bzw. Spec), Ursprungszustand, **`mask_before`**,
+eigene Maske (ja/nein), Stop-Ergebnis (Exit-Code, sauber, Zeit).
 
 | Zustand | wird geschrieben | Recovery, wenn dies der letzte Zustand ist |
 | --- | --- | --- |
-| `PREPARED` | nach Inventar und Inspect aller Mitglieder (Pflicht vor dem Stop) | nichts mutiert → `ABORTED` |
-| `STOP_REQUESTED` | vor Maske und Stop, je Mitglied | aktiv mit gleicher InvocationID und ohne eigene Maske: nichts passiert. Inaktiv mit eigener Maske: wie `RESUME_PENDING`. Sonst `CONFLICT` |
-| `QUIESCED` | alle Mitglieder gestoppt, Ergebnisse festgehalten | wie `RESUME_PENDING` |
+| `PREPARED` | nach Inventar und Inspect aller Mitglieder, Totmannschalter angelegt (Pflicht vor dem Stop) | nichts mutiert → Timer entfernen, `ABORTED` |
+| `STOP_REQUESTED` | je Mitglied vor `stop`, mit `mask_before` | aktiv mit gleicher InvocationID: nichts passiert. Inaktiv, keine eigene Maske, Fingerprint unverändert, kein späterer Start: `start`. Sonst `CONFLICT` |
+| `MASK_REQUESTED` | je Mitglied nach dem Stop, vor `mask --runtime` | Laufzeit-Maske vorhanden und `mask_before` = keine: eigene Maske → wie `RESUME_PENDING`. Keine Maske: wie `STOP_REQUESTED` |
+| `QUIESCED` | alle Mitglieder gestoppt und maskiert, geprüft | wie `RESUME_PENDING` |
 | `CAPTURING` | vor der ersten Datei | wie `RESUME_PENDING`; Job fehlgeschlagen |
-| `RESUME_PENDING` | nach der letzten Datei, bei Cancel oder Fehler | Wiederanlauf **nur**, wenn gleiche Boot-ID, Mitglied inaktiv, Maske die eigene, Fingerprint unverändert, bei Containern `StoppedByUser` und `FinishedAt` = eigener Stop. Sonst `CONFLICT` |
-| `RESUMED` | alle Mitglieder im Ursprungszustand | fertig, archivieren |
+| `RESUME_PENDING` | nach der letzten Datei, bei Cancel, Fehler, SIGTERM oder `max_downtime` | `unmask --runtime` und `start` **nur**, wenn gleiche Boot-ID, Mitglied inaktiv, Maske die eigene, Fingerprint unverändert, bei Containern `StoppedByUser` und `FinishedAt` = eigener Stop. Sonst `CONFLICT` |
+| `RESUMED` | alle Mitglieder im Ursprungszustand | Timer entfernen, archivieren |
 | `CONFLICT` | – | manuelle Klärung; `ofd --podman-journal` zeigt, `--resolve <job>` entfernt nur die eigene Maske |
 
 Sonderfälle: **Neue Boot-ID**: die Maske ist weg, systemd hat nach `WantedBy`
@@ -794,10 +1067,9 @@ Sicherung** (InvocationID bzw. Container-ID geändert): Job fehlerhaft,
 `consistency_violated`, kein zweiter Stop, kein Wiederanlauf durch uns.
 **Cancel**: sofort `RESUME_PENDING`, Wiederanlauf mit eigenem Zeitbudget und
 frischer Broker-Instanz; ein begonnener `systemctl stop` wird nicht
-wiederholt, sondern sein Ergebnis gelesen. **`ofd` stirbt**: Maske bleibt bis
-zur Recovery beim Start von `ofd` und vor jedem neuen Podman-Job der Domäne.
-Ein Totmannschalter (`systemd-run --on-active=<max_downtime>`) prüft keinen
-Fingerprint und ist nicht im MVP [K §1.3].
+wiederholt, sondern sein Ergebnis gelesen. **`ofd` stirbt oder hängt**:
+Recovery beim Start von `ofd`, vor jedem neuen Podman-Job der Domäne und
+spätestens durch den Totmannschalter nach `max_downtime`.
 
 ## Threading, Grenzen, Abbruch
 
@@ -810,25 +1082,46 @@ bekommt einen Planfehler und nimmt nie eine fremd gestoppte Gruppe wieder
 auf); teilbare Lese-Leases; Restore-Leases auf Zielnamen. Kein globaler Lock
 über I/O [K §4].
 
-Kein Spool beim Sichern: Layer und Volume-Dateien werden offsetbasiert
-gelesen. Spool nur für den Image-Import beim Restore, auf der Platte
-(`/var/tmp/onesimus-podman/<domäne>/<job>/`, Eigentümer das Konto, 0700),
-Quote = Summe der `diff-size` der benötigten Layer, `statvfs` vorab, Löschen
-bei Close, Cancel und Recovery. Grenzen je Instanz: offene Handles (64),
-Einträge je Scan-Antwort (1024), Pfadlänge (4096), xattr (64 KiB),
-Inspect/Spec (1 MiB), Objekte im Inventar (konfigurierbar). Abbruch: Epoch-
-Unterbrechung des WASM-Stores, SIGTERM/SIGKILL an die Broker-Prozessgruppe,
-danach Recovery mit eigenem Budget (`cancel_timeout`, `recovery_timeout`).
+Kein Spool beim Sichern: Layer und Volume-Dateien liest der Host
+offsetbasiert. **Spool nur für den Image-Import beim Restore** (V-7, [K §4]):
+
+- Basis `/var/lib/onesimus/podman-spool/`, Eigentümer root, Modus **0700**,
+  nie unter `/var/tmp` oder `/tmp`.
+- Angelegt mit einer **`O_NOFOLLOW`-Kette**: jedes Element per `mkdirat` und
+  `openat(O_DIRECTORY|O_NOFOLLOW)` ab dem Deskriptor des Elternverzeichnisses,
+  Eigentümer und Modus nach dem Öffnen geprüft; ein vorgefundener Symlink oder
+  fremder Eigentümer bricht ab.
+- Je Job ein Unterverzeichnis `<domäne>/<jobid>`. Rootless wird es per
+  `fchown` dem Konto übergeben; der Broker erreicht es nur über einen
+  geerbten Verzeichnis-Deskriptor (`/proc/self/fd/<n>`), weil er die
+  0700-Basis nicht durchlaufen kann. Nachweis in P3, dass
+  `podman pull oci:/proc/self/fd/<n>/…` funktioniert; Ausweichweg ist
+  `podman load` aus stdin ohne Spool (Vorschlag, offen).
+- Löschen nur per `unlinkat` ab dem geprüften Deskriptor mit
+  `openat2(RESOLVE_BENEATH|RESOLVE_NO_SYMLINKS)`, bei Close, Cancel und
+  Recovery; root folgt dabei nie einem Pfad, den ein Konto gewählt hat.
+- Quote = Summe der `diff-size` der benötigten Layer, `statvfs` vorab.
+
+Grenzen je Instanz: offene Handles (64), Einträge je Scan-Antwort (1024),
+Pfadlänge (4096), xattr (64 KiB), Inspect/Spec (1 MiB), Zeilen in
+`ownership.tsv`, Objekte im Inventar (konfigurierbar). Abbruch:
+Epoch-Unterbrechung des WASM-Stores, SIGTERM/SIGKILL an die
+Broker-Prozessgruppe, danach Recovery mit eigenem Budget (`cancel_timeout`,
+`recovery_timeout`).
 
 ## Restore
 
 ### `restore_mode=files`
 
-Der Baum landet unter `Where` wie im SD-Strom, ohne Plugin-Code. Von Hand
-nutzbar: Images per `podman pull oci:<Where>/@podman/<domäne>/images/oci:<name>`;
-Volume-Daten mit `files_owner`/`files_special` wie im Abschnitt Attribute,
-danach `podman volume create` und `podman unshare cp -a --sparse=always`
-[K §2.3]. Quadlet-Quellen und Inspect-Daten dienen als Vorlage.
+Der Baum landet unter `Where` wie im SD-Strom, ohne Plugin-Code. Weil der
+Strom schon bereinigt ist (V-1), entstehen dabei keine setuid-, setgid- oder
+Cap-Dateien, unabhängig davon, welcher FD restauriert; Volume-Dateien tragen
+Host-IDs. Von Hand nutzbar: Images per
+`podman pull oci:<Where>/@podman/<domäne>/images/oci:<name>`; Volume-Daten
+auf demselben Host per `podman volume create` und
+`podman unshare cp -a --sparse=always` [K §2.3]; Sonderbits und Caps nennt
+`ownership.tsv`. Quadlet-Quellen (bei `env=omit` als Vorlage) und
+Inspect-Daten dienen als Vorlage.
 
 ### `restore_mode=online` (gestagt)
 
@@ -837,100 +1130,118 @@ STAGED`; jede angelegte Ressource trägt das Label
 `org.onesimus.restore-job=<jobid>` und steht in der Liste `created` [K §2.2].
 
 0. **Vorprüfung ohne Mutation**: Zielkonto freigegeben; Mapping groß genug
-   (größte gesicherte ns-UID/GID kleiner als das Ziel-Mapping); Plattform;
-   alle Zielnamen mit Suffix frei; Subnetze frei; Secrets vorhanden; Images
-   verfügbar; Ports und statische IPs gegen Bestand. Ergebnis: Plan mit
-   Konfliktliste; Planfehler brechen vor jeder Mutation ab.
+   für `uidset`/`gidset` **einschließlich der IDs aus ACL-Einträgen** (sonst
+   scheitert `setxattr(system.posix_acl_*)` mit EINVAL, Praxis 2);
+   Plattform; alle Zielnamen mit Suffix frei; Subnetze und Bridge-Namen frei;
+   Secrets vorhanden; Images verfügbar oder schon vorhanden; Ports und
+   statische IPs gegen Bestand; Pflichtvergleich der Sicherheitsfelder für
+   jede geplante Anlage. Ergebnis: Plan mit Konfliktliste; Planfehler brechen
+   vor jeder Mutation ab.
 1. **Netze** aus Inspect mit Erlaubnisliste (bridge/macvlan/ipvlan, Subnetz,
    Gateway, IP-Bereich, IPv6, internal, DNS, Optionen, Labels), Name mit
    Suffix.
-2. **Volumes** neu anlegen (Treiber `local`, Optionen aus Erlaubnisliste);
-   prüfen: leer, `CreatedAt` ≥ Jobstart, Restore-Label. Befüllen im
-   Ziel-Namespace mit der Reihenfolge aus dem Abschnitt Attribute; Ergebnis wie
-   `cp -a --sparse=always` im Namespace (Eigentümer, Modus, Hardlinks, Symlinks,
-   Löcher) [K §2.1]. Danach Vergleich mit dem Manifest (Anzahl, Größen,
-   Prüfsummen). Nie `podman volume import`: es führt Inhalte zusammen [K §2.1].
-3. **Images**: `reference` per Pull nur als `name@sha256:…` aus erlaubten
-   Registries, dann Image-ID prüfen; `blobs` als OCI-Layout im Spool, feste
-   Befehlszeile `podman pull oci:<spool>:<ref>`, Image-ID gleich Config-Digest.
-   Ein vorhandenes gleiches Image wird wiederverwendet.
-4. **Pods, dann Container** nach `restore_strategy`: Basis ist `spec.json`
-   aus `podman generate spec`; bei `create-command` überschreiben die
-   geprüften Optionen der Positivliste die verlorenen Felder (statische IP,
-   Secret-Ziele, pasta-Optionen, `keep-id`). Name mit Suffix, Volumes nur aus
-   diesem Job, Netze aus diesem Job oder freigegeben, Bind Mounts nur über
-   `bind_map`, `--requires` auf Suffix-Namen, Label `restored-from`, **nicht
-   starten**. Anlage über libpod create; der Host prüft die Spec: keine neuen
-   Rechte gegenüber dem Original (privileged, cap_add, devices,
-   pid/ipc/net=host nur, wenn im Original **und** von der Policy erlaubt)
+2. **Volumes** neu anlegen: Treiber `local` **ohne** `o=bind`/`device`
+   (V-14); prüfen: leer, `CreatedAt` ≥ Jobstart, Restore-Label. Befüllen nach
+   dem Abschnitt „Restore online: Attribute“; Ergebnis wie
+   `cp -a --sparse=always` im Namespace [K §2.1, Praxis 2]. Danach Vergleich
+   mit dem Manifest (Anzahl, Größen, Prüfsummen). Nie `podman volume
+   import`: es führt Inhalte zusammen [K §2.1].
+3. **Images**: **vorhandene Image-ID nur referenzieren, nicht pullen**
+   (Praxis 1). Sonst `reference` per Pull nur als `name@sha256:…` aus
+   erlaubten Registries, dann Image-ID prüfen; `blobs` als OCI-Layout im
+   Spool, feste Befehlszeile `podman pull oci:<spool>:<ref>`, danach Image-ID
+   gleich Config-Digest und Manifest-Digest gleich `restore_digest`.
+4. **Pods, dann Container** nach `restore_strategy`: `create-command` aus der
+   geprüften Positivliste; `spec` aus Spec plus Inspect-Ergänzung, ohne
+   Quell-`idmappings` und automatische Aliase. Name mit Suffix, Volumes nur
+   aus diesem Job, Netze aus diesem Job oder freigegeben, Bind Mounts nur über
+   `bind_map`, `--requires` auf Suffix-Namen, Variablen ohne Wert
+   weggelassen, Label `restored-from`, **nicht starten**. Anlage über libpod
+   create; danach Pflichtvergleich der Sicherheitsfelder am neuen Inspect
+   (Abschnitt Container); mehr Rechte als das Original → Rückbau. pid/ipc/
+   net=host nur, wenn im Original **und** von der Policy erlaubt
    [K §2.1, K §3.3].
-5. **Quadlet**: Quellen umschreiben (Suffix für `ContainerName`, `.volume`- und
-   `.network`-Verweise, `[Install]` entfernen, `image_pin`-Drop-in) und
-   **außerhalb aller Quadlet-Suchpfade** ablegen: rootless
+5. **Quadlet und lokale Units**: Quellen umschreiben (Suffix für
+   `ContainerName` und Unit-Namen, `.volume`- und `.network`-Verweise,
+   Hostpfade in `Volume=`/`Mount=` nur über `bind_map`, sonst Planfehler,
+   `[Install]` entfernen, `image_pin`-Drop-in). Verwandte lokale Units unter
+   `systemd/` (z. B. `tapir-ackervielfalt.target`) werden **mitgestagt**, mit
+   Suffix und umgeschriebenen `PartOf=`/`Wants=` (V-13). Alles **außerhalb
+   aller Quadlet- und Unit-Suchpfade** ablegen: rootless
    `~/.local/share/onesimus/staged/<jobid>/`, rootful
    `/var/lib/onesimus/podman-staged/<jobid>/`. Unterverzeichnisse der
    Suchpfade sind verboten, weil Quadlet sie rekursiv liest [K §2.1].
    Quadlet-Container werden nicht vorab angelegt; Quadlet erzeugt sie beim
-   Start. `EnvironmentFile=` bleibt ein Verweis.
-6. **Bericht**: angelegte Objekte, offene Punkte (Secrets, Env-Werte, Ports,
-   EnvironmentFiles, `lossy_fields`). Promotion (Quadlet in den Suchpfad,
+   Start. `EnvironmentFile=` bleibt ein Verweis; offene Platzhalter
+   (`env=omit`) verhindern die Promotion.
+6. **Bericht**: angelegte Objekte, offene Punkte (Secrets, weggelassene
+   Variablen, offene Platzhalter, Ports, EnvironmentFiles, `lossy_fields`,
+   nicht angewandte Einträge). Promotion (Quellen in den Suchpfad,
    `daemon-reload`) und Start gibt der Administrator getrennt frei.
 
 Fehler nach Schritt 0: Rückbau **nur** der Objekte in `created` mit eigenem
 Label; teilweise befüllte Volumes werden gelöscht, nicht repariert; nach
 Absturz Recovery aus dem Restore-Journal nach derselben Regel.
 
-libpod create ohne Socket: Vorschlag, offen: Broker bzw. Rootful-Backend
+libpod create ohne Socket (Vorschlag, offen): Broker bzw. Rootful-Backend
 starten für die Dauer des Restores einen privaten
 `podman system service --time=0 unix://<privates-verzeichnis>/s.sock` als
-eigenes Kind und beenden ihn danach; kein fremder Socket, keine
-Unit-Aktivierung [A §1]. Alternative: der Host erzeugt aus der Spec eine
-geprüfte `podman create`-Argumentliste.
+eigenes Kind, beenden ihn danach und prüfen das Ende per PID (ein solcher
+Dienst überlebt sonst die Shell, Praxis 3); kein fremder Socket, keine
+Unit-Aktivierung [A §1]. Technisch bestätigt (Praxis 3). Alternative: der
+Host erzeugt aus der Spec eine geprüfte `podman create`-Argumentliste.
 
 ### Konflikte
 
 | Konflikt | Verhalten von Podman | Behandlung |
 | --- | --- | --- |
-| gleichnamiges Netz | „network name … already used“ | Suffix; bei `existing` muss das Subnetz passen, sonst Planfehler |
-| Subnetz überlappt (auch `10.88.0.0/16`) oder Host-Route | „subnet … is already used“ [K §2.1] | `network_subnet=keep`: Planfehler; `auto`: neues Subnetz, Warnung |
-| Quadlet-`.network` existiert mit anderem Subnetz | `--ignore` verschweigt es [A §3] | Planfehler |
-| `network_interface` (Bridge-Name) belegt | – | Feld weglassen, netavark vergibt; vermerken |
+| gleichnamiges Netz | „network name … already used“ (Praxis 7) | Suffix; bei `existing` muss das Subnetz passen, sonst Planfehler |
+| Subnetz überlappt (auch `10.88.0.0/16`) oder Host-Route | „subnet … is already used on the host or by another config“ (Praxis 7) | `network_subnet=keep`: Planfehler; `auto`: neues Subnetz, Warnung |
+| Quadlet-`.network` existiert mit anderem Subnetz | `--ignore` verschweigt es (Praxis 7) | Planfehler |
+| `network_interface` (Bridge-Name) belegt | „bridge name … already in use“, `create` scheitert (Praxis 7) | Vorprüfung; Feld weglassen, netavark vergibt; vermerken |
 | macvlan/ipvlan-Parent fehlt | – | Planfehler (später `netmap=`) |
-| statische IP belegt | `create` gelingt, `start` scheitert („already allocated“) [K §2.1] | Planfehler bei `restore_ip=keep`, sonst Warnung |
+| statische IP belegt | `create` gelingt, `start` scheitert („already allocated“, Praxis 7) | Planfehler bei `restore_ip=keep`, sonst Warnung |
 | Host-Port belegt, rootless < 1024 | `create` gelingt, `start` scheitert; unter `Restart=always` Neustartschleife [K §2.1] | Warnung im Plan; Container bleiben gestoppt |
 | fehlendes Secret | `create` scheitert sofort [K §2.1] | Planfehler mit Name |
-| gleichnamige Quadlet-Quelle im Ziel | – | Planfehler bei Promotion |
+| gleichnamige Quadlet-Quelle oder Unit im Ziel | – | Planfehler bei Promotion |
 | Standardnetz `podman` abweichend | – | Referenz plus Subnetzangabe, Warnung |
 | rootful → rootless | macvlan/ipvlan, feste Bridge-Namen eingeschränkt | Planfehler bei nicht unterstützten Treibern |
-| ns-IDs außerhalb des Ziel-Mappings | – | Planfehler „subuid-Bereich zu klein“ |
+| ns-IDs außerhalb des Ziel-Mappings, auch in ACLs | `setxattr` EINVAL bzw. `chown` EINVAL (Praxis 2) | Planfehler „subuid-Bereich zu klein“ |
+| Image-ID im Ziel schon vorhanden | `pull oci:` ändert Digest und RepoDigests (Praxis 1) | nicht pullen, nur referenzieren |
 | `NeedsCopyUp`/`NeedsChown` am neuen Volume | Podman kopiert nur in leere Volumes, `chown` nur der Wurzel (Vermutung) [S §2] | Testfall; Original-Flags im Inspect |
+
+Zwei Speicher desselben Kontos dürfen gleiches Subnetz und gleichen
+Bridge-Namen haben, weil `rootless-netns` je runroot liegt; die Vorprüfung je
+Domäne genügt (Praxis 7).
 
 ## Später: Accurate und Incrementals
 
 MVP ist Full-only. `JobContext` hat weder Level noch Since; `save_plugin_file`
 ruft `accurate_check_file` nicht auf und `plugin_ff` löscht `FO_CHKCHANGES`
 [S §4]. Für P4: `JobContext` um `level` und `since_unix` erweitern,
-`accurate_check_file` mit dem Stat aus `FileEntry` aufrufen, Löschungen über
-`accurate_finish` (`FT_DELETED`). Image-Blobs fallen dank Digest-Pfad und fester
-`mtime`/`ctime` automatisch aus Incrementals heraus; Volumes liefern alle
-Einträge, Daten nur für geänderte Dateien (ctime erfasst auch `chown` und
+`accurate_check_file` mit dem Stat des Scan-Eintrags aufrufen, Löschungen über
+`accurate_finish` (`FT_DELETED`). Image-Blobs fallen dank Digest-Pfad und
+fester `mtime`/`ctime` automatisch aus Incrementals heraus; Volumes liefern
+alle Einträge, Daten nur für geänderte Dateien (ctime erfasst auch `chown` und
 xattr). Ebenfalls P4: `consistency=freeze` (Pause plus Snapshot, sobald
-Volumes als Subvolumes zertifiziert sind; btrfs-Volumes sind heute keine
-Subvolumes [K §1.1]), signierte App-Adapter, Remote, weitere Storage-Treiber.
+Volumes als Subvolumes zertifiziert sind [K §1.1]), signierte App-Adapter,
+Remote, weitere Storage-Treiber, rootful CHAR/BLOCK.
 
 ## Abnahmefall forgeiec.io
 
-Rootful Debian 13, Podman 5.4.2, overlay auf ext4, SELinux aus, netavark
-[S Einleitung, A §4, K §1.1]: fünf Quadlet-Units `tapir-*` in
+Rootful Debian 13, Podman 5.4.2, systemd 257, overlay auf ext4, SELinux aus,
+netavark [S Einleitung, A §4, K §1.1]: fünf Quadlet-Units `tapir-*` in
 `/etc/containers/systemd/` (alle `Restart=always`, `Network=host`, Label
-`PODMAN_SYSTEMD_UNIT`), `tapir-ackervielfalt.target` in `/etc/systemd/system`
+`PODMAN_SYSTEMD_UNIT`, `ExecStop=podman rm -v -f -i --cidfile=…`,
+`KillMode=mixed`), **`tapir-ackervielfalt.target`** in `/etc/systemd/system`
 (`PartOf`), `Wants=tapir-redis.service`, `After=postgresql.service` (Host),
 `EnvironmentFile=/etc/tapir/keycloak.env` und
 `/etc/tapir/instances/ackervielfalt.env`, Bind Mounts
 `/var/lib/tapir/{ackervielfalt,redis,keycloak/themes/wirgarten}`, keine
 Named Volumes, keine eigenen Netze, keine Pods, keine Podman-Secrets; drei
 Images (tapir `:latest` 1,11 GB, keycloak 26.8.0, redis 7.4-alpine), keine
-gemeinsamen Layer. Daneben `www-data` mit Matomo, nicht freigegeben.
+gemeinsamen Layer. Datenbanken von tapir und Keycloak im Host-PostgreSQL.
+Daneben `www-data` mit Matomo, nicht freigegeben.
 
 ```text
 FileSet {
@@ -939,11 +1250,29 @@ FileSet {
     Options { signature = XXH128; compression = LZ4 }
     File = /etc/tapir
     File = /var/lib/tapir
-    Plugin = "podman:user=root:quadlet=tapir-*:images=blobs"
-    Plugin = "postgresql:instance=main"
+    File = /etc/containers                                  # Quadlet-Originale, containers/registries/storage.conf
+    File = /etc/systemd/system/tapir-ackervielfalt.target
+    Plugin = "podman:user=root:quadlet=tapir-*:images=blobs:max_downtime=3600"
+    Plugin = "postgresql:instance=main"                     # Datenbanken von tapir und Keycloak, siehe POSTGRESQL-PHASE2
   }
 }
 ```
+
+`File = /etc/containers` deckt die Quadlet-Originale (einschließlich
+etwaiger `Environment=`-Werte, bewusst über den FD) und die
+Podman-Konfiguration ab (V-13 e). Registry-Anmeldungen
+(`/run/containers/0/auth.json`, `/root/.config/containers/auth.json`) werden
+nicht gesichert; mit `images=blobs` braucht der Restore keinen Pull.
+`max_downtime=3600` ist ein Beispielwert; er wird nach dem Probelauf
+festgelegt.
+
+**Vorbedingungen** (V-13 d): Die Abnahme-Sicherung **stoppt die produktiven
+tapir-Units** für die Dauer des ganzen Jobs (Dateien, PostgreSQL-Dump und
+1,1 GB Image-Blobs). Sie läuft deshalb nur in einem **Wartungsfenster mit
+ausdrücklicher Freigabe des Nutzers**. Vorher ein Probelauf derselben Zeile
+mit `consistency=crash` (kein Stop) zur Messung der Jobdauer; daraus folgen
+das Fenster und `max_downtime` (Messdauer plus Reserve). Bis zur Freigabe
+bleibt forgeiec.io nur lesend.
 
 Erwartet:
 
@@ -951,69 +1280,111 @@ Erwartet:
   Netze, `external.paths` für beide EnvironmentFiles und die Bind-Quellen mit
   `covered_by_fd: true`, `external.units` `postgresql.service`, `www-data` als
   `discovered_unconfirmed` angezeigt und nicht gesichert.
-- Sicherung: Inspect und Spec vor dem Stop; Writergruppe aus allen tapir-Units
-  über `Wants`/`PartOf` und gemeinsame Bind-Quelle; Stop über Laufzeit-Maske für
-  den ganzen Job (`consistency_scope=job`), also auch während der FD die
-  Dateien unter `/var/lib/tapir` und `/etc/tapir` sichert; PostgreSQL läuft
-  weiter und wird über sein Plugin gesichert. `env.json` nur mit Namen.
-  Image-Blobs je DiffID. Journal endet in `RESUMED`, alle Units wieder aktiv.
-- Grants: `podman.rootful`, `podman.inventory`, `podman.image.read`,
-  `podman.lifecycle`.
-- Restore auf einem frischen Testhost: `files` für `/etc/tapir` und
-  `/var/lib/tapir`, `online` für Podman: gleiche Image-IDs, Quadlet-Quellen
-  gestagt mit `image_pin`-Drop-in, keine Aktivierung; Anwendungsprüfung erst
-  nach ausdrücklicher Promotion und Start.
+- Sicherung: Inventar, Inspect, `CreateCommand` und Unit-Eigenschaften vor dem
+  Stop; Writergruppe aus allen tapir-Units über `Wants`/`PartOf` und
+  gemeinsame Bind-Quelle; Totmannschalter angelegt; Stop je Unit mit `stop`,
+  dann `mask --runtime`, für den ganzen Job (`consistency_scope=job`), also
+  auch während der FD `/var/lib/tapir`, `/etc/tapir` und `/etc/containers`
+  sichert; PostgreSQL läuft weiter und wird über sein Plugin gesichert.
+  `env.json` nur mit Namen. Image-Blobs je DiffID, `restore_digest` im
+  Manifest. Journal endet in `RESUMED`, alle Units wieder aktiv, gemessene
+  Ausfallzeit im Manifest (`downtime_seconds`).
+- Grants im Zertifikat: alle Podman-Grants; die Policy auf forgeiec.io lässt
+  `podman.rootful`, `podman.inventory`, `podman.image.read`,
+  `podman.lifecycle` und, falls dort auch restauriert werden soll,
+  `podman.restore` zu (V-11).
+- **Restore auf einem frischen Testhost**:
+  1. `files` für `/etc/tapir`, `/var/lib/tapir` und `/etc/containers`
+     (Konfiguration; Quadlet-Originale nur als Vorlage, nicht in den
+     Suchpfad).
+  2. **Datenbank als Handschritt**: Der Online-Restore des PostgreSQL-Plugins
+     ist offen und „in neue Datenbank“ geplant ([STAND](STAND-2026-11-19.md),
+     [PostgreSQL Phase 2](POSTGRESQL-PHASE2.md)); tapir und Keycloak erwarten
+     die Datenbanknamen aus `/etc/tapir/*.env`. Für die Abnahme daher
+     PostgreSQL-Restore als Datei und `pg_restore` in die **Originalnamen**
+     auf dem Testhost, dokumentiert als Handschritt.
+  3. `online` für Podman mit
+     `bind_map=/var/lib/tapir=/var/lib/tapir` (Identität ausdrücklich, V-13 c):
+     gleiche Image-IDs, Quadlet-Quellen und `tapir-ackervielfalt.target`
+     gestagt mit Suffix und `image_pin`-Drop-in (`restore_digest`), keine
+     Aktivierung.
+  4. Promotion und Start nach ausdrücklicher Freigabe, dann
+     Anwendungsprüfung.
 
-## Testaufbau in Containern
+## Testaufbau
 
-Alle Versuche ohne root und ohne Produktivsystem, auf dem Entwicklungsrechner
-und in CI [S Testaufbau, K §0]:
+Versuche ohne root und ohne Produktivsystem, auf dem Entwicklungsrechner und
+in CI [S Testaufbau, K §0]. **Lifecycle-, Quadlet-, systemd- und
+rootful-Tests brauchen eine Test-VM** mit eigenem systemd; ein Container
+(`quay.io/podman/stable`) bildet Quadlet, Systemmanager und
+`mask --runtime` nicht ab (V-18).
 
 ```sh
-T=$(mktemp -d /tmp/podtest.XXXX)
-export XDG_RUNTIME_DIR=$T/xdg-run XDG_DATA_HOME=$T/xdg-data   # eigener Blob-Info-Cache und Laufzeitordner
+T=$(mktemp -d /tmp/podtest.XXXX)       # 0700
+export HOME=$T/home XDG_CONFIG_HOME=$T/config XDG_DATA_HOME=$T/xdg-data XDG_RUNTIME_DIR=$T/xdg-run
+export CONTAINERS_CONF=$T/containers.conf CONTAINERS_STORAGE_CONF=$T/storage.conf   # lock_type = "file"
 P="podman --root $T/root --runroot $T/run --tmpdir $T/tmp --storage-driver vfs"     # Quelle
 Q="podman --root $T/root2 --runroot $T/run2 --tmpdir $T/tmp2 --storage-driver vfs"  # Ziel
 ```
 
-**Isolationsregeln** (Lehre aus einem Zwischenfall [K §0]): `--root` und
-`--runroot` allein trennen weder das libpod-`tmpdir` (`alive`, `pause.pid`,
-`exits/`) noch die Lock-Tabelle in `/dev/shm`; ein `system reset` auf einem
-Wegwerf-Speicher ließ Podman einen Neustart annehmen und den echten Speicher
-des Kontos „auffrischen“. Deshalb: immer eigenes `--root`, `--runroot`,
-`--tmpdir` und `XDG_RUNTIME_DIR`, besser ein eigenes Testkonto; **nie
-`podman system reset`**; Aufräumen mit `$P unshare rm -rf $T`.
+**Isolationsregeln** (Lehre aus einem Zwischenfall [K §0] und Praxis):
 
-- Image-Fixtures: busybox und alpine (Multi-Arch-Index, gzip-Layer), ein
-  abgeleitetes Image mit gemeinsamer Basis und abweichender Layer-ID/DiffID,
-  ein lokal gebautes Image ohne Registry-Manifest; später zstd und
-  zstd:chunked.
-- Volume-Fixture (per `$P run --network none` und `$P unshare`): Verzeichnis
-  0700 von UID 1000, Hardlink, Symlink, FIFO, Sparse-Datei mit 100 MiB Loch,
-  `user.*`-xattr, ACL und Default-ACL, `security.capability`, setuid-Datei,
-  Name mit Byte 0xff, leeres Verzeichnis, UID außerhalb des Mappings
-  (Negativfall); Varianten `o=bind`, `tmpfs`, Treiber `image`.
-- Rundreise: Sicherung über `ofd` in den SD-Strom (Ende-zu-Ende-Aufbau aus
-  Phase 1), Restore `online` nach `$Q`; Vergleich je Datei im Namespace:
-  SHA-256, `stat -c '%u %g %a %h %s %b'`, `getfacl -n`, xattrs, Caps,
-  Inode-Gleichheit der Hardlinks, `SEEK_DATA`; Images: `Id`, `RootFS.Layers`,
-  `RepoTags`, dann `$Q run --rm --network none <id> true`.
-- Anderer subuid-Bereich: verschachtelter Namespace
-  `unshare --user --map-users=0:5000:2000`; echte zweite Konten mit anderem
-  `/etc/subuid` und das rootful Profil in einem Container
-  (`quay.io/podman/stable`, privilegiert im rootless Podman) oder einer
-  Test-VM.
-- Quadlet-Tests nur in einem eigenen Benutzermanager des Testkontos bzw. im
-  Container, mit Quellen unter dessen `$XDG_RUNTIME_DIR/containers/systemd`.
+- `--root` und `--runroot` allein trennen weder das libpod-`tmpdir`
+  (`alive`, `pause.pid`, `exits/`) noch die Lock-Tabelle in `/dev/shm`; immer
+  eigenes `--root`, `--runroot`, `--tmpdir` und `XDG_RUNTIME_DIR`, besser ein
+  eigenes Testkonto; **nie `podman system reset`**.
+- Die shm-Lock-Tabelle ist je UID gemeinsam: eigene `containers.conf` mit
+  `lock_type = "file"`. Ohne eigenes `HOME`/`XDG_CONFIG_HOME` liest Podman
+  `storage.conf` und `containers.conf` des Nutzers.
+- Aufräumen in dieser Reihenfolge: Unterverzeichnisse per `$P unshare rm -rf`
+  löschen (ein `unshare rm -rf $T` legt den Speicher sofort wieder an), den
+  eigenen Pause-Prozess beenden (PID aus
+  `$XDG_RUNTIME_DIR/libpod/tmp/pause.pid`, per `environ` geprüft), dann
+  `rm -rf $T` als Konto. Private `podman system service` per PID beenden.
+- Netze für Laufzeittests mit `--disable-dns`; aardvark-dns startet ohne
+  Benutzerbus nicht.
+- Quadlet-Tests nur im Benutzermanager eines Testkontos bzw. der Test-VM.
+
+Fixtures:
+
+- Images: busybox und alpine (Multi-Arch-Index, gzip-Layer), ein abgeleitetes
+  Image mit gemeinsamer Basis, Whiteouts, Hardlink, Symlink, FIFO, setuid,
+  Sparse-Datei, Name mit 0xff, xattr; ein lokal gebautes Image ohne
+  Registry-Manifest; später zstd und zstd:chunked.
+- Volume (per `$P run --network none` und `$P unshare`): Verzeichnis 0700
+  von UID 1000, Hardlink, Symlink, FIFO, Sparse-Datei mit 100 MiB Loch,
+  `user.*`-xattr, ACL und Default-ACL (auch mit einer ID, die kein Eigentümer
+  ist), `security.capability`, setuid-Datei, Name mit Byte 0xff, leeres
+  Verzeichnis, UID außerhalb des Mappings (Negativfall); Varianten `o=bind`,
+  `tmpfs`, Treiber `image`.
+- Container: CLI-Container mit allen Optionen aus Praxis 3 (Env, env-file,
+  statische IP/MAC, Alias, Secret mit Ziel und `type=env`, `keep-id`,
+  Healthcheck, CapAdd/CapDrop, `--read-only`, `no-new-privileges`, Ulimits,
+  Stop-Signal/-Timeout, `--init`); API-Container ohne `CreateCommand`;
+  Quadlet-Unit, deren PID 1 SIGTERM ignoriert.
+- Sentinels: eindeutige Testwerte in jeder Env-Quelle der Tabelle
+  „Umgebungsvariablen“, in Kommandoargumenten, Healthcheck, Labels und
+  Drop-ins.
+- Rundreise: Sicherung über `ofd` in den SD-Strom, Restore `online` nach `$Q`;
+  Vergleich je Datei im Namespace: SHA-256, `stat -c '%u %g %a %h %s %b'`,
+  `getfacl -n`, xattrs, Caps, Inode-Gleichheit der Hardlinks, `SEEK_DATA`;
+  Images: `Id`, `RootFS.Layers`, `RepoTags`, Manifest-Digest gleich
+  `restore_digest`, dann `$Q run --rm --network none <id> true`.
+- Anderer subuid-Bereich: verschachtelter Namespace (Maps vom Elternprozess,
+  z. B. `0:5000:2000`) und echte zweite Konten mit anderem `/etc/subuid` in
+  der Test-VM.
 
 ## Phasen und Exitkriterien
 
+Jedes Kriterium ist ein benannter, automatisierter Test oder eine Messung mit
+Schwelle (V-18).
+
 | Phase | Liefergegenstand | Exitkriterium |
 | --- | --- | --- |
-| P0 | Grundlagen: `FileEntry` v2 mit Host-Kontrolle, WIT-Schnittstelle `podman`, `podman_broker.proto`, Broker-Start mit von `ofd` angelegtem User-Namespace, Gerüst des Rootful-Backends, Kontopolicy, Grants, erweiterte Discovery, Journaldatei | Gast kann keine Eigentümer, Sonderbits oder Caps erfinden; Broker ohne Pause-Prozess führt unter NNP `podman info` aus; Rootful-Backend ohne generisches Exec; conmon-Fund und bestätigte Domäne getrennt |
-| P1 | Inventar und Plan: Zusammenhangs-Algorithmus in Gast und Host, Quellen-Rangfolge, Env-Filter, Manifest ohne Daten | gestoppte Container und Quadlet-Units ohne Container sichtbar; gleiche Namen verschiedener UIDs getrennt; Host- und Gast-Objektmenge stimmen überein; Plan für forgeiec.io wie erwartet |
-| P2 | Full-Backup: Dateibaum, Image-Blobs per tar-split, Volumes mit Attributen, Stop mit `consistency_scope=job`, Journal und Recovery | Crash-/Cancel-Tests an jedem Journalübergang; Metadaten-Rundreise im Testaufbau; Abnahme-Sicherung forgeiec.io |
-| P3 | Restore `files` und `online` mit Konflikttabelle, Rückbau und separater Promotion | sauberer Zielhost offline, gleiche Image-IDs, bestehende Ressourcen unverändert, Rückbau nur eigener Objekte; forgeiec-Restore auf Testhost mit Anwendungsprüfung |
+| P0 | Grundlagen: `FileEntry` v2 mit `source_ref`, Scan-Handle im Host, bereinigter Strom, `api_version {1,2}`, WIT `onesimus:filed-plugin/podman`, `podman_broker.proto`, Broker-Start im root-eigenen Namespace, Gerüst des Rootful-Backends mit Exec-Protokoll, Bindung an `org.onesimus.podman`, Kontopolicy, Grants, erweiterte Discovery, Journaldatei | (1) Restore in Dateien eines Fixture-Volumes mit ns-UID-0-setuid-Datei und Cap-Datei, je mit `ofd` und mit einem Bareos-FD: `find <Where> -perm /7000` leer, `getcap -r <Where>` leer, Eigentümer = Host-IDs. (2) Tests „Gast liefert fremde `source_ref`, falschen Pfad, doppelte `source_ref`, Bytes für `source_ref`-Eintrag“: alle abgewiesen. (3) Broker im root-eigenen Namespace unter NNP mit den drei Variablen, jeweils **mit und ohne** Pause-Prozess: `podman info` meldet `Rootless=true` und den graphroot des Kontos; `ps -a`, `inspect`, `volume ls`, `create` und `run --rm` eines busybox-Containers gelingen; `systemctl --user show` als Konto-UID gelingt. (4) Test „Konto versucht `ptrace` auf den Broker“: EPERM. (5) Test „Konto liefert Scan-Antwort mit CHAR-Gerät/ID außerhalb der Map“: nicht im Strom, unter `rejected`. (6) Exec-Protokoll der ganzen P0-Testsuite enthält nur Argumentlisten der Operationstabelle. (7) PostgreSQL-Plugin (`api_version` 1) und Podman-Testplugin (2) laden nebeneinander. (8) Discovery folgt im Test keinem Symlink im Kontoverzeichnis; conmon-Fund und bestätigte Domäne sind getrennte JSON-Felder |
+| P1 | Inventar und Plan im Host, Quellen-Rangfolge, Positivlisten, Env-Behandlung, Manifest ohne Daten | (1) Fixture mit gestopptem Container und Quadlet-Unit ohne Container: beide im Plan. (2) Gleiche Namen unter zwei UIDs: zwei getrennte Objekte. (3) Sentinel-Test `env=omit`: `grep -r <sentinel>` über alle Gastantworten, den Strom, Joblog und Katalog ergibt 0 Treffer für jeden Env-Wert; bei `env=keep` Treffer nur im Strom. (4) Container-Fixture: für jede Strategie enthält der Plan alle Sicherheitsfelder des Originals, oder ein Planfehler nennt das fehlende Feld; `--secret type=env` ohne Quadlet/CreateCommand ergibt Planfehler. (5) Plan für forgeiec.io (lesend) gleicht der erwarteten Objektliste (Diff leer) |
+| P2 | Full-Backup: Dateibaum, Image-Blobs per tar-split, Volumes mit Attributen, Stop mit `consistency_scope=job`, Totmannschalter, Journal und Recovery | (1) An jedem Journalübergang je `kill -9 ofd`, SIGTERM und Cancel: danach alle Units aktiv, Fingerprint unverändert, keine eigene Maske übrig (`/run/systemd/…` ohne unsere `/dev/null`-Links). (2) SD ohne Medium bzw. `ofd` per SIGSTOP angehalten: Units spätestens `max_downtime + 60 s` nach dem ersten Stop wieder aktiv. (3) Quadlet-Unit, deren PID 1 SIGTERM ignoriert: Stop über ExecStop in höchstens `StopTimeout + 5 s`, kein 90-s-Timeout, Container danach gelöscht. (4) Layer-Fixtures auf vfs, overlay, btrfs: SHA-256 = DiffID. (5) Volume-Rundreise ohne Abweichung außer dokumentierten (Verzeichnis-nlink/-größe). (6) Abnahme-Sicherung forgeiec.io im freigegebenen Wartungsfenster: Journal `RESUMED`, `downtime_seconds` ≤ `max_downtime`, alle fünf Units aktiv, Anwendung antwortet (HTTP 200) |
+| P3 | Restore `files` und `online` mit Konflikttabelle, Rückbau und separater Promotion | (1) Zielhost ohne Route zu Registries: gleiche Image-IDs, Manifest-Digest = `restore_digest`, `run --network none <id> true` gelingt. (2) JSON-Schnappschuss von `ps -a`, `images`, `volume ls`, `network ls` der Zieldomäne vorher/nachher unterscheidet sich nur um Objekte mit Restore-Label; vorhandene Images unverändert (Digest, RepoDigests). (3) Fehler eingespielt in jedem Restore-Journalzustand: Rückbau entfernt genau die Objekte in `created`. (4) Pflichtvergleich: kein restaurierter Fixture-Container hat mehr Rechte als das Original. (5) `image_pin` mit `restore_digest` startet unter Quadlet ohne Pull. (6) forgeiec-Restore auf dem Testhost mit den dokumentierten Handschritten: Anmeldeseite HTTP 200, Stichprobe der Daten gleich |
 | P4 | Accurate/Incrementals, `freeze`, App-Adapter, `image_digest=original`, Remote, weitere Treiber | je Profil eigene Zertifizierung und Rundreise |
 
 ## Pflichttests
@@ -1021,68 +1392,109 @@ des Kontos „auffrischen“. Deshalb: immer eigenes `--root`, `--runroot`,
 - Discovery: conmon zweier rootless UIDs, rootful conmon, CRI-O-Fehlkandidat,
   manipulierter Prozessname, PID-Reuse, Exit während der Erkennung; Konto mit
   runroot `/tmp/storage-run-<uid>`, abweichender graphroot, Konto nur mit
-  gestoppter Quadlet-Unit; eingeschränkte `/proc`-Sicht, fehlendes NSS-Konto,
-  UID-Wiederverwendung; Plugin-Zeile mit nicht freigegebenem Konto.
-- Grants: fehlendes `podman.rootful` bei `user=root`, fehlendes
-  `podman.lifecycle` bei `consistency=stop`, lokale Policy entzieht Grants.
-- Host-Kontrolle: Gast liefert abweichende UID/Modus/xattrs, setuid ohne
-  `source_ref`, Pfad außerhalb eines Volumes; Restore in Dateien mit
-  ns-UID 0 und setuid (`files_special=drop`).
+  gestoppter Quadlet-Unit; Symlink statt `db.sql`; eingeschränkte
+  `/proc`-Sicht, fehlendes NSS-Konto, UID-Wiederverwendung; Plugin-Zeile mit
+  nicht freigegebenem Konto.
+- Grants und Bindung: fehlendes `podman.rootful` bei `user=root`, fehlendes
+  `podman.lifecycle` bei `consistency=stop` (bei `scope=job` vor jedem Stop
+  erkannt), lokale Policy entzieht Grants, anderes Plugin mit Podman-Grants
+  im Zertifikat wird nicht verknüpft.
+- Host-Kontrolle: fremde, doppelte oder umgehängte `source_ref`; Gast
+  liefert Bytes oder Attribute zu einem `source_ref`-Eintrag; Pfad außerhalb
+  eines Volumes; Restore in Dateien mit ns-UID 0, setuid und Caps (Ergebnis
+  ohne Sonderbits und Caps); Konto manipuliert Broker-Antwort; `ptrace` auf
+  den Broker.
 - Zwei UIDs mit identischen Namen; manipulierte IDs, Handles und Symlinks;
   kein Zugriff über Konto- oder Jobgrenzen.
-- Env: `env=omit` liefert keinen Wert an Gast, Volume, Joblog oder Katalog
-  (Inspect, Spec, `CreateCommand`, Dryrun); `env=keep` nur auf dem Volume.
-- Pods: Auswahl eines Mitglieds sichert den ganzen Pod.
-- Images: Layer-Rekonstruktion bit-genau (SHA-256 = DiffID), Layer verschwindet
-  während des Streams, Layer ohne tar-split, Restore mit gleicher Image-ID und
-  neuem Manifest-Digest, veränderlicher Tag mit `image_pin`.
-- Volumes: andere subuid-Bereiche, ACL/xattr/Caps, Hardlinks, Sparse,
-  Symlinks, nicht-UTF-8-Namen, Gerätedateien rootless, `o=bind` außerhalb der
-  Allowlist, fremder Treiber; Restore in nichtleeres Ziel abgewiesen.
+- Env: Sentinel-Test über alle Orte der Tabelle, Kommandoargumente,
+  Healthcheck, Labels, Drop-ins und stderr; Restore lässt Variablen ohne Wert
+  weg; `env=keep` nur auf dem Volume.
+- Pods: Auswahl eines Mitglieds sichert den ganzen Pod, auch gegen `exclude`.
+- Images: Layer-Rekonstruktion bit-genau (SHA-256 = DiffID), Layer
+  verschwindet während des Streams, Layer ohne tar-split, tar-split mit
+  `../` oder Symlink im Layer-Verzeichnis, Restore mit gleicher Image-ID und
+  `restore_digest`, vorhandenes Image wird nicht gepullt, veränderlicher Tag
+  mit `image_pin`.
+- Volumes: andere subuid-Bereiche, ACL-IDs außerhalb des Ziel-Mappings,
+  xattr/Caps, Hardlinks, Sparse, Symlinks, nicht-UTF-8-Namen, Gerätedateien
+  rootless, `o=bind` außerhalb der Allowlist, fremder Treiber; Restore in
+  nichtleeres Ziel abgewiesen; Restore legt nie `o=bind` an.
+- Container: Quellen-Rangfolge je Strategie, `generate spec` mit
+  `--secret type=env`, Pflichtvergleich der Sicherheitsfelder.
 - Konsistenz: Quadlet `Restart=always` unter Maske, `Wants=` einer anderen
-  Unit, Timer, Bediener startet während der Sicherung, SIGKILL nach Frist,
-  `scope=job` deckt die Include-Dateien ab; FD-/Broker-Crash vor und nach
-  jedem Journalübergang; neue Boot-ID.
-- Restore: Port-, IP-, Subnetz- und Secret-Konflikte wie in der Tabelle;
-  `--ignore`-Falle; Staging nie unter einem Quadlet-Suchpfad; Rückbau nur mit
-  eigenem Label; kein automatischer Start.
-- Cancel bei vollem Puffer, während `StopUnit` und während eines Layer-Streams;
-  Plugin A hält Device B nicht an.
-- gRPC-Ausfall mit BNET-Fallback ohne doppelte Jobausführung.
+  Unit, Timer, Start im Fenster zwischen `stop` und `mask`, vorab maskierte
+  Unit, PID 1 ignoriert SIGTERM, Bediener startet während der Sicherung,
+  SIGKILL nach Frist, `scope=job` deckt die Include-Dateien ab, Planfehler in
+  der zweiten Zeile stoppt nichts, Estimate stoppt nie; FD-/Broker-Crash vor
+  und nach jedem Journalübergang; Totmannschalter bei hängendem `ofd`;
+  SIGTERM an `ofd`; neue Boot-ID.
+- Restore: Port-, IP-, Subnetz-, Bridge-Namen- und Secret-Konflikte wie in
+  der Tabelle; `--ignore`-Falle; Staging nie unter einem Suchpfad; lokale
+  Units mitgestagt; Rückbau nur mit eigenem Label; kein automatischer Start;
+  Spool mit vorab angelegtem Symlink abgewiesen.
+- Cancel bei vollem Puffer, während `systemctl stop` und während eines
+  Layer-Streams.
 
 ## Offene Punkte
 
-1. **Quadlet-Quellen mit Werten bei `env=omit`**: Quellen können
-   `Environment=PASSWORD=…` enthalten. Vorschlag, offen: byte-genau sichern,
-   weil sie Konfigurationsdateien wie EnvironmentFiles sind, mit Warnung
-   `quadlet_env_values` (nur Namen); Alternative: Werte entfernen und die
-   Quelle als verändert kennzeichnen.
-2. **Podman-CLI im von `ofd` angelegten Namespace** (Eigentümer,
-   `_CONTAINERS_USERNS_CONFIGURED`, Pause-Prozess, Mount-Namespace): P0-Nachweis.
-3. **libpod create ohne Socket**: privater kurzlebiger Dienst oder geprüfte
-   `podman create`-Argumentliste.
-4. **Grant-Namen** und **Ort/Format der Kontopolicy**.
-5. **`restore_mode`**: `online` (wie in `ofd`) mit `stage` als Synonym oder nur
-   `online`.
-6. **Restore in Dateien**: `files_special`, `files_owner`, `ownership.tsv`.
-7. **Lese-Sperren** über lange Layer-Streams oder Prüfung danach.
-8. **Discovery**: ob `storage.conf` der Benutzer (nur Schlüssel `graphroot`)
-   gelesen werden darf oder nur Standardpfad, conmon-Hinweis und Admin-Eintrag.
-9. **Healthcheck** `--health-on-failure=restart` während Stop/Maske (nicht
+1. **Lese-Sperren** über lange Layer-Streams oder Prüfung danach (Images).
+2. **libpod create ohne Socket**: privater kurzlebiger Dienst (bestätigt
+   machbar, Praxis 3) oder geprüfte `podman create`-Argumentliste.
+3. **Grant-Namen**, **Ort/Format der Kontopolicy** und Grants je Plugin-ID im
+   Zertifikat (V-11, Signier-Infrastruktur).
+4. **Image-Import rootless** über `oci:/proc/self/fd/<n>` oder `podman load`
+   aus stdin (Spool, P3-Nachweis).
+5. **`systemctl --user` als Konto-UID mit NNP** oder `--machine=<konto>@`;
+   Verhalten ohne Benutzermanager (P0-Nachweis).
+6. **SD-Antwort**, die Gerät und Volume garantiert, als Startsignal für den
+   Stop (P2).
+7. **Healthcheck** `--health-on-failure=restart` während Stop und Maske (nicht
    geprüft); `NeedsCopyUp`/`NeedsChown` an neuen Volumes.
-10. **SELinux** `relabel` ungeprüft (beide untersuchten Rechner ohne SELinux).
-11. **Versionen**: erstes zertifiziertes Profil Podman 5.4.2 (netavark, sqlite,
-    overlay/btrfs/vfs); andere Versionen erst nach eigenem Test. Die
-    `latest`-Dokumentation ist Planungsquelle, keine Freigabe.
-12. **Totmannschalter** für Masken nach `ofd`-Absturz: nicht im MVP.
+8. **SELinux** `relabel` ungeprüft (beide untersuchten Rechner ohne SELinux).
+9. **Versionen**: erstes zertifiziertes Profil Podman 5.4.2 (netavark, sqlite,
+   overlay/btrfs/vfs, `cgroup_manager=systemd`); Positivlisten und interne
+   Variablen gehören zum Profil; andere Versionen erst nach eigenem Test.
+10. **`image_pin`**: Auflösung des lokalen `restore_digest` durch Quadlet ohne
+    Pull (P3), sonst Pin über die Image-ID.
+11. **rootful CHAR/BLOCK** in Volumes: im MVP ausgelassen; ob sie beim
+    Online-Restore aus `ownership.tsv` neu angelegt werden dürfen.
+
+Erledigt durch diese Überarbeitung: Quadlet-Quellen mit Werten bei
+`env=omit` (geschwärzte Vorlage), Podman-CLI im vorbereiteten Namespace
+(Variablen, Mount-Namespace; Eigentümer root bleibt P0-Nachweis),
+`restore_mode` (nur `online`), Restore in Dateien (bereinigter Strom,
+`ownership.tsv`), Discovery ohne Auswertung von Kontodateien als root,
+Totmannschalter (im MVP).
+
+## Entscheidungen, die der Nutzer noch treffen muss
+
+1. **Vorgabe für `max_downtime`** (V-4). Empfehlung: 7200 s als Vorgabe,
+   Pflicht bei `consistency_scope=job`; für forgeiec.io nach dem Probelauf mit
+   `consistency=crash` die Messdauer plus Reserve.
+2. **Stop-Reihenfolge bei Quadlet** (Praxis 4). Empfehlung: `stop`, dann
+   `mask --runtime` mit Nachprüfung, weil das ungeschützte Fenster nur
+   Millisekunden statt der ganzen Stop-Dauer umfasst.
+3. **Literale Kennwörter in Kommandoargumenten, Healthcheck und Labels** bei
+   `env=omit` (V-6). Empfehlung: Wertabgleich mit den Env-Werten, andere
+   Literale behalten, weil der Restore sie braucht; eine Option
+   `args=redact` erst bei Bedarf.
+4. **Bindung der Podman-Grants** (V-11). Empfehlung: jetzt feste Bindung an
+   `org.onesimus.podman` im Code von `ofd`, Grants je Plugin-ID später in der
+   Signier-Infrastruktur.
+5. **Vertragsversion** (V-16). Empfehlung: `ofd` akzeptiert `{1, 2}`; kein
+   harter Suite-Schnitt, das PostgreSQL-Plugin bleibt bei 1.
+6. **Abnahme forgeiec.io** (V-13). Empfehlung: Freigabe eines Wartungsfensters
+   erst nach dem Probelauf; Datenbank auf dem Testhost per Datei-Restore und
+   `pg_restore` in die Originalnamen als dokumentierter Handschritt, bis der
+   Online-Restore des PostgreSQL-Plugins steht.
 
 ## Umsetzungsstand
 
 `onesimus-plugins::executor` implementiert isolierte Worker, begrenzte Queues,
 Instanz-/Job-/Device-Prüfung, direkte Interrupts und einen Deadline-Watchdog.
 Der WASM-Host lädt signierte Gäste (Phase 1); der Broker-Start aus geprüftem
-Deskriptor existiert für PostgreSQL (`broker.rs`) und ist die Vorlage für
-`onesimus-podman-broker`.
+Deskriptor existiert für PostgreSQL (`broker.rs`, ohne `PR_SET_DUMPABLE`) und
+ist die Vorlage für `onesimus-podman-broker`.
 
 `onesimus-plugins::discovery` erfasst conmon-Kandidaten:
 
