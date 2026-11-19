@@ -125,6 +125,57 @@ Image-save und Container-export sind keine austauschbaren Verfahren.
 Registry-Wiederbeschaffung allein ist nur in einem ausdrücklich gewählten Profil
 zulässig; fehlender Registryzugriff darf das Offline-Restoreprofil nicht brechen.
 
+## Parameter der Plugin-Zeile (Vorschlag, offen)
+
+Was gesichert wird, legt der Administrator in der FileSet-Plugin-Zeile fest,
+Schreibweise wie beim PostgreSQL-Plugin (`name:schlüssel=wert:…`). Eine Zeile
+gilt genau einem Konto; mehrere Konten bedeuten mehrere Plugin-Zeilen.
+
+```text
+Plugin = "podman:user=forgejo:pods=*:exclude=test-*"
+Plugin = "podman:user=1001:containers=keycloak,postgres:images=reference"
+Plugin = "podman:user=root:quadlet=web-*.container:consistency=stop"
+```
+
+| Schlüssel | Pflicht | Werte | Vorgabe | Bedeutung |
+| --- | --- | --- | --- | --- |
+| `user` | ja | Kontoname, UID oder `root` | – | Das Konto, dessen Podman gesichert wird. Es muss in der Policy freigegeben sein; ein nur über conmon gefundenes Konto wird abgelehnt (Planfehler), nie still mitgesichert. `root` ist das rootful Profil. |
+| `endpoint` | nein | Endpoint-ID | lokaler libpod-Socket des Kontos | Nur für später (Remote, P4); im MVP nur lokal. |
+| `pods` | eine Auswahl | Namen oder Globs, kommagetrennt | – | Pods samt ihrer Container. |
+| `containers` | eine Auswahl | Namen oder Globs | – | Einzelne Container außerhalb von Pods. |
+| `quadlet` | eine Auswahl | Unit-Namen oder Globs | – | Über Quadlet verwaltete Container, Pods und Volumes; schließt die Quelldateien ein. |
+| `exclude` | nein | Namen oder Globs | – | Wird von `pods`/`containers`/`quadlet` abgezogen. |
+| `volumes` | nein | `yes`, `no` | `yes` | Named Volumes der Auswahl (zertifiziertes Profil). Bind Mounts nie; die sichert der FD als Dateien (eigene Include-Zeile). |
+| `images` | nein | `archive`, `reference`, `no` | `archive` | `archive`: `podman save` der verwendeten Images (Offline-Restore möglich). `reference`: nur Name und Digest, Restore braucht die Registry (ausdrücklich gewähltes Profil). |
+| `quadlet_sources` | nein | `yes`, `no` | `yes` | Quadlet-Quelldateien, Includes und Drop-ins der Auswahl. |
+| `consistency` | nein | `stop`, `crash` | `stop` | `stop`: autorisierter Stop der Writergruppe mit Journal, Sicherung, Wiederaufnahme. `crash`: Kopie im laufenden Betrieb, ausdrücklich abgeschwächtes Profil, im Manifest vermerkt. |
+| `secrets` | nein | `reference` | `reference` | Secrets nur als Verweis zur Wiederbereitstellung, nie ihr Inhalt. Ein anderer Wert ist im MVP nicht zulässig. |
+
+Regeln:
+
+- Genau eine der Auswahlen `pods`, `containers` oder `quadlet` ist Pflicht;
+  `*` wählt alles dieses Kontos. Ohne Auswahl: Planfehler. (Vorschlag: nicht
+  stillschweigend „alles“, damit eine leere Zeile nicht ungewollt Images und
+  Volumes sichert.)
+- Eine Auswahl, die nicht unterstützte Quellen trifft (externer
+  Volumetreiber, unbekanntes Mappingprofil, Writable Layer mit Änderungen),
+  ist ein Planfehler mit Nennung der Quelle, kein stilles Auslassen.
+- Unbekannte Schlüssel sind ein Fehler.
+- Gleiche Container-Namen verschiedener Konten bleiben getrennt, weil `user`
+  Teil der Identität im Manifest ist.
+
+Restore-Parameter (Restore-Job, `pluginoptions=`):
+
+| Schlüssel | Werte | Vorgabe | Bedeutung |
+| --- | --- | --- | --- |
+| `restore_mode` | `files`, `stage` | `files` | `files`: Archive als Dateien unter `Where` (ohne Plugin-Code). `stage`: über das Plugin in neue, gestoppte Ressourcen (Abschnitt Restore). |
+| `target_user` | Kontoname, UID | Original-Konto | Zielkonto für `stage`; muss freigegeben sein. |
+| `suffix` | Text | `-restored` | Namenszusatz der neuen Pods, Container und Volumes, damit nichts Bestehendes berührt wird. |
+
+Offen: ob `consistency=stop` je Pod oder für die ganze Auswahl gemeinsam
+stoppt (Writergruppe über Pods hinweg), und ob `images=archive` gemeinsam
+genutzte Images je Job nur einmal sichert.
+
 ## Broker, Namespaces und Metadaten
 
 Die Podman-API erlaubt weitreichende Aktionen mit den Rechten des Servicebenutzers.
