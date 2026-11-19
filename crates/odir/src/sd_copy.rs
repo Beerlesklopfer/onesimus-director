@@ -80,14 +80,10 @@ use bareos_bnet::{BnetMessage, BnetSignal, BnetStream};
 use bareos_bnet::tls_psk::PskStream;
 use tracing::{debug, warn};
 
-use crate::job_worker::{self, JobParams, PipeMessage, WorkerPipes, M_INFO};
+use crate::job_worker::{self, JobParams, PipeMessage, WorkerPipes, M_FATAL, M_INFO};
 
-const M_FATAL: u32 = 3;
-
-/// bnet BashSpaces(): blanks travel as 0x01.
-fn bash(text: &str) -> String {
-    crate::catreq::bash_spaces(text)
-}
+/// bnet BashSpaces(): blanks travel as 0x01 (bareos-format).
+use bareos_format::bash::bash_spaces as bash;
 
 /// The fields of one Job command (msgchan.cc jobcmd).
 struct JobCmd<'a> {
@@ -102,15 +98,24 @@ struct JobCmd<'a> {
     no_attributes: bool,
 }
 
+/// The Job command line: one formatter for odir and osd (bareos-format).
 fn format_job_command(cmd: &JobCmd, copy: &CopySession) -> String {
-    let or_none = |v: &str| if v.is_empty() { "**None**".to_string() } else { bash(v) };
-    format!("JobId={} job={} job_name={} client_name={} type={} level={} FileSet={} NoAttr={} SpoolAttr={} \
-             FileSetMD5={} SpoolData={} PreferMountedVols={} SpoolSize={} rerunning=0 VolSessionId=0 \
-             VolSessionTime=0 Quota=0 Protocol=0 BackupFormat=Native\n",
-        cmd.job_id, cmd.unique_job, bash(cmd.job_resource), or_none(cmd.client), cmd.job_type as u32,
-        cmd.level as u32, or_none(cmd.fileset), cmd.no_attributes as i32, copy.spool_attributes as i32,
-        if cmd.fileset_md5.is_empty() { "**Dummy**" } else { cmd.fileset_md5 }, copy.spool_data as i32,
-        copy.prefer_mounted_volumes as i32, copy.spool_size)
+    bareos_format::sd_job::JobCommand {
+        job_id: cmd.job_id,
+        unique_job: cmd.unique_job,
+        job_name: cmd.job_resource,
+        client_name: cmd.client,
+        job_type: cmd.job_type,
+        level: cmd.level,
+        fileset: cmd.fileset,
+        fileset_md5: cmd.fileset_md5,
+        no_attributes: cmd.no_attributes,
+        spool_attributes: copy.spool_attributes,
+        spool_data: copy.spool_data,
+        prefer_mounted_volumes: copy.prefer_mounted_volumes,
+        spool_size: copy.spool_size,
+    }
+    .format()
 }
 
 /// The Job command (msgchan.cc jobcmd).

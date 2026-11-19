@@ -199,10 +199,8 @@ pub fn handshake_text(probed: bool) -> String {
     format!("{}\n", m.replace(['\r', '\u{b}', ','], " "))
 }
 
-/// UnbashSpaces(): 0x01 back to blanks.
-pub fn unbash_spaces(s: &str) -> String {
-    s.replace('\u{1}', " ")
-}
+/// UnbashSpaces(): 0x01 back to blanks (bareos-format).
+pub use bareos_format::bash::unbash_spaces;
 
 /// msgchan.cc:259/183: the device the Storage daemon accepted.
 pub fn using_device_text(device: &str, write: bool) -> String {

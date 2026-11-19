@@ -1,0 +1,13 @@
+[package]
+name = "bareos-format"
+description = "Bareos stream and volume format: LStat, Bareos base64, stream ids, file types, message types, BashSpaces, SD job command"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+
+[dependencies]
+aquamarine.workspace = true
+
+[dev-dependencies]
+base64.workspace = true

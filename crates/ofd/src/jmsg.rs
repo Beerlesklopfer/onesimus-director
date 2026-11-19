@@ -5,14 +5,8 @@ use std::io::{Read, Write};
 
 use bareos_bnet::BnetStream;
 
-// lib/message_severity.h
-pub const M_FATAL: i32 = 3;
-pub const M_ERROR: i32 = 4;
-pub const M_WARNING: i32 = 5;
-pub const M_INFO: i32 = 6;
-pub const M_SAVED: i32 = 7;
-pub const M_SKIPPED: i32 = 9;
-pub const M_RESTORED: i32 = 13;
+// lib/message_severity.h (bareos-format)
+pub use bareos_format::msg::{M_ERROR, M_FATAL, M_INFO, M_RESTORED, M_SAVED, M_SKIPPED, M_WARNING};
 
 // include/job_status.h
 pub const JS_BLOCKED: u8 = b'B';

@@ -19,6 +19,7 @@ onesimus-proto-rs.workspace = true
 prost.workspace = true
 tokio-stream = { version = "0.1", features = ["net"] }
 bareos-bnet.workspace = true
+bareos-format.workspace = true
 bareos-config.workspace = true
 
 anyhow.workspace = true

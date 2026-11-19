@@ -8,10 +8,9 @@
 //! `3000 OK label. VolFiles=%lu VolBytes=%llu ` and
 //! `3000 OK label. VolBytes=%llu `.
 
-/// C++ BashSpaces(): every space becomes 0x01 for the SD command line.
-pub fn bash_spaces(text: &str) -> String {
-    text.replace(' ', "\u{1}")
-}
+/// C++ BashSpaces(): every space becomes 0x01 for the SD command line
+/// (bareos-format).
+pub use bareos_format::bash::bash_spaces;
 
 /// The successful label reply of the SD: `Some((Some(VolFiles), VolBytes))`
 /// for `3000 OK label. VolFiles=%lu VolBytes=%llu ` (both conversions),

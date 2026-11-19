@@ -138,7 +138,7 @@ pub fn make_console_hello(name: &str, version: &str, want_grpc: bool) -> String 
 /// Note: underscores in names are NOT replaced — they may be literal.
 /// Only \x01 (ASCII SOH) is the encoded space character.
 fn unbash_name(name: &str) -> String {
-    name.replace('\x01', " ").trim().to_string()
+    bareos_format::bash::unbash_spaces(name).trim().to_string()
 }
 
 /// C++ BareosVersionNumber::kUndefined (include/version_numbers.h).

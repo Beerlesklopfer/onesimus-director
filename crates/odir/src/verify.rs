@@ -37,17 +37,17 @@ pub const L_VERIFY_VOLUME_TO_CATALOG: u8 = b'O';
 pub const L_VERIFY_DISK_TO_CATALOG: u8 = b'd';
 pub const L_VERIFY_DATA: u8 = b'A';
 
-const STREAM_UNIX_ATTRIBUTES: i64 = 1;
-const STREAM_MD5_DIGEST: i64 = 3;
-const STREAM_UNIX_ATTRIBUTES_EX: i64 = 5;
-const STREAM_SHA1_DIGEST: i64 = 10;
-const STREAM_SHA256_DIGEST: i64 = 17;
-const STREAM_SHA512_DIGEST: i64 = 18;
-const STREAM_RESTORE_OBJECT: i64 = 28;
-const STREAM_XXH128_DIGEST: i64 = 40;
+// include/streams.h (one definition: bareos_format::stream), widened to the
+// i64 the attribute header is scanned into.
+/// `STREAM_UNIX_ATTRIBUTES` as `i64`.
+const STREAM_UNIX_ATTRIBUTES: i64 = bareos_format::stream::STREAM_UNIX_ATTRIBUTES as i64;
+/// `STREAM_UNIX_ATTRIBUTES_EX` as `i64`.
+const STREAM_UNIX_ATTRIBUTES_EX: i64 = bareos_format::stream::STREAM_UNIX_ATTRIBUTES_EX as i64;
+/// `STREAM_RESTORE_OBJECT` as `i64`.
+const STREAM_RESTORE_OBJECT: i64 = bareos_format::stream::STREAM_RESTORE_OBJECT as i64;
 
 /// lib/message.h M_FATAL.
-const M_FATAL: u32 = 3;
+use crate::job_worker::M_FATAL;
 
 /// What the job worker needs besides the common [`JobParams`].
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -493,19 +493,15 @@ fn name_and_attr(msg: &[u8]) -> (Vec<u8>, Vec<u8>) {
 
 /// CryptoDigestStreamType() != CRYPTO_DIGEST_NONE.
 fn is_digest_stream(stream: i64) -> bool {
-    matches!(stream, STREAM_MD5_DIGEST | STREAM_SHA1_DIGEST | STREAM_SHA256_DIGEST | STREAM_SHA512_DIGEST
-        | STREAM_XXH128_DIGEST)
+    i32::try_from(stream).is_ok_and(bareos_format::stream::is_digest_stream)
 }
 
 /// stream_to_ascii() of the digest streams.
+/// Called for digest streams only, where it equals bareos-format's table.
 fn stream_to_ascii(stream: i64) -> String {
-    match stream {
-        STREAM_MD5_DIGEST => "MD5 digest".into(),
-        STREAM_SHA1_DIGEST => "SHA1 digest".into(),
-        STREAM_SHA256_DIGEST => "SHA256 digest".into(),
-        STREAM_SHA512_DIGEST => "SHA512 digest".into(),
-        STREAM_XXH128_DIGEST => "XXH128 digest".into(),
-        other => other.to_string(),
+    match i32::try_from(stream) {
+        Ok(s) if bareos_format::stream::is_digest_stream(s) => bareos_format::stream::stream_to_ascii(s),
+        _ => stream.to_string(),
     }
 }
 
@@ -856,12 +852,24 @@ fn response<S: std::io::Read + std::io::Write>(bs: &mut BnetStream<S>, job_id: u
 /// StartStorageDaemonJob() + ReserveReadDevice() + "run": the SD session
 /// (VolSessionId, VolSessionTime, Authorization).
 fn start_sd(sd: &mut Bnet, p: &JobParams, v: &VerifyParams) -> Result<(i32, i32, String), String> {
-    let bash = crate::sd_label::bash_spaces;
+    let bash = bareos_format::bash::bash_spaces;
     let job_id = p.job_id;
-    sd.send_str(&format!("JobId={} job={} job_name={} client_name={} type={} level={} FileSet={} NoAttr=0 SpoolAttr=0 \
-        FileSetMD5=**Dummy** SpoolData=0 PreferMountedVols=1 SpoolSize=0 rerunning=0 VolSessionId=0 VolSessionTime=0 \
-        Quota=0 Protocol=0 BackupFormat=Native\n", job_id, p.unique_job, bash(&p.job_name), bash(&p.client_name),
-        b'V', L_VERIFY_VOLUME_TO_CATALOG, bash(&v.fileset_name))).map_err(|e| e.to_string())?;
+    let command = bareos_format::sd_job::JobCommand {
+        job_id,
+        unique_job: &p.unique_job,
+        job_name: &p.job_name,
+        client_name: &p.client_name,
+        job_type: 'V',
+        level: L_VERIFY_VOLUME_TO_CATALOG as char,
+        fileset: &v.fileset_name,
+        fileset_md5: "",
+        no_attributes: false,
+        spool_attributes: false,
+        spool_data: false,
+        prefer_mounted_volumes: true,
+        spool_size: 0,
+    };
+    sd.send_str(&command.format()).map_err(|e| e.to_string())?;
     let reply = match next_message(sd, job_id)? {
         Some(data) => String::from_utf8_lossy(&data).into_owned(),
         None => return Err("<stored: bad response to Job command: signal\n".into()),

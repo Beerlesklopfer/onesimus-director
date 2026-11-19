@@ -210,33 +210,6 @@ pub fn basename_dir(path: &str) -> &str {
 
 // --- lstat decoding (lib/attribs.cc DecodeStat, lib/base64.cc) -------------
 
-fn base64_value(c: u8) -> u64 {
-    match c {
-        b'A'..=b'Z' => u64::from(c - b'A'),
-        b'a'..=b'z' => u64::from(c - b'a') + 26,
-        b'0'..=b'9' => u64::from(c - b'0') + 52,
-        b'+' => 62,
-        b'/' => 63,
-        _ => 0,
-    }
-}
-
-/// C++ FromBase64(): value at `*i`, advancing over it.
-fn from_base64(b: &[u8], i: &mut usize) -> i64 {
-    let at = |i: usize| b.get(i).copied().unwrap_or(0);
-    let mut neg = false;
-    if at(*i) == b'-' {
-        *i += 1;
-        neg = true;
-    }
-    let mut val: u64 = 0;
-    while at(*i) != 0 && at(*i) != b' ' {
-        val = (val << 6) + base64_value(at(*i));
-        *i += 1;
-    }
-    if neg { (val as i64).wrapping_neg() } else { val as i64 }
-}
-
 /// Decoded stat fields as the C++ JSON output sees them (struct stat member
 /// types, widened to uint64_t and printed as json_int_t), plus LinkFI.
 #[derive(Debug, Default, PartialEq)]
@@ -255,35 +228,22 @@ pub struct Stat {
     pub link_fi: i64,
 }
 
+/// DecodeStat() (bareos-format) in the widened form of the JSON output.
 pub fn decode_stat(lstat: &str) -> Stat {
-    let b = lstat.as_bytes();
-    let at = |i: usize| b.get(i).copied().unwrap_or(0);
-    let mut i = 0;
-    let mut v = [0i64; 13];
-    for (n, value) in v.iter_mut().enumerate() {
-        *value = from_base64(b, &mut i);
-        if n < 12 {
-            i += 1;
-        }
-    }
-    let mut link_fi = 0;
-    if at(i) == b' ' || (at(i) != 0 && at(i + 1) == b' ') {
-        i += 1;
-        link_fi = i64::from(from_base64(b, &mut i) as u32 as i32);
-    }
+    let (st, link_fi, _) = bareos_format::lstat::decode_stat(lstat.as_bytes());
     Stat {
-        dev: v[0],
-        ino: v[1],
-        mode: i64::from(v[2] as u32),
-        nlink: v[3],
-        uid: v[4] as u32,
-        gid: v[5] as u32,
-        rdev: v[6],
-        size: v[7],
-        atime: v[10],
-        mtime: v[11],
-        ctime: v[12],
-        link_fi,
+        dev: st.dev as i64,
+        ino: st.ino as i64,
+        mode: i64::from(st.mode),
+        nlink: st.nlink as i64,
+        uid: st.uid,
+        gid: st.gid,
+        rdev: st.rdev as i64,
+        size: st.size,
+        atime: st.atime,
+        mtime: st.mtime,
+        ctime: st.ctime,
+        link_fi: i64::from(link_fi),
     }
 }
 

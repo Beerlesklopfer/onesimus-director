@@ -63,32 +63,10 @@ impl Stat {
     }
 }
 
-fn digit(byte: u8) -> u64 {
-    match byte {
-        b'A'..=b'Z' => (byte - b'A') as u64,
-        b'a'..=b'z' => (byte - b'a') as u64 + 26,
-        b'0'..=b'9' => (byte - b'0') as u64 + 52,
-        b'+' => 62,
-        b'/' => 63,
-        // Bareos maps unknown characters to 0 as well
-        _ => 0,
-    }
-}
-
-/// One number in Bareos base64 notation, e.g. `"-B"` → -1.
+/// One number in Bareos base64 notation, e.g. `"-B"` → -1 (bareos-format).
+/// A field never holds a blank or NUL, so FromBase64() reads all of it.
 pub fn from_base64(field: &str) -> i64 {
-    let (negative, digits) = match field.strip_prefix('-') {
-        Some(rest) => (true, rest),
-        None => (false, field),
-    };
-    let value = digits
-        .bytes()
-        .fold(0u64, |acc, byte| acc.wrapping_shl(6).wrapping_add(digit(byte)));
-    if negative {
-        (value as i64).wrapping_neg()
-    } else {
-        value as i64
-    }
+    bareos_format::base64::from_base64(field.as_bytes()).0
 }
 
 /// Decode an LStat string. Returns `None` if it has too few fields.

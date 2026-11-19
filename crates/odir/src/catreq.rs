@@ -41,15 +41,8 @@ fn scanned_s(v: &[Scanned], i: usize) -> String {
 // Small C helpers
 // ---------------------------------------------------------------------------
 
-/// lib/util.cc BashSpaces().
-pub(crate) fn bash_spaces(s: &str) -> String {
-    s.replace(' ', "\x01")
-}
-
-/// lib/util.cc UnbashSpaces().
-pub(crate) fn unbash_spaces(s: &str) -> String {
-    s.replace('\x01', " ")
-}
+/// lib/util.cc BashSpaces() and UnbashSpaces() (bareos-format).
+pub(crate) use bareos_format::bash::{bash_spaces, unbash_spaces};
 
 /// C string at `start` (up to the first NUL or the end of the buffer).
 fn cstr(buf: &[u8], start: usize) -> &[u8] {
@@ -127,51 +120,20 @@ fn with_commas(v: u64) -> String {
     crate::sql_list::add_commas(&v.to_string())
 }
 
-/// lib/base64.cc BinToBase64(compatible = true).
+/// lib/base64.cc BinToBase64(compatible = true) (bareos-format).
 fn bin_to_base64(bin: &[u8]) -> String {
-    const DIGITS: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
-    let mut out = String::new();
-    let (mut reg, mut rem): (u32, i32) = (0, 0);
-    let mut i = 0;
-    while i < bin.len() {
-        if rem < 6 {
-            reg = (reg << 8) | bin[i] as u32;
-            i += 1;
-            rem += 8;
-        }
-        out.push(DIGITS[((reg >> (rem - 6)) & 0x3f) as usize] as char);
-        rem -= 6;
-    }
-    if rem != 0 {
-        let mask = (1u32 << rem) - 1;
-        out.push(DIGITS[((reg & mask) << (6 - rem)) as usize] as char);
-    }
-    out
+    bareos_format::base64::bin_to_base64(bin, true)
 }
 
-/// findlib/bfile.cc stream_to_ascii() for the digest streams.
-fn stream_to_ascii(stream: i32) -> String {
-    match stream {
-        STREAM_MD5_DIGEST => "MD5 digest".into(),
-        STREAM_SHA1_DIGEST => "SHA1 digest".into(),
-        STREAM_SHA256_DIGEST => "SHA256 digest".into(),
-        STREAM_SHA512_DIGEST => "SHA512 digest".into(),
-        STREAM_XXH128_DIGEST => "XXH128 digest".into(),
-        other => format!("{other}"),
-    }
-}
+/// findlib/bfile.cc stream_to_ascii() (bareos-format); called for digest streams only.
+use bareos_format::stream::stream_to_ascii;
 
-const STREAM_UNIX_ATTRIBUTES: i32 = 1;
-const STREAM_MD5_DIGEST: i32 = 3;
-const STREAM_UNIX_ATTRIBUTES_EX: i32 = 5;
-const STREAM_SHA1_DIGEST: i32 = 10;
-const STREAM_SHA256_DIGEST: i32 = 17;
-const STREAM_SHA512_DIGEST: i32 = 18;
-const STREAM_RESTORE_OBJECT: i32 = 28;
-const STREAM_XXH128_DIGEST: i32 = 40;
-const FT_REG: i32 = 3;
-const FT_DELETED: i32 = 23;
-const FT_BASE: i32 = 24;
+// include/streams.h and include/filetypes.h (bareos-format)
+use bareos_format::filetype::{FT_BASE, FT_DELETED, FT_REG};
+use bareos_format::stream::{
+    STREAM_MD5_DIGEST, STREAM_RESTORE_OBJECT, STREAM_SHA1_DIGEST, STREAM_SHA256_DIGEST, STREAM_SHA512_DIGEST,
+    STREAM_UNIX_ATTRIBUTES, STREAM_UNIX_ATTRIBUTES_EX, STREAM_XXH128_DIGEST,
+};
 const VOL_ENABLED: i32 = 1;
 const BATCH_FLUSH: u32 = 800_000;
 /// Rows sent to the server-side batch table in one INSERT.

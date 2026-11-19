@@ -11,9 +11,7 @@ use crate::attribs::*;
 use crate::fileset::*;
 
 /// FT_NOCHG etc. of include/filetypes.h not already in attribs.
-pub const FT_INVALIDFS: i32 = 19;
-pub const FT_INVALIDDT: i32 = 20;
-pub const FT_BASE: i32 = 24;
+pub use bareos_format::filetype::{FT_BASE, FT_INVALIDDT, FT_INVALIDFS};
 
 /// The per-file packet (FindFilesPacket).
 #[derive(Clone, Default)]

@@ -7,6 +7,7 @@ authors.workspace = true
 license.workspace = true
 
 [dependencies]
+bareos-format.workspace = true
 anyhow.workspace = true
 thiserror.workspace = true
 tracing.workspace = true

@@ -68,7 +68,7 @@ impl Digest {
 
 /// BinToBase64(..., compatible=true)
 pub fn to_base64(bin: &[u8]) -> String {
-    bareos_bnet::cram_md5::bareos_bin_to_base64(bin, true)
+    bareos_format::base64::bin_to_base64(bin, true)
 }
 
 #[cfg(test)]

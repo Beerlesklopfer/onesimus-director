@@ -29,7 +29,7 @@ use crate::config::FdConfig;
 use crate::plugin::{self, PluginError, Session};
 use onesimus_proto_rs::onesimus::filed::plugin::v1 as pb;
 
-pub const M_NOTSAVED: i32 = 8;
+pub use bareos_format::msg::M_NOTSAVED;
 
 /// SelectDataStream() (no encryption, portable data).
 pub fn select_data_stream(flags: Flags) -> i32 {

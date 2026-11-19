@@ -74,10 +74,8 @@ pub struct Session<'a> {
 /// Command handler: false ends the command loop.
 type Handler<'a, S> = fn(&mut Session<'a>, &mut BnetStream<S>, &str) -> bool;
 
-/// UnbashSpaces(): 0x01 back to a space.
-fn unbash(s: &str) -> String {
-    s.replace('\x01', " ")
-}
+/// UnbashSpaces(): 0x01 back to a space (bareos-format).
+use bareos_format::bash::unbash_spaces as unbash;
 
 impl<'a> Session<'a> {
     pub fn new(config: &'a FdConfig, director: &'a DirectorAuth, session_id: u64) -> Self {

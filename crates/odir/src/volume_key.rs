@@ -3,7 +3,6 @@
 //! with the Director's `Key Encryption Key` (RFC 3394 AES-128 key wrap),
 //! always stored base64 encoded in `Media.EncryptionKey`.
 
-use base64::Engine as _;
 use rand::RngCore as _;
 
 /// DEFAULT_PASSPHRASE_LENGTH (include/baconfig.h).
@@ -36,7 +35,7 @@ pub(crate) fn aes_wrap(kek: &[u8], plain: &[u8]) -> Result<Vec<u8>, String> {
 
 /// BinToBase64(compatible=true): standard alphabet, no padding.
 pub(crate) fn bin_to_base64(bin: &[u8]) -> String {
-    base64::engine::general_purpose::STANDARD_NO_PAD.encode(bin)
+    bareos_format::base64::bin_to_base64(bin, true)
 }
 
 /// GenerateNewEncryptionKey(): the catalog value of a new volume key, or
@@ -57,6 +56,7 @@ pub(crate) fn generate_new_encryption_key(volume: &str, key_encryption_key: Opti
 #[cfg(test)]
 mod tests {
     use super::*;
+    use base64::Engine as _;
 
     #[test]
     fn passphrase_uses_valid_chars() {

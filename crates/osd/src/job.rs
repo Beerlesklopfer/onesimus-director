@@ -27,32 +27,57 @@ pub struct SdJobParams {
     pub job_name: String,
     pub job_type: SdJobType,
     pub level: String,
-    pub client_address: String,
+    /// Name of the Client resource (`client_name=`), not its address (D11).
+    pub client_name: String,
+    /// Name of the FileSet (`FileSet=`); empty sends `**None**` as Bareos does
+    /// without a FileSet.
+    pub fileset: String,
+    /// FileSet digest (`FileSetMD5=`); empty sends `**Dummy**`.
+    pub fileset_md5: String,
     pub media_type: String,
     pub pool_name: String,
     pub device_name: String,
 }
 
+/// The Job command of `p` (msgchan.cc jobcmd), formatted by
+/// `bareos_format::sd_job::JobCommand` like every other Job command.
+///
+/// Before 19.11.2026 this was a third formatter with defect D11: the client
+/// address as `client_name`, a fixed `FileSet=LinuxAll`, no BashSpaces,
+/// `FileSetMD5=0` and `BackupFormat=NativeBackup` for backups.
+pub fn job_command(p: &SdJobParams) -> String {
+    let (job_type, level) = match p.job_type {
+        SdJobType::Backup => ('B', match p.level.as_str() {
+            "incremental" => 'I',
+            "differential" => 'D',
+            _ => 'F',
+        }),
+        SdJobType::Restore => ('R', ' '),
+    };
+    bareos_format::sd_job::JobCommand {
+        job_id: p.job_id,
+        unique_job: &p.unique_job,
+        job_name: &p.job_name,
+        client_name: &p.client_name,
+        job_type,
+        level,
+        fileset: &p.fileset,
+        fileset_md5: &p.fileset_md5,
+        no_attributes: false,
+        spool_attributes: false,
+        spool_data: false,
+        prefer_mounted_volumes: true,
+        spool_size: 0,
+    }
+    .format()
+}
+
 /// Send job setup command to SD, receive Authorization key + SDid/SDtime.
 ///
-/// Protocol: `JobId=N job=UNIQUE type=T level=L ...`
+/// Protocol: `JobId=N job=UNIQUE type=T level=L ...` ([`job_command`])
 /// Response: `3000 OK Job SDid=N SDtime=T Authorization=KEY`
 pub fn sd_job_setup(sd: &mut BnetStream<PskStream>, p: &SdJobParams) -> Result<SdSession, String> {
-    let (type_int, level_int, fileset_md5, backup_fmt) = match p.job_type {
-        SdJobType::Backup => (66, match p.level.as_str() {
-            "full" => 70, "incremental" => 73, "differential" => 68, _ => 70,
-        }, "0", "NativeBackup"),
-        SdJobType::Restore => (82, 32, "**Dummy**", "Native"),
-    };
-
-    let cmd = format!(
-        "JobId={} job={} job_name={} client_name={} \
-         type={type_int} level={level_int} FileSet=LinuxAll NoAttr=0 SpoolAttr=0 FileSetMD5={fileset_md5} \
-         SpoolData=0 PreferMountedVols=1 SpoolSize=0 \
-         rerunning=0 VolSessionId=0 VolSessionTime=0 Quota=0 \
-         Protocol=0 BackupFormat={backup_fmt}\n",
-        p.job_id, p.unique_job, p.job_name, p.client_address
-    );
+    let cmd = job_command(p);
     sd.send_str(&cmd).map_err(|e| format!("send: {e}"))?;
 
     let resp = sd.recv_str().map_err(|e| format!("recv: {e}"))?;
@@ -129,4 +154,52 @@ fn extract_field(resp: &str, prefix: &str) -> Option<String> {
         .find(|s| s.starts_with(prefix))
         .and_then(|s| s.strip_prefix(prefix))
         .map(|s| s.to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Restore parameters as odir's job_worker builds them.
+    fn restore_params() -> SdJobParams {
+        SdJobParams {
+            job_id: 3,
+            unique_job: "VRestore.2026-11-19_05.06.30_08".into(),
+            job_name: "V Restore".into(),
+            job_type: SdJobType::Restore,
+            level: String::new(),
+            client_name: "my fd".into(),
+            fileset: String::new(),
+            fileset_md5: String::new(),
+            media_type: "VFile".into(),
+            pool_name: "VPool".into(),
+            device_name: "VDev".into(),
+        }
+    }
+
+    #[test]
+    fn d11_client_name_not_address_no_linuxall_bashed() {
+        let cmd = job_command(&restore_params());
+        assert_eq!(
+            cmd,
+            "JobId=3 job=VRestore.2026-11-19_05.06.30_08 job_name=V\u{1}Restore client_name=my\u{1}fd type=82 \
+             level=32 FileSet=**None** NoAttr=0 SpoolAttr=0 FileSetMD5=**Dummy** SpoolData=0 PreferMountedVols=1 \
+             SpoolSize=0 rerunning=0 VolSessionId=0 VolSessionTime=0 Quota=0 Protocol=0 BackupFormat=Native\n"
+        );
+        assert!(!cmd.contains("LinuxAll") && !cmd.contains("127.0.0.1"));
+    }
+
+    #[test]
+    fn backup_levels_and_named_fileset() {
+        let mut p = restore_params();
+        p.job_type = SdJobType::Backup;
+        p.fileset = "Linux All".into();
+        p.fileset_md5 = "abc".into();
+        for (level, code) in [("full", "70"), ("incremental", "73"), ("differential", "68"), ("", "70")] {
+            p.level = level.into();
+            let cmd = job_command(&p);
+            assert!(cmd.contains(&format!(" type=66 level={code} FileSet=Linux\u{1}All ")), "{cmd}");
+            assert!(cmd.contains(" FileSetMD5=abc ") && cmd.ends_with("BackupFormat=Native\n"), "{cmd}");
+        }
+    }
 }

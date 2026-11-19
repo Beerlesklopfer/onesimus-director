@@ -17,11 +17,7 @@ use bareos_bnet::{BnetMessage, BnetSignal, BnetStream};
 use tracing::{debug, warn};
 
 use crate::backup::{BackupEnd, ClientRetention, JobIds};
-use crate::job_worker::{self, JobParams, PipeMessage, WorkerPipes, M_INFO};
-
-const M_FATAL: u32 = 3;
-const M_WARNING: u32 = 5;
-const M_ERROR: u32 = 4;
+use crate::job_worker::{self, JobParams, PipeMessage, WorkerPipes, M_ERROR, M_FATAL, M_INFO, M_WARNING};
 
 /// What the worker needs beyond JobParams (JobParams.backup).
 #[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]

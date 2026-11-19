@@ -8,6 +8,7 @@ license.workspace = true
 
 [dependencies]
 bareos-bnet.workspace = true
+bareos-format.workspace = true
 bareos-config.workspace = true
 
 tracing.workspace = true

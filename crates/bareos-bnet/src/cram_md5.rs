@@ -215,43 +215,7 @@ fn compute_hmac_md5_bareos_base64(challenge: &[u8], password: &[u8]) -> String {
 /// compatible=true: treats input bytes as uint8_t (standard)
 /// compatible=false: treats input bytes as int8_t (sign-extension, Bareos-specific)
 pub fn bareos_bin_to_base64(bin: &[u8], compatible: bool) -> String {
-    const DIGITS: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
-
-    let mut buf = Vec::new();
-    let mut reg: u32 = 0;
-    let mut rem: u32 = 0;
-    let mut i: usize = 0;
-
-    while i < bin.len() {
-        if rem < 6 {
-            reg <<= 8;
-            if compatible {
-                reg |= bin[i] as u32;
-            } else {
-                // C++: reg |= (int8_t)bin[i];
-                // int8_t sign-extends negative values, wrapping in u32
-                reg |= bin[i] as i8 as i32 as u32;
-            }
-            i += 1;
-            rem += 8;
-        }
-        let save = reg;
-        reg >>= rem - 6;
-        buf.push(DIGITS[(reg & 0x3F) as usize]);
-        reg = save;
-        rem -= 6;
-    }
-
-    if rem > 0 {
-        let mask: u32 = (1 << rem) - 1;
-        if compatible {
-            buf.push(DIGITS[((reg & mask) << (6 - rem)) as usize]);
-        } else {
-            buf.push(DIGITS[(reg & mask) as usize]);
-        }
-    }
-
-    String::from_utf8(buf).unwrap()
+    bareos_format::base64::bin_to_base64(bin, compatible)
 }
 
 /// Parse the challenge string from an auth message.
@@ -283,14 +247,16 @@ pub fn parse_tls_policy(msg: &str) -> Option<i32> {
     }
 }
 
-/// Replace spaces with underscores (Bareos "BashSpaces" convention).
+/// Replace spaces with underscores. Not Bareos `BashSpaces()` (that uses
+/// 0x01): the Onesimus Hello form, defect suspicion D13 of the ofd audit.
+/// One definition: `bareos_format::bash::underscore_spaces`.
 pub fn bash_spaces(s: &str) -> String {
-    s.replace(' ', "_")
+    bareos_format::bash::underscore_spaces(s)
 }
 
-/// Replace underscores with spaces (Bareos "UnbashSpaces" convention).
+/// Replace underscores with spaces (inverse of [`bash_spaces`]).
 pub fn unbash_spaces(s: &str) -> String {
-    s.replace('_', " ")
+    bareos_format::bash::ununderscore_spaces(s)
 }
 
 /// Key for CRAM-MD5 / TLS-PSK from a configured password: "[md5]<hex>" is

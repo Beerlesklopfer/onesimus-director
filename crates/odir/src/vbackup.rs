@@ -20,10 +20,7 @@ use bareos_config::raw::Directive;
 use bareos_config::resources::JobResource;
 
 /// lib/message.h M_* codes for the worker's start messages.
-const M_FATAL: u32 = 3;
-const M_ERROR: u32 = 4;
-const M_WARNING: u32 = 5;
-const M_INFO: u32 = 6;
+use crate::job_worker::{M_ERROR, M_FATAL, M_INFO, M_WARNING};
 
 /// What `run job=.. level=VirtualFull ..` asks for (ua_run.cc RunContext).
 #[derive(Debug, Clone, Default)]

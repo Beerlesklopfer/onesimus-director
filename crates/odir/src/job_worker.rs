@@ -282,11 +282,15 @@ fn director_response<S: std::io::Read + std::io::Write>(fd: &mut BnetStream<S>, 
         }
     }
 }
-/// lib/message.h M_* codes of the worker's own job messages.
-const M_FATAL: u32 = 3;
-pub(crate) const M_ERROR: u32 = 4;
-const M_WARNING: u32 = 5;
-pub(crate) const M_INFO: u32 = 6;
+/// lib/message_severity.h M_* codes (one definition: `bareos_format::msg`)
+/// as the `u32` the worker pipe carries; the other worker modules use these.
+pub(crate) const M_FATAL: u32 = bareos_format::msg::M_FATAL as u32;
+/// `M_ERROR` as `u32` (see [`M_FATAL`]).
+pub(crate) const M_ERROR: u32 = bareos_format::msg::M_ERROR as u32;
+/// `M_WARNING` as `u32` (see [`M_FATAL`]).
+pub(crate) const M_WARNING: u32 = bareos_format::msg::M_WARNING as u32;
+/// `M_INFO` as `u32` (see [`M_FATAL`]).
+pub(crate) const M_INFO: u32 = bareos_format::msg::M_INFO as u32;
 
 /// The worker's pipe to the Director for job messages (any thread).
 static JMSG_PIPE: std::sync::Mutex<Option<std::fs::File>> = std::sync::Mutex::new(None);
@@ -832,7 +836,10 @@ fn to_sd_params(p: &JobParams) -> SdJobParams {
         job_name: p.job_name.clone(),
         job_type: match p.job_type { WorkerJobType::Restore => SdJobType::Restore, _ => SdJobType::Backup },
         level: p.level.clone(),
-        client_address: p.fd_address.clone(),
+        client_name: p.client_name.clone(),
+        // JobParams carries no FileSet name for restores: **None** (open point)
+        fileset: String::new(),
+        fileset_md5: String::new(),
         media_type: p.sd_media_type.clone(),
         pool_name: p.pool_name.clone(),
         device_name: p.sd_device.clone(),
