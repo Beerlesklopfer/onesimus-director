@@ -116,13 +116,17 @@ impl Director for DirectorServiceImpl {
         Ok(Response::new(ChallengeResponse { nonce }))
     }
 
+    /// Challenge/response login, throttled per source address and console
+    /// (auth::LoginThrottle). A wrong proof answers `success: false`; a
+    /// throttled login fails with `RESOURCE_EXHAUSTED` and the remaining
+    /// wait in the message.
     async fn login(
         &self,
         request: Request<LoginRequest>,
     ) -> Result<Response<LoginResponse>, Status> {
         let peer = request.remote_addr();
         let req = request.into_inner();
-        let response = match self.auth.login(&req.console_name, &req.nonce, &req.proof) {
+        let response = match self.auth.login_from(&req.console_name, &req.nonce, &req.proof, peer) {
             Ok(token) => {
                 info!("gRPC login: console '{}' from {:?}", req.console_name, peer);
                 LoginResponse {
@@ -133,9 +137,13 @@ impl Director for DirectorServiceImpl {
                     ..Default::default()
                 }
             }
+            Err(e @ super::auth::LoginError::Throttled(_)) => {
+                warn!("gRPC login refused: console '{}' from {:?}: {e}", req.console_name, peer);
+                return Err(Status::resource_exhausted(e.to_string()));
+            }
             Err(e) => {
                 warn!("gRPC login failed: console '{}' from {:?}: {e}", req.console_name, peer);
-                LoginResponse { success: false, error_message: e, ..Default::default() }
+                LoginResponse { success: false, error_message: e.to_string(), ..Default::default() }
             }
         };
         Ok(Response::new(response))
@@ -172,6 +180,9 @@ impl Director for DirectorServiceImpl {
 
     type InteractiveSessionStream = ReceiverStream<Result<SessionMessage, Status>>;
 
+    /// Bidirectional console session: commands in, responses and push
+    /// events out. A push event is sent only if the session's console may
+    /// see the resource it is about (auth::AuthState::event_visible).
     async fn interactive_session(
         &self,
         request: Request<Streaming<SessionMessage>>,
@@ -230,6 +241,9 @@ impl Director for DirectorServiceImpl {
                     // Check for bus messages (non-blocking)
                     _ = tokio::time::sleep(tokio::time::Duration::from_millis(100)) => {
                         while let Ok(bus_msg) = bus_rx.try_recv() {
+                            if !auth.event_visible(session_id, &bus_msg) {
+                                continue;
+                            }
                             let push_event = super::push_events::to_push_event(&bus_msg);
                             let session_msg = SessionMessage {
                                 r#type: session_message::Type::PushEvent as i32,
