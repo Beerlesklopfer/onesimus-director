@@ -114,10 +114,7 @@ fn reload_config(config_path: &std::path::Path, shared_config: &SharedConfig) ->
     for note in crate::config_test::deprecated_notes(&new_config.raw) {
         warn!("{note}");
     }
-    let mut cfg = shared_config.write().map_err(|e| format!("config lock: {e}"))?;
-    crate::fd_grpc::configure(&new_config);
-    *cfg = new_config;
-    crate::fd_protocol::reset_handshake_modes();
+    let mut cfg = install_config(shared_config, new_config)?;
     // DoReloadConfig(): CheckCatalog(UPDATE_CATALOG) for the new resources
     if let Some(catalog) = RELOAD_CATALOG.get() {
         crate::check_catalog::ensure_basic_records(&cfg, catalog);
@@ -127,6 +124,21 @@ fn reload_config(config_path: &std::path::Path, shared_config: &SharedConfig) ->
     drop(cfg);
     crate::ovfs::recheck_after_reload();
     Ok(())
+}
+
+/// Makes a checked configuration the active one. The scheduler's queue is
+/// cleared with it (reload.cc:212 `Scheduler::GetMainScheduler().ClearQueue()`):
+/// the generation is bumped while the write lock is held, so the scheduler
+/// never runs an item planned from the old configuration with the Run
+/// directives of the new one.
+fn install_config(shared_config: &SharedConfig, new_config: DirectorConfig)
+    -> Result<std::sync::RwLockWriteGuard<'_, DirectorConfig>, String> {
+    let mut cfg = shared_config.write().map_err(|e| format!("config lock: {e}"))?;
+    crate::fd_grpc::configure(&new_config);
+    *cfg = new_config;
+    crate::scheduler::config_replaced();
+    crate::fd_protocol::reset_handshake_modes();
+    Ok(cfg)
 }
 
 /// Jmsg(nullptr, type, 0, text): JobId 0 through the daemon messages.
@@ -189,6 +201,33 @@ mod tests {
 
         // Verify swapped
         assert_eq!(shared.read().unwrap().director.name, "new-dir");
+    }
+
+    #[test]
+    fn installing_a_reloaded_configuration_clears_the_scheduler_queue() {
+        let shared: SharedConfig = Arc::new(RwLock::new(DirectorConfig::from_str(
+            "Director { Name = old-dir\n Password = p\n }").unwrap()));
+        let before = crate::scheduler::CONFIG_GENERATION.load(std::sync::atomic::Ordering::SeqCst);
+        let guard = install_config(&shared, DirectorConfig::from_str(
+            "Director { Name = new-dir\n Password = p\n }").unwrap()).unwrap();
+        // bumped while the write lock is still held
+        assert!(crate::scheduler::CONFIG_GENERATION.load(std::sync::atomic::Ordering::SeqCst) > before);
+        assert_eq!(guard.director.name, "new-dir");
+        drop(guard);
+        assert_eq!(shared.read().unwrap().director.name, "new-dir");
+    }
+
+    #[test]
+    fn failed_reload_keeps_the_previous_configuration() {
+        let dir = std::env::temp_dir().join(format!("odir-reload-test-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("bareos-dir.conf");
+        std::fs::write(&path, "Director { Name = broken\n Password = p\n ").unwrap();
+        let shared: SharedConfig = Arc::new(RwLock::new(DirectorConfig::from_str(
+            "Director { Name = old-dir\n Password = p\n }").unwrap()));
+        assert!(reload_config(&path, &shared).is_err());
+        assert_eq!(shared.read().unwrap().director.name, "old-dir");
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

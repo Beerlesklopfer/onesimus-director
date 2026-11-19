@@ -7,13 +7,21 @@
 //! whose runtime lies within 61 seconds of the time it was last taken out
 //! (RunResource::scheduled_last) and runs older than a minute. Duplicate
 //! jobs (Allow Duplicate Jobs) are checked when the job starts, not here.
+//!
+//! A successful reload clears the queue (reload.cc:212 DoReloadConfig():
+//! `Scheduler::GetMainScheduler().ClearQueue()`), so the next cycle plans
+//! from the new configuration. Here the reload bumps CONFIG_GENERATION
+//! while it holds the write lock of the configuration; the scheduler
+//! compares it under the read lock before it takes an item out.
 
 use std::collections::{BinaryHeap, HashMap};
 use std::cmp::Ordering as CmpOrdering;
-use std::sync::atomic::{AtomicBool, AtomicI64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicI64, AtomicU64, Ordering};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use tracing::{info, debug};
+
+use bareos_config::resources::RunDirective;
 
 use crate::director_config::{DirectorConfig, SharedConfig};
 
@@ -24,6 +32,17 @@ const DEFAULT_WAIT_INTERVAL: i64 = 60;
 /// SchedulerJobItemQueue::default_priority (items without run resource).
 #[cfg(test)]
 const DEFAULT_PRIORITY: i32 = 10;
+
+/// Generation of the active configuration: a successful reload increments
+/// it while it holds the configuration's write lock (config_replaced()).
+pub static CONFIG_GENERATION: AtomicU64 = AtomicU64::new(0);
+
+/// Called by the reload with the write lock of the new configuration held:
+/// the scheduler clears its queue before it takes the next item out
+/// (reload.cc:212 ClearQueue()).
+pub fn config_replaced() {
+    CONFIG_GENERATION.fetch_add(1, Ordering::SeqCst);
+}
 
 /// A scheduled job item in the priority queue (SchedulerJobItem).
 #[derive(Debug, Clone)]
@@ -99,7 +118,9 @@ pub trait TimeSource {
     fn sleep_for(&self, seconds: i64) -> bool;
 }
 
-/// SystemTimeSource: wall clock, sleep interrupted by shutdown.
+/// SystemTimeSource: wall clock, sleep interrupted by shutdown and by a
+/// reload (so a run the reload adds is not missed while the scheduler
+/// sleeps on the old queue).
 struct SystemTimeSource<'a> {
     shutdown: &'a AtomicBool,
 }
@@ -110,7 +131,9 @@ impl TimeSource for SystemTimeSource<'_> {
     }
 
     fn sleep_for(&self, seconds: i64) -> bool {
-        sleep_interruptible(Duration::from_secs(seconds.max(0) as u64), self.shutdown);
+        let generation = CONFIG_GENERATION.load(Ordering::SeqCst);
+        sleep_interruptible(Duration::from_secs(seconds.max(0) as u64), self.shutdown,
+            || CONFIG_GENERATION.load(Ordering::SeqCst) != generation);
         STATE.heartbeat();
         !self.shutdown.load(Ordering::Relaxed)
     }
@@ -121,16 +144,43 @@ pub struct Scheduler<T: TimeSource> {
     time: T,
     queue: BinaryHeap<ScheduledJob>,
     /// RunResource::scheduled_last (0 until the run was taken out once).
+    /// Kept across a reload (keyed by job, schedule and Run index): in
+    /// Bareos the new RunResource starts at 0, which could start a run a
+    /// second time when the reload falls within a minute after it ran.
     scheduled_last: HashMap<RunKey, i64>,
+    /// Source of the configuration generation (CONFIG_GENERATION).
+    generation_source: &'static AtomicU64,
+    /// Generation of the configuration the queued items come from.
+    generation: u64,
 }
 
 impl<T: TimeSource> Scheduler<T> {
     pub fn new(time: T) -> Self {
-        Self { time, queue: BinaryHeap::new(), scheduled_last: HashMap::new() }
+        Self::with_generation(time, &CONFIG_GENERATION)
+    }
+
+    fn with_generation(time: T, generation_source: &'static AtomicU64) -> Self {
+        let generation = generation_source.load(Ordering::SeqCst);
+        Self { time, queue: BinaryHeap::new(), scheduled_last: HashMap::new(), generation_source, generation }
+    }
+
+    /// ClearQueue() after a reload: true when the queued items came from a
+    /// configuration that is no longer active (call with the read lock held).
+    fn clear_queue_if_reloaded(&mut self) -> bool {
+        let current = self.generation_source.load(Ordering::SeqCst);
+        if current == self.generation {
+            return false;
+        }
+        if !self.queue.is_empty() {
+            debug!("Scheduler: configuration reloaded, clearing {} queued jobs.", self.queue.len());
+        }
+        self.queue.clear();
+        self.generation = current;
+        true
     }
 
     /// One cycle of Scheduler::Run(); false when the scheduler stops.
-    pub fn cycle(&mut self, config: &SharedConfig, execute: &mut dyn FnMut(ScheduledJob)) -> bool {
+    pub fn cycle(&mut self, config: &SharedConfig, execute: &mut dyn FnMut(ScheduledJob, Option<RunDirective>)) -> bool {
         self.fill_queue_or_sleep(config) && self.wait_for_jobs_to_run(config, execute)
     }
 
@@ -138,6 +188,7 @@ impl<T: TimeSource> Scheduler<T> {
     fn fill_queue_or_sleep(&mut self, config: &SharedConfig) -> bool {
         while self.queue.is_empty() {
             if let Ok(cfg) = config.read() {
+                self.clear_queue_if_reloaded();
                 self.add_jobs_for_this_and_next_hour(&cfg);
             }
             if self.queue.is_empty() && !self.time.sleep_for(DEFAULT_WAIT_INTERVAL) {
@@ -149,31 +200,44 @@ impl<T: TimeSource> Scheduler<T> {
 
     /// WaitForJobsToRun(): due items are taken out and run (their run's
     /// scheduled_last becomes now), else sleep until the next one (at most
-    /// the default wait interval).
-    fn wait_for_jobs_to_run(&mut self, config: &SharedConfig, execute: &mut dyn FnMut(ScheduledJob)) -> bool {
-        while let Some(next) = self.queue.peek() {
+    /// the default wait interval). After a reload the queue is cleared and
+    /// the cycle ends, so the next one fills it from the new configuration.
+    /// The Run directive is looked up under the same read lock that checked
+    /// the generation, so its level and pool come from the configuration
+    /// the item was planned from.
+    fn wait_for_jobs_to_run(&mut self, config: &SharedConfig, execute: &mut dyn FnMut(ScheduledJob, Option<RunDirective>)) -> bool {
+        loop {
             let now = self.time.system_time();
-            if now >= next.runtime {
+            let (job, enabled, directive) = {
+                let cfg = config.read().ok();
+                if self.clear_queue_if_reloaded() {
+                    return true;
+                }
+                let Some(next) = self.queue.peek() else { return true };
+                if now < next.runtime {
+                    let wait = DEFAULT_WAIT_INTERVAL.min(next.runtime - now);
+                    debug!("Scheduler: WaitForJobsToRun is sleeping for {wait} seconds. Next job: {}.", next.job_name);
+                    drop(cfg);
+                    if !self.time.sleep_for(wait) {
+                        return false;
+                    }
+                    continue;
+                }
                 let job = self.queue.pop().expect("peeked");
-                let enabled = config.read().ok()
+                let enabled = cfg.as_ref()
                     .and_then(|cfg| cfg.find_job(&job.job_name).map(|j| j.enabled)).unwrap_or(true);
-                if !enabled {
-                    continue; // check queue again
-                }
-                if let Some(run) = &job.run {
-                    self.scheduled_last.insert(run.clone(), now);
-                }
-                debug!("Scheduler: Running job {}.", job.job_name);
-                execute(job);
-            } else {
-                let wait = DEFAULT_WAIT_INTERVAL.min(next.runtime - now);
-                debug!("Scheduler: WaitForJobsToRun is sleeping for {wait} seconds. Next job: {}.", next.job_name);
-                if !self.time.sleep_for(wait) {
-                    return false;
-                }
+                let directive = job.run.as_ref().zip(cfg.as_ref()).and_then(|(run, cfg)| run_directive(cfg, run));
+                (job, enabled, directive)
+            };
+            if !enabled {
+                continue; // check queue again
             }
+            if let Some(run) = &job.run {
+                self.scheduled_last.insert(run.clone(), now);
+            }
+            debug!("Scheduler: Running job {}.", job.job_name);
+            execute(job, directive);
         }
-        true
     }
 
     /// AddJobsForThisAndNextHourToQueue()
@@ -238,7 +302,7 @@ fn automatic_scheduler_schedule<'a>(cfg: &'a DirectorConfig, job: &bareos_config
 }
 
 /// The Run directive of a queued item in the current configuration.
-pub fn run_directive(cfg: &DirectorConfig, run: &RunKey) -> Option<bareos_config::resources::RunDirective> {
+pub fn run_directive(cfg: &DirectorConfig, run: &RunKey) -> Option<RunDirective> {
     cfg.schedules.iter().find(|s| s.name == run.schedule).and_then(|s| s.runs.get(run.index)).cloned()
 }
 
@@ -252,9 +316,8 @@ pub fn scheduler_loop(launcher: Option<crate::scheduled_run::Launcher>, shutdown
     if let Some(launcher) = launcher {
         let config = launcher.config.clone();
         let mut scheduler = Scheduler::new(SystemTimeSource { shutdown });
-        let mut execute = |job: ScheduledJob| {
+        let mut execute = |job: ScheduledJob, run: Option<RunDirective>| {
             debug!("dispatching job '{}' (level={}, priority={})", job.job_name, job.level, job.priority);
-            let run = job.run.as_ref().and_then(|run| config.read().ok().and_then(|cfg| run_directive(&cfg, run)));
             if launcher.execute(&job.job_name, run.as_ref(), now_unix()) != 0 {
                 state.jobs_dispatched.fetch_add(1, Ordering::Relaxed);
             }
@@ -273,11 +336,11 @@ pub fn scheduler_loop(launcher: Option<crate::scheduled_run::Launcher>, shutdown
 }
 
 /// Sleep that can be interrupted by shutdown.
-fn sleep_interruptible(duration: Duration, shutdown: &AtomicBool) {
+fn sleep_interruptible(duration: Duration, shutdown: &AtomicBool, wake: impl Fn() -> bool) {
     let interval = Duration::from_millis(500);
     let mut remaining = duration;
 
-    while remaining > Duration::ZERO && !shutdown.load(Ordering::Relaxed) {
+    while remaining > Duration::ZERO && !shutdown.load(Ordering::Relaxed) && !wake() {
         let sleep_time = remaining.min(interval);
         std::thread::sleep(sleep_time);
         remaining = remaining.saturating_sub(sleep_time);
@@ -349,7 +412,7 @@ Messages { Name=Standard }
         let now = Cell::new(start);
         let mut scheduler = Scheduler::new(FakeClock { now: &now, limit });
         let mut started = Vec::new();
-        let mut execute = |job: ScheduledJob| started.push((job.job_name, now.get(), job.level, job.priority));
+        let mut execute = |job: ScheduledJob, _: Option<RunDirective>| started.push((job.job_name, now.get(), job.level, job.priority));
         while scheduler.cycle(cfg, &mut execute) {}
         started
     }
@@ -431,9 +494,50 @@ Messages { Name=Standard }
             assert_eq!(scheduler.queue.len(), 1);
             cfg.write().unwrap().jobs[0].enabled = false;
             now.set(local(10, 30));
-            scheduler.wait_for_jobs_to_run(&cfg, &mut |_| started += 1);
+            scheduler.wait_for_jobs_to_run(&cfg, &mut |_, _| started += 1);
             assert_eq!(started, 0);
             assert!(scheduler.queue.is_empty());
+        })
+    }
+
+    /// reload.cc:212: after a reload the scheduler plans from the new
+    /// configuration. Old queue: run "a" Full at 10:30 (pool Full), "gone"
+    /// at 10:40. New configuration: "a" Incremental at 10:20 in pool Inc,
+    /// "gone" removed, "new" added at 10:25.
+    #[test]
+    fn reload_clears_the_queue_and_plans_from_the_new_configuration() {
+        tz(|| {
+            let old = format!("{BASE}Pool {{ Name=Inc; Pool Type=Backup }}\n\
+                Schedule {{ Name=s; Run = Full daily at 10:30 }}\n\
+                Schedule {{ Name=g; Run = Full daily at 10:40 }}\n{}{}",
+                job("a", "s", ""), job("gone", "g", ""));
+            let new = format!("{BASE}Pool {{ Name=Inc; Pool Type=Backup }}\n\
+                Schedule {{ Name=s; Run = Incremental Pool=Inc daily at 10:20 }}\n\
+                Schedule {{ Name=n; Run = Full daily at 10:25 }}\n{}{}",
+                job("a", "s", ""), job("new", "n", ""));
+            let cfg = config(&old);
+            let generation: &'static AtomicU64 = Box::leak(Box::new(AtomicU64::new(0)));
+            let now = Cell::new(local(10, 0));
+            let mut scheduler = Scheduler::with_generation(FakeClock { now: &now, limit: local(11, 0) }, generation);
+            scheduler.fill_queue_or_sleep(&cfg);
+            assert_eq!(scheduler.queue.len(), 2);
+
+            // the reload: swap under the write lock, bump the generation
+            {
+                let mut guard = cfg.write().unwrap();
+                *guard = crate::director_config::DirectorConfig::from_str(&new).unwrap();
+                generation.fetch_add(1, Ordering::SeqCst);
+            }
+
+            let mut started = Vec::new();
+            let mut execute = |job: ScheduledJob, run: Option<RunDirective>| {
+                started.push((job.job_name, now.get(), job.level, run.and_then(|r| r.pool)));
+            };
+            while scheduler.cycle(&cfg, &mut execute) {}
+            assert_eq!(started, vec![
+                ("a".to_string(), local(10, 20), "Incremental".to_string(), Some("Inc".to_string())),
+                ("new".to_string(), local(10, 25), "Full".to_string(), None),
+            ]);
         })
     }
 
