@@ -386,10 +386,10 @@ pub fn tools() -> Vec<Value> {
                 "client": s("files/jobs/quota: of this client"),
                 "volume": { "type": "array", "items": { "type": "string" }, "minItems": 1,
                     "description": "files/jobs: of this volume (one); volume: these volumes" },
-                "pool": s("jobs: of this pool; volume with action: volumes of this pool"),
+                "pool": s("jobs: of this pool; volume with action: volumes of this pool (with action: pool or allpools is required)"),
                 "jobstatus": s("jobs/volume: only jobs with these status letters, comma-separated, e.g. E,f"),
                 "action": e(&["truncate", "all"], "volume: run ActionOnPurge for purged volumes"),
-                "storage": s("with action: storage"),
+                "storage": s("with action: storage (needed when the Director has more than one Storage, else it asks)"),
                 "allpools": b("with action: volumes of all pools"),
                 "drive": i(0, "with action: drive"),
                 "confirm": confirm()
@@ -1092,6 +1092,11 @@ fn purge(a: &Args) -> Result<Plan, String> {
     }
     if kind == "volume" {
         if let Some(action) = a.choice("action", &["truncate", "all"])? {
+            // ActionOnPurgeCmd forces a pool selection without pool=/allpools
+            // (ua_purge.cc), a dialog the tool cannot answer.
+            if !a.has("pool") && !a.flag("allpools")? {
+                return Err("purge volume with action needs pool or allpools (the Director would ask for the pool)".into());
+            }
             p.push(format!("action={action}"));
             push_name(&mut p, a, "storage")?;
             push_name(&mut p, a, "pool")?;
@@ -1409,8 +1414,10 @@ mod tests {
         assert_eq!(line("purge", json!({"kind":"volume","volume":["A","B"],"confirm":true})), "purge volume=A volume=B");
         assert_eq!(line("purge", json!({"kind":"files","jobid":4,"confirm":true})), "purge files jobid=4");
         assert_eq!(line("purge", json!({"kind":"jobs","client":"fd","jobstatus":"E,f","confirm":true})), "purge jobs client=fd jobstatus=E,f");
-        assert_eq!(line("purge", json!({"kind":"volume","volume":"A","action":"truncate","storage":"File","confirm":true})),
-            "purge volume=A action=truncate storage=File");
+        assert_eq!(line("purge", json!({"kind":"volume","volume":"A","action":"truncate","storage":"File","pool":"Full","confirm":true})),
+            "purge volume=A action=truncate storage=File pool=Full");
+        // without pool/allpools the Director would ask for the pool (BgLage, 19.11.2026)
+        assert!(err("purge", json!({"kind":"volume","volume":"A","action":"truncate","confirm":true})).contains("pool or allpools"));
         assert_eq!(line("delete", json!({"kind":"volume","volume":"A","confirm":true})), "delete volume=A yes");
         assert_eq!(line("delete", json!({"kind":"jobid","jobids":[1,2,3],"confirm":true})), "delete jobid=1,2,3");
         assert_eq!(line("delete", json!({"kind":"pool","pool":"Old","confirm":true})), "delete pool=Old");

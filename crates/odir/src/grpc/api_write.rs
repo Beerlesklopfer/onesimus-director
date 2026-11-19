@@ -714,6 +714,11 @@ fn purge(r: &Req, kind: &str) -> Result<Plan, String> {
     }
     if kind == "volume" {
         if let Some(action) = r.choice("action", &["truncate", "all"])? {
+            // ActionOnPurgeCmd forces a pool selection without pool=/allpools
+            // (ua_purge.cc), a dialog a typed RPC cannot answer.
+            if !r.has("pool") && !r.flag("allpools") {
+                return Err("PurgeVolume with action needs pool or allpools".into());
+            }
             l.kv("action", action);
             push_texts(&mut l, r, &["storage", "pool", "devicetype"])?;
             if r.flag("allpools") {
@@ -1133,8 +1138,12 @@ mod tests {
         assert_eq!(line("PruneDirectory", json!({"directory": "/x/", "client": "fd", "recursive": true, "confirm": true})),
                    "prune directory=/x/ client=fd recursive yes");
         assert_eq!(line("PurgeVolume", json!({"volume": ["A", "B"], "confirm": true})), "purge volume=A volume=B");
-        assert_eq!(line("PurgeVolume", json!({"volume": ["A"], "action": "truncate", "storage": "File", "confirm": true})),
-                   "purge volume=A action=truncate storage=File");
+        assert_eq!(line("PurgeVolume", json!({"volume": ["A"], "action": "truncate", "storage": "File", "pool": "Full", "confirm": true})),
+                   "purge volume=A action=truncate storage=File pool=Full");
+        assert_eq!(line("PurgeVolume", json!({"action": "all", "allpools": true, "confirm": true})),
+                   "purge volume action=all allpools");
+        // without pool/allpools the Director would ask for the pool
+        assert!(err("PurgeVolume", json!({"volume": ["A"], "action": "truncate", "confirm": true})).contains("pool or allpools"));
         assert_eq!(line("PurgeFiles", json!({"jobid": 4, "confirm": true})), "purge files jobid=4");
         assert_eq!(line("PurgeJobs", json!({"client": "fd", "jobstatus": "E,f", "confirm": true})), "purge jobs client=fd jobstatus=E,f");
         assert_eq!(line("PurgeQuota", json!({"confirm": true})), "purge quota");

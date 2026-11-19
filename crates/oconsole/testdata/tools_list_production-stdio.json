@@ -3652,7 +3652,7 @@
           },
           "pool": {
             "type": "string",
-            "description": "jobs: of this pool; volume with action: volumes of this pool"
+            "description": "jobs: of this pool; volume with action: volumes of this pool (with action: pool or allpools is required)"
           },
           "jobstatus": {
             "type": "string",
@@ -3668,7 +3668,7 @@
           },
           "storage": {
             "type": "string",
-            "description": "with action: storage"
+            "description": "with action: storage (needed when the Director has more than one Storage, else it asks)"
           },
           "allpools": {
             "type": "boolean",
