@@ -112,7 +112,7 @@ zu einem Planfehler; kein stilles Auslassen oder Wechsel des Sicherungsverfahren
 | --- | --- | --- |
 | UID-/Endpoint-Domäne | Host, UID, Engine-/Endpoint-ID, Version und Mappingprofil. | Zielkonto und Berechtigungen explizit zuordnen. |
 | Pods / Container | Nur Inspect-Daten: Konfiguration, unveränderliche IDs, Image-Referenz, Abhängigkeiten und Mounts; kein Export des Container-Dateisystems. | Neue getrennte Ressourcen, gestoppt; kein ungeprüftes Inspect-Replay. |
-| Images | Wählbar: IDs, Tags, Digests und Plattform immer (in den Inspect-Daten); Save-Archive nur mit `images=archive`. | Load bzw. Pull plus Identitätsprüfung. Nur das Offlineprofil (`images=archive`) enthält alle benötigten Images. |
+| Images | Wählbar: IDs, Tags, Digests und Plattform immer (in den Inspect-Daten); mit `images=blobs` zusätzlich Manifest, Config und jede Layer als eigene Datei, je Digest einmal. | Pull bzw. Wiederaufbau aus den Blobs plus Digest-Prüfung. Nur mit `images=blobs` ist ein Restore ohne Registry möglich. |
 | Quadlet | Quelldateien, Includes, Drop-ins und freigegebene Abhängigkeiten. | Zuerst gestaged; generierte Services ersetzen die Quellen nicht. Keine automatische Aktivierung. |
 | Named Volumes | Daten und zertifiziertes Metadatenprofil unter passendem Usernamespace. | Neu angelegtes leeres Stagingvolume; keine Inhaltsvermischung. |
 | Bind Mounts | Eigene autorisierte FD-Dateisicherung. | Freigegebene Zielpfadzuordnung, kein automatischer Zugriff auf Inspect-Pfade. |
@@ -146,11 +146,39 @@ Plugin = "podman:user=root:quadlet=web-*.container:consistency=stop"
 | `quadlet` | eine Auswahl | Unit-Namen oder Globs | – | Über Quadlet verwaltete Container, Pods und Volumes; schließt die Quelldateien ein. |
 | `exclude` | nein | Namen oder Globs | – | Wird von `pods`/`containers`/`quadlet` abgezogen. |
 | `volumes` | nein | `yes`, `no` | `yes` | Named Volumes der Auswahl (zertifiziertes Profil). Bind Mounts nie; die sichert der FD als Dateien (eigene Include-Zeile). |
-| `images` | nein | `archive`, `reference` | `reference` | `reference`: Name, Tag und Digest der verwendeten Images stehen in den Inspect-Daten; der Restore holt sie aus der Registry. `archive`: zusätzlich `podman save` der Images, für einen Restore ohne Registry. |
+| `images` | nein | `blobs`, `reference` | `reference` | `reference`: Name, Tag und Digest stehen in den Inspect-Daten; der Restore holt die Images aus der Registry. `blobs`: zusätzlich Manifest, Config und Layer als einzelne Dateien im Baum, je Digest einmal (gemeinsame Layer nur einmal); Restore ohne Registry. Kein `podman save`-tar. |
 | `networks` | nein | `yes`, `no` | `yes` | Die von der Auswahl verwendeten Podman-Netzwerke als Inspect-Daten (`podman network inspect`): Name, ID, Treiber, Subnetze, Gateways, IP-Bereiche, IPv6, DNS, interne/isolierte Netze, Optionen und Labels. Dazu je Container seine Netzwerkzuordnung (statische IP/MAC, Aliase, Portfreigaben) aus dessen Inspect-Daten. Das Standardnetz `podman` nur als Referenz. |
 | `quadlet_sources` | nein | `yes`, `no` | `yes` | Quadlet-Quelldateien, Includes und Drop-ins der Auswahl. |
 | `consistency` | nein | `stop`, `crash` | `stop` | `stop`: autorisierter Stop der Writergruppe mit Journal, Sicherung, Wiederaufnahme. `crash`: Kopie im laufenden Betrieb, ausdrücklich abgeschwächtes Profil, im Manifest vermerkt. |
 | `secrets` | nein | `reference` | `reference` | Secrets nur als Verweis zur Wiederbereitstellung, nie ihr Inhalt. Ein anderer Wert ist im MVP nicht zulässig. |
+
+### Arbeitsweise wie ein Dateisystem (Entscheidung des Nutzers, 19.11.2026)
+
+Das Plugin legt im vorhandenen SD-Strom (`NextFile`/`ReadFile`, Bareos-Format)
+einen virtuellen Dateibaum an, wie ein Dateisystem. Es gibt kein zusätzliches
+tar: der Strom ist bereits der Container, ein tar darin wäre doppelt. Jede
+Einheit ist eine eigene Datei mit eigenen Attributen; dadurch bleiben
+Restore einzelner Teile, Prüfsummen je Datei und später Incrementals möglich.
+
+```text
+/@podman/<user>/pods/<pod>/inspect.json
+/@podman/<user>/containers/<container>/inspect.json
+/@podman/<user>/networks/<netz>/inspect.json
+/@podman/<user>/volumes/<volume>/inspect.json
+/@podman/<user>/volumes/<volume>/data/<Pfad im Volume>      (Dateien des Volumes)
+/@podman/<user>/images/<name:tag>.json                      (Referenz: Digest, Plattform)
+/@podman/<user>/images/blobs/sha256/<digest>                (nur images=blobs; je Digest einmal)
+/@podman/<user>/quadlet/<unit>.container|.pod|.network|.volume
+/@podman/<user>/manifest.json                               (Auswahl, Abhängigkeiten, Profil, Ausschlüsse)
+```
+
+Zusammenhänge erkennt das Plugin selbst: Zu jedem ausgewählten Pod oder
+Container gehören automatisch sein Pod, seine Images (als Referenz bzw. Blobs),
+seine Named Volumes, seine Netzwerke, seine Abhängigkeiten (`--requires`,
+Pod-Infra) und die Quadlet-Units, aus denen er stammt. Der Administrator wählt
+nur aus, *was* er sichern will; *was dazugehört*, ergänzt das Plugin und
+schreibt es ins Manifest. Gemeinsam genutzte Objekte (ein Netz, ein Volume, eine
+Layer mehrerer Container) erscheinen einmal im Baum.
 
 Was von einem Container gesichert wird (Entscheidung des Nutzers, 19.11.2026):
 nur seine Inspect-Daten (Konfiguration, IDs, Image-Referenz, Mounts,
@@ -186,7 +214,7 @@ Restore-Parameter (Restore-Job, `pluginoptions=`):
 Offen: ob beim Restore mit `stage` überlappende Subnetze eines neu angelegten
 Netzes mit vorhandenen Netzen des Zielhosts geprüft und abgelehnt werden (Vorschlag:
 ja, Planfehler). Ob `consistency=stop` je Pod oder für die ganze Auswahl gemeinsam
-stoppt (Writergruppe über Pods hinweg), und ob `images=archive` gemeinsam
+stoppt (Writergruppe über Pods hinweg), und ob `images=blobs` gemeinsam
 genutzte Images je Job nur einmal sichert.
 
 ## Broker, Namespaces und Metadaten
@@ -270,7 +298,7 @@ importieren. [Volume import](https://docs.podman.io/en/latest/markdown/podman-vo
 | --- | --- | --- |
 | P0 | Runtime-/Brokervertrag, Metadatenpfad, UID-/Endpointpolicy und Discovery. | Keine automatische Rechteausweitung; conmon-Fund und bestätigte Podman-Quelle klar getrennt. |
 | P1 | Inventory-/Plan-Modus mit Quadlet und dauerhaft registrierten Konten. | Gestoppte Container fehlen nicht; gleiche Namen verschiedener UIDs bleiben getrennt. |
-| P2 | Lokales Full-only-Backup, Journal, Imagearchive und zertifizierte Volumes. | Crash-/Cancel-/Konsistenztests und Metadaten-Roundtrip bestanden. |
+| P2 | Lokales Full-only-Backup als Dateibaum, Journal, Image-Blobs und zertifizierte Volumes. | Crash-/Cancel-/Konsistenztests und Metadaten-Roundtrip bestanden. |
 | P3 | Restore in neue Ressourcen und separate Promotion. | Sauberer Zielhost und Offline-Images; bestehende Ressourcen unverändert. |
 | P4 | Remote, weitere Storage-/Mappingprofile, App-Adapter und Incrementals. | Je Profil eigene Zertifizierung; Remote-Pfade niemals als lokale FD-Pfade verwenden. |
 
