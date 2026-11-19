@@ -4,6 +4,8 @@
 - [Betrieb des Directors: Dienst, Katalog, Umgebungsvariablen, Abweichungen von Bareos](betrieb-odir.md)
 - [Kommandozeilenparameter: Director, Konsole und File Daemon](kommandozeile.md)
 - [File Daemon: gRPC mit dauerhaftem BNET-Fallback](file-daemon.md)
+- [Testgerüst Director + FD + SD (Ende-zu-Ende, `--ignored`)](testgeruest.md)
+- [Dokumentationsregel: Moduldoku, Glossar, Diagramme, Modulbaum](dokumentation.md)
 - [Signierbare Plugin-Architektur](plugin-architektur.md)
 - [Befehlsübersicht](commands/README.md)
 - [MCP-Server von oconsole (Tools mit Beispielen)](mcp.md)

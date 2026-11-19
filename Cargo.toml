@@ -15,6 +15,7 @@ members = [
     "crates/onesimus-ldap-broker",
     "crates/onesimus-podman-core",
     "crates/onesimus-podman-broker",
+    "crates/onesimus-rig",
 ]
 
 [workspace.package]
@@ -59,6 +60,9 @@ openssl = "0.10"
 rcgen = "0.13"
 mdns-sd = "0.13"
 hex = "0.4"
+
+# Documentation: Mermaid diagrams in rustdoc
+aquamarine = "0.6"
 
 # Concurrency
 crossbeam-channel = "0.5"

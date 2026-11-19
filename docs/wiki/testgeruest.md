@@ -1,0 +1,138 @@
+# Testgerüst Director + FD + SD
+
+Das Testgerüst startet einen vollständigen Satz Daemons auf dem eigenen
+Rechner und prüft damit Backup, Restore, Verify, Estimate und Abbruch von
+Ende zu Ende. Es ist das Sicherheitsnetz für den Umbau von ofd und für den
+Neubau von osd (Gutachten `docs/audits/ofd-struktur-2026-11-19.md` §3 und §6,
+Schritt 0).
+
+Code: Crate `crates/onesimus-rig` (Bibliothek) und die Tests in
+`crates/onesimus-rig/tests/rig.rs`. Die Rustdoc-Seite des Crates erklärt jeden
+Typ, enthält ein Glossar (`onesimus_rig::glossary`), ein Klassendiagramm
+(`Rig`) und den beim Bau erzeugten Modulbaum.
+
+## Was läuft
+
+| Teil | Programm | Port |
+|---|---|---|
+| Director | `target/debug/odir` aus dem Workspace (`--disable-grpc`) | 39391 |
+| File Daemon | `target/debug/ofd` aus dem Workspace (`--disable-grpc`) | 39392 |
+| Storage Daemon | `/usr/sbin/bareos-sd` 25 (austauschbar, siehe unten) | 39393 |
+| Katalog | eigener PostgreSQL-Cluster aus `initdb`, nur TCP auf `127.0.0.2` | 39394 |
+
+Jeder Test hat einen eigenen Satz Ports (39391, 39401, 39411, 39421, 39431,
+je vier aufeinanderfolgende) und ein eigenes Verzeichnis
+`/tmp/ofdrig-<Port>-<PID>`. Alles läuft als normaler Benutzer; kein
+Systemdienst und keine Systemdatenbank wird angefasst.
+
+Warum `127.0.0.2`: Der Cluster hat keine Unix-Sockets, weil Socket-Pfade unter
+`/tmp/…` die Grenze von 107 Zeichen leicht überschreiten. odir verbindet sich
+bei `127.0.0.1` und `localhost` aber über den Socket in `/var/run/postgresql`
+(`crates/odir/src/check_catalog.rs` `uses_socket`). Jede andere Adresse aus
+`127.0.0.0/8` geht über TCP.
+
+## Starten
+
+```sh
+cargo test -p onesimus-rig -- --ignored
+```
+
+Der Test baut vorher `odir` und `ofd` (`cargo build -p odir -p ofd`), damit
+nie ein veraltetes Binary geprüft wird. Ohne `--ignored` laufen nur die
+Unit-Tests des Crates; die Gerüst-Tests stehen dann als „ignored, needs
+bareos-sd and initdb: run with --ignored“ in der Ausgabe.
+
+Dauer: rund 35 s für alle fünf Tests (sie laufen parallel).
+
+Voraussetzungen (fehlt eine, scheitert der Test mit einer Liste der fehlenden
+Teile und je einem Hinweis, er besteht nie still):
+
+- `bareos-sd` 25 (`apt install bareos-storage`)
+- PostgreSQL-Server-Programme `initdb`, `pg_ctl` und `psql`
+  (`apt install postgresql`; gesucht unter `/usr/lib/postgresql/<Version>/bin`
+  und im `PATH`)
+- Katalogschema `/usr/lib/bareos/scripts/ddl/creates/postgresql.sql`
+  (`apt install bareos-database-postgresql`)
+- `diff`
+
+Umgebungsvariablen:
+
+| Variable | Wirkung |
+|---|---|
+| `ONESIMUS_RIG_SD` | Pfad des Storage Daemons (Vorgabe `/usr/sbin/bareos-sd`) |
+| `ONESIMUS_RIG_ODIR`, `ONESIMUS_RIG_OFD` | andere Binaries für Director und FD |
+| `ONESIMUS_RIG_PGBIN` | Verzeichnis mit `initdb`, `pg_ctl`, `psql` |
+| `ONESIMUS_RIG_DDL` | anderes Katalogschema |
+| `ONESIMUS_RIG_NO_BUILD=1` | nicht vorher bauen, vorhandene Binaries nehmen |
+| `ONESIMUS_RIG_KEEP=1` | Gerüstverzeichnis (Konfiguration, Logs, Volumes) nach dem Lauf behalten |
+
+Logs eines Laufs (mit `ONESIMUS_RIG_KEEP=1`): `dir.log`, `fd.log`, `sd.log`,
+`pg.log` im Gerüstverzeichnis, dazu `dir-work/job.log`.
+
+## Was geprüft wird
+
+`backup_verify_restore_estimate_cancel` (Ports ab 39391):
+
+1. Backup des Testbaums (Full, MD5, GZIP, Sparse, HardLinks = yes) → `T`, 13 Einträge.
+   Der Baum enthält: gewöhnliche Dateien, ein Unterverzeichnis, eine leere
+   Datei, eine 12-MiB-Datei, einen Symlink, zwei Hardlinks auf dieselbe Inode,
+   einen Namen, der kein UTF-8 ist (`caf\xe9.txt`), und eine 8-MiB-Sparse-Datei.
+2. Estimate mit Listing → nennt die Dateien des Baums.
+3. Verify VolumeToCatalog → `T`.
+4. Restore in das Zielverzeichnis → `T`; `diff -r --no-dereference` Quelle
+   gegen Ziel ohne Unterschied; die Hardlinks teilen wieder eine Inode; die
+   Sparse-Datei belegt weniger als ein Viertel ihrer Größe.
+5. Abbruch eines laufenden Backups (48 MiB bei 4 MB/s) → der Job endet früh
+   und nicht mit `T`.
+
+Erwartete Defekte stehen als eigene Tests mit `#[should_panic]`. Sie bestehen,
+solange der Defekt besteht. Wird er behoben, schlägt der Test fehl („panic did
+not contain expected string“ bzw. „test did not panic“); dann wird aus ihm
+eine gewöhnliche Prüfung.
+
+| Test | Defekt | Fundstelle |
+|---|---|---|
+| `expected_defect_d1_fd_reports_cancel_as_error` | D1: ofd meldet nach `cancel` `TermCode=69` (E) statt A | Gutachten §7 |
+| `expected_defect_d14_job_bandwidth_is_overwritten` | D14 (neu): Job-Direktive `Maximum Bandwidth` erreicht den FD als `setbandwidth`, `storage_cmd` überschreibt sie mit dem Client-Wert | `ofd/src/job/backup_cmds.rs` `setbandwidth_cmd`, `ofd/src/job.rs` `storage_cmd`; Bareos `filed/dir_cmd.cc` 751, 1412–1420 |
+| `expected_defect_d15_estimate_before_first_backup_is_silent` | D15 (neu): `estimate` vor dem ersten Backup antwortet nur „Using Catalog“, weil odir den FileSet-Satz nur sucht statt ihn anzulegen. Ursache des Gutachten-Befunds „Estimate-Pfad nicht erreicht“ | `odir/src/commands/estimate.rs` `estimate_job` |
+| `expected_defect_d16_canceled_backup_is_fatal_in_catalog` | D16 (neu): abgebrochenes Backup steht im Katalog als `f` statt `A` (Worker endet mit Code 1). Der Fachmann maß bei anderem Zeitverlauf `A` | `odir/src/job_manager.rs` |
+
+Nicht geprüft und bewusst ausgelassen: Verify DiskToCatalog. Mit `Sparse = yes`
+meldet es bei Nulldateien „MD5 digest differs“; das ist geerbtes
+Bareos-Verhalten und kein ofd-Defekt (Gutachten §3).
+
+Bekannte Konfigurationsfalle: Bareos 25 setzt in FileSet-Optionen
+`HardLinks = no` als Vorgabe (odir sendet dann `H`). Ohne `HardLinks = yes`
+werden zwei Hardlinks als zwei Dateien gesichert und wiederhergestellt.
+
+## bareos-sd durch osd ersetzen
+
+Der Storage Daemon ist eine Variable:
+
+```sh
+cargo build -p osd-daemon        # sobald es crates/osd/daemon gibt
+ONESIMUS_RIG_SD=$PWD/target/debug/osd cargo test -p onesimus-rig -- --ignored
+```
+
+Das Gerüst startet den SD mit `-f -c <Datei> -d 50` und erwartet, dass er
+`<Gerüst>/sd/bareos-sd.conf` liest (Storage, Director, Device, Messages; siehe
+`onesimus_rig::config::sd_config`) und auf dem Port aus `SD Port` annimmt.
+Ein osd, der dieselbe Konfiguration und dieselbe Kommandozeile versteht, ist
+damit ohne Änderung am Gerüst prüfbar. Dieselben Tests müssen dann grün
+werden; die erwarteten Defekte D1, D14, D15 und D16 liegen in ofd bzw. odir
+und bleiben vom Tausch des SD unberührt.
+
+Ebenso lassen sich Director und FD tauschen (`ONESIMUS_RIG_ODIR`,
+`ONESIMUS_RIG_OFD`), etwa gegen `/usr/sbin/bareos-dir` als Gegenprobe. Die
+Kommandozeile `-f --disable-grpc -c <Verzeichnis> -d 100` ist dabei auf odir
+und ofd zugeschnitten; für die Bareos-Programme muss `--disable-grpc` entfallen
+(noch nicht umgesetzt).
+
+## Aufräumen
+
+`Rig` räumt in `Drop` ab, auch wenn ein Test vorher scheitert: Director, FD
+und SD bekommen `SIGTERM` an ihre Prozessgruppe, nach 10 s `SIGKILL`; der
+Cluster wird mit `pg_ctl stop -m immediate` beendet; das Verzeichnis wird
+gelöscht (außer mit `ONESIMUS_RIG_KEEP=1`). Bricht der Testprozess selbst hart
+ab (`kill -9`), bleibt das Verzeichnis liegen: `rm -rf /tmp/ofdrig-*` und
+`pkill -f /tmp/ofdrig-` räumen von Hand auf.

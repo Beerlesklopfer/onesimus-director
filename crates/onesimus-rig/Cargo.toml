@@ -1,0 +1,13 @@
+[package]
+name = "onesimus-rig"
+description = "End-to-end test rig: odir + ofd + bareos-sd (later osd) with a throwaway catalog"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+publish = false
+
+[dependencies]
+bareos-bnet.workspace = true
+libc.workspace = true
+aquamarine.workspace = true
