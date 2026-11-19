@@ -5,6 +5,10 @@ onesimus (25.1.2+onesimus.0.2.0-2) UNRELEASED; urgency=medium
     unresolvable address. Address/Addresses are aliases of the Director
     resource. Mixing DirAddresses with DirAddress or DirPort is an error,
     an entry without port takes 9101. IPv6 sockets are IPv6-only.
+    As bareos-dir: "ip" entries are IPv4, addr/port must be unquoted
+    (addr = "::1" is refused), one addr and one port per entry, and an
+    address that cannot be bound is retried three times, 5 s apart, then
+    the start fails (no listening on a subset of the configured addresses).
     BEHAVIOUR CHANGE: without any address the Director now listens on
     0.0.0.0 AND :: (BNET on DirPort, gRPC on DirPort+1000), as Bareos does.
     Hosts with a routed IPv6 address need IPv6 firewall rules for 9101 and
