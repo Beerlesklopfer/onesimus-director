@@ -1,6 +1,6 @@
 # Planung: Signier-Infrastruktur (Plugins und Pakete)
 
-Stand: 19.11.2026. Status: **Freigegeben** (Nutzer, 19.11.2026: „GO!“). Offen sind nur noch die Laufzeit der Signierzertifikate und der Ort der zweiten Offline-Kopie.
+Stand: 19.11.2026. Status: **Freigegeben** (Nutzer, 19.11.2026: „GO!“). Offen ist nur noch der Ort der zweiten Offline-Kopie (Sache des Nutzers, nicht im Repository).
 
 Zwei getrennte Signaturebenen, beide nötig:
 
@@ -139,5 +139,5 @@ meist kein Ed25519). Die CA bleibt Ed25519.
 1. ~~Freigabe des Modells~~ – freigegeben (Nutzer, 19.11.2026): CA offline,
    Signierschlüssel offline erzeugt und in den TPM importiert.
 1a. ~~Algorithmus und Werkzeug~~ – entschieden: RSA 4096, OpenSSL-Provider `tpm2`.
-2. Laufzeit der Signierzertifikate (Vorschlag 3 Jahre) oder Zeitstempeldienst.
+2. ~~Laufzeit der Signierzertifikate~~ – entschieden (Nutzer, 19.11.2026): **3 Jahre**, kein Zeitstempeldienst; Neusignieren rechtzeitig vor Ablauf.
 3. Wo die zweite Offline-Kopie liegt.
