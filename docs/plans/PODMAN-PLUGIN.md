@@ -1466,7 +1466,11 @@ Erledigt durch diese Überarbeitung: Quadlet-Quellen mit Werten bei
 `ownership.tsv`), Discovery ohne Auswertung von Kontodateien als root,
 Totmannschalter (im MVP).
 
-## Entscheidungen, die der Nutzer noch treffen muss
+## Entscheidungen des Nutzers vom 19.11.2026 (zuvor offen)
+
+Der Nutzer hat alle sechs Empfehlungen übernommen („podman go“, 19.11.2026).
+Die folgenden Punkte sind damit entschieden, wie jeweils empfohlen:
+
 
 1. **Vorgabe für `max_downtime`** (V-4). Empfehlung: 7200 s als Vorgabe,
    Pflicht bei `consistency_scope=job`; für forgeiec.io nach dem Probelauf mit
