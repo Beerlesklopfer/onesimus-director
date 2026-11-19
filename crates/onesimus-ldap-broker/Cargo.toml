@@ -1,0 +1,16 @@
+[package]
+name = "onesimus-ldap-broker"
+description = "Broker of the signed OpenLDAP plugin for ofd: runs as the slapd user, fixed slapcat/slapadd calls"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license = "AGPL-3.0-only"
+
+[[bin]]
+name = "onesimus-ldap-broker"
+path = "src/main.rs"
+
+[dependencies]
+onesimus-proto-rs.workspace = true
+prost.workspace = true
+libc.workspace = true

@@ -12,6 +12,7 @@ members = [
     "crates/ofd",
     "crates/onesimus-plugins",
     "crates/onesimus-pg-broker",
+    "crates/onesimus-ldap-broker",
 ]
 
 [workspace.package]
