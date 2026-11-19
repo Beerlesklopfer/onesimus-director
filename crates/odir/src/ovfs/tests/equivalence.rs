@@ -1,6 +1,7 @@
 //! Equivalence of the Director fallback and the `ovfs` extension.
 //!
-//! Runs only with `OVFS_EQUIV_URL` set to a PostgreSQL server (without
+//! Both tests are `#[ignore]`d; run them with `--ignored`. The first needs
+//! `OVFS_EQUIV_URL` set to a PostgreSQL server (without
 //! database name, e.g. `postgres://user@127.0.0.1:55439`) on which the
 //! extension `ovfs` is available and a Bareos catalog template exists
 //! (`OVFS_EQUIV_TEMPLATE`, default `bareos_cppref`). The test creates a
@@ -266,11 +267,9 @@ fn canonical(text: &str) -> String {
 }
 
 #[test]
+#[ignore = "needs OVFS_EQUIV_URL=<postgres url> with the ovfs extension and the catalog template"]
 fn fallback_equals_extension() {
-    let Ok(base) = std::env::var("OVFS_EQUIV_URL") else {
-        eprintln!("ovfs equivalence: skipped (OVFS_EQUIV_URL not set)");
-        return;
-    };
+    let base = std::env::var("OVFS_EQUIV_URL").expect("OVFS_EQUIV_URL not set");
     let template = std::env::var("OVFS_EQUIV_TEMPLATE").unwrap_or_else(|_| "bareos_cppref".into());
     let scratch = Scratch::create(&base, &template);
     scratch.exec("CREATE EXTENSION ovfs");
@@ -380,11 +379,9 @@ fn fallback_equals_extension() {
 }
 
 #[test]
+#[ignore = "needs OVFS_FALLBACK_URL=<postgres url> without the ovfs extension, with the catalog template"]
 fn fallback_without_extension() {
-    let Ok(base) = std::env::var("OVFS_FALLBACK_URL") else {
-        eprintln!("ovfs fallback: skipped (OVFS_FALLBACK_URL not set)");
-        return;
-    };
+    let base = std::env::var("OVFS_FALLBACK_URL").expect("OVFS_FALLBACK_URL not set");
     let template = std::env::var("OVFS_EQUIV_TEMPLATE").unwrap_or_else(|_| "bareos_cppref".into());
     let scratch = Scratch::create(&base, &template);
     scratch.exec(&synthetic_sql());

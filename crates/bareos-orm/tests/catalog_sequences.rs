@@ -11,11 +11,9 @@ use bareos_orm::migration::{check_sequences, Migrator};
 use sqlx::postgres::{PgConnectOptions, PgPoolOptions};
 
 #[tokio::test]
+#[ignore = "needs BAREOS_ORM_TEST_DB=<postgres url of a throw-away database>"]
 async fn migrations_never_move_sequences_and_lags_are_reported() {
-    let Ok(url) = std::env::var("BAREOS_ORM_TEST_DB") else {
-        eprintln!("BAREOS_ORM_TEST_DB not set, skipping");
-        return;
-    };
+    let url = std::env::var("BAREOS_ORM_TEST_DB").expect("BAREOS_ORM_TEST_DB not set");
     let schema = format!("onesimus_c039_{}", std::process::id());
     let admin = PgPoolOptions::new().max_connections(1).connect(&url).await.unwrap();
     sqlx::query(&format!("CREATE SCHEMA {schema}")).execute(&admin).await.unwrap();

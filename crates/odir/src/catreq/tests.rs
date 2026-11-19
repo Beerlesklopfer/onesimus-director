@@ -506,8 +506,9 @@ fn catalog_files_off_and_blast_attr() {
 /// With ONESIMUS_CATREQ_DB=<postgres url of a throw-away catalog copy>: run
 /// a backup's catalog requests and check the catalog effects.
 #[test]
+#[ignore = "needs ONESIMUS_CATREQ_DB=<postgres url of a throw-away catalog copy>"]
 fn real_catalog_round_trip() {
-    let Ok(url) = std::env::var("ONESIMUS_CATREQ_DB") else { return };
+    let url = std::env::var("ONESIMUS_CATREQ_DB").expect("ONESIMUS_CATREQ_DB not set");
     static SHUTDOWN: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
     let (cat, _join) = crate::catalog_worker::spawn_catalog_worker(url.parse().expect("catalog url"), &SHUTDOWN);
     let job_id: u32 = cat.query_rows("INSERT INTO Job (Job,Name,Type,Level,JobStatus,PoolId,ClientId) \

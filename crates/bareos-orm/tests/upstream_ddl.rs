@@ -542,11 +542,9 @@ async fn describe(pool: &sqlx::PgPool, schema: &str) -> Vec<String> {
 }
 
 #[tokio::test]
+#[ignore = "needs BAREOS_ORM_TEST_DB=<postgres url of a throw-away database>"]
 async fn fresh_migration_creates_the_bareos_schema() {
-    let Ok(url) = std::env::var("BAREOS_ORM_TEST_DB") else {
-        eprintln!("BAREOS_ORM_TEST_DB not set, skipping");
-        return;
-    };
+    let url = std::env::var("BAREOS_ORM_TEST_DB").expect("BAREOS_ORM_TEST_DB not set");
     use std::str::FromStr;
     let admin = sqlx::postgres::PgPoolOptions::new().max_connections(1).connect(&url).await.unwrap();
     let pid = std::process::id();
