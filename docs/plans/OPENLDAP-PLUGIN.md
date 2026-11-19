@@ -2,8 +2,9 @@
 
 Stand: 19.11.2026. Status: **neu geschrieben nach zwei Prüfberichten
 (Sicherheit S-1 bis S-16 / E-1 bis E-12, LDAP-Mechanik L-1 bis L-20) und den
-verbindlichen Entscheidungen des Nutzers vom 19.11.2026; Umsetzung siehe
-Abschnitt „Umsetzung“.** Ersetzt den Entwurf vom 27.10.2026 (LDAP-Protokoll-
+verbindlichen Entscheidungen des Nutzers vom 19.11.2026; umgesetzt und in
+Podman für beide Konfigurationsarten getestet (Abschnitt „Umsetzung“). Offen:
+Bau mit echtem Signierschlüssel und Lauf gegen `odir` + `bareos-sd`.** Ersetzt den Entwurf vom 27.10.2026 (LDAP-Protokoll-
 Broker über ldapi als root, Eintragsbaum), der nicht mehr zur Architektur passt.
 
 Das Plugin sichert einen lokalen OpenLDAP-Server (`slapd` 2.5/2.6, Backend
@@ -50,7 +51,7 @@ FileSet {
 | Option | Vorgabe | Bedeutung |
 | --- | --- | --- |
 | `instance` | `main` | Name im virtuellen Baum `/@openldap/<instance>/`, `[A-Za-z0-9_-]{1,64}`. |
-| `databases` | `*` | Suffixe (Komma-Liste, `*`-Muster, Groß-/Kleinschreibung egal). Nur `mdb` ist sicherbar. |
+| `databases` | `*` | Suffixe (Liste mit `;`, weil ein Suffix Kommas enthält; `*`-Muster, Groß-/Kleinschreibung egal). Nur `mdb` ist sicherbar. |
 | `exclude` | leer | Suffix-Muster, die ausgelassen werden. |
 | `config` | `yes` | Konfiguration mitsichern (cn=config bzw. Dateisatz). |
 | `config_path` | – | Nur Auswahl, wenn **mehrere** slapd laufen: der Wert muss dem erkannten `-F`/`-f` eines Prozesses entsprechen. Wird nie als Pfad benutzt. |
@@ -298,10 +299,44 @@ oder Fehlermeldungen); slapd als root abgelehnt; Produktivverzeichnis nie
 
 | # | Punkt | Vorschlag |
 | --- | --- | --- |
-| O-1 | Sicherung ohne laufenden slapd | abgelehnt (Vorschlag, offen) |
+| O-1 | Sicherung/Online-Restore ohne laufenden slapd | abgelehnt, die Benutzer-ID kommt nur vom Prozess (Vorschlag, offen) |
 | O-2 | Grants v2 je Plugin-ID (E-5) | später |
 | O-3 | include außerhalb der Präfixliste | Planfehler statt stilles Weglassen (Vorschlag, offen) |
 | O-4 | Daten-Restore online ohne Konfiguration im selben Job | abgelehnt (Vorschlag, offen) |
 | O-5 | Inkrementale (Hash je Eintrag statt Zeitstempel, L-7) | später |
 | O-6 | `physical` über `mdb_copy` (L-18) | später |
 | O-7 | Ende-zu-Ende mit `odir` + `bareos-sd` und Katalog | am echten System |
+| O-8 | Ein vorhandenes, leeres `target=` | nur, wenn es ofd (root) gehört und für Gruppe/Andere nicht schreibbar ist (Vorschlag, offen) |
+| O-9 | slapd.d-Restore: Nebendateien (`/etc/default/slapd`) | landen unter `<ziel>/conf/…`, werden nicht angewendet (Vorschlag, offen) |
+
+## Umsetzung (19.11.2026)
+
+| Schritt | Commit | Stand |
+| --- | --- | --- |
+| Plan | `6b3c07c` | dieser Plan |
+| S-10 Broker allgemein | `429dce4` | `BrokerFunction` je Broker, Tabelle Capability → Import → Funktionen (`BROKER_IMPORTS`, `import_plan`), Port nennt Familie und bediente Capabilities, `prepare_broker_for` verteilt nach Manifest und Jobart; PostgreSQL unverändert, Tests grün |
+| Vertrag | `4b6032d` (proto `openldap` `1298e49`) | `proto/openldap_broker.proto`, WIT `openldap`, `openldap-restore`, Welt `openldap-plugin` |
+| Broker | `7ac8939` | `crates/onesimus-ldap-broker`: info (slapd -VV, `slapcat -n 0` bzw. slapd.conf-Parser), dumps, Dateien nach ID, slapadd nur mit `--target`, stderr-Filter |
+| Host | `03fc867` | `ldap_instance.rs`, `ldap_port.rs`, TLS-Warnungen, Ablehnung geheimer Optionen, Ziel anlegen/prüfen/umschreiben/löschen, Restore-Hinweise im Joblog |
+| Gast-Laufzeit | `13c03d2` | Größenklassen statt Bump-Allokator (ein Strom wuchs je Block um zwei Puffer bis zur 32-MiB-Grenze); PostgreSQL/example-tree neu gebaut, grün |
+| Gast | `2a50e31` | `plugins/openldap` (no_std) |
+| Tests | `30e09b1` | `tests/openldap/` (Containerfile, Setup, `run-in-podman.sh`), `crates/ofd/src/ldap_e2e.rs` |
+| Paket | `e08ff23` | `packaging/ofd-plugin-openldap` |
+
+Container-Lauf (Podman 5.4.2 rootless, isoliert, debian:trixie, slapd
+2.6.10), je `ldaptest-olc` und `ldaptest-conf` bestanden: Broker als
+`openldap`; Daten-LDIF byte-gleich mit `slapcat -b`, cn=config byte-gleich mit
+`slapcat -n 0` bzw. Dateisatz byte-gleich; unter Schreiblast p+q = 20 000
+(Umbau lief während des Dumps); Restore in Dateien ohne Plugin-Code (0600);
+Online-Restore in `/var/lib/onesimus-ldap-restore/<jobid>`, zweiter slapd auf
+dem Ziel, Anmeldung `anna`/`annaPass1`, `memberOf`, Daten und cn=config
+(ohne umgeschriebene Pfade) gleich; Ziel = Produktivverzeichnis abgelehnt,
+`data.mdb` vorher/nachher gleich; slapadd-Fehler ohne Geheimnis/DN; Lecktest
+(rootpw-Hash, userPassword, `credentials=`) nur in Dateidaten, nie in
+Attribut-/Plugin-Namen-Strömen, Joblog oder Restore-Meldungen; slapd als root
+abgelehnt.
+
+Am echten System zu prüfen: Signieren mit dem G1-Schlüssel (TPM) mit den
+Grants oben, `ofd --check-plugin` des Pakets, Lauf gegen `odir` + `bareos-sd`
+mit Katalog (FileSetText, `list files`, Audit-Log), BgLage (dort ofd auf dem
+LDAP-Host, Passwort im alten Job ändern, S-3).

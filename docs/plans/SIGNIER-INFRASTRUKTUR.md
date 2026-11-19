@@ -305,10 +305,13 @@ capabilities = SEQUENCE:onesimus_capabilities
 [onesimus_plugin_ids]
 p1 = UTF8String:org.onesimus.example-tree
 p2 = UTF8String:org.onesimus.postgresql
+p3 = UTF8String:org.onesimus.openldap
 [onesimus_capabilities]
 c1 = UTF8String:file.read
 c2 = UTF8String:file.write
 c3 = UTF8String:postgresql.read
+c4 = UTF8String:openldap.read
+c5 = UTF8String:openldap.write
 ```
 
 ```sh
