@@ -1,6 +1,6 @@
 # Planung: Ressourcen lesen, anlegen, ändern, löschen über gRPC (CRUD)
 
-Stand: 19.11.2026. Status: **Entwurf zur Abstimmung mit der GUI.**
+Stand: 19.11.2026. Status: **Mit der GUI abgestimmt (19.11.2026), Umsetzung läuft.**
 
 Auftrag des Nutzers: volles CRUD für Ressourcen der Director-Konfiguration,
 zuerst für Zeitpläne („Weekly Cycle kein CRUD möglich“, „ein drag führt zu einem
@@ -44,7 +44,34 @@ erkennt den Umfang über `GetConfigCapabilities` und fällt ohne diese RPC auf
    `EXISTS`, wenn der Name schon vergeben ist.
 9. **Umbenennen** kommt später (mit Anpassung aller Verweise); bis dahin fehlt
    `RENAME` in den Fähigkeiten.
-10. **Reihenfolge der Typen:** Schedule, dann Job und JobDefs, dann die übrigen.
+10. **Prüfen ohne Schreiben:** `validate_only` in Create, Update und Delete
+    liefert dieselbe Antwort wie der echte Aufruf (status, problem,
+    referenced_by), schreibt aber nichts und lädt nicht neu.
+11. **Konflikt mit aktuellem Stand:** `CONFLICT` enthält immer `text` und
+    `sha256` des aktuellen Stands, damit der Client den Unterschied zeigen kann,
+    ohne neu zu lesen.
+12. **Exakte Bytes:** `text` ist der Bereich der Ressource genau so, wie er in
+    der Datei steht, vom ersten Zeichen des Ressourcennamens (`Schedule`) bis
+    einschließlich der schließenden Klammer und des folgenden Zeilenendes,
+    mit unveränderten Zeilenenden (CRLF bleibt CRLF) und ohne Normalisierung.
+    `sha256` wird über genau diese Bytes gebildet. Geschriebener Text wird
+    unverändert übernommen.
+13. **Fähigkeiten je Sitzung:** `GetConfigCapabilities` spiegelt die ACLs der
+    angemeldeten Konsole: Ohne Command-ACL `configure` keine schreibenden
+    Operationen; Typen ohne erlaubte Ressource erscheinen nicht.
+14. **Protokoll:** Jede schreibende Operation (nicht `validate_only`) geht ins
+    Journal und als Director-Meldung (Messages-Ressource des Directors):
+    Konsole, Operation, Typ, Name, alter und neuer SHA-256, Datei.
+15. **Was der Reload nicht angleicht:** Der Reload schreibt wie beim Start
+    (`CheckCatalog`, C-066) die Pool-Datensätze des Katalogs aus der
+    Konfiguration neu (`check_catalog::ensure_basic_records`, aufgerufen in
+    `reload.rs`). Die Volumes eines Pools behalten ihre Werte (Retention,
+    Recycle, Max Volume Bytes …), bis `update volume … frompool` bzw.
+    `update pool from resource` läuft. Die Antwort nennt solche Nacharbeiten in
+    `followups` (z. B. „update volume pool=Full allfrompool“).
+16. **Übersicht:** `ListResources(type)` liefert je Ressource Name, Datei und
+    SHA-256, damit ein Client veraltete Stände ohne einzelne Reads erkennt.
+17. **Reihenfolge der Typen:** Schedule, dann Job und JobDefs, dann die übrigen.
     `GetConfigCapabilities` nennt je Typ, was schon geht.
 
 ## proto (Ergänzung von `proto/director_api.proto`)
@@ -61,6 +88,7 @@ service DirectorApi {
   rpc UpdateResource (UpdateResourceRequest) returns (ResourceResponse);
   rpc DeleteResource (DeleteResourceRequest) returns (ResourceResponse);
   rpc RenameResource (RenameResourceRequest) returns (ResourceResponse);  // später; bis dahin UNIMPLEMENTED
+  rpc ListResources (ListResourcesRequest) returns (ListResourcesResponse);
 }
 
 enum ResourceType {
@@ -130,6 +158,7 @@ message CreateResourceRequest {
   option (onesimus.command_name) = "configure create";
   ResourceType type = 1;
   string text = 2;                     // vollständige Ressource "Schedule { Name = ...; ... }"
+  bool validate_only = 3;              // nur prüfen, nichts schreiben, kein Reload
 }
 
 message UpdateResourceRequest {
@@ -137,12 +166,30 @@ message UpdateResourceRequest {
   ResourceRef resource = 1;
   string expected_sha256 = 2;          // SHA-256 (hex) des Textes, auf dem die Änderung beruht
   string text = 3;                     // neuer vollständiger Text; Name muss resource.name sein
+  bool validate_only = 4;
 }
 
 message DeleteResourceRequest {
   option (onesimus.command_name) = "configure delete";
   ResourceRef resource = 1;
   string expected_sha256 = 2;
+  bool validate_only = 3;
+}
+
+message ListResourcesRequest {
+  option (onesimus.command_name) = "configure list";
+  ResourceType type = 1;
+}
+
+message ResourceSummary {
+  ResourceRef resource = 1;
+  string file = 2;
+  string sha256 = 3;
+  bool shared_file = 4;
+}
+
+message ListResourcesResponse {
+  repeated ResourceSummary resources = 1;
 }
 
 message RenameResourceRequest {
@@ -170,6 +217,9 @@ message ResourceResponse {
   repeated ResourceRef referenced_by = 8;
   ConfigProblem problem = 9;           // bei INVALID
   bool reloaded = 10;                  // Konfiguration neu geladen
+  bool validated_only = 11;            // Antwort auf validate_only, nichts geschrieben
+  string old_sha256 = 12;              // Stand vor der Änderung (schreibende Operationen)
+  repeated string followups = 13;      // was der Reload nicht angleicht, als Konsolenbefehle
 }
 ```
 
