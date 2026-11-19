@@ -44,7 +44,8 @@ rustls.workspace = true
 libc.workspace = true
 daemonize.workspace = true
 clap.workspace = true
-tokio-stream = "0.1"
+tokio-stream = { version = "0.1", features = ["net"] }
+socket2 = { version = "0.5", features = ["all"] }
 sqlx.workspace = true
 chrono = "0.4"
 rcgen.workspace = true

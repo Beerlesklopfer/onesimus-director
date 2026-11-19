@@ -56,8 +56,8 @@ impl ExecParts {
 
 /// Everything the gRPC server needs besides the shared queues.
 pub struct GrpcSettings {
-    pub bind_address: String,
-    pub port: u16,
+    /// Bound sockets, one per listen address (`listen::bind_all`).
+    pub listeners: Vec<std::net::TcpListener>,
     pub bnet_port: u16,
     pub director_name: String,
     pub identity: tls::GrpcIdentity,
@@ -95,13 +95,25 @@ pub fn run_grpc_server(
     let shutdown_flag = shutdown as *const AtomicBool;
 
     rt.block_on(async move {
-        let addr = match format!("{}:{}", settings.bind_address, settings.port).parse() {
-            Ok(a) => a,
-            Err(e) => {
-                error!("invalid gRPC bind address {}:{}: {e}", settings.bind_address, settings.port);
-                return;
+        let mut addrs = Vec::new();
+        let mut incoming = tokio_stream::StreamMap::new();
+        for (i, listener) in settings.listeners.into_iter().enumerate() {
+            let bound = listener.set_nonblocking(true)
+                .and_then(|()| tokio::net::TcpListener::from_std(listener));
+            match bound {
+                Ok(l) => {
+                    if let Ok(a) = l.local_addr() {
+                        addrs.push(a.to_string());
+                    }
+                    incoming.insert(i, tokio_stream::wrappers::TcpListenerStream::new(l));
+                }
+                Err(e) => {
+                    error!("gRPC listener: {e}");
+                    return;
+                }
             }
-        };
+        }
+        let incoming = tokio_stream::StreamExt::map(incoming, |(_, conn)| conn);
         // Typed API (director_api.proto): same port, TLS, session tokens and ACLs
         let api = api::DirectorApiImpl::new(q.clone(), settings.auth.clone()).with_exec(settings.exec.clone());
         let svc = DirectorServiceImpl::new(
@@ -111,7 +123,7 @@ pub fn run_grpc_server(
             .identity(Identity::from_pem(&settings.identity.cert_pem, &settings.identity.key_pem));
 
         RUNNING.store(true, Ordering::Relaxed);
-        info!("gRPC server (TLS) listening on {addr}, certificate SHA-256 {}", settings.identity.fingerprint);
+        info!("gRPC server (TLS) listening on {}, certificate SHA-256 {}", addrs.join(", "), settings.identity.fingerprint);
 
         // Use a channel to signal shutdown
         let (shutdown_tx, shutdown_rx) = tokio::sync::oneshot::channel::<()>();
@@ -138,7 +150,7 @@ pub fn run_grpc_server(
         let result = builder
             .add_service(DirectorServer::new(svc))
             .add_service(DirectorApiServer::new(api))
-            .serve_with_shutdown(addr, async { let _ = shutdown_rx.await; });
+            .serve_with_incoming_shutdown(incoming, async { let _ = shutdown_rx.await; });
 
         if let Err(e) = result.await {
             error!("gRPC server error: {e}");

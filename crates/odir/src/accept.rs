@@ -24,8 +24,8 @@ use crate::session;
 use crate::director_config::SharedConfig;
 
 pub struct AcceptConfig {
-    pub bind_address: String,
-    pub port: u16,
+    /// Bound sockets, one per listen address (`listen::bind_all`).
+    pub listeners: Vec<TcpListener>,
     pub password: String,
     pub tls_config: Option<TlsConfig>,
     pub shared_config: Option<SharedConfig>,
@@ -36,8 +36,7 @@ pub struct AcceptConfig {
 impl Default for AcceptConfig {
     fn default() -> Self {
         Self {
-            bind_address: "0.0.0.0".to_string(),
-            port: 9101,
+            listeners: Vec::new(),
             password: String::new(),
             tls_config: None,
             shared_config: None,
@@ -54,19 +53,11 @@ pub fn accept_loop(
     config: &AcceptConfig,
     shutdown: &AtomicBool,
 ) {
-    let addr = format!("{}:{}", config.bind_address, config.port);
-
-    let listener = match TcpListener::bind(&addr) {
-        Ok(l) => {
+    for listener in &config.listeners {
+        if let Ok(addr) = listener.local_addr() {
             info!("listening on {addr}");
-            l
         }
-        Err(e) => {
-            error!("FATAL: failed to bind {addr}: {e}");
-            error!("Another director already running? Check: ss -tlnp | grep {}", config.port);
-            std::process::exit(1);
-        }
-    };
+    }
 
     // Build TLS server config if certs are provided
     let tls_server_config = config.tls_config.as_ref().and_then(|tc| {
@@ -86,39 +77,45 @@ pub fn accept_loop(
         }
     });
 
-    // Set non-blocking so we can check shutdown flag
-    listener.set_nonblocking(true).ok();
+    // Set non-blocking so we can check shutdown flag and serve every socket
+    for listener in &config.listeners {
+        listener.set_nonblocking(true).ok();
+    }
 
     while !shutdown.load(Ordering::Relaxed) {
-        match listener.accept() {
-            Ok((stream, peer_addr)) => {
-                debug!("new connection from {peer_addr}");
-                stream.set_nonblocking(false).ok();
-                stream.set_nodelay(true).ok(); // Disable Nagle — EOD signal must arrive immediately
+        let mut idle = true;
+        for listener in &config.listeners {
+            match listener.accept() {
+                Ok((stream, peer_addr)) => {
+                    idle = false;
+                    debug!("new connection from {peer_addr}");
+                    stream.set_nonblocking(false).ok();
+                    stream.set_nodelay(true).ok(); // Disable Nagle — EOD signal must arrive immediately
 
-                let smgr = session_mgr.clone();
-                let q = cmd_queue.clone();
-                let password = config.password.clone();
-                let tls_cfg = tls_server_config.clone();
-                let shared_cfg = config.shared_config.clone();
-                let job_mgr = config.job_manager.clone();
-                let cat = config.catalog.clone();
-                let session_id = crate::session_manager::next_session_id();
+                    let smgr = session_mgr.clone();
+                    let q = cmd_queue.clone();
+                    let password = config.password.clone();
+                    let tls_cfg = tls_server_config.clone();
+                    let shared_cfg = config.shared_config.clone();
+                    let job_mgr = config.job_manager.clone();
+                    let cat = config.catalog.clone();
+                    let session_id = crate::session_manager::next_session_id();
 
-                thread::Builder::new()
-                    .name(format!("dir:session:{session_id}"))
-                    .spawn(move || {
-                        handle_connection(stream, session_id, &password, tls_cfg, &smgr, &q, &shared_cfg, &job_mgr, &cat);
-                    })
-                    .ok();
+                    thread::Builder::new()
+                        .name(format!("dir:session:{session_id}"))
+                        .spawn(move || {
+                            handle_connection(stream, session_id, &password, tls_cfg, &smgr, &q, &shared_cfg, &job_mgr, &cat);
+                        })
+                        .ok();
+                }
+                Err(ref e) if e.kind() == std::io::ErrorKind::WouldBlock => {}
+                Err(e) => {
+                    warn!("accept error: {e}");
+                }
             }
-            Err(ref e) if e.kind() == std::io::ErrorKind::WouldBlock => {
-                std::thread::sleep(std::time::Duration::from_millis(100));
-            }
-            Err(e) => {
-                warn!("accept error: {e}");
-                std::thread::sleep(std::time::Duration::from_millis(100));
-            }
+        }
+        if idle {
+            std::thread::sleep(std::time::Duration::from_millis(100));
         }
     }
 
@@ -291,8 +288,7 @@ mod tests {
     #[test]
     fn accept_config_defaults() {
         let config = AcceptConfig::default();
-        assert_eq!(config.bind_address, "0.0.0.0");
-        assert_eq!(config.port, 9101);
+        assert!(config.listeners.is_empty());
     }
 
     #[test]

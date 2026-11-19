@@ -37,6 +37,7 @@ mod job_worker;
 mod verify;
 mod json_output;
 mod kill;
+mod listen;
 mod localtime;
 mod logging;
 mod mdns;
@@ -148,7 +149,7 @@ struct Cli {
     #[arg(long, short = 'P')]
     port: Option<u16>,
 
-    /// Override bind address (default: 0.0.0.0).
+    /// Listen on this address only (default: DirAddresses, DirAddress, else 0.0.0.0).
     #[arg(long, short = 'b')]
     bind_address: Option<String>,
 
@@ -195,36 +196,6 @@ struct Cli {
     /// PEM private key for gRPC.
     #[arg(long, requires = "grpc_cert")]
     grpc_key: Option<String>,
-}
-
-/// The listen address of the Director as "ip" or "[ipv6]": the address a
-/// name resolves to first (Bareos behaviour), 0.0.0.0 when none is given.
-fn bind_address_for(given: Option<&str>, port: u16) -> Result<String, String> {
-    use std::net::ToSocketAddrs;
-    let Some(host) = given else { return Ok("0.0.0.0".to_string()) };
-    let host = host.trim_start_matches('[').trim_end_matches(']');
-    let first = (host, port).to_socket_addrs().map_err(|e| format!("DirAddress {host}: {e}"))?.next()
-        .ok_or_else(|| format!("DirAddress {host}: no address"))?;
-    Ok(match first.ip() {
-        std::net::IpAddr::V4(ip) => ip.to_string(),
-        std::net::IpAddr::V6(ip) => format!("[{ip}]"),
-    })
-}
-
-#[cfg(test)]
-mod bind_address_tests {
-    use super::bind_address_for;
-
-    #[test]
-    fn dir_address_becomes_a_parsable_listen_address() {
-        assert_eq!(bind_address_for(None, 9101).unwrap(), "0.0.0.0");
-        assert_eq!(bind_address_for(Some("127.0.0.1"), 9101).unwrap(), "127.0.0.1");
-        assert_eq!(bind_address_for(Some("::1"), 9101).unwrap(), "[::1]");
-        assert_eq!(bind_address_for(Some("[::1]"), 9101).unwrap(), "[::1]");
-        let a = bind_address_for(Some("::1"), 9101).unwrap();
-        assert!(format!("{a}:9101").parse::<std::net::SocketAddr>().is_ok());
-        assert!(bind_address_for(Some("no.such.host.invalid"), 9101).is_err());
-    }
 }
 
 fn main() {
@@ -488,15 +459,22 @@ fn main() {
     job_messages::set_catalog(catalog.clone());
 
     let port = config.director.port;
-    // --bind-address, else DirAddress, else every interface. A name is
-    // resolved once; the result is written so "{addr}:{port}" parses.
-    if config.director.addresses_given {
-        eprintln!("DirAddresses is not supported; use DirAddress");
-        std::process::exit(1);
-    }
-    let bind_addr = match bind_address_for(cli.bind_address.as_deref().or(config.director.address.as_deref()), port) {
+    // --bind-address, else every DirAddresses entry, else DirAddress, else
+    // every IPv4 interface. Bound here, before any listener thread, so a
+    // wrong address stops the start with a message.
+    let listen_addrs = match listen::listen_addresses(&config.raw, cli.bind_address.as_deref(), port) {
         Ok(a) => a,
         Err(e) => {
+            error!("FATAL: {e}");
+            eprintln!("{e}");
+            std::process::exit(1);
+        }
+    };
+    let bnet_listeners = match listen::bind_all(&listen_addrs) {
+        Ok(l) => l,
+        Err(e) => {
+            error!("FATAL: {e}");
+            error!("Another director already running? Check: ss -tlnp | grep {port}");
             eprintln!("{e}");
             std::process::exit(1);
         }
@@ -528,12 +506,13 @@ fn main() {
     ));
     job_mgr.lock().unwrap().set_self_ref(Arc::downgrade(&job_mgr));
 
-    info!("Director '{}' listening on port {}", dir_name, port);
+    info!("Director '{}' listening on {}", dir_name,
+        listen_addrs.iter().map(|a| a.to_string()).collect::<Vec<_>>().join(", "));
 
     // Named threads
     let mut threads = spawn_named_threads(
         session_mgr.clone(), bus.clone(), cmd_queue.clone(),
-        shared_config.clone(), port, bind_addr, grpc_enabled, dir_password, tls_config,
+        shared_config.clone(), &listen_addrs, bnet_listeners, grpc_enabled, dir_password, tls_config,
         job_mgr.clone(), catalog.clone(),
     );
 
@@ -574,8 +553,8 @@ fn spawn_named_threads(
     bus: Arc<MessageBus>,
     cmd_queue: Arc<CommandQueue>,
     config: SharedConfig,
-    port: u16,
-    bind_address: String,
+    listen_addrs: &[std::net::SocketAddr],
+    bnet_listeners: Vec<std::net::TcpListener>,
     grpc_enabled: bool,
     password: String,
     tls_config: Option<bareos_bnet::tls::TlsConfig>,
@@ -588,7 +567,6 @@ fn spawn_named_threads(
     {
         let smgr = session_mgr.clone();
         let q = cmd_queue.clone();
-        let bind_address = bind_address.clone();
         let pw = password.clone();
         let tls_cfg = tls_config.clone();
         let shared_cfg = config.clone();
@@ -598,8 +576,7 @@ fn spawn_named_threads(
             .name("dir:accept".into())
             .spawn(move || {
                 let config = accept::AcceptConfig {
-                    bind_address: bind_address,
-                    port,
+                    listeners: bnet_listeners,
                     password: pw,
                     tls_config: tls_cfg,
                     shared_config: Some(shared_cfg),
@@ -644,6 +621,8 @@ fn spawn_named_threads(
     }
 
     // dir:grpc — tonic gRPC server over TLS (optional), dir:mdns — DNS-SD announcement
+    // The BNET port announced and reported: that of the first listen address.
+    let port = listen_addrs.first().map(|a| a.port()).unwrap_or(9101);
     let (dir_name, grpc_port, mdns_advertise, grpc_identity) = {
         let cfg = config.read().unwrap();
         let d = &cfg.director;
@@ -663,16 +642,28 @@ fn spawn_named_threads(
         } else {
             None
         };
-        (d.name.clone(), d.grpc_port.unwrap_or(port.saturating_add(1000)), d.mdns_advertise, identity)
+        (d.name.clone(), d.grpc_port, d.mdns_advertise, identity)
     };
-    let grpc_fingerprint = grpc_identity.as_ref().map(|id| id.fingerprint.clone());
+    // gRPC on every listen address: `gRPC Port`, else that address's port + 1000.
+    let grpc_addrs: Vec<std::net::SocketAddr> = listen_addrs.iter()
+        .map(|a| std::net::SocketAddr::new(a.ip(), grpc_port.unwrap_or(a.port().saturating_add(1000))))
+        .fold(Vec::new(), |mut v, a| { if !v.contains(&a) { v.push(a); } v });
+    let grpc_port = grpc_port.unwrap_or(port.saturating_add(1000));
+    let grpc_identity = match grpc_identity.map(|id| (id, listen::bind_all(&grpc_addrs))) {
+        Some((id, Ok(listeners))) => Some((id, listeners)),
+        Some((_, Err(e))) => {
+            error!("gRPC disabled: {e}");
+            None
+        }
+        None => None,
+    };
+    let grpc_fingerprint = grpc_identity.as_ref().map(|(id, _)| id.fingerprint.clone());
 
-    if let Some(identity) = grpc_identity {
+    if let Some((identity, grpc_listeners)) = grpc_identity {
         let b = bus.clone();
         let q = cmd_queue.clone();
         let settings = grpc::GrpcSettings {
-            bind_address: bind_address.clone(),
-            port: grpc_port,
+            listeners: grpc_listeners,
             bnet_port: port,
             director_name: dir_name.clone(),
             identity,
@@ -695,8 +686,7 @@ fn spawn_named_threads(
 
     // A Director bound to loopback is not reachable from the network:
     // announcing it there would only advertise its name and ports.
-    let bound_to_loopback = bind_address.trim_matches(|c| c == '[' || c == ']')
-        .parse::<std::net::IpAddr>().is_ok_and(|ip| ip.is_loopback());
+    let bound_to_loopback = listen_addrs.iter().all(|a| a.ip().is_loopback());
     if mdns_advertise && bound_to_loopback {
         info!("mDNS: not announcing, Director listens on loopback only");
     }

@@ -38,6 +38,10 @@ fn run_with(path: &std::path::Path, pause: std::time::Duration) -> (String, i32)
         let (text, code) = report(&config.raw, &diags, &base);
         return (format!("{notes}{text}"), code);
     }
+    // The listen addresses must resolve: the daemon binds them at start.
+    if let Err(e) = crate::listen::listen_addresses(&config.raw, None, config.director.port) {
+        return (format!("{notes}{}", config_error("lib/parse_conf.cc", &e, None)), EXIT_CONFIG_ERROR);
+    }
     // CheckCatalog(CHECK_CONNECTION): Pmsg2(000, ...) of the first catalog
     // that does not open.
     if let Err(text) = crate::check_catalog::check_connections_with(&config, pause, |_| {}) {
@@ -318,6 +322,16 @@ mod tests {
             }
         }
         assert_eq!(found, expected);
+    }
+
+    #[test]
+    fn unresolvable_dir_addresses_fail_the_test() {
+        let dir = config_dir("addresses", JOB);
+        std::fs::write(dir.join("bareos-dir.d/director/x.conf"), "Director {\n  Name = bareos-dir\n  Password = p\n  Messages = Daemon\n  \
+            DirAddresses = {\n    ipv4 = { addr = 127.0.0.1; port = 9101; }\n    ipv6 = { addr = no.such.host.invalid; }\n  }\n}\n").unwrap();
+        let (text, code) = run_with(&dir, std::time::Duration::ZERO);
+        assert_eq!(code, 42, "{text}");
+        assert!(text.contains("Config error: DirAddresses no.such.host.invalid"), "{text}");
     }
 
     #[test]

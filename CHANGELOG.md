@@ -1,5 +1,15 @@
 onesimus (25.1.2+onesimus.0.2.0-2) UNRELEASED; urgency=medium
 
+  * odir: listen addresses as Bareos 25. DirAddresses (block form) binds
+    every entry instead of stopping the Director at start; -t reports an
+    unresolvable address. Address/Addresses are aliases of the Director
+    resource. Mixing DirAddresses with DirAddress or DirPort is an error,
+    an entry without port takes 9101. IPv6 sockets are IPv6-only.
+    BEHAVIOUR CHANGE: without any address the Director now listens on
+    0.0.0.0 AND :: (BNET on DirPort, gRPC on DirPort+1000), as Bareos does.
+    Hosts with a routed IPv6 address need IPv6 firewall rules for 9101 and
+    10101, or a DirAddress/DirAddresses entry, before the upgrade.
+
   * Set director-parity-anchor-20261015 before per-command parity changes.
   * Define per-command SHA-256 response parity for bconsole and oconsole,
     including deterministic fixtures and explicit reporting of untested cases.
