@@ -1,5 +1,16 @@
 onesimus (25.1.2+onesimus.0.2.0-2) UNRELEASED; urgency=medium
 
+  * odir: secrets in FileSet plugin lines (password=, bind_pw= ...) are
+    masked in FileSet.FileSetText and in "show fileset" (S-3). bareos-dir
+    stores them in clear (job.cc:1393); the FileSet record is matched by
+    name and MD5, so the masked text changes no FileSetId. The FD still
+    receives the real line.
+  * ofd/odir: secret option names shared in bareos_config::secrets, now
+    also bind_pw, bindpw, rootpw, olcRootPW ("pw") (S-4).
+  * ofd: a plugin's file entries keep only permission bits; setuid, setgid
+    and sticky are dropped, so a restore to files never creates root-owned
+    special files from plugin data (S-13).
+
   * docs: operations page docs/wiki/betrieb-odir.md (service, addresses,
     catalog at start, all environment variables, mail, auto prune,
     deliberate deviations from Bareos).

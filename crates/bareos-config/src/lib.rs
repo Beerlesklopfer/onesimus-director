@@ -8,6 +8,7 @@ pub mod jobdefs;
 pub mod parser;
 pub mod raw;
 pub mod values;
+pub mod secrets;
 
 pub use resources::*;
 pub use parser::parse_config;

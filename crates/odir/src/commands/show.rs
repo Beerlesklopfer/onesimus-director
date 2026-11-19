@@ -1959,7 +1959,9 @@ fn print_options(fo: &FileOptions, w: &mut W) {
 }
 
 /// FilesetResource::PrintConfig(hide_sensitive=false, verbose=false) as
-/// job.cc GetOrCreateFilesetRecord() stores it in FileSet.FileSetText.
+/// job.cc GetOrCreateFilesetRecord() stores it in FileSet.FileSetText,
+/// except that secrets in plugin lines are masked (S-3, deliberate
+/// deviation; the FileSet record is found by name and MD5, not by text).
 pub(crate) fn fileset_text(res: &ConfResource) -> String {
     let mut w = W::new();
     print_fileset(res, &mut w);
@@ -1993,8 +1995,11 @@ fn print_fileset(res: &ConfResource, w: &mut W) {
             let files: Vec<String> = body.iter().filter(|d| d.norm_key() == "file")
                 .flat_map(|d| d.values()).map(str::to_string).collect();
             w.one_per_line("File", &files, false, true, true);
+            // Secrets of plugin lines never reach FileSet.FileSetText or the
+            // show output (S-3; bareos-dir stores them in clear,
+            // job.cc:1393). The FD still gets the real line with the FileSet.
             let plugins: Vec<String> = body.iter().filter(|d| d.norm_key() == "plugin")
-                .filter_map(|d| d.first()).map(str::to_string).collect();
+                .filter_map(|d| d.first()).map(bareos_config::secrets::mask_plugin_secrets).collect();
             w.one_per_line("Plugin", &plugins, false, true, false);
             let ignore: Vec<String> = body.iter().filter(|d| d.norm_key() == "excludedircontaining")
                 .filter_map(|d| d.first()).map(str::to_string).collect();
@@ -2019,6 +2024,15 @@ fn print_fileset(res: &ConfResource, w: &mut W) {
 
 #[cfg(test)]
 mod tests {
+
+    /// S-3: secrets of plugin lines are masked in FileSet.FileSetText.
+    #[test]
+    fn fileset_text_masks_plugin_secrets() {
+        let raw = bareos_config::raw::parse_str("FileSet {\n Name = fs\n Include {\n  Plugin = \"python:module_name=bareos-fd-ldap:bind_dn=cn=a:password=geheim:host=h\"\n }\n}\n", None).unwrap();
+        let text = fileset_text(&raw[0]);
+        assert!(!text.contains("geheim"), "{text}");
+        assert!(text.contains("password=*****:host=h"), "{text}");
+    }
     use super::*;
     use crate::command_ast::Argument;
     use bareos_config::raw::parse_str;
