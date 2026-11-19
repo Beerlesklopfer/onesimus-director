@@ -1024,23 +1024,50 @@ fn add_all_findex(rx: &mut Rx) -> bool {
 /// Adds the FileIndex of every file of the selected jobs whose full path matches `regex`
 /// to the bootstrap and drops the FileRegex line then. False: nothing found or the
 /// catalog query failed (the bootstrap is unchanged).
+///
+/// A job whose File rows were pruned (PurgedFiles) has nothing to match in the
+/// catalog. Upstream sends all FileIndexes of every job with the FileRegex line
+/// (ua_restore.cc:228 AddAllFindex), and the tree is not offered for such jobs
+/// (ua_restore.cc:1323). So a purged job gets all its FileIndexes and the
+/// FileRegex line stays for the SD to filter; it is never dropped silently (J-16).
 fn add_matching_findex(rx: &mut Rx, regex: &str) -> bool {
     let jobids: Vec<String> = jobid_list(&rx.job_ids).into_iter().filter(|j| *j != 0).map(|j| j.to_string()).collect();
     if jobids.is_empty() {
         return false;
     }
-    let sql = format!("SELECT File.JobId, File.FileIndex FROM File JOIN Path USING (PathId) \
-        WHERE File.JobId IN ({}) AND Path.Path||File.Name ~ '{}' ORDER BY File.JobId, File.FileIndex",
-        jobids.join(","), regex.replace('\'', "''"));
-    let Ok(table) = rx.db.rows(&sql) else { return false };
-    if table.rows.is_empty() {
+    let purged: Vec<String> = match rx.db.rows(&format!(
+        "SELECT JobId FROM Job WHERE JobId IN ({}) AND PurgedFiles<>0 ORDER BY JobId", jobids.join(","))) {
+        Ok(table) => table.rows.into_iter().filter_map(|r| r.into_iter().next().flatten()).collect(),
+        Err(_) => return false,
+    };
+    let unpurged: Vec<&String> = jobids.iter().filter(|j| !purged.contains(j)).collect();
+    if unpurged.is_empty() {
         return false;
     }
-    for row in &table.rows {
-        let value = |i: usize| row.get(i).cloned().flatten().unwrap_or_default();
-        rx.bsr.add_findex(str_to_int64(&value(0)) as u32, str_to_int64(&value(1)) as i32);
+    let sql = format!("SELECT File.JobId, File.FileIndex FROM File JOIN Path USING (PathId) \
+        WHERE File.JobId IN ({}) AND Path.Path||File.Name ~ '{}' ORDER BY File.JobId, File.FileIndex",
+        unpurged.iter().map(|j| j.as_str()).collect::<Vec<_>>().join(","), regex.replace('\'', "''"));
+    let Ok(table) = rx.db.rows(&sql) else { return false };
+    if table.rows.is_empty() && purged.is_empty() {
+        return false;
     }
-    rx.bsr.clear_fileregex();
+    let rows: Vec<(String, i32)> = table.rows.iter().map(|row| {
+        let value = |i: usize| row.get(i).cloned().flatten().unwrap_or_default();
+        (value(0), str_to_int64(&value(1)) as i32)
+    }).collect();
+    // in the order of the JobId list, as AddAllFindex
+    for jobid in &jobids {
+        if purged.contains(jobid) {
+            rx.bsr.add_findex_all(str_to_int64(jobid) as u32);
+        } else {
+            for (_, findex) in rows.iter().filter(|(id, _)| id == jobid) {
+                rx.bsr.add_findex(str_to_int64(jobid) as u32, *findex);
+            }
+        }
+    }
+    if purged.is_empty() {
+        rx.bsr.clear_fileregex();
+    }
     true
 }
 
@@ -1104,8 +1131,13 @@ fn build_directory_tree(ua: &mut Ua, ast: &CommandAst, rx: &mut Rx) -> bool {
         tree.insert_row(ua, value(0), value(1), str_to_int64(value(2)) as i32, str_to_int64(value(3)) as u32,
             value(4), str_to_int64(value(5)) as i32);
     });
+    // GetFileList() (ua_restore.cc:1308) reads the whole result before the
+    // handler sees a row, so a failed query leaves no tree there. The rows
+    // here arrive one by one: a failure in between would leave a partial
+    // tree that `all done` restores. Stop instead (J-16).
     if let Err(e) = result {
-        ua.error_msg(e);
+        ua.error_msg(if e.ends_with('\n') { e } else { format!("{e}\n") });
+        return false;
     }
 
     if !rx.base_job_ids.is_empty() {
@@ -2273,6 +2305,51 @@ Console { Name=limited; Password=pw; CommandACL=*all*; CatalogACL=*all*; ClientA
         let (_, transcript) = dialog(&ctx, &line, &["quit"]);
         assert!(transcript.ends_with("$ quit\nRestore not done.\n"), "{transcript}");
         let _ = std::fs::remove_file(&bootstrap);
+    }
+
+    /// J-16: a catalog error while the file list is read stops the restore
+    /// (no partial tree that `all done` would restore).
+    #[test]
+    fn file_list_read_error_stops_the_restore() {
+        let (mut ctx, _) = context("*UserAgent*");
+        ctx.catalog = Some(CatalogHandle::mock(|request| {
+            let CatalogRequest::TextRows { sql } = request else { return CatalogResponse::Error("mock".into()) };
+            if sql.starts_with("SELECT Path.Path, T1.Name") {
+                return CatalogResponse::Error("ERROR:  connection lost".into());
+            }
+            CatalogResponse::Rows(answer(&sql))
+        }));
+        let result = run(&ctx, "restore jobid=1 all done");
+        assert!(!result.success);
+        assert!(result.error_message.contains("connection lost"), "{}", result.error_message);
+        assert!(result.text_output.contains("Restore not done.\n"), "{}", result.text_output);
+    }
+
+    /// J-16: fileregex= is resolved in the catalog; a job whose File rows
+    /// were pruned keeps all its FileIndexes with the FileRegex line instead
+    /// of dropping out of the selection.
+    #[test]
+    fn fileregex_keeps_jobs_with_purged_files() {
+        let catalog = CatalogHandle::mock(|request| {
+            let CatalogRequest::TextRows { sql } = request else { return CatalogResponse::Error("mock".into()) };
+            CatalogResponse::Rows(if sql.contains("PurgedFiles<>0") {
+                table(&["2"])
+            } else if sql.contains("FROM File JOIN Path") {
+                assert!(sql.contains("File.JobId IN (1)"), "{sql}");
+                table(&["1|5", "1|7"])
+            } else {
+                table(&[])
+            })
+        });
+        let mut rx = Rx { db: RestoreDb::Shared(catalog), job_ids: "1,2".into(), base_job_ids: String::new(),
+            last_jobid: String::new(), total_files: 0, all: false, client_name: None, pool: None,
+            bsr: Bsr::default(), selected_files: 0, store: None, filter: 'B', archive: false };
+        rx.bsr.set_fileregex("etc");
+        assert!(add_matching_findex(&mut rx, "etc"));
+        let bsr = format!("{:?}", rx.bsr);
+        assert!(bsr.contains("job_id: 1") && bsr.contains("file_ids: [5, 7]"), "{bsr}");
+        assert!(bsr.contains("job_id: 2") && bsr.contains("all_files: true"), "{bsr}");
+        assert!(bsr.contains("Some(\"etc\")"), "the SD filters the purged job: {bsr}");
     }
 
     #[test]
