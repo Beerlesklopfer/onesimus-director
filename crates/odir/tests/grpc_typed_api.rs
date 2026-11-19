@@ -819,7 +819,7 @@ async fn config_crud(channel: &Channel, token: &MetadataValue<tonic::metadata::A
 
     let caps = grpc.get_config_capabilities(with_token(token, pb::ConfigCapabilitiesRequest {})).await.unwrap().into_inner();
     let types: Vec<_> = caps.types.iter().map(|t| t.r#type()).collect();
-    check(caps.interface_version == 1 && types == [pb::ResourceType::Schedule, pb::ResourceType::Job, pb::ResourceType::Jobdefs, pb::ResourceType::Client],
+    check(caps.interface_version == 1 && types == [pb::ResourceType::Schedule, pb::ResourceType::Job, pb::ResourceType::Jobdefs, pb::ResourceType::Client, pb::ResourceType::Fileset],
           format!("capabilities {caps:?}"));
     let caps = grpc.get_config_capabilities(with_token(limited, pb::ConfigCapabilitiesRequest {})).await.unwrap().into_inner();
     check(caps.types.is_empty(), format!("capabilities without configure {caps:?}"));
@@ -939,7 +939,9 @@ fn start_private_director(base: &Path) -> Director {
     };
     let fd_conf = base.join("fd/bareos-fd.conf");
     let sd_conf = base.join("sd/bareos-sd.conf");
-    let fd = spawn(&["/usr/sbin/bareos-fd", "-f", "-c", fd_conf.to_str().unwrap()], "fd.out");
+    // TYPED_API_FD: another File Daemon (e.g. target/debug/ofd) instead of bareos-fd
+    let fd_bin = std::env::var("TYPED_API_FD").unwrap_or_else(|_| "/usr/sbin/bareos-fd".into());
+    let fd = spawn(&[fd_bin.as_str(), "-f", "-c", fd_conf.to_str().unwrap()], "fd.out");
     let sd = spawn(&["/usr/sbin/bareos-sd", "-f", "-c", sd_conf.to_str().unwrap()], "sd.out");
     let child = spawn(&[binary.to_str().unwrap(), "-f", "--grpc-port", &grpc_port.to_string(), "-c", conf.to_str().unwrap()], "dir.out");
     let director = Director { child, db, cert: work.join("onesimus-grpc.crt"), work: base.to_path_buf(), port, grpc_port,
@@ -972,7 +974,7 @@ fn first_jobid(reply: &Value) -> u64 {
 
 #[cfg(feature = "grpc-development")]
 #[tokio::test(flavor = "multi_thread")]
-#[ignore = "needs PostgreSQL, /usr/sbin/bareos-fd and bareos-sd (started privately) and the built binaries"]
+#[ignore = "needs PostgreSQL, /usr/sbin/bareos-fd (or TYPED_API_FD) and bareos-sd (started privately) and the built binaries"]
 async fn typed_api_writes_on_private_daemons() {
     let base = PathBuf::from(std::env::var("TYPED_API_DEV_DIR").unwrap_or_else(|_| "/tmp/ta39240".into()));
     // restore targets (e.g. the agent's scratchpad); default under the base directory
@@ -1053,6 +1055,11 @@ async fn typed_api_writes_on_private_daemons() {
     assert_eq!(update["volumes"][0]["volstatus"], json!(3), "{update:#}");  // Used
     let unconfirmed = call(&channel, &token, "PurgeVolume", &json!({"volume": ["TA-0001"]})).await.unwrap_err();
     assert_eq!(unconfirmed.code(), Code::InvalidArgument);
+    // strict prune rule (protect.rs): the volume holds the latest chain of
+    // tfd/TSet and is not purged; `delete jobid` is the only way to remove it
+    let refused = call(&channel, &token, "PurgeVolume", &json!({"volume": ["TA-0001"], "confirm": true})).await;
+    assert!(format!("{refused:?}").contains("latest Full chain"), "{refused:?}");
+    act(&channel, &token, "DeleteJob", json!({"jobid": [backup], "confirm": true})).await;
     let purge = act(&channel, &token, "PurgeVolume", json!({"volume": ["TA-0001"], "confirm": true})).await;
     assert_eq!(purge["volumes"][0]["volstatus"], json!(5), "{purge:#}");  // Purged
     act(&channel, &token, "Truncate", json!({"volume": "TA-0001", "storage": "tsd", "pool": "TA", "confirm": true})).await;
@@ -1065,8 +1072,7 @@ async fn typed_api_writes_on_private_daemons() {
     let cancel = act(&channel, &token, "Cancel", json!({"jobid": first_jobid(&later)})).await;
     assert!(cancel["text"].as_str().unwrap().contains("cancel"), "{cancel:#}");
 
-    // catalog and resource administration
-    act(&channel, &token, "DeleteJob", json!({"jobid": [backup], "confirm": true})).await;
+    // catalog and resource administration (DeleteJob: before the purge above)
     act(&channel, &token, "Disable", json!({"job": "Bk"})).await;
     act(&channel, &token, "Enable", json!({"job": "Bk"})).await;
     act(&channel, &token, "UpdatePool", json!({"pool": "TA"})).await;

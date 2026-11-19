@@ -12,9 +12,12 @@ path = "src/main.rs"
 # Drop-in: /usr/sbin/odir (C++ bareos-dir can stay installed side-by-side)
 
 [features]
-# Typed gRPC write/session/restore RPCs (DirectorApi, S-35). Development
-# build only; the production build answers UNIMPLEMENTED for them.
+# Typed gRPC write/session/restore RPCs (DirectorApi, S-35).
 grpc-development = []
+# On in every build since 19.11.2026 (decision of the maintainer): the typed
+# write RPCs build the same console lines as ExecuteCommand, go through the
+# same queue and the same console ACLs, and can answer the known questions.
+default = ["grpc-development"]
 
 [dependencies]
 bareos-bnet.workspace = true

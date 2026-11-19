@@ -105,6 +105,7 @@ for job in api.list_jobs(req).await?.into_inner().jobs {
 
 - **Produktions-Build** (Paket, Vorgabe): alle lesenden RPCs – Info/Hilfe, `list`/`llist` aller Formen, `status`/`.status`, `show` aller Ressourcentypen, die Punkt-Auflistungen, `.sql*`-Metadaten, `.acl`/`.profile` (Liste), BVFS-Abfragen und OVFS; dazu die Konfigurations-RPCs (Rohtext-CRUD, siehe unten). Alle übrigen RPCs antworten `UNIMPLEMENTED` (ihr Code ist nicht einkompiliert), wie die MCP-Schreib-Tools von oconsole.
 - **Entwicklungs-Build** (`cargo build -p odir --features grpc-development`, S-35): zusätzlich die schreibenden Befehle, die Sitzungsbefehle und die interaktive Wiederherstellung.
+- **Seit 19.11.2026 ist das Feature `grpc-development` in jedem Build eingeschaltet** (Standard-Feature, Entscheidung des Maintainers): die schreibenden RPCs bauen dieselben Konsolenzeilen wie `ExecuteCommand`, laufen durch dieselbe Warteschlange und dieselben Konsolen-ACLs und beantworten die bekannten Rückfragen. Damit gehen über MCP auch `delete pool`, `sqlquery`, `run_query`, `add_volumes` und der interaktive Restore. Ein Build ohne sie: `--no-default-features`.
 
 ### Schreibende RPCs (Entwicklungs-Build)
 
