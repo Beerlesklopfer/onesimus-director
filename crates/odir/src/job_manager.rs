@@ -1217,6 +1217,14 @@ impl JobManager {
                     post_catreq_messages(&self.bus, self.config.as_ref(), job, messages);
                 }
                 info!("JobManager: job {} worker exited (code={exit_code}), catalog status={db_status}", job.job_id);
+                // job.cc JobThread: DoAutoprune() after the cleanup, before AfterJob (commands/autoprune.rs).
+                if let Some(params) = &job.jcr.params {
+                    let ended = crate::commands::autoprune::EndedJob { job_id: job.job_id, job_name: &job.job_name,
+                        job_type: params.job_type, level: &params.level, client: &params.client_name, pool: &params.pool_name,
+                        status: job.observed_status, fd_reached: job.jcr.fd_reached };
+                    let messages = crate::commands::autoprune::after_job(self.config.as_ref(), self.catalog.as_ref(), &ended);
+                    post_catreq_messages(&self.bus, self.config.as_ref(), job, messages);
+                }
                 start_after_scripts(job, &host, &self.bus, self.config.as_ref(), final_phase, status);
             }
         }

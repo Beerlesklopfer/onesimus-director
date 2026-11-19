@@ -20,6 +20,7 @@ pub mod acl;
 pub mod catalog;
 pub mod extra;
 pub mod purge;
+pub mod autoprune;
 pub mod show;
 pub mod show_items;
 

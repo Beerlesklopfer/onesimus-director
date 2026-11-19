@@ -56,9 +56,11 @@ pub(crate) fn exclude_running_jobs(ctx: &ExecContext, list: &mut Vec<u32>) -> us
     list.len()
 }
 
-/// C++ PrepareJobidsTobedeleted(): the console's own JobId (0) and zeros go.
-fn prepare_jobids(list: &mut Vec<u32>) -> String {
-    list.retain(|id| *id != 0);
+/// C++ PrepareJobidsTobedeleted() (ua_purge.cc:407): the JobId of the
+/// UaContext's jcr (0 for a console, the job itself for DoAutoprune) and
+/// zeros go.
+fn prepare_jobids(list: &mut Vec<u32>, own_job_id: u32) -> String {
+    list.retain(|id| *id != 0 && *id != own_job_id);
     list.iter().map(u32::to_string).collect::<Vec<_>>().join(",")
 }
 
@@ -137,7 +139,12 @@ pub(crate) fn purge_jobs(db: &dyn Db, jobids: &str) -> Result<(), String> {
 /// C++ PurgeJobListFromCatalog() (ua_purge.cc:426); false (error sent)
 /// when the catalog refused the purge.
 pub(crate) fn purge_job_list_from_catalog(ua: &mut Ua, db: &dyn Db, list: &mut Vec<u32>) -> bool {
-    let jobids = prepare_jobids(list);
+    purge_job_list_from_catalog_of(ua, db, list, 0)
+}
+
+/// PurgeJobListFromCatalog() of a UaContext whose jcr has `own_job_id`.
+fn purge_job_list_from_catalog_of(ua: &mut Ua, db: &dyn Db, list: &mut Vec<u32>, own_job_id: u32) -> bool {
+    let jobids = prepare_jobids(list, own_job_id);
     if list.is_empty() {
         ua.send_msg("No jobids found to be purged\n");
         return true;
@@ -154,8 +161,8 @@ pub(crate) fn purge_job_list_from_catalog(ua: &mut Ua, db: &dyn Db, list: &mut V
 
 /// C++ PurgeFilesFromJobList() (ua_purge.cc:442); false (error sent)
 /// when the catalog refused the purge.
-fn purge_files_from_job_list(ua: &mut Ua, db: &dyn Db, list: &mut Vec<u32>) -> bool {
-    let jobids = prepare_jobids(list);
+fn purge_files_from_job_list(ua: &mut Ua, db: &dyn Db, list: &mut Vec<u32>, own_job_id: u32) -> bool {
+    let jobids = prepare_jobids(list, own_job_id);
     match purge_files(db, &jobids) {
         Ok(()) => true,
         Err(error) => {
@@ -283,7 +290,7 @@ pub(crate) fn purge_files_from_client(ua: &mut Ua, ast: &CommandAst, db: &dyn Db
         if !ua.get_confirmation(ast, "Purge (yes/no)? ", false) {
             ua.info_msg("Purge canceled.\n");
         } else {
-            purge_files_from_job_list(ua, db, &mut del);
+            purge_files_from_job_list(ua, db, &mut del, 0);
         }
     }
 }
@@ -532,6 +539,12 @@ fn prune_filter(client: Option<&str>, pool: Option<&str>, period: u64) -> (Strin
 
 /// ua_prune.cc PruneFiles() with the confirmed retention.
 pub(crate) fn prune_files(ua: &mut Ua, db: &dyn Db, client: &str, pool: Option<&str>, period: u64) {
+    prune_files_of(ua, db, client, pool, period, 0)
+}
+
+/// ua_prune.cc PruneFiles() (ua_prune.cc:892) of a UaContext whose jcr
+/// has `own_job_id` (DoAutoprune: the job that just ended).
+pub(crate) fn prune_files_of(ua: &mut Ua, db: &dyn Db, client: &str, pool: Option<&str>, period: u64, own_job_id: u32) {
     let (from, filter) = prune_filter(Some(client), pool, period);
     ua.send_msg("Begin pruning Files.\n");
     let count = match column0(db, &format!("SELECT COUNT(1) FROM Job {from} WHERE PurgedFiles=0 {filter}")) {
@@ -547,7 +560,7 @@ pub(crate) fn prune_files(ua: &mut Ua, db: &dyn Db, client: &str, pool: Option<&
     }
     let mut list = parse_ids(column0(db, &format!("SELECT JobId FROM Job {from} WHERE PurgedFiles=0 {filter} ORDER BY JobId"))
         .unwrap_or_default());
-    if !purge_files_from_job_list(ua, db, &mut list) {
+    if !purge_files_from_job_list(ua, db, &mut list, own_job_id) {
         return;
     }
     ua.info_msg(format!("Pruned Files from {} Jobs for client {client} from catalog.\n", with_commas(list.len() as u64)));
@@ -564,6 +577,12 @@ pub(crate) fn prune_files(ua: &mut Ua, db: &dyn Db, client: &str, pool: Option<&
 /// latest chain. Here every failure while the keep list is built aborts
 /// the prune before anything is deleted.
 pub(crate) fn prune_jobs(ua: &mut Ua, db: &dyn Db, client: &str, pool: Option<&str>, period: u64) -> bool {
+    prune_jobs_of(ua, db, client, pool, period, 0)
+}
+
+/// PruneJobs() of a UaContext whose jcr has `own_job_id` (DoAutoprune:
+/// the job that just ended; PrepareJobidsTobedeleted drops it).
+pub(crate) fn prune_jobs_of(ua: &mut Ua, db: &dyn Db, client: &str, pool: Option<&str>, period: u64, own_job_id: u32) -> bool {
     let (from, filter) = prune_filter(Some(client), pool, period);
     let drop = |db: &dyn Db| { let _ = db.exec("DROP TABLE IF EXISTS DelCandidates\n"); };
     drop(db);
@@ -654,7 +673,7 @@ pub(crate) fn prune_jobs(ua: &mut Ua, db: &dyn Db, client: &str, pool: Option<&s
             Vec::new()
         }
     };
-    if purge_job_list_from_catalog(ua, db, &mut list) && !list.is_empty() {
+    if purge_job_list_from_catalog_of(ua, db, &mut list, own_job_id) && !list.is_empty() {
         ua.info_msg(format!("Pruned {} {} for client {client} from catalog.\n", list.len(),
             if list.len() == 1 { "Job" } else { "Jobs" }));
     }

@@ -485,6 +485,16 @@ impl<'a> Ua<'a> {
 
     /// Result of the command. After a dialog the rest goes to the console
     /// directly (C++ order); otherwise text and errors are returned.
+    /// The output in call order, one entry per message: a UaContext of a
+    /// job without console sends each one as Jmsg M_INFO
+    /// (ua_output.cc:1882, used by DoAutoprune, commands/autoprune.rs).
+    pub(crate) fn into_job_messages(self) -> Vec<String> {
+        self.segments.into_iter().filter_map(|segment| match segment {
+            Segment::Text(t) | Segment::Error(t) | Segment::Warning(t) | Segment::Info(t) => Some(t),
+            Segment::Note(..) => None,
+        }).filter(|t| !t.is_empty()).collect()
+    }
+
     pub fn finish(mut self, success: bool) -> CommandResult {
         if self.interacted && !self.batch() {
             self.flush();
