@@ -17,6 +17,7 @@ pub mod restore_tree;
 pub mod configure;
 pub mod sql;
 pub mod acl;
+pub mod catalog;
 pub mod extra;
 pub mod purge;
 pub mod show;

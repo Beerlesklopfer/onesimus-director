@@ -74,7 +74,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::thread;
 
 use clap::Parser;
-use tracing::{info, error, warn};
+use tracing::{info, error, warn, debug};
 use tracing_subscriber::EnvFilter;
 
 use crate::command_queue::CommandQueue;
@@ -402,7 +402,7 @@ fn main() {
         info!("running as uid={} gid={}", nix::unistd::getuid(), nix::unistd::getgid());
     }
 
-    // Catalog URL of the worker
+    // Build catalog URL and auto-migrate
     let catalog_db_url = config.catalogs.first().map(|cat| {
         if cat.db_address.is_empty() || cat.db_address == "localhost" || cat.db_address == "127.0.0.1" {
             format!("postgres://{}@localhost/{}?host=/var/run/postgresql", cat.db_user, cat.db_name)
@@ -411,15 +411,28 @@ fn main() {
         }
     });
 
-    // CheckCatalog() at start (dird.cc, dird/check_catalog.cc): every
-    // catalog must open and be at BDB_VERSION, else the Director ends
-    // (M_ERROR_TERM). The Director never migrates the schema (K-3, J-14):
-    // that is the job of the Bareos DDL scripts, so a way back to bareos-dir
-    // finds the catalog it left.
-    if let Err(text) = check_catalog::check_connections(&config, |_| {}) {
-        error!("FATAL: {}", text.trim_end());
-        eprintln!("{}", text.trim_end());
-        std::process::exit(1);
+    if let Some(ref db_url) = catalog_db_url {
+        let cat = config.catalogs.first().unwrap();
+
+        // Schema-Verzeichnis: relativ zum Binary (dev) oder /usr/lib/bareos/ddl/schema (installed)
+        let schema_dir = commands::catalog::schema_dir();
+
+        if schema_dir.exists() {
+            let migrator = bareos_orm::migration::Migrator::new(&schema_dir);
+            let rt = tokio::runtime::Runtime::new().unwrap();
+            match rt.block_on(async {
+                let pool = sqlx::postgres::PgPoolOptions::new()
+                    .max_connections(1)
+                    .connect(&db_url).await?;
+                migrator.migrate(&pool).await
+            }) {
+                Ok(0) => info!("catalog '{}' schema up to date", cat.db_name),
+                Ok(n) => info!("catalog '{}': applied {} schema migration(s)", cat.db_name, n),
+                Err(e) => warn!("catalog migration failed: {e} (continuing without catalog)"),
+            }
+        } else {
+            debug!("no schema directory found at {}, skipping migration", schema_dir.display());
+        }
     }
 
     // Spawn catalog worker (single DB pool for all queries)
