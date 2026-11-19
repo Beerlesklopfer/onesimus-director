@@ -11,7 +11,9 @@ openssl x509 -req -in server.csr -CA ca.crt -CAkey ca.key -CAcreateserial -copy_
 chown root:openldap server.key; chmod 640 server.key
 chown -R openldap:openldap /srv/ldap; chmod 700 /srv/ldap/main /srv/ldap/zweit
 chown root:openldap /etc/ldap/slapd.conf; chmod 640 /etc/ldap/slapd.conf
-sed -i 's|^SLAPD_CONF=.*|SLAPD_CONF=/etc/ldap/slapd.conf|; s|^SLAPD_SERVICES=.*|SLAPD_SERVICES="ldap:/// ldaps:/// ldapi:///"|' /etc/default/slapd
+# O-7 (--network host) sets LDAPTEST_SLAPD_SERVICES=ldapi:/// (no TCP port in the host's namespace)
+services=${LDAPTEST_SLAPD_SERVICES:-ldap:/// ldaps:/// ldapi:///}
+sed -i "s|^SLAPD_CONF=.*|SLAPD_CONF=/etc/ldap/slapd.conf|; s|^SLAPD_SERVICES=.*|SLAPD_SERVICES=\"$services\"|" /etc/default/slapd
 install -d -o openldap -g openldap /run/slapd
 slaptest -u -f /etc/ldap/slapd.conf >/dev/null 2>&1
 ldap-ctl start

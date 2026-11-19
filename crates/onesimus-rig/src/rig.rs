@@ -34,6 +34,16 @@ pub struct RigOptions {
     pub keep: bool,
     /// Debug level of odir and ofd (`-d`).
     pub debug_level: u32,
+    /// Start the rig's own `ofd` (client `vfd`). `false` when the test brings
+    /// its File Daemon itself, e.g. a packaged ofd in a container
+    /// (`tests/ldap_o7.rs`); the FD port is then not checked either.
+    pub start_fd: bool,
+    /// Additional or replacing Director resources as (relative path, text),
+    /// see [`crate::config::write_director_resources`].
+    pub extra_director: Vec<(String, String)>,
+    /// `Auditing = yes` in the Director; audit messages go to
+    /// `dir-work/audit.log` ([`Rig::daemon_log`] with `audit`).
+    pub auditing: bool,
 }
 
 impl RigOptions {
@@ -43,6 +53,9 @@ impl RigOptions {
             base_port,
             keep: std::env::var_os("ONESIMUS_RIG_KEEP").is_some_and(|v| v != "0"),
             debug_level: 100,
+            start_fd: true,
+            extra_director: Vec::new(),
+            auditing: false,
         }
     }
 }
@@ -137,6 +150,9 @@ impl Rig {
             ("SD", ports.sd, "127.0.0.1"),
             ("Katalog", ports.pg, crate::catalog::LISTEN),
         ] {
+            if what == "FD" && !options.start_fd {
+                continue;
+            }
             let address: SocketAddr = format!("{host}:{port}").parse().map_err(|e| format!("{e}"))?;
             if !port_free(address) {
                 return Err(format!("Port {port} ({what}) ist belegt: läuft noch ein Gerüst? (ss -ltnp)"));
@@ -158,24 +174,32 @@ impl Rig {
         crate::tree::build_big(&self.layout.big).map_err(io)?;
         let cluster = Cluster::create(&self.layout.root, self.ports.pg, &self.programs)?;
         crate::config::write_all(&self.layout, self.ports, &cluster.user).map_err(io)?;
+        if self.options.auditing {
+            let audit = crate::config::auditing_resources(&self.layout, self.ports, &cluster.user);
+            crate::config::write_director_resources(&self.layout, &audit).map_err(io)?;
+        }
+        crate::config::write_director_resources(&self.layout, &self.options.extra_director).map_err(io)?;
         self.catalog = Some(cluster);
 
         let debug = self.options.debug_level.to_string();
-        let fd_conf = self.layout.fd_conf.display().to_string();
-        let mut fd = Daemon::spawn(
-            "ofd",
-            &self.programs.ofd,
-            &["-f", "--disable-grpc", "-c", &fd_conf, "-d", &debug],
-            &self.layout.root.join("fd.log"),
-        )?;
+        let local = |port: u16| SocketAddr::from(([127, 0, 0, 1], port));
         let sd_conf = self.layout.sd_conf.display().to_string();
         let mut sd = Daemon::spawn("sd", &self.programs.sd, &["-f", "-c", &sd_conf, "-d", "50"], &self.layout.root.join("sd.log"))?;
-        let local = |port: u16| SocketAddr::from(([127, 0, 0, 1], port));
-        let started = wait_port(&mut fd, local(self.ports.fd), Duration::from_secs(20))
-            .and_then(|()| wait_port(&mut sd, local(self.ports.sd), Duration::from_secs(20)));
+        let started = wait_port(&mut sd, local(self.ports.sd), Duration::from_secs(20));
         self.daemons.push(sd);
-        self.daemons.push(fd);
         started?;
+        if self.options.start_fd {
+            let fd_conf = self.layout.fd_conf.display().to_string();
+            let mut fd = Daemon::spawn(
+                "ofd",
+                &self.programs.ofd,
+                &["-f", "--disable-grpc", "-c", &fd_conf, "-d", &debug],
+                &self.layout.root.join("fd.log"),
+            )?;
+            let started = wait_port(&mut fd, local(self.ports.fd), Duration::from_secs(20));
+            self.daemons.push(fd);
+            started?;
+        }
 
         let dir_conf = self.layout.dir_conf.display().to_string();
         let mut dir = Daemon::spawn(
@@ -277,14 +301,18 @@ impl Rig {
             .unwrap_or_else(|e| e)
     }
 
-    /// The whole log file of the daemon `name` (`odir`, `ofd`, `sd`).
+    /// The whole log file of the daemon `name` (`odir`, `ofd`, `sd`), or the
+    /// Director's `job.log` (`job`) or audit log (`audit`, with
+    /// [`RigOptions::auditing`]) from its working directory.
     pub fn daemon_log(&self, name: &str) -> String {
         let file = match name {
-            "odir" => "dir.log",
-            "ofd" => "fd.log",
-            _ => "sd.log",
+            "odir" => self.layout.root.join("dir.log"),
+            "ofd" => self.layout.root.join("fd.log"),
+            "job" => self.layout.dir_work.join("job.log"),
+            "audit" => self.layout.dir_work.join("audit.log"),
+            _ => self.layout.root.join("sd.log"),
         };
-        std::fs::read_to_string(self.layout.root.join(file)).unwrap_or_default()
+        std::fs::read_to_string(file).unwrap_or_default()
     }
 
     /// The `2800 End Job` report of the FD for JobId `id`, read from the ofd

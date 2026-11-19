@@ -8,6 +8,9 @@
 //! Datenfluss: [`Layout::new`] legt die Pfade fest, [`write_all`] schreibt
 //! `fd/client/vfd.conf` (ofd liest ein Verzeichnis), `sd/bareos-sd.conf`
 //! (eine Datei) und `dir/bareos-dir.d/<Ressource>/<Name>.conf`.
+//! [`write_director_resources`] ergänzt danach Ressourcen eines Tests, etwa
+//! Client, FileSet und Job für einen FD außerhalb des Gerüsts (ein ofd in
+//! einem Container); [`auditing_resources`] schaltet das Audit-Log ein.
 //!
 //! Bareos-Gegenstück: die Konfigurationsvorlagen der `systemtests`
 //! (`systemtests/tests/*/etc/bareos/`). Die Ressourcen hier entsprechen dem
@@ -104,6 +107,41 @@ pub fn write_all(layout: &Layout, ports: Ports, catalog_user: &str) -> std::io::
         write(&layout.dir_conf.join(relative), &text)?;
     }
     Ok(())
+}
+
+/// Writes additional or replacing Director resources (relative path below
+/// the Director configuration directory, text), e.g. a Client, FileSet and
+/// Job for a File Daemon outside the rig ([`crate::RigOptions::extra_director`]).
+/// A path that [`director_config`] also writes replaces that file.
+pub fn write_director_resources(layout: &Layout, resources: &[(String, String)]) -> std::io::Result<()> {
+    for (relative, text) in resources {
+        if relative.split('/').any(|part| part.is_empty() || part == "..") {
+            return Err(std::io::Error::other(format!("Director resource path {relative:?} is not a plain relative path")));
+        }
+        write(&layout.dir_conf.join(relative), text)?;
+    }
+    Ok(())
+}
+
+/// The Director resource with `Auditing = yes` and a Messages resource
+/// `Daemon` that also appends the audit messages to `dir-work/audit.log`
+/// ([`crate::RigOptions::auditing`]); written over the defaults.
+pub fn auditing_resources(layout: &Layout, ports: Ports, catalog_user: &str) -> Vec<(String, String)> {
+    let work = layout.dir_work.display();
+    director_config(layout, ports, catalog_user)
+        .into_iter()
+        .filter_map(|(path, text)| match path.as_str() {
+            "director/bareos-dir.conf" => Some((path, text.replacen("\n}\n", "\n  Auditing = yes\n}\n", 1))),
+            "messages/Daemon.conf" => Some((
+                path,
+                format!(
+                    "Messages {{\n  Name = Daemon\n  append = \"{work}/daemon.log\" = all, !skipped, !saved, !audit\n  \
+                     append = \"{work}/audit.log\" = audit\n}}\n"
+                ),
+            )),
+            _ => None,
+        })
+        .collect()
 }
 
 /// Creates the parent directory of `path` and writes `text`.
@@ -240,5 +278,23 @@ mod tests {
         let files = director_config(&layout, Ports::from_base(39391), "me");
         let catalog = &files.iter().find(|(p, _)| p.starts_with("catalog/")).unwrap().1;
         assert!(catalog.contains("DbAddress = 127.0.0.2") && catalog.contains("DbPort = 39394"), "{catalog}");
+    }
+
+    #[test]
+    fn auditing_switches_on_auditing_and_an_audit_log() {
+        let layout = Layout::new(Path::new("/tmp/r1"));
+        let files = auditing_resources(&layout, Ports::from_base(39391), "me");
+        let director = &files.iter().find(|(p, _)| p == "director/bareos-dir.conf").unwrap().1;
+        assert!(director.contains("  Auditing = yes\n}\n") && director.contains("DirPort = 39391"), "{director}");
+        let daemon = &files.iter().find(|(p, _)| p == "messages/Daemon.conf").unwrap().1;
+        assert!(daemon.contains("/tmp/r1/dir-work/audit.log\" = audit"), "{daemon}");
+        assert_eq!(files.len(), 2);
+    }
+
+    #[test]
+    fn extra_resource_paths_must_stay_below_the_configuration() {
+        let layout = Layout::new(Path::new("/nonexistent-rig"));
+        let error = write_director_resources(&layout, &[("../evil.conf".into(), String::new())]).unwrap_err();
+        assert!(error.to_string().contains("not a plain relative path"), "{error}");
     }
 }

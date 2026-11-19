@@ -11,3 +11,11 @@ publish = false
 bareos-bnet.workspace = true
 libc.workspace = true
 aquamarine.workspace = true
+
+[dev-dependencies]
+# tests/ldap_o7.rs: a throwaway plugin CA and a signed OpenLDAP bundle at test time
+onesimus-plugins = { path = "../onesimus-plugins", features = ["test-ca"] }
+onesimus-proto-rs.workspace = true
+prost.workspace = true
+serde_json.workspace = true
+sha2.workspace = true

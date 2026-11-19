@@ -12,6 +12,10 @@ slapd slapd/purge_database boolean true
 slapd slapd/move_old_database boolean false
 X
 DEBIAN_FRONTEND=noninteractive dpkg-reconfigure slapd >/dev/null 2>&1
+# O-7 (--network host): only ldapi, no TCP port 389 in the host's namespace
+if [ -n "${LDAPTEST_SLAPD_SERVICES:-}" ]; then
+  sed -i "s|^SLAPD_SERVICES=.*|SLAPD_SERVICES=\"$LDAPTEST_SLAPD_SERVICES\"|" /etc/default/slapd
+fi
 ldap-ctl start
 E="-Q -Y EXTERNAL -H ldapi:///"
 ldapadd $E -f /etc/ldap/schema/cosine.ldif >/dev/null 2>&1 || true

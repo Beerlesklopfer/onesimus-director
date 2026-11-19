@@ -105,6 +105,35 @@ Bekannte Konfigurationsfalle: Bareos 25 setzt in FileSet-Optionen
 `HardLinks = no` als Vorgabe (odir sendet dann `H`). Ohne `HardLinks = yes`
 werden zwei Hardlinks als zwei Dateien gesichert und wiederhergestellt.
 
+## Fremder File Daemon (Container) und Audit-Log
+
+`RigOptions` hat drei Schalter für Tests, die ihren FD selbst mitbringen:
+
+| Feld | Vorgabe | Wirkung |
+|---|---|---|
+| `start_fd` | `true` | `false`: kein eigener ofd (Client `vfd`), der FD-Port wird nicht geprüft |
+| `extra_director` | leer | zusätzliche oder ersetzende Director-Ressourcen als (relativer Pfad, Text), z. B. `client/x.conf`, `fileset/X.conf`, `job/X.conf` |
+| `auditing` | `false` | `Auditing = yes` im Director, Audit-Meldungen nach `dir-work/audit.log` (`Rig::daemon_log("audit")`) |
+
+Dazu `Cluster::dump()` (ganzer Katalog als `pg_dump --data-only`, für
+Lecktests) und `Rig::daemon_log("job")` (`dir-work/job.log`).
+
+Nutzer: `crates/onesimus-rig/tests/ldap_o7.rs` (O-7 des OpenLDAP-Plans,
+`docs/plans/OPENLDAP-PLUGIN.md`). Der Test installiert ofd und
+`ofd-plugin-openldap` als Debian-Pakete in zwei slapd-Containern
+(`--network host`, FD auf `127.0.0.2:39461/39462`), das Gerüst auf den Ports
+ab 39451 startet nur odir, bareos-sd und den Katalog. Podman läuft isoliert
+über `tests/openldap/o7-podman.sh`. Start:
+
+```sh
+(cd plugins/openldap && CARGO_TARGET_DIR=../../target/plugins cargo +1.99.1 build --release --target wasm32-wasip2)
+cargo test -p onesimus-rig --test ldap_o7 -- --ignored --nocapture
+```
+
+Der Test baut ofd mit einer Wegwerf-Plugin-CA (`ONESIMUS_PLUGIN_CA`) in
+einem eigenen Zielverzeichnis `target/ldap-o7`, nie in `target/debug` oder
+`target/release`; private Schlüssel bleiben im Speicher.
+
 ## bareos-sd durch osd ersetzen
 
 Der Storage Daemon ist eine Variable:

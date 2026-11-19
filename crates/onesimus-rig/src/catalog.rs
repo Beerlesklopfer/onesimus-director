@@ -97,6 +97,22 @@ impl Cluster {
         self.sql(DATABASE, sql)
     }
 
+    /// The whole content of the catalog database as SQL text
+    /// (`pg_dump --data-only`, the program next to `psql`), e.g. to search
+    /// every table for a string that must never reach the catalog.
+    pub fn dump(&self) -> Result<String, String> {
+        let pg_dump = self
+            .psql
+            .parent()
+            .map(|dir| dir.join("pg_dump"))
+            .filter(|p| p.is_file())
+            .or_else(|| crate::prereq::which("pg_dump"))
+            .ok_or("pg_dump nicht gefunden (apt install postgresql-client)")?;
+        run(Command::new(pg_dump)
+            .args(["-h", LISTEN, "-p", &self.port.to_string(), "-U", &self.user, "--data-only", DATABASE])
+            .env("PGCONNECT_TIMEOUT", "10"))
+    }
+
     /// Stops the cluster immediately (no checkpoint: it is thrown away).
     pub fn stop(&mut self) {
         if self.running {

@@ -2292,6 +2292,11 @@ dependencies = [
  "aquamarine",
  "bareos-bnet",
  "libc",
+ "onesimus-plugins",
+ "onesimus-proto-rs",
+ "prost",
+ "serde_json",
+ "sha2",
 ]
 
 [[package]]
