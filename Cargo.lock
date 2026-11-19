@@ -2122,6 +2122,7 @@ dependencies = [
  "md-5",
  "mdns-sd",
  "nix 0.29.0",
+ "onesimus-daemon",
  "onesimus-proto-rs",
  "openssl",
  "osd",
@@ -2157,12 +2158,11 @@ dependencies = [
  "chrono",
  "clap",
  "crossbeam-channel",
- "ctrlc",
- "daemonize",
  "flate2",
  "libc",
  "md-5",
  "nix 0.29.0",
+ "onesimus-daemon",
  "onesimus-plugins",
  "onesimus-podman-core",
  "onesimus-proto-rs",
@@ -2179,7 +2179,6 @@ dependencies = [
  "tokio-stream",
  "tonic",
  "tracing",
- "tracing-subscriber",
  "twox-hash",
  "walkdir",
  "wat",
@@ -2205,6 +2204,18 @@ name = "once_cell_polyfill"
 version = "1.70.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "384b8ab6d37215f3c5301a95a4accb5d64aa607f1fcb26a11b5303878451b4fe"
+
+[[package]]
+name = "onesimus-daemon"
+version = "25.1.2+onesimus.0.2.0"
+dependencies = [
+ "aquamarine",
+ "ctrlc",
+ "daemonize",
+ "nix 0.29.0",
+ "tracing",
+ "tracing-subscriber",
+]
 
 [[package]]
 name = "onesimus-ldap-broker"

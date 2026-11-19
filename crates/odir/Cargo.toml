@@ -19,6 +19,7 @@ grpc-development = []
 [dependencies]
 bareos-bnet.workspace = true
 bareos-format.workspace = true
+onesimus-daemon.workspace = true
 bareos-config.workspace = true
 bareos-catalog.workspace = true
 onesimus-proto-rs.workspace = true

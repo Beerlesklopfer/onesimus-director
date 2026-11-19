@@ -17,6 +17,7 @@ members = [
     "crates/onesimus-podman-broker",
     "crates/onesimus-rig",
     "crates/bareos-format",
+    "crates/onesimus-daemon",
 ]
 
 [workspace.package]
@@ -101,6 +102,7 @@ thiserror = "2"
 # Workspace crates
 bareos-bnet = { path = "crates/bareos-bnet" }
 bareos-format = { path = "crates/bareos-format" }
+onesimus-daemon = { path = "crates/onesimus-daemon" }
 bareos-config = { path = "crates/bareos-config" }
 bareos-catalog = { path = "crates/bareos-catalog" }
 onesimus-proto-rs = { path = "crates/onesimus-proto-rs" }

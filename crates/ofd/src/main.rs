@@ -55,7 +55,6 @@ use std::thread;
 
 use clap::Parser;
 use tracing::{info, error, warn};
-use tracing_subscriber::EnvFilter;
 
 /// Global shutdown flag.
 static SHUTDOWN: AtomicBool = AtomicBool::new(false);
@@ -166,18 +165,8 @@ fn main() {
         return;
     }
 
-    // Logging
-    let filter = if cli.debug_level > 0 {
-        "debug,hyper=info,h2=info".to_string()
-    } else {
-        "info,hyper=warn,h2=warn".to_string()
-    };
-    tracing_subscriber::fmt()
-        .with_env_filter(
-            EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| EnvFilter::new(&filter)),
-        )
-        .init();
+    // Logging (onesimus-daemon)
+    onesimus_daemon::logging::init(&onesimus_daemon::logging::default_filter(cli.debug_level, &["hyper", "h2"]));
 
     let _ = rustls::crypto::ring::default_provider().install_default();
 
@@ -204,31 +193,14 @@ fn main() {
         std::process::exit(0);
     }
 
-    // Privilege drop
-    #[cfg(unix)]
-    {
-        if let Some(ref group_name) = cli.group {
-            if let Ok(Some(group)) = nix::unistd::Group::from_name(group_name) {
-                nix::unistd::setgid(group.gid).ok();
-                info!("switched to group {group_name}");
-            }
-        }
-        if let Some(ref user_name) = cli.user {
-            if let Ok(Some(user)) = nix::unistd::User::from_name(user_name) {
-                nix::unistd::setuid(user.uid).ok();
-                info!("switched to user {user_name}");
-            }
-        }
-    }
+    // Privilege drop (onesimus-daemon, lenient as before; open point: strict)
+    onesimus_daemon::privileges::drop_privileges_lenient(cli.user.as_deref(), cli.group.as_deref());
 
-    // Daemonize
+    // Daemonize (onesimus-daemon)
     if !cli.foreground {
         info!("daemonizing...");
-        match daemonize::Daemonize::new()
-            .working_directory("/var/lib/bareos")
-            .start()
-        {
-            Ok(_) => info!("daemon started"),
+        match onesimus_daemon::background::daemonize(std::path::Path::new("/var/lib/bareos"), None) {
+            Ok(()) => info!("daemon started"),
             Err(e) => {
                 error!("FATAL: daemonize failed: {e}");
                 std::process::exit(1);
@@ -296,8 +268,8 @@ fn main() {
         })
         .expect("failed to spawn fd:heartbeat");
 
-    // Wait for shutdown
-    wait_for_shutdown();
+    // Wait for shutdown (onesimus-daemon: ctrlc handler, SIGINT, as before)
+    onesimus_daemon::signals::wait_for_interrupt();
 
     info!("Onesimus File Daemon shutting down");
     SHUTDOWN.store(true, Ordering::SeqCst);
@@ -307,13 +279,6 @@ fn main() {
     if let Some((_, handle)) = grpc_handle { handle.join().ok(); }
 
     info!("Onesimus File Daemon stopped");
-}
-
-fn wait_for_shutdown() {
-    use std::sync::mpsc;
-    let (tx, rx) = mpsc::channel();
-    let _ = ctrlc::set_handler(move || { let _ = tx.send(()); });
-    let _ = rx.recv();
 }
 
 /// Checks a bundle as a job would: trust base, local policy, signature,

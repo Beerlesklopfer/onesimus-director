@@ -1,0 +1,15 @@
+[package]
+name = "onesimus-daemon"
+description = "Common daemon frame of ofd and osd: signals, logging, PID file, daemonize, privilege drop, -t, Bareos exit codes"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+
+[dependencies]
+aquamarine.workspace = true
+ctrlc.workspace = true
+daemonize.workspace = true
+nix.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
