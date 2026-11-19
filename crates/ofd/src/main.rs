@@ -154,7 +154,11 @@ fn main() {
         let paths = if cli.conmon_executable.is_empty() {
             onesimus_plugins::discovery::installed_conmon_paths()
         } else { cli.conmon_executable.clone() };
-        let result = onesimus_plugins::discovery::Scanner::new("/proc", &paths).and_then(|scanner| scanner.scan());
+        let result = onesimus_plugins::discovery::Scanner::new("/proc", &paths).and_then(|scanner| scanner.scan())
+            .map(|mut report| {
+                report.indicators = onesimus_plugins::discovery::indicators(std::path::Path::new("/"));
+                report
+            });
         match result {
             Ok(report) => println!("{}", serde_json::to_string_pretty(&report).expect("discovery JSON")),
             Err(error) => { eprintln!("Podman discovery: {error}"); std::process::exit(1); }

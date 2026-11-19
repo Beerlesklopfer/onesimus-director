@@ -22,7 +22,17 @@ pub struct Candidate {
 }
 #[derive(Debug, Default, Serialize)]
 pub struct Report {
+    /// conmon finds (running containers only); never a confirmation.
     pub candidates: Vec<Candidate>,
+    /// Storage, Quadlet, linger, sub-ID and runtime indicators per account
+    /// (docs/plans/PODMAN-PLUGIN.md, "Erkennung der Konten"); finds
+    /// stopped workloads too. Read with lstat only, no symlink followed,
+    /// no file content read, no account configuration evaluated.
+    pub indicators: Vec<AccountIndicators>,
+    /// Domains confirmed by the broker of a released account or by the
+    /// rootful backend (`engine-identify`). Discovery never confirms: this
+    /// stays empty here and is a separate field from the conmon finds.
+    pub confirmed: Vec<ConfirmedDomain>,
     /// Discovery cannot establish its own host PID-namespace provenance.
     pub host_scope_verified: bool,
     pub issues: BTreeSet<String>,
@@ -233,6 +243,127 @@ fn uids(status: &str) -> io::Result<(u32, u32)> {
     Ok((real, effective))
 }
 
+/// One confirmed storage domain (filled only by `engine-identify`).
+#[derive(Debug, Clone, Serialize)]
+pub struct ConfirmedDomain {
+    /// Host uid.
+    pub host_uid: u32,
+    /// Real graphroot.
+    pub graphroot: PathBuf,
+    /// State: `confirmed_podman`.
+    pub state: &'static str,
+}
+
+/// Indicators of one account, gathered without reading contents.
+#[derive(Debug, Clone, Default, Serialize, PartialEq, Eq)]
+pub struct AccountIndicators {
+    /// Login name from passwd (display only; names change).
+    pub name: String,
+    /// Host uid.
+    pub host_uid: u32,
+    /// `db.sql` or `bolt_state.db` below the default storage (regular file).
+    pub storage: bool,
+    /// Quadlet directories that exist (`/etc/containers/systemd/users/<uid>`,
+    /// `~/.config/containers/systemd`).
+    pub quadlet_dirs: Vec<PathBuf>,
+    /// `/var/lib/systemd/linger/<name>` exists.
+    pub linger: bool,
+    /// Listed in subuid and subgid.
+    pub subids: bool,
+    /// Runtime remnants since boot (`/run/user/<uid>/libpod`, `/tmp/storage-run-<uid>`).
+    pub runtime: Vec<PathBuf>,
+    /// Paths where a symlink was met and not followed (suspicious).
+    pub suspicious: Vec<PathBuf>,
+    /// Always `discovered_unconfirmed`.
+    pub state: &'static str,
+}
+
+/// What lstat found at a path, walking every component without following.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Found {
+    /// Nothing there (or not accessible).
+    Missing,
+    /// A symlink at this or an upper component: not followed.
+    Link,
+    /// A regular file.
+    File,
+    /// A directory.
+    Dir,
+}
+
+/// lstat of every component of `rel` below `root`; stops at the first link,
+/// so no lookup ever passes through a symlink of an account.
+fn lstat_walk(root: &Path, rel: &Path) -> Found {
+    let mut p = root.to_path_buf();
+    let comps: Vec<_> = rel.components().filter(|c| matches!(c, std::path::Component::Normal(_))).collect();
+    for (i, c) in comps.iter().enumerate() {
+        p.push(c);
+        let Ok(m) = std::fs::symlink_metadata(&p) else { return Found::Missing };
+        if m.file_type().is_symlink() {
+            return Found::Link;
+        }
+        if i + 1 == comps.len() {
+            return if m.is_dir() { Found::Dir } else if m.is_file() { Found::File } else { Found::Missing };
+        }
+        if !m.is_dir() {
+            return Found::Missing;
+        }
+    }
+    Found::Missing
+}
+
+/// Storage, Quadlet, linger, sub-ID and runtime indicators of every passwd
+/// account below `root` (`/` in production). Only accounts with at least
+/// one indicator are listed. Nothing is read but passwd, subuid and
+/// subgid; no symlink is followed. A time limit per access (automount and
+/// NFS homes) is still open.
+pub fn indicators(root: &Path) -> Vec<AccountIndicators> {
+    let read = |rel: &str| std::fs::read_to_string(root.join(rel)).unwrap_or_default();
+    let (subuid, subgid) = (read("etc/subuid"), read("etc/subgid"));
+    let listed = |text: &str, name: &str, uid: u32| {
+        text.lines().any(|l| l.split(':').next().is_some_and(|w| w == name || w == uid.to_string()))
+    };
+    let rel_of = |p: &Path| p.strip_prefix("/").unwrap_or(p).to_path_buf();
+    let mut out = Vec::new();
+    for line in read("etc/passwd").lines() {
+        let f: Vec<&str> = line.split(':').collect();
+        if f.len() < 7 {
+            continue;
+        }
+        let (name, Ok(uid), home) = (f[0], f[2].parse::<u32>(), Path::new(f[5])) else { continue };
+        let mut ind = AccountIndicators { name: name.into(), host_uid: uid, state: "discovered_unconfirmed", ..Default::default() };
+        let look = |rel: &Path, ind: &mut AccountIndicators| {
+            let found = lstat_walk(root, rel);
+            if found == Found::Link {
+                ind.suspicious.push(Path::new("/").join(rel));
+            }
+            found
+        };
+        let storage_base = if uid == 0 { PathBuf::from("var/lib/containers/storage") } else { rel_of(home).join(".local/share/containers/storage") };
+        for db in ["db.sql", "libpod/bolt_state.db"] {
+            if look(&storage_base.join(db), &mut ind) == Found::File {
+                ind.storage = true;
+            }
+        }
+        for rel in [PathBuf::from(format!("etc/containers/systemd/users/{uid}")), rel_of(home).join(".config/containers/systemd")] {
+            if look(&rel, &mut ind) == Found::Dir {
+                ind.quadlet_dirs.push(Path::new("/").join(&rel));
+            }
+        }
+        ind.linger = look(&PathBuf::from(format!("var/lib/systemd/linger/{name}")), &mut ind) == Found::File;
+        ind.subids = listed(&subuid, name, uid) && listed(&subgid, name, uid);
+        for rel in [PathBuf::from(format!("run/user/{uid}/libpod")), PathBuf::from(format!("tmp/storage-run-{uid}"))] {
+            if look(&rel, &mut ind) == Found::Dir {
+                ind.runtime.push(Path::new("/").join(&rel));
+            }
+        }
+        if ind.storage || !ind.quadlet_dirs.is_empty() || ind.linger || !ind.runtime.is_empty() || !ind.suspicious.is_empty() {
+            out.push(ind);
+        }
+    }
+    out
+}
+
 /// Default installation paths are candidates for administrator trust, not
 /// container-owned paths. Missing paths are ignored; a scan with no installed
 /// executable reports incomplete discovery instead of asserting an empty host.
@@ -328,6 +459,50 @@ mod tests {
         assert!(report.issues.contains("procfs_hidepid_configured"));
         std::fs::remove_dir_all(root).unwrap();
     }
+    /// Exit criterion P0 (8): no symlink in an account directory is
+    /// followed; conmon finds and confirmed domains are separate fields.
+    #[test]
+    fn indicators_never_follow_links_and_stay_separate() {
+        let root = std::env::temp_dir().join(format!("onesimus-indicators-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        for d in ["etc", "home/alice/.local/share/containers/storage", "home/bob", "elsewhere/storage",
+            "home/carol/.local/share/containers/storage", "var/lib/systemd/linger", "run/user/1002/libpod",
+            "etc/containers/systemd/users/1003"] {
+            std::fs::create_dir_all(root.join(d)).unwrap();
+        }
+        std::fs::write(root.join("etc/passwd"), "alice:x:1001:1001::/home/alice:/bin/sh\nbob:x:1002:1002::/home/bob:/bin/sh\n\
+            carol:x:1003:1003::/home/carol:/bin/sh\ndave:x:1004:1004::/home/dave:/bin/sh\n").unwrap();
+        std::fs::write(root.join("etc/subuid"), "alice:100000:65536\n").unwrap();
+        std::fs::write(root.join("etc/subgid"), "alice:100000:65536\n").unwrap();
+        // alice: a real db.sql, linger, sub-IDs.
+        std::fs::write(root.join("home/alice/.local/share/containers/storage/db.sql"), b"x").unwrap();
+        std::fs::write(root.join("var/lib/systemd/linger/alice"), b"").unwrap();
+        // bob: .local is a link to a storage elsewhere: not followed.
+        std::fs::write(root.join("elsewhere/storage/db.sql"), b"x").unwrap();
+        std::fs::create_dir_all(root.join("elsewhere/share/containers")).unwrap();
+        symlink(root.join("elsewhere/storage"), root.join("elsewhere/share/containers/storage")).unwrap();
+        symlink(root.join("elsewhere"), root.join("home/bob/.local")).unwrap();
+        // carol: db.sql itself is a link (e.g. to a secret): not followed.
+        symlink(root.join("etc/passwd"), root.join("home/carol/.local/share/containers/storage/db.sql")).unwrap();
+        let ind = indicators(&root);
+        let by = |n: &str| ind.iter().find(|i| i.name == n).cloned();
+        let alice = by("alice").unwrap();
+        assert!(alice.storage && alice.linger && alice.subids && alice.suspicious.is_empty());
+        let bob = by("bob").unwrap();
+        assert!(!bob.storage && bob.suspicious.iter().any(|p| p.ends_with("home/bob/.local/share/containers/storage/db.sql")), "{bob:?}");
+        assert_eq!(bob.runtime, vec![PathBuf::from("/run/user/1002/libpod")]);
+        let carol = by("carol").unwrap();
+        assert!(!carol.storage && !carol.suspicious.is_empty());
+        assert_eq!(carol.quadlet_dirs, vec![PathBuf::from("/etc/containers/systemd/users/1003")]);
+        assert!(by("dave").is_none(), "no indicator, not listed");
+        assert!(ind.iter().all(|i| i.state == "discovered_unconfirmed"));
+        let report = Report { indicators: ind, ..Default::default() };
+        let json = serde_json::to_value(&report).unwrap();
+        assert!(json.get("candidates").is_some() && json.get("confirmed").is_some() && json.get("indicators").is_some());
+        assert_eq!(json["confirmed"], serde_json::json!([]));
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
     #[test]
     fn empty_scan_is_not_a_claim_of_complete_inventory() {
         let root =
