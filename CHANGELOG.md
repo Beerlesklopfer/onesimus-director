@@ -1,5 +1,12 @@
 onesimus (25.1.2+onesimus.0.2.0-2) UNRELEASED; urgency=medium
 
+  * odir: time and size directives are read with every word of the value
+    and the Bareos units (K-1). Max Run Time, Full/Incremental/Differential
+    Max Run Time, Max Wait Time, Max Start Delay, Duplicate Job Proximity
+    and Reschedule Interval took only the first word ("2 hours" = 2 s);
+    Spool Size likewise ("10 GB" = 10 bytes); Migration High/Low Bytes
+    used k = 1000 instead of Bareos' k = 1024, kb = 1000.
+
   * odir: listen addresses as Bareos 25. DirAddresses (block form) binds
     every entry instead of stopping the Director at start; -t reports an
     unresolvable address. Address/Addresses are aliases of the Director

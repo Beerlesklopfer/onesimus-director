@@ -255,8 +255,12 @@ fn int64_value(catalog: &CatalogHandle, sql: &str) -> Result<Option<i64>, String
 fn pool_occupancy(config: &DirectorConfig, catalog: &CatalogHandle, request: &Request, out: &mut Outcome) -> Option<Vec<String>> {
     let kind = request.kind;
     let pool = sql_esc(request.pool);
-    let size = |key: &str| crate::job_messages::raw_directive(config, "pool", request.pool, key)
-        .and_then(|v| bareos_config::values::parse_size(&v).ok().map(|(_, n)| n)).unwrap_or(0) as i64;
+    // Every word of the value with the Bareos size units (k = 1024, kb = 1000).
+    let pool_dirs = config.raw.iter()
+        .find(|r| r.norm_type() == "pool" && r.name().is_some_and(|n| n.eq_ignore_ascii_case(request.pool)))
+        .map(|r| r.directives.as_slice()).unwrap_or(&[]);
+    let size = |key: &str| crate::commands::defaults::number(pool_dirs, key, 0, crate::commands::defaults::SIZES)
+        .unwrap_or(0) as i64;
     let (high, low) = (size("migrationhighbytes"), size("migrationlowbytes"));
     let none = |out: &mut Outcome| {
         out.messages.push((MsgType::Info, format!("No Volumes found to {}.\n", kind.action(false))));

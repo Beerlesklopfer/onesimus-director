@@ -603,6 +603,17 @@ Job {Name=K; JobDefs=B}
         assert_eq!(cfg.find_job("K").unwrap().level, bareos_config::JobLevel::Differential);
         assert_eq!(cfg.find_job("K").unwrap().client, "fd");
     }
+    /// K-1: sizes and times are every word of the value, Bareos units.
+    #[test]
+    fn number_reads_every_word_with_bareos_units() {
+        let raw = bareos_config::raw::parse_str("Job {\n Name = j\n Spool Size = 10 GB\n Max Run Time = 2 hours\n}\n\
+            Pool {\n Name = p\n Migration High Bytes = 2 g\n Migration Low Bytes = 500 mb\n}\n", None).unwrap();
+        let (job, pool) = (&raw[0].directives, &raw[1].directives);
+        assert_eq!(number(job, "spoolsize", 0, SIZES).unwrap(), 10_000_000_000);
+        assert_eq!(time_directive(job, "maxruntime"), 7200);
+        assert_eq!(number(pool, "migrationhighbytes", 0, SIZES).unwrap(), 2 * 1073741824);
+        assert_eq!(number(pool, "migrationlowbytes", 0, SIZES).unwrap(), 500_000_000);
+    }
     #[test]
     fn strtod_exponents_and_modifiers_match_original_grammar() {
         assert_eq!(quantity("1e3", TIMES).unwrap(), 1000);

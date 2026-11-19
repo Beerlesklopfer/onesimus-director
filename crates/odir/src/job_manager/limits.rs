@@ -152,9 +152,6 @@ fn default_media_wait() -> i64 {
 /// JobMonitorWatchdog interval (job.cc InitJobServer: wd->interval = 60).
 const MONITOR_INTERVAL: std::time::Duration = std::time::Duration::from_secs(60);
 
-fn seconds(value: Option<&str>) -> i64 {
-    value.and_then(|v| bareos_config::values::parse_time(v).ok()).map_or(0, |(_, d)| d.as_secs() as i64)
-}
 
 fn yes(value: Option<&str>, default: bool) -> bool {
     value.map_or(default, |v| matches!(v.to_ascii_lowercase().as_str(), "yes" | "true" | "1" | "on"))
@@ -162,28 +159,31 @@ fn yes(value: Option<&str>, default: bool) -> bool {
 
 /// The Job resource's limits (JobDefs included; the last directive wins).
 pub(super) fn job_limits(config: &crate::director_config::DirectorConfig, job_name: &str) -> JobLimits {
-    let effective = bareos_config::jobdefs::effective(&config.raw, "job", job_name).unwrap_or_default();
-    let get = |key: &str| effective.iter().rev().find(|e| e.directive.norm_key() == key)
-        .and_then(|e| e.directive.first().map(str::to_string));
+    let dirs = crate::commands::defaults::job_directives(config, job_name);
+    let get = |key: &str| crate::commands::defaults::first(&dirs, key).map(str::to_string);
+    // A time is every word of the value ("2 hours", "1 day 6 hours"), not
+    // only the first (K-1: "2 hours" was read as 2 seconds).
+    let seconds = |key: &str| crate::commands::defaults::time_directive(&dirs, key) as i64;
+    let given = |key: &str| dirs.iter().any(|d| d.norm_key() == key);
     let job = config.find_job(job_name);
     JobLimits {
-        max_wait_time: seconds(get("maxwaittime").as_deref()),
-        max_run_time: seconds(get("maxruntime").as_deref()),
-        full_max_run_time: seconds(get("fullmaxruntime").as_deref()),
-        inc_max_run_time: seconds(get("incrementalmaxruntime").as_deref()),
-        diff_max_run_time: seconds(get("differentialmaxruntime").as_deref()),
-        max_start_delay: seconds(get("maxstartdelay").as_deref()),
+        max_wait_time: seconds("maxwaittime"),
+        max_run_time: seconds("maxruntime"),
+        full_max_run_time: seconds("fullmaxruntime"),
+        inc_max_run_time: seconds("incrementalmaxruntime"),
+        diff_max_run_time: seconds("differentialmaxruntime"),
+        max_start_delay: seconds("maxstartdelay"),
         allow_duplicate_jobs: yes(get("allowduplicatejobs").as_deref(), true),
         cancel_lower_level: yes(get("cancellowerlevelduplicates").as_deref(), false),
         cancel_queued: yes(get("cancelqueuedduplicates").as_deref(), false),
         cancel_running: yes(get("cancelrunningduplicates").as_deref(), false),
-        duplicate_job_proximity: seconds(get("duplicatejobproximity").as_deref()),
+        duplicate_job_proximity: seconds("duplicatejobproximity"),
         always_incremental: yes(get("alwaysincremental").as_deref(), false),
         backup: job.is_some_and(|j| j.job_type == bareos_config::resources::JobType::Backup),
         fileset: job.map(|j| j.fileset.clone()).unwrap_or_default(),
         reschedule_on_error: yes(get("rescheduleonerror").as_deref(), false),
         reschedule_incomplete: yes(get("rescheduleincompletejobs").as_deref(), true),
-        reschedule_interval: get("rescheduleinterval").map_or(1800, |v| seconds(Some(&v))),
+        reschedule_interval: if given("rescheduleinterval") { seconds("rescheduleinterval") } else { 1800 },
         reschedule_times: get("rescheduletimes").and_then(|v| v.trim().parse().ok()).unwrap_or(5),
     }
 }
@@ -590,6 +590,23 @@ mod tests {
         o.job_name = "other-job";
         assert_eq!(allow_duplicate("j", &s, "c", &[o], 0), Duplicate::CancelMe(
             "JobId 7 already running. Duplicate consolidation job of Client \"c\" and FileSet \"fs\" not allowed.\n".into()));
+    }
+
+    /// K-1: a time is every word of the value, with JobDefs as fallback.
+    #[test]
+    fn job_limits_read_whole_time_values() {
+        let cfg = crate::director_config::DirectorConfig::from_str("Director {\n Name = d\n Password = p\n}\n\
+            JobDefs {\n Name = jd\n Max Wait Time = 30 minutes\n Reschedule Interval = 1 hour\n}\n\
+            Job {\n Name = j\n Type = Backup\n JobDefs = jd\n Max Run Time = 2 hours\n\
+            Full Max Run Time = 1 day 6 hours\n Max Start Delay = 90\n Duplicate Job Proximity = 2h\n}\n").unwrap();
+        let l = job_limits(&cfg, "j");
+        assert_eq!(l.max_run_time, 7200);
+        assert_eq!(l.full_max_run_time, 86400 + 6 * 3600);
+        assert_eq!(l.max_start_delay, 90);
+        assert_eq!(l.duplicate_job_proximity, 7200);
+        assert_eq!(l.max_wait_time, 1800);
+        assert_eq!(l.reschedule_interval, 3600);
+        assert_eq!(job_limits(&cfg, "j").inc_max_run_time, 0);
     }
 
     #[test]

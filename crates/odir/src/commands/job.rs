@@ -1764,8 +1764,9 @@ fn run_selected(
         .unwrap_or_else(|| bool_dir("spooldata", false));
     let accurate = run_flag("accurate").or_else(crate::scheduled_run::accurate)
         .unwrap_or_else(|| bool_dir("accurate", false));
-    let spool_size = job_dirs.iter().rev().find(|d| d.norm_key() == "spoolsize").and_then(|d| d.first())
-        .and_then(|v| bareos_config::values::parse_size(v).ok()).map_or(0, |(_, size)| size as i64);
+    // Every word of the value ("10 GB"), Bareos size units.
+    let spool_size = crate::commands::defaults::number(&job_dirs, "spoolsize", 0, crate::commands::defaults::SIZES)
+        .unwrap_or(0) as i64;
     let fileset_lines = match crate::commands::estimate::include_exclude_messages(&config, fileset_name) {
         Ok(lines) => lines,
         Err(e) => return job_failed(e),
