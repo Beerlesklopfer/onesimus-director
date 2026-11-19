@@ -738,6 +738,13 @@ async fn typed_api_matches_console_api2() {
     let anonymous = grpc.get_version(cmd::VersionCommand {}).await;
     assert_eq!(anonymous.unwrap_err().code(), Code::Unauthenticated);
 
+    // --- configuration CRUD as raw text (Onesimus extension) --------------
+    failures.extend(config_crud(&channel, &token, &limited, &director).await);
+    for rpc in ["GetConfigCapabilities", "ReadResource", "CreateResource", "UpdateResource", "DeleteResource",
+                "ListResources", "RenameResource"] {
+        covered.insert(rpc);
+    }
+
     // --- typed client as the GUI would use it -----------------------------
     let mut req = Request::new(pb::ListJobsCommand { limit: 2, llist: true, ..Default::default() });
     req.metadata_mut().insert(SESSION_HEADER, token.clone());
@@ -791,6 +798,66 @@ async fn typed_api_matches_console_api2() {
     println!("typed API: {} cases, {} RPCs implemented and compared, {} UNIMPLEMENTED (S-35)",
              cases.len(), covered.len(), unimplemented.len());
     assert!(failures.is_empty(), "{} mismatches:\n{}", failures.len(), failures.join("\n"));
+}
+
+/// Request with the session token.
+fn with_token<Q>(token: &MetadataValue<tonic::metadata::Ascii>, message: Q) -> Request<Q> {
+    let mut request = Request::new(message);
+    request.metadata_mut().insert(SESSION_HEADER, token.clone());
+    request
+}
+
+/// GetConfigCapabilities, Create/Read/Update/Delete/ListResources of a
+/// Schedule in the test's copy of the configuration (real reload), the
+/// ACL of a console without `configure` and RenameResource UNIMPLEMENTED.
+async fn config_crud(channel: &Channel, token: &MetadataValue<tonic::metadata::Ascii>,
+                     limited: &MetadataValue<tonic::metadata::Ascii>, director: &Director) -> Vec<String> {
+    let mut failures = Vec::new();
+    let mut check = |ok: bool, what: String| if !ok { failures.push(format!("config CRUD: {what}")) };
+    let mut grpc = DirectorApiClient::new(channel.clone());
+    let schedule = |name: &str| Some(pb::ResourceRef { r#type: pb::ResourceType::Schedule as i32, name: name.into() });
+
+    let caps = grpc.get_config_capabilities(with_token(token, pb::ConfigCapabilitiesRequest {})).await.unwrap().into_inner();
+    let types: Vec<_> = caps.types.iter().map(|t| t.r#type()).collect();
+    check(caps.interface_version == 1 && types == [pb::ResourceType::Schedule, pb::ResourceType::Job, pb::ResourceType::Jobdefs],
+          format!("capabilities {caps:?}"));
+    let caps = grpc.get_config_capabilities(with_token(limited, pb::ConfigCapabilitiesRequest {})).await.unwrap().into_inner();
+    check(caps.types.is_empty(), format!("capabilities without configure {caps:?}"));
+    let denied = grpc.read_resource(with_token(limited, pb::ReadResourceRequest { resource: schedule("WeeklyCycle") })).await;
+    check(matches!(&denied, Err(s) if s.code() == Code::PermissionDenied), format!("read without configure {denied:?}"));
+
+    let text = "Schedule {\n  Name = \"TypedApiCrud\"\n  Run = Full 1st sun at 03:00  # typed API test\n}\n";
+    let created = grpc.create_resource(with_token(token, pb::CreateResourceRequest {
+        r#type: pb::ResourceType::Schedule as i32, text: text.into(), validate_only: false })).await.unwrap().into_inner();
+    check(created.status() == pb::ConfigStatus::Ok && created.reloaded, format!("create {created:?}"));
+    let file = director.work.join("conf/bareos-dir.d/schedule/TypedApiCrud.conf");
+    check(std::fs::read_to_string(&file).ok().as_deref() == Some(text), format!("file {}", file.display()));
+    let show = console(director.port, "*UserAgent*", PASSWORD, &["show schedule=TypedApiCrud"]).join("");
+    check(show.contains("TypedApiCrud"), format!("show after reload: {show}"));
+
+    let read = grpc.read_resource(with_token(token, pb::ReadResourceRequest { resource: schedule("TypedApiCrud") }))
+        .await.unwrap().into_inner();
+    let digest: String = Sha256::digest(text.as_bytes()).iter().map(|b| format!("{b:02x}")).collect();
+    check(read.text == text && read.sha256 == digest, format!("read {read:?}"));
+    let conflict = grpc.update_resource(with_token(token, pb::UpdateResourceRequest { resource: schedule("TypedApiCrud"),
+        expected_sha256: "0".repeat(64), text: text.replace("03:00", "04:00"), validate_only: false })).await.unwrap().into_inner();
+    check(conflict.status() == pb::ConfigStatus::Conflict && conflict.sha256 == read.sha256, format!("conflict {conflict:?}"));
+    let updated = grpc.update_resource(with_token(token, pb::UpdateResourceRequest { resource: schedule("TypedApiCrud"),
+        expected_sha256: read.sha256.clone(), text: text.replace("03:00", "04:00"), validate_only: false })).await.unwrap().into_inner();
+    check(updated.status() == pb::ConfigStatus::Ok && updated.old_sha256 == read.sha256, format!("update {updated:?}"));
+    let list = grpc.list_resources(with_token(token, pb::ListResourcesRequest { r#type: pb::ResourceType::Schedule as i32 }))
+        .await.unwrap().into_inner();
+    check(list.resources.iter().any(|r| r.resource.as_ref().unwrap().name == "TypedApiCrud" && r.sha256 == updated.sha256),
+          format!("list {list:?}"));
+    let validated = grpc.delete_resource(with_token(token, pb::DeleteResourceRequest { resource: schedule("TypedApiCrud"),
+        expected_sha256: updated.sha256.clone(), validate_only: true })).await.unwrap().into_inner();
+    check(validated.status() == pb::ConfigStatus::Ok && validated.validated_only && file.exists(), format!("validate_only {validated:?}"));
+    let deleted = grpc.delete_resource(with_token(token, pb::DeleteResourceRequest { resource: schedule("TypedApiCrud"),
+        expected_sha256: updated.sha256.clone(), validate_only: false })).await.unwrap().into_inner();
+    check(deleted.status() == pb::ConfigStatus::Ok && !file.exists(), format!("delete {deleted:?}"));
+    let rename = grpc.rename_resource(with_token(token, pb::RenameResourceRequest::default())).await;
+    check(matches!(&rename, Err(s) if s.code() == Code::Unimplemented), format!("rename {rename:?}"));
+    failures
 }
 
 // ---------------------------------------------------------------------------
