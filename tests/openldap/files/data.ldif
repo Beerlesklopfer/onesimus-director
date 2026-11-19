@@ -1,0 +1,48 @@
+dn: ou=people,dc=example,dc=org
+objectClass: organizationalUnit
+ou: people
+
+dn: ou=groups,dc=example,dc=org
+objectClass: organizationalUnit
+ou: groups
+
+dn: ou=policies,dc=example,dc=org
+objectClass: organizationalUnit
+ou: policies
+
+dn: cn=default,ou=policies,dc=example,dc=org
+objectClass: pwdPolicy
+objectClass: device
+cn: default
+pwdAttribute: userPassword
+pwdMaxFailure: 5
+pwdLockout: TRUE
+pwdMinLength: 8
+
+dn: uid=anna,ou=people,dc=example,dc=org
+objectClass: inetOrgPerson
+objectClass: onesimusTagged
+uid: anna
+cn: Anna Muster
+sn: Muster
+onesimusTag: blau
+userPassword: annaPass1
+jpegPhoto:: /9j/4AAQSkZJRgABAQAAAQABAAD/2wBDAP//////////////////////////////////////////////////////////////////////////////////////2wBDAf//////////////////////////////////////////////////////////////////////////////////////wAARCAABAAEDASIAAhEBAxEB/8QAFQABAQAAAAAAAAAAAAAAAAAAAAP/xAAUEAEAAAAAAAAAAAAAAAAAAAAA/8QAFAEBAAAAAAAAAAAAAAAAAAAAAP/EABQRAQAAAAAAAAAAAAAAAAAAAAD/2gAMAwEAAhEDEQA/AKAAH//Z
+
+dn: uid=bernd,ou=people,dc=example,dc=org
+objectClass: inetOrgPerson
+uid: bernd
+cn: Bernd Schröder
+sn: Schröder
+userPassword: berndPass1
+
+dn: cn=admins,ou=groups,dc=example,dc=org
+objectClass: groupOfNames
+cn: admins
+member: uid=anna,ou=people,dc=example,dc=org
+
+dn: cn=staff,ou=groups,dc=example,dc=org
+objectClass: groupOfNames
+cn: staff
+member: uid=anna,ou=people,dc=example,dc=org
+member: uid=bernd,ou=people,dc=example,dc=org

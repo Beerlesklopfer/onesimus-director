@@ -528,6 +528,7 @@ impl<T: Read + Write + Send> LdapPort<T> {
             config_ids: BTreeSet::new(), open: BTreeSet::new(), warnings: Vec::new() })
     }
 
+    #[cfg(test)]
     pub fn target(&self) -> Option<&Path> {
         match &self.mode {
             Mode::Restore(r) => Some(&r.target),
@@ -709,7 +710,9 @@ impl Restore {
                     }
                     Some(pb::load_open_request::What::ConfigFile(f)) => {
                         let path = PathBuf::from(&f.path);
-                        if self.against.is_some() || !plain_absolute(&path) || path == Path::new("/") {
+                        // slapd.d: side files (e.g. /etc/default/slapd) may follow cn=config.
+                        let side_file = matches!(self.against, Some(pb::broker_load_open::Against::ConfigDir(_)));
+                        if (self.against.is_some() && !side_file) || !plain_absolute(&path) || path == Path::new("/") {
                             return Err("a configuration file must come before the data, with an absolute plain path".into());
                         }
                         if self.config_files.len() >= MAX_CONFIG_FILES {
@@ -771,6 +774,10 @@ impl Restore {
                 }
                 let result = match load {
                     Load::ConfigLdif(buf) => self.load_cn_config(transport, &buf, chunk)?,
+                    Load::ConfigFile { path, data, .. } if matches!(self.against, Some(pb::broker_load_open::Against::ConfigDir(_))) => {
+                        self.write_conf_file(&conf_path(&self.target, &path), &data)?;
+                        pb::LoadCloseResponse { ok: true, diagnostic: String::new(), target: String::new() }
+                    }
                     Load::ConfigFile { path, main, data } => {
                         if main {
                             self.main_file = Some(path.clone());
@@ -823,24 +830,8 @@ impl Restore {
             .or_else(|| self.config_files.keys().find(|p| p.file_name().is_some_and(|n| n == "slapd.conf")).cloned())
             .ok_or("the restored configuration has no main slapd.conf")?;
         let (files, dbs) = rewrite_slapd_conf(&self.config_files, &main, &self.target)?;
-        let conf = self.target.join("conf");
         for (path, bytes) in &files {
-            // Directories below <target>/conf belong to the slapd user (0700).
-            let rel = path.strip_prefix(&self.target).map_err(|_| "configuration outside the target".to_string())?;
-            let mut dir = self.target.clone();
-            for part in rel.parent().into_iter().flat_map(Path::components) {
-                dir.push(part);
-                if !dir.exists() {
-                    self.mkdir_for_slapd(&dir)?;
-                }
-            }
-            if !path.starts_with(&conf) {
-                return Err("configuration outside the target".into());
-            }
-            let mut f = std::fs::OpenOptions::new().write(true).create_new(true).mode(0o600)
-                .custom_flags(libc::O_NOFOLLOW).open(path).map_err(|e| format!("{}: {e}", path.display()))?;
-            f.write_all(bytes).map_err(|e| format!("{}: {e}", path.display()))?;
-            std::os::unix::fs::chown(path, Some(self.run_as.uid), Some(self.run_as.gid)).map_err(|e| format!("{}: {e}", path.display()))?;
+            self.write_conf_file(path, bytes)?;
         }
         for db in &dbs {
             self.mkdir_for_slapd(&db.directory)?;
@@ -848,6 +839,29 @@ impl Restore {
         self.dbs = dbs;
         self.against = Some(pb::broker_load_open::Against::ConfigFile(conf_path(&self.target, &main).display().to_string()));
         Ok(())
+    }
+
+    /// One configuration file at `path` below `<target>/conf`: new, 0600,
+    /// owned by the slapd user, parent directories 0700 likewise.
+    fn write_conf_file(&self, path: &Path, bytes: &[u8]) -> Result<(), String> {
+        let conf = self.target.join("conf");
+        if !plain_absolute(path) || !path.starts_with(&conf) || path == conf {
+            return Err("configuration outside the target".into());
+        }
+        let rel = path.strip_prefix(&self.target).map_err(|_| "configuration outside the target".to_string())?;
+        let mut dir = self.target.clone();
+        for part in rel.parent().into_iter().flat_map(Path::components) {
+            dir.push(part);
+            match std::fs::symlink_metadata(&dir) {
+                Ok(m) if m.is_dir() && !m.file_type().is_symlink() => {}
+                Ok(_) => return Err(format!("{}: not a plain directory", dir.display())),
+                Err(_) => self.mkdir_for_slapd(&dir)?,
+            }
+        }
+        let mut f = std::fs::OpenOptions::new().write(true).create_new(true).mode(0o600)
+            .custom_flags(libc::O_NOFOLLOW).open(path).map_err(|e| format!("{}: {e}", path.display()))?;
+        f.write_all(bytes).map_err(|e| format!("{}: {e}", path.display()))?;
+        std::os::unix::fs::chown(path, Some(self.run_as.uid), Some(self.run_as.gid)).map_err(|e| format!("{}: {e}", path.display()))
     }
 
     fn slapadd<T: Read + Write>(&mut self, transport: &mut T, against: pb::broker_load_open::Against,

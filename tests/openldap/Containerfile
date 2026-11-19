@@ -1,0 +1,13 @@
+# Test image of the OpenLDAP plugin (docs/plans/OPENLDAP-PLUGIN.md): official
+# Debian trixie, slapd 2.6 from Debian, set up by setup-olc.sh (slapd.d) or
+# setup-conf.sh (slapd.conf). Started with --init, so a stopped slapd does
+# not stay as a zombie. Run by tests/openldap/run-in-podman.sh.
+FROM docker.io/library/debian:trixie
+ENV DEBIAN_FRONTEND=noninteractive
+RUN echo 'slapd slapd/no_configuration boolean true' | debconf-set-selections \
+ && apt-get update \
+ && apt-get install -y --no-install-recommends slapd ldap-utils lmdb-utils procps ca-certificates openssl libssl3t64 zlib1g \
+ && rm -rf /var/lib/apt/lists/*
+COPY files/ /opt/ldaptest/
+RUN chmod 755 /opt/ldaptest/*.sh /opt/ldaptest/ldap-ctl && ln -s /opt/ldaptest/ldap-ctl /usr/local/sbin/ldap-ctl
+CMD ["sleep", "infinity"]

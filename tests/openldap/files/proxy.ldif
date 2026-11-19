@@ -1,0 +1,8 @@
+dn: olcDatabase={3}ldap,cn=config
+changetype: add
+objectClass: olcDatabaseConfig
+objectClass: olcLDAPConfig
+olcDatabase: {3}ldap
+olcSuffix: dc=example,dc=net
+olcDbURI: ldap://127.0.0.1:3890/
+olcDbIDAssertBind: bindmethod=simple binddn="cn=admin,o=second,c=de" credentials=admin123 mode=none

@@ -1,0 +1,9 @@
+dn: o=zweit,c=de
+objectClass: organization
+o: zweit
+
+dn: cn=svc,o=zweit,c=de
+objectClass: person
+cn: svc
+sn: Service
+userPassword: {SSHA}mzk4xLlCA0uZhM9pGxDsMizeHI7GpkgQ

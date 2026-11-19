@@ -675,12 +675,8 @@ impl<S: Read + Write> Backup<'_, '_, S> {
 
     /// A `Plugin =` line: start the signed plugin and save every file it
     /// lists, each framed by plugin-name records like the Bareos FD.
-    pub fn save_plugin(&mut self, include: &FfPkt, text: &str) -> i32 {
-        self.save_plugin_covered(include, text, &[])
-    }
-
-    /// `save_plugin` with the `File =` names of the FileSet, which a plugin's
-    /// broker may check its instance's files against (warnings only).
+    /// `covered`: the `File =` names of the FileSet, which a plugin's broker
+    /// may check its instance's files against (warnings only).
     pub fn save_plugin_covered(&mut self, include: &FfPkt, text: &str, covered: &[Vec<u8>]) -> i32 {
         let shown = crate::secrets::mask_plugin_secrets(text);
         let line = match plugin::parse_line(text) {

@@ -1,0 +1,16 @@
+#!/bin/sh
+# ldap-ctl start|stop|status  -- starts slapd like Debian's systemd unit (reads /etc/default/slapd)
+. /etc/default/slapd
+case "$1" in
+start)
+  mkdir -p /run/slapd; chown "$SLAPD_USER:$SLAPD_GROUP" /run/slapd
+  if [ -z "$SLAPD_CONF" ]; then flag=""; elif [ -d "$SLAPD_CONF" ]; then flag="-F $SLAPD_CONF"; else flag="-f $SLAPD_CONF"; fi
+  exec_line="/usr/sbin/slapd -h \"$SLAPD_SERVICES\" -u $SLAPD_USER -g $SLAPD_GROUP $flag $SLAPD_OPTIONS"
+  eval "$exec_line"
+  for i in 1 2 3 4 5 6 7 8 9 10; do [ -S /run/slapd/ldapi ] && ldapsearch -x -H ldapi:/// -b "" -s base >/dev/null 2>&1 && exit 0; sleep 0.3; done
+  echo "slapd did not start" >&2; exit 1 ;;
+stop)
+  p=$(pgrep -x slapd) || exit 0; kill $p
+  while kill -0 $p 2>/dev/null; do sleep 0.2; done ;;
+status) pgrep -a -x slapd ;;
+esac

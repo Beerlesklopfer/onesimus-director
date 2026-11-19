@@ -805,7 +805,7 @@ mod tests {
 /// Build the guest first (see plugins/example-tree/README.md), then
 /// `cargo test -p ofd -- --ignored example_tree`.
 #[cfg(test)]
-mod guest {
+pub(crate) mod guest {
     use super::testkit::signed_artifact;
     use super::*;
     use crate::backup::{Backup, JobEnv, SdSender};
@@ -834,7 +834,7 @@ mod guest {
 
     /// FD->SD frames ("<fi> <stream> 0", data, EOD) as the SD sends them back
     /// on restore ("rechdr <vsid> <vst> <fi> <stream> <len>", data).
-    pub(super) fn as_read_back(written: &[u8]) -> Vec<u8> {
+    pub(crate) fn as_read_back(written: &[u8]) -> Vec<u8> {
         let mut frames = Vec::new();
         let mut b = written;
         while b.len() >= 4 {
@@ -869,7 +869,7 @@ mod guest {
         out
     }
 
-    pub(super) struct Duplex(pub Cursor<Vec<u8>>);
+    pub(crate) struct Duplex(pub Cursor<Vec<u8>>);
     impl Read for Duplex {
         fn read(&mut self, b: &mut [u8]) -> std::io::Result<usize> {
             self.0.read(b)
