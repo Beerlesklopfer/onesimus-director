@@ -1,5 +1,30 @@
 onesimus (25.1.2+onesimus.0.2.0-2) UNRELEASED; urgency=medium
 
+  * docs: operations page docs/wiki/betrieb-odir.md (service, addresses,
+    catalog at start, all environment variables, mail, auto prune,
+    deliberate deviations from Bareos).
+  * odir: Mail, MailOnError, MailOnSuccess and Operator destinations are
+    served as by bareos-dir (J-4); without MailCommand /usr/lib/sendmail.
+  * odir: a catalog error during a job makes it fail; a failed batch insert
+    of file attributes is fatal (stricter than Bareos, which drops the
+    block silently) (J-1). A restore/verify takes the SD's end status, a
+    file count mismatch gives W (J-8). An orphaned worker no longer answers
+    SD catalog requests itself (J-15). "End Job" without TermCode is no
+    success (J-17).
+  * odir: reload replans the scheduler from the new configuration (J-9);
+    purge runs in one transaction and reports errors (J-10); prune jobs
+    aborts when the keep list of the latest Full chain fails (J-11);
+    restore no longer shrinks the selection silently and checks jobid=,
+    escapes directory= (J-16, J-17).
+  * odir: AutoPrune of Jobs and Files at the end of a job as DoAutoprune
+    (J-13). DELETES CATALOG DATA: the first job after the upgrade prunes
+    the whole backlog of a client with AutoPrune = yes; the latest Full
+    chain stays as jobs, its file records follow File Retention.
+  * packaging/tests/ci: postinst creates /etc/bareos only when missing
+    (T-10); database tests are ignored instead of passing silently (T-9);
+    PostgreSQL test sockets under /tmp (T-15); CI tests bareos-bnet and
+    bareos-orm (T-8).
+
   * odir: the wait for a volume of a job without "Max Wait Time" (default
     600 s, C-085) is set with the environment variable
     ONESIMUS_DEFAULT_MEDIA_WAIT, e.g. in a systemd drop-in (J-12); no new

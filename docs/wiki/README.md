@@ -1,6 +1,7 @@
 # Director Wiki
 
 - [Vollständigkeitsprüfung und Roadmap](../TODO-COMMANDS.md)
+- [Betrieb des Directors: Dienst, Katalog, Umgebungsvariablen, Abweichungen von Bareos](betrieb-odir.md)
 - [Kommandozeilenparameter: Director, Konsole und File Daemon](kommandozeile.md)
 - [File Daemon: gRPC mit dauerhaftem BNET-Fallback](file-daemon.md)
 - [Signierbare Plugin-Architektur](plugin-architektur.md)
