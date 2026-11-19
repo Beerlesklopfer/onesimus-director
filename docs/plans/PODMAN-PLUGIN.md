@@ -2,9 +2,9 @@
 
 Stand: 19.11.2026. Status: **Grundplan freigegeben (18.10.2026), am 19.11.2026
 nach drei Teamberichten und vier Entscheidungen des Nutzers neu gefasst und am
-selben Tag nach zwei Verifikationsberichten überarbeitet.** Produktiver Code
-existiert noch nicht; vorhanden sind Worker-Kern und read-only
-conmon-Discovery (Abschnitt „Umsetzungsstand“).
+selben Tag nach zwei Verifikationsberichten überarbeitet.** P0 ist umgesetzt;
+offen sind der Bareos-FD-Lauf von (1) und der Host-root-Lauf von (3)/(4) auf
+einer Test-VM (Abschnitt „Umsetzungsstand“, „Stand P0“).
 
 Kennzeichnung in diesem Plan:
 
@@ -1511,5 +1511,55 @@ Der Modus braucht keine FD-Konfiguration, startet keinen Listener und gibt
 JSON aus. Er prüft root-eigene, nicht gruppen-/weltbeschreibbare Executables
 über Device/Inode und vergleicht PID/Startzeit/UID/Executable doppelt.
 Kandidaten bleiben `discovered_unconfirmed`; `host_scope_verified` bleibt
-false. Kontoregistry, Storage-Indizien, NSS-Anzeige und Bestätigung durch den
-Broker fehlen noch. P0 ist begonnen, nicht abgeschlossen.
+false.
+
+### Stand P0 (19.11.2026)
+
+Umgesetzt (Proto-Zweig `podman`, Crates `onesimus-podman-core` und
+`onesimus-podman-broker`, `ofd`-Module `podman_port`, `podman_scan`,
+`podman_rootful`, `podman_e2e`, Erweiterungen in `broker.rs`, `backup.rs`,
+`plugin.rs`, `onesimus-plugins`):
+
+| Exitkriterium | Nachweis (Test) | Stand |
+| --- | --- | --- |
+| (1) Restore in Dateien sauber | `podman_e2e::volume_restore_to_files_is_clean` (echtes Podman, isoliert): `find -perm /7000` und `getcap -r` leer, Strom mit Host-IDs, `security.capability` nie im Strom; dazu `sanitize::tests::*`, `podman_scan::tests::*` | mit `ofd` nachgewiesen; **mit Bareos-FD offen** (kein bareos-fd auf dem Entwicklungsrechner) |
+| (2) fremde/falsche/doppelte `source_ref`, Bytes des Gastes | `podman_port::tests::foreign_wrong_and_duplicate_references_are_refused`, `…::guest_listed_references_carry_host_bytes_and_attributes`, `podman_scan::tests::references_are_checked_and_used_once`, `wasm::tests::scan_references_need_contract_two` | nachgewiesen |
+| (3) Broker im root-eigenen Namespace | `podman_e2e::broker_in_root_owned_namespace` (verschachtelter Namespace: Wurzel des äußeren Namespace besitzt den Broker-Namespace; NNP, drei Variablen, ohne Pause-Prozess: info rootless + graphroot, load, ps, volume ls, create, inspect, run --rm; echter Broker: engine-identify, inventory); `podman_e2e::systemctl_user_show_as_account` | im verschachtelten Namespace nachgewiesen; **mit echtem Host-root und mit vorhandenem Pause-Prozess offen** (Test-VM: `podman_e2e::broker_with_host_root_on_test_vm`, `#[ignore]` mit Anleitung) |
+| (4) `ptrace` des Kontos auf den Broker | Teil von `broker_in_root_owned_namespace`: EPERM | im verschachtelten Namespace nachgewiesen; Host-root wie (3) |
+| (5) CHAR-Gerät/ID außerhalb der Map | `sanitize::tests::devices_sockets_and_foreign_ids_are_rejected`, `podman_scan::tests::foreign_ids_are_rejected_not_streamed` | nachgewiesen (Gerätedatei nur als Unit-Test, ohne root nicht anlegbar) |
+| (6) Exec-Protokoll nur aus der Tabelle | `podman_rootful::tests::requests_map_to_table_rows_only`, `exec::tests::*` | nachgewiesen für das Rootful-Backend mit Test-Runner; der echte Lauf als root braucht die Test-VM |
+| (7) Vertrag 1 und 2 nebeneinander | `podman_port::tests::contract_one_and_two_plugins_load_side_by_side`, `tests::contract_versions_one_and_two_are_accepted` | nachgewiesen mit skriptierten Gästen (nicht mit dem gebauten PostgreSQL-Gast) |
+| (8) Discovery folgt keinem Symlink, getrennte Felder | `discovery::tests::indicators_never_follow_links_and_stay_separate` | nachgewiesen |
+
+Bindung und Grants: `tests::podman_grants_are_bound_to_the_podman_plugin_id`,
+`podman_port::tests::the_line_is_bound_to_the_podman_plugin_and_its_grants`,
+`wasm::tests::podman_imports_follow_the_grants`. Journal mit
+Recovery-Entscheidung und Datei (`fsync`, `rename`, `O_NOFOLLOW`, `flock`):
+`journal::tests::*`; in einen Lifecycle eingebaut wird es erst in P2.
+
+Entscheidungen der Umsetzung, jeweils die sicherere Variante
+(**Vorschlag, offen**):
+
+- Kontopolicy: eigene Datei `/etc/onesimus/podman-accounts.json`, Format
+  `onesimus-podman-accounts/1`, `deny_unknown_fields`, Prüfung wie die
+  Plugin-Policy (root-eigen, nicht beschreibbar bis `/`).
+- `consistency=stop` ist bis P2 ein Planfehler (kein stiller Wechsel zu
+  `crash`); P0 nimmt nur `consistency=crash` an.
+- Volumes mit Optionen (`type=`, `o=bind`, `device=`) sind in P0 ein
+  Planfehler; `volume_bind_roots` wird erst mit P1/P2 ausgewertet. Der
+  `Mountpoint` aus `volume inspect` muss `<graphroot>/volumes/<name>/_data`
+  sein.
+- Podman-Grants verlangen `api_version` 2 auch in `verify`; `sign-component
+  prepare` setzt 2, sobald ein Podman-Grant angefordert wird.
+- Der Broker bekommt `--root/--runroot/--tmpdir` nur vom Host aus der
+  Kontopolicy (nie vom Gast); der graphroot, den Podman meldet, muss Pfad
+  und Inode der Kontopolicy haben.
+- ACL im Strom als ACL-Stream mit numerischen Host-IDs (nie Namen); xattrs
+  nur `user.*` als `STREAM_XATTR_LINUX`; FIFO als `FT_SPEC`; `ownership.tsv`
+  gehört der euid/egid von `ofd`.
+
+Offen nach P0: Sparse (`SEEK_DATA`), Zeitlimit je Discovery-Zugriff,
+`inspect`/`member-state` und Positivlisten für Inspect/Spec (P1),
+Image-Blobs (P2), Lifecycle mit Journal, Totmannschalter und
+`--podman-recover` (P2), Gast `plugins/podman` und Paket
+`ofd-plugin-podman`.

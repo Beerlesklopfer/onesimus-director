@@ -391,7 +391,8 @@ fn nested_inside() {
     // SAFETY: geteuid has no preconditions.
     assert_eq!(unsafe { libc::geteuid() }, 0, "root of the outer namespace");
     let n = Path::new(BASE).join(format!("nested-{}", std::process::id()));
-    let result = std::panic::catch_unwind(|| nested_case(&n, &archive, &broker));
+    let map = IdMap::rootless(ACCOUNT, &[(2, 65534)]).unwrap();
+    let result = std::panic::catch_unwind(|| nested_case(&n, &archive, &broker, ACCOUNT, ACCOUNT, &map));
     let _ = std::fs::remove_dir_all(&n);
     if let Err(e) = result {
         std::panic::resume_unwind(e);
@@ -402,8 +403,9 @@ fn nested_inside() {
 /// The account of the nested run: outer uid/gid 1, sub-IDs outer 2..65535.
 const ACCOUNT: u32 = 1;
 
-/// The body of [`nested_inside`].
-fn nested_case(n: &Path, archive: &Path, broker: &Path) {
+/// The body of [`nested_inside`] and [`broker_with_host_root_on_test_vm`]:
+/// account `uid`/`gid` with the namespace `map`, run by (namespace) root.
+fn nested_case(n: &Path, archive: &Path, broker: &Path, uid: u32, gid: u32, map: &IdMap) {
     use crate::broker::UserNs;
     let _ = std::fs::remove_dir_all(n);
     for d in ["plugins/podman", "home/.config/containers", "xdg", "root", "run", "tmp"] {
@@ -412,7 +414,7 @@ fn nested_case(n: &Path, archive: &Path, broker: &Path) {
     std::fs::write(n.join("home/.config/containers/containers.conf"),
         "[engine]\nlock_type = \"file\"\ncgroup_manager = \"cgroupfs\"\nevents_logger = \"file\"\n").unwrap();
     for d in ["home", "home/.config", "home/.config/containers", "home/.config/containers/containers.conf", "xdg", "root", "run", "tmp"] {
-        std::os::unix::fs::chown(n.join(d), Some(ACCOUNT), Some(ACCOUNT)).unwrap();
+        std::os::unix::fs::chown(n.join(d), Some(uid), Some(gid)).unwrap();
     }
     std::fs::set_permissions(n.join("xdg"), std::fs::Permissions::from_mode(0o700)).unwrap();
     for d in [n.to_path_buf(), n.join("plugins"), n.join("plugins/podman")] {
@@ -448,17 +450,21 @@ fn nested_case(n: &Path, archive: &Path, broker: &Path) {
         native: [("test-triplet".to_string(), parts)].into(),
         suite: None,
     };
-    let map = IdMap::rootless(ACCOUNT, &[(2, 65534)]).unwrap();
     let env = vec![
         ("HOME".to_string(), n.join("home").display().to_string()),
         ("XDG_RUNTIME_DIR".to_string(), n.join("xdg").display().to_string()),
         ("PATH".to_string(), "/usr/sbin:/usr/bin:/sbin:/bin".to_string()),
         ("LANG".to_string(), "C".to_string()),
         ("_CONTAINERS_USERNS_CONFIGURED".to_string(), "done".to_string()),
-        ("_CONTAINERS_ROOTLESS_UID".to_string(), ACCOUNT.to_string()),
-        ("_CONTAINERS_ROOTLESS_GID".to_string(), ACCOUNT.to_string()),
+        ("_CONTAINERS_ROOTLESS_UID".to_string(), uid.to_string()),
+        ("_CONTAINERS_ROOTLESS_GID".to_string(), gid.to_string()),
     ];
-    let ns = UserNs { uid_map: map.proc_map(), gid_map: map.proc_map(), env };
+    let gmap = if uid == gid { map.clone() } else {
+        let mut g = map.clone();
+        g.ranges[0].host_start = gid;
+        g
+    };
+    let ns = UserNs { uid_map: map.proc_map(), gid_map: gmap.proc_map(), env };
     let storage = format!("--root {r} --runroot {rr} --tmpdir {t} --storage-driver vfs",
         r = n.join("root").display(), rr = n.join("run").display(), t = n.join("tmp").display());
     // (3) Podman under NNP with the three variables, without a pause process.
@@ -509,7 +515,7 @@ fn nested_case(n: &Path, archive: &Path, broker: &Path) {
     if child == 0 {
         // SAFETY: child process: become the account, try to attach, report.
         unsafe {
-            if libc::setresgid(ACCOUNT, ACCOUNT, ACCOUNT) < 0 || libc::setresuid(ACCOUNT, ACCOUNT, ACCOUNT) < 0 {
+            if libc::setresgid(gid, gid, gid) < 0 || libc::setresuid(uid, uid, uid) < 0 {
                 libc::_exit(3);
             }
             let r = libc::ptrace(libc::PTRACE_ATTACH, pid, std::ptr::null_mut::<libc::c_void>(), std::ptr::null_mut::<libc::c_void>());
@@ -529,6 +535,42 @@ fn nested_case(n: &Path, archive: &Path, broker: &Path) {
     let mut sink = String::new();
     let _ = std::io::Read::read_to_string(&mut c.socket, &mut sink);
     c.wait();
+}
+
+/// Exit criteria P0 (3) and (4) with real host root on a **test VM**
+/// (never on a production host): the broker's namespace is owned by the
+/// host's root, the account is a real account with sub-IDs.
+///
+/// ```sh
+/// # on the test VM, as root, with a throwaway account that has sub-IDs:
+/// podman pull docker.io/library/busybox:1.36 && podman save -o /root/busybox.tar docker.io/library/busybox:1.36
+/// cargo build -p onesimus-podman-broker
+/// ONESIMUS_PODMAN_VM_ACCOUNT=podtest ONESIMUS_PODMAN_VM_IMAGE=/root/busybox.tar \
+///   cargo test -p ofd -- --ignored podman_e2e::broker_with_host_root_on_test_vm --nocapture
+/// ```
+///
+/// The variant "with an existing pause process of the account" starts one
+/// first as the account (`runuser -u podtest -- podman unshare true`) and
+/// then runs this test again; the broker must not join it.
+#[test]
+#[ignore = "test VM only: real root and a throwaway account with sub-IDs (see the doc comment)"]
+fn broker_with_host_root_on_test_vm() {
+    let (Some(name), Some(image)) = (std::env::var("ONESIMUS_PODMAN_VM_ACCOUNT").ok(), std::env::var_os("ONESIMUS_PODMAN_VM_IMAGE")) else {
+        eprintln!("ONESIMUS_PODMAN_VM_ACCOUNT / ONESIMUS_PODMAN_VM_IMAGE not set; skipped");
+        return;
+    };
+    // SAFETY: geteuid has no preconditions.
+    assert_eq!(unsafe { libc::geteuid() }, 0, "needs real root on the test VM");
+    let user = nix::unistd::User::from_name(&name).unwrap().expect("account");
+    let (uid, gid) = (user.uid.as_raw(), user.gid.as_raw());
+    let r = idmap::sub_ranges(&std::fs::read_to_string("/etc/subuid").unwrap(), &name, uid).unwrap();
+    let map = IdMap::rootless(uid, &r[..1]).unwrap();
+    let n = Path::new(BASE).join(format!("vm-{}", std::process::id()));
+    let result = std::panic::catch_unwind(|| nested_case(&n, Path::new(&image), &broker_binary(), uid, gid, &map));
+    let _ = std::fs::remove_dir_all(&n);
+    if let Err(e) = result {
+        std::panic::resume_unwind(e);
+    }
 }
 
 /// Exit criterion P0 (3), last part: `systemctl --user show` as the
