@@ -1,6 +1,6 @@
 # Planung: Ressourcen lesen, anlegen, ändern, löschen über gRPC (CRUD)
 
-Stand: 19.11.2026. Status: **Mit der GUI abgestimmt (19.11.2026); erste Ausbaustufe (Schedule, Job, JobDefs) umgesetzt.**
+Stand: 19.11.2026. Status: **Mit der GUI abgestimmt (19.11.2026); erste Ausbaustufe (Schedule, Job, JobDefs), Client und FileSet umgesetzt.**
 
 Auftrag des Nutzers: volles CRUD für Ressourcen der Director-Konfiguration,
 zuerst für Zeitpläne („Weekly Cycle kein CRUD möglich“, „ein drag führt zu einem
@@ -391,6 +391,29 @@ nicht verfügbar ist. Dafür gibt es den Onesimus-Punktbefehl `.config`
   Protokoll wie beim gRPC-Weg; im Audit-Protokoll der Befehlszeile wird
   `text64=` durch die Länge ersetzt (Passwörter im Text).
 
+### FileSet und `configure delete` über das CRUD (19.11.2026)
+
+Anlass: Beim Entfernen von BgLage auf PDC hat das alte `configure delete`
+(MCP-Werkzeug `configure_delete`) Job, Client und Pool ohne jede
+Verweisprüfung aus dem Speicher genommen und die Datei gelöscht; das FileSet
+konnte es nicht löschen.
+
+- FileSet mit READ_RAW, CREATE_RAW, UPDATE_RAW, DELETE und `ListResources`;
+  Rechte über die FileSet-ACL wie `show fileset`. Referenzen: `FileSet =` in
+  Job und JobDefs (`R_FILESET`) und `fileset=<name>` in Job-`Run`-Werten und
+  RunScript-`run`-Befehlen bei wörtlichem Namen. Test
+  `fileset_create_read_update_delete_and_referenced`.
+- `configure delete <typ>=<name> [yes]` (Konsole, `ConfigureDelete` über
+  gRPC, damit auch das MCP-Werkzeug) geht jetzt durch denselben Editor: Lesen
+  für die aktuelle SHA-256, dann DeleteResource mit dieser Prüfsumme. Damit
+  gelten REFERENCED (es wird nichts gelöscht, die Verweise werden genannt),
+  die `-t`-Prüfung der Restkonfiguration, atomares Schreiben und Reload mit
+  Rücknahme. Typen: client, job, jobdefs, schedule, fileset. Pool, Storage
+  und Console werden abgelehnt („cannot be deleted safely yet“), bis sie im
+  CRUD sind. Ohne Konfigurationspfad lehnt der Befehl ab, statt nur die
+  laufende Konfiguration zu ändern. Test
+  `configure_delete_goes_through_the_crud`.
+
 Offen: RENAME (Grundsatz 9), weitere Typen (Grundsatz 17) mit `followups`
 für Pool (Grundsatz 15), ob die alten Konsolenerweiterungen
-`configure update/delete/read` entfernt werden.
+`configure update/read` entfernt werden.

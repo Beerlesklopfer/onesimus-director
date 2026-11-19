@@ -433,3 +433,30 @@ fn a_job_using_the_client_prevents_the_delete() {
     assert_eq!((o.status, o.referenced_by.clone()), (Status::Referenced, vec![("jobdefs".to_string(), "d".to_string())]));
     assert_eq!(run_arg("run job=a Client=x yes", "client=").as_deref(), Some("x"));
 }
+
+/// FileSet with Options, Include and Exclude blocks and a comment the GUI does not know.
+const FILESET_ORPHAN: &str = "FileSet {\n  Name = orphan\n  # kept as written\n  Include {\n    Options {\n      Signature = XXH128\n    }\n    File = /srv\n  }\n  Exclude {\n    File = /srv/tmp\n  }\n}\n";
+
+#[test]
+fn fileset_create_read_update_delete_and_referenced() {
+    let h = harness("fileset");
+    let created = h.create(RType::FileSet, FILESET_ORPHAN);
+    assert_eq!(created.status, Status::Ok, "{created:?}");
+    assert_eq!(std::fs::read_to_string(h.file("fileset", "orphan.conf")).unwrap(), FILESET_ORPHAN);
+    let read = h.read(RType::FileSet, "orphan");
+    assert_eq!((read.status, read.text.as_str()), (Status::Ok, FILESET_ORPHAN));
+    let changed = FILESET_ORPHAN.replace("File = /srv\n", "File = /srv\n    File = /opt\n");
+    let updated = h.update(RType::FileSet, "orphan", &read.sha256, &changed);
+    assert_eq!(updated.status, Status::Ok, "{updated:?}");
+    let o = h.delete(RType::FileSet, "orphan", &updated.sha256);
+    assert_eq!(o.status, Status::Ok, "{o:?}");
+    assert!(!h.file("fileset", "orphan.conf").exists());
+    // JOB_A uses FileSet = fs
+    let read = h.read(RType::FileSet, "fs");
+    let o = h.delete(RType::FileSet, "fs", &read.sha256);
+    assert_eq!((o.status, o.referenced_by.clone()), (Status::Referenced, vec![("job".to_string(), "a".to_string())]));
+    assert!(h.file("fileset", "fs.conf").exists());
+    // `run job=… fileset=<name>` in a Job Run value names it too
+    let raw = bareos_config::raw::parse_str("Job {\n Name = r\n Run = \"job=a fileset=orphan level=Full\"\n}\n", None).unwrap();
+    assert_eq!(references(&raw, RType::FileSet, "orphan"), vec![("job".into(), "r".into())]);
+}

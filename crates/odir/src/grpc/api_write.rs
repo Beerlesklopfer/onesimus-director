@@ -820,7 +820,7 @@ fn configure(r: &Req, action: &str) -> Result<Plan, String> {
 }
 
 /// Resource types `configure delete` removes (commands/configure.rs).
-const CONFIGURE_DELETE_TYPES: &[&str] = &["client", "job", "pool", "storage", "console", "schedule"];
+const CONFIGURE_DELETE_TYPES: &[&str] = &["client", "job", "jobdefs", "schedule", "fileset"];
 /// Resource types and directives `configure update` changes.
 const CONFIGURE_UPDATE: &[(&str, &[&str])] = &[
     ("client", &["address", "port", "password"]),
@@ -1158,8 +1158,8 @@ mod tests {
         assert!(err("ConfigureUpdate", json!({"resource_type": 1, "name": "c1", "directives": {"enabled": "no"}})).contains("does not apply"));
         assert!(err("ConfigureUpdate", json!({"resource_type": 8, "name": "p", "directives": {"x": "y"}})).contains("supports"));
         assert_eq!(line("ConfigureDelete", json!({"resource_type": 6, "name": "s1", "yes": true})), "configure delete schedule=s1 yes");
-        assert_eq!(line("ConfigureDelete", json!({"resource_type": 8, "name": "p"})), "configure delete pool=p");
-        assert!(err("ConfigureDelete", json!({"resource_type": 7, "name": "fs"})).contains("supports"));
+        assert_eq!(line("ConfigureDelete", json!({"resource_type": 7, "name": "fs"})), "configure delete fileset=fs");
+        assert!(err("ConfigureDelete", json!({"resource_type": 8, "name": "p"})).contains("supports"));
         assert_eq!(line("ConfigureExport", json!({"client": "fd"})), "configure export client=fd");
         assert_eq!(line("SetDebug", json!({"level": 100, "trace": true, "dir": true})), "setdebug level=100 trace=1 dir");
         assert_eq!(line("SetDebug", json!({"level": 0, "client": "fd"})), "setdebug level=0 client=fd");
@@ -1183,7 +1183,7 @@ mod tests {
         assert_eq!(line("DotAclCopy", json!({"from": "a", "to": "b"})), ".acl copy from=a to=b");
     }
 
-    /// S-38: the planned lines run through `configure` itself and change
+    /// S-38: the planned lines run through `configure` itself; update changes
     /// the running configuration (no config path in tests: nothing on disk).
     #[test]
     fn configure_update_delete_lines_are_accepted() {
@@ -1207,9 +1207,11 @@ mod tests {
         assert_eq!(config.read().unwrap().find_client("c1").unwrap().address, "new");
         assert_eq!(run("ConfigureUpdate", json!({"resource_type": 3, "name": "j", "directives": {"newpool": "Full"}})),
                    "Job 'j' updated: pool=Full\n");
-        assert_eq!(run("ConfigureDelete", json!({"resource_type": 6, "name": "s1", "yes": true})), "Deleted Schedule 's1'\n");
-        assert!(config.read().unwrap().schedules.iter().all(|s| s.name != "s1"));
-        assert_eq!(run("ConfigureDelete", json!({"resource_type": 1, "name": "nosuch"})), "Client 'nosuch' not found\n");
+        // `configure delete` needs a configuration path (CRUD editor); without
+        // one it refuses instead of changing only the running configuration.
+        // The CRUD path itself: config_crud::tests::configure_delete_goes_through_the_crud.
+        assert!(run("ConfigureDelete", json!({"resource_type": 6, "name": "s1", "yes": true})).contains("not available"));
+        assert!(config.read().unwrap().schedules.iter().any(|s| s.name == "s1"));
     }
 
     /// S-39: limit=0 survives the wire (optional field) and becomes

@@ -62,6 +62,7 @@ pub fn type_text(rtype: RType) -> &'static str {
         RType::Job => "JOB",
         RType::JobDefs => "JOBDEFS",
         RType::Client => "CLIENT",
+        RType::FileSet => "FILESET",
     }
 }
 
@@ -163,7 +164,8 @@ fn failure(message: impl Into<String>) -> CommandResult {
     CommandResult::error(message)
 }
 
-fn console_of(ctx: &ExecContext) -> String {
+/// Name of the console of the session (`*UserAgent*` without a session manager).
+pub(crate) fn console_of(ctx: &ExecContext) -> String {
     match &ctx.session_mgr {
         Some(manager) => manager.authenticated_console(ctx.session_id).unwrap_or_default(),
         None => "*UserAgent*".into(),
@@ -194,7 +196,7 @@ pub fn mask_cmdline(cmdline: &str) -> String {
 
 const USAGE: &str = "Usage: .config capabilities | list type=<type> | read type=<type> name=<name> | \
     create type=<type> text64=<base64> [validate_only] | update type=<type> name=<name> sha256=<sha> text64=<base64> \
-    [validate_only] | delete type=<type> name=<name> sha256=<sha> [validate_only]; type: schedule, job, jobdefs, client";
+    [validate_only] | delete type=<type> name=<name> sha256=<sha> [validate_only]; type: schedule, job, jobdefs, client, fileset";
 
 /// `.config …` (production editor: the configuration path of the Director).
 pub fn cmd_dot_config(ast: &CommandAst, ctx: &ExecContext) -> CommandResult {
@@ -241,7 +243,7 @@ pub fn dot_config(ast: &CommandAst, ctx: &ExecContext,
     }
     let Some(type_word) = value(ast, "type") else { return failure(format!("type=<type> is required. {USAGE}")) };
     let Some(rtype) = parse_type(type_word) else {
-        return failure(format!("type \"{type_word}\" cannot be edited (schedule, job, jobdefs, client)"));
+        return failure(format!("type \"{type_word}\" cannot be edited (schedule, job, jobdefs, client, fileset)"));
     };
     let editor = match editor() {
         Ok(e) => e,
@@ -437,5 +439,32 @@ Console {\n  Name = viewer\n  Password = pw\n  CommandACL = .config\n  ClientACL
         assert_eq!(crate::command_registry::resolve_command_name(registry, ".config"), Some(".config"));
         assert!(!crate::ua_commands_table::UA_COMMANDS.iter().any(|e| e.0.starts_with(".config")));
         assert_eq!(crate::command_registry::resolve_command_name(registry, "configure"), Some("configure"));
+    }
+
+    /// `configure delete` goes through the CRUD: a FileSet a Job uses is
+    /// refused (REFERENCED), an unused one is deleted with its file, types
+    /// without a reference check are refused.
+    #[test]
+    fn configure_delete_goes_through_the_crud() {
+        let h = Arc::new(harness("configure-delete"));
+        let config = Arc::new(RwLock::new(DirectorConfig::load(&h.dir).unwrap()));
+        let ctx = ExecContext { session_id: 0, config: Some(config), session_mgr: None, catalog: None,
+            api_mode: ApiMode::Human, bus_rx: None, job_manager: None };
+        let editor = h_editor(&h);
+        let run = |line: &str| {
+            let r = crate::commands::configure::configure_delete_with(&crate::session::parse_cli_command(line), &ctx, &editor);
+            format!("{}{}", r.text_output, r.error_message)
+        };
+        let fs = h.dir.join("bareos-dir.d/fileset/fs.conf");
+        let out = run("configure delete fileset=fs yes");
+        assert!(out.contains("is used by 1 resource") && out.contains("job \"a\""), "{out}");
+        assert!(fs.exists());
+        let orphan = h.dir.join("bareos-dir.d/fileset/orphan.conf");
+        std::fs::write(&orphan, "FileSet {\n  Name = orphan\n  Include {\n    File = /srv\n  }\n}\n").unwrap();
+        assert_eq!(run("configure delete fileset=orphan yes"), "Deleted FileSet 'orphan'\n");
+        assert!(!orphan.exists());
+        assert!(run("configure delete pool=Full yes").contains("cannot be deleted safely"));
+        assert!(h.dir.join("bareos-dir.d/pool/Full.conf").exists());
+        assert_eq!(run("configure delete job=nosuch"), "Job \"nosuch\" not found\n");
     }
 }

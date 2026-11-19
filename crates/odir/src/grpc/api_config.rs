@@ -44,6 +44,7 @@ fn to_proto_type(rtype: RType) -> pb::ResourceType {
         RType::Job => pb::ResourceType::Job,
         RType::JobDefs => pb::ResourceType::Jobdefs,
         RType::Client => pb::ResourceType::Client,
+        RType::FileSet => pb::ResourceType::Fileset,
     }
 }
 
@@ -78,6 +79,7 @@ fn rtype(value: i32) -> Result<RType, Status> {
         pb::ResourceType::Job => Ok(RType::Job),
         pb::ResourceType::Jobdefs => Ok(RType::JobDefs),
         pb::ResourceType::Client => Ok(RType::Client),
+        pb::ResourceType::Fileset => Ok(RType::FileSet),
         other => Err(Status::unimplemented(format!("{} cannot be edited yet (see GetConfigCapabilities)", other.as_str_name()))),
     }
 }
@@ -368,10 +370,11 @@ Console {\n  Name = clients\n  Password = pw\n  CommandACL = configure\n  Client
         let err = f.api.get_config_capabilities(Request::new(pb::ConfigCapabilitiesRequest {})).await.unwrap_err();
         assert_eq!(err.code(), tonic::Code::Unauthenticated);
 
-        // default console: all four types with all implemented operations
+        // default console: all five types with all implemented operations
         let caps = f.api.get_config_capabilities(req(pb::ConfigCapabilitiesRequest {}, &root)).await.unwrap().into_inner();
         assert_eq!(caps.interface_version, 1);
-        assert_eq!(types(&caps), [pb::ResourceType::Schedule, pb::ResourceType::Job, pb::ResourceType::Jobdefs, pb::ResourceType::Client]);
+        assert_eq!(types(&caps), [pb::ResourceType::Schedule, pb::ResourceType::Job, pb::ResourceType::Jobdefs, pb::ResourceType::Client,
+            pb::ResourceType::Fileset]);
         assert!(caps.types.iter().all(|t| t.operations().collect::<Vec<_>>() == OPERATIONS));
 
         // no Command ACL configure: PERMISSION_DENIED, no types

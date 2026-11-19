@@ -20,7 +20,7 @@
 //!   state back and reloads again (RELOAD_FAILED).
 //! - One lock serializes read-check-write-reload of all changes.
 //!
-//! First stage (principle 17): Schedule, Job and JobDefs; then Client.
+//! First stage (principle 17): Schedule, Job and JobDefs; then Client and FileSet.
 
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
@@ -41,10 +41,12 @@ pub enum RType {
     Job,
     JobDefs,
     Client,
+    /// FileSet; deleting one that a Job or JobDefs names is REFERENCED.
+    FileSet,
 }
 
 impl RType {
-    pub const ALL: [RType; 4] = [RType::Schedule, RType::Job, RType::JobDefs, RType::Client];
+    pub const ALL: [RType; 5] = [RType::Schedule, RType::Job, RType::JobDefs, RType::Client, RType::FileSet];
 
     /// Type word as written in new files and messages.
     pub fn word(self) -> &'static str {
@@ -53,6 +55,7 @@ impl RType {
             RType::Job => "Job",
             RType::JobDefs => "JobDefs",
             RType::Client => "Client",
+            RType::FileSet => "FileSet",
         }
     }
 
@@ -63,6 +66,7 @@ impl RType {
             RType::Job => "job",
             RType::JobDefs => "jobdefs",
             RType::Client => "client",
+            RType::FileSet => "fileset",
         }
     }
 
@@ -73,15 +77,18 @@ impl RType {
             RType::Job => "R_JOB",
             RType::JobDefs => "R_JOBDEFS",
             RType::Client => "R_CLIENT",
+            RType::FileSet => "R_FILESET",
         }
     }
 
-    /// Resource ACL like `show` (JobDefs use the Job ACL, Client the Client ACL).
+    /// Resource ACL like `show` (JobDefs use the Job ACL, Client the Client ACL,
+    /// FileSet the FileSet ACL).
     pub fn acl(self) -> crate::acl::Kind {
         match self {
             RType::Schedule => crate::acl::Kind::Schedule,
             RType::Job | RType::JobDefs => crate::acl::Kind::Job,
             RType::Client => crate::acl::Kind::Client,
+            RType::FileSet => crate::acl::Kind::FileSet,
         }
     }
 }
@@ -469,7 +476,7 @@ fn run_arg(command: &str, key: &str) -> Option<String> {
 /// Every resource that names resource `name` of type `rtype`: directives
 /// whose item refers to that type (Schedule =, JobDefs =, Job To Verify =,
 /// Client = …, from the item tables of all resource types), and for Jobs
-/// (Clients) `run job=<name>` (`client=<name>`) in RunScript `Console =`
+/// (Clients, FileSets) `run job=<name>` (`client=<name>`, `fileset=<name>`) in RunScript `Console =`
 /// commands and Job `Run =` values when the name is literal. Console/Profile ACL entries are patterns,
 /// not references.
 pub fn references(raw: &[ConfResource], rtype: RType, name: &str) -> Vec<(String, String)> {
@@ -490,6 +497,7 @@ pub fn references(raw: &[ConfResource], rtype: RType, name: &str) -> Vec<(String
             let key = match rtype {
                 RType::Job => Some("job="),
                 RType::Client => Some("client="),
+                RType::FileSet => Some("fileset="),
                 _ => None,
             };
             if let Some(key) = key && matches!(res.norm_type().as_str(), "job" | "jobdefs") {
@@ -992,7 +1000,7 @@ impl ConfigEditor {
                 });
                 // Principle 15: what the reload does not bring into line (Pool
                 // resources: volumes keep their values until `update volume …
-                // frompool`) goes into `followups`; Schedule/Job/JobDefs/Client
+                // frompool`) goes into `followups`; Schedule/Job/JobDefs/Client/FileSet
                 // have nothing of that kind (the catalog Client record takes
                 // AutoPrune and the retentions at the next job, as in Bareos), so the list stays empty in this stage.
                 outcome.followups = Vec::new();

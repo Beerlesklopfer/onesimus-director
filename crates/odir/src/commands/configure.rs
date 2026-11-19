@@ -34,16 +34,6 @@ fn persist_resource(config_dir: &str, resource_type: &str, name: &str, content: 
     Ok(())
 }
 
-/// Delete a resource config file from disk.
-fn delete_resource_file(config_dir: &str, resource_type: &str, name: &str) -> Result<(), String> {
-    let path = format!("{config_dir}/bareos-dir.d/{resource_type}/{name}.conf");
-    if Path::new(&path).exists() {
-        std::fs::remove_file(&path).map_err(|e| format!("rm {path}: {e}"))?;
-        tracing::info!("Deleted {resource_type}/{name}.conf");
-    }
-    Ok(())
-}
-
 /// Configuration layout derived from the `-c` path, like the C++
 /// ConfigurationParser (config_dir_, config_include_dir_).
 struct Layout {
@@ -655,54 +645,75 @@ fn configure_export(ast: &CommandAst, ctx: &ExecContext, layout: Option<&Layout>
 // Onesimus extensions: configure read / update / delete
 // ---------------------------------------------------------------------------
 
+/// `configure delete <type>=<name> [yes]` (Onesimus extension).
+///
+/// Goes through the configuration CRUD ([`crate::config_edit`]), the same
+/// path as DeleteResource over gRPC and `.config delete` over BNET: the
+/// resource is read for its current SHA-256, then deleted with that
+/// checksum, so the reference check (REFERENCED: a Job still names the
+/// Client/FileSet/Schedule …), the `odir -t` check of the remaining
+/// configuration, the atomic file change and the reload with rollback all
+/// apply. Types the CRUD does not edit (Pool, Storage, Console) are refused:
+/// the earlier implementation removed them from memory and deleted the file
+/// without any reference check.
 fn configure_delete(ast: &CommandAst, ctx: &ExecContext) -> CommandResult {
-    let config = match &ctx.config {
-        Some(c) => c,
-        None => return CommandResult::error("No config loaded\n".to_string()),
+    let editor = match ctx.config.as_ref().and_then(crate::config_edit::shared_editor) {
+        Some(e) => e,
+        None => return CommandResult::error("configure delete: configuration editing is not available (no configuration path)\n".to_string()),
     };
+    configure_delete_with(ast, ctx, &editor)
+}
 
-    // Check for client=, job=, pool= arguments
-    for arg in &ast.arguments {
-        if let Some(name) = &arg.value {
-            let mut cfg = config.write().unwrap();
-            match arg.key.as_str() {
-                "client" | "job" | "pool" | "storage" | "console" | "schedule" => {
-                    let resource_type = arg.key.as_str();
-                    let (_vec_len_before, removed) = match resource_type {
-                        "client" => { let b = cfg.clients.len(); cfg.clients.retain(|c| c.name != *name); (b, b > cfg.clients.len()) }
-                        "job" => { let b = cfg.jobs.len(); cfg.jobs.retain(|j| j.name != *name); (b, b > cfg.jobs.len()) }
-                        "pool" => { let b = cfg.pools.len(); cfg.pools.retain(|p| p.name != *name); (b, b > cfg.pools.len()) }
-                        "storage" => { let b = cfg.storages.len(); cfg.storages.retain(|s| s.name != *name); (b, b > cfg.storages.len()) }
-                        "console" => {
-                            let b = cfg.consoles.len();
-                            if cfg.consoles.iter().position(|c| c.name == *name).is_some_and(|i| i < cfg.loaded_consoles) {
-                                cfg.loaded_consoles -= 1;
-                            }
-                            cfg.consoles.retain(|c| c.name != *name);
-                            (b, b > cfg.consoles.len())
-                        }
-                        "schedule" => { let b = cfg.schedules.len(); cfg.schedules.retain(|s| s.name != *name); (b, b > cfg.schedules.len()) }
-                        _ => (0, false),
-                    };
-                    if removed {
-                        // Delete from disk
-                        if let Some(dir) = config_dir(ctx) {
-                            let _ = delete_resource_file(&dir, resource_type, name);
-                        }
-                        let rt = resource_type.chars().next().unwrap().to_uppercase().to_string()
-                            + &resource_type[1..];
-                        return CommandResult::ok(format!("Deleted {rt} '{name}'\n"));
-                    }
-                    let rt = resource_type.chars().next().unwrap().to_uppercase().to_string()
-                        + &resource_type[1..];
-                    return CommandResult::error(format!("{rt} '{name}' not found\n"));
-                }
-                _ => {}
+/// [`configure_delete`] with an explicit editor (tests: a throw-away configuration).
+pub(crate) fn configure_delete_with(ast: &CommandAst, ctx: &ExecContext, editor: &crate::config_edit::ConfigEditor) -> CommandResult {
+    use crate::config_edit::{RType, Status};
+    /// Types `configure delete` accepted before the CRUD path; those without
+    /// a CRUD type are refused with a hint.
+    const UNSAFE: [&str; 3] = ["pool", "storage", "console"];
+    let Some((key, name)) = ast.arguments.iter()
+        .find_map(|a| a.value.as_deref().map(|v| (a.key.to_ascii_lowercase(), v.to_string()))) else {
+        return CommandResult::ok("configure delete: specify client=<name>, job=<name>, jobdefs=<name>, schedule=<name> or fileset=<name>\n".to_string());
+    };
+    let Some(rtype) = RType::ALL.into_iter().find(|t| t.norm() == key) else {
+        if UNSAFE.contains(&key.as_str()) {
+            return CommandResult::error(format!("configure delete: {key} resources cannot be deleted safely yet \
+                (no reference check); remove the file by hand and reload\n"));
+        }
+        return CommandResult::error(format!("configure delete: unknown resource type \"{key}\"\n"));
+    };
+    let allow = |n: &str| crate::acl::access(ctx, rtype.acl(), n);
+    let console = super::config_crud::console_of(ctx);
+    let read = match editor.read(rtype, &name, &allow) {
+        Ok(o) => o,
+        Err(e) => return CommandResult::error(format!("configure delete: {e}\n")),
+    };
+    if read.status != Status::Ok {
+        return CommandResult::error(format!("{}\n", read.message));
+    }
+    let o = match editor.delete(rtype, &name, &read.sha256, false, &console, &allow) {
+        Ok(o) => o,
+        Err(e) => return CommandResult::error(format!("configure delete: {e}\n")),
+    };
+    match o.status {
+        Status::Ok => CommandResult::ok(format!("Deleted {} '{name}'\n", rtype.word())),
+        Status::Referenced => {
+            let mut text = format!("{}; nothing deleted:\n", o.message);
+            for (t, n) in &o.referenced_by {
+                text.push_str(&format!("  {t} \"{n}\"\n"));
             }
+            CommandResult::error(text)
+        }
+        _ => {
+            let mut text = format!("{}\n", o.message);
+            if let Some(p) = &o.problem {
+                text.push_str(&p.text);
+                if !text.ends_with('\n') {
+                    text.push('\n');
+                }
+            }
+            CommandResult::error(text)
         }
     }
-
-    CommandResult::ok("configure delete: specify client=<name>, job=<name>, pool=<name>, etc.\n".to_string())
 }
 
 fn configure_read(ast: &CommandAst, ctx: &ExecContext) -> CommandResult {
