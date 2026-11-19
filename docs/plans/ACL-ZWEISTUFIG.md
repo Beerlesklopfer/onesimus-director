@@ -106,7 +106,7 @@ nicht ein.
 
 ## Umsetzung (20.11.2026)
 
-Commit: `feat(odir): zweistufige ACLs – Katalog-ACL als innere Stufe`
+Commit `76d7c4c` (`feat(odir): zweistufige ACLs – Katalog-ACL als innere Stufe`)
 (Branch `development`, Nachfolger von `ca365ab`).
 
 ### Bausteine
