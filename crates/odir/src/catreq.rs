@@ -863,6 +863,9 @@ struct Batch {
     errmsg: String,
     changes: u32,
     pending: Vec<String>,
+    /// A block of rows could not be sent (`errmsg` says why): the batch
+    /// takes no more rows and ends with "Batch end" (M_FATAL). J-1.
+    failed: bool,
 }
 
 impl Batch {
@@ -1232,13 +1235,19 @@ VALUES ('{}','{}','\\x{}',{},{},{},{},{},{},{})",
             msgs.push((MsgType::Fatal, self.errmsg.clone()));
             return true;
         }
+        // J-1: after a failed block the job is already fatal; the batch
+        // ends with "Batch end" (WriteBatchFileRecords bails out,
+        // sql_create.cc:790-793) and keeps no further rows.
+        if self.batch_started && self.batch.as_ref().is_some_and(|b| b.failed) {
+            return true;
+        }
         if self.batch_started && self.batch.as_ref().is_some_and(|b| b.changes > BATCH_FLUSH) {
             self.write_batch_file_records(msgs);
         }
         if !self.batch_started {
             if self.batch.is_none() {
                 match open_batch() {
-                    Some(db) => self.batch = Some(Batch { db, errmsg: String::new(), changes: 0, pending: Vec::new() }),
+                    Some(db) => self.batch = Some(Batch { db, errmsg: String::new(), changes: 0, pending: Vec::new(), failed: false }),
                     None => {
                         self.errmsg = "Could not init database batch connection\n".into();
                         msgs.push((MsgType::Fatal, self.errmsg.clone()));
@@ -1270,7 +1279,17 @@ Name varchar,LStat varchar,Md5 varchar,DeltaSeq smallint,Fhinfo NUMERIC(20),Fhno
         batch.changes += 1;
         if batch.pending.len() >= BATCH_CHUNK {
             if let Err(error) = batch.flush() {
+                // postgresql.cc:1137-1142 SqlBatchInsertFileTable() sets this
+                // errmsg. Bareos returns true there (postgresql.cc:1146) and
+                // only notices a lost connection at the next statement
+                // (sql_create.cc:795 "Lock Path table"); a block the server
+                // rejected would vanish. Here the rows of the block are gone
+                // as well, so the caller's "Attribute create error: ERR=%s"
+                // (catreq.cc:521-523, M_FATAL) makes the job fail. J-1.
                 batch.errmsg = format!("error copying in batch mode: {error}");
+                batch.failed = true;
+                self.errmsg = batch.errmsg.clone();
+                return false;
             }
         }
         true
@@ -1294,6 +1313,12 @@ Name varchar,LStat varchar,Md5 varchar,DeltaSeq smallint,Fhinfo NUMERIC(20),Fhno
             }
         };
         'run: {
+            // sql_create.cc:790-793: "Batch end %s" (M_FATAL) and no File
+            // rows of this batch; also when a block failed before (J-1).
+            if batch.failed {
+                msgs.push((MsgType::Fatal, format!("Batch end {}\n", batch.errmsg)));
+                break 'run;
+            }
             if let Err(error) = batch.flush() {
                 batch.errmsg = format!("error ending batch mode: {error}");
                 msgs.push((MsgType::Fatal, format!("Batch end {}\n", batch.errmsg)));
@@ -1326,6 +1351,7 @@ JOIN Path ON (batch.Path = Path.Path) ") {
         let _ = batch.db.exec("DROP TABLE IF EXISTS batch");
         batch.pending.clear();
         batch.changes = 0;
+        batch.failed = false;
         self.batch_started = false;
         ok
     }

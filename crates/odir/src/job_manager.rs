@@ -71,6 +71,9 @@ struct JcrState {
     sd_reached: bool,
     /// jcr->dir_impl->SDJobStatus ('\0' none).
     sd_status: char,
+    /// jcr->JobErrors of the Director's own job messages (catalog
+    /// requests); the FD's errors are added at the end (backup.cc:735). J-1.
+    job_errors: u32,
     /// jcr->post_scripts_ran (RunScripts "AfterJob" happens once).
     post_scripts_ran: bool,
     /// The end of the job (UpdateJobEnd, report) is done; the job is
@@ -889,6 +892,7 @@ impl JobManager {
                             job.last_files = files as i64;
                             job.last_bytes = bytes as i64;
                         }
+                        jmsg_effects(job, &reply.messages);
                         post_catreq_messages_of(&self.bus, self.config.as_ref(), job, from, reply.messages);
                         job.handle.send_message(&PipeMessage::CatResp { response: reply.to_sd });
                         job.phase = previous_phase;
@@ -898,6 +902,7 @@ impl JobManager {
                         let data = hex::decode(&data).unwrap_or_default();
                         let reply = catreq_session(&mut self.catreq_jobs, &self.catalog, &self.config, job)
                             .dispatch(self.catalog.as_ref().map(|c| c as &dyn Db), &batch_opener(&self.catalog), &data);
+                        jmsg_effects(job, &reply.messages);
                         post_catreq_messages_of(&self.bus, self.config.as_ref(), job, from, reply.messages);
                     }
 
@@ -1057,12 +1062,17 @@ impl JobManager {
                     let messages = state.end_of_job(self.catalog.as_ref().map(|c| c as &dyn Db), &batch_opener(&self.catalog));
                     // SD-SD Copy/Migrate: the attributes are mig_jcr's (S-20).
                     let owner = crate::migrate::remote_new_job(job.job_id).unwrap_or(job.job_id);
+                    // A failed batch insert ("Batch end", "Fill File table") is
+                    // M_FATAL: the job ends JS_FatalError (sql_create.cc:791-821). J-1.
+                    jmsg_effects(job, &messages);
                     post_catreq_messages_of(&self.bus, self.config.as_ref(), job, owner, messages);
                 }
                 let mut ending = job.pending_end.take().unwrap_or_else(|| JobEnd {
                     term_code: b'E' as i32, files: job.last_files, bytes: job.last_bytes,
                     errors: 1, vol_session_id: 0, vol_session_time: 0,
                 });
+                // The Director's own JobErrors of the catalog requests (J-1).
+                let dir_errors = job.jcr.job_errors;
                 // VerifyCleanup(): Director-side JobErrors and TermCode (verify.rs).
                 if let Some(end) = crate::verify::finish(self.catalog.as_ref(), job.job_id, ending.files) {
                     ending.errors += end.errors;
@@ -1080,7 +1090,7 @@ impl JobManager {
                     let end = crate::migrate::WorkerEnd {
                         status: job.observed_status, sd_status: job.jcr.sd_status,
                         sd_files: ending.files.max(0) as u64, sd_bytes: ending.bytes.max(0) as u64,
-                        sd_errors: ending.errors.max(0) as u32, job_errors: 0,
+                        sd_errors: ending.errors.max(0) as u32, job_errors: dir_errors,
                         vol_session_id: ending.vol_session_id, vol_session_time: ending.vol_session_time,
                         start_time, end_time };
                     let director = self.config.as_ref().and_then(|c| c.read().ok()).map(|c| c.director.name.clone()).unwrap_or_default();
@@ -1096,6 +1106,9 @@ impl JobManager {
                         continue;
                     }
                 }
+                // backup.cc:735 jcr->JobErrors += JobErrors: the FD's errors
+                // and the Director's own (J-1).
+                ending.errors = ending.errors.saturating_add(dir_errors as i32);
                 // NativeBackupCleanup: terminated with errors is JS_Warnings
                 // (AdminCleanup keeps JS_Terminated: the errors of its run
                 // scripts only count, S-07).
@@ -1452,6 +1465,22 @@ fn post_catreq_messages_of(bus: &MessageBus, config: Option<&SharedConfig>, job:
             crate::console_msg::dispatch_job_message(&config, &job.job_name, job.job_id, crate::audit::code(msg_type), now_unix(), &msg);
         }
         bus.post(BusMessage::JobMessage { job_id: job.job_id, job_name: job.job_name.clone(), msg_type, text, timestamp: now_unix() });
+    }
+}
+
+/// The side effects of Jmsg() on the JCR (lib/message.cc:1239-1246):
+/// M_FATAL sets JS_FatalError and JobErrors to at least 1, M_ERROR counts
+/// JobErrors. For the job messages of the catalog requests (J-1).
+fn jmsg_effects(job: &mut DirJob, messages: &crate::catreq::Messages) {
+    for (msg_type, _) in messages {
+        match msg_type {
+            crate::message_bus::MsgType::Fatal => {
+                job.observed_status = merge_status(job.observed_status, 'f');
+                if job.jcr.job_errors == 0 { job.jcr.job_errors = 1; }
+            }
+            crate::message_bus::MsgType::Error => job.jcr.job_errors += 1,
+            _ => {}
+        }
     }
 }
 

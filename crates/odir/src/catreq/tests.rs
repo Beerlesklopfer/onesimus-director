@@ -501,6 +501,65 @@ fn catalog_files_off_and_blast_attr() {
     assert!(batch.log().iter().any(|s| s == "INSERT INTO batch VALUES (1,42,'/','x','P','0',0,0,0)"));
 }
 
+/// J-1: a block of the batch insert the catalog rejects (lost connection,
+/// full disk) is M_FATAL right away; the batch takes no more rows and ends
+/// with "Batch end" (sql_create.cc:790-793), never with File rows of it.
+#[test]
+fn failed_batch_block_is_fatal_and_ends_the_batch() {
+    let catalog = MockDb::new(|_| None);
+    let batch = MockDb::new(|_| None).with_exec(|sql| if sql.starts_with("INSERT INTO batch") {
+        Err("server closed the connection unexpectedly".into())
+    } else {
+        Ok(0)
+    });
+    let opener_db = batch.clone();
+    let opener = move || Some(Box::new(opener_db.clone()) as Box<dyn Db + Send>);
+    let mut job = CatReqJob::new(context());
+    let mut fatal = Vec::new();
+    // BATCH_CHUNK rows fill the first block; the next attribute flushes the cached one.
+    for i in 1..=(BATCH_CHUNK as i32 + 5) {
+        let record = format!("{i} 3 /data/f{i}\0P0A\0\0\0");
+        let reply = job.dispatch(Some(&catalog), &opener, &upd_cat(i, STREAM_UNIX_ATTRIBUTES, record.as_bytes()));
+        fatal.extend(reply.messages.into_iter().filter(|(t, _)| *t == MsgType::Fatal));
+    }
+    assert_eq!(fatal, vec![(MsgType::Fatal,
+        "Attribute create error: ERR=error copying in batch mode: server closed the connection unexpectedly".to_string())]);
+    let messages = job.end_of_job(Some(&catalog), &opener);
+    assert_eq!(messages[1], (MsgType::Fatal,
+        "Batch end error copying in batch mode: server closed the connection unexpectedly\n".to_string()));
+    assert_eq!(messages.len(), 2, "{messages:?}");
+    let log = batch.log();
+    // One block was tried, no File or Path rows, the batch table dropped.
+    assert_eq!(log.iter().filter(|s| s.starts_with("INSERT INTO batch")).count(), 1);
+    assert!(!log.iter().any(|s| s.starts_with("INSERT INTO File") || s.starts_with("INSERT INTO Path")));
+    assert_eq!(log.last().unwrap(), "DROP TABLE IF EXISTS batch");
+}
+
+/// J-1: the last block, sent at the end of the job, fails: "Batch end".
+#[test]
+fn failed_last_batch_block_is_fatal() {
+    let catalog = MockDb::new(|_| None);
+    let batch = MockDb::new(|_| None).with_exec(|sql| if sql.starts_with("INSERT INTO batch") {
+        Err("could not extend file: No space left on device".into())
+    } else {
+        Ok(0)
+    });
+    let opener_db = batch.clone();
+    let opener = move || Some(Box::new(opener_db.clone()) as Box<dyn Db + Send>);
+    let mut job = CatReqJob::new(context());
+    job.dispatch(Some(&catalog), &opener, &upd_cat(1, STREAM_UNIX_ATTRIBUTES, b"1 3 /x\0P\0\0\0"));
+    let reply = job.dispatch(Some(&catalog), &opener, &upd_cat(2, STREAM_UNIX_ATTRIBUTES, b"2 3 /y\0P\0\0\0"));
+    assert_eq!(reply, Reply::default());
+    let reply = job.dispatch(Some(&catalog), &opener, b"Catreq Job=backup.2026 UpdateFileList\n");
+    assert_eq!(reply.to_sd, "1992 Update File table error\n");
+    assert_eq!(reply.messages[1..], [
+        (MsgType::Fatal, "Batch end error ending batch mode: could not extend file: No space left on device\n".to_string()),
+        (MsgType::Fatal, "Catalog error updating File table. error ending batch mode: could not extend file: \
+No space left on device\n".to_string()),
+    ]);
+    assert!(!batch.log().iter().any(|s| s.starts_with("INSERT INTO File")));
+}
+
 // --- real catalog ------------------------------------------------------------------
 
 /// With ONESIMUS_CATREQ_DB=<postgres url of a throw-away catalog copy>: run

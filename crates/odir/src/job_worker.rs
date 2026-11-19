@@ -1536,6 +1536,71 @@ mod wait_protocol_tests {
         until(&mut manager,|manager| manager.active_count()==0);
         for id in [Some(42),None] {assert!(manager.completion_error(id,since).unwrap().contains("injected update failure"));}
     }
+    /// stored/askdir.cc FileAttributes: an UpdCat record of the SD.
+    fn upd_cat(file_index: u32, stream: u32, record: &[u8]) -> PipeMessage {
+        let mut m = b"UpdCat Job=Backup.001 FileAttributes ".to_vec();
+        for v in [1u32, 1_781_000_000, file_index, stream, record.len() as u32] {
+            m.extend_from_slice(&v.to_be_bytes());
+        }
+        m.extend_from_slice(record);
+        PipeMessage::UpdCat { job_id: 42, data: hex::encode(m) }
+    }
+    /// A catalog double: `fail` rejects statements of the job's private
+    /// batch connection and of the shared one; UpdateJobEnd goes to `end`.
+    fn failing_catalog(fail: &'static str, end: std::sync::mpsc::Sender<(String, i32)>) -> crate::catalog_worker::CatalogHandle {
+        use crate::catalog_worker::{CatalogRequest, CatalogResponse, ConnectionOp, SqlTable};
+        crate::catalog_worker::CatalogHandle::mock(move |request| match request {
+            CatalogRequest::TextRows { .. } => CatalogResponse::Rows(SqlTable::default()),
+            CatalogRequest::Execute { sql } if sql.starts_with(fail) => CatalogResponse::Error("server closed the connection unexpectedly".into()),
+            CatalogRequest::Dedicated { ops } => {
+                std::thread::spawn(move || while let Ok((op, answer)) = ops.recv() {
+                    let _ = answer.send(match op {
+                        ConnectionOp::Execute(sql) if sql.starts_with(fail) =>
+                            CatalogResponse::Error("server closed the connection unexpectedly".into()),
+                        ConnectionOp::Rows(_) => CatalogResponse::Rows(SqlTable::default()),
+                        ConnectionOp::Execute(_) => CatalogResponse::Ok(0),
+                    });
+                });
+                CatalogResponse::Ok(0)
+            }
+            CatalogRequest::UpdateJobEnd { status, job_errors, .. } => { end.send((status, job_errors)).unwrap(); CatalogResponse::Ok(1) }
+            _ => CatalogResponse::Ok(0),
+        })
+    }
+    /// J-1: the batch insert fails at the end of the job ("Batch end",
+    /// M_FATAL): the job ends JS_FatalError, not "OK" (lib/message.cc:1239-1242).
+    #[test]
+    fn failed_batch_insert_makes_the_job_fatal() {
+        let (tx, rx) = std::sync::mpsc::channel();
+        let (handle, mut release) = held_worker(&[upd_cat(1, 1, b"1 3 /etc/hosts\0P0A\0\0\0"),
+            PipeMessage::JobEnd { job_id: 42, term_code: b'T' as i32, files: 1, bytes: 10, errors: 0, vol_session_id: None, vol_session_time: None }]);
+        let mut manager = crate::job_manager::JobManager::new(std::sync::Arc::new(crate::message_bus::MessageBus::new(10)), None,
+            Some(failing_catalog("INSERT INTO batch", tx)));
+        manager.add_job(42, "Backup", handle);
+        until(&mut manager, |manager| manager.get_job(42).unwrap().phase == crate::job_manager::DirJobPhase::Finishing);
+        writeln!(release, "exit").unwrap();
+        until(&mut manager, |manager| manager.active_count() == 0);
+        assert_eq!(rx.try_recv().unwrap(), ("f".to_string(), 1));
+        assert_eq!(manager.get_job(42).unwrap().phase, crate::job_manager::DirJobPhase::Error);
+    }
+    /// J-1: an M_ERROR of a catalog request counts in JobErrors; a backup
+    /// that terminated with errors is "OK -- with warnings" (backup.cc:768-771).
+    #[test]
+    fn catalog_error_counts_in_job_errors() {
+        let (tx, rx) = std::sync::mpsc::channel();
+        // A digest without its attribute record: UPDATE File SET MD5 (sql_update.cc).
+        let (handle, mut release) = held_worker(&[upd_cat(0, 3, &[7; 16]),
+            PipeMessage::JobEnd { job_id: 42, term_code: b'T' as i32, files: 1, bytes: 10, errors: 0, vol_session_id: None, vol_session_time: None }]);
+        let mut manager = crate::job_manager::JobManager::new(std::sync::Arc::new(crate::message_bus::MessageBus::new(10)), None,
+            Some(failing_catalog("UPDATE File SET MD5", tx)));
+        manager.add_job(42, "Backup", handle);
+        until(&mut manager, |manager| manager.get_job(42).unwrap().phase == crate::job_manager::DirJobPhase::Finishing);
+        writeln!(release, "exit").unwrap();
+        until(&mut manager, |manager| manager.active_count() == 0);
+        // UpdateDB() reports the failed statement (sql.cc:274, M_ERROR), then
+        // UpdateAttribute() "Catalog error updating file digest" (M_ERROR).
+        assert_eq!(rx.try_recv().unwrap(), ("W".to_string(), 2));
+    }
     #[test]
     fn consecutive_pipe_messages_survive_reader_buffering_and_eof() {
         let (read, write) = nix::unistd::pipe().unwrap();
