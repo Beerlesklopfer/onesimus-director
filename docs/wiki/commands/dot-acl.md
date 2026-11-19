@@ -5,7 +5,7 @@
 `.acl` zeigt die ACLs einer Console und ändert ihre **Katalog-ACL**, die innere Stufe des zweistufigen ACL-Modells ([ACL-ZWEISTUFIG.md](../../plans/ACL-ZWEISTUFIG.md)):
 
 - **Datei-ACL** (äußerer Rahmen): die ACL-Direktiven der Console und ihrer Profile in `bareos-dir.d`, ausgewertet wie in Bareos. Sie werden **nur im Editor** geändert; `.acl` schreibt nie in eine Datei.
-- **Katalog-ACL** (innere Stufe): Einträge je Console und ACL-Typ in der Katalogtabelle `onesimus_console_acl`. Sie kann nur weiter einschränken.
+- **Katalog-ACL** (innere Stufe): Einträge je Console und ACL-Typ in der Katalogtabelle `onesimus.console_acl` (eigenes Schema `onesimus`, siehe [betrieb-odir.md](../betrieb-odir.md#katalog-schema-onesimus)). Sie kann nur weiter einschränken.
 - **Wirksam** ist, was Datei-ACL **und** Katalog-ACL erlauben. Ein ACL-Typ ohne Katalog-Einträge schränkt nicht ein; ohne jede Katalog-Einträge verhält sich der Director wie Bareos.
 
 Die Katalog-Liste wird wie eine Bareos-Liste ausgewertet: der erste passende Eintrag entscheidet, `!` verbietet, reguläre Ausdrücke (POSIX ERE, ganzer Name, ohne Groß-/Kleinschreibung) und `*all*` gelten wie in der Datei, passt kein Eintrag, ist der Name verboten. Eine Änderung wirkt sofort (der Director lädt die Katalog-ACL nach jeder Änderung, nach `reload` und beim Start neu).
@@ -118,7 +118,7 @@ mcp@bareos-dir> .acl delete console=mcp commandacl=!delete
 | `.acl: permission denied, listing the ACLs of Console "…" requires the CommandACL configure.` | Fremde Konsole ohne `configure`-Recht angefragt. |
 | `.acl <unterbefehl>: refused, Console "…" may only restrict its own catalog ACL further; …` | Änderung an der eigenen Console, die erweitern könnte (Regel oben). |
 | `.acl <unterbefehl>: refused, the catalog ACL is not readable (…).` | Katalog nicht erreichbar; der Director versucht es alle 30 s neu. |
-| `.acl <unterbefehl>: refused, the catalog has no table onesimus_console_acl …` | Schema-Erweiterung v2253 fehlt; Startmeldungen des Directors prüfen. |
+| `.acl <unterbefehl>: refused, the catalog has no table onesimus.console_acl …` | Schema-Erweiterung v2253 fehlt (z. B. fehlendes Recht, das Schema `onesimus` anzulegen); Startmeldungen des Directors prüfen (`catalog migration failed`). |
 | `.acl <unterbefehl>: no catalog, the catalog ACL is not available.` | Director ohne Katalog. |
 | `.acl <unterbefehl>: console=<name> required.` / `.acl copy: from=<console> to=<console> required.` | Pflichtargument fehlt. |
 | `Console "…" not found.` | Es gibt keine Console-Ressource dieses Namens. |

@@ -27,6 +27,46 @@ pub struct CatalogSchema {
     /// Stored Procedures / Functions
     #[serde(default)]
     pub functions: Vec<FunctionDef>,
+    /// Objects an earlier version created in the default schema (the first
+    /// existing schema of the connection's `search_path`, normally `public`)
+    /// and this version moves to the schema named in their qualified name
+    /// (`onesimus.vw_job_summary`). Applied by [`crate::Migrator::migrate`]
+    /// before the version's own tables, functions and views; afterwards the
+    /// newest shipped definition of each object is applied again
+    /// (CREATE OR REPLACE), so the step also restores a missing object.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub relocate: Vec<RelocateDef>,
+}
+
+/// Kind of a relocated catalog object ([`RelocateDef`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum ObjectKind {
+    /// A view (plain or materialized).
+    View,
+    /// A function; every overload of the name is moved.
+    Function,
+}
+
+/// One object moved from the default schema into its own schema
+/// ([`CatalogSchema::relocate`]).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RelocateDef {
+    /// View or function.
+    pub kind: ObjectKind,
+    /// Schema-qualified target name, e.g. `onesimus.sp_create_job_record`;
+    /// the unqualified part is the name in the default schema.
+    pub name: String,
+}
+
+/// Split a possibly schema-qualified object name (`onesimus.console_acl`)
+/// into schema and object name. Names in the schema files are plain
+/// lower-case identifiers, never quoted, so the first `.` separates them.
+pub fn split_qualified(name: &str) -> (Option<&str>, &str) {
+    match name.split_once('.') {
+        Some((schema, object)) => (Some(schema), object),
+        None => (None, name),
+    }
 }
 
 /// Tabellen-Definition.
@@ -202,12 +242,39 @@ impl CatalogSchema {
         Ok(())
     }
 
+    /// Schemas named by the qualified tables, views, functions and
+    /// relocation targets of this file (`onesimus` for `onesimus.console_acl`),
+    /// sorted and without duplicates. Unqualified objects live in the
+    /// default schema of the connection and need none.
+    pub fn object_schemas(&self) -> Vec<String> {
+        let names = self.tables.iter().map(|t| t.name.as_str())
+            .chain(self.views.iter().map(|v| v.name.as_str()))
+            .chain(self.functions.iter().map(|f| f.name.as_str()))
+            .chain(self.relocate.iter().map(|r| r.name.as_str()));
+        let set: std::collections::BTreeSet<String> = names
+            .filter_map(|n| split_qualified(n).0.map(str::to_string))
+            .collect();
+        set.into_iter().collect()
+    }
+
+    /// `CREATE SCHEMA IF NOT EXISTS` for every schema of
+    /// [`Self::object_schemas`]. Without `AUTHORIZATION` the schema belongs
+    /// to the connected role, i.e. the catalog database user.
+    pub fn schema_statements(&self) -> Vec<String> {
+        self.object_schemas().iter().map(|s| format!("CREATE SCHEMA IF NOT EXISTS {s};")).collect()
+    }
+
     /// Generiere CREATE TABLE SQL für alle Tabellen.
     pub fn to_ddl(&self) -> String {
         let mut sql = String::new();
         sql.push_str(&format!("-- Bareos Catalog Schema v{}\n", self.version));
         sql.push_str(&format!("-- {}\n", self.description));
         sql.push_str(&format!("-- Generated from JSON schema\n\n"));
+
+        for stmt in self.schema_statements() {
+            sql.push_str(&stmt);
+            sql.push_str("\n\n");
+        }
 
         for table in &self.tables {
             for stmt in table.to_statements() {
@@ -236,9 +303,11 @@ impl CatalogSchema {
         sql
     }
 
-    /// Generiere einzelne SQL-Statements (Tables + Indices + Functions + Views).
+    /// Generiere einzelne SQL-Statements (Schemas + Tables + Indices +
+    /// Functions + Views). Relocations ([`Self::relocate`]) need the live
+    /// catalog and are done by the migrator, not by these statements.
     pub fn to_statements(&self) -> Vec<String> {
-        let mut stmts = Vec::new();
+        let mut stmts = self.schema_statements();
         // 1. Tables + Indices + initial rows
         for table in &self.tables {
             stmts.extend(table.to_statements());

@@ -63,17 +63,125 @@ Prüfen: `ss -ltnp | grep -E '9101|10101'` und die Zeilen `listening on …` im 
    Verbunden wird mit allen Angaben der Catalog-Ressource (Adresse oder
    Socket, Port, Benutzer, Passwort), genauso wie bei `odir -t`.
 2. Schema-Erweiterung (gewollte Funktion): der Migrator spielt die
-   Onesimus-Views und -Funktionen aus `/usr/lib/bareos/scripts/ddl/v2251_*.json`
-   und `v2252_*.json` sowie die Tabelle `onesimus_console_acl` der
-   Katalog-ACL (`v2253_*.json`, zweistufige ACLs) ein, wenn sie noch fehlen. Die Bareos-Tabelle `version`
-   bleibt auf der Bareos-Version (2250), die Onesimus-Stufen stehen in der
-   eigenen Tabelle `bareos_schema_version`; `bareos-dir` öffnet den Katalog
-   also weiterhin. Die Migrationen sind additiv (kein DROP, kein TRUNCATE).
-   Journal: `applied N schema migration(s)` bzw. `schema up to date`.
+   Onesimus-Stufen aus `/usr/lib/bareos/scripts/ddl/v2251_*.json`,
+   `v2252_*.json` und `v2253_*.json` ein, wenn sie noch fehlen. Alle
+   Onesimus-Objekte liegen im eigenen PostgreSQL-Schema `onesimus`,
+   `public` bleibt reines Bareos (Abschnitt [Katalog-Schema
+   `onesimus`](#katalog-schema-onesimus)). Die Bareos-Tabelle `version`
+   bleibt auf der Bareos-Version (2250), die Onesimus-Stufen stehen in
+   `public.bareos_schema_version`; `bareos-dir` öffnet den Katalog also
+   weiterhin. Die Migrationen löschen keine Daten (kein DROP TABLE, kein
+   TRUNCATE). Journal: `applied N schema migration(s)` bzw. `schema up to
+   date`; scheitert eine Stufe, `catalog migration failed: …` (der Director
+   läuft ohne die Erweiterung weiter und versucht es beim nächsten Start
+   erneut).
 3. Jobs eines früheren Laufs, die noch auf `C` oder `R` stehen, enden als `f`
    (wie `CheckCatalog(UPDATE_AND_FIX)`); nur beim Start, nicht bei `reload`.
 4. Fällt der Katalog im Betrieb aus, scheitern die Anfragen mit einer Meldung;
    ist er wieder da, verbindet der Director von selbst neu.
+
+## Katalog-Schema `onesimus`
+
+Entscheidung des Maintainers vom 20.11.2026: Onesimus-Objekte bekommen ein
+eigenes PostgreSQL-Schema, `public` bleibt reines Bareos.
+
+| Objekt | Ort | Stufe |
+| --- | --- | --- |
+| Bareos-Tabellen, `version` (2250), Bareos-Funktionen `decode_lstat`, `bareos_frombase64` | `public` | 2250 (Bareos-DDL) |
+| Views `vw_job_summary`, `vw_volume_status`, `vw_last_backup_per_client`, `vw_file_list`; Funktionen `sp_create_job_record`, `sp_update_job_end`, `fn_find_appendable_volume`, `fn_find_latest_backup`, `sp_create_jobmedia`, `fn_since_utime` | `onesimus` | 2251 |
+| Views `vw_running_jobs`, `vw_media_list`; Funktionen `sp_prune_expired_volumes`, `sp_prune_expired_jobs`, `sp_purge_volume`, `fn_director_status` | `onesimus` | 2252 |
+| Tabelle `console_acl` (Katalog-ACL, [ACL-ZWEISTUFIG.md](../plans/ACL-ZWEISTUFIG.md)) | `onesimus` | 2253 |
+| `bareos_schema_version` (Onesimus-Stufen) | `public` (**Ausnahme**, siehe unten) | – |
+
+Stufen:
+
+- **2251/2252** legen ihre Objekte direkt in `onesimus` an (die Namen in den
+  JSON-Dateien sind qualifiziert, `onesimus.vw_job_summary`). Das gilt für
+  neue Kataloge und für Kataloge, die nur die Bareos-DDL haben.
+- **2253** legt das Schema an (falls es fehlt), verschiebt die Views und
+  Funktionen, die ein odir vor dieser Stufe unqualifiziert im Standardschema
+  (`current_schema()`, normalerweise `public`) angelegt hat, mit
+  `ALTER VIEW/FUNCTION … SET SCHEMA onesimus` (OID, Eigentümer, Rechte und
+  davon abhängige eigene Views des Betreibers bleiben erhalten), spielt
+  danach ihre ausgelieferte Definition erneut ein (`CREATE OR REPLACE`; ein
+  fehlendes Objekt entsteht so neu) und legt `onesimus.console_acl` an.
+  Liegt ein Objekt in beiden Schemas (z. B. abgebrochener Lauf, von Hand
+  neu angelegt), wird die Kopie in `public` ohne CASCADE gelöscht. Auf einem
+  Katalog auf Stufe 2252 (wie dem Produktionskatalog) verschiebt sie also
+  alles; auf einem neuen Katalog ist sie ein No-op bis auf die Tabelle. Ein
+  zweiter Start ändert nichts.
+- Schema-Eigentümer ist der verbundene Katalog-Benutzer (`CREATE SCHEMA`
+  ohne `AUTHORIZATION`). Dafür braucht er das Recht `CREATE` auf der
+  Datenbank. Fehlt es, endet die Migration mit `cannot create schema
+  onesimus`, die Stufe wird **nicht** eingetragen, die Objekte bleiben in
+  `public`, odir läuft weiter (Katalog-ACL nur aus Dateien,
+  `fn_find_latest_backup` über die eingebaute Abfrage) und versucht es beim
+  nächsten Start erneut. Abhilfe (eine von beiden):
+  `GRANT CREATE ON DATABASE bareos TO bareos;` oder als Superuser
+  `CREATE SCHEMA onesimus AUTHORIZATION bareos;` (ein vorhandenes Schema
+  legt odir nicht neu an und braucht dann das Datenbankrecht nicht).
+
+Zugriff aus odir: Onesimus-Objekte werden **qualifiziert** angesprochen
+(`onesimus.console_acl`, `onesimus.fn_find_latest_backup(…)`); der
+`search_path` der Katalogverbindungen bleibt unverändert. Unqualifizierte
+Namen lösen damit genau wie vorher in die Bareos-Tabellen von `public` auf.
+`onesimus` steht nie im `search_path`.
+
+Für `.sql`, `sqlquery` und eigene Skripte: Bareos-Tabellen weiter
+unqualifiziert (`SELECT … FROM job`). Onesimus-Objekte nur noch qualifiziert
+(`SELECT * FROM onesimus.vw_job_summary`); wer bisher `vw_…` oder
+`sp_…` unqualifiziert aufgerufen hat, muss `onesimus.` voranstellen.
+`.sqltables`/`.sqlschema` zeigen wie bei Bareos nur `public` (die Tabelle
+der Katalog-ACL also nicht mehr).
+
+**Ausnahme `bareos_schema_version` in `public`:** Die Versionstabelle der
+Onesimus-Stufen bleibt in `public`. Jeder bisherige odir sucht sie dort
+(unqualifiziert). Läge sie in `onesimus`, hielte ein zurückgerollter älterer
+odir den Katalog für Stufe 2250 und legte die Views und Funktionen von
+2251/2252 erneut in `public` an. Sie ist die einzige Onesimus-Tabelle in
+`public`.
+
+Bareos-Upgrade (offen): Die Views in `onesimus` lesen aus `public.job`,
+`client`, `pool`, `media`, `file`, `path`. PostgreSQL verweigert damit in
+einem Bareos-Update-Skript (`update_bareos_tables`) `ALTER TABLE … ALTER
+COLUMN … TYPE` und `DROP COLUMN` auf einer Spalte, die eine View benutzt,
+sowie `DROP TABLE` ohne CASCADE. Der Migrator behandelt das nicht (das war
+mit den Views in `public` genauso). Bis dahin vor einem
+Bareos-Schema-Upgrade die Views löschen
+(`DROP VIEW onesimus.vw_job_summary, onesimus.vw_volume_status,
+onesimus.vw_last_backup_per_client, onesimus.vw_file_list,
+onesimus.vw_running_jobs, onesimus.vw_media_list;`) und danach wieder
+anlegen. odir legt eine fehlende View heute nicht von selbst neu an (die
+Stufen sind schon eingetragen, es zählt die höchste); bis der Migrator das
+kann, die Views von Hand aus den `query`-Feldern der JSON-Dateien anlegen.
+Die Funktionen sind nicht betroffen (PL/pgSQL- und SQL-Rümpfe werden erst
+beim Aufruf aufgelöst).
+
+### Rückweg auf einen älteren odir
+
+Ein odir vor dieser Stufe (z. B. die Version auf Stufe 2252) auf einem
+migrierten Katalog:
+
+- Er liest `public.bareos_schema_version` = 2253, kennt selbst nur bis 2252
+  und migriert nichts (`database already at v2253 (latest: v2252)`). Er
+  legt nichts in `public` neu an. (Geprüft am 20.11.2026 mit dem Stand
+  `ca365ab` auf einem Wegwerf-Katalog.)
+- Er ruft `fn_find_latest_backup` unqualifiziert auf; der Aufruf scheitert
+  und er nimmt die eingebaute Abfrage mit demselben Ergebnis. Sonst benutzt
+  sein Code keine Onesimus-Objekte.
+- Die Katalog-ACL (`onesimus.console_acl`) wertet ein odir vor den
+  zweistufigen ACLs nicht aus: es gelten nur die Datei-ACLs. Ein
+  Entwicklungsstand `76d7c4c` (nie veröffentlicht) sucht
+  `onesimus_console_acl`, findet sie nicht und fällt ebenso auf die
+  Datei-ACLs zurück. Einschränkungen per `.acl` gehen beim Rückweg also
+  verloren, bis wieder ein aktueller odir läuft; die Einträge selbst bleiben
+  erhalten.
+- Eigene Abfragen auf `vw_…` ohne Schema scheitern auch unter dem alten odir.
+- Wer dauerhaft zurück will und die Objekte wieder in `public` braucht:
+  `ALTER VIEW onesimus.<view> SET SCHEMA public;` bzw. `ALTER FUNCTION
+  onesimus.<funktion>(…) SET SCHEMA public;` für jedes Objekt der Tabelle
+  oben, dann `DELETE FROM bareos_schema_version WHERE version = 2253;`. Die
+  Tabelle `onesimus.console_acl` stört einen alten odir nicht.
 
 ## Umgebungsvariablen
 
@@ -178,18 +286,18 @@ Einzelfall bleibt `delete jobid=…` auf der Konsole.
 
 ## Abweichungen von Bareos
 
-Bewusst entschieden (Stand 19.11.2026):
+Bewusst entschieden (Stand 20.11.2026):
 
 | Thema | bareos-dir | odir | Grund |
 | --- | --- | --- | --- |
-| Schema-Erweiterung | keine | Views und Funktionen beim Start (v2251/v2252), Tabelle `onesimus_console_acl` (v2253), `version` bleibt 2250 | Logik in der Datenbank änderbar ohne neuen Code; Katalog-ACL |
+| Schema-Erweiterung | keine | eigenes PostgreSQL-Schema `onesimus`: Views und Funktionen (v2251/v2252), Tabelle `onesimus.console_acl` (v2253, verschiebt ältere Objekte aus `public`); `public` bleibt Bareos, einzige Ausnahme `public.bareos_schema_version`; `version` bleibt 2250 | Logik in der Datenbank änderbar ohne neuen Code; Katalog-ACL; Trennung von Bareos (Entscheidung des Maintainers 20.11.2026) |
 | Wartezeit auf ein Volume | unbegrenzt ohne `Max Wait Time` | 600 s, über `ONESIMUS_DEFAULT_MEDIA_WAIT` | kein hängender Nachtlauf; keine Direktive wegen Rückweg |
 | Gescheiterter Batch-Insert der File-Zeilen | Block wird ignoriert, Job `T`, Dateien fehlen im Katalog | Job wird fatal (`f`), „Attribute create error“ | kein stilles Fehlen von Dateien im Restore-Baum |
 | Purge (PurgeFiles/PurgeJobs) | ohne Transaktion, Fehler ignoriert | eine Transaktion, Fehler werden gemeldet | kein halb gelöschter Job |
 | `prune jobs`, Behalten-Liste nicht ermittelbar | Fehler ignoriert, löscht trotzdem | bricht vor dem Löschen ab | die letzte Full-Kette darf nie verloren gehen |
 | Schutz der jüngsten Kette | nur bei `prune jobs`/AutoPrune, nur für konfigurierte Job/FileSet/Client, FileSet nach FileSetId; File-Zeilen fallen nach `File Retention` weg; Volumes werden ohne Rücksicht gepruned/recycelt | je Client und FileSet-Name immer, auch nicht konfiguriert; Jobs und File-Zeilen bleiben; Volumes mit diesen Jobs werden weder gepruned, gepurgt, recycelt, `truncate`d noch gelöscht; Katalogfehler purgt nichts | Entscheidung des Nutzers 19.11.2026: der letzte Stand jedes Clients muss restaurierbar bleiben; ein Job wartet dafür ggf. auf ein Volume |
 | ACLs in Dateien ändern | `configure add console/profile/user` legt Dateien mit ACLs an | `configure add console/profile/user` wird abgelehnt; ACL-Ressourcen nur im Editor | Entscheidung des Nutzers 19.11.2026 (zweistufige ACLs): sonst kann sich eine Console mit `configure` selbst mehr Rechte geben |
-| Zweistufige ACLs | nur Datei-ACLs | wirksam ist Datei-ACL **und** Katalog-ACL (`onesimus_console_acl`, je Console); `.acl set/delete/clear/copy` ändern nur die Katalog-ACL (braucht `.acl` und `configure`; die eigene Console nur enger). Ohne Katalog-Einträge wie Bareos. Katalog-ACL nicht lesbar: Consoles mit (möglichen) Einträgen dürfen nur `status`, `.status`, `version`; Journal `catalog ACL not readable`, neuer Versuch alle 30 s | Entscheidung des Nutzers 19.11.2026 ([ACL-ZWEISTUFIG.md](../plans/ACL-ZWEISTUFIG.md)): Einschränken auch per MCP, ohne die Dateien anzufassen |
+| Zweistufige ACLs | nur Datei-ACLs | wirksam ist Datei-ACL **und** Katalog-ACL (`onesimus.console_acl`, je Console); `.acl set/delete/clear/copy` ändern nur die Katalog-ACL (braucht `.acl` und `configure`; die eigene Console nur enger). Ohne Katalog-Einträge wie Bareos. Katalog-ACL nicht lesbar: Consoles mit (möglichen) Einträgen dürfen nur `status`, `.status`, `version`; Journal `catalog ACL not readable`, neuer Versuch alle 30 s | Entscheidung des Nutzers 19.11.2026 ([ACL-ZWEISTUFIG.md](../plans/ACL-ZWEISTUFIG.md)): Einschränken auch per MCP, ohne die Dateien anzufassen |
 | gRPC | gibt es nicht | TLS auf `DirPort + 1000`, gleiche Adressen wie BNET | Schnittstelle der GUI |
 | Mail-Sammlung | Dateien `<WorkingDirectory>/*.mail` | im Speicher | – |
 | Paketversion | – | bleibt `25.1.2+onesimus.0.2.0`, Installation mit `dpkg -i` | Entscheidung des Nutzers; neue Builds an Prüfsumme und Build-Datum erkennbar |

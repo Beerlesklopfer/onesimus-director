@@ -7,29 +7,29 @@
   "tables": [],
   "views": [
     {
-      "name": "vw_job_summary",
+      "name": "onesimus.vw_job_summary",
       "description": "Zusammenfassung aller Jobs mit Client- und Pool-Namen",
       "query": "SELECT j.jobid, j.job, j.name AS jobname, j.type, j.level, j.jobstatus, j.schedtime, j.starttime, j.endtime, j.jobfiles, j.jobbytes, j.joberrors, j.volsessionid, j.volsessiontime, c.name AS clientname, p.name AS poolname FROM job j LEFT JOIN client c ON j.clientid = c.clientid LEFT JOIN pool p ON j.poolid = p.poolid"
     },
     {
-      "name": "vw_volume_status",
+      "name": "onesimus.vw_volume_status",
       "description": "Volume-Status mit Pool-Name und Fuellstand",
       "query": "SELECT m.mediaid, m.volumename, m.volstatus, m.volbytes, m.voljobs, m.volfiles, m.volmounts, m.volerrors, m.maxvolbytes, m.mediatype, m.slot, p.name AS poolname, CASE WHEN m.maxvolbytes > 0 THEN ROUND(100.0 * m.volbytes / m.maxvolbytes, 1) ELSE 0 END AS pct_full FROM media m LEFT JOIN pool p ON m.poolid = p.poolid"
     },
     {
-      "name": "vw_last_backup_per_client",
+      "name": "onesimus.vw_last_backup_per_client",
       "description": "Letzter erfolgreicher Backup pro Client",
       "query": "SELECT DISTINCT ON (c.name) c.name AS clientname, j.jobid, j.name AS jobname, j.level, j.starttime, j.endtime, j.jobfiles, j.jobbytes FROM job j JOIN client c ON j.clientid = c.clientid WHERE j.type = 'B' AND j.jobstatus = 'T' ORDER BY c.name, j.starttime DESC"
     },
     {
-      "name": "vw_file_list",
+      "name": "onesimus.vw_file_list",
       "description": "Dateiliste mit Pfaden (ersetzt den fehleranfaelligen filename-Join)",
       "query": "SELECT f.fileid, f.jobid, p.path || f.name AS filepath, f.fileindex, f.markid FROM file f JOIN path p ON f.pathid = p.pathid"
     }
   ],
   "functions": [
     {
-      "name": "sp_create_job_record",
+      "name": "onesimus.sp_create_job_record",
       "description": "Erstelle einen neuen Job-Record und gib die JobId zurueck",
       "params": "p_job text, p_name text, p_type char(1), p_level char(1), p_client text, p_pool text, p_fileset text, p_sched_time bigint",
       "returns": "integer",
@@ -38,7 +38,7 @@
       "body": "DECLARE\n  v_client_id integer;\n  v_pool_id integer;\n  v_fileset_id integer;\n  v_job_id integer;\nBEGIN\n  -- Resolve client (auto-create if missing)\n  SELECT clientid INTO v_client_id FROM client WHERE name = p_client;\n  IF v_client_id IS NULL THEN\n    INSERT INTO client (name, uname, autoprune, fileretention, jobretention)\n    VALUES (p_client, '', 1, 2592000, 15552000)\n    RETURNING clientid INTO v_client_id;\n  END IF;\n\n  -- Resolve pool\n  SELECT poolid INTO v_pool_id FROM pool WHERE name = p_pool;\n  IF v_pool_id IS NULL THEN v_pool_id := 0; END IF;\n\n  -- Resolve fileset\n  SELECT filesetid INTO v_fileset_id FROM fileset WHERE fileset = p_fileset;\n  IF v_fileset_id IS NULL THEN v_fileset_id := 0; END IF;\n\n  -- Insert job\n  INSERT INTO job (job, name, type, level, clientid, jobstatus,\n    schedtime, starttime, realendtime, jobtdate,\n    volsessionid, volsessiontime, jobfiles, jobbytes, joberrors,\n    poolid, filesetid, priorjobid, hasbase, hascache, reviewed, comment)\n  VALUES (p_job, p_name, p_type, p_level, v_client_id, 'C',\n    to_timestamp(p_sched_time::float8), to_timestamp(p_sched_time::float8),\n    to_timestamp(p_sched_time::float8), p_sched_time,\n    0, 0, 0, 0, 0, v_pool_id, v_fileset_id, 0, 0, 0, 0, '')\n  RETURNING jobid INTO v_job_id;\n\n  RETURN v_job_id;\nEND;"
     },
     {
-      "name": "sp_update_job_end",
+      "name": "onesimus.sp_update_job_end",
       "description": "Update Job-End: Status, Files, Bytes, Errors, VolSession",
       "params": "p_job_id integer, p_status char(1), p_end_time bigint, p_files bigint, p_bytes bigint, p_errors integer, p_vol_session_id integer, p_vol_session_time integer",
       "returns": "void",
@@ -47,7 +47,7 @@
       "body": "BEGIN\n  UPDATE job SET\n    jobstatus = p_status,\n    endtime = to_timestamp(p_end_time::float8),\n    realendtime = to_timestamp(p_end_time::float8),\n    jobfiles = p_files,\n    jobbytes = p_bytes,\n    joberrors = p_errors,\n    volsessionid = p_vol_session_id,\n    volsessiontime = p_vol_session_time\n  WHERE jobid = p_job_id;\nEND;"
     },
     {
-      "name": "fn_find_appendable_volume",
+      "name": "onesimus.fn_find_appendable_volume",
       "description": "Finde ein beschreibbares Volume in einem Pool",
       "params": "p_pool_name text",
       "returns": "text",
@@ -56,7 +56,7 @@
       "body": "SELECT m.volumename FROM media m JOIN pool p ON m.poolid = p.poolid WHERE p.name = p_pool_name AND m.volstatus = 'Append' ORDER BY m.mediaid LIMIT 1;"
     },
     {
-      "name": "fn_find_latest_backup",
+      "name": "onesimus.fn_find_latest_backup",
       "description": "Finde den letzten erfolgreichen Backup-Job fuer einen Client",
       "params": "p_client_name text",
       "returns": "integer",
@@ -65,7 +65,7 @@
       "body": "SELECT j.jobid FROM job j JOIN client c ON j.clientid = c.clientid WHERE c.name = p_client_name AND j.type = 'B' AND j.jobstatus = 'T' ORDER BY j.jobid DESC LIMIT 1;"
     },
     {
-      "name": "sp_create_jobmedia",
+      "name": "onesimus.sp_create_jobmedia",
       "description": "Erstelle einen JobMedia-Record und update Media EndFile/EndBlock. Flaschenhals bei grossen Backups — SP vermeidet Round-Trips, spaeter durch Rust Batch-Insert ersetzbar.",
       "params": "p_job_id integer, p_media_id integer, p_first_index integer, p_last_index integer, p_start_file integer, p_end_file integer, p_start_block bigint, p_end_block bigint, p_copy integer, p_strip integer, p_job_bytes bigint",
       "returns": "integer",
@@ -74,7 +74,7 @@
       "body": "DECLARE\n  v_vol_index integer;\n  v_jm_id integer;\nBEGIN\n  -- VolIndex = count of existing jobmedia + 1 (same as C++)\n  SELECT COALESCE(COUNT(*), 0) + 1 INTO v_vol_index\n  FROM jobmedia WHERE jobid = p_job_id;\n\n  INSERT INTO jobmedia (jobid, mediaid, firstindex, lastindex,\n    startfile, endfile, startblock, endblock, volindex, jobbytes)\n  VALUES (p_job_id, p_media_id, p_first_index, p_last_index,\n    p_start_file, p_end_file, p_start_block, p_end_block,\n    v_vol_index, p_job_bytes)\n  RETURNING jobmediaid INTO v_jm_id;\n\n  -- Update Media EndFile/EndBlock (C++ does this too)\n  UPDATE media SET\n    endfile = GREATEST(endfile, p_end_file),\n    endblock = GREATEST(endblock, p_end_block)\n  WHERE mediaid = p_media_id;\n\n  RETURN v_jm_id;\nEND;"
     },
     {
-      "name": "fn_since_utime",
+      "name": "onesimus.fn_since_utime",
       "description": "Berechne since_utime fuer Incremental/Differential Backup. Incremental: letzter erfolgreicher Backup (F/I/D). Differential: letzter erfolgreicher Full (F).",
       "params": "p_client_name text, p_level char(1)",
       "returns": "TABLE(since_utime bigint, prev_job text)",

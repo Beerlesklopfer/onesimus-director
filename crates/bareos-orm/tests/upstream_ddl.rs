@@ -12,10 +12,12 @@
 //! parallel safety). An installed Bareos DDL of the same schema version is
 //! checked as well when present.
 //!
-//! With `BAREOS_ORM_TEST_DB` (a PostgreSQL URL, see `catalog_sequences.rs`)
-//! the second test also loads the original DDL and runs a fresh
-//! `Migrator::migrate()` in two throw-away schemas and compares what
-//! PostgreSQL reports for both.
+//! With `BAREOS_ORM_TEST_DB` (a PostgreSQL URL, see `common/mod.rs`) the
+//! second test also loads the original DDL and runs a fresh
+//! `Migrator::migrate()` in two throw-away databases and compares what
+//! PostgreSQL reports for their `public` schemas.
+
+mod common;
 
 use std::collections::BTreeMap;
 use std::path::Path;
@@ -541,47 +543,32 @@ async fn describe(pool: &sqlx::PgPool, schema: &str) -> Vec<String> {
     lines
 }
 
+/// Original DDL and a fresh migration, each in a throw-away database:
+/// PostgreSQL must report the same objects in `public`. The Onesimus
+/// objects (views, functions, tables of v2251+) live in the schema
+/// `onesimus` and must not show up in `public`; only the version
+/// bookkeeping `bareos_schema_version` is there on top.
 #[tokio::test]
-#[ignore = "needs BAREOS_ORM_TEST_DB=<postgres url of a throw-away database>"]
+#[ignore = "needs BAREOS_ORM_TEST_DB=<postgres url of a throw-away cluster>"]
 async fn fresh_migration_creates_the_bareos_schema() {
-    let url = std::env::var("BAREOS_ORM_TEST_DB").expect("BAREOS_ORM_TEST_DB not set");
-    use std::str::FromStr;
-    let admin = sqlx::postgres::PgPoolOptions::new().max_connections(1).connect(&url).await.unwrap();
-    let pid = std::process::id();
-    let (upstream, ours) = (format!("c052_upstream_{pid}"), format!("c052_ours_{pid}"));
-    for s in [&upstream, &ours] {
-        sqlx::query(&format!("CREATE SCHEMA {s}")).execute(&admin).await.unwrap();
-    }
+    let (upstream, ours) = (common::TestDb::create("c052_upstream", None).await, common::TestDb::create("c052_ours", None).await);
     let result = async {
-        let connect = |schema: &str| {
-            let options = sqlx::postgres::PgConnectOptions::from_str(&url).unwrap().options([("search_path", schema)]);
-            sqlx::postgres::PgPoolOptions::new().max_connections(1).connect_with(options)
-        };
+        let (upstream_pool, ours_pool) = (upstream.pool().await, ours.pool().await);
         let ddl = std::fs::read_to_string(Path::new(env!("CARGO_MANIFEST_DIR")).join(VENDORED)).unwrap();
-        sqlx::raw_sql(&ddl).execute(&connect(&upstream).await?).await?;
+        sqlx::raw_sql(&ddl).execute(&upstream_pool).await?;
         let migrator = bareos_orm::Migrator::new(&Path::new(env!("CARGO_MANIFEST_DIR")).join("schema"));
-        migrator.migrate(&connect(&ours).await?).await.map_err(|e| sqlx::Error::Protocol(e.to_string()))?;
+        migrator.migrate(&ours_pool).await.map_err(|e| sqlx::Error::Protocol(e.to_string()))?;
 
-        let expected = describe(&admin, &upstream).await;
-        // Onesimus extensions (bareos_schema_version, views, functions and
-        // tables of v2251+) come on top; everything Bareos has must be identical.
-        let extension_functions: Vec<String> = migrator.load_versions().unwrap().iter()
-            .filter(|s| s.version > 2250).flat_map(|s| s.functions.iter().map(|f| format!("function {}(", f.name)))
-            .collect();
-        // Tables of the extensions (e.g. onesimus_console_acl, v2253).
-        let extension_tables: Vec<String> = migrator.load_versions().unwrap().iter()
-            .filter(|s| s.version > 2250).flat_map(|s| s.tables.iter().map(|t| t.name.clone()))
-            .collect();
-        let got: Vec<String> = describe(&admin, &ours).await.into_iter()
+        let expected = describe(&upstream_pool, "public").await;
+        let got: Vec<String> = describe(&ours_pool, "public").await.into_iter()
             .filter(|l| !l.contains("bareos_schema_version"))
-            .filter(|l| !extension_tables.iter().any(|t| l.contains(t.as_str())))
-            .filter(|l| !extension_functions.iter().any(|f| l.starts_with(f)))
             .collect();
+        upstream_pool.close().await;
+        ours_pool.close().await;
         Ok::<_, sqlx::Error>((expected, got))
     }.await;
-    for s in [&upstream, &ours] {
-        sqlx::query(&format!("DROP SCHEMA {s} CASCADE")).execute(&admin).await.unwrap();
-    }
+    upstream.drop().await;
+    ours.drop().await;
     let (expected, got) = result.unwrap();
     let missing: Vec<&String> = expected.iter().filter(|l| !got.contains(l)).collect();
     let extra: Vec<&String> = got.iter().filter(|l| !expected.contains(l)).collect();

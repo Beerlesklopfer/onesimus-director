@@ -21,12 +21,22 @@
 //! 3. Führt Migrationen durch (Version N → N+1)
 //! 4. Validiert das Live-Schema gegen die JSON-Definition
 //! 5. Generiert Rust-Structs (optional, zur Compile-Zeit)
+//!
+//! # Schemas
+//!
+//! The Bareos tables (v2250) live in the default schema of the connection
+//! (`public`). Every Onesimus object (views, functions, tables of v2251+)
+//! is schema-qualified in the JSON files (`onesimus.vw_job_summary`) and
+//! lives in its own PostgreSQL schema `onesimus`; v2253 moves the objects
+//! older versions created in `public` there ([`schema::RelocateDef`]). The
+//! version bookkeeping `bareos_schema_version` deliberately stays in the
+//! default schema, where every odir release looks for it.
 
 pub mod schema;
 pub mod migration;
 pub mod codegen;
 pub mod error;
 
-pub use schema::{CatalogSchema, TableDef, ColumnDef, IndexDef};
+pub use schema::{CatalogSchema, TableDef, ColumnDef, IndexDef, ObjectKind, RelocateDef};
 pub use migration::Migrator;
 pub use error::OrmError;

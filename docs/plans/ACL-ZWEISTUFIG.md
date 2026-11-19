@@ -58,12 +58,19 @@ mit `*all*` an. Die BgLage-Sitzung konnte deshalb `delete`, `purge` und
 ## Speicher der inneren Stufe
 
 Neue Tabelle in der Onesimus-Schemaerweiterung des Katalogs, Stufe **v2253**
-(`crates/bareos-orm/schema/v2253_console_acl.json`, siehe Umsetzung zur
-Nummer). Umgesetzt wie vorgeschlagen, dazu eine CHECK-Bedingung auf `acl_type`:
+(`crates/bareos-orm/schema/v2253_onesimus_schema.json`, siehe Umsetzung zur
+Nummer). Umgesetzt wie vorgeschlagen, dazu eine CHECK-Bedingung auf `acl_type`.
+Ort (Entscheidung des Maintainers 20.11.2026): die Tabelle heißt
+`onesimus.console_acl` und liegt im eigenen PostgreSQL-Schema `onesimus`
+aller Onesimus-Objekte, `public` bleibt reines Bareos; dieselbe Stufe
+verschiebt die Views und Funktionen von 2251/2252 dorthin
+([betrieb-odir.md](../wiki/betrieb-odir.md#katalog-schema-onesimus)).
+Zuerst (Commit `76d7c4c`, nie veröffentlicht) hieß sie
+`public.onesimus_console_acl`.
 
 ```sql
 -- eine Zeile je Console, ACL-Typ und Eintrag, Reihenfolge wie in Bareos
-CREATE TABLE onesimus_console_acl (
+CREATE TABLE onesimus.console_acl (
     console   text     NOT NULL,   -- Name der Console-Ressource
     acl_type  text     NOT NULL,   -- job, client, storage, schedule, pool,
                                    -- command, fileset, catalog, where, pluginoptions
@@ -71,7 +78,8 @@ CREATE TABLE onesimus_console_acl (
     entry     text     NOT NULL,   -- wie in der Datei: Name, Regex, !Negation, *all*
     changed_by text    NOT NULL,   -- Console, die den Eintrag gesetzt hat
     changed_at timestamptz NOT NULL DEFAULT now(),
-    PRIMARY KEY (console, acl_type, position)
+    PRIMARY KEY (console, acl_type, position),
+    CONSTRAINT console_acl_type_check CHECK (acl_type IN ('job', 'client', …))
 );
 ```
 
@@ -113,7 +121,7 @@ Commit `76d7c4c` (`feat(odir): zweistufige ACLs – Katalog-ACL als innere Stufe
 
 | Stelle | Inhalt |
 | --- | --- |
-| `crates/bareos-orm/schema/v2253_console_acl.json` | Tabelle `onesimus_console_acl` (Schlüssel `console, acl_type, position`, CHECK auf die zehn Typnamen) |
+| `crates/bareos-orm/schema/v2253_onesimus_schema.json` | Tabelle `onesimus.console_acl` (Schlüssel `console, acl_type, position`, CHECK auf die zehn Typnamen); dieselbe Stufe legt das Schema `onesimus` an und verschiebt die Objekte von 2251/2252 dorthin (zuerst `v2253_console_acl.json` mit `public.onesimus_console_acl`, Commit `76d7c4c`) |
 | `crates/odir/src/catalog_acl.rs` | Cache `CatalogAcl` (Ladezustand, Einträge, F-4-Logik), Laden, Schreiben in einer impliziten Transaktion, Thread `dir:catalog-acl` |
 | `crates/odir/src/acl.rs` | `allowed` = `file_allowed` ∧ `catalog_allowed`; `any_allowed`, `has_restrictions`, `no_restrictions` berücksichtigen die Katalog-ACL |
 | `crates/odir/src/director_config.rs` | Feld `catalog_acl: Arc<CatalogAcl>`; `reload::install_config` reicht denselben Speicher an die neue Konfiguration weiter |
@@ -208,12 +216,13 @@ auswerten, gibt es nicht (`show console` zeigt nur an).
 Negation, Regex, `*all*`; Typ ohne Einträge; F-2 eigene/andere Console; F-3;
 F-4; Cache nach Änderung und Reload; typisierte DotAclList-Antwort),
 `grpc::push_events::tests::catalog_acl_restricts_push_events`,
-`bareos-orm/tests/console_acl_migration.rs` (frischer Katalog, Katalog auf
-Stufe 2252, reiner Bareos-Katalog; braucht `BAREOS_ORM_TEST_DB`).
+`bareos-orm/tests/onesimus_schema_migration.rs` (frischer Katalog, Katalog auf
+Stufe 2252 mit den Objekten in `public`, reiner Bareos-Katalog, halb
+verschobener Katalog, fehlendes `CREATE`-Recht; braucht `BAREOS_ORM_TEST_DB`).
 
 ### Offen
 
 - Die Katalog-Einträge stehen im typisierten gRPC-Ergebnis nur in
   `extra_fields` (JSON-Text); eigene Proto-Felder wären eine spätere Erweiterung.
-- Änderungen direkt per SQL an `onesimus_console_acl` wirken erst beim
+- Änderungen direkt per SQL an `onesimus.console_acl` wirken erst beim
   nächsten Laden (`reload`, `.acl`-Änderung).

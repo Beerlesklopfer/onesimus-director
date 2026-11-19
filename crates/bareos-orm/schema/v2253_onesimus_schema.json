@@ -1,12 +1,30 @@
 {
   "version": 2253,
-  "description": "Two-tier console ACLs: catalog ACL (inner tier) per console and ACL type, can only restrict the file ACLs further (docs/plans/ACL-ZWEISTUFIG.md)",
+  "description": "Own PostgreSQL schema onesimus for all Onesimus catalog objects (public stays pure Bareos): moves the views and functions of v2251/v2252 out of the default schema; two-tier console ACLs: onesimus.console_acl, the catalog ACL (inner tier) per console and ACL type, can only restrict the file ACLs further (docs/plans/ACL-ZWEISTUFIG.md)",
   "created": "2026-11-20",
   "author": "Onesimus",
   "min_compatible_version": 2252,
+  "relocate": [
+    { "kind": "view", "name": "onesimus.vw_job_summary" },
+    { "kind": "view", "name": "onesimus.vw_volume_status" },
+    { "kind": "view", "name": "onesimus.vw_last_backup_per_client" },
+    { "kind": "view", "name": "onesimus.vw_file_list" },
+    { "kind": "function", "name": "onesimus.sp_create_job_record" },
+    { "kind": "function", "name": "onesimus.sp_update_job_end" },
+    { "kind": "function", "name": "onesimus.fn_find_appendable_volume" },
+    { "kind": "function", "name": "onesimus.fn_find_latest_backup" },
+    { "kind": "function", "name": "onesimus.sp_create_jobmedia" },
+    { "kind": "function", "name": "onesimus.fn_since_utime" },
+    { "kind": "view", "name": "onesimus.vw_running_jobs" },
+    { "kind": "view", "name": "onesimus.vw_media_list" },
+    { "kind": "function", "name": "onesimus.sp_prune_expired_volumes" },
+    { "kind": "function", "name": "onesimus.sp_prune_expired_jobs" },
+    { "kind": "function", "name": "onesimus.sp_purge_volume" },
+    { "kind": "function", "name": "onesimus.fn_director_status" }
+  ],
   "tables": [
     {
-      "name": "onesimus_console_acl",
+      "name": "onesimus.console_acl",
       "description": "Inner tier of the two-tier console ACLs: one row per console, ACL type and entry; evaluated like a Bareos ACL list (first match decides, ! negation, regex, *all*). Written only by odir (.acl set/delete/clear/copy).",
       "columns": [
         { "name": "console", "type": "text", "not_null": true, "description": "Name of the Console resource" },
@@ -21,7 +39,7 @@
       "foreign_keys": [],
       "constraints": [
         {
-          "name": "onesimus_console_acl_type_check",
+          "name": "console_acl_type_check",
           "type": "check",
           "expression": "acl_type IN ('job', 'client', 'storage', 'schedule', 'pool', 'command', 'fileset', 'catalog', 'where', 'pluginoptions')"
         }

@@ -4,7 +4,7 @@ use std::path::{Path, PathBuf};
 
 use tracing::{info, warn, debug};
 
-use crate::schema::CatalogSchema;
+use crate::schema::{split_qualified, CatalogSchema, ObjectKind};
 use crate::error::OrmError;
 
 /// Schema-Migrator: liest JSON-Versionen und migriert die DB.
@@ -151,6 +151,13 @@ impl Migrator {
     /// Führe Migration auf einer PostgreSQL-Datenbank durch.
     /// Prüft die aktuelle Version (C++ `version` Tabelle oder unsere `bareos_schema_version`),
     /// wendet fehlende Schema-Versionen an (Statement für Statement).
+    ///
+    /// Per step: create the schemas its qualified objects need
+    /// (`ensure_schemas`, error = stop), move the objects of
+    /// [`CatalogSchema::relocate`] (`relocate_objects`), apply the step's
+    /// statements (failures are logged and skipped), record the step. A
+    /// schema or relocation error leaves the step unrecorded, so the next
+    /// start tries again.
     pub async fn migrate(&self, pool: &sqlx::PgPool) -> Result<u32, OrmError> {
         let db_version = self.get_db_version(pool).await?;
 
@@ -169,43 +176,28 @@ impl Migrator {
 
             info!("migrating to schema v{}: {}", schema.version, schema.description);
 
-            if db_version == 0 {
+            // Own schemas first (hard error: the step's objects need them),
+            // then objects that move there, then the step's own objects.
+            ensure_schemas(pool, schema).await?;
+            let problems = relocate_objects(pool, &versions, schema).await;
+
+            let stmts = if db_version == 0 {
                 // Fresh install: alle Tabellen anlegen (Statement fuer Statement)
-                let stmts = schema.to_statements();
-                for stmt in &stmts {
-                    let trimmed = stmt.trim();
-                    if trimmed.is_empty() || trimmed.starts_with("--") { continue; }
-                    if let Some(op) = destructive_op(trimmed) {
-                        warn!("migration stmt skipped ({op} could reset ids in the shared catalog)\n  SQL: {}", &trimmed[..trimmed.len().min(120)]);
-                        continue;
-                    }
-                    debug!("  {}", &trimmed[..trimmed.len().min(80)]);
-                    if let Err(e) = sqlx::query(trimmed).execute(pool).await {
-                        warn!("migration stmt failed: {e}\n  SQL: {}", &trimmed[..trimmed.len().min(120)]);
-                        // Continue — IF NOT EXISTS handles duplicates
-                    }
-                }
+                schema.to_statements()
             } else {
                 // Inkrementelle Migration: nur Diff anwenden
-                let prev = versions.iter()
-                    .filter(|s| s.version < schema.version)
-                    .last();
+                versions.iter()
+                    .rfind(|s| s.version < schema.version)
+                    .map(|prev_schema| Self::diff(prev_schema, schema))
+                    .unwrap_or_default()
+            };
+            run_statements(pool, &stmts).await;
 
-                if let Some(prev_schema) = prev {
-                    let stmts = Self::diff(prev_schema, schema);
-                    for stmt in &stmts {
-                        let trimmed = stmt.trim();
-                        if trimmed.is_empty() || trimmed.starts_with("--") { continue; }
-                        if let Some(op) = destructive_op(trimmed) {
-                            warn!("migration stmt skipped ({op} could reset ids in the shared catalog)\n  SQL: {}", &trimmed[..trimmed.len().min(120)]);
-                            continue;
-                        }
-                        debug!("  {}", &trimmed[..trimmed.len().min(80)]);
-                        if let Err(e) = sqlx::query(trimmed).execute(pool).await {
-                            warn!("migration stmt failed: {e}\n  SQL: {}", &trimmed[..trimmed.len().min(120)]);
-                        }
-                    }
-                }
+            if !problems.is_empty() {
+                // Not recorded: the next start tries the step again.
+                return Err(OrmError::Other(format!(
+                    "schema v{}: {} (version not recorded, retried at the next start)",
+                    schema.version, problems.join("; "))));
             }
 
             self.set_db_version(pool, schema).await?;
@@ -265,6 +257,12 @@ impl Migrator {
     /// the C++ Director refuses to open a catalog whose VersionId it does not
     /// know, so Onesimus extensions (views, functions) must not bump it —
     /// otherwise a C++ Director on the same catalog stops working.
+    ///
+    /// `bareos_schema_version` deliberately stays unqualified in the default
+    /// schema (`public`), the only Onesimus table outside the schema
+    /// `onesimus`: every odir release looks for it there, and an older odir
+    /// rolled back onto the catalog that did not find it would take the
+    /// catalog for 2250 and create the v2251/v2252 objects in `public` again.
     async fn set_db_version(&self, pool: &sqlx::PgPool, schema: &CatalogSchema) -> Result<(), OrmError> {
         sqlx::query(
             "CREATE TABLE IF NOT EXISTS bareos_schema_version (version integer NOT NULL, applied_at timestamp DEFAULT now())"
@@ -320,6 +318,161 @@ fn destructive_op(stmt: &str) -> Option<&'static str> {
     }
 }
 
+/// Execute migration statements one by one. A failing statement is logged
+/// and skipped (IF NOT EXISTS / OR REPLACE make re-runs harmless); comment
+/// lines, statements [`destructive_op`] rejects and `CREATE SCHEMA` (done
+/// before by [`ensure_schemas`], which also accepts a schema an
+/// administrator created) are not executed.
+async fn run_statements(pool: &sqlx::PgPool, stmts: &[String]) {
+    for stmt in stmts {
+        let trimmed = stmt.trim();
+        if trimmed.is_empty() || trimmed.starts_with("--") || trimmed.starts_with("CREATE SCHEMA ") {
+            continue;
+        }
+        if let Some(op) = destructive_op(trimmed) {
+            warn!("migration stmt skipped ({op} could reset ids in the shared catalog)\n  SQL: {}", &trimmed[..trimmed.len().min(120)]);
+            continue;
+        }
+        debug!("  {}", &trimmed[..trimmed.len().min(80)]);
+        if let Err(e) = sqlx::query(trimmed).execute(pool).await {
+            warn!("migration stmt failed: {e}\n  SQL: {}", &trimmed[..trimmed.len().min(120)]);
+        }
+    }
+}
+
+/// Make sure every schema the step's objects are qualified with exists and
+/// the connected role may create objects in it. A missing schema is created
+/// owned by the connected role (the catalog database user); that needs the
+/// CREATE privilege on the database. An administrator may instead create it
+/// beforehand (`CREATE SCHEMA onesimus AUTHORIZATION <catalog user>`): an
+/// existing schema is never created again, so the database privilege is not
+/// needed then. Errors end the migration before the step is recorded.
+async fn ensure_schemas(pool: &sqlx::PgPool, schema: &CatalogSchema) -> Result<(), OrmError> {
+    for name in schema.object_schemas() {
+        let exists: bool = sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM pg_namespace WHERE nspname = $1)")
+            .bind(&name).fetch_one(pool).await?;
+        if !exists {
+            if let Err(e) = sqlx::query(&format!("CREATE SCHEMA IF NOT EXISTS {}", quote_ident(&name)))
+                .execute(pool).await
+            {
+                return Err(OrmError::Other(format!(
+                    "schema v{}: cannot create schema {name}: {e} (the catalog user needs \
+                     GRANT CREATE ON DATABASE <catalog> TO <user>, or a superuser creates it: \
+                     CREATE SCHEMA {name} AUTHORIZATION <user>)", schema.version)));
+            }
+            info!("created schema {name}");
+        }
+        let may_create: bool = sqlx::query_scalar("SELECT has_schema_privilege($1, 'CREATE')")
+            .bind(&name).fetch_one(pool).await?;
+        if !may_create {
+            return Err(OrmError::Other(format!(
+                "schema v{}: the catalog user may not create objects in schema {name} \
+                 (GRANT CREATE, USAGE ON SCHEMA {name} TO <user>)", schema.version)));
+        }
+    }
+    Ok(())
+}
+
+/// Move the objects of [`CatalogSchema::relocate`] from the default schema
+/// (`current_schema()`: the first existing schema of the `search_path`,
+/// where earlier versions created them unqualified, normally `public`) to
+/// their target schema, then apply their newest definition from `versions`
+/// (up to `schema`) again. Idempotent: an object no longer in the default
+/// schema is left alone; one present in both schemas (created again in the
+/// default schema, e.g. by hand) loses its default-schema copy. `ALTER ...
+/// SET SCHEMA` keeps the object's OID, owner, grants and dependent objects.
+/// Returns the problems; the caller does not record the step then.
+async fn relocate_objects(pool: &sqlx::PgPool, versions: &[CatalogSchema], schema: &CatalogSchema) -> Vec<String> {
+    let mut problems = Vec::new();
+    if schema.relocate.is_empty() {
+        return problems;
+    }
+    let default: Option<String> = match sqlx::query_scalar("SELECT current_schema()::text").fetch_one(pool).await {
+        Ok(d) => d,
+        Err(e) => return vec![format!("current_schema(): {e}")],
+    };
+    let Some(default) = default else {
+        return vec!["no schema of the search_path exists".to_string()];
+    };
+    for def in &schema.relocate {
+        let (Some(target), object) = split_qualified(&def.name) else {
+            problems.push(format!("relocate {}: name without target schema", def.name));
+            continue;
+        };
+        if target != default
+            && let Err(e) = move_object(pool, def.kind, &default, target, object).await
+        {
+            problems.push(format!("moving {object} from {default} to {target}: {e}"));
+            continue;
+        }
+        let newest = versions.iter().rev().filter(|v| v.version <= schema.version);
+        let sql = match def.kind {
+            ObjectKind::View => newest.into_iter()
+                .find_map(|v| v.views.iter().find(|x| x.name == def.name)).map(|x| x.to_sql()),
+            ObjectKind::Function => newest.into_iter()
+                .find_map(|v| v.functions.iter().find(|x| x.name == def.name)).map(|x| x.to_sql()),
+        };
+        match sql {
+            Some(sql) => if let Err(e) = sqlx::query(&sql).execute(pool).await {
+                problems.push(format!("re-creating {}: {e}", def.name));
+            },
+            None => problems.push(format!("relocate {}: no definition in the schema files", def.name)),
+        }
+    }
+    problems
+}
+
+/// One relocation of [`relocate_objects`]: `ALTER VIEW/FUNCTION ... SET
+/// SCHEMA` for every match of `object` in `default`, or `DROP` of the
+/// default-schema copy when `target` already has the same object (same view
+/// name, same function signature). DROP is without CASCADE: an object of
+/// the operator depending on the copy makes it fail instead of vanishing.
+async fn move_object(pool: &sqlx::PgPool, kind: ObjectKind, default: &str, target: &str, object: &str)
+    -> Result<(), sqlx::Error>
+{
+    let statements: Vec<String> = match kind {
+        ObjectKind::View => {
+            let rows: Vec<(String, bool)> = sqlx::query_as(
+                "SELECT c.relkind::text, EXISTS(SELECT 1 FROM pg_class t JOIN pg_namespace tn ON tn.oid = t.relnamespace \
+                                               WHERE tn.nspname = $3 AND t.relname = c.relname) \
+                 FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace \
+                 WHERE n.nspname = $1 AND c.relname = $2 AND c.relkind IN ('v', 'm')")
+                .bind(default).bind(object).bind(target).fetch_all(pool).await?;
+            rows.into_iter().map(|(relkind, in_target)| {
+                let what = if relkind == "m" { "MATERIALIZED VIEW" } else { "VIEW" };
+                let source = format!("{}.{}", quote_ident(default), quote_ident(object));
+                if in_target {
+                    format!("DROP {what} {source}")
+                } else {
+                    format!("ALTER {what} {source} SET SCHEMA {}", quote_ident(target))
+                }
+            }).collect()
+        }
+        ObjectKind::Function => {
+            let rows: Vec<(String, bool)> = sqlx::query_as(
+                "SELECT pg_get_function_identity_arguments(p.oid), \
+                        EXISTS(SELECT 1 FROM pg_proc t JOIN pg_namespace tn ON tn.oid = t.pronamespace \
+                               WHERE tn.nspname = $3 AND t.proname = p.proname AND t.proargtypes = p.proargtypes) \
+                 FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace \
+                 WHERE n.nspname = $1 AND p.proname = $2")
+                .bind(default).bind(object).bind(target).fetch_all(pool).await?;
+            rows.into_iter().map(|(args, in_target)| {
+                let source = format!("{}.{}({args})", quote_ident(default), quote_ident(object));
+                if in_target {
+                    format!("DROP FUNCTION {source}")
+                } else {
+                    format!("ALTER FUNCTION {source} SET SCHEMA {}", quote_ident(target))
+                }
+            }).collect()
+        }
+    };
+    for sql in statements {
+        info!("schema relocation: {sql}");
+        sqlx::query(&sql).execute(pool).await?;
+    }
+    Ok(())
+}
+
 /// Whether `name` resolves to a table on the connection's `search_path` —
 /// the same lookup the unqualified statements here use, so a catalog in
 /// another schema of the same database is never mistaken for this one.
@@ -357,6 +510,7 @@ impl SequenceLag {
     }
 }
 
+/// Double-quoted SQL identifier (`"` doubled).
 fn quote_ident(name: &str) -> String {
     format!("\"{}\"", name.replace('"', "\"\""))
 }
@@ -536,6 +690,37 @@ mod tests {
         for f in versions.iter().flat_map(|v| &v.functions) {
             assert!(stmts.iter().any(|s| s.starts_with(&format!("CREATE OR REPLACE FUNCTION {}(", f.name))), "{}", f.name);
         }
+    }
+
+    /// Every Onesimus object of the shipped files is qualified with the
+    /// schema `onesimus` (public stays pure Bareos), the Bareos base has no
+    /// qualified names, and v2253 moves exactly the views and functions
+    /// v2251/v2252 created unqualified before, each with a definition.
+    #[test]
+    fn onesimus_objects_live_in_their_own_schema() {
+        let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("schema");
+        let versions = Migrator::new(&dir).load_versions().unwrap();
+        assert!(versions[0].object_schemas().is_empty());
+        let mut defined: Vec<(ObjectKind, String)> = Vec::new();
+        for v in versions.iter().filter(|v| is_onesimus_extension(v)) {
+            assert_eq!(v.object_schemas(), ["onesimus"], "v{}", v.version);
+            let names = v.tables.iter().map(|t| &t.name)
+                .chain(v.views.iter().map(|x| &x.name)).chain(v.functions.iter().map(|x| &x.name));
+            for name in names {
+                assert!(name.starts_with("onesimus."), "v{}: {name}", v.version);
+            }
+            if v.version < 2253 {
+                defined.extend(v.views.iter().map(|x| (ObjectKind::View, x.name.clone())));
+                defined.extend(v.functions.iter().map(|x| (ObjectKind::Function, x.name.clone())));
+            }
+        }
+        let step = versions.iter().find(|v| v.version == 2253).unwrap();
+        let relocated: Vec<(ObjectKind, String)> = step.relocate.iter().map(|r| (r.kind, r.name.clone())).collect();
+        assert_eq!(relocated, defined);
+        assert_eq!(defined.len(), 16);
+        let stmts = step.to_statements();
+        assert_eq!(stmts[0], "CREATE SCHEMA IF NOT EXISTS onesimus;");
+        assert!(stmts[1].starts_with("CREATE TABLE IF NOT EXISTS onesimus.console_acl ("), "{}", stmts[1]);
     }
 
     #[test]

@@ -27,8 +27,8 @@ Drop-in replacement for the Bareos Director daemon — independent project after
 - **flume MPSC** for catalog queries, crossbeam channels for command queue
 - **BNET + gRPC** dual protocol (native Rust, no FFI)
 - **TLS-PSK** via `openssl` crate (TLSv1.2 — see `tls_psk.rs` for TLSv1.3 limitation docs)
-- **Stored Procedures**: `sp_create_job_record`, `sp_update_job_end`, `sp_create_jobmedia`
-- **Views**: `vw_job_summary`, `vw_volume_status`, `vw_file_list`, `vw_last_backup_per_client`
+- **Stored Procedures** (PostgreSQL schema `onesimus`, `public` stays pure Bareos): `onesimus.sp_create_job_record`, `onesimus.sp_update_job_end`, `onesimus.sp_create_jobmedia`
+- **Views** (schema `onesimus`): `onesimus.vw_job_summary`, `onesimus.vw_volume_status`, `onesimus.vw_file_list`, `onesimus.vw_last_backup_per_client`
 
 ## Crates
 

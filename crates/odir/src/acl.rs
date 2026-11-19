@@ -76,11 +76,11 @@ impl Kind {
             Self::PluginOptions => "PluginOptionsAcl",
         }
     }
-    /// Value of the column `acl_type` of `onesimus_console_acl`.
+    /// Value of the column `acl_type` of `onesimus.console_acl`.
     pub fn catalog_name(self) -> &'static str {
         self.key().trim_end_matches("acl")
     }
-    /// The type of a column value `acl_type` of `onesimus_console_acl`.
+    /// The type of a column value `acl_type` of `onesimus.console_acl`.
     pub fn from_catalog_name(name: &str) -> Option<Self> {
         Self::ALL.into_iter().find(|k| k.catalog_name() == name)
     }

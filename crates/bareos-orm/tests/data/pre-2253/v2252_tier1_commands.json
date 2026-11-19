@@ -1,0 +1,58 @@
+{
+  "version": 2252,
+  "description": "Tier 1 command support: cancel, status, prune, purge, media listing",
+  "created": "2026-03-29",
+  "author": "Onesimus",
+  "min_compatible_version": 2251,
+  "tables": [],
+  "views": [
+    {
+      "name": "vw_running_jobs",
+      "description": "Aktuell laufende Jobs (status dir)",
+      "query": "SELECT j.jobid, j.job, j.name AS jobname, j.type, j.level, j.jobstatus, j.starttime, j.jobfiles, j.jobbytes, j.joberrors, c.name AS clientname, j.volsessionid, j.volsessiontime FROM job j LEFT JOIN client c ON j.clientid = c.clientid WHERE j.jobstatus IN ('R', 'C', 'B', 'e', 'D', 'F', 'S', 'm', 'M', 's', 'j', 'c', 'd', 't', 'p', 'i', 'a', 'l', 'L')"
+    },
+    {
+      "name": "vw_media_list",
+      "description": "Alle Volumes mit Pool-Name (fuer .media Completion)",
+      "query": "SELECT m.mediaid, m.volumename, m.volstatus, m.mediatype, m.volbytes, m.voljobs, m.volfiles, m.maxvolbytes, p.name AS poolname FROM media m LEFT JOIN pool p ON m.poolid = p.poolid ORDER BY m.volumename"
+    }
+  ],
+  "functions": [
+    {
+      "name": "sp_prune_expired_volumes",
+      "description": "Prune abgelaufene Volume-Records (VolStatus='Purged' oder Retention abgelaufen)",
+      "params": "p_pool_name text DEFAULT NULL",
+      "returns": "integer",
+      "language": "plpgsql",
+      "volatility": "VOLATILE",
+      "body": "DECLARE\n  v_count integer := 0;\nBEGIN\n  -- Mark volumes as Purged where all jobs using them are expired\n  UPDATE media SET volstatus = 'Purged'\n  WHERE volstatus = 'Full'\n    AND mediaid NOT IN (\n      SELECT DISTINCT jm.mediaid FROM jobmedia jm\n      JOIN job j ON jm.jobid = j.jobid\n      WHERE j.jobstatus = 'T'\n        AND j.realendtime > NOW() - INTERVAL '6 months'\n    )\n    AND (p_pool_name IS NULL OR poolid IN (SELECT poolid FROM pool WHERE name = p_pool_name));\n  GET DIAGNOSTICS v_count = ROW_COUNT;\n  RETURN v_count;\nEND;"
+    },
+    {
+      "name": "sp_prune_expired_jobs",
+      "description": "Loesche Job-Records die aelter als die Retention sind",
+      "params": "p_client_name text DEFAULT NULL, p_days integer DEFAULT 180",
+      "returns": "integer",
+      "language": "plpgsql",
+      "volatility": "VOLATILE",
+      "body": "DECLARE\n  v_count integer := 0;\n  v_client_id integer;\nBEGIN\n  IF p_client_name IS NOT NULL THEN\n    SELECT clientid INTO v_client_id FROM client WHERE name = p_client_name;\n  END IF;\n\n  -- Delete jobmedia records for expired jobs\n  DELETE FROM jobmedia WHERE jobid IN (\n    SELECT jobid FROM job\n    WHERE realendtime < NOW() - (p_days || ' days')::interval\n      AND jobstatus IN ('T', 'E', 'f', 'A')\n      AND (v_client_id IS NULL OR clientid = v_client_id)\n  );\n\n  -- Delete the jobs themselves\n  DELETE FROM job\n  WHERE realendtime < NOW() - (p_days || ' days')::interval\n    AND jobstatus IN ('T', 'E', 'f', 'A')\n    AND (v_client_id IS NULL OR clientid = v_client_id);\n  GET DIAGNOSTICS v_count = ROW_COUNT;\n\n  RETURN v_count;\nEND;"
+    },
+    {
+      "name": "sp_purge_volume",
+      "description": "Purge alle Records eines Volumes (JobMedia + setze VolStatus='Purged')",
+      "params": "p_volume_name text",
+      "returns": "integer",
+      "language": "plpgsql",
+      "volatility": "VOLATILE",
+      "body": "DECLARE\n  v_media_id integer;\n  v_count integer := 0;\nBEGIN\n  SELECT mediaid INTO v_media_id FROM media WHERE volumename = p_volume_name;\n  IF v_media_id IS NULL THEN\n    RETURN 0;\n  END IF;\n\n  -- Delete jobmedia records for this volume\n  DELETE FROM jobmedia WHERE mediaid = v_media_id;\n  GET DIAGNOSTICS v_count = ROW_COUNT;\n\n  -- Reset volume status\n  UPDATE media SET\n    volstatus = 'Purged',\n    voljobs = 0,\n    volfiles = 0,\n    volbytes = 0\n  WHERE mediaid = v_media_id;\n\n  RETURN v_count;\nEND;"
+    },
+    {
+      "name": "fn_director_status",
+      "description": "Director Status-Zusammenfassung: Anzahl Jobs nach Status",
+      "params": "",
+      "returns": "TABLE(total_jobs bigint, running bigint, successful bigint, errors bigint, total_bytes bigint, total_files bigint)",
+      "language": "sql",
+      "volatility": "STABLE",
+      "body": "SELECT COUNT(*) AS total_jobs, COUNT(*) FILTER (WHERE jobstatus IN ('R','C')) AS running, COUNT(*) FILTER (WHERE jobstatus = 'T') AS successful, COUNT(*) FILTER (WHERE jobstatus IN ('E','f')) AS errors, COALESCE(SUM(jobbytes), 0) AS total_bytes, COALESCE(SUM(jobfiles), 0) AS total_files FROM job;"
+    }
+  ]
+}

@@ -724,10 +724,15 @@ async fn handle_since_utime(pool: &sqlx::PgPool, client_name: &str, job_name: &s
     }
 }
 
+/// JobId of the newest successful backup of `client_name`, from the
+/// extension function `onesimus.fn_find_latest_backup` (schema `onesimus`,
+/// v2251, moved there by v2253; called qualified, the connection's
+/// `search_path` stays Bareos' own) or, when it is missing (extension not
+/// installed or not yet moved), from the same query inline.
 async fn handle_find_latest_backup_jobid(pool: &sqlx::PgPool, client_name: &str) -> CatalogResponse {
-    // fn_find_latest_backup(p_client_name text) RETURNS integer
+    // onesimus.fn_find_latest_backup(p_client_name text) RETURNS integer
     let row: Option<(Option<i32>,)> = match sqlx::query_as(
-        "SELECT fn_find_latest_backup($1)"
+        "SELECT onesimus.fn_find_latest_backup($1)"
     ).bind(client_name).fetch_optional(pool).await {
         Ok(r) => r,
         Err(_) => {

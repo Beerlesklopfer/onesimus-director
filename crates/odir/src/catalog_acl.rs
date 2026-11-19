@@ -2,7 +2,7 @@
 //!
 //! The ACL directives of the Console and Profile resources in the
 //! configuration files are the outer frame (evaluated in [`crate::acl`] like
-//! Bareos `ua_acl.cc`). The catalog table `onesimus_console_acl` (schema
+//! Bareos `ua_acl.cc`). The catalog table `onesimus.console_acl` (schema
 //! extension v2253 of `bareos-orm`) holds a second list per console and ACL
 //! type; a name is allowed only when the file ACL **and** the catalog list
 //! allow it. A type without catalog entries does not restrict.
@@ -51,10 +51,14 @@ pub const LOCKED_COMMANDS: &[&str] = &["status", ".status", "version"];
 /// Pause between two load attempts while the last load failed.
 pub const RETRY_INTERVAL: Duration = Duration::from_secs(30);
 
-/// Name of the catalog table of the inner tier.
-pub const TABLE: &str = "onesimus_console_acl";
+/// Name of the catalog table of the inner tier, schema-qualified: Onesimus
+/// objects live in the schema `onesimus` (v2253), `public` holds only the
+/// Bareos tables. Qualified rather than via `search_path`, so the catalog
+/// connections resolve the Bareos tables exactly as before. `to_regclass`
+/// of this name is NULL while the schema or the table is missing.
+pub const TABLE: &str = "onesimus.console_acl";
 
-/// One catalog ACL entry as stored in `onesimus_console_acl`.
+/// One catalog ACL entry as stored in `onesimus.console_acl`.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct CatalogEntry {
     /// The entry as in a configuration file: name, regex, `!negation`, `*all*`.
@@ -456,9 +460,9 @@ mod tests {
     #[test]
     fn write_sql_replaces_types_and_quotes() {
         let sql = write_sql("o'p", &[(Kind::Job, vec!["a".into(), "!b'c".into()]), (Kind::Pool, vec![])], "adm");
-        assert_eq!(sql, "DELETE FROM onesimus_console_acl WHERE console = 'o''p' AND acl_type = 'job';\n\
-            INSERT INTO onesimus_console_acl (console, acl_type, position, entry, changed_by) VALUES ('o''p', 'job', 0, 'a', 'adm');\n\
-            INSERT INTO onesimus_console_acl (console, acl_type, position, entry, changed_by) VALUES ('o''p', 'job', 1, '!b''c', 'adm');\n\
-            DELETE FROM onesimus_console_acl WHERE console = 'o''p' AND acl_type = 'pool';\n");
+        assert_eq!(sql, "DELETE FROM onesimus.console_acl WHERE console = 'o''p' AND acl_type = 'job';\n\
+            INSERT INTO onesimus.console_acl (console, acl_type, position, entry, changed_by) VALUES ('o''p', 'job', 0, 'a', 'adm');\n\
+            INSERT INTO onesimus.console_acl (console, acl_type, position, entry, changed_by) VALUES ('o''p', 'job', 1, '!b''c', 'adm');\n\
+            DELETE FROM onesimus.console_acl WHERE console = 'o''p' AND acl_type = 'pool';\n");
     }
 }

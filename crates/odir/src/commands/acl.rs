@@ -4,7 +4,7 @@
 //! Two-tier console ACLs (docs/plans/ACL-ZWEISTUFIG.md): the ACL directives
 //! of the Console and Profile resources in the configuration files are the
 //! outer frame and are changed in the editor only; the catalog ACL
-//! (`onesimus_console_acl`, [`crate::catalog_acl`]) can only restrict
+//! (`onesimus.console_acl`, [`crate::catalog_acl`]) can only restrict
 //! further. Effective is what both allow ([`crate::acl::allowed`]).
 //!
 //! - `.acl [list] [console=<name>]`: per ACL type the file entries (the
@@ -582,7 +582,7 @@ Console { Name = viewer; Password = pw3; CommandAcl = .acl, status }
 Console { Name = mcp; Password = pw4; CommandAcl = *all*; JobAcl = backup-a, restore }
 "#;
 
-    /// An in-memory `onesimus_console_acl` behind a mock catalog: the rows
+    /// An in-memory `onesimus.console_acl` behind a mock catalog: the rows
     /// (console, type, entry) in order; `fail` makes every query fail.
     #[derive(Clone, Default)]
     struct FakeTable {

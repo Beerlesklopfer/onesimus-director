@@ -1,31 +1,25 @@
 //! Catalog sequences across migrations (Compatibility log C-039).
 //!
-//! Needs a PostgreSQL database: set `BAREOS_ORM_TEST_DB` to a connection URL
-//! (e.g. `postgres:///scratch?host=/tmp/pg`). The test works only inside a
-//! schema it creates and drops itself (`search_path` is pinned to it), so
-//! nothing outside that schema is touched. Without the variable it is skipped.
+//! Needs a throw-away PostgreSQL cluster: set `BAREOS_ORM_TEST_DB` to a
+//! connection URL whose role may create databases (see `common/mod.rs`).
+//! The test works in a database of its own, created and dropped by itself
+//! (the Onesimus objects live in the fixed schema `onesimus`, so cases
+//! cannot share one database). Without the variable it is skipped.
 
-use std::str::FromStr;
+mod common;
 
 use bareos_orm::migration::{check_sequences, Migrator};
-use sqlx::postgres::{PgConnectOptions, PgPoolOptions};
 
+/// Fresh migration, explicit-id rows, second migration: sequences never
+/// move, the lag is reported with a repair statement that works.
 #[tokio::test]
-#[ignore = "needs BAREOS_ORM_TEST_DB=<postgres url of a throw-away database>"]
+#[ignore = "needs BAREOS_ORM_TEST_DB=<postgres url of a throw-away cluster>"]
 async fn migrations_never_move_sequences_and_lags_are_reported() {
-    let url = std::env::var("BAREOS_ORM_TEST_DB").expect("BAREOS_ORM_TEST_DB not set");
-    let schema = format!("onesimus_c039_{}", std::process::id());
-    let admin = PgPoolOptions::new().max_connections(1).connect(&url).await.unwrap();
-    sqlx::query(&format!("CREATE SCHEMA {schema}")).execute(&admin).await.unwrap();
-
-    let result = run(&url, &schema).await;
-    sqlx::query(&format!("DROP SCHEMA {schema} CASCADE")).execute(&admin).await.unwrap();
-    result.unwrap();
+    common::in_database("onesimus_c039", run).await;
 }
 
-async fn run(url: &str, schema: &str) -> Result<(), Box<dyn std::error::Error>> {
-    let options = PgConnectOptions::from_str(url)?.options([("search_path", schema)]);
-    let pool = PgPoolOptions::new().max_connections(1).connect_with(options).await?;
+/// The case of [`migrations_never_move_sequences_and_lags_are_reported`].
+async fn run(pool: sqlx::PgPool) -> Result<(), Box<dyn std::error::Error>> {
     let migrator = Migrator::new(&std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("schema"));
 
     // Fresh install: the Bareos version table stays at the Bareos version.
