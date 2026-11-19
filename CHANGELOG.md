@@ -1,5 +1,11 @@
 onesimus (25.1.2+onesimus.0.2.0-2) UNRELEASED; urgency=medium
 
+  * odir: DirectorApi configuration CRUD (raw text) also for Client
+    resources: Read/Create/Update/Delete/ListResources, listed by
+    GetConfigCapabilities when the Client ACL allows a client. Delete
+    answers REFERENCED while a Job/JobDefs names the client (Client =,
+    client= in Run and RunScript console commands).
+
   * odir: secrets in FileSet plugin lines (password=, bind_pw= ...) are
     masked in FileSet.FileSetText and in "show fileset" (S-3). bareos-dir
     stores them in clear (job.cc:1393); the FileSet record is matched by

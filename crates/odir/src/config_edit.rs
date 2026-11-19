@@ -20,7 +20,7 @@
 //!   state back and reloads again (RELOAD_FAILED).
 //! - One lock serializes read-check-write-reload of all changes.
 //!
-//! First stage (principle 17): Schedule, Job and JobDefs.
+//! First stage (principle 17): Schedule, Job and JobDefs; then Client.
 
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
@@ -40,10 +40,11 @@ pub enum RType {
     Schedule,
     Job,
     JobDefs,
+    Client,
 }
 
 impl RType {
-    pub const ALL: [RType; 3] = [RType::Schedule, RType::Job, RType::JobDefs];
+    pub const ALL: [RType; 4] = [RType::Schedule, RType::Job, RType::JobDefs, RType::Client];
 
     /// Type word as written in new files and messages.
     pub fn word(self) -> &'static str {
@@ -51,6 +52,7 @@ impl RType {
             RType::Schedule => "Schedule",
             RType::Job => "Job",
             RType::JobDefs => "JobDefs",
+            RType::Client => "Client",
         }
     }
 
@@ -60,6 +62,7 @@ impl RType {
             RType::Schedule => "schedule",
             RType::Job => "job",
             RType::JobDefs => "jobdefs",
+            RType::Client => "client",
         }
     }
 
@@ -69,14 +72,16 @@ impl RType {
             RType::Schedule => "R_SCHEDULE",
             RType::Job => "R_JOB",
             RType::JobDefs => "R_JOBDEFS",
+            RType::Client => "R_CLIENT",
         }
     }
 
-    /// Resource ACL like `show` (JobDefs use the Job ACL).
+    /// Resource ACL like `show` (JobDefs use the Job ACL, Client the Client ACL).
     pub fn acl(self) -> crate::acl::Kind {
         match self {
             RType::Schedule => crate::acl::Kind::Schedule,
             RType::Job | RType::JobDefs => crate::acl::Kind::Job,
+            RType::Client => crate::acl::Kind::Client,
         }
     }
 }
@@ -437,9 +442,22 @@ fn check(tree: &Tree, base: &str) -> Result<DirectorConfig, Problem> {
 /// `job=<name>` of a console `run` command or a Job `Run` value, when the
 /// name is literal (no variables); otherwise None (not decidable).
 fn run_job_name(command: &str) -> Option<String> {
+    run_arg(command, "job=")
+}
+
+/// The literal value of `<key>` (e.g. `client=`) in a console command line;
+/// None when missing or when it contains variables.
+fn run_arg(command: &str, key: &str) -> Option<String> {
     let lower = command.to_ascii_lowercase();
-    let at = lower.find("job=").filter(|&i| i == 0 || lower.as_bytes()[i - 1].is_ascii_whitespace())?;
-    let value = &command[at + 4..];
+    let mut from = 0;
+    let at = loop {
+        let i = from + lower[from..].find(key)?;
+        if i == 0 || lower.as_bytes()[i - 1].is_ascii_whitespace() {
+            break i;
+        }
+        from = i + key.len();
+    };
+    let value = &command[at + key.len()..];
     let name = if let Some(quoted) = value.strip_prefix('"') {
         quoted.split('"').next()?
     } else {
@@ -449,10 +467,10 @@ fn run_job_name(command: &str) -> Option<String> {
 }
 
 /// Every resource that names resource `name` of type `rtype`: directives
-/// whose item refers to that type (Schedule =, JobDefs =, Job To Verify =
-/// …, from the item tables of all resource types), and for Jobs `run
-/// job=<name>` in RunScript `Console =` commands and Job `Run =` values
-/// when the job name is literal. Console/Profile ACL entries are patterns,
+/// whose item refers to that type (Schedule =, JobDefs =, Job To Verify =,
+/// Client = …, from the item tables of all resource types), and for Jobs
+/// (Clients) `run job=<name>` (`client=<name>`) in RunScript `Console =`
+/// commands and Job `Run =` values when the name is literal. Console/Profile ACL entries are patterns,
 /// not references.
 pub fn references(raw: &[ConfResource], rtype: RType, name: &str) -> Vec<(String, String)> {
     let mut out: Vec<(String, String)> = Vec::new();
@@ -467,14 +485,21 @@ pub fn references(raw: &[ConfResource], rtype: RType, name: &str) -> Vec<(String
                 && item.code == Some(rtype.rcode()) && d.values().contains(&name) {
                 return true;
             }
-            if rtype == RType::Job && matches!(res.norm_type().as_str(), "job" | "jobdefs") {
-                if d.norm_key() == "run" && d.values().iter().any(|v| run_job_name(v).as_deref() == Some(name)) {
+            // `run job=<name>` / `run ... client=<name>` in Job `Run` values
+            // and RunScript console commands
+            let key = match rtype {
+                RType::Job => Some("job="),
+                RType::Client => Some("client="),
+                _ => None,
+            };
+            if let Some(key) = key && matches!(res.norm_type().as_str(), "job" | "jobdefs") {
+                if d.norm_key() == "run" && d.values().iter().any(|v| run_arg(v, key).as_deref() == Some(name)) {
                     return true;
                 }
                 if d.norm_key() == "runscript" {
                     return d.block.iter().flatten().filter(|c| c.norm_key() == "console").flat_map(|c| c.values())
                         .any(|v| v.trim_start().to_ascii_lowercase().starts_with("run ")
-                            && run_job_name(v).as_deref() == Some(name));
+                            && run_arg(v, key).as_deref() == Some(name));
                 }
             }
             false
@@ -956,8 +981,9 @@ impl ConfigEditor {
                 });
                 // Principle 15: what the reload does not bring into line (Pool
                 // resources: volumes keep their values until `update volume …
-                // frompool`) goes into `followups`; Schedule/Job/JobDefs have
-                // nothing of that kind, so the list stays empty in this stage.
+                // frompool`) goes into `followups`; Schedule/Job/JobDefs/Client
+                // have nothing of that kind (the catalog Client record takes
+                // AutoPrune and the retentions at the next job, as in Bareos), so the list stays empty in this stage.
                 outcome.followups = Vec::new();
                 Ok(outcome)
             }

@@ -337,6 +337,27 @@ Entscheidungen, die der Plan offen ließ (konservativ):
    (`IsNameValid`).
 9. `@include` wird wie im Rohparser übersprungen (nicht verfolgt).
 
+### Client (19.11.2026, zweite Ausbaustufe)
+
+Umgesetzt: Client mit READ_RAW, CREATE_RAW, UPDATE_RAW, DELETE und
+`ListResources`; `GetConfigCapabilities` nennt ihn, wenn die Client-ACL der
+Konsole (oder ihres Profils) einen positiven Eintrag hat. Rechte pro Name über
+die Client-ACL wie `show client`.
+
+- Referenzen: `Client =` in Job und JobDefs (einziges Item mit `R_CLIENT` in
+  den Direktiventabellen; ein `Restore Client` gibt es in Bareos 25 nicht),
+  dazu `client=<name>` in Job-`Run`-Werten und in `run`-Befehlen von
+  RunScript-`Console`, nur bei wörtlichem Namen (konservativ: lieber
+  REFERENCED als ein verwaister Verweis). Nicht gezählt: Client-ACL-Einträge
+  (Muster).
+- Der Rohtext bleibt Byte für Byte erhalten (TLS-Direktiven, Kommentare,
+  `;`, CRLF); Tests in `config_edit/tests.rs` (`client_*`,
+  `a_job_using_the_client_prevents_the_delete`) und `grpc/api_config.rs`.
+- `followups` bleibt leer: der Katalog-Datensatz des Clients übernimmt
+  AutoPrune und Retentions wie in Bareos beim nächsten Job des Clients.
+- Hinweis: `referenced_by` nennt auch Ressourcen, die die ACL der Konsole
+  nicht zeigt (wie bei Schedule); die Löschung wird dadurch nur verhindert.
+
 Offen: RENAME (Grundsatz 9), weitere Typen (Grundsatz 17) mit `followups`
 für Pool (Grundsatz 15), ob die alten Konsolenerweiterungen
 `configure update/delete/read` entfernt werden.

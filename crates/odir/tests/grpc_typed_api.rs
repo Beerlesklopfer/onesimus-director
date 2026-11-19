@@ -819,7 +819,7 @@ async fn config_crud(channel: &Channel, token: &MetadataValue<tonic::metadata::A
 
     let caps = grpc.get_config_capabilities(with_token(token, pb::ConfigCapabilitiesRequest {})).await.unwrap().into_inner();
     let types: Vec<_> = caps.types.iter().map(|t| t.r#type()).collect();
-    check(caps.interface_version == 1 && types == [pb::ResourceType::Schedule, pb::ResourceType::Job, pb::ResourceType::Jobdefs],
+    check(caps.interface_version == 1 && types == [pb::ResourceType::Schedule, pb::ResourceType::Job, pb::ResourceType::Jobdefs, pb::ResourceType::Client],
           format!("capabilities {caps:?}"));
     let caps = grpc.get_config_capabilities(with_token(limited, pb::ConfigCapabilitiesRequest {})).await.unwrap().into_inner();
     check(caps.types.is_empty(), format!("capabilities without configure {caps:?}"));

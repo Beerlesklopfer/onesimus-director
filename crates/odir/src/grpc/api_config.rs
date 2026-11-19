@@ -7,7 +7,7 @@
 //!   (gRPC PERMISSION_DENIED otherwise, like the other DirectorApi RPCs):
 //!   the raw text is not redacted like `show` without `configure`;
 //! - the resource ACL of the type (Schedule ACL, Job ACL for Job and
-//!   JobDefs, as `show`) decides per name: status DENIED; ListResources
+//!   JobDefs, Client ACL, as `show`) decides per name: status DENIED; ListResources
 //!   leaves out what it denies;
 //! - GetConfigCapabilities never fails for a session: without `configure`
 //!   it lists no type, otherwise the types of this stage whose ACL allows
@@ -43,6 +43,7 @@ fn to_proto_type(rtype: RType) -> pb::ResourceType {
         RType::Schedule => pb::ResourceType::Schedule,
         RType::Job => pb::ResourceType::Job,
         RType::JobDefs => pb::ResourceType::Jobdefs,
+        RType::Client => pb::ResourceType::Client,
     }
 }
 
@@ -76,6 +77,7 @@ fn rtype(value: i32) -> Result<RType, Status> {
         pb::ResourceType::Schedule => Ok(RType::Schedule),
         pb::ResourceType::Job => Ok(RType::Job),
         pb::ResourceType::Jobdefs => Ok(RType::JobDefs),
+        pb::ResourceType::Client => Ok(RType::Client),
         other => Err(Status::unimplemented(format!("{} cannot be edited yet (see GetConfigCapabilities)", other.as_str_name()))),
     }
 }
@@ -249,7 +251,8 @@ mod tests {
         std::fs::write(dir.join("bareos-dir.d/console/consoles.conf"), "\
 Console {\n  Name = admin\n  Password = pw\n  CommandACL = configure, show\n  ScheduleACL = *all*\n  JobACL = a, !secret\n}\n\
 Console {\n  Name = viewer\n  Password = pw\n  CommandACL = show\n  ScheduleACL = *all*\n  JobACL = *all*\n}\n\
-Console {\n  Name = noschedule\n  Password = pw\n  CommandACL = configure\n  ScheduleACL = !WeeklyCycle\n  JobACL = *all*\n}\n").unwrap();
+Console {\n  Name = noschedule\n  Password = pw\n  CommandACL = configure\n  ScheduleACL = !WeeklyCycle\n  JobACL = *all*\n}\n\
+Console {\n  Name = clients\n  Password = pw\n  CommandACL = configure\n  ClientACL = fd\n}\n").unwrap();
         let shared: SharedConfig = Arc::new(RwLock::new(DirectorConfig::load(&dir).unwrap()));
         let manager = Arc::new(crate::session_manager::SessionManager::new(Arc::new(crate::message_bus::MessageBus::new(16))));
         let auth = Arc::new(super::super::auth::AuthState::new(shared.clone(), manager));
@@ -366,10 +369,10 @@ Console {\n  Name = noschedule\n  Password = pw\n  CommandACL = configure\n  Sch
         let err = f.api.get_config_capabilities(Request::new(pb::ConfigCapabilitiesRequest {})).await.unwrap_err();
         assert_eq!(err.code(), tonic::Code::Unauthenticated);
 
-        // default console: all three types with all implemented operations
+        // default console: all four types with all implemented operations
         let caps = f.api.get_config_capabilities(req(pb::ConfigCapabilitiesRequest {}, &root)).await.unwrap().into_inner();
         assert_eq!(caps.interface_version, 1);
-        assert_eq!(types(&caps), [pb::ResourceType::Schedule, pb::ResourceType::Job, pb::ResourceType::Jobdefs]);
+        assert_eq!(types(&caps), [pb::ResourceType::Schedule, pb::ResourceType::Job, pb::ResourceType::Jobdefs, pb::ResourceType::Client]);
         assert!(caps.types.iter().all(|t| t.operations().collect::<Vec<_>>() == OPERATIONS));
 
         // no Command ACL configure: PERMISSION_DENIED, no types
@@ -407,5 +410,23 @@ Console {\n  Name = noschedule\n  Password = pw\n  CommandACL = configure\n  Sch
         assert_eq!(list.resources.iter().map(|r| r.resource.as_ref().unwrap().name.as_str()).collect::<Vec<_>>(), ["a"]);
         let caps = f.api.get_config_capabilities(req(pb::ConfigCapabilitiesRequest {}, &admin)).await.unwrap().into_inner();
         assert_eq!(types(&caps), [pb::ResourceType::Schedule, pb::ResourceType::Job, pb::ResourceType::Jobdefs]);
+
+        // Client ACL: only Client in the capabilities, DENIED for other names
+        let clients = f.login("clients", "pw");
+        let caps = f.api.get_config_capabilities(req(pb::ConfigCapabilitiesRequest {}, &clients)).await.unwrap().into_inner();
+        assert_eq!(types(&caps), [pb::ResourceType::Client]);
+        let client = |name: &str| Some(pb::ResourceRef { r#type: pb::ResourceType::Client as i32, name: name.into() });
+        let read = f.api.read_resource(req(pb::ReadResourceRequest { resource: client("fd") }, &clients)).await.unwrap().into_inner();
+        assert_eq!(read.status(), pb::ConfigStatus::Ok);
+        assert_eq!(read.resource.unwrap().r#type(), pb::ResourceType::Client);
+        let denied = f.api.create_resource(req(pb::CreateResourceRequest { r#type: pb::ResourceType::Client as i32,
+            text: crate::config_edit::tests::CLIENT_TLS.into(), validate_only: true }, &clients)).await.unwrap().into_inner();
+        assert_eq!(denied.status(), pb::ConfigStatus::Denied);
+        // the Jobs using the client: REFERENCED
+        let referenced = f.api.delete_resource(req(pb::DeleteResourceRequest { resource: client("fd"),
+            expected_sha256: read.sha256, validate_only: true }, &clients)).await.unwrap().into_inner();
+        assert_eq!(referenced.status(), pb::ConfigStatus::Referenced);
+        let job = |name: &str| pb::ResourceRef { r#type: pb::ResourceType::Job as i32, name: name.into() };
+        assert_eq!(referenced.referenced_by, vec![job("secret"), job("a")]);
     }
 }

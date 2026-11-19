@@ -363,3 +363,72 @@ fn two_concurrent_updates_do_not_overtake_each_other() {
     statuses.sort_by_key(|s| *s as u8);
     assert_eq!(statuses, [Status::Ok, Status::Conflict]);
 }
+
+pub(crate) const CLIENT_TLS: &str = "Client {\n  # laptop, TLS with PSK off\n  Name = \"laptop-fd\"   # name\n  Address = laptop.example   ; Port = 9102\n  Password = \"[md5]0123456789abcdef\"\n  TLS Enable = yes\n  TLS Require = yes\n  TLS CA Certificate File = \"/etc/bareos/tls/ca.pem\"\n  TLS Certificate = /etc/bareos/tls/dir.pem\n  TLS Key = /etc/bareos/tls/dir.key\n  TLS Allowed CN = \"laptop.example\"\n  File Retention = 30 days\n  Job Retention = 6 months\n  AutoPrune = no\n  Maximum Concurrent Jobs = 2\n  Heartbeat Interval = 60\n}\n";
+
+#[test]
+fn client_create_read_update_delete_keeps_every_directive() {
+    let h = harness("client-crud");
+    let created = h.create(RType::Client, CLIENT_TLS);
+    assert_eq!(created.status, Status::Ok, "{created:?}");
+    let path = h.file("client", "laptop-fd.conf");
+    assert_eq!(std::fs::read_to_string(&path).unwrap(), CLIENT_TLS);
+    let read = h.read(RType::Client, "laptop-fd");
+    assert_eq!((read.status, read.text.as_str(), read.sha256.as_str()), (Status::Ok, CLIENT_TLS, created.sha256.as_str()));
+    // only one value changes, every other byte (TLS, comments, `;`) stays
+    let changed = CLIENT_TLS.replace("File Retention = 30 days", "File Retention = 60 days");
+    let updated = h.update(RType::Client, "laptop-fd", &read.sha256, &changed);
+    assert_eq!(updated.status, Status::Ok, "{updated:?}");
+    assert_eq!(std::fs::read(&path).unwrap(), changed.as_bytes());
+    assert!(updated.followups.is_empty());
+    let list = h.editor.list(RType::Client, &all).unwrap();
+    assert_eq!(list.iter().map(|s| s.name.as_str()).collect::<Vec<_>>(), ["laptop-fd", "fd"]);
+    // missing Address: INVALID like `odir -t`, nothing written
+    let bad = changed.replace("  Address = laptop.example   ; Port = 9102\n", "");
+    let o = h.update(RType::Client, "laptop-fd", &updated.sha256, &bad);
+    assert_eq!(o.status, Status::Invalid, "{o:?}");
+    assert_eq!(std::fs::read(&path).unwrap(), changed.as_bytes());
+    let deleted = h.delete(RType::Client, "laptop-fd", &updated.sha256);
+    assert_eq!(deleted.status, Status::Ok, "{deleted:?}");
+    assert!(!path.exists());
+    assert_eq!(h.reloads.load(Ordering::SeqCst), 3);
+    assert!(h.messages.lock().unwrap()[1].starts_with("Console [admin] config update Client \"laptop-fd\""));
+}
+
+#[test]
+fn client_crlf_and_conflict() {
+    let h = harness("client-crlf");
+    let crlf = CLIENT_TLS.replace('\n', "\r\n");
+    let file = h.file("client", "laptop-fd.conf");
+    std::fs::write(&file, &crlf).unwrap();
+    let read = h.read(RType::Client, "laptop-fd");
+    assert_eq!(read.sha256, sha256_hex(&crlf));
+    let o = h.update(RType::Client, "laptop-fd", "deadbeef", &crlf);
+    assert_eq!((o.status, o.text.as_str()), (Status::Conflict, crlf.as_str()));
+    let changed = crlf.replace("Heartbeat Interval = 60", "Heartbeat Interval = 120");
+    assert_eq!(h.update(RType::Client, "laptop-fd", &read.sha256, &changed).status, Status::Ok);
+    assert_eq!(std::fs::read(&file).unwrap(), changed.as_bytes());
+}
+
+#[test]
+fn a_job_using_the_client_prevents_the_delete() {
+    let h = harness("client-referenced");
+    // JOB_A uses Client = fd
+    let read = h.read(RType::Client, "fd");
+    let o = h.delete(RType::Client, "fd", &read.sha256);
+    assert_eq!(o.status, Status::Referenced, "{o:?}");
+    assert_eq!(o.referenced_by, vec![("job".to_string(), "a".to_string())]);
+    assert!(h.file("client", "fd.conf").exists());
+    // JobDefs, `run ... client=` in a Run value and in a RunScript console command
+    assert_eq!(h.create(RType::Client, CLIENT_TLS).status, Status::Ok);
+    std::fs::write(h.file("jobdefs", "d.conf"), "JobDefs {\n  Name = d\n  Client = \"laptop-fd\"\n}\n").unwrap();
+    let raw = bareos_config::raw::parse_str("Job {\n Name = r\n Run = \"job=a client=laptop-fd level=Full\"\n}\n\
+        Job {\n Name = s\n RunScript {\n  Console = \"run job=a client=\\\"laptop-fd\\\" yes\"\n }\n}\n\
+        Job {\n Name = t\n Run = \"job=a client=%c\"\n RunScript {\n  Console = \"run job=a myclient=laptop-fd\"\n }\n}\n\
+        Console {\n Name = c\n Password = p\n ClientACL = laptop-fd\n}\n", None).unwrap();
+    assert_eq!(references(&raw, RType::Client, "laptop-fd"), vec![("job".into(), "r".into()), ("job".into(), "s".into())]);
+    let read = h.read(RType::Client, "laptop-fd");
+    let o = h.delete(RType::Client, "laptop-fd", &read.sha256);
+    assert_eq!((o.status, o.referenced_by.clone()), (Status::Referenced, vec![("jobdefs".to_string(), "d".to_string())]));
+    assert_eq!(run_arg("run job=a Client=x yes", "client=").as_deref(), Some("x"));
+}
