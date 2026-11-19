@@ -1,207 +1,307 @@
 # Planung: OpenLDAP-Plugin für ofd
 
-Stand: 27.10.2026. Status: **Entwurf zur Freigabe; keine Umsetzung begonnen.**
+Stand: 19.11.2026. Status: **neu geschrieben nach zwei Prüfberichten
+(Sicherheit S-1 bis S-16 / E-1 bis E-12, LDAP-Mechanik L-1 bis L-20) und den
+verbindlichen Entscheidungen des Nutzers vom 19.11.2026; Umsetzung siehe
+Abschnitt „Umsetzung“.** Ersetzt den Entwurf vom 27.10.2026 (LDAP-Protokoll-
+Broker über ldapi als root, Eintragsbaum), der nicht mehr zur Architektur passt.
 
-Das Plugin ersetzt das Python-Plugin `bareos-fd-ldap` (siehe Job `BackupBgLage`):
-Sicherung **und** Wiederherstellung eines OpenLDAP-Servers (`slapd`), die
-Datenbank und die Online-Konfiguration (`cn=config`) einschließen. Der Inhalt
-einer Sicherung soll später in der Oberfläche **durchsuchbar** sein, wie jedes
-andere FileSet. Daraus folgt: kein LDIF-Klumpen, sondern ein Baum virtueller
-Dateien mit Metadaten.
+Das Plugin sichert einen lokalen OpenLDAP-Server (`slapd` 2.5/2.6, Backend
+`mdb`) vollständig und konsistent – Daten, Konfiguration, Overlays, ACLs,
+Passwort-Hashes – und ersetzt das Python-Plugin `bareos-fd-ldap` (Job
+`BackupBgLage`). Es gelten [Plugin-Architektur](../wiki/plugin-architektur.md),
+[Signier-Infrastruktur](SIGNIER-INFRASTRUKTUR.md) und das Vorbild
+[PostgreSQL](POSTGRESQL-PLUGIN.md) / [Phase 2](POSTGRESQL-PHASE2.md):
+signiertes Rust/WASM ohne Importe außer einem typisierten Broker-Import,
+nativer Broker als Instanzbenutzer, nie als root, der Host prüft jede Anfrage.
 
-Es gelten [Plugin-Architektur](../wiki/plugin-architektur.md) und
-[Protobuf-Vertrag](../../proto/filed_plugin.proto): signiertes Rust/WASM, kein
-Python-/Shell-Plugin, eigene Instanz je Job, begrenzte Queues, außerbandiges
-Cancel. DIR↔FD über gRPC mit BNET-Fallback, FD↔SD bleibt BNET.
+## Entscheidungen (19.11.2026, verbindlich)
 
-## Stand der Grundlage
+| # | Thema | Entscheidung |
+| --- | --- | --- |
+| E-1 | Zugriff | `slapcat` über den eigenen signierten Broker `onesimus-ldap-broker`, der als Instanzbenutzer (`openldap`) läuft, nie als root. **Kein Online-Lesen über ldapi**, kein LDAP-Protokoll im Broker. |
+| E-2 | Entfernte Server | nicht unterstützt; `ofd` läuft auf dem LDAP-Host (BgLage: dort installieren). |
+| E-3 | Passwörter | keine in Plugin-Zeilen. `ofd` **lehnt** eine `openldap`-Zeile mit geheimem Schlüssel (`password=`, `bind_pw=`, `credentials=`, …) ab, statt sie nur zu maskieren. |
+| E-4 | Namen | Plugin-ID `org.onesimus.openldap`, Capabilities `openldap.read` und `openldap.write` (siehe unten); vor dem Ausstellen des G1-Signierzertifikats in `signer.cnf`. |
+| E-6 | Form | **eine LDIF-Datei je Datenbank**, kein Eintragsbaum. cn=config bei slapd.d über `slapcat -n 0`, Datenbanken immer über `slapcat -b <suffix>` (die Nummern verschieben sich, L-11). |
+| E-7 | Online-Restore | nur `slapadd` in ein **neues, leeres Ziel**, das der Host anlegt; der Host schreibt `olcDbDirectory`/`directory` auf das Ziel um. Nie in einen laufenden Produktivserver, kein modify/delete. |
+| E-8 | Konfigurationsarten | Online-Konfiguration (slapd.d/cn=config) und Datei-Konfiguration (slapd.conf) gleichwertig, Erkennung automatisch. Restore stellt die gesicherte Art wieder her, keine Umwandlung. |
+| E-9 | TLS-Schlüssel | gehören nicht zum Plugin. Ein normales `File =` im selben FileSet sichert sie (ofd als root); das Plugin **warnt**, wenn die von der Konfiguration genannten TLS-Dateien im FileSet fehlen. |
+| E-10 | Broker allgemein | Vorphase: Host für mehrere Broker verallgemeinert (S-10), PostgreSQL unverändert. |
+| — | Geheimnisse im Inhalt | `userPassword`, `olcRootPW`/`rootpw`, `credentials=` (syncrepl, idassert-bind), `olcDbACLPasswd`/`acl-passwd` stehen nur auf dem Volume, nie im Joblog, im Katalog oder in `_info.json` (dort nur die **Namen** der Geheimnisarten). Die Fehlerausgabe von slapcat/slapadd wird gefiltert. |
+| — | Paket | `ofd-plugin-openldap` nach dem Muster von `ofd-plugin-postgresql`; postinst trägt `Plugin Names = "openldap"` ein, Neustart nur ohne laufenden Job, **kein Eingriff in slapd**. |
 
-Vorhanden: Verifier, Wasmtime-Host (`wasm::load_signed`), Executor, Vertrag
-`FileDaemonPlugin`, `ofd --check-plugin`. **Es fehlen** (Voraussetzungen):
+Bereits behoben vor diesem Plan (Mängelliste, E-11): Maskierung in
+`FileSetText`/`show fileset` (S-3, `63b24ff`), Schlüssel mit `pw` (S-4),
+Modus-Maske `& 0o777` für Plugin-Dateien (S-13, `e1ecd00`).
 
-| Lücke | Wirkung |
-| --- | --- |
-| `ofd` führt `Plugin = …` im `Include` nicht aus (heute: „not found“) | Ohne Anschluss an die Job-Engine läuft kein Plugin. |
-| Der WASM-Gast hat keine Netz-, Datei- oder Prozess-Importe | Der Zugriff auf `slapd` braucht einen Broker auf dem Host. |
-| `FileEntry` kennt nur Pfad, Art, Größe, Zeit, Modus, Linkziel | Für Durchsuchen und Inkrementale fehlen Metadaten (siehe unten). |
-
-Diese drei Punkte sind Phase 0 und 1; das eigentliche Plugin ist Phase 2.
-
-## Ein Include, zwei Plugin-Zeilen
+## Plugin-Zeile
 
 ```
-Include {
-  Plugin = "openldap:instance=main:content=data:uri=ldaps\://ldap.example.org:bind_dn=cn=admin,dc=example,dc=org:password=…"
-  Plugin = "openldap:instance=main:content=config:uri=ldapi\:///"
+FileSet {
+  Name = "ldap-fs"
+  Include {
+    Plugin = "openldap:instance=main"
+    File = /etc/ldap/tls            # TLS-Schlüssel (root-only), E-9
+  }
 }
 ```
 
-Jede Zeile ist eine Plugin-Instanz mit eigenem Inhaltsbereich (`content=data`
-oder `content=config`). Passwörter in den Optionen werden in Meldungen
-maskiert (`ofd/src/secrets.rs`). Fehlt ein Plugin, meldet `ofd` jede Zeile
-einzeln (Issue #9).
+| Option | Vorgabe | Bedeutung |
+| --- | --- | --- |
+| `instance` | `main` | Name im virtuellen Baum `/@openldap/<instance>/`, `[A-Za-z0-9_-]{1,64}`. |
+| `databases` | `*` | Suffixe (Komma-Liste, `*`-Muster, Groß-/Kleinschreibung egal). Nur `mdb` ist sicherbar. |
+| `exclude` | leer | Suffix-Muster, die ausgelassen werden. |
+| `config` | `yes` | Konfiguration mitsichern (cn=config bzw. Dateisatz). |
+| `config_path` | – | Nur Auswahl, wenn **mehrere** slapd laufen: der Wert muss dem erkannten `-F`/`-f` eines Prozesses entsprechen. Wird nie als Pfad benutzt. |
 
-## Virtueller Baum und Durchsuchen
+Ein ausdrücklich genannter Suffix, den es nicht gibt oder der kein `mdb` ist,
+ist ein Planfehler; ein Muster ohne Treffer nicht.
 
-Jeder LDAP-Eintrag wird eine virtuelle Datei; die Verzeichnishierarchie des
-DIT wird zum Verzeichnisbaum. Dadurch erscheint er im Katalog (Tabellen
-`File`, `Path`) und ist über die vorhandene Pfadsuche (bvfs/OVFS) durchsuchbar.
+Restore-Optionen (Restore-Job, `Plugin Options`):
+`openldap:restore_mode=online[:target=/var/lib/onesimus-ldap-restore/<name>]`.
+
+## Virtueller Baum
 
 ```
-/@openldap/main/_info.json                              Instanz-Metadaten
-/@openldap/main/data/dc=de/dc=example/@entry.ldif       der Eintrag dc=example,dc=de
-/@openldap/main/data/dc=de/dc=example/ou=people/@entry.ldif
-/@openldap/main/data/dc=de/dc=example/ou=people/uid=anna/@entry.ldif
-/@openldap/main/config/@entry.ldif                      cn=config
-/@openldap/main/config/olcDatabase={1}mdb/@entry.ldif
+/@openldap/main/                              Verzeichnis
+/@openldap/main/_info.json                    zuerst: Art, Version, Datenbanken, TLS-Dateien, Geheimnisarten
+/@openldap/main/config/cn=config.ldif         slapd.d: slapcat -n 0
+/@openldap/main/config/files/etc/ldap/slapd.conf          slapd.conf: Hauptdatei
+/@openldap/main/config/files/etc/ldap/schema/core.schema  … jede include-Datei (rekursiv)
+/@openldap/main/config/files/etc/default/slapd            beide Arten
+/@openldap/main/data/dc=example,dc=org.ldif   slapcat -b dc=example,dc=org
+/@openldap/main/data/o=second,c=de.ldif
 ```
 
-**Jeder Eintrag ist ein Verzeichnis**, das seinen Inhalt in `@entry.ldif`
-trägt; Kinder sind Unterverzeichnisse. Das gilt einheitlich für Blätter und
-innere Knoten. Der Pfad eines Eintrags ändert sich nie, wenn er später Kinder
-bekommt oder verliert; Versionen und Inkrementale bleiben stabil. In der
-Baumansicht ist jeder Knoten genau ein Knoten, so wie im DIT.
+- Jede `data/<suffix>.ldif` ist **slapadd-fähig** (Entry-ID-Reihenfolge, Kind
+  vor Elternteil möglich, L-16; slapadd nimmt das an). Der Suffix ist Dateiname,
+  `/`, `%` und Steuerzeichen werden `%XX`-kodiert.
+- `_info.json` steht **vorne**: Ein Online-Restore kennt damit Art und
+  Hauptdatei, bevor die Konfiguration kommt. Inhalt: `kind` (`slapd.d`/
+  `slapd.conf`), `config_path`, `server_version` (`slapd -VV`, L-13), je
+  Datenbank Nummer, Backend, Suffix, Verzeichnis, Overlays, gesichert ja/nein
+  mit Grund (L-6: `ldap`, `meta`, `monitor`, … „no local storage“), TLS-Dateien,
+  `contains_secrets` (nur Namen), `consistency: "per-database"`.
+- Modus aller Dateien 0600, Verzeichnisse 0700 (S-13, S-7.4).
+- **Kein Eintragsbaum** (E-6, L-19): kein `@entry.ldif` je Eintrag, keine
+  DN-Pfade im Katalog. Einzelne Einträge holt der Administrator aus der
+  Datenbank-LDIF des Restores in Dateien (`ldapadd`).
+- Konsistenz (L-3, gemessen): `slapcat` liest jede mdb-Datenbank in **einer**
+  LMDB-Lesetransaktion – ein Schnappschuss je Datenbank, auch unter Schreiblast
+  (20 000 Einträge Umbau, |p|+|q| immer N oder N+1). Zwischen Datenbanken und
+  zwischen cn=config und Daten gibt es keinen gemeinsamen Zeitpunkt.
+- Level: jede Sicherung ist vollständig (L-7); Incremental/Differential
+  schreiben ebenfalls alles. `modifyTimestamp` taugt nicht als Änderungsmerkmal.
 
-- **Pfad:** Relative DNs in umgekehrter Reihenfolge, Sonderzeichen nach RFC 4514
-  und zusätzlich für `/` und Nicht-UTF-8 escaped; Pfadbytes bleiben Bytes.
-- **Datei `@entry.ldif`:** Der Eintrag als LDIF (RFC 2849), Binärattribute
-  base64. Eine Datei je Eintrag ermöglicht den **Restore einzelner Einträge**
-  (die Datei) **oder Teilbäume** (das Verzeichnis).
-- **Zeitstempel:** `modifyTimestamp` des Eintrags als Änderungszeit; Größe =
-  LDIF-Länge. Daraus rechnet das FileSet-Verhalten (Accurate/Incremental) wie
-  bei normalen Dateien.
-- **`_info.json`** (Datenbankinformationen für die Oberfläche): Instanz, Server-
-  Version, Backend (`mdb`, `hdb`), Suffix, Anzahl Einträge, `contextCSN`,
-  Schemaliste, Overlays, Zeitpunkt der Sicherung, Sicherungsmodus. Die
-  Oberfläche liest dies, ohne den Baum zu durchlaufen.
+## Instanz erkennen (`ofd`, `ldap_instance::discover`, L-11)
 
-### Datensätze auswählen
+1. In `/proc` jeden Prozess mit `comm == "slapd"` suchen. Genau einer: dieser.
+   Mehrere: `config_path=` wählt; sonst Planfehler. Keiner: Planfehler
+   (**Vorschlag, offen:** slapcat bräuchte keinen laufenden Server, L-11.5; ohne
+   Prozess fehlt aber die gegengeprüfte Benutzer-ID, daher abgelehnt).
+2. `/proc/<pid>/status`: reale = effektive UID und GID; **UID 0 wird abgelehnt**
+   (slapd ohne `-u`).
+3. `/proc/<pid>/cmdline`: `-F <dir>` → slapd.d, `-f <datei>` → slapd.conf.
+   Ohne beides gilt die eingebaute Vorgabe wie bei der Debian-Unit:
+   `/etc/ldap/slapd.d`, falls vorhanden, sonst `/etc/ldap/slapd.conf`
+   (`SLAPD_CONF` aus `/etc/default/slapd` setzt die Unit nur als `-F`/`-f`).
+   Relativer Pfad oder Symlink: abgelehnt.
+4. Eigentümer: slapd.d gehört der Prozess-UID; slapd.conf gehört root oder der
+   Prozess-UID und ist für Andere nicht schreibbar. Jedes `olcDbDirectory`/
+   `directory` einer gesicherten Datenbank gehört der Prozess-UID (Prüfung im
+   Host gegen die Antwort des Brokers, nicht im Broker).
+5. Die Werkzeuge `/usr/sbin/slapcat`, `slapadd`, `slapd` müssen root gehören und
+   dürfen für Gruppe/Andere nicht schreibbar sein (`check_trusted`).
 
-Einträge sind einzeln und als Teilbaum auswählbar, sowohl beim Wiederherstellen
-als auch beim Sichern.
+## Broker `onesimus-ldap-broker`
 
-- **Restore:** Die Auswahl läuft über die vorhandene Dateiauswahl: nur der
-  Eintrag ist seine `@entry.ldif`, der Teilbaum das Verzeichnis (`ou=people/`
-  mit Schrägstrich). Die Oberfläche zeigt DN und Objektklasse
-  (`FileEntry.attributes`), die Auswahl selbst bleibt eine Pfadauswahl im
-  Katalog. `fileregex` und `files`/`directories` des Restore-Befehls gelten
-  unverändert.
-- **Eltern fehlen:** Wer `uid=anna` ohne `ou=people` auswählt, bekommt im Plan
-  den Hinweis „Elterneintrag fehlt im Ziel“. Der Online-Import legt Eltern nicht
-  stillschweigend an; `with_parents=yes` nimmt die Elternkette ausdrücklich mit.
-- **Verweise:** Einträge, die auf andere verweisen (`member`, `manager`,
-  `seeAlso`, Overlays wie `memberof`), werden nicht automatisch ergänzt. Der
-  Plan listet DNs, die im Ziel nicht existieren.
-- **Backup:** Eine Plugin-Zeile kann den Umfang begrenzen: `base=<DN>`
-  (Teilbaum), `scope=sub|one`, `filter=<Filter>`. Die zulässigen Basen und
-  Filter legt die signierte Freigabe fest, nicht das Plugin; ein Filter ist
-  kein freier Suchausdruck des Gasts. Mehrere Zeilen im selben `Include`
-  sichern unterschiedliche Teile, derselbe DN zweimal ist ein Planfehler.
-- **Durchsuchen vs. Zeitstand:** Jede Sicherung ist ein Stand; die Oberfläche
-  zeigt je Eintrag die Versionen über die vorhandenen Versions-Sichten
-  (`ovfs_versions`, `bvfs_versions`).
+Rust, nativ, im Plugin-Paket unter `openldap/onesimus-ldap-broker`, Hash im
+signierten Manifest, Start per `fexecve` als Instanzbenutzer mit leerer
+Umgebung (Vorbild PostgreSQL B). Argumente nur vom Host:
 
-### Erweiterung des Vertrags (Voraussetzung)
+```text
+onesimus-ldap-broker --sbin /usr/sbin (--config-dir <slapd.d> | --config-file <slapd.conf>) [--target <neues Ziel>]
+```
 
-`FileEntry` bekommt, versioniert und rückwärtsverträglich, ein Feld
-`map<string,string> attributes` (z. B. `dn`, `entryUUID`, `objectClass`) und
-eine Art `FILE_KIND_VIRTUAL`, damit die Oberfläche den DN statt des
-maskierten Pfads zeigen und nach Objektklasse filtern kann. Ohne diese
-Änderung stünden DN und Klasse nur im LDIF-Inhalt.
+Vertrag `proto/openldap_broker.proto` (Paket `onesimus.filed.broker.openldap.v1`):
 
-## Zugriff: Broker mit Capability `ldap.read` / `ldap.write`
+| Operation | Broker führt aus | Prüfung im Host (`LdapPort`) |
+| --- | --- | --- |
+| `info` | `slapd -VV`; slapd.d: `slapcat -F <dir> -n 0` parsen; slapd.conf: Datei samt `include` (rekursiv) parsen. Ergebnis: Art, Version, Datenbanken (Nummer, Backend, Suffix, Verzeichnis, Overlays), Konfigurationsdateien **mit fester ID**, TLS-Dateien, Geheimnisarten | Auswahl aus `databases=`/`exclude=`/`config=` festlegen; nur `mdb`; Eigentümer jedes Datenbankverzeichnisses; Antwort an den Gast mit `selected` je Datenbank |
+| `dump-open {config}` | `slapcat -F <dir> -n 0 -o ldif_wrap=no` (nur slapd.d; bei slapd.conf gibt es kein `-n 0`, L-10) | `config=yes` und Art slapd.d |
+| `dump-open {suffix}` | `slapcat -F <dir>\|-f <datei> -b <suffix> -o ldif_wrap=no` | Suffix in der Auswahl |
+| `config-file-open {id}` | liest die Datei mit dieser ID aus seiner eigenen `info`-Liste; nie ein Pfad vom Gast; nur unter festen Präfixen (Verzeichnis der Hauptdatei, `/etc/ldap`, `/etc/openldap`, `/usr/share/openldap`, `/etc/default/slapd`), nie eine TLS-Datei | ID aus der gefilterten Liste, `config=yes` |
+| `dump-read`, `dump-close` | Strom lesen bzw. Prozess beenden | nur eigene Handles, höchstens ein Block |
+| `load-open/-write/-close` (nur Restore, `openldap.write`) | `slapadd -F <ziel>/slapd.d -n 0` bzw. `slapadd -F\|-f <ziel…> -b <suffix> -q`, nur mit `--target`, Pfade nur unterhalb des Ziels | siehe Online-Restore |
 
-Der Gast bleibt ohne Netzwerk. Ein Broker auf dem Host (Teil von `ofd`,
-nicht des Plugins) bietet typisierte, jobgebundene Operationen:
+- Feste Argumentlisten, `env_clear`, stdin `/dev/null` (slapcat) bzw. Pipe
+  (slapadd). Ein Broker mit `--target` sichert nicht (keine dump-Operationen),
+  einer ohne `--target` schreibt nicht.
+- **stderr-Filter (S-7.2):** Diagnosen von slapcat/slapadd werden nie wörtlich
+  weitergegeben. Der Broker meldet Exit-Status, die LDIF-Zeilennummer
+  (`line=N`) und bekannte Fehlerklassen als eigene feste Texte. Eine
+  slapadd-Meldung, die eine LDIF-Zeile zitiert, erreicht so nie das Joblog.
+- Abbruch: Prozessgruppe (SIGTERM, dann SIGKILL), wie beim Vorbild.
 
-| Operation | Zweck |
-| --- | --- |
-| `ldap.info` | Root-DSE, `namingContexts`, Datenbankliste, Zähler, `contextCSN` |
-| `ldap.search` | Eintragsliste (DN, `modifyTimestamp`, `entryUUID`) eines Suffixes, seitenweise |
-| `ldap.read_entry` | Ein Eintrag als LDIF, inkl. Operational Attributes (`+`) |
-| `ldap.add_entry`, `ldap.modify`, `ldap.delete` | Nur Restore, nur nach Plan-Freigabe |
+## Gast ↔ Host: WIT und Capabilities
 
-Zwei freigegebene Verbindungsarten:
+```wit
+interface openldap {          // openldap.read
+    info, dump-open, dump-read, dump-close, config-file-open
+}
+interface openldap-restore {  // openldap.write
+    load-open, load-write, load-close
+}
+world openldap-plugin { include plugin; import openldap; import openldap-restore; }
+```
 
-- **`ldapi:///` mit SASL EXTERNAL.** Der FD läuft als root; damit sind
-  `cn=config` und alle Datenbanken ohne Passwort im Optionstext erreichbar.
-  Bevorzugt, wenn `slapd` auf demselben Host läuft.
-- **`ldaps://` mit Bind-DN und Passwort.** Für einen entfernten `slapd`
-  (heutiger Zustand von `BgLage-fs`). Zertifikat wird geprüft; kein
-  Fallback auf unverschlüsselt. Passwort nur aus den Plugin-Optionen, nie im Katalog.
+| Capability | Wofür | Verknüpft |
+| --- | --- | --- |
+| `file.read` | Sicherung (NextFile/ReadFile) | Backup-Job |
+| `file.write` | Online-Restore (WriteFile/CloseFile) | Restore-Job |
+| `openldap.read` | Import `openldap` | wenn Manifest und Policy sie gewähren und ein openldap-Port läuft |
+| `openldap.write` | Import `openldap-restore` mit echten Funktionen | **nur** im Restore-Job mit `restore_mode=online`; im Backup-Job antworten diese Funktionen nur mit Fehler (der Gast importiert beide Schnittstellen, eine Instanziierung braucht alle Importe) |
 
-Der Broker erlaubt dem Gast keine freien Filter, Base-DNs oder URIs: Instanz,
-Suffix und URI kommen aus der Konfiguration und der signierten Freigabe
-(`allowed_capabilities` der Trust-Policy), nicht vom Plugin.
+`signer.cnf` (Grants des G1-Signierzertifikats) bekommt:
+
+```ini
+[onesimus_plugin_ids]
+p3 = UTF8String:org.onesimus.openldap
+[onesimus_capabilities]
+c4 = UTF8String:openldap.read
+c5 = UTF8String:openldap.write
+```
+
+Grants sind ein Kreuzprodukt (S-11, E-5): ein signiertes PostgreSQL-Bundle
+könnte `openldap.write` anfordern. **Vorschlag, offen:** vorerst akzeptiert,
+Grants Version 2 (Capabilities je Plugin-ID) als offener Punkt. Ein Port
+bedient nur seine eigene Schnittstelle: ein Plugin mit `openldap.read` bekommt
+nie den Import `postgresql` und umgekehrt (Test).
 
 ## Sicherung
 
-1. `Initialize`; `ldap.info` prüft Erreichbarkeit, Backend und Suffixe.
-2. `content=data`: je Suffix paginiert alle DNs lesen; Baum in
-   Elternreihenfolge (Eltern vor Kindern) als `NextFile` liefern.
-   `content=config`: `cn=config` und alle `olc…`-Unterbäume.
-3. `ReadFile` liefert das LDIF des Eintrags, `ldap.read_entry` mit
-   Operational Attributes (`entryUUID`, `createTimestamp`, `creatorsName`,
-   `modifyTimestamp`, …), damit eine Wiederherstellung die Identität erhält.
-4. `_info.json` zuletzt, mit der Zahl tatsächlich gelesener Einträge.
-5. **Inkremental:** Einträge mit `modifyTimestamp` seit der letzten Sicherung;
-   gelöschte Einträge erkennt die Accurate-Liste (Pfad fehlt). Ändert sich
-   `contextCSN` während der Sicherung, endet der Lauf mit Warnung, nicht
-   stillschweigend inkonsistent. Konsistenzklasse: **fuzzy** (kein
-   Snapshot); ein konsistenter Modus (`slapcat` auf einem
-   freigegebenen Dateisystemsnapshot) ist eine spätere Klasse.
+1. `Session::open` → `prepare_broker`: verifiziertes Manifest mit
+   `openldap.read` → Zeile ohne Geheimnis (E-3) → `discover` → Werkzeuge
+   prüfen → Broker als Instanzbenutzer starten → `LdapPort::new` holt `info`,
+   prüft Eigentümer und legt die Auswahl fest.
+2. TLS-Dateien aus `info`, die kein `File =` des FileSets abdeckt, ergeben je
+   eine **Warnung** im Joblog (E-9); der Job läuft weiter.
+3. Gast: `_info.json`, dann Konfiguration (cn=config bzw. Dateien), dann je
+   ausgewählter Datenbank `data/<suffix>.ldif` als Strom ohne Zwischendatei.
+4. Ein fehlgeschlagener slapcat (Exit ≠ 0) beendet den Job mit Fehler; die
+   Diagnose ist gefiltert.
 
 ## Wiederherstellung
 
-1. Plan anzeigen: Ziel (`ldapi`/`ldaps`), Suffix, Zahl der Einträge, Konflikte
-   (vorhandene DNs), Umgang mit Operational Attributes.
-2. **Standard: Wiederherstellung in Dateien** (`where=/pfad`): Der Restore
-   schreibt die LDIF-Dateien; nichts am laufenden `slapd` ändert sich.
-3. **Online-Import** nur ausdrücklich (`restore_mode=online`): Einträge in
-   Elternreihenfolge per `ldap.add_entry`. Online lassen sich `entryUUID`,
-   `createTimestamp` und `creatorsName` nur mit der Relax-Kontrolle und
-   passenden Rechten setzen; sonst erzeugt `slapd` neue Werte. Das Ergebnis wird
-   im Joblog genannt, kein stilles Abweichen.
-4. **Offline-Import** (`slapadd`) bleibt ein getrennter, manueller Schritt
-   (Dienst anhalten); `ofd` startet ihn nicht.
-5. `replace=never` ist Vorgabe: vorhandene DNs werden gemeldet, nicht überschrieben.
-   `cn=config` wird nie ohne ausdrückliche Freigabe zurückgeschrieben; ein
-   fehlerhaftes `olcDatabase` kann `slapd` am Start hindern.
+### In Dateien (Standard, `restore_mode=files`)
+
+Ohne Plugin-Code (Regel Phase 1): `Where=/pfad` schreibt den Baum mit Modus
+0600. Danach von Hand, geprüft im Container (L-9):
+
+```sh
+systemctl stop slapd                         # und warten, bis kein slapd mehr läuft
+mv /etc/ldap/slapd.d /etc/ldap/slapd.d.alt; mv /var/lib/ldap /var/lib/ldap.alt
+install -d -o openldap -g openldap -m 700 /etc/ldap/slapd.d /var/lib/ldap   # und jedes olcDbDirectory
+R=/pfad/@openldap/main
+runuser -u openldap -- slapadd -F /etc/ldap/slapd.d -n 0 -l $R/config/cn=config.ldif
+runuser -u openldap -- slapadd -F /etc/ldap/slapd.d -b dc=example,dc=org -q -l $R/data/dc=example,dc=org.ldif
+systemctl start slapd
+```
+
+slapd.conf: `config/files/…` an ihren Ort, TLS-Schlüssel aus dem `File =`-Teil,
+dann `slapadd -f /etc/ldap/slapd.conf -b <suffix> -q -l …`. Vergleich mit
+attributweise sortiertem LDIF (die Reihenfolge der Attribute in cn=config
+verschiebt sich, L-9).
+
+### Online, nur in ein neues Ziel (`restore_mode=online`)
+
+1. Ziel: `target=` aus den Restore-Optionen, Vorgabe
+   `/var/lib/onesimus-ldap-restore/<jobid>`. Der Host lehnt ab: relativer Pfad,
+   `.`/`..`, Symlink, vorhandenes nicht leeres Verzeichnis, ein Elternpfad, der
+   nicht root gehört oder für Andere schreibbar ist, und jede Überschneidung
+   (gleich, darüber, darunter) mit dem Konfigurationspfad oder einem
+   Datenbankverzeichnis der laufenden Instanz.
+2. Der Host legt das Ziel an (root, 0755) und darin `slapd.d/` bzw. `conf/`,
+   `db-<n>/`, `run/` (Instanzbenutzer, 0700).
+3. **slapd.d:** Der Gast reicht `cn=config.ldif` über `load-*` an den Host; der
+   Host puffert (höchstens 16 MiB), schreibt jedes `olcDbDirectory` auf
+   `<ziel>/db-<n>` und `olcPidFile`/`olcArgsFile` auf `<ziel>/run/` um, legt die
+   Verzeichnisse an und lässt den Broker `slapadd -n 0` ausführen (L-9:
+   Verzeichnisse vor `-n 0`, sonst Teilzustand).
+   **slapd.conf:** jede Datei geht an den Host, der sie unter
+   `<ziel>/conf/<originalpfad>` ablegt und `include`, `directory` (fehlend:
+   ergänzt), `pidfile`, `argsfile` umschreibt.
+4. Danach je Datenbank-LDIF `slapadd -b <suffix> -q` gegen die Zielkonfiguration;
+   der Suffix muss eine `mdb`-Datenbank der **zurückgespielten** Konfiguration
+   sein, deren Verzeichnis im Ziel liegt. Daten ohne Konfiguration im selben
+   Restore: abgelehnt (**Vorschlag, offen**).
+5. Fehler: der Host löscht das Ziel. Erfolg: das Ziel bleibt; das Joblog nennt
+   den Prüfbefehl `slapd -F <ziel>/slapd.d -h ldapi://<ziel>/run/ldapi -u openldap -g openldap`.
+   Der Wechsel auf die neue Instanz (Dienst stoppen, Verzeichnisse tauschen)
+   ist ein Schritt des Administrators; `ofd` führt ihn nie aus.
+6. Am Produktivsystem ändert sich nichts, ein Rollback ist dort nicht nötig.
 
 ## Sicherheit und Betrieb
 
-- Kein Passwort im Joblog, im Katalog oder in `_info.json`
-  (`mask_plugin_secrets`; Testfall mit `password=` und `bind_pw=`).
-- `userPassword`-Hashes stehen im LDIF. Das Volume ist entsprechend zu
-  behandeln (Verschlüsselung der Sicherung, Zugriff auf den Pool).
-- Fehlerbehandlung: Trap, Timeout und Cancel betreffen nur diese Instanz
-  (Executor-Vertrag); der Broker schließt die LDAP-Sitzung.
-- Eine einzelne Plugin-Zeile darf nicht stillschweigend weggelassen werden:
-  Fehlt `content=config`, endet der Job mit Fehler.
+- Das Volume enthält Passwort-Hashes, Klartext-Proxy-Passwörter
+  (`credentials=`, `acl-passwd`) und `olcRootPW`. Pool-Verschlüsselung wird
+  empfohlen; `_info.json.contains_secrets` nennt die Arten.
+- Joblog/Katalog: nur Pfade (keine DNs, da kein Eintragsbaum), gefilterte
+  Diagnosen, die maskierte Plugin-Zeile. Lecktest siehe unten.
+- `FileEntry.attributes` (E-12): nur Anzeigewerte (Suffix, Backend, Art); sie
+  werden heute nicht gesichert (S-12) und enthalten nie Inhalte.
+  **Vorschlag, offen:** Anzeige aus dem Pfad, kein Katalogfeld.
+- Restore in Dateien als root: Dateien 0600, Eigentümer root (S-7.4).
+- Broker: keine Zusatzgruppen (`setgroups(0)`, S-6); ein TLS-Schlüssel
+  `root:ssl-cert 0640` ist für ihn nicht lesbar – deshalb E-9.
 
-## Phasen und Abnahme
+## Paket `ofd-plugin-openldap`
 
-| Phase | Liefergegenstand | Exitkriterium |
+`packaging/ofd-plugin-openldap/build-deb.sh <openldap.pb> <onesimus-ldap-broker>`:
+`/usr/lib/<triplet>/onesimus/plugins/openldap.pb` und
+`…/plugins/openldap/onesimus-ldap-broker`, alles root, nicht schreibbar für
+Gruppe/Andere. `Depends: ofd (= Version)`, `Recommends: slapd`,
+`Enhances: slapd`. postinst (jede Installation, jedes Upgrade): markierte Zeile
+`Plugin Names = "openldap"   # ofd-plugin-openldap` in die Client-Ressource,
+`ofd -t` prüft, sonst Rückbau; Neustart von `ofd` nur ohne offene Verbindung
+auf dem FD-Port. Kein Eingriff in slapd (keine ACL, keine Gruppe). postrm
+`remove`/`purge`: entfernt die markierte Zeile.
+
+## Tests
+
+Unit (in `cargo test`, ohne slapd):
+- Host: openldap-Port verknüpft nie `postgresql` und umgekehrt; `openldap.write`
+  nur im Restore; Plugin ohne Capability instanziiert nicht.
+- `LdapPort` mit gefälschtem Transport: fremder Suffix, Proxy-Datenbank,
+  Config bei `config=no`, unbekannte Datei-ID, fremder Handle, Block-Grenze,
+  `load-*` im Backup, Ziel unter/über/gleich Produktivpfad, Symlink, nicht leer,
+  Umschreiben für slapd.d und slapd.conf (inkl. fehlendem `directory`).
+- `discover` gegen ein gefälschtes `/proc`: fremder Prozess, slapd als root,
+  Eigentümer ≠ UID, relatives `-F`, Vorgabe slapd.d vor slapd.conf, mehrere slapd.
+- Broker: Parser für `slapcat -n 0` und slapd.conf (Fortsetzungszeilen,
+  Anführungszeichen, rekursive includes), stderr-Filter gibt kein Geheimnis weiter.
+- Geheimnisse: `openldap:…:password=x` abgelehnt.
+
+Integration und Ende-zu-Ende in Podman (debian:trixie, slapd 2.6, `--init`;
+Aufbau aus dem Mechanik-Gutachten) für **beide** Konfigurationsarten:
+Backup unter Schreiblast konsistent; Restore in Dateien ohne Plugin-Code;
+Online-Restore in ein neues Ziel (Daten, Overlays, ACLs, Hashes gleich,
+Anmeldung mit altem Passwort an einem zweiten slapd auf dem Ziel); slapd.conf
+mit include-Dateien; Lecktest (kein Geheimnis in Joblog, Attributen/Katalog
+oder Fehlermeldungen); slapd als root abgelehnt; Produktivverzeichnis nie
+überschrieben (`data.mdb` vor/nach gleich). Podman-Isolation: eigenes
+`--root`, `--runroot`, `--tmpdir` und `XDG_RUNTIME_DIR` (0700), nie
+`system reset`, Präfix `ldaptest-`.
+
+## Offene Punkte
+
+| # | Punkt | Vorschlag |
 | --- | --- | --- |
-| 0 | Vertragserweiterung (`FileEntry.attributes`, `FILE_KIND_VIRTUAL`), Entscheidung zum Katalog (Pfad ↔ DN) | Roundtrip in Protobuf und Katalog getestet |
-| 1 | Plugin-Anschluss in `ofd`: `Plugin =` laden, `NextFile`/`ReadFile` in den SD-Strom, `WriteFile` beim Restore, Cancel | Testplugin sichert und stellt wieder her; zwei Plugin-Zeilen je Include |
-| 2 | Broker `ldap.*` (ldapi, ldaps), Plugin `openldap` (Backup) | Echter `slapd` (Wegwerfinstanz): alle Einträge, Reihenfolge, Operational Attributes, `_info.json` |
-| 3 | Restore in Dateien, danach Online-Import | Roundtrip: sichern, löschen, wiederherstellen, `slapcat`-Vergleich |
-| 4 | Inkrementale, Durchsuchen in der Oberfläche | Änderungen und Löschungen erscheinen; DN-Anzeige statt Pfad |
-
-Pflichttests: Sonderzeichen und Nicht-UTF-8 im DN; Binärattribute;
-Mehrfach-Suffixe; sehr große Einträge (Gruppen mit vielen `member`-Werten);
-`slapd` fällt während der Sicherung aus; Cancel bei blockiertem Broker;
-falsches Passwort; abgelaufenes Zertifikat; Plugin A hält Device B nicht an.
-
-## Offene Entscheidungen
-
-1. Reicht der Katalogpfad aus DN-Segmenten, oder braucht die Oberfläche ein
-   eigenes Feld (`FileEntry.attributes`)? Der Plan nimmt Letzteres an.
-2. Ist **fuzzy** als erste Konsistenzklasse akzeptabel, oder ist ein
-   `slapcat`-Modus auf einem Snapshot Pflicht für Phase 2?
-3. Soll der Online-Import (Phase 3) das Setzen von Operational Attributes über
-   die Relax-Kontrolle verlangen, oder reicht Wiederherstellung in Dateien als
-   Standard?
-4. Welche Verbindungsart ist für BGLAGE maßgeblich: `ldapi:///` (wenn `slapd` auf
-   demselben Host liegt) oder `ldaps://`?
+| O-1 | Sicherung ohne laufenden slapd | abgelehnt (Vorschlag, offen) |
+| O-2 | Grants v2 je Plugin-ID (E-5) | später |
+| O-3 | include außerhalb der Präfixliste | Planfehler statt stilles Weglassen (Vorschlag, offen) |
+| O-4 | Daten-Restore online ohne Konfiguration im selben Job | abgelehnt (Vorschlag, offen) |
+| O-5 | Inkrementale (Hash je Eintrag statt Zeitstempel, L-7) | später |
+| O-6 | `physical` über `mdb_copy` (L-18) | später |
+| O-7 | Ende-zu-Ende mit `odir` + `bareos-sd` und Katalog | am echten System |
