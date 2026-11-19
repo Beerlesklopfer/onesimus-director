@@ -13,6 +13,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 &format!("{proto_dir}/filed_service.proto"),
                 &format!("{proto_dir}/filed_plugin.proto"),
                 &format!("{proto_dir}/postgresql_broker.proto"),
+                &format!("{proto_dir}/openldap_broker.proto"),
             ],
             &[proto_dir],
         )?;
@@ -31,6 +32,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("cargo:rerun-if-changed={proto_dir}/filed_service.proto");
     println!("cargo:rerun-if-changed={proto_dir}/filed_plugin.proto");
     println!("cargo:rerun-if-changed={proto_dir}/postgresql_broker.proto");
+    println!("cargo:rerun-if-changed={proto_dir}/openldap_broker.proto");
 
     // Rebuild if protos change
     println!("cargo:rerun-if-changed={proto_dir}/director_service.proto");

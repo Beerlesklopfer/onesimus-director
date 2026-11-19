@@ -33,3 +33,30 @@ world postgresql-plugin {
     include plugin;
     import postgresql;
 }
+
+/// The OpenLDAP broker, reading (proto/openldap_broker.proto): linked only
+/// for plugins granted "openldap.read". Configuration files are opened by
+/// the id of the info list and read with dump-read.
+interface openldap {
+    info: func(request: list<u8>) -> result<list<u8>, string>;
+    dump-open: func(request: list<u8>) -> result<list<u8>, string>;
+    dump-read: func(request: list<u8>) -> result<list<u8>, string>;
+    dump-close: func(request: list<u8>) -> result<list<u8>, string>;
+    config-file-open: func(request: list<u8>) -> result<list<u8>, string>;
+}
+
+/// The OpenLDAP broker, loading into a new restore target the host
+/// creates: real only for plugins granted "openldap.write" in an online
+/// restore job; elsewhere every call fails.
+interface openldap-restore {
+    load-open: func(request: list<u8>) -> result<list<u8>, string>;
+    load-write: func(request: list<u8>) -> result<list<u8>, string>;
+    load-close: func(request: list<u8>) -> result<list<u8>, string>;
+}
+
+/// A plugin with the OpenLDAP broker imports.
+world openldap-plugin {
+    include plugin;
+    import openldap;
+    import openldap-restore;
+}

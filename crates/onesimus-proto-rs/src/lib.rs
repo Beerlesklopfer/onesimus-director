@@ -14,6 +14,11 @@ pub mod onesimus {
                     tonic::include_proto!("onesimus.filed.broker.postgresql.v1");
                 }
             }
+            pub mod openldap {
+                pub mod v1 {
+                    tonic::include_proto!("onesimus.filed.broker.openldap.v1");
+                }
+            }
         }
     }
     pub mod director {
