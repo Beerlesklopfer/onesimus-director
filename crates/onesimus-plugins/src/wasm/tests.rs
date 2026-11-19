@@ -487,9 +487,79 @@ fn broker_calls_are_bounded() {
         broker: port(POSTGRESQL_READ),
         max_broker_response: 8,
     };
-    assert_eq!(broker_call(&mut state, BrokerFunction::PostgresqlInfo, b"abc".to_vec()).unwrap(), b"cba");
-    assert!(broker_call(&mut state, BrokerFunction::PostgresqlInfo, vec![0; 9]).unwrap_err().contains("response"));
-    assert!(broker_call(&mut state, BrokerFunction::PostgresqlInfo, vec![0; MAX_BROKER_REQUEST + 1]).unwrap_err().contains("request"));
+    assert_eq!(broker_call(&mut state, BrokerFunction::Postgresql(PostgresqlFunction::Info), b"abc".to_vec()).unwrap(), b"cba");
+    assert!(broker_call(&mut state, BrokerFunction::Postgresql(PostgresqlFunction::Info), vec![0; 9]).unwrap_err().contains("response"));
+    assert!(broker_call(&mut state, BrokerFunction::Postgresql(PostgresqlFunction::Info), vec![0; MAX_BROKER_REQUEST + 1]).unwrap_err().contains("request"));
     state.broker = None;
-    assert!(broker_call(&mut state, BrokerFunction::PostgresqlInfo, Vec::new()).is_err());
+    assert!(broker_call(&mut state, BrokerFunction::Postgresql(PostgresqlFunction::Info), Vec::new()).is_err());
+}
+
+const LDAP_IMPORT: &str = "(import \"onesimus:filed-plugin/openldap@1.0.0\" (instance \
+    (export \"info\" (func (param \"request\" (list u8)) (result (result (list u8) (error string)))))))";
+const LDAP_RESTORE_IMPORT: &str = "(import \"onesimus:filed-plugin/openldap-restore@1.0.0\" (instance \
+    (export \"load-open\" (func (param \"request\" (list u8)) (result (result (list u8) (error string)))))))";
+
+/// An OpenLDAP port: family openldap.read, serving openldap.write only
+/// when `restore` (an online restore job).
+struct LdapEcho {
+    restore: bool,
+}
+impl BrokerPort for LdapEcho {
+    fn capability(&self) -> &'static str {
+        OPENLDAP_READ
+    }
+    fn serves(&self, capability: &str) -> bool {
+        capability == OPENLDAP_READ || (self.restore && capability == OPENLDAP_WRITE)
+    }
+    fn call(&mut self, _function: BrokerFunction, request: &[u8]) -> Result<Vec<u8>, String> {
+        Ok(request.to_vec())
+    }
+}
+fn ldap_port(restore: bool) -> Option<BrokerHandle> {
+    Some(BrokerHandle(Arc::new(Mutex::new(Box::new(LdapEcho { restore })))))
+}
+
+#[test]
+fn each_port_links_only_its_own_broker_imports() {
+    let host = Host::new(1).unwrap();
+    let load = |import: &str, caps: &[&str], broker: Option<BrokerHandle>, id: &str| {
+        let (bundle, policy) =
+            crate::tests::signed_component_with(fixture(Behavior::Complete, import, false, false), caps);
+        let mut opts = options(id);
+        opts.broker = broker;
+        load_signed_at(&host, bundle, &policy, opts, 150).map(|mut w| w.shutdown(Duration::from_secs(1)).unwrap())
+    };
+    // The OpenLDAP guest with its own port.
+    assert!(load(LDAP_IMPORT, &["file.read", OPENLDAP_READ], ldap_port(false), "ldap-ok").is_ok());
+    // An openldap.read plugin never gets the PostgreSQL import, and the other way round.
+    assert!(matches!(load(PG_IMPORT, &["file.read", OPENLDAP_READ], ldap_port(false), "ldap-pg"), Err(LoadError::Runtime(_))));
+    assert!(matches!(load(PG_IMPORT, &["file.read", POSTGRESQL_READ, OPENLDAP_READ], ldap_port(false), "ldap-pg2"),
+        Err(LoadError::Runtime(_))));
+    assert!(matches!(load(LDAP_IMPORT, &["file.read", POSTGRESQL_READ, OPENLDAP_READ], port(POSTGRESQL_READ), "pg-ldap"),
+        Err(LoadError::Runtime(_))));
+    // Without openldap.read the port is refused.
+    assert!(matches!(load(LDAP_IMPORT, &["file.read"], ldap_port(false), "ldap-nocap"), Err(LoadError::Runtime(_))));
+    // The restore import needs openldap.write in the manifest; with it the
+    // guest instantiates in both jobs (failing functions in a backup).
+    assert!(matches!(load(LDAP_RESTORE_IMPORT, &["file.read", OPENLDAP_READ], ldap_port(true), "ldap-nowrite"),
+        Err(LoadError::Runtime(_))));
+    assert!(load(LDAP_RESTORE_IMPORT, &["file.read", OPENLDAP_READ, OPENLDAP_WRITE], ldap_port(false), "ldap-w-backup").is_ok());
+    assert!(load(LDAP_RESTORE_IMPORT, &["file.read", OPENLDAP_READ, OPENLDAP_WRITE], ldap_port(true), "ldap-w-restore").is_ok());
+}
+
+#[test]
+fn openldap_write_is_live_only_where_the_port_serves_it() {
+    let caps = |c: &[&str]| c.iter().map(|s| s.to_string()).collect::<Vec<_>>();
+    let live = |granted: &[String], restore: bool| -> Vec<(&str, bool)> {
+        let port = LdapEcho { restore };
+        import_plan(granted, OPENLDAP_READ, &|c| port.serves(c)).unwrap().into_iter().map(|(i, l)| (i.capability, l)).collect()
+    };
+    let all = caps(&[OPENLDAP_READ, OPENLDAP_WRITE]);
+    assert_eq!(live(&all, false), [(OPENLDAP_READ, true), (OPENLDAP_WRITE, false)]);
+    assert_eq!(live(&all, true), [(OPENLDAP_READ, true), (OPENLDAP_WRITE, true)]);
+    assert_eq!(live(&caps(&[OPENLDAP_READ]), true), [(OPENLDAP_READ, true)]);
+    // openldap.write alone is no family; postgresql.read never brings openldap imports.
+    assert!(import_plan(&caps(&[OPENLDAP_WRITE]), OPENLDAP_WRITE, &|_| true).is_err());
+    let pg = import_plan(&caps(&[POSTGRESQL_READ, OPENLDAP_READ, OPENLDAP_WRITE]), POSTGRESQL_READ, &|_| true).unwrap();
+    assert_eq!(pg.iter().map(|(i, _)| i.import).collect::<Vec<_>>(), ["onesimus:filed-plugin/postgresql@1.0.0"]);
 }

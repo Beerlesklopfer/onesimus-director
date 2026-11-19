@@ -12,7 +12,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::io::{Read, Write};
 
-use onesimus_plugins::wasm::{BrokerFunction, BrokerPort, POSTGRESQL_READ};
+use onesimus_plugins::wasm::{BrokerFunction, BrokerPort, PostgresqlFunction, POSTGRESQL_READ};
 use onesimus_proto_rs::onesimus::filed::broker::postgresql::v1 as pb;
 use prost::Message;
 
@@ -127,7 +127,7 @@ impl<T: Read + Write + Send> PgPort<T> {
         use pb::broker_response::Response as A;
         let bad = |e: prost::DecodeError| format!("bad request: {e}");
         match function {
-            BrokerFunction::PostgresqlInfo => {
+            BrokerFunction::Postgresql(PostgresqlFunction::Info) => {
                 pb::InfoRequest::decode(request).map_err(bad)?;
                 let A::Info(mut info) = exchange(&mut self.transport, Q::Info(pb::InfoRequest {}))? else {
                     return Err("broker: unexpected answer".into());
@@ -135,7 +135,7 @@ impl<T: Read + Write + Send> PgPort<T> {
                 info.databases.retain(|d| self.allowed.contains(&d.name));
                 Ok(info.encode_to_vec())
             }
-            BrokerFunction::PostgresqlDatabaseInfo => {
+            BrokerFunction::Postgresql(PostgresqlFunction::DatabaseInfo) => {
                 let r = pb::DatabaseInfoRequest::decode(request).map_err(bad)?;
                 self.permit(&r.database)?;
                 match exchange(&mut self.transport, Q::DatabaseInfo(r))? {
@@ -143,7 +143,7 @@ impl<T: Read + Write + Send> PgPort<T> {
                     _ => Err("broker: unexpected answer".into()),
                 }
             }
-            BrokerFunction::PostgresqlDumpOpen => {
+            BrokerFunction::Postgresql(PostgresqlFunction::DumpOpen) => {
                 let r = pb::DumpOpenRequest::decode(request).map_err(bad)?;
                 match &r.what {
                     Some(pb::dump_open_request::What::Database(db)) => self.permit(db)?,
@@ -159,7 +159,7 @@ impl<T: Read + Write + Send> PgPort<T> {
                     _ => Err("broker: unexpected answer".into()),
                 }
             }
-            BrokerFunction::PostgresqlDumpRead => {
+            BrokerFunction::Postgresql(PostgresqlFunction::DumpRead) => {
                 let mut r = pb::DumpReadRequest::decode(request).map_err(bad)?;
                 if !self.open.contains(&r.handle) {
                     return Err("unknown dump handle".into());
@@ -170,7 +170,7 @@ impl<T: Read + Write + Send> PgPort<T> {
                     _ => Err("broker: unexpected answer".into()),
                 }
             }
-            BrokerFunction::PostgresqlDumpClose => {
+            BrokerFunction::Postgresql(PostgresqlFunction::DumpClose) => {
                 let r = pb::DumpCloseRequest::decode(request).map_err(bad)?;
                 if !self.open.remove(&r.handle) {
                     return Err("unknown dump handle".into());
@@ -180,6 +180,7 @@ impl<T: Read + Write + Send> PgPort<T> {
                     _ => Err("broker: unexpected answer".into()),
                 }
             }
+            BrokerFunction::Openldap(_) => Err("not a function of the PostgreSQL broker".into()),
         }
     }
 }
@@ -285,28 +286,28 @@ mod tests {
         let mut port = PgPort::new(fake, &opts(&[("databases", "EleLa,postgres"), ("globals", "no")]), 1024).unwrap();
 
         // Info shows only the allowed databases.
-        let shown = pb::InfoResponse::decode(port.call(BrokerFunction::PostgresqlInfo, &[]).unwrap().as_slice()).unwrap();
+        let shown = pb::InfoResponse::decode(port.call(BrokerFunction::Postgresql(PostgresqlFunction::Info), &[]).unwrap().as_slice()).unwrap();
         assert_eq!(shown.databases.iter().map(|d| d.name.as_str()).collect::<Vec<_>>(), ["EleLa", "postgres"]);
 
         // Refused here, before the broker.
         let open = |what| pb::DumpOpenRequest { what: Some(what) }.encode_to_vec();
         for (f, req) in [
-            (BrokerFunction::PostgresqlDumpOpen, open(pb::dump_open_request::What::Database("bareos".into()))),
-            (BrokerFunction::PostgresqlDumpOpen, open(pb::dump_open_request::What::Database("multigpt".into()))),
-            (BrokerFunction::PostgresqlDumpOpen, open(pb::dump_open_request::What::Globals(pb::GlobalsOnly {}))),
-            (BrokerFunction::PostgresqlDatabaseInfo, pb::DatabaseInfoRequest { database: "template1".into() }.encode_to_vec()),
-            (BrokerFunction::PostgresqlDumpRead, pb::DumpReadRequest { handle: 7, max_bytes: 10 }.encode_to_vec()),
+            (BrokerFunction::Postgresql(PostgresqlFunction::DumpOpen), open(pb::dump_open_request::What::Database("bareos".into()))),
+            (BrokerFunction::Postgresql(PostgresqlFunction::DumpOpen), open(pb::dump_open_request::What::Database("multigpt".into()))),
+            (BrokerFunction::Postgresql(PostgresqlFunction::DumpOpen), open(pb::dump_open_request::What::Globals(pb::GlobalsOnly {}))),
+            (BrokerFunction::Postgresql(PostgresqlFunction::DatabaseInfo), pb::DatabaseInfoRequest { database: "template1".into() }.encode_to_vec()),
+            (BrokerFunction::Postgresql(PostgresqlFunction::DumpRead), pb::DumpReadRequest { handle: 7, max_bytes: 10 }.encode_to_vec()),
         ] {
             assert!(port.call(f, &req).is_err(), "{f:?}");
         }
 
         // Allowed: open, read (capped to the chunk), close.
-        let o = pb::DumpOpenResponse::decode(port.call(BrokerFunction::PostgresqlDumpOpen,
+        let o = pb::DumpOpenResponse::decode(port.call(BrokerFunction::Postgresql(PostgresqlFunction::DumpOpen),
             &open(pb::dump_open_request::What::Database("EleLa".into()))).unwrap().as_slice()).unwrap();
         assert_eq!(o.handle, 7);
-        port.call(BrokerFunction::PostgresqlDumpRead, &pb::DumpReadRequest { handle: 7, max_bytes: 999_999 }.encode_to_vec()).unwrap();
-        port.call(BrokerFunction::PostgresqlDumpClose, &pb::DumpCloseRequest { handle: 7 }.encode_to_vec()).unwrap();
-        assert!(port.call(BrokerFunction::PostgresqlDumpClose, &pb::DumpCloseRequest { handle: 7 }.encode_to_vec()).is_err());
+        port.call(BrokerFunction::Postgresql(PostgresqlFunction::DumpRead), &pb::DumpReadRequest { handle: 7, max_bytes: 999_999 }.encode_to_vec()).unwrap();
+        port.call(BrokerFunction::Postgresql(PostgresqlFunction::DumpClose), &pb::DumpCloseRequest { handle: 7 }.encode_to_vec()).unwrap();
+        assert!(port.call(BrokerFunction::Postgresql(PostgresqlFunction::DumpClose), &pb::DumpCloseRequest { handle: 7 }.encode_to_vec()).is_err());
 
         let seen = &port.transport.seen;
         assert_eq!(seen.len(), 5, "only allowed requests went out: {seen:?}");

@@ -239,22 +239,49 @@ pub struct Session {
     /// The native broker of this session (stopped with it) and a second
     /// handle on its socket: shutting it down unblocks a waiting broker call.
     broker: Option<(crate::broker::Broker, std::os::unix::net::UnixStream)>,
+    /// The checked port of that broker (told the job's end).
+    port: Option<onesimus_plugins::wasm::BrokerHandle>,
+    /// Warnings from preparing the broker, for the job log.
+    pub warnings: Vec<String>,
 }
 
 /// A started broker and the port the guest's import calls go through.
 pub(crate) struct PreparedBroker {
-    handle: onesimus_plugins::wasm::BrokerHandle,
-    broker: crate::broker::Broker,
-    cancel: std::os::unix::net::UnixStream,
+    pub(crate) handle: onesimus_plugins::wasm::BrokerHandle,
+    pub(crate) broker: crate::broker::Broker,
+    pub(crate) cancel: std::os::unix::net::UnixStream,
+    /// Warnings for the job log (e.g. TLS files the FileSet misses).
+    pub(crate) warnings: Vec<String>,
 }
 
-/// The broker a plugin needs, from its *verified* manifest: for
-/// `postgresql.read` the instance named by `socket=`/`port=` (default
-/// /var/run/postgresql, 5432), its user, and `<name>/onesimus-pg-broker`.
+/// What a broker needs to know about its job besides the plugin line.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct BrokerContext<'a> {
+    pub operation: pb::JobOperation,
+    pub job_id: u64,
+    /// The `File =` names of the FileSet (backup).
+    pub covered: &'a [Vec<u8>],
+}
+impl BrokerContext<'static> {
+    pub(crate) fn backup() -> Self {
+        BrokerContext { operation: pb::JobOperation::Backup, job_id: 0, covered: &[] }
+    }
+}
+
+/// The broker a plugin needs, from its *verified* manifest, for a backup.
 /// `owner`/`top`: the ownership rule (root and / in production).
 pub(crate) fn prepare_broker(resolved: &Resolved, line: &PluginLine, plugin_dir: &Path, triplet: &str, chunk: u32,
     owner: u32, top: &Path) -> Result<Option<PreparedBroker>, PluginError> {
-    use onesimus_plugins::wasm::{BrokerHandle, POSTGRESQL_READ};
+    prepare_broker_for(resolved, line, plugin_dir, triplet, chunk, owner, top, &BrokerContext::backup())
+}
+
+/// The broker a plugin needs, dispatched by the capability of its verified
+/// manifest: `postgresql.read` (see `prepare_postgresql`), `openldap.read`
+/// (see `ldap_port::prepare`), otherwise none.
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn prepare_broker_for(resolved: &Resolved, line: &PluginLine, plugin_dir: &Path, triplet: &str, chunk: u32,
+    owner: u32, top: &Path, context: &BrokerContext) -> Result<Option<PreparedBroker>, PluginError> {
+    use onesimus_plugins::wasm::{OPENLDAP_READ, POSTGRESQL_READ};
     let load = |e: &dyn fmt::Display| PluginError::Load(e.to_string());
     let bundle = bundle::read_bundle(&resolved.bundle, RuntimeLimits::default().max_component_bytes).map_err(|e| load(&e))?;
     let policy = trust::policy(&resolved.policy)?;
@@ -263,9 +290,22 @@ pub(crate) fn prepare_broker(resolved: &Resolved, line: &PluginLine, plugin_dir:
     let verified = onesimus_plugins::verify(&bundle.manifest_bytes, &bundle.ed25519_signature, bundle.artifact_bytes,
         &bundle.x509_certificate_chain_der, &policy, now).map_err(|e| load(&e))?;
     let manifest = verified.manifest();
-    if !manifest.capabilities.iter().any(|c| c == POSTGRESQL_READ) {
-        return Ok(None);
+    let has = |c: &str| manifest.capabilities.iter().any(|m| m == c);
+    if has(POSTGRESQL_READ) {
+        prepare_postgresql(manifest, line, plugin_dir, triplet, chunk, owner, top).map(Some)
+    } else if has(OPENLDAP_READ) {
+        let _ = context;
+        Err(PluginError::Load("this ofd has no OpenLDAP broker support".into()))
+    } else {
+        Ok(None)
     }
+}
+
+/// `postgresql.read`: the instance named by `socket=`/`port=` (default
+/// /var/run/postgresql, 5432), its user, and `<name>/onesimus-pg-broker`.
+fn prepare_postgresql(manifest: &onesimus_plugins::Manifest, line: &PluginLine, plugin_dir: &Path, triplet: &str,
+    chunk: u32, owner: u32, top: &Path) -> Result<PreparedBroker, PluginError> {
+    use onesimus_plugins::wasm::BrokerHandle;
     let socket_dir = PathBuf::from(line.options.get("socket").map(String::as_str).unwrap_or("/var/run/postgresql"));
     let port: u16 = match line.options.get("port") {
         Some(p) => p.parse().map_err(|_| PluginError::Syntax(format!("port \"{p}\" is not a number")))?,
@@ -286,7 +326,12 @@ pub(crate) fn prepare_broker(resolved: &Resolved, line: &PluginLine, plugin_dir:
     let cancel = broker.socket.try_clone().map_err(io)?;
     let port = crate::pg_port::PgPort::new(broker.socket.try_clone().map_err(io)?, &line.options, chunk)
         .map_err(PluginError::Load)?;
-    Ok(Some(PreparedBroker { handle: BrokerHandle(std::sync::Arc::new(std::sync::Mutex::new(Box::new(port)))), broker, cancel }))
+    Ok(PreparedBroker {
+        handle: BrokerHandle(std::sync::Arc::new(std::sync::Mutex::new(Box::new(port)))),
+        broker,
+        cancel,
+        warnings: Vec::new(),
+    })
 }
 
 impl Session {
@@ -294,10 +339,20 @@ impl Session {
     /// `index` numbers the plugin lines of the job (instance identity).
     pub fn open(config: &FdConfig, line: &PluginLine, job: pb::JobContext, index: usize, chunk: u32)
         -> Result<Self, PluginError> {
+        Self::open_covered(config, line, job, index, chunk, &[])
+    }
+
+    /// `open` with the `File =` names of the job's FileSet, which a broker
+    /// may check its instance's files against (warnings only).
+    pub fn open_covered(config: &FdConfig, line: &PluginLine, job: pb::JobContext, index: usize, chunk: u32,
+        covered: &[Vec<u8>]) -> Result<Self, PluginError> {
         let resolved = resolve(config, line)?;
         let runtime = RuntimeLimits { max_chunk_bytes: chunk, ..RuntimeLimits::default() };
+        let operation = pb::JobOperation::try_from(job.operation).unwrap_or(pb::JobOperation::Backup);
+        let context = BrokerContext { operation, job_id: job.job_id, covered };
         let broker = match (&config.plugin_directory, crate::config::multiarch_triplet()) {
-            (Some(dir), Some(triplet)) => prepare_broker(&resolved, line, dir, triplet, chunk, 0, Path::new("/"))?,
+            (Some(dir), Some(triplet)) =>
+                prepare_broker_for(&resolved, line, dir, triplet, chunk, 0, Path::new("/"), &context)?,
             _ => None,
         };
         Self::open_with(&resolved, line, job, index, runtime, broker)
@@ -337,8 +392,11 @@ impl Session {
             broker: prepared.as_ref().map(|p| p.handle.clone()),
         })
         .map_err(|e| load(&e))?;
+        let port = prepared.as_ref().map(|p| p.handle.clone());
+        let warnings = prepared.as_ref().map(|p| p.warnings.clone()).unwrap_or_default();
         let broker = prepared.map(|p| (p.broker, p.cancel));
-        Ok(Self { worker, binding, job, line: line.clone(), plugin_id: manifest.plugin_id, chunk, started: false, broker })
+        Ok(Self { worker, binding, job, line: line.clone(), plugin_id: manifest.plugin_id, chunk, started: false, broker,
+            port, warnings })
     }
 
     /// One call, waiting until it answers or `canceled()` turns true.
@@ -434,7 +492,21 @@ impl Session {
     }
 
     /// Reports the end of the job to the plugin and stops the worker.
-    pub fn finish(mut self, succeeded: bool) -> Result<(), PluginError> {
+    pub fn finish(self, succeeded: bool) -> Result<(), PluginError> {
+        self.finish_with_notes(succeeded).0
+    }
+
+    /// `finish`, with the broker port's notes for the job log.
+    pub fn finish_with_notes(mut self, succeeded: bool) -> (Result<(), PluginError>, Vec<String>) {
+        let result = self.finish_worker(succeeded);
+        let notes = match self.port.take() {
+            Some(port) => port.0.lock().map(|mut p| p.finish(succeeded && result.is_ok())).unwrap_or_default(),
+            None => Vec::new(),
+        };
+        (result, notes)
+    }
+
+    fn finish_worker(&mut self, succeeded: bool) -> Result<(), PluginError> {
         let never = || false;
         let reported = if self.started {
             let event = if succeeded {

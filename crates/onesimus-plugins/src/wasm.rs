@@ -55,23 +55,52 @@ pub struct LoadOptions {
     pub broker: Option<BrokerHandle>,
 }
 
-/// One function of a typed broker import. Each takes and returns one
-/// encoded message of the broker's protobuf contract.
+/// One function of a typed broker import, namespaced by broker. Each takes
+/// and returns one encoded message of the broker's protobuf contract.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum BrokerFunction {
-    PostgresqlInfo,
-    PostgresqlDatabaseInfo,
-    PostgresqlDumpOpen,
-    PostgresqlDumpRead,
-    PostgresqlDumpClose,
+    Postgresql(PostgresqlFunction),
+    Openldap(OpenldapFunction),
+}
+/// proto/postgresql_broker.proto, import `postgresql`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PostgresqlFunction {
+    Info,
+    DatabaseInfo,
+    DumpOpen,
+    DumpRead,
+    DumpClose,
+}
+/// proto/openldap_broker.proto, imports `openldap` and `openldap-restore`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum OpenldapFunction {
+    Info,
+    DumpOpen,
+    DumpRead,
+    DumpClose,
+    ConfigFileOpen,
+    LoadOpen,
+    LoadWrite,
+    LoadClose,
 }
 
 /// The host's implementation of a broker import. It checks every request
 /// before passing it to the broker process.
 pub trait BrokerPort: Send {
-    /// The capability the manifest must carry for the import to be linked.
+    /// The broker family: the capability the manifest must carry for any
+    /// import of this broker to be linked (e.g. "postgresql.read").
     fn capability(&self) -> &'static str;
+    /// Whether this port serves `capability` in the current job. A granted
+    /// capability of the family that the port does not serve (e.g.
+    /// "openldap.write" in a backup job) gets functions that only fail.
+    fn serves(&self, capability: &str) -> bool {
+        capability == self.capability()
+    }
     fn call(&mut self, function: BrokerFunction, request: &[u8]) -> Result<Vec<u8>, String>;
+    /// The end of the job; notes for the job log (e.g. where a restore went).
+    fn finish(&mut self, _succeeded: bool) -> Vec<String> {
+        Vec::new()
+    }
 }
 
 /// A shareable broker port (LoadOptions stays Clone).
@@ -85,17 +114,67 @@ impl std::fmt::Debug for BrokerHandle {
 
 /// The capability of the PostgreSQL broker import.
 pub const POSTGRESQL_READ: &str = "postgresql.read";
+/// The OpenLDAP broker: reading (backup), and loading into a new target
+/// (online restore only).
+pub const OPENLDAP_READ: &str = "openldap.read";
+pub const OPENLDAP_WRITE: &str = "openldap.write";
 /// Capabilities whose import only a running broker can serve.
-pub const BROKER_CAPABILITIES: &[&str] = &[POSTGRESQL_READ];
+pub const BROKER_CAPABILITIES: &[&str] = &[POSTGRESQL_READ, OPENLDAP_READ, OPENLDAP_WRITE];
 
 /// Whether the plugin imports a broker interface (and so cannot be
 /// instantiated without a broker, e.g. by `ofd --check-plugin`).
 pub fn needs_broker(manifest: &crate::Manifest) -> bool {
     manifest.capabilities.iter().any(|c| BROKER_CAPABILITIES.contains(&c.as_str()))
 }
-const POSTGRESQL_IMPORT: &str = "onesimus:filed-plugin/postgresql@1.0.0";
-/// Largest broker request a guest may send.
-const MAX_BROKER_REQUEST: usize = 64 * 1024;
+
+/// One WIT import of a broker: linked only when the verified manifest
+/// carries `capability` and the port belongs to `family`.
+pub struct BrokerImport {
+    pub capability: &'static str,
+    pub family: &'static str,
+    pub import: &'static str,
+    pub functions: &'static [(&'static str, BrokerFunction)],
+}
+
+/// Capability -> import -> functions, for every broker the host knows.
+pub const BROKER_IMPORTS: &[BrokerImport] = &[
+    BrokerImport {
+        capability: POSTGRESQL_READ,
+        family: POSTGRESQL_READ,
+        import: "onesimus:filed-plugin/postgresql@1.0.0",
+        functions: &[
+            ("info", BrokerFunction::Postgresql(PostgresqlFunction::Info)),
+            ("database-info", BrokerFunction::Postgresql(PostgresqlFunction::DatabaseInfo)),
+            ("dump-open", BrokerFunction::Postgresql(PostgresqlFunction::DumpOpen)),
+            ("dump-read", BrokerFunction::Postgresql(PostgresqlFunction::DumpRead)),
+            ("dump-close", BrokerFunction::Postgresql(PostgresqlFunction::DumpClose)),
+        ],
+    },
+    BrokerImport {
+        capability: OPENLDAP_READ,
+        family: OPENLDAP_READ,
+        import: "onesimus:filed-plugin/openldap@1.0.0",
+        functions: &[
+            ("info", BrokerFunction::Openldap(OpenldapFunction::Info)),
+            ("dump-open", BrokerFunction::Openldap(OpenldapFunction::DumpOpen)),
+            ("dump-read", BrokerFunction::Openldap(OpenldapFunction::DumpRead)),
+            ("dump-close", BrokerFunction::Openldap(OpenldapFunction::DumpClose)),
+            ("config-file-open", BrokerFunction::Openldap(OpenldapFunction::ConfigFileOpen)),
+        ],
+    },
+    BrokerImport {
+        capability: OPENLDAP_WRITE,
+        family: OPENLDAP_READ,
+        import: "onesimus:filed-plugin/openldap-restore@1.0.0",
+        functions: &[
+            ("load-open", BrokerFunction::Openldap(OpenldapFunction::LoadOpen)),
+            ("load-write", BrokerFunction::Openldap(OpenldapFunction::LoadWrite)),
+            ("load-close", BrokerFunction::Openldap(OpenldapFunction::LoadClose)),
+        ],
+    },
+];
+/// Largest broker request a guest may send (a load-write carries one block).
+const MAX_BROKER_REQUEST: usize = 64 * 1024 + 512 * 1024;
 
 /// Store data: memory limits and the broker port of this instance.
 pub struct HostState {
@@ -116,28 +195,50 @@ fn broker_call(state: &mut HostState, function: BrokerFunction, request: Vec<u8>
     Ok(response)
 }
 
-/// Links the PostgreSQL broker import: only with the capability in the
-/// verified manifest and a port of the same capability.
+/// Which imports a port of `family` gets for a manifest with `granted`
+/// capabilities, as (import, live). Live imports reach the port; the others
+/// (granted, but not served in this job) only fail. Imports of other
+/// families, or whose capability is not granted, are not linked at all, so
+/// a guest importing them cannot be instantiated.
+pub fn import_plan(granted: &[String], family: &str, serves: &dyn Fn(&str) -> bool)
+    -> Result<Vec<(&'static BrokerImport, bool)>, String> {
+    let has = |c: &str| granted.iter().any(|g| g == c);
+    if !has(family) || !BROKER_IMPORTS.iter().any(|i| i.capability == family && i.family == family) {
+        return Err(format!("broker {family} not granted to this plugin"));
+    }
+    Ok(BROKER_IMPORTS.iter()
+        .filter(|i| i.family == family && has(i.capability))
+        .map(|i| (i, serves(i.capability)))
+        .collect())
+}
+
+/// Links the broker imports of the port's family: only capabilities in the
+/// verified manifest, real functions only for what the port serves.
 fn link_brokers(linker: &mut Linker<HostState>, manifest: &crate::Manifest, broker: Option<&BrokerHandle>)
     -> Result<(), executor::Error> {
     let Some(handle) = broker else { return Ok(()) };
-    let capability = handle.0.lock().map_err(|_| backend("broker unavailable"))?.capability();
-    if capability != POSTGRESQL_READ || !manifest.capabilities.iter().any(|c| c == POSTGRESQL_READ) {
-        return Err(backend(format!("broker {capability} not granted to this plugin")));
-    }
-    let mut instance = linker.instance(POSTGRESQL_IMPORT).map_err(backend)?;
-    for (name, function) in [
-        ("info", BrokerFunction::PostgresqlInfo),
-        ("database-info", BrokerFunction::PostgresqlDatabaseInfo),
-        ("dump-open", BrokerFunction::PostgresqlDumpOpen),
-        ("dump-read", BrokerFunction::PostgresqlDumpRead),
-        ("dump-close", BrokerFunction::PostgresqlDumpClose),
-    ] {
-        instance
-            .func_wrap(name, move |mut caller: wasmtime::StoreContextMut<'_, HostState>, (request,): (Vec<u8>,)| {
-                Ok((broker_call(caller.data_mut(), function, request),))
-            })
-            .map_err(backend)?;
+    let plan = {
+        let port = handle.0.lock().map_err(|_| backend("broker unavailable"))?;
+        import_plan(&manifest.capabilities, port.capability(), &|c| port.serves(c)).map_err(backend)?
+    };
+    for (import, live) in plan {
+        let mut instance = linker.instance(import.import).map_err(backend)?;
+        let capability = import.capability;
+        for &(name, function) in import.functions {
+            if live {
+                instance
+                    .func_wrap(name, move |mut caller: wasmtime::StoreContextMut<'_, HostState>, (request,): (Vec<u8>,)| {
+                        Ok((broker_call(caller.data_mut(), function, request),))
+                    })
+                    .map_err(backend)?;
+            } else {
+                instance
+                    .func_wrap(name, move |_caller: wasmtime::StoreContextMut<'_, HostState>, (_request,): (Vec<u8>,)| {
+                        Ok((Err::<Vec<u8>, String>(format!("{capability} is not available in this job")),))
+                    })
+                    .map_err(backend)?;
+            }
+        }
     }
     Ok(())
 }
