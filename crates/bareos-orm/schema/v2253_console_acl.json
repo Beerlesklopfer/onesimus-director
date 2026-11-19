@@ -1,0 +1,33 @@
+{
+  "version": 2253,
+  "description": "Two-tier console ACLs: catalog ACL (inner tier) per console and ACL type, can only restrict the file ACLs further (docs/plans/ACL-ZWEISTUFIG.md)",
+  "created": "2026-11-20",
+  "author": "Onesimus",
+  "min_compatible_version": 2252,
+  "tables": [
+    {
+      "name": "onesimus_console_acl",
+      "description": "Inner tier of the two-tier console ACLs: one row per console, ACL type and entry; evaluated like a Bareos ACL list (first match decides, ! negation, regex, *all*). Written only by odir (.acl set/delete/clear/copy).",
+      "columns": [
+        { "name": "console", "type": "text", "not_null": true, "description": "Name of the Console resource" },
+        { "name": "acl_type", "type": "text", "not_null": true, "description": "job, client, storage, schedule, pool, command, fileset, catalog, where, pluginoptions" },
+        { "name": "position", "type": "integer", "not_null": true, "description": "Evaluation order within (console, acl_type), starting at 0" },
+        { "name": "entry", "type": "text", "not_null": true, "description": "As in the configuration file: name, regex, !negation, *all*" },
+        { "name": "changed_by", "type": "text", "not_null": true, "description": "Console that set the entry" },
+        { "name": "changed_at", "type": "timestamptz", "not_null": true, "default": "now()", "description": "Time of the change" }
+      ],
+      "primary_key": "console, acl_type, position",
+      "indices": [],
+      "foreign_keys": [],
+      "constraints": [
+        {
+          "name": "onesimus_console_acl_type_check",
+          "type": "check",
+          "expression": "acl_type IN ('job', 'client', 'storage', 'schedule', 'pool', 'command', 'fileset', 'catalog', 'where', 'pluginoptions')"
+        }
+      ]
+    }
+  ],
+  "views": [],
+  "functions": []
+}

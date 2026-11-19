@@ -33,7 +33,8 @@ async fn run(url: &str, schema: &str) -> Result<(), Box<dyn std::error::Error>> 
     let version: i32 = sqlx::query_scalar("SELECT MAX(versionid) FROM version").fetch_one(&pool).await?;
     assert_eq!(version, 2250, "Onesimus extensions must not bump the Bareos VersionId");
     let ours: i32 = sqlx::query_scalar("SELECT MAX(version) FROM bareos_schema_version").fetch_one(&pool).await?;
-    assert_eq!(ours, 2252);
+    let latest = migrator.load_versions()?.last().map(|s| s.version as i32);
+    assert_eq!(Some(ours), latest);
     assert!(check_sequences(&pool).await?.is_empty());
 
     // Normal insert, then rows with explicit ids as a `\copy` would load them.

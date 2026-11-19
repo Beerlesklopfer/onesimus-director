@@ -2532,7 +2532,7 @@
     {
       "name": "acl_list",
       "title": "Console ACLs",
-      "description": "ACLs of a console (Onesimus .acl list).",
+      "description": "ACLs of a console per type: file ACL, catalog ACL and the effective result (Onesimus .acl list).",
       "inputSchema": {
         "type": "object",
         "properties": {
@@ -3652,7 +3652,7 @@
           },
           "pool": {
             "type": "string",
-            "description": "jobs: of this pool; volume with action: volumes of this pool"
+            "description": "jobs: of this pool; volume with action: volumes of this pool (with action: pool or allpools is required)"
           },
           "jobstatus": {
             "type": "string",
@@ -3668,7 +3668,7 @@
           },
           "storage": {
             "type": "string",
-            "description": "with action: storage"
+            "description": "with action: storage (needed when the Director has more than one Storage, else it asks)"
           },
           "allpools": {
             "type": "boolean",
@@ -4579,7 +4579,7 @@
     {
       "name": "acl_modify",
       "title": "Change console ACLs",
-      "description": "Change the ACLs of a console in the running Director (Onesimus '.acl set/delete/clear/copy'). type: e.g. job, client, command (…acl); value: entries, comma-separated.",
+      "description": "Change the catalog ACL of a console (Onesimus '.acl set/delete/clear/copy'): the inner tier, which can only restrict the file ACL (effective = file ACL and catalog ACL; file ACLs are changed in the editor only). Needs CommandACL .acl and configure; the own console can only be narrowed (insert ! entries, remove entries without !). type: e.g. job, client, command (…acl); value: entries, comma-separated.",
       "inputSchema": {
         "type": "object",
         "properties": {

@@ -1,22 +1,52 @@
 //! Console ACL semantics from Bareos ua_acl.cc; policies are read after reload.
+//!
+//! Two tiers (docs/plans/ACL-ZWEISTUFIG.md): the ACL directives of the
+//! Console and its Profiles in the configuration files are the outer frame
+//! ([`file_allowed`]); the catalog ACL of the console
+//! ([`crate::catalog_acl`]) can only restrict further. [`allowed`] and
+//! [`any_allowed`] are the central decisions and combine both; every ACL
+//! check of commands, typed RPCs, configuration CRUD, push events and
+//! GetConfigCapabilities goes through them (or through [`access`] and its
+//! variants, which call [`allowed`]). [`no_restrictions`] and
+//! [`has_restrictions`] decide whether a listing may skip per-row checks and
+//! count catalog entries as a restriction.
 use crate::{command_executor::ExecContext, director_config::DirectorConfig};
+use crate::catalog_acl::Restriction;
 use bareos_config::raw::ConfResource;
 use std::ffi::CString;
 
-#[derive(Clone, Copy, Debug)]
+/// The ACL types of a Console or Profile resource.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum Kind {
+    /// `CommandACL`
     Command,
+    /// `JobACL`
     Job,
+    /// `ClientACL`
     Client,
+    /// `StorageACL`
     Storage,
+    /// `ScheduleACL`
     Schedule,
+    /// `PoolACL`
     Pool,
+    /// `FileSetACL`
     FileSet,
+    /// `CatalogACL`
     Catalog,
+    /// `WhereACL`
     Where,
+    /// `PluginOptionsACL`
     PluginOptions,
 }
 impl Kind {
+    /// Every ACL type in the order of the Console directive table
+    /// (dird_conf.cc ConsoleResource items), as `.acl list` shows them.
+    pub const ALL: [Kind; 10] = [
+        Self::Job, Self::Client, Self::Storage, Self::Schedule, Self::Pool, Self::Command,
+        Self::FileSet, Self::Catalog, Self::Where, Self::PluginOptions,
+    ];
+    /// Normalized directive key (`bareos_config::raw::normalize_key`).
     fn key(self) -> &'static str {
         match self {
             Self::Command => "commandacl",
@@ -31,6 +61,49 @@ impl Kind {
             Self::PluginOptions => "pluginoptionsacl",
         }
     }
+    /// Directive name as written in the configuration (`JobAcl`, ...).
+    pub fn directive(self) -> &'static str {
+        match self {
+            Self::Command => "CommandAcl",
+            Self::Job => "JobAcl",
+            Self::Client => "ClientAcl",
+            Self::Storage => "StorageAcl",
+            Self::Schedule => "ScheduleAcl",
+            Self::Pool => "PoolAcl",
+            Self::FileSet => "FileSetAcl",
+            Self::Catalog => "CatalogAcl",
+            Self::Where => "WhereAcl",
+            Self::PluginOptions => "PluginOptionsAcl",
+        }
+    }
+    /// Value of the column `acl_type` of `onesimus_console_acl`.
+    pub fn catalog_name(self) -> &'static str {
+        self.key().trim_end_matches("acl")
+    }
+    /// The type of a column value `acl_type` of `onesimus_console_acl`.
+    pub fn from_catalog_name(name: &str) -> Option<Self> {
+        Self::ALL.into_iter().find(|k| k.catalog_name() == name)
+    }
+    /// The type of an `.acl` argument: `jobacl`, `JobAcl` or `job`.
+    pub fn from_argument(key: &str) -> Option<Self> {
+        let key = key.to_ascii_lowercase();
+        Self::ALL.into_iter().find(|k| k.key() == key || k.catalog_name() == key)
+    }
+    /// The configuration resource type whose names this ACL type lists
+    /// (None: Command, Where and PluginOptions name no resources).
+    pub fn resource_type(self) -> Option<&'static str> {
+        match self {
+            Self::Job => Some("job"),
+            Self::Client => Some("client"),
+            Self::Storage => Some("storage"),
+            Self::Schedule => Some("schedule"),
+            Self::Pool => Some("pool"),
+            Self::FileSet => Some("fileset"),
+            Self::Catalog => Some("catalog"),
+            Self::Command | Self::Where | Self::PluginOptions => None,
+        }
+    }
+    /// `.authorized` selector (`cmd`, `job`, ...).
     pub fn selector(key: &str) -> Option<Self> {
         match key.to_ascii_lowercase().as_str() {
             "cmd" => Some(Self::Command),
@@ -46,6 +119,7 @@ impl Kind {
     }
 }
 
+/// Whether `item` is a valid resource name (IsNameValid).
 pub(crate) fn valid_name(item: &str) -> bool {
     // include/baconfig.h MAX_NAME_LENGTH=128; lib/edit.cc IsNameValid.
     !item.is_empty()
@@ -56,11 +130,19 @@ pub(crate) fn valid_name(item: &str) -> bool {
             .bytes()
             .all(|b| b.is_ascii_alphanumeric() || b":.-_/ ".contains(&b))
 }
-fn matches(pattern: &str, item: &str) -> bool {
+/// Whether an ACL entry is evaluated as a regular expression (it contains
+/// one of the characters FindInAcl() looks for); `*all*` is no regex.
+pub(crate) fn is_regex(pattern: &str) -> bool {
+    !pattern.eq_ignore_ascii_case("*all*") && pattern.bytes().any(|b| b".()[]|^$+?*".contains(&b))
+}
+
+/// Whether the ACL entry `pattern` (without `!`) matches `item`: `*all*`,
+/// the name case-insensitively, or a POSIX ERE matching the whole item.
+pub(crate) fn matches(pattern: &str, item: &str) -> bool {
     if pattern.eq_ignore_ascii_case("*all*") || pattern.eq_ignore_ascii_case(item) {
         return true;
     }
-    if !pattern.bytes().any(|b| b".()[]|^$+?*".contains(&b)) {
+    if !is_regex(pattern) {
         return false;
     }
     let (Ok(pattern), Ok(item)) = (CString::new(pattern), CString::new(item)) else {
@@ -88,13 +170,10 @@ fn matches(pattern: &str, item: &str) -> bool {
         found.rm_so == 0 && found.rm_eo as usize == item.as_bytes().len()
     }
 }
-fn list(resource: &ConfResource, kind: Kind, item: &str) -> Option<bool> {
-    for rule in resource
-        .directives
-        .iter()
-        .filter(|d| d.norm_key() == kind.key())
-        .flat_map(|d| d.values())
-    {
+/// Bareos list semantics: the first entry matching `item` decides (`!`
+/// entries deny); None when no entry matches.
+pub(crate) fn first_match<'a>(rules: impl IntoIterator<Item = &'a str>, item: &str) -> Option<bool> {
+    for rule in rules {
         let (allow, pattern) = rule.strip_prefix('!').map_or((true, rule), |p| (false, p));
         if matches(pattern, item) {
             return Some(allow);
@@ -103,7 +182,35 @@ fn list(resource: &ConfResource, kind: Kind, item: &str) -> Option<bool> {
     None
 }
 
+/// [`first_match`] over the `kind` directives of one resource.
+fn list(resource: &ConfResource, kind: Kind, item: &str) -> Option<bool> {
+    first_match(resource.directives.iter().filter(|d| d.norm_key() == kind.key()).flat_map(|d| d.values()), item)
+}
+
+/// The central ACL decision: whether `console` may access `item` of ACL
+/// `kind`. Allowed only when the file ACL ([`file_allowed`]) **and** the
+/// catalog ACL ([`catalog_allowed`]) allow it (two-tier ACLs).
 pub fn allowed(config: &DirectorConfig, console: &str, kind: Kind, item: &str) -> bool {
+    file_allowed(config, console, kind, item) && catalog_allowed(config, console, kind, item)
+}
+
+/// The inner tier alone: a type without catalog entries allows everything;
+/// a catalog list is evaluated like a Bareos list (first match decides, no
+/// match denies); a locked console (catalog unreadable, F-4) may run only
+/// [`crate::catalog_acl::LOCKED_COMMANDS`] and nothing of any other type.
+pub(crate) fn catalog_allowed(config: &DirectorConfig, console: &str, kind: Kind, item: &str) -> bool {
+    config.catalog_acl.with_restriction(console, kind, |restriction| match restriction {
+        Restriction::None => true,
+        Restriction::List(list) => first_match(list.iter().map(|e| e.entry.as_str()), item) == Some(true),
+        Restriction::Locked => kind == Kind::Command
+            && crate::catalog_acl::LOCKED_COMMANDS.iter().any(|c| c.eq_ignore_ascii_case(item)),
+    })
+}
+
+/// The outer tier alone, ua_acl.cc AclAccessOk(): the console's own list,
+/// then its profiles in assignment order; the first matching entry decides,
+/// no match denies. The default console allows every valid name.
+pub(crate) fn file_allowed(config: &DirectorConfig, console: &str, kind: Kind, item: &str) -> bool {
     if !matches!(kind, Kind::Where | Kind::PluginOptions) && !valid_name(item) {
         return false;
     }
@@ -141,11 +248,23 @@ pub fn allowed(config: &DirectorConfig, console: &str, kind: Kind, item: &str) -
     false
 }
 
-/// Whether the ACL `kind` of `console` (its own list, then its profiles)
-/// allows any resource at all: one entry that is not a `!` negation. The
-/// default console allows everything. Used by GetConfigCapabilities (a
-/// type without any allowed resource is not offered).
+/// Whether the ACL `kind` of `console` allows any resource at all: the file
+/// ACL ([`file_any_allowed`]) and the catalog ACL (no entries, or one entry
+/// that is not a `!` negation; a locked console only commands). Used by
+/// GetConfigCapabilities (a type without any allowed resource is not offered).
 pub fn any_allowed(config: &DirectorConfig, console: &str, kind: Kind) -> bool {
+    file_any_allowed(config, console, kind)
+        && config.catalog_acl.with_restriction(console, kind, |restriction| match restriction {
+            Restriction::None => true,
+            Restriction::List(list) => list.iter().any(|e| !e.entry.starts_with('!')),
+            Restriction::Locked => kind == Kind::Command,
+        })
+}
+
+/// The file ACL alone: whether the `kind` list of `console` (its own list,
+/// then its profiles) has one entry that is not a `!` negation. The default
+/// console allows everything.
+pub(crate) fn file_any_allowed(config: &DirectorConfig, console: &str, kind: Kind) -> bool {
     if console == "*UserAgent*" {
         return true;
     }
@@ -170,7 +289,8 @@ pub fn any_allowed(config: &DirectorConfig, console: &str, kind: Kind) -> bool {
 
 /// C++ ua_acl.cc UaContext::AclNoRestrictions(): the first `!` entry means
 /// restricted, the first `*all*` unrestricted (console list, then profiles);
-/// the default console is unrestricted.
+/// the default console is unrestricted. Catalog entries of the type (or a
+/// locked console, F-4) always mean restricted.
 pub fn no_restrictions(ctx: &ExecContext, kind: Kind) -> bool {
     let console = match &ctx.session_mgr {
         Some(manager) => match manager.authenticated_console(ctx.session_id) {
@@ -189,6 +309,9 @@ pub fn no_restrictions(ctx: &ExecContext, kind: Kind) -> bool {
     else {
         return false;
     };
+    if config.catalog_acl.restricts(&console, kind) {
+        return false;
+    }
     let decide = |resource: &ConfResource| {
         resource.directives.iter()
             .filter(|d| d.norm_key() == kind.key())
@@ -208,6 +331,8 @@ pub fn no_restrictions(ctx: &ExecContext, kind: Kind) -> bool {
     false
 }
 
+/// AclAccessOk(acl, item) for the console of the session in `ctx` (via
+/// [`allowed`]); contexts without a session manager act as the default console.
 pub fn access(ctx: &ExecContext, kind: Kind, item: &str) -> bool {
     let console = match &ctx.session_mgr {
         Some(manager) => match manager.authenticated_console(ctx.session_id) {
@@ -241,7 +366,8 @@ pub fn access_locked(ctx: &ExecContext, config: &DirectorConfig, kind: Kind, ite
 }
 
 /// `UaContext::AclHasRestrictions` (ua_acl.cc:191): the first `!` entry or
-/// `*all*` in the console list, then in its profiles, decides.
+/// `*all*` in the console list, then in its profiles, decides. Catalog
+/// entries of the type (or a locked console, F-4) always mean restricted.
 pub fn has_restrictions(ctx: &ExecContext, kind: Kind) -> bool {
     let Some(manager) = &ctx.session_mgr else { return false };
     let Some(console) = manager.authenticated_console(ctx.session_id) else { return true };
@@ -251,6 +377,9 @@ pub fn has_restrictions(ctx: &ExecContext, kind: Kind) -> bool {
     let Some(config) = ctx.config.as_ref().and_then(|c| c.read().ok()) else { return true };
     let Some(resource) = config.raw.iter()
         .find(|r| r.norm_type() == "console" && r.name() == Some(console.as_str())) else { return true };
+    if config.catalog_acl.restricts(&console, kind) {
+        return true;
+    }
     let decide = |resource: &ConfResource| resource.directives.iter()
         .filter(|d| d.norm_key() == kind.key()).flat_map(|d| d.values())
         .find_map(|v| if v.starts_with('!') { Some(true) }
@@ -409,6 +538,49 @@ User {Name=limited; CommandACL=*all*}"#).unwrap();
         assert!(allowed(&cfg, "ordered", Kind::Command, "delete"));
         assert!(!allowed(&cfg, "missing", Kind::Command, "version"));
     }
+    /// Two tiers: the catalog list is intersected with the file list per
+    /// type; a type without catalog entries does not restrict; any_allowed,
+    /// has_restrictions and no_restrictions see catalog entries too, so no
+    /// listing skips its per-row check for a catalog-restricted type.
+    #[test]
+    fn catalog_tier_intersects_and_counts_as_restriction() {
+        use crate::catalog_acl::LoadState;
+        let ctx = context(); // limited: JobACL=!blocked,*all*; ClientACL=*all*
+        let config = ctx.config.as_ref().unwrap().clone();
+        assert!(!has_restrictions(&ctx, Kind::Client) && no_restrictions(&ctx, Kind::Client));
+        config.read().unwrap().catalog_acl.set_for_test(LoadState::Loaded, &[
+            ("limited", Kind::Client, &["!fd-secret", "fd-.*"]),
+            ("limited", Kind::Job, &["*all*"]),
+            ("limited", Kind::Pool, &["!x"]),
+        ]);
+        let cfg = config.read().unwrap();
+        assert!(allowed(&cfg, "limited", Kind::Client, "fd-one"));
+        assert!(!allowed(&cfg, "limited", Kind::Client, "fd-secret"));
+        assert!(!allowed(&cfg, "limited", Kind::Client, "other"), "no catalog match denies");
+        assert!(!allowed(&cfg, "limited", Kind::Job, "blocked"), "catalog *all* cannot widen");
+        assert!(allowed(&cfg, "limited", Kind::Job, "nightly"));
+        assert!(allowed(&cfg, "limited", Kind::Command, "version"), "no catalog entries of the type");
+        assert!(!any_allowed(&cfg, "limited", Kind::Pool), "only negations in the catalog");
+        assert!(any_allowed(&cfg, "limited", Kind::Client));
+        drop(cfg);
+        assert!(has_restrictions(&ctx, Kind::Client) && !no_restrictions(&ctx, Kind::Client));
+        config.read().unwrap().catalog_acl.set_for_test(LoadState::Loaded, &[("limited", Kind::Pool, &["!x"])]);
+        assert!(!has_restrictions(&ctx, Kind::Client) && no_restrictions(&ctx, Kind::Client), "no client entries");
+        // Locked (F-4): only status, .status and version, nothing else.
+        config.read().unwrap().catalog_acl.set_for_test(LoadState::Failed("down".into()), &[
+            ("limited", Kind::Pool, &["!x"]),
+        ]);
+        let cfg = config.read().unwrap();
+        assert!(allowed(&cfg, "limited", Kind::Command, "version"));
+        assert!(!allowed(&cfg, "limited", Kind::Command, "help"));
+        assert!(!allowed(&cfg, "limited", Kind::Client, "fd-one"));
+        assert!(!any_allowed(&cfg, "limited", Kind::Job) && any_allowed(&cfg, "limited", Kind::Command));
+        assert!(allowed(&cfg, "*UserAgent*", Kind::Job, "any"), "default console never locked");
+        drop(cfg);
+        // Locked although the console has no client entries.
+        assert!(has_restrictions(&ctx, Kind::Client) && !no_restrictions(&ctx, Kind::Client));
+    }
+
     #[test]
     fn posix_regex_requires_full_match_and_skips_invalid_patterns() {
         assert!(matches("[[:alpha:]]+", "Backup"));

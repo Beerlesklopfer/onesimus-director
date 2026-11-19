@@ -561,7 +561,7 @@ pub fn tools() -> Vec<Value> {
             "Catalog metadata (Onesimus .sqltables / .sqlcount / .sqlschema): tables, row counts or columns.",
             props(json!({ "kind": { "type": "string", "enum": ["tables", "count", "schema"], "description": "what" },
                 "table": string("one table (count, schema)"), "catalog": string("catalog") })), &["kind"], true),
-        tool("acl_list", "Console ACLs", "ACLs of a console (Onesimus .acl list).",
+        tool("acl_list", "Console ACLs", "ACLs of a console per type: file ACL, catalog ACL and the effective result (Onesimus .acl list).",
             props(json!({ "console": string("console; default: this one") })), &[], true),
         tool("profile_list", "Profiles", "Profiles with their ACLs (Onesimus .profile list).", props(json!({})), &[], true),
         tool("bvfs_get_jobids", "BVFS job chain",

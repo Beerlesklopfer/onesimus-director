@@ -121,7 +121,12 @@ fn reload_config(config_path: &std::path::Path, shared_config: &SharedConfig) ->
     }
     info!("configuration reloaded: Director '{}', {} clients, {} jobs",
           cfg.director.name, cfg.clients.len(), cfg.jobs.len());
+    let catalog_acl = cfg.catalog_acl.clone();
     drop(cfg);
+    // Two-tier ACLs: reload the catalog ACL cache with the configuration
+    // (outside the configuration lock; a failure locks the consoles that
+    // have or may have catalog entries, catalog_acl F-4).
+    catalog_acl.refresh();
     crate::ovfs::recheck_after_reload();
     Ok(())
 }
@@ -130,10 +135,13 @@ fn reload_config(config_path: &std::path::Path, shared_config: &SharedConfig) ->
 /// cleared with it (reload.cc:212 `Scheduler::GetMainScheduler().ClearQueue()`):
 /// the generation is bumped while the write lock is held, so the scheduler
 /// never runs an item planned from the old configuration with the Run
-/// directives of the new one.
-fn install_config(shared_config: &SharedConfig, new_config: DirectorConfig)
+/// directives of the new one. The catalog ACL store (inner ACL tier) of the
+/// old configuration goes on to the new one, so its cache and catalog
+/// attachment survive the reload.
+fn install_config(shared_config: &SharedConfig, mut new_config: DirectorConfig)
     -> Result<std::sync::RwLockWriteGuard<'_, DirectorConfig>, String> {
     let mut cfg = shared_config.write().map_err(|e| format!("config lock: {e}"))?;
+    new_config.catalog_acl = cfg.catalog_acl.clone();
     crate::fd_grpc::configure(&new_config);
     *cfg = new_config;
     crate::scheduler::config_replaced();

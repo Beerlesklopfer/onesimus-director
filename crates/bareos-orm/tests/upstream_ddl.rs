@@ -563,13 +563,18 @@ async fn fresh_migration_creates_the_bareos_schema() {
         migrator.migrate(&connect(&ours).await?).await.map_err(|e| sqlx::Error::Protocol(e.to_string()))?;
 
         let expected = describe(&admin, &upstream).await;
-        // Onesimus extensions (bareos_schema_version, views, functions of
-        // v2251+) come on top; everything Bareos has must be identical.
+        // Onesimus extensions (bareos_schema_version, views, functions and
+        // tables of v2251+) come on top; everything Bareos has must be identical.
         let extension_functions: Vec<String> = migrator.load_versions().unwrap().iter()
             .filter(|s| s.version > 2250).flat_map(|s| s.functions.iter().map(|f| format!("function {}(", f.name)))
             .collect();
+        // Tables of the extensions (e.g. onesimus_console_acl, v2253).
+        let extension_tables: Vec<String> = migrator.load_versions().unwrap().iter()
+            .filter(|s| s.version > 2250).flat_map(|s| s.tables.iter().map(|t| t.name.clone()))
+            .collect();
         let got: Vec<String> = describe(&admin, &ours).await.into_iter()
             .filter(|l| !l.contains("bareos_schema_version"))
+            .filter(|l| !extension_tables.iter().any(|t| l.contains(t.as_str())))
             .filter(|l| !extension_functions.iter().any(|f| l.starts_with(f)))
             .collect();
         Ok::<_, sqlx::Error>((expected, got))

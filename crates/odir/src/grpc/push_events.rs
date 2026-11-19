@@ -237,6 +237,51 @@ Console { Name=nothing; Password=pw }
         }
     }
 
+    /// The inner ACL tier (catalog ACL) restricts push events like every
+    /// other ACL check: a catalog negation hides job, client and storage
+    /// events and the events naming no resource; an unreadable catalog
+    /// (F-4) hides everything from a console with catalog entries.
+    #[test]
+    fn catalog_acl_restricts_push_events() {
+        use crate::catalog_acl::LoadState;
+        let cfg = acl_config();
+        assert!(visible_to(&cfg, "admin", &job("BackupHome")));
+        assert!(visible_to(&cfg, "admin", &BusMessage::ConsoleText { text: "x".into() }));
+        cfg.catalog_acl.set_for_test(LoadState::Loaded, &[
+            ("admin", Kind::Job, &["!BackupHome", "*all*"]),
+            ("admin", Kind::Client, &["fd1"]),
+            ("jobs", Kind::Storage, &["!File", "*all*"]),
+        ]);
+        assert!(!visible_to(&cfg, "admin", &job("BackupHome")));
+        assert!(!visible_to(&cfg, "admin", &job_msg(7, "BackupHome")));
+        assert!(visible_to(&cfg, "admin", &job("BackupOther")));
+        for event in fd("fd1") {
+            assert!(visible_to(&cfg, "admin", &event), "{event:?}");
+        }
+        for event in fd("fd2") {
+            assert!(!visible_to(&cfg, "admin", &event), "{event:?}");
+        }
+        for event in sd("File") {
+            assert!(!visible_to(&cfg, "jobs", &event), "{event:?}");
+        }
+        // Inner tier cannot widen: the file allows no Tape for jobs.
+        for event in sd("Tape") {
+            assert!(!visible_to(&cfg, "jobs", &event), "{event:?}");
+        }
+        // Events naming no resource need every configured resource: a catalog
+        // list that denies the configured pool Secret hides them.
+        cfg.catalog_acl.set_for_test(LoadState::Loaded, &[("admin", Kind::Pool, &["Full"])]);
+        assert!(!visible_to(&cfg, "admin", &BusMessage::ConsoleText { text: "x".into() }));
+        assert!(!visible_to(&cfg, "admin", &job_msg(0, "")));
+        // Catalog unreadable: admin (has entries) sees nothing, almost (none) keeps the file ACL.
+        cfg.catalog_acl.set_for_test(LoadState::Failed("down".into()), &[("admin", Kind::Pool, &["Full"])]);
+        assert!(!visible_to(&cfg, "admin", &job("BackupOther")));
+        for event in fd("fd1") {
+            assert!(!visible_to(&cfg, "admin", &event), "{event:?}");
+        }
+        assert!(visible_to(&cfg, "almost", &job("BackupOther")));
+    }
+
     /// A Console Profile grants and limits events like acl::allowed does.
     #[test]
     fn profiles_grant_like_console_commands() {

@@ -101,8 +101,10 @@ pub(super) fn tools() -> Vec<Value> {
         tool("bvfs_clear_cache", "Clear the BVFS cache", "Empty the BVFS path cache (bconsole '.bvfs_clear_cache yes').",
             json!({}), &[], annotations(false, false, true)),
         tool("acl_modify", "Change console ACLs",
-            "Change the ACLs of a console in the running Director (Onesimus '.acl set/delete/clear/copy'). \
-             type: e.g. job, client, command (…acl); value: entries, comma-separated.",
+            "Change the catalog ACL of a console (Onesimus '.acl set/delete/clear/copy'): the inner tier, which can \
+             only restrict the file ACL (effective = file ACL and catalog ACL; file ACLs are changed in the editor only). \
+             Needs CommandACL .acl and configure; the own console can only be narrowed (insert ! entries, remove \
+             entries without !). type: e.g. job, client, command (…acl); value: entries, comma-separated.",
             json!({
                 "action": e(ACL_ACTIONS, "set, delete, clear or copy"),
                 "console": s("console (set, delete, clear)"),

@@ -64,7 +64,8 @@ Prüfen: `ss -ltnp | grep -E '9101|10101'` und die Zeilen `listening on …` im 
    Socket, Port, Benutzer, Passwort), genauso wie bei `odir -t`.
 2. Schema-Erweiterung (gewollte Funktion): der Migrator spielt die
    Onesimus-Views und -Funktionen aus `/usr/lib/bareos/scripts/ddl/v2251_*.json`
-   und `v2252_*.json` ein, wenn sie noch fehlen. Die Bareos-Tabelle `version`
+   und `v2252_*.json` sowie die Tabelle `onesimus_console_acl` der
+   Katalog-ACL (`v2253_*.json`, zweistufige ACLs) ein, wenn sie noch fehlen. Die Bareos-Tabelle `version`
    bleibt auf der Bareos-Version (2250), die Onesimus-Stufen stehen in der
    eigenen Tabelle `bareos_schema_version`; `bareos-dir` öffnet den Katalog
    also weiterhin. Die Migrationen sind additiv (kein DROP, kein TRUNCATE).
@@ -181,13 +182,14 @@ Bewusst entschieden (Stand 19.11.2026):
 
 | Thema | bareos-dir | odir | Grund |
 | --- | --- | --- | --- |
-| Schema-Erweiterung | keine | Views und Funktionen beim Start (v2251/v2252), `version` bleibt 2250 | Logik in der Datenbank änderbar ohne neuen Code |
+| Schema-Erweiterung | keine | Views und Funktionen beim Start (v2251/v2252), Tabelle `onesimus_console_acl` (v2253), `version` bleibt 2250 | Logik in der Datenbank änderbar ohne neuen Code; Katalog-ACL |
 | Wartezeit auf ein Volume | unbegrenzt ohne `Max Wait Time` | 600 s, über `ONESIMUS_DEFAULT_MEDIA_WAIT` | kein hängender Nachtlauf; keine Direktive wegen Rückweg |
 | Gescheiterter Batch-Insert der File-Zeilen | Block wird ignoriert, Job `T`, Dateien fehlen im Katalog | Job wird fatal (`f`), „Attribute create error“ | kein stilles Fehlen von Dateien im Restore-Baum |
 | Purge (PurgeFiles/PurgeJobs) | ohne Transaktion, Fehler ignoriert | eine Transaktion, Fehler werden gemeldet | kein halb gelöschter Job |
 | `prune jobs`, Behalten-Liste nicht ermittelbar | Fehler ignoriert, löscht trotzdem | bricht vor dem Löschen ab | die letzte Full-Kette darf nie verloren gehen |
 | Schutz der jüngsten Kette | nur bei `prune jobs`/AutoPrune, nur für konfigurierte Job/FileSet/Client, FileSet nach FileSetId; File-Zeilen fallen nach `File Retention` weg; Volumes werden ohne Rücksicht gepruned/recycelt | je Client und FileSet-Name immer, auch nicht konfiguriert; Jobs und File-Zeilen bleiben; Volumes mit diesen Jobs werden weder gepruned, gepurgt, recycelt, `truncate`d noch gelöscht; Katalogfehler purgt nichts | Entscheidung des Nutzers 19.11.2026: der letzte Stand jedes Clients muss restaurierbar bleiben; ein Job wartet dafür ggf. auf ein Volume |
-| ACLs in Dateien ändern | `configure add console/profile/user` legt Dateien mit ACLs an | `configure add console/profile/user` und `.acl set/delete/clear/copy` werden abgelehnt; ACL-Ressourcen nur im Editor | Entscheidung des Nutzers 19.11.2026 (zweistufige ACLs): sonst kann sich eine Console mit `configure` selbst mehr Rechte geben |
+| ACLs in Dateien ändern | `configure add console/profile/user` legt Dateien mit ACLs an | `configure add console/profile/user` wird abgelehnt; ACL-Ressourcen nur im Editor | Entscheidung des Nutzers 19.11.2026 (zweistufige ACLs): sonst kann sich eine Console mit `configure` selbst mehr Rechte geben |
+| Zweistufige ACLs | nur Datei-ACLs | wirksam ist Datei-ACL **und** Katalog-ACL (`onesimus_console_acl`, je Console); `.acl set/delete/clear/copy` ändern nur die Katalog-ACL (braucht `.acl` und `configure`; die eigene Console nur enger). Ohne Katalog-Einträge wie Bareos. Katalog-ACL nicht lesbar: Consoles mit (möglichen) Einträgen dürfen nur `status`, `.status`, `version`; Journal `catalog ACL not readable`, neuer Versuch alle 30 s | Entscheidung des Nutzers 19.11.2026 ([ACL-ZWEISTUFIG.md](../plans/ACL-ZWEISTUFIG.md)): Einschränken auch per MCP, ohne die Dateien anzufassen |
 | gRPC | gibt es nicht | TLS auf `DirPort + 1000`, gleiche Adressen wie BNET | Schnittstelle der GUI |
 | Mail-Sammlung | Dateien `<WorkingDirectory>/*.mail` | im Speicher | – |
 | Paketversion | – | bleibt `25.1.2+onesimus.0.2.0`, Installation mit `dpkg -i` | Entscheidung des Nutzers; neue Builds an Prüfsumme und Build-Datum erkennbar |

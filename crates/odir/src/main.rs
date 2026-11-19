@@ -10,6 +10,7 @@ mod backup;
 mod backup_worker;
 mod breg;
 mod btime;
+mod catalog_acl;
 mod catalog_worker;
 mod check_catalog;
 mod catreq;
@@ -517,6 +518,19 @@ fn main() {
 
     // Shared state
     let shared_config: SharedConfig = Arc::new(std::sync::RwLock::new(config));
+    // Two-tier ACLs: load the catalog ACL (inner tier) before any listener
+    // accepts a console; while it is unreadable, consoles that have or may
+    // have catalog entries are limited to status/version (catalog_acl F-4)
+    // and dir:catalog-acl retries.
+    if let Some(cat) = &catalog {
+        let store = shared_config.read().unwrap().catalog_acl.clone();
+        store.attach(cat.clone());
+        match store.refresh() {
+            catalog_acl::LoadState::Loaded => info!("catalog ACL loaded ({} console(s) with entries)", store.consoles().len()),
+            state => warn!("catalog ACL: {state:?}"),
+        }
+        catalog_acl::spawn_retry_thread(store, &SHUTDOWN);
+    }
     let bus = Arc::new(MessageBus::new(1024));
     let session_mgr = Arc::new(SessionManager::new(bus.clone()));
     let cmd_queue = Arc::new(CommandQueue::new(256));

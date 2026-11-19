@@ -2532,7 +2532,7 @@
     {
       "name": "acl_list",
       "title": "Console ACLs",
-      "description": "ACLs of a console (Onesimus .acl list).",
+      "description": "ACLs of a console per type: file ACL, catalog ACL and the effective result (Onesimus .acl list).",
       "inputSchema": {
         "type": "object",
         "properties": {

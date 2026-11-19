@@ -35,6 +35,12 @@ pub struct DirectorConfig {
     /// with `omit_defaults_` (set by the first CheckResources()), which
     /// changes what `show` prints (compatibility log C-057).
     pub reloaded: bool,
+    /// Inner tier of the two-tier console ACLs (catalog ACL cache,
+    /// [`crate::catalog_acl`]). One store for the Director's lifetime: a
+    /// reload hands the same `Arc` to the new configuration
+    /// (`reload::install_config`). A configuration built elsewhere (tests,
+    /// `config_edit` checks) has its own store with the inner tier off.
+    pub catalog_acl: std::sync::Arc<crate::catalog_acl::CatalogAcl>,
 }
 
 impl DirectorConfig {
@@ -99,6 +105,7 @@ impl DirectorConfig {
             loaded_consoles: 0,
             raw: Vec::new(),
             reloaded: false,
+            catalog_acl: std::sync::Arc::default(),
         };
 
         for resource in resources {
