@@ -329,9 +329,22 @@ pub fn run_shell_command(command: &str, name: &str) -> Vec<(MsgType, String)> {
         let child = match argv.split_first() {
             // execvp(NULL, ...) fails with EFAULT
             None => return Ok(Err(std::io::Error::from_raw_os_error(libc::EFAULT))),
-            Some((program, args)) => std::process::Command::new(program).args(args)
-                .stdin(std::process::Stdio::null()).stdout(writer).stderr(stderr).spawn(),
+            Some((program, args)) => {
+                let spawn = |cmd: &mut std::process::Command| -> std::io::Result<std::process::Child> {
+                    cmd.stdin(std::process::Stdio::null()).stdout(writer.try_clone()?).stderr(stderr.try_clone()?).spawn()
+                };
+                match spawn(std::process::Command::new(program).args(args)) {
+                    // glibc execvp(): a file the kernel cannot execute (ENOEXEC,
+                    // e.g. a script whose "#!" is not on line 1) is run by
+                    // /bin/sh with the same arguments; bareos-dir's OpenBpipe
+                    // gets that, std::process::Command does not.
+                    Err(e) if e.raw_os_error() == Some(libc::ENOEXEC) =>
+                        spawn(std::process::Command::new("/bin/sh").arg(program).args(args)),
+                    other => other,
+                }
+            }
         };
+        drop((writer, stderr));
         // The Command (and with it the pipe's write ends) is gone here.
         Ok::<_, std::io::Error>(child.map(|child| (child, reader)))
     })();
@@ -538,6 +551,22 @@ pub fn client_commands(config: &DirectorConfig, job: &ScriptJob) -> Option<(Vec<
 
 #[cfg(test)]
 mod tests {
+
+    /// A script whose "#!" is not on line 1 (ENOEXEC) runs via /bin/sh, as
+    /// with glibc execvp() in bareos-dir (Samba4-Weekly on PDC).
+    #[test]
+    fn script_without_leading_shebang_runs_via_sh() {
+        let dir = std::env::temp_dir().join(format!("odir-enoexec-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let script = dir.join("pre-backup.sh");
+        std::fs::write(&script, "# comment first\n#!/bin/bash\necho \"ran $1\"\n").unwrap();
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let messages = run_shell_command(&format!("{} arg1", script.display()), "BeforeJob");
+        let _ = std::fs::remove_dir_all(&dir);
+        assert!(messages.iter().any(|(_, t)| t == "BeforeJob: ran arg1\n"), "{messages:?}");
+        assert!(!messages.iter().any(|(t, _)| *t == MsgType::Error), "{messages:?}");
+    }
     use super::*;
 
     #[test]
