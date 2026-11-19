@@ -117,8 +117,17 @@ pub fn psk_connect(stream: TcpStream, identity: &str, psk: &[u8]) -> io::Result<
     });
 
     builder.set_cipher_list(BAREOS_CIPHERS).map_err(ssl_err)?;
+    // A daemon with its own certificate (e.g. a File daemon with TLS
+    // Certificate set) may present it in this handshake. The C++ Director
+    // does not check it without "TLS Verify Peer = yes" (lib/tls_openssl.cc:
+    // SSL_VERIFY_NONE); PSK and the CRAM-MD5 password exchange that follows
+    // authenticate the peer. SslConnector's default (system CAs, host name
+    // "bareos") made such a client fail with "certificate verify failed".
+    builder.set_verify(SslVerifyMode::NONE);
     let connector = builder.build();
-    let ssl_stream = connector.connect("bareos", stream)
+    let ssl_stream = connector.configure().map_err(ssl_err)?
+        .verify_hostname(false)
+        .connect("bareos", stream)
         .map_err(|e| io::Error::new(io::ErrorKind::Other, format!("PSK connect: {e}")))?;
     Ok(PskStream { inner: ssl_stream })
 }
@@ -338,6 +347,50 @@ mod tests {
         let mut buf = [0u8; 100];
         let n = c.read(&mut buf).unwrap();
         assert_eq!(&buf[..n], b"hello back");
+        server.join().unwrap();
+    }
+
+    /// A File daemon with a certificate (TLS Certificate set, PSK as well):
+    /// the Director connects without checking that certificate, as the C++
+    /// Director without "TLS Verify Peer = yes" (PDC-fd, JobId 1136).
+    #[test]
+    fn psk_connect_accepts_a_peer_that_presents_a_certificate() {
+        use openssl::{asn1::Asn1Time, hash::MessageDigest, pkey::PKey, rsa::Rsa, x509::{X509, X509NameBuilder}};
+        let key = PKey::from_rsa(Rsa::generate(2048).unwrap()).unwrap();
+        let mut name = X509NameBuilder::new().unwrap();
+        name.append_entry_by_text("CN", "*.intranet.example").unwrap();
+        let name = name.build();
+        let mut cert = X509::builder().unwrap();
+        cert.set_version(2).unwrap();
+        cert.set_subject_name(&name).unwrap();
+        cert.set_issuer_name(&name).unwrap();
+        cert.set_pubkey(&key).unwrap();
+        cert.set_not_before(&Asn1Time::days_from_now(0).unwrap()).unwrap();
+        cert.set_not_after(&Asn1Time::days_from_now(1).unwrap()).unwrap();
+        cert.sign(&key, MessageDigest::sha256()).unwrap();
+        let cert = cert.build();
+
+        let psk = password_to_psk("fdpassword");
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let psk_server = psk.clone();
+        let server = std::thread::spawn(move || {
+            let (stream, _) = listener.accept().unwrap();
+            let mut ctx = ssl::SslContext::builder(SslMethod::tls_server()).unwrap();
+            ctx.set_certificate(&cert).unwrap();
+            ctx.set_private_key(&key).unwrap();
+            ctx.set_psk_server_callback(move |_, _, buf| {
+                buf[..psk_server.len()].copy_from_slice(&psk_server);
+                Ok(psk_server.len())
+            });
+            ctx.set_cipher_list(BAREOS_CIPHERS).unwrap();
+            let mut s = ssl::Ssl::new(&ctx.build()).unwrap().accept(stream).unwrap();
+            let mut buf = [0u8; 2];
+            s.read_exact(&mut buf).unwrap();
+        });
+        let stream = TcpStream::connect(format!("127.0.0.1:{port}")).unwrap();
+        let mut c = psk_connect(stream, "R_DIRECTOR\x1edir", &psk).expect("no certificate check");
+        c.write_all(b"ok").unwrap();
         server.join().unwrap();
     }
 

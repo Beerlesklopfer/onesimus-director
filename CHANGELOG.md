@@ -1,5 +1,13 @@
 onesimus (25.1.2+onesimus.0.2.0-2) UNRELEASED; urgency=medium
 
+  * odir: the TLS-PSK connection to a File or Storage daemon no longer
+    checks a certificate the daemon presents (system CAs, host name
+    "bareos"); the C++ Director does not without "TLS Verify Peer = yes".
+    A File daemon with its own TLS certificate failed every job with
+    "certificate verify failed".
+  * odir: a RunScript the kernel cannot execute (ENOEXEC, e.g. "#!" not
+    on line 1) runs via /bin/sh as with glibc execvp() in bareos-dir.
+
   * odir: jobs left created or running by an earlier run end as fatal at
     start, as CheckCatalog(UPDATE_AND_FIX) does (J-3): C -> f with
     Start/EndTime = SchedTime, R -> f with EndTime = StartTime. Only at
