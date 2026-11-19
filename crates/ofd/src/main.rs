@@ -26,6 +26,8 @@ mod heartbeat;
 mod grpc;
 mod grpc_tls;
 mod jmsg;
+mod ldap_instance;
+mod ldap_port;
 mod job;
 mod pg_instance;
 mod pg_port;

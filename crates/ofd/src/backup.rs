@@ -676,6 +676,12 @@ impl<S: Read + Write> Backup<'_, '_, S> {
     /// A `Plugin =` line: start the signed plugin and save every file it
     /// lists, each framed by plugin-name records like the Bareos FD.
     pub fn save_plugin(&mut self, include: &FfPkt, text: &str) -> i32 {
+        self.save_plugin_covered(include, text, &[])
+    }
+
+    /// `save_plugin` with the `File =` names of the FileSet, which a plugin's
+    /// broker may check its instance's files against (warnings only).
+    pub fn save_plugin_covered(&mut self, include: &FfPkt, text: &str, covered: &[Vec<u8>]) -> i32 {
         let shown = crate::secrets::mask_plugin_secrets(text);
         let line = match plugin::parse_line(text) {
             Ok(l) => l,
@@ -693,8 +699,13 @@ impl<S: Read + Write> Backup<'_, '_, S> {
         let chunk = self.buf_size.clamp(4096, 256 * 1024) as u32;
         let index = self.plugin_index;
         self.plugin_index += 1;
-        match Session::open(self.config, &line, job, index, chunk) {
-            Ok(session) => self.run_plugin(include, &shown, session),
+        match Session::open_covered(self.config, &line, job, index, chunk, covered) {
+            Ok(session) => {
+                for w in &session.warnings {
+                    self.jmsg(M_WARNING, format!("Plugin: \"{shown}\": {w}\n"));
+                }
+                self.run_plugin(include, &shown, session)
+            }
             Err(e) => {
                 self.jmsg(M_FATAL, format!("Plugin: \"{shown}\": {e}\n"));
                 0
@@ -897,7 +908,8 @@ pub fn plugin_ff(include: &FfPkt, entry: &pb::FileEntry) -> Option<FfPkt> {
 
 impl<S: Read + Write> Handler for BackupHandler<'_, '_, '_, S> {
     fn plugin(&mut self, ff: &mut FfPkt, line: &str) -> i32 {
-        self.b.save_plugin(ff, line)
+        let covered: Vec<Vec<u8>> = self.fileset.include.iter().flat_map(|i| i.names.iter().cloned()).collect();
+        self.b.save_plugin_covered(ff, line, &covered)
     }
     fn handle(&mut self, ff: &mut FfPkt, links: &mut HashMap<(u64, u64), CurLink>, _top: bool) -> i32 {
         if ff.type_ == FT_NOFSCHG && !is_in_fileset(self.fileset, &ff.fname) {

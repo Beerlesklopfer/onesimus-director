@@ -291,7 +291,11 @@ impl Restore<'_> {
             ok &= self.close_online(&mut r, true);
         }
         for (name, session) in std::mem::take(&mut r.sessions) {
-            if let Err(e) = session.finish(ok) {
+            let (finished, notes) = session.finish_with_notes(ok);
+            for note in notes {
+                self.jmsg(M_INFO, format!("Plugin: \"{name}\": {note}\n"));
+            }
+            if let Err(e) = finished {
                 if ok {
                     self.jmsg(M_FATAL, format!("Plugin: \"{name}\": finish: {e}\n"));
                     ok = false;

@@ -294,8 +294,7 @@ pub(crate) fn prepare_broker_for(resolved: &Resolved, line: &PluginLine, plugin_
     if has(POSTGRESQL_READ) {
         prepare_postgresql(manifest, line, plugin_dir, triplet, chunk, owner, top).map(Some)
     } else if has(OPENLDAP_READ) {
-        let _ = context;
-        Err(PluginError::Load("this ofd has no OpenLDAP broker support".into()))
+        crate::ldap_port::prepare(manifest, line, plugin_dir, triplet, chunk, owner, top, context).map(Some)
     } else {
         Ok(None)
     }
