@@ -1,6 +1,6 @@
 # Planung: Signier-Infrastruktur (Plugins und Pakete)
 
-Stand: 19.11.2026. Status: **Entwurf zur Freigabe.**
+Stand: 19.11.2026. Status: **Freigegeben** (Nutzer, 19.11.2026: „GO!“). Offen sind nur noch die Laufzeit der Signierzertifikate und der Ort der zweiten Offline-Kopie.
 
 Zwei getrennte Signaturebenen, beide nötig:
 
@@ -9,7 +9,7 @@ Zwei getrennte Signaturebenen, beide nötig:
 | Prüft | `apt` / `dnf` beim Installieren | `ofd` bei **jedem Laden** |
 | Gegenstand | Repository (`InRelease`) bzw. jedes RPM | Manifest, WASM-Code, Hashes der Binärteile |
 | Schützt gegen | manipulierte Downloads, gefälschte Repositories | Austausch nach der Installation, Plugins aus anderer Quelle, Skripte/LLM-Agenten mit Shellzugriff |
-| Technik | OpenPGP | X.509, Ed25519 / ECDSA P-256 |
+| Technik | OpenPGP | X.509: CA Ed25519, Signierschlüssel RSA 4096 (RSA-PSS/SHA-256) |
 
 ## Entscheidungen bisher
 
@@ -136,8 +136,8 @@ meist kein Ed25519). Die CA bleibt Ed25519.
 
 ## Offene Fragen
 
-1. Freigabe des Modells (CA offline, Signierschlüssel offline erzeugt und in
-   den TPM importiert).
+1. ~~Freigabe des Modells~~ – freigegeben (Nutzer, 19.11.2026): CA offline,
+   Signierschlüssel offline erzeugt und in den TPM importiert.
 1a. ~~Algorithmus und Werkzeug~~ – entschieden: RSA 4096, OpenSSL-Provider `tpm2`.
 2. Laufzeit der Signierzertifikate (Vorschlag 3 Jahre) oder Zeitstempeldienst.
 3. Wo die zweite Offline-Kopie liegt.
