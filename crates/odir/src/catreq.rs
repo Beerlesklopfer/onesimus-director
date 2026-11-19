@@ -1599,7 +1599,9 @@ fn prune_volumes(cat: &mut Cat, ctx: &JobContext, in_changer: bool, mr: &mut Med
                 lmr.volume_name, lmr.vol_retention, list.len()));
             let jobids = list.iter().map(u32::to_string).collect::<Vec<_>>().join(",");
             cat.jmsg(MsgType::Info, format!("Purging the following {} JobIds: {jobids}\n", list.len()));
-            crate::commands::purge::purge_jobs(cat.db, &jobids);
+            if let Err(error) = crate::commands::purge::purge_jobs(cat.db, &jobids) {
+                cat.jmsg(MsgType::Error, format!("{}\n", error.trim_end()));
+            }
         }
         if !is_volume_purged(cat, ctx, &mut lmr) {
             continue;
@@ -1637,7 +1639,10 @@ fn purge_jobs_from_volume(cat: &mut Cat, ctx: &JobContext, mr: &mut MediaRecord)
         cat.jmsg(MsgType::Info, format!("No Jobs found for media {} to purge from catalog.\n", mr.volume_name));
     } else {
         cat.jmsg(MsgType::Info, format!("Found {} Jobs for media \"{}\" in catalog.\n", ids.len(), mr.volume_name));
-        crate::commands::purge::purge_jobs(cat.db, &ids.join(","));
+        if let Err(error) = crate::commands::purge::purge_jobs(cat.db, &ids.join(",")) {
+            cat.jmsg(MsgType::Error, format!("{}\n", error.trim_end()));
+            return false;
+        }
         cat.jmsg(MsgType::Info, format!("{} Jobs{} on Volume \"{}\" purged from catalog.\n", ids.len(),
             if ids.len() <= 1 { "" } else { "s" }, mr.volume_name));
     }
@@ -1671,7 +1676,9 @@ fn prune_volume(cat: &mut Cat, ctx: &JobContext, mr: &mut MediaRecord) -> bool {
     if !list.is_empty() {
         let jobids = list.iter().map(u32::to_string).collect::<Vec<_>>().join(",");
         cat.jmsg(MsgType::Info, format!("Purging the following {} JobIds: {jobids}\n", list.len()));
-        crate::commands::purge::purge_jobs(cat.db, &jobids);
+        if let Err(error) = crate::commands::purge::purge_jobs(cat.db, &jobids) {
+            cat.jmsg(MsgType::Error, format!("{}\n", error.trim_end()));
+        }
     }
     let now_empty = is_volume_purged(cat, ctx, mr);
     cat.jmsg(MsgType::Info, if now_empty {
@@ -1960,6 +1967,9 @@ impl Db for CatalogHandle {
     }
     fn exec(&self, sql: &str) -> Result<u64, String> {
         self.execute(sql)
+    }
+    fn private_connection(&self) -> Option<Result<crate::catalog_worker::CatalogConnection, String>> {
+        Some(self.dedicated())
     }
 }
 

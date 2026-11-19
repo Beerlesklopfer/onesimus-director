@@ -66,52 +66,103 @@ fn parse_ids(values: Vec<String>) -> Vec<u32> {
     values.iter().map(|v| crate::commands::job::str_to_int64(v) as u32).collect()
 }
 
-/// BareosDb::PurgeFiles().
-pub(crate) fn purge_files(db: &dyn Db, jobids: &str) {
-    if jobids.is_empty() {
-        return;
+/// Runs `work` in one transaction. A pooled handle lends a connection of
+/// its own (Db::private_connection), a single connection runs BEGIN on
+/// itself. On the first failed statement the transaction is rolled back
+/// and the error returned.
+///
+/// Deviation from Bareos: BareosDb::PurgeFiles()/PurgeJobs()
+/// (cats/sql_delete.cc:204-257) run each statement on its own, without a
+/// transaction, and ignore the results of SqlQuery(). A failure there can
+/// leave a job with JobMedia but without File rows, or the reverse, and the
+/// caller reports the jobs as purged.
+fn in_transaction(db: &dyn Db, work: impl FnOnce(&dyn Db) -> Result<(), String>) -> Result<(), String> {
+    match db.private_connection() {
+        Some(connection) => transaction_on(&connection?, work),
+        None => transaction_on(db, work),
     }
-    let _ = db.exec(&format!("DELETE FROM File WHERE JobId IN ({jobids})"));
-    let _ = db.exec(&format!("DELETE FROM BaseFiles WHERE JobId IN ({jobids})"));
-    let _ = db.exec(&format!("UPDATE Job SET PurgedFiles=1 WHERE JobId IN ({jobids})"));
 }
 
-/// BareosDb::PurgeJobs(): all records of the jobs, copies upgraded
-/// (UpgradeCopies) before the Job rows go.
-pub(crate) fn purge_jobs(db: &dyn Db, jobids: &str) {
-    if jobids.is_empty() {
-        return;
+fn transaction_on(db: &dyn Db, work: impl FnOnce(&dyn Db) -> Result<(), String>) -> Result<(), String> {
+    db.exec("BEGIN")?;
+    let result = work(db).and_then(|()| db.exec("COMMIT").map(|_| ()));
+    if result.is_err() {
+        let _ = db.exec("ROLLBACK");
     }
-    purge_files(db, jobids);
-    for table in ["JobMedia", "Log", "RestoreObject", "PathVisibility", "NDMPJobEnvironment", "JobStats"] {
-        let _ = db.exec(&format!("DELETE FROM {table} WHERE JobId IN ({jobids})"));
-    }
-    // UpgradeCopies (sql_update.cc:553, query 0040_uap_upgrade_copies_oldest_job).
-    let _ = db.exec(&format!(
-        "CREATE TEMPORARY TABLE cpy_tmp AS\nSELECT MIN(JobId) AS JobId\n  FROM Job\n WHERE Type = 'C'\n   AND (\n          \
-         PriorJobId IN ({jobids})\n       OR PriorJobId IN (\n         SELECT PriorJobId\n           FROM Job\n          \
-         WHERE JobId IN ({jobids})\n            AND Type = 'B'\n          )\n       )\n GROUP BY PriorJobId\n"));
-    let _ = db.exec("UPDATE Job SET Type='B' WHERE JobId IN ( SELECT JobId FROM cpy_tmp )");
-    let _ = db.exec("DELETE FROM Job WHERE Type='c' AND priorjobid IN ( SELECT JobId FROM cpy_tmp )");
-    let _ = db.exec("DROP TABLE IF EXISTS cpy_tmp");
-    let _ = db.exec(&format!("DELETE FROM Job WHERE JobId IN ({jobids})"));
+    result
 }
 
-/// C++ PurgeJobListFromCatalog().
-pub(crate) fn purge_job_list_from_catalog(ua: &mut Ua, db: &dyn Db, list: &mut Vec<u32>) {
+/// The statements of BareosDb::PurgeFiles() (cats/sql_delete.cc:204).
+fn purge_files_statements(db: &dyn Db, jobids: &str) -> Result<(), String> {
+    db.exec(&format!("DELETE FROM File WHERE JobId IN ({jobids})"))?;
+    db.exec(&format!("DELETE FROM BaseFiles WHERE JobId IN ({jobids})"))?;
+    db.exec(&format!("UPDATE Job SET PurgedFiles=1 WHERE JobId IN ({jobids})"))?;
+    Ok(())
+}
+
+/// BareosDb::PurgeFiles() (cats/sql_delete.cc:204), in one transaction;
+/// Err with the catalog error, nothing changed then.
+pub(crate) fn purge_files(db: &dyn Db, jobids: &str) -> Result<(), String> {
+    if jobids.is_empty() {
+        return Ok(());
+    }
+    in_transaction(db, |db| purge_files_statements(db, jobids))
+}
+
+/// BareosDb::PurgeJobs() (cats/sql_delete.cc:223): all records of the
+/// jobs, copies upgraded (UpgradeCopies) before the Job rows go. In one
+/// transaction; Err with the catalog error, nothing changed then.
+pub(crate) fn purge_jobs(db: &dyn Db, jobids: &str) -> Result<(), String> {
+    if jobids.is_empty() {
+        return Ok(());
+    }
+    in_transaction(db, |db| {
+        purge_files_statements(db, jobids)?;
+        for table in ["JobMedia", "Log", "RestoreObject", "PathVisibility", "NDMPJobEnvironment", "JobStats"] {
+            db.exec(&format!("DELETE FROM {table} WHERE JobId IN ({jobids})"))?;
+        }
+        // UpgradeCopies (sql_update.cc:553, query 0040_uap_upgrade_copies_oldest_job).
+        db.exec(&format!(
+            "CREATE TEMPORARY TABLE cpy_tmp AS\nSELECT MIN(JobId) AS JobId\n  FROM Job\n WHERE Type = 'C'\n   AND (\n          \
+             PriorJobId IN ({jobids})\n       OR PriorJobId IN (\n         SELECT PriorJobId\n           FROM Job\n          \
+             WHERE JobId IN ({jobids})\n            AND Type = 'B'\n          )\n       )\n GROUP BY PriorJobId\n"))?;
+        db.exec("UPDATE Job SET Type='B' WHERE JobId IN ( SELECT JobId FROM cpy_tmp )")?;
+        db.exec("DELETE FROM Job WHERE Type='c' AND priorjobid IN ( SELECT JobId FROM cpy_tmp )")?;
+        db.exec("DROP TABLE IF EXISTS cpy_tmp")?;
+        db.exec(&format!("DELETE FROM Job WHERE JobId IN ({jobids})"))?;
+        Ok(())
+    })
+}
+
+/// C++ PurgeJobListFromCatalog() (ua_purge.cc:426); false (error sent)
+/// when the catalog refused the purge.
+pub(crate) fn purge_job_list_from_catalog(ua: &mut Ua, db: &dyn Db, list: &mut Vec<u32>) -> bool {
     let jobids = prepare_jobids(list);
     if list.is_empty() {
         ua.send_msg("No jobids found to be purged\n");
-        return;
+        return true;
     }
     ua.send_msg(format!("Purging the following {} JobIds: {jobids}\n", list.len()));
-    purge_jobs(db, &jobids);
+    match purge_jobs(db, &jobids) {
+        Ok(()) => true,
+        Err(error) => {
+            ua.error_msg(db_error(&error));
+            false
+        }
+    }
 }
 
-/// C++ PurgeFilesFromJobList().
-fn purge_files_from_job_list(db: &dyn Db, list: &mut Vec<u32>) {
+/// C++ PurgeFilesFromJobList() (ua_purge.cc:442); false (error sent)
+/// when the catalog refused the purge.
+fn purge_files_from_job_list(ua: &mut Ua, db: &dyn Db, list: &mut Vec<u32>) -> bool {
     let jobids = prepare_jobids(list);
-    purge_files(db, &jobids);
+    match purge_files(db, &jobids) {
+        Ok(()) => true,
+        Err(error) => {
+            ua.error_msg(db_error(&error));
+            false
+        }
+    }
 }
 
 /// The Media record fields prune and purge work with (MediaDbRecord).
@@ -232,7 +283,7 @@ pub(crate) fn purge_files_from_client(ua: &mut Ua, ast: &CommandAst, db: &dyn Db
         if !ua.get_confirmation(ast, "Purge (yes/no)? ", false) {
             ua.info_msg("Purge canceled.\n");
         } else {
-            purge_files_from_job_list(db, &mut del);
+            purge_files_from_job_list(ua, db, &mut del);
         }
     }
 }
@@ -258,8 +309,7 @@ pub(crate) fn purge_jobs_from_client(ua: &mut Ua, ast: &CommandAst, db: &dyn Db,
         ua.info_msg(format!("Found {} Jobs for client \"{client}\" in catalog \"{catalog}\".\n", list.len()));
         if !ua.get_confirmation(ast, "Purge (yes/no)? ", false) {
             ua.info_msg("Purge canceled.\n");
-        } else {
-            purge_job_list_from_catalog(ua, db, &mut list);
+        } else if purge_job_list_from_catalog(ua, db, &mut list) {
             let n = list.len();
             ua.info_msg(format!("{n} Job{} on client \"{client}\" purged from catalog.\n", if n <= 1 { "" } else { "s" }));
         }
@@ -287,8 +337,7 @@ pub(crate) fn purge_jobs_from_pool(ua: &mut Ua, ast: &CommandAst, db: &dyn Db, p
         ua.info_msg(format!("Found {} Jobs for pool \"{pool}\" in catalog.\n", list.len()));
         if !ua.get_confirmation(ast, "Purge (yes/no)? ", false) {
             ua.info_msg("Purge canceled.\n");
-        } else {
-            purge_job_list_from_catalog(ua, db, &mut list);
+        } else if purge_job_list_from_catalog(ua, db, &mut list) {
             let n = list.len();
             ua.info_msg(format!("{n} Job{} on Pool \"{pool}\" purged from catalog.\n", if n <= 1 { "" } else { "s" }));
         }
@@ -364,7 +413,10 @@ pub(crate) fn purge_jobs_from_volume(ua: &mut Ua, ast: &CommandAst, db: &dyn Db,
         if !ua.get_confirmation(ast, "Purge (yes/no)? ", true) {
             ua.info_msg("Purge canceled.\n");
         } else {
-            purge_jobs(db, &jobids);
+            if let Err(error) = purge_jobs(db, &jobids) {
+                ua.error_msg(db_error(&error));
+                return false;
+            }
             let n = list.len();
             ua.info_msg(format!("{n} Jobs{} on Volume \"{}\" purged from catalog.\n", if n <= 1 { "" } else { "s" },
                 volume.name));
@@ -495,7 +547,9 @@ pub(crate) fn prune_files(ua: &mut Ua, db: &dyn Db, client: &str, pool: Option<&
     }
     let mut list = parse_ids(column0(db, &format!("SELECT JobId FROM Job {from} WHERE PurgedFiles=0 {filter} ORDER BY JobId"))
         .unwrap_or_default());
-    purge_files_from_job_list(db, &mut list);
+    if !purge_files_from_job_list(ua, db, &mut list) {
+        return;
+    }
     ua.info_msg(format!("Pruned Files from {} Jobs for client {client} from catalog.\n", with_commas(list.len() as u64)));
 }
 
@@ -570,8 +624,7 @@ pub(crate) fn prune_jobs(ua: &mut Ua, db: &dyn Db, client: &str, pool: Option<&s
             Vec::new()
         }
     };
-    purge_job_list_from_catalog(ua, db, &mut list);
-    if !list.is_empty() {
+    if purge_job_list_from_catalog(ua, db, &mut list) && !list.is_empty() {
         ua.info_msg(format!("Pruned {} {} for client {client} from catalog.\n", list.len(),
             if list.len() == 1 { "Job" } else { "Jobs" }));
     }
@@ -1064,14 +1117,19 @@ pub(crate) mod tests {
     pub(crate) struct FakeDb {
         pub answers: Vec<(&'static str, Vec<Vec<&'static str>>)>,
         pub log: Mutex<Vec<String>>,
+        /// Statements containing this fragment fail.
+        pub fail: Option<&'static str>,
     }
 
     impl FakeDb {
         pub(crate) fn new(answers: Vec<(&'static str, Vec<Vec<&'static str>>)>) -> Self {
-            Self { answers, log: Mutex::new(Vec::new()) }
+            Self { answers, log: Mutex::new(Vec::new()), fail: None }
         }
+        /// The writes without the transaction frame (BEGIN, COMMIT).
         pub(crate) fn writes(&self) -> Vec<String> {
-            self.log.lock().unwrap().iter().filter(|s| !s.trim_start().starts_with("SELECT")).cloned().collect()
+            self.log.lock().unwrap().iter()
+                .filter(|s| !s.trim_start().starts_with("SELECT") && !matches!(s.as_str(), "BEGIN" | "COMMIT"))
+                .cloned().collect()
         }
     }
 
@@ -1087,8 +1145,62 @@ pub(crate) mod tests {
         }
         fn exec(&self, sql: &str) -> Result<u64, String> {
             self.log.lock().unwrap().push(sql.to_string());
-            Ok(1)
+            match self.fail {
+                Some(fragment) if sql.contains(fragment) => Err(format!("ERROR:  failed: {fragment}")),
+                _ => Ok(1),
+            }
         }
+    }
+
+    /// J-10: PurgeJobs runs in one transaction; the first failed statement
+    /// rolls it back and the error reaches the caller.
+    #[test]
+    fn purge_jobs_runs_in_one_transaction_and_reports_errors() {
+        let db = FakeDb::new(vec![]);
+        assert_eq!(purge_jobs(&db, "11,12"), Ok(()));
+        let log = db.log.lock().unwrap().clone();
+        assert_eq!(log.first().map(String::as_str), Some("BEGIN"));
+        assert_eq!(log.last().map(String::as_str), Some("COMMIT"));
+        assert_eq!(log[log.len() - 2], "DELETE FROM Job WHERE JobId IN (11,12)");
+
+        let mut db = FakeDb::new(vec![]);
+        db.fail = Some("DELETE FROM JobMedia");
+        let error = purge_jobs(&db, "11").unwrap_err();
+        assert!(error.contains("DELETE FROM JobMedia"), "{error}");
+        let log = db.log.lock().unwrap().clone();
+        assert_eq!(log.last().map(String::as_str), Some("ROLLBACK"));
+        assert!(!log.iter().any(|s| s == "COMMIT" || s.starts_with("DELETE FROM Job WHERE")), "{log:?}");
+
+        // The console reports the error instead of "purged".
+        let ctx = ctx();
+        let mut db = FakeDb::new(vec![("FROM Client WHERE Name", vec![vec!["4"]]),
+                                      ("FROM Job WHERE ClientId=4", vec![vec!["11"]])]);
+        db.fail = Some("DELETE FROM File ");
+        let mut ua = Ua::new(&ctx);
+        purge_jobs_from_client(&mut ua, &ast("purge jobs client=fd1 yes"), &db, "fd1");
+        let result = ua.finish(true);
+        assert!(!result.text_output.contains("purged from catalog"), "{}", result.text_output);
+        assert!(result.error_message.contains("DELETE FROM File"), "{}", result.error_message);
+
+        // A pooled handle lends a connection of its own for the transaction.
+        let seen = std::sync::Arc::new(Mutex::new(Vec::new()));
+        let log = seen.clone();
+        let handle = crate::catalog_worker::CatalogHandle::mock(move |request| match request {
+            crate::catalog_worker::CatalogRequest::Dedicated { ops } => {
+                let log = log.clone();
+                std::thread::spawn(move || while let Ok((op, reply)) = ops.recv() {
+                    if let crate::catalog_worker::ConnectionOp::Execute(sql) = op {
+                        log.lock().unwrap().push(sql);
+                    }
+                    let _ = reply.send(crate::catalog_worker::CatalogResponse::Ok(0));
+                });
+                crate::catalog_worker::CatalogResponse::Ok(0)
+            }
+            _ => crate::catalog_worker::CatalogResponse::Error("not on the pool".into()),
+        });
+        assert_eq!(purge_files(&handle, "5"), Ok(()));
+        assert_eq!(*seen.lock().unwrap(), vec!["BEGIN", "DELETE FROM File WHERE JobId IN (5)",
+            "DELETE FROM BaseFiles WHERE JobId IN (5)", "UPDATE Job SET PurgedFiles=1 WHERE JobId IN (5)", "COMMIT"]);
     }
 
     fn ctx() -> ExecContext {

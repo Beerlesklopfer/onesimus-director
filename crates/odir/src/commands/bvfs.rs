@@ -25,6 +25,12 @@ pub trait Db {
     fn rows(&self, sql: &str) -> Result<SqlTable, String>;
     /// C++ UpdateDb/InsertDb/DeleteDb, SqlAffectedRows.
     fn exec(&self, sql: &str) -> Result<u64, String>;
+    /// A connection of its own for a transaction (purge.rs): Some for a
+    /// pooled handle, whose statements may each run on another connection;
+    /// None when this already is one connection (BEGIN/COMMIT run on it).
+    fn private_connection(&self) -> Option<Result<CatalogConnection, String>> {
+        None
+    }
 }
 
 impl Db for CatalogConnection {

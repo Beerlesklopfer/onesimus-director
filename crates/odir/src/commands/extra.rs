@@ -727,8 +727,10 @@ fn delete_execute(ua: &mut crate::ua_select::Ua, action: DeleteAction,
                 let jobids: Vec<String> = table.rows.into_iter().filter_map(|r| r.into_iter().next().flatten()).collect();
                 if !jobids.is_empty() {
                     let list = jobids.join(",");
-                    if let Ok(db) = cat.dedicated() {
-                        super::purge::purge_jobs(&db, &list);
+                    let purged = cat.dedicated().and_then(|db| super::purge::purge_jobs(&db, &list));
+                    if let Err(error) = purged {
+                        ua.error_msg(format!("{}\n", error.trim_end()));
+                        return;
                     }
                     deleted.insert("jobids".into(), Value::Array(jobids.iter().cloned().map(Value::String).collect()));
                     ua.info_msg(format!("Deleted {} jobs and associated records deleted from the catalog (jobids: {list}).\n",
@@ -749,9 +751,9 @@ fn delete_execute(ua: &mut crate::ua_select::Ua, action: DeleteAction,
         }
         DeleteAction::Job(id) => {
             // PurgeJobsFromCatalog.
-            match cat.dedicated() {
-                Ok(db) => super::purge::purge_jobs(&db, &id.to_string()),
-                Err(e) => ua.error_msg(format!("{e}\n")),
+            if let Err(error) = cat.dedicated().and_then(|db| super::purge::purge_jobs(&db, &id.to_string())) {
+                ua.error_msg(format!("{}\n", error.trim_end()));
+                return;
             }
             ua.send_msg(format!("Jobid {id} and associated records deleted from the catalog.\n"));
         }

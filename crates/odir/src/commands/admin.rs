@@ -1462,7 +1462,11 @@ fn purge_execute(ua: &mut crate::ua_select::Ua, ast: &CommandAst, action: PurgeA
     use super::purge;
     let Some(db) = private_db(ua) else { return };
     match action {
-        PurgeAction::FilesOfJob(jobid) => purge::purge_files(&db, &jobid.to_string()),
+        PurgeAction::FilesOfJob(jobid) => {
+            if let Err(error) = purge::purge_files(&db, &jobid.to_string()) {
+                ua.error_msg(format!("{}\n", error.trim_end()));
+            }
+        }
         PurgeAction::FilesOfClient(client) => purge::purge_files_from_client(ua, ast, &db, &client),
         PurgeAction::JobsOfClient(client) => purge::purge_jobs_from_client(ua, ast, &db, &client),
         PurgeAction::JobsOfVolume(volume) => match purge::get_volume_by_name(&db, &volume) {

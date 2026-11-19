@@ -606,8 +606,16 @@ pub fn cleanup(director: &str, catalog: Option<&CatalogHandle>, job_id: u32, end
                             "UPDATE File SET JobId={new} WHERE JobId={old} AND Name NOT IN (SELECT Name FROM File WHERE JobId={new})"));
                     }
                     match cat.dedicated() {
-                        Ok(db) if info.purge_migrate_job => crate::commands::purge::purge_jobs(&db, &old.to_string()),
-                        Ok(db) => crate::commands::purge::purge_files(&db, &old.to_string()),
+                        Ok(db) => {
+                            let purged = if info.purge_migrate_job {
+                                crate::commands::purge::purge_jobs(&db, &old.to_string())
+                            } else {
+                                crate::commands::purge::purge_files(&db, &old.to_string())
+                            };
+                            if let Err(e) = purged {
+                                msgs.push((MsgType::Error, format!("{}\n", e.trim_end())));
+                            }
+                        }
                         Err(e) => msgs.push((MsgType::Error, format!("{e}\n"))),
                     }
                 }
