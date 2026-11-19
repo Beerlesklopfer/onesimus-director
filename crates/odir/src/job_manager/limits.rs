@@ -147,10 +147,24 @@ pub const DEFAULT_MEDIA_WAIT: i64 = 600;
 /// wait (J-12, user decision 2026-11-19): a new directive would make the
 /// configuration unreadable for bareos-dir. A job's "Max Wait Time" still
 /// takes precedence. Set it with a systemd drop-in, see odir.service.
-fn default_media_wait() -> i64 {
+pub(crate) fn default_media_wait() -> i64 {
     static VALUE: std::sync::OnceLock<i64> = std::sync::OnceLock::new();
     *VALUE.get_or_init(|| std::env::var("ONESIMUS_DEFAULT_MEDIA_WAIT").ok()
         .and_then(|v| v.trim().parse().ok()).filter(|v: &i64| *v > 0).unwrap_or(DEFAULT_MEDIA_WAIT))
+}
+
+/// Start-up log line with the effective volume wait and where it comes
+/// from, so an administrator can check a drop-in (docs/wiki/betrieb-odir.md).
+pub(crate) fn log_default_media_wait() {
+    let from_env = std::env::var("ONESIMUS_DEFAULT_MEDIA_WAIT").ok();
+    let value = default_media_wait();
+    match from_env {
+        Some(raw) if value != DEFAULT_MEDIA_WAIT || raw.trim() == DEFAULT_MEDIA_WAIT.to_string() =>
+            tracing::info!("volume wait for jobs without Max Wait Time: {value} s (ONESIMUS_DEFAULT_MEDIA_WAIT)"),
+        Some(raw) => tracing::warn!(
+            "ONESIMUS_DEFAULT_MEDIA_WAIT={raw:?} is not a positive number of seconds; volume wait for jobs without Max Wait Time: {value} s (default)"),
+        None => tracing::info!("volume wait for jobs without Max Wait Time: {value} s (default)"),
+    }
 }
 
 /// JobMonitorWatchdog interval (job.cc InitJobServer: wd->interval = 60).

@@ -467,6 +467,7 @@ fn main() {
         // end as fatal, before the scheduler starts (J-3).
         check_catalog::cleanup_old_job_records(cat);
     }
+    job_manager::log_default_media_wait();
     // dird.cc: InitConsoleMsg(working_directory) after CheckCatalog() — the
     // console message queue (start-up messages before it reach no console).
     console_msg::init(std::path::Path::new(&config.director.working_directory), &config.director.name);

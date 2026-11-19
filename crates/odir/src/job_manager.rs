@@ -15,6 +15,7 @@ use crate::job_worker::{JobHandle, PipeMessage};
 
 mod limits;
 pub use limits::{Rerun, StartFlags};
+pub(crate) use limits::log_default_media_wait;
 use crate::message_bus::{MessageBus, BusMessage};
 use crate::director_config::SharedConfig;
 
