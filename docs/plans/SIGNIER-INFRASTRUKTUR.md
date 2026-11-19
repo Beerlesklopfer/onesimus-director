@@ -27,6 +27,23 @@ Zwei getrennte Signaturebenen, beide nötig:
 - **Algorithmus und Werkzeug wie beim Kernel** (Nutzer, 19.11.2026):
   **RSA 4096**, signiert über den **OpenSSL-Provider `tpm2`**.
 
+- **Wechsel des Signierschlüssels = Versionswechsel der kompletten Suite**
+  (Nutzer, 19.11.2026). Signierzertifikate werden als neues Glied in die Kette
+  gehängt; ein Wechsel MUSS zwangsläufig ein gemeinsames Release von `ofd`,
+  `odir` und allen Plugins nach sich ziehen.
+
+### Umsetzung der Suite-Bindung (Vorschlag)
+
+- Je Generation ein Zwischenzertifikat der Offline-Root
+  („Onesimus Plugin Signing G<n>“), darunter das Signierzertifikat.
+- In `ofd` einkompiliert: Root und die Generation dieses Releases.
+- Manifest (Schema 3): Feld `suite` (Suite-Version). `ofd` lädt nur Bundles,
+  deren Kette über die Generation dieses Releases läuft **und** deren `suite`
+  zur eigenen Version passt. Alte Bundles laden mit neuem `ofd` nicht und
+  umgekehrt – der Versionswechsel der Suite ist damit erzwungen.
+- Offen: was als Suite-Version zählt (ganze Workspace-Version oder nur der
+  Onesimus-Teil) und ob es ein Übergangsfenster mit zwei Generationen gibt.
+
 ## Schlüssel und wo sie liegen
 
 | Schlüssel | Ort | Gebraucht |
