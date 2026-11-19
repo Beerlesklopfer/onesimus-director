@@ -1,0 +1,39 @@
+#!/bin/sh
+# ofd-plugin-postgresql postrm
+#  remove: ofd no longer loads the plugin (only the line this package added).
+#  purge:  also the pg_hba.conf rules this package added, clusters reloaded.
+set -u
+
+MARK="# ofd-plugin-postgresql"
+FD_DIR=${OFD_PLUGIN_FD_DIR:-/etc/bareos/bareos-fd.d}
+
+log() { echo "ofd-plugin-postgresql: $*"; }
+
+remove_marked() { # file
+    grep -qF "$MARK" "$1" 2>/dev/null || return 1
+    tmp="$1.ofd-new"
+    grep -vF "$MARK" "$1" > "$tmp" &&
+        chown --reference="$1" "$tmp" && chmod --reference="$1" "$tmp" &&
+        mv "$tmp" "$1" || { rm -f "$tmp"; return 1; }
+}
+
+case "${1:-}" in
+    remove|purge)
+        for f in $(grep -rlF "$MARK" "$FD_DIR" 2>/dev/null); do
+            remove_marked "$f" && log "removed Plugin Names line from $f"
+        done
+        ;;
+esac
+
+if [ "${1:-}" = purge ] && command -v pg_lsclusters >/dev/null 2>&1; then
+    pg_lsclusters -h 2>/dev/null | while read -r ver cl _port status _owner _rest; do
+        hba=$(pg_conftool -s "$ver" "$cl" show hba_file 2>/dev/null | tr -d "'")
+        [ -n "$hba" ] || hba="/etc/postgresql/$ver/$cl/pg_hba.conf"
+        if remove_marked "$hba"; then
+            log "$ver/$cl: removed the rule from $hba"
+            [ "$status" = online ] && pg_ctlcluster "$ver" "$cl" reload >/dev/null 2>&1
+        fi
+    done
+fi
+
+exit 0

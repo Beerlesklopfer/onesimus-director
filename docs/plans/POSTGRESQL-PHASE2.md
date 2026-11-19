@@ -10,7 +10,7 @@ Stand: 18.11.2026. Status: **Freigegeben (18.11.2026, alle drei Vorschläge); A 
 | D Import + Port | `6838be1`, `5cbccbd` | fertig: Import nur mit Capability, Port prüft jede Anfrage |
 | E Broker | `1876efa` | fertig, gegen Wegwerf-Cluster inkl. `pg_restore` |
 | F Gast | `2b21768` | fertig, Ende-zu-Ende inkl. `pg_restore` |
-| G Paket | – | offen |
+| G Paket | (dieser Commit) | Paketbau und postinst/postrm fertig und getestet; Bau mit echtem Signierschlüssel steht aus |
 | H Tests | `d7bb6c5` | Cancel und Server-Ausfall (Wegwerf-Cluster); echter Lauf siehe unten |
 
 Setzt [Phase 1](PLUGIN-PHASE1.md) voraus (abgenommen im Ende-zu-Ende-Lauf) und
@@ -98,6 +98,36 @@ Datenbank `<db>.dump` über `dump-read`, `_info.json` zuletzt.
 `ofd-plugin-postgresql`, `Architecture: any`, `Multi-Arch: same`:
 `/usr/lib/<triplet>/onesimus/plugins/postgresql.pb` und
 `/usr/lib/<triplet>/onesimus/plugins/postgresql/onesimus-pg-broker`.
+Version = Version von `ofd`, `Depends: ofd (= <Version>)` (Suite-Bindung).
+Alles gehört root und ist für Gruppe/Andere nicht beschreibbar.
+
+Bau: `packaging/ofd-plugin-postgresql/build-deb.sh <postgresql.pb> <onesimus-pg-broker>`
+aus einem fertig signierten Bundle (Signieren siehe SIGNIER-INFRASTRUKTUR.md,
+„Ablauf: Schritt für Schritt“); das Skript sieht nie einen privaten Schlüssel.
+
+postinst bei **jeder** Installation und **jedem** Upgrade (Entscheidung des
+Nutzers, 19.11.2026):
+
+1. Für jeden Cluster aus `pg_lsclusters` die Anmeldung so prüfen, wie der
+   Broker sich anmeldet (als Cluster-Eigentümer, lokaler Socket, ohne
+   Passwort). Gelingt sie nicht, eine markierte Regel
+   `local all <Eigentümer> peer # ofd-plugin-postgresql` vor die erste Regel der
+   `pg_hba.conf` setzen (first match), Cluster neu laden, erneut prüfen; sonst
+   den alten Stand wiederherstellen und melden. Eigentümer root und nicht
+   laufende Cluster werden übersprungen (nächstes Upgrade prüft erneut).
+2. `Plugin Names = "postgresql"` als eigene, markierte Zeile in die
+   Client-Ressource von `ofd`, sofern das Plugin noch nicht eingetragen ist;
+   `ofd -t` prüft, sonst Rückbau. `ofd` liest die Konfiguration nur beim
+   Start: Neustart nur ohne offene Verbindung auf dem FD-Port (kein laufender
+   Job), sonst ein Hinweis.
+
+postrm: `remove` entfernt die `Plugin Names`-Zeile, `purge` zusätzlich die
+markierten `pg_hba.conf`-Regeln (Cluster neu geladen). Fehler brechen die
+Installation nie ab.
+
+Getestet (19.11.2026): Einfügen, Idempotenz beim Upgrade, `ofd -t` und
+Entfernen an einer Kopie der FD-Konfiguration; die Anmeldeprüfung lesend auf
+forgeiec.io (17/main, `postgres` per peer erfolgreich, keine Änderung nötig).
 
 ## H. Tests
 
