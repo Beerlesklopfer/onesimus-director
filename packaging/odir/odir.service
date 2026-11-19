@@ -2,6 +2,9 @@
 Description=Onesimus Director Daemon
 After=network-online.target postgresql.service
 Wants=network-online.target
+# Only one Director on port 9101 and the catalog (T-5): starting odir stops
+# bareos-dir and vice versa; both packages stay installable for a way back.
+Conflicts=bareos-director.service
 
 [Service]
 Type=simple
