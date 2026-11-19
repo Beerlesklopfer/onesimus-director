@@ -60,3 +60,28 @@ world openldap-plugin {
     import openldap;
     import openldap-restore;
 }
+
+/// The Podman broker and host (proto/podman_broker.proto,
+/// docs/plans/PODMAN-PLUGIN.md): linked only for the plugin id
+/// org.onesimus.podman with contract 2 and the grant "podman.inventory".
+/// The host computes the allowed object set and filters every answer
+/// through a positive list; stop, mask and restart are host-only.
+interface podman {
+    engine-identify: func(request: list<u8>) -> result<list<u8>, string>;
+    inventory: func(request: list<u8>) -> result<list<u8>, string>;
+    inspect: func(request: list<u8>) -> result<list<u8>, string>;
+    member-state: func(request: list<u8>) -> result<list<u8>, string>;
+}
+
+/// Volume data (grant "podman.volume.read"): the host scans and answers with
+/// scan references for FileEntry.source_ref, never bytes or attributes.
+interface podman-volume {
+    volume-scan: func(request: list<u8>) -> result<list<u8>, string>;
+}
+
+/// A plugin with the Podman imports.
+world podman-plugin {
+    include plugin;
+    import podman;
+    import podman-volume;
+}

@@ -218,6 +218,7 @@ fn plugin_entry(attr: &Attributes) -> pb::FileEntry {
         mode: attr.statp.mode & 0o7777,
         symlink_target: if kind == pb::FileKind::Symlink { attr.lname.clone() } else { Vec::new() },
         attributes: Default::default(),
+        source_ref: Vec::new(),
     }
 }
 

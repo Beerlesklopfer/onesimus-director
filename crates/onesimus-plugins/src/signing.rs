@@ -70,7 +70,12 @@ pub fn prepare(component: &[u8], leaf_der: &[u8], request: &PrepareRequest) -> R
         schema_version: 3,
         plugin_id: request.plugin_id.clone(),
         version: request.version.clone(),
-        api_version: API_VERSION,
+        // Podman grants need contract 2 (FileEntry.source_ref).
+        api_version: if request.capabilities.iter().any(|c| crate::is_podman_grant(c)) {
+            crate::API_VERSION_SOURCE_REF
+        } else {
+            API_VERSION
+        },
         artifact_sha256: hex::encode(Sha256::digest(component)),
         signing_key_id: signing_key_id(leaf_der).map_err(|e| e.to_string())?,
         not_before: match request.not_before {

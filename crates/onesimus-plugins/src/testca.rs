@@ -245,7 +245,12 @@ pub fn manifest(artifact: &[u8], leaf: &X509, plugin_id: &str, capabilities: &[&
         schema_version: 3,
         plugin_id: plugin_id.into(),
         version: "1.0.0".into(),
-        api_version: crate::API_VERSION,
+        // Podman grants need contract 2, like signing::prepare decides.
+        api_version: if capabilities.iter().any(|c| crate::is_podman_grant(c)) {
+            crate::API_VERSION_SOURCE_REF
+        } else {
+            crate::API_VERSION
+        },
         artifact_sha256: hex::encode(Sha256::digest(artifact)),
         signing_key_id: crate::signing_key_id(&leaf.to_der().unwrap()).unwrap(),
         not_before,

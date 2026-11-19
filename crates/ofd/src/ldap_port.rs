@@ -929,7 +929,7 @@ impl<T: Read + Write + Send> BrokerPort for LdapPort<T> {
     fn call(&mut self, function: BrokerFunction, request: &[u8]) -> Result<Vec<u8>, String> {
         match function {
             BrokerFunction::Openldap(f) => self.checked(f, request),
-            BrokerFunction::Postgresql(_) => Err("not a function of the OpenLDAP broker".into()),
+            BrokerFunction::Postgresql(_) | BrokerFunction::Podman(_) => Err("not a function of the OpenLDAP broker".into()),
         }
     }
     fn finish(&mut self, succeeded: bool) -> Vec<String> {

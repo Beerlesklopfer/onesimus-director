@@ -61,6 +61,7 @@ pub struct LoadOptions {
 pub enum BrokerFunction {
     Postgresql(PostgresqlFunction),
     Openldap(OpenldapFunction),
+    Podman(PodmanFunction),
 }
 /// proto/postgresql_broker.proto, import `postgresql`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -82,6 +83,23 @@ pub enum OpenldapFunction {
     LoadOpen,
     LoadWrite,
     LoadClose,
+}
+
+/// proto/podman_broker.proto, imports `podman` and `podman-volume`
+/// (docs/plans/PODMAN-PLUGIN.md). Stop, mask and restart are never guest
+/// functions (V-9); the host runs them alone.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PodmanFunction {
+    /// `podman info/version`, filtered by the host's positive list.
+    EngineIdentify,
+    /// The inventory of the domain, filtered.
+    Inventory,
+    /// Inspect or generate spec of objects in the allowed set.
+    Inspect,
+    /// Read-only state of a member of the allowed set.
+    MemberState,
+    /// Host scan of a volume: references, never bytes or attributes.
+    VolumeScan,
 }
 
 /// The host's implementation of a broker import. It checks every request
@@ -118,8 +136,22 @@ pub const POSTGRESQL_READ: &str = "postgresql.read";
 /// (online restore only).
 pub const OPENLDAP_READ: &str = "openldap.read";
 pub const OPENLDAP_WRITE: &str = "openldap.write";
+/// The Podman grants (docs/plans/PODMAN-PLUGIN.md, "Grants"); bound to the
+/// plugin id org.onesimus.podman by `verify`.
+pub const PODMAN_INVENTORY: &str = "podman.inventory";
+/// Image metadata and blobs, read by the host.
+pub const PODMAN_IMAGE_READ: &str = "podman.image.read";
+/// Volume data with attributes, read by the host.
+pub const PODMAN_VOLUME_READ: &str = "podman.volume.read";
+/// The host stops and restarts the writer group of a line.
+pub const PODMAN_LIFECYCLE: &str = "podman.lifecycle";
+/// Online restore.
+pub const PODMAN_RESTORE: &str = "podman.restore";
+/// Access to the rootful backend in ofd (user=root), in addition.
+pub const PODMAN_ROOTFUL: &str = "podman.rootful";
 /// Capabilities whose import only a running broker can serve.
-pub const BROKER_CAPABILITIES: &[&str] = &[POSTGRESQL_READ, OPENLDAP_READ, OPENLDAP_WRITE];
+pub const BROKER_CAPABILITIES: &[&str] =
+    &[POSTGRESQL_READ, OPENLDAP_READ, OPENLDAP_WRITE, PODMAN_INVENTORY, PODMAN_VOLUME_READ];
 
 /// Whether the plugin imports a broker interface (and so cannot be
 /// instantiated without a broker, e.g. by `ofd --check-plugin`).
@@ -171,6 +203,23 @@ pub const BROKER_IMPORTS: &[BrokerImport] = &[
             ("load-write", BrokerFunction::Openldap(OpenldapFunction::LoadWrite)),
             ("load-close", BrokerFunction::Openldap(OpenldapFunction::LoadClose)),
         ],
+    },
+    BrokerImport {
+        capability: PODMAN_INVENTORY,
+        family: PODMAN_INVENTORY,
+        import: "onesimus:filed-plugin/podman@1.0.0",
+        functions: &[
+            ("engine-identify", BrokerFunction::Podman(PodmanFunction::EngineIdentify)),
+            ("inventory", BrokerFunction::Podman(PodmanFunction::Inventory)),
+            ("inspect", BrokerFunction::Podman(PodmanFunction::Inspect)),
+            ("member-state", BrokerFunction::Podman(PodmanFunction::MemberState)),
+        ],
+    },
+    BrokerImport {
+        capability: PODMAN_VOLUME_READ,
+        family: PODMAN_INVENTORY,
+        import: "onesimus:filed-plugin/podman-volume@1.0.0",
+        functions: &[("volume-scan", BrokerFunction::Podman(PodmanFunction::VolumeScan))],
     },
 ];
 /// Largest broker request a guest may send (a load-write carries one block).
@@ -426,6 +475,9 @@ pub struct WasmBackend {
     limits: RuntimeLimits,
     max_response: usize,
     capabilities: Vec<String>,
+    /// Contract version of the verified manifest: scan references and the
+    /// FIFO/HARDLINK kinds exist only from version 2 on.
+    api_version: u32,
 }
 fn backend(error: impl std::fmt::Display) -> executor::Error {
     executor::Error::Backend(error.to_string())
@@ -455,6 +507,27 @@ fn attributes(map: &std::collections::HashMap<String, String>) -> Result<(), exe
 }
 /// Longest plugin diagnostic passed on to the job log.
 const MAX_DIAGNOSTIC: usize = 512;
+/// Largest scan reference a guest may hand back (the host issues 16 bytes).
+pub const MAX_SOURCE_REF: usize = 64;
+
+/// The kind and scan reference of a listed entry (docs/plans/PODMAN-PLUGIN.md,
+/// "Erweiterung von FileEntry"): `source_ref` only from contract 2 on and
+/// bounded; FIFO and HARDLINK only with a reference, because only a host
+/// scan entry can stand behind them. Whether the reference is genuine,
+/// unused and matches the path is the host's check (ofd), not this one.
+pub fn entry_kind(file: &pb::FileEntry, api_version: u32) -> Result<(), executor::Error> {
+    if !file.source_ref.is_empty()
+        && (api_version < crate::API_VERSION_SOURCE_REF || file.source_ref.len() > MAX_SOURCE_REF)
+    {
+        return Err(backend("scan reference not allowed for this plugin"));
+    }
+    match pb::FileKind::try_from(file.kind) {
+        Ok(pb::FileKind::Regular | pb::FileKind::Directory | pb::FileKind::Symlink | pb::FileKind::Virtual) => Ok(()),
+        Ok(pb::FileKind::Fifo | pb::FileKind::Hardlink) if !file.source_ref.is_empty() => Ok(()),
+        _ => Err(backend("unsupported file kind")),
+    }
+}
+
 fn ok(result: Option<&pb::OperationResult>) -> Result<(), executor::Error> {
     match result {
         Some(r) if r.code == ReturnCode::RcOk as i32 => Ok(()),
@@ -592,6 +665,7 @@ impl WasmBackend {
             limits: options.runtime,
             max_response: options.worker.max_response_bytes,
             capabilities: manifest.capabilities.clone(),
+            api_version: manifest.api_version,
         })
     }
     fn bound(&self, instance: &str, job: u64) -> Result<(), executor::Error> {
@@ -685,15 +759,7 @@ impl Backend for WasmBackend {
                 match &response.item {
                     Some(pb::next_file_response::Item::File(file)) => {
                         self.path(&file.path)?;
-                        if !matches!(
-                            pb::FileKind::try_from(file.kind),
-                            Ok(pb::FileKind::Regular
-                                | pb::FileKind::Directory
-                                | pb::FileKind::Symlink
-                                | pb::FileKind::Virtual)
-                        ) {
-                            return Err(backend("unsupported file kind"));
-                        }
+                        entry_kind(file, self.api_version)?;
                         attributes(&file.attributes)?;
                     }
                     Some(pb::next_file_response::Item::Complete(_)) => {}

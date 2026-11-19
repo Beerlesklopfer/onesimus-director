@@ -180,7 +180,7 @@ impl<T: Read + Write + Send> PgPort<T> {
                     _ => Err("broker: unexpected answer".into()),
                 }
             }
-            BrokerFunction::Openldap(_) => Err("not a function of the PostgreSQL broker".into()),
+            BrokerFunction::Openldap(_) | BrokerFunction::Podman(_) => Err("not a function of the PostgreSQL broker".into()),
         }
     }
 }

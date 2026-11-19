@@ -299,6 +299,41 @@ fn manifest_validity_api_target_and_component_format_are_checked() {
     refused!(f.check(150), VerifyError::Compatibility);
 }
 
+/// Contract versions {1, 2} load side by side (V-16, user decision
+/// 19.11.2026); 0 and 3 do not.
+#[test]
+fn contract_versions_one_and_two_are_accepted() {
+    let mut f = Fixture::new();
+    for v in [1, 2] {
+        f.manifest.api_version = v;
+        assert_eq!(f.check(150).unwrap().manifest().api_version, v);
+    }
+    for v in [0, 3] {
+        f.manifest.api_version = v;
+        refused!(f.check(150), VerifyError::Compatibility);
+    }
+}
+
+/// Podman grants are bound to org.onesimus.podman (V-11, user decision
+/// 19.11.2026), even when the certificate grants them to another plugin
+/// id, and need contract 2.
+#[test]
+fn podman_grants_are_bound_to_the_podman_plugin_id() {
+    let mut f = Fixture::new();
+    let key = f.key.clone();
+    let caps = ["podman.inventory", "podman.rootful"];
+    // A suite certificate granting podman.* to another plugin id too.
+    f.with_leaf(&key, &grants(&["test.files", PODMAN_PLUGIN_ID], &caps), 50, 400);
+    f.manifest.capabilities = caps.iter().map(|c| c.to_string()).collect();
+    f.manifest.api_version = 2;
+    refused!(f.check(150), VerifyError::Capability);
+    f.manifest.plugin_id = PODMAN_PLUGIN_ID.into();
+    assert_eq!(f.check(150).unwrap().manifest().plugin_id, PODMAN_PLUGIN_ID);
+    f.manifest.api_version = 1;
+    refused!(f.check(150), VerifyError::Compatibility);
+    assert!(is_podman_grant("podman.lifecycle") && !is_podman_grant("postgresql.read"));
+}
+
 #[test]
 fn schema_3_binds_native_parts() {
     let hash = "ab".repeat(32);

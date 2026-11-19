@@ -563,3 +563,39 @@ fn openldap_write_is_live_only_where_the_port_serves_it() {
     let pg = import_plan(&caps(&[POSTGRESQL_READ, OPENLDAP_READ, OPENLDAP_WRITE]), POSTGRESQL_READ, &|_| true).unwrap();
     assert_eq!(pg.iter().map(|(i, _)| i.import).collect::<Vec<_>>(), ["onesimus:filed-plugin/postgresql@1.0.0"]);
 }
+
+/// Podman imports: `podman` with podman.inventory, `podman-volume` only
+/// with podman.volume.read in addition; never for another family.
+#[test]
+fn podman_imports_follow_the_grants() {
+    let caps = |c: &[&str]| c.iter().map(|s| s.to_string()).collect::<Vec<_>>();
+    let plan = |granted: &[String]| -> Vec<&str> {
+        import_plan(granted, PODMAN_INVENTORY, &|_| true).unwrap().into_iter().map(|(i, _)| i.import).collect()
+    };
+    assert_eq!(plan(&caps(&[PODMAN_INVENTORY])), ["onesimus:filed-plugin/podman@1.0.0"]);
+    assert_eq!(plan(&caps(&[PODMAN_INVENTORY, PODMAN_VOLUME_READ, PODMAN_ROOTFUL])),
+        ["onesimus:filed-plugin/podman@1.0.0", "onesimus:filed-plugin/podman-volume@1.0.0"]);
+    // podman.volume.read alone is no family; another family gets no podman import.
+    assert!(import_plan(&caps(&[PODMAN_VOLUME_READ]), PODMAN_VOLUME_READ, &|_| true).is_err());
+    let pg = import_plan(&caps(&[POSTGRESQL_READ, PODMAN_INVENTORY]), POSTGRESQL_READ, &|_| true).unwrap();
+    assert_eq!(pg.len(), 1);
+}
+
+/// FileEntry v2: scan references only from contract 2 on; FIFO and
+/// HARDLINK only with a reference.
+#[test]
+fn scan_references_need_contract_two() {
+    let entry = |kind: pb::FileKind, source_ref: &[u8]| pb::FileEntry {
+        path: b"/@podman/x".to_vec(), kind: kind as i32, source_ref: source_ref.to_vec(), ..Default::default()
+    };
+    assert!(entry_kind(&entry(pb::FileKind::Regular, b""), 1).is_ok());
+    assert!(entry_kind(&entry(pb::FileKind::Regular, b"r"), 1).is_err());
+    assert!(entry_kind(&entry(pb::FileKind::Regular, b"r"), 2).is_ok());
+    assert!(entry_kind(&entry(pb::FileKind::Regular, &[0; 65]), 2).is_err());
+    for kind in [pb::FileKind::Fifo, pb::FileKind::Hardlink] {
+        assert!(entry_kind(&entry(kind, b""), 2).is_err());
+        assert!(entry_kind(&entry(kind, b"r"), 2).is_ok());
+        assert!(entry_kind(&entry(kind, b"r"), 1).is_err());
+    }
+    assert!(entry_kind(&entry(pb::FileKind::Unspecified, b"r"), 2).is_err());
+}

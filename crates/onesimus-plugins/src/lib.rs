@@ -24,6 +24,25 @@ use sha2::{Digest, Sha256};
 use std::collections::BTreeMap;
 
 pub const API_VERSION: u32 = 1;
+/// Contract versions `ofd` accepts (docs/plans/PODMAN-PLUGIN.md,
+/// "Vertragsversion", user decision 19.11.2026): 1 for the plugins of
+/// phase 1 and 2 (PostgreSQL, OpenLDAP), 2 adds `FileEntry.source_ref` and
+/// the FIFO/HARDLINK kinds (Podman). No hard cut: both load side by side.
+pub const SUPPORTED_API_VERSIONS: &[u32] = &[1, 2];
+/// The contract version that introduced host scan references.
+pub const API_VERSION_SOURCE_REF: u32 = 2;
+/// The only plugin id the Podman grants and imports are bound to
+/// (V-11, user decision 19.11.2026): a suite certificate grants its
+/// capabilities to each of its plugin ids, so without this fixed binding any
+/// other signed plugin could request `podman.rootful`.
+pub const PODMAN_PLUGIN_ID: &str = "org.onesimus.podman";
+/// Prefix of every Podman grant (`podman.inventory`, `podman.rootful`, ...).
+pub const PODMAN_GRANT_PREFIX: &str = "podman.";
+
+/// Whether `capability` is a Podman grant.
+pub fn is_podman_grant(capability: &str) -> bool {
+    capability.starts_with(PODMAN_GRANT_PREFIX)
+}
 /// Manifest schema: 3 adds `suite` (binding to the suite version of `ofd`).
 /// Schemas 1 and 2 are still parsed and checked, but no longer load: they
 /// carry no suite, and the plan's hard cut lets only bundles of the running
@@ -195,11 +214,21 @@ pub fn verify(
     if manifest.suite.as_deref() != Some(policy.suite.as_str()) {
         return Err(VerifyError::Suite);
     }
-    if manifest.api_version != API_VERSION
+    if !SUPPORTED_API_VERSIONS.contains(&manifest.api_version)
         || manifest.target != trust::TARGET
         || !component.starts_with(COMPONENT_HEADER)
     {
         return Err(VerifyError::Compatibility);
+    }
+    // Podman grants: only org.onesimus.podman, only with contract 2 (its
+    // file entries carry host scan references).
+    if manifest.capabilities.iter().any(|c| is_podman_grant(c)) {
+        if manifest.plugin_id != PODMAN_PLUGIN_ID {
+            return Err(VerifyError::Capability);
+        }
+        if manifest.api_version < API_VERSION_SOURCE_REF {
+            return Err(VerifyError::Compatibility);
+        }
     }
     if manifest.capabilities.iter().any(|c| {
         !chain.grants.capabilities.contains(c)

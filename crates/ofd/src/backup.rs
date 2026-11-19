@@ -897,7 +897,9 @@ pub fn plugin_ff(include: &FfPkt, entry: &pb::FileEntry) -> Option<FfPkt> {
             statp.mode = libc::S_IFLNK | 0o777;
             (FT_LNK, entry.symlink_target.clone())
         }
-        pb::FileKind::Unspecified => return None,
+        // FIFO and hard link exist only as host scan entries (source_ref,
+        // see podman_scan); a guest cannot describe one itself.
+        pb::FileKind::Fifo | pb::FileKind::Hardlink | pb::FileKind::Unspecified => return None,
     };
     Some(FfPkt { fname: path.clone(), link, top_fname: path, statp, type_, opts, ..Default::default() })
 }
