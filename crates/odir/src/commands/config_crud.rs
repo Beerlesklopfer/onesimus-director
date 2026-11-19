@@ -30,6 +30,8 @@
 //! names out). Writes are logged like the gRPC path (journal and Director
 //! message). The audit log of the command line shows `text64=` masked.
 
+#![allow(clippy::result_large_err)] // CommandResult as the error of a closure, as in the other commands
+
 use base64::Engine;
 use serde_json::{json, Value};
 
