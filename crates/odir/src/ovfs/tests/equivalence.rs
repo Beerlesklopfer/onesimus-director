@@ -216,7 +216,7 @@ fn synthetic_sql() -> String {
 }
 
 fn connect(url: &str) -> (CatalogHandle, CatalogConnection) {
-    let (handle, _join) = spawn_catalog_worker(url.to_string(), &SHUTDOWN);
+    let (handle, _join) = spawn_catalog_worker(url.parse().expect("catalog url"), &SHUTDOWN);
     let db = handle.dedicated().expect("dedicated connection");
     (handle, db)
 }

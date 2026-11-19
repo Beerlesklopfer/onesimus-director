@@ -340,8 +340,14 @@ fn resp_debug(r: &CatalogResponse) -> &'static str {
 // ---------------------------------------------------------------------------
 
 /// Spawn the catalog worker. Returns the CatalogHandle for callers.
+///
+/// The pool connects lazily: a database that is (or becomes) unreachable
+/// fails each request with an error and is connected again on a later
+/// request; the worker never stops while the Director runs. (Before, a
+/// failed first connect ended the worker and a request already queued
+/// waited for its answer forever: the Director hung at start, J-5.)
 pub fn spawn_catalog_worker(
-    catalog_url: String,
+    options: sqlx::postgres::PgConnectOptions,
     shutdown: &'static AtomicBool,
 ) -> (CatalogHandle, std::thread::JoinHandle<()>) {
     let (tx, rx) = flume::bounded::<(CatalogRequest, flume::Sender<CatalogResponse>)>(256);
@@ -361,8 +367,9 @@ pub fn spawn_catalog_worker(
                 // Every new (or re-established) connection checks the OVFS
                 // extension; a change is logged.
                 let detect_into = ovfs.clone();
-                let pool = match sqlx::postgres::PgPoolOptions::new()
+                let pool = sqlx::postgres::PgPoolOptions::new()
                     .max_connections(8)
+                    .acquire_timeout(std::time::Duration::from_secs(30))
                     .after_connect(move |conn, _meta| {
                         let target = detect_into.clone();
                         Box::pin(async move {
@@ -372,17 +379,12 @@ pub fn spawn_catalog_worker(
                             Ok(())
                         })
                     })
-                    .connect(&catalog_url)
-                    .await
-                {
-                    Ok(p) => p,
-                    Err(e) => {
-                        error!("catalog worker: DB connect failed: {e}");
-                        return;
-                    }
-                };
+                    .connect_lazy_with(options);
 
-                info!("catalog worker connected (pool max=8)");
+                match pool.acquire().await {
+                    Ok(_) => info!("catalog worker connected (pool max=8)"),
+                    Err(e) => error!("catalog worker: DB connect failed: {e} (requests fail until the database is reachable)"),
+                }
 
                 while let Ok((req, resp_tx)) = rx.recv_async().await {
                     if shutdown.load(Ordering::Relaxed) { break; }

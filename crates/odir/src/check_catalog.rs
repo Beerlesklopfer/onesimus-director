@@ -119,7 +119,10 @@ fn uses_socket(cat: &CatalogResource) -> bool {
 
 const SOCKET_DIR: &str = "/var/run/postgresql";
 
-fn connect_options(cat: &CatalogResource) -> sqlx::postgres::PgConnectOptions {
+/// Connection parameters of a Catalog resource as libpq gets them from
+/// BareosDbPostgresql (address or socket, port, user, password). The
+/// catalog worker, the start migration and -t all use these (T-13).
+pub(crate) fn connect_options(cat: &CatalogResource) -> sqlx::postgres::PgConnectOptions {
     let mut options = sqlx::postgres::PgConnectOptions::new_without_pgpass()
         .port(cat.db_port)
         .database(&cat.db_name);

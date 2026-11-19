@@ -509,7 +509,7 @@ fn catalog_files_off_and_blast_attr() {
 fn real_catalog_round_trip() {
     let Ok(url) = std::env::var("ONESIMUS_CATREQ_DB") else { return };
     static SHUTDOWN: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
-    let (cat, _join) = crate::catalog_worker::spawn_catalog_worker(url, &SHUTDOWN);
+    let (cat, _join) = crate::catalog_worker::spawn_catalog_worker(url.parse().expect("catalog url"), &SHUTDOWN);
     let job_id: u32 = cat.query_rows("INSERT INTO Job (Job,Name,Type,Level,JobStatus,PoolId,ClientId) \
 VALUES ('c055.test','c055','B','F','R',3,1); SELECT currval('job_jobid_seq')").unwrap().rows[0][0].clone().unwrap().parse().unwrap();
     let storage_id: i64 = cat.query_rows("SELECT StorageId FROM Storage WHERE Name='File'").unwrap().rows[0][0].clone().unwrap().parse().unwrap();

@@ -18,7 +18,7 @@ use bareos_config::raw::{normalize_key, ConfResource};
 /// my_name before the Director resource names the daemon.
 const MY_NAME: &str = "odir";
 /// BEXIT_CONFIG_ERROR
-const EXIT_CONFIG_ERROR: i32 = 42;
+pub(crate) const EXIT_CONFIG_ERROR: i32 = 42;
 
 /// Runs the configuration test: (text written to stdout, exit code).
 pub fn run(path: &std::path::Path) -> (String, i32) {

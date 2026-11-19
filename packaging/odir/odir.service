@@ -1,21 +1,34 @@
 [Unit]
 Description=Onesimus Director Daemon
-After=network-online.target postgresql.service
+# Ordering, conditions and restart limits as the bareos-director unit
+# (T-7): a configuration error (exit 42) is not restarted, other failures
+# at most 10 times a day, 30 s apart.
+Requires=network.target nss-lookup.target time-sync.target
+After=network-online.target nss-lookup.target local-fs.target remote-fs.target time-sync.target postgresql.service
 Wants=network-online.target
 # Only one Director on port 9101 and the catalog (T-5): starting odir stops
 # bareos-dir and vice versa; both packages stay installable for a way back.
 Conflicts=bareos-director.service
+ConditionPathExists=/var/lib/bareos
+# Limit the number of restarts per day (reset: systemctl reset-failed odir)
+StartLimitIntervalSec=1d
+StartLimitBurst=10
 
 [Service]
 Type=simple
 User=bareos
 Group=bareos
+WorkingDirectory=/var/lib/bareos
 ExecStart=/usr/sbin/odir -c /etc/bareos/bareos-dir.d -f
+SuccessExitStatus=0 15
+# A reload checks the configuration first; a broken one is not loaded.
+ExecReload=/usr/sbin/odir -t -c /etc/bareos/bareos-dir.d
 ExecReload=/bin/kill -HUP $MAINPID
 LimitNOFILE=65536
 Restart=on-failure
-RestartSec=5
-WorkingDirectory=/var/lib/bareos
+RestartSec=30
+# Don't restart on wrong arguments (41) or configuration errors (42).
+RestartPreventExitStatus=41 42
 
 [Install]
 WantedBy=multi-user.target

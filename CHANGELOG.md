@@ -1,5 +1,16 @@
 onesimus (25.1.2+onesimus.0.2.0-2) UNRELEASED; urgency=medium
 
+  * odir: catalog at start and while running (J-5, T-13). The start checks
+    every catalog like CheckCatalog() and ends with exit 1 when one does
+    not open (before: it ran on without a catalog or hung forever). The
+    catalog worker and the start migration connect with the same
+    parameters as -t (DbPassword, DbPort and socket were dropped before).
+    The worker's pool connects lazily: an outage fails requests with an
+    error and the next request after it reconnects.
+  * odir unit as bareos-director (T-7): RestartSec=30, at most 10 restarts
+    a day, no restart on exit 41/42; a configuration error at start now
+    ends with 42 like bareos-dir. Reload runs "odir -t" first.
+
   * odir: the start migration finds the installed schema (T-11). The
     package installs the schema JSON to /usr/lib/bareos/scripts/ddl/, the
     Director looked in /usr/lib/bareos/ddl/schema, so the Onesimus

@@ -281,7 +281,9 @@ fn main() {
             }
             Err(e) => {
                 error!("failed to load config {}: {e}", cli.config.display());
-                std::process::exit(1);
+                // bareos-dir ends a configuration error with 42; the unit does
+                // not restart on it (RestartPreventExitStatus, T-7)
+                std::process::exit(config_test::EXIT_CONFIG_ERROR);
             }
         }
     } else {
@@ -402,16 +404,21 @@ fn main() {
         info!("running as uid={} gid={}", nix::unistd::getuid(), nix::unistd::getgid());
     }
 
-    // Build catalog URL and auto-migrate
-    let catalog_db_url = config.catalogs.first().map(|cat| {
-        if cat.db_address.is_empty() || cat.db_address == "localhost" || cat.db_address == "127.0.0.1" {
-            format!("postgres://{}@localhost/{}?host=/var/run/postgresql", cat.db_user, cat.db_name)
-        } else {
-            format!("postgres://{}@{}:{}/{}", cat.db_user, cat.db_address, cat.db_port, cat.db_name)
-        }
-    });
+    // CheckCatalog() at start (dird.cc): every catalog must open, else the
+    // Director ends (M_ERROR_TERM) and systemd may start it again later.
+    // Before, it ran on without a catalog or hung (J-5).
+    if let Err(text) = check_catalog::check_connections(&config, |_| {}) {
+        error!("FATAL: {}", text.trim_end());
+        eprintln!("{}", text.trim_end());
+        std::process::exit(1);
+    }
 
-    if let Some(ref db_url) = catalog_db_url {
+    // Connection parameters of the first catalog, as -t uses them (T-13:
+    // the worker URL used to drop DbPassword and, for local addresses, DbPort).
+    let catalog_options = config.catalogs.first().map(check_catalog::connect_options);
+
+    // Schema extension (views and functions of the Onesimus schema files)
+    if let Some(ref options) = catalog_options {
         let cat = config.catalogs.first().unwrap();
 
         // Schema directory: next to the build tree (dev) or where the package installs it
@@ -423,12 +430,12 @@ fn main() {
             match rt.block_on(async {
                 let pool = sqlx::postgres::PgPoolOptions::new()
                     .max_connections(1)
-                    .connect(&db_url).await?;
+                    .connect_with(options.clone()).await?;
                 migrator.migrate(&pool).await
             }) {
                 Ok(0) => info!("catalog '{}' schema up to date", cat.db_name),
                 Ok(n) => info!("catalog '{}': applied {} schema migration(s)", cat.db_name, n),
-                Err(e) => warn!("catalog migration failed: {e} (continuing without catalog)"),
+                Err(e) => warn!("catalog migration failed: {e} (continuing without the schema extension)"),
             }
         } else {
             debug!("no schema directory found at {}, skipping migration", schema_dir.display());
@@ -436,8 +443,8 @@ fn main() {
     }
 
     // Spawn catalog worker (single DB pool for all queries)
-    let catalog_handle = if let Some(url) = catalog_db_url {
-        let (handle, join) = catalog_worker::spawn_catalog_worker(url, &SHUTDOWN);
+    let catalog_handle = if let Some(options) = catalog_options {
+        let (handle, join) = catalog_worker::spawn_catalog_worker(options, &SHUTDOWN);
         // Store join handle for later
         Some((handle, join))
     } else {
@@ -467,7 +474,8 @@ fn main() {
         Err(e) => {
             error!("FATAL: {e}");
             eprintln!("{e}");
-            std::process::exit(1);
+            // a configuration error as in StoreAddresses (scan_err)
+            std::process::exit(config_test::EXIT_CONFIG_ERROR);
         }
     };
     let bnet_listeners = match listen::bind_all(&listen_addrs) {
