@@ -85,6 +85,14 @@ impl std::fmt::Debug for BrokerHandle {
 
 /// The capability of the PostgreSQL broker import.
 pub const POSTGRESQL_READ: &str = "postgresql.read";
+/// Capabilities whose import only a running broker can serve.
+pub const BROKER_CAPABILITIES: &[&str] = &[POSTGRESQL_READ];
+
+/// Whether the plugin imports a broker interface (and so cannot be
+/// instantiated without a broker, e.g. by `ofd --check-plugin`).
+pub fn needs_broker(manifest: &crate::Manifest) -> bool {
+    manifest.capabilities.iter().any(|c| BROKER_CAPABILITIES.contains(&c.as_str()))
+}
 const POSTGRESQL_IMPORT: &str = "onesimus:filed-plugin/postgresql@1.0.0";
 /// Largest broker request a guest may send.
 const MAX_BROKER_REQUEST: usize = 64 * 1024;

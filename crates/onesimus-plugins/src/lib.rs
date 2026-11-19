@@ -1,26 +1,40 @@
 //! Verification boundary for signed Rust/WebAssembly plugins. No Python runtime
 //! or native dynamic libraries are loaded. Component execution is a separate
 //! host implementation and must only accept a VerifiedComponent.
+//!
+//! Trust model (plan: docs/plans/SIGNIER-INFRASTRUKTUR.md): an offline
+//! Ed25519 root, one intermediate per generation, signing certificates with
+//! the plugin grants in an X.509 extension. Root, the generation of this
+//! release and a revocation list are compiled into `ofd` ([`TrustBase`]);
+//! the local policy ([`LocalPolicy`]) can only restrict.
 pub mod bundle;
 mod certificate;
 pub mod discovery;
 pub mod executor;
+pub mod signing;
+#[cfg(any(test, feature = "test-ca"))]
+pub mod testca;
+pub mod trust;
 pub mod wasm;
-pub use certificate::signing_key_id;
+pub use certificate::{RSA_BITS, leaf_grants, signing_key_id, verify_manifest_signature};
+pub use trust::{GRANTS_OID, Grants, LocalPolicy, Revocations, TARGET, TrustBase, TrustPolicy, suite_of};
 
-use openssl::{pkey::Id, sign::Verifier};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeMap;
 
 pub const API_VERSION: u32 = 1;
-/// Newest manifest schema: 2 adds native parts; 1 is still accepted.
-pub const MANIFEST_SCHEMA_VERSION: u32 = 2;
+/// Manifest schema: 3 adds `suite` (binding to the suite version of `ofd`).
+/// Schemas 1 and 2 are still parsed and checked, but no longer load: they
+/// carry no suite, and the plan's hard cut lets only bundles of the running
+/// suite load.
+pub const MANIFEST_SCHEMA_VERSION: u32 = 3;
 const MAX_MANIFEST: usize = 64 * 1024;
 const COMPONENT_HEADER: &[u8] = b"\0asm\x0d\0\x01\0";
 
-/// Detached Ed25519 signature covers the exact UTF-8 JSON bytes, including all
-/// fields and whitespace. Do not deserialize and reserialize before verifying.
+/// The detached signature (Ed25519 or RSA-PSS, by the leaf's key type) covers
+/// the exact UTF-8 JSON bytes, including all fields and whitespace. Do not
+/// deserialize and reserialize before verifying.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Manifest {
@@ -33,12 +47,16 @@ pub struct Manifest {
     pub not_before: u64,
     pub not_after: u64,
     pub capabilities: Vec<String>,
-    /// Host target, e.g. wasm32-wasip2. The verifier compares it to host policy.
+    /// Host target, always [`TARGET`].
     pub target: String,
-    /// Schema 2: native parts per Debian multiarch triplet (e.g. a broker),
-    /// each bound to its SHA-256. Empty and absent in schema 1.
+    /// Schema 2 and 3: native parts per Debian multiarch triplet (e.g. a
+    /// broker), each bound to its SHA-256. Absent in schema 1.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub native: BTreeMap<String, Vec<NativePart>>,
+    /// Schema 3: suite version this bundle was built for (Onesimus part of
+    /// the workspace version, e.g. `0.2.0`). Must equal the host's exactly.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub suite: Option<String>,
 }
 
 /// One native file of a plugin package: a path below the plugin directory
@@ -60,12 +78,10 @@ impl Manifest {
 const MAX_TRIPLETS: usize = 16;
 const MAX_PARTS: usize = 8;
 
-/// Schema 2 native parts: lowercase triplets, safe relative paths, hex hashes.
+/// Native parts (schema 2 and 3): lowercase triplets, safe relative paths,
+/// hex hashes.
 fn check_native(native: &BTreeMap<String, Vec<NativePart>>) -> Result<(), VerifyError> {
     let bad = |why: &str| Err(VerifyError::Manifest(format!("native: {why}")));
-    if native.is_empty() {
-        return bad("schema 2 needs at least one triplet");
-    }
     if native.len() > MAX_TRIPLETS {
         return bad("too many triplets");
     }
@@ -95,32 +111,6 @@ fn check_native(native: &BTreeMap<String, Vec<NativePart>>) -> Result<(), Verify
         }
     }
     Ok(())
-}
-
-#[derive(Default, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct SignerGrant {
-    pub plugin_ids: BTreeSet<String>,
-    pub capabilities: BTreeSet<String>,
-}
-
-#[derive(Default)]
-pub struct TrustPolicy {
-    /// Administratively trusted CA certificates (DER). Bundle roots are never
-    /// imported here and the system's TLS/web root store is not consulted.
-    pub trust_anchors_der: Vec<Vec<u8>>,
-    /// SHA-256(SPKI DER) -> explicitly authorized plugin identities/capabilities.
-    pub signers: BTreeMap<String, SignerGrant>,
-    /// Applies to every validated chain member, including intermediate/CA keys.
-    pub revoked_keys: BTreeSet<String>,
-    pub revoked_certificates: BTreeSet<String>,
-    pub revoked_plugins: BTreeSet<String>,
-    pub allowed_capabilities: BTreeSet<String>,
-    pub target: String,
-    /// Freshness of the administratively supplied offline revocation/policy
-    /// snapshot. No network CRL/OCSP fetch is performed by this verifier.
-    pub valid_from: u64,
-    pub valid_until: u64,
 }
 
 /// Owns the exact verified bytes to avoid a path swap between checking and
@@ -157,10 +147,15 @@ pub enum VerifyError {
     Compatibility,
     #[error("plugin requests a capability not granted by the host")]
     Capability,
+    #[error("plugin was built for another Onesimus suite version (or has no suite); install the plugin of this release")]
+    Suite,
     #[error("plugin artifact hash does not match its signed manifest")]
     Artifact,
 }
 
+/// Checks one bundle against the compiled-in trust base, the local
+/// restrictions and the host suite. Call it for every load: certificate
+/// validity, revocations and the local policy apply at `now_unix`.
 pub fn verify(
     manifest_bytes: &[u8],
     signature: &[u8],
@@ -169,6 +164,64 @@ pub fn verify(
     policy: &TrustPolicy,
     now_unix: u64,
 ) -> Result<VerifiedComponent, VerifyError> {
+    let manifest = parse_manifest(manifest_bytes)?;
+    if let Some((from, until)) = policy.local.validity
+        && (from >= until || now_unix < from || now_unix >= until)
+    {
+        return Err(VerifyError::Trust);
+    }
+    let chain = certificate::verify_chain(
+        certificate_chain_der,
+        &policy.base,
+        &policy.local.revoked,
+        now_unix,
+    )?;
+    let id = &manifest.plugin_id;
+    if manifest.signing_key_id != certificate::key_id(&chain.key)?
+        || policy.base.revoked().plugin(id)
+        || policy.local.revoked.plugin(id)
+        || !chain.grants.plugin_ids.contains(id)
+        || policy.local.plugin_ids.as_ref().is_some_and(|ids| !ids.contains(id))
+    {
+        return Err(VerifyError::Trust);
+    }
+    certificate::verify_signature(&chain.key, manifest_bytes, signature)?;
+    if manifest.not_before >= manifest.not_after
+        || now_unix < manifest.not_before
+        || now_unix >= manifest.not_after
+    {
+        return Err(VerifyError::Validity);
+    }
+    if manifest.suite.as_deref() != Some(policy.suite.as_str()) {
+        return Err(VerifyError::Suite);
+    }
+    if manifest.api_version != API_VERSION
+        || manifest.target != trust::TARGET
+        || !component.starts_with(COMPONENT_HEADER)
+    {
+        return Err(VerifyError::Compatibility);
+    }
+    if manifest.capabilities.iter().any(|c| {
+        !chain.grants.capabilities.contains(c)
+            || policy.local.allowed_capabilities.as_ref().is_some_and(|allowed| !allowed.contains(c))
+    }) {
+        return Err(VerifyError::Capability);
+    }
+    let expected = hex::decode(&manifest.artifact_sha256).map_err(|_| VerifyError::Artifact)?;
+    if expected.as_slice() != Sha256::digest(&component).as_slice() {
+        return Err(VerifyError::Artifact);
+    }
+    Ok(VerifiedComponent {
+        manifest,
+        component,
+        certificate_sha256: chain.certificate_sha256,
+    })
+}
+
+/// Size, JSON, required fields and the rules of each schema. Schemas 1 and
+/// 2 pass this check (their structure is still validated); `verify` refuses
+/// them at the suite comparison because they carry no suite.
+pub fn parse_manifest(manifest_bytes: &[u8]) -> Result<Manifest, VerifyError> {
     if manifest_bytes.len() > MAX_MANIFEST {
         return Err(VerifyError::Manifest("maximum size is 64 KiB".into()));
     }
@@ -182,63 +235,29 @@ pub fn verify(
             "identity, version and signing key are required".into(),
         ));
     }
+    let suite = |needed: bool| match (&manifest.suite, needed) {
+        (None, false) => Ok(()),
+        (Some(_), false) => Err(VerifyError::Manifest("suite needs schema 3".into())),
+        (Some(s), true) if trust::valid_suite(s) => Ok(()),
+        (_, true) => Err(VerifyError::Manifest("schema 3 needs a valid suite".into())),
+    };
     match manifest.schema_version {
-        1 if manifest.native.is_empty() => {}
+        1 if manifest.native.is_empty() => suite(false)?,
         1 => return Err(VerifyError::Manifest("native parts need schema 2".into())),
-        MANIFEST_SCHEMA_VERSION => check_native(&manifest.native)?,
+        2 if manifest.native.is_empty() => {
+            return Err(VerifyError::Manifest("native: schema 2 needs at least one triplet".into()));
+        }
+        2 => {
+            suite(false)?;
+            check_native(&manifest.native)?
+        }
+        3 => {
+            suite(true)?;
+            check_native(&manifest.native)?
+        }
         _ => return Err(VerifyError::Compatibility),
     }
-    let (key, certificate_sha256) =
-        certificate::verify_chain(certificate_chain_der, policy, now_unix)?;
-    if manifest.signing_key_id != certificate::key_id(&key)?
-        || policy.revoked_plugins.contains(&manifest.plugin_id)
-    {
-        return Err(VerifyError::Trust);
-    }
-    let grant = policy
-        .signers
-        .get(&manifest.signing_key_id)
-        .ok_or(VerifyError::Trust)?;
-    if !grant.plugin_ids.contains(&manifest.plugin_id) {
-        return Err(VerifyError::Trust);
-    }
-    if key.id() != Id::ED25519 || signature.len() != 64 {
-        return Err(VerifyError::Signature);
-    }
-    let valid = Verifier::new_without_digest(&key)
-        .and_then(|mut verifier| verifier.verify_oneshot(signature, manifest_bytes))
-        .map_err(|_| VerifyError::Signature)?;
-    if !valid {
-        return Err(VerifyError::Signature);
-    }
-    if manifest.not_before >= manifest.not_after
-        || now_unix < manifest.not_before
-        || now_unix >= manifest.not_after
-    {
-        return Err(VerifyError::Validity);
-    }
-    if manifest.api_version != API_VERSION
-        || manifest.target != policy.target
-        || !component.starts_with(COMPONENT_HEADER)
-    {
-        return Err(VerifyError::Compatibility);
-    }
-    if manifest
-        .capabilities
-        .iter()
-        .any(|c| !policy.allowed_capabilities.contains(c) || !grant.capabilities.contains(c))
-    {
-        return Err(VerifyError::Capability);
-    }
-    let expected = hex::decode(&manifest.artifact_sha256).map_err(|_| VerifyError::Artifact)?;
-    if expected.as_slice() != Sha256::digest(&component).as_slice() {
-        return Err(VerifyError::Artifact);
-    }
-    Ok(VerifiedComponent {
-        manifest,
-        component,
-        certificate_sha256,
-    })
+    Ok(manifest)
 }
 
 #[cfg(test)]

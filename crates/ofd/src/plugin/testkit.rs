@@ -1,16 +1,13 @@
-//! Signed test plugins: a scripted Component Model guest, a fresh test CA per
-//! call and a matching trust policy. Private keys stay in memory; the bundle
+//! Signed test plugins: a scripted Component Model guest, the shared test
+//! hierarchy of onesimus-plugins (feature test-ca) and a local policy. Private keys stay in memory; the bundle
 //! and the policy hold only public certificates. Test use only.
 
 use std::path::Path;
 use std::time::{SystemTime, UNIX_EPOCH};
 
+use onesimus_plugins::testca;
 use onesimus_proto_rs::onesimus::{ccc::{PluginMetadata, ReturnCode}, filed::plugin::v1 as pb};
-use openssl::{pkey::PKey, sign::Signer};
 use prost::Message;
-use rcgen::{BasicConstraints, CertificateParams, DnType, ExtendedKeyUsagePurpose, IsCa, KeyPair, KeyUsagePurpose,
-    PKCS_ED25519};
-use sha2::{Digest, Sha256};
 
 use super::Resolved;
 
@@ -158,61 +155,19 @@ pub fn signed_artifact(dir: &Path, name: &str, artifact: Vec<u8>) -> Resolved {
     signed_artifact_with(dir, name, artifact, &["file.read", "file.write"], Default::default())
 }
 
-/// A signed bundle with these capabilities and native parts (schema 2 when
-/// `native` is not empty).
+/// A signed bundle with these capabilities and native parts (schema 3, the
+/// suite of this build), signed by the shared test hierarchy with an RSA 4096
+/// key whose certificate grants exactly this plugin and these capabilities.
+/// The policy pins the test root (compiled in for tests) and restricts
+/// nothing else.
 pub fn signed_artifact_with(dir: &Path, name: &str, artifact: Vec<u8>, caps: &[&str],
     native: std::collections::BTreeMap<String, Vec<onesimus_plugins::NativePart>>) -> Resolved {
     let now = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs();
-    let ca_key = KeyPair::generate_for(&PKCS_ED25519).unwrap();
-    let mut ca = CertificateParams::default();
-    ca.distinguished_name.push(DnType::CommonName, "ofd-plugin-test-ca");
-    ca.is_ca = IsCa::Ca(BasicConstraints::Unconstrained);
-    ca.key_usages = vec![KeyUsagePurpose::KeyCertSign, KeyUsagePurpose::CrlSign];
-    let ca = ca.self_signed(&ca_key).unwrap();
-    let signing_key = KeyPair::generate_for(&PKCS_ED25519).unwrap();
-    let mut leaf = CertificateParams::default();
-    leaf.distinguished_name.push(DnType::CommonName, "ofd-plugin-test-signer");
-    leaf.key_usages = vec![KeyUsagePurpose::DigitalSignature];
-    leaf.extended_key_usages = vec![ExtendedKeyUsagePurpose::CodeSigning];
-    leaf.use_authority_key_identifier_extension = true;
-    let leaf = leaf.signed_by(&signing_key, &ca, &ca_key).unwrap();
-    let key = PKey::private_key_from_der(&signing_key.serialize_der()).unwrap();
-
-    let key_id = onesimus_plugins::signing_key_id(leaf.der()).unwrap();
-    let plugin_id = format!("test.{name}");
-    let capabilities: Vec<String> = caps.iter().map(|c| c.to_string()).collect();
-    let manifest = onesimus_plugins::Manifest {
-        schema_version: if native.is_empty() { 1 } else { 2 },
-        plugin_id: plugin_id.clone(),
-        version: "1.0.0".into(),
-        api_version: 1,
-        artifact_sha256: Sha256::digest(&artifact).iter().map(|b| format!("{b:02x}")).collect(),
-        signing_key_id: key_id.clone(),
-        not_before: now - 1,
-        not_after: now + 300,
-        capabilities: capabilities.clone(),
-        target: "wasm32-wasip2".into(),
-        native,
-    };
-    let manifest_bytes = serde_json::to_vec(&manifest).unwrap();
-    let signature = Signer::new_without_digest(&key).unwrap().sign_oneshot_to_vec(&manifest_bytes).unwrap();
-    let bundle = pb::SignedPluginArtifact {
-        manifest_bytes,
-        ed25519_signature: signature,
-        artifact_bytes: artifact,
-        x509_certificate_chain_der: vec![leaf.der().to_vec()],
-    };
+    let bundle = testca::signed_bundle(artifact, &format!("test.{name}"), caps, native, now);
     let bundle_path = dir.join(format!("{name}.pb"));
     std::fs::write(&bundle_path, bundle.encode_to_vec()).unwrap();
-    std::fs::write(dir.join("ca.pem"), ca.pem()).unwrap();
-    let policy = serde_json::json!({
-        "ca_certificates": ["ca.pem"],
-        "signers": { key_id: { "plugin_ids": [plugin_id], "capabilities": capabilities } },
-        "allowed_capabilities": capabilities,
-        "target": "wasm32-wasip2",
-        "valid_from": now - 1,
-        "valid_until": now + 300,
-    });
+    std::fs::write(dir.join("ca.pem"), testca::TestCa::shared().root.to_pem().unwrap()).unwrap();
+    let policy = serde_json::json!({ "ca_certificates": ["ca.pem"], "target": "wasm32-wasip2" });
     let policy_path = dir.join("policy.json");
     std::fs::write(&policy_path, serde_json::to_vec(&policy).unwrap()).unwrap();
     Resolved { bundle: bundle_path, policy: policy_path }

@@ -87,6 +87,30 @@ pub(crate) fn launch_checked(plugin_dir: &Path, manifest: &onesimus_plugins::Man
     spawn(&file, run_as, part, args).map_err(|e| PluginError::Load(format!("starting {part}: {e}")))
 }
 
+/// For `ofd --check-plugin`: every native part the verified manifest lists
+/// for `triplet` is a regular file (not a link) below `plugin_dir` with the
+/// signed SHA-256. Returns how many parts were checked. Nothing is started.
+pub(crate) fn check_parts(plugin_dir: &Path, manifest: &onesimus_plugins::Manifest, triplet: &str)
+    -> Result<usize, PluginError> {
+    let Some(parts) = manifest.native.get(triplet) else { return Ok(0) };
+    for part in parts {
+        let path = plugin_dir.join(&part.path);
+        let mut file = std::fs::OpenOptions::new()
+            .read(true)
+            .custom_flags(libc::O_CLOEXEC | libc::O_NOFOLLOW)
+            .open(&path)
+            .map_err(|e| refuse(&path, e.to_string()))?;
+        let meta = file.metadata().map_err(|e| refuse(&path, e.to_string()))?;
+        if !meta.is_file() {
+            return Err(refuse(&path, "is not a regular file"));
+        }
+        if sha256_of(&mut file).map_err(|e| refuse(&path, e.to_string()))? != part.sha256 {
+            return Err(refuse(&path, "SHA-256 does not match the signed manifest"));
+        }
+    }
+    Ok(parts.len())
+}
+
 fn sha256_of(file: &mut File) -> std::io::Result<String> {
     let mut hasher = Sha256::new();
     let mut buf = vec![0u8; 64 * 1024];
@@ -251,7 +275,7 @@ mod tests {
         std::fs::set_permissions(&target, std::fs::Permissions::from_mode(0o755)).unwrap();
         let sha = sha256_of(&mut File::open(&target).unwrap()).unwrap();
         onesimus_plugins::Manifest {
-            schema_version: 2,
+            schema_version: 3,
             plugin_id: "test.broker".into(),
             version: "1".into(),
             api_version: 1,
@@ -263,6 +287,7 @@ mod tests {
             target: "wasm32-wasip2".into(),
             native: [("test-triplet".to_string(),
                 vec![onesimus_plugins::NativePart { path: "broker".into(), sha256: sha }])].into(),
+            suite: Some("0.0.0".into()),
         }
     }
     fn start(d: &Path, m: &onesimus_plugins::Manifest, args: &[&str]) -> Result<Broker, PluginError> {

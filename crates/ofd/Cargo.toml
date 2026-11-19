@@ -43,6 +43,7 @@ rcgen.workspace = true
 twox-hash = { version = "2", default-features = false, features = ["xxhash3_128", "std"] }
 
 [dev-dependencies]
+onesimus-plugins = { path = "../onesimus-plugins", features = ["test-ca"] }
 openssl.workspace = true
 wat = "1"
 

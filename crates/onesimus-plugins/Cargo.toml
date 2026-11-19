@@ -19,5 +19,11 @@ prost.workspace = true
 onesimus-proto-rs.workspace = true
 wasmtime = { version = "=49.0.3", default-features = false, features = ["std", "runtime", "cranelift", "component-model"] }
 
+[features]
+# Test CA hierarchy (Ed25519 root, generation, RSA 4096 leaf) for tests of
+# dependent crates. Only enabled from [dev-dependencies]; it adds helpers that
+# issue test certificates, never a way around verification.
+test-ca = []
+
 [dev-dependencies]
 wat = "1"

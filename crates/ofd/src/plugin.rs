@@ -170,10 +170,12 @@ fn policy_ca_files(policy: &Path) -> Result<Vec<PathBuf>, PluginError> {
     let bytes = onesimus_plugins::bundle::read_bounded(policy, 1024 * 1024).map_err(|e| untrusted(e.to_string()))?;
     let value: serde_json::Value = serde_json::from_slice(&bytes).map_err(|_| untrusted("invalid policy JSON".into()))?;
     let base = policy.parent().unwrap_or(Path::new("/"));
-    value
-        .get("ca_certificates")
-        .and_then(|v| v.as_array())
-        .ok_or_else(|| untrusted("no ca_certificates".into()))?
+    // Optional: the policy may pin compiled-in CA files, nothing else.
+    let Some(list) = value.get("ca_certificates") else {
+        return Ok(Vec::new());
+    };
+    list.as_array()
+        .ok_or_else(|| untrusted("ca_certificates is not a list".into()))?
         .iter()
         .map(|v| v.as_str().map(|s| base.join(s)).ok_or_else(|| untrusted("ca_certificates holds a non-string".into())))
         .collect()
@@ -255,7 +257,7 @@ pub(crate) fn prepare_broker(resolved: &Resolved, line: &PluginLine, plugin_dir:
     use onesimus_plugins::wasm::{BrokerHandle, POSTGRESQL_READ};
     let load = |e: &dyn fmt::Display| PluginError::Load(e.to_string());
     let bundle = bundle::read_bundle(&resolved.bundle, RuntimeLimits::default().max_component_bytes).map_err(|e| load(&e))?;
-    let policy = bundle::read_policy(&resolved.policy).map_err(|e| load(&e))?;
+    let policy = trust::policy(&resolved.policy)?;
     let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_err(|e| load(&e))?.as_secs();
     // The broker decision rests on the verified manifest only.
     let verified = onesimus_plugins::verify(&bundle.manifest_bytes, &bundle.ed25519_signature, bundle.artifact_bytes,
@@ -311,7 +313,7 @@ impl Session {
         let load = |e: &dyn fmt::Display| PluginError::Load(e.to_string());
         let chunk = runtime.max_chunk_bytes;
         let bundle = bundle::read_bundle(&resolved.bundle, runtime.max_component_bytes).map_err(|e| load(&e))?;
-        let policy = bundle::read_policy(&resolved.policy).map_err(|e| load(&e))?;
+        let policy = trust::policy(&resolved.policy)?;
         let manifest: onesimus_plugins::Manifest =
             serde_json::from_slice(&bundle.manifest_bytes).map_err(|e| load(&e))?;
         let binding = Binding {
@@ -454,6 +456,7 @@ impl Session {
 
 #[cfg(test)]
 pub(crate) mod testkit;
+pub(crate) mod trust;
 
 #[cfg(test)]
 mod tests {
@@ -569,7 +572,10 @@ mod tests {
         std::fs::write(d.join("open/evil.pem"), b"x").unwrap();
         std::fs::write(d.join("policy.json"), br#"{"ca_certificates":["ca.pem","open/evil.pem"]}"#).unwrap();
         assert!(matches!(resolve_checked(&c, &line, me(), &d), Err(PluginError::Untrusted { path, .. }) if path.ends_with("open")));
+        // Without CA files (the trust base is compiled in) only the policy itself counts.
         std::fs::write(d.join("policy.json"), b"{}").unwrap();
+        assert!(resolve_checked(&c, &line, me(), &d).is_ok());
+        std::fs::write(d.join("policy.json"), br#"{"ca_certificates":"ca.pem"}"#).unwrap();
         assert!(matches!(resolve_checked(&c, &line, me(), &d), Err(PluginError::Untrusted { reason, .. }) if reason.contains("ca_certificates")));
         std::fs::remove_dir_all(&d).unwrap();
     }

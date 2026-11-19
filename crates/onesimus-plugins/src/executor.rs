@@ -526,6 +526,7 @@ mod tests {
                 capabilities: vec![],
                 target: "test".into(),
                 native: Default::default(),
+                suite: None,
             },
             component: Vec::new(),
             certificate_sha256: "test".into(),

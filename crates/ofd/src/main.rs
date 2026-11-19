@@ -134,9 +134,10 @@ struct Cli {
 fn main() {
     let cli = Cli::parse();
     if let Some(path) = cli.check_plugin.as_deref() {
-        if let Err(error) = check_plugin(path, cli.plugin_policy.as_deref().unwrap(),
+        match check_plugin(path, cli.plugin_policy.as_deref().unwrap(),
             cli.plugin_check_operation.unwrap_or(PluginCheckOperation::Backup)) {
-            eprintln!("Plugin check: {error}"); std::process::exit(1);
+            Ok(report) => println!("{report}"),
+            Err(error) => { eprintln!("Plugin check: {error}"); std::process::exit(1); }
         }
         return;
     }
@@ -302,14 +303,38 @@ fn wait_for_shutdown() {
     let _ = rx.recv();
 }
 
+/// Checks a bundle as a job would: trust base, local policy, signature,
+/// manifest (suite) and the hashes of its native parts for this triplet.
+/// A plugin that needs a broker ends there (no broker in check mode);
+/// any other plugin is also instantiated and initialized.
 fn check_plugin(path: &std::path::Path, policy: &std::path::Path,
-    operation: PluginCheckOperation) -> Result<(), Box<dyn std::error::Error>> {
+    operation: PluginCheckOperation) -> Result<String, Box<dyn std::error::Error>> {
     use onesimus_plugins::{bundle, executor::{Binding, Host, Limits}, wasm::{self, LoadOptions, RuntimeLimits}};
     use onesimus_proto_rs::onesimus::filed::plugin::v1::{JobContext, JobOperation};
     let runtime = RuntimeLimits::default();
     let bundle = bundle::read_bundle(path, runtime.max_component_bytes)?;
-    let policy = bundle::read_policy(policy)?;
-    let manifest: onesimus_plugins::Manifest = serde_json::from_slice(&bundle.manifest_bytes)?;
+    let policy = plugin::trust::policy(policy).map_err(|e| e.to_string())?;
+    let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH)?.as_secs();
+    let verified = onesimus_plugins::verify(&bundle.manifest_bytes, &bundle.ed25519_signature,
+        bundle.artifact_bytes.clone(), &bundle.x509_certificate_chain_der, &policy, now)?;
+    let manifest = verified.manifest().clone();
+    drop(verified);
+    let what = format!("Plugin {} {} (suite {}, {})", manifest.plugin_id, manifest.version, policy.suite,
+        policy.base.generation_name());
+    let dir = path.parent().unwrap_or(std::path::Path::new("."));
+    let triplet = config::multiarch_triplet();
+    let parts = match triplet {
+        Some(t) => broker::check_parts(dir, &manifest, t).map_err(|e| e.to_string())?,
+        None => 0,
+    };
+    if wasm::needs_broker(&manifest) {
+        let triplet = triplet.ok_or("no multiarch triplet for this build")?;
+        if parts == 0 {
+            return Err(format!("the signed manifest lists no native parts for {triplet}").into());
+        }
+        return Ok(format!("{what}: X.509, signature, manifest and {parts} native part(s) for {triplet} OK; \
+            not initialized (needs a broker)"));
+    }
     let host = Host::new(1)?;
     let mut worker = wasm::load_signed(&host, bundle, &policy, LoadOptions {
         binding: Binding { instance_id: "plugin-check".into(), job_id: 1,
@@ -321,8 +346,7 @@ fn check_plugin(path: &std::path::Path, policy: &std::path::Path,
             max_response_bytes: 256 * 1024, operation_timeout: std::time::Duration::from_secs(5) }, runtime, broker: None,
     })?;
     worker.shutdown(std::time::Duration::from_secs(2))?;
-    println!("Plugin {} {}: X.509, signature, component ABI and initialization OK", manifest.plugin_id, manifest.version);
-    Ok(())
+    Ok(format!("{what}: X.509, signature, manifest, component ABI and initialization OK"))
 }
 
 #[cfg(test)]
@@ -338,5 +362,61 @@ mod plugin_cli_tests {
         let cli = Cli::try_parse_from(["ofd", "--check-plugin", "bundle.pb", "--plugin-policy", "policy.json",
             "--plugin-check-operation", "restore"]).unwrap();
         assert!(matches!(cli.plugin_check_operation, Some(PluginCheckOperation::Restore)));
+    }
+
+    fn dir(tag: &str) -> std::path::PathBuf {
+        let d = std::path::PathBuf::from(format!("/tmp/ofd-check-{tag}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&d);
+        std::fs::create_dir_all(&d).unwrap();
+        d
+    }
+
+    #[test]
+    fn a_broker_plugin_is_checked_up_to_its_native_parts() {
+        use onesimus_plugins::NativePart;
+        use sha2::{Digest, Sha256};
+        let Some(triplet) = config::multiarch_triplet() else { return };
+        let d = dir("broker");
+        std::fs::create_dir(d.join("postgresql")).unwrap();
+        let broker = d.join("postgresql/onesimus-pg-broker");
+        std::fs::write(&broker, b"broker binary").unwrap();
+        let sha: String = Sha256::digest(b"broker binary").iter().map(|b| format!("{b:02x}")).collect();
+        let native = [(triplet.to_string(), vec![NativePart { path: "postgresql/onesimus-pg-broker".into(), sha256: sha }])].into();
+        // A component that could not run without a broker; check mode never instantiates it.
+        let component = wat::parse_str("(component)").unwrap();
+        let resolved = plugin::testkit::signed_artifact_with(&d, "postgresql", component,
+            &["file.read", "postgresql.read"], native);
+        let report = check_plugin(&resolved.bundle, &resolved.policy, PluginCheckOperation::Backup).unwrap();
+        assert!(report.contains("test.postgresql 1.0.0") && report.contains("1 native part(s)")
+            && report.contains("not initialized"), "{report}");
+        // A replaced broker fails the check.
+        std::fs::write(&broker, b"other binary").unwrap();
+        let error = check_plugin(&resolved.bundle, &resolved.policy, PluginCheckOperation::Backup).unwrap_err();
+        assert!(error.to_string().contains("SHA-256"), "{error}");
+        // A broker plugin without native parts for this triplet fails too.
+        let resolved = plugin::testkit::signed_artifact_with(&d, "postgresql", wat::parse_str("(component)").unwrap(),
+            &["postgresql.read"], Default::default());
+        let error = check_plugin(&resolved.bundle, &resolved.policy, PluginCheckOperation::Backup).unwrap_err();
+        assert!(error.to_string().contains("no native parts"), "{error}");
+        std::fs::remove_dir_all(&d).unwrap();
+    }
+
+    #[test]
+    fn a_plain_plugin_is_initialized_and_a_bad_bundle_refused() {
+        use prost::Message;
+        let d = dir("plain");
+        let resolved = plugin::testkit::signed_plugin(&d, "example", &Default::default());
+        let report = check_plugin(&resolved.bundle, &resolved.policy, PluginCheckOperation::Restore).unwrap();
+        assert!(report.contains("initialization OK") && report.contains("Onesimus Plugin Signing G1"), "{report}");
+        let mut bundle = onesimus_plugins::bundle::read_bundle(&resolved.bundle, 1 << 24).unwrap();
+        bundle.ed25519_signature[3] ^= 1;
+        std::fs::write(&resolved.bundle, bundle.encode_to_vec()).unwrap();
+        let error = check_plugin(&resolved.bundle, &resolved.policy, PluginCheckOperation::Backup).unwrap_err();
+        assert!(error.to_string().contains("invalid plugin signature"), "{error}");
+        // A local policy that tries to grant is a load error.
+        std::fs::write(&resolved.policy, br#"{"signers":{}}"#).unwrap();
+        let error = check_plugin(&resolved.bundle, &resolved.policy, PluginCheckOperation::Backup).unwrap_err();
+        assert!(error.to_string().contains("cannot grant"), "{error}");
+        std::fs::remove_dir_all(&d).unwrap();
     }
 }
