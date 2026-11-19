@@ -1,5 +1,12 @@
 onesimus (25.1.2+onesimus.0.2.0-2) UNRELEASED; urgency=medium
 
+  * odir: the start migration finds the installed schema (T-11). The
+    package installs the schema JSON to /usr/lib/bareos/scripts/ddl/, the
+    Director looked in /usr/lib/bareos/ddl/schema, so the Onesimus
+    extension (v2251 views and functions, v2252) never reached an
+    installed catalog. After the upgrade the first start applies it; the
+    Bareos Version table stays at 2250.
+
   * odir: time and size directives are read with every word of the value
     and the Bareos units (K-1). Max Run Time, Full/Incremental/Differential
     Max Run Time, Max Wait Time, Max Start Delay, Duplicate Job Proximity

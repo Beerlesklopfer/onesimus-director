@@ -295,7 +295,7 @@ fn main() {
 
     // --export-schema: print JSON schema and exit
     if cli.export_schema {
-        let schema_dir = std::path::Path::new("/usr/lib/bareos/scripts/ddl");
+        let schema_dir = std::path::Path::new(commands::catalog::INSTALLED_SCHEMA_DIR);
         let migrator = bareos_orm::migration::Migrator::new(schema_dir);
         match migrator.latest() {
             Ok(Some(schema)) => {
@@ -414,7 +414,7 @@ fn main() {
     if let Some(ref db_url) = catalog_db_url {
         let cat = config.catalogs.first().unwrap();
 
-        // Schema-Verzeichnis: relativ zum Binary (dev) oder /usr/lib/bareos/ddl/schema (installed)
+        // Schema directory: next to the build tree (dev) or where the package installs it
         let schema_dir = commands::catalog::schema_dir();
 
         if schema_dir.exists() {
