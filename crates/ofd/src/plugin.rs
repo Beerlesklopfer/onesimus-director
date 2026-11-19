@@ -131,7 +131,7 @@ pub fn parse_line(text: &str) -> Result<PluginLine, PluginError> {
 }
 
 /// Paths of a plugin that passed every check before loading.
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Resolved {
     pub bundle: PathBuf,
     pub policy: PathBuf,
@@ -282,8 +282,9 @@ pub(crate) fn prepare_broker(resolved: &Resolved, line: &PluginLine, plugin_dir:
 }
 
 /// The broker a plugin needs, dispatched by the capability of its verified
-/// manifest: `postgresql.read` (see `prepare_postgresql`), `openldap.read`
-/// (see `ldap_port::prepare`), otherwise none.
+/// manifest: `postgresql.read` (see `prepare_postgresql`; in a restore job
+/// `pg_restore_stub`), `openldap.read` (see `ldap_port::prepare`), otherwise
+/// none.
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn prepare_broker_for(resolved: &Resolved, line: &PluginLine, plugin_dir: &Path, triplet: &str, chunk: u32,
     owner: u32, top: &Path, context: &BrokerContext) -> Result<Option<PreparedBroker>, PluginError> {
@@ -301,6 +302,9 @@ pub(crate) fn prepare_broker_for(resolved: &Resolved, line: &PluginLine, plugin_
         // Fixed binding (V-11): only org.onesimus.podman with contract 2.
         let files = crate::podman_port::HostFiles::system();
         crate::podman_port::prepare(manifest, line, plugin_dir, triplet, chunk, owner, top, context, &files).map(Some)
+    } else if has(POSTGRESQL_READ) && context.operation == pb::JobOperation::Restore {
+        // The read broker serves backups only; see `PgRestoreStub`.
+        pg_restore_stub().map(Some)
     } else if has(POSTGRESQL_READ) {
         prepare_postgresql(manifest, line, plugin_dir, triplet, chunk, owner, top).map(Some)
     } else if has(OPENLDAP_READ) {
@@ -310,7 +314,46 @@ pub(crate) fn prepare_broker_for(resolved: &Resolved, line: &PluginLine, plugin_
     }
 }
 
-/// `postgresql.read`: the instance named by `socket=`/`port=` (default
+/// The PostgreSQL port of a restore job: no broker process, no instance
+/// discovery and no check of the backup-time `databases=` list against the
+/// live server (a restore of a dropped database must not fail on its very
+/// absence). The guest's imports stay linked, so it instantiates as in a
+/// backup, but every broker call fails: the read broker only dumps, and a
+/// restore through the plugin writes nothing through it (online restore into
+/// a new database is phase 3 and will bring its own write port).
+struct PgRestoreStub;
+
+impl onesimus_plugins::wasm::BrokerPort for PgRestoreStub {
+    /// The PostgreSQL family, so the guest's imports are linked.
+    fn capability(&self) -> &'static str {
+        onesimus_plugins::wasm::POSTGRESQL_READ
+    }
+    /// Nothing is served: the linked imports only fail.
+    fn serves(&self, _capability: &str) -> bool {
+        false
+    }
+    /// Never reached through linked stubs; refuses all the same.
+    fn call(&mut self, _function: onesimus_plugins::wasm::BrokerFunction, _request: &[u8]) -> Result<Vec<u8>, String> {
+        Err(format!("{} is not available in a restore job", onesimus_plugins::wasm::POSTGRESQL_READ))
+    }
+}
+
+/// The prepared broker of a PostgreSQL restore job: `PgRestoreStub`, no
+/// process. The cancel socket is one end of a fresh pair (nothing waits on it).
+fn pg_restore_stub() -> Result<PreparedBroker, PluginError> {
+    use onesimus_plugins::wasm::BrokerHandle;
+    let (cancel, _peer) = std::os::unix::net::UnixStream::pair()
+        .map_err(|e| PluginError::Load(format!("broker socket: {e}")))?;
+    Ok(PreparedBroker {
+        handle: BrokerHandle(std::sync::Arc::new(std::sync::Mutex::new(Box::new(PgRestoreStub)))),
+        broker: None,
+        cancel,
+        warnings: Vec::new(),
+        scans: None,
+    })
+}
+
+/// `postgresql.read` in a backup job: the instance named by `socket=`/`port=` (default
 /// /var/run/postgresql, 5432), its user, and `<name>/onesimus-pg-broker`.
 fn prepare_postgresql(manifest: &onesimus_plugins::Manifest, line: &PluginLine, plugin_dir: &Path, triplet: &str,
     chunk: u32, owner: u32, top: &Path) -> Result<PreparedBroker, PluginError> {
@@ -770,6 +813,44 @@ mod tests {
             std::fs::remove_dir_all(&d).unwrap();
         }
 
+        /// Review finding A: an online restore of a database dropped since
+        /// the backup. The stored line still names it (`databases=EleLa`);
+        /// a restore job starts no read broker, discovers no instance and
+        /// checks no database, so the session opens. The guest's imports are
+        /// linked but serve nothing.
+        #[test]
+        fn a_postgresql_restore_starts_no_broker_and_checks_no_database() {
+            use onesimus_plugins::wasm::{BrokerFunction, PostgresqlFunction, POSTGRESQL_READ};
+            let d = super::dir();
+            let caps = ["file.read", "file.write", POSTGRESQL_READ];
+            let resolved = signed_plugin_as(&d, "postgresql", "test.postgresql", &caps, &Script::default());
+            // No server behind this socket directory: a backup cannot start.
+            let line = parse_line("postgresql:socket=/nonexistent/onesimus-pg:databases=EleLa:restore_mode=online:target_db=x")
+                .unwrap();
+            let backup = prepare_broker_for(&resolved, &line, &d, "test-triplet", 1024, super::me(), &d,
+                &BrokerContext::backup());
+            assert!(backup.is_err(), "a backup discovers the instance");
+            let context = BrokerContext { operation: pb::JobOperation::Restore, job_id: 1, covered: &[] };
+            let prepared = prepare_broker_for(&resolved, &line, &d, "test-triplet", 1024, super::me(), &d, &context)
+                .unwrap()
+                .expect("a port for the guest's imports");
+            assert!(prepared.broker.is_none(), "no broker process in a restore");
+            {
+                let mut port = prepared.handle.0.lock().unwrap();
+                assert_eq!(port.capability(), POSTGRESQL_READ);
+                assert!(!port.serves(POSTGRESQL_READ));
+                assert!(port.call(BrokerFunction::Postgresql(PostgresqlFunction::Info), &[]).is_err());
+            }
+            let mut s = Session::open_with(&resolved, &line, job(pb::JobOperation::Restore), 0, limits(), Some(prepared))
+                .unwrap();
+            s.start(&NEVER).unwrap();
+            let f = pb::FileEntry { path: b"x".to_vec(), kind: pb::FileKind::Virtual as i32, ..Default::default() };
+            s.write(&f, 0, b"data", &NEVER).unwrap();
+            s.close(b"x", false, &NEVER).unwrap();
+            s.finish(true).unwrap();
+            std::fs::remove_dir_all(&d).unwrap();
+        }
+
         #[test]
         fn a_changed_bundle_is_refused_before_any_guest_code_runs() {
             let d = super::dir();
@@ -1064,6 +1145,12 @@ pub(crate) mod guest {
         }
         /// Backup of one session into a BNET buffer: (result, volume, messages).
         fn backup(&self, session: Session, canceled: &std::sync::atomic::AtomicBool) -> (i32, Vec<u8>, Vec<String>) {
+            self.backup_shown(session, canceled, "postgresql:instance=main")
+        }
+        /// `backup` with `shown` as the plugin line stored in the stream (the
+        /// line an online restore merges its options over).
+        fn backup_shown(&self, session: Session, canceled: &std::sync::atomic::AtomicBool, shown: &str)
+            -> (i32, Vec<u8>, Vec<String>) {
             let config = crate::config::FdConfig::parse("Director { Name = d; Password = p }").unwrap();
             let mut sd = bareos_bnet::BnetStream::new(std::io::Cursor::new(Vec::new()));
             let mut msgs = crate::jmsg::JobMsgs::new("test-fd");
@@ -1075,7 +1162,7 @@ pub(crate) mod guest {
                 flush: &mut flush, buf_size: CHUNK as usize, workers: 0, acl_errors: 0, xattr_errors: 0, xattr_disabled: false,
                 config: &config, plugin_index: 0,
             }
-            .run_plugin(&crate::find::FfPkt::default(), "postgresql:instance=main", session);
+            .run_plugin(&crate::find::FfPkt::default(), shown, session);
             let sent = msgs.take_queued();
             (ok, sd.into_inner().into_inner(), sent)
         }
@@ -1156,6 +1243,54 @@ pub(crate) mod guest {
             .arg(base.join("db/app-1/app-1.dump")).output().unwrap();
         assert!(r.status.success(), "{}", String::from_utf8_lossy(&r.stderr));
         assert_eq!(c.sql("restored", "SELECT count(*) FROM t").trim(), "20000");
+    }
+
+    /// Review finding A, end to end: a backup with `databases=EleLa`, then
+    /// EleLa is dropped, then an online restore keeps `databases=EleLa` from
+    /// the stored line. The session is opened as `Session::open` does it (the
+    /// broker chosen by the job's operation) and must not be refused because
+    /// the database no longer exists; the guest itself then declines online
+    /// restore (phase 3), which is the expected end of this job.
+    #[test]
+    #[ignore = "needs the built postgresql guest and onesimus-pg-broker"]
+    fn an_online_restore_of_a_dropped_database_is_not_refused() {
+        let Some(mut setup) = pg_setup("dropped", 55437) else { return };
+        setup.line.options.insert("databases".into(), "EleLa".into());
+        let c = &setup.cluster;
+        c.sql("postgres", "CREATE DATABASE \"EleLa\"");
+        c.sql("EleLa", "CREATE TABLE t (id int); INSERT INTO t VALUES (1)");
+        let canceled = std::sync::atomic::AtomicBool::new(false);
+        let shown = format!("postgresql:instance=main:socket={}:port={}:databases=EleLa", c.sockets().display(), c.port);
+        let (ok, volume, sent) = setup.backup_shown(setup.session(9401), &canceled, &shown);
+        assert_eq!(ok, 1, "{sent:?}");
+        c.sql("postgres", "DROP DATABASE \"EleLa\"");
+
+        let (resolved, plugins, dir) = (setup.resolved.clone(), setup.plugins.clone(), setup.dir.clone());
+        crate::restore::test_hook::set(Box::new(move |line, job, index| {
+            assert_eq!(line.options.get("databases").map(String::as_str), Some("EleLa"), "kept from the stored line");
+            let operation = pb::JobOperation::try_from(job.operation).unwrap_or(pb::JobOperation::Backup);
+            let context = BrokerContext { operation, job_id: job.job_id, covered: &[] };
+            let prepared = prepare_broker_for(&resolved, line, &plugins, TRIPLET, CHUNK, me_uid(), &dir, &context)?;
+            let runtime = RuntimeLimits { max_chunk_bytes: CHUNK, ..RuntimeLimits::default() };
+            Session::open_with(&resolved, line, job, index, runtime, prepared)
+        }));
+        let config = crate::config::FdConfig::parse("Director { Name = d; Password = p }").unwrap();
+        let mut rsd = bareos_bnet::BnetStream::new(Duplex(std::io::Cursor::new(as_read_back(&volume))));
+        let params = crate::restore::RestoreParams { where_: crate::attribs::Where::Prefix(Vec::new()), replace: b'a',
+            prefix_links: false };
+        let mut rmsgs = crate::jmsg::JobMsgs::new("test-fd");
+        rmsgs.job_id = 9402;
+        let mut sent = Vec::new();
+        let options = ["postgresql:restore_mode=online:target_db=x".to_string()];
+        crate::restore::Restore { params: &params, msgs: &mut rmsgs, counters: &mut crate::restore::Counters::default(),
+            create: &mut crate::create_file::CreateState::default(), canceled: &canceled, config: Some(&config),
+            plugin_options: &options }
+            .run(&mut rsd, &mut |m: &mut crate::jmsg::JobMsgs| sent.extend(m.take_queued()));
+        assert!(!sent.iter().any(|m| m.contains("does not exist")), "refused for the dropped database: {sent:?}");
+        assert!(sent.iter().any(|m| m.contains("restoring online through test.postgresql")), "{sent:?}");
+        assert!(sent.iter().any(|m| m.contains("online restore is not available yet")), "{sent:?}");
+        let sockets = c.sockets().display().to_string();
+        assert!(processes_with("onesimus-pg-broker").iter().all(|p| !p.contains(&sockets)), "no broker in a restore");
     }
 
     /// pg_dump waits for a lock another session holds; the job is canceled.

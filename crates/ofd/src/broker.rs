@@ -306,6 +306,12 @@ fn spawn(file: &File, run_as: RunAs, name: &str, args: &[String]) -> std::io::Re
         // SAFETY: child process; see above.
         unsafe { child_exec(exe, sock, null, switch, run_as, &argv, &envp) }
     }
+    // The child makes itself a group leader too; doing it here as well
+    // means kill(-pid) reaches it even before the child got that far
+    // (otherwise `stop` would wait out its grace for nothing). Errors are
+    // harmless: EACCES once the child has exec'd, by then it did it itself.
+    // SAFETY: setpgid on our own fresh child.
+    unsafe { libc::setpgid(pid, pid) };
     drop(child);
     Ok(Broker { socket: parent, pid, reaped: false })
 }
@@ -363,6 +369,8 @@ impl Broker {
     }
 
     /// Stops the broker's process group: SIGTERM, after `grace` SIGKILL.
+    /// The broker's wait status, or None when it is unknown (already reaped
+    /// elsewhere, or waitpid failed; then it is not marked as reaped).
     pub fn stop(&mut self, grace: Duration) -> Option<i32> {
         if self.reaped {
             return None;
@@ -371,36 +379,76 @@ impl Broker {
         unsafe { libc::kill(-self.pid, libc::SIGTERM) };
         let deadline = Instant::now() + grace;
         loop {
-            let mut status = 0;
-            // SAFETY: waiting for our own child.
-            let r = unsafe { libc::waitpid(self.pid, &mut status, libc::WNOHANG) };
-            if r == self.pid || r < 0 {
-                self.reaped = true;
-                return (r == self.pid).then_some(status);
+            match self.wait_flags(libc::WNOHANG) {
+                Waited::Exited(status) => return Some(status),
+                Waited::Gone => return None,
+                Waited::Running | Waited::Failed => {}
             }
             if Instant::now() >= deadline {
                 // SAFETY: as above.
-                unsafe {
-                    libc::kill(-self.pid, libc::SIGKILL);
-                    libc::waitpid(self.pid, &mut status, 0);
-                }
-                self.reaped = true;
-                return Some(status);
+                unsafe { libc::kill(-self.pid, libc::SIGKILL) };
+                return match self.wait_flags(0) {
+                    Waited::Exited(status) => Some(status),
+                    Waited::Gone | Waited::Running | Waited::Failed => None,
+                };
             }
             std::thread::sleep(Duration::from_millis(20));
         }
     }
 
-    /// Waits for the broker to exit by itself; its exit status.
+    /// Waits for the broker to exit by itself; its exit status (None when
+    /// unknown, see `stop`).
     pub fn wait(&mut self) -> Option<i32> {
         if self.reaped {
             return None;
         }
+        match self.wait_flags(0) {
+            Waited::Exited(status) => Some(status),
+            Waited::Gone | Waited::Running | Waited::Failed => None,
+        }
+    }
+
+    /// One waitpid on the broker with `flags`, retried on EINTR; marks the
+    /// broker reaped exactly when it was (its status, or ECHILD).
+    fn wait_flags(&mut self, flags: i32) -> Waited {
+        let pid = self.pid;
+        let waited = wait_retrying(pid, |status| {
+            // SAFETY: waiting for our own child.
+            let r = unsafe { libc::waitpid(pid, status, flags) };
+            if r < 0 { Err(std::io::Error::last_os_error().raw_os_error().unwrap_or(0)) } else { Ok(r) }
+        });
+        if matches!(waited, Waited::Exited(_) | Waited::Gone) {
+            self.reaped = true;
+        }
+        waited
+    }
+}
+
+/// What one waitpid on the broker found.
+#[derive(Debug, PartialEq, Eq)]
+enum Waited {
+    /// Reaped now, with this wait status.
+    Exited(i32),
+    /// Still running (WNOHANG).
+    Running,
+    /// ECHILD: no such child any more (reaped elsewhere); status unknown.
+    Gone,
+    /// Any other error: neither reaped nor known to be running.
+    Failed,
+}
+
+/// Classifies `call` (a waitpid for `pid`: the returned pid or the errno),
+/// calling it again as long as it is interrupted (EINTR).
+fn wait_retrying(pid: libc::pid_t, mut call: impl FnMut(&mut i32) -> Result<libc::pid_t, i32>) -> Waited {
+    loop {
         let mut status = 0;
-        // SAFETY: waiting for our own child.
-        let r = unsafe { libc::waitpid(self.pid, &mut status, 0) };
-        self.reaped = true;
-        (r == self.pid).then_some(status)
+        return match call(&mut status) {
+            Ok(r) if r == pid => Waited::Exited(status),
+            Ok(_) => Waited::Running,
+            Err(libc::EINTR) => continue,
+            Err(libc::ECHILD) => Waited::Gone,
+            Err(_) => Waited::Failed,
+        };
     }
 }
 
@@ -517,6 +565,69 @@ mod tests {
         std::fs::rename(d.join("plugin/broker"), d.join("plugin/real")).unwrap();
         std::os::unix::fs::symlink(d.join("plugin/real"), d.join("plugin/broker")).unwrap();
         assert!(start(&d, &m, &[]).is_err(), "O_NOFOLLOW refuses a link");
+        std::fs::remove_dir_all(&d).unwrap();
+    }
+
+    /// waitpid results: EINTR is retried, only the child's pid or ECHILD
+    /// count as reaped, and no error is mistaken for an exit status.
+    #[test]
+    fn wait_retries_on_eintr_and_classifies_the_rest() {
+        let mut answers = vec![Err(libc::EINTR), Err(libc::EINTR), Ok(42)].into_iter();
+        let mut calls = 0;
+        let waited = wait_retrying(42, |status| {
+            calls += 1;
+            *status = 9;
+            answers.next().unwrap()
+        });
+        assert_eq!((waited, calls), (Waited::Exited(9), 3));
+        assert_eq!(wait_retrying(42, |_| Ok(0)), Waited::Running);
+        assert_eq!(wait_retrying(42, |_| Err(libc::ECHILD)), Waited::Gone);
+        assert_eq!(wait_retrying(42, |_| Err(libc::EINVAL)), Waited::Failed);
+    }
+
+    /// A broker that ignores SIGTERM is killed; `stop` reports the real
+    /// status (killed by SIGKILL), not a clean exit.
+    #[test]
+    fn stop_reports_the_status_after_sigkill() {
+        let d = dir("kill");
+        let m = install(&d, "/bin/sh");
+        let mut b = start(&d, &m, &["-c", "trap '' TERM; sleep 30"]).unwrap();
+        std::thread::sleep(Duration::from_millis(200));
+        let status = b.stop(Duration::from_millis(300)).expect("a status");
+        assert!(libc::WIFSIGNALED(status) && libc::WTERMSIG(status) == libc::SIGKILL, "status {status:#x}");
+        assert_eq!(b.stop(Duration::from_millis(10)), None, "already reaped");
+        std::fs::remove_dir_all(&d).unwrap();
+    }
+
+    /// A broker reaped elsewhere (ECHILD) counts as reaped without a status.
+    #[test]
+    fn stop_after_the_child_was_reaped_elsewhere() {
+        let d = dir("echild");
+        let m = install(&d, "/bin/sh");
+        let mut b = start(&d, &m, &["-c", "exit 3"]).unwrap();
+        let mut status = 0;
+        // SAFETY: waiting for our own child.
+        assert_eq!(unsafe { libc::waitpid(b.pid, &mut status, 0) }, b.pid);
+        let begin = Instant::now();
+        assert_eq!(b.stop(Duration::from_secs(2)), None);
+        assert!(b.reaped);
+        assert!(begin.elapsed() < Duration::from_secs(1), "no grace wait for a gone child");
+        std::fs::remove_dir_all(&d).unwrap();
+    }
+
+    /// The parent makes the broker a group leader itself: right after
+    /// spawn its group is its pid, and an immediate stop ends it at once.
+    #[test]
+    fn the_broker_leads_its_group_from_the_start() {
+        let d = dir("pgid");
+        let m = install(&d, "/bin/sh");
+        let mut b = start(&d, &m, &["-c", "sleep 30"]).unwrap();
+        // SAFETY: getpgid on our own child.
+        assert_eq!(unsafe { libc::getpgid(b.pid) }, b.pid);
+        let begin = Instant::now();
+        let status = b.stop(Duration::from_secs(2)).expect("a status");
+        assert!(begin.elapsed() < Duration::from_secs(1), "stop took {:?}", begin.elapsed());
+        assert!(libc::WIFSIGNALED(status), "status {status:#x}");
         std::fs::remove_dir_all(&d).unwrap();
     }
 
