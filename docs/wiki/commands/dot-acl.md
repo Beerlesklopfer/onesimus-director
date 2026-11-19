@@ -1,5 +1,7 @@
 # .acl — Konsolen-ACLs anzeigen und ändern (Onesimus)
 
+> **Seit 19.11.2026 lehnt odir `set`, `delete`, `clear` und `copy` ab.** ACLs in den Konfigurationsdateien (Console, Profile, User) sind der äußere Rahmen des zweistufigen ACL-Modells und werden nur im Editor geändert ([ACL-ZWEISTUFIG.md](../../plans/ACL-ZWEISTUFIG.md)). Vorher schrieben die Unterbefehle die Datei der Console um; eine Console mit `.acl` und `configure` (etwa die MCP-Console `<name>-mcp`) konnte sich so selbst mehr Rechte geben. Die innere Stufe (Katalog-ACL, kann nur weiter einschränken) übernimmt diese Unterbefehle später. Die Beschreibung unten gilt nur noch für `list`; der Rest bleibt als Stand bis 19.11.2026 stehen.
+
 ## Zweck
 
 `.acl` zeigt die wirksamen ACLs einer Console-Ressource und ändert sie im laufenden Director. Die Änderung wird sofort wirksam (die nächste ACL-Prüfung sieht sie) und wie bei [configure add](configure.md) in die Ressourcendatei der Konsole geschrieben, sodass sie einen [reload](reload.md) oder Neustart übersteht.

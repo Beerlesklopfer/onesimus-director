@@ -48,9 +48,9 @@ mit `*all*` an. Die BgLage-Sitzung konnte deshalb `delete`, `purge` und
 
 | Stelle | heute | künftig |
 | --- | --- | --- |
-| `.acl set/delete/clear/copy` (Onesimus-Erweiterung, `commands/acl.rs`) | **schreibt die Console-Datei um** | schreibt die **Katalog-ACL**; die Datei bleibt unberührt |
+| `.acl set/delete/clear/copy` (Onesimus-Erweiterung, `commands/acl.rs`) | ~~schreibt die Console-Datei um~~ seit 19.11.2026 abgelehnt | schreibt die **Katalog-ACL**; die Datei bleibt unberührt |
 | `.acl list` | zeigt Datei-ACLs | zeigt Datei-, Katalog- und effektive ACL |
-| `configure add console`/`profile` (Bareos-Befehl) | legt eine Datei mit ACL-Direktiven an | offene Frage F-1 |
+| `configure add console`/`profile`/`user` (Bareos-Befehl) | ~~legt eine Datei mit ACL-Direktiven an~~ seit 19.11.2026 abgelehnt (F-1) | bleibt abgelehnt |
 | `configure delete console` | seit `233a6f3` abgelehnt | bleibt abgelehnt |
 | Konfigurations-CRUD (gRPC, `.config`) | Console/Profile/User nicht editierbar | bleibt so (Regel 3) |
 | Push-Ereignisse gRPC | ungefiltert (K-19) | gefiltert über die zentrale Funktion (in Arbeit, nur Datei-Stufe) |
@@ -84,7 +84,7 @@ nicht ein.
 
 | # | Frage | Entscheider |
 | --- | --- | --- |
-| F-1 | `configure add console`/`profile` ist ein Bareos-Befehl und schreibt ACL-Direktiven in eine Datei. Regel 3 schließt das aus. Vorschlag: ablehnen, wenn ACL-Direktiven (`*Acl`, `Profile`) im Aufruf stehen; eine Console ohne ACL-Zeilen hat in Bareos keine Rechte und darf angelegt werden. Abweichung von Bareos, kommt in betrieb-odir.md. | Maintainer |
+| ~~F-1~~ | **Entschieden und umgesetzt 19.11.2026:** `configure add console`, `profile` und `user` werden immer abgelehnt (nicht nur mit ACL-Zeilen); Consoles legt nur der Editor an. Ursprüngliche Frage: `configure add console`/`profile` ist ein Bareos-Befehl und schreibt ACL-Direktiven in eine Datei. Regel 3 schließt das aus. Vorschlag: ablehnen, wenn ACL-Direktiven (`*Acl`, `Profile`) im Aufruf stehen; eine Console ohne ACL-Zeilen hat in Bareos keine Rechte und darf angelegt werden. Abweichung von Bareos, kommt in betrieb-odir.md. | Maintainer |
 | F-2 | Wer darf die Katalog-ACL ändern? Vorschlag: Command-ACL `.acl` **und** `configure` (wie heute), und nur für **andere** Consoles; die eigene Console kann sich nur selbst einschränken, nie lockern. | Maintainer |
 | F-3 | Ein Katalog-Eintrag, der mehr erlaubt als die Datei: ablehnen oder speichern und als wirkungslos melden? Vorschlag: speichern und melden, weil sich die Datei später ändern kann. | Maintainer |
 | F-4 | Katalog nicht erreichbar bei einer Console mit Katalog-Einträgen: nur `status`/`version` (Vorschlag) oder gar nichts? | Maintainer |

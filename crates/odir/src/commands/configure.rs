@@ -556,7 +556,20 @@ fn add_resource(cfg: &mut DirectorConfig, layout: &Layout, args: &[Argument]) ->
     Ok((output, Value::Object(object)))
 }
 
+/// Resource types `configure add` refuses (decision of the maintainer,
+/// 19.11.2026, F-1 of docs/plans/ACL-ZWEISTUFIG.md): Console, Profile and
+/// User carry the ACLs of the outer tier, which are written in the editor
+/// only. Deviation from Bareos (ConfigureAddResource accepts them); without
+/// it a console allowed `configure` could add a console with `*all*` and log
+/// in as that one.
+const ADD_REFUSED: [&str; 3] = ["console", "profile", "user"];
+
 fn configure_add(ast: &CommandAst, ctx: &ExecContext, layout: Option<&Layout>) -> CommandResult {
+    if let Some(kind) = ast.arguments.get(1).map(|a| a.key.to_ascii_lowercase())
+        && ADD_REFUSED.contains(&kind.as_str()) {
+        return CommandResult::error(format!("configure add {kind}: refused. Console, Profile and User resources \
+            carry ACLs and are created in the editor only (docs/plans/ACL-ZWEISTUFIG.md).\n"));
+    }
     let (Some(config), Some(layout)) = (&ctx.config, layout) else {
         return CommandResult::error("No config loaded\n".to_string());
     };
@@ -888,6 +901,24 @@ Profile { Name = operator }
             Some((k, v)) => Argument { key: k.into(), value: Some(v.into()) },
             None => Argument { key: t.into(), value: None },
         }).collect()
+    }
+
+    /// F-1: `configure add console|profile|user` is refused before anything
+    /// is parsed or written, whatever the console's CommandACL.
+    #[test]
+    fn configure_add_of_acl_resources_is_refused() {
+        use std::sync::{Arc, RwLock};
+        let (cfg, layout) = setup("refused");
+        let ctx = ExecContext { session_id: 0, config: Some(Arc::new(RwLock::new(cfg))), session_mgr: None,
+            catalog: None, api_mode: crate::command_executor::ApiMode::Human, bus_rx: None, job_manager: None };
+        for line in ["configure add console name=x password=p commandacl=*all*", "configure add profile name=p commandacl=*all*",
+                     "configure add user name=u commandacl=*all*", "configure add Console name=y password=p"] {
+            let r = configure_add(&crate::session::parse_cli_command(line), &ctx, Some(&layout));
+            assert!(!r.success && r.error_message.contains("refused"), "{line}: {}", r.error_message);
+        }
+        assert_eq!(std::fs::read_dir(layout.include_dir.join("console")).unwrap().count(), 0);
+        assert_eq!(std::fs::read_dir(layout.include_dir.join("profile")).unwrap().count(), 0);
+        assert!(ctx.config.as_ref().unwrap().read().unwrap().find_console("x").is_none());
     }
 
     #[test]
