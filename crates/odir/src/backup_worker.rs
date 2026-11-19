@@ -622,7 +622,7 @@ fn send_accurate_files(fd: &mut BnetStream<AnyStream>, pipes: &mut WorkerPipes, 
 }
 
 /// EndJob: "2800 End Job TermCode=%d JobFiles=%u ReadBytes=%llu JobBytes=%llu Errors=%u VSS=%d Encrypt=%d"
-fn parse_end_job(msg: &str) -> Option<(u8, u64, u64, u64, u32, bool, bool)> {
+pub(crate) fn parse_end_job(msg: &str) -> Option<(u8, u64, u64, u64, u32, bool, bool)> {
     let rest = msg.strip_prefix("2800 End Job ")?;
     let mut values = Vec::new();
     for (word, key) in rest.split_whitespace().zip(["TermCode=", "JobFiles=", "ReadBytes=", "JobBytes=", "Errors=", "VSS=", "Encrypt="]) {

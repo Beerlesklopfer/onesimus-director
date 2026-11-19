@@ -285,6 +285,7 @@ fn director_response<S: std::io::Read + std::io::Write>(fd: &mut BnetStream<S>, 
 /// lib/message.h M_* codes of the worker's own job messages.
 const M_FATAL: u32 = 3;
 pub(crate) const M_ERROR: u32 = 4;
+const M_WARNING: u32 = 5;
 pub(crate) const M_INFO: u32 = 6;
 
 /// The worker's pipe to the Director for job messages (any thread).
@@ -1013,14 +1014,16 @@ fn wait_for_fd_end_job(fd: &mut BnetStream<bareos_bnet::AnyStream>, job_id: u32)
                 let msg = String::from_utf8_lossy(&data).trim().to_string();
                 if msg.starts_with("2800 End Job") {
                     info!("Worker {job_id}: FD End Job: {msg}");
-                    let mut tc = 0i32; let mut f = 0i64; let mut b = 0i64; let mut e = 0i32;
-                    for part in msg.split_whitespace() {
-                        if let Some(v) = part.strip_prefix("TermCode=") { tc = v.parse().unwrap_or(0); }
-                        else if let Some(v) = part.strip_prefix("JobFiles=") { f = v.parse().unwrap_or(0); }
-                        else if let Some(v) = part.strip_prefix("JobBytes=") { b = v.parse().unwrap_or(0); }
-                        else if let Some(v) = part.strip_prefix("Errors=") { e = v.parse().unwrap_or(0); }
+                    match end_job_of(&msg) {
+                        Some(end) => return end,
+                        // backup.cc:690-701: only the complete EndJob format
+                        // ends the wait; anything else is "Unexpected Client
+                        // Job message" (M_WARNING), never a success. J-17.
+                        None => {
+                            worker_jmsg(job_id, M_WARNING, format!("Unexpected Client Job message: {}", String::from_utf8_lossy(&data)));
+                            continue;
+                        }
                     }
-                    return (f, b, e, tc);
                 }
                 if msg.starts_with("2000 OK storage end") {
                     // FD is done with SD data transfer. Signal end-of-commands
@@ -1037,15 +1040,29 @@ fn wait_for_fd_end_job(fd: &mut BnetStream<bareos_bnet::AnyStream>, job_id: u32)
             }
             Ok(BnetMessage::Signal(sig)) => {
                 debug!("Worker {job_id} FD signal: {sig:?}");
-                if matches!(sig, BnetSignal::Terminate) { return (0, 0, 1, 2); }
+                if matches!(sig, BnetSignal::Terminate) {
+                    // backup.cc:739-741: no EndJob: FDJobStatus JS_ErrorTerminated.
+                    worker_jmsg(job_id, M_FATAL, "No Job status returned from FD.\n".into());
+                    return (0, 0, 1, 2);
+                }
             }
             Err(e) => {
                 error!("Worker {job_id} FD recv error: {e}");
                 worker_jmsg(job_id, M_FATAL, format!("Network error with FD: ERR={e}\n"));
+                worker_jmsg(job_id, M_FATAL, "No Job status returned from FD.\n".into());
                 return (0, 0, 1, 2);
             }
         }
     }
+}
+
+/// backup.cc:72-75 EndJob "2800 End Job TermCode=%d JobFiles=%u ReadBytes=%llu
+/// JobBytes=%llu Errors=%u VSS=%d Encrypt=%d": (JobFiles, JobBytes, Errors,
+/// TermCode) when all seven fields are there (sscanf() == 7). Without a
+/// TermCode the FD's status is unknown, not JS_Terminated. J-17.
+fn end_job_of(msg: &str) -> Option<(i64, i64, i32, i32)> {
+    crate::backup_worker::parse_end_job(msg)
+        .map(|(term_code, files, _, bytes, errors, _, _)| (files as i64, bytes as i64, errors as i32, term_code as i32))
 }
 
 // ============================================================================
@@ -1682,6 +1699,19 @@ mod wait_protocol_tests {
         let other = serde_json::to_string(&PipeMessage::ResetStatus { job_id: 42 }).unwrap();
         assert!(read_catalog_answer(&mut pipe_with(&[&other])).unwrap_err().starts_with("unexpected answer from the Director: "));
         assert!(read_catalog_answer(&mut pipe_with(&["{torn"])).is_err());
+    }
+    /// J-17: backup.cc:690-701: only the complete EndJob message ends the
+    /// wait for the FD; "End Job" without TermCode is not a success.
+    #[test]
+    fn end_job_needs_the_complete_endjob_format() {
+        assert_eq!(end_job_of("2800 End Job TermCode=84 JobFiles=5 ReadBytes=60 JobBytes=50 Errors=1 VSS=0 Encrypt=0"),
+            Some((5, 50, 1, 84)));
+        assert_eq!(end_job_of("2800 End Job TermCode=69 JobFiles=0 ReadBytes=0 JobBytes=0 Errors=2 VSS=0 Encrypt=0\n"),
+            Some((0, 0, 2, 69)));
+        for incomplete in ["2800 End Job", "2800 End Job JobFiles=5 JobBytes=50 Errors=0",
+            "2800 End Job TermCode=84 JobFiles=5", "2800 End Job TermCode=T JobFiles=5 ReadBytes=60 JobBytes=50 Errors=1 VSS=0 Encrypt=0"] {
+            assert_eq!(end_job_of(incomplete), None, "{incomplete}");
+        }
     }
     #[test]
     fn consecutive_pipe_messages_survive_reader_buffering_and_eof() {
