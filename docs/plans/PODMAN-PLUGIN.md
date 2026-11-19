@@ -111,8 +111,8 @@ zu einem Planfehler; kein stilles Auslassen oder Wechsel des Sicherungsverfahren
 | Objekt | Sicherung und Identität | Restore / Grenze |
 | --- | --- | --- |
 | UID-/Endpoint-Domäne | Host, UID, Engine-/Endpoint-ID, Version und Mappingprofil. | Zielkonto und Berechtigungen explizit zuordnen. |
-| Pods / Container | Konfiguration, unveränderliche IDs, Abhängigkeiten und Mounts. | Neue getrennte Ressourcen, gestoppt; kein ungeprüftes Inspect-Replay. |
-| Images | Save-Archive, IDs, Tags, Digests und Plattform. | Load plus Identitätsprüfung. Offlineprofil enthält alle benötigten Images. |
+| Pods / Container | Nur Inspect-Daten: Konfiguration, unveränderliche IDs, Image-Referenz, Abhängigkeiten und Mounts; kein Export des Container-Dateisystems. | Neue getrennte Ressourcen, gestoppt; kein ungeprüftes Inspect-Replay. |
+| Images | Wählbar: IDs, Tags, Digests und Plattform immer (in den Inspect-Daten); Save-Archive nur mit `images=archive`. | Load bzw. Pull plus Identitätsprüfung. Nur das Offlineprofil (`images=archive`) enthält alle benötigten Images. |
 | Quadlet | Quelldateien, Includes, Drop-ins und freigegebene Abhängigkeiten. | Zuerst gestaged; generierte Services ersetzen die Quellen nicht. Keine automatische Aktivierung. |
 | Named Volumes | Daten und zertifiziertes Metadatenprofil unter passendem Usernamespace. | Neu angelegtes leeres Stagingvolume; keine Inhaltsvermischung. |
 | Bind Mounts | Eigene autorisierte FD-Dateisicherung. | Freigegebene Zielpfadzuordnung, kein automatischer Zugriff auf Inspect-Pfade. |
@@ -146,10 +146,19 @@ Plugin = "podman:user=root:quadlet=web-*.container:consistency=stop"
 | `quadlet` | eine Auswahl | Unit-Namen oder Globs | – | Über Quadlet verwaltete Container, Pods und Volumes; schließt die Quelldateien ein. |
 | `exclude` | nein | Namen oder Globs | – | Wird von `pods`/`containers`/`quadlet` abgezogen. |
 | `volumes` | nein | `yes`, `no` | `yes` | Named Volumes der Auswahl (zertifiziertes Profil). Bind Mounts nie; die sichert der FD als Dateien (eigene Include-Zeile). |
-| `images` | nein | `archive`, `reference`, `no` | `archive` | `archive`: `podman save` der verwendeten Images (Offline-Restore möglich). `reference`: nur Name und Digest, Restore braucht die Registry (ausdrücklich gewähltes Profil). |
+| `images` | nein | `archive`, `reference` | `reference` | `reference`: Name, Tag und Digest der verwendeten Images stehen in den Inspect-Daten; der Restore holt sie aus der Registry. `archive`: zusätzlich `podman save` der Images, für einen Restore ohne Registry. |
 | `quadlet_sources` | nein | `yes`, `no` | `yes` | Quadlet-Quelldateien, Includes und Drop-ins der Auswahl. |
 | `consistency` | nein | `stop`, `crash` | `stop` | `stop`: autorisierter Stop der Writergruppe mit Journal, Sicherung, Wiederaufnahme. `crash`: Kopie im laufenden Betrieb, ausdrücklich abgeschwächtes Profil, im Manifest vermerkt. |
 | `secrets` | nein | `reference` | `reference` | Secrets nur als Verweis zur Wiederbereitstellung, nie ihr Inhalt. Ein anderer Wert ist im MVP nicht zulässig. |
+
+Was von einem Container gesichert wird (Entscheidung des Nutzers, 19.11.2026):
+nur seine Inspect-Daten (Konfiguration, IDs, Image-Referenz, Mounts,
+Abhängigkeiten), kein `podman export` des Container-Dateisystems. Container und
+Image doppelt zu sichern ist sinnlos; Image plus Inspect-Daten reichen für den
+Restore. Images selbst sind wählbar, nicht Pflicht (`images=`). Daten liegen in
+Named Volumes (`volumes=`) oder Bind Mounts (FD-Dateisicherung). Änderungen im
+Writable Layer werden deshalb nicht gesichert und bleiben, wie oben, als
+MVP-Ausschluss im Manifest vermerkt.
 
 Regeln:
 
