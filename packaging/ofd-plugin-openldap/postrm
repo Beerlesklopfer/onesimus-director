@@ -1,0 +1,30 @@
+#!/bin/sh
+# ofd-plugin-openldap postrm
+#  remove, purge: ofd no longer loads the plugin (only the line this
+#  package added). slapd was never changed, so nothing else is undone.
+#  Online-restore targets below /var/lib/onesimus-ldap-restore are data of
+#  the administrator and stay.
+set -u
+
+MARK="# ofd-plugin-openldap"
+FD_DIR=${OFD_PLUGIN_FD_DIR:-/etc/bareos/bareos-fd.d}
+
+log() { echo "ofd-plugin-openldap: $*"; }
+
+remove_marked() { # file
+    grep -qF "$MARK" "$1" 2>/dev/null || return 1
+    tmp="$1.ofd-new"
+    grep -vF "$MARK" "$1" > "$tmp" &&
+        chown --reference="$1" "$tmp" && chmod --reference="$1" "$tmp" &&
+        mv "$tmp" "$1" || { rm -f "$tmp"; return 1; }
+}
+
+case "${1:-}" in
+    remove|purge)
+        for f in $(grep -rlF "$MARK" "$FD_DIR" 2>/dev/null); do
+            remove_marked "$f" && log "removed Plugin Names line from $f"
+        done
+        ;;
+esac
+
+exit 0
