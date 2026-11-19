@@ -94,7 +94,9 @@ pub fn discover(socket_dir: &Path, port: u16) -> Result<Instance, PluginError> {
 }
 
 /// A throwaway PostgreSQL cluster of the test user: own data directory and
-/// socket directory, no TCP. Stopped and removed when dropped.
+/// socket directory, no TCP. Stopped and removed when dropped. The socket
+/// directory lies directly under /tmp: a Unix socket path holds at most 107
+/// bytes, and a long TMPDIR would exceed it.
 #[cfg(test)]
 pub(crate) mod testcluster {
     use std::path::PathBuf;
@@ -102,6 +104,7 @@ pub(crate) mod testcluster {
 
     pub struct Cluster {
         pub root: PathBuf,
+        pub sock: PathBuf,
         pub port: u16,
         pub bin: PathBuf,
     }
@@ -111,7 +114,7 @@ pub(crate) mod testcluster {
             self.root.join("data")
         }
         pub fn sockets(&self) -> PathBuf {
-            self.root.join("sock")
+            self.sock.clone()
         }
         /// Runs SQL as the test user against database `db`.
         pub fn sql(&self, db: &str, sql: &str) -> String {
@@ -129,6 +132,7 @@ pub(crate) mod testcluster {
             let _ = Command::new(self.bin.join("pg_ctl")).arg("-D").arg(self.data()).args(["-m", "immediate", "stop"])
                 .output();
             let _ = std::fs::remove_dir_all(&self.root);
+            let _ = std::fs::remove_dir_all(&self.sock);
         }
     }
 
@@ -140,8 +144,11 @@ pub(crate) mod testcluster {
             .max()?;
         let root = std::env::temp_dir().join(format!("ofd-pg-{tag}-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&root);
-        std::fs::create_dir_all(root.join("sock")).ok()?;
-        let cluster = Cluster { root, port, bin };
+        std::fs::create_dir_all(&root).ok()?;
+        let sock = PathBuf::from(format!("/tmp/ofd-pgs-{tag}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&sock);
+        std::fs::create_dir_all(&sock).ok()?;
+        let cluster = Cluster { root, sock, port, bin };
         let init = Command::new(cluster.bin.join("initdb"))
             .arg("-D").arg(cluster.data()).args(["-A", "peer", "-E", "UTF8", "--no-sync", "-U"])
             .arg(nix::unistd::User::from_uid(nix::unistd::getuid()).ok()??.name)
@@ -179,7 +186,8 @@ mod tests {
 
     #[test]
     fn a_forged_lock_file_is_refused() {
-        let d = std::env::temp_dir().join(format!("ofd-pg-forged-{}", std::process::id()));
+        // Under /tmp, not TMPDIR: the socket path must stay within 107 bytes.
+        let d = PathBuf::from(format!("/tmp/ofd-pg-forged-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&d);
         std::fs::create_dir_all(d.join("data")).unwrap();
         let _sock = std::os::unix::net::UnixListener::bind(d.join(".s.PGSQL.5999")).unwrap();

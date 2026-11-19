@@ -1,5 +1,7 @@
 //! The broker against a throwaway cluster of the test user (initdb, own
 //! socket directory, no TCP). Skipped without PostgreSQL server binaries.
+//! The socket directory lies directly under /tmp: a Unix socket path holds at
+//! most 107 bytes, and a long TMPDIR would exceed it.
 
 use std::io::{Read, Write};
 use std::path::PathBuf;
@@ -10,6 +12,7 @@ use prost::Message;
 
 struct Cluster {
     root: PathBuf,
+    sock: PathBuf,
     port: u16,
     bin: PathBuf,
 }
@@ -20,20 +23,23 @@ impl Cluster {
             .filter(|b| b.join("initdb").is_file()).max()?;
         let root = std::env::temp_dir().join(format!("pg-broker-test-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&root);
-        std::fs::create_dir_all(root.join("sock")).unwrap();
-        let c = Cluster { root, port, bin };
+        std::fs::create_dir_all(&root).unwrap();
+        let sock = PathBuf::from(format!("/tmp/pg-broker-sock-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&sock);
+        std::fs::create_dir_all(&sock).unwrap();
+        let c = Cluster { root, sock, port, bin };
         let user = std::env::var("USER").unwrap_or_else(|_| "postgres".into());
         let user = Command::new("id").arg("-un").output().map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string()).unwrap_or(user);
         assert!(Command::new(c.bin.join("initdb")).arg("-D").arg(c.root.join("data"))
             .args(["-A", "peer", "-E", "UTF8", "--no-sync", "-U", &user]).output().unwrap().status.success());
-        let opts = format!("-k {} -p {port} -c listen_addresses=''", c.root.join("sock").display());
+        let opts = format!("-k {} -p {port} -c listen_addresses=''", c.sock.display());
         assert!(Command::new(c.bin.join("pg_ctl")).arg("-D").arg(c.root.join("data")).args(["-w", "-l"])
             .arg(c.root.join("log")).args(["-o", &opts, "start"]).output().unwrap().status.success());
         Some(c)
     }
     fn sql(&self, db: &str, sql: &str) {
         let out = Command::new(self.bin.join("psql")).args(["-X", "-q", "-v", "ON_ERROR_STOP=1", "-h"])
-            .arg(self.root.join("sock")).args(["-p", &self.port.to_string(), "-d", db, "-c", sql]).output().unwrap();
+            .arg(&self.sock).args(["-p", &self.port.to_string(), "-d", db, "-c", sql]).output().unwrap();
         assert!(out.status.success(), "{sql}: {}", String::from_utf8_lossy(&out.stderr));
     }
 }
@@ -41,6 +47,7 @@ impl Drop for Cluster {
     fn drop(&mut self) {
         let _ = Command::new(self.bin.join("pg_ctl")).arg("-D").arg(self.root.join("data")).args(["-m", "immediate", "stop"]).output();
         let _ = std::fs::remove_dir_all(&self.root);
+        let _ = std::fs::remove_dir_all(&self.sock);
     }
 }
 
@@ -49,7 +56,7 @@ impl Broker {
     fn start(c: &Cluster) -> Self {
         Broker(Command::new(env!("CARGO_BIN_EXE_onesimus-pg-broker"))
             .env_clear()
-            .arg("--socket-dir").arg(c.root.join("sock")).args(["--port", &c.port.to_string()])
+            .arg("--socket-dir").arg(&c.sock).args(["--port", &c.port.to_string()])
             .arg("--bin").arg(&c.bin)
             .stdin(Stdio::piped()).stdout(Stdio::piped()).spawn().unwrap())
     }
@@ -123,10 +130,10 @@ fn info_database_info_and_dumps() {
     let file = c.root.join("app.dump");
     std::fs::write(&file, &dump).unwrap();
     c.sql("postgres", "CREATE DATABASE restored");
-    let restore = Command::new(c.bin.join("pg_restore")).arg("-h").arg(c.root.join("sock"))
+    let restore = Command::new(c.bin.join("pg_restore")).arg("-h").arg(&c.sock)
         .args(["-p", &c.port.to_string(), "-d", "restored"]).arg(&file).output().unwrap();
     assert!(restore.status.success(), "{}", String::from_utf8_lossy(&restore.stderr));
-    let count = Command::new(c.bin.join("psql")).args(["-X", "-A", "-t", "-h"]).arg(c.root.join("sock"))
+    let count = Command::new(c.bin.join("psql")).args(["-X", "-A", "-t", "-h"]).arg(&c.sock)
         .args(["-p", &c.port.to_string(), "-d", "restored", "-c", "SELECT count(*), sum(id) FROM t"]).output().unwrap();
     assert_eq!(String::from_utf8_lossy(&count.stdout).trim(), "5000|12502500");
 
