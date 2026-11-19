@@ -41,8 +41,15 @@ Zwei getrennte Signaturebenen, beide nötig:
   deren Kette über die Generation dieses Releases läuft **und** deren `suite`
   zur eigenen Version passt. Alte Bundles laden mit neuem `ofd` nicht und
   umgekehrt – der Versionswechsel der Suite ist damit erzwungen.
-- Offen: was als Suite-Version zählt (ganze Workspace-Version oder nur der
-  Onesimus-Teil) und ob es ein Übergangsfenster mit zwei Generationen gibt.
+- **Suite-Version = Onesimus-Teil** der Workspace-Version (Nutzer,
+  19.11.2026): bei `25.1.2+onesimus.0.2.0` ist das `0.2.0`; das Bareos-
+  Kompatibilitätspräfix zählt nicht. `ofd` vergleicht `suite` des Manifests
+  exakt mit seinem eigenen Onesimus-Teil.
+- **Harter Schnitt** (Nutzer, 19.11.2026): `ofd` akzeptiert genau eine
+  Generation, die seines Releases; kein Übergangsfenster. Ein Host mit neuem
+  `ofd` braucht die neu signierten Plugins derselben Suite-Version –
+  Paketabhängigkeiten erzwingen das (`onesimus-plugin-*` hängt von
+  `ofd (= <Version>)` ab und umgekehrt über `Breaks:` älterer Plugins).
 
 ## Schlüssel und wo sie liegen
 
