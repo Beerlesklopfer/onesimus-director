@@ -894,31 +894,16 @@ pub(crate) fn sd_catrec_loop(
                     debug!("Worker {job_id} SD CatReq: {msg}");
                     send_jmsg(PipeMessage::CatReq { job_id, request: msg_raw.into_owned() });
                     // Read CatResp from Director via pipe
-                    let mut buf = String::new();
-                    let mut reader = BufReader::new(&mut *from_dir);
-                    match reader.read_line(&mut buf) {
-                        Ok(n) if n > 0 => {
-                            debug!("Worker {job_id} CatResp pipe ({n} bytes): {}", buf.trim());
-                            match serde_json::from_str::<PipeMessage>(&buf) {
-                                Ok(PipeMessage::CatResp { response }) => {
-                                    debug!("Worker {job_id} → SD: {}", response.chars().take(60).collect::<String>());
-                                    if !response.is_empty() {
-                                        let _ = sd.send_str(&response);
-                                    }
-                                }
-                                other => {
-                                    warn!("Worker {job_id}: unexpected pipe msg: {other:?}, sending OK");
-                                    let _ = sd.send_str("1000 OK\n");
-                                }
+                    match read_catalog_answer(from_dir) {
+                        Ok(response) => {
+                            debug!("Worker {job_id} → SD: {}", response.chars().take(60).collect::<String>());
+                            if !response.is_empty() {
+                                let _ = sd.send_str(&response);
                             }
                         }
-                        Ok(_) => {
-                            warn!("Worker {job_id}: pipe EOF while waiting for CatResp");
-                            let _ = sd.send_str("1000 OK\n");
-                        }
-                        Err(e) => {
-                            error!("Worker {job_id}: pipe read error: {e}");
-                            let _ = sd.send_str("1000 OK\n");
+                        Err(why) => {
+                            abort_without_catalog(job_id, &why);
+                            break;
                         }
                     }
                 } else if msg.starts_with("Status Job=") {
@@ -1262,6 +1247,39 @@ extern "C" fn worker_sigterm(_: libc::c_int) {
     WORKER_CANCEL.store(true, Ordering::SeqCst);
     // CancelJob(): a worker blocked on a daemon socket wakes up (shutdown(2)
     // is async-signal-safe). S-23.
+    for slot in &CANCEL_FDS {
+        let fd = slot.load(Ordering::SeqCst);
+        if fd >= 0 {
+            unsafe { libc::shutdown(fd, libc::SHUT_RDWR); }
+        }
+    }
+}
+
+/// The Director's answer to a catalog request of the SD (CatResp on the
+/// pipe); `Err` when the Director is gone (EOF, read error) or answered
+/// something else. J-15.
+pub(crate) fn read_catalog_answer(from_director: &mut std::fs::File) -> Result<String, String> {
+    let mut line = String::new();
+    match BufReader::new(from_director).read_line(&mut line) {
+        Ok(0) => Err("pipe to the Director closed".into()),
+        Ok(_) => match serde_json::from_str::<PipeMessage>(&line) {
+            Ok(PipeMessage::CatResp { response }) => Ok(response),
+            _ => Err(format!("unexpected answer from the Director: {}", line.trim_end())),
+        },
+        Err(e) => Err(format!("pipe to the Director: {e}")),
+    }
+}
+
+/// J-15: a catalog request of the SD the Director cannot answer. A worker
+/// never answers in the catalog's place (it used to send "1000 OK"): the
+/// job ends with an error and its daemon connections are shut down, as
+/// they would be if the Director process itself had gone away; the SD sees
+/// the lost Director connection (e.g. stored/askdir.cc:438-442 "Error
+/// creating JobMedia record", M_FATAL), the FD read fails.
+pub(crate) fn abort_without_catalog(job_id: u32, why: &str) {
+    error!("Worker {job_id}: catalog request not answered ({why}); aborting the job");
+    worker_jmsg(job_id, M_FATAL, format!("Catalog request of the Storage daemon not answered: {why}\n"));
+    WORKER_FATAL.store(true, Ordering::SeqCst);
     for slot in &CANCEL_FDS {
         let fd = slot.load(Ordering::SeqCst);
         if fd >= 0 {
@@ -1646,6 +1664,24 @@ mod wait_protocol_tests {
         assert_eq!(restore_end_status(&[restore_end(5)], Some(6)), "W");
         assert_eq!(restore_end_status(&[restore_end(6)], Some(6)), "T");
         assert_eq!(restore_end_status(&[restore_end(6)], None), "T");
+    }
+    /// J-15: only a CatResp of the Director answers the SD; a closed pipe
+    /// (Director gone) or another message is an error, never "1000 OK".
+    #[test]
+    fn catalog_answer_comes_only_from_the_director() {
+        let pipe_with = |lines: &[&str]| {
+            let (read, write) = nix::unistd::pipe().unwrap();
+            let mut write = std::fs::File::from(write);
+            for line in lines { writeln!(write, "{line}").unwrap(); }
+            drop(write);
+            std::fs::File::from(read)
+        };
+        let answer = serde_json::to_string(&PipeMessage::CatResp { response: "1000 OK VolName=Full-0001\n".into() }).unwrap();
+        assert_eq!(read_catalog_answer(&mut pipe_with(&[&answer])).unwrap(), "1000 OK VolName=Full-0001\n");
+        assert_eq!(read_catalog_answer(&mut pipe_with(&[])).unwrap_err(), "pipe to the Director closed");
+        let other = serde_json::to_string(&PipeMessage::ResetStatus { job_id: 42 }).unwrap();
+        assert!(read_catalog_answer(&mut pipe_with(&[&other])).unwrap_err().starts_with("unexpected answer from the Director: "));
+        assert!(read_catalog_answer(&mut pipe_with(&["{torn"])).is_err());
     }
     #[test]
     fn consecutive_pipe_messages_survive_reader_buffering_and_eof() {

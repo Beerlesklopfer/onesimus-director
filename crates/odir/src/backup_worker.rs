@@ -8,7 +8,7 @@
 //! ("storage address=", SD "run", message thread), "backup FileIndex=0"
 //! and WaitForJobTermination (FD "2800 End Job", SD "3099 Job end").
 
-use std::io::{BufRead, BufReader, Read, Write};
+use std::io::{Read, Write};
 use std::sync::atomic::Ordering;
 
 use bareos_bnet::stream::AnyStream;
@@ -771,9 +771,19 @@ fn message_thread(sd: &mut BnetStream<PskStream>, job_id: u32, mut from_director
                     Some(b'U') => job_worker::send_jmsg(PipeMessage::UpdCat { job_id, data: hex::encode(&data) }),
                     Some(b'C' | b'B') => {
                         job_worker::send_jmsg(PipeMessage::CatReq { job_id, request: raw.clone() });
-                        let response = read_response(&mut from_director);
-                        if !response.is_empty() {
-                            let _ = sd.send_str(&response);
+                        match job_worker::read_catalog_answer(&mut from_director) {
+                            Ok(response) => {
+                                if !response.is_empty() {
+                                    let _ = sd.send_str(&response);
+                                }
+                            }
+                            // J-15: no answer in the catalog's place; the job
+                            // ends with an error (JS_FatalError).
+                            Err(why) => {
+                                note_type(M_FATAL);
+                                job_worker::abort_without_catalog(job_id, &why);
+                                break Some(SdEnd { status: b'E', ..Default::default() });
+                            }
                         }
                     }
                     _ if raw.starts_with("Jmsg") => forward(job_id, &raw),
@@ -805,19 +815,6 @@ fn message_thread(sd: &mut BnetStream<PskStream>, job_id: u32, mut from_director
     };
     let _ = sd.send_signal(BnetSignal::Terminate);
     result
-}
-
-/// The Director's answer to a catalog request (CatResp on the pipe).
-fn read_response(from_director: &mut std::fs::File) -> String {
-    let mut line = String::new();
-    let mut reader = BufReader::new(from_director);
-    match reader.read_line(&mut line) {
-        Ok(n) if n > 0 => match serde_json::from_str::<PipeMessage>(&line) {
-            Ok(PipeMessage::CatResp { response }) => response,
-            _ => "1000 OK\n".into(),
-        },
-        _ => "1000 OK\n".into(),
-    }
 }
 
 #[cfg(test)]
