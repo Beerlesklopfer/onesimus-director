@@ -1,0 +1,17 @@
+[package]
+name = "onesimus-podman-broker"
+description = "Broker of the signed Podman plugin for ofd: runs as the account in a root-owned user namespace, fixed podman calls, metadata only"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license = "AGPL-3.0-only"
+
+[[bin]]
+name = "onesimus-podman-broker"
+path = "src/main.rs"
+
+[dependencies]
+onesimus-proto-rs.workspace = true
+onesimus-podman-core = { path = "../onesimus-podman-core" }
+prost.workspace = true
+libc.workspace = true

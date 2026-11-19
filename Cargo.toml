@@ -13,6 +13,8 @@ members = [
     "crates/onesimus-plugins",
     "crates/onesimus-pg-broker",
     "crates/onesimus-ldap-broker",
+    "crates/onesimus-podman-core",
+    "crates/onesimus-podman-broker",
 ]
 
 [workspace.package]

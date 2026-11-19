@@ -2189,6 +2189,27 @@ dependencies = [
 ]
 
 [[package]]
+name = "onesimus-podman-broker"
+version = "25.1.2+onesimus.0.2.0"
+dependencies = [
+ "libc",
+ "onesimus-podman-core",
+ "onesimus-proto-rs",
+ "prost",
+]
+
+[[package]]
+name = "onesimus-podman-core"
+version = "25.1.2+onesimus.0.2.0"
+dependencies = [
+ "hex",
+ "libc",
+ "serde",
+ "serde_json",
+ "sha2",
+]
+
+[[package]]
 name = "onesimus-proto-rs"
 version = "25.1.2+onesimus.0.2.0"
 dependencies = [
