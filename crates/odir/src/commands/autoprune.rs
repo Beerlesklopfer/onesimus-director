@@ -3,8 +3,8 @@
 //! Client (or `Prune Jobs`/`Prune Files` on the Job) every job that ends
 //! purges the Job records older than the Job Retention and the File
 //! records older than the File Retention of its client, like `prune jobs`
-//! and `prune files` on the console. The latest Full chain of every
-//! configured client/FileSet stays (PruneJobs, ua_prune.cc:1077-1114).
+//! and `prune files` on the console. The latest chain of every client and
+//! FileSet name stays with its File records, configured or not (protect.rs).
 //!
 //! When it runs (dird/job.cc:479-614, JobThread): after DoX() returned
 //! true and its cleanup wrote the report, before the AfterJob run scripts.
@@ -247,7 +247,7 @@ mod tests {
         let jobs = log.iter().position(|s| s == "DELETE FROM Job WHERE JobId IN (41)").unwrap();
         let files = log.iter().position(|s| s == "DELETE FROM File WHERE JobId IN (42)").unwrap();
         assert!(jobs < files);
-        assert!(!log.iter().any(|s| s.contains("(50)") || s.contains(",50)")), "{log:?}");
+        assert!(!log.iter().any(|s| !s.starts_with("SELECT") && (s.contains("(50)") || s.contains(",50)"))), "{log:?}");
         // Client.Name and the retention cut-off of 180 days
         assert!(log.iter().any(|s| s.starts_with("INSERT INTO DelCandidates") && s.contains("Client.Name = 'fd1'")));
     }

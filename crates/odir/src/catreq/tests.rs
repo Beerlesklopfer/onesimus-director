@@ -258,6 +258,44 @@ fn get_vol_info_recycles_a_purged_volume() {
         && s.contains("VolStatus='Recycle'") && s.contains("RecycleCount=1,")));
 }
 
+/// Onesimus (protect.rs): a volume set to Purged by hand that still holds
+/// the latest Full of a client is not recycled; a catalog error neither.
+#[test]
+fn a_purged_volume_with_the_latest_chain_is_not_recycled() {
+    let chain_row = |id: &str, level: &str| row(&["1", "fd1", "fs", id, level, "5", "2026-11-01 10:00:00",
+        "2026-11-01 11:00:00", "100", "0"]);
+    let db = MockDb::new(move |sql| {
+        if sql.ends_with("WHERE VolumeName='Full-0002'") {
+            Some(Ok(vec![media(2, "Full-0002", "Purged", 3, 4, 9, 100, 1)]))
+        } else if sql == "SELECT DISTINCT JobId FROM JobMedia WHERE MediaId=2" {
+            Some(Ok(vec![row(&["31"])]))
+        } else if sql.contains("WHERE J.JobId IN (31)") {
+            Some(Ok(vec![chain_row("31", "F")]))
+        } else {
+            None
+        }
+    });
+    let reply = run(&db, "CatReq Job=b GetVolInfo VolName=Full-0002 write=1\n");
+    assert!(!reply.to_sd.contains("VolStatus=Recycle"), "{}", reply.to_sd);
+    assert!(reply.messages.iter().any(|(_, m)| m.starts_with("Volume \"Full-0002\" holds the latest Full chain of \
+        client \"fd1\" FileSet \"fs\" (JobIds 31); not recycled.") && m.contains("waits for a volume as with a full pool")),
+        "{:?}", reply.messages);
+    assert!(!db.log().iter().any(|s| s.contains("VolStatus='Recycle'")));
+    // the chain query fails: not recycled either
+    let db = MockDb::new(|sql| {
+        if sql.ends_with("WHERE VolumeName='Full-0002'") {
+            Some(Ok(vec![media(2, "Full-0002", "Purged", 3, 4, 9, 100, 1)]))
+        } else if sql.contains("FROM JobMedia WHERE MediaId=2") {
+            Some(Err("ERROR:  connection lost".into()))
+        } else {
+            None
+        }
+    });
+    let reply = run(&db, "CatReq Job=b GetVolInfo VolName=Full-0002 write=1\n");
+    assert!(!reply.to_sd.contains("VolStatus=Recycle"), "{}", reply.to_sd);
+    assert!(reply.messages.iter().any(|(t, m)| *t == MsgType::Error && m.contains("not recycled")), "{:?}", reply.messages);
+}
+
 // --- UpdateMedia (catreq.cc:258-280) -------------------------------------------
 
 /// stored/askdir.cc Update_media.
@@ -597,4 +635,73 @@ JOIN Job USING (JobId) WHERE File.JobId={job_id}")).unwrap();
     assert_eq!(files.rows, vec![row(&["/c055/dir/", "file", "1", "99"])]);
     let jm = cat.query_rows(&format!("SELECT VolIndex, EndBlock FROM JobMedia WHERE JobId={job_id}")).unwrap();
     assert_eq!(jm.rows, vec![row(&["1", "999"])]);
+}
+
+/// With ONESIMUS_PROTECT_DB=<postgres url of a throw-away catalog copy>: a
+/// pool whose only volume holds the latest Full of a client, its Volume
+/// Retention long over. FindMedia with Prune Volumes does not prune or
+/// recycle it; set to Purged by hand, GetVolInfo does not recycle it.
+#[test]
+#[ignore = "needs ONESIMUS_PROTECT_DB=<postgres url of a throw-away catalog copy>"]
+fn protected_volume_is_not_recycled_against_postgresql() {
+    let url = std::env::var("ONESIMUS_PROTECT_DB").expect("ONESIMUS_PROTECT_DB not set");
+    static SHUTDOWN: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+    let (cat, _join) = crate::catalog_worker::spawn_catalog_worker(url.parse().expect("catalog url"), &SHUTDOWN);
+    let one = |sql: &str| cat.query_rows(sql).unwrap().rows[0][0].clone().unwrap_or_default();
+    let exec = |sql: &str| { cat.query_rows(sql).unwrap(); };
+    for (table, column) in [("client", "clientid"), ("fileset", "filesetid"), ("job", "jobid"), ("media", "mediaid"),
+                            ("pool", "poolid"), ("jobmedia", "jobmediaid")] {
+        exec(&format!("SELECT setval(pg_get_serial_sequence('{table}', '{column}'), (SELECT COALESCE(MAX({column}), 0) + 1 FROM {table}))"));
+    }
+    exec("DELETE FROM Media WHERE VolumeName='Protect2-0001'");
+    exec("DELETE FROM Pool WHERE Name='ProtectPool'");
+    exec("INSERT INTO Pool (Name, NumVols, MaxVols, UseOnce, UseCatalog, AcceptAnyVolume, VolRetention, VolUseDuration, \
+          MaxVolJobs, MaxVolFiles, MaxVolBytes, AutoPrune, Recycle, PoolType, LabelFormat, Enabled, LabelType) \
+          VALUES ('ProtectPool', 1, 0, 0, 1, 0, 86400, 0, 0, 0, 0, 1, 1, 'Backup', '', 1, 0)");
+    let pool: i64 = one("SELECT PoolId FROM Pool WHERE Name='ProtectPool'").parse().unwrap();
+    exec("INSERT INTO Client (Name, Uname) SELECT 'protect2-fd', '' WHERE NOT EXISTS (SELECT 1 FROM Client WHERE Name='protect2-fd')");
+    let client = one("SELECT ClientId FROM Client WHERE Name='protect2-fd'");
+    exec("INSERT INTO FileSet (FileSet, MD5, CreateTime) SELECT 'PS2', 'm', now() WHERE NOT EXISTS (SELECT 1 FROM FileSet WHERE FileSet='PS2')");
+    let fileset = one("SELECT MIN(FileSetId) FROM FileSet WHERE FileSet='PS2'");
+    let t = now() - 300 * 86400;
+    exec(&format!("INSERT INTO Job (Job, Name, Type, Level, ClientId, JobStatus, StartTime, EndTime, JobTDate, JobFiles, PoolId, \
+          FileSetId) VALUES ('protect2.full', 'protect2', 'B', 'F', {client}, 'T', to_timestamp({t})::timestamp, \
+          to_timestamp({})::timestamp, {}, 1, {pool}, {fileset})", t + 60, t + 60));
+    let job = one("SELECT MAX(JobId) FROM Job WHERE Job='protect2.full'");
+    exec(&format!("INSERT INTO Media (VolumeName, MediaType, VolStatus, PoolId, VolRetention, Recycle, Enabled, FirstWritten, \
+          LastWritten, VolJobs, VolBytes) VALUES ('Protect2-0001', 'File', 'Full', {pool}, 86400, 1, 1, \
+          to_timestamp({t})::timestamp, to_timestamp({})::timestamp, 1, 1000)", t + 60));
+    let media = one("SELECT MediaId FROM Media WHERE VolumeName='Protect2-0001'");
+    exec(&format!("INSERT INTO JobMedia (JobId, MediaId, FirstIndex, LastIndex) VALUES ({job}, {media}, 1, 1)"));
+    let before = one(&format!("SELECT COUNT(*) FROM JobMedia WHERE MediaId={media}"));
+    println!("before: volume Protect2-0001 Full, JobMedia rows {before}, Job {job}");
+
+    let ctx = JobContext { job_id: 0, start_time: now(), pool_id: pool, pool_name: "ProtectPool".into(), catalog_files: true,
+        write_storage: Some(WriteStorage { media_type: "File".into(), storage_id: 0, autochanger: false }), mig_job_id: None,
+        prune_volumes: true, purge_oldest_volume: false, recycle_oldest_volume: true };
+    let mut catreq = CatReqJob::new(ctx);
+    let opener = || cat.dedicated().ok().map(|c| Box::new(c) as Box<dyn Db + Send>);
+    let db: &dyn Db = &cat;
+    let reply = catreq.dispatch(Some(db), &opener,
+        b"CatReq Job=protect.test FindMedia=1 pool_name=ProtectPool media_type=File unwanted_volumes=\n");
+    println!("FindMedia: {}", reply.to_sd.trim_end());
+    for (t, m) in &reply.messages {
+        print!("{t:?}: {m}");
+    }
+    assert!(!reply.to_sd.contains("VolName=Protect2-0001"), "{reply:?}");
+    assert!(reply.messages.iter().any(|(_, m)| m.contains("Volume \"Protect2-0001\" holds the latest Full chain")
+        && m.contains("waits for a volume as with a full pool")), "{reply:?}");
+    assert_eq!(one(&format!("SELECT VolStatus FROM Media WHERE MediaId={media}")), "Full");
+
+    // set to Purged by hand: still not recycled
+    exec(&format!("UPDATE Media SET VolStatus='Purged' WHERE MediaId={media}"));
+    let reply = catreq.dispatch(Some(db), &opener, b"CatReq Job=protect.test GetVolInfo VolName=Protect2-0001 write=1\n");
+    println!("GetVolInfo: {}", reply.to_sd.trim_end());
+    for (t, m) in &reply.messages {
+        print!("{t:?}: {m}");
+    }
+    assert!(!reply.to_sd.contains("VolStatus=Recycle"), "{reply:?}");
+    let after = one(&format!("SELECT COUNT(*) FROM JobMedia WHERE MediaId={media}"));
+    println!("after: volume Protect2-0001 {}, JobMedia rows {after}", one(&format!("SELECT VolStatus FROM Media WHERE MediaId={media}")));
+    assert_eq!((before.as_str(), after.as_str()), ("1", "1"));
 }

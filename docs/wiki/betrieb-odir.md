@@ -138,14 +138,42 @@ Konsolensitzung und beim Beenden hinaus. Fehler des Mail-Programms stehen als
 
 ## AutoPrune am Job-Ende
 
-Wie `bareos-dir`: Nach jedem Job prunt der Director Jobs und Files des Clients
-nach `Job Retention` und `File Retention` (Pool-Retention vor Client-Retention),
-wenn `AutoPrune = yes` gesetzt ist. Die jüngste vollständige Kette (letzter
-Full mit den Differentials und Incrementals danach) bleibt als Job erhalten,
-auch wenn sie älter als die Retention ist. Ihre File-Zeilen fallen aber nach
-der `File Retention` weg; danach ist nur noch der Restore ganzer Jobs möglich,
-keine Dateiauswahl im Baum. Der erste Job nach dem Wechsel von einer Version
-ohne AutoPrune prunt den ganzen Rückstand; vorher den Katalog sichern.
+Nach jedem Job prunt der Director Jobs und Files des Clients nach `Job
+Retention` und `File Retention` (Pool-Retention vor Client-Retention), wenn
+`AutoPrune = yes` gesetzt ist (wie `bareos-dir`). Der erste Job nach dem
+Wechsel von einer Version ohne AutoPrune prunt den ganzen Rückstand; vorher den
+Katalog sichern.
+
+Strenger als `bareos-dir` (Entscheidung des Nutzers vom 19.11.2026): Die
+jüngste erfolgreiche Kette je Client und FileSet-Name im Katalog wird nie
+gepurgt, auch wenn sie älter als die Retention ist:
+
+- Kette: der letzte Full mit JobStatus `T`/`W`, die letzte Differential danach
+  (mit Dateien) und die Incrementals danach, wie `AccurateGetJobids` (Level
+  Incremental); dazu Base-Jobs der Kette. Das FileSet zählt nach Namen über
+  alle FileSetIds (eine geänderte Include-Liste ergibt eine neue FileSetId).
+- Gilt unabhängig davon, ob Job, FileSet oder Client noch konfiguriert sind
+  (umbenannter Job, entfernter Client).
+- Weder die Jobs noch ihre File-Zeilen werden gepurgt: `prune jobs`, `prune
+  files`, AutoPrune, `purge jobs`/`purge files` überspringen sie
+  (`PurgedFiles` bleibt 0; der Restore mit Dateiauswahl bleibt möglich).
+- Ein Volume mit Daten (JobMedia) eines Jobs dieser Ketten wird nicht gepruned,
+  gepurgt, recycelt, `truncate`d oder gelöscht: weder durch `Prune Volumes`,
+  `Recycle Oldest Volume`/`Purge Oldest Volume` bei der Volume-Suche eines Jobs
+  noch durch `prune volume`, `purge volume`, `truncate` oder `delete volume` auf
+  der Konsole (dort hilft auch `yes` nicht).
+- Ist die Kette nicht ermittelbar (Katalogfehler), wird nichts gepurgt.
+- Meldungen nennen, was geschützt wurde, z. B. `Keeping the latest Full chain of
+  client "fd1" FileSet "fs" (JobIds 3,4,5); its jobs are not pruned.` oder
+  `Volume "Full-0007" holds the latest Full chain of client "fd1" FileSet "fs"
+  (JobIds 3); not pruned.`
+
+Auswirkung auf die Volume-Wahl: Findet ein Job außer solchen Volumes kein
+freies, wartet er auf ein Volume wie bei einem vollen Pool (Meldung an den Job:
+„the job waits for a volume as with a full pool“). Abhilfe: ein Volume labeln
+oder hinzufügen bzw. `Maximum Volumes` erhöhen. Ein Volume wird erst wieder frei,
+wenn eine neuere Kette die geschützte ablöst (nächster Full). Ausweg für den
+Einzelfall bleibt `delete jobid=…` auf der Konsole.
 
 ## Abweichungen von Bareos
 
@@ -158,6 +186,7 @@ Bewusst entschieden (Stand 19.11.2026):
 | Gescheiterter Batch-Insert der File-Zeilen | Block wird ignoriert, Job `T`, Dateien fehlen im Katalog | Job wird fatal (`f`), „Attribute create error“ | kein stilles Fehlen von Dateien im Restore-Baum |
 | Purge (PurgeFiles/PurgeJobs) | ohne Transaktion, Fehler ignoriert | eine Transaktion, Fehler werden gemeldet | kein halb gelöschter Job |
 | `prune jobs`, Behalten-Liste nicht ermittelbar | Fehler ignoriert, löscht trotzdem | bricht vor dem Löschen ab | die letzte Full-Kette darf nie verloren gehen |
+| Schutz der jüngsten Kette | nur bei `prune jobs`/AutoPrune, nur für konfigurierte Job/FileSet/Client, FileSet nach FileSetId; File-Zeilen fallen nach `File Retention` weg; Volumes werden ohne Rücksicht gepruned/recycelt | je Client und FileSet-Name immer, auch nicht konfiguriert; Jobs und File-Zeilen bleiben; Volumes mit diesen Jobs werden weder gepruned, gepurgt, recycelt, `truncate`d noch gelöscht; Katalogfehler purgt nichts | Entscheidung des Nutzers 19.11.2026: der letzte Stand jedes Clients muss restaurierbar bleiben; ein Job wartet dafür ggf. auf ein Volume |
 | gRPC | gibt es nicht | TLS auf `DirPort + 1000`, gleiche Adressen wie BNET | Schnittstelle der GUI |
 | Mail-Sammlung | Dateien `<WorkingDirectory>/*.mail` | im Speicher | – |
 | Paketversion | – | bleibt `25.1.2+onesimus.0.2.0`, Installation mit `dpkg -i` | Entscheidung des Nutzers; neue Builds an Prüfsumme und Build-Datum erkennbar |

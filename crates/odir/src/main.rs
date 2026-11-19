@@ -22,6 +22,7 @@ mod commands;
 mod config_check;
 mod config_test;
 mod config_edit;
+mod protect;
 mod consolidate;
 mod command_worker;
 mod expand;

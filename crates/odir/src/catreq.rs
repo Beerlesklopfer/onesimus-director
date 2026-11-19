@@ -1594,6 +1594,10 @@ fn prune_volumes(cat: &mut Cat, ctx: &JobContext, in_changer: bool, mr: &mut Med
         // GetPruneListForVolume() / PurgeJobListFromCatalog()
         let list = crate::commands::purge::prune_candidates_db(cat.db, lmr.media_id, lmr.vol_retention.max(0) as u64,
             lmr.enabled as i64, &running).unwrap_or_default();
+        // Onesimus (protect.rs): a volume of the latest chain of a client is not pruned
+        if !list.is_empty() && !volume_unprotected(cat, &lmr, "pruned") {
+            continue;
+        }
         if !list.is_empty() {
             cat.jmsg(MsgType::Info, format!("Volume \"{}\" has Volume Retention of {} sec. and has {} jobs that will be pruned\n",
                 lmr.volume_name, lmr.vol_retention, list.len()));
@@ -1626,6 +1630,10 @@ fn purge_jobs_from_volume(cat: &mut Cat, ctx: &JobContext, mr: &mut MediaRecord)
     if !matches!(mr.vol_status.as_str(), "Append" | "Full" | "Used" | "Error") {
         cat.jmsg(MsgType::Info, format!("\nVolume \"{}\" has VolStatus \"{}\" and cannot be purged.\n\
             The VolStatus must be: Append, Full, Used or Error to be purged.\n", mr.volume_name, mr.vol_status));
+        return false;
+    }
+    // Onesimus (protect.rs): Purge Oldest Volume never purges the latest chain
+    if !volume_unprotected(cat, mr, "purged") {
         return false;
     }
     let ids: Vec<String> = match cat.db.rows(&format!("SELECT DISTINCT JobId FROM JobMedia WHERE MediaId={}", mr.media_id)) {
@@ -1663,6 +1671,10 @@ fn prune_volume(cat: &mut Cat, ctx: &JobContext, mr: &mut MediaRecord) -> bool {
     if empty {
         cat.jmsg(MsgType::Info, format!("Volume \"{0}\" seems to be empty.  Make sure that it is not currently in use, \
             then call 'purge volume=\"{0}\"'", mr.volume_name));
+        return false;
+    }
+    // Onesimus (protect.rs): Recycle Oldest Volume never prunes the latest chain
+    if !volume_unprotected(cat, mr, "pruned") {
         return false;
     }
     let running = RUNNING_JOBIDS.lock().map(|r| r.clone()).unwrap_or_default();
@@ -1835,8 +1847,32 @@ fn recycle_oldest_purged_volume(cat: &mut Cat, in_changer: bool, mr: &mut MediaR
     false
 }
 
-/// recycle.cc RecycleVolume().
+/// Onesimus (protect.rs): whether volume `mr` may be pruned, purged or
+/// recycled; otherwise the reason as a job message (a catalog error
+/// counts as protected).
+fn volume_unprotected(cat: &mut Cat, mr: &MediaRecord, action: &str) -> bool {
+    match crate::protect::for_volume(cat.db, mr.media_id) {
+        Ok(protected) if protected.is_empty() => true,
+        Ok(protected) => {
+            cat.jmsg(MsgType::Info, format!("{}{}", protected.volume_message(&mr.volume_name, action),
+                crate::protect::WAIT_NOTE));
+            false
+        }
+        Err(error) => {
+            cat.jmsg(MsgType::Error, format!("Cannot determine whether volume \"{}\" holds the latest Full chain of a \
+                client ({}); not {action}.\n", mr.volume_name, error.trim_end()));
+            false
+        }
+    }
+}
+
+/// recycle.cc RecycleVolume(). Onesimus (protect.rs): not a volume that
+/// still holds jobs of the latest chain of a client (e.g. set to Purged by
+/// hand).
 fn recycle_volume(cat: &mut Cat, mr: &mut MediaRecord) -> bool {
+    if !volume_unprotected(cat, mr, "recycled") {
+        return false;
+    }
     mr.vol_status = "Recycle".into();
     mr.vol_jobs = 0;
     mr.vol_files = 0;

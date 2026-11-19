@@ -718,6 +718,10 @@ fn delete_execute(ua: &mut crate::ua_select::Ua, action: DeleteAction,
     };
     match action {
         DeleteAction::Volume { name, media_id, purged } => {
+            // Onesimus (protect.rs): never a volume of the latest chain of a client, `yes` or not.
+            if !super::purge::volume_unprotected(ua, &cat, media_id, &name, "deleted") {
+                return;
+            }
             if !purged {
                 // GetVolumeJobids, PurgeJobsFromCatalog.
                 let Ok(table) = cat.query_rows(&format!("SELECT DISTINCT JobId FROM JobMedia WHERE MediaId={media_id}")) else {

@@ -17,6 +17,17 @@ onesimus (25.1.2+onesimus.0.2.0-2) UNRELEASED; urgency=medium
     ends kept; missing ones added before the closing brace; nested blocks
     refused) and writes it back with the sha256 (one retry on CONFLICT).
     A Director without the configuration CRUD for the type is refused.
+  * odir: stricter prune rule (decision of the user 19.11.2026, deliberate
+    deviation from bareos-dir): the latest successful chain (last Full T/W,
+    last Differential, Incrementals after them) of every client and FileSet
+    name in the catalog is never pruned or purged, configured or not; its
+    File records stay too (prune jobs/files, AutoPrune, purge jobs/files).
+    A volume with JobMedia of such a job is not pruned, purged, recycled,
+    truncated or deleted (Prune Volumes, Recycle/Purge Oldest Volume,
+    prune/purge/delete volume, truncate; "yes" does not override it); a
+    job may then wait for a volume as with a full pool. A catalog error
+    while determining the chains purges nothing. Messages name what was
+    kept.
 
   * odir: secrets in FileSet plugin lines (password=, bind_pw= ...) are
     masked in FileSet.FileSetText and in "show fileset" (S-3). bareos-dir

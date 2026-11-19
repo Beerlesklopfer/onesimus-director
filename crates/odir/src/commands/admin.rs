@@ -1716,6 +1716,11 @@ fn truncate_with(
     let mut connected = false;
     for &id in &media_ids {
         if let Some(media) = truncate_media(db, id) {
+            // Onesimus (protect.rs): a volume set to Purged by hand that still
+            // holds the latest chain of a client is not truncated.
+            if !super::purge::volume_unprotected(&mut ua, db, id, &media.volume_name, "truncated") {
+                continue;
+            }
             do_truncate(&mut ua, db, sd, &mut connected, media, drive);
         }
     }

@@ -172,6 +172,43 @@ fn purge_files_from_job_list(ua: &mut Ua, db: &dyn Db, list: &mut Vec<u32>, own_
     }
 }
 
+/// Onesimus (protect.rs): drops the jobs of the latest chain of every
+/// (client, FileSet name) from `list` and says so; false (error sent,
+/// nothing may be purged) when the chains cannot be determined.
+pub(crate) fn keep_latest_chains(ua: &mut Ua, db: &dyn Db, list: &mut Vec<u32>, what: &str) -> bool {
+    match crate::protect::for_jobs(db, list) {
+        Ok(protected) => {
+            for message in protected.remove_from(list, what) {
+                ua.send_msg(message);
+            }
+            true
+        }
+        Err(error) => {
+            ua.error_msg(format!("Cannot determine the latest Full chains to keep ({}); nothing purged.\n",
+                error.trim_end()));
+            false
+        }
+    }
+}
+
+/// Onesimus (protect.rs): true when volume `volume` may be pruned, purged,
+/// recycled, truncated or deleted; otherwise the reason is sent as an
+/// error (`action`: "pruned", "purged" …).
+pub(crate) fn volume_unprotected(ua: &mut Ua, db: &dyn Db, media_id: i64, name: &str, action: &str) -> bool {
+    match crate::protect::for_volume(db, media_id) {
+        Ok(protected) if protected.is_empty() => true,
+        Ok(protected) => {
+            ua.error_msg(protected.volume_message(name, action));
+            false
+        }
+        Err(error) => {
+            ua.error_msg(format!("Cannot determine whether volume \"{name}\" holds the latest Full chain of a client \
+                ({}); not {action}.\n", error.trim_end()));
+            false
+        }
+    }
+}
+
 /// The Media record fields prune and purge work with (MediaDbRecord).
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub(crate) struct Volume {
@@ -290,7 +327,9 @@ pub(crate) fn purge_files_from_client(ua: &mut Ua, ast: &CommandAst, db: &dyn Db
         if !ua.get_confirmation(ast, "Purge (yes/no)? ", false) {
             ua.info_msg("Purge canceled.\n");
         } else {
-            purge_files_from_job_list(ua, db, &mut del, 0);
+            if keep_latest_chains(ua, db, &mut del, "File records") {
+                purge_files_from_job_list(ua, db, &mut del, 0);
+            }
         }
     }
 }
@@ -316,7 +355,7 @@ pub(crate) fn purge_jobs_from_client(ua: &mut Ua, ast: &CommandAst, db: &dyn Db,
         ua.info_msg(format!("Found {} Jobs for client \"{client}\" in catalog \"{catalog}\".\n", list.len()));
         if !ua.get_confirmation(ast, "Purge (yes/no)? ", false) {
             ua.info_msg("Purge canceled.\n");
-        } else if purge_job_list_from_catalog(ua, db, &mut list) {
+        } else if keep_latest_chains(ua, db, &mut list, "jobs") && purge_job_list_from_catalog(ua, db, &mut list) {
             let n = list.len();
             ua.info_msg(format!("{n} Job{} on client \"{client}\" purged from catalog.\n", if n <= 1 { "" } else { "s" }));
         }
@@ -344,7 +383,7 @@ pub(crate) fn purge_jobs_from_pool(ua: &mut Ua, ast: &CommandAst, db: &dyn Db, p
         ua.info_msg(format!("Found {} Jobs for pool \"{pool}\" in catalog.\n", list.len()));
         if !ua.get_confirmation(ast, "Purge (yes/no)? ", false) {
             ua.info_msg("Purge canceled.\n");
-        } else if purge_job_list_from_catalog(ua, db, &mut list) {
+        } else if keep_latest_chains(ua, db, &mut list, "jobs") && purge_job_list_from_catalog(ua, db, &mut list) {
             let n = list.len();
             ua.info_msg(format!("{n} Job{} on Pool \"{pool}\" purged from catalog.\n", if n <= 1 { "" } else { "s" }));
         }
@@ -385,6 +424,10 @@ pub(crate) fn purge_jobs_from_volume(ua: &mut Ua, ast: &CommandAst, db: &dyn Db,
     if !matches!(volume.status.as_str(), "Append" | "Full" | "Used" | "Error") {
         ua.error_msg(format!("\nVolume \"{}\" has VolStatus \"{}\" and cannot be purged.\n\
             The VolStatus must be: Append, Full, Used or Error to be purged.\n", volume.name, volume.status));
+        return false;
+    }
+    // Onesimus (protect.rs): never a volume of the latest chain, `yes` or not.
+    if !volume_unprotected(ua, db, volume.media_id, &volume.name, "purged") {
         return false;
     }
     let Some(statuses) = job_status_selection(ast) else {
@@ -558,8 +601,17 @@ pub(crate) fn prune_files_of(ua: &mut Ua, db: &dyn Db, client: &str, pool: Optio
         ua.warning_msg("No Files found to prune.\n");
         return;
     }
-    let mut list = parse_ids(column0(db, &format!("SELECT JobId FROM Job {from} WHERE PurgedFiles=0 {filter} ORDER BY JobId"))
-        .unwrap_or_default());
+    let mut list = match column0(db, &format!("SELECT JobId FROM Job {from} WHERE PurgedFiles=0 {filter} ORDER BY JobId")) {
+        Ok(ids) => parse_ids(ids),
+        Err(error) => {
+            ua.error_msg(db_error(&error));
+            return;
+        }
+    };
+    // Onesimus (protect.rs): the File records of the latest chain stay.
+    if !keep_latest_chains(ua, db, &mut list, "File records") {
+        return;
+    }
     if !purge_files_from_job_list(ua, db, &mut list, own_job_id) {
         return;
     }
@@ -575,7 +627,9 @@ pub(crate) fn prune_files_of(ua: &mut Ua, db: &dyn Db, client: &str, pool: Optio
 /// (ua_prune.cc:1095, 1127) and ignores a failed AccurateGetJobids
 /// (ua_prune.cc:1112); with an incomplete keep list it would prune the
 /// latest chain. Here every failure while the keep list is built aborts
-/// the prune before anything is deleted.
+/// the prune before anything is deleted. Onesimus addition (protect.rs):
+/// the latest chain of every (client, FileSet name) of the candidates
+/// stays as well, configured or not, also its jobs without files.
 pub(crate) fn prune_jobs(ua: &mut Ua, db: &dyn Db, client: &str, pool: Option<&str>, period: u64) -> bool {
     prune_jobs_of(ua, db, client, pool, period, 0)
 }
@@ -600,6 +654,32 @@ pub(crate) fn prune_jobs_of(ua: &mut Ua, db: &dyn Db, client: &str, pool: Option
         ua.error_msg(db_error(&error));
         drop(db);
         return true;
+    }
+    // Onesimus (protect.rs, deliberate deviation): the latest chain of every
+    // (client, FileSet name) of the candidates stays, configured or not,
+    // also its jobs without files; a catalog error prunes nothing.
+    let protected = match column0(db, "SELECT JobId FROM DelCandidates ORDER BY JobId")
+        .and_then(|ids| { let ids = parse_ids(ids); crate::protect::for_jobs(db, &ids).map(|p| (ids, p)) }) {
+        Ok((candidates, protected)) => {
+            let mut rest = candidates;
+            for message in protected.remove_from(&mut rest, "jobs") {
+                ua.send_msg(message);
+            }
+            protected.jobids()
+        }
+        Err(error) => {
+            ua.error_msg(format!("Cannot determine the latest Full chains to keep ({}); nothing pruned.\n", error.trim_end()));
+            drop(db);
+            return true;
+        }
+    };
+    if !protected.is_empty() {
+        let list = protected.iter().map(u32::to_string).collect::<Vec<_>>().join(",");
+        if let Err(error) = db.exec(&format!("DELETE FROM DelCandidates WHERE JobId IN ({list})")) {
+            ua.error_msg(db_error(&error));
+            drop(db);
+            return true;
+        }
     }
     // JobSelectHandler: jobs, filesets and clients still configured, no Verify jobs.
     let mut checks: Vec<(i64, i64)> = Vec::new();
@@ -765,6 +845,10 @@ pub(crate) fn prune_volume(ua: &mut Ua, db: &dyn Db, volume: &mut Volume) -> boo
     if empty {
         ua.send_msg(format!("Volume \"{0}\" seems to be empty.  Make sure that it is not currently in use, \
             then call 'purge volume=\"{0}\"'", volume.name));
+        return false;
+    }
+    // Onesimus (protect.rs): a volume of the latest chain is not pruned.
+    if !volume_unprotected(ua, db, volume.media_id, &volume.name, "pruned") {
         return false;
     }
     // GetPruneListForVolume()
@@ -1679,5 +1763,330 @@ pub(crate) mod tests {
         assert_eq!(atoi("99999999999"), 1_215_752_191);
         assert_eq!(atoi("99999999999999999999"), i64::MAX as i32);
         assert_eq!(atoi("x"), 0);
+    }
+}
+
+/// Onesimus (protect.rs): the latest chain of every (client, FileSet name)
+/// is never pruned or purged; mock catalog.
+#[cfg(test)]
+mod protect_tests {
+    use super::*;
+    use crate::catalog_worker::SqlTable;
+    use crate::protect::tests::{job, Catalog};
+    use std::sync::Mutex;
+
+    /// The fake catalog of protect.rs plus the DelCandidates table and the
+    /// candidate queries of prune jobs/files.
+    struct ChainDb {
+        cat: Catalog,
+        candidates: Vec<u32>,
+        removed: Mutex<Vec<u32>>,
+        fail_chains: bool,
+        log: Mutex<Vec<String>>,
+    }
+
+    fn ids_after(sql: &str, after: &str) -> Vec<u32> {
+        let rest = &sql[sql.find(after).unwrap() + after.len()..];
+        rest[..rest.find(')').unwrap()].split(',').filter_map(|s| s.trim().parse().ok()).collect()
+    }
+
+    impl ChainDb {
+        fn new(cat: Catalog, candidates: Vec<u32>) -> Self {
+            Self { cat, candidates, removed: Mutex::new(Vec::new()), fail_chains: false, log: Mutex::new(Vec::new()) }
+        }
+        fn left(&self) -> Vec<String> {
+            let removed = self.removed.lock().unwrap();
+            self.candidates.iter().filter(|id| !removed.contains(id)).map(u32::to_string).collect()
+        }
+        /// JobIds of the purge statements (DELETE FROM Job / DELETE FROM File).
+        fn purged(&self, table: &str) -> Vec<u32> {
+            let prefix = format!("DELETE FROM {table} WHERE JobId IN (");
+            self.log.lock().unwrap().iter().filter(|s| s.starts_with(&prefix)).flat_map(|s| ids_after(s, "IN (")).collect()
+        }
+    }
+
+    impl Db for ChainDb {
+        fn rows(&self, sql: &str) -> Result<SqlTable, String> {
+            self.log.lock().unwrap().push(sql.to_string());
+            let table = |values: Vec<String>| Ok(SqlTable {
+                columns: vec![crate::catalog_worker::SqlColumn { name: "c".into(), numeric: false }],
+                rows: values.into_iter().map(|v| vec![Some(v)]).collect() });
+            if sql.contains("WHERE J.JobId IN (") && self.fail_chains {
+                return Err("ERROR:  canceling statement due to statement timeout".into());
+            }
+            if sql.starts_with("SELECT JobId FROM DelCandidates") || sql.contains("DISTINCT DelCandidates.JobId") {
+                return table(self.left());
+            }
+            if sql.starts_with("SELECT COUNT(1) FROM Job") {
+                return table(vec![self.candidates.len().to_string()]);
+            }
+            if sql.starts_with("SELECT JobId FROM Job ") && sql.contains("PurgedFiles=0") {
+                return table(self.candidates.iter().map(u32::to_string).collect());
+            }
+            if sql.contains("FROM DelCandidates") {
+                // JobSelectHandler: none configured (job renamed)
+                return table(vec![]);
+            }
+            self.cat.rows(sql)
+        }
+        fn exec(&self, sql: &str) -> Result<u64, String> {
+            self.log.lock().unwrap().push(sql.to_string());
+            if sql.starts_with("DELETE FROM DelCandidates WHERE JobId IN (") {
+                self.removed.lock().unwrap().extend(ids_after(sql, "IN ("));
+            }
+            Ok(1)
+        }
+    }
+
+    fn ctx() -> ExecContext {
+        // no Job resource for the catalog jobs: the job was renamed
+        crate::ua_select::tests::context(
+            "Director { Name = dir }\nCatalog { Name = MyCatalog; DbName = x }\nClient { Name = fd1; Password = x }\n\
+             Pool { Name = Full; Pool Type = Backup }", crate::command_executor::ApiMode::Human)
+    }
+
+    /// fd1 / FileSet "fs" with two FileSetIds (11, 12): old chain 1,2; latest
+    /// chain 3 (Full, FileSetId 11), 4 and 5 (Incrementals, FileSetId 12);
+    /// fd2 has its only Full 6 (older than every retention).
+    fn catalog() -> Catalog {
+        let mut jobs = vec![job(1, 1, 11, "fs", 'F', 1), job(2, 1, 11, "fs", 'I', 2), job(3, 1, 11, "fs", 'F', 3),
+                            job(4, 1, 12, "fs", 'I', 4), job(5, 1, 12, "fs", 'I', 5), job(6, 2, 11, "fs", 'F', 1)];
+        jobs[0].media = vec![8];
+        jobs[2].media = vec![7];
+        jobs[5].media = vec![9];
+        Catalog::new(jobs)
+    }
+
+    fn output(result: &crate::command_queue::CommandResult) -> String {
+        format!("{}{}", result.text_output, result.error_message)
+    }
+
+    #[test]
+    fn prune_jobs_keeps_the_latest_chain_of_a_renamed_job_and_fileset_ids_of_one_name() {
+        let ctx = ctx();
+        let db = ChainDb::new(catalog(), vec![1, 2, 3, 4, 5, 6]);
+        let mut ua = Ua::new(&ctx);
+        assert!(prune_jobs_of(&mut ua, &db, "fd1", None, 86400, 0));
+        let out = output(&ua.finish(true));
+        assert_eq!(db.purged("Job"), vec![1, 2], "{out}");
+        assert!(out.contains("Keeping the latest Full chain of client \"fd1\" FileSet \"fs\" (JobIds 3,4,5); \
+            its jobs are not pruned."), "{out}");
+        // the only Full of fd2, older than the retention, stays as well
+        assert!(out.contains("client \"fd2\" FileSet \"fs\" (JobIds 6)"), "{out}");
+    }
+
+    #[test]
+    fn prune_files_keeps_the_file_records_of_the_latest_chain() {
+        let ctx = ctx();
+        let db = ChainDb::new(catalog(), vec![1, 2, 3, 4, 5]);
+        let mut ua = Ua::new(&ctx);
+        prune_files_of(&mut ua, &db, "fd1", None, 86400, 0);
+        let out = output(&ua.finish(true));
+        assert_eq!(db.purged("File"), vec![1, 2], "{out}");
+        assert!(!db.log.lock().unwrap().iter().any(|s| s.starts_with("UPDATE Job SET PurgedFiles=1") && s.contains('3')));
+        assert!(out.contains("its File records are not pruned") && out.contains("Pruned Files from 2 Jobs"), "{out}");
+    }
+
+    #[test]
+    fn a_catalog_error_prunes_nothing() {
+        let ctx = ctx();
+        let mut db = ChainDb::new(catalog(), vec![1, 2, 3, 4, 5]);
+        db.fail_chains = true;
+        let mut ua = Ua::new(&ctx);
+        assert!(prune_jobs_of(&mut ua, &db, "fd1", None, 86400, 0));
+        prune_files_of(&mut ua, &db, "fd1", None, 86400, 0);
+        let out = output(&ua.finish(true));
+        assert!(db.purged("Job").is_empty() && db.purged("File").is_empty(), "{out}");
+        assert!(out.contains("Cannot determine the latest Full chains to keep") && out.contains("nothing pruned"), "{out}");
+        // volumes: refused as well
+        let mut ua = Ua::new(&ctx);
+        let mut volume = Volume { media_id: 8, name: "Full-0008".into(), status: "Full".into(), first_written: 1,
+            last_written: 1, ..Default::default() };
+        let mut cat = catalog();
+        cat.fail = true;
+        assert!(!prune_volume(&mut ua, &cat, &mut volume));
+        assert!(!purge_jobs_from_volume(&mut ua, &crate::session::parse_cli_command("purge volume=Full-0008 yes"), &cat,
+            &mut volume, true));
+        let out = output(&ua.finish(true));
+        assert!(out.contains("Cannot determine whether volume \"Full-0008\" holds the latest Full chain"), "{out}");
+        assert!(!cat.log.lock().unwrap().iter().any(|s| s.starts_with("DELETE") || s.starts_with("UPDATE")));
+    }
+
+    #[test]
+    fn volumes_with_the_latest_chain_are_neither_pruned_nor_purged() {
+        let ctx = ctx();
+        let cat = catalog();
+        let mut ua = Ua::new(&ctx);
+        let mut volume = Volume { media_id: 7, name: "Full-0007".into(), status: "Full".into(), first_written: 1,
+            last_written: 1, ..Default::default() };
+        assert!(!prune_volume(&mut ua, &cat, &mut volume));
+        // `yes` does not help
+        assert!(!purge_jobs_from_volume(&mut ua, &crate::session::parse_cli_command("purge volume=Full-0007 yes"), &cat,
+            &mut volume, true));
+        let out = output(&ua.finish(true));
+        assert!(out.contains("Volume \"Full-0007\" holds the latest Full chain of client \"fd1\" FileSet \"fs\" (JobIds 3); \
+            not pruned."), "{out}");
+        assert!(out.contains("(JobIds 3); not purged."), "{out}");
+        assert!(!cat.log.lock().unwrap().iter().any(|s| s.starts_with("DELETE") || s.starts_with("UPDATE")), "nothing written");
+        assert_eq!(volume.status, "Full");
+        // a volume with only the old chain is pruned as before
+        let mut ua = Ua::new(&ctx);
+        let mut old = Volume { media_id: 8, name: "Full-0008".into(), status: "Full".into(), first_written: 1,
+            last_written: 1, ..Default::default() };
+        prune_volume(&mut ua, &cat, &mut old);
+        let out = output(&ua.finish(true));
+        assert!(!out.contains("holds the latest Full chain") && out.contains("Pruning volume Full-0008"), "{out}");
+    }
+
+    #[test]
+    fn purge_jobs_of_a_client_skips_the_latest_chain() {
+        let ctx = ctx();
+        // purge jobs client=fd1: the candidate query of PurgeJobsFromClient
+        struct ClientDb(ChainDb);
+        impl Db for ClientDb {
+            fn rows(&self, sql: &str) -> Result<SqlTable, String> {
+                if sql.contains("FROM Client WHERE Name") {
+                    self.0.log.lock().unwrap().push(sql.to_string());
+                    return Ok(SqlTable { columns: vec![], rows: vec![vec![Some("1".into())]] });
+                }
+                if sql.starts_with("SELECT JobId, PurgedFiles FROM Job WHERE ClientId=1") {
+                    self.0.log.lock().unwrap().push(sql.to_string());
+                    return Ok(SqlTable { columns: vec![], rows: (1..=5).map(|i| vec![Some(i.to_string())]).collect() });
+                }
+                self.0.rows(sql)
+            }
+            fn exec(&self, sql: &str) -> Result<u64, String> {
+                self.0.exec(sql)
+            }
+        }
+        let db = ClientDb(ChainDb::new(catalog(), vec![]));
+        let mut ua = Ua::new(&ctx);
+        purge_jobs_from_client(&mut ua, &crate::session::parse_cli_command("purge jobs client=fd1 yes"), &db, "fd1");
+        let out = output(&ua.finish(true));
+        assert_eq!(db.0.purged("Job"), vec![1, 2], "{out}");
+        assert!(out.contains("(JobIds 3,4,5); its jobs are not pruned"), "{out}");
+    }
+
+    /// Delegates to a real catalog connection, but the chain query fails.
+    struct FailingChains<'a>(&'a dyn Db);
+    impl Db for FailingChains<'_> {
+        fn rows(&self, sql: &str) -> Result<SqlTable, String> {
+            if sql.contains("WHERE J.JobId IN (") {
+                return Err("ERROR:  simulated catalog failure".into());
+            }
+            self.0.rows(sql)
+        }
+        fn exec(&self, sql: &str) -> Result<u64, String> {
+            self.0.exec(sql)
+        }
+    }
+
+    /// Against a throw-away copy of a catalog (ONESIMUS_PROTECT_DB=postgres://…):
+    /// a client whose job name is not configured, FileSet "PS" with two
+    /// FileSetIds, two Full chains older than the retention, a failed Full,
+    /// two volumes. Prints the counts before and after.
+    #[test]
+    #[ignore = "needs ONESIMUS_PROTECT_DB=<postgres url of a throw-away catalog copy>"]
+    fn protect_against_postgresql() {
+        let url = std::env::var("ONESIMUS_PROTECT_DB").expect("ONESIMUS_PROTECT_DB");
+        static SHUTDOWN: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+        let (cat, _join) = crate::catalog_worker::spawn_catalog_worker(url.parse().expect("catalog url"), &SHUTDOWN);
+        let conn = cat.dedicated().unwrap();
+        let db: &dyn Db = &conn;
+        let one = |sql: &str| -> String { db.rows(sql).unwrap().rows[0][0].clone().unwrap_or_default() };
+        let day = 86400i64;
+        let now = now();
+        let at = |days: i64| bstrutime(now - days * day);
+        // fixtures
+        for sql in ["DELETE FROM Client WHERE Name='protect-fd'", "DELETE FROM FileSet WHERE FileSet='PS'"] {
+            db.exec(sql).unwrap();
+        }
+        // the copy may carry rows inserted with explicit ids
+        for (table, column) in [("Client", "ClientId"), ("FileSet", "FileSetId"), ("Path", "PathId"), ("Job", "JobId"),
+                                ("Media", "MediaId"), ("JobMedia", "JobMediaId")] {
+            db.rows(&format!("SELECT setval(pg_get_serial_sequence('{}', '{}'), (SELECT COALESCE(MAX({column}), 0) + 1 FROM {table}))",
+                table.to_lowercase(), column.to_lowercase())).unwrap();
+        }
+        db.exec("INSERT INTO Client (Name, Uname, AutoPrune, FileRetention, JobRetention) VALUES ('protect-fd', '', 1, 0, 0)").unwrap();
+        let client = one("SELECT ClientId FROM Client WHERE Name='protect-fd'");
+        db.exec(&format!("INSERT INTO FileSet (FileSet, MD5, CreateTime) VALUES ('PS', 'md5-a', '{}'), ('PS', 'md5-b', '{}')",
+            at(500), at(299))).unwrap();
+        let fs_a = one("SELECT FileSetId FROM FileSet WHERE FileSet='PS' AND MD5='md5-a'");
+        let fs_b = one("SELECT FileSetId FROM FileSet WHERE FileSet='PS' AND MD5='md5-b'");
+        db.exec("INSERT INTO Path (Path) SELECT '/protect/' WHERE NOT EXISTS (SELECT 1 FROM Path WHERE Path='/protect/')").unwrap();
+        let path = one("SELECT PathId FROM Path WHERE Path='/protect/'");
+        let pool = one("SELECT PoolId FROM Pool WHERE Name='Full'");
+        let mut ids = Vec::new();
+        for (name, level, status, fileset, days) in [("j1", 'F', 'T', &fs_a, 400), ("j2", 'I', 'T', &fs_a, 399),
+            ("j3", 'F', 'T', &fs_a, 300), ("j4", 'I', 'T', &fs_b, 299), ("j5", 'I', 'T', &fs_b, 298), ("j6", 'F', 'f', &fs_b, 200)] {
+            db.exec(&format!("INSERT INTO Job (Job, Name, Type, Level, ClientId, JobStatus, SchedTime, StartTime, EndTime, \
+                RealEndTime, JobTDate, JobFiles, PoolId, FileSetId, PurgedFiles) VALUES ('protect-{name}', 'protect-old-name', \
+                'B', '{level}', {client}, '{status}', '{s}', '{s}', '{e}', '{e}', {t}, 3, {pool}, {fileset}, 0)",
+                s = at(days), e = bstrutime(now - days * day + 3600), t = now - days * day + 3600)).unwrap();
+            let id = one(&format!("SELECT JobId FROM Job WHERE Job='protect-{name}'"));
+            for f in 0..3 {
+                db.exec(&format!("INSERT INTO File (JobId, PathId, Name, LStat, MD5, FileIndex) VALUES ({id}, {path}, 'f{f}', 'x', '0', {})", f + 1)).unwrap();
+            }
+            ids.push(id.parse::<u32>().unwrap());
+        }
+        let [j1, j2, j3, j4, j5, j6] = ids[..] else { panic!() };
+        for (volume, jobs) in [("Protect-0001", vec![j3]), ("Protect-0002", vec![j1, j2])] {
+            db.exec(&format!("DELETE FROM Media WHERE VolumeName='{volume}'")).unwrap();
+            db.exec(&format!("INSERT INTO Media (VolumeName, MediaType, VolStatus, PoolId, VolRetention, Recycle, Enabled, \
+                FirstWritten, LastWritten, VolJobs) VALUES ('{volume}', 'File', 'Full', {pool}, {day}, 1, 1, '{}', '{}', {})",
+                at(400), at(290), jobs.len())).unwrap();
+            let media = one(&format!("SELECT MediaId FROM Media WHERE VolumeName='{volume}'"));
+            for job in jobs {
+                db.exec(&format!("INSERT INTO JobMedia (JobId, MediaId, FirstIndex, LastIndex) VALUES ({job}, {media}, 1, 3)")).unwrap();
+            }
+        }
+        let counts = |label: &str| {
+            let jobs = one(&format!("SELECT COUNT(*) FROM Job WHERE ClientId={client}"));
+            let files = one(&format!("SELECT COUNT(*) FROM File JOIN Job USING (JobId) WHERE ClientId={client}"));
+            let purged = one(&format!("SELECT COUNT(*) FROM Job WHERE ClientId={client} AND PurgedFiles=1"));
+            println!("{label}: jobs={jobs} files={files} purgedfiles={purged}");
+            (jobs.parse::<u32>().unwrap(), files.parse::<u32>().unwrap())
+        };
+        let ctx = ctx();
+        let retention = 30 * day as u64;
+        assert_eq!(counts("before"), (6, 18));
+
+        // a catalog error prunes nothing
+        let mut ua = Ua::new(&ctx);
+        prune_jobs_of(&mut ua, &FailingChains(db), "protect-fd", None, retention, 0);
+        prune_files_of(&mut ua, &FailingChains(db), "protect-fd", None, retention, 0);
+        print!("{}", output(&ua.finish(true)));
+        assert_eq!(counts("after catalog error"), (6, 18));
+
+        // prune files: the latest chain (j3 Full of FileSetId a, j4/j5 of b) keeps its File records
+        let mut ua = Ua::new(&ctx);
+        prune_files_of(&mut ua, db, "protect-fd", None, retention, 0);
+        print!("{}", output(&ua.finish(true)));
+        assert_eq!(counts("after prune files"), (6, 9));
+        assert_eq!(one(&format!("SELECT COUNT(*) FROM File WHERE JobId IN ({j3},{j4},{j5})")), "9");
+        assert_eq!(one(&format!("SELECT COUNT(*) FROM Job WHERE JobId IN ({j3},{j4},{j5}) AND PurgedFiles=0")), "3");
+
+        // prune jobs: the older Full chain and the failed Full go, the latest chain of the renamed job stays
+        let mut ua = Ua::new(&ctx);
+        prune_jobs_of(&mut ua, db, "protect-fd", None, retention, 0);
+        let out = output(&ua.finish(true));
+        print!("{out}");
+        assert_eq!(counts("after prune jobs"), (3, 9));
+        let left: Vec<String> = column0(db, &format!("SELECT JobId FROM Job WHERE ClientId={client} ORDER BY JobId")).unwrap();
+        assert_eq!(left, [j3, j4, j5].map(|i| i.to_string()));
+        assert!(out.contains(&format!("(JobIds {j3},{j4},{j5})")), "{out}");
+        let _ = (j1, j2, j6);
+
+        // volumes: the one with the latest Full is neither pruned nor purged, the other one is purged
+        for (volume, expect) in [("Protect-0001", "Full"), ("Protect-0002", "Purged")] {
+            let mut v = get_volume_by_name(db, volume).unwrap();
+            let mut ua = Ua::new(&ctx);
+            prune_volume(&mut ua, db, &mut v);
+            purge_jobs_from_volume(&mut ua, &crate::session::parse_cli_command(&format!("purge volume={volume} yes")),
+                db, &mut v, true);
+            print!("{}", output(&ua.finish(true)));
+            assert_eq!(one(&format!("SELECT VolStatus FROM Media WHERE VolumeName='{volume}'")), expect);
+        }
+        assert_eq!(one(&format!("SELECT COUNT(*) FROM JobMedia WHERE JobId={j3}")), "1");
     }
 }
