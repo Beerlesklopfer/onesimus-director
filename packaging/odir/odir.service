@@ -25,6 +25,11 @@ SuccessExitStatus=0 15
 ExecReload=/usr/sbin/odir -t -c /etc/bareos/bareos-dir.d
 ExecReload=/bin/kill -HUP $MAINPID
 LimitNOFILE=65536
+# Seconds a job without "Max Wait Time" waits for a volume before it is
+# cancelled (default 600, Onesimus decision C-085). Change it with a drop-in,
+# e.g. "systemctl edit odir":
+#   [Service]
+#   Environment=ONESIMUS_DEFAULT_MEDIA_WAIT=3600
 Restart=on-failure
 RestartSec=30
 # Don't restart on wrong arguments (41) or configuration errors (42).

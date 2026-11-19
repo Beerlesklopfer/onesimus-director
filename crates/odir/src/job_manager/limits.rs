@@ -141,8 +141,12 @@ fn wants_reschedule(l: &JobLimits, count: u32, status: char, level: char) -> boo
 /// for a volume before the watchdog cancels it. The original has no limit.
 pub const DEFAULT_MEDIA_WAIT: i64 = 600;
 
-/// [`DEFAULT_MEDIA_WAIT`], or for tests on private daemons the seconds in
-/// `ONESIMUS_DEFAULT_MEDIA_WAIT` (read once; not meant for production).
+/// [`DEFAULT_MEDIA_WAIT`], or the seconds in the environment variable
+/// `ONESIMUS_DEFAULT_MEDIA_WAIT` (a positive integer, read once at start;
+/// other values keep the default). This is the supported way to change the
+/// wait (J-12, user decision 2026-11-19): a new directive would make the
+/// configuration unreadable for bareos-dir. A job's "Max Wait Time" still
+/// takes precedence. Set it with a systemd drop-in, see odir.service.
 fn default_media_wait() -> i64 {
     static VALUE: std::sync::OnceLock<i64> = std::sync::OnceLock::new();
     *VALUE.get_or_init(|| std::env::var("ONESIMUS_DEFAULT_MEDIA_WAIT").ok()

@@ -1,5 +1,10 @@
 onesimus (25.1.2+onesimus.0.2.0-2) UNRELEASED; urgency=medium
 
+  * odir: the wait for a volume of a job without "Max Wait Time" (default
+    600 s, C-085) is set with the environment variable
+    ONESIMUS_DEFAULT_MEDIA_WAIT, e.g. in a systemd drop-in (J-12); no new
+    directive, so bareos-dir can still read the configuration.
+
   * odir: a missing or unreadable configuration ends the start with exit
     42 (J-6, T-14); before, an empty Director with the password "default"
     listened on every interface.
