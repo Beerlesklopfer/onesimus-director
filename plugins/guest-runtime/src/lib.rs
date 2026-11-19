@@ -13,32 +13,47 @@
 #![no_std]
 
 pub mod heap {
-    //! A bump allocator over linear memory. The host gives every job its own
-    //! instance and memory limit, so memory is reclaimed when the job ends;
-    //! only the most recent allocation is ever freed in place.
+    //! A size-class allocator over linear memory: every block is a power of
+    //! two (at least 16 bytes, 16-byte aligned) and a freed block goes on the
+    //! free list of its class for the next allocation of that class. A
+    //! streaming plugin thus reuses the same few blocks for every chunk
+    //! instead of growing until the memory limit (a plain bump allocator
+    //! frees only the most recent block, and chunk buffers are freed out of
+    //! order). Blocks are never merged; the host gives every job its own
+    //! instance, so all memory is reclaimed when the job ends. Alignments
+    //! above 16 come from the bump region and are not reused.
     use core::alloc::{GlobalAlloc, Layout};
     use core::cell::Cell;
 
-    pub struct Bump {
+    const PAGE: usize = 65536;
+    const MIN_SHIFT: u32 = 4;
+    const CLASSES: usize = 28;
+
+    pub struct Heap {
         next: Cell<usize>,
         end: Cell<usize>,
-        last: Cell<usize>,
+        free: [Cell<usize>; CLASSES],
     }
     // SAFETY: the component runs single-threaded.
-    unsafe impl Sync for Bump {}
+    unsafe impl Sync for Heap {}
 
-    const PAGE: usize = 65536;
+    /// The class of a block for `size` bytes, None when too large.
+    fn class(size: usize) -> Option<usize> {
+        let shift = size.max(1 << MIN_SHIFT).next_power_of_two().trailing_zeros();
+        let c = (shift - MIN_SHIFT) as usize;
+        (c < CLASSES).then_some(c)
+    }
 
-    unsafe impl GlobalAlloc for Bump {
-        unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
-            let align = layout.align().max(8);
+    impl Heap {
+        /// `size` bytes at `align` from the end of the used region.
+        fn bump(&self, size: usize, align: usize) -> *mut u8 {
             if self.next.get() == 0 {
                 let pages = core::arch::wasm32::memory_size(0);
                 self.next.set(pages * PAGE);
                 self.end.set(pages * PAGE);
             }
             let start = (self.next.get() + align - 1) & !(align - 1);
-            let Some(end) = start.checked_add(layout.size()) else { return core::ptr::null_mut() };
+            let Some(end) = start.checked_add(size) else { return core::ptr::null_mut() };
             if end > self.end.get() {
                 let need = (end - self.end.get()).div_ceil(PAGE);
                 if core::arch::wasm32::memory_grow(0, need) == usize::MAX {
@@ -46,19 +61,57 @@ pub mod heap {
                 }
                 self.end.set(self.end.get() + need * PAGE);
             }
-            self.last.set(start);
             self.next.set(end);
             start as *mut u8
         }
-        unsafe fn dealloc(&self, ptr: *mut u8, _layout: Layout) {
-            if ptr as usize == self.last.get() {
-                self.next.set(self.last.get());
+    }
+
+    unsafe impl GlobalAlloc for Heap {
+        unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
+            if layout.align() > 16 {
+                return self.bump(layout.size(), layout.align());
+            }
+            let Some(c) = class(layout.size()) else { return core::ptr::null_mut() };
+            let head = self.free[c].get();
+            if head != 0 {
+                // SAFETY: a freed block of this class holds the next free block.
+                self.free[c].set(unsafe { *(head as *const usize) });
+                return head as *mut u8;
+            }
+            self.bump(1 << (c as u32 + MIN_SHIFT), 16)
+        }
+        unsafe fn dealloc(&self, ptr: *mut u8, layout: Layout) {
+            if layout.align() > 16 || ptr.is_null() {
+                return;
+            }
+            if let Some(c) = class(layout.size()) {
+                // SAFETY: the block is ours, at least 16 bytes and 16-byte aligned.
+                unsafe { *(ptr as *mut usize) = self.free[c].get() };
+                self.free[c].set(ptr as usize);
+            }
+        }
+        unsafe fn realloc(&self, ptr: *mut u8, layout: Layout, new_size: usize) -> *mut u8 {
+            if layout.align() <= 16 && class(layout.size()).is_some() && class(layout.size()) == class(new_size) {
+                return ptr;
+            }
+            // SAFETY: as GlobalAlloc::realloc requires.
+            unsafe {
+                let new = self.alloc(Layout::from_size_align_unchecked(new_size, layout.align()));
+                if !new.is_null() {
+                    core::ptr::copy_nonoverlapping(ptr, new, layout.size().min(new_size));
+                    self.dealloc(ptr, layout);
+                }
+                new
             }
         }
     }
 
     #[global_allocator]
-    pub static HEAP: Bump = Bump { next: Cell::new(0), end: Cell::new(0), last: Cell::new(0) };
+    pub static HEAP: Heap = Heap {
+        next: Cell::new(0),
+        end: Cell::new(0),
+        free: [const { Cell::new(0) }; CLASSES],
+    };
 }
 
 /// memcmp/bcmp: wasi-libc is not linked into a `no_std` component, and the
