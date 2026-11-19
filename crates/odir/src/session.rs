@@ -340,6 +340,8 @@ pub fn handle_console_session_with<S: Read + Write>(
 
     // Cleanup
     session_mgr.remove_session(mgr_session_id);
+    // The console's JCR goes away: CloseMsg(nullptr) (lib/jcr.cc:373)
+    crate::mail::close_daemon();
     info!("session {session_id} ({console_name}) ended");
 }
 

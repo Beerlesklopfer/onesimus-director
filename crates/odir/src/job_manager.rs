@@ -386,6 +386,8 @@ impl JobManager {
             jcr: JcrState { priority: start.priority, allow_mixed_priority, sched_time: start.sched_time,
                 params: Some(start.params), ..Default::default() },
         });
+        // The job's codes for its operator messages (mail.rs).
+        if let Some(job) = self.jobs.last() { crate::mail::register_job(self.config.as_ref(), &script_job(job)); }
         // StartServer(): a server thread started for this job runs the
         // jobs already in the ready queue at once (jobq.cc).
         for id in &self.ready { self.ready_at.remove(id); }
@@ -813,7 +815,7 @@ impl JobManager {
                         job.handle.send_message(&PipeMessage::RunScriptsDone { status: outcome.status as i32,
                             errors: outcome.errors, client_commands, run_before_now });
                     }
-                    ScriptRunKind::After { phase, status } => finish_job(job, &self.bus, phase, status),
+                    ScriptRunKind::After { phase, status } => finish_job(job, &self.bus, self.config.as_ref(), phase, status),
                     ScriptRunKind::BeforeInternal { kind } => {
                         if let Some(params) = job.jcr.params.clone() {
                             run_internal_job(job, kind, &params, outcome, &self.bus, &self.config, &self.catalog, &mut children);
@@ -1338,7 +1340,9 @@ fn run_internal_job(job: &mut DirJob, kind: crate::internal_jobs::Kind, params: 
 }
 
 /// The job is complete: `wait` and the queue see it ended.
-fn finish_job(job: &mut DirJob, bus: &MessageBus, phase: DirJobPhase, status: &str) {
+fn finish_job(job: &mut DirJob, bus: &MessageBus, config: Option<&SharedConfig>, phase: DirJobPhase, status: &str) {
+    // JcrCleanup(): CloseMsg(jcr), CloseMsg(nullptr) (lib/jcr.cc:368, 373)
+    crate::mail::close_job(config, &script_job(job));
     job.phase = phase;
     job.completed_at = Some(std::time::Instant::now());
     bus.post(BusMessage::JobStatus { job_id: job.job_id, job_name: job.job_name.clone(), status: status.into(), timestamp: now_unix() });
@@ -1359,7 +1363,7 @@ fn start_after_scripts(job: &mut DirJob, host: &crate::runscript::Host, bus: &Ar
     };
     match spawned {
         Some(handle) => job.jcr.script_run = Some(ScriptRun { handle, kind: ScriptRunKind::After { phase, status } }),
-        None => finish_job(job, bus, phase, status),
+        None => finish_job(job, bus, config, phase, status),
     }
 }
 

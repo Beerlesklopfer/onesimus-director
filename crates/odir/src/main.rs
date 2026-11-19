@@ -40,6 +40,7 @@ mod kill;
 mod listen;
 mod localtime;
 mod logging;
+mod mail;
 mod mdns;
 mod ndmp;
 mod ovfs;
@@ -559,6 +560,8 @@ fn main() {
             error!("Thread {name} panicked: {e:?}");
         }
     }
+    // TermMsg(): the daemon's collected mail (lib/message.cc:487)
+    mail::shutdown();
 
     info!("Onesimus Director stopped");
 }

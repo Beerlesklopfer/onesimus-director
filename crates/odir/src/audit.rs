@@ -1,5 +1,6 @@
 //! Console auditing (dird/ua_audit.cc) and the daemon message delivery it
-//! needs (lib/message.cc e_msg/DispatchMessage for `file`/`append`).
+//! needs (lib/message.cc e_msg/DispatchMessage; mail and operator in
+//! `mail.rs`).
 //!
 //! With `Auditing = yes` in the Director resource, every audited console
 //! command and every audited ACL failure becomes an M_AUDIT message, routed
@@ -202,6 +203,8 @@ pub(crate) fn daemon_messages(config: &DirectorConfig) -> Option<&ConfResource> 
 
 /// The Messages resource `name`.
 pub(crate) fn messages_resource<'a>(config: &'a DirectorConfig, name: &str) -> Option<&'a ConfResource> {
+    // my_name for %d of mail and operator commands without a job
+    crate::mail::set_director(&config.director.name);
     config.raw.iter()
         .find(|r| r.norm_type() == "messages" && r.name().is_some_and(|n| n.eq_ignore_ascii_case(name)))
 }
@@ -210,9 +213,12 @@ pub(crate) fn messages_resource<'a>(config: &'a DirectorConfig, name: &str) -> O
 /// that want message type `code` (lib/message.h M_*). `mtime` 0 is now, 1
 /// is now without the date prefix. Served destinations: `console` (the
 /// console message queue), `file`, `append` (date prefix, then the message)
-/// and `catalog` (a Log row through DirDbLogInsert, only with a JCR that
-/// has a catalog: `job_id`). Mail, operator, syslog and the std streams
-/// are not served.
+/// `catalog` (a Log row through DirDbLogInsert, only with a JCR that
+/// has a catalog: `job_id`), `mail`, `mailonerror` and `mailonsuccess`
+/// (collected for the job `job_id`, None or 0: the daemon, and sent when
+/// it ends, message.cc:780-808) and `operator` (sent at once,
+/// message.cc:760-779), see `mail.rs`. Syslog and the std streams are not
+/// served.
 pub(crate) fn dispatch(res: &ConfResource, code: u32, mtime: i64, msg: &str, job_id: Option<u32>) {
     let (mtime, dt_conversion) = match mtime {
         0 => (now(), true),
@@ -238,6 +244,14 @@ pub(crate) fn dispatch(res: &ConfResource, code: u32, mtime: i64, msg: &str, job
                         tracing::warn!("Msg delivery error: Unable to store data in database.");
                     }
                 }
+                continue;
+            }
+            "operator" => {
+                crate::mail::operator(res, &dest.where_, &format!("{dt}{msg}"), job_id);
+                continue;
+            }
+            "mail" | "mailonerror" | "mailonsuccess" => {
+                crate::mail::collect(res, dest.code, &dest.where_, &format!("{dt}{msg}"), job_id);
                 continue;
             }
             "file" | "append" => {}

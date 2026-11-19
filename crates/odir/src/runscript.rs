@@ -301,7 +301,7 @@ const EXECVP_ERRORS: [i32; 9] = [libc::EACCES, libc::ENOEXEC, libc::EFAULT, libc
     libc::ENAMETOOLONG, libc::ENOMEM, libc::ETXTBSY, libc::ENOENT];
 
 /// CloseBpipe() status, as (code, BErrNo::bstrerror text).
-fn exit_error(code: i32, signal: bool) -> (i32, String) {
+pub(crate) fn exit_error(code: i32, signal: bool) -> (i32, String) {
     if signal {
         return (code, format!("Child died from signal {code}: {}", signal_name(code)));
     }
