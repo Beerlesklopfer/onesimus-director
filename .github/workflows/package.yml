@@ -1,5 +1,6 @@
 # Tests und Debian-Pakete.
-#   test    – cargo test der Workspace-Crates (Director, Konsole, Konfiguration, FD)
+#   test    – cargo test der Workspace-Crates (Director, Konsole, Konfiguration, FD,
+#             BNET-Protokoll, Katalog-ORM)
 #   package – nur wenn test grün ist: cargo-deb auf Debian 13 (trixie),
 #             Pakete odir, ofd und oconsole als Artefakt; bei einem Tag v*
 #             zusätzlich an ein GitHub-Release gehängt.
@@ -62,6 +63,7 @@ jobs:
         run: |
           cargo test --locked \
             -p odir -p oconsole -p bareos-config -p ofd -p onesimus-plugins \
+            -p bareos-bnet -p bareos-orm \
             --no-default-features --features oconsole/mcp-production
 
       # Entwicklungs-Build der typisierten gRPC-API (S-35): nur Tests, die
