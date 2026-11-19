@@ -116,7 +116,7 @@ zu einem Planfehler; kein stilles Auslassen oder Wechsel des Sicherungsverfahren
 | Quadlet | Quelldateien, Includes, Drop-ins und freigegebene Abhängigkeiten. | Zuerst gestaged; generierte Services ersetzen die Quellen nicht. Keine automatische Aktivierung. |
 | Named Volumes | Daten und zertifiziertes Metadatenprofil unter passendem Usernamespace. | Neu angelegtes leeres Stagingvolume; keine Inhaltsvermischung. |
 | Bind Mounts | Eigene autorisierte FD-Dateisicherung. | Freigegebene Zielpfadzuordnung, kein automatischer Zugriff auf Inspect-Pfade. |
-| Netzwerke / Secrets | Deklarative Abhängigkeiten; Secrets standardmäßig als Wiederbereitstellungsreferenz. | Erlaubte Optionen, separate Bereitstellung; keine Secrets in Logs/Katalog. |
+| Netzwerke / Secrets | Netzwerke als Inspect-Daten (Treiber, Subnetze, Gateways, DNS, Optionen, Labels) und die Netzwerkzuordnung je Container; `.network`-Quadlet-Dateien mit den Quadlet-Quellen. Secrets standardmäßig als Wiederbereitstellungsreferenz. | Erlaubte Optionen, separate Bereitstellung; keine Secrets in Logs/Katalog. |
 | Writable Layer | MVP-Ausschluss ausdrücklich manifestieren. | Vollständiges Restoreprofil bei relevanten ungesicherten Änderungen ablehnen. |
 
 Image-save und Container-export sind keine austauschbaren Verfahren.
@@ -147,6 +147,7 @@ Plugin = "podman:user=root:quadlet=web-*.container:consistency=stop"
 | `exclude` | nein | Namen oder Globs | – | Wird von `pods`/`containers`/`quadlet` abgezogen. |
 | `volumes` | nein | `yes`, `no` | `yes` | Named Volumes der Auswahl (zertifiziertes Profil). Bind Mounts nie; die sichert der FD als Dateien (eigene Include-Zeile). |
 | `images` | nein | `archive`, `reference` | `reference` | `reference`: Name, Tag und Digest der verwendeten Images stehen in den Inspect-Daten; der Restore holt sie aus der Registry. `archive`: zusätzlich `podman save` der Images, für einen Restore ohne Registry. |
+| `networks` | nein | `yes`, `no` | `yes` | Die von der Auswahl verwendeten Podman-Netzwerke als Inspect-Daten (`podman network inspect`): Name, ID, Treiber, Subnetze, Gateways, IP-Bereiche, IPv6, DNS, interne/isolierte Netze, Optionen und Labels. Dazu je Container seine Netzwerkzuordnung (statische IP/MAC, Aliase, Portfreigaben) aus dessen Inspect-Daten. Das Standardnetz `podman` nur als Referenz. |
 | `quadlet_sources` | nein | `yes`, `no` | `yes` | Quadlet-Quelldateien, Includes und Drop-ins der Auswahl. |
 | `consistency` | nein | `stop`, `crash` | `stop` | `stop`: autorisierter Stop der Writergruppe mit Journal, Sicherung, Wiederaufnahme. `crash`: Kopie im laufenden Betrieb, ausdrücklich abgeschwächtes Profil, im Manifest vermerkt. |
 | `secrets` | nein | `reference` | `reference` | Secrets nur als Verweis zur Wiederbereitstellung, nie ihr Inhalt. Ein anderer Wert ist im MVP nicht zulässig. |
@@ -179,9 +180,12 @@ Restore-Parameter (Restore-Job, `pluginoptions=`):
 | --- | --- | --- | --- |
 | `restore_mode` | `files`, `stage` | `files` | `files`: Archive als Dateien unter `Where` (ohne Plugin-Code). `stage`: über das Plugin in neue, gestoppte Ressourcen (Abschnitt Restore). |
 | `target_user` | Kontoname, UID | Original-Konto | Zielkonto für `stage`; muss freigegeben sein. |
-| `suffix` | Text | `-restored` | Namenszusatz der neuen Pods, Container und Volumes, damit nichts Bestehendes berührt wird. |
+| `suffix` | Text | `-restored` | Namenszusatz der neuen Pods, Container, Volumes und Netzwerke, damit nichts Bestehendes berührt wird. |
+| `networks` | `create`, `existing` | `create` | `create`: fehlende Netzwerke aus den Inspect-Daten neu anlegen (mit `suffix`); ein gleichnamiges vorhandenes Netz mit abweichendem Subnetz ist ein Planfehler. `existing`: nur vorhandene Netze gleichen Namens verwenden, fehlende sind ein Planfehler. |
 
-Offen: ob `consistency=stop` je Pod oder für die ganze Auswahl gemeinsam
+Offen: ob beim Restore mit `stage` überlappende Subnetze eines neu angelegten
+Netzes mit vorhandenen Netzen des Zielhosts geprüft und abgelehnt werden (Vorschlag:
+ja, Planfehler). Ob `consistency=stop` je Pod oder für die ganze Auswahl gemeinsam
 stoppt (Writergruppe über Pods hinweg), und ob `images=archive` gemeinsam
 genutzte Images je Job nur einmal sichert.
 
