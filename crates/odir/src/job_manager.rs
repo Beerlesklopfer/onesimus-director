@@ -1109,6 +1109,22 @@ impl JobManager {
                 // backup.cc:735 jcr->JobErrors += JobErrors: the FD's errors
                 // and the Director's own (J-1).
                 ending.errors = ending.errors.saturating_add(dir_errors as i32);
+                // WaitForJobTermination() of a restore or verify job
+                // (backup.cc:752-757): with the Director and the FD at
+                // JS_Terminated the SD's end status is the job's; a lost SD
+                // connection is JS_ErrorTerminated (msgchan.cc:517). A native
+                // backup does this in backup_worker.rs finish_wait(). Only
+                // final error states are taken: an SD that never reported one
+                // ('\0', 'R') leaves the status alone, unlike Bareos, which
+                // would write that code as TermCode. J-8.
+                if job.jcr.backup_end.is_none() && job.observed_status == 'T' && status_priority(job.jcr.sd_status) > 0 {
+                    job.observed_status = merge_status(job.observed_status, job.jcr.sd_status);
+                }
+                // restore.cc:435-441: a file count mismatch is JS_Warnings,
+                // before UpdateJobEnd() (restore.cc:476). J-8.
+                if let Some(report) = &job.jcr.report {
+                    job.observed_status = crate::job_messages::restore_term_code(report, ending.files.max(0) as u64, job.observed_status);
+                }
                 // NativeBackupCleanup: terminated with errors is JS_Warnings
                 // (AdminCleanup keeps JS_Terminated: the errors of its run
                 // scripts only count, S-07).

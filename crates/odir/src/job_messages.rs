@@ -554,17 +554,22 @@ pub fn backup_summary(director: &str, report: &JobReport, outcome: &JobOutcome, 
     messages
 }
 
+/// restore.cc:435-441 NativeRestoreCleanup(): fewer (or more) files restored
+/// than expected turn JS_Terminated into JS_Warnings, before UpdateJobEnd()
+/// writes the status to the catalog (restore.cc:476). J-8.
+pub fn restore_term_code(report: &JobReport, files: u64, status: char) -> char {
+    let mismatch = report.kind == ReportKind::Restore && report.expected_files.is_some_and(|expected| expected != files);
+    if mismatch && status == 'T' { 'W' } else { status }
+}
+
 /// NativeRestoreCleanup() and GenerateRestoreSummary() (restore.cc:419-602)
 /// for a native restore. The daemons' secure erase commands are "*None*"
 /// once they were reached; one never reached prints its NULL command.
 pub fn restore_summary(director: &str, report: &JobReport, outcome: &JobOutcome, facts: &CatalogFacts) -> Vec<JobMsg> {
     let mut messages = Vec::new();
-    let mut status = outcome.status;
+    let status = restore_term_code(report, outcome.files, outcome.status);
     if let Some(expected) = report.expected_files.filter(|expected| *expected != outcome.files) {
         messages.push((MsgType::Warning, format!("File count mismatch: expected={expected} , restored={}\n", outcome.files)));
-        if status == 'T' {
-            status = 'W';
-        }
     }
     let (msg_type, term_msg) = restore_term_msg(status);
     let run_time = outcome.end_time - report.start_time;

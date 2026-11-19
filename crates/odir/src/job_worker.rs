@@ -944,7 +944,17 @@ pub(crate) fn sd_catrec_loop(
             }
             Ok(BnetMessage::Signal(BnetSignal::Terminate)) => break,
             Ok(BnetMessage::Signal(sig)) => debug!("Worker {job_id} SD signal: {sig:?}"),
-            Err(e) => { debug!("Worker {job_id} SD recv: {e}"); break; }
+            Err(e) => {
+                debug!("Worker {job_id} SD recv: {e}");
+                // msgchan.cc:509-517: a lost SD connection is FATAL and the
+                // SD status JS_ErrorTerminated, so a restore cannot end "OK"
+                // (a canceled job leaves the loop first, msgchan.cc:482). J-8.
+                if !WORKER_CANCEL.load(Ordering::SeqCst) {
+                    worker_jmsg(job_id, M_FATAL, "Director's comm line to SD dropped.\n".into());
+                    send_jmsg(PipeMessage::JobStatus { job_id, status: b'E' as i32 });
+                }
+                break;
+            }
         }
     }
     let _ = sd.send_signal(BnetSignal::Terminate);
@@ -1600,6 +1610,42 @@ mod wait_protocol_tests {
         // UpdateDB() reports the failed statement (sql.cc:274, M_ERROR), then
         // UpdateAttribute() "Catalog error updating file digest" (M_ERROR).
         assert_eq!(rx.try_recv().unwrap(), ("W".to_string(), 2));
+    }
+    /// J-8: the end status of a restore in the catalog (UpdateJobEnd).
+    fn restore_end_status(messages: &[PipeMessage], expected_files: Option<u64>) -> String {
+        let (tx, rx) = std::sync::mpsc::channel();
+        let (handle, mut release) = held_worker(messages);
+        let mut manager = crate::job_manager::JobManager::new(std::sync::Arc::new(crate::message_bus::MessageBus::new(10)), None,
+            Some(failing_catalog("nothing fails", tx)));
+        manager.add_job(42, "RestoreFiles", handle);
+        manager.set_job_report(42, crate::job_messages::JobReport { kind: crate::job_messages::ReportKind::Restore,
+            job: "RestoreFiles.001".into(), expected_files, ..Default::default() });
+        until(&mut manager, |manager| manager.get_job(42).unwrap().phase == crate::job_manager::DirJobPhase::Finishing);
+        writeln!(release, "exit").unwrap();
+        until(&mut manager, |manager| manager.active_count() == 0);
+        rx.try_recv().unwrap().0
+    }
+    fn restore_end(files: i64) -> PipeMessage {
+        PipeMessage::JobEnd { job_id: 42, term_code: b'T' as i32, files, bytes: 10, errors: 0, vol_session_id: None, vol_session_time: None }
+    }
+    /// J-8: WaitForJobTermination() (backup.cc:752-757): with the FD at
+    /// JS_Terminated the SD's end status is the restore's.
+    #[test]
+    fn restore_takes_the_storage_daemon_end_status() {
+        let sd = |status: u8| PipeMessage::JobStatus { job_id: 42, status: status as i32 };
+        assert_eq!(restore_end_status(&[sd(b'R'), sd(b'T'), restore_end(5)], Some(5)), "T");
+        assert_eq!(restore_end_status(&[sd(b'R'), sd(b'E'), restore_end(5)], Some(5)), "E");
+        assert_eq!(restore_end_status(&[sd(b'A'), restore_end(5)], Some(5)), "A");
+        // No final status from the SD: the FD's.
+        assert_eq!(restore_end_status(&[sd(b'R'), restore_end(5)], Some(5)), "T");
+    }
+    /// J-8: restore.cc:435-441: a file count mismatch is JS_Warnings in the
+    /// catalog, not only in the report.
+    #[test]
+    fn restore_file_count_mismatch_is_warnings_in_the_catalog() {
+        assert_eq!(restore_end_status(&[restore_end(5)], Some(6)), "W");
+        assert_eq!(restore_end_status(&[restore_end(6)], Some(6)), "T");
+        assert_eq!(restore_end_status(&[restore_end(6)], None), "T");
     }
     #[test]
     fn consecutive_pipe_messages_survive_reader_buffering_and_eof() {
