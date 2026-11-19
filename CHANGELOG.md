@@ -1,5 +1,9 @@
 onesimus (25.1.2+onesimus.0.2.0-2) UNRELEASED; urgency=medium
 
+  * odir: a missing or unreadable configuration ends the start with exit
+    42 (J-6, T-14); before, an empty Director with the password "default"
+    listened on every interface.
+
   * odir: the TLS-PSK connection to a File or Storage daemon no longer
     checks a certificate the daemon presents (system CAs, host name
     "bareos"); the C++ Director does not without "TLS Verify Peer = yes".

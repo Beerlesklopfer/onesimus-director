@@ -287,8 +287,12 @@ fn main() {
             }
         }
     } else {
-        warn!("config file {} not found, using defaults", cli.config.display());
-        DirectorConfig::from_str("Director { Name = bareos-dir\n Port = 9101\n Password = default\n }").unwrap()
+        // bareos-dir ends when it cannot read its configuration. Before, odir
+        // started an empty Director with the password "default" on every
+        // interface (J-6, T-14), e.g. after /etc/bareos became unreadable.
+        error!("FATAL: configuration {} not found or not readable", cli.config.display());
+        eprintln!("configuration {} not found or not readable", cli.config.display());
+        std::process::exit(config_test::EXIT_CONFIG_ERROR)
     };
 
     for note in config_test::deprecated_notes(&config.raw) {
