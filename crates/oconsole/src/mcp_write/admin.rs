@@ -122,11 +122,17 @@ pub(super) fn tools() -> Vec<Value> {
                 "profile": s("profile (assign, unassign)"),
             }), &["action"], annotations(false, true, false)),
         tool("configure_update", "Change a configuration resource",
-            "Change directives of a resource in the running Director and its file (Onesimus 'configure update').",
+            "Change directives of a resource in its configuration file and reload the Director, through the \
+             Director's configuration CRUD (gRPC ReadResource/UpdateResource, BNET '.config'): only the given \
+             directives change, every other directive, comment and the indentation stay. Directive names as in \
+             Bareos (case and blanks do not matter, e.g. 'File Retention'); a missing directive is added. Directives \
+             of nested blocks (RunScript, Include …) are refused. Only for the types the Director offers with \
+             READ_RAW and UPDATE_RAW (odir: schedule, job, jobdefs, client); bareos-dir is refused. Returns the \
+             changed directives, the old and new sha256 and whether the Director reloaded.",
             json!({
                 "resource": e(CONFIGURE_TYPES, "resource type"),
                 "name": s("resource name"),
-                "directives": { "type": "object", "description": "directive -> new value",
+                "directives": { "type": "object", "description": "directive -> new value (booleans become yes/no)",
                     "additionalProperties": { "type": ["string", "number", "boolean"] } },
             }), &["resource", "name", "directives"], annotations(false, false, true)),
         tool("configure_delete", "Delete a configuration resource",
@@ -253,7 +259,12 @@ pub(super) fn plan(tool: &str, arguments: &Value) -> Option<Result<Plan, String>
         "bvfs_clear_cache" => |_| Ok(Plan::new(".bvfs_clear_cache yes".into())),
         "acl_modify" => acl_modify,
         "profile_modify" => profile_modify,
-        "configure_update" => |a| configure_change(a, "update"),
+        // Not executed as a console line (mcp_config.rs runs the CRUD); the
+        // plan checks the arguments and names the first BNET step.
+        "configure_update" => |a| {
+            let (resource, name, _) = crate::mcp_config::check_arguments(&Value::Object(a.map.clone()))?;
+            Ok(Plan::new(format!(".config read type={resource} {}", name_arg("name", &name)?)))
+        },
         "configure_delete" => |a| {
             a.confirmed()?;
             configure_change(a, "delete")
@@ -453,7 +464,7 @@ mod tests {
         assert_eq!(line("acl_modify", json!({"action":"delete","console":"c","type":"JobAcl"})), ".acl delete console=c jobacl");
         assert_eq!(line("acl_modify", json!({"action":"copy","from":"a","to":"b"})), ".acl copy from=a to=b");
         assert_eq!(line("profile_modify", json!({"action":"assign","console":"c","profile":"p"})), ".profile assign console=c profile=p");
-        assert_eq!(line("configure_update", json!({"resource":"client","name":"fd","directives":{"address":"h"}})), "configure update client=fd address=\"h\"");
+        assert_eq!(line("configure_update", json!({"resource":"client","name":"fd","directives":{"address":"h"}})), ".config read type=client name=fd");
         assert_eq!(line("configure_delete", json!({"resource":"client","name":"fd","confirm":true})), "configure delete client=fd yes");
         assert_eq!(line("use_catalog", json!({"catalog":"MyCatalog"})), "use catalog=MyCatalog");
         assert_eq!(line("setdevice", json!({"storage":"S","device":"D","autoselect":false})), "setdevice storage=S device=D autoselect=no");

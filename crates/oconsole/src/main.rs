@@ -20,6 +20,7 @@ mod mcp;
 mod mcp_read;
 mod mcp_mirror;
 mod mcp_write;
+mod mcp_config;
 mod mcp_tree;
 mod mcp_typed;
 #[cfg(test)]

@@ -441,8 +441,9 @@ pub fn request(tool: &str, arguments: &Value) -> Option<(&'static str, Value)> {
             let kind = r.str("resource")?.to_string();
             r.rename("name", &kind).done(if tool == "enable" { "Enable" } else { "Disable" })
         }
-        "configure_add" | "configure_update" | "configure_delete" => {
-            let rpc = match tool { "configure_add" => "ConfigureAdd", "configure_update" => "ConfigureUpdate", _ => "ConfigureDelete" };
+        // configure_update: mcp_config.rs (raw-text CRUD), never ConfigureUpdate (K-10)
+        "configure_add" | "configure_delete" => {
+            let rpc = if tool == "configure_add" { "ConfigureAdd" } else { "ConfigureDelete" };
             let mut r = r.rename("resource", "resource_type").copy(&["name"]);
             if tool == "configure_delete" {
                 r = r.set("yes", json!(true));
@@ -569,8 +570,8 @@ mod tests {
             let (input, _) = rpc_types(rpc).unwrap();
             (rpc, typed::message_to_json(&input, &bytes))
         };
-        let (rpc, req) = typed("configure_update", json!({"resource":"client","name":"fd","directives":{"address":"h","port":9102}}));
-        assert_eq!((rpc, req["name"].clone(), req["directives"]["port"].clone()), ("ConfigureUpdate", json!("fd"), json!("9102")));
+        // configure_update never takes ConfigureUpdate (K-10), see mcp_config.rs
+        assert!(request("configure_update", &json!({"resource":"client","name":"fd","directives":{"address":"h"}})).is_none());
         let (rpc, req) = typed("configure_delete", json!({"resource":"schedule","name":"s","confirm":true}));
         assert_eq!((rpc, req["yes"].clone()), ("ConfigureDelete", json!(true)));
         let (rpc, req) = typed("delete", json!({"kind":"storage","storage":"S","confirm":true}));

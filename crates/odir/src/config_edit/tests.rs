@@ -376,7 +376,8 @@ fn client_create_read_update_delete_keeps_every_directive() {
     let read = h.read(RType::Client, "laptop-fd");
     assert_eq!((read.status, read.text.as_str(), read.sha256.as_str()), (Status::Ok, CLIENT_TLS, created.sha256.as_str()));
     // only one value changes, every other byte (TLS, comments, `;`) stays
-    let changed = CLIENT_TLS.replace("File Retention = 30 days", "File Retention = 60 days");
+    // quoted like the MCP tool configure_update writes values with blanks
+    let changed = CLIENT_TLS.replace("File Retention = 30 days", "File Retention = \"60 days\"");
     let updated = h.update(RType::Client, "laptop-fd", &read.sha256, &changed);
     assert_eq!(updated.status, Status::Ok, "{updated:?}");
     assert_eq!(std::fs::read(&path).unwrap(), changed.as_bytes());

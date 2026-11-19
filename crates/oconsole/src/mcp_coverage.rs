@@ -29,6 +29,12 @@ pub const NOT_APPLICABLE: &[(&str, &str)] = &[
     ("Quit", "would end the MCP server's Director session"),
     ("Exit", "would end the MCP server's Director session"),
     ("DotQuit", "would end the MCP server's Director session"),
+    ("ConfigureUpdate", "rewrites the resource file with a few fields and loses directives (K-10); \
+        configure_update uses ReadResource/UpdateResource"),
+    ("CreateResource", "raw-text create is not an MCP tool yet (configure_add covers adding resources)"),
+    ("DeleteResource", "raw-text delete is not an MCP tool yet (configure_delete covers deleting resources)"),
+    ("ListResources", "not an MCP tool yet (show lists the configured resources)"),
+    ("RenameResource", "not implemented by the Director yet"),
 ];
 
 /// (RPC, tool, sample arguments, typed route); `false`: the tool always
@@ -166,7 +172,11 @@ pub const COVERAGE: &[(&str, &str, &str, bool)] = &[
     ("ConfigureAdd", "configure_add", r#"{"resource":"client","name":"x","directives":{"address":"h","password":"p"}}"#, true),
     ("ConfigureExport", "configure_export", r#"{"client":"fd"}"#, true),
     ("ConfigureDelete", "configure_delete", r#"{"resource":"client","name":"x","confirm":true}"#, true),
-    ("ConfigureUpdate", "configure_update", r#"{"resource":"client","name":"x","directives":{"address":"h"}}"#, true),
+    // configure_update edits the raw text through the configuration CRUD
+    // (mcp_config.rs: capabilities, read, update), not with a console line
+    ("GetConfigCapabilities", "configure_update", r#"{"resource":"client","name":"x","directives":{"address":"h"}}"#, false),
+    ("ReadResource", "configure_update", r#"{"resource":"client","name":"x","directives":{"address":"h"}}"#, false),
+    ("UpdateResource", "configure_update", r#"{"resource":"client","name":"x","directives":{"address":"h"}}"#, false),
     ("Reload", "reload", "{}", true),
     ("SetDebug", "setdebug", r#"{"level":0,"target":"dir"}"#, true),
     ("SetBandwidth", "setbandwidth", r#"{"limit":100,"client":"fd"}"#, true),

@@ -4680,7 +4680,7 @@
     {
       "name": "configure_update",
       "title": "Change a configuration resource",
-      "description": "Change directives of a resource in the running Director and its file (Onesimus 'configure update').",
+      "description": "Change directives of a resource in its configuration file and reload the Director, through the Director's configuration CRUD (gRPC ReadResource/UpdateResource, BNET '.config'): only the given directives change, every other directive, comment and the indentation stay. Directive names as in Bareos (case and blanks do not matter, e.g. 'File Retention'); a missing directive is added. Directives of nested blocks (RunScript, Include …) are refused. Only for the types the Director offers with READ_RAW and UPDATE_RAW (odir: schedule, job, jobdefs, client); bareos-dir is refused. Returns the changed directives, the old and new sha256 and whether the Director reloaded.",
       "inputSchema": {
         "type": "object",
         "properties": {
@@ -4709,7 +4709,7 @@
           },
           "directives": {
             "type": "object",
-            "description": "directive -> new value",
+            "description": "directive -> new value (booleans become yes/no)",
             "additionalProperties": {
               "type": [
                 "string",

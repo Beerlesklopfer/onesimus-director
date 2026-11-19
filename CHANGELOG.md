@@ -9,6 +9,14 @@ onesimus (25.1.2+onesimus.0.2.0-2) UNRELEASED; urgency=medium
     configuration CRUD over BNET (capabilities, list, read, create,
     update, delete; text as base64 in text64=), same core logic and lock
     as the gRPC RPCs; needs the Command ACL ".config" and "configure".
+  * oconsole: the MCP tool configure_update no longer runs "configure
+    update" (it rewrote a Client file with four fields and lost every
+    other directive, K-10). It reads the raw text (ReadResource over gRPC,
+    ".config read" over BNET), replaces only the given directives (names
+    compared like Bareos; last occurrence; comments, indentation and line
+    ends kept; missing ones added before the closing brace; nested blocks
+    refused) and writes it back with the sha256 (one retry on CONFLICT).
+    A Director without the configuration CRUD for the type is refused.
 
   * odir: secrets in FileSet plugin lines (password=, bind_pw= ...) are
     masked in FileSet.FileSetText and in "show fileset" (S-3). bareos-dir

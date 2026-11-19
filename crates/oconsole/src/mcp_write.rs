@@ -92,6 +92,12 @@ pub fn call<R: CommandRunner>(
             Ok(()) => run_plain(runner, command),
         });
     }
+    // configure_update: raw-text CRUD of the Director, never `configure update` (K-10)
+    if name == "configure_update" {
+        return Some(runner.lock()
+            .map_err(|_| (-32603, "Director runner unavailable".to_string()))
+            .map(|mut runner| crate::mcp_config::configure_update(&mut *runner, arguments)));
+    }
     let plan = plan(name, arguments)?;
     Some(
         runner

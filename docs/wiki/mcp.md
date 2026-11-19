@@ -27,7 +27,16 @@ Jedes Tool prüft zuerst seine Parameter und baut daraus die Konsolenzeile. Dann
 
 Über gRPC sind die Ergebnisse der Lese-Tools also typisierte Messages (z. B. `ListJobsResponse` mit `jobs[].jobstatus` als Enum `JOB_STATUS_TERMINATED`), über BNET das JSON-RPC-Objekt der Director-JSON-API. `"format": "text"` erzwingt bei Lese-Tools die Konsolenzeile.
 
-`configure_update`, `configure_delete`, `delete` mit `kind: storage` und `setbandwidth` (auch `limit: 0` und `all: true`) gehen über die typisierte RPC (S-38/S-39: der Entwicklungs-Director baut dafür die Zeilen, die seine Befehle annehmen; `SetBandwidth` hat ein optionales `limit`). `configure_update` kennt über die RPC nur die Direktiven, die `configure update` ändert (client: `address`, `port`, `password`; job: `newclient`, `newstorage`, `newpool`); andere lehnt der Director mit `INVALID_ARGUMENT` ab.
+`configure_delete`, `delete` mit `kind: storage` und `setbandwidth` (auch `limit: 0` und `all: true`) gehen über die typisierte RPC (S-38/S-39: der Entwicklungs-Director baut dafür die Zeilen, die seine Befehle annehmen; `SetBandwidth` hat ein optionales `limit`). 
+
+`configure_update` ändert Direktiven über das Konfigurations-CRUD des Directors ([CONFIG-CRUD-GRPC.md](../plans/CONFIG-CRUD-GRPC.md)), nicht mehr über `configure update` (das schreibt eine Client-Datei mit vier Feldern neu und verliert die übrigen Direktiven, K-10):
+
+1. Die Fähigkeiten der Verbindung entscheiden: über gRPC `GetConfigCapabilities`, über BNET `.config capabilities`. Bietet der Director den Typ nicht mit `READ_RAW` und `UPDATE_RAW` an (bareos-dir, älterer odir), verweigert das Werkzeug mit einer Meldung; einen Konsolenweg gibt es nicht mehr.
+2. `ReadResource` bzw. `.config read` liefert Rohtext und sha256.
+3. Nur die genannten Direktiven werden im Rohtext ersetzt: Namen wie in Bareos verglichen (Groß-/Kleinschreibung und Leerzeichen egal, `File Retention` = `fileretention`); ersetzt wird der Wert des letzten Vorkommens, Schlüssel, Einrückung, Kommentar und Zeilenende bleiben. Fehlt die Direktive, kommt eine Zeile vor die schließende Klammer der Ressource, eingerückt wie die letzte Direktive, mit dem Zeilenende der Datei. Werte mit Leerzeichen oder Sonderzeichen werden in Anführungszeichen gesetzt (`\` und `"` maskiert), Wahrheitswerte als `yes`/`no`. Verschachtelte Blöcke (RunScript, Include …) bleiben unangetastet; Direktiven darin lehnt das Werkzeug ab. `Name` ist nicht änderbar.
+4. `UpdateResource` bzw. `.config update` mit dem gelesenen sha256. Bei `CONFLICT` liest das Werkzeug einmal neu und versucht es erneut, danach meldet es den Fehler. `INVALID` kommt mit Datei, Zeile, Spalte und dem Text der Prüfung (`odir -t`) zurück.
+
+Ergebnis: die geänderten Direktiven (alt → neu, hinzugefügt), alter und neuer sha256, ob neu geladen wurde, und der Weg (`grpc`/`bnet`).
 
 ## Typisierte Lese-Tools
 
@@ -1803,7 +1812,7 @@ Module `oconsole/src/mcp_write.rs`, `mcp_write/admin.rs` (weitere Befehle) und `
 | `bvfs_update`, `bvfs_restore`, `bvfs_cleanup`, `bvfs_clear_cache` | `.bvfs_update [jobid=]`, `.bvfs_restore path= jobid= [fileid= dirid= hardlink=]`, `.bvfs_cleanup path=`, `.bvfs_clear_cache yes` | schreibend | – |
 | `acl_modify` | `.acl set\|delete console= <typ>acl=…`, `.acl clear console=`, `.acl copy from= to=` | destruktiv | – |
 | `profile_modify` | `.profile create\|set\|delete\|assign\|unassign …` | destruktiv | – |
-| `configure_update` | `configure update <typ>=<name> <direktive>="…" …` | idempotent | – |
+| `configure_update` | gRPC: `GetConfigCapabilities`, `ReadResource`, `UpdateResource`; BNET: `.config capabilities`, `.config read`, `.config update … text64=` (nie `configure update`, K-10) | idempotent | – |
 | `configure_delete` | `configure delete <typ>=<name> yes` | destruktiv | ja |
 | `use_catalog` | `use catalog=` | idempotent | – |
 | `setdevice` | `setdevice storage= device= [autoselect=yes\|no]` | idempotent | – |
