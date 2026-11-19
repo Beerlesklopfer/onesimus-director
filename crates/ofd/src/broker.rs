@@ -357,6 +357,7 @@ unsafe fn child_exec(exe: i32, sock: i32, null: i32, switch: bool, run_as: RunAs
 
 impl Broker {
     /// The broker's process id (also its process group).
+    #[cfg(test)]
     pub fn pid(&self) -> libc::pid_t {
         self.pid
     }

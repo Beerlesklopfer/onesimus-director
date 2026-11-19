@@ -49,14 +49,14 @@
 //! (`save_scan_file`), the online restore (applies `ownership.tsv`).
 
 use std::collections::HashMap;
-use std::ffi::{CString, OsStr};
+use std::ffi::CString;
 use std::fs::File;
 use std::os::fd::{AsRawFd, FromRawFd, OwnedFd};
 use std::os::unix::ffi::OsStrExt;
 use std::path::Path;
 use std::sync::{Arc, Mutex};
 
-use onesimus_podman_core::ownership::{self, Table};
+use onesimus_podman_core::ownership::Table;
 use onesimus_podman_core::sanitize::{self, AclEntry, Domain, Outcome, RawEntry, RawKind, Reason};
 use onesimus_proto_rs::onesimus::filed::plugin::v1 as pb;
 
@@ -255,10 +255,6 @@ pub struct VolumeScan {
     pub entries: Vec<Entry>,
     /// Rejected entries.
     pub rejected: Vec<Rejection>,
-    /// Rows with special bits (for the restore report).
-    pub special_rows: usize,
-    /// Rows with capabilities.
-    pub caps_rows: usize,
 }
 
 /// A fresh random reference.
@@ -510,7 +506,6 @@ pub fn scan_volume(graphroot: &OwnedFd, name: &str, domain: &Domain, domain_id: 
         max_entries,
     };
     w.visit(None, b"", Vec::new(), st)?;
-    let (special_rows, caps_rows) = (w.table.special_count(), w.table.caps_count());
     let tsv = w.table.render();
     let mut entries = std::mem::take(&mut w.entries);
     let rejected = std::mem::take(&mut w.rejected);
@@ -539,7 +534,7 @@ pub fn scan_volume(graphroot: &OwnedFd, name: &str, domain: &Domain, domain_id: 
         source_ref: new_ref().map_err(|e| e.to_string())?,
         path: [prefix, b"/ownership.tsv"].concat(),
     });
-    Ok(VolumeScan { data, entries, rejected, special_rows, caps_rows })
+    Ok(VolumeScan { data, entries, rejected })
 }
 
 /// What `backup.rs` gets for one reference.
@@ -638,21 +633,18 @@ impl ScanTable {
     }
 }
 
-/// The relative path of an entry as text (for messages).
-pub fn shown(rel: &[u8]) -> String {
-    if rel.is_empty() { ".".into() } else { OsStr::from_bytes(rel).to_string_lossy().into_owned() }
-}
-
-/// ownership.tsv parsing re-exported for the restore and tests.
-pub fn parse_ownership(bytes: &[u8]) -> Result<Vec<onesimus_podman_core::sanitize::OwnershipRow>, String> {
-    ownership::parse(bytes)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use onesimus_podman_core::idmap::IdMap;
+    use onesimus_podman_core::ownership;
+    use std::ffi::OsStr;
     use std::os::unix::fs::PermissionsExt;
+
+    /// The relative path of an entry as text (for messages).
+    fn shown(rel: &[u8]) -> String {
+        if rel.is_empty() { ".".into() } else { OsStr::from_bytes(rel).to_string_lossy().into_owned() }
+    }
 
     fn me() -> (u32, u32) {
         // SAFETY: getuid/getgid have no preconditions.
@@ -706,9 +698,9 @@ mod tests {
         let tsv = s.entries.last().unwrap();
         assert_eq!(tsv.path, b"/@podman/uid-1/volumes/v/ownership.tsv");
         let EntryKind::Ownership(bytes) = &tsv.kind else { panic!() };
-        let rows = parse_ownership(bytes).unwrap();
+        let rows = ownership::parse(bytes).unwrap();
         assert!(rows.iter().any(|r| r.relpath == b"sub/file" && r.mode == 0o4755 && r.ns_uid == 0), "{rows:?}");
-        assert_eq!(s.special_rows, 2, "both names of the setuid inode");
+        assert_eq!(rows.iter().filter(|r| r.mode & 0o7000 != 0).count(), 2, "both names of the setuid inode");
         std::fs::remove_dir_all(&g).unwrap();
     }
 

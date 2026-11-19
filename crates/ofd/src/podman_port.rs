@@ -455,7 +455,8 @@ pub fn broker_args(account: &AccountEntry) -> Vec<String> {
 /// uid, **outside** the broker's namespace (V-8): `PR_SET_NO_NEW_PRIVS`,
 /// an empty environment plus `XDG_RUNTIME_DIR`, stdin and stderr on
 /// /dev/null. As root `ofd` switches to the account first; otherwise only
-/// its own uid is possible.
+/// its own uid is possible. Used by the lifecycle (P2); proven in P0.
+#[allow(dead_code)]
 pub fn unit_show_as_account(uid: u32, gid: u32, runtime: &Path, units: &[String]) -> Result<Vec<u8>, String> {
     use std::os::unix::process::CommandExt;
     let argv = onesimus_podman_core::exec::Operation::UnitShow { user: true, units: units.to_vec() }.argv(&Storage::default())?;

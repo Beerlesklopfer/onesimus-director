@@ -12,7 +12,7 @@
 //! environment plus a fixed `PATH` and `LANG=C`, stdin and stderr on
 //! `/dev/null`, its own process group, `RLIMIT_CORE` 0, programs checked to
 //! be root-owned and not writable. Every argument list it runs goes into
-//! the **exec protocol** ([`exec_log`]); the P0 test suite compares the
+//! the **exec protocol** (`EXEC_LOG`, also logged); the P0 test suite compares the
 //! protocol with the table (exit criterion P0 (6)).
 //!
 //! # Data flow
@@ -49,7 +49,9 @@ use crate::podman_port::Backend;
 /// backend ran (or tried to run).
 static EXEC_LOG: Mutex<Vec<Vec<String>>> = Mutex::new(Vec::new());
 
-/// A copy of the exec protocol.
+/// A copy of the exec protocol (the P0 suite compares it with the table;
+/// production writes each entry to the log as well).
+#[cfg(test)]
 pub fn exec_log() -> Vec<Vec<String>> {
     EXEC_LOG.lock().map(|l| l.clone()).unwrap_or_default()
 }
@@ -124,6 +126,8 @@ pub struct RootfulBackend {
     storage: Storage,
 }
 
+// The error answer is a whole BrokerResponse, built once per failed request.
+#[allow(clippy::result_large_err)]
 impl RootfulBackend {
     /// A backend with `runner` and the domain's storage options.
     pub fn new(runner: Box<dyn Runner>, storage: Storage) -> Self {
@@ -165,6 +169,7 @@ fn kind(k: i32) -> Option<Kind> {
 }
 
 impl Backend for RootfulBackend {
+    #[allow(clippy::result_large_err)]
     fn request(&mut self, request: pb::BrokerRequest) -> Result<pb::BrokerResponse, String> {
         use pb::broker_request::Request;
         use pb::broker_response::Response;
@@ -183,7 +188,7 @@ impl Backend for RootfulBackend {
                     secrets_json: self.run(&Operation::Secrets, MAX_INSPECT)?,
                 }),
                 Some(Request::Inspect(r)) => {
-                    let k = kind(r.kind).ok_or_else(|| refused())?;
+                    let k = kind(r.kind).ok_or_else(refused)?;
                     let op = if r.spec { Operation::GenerateSpec(r.ids.first().cloned().unwrap_or_default()) } else { Operation::Inspect(k, r.ids) };
                     Response::Inspect(pb::InspectResponse { json: self.run(&op, MAX_INSPECT)? })
                 }

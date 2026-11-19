@@ -356,12 +356,14 @@ fn broker_in_root_owned_namespace() {
     // busybox once into an isolated store, saved as an archive for the inside.
     let iso = Iso::new("p0-image");
     let archive = Path::new(BASE).join(format!("busybox-{}.tar", std::process::id()));
-    let prepared = (|| {
+    let prepared = std::panic::catch_unwind(|| {
         iso.podman(&["pull", "-q", "docker.io/library/busybox:1.36"]);
         iso.podman(&["save", "-o", archive.to_str().unwrap(), "docker.io/library/busybox:1.36"]);
-    })();
+    });
     iso.cleanup();
-    let _ = prepared;
+    if let Err(e) = prepared {
+        std::panic::resume_unwind(e);
+    }
     std::fs::set_permissions(&archive, std::fs::Permissions::from_mode(0o644)).unwrap();
     let me_exe = std::env::current_exe().unwrap();
     let out = Command::new("unshare")

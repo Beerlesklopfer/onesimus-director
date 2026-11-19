@@ -316,12 +316,15 @@ pub(crate) fn attribute_modes(stream: &[u8]) -> Vec<(u32, u32)> {
     out
 }
 
+/// A named case: the guest steps built from the scan's entries.
+type Case = (&'static str, Box<dyn Fn(&[podman_scan::Entry]) -> Vec<Step>>);
+
 /// Exit criterion P0 (2): foreign, wrong-path and duplicate references
 /// fail the job before any byte of them is sent.
 #[test]
 fn foreign_wrong_and_duplicate_references_are_refused() {
     let d = tmp("refs-bad");
-    let cases: Vec<(&str, Box<dyn Fn(&[podman_scan::Entry]) -> Vec<Step>>)> = vec![
+    let cases: Vec<Case> = vec![
         ("foreign", Box::new(|e| vec![ref_step(&e[2].path, fpb::FileKind::Regular, &[9u8; 16], 1, 0o644)])),
         ("wrong path", Box::new(|e| {
             let su = e.iter().find(|x| x.relpath == b"bin/su" || x.relpath == b"su2").unwrap();
