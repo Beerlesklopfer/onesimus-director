@@ -496,7 +496,12 @@ fn update_volume(ua: &mut crate::ua_select::Ua, ast: &CommandAst, act: UpdateAct
         act(ua, UpdateAction::AllVols);
         return true;
     }
-    while !done {
+    if done {
+        return true;
+    }
+    // ua_update.cc:707 UpdateVolume: `for (; !done;)` never sets done inside the
+    // loop; every branch either continues the menu or returns.
+    loop {
         ua.start_prompt("Parameters to modify:\n");
         for item in ["Volume Status", "Volume Retention Period", "Volume Use Duration", "Maximum Volume Jobs",
             "Maximum Volume Files", "Maximum Volume Bytes", "Recycle Flag", "Slot", "InChanger Flag",
@@ -655,7 +660,6 @@ fn update_volume(ua: &mut crate::ua_select::Ua, ast: &CommandAst, act: UpdateAct
             }
         }
     }
-    true
 }
 
 /// The catalog work of `update`.
