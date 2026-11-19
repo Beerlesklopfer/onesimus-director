@@ -95,7 +95,7 @@ Datenbank `<db>.dump` über `dump-read`, `_info.json` zuletzt.
 
 ## G. Paket
 
-`onesimus-plugin-postgresql`, `Architecture: any`, `Multi-Arch: same`:
+`ofd-plugin-postgresql`, `Architecture: any`, `Multi-Arch: same`:
 `/usr/lib/<triplet>/onesimus/plugins/postgresql.pb` und
 `/usr/lib/<triplet>/onesimus/plugins/postgresql/onesimus-pg-broker`.
 
@@ -139,8 +139,10 @@ Befunde:
   Ein Original-Bareos-Director sendet das nicht; dann bleibt `bareos`.
 - **`ofd --check-plugin`** kann ein Plugin mit Broker-Import nicht
   instanziieren (kein Broker im Prüfmodus). Für solche Plugins soll der Check
-  bei Signatur, Manifest und Binärteil-Hashes enden.
+  bei Signatur, Manifest und Binärteil-Hashes enden. **Umgesetzt** mit der
+  [Signier-Infrastruktur](SIGNIER-INFRASTRUKTUR.md), Änderung 5.
 - **Vertrauensbasis:** Entscheidung des Nutzers: CA-Zertifikat und Grants
   werden in `ofd` einkompiliert; die lokale Policy darf nur einschränken.
-  Ort des privaten CA-Schlüssels offen.
+  Umgesetzt, siehe [Signier-Infrastruktur](SIGNIER-INFRASTRUKTUR.md); die CA
+  liegt offline.
 

@@ -8,8 +8,9 @@ weiterhin ihre eigenen Plugins verwenden; sie sind externe Protokollpartner.
 ## Implementierter Stand
 
 Das Workspace-Crate [onesimus-plugins](../../crates/onesimus-plugins/src/lib.rs)
-prüft Signatur, Artefaktbindung, Vertrauensstellung, Widerruf, Gültigkeit,
-API-/Zielversion und Capability-Freigaben. Erfolgreiche Prüfung liefert einen
+prüft Signatur, Artefaktbindung, Vertrauensstellung (einkompilierte Root und
+Generation), Grants aus dem Signierzertifikat, Widerruf, Gültigkeit,
+Suite-, API- und Zielversion und Capability-Freigaben. Erfolgreiche Prüfung liefert einen
 `VerifiedComponent`, der die geprüften Artefaktbytes besitzt. Der spätere Loader
 muss diese Bytes verwenden, statt einen Dateipfad nach der Prüfung erneut zu
 öffnen.
@@ -31,137 +32,120 @@ stehen, und Policy und Bundle müssen root-eigen sein.
 
 ## X.509, Build-Signierung und Ladeprüfung
 
-Der private Signierschlüssel wird ausschließlich im Compiler-/Build-System
-verwendet. Er wird weder in das Plugin eingebaut noch an den File Daemon
-verteilt. Der Herausgeber stellt ein X.509-Code-Signing-Zertifikat bereit;
-der Daemon prüft die öffentliche Zertifikatskette und die Artefaktsignatur
-**bei jedem Laden vor der Initialisierung**.
+Plan und Schritt-für-Schritt-Anleitung: [Signier-Infrastruktur](../plans/SIGNIER-INFRASTRUKTUR.md).
 
-Ein Bundle enthält:
+```mermaid
+flowchart TB
+    R["Root-CA (Ed25519, offline)"] --> G["Onesimus Plugin Signing Gn<br/>(Generation des Releases)"]
+    G --> L["Signierzertifikat (RSA 4096 im TPM)<br/>Grants-Erweiterung: Plugin-IDs, Capabilities"]
+    L -. signiert .-> M[manifest.json Schema 3 mit suite]
+    O["ofd: einkompiliert Root, Generation,<br/>Widerrufsliste (ONESIMUS_PLUGIN_CA)"] -. prüft .-> L
+```
 
-- `plugin.wasm`: Rust/WebAssembly-Komponente (Component Model).
-- `manifest.json`: exakt signierte UTF-8-Bytes, Schema-Version `1`.
-- `manifest.sig`: abgetrennte Ed25519-Signatur (64 Bytes).
-- Öffentliche X.509-Zertifikate als DER-Kette, Leaf zuerst, danach Intermediate-CAs.
+Private Schlüssel kommen nie in ein Plugin, in `ofd` oder in `sign-component`.
+Die Root-CA (Ed25519) und die Generationen liegen offline; der
+Signierschlüssel (RSA 4096) wird offline erzeugt und in den TPM des
+Build-Rechners importiert. Der Daemon prüft die öffentliche Kette und die
+Manifest-Signatur **bei jedem Laden vor der Initialisierung**.
 
-Der [Protobuf-Umschlag](../../proto/filed_plugin.proto) transportiert diese Kette
-in `x509_certificate_chain_der`. Mitgelieferte Roots werden niemals automatisch
-zu Vertrauensankern. Das Zertifikatsmodell ist X.509; der Artefakt-Signaturalgorithmus
-im Manifest ist Ed25519.
+Ein Bundle (`SignedPluginArtifact`, [Protobuf](../../proto/filed_plugin.proto)) enthält:
+
+- `artifact_bytes`: Rust/WebAssembly-Komponente (Component Model).
+- `manifest_bytes`: exakt signierte UTF-8-Bytes, Schema-Version `3`.
+- `ed25519_signature`: die abgetrennte Signatur; trotz des Namens je nach
+  Schlüssel des Signierzertifikats Ed25519 (64 Byte) oder RSA-PSS (512 Byte).
+- `x509_certificate_chain_der`: das Signierzertifikat, optional gefolgt von der
+  Generation. Andere Zertifikate aus dem Bundle werden nie verwendet.
 
 ```json
 {
-  "schema_version": 1,
-  "plugin_id": "org.example.files",
+  "schema_version": 3,
+  "plugin_id": "org.onesimus.postgresql",
   "version": "1.0.0",
   "api_version": 1,
-  "artifact_sha256": "<SHA-256 der exakten plugin.wasm-Bytes>",
-  "signing_key_id": "<SHA-256 des DER-SubjectPublicKeyInfo des Signierschlüssels>",
-  "not_before": 1792281600,
-  "not_after": 1823817600,
-  "capabilities": ["file.read"],
-  "target": "wasm32-wasip2"
+  "artifact_sha256": "<SHA-256 der exakten Komponenten-Bytes>",
+  "signing_key_id": "<SHA-256 des DER-SubjectPublicKeyInfo des Signierzertifikats>",
+  "not_before": 1795000000,
+  "not_after": 1889600000,
+  "capabilities": ["file.read", "postgresql.read"],
+  "target": "wasm32-wasip2",
+  "native": {"x86_64-linux-gnu": [{"path": "postgresql/onesimus-pg-broker", "sha256": "…"}]},
+  "suite": "0.2.0"
 }
 ```
 
-Schema 2 ergänzt `native`: je Debian-Triplet die Binärteile des Plugin-Pakets
-(z. B. einen Broker) mit relativem Pfad und SHA-256, etwa
-`"native": {"x86_64-linux-gnu": [{"path": "postgresql/onesimus-pg-broker", "sha256": "…"}]}`.
-Schema 1 bleibt gültig und darf keine Binärteile nennen. Ein Binärteil läuft
-nur, wenn sein Hash auf dem geöffneten Deskriptor zum geprüften Manifest passt.
+- `suite` muss exakt dem Onesimus-Teil der Version von `ofd` entsprechen
+  (`25.1.2+onesimus.0.2.0` → `0.2.0`). Schema 1 und 2 (ohne `suite`) werden
+  noch eingelesen und geprüft, laden aber nicht mehr.
+- `native` (optional) nennt je Debian-Triplet die Binärteile des
+  Plugin-Pakets mit relativem Pfad und SHA-256. Ein Binärteil läuft nur, wenn
+  sein Hash auf dem geöffneten Deskriptor zum geprüften Manifest passt.
+- Hashes sind hexadezimal in Kleinbuchstaben. Die Signatur umfasst die
+  gesamten gespeicherten Manifestbytes; vor der Prüfung wird nichts neu
+  serialisiert. Unbekannte oder doppelte Felder werden abgewiesen.
 
-Hashes sind hexadezimal; die Schlüssel-ID ist kanonisch in Kleinbuchstaben.
-Die Signatur umfasst die gesamten gespeicherten Manifestbytes einschließlich
-Leerzeichen. Vor der Prüfung darf das JSON nicht erneut serialisiert werden.
-`artifact_sha256` bindet die Freigabe an genau ein WASM-Artefakt. Unbekannte oder
-doppelte Manifestfelder werden abgewiesen.
-
-Beispielschritte im Build-System mit einem bereits ausgestellten öffentlichen
-Zertifikat `signer.crt` und dem nur dort verfügbaren privaten Schlüssel:
+Signiert wird in drei Schritten, ohne dass ein Onesimus-Werkzeug einen
+privaten Schlüssel sieht:
 
 ```bash
-# Stabile Schlüssel-ID ermitteln, ins Manifest übernehmen:
-openssl x509 -in signer.crt -pubkey -noout | openssl pkey -pubin -outform DER | sha256sum
-# Artefakthash ebenfalls ins Manifest übernehmen:
-sha256sum plugin.wasm
-# Erst das fertige Manifest signieren:
-openssl pkeyutl -sign -rawin -inkey signer-private.pem -in manifest.json -out manifest.sig
-# Ausschließlich öffentliche Zertifikate für das Bundle exportieren:
-openssl x509 -in signer.crt -outform DER -out signer.der
+cargo run -p onesimus-plugins --example sign-component -- prepare --component plugin.wasm \
+    --cert signer.pem --plugin-id org.onesimus.postgresql --version 1.0.0 \
+    --capability file.read --capability postgresql.read --out manifest.json
+openssl dgst -sha256 -sign handle:0x81000010 -provider tpm2 -provider default \
+    -sigopt rsa_padding_mode:pss -sigopt rsa_pss_saltlen:digest -out manifest.sig manifest.json
+cargo run -p onesimus-plugins --example sign-component -- assemble --component plugin.wasm \
+    --manifest manifest.json --signature manifest.sig --chain chain.pem --out plugin.pb
 ```
 
-Die Ausgabe des Beispiels enthält Hash-Platzhalter, die vor dem Signieren
-ersetzt werden müssen. Zertifikatsausstellung und Aufbewahrung des privaten
-Schlüssels gehören zur administrierten CA-/Build-Infrastruktur. Der Daemon
-benötigt weder den privaten Leaf- noch den privaten CA-Schlüssel.
+`assemble` prüft die Signatur vor dem Schreiben (mit `--trust-dir` zusätzlich
+die volle Prüfung von `ofd`).
 
 ## Vertrauensgrenze und Prüfungen
 
-`TrustPolicy` enthält ausschließlich öffentliches Vertrauen und lokale Freigaben:
+Die **Vertrauensbasis ist einkompiliert** (`TrustBase`): `ONESIMUS_PLUGIN_CA`
+nennt beim Bauen ein Verzeichnis mit `root.pem`, `generation.pem` und
+`revoked.json`. Ohne die Variable hat ein Build keine Vertrauensbasis und lädt
+kein Plugin; nur die Tests verwenden eine eigene Test-Hierarchie
+(`onesimus-plugins`, Feature `test-ca`).
 
-| Feld | Bedeutung |
+| Prüfung | Regel |
 | --- | --- |
-| `trust_anchors_der` | Administrierte CA-Vertrauensanker; kein automatischer Import aus Bundles oder dem Web-/TLS-Rootstore. |
-| `signers` | Schlüssel-ID → erlaubte Plugin-IDs und Capabilities. Eine gültige CA-Kette allein erlaubt einem Herausgeber nicht jedes Plugin. |
-| `revoked_keys` | Gesperrte SPKI-Fingerprints, für Leaf-, Intermediate- und CA-Schlüssel. |
-| `revoked_certificates` | Gesperrte SHA-256-Fingerprints einzelner DER-Zertifikate. |
-| `revoked_plugins` | Gesperrte Plugin-Identitäten. |
-| `allowed_capabilities` | Zusätzliche lokale Obergrenze; sowohl diese als auch die Herausgeberfreigabe müssen jede angeforderte Fähigkeit erlauben. |
-| `target` | Exaktes freigegebenes Ziel, z. B. `wasm32-wasip2`. |
-| `valid_from`, `valid_until` | Gültigkeitsfenster des administrierten Offline-Policy-/Widerrufsstands. Abgelaufene oder fehlende Policy wird abgewiesen. |
+| Kette | genau Signierzertifikat → einkompilierte Generation → einkompilierte Root (byte-genau), OpenSSL mit `X509_STRICT`, Sicherheitsstufe 2; ein direkt von der Root ausgestelltes oder einer anderen Generation zugehöriges Zertifikat wird abgelehnt |
+| Zweck | Signierzertifikat: kein CA, `digitalSignature`, EKU `codeSigning`; ein EKU einer CA muss Code Signing zulassen |
+| Gültigkeit | aller drei Zertifikate und des Manifests zum Ladezeitpunkt (kein Zeitstempeldienst) |
+| Grants | Erweiterung `2.25.166226948137511682553772901840964231856.1` des Signierzertifikats: die Plugin-ID muss genannt sein, jede angeforderte Capability ebenso |
+| Signatur | nach Schlüsseltyp: Ed25519, oder RSA mit genau 4096 Bit, RSA-PSS, SHA-256, Salt = 32; PKCS#1 v1.5 und andere Längen werden abgelehnt |
+| Widerruf | SPKI- und Zertifikats-Fingerabdrücke (für jedes Kettenglied) und Plugin-IDs aus der eingebauten Liste und der lokalen Policy |
+| Suite, API, Ziel | `suite` exakt, `api_version` 1, Ziel `wasm32-wasip2`, Component-Header |
+| Artefakt | SHA-256 der Komponente wie im Manifest |
 
-Der Verifier prüft die Kette mit OpenSSL einschließlich Signaturen, aktueller
-Zertifikatsgültigkeit, CA-/Pfadlängen-/kritischen Extension-Regeln und
-Authentifizierungsniveau. Das Leaf muss ein Nicht-CA-Zertifikat mit explizitem
-`digitalSignature` und `codeSigning` sein. Falls eine CA einen EKU einschränkt,
-muss dieser Code Signing zulassen. Schlüssel-ID und Leaf-SPKI müssen genau
-übereinstimmen. Unvollständige/unvertrauenswürdige Ketten und Widerrufe werden
-vor Artefaktfreigabe abgewiesen.
-
-Die Zertifikats-, Manifest- und Policy-Gültigkeit werden zum Prüfzeitpunkt
-kontrolliert. Zeitangaben sind UTC-Unixsekunden; Manifest-/Policy-Obergrenzen
-gelten exklusiv. Die Uhr und der Policy-Stand kommen vom administrierten Host,
-nicht aus einer Behauptung des Plugins.
-
-Die lokale Widerrufsliste ist implementiert. Automatischer CRL-/OCSP-Abruf,
-Signierung/Verteilung von Policy-Updates und eine produktive WASM-Loader-Einbindung
-sind noch offen. Der spätere Loader muss für jede neue Initialisierung den
-aktuellen Trust-/Widerrufsstand anwenden; alte `VerifiedComponent`-Instanzen
-sind kein dauerhaftes Freigabeticket.
+Die **lokale Policy** (`Plugin Policy`, root-eigen) kann nur einschränken:
+`plugin_ids`, `allowed_capabilities`, zusätzliche `revoked_keys`,
+`revoked_certificates`, `revoked_plugins`, ein Gültigkeitsfenster
+`valid_from`/`valid_until`. `ca_certificates` ist nur zum Festnageln erlaubt
+(jedes Zertifikat muss einkompiliert sein); eine fremde CA, `signers` (Grants
+der alten Form) oder ein anderes Ziel sind Ladefehler.
 
 Die Prüfung kontrolliert auch den Component-Header, ersetzt aber weder die
-vollständige WASM-Validierung noch die Runtime-Sandbox und deren Ressourcenlimits.
-Beides muss der spätere Host vor der Ausführung erzwingen.
+vollständige WASM-Validierung noch die Runtime-Sandbox und deren
+Ressourcenlimits; beides erzwingt der Host vor der Ausführung. Für jede neue
+Initialisierung gilt der aktuelle Stand von Policy, Widerruf und Uhr; ein
+`VerifiedComponent` ist kein dauerhaftes Freigabeticket. Automatischer
+CRL-/OCSP-Abruf ist nicht vorgesehen.
 
 ## Zertifikatserneuerung und Schlüsselwechsel
 
-Die dauerhafte Schlüsselidentität ist `SHA-256(DER SubjectPublicKeyInfo)`. Ein
-neues Zertifikat mit demselben öffentlichen Schlüssel behält diese ID. Ein
-signiertes unverändertes Artefakt kann deshalb mit einer erneuerten gültigen
-öffentlichen Kette bereitgestellt werden, sofern Manifest und Hostpolicy es
-weiterhin erlauben. Zertifikate, Seriennummern und Laufzeiten sind austauschbar;
-private Schlüssel sind keine Laufzeitressource des Daemons.
-
-Bei einem **kompromittierten Schlüssel**:
-
-1. Neuen privaten Schlüssel im Build-/Signiersystem erzeugen und neues
-   Code-Signing-Zertifikat ausstellen lassen.
-2. Neue SPKI-ID mit den benötigten Plugin-/Capability-Freigaben administriert
-   verteilen; den alten SPKI-Fingerprint widerrufen und die alte Freigabe entfernen.
-3. Bekannte vertrauenswürdige Artefakte erneut prüfen, das Manifest mit neuer
-   Schlüssel-ID erstellen und mit dem neuen Schlüssel signieren.
-4. Das neue Bundle bereitstellen. Alte Bundles und auch neue Zertifikate über
-   dem kompromittierten alten Schlüssel bleiben gesperrt.
-5. Bereits laufende Instanzen nach Betriebsrichtlinie deaktivieren/ersetzen;
-   eine Policyänderung beendet einen Thread nicht automatisch. Diese Verbindung
-   zur Instanzverwaltung ist bei der produktiven Loader-Einbindung umzusetzen.
-
-Ein Widerruf nur des Zertifikats betrifft dessen Fingerprint; eine reguläre
-Erneuerung mit gleichem **nicht kompromittiertem** Key kann danach zulässig sein.
-Bei Schlüsselkompromittierung ist deshalb stets der Key selbst zu sperren.
-Zertifikatserneuerung allein widerruft das alte Zertifikat nicht. Ein selbst
-angegebenes Build-Datum ist kein vertrauenswürdiger Nachweis einer Signierung
-vor der Kompromittierung; ein TSA-Zeitstempelmodell ist derzeit nicht implementiert.
+- **Erneuerung:** Ein neues Signierzertifikat für denselben Schlüssel behält
+  die Schlüssel-ID (`SHA-256(SPKI)`); die Plugins werden mit der neuen Kette
+  neu vorbereitet und signiert, `ofd` bleibt unverändert.
+- **Kompromittierung:** Schlüssel sofort über die lokale Policy sperren
+  (`revoked_keys`), dauerhaft über `revoked.json` im nächsten Release. Ein
+  neuer Schlüssel bekommt ein Zertifikat einer **neuen Generation**; das ist
+  nach Entscheidung des Nutzers ein Versionswechsel der kompletten Suite
+  (`ofd`, `odir`, alle Plugins). Alte Bundles laden mit dem neuen `ofd` nicht.
+- Ein Widerruf nur des Zertifikats sperrt dessen Fingerabdruck; bei
+  Kompromittierung ist stets der Schlüssel zu sperren. Ein selbst angegebenes
+  Build-Datum ist kein Nachweis einer Signierung vor der Kompromittierung.
 
 Technische Quellen: [OpenSSL-Kettenprüfung](https://docs.openssl.org/3.0/man3/X509_verify_cert/),
 [Zertifikatszwecke und Trust Store](https://docs.openssl.org/3.0/man3/X509_STORE_CTX_new/).

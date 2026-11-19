@@ -117,6 +117,16 @@ Client {
 - `Plugin Names` ist eine Positivliste; ein installiertes, aber nicht genanntes
   Plugin läuft nicht.
 - Ohne `Plugin Policy` läuft kein Plugin („Plugin … not found“ wie bisher).
+  Die Vertrauensbasis (Root-CA, Generation, Widerrufsliste) ist in `ofd`
+  einkompiliert (`ONESIMUS_PLUGIN_CA` beim Bauen); die Policy kann nur
+  einschränken (`plugin_ids`, `allowed_capabilities`, zusätzliche Widerrufe,
+  `valid_from`/`valid_until`) und darf `{}` sein. Eine fremde CA oder
+  `signers` in der Policy sind ein Ladefehler. Ein `ofd` ohne eingebaute
+  Vertrauensbasis lädt kein Plugin. Details:
+  [Signier-Infrastruktur](../plans/SIGNIER-INFRASTRUKTUR.md).
+- Jedes Bundle muss zur Suite-Version des `ofd` passen (Onesimus-Teil der
+  Version, z. B. `0.2.0`); nach einem Update von `ofd` braucht es die Plugins
+  desselben Releases.
 - Policy, Plugin-Verzeichnis und Bundle müssen root gehören und dürfen für
   Gruppe und Andere nicht schreibbar sein, ebenso jedes Verzeichnis darüber.
   Sonst verweigert `ofd` das Plugin.

@@ -72,7 +72,7 @@ Damit die Signatur nicht umgangen werden kann, gilt zusätzlich:
 ## Verteilung: ein Debian-Paket je Plugin
 
 Entscheidung vom 18.11.2026: Jedes Plugin ist ein eigenes Debian-Paket
-(`onesimus-plugin-<name>`).
+(`ofd-plugin-<name>`, Name nach Entscheidung vom 19.11.2026).
 
 - **Multiarch (Entscheidung 18.11.2026):** Ein Plugin bringt Binärteile je
   Architektur mit (z. B. seinen Broker), das Paket ist also
@@ -84,10 +84,11 @@ Entscheidung vom 18.11.2026: Jedes Plugin ist ein eigenes Debian-Paket
 - **Das Paket gibt sich nicht selbst frei.** Es ändert weder `Plugin Names` noch
   die Policy. Freigabe ist ein Schritt des Administrators (oder seiner
   Konfigurationsverwaltung). Ein installiertes Paket allein führt keinen Code aus.
-- **Die Trust-Policy gehört nicht in ein Plugin-Paket.** Sie kommt aus einem
-  eigenen Paket (Vorschlag `onesimus-plugin-trust`, Conffile
-  `/etc/onesimus/plugin-policy.json` mit den CA-Zertifikaten) oder vom
-  Administrator. Sonst könnte jedes Paket seine eigene CA mitbringen.
+- **Die Vertrauensbasis gehört nicht in ein Plugin-Paket.** Seit der
+  [Signier-Infrastruktur](SIGNIER-INFRASTRUKTUR.md) ist sie in `ofd`
+  einkompiliert (Root, Generation, Widerrufsliste); die lokale Policy
+  `/etc/onesimus/plugin-policy.json` kommt vom Administrator und kann nur
+  einschränken. Kein Paket kann eine eigene CA mitbringen.
 - `Depends: ofd (>= <Version mit Phase 1>)`; das Paket prüft im `postinst` das
   Bundle mit `ofd --check-plugin` und meldet einen Fehler, bricht die
   Installation aber nicht ab (die Policy kann später kommen).
