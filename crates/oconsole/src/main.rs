@@ -151,6 +151,56 @@ struct ConsoleConfig {
     grpc: Option<bool>,
     grpc_port: Option<u16>,
     grpc_fingerprint: Option<String>,
+    /// Every `Console { Name Password }` of the file, in file order: the
+    /// human login (first one without the MCP suffix) and the MCP login
+    /// (`<name>-mcp`, see [`mcp_login`]).
+    consoles: Vec<(String, String)>,
+}
+
+/// Suffix of the console the MCP server logs in as (decision of the
+/// maintainer, 19.11.2026): the MCP path MUST use its own Console resource
+/// `<console>-mcp`, defined in the Director's configuration with its own
+/// (narrower) ACLs and in oconsole.conf with its own password.
+const MCP_CONSOLE_SUFFIX: &str = "-mcp";
+
+/// The login (console, password) of the MCP server.
+///
+/// - `--name` ending in `-mcp`: that console, password from `--password` or
+///   from its `Console` resource in the file.
+/// - otherwise `<human console>-mcp`, where the human console is `--name` or
+///   the first `Console` of the file without the suffix; its password comes
+///   from the `Console` resource of that name in the file (never the
+///   human console's password).
+///
+/// Errors when there is no named human console (`*UserAgent*` has no MCP
+/// counterpart) or no password for the MCP console: the MCP server then does
+/// not start instead of falling back to the human console's rights.
+fn mcp_login(cfg: &ConsoleConfig, cli_name: Option<&str>, cli_password: Option<&str>) -> Result<(String, String), String> {
+    let explicit = cli_name.filter(|n| n.ends_with(MCP_CONSOLE_SUFFIX));
+    let target = match explicit {
+        Some(n) => n.to_string(),
+        None => {
+            let base = cli_name.map(str::to_string).unwrap_or_else(|| cfg.name.clone());
+            if base.is_empty() || base == "*UserAgent*" {
+                return Err(format!("the MCP server logs in as its own console <name>{MCP_CONSOLE_SUFFIX}, but the \
+                    configuration names no console (only *UserAgent*). Add `Console {{ Name = <name>{MCP_CONSOLE_SUFFIX}; \
+                    Password = ... }}` to oconsole.conf and the same Console with narrower ACLs to the Director"));
+            }
+            format!("{base}{MCP_CONSOLE_SUFFIX}")
+        }
+    };
+    let from_file = cfg.consoles.iter().find(|(n, _)| *n == target).map(|(_, p)| p.clone());
+    let password = match (explicit, cli_password) {
+        (Some(_), Some(p)) => Some(p.to_string()),
+        _ => from_file,
+    };
+    match password {
+        Some(p) if !p.is_empty() => Ok((target, p)),
+        _ => Err(format!("the MCP server logs in as console \"{target}\", but oconsole.conf has no \
+            `Console {{ Name = {target}; Password = ... }}`. Add it there and the Console \"{target}\" with \
+            narrower ACLs to the Director's configuration (in the editor); the MCP never uses the rights of \
+            the human console")),
+    }
 }
 
 /// Effective CLI — resolved from config file + CLI overrides
@@ -209,8 +259,10 @@ fn parse_console_config(content: &str) -> ConsoleConfig {
         grpc: None,
         grpc_port: None,
         grpc_fingerprint: None,
+        consoles: Vec::new(),
     };
     let mut director_password = String::new();
+    // the Console resource being read
     let mut console: Option<(String, String)> = None;
     // Resource we are in: None at top level (flat files of older oconsole
     // versions are read as Director keys).
@@ -224,7 +276,7 @@ fn parse_console_config(content: &str) -> ConsoleConfig {
             if let Some(open) = line.find('{') {
                 block = Some(line[..open].trim().to_ascii_lowercase());
                 depth = 1;
-                if block.as_deref() == Some("console") && console.is_none() {
+                if block.as_deref() == Some("console") {
                     console = Some((String::new(), String::new()));
                 }
                 continue;
@@ -235,7 +287,13 @@ fn parse_console_config(content: &str) -> ConsoleConfig {
         }
         if line.starts_with('}') {
             depth = depth.saturating_sub(1);
-            if depth == 0 { block = None; }
+            if depth == 0 {
+                if block.as_deref() == Some("console")
+                    && let Some(c) = console.take().filter(|c| !c.0.is_empty()) {
+                    cfg.consoles.push(c);
+                }
+                block = None;
+            }
             continue;
         }
         let Some(pos) = line.find('=') else { continue };
@@ -257,12 +315,13 @@ fn parse_console_config(content: &str) -> ConsoleConfig {
         }
     }
 
-    match console {
-        Some((name, password)) if !name.is_empty() => {
+    // the human login: the first Console without the MCP suffix
+    match cfg.consoles.iter().find(|(n, _)| !n.ends_with(MCP_CONSOLE_SUFFIX)).cloned() {
+        Some((name, password)) => {
             cfg.name = name;
             cfg.password = password;
         }
-        _ => cfg.password = director_password,
+        None => cfg.password = director_password,
     }
     cfg
 }
@@ -275,10 +334,19 @@ fn main() {
     let file_cfg = load_console_config(cli.config.as_deref());
 
     // CLI args override config file
-    let address = cli.address.unwrap_or(file_cfg.address);
+    let address = cli.address.clone().unwrap_or(file_cfg.address.clone());
     let port = cli.port.unwrap_or(file_cfg.port);
-    let name = cli.name.unwrap_or(file_cfg.name);
-    let password = cli.password.unwrap_or(file_cfg.password);
+    let (name, password) = if cli.mcp {
+        match mcp_login(&file_cfg, cli.name.as_deref(), cli.password.as_deref()) {
+            Ok(login) => login,
+            Err(e) => {
+                eprintln!("MCP: {e}");
+                std::process::exit(2);
+            }
+        }
+    } else {
+        (cli.name.clone().unwrap_or(file_cfg.name.clone()), cli.password.clone().unwrap_or(file_cfg.password.clone()))
+    };
 
     // stderr: stdout belongs to command output (and to the protocol in --mcp mode)
     tracing_subscriber::fmt().with_ansi(color::enabled())
@@ -1665,6 +1733,28 @@ mod tests {
         assert_eq!(cfg.password, "conpw");
         assert_eq!(cfg.address, "192.0.2.10");
         assert_eq!(cfg.port, 9102);
+    }
+
+    /// The MCP server logs in only as `<console>-mcp` (19.11.2026).
+    #[test]
+    fn mcp_logs_in_as_its_own_console() {
+        let file = concat!("Director {\n  Name = PDC-dir\n  Address = h\n  Password = \"dirpw\"\n}\n",
+            "Console {\n  Name = bconsole-mcp\n  Password = \"mcppw\"\n}\n",
+            "Console {\n  Name = bconsole\n  Password = \"conpw\"\n}\n");
+        let cfg = parse_console_config(file);
+        // the human login skips the MCP console even when it comes first
+        assert_eq!((cfg.name.as_str(), cfg.password.as_str()), ("bconsole", "conpw"));
+        assert_eq!(mcp_login(&cfg, None, None), Ok(("bconsole-mcp".into(), "mcppw".into())));
+        // --name of the human console: still its -mcp console, never its password
+        assert_eq!(mcp_login(&cfg, Some("bconsole"), Some("conpw")), Ok(("bconsole-mcp".into(), "mcppw".into())));
+        // --name/--password of an -mcp console
+        assert_eq!(mcp_login(&cfg, Some("x-mcp"), Some("p")), Ok(("x-mcp".into(), "p".into())));
+        // no -mcp console in the file: no start
+        let human_only = parse_console_config("Console {\n  Name = bconsole\n  Password = \"conpw\"\n}\n");
+        assert!(mcp_login(&human_only, None, None).unwrap_err().contains("bconsole-mcp"));
+        // *UserAgent* has no MCP counterpart
+        let agent = parse_console_config("Director {\n  Password = \"dirpw\"\n}\n");
+        assert!(mcp_login(&agent, None, None).unwrap_err().contains("*UserAgent*"));
     }
 
     #[test]

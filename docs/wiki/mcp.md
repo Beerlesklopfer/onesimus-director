@@ -17,12 +17,29 @@ Entscheidung [C-087](../COMPATIBILITY-LOG.md) (17.10.2026, S-36): Das lokale MCP
 - Ohne Schreibrechte nennt `tools/list` kein Schreib-Tool, und ein Aufruf endet mit dem JSON-RPC-Fehler `-32602 unknown tool: <name>`, ohne dass ein Befehl an den Director geht.
 - Zerstörende Tools verlangen weiter `confirm: true` (siehe unten), unabhängig vom Transport.
 
+### Eigene Console für das MCP (`<console>-mcp`)
+
+Entscheidung des Maintainers (19.11.2026): Der MCP-Weg **muss** eine eigene Console haben, Suffix `-mcp`, in der Konfiguration. Die Rechte des MCP legt allein deren ACL im Director fest; die Console legt der Maintainer im Editor an (Datei-ACLs nur im Editor, siehe [ACL-ZWEISTUFIG.md](../plans/ACL-ZWEISTUFIG.md)).
+
+- `oconsole --mcp` meldet sich als `<console>-mcp` an, wobei `<console>` die erste `Console` ohne Suffix in `oconsole.conf` bzw. `--name` ist. Das Passwort kommt aus der `Console { Name = <console>-mcp; Password = … }` derselben Datei, nie aus der Console des Menschen.
+- `--name x-mcp --password …` wählt eine MCP-Console ausdrücklich.
+- Fehlt die MCP-Console in `oconsole.conf` (oder steht dort nur `*UserAgent*`), startet das MCP nicht (Exit 2, Meldung mit den nötigen Zeilen). Ein Rückfall auf die Rechte des Menschen ist ausgeschlossen.
+- Ohne `--mcp` meldet sich oconsole wie bisher als erste `Console` ohne Suffix an, auch wenn die MCP-Console in der Datei zuerst steht.
+
+Beispiel `oconsole.conf`:
+
+```text
+Director { Name = PDC-dir; Address = 192.0.2.10; Password = "…" }
+Console { Name = bconsole;     Password = "…" }
+Console { Name = bconsole-mcp; Password = "…" }   # eigenes Passwort
+```
+
 ### Weg zum Director
 
 Jedes Tool prüft zuerst seine Parameter und baut daraus die Konsolenzeile. Dann:
 
 1. **gRPC** (`--grpc` oder `Grpc = yes` in der Konfiguration): Das Tool ruft die typisierte RPC der [`DirectorApi`](grpc-api.md) auf (Request aus den Parametern, Antwort als typisierte Message). Das Ergebnis ist die Antwort als JSON mit den Feldnamen der Proto-Datei, einmal als Text und als `structuredContent`. Bei `ActionResponse` (Schreib-RPCs) ist der Text die Ausgabe des Directors mit der gesendeten Zeile davor, `isError` folgt `success`.
-2. **gRPC, RPC nicht verfügbar**: Antwortet der Director mit `UNIMPLEMENTED` (Produktions-Director: alle Schreib-, Sitzungs- und Restore-Baum-RPCs, S-35) oder hat ein Parameter kein Feld im Request (z. B. `order` bei `list_jobs`, `state` bei `dot_jobs`), läuft die Konsolenzeile über `ExecuteCommand` derselben gRPC-Sitzung. oconsole merkt sich `UNIMPLEMENTED` je RPC und fragt nicht erneut. Rückfragen kann `ExecuteCommand` nicht beantworten: `purge` hängt deshalb `yes` an (GetConfirmation), und Tools, die nur als Dialog funktionieren (`add_volumes`, `sqlquery`, `run_query`, `delete` eines Pools, `restore_tree_*`), melden über diesen Weg einen Fehler mit Hinweis auf BNET bzw. `dot_sql`.
+2. **gRPC, RPC nicht verfügbar**: Antwortet der Director mit `UNIMPLEMENTED` (ältere Produktions-Directors vor 19.11.2026: alle Schreib-, Sitzungs- und Restore-Baum-RPCs, S-35; seitdem sind sie in jedem Build da) oder hat ein Parameter kein Feld im Request (z. B. `order` bei `list_jobs`, `state` bei `dot_jobs`), läuft die Konsolenzeile über `ExecuteCommand` derselben gRPC-Sitzung. oconsole merkt sich `UNIMPLEMENTED` je RPC und fragt nicht erneut. Rückfragen kann `ExecuteCommand` nicht beantworten: `purge` hängt deshalb `yes` an (GetConfirmation), und Tools, die nur als Dialog funktionieren (`add_volumes`, `sqlquery`, `run_query`, `delete` eines Pools, `restore_tree_*`), melden über diesen Weg einen Fehler mit Hinweis auf BNET bzw. `dot_sql`.
 3. **BNET** (z. B. zum Original-bareos-dir): die Konsolenzeile wie bisher, Lese-Tools unter `.api json compact=yes`, Schreib-Tools im Textmodus mit den Antworten auf die Rückfragen, die das Tool nennt.
 
 Über gRPC sind die Ergebnisse der Lese-Tools also typisierte Messages (z. B. `ListJobsResponse` mit `jobs[].jobstatus` als Enum `JOB_STATUS_TERMINATED`), über BNET das JSON-RPC-Objekt der Director-JSON-API. `"format": "text"` erzwingt bei Lese-Tools die Konsolenzeile.
