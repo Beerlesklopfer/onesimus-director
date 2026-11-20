@@ -9,6 +9,7 @@ compile_error!("MCP production and development policies are mutually exclusive; 
 compile_error!("Select an MCP policy: mcp-production (default) or mcp-development");
 
 mod color;
+mod fishkeys;
 mod grammar;
 
 // Keep all console stdout/stderr decoration under the same NO_COLOR policy.
@@ -742,6 +743,8 @@ struct BareosHelper {
     value_cache: grammar::ValueCache,
     /// Lines the Director refused in this session: never suggested
     failed: Vec<String>,
+    /// Esc: no suggestion while the line is this text (set by the key handler)
+    hidden_for: fishkeys::HiddenHint,
 }
 
 impl BareosHelper {
@@ -751,6 +754,7 @@ impl BareosHelper {
             rate_guard: rate_guard::CommandRateGuard::default(),
             value_cache: grammar::ValueCache::new(),
             failed: Vec::new(),
+            hidden_for: fishkeys::HiddenHint::default(),
         }
     }
 
@@ -911,6 +915,9 @@ impl Hinter for BareosHelper {
 
     /// fish autosuggestion (history, a single completion, usage), only at the end of the line.
     fn hint(&self, line: &str, pos: usize, ctx: &Context<'_>) -> Option<ConsoleHint> {
+        if self.hidden_for.is_hidden(line) {
+            return None;
+        }
         let history = ctx.history();
         let newest_first: Vec<String> = (0..history.len()).rev()
             .filter_map(|i| history.get(i, rustyline::history::SearchDirection::Forward).ok().flatten())
@@ -1057,6 +1064,7 @@ fn interactive_loop(
     let guard = helper.rate_guard.clone();
     helper.load_from_director(dir.as_mut());
     eprintln!("\x1b[2m({})\x1b[0m", helper.summary());
+    let hidden_hint = helper.hidden_for.clone();
 
     let rl_config = rustyline::Config::builder()
         .completion_type(rustyline::CompletionType::List)
@@ -1065,6 +1073,7 @@ fn interactive_loop(
         .build();
     let mut rl = Editor::with_config(rl_config).unwrap();
     rl.set_helper(Some(helper));
+    fishkeys::bind(&mut rl, hidden_hint);
     let refresh = if color::enabled() {
         rl.create_external_printer().map(rate_guard::PromptRefresh::new).unwrap_or_default()
     } else { rate_guard::PromptRefresh::default() };
