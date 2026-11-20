@@ -144,6 +144,20 @@ FD ─ Netz ─► Empfänger (schreibt) ─► /dev/shm/osd-<JobId>.ring ─┬
 - **Lesen (Restore)** nutzt denselben Ring in Gegenrichtung: Geräteleser füllen ihn, die Netzsitzung leert ihn. Beim Striping setzt die Netzsitzung die Blöcke nach Folgenummer zusammen.
 - **Stufe 1 (ein File-Device)** baut den Ring schon mit genau einem Verbraucher, damit Routen, Striping und Zweige später nur Verbraucher hinzufügen.
 
+## Eigenes Backup-Dateisystem (Richtung, Maintainer 20.11.2026)
+
+> Es macht Sinn, ein eigenes Filesystem für Backups zu etablieren, um auf die Platten zu schreiben. Dann haben wir die doppelte Organisation gespart.
+
+- **Heute** ist die Organisation doppelt: Ein allgemeines Dateisystem verwaltet Dateien und Extents, und in den Volume-Dateien verwaltet das Bareos-Volume-Format noch einmal Blöcke, Labels und Sitzungen.
+- **Ziel:** osd schreibt auf Rohgeräte oder Partitionen in einem **eigenen, auf Backups zugeschnittenen Layout**, am Betriebssystem vorbei, also ohne fremdes Dateisystem und ohne Seitencache (`O_DIRECT` bzw. die Gegenstücke auf macOS und Windows).
+- **Skizze** (Grundlage: Recherche, siehe unten):
+  - je Platte ein Superblock mit Label, das sich selbst beschreibt; Wechselplatten werden daran erkannt (D-6);
+  - ein Volume ist eine benannte Menge von Extents. Darin stehen die Bareos-Blöcke unverändert, also Labels, Sitzungen und Records. Ein Volume lässt sich als gewöhnliche Bareos-Volume-Datei **exportieren**, für `bls` oder bareos-sd. Damit bleibt die Kompatibilität aus dem [Grundsatz](#grundsatz-grpc-ist-der-weg-bnet-bleibt-für-bareos) erhalten.
+  - Belegt wird fast nur durch Anhängen. Freigegeben wird volumeweise beim Recyceln, wie bei Bareos: prune, purge, recycle.
+  - Die Metadaten sind gegen Abstürze gesichert (Journal oder Copy-on-Write).
+  - Ein Stripe-Satz besteht aus mehreren Platten mit gemeinsamem Superblock-Verweis (D-4/D-5). Prüfsummen werden je Block geführt.
+- **Status:** Richtung festgelegt; Layout und erster Schritt folgen aus der laufenden Recherche (Vorbilder: Ceph BlueStore, SPDK Blobstore, LTFS, logstrukturierte und ZNS-Layouts). Als **eigene Phase nach P1** wird dazu eine Entscheidung D-14 nachgetragen.
+
 ## Gerätearten
 
 | Art | Bareos-Gegenstück | osd-Umfang |
