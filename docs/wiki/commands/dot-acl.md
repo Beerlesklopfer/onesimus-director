@@ -36,6 +36,8 @@ Die Katalog-Liste wird wie eine Bareos-Liste ausgewertet: der erste passende Ein
 
 `<typ>` ist einer von `job`, `client`, `storage`, `schedule`, `pool`, `command`, `fileset`, `catalog`, `where`, `pluginoptions` (also `jobacl=`, `commandacl=` usw., Groß-/Kleinschreibung egal).
 
+Einträge: Ein Wert wird an Kommas getrennt (`jobacl=!restore,backup-.*`), aber nicht an Kommas innerhalb von `{}`, `[]` oder `()`, also bleibt `backup-[a-z]{1,3}` ein Eintrag. Wird derselbe Typ mehrfach angegeben, ist jedes Vorkommen genau ein Eintrag, ohne Trennung (`jobacl="a,b" jobacl=c` → `a,b` und `c`). Anführungszeichen entfernt der Befehlsparser wie bei Bareos, so sind auch Namen mit Leerzeichen möglich (`console="My Console" filesetacl="Full Set,!Windows All Drives"`).
+
 ## Argumente
 
 | Argument | Bedeutung |

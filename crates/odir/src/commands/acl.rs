@@ -56,9 +56,49 @@ fn norm(key: &str) -> String {
     bareos_config::raw::normalize_key(key)
 }
 
-/// Comma-separated entries of an argument value, trimmed, empty ones dropped.
+/// Comma-separated entries of an argument value, trimmed, empty ones
+/// dropped. Commas inside `{}`, `[]` or `()` belong to the entry (regular
+/// expressions such as `a{1,3}` or `(x|y,z)`).
 fn split_entries(value: &str) -> Vec<String> {
-    value.split(',').map(str::trim).filter(|e| !e.is_empty()).map(str::to_string).collect()
+    let mut entries = Vec::new();
+    let (mut depth, mut current) = (0i32, String::new());
+    for c in value.chars() {
+        match c {
+            '{' | '[' | '(' => depth += 1,
+            '}' | ']' | ')' => depth = (depth - 1).max(0),
+            ',' if depth == 0 => {
+                entries.push(std::mem::take(&mut current));
+                continue;
+            }
+            _ => {}
+        }
+        current.push(c);
+    }
+    entries.push(current);
+    entries.into_iter().map(|e| e.trim().to_string()).filter(|e| !e.is_empty()).collect()
+}
+
+/// The `<type>acl=` arguments grouped by ACL type, in order of first
+/// appearance. A type given once: its value split at commas (`jobacl=a,b`).
+/// A type given several times: every occurrence is exactly one entry, not
+/// split, so an entry may contain a comma (`jobacl="a{1,3}" jobacl=b`).
+/// `None`: the type without a value (`.acl delete jobacl`).
+fn grouped_entries<'a>(typed: &[(Kind, Option<&'a str>)]) -> Vec<(Kind, Option<Vec<String>>)> {
+    let mut kinds: Vec<Kind> = Vec::new();
+    for (kind, _) in typed {
+        if !kinds.contains(kind) {
+            kinds.push(*kind);
+        }
+    }
+    kinds.into_iter().map(|kind| {
+        let values: Vec<Option<&str>> = typed.iter().filter(|(k, _)| *k == kind).map(|(_, v)| *v).collect();
+        let entries = match values.as_slice() {
+            [None] => None,
+            [Some(value)] => Some(split_entries(value)),
+            many => Some(many.iter().flatten().map(|v| v.trim()).filter(|e| !e.is_empty()).map(str::to_string).collect()),
+        };
+        (kind, entries)
+    }).collect()
 }
 
 /// Name of the console this session authenticated as.
@@ -397,8 +437,8 @@ fn plan(action: &str, ast: &CommandAst, target: &str, current: &ConsoleLists, so
             if typed.is_empty() {
                 return Err(".acl set: specify at least one <type>acl=<entries>.\n".into());
             }
-            for (kind, value) in typed {
-                let values = split_entries(value.unwrap_or(""));
+            for (kind, values) in grouped_entries(&typed) {
+                let values = values.unwrap_or_default();
                 if values.is_empty() {
                     return Err(format!(".acl set: {} needs at least one entry (use .acl delete to remove it).\n",
                         kind.directive()));
@@ -413,15 +453,14 @@ fn plan(action: &str, ast: &CommandAst, target: &str, current: &ConsoleLists, so
             if typed.is_empty() {
                 return Err(".acl delete: specify at least one <type>acl[=<entries>].\n".into());
             }
-            for (kind, value) in typed {
+            for (kind, value) in grouped_entries(&typed) {
                 let old = plain(current, kind);
                 if old.is_empty() {
                     return Err(format!("Console \"{target}\" has no catalog {} entries.\n", kind.directive()));
                 }
                 let new = match value {
                     None => Vec::new(),
-                    Some(value) => {
-                        let remove = split_entries(value);
+                    Some(remove) => {
                         if let Some(missing) = remove.iter().find(|e| !old.contains(e)) {
                             return Err(format!("{} entry \"{missing}\" not found in the catalog ACL of Console \"{target}\".\n",
                                 kind.directive()));
@@ -700,6 +739,24 @@ Console { Name = mcp; Password = pw4; CommandAcl = *all*; JobAcl = backup-a, res
     /// The typed RPC DotAclList keeps working: the file entries map onto
     /// ConsoleAclInfo as before, the new catalog/effective objects go to
     /// `extra_fields` (JSON text) and nothing is lost.
+    /// A type given several times: each occurrence is one entry, so an
+    /// entry may contain a comma; quotes are removed by the parser; a type
+    /// given once is split at commas outside brackets.
+    #[test]
+    fn repeated_keys_are_one_entry_each() {
+        let table = FakeTable::default();
+        let ctx = setup("admin", &table);
+        assert!(run(&ctx, ".acl set console=op jobacl=\"backup-[a-z]{1,3}\" jobacl=\"!restore\"").success);
+        assert_eq!(table.list("op", "job"), s(&["backup-[a-z]{1,3}", "!restore"]));
+        assert!(run(&ctx, ".acl set console=op clientacl=a,b").success);
+        assert_eq!(table.list("op", "client"), s(&["a", "b"]));
+        assert!(run(&ctx, ".acl delete console=op jobacl=\"backup-[a-z]{1,3}\" jobacl=nothing-else").success == false,
+            "every repeated entry must exist");
+        assert!(run(&ctx, ".acl delete console=op jobacl=\"backup-[a-z]{1,3}\"").success);
+        assert_eq!(table.list("op", "job"), s(&["!restore"]), "commas inside braces do not split a single value");
+        assert_eq!(split_entries("a{1,3},b,(x|y,z), [p,q]"), s(&["a{1,3}", "b", "(x|y,z)", "[p,q]"]));
+    }
+
     #[test]
     fn list_json_maps_onto_the_typed_acl_list_response() {
         use prost::Message;
