@@ -679,7 +679,7 @@
   "local_source_files": [
     {
       "path": "Cargo.toml",
-      "sha256": "cf0cdf9c1990dc6dbf66f3b94445d77a01c38d32a2cfddb0de5661c765191f64"
+      "sha256": "c2517fcc62e5798941bfb0823778295dc0e4bee450d840f6f0bbe5d1cd4af902"
     },
     {
       "path": "crates/bareos-bnet/src/debug.rs",
@@ -687,11 +687,11 @@
     },
     {
       "path": "crates/oconsole/Cargo.toml",
-      "sha256": "4c9a94a724ab859a42973ee8fc158e3ddc42dc4412b3961635c8de3ba02a80cf"
+      "sha256": "ba8836d453f92afdf7c746ac64a6a96a39563f4069084a97f8cd4436335735eb"
     },
     {
       "path": "crates/oconsole/src/main.rs",
-      "sha256": "bccaa4c0a4c64a187b7362af09887b6124ac7fbf87e36bd5c3f136d8559d2268"
+      "sha256": "050ae764f2c7b7463ef5ecbeabd749ccc067ab2d6ae418c984e955e1a41739b0"
     },
     {
       "path": "crates/oconsole/src/mcp.rs",
@@ -714,8 +714,12 @@
       "sha256": "c746df8399d473a900f13e29006d67c58c21cce6c24b6750b786563e7af365d7"
     },
     {
+      "path": "crates/odir/src/command_grammar.rs",
+      "sha256": "a28c340ec16817c4e81a1fc48806bc11433fd36d5dab319945e2609ed92b6c7f"
+    },
+    {
       "path": "crates/odir/src/command_registry.rs",
-      "sha256": "dedd91fd6afeec1fafa0d1ff418b98018d933c6739a07b6d3d931b3372a03c32"
+      "sha256": "2966d51f57ca92318df063f4ec8ef2478162a5630031064dc3aad2e305f601d5"
     },
     {
       "path": "crates/odir/src/commands/acl.rs",
@@ -743,7 +747,7 @@
     },
     {
       "path": "crates/odir/src/commands/cancel.rs",
-      "sha256": "369ca02aad1408b9c5d07131e7ee5c8b9c1ea9d9f4cd382f841629aa99499267"
+      "sha256": "5526e21b56a04de9768cb3e114862644934f8984c260c2722375f9f38c7dac3b"
     },
     {
       "path": "crates/odir/src/commands/catalog.rs",
@@ -782,12 +786,16 @@
       "sha256": "230f6edd25da44f78a6475915d3dfe4584299706aa11d1a37a242a7a4830a010"
     },
     {
+      "path": "crates/odir/src/commands/grammar.rs",
+      "sha256": "14876a4c24707f295d230a179b7e94fe6b993cf704993134d54e1a907f20ce16"
+    },
+    {
       "path": "crates/odir/src/commands/job.rs",
-      "sha256": "a7f4b882502c40def7d83980438a049f2f2e1bd1759228337b09fc26f654eeaf"
+      "sha256": "2ef1e65deb966e7007d02a874528e12385bf56b3fbefe4c4a2034b298d3fd453"
     },
     {
       "path": "crates/odir/src/commands/label.rs",
-      "sha256": "d0e9581a9425e5c2f19c2335982ba19022f7cca496224cecfa80a71924752ebf"
+      "sha256": "c34669b4d04230271dea38684d95744a875460d714155c22b7bdecc8cca6a18d"
     },
     {
       "path": "crates/odir/src/commands/list.rs",
@@ -795,7 +803,7 @@
     },
     {
       "path": "crates/odir/src/commands/mod.rs",
-      "sha256": "a5ed26ff0bdf5ddab6f2dff46405c08a9da36fa90b08f9891c6753cc4e53225f"
+      "sha256": "227fb998d7fe6eb3929048e077ec41854fcd4bb312c18fffdbdd7e1b0bc56e24"
     },
     {
       "path": "crates/odir/src/commands/ovfs.rs",
@@ -823,7 +831,7 @@
     },
     {
       "path": "crates/odir/src/commands/restore.rs",
-      "sha256": "314f4fbd543272fd9d7f29e0ed4759530e48e9eea928c9cc443fc470fe88910c"
+      "sha256": "4cd6c324b81bc3922bb3f76249145dba6a025f4bedacf012322e31b539b19371"
     },
     {
       "path": "crates/odir/src/commands/restore_bsr.rs",
@@ -847,7 +855,7 @@
     },
     {
       "path": "crates/odir/src/commands/status.rs",
-      "sha256": "600ddc8f8f0644e61ae0593e84eef3b7280d875832f103866b1e4e730dbf994c"
+      "sha256": "2be42295050ad32482221315868c76927e9cdd50ccd3c3607354612bdcd14e00"
     },
     {
       "path": "crates/odir/src/commands/update_db.rs",
@@ -862,12 +870,16 @@
       "sha256": "f6b226175d2b4345f8dbc0dce2dba4f943fb4c6d9f791284e75534d8c23dc3c0"
     },
     {
+      "path": "crates/odir/src/grammar_table.rs",
+      "sha256": "fbb0ad6d40df726e1f7ed25cc9c3f3ea0e5f0527dce4ac2d72ec80b92381b8d2"
+    },
+    {
       "path": "crates/odir/src/job_manager.rs",
-      "sha256": "64d3eb7cbdce7050d57bcc3314629204c111c0ee876b33fe62da31fc75b9e3ff"
+      "sha256": "4b409d56c6e867f7a7af6c059a2edb06d46e2dbe619ce0ac46987992b6f86d0b"
     },
     {
       "path": "crates/odir/src/job_worker.rs",
-      "sha256": "d9b8b3e181ecaeb71c4c0d93362ceac499a32df46ab27b77193c00da0d872038"
+      "sha256": "f691abd77b37e048daae9e7799980bb6129796973590b749b4272d2de1d0b461"
     },
     {
       "path": "crates/odir/src/logging.rs",
@@ -875,7 +887,7 @@
     },
     {
       "path": "crates/odir/src/main.rs",
-      "sha256": "835d162abfe01af00baf5ef62fd0d7bc656e071565d8fa8d2bbaed550d482649"
+      "sha256": "d14fc3ffee3e36a43829f6c03fe5ed463b14383f16692bc3469ab75b2b61573c"
     },
     {
       "path": "crates/odir/src/scheduler.rs",
@@ -954,7 +966,7 @@
       "parity_verified": 5,
       "registered_unverified": 21
     },
-    "onesimus_extra_names": 13
+    "onesimus_extra_names": 14
   },
   "parity_evidence": {
     "date": "2026-10-18",
@@ -1034,7 +1046,7 @@
         "handler": "commands::dot::cmd_dot_noop",
         "registry": {
           "file": "crates/odir/src/command_registry.rs",
-          "line": 264
+          "line": 117
         },
         "implementation": {
           "file": "crates/odir/src/commands/dot.rs",
@@ -1111,7 +1123,7 @@
         "handler": "commands::dot::cmd_dot_actiononpurge",
         "registry": {
           "file": "crates/odir/src/command_registry.rs",
-          "line": 291
+          "line": 144
         },
         "implementation": {
           "file": "crates/odir/src/commands/dot.rs",
@@ -1157,14 +1169,14 @@
         "handler": "commands::dot::cmd_dot_api",
         "registry": {
           "file": "crates/odir/src/command_registry.rs",
-          "line": 294
+          "line": 147
         },
         "implementation": {
           "file": "crates/odir/src/commands/dot.rs",
           "line": 414
         },
         "declared_arguments": [
-          "mode"
+          "compact"
         ],
         "status": "parity_verified",
         "findings": [
@@ -1243,14 +1255,21 @@
         "handler": "commands::dot::cmd_dot_authorized",
         "registry": {
           "file": "crates/odir/src/command_registry.rs",
-          "line": 287
+          "line": 140
         },
         "implementation": {
           "file": "crates/odir/src/commands/dot.rs",
           "line": 220
         },
         "declared_arguments": [
-          "job"
+          "job",
+          "client",
+          "storage",
+          "schedule",
+          "pool",
+          "cmd",
+          "fileset",
+          "catalog"
         ],
         "status": "parity_verified",
         "findings": [
@@ -1291,7 +1310,7 @@
         "handler": "commands::dot::cmd_dot_catalogs",
         "registry": {
           "file": "crates/odir/src/command_registry.rs",
-          "line": 273
+          "line": 126
         },
         "implementation": {
           "file": "crates/odir/src/commands/dot.rs",
@@ -1343,13 +1362,16 @@
         "handler": "commands::dot::cmd_dot_clients",
         "registry": {
           "file": "crates/odir/src/command_registry.rs",
-          "line": 267
+          "line": 120
         },
         "implementation": {
           "file": "crates/odir/src/commands/dot.rs",
           "line": 73
         },
-        "declared_arguments": [],
+        "declared_arguments": [
+          "enabled",
+          "disabled"
+        ],
         "status": "parity_verified",
         "findings": [
           "Paritätslauf 18.10.2026 (`development` `579da25`): 24 von 24 Fällen byte-identisch; Modi: Text, API 1, API 2, Konsolen parity-acl, parity-bvfs, parity-limited, parity-operator."
@@ -1409,7 +1431,7 @@
         "handler": "commands::dot::cmd_dot_consoles",
         "registry": {
           "file": "crates/odir/src/command_registry.rs",
-          "line": 274
+          "line": 127
         },
         "implementation": {
           "file": "crates/odir/src/commands/dot.rs",
@@ -1461,7 +1483,7 @@
         "handler": "commands::dot::cmd_dot_users",
         "registry": {
           "file": "crates/odir/src/command_registry.rs",
-          "line": 282
+          "line": 135
         },
         "implementation": {
           "file": "crates/odir/src/commands/dot.rs",
@@ -1517,14 +1539,17 @@
         "handler": "commands::dot::cmd_dot_defaults",
         "registry": {
           "file": "crates/odir/src/command_registry.rs",
-          "line": 285
+          "line": 138
         },
         "implementation": {
           "file": "crates/odir/src/commands/dot.rs",
           "line": 142
         },
         "declared_arguments": [
-          "job"
+          "job",
+          "client",
+          "storage",
+          "pool"
         ],
         "status": "parity_verified",
         "findings": [
@@ -1579,7 +1604,7 @@
         "handler": "commands::dot::cmd_dot_filesets",
         "registry": {
           "file": "crates/odir/src/command_registry.rs",
-          "line": 271
+          "line": 124
         },
         "implementation": {
           "file": "crates/odir/src/commands/dot.rs",
@@ -1633,13 +1658,17 @@
         "handler": "commands::basic::cmd_dot_help",
         "registry": {
           "file": "crates/odir/src/command_registry.rs",
-          "line": 261
+          "line": 114
         },
         "implementation": {
           "file": "crates/odir/src/commands/basic.rs",
           "line": 161
         },
-        "declared_arguments": [],
+        "declared_arguments": [
+          "all",
+          "item",
+          "full"
+        ],
         "status": "parity_verified",
         "findings": [
           "Paritätslauf 18.10.2026 (`development` `579da25`): 13 von 13 Fällen byte-identisch; Modi: Text, API 1, API 2, Konsolen parity-limited."
@@ -1688,7 +1717,7 @@
         "handler": "commands::dot::cmd_dot_jobdefs",
         "registry": {
           "file": "crates/odir/src/command_registry.rs",
-          "line": 275
+          "line": 128
         },
         "implementation": {
           "file": "crates/odir/src/commands/dot.rs",
@@ -1741,13 +1770,17 @@
         "handler": "commands::dot::cmd_dot_jobs",
         "registry": {
           "file": "crates/odir/src/command_registry.rs",
-          "line": 268
+          "line": 121
         },
         "implementation": {
           "file": "crates/odir/src/commands/dot.rs",
           "line": 83
         },
-        "declared_arguments": [],
+        "declared_arguments": [
+          "type",
+          "enabled",
+          "disabled"
+        ],
         "status": "parity_verified",
         "findings": [
           "Paritätslauf 18.10.2026 (`development` `579da25`): 49 von 49 Fällen byte-identisch; Modi: Text, API 1, API 2, Konsolen parity-acl, parity-bvfs, parity-limited, parity-operator."
@@ -1832,13 +1865,15 @@
         "handler": "commands::dot::cmd_dot_jobstatus",
         "registry": {
           "file": "crates/odir/src/command_registry.rs",
-          "line": 286
+          "line": 139
         },
         "implementation": {
           "file": "crates/odir/src/commands/dot.rs",
           "line": 150
         },
-        "declared_arguments": [],
+        "declared_arguments": [
+          "catalog"
+        ],
         "status": "parity_verified",
         "findings": [
           "Paritätslauf 18.10.2026 (`development` `579da25`): 21 von 21 Fällen byte-identisch; Modi: Text, API 1, API 2."
@@ -1895,7 +1930,7 @@
         "handler": "commands::dot::cmd_dot_levels",
         "registry": {
           "file": "crates/odir/src/command_registry.rs",
-          "line": 288
+          "line": 141
         },
         "implementation": {
           "file": "crates/odir/src/commands/dot.rs",
@@ -1947,7 +1982,7 @@
         "handler": "commands::dot::cmd_dot_locations",
         "registry": {
           "file": "crates/odir/src/command_registry.rs",
-          "line": 277
+          "line": 130
         },
         "implementation": {
           "file": "crates/odir/src/commands/dot.rs",
@@ -1993,7 +2028,7 @@
         "handler": "commands::dot::cmd_dot_messages",
         "registry": {
           "file": "crates/odir/src/command_registry.rs",
-          "line": 280
+          "line": 133
         },
         "implementation": {
           "file": "crates/odir/src/commands/dot.rs",
@@ -2044,7 +2079,7 @@
         "handler": "commands::dot::cmd_dot_media",
         "registry": {
           "file": "crates/odir/src/command_registry.rs",
-          "line": 278
+          "line": 131
         },
         "implementation": {
           "file": "crates/odir/src/commands/dot.rs",
@@ -2091,7 +2126,7 @@
         "handler": "commands::dot::cmd_dot_mediatypes",
         "registry": {
           "file": "crates/odir/src/command_registry.rs",
-          "line": 279
+          "line": 132
         },
         "implementation": {
           "file": "crates/odir/src/commands/dot.rs",
@@ -2142,7 +2177,7 @@
         "handler": "commands::dot::cmd_dot_msgs",
         "registry": {
           "file": "crates/odir/src/command_registry.rs",
-          "line": 281
+          "line": 134
         },
         "implementation": {
           "file": "crates/odir/src/commands/dot.rs",
@@ -2196,13 +2231,15 @@
         "handler": "commands::dot::cmd_dot_pools",
         "registry": {
           "file": "crates/odir/src/command_registry.rs",
-          "line": 269
+          "line": 122
         },
         "implementation": {
           "file": "crates/odir/src/commands/dot.rs",
           "line": 100
         },
-        "declared_arguments": [],
+        "declared_arguments": [
+          "type"
+        ],
         "status": "parity_verified",
         "findings": [
           "Paritätslauf 18.10.2026 (`development` `579da25`): 34 von 34 Fällen byte-identisch; Modi: Text, API 1, API 2, Konsolen parity-acl, parity-bvfs, parity-limited, parity-operator.",
@@ -2273,7 +2310,7 @@
         "handler": "commands::dot::cmd_dot_profiles",
         "registry": {
           "file": "crates/odir/src/command_registry.rs",
-          "line": 276
+          "line": 129
         },
         "implementation": {
           "file": "crates/odir/src/commands/dot.rs",
@@ -2325,7 +2362,7 @@
         "handler": "commands::basic::cmd_quit",
         "registry": {
           "file": "crates/odir/src/command_registry.rs",
-          "line": 262
+          "line": 115
         },
         "implementation": {
           "file": "crates/odir/src/commands/basic.rs",
@@ -2372,14 +2409,15 @@
         "handler": "commands::sql::cmd_dot_sql",
         "registry": {
           "file": "crates/odir/src/command_registry.rs",
-          "line": 298
+          "line": 151
         },
         "implementation": {
           "file": "crates/odir/src/commands/sql.rs",
           "line": 27
         },
         "declared_arguments": [
-          "query"
+          "query",
+          "catalog"
         ],
         "status": "parity_verified",
         "findings": [
@@ -2448,13 +2486,16 @@
         "handler": "commands::dot::cmd_dot_schedule",
         "registry": {
           "file": "crates/odir/src/command_registry.rs",
-          "line": 272
+          "line": 125
         },
         "implementation": {
           "file": "crates/odir/src/commands/dot.rs",
           "line": 130
         },
-        "declared_arguments": [],
+        "declared_arguments": [
+          "enabled",
+          "disabled"
+        ],
         "status": "parity_verified",
         "findings": [
           "Paritätslauf 18.10.2026 (`development` `579da25`): 25 von 25 Fällen byte-identisch; Modi: Text, API 2, Konsolen parity-acl, parity-bvfs, parity-limited, parity-operator."
@@ -2518,13 +2559,27 @@
         "handler": "commands::status::cmd_dot_status",
         "registry": {
           "file": "crates/odir/src/command_registry.rs",
-          "line": 263
+          "line": 116
         },
         "implementation": {
           "file": "crates/odir/src/commands/status.rs",
           "line": 153
         },
-        "declared_arguments": [],
+        "declared_arguments": [
+          "dir",
+          "current",
+          "last",
+          "header",
+          "scheduled",
+          "running",
+          "terminated",
+          "storage",
+          "waitreservation",
+          "devices",
+          "volumes",
+          "spooling",
+          "client"
+        ],
         "status": "parity_verified",
         "findings": [
           "Paritätslauf 18.10.2026 (`development` `579da25`): 28 von 28 Fällen byte-identisch; Modi: Text, API 2.",
@@ -2589,13 +2644,16 @@
         "handler": "commands::dot::cmd_dot_storage",
         "registry": {
           "file": "crates/odir/src/command_registry.rs",
-          "line": 270
+          "line": 123
         },
         "implementation": {
           "file": "crates/odir/src/commands/dot.rs",
           "line": 113
         },
-        "declared_arguments": [],
+        "declared_arguments": [
+          "enabled",
+          "disabled"
+        ],
         "status": "parity_verified",
         "findings": [
           "Paritätslauf 18.10.2026 (`development` `579da25`): 22 von 22 Fällen byte-identisch; Modi: Text, API 2, Konsolen parity-acl, parity-bvfs, parity-limited, parity-operator."
@@ -2653,7 +2711,7 @@
         "handler": "commands::dot::cmd_dot_types",
         "registry": {
           "file": "crates/odir/src/command_registry.rs",
-          "line": 289
+          "line": 142
         },
         "implementation": {
           "file": "crates/odir/src/commands/dot.rs",
@@ -2697,7 +2755,7 @@
         "handler": "commands::dot::cmd_dot_volstatus",
         "registry": {
           "file": "crates/odir/src/command_registry.rs",
-          "line": 290
+          "line": 143
         },
         "implementation": {
           "file": "crates/odir/src/commands/dot.rs",
@@ -2748,7 +2806,7 @@
         "handler": "commands::bvfs::cmd_bvfs_lsdirs",
         "registry": {
           "file": "crates/odir/src/command_registry.rs",
-          "line": 313
+          "line": 169
         },
         "implementation": {
           "file": "crates/odir/src/commands/bvfs.rs",
@@ -2756,7 +2814,12 @@
         },
         "declared_arguments": [
           "jobid",
-          "pathid"
+          "path",
+          "pathid",
+          "limit",
+          "offset",
+          "pattern",
+          "filename"
         ],
         "status": "parity_verified",
         "findings": [
@@ -2810,7 +2873,7 @@
         "handler": "commands::bvfs::cmd_bvfs_lsfiles",
         "registry": {
           "file": "crates/odir/src/command_registry.rs",
-          "line": 314
+          "line": 170
         },
         "implementation": {
           "file": "crates/odir/src/commands/bvfs.rs",
@@ -2818,7 +2881,12 @@
         },
         "declared_arguments": [
           "jobid",
-          "pathid"
+          "path",
+          "pathid",
+          "limit",
+          "offset",
+          "pattern",
+          "filename"
         ],
         "status": "parity_verified",
         "findings": [
@@ -2866,14 +2934,15 @@
         "handler": "commands::bvfs::cmd_bvfs_update",
         "registry": {
           "file": "crates/odir/src/command_registry.rs",
-          "line": 309
+          "line": 165
         },
         "implementation": {
           "file": "crates/odir/src/commands/bvfs.rs",
           "line": 821
         },
         "declared_arguments": [
-          "jobid"
+          "jobid",
+          "catalog"
         ],
         "status": "parity_verified",
         "findings": [
@@ -2916,14 +2985,16 @@
         "handler": "commands::bvfs::cmd_bvfs_get_jobids",
         "registry": {
           "file": "crates/odir/src/command_registry.rs",
-          "line": 312
+          "line": 168
         },
         "implementation": {
           "file": "crates/odir/src/commands/bvfs.rs",
           "line": 982
         },
         "declared_arguments": [
-          "jobid"
+          "jobid",
+          "ujobid",
+          "all"
         ],
         "status": "parity_verified",
         "findings": [
@@ -2973,7 +3044,7 @@
         "handler": "commands::bvfs::cmd_bvfs_versions",
         "registry": {
           "file": "crates/odir/src/command_registry.rs",
-          "line": 315
+          "line": 171
         },
         "implementation": {
           "file": "crates/odir/src/commands/bvfs.rs",
@@ -2981,8 +3052,16 @@
         },
         "declared_arguments": [
           "jobid",
+          "client",
           "pathid",
-          "fname"
+          "path",
+          "filename",
+          "fname",
+          "name",
+          "copies",
+          "versions",
+          "limit",
+          "offset"
         ],
         "status": "parity_verified",
         "findings": [
@@ -3030,14 +3109,19 @@
         "handler": "commands::bvfs::cmd_bvfs_restore",
         "registry": {
           "file": "crates/odir/src/command_registry.rs",
-          "line": 316
+          "line": 172
         },
         "implementation": {
           "file": "crates/odir/src/commands/bvfs.rs",
           "line": 876
         },
         "declared_arguments": [
-          "jobid"
+          "path",
+          "jobid",
+          "fileid",
+          "dirid",
+          "hardlink",
+          "useemptypath"
         ],
         "status": "registered_unverified",
         "findings": [
@@ -3075,13 +3159,15 @@
         "handler": "commands::bvfs::cmd_bvfs_cleanup",
         "registry": {
           "file": "crates/odir/src/command_registry.rs",
-          "line": 310
+          "line": 166
         },
         "implementation": {
           "file": "crates/odir/src/commands/bvfs.rs",
           "line": 861
         },
-        "declared_arguments": [],
+        "declared_arguments": [
+          "path"
+        ],
         "status": "partial",
         "findings": [
           "Paritätslauf 18.10.2026 (`development` `579da25`): 1 von 1 Fällen byte-identisch; Modi: Text.",
@@ -3119,7 +3205,7 @@
         "handler": "commands::bvfs::cmd_bvfs_clear_cache",
         "registry": {
           "file": "crates/odir/src/command_registry.rs",
-          "line": 311
+          "line": 167
         },
         "implementation": {
           "file": "crates/odir/src/commands/bvfs.rs",
@@ -3171,14 +3257,19 @@
         "handler": "commands::extra::cmd_add",
         "registry": {
           "file": "crates/odir/src/command_registry.rs",
-          "line": 253
+          "line": 106
         },
         "implementation": {
           "file": "crates/odir/src/commands/extra.rs",
           "line": 849
         },
         "declared_arguments": [
-          "pool"
+          "pool",
+          "storage",
+          "jobid",
+          "volume",
+          "slot",
+          "drive"
         ],
         "status": "partial",
         "findings": [
@@ -3227,7 +3318,7 @@
         "handler": "commands::extra::cmd_autodisplay",
         "registry": {
           "file": "crates/odir/src/command_registry.rs",
-          "line": 221
+          "line": 87
         },
         "implementation": {
           "file": "crates/odir/src/commands/extra.rs",
@@ -3286,7 +3377,7 @@
         "handler": "commands::extra::cmd_automount",
         "registry": {
           "file": "crates/odir/src/command_registry.rs",
-          "line": 222
+          "line": 88
         },
         "implementation": {
           "file": "crates/odir/src/commands/extra.rs",
@@ -3348,14 +3439,21 @@
         "handler": "commands::cancel::cmd_cancel",
         "registry": {
           "file": "crates/odir/src/command_registry.rs",
-          "line": 126
+          "line": 48
         },
         "implementation": {
           "file": "crates/odir/src/commands/cancel.rs",
           "line": 64
         },
         "declared_arguments": [
-          "jobid"
+          "storage",
+          "sd",
+          "jobid",
+          "job",
+          "ujobid",
+          "state",
+          "all",
+          "yes"
         ],
         "status": "partial",
         "findings": [
@@ -3445,14 +3543,223 @@
         "handler": "commands::configure::cmd_configure",
         "registry": {
           "file": "crates/odir/src/command_registry.rs",
-          "line": 213
+          "line": 81
         },
         "implementation": {
           "file": "crates/odir/src/commands/configure.rs",
           "line": 53
         },
         "declared_arguments": [
-          "sub"
+          "add",
+          "client",
+          "name",
+          "description",
+          "protocol",
+          "authtype",
+          "address",
+          "lanaddress",
+          "port",
+          "username",
+          "password",
+          "catalog",
+          "passive",
+          "connectionfromdirectortoclient",
+          "connectionfromclienttodirector",
+          "enabled",
+          "hardquota",
+          "softquota",
+          "softquotagraceperiod",
+          "strictquotas",
+          "quotaincludefailedjobs",
+          "heartbeatinterval",
+          "maximumconcurrentjobs",
+          "maximumbandwidthperjob",
+          "ndmploglevel",
+          "ndmpblocksize",
+          "ndmpuselmdb",
+          "tlsauthenticate",
+          "tlsenable",
+          "tlsrequire",
+          "tlscipherlist",
+          "tlsciphersuites",
+          "tlsdhfile",
+          "tlsprotocol",
+          "tlsverifypeer",
+          "tlscacertificatefile",
+          "tlscacertificatedir",
+          "tlscertificaterevocationlist",
+          "tlscertificate",
+          "tlskey",
+          "tlsallowedcn",
+          "jobdefs",
+          "type",
+          "backupformat",
+          "level",
+          "messages",
+          "storage",
+          "pool",
+          "fullbackuppool",
+          "virtualfullbackuppool",
+          "incrementalbackuppool",
+          "differentialbackuppool",
+          "nextpool",
+          "fileset",
+          "schedule",
+          "jobtoverify",
+          "run",
+          "where",
+          "regexwhere",
+          "stripprefix",
+          "addprefix",
+          "addsuffix",
+          "bootstrap",
+          "writebootstrap",
+          "replace",
+          "maximumbandwidth",
+          "maxrunschedtime",
+          "maxruntime",
+          "fullmaxruntime",
+          "incrementalmaxruntime",
+          "differentialmaxruntime",
+          "maxwaittime",
+          "maxstartdelay",
+          "maxfullinterval",
+          "maxvirtualfullinterval",
+          "maxdiffinterval",
+          "prefixlinks",
+          "prunejobs",
+          "prunefiles",
+          "prunevolumes",
+          "purgemigrationjob",
+          "spoolattributes",
+          "spooldata",
+          "spoolsize",
+          "rerunfailedlevels",
+          "prefermountedvolumes",
+          "runbeforejob",
+          "runafterjob",
+          "runafterfailedjob",
+          "clientrunbeforejob",
+          "clientrunafterjob",
+          "rescheduleonerror",
+          "rescheduleinterval",
+          "rescheduletimes",
+          "priority",
+          "allowmixedpriority",
+          "selectionpattern",
+          "selectiontype",
+          "accurate",
+          "allowduplicatejobs",
+          "cancellowerlevelduplicates",
+          "cancelqueuedduplicates",
+          "cancelrunningduplicates",
+          "savefilehistory",
+          "filehistorysize",
+          "fdpluginoptions",
+          "sdpluginoptions",
+          "dirpluginoptions",
+          "maxconcurrentcopies",
+          "alwaysincremental",
+          "alwaysincrementaljobretention",
+          "alwaysincrementalkeepnumber",
+          "alwaysincrementalmaxfullage",
+          "maxfullconsolidations",
+          "runonincomingconnectinterval",
+          "job",
+          "device",
+          "mediatype",
+          "autochanger",
+          "allowcompression",
+          "cachestatusinterval",
+          "maximumconcurrentreadjobs",
+          "pairedstorage",
+          "ndmpchangerdevice",
+          "dbaddress",
+          "dbport",
+          "dbpassword",
+          "dbuser",
+          "dbname",
+          "dbsocket",
+          "reconnect",
+          "exitonfatal",
+          "minconnections",
+          "maxconnections",
+          "incconnections",
+          "idletimeout",
+          "validatetimeout",
+          "ignorefilesetchanges",
+          "enablevss",
+          "pooltype",
+          "labelformat",
+          "cleaningprefix",
+          "usecatalog",
+          "purgeoldestvolume",
+          "actiononpurge",
+          "recycleoldestvolume",
+          "recyclecurrentvolume",
+          "maximumvolumes",
+          "maximumvolumejobs",
+          "maximumvolumefiles",
+          "maximumvolumebytes",
+          "catalogfiles",
+          "volumeretention",
+          "volumeuseduration",
+          "migrationtime",
+          "migrationhighbytes",
+          "migrationlowbytes",
+          "autoprune",
+          "recycle",
+          "recyclepool",
+          "scratchpool",
+          "minimumblocksize",
+          "maximumblocksize",
+          "mailcommand",
+          "operatorcommand",
+          "timestampformat",
+          "syslog",
+          "mail",
+          "mailonerror",
+          "mailonsuccess",
+          "file",
+          "append",
+          "stdout",
+          "stderr",
+          "director",
+          "console",
+          "operator",
+          "counter",
+          "minimum",
+          "maximum",
+          "wrapcounter",
+          "profile",
+          "jobacl",
+          "clientacl",
+          "storageacl",
+          "scheduleacl",
+          "poolacl",
+          "commandacl",
+          "filesetacl",
+          "catalogacl",
+          "whereacl",
+          "pluginoptionsacl",
+          "user",
+          "export",
+          "read",
+          "update",
+          "yes",
+          "fdaddress",
+          "fdport",
+          "fdpassword",
+          "verifyjob",
+          "runscript",
+          "newclient",
+          "newfileset",
+          "newpool",
+          "newstorage",
+          "newschedule",
+          "include",
+          "exclude",
+          "delete"
         ],
         "status": "parity_verified",
         "findings": [
@@ -3537,7 +3844,7 @@
         "handler": "commands::extra::cmd_create",
         "registry": {
           "file": "crates/odir/src/command_registry.rs",
-          "line": 252
+          "line": 105
         },
         "implementation": {
           "file": "crates/odir/src/commands/extra.rs",
@@ -3594,15 +3901,19 @@
         "handler": "commands::extra::cmd_delete",
         "registry": {
           "file": "crates/odir/src/command_registry.rs",
-          "line": 193
+          "line": 72
         },
         "implementation": {
           "file": "crates/odir/src/commands/extra.rs",
           "line": 565
         },
         "declared_arguments": [
+          "yes",
+          "catalog",
           "volume",
-          "jobid"
+          "pool",
+          "jobid",
+          "storage"
         ],
         "status": "partial",
         "findings": [
@@ -3679,11 +3990,11 @@
         "handler": "commands::job::cmd_disable",
         "registry": {
           "file": "crates/odir/src/command_registry.rs",
-          "line": 147
+          "line": 54
         },
         "implementation": {
           "file": "crates/odir/src/commands/job.rs",
-          "line": 2284
+          "line": 2285
         },
         "declared_arguments": [
           "job",
@@ -3765,11 +4076,11 @@
         "handler": "commands::job::cmd_enable",
         "registry": {
           "file": "crates/odir/src/command_registry.rs",
-          "line": 140
+          "line": 52
         },
         "implementation": {
           "file": "crates/odir/src/commands/job.rs",
-          "line": 2280
+          "line": 2281
         },
         "declared_arguments": [
           "job",
@@ -3853,7 +4164,7 @@
         "handler": "commands::estimate::cmd_estimate",
         "registry": {
           "file": "crates/odir/src/command_registry.rs",
-          "line": 186
+          "line": 70
         },
         "implementation": {
           "file": "crates/odir/src/commands/estimate.rs",
@@ -3862,8 +4173,12 @@
         "declared_arguments": [
           "job",
           "client",
+          "fd",
           "fileset",
-          "level"
+          "level",
+          "accurate",
+          "listing",
+          "catalog"
         ],
         "status": "parity_verified",
         "findings": [
@@ -3946,7 +4261,7 @@
         "handler": "commands::basic::cmd_quit",
         "registry": {
           "file": "crates/odir/src/command_registry.rs",
-          "line": 103
+          "line": 39
         },
         "implementation": {
           "file": "crates/odir/src/commands/basic.rs",
@@ -3995,14 +4310,19 @@
         "handler": "commands::extra::cmd_export",
         "registry": {
           "file": "crates/odir/src/command_registry.rs",
-          "line": 255
+          "line": 108
         },
         "implementation": {
           "file": "crates/odir/src/commands/extra.rs",
           "line": 985
         },
         "declared_arguments": [
-          "storage"
+          "storage",
+          "srcslots",
+          "dstslots",
+          "volume",
+          "scan",
+          "drive"
         ],
         "status": "partial",
         "findings": [
@@ -4044,7 +4364,7 @@
         "handler": "commands::extra::cmd_gui",
         "registry": {
           "file": "crates/odir/src/command_registry.rs",
-          "line": 223
+          "line": 89
         },
         "implementation": {
           "file": "crates/odir/src/commands/extra.rs",
@@ -4116,15 +4436,13 @@
         "handler": "commands::basic::cmd_help",
         "registry": {
           "file": "crates/odir/src/command_registry.rs",
-          "line": 104
+          "line": 40
         },
         "implementation": {
           "file": "crates/odir/src/commands/basic.rs",
           "line": 130
         },
-        "declared_arguments": [
-          "command"
-        ],
+        "declared_arguments": [],
         "status": "parity_verified",
         "findings": [
           "Paritätslauf 18.10.2026 (`development` `579da25`): 11 von 11 Fällen byte-identisch; Modi: Text, API 1, API 2, Konsolen parity-limited."
@@ -4176,14 +4494,19 @@
         "handler": "commands::extra::cmd_import",
         "registry": {
           "file": "crates/odir/src/command_registry.rs",
-          "line": 254
+          "line": 107
         },
         "implementation": {
           "file": "crates/odir/src/commands/extra.rs",
           "line": 981
         },
         "declared_arguments": [
-          "storage"
+          "storage",
+          "srcslots",
+          "dstslots",
+          "volume",
+          "scan",
+          "drive"
         ],
         "status": "partial",
         "findings": [
@@ -4231,7 +4554,7 @@
         "handler": "commands::admin::cmd_label",
         "registry": {
           "file": "crates/odir/src/command_registry.rs",
-          "line": 163
+          "line": 60
         },
         "implementation": {
           "file": "crates/odir/src/commands/admin.rs",
@@ -4239,8 +4562,18 @@
         },
         "declared_arguments": [
           "storage",
+          "sd",
           "volume",
-          "pool"
+          "pool",
+          "slot",
+          "catalog",
+          "slots",
+          "drive",
+          "barcodes",
+          "barcode",
+          "encrypt",
+          "yes",
+          "device"
         ],
         "status": "partial",
         "findings": [
@@ -4317,17 +4650,62 @@
         "handler": "commands::list::cmd_list",
         "registry": {
           "file": "crates/odir/src/command_registry.rs",
-          "line": 155
+          "line": 57
         },
         "implementation": {
           "file": "crates/odir/src/commands/list.rs",
           "line": 17
         },
         "declared_arguments": [
-          "what",
           "limit",
+          "offset",
+          "current",
+          "enabled",
+          "disabled",
+          "catalog",
+          "basefiles",
           "jobid",
-          "job"
+          "ujobid",
+          "backups",
+          "client",
+          "fileset",
+          "jobstatus",
+          "level",
+          "order",
+          "days",
+          "hours",
+          "reverse",
+          "clients",
+          "copies",
+          "files",
+          "type",
+          "filesets",
+          "filesetid",
+          "jobs",
+          "jobtype",
+          "joblevel",
+          "volume",
+          "pool",
+          "last",
+          "count",
+          "job",
+          "jobname",
+          "joblog",
+          "jobmedia",
+          "jobtotals",
+          "jobstatistics",
+          "log",
+          "media",
+          "all",
+          "nextvolume",
+          "pools",
+          "poolid",
+          "storages",
+          "storage",
+          "volumes",
+          "volumeid",
+          "mediaid",
+          "schedules"
         ],
         "status": "parity_verified",
         "findings": [
@@ -4720,17 +5098,62 @@
         "handler": "commands::list::cmd_list",
         "registry": {
           "file": "crates/odir/src/command_registry.rs",
-          "line": 155
+          "line": 57
         },
         "implementation": {
           "file": "crates/odir/src/commands/list.rs",
           "line": 17
         },
         "declared_arguments": [
-          "what",
           "limit",
+          "offset",
+          "current",
+          "enabled",
+          "disabled",
+          "catalog",
+          "basefiles",
           "jobid",
-          "job"
+          "ujobid",
+          "backups",
+          "client",
+          "fileset",
+          "jobstatus",
+          "level",
+          "order",
+          "days",
+          "hours",
+          "reverse",
+          "clients",
+          "copies",
+          "files",
+          "type",
+          "filesets",
+          "filesetid",
+          "jobs",
+          "jobtype",
+          "joblevel",
+          "volume",
+          "pool",
+          "last",
+          "count",
+          "job",
+          "jobname",
+          "joblog",
+          "jobmedia",
+          "jobtotals",
+          "jobstatistics",
+          "log",
+          "media",
+          "all",
+          "nextvolume",
+          "pools",
+          "poolid",
+          "storages",
+          "storage",
+          "volumes",
+          "volumeid",
+          "mediaid",
+          "schedules"
         ],
         "status": "parity_verified",
         "findings": [
@@ -4885,7 +5308,7 @@
         "handler": "commands::extra::cmd_messages",
         "registry": {
           "file": "crates/odir/src/command_registry.rs",
-          "line": 224
+          "line": 90
         },
         "implementation": {
           "file": "crates/odir/src/commands/extra.rs",
@@ -4962,7 +5385,7 @@
         "handler": "commands::extra::cmd_memory",
         "registry": {
           "file": "crates/odir/src/command_registry.rs",
-          "line": 225
+          "line": 91
         },
         "implementation": {
           "file": "crates/odir/src/commands/extra.rs",
@@ -5014,14 +5437,21 @@
         "handler": "commands::admin::cmd_mount",
         "registry": {
           "file": "crates/odir/src/command_registry.rs",
-          "line": 169
+          "line": 62
         },
         "implementation": {
           "file": "crates/odir/src/commands/admin.rs",
           "line": 155
         },
         "declared_arguments": [
-          "storage"
+          "storage",
+          "sd",
+          "slot",
+          "drive",
+          "device",
+          "jobid",
+          "job",
+          "ujobid"
         ],
         "status": "partial",
         "findings": [
@@ -5081,13 +5511,18 @@
         "handler": "commands::extra::cmd_move",
         "registry": {
           "file": "crates/odir/src/command_registry.rs",
-          "line": 256
+          "line": 109
         },
         "implementation": {
           "file": "crates/odir/src/commands/extra.rs",
           "line": 989
         },
-        "declared_arguments": [],
+        "declared_arguments": [
+          "storage",
+          "srcslots",
+          "dstslots",
+          "drive"
+        ],
         "status": "partial",
         "findings": [
           "Paritätslauf 18.10.2026 (`development` `579da25`): 5 von 5 Fällen byte-identisch; Modi: Text, API 2.",
@@ -5132,15 +5567,24 @@
         "handler": "commands::admin::cmd_prune",
         "registry": {
           "file": "crates/odir/src/command_registry.rs",
-          "line": 198
+          "line": 74
         },
         "implementation": {
           "file": "crates/odir/src/commands/admin.rs",
           "line": 869
         },
         "declared_arguments": [
+          "files",
+          "client",
+          "pool",
+          "yes",
+          "jobs",
+          "jobtype",
           "volume",
-          "client"
+          "all",
+          "stats",
+          "directory",
+          "recursive"
         ],
         "status": "partial",
         "findings": [
@@ -5225,14 +5669,32 @@
         "handler": "commands::admin::cmd_purge",
         "registry": {
           "file": "crates/odir/src/command_registry.rs",
-          "line": 203
+          "line": 76
         },
         "implementation": {
           "file": "crates/odir/src/commands/admin.rs",
           "line": 1239
         },
         "declared_arguments": [
-          "volume"
+          "catalog",
+          "files",
+          "job",
+          "jobid",
+          "client",
+          "volume",
+          "yes",
+          "jobs",
+          "pool",
+          "jobstatus",
+          "all",
+          "allpools",
+          "volstatus",
+          "storage",
+          "devicetype",
+          "drive",
+          "action",
+          "dryrun",
+          "quota"
         ],
         "status": "partial",
         "findings": [
@@ -5320,7 +5782,7 @@
         "handler": "commands::basic::cmd_quit",
         "registry": {
           "file": "crates/odir/src/command_registry.rs",
-          "line": 103
+          "line": 39
         },
         "implementation": {
           "file": "crates/odir/src/commands/basic.rs",
@@ -5372,7 +5834,7 @@
         "handler": "commands::sql::cmd_query",
         "registry": {
           "file": "crates/odir/src/command_registry.rs",
-          "line": 218
+          "line": 84
         },
         "implementation": {
           "file": "crates/odir/src/commands/sql.rs",
@@ -5446,20 +5908,46 @@
         "handler": "commands::restore::cmd_restore",
         "registry": {
           "file": "crates/odir/src/command_registry.rs",
-          "line": 130
+          "line": 50
         },
         "implementation": {
           "file": "crates/odir/src/commands/restore.rs",
           "line": 90
         },
         "declared_arguments": [
-          "client",
-          "jobid",
           "where",
+          "client",
+          "storage",
+          "bootstrap",
+          "restorejob",
+          "comment",
+          "jobid",
+          "fileset",
           "replace",
-          "all",
+          "pluginoptions",
+          "regexwhere",
+          "fileregex",
+          "restoreclient",
+          "backupformat",
+          "pool",
+          "file",
+          "directory",
+          "before",
+          "strip_prefix",
+          "stripprefix",
+          "add_prefix",
+          "addprefix",
+          "add_suffix",
+          "addsuffix",
+          "select",
+          "current",
+          "copies",
+          "archive",
           "done",
-          "yes"
+          "all",
+          "job",
+          "yes",
+          "catalog"
         ],
         "status": "partial",
         "findings": [
@@ -5603,7 +6091,7 @@
         "handler": "commands::extra::cmd_relabel",
         "registry": {
           "file": "crates/odir/src/command_registry.rs",
-          "line": 251
+          "line": 104
         },
         "implementation": {
           "file": "crates/odir/src/commands/extra.rs",
@@ -5611,7 +6099,13 @@
         },
         "declared_arguments": [
           "storage",
-          "volume"
+          "oldvolume",
+          "volume",
+          "pool",
+          "slot",
+          "drive",
+          "encrypt",
+          "yes"
         ],
         "status": "partial",
         "findings": [
@@ -5661,14 +6155,21 @@
         "handler": "commands::admin::cmd_release",
         "registry": {
           "file": "crates/odir/src/command_registry.rs",
-          "line": 177
+          "line": 66
         },
         "implementation": {
           "file": "crates/odir/src/commands/admin.rs",
           "line": 163
         },
         "declared_arguments": [
-          "storage"
+          "storage",
+          "sd",
+          "drive",
+          "device",
+          "alldrives",
+          "jobid",
+          "job",
+          "ujobid"
         ],
         "status": "parity_verified",
         "findings": [
@@ -5715,7 +6216,7 @@
         "handler": "commands::admin::cmd_reload",
         "registry": {
           "file": "crates/odir/src/command_registry.rs",
-          "line": 212
+          "line": 80
         },
         "implementation": {
           "file": "crates/odir/src/commands/admin.rs",
@@ -5788,14 +6289,19 @@
         "handler": "commands::extra::cmd_rerun",
         "registry": {
           "file": "crates/odir/src/command_registry.rs",
-          "line": 250
+          "line": 103
         },
         "implementation": {
           "file": "crates/odir/src/commands/extra.rs",
           "line": 333
         },
         "declared_arguments": [
-          "jobid"
+          "jobid",
+          "since_jobid",
+          "until_jobid",
+          "days",
+          "hours",
+          "yes"
         ],
         "status": "partial",
         "findings": [
@@ -5869,7 +6375,7 @@
         "handler": "commands::resolve::cmd_resolve",
         "registry": {
           "file": "crates/odir/src/command_registry.rs",
-          "line": 249
+          "line": 102
         },
         "implementation": {
           "file": "crates/odir/src/commands/resolve.rs",
@@ -5877,7 +6383,9 @@
         },
         "declared_arguments": [
           "client",
-          "storage"
+          "fd",
+          "storage",
+          "sd"
         ],
         "status": "parity_verified",
         "findings": [
@@ -5957,7 +6465,7 @@
         "handler": "commands::job::cmd_run",
         "registry": {
           "file": "crates/odir/src/command_registry.rs",
-          "line": 114
+          "line": 46
         },
         "implementation": {
           "file": "crates/odir/src/commands/job.rs",
@@ -5965,13 +6473,38 @@
         },
         "declared_arguments": [
           "job",
-          "level",
           "client",
-          "storage",
-          "pool",
+          "fd",
           "fileset",
+          "level",
+          "storage",
+          "sd",
+          "where",
+          "regexwhere",
+          "bootstrap",
+          "replace",
           "when",
           "priority",
+          "verifyjob",
+          "files",
+          "catalog",
+          "since",
+          "cloned",
+          "verifylist",
+          "migrationjob",
+          "pool",
+          "nextpool",
+          "backupclient",
+          "restoreclient",
+          "pluginoptions",
+          "spooldata",
+          "comment",
+          "ignoreduplicatecheck",
+          "accurate",
+          "jobid",
+          "backupformat",
+          "consolidatejob",
+          "schedule",
           "yes"
         ],
         "status": "partial",
@@ -6222,16 +6755,34 @@
         "handler": "commands::status::cmd_status",
         "registry": {
           "file": "crates/odir/src/command_registry.rs",
-          "line": 107
+          "line": 43
         },
         "implementation": {
           "file": "crates/odir/src/commands/status.rs",
           "line": 91
         },
         "declared_arguments": [
-          "dir",
+          "all",
+          "director",
+          "days",
+          "verbose",
           "client",
-          "storage"
+          "storage",
+          "slots",
+          "drive",
+          "device",
+          "job",
+          "jobid",
+          "ujobid",
+          "scheduler",
+          "schedule",
+          "subscriptions",
+          "detail",
+          "clients",
+          "plugins",
+          "anonymize",
+          "unknown",
+          "configuration"
         ],
         "status": "partial",
         "findings": [
@@ -6346,7 +6897,7 @@
         "handler": "commands::bandwidth::cmd_setbandwidth",
         "registry": {
           "file": "crates/odir/src/command_registry.rs",
-          "line": 246
+          "line": 99
         },
         "implementation": {
           "file": "crates/odir/src/commands/bandwidth.rs",
@@ -6354,8 +6905,16 @@
         },
         "declared_arguments": [
           "client",
+          "fd",
           "storage",
-          "limit"
+          "sd",
+          "jobid",
+          "job",
+          "ujobid",
+          "state",
+          "all",
+          "limit",
+          "yes"
         ],
         "status": "partial",
         "findings": [
@@ -6453,7 +7012,7 @@
         "handler": "commands::debug::cmd_setdebug",
         "registry": {
           "file": "crates/odir/src/command_registry.rs",
-          "line": 237
+          "line": 98
         },
         "implementation": {
           "file": "crates/odir/src/commands/debug.rs",
@@ -6464,9 +7023,11 @@
           "trace",
           "timestamp",
           "hangup",
+          "tags",
           "client",
           "storage",
           "dir",
+          "director",
           "all"
         ],
         "status": "partial",
@@ -6520,14 +7081,16 @@
         "handler": "commands::extra::cmd_setdevice",
         "registry": {
           "file": "crates/odir/src/command_registry.rs",
-          "line": 248
+          "line": 101
         },
         "implementation": {
           "file": "crates/odir/src/commands/extra.rs",
           "line": 233
         },
         "declared_arguments": [
-          "storage"
+          "storage",
+          "device",
+          "autoselect"
         ],
         "status": "parity_verified",
         "findings": [
@@ -6590,15 +7153,13 @@
         "handler": "commands::extra::cmd_setip",
         "registry": {
           "file": "crates/odir/src/command_registry.rs",
-          "line": 247
+          "line": 100
         },
         "implementation": {
           "file": "crates/odir/src/commands/extra.rs",
           "line": 216
         },
-        "declared_arguments": [
-          "client"
-        ],
+        "declared_arguments": [],
         "status": "partial",
         "findings": [
           "Paritätslauf 18.10.2026 (`development` `579da25`): 3 von 3 Fällen byte-identisch; Modi: Text, API 2, Konsolen parity-limited.",
@@ -6651,14 +7212,43 @@
         "handler": "commands::show::cmd_show",
         "registry": {
           "file": "crates/odir/src/command_registry.rs",
-          "line": 226
+          "line": 92
         },
         "implementation": {
           "file": "crates/odir/src/commands/show.rs",
           "line": 173
         },
         "declared_arguments": [
-          "what"
+          "catalog",
+          "catalogs",
+          "client",
+          "clients",
+          "console",
+          "consoles",
+          "director",
+          "directors",
+          "fileset",
+          "filesets",
+          "job",
+          "jobs",
+          "message",
+          "messages",
+          "pool",
+          "pools",
+          "profile",
+          "profiles",
+          "schedule",
+          "schedules",
+          "storage",
+          "storages",
+          "user",
+          "users",
+          "counter",
+          "counters",
+          "jobdefs",
+          "all",
+          "verbose",
+          "disabled"
         ],
         "status": "parity_verified",
         "findings": [
@@ -6814,7 +7404,7 @@
         "handler": "commands::sql::cmd_sql_query",
         "registry": {
           "file": "crates/odir/src/command_registry.rs",
-          "line": 217
+          "line": 83
         },
         "implementation": {
           "file": "crates/odir/src/commands/sql.rs",
@@ -6891,7 +7481,7 @@
         "handler": "commands::basic::cmd_time",
         "registry": {
           "file": "crates/odir/src/command_registry.rs",
-          "line": 102
+          "line": 38
         },
         "implementation": {
           "file": "crates/odir/src/commands/basic.rs",
@@ -6935,7 +7525,7 @@
         "handler": "commands::extra::cmd_trace",
         "registry": {
           "file": "crates/odir/src/command_registry.rs",
-          "line": 230
+          "line": 93
         },
         "implementation": {
           "file": "crates/odir/src/commands/extra.rs",
@@ -6987,15 +7577,20 @@
         "handler": "commands::admin::cmd_truncate",
         "registry": {
           "file": "crates/odir/src/command_registry.rs",
-          "line": 207
+          "line": 78
         },
         "implementation": {
           "file": "crates/odir/src/commands/admin.rs",
           "line": 1517
         },
         "declared_arguments": [
+          "volstatus",
           "storage",
-          "volume"
+          "pool",
+          "volume",
+          "drive",
+          "yes",
+          "catalog"
         ],
         "status": "partial",
         "findings": [
@@ -7057,14 +7652,21 @@
         "handler": "commands::admin::cmd_unmount",
         "registry": {
           "file": "crates/odir/src/command_registry.rs",
-          "line": 173
+          "line": 64
         },
         "implementation": {
           "file": "crates/odir/src/commands/admin.rs",
           "line": 159
         },
         "declared_arguments": [
-          "storage"
+          "storage",
+          "sd",
+          "drive",
+          "device",
+          "alldrives",
+          "jobid",
+          "job",
+          "ujobid"
         ],
         "status": "partial",
         "findings": [
@@ -7109,14 +7711,21 @@
         "handler": "commands::admin::cmd_unmount",
         "registry": {
           "file": "crates/odir/src/command_registry.rs",
-          "line": 173
+          "line": 64
         },
         "implementation": {
           "file": "crates/odir/src/commands/admin.rs",
           "line": 159
         },
         "declared_arguments": [
-          "storage"
+          "storage",
+          "sd",
+          "drive",
+          "device",
+          "alldrives",
+          "jobid",
+          "job",
+          "ujobid"
         ],
         "status": "registered_unverified",
         "findings": [
@@ -7175,7 +7784,7 @@
         "handler": "commands::admin::cmd_update",
         "registry": {
           "file": "crates/odir/src/command_registry.rs",
-          "line": 181
+          "line": 68
         },
         "implementation": {
           "file": "crates/odir/src/commands/admin.rs",
@@ -7183,7 +7792,35 @@
         },
         "declared_arguments": [
           "volume",
-          "pool"
+          "volstatus",
+          "volretention",
+          "voluse",
+          "maxvoljobs",
+          "maxvolfiles",
+          "maxvolbytes",
+          "recycle",
+          "inchanger",
+          "slot",
+          "pool",
+          "recyclepool",
+          "fromallpools",
+          "allfrompool",
+          "enabled",
+          "actiononpurge",
+          "storage",
+          "encrypt",
+          "slots",
+          "sd",
+          "scan",
+          "drive",
+          "jobid",
+          "jobname",
+          "starttime",
+          "client",
+          "filesetid",
+          "jobtype",
+          "stats",
+          "days"
         ],
         "status": "partial",
         "findings": [
@@ -7331,7 +7968,7 @@
         "handler": "commands::extra::cmd_use",
         "registry": {
           "file": "crates/odir/src/command_registry.rs",
-          "line": 236
+          "line": 97
         },
         "implementation": {
           "file": "crates/odir/src/commands/extra.rs",
@@ -7384,7 +8021,7 @@
         "handler": "commands::extra::cmd_var",
         "registry": {
           "file": "crates/odir/src/command_registry.rs",
-          "line": 231
+          "line": 94
         },
         "implementation": {
           "file": "crates/odir/src/commands/extra.rs",
@@ -7443,7 +8080,7 @@
         "handler": "commands::basic::cmd_version",
         "registry": {
           "file": "crates/odir/src/command_registry.rs",
-          "line": 101
+          "line": 37
         },
         "implementation": {
           "file": "crates/odir/src/commands/basic.rs",
@@ -7500,7 +8137,7 @@
         "handler": "commands::wait::cmd_wait",
         "registry": {
           "file": "crates/odir/src/command_registry.rs",
-          "line": 232
+          "line": 95
         },
         "implementation": {
           "file": "crates/odir/src/commands/wait.rs",
@@ -7511,7 +8148,8 @@
           "jobname",
           "ujobid",
           "mount",
-          "timeout"
+          "timeout",
+          "catalog"
         ],
         "status": "partial",
         "findings": [
@@ -7589,7 +8227,7 @@
         "handler": "commands::extra::cmd_whoami",
         "registry": {
           "file": "crates/odir/src/command_registry.rs",
-          "line": 235
+          "line": 96
         },
         "implementation": {
           "file": "crates/odir/src/commands/extra.rs",
@@ -8421,13 +9059,32 @@
       "handler": "commands::acl::cmd_dot_acl",
       "registry": {
         "file": "crates/odir/src/command_registry.rs",
-        "line": 304
+        "line": 157
       },
       "implementation": {
         "file": "crates/odir/src/commands/acl.rs",
         "line": 134
       },
-      "declared_arguments": []
+      "declared_arguments": [
+        "list",
+        "console",
+        "set",
+        "jobacl",
+        "clientacl",
+        "storageacl",
+        "scheduleacl",
+        "poolacl",
+        "commandacl",
+        "filesetacl",
+        "catalogacl",
+        "whereacl",
+        "pluginoptionsacl",
+        "delete",
+        "clear",
+        "copy",
+        "from",
+        "to"
+      ]
     },
     {
       "name": ".config",
@@ -8435,25 +9092,41 @@
       "handler": "commands::config_crud::cmd_dot_config",
       "registry": {
         "file": "crates/odir/src/command_registry.rs",
-        "line": 319
+        "line": 175
       },
       "implementation": {
         "file": "crates/odir/src/commands/config_crud.rs",
         "line": 202
       },
       "declared_arguments": [
+        "json",
         "capabilities",
         "list",
-        "read",
-        "create",
-        "update",
-        "delete",
         "type",
+        "read",
         "name",
-        "sha256",
+        "create",
         "text64",
         "validate_only",
-        "json"
+        "update",
+        "sha256",
+        "delete"
+      ]
+    },
+    {
+      "name": ".grammar",
+      "canonical_name": ".grammar",
+      "handler": "commands::grammar::cmd_dot_grammar",
+      "registry": {
+        "file": "crates/odir/src/command_registry.rs",
+        "line": 160
+      },
+      "implementation": {
+        "file": "crates/odir/src/commands/grammar.rs",
+        "line": 14
+      },
+      "declared_arguments": [
+        "command"
       ]
     },
     {
@@ -8462,13 +9135,18 @@
       "handler": "commands::dot::cmd_dot_grpc",
       "registry": {
         "file": "crates/odir/src/command_registry.rs",
-        "line": 295
+        "line": 148
       },
       "implementation": {
         "file": "crates/odir/src/commands/dot.rs",
         "line": 535
       },
-      "declared_arguments": []
+      "declared_arguments": [
+        "on",
+        "off",
+        "format",
+        "compact"
+      ]
     },
     {
       "name": ".ovfs_latest",
@@ -8476,7 +9154,7 @@
       "handler": "commands::ovfs::cmd_ovfs_latest",
       "registry": {
         "file": "crates/odir/src/command_registry.rs",
-        "line": 323
+        "line": 179
       },
       "implementation": {
         "file": "crates/odir/src/commands/ovfs.rs",
@@ -8494,7 +9172,7 @@
       "handler": "commands::ovfs::cmd_ovfs_ls",
       "registry": {
         "file": "crates/odir/src/command_registry.rs",
-        "line": 325
+        "line": 181
       },
       "implementation": {
         "file": "crates/odir/src/commands/ovfs.rs",
@@ -8514,7 +9192,7 @@
       "handler": "commands::ovfs::cmd_ovfs_status",
       "registry": {
         "file": "crates/odir/src/command_registry.rs",
-        "line": 322
+        "line": 178
       },
       "implementation": {
         "file": "crates/odir/src/commands/ovfs.rs",
@@ -8531,7 +9209,7 @@
       "handler": "commands::ovfs::cmd_ovfs_tree",
       "registry": {
         "file": "crates/odir/src/command_registry.rs",
-        "line": 324
+        "line": 180
       },
       "implementation": {
         "file": "crates/odir/src/commands/ovfs.rs",
@@ -8553,7 +9231,7 @@
       "handler": "commands::ovfs::cmd_ovfs_versions",
       "registry": {
         "file": "crates/odir/src/command_registry.rs",
-        "line": 326
+        "line": 182
       },
       "implementation": {
         "file": "crates/odir/src/commands/ovfs.rs",
@@ -8573,13 +9251,32 @@
       "handler": "commands::acl::cmd_dot_acl",
       "registry": {
         "file": "crates/odir/src/command_registry.rs",
-        "line": 304
+        "line": 157
       },
       "implementation": {
         "file": "crates/odir/src/commands/acl.rs",
         "line": 134
       },
-      "declared_arguments": []
+      "declared_arguments": [
+        "list",
+        "console",
+        "set",
+        "jobacl",
+        "clientacl",
+        "storageacl",
+        "scheduleacl",
+        "poolacl",
+        "commandacl",
+        "filesetacl",
+        "catalogacl",
+        "whereacl",
+        "pluginoptionsacl",
+        "delete",
+        "clear",
+        "copy",
+        "from",
+        "to"
+      ]
     },
     {
       "name": ".sqlcount",
@@ -8587,13 +9284,16 @@
       "handler": "commands::dot::cmd_dot_sqlcount",
       "registry": {
         "file": "crates/odir/src/command_registry.rs",
-        "line": 301
+        "line": 154
       },
       "implementation": {
         "file": "crates/odir/src/commands/dot.rs",
         "line": 580
       },
-      "declared_arguments": []
+      "declared_arguments": [
+        "table",
+        "catalog"
+      ]
     },
     {
       "name": ".sqlschema",
@@ -8601,13 +9301,16 @@
       "handler": "commands::dot::cmd_dot_sqlschema",
       "registry": {
         "file": "crates/odir/src/command_registry.rs",
-        "line": 300
+        "line": 153
       },
       "implementation": {
         "file": "crates/odir/src/commands/dot.rs",
         "line": 575
       },
-      "declared_arguments": []
+      "declared_arguments": [
+        "table",
+        "catalog"
+      ]
     },
     {
       "name": ".sqltables",
@@ -8615,13 +9318,15 @@
       "handler": "commands::dot::cmd_dot_sqltables",
       "registry": {
         "file": "crates/odir/src/command_registry.rs",
-        "line": 299
+        "line": 152
       },
       "implementation": {
         "file": "crates/odir/src/commands/dot.rs",
         "line": 570
       },
-      "declared_arguments": []
+      "declared_arguments": [
+        "catalog"
+      ]
     },
     {
       "name": ".storage",
@@ -8629,13 +9334,16 @@
       "handler": "commands::dot::cmd_dot_storage",
       "registry": {
         "file": "crates/odir/src/command_registry.rs",
-        "line": 270
+        "line": 123
       },
       "implementation": {
         "file": "crates/odir/src/commands/dot.rs",
         "line": 113
       },
-      "declared_arguments": []
+      "declared_arguments": [
+        "enabled",
+        "disabled"
+      ]
     }
   ]
 }
