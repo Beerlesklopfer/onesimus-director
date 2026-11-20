@@ -211,6 +211,8 @@ struct Cli {
 }
 
 fn main() {
+    // Before any thread or runtime: workers keep tokio's signal pipe open.
+    job_worker::reserve_tokio_signal_fds();
     let cli = Cli::parse();
     if let Some(dir) = &cli.write_man_pages {
         match manpages::write_all(command_grammar::roots(), dir, env!("CARGO_PKG_VERSION")) {

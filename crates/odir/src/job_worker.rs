@@ -1413,6 +1413,36 @@ impl JobHandle {
     pub fn resume(&self) { if self.pid > 0 { unsafe { libc::kill(self.pid, libc::SIGUSR2); } } }
 }
 
+/// The descriptors of tokio's process-wide signal pipe (see
+/// [`reserve_tokio_signal_fds`]); a worker keeps them open.
+static TOKIO_SIGNAL_FDS: std::sync::OnceLock<Vec<i32>> = std::sync::OnceLock::new();
+
+/// The open file descriptors of this process (Linux: `/proc/self/fd`).
+fn open_fds() -> std::collections::BTreeSet<i32> {
+    std::fs::read_dir("/proc/self/fd")
+        .map(|dir| dir.filter_map(|e| e.ok()?.file_name().to_str()?.parse().ok()).collect())
+        .unwrap_or_default()
+}
+
+/// Call first in `main`, before any thread or runtime: initialises tokio's
+/// process-wide signal pipe now and records its descriptors.
+///
+/// Every tokio runtime with I/O (the gRPC clients of `fd_grpc`/`sd_grpc`
+/// in a worker) clones that pipe. A worker closes all inherited
+/// descriptors after `fork`; when the parent had already created the pipe
+/// (catalog, gRPC server), the clone then failed with "Bad file descriptor"
+/// or, once the number was reused, "Invalid argument", and every worker
+/// silently fell back from gRPC to BNET. Keeping these two descriptors
+/// open in the worker fixes that.
+pub fn reserve_tokio_signal_fds() {
+    let before = open_fds();
+    if let Ok(rt) = tokio::runtime::Builder::new_current_thread().enable_all().build() {
+        drop(rt);
+    }
+    let fds = open_fds().difference(&before).copied().collect();
+    let _ = TOKIO_SIGNAL_FDS.set(fds);
+}
+
 /// Spawn a job worker process with dual pipes.
 #[cfg(unix)]
 pub fn spawn_job_worker(job_id: u32, job_name: &str, params: &JobParams) -> io::Result<JobHandle> {
@@ -1437,7 +1467,8 @@ pub fn spawn_job_worker(job_id: u32, job_name: &str, params: &JobParams) -> io::
             drop(logging_guard);
             drop(w2d_r); drop(d2w_w);
             // Close inherited FDs (TCP listener etc)
-            let keep = [w2d_w.as_raw_fd(), d2w_r.as_raw_fd()];
+            let mut keep = vec![w2d_w.as_raw_fd(), d2w_r.as_raw_fd()];
+            keep.extend(TOKIO_SIGNAL_FDS.get().into_iter().flatten());
             for fd in 3..1024 { if !keep.contains(&fd) { unsafe { libc::close(fd); } } }
 
             let proc_name = format!("job:{job_id}");
