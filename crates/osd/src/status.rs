@@ -5,15 +5,16 @@ use std::time::Duration;
 
 use tracing::debug;
 
-use bareos_bnet::{BnetStream, BnetSignal, BnetMessage, CramMd5Auth};
-use bareos_bnet::hello::{make_director_hello, SD_OK_HELLO};
-use bareos_bnet::tls_psk;
+use bareos_bnet::{BnetSignal, BnetMessage};
 
 /// Result of an SD status query.
 #[derive(Debug)]
 pub struct SdStatusResult {
+    /// Storage resource the query went to.
     pub storage_name: String,
+    /// The SD's status output, or the error text.
     pub status_text: String,
+    /// Whether the SD answered.
     pub success: bool,
 }
 
@@ -38,43 +39,12 @@ pub fn query_sd_status(
         Ok(s) => s,
         Err(e) => return fail(storage_name, &format!("connect {addr}: {e}")),
     };
-    stream.set_read_timeout(Some(Duration::from_secs(30))).ok();
-
-    let psk_identity = format!("R_DIRECTOR\x1e{director_name}");
-    let psk = tls_psk::password_to_psk(password);
-
-    match tls_psk::psk_connect(stream, &psk_identity, &psk) {
-        Ok(psk_stream) => {
-            debug!("SD {storage_name}: TLS-PSK OK");
-            do_sd_status(BnetStream::new(psk_stream), password, director_name, storage_name)
-        }
-        Err(e) => fail(storage_name, &format!("TLS-PSK: {e}")),
-    }
-}
-
-fn do_sd_status<S: std::io::Read + std::io::Write>(
-    mut bnet: BnetStream<S>,
-    password: &str,
-    director_name: &str,
-    storage_name: &str,
-) -> SdStatusResult {
-    let hello = make_director_hello(director_name);
-    if let Err(e) = bnet.send_str(&hello) {
-        return fail(storage_name, &format!("hello: {e}"));
-    }
-
-    let auth = CramMd5Auth::new(password, director_name, 2);
-    match auth.two_way_authenticate(&mut bnet, false) {
-        Ok(r) if r.success => debug!("SD {storage_name}: CRAM-MD5 OK"),
-        Ok(_) => return fail(storage_name, "CRAM-MD5 failed"),
-        Err(e) => return fail(storage_name, &format!("CRAM-MD5: {e}")),
+    // Handshake in crate::connect (one implementation since 20.11.2026).
+    let mut bnet = match crate::connect::connect_sd_on(stream, password, director_name, Some(Duration::from_secs(30))) {
+        Ok((bnet, _)) => bnet,
+        Err(e) => return fail(storage_name, &e.to_string()),
     };
-
-    match bnet.recv_str() {
-        Ok(msg) if msg.starts_with(SD_OK_HELLO) => {}
-        Ok(msg) => debug!("SD {storage_name}: unexpected: {msg}"),
-        Err(e) => return fail(storage_name, &format!("hello recv: {e}")),
-    }
+    debug!("SD {storage_name}: connected");
 
     if let Err(e) = bnet.send_str("status") {
         return fail(storage_name, &format!("status send: {e}"));

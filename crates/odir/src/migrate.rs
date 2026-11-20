@@ -429,7 +429,7 @@ pub fn start_worker(config: &DirectorConfig, catalog: &CatalogHandle, req: &Work
         sd_address: write.address.clone(), sd_port: write.port, sd_password: write.password.clone(),
         sd_device: write.devices.first().cloned().unwrap_or_default(), sd_media_type: write.media_type.clone(),
         director_name: config.director.name.clone(), pool_name: next_pool.clone(),
-        fileset_includes: Vec::new(), fileset_excludes: Vec::new(), since_utime: 0, prev_job: String::new(),
+        fileset_name: fileset.clone(), fileset_includes: Vec::new(), fileset_excludes: Vec::new(), since_utime: 0, prev_job: String::new(),
         where_path: None, regex_where: None, prefix_links: false, replace: None, restore_jobid: None, bootstrap: None, client_name: client.clone(),
         client_first_connection: false, passive_client: false, copy: Some(copy_session), verify: None, plugin_options: Vec::new(), backup: None,
     };

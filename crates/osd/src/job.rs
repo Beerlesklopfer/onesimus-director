@@ -7,25 +7,35 @@ use tracing::debug;
 /// SD session info returned from job setup.
 #[derive(Debug, Clone)]
 pub struct SdSession {
+    /// `Authorization=`: the key the FD presents to the SD for this job.
     pub auth_key: String,
+    /// `SDid=`: VolSessionId the SD writes the job's records under.
     pub vol_session_id: i32,
+    /// `SDtime=`: VolSessionTime (SD start time) of that session.
     pub vol_session_time: i32,
 }
 
 /// Job type for SD protocol.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SdJobType {
+    /// `type=B`, level from [`SdJobParams::level`].
     Backup,
+    /// `type=R`, level blank.
     Restore,
 }
 
 /// Parameters for SD job setup.
 #[derive(Debug, Clone)]
 pub struct SdJobParams {
+    /// `JobId=`: the job's catalog id.
     pub job_id: u32,
+    /// `job=`: the unique job name (`<Job>.<date>_<time>_<n>`).
     pub unique_job: String,
+    /// `job_name=`: name of the Job resource.
     pub job_name: String,
+    /// Backup or restore.
     pub job_type: SdJobType,
+    /// Backup level (`full`, `incremental`, `differential`); ignored for restores.
     pub level: String,
     /// Name of the Client resource (`client_name=`), not its address (D11).
     pub client_name: String,
@@ -34,8 +44,11 @@ pub struct SdJobParams {
     pub fileset: String,
     /// FileSet digest (`FileSetMD5=`); empty sends `**Dummy**`.
     pub fileset_md5: String,
+    /// `media_type=` of `use storage`.
     pub media_type: String,
+    /// `pool_name=` of `use storage`.
     pub pool_name: String,
+    /// `use device=`: the device the job asks for.
     pub device_name: String,
 }
 
@@ -98,17 +111,30 @@ pub fn sd_job_setup(sd: &mut BnetStream<PskStream>, p: &SdJobParams) -> Result<S
     Ok(SdSession { auth_key, vol_session_id, vol_session_time })
 }
 
+/// The `use storage` and `use device` lines of `p` (msgchan.cc
+/// `use_storage`, `use_device`); pool, media type and device go through
+/// BashSpaces as in `ReserveReadDevice`/`ReserveWriteDevice`. The storage
+/// name is `File`: the parameters carry none (open point, P1).
+pub fn use_device_commands(p: &SdJobParams) -> [String; 2] {
+    let bash = bareos_format::bash::bash_spaces;
+    let append = if p.job_type == SdJobType::Restore { 0 } else { 1 };
+    [
+        format!(
+            "use storage=File media_type={} pool_name={} pool_type=Backup append={append} copy=0 stripe=0\n",
+            bash(&p.media_type),
+            bash(&p.pool_name)
+        ),
+        format!("use device={}\n", bash(&p.device_name)),
+    ]
+}
+
 /// Send "use storage/device" commands to SD.
 /// Returns the SD's answer ("3000 OK use device device=...") and the job
 /// messages ("Jmsg Job=...") it sent before.
 pub fn sd_use_device(sd: &mut BnetStream<PskStream>, p: &SdJobParams) -> Result<(String, Vec<String>), String> {
-    let append = if p.job_type == SdJobType::Restore { 0 } else { 1 };
-    let cmd = format!(
-        "use storage=File media_type={} pool_name={} pool_type=Backup append={append} copy=0 stripe=0\n",
-        p.media_type, p.pool_name
-    );
-    sd.send_str(&cmd).map_err(|e| format!("send: {e}"))?;
-    sd.send_str(&format!("use device={}\n", p.device_name)).map_err(|e| format!("send: {e}"))?;
+    for cmd in use_device_commands(p) {
+        sd.send_str(&cmd).map_err(|e| format!("send: {e}"))?;
+    }
     sd.send_signal(BnetSignal::Eod).map_err(|e| format!("eod1: {e}"))?;
     sd.send_signal(BnetSignal::Eod).map_err(|e| format!("eod2: {e}"))?;
 
@@ -187,6 +213,29 @@ mod tests {
              SpoolSize=0 rerunning=0 VolSessionId=0 VolSessionTime=0 Quota=0 Protocol=0 BackupFormat=Native\n"
         );
         assert!(!cmd.contains("LinuxAll") && !cmd.contains("127.0.0.1"));
+    }
+
+    #[test]
+    fn d11_restore_with_the_real_fileset() {
+        let mut p = restore_params();
+        p.fileset = "Linux All".into();
+        let cmd = job_command(&p);
+        assert!(cmd.contains(" client_name=my\u{1}fd type=82 level=32 FileSet=Linux\u{1}All "), "{cmd}");
+    }
+
+    #[test]
+    fn use_device_lines_are_bashed_like_msgchan() {
+        let mut p = restore_params();
+        p.media_type = "V File".into();
+        p.pool_name = "V Pool".into();
+        p.device_name = "V Dev".into();
+        assert_eq!(use_device_commands(&p), [
+            "use storage=File media_type=V\u{1}File pool_name=V\u{1}Pool pool_type=Backup append=0 copy=0 stripe=0\n"
+                .to_string(),
+            "use device=V\u{1}Dev\n".to_string(),
+        ]);
+        p.job_type = SdJobType::Backup;
+        assert!(use_device_commands(&p)[0].contains(" append=1 "));
     }
 
     #[test]

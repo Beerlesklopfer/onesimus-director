@@ -2347,7 +2347,6 @@ name = "osd"
 version = "25.1.2+onesimus.0.2.0"
 dependencies = [
  "bareos-bnet",
- "bareos-config",
  "bareos-format",
  "serde",
  "serde_json",

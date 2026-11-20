@@ -1627,7 +1627,7 @@ Job { Name = single; Client = fd1; Storage = File }
             job_type: WorkerJobType::Backup, level: "Full".into(), fd_address: String::new(), fd_port: 0,
             fd_password: String::new(), fd_grpc: None, sd_address: String::new(), sd_port: 0, sd_password: String::new(),
             sd_device: String::new(), sd_media_type: String::new(), director_name: "dir".into(), pool_name: "Full".into(),
-            fileset_includes: Vec::new(), fileset_excludes: Vec::new(), since_utime: 0, prev_job: String::new(),
+            fileset_name: String::new(), fileset_includes: Vec::new(), fileset_excludes: Vec::new(), since_utime: 0, prev_job: String::new(),
             where_path: None, regex_where: None, prefix_links: false, replace: None, restore_jobid: None, bootstrap: None,
             client_name: String::new(), client_first_connection: false, passive_client: false, copy: None, verify: None, plugin_options: Vec::new(), backup: None }
     }

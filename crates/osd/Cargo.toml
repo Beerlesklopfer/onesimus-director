@@ -1,6 +1,6 @@
 [package]
 name = "osd"
-description = "Bareos Storage Daemon protocol — SD connection, job setup, CatReq relay, device management"
+description = "Storage Daemon interface — Director/client side of the SD protocol: connection, job setup, CatReq relay, device commands"
 version.workspace = true
 edition.workspace = true
 authors.workspace = true
@@ -9,7 +9,6 @@ license.workspace = true
 [dependencies]
 bareos-bnet.workspace = true
 bareos-format.workspace = true
-bareos-config.workspace = true
 
 tracing.workspace = true
 serde.workspace = true

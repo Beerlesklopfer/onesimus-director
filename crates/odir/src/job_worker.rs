@@ -84,6 +84,10 @@ pub struct JobParams {
     pub sd_media_type: String,
     pub director_name: String,
     pub pool_name: String,
+    /// Name of the Job resource's FileSet (`FileSet=` of the SD job
+    /// command); empty sends `**None**`.
+    #[serde(default)]
+    pub fileset_name: String,
     pub fileset_includes: Vec<String>,
     pub fileset_excludes: Vec<String>,
     // Incremental/Differential: timestamp of reference backup
@@ -837,8 +841,8 @@ fn to_sd_params(p: &JobParams) -> SdJobParams {
         job_type: match p.job_type { WorkerJobType::Restore => SdJobType::Restore, _ => SdJobType::Backup },
         level: p.level.clone(),
         client_name: p.client_name.clone(),
-        // JobParams carries no FileSet name for restores: **None** (open point)
-        fileset: String::new(),
+        // The Job resource's FileSet, as msgchan.cc sends jcr->res.fileset (D11).
+        fileset: p.fileset_name.clone(),
         fileset_md5: String::new(),
         media_type: p.sd_media_type.clone(),
         pool_name: p.pool_name.clone(),
@@ -1163,20 +1167,12 @@ pub(crate) fn connect_sd(p: &JobParams) -> Result<(BnetStream<tls_psk::PskStream
     connect_sd_on(p, sock)
 }
 
-/// TLS-PSK, Hello and CRAM-MD5 with the Storage daemon on a connected socket.
+/// TLS-PSK, Hello, CRAM-MD5 and the OK-Hello with the Storage daemon on a
+/// connected socket (`osd::connect::connect_sd_on`): a read timeout during
+/// the handshake, none afterwards, because a job may wait on the SD for as
+/// long as a mount takes.
 pub(crate) fn connect_sd_on(p: &JobParams, sock: std::net::TcpStream) -> Result<(BnetStream<tls_psk::PskStream>, String), String> {
-    sock.set_read_timeout(None).ok();
-    let psk = tls_psk::password_to_psk(&p.sd_password);
-    let stream = tls_psk::psk_connect(sock, &format!("R_DIRECTOR\x1e{}", p.director_name), &psk)
-        .map_err(|e| format!("TLS-PSK: {e}"))?;
-    let cipher = stream.cipher_name();
-    let mut bnet = BnetStream::new(stream);
-    bnet.send_str(&make_director_hello(&p.director_name)).map_err(|e| format!("hello: {e}"))?;
-    let auth = CramMd5Auth::new(&p.sd_password, &p.director_name, 2);
-    let r = auth.two_way_authenticate(&mut bnet, false).map_err(|e| format!("CRAM: {e}"))?;
-    if !r.success { return Err("CRAM failed".into()); }
-    let _ = bnet.recv_str(); // 3000 OK Hello
-    Ok((bnet, cipher))
+    osd::connect::connect_sd_on(sock, &p.sd_password, &p.director_name, None).map_err(|e| e.to_string())
 }
 
 fn resolve_connect(addr: &str, timeout_secs: u64) -> Result<std::net::TcpStream, String> {
@@ -1465,7 +1461,7 @@ mod wait_protocol_tests {
             level: "full".into(), fd_address: String::new(), fd_port: 0, fd_password: String::new(), fd_grpc: None,
             sd_address: String::new(), sd_port: 0, sd_password: String::new(), sd_device: String::new(),
             sd_media_type: String::new(), director_name: String::new(), pool_name: String::new(),
-            fileset_includes: vec![], fileset_excludes: vec![], since_utime: 0, prev_job: String::new(),
+            fileset_name: String::new(), fileset_includes: vec![], fileset_excludes: vec![], since_utime: 0, prev_job: String::new(),
             where_path: Some("/tmp/with space".into()), regex_where: None, prefix_links: false,
             replace: Some("ifnewer".into()), restore_jobid: None, bootstrap: None,
             client_name: String::new(), client_first_connection: false, passive_client: false, copy: None, verify: None, plugin_options: Vec::new(), backup: None,

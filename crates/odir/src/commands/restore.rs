@@ -1872,6 +1872,7 @@ pub(crate) fn start_restore(ctx: &ExecContext, launch: Launch) -> CommandResult 
         sd_media_type: storage.media_type.clone(),
         director_name: dir_name,
         pool_name: job.pool.clone(),
+        fileset_name: job.fileset.clone(),
         fileset_includes: vec![],
         fileset_excludes: vec![],
         since_utime: 0,

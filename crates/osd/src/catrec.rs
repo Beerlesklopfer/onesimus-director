@@ -16,10 +16,20 @@ use serde::{Serialize, Deserialize};
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(tag = "type")]
 pub enum CatReqMessage {
+    /// A catalog request of the SD for the Director.
     #[serde(rename = "cat_req")]
-    Request { job_id: u32, request: String },
+    Request {
+        /// Job the request belongs to.
+        job_id: u32,
+        /// The SD's CatReq line.
+        request: String,
+    },
+    /// The Director's answer to send back to the SD.
     #[serde(rename = "cat_resp")]
-    Response { response: String },
+    Response {
+        /// The answer line.
+        response: String,
+    },
 }
 
 /// Run the SD CatReq relay loop.
