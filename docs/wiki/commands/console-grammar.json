@@ -5528,7 +5528,7 @@
                 "list": true,
                 "positional": false,
                 "value_optional": false,
-                "description": "Volume status (Onesimus)",
+                "description": "Volume status (Onesimus); Purged and Recycle volumes are never selected, Cleaning tapes cannot be purged",
                 "values": [
                   "Full",
                   "Used",
@@ -5882,26 +5882,37 @@
                   {
                     "name": "protocol",
                     "kind": "value",
-                    "type": "string",
+                    "type": "enum",
                     "required": false,
                     "repeatable": false,
                     "group": null,
                     "list": false,
                     "positional": false,
                     "value_optional": false,
-                    "description": "Directive (auth_protocol_type)"
+                    "description": "Directive (auth_protocol_type)",
+                    "values": [
+                      "Native",
+                      "NDMPV2",
+                      "NDMPV3",
+                      "NDMPV4"
+                    ]
                   },
                   {
                     "name": "authtype",
                     "kind": "value",
-                    "type": "string",
+                    "type": "enum",
                     "required": false,
                     "repeatable": false,
                     "group": null,
                     "list": false,
                     "positional": false,
                     "value_optional": false,
-                    "description": "Directive (auth_type)"
+                    "description": "Directive (auth_type)",
+                    "values": [
+                      "None",
+                      "Clear",
+                      "MD5"
+                    ]
                   },
                   {
                     "name": "address",
@@ -5966,14 +5977,15 @@
                   {
                     "name": "catalog",
                     "kind": "value",
-                    "type": "string",
+                    "type": "resource",
                     "required": false,
                     "repeatable": false,
                     "group": null,
                     "list": false,
                     "positional": false,
                     "value_optional": false,
-                    "description": "Directive (res)"
+                    "description": "Directive (res)",
+                    "source": ".catalogs"
                   },
                   {
                     "name": "passive",
@@ -6409,26 +6421,42 @@
                   {
                     "name": "type",
                     "kind": "value",
-                    "type": "string",
+                    "type": "enum",
                     "required": true,
                     "repeatable": false,
                     "group": null,
                     "list": false,
                     "positional": false,
                     "value_optional": false,
-                    "description": "Directive (job_type)"
+                    "description": "Directive (job_type)",
+                    "values": [
+                      "Backup",
+                      "Admin",
+                      "Archive",
+                      "Verify",
+                      "Restore",
+                      "Migrate",
+                      "Copy",
+                      "Consolidate"
+                    ]
                   },
                   {
                     "name": "protocol",
                     "kind": "value",
-                    "type": "string",
+                    "type": "enum",
                     "required": false,
                     "repeatable": false,
                     "group": null,
                     "list": false,
                     "positional": false,
                     "value_optional": false,
-                    "description": "Directive (protocol_type)"
+                    "description": "Directive (protocol_type)",
+                    "values": [
+                      "Native",
+                      "NDMP_BAREOS",
+                      "NDMP",
+                      "NDMP_NATIVE"
+                    ]
                   },
                   {
                     "name": "backupformat",
@@ -6445,182 +6473,209 @@
                   {
                     "name": "level",
                     "kind": "value",
-                    "type": "string",
+                    "type": "enum",
                     "required": false,
                     "repeatable": false,
                     "group": null,
                     "list": false,
                     "positional": false,
                     "value_optional": false,
-                    "description": "Directive (backup_level)"
+                    "description": "Directive (backup_level)",
+                    "values": [
+                      "Full",
+                      "Base",
+                      "Incremental",
+                      "Differential",
+                      "Since",
+                      "VirtualFull",
+                      "Catalog",
+                      "InitCatalog",
+                      "VolumeToCatalog",
+                      "DiskToCatalog",
+                      "Data"
+                    ]
                   },
                   {
                     "name": "messages",
                     "kind": "value",
-                    "type": "string",
+                    "type": "resource",
                     "required": true,
                     "repeatable": false,
                     "group": null,
                     "list": false,
                     "positional": false,
                     "value_optional": false,
-                    "description": "Directive (res)"
+                    "description": "Directive (res)",
+                    "source": ".msgs"
                   },
                   {
                     "name": "storage",
                     "kind": "value",
-                    "type": "string",
+                    "type": "resource",
                     "required": false,
                     "repeatable": true,
                     "group": null,
                     "list": false,
                     "positional": false,
                     "value_optional": false,
-                    "description": "Directive (resource_list)"
+                    "description": "Directive (resource_list)",
+                    "source": ".storages"
                   },
                   {
                     "name": "pool",
                     "kind": "value",
-                    "type": "string",
+                    "type": "resource",
                     "required": true,
                     "repeatable": false,
                     "group": null,
                     "list": false,
                     "positional": false,
                     "value_optional": false,
-                    "description": "Directive (res)"
+                    "description": "Directive (res)",
+                    "source": ".pools"
                   },
                   {
                     "name": "fullbackuppool",
                     "kind": "value",
-                    "type": "string",
+                    "type": "resource",
                     "required": false,
                     "repeatable": false,
                     "group": null,
                     "list": false,
                     "positional": false,
                     "value_optional": false,
-                    "description": "Directive (res)"
+                    "description": "Directive (res)",
+                    "source": ".pools"
                   },
                   {
                     "name": "virtualfullbackuppool",
                     "kind": "value",
-                    "type": "string",
+                    "type": "resource",
                     "required": false,
                     "repeatable": false,
                     "group": null,
                     "list": false,
                     "positional": false,
                     "value_optional": false,
-                    "description": "Directive (res)"
+                    "description": "Directive (res)",
+                    "source": ".pools"
                   },
                   {
                     "name": "incrementalbackuppool",
                     "kind": "value",
-                    "type": "string",
+                    "type": "resource",
                     "required": false,
                     "repeatable": false,
                     "group": null,
                     "list": false,
                     "positional": false,
                     "value_optional": false,
-                    "description": "Directive (res)"
+                    "description": "Directive (res)",
+                    "source": ".pools"
                   },
                   {
                     "name": "differentialbackuppool",
                     "kind": "value",
-                    "type": "string",
+                    "type": "resource",
                     "required": false,
                     "repeatable": false,
                     "group": null,
                     "list": false,
                     "positional": false,
                     "value_optional": false,
-                    "description": "Directive (res)"
+                    "description": "Directive (res)",
+                    "source": ".pools"
                   },
                   {
                     "name": "nextpool",
                     "kind": "value",
-                    "type": "string",
+                    "type": "resource",
                     "required": false,
                     "repeatable": false,
                     "group": null,
                     "list": false,
                     "positional": false,
                     "value_optional": false,
-                    "description": "Directive (res)"
+                    "description": "Directive (res)",
+                    "source": ".pools"
                   },
                   {
                     "name": "client",
                     "kind": "value",
-                    "type": "string",
+                    "type": "resource",
                     "required": false,
                     "repeatable": false,
                     "group": null,
                     "list": false,
                     "positional": false,
                     "value_optional": false,
-                    "description": "Directive (res)"
+                    "description": "Directive (res)",
+                    "source": ".clients"
                   },
                   {
                     "name": "fileset",
                     "kind": "value",
-                    "type": "string",
+                    "type": "resource",
                     "required": false,
                     "repeatable": false,
                     "group": null,
                     "list": false,
                     "positional": false,
                     "value_optional": false,
-                    "description": "Directive (res)"
+                    "description": "Directive (res)",
+                    "source": ".filesets"
                   },
                   {
                     "name": "schedule",
                     "kind": "value",
-                    "type": "string",
+                    "type": "resource",
                     "required": false,
                     "repeatable": false,
                     "group": null,
                     "list": false,
                     "positional": false,
                     "value_optional": false,
-                    "description": "Directive (res)"
+                    "description": "Directive (res)",
+                    "source": ".schedule"
                   },
                   {
                     "name": "jobtoverify",
                     "kind": "value",
-                    "type": "string",
+                    "type": "resource",
                     "required": false,
                     "repeatable": false,
                     "group": null,
                     "list": false,
                     "positional": false,
                     "value_optional": false,
-                    "description": "Directive (res)"
+                    "description": "Directive (res)",
+                    "source": ".jobs"
                   },
                   {
                     "name": "catalog",
                     "kind": "value",
-                    "type": "string",
+                    "type": "resource",
                     "required": false,
                     "repeatable": false,
                     "group": null,
                     "list": false,
                     "positional": false,
                     "value_optional": false,
-                    "description": "Directive (res)"
+                    "description": "Directive (res)",
+                    "source": ".catalogs"
                   },
                   {
                     "name": "jobdefs",
                     "kind": "value",
-                    "type": "string",
+                    "type": "resource",
                     "required": false,
                     "repeatable": false,
                     "group": null,
                     "list": false,
                     "positional": false,
                     "value_optional": false,
-                    "description": "Directive (res)"
+                    "description": "Directive (res)",
+                    "source": ".jobdefs"
                   },
                   {
                     "name": "run",
@@ -6721,14 +6776,20 @@
                   {
                     "name": "replace",
                     "kind": "value",
-                    "type": "string",
+                    "type": "enum",
                     "required": false,
                     "repeatable": false,
                     "group": null,
                     "list": false,
                     "positional": false,
                     "value_optional": false,
-                    "description": "Directive (replace_option)"
+                    "description": "Directive (replace_option)",
+                    "values": [
+                      "Always",
+                      "IfNewer",
+                      "IfOlder",
+                      "Never"
+                    ]
                   },
                   {
                     "name": "maximumbandwidth",
@@ -7189,14 +7250,25 @@
                   {
                     "name": "selectiontype",
                     "kind": "value",
-                    "type": "string",
+                    "type": "enum",
                     "required": false,
                     "repeatable": false,
                     "group": null,
                     "list": false,
                     "positional": false,
                     "value_optional": false,
-                    "description": "Directive (migration_type)"
+                    "description": "Directive (migration_type)",
+                    "values": [
+                      "SmallestVolume",
+                      "OldestVolume",
+                      "PoolOccupancy",
+                      "PoolTime",
+                      "PoolUncopiedJobs",
+                      "Client",
+                      "Volume",
+                      "Job",
+                      "SqlQuery"
+                    ]
                   },
                   {
                     "name": "accurate",
@@ -7472,26 +7544,42 @@
                   {
                     "name": "type",
                     "kind": "value",
-                    "type": "string",
+                    "type": "enum",
                     "required": true,
                     "repeatable": false,
                     "group": null,
                     "list": false,
                     "positional": false,
                     "value_optional": false,
-                    "description": "Directive (job_type)"
+                    "description": "Directive (job_type)",
+                    "values": [
+                      "Backup",
+                      "Admin",
+                      "Archive",
+                      "Verify",
+                      "Restore",
+                      "Migrate",
+                      "Copy",
+                      "Consolidate"
+                    ]
                   },
                   {
                     "name": "protocol",
                     "kind": "value",
-                    "type": "string",
+                    "type": "enum",
                     "required": false,
                     "repeatable": false,
                     "group": null,
                     "list": false,
                     "positional": false,
                     "value_optional": false,
-                    "description": "Directive (protocol_type)"
+                    "description": "Directive (protocol_type)",
+                    "values": [
+                      "Native",
+                      "NDMP_BAREOS",
+                      "NDMP",
+                      "NDMP_NATIVE"
+                    ]
                   },
                   {
                     "name": "backupformat",
@@ -7508,182 +7596,209 @@
                   {
                     "name": "level",
                     "kind": "value",
-                    "type": "string",
+                    "type": "enum",
                     "required": false,
                     "repeatable": false,
                     "group": null,
                     "list": false,
                     "positional": false,
                     "value_optional": false,
-                    "description": "Directive (backup_level)"
+                    "description": "Directive (backup_level)",
+                    "values": [
+                      "Full",
+                      "Base",
+                      "Incremental",
+                      "Differential",
+                      "Since",
+                      "VirtualFull",
+                      "Catalog",
+                      "InitCatalog",
+                      "VolumeToCatalog",
+                      "DiskToCatalog",
+                      "Data"
+                    ]
                   },
                   {
                     "name": "messages",
                     "kind": "value",
-                    "type": "string",
+                    "type": "resource",
                     "required": true,
                     "repeatable": false,
                     "group": null,
                     "list": false,
                     "positional": false,
                     "value_optional": false,
-                    "description": "Directive (res)"
+                    "description": "Directive (res)",
+                    "source": ".msgs"
                   },
                   {
                     "name": "storage",
                     "kind": "value",
-                    "type": "string",
+                    "type": "resource",
                     "required": false,
                     "repeatable": true,
                     "group": null,
                     "list": false,
                     "positional": false,
                     "value_optional": false,
-                    "description": "Directive (resource_list)"
+                    "description": "Directive (resource_list)",
+                    "source": ".storages"
                   },
                   {
                     "name": "pool",
                     "kind": "value",
-                    "type": "string",
+                    "type": "resource",
                     "required": true,
                     "repeatable": false,
                     "group": null,
                     "list": false,
                     "positional": false,
                     "value_optional": false,
-                    "description": "Directive (res)"
+                    "description": "Directive (res)",
+                    "source": ".pools"
                   },
                   {
                     "name": "fullbackuppool",
                     "kind": "value",
-                    "type": "string",
+                    "type": "resource",
                     "required": false,
                     "repeatable": false,
                     "group": null,
                     "list": false,
                     "positional": false,
                     "value_optional": false,
-                    "description": "Directive (res)"
+                    "description": "Directive (res)",
+                    "source": ".pools"
                   },
                   {
                     "name": "virtualfullbackuppool",
                     "kind": "value",
-                    "type": "string",
+                    "type": "resource",
                     "required": false,
                     "repeatable": false,
                     "group": null,
                     "list": false,
                     "positional": false,
                     "value_optional": false,
-                    "description": "Directive (res)"
+                    "description": "Directive (res)",
+                    "source": ".pools"
                   },
                   {
                     "name": "incrementalbackuppool",
                     "kind": "value",
-                    "type": "string",
+                    "type": "resource",
                     "required": false,
                     "repeatable": false,
                     "group": null,
                     "list": false,
                     "positional": false,
                     "value_optional": false,
-                    "description": "Directive (res)"
+                    "description": "Directive (res)",
+                    "source": ".pools"
                   },
                   {
                     "name": "differentialbackuppool",
                     "kind": "value",
-                    "type": "string",
+                    "type": "resource",
                     "required": false,
                     "repeatable": false,
                     "group": null,
                     "list": false,
                     "positional": false,
                     "value_optional": false,
-                    "description": "Directive (res)"
+                    "description": "Directive (res)",
+                    "source": ".pools"
                   },
                   {
                     "name": "nextpool",
                     "kind": "value",
-                    "type": "string",
+                    "type": "resource",
                     "required": false,
                     "repeatable": false,
                     "group": null,
                     "list": false,
                     "positional": false,
                     "value_optional": false,
-                    "description": "Directive (res)"
+                    "description": "Directive (res)",
+                    "source": ".pools"
                   },
                   {
                     "name": "client",
                     "kind": "value",
-                    "type": "string",
+                    "type": "resource",
                     "required": false,
                     "repeatable": false,
                     "group": null,
                     "list": false,
                     "positional": false,
                     "value_optional": false,
-                    "description": "Directive (res)"
+                    "description": "Directive (res)",
+                    "source": ".clients"
                   },
                   {
                     "name": "fileset",
                     "kind": "value",
-                    "type": "string",
+                    "type": "resource",
                     "required": false,
                     "repeatable": false,
                     "group": null,
                     "list": false,
                     "positional": false,
                     "value_optional": false,
-                    "description": "Directive (res)"
+                    "description": "Directive (res)",
+                    "source": ".filesets"
                   },
                   {
                     "name": "schedule",
                     "kind": "value",
-                    "type": "string",
+                    "type": "resource",
                     "required": false,
                     "repeatable": false,
                     "group": null,
                     "list": false,
                     "positional": false,
                     "value_optional": false,
-                    "description": "Directive (res)"
+                    "description": "Directive (res)",
+                    "source": ".schedule"
                   },
                   {
                     "name": "jobtoverify",
                     "kind": "value",
-                    "type": "string",
+                    "type": "resource",
                     "required": false,
                     "repeatable": false,
                     "group": null,
                     "list": false,
                     "positional": false,
                     "value_optional": false,
-                    "description": "Directive (res)"
+                    "description": "Directive (res)",
+                    "source": ".jobs"
                   },
                   {
                     "name": "catalog",
                     "kind": "value",
-                    "type": "string",
+                    "type": "resource",
                     "required": false,
                     "repeatable": false,
                     "group": null,
                     "list": false,
                     "positional": false,
                     "value_optional": false,
-                    "description": "Directive (res)"
+                    "description": "Directive (res)",
+                    "source": ".catalogs"
                   },
                   {
                     "name": "jobdefs",
                     "kind": "value",
-                    "type": "string",
+                    "type": "resource",
                     "required": false,
                     "repeatable": false,
                     "group": null,
                     "list": false,
                     "positional": false,
                     "value_optional": false,
-                    "description": "Directive (res)"
+                    "description": "Directive (res)",
+                    "source": ".jobdefs"
                   },
                   {
                     "name": "run",
@@ -7784,14 +7899,20 @@
                   {
                     "name": "replace",
                     "kind": "value",
-                    "type": "string",
+                    "type": "enum",
                     "required": false,
                     "repeatable": false,
                     "group": null,
                     "list": false,
                     "positional": false,
                     "value_optional": false,
-                    "description": "Directive (replace_option)"
+                    "description": "Directive (replace_option)",
+                    "values": [
+                      "Always",
+                      "IfNewer",
+                      "IfOlder",
+                      "Never"
+                    ]
                   },
                   {
                     "name": "maximumbandwidth",
@@ -8252,14 +8373,25 @@
                   {
                     "name": "selectiontype",
                     "kind": "value",
-                    "type": "string",
+                    "type": "enum",
                     "required": false,
                     "repeatable": false,
                     "group": null,
                     "list": false,
                     "positional": false,
                     "value_optional": false,
-                    "description": "Directive (migration_type)"
+                    "description": "Directive (migration_type)",
+                    "values": [
+                      "SmallestVolume",
+                      "OldestVolume",
+                      "PoolOccupancy",
+                      "PoolTime",
+                      "PoolUncopiedJobs",
+                      "Client",
+                      "Volume",
+                      "Job",
+                      "SqlQuery"
+                    ]
                   },
                   {
                     "name": "accurate",
@@ -8535,26 +8667,37 @@
                   {
                     "name": "protocol",
                     "kind": "value",
-                    "type": "string",
+                    "type": "enum",
                     "required": false,
                     "repeatable": false,
                     "group": null,
                     "list": false,
                     "positional": false,
                     "value_optional": false,
-                    "description": "Directive (auth_protocol_type)"
+                    "description": "Directive (auth_protocol_type)",
+                    "values": [
+                      "Native",
+                      "NDMPV2",
+                      "NDMPV3",
+                      "NDMPV4"
+                    ]
                   },
                   {
                     "name": "authtype",
                     "kind": "value",
-                    "type": "string",
+                    "type": "enum",
                     "required": false,
                     "repeatable": false,
                     "group": null,
                     "list": false,
                     "positional": false,
                     "value_optional": false,
-                    "description": "Directive (auth_type)"
+                    "description": "Directive (auth_type)",
+                    "values": [
+                      "None",
+                      "Clear",
+                      "MD5"
+                    ]
                   },
                   {
                     "name": "address",
@@ -8739,14 +8882,15 @@
                   {
                     "name": "pairedstorage",
                     "kind": "value",
-                    "type": "string",
+                    "type": "resource",
                     "required": false,
                     "repeatable": false,
                     "group": null,
                     "list": false,
                     "positional": false,
                     "value_optional": false,
-                    "description": "Directive (res)"
+                    "description": "Directive (res)",
+                    "source": ".storages"
                   },
                   {
                     "name": "maximumbandwidthperjob",
@@ -9339,14 +9483,22 @@
                   {
                     "name": "pooltype",
                     "kind": "value",
-                    "type": "string",
+                    "type": "enum",
                     "required": false,
                     "repeatable": false,
                     "group": null,
                     "list": false,
                     "positional": false,
                     "value_optional": false,
-                    "description": "Directive (pooltype)"
+                    "description": "Directive (pooltype)",
+                    "values": [
+                      "Backup",
+                      "Copy",
+                      "Cloned",
+                      "Archive",
+                      "Migration",
+                      "Scratch"
+                    ]
                   },
                   {
                     "name": "labelformat",
@@ -9407,14 +9559,18 @@
                   {
                     "name": "actiononpurge",
                     "kind": "value",
-                    "type": "string",
+                    "type": "enum",
                     "required": false,
                     "repeatable": false,
                     "group": null,
                     "list": false,
                     "positional": false,
                     "value_optional": false,
-                    "description": "Directive (action_on_purge)"
+                    "description": "Directive (action_on_purge)",
+                    "values": [
+                      "None",
+                      "Truncate"
+                    ]
                   },
                   {
                     "name": "recycleoldestvolume",
@@ -9575,26 +9731,28 @@
                   {
                     "name": "nextpool",
                     "kind": "value",
-                    "type": "string",
+                    "type": "resource",
                     "required": false,
                     "repeatable": false,
                     "group": null,
                     "list": false,
                     "positional": false,
                     "value_optional": false,
-                    "description": "Directive (res)"
+                    "description": "Directive (res)",
+                    "source": ".pools"
                   },
                   {
                     "name": "storage",
                     "kind": "value",
-                    "type": "string",
+                    "type": "resource",
                     "required": false,
                     "repeatable": true,
                     "group": null,
                     "list": false,
                     "positional": false,
                     "value_optional": false,
-                    "description": "Directive (resource_list)"
+                    "description": "Directive (resource_list)",
+                    "source": ".storages"
                   },
                   {
                     "name": "autoprune",
@@ -9631,38 +9789,41 @@
                   {
                     "name": "recyclepool",
                     "kind": "value",
-                    "type": "string",
+                    "type": "resource",
                     "required": false,
                     "repeatable": false,
                     "group": null,
                     "list": false,
                     "positional": false,
                     "value_optional": false,
-                    "description": "Directive (res)"
+                    "description": "Directive (res)",
+                    "source": ".pools"
                   },
                   {
                     "name": "scratchpool",
                     "kind": "value",
-                    "type": "string",
+                    "type": "resource",
                     "required": false,
                     "repeatable": false,
                     "group": null,
                     "list": false,
                     "positional": false,
                     "value_optional": false,
-                    "description": "Directive (res)"
+                    "description": "Directive (res)",
+                    "source": ".pools"
                   },
                   {
                     "name": "catalog",
                     "kind": "value",
-                    "type": "string",
+                    "type": "resource",
                     "required": false,
                     "repeatable": false,
                     "group": null,
                     "list": false,
                     "positional": false,
                     "value_optional": false,
-                    "description": "Directive (res)"
+                    "description": "Directive (res)",
+                    "source": ".catalogs"
                   },
                   {
                     "name": "minimumblocksize",
@@ -9985,14 +10146,15 @@
                   {
                     "name": "catalog",
                     "kind": "value",
-                    "type": "string",
+                    "type": "resource",
                     "required": false,
                     "repeatable": false,
                     "group": null,
                     "list": false,
                     "positional": false,
                     "value_optional": false,
-                    "description": "Directive (res)"
+                    "description": "Directive (res)",
+                    "source": ".catalogs"
                   }
                 ],
                 "subs": []
@@ -10379,14 +10541,15 @@
                   {
                     "name": "profile",
                     "kind": "value",
-                    "type": "string",
+                    "type": "resource",
                     "required": false,
                     "repeatable": true,
                     "group": null,
                     "list": false,
                     "positional": false,
                     "value_optional": false,
-                    "description": "Directive (resource_list)"
+                    "description": "Directive (resource_list)",
+                    "source": ".profiles"
                   }
                 ],
                 "subs": []
@@ -10556,26 +10719,37 @@
                   {
                     "name": "protocol",
                     "kind": "value",
-                    "type": "string",
+                    "type": "enum",
                     "required": false,
                     "repeatable": true,
                     "group": null,
                     "list": false,
                     "positional": false,
                     "value_optional": false,
-                    "description": "Directive (empty value removes it)"
+                    "description": "Directive (empty value removes it)",
+                    "values": [
+                      "Native",
+                      "NDMPV2",
+                      "NDMPV3",
+                      "NDMPV4"
+                    ]
                   },
                   {
                     "name": "authtype",
                     "kind": "value",
-                    "type": "string",
+                    "type": "enum",
                     "required": false,
                     "repeatable": true,
                     "group": null,
                     "list": false,
                     "positional": false,
                     "value_optional": false,
-                    "description": "Directive (empty value removes it)"
+                    "description": "Directive (empty value removes it)",
+                    "values": [
+                      "None",
+                      "Clear",
+                      "MD5"
+                    ]
                   },
                   {
                     "name": "address",
@@ -10676,62 +10850,79 @@
                   {
                     "name": "catalog",
                     "kind": "value",
-                    "type": "string",
+                    "type": "resource",
                     "required": false,
                     "repeatable": true,
                     "group": null,
                     "list": false,
                     "positional": false,
                     "value_optional": false,
-                    "description": "Directive (empty value removes it)"
+                    "description": "Directive (empty value removes it)",
+                    "source": ".catalogs"
                   },
                   {
                     "name": "passive",
                     "kind": "value",
-                    "type": "string",
+                    "type": "bool",
                     "required": false,
                     "repeatable": true,
                     "group": null,
                     "list": false,
                     "positional": false,
                     "value_optional": false,
-                    "description": "Directive (empty value removes it)"
+                    "description": "Directive (empty value removes it)",
+                    "values": [
+                      "yes",
+                      "no"
+                    ]
                   },
                   {
                     "name": "connectionfromdirectortoclient",
                     "kind": "value",
-                    "type": "string",
+                    "type": "bool",
                     "required": false,
                     "repeatable": true,
                     "group": null,
                     "list": false,
                     "positional": false,
                     "value_optional": false,
-                    "description": "Directive (empty value removes it)"
+                    "description": "Directive (empty value removes it)",
+                    "values": [
+                      "yes",
+                      "no"
+                    ]
                   },
                   {
                     "name": "connectionfromclienttodirector",
                     "kind": "value",
-                    "type": "string",
+                    "type": "bool",
                     "required": false,
                     "repeatable": true,
                     "group": null,
                     "list": false,
                     "positional": false,
                     "value_optional": false,
-                    "description": "Directive (empty value removes it)"
+                    "description": "Directive (empty value removes it)",
+                    "values": [
+                      "yes",
+                      "no"
+                    ]
                   },
                   {
                     "name": "enabled",
                     "kind": "value",
-                    "type": "string",
+                    "type": "bool",
                     "required": false,
                     "repeatable": true,
                     "group": null,
                     "list": false,
                     "positional": false,
                     "value_optional": false,
-                    "description": "Directive (empty value removes it)"
+                    "description": "Directive (empty value removes it)",
+                    "values": [
+                      "yes",
+                      "no"
+                    ]
                   },
                   {
                     "name": "hardquota",
@@ -10772,26 +10963,34 @@
                   {
                     "name": "strictquotas",
                     "kind": "value",
-                    "type": "string",
+                    "type": "bool",
                     "required": false,
                     "repeatable": true,
                     "group": null,
                     "list": false,
                     "positional": false,
                     "value_optional": false,
-                    "description": "Directive (empty value removes it)"
+                    "description": "Directive (empty value removes it)",
+                    "values": [
+                      "yes",
+                      "no"
+                    ]
                   },
                   {
                     "name": "quotaincludefailedjobs",
                     "kind": "value",
-                    "type": "string",
+                    "type": "bool",
                     "required": false,
                     "repeatable": true,
                     "group": null,
                     "list": false,
                     "positional": false,
                     "value_optional": false,
-                    "description": "Directive (empty value removes it)"
+                    "description": "Directive (empty value removes it)",
+                    "values": [
+                      "yes",
+                      "no"
+                    ]
                   },
                   {
                     "name": "heartbeatinterval",
@@ -10856,50 +11055,66 @@
                   {
                     "name": "ndmpuselmdb",
                     "kind": "value",
-                    "type": "string",
+                    "type": "bool",
                     "required": false,
                     "repeatable": true,
                     "group": null,
                     "list": false,
                     "positional": false,
                     "value_optional": false,
-                    "description": "Directive (empty value removes it)"
+                    "description": "Directive (empty value removes it)",
+                    "values": [
+                      "yes",
+                      "no"
+                    ]
                   },
                   {
                     "name": "tlsauthenticate",
                     "kind": "value",
-                    "type": "string",
+                    "type": "bool",
                     "required": false,
                     "repeatable": true,
                     "group": null,
                     "list": false,
                     "positional": false,
                     "value_optional": false,
-                    "description": "Directive (empty value removes it)"
+                    "description": "Directive (empty value removes it)",
+                    "values": [
+                      "yes",
+                      "no"
+                    ]
                   },
                   {
                     "name": "tlsenable",
                     "kind": "value",
-                    "type": "string",
+                    "type": "bool",
                     "required": false,
                     "repeatable": true,
                     "group": null,
                     "list": false,
                     "positional": false,
                     "value_optional": false,
-                    "description": "Directive (empty value removes it)"
+                    "description": "Directive (empty value removes it)",
+                    "values": [
+                      "yes",
+                      "no"
+                    ]
                   },
                   {
                     "name": "tlsrequire",
                     "kind": "value",
-                    "type": "string",
+                    "type": "bool",
                     "required": false,
                     "repeatable": true,
                     "group": null,
                     "list": false,
                     "positional": false,
                     "value_optional": false,
-                    "description": "Directive (empty value removes it)"
+                    "description": "Directive (empty value removes it)",
+                    "values": [
+                      "yes",
+                      "no"
+                    ]
                   },
                   {
                     "name": "tlscipherlist",
@@ -10952,14 +11167,18 @@
                   {
                     "name": "tlsverifypeer",
                     "kind": "value",
-                    "type": "string",
+                    "type": "bool",
                     "required": false,
                     "repeatable": true,
                     "group": null,
                     "list": false,
                     "positional": false,
                     "value_optional": false,
-                    "description": "Directive (empty value removes it)"
+                    "description": "Directive (empty value removes it)",
+                    "values": [
+                      "yes",
+                      "no"
+                    ]
                   },
                   {
                     "name": "tlscacertificatefile",
@@ -11075,26 +11294,42 @@
                   {
                     "name": "type",
                     "kind": "value",
-                    "type": "string",
+                    "type": "enum",
                     "required": false,
                     "repeatable": true,
                     "group": null,
                     "list": false,
                     "positional": false,
                     "value_optional": false,
-                    "description": "Directive (empty value removes it)"
+                    "description": "Directive (empty value removes it)",
+                    "values": [
+                      "Backup",
+                      "Admin",
+                      "Archive",
+                      "Verify",
+                      "Restore",
+                      "Migrate",
+                      "Copy",
+                      "Consolidate"
+                    ]
                   },
                   {
                     "name": "protocol",
                     "kind": "value",
-                    "type": "string",
+                    "type": "enum",
                     "required": false,
                     "repeatable": true,
                     "group": null,
                     "list": false,
                     "positional": false,
                     "value_optional": false,
-                    "description": "Directive (empty value removes it)"
+                    "description": "Directive (empty value removes it)",
+                    "values": [
+                      "Native",
+                      "NDMP_BAREOS",
+                      "NDMP",
+                      "NDMP_NATIVE"
+                    ]
                   },
                   {
                     "name": "backupformat",
@@ -11111,194 +11346,222 @@
                   {
                     "name": "level",
                     "kind": "value",
-                    "type": "string",
+                    "type": "enum",
                     "required": false,
                     "repeatable": true,
                     "group": null,
                     "list": false,
                     "positional": false,
                     "value_optional": false,
-                    "description": "Directive (empty value removes it)"
+                    "description": "Directive (empty value removes it)",
+                    "values": [
+                      "Full",
+                      "Base",
+                      "Incremental",
+                      "Differential",
+                      "Since",
+                      "VirtualFull",
+                      "Catalog",
+                      "InitCatalog",
+                      "VolumeToCatalog",
+                      "DiskToCatalog",
+                      "Data"
+                    ]
                   },
                   {
                     "name": "messages",
                     "kind": "value",
-                    "type": "string",
+                    "type": "resource",
                     "required": false,
                     "repeatable": true,
                     "group": null,
                     "list": false,
                     "positional": false,
                     "value_optional": false,
-                    "description": "Directive (empty value removes it)"
+                    "description": "Directive (empty value removes it)",
+                    "source": ".msgs"
                   },
                   {
                     "name": "storage",
                     "kind": "value",
-                    "type": "string",
+                    "type": "resource",
                     "required": false,
                     "repeatable": true,
                     "group": null,
                     "list": false,
                     "positional": false,
                     "value_optional": false,
-                    "description": "Directive (empty value removes it)"
+                    "description": "Directive (empty value removes it)",
+                    "source": ".storages"
                   },
                   {
                     "name": "pool",
                     "kind": "value",
-                    "type": "string",
+                    "type": "resource",
                     "required": false,
                     "repeatable": true,
                     "group": null,
                     "list": false,
                     "positional": false,
                     "value_optional": false,
-                    "description": "Directive (empty value removes it)"
+                    "description": "Directive (empty value removes it)",
+                    "source": ".pools"
                   },
                   {
                     "name": "fullbackuppool",
                     "kind": "value",
-                    "type": "string",
+                    "type": "resource",
                     "required": false,
                     "repeatable": true,
                     "group": null,
                     "list": false,
                     "positional": false,
                     "value_optional": false,
-                    "description": "Directive (empty value removes it)"
+                    "description": "Directive (empty value removes it)",
+                    "source": ".pools"
                   },
                   {
                     "name": "virtualfullbackuppool",
                     "kind": "value",
-                    "type": "string",
+                    "type": "resource",
                     "required": false,
                     "repeatable": true,
                     "group": null,
                     "list": false,
                     "positional": false,
                     "value_optional": false,
-                    "description": "Directive (empty value removes it)"
+                    "description": "Directive (empty value removes it)",
+                    "source": ".pools"
                   },
                   {
                     "name": "incrementalbackuppool",
                     "kind": "value",
-                    "type": "string",
+                    "type": "resource",
                     "required": false,
                     "repeatable": true,
                     "group": null,
                     "list": false,
                     "positional": false,
                     "value_optional": false,
-                    "description": "Directive (empty value removes it)"
+                    "description": "Directive (empty value removes it)",
+                    "source": ".pools"
                   },
                   {
                     "name": "differentialbackuppool",
                     "kind": "value",
-                    "type": "string",
+                    "type": "resource",
                     "required": false,
                     "repeatable": true,
                     "group": null,
                     "list": false,
                     "positional": false,
                     "value_optional": false,
-                    "description": "Directive (empty value removes it)"
+                    "description": "Directive (empty value removes it)",
+                    "source": ".pools"
                   },
                   {
                     "name": "nextpool",
                     "kind": "value",
-                    "type": "string",
+                    "type": "resource",
                     "required": false,
                     "repeatable": true,
                     "group": null,
                     "list": false,
                     "positional": false,
                     "value_optional": false,
-                    "description": "Directive (empty value removes it)"
+                    "description": "Directive (empty value removes it)",
+                    "source": ".pools"
                   },
                   {
                     "name": "client",
                     "kind": "value",
-                    "type": "string",
+                    "type": "resource",
                     "required": false,
                     "repeatable": true,
                     "group": null,
                     "list": false,
                     "positional": false,
                     "value_optional": false,
-                    "description": "Directive (empty value removes it)"
+                    "description": "Directive (empty value removes it)",
+                    "source": ".clients"
                   },
                   {
                     "name": "fileset",
                     "kind": "value",
-                    "type": "string",
+                    "type": "resource",
                     "required": false,
                     "repeatable": true,
                     "group": null,
                     "list": false,
                     "positional": false,
                     "value_optional": false,
-                    "description": "Directive (empty value removes it)"
+                    "description": "Directive (empty value removes it)",
+                    "source": ".filesets"
                   },
                   {
                     "name": "schedule",
                     "kind": "value",
-                    "type": "string",
+                    "type": "resource",
                     "required": false,
                     "repeatable": true,
                     "group": null,
                     "list": false,
                     "positional": false,
                     "value_optional": false,
-                    "description": "Directive (empty value removes it)"
+                    "description": "Directive (empty value removes it)",
+                    "source": ".schedule"
                   },
                   {
                     "name": "jobtoverify",
                     "kind": "value",
-                    "type": "string",
+                    "type": "resource",
                     "required": false,
                     "repeatable": true,
                     "group": null,
                     "list": false,
                     "positional": false,
                     "value_optional": false,
-                    "description": "Directive (empty value removes it)"
+                    "description": "Directive (empty value removes it)",
+                    "source": ".jobs"
                   },
                   {
                     "name": "verifyjob",
                     "kind": "value",
-                    "type": "string",
+                    "type": "resource",
                     "required": false,
                     "repeatable": true,
                     "group": null,
                     "list": false,
                     "positional": false,
                     "value_optional": false,
-                    "description": "Directive (empty value removes it)"
+                    "description": "Directive (empty value removes it)",
+                    "source": ".jobs"
                   },
                   {
                     "name": "catalog",
                     "kind": "value",
-                    "type": "string",
+                    "type": "resource",
                     "required": false,
                     "repeatable": true,
                     "group": null,
                     "list": false,
                     "positional": false,
                     "value_optional": false,
-                    "description": "Directive (empty value removes it)"
+                    "description": "Directive (empty value removes it)",
+                    "source": ".catalogs"
                   },
                   {
                     "name": "jobdefs",
                     "kind": "value",
-                    "type": "string",
+                    "type": "resource",
                     "required": false,
                     "repeatable": true,
                     "group": null,
                     "list": false,
                     "positional": false,
                     "value_optional": false,
-                    "description": "Directive (empty value removes it)"
+                    "description": "Directive (empty value removes it)",
+                    "source": ".jobdefs"
                   },
                   {
                     "name": "run",
@@ -11399,14 +11662,20 @@
                   {
                     "name": "replace",
                     "kind": "value",
-                    "type": "string",
+                    "type": "enum",
                     "required": false,
                     "repeatable": true,
                     "group": null,
                     "list": false,
                     "positional": false,
                     "value_optional": false,
-                    "description": "Directive (empty value removes it)"
+                    "description": "Directive (empty value removes it)",
+                    "values": [
+                      "Always",
+                      "IfNewer",
+                      "IfOlder",
+                      "Never"
+                    ]
                   },
                   {
                     "name": "maximumbandwidth",
@@ -11543,98 +11812,130 @@
                   {
                     "name": "prefixlinks",
                     "kind": "value",
-                    "type": "string",
+                    "type": "bool",
                     "required": false,
                     "repeatable": true,
                     "group": null,
                     "list": false,
                     "positional": false,
                     "value_optional": false,
-                    "description": "Directive (empty value removes it)"
+                    "description": "Directive (empty value removes it)",
+                    "values": [
+                      "yes",
+                      "no"
+                    ]
                   },
                   {
                     "name": "prunejobs",
                     "kind": "value",
-                    "type": "string",
+                    "type": "bool",
                     "required": false,
                     "repeatable": true,
                     "group": null,
                     "list": false,
                     "positional": false,
                     "value_optional": false,
-                    "description": "Directive (empty value removes it)"
+                    "description": "Directive (empty value removes it)",
+                    "values": [
+                      "yes",
+                      "no"
+                    ]
                   },
                   {
                     "name": "prunefiles",
                     "kind": "value",
-                    "type": "string",
+                    "type": "bool",
                     "required": false,
                     "repeatable": true,
                     "group": null,
                     "list": false,
                     "positional": false,
                     "value_optional": false,
-                    "description": "Directive (empty value removes it)"
+                    "description": "Directive (empty value removes it)",
+                    "values": [
+                      "yes",
+                      "no"
+                    ]
                   },
                   {
                     "name": "prunevolumes",
                     "kind": "value",
-                    "type": "string",
+                    "type": "bool",
                     "required": false,
                     "repeatable": true,
                     "group": null,
                     "list": false,
                     "positional": false,
                     "value_optional": false,
-                    "description": "Directive (empty value removes it)"
+                    "description": "Directive (empty value removes it)",
+                    "values": [
+                      "yes",
+                      "no"
+                    ]
                   },
                   {
                     "name": "purgemigrationjob",
                     "kind": "value",
-                    "type": "string",
+                    "type": "bool",
                     "required": false,
                     "repeatable": true,
                     "group": null,
                     "list": false,
                     "positional": false,
                     "value_optional": false,
-                    "description": "Directive (empty value removes it)"
+                    "description": "Directive (empty value removes it)",
+                    "values": [
+                      "yes",
+                      "no"
+                    ]
                   },
                   {
                     "name": "enabled",
                     "kind": "value",
-                    "type": "string",
+                    "type": "bool",
                     "required": false,
                     "repeatable": true,
                     "group": null,
                     "list": false,
                     "positional": false,
                     "value_optional": false,
-                    "description": "Directive (empty value removes it)"
+                    "description": "Directive (empty value removes it)",
+                    "values": [
+                      "yes",
+                      "no"
+                    ]
                   },
                   {
                     "name": "spoolattributes",
                     "kind": "value",
-                    "type": "string",
+                    "type": "bool",
                     "required": false,
                     "repeatable": true,
                     "group": null,
                     "list": false,
                     "positional": false,
                     "value_optional": false,
-                    "description": "Directive (empty value removes it)"
+                    "description": "Directive (empty value removes it)",
+                    "values": [
+                      "yes",
+                      "no"
+                    ]
                   },
                   {
                     "name": "spooldata",
                     "kind": "value",
-                    "type": "string",
+                    "type": "bool",
                     "required": false,
                     "repeatable": true,
                     "group": null,
                     "list": false,
                     "positional": false,
                     "value_optional": false,
-                    "description": "Directive (empty value removes it)"
+                    "description": "Directive (empty value removes it)",
+                    "values": [
+                      "yes",
+                      "no"
+                    ]
                   },
                   {
                     "name": "spoolsize",
@@ -11651,26 +11952,34 @@
                   {
                     "name": "rerunfailedlevels",
                     "kind": "value",
-                    "type": "string",
+                    "type": "bool",
                     "required": false,
                     "repeatable": true,
                     "group": null,
                     "list": false,
                     "positional": false,
                     "value_optional": false,
-                    "description": "Directive (empty value removes it)"
+                    "description": "Directive (empty value removes it)",
+                    "values": [
+                      "yes",
+                      "no"
+                    ]
                   },
                   {
                     "name": "prefermountedvolumes",
                     "kind": "value",
-                    "type": "string",
+                    "type": "bool",
                     "required": false,
                     "repeatable": true,
                     "group": null,
                     "list": false,
                     "positional": false,
                     "value_optional": false,
-                    "description": "Directive (empty value removes it)"
+                    "description": "Directive (empty value removes it)",
+                    "values": [
+                      "yes",
+                      "no"
+                    ]
                   },
                   {
                     "name": "runbeforejob",
@@ -11747,14 +12056,18 @@
                   {
                     "name": "rescheduleonerror",
                     "kind": "value",
-                    "type": "string",
+                    "type": "bool",
                     "required": false,
                     "repeatable": true,
                     "group": null,
                     "list": false,
                     "positional": false,
                     "value_optional": false,
-                    "description": "Directive (empty value removes it)"
+                    "description": "Directive (empty value removes it)",
+                    "values": [
+                      "yes",
+                      "no"
+                    ]
                   },
                   {
                     "name": "rescheduleinterval",
@@ -11795,14 +12108,18 @@
                   {
                     "name": "allowmixedpriority",
                     "kind": "value",
-                    "type": "string",
+                    "type": "bool",
                     "required": false,
                     "repeatable": true,
                     "group": null,
                     "list": false,
                     "positional": false,
                     "value_optional": false,
-                    "description": "Directive (empty value removes it)"
+                    "description": "Directive (empty value removes it)",
+                    "values": [
+                      "yes",
+                      "no"
+                    ]
                   },
                   {
                     "name": "selectionpattern",
@@ -11831,86 +12148,121 @@
                   {
                     "name": "selectiontype",
                     "kind": "value",
-                    "type": "string",
+                    "type": "enum",
                     "required": false,
                     "repeatable": true,
                     "group": null,
                     "list": false,
                     "positional": false,
                     "value_optional": false,
-                    "description": "Directive (empty value removes it)"
+                    "description": "Directive (empty value removes it)",
+                    "values": [
+                      "SmallestVolume",
+                      "OldestVolume",
+                      "PoolOccupancy",
+                      "PoolTime",
+                      "PoolUncopiedJobs",
+                      "Client",
+                      "Volume",
+                      "Job",
+                      "SqlQuery"
+                    ]
                   },
                   {
                     "name": "accurate",
                     "kind": "value",
-                    "type": "string",
+                    "type": "bool",
                     "required": false,
                     "repeatable": true,
                     "group": null,
                     "list": false,
                     "positional": false,
                     "value_optional": false,
-                    "description": "Directive (empty value removes it)"
+                    "description": "Directive (empty value removes it)",
+                    "values": [
+                      "yes",
+                      "no"
+                    ]
                   },
                   {
                     "name": "allowduplicatejobs",
                     "kind": "value",
-                    "type": "string",
+                    "type": "bool",
                     "required": false,
                     "repeatable": true,
                     "group": null,
                     "list": false,
                     "positional": false,
                     "value_optional": false,
-                    "description": "Directive (empty value removes it)"
+                    "description": "Directive (empty value removes it)",
+                    "values": [
+                      "yes",
+                      "no"
+                    ]
                   },
                   {
                     "name": "cancellowerlevelduplicates",
                     "kind": "value",
-                    "type": "string",
+                    "type": "bool",
                     "required": false,
                     "repeatable": true,
                     "group": null,
                     "list": false,
                     "positional": false,
                     "value_optional": false,
-                    "description": "Directive (empty value removes it)"
+                    "description": "Directive (empty value removes it)",
+                    "values": [
+                      "yes",
+                      "no"
+                    ]
                   },
                   {
                     "name": "cancelqueuedduplicates",
                     "kind": "value",
-                    "type": "string",
+                    "type": "bool",
                     "required": false,
                     "repeatable": true,
                     "group": null,
                     "list": false,
                     "positional": false,
                     "value_optional": false,
-                    "description": "Directive (empty value removes it)"
+                    "description": "Directive (empty value removes it)",
+                    "values": [
+                      "yes",
+                      "no"
+                    ]
                   },
                   {
                     "name": "cancelrunningduplicates",
                     "kind": "value",
-                    "type": "string",
+                    "type": "bool",
                     "required": false,
                     "repeatable": true,
                     "group": null,
                     "list": false,
                     "positional": false,
                     "value_optional": false,
-                    "description": "Directive (empty value removes it)"
+                    "description": "Directive (empty value removes it)",
+                    "values": [
+                      "yes",
+                      "no"
+                    ]
                   },
                   {
                     "name": "savefilehistory",
                     "kind": "value",
-                    "type": "string",
+                    "type": "bool",
                     "required": false,
                     "repeatable": true,
                     "group": null,
                     "list": false,
                     "positional": false,
                     "value_optional": false,
-                    "description": "Directive (empty value removes it)"
+                    "description": "Directive (empty value removes it)",
+                    "values": [
+                      "yes",
+                      "no"
+                    ]
                   },
                   {
                     "name": "filehistorysize",
@@ -11975,14 +12327,18 @@
                   {
                     "name": "alwaysincremental",
                     "kind": "value",
-                    "type": "string",
+                    "type": "bool",
                     "required": false,
                     "repeatable": true,
                     "group": null,
                     "list": false,
                     "positional": false,
                     "value_optional": false,
-                    "description": "Directive (empty value removes it)"
+                    "description": "Directive (empty value removes it)",
+                    "values": [
+                      "yes",
+                      "no"
+                    ]
                   },
                   {
                     "name": "alwaysincrementaljobretention",
@@ -12047,62 +12403,67 @@
                   {
                     "name": "newclient",
                     "kind": "value",
-                    "type": "string",
+                    "type": "resource",
                     "required": false,
                     "repeatable": true,
                     "group": null,
                     "list": false,
                     "positional": false,
                     "value_optional": false,
-                    "description": "Directive (empty value removes it)"
+                    "description": "Directive (empty value removes it)",
+                    "source": ".clients"
                   },
                   {
                     "name": "newfileset",
                     "kind": "value",
-                    "type": "string",
+                    "type": "resource",
                     "required": false,
                     "repeatable": true,
                     "group": null,
                     "list": false,
                     "positional": false,
                     "value_optional": false,
-                    "description": "Directive (empty value removes it)"
+                    "description": "Directive (empty value removes it)",
+                    "source": ".filesets"
                   },
                   {
                     "name": "newpool",
                     "kind": "value",
-                    "type": "string",
+                    "type": "resource",
                     "required": false,
                     "repeatable": true,
                     "group": null,
                     "list": false,
                     "positional": false,
                     "value_optional": false,
-                    "description": "Directive (empty value removes it)"
+                    "description": "Directive (empty value removes it)",
+                    "source": ".pools"
                   },
                   {
                     "name": "newstorage",
                     "kind": "value",
-                    "type": "string",
+                    "type": "resource",
                     "required": false,
                     "repeatable": true,
                     "group": null,
                     "list": false,
                     "positional": false,
                     "value_optional": false,
-                    "description": "Directive (empty value removes it)"
+                    "description": "Directive (empty value removes it)",
+                    "source": ".storages"
                   },
                   {
                     "name": "newschedule",
                     "kind": "value",
-                    "type": "string",
+                    "type": "resource",
                     "required": false,
                     "repeatable": true,
                     "group": null,
                     "list": false,
                     "positional": false,
                     "value_optional": false,
-                    "description": "Directive (empty value removes it)"
+                    "description": "Directive (empty value removes it)",
+                    "source": ".schedule"
                   }
                 ],
                 "subs": []
@@ -12146,26 +12507,42 @@
                   {
                     "name": "type",
                     "kind": "value",
-                    "type": "string",
+                    "type": "enum",
                     "required": false,
                     "repeatable": true,
                     "group": null,
                     "list": false,
                     "positional": false,
                     "value_optional": false,
-                    "description": "Directive (empty value removes it)"
+                    "description": "Directive (empty value removes it)",
+                    "values": [
+                      "Backup",
+                      "Admin",
+                      "Archive",
+                      "Verify",
+                      "Restore",
+                      "Migrate",
+                      "Copy",
+                      "Consolidate"
+                    ]
                   },
                   {
                     "name": "protocol",
                     "kind": "value",
-                    "type": "string",
+                    "type": "enum",
                     "required": false,
                     "repeatable": true,
                     "group": null,
                     "list": false,
                     "positional": false,
                     "value_optional": false,
-                    "description": "Directive (empty value removes it)"
+                    "description": "Directive (empty value removes it)",
+                    "values": [
+                      "Native",
+                      "NDMP_BAREOS",
+                      "NDMP",
+                      "NDMP_NATIVE"
+                    ]
                   },
                   {
                     "name": "backupformat",
@@ -12182,194 +12559,222 @@
                   {
                     "name": "level",
                     "kind": "value",
-                    "type": "string",
+                    "type": "enum",
                     "required": false,
                     "repeatable": true,
                     "group": null,
                     "list": false,
                     "positional": false,
                     "value_optional": false,
-                    "description": "Directive (empty value removes it)"
+                    "description": "Directive (empty value removes it)",
+                    "values": [
+                      "Full",
+                      "Base",
+                      "Incremental",
+                      "Differential",
+                      "Since",
+                      "VirtualFull",
+                      "Catalog",
+                      "InitCatalog",
+                      "VolumeToCatalog",
+                      "DiskToCatalog",
+                      "Data"
+                    ]
                   },
                   {
                     "name": "messages",
                     "kind": "value",
-                    "type": "string",
+                    "type": "resource",
                     "required": false,
                     "repeatable": true,
                     "group": null,
                     "list": false,
                     "positional": false,
                     "value_optional": false,
-                    "description": "Directive (empty value removes it)"
+                    "description": "Directive (empty value removes it)",
+                    "source": ".msgs"
                   },
                   {
                     "name": "storage",
                     "kind": "value",
-                    "type": "string",
+                    "type": "resource",
                     "required": false,
                     "repeatable": true,
                     "group": null,
                     "list": false,
                     "positional": false,
                     "value_optional": false,
-                    "description": "Directive (empty value removes it)"
+                    "description": "Directive (empty value removes it)",
+                    "source": ".storages"
                   },
                   {
                     "name": "pool",
                     "kind": "value",
-                    "type": "string",
+                    "type": "resource",
                     "required": false,
                     "repeatable": true,
                     "group": null,
                     "list": false,
                     "positional": false,
                     "value_optional": false,
-                    "description": "Directive (empty value removes it)"
+                    "description": "Directive (empty value removes it)",
+                    "source": ".pools"
                   },
                   {
                     "name": "fullbackuppool",
                     "kind": "value",
-                    "type": "string",
+                    "type": "resource",
                     "required": false,
                     "repeatable": true,
                     "group": null,
                     "list": false,
                     "positional": false,
                     "value_optional": false,
-                    "description": "Directive (empty value removes it)"
+                    "description": "Directive (empty value removes it)",
+                    "source": ".pools"
                   },
                   {
                     "name": "virtualfullbackuppool",
                     "kind": "value",
-                    "type": "string",
+                    "type": "resource",
                     "required": false,
                     "repeatable": true,
                     "group": null,
                     "list": false,
                     "positional": false,
                     "value_optional": false,
-                    "description": "Directive (empty value removes it)"
+                    "description": "Directive (empty value removes it)",
+                    "source": ".pools"
                   },
                   {
                     "name": "incrementalbackuppool",
                     "kind": "value",
-                    "type": "string",
+                    "type": "resource",
                     "required": false,
                     "repeatable": true,
                     "group": null,
                     "list": false,
                     "positional": false,
                     "value_optional": false,
-                    "description": "Directive (empty value removes it)"
+                    "description": "Directive (empty value removes it)",
+                    "source": ".pools"
                   },
                   {
                     "name": "differentialbackuppool",
                     "kind": "value",
-                    "type": "string",
+                    "type": "resource",
                     "required": false,
                     "repeatable": true,
                     "group": null,
                     "list": false,
                     "positional": false,
                     "value_optional": false,
-                    "description": "Directive (empty value removes it)"
+                    "description": "Directive (empty value removes it)",
+                    "source": ".pools"
                   },
                   {
                     "name": "nextpool",
                     "kind": "value",
-                    "type": "string",
+                    "type": "resource",
                     "required": false,
                     "repeatable": true,
                     "group": null,
                     "list": false,
                     "positional": false,
                     "value_optional": false,
-                    "description": "Directive (empty value removes it)"
+                    "description": "Directive (empty value removes it)",
+                    "source": ".pools"
                   },
                   {
                     "name": "client",
                     "kind": "value",
-                    "type": "string",
+                    "type": "resource",
                     "required": false,
                     "repeatable": true,
                     "group": null,
                     "list": false,
                     "positional": false,
                     "value_optional": false,
-                    "description": "Directive (empty value removes it)"
+                    "description": "Directive (empty value removes it)",
+                    "source": ".clients"
                   },
                   {
                     "name": "fileset",
                     "kind": "value",
-                    "type": "string",
+                    "type": "resource",
                     "required": false,
                     "repeatable": true,
                     "group": null,
                     "list": false,
                     "positional": false,
                     "value_optional": false,
-                    "description": "Directive (empty value removes it)"
+                    "description": "Directive (empty value removes it)",
+                    "source": ".filesets"
                   },
                   {
                     "name": "schedule",
                     "kind": "value",
-                    "type": "string",
+                    "type": "resource",
                     "required": false,
                     "repeatable": true,
                     "group": null,
                     "list": false,
                     "positional": false,
                     "value_optional": false,
-                    "description": "Directive (empty value removes it)"
+                    "description": "Directive (empty value removes it)",
+                    "source": ".schedule"
                   },
                   {
                     "name": "jobtoverify",
                     "kind": "value",
-                    "type": "string",
+                    "type": "resource",
                     "required": false,
                     "repeatable": true,
                     "group": null,
                     "list": false,
                     "positional": false,
                     "value_optional": false,
-                    "description": "Directive (empty value removes it)"
+                    "description": "Directive (empty value removes it)",
+                    "source": ".jobs"
                   },
                   {
                     "name": "verifyjob",
                     "kind": "value",
-                    "type": "string",
+                    "type": "resource",
                     "required": false,
                     "repeatable": true,
                     "group": null,
                     "list": false,
                     "positional": false,
                     "value_optional": false,
-                    "description": "Directive (empty value removes it)"
+                    "description": "Directive (empty value removes it)",
+                    "source": ".jobs"
                   },
                   {
                     "name": "catalog",
                     "kind": "value",
-                    "type": "string",
+                    "type": "resource",
                     "required": false,
                     "repeatable": true,
                     "group": null,
                     "list": false,
                     "positional": false,
                     "value_optional": false,
-                    "description": "Directive (empty value removes it)"
+                    "description": "Directive (empty value removes it)",
+                    "source": ".catalogs"
                   },
                   {
                     "name": "jobdefs",
                     "kind": "value",
-                    "type": "string",
+                    "type": "resource",
                     "required": false,
                     "repeatable": true,
                     "group": null,
                     "list": false,
                     "positional": false,
                     "value_optional": false,
-                    "description": "Directive (empty value removes it)"
+                    "description": "Directive (empty value removes it)",
+                    "source": ".jobdefs"
                   },
                   {
                     "name": "run",
@@ -12470,14 +12875,20 @@
                   {
                     "name": "replace",
                     "kind": "value",
-                    "type": "string",
+                    "type": "enum",
                     "required": false,
                     "repeatable": true,
                     "group": null,
                     "list": false,
                     "positional": false,
                     "value_optional": false,
-                    "description": "Directive (empty value removes it)"
+                    "description": "Directive (empty value removes it)",
+                    "values": [
+                      "Always",
+                      "IfNewer",
+                      "IfOlder",
+                      "Never"
+                    ]
                   },
                   {
                     "name": "maximumbandwidth",
@@ -12614,98 +13025,130 @@
                   {
                     "name": "prefixlinks",
                     "kind": "value",
-                    "type": "string",
+                    "type": "bool",
                     "required": false,
                     "repeatable": true,
                     "group": null,
                     "list": false,
                     "positional": false,
                     "value_optional": false,
-                    "description": "Directive (empty value removes it)"
+                    "description": "Directive (empty value removes it)",
+                    "values": [
+                      "yes",
+                      "no"
+                    ]
                   },
                   {
                     "name": "prunejobs",
                     "kind": "value",
-                    "type": "string",
+                    "type": "bool",
                     "required": false,
                     "repeatable": true,
                     "group": null,
                     "list": false,
                     "positional": false,
                     "value_optional": false,
-                    "description": "Directive (empty value removes it)"
+                    "description": "Directive (empty value removes it)",
+                    "values": [
+                      "yes",
+                      "no"
+                    ]
                   },
                   {
                     "name": "prunefiles",
                     "kind": "value",
-                    "type": "string",
+                    "type": "bool",
                     "required": false,
                     "repeatable": true,
                     "group": null,
                     "list": false,
                     "positional": false,
                     "value_optional": false,
-                    "description": "Directive (empty value removes it)"
+                    "description": "Directive (empty value removes it)",
+                    "values": [
+                      "yes",
+                      "no"
+                    ]
                   },
                   {
                     "name": "prunevolumes",
                     "kind": "value",
-                    "type": "string",
+                    "type": "bool",
                     "required": false,
                     "repeatable": true,
                     "group": null,
                     "list": false,
                     "positional": false,
                     "value_optional": false,
-                    "description": "Directive (empty value removes it)"
+                    "description": "Directive (empty value removes it)",
+                    "values": [
+                      "yes",
+                      "no"
+                    ]
                   },
                   {
                     "name": "purgemigrationjob",
                     "kind": "value",
-                    "type": "string",
+                    "type": "bool",
                     "required": false,
                     "repeatable": true,
                     "group": null,
                     "list": false,
                     "positional": false,
                     "value_optional": false,
-                    "description": "Directive (empty value removes it)"
+                    "description": "Directive (empty value removes it)",
+                    "values": [
+                      "yes",
+                      "no"
+                    ]
                   },
                   {
                     "name": "enabled",
                     "kind": "value",
-                    "type": "string",
+                    "type": "bool",
                     "required": false,
                     "repeatable": true,
                     "group": null,
                     "list": false,
                     "positional": false,
                     "value_optional": false,
-                    "description": "Directive (empty value removes it)"
+                    "description": "Directive (empty value removes it)",
+                    "values": [
+                      "yes",
+                      "no"
+                    ]
                   },
                   {
                     "name": "spoolattributes",
                     "kind": "value",
-                    "type": "string",
+                    "type": "bool",
                     "required": false,
                     "repeatable": true,
                     "group": null,
                     "list": false,
                     "positional": false,
                     "value_optional": false,
-                    "description": "Directive (empty value removes it)"
+                    "description": "Directive (empty value removes it)",
+                    "values": [
+                      "yes",
+                      "no"
+                    ]
                   },
                   {
                     "name": "spooldata",
                     "kind": "value",
-                    "type": "string",
+                    "type": "bool",
                     "required": false,
                     "repeatable": true,
                     "group": null,
                     "list": false,
                     "positional": false,
                     "value_optional": false,
-                    "description": "Directive (empty value removes it)"
+                    "description": "Directive (empty value removes it)",
+                    "values": [
+                      "yes",
+                      "no"
+                    ]
                   },
                   {
                     "name": "spoolsize",
@@ -12722,26 +13165,34 @@
                   {
                     "name": "rerunfailedlevels",
                     "kind": "value",
-                    "type": "string",
+                    "type": "bool",
                     "required": false,
                     "repeatable": true,
                     "group": null,
                     "list": false,
                     "positional": false,
                     "value_optional": false,
-                    "description": "Directive (empty value removes it)"
+                    "description": "Directive (empty value removes it)",
+                    "values": [
+                      "yes",
+                      "no"
+                    ]
                   },
                   {
                     "name": "prefermountedvolumes",
                     "kind": "value",
-                    "type": "string",
+                    "type": "bool",
                     "required": false,
                     "repeatable": true,
                     "group": null,
                     "list": false,
                     "positional": false,
                     "value_optional": false,
-                    "description": "Directive (empty value removes it)"
+                    "description": "Directive (empty value removes it)",
+                    "values": [
+                      "yes",
+                      "no"
+                    ]
                   },
                   {
                     "name": "runbeforejob",
@@ -12818,14 +13269,18 @@
                   {
                     "name": "rescheduleonerror",
                     "kind": "value",
-                    "type": "string",
+                    "type": "bool",
                     "required": false,
                     "repeatable": true,
                     "group": null,
                     "list": false,
                     "positional": false,
                     "value_optional": false,
-                    "description": "Directive (empty value removes it)"
+                    "description": "Directive (empty value removes it)",
+                    "values": [
+                      "yes",
+                      "no"
+                    ]
                   },
                   {
                     "name": "rescheduleinterval",
@@ -12866,14 +13321,18 @@
                   {
                     "name": "allowmixedpriority",
                     "kind": "value",
-                    "type": "string",
+                    "type": "bool",
                     "required": false,
                     "repeatable": true,
                     "group": null,
                     "list": false,
                     "positional": false,
                     "value_optional": false,
-                    "description": "Directive (empty value removes it)"
+                    "description": "Directive (empty value removes it)",
+                    "values": [
+                      "yes",
+                      "no"
+                    ]
                   },
                   {
                     "name": "selectionpattern",
@@ -12902,86 +13361,121 @@
                   {
                     "name": "selectiontype",
                     "kind": "value",
-                    "type": "string",
+                    "type": "enum",
                     "required": false,
                     "repeatable": true,
                     "group": null,
                     "list": false,
                     "positional": false,
                     "value_optional": false,
-                    "description": "Directive (empty value removes it)"
+                    "description": "Directive (empty value removes it)",
+                    "values": [
+                      "SmallestVolume",
+                      "OldestVolume",
+                      "PoolOccupancy",
+                      "PoolTime",
+                      "PoolUncopiedJobs",
+                      "Client",
+                      "Volume",
+                      "Job",
+                      "SqlQuery"
+                    ]
                   },
                   {
                     "name": "accurate",
                     "kind": "value",
-                    "type": "string",
+                    "type": "bool",
                     "required": false,
                     "repeatable": true,
                     "group": null,
                     "list": false,
                     "positional": false,
                     "value_optional": false,
-                    "description": "Directive (empty value removes it)"
+                    "description": "Directive (empty value removes it)",
+                    "values": [
+                      "yes",
+                      "no"
+                    ]
                   },
                   {
                     "name": "allowduplicatejobs",
                     "kind": "value",
-                    "type": "string",
+                    "type": "bool",
                     "required": false,
                     "repeatable": true,
                     "group": null,
                     "list": false,
                     "positional": false,
                     "value_optional": false,
-                    "description": "Directive (empty value removes it)"
+                    "description": "Directive (empty value removes it)",
+                    "values": [
+                      "yes",
+                      "no"
+                    ]
                   },
                   {
                     "name": "cancellowerlevelduplicates",
                     "kind": "value",
-                    "type": "string",
+                    "type": "bool",
                     "required": false,
                     "repeatable": true,
                     "group": null,
                     "list": false,
                     "positional": false,
                     "value_optional": false,
-                    "description": "Directive (empty value removes it)"
+                    "description": "Directive (empty value removes it)",
+                    "values": [
+                      "yes",
+                      "no"
+                    ]
                   },
                   {
                     "name": "cancelqueuedduplicates",
                     "kind": "value",
-                    "type": "string",
+                    "type": "bool",
                     "required": false,
                     "repeatable": true,
                     "group": null,
                     "list": false,
                     "positional": false,
                     "value_optional": false,
-                    "description": "Directive (empty value removes it)"
+                    "description": "Directive (empty value removes it)",
+                    "values": [
+                      "yes",
+                      "no"
+                    ]
                   },
                   {
                     "name": "cancelrunningduplicates",
                     "kind": "value",
-                    "type": "string",
+                    "type": "bool",
                     "required": false,
                     "repeatable": true,
                     "group": null,
                     "list": false,
                     "positional": false,
                     "value_optional": false,
-                    "description": "Directive (empty value removes it)"
+                    "description": "Directive (empty value removes it)",
+                    "values": [
+                      "yes",
+                      "no"
+                    ]
                   },
                   {
                     "name": "savefilehistory",
                     "kind": "value",
-                    "type": "string",
+                    "type": "bool",
                     "required": false,
                     "repeatable": true,
                     "group": null,
                     "list": false,
                     "positional": false,
                     "value_optional": false,
-                    "description": "Directive (empty value removes it)"
+                    "description": "Directive (empty value removes it)",
+                    "values": [
+                      "yes",
+                      "no"
+                    ]
                   },
                   {
                     "name": "filehistorysize",
@@ -13046,14 +13540,18 @@
                   {
                     "name": "alwaysincremental",
                     "kind": "value",
-                    "type": "string",
+                    "type": "bool",
                     "required": false,
                     "repeatable": true,
                     "group": null,
                     "list": false,
                     "positional": false,
                     "value_optional": false,
-                    "description": "Directive (empty value removes it)"
+                    "description": "Directive (empty value removes it)",
+                    "values": [
+                      "yes",
+                      "no"
+                    ]
                   },
                   {
                     "name": "alwaysincrementaljobretention",
@@ -13118,62 +13616,67 @@
                   {
                     "name": "newclient",
                     "kind": "value",
-                    "type": "string",
+                    "type": "resource",
                     "required": false,
                     "repeatable": true,
                     "group": null,
                     "list": false,
                     "positional": false,
                     "value_optional": false,
-                    "description": "Directive (empty value removes it)"
+                    "description": "Directive (empty value removes it)",
+                    "source": ".clients"
                   },
                   {
                     "name": "newfileset",
                     "kind": "value",
-                    "type": "string",
+                    "type": "resource",
                     "required": false,
                     "repeatable": true,
                     "group": null,
                     "list": false,
                     "positional": false,
                     "value_optional": false,
-                    "description": "Directive (empty value removes it)"
+                    "description": "Directive (empty value removes it)",
+                    "source": ".filesets"
                   },
                   {
                     "name": "newpool",
                     "kind": "value",
-                    "type": "string",
+                    "type": "resource",
                     "required": false,
                     "repeatable": true,
                     "group": null,
                     "list": false,
                     "positional": false,
                     "value_optional": false,
-                    "description": "Directive (empty value removes it)"
+                    "description": "Directive (empty value removes it)",
+                    "source": ".pools"
                   },
                   {
                     "name": "newstorage",
                     "kind": "value",
-                    "type": "string",
+                    "type": "resource",
                     "required": false,
                     "repeatable": true,
                     "group": null,
                     "list": false,
                     "positional": false,
                     "value_optional": false,
-                    "description": "Directive (empty value removes it)"
+                    "description": "Directive (empty value removes it)",
+                    "source": ".storages"
                   },
                   {
                     "name": "newschedule",
                     "kind": "value",
-                    "type": "string",
+                    "type": "resource",
                     "required": false,
                     "repeatable": true,
                     "group": null,
                     "list": false,
                     "positional": false,
                     "value_optional": false,
-                    "description": "Directive (empty value removes it)"
+                    "description": "Directive (empty value removes it)",
+                    "source": ".schedule"
                   }
                 ],
                 "subs": []
@@ -13229,14 +13732,18 @@
                   {
                     "name": "enabled",
                     "kind": "value",
-                    "type": "string",
+                    "type": "bool",
                     "required": false,
                     "repeatable": true,
                     "group": null,
                     "list": false,
                     "positional": false,
                     "value_optional": false,
-                    "description": "Directive (empty value removes it)"
+                    "description": "Directive (empty value removes it)",
+                    "values": [
+                      "yes",
+                      "no"
+                    ]
                   }
                 ],
                 "subs": []
@@ -13304,26 +13811,34 @@
                   {
                     "name": "ignorefilesetchanges",
                     "kind": "value",
-                    "type": "string",
+                    "type": "bool",
                     "required": false,
                     "repeatable": true,
                     "group": null,
                     "list": false,
                     "positional": false,
                     "value_optional": false,
-                    "description": "Directive (empty value removes it)"
+                    "description": "Directive (empty value removes it)",
+                    "values": [
+                      "yes",
+                      "no"
+                    ]
                   },
                   {
                     "name": "enablevss",
                     "kind": "value",
-                    "type": "string",
+                    "type": "bool",
                     "required": false,
                     "repeatable": true,
                     "group": null,
                     "list": false,
                     "positional": false,
                     "value_optional": false,
-                    "description": "Directive (empty value removes it)"
+                    "description": "Directive (empty value removes it)",
+                    "values": [
+                      "yes",
+                      "no"
+                    ]
                   }
                 ],
                 "subs": []

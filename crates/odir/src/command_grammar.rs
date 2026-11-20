@@ -997,6 +997,70 @@ mod tests {
         assert!(validate(roots, "nosuchcommand").is_err());
     }
 
+    /// Every directive of `configure add <type>` and `configure update
+    /// <type>=` whose item references a resource completes from the
+    /// dot-command of that type, every enum-typed item has its keywords and
+    /// every flag yes/no (directive tables of show_items.rs).
+    #[test]
+    fn configure_directives_have_value_sources() {
+        use crate::commands::show_items::Ty;
+        let configure = registry_roots().iter().find(|n| n.word == "configure").unwrap();
+        let (mut resources, mut enums) = (0, 0);
+        for verb in configure.subs.iter().filter(|s| s.word == "add" || s.word == "update") {
+            for node in &verb.subs {
+                let items = crate::config_check::items_of(&node.word).unwrap_or_else(|| panic!("{}", node.word));
+                for arg in &node.args {
+                    let item = crate::config_check::item_of(items, &arg.name)
+                        .or_else(|| arg.name.strip_prefix("new").and_then(|k| crate::config_check::item_of(items, k)));
+                    let Some(item) = item else { continue };
+                    let at = format!("configure {} {} {}", verb.word, node.word, arg.name);
+                    match item.ty {
+                        Ty::Res | Ty::AlistRes => {
+                            let code = item.code.unwrap_or_else(|| panic!("{at}: no resource code"));
+                            match crate::grammar_table::resource_source(code) {
+                                Some(source) => {
+                                    assert_eq!(arg.values, Values::Source(source.into()), "{at}");
+                                    assert_eq!(arg.arg_type, ArgType::Resource, "{at}");
+                                    resources += 1;
+                                }
+                                None => assert_eq!(code, "R_COUNTER", "{at}: resource without source"),
+                            }
+                        }
+                        Ty::Bool | Ty::Bit => assert_eq!(arg.arg_type, ArgType::Bool, "{at}"),
+                        ty => if let Some(values) = crate::commands::show::enum_values(ty) {
+                            assert_eq!(arg.arg_type, ArgType::Enum, "{at}");
+                            assert_eq!(arg.values, Values::Fixed(values.iter().map(|v| v.to_string()).collect()), "{at}");
+                            enums += 1;
+                        },
+                    }
+                }
+            }
+        }
+        assert!(resources > 50 && enums > 15, "{resources} resources, {enums} enums");
+        let add_job = &configure.subs[0].subs.iter().find(|n| n.word == "job").unwrap().args;
+        let find = |n: &str| add_job.iter().find(|a| a.name == n).unwrap_or_else(|| panic!("{n}"));
+        assert_eq!(find("client").values, Values::Source(".clients".into()));
+        assert_eq!(find("messages").values, Values::Source(".msgs".into()));
+        assert!(matches!(&find("type").values, Values::Fixed(v) if v.contains(&"Backup".to_string())));
+        assert!(matches!(&find("level").values, Values::Fixed(v) if v.contains(&"Incremental".to_string())));
+    }
+
+    /// Every value source names a registered dot-command.
+    #[test]
+    fn value_sources_are_registered_commands() {
+        let roots = registry_roots();
+        for root in roots {
+            for node in root.walk() {
+                for arg in node.args.iter().chain(node.value.as_deref()) {
+                    if let Values::Source(source) = &arg.values {
+                        assert!(source == COMMANDS_SOURCE || find_root(roots, source).is_some_and(|r| r.dot),
+                            "{} {} {}: unknown source {source}", root.word, node.word, arg.name);
+                    }
+                }
+            }
+        }
+    }
+
     #[test]
     fn usage_of_purge_volume() {
         let purge = registry_roots().iter().find(|n| n.word == "purge").unwrap();

@@ -16,7 +16,8 @@
 
 #![warn(clippy::missing_docs_in_private_items)]
 
-use crate::command_grammar::{boolean, enm, int, kw, pos, res, sub, val, vsub, GrammarArg, Node, COMMANDS_SOURCE};
+use crate::command_grammar::{boolean, enm, int, kw, pos, res, sub, val, vsub, ArgType, GrammarArg, Node, Values, COMMANDS_SOURCE};
+use crate::commands::show_items::{Item, Ty};
 
 // Value sources (dot-commands whose output lines are the values).
 /// Value source `.clients`.
@@ -545,7 +546,7 @@ fn purge() -> Node {
             kw("all", "Every volume of the pool selection (Onesimus)"),
             res("pool", "Pool name", POOLS).group("scope"),
             kw("allpools", "Every pool").group("scope"),
-            enm("volstatus", "Volume status (Onesimus)", &crate::commands::purge_bulk::VOLSTATUS).list(),
+            enm("volstatus", "Volume status (Onesimus); Purged and Recycle volumes are never selected, Cleaning tapes cannot be purged", &crate::commands::purge_bulk::VOLSTATUS).list(),
             res("volume", "Volumes for action= (several allowed)", MEDIA).repeat(),
             res("storage", "Storage name", STORAGES), val("devicetype", "Device type"), int("drive", "Drive number"),
             val("action", "Action on purge").values(&["truncate", "all"]),
@@ -559,10 +560,55 @@ fn purge() -> Node {
         .see(&["prune", "delete", "truncate"])
 }
 
+/// Value source of a directive that references a resource of the type
+/// `code` (`R_POOL` → `.pools`). None for a Counter (`WrapCounter`): no
+/// dot-command lists counters, in Bareos neither.
+pub(crate) fn resource_source(code: &str) -> Option<&'static str> {
+    Some(match code {
+        "R_CATALOG" => CATALOGS,
+        "R_CLIENT" => CLIENTS,
+        "R_CONSOLE" => CONSOLES,
+        "R_FILESET" => FILESETS,
+        "R_JOB" => JOBS,
+        "R_JOBDEFS" => JOBDEFS,
+        "R_MSGS" => MESSAGES,
+        "R_POOL" => POOLS,
+        "R_PROFILE" => PROFILES,
+        "R_SCHEDULE" => SCHEDULES,
+        "R_STORAGE" => STORAGES,
+        "R_USER" => USERS,
+        _ => return None,
+    })
+}
+
+/// Type and values of a configuration directive from its item in the
+/// directive tables: a resource reference gets the dot-command of the
+/// referenced type, an enum keyword the values of the Director's keyword
+/// tables ([`crate::commands::show::enum_values`]), a flag yes/no.
+fn typed_directive(arg: GrammarArg, item: Option<&Item>) -> GrammarArg {
+    let Some(item) = item else { return arg };
+    match item.ty {
+        Ty::Res | Ty::AlistRes => match item.code.and_then(resource_source) {
+            Some(source) => arg.source(source),
+            None => arg,
+        },
+        Ty::Bool | Ty::Bit => GrammarArg {
+            arg_type: ArgType::Bool,
+            values: Values::Fixed(vec!["yes".into(), "no".into()]),
+            ..arg
+        },
+        ty => match crate::commands::show::enum_values(ty) {
+            Some(values) => arg.values(&values),
+            None => arg,
+        },
+    }
+}
+
 /// Arguments of `configure add <type>` from the generated Bareos usage line
 /// (`name=<NAME> [description=<STRING>] ...`): bracketed ones optional,
-/// list types repeatable.
-fn configure_add_args(line: &str) -> Vec<GrammarArg> {
+/// list types repeatable; type and values from the directive table of `kind`.
+fn configure_add_args(kind: &str, line: &str) -> Vec<GrammarArg> {
+    let items = crate::config_check::items_of(kind).unwrap_or(&[]);
     line.split_whitespace().skip(2).filter_map(|word| {
         let optional = word.starts_with('[');
         let word = word.trim_matches(|c| c == '[' || c == ']');
@@ -580,7 +626,7 @@ fn configure_add_args(line: &str) -> Vec<GrammarArg> {
         if !optional {
             arg = arg.req();
         }
-        Some(arg)
+        Some(typed_directive(arg, crate::config_check::item_of(items, key)))
     }).collect()
 }
 
@@ -602,7 +648,7 @@ fn configure() -> Node {
                 val("description", "Description"),
             ])
         } else {
-            sub(kind, "New resource").args(configure_add_args(line))
+            sub(kind, "New resource").args(configure_add_args(kind, line))
         };
         add_subs.push(node);
     }
@@ -643,24 +689,27 @@ fn configure() -> Node {
 /// the type's item table (normalized key), repeatable (a directive given
 /// several times replaces all its lines), an empty value removes it.
 fn update_directives(rtype: &str) -> Vec<GrammarArg> {
+    let items = crate::config_check::items_of(rtype).unwrap_or(&[]);
     let mut args: Vec<GrammarArg> = Vec::new();
-    let add = |key: String, args: &mut Vec<GrammarArg>| {
+    let add = |key: String, item: Option<&Item>, args: &mut Vec<GrammarArg>| {
         if key != "name" && !args.iter().any(|a| a.name == key) {
-            args.push(val(&key, "Directive (empty value removes it)").repeat());
+            args.push(typed_directive(val(&key, "Directive (empty value removes it)").repeat(), item));
         }
     };
-    for item in crate::config_check::items_of(rtype).unwrap_or(&[]) {
+    for item in items {
         if item.deprecated {
             continue;
         }
-        add(bareos_config::edit::norm_key(item.name), &mut args);
+        add(bareos_config::edit::norm_key(item.name), Some(item), &mut args);
         for alias in item.aliases {
-            add(bareos_config::edit::norm_key(alias), &mut args);
+            add(bareos_config::edit::norm_key(alias), Some(item), &mut args);
         }
     }
     if matches!(rtype, "job" | "jobdefs") {
+        // old Job aliases of client, fileset, pool, storage, schedule
         for key in ["newclient", "newfileset", "newpool", "newstorage", "newschedule"] {
-            add(key.to_string(), &mut args);
+            let item = crate::config_check::item_of(items, &key[3..]);
+            add(key.to_string(), item, &mut args);
         }
     }
     args

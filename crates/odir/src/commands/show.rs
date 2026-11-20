@@ -748,6 +748,18 @@ const MIG_TYPES: &[(&str, u8)] = &[
 const TAPE_LABELS: &[(&str, u8)] = &[("bareos", 0), ("ansi", 1), ("ibm", 2)];
 const POOL_TYPES: &[&str] = &["Backup", "Copy", "Cloned", "Archive", "Migration", "Scratch"];
 
+/// The keywords an enum-typed directive accepts (job type, level, pool
+/// type and the keyword tables above), for the console grammar; None for
+/// every other item type.
+pub(crate) fn enum_values(ty: Ty) -> Option<Vec<&'static str>> {
+    Some(match ty {
+        Ty::Jobtype => JOB_TYPES.iter().map(|(name, _)| *name).collect(),
+        Ty::Level => JOB_LEVELS.iter().map(|(name, _)| *name).collect(),
+        Ty::Pooltype => POOL_TYPES.to_vec(),
+        _ => kw_table(ty)?.iter().map(|(name, _)| *name).collect(),
+    })
+}
+
 fn kw_lookup(table: &'static [(&'static str, u8)], v: &str) -> Option<&'static str> {
     let code = table.iter().find(|(n, _)| n.eq_ignore_ascii_case(v))?.1;
     table.iter().find(|(_, c)| *c == code).map(|(n, _)| *n)

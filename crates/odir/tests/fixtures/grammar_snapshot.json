@@ -276,7 +276,7 @@
                 "list": true,
                 "positional": false,
                 "value_optional": false,
-                "description": "Volume status (Onesimus)",
+                "description": "Volume status (Onesimus); Purged and Recycle volumes are never selected, Cleaning tapes cannot be purged",
                 "values": [
                   "Full",
                   "Used",

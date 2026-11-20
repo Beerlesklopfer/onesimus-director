@@ -80,7 +80,7 @@ Pool name (name; values from .pools; excludes the other arguments of group scope
 Every pool (keyword; excludes the other arguments of group scope)
 .TP
 .B "volstatus=<volstatus>[,...]"
-Volume status (Onesimus) (one of a fixed set; values: Full, Used, Error, Append, Archive, Disabled, Read\-Only; several values separated by commas)
+Volume status (Onesimus); Purged and Recycle volumes are never selected, Cleaning tapes cannot be purged (one of a fixed set; values: Full, Used, Error, Append, Archive, Disabled, Read\-Only; several values separated by commas)
 .TP
 .B "volume=<volume> ..."
 Volumes for action= (several allowed) (name; values from .media; may be repeated)

@@ -2028,7 +2028,7 @@ Pool name (name; values from .pools; excludes the other arguments of group scope
 Every pool (keyword; excludes the other arguments of group scope)
 .TP
 .B "volstatus=<volstatus>[,...]"
-Volume status (Onesimus) (one of a fixed set; values: Full, Used, Error, Append, Archive, Disabled, Read\-Only; several values separated by commas)
+Volume status (Onesimus); Purged and Recycle volumes are never selected, Cleaning tapes cannot be purged (one of a fixed set; values: Full, Used, Error, Append, Archive, Disabled, Read\-Only; several values separated by commas)
 .TP
 .B "volume=<volume> ..."
 Volumes for action= (several allowed) (name; values from .media; may be repeated)
@@ -2131,14 +2131,14 @@ Configure director resources
 \fBSynopsis\fR
 .nf
 configure
-configure add client name=<name> [description=<description>] [protocol=<protocol>] [authtype=<authtype>] address=<address> [lanaddress=<lanaddress>] [port=<port>] [username=<username>] password=<password> [catalog=<catalog>] [passive=<yes|no>] [connectionfromdirectortoclient=<yes|no>] [connectionfromclienttodirector=<yes|no>] [enabled=<yes|no>] [hardquota=<hardquota>] [softquota=<softquota>] [softquotagraceperiod=<softquotagraceperiod>] [strictquotas=<yes|no>] [quotaincludefailedjobs=<yes|no>] [heartbeatinterval=<heartbeatinterval>] [maximumconcurrentjobs=<maximumconcurrentjobs>] [maximumbandwidthperjob=<maximumbandwidthperjob>] [ndmploglevel=<ndmploglevel>] [ndmpblocksize=<ndmpblocksize>] [ndmpuselmdb=<yes|no>] [tlsauthenticate=<yes|no>] [tlsenable=<yes|no>] [tlsrequire=<yes|no>] [tlscipherlist=<tlscipherlist>] [tlsciphersuites=<tlsciphersuites>] [tlsdhfile=<tlsdhfile>] [tlsprotocol=<tlsprotocol>] [tlsverifypeer=<yes|no>] [tlscacertificatefile=<tlscacertificatefile>] [tlscacertificatedir=<tlscacertificatedir>] [tlscertificaterevocationlist=<tlscertificaterevocationlist>] [tlscertificate=<tlscertificate>] [tlskey=<tlskey>] [tlsallowedcn=<tlsallowedcn> ...]
-configure add jobdefs name=<name> [description=<description>] type=<type> [protocol=<protocol>] [backupformat=<backupformat>] [level=<level>] messages=<messages> [storage=<storage> ...] pool=<pool> [fullbackuppool=<fullbackuppool>] [virtualfullbackuppool=<virtualfullbackuppool>] [incrementalbackuppool=<incrementalbackuppool>] [differentialbackuppool=<differentialbackuppool>] [nextpool=<nextpool>] [client=<client>] [fileset=<fileset>] [schedule=<schedule>] [jobtoverify=<jobtoverify>] [catalog=<catalog>] [jobdefs=<jobdefs>] [run=<run> ...] [where=<where>] [regexwhere=<regexwhere>] [stripprefix=<stripprefix>] [addprefix=<addprefix>] [addsuffix=<addsuffix>] [bootstrap=<bootstrap>] [writebootstrap=<writebootstrap>] [replace=<replace>] [maximumbandwidth=<maximumbandwidth>] [maxrunschedtime=<maxrunschedtime>] [maxruntime=<maxruntime>] [fullmaxruntime=<fullmaxruntime>] [incrementalmaxruntime=<incrementalmaxruntime>] [differentialmaxruntime=<differentialmaxruntime>] [maxwaittime=<maxwaittime>] [maxstartdelay=<maxstartdelay>] [maxfullinterval=<maxfullinterval>] [maxvirtualfullinterval=<maxvirtualfullinterval>] [maxdiffinterval=<maxdiffinterval>] [prefixlinks=<yes|no>] [prunejobs=<yes|no>] [prunefiles=<yes|no>] [prunevolumes=<yes|no>] [purgemigrationjob=<yes|no>] [enabled=<yes|no>] [spoolattributes=<yes|no>] [spooldata=<yes|no>] [spoolsize=<spoolsize>] [rerunfailedlevels=<yes|no>] [prefermountedvolumes=<yes|no>] [runbeforejob=<runbeforejob> ...] [runafterjob=<runafterjob> ...] [runafterfailedjob=<runafterfailedjob> ...] [clientrunbeforejob=<clientrunbeforejob> ...] [clientrunafterjob=<clientrunafterjob> ...] [maximumconcurrentjobs=<maximumconcurrentjobs>] [rescheduleonerror=<yes|no>] [rescheduleinterval=<rescheduleinterval>] [rescheduletimes=<rescheduletimes>] [priority=<priority>] [allowmixedpriority=<yes|no>] [selectionpattern=<selectionpattern>] [selectiontype=<selectiontype>] [accurate=<yes|no>] [allowduplicatejobs=<yes|no>] [cancellowerlevelduplicates=<yes|no>] [cancelqueuedduplicates=<yes|no>] [cancelrunningduplicates=<yes|no>] [savefilehistory=<yes|no>] [filehistorysize=<filehistorysize>] [fdpluginoptions=<fdpluginoptions> ...] [sdpluginoptions=<sdpluginoptions> ...] [dirpluginoptions=<dirpluginoptions> ...] [maxconcurrentcopies=<maxconcurrentcopies>] [alwaysincremental=<yes|no>] [alwaysincrementaljobretention=<alwaysincrementaljobretention>] [alwaysincrementalkeepnumber=<alwaysincrementalkeepnumber>] [alwaysincrementalmaxfullage=<alwaysincrementalmaxfullage>] [maxfullconsolidations=<maxfullconsolidations>] [runonincomingconnectinterval=<runonincomingconnectinterval>]
-configure add job name=<name> [description=<description>] type=<type> [protocol=<protocol>] [backupformat=<backupformat>] [level=<level>] messages=<messages> [storage=<storage> ...] pool=<pool> [fullbackuppool=<fullbackuppool>] [virtualfullbackuppool=<virtualfullbackuppool>] [incrementalbackuppool=<incrementalbackuppool>] [differentialbackuppool=<differentialbackuppool>] [nextpool=<nextpool>] [client=<client>] [fileset=<fileset>] [schedule=<schedule>] [jobtoverify=<jobtoverify>] [catalog=<catalog>] [jobdefs=<jobdefs>] [run=<run> ...] [where=<where>] [regexwhere=<regexwhere>] [stripprefix=<stripprefix>] [addprefix=<addprefix>] [addsuffix=<addsuffix>] [bootstrap=<bootstrap>] [writebootstrap=<writebootstrap>] [replace=<replace>] [maximumbandwidth=<maximumbandwidth>] [maxrunschedtime=<maxrunschedtime>] [maxruntime=<maxruntime>] [fullmaxruntime=<fullmaxruntime>] [incrementalmaxruntime=<incrementalmaxruntime>] [differentialmaxruntime=<differentialmaxruntime>] [maxwaittime=<maxwaittime>] [maxstartdelay=<maxstartdelay>] [maxfullinterval=<maxfullinterval>] [maxvirtualfullinterval=<maxvirtualfullinterval>] [maxdiffinterval=<maxdiffinterval>] [prefixlinks=<yes|no>] [prunejobs=<yes|no>] [prunefiles=<yes|no>] [prunevolumes=<yes|no>] [purgemigrationjob=<yes|no>] [enabled=<yes|no>] [spoolattributes=<yes|no>] [spooldata=<yes|no>] [spoolsize=<spoolsize>] [rerunfailedlevels=<yes|no>] [prefermountedvolumes=<yes|no>] [runbeforejob=<runbeforejob> ...] [runafterjob=<runafterjob> ...] [runafterfailedjob=<runafterfailedjob> ...] [clientrunbeforejob=<clientrunbeforejob> ...] [clientrunafterjob=<clientrunafterjob> ...] [maximumconcurrentjobs=<maximumconcurrentjobs>] [rescheduleonerror=<yes|no>] [rescheduleinterval=<rescheduleinterval>] [rescheduletimes=<rescheduletimes>] [priority=<priority>] [allowmixedpriority=<yes|no>] [selectionpattern=<selectionpattern>] [selectiontype=<selectiontype>] [accurate=<yes|no>] [allowduplicatejobs=<yes|no>] [cancellowerlevelduplicates=<yes|no>] [cancelqueuedduplicates=<yes|no>] [cancelrunningduplicates=<yes|no>] [savefilehistory=<yes|no>] [filehistorysize=<filehistorysize>] [fdpluginoptions=<fdpluginoptions> ...] [sdpluginoptions=<sdpluginoptions> ...] [dirpluginoptions=<dirpluginoptions> ...] [maxconcurrentcopies=<maxconcurrentcopies>] [alwaysincremental=<yes|no>] [alwaysincrementaljobretention=<alwaysincrementaljobretention>] [alwaysincrementalkeepnumber=<alwaysincrementalkeepnumber>] [alwaysincrementalmaxfullage=<alwaysincrementalmaxfullage>] [maxfullconsolidations=<maxfullconsolidations>] [runonincomingconnectinterval=<runonincomingconnectinterval>]
-configure add storage name=<name> [description=<description>] [protocol=<protocol>] [authtype=<authtype>] address=<address> [lanaddress=<lanaddress>] [port=<port>] [username=<username>] password=<password> device=<device> mediatype=<mediatype> [autochanger=<yes|no>] [enabled=<yes|no>] [allowcompression=<yes|no>] [heartbeatinterval=<heartbeatinterval>] [cachestatusinterval=<cachestatusinterval>] [maximumconcurrentjobs=<maximumconcurrentjobs>] [maximumconcurrentreadjobs=<maximumconcurrentreadjobs>] [pairedstorage=<pairedstorage>] [maximumbandwidthperjob=<maximumbandwidthperjob>] [ndmpchangerdevice=<ndmpchangerdevice>] [tlsauthenticate=<yes|no>] [tlsenable=<yes|no>] [tlsrequire=<yes|no>] [tlscipherlist=<tlscipherlist>] [tlsciphersuites=<tlsciphersuites>] [tlsdhfile=<tlsdhfile>] [tlsprotocol=<tlsprotocol>] [tlsverifypeer=<yes|no>] [tlscacertificatefile=<tlscacertificatefile>] [tlscacertificatedir=<tlscacertificatedir>] [tlscertificaterevocationlist=<tlscertificaterevocationlist>] [tlscertificate=<tlscertificate>] [tlskey=<tlskey>] [tlsallowedcn=<tlsallowedcn> ...]
+configure add client name=<name> [description=<description>] [protocol=<Native|NDMPV2|NDMPV3|NDMPV4>] [authtype=<None|Clear|MD5>] address=<address> [lanaddress=<lanaddress>] [port=<port>] [username=<username>] password=<password> [catalog=<catalog>] [passive=<yes|no>] [connectionfromdirectortoclient=<yes|no>] [connectionfromclienttodirector=<yes|no>] [enabled=<yes|no>] [hardquota=<hardquota>] [softquota=<softquota>] [softquotagraceperiod=<softquotagraceperiod>] [strictquotas=<yes|no>] [quotaincludefailedjobs=<yes|no>] [heartbeatinterval=<heartbeatinterval>] [maximumconcurrentjobs=<maximumconcurrentjobs>] [maximumbandwidthperjob=<maximumbandwidthperjob>] [ndmploglevel=<ndmploglevel>] [ndmpblocksize=<ndmpblocksize>] [ndmpuselmdb=<yes|no>] [tlsauthenticate=<yes|no>] [tlsenable=<yes|no>] [tlsrequire=<yes|no>] [tlscipherlist=<tlscipherlist>] [tlsciphersuites=<tlsciphersuites>] [tlsdhfile=<tlsdhfile>] [tlsprotocol=<tlsprotocol>] [tlsverifypeer=<yes|no>] [tlscacertificatefile=<tlscacertificatefile>] [tlscacertificatedir=<tlscacertificatedir>] [tlscertificaterevocationlist=<tlscertificaterevocationlist>] [tlscertificate=<tlscertificate>] [tlskey=<tlskey>] [tlsallowedcn=<tlsallowedcn> ...]
+configure add jobdefs name=<name> [description=<description>] type=<type> [protocol=<Native|NDMP_BAREOS|NDMP|NDMP_NATIVE>] [backupformat=<backupformat>] [level=<level>] messages=<messages> [storage=<storage> ...] pool=<pool> [fullbackuppool=<fullbackuppool>] [virtualfullbackuppool=<virtualfullbackuppool>] [incrementalbackuppool=<incrementalbackuppool>] [differentialbackuppool=<differentialbackuppool>] [nextpool=<nextpool>] [client=<client>] [fileset=<fileset>] [schedule=<schedule>] [jobtoverify=<jobtoverify>] [catalog=<catalog>] [jobdefs=<jobdefs>] [run=<run> ...] [where=<where>] [regexwhere=<regexwhere>] [stripprefix=<stripprefix>] [addprefix=<addprefix>] [addsuffix=<addsuffix>] [bootstrap=<bootstrap>] [writebootstrap=<writebootstrap>] [replace=<Always|IfNewer|IfOlder|Never>] [maximumbandwidth=<maximumbandwidth>] [maxrunschedtime=<maxrunschedtime>] [maxruntime=<maxruntime>] [fullmaxruntime=<fullmaxruntime>] [incrementalmaxruntime=<incrementalmaxruntime>] [differentialmaxruntime=<differentialmaxruntime>] [maxwaittime=<maxwaittime>] [maxstartdelay=<maxstartdelay>] [maxfullinterval=<maxfullinterval>] [maxvirtualfullinterval=<maxvirtualfullinterval>] [maxdiffinterval=<maxdiffinterval>] [prefixlinks=<yes|no>] [prunejobs=<yes|no>] [prunefiles=<yes|no>] [prunevolumes=<yes|no>] [purgemigrationjob=<yes|no>] [enabled=<yes|no>] [spoolattributes=<yes|no>] [spooldata=<yes|no>] [spoolsize=<spoolsize>] [rerunfailedlevels=<yes|no>] [prefermountedvolumes=<yes|no>] [runbeforejob=<runbeforejob> ...] [runafterjob=<runafterjob> ...] [runafterfailedjob=<runafterfailedjob> ...] [clientrunbeforejob=<clientrunbeforejob> ...] [clientrunafterjob=<clientrunafterjob> ...] [maximumconcurrentjobs=<maximumconcurrentjobs>] [rescheduleonerror=<yes|no>] [rescheduleinterval=<rescheduleinterval>] [rescheduletimes=<rescheduletimes>] [priority=<priority>] [allowmixedpriority=<yes|no>] [selectionpattern=<selectionpattern>] [selectiontype=<selectiontype>] [accurate=<yes|no>] [allowduplicatejobs=<yes|no>] [cancellowerlevelduplicates=<yes|no>] [cancelqueuedduplicates=<yes|no>] [cancelrunningduplicates=<yes|no>] [savefilehistory=<yes|no>] [filehistorysize=<filehistorysize>] [fdpluginoptions=<fdpluginoptions> ...] [sdpluginoptions=<sdpluginoptions> ...] [dirpluginoptions=<dirpluginoptions> ...] [maxconcurrentcopies=<maxconcurrentcopies>] [alwaysincremental=<yes|no>] [alwaysincrementaljobretention=<alwaysincrementaljobretention>] [alwaysincrementalkeepnumber=<alwaysincrementalkeepnumber>] [alwaysincrementalmaxfullage=<alwaysincrementalmaxfullage>] [maxfullconsolidations=<maxfullconsolidations>] [runonincomingconnectinterval=<runonincomingconnectinterval>]
+configure add job name=<name> [description=<description>] type=<type> [protocol=<Native|NDMP_BAREOS|NDMP|NDMP_NATIVE>] [backupformat=<backupformat>] [level=<level>] messages=<messages> [storage=<storage> ...] pool=<pool> [fullbackuppool=<fullbackuppool>] [virtualfullbackuppool=<virtualfullbackuppool>] [incrementalbackuppool=<incrementalbackuppool>] [differentialbackuppool=<differentialbackuppool>] [nextpool=<nextpool>] [client=<client>] [fileset=<fileset>] [schedule=<schedule>] [jobtoverify=<jobtoverify>] [catalog=<catalog>] [jobdefs=<jobdefs>] [run=<run> ...] [where=<where>] [regexwhere=<regexwhere>] [stripprefix=<stripprefix>] [addprefix=<addprefix>] [addsuffix=<addsuffix>] [bootstrap=<bootstrap>] [writebootstrap=<writebootstrap>] [replace=<Always|IfNewer|IfOlder|Never>] [maximumbandwidth=<maximumbandwidth>] [maxrunschedtime=<maxrunschedtime>] [maxruntime=<maxruntime>] [fullmaxruntime=<fullmaxruntime>] [incrementalmaxruntime=<incrementalmaxruntime>] [differentialmaxruntime=<differentialmaxruntime>] [maxwaittime=<maxwaittime>] [maxstartdelay=<maxstartdelay>] [maxfullinterval=<maxfullinterval>] [maxvirtualfullinterval=<maxvirtualfullinterval>] [maxdiffinterval=<maxdiffinterval>] [prefixlinks=<yes|no>] [prunejobs=<yes|no>] [prunefiles=<yes|no>] [prunevolumes=<yes|no>] [purgemigrationjob=<yes|no>] [enabled=<yes|no>] [spoolattributes=<yes|no>] [spooldata=<yes|no>] [spoolsize=<spoolsize>] [rerunfailedlevels=<yes|no>] [prefermountedvolumes=<yes|no>] [runbeforejob=<runbeforejob> ...] [runafterjob=<runafterjob> ...] [runafterfailedjob=<runafterfailedjob> ...] [clientrunbeforejob=<clientrunbeforejob> ...] [clientrunafterjob=<clientrunafterjob> ...] [maximumconcurrentjobs=<maximumconcurrentjobs>] [rescheduleonerror=<yes|no>] [rescheduleinterval=<rescheduleinterval>] [rescheduletimes=<rescheduletimes>] [priority=<priority>] [allowmixedpriority=<yes|no>] [selectionpattern=<selectionpattern>] [selectiontype=<selectiontype>] [accurate=<yes|no>] [allowduplicatejobs=<yes|no>] [cancellowerlevelduplicates=<yes|no>] [cancelqueuedduplicates=<yes|no>] [cancelrunningduplicates=<yes|no>] [savefilehistory=<yes|no>] [filehistorysize=<filehistorysize>] [fdpluginoptions=<fdpluginoptions> ...] [sdpluginoptions=<sdpluginoptions> ...] [dirpluginoptions=<dirpluginoptions> ...] [maxconcurrentcopies=<maxconcurrentcopies>] [alwaysincremental=<yes|no>] [alwaysincrementaljobretention=<alwaysincrementaljobretention>] [alwaysincrementalkeepnumber=<alwaysincrementalkeepnumber>] [alwaysincrementalmaxfullage=<alwaysincrementalmaxfullage>] [maxfullconsolidations=<maxfullconsolidations>] [runonincomingconnectinterval=<runonincomingconnectinterval>]
+configure add storage name=<name> [description=<description>] [protocol=<Native|NDMPV2|NDMPV3|NDMPV4>] [authtype=<None|Clear|MD5>] address=<address> [lanaddress=<lanaddress>] [port=<port>] [username=<username>] password=<password> device=<device> mediatype=<mediatype> [autochanger=<yes|no>] [enabled=<yes|no>] [allowcompression=<yes|no>] [heartbeatinterval=<heartbeatinterval>] [cachestatusinterval=<cachestatusinterval>] [maximumconcurrentjobs=<maximumconcurrentjobs>] [maximumconcurrentreadjobs=<maximumconcurrentreadjobs>] [pairedstorage=<pairedstorage>] [maximumbandwidthperjob=<maximumbandwidthperjob>] [ndmpchangerdevice=<ndmpchangerdevice>] [tlsauthenticate=<yes|no>] [tlsenable=<yes|no>] [tlsrequire=<yes|no>] [tlscipherlist=<tlscipherlist>] [tlsciphersuites=<tlsciphersuites>] [tlsdhfile=<tlsdhfile>] [tlsprotocol=<tlsprotocol>] [tlsverifypeer=<yes|no>] [tlscacertificatefile=<tlscacertificatefile>] [tlscacertificatedir=<tlscacertificatedir>] [tlscertificaterevocationlist=<tlscertificaterevocationlist>] [tlscertificate=<tlscertificate>] [tlskey=<tlskey>] [tlsallowedcn=<tlsallowedcn> ...]
 configure add catalog name=<name> [description=<description>] [dbaddress=<dbaddress>] [dbport=<dbport>] [dbpassword=<dbpassword>] dbuser=<dbuser> dbname=<dbname> [dbsocket=<dbsocket>] [reconnect=<yes|no>] [exitonfatal=<yes|no>] [minconnections=<minconnections>] [maxconnections=<maxconnections>] [incconnections=<incconnections>] [idletimeout=<idletimeout>] [validatetimeout=<validatetimeout>]
 configure add schedule name=<name> [description=<description>] [run=<run> ...] [enabled=<yes|no>]
 configure add fileset name=<name> [description=<description>] [ignorefilesetchanges=<yes|no>] [enablevss=<yes|no>]
-configure add pool name=<name> [description=<description>] [pooltype=<pooltype>] [labelformat=<labelformat>] [cleaningprefix=<cleaningprefix>] [usecatalog=<yes|no>] [purgeoldestvolume=<yes|no>] [actiononpurge=<actiononpurge>] [recycleoldestvolume=<yes|no>] [recyclecurrentvolume=<yes|no>] [maximumvolumes=<maximumvolumes>] [maximumvolumejobs=<maximumvolumejobs>] [maximumvolumefiles=<maximumvolumefiles>] [maximumvolumebytes=<maximumvolumebytes>] [catalogfiles=<yes|no>] [volumeretention=<volumeretention>] [volumeuseduration=<volumeuseduration>] [migrationtime=<migrationtime>] [migrationhighbytes=<migrationhighbytes>] [migrationlowbytes=<migrationlowbytes>] [nextpool=<nextpool>] [storage=<storage> ...] [autoprune=<yes|no>] [recycle=<yes|no>] [recyclepool=<recyclepool>] [scratchpool=<scratchpool>] [catalog=<catalog>] [minimumblocksize=<minimumblocksize>] [maximumblocksize=<maximumblocksize>]
+configure add pool name=<name> [description=<description>] [pooltype=<pooltype>] [labelformat=<labelformat>] [cleaningprefix=<cleaningprefix>] [usecatalog=<yes|no>] [purgeoldestvolume=<yes|no>] [actiononpurge=<None|Truncate>] [recycleoldestvolume=<yes|no>] [recyclecurrentvolume=<yes|no>] [maximumvolumes=<maximumvolumes>] [maximumvolumejobs=<maximumvolumejobs>] [maximumvolumefiles=<maximumvolumefiles>] [maximumvolumebytes=<maximumvolumebytes>] [catalogfiles=<yes|no>] [volumeretention=<volumeretention>] [volumeuseduration=<volumeuseduration>] [migrationtime=<migrationtime>] [migrationhighbytes=<migrationhighbytes>] [migrationlowbytes=<migrationlowbytes>] [nextpool=<nextpool>] [storage=<storage> ...] [autoprune=<yes|no>] [recycle=<yes|no>] [recyclepool=<recyclepool>] [scratchpool=<scratchpool>] [catalog=<catalog>] [minimumblocksize=<minimumblocksize>] [maximumblocksize=<maximumblocksize>]
 configure add messages [name=<name>] [description=<description>] [mailcommand=<mailcommand>] [operatorcommand=<operatorcommand>] [timestampformat=<timestampformat>] [syslog=<syslog> ...] [mail=<mail> ...] [mailonerror=<mailonerror> ...] [mailonsuccess=<mailonsuccess> ...] [file=<file> ...] [append=<append> ...] [stdout=<stdout> ...] [stderr=<stderr> ...] [director=<director> ...] [console=<console> ...] [operator=<operator> ...] [catalog=<catalog> ...]
 configure add counter name=<name> [description=<description>] [minimum=<minimum>] [maximum=<maximum>] [wrapcounter=<wrapcounter>] [catalog=<catalog>]
 configure add profile name=<name> [description=<description>] [jobacl=<jobacl> ...] [clientacl=<clientacl> ...] [storageacl=<storageacl> ...] [scheduleacl=<scheduleacl> ...] [poolacl=<poolacl> ...] [commandacl=<commandacl> ...] [filesetacl=<filesetacl> ...] [catalogacl=<catalogacl> ...] [whereacl=<whereacl> ...] [pluginoptionsacl=<pluginoptionsacl> ...]
@@ -2147,11 +2147,11 @@ configure add user name=<name> [description=<description>] [jobacl=<jobacl> ...]
 configure export client=<client>
 configure read [client=<client> | job=<job> | pool=<pool> | storage=<storage>]
 configure update [yes]
-configure update client=<client> [description=<description> ...] [protocol=<protocol> ...] [authtype=<authtype> ...] [address=<address> ...] [fdaddress=<fdaddress> ...] [lanaddress=<lanaddress> ...] [port=<port> ...] [fdport=<fdport> ...] [username=<username> ...] [password=<password> ...] [fdpassword=<fdpassword> ...] [catalog=<catalog> ...] [passive=<passive> ...] [connectionfromdirectortoclient=<connectionfromdirectortoclient> ...] [connectionfromclienttodirector=<connectionfromclienttodirector> ...] [enabled=<enabled> ...] [hardquota=<hardquota> ...] [softquota=<softquota> ...] [softquotagraceperiod=<softquotagraceperiod> ...] [strictquotas=<strictquotas> ...] [quotaincludefailedjobs=<quotaincludefailedjobs> ...] [heartbeatinterval=<heartbeatinterval> ...] [maximumconcurrentjobs=<maximumconcurrentjobs> ...] [maximumbandwidthperjob=<maximumbandwidthperjob> ...] [ndmploglevel=<ndmploglevel> ...] [ndmpblocksize=<ndmpblocksize> ...] [ndmpuselmdb=<ndmpuselmdb> ...] [tlsauthenticate=<tlsauthenticate> ...] [tlsenable=<tlsenable> ...] [tlsrequire=<tlsrequire> ...] [tlscipherlist=<tlscipherlist> ...] [tlsciphersuites=<tlsciphersuites> ...] [tlsdhfile=<tlsdhfile> ...] [tlsprotocol=<tlsprotocol> ...] [tlsverifypeer=<tlsverifypeer> ...] [tlscacertificatefile=<tlscacertificatefile> ...] [tlscacertificatedir=<tlscacertificatedir> ...] [tlscertificaterevocationlist=<tlscertificaterevocationlist> ...] [tlscertificate=<tlscertificate> ...] [tlskey=<tlskey> ...] [tlsallowedcn=<tlsallowedcn> ...]
-configure update job=<job> [description=<description> ...] [type=<type> ...] [protocol=<protocol> ...] [backupformat=<backupformat> ...] [level=<level> ...] [messages=<messages> ...] [storage=<storage> ...] [pool=<pool> ...] [fullbackuppool=<fullbackuppool> ...] [virtualfullbackuppool=<virtualfullbackuppool> ...] [incrementalbackuppool=<incrementalbackuppool> ...] [differentialbackuppool=<differentialbackuppool> ...] [nextpool=<nextpool> ...] [client=<client> ...] [fileset=<fileset> ...] [schedule=<schedule> ...] [jobtoverify=<jobtoverify> ...] [verifyjob=<verifyjob> ...] [catalog=<catalog> ...] [jobdefs=<jobdefs> ...] [run=<run> ...] [where=<where> ...] [regexwhere=<regexwhere> ...] [stripprefix=<stripprefix> ...] [addprefix=<addprefix> ...] [addsuffix=<addsuffix> ...] [bootstrap=<bootstrap> ...] [writebootstrap=<writebootstrap> ...] [replace=<replace> ...] [maximumbandwidth=<maximumbandwidth> ...] [maxrunschedtime=<maxrunschedtime> ...] [maxruntime=<maxruntime> ...] [fullmaxruntime=<fullmaxruntime> ...] [incrementalmaxruntime=<incrementalmaxruntime> ...] [differentialmaxruntime=<differentialmaxruntime> ...] [maxwaittime=<maxwaittime> ...] [maxstartdelay=<maxstartdelay> ...] [maxfullinterval=<maxfullinterval> ...] [maxvirtualfullinterval=<maxvirtualfullinterval> ...] [maxdiffinterval=<maxdiffinterval> ...] [prefixlinks=<prefixlinks> ...] [prunejobs=<prunejobs> ...] [prunefiles=<prunefiles> ...] [prunevolumes=<prunevolumes> ...] [purgemigrationjob=<purgemigrationjob> ...] [enabled=<enabled> ...] [spoolattributes=<spoolattributes> ...] [spooldata=<spooldata> ...] [spoolsize=<spoolsize> ...] [rerunfailedlevels=<rerunfailedlevels> ...] [prefermountedvolumes=<prefermountedvolumes> ...] [runbeforejob=<runbeforejob> ...] [runafterjob=<runafterjob> ...] [runafterfailedjob=<runafterfailedjob> ...] [clientrunbeforejob=<clientrunbeforejob> ...] [clientrunafterjob=<clientrunafterjob> ...] [maximumconcurrentjobs=<maximumconcurrentjobs> ...] [rescheduleonerror=<rescheduleonerror> ...] [rescheduleinterval=<rescheduleinterval> ...] [rescheduletimes=<rescheduletimes> ...] [priority=<priority> ...] [allowmixedpriority=<allowmixedpriority> ...] [selectionpattern=<selectionpattern> ...] [runscript=<runscript> ...] [selectiontype=<selectiontype> ...] [accurate=<accurate> ...] [allowduplicatejobs=<allowduplicatejobs> ...] [cancellowerlevelduplicates=<cancellowerlevelduplicates> ...] [cancelqueuedduplicates=<cancelqueuedduplicates> ...] [cancelrunningduplicates=<cancelrunningduplicates> ...] [savefilehistory=<savefilehistory> ...] [filehistorysize=<filehistorysize> ...] [fdpluginoptions=<fdpluginoptions> ...] [sdpluginoptions=<sdpluginoptions> ...] [dirpluginoptions=<dirpluginoptions> ...] [maxconcurrentcopies=<maxconcurrentcopies> ...] [alwaysincremental=<alwaysincremental> ...] [alwaysincrementaljobretention=<alwaysincrementaljobretention> ...] [alwaysincrementalkeepnumber=<alwaysincrementalkeepnumber> ...] [alwaysincrementalmaxfullage=<alwaysincrementalmaxfullage> ...] [maxfullconsolidations=<maxfullconsolidations> ...] [runonincomingconnectinterval=<runonincomingconnectinterval> ...] [newclient=<newclient> ...] [newfileset=<newfileset> ...] [newpool=<newpool> ...] [newstorage=<newstorage> ...] [newschedule=<newschedule> ...]
-configure update jobdefs=<jobdefs> [description=<description> ...] [type=<type> ...] [protocol=<protocol> ...] [backupformat=<backupformat> ...] [level=<level> ...] [messages=<messages> ...] [storage=<storage> ...] [pool=<pool> ...] [fullbackuppool=<fullbackuppool> ...] [virtualfullbackuppool=<virtualfullbackuppool> ...] [incrementalbackuppool=<incrementalbackuppool> ...] [differentialbackuppool=<differentialbackuppool> ...] [nextpool=<nextpool> ...] [client=<client> ...] [fileset=<fileset> ...] [schedule=<schedule> ...] [jobtoverify=<jobtoverify> ...] [verifyjob=<verifyjob> ...] [catalog=<catalog> ...] [jobdefs=<jobdefs> ...] [run=<run> ...] [where=<where> ...] [regexwhere=<regexwhere> ...] [stripprefix=<stripprefix> ...] [addprefix=<addprefix> ...] [addsuffix=<addsuffix> ...] [bootstrap=<bootstrap> ...] [writebootstrap=<writebootstrap> ...] [replace=<replace> ...] [maximumbandwidth=<maximumbandwidth> ...] [maxrunschedtime=<maxrunschedtime> ...] [maxruntime=<maxruntime> ...] [fullmaxruntime=<fullmaxruntime> ...] [incrementalmaxruntime=<incrementalmaxruntime> ...] [differentialmaxruntime=<differentialmaxruntime> ...] [maxwaittime=<maxwaittime> ...] [maxstartdelay=<maxstartdelay> ...] [maxfullinterval=<maxfullinterval> ...] [maxvirtualfullinterval=<maxvirtualfullinterval> ...] [maxdiffinterval=<maxdiffinterval> ...] [prefixlinks=<prefixlinks> ...] [prunejobs=<prunejobs> ...] [prunefiles=<prunefiles> ...] [prunevolumes=<prunevolumes> ...] [purgemigrationjob=<purgemigrationjob> ...] [enabled=<enabled> ...] [spoolattributes=<spoolattributes> ...] [spooldata=<spooldata> ...] [spoolsize=<spoolsize> ...] [rerunfailedlevels=<rerunfailedlevels> ...] [prefermountedvolumes=<prefermountedvolumes> ...] [runbeforejob=<runbeforejob> ...] [runafterjob=<runafterjob> ...] [runafterfailedjob=<runafterfailedjob> ...] [clientrunbeforejob=<clientrunbeforejob> ...] [clientrunafterjob=<clientrunafterjob> ...] [maximumconcurrentjobs=<maximumconcurrentjobs> ...] [rescheduleonerror=<rescheduleonerror> ...] [rescheduleinterval=<rescheduleinterval> ...] [rescheduletimes=<rescheduletimes> ...] [priority=<priority> ...] [allowmixedpriority=<allowmixedpriority> ...] [selectionpattern=<selectionpattern> ...] [runscript=<runscript> ...] [selectiontype=<selectiontype> ...] [accurate=<accurate> ...] [allowduplicatejobs=<allowduplicatejobs> ...] [cancellowerlevelduplicates=<cancellowerlevelduplicates> ...] [cancelqueuedduplicates=<cancelqueuedduplicates> ...] [cancelrunningduplicates=<cancelrunningduplicates> ...] [savefilehistory=<savefilehistory> ...] [filehistorysize=<filehistorysize> ...] [fdpluginoptions=<fdpluginoptions> ...] [sdpluginoptions=<sdpluginoptions> ...] [dirpluginoptions=<dirpluginoptions> ...] [maxconcurrentcopies=<maxconcurrentcopies> ...] [alwaysincremental=<alwaysincremental> ...] [alwaysincrementaljobretention=<alwaysincrementaljobretention> ...] [alwaysincrementalkeepnumber=<alwaysincrementalkeepnumber> ...] [alwaysincrementalmaxfullage=<alwaysincrementalmaxfullage> ...] [maxfullconsolidations=<maxfullconsolidations> ...] [runonincomingconnectinterval=<runonincomingconnectinterval> ...] [newclient=<newclient> ...] [newfileset=<newfileset> ...] [newpool=<newpool> ...] [newstorage=<newstorage> ...] [newschedule=<newschedule> ...]
-configure update schedule=<schedule> [description=<description> ...] [run=<run> ...] [enabled=<enabled> ...]
-configure update fileset=<fileset> [description=<description> ...] [include=<include> ...] [exclude=<exclude> ...] [ignorefilesetchanges=<ignorefilesetchanges> ...] [enablevss=<enablevss> ...]
+configure update client=<client> [description=<description> ...] [protocol=<Native|NDMPV2|NDMPV3|NDMPV4> ...] [authtype=<None|Clear|MD5> ...] [address=<address> ...] [fdaddress=<fdaddress> ...] [lanaddress=<lanaddress> ...] [port=<port> ...] [fdport=<fdport> ...] [username=<username> ...] [password=<password> ...] [fdpassword=<fdpassword> ...] [catalog=<catalog> ...] [passive=<yes|no> ...] [connectionfromdirectortoclient=<yes|no> ...] [connectionfromclienttodirector=<yes|no> ...] [enabled=<yes|no> ...] [hardquota=<hardquota> ...] [softquota=<softquota> ...] [softquotagraceperiod=<softquotagraceperiod> ...] [strictquotas=<yes|no> ...] [quotaincludefailedjobs=<yes|no> ...] [heartbeatinterval=<heartbeatinterval> ...] [maximumconcurrentjobs=<maximumconcurrentjobs> ...] [maximumbandwidthperjob=<maximumbandwidthperjob> ...] [ndmploglevel=<ndmploglevel> ...] [ndmpblocksize=<ndmpblocksize> ...] [ndmpuselmdb=<yes|no> ...] [tlsauthenticate=<yes|no> ...] [tlsenable=<yes|no> ...] [tlsrequire=<yes|no> ...] [tlscipherlist=<tlscipherlist> ...] [tlsciphersuites=<tlsciphersuites> ...] [tlsdhfile=<tlsdhfile> ...] [tlsprotocol=<tlsprotocol> ...] [tlsverifypeer=<yes|no> ...] [tlscacertificatefile=<tlscacertificatefile> ...] [tlscacertificatedir=<tlscacertificatedir> ...] [tlscertificaterevocationlist=<tlscertificaterevocationlist> ...] [tlscertificate=<tlscertificate> ...] [tlskey=<tlskey> ...] [tlsallowedcn=<tlsallowedcn> ...]
+configure update job=<job> [description=<description> ...] [type=<type> ...] [protocol=<Native|NDMP_BAREOS|NDMP|NDMP_NATIVE> ...] [backupformat=<backupformat> ...] [level=<level> ...] [messages=<messages> ...] [storage=<storage> ...] [pool=<pool> ...] [fullbackuppool=<fullbackuppool> ...] [virtualfullbackuppool=<virtualfullbackuppool> ...] [incrementalbackuppool=<incrementalbackuppool> ...] [differentialbackuppool=<differentialbackuppool> ...] [nextpool=<nextpool> ...] [client=<client> ...] [fileset=<fileset> ...] [schedule=<schedule> ...] [jobtoverify=<jobtoverify> ...] [verifyjob=<verifyjob> ...] [catalog=<catalog> ...] [jobdefs=<jobdefs> ...] [run=<run> ...] [where=<where> ...] [regexwhere=<regexwhere> ...] [stripprefix=<stripprefix> ...] [addprefix=<addprefix> ...] [addsuffix=<addsuffix> ...] [bootstrap=<bootstrap> ...] [writebootstrap=<writebootstrap> ...] [replace=<Always|IfNewer|IfOlder|Never> ...] [maximumbandwidth=<maximumbandwidth> ...] [maxrunschedtime=<maxrunschedtime> ...] [maxruntime=<maxruntime> ...] [fullmaxruntime=<fullmaxruntime> ...] [incrementalmaxruntime=<incrementalmaxruntime> ...] [differentialmaxruntime=<differentialmaxruntime> ...] [maxwaittime=<maxwaittime> ...] [maxstartdelay=<maxstartdelay> ...] [maxfullinterval=<maxfullinterval> ...] [maxvirtualfullinterval=<maxvirtualfullinterval> ...] [maxdiffinterval=<maxdiffinterval> ...] [prefixlinks=<yes|no> ...] [prunejobs=<yes|no> ...] [prunefiles=<yes|no> ...] [prunevolumes=<yes|no> ...] [purgemigrationjob=<yes|no> ...] [enabled=<yes|no> ...] [spoolattributes=<yes|no> ...] [spooldata=<yes|no> ...] [spoolsize=<spoolsize> ...] [rerunfailedlevels=<yes|no> ...] [prefermountedvolumes=<yes|no> ...] [runbeforejob=<runbeforejob> ...] [runafterjob=<runafterjob> ...] [runafterfailedjob=<runafterfailedjob> ...] [clientrunbeforejob=<clientrunbeforejob> ...] [clientrunafterjob=<clientrunafterjob> ...] [maximumconcurrentjobs=<maximumconcurrentjobs> ...] [rescheduleonerror=<yes|no> ...] [rescheduleinterval=<rescheduleinterval> ...] [rescheduletimes=<rescheduletimes> ...] [priority=<priority> ...] [allowmixedpriority=<yes|no> ...] [selectionpattern=<selectionpattern> ...] [runscript=<runscript> ...] [selectiontype=<selectiontype> ...] [accurate=<yes|no> ...] [allowduplicatejobs=<yes|no> ...] [cancellowerlevelduplicates=<yes|no> ...] [cancelqueuedduplicates=<yes|no> ...] [cancelrunningduplicates=<yes|no> ...] [savefilehistory=<yes|no> ...] [filehistorysize=<filehistorysize> ...] [fdpluginoptions=<fdpluginoptions> ...] [sdpluginoptions=<sdpluginoptions> ...] [dirpluginoptions=<dirpluginoptions> ...] [maxconcurrentcopies=<maxconcurrentcopies> ...] [alwaysincremental=<yes|no> ...] [alwaysincrementaljobretention=<alwaysincrementaljobretention> ...] [alwaysincrementalkeepnumber=<alwaysincrementalkeepnumber> ...] [alwaysincrementalmaxfullage=<alwaysincrementalmaxfullage> ...] [maxfullconsolidations=<maxfullconsolidations> ...] [runonincomingconnectinterval=<runonincomingconnectinterval> ...] [newclient=<newclient> ...] [newfileset=<newfileset> ...] [newpool=<newpool> ...] [newstorage=<newstorage> ...] [newschedule=<newschedule> ...]
+configure update jobdefs=<jobdefs> [description=<description> ...] [type=<type> ...] [protocol=<Native|NDMP_BAREOS|NDMP|NDMP_NATIVE> ...] [backupformat=<backupformat> ...] [level=<level> ...] [messages=<messages> ...] [storage=<storage> ...] [pool=<pool> ...] [fullbackuppool=<fullbackuppool> ...] [virtualfullbackuppool=<virtualfullbackuppool> ...] [incrementalbackuppool=<incrementalbackuppool> ...] [differentialbackuppool=<differentialbackuppool> ...] [nextpool=<nextpool> ...] [client=<client> ...] [fileset=<fileset> ...] [schedule=<schedule> ...] [jobtoverify=<jobtoverify> ...] [verifyjob=<verifyjob> ...] [catalog=<catalog> ...] [jobdefs=<jobdefs> ...] [run=<run> ...] [where=<where> ...] [regexwhere=<regexwhere> ...] [stripprefix=<stripprefix> ...] [addprefix=<addprefix> ...] [addsuffix=<addsuffix> ...] [bootstrap=<bootstrap> ...] [writebootstrap=<writebootstrap> ...] [replace=<Always|IfNewer|IfOlder|Never> ...] [maximumbandwidth=<maximumbandwidth> ...] [maxrunschedtime=<maxrunschedtime> ...] [maxruntime=<maxruntime> ...] [fullmaxruntime=<fullmaxruntime> ...] [incrementalmaxruntime=<incrementalmaxruntime> ...] [differentialmaxruntime=<differentialmaxruntime> ...] [maxwaittime=<maxwaittime> ...] [maxstartdelay=<maxstartdelay> ...] [maxfullinterval=<maxfullinterval> ...] [maxvirtualfullinterval=<maxvirtualfullinterval> ...] [maxdiffinterval=<maxdiffinterval> ...] [prefixlinks=<yes|no> ...] [prunejobs=<yes|no> ...] [prunefiles=<yes|no> ...] [prunevolumes=<yes|no> ...] [purgemigrationjob=<yes|no> ...] [enabled=<yes|no> ...] [spoolattributes=<yes|no> ...] [spooldata=<yes|no> ...] [spoolsize=<spoolsize> ...] [rerunfailedlevels=<yes|no> ...] [prefermountedvolumes=<yes|no> ...] [runbeforejob=<runbeforejob> ...] [runafterjob=<runafterjob> ...] [runafterfailedjob=<runafterfailedjob> ...] [clientrunbeforejob=<clientrunbeforejob> ...] [clientrunafterjob=<clientrunafterjob> ...] [maximumconcurrentjobs=<maximumconcurrentjobs> ...] [rescheduleonerror=<yes|no> ...] [rescheduleinterval=<rescheduleinterval> ...] [rescheduletimes=<rescheduletimes> ...] [priority=<priority> ...] [allowmixedpriority=<yes|no> ...] [selectionpattern=<selectionpattern> ...] [runscript=<runscript> ...] [selectiontype=<selectiontype> ...] [accurate=<yes|no> ...] [allowduplicatejobs=<yes|no> ...] [cancellowerlevelduplicates=<yes|no> ...] [cancelqueuedduplicates=<yes|no> ...] [cancelrunningduplicates=<yes|no> ...] [savefilehistory=<yes|no> ...] [filehistorysize=<filehistorysize> ...] [fdpluginoptions=<fdpluginoptions> ...] [sdpluginoptions=<sdpluginoptions> ...] [dirpluginoptions=<dirpluginoptions> ...] [maxconcurrentcopies=<maxconcurrentcopies> ...] [alwaysincremental=<yes|no> ...] [alwaysincrementaljobretention=<alwaysincrementaljobretention> ...] [alwaysincrementalkeepnumber=<alwaysincrementalkeepnumber> ...] [alwaysincrementalmaxfullage=<alwaysincrementalmaxfullage> ...] [maxfullconsolidations=<maxfullconsolidations> ...] [runonincomingconnectinterval=<runonincomingconnectinterval> ...] [newclient=<newclient> ...] [newfileset=<newfileset> ...] [newpool=<newpool> ...] [newstorage=<newstorage> ...] [newschedule=<newschedule> ...]
+configure update schedule=<schedule> [description=<description> ...] [run=<run> ...] [enabled=<yes|no> ...]
+configure update fileset=<fileset> [description=<description> ...] [include=<include> ...] [exclude=<exclude> ...] [ignorefilesetchanges=<yes|no> ...] [enablevss=<yes|no> ...]
 configure delete client=<client>
 configure delete job=<job>
 configure delete jobdefs=<jobdefs>
@@ -2259,11 +2259,11 @@ Directive (name) (text; required)
 .B "description=<description>"
 Directive (string) (text)
 .TP
-.B "protocol=<protocol>"
-Directive (auth_protocol_type) (text)
+.B "protocol=<Native|NDMPV2|NDMPV3|NDMPV4>"
+Directive (auth_protocol_type) (one of a fixed set; values: Native, NDMPV2, NDMPV3, NDMPV4)
 .TP
-.B "authtype=<authtype>"
-Directive (auth_type) (text)
+.B "authtype=<None|Clear|MD5>"
+Directive (auth_type) (one of a fixed set; values: None, Clear, MD5)
 .TP
 .B "address=<address>"
 Directive (string) (text; required)
@@ -2281,7 +2281,7 @@ Directive (string) (text)
 Directive (autopassword) (text; required)
 .TP
 .B "catalog=<catalog>"
-Directive (res) (text)
+Directive (res) (name; values from .catalogs)
 .TP
 .B "passive=<yes|no>"
 Directive (boolean) (yes or no)
@@ -2379,58 +2379,58 @@ Directive (name) (text; required)
 Directive (string) (text)
 .TP
 .B "type=<type>"
-Directive (job_type) (text; required)
+Directive (job_type) (one of a fixed set; values: Backup, Admin, Archive, Verify, Restore, Migrate, Copy, Consolidate; required)
 .TP
-.B "protocol=<protocol>"
-Directive (protocol_type) (text)
+.B "protocol=<Native|NDMP_BAREOS|NDMP|NDMP_NATIVE>"
+Directive (protocol_type) (one of a fixed set; values: Native, NDMP_BAREOS, NDMP, NDMP_NATIVE)
 .TP
 .B "backupformat=<backupformat>"
 Directive (string) (text)
 .TP
 .B "level=<level>"
-Directive (backup_level) (text)
+Directive (backup_level) (one of a fixed set; values: Full, Base, Incremental, Differential, Since, VirtualFull, Catalog, InitCatalog, VolumeToCatalog, DiskToCatalog, Data)
 .TP
 .B "messages=<messages>"
-Directive (res) (text; required)
+Directive (res) (name; values from .msgs; required)
 .TP
 .B "storage=<storage> ..."
-Directive (resource_list) (text; may be repeated)
+Directive (resource_list) (name; values from .storages; may be repeated)
 .TP
 .B "pool=<pool>"
-Directive (res) (text; required)
+Directive (res) (name; values from .pools; required)
 .TP
 .B "fullbackuppool=<fullbackuppool>"
-Directive (res) (text)
+Directive (res) (name; values from .pools)
 .TP
 .B "virtualfullbackuppool=<virtualfullbackuppool>"
-Directive (res) (text)
+Directive (res) (name; values from .pools)
 .TP
 .B "incrementalbackuppool=<incrementalbackuppool>"
-Directive (res) (text)
+Directive (res) (name; values from .pools)
 .TP
 .B "differentialbackuppool=<differentialbackuppool>"
-Directive (res) (text)
+Directive (res) (name; values from .pools)
 .TP
 .B "nextpool=<nextpool>"
-Directive (res) (text)
+Directive (res) (name; values from .pools)
 .TP
 .B "client=<client>"
-Directive (res) (text)
+Directive (res) (name; values from .clients)
 .TP
 .B "fileset=<fileset>"
-Directive (res) (text)
+Directive (res) (name; values from .filesets)
 .TP
 .B "schedule=<schedule>"
-Directive (res) (text)
+Directive (res) (name; values from .schedule)
 .TP
 .B "jobtoverify=<jobtoverify>"
-Directive (res) (text)
+Directive (res) (name; values from .jobs)
 .TP
 .B "catalog=<catalog>"
-Directive (res) (text)
+Directive (res) (name; values from .catalogs)
 .TP
 .B "jobdefs=<jobdefs>"
-Directive (res) (text)
+Directive (res) (name; values from .jobdefs)
 .TP
 .B "run=<run> ..."
 Directive (string_list) (text; may be repeated)
@@ -2456,8 +2456,8 @@ Directive (directory) (text)
 .B "writebootstrap=<writebootstrap>"
 Directive (directory_or_command) (text)
 .TP
-.B "replace=<replace>"
-Directive (replace_option) (text)
+.B "replace=<Always|IfNewer|IfOlder|Never>"
+Directive (replace_option) (one of a fixed set; values: Always, IfNewer, IfOlder, Never)
 .TP
 .B "maximumbandwidth=<maximumbandwidth>"
 Directive (speed) (text)
@@ -2562,7 +2562,7 @@ Directive (boolean) (yes or no)
 Directive (string) (text)
 .TP
 .B "selectiontype=<selectiontype>"
-Directive (migration_type) (text)
+Directive (migration_type) (one of a fixed set; values: SmallestVolume, OldestVolume, PoolOccupancy, PoolTime, PoolUncopiedJobs, Client, Volume, Job, SqlQuery)
 .TP
 .B "accurate=<yes|no>"
 Directive (boolean) (yes or no)
@@ -2624,58 +2624,58 @@ Directive (name) (text; required)
 Directive (string) (text)
 .TP
 .B "type=<type>"
-Directive (job_type) (text; required)
+Directive (job_type) (one of a fixed set; values: Backup, Admin, Archive, Verify, Restore, Migrate, Copy, Consolidate; required)
 .TP
-.B "protocol=<protocol>"
-Directive (protocol_type) (text)
+.B "protocol=<Native|NDMP_BAREOS|NDMP|NDMP_NATIVE>"
+Directive (protocol_type) (one of a fixed set; values: Native, NDMP_BAREOS, NDMP, NDMP_NATIVE)
 .TP
 .B "backupformat=<backupformat>"
 Directive (string) (text)
 .TP
 .B "level=<level>"
-Directive (backup_level) (text)
+Directive (backup_level) (one of a fixed set; values: Full, Base, Incremental, Differential, Since, VirtualFull, Catalog, InitCatalog, VolumeToCatalog, DiskToCatalog, Data)
 .TP
 .B "messages=<messages>"
-Directive (res) (text; required)
+Directive (res) (name; values from .msgs; required)
 .TP
 .B "storage=<storage> ..."
-Directive (resource_list) (text; may be repeated)
+Directive (resource_list) (name; values from .storages; may be repeated)
 .TP
 .B "pool=<pool>"
-Directive (res) (text; required)
+Directive (res) (name; values from .pools; required)
 .TP
 .B "fullbackuppool=<fullbackuppool>"
-Directive (res) (text)
+Directive (res) (name; values from .pools)
 .TP
 .B "virtualfullbackuppool=<virtualfullbackuppool>"
-Directive (res) (text)
+Directive (res) (name; values from .pools)
 .TP
 .B "incrementalbackuppool=<incrementalbackuppool>"
-Directive (res) (text)
+Directive (res) (name; values from .pools)
 .TP
 .B "differentialbackuppool=<differentialbackuppool>"
-Directive (res) (text)
+Directive (res) (name; values from .pools)
 .TP
 .B "nextpool=<nextpool>"
-Directive (res) (text)
+Directive (res) (name; values from .pools)
 .TP
 .B "client=<client>"
-Directive (res) (text)
+Directive (res) (name; values from .clients)
 .TP
 .B "fileset=<fileset>"
-Directive (res) (text)
+Directive (res) (name; values from .filesets)
 .TP
 .B "schedule=<schedule>"
-Directive (res) (text)
+Directive (res) (name; values from .schedule)
 .TP
 .B "jobtoverify=<jobtoverify>"
-Directive (res) (text)
+Directive (res) (name; values from .jobs)
 .TP
 .B "catalog=<catalog>"
-Directive (res) (text)
+Directive (res) (name; values from .catalogs)
 .TP
 .B "jobdefs=<jobdefs>"
-Directive (res) (text)
+Directive (res) (name; values from .jobdefs)
 .TP
 .B "run=<run> ..."
 Directive (string_list) (text; may be repeated)
@@ -2701,8 +2701,8 @@ Directive (directory) (text)
 .B "writebootstrap=<writebootstrap>"
 Directive (directory_or_command) (text)
 .TP
-.B "replace=<replace>"
-Directive (replace_option) (text)
+.B "replace=<Always|IfNewer|IfOlder|Never>"
+Directive (replace_option) (one of a fixed set; values: Always, IfNewer, IfOlder, Never)
 .TP
 .B "maximumbandwidth=<maximumbandwidth>"
 Directive (speed) (text)
@@ -2807,7 +2807,7 @@ Directive (boolean) (yes or no)
 Directive (string) (text)
 .TP
 .B "selectiontype=<selectiontype>"
-Directive (migration_type) (text)
+Directive (migration_type) (one of a fixed set; values: SmallestVolume, OldestVolume, PoolOccupancy, PoolTime, PoolUncopiedJobs, Client, Volume, Job, SqlQuery)
 .TP
 .B "accurate=<yes|no>"
 Directive (boolean) (yes or no)
@@ -2868,11 +2868,11 @@ Directive (name) (text; required)
 .B "description=<description>"
 Directive (string) (text)
 .TP
-.B "protocol=<protocol>"
-Directive (auth_protocol_type) (text)
+.B "protocol=<Native|NDMPV2|NDMPV3|NDMPV4>"
+Directive (auth_protocol_type) (one of a fixed set; values: Native, NDMPV2, NDMPV3, NDMPV4)
 .TP
-.B "authtype=<authtype>"
-Directive (auth_type) (text)
+.B "authtype=<None|Clear|MD5>"
+Directive (auth_type) (one of a fixed set; values: None, Clear, MD5)
 .TP
 .B "address=<address>"
 Directive (string) (text; required)
@@ -2917,7 +2917,7 @@ Directive (pint32) (number)
 Directive (pint32) (number)
 .TP
 .B "pairedstorage=<pairedstorage>"
-Directive (res) (text)
+Directive (res) (name; values from .storages)
 .TP
 .B "maximumbandwidthperjob=<maximumbandwidthperjob>"
 Directive (speed) (text)
@@ -3051,7 +3051,7 @@ Directive (name) (text; required)
 Directive (string) (text)
 .TP
 .B "pooltype=<pooltype>"
-Directive (pooltype) (text)
+Directive (pooltype) (one of a fixed set; values: Backup, Copy, Cloned, Archive, Migration, Scratch)
 .TP
 .B "labelformat=<labelformat>"
 Directive (strname) (text)
@@ -3065,8 +3065,8 @@ Directive (boolean) (yes or no)
 .B "purgeoldestvolume=<yes|no>"
 Directive (boolean) (yes or no)
 .TP
-.B "actiononpurge=<actiononpurge>"
-Directive (action_on_purge) (text)
+.B "actiononpurge=<None|Truncate>"
+Directive (action_on_purge) (one of a fixed set; values: None, Truncate)
 .TP
 .B "recycleoldestvolume=<yes|no>"
 Directive (boolean) (yes or no)
@@ -3105,10 +3105,10 @@ Directive (size64) (text)
 Directive (size64) (text)
 .TP
 .B "nextpool=<nextpool>"
-Directive (res) (text)
+Directive (res) (name; values from .pools)
 .TP
 .B "storage=<storage> ..."
-Directive (resource_list) (text; may be repeated)
+Directive (resource_list) (name; values from .storages; may be repeated)
 .TP
 .B "autoprune=<yes|no>"
 Directive (boolean) (yes or no)
@@ -3117,13 +3117,13 @@ Directive (boolean) (yes or no)
 Directive (boolean) (yes or no)
 .TP
 .B "recyclepool=<recyclepool>"
-Directive (res) (text)
+Directive (res) (name; values from .pools)
 .TP
 .B "scratchpool=<scratchpool>"
-Directive (res) (text)
+Directive (res) (name; values from .pools)
 .TP
 .B "catalog=<catalog>"
-Directive (res) (text)
+Directive (res) (name; values from .catalogs)
 .TP
 .B "minimumblocksize=<minimumblocksize>"
 Directive (size32) (text)
@@ -3202,7 +3202,7 @@ Directive (pint32) (number)
 Directive (res) (text)
 .TP
 .B "catalog=<catalog>"
-Directive (res) (text)
+Directive (res) (name; values from .catalogs)
 .PP
 \fIconfigure add profile\fR
 .TP
@@ -3295,7 +3295,7 @@ Directive (acl) (text; may be repeated)
 Directive (acl) (text; may be repeated)
 .TP
 .B "profile=<profile> ..."
-Directive (resource_list) (text; may be repeated)
+Directive (resource_list) (name; values from .profiles; may be repeated)
 .PP
 \fIconfigure export\fR
 .TP
@@ -3329,11 +3329,11 @@ Resource name (name; values from .clients)
 .B "description=<description> ..."
 Directive (empty value removes it) (text; may be repeated)
 .TP
-.B "protocol=<protocol> ..."
-Directive (empty value removes it) (text; may be repeated)
+.B "protocol=<Native|NDMPV2|NDMPV3|NDMPV4> ..."
+Directive (empty value removes it) (one of a fixed set; values: Native, NDMPV2, NDMPV3, NDMPV4; may be repeated)
 .TP
-.B "authtype=<authtype> ..."
-Directive (empty value removes it) (text; may be repeated)
+.B "authtype=<None|Clear|MD5> ..."
+Directive (empty value removes it) (one of a fixed set; values: None, Clear, MD5; may be repeated)
 .TP
 .B "address=<address> ..."
 Directive (empty value removes it) (text; may be repeated)
@@ -3360,19 +3360,19 @@ Directive (empty value removes it) (text; may be repeated)
 Directive (empty value removes it) (text; may be repeated)
 .TP
 .B "catalog=<catalog> ..."
-Directive (empty value removes it) (text; may be repeated)
+Directive (empty value removes it) (name; values from .catalogs; may be repeated)
 .TP
-.B "passive=<passive> ..."
-Directive (empty value removes it) (text; may be repeated)
+.B "passive=<yes|no> ..."
+Directive (empty value removes it) (yes or no; may be repeated)
 .TP
-.B "connectionfromdirectortoclient=<connectionfromdirectortoclient> ..."
-Directive (empty value removes it) (text; may be repeated)
+.B "connectionfromdirectortoclient=<yes|no> ..."
+Directive (empty value removes it) (yes or no; may be repeated)
 .TP
-.B "connectionfromclienttodirector=<connectionfromclienttodirector> ..."
-Directive (empty value removes it) (text; may be repeated)
+.B "connectionfromclienttodirector=<yes|no> ..."
+Directive (empty value removes it) (yes or no; may be repeated)
 .TP
-.B "enabled=<enabled> ..."
-Directive (empty value removes it) (text; may be repeated)
+.B "enabled=<yes|no> ..."
+Directive (empty value removes it) (yes or no; may be repeated)
 .TP
 .B "hardquota=<hardquota> ..."
 Directive (empty value removes it) (text; may be repeated)
@@ -3383,11 +3383,11 @@ Directive (empty value removes it) (text; may be repeated)
 .B "softquotagraceperiod=<softquotagraceperiod> ..."
 Directive (empty value removes it) (text; may be repeated)
 .TP
-.B "strictquotas=<strictquotas> ..."
-Directive (empty value removes it) (text; may be repeated)
+.B "strictquotas=<yes|no> ..."
+Directive (empty value removes it) (yes or no; may be repeated)
 .TP
-.B "quotaincludefailedjobs=<quotaincludefailedjobs> ..."
-Directive (empty value removes it) (text; may be repeated)
+.B "quotaincludefailedjobs=<yes|no> ..."
+Directive (empty value removes it) (yes or no; may be repeated)
 .TP
 .B "heartbeatinterval=<heartbeatinterval> ..."
 Directive (empty value removes it) (text; may be repeated)
@@ -3404,17 +3404,17 @@ Directive (empty value removes it) (text; may be repeated)
 .B "ndmpblocksize=<ndmpblocksize> ..."
 Directive (empty value removes it) (text; may be repeated)
 .TP
-.B "ndmpuselmdb=<ndmpuselmdb> ..."
-Directive (empty value removes it) (text; may be repeated)
+.B "ndmpuselmdb=<yes|no> ..."
+Directive (empty value removes it) (yes or no; may be repeated)
 .TP
-.B "tlsauthenticate=<tlsauthenticate> ..."
-Directive (empty value removes it) (text; may be repeated)
+.B "tlsauthenticate=<yes|no> ..."
+Directive (empty value removes it) (yes or no; may be repeated)
 .TP
-.B "tlsenable=<tlsenable> ..."
-Directive (empty value removes it) (text; may be repeated)
+.B "tlsenable=<yes|no> ..."
+Directive (empty value removes it) (yes or no; may be repeated)
 .TP
-.B "tlsrequire=<tlsrequire> ..."
-Directive (empty value removes it) (text; may be repeated)
+.B "tlsrequire=<yes|no> ..."
+Directive (empty value removes it) (yes or no; may be repeated)
 .TP
 .B "tlscipherlist=<tlscipherlist> ..."
 Directive (empty value removes it) (text; may be repeated)
@@ -3428,8 +3428,8 @@ Directive (empty value removes it) (text; may be repeated)
 .B "tlsprotocol=<tlsprotocol> ..."
 Directive (empty value removes it) (text; may be repeated)
 .TP
-.B "tlsverifypeer=<tlsverifypeer> ..."
-Directive (empty value removes it) (text; may be repeated)
+.B "tlsverifypeer=<yes|no> ..."
+Directive (empty value removes it) (yes or no; may be repeated)
 .TP
 .B "tlscacertificatefile=<tlscacertificatefile> ..."
 Directive (empty value removes it) (text; may be repeated)
@@ -3458,61 +3458,61 @@ Resource name (name; values from .jobs)
 Directive (empty value removes it) (text; may be repeated)
 .TP
 .B "type=<type> ..."
-Directive (empty value removes it) (text; may be repeated)
+Directive (empty value removes it) (one of a fixed set; values: Backup, Admin, Archive, Verify, Restore, Migrate, Copy, Consolidate; may be repeated)
 .TP
-.B "protocol=<protocol> ..."
-Directive (empty value removes it) (text; may be repeated)
+.B "protocol=<Native|NDMP_BAREOS|NDMP|NDMP_NATIVE> ..."
+Directive (empty value removes it) (one of a fixed set; values: Native, NDMP_BAREOS, NDMP, NDMP_NATIVE; may be repeated)
 .TP
 .B "backupformat=<backupformat> ..."
 Directive (empty value removes it) (text; may be repeated)
 .TP
 .B "level=<level> ..."
-Directive (empty value removes it) (text; may be repeated)
+Directive (empty value removes it) (one of a fixed set; values: Full, Base, Incremental, Differential, Since, VirtualFull, Catalog, InitCatalog, VolumeToCatalog, DiskToCatalog, Data; may be repeated)
 .TP
 .B "messages=<messages> ..."
-Directive (empty value removes it) (text; may be repeated)
+Directive (empty value removes it) (name; values from .msgs; may be repeated)
 .TP
 .B "storage=<storage> ..."
-Directive (empty value removes it) (text; may be repeated)
+Directive (empty value removes it) (name; values from .storages; may be repeated)
 .TP
 .B "pool=<pool> ..."
-Directive (empty value removes it) (text; may be repeated)
+Directive (empty value removes it) (name; values from .pools; may be repeated)
 .TP
 .B "fullbackuppool=<fullbackuppool> ..."
-Directive (empty value removes it) (text; may be repeated)
+Directive (empty value removes it) (name; values from .pools; may be repeated)
 .TP
 .B "virtualfullbackuppool=<virtualfullbackuppool> ..."
-Directive (empty value removes it) (text; may be repeated)
+Directive (empty value removes it) (name; values from .pools; may be repeated)
 .TP
 .B "incrementalbackuppool=<incrementalbackuppool> ..."
-Directive (empty value removes it) (text; may be repeated)
+Directive (empty value removes it) (name; values from .pools; may be repeated)
 .TP
 .B "differentialbackuppool=<differentialbackuppool> ..."
-Directive (empty value removes it) (text; may be repeated)
+Directive (empty value removes it) (name; values from .pools; may be repeated)
 .TP
 .B "nextpool=<nextpool> ..."
-Directive (empty value removes it) (text; may be repeated)
+Directive (empty value removes it) (name; values from .pools; may be repeated)
 .TP
 .B "client=<client> ..."
-Directive (empty value removes it) (text; may be repeated)
+Directive (empty value removes it) (name; values from .clients; may be repeated)
 .TP
 .B "fileset=<fileset> ..."
-Directive (empty value removes it) (text; may be repeated)
+Directive (empty value removes it) (name; values from .filesets; may be repeated)
 .TP
 .B "schedule=<schedule> ..."
-Directive (empty value removes it) (text; may be repeated)
+Directive (empty value removes it) (name; values from .schedule; may be repeated)
 .TP
 .B "jobtoverify=<jobtoverify> ..."
-Directive (empty value removes it) (text; may be repeated)
+Directive (empty value removes it) (name; values from .jobs; may be repeated)
 .TP
 .B "verifyjob=<verifyjob> ..."
-Directive (empty value removes it) (text; may be repeated)
+Directive (empty value removes it) (name; values from .jobs; may be repeated)
 .TP
 .B "catalog=<catalog> ..."
-Directive (empty value removes it) (text; may be repeated)
+Directive (empty value removes it) (name; values from .catalogs; may be repeated)
 .TP
 .B "jobdefs=<jobdefs> ..."
-Directive (empty value removes it) (text; may be repeated)
+Directive (empty value removes it) (name; values from .jobdefs; may be repeated)
 .TP
 .B "run=<run> ..."
 Directive (empty value removes it) (text; may be repeated)
@@ -3538,8 +3538,8 @@ Directive (empty value removes it) (text; may be repeated)
 .B "writebootstrap=<writebootstrap> ..."
 Directive (empty value removes it) (text; may be repeated)
 .TP
-.B "replace=<replace> ..."
-Directive (empty value removes it) (text; may be repeated)
+.B "replace=<Always|IfNewer|IfOlder|Never> ..."
+Directive (empty value removes it) (one of a fixed set; values: Always, IfNewer, IfOlder, Never; may be repeated)
 .TP
 .B "maximumbandwidth=<maximumbandwidth> ..."
 Directive (empty value removes it) (text; may be repeated)
@@ -3574,38 +3574,38 @@ Directive (empty value removes it) (text; may be repeated)
 .B "maxdiffinterval=<maxdiffinterval> ..."
 Directive (empty value removes it) (text; may be repeated)
 .TP
-.B "prefixlinks=<prefixlinks> ..."
-Directive (empty value removes it) (text; may be repeated)
+.B "prefixlinks=<yes|no> ..."
+Directive (empty value removes it) (yes or no; may be repeated)
 .TP
-.B "prunejobs=<prunejobs> ..."
-Directive (empty value removes it) (text; may be repeated)
+.B "prunejobs=<yes|no> ..."
+Directive (empty value removes it) (yes or no; may be repeated)
 .TP
-.B "prunefiles=<prunefiles> ..."
-Directive (empty value removes it) (text; may be repeated)
+.B "prunefiles=<yes|no> ..."
+Directive (empty value removes it) (yes or no; may be repeated)
 .TP
-.B "prunevolumes=<prunevolumes> ..."
-Directive (empty value removes it) (text; may be repeated)
+.B "prunevolumes=<yes|no> ..."
+Directive (empty value removes it) (yes or no; may be repeated)
 .TP
-.B "purgemigrationjob=<purgemigrationjob> ..."
-Directive (empty value removes it) (text; may be repeated)
+.B "purgemigrationjob=<yes|no> ..."
+Directive (empty value removes it) (yes or no; may be repeated)
 .TP
-.B "enabled=<enabled> ..."
-Directive (empty value removes it) (text; may be repeated)
+.B "enabled=<yes|no> ..."
+Directive (empty value removes it) (yes or no; may be repeated)
 .TP
-.B "spoolattributes=<spoolattributes> ..."
-Directive (empty value removes it) (text; may be repeated)
+.B "spoolattributes=<yes|no> ..."
+Directive (empty value removes it) (yes or no; may be repeated)
 .TP
-.B "spooldata=<spooldata> ..."
-Directive (empty value removes it) (text; may be repeated)
+.B "spooldata=<yes|no> ..."
+Directive (empty value removes it) (yes or no; may be repeated)
 .TP
 .B "spoolsize=<spoolsize> ..."
 Directive (empty value removes it) (text; may be repeated)
 .TP
-.B "rerunfailedlevels=<rerunfailedlevels> ..."
-Directive (empty value removes it) (text; may be repeated)
+.B "rerunfailedlevels=<yes|no> ..."
+Directive (empty value removes it) (yes or no; may be repeated)
 .TP
-.B "prefermountedvolumes=<prefermountedvolumes> ..."
-Directive (empty value removes it) (text; may be repeated)
+.B "prefermountedvolumes=<yes|no> ..."
+Directive (empty value removes it) (yes or no; may be repeated)
 .TP
 .B "runbeforejob=<runbeforejob> ..."
 Directive (empty value removes it) (text; may be repeated)
@@ -3625,8 +3625,8 @@ Directive (empty value removes it) (text; may be repeated)
 .B "maximumconcurrentjobs=<maximumconcurrentjobs> ..."
 Directive (empty value removes it) (text; may be repeated)
 .TP
-.B "rescheduleonerror=<rescheduleonerror> ..."
-Directive (empty value removes it) (text; may be repeated)
+.B "rescheduleonerror=<yes|no> ..."
+Directive (empty value removes it) (yes or no; may be repeated)
 .TP
 .B "rescheduleinterval=<rescheduleinterval> ..."
 Directive (empty value removes it) (text; may be repeated)
@@ -3637,8 +3637,8 @@ Directive (empty value removes it) (text; may be repeated)
 .B "priority=<priority> ..."
 Directive (empty value removes it) (text; may be repeated)
 .TP
-.B "allowmixedpriority=<allowmixedpriority> ..."
-Directive (empty value removes it) (text; may be repeated)
+.B "allowmixedpriority=<yes|no> ..."
+Directive (empty value removes it) (yes or no; may be repeated)
 .TP
 .B "selectionpattern=<selectionpattern> ..."
 Directive (empty value removes it) (text; may be repeated)
@@ -3647,25 +3647,25 @@ Directive (empty value removes it) (text; may be repeated)
 Directive (empty value removes it) (text; may be repeated)
 .TP
 .B "selectiontype=<selectiontype> ..."
-Directive (empty value removes it) (text; may be repeated)
+Directive (empty value removes it) (one of a fixed set; values: SmallestVolume, OldestVolume, PoolOccupancy, PoolTime, PoolUncopiedJobs, Client, Volume, Job, SqlQuery; may be repeated)
 .TP
-.B "accurate=<accurate> ..."
-Directive (empty value removes it) (text; may be repeated)
+.B "accurate=<yes|no> ..."
+Directive (empty value removes it) (yes or no; may be repeated)
 .TP
-.B "allowduplicatejobs=<allowduplicatejobs> ..."
-Directive (empty value removes it) (text; may be repeated)
+.B "allowduplicatejobs=<yes|no> ..."
+Directive (empty value removes it) (yes or no; may be repeated)
 .TP
-.B "cancellowerlevelduplicates=<cancellowerlevelduplicates> ..."
-Directive (empty value removes it) (text; may be repeated)
+.B "cancellowerlevelduplicates=<yes|no> ..."
+Directive (empty value removes it) (yes or no; may be repeated)
 .TP
-.B "cancelqueuedduplicates=<cancelqueuedduplicates> ..."
-Directive (empty value removes it) (text; may be repeated)
+.B "cancelqueuedduplicates=<yes|no> ..."
+Directive (empty value removes it) (yes or no; may be repeated)
 .TP
-.B "cancelrunningduplicates=<cancelrunningduplicates> ..."
-Directive (empty value removes it) (text; may be repeated)
+.B "cancelrunningduplicates=<yes|no> ..."
+Directive (empty value removes it) (yes or no; may be repeated)
 .TP
-.B "savefilehistory=<savefilehistory> ..."
-Directive (empty value removes it) (text; may be repeated)
+.B "savefilehistory=<yes|no> ..."
+Directive (empty value removes it) (yes or no; may be repeated)
 .TP
 .B "filehistorysize=<filehistorysize> ..."
 Directive (empty value removes it) (text; may be repeated)
@@ -3682,8 +3682,8 @@ Directive (empty value removes it) (text; may be repeated)
 .B "maxconcurrentcopies=<maxconcurrentcopies> ..."
 Directive (empty value removes it) (text; may be repeated)
 .TP
-.B "alwaysincremental=<alwaysincremental> ..."
-Directive (empty value removes it) (text; may be repeated)
+.B "alwaysincremental=<yes|no> ..."
+Directive (empty value removes it) (yes or no; may be repeated)
 .TP
 .B "alwaysincrementaljobretention=<alwaysincrementaljobretention> ..."
 Directive (empty value removes it) (text; may be repeated)
@@ -3701,19 +3701,19 @@ Directive (empty value removes it) (text; may be repeated)
 Directive (empty value removes it) (text; may be repeated)
 .TP
 .B "newclient=<newclient> ..."
-Directive (empty value removes it) (text; may be repeated)
+Directive (empty value removes it) (name; values from .clients; may be repeated)
 .TP
 .B "newfileset=<newfileset> ..."
-Directive (empty value removes it) (text; may be repeated)
+Directive (empty value removes it) (name; values from .filesets; may be repeated)
 .TP
 .B "newpool=<newpool> ..."
-Directive (empty value removes it) (text; may be repeated)
+Directive (empty value removes it) (name; values from .pools; may be repeated)
 .TP
 .B "newstorage=<newstorage> ..."
-Directive (empty value removes it) (text; may be repeated)
+Directive (empty value removes it) (name; values from .storages; may be repeated)
 .TP
 .B "newschedule=<newschedule> ..."
-Directive (empty value removes it) (text; may be repeated)
+Directive (empty value removes it) (name; values from .schedule; may be repeated)
 .PP
 \fIconfigure update jobdefs=<jobdefs>\fR
 .TP
@@ -3724,61 +3724,61 @@ Resource name (name; values from .jobdefs)
 Directive (empty value removes it) (text; may be repeated)
 .TP
 .B "type=<type> ..."
-Directive (empty value removes it) (text; may be repeated)
+Directive (empty value removes it) (one of a fixed set; values: Backup, Admin, Archive, Verify, Restore, Migrate, Copy, Consolidate; may be repeated)
 .TP
-.B "protocol=<protocol> ..."
-Directive (empty value removes it) (text; may be repeated)
+.B "protocol=<Native|NDMP_BAREOS|NDMP|NDMP_NATIVE> ..."
+Directive (empty value removes it) (one of a fixed set; values: Native, NDMP_BAREOS, NDMP, NDMP_NATIVE; may be repeated)
 .TP
 .B "backupformat=<backupformat> ..."
 Directive (empty value removes it) (text; may be repeated)
 .TP
 .B "level=<level> ..."
-Directive (empty value removes it) (text; may be repeated)
+Directive (empty value removes it) (one of a fixed set; values: Full, Base, Incremental, Differential, Since, VirtualFull, Catalog, InitCatalog, VolumeToCatalog, DiskToCatalog, Data; may be repeated)
 .TP
 .B "messages=<messages> ..."
-Directive (empty value removes it) (text; may be repeated)
+Directive (empty value removes it) (name; values from .msgs; may be repeated)
 .TP
 .B "storage=<storage> ..."
-Directive (empty value removes it) (text; may be repeated)
+Directive (empty value removes it) (name; values from .storages; may be repeated)
 .TP
 .B "pool=<pool> ..."
-Directive (empty value removes it) (text; may be repeated)
+Directive (empty value removes it) (name; values from .pools; may be repeated)
 .TP
 .B "fullbackuppool=<fullbackuppool> ..."
-Directive (empty value removes it) (text; may be repeated)
+Directive (empty value removes it) (name; values from .pools; may be repeated)
 .TP
 .B "virtualfullbackuppool=<virtualfullbackuppool> ..."
-Directive (empty value removes it) (text; may be repeated)
+Directive (empty value removes it) (name; values from .pools; may be repeated)
 .TP
 .B "incrementalbackuppool=<incrementalbackuppool> ..."
-Directive (empty value removes it) (text; may be repeated)
+Directive (empty value removes it) (name; values from .pools; may be repeated)
 .TP
 .B "differentialbackuppool=<differentialbackuppool> ..."
-Directive (empty value removes it) (text; may be repeated)
+Directive (empty value removes it) (name; values from .pools; may be repeated)
 .TP
 .B "nextpool=<nextpool> ..."
-Directive (empty value removes it) (text; may be repeated)
+Directive (empty value removes it) (name; values from .pools; may be repeated)
 .TP
 .B "client=<client> ..."
-Directive (empty value removes it) (text; may be repeated)
+Directive (empty value removes it) (name; values from .clients; may be repeated)
 .TP
 .B "fileset=<fileset> ..."
-Directive (empty value removes it) (text; may be repeated)
+Directive (empty value removes it) (name; values from .filesets; may be repeated)
 .TP
 .B "schedule=<schedule> ..."
-Directive (empty value removes it) (text; may be repeated)
+Directive (empty value removes it) (name; values from .schedule; may be repeated)
 .TP
 .B "jobtoverify=<jobtoverify> ..."
-Directive (empty value removes it) (text; may be repeated)
+Directive (empty value removes it) (name; values from .jobs; may be repeated)
 .TP
 .B "verifyjob=<verifyjob> ..."
-Directive (empty value removes it) (text; may be repeated)
+Directive (empty value removes it) (name; values from .jobs; may be repeated)
 .TP
 .B "catalog=<catalog> ..."
-Directive (empty value removes it) (text; may be repeated)
+Directive (empty value removes it) (name; values from .catalogs; may be repeated)
 .TP
 .B "jobdefs=<jobdefs> ..."
-Directive (empty value removes it) (text; may be repeated)
+Directive (empty value removes it) (name; values from .jobdefs; may be repeated)
 .TP
 .B "run=<run> ..."
 Directive (empty value removes it) (text; may be repeated)
@@ -3804,8 +3804,8 @@ Directive (empty value removes it) (text; may be repeated)
 .B "writebootstrap=<writebootstrap> ..."
 Directive (empty value removes it) (text; may be repeated)
 .TP
-.B "replace=<replace> ..."
-Directive (empty value removes it) (text; may be repeated)
+.B "replace=<Always|IfNewer|IfOlder|Never> ..."
+Directive (empty value removes it) (one of a fixed set; values: Always, IfNewer, IfOlder, Never; may be repeated)
 .TP
 .B "maximumbandwidth=<maximumbandwidth> ..."
 Directive (empty value removes it) (text; may be repeated)
@@ -3840,38 +3840,38 @@ Directive (empty value removes it) (text; may be repeated)
 .B "maxdiffinterval=<maxdiffinterval> ..."
 Directive (empty value removes it) (text; may be repeated)
 .TP
-.B "prefixlinks=<prefixlinks> ..."
-Directive (empty value removes it) (text; may be repeated)
+.B "prefixlinks=<yes|no> ..."
+Directive (empty value removes it) (yes or no; may be repeated)
 .TP
-.B "prunejobs=<prunejobs> ..."
-Directive (empty value removes it) (text; may be repeated)
+.B "prunejobs=<yes|no> ..."
+Directive (empty value removes it) (yes or no; may be repeated)
 .TP
-.B "prunefiles=<prunefiles> ..."
-Directive (empty value removes it) (text; may be repeated)
+.B "prunefiles=<yes|no> ..."
+Directive (empty value removes it) (yes or no; may be repeated)
 .TP
-.B "prunevolumes=<prunevolumes> ..."
-Directive (empty value removes it) (text; may be repeated)
+.B "prunevolumes=<yes|no> ..."
+Directive (empty value removes it) (yes or no; may be repeated)
 .TP
-.B "purgemigrationjob=<purgemigrationjob> ..."
-Directive (empty value removes it) (text; may be repeated)
+.B "purgemigrationjob=<yes|no> ..."
+Directive (empty value removes it) (yes or no; may be repeated)
 .TP
-.B "enabled=<enabled> ..."
-Directive (empty value removes it) (text; may be repeated)
+.B "enabled=<yes|no> ..."
+Directive (empty value removes it) (yes or no; may be repeated)
 .TP
-.B "spoolattributes=<spoolattributes> ..."
-Directive (empty value removes it) (text; may be repeated)
+.B "spoolattributes=<yes|no> ..."
+Directive (empty value removes it) (yes or no; may be repeated)
 .TP
-.B "spooldata=<spooldata> ..."
-Directive (empty value removes it) (text; may be repeated)
+.B "spooldata=<yes|no> ..."
+Directive (empty value removes it) (yes or no; may be repeated)
 .TP
 .B "spoolsize=<spoolsize> ..."
 Directive (empty value removes it) (text; may be repeated)
 .TP
-.B "rerunfailedlevels=<rerunfailedlevels> ..."
-Directive (empty value removes it) (text; may be repeated)
+.B "rerunfailedlevels=<yes|no> ..."
+Directive (empty value removes it) (yes or no; may be repeated)
 .TP
-.B "prefermountedvolumes=<prefermountedvolumes> ..."
-Directive (empty value removes it) (text; may be repeated)
+.B "prefermountedvolumes=<yes|no> ..."
+Directive (empty value removes it) (yes or no; may be repeated)
 .TP
 .B "runbeforejob=<runbeforejob> ..."
 Directive (empty value removes it) (text; may be repeated)
@@ -3891,8 +3891,8 @@ Directive (empty value removes it) (text; may be repeated)
 .B "maximumconcurrentjobs=<maximumconcurrentjobs> ..."
 Directive (empty value removes it) (text; may be repeated)
 .TP
-.B "rescheduleonerror=<rescheduleonerror> ..."
-Directive (empty value removes it) (text; may be repeated)
+.B "rescheduleonerror=<yes|no> ..."
+Directive (empty value removes it) (yes or no; may be repeated)
 .TP
 .B "rescheduleinterval=<rescheduleinterval> ..."
 Directive (empty value removes it) (text; may be repeated)
@@ -3903,8 +3903,8 @@ Directive (empty value removes it) (text; may be repeated)
 .B "priority=<priority> ..."
 Directive (empty value removes it) (text; may be repeated)
 .TP
-.B "allowmixedpriority=<allowmixedpriority> ..."
-Directive (empty value removes it) (text; may be repeated)
+.B "allowmixedpriority=<yes|no> ..."
+Directive (empty value removes it) (yes or no; may be repeated)
 .TP
 .B "selectionpattern=<selectionpattern> ..."
 Directive (empty value removes it) (text; may be repeated)
@@ -3913,25 +3913,25 @@ Directive (empty value removes it) (text; may be repeated)
 Directive (empty value removes it) (text; may be repeated)
 .TP
 .B "selectiontype=<selectiontype> ..."
-Directive (empty value removes it) (text; may be repeated)
+Directive (empty value removes it) (one of a fixed set; values: SmallestVolume, OldestVolume, PoolOccupancy, PoolTime, PoolUncopiedJobs, Client, Volume, Job, SqlQuery; may be repeated)
 .TP
-.B "accurate=<accurate> ..."
-Directive (empty value removes it) (text; may be repeated)
+.B "accurate=<yes|no> ..."
+Directive (empty value removes it) (yes or no; may be repeated)
 .TP
-.B "allowduplicatejobs=<allowduplicatejobs> ..."
-Directive (empty value removes it) (text; may be repeated)
+.B "allowduplicatejobs=<yes|no> ..."
+Directive (empty value removes it) (yes or no; may be repeated)
 .TP
-.B "cancellowerlevelduplicates=<cancellowerlevelduplicates> ..."
-Directive (empty value removes it) (text; may be repeated)
+.B "cancellowerlevelduplicates=<yes|no> ..."
+Directive (empty value removes it) (yes or no; may be repeated)
 .TP
-.B "cancelqueuedduplicates=<cancelqueuedduplicates> ..."
-Directive (empty value removes it) (text; may be repeated)
+.B "cancelqueuedduplicates=<yes|no> ..."
+Directive (empty value removes it) (yes or no; may be repeated)
 .TP
-.B "cancelrunningduplicates=<cancelrunningduplicates> ..."
-Directive (empty value removes it) (text; may be repeated)
+.B "cancelrunningduplicates=<yes|no> ..."
+Directive (empty value removes it) (yes or no; may be repeated)
 .TP
-.B "savefilehistory=<savefilehistory> ..."
-Directive (empty value removes it) (text; may be repeated)
+.B "savefilehistory=<yes|no> ..."
+Directive (empty value removes it) (yes or no; may be repeated)
 .TP
 .B "filehistorysize=<filehistorysize> ..."
 Directive (empty value removes it) (text; may be repeated)
@@ -3948,8 +3948,8 @@ Directive (empty value removes it) (text; may be repeated)
 .B "maxconcurrentcopies=<maxconcurrentcopies> ..."
 Directive (empty value removes it) (text; may be repeated)
 .TP
-.B "alwaysincremental=<alwaysincremental> ..."
-Directive (empty value removes it) (text; may be repeated)
+.B "alwaysincremental=<yes|no> ..."
+Directive (empty value removes it) (yes or no; may be repeated)
 .TP
 .B "alwaysincrementaljobretention=<alwaysincrementaljobretention> ..."
 Directive (empty value removes it) (text; may be repeated)
@@ -3967,19 +3967,19 @@ Directive (empty value removes it) (text; may be repeated)
 Directive (empty value removes it) (text; may be repeated)
 .TP
 .B "newclient=<newclient> ..."
-Directive (empty value removes it) (text; may be repeated)
+Directive (empty value removes it) (name; values from .clients; may be repeated)
 .TP
 .B "newfileset=<newfileset> ..."
-Directive (empty value removes it) (text; may be repeated)
+Directive (empty value removes it) (name; values from .filesets; may be repeated)
 .TP
 .B "newpool=<newpool> ..."
-Directive (empty value removes it) (text; may be repeated)
+Directive (empty value removes it) (name; values from .pools; may be repeated)
 .TP
 .B "newstorage=<newstorage> ..."
-Directive (empty value removes it) (text; may be repeated)
+Directive (empty value removes it) (name; values from .storages; may be repeated)
 .TP
 .B "newschedule=<newschedule> ..."
-Directive (empty value removes it) (text; may be repeated)
+Directive (empty value removes it) (name; values from .schedule; may be repeated)
 .PP
 \fIconfigure update schedule=<schedule>\fR
 .TP
@@ -3992,8 +3992,8 @@ Directive (empty value removes it) (text; may be repeated)
 .B "run=<run> ..."
 Directive (empty value removes it) (text; may be repeated)
 .TP
-.B "enabled=<enabled> ..."
-Directive (empty value removes it) (text; may be repeated)
+.B "enabled=<yes|no> ..."
+Directive (empty value removes it) (yes or no; may be repeated)
 .PP
 \fIconfigure update fileset=<fileset>\fR
 .TP
@@ -4009,11 +4009,11 @@ Directive (empty value removes it) (text; may be repeated)
 .B "exclude=<exclude> ..."
 Directive (empty value removes it) (text; may be repeated)
 .TP
-.B "ignorefilesetchanges=<ignorefilesetchanges> ..."
-Directive (empty value removes it) (text; may be repeated)
+.B "ignorefilesetchanges=<yes|no> ..."
+Directive (empty value removes it) (yes or no; may be repeated)
 .TP
-.B "enablevss=<enablevss> ..."
-Directive (empty value removes it) (text; may be repeated)
+.B "enablevss=<yes|no> ..."
+Directive (empty value removes it) (yes or no; may be repeated)
 .PP
 \fIconfigure delete client=<client>\fR
 .TP
