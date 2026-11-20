@@ -346,3 +346,15 @@ fn the_write_tool_routes_configure_update_here() {
     assert_eq!(r["isError"], false, "{r}");
     assert_eq!(d.lock().unwrap().lines, ["GetConfigCapabilities", "ReadResource", "UpdateResource"]);
 }
+
+/// `null` in `directives` removes every line of the directive, the rest stays.
+#[test]
+fn null_removes_the_directive() {
+    let changes = directives(&serde_json::json!({"directives": {"File Retention": null, "address": "h2"}}), "client").unwrap();
+    assert_eq!(changes[0], ("File Retention".to_string(), Vec::<String>::new()));
+    let (out, report) = replace_directives(CLIENT, &changes).unwrap();
+    assert!(!out.contains("Retention"), "{out}");
+    assert!(out.contains("Address = h2   ; Port = 9102\n") && out.contains("TLS Enable = yes"), "{out}");
+    assert_eq!(report[0].old, ["30 days", "40 days"]);
+    assert!(report[0].new.is_empty());
+}

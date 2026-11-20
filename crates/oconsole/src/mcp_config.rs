@@ -112,6 +112,11 @@ pub fn directives(arguments: &Value, resource: &str) -> Result<Vec<(String, Vec<
             return Err("the Name cannot be changed (renaming is not supported)".into());
         }
         let items = match value {
+            // null removes every line of the directive
+            Value::Null => {
+                out.push((key.to_string(), Vec::new()));
+                continue;
+            }
             Value::Array(items) if items.is_empty() => return Err(format!("directive '{key}': empty list")),
             Value::Array(items) => items.clone(),
             v => vec![v.clone()],

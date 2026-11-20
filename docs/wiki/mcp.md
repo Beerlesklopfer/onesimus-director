@@ -54,6 +54,8 @@ Jedes Tool prüft zuerst seine Parameter und baut daraus die Konsolenzeile. Dann
                   "Run": ["Full sun at 23:30", "Incremental mon-sat at 23:30"] } }
 ```
 
+`null` als Wert entfernt alle Zeilen der Direktive (`{"Description": null}`).
+
 
 1. Die Fähigkeiten der Verbindung entscheiden: über gRPC `GetConfigCapabilities`, über BNET `.config capabilities`. Bietet der Director den Typ nicht mit `READ_RAW` und `UPDATE_RAW` an (bareos-dir, älterer odir), verweigert das Werkzeug mit einer Meldung; einen Konsolenweg gibt es nicht mehr.
 2. `ReadResource` bzw. `.config read` liefert Rohtext und sha256.

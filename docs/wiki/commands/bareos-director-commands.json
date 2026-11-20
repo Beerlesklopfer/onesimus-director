@@ -679,27 +679,23 @@
   "local_source_files": [
     {
       "path": "Cargo.toml",
-      "sha256": "dae631ba49ab71f1a39eaf3438a7911a1a9d79f51c5630ce2495826cef19a3e0"
+      "sha256": "cf0cdf9c1990dc6dbf66f3b94445d77a01c38d32a2cfddb0de5661c765191f64"
     },
     {
       "path": "crates/bareos-bnet/src/debug.rs",
       "sha256": "88e898b585d221cef727d1140ca26fe0b7737ea465b77e3c22ec958147491c63"
     },
     {
-      "path": "crates/osd/src/command.rs",
-      "sha256": "46397ca758bb22fc0b7df8bbdba22b2fb6bba91dd2af8ccded9e0c6f02719aaf"
-    },
-    {
       "path": "crates/oconsole/Cargo.toml",
-      "sha256": "939c54f14c4935fdd6e2819127766447613a4b6018440f8949b1d6c613a3bcda"
+      "sha256": "4c9a94a724ab859a42973ee8fc158e3ddc42dc4412b3961635c8de3ba02a80cf"
     },
     {
       "path": "crates/oconsole/src/main.rs",
-      "sha256": "85894ca6cde5632ab2222b3a26c87cb4b33120b8384ea7c9ef1bc4c274fa10af"
+      "sha256": "bccaa4c0a4c64a187b7362af09887b6124ac7fbf87e36bd5c3f136d8559d2268"
     },
     {
       "path": "crates/oconsole/src/mcp.rs",
-      "sha256": "16e15fe0675441c9749a7da9303aabda7608e271c73b35fcf5ffdff7623bdefb"
+      "sha256": "dbb10f66e3f0352c3f2e54ed0246186f583ab6168333b928e1d9b5d80a426dfa"
     },
     {
       "path": "crates/oconsole/src/mcp_mirror.rs",
@@ -711,27 +707,31 @@
     },
     {
       "path": "crates/odir/src/catalog_worker.rs",
-      "sha256": "cba7704aa666abbb654fc7c3f2d0b1cfac18ceaf71eb982de6cfda41e3eb1abc"
+      "sha256": "5162614d17b1fae56e33389dfa8b4cc45fb5c9e5c9e9023e5ec4314b779a38c1"
     },
     {
       "path": "crates/odir/src/command_executor.rs",
-      "sha256": "351f8b42ad7c3565aa6690ce2a1f71635d48301bc980b65e35f9902ab89a5337"
+      "sha256": "c746df8399d473a900f13e29006d67c58c21cce6c24b6750b786563e7af365d7"
     },
     {
       "path": "crates/odir/src/command_registry.rs",
-      "sha256": "04b48034565bd816b22a5581f2d03f58ee72a9c395944c7f1296f7679d123eb0"
+      "sha256": "dedd91fd6afeec1fafa0d1ff418b98018d933c6739a07b6d3d931b3372a03c32"
     },
     {
       "path": "crates/odir/src/commands/acl.rs",
-      "sha256": "204ed8a5bb50d44136ea9cce8f2aa11df7aeae36ba73c5d453ed5dfb46fd7b2d"
+      "sha256": "d5214a7174d7f4cac6ed1f7ea38cc10fbf0eb768bbdde17111c0f053d972ab0c"
     },
     {
       "path": "crates/odir/src/commands/admin.rs",
-      "sha256": "dcfc45548e3986bbb6a06668f287b215722043dce6c992ec49568d00522f5ecf"
+      "sha256": "fd571f78791f4809202facd319df46b8cdfc9a2037600b1642fe796f91f07f9e"
+    },
+    {
+      "path": "crates/odir/src/commands/autoprune.rs",
+      "sha256": "968f64324d8d1414906bb1efac983b6c5b57745010845d3adf30968295a1f15a"
     },
     {
       "path": "crates/odir/src/commands/bandwidth.rs",
-      "sha256": "d1d150761743176b0e4ed35a465b61f967d39b4cea6aef64edb4e796695e80f7"
+      "sha256": "2b664486c24c1884a168bf5f7ca46b411453ab009a7e420033e1a0e4ded826fb"
     },
     {
       "path": "crates/odir/src/commands/basic.rs",
@@ -739,7 +739,7 @@
     },
     {
       "path": "crates/odir/src/commands/bvfs.rs",
-      "sha256": "9c36dddd69b2ddd393d92980748398c43a5add92dd5ebfc7f56a6971c96585be"
+      "sha256": "577a996cb04f502bccd998c7effc35d1d660d472f835105266621ba077175df0"
     },
     {
       "path": "crates/odir/src/commands/cancel.rs",
@@ -747,11 +747,15 @@
     },
     {
       "path": "crates/odir/src/commands/catalog.rs",
-      "sha256": "2ae021c4fd731e5a172cd44506e9cc121125e7976387453fecf660fdd38d512d"
+      "sha256": "7460ba465aa02f186f9ba3557d4cd101b981c95a9e0f44e89ae142ae4ee66675"
+    },
+    {
+      "path": "crates/odir/src/commands/config_crud.rs",
+      "sha256": "0191bd90e00d2e91718807b29ed96a69c49963784580ce5ccecb1adf46775085"
     },
     {
       "path": "crates/odir/src/commands/configure.rs",
-      "sha256": "dfa5a951f1c03e1fb465a204909196fdf1c41103a8634da0a9c64e9f91f0dad2"
+      "sha256": "08e77da7e9014c316887539793d2461737b729289bc5ae0f0b5e56c30f408bf2"
     },
     {
       "path": "crates/odir/src/commands/configure_usage.rs",
@@ -759,15 +763,15 @@
     },
     {
       "path": "crates/odir/src/commands/debug.rs",
-      "sha256": "17228f5436bdcea441882160354d9ee576af55630dd8c90930baddd9bc41ddb7"
+      "sha256": "b60664826365a6e7983456a061d40a817a77f336af41ce0ed7e124c7633ad52c"
     },
     {
       "path": "crates/odir/src/commands/defaults.rs",
-      "sha256": "dd835511660aaddf8dd194290a938772f1f9025b98f472919bd25b4943311b6c"
+      "sha256": "c0e907fa63068eb1a6030490128b785cdc742416cb395b42f1013d62c30406bb"
     },
     {
       "path": "crates/odir/src/commands/dot.rs",
-      "sha256": "86c1b224002d3365133d2ef6da026a1abdb6f9971154240ea0ee90e0ead7af41"
+      "sha256": "0863420d64fbb93f1557dd528a76c1dbd6c32f63b55796339d471eef074e6087"
     },
     {
       "path": "crates/odir/src/commands/estimate.rs",
@@ -775,11 +779,15 @@
     },
     {
       "path": "crates/odir/src/commands/extra.rs",
-      "sha256": "269b13c7e0724f0dca8caada32073bd8c016c22efb6426843e51772ac3a307d1"
+      "sha256": "230f6edd25da44f78a6475915d3dfe4584299706aa11d1a37a242a7a4830a010"
     },
     {
       "path": "crates/odir/src/commands/job.rs",
-      "sha256": "6a94a16108eadba87fb23aab9117c439e4af41570464f9e93d8ae7b750a7ca1f"
+      "sha256": "a7f4b882502c40def7d83980438a049f2f2e1bd1759228337b09fc26f654eeaf"
+    },
+    {
+      "path": "crates/odir/src/commands/label.rs",
+      "sha256": "d0e9581a9425e5c2f19c2335982ba19022f7cca496224cecfa80a71924752ebf"
     },
     {
       "path": "crates/odir/src/commands/list.rs",
@@ -787,7 +795,7 @@
     },
     {
       "path": "crates/odir/src/commands/mod.rs",
-      "sha256": "9917405636dac8325ecdc75b8b75dba805f000cb0ac945fb4dd15e9ac915982d"
+      "sha256": "bd6986bbd677320c938b71e432b63d3883f83d7ba7f4f306743df8df943898e4"
     },
     {
       "path": "crates/odir/src/commands/ovfs.rs",
@@ -803,19 +811,19 @@
     },
     {
       "path": "crates/odir/src/commands/purge.rs",
-      "sha256": "df2fc5aca9d5c0c88f0b4d2718b0799cbb55f8129d929c8eec885edebb876abe"
+      "sha256": "dd482891561147762638738cc96100167397ed5afedd8c4bd834432a06deefa0"
     },
     {
       "path": "crates/odir/src/commands/resolve.rs",
-      "sha256": "82fe18a9ae5749b76f6f866069174e9f155600be51a3cf6782a0662860f53697"
+      "sha256": "039a90c0c84b91783296d386e329bc1d3c8494741906af66642e7492a1d2d9c3"
     },
     {
       "path": "crates/odir/src/commands/restore.rs",
-      "sha256": "55a42a3376f6670179d732cb145321e242144bd20128eb5f0bf47cb96212c3a8"
+      "sha256": "314f4fbd543272fd9d7f29e0ed4759530e48e9eea928c9cc443fc470fe88910c"
     },
     {
       "path": "crates/odir/src/commands/restore_bsr.rs",
-      "sha256": "94fb746704549e3fdc90f9c28451cd768bfaeb3b299b02a3af2b155d0c6cef96"
+      "sha256": "54b18003ece6c0cf2e557264dc2a05ff5b8c7c2aaebdbbfc06dbafa3954fa130"
     },
     {
       "path": "crates/odir/src/commands/restore_tree.rs",
@@ -823,7 +831,7 @@
     },
     {
       "path": "crates/odir/src/commands/show.rs",
-      "sha256": "19e85d13ddb45d9fcb9cca4ac328c1b383bdb1257627cbd01b42025f3408d42e"
+      "sha256": "c10bcd1ad1829c00e583e3b4cb42e6ae521429e289609e6ec1b5bbd48da4bd9f"
     },
     {
       "path": "crates/odir/src/commands/show_items.rs",
@@ -835,7 +843,7 @@
     },
     {
       "path": "crates/odir/src/commands/status.rs",
-      "sha256": "b67a69269fffbcd3cb91d99283e66c12628836eb84e9b63e6f043784a3fcc929"
+      "sha256": "600ddc8f8f0644e61ae0593e84eef3b7280d875832f103866b1e4e730dbf994c"
     },
     {
       "path": "crates/odir/src/commands/update_db.rs",
@@ -847,15 +855,15 @@
     },
     {
       "path": "crates/odir/src/fd_protocol.rs",
-      "sha256": "078b517c4d9facee6d56ff33d37d019db87e7464b792796576976e46a0d2de8a"
+      "sha256": "f6b226175d2b4345f8dbc0dce2dba4f943fb4c6d9f791284e75534d8c23dc3c0"
     },
     {
       "path": "crates/odir/src/job_manager.rs",
-      "sha256": "7c2c4f11fafd5d3221393ce7bc762ebe848e4cac4596fc7e7697df662fbbf675"
+      "sha256": "64d3eb7cbdce7050d57bcc3314629204c111c0ee876b33fe62da31fc75b9e3ff"
     },
     {
       "path": "crates/odir/src/job_worker.rs",
-      "sha256": "0b27081f1335133cafed662eae2fb0a5944a6345d2f5e6207d182ec90202ea71"
+      "sha256": "d9b8b3e181ecaeb71c4c0d93362ceac499a32df46ab27b77193c00da0d872038"
     },
     {
       "path": "crates/odir/src/logging.rs",
@@ -863,15 +871,19 @@
     },
     {
       "path": "crates/odir/src/main.rs",
-      "sha256": "1c7086dcc3795e120b16c91577710ee78634a1cd74232d1a57977d349ce7f1a0"
+      "sha256": "835d162abfe01af00baf5ef62fd0d7bc656e071565d8fa8d2bbaed550d482649"
     },
     {
       "path": "crates/odir/src/scheduler.rs",
-      "sha256": "91c21af2dfa26688f13ca1628aa3abde68718e42356931148d4afd8b2dc8e53a"
+      "sha256": "156d1c8b0e8998b0816e89853636f2f36161b2b278c2cb0439c33201d63a68b0"
     },
     {
       "path": "crates/odir/src/session.rs",
-      "sha256": "54cd0d1c616357980d090fb9a126e60ca4847b0018a1ca18f49e8e83b2698eff"
+      "sha256": "8ab7096c08276481426876a3dd83a34bb606acce51ab0d0b6c7c2921240cb8d8"
+    },
+    {
+      "path": "crates/osd/src/command.rs",
+      "sha256": "46397ca758bb22fc0b7df8bbdba22b2fb6bba91dd2af8ccded9e0c6f02719aaf"
     }
   ],
   "mcp_build_policies": {
@@ -937,7 +949,7 @@
     "restore_file_selection_status_counts": {
       "missing_context": 26
     },
-    "onesimus_extra_names": 12
+    "onesimus_extra_names": 13
   },
   "parity_evidence": {
     "date": "2026-10-16",
@@ -2628,7 +2640,7 @@
         },
         "implementation": {
           "file": "crates/odir/src/commands/bvfs.rs",
-          "line": 932
+          "line": 916
         },
         "declared_arguments": [
           "jobid",
@@ -2690,7 +2702,7 @@
         },
         "implementation": {
           "file": "crates/odir/src/commands/bvfs.rs",
-          "line": 914
+          "line": 898
         },
         "declared_arguments": [
           "jobid",
@@ -2746,7 +2758,7 @@
         },
         "implementation": {
           "file": "crates/odir/src/commands/bvfs.rs",
-          "line": 837
+          "line": 821
         },
         "declared_arguments": [
           "jobid"
@@ -2796,7 +2808,7 @@
         },
         "implementation": {
           "file": "crates/odir/src/commands/bvfs.rs",
-          "line": 998
+          "line": 982
         },
         "declared_arguments": [
           "jobid"
@@ -2852,7 +2864,7 @@
         },
         "implementation": {
           "file": "crates/odir/src/commands/bvfs.rs",
-          "line": 958
+          "line": 942
         },
         "declared_arguments": [
           "jobid",
@@ -2909,7 +2921,7 @@
         },
         "implementation": {
           "file": "crates/odir/src/commands/bvfs.rs",
-          "line": 892
+          "line": 876
         },
         "declared_arguments": [
           "jobid"
@@ -2953,7 +2965,7 @@
         },
         "implementation": {
           "file": "crates/odir/src/commands/bvfs.rs",
-          "line": 877
+          "line": 861
         },
         "declared_arguments": [],
         "status": "partial",
@@ -2997,7 +3009,7 @@
         },
         "implementation": {
           "file": "crates/odir/src/commands/bvfs.rs",
-          "line": 859
+          "line": 843
         },
         "declared_arguments": [
           "yes"
@@ -3049,7 +3061,7 @@
         },
         "implementation": {
           "file": "crates/odir/src/commands/extra.rs",
-          "line": 880
+          "line": 849
         },
         "declared_arguments": [
           "pool"
@@ -3103,7 +3115,7 @@
         },
         "implementation": {
           "file": "crates/odir/src/commands/extra.rs",
-          "line": 50
+          "line": 35
         },
         "declared_arguments": [],
         "status": "parity_verified",
@@ -3161,7 +3173,7 @@
         },
         "implementation": {
           "file": "crates/odir/src/commands/extra.rs",
-          "line": 58
+          "line": 43
         },
         "declared_arguments": [],
         "status": "parity_verified",
@@ -3317,7 +3329,7 @@
         },
         "implementation": {
           "file": "crates/odir/src/commands/configure.rs",
-          "line": 79
+          "line": 53
         },
         "declared_arguments": [
           "sub"
@@ -3395,7 +3407,7 @@
         },
         "implementation": {
           "file": "crates/odir/src/commands/extra.rs",
-          "line": 836
+          "line": 805
         },
         "declared_arguments": [
           "pool"
@@ -3449,7 +3461,7 @@
         },
         "implementation": {
           "file": "crates/odir/src/commands/extra.rs",
-          "line": 602
+          "line": 565
         },
         "declared_arguments": [
           "volume",
@@ -3520,7 +3532,7 @@
         },
         "implementation": {
           "file": "crates/odir/src/commands/job.rs",
-          "line": 2277
+          "line": 2284
         },
         "declared_arguments": [
           "job",
@@ -3601,7 +3613,7 @@
         },
         "implementation": {
           "file": "crates/odir/src/commands/job.rs",
-          "line": 2273
+          "line": 2280
         },
         "declared_arguments": [
           "job",
@@ -3818,7 +3830,7 @@
         },
         "implementation": {
           "file": "crates/odir/src/commands/extra.rs",
-          "line": 1016
+          "line": 985
         },
         "declared_arguments": [
           "storage"
@@ -3868,7 +3880,7 @@
         },
         "implementation": {
           "file": "crates/odir/src/commands/extra.rs",
-          "line": 66
+          "line": 51
         },
         "declared_arguments": [],
         "status": "parity_verified",
@@ -3996,7 +4008,7 @@
         },
         "implementation": {
           "file": "crates/odir/src/commands/extra.rs",
-          "line": 1012
+          "line": 981
         },
         "declared_arguments": [
           "storage"
@@ -4052,7 +4064,7 @@
         },
         "implementation": {
           "file": "crates/odir/src/commands/admin.rs",
-          "line": 26
+          "line": 10
         },
         "declared_arguments": [
           "storage",
@@ -4667,7 +4679,7 @@
         },
         "implementation": {
           "file": "crates/odir/src/commands/extra.rs",
-          "line": 87
+          "line": 72
         },
         "declared_arguments": [],
         "status": "parity_verified",
@@ -4723,7 +4735,7 @@
         },
         "implementation": {
           "file": "crates/odir/src/commands/extra.rs",
-          "line": 97
+          "line": 82
         },
         "declared_arguments": [],
         "status": "parity_verified",
@@ -4775,7 +4787,7 @@
         },
         "implementation": {
           "file": "crates/odir/src/commands/admin.rs",
-          "line": 192
+          "line": 155
         },
         "declared_arguments": [
           "storage"
@@ -4843,7 +4855,7 @@
         },
         "implementation": {
           "file": "crates/odir/src/commands/extra.rs",
-          "line": 1020
+          "line": 989
         },
         "declared_arguments": [],
         "status": "partial",
@@ -4894,7 +4906,7 @@
         },
         "implementation": {
           "file": "crates/odir/src/commands/admin.rs",
-          "line": 902
+          "line": 869
         },
         "declared_arguments": [
           "volume",
@@ -4986,7 +4998,7 @@
         },
         "implementation": {
           "file": "crates/odir/src/commands/admin.rs",
-          "line": 1272
+          "line": 1239
         },
         "declared_arguments": [
           "volume"
@@ -5190,7 +5202,7 @@
         },
         "implementation": {
           "file": "crates/odir/src/commands/restore.rs",
-          "line": 88
+          "line": 90
         },
         "declared_arguments": [
           "client",
@@ -5279,7 +5291,7 @@
         },
         "implementation": {
           "file": "crates/odir/src/commands/extra.rs",
-          "line": 576
+          "line": 561
         },
         "declared_arguments": [
           "storage",
@@ -5339,7 +5351,7 @@
         },
         "implementation": {
           "file": "crates/odir/src/commands/admin.rs",
-          "line": 200
+          "line": 163
         },
         "declared_arguments": [
           "storage"
@@ -5394,7 +5406,7 @@
         },
         "implementation": {
           "file": "crates/odir/src/commands/admin.rs",
-          "line": 1841
+          "line": 1817
         },
         "declared_arguments": [],
         "status": "registered_unverified",
@@ -5440,7 +5452,7 @@
         },
         "implementation": {
           "file": "crates/odir/src/commands/extra.rs",
-          "line": 348
+          "line": 333
         },
         "declared_arguments": [
           "jobid"
@@ -5611,7 +5623,7 @@
         },
         "implementation": {
           "file": "crates/odir/src/commands/job.rs",
-          "line": 13
+          "line": 12
         },
         "declared_arguments": [
           "job",
@@ -5949,7 +5961,7 @@
         },
         "implementation": {
           "file": "crates/odir/src/commands/extra.rs",
-          "line": 248
+          "line": 233
         },
         "declared_arguments": [
           "storage"
@@ -6020,7 +6032,7 @@
         },
         "implementation": {
           "file": "crates/odir/src/commands/extra.rs",
-          "line": 231
+          "line": 216
         },
         "declared_arguments": [
           "client"
@@ -6275,7 +6287,7 @@
         },
         "implementation": {
           "file": "crates/odir/src/commands/extra.rs",
-          "line": 104
+          "line": 89
         },
         "declared_arguments": [],
         "status": "partial",
@@ -6327,7 +6339,7 @@
         },
         "implementation": {
           "file": "crates/odir/src/commands/admin.rs",
-          "line": 1525
+          "line": 1496
         },
         "declared_arguments": [
           "storage",
@@ -6390,7 +6402,7 @@
         },
         "implementation": {
           "file": "crates/odir/src/commands/admin.rs",
-          "line": 196
+          "line": 159
         },
         "declared_arguments": [
           "storage"
@@ -6441,7 +6453,7 @@
         },
         "implementation": {
           "file": "crates/odir/src/commands/admin.rs",
-          "line": 196
+          "line": 159
         },
         "declared_arguments": [
           "storage"
@@ -6509,7 +6521,7 @@
         },
         "implementation": {
           "file": "crates/odir/src/commands/admin.rs",
-          "line": 220
+          "line": 183
         },
         "declared_arguments": [
           "volume",
@@ -6607,7 +6619,7 @@
         },
         "implementation": {
           "file": "crates/odir/src/commands/extra.rs",
-          "line": 224
+          "line": 209
         },
         "declared_arguments": [
           "catalog"
@@ -6658,7 +6670,7 @@
         },
         "implementation": {
           "file": "crates/odir/src/commands/extra.rs",
-          "line": 126
+          "line": 111
         },
         "declared_arguments": [],
         "status": "parity_verified",
@@ -6830,7 +6842,7 @@
         },
         "implementation": {
           "file": "crates/odir/src/commands/extra.rs",
-          "line": 214
+          "line": 199
         },
         "declared_arguments": [],
         "status": "parity_verified",
@@ -6879,7 +6891,7 @@
         ],
         "implementation": {
           "file": "crates/odir/src/commands/restore.rs",
-          "line": 88
+          "line": 90
         },
         "open_log_entries": [
           "C-047"
@@ -6912,7 +6924,7 @@
         ],
         "implementation": {
           "file": "crates/odir/src/commands/restore.rs",
-          "line": 88
+          "line": 90
         },
         "open_log_entries": [
           "C-047"
@@ -6945,7 +6957,7 @@
         ],
         "implementation": {
           "file": "crates/odir/src/commands/restore.rs",
-          "line": 88
+          "line": 90
         },
         "open_log_entries": [
           "C-047"
@@ -6978,7 +6990,7 @@
         ],
         "implementation": {
           "file": "crates/odir/src/commands/restore.rs",
-          "line": 88
+          "line": 90
         },
         "open_log_entries": [
           "C-047"
@@ -7011,7 +7023,7 @@
         ],
         "implementation": {
           "file": "crates/odir/src/commands/restore.rs",
-          "line": 88
+          "line": 90
         },
         "open_log_entries": [
           "C-047"
@@ -7044,7 +7056,7 @@
         ],
         "implementation": {
           "file": "crates/odir/src/commands/restore.rs",
-          "line": 88
+          "line": 90
         },
         "open_log_entries": [
           "C-047"
@@ -7077,7 +7089,7 @@
         ],
         "implementation": {
           "file": "crates/odir/src/commands/restore.rs",
-          "line": 88
+          "line": 90
         },
         "open_log_entries": [
           "C-047"
@@ -7110,7 +7122,7 @@
         ],
         "implementation": {
           "file": "crates/odir/src/commands/restore.rs",
-          "line": 88
+          "line": 90
         },
         "open_log_entries": [
           "C-047"
@@ -7143,7 +7155,7 @@
         ],
         "implementation": {
           "file": "crates/odir/src/commands/restore.rs",
-          "line": 88
+          "line": 90
         },
         "open_log_entries": [
           "C-047"
@@ -7176,7 +7188,7 @@
         ],
         "implementation": {
           "file": "crates/odir/src/commands/restore.rs",
-          "line": 88
+          "line": 90
         },
         "open_log_entries": [
           "C-047"
@@ -7209,7 +7221,7 @@
         ],
         "implementation": {
           "file": "crates/odir/src/commands/restore.rs",
-          "line": 88
+          "line": 90
         },
         "open_log_entries": [
           "C-047"
@@ -7242,7 +7254,7 @@
         ],
         "implementation": {
           "file": "crates/odir/src/commands/restore.rs",
-          "line": 88
+          "line": 90
         },
         "open_log_entries": [
           "C-047"
@@ -7275,7 +7287,7 @@
         ],
         "implementation": {
           "file": "crates/odir/src/commands/restore.rs",
-          "line": 88
+          "line": 90
         },
         "open_log_entries": [
           "C-047"
@@ -7308,7 +7320,7 @@
         ],
         "implementation": {
           "file": "crates/odir/src/commands/restore.rs",
-          "line": 88
+          "line": 90
         },
         "open_log_entries": [
           "C-047"
@@ -7341,7 +7353,7 @@
         ],
         "implementation": {
           "file": "crates/odir/src/commands/restore.rs",
-          "line": 88
+          "line": 90
         },
         "open_log_entries": [
           "C-047"
@@ -7374,7 +7386,7 @@
         ],
         "implementation": {
           "file": "crates/odir/src/commands/restore.rs",
-          "line": 88
+          "line": 90
         },
         "open_log_entries": [
           "C-047"
@@ -7407,7 +7419,7 @@
         ],
         "implementation": {
           "file": "crates/odir/src/commands/restore.rs",
-          "line": 88
+          "line": 90
         },
         "open_log_entries": [
           "C-047"
@@ -7440,7 +7452,7 @@
         ],
         "implementation": {
           "file": "crates/odir/src/commands/restore.rs",
-          "line": 88
+          "line": 90
         },
         "open_log_entries": [
           "C-047"
@@ -7473,7 +7485,7 @@
         ],
         "implementation": {
           "file": "crates/odir/src/commands/restore.rs",
-          "line": 88
+          "line": 90
         },
         "open_log_entries": [
           "C-047"
@@ -7506,7 +7518,7 @@
         ],
         "implementation": {
           "file": "crates/odir/src/commands/restore.rs",
-          "line": 88
+          "line": 90
         },
         "open_log_entries": [
           "C-047"
@@ -7539,7 +7551,7 @@
         ],
         "implementation": {
           "file": "crates/odir/src/commands/restore.rs",
-          "line": 88
+          "line": 90
         },
         "open_log_entries": [
           "C-047"
@@ -7572,7 +7584,7 @@
         ],
         "implementation": {
           "file": "crates/odir/src/commands/restore.rs",
-          "line": 88
+          "line": 90
         },
         "open_log_entries": [
           "C-047"
@@ -7605,7 +7617,7 @@
         ],
         "implementation": {
           "file": "crates/odir/src/commands/restore.rs",
-          "line": 88
+          "line": 90
         },
         "open_log_entries": [
           "C-047"
@@ -7638,7 +7650,7 @@
         ],
         "implementation": {
           "file": "crates/odir/src/commands/restore.rs",
-          "line": 88
+          "line": 90
         },
         "open_log_entries": [
           "C-047"
@@ -7671,7 +7683,7 @@
         ],
         "implementation": {
           "file": "crates/odir/src/commands/restore.rs",
-          "line": 88
+          "line": 90
         },
         "open_log_entries": [
           "C-047"
@@ -7704,7 +7716,7 @@
         ],
         "implementation": {
           "file": "crates/odir/src/commands/restore.rs",
-          "line": 88
+          "line": 90
         },
         "open_log_entries": [
           "C-047"
@@ -7724,9 +7736,36 @@
       },
       "implementation": {
         "file": "crates/odir/src/commands/acl.rs",
-        "line": 93
+        "line": 94
       },
       "declared_arguments": []
+    },
+    {
+      "name": ".config",
+      "canonical_name": ".config",
+      "handler": "commands::config_crud::cmd_dot_config",
+      "registry": {
+        "file": "crates/odir/src/command_registry.rs",
+        "line": 319
+      },
+      "implementation": {
+        "file": "crates/odir/src/commands/config_crud.rs",
+        "line": 202
+      },
+      "declared_arguments": [
+        "capabilities",
+        "list",
+        "read",
+        "create",
+        "update",
+        "delete",
+        "type",
+        "name",
+        "sha256",
+        "text64",
+        "validate_only",
+        "json"
+      ]
     },
     {
       "name": ".grpc",
@@ -7748,7 +7787,7 @@
       "handler": "commands::ovfs::cmd_ovfs_latest",
       "registry": {
         "file": "crates/odir/src/command_registry.rs",
-        "line": 320
+        "line": 323
       },
       "implementation": {
         "file": "crates/odir/src/commands/ovfs.rs",
@@ -7766,7 +7805,7 @@
       "handler": "commands::ovfs::cmd_ovfs_ls",
       "registry": {
         "file": "crates/odir/src/command_registry.rs",
-        "line": 322
+        "line": 325
       },
       "implementation": {
         "file": "crates/odir/src/commands/ovfs.rs",
@@ -7786,7 +7825,7 @@
       "handler": "commands::ovfs::cmd_ovfs_status",
       "registry": {
         "file": "crates/odir/src/command_registry.rs",
-        "line": 319
+        "line": 322
       },
       "implementation": {
         "file": "crates/odir/src/commands/ovfs.rs",
@@ -7803,7 +7842,7 @@
       "handler": "commands::ovfs::cmd_ovfs_tree",
       "registry": {
         "file": "crates/odir/src/command_registry.rs",
-        "line": 321
+        "line": 324
       },
       "implementation": {
         "file": "crates/odir/src/commands/ovfs.rs",
@@ -7825,7 +7864,7 @@
       "handler": "commands::ovfs::cmd_ovfs_versions",
       "registry": {
         "file": "crates/odir/src/command_registry.rs",
-        "line": 323
+        "line": 326
       },
       "implementation": {
         "file": "crates/odir/src/commands/ovfs.rs",
@@ -7849,7 +7888,7 @@
       },
       "implementation": {
         "file": "crates/odir/src/commands/acl.rs",
-        "line": 93
+        "line": 94
       },
       "declared_arguments": []
     },
@@ -7863,7 +7902,7 @@
       },
       "implementation": {
         "file": "crates/odir/src/commands/dot.rs",
-        "line": 583
+        "line": 580
       },
       "declared_arguments": []
     },
@@ -7877,7 +7916,7 @@
       },
       "implementation": {
         "file": "crates/odir/src/commands/dot.rs",
-        "line": 578
+        "line": 575
       },
       "declared_arguments": []
     },
@@ -7891,7 +7930,7 @@
       },
       "implementation": {
         "file": "crates/odir/src/commands/dot.rs",
-        "line": 573
+        "line": 570
       },
       "declared_arguments": []
     },

@@ -138,8 +138,8 @@ pub(super) fn tools() -> Vec<Value> {
                 "resource": e(crate::mcp_config::TYPES, "resource type"),
                 "name": s("resource name"),
                 "directives": { "type": "object", "description": "directive -> new value (booleans become yes/no); \
-                    a list of strings replaces every line of a repeated directive (Run)",
-                    "additionalProperties": { "type": ["string", "number", "boolean", "array"],
+                    a list of strings replaces every line of a repeated directive (Run); null removes the directive",
+                    "additionalProperties": { "type": ["string", "number", "boolean", "array", "null"],
                         "items": { "type": "string" } } },
             }), &["resource", "name", "directives"], annotations(false, false, true)),
         tool("configure_delete", "Delete a configuration resource",

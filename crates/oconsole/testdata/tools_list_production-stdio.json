@@ -4701,13 +4701,14 @@
           },
           "directives": {
             "type": "object",
-            "description": "directive -> new value (booleans become yes/no); a list of strings replaces every line of a repeated directive (Run)",
+            "description": "directive -> new value (booleans become yes/no); a list of strings replaces every line of a repeated directive (Run); null removes the directive",
             "additionalProperties": {
               "type": [
                 "string",
                 "number",
                 "boolean",
-                "array"
+                "array",
+                "null"
               ],
               "items": {
                 "type": "string"

@@ -1171,9 +1171,11 @@ fn configure_add(a: &Args) -> Result<Plan, String> {
     match a.map.get("directives") {
         None | Some(Value::Null) => {}
         Some(Value::Object(directives)) => {
-            for (key, value) in directives {
-                if key.is_empty() || !key.chars().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit()) || key == "name" {
-                    return Err(format!("directive '{key}': lowercase letters and digits only, without spaces (not name)"));
+            for (given, value) in directives {
+                // Bareos keywords ignore case, blanks and underscores ("File Retention", "Description").
+                let key = &bareos_config::edit::norm_key(given);
+                if key.is_empty() || !key.chars().all(|c| c.is_ascii_alphanumeric()) || key == "name" {
+                    return Err(format!("directive '{given}': letters and digits only (not name)"));
                 }
                 let values = match value {
                     Value::Array(items) if !items.is_empty() => items.clone(),
@@ -1433,6 +1435,8 @@ mod tests {
             line("configure_add", json!({"resource":"client","name":"new-fd","directives":{"address":"10.0.0.1","password":"p w","fdport":9102,"run":["a","b"]}})),
             "configure add client name=new-fd address=\"10.0.0.1\" password=\"p w\" fdport=\"9102\" run=\"a\" run=\"b\""
         );
+        assert_eq!(line("configure_add", json!({"resource":"schedule","name":"s","directives":{"Description":"d","File Retention":"30 days"}})),
+                   "configure add schedule name=s description=\"d\" fileretention=\"30 days\"", "keys normalized like Bareos keywords");
         assert_eq!(line("configure_export", json!({"client":"fd"})), "configure export client=fd");
         assert_eq!(line("reload", json!({})), "reload");
         assert_eq!(line("setdebug", json!({"level":100,"target":"client","name":"fd","trace":true})), "setdebug level=100 trace=1 client=fd");
@@ -1496,7 +1500,8 @@ mod tests {
             ("delete", json!({"kind":"jobid","jobids":[1],"volume":"V","confirm":true})),
             ("enable", json!({"resource":"storage","name":"x"})),
             ("configure_add", json!({"resource":"director","name":"x"})),
-            ("configure_add", json!({"resource":"client","name":"x","directives":{"Address":"a"}})),
+            ("configure_add", json!({"resource":"client","name":"x","directives":{"add-ress":"a"}})),
+            ("configure_add", json!({"resource":"client","name":"x","directives":{"Name":"y"}})),
             ("configure_add", json!({"resource":"client","name":"x","directives":{"address":"@/etc/passwd"}})),
             ("setdebug", json!({"level":1,"target":"client"})),
             ("setdebug", json!({"level":1,"target":"dir","hangup":3})),

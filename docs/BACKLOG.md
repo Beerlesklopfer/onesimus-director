@@ -23,7 +23,7 @@ Belege stehen im [Kompatibilitätslog](COMPATIBILITY-LOG.md), in
 | Befehl | Offen | Bezug |
 | --- | --- | --- |
 | `status` | SD-Teil von `status all`/`status storage`; typisierte RPCs für `status client/storage` liefern nur Text | [C-014](COMPATIBILITY-LOG.md), S-34 |
-| `configure` | `configure update/delete` (Onesimus-Erweiterungen) prüfen die Ressourcen-ACL nicht; dazu S-38 | Hinweis [C-062](COMPATIBILITY-LOG.md) |
+| `configure` | ~~`configure update/delete` (Onesimus-Erweiterungen) prüfen die Ressourcen-ACL nicht; dazu S-38~~ erledigt 20.11.2026 (`c116264`): beide prüfen die Ressourcen-ACL der Konsole (über das Konfigurations-CRUD, verbotene Ressource wie unbekannt) | Hinweis [C-062](COMPATIBILITY-LOG.md) |
 | `setbandwidth` | `max_bandwidth` laufender Jobs; Jmsg bei Connect-/Antwortfehlern | [C-056](COMPATIBILITY-LOG.md), S-39 |
 | `label`, `relabel` | Option `encrypt` erzeugt noch keinen Volume-Schlüssel | [C-084](COMPATIBILITY-LOG.md), S-08 |
 | `update` | `update jobid=… starttime=` fehlt; S-40 | Hinweis [C-059](COMPATIBILITY-LOG.md) |

@@ -820,7 +820,7 @@ flowchart TB
 | Konsolen-ACLs | `UaContext::AclAccessOk` (`dird/ua_acl.cc:40`, `:139`), Profile, POSIX-Regex, `AclHasRestrictions` | `acl.rs` (`allowed`, `access`, `has_restrictions`, `access_audited`); Befehls-ACL vor dem Handler in `resolve_permitted` | Tests in `acl.rs` u. a. „forbidden dispatch never invokes handler through prefix or alias“ |
 | ACL in Listen | `SetAclFilter`, Filter in `ua_dotcmds.cc`, `ua_output.cc` | nachgezogen (C-025, C-026) | |
 | `show` und Geheimnisse | `DumpResource`/`IsResAllowed`, `hide_sensitive_data` | gleich (C-062): Filter nach ACL, Passwörter als `****************` ohne `configure`-Recht | vorher sah eine eingeschränkte Konsole alle Hashes (Sicherheitsfund) |
-| Onesimus-Erweiterungen | — | `configure update/delete` prüfen die Ressourcen-ACL noch nicht (offen, Hinweis C-062); `.sqlcount/.sqltables/.sqlschema` mit derselben ACL wie `.sql` (C-074) | |
+| Onesimus-Erweiterungen | — | ~~`configure update/delete` prüfen die Ressourcen-ACL noch nicht~~ (erledigt 20.11.2026, `c116264`: beide über das Konfigurations-CRUD mit Ressourcen-ACL; Hinweis C-062); `.sqlcount/.sqltables/.sqlschema` mit derselben ACL wie `.sql` (C-074) | |
 | Transport | TLS-PSK aus dem Passwort, optional Zertifikate (`tls_conf.cc`), kTLS (`SetEnableKtls`) | TLS-PSK (OpenSSL), Zertifikat-TLS nur per CLI ohne Peer-Prüfung; gRPC mit rustls und Zertifikats-Pinning beim Client | |
 | Authentisierung | CRAM-MD5 zweiseitig; PAM für Konsolen (`dird/auth_pam.cc`, `AuthenticatePamUser`) | CRAM-MD5 zweiseitig; **kein PAM** (nur die Konfigurationsprüfung für PAM-Konsolen in `config_check.rs`); gRPC: HMAC-SHA256-Challenge, Sitzungstoken mit Ablauf (`session_manager.rs::authenticate_session_with_ttl`) | |
 | Verbindungsgrenzen | `MaximumConsoleConnections` | nicht durchgesetzt | Angriffsfläche für Verbindungsfluten (jede Verbindung ein Thread) |
@@ -966,7 +966,7 @@ Offene Stubs laut [STUBS.md](../STUBS.md) und Fokus laut [BACKLOG.md](../BACKLOG
 | S-13 | Rust-FD ohne PKI, Plugins, Heartbeat, client-initiierte Verbindungen, LMDB-Accurate, Windows/macOS |
 | C-014 | SD-Teil von `status all`/`status storage` |
 | C-057 | Normaler Start prüft nicht wie `-t`; keine Lexer-Diagnosen |
-| C-062 | `configure update/delete` ohne Ressourcen-ACL |
+| C-062 | ~~`configure update/delete` ohne Ressourcen-ACL~~ (erledigt 20.11.2026) |
 | C-056 | `max_bandwidth` laufender Jobs |
 | C-084/S-08 | `label … encrypt` ohne Volume-Schlüssel |
 | C-047 | Nicht-UTF-8-Dateinamen auf SQL_ASCII-Katalogen |

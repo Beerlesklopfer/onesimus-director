@@ -810,9 +810,11 @@ fn configure(r: &Req, action: &str) -> Result<Plan, String> {
     let mut l = Line::new(&format!("configure {action}"));
     l.word(&kind).kv("name", r.req("name")?);
     if let Some(Value::Object(directives)) = r.0.get("directives") {
-        for (key, value) in directives {
-            if key.is_empty() || !key.chars().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit()) || key == "name" {
-                return Err(format!("directive '{key}': lowercase letters and digits only (not name)"));
+        for (given, value) in directives {
+            // Bareos keywords ignore case, blanks and underscores ("File Retention", "Description").
+            let key = &bareos_config::edit::norm_key(given);
+            if key.is_empty() || !key.chars().all(|c| c.is_ascii_alphanumeric()) || key == "name" {
+                return Err(format!("directive '{given}': letters and digits only (not name)"));
             }
             let value = value.as_str().unwrap_or("");
             if value.is_empty() || value.chars().any(|c| c.is_control() || c == '"' || c == '@' || c == ';') {
@@ -1171,6 +1173,8 @@ mod tests {
         assert_eq!(line("MoveVolumes", json!({"storage": "T", "srcslots": "1", "dstslots": "2"})), "move storage=T srcslots=1 dstslots=2");
         assert_eq!(line("ConfigureAdd", json!({"resource_type": 1, "name": "c1", "directives": {"address": "h", "password": "p"}})),
                    "configure add client name=c1 address=h password=p");
+        assert_eq!(line("ConfigureAdd", json!({"resource_type": 1, "name": "c1", "directives": {"Address": "h", "File_Retention": "30 days"}})),
+                   "configure add client name=c1 address=h fileretention=\"30 days\"", "keys normalized like Bareos keywords");
         // S-38: the lines `configure update|delete` accept (directives in request order)
         assert_eq!(line("ConfigureUpdate", json!({"resource_type": 1, "name": "c1", "directives": {"port": "9102", "address": "h"}})),
                    "configure update client=c1 port=9102 address=h");

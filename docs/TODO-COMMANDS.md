@@ -73,8 +73,9 @@ Nur Punkte, die in den Quellen ausdrücklich als offen stehen:
 - **Eigener FD `ofd`:** PKI-Verschlüsselung/Signaturen, Plugins,
   Heartbeat, client-initiierte Verbindungen, LMDB für Accurate, VSS/Windows/macOS;
   `breg.rs` noch als Kopie ([S-13](STUBS.md)).
-- **`configure update/delete`** (Erweiterungen) prüfen die Ressourcen-ACL nicht
-  (Hinweis [C-062](COMPATIBILITY-LOG.md)).
+- ~~**`configure update/delete`** (Erweiterungen) prüfen die Ressourcen-ACL nicht~~
+  (Hinweis [C-062](COMPATIBILITY-LOG.md)) – erledigt 20.11.2026 (`c116264`): beide über das
+  Konfigurations-CRUD mit Ressourcen-ACL.
 - **Konfigurationsstart:** der normale Start prüft die Konfiguration nicht wie
   `-t`; Lexer-Diagnosen (Zeile/Spalte) gehen nicht ins Log ([C-057](COMPATIBILITY-LOG.md)).
 - **`setbandwidth`:** `max_bandwidth` laufender Jobs, Jmsg bei Connect-/Antwortfehlern
@@ -189,7 +190,7 @@ Wiki-Status aber nicht ändert.
 | `autodisplay` | ja | parity_verified | 16 / 17 | — | Entw.: `Autodisplay` | Entw.: nur `execute` |
 | `automount` | ja | parity_verified | 14 / 14 | — | Entw.: `Automount` | Entw.: nur `execute` |
 | `cancel` | ja | partial | 24 / 27 | [C-048](COMPATIBILITY-LOG.md) behoben; Cancel laufender Jobs nur mit privaten FD/SD ([S-22](STUBS.md), [S-26](STUBS.md)) belegt; [C-011](COMPATIBILITY-LOG.md): Cancel-Dialog ohne Test; `*JobCancel*` des Job-Threads verbraucht keine Jobnamen-Nummer ([S-26](STUBS.md)) | Entw.: `Cancel` | Entw.: `cancel_job` |
-| `configure` | ja | parity_verified | 31 / 43 | offen: `configure update/delete` (Erweiterungen) ohne Ressourcen-ACL (Hinweis [C-062](COMPATIBILITY-LOG.md)) | Entw.: 4 RPCs | Entw.: `configure_add`, `configure_export` |
+| `configure` | ja | parity_verified | 31 / 43 | ~~offen: `configure update/delete` (Erweiterungen) ohne Ressourcen-ACL~~ erledigt 20.11.2026 (Hinweis [C-062](COMPATIBILITY-LOG.md)) | Entw.: 4 RPCs | Entw.: `configure_add`, `configure_export` |
 | `create` | ja | partial | 4 / 7 | [C-066](COMPATIBILITY-LOG.md) behoben; Katalogzustand per Folgeschritt nur in `c066` | Entw.: `CreatePool` | Entw.: nur `execute` |
 | `delete` | ja | partial | 16 / 36 | [C-046](COMPATIBILITY-LOG.md), [C-077](COMPATIBILITY-LOG.md) behoben; `c035-delete-noarg-api2` in der Baseline `match` | Entw.: 4 RPCs | Entw.: `delete` |
 | `disable` | ja | parity_verified | 30 / 35 | — | Entw.: `Disable` | Entw.: `disable` |
