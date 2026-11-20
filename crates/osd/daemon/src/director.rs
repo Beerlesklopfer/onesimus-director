@@ -324,7 +324,8 @@ impl DirSession {
         Next::Quit
     }
 
-    /// `PassiveCmd`: osd connects to the FD and authenticates with the
+    /// `PassiveCmd`: osd connects to the FD (over gRPC when the command
+    /// carries the FD's gRPC target, else BNET) and authenticates with the
     /// job's key; then `2000 OK passive client`.
     fn passive_cmd(&mut self, msg: &str) -> Next {
         let Some(job) = self.job.clone() else { return Next::Quit };
@@ -332,8 +333,10 @@ impl DirSession {
             self.d.jmsg(&self.dir, &job, M_FATAL, &format!("Bad passiveclientcmd command: {msg}"));
             return Next::Quit;
         };
-        match crate::server::connect_passive_fd(&self.d, &job, &addr, port, ssl) {
-            Ok(conn) => {
+        // odir appends the FD's gRPC target when the FD offers gRPC.
+        let grpc = onesimus_bnet_grpc::Target::from_tokens(&addr, msg);
+        match crate::server::connect_passive_fd(&self.d, &job, &addr, port, ssl, grpc.as_ref()) {
+            Ok((conn, _transport)) => {
                 job.connect_fd(conn);
                 self.send("2000 OK passive client\n");
                 Next::Continue

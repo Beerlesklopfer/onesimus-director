@@ -2388,9 +2388,14 @@ dependencies = [
  "clap",
  "libc",
  "nix 0.29.0",
+ "onesimus-bnet-grpc",
  "onesimus-daemon",
+ "onesimus-proto-rs",
  "osd",
  "osd-ring",
+ "rcgen",
+ "tokio",
+ "tonic",
  "tracing",
 ]
 

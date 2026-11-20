@@ -1,6 +1,6 @@
 [package]
 name = "osd-daemon"
-description = "Onesimus Storage Daemon (binary osd) — Rust replacement for the Bareos Storage Daemon; P1 stage 2: backup, restore and verify on File devices over BNET"
+description = "Onesimus Storage Daemon (binary osd) — Rust replacement for the Bareos Storage Daemon; P1: backup, restore and verify on File devices, gRPC (TLS) to odir/ofd, BNET to bareos-dir/bareos-fd"
 version.workspace = true
 edition.workspace = true
 authors.workspace = true
@@ -21,13 +21,20 @@ doc = false
 bareos-bnet.workspace = true
 bareos-config.workspace = true
 bareos-format.workspace = true
+onesimus-bnet-grpc.workspace = true
 onesimus-daemon.workspace = true
+onesimus-proto-rs.workspace = true
 osd.workspace = true
 osd-ring.workspace = true
 clap.workspace = true
 libc.workspace = true
 nix.workspace = true
+tokio.workspace = true
+tonic.workspace = true
 tracing.workspace = true
+
+[dev-dependencies]
+rcgen.workspace = true
 
 [package.metadata.deb]
 name = "osd"
@@ -37,10 +44,11 @@ license-file = ["../../../packaging/copyright", "0"]
 extended-description = """\
 Storage Daemon written in Rust, to replace the Bareos Storage Daemon.
 Reads /etc/bareos/bareos-sd.d/ config tree (Bareos-compatible).
-Development state P1 stage 2: backup, restore and verify on File devices
-over BNET (active and passive clients, Bareos volume format, jobs over
-several volumes); gRPC follows in stage 3. The service is installed but
-neither enabled nor started.
+Development state P1: backup, restore and verify on File devices (active
+and passive clients, Bareos volume format, jobs over several volumes);
+gRPC with TLS to the Onesimus Director and File Daemon, BNET to
+bareos-dir and bareos-fd. The service is installed but neither enabled
+nor started.
 .
 Binary: /usr/sbin/osd
 Service: osd.service (alias bareos-storage.service)"""
@@ -49,7 +57,7 @@ priority = "optional"
 depends = "$auto"
 maintainer-scripts = "../../../packaging/osd"
 # Not enabled or started until the maintainer switches a host to osd
-# (restore works since P1 stage 2; gRPC follows in stage 3).
+# (P1 complete: restore since stage 2, gRPC since stage 3).
 systemd-units = { unit-name = "osd", unit-scripts = "../../../packaging/osd", enable = false, start = false }
 # M7/M8: `target/…` is relative to the workspace, everything else to this
 # package directory (three levels below the root).

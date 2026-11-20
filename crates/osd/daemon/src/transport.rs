@@ -1,10 +1,14 @@
 //! Transport der Steuer- und Datenverbindungen.
 //!
 //! Zweck: Director-Sitzung und FD-Datenphase sprechen über [`Channel`],
-//! nicht über einen konkreten Socket. Stufe 1 hat genau eine Umsetzung,
-//! BNET ([`bareos_bnet::BnetStream`] über TLS-PSK oder Klartext). In Stufe 3
-//! kommt gRPC (`onesimus-proto-stored`) als zweite Umsetzung dazu, ohne
-//! dass Befehlsschleife oder Append-Logik sich ändern.
+//! nicht über einen konkreten Socket. Zwei Umsetzungen, beide über
+//! [`bareos_bnet::BnetStream`]: BNET (TLS-PSK oder Klartext auf dem
+//! SD-Port) und seit Stufe 3 gRPC (`onesimus.stored.StorageDaemon`
+//! Control/Data bzw. `onesimus.filed.FileDaemon/Data` beim passiven
+//! Client), wo `onesimus_bnet_grpc::ControlIo` den Strom als `Read`/`Write`
+//! liefert ([`crate::grpc`]). Befehlsschleife, Append- und Lese-Logik
+//! wissen nicht, welche es ist. Schreiben und Lesen, aktiv und passiv
+//! laufen so über beide.
 //!
 //! Bareos-Gegenstück: `core/src/lib/bsock.h` (`BareosSocket` mit `recv`,
 //! `send`, `signal`).

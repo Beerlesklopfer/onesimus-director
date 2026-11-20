@@ -1,13 +1,18 @@
 //! Verbindungen annehmen und aufbauen: Director, aktiver und passiver FD.
 //!
-//! Zweck: Auf dem `SD Port` rufen Director und File Daemons an. Das erste
-//! Byte entscheidet über TLS-PSK (Schlüssel nach PSK-Identität: Director →
-//! sein Passwort, `R_JOB` → der Schlüssel des Jobs), die erste Zeile über
-//! die Art: `Hello Start Job <Job>` ist ein FD (aktiver Client), alles
-//! andere geht an die Director-Sitzung. Bei passivem Client
-//! (`Passive = yes`) baut osd die Verbindung zum FD selbst auf
-//! ([`connect_passive_fd`]). Danach ist die Datenphase in beiden Fällen
-//! dieselbe ([`crate::fd_session`]).
+//! Zweck: Auf dem `SD Port` (BNET) und über gRPC (`StorageDaemon`,
+//! [`crate::grpc`]) rufen Director und File Daemons an. Bei BNET entscheidet
+//! das erste Byte über TLS-PSK (Schlüssel nach PSK-Identität: Director →
+//! sein Passwort, `R_JOB` → der Schlüssel des Jobs), bei gRPC ist der Strom
+//! schon TLS. Danach ist alles gleich ([`handle_session`]): Die erste
+//! Zeile entscheidet über die Art, `Hello Start Job <Job>` ist ein FD
+//! (aktiver Client), alles andere geht an die Director-Sitzung. Ein
+//! gRPC-Strom nimmt nur die Art an, für die seine RPC steht ([`Peer`]).
+//! Bei passivem Client (`Passive = yes`) baut osd die Verbindung zum FD
+//! selbst auf ([`connect_passive_fd`]): über gRPC (`FileDaemon/Data`), wenn
+//! odir die gRPC-Angaben des FD mitschickt, sonst und bei jedem Fehler
+//! über BNET. Danach ist die Datenphase in allen Fällen dieselbe
+//! ([`crate::fd_session`], [`crate::read_session`]).
 //!
 //! Bareos-Gegenstück: `core/src/stored/socket_server.cc`
 //! (`HandleConnectionRequest`), `stored/fd_cmds.cc`
@@ -20,10 +25,13 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use bareos_bnet::{tls_psk, BnetStream, CramMd5Auth};
-use onesimus_daemon::accept::{open_bnet, PskIdentity, Rw};
+use onesimus_daemon::accept::{open_bnet, AnyBnet, PskIdentity, Rw};
 
 use crate::daemon::Daemon;
-use crate::jobs::{FdConnection, Job};
+use crate::jobs::{Breaker, FdConnection, Job};
+
+/// Read limit while a gRPC peer logs in (Hello, CRAM-MD5).
+pub const LOGIN_TIMEOUT: Duration = Duration::from_secs(30);
 
 /// Shortest valid Hello (`MIN_MSG_LEN`).
 const MIN_HELLO: usize = 25;
@@ -40,12 +48,44 @@ fn psk_for(d: &Daemon, identity: &str) -> Option<Vec<u8>> {
     }
 }
 
-/// `HandleConnectionRequest`: one incoming connection.
+/// Which peers a connection may carry.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Peer {
+    /// Director or FD (the BNET port).
+    Any,
+    /// Only a Director (`StorageDaemon/Control`).
+    Director,
+    /// Only the FD of a job (`StorageDaemon/Data`).
+    Fd,
+}
+
+/// `HandleConnectionRequest`: one incoming BNET connection.
 pub fn handle_connection(d: Daemon, stream: TcpStream, session: u64) {
     stream.set_read_timeout(Some(Duration::from_secs(30))).ok();
     let tcp = stream.try_clone().ok();
     let lookup_daemon = d.clone();
-    let Some(mut bnet) = open_bnet(stream, session, move |id| psk_for(&lookup_daemon, id)) else { return };
+    let Some(bnet) = open_bnet(stream, session, move |id| psk_for(&lookup_daemon, id)) else { return };
+    let unlimited = tcp.as_ref().and_then(|t| t.try_clone().ok());
+    let after_hello = move || {
+        if let Some(tcp) = &unlimited {
+            tcp.set_read_timeout(None).ok();
+        }
+    };
+    handle_session(d, bnet, session, Peer::Any, "BNET", after_hello, Breaker::socket(tcp));
+}
+
+/// The common part of BNET and gRPC: reads the Hello, then runs the
+/// Director session or hands an FD to its job. `after_hello` lifts the
+/// read limit of the login; `breaker` breaks an FD connection on cancel.
+pub fn handle_session(
+    d: Daemon,
+    mut bnet: AnyBnet,
+    session: u64,
+    peer: Peer,
+    transport: &str,
+    after_hello: impl FnOnce(),
+    breaker: Breaker,
+) {
     let hello = match bnet.recv_str() {
         Ok(h) => h,
         Err(e) => {
@@ -57,19 +97,27 @@ pub fn handle_connection(d: Daemon, stream: TcpStream, session: u64) {
         tracing::warn!("session {session}: Invalid connection. Len={}", hello.len());
         return;
     }
-    if let Some(tcp) = &tcp {
-        tcp.set_read_timeout(None).ok();
-    }
+    after_hello();
     if let Some(job) = hello.strip_prefix("Hello Start Job ").and_then(|r| r.split_whitespace().next()) {
-        handle_fd(&d, bnet, job, tcp, session);
+        if peer == Peer::Director {
+            tracing::warn!("session {session}: StorageDaemon/Control accepts only a Director: {}", hello.trim_end());
+            return;
+        }
+        tracing::info!("session {session}: File daemon of job {job} connects over {transport}");
+        handle_fd(&d, bnet, job, breaker, session);
         return;
     }
+    if peer == Peer::Fd {
+        tracing::warn!("session {session}: StorageDaemon/Data accepts only a File daemon: {}", hello.trim_end());
+        return;
+    }
+    tracing::info!("session {session}: Director connects over {transport}");
     crate::director::handle(d, bnet, &hello, session);
 }
 
 /// `HandleFiledConnection`: the FD of a job calls; authenticate it with the
 /// job's key and hand the connection to the job.
-fn handle_fd(d: &Daemon, mut bnet: BnetStream<Box<dyn Rw>>, job_name: &str, tcp: Option<TcpStream>, session: u64) {
+fn handle_fd(d: &Daemon, mut bnet: AnyBnet, job_name: &str, breaker: Breaker, session: u64) {
     let Some(job) = d.jobs.find(job_name) else {
         tracing::error!("session {session}: FD connect failed: Job name not found: {job_name}");
         return;
@@ -82,7 +130,7 @@ fn handle_fd(d: &Daemon, mut bnet: BnetStream<Box<dyn Rw>>, job_name: &str, tcp:
     match auth.two_way_authenticate(&mut bnet, true) {
         Ok(r) if r.success => {
             tracing::debug!("session {session}: OK Authentication jid={} Job {}", job.cmd.job_id, job.cmd.job);
-            job.connect_fd(FdConnection { channel: Box::new(bnet), socket: tcp });
+            job.connect_fd(FdConnection { channel: Box::new(bnet), breaker });
         }
         _ => {
             tracing::error!("session {session}: Authorization problem: Two way security handshake failed with File daemon");
@@ -92,10 +140,64 @@ fn handle_fd(d: &Daemon, mut bnet: BnetStream<Box<dyn Rw>>, job_name: &str, tcp:
     }
 }
 
-/// `PassiveCmd`: connects to the FD at `addr:port` (retrying for up to 30 s),
-/// TLS-PSK with identity `R_JOB\x1e<Job>` when `ssl` is `kBnetTlsAuto`,
-/// `Hello Storage calling Start Job <Job>`, CRAM-MD5 with the job's key.
-pub fn connect_passive_fd(d: &Daemon, job: &Arc<Job>, addr: &str, port: u16, ssl: i32) -> Result<FdConnection, String> {
+/// `PassiveCmd`: connects to the FD of `job`. With `grpc` (odir sent the
+/// FD's gRPC target) first over `FileDaemon/Data`; when that fails, and
+/// without it, over BNET ([`connect_passive_fd_bnet`]). Returns the
+/// connection and its transport name.
+pub fn connect_passive_fd(
+    d: &Daemon,
+    job: &Arc<Job>,
+    addr: &str,
+    port: u16,
+    ssl: i32,
+    grpc: Option<&onesimus_bnet_grpc::Target>,
+) -> Result<(FdConnection, &'static str), String> {
+    if let Some(target) = grpc {
+        match connect_passive_fd_grpc(d, job, target) {
+            Ok(conn) => {
+                tracing::info!("{}: connected to File daemon {}:{} over gRPC TLS (passive client)", job.cmd.job, target.host, target.port);
+                return Ok((conn, onesimus_bnet_grpc::TRANSPORT));
+            }
+            Err(e) => tracing::warn!(
+                "{}: File daemon {}:{}: {e}; falling back to BNET on port {port}",
+                job.cmd.job,
+                target.host,
+                target.port
+            ),
+        }
+    }
+    let conn = connect_passive_fd_bnet(d, job, addr, port, ssl)?;
+    tracing::info!("{}: connected to File daemon {addr}:{port} over BNET (passive client)", job.cmd.job);
+    Ok((conn, "BNET"))
+}
+
+/// The gRPC part of [`connect_passive_fd`]: `FileDaemon/Data`, Hello,
+/// CRAM-MD5 with the job's key.
+fn connect_passive_fd_grpc(d: &Daemon, job: &Arc<Job>, target: &onesimus_bnet_grpc::Target) -> Result<FdConnection, String> {
+    let mut io = onesimus_bnet_grpc::client::connect(target, onesimus_bnet_grpc::Rpc::FileDaemonData, Some(LOGIN_TIMEOUT))
+        .map_err(|e| e.to_string())?;
+    io.cancel = Some(&crate::SHUTDOWN);
+    let close = io.close_handle();
+    let mut bnet = BnetStream::new(io);
+    bnet.send_str(&format!("Hello Storage calling Start Job {}\n", job.cmd.job)).map_err(|e| e.to_string())?;
+    let auth = CramMd5Auth::new_raw(&job.auth_key, &format!("R_STORAGE::{}", d.name()), 2);
+    match auth.two_way_authenticate(&mut bnet, false) {
+        Ok(r) if r.success => {
+            let mut io = bnet.into_inner();
+            io.set_read_timeout(None);
+            let channel: AnyBnet = BnetStream::new(Box::new(io));
+            Ok(FdConnection { channel: Box::new(channel), breaker: Breaker::Grpc(close) })
+        }
+        Ok(_) => Err("Failed to authenticate File daemon.".into()),
+        Err(e) => Err(format!("CRAM: {e}")),
+    }
+}
+
+/// The BNET part of [`connect_passive_fd`]: connects to the FD at
+/// `addr:port` (retrying for up to 30 s), TLS-PSK with identity
+/// `R_JOB\x1e<Job>` when `ssl` is `kBnetTlsAuto`, `Hello Storage calling
+/// Start Job <Job>`, CRAM-MD5 with the job's key.
+fn connect_passive_fd_bnet(d: &Daemon, job: &Arc<Job>, addr: &str, port: u16, ssl: i32) -> Result<FdConnection, String> {
     let deadline = Instant::now() + Duration::from_secs(30);
     let tcp = loop {
         let attempt = (addr, port)
@@ -110,7 +212,7 @@ pub fn connect_passive_fd(d: &Daemon, job: &Arc<Job>, addr: &str, port: u16, ssl
         }
     };
     tcp.set_nodelay(true).ok();
-    let socket = tcp.try_clone().ok();
+    let breaker = Breaker::socket(tcp.try_clone().ok());
     let stream: Box<dyn Rw> = if ssl == TLS_AUTO {
         let identity = format!("R_JOB\x1e{}", job.cmd.job);
         Box::new(tls_psk::psk_connect(tcp, &identity, job.auth_key.as_bytes()).map_err(|e| format!("TLS: {e}"))?)
@@ -121,7 +223,7 @@ pub fn connect_passive_fd(d: &Daemon, job: &Arc<Job>, addr: &str, port: u16, ssl
     bnet.send_str(&format!("Hello Storage calling Start Job {}\n", job.cmd.job)).map_err(|e| e.to_string())?;
     let auth = CramMd5Auth::new_raw(&job.auth_key, &format!("R_STORAGE::{}", d.name()), 2);
     match auth.two_way_authenticate(&mut bnet, false) {
-        Ok(r) if r.success => Ok(FdConnection { channel: Box::new(bnet), socket }),
+        Ok(r) if r.success => Ok(FdConnection { channel: Box::new(bnet), breaker }),
         _ => Err("Failed to authenticate File daemon.".into()),
     }
 }

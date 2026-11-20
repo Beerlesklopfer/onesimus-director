@@ -130,12 +130,40 @@ pub struct Bootstrap {
     pub bsr: bareos_format::bsr::Bsr,
 }
 
+/// How a cancel breaks the FD connection of a job.
+pub enum Breaker {
+    /// Nothing to break (tests).
+    None,
+    /// BNET: shut the socket down.
+    Socket(TcpStream),
+    /// gRPC: set the stream's close flag (`ControlIo::close_handle`).
+    Grpc(std::sync::Arc<AtomicBool>),
+}
+
+impl Breaker {
+    /// The breaker of a BNET connection with socket `socket`, if any.
+    pub fn socket(socket: Option<TcpStream>) -> Breaker {
+        socket.map(Breaker::Socket).unwrap_or(Breaker::None)
+    }
+
+    /// Breaks the connection: blocked reads return an error.
+    pub fn break_connection(&self) {
+        match self {
+            Breaker::None => {}
+            Breaker::Socket(s) => {
+                let _ = s.shutdown(std::net::Shutdown::Both);
+            }
+            Breaker::Grpc(close) => close.store(true, Ordering::Release),
+        }
+    }
+}
+
 /// The FD side of a job once connected and authenticated.
 pub struct FdConnection {
     /// The data channel.
     pub channel: Box<dyn Channel>,
-    /// Socket handle to break the connection on cancel.
-    pub socket: Option<TcpStream>,
+    /// How a cancel breaks the connection.
+    pub breaker: Breaker,
 }
 
 /// One job of the SD (`JobControlRecord` of `stored`).
@@ -217,10 +245,8 @@ impl Job {
     pub fn cancel(&self) {
         self.canceled.store(true, Ordering::Release);
         self.set_status('A');
-        if let Some(conn) = self.fd.lock().unwrap_or_else(|e| e.into_inner()).as_ref()
-            && let Some(s) = &conn.socket
-        {
-            let _ = s.shutdown(std::net::Shutdown::Both);
+        if let Some(conn) = self.fd.lock().unwrap_or_else(|e| e.into_inner()).as_ref() {
+            conn.breaker.break_connection();
         }
         self.fd_arrived.notify_all();
     }

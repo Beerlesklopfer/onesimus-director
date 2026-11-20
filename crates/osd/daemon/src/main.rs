@@ -1,9 +1,11 @@
 //! # osd – der Onesimus Storage Daemon (Programm)
 //!
 //! Zweck: osd ersetzt bareos-sd (Plan `docs/plans/OSD-GERAETE-UND-VERTEILUNG.md`).
-//! Stand P1 Stufe 2: Backup, Restore und Verify über BNET auf bzw. von
+//! Stand P1 (abgeschlossen): Backup, Restore und Verify auf bzw. von
 //! File-Devices, mit aktivem und passivem Client, im Bareos-Volume-Format;
-//! gRPC folgt in Stufe 3. Anleitung und Abweichungen: `docs/wiki/osd.md`.
+//! zu odir und ofd über gRPC mit TLS ([`grpc`], `onesimus.stored.StorageDaemon`),
+//! zu bareos-dir und bareos-fd über BNET. Anleitung und Abweichungen:
+//! `docs/wiki/osd.md`.
 //!
 //! Argumente (wie `stored/stored.cc`):
 //!
@@ -14,6 +16,9 @@
 //! | `-d <n>` | Debug-Level; ab 1 Logging auf `debug` |
 //! | `-t` | Konfiguration prüfen, Exit 0 (gut) oder 1 (Fehler) |
 //! | `-v` | ausführliche Meldungen |
+//! | `--disable-grpc` | keinen gRPC-Port öffnen, nur BNET (wie ofd) |
+//! | `--grpc-listen <Adresse:Port>` | gRPC-Port statt osd.d `Grpc Address`/`Grpc Port` (Vorgabe `SD Port` + 1000); muss starten |
+//! | `--grpc-cert <PEM>`, `--grpc-key <PEM>` | eigenes TLS-Zertifikat statt des erzeugten `onesimus-sd-grpc.crt` |
 //! | `--device-writer <Ring>` | intern: Geräteschreiber eines Jobs (Kindprozess, D-13) |
 //! | `--device-reader <Ring>` | intern: Geräteleser eines Restore- oder Verify-Jobs (Kindprozess) |
 //!
@@ -23,7 +28,8 @@
 //!
 //! Datenfluss: Argumente → [`onesimus_daemon::logging`] →
 //! [`bareos_config::sd::load`] → verwaiste Ringe löschen → Port binden →
-//! [`onesimus_daemon::accept::serve`] → je Verbindung [`server`] →
+//! gRPC-Port ([`grpc`]) → [`onesimus_daemon::accept::serve`] → je
+//! Verbindung (BNET oder gRPC-Strom) [`server`] →
 //! [`director`] bzw. FD-Anschluss → `run` → [`fd_session`] (Erzeuger) →
 //! Ring (`osd-ring`) → [`writer`] (Kindprozess) → Volume ([`device`]).
 //! Lesen: `read data` → [`read_session`] (Verbraucher) ← Ring ←
@@ -43,6 +49,7 @@ mod daemon;
 mod device;
 mod director;
 mod fd_session;
+mod grpc;
 mod jobs;
 mod read_session;
 mod reader;
@@ -52,9 +59,13 @@ mod status;
 mod transport;
 mod writer;
 
-use std::net::TcpListener;
+use std::net::{SocketAddr, TcpListener};
 use std::path::PathBuf;
 use std::sync::atomic::AtomicBool;
+
+/// Set on shutdown: the accept loop, the gRPC server and every gRPC
+/// stream end.
+pub(crate) static SHUTDOWN: AtomicBool = AtomicBool::new(false);
 
 use clap::Parser;
 
@@ -83,6 +94,23 @@ struct Cli {
     #[arg(short, long)]
     verbose: bool,
 
+    /// Do not start the gRPC listener (BNET only).
+    #[arg(long, conflicts_with = "grpc_listen")]
+    disable_grpc: bool,
+
+    /// TLS gRPC listener (default: osd.d Grpc Address/Grpc Port, else
+    /// SD Address and SD Port + 1000); BNET always remains available.
+    #[arg(long, value_name = "ADDRESS:PORT")]
+    grpc_listen: Option<SocketAddr>,
+
+    /// PEM server certificate for gRPC (default: generated in the working directory).
+    #[arg(long, requires = "grpc_key")]
+    grpc_cert: Option<PathBuf>,
+
+    /// PEM private key for gRPC.
+    #[arg(long, requires = "grpc_cert")]
+    grpc_key: Option<PathBuf>,
+
     /// Internal: run as the device writer of ring <RING> (started by osd).
     #[arg(long, value_name = "RING", hide = true)]
     device_writer: Option<String>,
@@ -90,6 +118,36 @@ struct Cli {
     /// Internal: run as the device reader of ring <RING> (started by osd).
     #[arg(long, value_name = "RING", hide = true)]
     device_reader: Option<String>,
+}
+
+/// Starts the gRPC listener unless disabled (`--disable-grpc`, osd.d
+/// `Grpc Enable = no`). As in ofd: a listener asked for explicitly
+/// (`--grpc-listen`) must start, the default one only warns.
+fn start_grpc(cli: &Cli, d: &daemon::Daemon) {
+    let storage = &d.config.storage;
+    if cli.disable_grpc || !storage.grpc_enable {
+        tracing::info!("osd: gRPC disabled, BNET only");
+        return;
+    }
+    let explicit = cli.grpc_listen.is_some();
+    let address = match cli.grpc_listen {
+        Some(a) => Ok(a),
+        None => format!("{}:{}", storage.grpc_address(), storage.grpc_port())
+            .parse::<SocketAddr>()
+            .map_err(|e| format!("Grpc Address {}: {e}", storage.grpc_address())),
+    };
+    let started = address.and_then(|address| {
+        let (cert, key) = grpc::certificate(d, cli.grpc_cert.as_deref(), cli.grpc_key.as_deref())?;
+        grpc::start(d.clone(), address, &cert, &key)
+    });
+    match started {
+        Ok((address, _thread)) => tracing::info!("osd: gRPC (TLS) listening on {address}"),
+        Err(e) if explicit => {
+            eprintln!("osd: cannot start the gRPC listener: {e}");
+            std::process::exit(onesimus_daemon::exit::EXIT_FAILURE);
+        }
+        Err(e) => tracing::warn!("osd: gRPC listener not started, BNET only: {e}"),
+    }
 }
 
 /// The line `-t` prints for a good configuration.
@@ -165,7 +223,7 @@ fn main() {
         Err(_) => daemon::Launcher::Thread,
     };
     let d = daemon::Daemon::new(config, launcher);
-    static SHUTDOWN: AtomicBool = AtomicBool::new(false);
+    start_grpc(&cli, &d);
     std::thread::Builder::new()
         .name("accept".into())
         .spawn(move || {
