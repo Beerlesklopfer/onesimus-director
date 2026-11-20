@@ -1,6 +1,6 @@
 # osd: ein Netzwerk-Stream, mehrere Ausgabegeräte
 
-Stand: 20.11.2026. Status: **Entwurf**. Die Entscheidungen D-1 bis D-13 trifft der Maintainer.
+Stand: 20.11.2026. Status: **Entschieden** (D-1 bis D-13, Maintainer 20.11.2026), Umsetzung in Phasen.
 
 ## Vorgabe (Maintainer, 20.11.2026)
 
@@ -165,7 +165,7 @@ FD ─ Netz ─► Empfänger (schreibt) ─► /dev/shm/osd-<JobId>.ring ─┬
 
 - osd liest `bareos-sd.d` (Storage, Director, Device, Autochanger, Messages) mit `bareos-config`.
 - Neue Ressourcen: `Distributor` mit `Route`-Blöcken, und am Device `Removable Label` sowie die S3-Angaben.
-- **D-8:** Gehören die neuen Ressourcen in dieselben Dateien (Bareos würde `Distributor` dann als unbekannte Ressource ablehnen) oder in ein eigenes Verzeichnis `osd.d/`? Empfehlung: eigenes `osd.d/`. Dann kann ein bareos-sd mit derselben `bareos-sd.d` weiterlaufen.
+- **D-8 (entschieden: additiv, rückwärtskompatibel):** osd liest `bareos-sd.d` unverändert, die neuen Ressourcen kommen zusätzlich aus `osd.d/`. Ohne `osd.d/` verhält sich osd wie bareos-sd; ein bareos-sd läuft mit derselben `bareos-sd.d` weiter (Bareos würde `Distributor` dort als unbekannte Ressource ablehnen).
 
 ## Phasen
 
@@ -208,20 +208,22 @@ Nach P1 verschoben, jeweils mit Grund:
 - **ofd nach `crates/ofd/daemon` und die Plugins verschieben** gehört nicht zu P0 (Vorgabe).
 - **Client-Connects zum FD** (sechs Varianten in odir) gehören zur ofd-Schnittstelle (Gutachten §6 Schritt 4), nicht zu P0.
 
-## Offene Entscheidungen
+## Entscheidungen (Maintainer, 20.11.2026)
 
-| # | Frage | Empfehlung | Entscheider |
-| --- | --- | --- | --- |
-| D-1 | Verteiler als Device-Ersatz mit `Route`-Blöcken | ja | Maintainer |
-| D-2 | MediaType: je Ziel eigener (a) oder gemeinsamer (b) | a | Maintainer |
-| D-3 | Merkmale einer Route: Job, Client, Level, Pool, Typ, FileSet; weitere? | diese sechs | Maintainer |
-| D-4 | Stripe-Volumes nur für osd lesbar, eigener MediaType | ja (unvermeidbar) | Maintainer |
-| D-5 | Stripe nur innerhalb einer Geräteart | ja | Maintainer |
-| D-6 | Device-Watcher im osd-Prozess | ja | Maintainer |
-| D-7 | gRPC-Push „Medium eingelegt/entfernt“ für die GUI | später, mit GUI-Sitzung abstimmen | Maintainer + GUI |
-| D-8 | Neue Ressourcen in `osd.d/` statt `bareos-sd.d/` | ja | Maintainer |
-| D-9 | Zweige: Direktive `Branch = <Job>` am Haupt-Job; der Zweig-Job ist eine normale Job-Ressource | ja | Maintainer |
-| D-10 | Unterschiedliche Basis der Zweige: der Haupt-Job liest ab der älteren Basis | ja | Maintainer |
-| D-11 | Ein gescheiterter Zweig bricht die anderen nicht ab | ja | Maintainer |
-| D-12 | Ring: ein Fach = ein Bareos-Block; Fachgröße = Blockgröße des Devices, Fachzahl einstellbar (Vorgabe z. B. 64 Fächer je Job) | ja | Maintainer |
-| D-13 | Geräte-Schreiber als eigene Prozesse (wie die Job-Worker von odir) statt Threads | ja (Ausfall eines Geräts reißt den Job nicht mit) | Maintainer |
+Alle wie empfohlen, D-8 präzisiert: „additiv, rückwärtskompatibel“.
+
+| # | Frage | Entscheidung |
+| --- | --- | --- |
+| D-1 | Verteiler als Device-Ersatz mit `Route`-Blöcken | ja |
+| D-2 | MediaType: je Ziel eigener (a) oder gemeinsamer (b) | a |
+| D-3 | Merkmale einer Route: Job, Client, Level, Pool, Typ, FileSet; weitere? | diese sechs |
+| D-4 | Stripe-Volumes nur für osd lesbar, eigener MediaType | ja (unvermeidbar) |
+| D-5 | Stripe nur innerhalb einer Geräteart | ja |
+| D-6 | Device-Watcher im osd-Prozess | ja |
+| D-7 | gRPC-Push „Medium eingelegt/entfernt“ für die GUI | später, mit GUI-Sitzung abstimmen |
+| D-8 | Neue Ressourcen in `osd.d/` statt `bareos-sd.d/` | **additiv, rückwärtskompatibel:** osd liest `bareos-sd.d` unverändert; Onesimus-Erweiterungen (Verteiler, Routen, Zweig-, Ring- und S3-Angaben, `Removable Label`) kommen zusätzlich aus `osd.d/`. Ohne `osd.d/` verhält sich osd wie bareos-sd, und bareos-sd läuft mit derselben `bareos-sd.d` weiter |
+| D-9 | Zweige: Direktive `Branch = <Job>` am Haupt-Job; der Zweig-Job ist eine normale Job-Ressource | ja |
+| D-10 | Unterschiedliche Basis der Zweige: der Haupt-Job liest ab der älteren Basis | ja |
+| D-11 | Ein gescheiterter Zweig bricht die anderen nicht ab | ja |
+| D-12 | Ring: ein Fach = ein Bareos-Block; Fachgröße = Blockgröße des Devices, Fachzahl einstellbar (Vorgabe z. B. 64 Fächer je Job) | ja |
+| D-13 | Geräte-Schreiber als eigene Prozesse (wie die Job-Worker von odir) statt Threads | ja (Ausfall eines Geräts reißt den Job nicht mit) |
