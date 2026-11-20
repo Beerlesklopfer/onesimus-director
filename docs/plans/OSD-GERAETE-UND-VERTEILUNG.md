@@ -1,6 +1,6 @@
 # osd: ein Netzwerk-Stream, mehrere Ausgabegeräte
 
-Stand: 20.11.2026. Status: **Entwurf**. Die Entscheidungen D-1 bis D-11 trifft der Maintainer.
+Stand: 20.11.2026. Status: **Entwurf**. Die Entscheidungen D-1 bis D-13 trifft der Maintainer.
 
 ## Vorgabe (Maintainer, 20.11.2026)
 
@@ -114,6 +114,36 @@ So ergibt sich 3-2-1 ohne Copy-Job und ohne zweites Lesen des Clients: 3 ist das
 - **Fehler:** Scheitert ein Zweig, zum Beispiel weil das Volume voll ist oder die USB-Platte fehlt, darf das den anderen Zweig nicht abbrechen (D-11). Der gescheiterte Zweig-Job endet mit Fehler, sein Partner mit OK.
 - **Nur über gRPC zwischen odir und osd.** Ein bareos-dir kennt keine Zweige.
 
+## Datenpfad: Ringpuffer in `/dev/shm`
+
+Vorgabe (Maintainer, 20.11.2026): „Die Aufteilung der Devices erfolgt über einen Ringpuffer in /dev/shm. Die Synchronisation der Puffer darüber ebenfalls.“
+
+```
+FD ─ Netz ─► Empfänger (schreibt) ─► /dev/shm/osd-<JobId>.ring ─┬─► Device-Schreiber 1 (liest)
+                                     Kopf: Zeiger, Zustände      ├─► Device-Schreiber 2
+                                                                └─► …
+```
+
+- **Ein Ring je Job.** Er ist eine Datei in `/dev/shm`, die alle Beteiligten mit `mmap` einbinden. Sie besteht aus einem **Kopf** und N gleich großen **Fächern** (Slots).
+  - Ein Fach nimmt einen Bareos-Block auf (Blockgröße des Devices, Vorgabe 64 KiB), mit Folgenummer und Länge.
+  - Größe und Anzahl der Fächer sind einstellbar (D-12).
+- **Erzeuger:** die Netzsitzung, aktiv oder passiv, BNET oder gRPC. Sie schreibt die empfangenen Records in Blöcke und die Blöcke in freie Fächer.
+- **Verbraucher:** je Ziel-Device ein Schreiber. Er liest Fächer und schreibt sie aufs Volume. Er kann ein eigener Prozess sein, wie die Job-Worker von odir. Das ist der Grund für gemeinsamen Speicher statt Kanälen im Prozess: Fällt ein Geräteprozess aus, bleiben Empfänger und die anderen Geräte stehen.
+- **Verteilen über den Ring:**
+  - **Route:** ein Verbraucher, er liest jedes Fach.
+  - **Striping:** Fach `n` gehört dem Verbraucher `n mod N`. Jedes Fach wird genau einmal gelesen; die Folgenummer erlaubt das Zusammensetzen beim Lesen.
+  - **Zweige:** Jeder Zweig-Verbraucher liest **jedes** Fach. Ein Fach wird erst frei, wenn alle Zweige es gelesen haben: Freigabe = kleinster Lesezeiger. Der langsamste Zweig bestimmt den Takt, solange der Ring voll ist (D-13).
+- **Synchronisation über den Ring selbst:**
+  - Im Kopf stehen der Schreibzeiger, je Verbraucher ein Lesezeiger und ein Zustand (läuft / fertig / Fehler / PID).
+  - Alle Zeiger sind atomare 64-Bit-Zähler.
+  - Gewartet wird auf voll oder leer mit **futex** auf Kopfwörtern. Das funktioniert prozessübergreifend im gemeinsamen Speicher, ohne zusätzlichen Kanal.
+- **Fehler:**
+  - Stirbt ein Verbraucher, sieht der Erzeuger das am Zustand bzw. an der PID. Der zugehörige Zweig wird als gescheitert markiert, sein Lesezeiger zählt nicht mehr für die Freigabe (D-11). Die anderen laufen weiter.
+  - Stirbt der Erzeuger, beenden die Verbraucher den Job mit Fehler.
+  - Am Jobende wird der Ring gelöscht. Beim Start räumt osd verwaiste Ringe weg.
+- **Lesen (Restore)** nutzt denselben Ring in Gegenrichtung: Geräteleser füllen ihn, die Netzsitzung leert ihn. Beim Striping setzt die Netzsitzung die Blöcke nach Folgenummer zusammen.
+- **Stufe 1 (ein File-Device)** baut den Ring schon mit genau einem Verbraucher, damit Routen, Striping und Zweige später nur Verbraucher hinzufügen.
+
 ## Gerätearten
 
 | Art | Bareos-Gegenstück | osd-Umfang |
@@ -193,3 +223,5 @@ Nach P1 verschoben, jeweils mit Grund:
 | D-9 | Zweige: Direktive `Branch = <Job>` am Haupt-Job; der Zweig-Job ist eine normale Job-Ressource | ja | Maintainer |
 | D-10 | Unterschiedliche Basis der Zweige: der Haupt-Job liest ab der älteren Basis | ja | Maintainer |
 | D-11 | Ein gescheiterter Zweig bricht die anderen nicht ab | ja | Maintainer |
+| D-12 | Ring: ein Fach = ein Bareos-Block; Fachgröße = Blockgröße des Devices, Fachzahl einstellbar (Vorgabe z. B. 64 Fächer je Job) | ja | Maintainer |
+| D-13 | Geräte-Schreiber als eigene Prozesse (wie die Job-Worker von odir) statt Threads | ja (Ausfall eines Geräts reißt den Job nicht mit) | Maintainer |
