@@ -6,8 +6,10 @@
 //! nächsten Block weiter. Dieses Modul schreibt und liest das byte-genau
 //! wie bareos-sd 25, ohne IO: [`BlockBuilder`] füllt einen Block wie
 //! `WriteRecordToBlock`, [`BlockBuilder::finish`] setzt den Kopf mit
-//! Prüfsumme wie `SerBlockHeader`, [`read_volume`] zerlegt ein ganzes
-//! Volume wieder in Datensätze, [`summarize`] fasst Label, Sitzungen und
+//! Prüfsumme wie `SerBlockHeader`, [`RecordAssembler`] setzt Datensätze
+//! aus Blöcken wieder zusammen (je Sitzung, auch über Volumes hinweg, für
+//! den Restore), [`read_volume`] zerlegt ein ganzes Volume damit,
+//! [`summarize`] fasst Label, Sitzungen und
 //! Dateien zusammen (Prüfung im Gerüst, Vorstufe für `bls` in Stufe 2).
 //!
 //! Format (alle Zahlen Big Endian, `lib/serial.cc`):
@@ -388,24 +390,40 @@ pub struct VolumeContents {
     pub truncated: Option<usize>,
 }
 
-/// Reads every block of a file volume (`ReadBlockFromDev` with checksum,
-/// `ReadRecordFromBlock`) and reassembles records split across blocks. A
-/// volume of a job that continues on another volume may end inside a
-/// record ([`VolumeContents::truncated`]) and the next volume starts with a
-/// continuation header; such pieces come back as they are.
-pub fn read_volume(volume: &[u8]) -> Result<VolumeContents, String> {
-    let mut out = VolumeContents::default();
-    let mut offset = 0usize;
-    // A record whose data continues in the next block: (record, bytes missing).
-    let mut pending: Option<(VolRecord, usize)> = None;
-    while offset < volume.len() {
-        let header = verify_block(&volume[offset..]).map_err(|e| format!("at byte {offset}: {e}"))?;
-        let end = offset + header.block_len as usize;
-        out.blocks.push((offset as u64, header));
-        let mut at = offset + header.len();
+/// Reassembles records from blocks, one partial record per session
+/// (`ReadRecordFromBlock` with `READ_CTX` and `ReadContextSetRecord`).
+///
+/// A record split across blocks continues with a header whose stream is
+/// negated; the pieces are joined for the same session and stream. The
+/// assembler keeps its state across volumes, so a record that a job
+/// continued on its next volume comes back whole when the blocks of both
+/// volumes are pushed in order.
+#[derive(Debug, Default)]
+pub struct RecordAssembler {
+    /// Records still missing data, with the number of bytes missing; at
+    /// most one per session (`VolSessionId`, `VolSessionTime`).
+    pending: Vec<(VolRecord, usize)>,
+}
+
+impl RecordAssembler {
+    /// An assembler with nothing pending.
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Takes one block (exactly `block_len` bytes, checksum verified by the
+    /// caller or with `verify`) found at byte `offset` of its volume and
+    /// returns its header and the records that are complete now, in block
+    /// order. A continuation without a pending first part comes back as it
+    /// is (the start of a volume read on its own).
+    pub fn push_block(&mut self, block: &[u8], offset: u64, verify: bool) -> Result<(BlockHeader, Vec<VolRecord>), String> {
+        let header = if verify { verify_block(block)? } else { BlockHeader::parse(block)? };
+        let end = (header.block_len as usize).min(block.len());
+        let mut out = Vec::new();
+        let mut at = header.len();
         let rhl = if header.version == 1 { RECHDR1_LENGTH } else { RECHDR2_LENGTH };
+        let u = |p: usize| u32::from_be_bytes([block[p], block[p + 1], block[p + 2], block[p + 3]]);
         while end - at >= rhl {
-            let u = |p: usize| u32::from_be_bytes([volume[p], volume[p + 1], volume[p + 2], volume[p + 3]]);
             let (sid, stime, h) = if header.version == 1 {
                 (u(at), u(at + 4), at + 8)
             } else {
@@ -418,32 +436,61 @@ pub fn read_volume(volume: &[u8]) -> Result<VolumeContents, String> {
             if data_bytes >= MAX_BLOCK_LENGTH {
                 return Err(format!("block {}: record length {data_bytes} fails the sanity check", header.block_number));
             }
-            let mut record = match pending.take() {
-                Some((rec, _)) if stream < 0 && rec.stream == -stream && rec.vol_session_id == sid && rec.vol_session_time == stime => rec,
-                _ => VolRecord {
-                    block_number: header.block_number,
-                    block_offset: offset as u64,
-                    vol_session_id: sid,
-                    vol_session_time: stime,
-                    file_index,
-                    stream: stream.abs(),
-                    data: Vec::new(),
-                },
-            };
+            let slot = self.pending.iter().position(|(r, _)| r.vol_session_id == sid && r.vol_session_time == stime);
+            let continued = slot.filter(|&i| stream < 0 && self.pending[i].0.stream == -stream).map(|i| self.pending.swap_remove(i).0);
+            if continued.is_none()
+                && let Some(i) = slot
+            {
+                // a new record of the session: the unfinished one is dropped
+                self.pending.swap_remove(i);
+            }
+            let mut record = continued.unwrap_or(VolRecord {
+                block_number: header.block_number,
+                block_offset: offset,
+                vol_session_id: sid,
+                vol_session_time: stime,
+                file_index,
+                stream: stream.abs(),
+                data: Vec::new(),
+            });
             let n = data_bytes.min(end - at);
-            record.data.extend_from_slice(&volume[at..at + n]);
+            record.data.extend_from_slice(&block[at..at + n]);
             at += n;
             if n < data_bytes {
-                pending = Some((record, data_bytes - n));
+                self.pending.push((record, data_bytes - n));
             } else {
-                out.records.push(record);
+                out.push(record);
             }
         }
-        offset = end;
+        Ok((header, out))
+    }
+
+    /// Takes the records still missing data, with the bytes missing.
+    pub fn take_pending(&mut self) -> Vec<(VolRecord, usize)> {
+        std::mem::take(&mut self.pending)
+    }
+}
+
+/// Reads every block of a file volume (`ReadBlockFromDev` with checksum,
+/// `ReadRecordFromBlock`) and reassembles records split across blocks. A
+/// volume of a job that continues on another volume may end inside a
+/// record ([`VolumeContents::truncated`]) and the next volume starts with a
+/// continuation header; such pieces come back as they are.
+pub fn read_volume(volume: &[u8]) -> Result<VolumeContents, String> {
+    let mut out = VolumeContents::default();
+    let mut offset = 0usize;
+    let mut assembler = RecordAssembler::new();
+    while offset < volume.len() {
+        let header = BlockHeader::parse(&volume[offset..]).map_err(|e| format!("at byte {offset}: {e}"))?;
+        let end = (offset + header.block_len as usize).min(volume.len());
+        let (header, records) = assembler.push_block(&volume[offset..end], offset as u64, true).map_err(|e| format!("at byte {offset}: {e}"))?;
+        out.blocks.push((offset as u64, header));
+        out.records.extend(records);
+        offset += header.block_len as usize;
     }
     // A record that continues on the next volume (the job spanned volumes)
     // is returned with the bytes this volume holds.
-    if let Some((rec, missing)) = pending {
+    for (rec, missing) in assembler.take_pending() {
         out.truncated = Some(missing);
         out.records.push(rec);
     }
@@ -713,6 +760,57 @@ mod tests {
         let eos = eos.expect("EOS label in the last block");
         assert_eq!((eos.job_id, eos.job_files, eos.job_status), (1, Some(13), Some('T' as u32)));
         assert_eq!(b.finish(12), BAREOS_LAST_BLOCK);
+    }
+
+    #[test]
+    fn a_record_continued_on_the_next_volume_is_reassembled() {
+        // one 100-byte record over four 64-byte blocks (28 data bytes
+        // each after the headers); the first block ends "volume 1", the
+        // others are "volume 2"
+        let data: Vec<u8> = (0..100).collect();
+        let r = RecordRef { vol_session_id: 4, vol_session_time: 5, file_index: 7, stream: 2, data: &data };
+        let mut b = BlockBuilder::new(64);
+        let mut p = RecordProgress::default();
+        let mut blocks = Vec::new();
+        let mut n = 0;
+        while !b.write_record(&r, &mut p) {
+            blocks.push(b.finish(n));
+            n += 1;
+        }
+        blocks.push(b.finish(n));
+        assert_eq!(blocks.len(), 4);
+        let v1 = read_volume(&blocks[0]).unwrap();
+        assert_eq!((v1.records.len(), v1.truncated), (1, Some(72)), "the first volume ends inside the record");
+        let mut a = RecordAssembler::new();
+        assert!(a.push_block(&blocks[0], 0, true).unwrap().1.is_empty());
+        assert!(a.push_block(&blocks[1], 0, true).unwrap().1.is_empty());
+        assert!(a.push_block(&blocks[2], 64, true).unwrap().1.is_empty());
+        let (_, done) = a.push_block(&blocks[3], 128, true).unwrap();
+        assert_eq!(done.len(), 1);
+        assert_eq!((done[0].file_index, done[0].stream, &done[0].data), (7, 2, &data));
+        assert_eq!(done[0].block_number, 0, "the record starts in the first block");
+        assert!(a.take_pending().is_empty());
+    }
+
+    #[test]
+    fn interleaved_sessions_keep_their_own_partial_records() {
+        let one = RecordRef { vol_session_id: 1, vol_session_time: 9, file_index: 1, stream: 2, data: &[1u8; 50] };
+        let two = RecordRef { vol_session_id: 2, vol_session_time: 9, file_index: 1, stream: 2, data: &[2u8; 50] };
+        let mut blocks = Vec::new();
+        for (r, size) in [(&one, 60), (&two, 60), (&one, 100), (&two, 100)] {
+            let mut b = BlockBuilder::new(size);
+            let mut p = if size == 60 { RecordProgress::default() } else { RecordProgress { state: RecordState::HeaderCont, remainder: 26 } };
+            let _ = b.write_record(r, &mut p);
+            blocks.push(b.finish(blocks.len() as u32));
+        }
+        let mut a = RecordAssembler::new();
+        let mut out = Vec::new();
+        for blk in &blocks {
+            out.extend(a.push_block(blk, 0, true).unwrap().1);
+        }
+        assert_eq!(out.len(), 2);
+        assert_eq!((out[0].vol_session_id, out[0].data.as_slice()), (1, &[1u8; 50][..]));
+        assert_eq!((out[1].vol_session_id, out[1].data.as_slice()), (2, &[2u8; 50][..]));
     }
 
 }

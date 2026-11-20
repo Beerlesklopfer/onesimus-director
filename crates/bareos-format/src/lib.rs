@@ -22,7 +22,8 @@
 //! `lib/base64.cc`, `lib/util.cc` (`BashSpaces`), `lib/breg.cc`,
 //! `stored/read.cc` / `filed/backup.cc` (Netz-Köpfe), `dird/msgchan.cc`
 //! (`StartStorageDaemonJob`) und für die Volume-Ebene `stored/block.cc`,
-//! `stored/record.cc`, `stored/label.cc` (Zweig `bareos-25`).
+//! `stored/record.cc`, `stored/label.cc`, für den Bootstrap ([`bsr`])
+//! `lib/parse_bsr.cc` und `stored/bsr.cc` (Zweig `bareos-25`).
 //!
 //! Begriffe: [`glossary`].
 //!
@@ -34,6 +35,7 @@
 pub mod base64;
 pub mod bash;
 pub mod breg;
+pub mod bsr;
 pub mod filetype;
 pub mod glossary;
 pub mod label;

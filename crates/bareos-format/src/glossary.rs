@@ -24,3 +24,5 @@
 //! | **Datenkopf** | Kopf `<FileIndex> <Stream> 0` vor jedem Datensatz vom FD an den SD ([`crate::record::data_header`]). |
 //! | **regexwhere** | Liste `!von!nach!optionen` zum Umschreiben von Dateinamen beim Restore ([`crate::breg`]). |
 //! | **Sitzung** (VolSessionId/-Time) | Kennung, unter der ein SD die Datensätze eines Jobs schreibt; nicht die TCP-Sitzung. |
+//! | **Bootstrap** (BSR) | Text des Directors, der dem SD für Restore und Verify Volumes, Sitzungen, Adressbereiche und FileIndex-Bereiche nennt ([`crate::bsr`]). |
+//! | **Abschnitt** (eines Bootstraps) | Alles von einer `Volume=`-Zeile bis zur nächsten (`BootStrapRecord`). |
