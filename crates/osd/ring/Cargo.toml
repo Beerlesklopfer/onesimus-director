@@ -1,0 +1,10 @@
+[package]
+name = "osd-ring"
+description = "Shared-memory block ring of osd: one producer (network session), N consumers (device writers), cross-process wait/wake, request mailbox"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+
+[target.'cfg(unix)'.dependencies]
+libc.workspace = true

@@ -10,6 +10,7 @@ members = [
     "crates/bareos-orm",
     "crates/osd",
     "crates/osd/daemon",
+    "crates/osd/ring",
     "crates/ofd",
     "crates/onesimus-plugins",
     "crates/onesimus-pg-broker",
@@ -105,5 +106,7 @@ bareos-bnet = { path = "crates/bareos-bnet" }
 bareos-format = { path = "crates/bareos-format" }
 onesimus-daemon = { path = "crates/onesimus-daemon" }
 bareos-config = { path = "crates/bareos-config" }
+osd = { path = "crates/osd" }
+osd-ring = { path = "crates/osd/ring" }
 bareos-catalog = { path = "crates/bareos-catalog" }
 onesimus-proto-rs = { path = "crates/onesimus-proto-rs" }

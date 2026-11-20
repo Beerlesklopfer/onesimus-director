@@ -2297,6 +2297,7 @@ version = "25.1.2+onesimus.0.2.0"
 dependencies = [
  "aquamarine",
  "bareos-bnet",
+ "bareos-format",
  "libc",
  "onesimus-plugins",
  "onesimus-proto-rs",
@@ -2361,6 +2362,13 @@ dependencies = [
  "clap",
  "onesimus-daemon",
  "tracing",
+]
+
+[[package]]
+name = "osd-ring"
+version = "25.1.2+onesimus.0.2.0"
+dependencies = [
+ "libc",
 ]
 
 [[package]]
