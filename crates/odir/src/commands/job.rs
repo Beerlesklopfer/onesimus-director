@@ -1896,7 +1896,7 @@ fn run_selected(
     if let Some(smgr) = &ctx.session_mgr {
         smgr.bus().post(BusMessage::JobStatus {
             job_id, job_name: job.name.clone(), status: "Queued".to_string(),
-            timestamp: now_unix(),
+            timestamp: now_unix(), sched_time: 0,
         });
         // "Version:" (job_thread) and "Start Backup" (DoNativeBackup) come
         // from the worker when the job runs (backup_worker.rs).
@@ -2015,7 +2015,7 @@ pub(crate) fn queue_job(ctx: &ExecContext, job: &bareos_config::resources::JobRe
     let job_id = params.job_id;
     if let Some(smgr) = &ctx.session_mgr {
         smgr.bus().post(BusMessage::JobStatus {
-            job_id, job_name: job.name.clone(), status: "Queued".to_string(), timestamp: now_unix(),
+            job_id, job_name: job.name.clone(), status: "Queued".to_string(), timestamp: now_unix(), sched_time: 0,
         });
     }
     if let Some(ref mgr) = ctx.job_manager {
@@ -2133,7 +2133,7 @@ fn run_internal(
             let job_id = child.job_id;
             if let Some(smgr) = &ctx.session_mgr {
                 smgr.bus().post(BusMessage::JobStatus {
-                    job_id, job_name: child.job_name.clone(), status: "Queued".to_string(), timestamp: now_unix() });
+                    job_id, job_name: child.job_name.clone(), status: "Queued".to_string(), timestamp: now_unix(), sched_time: 0 });
             }
             match &ctx.job_manager {
                 Some(mgr) => enqueue_with_report(mgr, &child.job_name, child.start, &child.client, &child.storage,
@@ -2210,7 +2210,7 @@ fn run_virtual_full(
         Ok(child) => {
             if let Some(smgr) = &ctx.session_mgr {
                 smgr.bus().post(BusMessage::JobStatus {
-                    job_id: child.job_id, job_name: job.name.clone(), status: "Queued".to_string(), timestamp: now_unix(),
+                    job_id: child.job_id, job_name: job.name.clone(), status: "Queued".to_string(), timestamp: now_unix(), sched_time: 0,
                 });
             }
             let job_id = child.job_id;

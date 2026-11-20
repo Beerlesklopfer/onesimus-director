@@ -217,9 +217,14 @@ pub fn request(tool: &str, arguments: &Value) -> Option<(&'static str, Value)> {
     let r = Req { args, out: Map::new() };
     match tool {
         // ---- list / llist
-        "list_jobs" => r.copy(&["job", "client", "volume", "pool", "days", "hours", "last", "count", "limit", "offset"])
-            .joined("jobstatus", "jobstatus").joined("jobtype", "jobtype").joined("level", "joblevel")
-            .keep_unmapped(&["order"]).llist().done("ListJobs"),
+        // order desc: ListJobsCommand.reverse (G-1); asc is the default order
+        "list_jobs" => {
+            let desc = r.str("order") == Some("desc");
+            let r = r.copy(&["job", "client", "volume", "pool", "days", "hours", "last", "count", "limit", "offset"])
+                .joined("jobstatus", "jobstatus").joined("jobtype", "jobtype").joined("level", "joblevel");
+            let r = if desc { r.set("reverse", json!(true)) } else { r };
+            r.llist().done("ListJobs")
+        }
         "list_job" => r.copy(&["jobid", "ujobid"]).llist().done("GetJob"),
         "list_joblog" => r.copy(&["jobid", "ujobid", "count"]).keep_unmapped(&["limit", "offset"]).done("ListJobLog"),
         "list_jobmedia" => r.copy(&["jobid", "ujobid"]).llist().done("ListJobMedia"),
@@ -555,6 +560,10 @@ mod tests {
         let (rpc, req) = request("list_jobs", &json!({"client":"fd","jobstatus":["T","W"],"level":"F","long":true,"limit":3})).unwrap();
         assert_eq!(rpc, "ListJobs");
         assert_eq!(req, json!({"client":"fd","jobstatus":"T,W","joblevel":"F","llist":true,"limit":3}));
+        // G-1: order desc goes typed as reverse, and the request encodes
+        let (rpc, req) = request("list_jobs", &json!({"days":7,"order":"desc","limit":5})).unwrap();
+        assert_eq!(req, json!({"days":7,"limit":5,"reverse":true}));
+        assert!(encode(rpc, &req).is_ok());
         assert_eq!(request("show", &json!({"resource":"messages","name":"Daemon"})).unwrap(),
             ("ShowMessages", json!({"message":"Daemon"})));
         assert_eq!(request("restore", &json!({"client":"fd","jobids":[1,2],"files":["/etc/hosts"]})).unwrap(),
@@ -563,7 +572,7 @@ mod tests {
         assert!(request("version", &json!({"format":"text"})).is_none());
         assert!(request("query", &json!({"command":"list jobs"})).is_none());
         // arguments without a request field force the console line
-        let (rpc, req) = request("list_jobs", &json!({"order":"desc"})).unwrap();
+        let (rpc, req) = request("list_joblog", &json!({"jobid":1,"limit":10})).unwrap();
         assert!(encode(rpc, &req).is_err());
     }
 

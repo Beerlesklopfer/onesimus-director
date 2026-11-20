@@ -654,7 +654,7 @@ mod tests {
         let mut md = MetadataMap::new();
         md.insert(SESSION_HEADER, MetadataValue::try_from(token.as_str()).unwrap());
         let id = st.check_session(&md).unwrap();
-        let job = |name: &str| crate::message_bus::BusMessage::JobStatus { job_id: 1, job_name: name.into(), status: "R".into(), timestamp: 0 };
+        let job = |name: &str| crate::message_bus::BusMessage::JobStatus { job_id: 1, job_name: name.into(), status: "R".into(), timestamp: 0, sched_time: 0 };
         assert!(st.event_visible(id, &job("Mine")));
         assert!(!st.event_visible(id, &job("Theirs")));
         st.logout(&token);

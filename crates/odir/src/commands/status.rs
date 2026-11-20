@@ -471,7 +471,9 @@ fn list_running_jobs(ua: &mut Ua, ctx: &ExecContext) {
             ApiMode::Json => {
                 let job_type = res.as_ref().map_or("Backup", |r| job_type_str(r.job_type));
                 rows.push(json!({ "jobid": job.id, "name": unique, "level": level, "type": job_type,
-                                  "status": msg, "files": live.map_or(0, |p| p.files), "bytes": live.map_or(0, |p| p.bytes),
+                                  "status": msg,
+                                  // G-4: unix times for a timeline (0 = not started / unknown)
+                                  "start_time": job.start_time, "sched_time": job.sched_time, "files": live.map_or(0, |p| p.files), "bytes": live.map_or(0, |p| p.bytes),
                                   "bytes_per_sec": live.map_or(0, |p| p.bytes_per_sec),
                                   "files_examined": live.map_or(0, |p| p.files_examined),
                                   "errors": live.map_or(0, |p| p.errors),

@@ -287,7 +287,7 @@ fn cancel_job(ua: &mut Ua, job: &ActiveJob, links: &mut dyn CancelLinks) {
         if let Some(smgr) = &ctx.session_mgr {
             smgr.bus().post(BusMessage::JobStatus {
                 job_id: job.id, job_name: job.name.clone(), status: "Canceling".to_string(),
-                timestamp: now_unix(),
+                timestamp: now_unix(), sched_time: 0,
             });
         }
     }

@@ -229,6 +229,8 @@ pub struct ActiveJob {
     /// Client and Storage resource names ("" when unknown).
     pub client: String,
     pub storage: String,
+    /// jcr->start_time once the job started (unix time), 0 before (G-4).
+    pub start_time: i64,
     /// jcr->sched_time.
     pub sched_time: i64,
 }
@@ -350,7 +352,8 @@ impl JobManager {
                     unique_name: job.handle.unique_job.clone(), phase: job.phase, status: job.status(),
                     sd_status: job.jcr.sd_status, job_started: job.jcr.job_started,
                     fd_connected: job.jcr.fd_connected, sd_connected: job.jcr.sd_connected,
-                    client, storage, sched_time: job.jcr.sched_time }
+                    client, storage, sched_time: job.jcr.sched_time,
+                    start_time: if job.jcr.job_started { job.start_time } else { 0 } }
             }).collect()
     }
 
@@ -559,7 +562,7 @@ impl JobManager {
         // Jobs a Director-run job started (internal_jobs::ChildStart): JobqAdd.
         for child in children {
             self.bus.post(BusMessage::JobStatus { job_id: child.job_id, job_name: child.job_name.clone(),
-                status: "Queued".to_string(), timestamp: now_unix() });
+                status: "Queued".to_string(), timestamp: now_unix(), sched_time: 0 });
             self.enqueue_job(child.job_id, &child.job_name, child.start, &child.client, &child.storage);
             self.set_job_report(child.job_id, child.report);
         }
@@ -612,6 +615,7 @@ impl JobManager {
                 self.next_seq += 1;
                 job.jcr.started_seq = self.next_seq;
                 job.jcr.job_started = true;
+                post_running(&self.bus, job);
                 job.observed_status = merge_status(job.observed_status, 'R');
                 // "Version:", then RunScripts "BeforeJob" on their own thread
                 // (console commands need the JobManager lock), then the job
@@ -837,7 +841,12 @@ impl JobManager {
                 match msg {
                     PipeMessage::State { state, .. } => {
                         debug!("JobManager: job {} state={state}", job.job_id);
+                        let was_started = job.jcr.job_started;
                         job.worker_state(&state);
+                        // G-3: push "Running" when the job really starts (job_started).
+                        if !was_started && job.jcr.job_started {
+                            post_running(&self.bus, job);
+                        }
                         // A worker other than the backup's reached the FD with
                         // immediate TLS (connection_successful_handshake_). S-27.
                         if job.jcr.fd_connected && job.jcr.params.as_ref().is_some_and(|p| p.backup.is_none())
@@ -1231,7 +1240,7 @@ impl JobManager {
 
         for child in children {
             self.bus.post(BusMessage::JobStatus { job_id: child.job_id, job_name: child.job_name.clone(),
-                status: "Queued".to_string(), timestamp: now_unix() });
+                status: "Queued".to_string(), timestamp: now_unix(), sched_time: 0 });
             self.enqueue_job(child.job_id, &child.job_name, child.start, &child.client, &child.storage);
             self.set_job_report(child.job_id, child.report);
         }
@@ -1354,7 +1363,7 @@ fn finish_job(job: &mut DirJob, bus: &MessageBus, config: Option<&SharedConfig>,
     crate::mail::close_job(config, &script_job(job));
     job.phase = phase;
     job.completed_at = Some(std::time::Instant::now());
-    bus.post(BusMessage::JobStatus { job_id: job.job_id, job_name: job.job_name.clone(), status: status.into(), timestamp: now_unix() });
+    bus.post(BusMessage::JobStatus { job_id: job.job_id, job_name: job.job_name.clone(), status: status.into(), timestamp: now_unix(), sched_time: 0 });
 }
 
 /// job_thread(): RunScripts "AfterJob" after the cleanup and its report,
@@ -1565,6 +1574,13 @@ pub fn monitor_loop(
     debug!("job monitor stopped");
 }
 
+
+/// G-3: the push event "Running" when a job really starts, with its
+/// scheduled start time (jcr->sched_time; 0 when unknown).
+fn post_running(bus: &MessageBus, job: &DirJob) {
+    bus.post(BusMessage::JobStatus { job_id: job.job_id, job_name: job.job_name.clone(),
+        status: "Running".into(), timestamp: now_unix(), sched_time: job.jcr.sched_time });
+}
 
 fn now_unix() -> i64 {
     std::time::SystemTime::now()
@@ -1904,5 +1920,29 @@ Job { Name = single; Client = fd1; Storage = File }
         job.worker_state("ConnectingFD");
         assert_eq!(job.observed_status, 'A');
         kill_all(&mut job_manager);
+    }
+
+    /// G-3/G-4: "Running" carries the scheduled time; a running job reports
+    /// its real start time, a queued one 0.
+    #[test]
+    fn running_event_and_start_times() {
+        let mut m = manager(CONFIG);
+        enqueue(&mut m, 1, "a", 10, "fd1", "File");
+        let rx = m.bus.subscribe();
+        let job = m.jobs.iter_mut().find(|j| j.job_id == 1).unwrap();
+        job.jcr.sched_time = 1_795_000_000;
+        post_running(&m.bus, job);
+        match rx.try_recv().unwrap() {
+            BusMessage::JobStatus { job_id, status, sched_time, timestamp, .. } => {
+                assert_eq!((job_id, status.as_str(), sched_time), (1, "Running", 1_795_000_000));
+                assert!(timestamp > 0);
+            }
+            _ => panic!("expected JobStatus"),
+        }
+        assert_eq!(m.active_jobs()[0].start_time, 0, "not started yet");
+        m.set_phase(1, DirJobPhase::Running);
+        let active = &m.active_jobs()[0];
+        assert!(active.start_time > 0 && active.sched_time == 1_795_000_000);
+        kill_all(&mut m);
     }
 }

@@ -17,7 +17,9 @@ pub enum BusMessage {
     SdConnected { job_id: u32, storage_name: String, connect_time: i64 },
     SdDisconnected { job_id: u32, storage_name: String },
     SdStatus { job_id: u32, storage_name: String, alive: bool, check_time: i64 },
-    JobStatus { job_id: u32, job_name: String, status: String, timestamp: i64 },
+    /// `sched_time`: the job's scheduled start (unix time, 0 = unknown),
+    /// set on "Running" so a GUI can place the job on a timeline (G-3).
+    JobStatus { job_id: u32, job_name: String, status: String, timestamp: i64, sched_time: i64 },
     /// Job message — like C++ Jmsg(). Goes to all consoles that subscribed.
     /// msg_type maps to Messages resource types: info, warning, error, fatal, mount, ...
     JobMessage { job_id: u32, job_name: String, msg_type: MsgType, text: String, timestamp: i64 },
@@ -218,7 +220,7 @@ mod tests {
             job_id: 42,
             job_name: "BackupJob".into(),
             status: "Running".into(),
-            timestamp: 3000,
+            timestamp: 3000, sched_time: 0,
         });
 
         match rx.try_recv().unwrap() {

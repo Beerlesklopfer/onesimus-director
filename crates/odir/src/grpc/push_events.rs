@@ -130,12 +130,13 @@ pub fn to_push_event(msg: &BusMessage) -> PushEvent {
                 check_time: *check_time,
             })
         }
-        BusMessage::JobStatus { job_id, job_name, status, timestamp } => {
+        BusMessage::JobStatus { job_id, job_name, status, timestamp, sched_time } => {
             push_event::Event::JobStatus(JobStatusEvent {
                 job_id: *job_id,
                 job_name: job_name.clone(),
                 status: status.clone(),
                 timestamp: *timestamp,
+                sched_time: *sched_time,
             })
         }
         BusMessage::JobMessage { job_id, job_name, text, .. } => {
@@ -173,7 +174,7 @@ Console { Name=nothing; Password=pw }
 
     /// A job status event of job `name`.
     fn job(name: &str) -> BusMessage {
-        BusMessage::JobStatus { job_id: 7, job_name: name.into(), status: "R".into(), timestamp: 0 }
+        BusMessage::JobStatus { job_id: 7, job_name: name.into(), status: "R".into(), timestamp: 0, sched_time: 0 }
     }
 
     /// A job message of job `name` with JobId `id`.
@@ -357,7 +358,7 @@ Console { Name=nothing; Password=pw }
             job_id: 42,
             job_name: "Backup".into(),
             status: "Running".into(),
-            timestamp: 2000,
+            timestamp: 2000, sched_time: 0,
         };
         let event = to_push_event(&msg);
         match event.event.unwrap() {
@@ -380,7 +381,7 @@ Console { Name=nothing; Password=pw }
             BusMessage::SdConnected { job_id: 1, storage_name: "s".into(), connect_time: 0 },
             BusMessage::SdDisconnected { job_id: 1, storage_name: "s".into() },
             BusMessage::SdStatus { job_id: 1, storage_name: "s".into(), alive: true, check_time: 0 },
-            BusMessage::JobStatus { job_id: 1, job_name: "j".into(), status: "ok".into(), timestamp: 0 },
+            BusMessage::JobStatus { job_id: 1, job_name: "j".into(), status: "ok".into(), timestamp: 0, sched_time: 0 },
         ];
 
         for msg in &messages {

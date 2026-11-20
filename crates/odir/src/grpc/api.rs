@@ -671,6 +671,9 @@ mod tests {
         assert_eq!(line("ListJobs", pb::ListJobsCommand { job: "backup fd".into(), limit: 2, llist: true, ..Default::default() }),
                    "llist jobs job=\"backup fd\" limit=2");
         assert_eq!(line("ListJobs", pb::ListJobsCommand { count: true, last: false, ..Default::default() }), "list jobs count");
+        // G-1: the newest rows first
+        assert_eq!(line("ListJobs", pb::ListJobsCommand { days: 7, limit: 5, reverse: true, llist: true, ..Default::default() }),
+                   "llist jobs days=7 limit=5 reverse");
         assert_eq!(line("GetJob", pb::ListJobidCommand { jobid: 628, ..Default::default() }), "list jobid=628");
         // StatusCommand fields of other status forms are not passed on
         assert_eq!(line("GetDirectorStatus", cmd::StatusCommand { dir: true, client: "x".into(), days: 3, ..Default::default() }),
