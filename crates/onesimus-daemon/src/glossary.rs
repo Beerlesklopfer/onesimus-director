@@ -16,3 +16,8 @@
 //! | **Konfigurationsprüfung** (`-t`) | Konfiguration lesen, Ergebnis melden, mit Exit-Code enden ([`crate::config_check`]). |
 //! | **Exit-Code** | Rückgabewert des Prozesses; 41 und 42 verhindern einen Neustart durch systemd ([`crate::exit`]). |
 //! | **Debug-Level** (`-d`) | Ausführlichkeit der Bareos-Debugausgabe; ab 1 schaltet das Logging auf `debug` ([`crate::logging`]). |
+//! | **Accept-Schleife** | Wartet auf dem Port des Daemons und gibt jede Verbindung an einen eigenen Thread ([`crate::accept::serve`]). |
+//! | **PSK-Identität** | Name, den eine Gegenstelle beim TLS-PSK nennt (`R_DIRECTOR\x1e<Name>`, `R_JOB\x1e<Job>`); er wählt den Schlüssel ([`crate::accept::PskIdentity`]). |
+//! | **Hello** | Erste Zeile einer Gegenstelle, z. B. `Hello Director <Name> calling` ([`crate::handshake`]). |
+//! | **OK-Hello** | Antwort des Daemons nach erfolgreichem CRAM-MD5 (`2000 OK Hello 54` FD, `3000 OK Hello` SD). |
+//! | **Bandbreitengrenze** | Höchstzahl Bytes je Sekunde einer Datenverbindung (`setbandwidth`, [`crate::bwlimit`]). |

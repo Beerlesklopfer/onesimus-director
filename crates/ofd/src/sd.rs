@@ -4,7 +4,6 @@
 //! plus the table of running jobs (jcr list) both of them and `cancel` use.
 
 use std::collections::HashMap;
-use std::io::{Read, Write};
 use std::net::{TcpStream, ToSocketAddrs};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Condvar, LazyLock, Mutex};
@@ -12,9 +11,8 @@ use std::time::{Duration, Instant};
 
 use bareos_bnet::{BnetStream, CramMd5Auth, tls_psk};
 
-/// Any byte stream a BNET connection can run over.
-pub trait Rw: Read + Write + Send {}
-impl<T: Read + Write + Send> Rw for T {}
+/// Any byte stream a BNET connection can run over (onesimus-daemon).
+pub use onesimus_daemon::accept::Rw;
 
 pub type SdStream = BnetStream<Box<dyn Rw>>;
 
@@ -88,97 +86,8 @@ pub fn running() -> Vec<Arc<JobShared>> {
     v
 }
 
-/// BareosSocket bwlimit state (SetBwlimit, ControlBwlimit).
-#[derive(Default)]
-pub struct BwState {
-    /// bytes per second, 0: no limit
-    pub limit: AtomicU64,
-    pub bursting: AtomicBool,
-    /// (nb_bytes, last_tick in microseconds)
-    ticks: Mutex<(i64, i64)>,
-}
-
-fn now_us() -> i64 {
-    std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_micros() as i64).unwrap_or(0)
-}
-
-impl BwState {
-    /// ControlBwlimit()
-    pub fn control(&self, bytes: usize) {
-        let limit = self.limit.load(Ordering::Relaxed);
-        if limit == 0 || bytes == 0 {
-            return;
-        }
-        let rate = limit as f64 / 1_000_000.0;
-        let bursting = self.bursting.load(Ordering::Relaxed);
-        let mut t = self.ticks.lock().unwrap_or_else(|e| e.into_inner());
-        let now = now_us();
-        if t.1 == 0 {
-            *t = (bytes as i64, now);
-            return;
-        }
-        let temp = now - t.1;
-        if temp < 100 {
-            t.0 += bytes as i64;
-            return;
-        }
-        t.0 += bytes as i64;
-        t.1 = now;
-        if temp > 10_000_000 {
-            return;
-        }
-        t.0 -= (temp as f64 * rate) as i64;
-        if t.0 < 0 {
-            if !bursting {
-                t.0 = 0;
-            }
-            return;
-        }
-        let mut usec_sleep = (t.0 as f64 / rate) as i64;
-        if usec_sleep > 100 {
-            loop {
-                std::thread::sleep(Duration::from_micros(usec_sleep as u64));
-                let now = now_us();
-                if now - t.1 < usec_sleep {
-                    usec_sleep -= now - t.1;
-                    continue;
-                }
-                t.1 = now;
-                break;
-            }
-            if bursting {
-                t.0 -= (usec_sleep as f64 * rate) as i64;
-            } else {
-                t.0 = 0;
-            }
-        }
-    }
-}
-
-/// A stream whose reads and writes are bandwidth limited.
-pub struct Limited {
-    pub inner: Box<dyn Rw>,
-    pub bw: Arc<BwState>,
-}
-
-impl Read for Limited {
-    fn read(&mut self, b: &mut [u8]) -> std::io::Result<usize> {
-        let n = self.inner.read(b)?;
-        self.bw.control(n);
-        Ok(n)
-    }
-}
-
-impl Write for Limited {
-    fn write(&mut self, b: &[u8]) -> std::io::Result<usize> {
-        let n = self.inner.write(b)?;
-        self.bw.control(n);
-        Ok(n)
-    }
-    fn flush(&mut self) -> std::io::Result<()> {
-        self.inner.flush()
-    }
-}
+// BwState and Limited: onesimus-daemon (bwlimit), since 20.11.2026.
+pub use onesimus_daemon::bwlimit::{BwState, Limited};
 
 static JOBS: LazyLock<Mutex<HashMap<String, Arc<JobShared>>>> = LazyLock::new(|| Mutex::new(HashMap::new()));
 

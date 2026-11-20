@@ -4,8 +4,21 @@
 //! steht hier einmal: Logging einrichten, Konfiguration mit `-t` prüfen,
 //! Rechte abgeben (`-u`/`-g`), in den Hintergrund gehen (ohne `-f`),
 //! PID-Datei schreiben, auf `SIGTERM`/`SIGINT` warten, `SIGHUP` an einen
-//! eigenen Thread leiten, mit den Bareos-Exit-Codes enden. ofd nutzt es seit
-//! 19.11.2026; der neue osd (`crates/osd/daemon`) soll es von Anfang an nutzen.
+//! eigenen Thread leiten, mit den Bareos-Exit-Codes enden. Dazu kommt seit
+//! 20.11.2026 die Netzseite: Verbindungen annehmen ([`accept`], TLS-PSK mit
+//! Schlüsselwahl nach PSK-Identität), den Director anmelden ([`handshake`]),
+//! TLS für den gRPC-Server ([`grpc_tls`]) und die Bandbreitenbegrenzung
+//! ([`bwlimit`]). ofd nutzt es seit 19.11.2026; der neue osd
+//! (`crates/osd/daemon`) nutzt es von Anfang an.
+//!
+//! **Folgt in P1** (zu eng mit ofd verflochten, bleibt vorerst dort):
+//! die Tabelle laufender Jobs und der passive SD-Anschluss
+//! (`ofd/src/sd.rs` `JobShared`, `handle_stored_connection`), der
+//! gRPC-Dienst selbst mit Laufzeit und Sitzungsgrenze (`ofd/src/grpc.rs`
+//! `start`), das Binden des Ports mit den Fehlertexten der FD-Konfiguration
+//! (`ofd/src/accept.rs` `accept_loop`), die TLS-Fassung des Directors
+//! (`odir/src/grpc/tls.rs`, mit mDNS-Namen) sowie Signale, PID-Datei und
+//! `-k` in odir.
 //!
 //! Datenfluss eines Starts (Reihenfolge, wie `main` sie aufruft):
 //!
@@ -23,17 +36,26 @@
 //! `lib/signal.cc` (`InitSignals`), `include/exit_codes.h`, `filed/filed.cc`
 //! und `stored/stored.cc` (`main`).
 //!
-//! Herkunft: `ofd/src/main.rs` (Logging, Rechteabgabe, Hintergrund, Warten)
+//! Netzseite (`core/src/lib/bnet_server_tcp.cc`, `filed/authenticate.cc`,
+//! `stored/authenticate.cc`, `lib/bsock.cc` `ControlBwlimit`): siehe die
+//! Module.
+//!
+//! Herkunft: `ofd/src/accept.rs`, `ofd/src/grpc_tls.rs`, `ofd/src/sd.rs`
+//! (`Rw`, `BwState`, `Limited`), `ofd/src/main.rs` (Logging, Rechteabgabe, Hintergrund, Warten)
 //! und `odir/src/privileges.rs`, `odir/src/main.rs` (PID-Datei,
 //! Signalmasken, `-t`-Exit-Codes). Begriffe: [`glossary`].
 #![doc = include_str!(concat!(env!("OUT_DIR"), "/module_tree.md"))]
 #![deny(missing_docs)]
 #![deny(clippy::missing_docs_in_private_items)]
 
+pub mod accept;
 pub mod background;
+pub mod bwlimit;
 pub mod config_check;
 pub mod exit;
 pub mod glossary;
+pub mod grpc_tls;
+pub mod handshake;
 pub mod logging;
 pub mod pidfile;
 pub mod privileges;

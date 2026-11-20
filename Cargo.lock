@@ -2212,9 +2212,13 @@ name = "onesimus-daemon"
 version = "25.1.2+onesimus.0.2.0"
 dependencies = [
  "aquamarine",
+ "bareos-bnet",
+ "bareos-format",
  "ctrlc",
  "daemonize",
  "nix 0.29.0",
+ "rcgen",
+ "tonic",
  "tracing",
  "tracing-subscriber",
 ]

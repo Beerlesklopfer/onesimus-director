@@ -15,7 +15,7 @@ use onesimus_proto_rs::onesimus::filed::{
     file_daemon_server::{FileDaemon, FileDaemonServer},
 };
 use tokio_stream::{StreamExt, wrappers::ReceiverStream};
-use tonic::transport::{Identity, Server, ServerTlsConfig};
+use tonic::transport::Server;
 use tonic::{Request, Response, Status};
 
 static SESSION: AtomicU64 = AtomicU64::new(1 << 32);
@@ -99,12 +99,8 @@ pub fn start(
     key: &Path,
     shutdown: &'static AtomicBool,
 ) -> Result<(SocketAddr, std::thread::JoinHandle<()>), String> {
-    let identity = Identity::from_pem(
-        std::fs::read(cert).map_err(|e| e.to_string())?,
-        std::fs::read(key).map_err(|e| e.to_string())?,
-    );
     let mut builder = Server::builder()
-        .tls_config(ServerTlsConfig::new().identity(identity))
+        .tls_config(onesimus_daemon::grpc_tls::server_tls_config(cert, key)?)
         .map_err(|e| e.to_string())?;
     // Bind before reporting a successful startup (also catches port conflicts).
     let listener = std::net::TcpListener::bind(address).map_err(|e| e.to_string())?;
