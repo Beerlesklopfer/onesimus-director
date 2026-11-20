@@ -18,7 +18,22 @@
 //! erhalten (P1).
 //!
 //! Datenfluss: `osd -c <Pfad>` → [`load`] → [`crate::raw::load_tree`]
-//! (`bareos-sd.d/*/*.conf`) → [`SdConfig::from_resources`] → osd.
+//! (`bareos-sd.d/*/*.conf`) → [`SdConfig::from_resources`] → optional
+//! [`SdConfig::apply_overlay`] (`osd.d/*/*.conf`) → osd.
+//!
+//! **Erweiterung `osd.d/` (Plan D-8, „additiv, rückwärtskompatibel“):**
+//! Onesimus-Angaben stehen nie in `bareos-sd.d`, sondern in einem eigenen
+//! Baum `osd.d/<Typ>/<Name>.conf` neben `bareos-sd.d` ([`overlay_dir`]).
+//! Ein Eintrag dort erweitert die Ressource gleichen Typs und gleichen
+//! Namens aus `bareos-sd.d` („Namensgleichheit ist Bedingung“):
+//!
+//! - Er darf nur Onesimus-Direktiven setzen ([`ONESIMUS_DIRECTIVES`]);
+//!   jede andere Direktive, also jede Bareos-Direktive, ist ein Fehler.
+//! - Ohne gleichnamige Ressource in `bareos-sd.d` ist er ein Fehler.
+//! - Reine osd-Ressourcen (`Distributor` mit `Route`) kommen in P2; bis
+//!   dahin lehnt der Lader sie als noch nicht unterstützt ab.
+//! - Ohne `osd.d/` ist das Ergebnis genau das von `bareos-sd.d` allein;
+//!   ein bareos-sd liest denselben Baum unverändert.
 //!
 //! Bareos-Gegenstück: `core/src/stored/stored_conf.cc` (`store_items`,
 //! `dir_items`, `dev_items`, `changer_items`, Defaults), Zweig `bareos-25`.
@@ -33,6 +48,19 @@ pub const DEFAULT_SD_PORT: u16 = 9103;
 
 /// Default `Maximum Concurrent Jobs` of the Storage resource.
 pub const DEFAULT_MAX_CONCURRENT_JOBS: u32 = 20;
+
+/// Default `Maximum Block Size` of a Device (`stored_conf.cc`).
+pub const DEFAULT_MAX_BLOCK_SIZE: u32 = 1_048_576;
+
+/// Default `Label Block Size` of a Device (`stored_conf.cc`).
+pub const DEFAULT_LABEL_BLOCK_SIZE: u32 = 64_512;
+
+/// Default `Client Connect Wait` in seconds (`stored_conf.cc`).
+pub const DEFAULT_CLIENT_CONNECT_WAIT: u64 = 1800;
+
+/// The Onesimus directives `osd.d/` may add, per resource type (normalized
+/// type, normalized key). Everything else in `osd.d/` is an error.
+pub const ONESIMUS_DIRECTIVES: &[(&str, &str)] = &[("storage", "ringslots"), ("device", "ringslots")];
 
 /// The `Storage` resource: the daemon itself.
 #[derive(Debug, Clone, PartialEq)]
@@ -55,6 +83,14 @@ pub struct SdStorage {
     pub maximum_concurrent_jobs: u32,
     /// `Messages`: name of the Messages resource for daemon messages.
     pub messages: Option<String>,
+    /// `Just In Time Reservation` (default yes since Bareos 23): reserve
+    /// the device only when the first data arrives.
+    pub just_in_time_reservation: bool,
+    /// `Client Connect Wait` in seconds (default 1800): how long a job waits
+    /// for its File Daemon.
+    pub client_connect_wait: u64,
+    /// osd.d: `Ring Slots`, default slot count of the job rings (Onesimus).
+    pub ring_slots: Option<u32>,
     /// Every other directive, unchecked.
     pub other: Vec<Directive>,
 }
@@ -106,6 +142,16 @@ pub struct SdDevice {
     pub drive_index: u32,
     /// `Maximum Concurrent Jobs` (default 1).
     pub maximum_concurrent_jobs: u32,
+    /// `Maximum Block Size` in bytes (default 1 048 576, `stored_conf.cc`).
+    pub maximum_block_size: u32,
+    /// `Label Block Size` in bytes (default 64 512).
+    pub label_block_size: u32,
+    /// `Maximum Volume Size` in bytes; 0 = no limit (deprecated in Bareos,
+    /// the Pool's `Maximum Volume Bytes` is the usual limit).
+    pub maximum_volume_size: u64,
+    /// osd.d: `Ring Slots`, slot count of the ring of a job on this device
+    /// (Onesimus, D-12).
+    pub ring_slots: Option<u32>,
     /// Every other directive, unchecked.
     pub other: Vec<Directive>,
 }
@@ -155,7 +201,25 @@ pub struct SdConfig {
 /// `bareos-sd.d` directory itself) and checks it.
 pub fn load(path: &Path) -> Result<SdConfig, String> {
     let resources = crate::raw::load_tree(path, "bareos-sd.d")?;
-    SdConfig::from_resources(&resources)
+    let mut config = SdConfig::from_resources(&resources)?;
+    let overlay = overlay_dir(path);
+    if overlay.is_dir() {
+        let extensions = crate::raw::load_tree(&overlay, "osd.d").map_err(|e| format!("osd.d: {e}"))?;
+        config.apply_overlay(&extensions)?;
+    }
+    Ok(config)
+}
+
+/// Where `osd.d/` belongs for the configuration `path`: next to the file,
+/// inside the directory that holds `bareos-sd.d`, or next to `bareos-sd.d`.
+pub fn overlay_dir(path: &Path) -> std::path::PathBuf {
+    if path.is_file() {
+        return path.parent().unwrap_or(Path::new(".")).join("osd.d");
+    }
+    if path.file_name().is_some_and(|n| n == "bareos-sd.d") {
+        return path.parent().unwrap_or(Path::new(".")).join("osd.d");
+    }
+    path.join("osd.d")
 }
 
 /// The directives of one resource, looked up by normalized key.
@@ -208,6 +272,26 @@ impl<'a> Res<'a> {
         }
     }
 
+    /// `key` as a size (`1M`, `64512`), `default` when missing.
+    fn size(&self, key: &str, default: u64) -> Result<u64, String> {
+        match self.get(key) {
+            None => Ok(default),
+            Some(d) => crate::values::parse_size(&d.values().join(" "))
+                .map(|(_, v)| v)
+                .map_err(|e| format!("{}: {key}: {e}", self.label)),
+        }
+    }
+
+    /// `key` as a time in seconds (`30 minutes`), `default` when missing.
+    fn duration(&self, key: &str, default: u64) -> Result<u64, String> {
+        match self.get(key) {
+            None => Ok(default),
+            Some(d) => crate::values::parse_time(&d.values().join(" "))
+                .map(|(_, v)| v.as_secs())
+                .map_err(|e| format!("{}: {key}: {e}", self.label)),
+        }
+    }
+
     /// Directives whose keys are not in `known`.
     fn other(&self, known: &[&str]) -> Vec<Directive> {
         self.raw.directives.iter().filter(|d| !known.contains(&d.norm_key().as_str())).cloned().collect()
@@ -237,8 +321,12 @@ impl SdConfig {
                         plugin_directory: r.text("plugindirectory"),
                         maximum_concurrent_jobs: r.number("maximumconcurrentjobs", DEFAULT_MAX_CONCURRENT_JOBS)?,
                         messages: r.text("messages"),
+                        just_in_time_reservation: r.boolean("justintimereservation", true)?,
+                        client_connect_wait: r.duration("clientconnectwait", DEFAULT_CLIENT_CONNECT_WAIT)?,
+                        ring_slots: None,
                         other: r.other(&["name", "description", "sdport", "sdaddress", "workingdirectory",
-                            "piddirectory", "plugindirectory", "maximumconcurrentjobs", "messages"]),
+                            "piddirectory", "plugindirectory", "maximumconcurrentjobs", "messages",
+                            "justintimereservation", "clientconnectwait"]),
                     });
                 }
                 "director" => {
@@ -269,9 +357,14 @@ impl SdConfig {
                         autochanger: r.boolean("autochanger", false)?,
                         drive_index: r.number("driveindex", 0)?,
                         maximum_concurrent_jobs: r.number("maximumconcurrentjobs", 1)?,
+                        maximum_block_size: r.size("maximumblocksize", DEFAULT_MAX_BLOCK_SIZE.into())? as u32,
+                        label_block_size: r.size("labelblocksize", DEFAULT_LABEL_BLOCK_SIZE.into())? as u32,
+                        maximum_volume_size: r.size("maximumvolumesize", 0)?,
+                        ring_slots: None,
                         other: r.other(&["name", "description", "mediatype", "archivedevice", "devicetype",
                             "labelmedia", "randomaccess", "automaticmount", "removablemedia", "alwaysopen",
-                            "autochanger", "driveindex", "maximumconcurrentjobs"]),
+                            "autochanger", "driveindex", "maximumconcurrentjobs", "maximumblocksize",
+                            "labelblocksize", "maximumvolumesize"]),
                     });
                 }
                 "messages" => {
@@ -332,6 +425,65 @@ impl SdConfig {
             }
         }
         Ok(Self { storage, directors, devices, messages, autochangers })
+    }
+
+    /// Applies the `osd.d/` extensions `resources` (rules in the module
+    /// comment): only Onesimus directives, only onto a same-named resource
+    /// of the same type.
+    pub fn apply_overlay(&mut self, resources: &[ConfResource]) -> Result<(), String> {
+        for raw in resources {
+            let rtype = raw.norm_type();
+            let at = raw.source.as_ref().map(|p| format!(" ({})", p.display())).unwrap_or_default();
+            let Some(name) = raw.name().map(str::to_string) else {
+                return Err(format!("osd.d: {} without Name{at}", raw.rtype));
+            };
+            let known_type = matches!(rtype.as_str(), "storage" | "director" | "device" | "messages" | "autochanger");
+            if !known_type {
+                return Err(format!(
+                    "osd.d: resource type \"{}\" is not supported yet{at} (Distributor and Route follow in P2)",
+                    raw.rtype
+                ));
+            }
+            let exists = match rtype.as_str() {
+                "storage" => self.storage.name == name,
+                "director" => self.directors.iter().any(|d| d.name == name),
+                "device" => self.devices.iter().any(|d| d.name == name),
+                "messages" => self.messages.iter().any(|m| m.name == name),
+                _ => self.autochangers.iter().any(|a| a.name == name),
+            };
+            if !exists {
+                return Err(format!("osd.d: {} \"{name}\" extends no {} of that name in bareos-sd.d{at}", raw.rtype, raw.rtype));
+            }
+            let r = Res::new(raw, &raw.rtype);
+            for d in &raw.directives {
+                let key = d.norm_key();
+                if key == "name" {
+                    continue;
+                }
+                if !ONESIMUS_DIRECTIVES.contains(&(rtype.as_str(), key.as_str())) {
+                    return Err(format!(
+                        "osd.d: {} \"{name}\": \"{}\" is not an Onesimus directive; osd.d may only add Onesimus \
+                         directives and never set or override a Bareos directive{at}",
+                        raw.rtype, d.key
+                    ));
+                }
+            }
+            let slots = match r.get("ringslots") {
+                Some(_) => Some(r.number::<u32>("ringslots", 0)?).filter(|&n| n >= 2).map(Some)
+                    .ok_or_else(|| format!("osd.d: {} \"{name}\": Ring Slots must be at least 2{at}", raw.rtype))?,
+                None => None,
+            };
+            match rtype.as_str() {
+                "storage" => self.storage.ring_slots = slots.or(self.storage.ring_slots),
+                "device" => {
+                    if let Some(dev) = self.devices.iter_mut().find(|d| d.name == name) {
+                        dev.ring_slots = slots.or(dev.ring_slots);
+                    }
+                }
+                _ => {}
+            }
+        }
+        Ok(())
     }
 
     /// The Director resource named `name`.
@@ -450,6 +602,74 @@ Messages {
             assert_eq!(parse(&text).unwrap_err(), want);
         }
         assert_eq!(parse("Storage {\n Name = x\n}\n").unwrap_err(), "no Director resource defined");
+    }
+
+    #[test]
+    fn new_bareos_directives_with_defaults() {
+        let c = parse(SAMPLE).unwrap();
+        assert!(c.storage.just_in_time_reservation);
+        assert_eq!(c.storage.client_connect_wait, 1800);
+        let d = c.find_device("FileStorage").unwrap();
+        assert_eq!((d.maximum_block_size, d.label_block_size, d.maximum_volume_size), (1_048_576, 64_512, 0));
+        let text = SAMPLE.replace("AlwaysOpen = no;", "AlwaysOpen = no;\n  Maximum Block Size = 262144\n  Maximum Volume Size = 5 GiB")
+            .replace("Messages = Standard\n}", "Messages = Standard\n  Just In Time Reservation = no\n  Client Connect Wait = 5 minutes\n}");
+        let c = parse(&text).unwrap();
+        assert!(!c.storage.just_in_time_reservation);
+        assert_eq!(c.storage.client_connect_wait, 300);
+        let d = c.find_device("FileStorage").unwrap();
+        assert_eq!((d.maximum_block_size, d.maximum_volume_size), (262_144, 5 << 30));
+    }
+
+    /// Applies the osd.d text `overlay` to [`SAMPLE`].
+    fn overlay(overlay: &str) -> Result<SdConfig, String> {
+        let mut c = parse(SAMPLE)?;
+        c.apply_overlay(&crate::raw::parse_str(overlay, None).unwrap())?;
+        Ok(c)
+    }
+
+    #[test]
+    fn osd_d_extension_applies_to_the_same_named_resource() {
+        let c = overlay("Device {\n Name = FileStorage\n Ring Slots = 32\n}\nStorage {\n Name = PDC-sd\n RingSlots = 8\n}\n").unwrap();
+        assert_eq!(c.find_device("FileStorage").unwrap().ring_slots, Some(32));
+        assert_eq!(c.storage.ring_slots, Some(8));
+        // Bareos directives are untouched
+        assert_eq!(c.find_device("FileStorage").unwrap().media_type, "File");
+    }
+
+    #[test]
+    fn osd_d_override_of_a_bareos_directive_is_rejected() {
+        let e = overlay("Device {\n Name = FileStorage\n Media Type = Other\n}\n").unwrap_err();
+        assert!(e.contains("\"Media Type\" is not an Onesimus directive"), "{e}");
+        let e = overlay("Device {\n Name = FileStorage\n Ring Slots = 1\n}\n").unwrap_err();
+        assert!(e.contains("at least 2"), "{e}");
+    }
+
+    #[test]
+    fn osd_d_orphan_and_new_types_are_rejected() {
+        let e = overlay("Device {\n Name = NoSuchDevice\n Ring Slots = 4\n}\n").unwrap_err();
+        assert!(e.contains("Device \"NoSuchDevice\" extends no Device of that name in bareos-sd.d"), "{e}");
+        let e = overlay("Distributor {\n Name = V\n}\n").unwrap_err();
+        assert!(e.contains("not supported yet"), "{e}");
+        let e = overlay("Device {\n Ring Slots = 4\n}\n").unwrap_err();
+        assert!(e.contains("without Name"), "{e}");
+    }
+
+    #[test]
+    fn without_osd_d_the_tree_reads_like_bareos_sd() {
+        let dir = std::env::temp_dir().join(format!("bareos-config-osd-d-{}", std::process::id()));
+        let file = dir.join("bareos-sd.conf");
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(&file, SAMPLE).unwrap();
+        assert_eq!(overlay_dir(&file), dir.join("osd.d"));
+        let plain = load(&file).unwrap();
+        assert_eq!(plain, parse(SAMPLE).unwrap());
+        assert_eq!(plain.find_device("FileStorage").unwrap().ring_slots, None);
+        std::fs::create_dir_all(dir.join("osd.d").join("device")).unwrap();
+        std::fs::write(dir.join("osd.d/device/FileStorage.conf"), "Device {\n Name = FileStorage\n Ring Slots = 4\n}\n").unwrap();
+        assert_eq!(load(&file).unwrap().find_device("FileStorage").unwrap().ring_slots, Some(4));
+        std::fs::write(dir.join("osd.d/device/FileStorage.conf"), "Device {\n Name = Other\n Ring Slots = 4\n}\n").unwrap();
+        assert!(load(&file).unwrap_err().contains("extends no Device"));
+        std::fs::remove_dir_all(&dir).ok();
     }
 
     #[test]
