@@ -383,10 +383,16 @@ pub struct VolumeContents {
     pub blocks: Vec<(u64, BlockHeader)>,
     /// The records in order.
     pub records: Vec<VolRecord>,
+    /// Bytes missing from the last record when it continues on the next
+    /// volume.
+    pub truncated: Option<usize>,
 }
 
 /// Reads every block of a file volume (`ReadBlockFromDev` with checksum,
-/// `ReadRecordFromBlock`) and reassembles records split across blocks.
+/// `ReadRecordFromBlock`) and reassembles records split across blocks. A
+/// volume of a job that continues on another volume may end inside a
+/// record ([`VolumeContents::truncated`]) and the next volume starts with a
+/// continuation header; such pieces come back as they are.
 pub fn read_volume(volume: &[u8]) -> Result<VolumeContents, String> {
     let mut out = VolumeContents::default();
     let mut offset = 0usize;
@@ -435,8 +441,11 @@ pub fn read_volume(volume: &[u8]) -> Result<VolumeContents, String> {
         }
         offset = end;
     }
+    // A record that continues on the next volume (the job spanned volumes)
+    // is returned with the bytes this volume holds.
     if let Some((rec, missing)) = pending {
-        return Err(format!("volume ends inside a record (FileIndex {}, {missing} bytes missing)", rec.file_index));
+        out.truncated = Some(missing);
+        out.records.push(rec);
     }
     Ok(out)
 }
