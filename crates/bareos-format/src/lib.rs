@@ -13,7 +13,7 @@
 //! Datenfluss: Ein Backup erzeugt im FD je Datei einen Attribut-Datensatz
 //! (`STREAM_UNIX_ATTRIBUTES`, darin die LStat-Zeichenkette aus
 //! [`lstat::encode_stat`]) und Datensätze mit Daten und Prüfsumme. Der SD
-//! schreibt sie in Volumes ([`record`], [`volume`]), der Director legt die
+//! schreibt sie in Volumes ([`volume`] mit Blöcken und Datensätzen, [`label`]), der Director legt die
 //! Attribute im Katalog ab (`File.LStat`) und dekodiert sie für `bvfs`,
 //! `ovfs` und Verify wieder ([`lstat::decode_stat`]).
 //!
@@ -36,6 +36,7 @@ pub mod bash;
 pub mod breg;
 pub mod filetype;
 pub mod glossary;
+pub mod label;
 pub mod lstat;
 pub mod msg;
 pub mod record;

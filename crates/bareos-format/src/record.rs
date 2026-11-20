@@ -1,10 +1,10 @@
-//! Datensätze (Records): Netz-Köpfe als Code, Volume-Kopf vorbereitet.
+//! Datensätze (Records): Netz-Köpfe; die Volume-Köpfe stehen in [`crate::volume`].
 //!
 //! Zweck: Der SD zerlegt den Datenstrom des FD in Datensätze und schreibt sie
 //! in Blöcke ([`crate::volume`]). Jeder Datensatz hat einen Kopf und Nutzdaten.
-//! Dieses Modul nimmt später Typen, Parser und Writer dafür auf. Heute gibt es
-//! im Repository keinen Code für Datensätze im Volume, deshalb steht hier nur
-//! die Struktur mit Quellenangabe – kein ungetesteter Format-Code.
+//! Den Volume-Kopf schreibt und liest seit 20.11.2026
+//! [`crate::volume::BlockBuilder`] bzw. [`crate::volume::read_volume`], die
+//! Label-Inhalte [`crate::label`].
 //!
 //! Struktur laut Bareos `core/src/stored/record.h` und `block.h`, Zweig
 //! `bareos-25` (gelesen 19.11.2026):
@@ -20,8 +20,7 @@
 //! Label-Datensätze haben einen negativen `FileIndex` (`enum : int32_t` in
 //! `record.h`): `PRE_LABEL` −1, `VOL_LABEL` −2, `EOM_LABEL` −3, `SOS_LABEL` −4,
 //! `EOS_LABEL` −5, `EOT_LABEL` −6, `SOB_LABEL` −7, `EOB_LABEL` −8. Die
-//! Byte-Kodierung der Label-Inhalte (`ser_volume_label`, `UnserVolumeLabel`,
-//! `stored/label.cc`) ist noch nicht gelesen.
+//! Byte-Kodierung der Label-Inhalte steht in [`crate::label`].
 //!
 //! Auf dem Netz (FD ↔ SD) sieht ein Datensatz anders aus als im Volume:
 //! Vor den Nutzdaten steht ein eigener Kopf als Textzeile. Diese Köpfe sind
