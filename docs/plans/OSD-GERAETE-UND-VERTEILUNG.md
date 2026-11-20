@@ -141,7 +141,7 @@ So ergibt sich 3-2-1 ohne Copy-Job und ohne zweites Lesen des Clients: 3 ist das
 
 | # | Inhalt | Prüfung |
 | --- | --- | --- |
-| P0 | `bareos-format` und `onesimus-daemon` als gemeinsame Crates (ofd-Gutachten §5), osd-Schnittstelle (`crates/osd`) und Daemon (`crates/osd/daemon`) trennen | ofd und odir bauen unverändert |
+| P0 ✅ (20.11.2026) | `bareos-format` und `onesimus-daemon` als gemeinsame Crates (ofd-Gutachten §5), osd-Schnittstelle (`crates/osd`) und Daemon (`crates/osd/daemon`) trennen | ofd und odir bauen unverändert. Erledigt, siehe [P0 umgesetzt](#p0-umgesetzt-20112026) |
 | P1 | osd als Ersatz für bareos-sd mit **einem File-Device**: Label, Mount, Append, Read, Status, CatReq, Bareos-Volume-Format. Steuer- und Datenweg über **gRPC** (odir, ofd) und BNET (bareos-dir, bareos-fd) | Testgerüst Director+FD+SD (`onesimus-rig`): Backup und Restore mit odir+ofd über gRPC und mit bareos-fd über BNET. `bls` liest das Volume |
 | P2 | Verteiler mit Routen über File-Devices | Routing-Fälle im Rig, Restore über den MediaType |
 | P2b | Zweige (Branch): odir startet Haupt- und Zweig-Jobs, osd verteilt an beide, Katalogsätze je Zweig | Inc auf File, AI auf zweites File-Device; Restore aus jedem Zweig einzeln; ein gescheiterter Zweig bricht den anderen nicht ab; Konsolidierung des AI-Zweigs |
@@ -149,6 +149,34 @@ So ergibt sich 3-2-1 ohne Copy-Job und ohne zweites Lesen des Clients: 3 ist das
 | P4 | S3 | gegen einen lokalen S3 (z. B. MinIO im eigenen Podman-root, siehe Podman-Isolation) |
 | P5 | Striping | Backup über 2–3 File-Devices, Restore nur mit osd, bareos-sd lehnt den MediaType ab |
 | P6 | Band und Autochanger | `mhvtl` (virtuelles Band) im Rig |
+
+## P0 umgesetzt (20.11.2026)
+
+Commits auf `development` (lokal, nicht gepusht), in dieser Reihenfolge:
+
+| Commit | Inhalt |
+| --- | --- |
+| `8f308ed` | `bareos-format`: breg (aus ofd und odir zusammengeführt), Netz-Köpfe der Datensätze (`data_header`, `RecHdr`), `digest_name`; ofd und odir nutzen sie. Macht ofd und odir wieder baubar, nachdem `5cab9c8` die alten breg-Dateien versehentlich mitgelöscht hatte |
+| `09fc1c0` | neun Inline-Kopien von BashSpaces auf `bareos_format::bash`; D13 am Bareos-Quelltext geprüft |
+| `7c7277a` | `onesimus-daemon`: Accept-Schleife, TLS-PSK-Wahl, Director-Handshake, gRPC-TLS, Bandbreitengrenze; ofd nutzt sie |
+| `8a4b617` | osd: ein `connect_sd` (D12), echtes FileSet im SD-Job-Kommando (D11), `use storage` mit BashSpaces, Modulkommentar richtiggestellt |
+| `48eb9ed` | `bareos-config`: SD-Ressourcen (Storage, Director, Device, Messages, Autochanger) |
+| `46ece8b` | `crates/osd/daemon` (Paket `osd-daemon`, Programm `osd`): `-c -f -d -t -v`, `-t` prüft `bareos-sd.d`, sonst „osd: P1 pending“ (Exit 2); Paketierung `packaging/osd/` |
+| `9a91c53` | CI testet und dokumentiert osd und osd-daemon, README |
+
+Prüfung: `cargo test --workspace --exclude onesimus-rig` grün, 1255 Tests bestanden, 0 fehlgeschlagen, 34 ignoriert. `cargo doc --workspace --no-deps` ohne Fehler und ohne Namenskollision `osd` (M9).
+
+Schon am 19.11.2026 vorhanden (`b912a92`, `771a98d`): `bareos-format` mit LStat, Base64, Stream-IDs, `M_*`, BashSpaces und dem einen SD-Job-Formatierer; `onesimus-daemon` mit Logging, Signalen, PID-Datei, Hintergrund, Rechteabgabe und `-t`.
+
+Nach P1 verschoben, jeweils mit Grund:
+
+- **Hello mit `0x01` statt `'_'` (D13):** In P0 ändert sich kein Verhalten. Die Umstellung trifft jede Director-Verbindung zu FD und SD und braucht einen Lauf gegen bareos-sd/-fd im Gerüst.
+- **Teile von ofd, die zu eng verflochten sind:** Jobtabelle und passiver SD-Anschluss (`sd.rs`), der gRPC-Dienst mit Laufzeit (`grpc.rs` `start`), das Binden des Ports mit den FD-Fehlertexten. Dazu Signale, PID-Datei und `-k` in odir sowie dessen gRPC-TLS mit mDNS-Namen. Die Liste steht in der Crate-Doku von `onesimus-daemon`.
+- **Verbindungsaufbau „Client zum SD“ (`R_JOB`)** in der osd-Schnittstelle: Den braucht erst ein osd, der Daten annimmt.
+- **Storage-Name in `use storage`** aus `osd::job`: Die Job-Parameter tragen keinen Storage-Namen, es bleibt `File`. In `sd_copy` und `verify` ist der Name richtig.
+- **Unbekannte Direktiven in `bareos-sd.d`** werden noch nicht abgelehnt. bareos-sd lehnt sie ab.
+- **ofd nach `crates/ofd/daemon` und die Plugins verschieben** gehört nicht zu P0 (Vorgabe).
+- **Client-Connects zum FD** (sechs Varianten in odir) gehören zur ofd-Schnittstelle (Gutachten §6 Schritt 4), nicht zu P0.
 
 ## Offene Entscheidungen
 
