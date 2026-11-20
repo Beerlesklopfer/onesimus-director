@@ -15,8 +15,8 @@ Typ, enthält ein Glossar (`onesimus_rig::glossary`), ein Klassendiagramm
 
 | Teil | Programm | Port |
 |---|---|---|
-| Director | `target/debug/odir` aus dem Workspace (`--disable-grpc`) | 39391 |
-| File Daemon | `target/debug/ofd` aus dem Workspace (`--disable-grpc`) | 39392 |
+| Director | `target/debug/odir` aus dem Workspace (`--disable-grpc`: ohne eigenen gRPC-API-Server) | 39391 |
+| File Daemon | `target/debug/ofd` aus dem Workspace (`--disable-grpc`, außer mit `RigOptions::fd_grpc`) | 39392 |
 | Storage Daemon | `/usr/sbin/bareos-sd` 25 (austauschbar, siehe unten) | 39393 |
 | Katalog | eigener PostgreSQL-Cluster aus `initdb`, nur TCP auf `127.0.0.2` | 39394 |
 
@@ -65,6 +65,19 @@ Umgebungsvariablen:
 | `ONESIMUS_RIG_DDL` | anderes Katalogschema |
 | `ONESIMUS_RIG_NO_BUILD=1` | nicht vorher bauen, vorhandene Binaries nehmen |
 | `ONESIMUS_RIG_KEEP=1` | Gerüstverzeichnis (Konfiguration, Logs, Volumes) nach dem Lauf behalten |
+
+gRPC (P1 Stufe 3, `RigOptions::fd_grpc` und `sd_grpc`, Typ `Grpc`): `Off`
+(Vorgabe, wie bisher: der Daemon läuft mit `--disable-grpc`, die
+Director-Ressource ohne `Grpc Enable`), `On` (ofd mit `--grpc-listen
+127.0.0.1:<Basis+4>`, osd mit `Grpc Port = <Basis+5>` aus
+`sd/osd.d/storage/vsd.conf`, Client bzw. Storage im Director mit `Grpc
+Enable = yes`, Port, festgehaltenem Zertifikat aus dem Working Directory des
+Daemons und `Grpc Server Name = localhost`) und `Disabled` (Director wie
+`On`, Daemon mit `--disable-grpc`: der Director muss zurückfallen). Wo kein
+Daemon ein Zertifikat erzeugt (`Disabled`, bareos-sd), legt das Gerüst ein
+Ersatzzertifikat hin, damit der Director wirklich den gRPC-Port versucht.
+bareos-sd bekommt nie gRPC-Argumente. Die Interop-Matrix steht in
+`tests/osd_grpc.rs` (siehe [osd.md](osd.md#prüfen)).
 
 Logs eines Laufs (mit `ONESIMUS_RIG_KEEP=1`): `dir.log`, `fd.log`, `sd.log`,
 `pg.log` im Gerüstverzeichnis, dazu `dir-work/job.log`.

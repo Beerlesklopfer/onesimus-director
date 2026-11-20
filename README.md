@@ -36,12 +36,13 @@ Drop-in replacement for the Bareos Director daemon — independent project after
 |-------|------|-------------|
 | `odir` | Product | Director daemon binary |
 | `oconsole` | Product | `oconsole` — interactive console client |
-| `bareos-bnet` | Protocol | BNET wire protocol, TLS-PSK, CRAM-MD5 |
+| `bareos-bnet` | Protocol | BNET wire protocol, TLS-PSK, CRAM-MD5 (no tonic, no protos) |
+| `onesimus-bnet-grpc` | Protocol | BNET messages over gRPC with TLS: the one transport of odir, ofd and osd (`FileDaemon` and `StorageDaemon` Control/Data streams as Read/Write of BNET frames) |
 | `bareos-config` | Protocol | Bareos configuration parser |
 | `bareos-catalog` | Protocol | PostgreSQL catalog queries (sqlx) |
 | `bareos-orm` | Protocol | ORM + schema migration + codegen |
-| `osd` | Protocol | Storage Daemon interface: one SD connect (TLS-PSK, CRAM-MD5, checked OK-Hello), job command, `use storage`, CatReq relay, status |
-| `osd-daemon` | Product | `osd` — Onesimus Storage Daemon (`crates/osd/daemon`); P1 stage 2: backup, restore and verify over BNET on File devices in the Bareos volume format, active and passive clients, jobs over several volumes (docs/wiki/osd.md). Build/test with `-p osd-daemon` (`-p osd` is the interface only) |
+| `osd` | Protocol | Storage Daemon interface: one SD connect (gRPC first via the Director's dialer, else TLS-PSK; CRAM-MD5, checked OK-Hello), job command, `use storage`, CatReq relay, status |
+| `osd-daemon` | Product | `osd` — Onesimus Storage Daemon (`crates/osd/daemon`); P1 complete: backup, restore and verify on File devices in the Bareos volume format, active and passive clients, jobs over several volumes; gRPC with TLS to odir/ofd, BNET to bareos-dir/bareos-fd (docs/wiki/osd.md). Build/test with `-p osd-daemon` (`-p osd` is the interface only) |
 | `osd-ring` | Protocol | Shared-memory block ring of osd (`crates/osd/ring`): one producer, N device writers, cross-process wait/wake, mailbox |
 | `bareos-format` | Protocol | Bareos stream and volume format shared by odir, ofd and osd: stream IDs, record headers, volume blocks (BB02, CRC-32), volume and session labels, LStat, Bareos Base64, digests, `M_*`, BashSpaces, `regexwhere` (breg), SD job command |
 | `onesimus-daemon` | Protocol | Common daemon frame of ofd and osd: accept loop, TLS-PSK, Director handshake, gRPC TLS, bandwidth limit, logging, signals, PID file, privileges, `-t` |

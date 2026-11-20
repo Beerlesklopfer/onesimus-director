@@ -359,6 +359,43 @@ Nachtrag vom 20.11.2026. Der Text oben bleibt unverändert. Umgesetzt ist Phase 
 
 ~~**Nebenbefund:** Commit „chore(proto): Submodul auf 3302131“ enthielt außer dem Submodul die Löschung von `crates/odir/src/breg.rs` und `crates/ofd/src/breg.rs` (von einem abgebrochenen Agenten vorgemerkt), dazwischen bauten odir und ofd nicht.~~ Behoben vor dem Push (20.11.2026): die Löschungen liegen jetzt in `dac4237`, `9ff7efc` enthält nur das Submodul; jeder Commit baut.
 
+## §6.B Amendment 2026-11-20 — bareos-bnet tonic-frei (Schritt 3), osd P1 Stufe 3
+
+Nachtrag vom 20.11.2026. Der Text oben bleibt unverändert. Stand `a891380`
+und folgende (Plan, Abschnitt „P1 Stufe 3 umgesetzt“).
+
+**Schritt 3 erledigt, mit anderem Ziel-Crate.** `fd_grpc` (`connect`,
+`pair`, `ControlIo`) und die Strompumpe aus `ofd/src/grpc.rs` liegen jetzt
+im neuen Crate `onesimus-bnet-grpc`, nicht in einer ofd-Schnittstelle: Seit
+osd P1 Stufe 3 nutzen FD- und SD-Wege denselben Transport
+(`onesimus.filed.FileDaemon` und `onesimus.stored.StorageDaemon`, je
+`Control` und `Data`); nach der Grundregel von §5 („Was ofd **und** osd
+brauchen, kommt in ein neutrales Crate“) gehört er nicht zu einer Seite.
+`AnyStream::Grpc` ist durch `AnyStream::External(Box<dyn ExternalStream>)`
+ersetzt (Trait statt Enum-Variante, wie in §5 Punkt 1 vorgeschlagen).
+
+**Fakt (gemessen 20.11.2026):** `cargo tree -p bareos-bnet -i tonic` →
+„package ID specification `tonic` did not match any packages“ (kein Pfad); `cargo tree -p bareos-bnet -i onesimus-proto-rs` →
+ebenso leer. `bareos-bnet` hängt nicht mehr an tokio, tonic, tokio-stream,
+flume und onesimus-proto-rs. Das Proto des SD (§5 Punkt 5,
+„später `-stored`“) ist `stored_service.proto` in onesimus-proto, noch im
+gemeinsamen Crate `onesimus-proto-rs` gebaut; die Aufteilung der
+Proto-Crates bleibt offen.
+
+**Zwei Defekte im gRPC-Weg, behoben:**
+
+- **D17 – Job-Worker von odir sprachen nie gRPC.** Ein Worker schließt
+  nach `fork()` die Deskriptoren 3..1024, darunter tokios prozessweite
+  Signal-Pipe; jede tokio-Laufzeit mit I/O klont sie. Gemessen im Gerüst:
+  „FD 127.0.0.1:39515: Bad file descriptor (os error 9); falling back to
+  BNET“ in jedem Backup-, Restore- und Verify-Worker. Behoben in
+  `4d78e62` (`job_worker::reserve_tokio_signal_fds`); Beleg: Interop-Matrix
+  `crates/onesimus-rig/tests/osd_grpc.rs`.
+- **D18 – ein abgebrochener gRPC-Strom drehte sich endlos.** `ControlIo`
+  meldete Abbruch mit `ErrorKind::Interrupted`; `read_exact` wiederholt
+  diese Art sofort. Jetzt `ConnectionAborted`
+  (`onesimus_bnet_grpc::io::tests::close_handle_breaks_a_blocked_read`).
+
 ---
 
 ## §7 Defekte (Liste)

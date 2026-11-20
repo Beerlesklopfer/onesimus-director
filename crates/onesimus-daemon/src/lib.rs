@@ -13,12 +13,15 @@
 //!
 //! **Folgt in P1** (zu eng mit ofd verflochten, bleibt vorerst dort):
 //! die Tabelle laufender Jobs und der passive SD-Anschluss
-//! (`ofd/src/sd.rs` `JobShared`, `handle_stored_connection`), der
-//! gRPC-Dienst selbst mit Laufzeit und Sitzungsgrenze (`ofd/src/grpc.rs`
-//! `start`), das Binden des Ports mit den Fehlertexten der FD-Konfiguration
+//! (`ofd/src/sd.rs` `JobShared`, `handle_stored_connection`), das Binden des Ports mit den Fehlertexten der FD-Konfiguration
 //! (`ofd/src/accept.rs` `accept_loop`), die TLS-Fassung des Directors
 //! (`odir/src/grpc/tls.rs`, mit mDNS-Namen) sowie Signale, PID-Datei und
 //! `-k` in odir.
+//!
+//! Der gRPC-Server mit Laufzeit und Strompumpe (früher `ofd/src/grpc.rs`
+//! `start`) liegt seit 20.11.2026 in `onesimus-bnet-grpc` (`server::spawn`,
+//! `server::accept`), gemeinsam für ofd und osd; hier bleibt die
+//! TLS-Einstellung ([`grpc_tls`]).
 //!
 //! Datenfluss eines Starts (Reihenfolge, wie `main` sie aufruft):
 //!

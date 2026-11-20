@@ -1,8 +1,10 @@
 # Onesimus File Daemon
 
 `ofd` steuert Backup, Restore, Estimate und Verify. Die Verbindung zum
-Director kann über gRPC laufen. Die Datenverbindung zum Storage Daemon bleibt
-BNET. Die vorhandene BNET-Steuerverbindung bleibt **immer als Fallback** erhalten.
+Director kann über gRPC laufen, ebenso seit P1 Stufe 3 die Datenverbindung zu
+einem Onesimus Storage Daemon (osd, [osd.md](osd.md#transporte-grpc-und-bnet)).
+Zu einem bareos-sd bleibt sie BNET. Die vorhandenen BNET-Wege bleiben **immer
+als Fallback** erhalten.
 
 ## Verbindung und Fallback
 
@@ -12,8 +14,25 @@ flowchart LR
     D -->|Fallback: BNET mit TLS-PSK| B[ofd BNET-Port]
     G --> E[gemeinsame Job-Engine]
     B --> E
-    E <-->|Backup- und Restore-Daten: BNET| S[Storage Daemon]
+    E <-->|Daten zu osd: gRPC StorageDaemon/Data bzw. FileDaemon/Data| O[osd]
+    E <-->|Daten zu bareos-sd und Fallback: BNET| S[Storage Daemon]
 ```
+
+**Datenverbindung zu osd:** Laufen die Steuerverbindungen des Directors zu
+ofd und zu osd beide über gRPC, hängt odir an `storage address=…` die
+gRPC-Angaben des osd (`grpcport=… grpcname=… grpcca=…`); ofd ruft dann
+`onesimus.stored.StorageDaemon/Data` an (aktiver Client) und fällt bei jedem
+Fehler auf BNET zurück. Beim passiven Client (`Passive = yes`) ruft osd ofd
+über `onesimus.filed.FileDaemon/Data` an; dieser RPC nimmt nur
+`Hello Storage calling Start Job <Job>` an. Log-Zeilen: „Connected Storage
+daemon at … over gRPC TLS|BNET“ bzw. „Storage daemon connects over gRPC
+(passive client)“.
+
+Bis 20.11.2026 fiel jeder Job-Worker des Directors still auf BNET zurück:
+Der Worker schließt nach `fork()` die geerbten Deskriptoren, darunter die
+Signal-Pipe von tokio, die jede gRPC-Laufzeit braucht („Bad file
+descriptor“). Seitdem behält der Worker sie; Backup, Restore und Verify
+laufen wirklich über gRPC (Beleg: Gerüst-Tests `tests/osd_grpc.rs`).
 
 Für einen Client mit `Grpc Enable = yes` versucht der Director zuerst gRPC.
 Scheitern Verbindung, Zertifikatsprüfung, Service-Aufruf oder gegenseitige
@@ -32,7 +51,10 @@ Die bestehende gegenseitige Hello-/CRAM-Anmeldung läuft innerhalb der TLS-
 geschützten Sitzung. Die gemeinsame Job-Engine erhält lokal dieselben Nachrichten
 wie bisher. Auch binäre Restore-Objekte behalten ihre Nachrichtengrenzen.
 Monitor-Directors dürfen weiterhin nur die dafür freigegebenen Befehle nutzen.
-Der Proto-Vertrag steht in [filed_service.proto](../../proto/filed_service.proto).
+Der Proto-Vertrag steht in [filed_service.proto](../../proto/filed_service.proto)
+(`Control` für den Director, `Data` für osd beim passiven Client), der des
+Storage Daemons in [stored_service.proto](../../proto/stored_service.proto).
+Der Transport ist das Crate `onesimus-bnet-grpc`.
 
 ## File Daemon starten
 

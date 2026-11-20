@@ -186,7 +186,7 @@ FD ─ Netz ─► Empfänger (schreibt) ─► /dev/shm/osd-<JobId>.ring ─┬
 | # | Inhalt | Prüfung |
 | --- | --- | --- |
 | P0 ✅ (20.11.2026) | `bareos-format` und `onesimus-daemon` als gemeinsame Crates (ofd-Gutachten §5), osd-Schnittstelle (`crates/osd`) und Daemon (`crates/osd/daemon`) trennen | ofd und odir bauen unverändert. Erledigt, siehe [P0 umgesetzt](#p0-umgesetzt-20112026) |
-| P1 (Stufe 1 ✅, Stufe 2 ✅ 20.11.2026) | osd als Ersatz für bareos-sd mit **einem File-Device**: Label, Mount, Append, Read, Status, CatReq, Bareos-Volume-Format. Steuer- und Datenweg über **gRPC** (odir, ofd) und BNET (bareos-dir, bareos-fd). Stufe 1: Backup über BNET, aktiver und passiver Client, Datenweg über den Ring; Stufe 2: Lesen/Restore; Stufe 3: gRPC | Testgerüst Director+FD+SD (`onesimus-rig`): Backup und Restore mit odir+ofd über gRPC und mit bareos-fd über BNET. `bls` liest das Volume. Stufe 1 erledigt, siehe [P1 Stufe 1 umgesetzt](#p1-stufe-1-umgesetzt-20112026); Stufe 2 erledigt, siehe [P1 Stufe 2 umgesetzt](#p1-stufe-2-umgesetzt-20112026) |
+| P1 ✅ (20.11.2026; Stufen 1, 2, 3) | osd als Ersatz für bareos-sd mit **einem File-Device**: Label, Mount, Append, Read, Status, CatReq, Bareos-Volume-Format. Steuer- und Datenweg über **gRPC** (odir, ofd) und BNET (bareos-dir, bareos-fd). Stufe 1: Backup über BNET, aktiver und passiver Client, Datenweg über den Ring; Stufe 2: Lesen/Restore; Stufe 3: gRPC | Testgerüst Director+FD+SD (`onesimus-rig`): Backup und Restore mit odir+ofd über gRPC und mit bareos-fd über BNET. `bls` liest das Volume. Erledigt, siehe [Stufe 1](#p1-stufe-1-umgesetzt-20112026), [Stufe 2](#p1-stufe-2-umgesetzt-20112026), [Stufe 3](#p1-stufe-3-umgesetzt-20112026); was bleibt: [Nach P1](#nach-p1-offen) |
 | P2 | Verteiler mit Routen über File-Devices | Routing-Fälle im Rig, Restore über den MediaType |
 | P2b | Zweige (Branch): odir startet Haupt- und Zweig-Jobs, osd verteilt an beide, Katalogsätze je Zweig | Inc auf File, AI auf zweites File-Device; Restore aus jedem Zweig einzeln; ein gescheiterter Zweig bricht den anderen nicht ab; Konsolidierung des AI-Zweigs |
 | P3 | Wechselplatten und Device-Watcher | Rig mit Loop-Device, Ein- und Abziehen simuliert |
@@ -284,13 +284,116 @@ Belege (Gerüst, 20.11.2026, odir + ofd `--disable-grpc` + osd; `bareos-fd` ist 
 
 Prüfung: `cargo test --workspace --exclude onesimus-rig` grün, 1357 Tests bestanden, 0 fehlgeschlagen, 35 ignoriert; neu sind bareos-format 12 (Bootstrap, Zusammensetzen über Volumes, Sitzungen), osd-ring 1 (Gegenrichtung), osd-daemon 4 (Filter, Job über zwei Volumes, falsches Volume), onesimus-rig 1 (`compare_trees`) und 2 neue Gerüst-Tests (aus den beiden Backup-Tests wurden Backup-und-Restore-Tests).
 
-Offen für **Stufe 3** (gRPC):
+Stufe 3 (gRPC) ist erledigt, siehe [P1 Stufe 3 umgesetzt](#p1-stufe-3-umgesetzt-20112026); was aus den Stufen 1–3 offen bleibt, steht in [Nach P1](#nach-p1-offen).
 
-- Zweite Umsetzung von `transport::Channel` über `onesimus-proto-stored` zu odir und ofd, für Schreiben und Lesen; Onesimus-Erweiterungen nur dort.
-- Der Lesepfad schickt heute je Datensatz `rechdr` und Daten als zwei BNET-Nachrichten; über gRPC sollte ein Datensatz eine Nachricht sein (Kopf als Felder).
-- Medien-Ereignisse (D-7) und Stripe-Angaben brauchen Proto-Felder.
+## P1 Stufe 3 umgesetzt (20.11.2026)
 
-Weiter offen aus Stufe 1 und 2 (siehe Abweichungen in der Wiki): Warten auf ein Volume beim Schreiben (`JS_WaitMedia`, `mount`) und beim Lesen (Mount-Anforderung statt Abbruch), ein anderes Device beim Lesen, wenn der MediaType des Bootstraps nicht passt, Recycling und `relabel`, Spooling, Bandbreite, mehrere Jobs je Device (getrennte Lese-/Schreibzählung), Hintergrundbetrieb/PID-Datei, die übrigen bareos-sd-Befehle (`autochanger`, `readlabel`, `resolve` …), Copy/Migration (SD-zu-SD, `replicate`), die macOS-/Windows-Teile des Ring, Striping im Ring (Verbraucher k liest Fach ≡ k mod N; beim Lesen setzt die Netzsitzung nach Folgenummer zusammen).
+gRPC mit TLS ist der Hauptweg zwischen odir/ofd und osd, BNET der
+Rückfall, genau wie odir ↔ ofd (Grundsatz). Anleitung:
+[`docs/wiki/osd.md`, Transporte](../wiki/osd.md#transporte-grpc-und-bnet).
+
+- **Proto** (onesimus-proto, nicht gepusht): Zweig `stored` von `origin/main`
+  (`aad8995`; das lokale `main` stand einen Commit dahinter), Commit
+  `52e108b`: `stored_service.proto` mit `service StorageDaemon { rpc
+  Control(stream StoredFrame) returns (stream StoredFrame); rpc Data(…) }`;
+  `StoredFrame` hat die Felder von `filed.ControlFrame` (`bytes payload = 1`,
+  `int32 signal = 2`), eine BNET-Nachricht je Rahmen. `FileDaemon` bekommt
+  `Data` für die Verbindung eines osd zum passiven Client (FileDaemon hat
+  sonst nur `Control`, also keine weiteren RPCs zu spiegeln). Zusammengeführt
+  in `development` als `c23483b` (`--no-ff`).
+- **Transport:** neues Crate `onesimus-bnet-grpc` statt einer Kopie von
+  `fd_grpc`: `ControlIo` (Strom als `Read`/`Write` von BNET-Rahmen),
+  Client für die vier Ströme, Serverseite für ofd und osd, `Target` mit den
+  gRPC-Angaben als Befehls-Token. `bareos-bnet` ist dadurch frei von tonic,
+  tokio und Protos (Gutachten §5 Punkt 1, Amendment §6.B). Ein neutrales
+  Crate statt der ofd-Schnittstelle, weil FD- und SD-Wege es teilen.
+- **Anmeldung** wie odir ↔ ofd: TLS mit dem beim ersten Start erzeugten
+  selbstsignierten Zertifikat des Daemons (`onesimus-sd-grpc.crt`, stabil
+  über Neustarts), im Director festgehalten mit `Grpc CA Certificate File`
+  und geprüft mit `Grpc Server Name`; danach Hello und CRAM-MD5 im Strom
+  (Storage-Passwort bzw. Job-Schlüssel).
+- **osd:** gRPC-Port neben dem SD-Port (`osd.d` `Grpc Enable`/`Grpc Port`/
+  `Grpc Address`, Vorgabe `SD Port` + 1000; `--disable-grpc`,
+  `--grpc-listen`, `--grpc-cert`/`--grpc-key` wie ofd). Ein Strom ist die
+  zweite Umsetzung von `transport::Channel`; Steuer- und Datenweg, Schreiben
+  und Lesen, aktiv und passiv laufen durch denselben Code.
+- **odir:** Storage mit `Grpc Enable = yes` (dieselben Direktiven wie am
+  Client) wird zuerst über `StorageDaemon/Control` angesprochen, in
+  Job-Pfaden mit dem vor dem `fork` festgehaltenen Ziel, in Befehlswegen
+  über einen gRPC-Wähler in `osd::connect`. Jeder Fehler wird protokolliert
+  und fällt auf BNET mit den bisherigen SD-Fehlertexten zurück; ohne
+  `Grpc Enable` kein Versuch. Job-Kommando, CatReq-Weiterleitung und
+  `status storage` laufen unverändert im Strom.
+- **ofd/osd Datenweg:** Laufen beide Steuerverbindungen über gRPC, gibt
+  odir die gRPC-Angaben der Gegenseite im Befehl mit (`storage address=…`
+  an ofd, `passive client …` an osd); ofd ruft `StorageDaemon/Data`, osd
+  ruft `FileDaemon/Data`, jeweils mit BNET-Rückfall.
+- **Nebenbefund, behoben:** Job-Worker von odir schließen nach `fork()` die
+  geerbten Deskriptoren, darunter tokios Signal-Pipe; jeder gRPC-Aufbau im
+  Worker scheiterte deshalb („Bad file descriptor“), auch zu ofd, und fiel
+  still auf BNET zurück. Ebenso drehte sich ein abgebrochener gRPC-Strom
+  endlos in `read_exact` (Fehlerart `Interrupted`).
+
+Commits auf `development` (lokal, nicht gepusht), in dieser Reihenfolge:
+
+| Commit | Inhalt |
+| --- | --- |
+| `5c33957` | Submodul `proto` auf `c23483b` |
+| `9649ac7` | `bareos-config`: `osd.d` `Grpc Enable`, `Grpc Port`, `Grpc Address` |
+| `a891380` | `onesimus-bnet-grpc`; `onesimus-proto-rs` baut `stored_service.proto`; `bareos-bnet` ohne tonic; ofd: `FileDaemon/Data`, Client zu `StorageDaemon/Data` |
+| `ccd9460` | `osd-daemon`: `StorageDaemon`-Dienst, passiver Client über gRPC, `--disable-grpc` |
+| `1983776` | odir und `osd::connect`: Storage über gRPC zuerst, gRPC-Angaben für die Datenverbindung |
+| `4d78e62` | odir: Worker behalten tokios Signal-Pipe |
+| `44b6a38` | `onesimus-bnet-grpc`: Fehlerursache vollständig im Log |
+| `98e7edc` | `onesimus-rig`: `RigOptions::fd_grpc`/`sd_grpc`, Interop-Matrix `tests/osd_grpc.rs`, `tests/osd.rs` auf gRPC |
+| dieser Commit | Wiki, Testgerüst, dieser Abschnitt, Gutachten-Amendment |
+
+Belege (Gerüst, 20.11.2026; `bareos-fd` ist nicht installiert):
+
+- `tests/osd_grpc.rs` mit osd: 6 von 6, je Backup, Verify („Verify OK“) und Restore (`diff -r` rc=0). Transporte laut Log:
+  - (a) aktiv: odir „SD 127.0.0.1:39516: connected over gRPC TLS“, osd „Director connects over gRPC TLS“, odir „FD 127.0.0.1:39515: connected over gRPC TLS“, ofd „Connected Storage daemon at 127.0.0.1:39516 over gRPC TLS“, osd „File daemon of job VBackup… connects over gRPC TLS“; Job-Log „Connected Storage daemon at 127.0.0.1:39513, encryption: gRPC TLS“.
+  - (a) passiv: osd „VBackup…: connected to File daemon 127.0.0.1:39525 over gRPC TLS (passive client)“, ofd „Storage daemon connects over gRPC (passive client)“.
+  - (b) osd `--disable-grpc`: odir „SD 127.0.0.1:39536: transport error: tcp connect error: Connection refused (os error 111); falling back to BNET on port 39533“, osd „Director connects over BNET“, ofd „Connected Storage daemon at 127.0.0.1:39533 over BNET“; passiv osd „connected to File daemon 127.0.0.1:39542 over BNET (passive client)“. Director ↔ FD bleibt gRPC.
+  - (c) ofd `--disable-grpc`: odir „FD 127.0.0.1:39555: … Connection refused …; falling back to BNET on port 39552“, Director ↔ SD gRPC, FD ↔ SD BNET (aktiv und passiv).
+- (d) `ONESIMUS_RIG_SD=/usr/sbin/bareos-sd`: `tests/osd_grpc.rs` 6 von 6 (odir „SD …: … Connection refused …; falling back to BNET“, ofd über BNET), `tests/osd.rs` 4 von 4, `tests/rig.rs` 5 von 5.
+- `tests/osd.rs` mit osd (jetzt auf gRPC): 4 von 4; im gemischten Test laufen die bareos-sd-Abschnitte über TLS-PSK, der osd-Abschnitt über gRPC („Connected Storage daemon at 127.0.0.1:39506, encryption: gRPC TLS“ vom FD). `tests/rig.rs` mit `ONESIMUS_RIG_SD=$PWD/target/debug/osd`: 5 von 5.
+
+Prüfung: `cargo test --workspace --exclude onesimus-rig` grün, 1364 Tests bestanden, 0 fehlgeschlagen, 35 ignoriert; neu sind onesimus-bnet-grpc 6, bareos-config 1 (`osd.d` gRPC), osd-daemon 1 (gRPC-Port, Pinning, `--disable-grpc`), odir 1 (`sd_grpc`); 6 neue Gerüst-Tests. `cargo doc --no-deps --document-private-items` der neuen Crates ohne Warnung.
+
+## Nach P1 (offen)
+
+Aus den Stufen 1–3 zusammengeführt, mit Grund:
+
+- **gRPC-Erweiterungen von Onesimus:** Zweige (Branch), Medien-Ereignisse
+  (D-7) und Stripe-Angaben als typisierte Nachrichten in
+  `stored_service.proto` (Grundsatz: nur über gRPC). Nicht Teil von P1.
+- **Datensatz als eine gRPC-Nachricht:** Der Lesepfad schickt je
+  Datensatz `rechdr` und Daten als zwei Nachrichten, über gRPC wie über
+  BNET; ein Datensatz je Nachricht mit dem Kopf als Feldern spart eine
+  Nachricht und das Parsen.
+- **Copy/Migration und VirtualFull** (SD-zu-SD, `replicate`): osd kann sie
+  nicht; odir spricht den SD dafür nur über BNET an (`StorageUse::grpc`
+  bleibt dort leer).
+- **Zertifikat in `osd.d`:** ofd und osd nehmen ein eigenes Zertifikat nur
+  über `--grpc-cert`/`--grpc-key`; eine Direktive fehlt.
+- **Verbindungsaufbau „Client zum SD“** (ofd `sd.rs`, BNET und gRPC) liegt
+  noch in ofd; nach Gutachten §5 gehört er in die osd-Schnittstelle.
+- **Warten auf ein Volume:** beim Schreiben (`JS_WaitMedia`, `mount`) und
+  beim Lesen (Mount-Anforderung statt Abbruch).
+- **Anderes Device beim Lesen**, wenn der MediaType des Bootstraps nicht
+  passt.
+- **Recycling und `relabel`**, Spooling, Bandbreite (`setbandwidth` wird
+  nur beantwortet), mehrere Jobs je Device (getrennte Lese-/Schreibzählung).
+- **Hintergrundbetrieb, PID-Datei**, `-u`/`-g` für osd.
+- **Übrige bareos-sd-Befehle:** `autochanger`, `readlabel`, `resolve`,
+  `listen`, `nextrun`, `finish`, `setdevice`, `stats`.
+- **Ring:** macOS- und Windows-Teile; Striping im Ring (Verbraucher k liest
+  Fach ≡ k mod N, beim Lesen setzt die Netzsitzung nach Folgenummer
+  zusammen).
+- **Unbekannte Direktiven in `bareos-sd.d`** werden noch nicht abgelehnt
+  (aus P0); dazu die weiteren Punkte unter „Nach P1 verschoben“ im
+  Abschnitt P0 (Hello mit `0x01`, ofd-Verschiebung, Client-Connects zum
+  FD).
 
 ## Entscheidungen (Maintainer, 20.11.2026)
 
