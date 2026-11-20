@@ -486,22 +486,41 @@ async fn ensure_schemas(pool: &sqlx::PgPool, schema: &CatalogSchema) -> Result<(
             if let Err(e) = sqlx::query(&format!("CREATE SCHEMA IF NOT EXISTS {}", quote_ident(&name)))
                 .execute(pool).await
             {
+                let (db, user) = connection_identity(pool).await;
                 return Err(OrmError::Other(format!(
-                    "schema v{}: cannot create schema {name}: {e} (the catalog user needs \
-                     GRANT CREATE ON DATABASE <catalog> TO <user>, or a superuser creates it: \
-                     CREATE SCHEMA {name} AUTHORIZATION <user>)", schema.version)));
+                    "schema v{}: cannot create schema {name} in database {db}: {e} (one of: \
+                     GRANT CREATE ON DATABASE {db} TO {user}; or as superuser in database {db}: \
+                     CREATE SCHEMA {name} AUTHORIZATION {user};)", schema.version)));
             }
             info!("created schema {name}");
         }
         let may_create: bool = sqlx::query_scalar("SELECT has_schema_privilege($1, 'CREATE')")
             .bind(&name).fetch_one(pool).await?;
         if !may_create {
+            let (db, user) = connection_identity(pool).await;
             return Err(OrmError::Other(format!(
-                "schema v{}: the catalog user may not create objects in schema {name} \
-                 (GRANT CREATE, USAGE ON SCHEMA {name} TO <user>)", schema.version)));
+                "schema v{}: {user} may not create objects in schema {name} of database {db} \
+                 (in database {db}: GRANT CREATE, USAGE ON SCHEMA {name} TO {user};)", schema.version)));
         }
     }
     Ok(())
+}
+
+/// Database and role of the connection (`current_database()`,
+/// `current_user`, i.e. DbName and DbUser of the Catalog resource as the
+/// server sees them), quoted as identifiers for the repair statements of a
+/// message. A catalog's own values, never a fixed `bareos`: a Director may
+/// have several catalogs.
+async fn connection_identity(pool: &sqlx::PgPool) -> (String, String) {
+    let row: Option<(String, String)> = sqlx::query_as("SELECT current_database()::text, current_user::text")
+        .fetch_optional(pool).await.ok().flatten();
+    let (db, user) = row.unwrap_or_else(|| ("<database>".into(), "<catalog user>".into()));
+    let ident = |name: &str| {
+        let plain = name.chars().next().is_some_and(|c| c.is_ascii_lowercase() || c == '_')
+            && name.chars().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_');
+        if plain { name.to_string() } else { quote_ident(name) }
+    };
+    (ident(&db), ident(&user))
 }
 
 /// Move the objects of [`CatalogSchema::relocate`] from the default schema

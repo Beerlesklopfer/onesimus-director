@@ -426,21 +426,30 @@ fn main() {
     let catalog_options = config.catalogs.first().map(check_catalog::connect_options);
 
     // Schema extension (views and functions of the Onesimus schema files)
-    if let Some(ref options) = catalog_options {
-        let cat = config.catalogs.first().unwrap();
-
-        // Schema directory: next to the build tree (dev) or where the package installs it
-        let schema_dir = commands::catalog::schema_dir();
-
-        if schema_dir.exists() {
-            let migrator = bareos_orm::migration::Migrator::new(&schema_dir);
-            let rt = tokio::runtime::Runtime::new().unwrap();
+    // in every catalog: each Catalog resource is its own database with
+    // its own Onesimus objects. Resources naming the same database
+    // (address, port, name) are migrated once.
+    let schema_dir = commands::catalog::schema_dir();
+    if !config.catalogs.is_empty() && !schema_dir.exists() {
+        debug!("no schema directory found at {}, skipping migration", schema_dir.display());
+    } else if !config.catalogs.is_empty() {
+        let migrator = bareos_orm::migration::Migrator::new(&schema_dir);
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        let mut done: Vec<(String, u16, String)> = Vec::new();
+        for cat in &config.catalogs {
+            let target = (cat.db_address.clone(), cat.db_port, cat.db_name.clone());
+            if done.contains(&target) {
+                debug!("catalog '{}': database {} already migrated", cat.name, cat.db_name);
+                continue;
+            }
+            done.push(target);
+            let options = check_catalog::connect_options(cat);
             // Migration, then self-heal of the Onesimus objects on the same
             // connection (bareos_orm::heal; never ends the start).
             let (migrated, healed) = rt.block_on(async {
                 let pool = match sqlx::postgres::PgPoolOptions::new()
                     .max_connections(1)
-                    .connect_with(options.clone()).await
+                    .connect_with(options).await
                 {
                     Ok(pool) => pool,
                     Err(e) => return (Err(bareos_orm::OrmError::from(e)), None),
@@ -451,15 +460,14 @@ fn main() {
                 (migrated, Some(healed))
             });
             match migrated {
-                Ok(0) => info!("catalog '{}' schema up to date", cat.db_name),
-                Ok(n) => info!("catalog '{}': applied {} schema migration(s)", cat.db_name, n),
-                Err(e) => warn!("catalog migration failed: {e} (continuing without the schema extension)"),
+                Ok(0) => info!("catalog '{}' (database {}): schema up to date", cat.name, cat.db_name),
+                Ok(n) => info!("catalog '{}' (database {}): applied {} schema migration(s)", cat.name, cat.db_name, n),
+                Err(e) => warn!("catalog '{}' (database {}): migration failed: {e} (continuing without the schema extension)",
+                    cat.name, cat.db_name),
             }
             if let Some(report) = healed {
-                log_heal_report(&cat.db_name, &report);
+                log_heal_report(&cat.name, &report);
             }
-        } else {
-            debug!("no schema directory found at {}, skipping migration", schema_dir.display());
         }
     }
 

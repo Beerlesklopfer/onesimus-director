@@ -128,10 +128,18 @@ Stufen:
   onesimus`, die Stufe wird **nicht** eingetragen, die Objekte bleiben in
   `public`, odir läuft weiter (Katalog-ACL nur aus Dateien,
   `fn_find_latest_backup` über die eingebaute Abfrage) und versucht es beim
-  nächsten Start erneut. Abhilfe (eine von beiden):
-  `GRANT CREATE ON DATABASE bareos TO bareos;` oder als Superuser
-  `CREATE SCHEMA onesimus AUTHORIZATION bareos;` (ein vorhandenes Schema
-  legt odir nicht neu an und braucht dann das Datenbankrecht nicht).
+  nächsten Start erneut. Die Meldung nennt die Abhilfe mit den Werten
+  **dieses** Katalogs (Datenbank und Benutzer der Verbindung, also
+  `DbName`/`DbUser` der Catalog-Ressource), eine von beiden:
+  `GRANT CREATE ON DATABASE <DbName> TO <DbUser>;` oder als Superuser in
+  der Datenbank `<DbName>`: `CREATE SCHEMA onesimus AUTHORIZATION <DbUser>;`
+  (ein vorhandenes Schema legt odir nicht neu an und braucht dann das
+  Datenbankrecht nicht).
+- **Mehrere Kataloge:** odir migriert und heilt beim Start **jede**
+  Catalog-Ressource, jede in ihrer eigenen Datenbank; Ressourcen auf
+  dieselbe Datenbank (Adresse, Port, Name) nur einmal. Die Journalzeilen
+  nennen Katalog und Datenbank. Die Katalog-ACL (`onesimus.console_acl`)
+  liest odir aus dem ersten Katalog, wie alle Director-weiten Daten.
 
 Zugriff aus odir: Onesimus-Objekte werden **qualifiziert** angesprochen
 (`onesimus.console_acl`, `onesimus.fn_find_latest_backup(…)`); der

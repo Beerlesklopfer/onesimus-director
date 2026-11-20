@@ -378,6 +378,9 @@ async fn missing_create_privilege_fails_without_recording() {
         let migrator = Migrator::new(&schema_dir());
         let error = migrator.migrate(&pool).await.expect_err("no CREATE on the database");
         assert!(error.to_string().contains("cannot create schema onesimus"), "{error}");
+        // The repair statements name this catalog's database and user, not a fixed "bareos".
+        assert!(error.to_string().contains(&format!("GRANT CREATE ON DATABASE {} TO {role};", db.name)), "{error}");
+        assert!(error.to_string().contains(&format!("CREATE SCHEMA onesimus AUTHORIZATION {role};")), "{error}");
         assert_eq!(sqlx::query_scalar::<_, i32>("SELECT MAX(version) FROM bareos_schema_version").fetch_one(&pool).await?, 2252);
         assert_eq!(onesimus_objects_in(&pool, "public").await?.len(), OBJECTS.len());
 
