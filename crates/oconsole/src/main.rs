@@ -9,6 +9,7 @@ compile_error!("MCP production and development policies are mutually exclusive; 
 compile_error!("Select an MCP policy: mcp-production (default) or mcp-development");
 
 mod color;
+mod grammar;
 
 // Keep all console stdout/stderr decoration under the same NO_COLOR policy.
 macro_rules! print { ($($arg:tt)*) => { std::print!("{}", crate::color::output(&format!($($arg)*))) }; }
@@ -641,6 +642,14 @@ trait DirectorConn: Send {
 
     /// Send a signal string (e.g. "." for cancel).
     fn send_cancel(&mut self);
+
+    /// The reply of `cmd` in JSON (API mode 2), as text.
+    fn query_json(&mut self, cmd: &str) -> String {
+        self.query(".api 2");
+        let lines = self.query(cmd);
+        self.query(".api 0");
+        lines.join("\n")
+    }
 }
 
 /// Result from recv_msg
@@ -722,202 +731,95 @@ impl<S: std::io::Read + std::io::Write + Send> DirectorConn for BnetConn<S> {
     }
 }
 
-/// Parsed command entry from Director's .help response.
-struct CmdEntry {
-    name: String,
-    description: String,
-    usage: String,
-    /// Static completions from arguments field (bare keywords with !, key= args)
-    completions: Vec<String>,
-    /// Dot-command to query Director for dynamic values (e.g. ".clients" for client=)
-    /// Maps: argument key → dot-command
-    live_queries: Vec<(String, String)>,
-}
-
-/// rustyline Helper with tab-completion (from Director .help) and syntax coloring.
-/// Holds a shared reference to the Director connection for live queries.
+/// rustyline Helper: completion, fish-style suggestions and coloring from the
+/// Director's console grammar ([`grammar`]).
 struct BareosHelper {
-    /// Commands loaded from Director via .help at session start
-    entries: Vec<CmdEntry>,
+    /// The grammar: from `.grammar`, else rebuilt from `.help`
+    grammar: grammar::Grammar,
     rate_guard: rate_guard::CommandRateGuard,
-            /// Cached values from Director for tab-completion (loaded at connect)
+    /// Cached values from Director for tab-completion (loaded at connect)
     /// Maps: dot-command → list of values (e.g. ".clients" → ["bareos-fd", "remote-fd"])
-    value_cache: std::collections::HashMap<String, Vec<String>>,
+    value_cache: grammar::ValueCache,
+    /// Lines the Director refused in this session: never suggested
+    failed: Vec<String>,
 }
 
 impl BareosHelper {
     fn new() -> Self {
         Self {
-            entries: Vec::new(),
+            grammar: grammar::Grammar::default(),
             rate_guard: rate_guard::CommandRateGuard::default(),
-            value_cache: std::collections::HashMap::new(),
+            value_cache: grammar::ValueCache::new(),
+            failed: Vec::new(),
         }
     }
 
-    fn command_names(&self) -> impl Iterator<Item = &str> {
-        self.entries.iter().map(|e| e.name.as_str())
-    }
-
-    fn find_command(&self, name: &str) -> Option<&CmdEntry> {
-        self.entries.iter().find(|e| e.name == name)
-    }
-
-    /// Load commands + cached values from Director at connect time.
-    /// All queries happen sequentially over one connection before readline starts.
     /// Reload everything from the Director (after `reload`/`configure`).
     fn refresh(&mut self, dir: &mut dyn DirectorConn) {
-        self.entries.clear();
         self.value_cache.clear();
         self.load_from_director(dir);
     }
 
+    /// Load the grammar and the cached values at connect time.
+    /// All queries happen sequentially over one connection before readline starts.
     fn load_from_director(&mut self, dir: &mut dyn DirectorConn) {
-        // Bareos API1 .help carries descriptions and original usage;
-        // .help all intentionally contains only non-dot command names.
-        dir.query(".api 1");
-        let lines = dir.query(".help");
-        dir.query(".api 0");
-
-        for line in &lines {
-            if let Some(entry) = Self::parse_help_line(line) { self.entries.push(entry); }
-        }
-
-        if self.entries.is_empty() {
-            for name in &["version", "time", "quit", "exit", "help", ".help",
-                          "status", "run", "cancel", "list", "reload"] {
-                self.entries.push(CmdEntry {
-                    name: name.to_string(),
-                    description: String::new(),
-                    usage: String::new(),
-                    completions: Vec::new(),
-                    live_queries: Vec::new(),
-                });
-            }
-        }
-
+        self.grammar = load_grammar(dir);
         // Cache all dot-command values that are used for live-completion.
         // Query each unique dot-command once at connect time.
-        let mut dot_cmds: Vec<String> = self.entries.iter()
-            .flat_map(|e| e.live_queries.iter().map(|(_, cmd)| cmd.clone()))
-            .collect();
-        dot_cmds.sort();
-        dot_cmds.dedup();
-
-        for dot_cmd in &dot_cmds {
-            let values = dir.query(dot_cmd);
-            self.value_cache.insert(dot_cmd.clone(), values);
+        for source in self.grammar.value_sources() {
+            let values = dir.query(&source);
+            self.value_cache.insert(source, values);
         }
     }
 
-    fn parse_help_line(line: &str) -> Option<CmdEntry> {
-        let (name, description, usage, arguments) = if line.contains('\t') {
-            // Compatibility with older Onesimus metadata tables.
-            let mut fields = line.split('\t');
-            (fields.next()?.trim(), fields.next().unwrap_or(""), fields.next().unwrap_or(""),
-                Some(fields.next().unwrap_or("")))
-        } else {
-            let (header, usage) = line.rsplit_once(" --")?;
-            let (name, description) = header.split_once(' ')?;
-            (name.trim(), description, usage.trim(), None)
-        };
-        if name.is_empty() || !name.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'.' || b == b'_') { return None; }
-        let source_arguments;
-        let arguments = match arguments {
-            Some(arguments) => arguments,
-            None => {
-                source_arguments = Self::usage_arguments(usage, name);
-                &source_arguments
-            }
-        };
-        let (completions, live_queries) = Self::parse_arguments(arguments);
-        Some(CmdEntry {name:name.into(),description:description.into(),usage:usage.into(),completions,live_queries})
+    /// One line for the connect and refresh messages.
+    fn summary(&self) -> String {
+        format!("{} commands, {} subcommands and arguments{}, {} cached values for tab-completion",
+            self.grammar.commands.len(), self.grammar.element_count(),
+            if self.grammar.typed { "" } else { " (from .help)" },
+            self.value_cache.values().map(|v| v.len()).sum::<usize>())
+    }
+}
+
+/// `.api 2; .grammar; .api 0`; a Director without `.grammar` (Bareos, older
+/// odir: "is an invalid command") gets the model rebuilt from `.help`.
+fn load_grammar(dir: &mut dyn DirectorConn) -> grammar::Grammar {
+    let reply = dir.query_json(".grammar");
+    if let Some(typed) = serde_json::from_str(&reply).ok().and_then(|v| grammar::Grammar::from_grammar_json(&v)) {
+        return typed;
+    }
+    // Bareos API1 .help carries descriptions and original usage;
+    // .help all intentionally contains only non-dot command names.
+    dir.query(".api 1");
+    let lines = dir.query(".help");
+    dir.query(".api 0");
+    let fallback = grammar::Grammar::from_help_lines(&lines);
+    if fallback.commands.is_empty() { grammar::Grammar::minimal() } else { fallback }
+}
+
+/// Words of a command's grammar that are colored as known keywords.
+fn known_words(node: &grammar::Node, out: &mut Vec<String>) {
+    out.extend(node.args.iter().map(|a| a.name.clone()));
+    for sub in &node.subs {
+        out.push(sub.word.clone());
+        out.extend(sub.aliases.iter().cloned());
+        known_words(sub, out);
+    }
+}
+
+/// The suggestion shown after the cursor; `completion` None for a usage hint.
+struct ConsoleHint {
+    display: String,
+    completion: Option<String>,
+}
+
+impl rustyline::hint::Hint for ConsoleHint {
+    fn display(&self) -> &str {
+        &self.display
     }
 
-    fn usage_arguments(usage: &str, command: &str) -> String {
-        let mut arguments = Vec::new();
-        // Placeholders may contain alternatives, spaces and punctuation. Ignore
-        // their contents, but retain the surrounding grammar (including adjacent
-        // optional groups such as `[maxvoljobs=<nb>][enabled=<yes/no>]`).
-        let mut grammar = String::new();
-        let mut placeholder = false;
-        for ch in usage.chars() {
-            match ch {
-                '<' => { placeholder = true; grammar.push_str(" <value> "); }
-                '>' => placeholder = false,
-                _ if placeholder => {},
-                '[' | ']' | '(' | ')' | '|' | ',' => grammar.push(' '),
-                '=' => grammar.push_str(" = "),
-                _ => grammar.push(ch),
-            }
-        }
-        let tokens: Vec<_> = grammar.split_whitespace().collect();
-        for (index, token) in tokens.iter().enumerate() {
-            if *token == command || !token.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'_' || b == b'-') {
-                continue;
-            }
-            // Literal values (e.g. trace=0/1 or jobid=0) are not subcommands.
-            if index > 0 && tokens[index - 1] == "=" { continue; }
-            let argument = if tokens.get(index + 1) == Some(&"=") {
-                token.to_string()
-            } else {
-                format!("!{token}")
-            };
-            if !arguments.contains(&argument) { arguments.push(argument); }
-        }
-        arguments.join(",")
-    }
-
-    /// Parse the arguments field from .help into completions and live-query mappings.
-    ///
-    /// Conventions:
-    /// - "!dir"        → bare keyword "dir" (no "=")
-    /// - "job"         → key=value arg "job=" — also triggers live query ".jobs" for values
-    /// - "client"      → key=value arg "client=" — triggers ".clients"
-    /// - "storage"     → key=value arg "storage=" — triggers ".storages"
-    /// - "pool"        → key=value arg "pool=" — triggers ".pools"
-    /// - "fileset"     → key=value arg "fileset=" — triggers ".filesets"
-    /// - "schedule"    → key=value arg "schedule=" — triggers ".schedule"
-    /// - "level"       → key=value arg "level=" — triggers ".levels"
-    /// - "type"        → key=value arg "type=" — triggers ".types"
-    /// - "catalog"     → key=value arg "catalog=" — triggers ".catalogs"
-    fn parse_arguments(arguments: &str) -> (Vec<String>, Vec<(String, String)>) {
-        let mut completions = Vec::new();
-        let mut live_queries = Vec::new();
-
-        if arguments.is_empty() { return (completions, live_queries); }
-
-        for arg in arguments.split(',') {
-            let arg = arg.trim();
-            if arg.is_empty() { continue; }
-
-            if let Some(bare) = arg.strip_prefix('!') {
-                // Bare keyword — no "="
-                completions.push(bare.to_string());
-            } else {
-                // key=value argument
-                completions.push(format!("{arg}="));
-
-                // Map known argument keys to Director dot-commands for live values
-                let dot_cmd = match arg {
-                    "job" => Some(".jobs"),
-                    "client" => Some(".clients"),
-                    "storage" => Some(".storages"),
-                    "pool" => Some(".pools"),
-                    "fileset" => Some(".filesets"),
-                    "schedule" => Some(".schedule"),
-                    "level" => Some(".levels"),
-                    "type" => Some(".types"),
-                    "catalog" => Some(".catalogs"),
-                    "volume" => Some(".media"),
-                    _ => None,
-                };
-                if let Some(cmd) = dot_cmd {
-                    live_queries.push((arg.to_string(), cmd.to_string()));
-                }
-            }
-        }
-
-        (completions, live_queries)
+    fn completion(&self) -> Option<&str> {
+        self.completion.as_deref()
     }
 }
 
@@ -925,86 +827,8 @@ impl Completer for BareosHelper {
     type Candidate = Pair;
 
     fn complete(&self, line: &str, pos: usize, _ctx: &Context<'_>) -> rustyline::Result<(usize, Vec<Pair>)> {
-        let line = &line[..pos];
-        let parts: Vec<&str> = line.split_whitespace().collect();
-        let arg_pos = if line.chars().last().is_some_and(char::is_whitespace) { parts.len() } else { parts.len().saturating_sub(1) };
-        let prefix = if line.chars().last().is_some_and(char::is_whitespace) { "" } else { parts.last().copied().unwrap_or("") };
-        let start = if line.chars().last().is_some_and(char::is_whitespace) { pos } else { pos - prefix.len() };
-
-        // === Position 0: Command name ===
-        if arg_pos == 0 {
-            let matches: Vec<Pair> = self.entries.iter()
-                .filter(|e| e.name.starts_with(prefix))
-                .map(|e| {
-                    if e.description.is_empty() {
-                        Pair { display: e.name.clone(), replacement: e.name.clone() }
-                    } else {
-                        // fish-style: "command  -- description"
-                        Pair {
-                            display: format!("{:<22} -- {}", e.name, e.description),
-                            replacement: e.name.clone(),
-                        }
-                    }
-                })
-                .collect();
-            return Ok((0, matches));
-        }
-
-        let cmd = parts[0];
-
-        // "help <TAB>" / ".help <TAB>" → complete with command names + descriptions
-        if cmd == "help" || cmd == ".help" {
-            let matches: Vec<Pair> = self.entries.iter()
-                .filter(|e| e.name.starts_with(prefix))
-                .map(|e| Pair {
-                    display: format!("{:<22} -- {}", e.name, e.description),
-                    replacement: e.name.clone(),
-                })
-                .collect();
-            return Ok((start, matches));
-        }
-
-        let entry = match self.find_command(cmd) {
-            Some(e) => e,
-            None => return Ok((pos, Vec::new())),
-        };
-
-        // === Value after "key=" (e.g. "run client=[TAB]") ===
-        if prefix.contains('=') {
-            let (key, val_prefix) = prefix.split_once('=').unwrap_or(("", ""));
-            let val_start = start + key.len() + 1;
-
-            // Cached values from Director
-            if let Some((_, dot_cmd)) = entry.live_queries.iter().find(|(k, _)| k == key) {
-                let empty = Vec::new();
-                let values = self.value_cache.get(dot_cmd.as_str()).unwrap_or(&empty);
-                let matches: Vec<Pair> = values.iter()
-                    .filter(|v| v.starts_with(val_prefix))
-                    .map(|v| Pair { display: v.to_string(), replacement: v.to_string() })
-                    .collect();
-                return Ok((val_start, matches));
-            }
-
-            return Ok((pos, Vec::new()));
-        }
-
-        // === Position 1+: Arguments (bare keywords + key= args) ===
-        // Filter out args already typed
-        let already_typed: Vec<&str> = parts[1..arg_pos].iter()
-            .map(|p| p.split('=').next().unwrap_or(""))
-            .collect();
-
-        let matches: Vec<Pair> = entry.completions.iter()
-            .filter(|c| {
-                let key = c.trim_end_matches('=');
-                // Don't suggest key= args already used; bare keywords can repeat
-                !already_typed.contains(&key) || !c.ends_with('=')
-            })
-            .filter(|c| c.starts_with(prefix))
-            .map(|c| Pair { display: c.to_string(), replacement: c.to_string() })
-            .collect();
-
-        Ok((start, matches))
+        let (start, candidates) = grammar::complete(&self.grammar, &self.value_cache, line, pos);
+        Ok((start, candidates.into_iter().map(|c| Pair { display: c.display, replacement: c.replacement }).collect()))
     }
 }
 
@@ -1023,7 +847,7 @@ impl Highlighter for BareosHelper {
         let cmd = parts[0];
         let args_str = if parts.len() > 1 { parts[1] } else { "" };
 
-        let entry = self.find_command(cmd);
+        let entry = self.grammar.command(cmd);
 
         // Command color: green=regular, yellow=dot, red=unknown
         let cmd_color = match entry {
@@ -1038,9 +862,11 @@ impl Highlighter for BareosHelper {
 
         // Color arguments: known args = cyan, values = white, bare keywords = magenta
         let mut colored_args = String::new();
-        let known_completions: Vec<&str> = entry
-            .map(|e| e.completions.iter().map(|c| c.as_str()).collect())
-            .unwrap_or_default();
+        let mut known = Vec::new();
+        if let Some(node) = entry {
+            known_words(node, &mut known);
+        }
+        let known_completions: Vec<&str> = known.iter().map(String::as_str).collect();
 
         for (i, token) in args_str.split_whitespace().enumerate() {
             if i > 0 { colored_args.push(' '); }
@@ -1081,43 +907,17 @@ impl Highlighter for BareosHelper {
 }
 
 impl Hinter for BareosHelper {
-    type Hint = String;
+    type Hint = ConsoleHint;
 
-    fn hint(&self, line: &str, pos: usize, _ctx: &Context<'_>) -> Option<String> {
-        if pos < line.len() { return None; } // nur am Zeilenende
-
-        let parts: Vec<&str> = line.split_whitespace().collect();
-
-        if parts.is_empty() {
-            return None;
-        }
-
-        if parts.len() == 1 && !line.chars().last().is_some_and(char::is_whitespace) {
-            // Ghost-Text fuer Command-Name: "sta" → grau "tus"
-            let prefix = parts[0];
-            let best = self.command_names()
-                .filter(|c| c.starts_with(prefix) && *c != prefix)
-                .next()?;
-            return Some(best[prefix.len()..].to_string());
-        }
-
-        if parts.len() >= 1 && line.chars().last().is_some_and(char::is_whitespace) {
-            // Nach Command + Space: Ghost-Text fuer erstes Argument
-            let cmd = parts[0];
-            if let Some(entry) = self.find_command(cmd) {
-                // Zeige Usage als Ghost-Hint
-                let usage_hint = &entry.usage;
-                // Nur den Teil nach dem Command-Namen
-                if let Some(rest) = usage_hint.strip_prefix(cmd) {
-                    let rest = rest.trim_start();
-                    if !rest.is_empty() {
-                        return Some(color::output(&format!("\x1b[2m{rest}\x1b[0m")).into_owned());
-                    }
-                }
-            }
-        }
-
-        None
+    /// fish autosuggestion (history, a single completion, usage), only at the end of the line.
+    fn hint(&self, line: &str, pos: usize, ctx: &Context<'_>) -> Option<ConsoleHint> {
+        let history = ctx.history();
+        let newest_first: Vec<String> = (0..history.len()).rev()
+            .filter_map(|i| history.get(i, rustyline::history::SearchDirection::Forward).ok().flatten())
+            .map(|r| r.entry.into_owned())
+            .collect();
+        grammar::suggest(&self.grammar, &self.value_cache, &newest_first, &self.failed, line, pos)
+            .map(|s| ConsoleHint { display: s.display, completion: s.completion })
     }
 }
 
@@ -1256,10 +1056,7 @@ fn interactive_loop(
     let mut helper = BareosHelper::new();
     let guard = helper.rate_guard.clone();
     helper.load_from_director(dir.as_mut());
-    let total_completions: usize = helper.entries.iter().map(|e| e.completions.len()).sum();
-    let cached_values: usize = helper.value_cache.values().map(|v| v.len()).sum();
-    eprintln!("\x1b[2m({} commands, {} subcommands, {} cached values for tab-completion)\x1b[0m",
-        helper.entries.len(), total_completions, cached_values);
+    eprintln!("\x1b[2m({})\x1b[0m", helper.summary());
 
     let rl_config = rustyline::Config::builder()
         .completion_type(rustyline::CompletionType::List)
@@ -1287,6 +1084,13 @@ fn interactive_loop(
                 let cmd = line.trim();
                 if cmd.is_empty() { continue; }
 
+                // help <command> from the grammar (odir's man page text), not sent
+                if let Some(text) = rl.helper().and_then(|h| grammar::local_help(&h.grammar, cmd)) {
+                    print!("{text}");
+                    rl.add_history_entry(cmd).ok();
+                    continue;
+                }
+
                 match send_terminal_line(dir.as_mut(), &guard, cmd) {
                     None => continue,
                     Some(false) => { eprintln!("Connection lost"); break; }
@@ -1306,6 +1110,8 @@ fn interactive_loop(
                 // Read response
                 CTRL_C.store(false, Ordering::SeqCst);
                 let mut dialog = InputDialog::default();
+                // the Director refused the line: not suggested again
+                let mut refused = false;
                 loop {
                     if CTRL_C.swap(false, Ordering::SeqCst) {
                         if send_terminal_cancel(dir.as_mut(), &guard) {
@@ -1326,8 +1132,10 @@ fn interactive_loop(
                                 }
                                 continue;
                             }
+                            refused |= text.contains("is an invalid command");
                             print_reply(&text);
                         }
+                        Some(RecvResult::Signal(BnetSignal::CmdFailed)) => refused = true,
                         // API 1 input dialogs: the prompt text follows (C-076)
                         Some(RecvResult::Signal(signal @ (BnetSignal::SelectInput | BnetSignal::YesNo | BnetSignal::TextInput))) => {
                             dialog.signal(signal);
@@ -1375,14 +1183,19 @@ fn interactive_loop(
                     }
                 }
 
+                if refused {
+                    if let Some(helper) = rl.helper_mut() {
+                        helper.failed.push(cmd.to_string());
+                    }
+                }
+
                 // The Director's resources may have changed: refresh the
-                // completion data (command list, job/client/pool names, ...)
+                // completion data (grammar, job/client/pool names, ...)
                 let first = cmd.split_whitespace().next().unwrap_or("").to_ascii_lowercase();
                 if matches!(first.as_str(), "reload" | "configure") {
                     if let Some(helper) = rl.helper_mut() {
                         helper.refresh(dir.as_mut());
-                        eprintln!("\x1b[2m(tab-completion refreshed: {} commands, {} cached values)\x1b[0m",
-                            helper.entries.len(), helper.value_cache.values().map(|v| v.len()).sum::<usize>());
+                        eprintln!("\x1b[2m(tab-completion refreshed: {})\x1b[0m", helper.summary());
                     }
                 }
             }
@@ -1549,6 +1362,11 @@ impl DirectorConn for GrpcConn {
             .map(|l| l.trim().to_string())
             .filter(|l| !l.is_empty())
             .collect()
+    }
+
+    fn query_json(&mut self, cmd: &str) -> String {
+        use onesimus_proto_rs::onesimus::director::ResponseFormat;
+        self.execute(cmd, ResponseFormat::Json).unwrap_or_default()
     }
 
     fn send_cmd(&mut self, cmd: &str) -> bool {
@@ -1826,18 +1644,31 @@ mod tests {
         assert_eq!(dialog.prompt("x"), None);
     }
 
+    fn help_grammar(lines: &[&str]) -> grammar::Grammar {
+        grammar::Grammar::from_help_lines(&lines.iter().map(|l| l.to_string()).collect::<Vec<_>>())
+    }
+
+    fn arg_words(node: &grammar::Node) -> Vec<String> {
+        node.args.iter().map(|a| match a.kind {
+            grammar::Kind::Keyword => a.name.clone(),
+            grammar::Kind::Value => format!("{}=", a.name),
+        }).collect()
+    }
+
     #[test]
     fn completion_consumes_original_help_usage_instead_of_names_only() {
-        let status=BareosHelper::parse_help_line("status Report status -- status [dir | director | client=<client-name> | storage=<storage-name>]").unwrap();
-        assert_eq!(status.name,"status");assert_eq!(status.description,"Report status");
-        for value in ["dir","director","client=","storage="] { assert!(status.completions.contains(&value.to_string())); }
-        assert!(status.live_queries.contains(&("client".into(),".clients".into())));
-        assert!(status.live_queries.contains(&("storage".into(),".storages".into())));
-        let job=BareosHelper::parse_help_line("run Run a job -- run [job=<job-name> level=<level> yes]").unwrap();
-        assert!(job.completions.contains(&"job=".to_string()));assert!(job.completions.contains(&"yes".to_string()));
-        assert!(BareosHelper::parse_help_line("run").is_none());
-        let legacy=BareosHelper::parse_help_line("status\tReport status\tstatus [dir]\t!dir,client").unwrap();
-        assert!(legacy.completions.contains(&"dir".to_string()));
+        let g = help_grammar(&["status Report status -- status [dir | director | client=<client-name> | storage=<storage-name>]"]);
+        let status = g.command("status").unwrap();
+        assert_eq!(status.description, "Report status");
+        for value in ["dir", "director", "client=", "storage="] { assert!(arg_words(status).contains(&value.to_string())); }
+        assert!(status.args.iter().any(|a| a.name == "client" && a.values == grammar::Values::Source(".clients".into())));
+        assert!(status.args.iter().any(|a| a.name == "storage" && a.values == grammar::Values::Source(".storages".into())));
+        let g = help_grammar(&["run Run a job -- run [job=<job-name> level=<level> yes]", "run"]);
+        assert_eq!(g.commands.len(), 1, "a line without usage is no command");
+        assert!(arg_words(&g.commands[0]).contains(&"job=".to_string()));
+        assert!(arg_words(&g.commands[0]).contains(&"yes".to_string()));
+        let legacy = help_grammar(&["status\tReport status\tstatus [dir]\t!dir,client"]);
+        assert!(arg_words(&legacy.commands[0]).contains(&"dir".to_string()));
     }
 
     #[test]
@@ -1845,14 +1676,11 @@ mod tests {
         mod source {
             include!("../../odir/src/ua_commands_table.rs");
         }
-        let mut helper = BareosHelper::new();
-        for (name, description, usage) in source::UA_COMMANDS {
-            // query() trims responses, including the space after an empty usage.
-            let line = format!("{name} {description} -- {usage}");
-            let entry = BareosHelper::parse_help_line(line.trim()).unwrap();
-            assert_eq!(&entry.name, name);
-            helper.entries.push(entry);
-        }
+        // query() trims responses, including the space after an empty usage.
+        let lines: Vec<String> = source::UA_COMMANDS.iter()
+            .map(|(name, description, usage)| format!("{name} {description} -- {usage}").trim().to_string()).collect();
+        let g = grammar::Grammar::from_help_lines(&lines);
+        assert_eq!(g.commands.len(), source::UA_COMMANDS.len());
         for (command, keywords) in [
             ("list", vec!["jobs", "backups", "volumes", "jobstatistics"]),
             ("show", vec!["disabled", "clients", "all"]),
@@ -1860,30 +1688,29 @@ mod tests {
             ("update", vec!["slots", "stats", "enabled=", "recyclepool="]),
             ("purge", vec!["volume=", "quota", "action="]),
         ] {
-            let entry = helper.find_command(command).unwrap();
+            let words = arg_words(g.command(command).unwrap());
             for keyword in keywords {
-                assert!(entry.completions.iter().any(|c| c == keyword), "{command}: {keyword}");
+                assert!(words.iter().any(|c| c == keyword), "{command}: {keyword}");
             }
         }
     }
 
     #[test]
     fn completion_parses_adjacent_groups_and_spaced_assignments() {
-        let entry = BareosHelper::parse_help_line(
+        let g = help_grammar(&[
             "update Update volumes -- [maxvoljobs=<nb>][enabled=<yes/no>] | volume[=<volume>] [ drive = <drivenum>] trace=0/1"
-        ).unwrap();
+        ]);
+        let words = arg_words(&g.commands[0]);
         for key in ["maxvoljobs=", "enabled=", "volume=", "drive=", "trace="] {
-            assert!(entry.completions.iter().any(|c| c == key), "missing {key}");
+            assert!(words.iter().any(|c| c == key), "missing {key}");
         }
-        assert_eq!(entry.completions.len(), 5);
+        assert_eq!(words.len(), 5);
     }
 
     #[test]
     fn completion_keeps_partial_keys_and_handles_tabs() {
         let mut helper = BareosHelper::new();
-        helper.entries.push(BareosHelper::parse_help_line(
-            "run Run job -- job=<job-name> client=<client-name> yes"
-        ).unwrap());
+        helper.grammar = help_grammar(&["run Run job -- job=<job-name> client=<client-name> yes"]);
         let history = rustyline::history::DefaultHistory::new();
         let ctx = Context::new(&history);
         for line in ["run client", "run\tclient"] {
@@ -1895,6 +1722,52 @@ mod tests {
         let (_, matches) = helper.complete(line, line.len(), &ctx).unwrap();
         assert!(!matches.iter().any(|p| p.replacement == "client="));
         assert!(matches.iter().any(|p| p.replacement == "job="));
+    }
+
+    /// The loader takes `.grammar` (API 2) and falls back to `.help` when the
+    /// Director answers "is an invalid command" (Bareos).
+    struct FakeDirector {
+        grammar: Option<String>,
+        sent: Vec<String>,
+    }
+
+    impl DirectorConn for FakeDirector {
+        fn query(&mut self, cmd: &str) -> Vec<String> {
+            self.sent.push(cmd.to_string());
+            match cmd {
+                ".grammar" => match &self.grammar {
+                    Some(json) => vec![json.clone()],
+                    None => vec![r#"{"jsonrpc":"2.0","id":null,"error":{"code":1,"message":"failed","data":{"result":{},"messages":{"error":[".grammar: is an invalid command.\n"]}}}}"#.to_string()],
+                },
+                ".help" => vec!["run Run a job -- job=<job-name> yes".to_string()],
+                ".pools" => vec!["Full".to_string()],
+                _ => Vec::new(),
+            }
+        }
+        fn send_cmd(&mut self, _: &str) -> bool { true }
+        fn recv_msg(&mut self) -> Option<RecvResult> { None }
+        fn drain(&mut self) {}
+        fn send_cancel(&mut self) {}
+    }
+
+    #[test]
+    fn loader_prefers_grammar_and_falls_back_to_help() {
+        let json = r#"{"jsonrpc":"2.0","id":null,"result":{"grammar":{"schema":1,"commands":[
+            {"word":"purge","aliases":[],"description":"Purge","args":[],"subs":[
+              {"word":"volume","description":"v","args":[{"name":"pool","kind":"value","type":"resource","source":".pools"}],"subs":[]}]}]}}}"#;
+        let mut odir = FakeDirector { grammar: Some(json.replace('\n', " ")), sent: Vec::new() };
+        let mut helper = BareosHelper::new();
+        helper.load_from_director(&mut odir);
+        assert!(helper.grammar.typed);
+        assert_eq!(odir.sent[..3], [".api 2", ".grammar", ".api 0"]);
+        assert!(!odir.sent.contains(&".help".to_string()));
+        assert_eq!(helper.value_cache[".pools"], ["Full"]);
+        let mut bareos = FakeDirector { grammar: None, sent: Vec::new() };
+        helper.refresh(&mut bareos);
+        assert!(!helper.grammar.typed);
+        assert!(helper.grammar.command("run").is_some());
+        assert_eq!(bareos.sent[3..6], [".api 1", ".help", ".api 0"]);
+        assert!(helper.summary().contains("(from .help)"));
     }
 
     #[test]
