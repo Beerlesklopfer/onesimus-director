@@ -237,7 +237,7 @@ impl SdLink for NetSd {
 pub(crate) fn dev_name(store: &StorageResource) -> String {
     let first = store.device.split(',').next().unwrap_or("").trim().trim_matches('"');
     // BashSpaces()
-    first.replace(' ', "\u{1}")
+    bareos_format::bash::bash_spaces(first)
 }
 
 /// open_sd_bsock() (sd_cmds.cc:165) + one exchange; None if the connection
@@ -320,7 +320,7 @@ pub fn get_num_slots(ua: &mut Ua, sd: &mut impl SdLink, store: &StorageResource)
                 None => ua.send_msg(message),
             }
         }
-        ua.send_msg(format!("Device \"{}\" has {slots} slots.\n", dev_name(store).replace('\u{1}', " ")));
+        ua.send_msg(format!("Device \"{}\" has {slots} slots.\n", bareos_format::bash::unbash_spaces(&dev_name(store))));
     }
     if let Ok(mut cache) = SLOTS.lock() {
         cache.get_or_insert_with(HashMap::new).insert(store.name.clone(), slots);

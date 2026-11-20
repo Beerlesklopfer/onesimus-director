@@ -1445,7 +1445,7 @@ fn native_storage_status(store: &bareos_config::resources::StorageResource, cmd:
     let command = match cmd {
         Some(cmd) => format!(".status {cmd}\n"),
         // BashSpaces()
-        None => format!("status {}\n", devices.replace(' ', "\u{1}")),
+        None => format!("status {}\n", bareos_format::bash::bash_spaces(&devices)),
     };
     // fsend errors are silent upstream; the receive loop then ends.
     if sd.send_str(&command).is_ok() {

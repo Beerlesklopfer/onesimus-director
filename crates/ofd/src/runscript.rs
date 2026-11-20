@@ -29,7 +29,7 @@ pub fn parse_runscript(cmd: &str) -> Option<RunScript> {
         on_failure: v[1].int() != 0,
         fail_on_error: v[2].int() != 0,
         when: v[3].int() as i32,
-        command: v[4].text().replace('\x01', " "),
+        command: bareos_format::bash::unbash_spaces(&v[4].text()),
     })
 }
 

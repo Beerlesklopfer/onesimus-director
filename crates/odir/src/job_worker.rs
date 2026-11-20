@@ -1220,7 +1220,7 @@ pub(crate) fn send_expect<S: Read + Write>(bnet: &mut BnetStream<S>, cmd: &str, 
 /// dird/restore.cc BuildRestoreCommand(): "restore replace=%c prelinks=%d
 /// where=%s" or "... regexwhere=%s" (regexwhere wins), spaces bashed.
 fn fd_restore_command(params: &JobParams) -> String {
-    let bash = |s: &str| s.replace(' ', "\x01");
+    let bash = bareos_format::bash::bash_spaces;
     let (key, value) = match params.regex_where.as_deref() {
         Some(r) => ("regexwhere", bash(r)),
         None => ("where", bash(params.where_path.as_deref().unwrap_or(""))),

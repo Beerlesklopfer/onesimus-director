@@ -233,7 +233,7 @@ pub(crate) fn label_execute(ua: &mut Ua, request: LabelRequest, sd: &mut dyn SdS
                 let automount = ua.ctx.session_mgr.as_ref().is_none_or(|mgr| mgr.session_automount(ua.ctx.session_id));
                 if automount {
                     let dev_name = storage::dev_name(&store);
-                    ua.info_msg(format!("Requesting to mount {} ...\n", dev_name.replace('\u{1}', " ")));
+                    ua.info_msg(format!("Requesting to mount {} ...\n", bareos_format::bash::unbash_spaces(&dev_name)));
                     for message in sd.sd.exchange(&format!("mount {dev_name} drive={drive}")) {
                         ua.send_msg(message.clone());
                         if ["3001 ", "3002 ", "3906 "].iter().any(|p| message.starts_with(p)) {

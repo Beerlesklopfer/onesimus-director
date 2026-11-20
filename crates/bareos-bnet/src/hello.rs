@@ -166,7 +166,7 @@ pub fn name_type_and_version_from_hello(input: &str) -> Option<(String, &'static
     // BStringList(input, ' ') splits like std::getline: no trailing empty token
     let mut args: Vec<&str> = if input.is_empty() { Vec::new() } else { input.split(' ').collect() };
     if args.last() == Some(&"") { args.pop(); }
-    let name = args.get(name_pos)?.replace('\x01', " ");
+    let name = bareos_format::bash::unbash_spaces(args.get(name_pos)?);
     let mut version = BAREOS_VERSION_UNDEFINED;
     if let Some(version_str) = version_pos.and_then(|pos| args.get(pos)).filter(|v| !v.is_empty()) {
         let parts: Vec<&str> = version_str.split('.').collect();

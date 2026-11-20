@@ -150,7 +150,7 @@ pub(crate) fn handle_session(mut bnet: BnetStream<Box<dyn Rw>>, session_id: u64,
 
     // AuthenticateDirector(): "Hello Director %s calling"
     let dir_name = match hello.strip_prefix("Hello Director ").and_then(|r| r.split_whitespace().next()) {
-        Some(name) if hello.len() >= 25 && hello.len() <= 500 => name.replace('\x01', " "),
+        Some(name) if hello.len() >= 25 && hello.len() <= 500 => bareos_format::bash::unbash_spaces(name),
         _ => {
             warn!("session {session_id}: Bad Hello command from Director: {}", hello.trim_end());
             return;

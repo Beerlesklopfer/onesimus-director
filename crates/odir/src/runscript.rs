@@ -540,7 +540,7 @@ pub fn client_commands(config: &DirectorConfig, job: &ScriptJob) -> Option<(Vec<
         if !script.target.is_empty() && edit_job_codes(&script.target, &codes, "") == job.client {
             commands.push(format!("Run OnSuccess={} OnFailure={} AbortOnError={} When={} Command={}\n",
                 script.on_success as u8, script.on_failure as u8, script.fail_on_error as u8,
-                script_when(script), script.command.replace(' ', "\x01")));
+                script_when(script), bareos_format::bash::bash_spaces(&script.command)));
         }
         if script_when(script) & (SCRIPT_BEFORE | SCRIPT_AFTER_VSS) != 0 {
             before = true;
