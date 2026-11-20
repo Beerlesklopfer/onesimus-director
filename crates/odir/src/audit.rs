@@ -228,6 +228,10 @@ pub(crate) fn messages_resource<'a>(config: &'a DirectorConfig, name: &str) -> O
 /// message.cc:760-779), see `mail.rs`. Syslog and the std streams are not
 /// served.
 pub(crate) fn dispatch(res: &ConfResource, code: u32, mtime: i64, msg: &str, job_id: Option<u32>) {
+    // Secrets in RunScript command lines never reach a destination
+    // (catalog Log, journal, mail, console): crate::secrets.
+    let masked = crate::secrets::mask(msg);
+    let msg = masked.as_ref();
     let (mtime, dt_conversion) = match mtime {
         0 => (now(), true),
         1 => (now(), false),
@@ -309,6 +313,36 @@ Console {{ Name = limited; Password = pw; CommandACL = list, show; CatalogACL = 
     fn lines(path: &std::path::Path) -> Vec<String> {
         std::fs::read_to_string(path).unwrap_or_default().lines()
             .map(|l| l.splitn(3, ' ').nth(2).unwrap_or("").to_string()).collect()
+    }
+
+    /// A RunScript command line the client reports (`shell command: run
+    /// ClientBeforeJob "…--password=…"`) reaches neither the catalog `Log`
+    /// nor a file destination with the password (crate::secrets).
+    #[test]
+    fn secrets_in_job_messages_are_masked_for_every_destination() {
+        use crate::catalog_worker::{CatalogHandle, CatalogRequest, CatalogResponse, SqlTable};
+        let dir = std::env::temp_dir().join(format!("onesimus-audit-secrets-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let raw = bareos_config::raw::parse_str(&format!(
+            "Messages {{ Name = Standard; catalog = all; append = \"{}/job.log\" = all }}\n", dir.display()), None).unwrap();
+        let seen = Arc::new(Mutex::new(Vec::new()));
+        let log = seen.clone();
+        crate::job_messages::set_catalog(Some(CatalogHandle::mock(move |request| {
+            if let CatalogRequest::TextRows { sql } | CatalogRequest::RawQuery { sql } | CatalogRequest::Execute { sql } = request {
+                log.lock().unwrap().push(sql);
+            }
+            CatalogResponse::Rows(SqlTable { columns: vec![], rows: vec![] })
+        })));
+        let msg = "CLOUD-fd JobId 7: shell command: run ClientBeforeJob \"/etc/bareos/scripts/dump-database.sh \
+                   --user=www-data --password=Geheim-42\"\n";
+        dispatch(&raw[0], 1, 1, msg, Some(7));
+        crate::job_messages::set_catalog(None);
+        let sql = seen.lock().unwrap().join("\n");
+        assert!(sql.contains("INSERT INTO Log") && sql.contains("--password=***"), "{sql}");
+        let file = std::fs::read_to_string(dir.join("job.log")).unwrap();
+        assert!(file.contains("--user=www-data --password=***\""), "{file}");
+        assert!(!sql.contains("Geheim-42") && !file.contains("Geheim-42"));
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

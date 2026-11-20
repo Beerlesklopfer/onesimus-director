@@ -53,6 +53,13 @@ impl MessageBus {
 
     /// Post a message to all subscribers (non-blocking, drops on full).
     pub fn post(&self, msg: BusMessage) {
+        // Push events carry job and console texts: mask secrets (crate::secrets).
+        let msg = match msg {
+            BusMessage::JobMessage { job_id, job_name, msg_type, text, timestamp } =>
+                BusMessage::JobMessage { job_id, job_name, msg_type, text: crate::secrets::mask(&text).into_owned(), timestamp },
+            BusMessage::ConsoleText { text } => BusMessage::ConsoleText { text: crate::secrets::mask(&text).into_owned() },
+            other => other,
+        };
         let subs = self.subscribers.lock().unwrap();
         for tx in subs.iter() {
             let _ = tx.try_send(msg.clone());

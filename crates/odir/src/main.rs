@@ -53,6 +53,7 @@ mod reload;
 mod run_time;
 mod runscript;
 mod scheduled_run;
+mod secrets;
 mod scheduler;
 mod migrate;
 mod sd_copy;

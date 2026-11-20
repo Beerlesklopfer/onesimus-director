@@ -1298,7 +1298,10 @@ fn print_runscripts(item: &Item, scripts: &[(Script, bool)], inherited: bool, ve
                 continue;
             }
         }
-        let esc = escape_string(&s.command);
+        // Secrets in the command line are masked for every console
+        // (crate::secrets); the unmasked text stays readable via
+        // `.config read` / `configure export` (configure right).
+        let esc = escape_string(&crate::secrets::mask(&s.command));
         if s.short_form {
             w.push_obj("");
             if let Some(name) = s.short_name {
@@ -2024,6 +2027,17 @@ fn print_fileset(res: &ConfResource, w: &mut W) {
 
 #[cfg(test)]
 mod tests {
+
+    /// RunScript command lines: secrets masked for every console, the rest
+    /// of the line and the other directives unchanged (crate::secrets).
+    #[test]
+    fn runscript_secrets_are_masked() {
+        let raw = bareos_config::raw::parse_str("Job {\n Name = j\n Type = Backup\n RunScript {\n  Command = \"/x/dump.sh --user=u --password=Geheim-42\"\n  RunsWhen = before\n }\n ClientRunBeforeJob = \"PGPASSWORD=Geheim-42 pg_dump db\"\n}\n", None).unwrap();
+        let text = show_with(&ast(&[("jobs", None)]), &Conf::new(&raw, false), &|_, _, _| true).text_output;
+        assert!(!text.contains("Geheim-42"), "{text}");
+        assert!(text.contains("Command = \"/x/dump.sh --user=u --password=***\""), "{text}");
+        assert!(text.contains("PGPASSWORD=*** pg_dump db"), "{text}");
+    }
 
     /// S-3: secrets of plugin lines are masked in FileSet.FileSetText.
     #[test]
