@@ -670,6 +670,12 @@ Unterbefehl `key=` steht für die Form `key=<wert>`, ein Wort für das Schlüsse
 | `.acl` | `delete` | `DotAclDelete` | Entwicklungs-Build (`grpc-development`) |
 | `.acl` | `clear` | `DotAclClear` | Entwicklungs-Build (`grpc-development`) |
 | `.acl` | `copy` | `DotAclCopy` | Entwicklungs-Build (`grpc-development`) |
+| `.config` | `capabilities` | `GetConfigCapabilities` | implementiert (Konfiguration als Rohtext, jeder Build) |
+| `.config` | `list` | `ListResources` | implementiert (Konfiguration als Rohtext, jeder Build) |
+| `.config` | `read` | `ReadResource` | implementiert (Konfiguration als Rohtext, jeder Build) |
+| `.config` | `create` | `CreateResource` | implementiert (Konfiguration als Rohtext, jeder Build) |
+| `.config` | `update` | `UpdateResource` | implementiert (Konfiguration als Rohtext, jeder Build) |
+| `.config` | `delete` | `DeleteResource` | implementiert (Konfiguration als Rohtext, jeder Build) |
 | `.grpc` | – | `DotGrpc` | nicht anwendbar (Entwicklungs-Build: FAILED_PRECONDITION) |
 | `.ovfs_latest` | – | `DotOvfsLatest` | implementiert |
 | `.ovfs_ls` | – | `DotOvfsLs` | implementiert |
