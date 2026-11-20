@@ -231,14 +231,14 @@ Commits auf `development` (lokal, nicht gepusht), in dieser Reihenfolge:
 | Commit | Inhalt |
 | --- | --- |
 | `41cc205` | `bareos-format`: Blockkopf `BB02` mit CRC-32, Datensätze wie `WriteRecordToBlock` (Fortsetzungsköpfe), Volume- und Sitzungslabels, Leser `read_volume`/`summarize`; Label-Block und letzter Block eines bareos-sd-Volumes werden byte-genau nachgebaut |
-| `223d9fb`, `8007c5f` | `osd-ring` (`crates/osd/ring`): Ring je Job, ein Erzeuger, N Verbraucher, Freigabe = kleinster Lesezeiger, Postfach, Info-Bereich; `memmap2`, futex mit 100 ms Zeitgrenze, Cache-Zeilen, seitenweise Fächer, Lebendfrist (Recherche B, D-15); macOS/Windows übersetzbare Platzhalter |
+| `223d9fb`, `e497815` | `osd-ring` (`crates/osd/ring`): Ring je Job, ein Erzeuger, N Verbraucher, Freigabe = kleinster Lesezeiger, Postfach, Info-Bereich; `memmap2`, futex mit 100 ms Zeitgrenze, Cache-Zeilen, seitenweise Fächer, Lebendfrist (Recherche B, D-15); macOS/Windows übersetzbare Platzhalter |
 | `783ef76` | `onesimus-rig`: SD wählbar (`RigOptions::sd`), Client mit `Passive = yes`, beliebige Pakete bauen |
 | `f7dcabb` | `bareos-config`: `osd.d/` als Erweiterung von `bareos-sd.d` nach D-8 (Namensgleichheit, nur Onesimus-Direktiven, Waisen sind Fehler); `Maximum Block Size`, `Label Block Size`, `Maximum Volume Size`, `Just In Time Reservation`, `Client Connect Wait` |
-| `892e34c` | `osd::askdir`: CatReq, UpdCat, Jmsg und Status des SD wie `stored/askdir.cc` |
-| `41dfce3` | `onesimus-daemon::version`: Versionszeile mit Baudatum und Betriebssystem |
-| `5ca4403` | `bareos-format`: Rest eines Datensatzes am Volume-Ende (Job über mehrere Volumes) |
-| `c10fc05` | `osd-daemon`: Director-Befehle, aktiver und passiver FD, Datenphase über `transport::Channel`, Erzeuger und Geräteschreiber (`osd --device-writer`), Volume-Wahl, Label, Volume-Wechsel, EOS; Gerüst-Tests `tests/osd.rs` |
-| `0427cbb` | Glossar und Klassendiagramm von `osd-ring`, CI, README |
+| `cff310a` | `osd::askdir`: CatReq, UpdCat, Jmsg und Status des SD wie `stored/askdir.cc` |
+| `21104b9` | `onesimus-daemon::version`: Versionszeile mit Baudatum und Betriebssystem |
+| `cb0b31b` | `bareos-format`: Rest eines Datensatzes am Volume-Ende (Job über mehrere Volumes) |
+| `036c15c` | `osd-daemon`: Director-Befehle, aktiver und passiver FD, Datenphase über `transport::Channel`, Erzeuger und Geräteschreiber (`osd --device-writer`), Volume-Wahl, Label, Volume-Wechsel, EOS; Gerüst-Tests `tests/osd.rs` |
+| `e964f77` | Glossar und Klassendiagramm von `osd-ring`, CI, README |
 | dieser Commit | Wiki-Seite `osd.md`, Testgerüst, dieser Abschnitt |
 
 Belege (Gerüst, 20.11.2026, odir + ofd `--disable-grpc` + osd; `bareos-fd` ist auf dem Rechner nicht installiert):
