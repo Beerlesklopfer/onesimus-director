@@ -209,11 +209,48 @@ fn stale_rings_of_dead_producers_are_removed() {
     let _live = Ring::create(&live, RingConfig { slots: 1, slot_size: 8, consumers: 1 }).unwrap();
     let dead_ring = Ring::create(&dead, RingConfig { slots: 1, slot_size: 8, consumers: 1 }).unwrap();
     // A pid above pid_max never exists.
-    dead_ring.word(48).store(i32::MAX as u64, Ordering::Relaxed);
+    dead_ring.word(PRODUCER_PID).store(i32::MAX as u64, Ordering::Relaxed);
     assert_eq!(Ring::remove_stale(&prefix), vec![dead.clone()]);
     assert!(Ring::open(&dead).is_err());
     assert!(Ring::open(&live).is_ok());
     assert!(Ring::create(&live, RingConfig { slots: 1, slot_size: 8, consumers: 1 }).is_err());
+}
+
+#[test]
+fn a_stalled_consumer_is_evicted_after_the_liveness_timeout() {
+    let n = name("stall");
+    let _c = Cleanup(n.clone());
+    let mut ring = Ring::create(&n, RingConfig { slots: 1, slot_size: 8, consumers: 2 }).unwrap();
+    ring.set_liveness(Duration::from_millis(300));
+    ring.attach(0).unwrap();
+    ring.attach(1).unwrap();
+    ring.claim(Duration::ZERO).unwrap().publish(1);
+    // consumer 0 keeps reading and beating, consumer 1 stalls
+    let reader = Ring::open(&n).unwrap();
+    assert!(reader.next(0, Duration::ZERO).unwrap().is_some());
+    reader.release(0);
+    let keep_beating = std::thread::spawn(move || {
+        for _ in 0..20 {
+            reader.beat(0);
+            std::thread::sleep(Duration::from_millis(50));
+        }
+    });
+    assert_eq!(ring.claim(Duration::from_secs(5)).unwrap().seq(), 1);
+    assert_eq!(ring.consumer_state(1), State::Failed);
+    assert_eq!(ring.consumer_state(0), State::Running);
+    keep_beating.join().unwrap();
+}
+
+#[test]
+fn payloads_are_page_aligned() {
+    let n = name("align");
+    let _c = Cleanup(n.clone());
+    let ring = Ring::create(&n, RingConfig { slots: 3, slot_size: 65536, consumers: 1 }).unwrap();
+    for _ in 0..3 {
+        let slot = ring.claim(Duration::ZERO).unwrap();
+        assert_eq!(slot.data.as_ptr() as usize % 4096, 0);
+        slot.publish(0);
+    }
 }
 
 #[test]

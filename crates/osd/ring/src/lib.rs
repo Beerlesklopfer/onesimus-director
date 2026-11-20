@@ -32,10 +32,19 @@
 //!
 //! | Bereich | Größe | Inhalt |
 //! |---|---|---|
-//! | Kopf | 4096 | Kennung, Fachzahl, Fachgröße, Verbraucherzahl, Schreibzeiger, Erzeuger-Zustand/PID, Weckwörter, je Verbraucher Lesezeiger/Zustand/PID/Postfach-Zustand |
+//! | Kopf | 4096 | Kennung, Fachzahl, Fachgröße, Verbraucherzahl, Erzeuger-PID/-Zustand/-Startzeit/-Herzschlag; Schreibzeiger und jedes Weckwort auf eigener Cache-Zeile (64 B); je Verbraucher Lesezeiger (eigene Zeile), Zustand, PID, Startzeit, Herzschlag, Postfach-Zustand |
 //! | Postfächer | 8 × 64 KiB | je Verbraucher Anfrage bzw. Antwort |
 //! | Info | 8 KiB | Länge + Bytes (Job-Angaben) |
-//! | Fächer | N × (64 + Fachgröße) | je Fach Länge, 7 Metawörter, Nutzdaten |
+//! | Fachköpfe | N × 64 | je Fach Länge und 7 Metawörter |
+//! | Fächer | N × Fachgröße, auf 4096 gerundet | Nutzdaten, seitenweise ausgerichtet (später O_DIRECT, ungetestet) |
+//!
+//! Muster: Disruptor (ein Erzeuger-Cursor, je Verbraucher eine Folge, der
+//! Erzeuger wartet, solange Cursor − Fachzahl ≥ kleinste Folge). Aus Aeron
+//! übernommen: Zähler auf eigenen Cache-Zeilen und eine Lebendfrist – ein
+//! Verbraucher, dessen Herzschlag bei vollem Ring [`LIVENESS`] lang steht,
+//! wird als gescheitert ausgeschlossen, statt den Job aufzuhalten.
+//! Striping (Verbraucher k liest Fach ≡ k mod N) ist vorbereitet, aber noch
+//! nicht umgesetzt (P5).
 //!
 //! Bareos-Gegenstück: keins. bareos-sd schreibt aus dem Job-Thread direkt
 //! auf das Device (`stored/append.cc` `DoAppendData`, `stored/block.cc`
@@ -58,18 +67,38 @@ pub const INFO_SIZE: usize = 8 * 1024;
 /// Metadata words of a slot (free for the user).
 pub const SLOT_META: usize = 7;
 
+/// A consumer whose heartbeat stands still this long while the ring is
+/// full is evicted (Aeron `client.liveness`).
+pub const LIVENESS: Duration = Duration::from_secs(10);
+
 /// Size of the header.
 const HEADER_SIZE: usize = 4096;
 /// Size of a slot header (length + meta words).
 const SLOT_HEADER: usize = 64;
-/// "OSDRING1".
-const MAGIC: u64 = u64::from_le_bytes(*b"OSDRING1");
+/// Page size the payloads are aligned to.
+const PAGE: usize = 4096;
+/// "OSDRING2".
+const MAGIC: u64 = u64::from_le_bytes(*b"OSDRING2");
+/// Header offset of the producer's pid.
+const PRODUCER_PID: usize = 32;
+/// Header offset of the producer's state.
+const PRODUCER_STATE: usize = 40;
+/// Header offset of the producer's start time (seconds since 1970).
+const PRODUCER_START: usize = 48;
+/// Header offset of the write index (own cache line).
+const WRITE_INDEX: usize = 64;
+/// Header offset of the publish wait word (own cache line).
+const WRITE_SEQ: usize = 128;
+/// Header offset of the release wait word (own cache line).
+const READ_SEQ: usize = 192;
+/// Header offset of the mailbox wait word (own cache line).
+const MAIL_SEQ: usize = 256;
 /// Offset of the first consumer record in the header.
-const CONSUMER_BASE: usize = 128;
-/// Size of a consumer record.
-const CONSUMER_SIZE: usize = 64;
+const CONSUMER_BASE: usize = 512;
+/// Size of a consumer record (read index on its own cache line).
+const CONSUMER_SIZE: usize = 256;
 /// Longest single wait before conditions and peers are rechecked.
-const POLL: Duration = Duration::from_millis(200);
+const POLL: Duration = Duration::from_millis(100);
 
 /// State of the producer or of a consumer.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -151,6 +180,10 @@ pub struct Ring {
     slot_stride: usize,
     /// Consumer count.
     consumers: usize,
+    /// Producer side: last seen heartbeat of each consumer and since when.
+    seen: std::sync::Mutex<Vec<(u64, Instant)>>,
+    /// Eviction timeout (default [`LIVENESS`]).
+    liveness: Duration,
 }
 
 /// A claimed slot of the producer, filled and then published.
@@ -178,14 +211,43 @@ pub struct SlotRef<'a> {
 }
 
 impl Ring {
-    /// Total size of a ring with `cfg`.
-    fn size_of(cfg: &RingConfig) -> usize {
-        HEADER_SIZE + MAX_CONSUMERS * MAILBOX_SIZE + INFO_SIZE + cfg.slots as usize * Self::stride(cfg.slot_size as usize)
+    /// Offset of the slot header table.
+    const fn table_offset() -> usize {
+        HEADER_SIZE + MAX_CONSUMERS * MAILBOX_SIZE + INFO_SIZE
     }
 
-    /// Distance between slots for `slot_size`.
+    /// Offset of the first payload for `slots` slots (page aligned).
+    fn payload_offset(slots: usize) -> usize {
+        (Self::table_offset() + slots * SLOT_HEADER).div_ceil(PAGE) * PAGE
+    }
+
+    /// Total size of a ring with `cfg`.
+    fn size_of(cfg: &RingConfig) -> usize {
+        Self::payload_offset(cfg.slots as usize) + cfg.slots as usize * Self::stride(cfg.slot_size as usize)
+    }
+
+    /// Distance between payloads for `slot_size` (whole pages).
     fn stride(slot_size: usize) -> usize {
-        SLOT_HEADER + slot_size.div_ceil(64) * 64
+        slot_size.div_ceil(PAGE) * PAGE
+    }
+
+    /// A ring value around `map`.
+    fn wrap(name: &str, map: sys::Mapping, cfg: &RingConfig) -> Ring {
+        Ring {
+            name: name.to_string(),
+            map,
+            slots: cfg.slots.into(),
+            slot_size: cfg.slot_size as usize,
+            slot_stride: Self::stride(cfg.slot_size as usize),
+            consumers: cfg.consumers as usize,
+            seen: std::sync::Mutex::new(vec![(0, Instant::now()); cfg.consumers as usize]),
+            liveness: LIVENESS,
+        }
+    }
+
+    /// Sets the eviction timeout of stalled consumers (default [`LIVENESS`]).
+    pub fn set_liveness(&mut self, timeout: Duration) {
+        self.liveness = timeout;
     }
 
     /// Creates ring `name` and makes the calling process its producer.
@@ -194,19 +256,13 @@ impl Ring {
             return Err(RingError::Io(format!("invalid ring configuration {cfg:?}")));
         }
         let map = sys::create(name, Self::size_of(&cfg)).map_err(|e| RingError::Io(format!("ring {name}: {e}")))?;
-        let ring = Ring {
-            name: name.to_string(),
-            map,
-            slots: cfg.slots.into(),
-            slot_size: cfg.slot_size as usize,
-            slot_stride: Self::stride(cfg.slot_size as usize),
-            consumers: cfg.consumers as usize,
-        };
+        let ring = Self::wrap(name, map, &cfg);
         ring.word(8).store(cfg.slots.into(), Ordering::Relaxed);
         ring.word(16).store(cfg.slot_size.into(), Ordering::Relaxed);
         ring.word(24).store(cfg.consumers.into(), Ordering::Relaxed);
-        ring.word(48).store(sys::current_pid(), Ordering::Relaxed);
-        ring.word(40).store(State::Running as u64, Ordering::Relaxed);
+        ring.word(PRODUCER_PID).store(sys::current_pid(), Ordering::Relaxed);
+        ring.word(PRODUCER_START).store(unix_now(), Ordering::Relaxed);
+        ring.word(PRODUCER_STATE).store(State::Running as u64, Ordering::Relaxed);
         ring.word(0).store(MAGIC, Ordering::Release);
         Ok(ring)
     }
@@ -217,23 +273,19 @@ impl Ring {
         if map.len() < HEADER_SIZE {
             return Err(RingError::Io(format!("ring {name}: too short")));
         }
-        let mut ring = Ring { name: name.to_string(), map, slots: 0, slot_size: 0, slot_stride: 0, consumers: 0 };
-        if ring.word(0).load(Ordering::Acquire) != MAGIC {
+        let probe = Self::wrap(name, map, &RingConfig { slots: 0, slot_size: 0, consumers: 0 });
+        if probe.word(0).load(Ordering::Acquire) != MAGIC {
             return Err(RingError::Io(format!("ring {name}: not an osd ring")));
         }
         let cfg = RingConfig {
-            slots: ring.word(8).load(Ordering::Relaxed) as u32,
-            slot_size: ring.word(16).load(Ordering::Relaxed) as u32,
-            consumers: ring.word(24).load(Ordering::Relaxed) as u32,
+            slots: probe.word(8).load(Ordering::Relaxed) as u32,
+            slot_size: probe.word(16).load(Ordering::Relaxed) as u32,
+            consumers: probe.word(24).load(Ordering::Relaxed) as u32,
         };
-        if Self::size_of(&cfg) != ring.map.len() || cfg.consumers as usize > MAX_CONSUMERS {
+        if Self::size_of(&cfg) != probe.map.len() || cfg.consumers as usize > MAX_CONSUMERS {
             return Err(RingError::Io(format!("ring {name}: inconsistent header {cfg:?}")));
         }
-        ring.slots = cfg.slots.into();
-        ring.slot_size = cfg.slot_size as usize;
-        ring.slot_stride = Self::stride(ring.slot_size);
-        ring.consumers = cfg.consumers as usize;
-        Ok(ring)
+        Ok(Self::wrap(name, probe.map, &cfg))
     }
 
     /// Removes ring `name`; existing mappings stay valid.
@@ -247,7 +299,7 @@ impl Ring {
         let mut removed = Vec::new();
         for name in sys::list(prefix).unwrap_or_default() {
             let stale = match Ring::open(&name) {
-                Ok(ring) => !sys::pid_alive(ring.word(48).load(Ordering::Relaxed)),
+                Ok(ring) => !sys::pid_alive(ring.word(PRODUCER_PID).load(Ordering::Relaxed)),
                 Err(_) => true,
             };
             if stale && sys::unlink(&name).is_ok() {
@@ -293,22 +345,22 @@ impl Ring {
 
     /// Write index: number of published slots.
     fn write_index(&self) -> &AtomicU64 {
-        self.word(32)
+        self.word(WRITE_INDEX)
     }
 
     /// Bumped on every publish and producer state change.
     fn write_seq(&self) -> &AtomicU32 {
-        self.word32(56)
+        self.word32(WRITE_SEQ)
     }
 
     /// Bumped on every release and consumer state change.
     fn read_seq(&self) -> &AtomicU32 {
-        self.word32(60)
+        self.word32(READ_SEQ)
     }
 
     /// Bumped when a consumer posts a request.
     fn mail_seq(&self) -> &AtomicU32 {
-        self.word32(64)
+        self.word32(MAIL_SEQ)
     }
 
     /// Read index of consumer `c`.
@@ -318,22 +370,37 @@ impl Ring {
 
     /// State word of consumer `c`.
     fn consumer_word(&self, c: usize) -> &AtomicU64 {
-        self.word(CONSUMER_BASE + c * CONSUMER_SIZE + 8)
+        self.word(CONSUMER_BASE + c * CONSUMER_SIZE + 64)
     }
 
     /// PID of consumer `c`.
     fn consumer_pid(&self, c: usize) -> &AtomicU64 {
-        self.word(CONSUMER_BASE + c * CONSUMER_SIZE + 16)
+        self.word(CONSUMER_BASE + c * CONSUMER_SIZE + 72)
+    }
+
+    /// Start time of consumer `c` (seconds since 1970).
+    fn consumer_start(&self, c: usize) -> &AtomicU64 {
+        self.word(CONSUMER_BASE + c * CONSUMER_SIZE + 80)
+    }
+
+    /// Heartbeat counter of consumer `c`.
+    fn heartbeat(&self, c: usize) -> &AtomicU64 {
+        self.word(CONSUMER_BASE + c * CONSUMER_SIZE + 88)
     }
 
     /// Mailbox state of consumer `c`: 0 empty, 1 request, 2 answer.
     fn mail_state(&self, c: usize) -> &AtomicU32 {
-        self.word32(CONSUMER_BASE + c * CONSUMER_SIZE + 24)
+        self.word32(CONSUMER_BASE + c * CONSUMER_SIZE + 96)
     }
 
     /// Mailbox message length of consumer `c`.
     fn mail_len(&self, c: usize) -> &AtomicU64 {
-        self.word(CONSUMER_BASE + c * CONSUMER_SIZE + 32)
+        self.word(CONSUMER_BASE + c * CONSUMER_SIZE + 104)
+    }
+
+    /// Consumer `c` is alive: one heartbeat.
+    pub fn beat(&self, c: usize) {
+        self.heartbeat(c).fetch_add(1, Ordering::Relaxed);
     }
 
     /// The mailbox bytes of consumer `c`.
@@ -353,7 +420,13 @@ impl Ring {
 
     /// Pointer to slot header `index`.
     fn slot_ptr(&self, index: u64) -> *mut u8 {
-        let base = HEADER_SIZE + MAX_CONSUMERS * MAILBOX_SIZE + INFO_SIZE;
+        // SAFETY: index < slots, inside the mapping.
+        unsafe { self.map.ptr().add(Self::table_offset() + index as usize * SLOT_HEADER) }
+    }
+
+    /// Pointer to the payload of slot `index` (page aligned).
+    fn payload_ptr(&self, index: u64) -> *mut u8 {
+        let base = Self::payload_offset(self.slots as usize);
         // SAFETY: index < slots, inside the mapping.
         unsafe { self.map.ptr().add(base + index as usize * self.slot_stride) }
     }
@@ -385,7 +458,7 @@ impl Ring {
 
     /// State of the producer.
     pub fn producer_state(&self) -> State {
-        State::from_word(self.word(40).load(Ordering::Acquire))
+        State::from_word(self.word(PRODUCER_STATE).load(Ordering::Acquire))
     }
 
     /// Sets the state of consumer `c` and wakes everyone.
@@ -405,16 +478,27 @@ impl Ring {
         }
     }
 
-    /// Marks consumers whose process is gone as failed (D-11); true if any.
+    /// Marks consumers as failed whose process is gone or whose heartbeat
+    /// stood still for the liveness timeout (D-11); true if any.
     fn reap_consumers(&self) -> bool {
         let mut any = false;
+        let mut seen = self.seen.lock().unwrap_or_else(|e| e.into_inner());
         for c in 0..self.consumers {
+            if self.consumer_state(c) != State::Running {
+                continue;
+            }
             let pid = self.consumer_pid(c).load(Ordering::Acquire);
-            if self.consumer_state(c) == State::Running && pid != 0 && !sys::pid_alive(pid) {
+            let beat = self.heartbeat(c).load(Ordering::Relaxed);
+            if seen[c].0 != beat {
+                seen[c] = (beat, Instant::now());
+            }
+            let dead = pid != 0 && !sys::pid_alive(pid);
+            if dead || seen[c].1.elapsed() >= self.liveness {
                 self.consumer_word(c).store(State::Failed as u64, Ordering::Release);
                 any = true;
             }
         }
+        drop(seen);
         if any {
             self.bump_all();
         }
@@ -438,10 +522,10 @@ impl Ring {
             let w = self.write_index().load(Ordering::Relaxed);
             let Some(min) = self.min_read_index() else { return Err(RingError::NoConsumer) };
             if w - min < self.slots {
-                let p = self.slot_ptr(w % self.slots);
+                let p = self.payload_ptr(w % self.slots);
                 // SAFETY: the slot is free (all holding consumers passed it)
                 // and only the single producer writes slots.
-                let data = unsafe { std::slice::from_raw_parts_mut(p.add(SLOT_HEADER), self.slot_size) };
+                let data = unsafe { std::slice::from_raw_parts_mut(p, self.slot_size) };
                 return Ok(SlotMut { ring: self, seq: w, data, meta: [0; SLOT_META] });
             }
             if self.reap_consumers() {
@@ -457,7 +541,7 @@ impl Ring {
 
     /// Producer: all slots are published (`Done`) or the job failed.
     pub fn finish(&self, state: State) {
-        self.word(40).store(state as u64, Ordering::Release);
+        self.word(PRODUCER_STATE).store(state as u64, Ordering::Release);
         self.bump_all();
     }
 
@@ -473,13 +557,14 @@ impl Ring {
             return Err(RingError::Io(format!("ring {}: no consumer {c}", self.name)));
         }
         self.consumer_pid(c).store(sys::current_pid(), Ordering::Release);
+        self.consumer_start(c).store(unix_now(), Ordering::Release);
         self.set_consumer_state(c, State::Running);
         Ok(())
     }
 
     /// Whether the producer failed or its process is gone.
     fn producer_gone(&self) -> bool {
-        self.producer_state() == State::Failed || !sys::pid_alive(self.word(48).load(Ordering::Relaxed))
+        self.producer_state() == State::Failed || !sys::pid_alive(self.word(PRODUCER_PID).load(Ordering::Relaxed))
     }
 
     /// Consumer `c`: the next slot, `None` after the producer finished and
@@ -487,6 +572,7 @@ impl Ring {
     pub fn next(&self, c: usize, timeout: Duration) -> Result<Option<SlotRef<'_>>, RingError> {
         let deadline = Instant::now() + timeout;
         loop {
+            self.beat(c);
             let seen = self.write_seq().load(Ordering::Acquire);
             let r = self.read_index(c).load(Ordering::Relaxed);
             let w = self.write_index().load(Ordering::Acquire);
@@ -504,7 +590,7 @@ impl Ring {
                     (len.min(self.slot_size), meta)
                 };
                 // SAFETY: as above.
-                let data = unsafe { std::slice::from_raw_parts(p.add(SLOT_HEADER), len) };
+                let data = unsafe { std::slice::from_raw_parts(self.payload_ptr(r % self.slots), len) };
                 return Ok(Some(SlotRef { seq: r, data, meta }));
             }
             match self.producer_state() {
@@ -522,6 +608,7 @@ impl Ring {
 
     /// Consumer `c`: the slot from [`Ring::next`] is done.
     pub fn release(&self, c: usize) {
+        self.beat(c);
         self.read_index(c).fetch_add(1, Ordering::AcqRel);
         self.read_seq().fetch_add(1, Ordering::AcqRel);
         sys::wake(self.read_seq());
@@ -540,6 +627,7 @@ impl Ring {
         sys::wake(self.mail_seq());
         let deadline = Instant::now() + timeout;
         loop {
+            self.beat(c);
             if self.mail_state(c).load(Ordering::Acquire) == 2 {
                 let len = (self.mail_len(c).load(Ordering::Relaxed) as usize).min(MAILBOX_SIZE);
                 let answer = self.mailbox(c)[..len].to_vec();
@@ -582,6 +670,11 @@ impl Ring {
         }
         served
     }
+}
+
+/// Seconds since 1970.
+fn unix_now() -> u64 {
+    std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0)
 }
 
 impl SlotMut<'_> {

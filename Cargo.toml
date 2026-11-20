@@ -84,6 +84,7 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 # OS
 nix = { version = "0.29", features = ["process", "signal", "fs", "user", "hostname"] }
 libc = "0.2"
+memmap2 = "0.9"
 
 # Signal handling
 ctrlc = "3"
