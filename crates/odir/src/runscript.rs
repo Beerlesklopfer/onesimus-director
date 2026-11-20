@@ -559,9 +559,14 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("odir-enoexec-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         let script = dir.join("pre-backup.sh");
-        std::fs::write(&script, "# comment first\n#!/bin/bash\necho \"ran $1\"\n").unwrap();
-        use std::os::unix::fs::PermissionsExt;
-        std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
+        // Written by a child process: if this test process held a writable
+        // fd to the script, a child forked meanwhile by a parallel test could
+        // inherit it until its exec, and exec'ing the script would fail with
+        // ETXTBSY (the flake seen since 19.11.2026).
+        let status = std::process::Command::new("/bin/sh")
+            .arg("-c").arg("printf '# comment first\\n#!/bin/bash\\necho \"ran $1\"\\n' > \"$0\" && chmod 755 \"$0\"")
+            .arg(&script).status().unwrap();
+        assert!(status.success());
         let messages = run_shell_command(&format!("{} arg1", script.display()), "BeforeJob");
         let _ = std::fs::remove_dir_all(&dir);
         assert!(messages.iter().any(|(_, t)| t == "BeforeJob: ran arg1\n"), "{messages:?}");
