@@ -70,3 +70,71 @@ Stand: 20.11.2026. Alle Versions- und Datumsangaben stammen von crates.io bzw. d
 - Unter macOS vor 14.4 gibt es kein öffentliches prozessübergreifendes futex-Gegenstück.
 - Rohgeräte brauchen auf jeder Plattform Rechte.
 - Fällt die Wahl doch auf iceoryx2, ist dessen API noch nicht stabil.
+
+## Nachtrag A: eigenes Backup-Dateisystem („osdfs“)
+
+**Ergebnis:** machbar, ohne die Bareos-Kompatibilität aufzugeben, **wenn jedes osd-Volume ein bytegleiches Bareos-Datei-Volume bleibt** (Volume-Label, dann Bareos-Blöcke). Die Dateisystem-Schicht verwaltet dann nur Extents und Volume-Namen. Das ist die eingesparte doppelte Organisation.
+
+### Vorbilder
+
+| Entwurf | Auf der Platte | Übernehmen | Lizenz |
+| --- | --- | --- | --- |
+| NILFS2 | logstrukturiert, gleich große Segmente mit Zusammenfassung, Checkpoints, Wiederherstellung über Segment-Grenzmarken ([Doku](https://docs.kernel.org/filesystems/nilfs2.html)) | feste Segmente, Zusammenfassung je Segment, Vorwärtslesen; **kein Cleaner nötig**, weil Volumes als Ganzes recycelt werden | GPL-2.0, nur Entwurf |
+| F2FS | getrennte Logs für Knoten und Daten ([Doku](https://www.kernel.org/doc/html/latest/filesystems/f2fs.html)) | Metadaten-Log von den Daten trennen | nur Entwurf |
+| Zoned Storage (ZNS/SMR) | Zonen nur sequenziell beschreibbar, mit Schreibzeiger, Reset löscht ([zonedstorage.io](https://zonedstorage.io/docs/introduction/zoned-storage)) | Segment = Zonengröße, Recyceln = Reset, Metadaten in kleinem Bereich mit wahlfreiem Schreiben; später SMR/ZNS-fähig | Begriff |
+| Ceph BlueStore | Label an Offset 0 mit Kopien, crc32c; Belegungsstand nur im Speicher, nach Absturz durch Durchsuchen neu aufgebaut ([fast-onode-scan](https://docs.ceph.com/en/latest/rados/bluestore/fast-onode-scan/)) | Label mit Kopien, CRC je Block; Belegung **nicht** bei jedem Schreiben sichern, sondern aus der Volume-Tabelle ableiten | LGPL, nur Entwurf |
+| SPDK Blobstore | Superblock in Cluster 0, Blob = Liste von Clustern (~1 MiB), Wiederaufbau aus den Metadaten je Blob ([Doku](https://spdk.io/doc/blob.html)) | **nächstes Vorbild:** Volume = Blob = Liste von Segmenten | BSD-3, nur Entwurf |
+| LTFS | Index-Partition mit XML-Index, Generationsnummer, Zeiger auf den vorigen Index ([SNIA 2.4](https://www.snia.org/sites/default/files/technical-work/ltfs/release/SNIA-LTFS-Format-2.4.0-TechPosition.pdf)) | Index-Generationen mit Rückzeigern | BSD-3; für Band bleibt das Bareos-Format |
+| Proxmox Backup Server | auf normalem FS, Chunks nach SHA-256 mit CRC; auf Band ein Katalog auf dem Medium ([Überblick](https://pbs.proxmox.com/docs/technical-overview.html), [Band](https://pbs.proxmox.com/docs/tape-backup.html)) | Medien, die sich selbst beschreiben | AGPL-3.0 **[unbelegt]** |
+| IBM Spectrum Protect | DISK-Pools; auf AIX rohe LVs erlaubt, **unter Linux verboten**; Warnung, dass der Server nicht immer erkennt, ob ein rohes LV schon Daten enthält ([DEFINE VOLUME](https://www.ibm.com/docs/SSGSG7_7.1.5/srv.reference/r_cmd_volume_define.html)) | **Magisches Label und Ablehnung fremder Platten sind Pflicht** | proprietär |
+| Veeam | kein eigenes FS, nutzt XFS-Reflink bzw. ReFS-Block-Cloning ([Fast Clone](https://helpcenter.veeam.com/docs/vbr/userguide/backup_repository_block_cloning.html)) | Gegenbeispiel: der Marktführer bleibt auf einem FS | proprietär |
+
+### Skizze (eine osdfs je Platte oder Partition)
+
+```
+LBA 0      Platten-Label (4 KiB): Magic "OSDFS001", fs-UUID, Stripe-Satz-UUID,
+           Mitglied i/N, Stripe-Einheit (64 KiB), Segmentgröße, Sektorgröße,
+           MediaType, Geräteart (fest/USB), Generation, crc32c
+           (Kopien an festen Stellen; letztes Segment spiegelt es)
+Metadaten  2 × Volume-Tabelle (A/B, Copy-on-Write, Generation + crc32c):
+           je Volume: Name, Bareos-MediaType, Zustand (Append/Full/Used/Purged),
+           Segmentliste, bestätigte Länge, erste/letzte JobId, Label-Zeit
+Daten      Segmente, z. B. 256 MiB (Zonengröße), nur Anhängen;
+           je Segment: 4 KiB Zusammenfassung (Volume-Id, Folge, CRC) + Bareos-Blöcke
+```
+
+- **Volume = benannte Extent-Menge** mit dem Inhalt eines bytegleichen Bareos-Datei-Volumes. Export = Segmente hintereinander in eine Datei; `bls`, `bextract` und bareos-sd lesen sie. Ein Export-Rundlauftest genügt als Nachweis.
+- **Belegung:** nur Anhängen aus einer Liste freier Segmente. Frei wird Platz erst, wenn Bareos ein ganzes Volume purged oder recycelt; dann gehen seine Segmente zurück (bzw. Zonen-Reset bei ZNS). Eine Bitmap über die Segmente reicht und wird aus der Volume-Tabelle neu aufgebaut.
+- **Absturzsicherheit:** Volume-Tabelle A/B mit Generation. Reihenfolge beim Bestätigen: Blöcke fsync, dann die andere Tabellenkopie schreiben, dann fsync. Wiederherstellung: neueste gültige Tabelle laden, dann im letzten Segment vorwärts lesen, solange Zusammenfassung, Block-CRC und Blocknummer stimmen (wie NILFS). Maßgeblich bleibt der Katalog (JobMedia). Kein Journal nötig, solange die Metadaten nur die Volume-Tabelle sind.
+- **Striping (D-4/D-5):** jede Mitgliedsplatte hat ihre eigene osdfs; ein Stripe-Volume ist ein gleichnamiges Volume auf jedem Mitglied des Satzes, nur innerhalb einer Geräteart. Block *n* geht an Mitglied *n mod N*.
+- **Wechselplatten (D-6):** das Platten-Label beschreibt sich selbst; osd erkennt eine eingesteckte Platte an der fs-UUID, nicht am Gerätepfad.
+- **Ausrichtung:** alles auf 64 KiB, Metadaten mindestens auf 4 KiB bzw. die physische Sektorgröße.
+- **Prüfsummen:** crc32c in Label, Tabelle, Segment-Zusammenfassung und Bareos-Block; optional xxh3 oder BLAKE3 je Segment zum Scrubben.
+
+### Rust-Bausteine (crates.io, 20.11.2026)
+
+`crc32c` 0.6.9 oder `crc-fast` 1.10.0; `twox-hash` 2.1.5, `xxhash-rust` 0.8.21 (BSL-1.0, verträglich **[unbelegt]**), `blake3` 1.8.7; Bitmap mit `roaring` 0.12.0 oder `bitvec` 1.1.1. `redb` 5.0.0 hat einen `StorageBackend`-Trait und könnte auf einem reservierten Rohbereich liegen (Blockausrichtung **[unbelegt]**), ist für eine Tabelle mit einigen tausend Einträgen aber überdimensioniert. `fjall` zu schwer, `sled` veraltet, `persy` MPL-2.0. **Kein Allokator- oder Rohgeräte-FS-Crate lohnt die Übernahme**; die Belegung ist eine Bitmap von einigen hundert Zeilen.
+
+### Folgen für die Bareos-Kompatibilität
+
+- Volumes ohne Striping bleiben bytegleiche Bareos-Volumes, portabel über den Export.
+- Stripe-Volumes sind nur für osd (D-4/D-5); jedes Mitglied ist trotzdem ein gültiger Bareos-Blockstrom.
+- Ein bareos-sd kann osdfs-Platten nicht direkt lesen. Abhilfe: `osd export <volume>`, später eine schreibgeschützte FUSE-Sicht mit Volumes als Dateien **[Vorschlag]**.
+- Band und S3 sind nicht betroffen: osdfs gilt nur für Platten und Wechselplatten.
+
+### Risiken
+
+1. Eine fremde Platte überschreiben (die IBM-Warnung): Magic-Label verlangen, alles mit Partitionstabelle oder FS-Signatur ohne `--force` ablehnen, `O_EXCL`.
+2. Fehler in der Wiederherstellung bedeuten Datenverlust: Tests mit eingeschleusten Abstürzen (kill während des Tabellen-Commits) und ein Scrubber.
+3. Rechte: root/Gruppe `disk` (Linux), Admin plus Volume-Sperre (Windows), rdisk (macOS).
+4. Admins verlieren gewohnte Werkzeuge (ls, df, rsync); Export und FUSE mildern das.
+5. Rohzugriff unter Windows und macOS ungetestet.
+6. Wenig Marktbeleg: Veeam und PBS bleiben auf Dateisystemen, IBM verbietet rohe LVs unter Linux.
+
+### Empfohlener erster Schritt
+
+1. **osdfs v1** festlegen: Platten-Label mit Kopien, A/B-Volume-Tabelle, feste Segmente, Volumes als Segmentlisten mit unveränderten Bareos-Volume-Bytes.
+2. Zuerst gegen eine **vorbelegte gewöhnliche Datei oder ein Loop-Device** als „Platte“ bauen: derselbe Codepfad, ohne root testbar. Danach `/dev/sdX` mit `O_DIRECT|O_EXCL`, zunächst nur unter Linux.
+3. Umfang: eine Platte, kein Striping; Label, Volume anlegen/anhängen/schließen, Recyceln (Segmente frei), `osd export` in eine einfache Bareos-Datei, Wiederherstellung nach kill -9.
+4. Abnahme: ein exportiertes Volume besteht `bls`; Tests mit eingeschleusten Abstürzen stellen ohne Verlust bestätigter Blöcke wieder her.
+5. Danach in dieser Reihenfolge: Striping über N Mitglieder, Wechselplatten mit Selbstbeschreibung, dann Rohzugriff unter macOS und Windows.
