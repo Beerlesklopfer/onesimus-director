@@ -65,7 +65,7 @@ jobs:
           cargo test --locked \
             -p odir -p oconsole -p bareos-config -p ofd -p onesimus-plugins \
             -p bareos-bnet -p bareos-orm \
-            -p bareos-format -p onesimus-daemon -p onesimus-rig -p osd \
+            -p bareos-format -p onesimus-daemon -p onesimus-rig -p osd -p osd-daemon \
             --no-default-features --features oconsole/mcp-production
 
       # Dokumentationsregel (docs/wiki/dokumentation.md): die neuen Crates
@@ -76,7 +76,7 @@ jobs:
           RUSTDOCFLAGS: -D warnings
         run: |
           cargo doc --locked --no-deps --document-private-items \
-            -p bareos-format -p onesimus-daemon -p onesimus-rig
+            -p bareos-format -p onesimus-daemon -p onesimus-rig -p osd -p osd-daemon
 
       # Entwicklungs-Build der typisierten gRPC-API (S-35): nur Tests, die
       # Pakete bleiben Produktions-Builds
