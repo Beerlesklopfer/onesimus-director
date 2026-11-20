@@ -21,7 +21,7 @@ enable job=<job-name> client=<client-name> schedule=<schedule-name>
 
 **Paritätsfälle (35):** `c006-enable-nojob-api2`, `c006-enable-noclient`, `c011-enable-cancel`, `c012-enable-storage`, `c025-enable-select-limited`, `c025-enable-select-limited-api2`, `c025-enable-client-select-limited`, `c025-enable-client-select-limited-api2`, `c025-enable-select-operator`, `c025-enable-select-operator-api2`, `c025-enable-client-select-operator`, `c025-enable-client-select-operator-api2`, `c025-enable-select-bvfs`, `c025-enable-select-bvfs-api2`, `c025-enable-client-select-bvfs`, `c025-enable-client-select-bvfs-api2`, `c025-enable-select-acl`, `c025-enable-select-acl-api2`, `c025-enable-client-select-acl`, `c025-enable-client-select-acl-api2`, `c032-job-disable-enable`, `c032-job-disable-enable-api1`, `c032-job-disable-enable-api2`, `c032-client-disable-enable`, `c032-client-disable-enable-api2`, `c032-job-select-disable-enable`, `c032-limited-job`, `c032-limited-job-api2`, `c046-enable-noarg-api2`, `c046-enable-schedule-api2`, `c046-enable-client-api2`, `c058-admin-disabled`, `c063-disable-show`, `c063-disable-api2`, `enable-nojob`.
 
-**Lokaler Handler:** [crates/odir/src/commands/job.rs:2281](../../../crates/odir/src/commands/job.rs).
+**Lokaler Handler:** [crates/odir/src/commands/job.rs:2283](../../../crates/odir/src/commands/job.rs).
 
 Die folgenden vorhandenen Beispiele und Verhaltensbeschreibungen sind lokale Dokumentation; sie sind kein Beleg für vollständige Bareos-Kompatibilität. Bei Widersprüchen gilt der obige Befund.
 <!-- bareos-reference:end -->

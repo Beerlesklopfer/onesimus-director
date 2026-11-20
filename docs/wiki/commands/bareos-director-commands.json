@@ -679,7 +679,7 @@
   "local_source_files": [
     {
       "path": "Cargo.toml",
-      "sha256": "c2517fcc62e5798941bfb0823778295dc0e4bee450d840f6f0bbe5d1cd4af902"
+      "sha256": "44ac5a21ba987c880d1c768751767eb94d5731a2a729c60920e68d6414c63268"
     },
     {
       "path": "crates/bareos-bnet/src/debug.rs",
@@ -691,7 +691,7 @@
     },
     {
       "path": "crates/oconsole/src/main.rs",
-      "sha256": "050ae764f2c7b7463ef5ecbeabd749ccc067ab2d6ae418c984e955e1a41739b0"
+      "sha256": "06022447436c06d9a353c520e01fc6a3a2ff36f47ed3b9fbd23196e32d0669f8"
     },
     {
       "path": "crates/oconsole/src/mcp.rs",
@@ -715,7 +715,7 @@
     },
     {
       "path": "crates/odir/src/command_grammar.rs",
-      "sha256": "a28c340ec16817c4e81a1fc48806bc11433fd36d5dab319945e2609ed92b6c7f"
+      "sha256": "00e027d9b5016121c4a59f6e3d05fdbcca94c71062c88984bbf5468d44e69dbf"
     },
     {
       "path": "crates/odir/src/command_registry.rs",
@@ -791,7 +791,7 @@
     },
     {
       "path": "crates/odir/src/commands/job.rs",
-      "sha256": "2ef1e65deb966e7007d02a874528e12385bf56b3fbefe4c4a2034b298d3fd453"
+      "sha256": "cdead3416cd3ad803926540c22b288ed2db8e71dd1aa4cf7aff772d7da871bbe"
     },
     {
       "path": "crates/odir/src/commands/label.rs",
@@ -819,7 +819,7 @@
     },
     {
       "path": "crates/odir/src/commands/purge.rs",
-      "sha256": "24a22e8dbd9c95d2695e59869bb302a36d212853cff4dcb823d05adf65981d30"
+      "sha256": "93cda4679ac6171a345417d69f85efef2ad50cbfa99d45028aa2ef9537a7c6db"
     },
     {
       "path": "crates/odir/src/commands/purge_bulk.rs",
@@ -831,7 +831,7 @@
     },
     {
       "path": "crates/odir/src/commands/restore.rs",
-      "sha256": "4cd6c324b81bc3922bb3f76249145dba6a025f4bedacf012322e31b539b19371"
+      "sha256": "69e515865b3ae73c23d1a8600574b39fbd48c920fbe0734db841e03e2009fdc1"
     },
     {
       "path": "crates/odir/src/commands/restore_bsr.rs",
@@ -843,7 +843,7 @@
     },
     {
       "path": "crates/odir/src/commands/show.rs",
-      "sha256": "c10bcd1ad1829c00e583e3b4cb42e6ae521429e289609e6ec1b5bbd48da4bd9f"
+      "sha256": "25ef53bb503cf5b8123ba3d32298f29797e70a750c3190005a407804205a3f60"
     },
     {
       "path": "crates/odir/src/commands/show_items.rs",
@@ -871,15 +871,15 @@
     },
     {
       "path": "crates/odir/src/grammar_table.rs",
-      "sha256": "fbb0ad6d40df726e1f7ed25cc9c3f3ea0e5f0527dce4ac2d72ec80b92381b8d2"
+      "sha256": "94ac5b452947a6b1428e5eef1f5a693a11c3a635cfca4b58862bdb35680ad0be"
     },
     {
       "path": "crates/odir/src/job_manager.rs",
-      "sha256": "4b409d56c6e867f7a7af6c059a2edb06d46e2dbe619ce0ac46987992b6f86d0b"
+      "sha256": "ff4c502b0a7a6e140cf041ec0b2b7f0e5e1558b10554b9dd4ec8ceabc6c13baf"
     },
     {
       "path": "crates/odir/src/job_worker.rs",
-      "sha256": "f691abd77b37e048daae9e7799980bb6129796973590b749b4272d2de1d0b461"
+      "sha256": "2269888292077848f0a778af2fa1a371925bff7833de0f14f92e4a54508a7e25"
     },
     {
       "path": "crates/odir/src/logging.rs",
@@ -887,7 +887,7 @@
     },
     {
       "path": "crates/odir/src/main.rs",
-      "sha256": "d14fc3ffee3e36a43829f6c03fe5ed463b14383f16692bc3469ab75b2b61573c"
+      "sha256": "1445788fe347026a12c006f932eff066408e7917ab9c170a1292fa6bcf0f4a84"
     },
     {
       "path": "crates/odir/src/scheduler.rs",
@@ -3994,7 +3994,7 @@
         },
         "implementation": {
           "file": "crates/odir/src/commands/job.rs",
-          "line": 2285
+          "line": 2287
         },
         "declared_arguments": [
           "job",
@@ -4080,7 +4080,7 @@
         },
         "implementation": {
           "file": "crates/odir/src/commands/job.rs",
-          "line": 2281
+          "line": 2283
         },
         "declared_arguments": [
           "job",
@@ -8146,6 +8146,7 @@
         "declared_arguments": [
           "jobid",
           "jobname",
+          "job",
           "ujobid",
           "mount",
           "timeout",
