@@ -17,7 +17,7 @@ use std::process::Command;
 use std::time::{Duration, Instant};
 
 use crate::catalog::Cluster;
-use crate::config::{CLIENT, CONSOLE_PASSWORD, Layout, Ports};
+use crate::config::{CLIENT, CONSOLE_PASSWORD, Grpc, Layout, Ports};
 use crate::console::{Console, queued_job_id};
 use crate::prereq::Programs;
 use crate::process::{Daemon, port_free, wait_port};
@@ -51,6 +51,11 @@ pub struct RigOptions {
     /// `Passive = yes` on the Client: the SD connects to the FD instead of
     /// the FD to the SD (`passive client address=… port=… ssl=…`).
     pub passive_client: bool,
+    /// gRPC of the FD (ofd) and of the Director's Client resource.
+    pub fd_grpc: Grpc,
+    /// gRPC of the SD (osd; bareos-sd has none) and of the Director's
+    /// Storage resource.
+    pub sd_grpc: Grpc,
 }
 
 impl RigOptions {
@@ -65,6 +70,8 @@ impl RigOptions {
             auditing: false,
             sd: None,
             passive_client: false,
+            fd_grpc: Grpc::Off,
+            sd_grpc: Grpc::Off,
         }
     }
 }
@@ -161,8 +168,13 @@ impl Rig {
             ("FD", ports.fd, "127.0.0.1"),
             ("SD", ports.sd, "127.0.0.1"),
             ("Katalog", ports.pg, crate::catalog::LISTEN),
+            ("FD gRPC", ports.fd_grpc, "127.0.0.1"),
+            ("SD gRPC", ports.sd_grpc, "127.0.0.1"),
         ] {
-            if what == "FD" && !options.start_fd {
+            if what == "FD" && !options.start_fd
+                || what == "FD gRPC" && !(options.start_fd && options.fd_grpc == Grpc::On)
+                || what == "SD gRPC" && options.sd_grpc != Grpc::On
+            {
                 continue;
             }
             let address: SocketAddr = format!("{host}:{port}").parse().map_err(|e| format!("{e}"))?;
@@ -190,28 +202,44 @@ impl Rig {
             let audit = crate::config::auditing_resources(&self.layout, self.ports, &cluster.user);
             crate::config::write_director_resources(&self.layout, &audit).map_err(io)?;
         }
-        if self.options.passive_client {
-            let passive = crate::config::passive_client_resources(self.ports);
-            crate::config::write_director_resources(&self.layout, &passive).map_err(io)?;
+        if self.options.passive_client || self.options.fd_grpc.configured() {
+            let client = crate::config::client_resource(&self.layout, self.ports, self.options.passive_client, self.options.fd_grpc);
+            crate::config::write_director_resources(&self.layout, &[client]).map_err(io)?;
+        }
+        // A pinned certificate no daemon will create: the Director must
+        // try the port and fall back on the refused connection.
+        if self.options.fd_grpc == Grpc::Disabled {
+            crate::config::write_stand_in_certificate(&self.layout.fd_work.join(crate::config::FD_GRPC_CERT)).map_err(io)?;
+        }
+        if self.options.sd_grpc == Grpc::Disabled || self.options.sd_grpc.configured() && !is_osd(&self.programs.sd) {
+            crate::config::write_stand_in_certificate(&self.layout.sd_work.join(crate::config::SD_GRPC_CERT)).map_err(io)?;
+        }
+        if self.options.sd_grpc.configured() {
+            let storage = crate::config::storage_resource(&self.layout, self.ports, self.options.sd_grpc);
+            crate::config::write_director_resources(&self.layout, &[storage]).map_err(io)?;
+            crate::config::write_sd_grpc_extension(&self.layout, self.ports).map_err(io)?;
         }
         crate::config::write_director_resources(&self.layout, &self.options.extra_director).map_err(io)?;
         self.catalog = Some(cluster);
 
         let debug = self.options.debug_level.to_string();
         let local = |port: u16| SocketAddr::from(([127, 0, 0, 1], port));
-        let sd_conf = self.layout.sd_conf.display().to_string();
-        let mut sd = Daemon::spawn("sd", &self.programs.sd, &["-f", "-c", &sd_conf, "-d", "50"], &self.layout.root.join("sd.log"))?;
+        let sd_args = self.sd_args(&self.programs.sd);
+        let sd_args: Vec<&str> = sd_args.iter().map(String::as_str).collect();
+        let mut sd = Daemon::spawn("sd", &self.programs.sd, &sd_args, &self.layout.root.join("sd.log"))?;
         let started = wait_port(&mut sd, local(self.ports.sd), Duration::from_secs(20));
         self.daemons.push(sd);
         started?;
         if self.options.start_fd {
             let fd_conf = self.layout.fd_conf.display().to_string();
-            let mut fd = Daemon::spawn(
-                "ofd",
-                &self.programs.ofd,
-                &["-f", "--disable-grpc", "-c", &fd_conf, "-d", &debug],
-                &self.layout.root.join("fd.log"),
-            )?;
+            let grpc_listen = format!("127.0.0.1:{}", self.ports.fd_grpc);
+            let mut fd_args = vec!["-f", "-c", &fd_conf, "-d", &debug];
+            if self.options.fd_grpc.disabled() {
+                fd_args.push("--disable-grpc");
+            } else {
+                fd_args.extend(["--grpc-listen", &grpc_listen]);
+            }
+            let mut fd = Daemon::spawn("ofd", &self.programs.ofd, &fd_args, &self.layout.root.join("fd.log"))?;
             let started = wait_port(&mut fd, local(self.ports.fd), Duration::from_secs(20));
             self.daemons.push(fd);
             started?;
@@ -227,6 +255,19 @@ impl Rig {
         let started = wait_port(&mut dir, local(self.ports.dir), Duration::from_secs(30));
         self.daemons.push(dir);
         started
+    }
+
+    /// The arguments of SD `program`: osd gets `--disable-grpc` unless
+    /// [`RigOptions::sd_grpc`] is [`Grpc::On`] (its port then comes from
+    /// osd.d); bareos-sd knows no gRPC.
+    fn sd_args(&self, program: &Path) -> Vec<String> {
+        let mut args: Vec<String> = ["-f", "-c"].map(String::from).to_vec();
+        args.push(self.layout.sd_conf.display().to_string());
+        args.extend(["-d".to_string(), "50".to_string()]);
+        if is_osd(program) && self.options.sd_grpc.disabled() {
+            args.push("--disable-grpc".into());
+        }
+        args
     }
 
     /// A new console session with the Director.
@@ -395,9 +436,10 @@ impl Rig {
         self.daemons[index].stop();
         self.sd_restarts += 1;
         let n = self.sd_restarts;
-        let sd_conf = self.layout.sd_conf.display().to_string();
         let log = self.layout.root.join(format!("sd-{n}.log"));
-        let mut sd = Daemon::spawn("sd", program, &["-f", "-c", &sd_conf, "-d", "50"], &log)?;
+        let args = self.sd_args(program);
+        let args: Vec<&str> = args.iter().map(String::as_str).collect();
+        let mut sd = Daemon::spawn("sd", program, &args, &log)?;
         let started = wait_port(&mut sd, SocketAddr::from(([127, 0, 0, 1], self.ports.sd)), Duration::from_secs(20));
         self.daemons[index] = sd;
         self.programs.sd = program.to_path_buf();
@@ -408,6 +450,11 @@ impl Rig {
     pub fn root(&self) -> &Path {
         &self.layout.root
     }
+}
+
+/// Whether `program` is osd (by its file name), not bareos-sd.
+pub fn is_osd(program: &Path) -> bool {
+    program.file_name().is_some_and(|n| n == "osd")
 }
 
 impl Drop for Rig {

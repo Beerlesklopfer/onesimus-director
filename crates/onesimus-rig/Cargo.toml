@@ -11,6 +11,8 @@ publish = false
 bareos-bnet.workspace = true
 libc.workspace = true
 aquamarine.workspace = true
+# a stand-in gRPC certificate where no daemon creates one (fallback cases)
+rcgen.workspace = true
 
 [dev-dependencies]
 # tests/osd.rs: reads back the volume the SD wrote

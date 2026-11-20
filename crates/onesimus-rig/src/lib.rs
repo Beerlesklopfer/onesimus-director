@@ -38,4 +38,5 @@ pub mod process;
 mod rig;
 pub mod tree;
 
-pub use rig::{FdEndJob, JobRow, Rig, RigOptions, build_workspace_binaries, build_workspace_packages};
+pub use config::Grpc;
+pub use rig::{FdEndJob, JobRow, Rig, RigOptions, build_workspace_binaries, build_workspace_packages, is_osd};

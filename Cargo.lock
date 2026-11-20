@@ -2326,6 +2326,7 @@ dependencies = [
  "onesimus-plugins",
  "onesimus-proto-rs",
  "prost",
+ "rcgen",
  "serde_json",
  "sha2",
 ]

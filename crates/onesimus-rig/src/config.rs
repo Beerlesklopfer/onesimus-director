@@ -24,7 +24,7 @@ pub const CONSOLE_PASSWORD: &str = "rig-dir-pw";
 /// Name of the client (FD) in all configurations.
 pub const CLIENT: &str = "vfd";
 
-/// The four ports of one rig, all above 1024.
+/// The ports of one rig, all above 1024.
 #[derive(Debug, Clone, Copy)]
 pub struct Ports {
     /// Director port (console and daemons connect here).
@@ -35,13 +35,115 @@ pub struct Ports {
     pub sd: u16,
     /// Catalog cluster port on `127.0.0.2`.
     pub pg: u16,
+    /// gRPC port of the FD (ofd `--grpc-listen`), used with [`Grpc::On`].
+    pub fd_grpc: u16,
+    /// gRPC port of the SD (osd.d `Grpc Port`), used with [`Grpc::On`].
+    pub sd_grpc: u16,
 }
 
 impl Ports {
-    /// Four consecutive ports from `base`: Director, FD, SD, catalog.
+    /// Six consecutive ports from `base`: Director, FD, SD, catalog, FD
+    /// gRPC, SD gRPC (the tests space their bases by 10).
     pub fn from_base(base: u16) -> Ports {
-        Ports { dir: base, fd: base + 1, sd: base + 2, pg: base + 3 }
+        Ports { dir: base, fd: base + 1, sd: base + 2, pg: base + 3, fd_grpc: base + 4, sd_grpc: base + 5 }
     }
+}
+
+/// How a daemon of the rig offers gRPC and whether the Director uses it
+/// (Plan P1 stage 3, interop matrix).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Grpc {
+    /// No gRPC: the daemon runs with `--disable-grpc`, the Director's
+    /// resource has no `Grpc Enable` (BNET as before stage 3).
+    Off,
+    /// The daemon listens on its rig gRPC port, the Director's resource
+    /// has `Grpc Enable = yes` with port and pinned certificate.
+    On,
+    /// The Director's resource as with [`Grpc::On`], but the daemon runs
+    /// with `--disable-grpc`: the Director must fall back to BNET.
+    Disabled,
+}
+
+impl Grpc {
+    /// Whether the Director's resource carries the gRPC directives.
+    pub fn configured(self) -> bool {
+        self != Grpc::Off
+    }
+
+    /// Whether the daemon is started with `--disable-grpc`.
+    pub fn disabled(self) -> bool {
+        self != Grpc::On
+    }
+}
+
+/// File name of ofd's generated gRPC certificate in its working directory.
+pub const FD_GRPC_CERT: &str = "onesimus-fd-grpc.crt";
+
+/// File name of osd's generated gRPC certificate in its working directory.
+pub const SD_GRPC_CERT: &str = "onesimus-sd-grpc.crt";
+
+/// The Onesimus gRPC directives of a Director resource (`Grpc Enable`,
+/// port, pinned certificate, server name `localhost`), indented.
+fn grpc_directives(port: u16, cert: &Path) -> String {
+    format!(
+        "  Grpc Enable = yes\n  Grpc Port = {port}\n  Grpc CA Certificate File = \"{}\"\n  Grpc Server Name = localhost\n",
+        cert.display()
+    )
+}
+
+/// The Director's Client resource of the rig FD: `Passive = yes` with
+/// `passive`, the gRPC directives unless `grpc` is [`Grpc::Off`].
+pub fn client_resource(layout: &Layout, ports: Ports, passive: bool, grpc: Grpc) -> (String, String) {
+    let mut text = format!(
+        "Client {{\n  Name = {CLIENT}\n  Address = 127.0.0.1\n  FD Port = {fd}\n  Password = \"vfd-pw\"\n",
+        fd = ports.fd
+    );
+    if passive {
+        text += "  Passive = yes\n";
+    }
+    if grpc.configured() {
+        text += &grpc_directives(ports.fd_grpc, &layout.fd_work.join(FD_GRPC_CERT));
+    }
+    text += "}\n";
+    (format!("client/{CLIENT}.conf"), text)
+}
+
+/// The Director's Storage resource of the rig SD, with the gRPC
+/// directives unless `grpc` is [`Grpc::Off`].
+pub fn storage_resource(layout: &Layout, ports: Ports, grpc: Grpc) -> (String, String) {
+    let mut text = format!(
+        "Storage {{\n  Name = vsd\n  Address = 127.0.0.1\n  SD Port = {sd}\n  Password = \"vsd-pw\"\n  Device = VDev\n  \
+         Media Type = VFile\n  Maximum Concurrent Jobs = 10\n",
+        sd = ports.sd
+    );
+    if grpc.configured() {
+        text += &grpc_directives(ports.sd_grpc, &layout.sd_work.join(SD_GRPC_CERT));
+    }
+    text += "}\n";
+    ("storage/vsd.conf".into(), text)
+}
+
+/// Writes a self-signed certificate for `localhost` to `path` unless it
+/// exists. Used where the Director is told to pin a daemon's certificate
+/// that the daemon never generates ([`Grpc::Disabled`], bareos-sd): the
+/// Director then really tries the gRPC port, is refused and falls back,
+/// instead of failing early on a missing file.
+pub fn write_stand_in_certificate(path: &Path) -> std::io::Result<()> {
+    if path.exists() {
+        return Ok(());
+    }
+    let cert = rcgen::generate_simple_self_signed(vec!["localhost".to_string()]).map_err(std::io::Error::other)?;
+    write(path, &cert.cert.pem())
+}
+
+/// Writes `osd.d/storage/vsd.conf` next to the SD configuration: the gRPC
+/// port of the rig as an osd.d extension (D-8). bareos-sd never reads it.
+pub fn write_sd_grpc_extension(layout: &Layout, ports: Ports) -> std::io::Result<()> {
+    let dir = layout.sd_conf.parent().unwrap_or(Path::new(".")).join("osd.d").join("storage");
+    write(
+        &dir.join("vsd.conf"),
+        &format!("Storage {{\n  Name = vsd\n  Grpc Port = {}\n  Grpc Address = 127.0.0.1\n}}\n", ports.sd_grpc),
+    )
 }
 
 /// Every directory and file of one rig below its root.

@@ -1,5 +1,11 @@
 //! Ende-zu-Ende-Läufe mit osd als Storage Daemon (Plan
-//! `docs/plans/OSD-GERAETE-UND-VERTEILUNG.md`, P1 Stufe 1 und 2).
+//! `docs/plans/OSD-GERAETE-UND-VERTEILUNG.md`, P1 Stufe 1 bis 3).
+//!
+//! Seit Stufe 3 laufen alle Fälle auf dem Hauptweg gRPC: ofd mit
+//! gRPC-Port, Client- und Storage-Ressource mit `Grpc Enable = yes`, osd
+//! mit gRPC-Port aus `osd.d`. Gegen bareos-sd (`ONESIMUS_RIG_SD`) fällt
+//! odir für den SD auf BNET zurück. Die BNET-Fälle stehen in der
+//! Interop-Matrix `tests/osd_grpc.rs`.
 //!
 //! Start: `cargo test -p onesimus-rig --test osd -- --ignored`
 //! (docs/wiki/testgeruest.md, docs/wiki/osd.md). Der Test baut `odir`, `ofd`
@@ -29,7 +35,7 @@ use std::path::PathBuf;
 use std::process::Command;
 use std::time::Duration;
 
-use onesimus_rig::{Rig, RigOptions};
+use onesimus_rig::{Grpc, Rig, RigOptions};
 
 /// Longest time a job of the rig may take.
 const JOB_TIMEOUT: Duration = Duration::from_secs(180);
@@ -59,6 +65,8 @@ fn start(base_port: u16, passive_client: bool) -> Rig {
     let mut options = RigOptions::new(base_port);
     options.sd = Some(sd);
     options.passive_client = passive_client;
+    options.fd_grpc = Grpc::On;
+    options.sd_grpc = Grpc::On;
     Rig::start(options).unwrap_or_else(|e| panic!("Gerüst startet nicht: {e}"))
 }
 
@@ -199,6 +207,8 @@ fn osd_backup_verify_restore_over_several_volumes() {
     onesimus_rig::build_workspace_packages(&packages).unwrap_or_else(|e| panic!("{e}"));
     let mut options = RigOptions::new(39491);
     options.sd = Some(sd);
+    options.fd_grpc = Grpc::On;
+    options.sd_grpc = Grpc::On;
     options.extra_director = vec![(
         "pool/VPool.conf".into(),
         "Pool {\n  Name = VPool\n  Pool Type = Backup\n  Label Format = \"VVol-\"\n  Maximum Volume Bytes = 5M\n}\n".into(),
@@ -260,6 +270,8 @@ fn osd_and_bareos_sd_read_each_others_volumes() {
     onesimus_rig::build_workspace_packages(&["odir", "ofd", "osd-daemon"]).unwrap_or_else(|e| panic!("{e}"));
     let mut options = RigOptions::new(39501);
     options.sd = Some(bareos_sd.clone());
+    options.fd_grpc = Grpc::On;
+    options.sd_grpc = Grpc::On;
     let mut rig = Rig::start(options).unwrap_or_else(|e| panic!("Gerüst startet nicht: {e}"));
 
     let first = rig.run_job("VBackup").unwrap_or_else(|e| panic!("{e}"));
