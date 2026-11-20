@@ -35,6 +35,11 @@
 //! - Ohne `osd.d/` ist das Ergebnis genau das von `bareos-sd.d` allein;
 //!   ein bareos-sd liest denselben Baum unverändert.
 //!
+//! Onesimus-Direktiven heute: `Ring Slots` (Storage, Device) und für den
+//! gRPC-Zugang (P1 Stufe 3) an der Storage `Grpc Enable` (Vorgabe yes),
+//! `Grpc Port` (Vorgabe `SD Port` + 1000, wie ofd) und `Grpc Address`
+//! (Vorgabe `SD Address`).
+//!
 //! Bareos-Gegenstück: `core/src/stored/stored_conf.cc` (`store_items`,
 //! `dir_items`, `dev_items`, `changer_items`, Defaults), Zweig `bareos-25`.
 
@@ -60,7 +65,16 @@ pub const DEFAULT_CLIENT_CONNECT_WAIT: u64 = 1800;
 
 /// The Onesimus directives `osd.d/` may add, per resource type (normalized
 /// type, normalized key). Everything else in `osd.d/` is an error.
-pub const ONESIMUS_DIRECTIVES: &[(&str, &str)] = &[("storage", "ringslots"), ("device", "ringslots")];
+pub const ONESIMUS_DIRECTIVES: &[(&str, &str)] = &[
+    ("storage", "ringslots"),
+    ("device", "ringslots"),
+    ("storage", "grpcenable"),
+    ("storage", "grpcport"),
+    ("storage", "grpcaddress"),
+];
+
+/// Offset of the default gRPC port from the `SD Port` (as ofd: FD port + 1000).
+pub const GRPC_PORT_OFFSET: u16 = 1000;
 
 /// The `Storage` resource: the daemon itself.
 #[derive(Debug, Clone, PartialEq)]
@@ -91,8 +105,28 @@ pub struct SdStorage {
     pub client_connect_wait: u64,
     /// osd.d: `Ring Slots`, default slot count of the job rings (Onesimus).
     pub ring_slots: Option<u32>,
+    /// osd.d: `Grpc Enable` (default yes): start the TLS gRPC listener
+    /// (`onesimus.stored.StorageDaemon`) next to the BNET port (Onesimus).
+    pub grpc_enable: bool,
+    /// osd.d: `Grpc Port` (default `SD Port` + 1000, see [`SdStorage::grpc_port`]).
+    pub grpc_port: Option<u16>,
+    /// osd.d: `Grpc Address` (default the `SD Address`, else all).
+    pub grpc_address: Option<String>,
     /// Every other directive, unchecked.
     pub other: Vec<Directive>,
+}
+
+impl SdStorage {
+    /// The gRPC port: `Grpc Port`, else `SD Port` + [`GRPC_PORT_OFFSET`].
+    pub fn grpc_port(&self) -> u16 {
+        self.grpc_port.unwrap_or(self.port.saturating_add(GRPC_PORT_OFFSET))
+    }
+
+    /// The gRPC listen address: `Grpc Address`, else `SD Address`, else
+    /// `0.0.0.0`.
+    pub fn grpc_address(&self) -> &str {
+        self.grpc_address.as_deref().or(self.address.as_deref()).unwrap_or("0.0.0.0")
+    }
 }
 
 /// A `Director` resource: a Director allowed to connect.
@@ -324,6 +358,9 @@ impl SdConfig {
                         just_in_time_reservation: r.boolean("justintimereservation", true)?,
                         client_connect_wait: r.duration("clientconnectwait", DEFAULT_CLIENT_CONNECT_WAIT)?,
                         ring_slots: None,
+                        grpc_enable: true,
+                        grpc_port: None,
+                        grpc_address: None,
                         other: r.other(&["name", "description", "sdport", "sdaddress", "workingdirectory",
                             "piddirectory", "plugindirectory", "maximumconcurrentjobs", "messages",
                             "justintimereservation", "clientconnectwait"]),
@@ -473,6 +510,15 @@ impl SdConfig {
                     .ok_or_else(|| format!("osd.d: {} \"{name}\": Ring Slots must be at least 2{at}", raw.rtype))?,
                 None => None,
             };
+            if rtype == "storage" {
+                self.storage.grpc_enable = r.boolean("grpcenable", self.storage.grpc_enable)?;
+                if r.get("grpcport").is_some() {
+                    self.storage.grpc_port = Some(r.number::<u16>("grpcport", 0)?);
+                }
+                if let Some(address) = r.text("grpcaddress") {
+                    self.storage.grpc_address = Some(address);
+                }
+            }
             match rtype.as_str() {
                 "storage" => self.storage.ring_slots = slots.or(self.storage.ring_slots),
                 "device" => {
@@ -634,6 +680,22 @@ Messages {
         assert_eq!(c.storage.ring_slots, Some(8));
         // Bareos directives are untouched
         assert_eq!(c.find_device("FileStorage").unwrap().media_type, "File");
+    }
+
+    #[test]
+    fn osd_d_grpc_directives_of_the_storage() {
+        let c = parse(SAMPLE).unwrap();
+        assert!(c.storage.grpc_enable);
+        assert_eq!(c.storage.grpc_port(), c.storage.port + GRPC_PORT_OFFSET);
+        assert_eq!(c.storage.grpc_address(), c.storage.address.as_deref().unwrap_or("0.0.0.0"));
+        let c = overlay("Storage {\n Name = PDC-sd\n Grpc Port = 19103\n Grpc Address = 127.0.0.1\n}\n").unwrap();
+        assert_eq!((c.storage.grpc_port(), c.storage.grpc_address()), (19103, "127.0.0.1"));
+        let c = overlay("Storage {\n Name = PDC-sd\n Grpc Enable = no\n}\n").unwrap();
+        assert!(!c.storage.grpc_enable);
+        let e = overlay("Storage {\n Name = PDC-sd\n Grpc Port = many\n}\n").unwrap_err();
+        assert!(e.contains("grpcport"), "{e}");
+        let e = overlay("Device {\n Name = FileStorage\n Grpc Port = 1\n}\n").unwrap_err();
+        assert!(e.contains("not an Onesimus directive"), "{e}");
     }
 
     #[test]
