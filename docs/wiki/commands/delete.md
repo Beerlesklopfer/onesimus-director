@@ -17,14 +17,10 @@ delete [volume=<vol-name> [yes] | volume pool=<pool-name> [yes] | storage storag
 
 **Onesimus-Status:** `partial`. Paritätsfälle vorhanden, vollständige Funktionsparität aber nicht nachgewiesen (siehe Befunde).
 
-- Paritätslauf 16.10.2026 (`development` `7993ce6`): 15 von 16 Fällen byte-identisch; Modi: Text, API 1, API 2.
-- Abweichende Fälle: `c035-delete-noarg-api2`.
-- `.api 2`: Original liefert `"deleted": {}`, Onesimus ein leeres Ergebnis (C-046, Fall `c035-delete-noarg-api2`).
-- Löschen von Volume/Pool/Job wird nur über Dialog- und Abbruchpfade verglichen; die Katalogwirkung ist nur durch Einheitentests belegt.
+- Paritätslauf 18.10.2026 (`development` `579da25`): 35 von 35 Fällen byte-identisch; Modi: Text, API 1, API 2.
+- C-046 und C-077 behoben (`c035-delete-noarg-api2` gleich); die Katalogwirkung ist nur über isolierte Fälle und Einheitentests belegt.
 
-**Offene Logeinträge:** `C-046` ([Kompatibilitätslog](../../COMPATIBILITY-LOG.md)).
-
-**Paritätsfälle (16):** `c011-delete-cancel`, `c011-delete-volume-cancel`, `c011-delete-menu-pool-cancel`, `c011-delete-menu-jobid-cancel`, `c011-delete-jobid-cancel`, `c011-delete-pool-cancel`, `c011-delete-volume-pool-cancel`, `c011-delete-volume-unknown`, `c011-delete-volume-star-unknown`, `c011-delete-volname-unknown`, `c011-delete-storage-empty`, `c011-delete-api1-cancel`, `c012-delete-illegal-jobid`, `c035-delete-noarg-api1`, `c035-delete-noarg-api2`, `delete-dialog`.
+**Paritätsfälle (35):** `c011-delete-cancel`, `c011-delete-volume-cancel`, `c011-delete-menu-pool-cancel`, `c011-delete-menu-jobid-cancel`, `c011-delete-jobid-cancel`, `c011-delete-pool-cancel`, `c011-delete-volume-pool-cancel`, `c011-delete-volume-unknown`, `c011-delete-volume-star-unknown`, `c011-delete-volname-unknown`, `c011-delete-storage-empty`, `c011-delete-api1-cancel`, `c012-delete-illegal-jobid`, `c035-delete-noarg-api1`, `c035-delete-noarg-api2`, `c046-delete-jobid-illegal-api2`, `c046-delete-jobid-range-decreasing-api2`, `c046-delete-jobid-range-illegal-api2`, `c046-delete-jobid-novalue-api2`, `c046-delete-volume-nosuch-api2`, `c046-delete-volume-noname-api2`, `c046-delete-pool-api2`, `c046-delete-storage-nosuch-api2`, `c046-delete-storage-configured-api2`, `c046-delete-catalog-nosuch-api2`, `c046-delete-noarg-api1`, `c046-delete-jobid-illegal-api1`, `c047-tree-invalid`, `c077-delete-storage-configured`, `c077-delete-storage-nosuch`, `c077-delete-pool-no`, `c077-delete-pool-yes`, `c077-delete-pool-dialog`, `delete-dialog`, `s08-encrypt-cleanup`.
 
 **Lokaler Handler:** [crates/odir/src/commands/extra.rs:565](../../../crates/odir/src/commands/extra.rs).
 

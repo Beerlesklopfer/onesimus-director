@@ -17,12 +17,10 @@ move storage=<storage-name> srcslots=<slot-selection> dstslots=<slot-selection>
 
 **Onesimus-Status:** `partial`. Paritätsfälle vorhanden, vollständige Funktionsparität aber nicht nachgewiesen (siehe Befunde).
 
-- Paritätslauf 16.10.2026 (`development` `7993ce6`): 2 von 2 Fällen byte-identisch; Modi: Text.
-- Kein Autochanger im Fixture: verglichen sind nur Guards ohne Argumente; Slotbewegungen sind nur durch Einheitentests belegt. Die Originalsyntax srcslots/dstslots wird inzwischen ausgewertet.
+- Paritätslauf 18.10.2026 (`development` `579da25`): 5 von 5 Fällen byte-identisch; Modi: Text, API 2.
+- C-069 behoben; kein Autochanger im Fixture: Transfer/Release nur mit Schein-SD belegt.
 
-**Offene Logeinträge:** `C-045` ([Kompatibilitätslog](../../COMPATIBILITY-LOG.md)).
-
-**Paritätsfälle (2):** `c012-move-job-not-running`, `move-noargs`.
+**Paritätsfälle (5):** `c012-move-job-not-running`, `c066-move-storage-file`, `c066-move-storage-file-slots`, `c066-move-api2-file`, `move-noargs`.
 
 **Lokaler Handler:** [crates/odir/src/commands/extra.rs:989](../../../crates/odir/src/commands/extra.rs).
 

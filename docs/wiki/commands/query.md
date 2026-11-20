@@ -13,9 +13,9 @@ Referenz: [WIP/25.1.2-pre-43-g18be77e68, `18be77e6832e`](https://github.com/bare
 
 **Onesimus-Status:** `parity_verified`. Alle unten genannten Paritätsfälle antworten byte-identisch zum Original; nicht genannte Varianten sind damit nicht belegt.
 
-- Paritätslauf 16.10.2026 (`development` `7993ce6`): 8 von 8 Fällen byte-identisch; Modi: Text, API 1.
+- Paritätslauf 18.10.2026 (`development` `579da25`): 9 von 9 Fällen byte-identisch; Modi: Text, API 1, API 2.
 
-**Paritätsfälle (8):** `c011-query-cancel`, `c011-query-badnumber`, `c011-query-prompt-cancel`, `c011-query-client`, `c011-query-api1-cancel`, `c016-query-menu`, `c028-query-1`, `query-list`.
+**Paritätsfälle (9):** `c011-query-cancel`, `c011-query-badnumber`, `c011-query-prompt-cancel`, `c011-query-client`, `c011-query-api1-cancel`, `c016-query-menu`, `c028-query-1`, `c046-query-api2`, `query-list`.
 
 **Lokaler Handler:** [crates/odir/src/commands/sql.rs:129](../../../crates/odir/src/commands/sql.rs).
 

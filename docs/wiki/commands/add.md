@@ -17,10 +17,10 @@ add pool=<pool-name> storage=<storage-name> jobid=<jobid>
 
 **Onesimus-Status:** `partial`. Paritätsfälle vorhanden, vollständige Funktionsparität aber nicht nachgewiesen (siehe Befunde).
 
-- Paritätslauf 16.10.2026 (`development` `7993ce6`): 9 von 9 Fällen byte-identisch; Modi: Text, API 1, Konsolen parity-c030-client, parity-c030-job, parity-c030-pool, parity-c030-storage.
-- Verglichen sind Dialog, ACL-Warnung und Abbruch; das tatsächliche Anlegen von Volumes und der Katalogzustand danach sind nicht verglichen.
+- Paritätslauf 18.10.2026 (`development` `579da25`): 11 von 11 Fällen byte-identisch; Modi: Text, API 1, Konsolen parity-c030-client, parity-c030-job, parity-c030-pool, parity-c030-storage.
+- Dialog, ACL-Warnung und Abbruch verglichen; das Anlegen von Volumes und der Katalogzustand danach sind nicht verglichen.
 
-**Paritätsfälle (9):** `c011-add-cancel`, `c011-add-pool-cancel`, `c011-add-pool-badnumber-cancel`, `c011-add-api1-cancel`, `c030-add-job-cancel`, `c030-add-storage-cancel`, `c030-add-client-cancel`, `c030-add-pool-cancel`, `add-noargs`.
+**Paritätsfälle (11):** `c011-add-cancel`, `c011-add-pool-cancel`, `c011-add-pool-badnumber-cancel`, `c011-add-api1-cancel`, `c030-add-job-cancel`, `c030-add-storage-cancel`, `c030-add-client-cancel`, `c030-add-pool-cancel`, `c047-tree-mark-paths`, `add-noargs`, `s08-encrypt-add`.
 
 **Lokaler Handler:** [crates/odir/src/commands/extra.rs:849](../../../crates/odir/src/commands/extra.rs).
 

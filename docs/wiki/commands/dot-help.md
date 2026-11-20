@@ -17,9 +17,9 @@ Referenz: [WIP/25.1.2-pre-43-g18be77e68, `18be77e6832e`](https://github.com/bare
 
 **Onesimus-Status:** `parity_verified`. Alle unten genannten Paritätsfälle antworten byte-identisch zum Original; nicht genannte Varianten sind damit nicht belegt.
 
-- Paritätslauf 16.10.2026 (`development` `7993ce6`): 8 von 8 Fällen byte-identisch; Modi: Text, API 1, API 2, Konsolen parity-limited.
+- Paritätslauf 18.10.2026 (`development` `579da25`): 13 von 13 Fällen byte-identisch; Modi: Text, API 1, API 2, Konsolen parity-limited.
 
-**Paritätsfälle (8):** `c020-compact-help-run`, `c028-dot-help`, `dot-help`, `dot-help-all`, `dot-help-item`, `dot-help-full`, `dot-help-limited`, `dot-help-json`.
+**Paritätsfälle (13):** `c020-compact-help-run`, `c028-dot-help`, `c046-dothelp-api2`, `c046-dothelp-all-api2`, `c046-dothelp-item-api2`, `c046-dothelp-item-nosuch-api2`, `c047-tree-help-abort`, `dot-help`, `dot-help-all`, `dot-help-item`, `dot-help-full`, `dot-help-limited`, `dot-help-json`.
 
 **Lokaler Handler:** [crates/odir/src/commands/basic.rs:161](../../../crates/odir/src/commands/basic.rs).
 

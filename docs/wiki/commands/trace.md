@@ -17,8 +17,8 @@ trace on | off
 
 **Onesimus-Status:** `partial`. Paritätsfälle vorhanden, vollständige Funktionsparität aber nicht nachgewiesen (siehe Befunde).
 
-- Paritätslauf 16.10.2026 (`development` `7993ce6`): 3 von 3 Fällen byte-identisch; Modi: Text, API 1.
-- Verglichen sind Dialog und Abbruch; das Schreiben der Trace-Datei ist nur durch Einheitentests belegt.
+- Paritätslauf 18.10.2026 (`development` `579da25`): 3 von 3 Fällen byte-identisch; Modi: Text, API 1.
+- Dialog und Abbruch verglichen; das Schreiben der Trace-Datei ist nur durch Einheitentests belegt.
 
 **Paritätsfälle (3):** `c011-trace-cancel`, `c011-trace-api1-cancel`, `trace-noargs`.
 

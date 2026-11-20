@@ -15,14 +15,12 @@ setdevice storage=<storage-name> device=<device-name> autoselect=<bool>
 
 **RunScript erlaubt:** ja. **Audit-Ereignis:** ja. Beide Flags sind keine Read-only-Klassifizierung.
 
-**Onesimus-Status:** `partial`. Paritätsfälle vorhanden, vollständige Funktionsparität aber nicht nachgewiesen (siehe Befunde).
+**Onesimus-Status:** `parity_verified`. Alle unten genannten Paritätsfälle antworten byte-identisch zum Original; nicht genannte Varianten sind damit nicht belegt.
 
-- Paritätslauf 16.10.2026 (`development` `7993ce6`): 23 von 23 Fällen byte-identisch; Modi: Text, API 1, API 2, Konsolen parity-device, parity-limited.
-- NDMP-Storages werden nicht übersprungen (C-050). Verglichen sind ACL, Argumentprüfung und SD-Antwort auf dem Fixture-Storage.
+- Paritätslauf 18.10.2026 (`development` `579da25`): 25 von 25 Fällen byte-identisch; Modi: Text, API 1, API 2, Konsolen parity-device, parity-limited.
+- C-031, C-050 behoben.
 
-**Offene Logeinträge:** `C-050` ([Kompatibilitätslog](../../COMPATIBILITY-LOG.md)).
-
-**Paritätsfälle (23):** `c006-setdevice-noargs-api2`, `c006-setdevice-wrongarg`, `c006-setdevice-nostorage`, `c006-setdevice-badbool`, `c031-setdevice-forbidden`, `c031-setdevice-forbidden-unknown`, `c031-setdevice-forbidden-api1`, `c031-setdevice-forbidden-api2`, `c031-setdevice-permitted-nodev`, `c031-setdevice-permitted-nodev-api2`, `c031-setdevice-limited-nocmd`, `c031-setdevice-nodev`, `c031-setdevice-nodev-api1`, `c031-setdevice-nodev-api2`, `c031-setdevice-nostorage-api2`, `c031-setdevice-autoselect-upper`, `c031-setdevice-autoselect-on`, `c031-setdevice-key-upper`, `c031-setdevice-key-novalue`, `c031-setdevice-empty-value`, `c031-setdevice-missing-two`, `c031-setdevice-wrongarg-api2`, `setdevice-noargs`.
+**Paritätsfälle (25):** `c006-setdevice-noargs-api2`, `c006-setdevice-wrongarg`, `c006-setdevice-nostorage`, `c006-setdevice-badbool`, `c031-setdevice-forbidden`, `c031-setdevice-forbidden-unknown`, `c031-setdevice-forbidden-api1`, `c031-setdevice-forbidden-api2`, `c031-setdevice-permitted-nodev`, `c031-setdevice-permitted-nodev-api2`, `c031-setdevice-limited-nocmd`, `c031-setdevice-nodev`, `c031-setdevice-nodev-api1`, `c031-setdevice-nodev-api2`, `c031-setdevice-nostorage-api2`, `c031-setdevice-autoselect-upper`, `c031-setdevice-autoselect-on`, `c031-setdevice-key-upper`, `c031-setdevice-key-novalue`, `c031-setdevice-empty-value`, `c031-setdevice-missing-two`, `c031-setdevice-wrongarg-api2`, `c050-setdevice`, `c050-setdevice-native`, `setdevice-noargs`.
 
 **Lokaler Handler:** [crates/odir/src/commands/extra.rs:233](../../../crates/odir/src/commands/extra.rs).
 

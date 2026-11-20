@@ -17,12 +17,10 @@ setdebug level=<nn> trace=0/1 timestamp=0/1 client=<client-name> | dir | storage
 
 **Onesimus-Status:** `partial`. Paritätsfälle vorhanden, vollständige Funktionsparität aber nicht nachgewiesen (siehe Befunde).
 
-- Paritätslauf 16.10.2026 (`development` `7993ce6`): 7 von 7 Fällen byte-identisch; Modi: Text, API 1.
-- Verglichen sind nur Dialog/Abbruch und `setdebug level=0 dir`; Debug-Pegel an echte FD/SD sind laut Testregeln nicht live erlaubt und nur durch Einheitentests belegt (NDMP: C-050).
+- Paritätslauf 18.10.2026 (`development` `579da25`): 11 von 11 Fällen byte-identisch; Modi: Text, API 1.
+- C-050 behoben; Debug-Pegel an echte FD/SD sind nicht live erlaubt und nur durch Einheitentests belegt.
 
-**Offene Logeinträge:** `C-050` ([Kompatibilitätslog](../../COMPATIBILITY-LOG.md)).
-
-**Paritätsfälle (7):** `c011-setdebug-cancel`, `c011-setdebug-badlevel-cancel`, `c011-setdebug-daemon-cancel`, `c011-setdebug-daemon-api1-cancel`, `c011-setdebug-daemon-badnumber`, `setdebug-dir`, `setdebug-noargs`.
+**Paritätsfälle (11):** `c011-setdebug-cancel`, `c011-setdebug-badlevel-cancel`, `c011-setdebug-daemon-cancel`, `c011-setdebug-daemon-api1-cancel`, `c011-setdebug-daemon-badnumber`, `c050-setdebug-storage`, `c050-setdebug-client`, `c050-setdebug-storage-select`, `c050-setdebug-prompt-storage`, `setdebug-dir`, `setdebug-noargs`.
 
 **Lokaler Handler:** [crates/odir/src/commands/debug.rs:33](../../../crates/odir/src/commands/debug.rs).
 

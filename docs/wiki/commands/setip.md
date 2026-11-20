@@ -13,10 +13,10 @@ Referenz: [WIP/25.1.2-pre-43-g18be77e68, `18be77e6832e`](https://github.com/bare
 
 **Onesimus-Status:** `partial`. Paritätsfälle vorhanden, vollständige Funktionsparität aber nicht nachgewiesen (siehe Befunde).
 
-- Paritätslauf 16.10.2026 (`development` `7993ce6`): 2 von 2 Fällen byte-identisch; Modi: Text, Konsolen parity-limited.
-- Verglichen ist nur die Ablehnung für Konsolen ohne gleichnamigen Client; das Setzen der Client-Adresse ist nur durch Einheitentests belegt.
+- Paritätslauf 18.10.2026 (`development` `579da25`): 3 von 3 Fällen byte-identisch; Modi: Text, API 2, Konsolen parity-limited.
+- Verglichen ist nur die Ablehnung für Konsolen ohne gleichnamigen Client; das Setzen der Adresse ist nur durch Einheitentests belegt.
 
-**Paritätsfälle (2):** `c012-setip-limited`, `setip`.
+**Paritätsfälle (3):** `c012-setip-limited`, `c046-setip-api2`, `setip`.
 
 **Lokaler Handler:** [crates/odir/src/commands/extra.rs:216](../../../crates/odir/src/commands/extra.rs).
 

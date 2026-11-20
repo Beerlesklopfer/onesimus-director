@@ -17,7 +17,7 @@ gui on | off
 
 **Onesimus-Status:** `parity_verified`. Alle unten genannten Paritätsfälle antworten byte-identisch zum Original; nicht genannte Varianten sind damit nicht belegt.
 
-- Paritätslauf 16.10.2026 (`development` `7993ce6`): 30 von 30 Fällen byte-identisch; Modi: Text, API 1, API 2, GUI.
+- Paritätslauf 18.10.2026 (`development` `579da25`): 30 von 30 Fällen byte-identisch; Modi: Text, API 1, API 2, GUI.
 
 **Paritätsfälle (30):** `c005-gui-noarg`, `c005-gui-foo`, `c005-gui-upper`, `c005-gui-on-off`, `c005-gui-foo-api2`, `c005-gui-on-api2`, `c005-automount-prompt-then-command`, `c027-gui-list-pools`, `c027-gui-llist-pools`, `c027-gui-list-jobs`, `c027-gui-llist-jobs`, `c027-gui-list-media`, `c027-gui-llist-media`, `c027-gui-list-clients`, `c027-gui-list-jobtotals`, `c027-gui-list-jobmedia`, `c027-gui-list-filesets`, `c027-gui-list-log`, `c027-gui-sql`, `c027-gui-sqlquery-keyword`, `c027-gui-status-dir`, `c027-gui-show`, `c027-gui-messages`, `c027-gui-off-again`, `c027-gui-noarg`, `c027-gui-api1`, `c027-gui-api2`, `c036-gui-on-messages`, `gui-on`, `gui-off`.
 

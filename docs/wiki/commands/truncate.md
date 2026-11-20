@@ -17,14 +17,12 @@ truncate volstatus=Purged [storage=<storage>] [pool=<pool>] [volume=<volume>] [d
 
 **Onesimus-Status:** `partial`. Paritätsfälle vorhanden, vollständige Funktionsparität aber nicht nachgewiesen (siehe Befunde).
 
-- Paritätslauf 16.10.2026 (`development` `7993ce6`): 8 von 8 Fällen byte-identisch; Modi: Text.
-- Truncate über SD-Relabel mit Auswertung von `3000 OK label.` fehlt (C-053); verglichen sind nur Guards und Abbruchpfade.
+- Paritätslauf 18.10.2026 (`development` `579da25`): 18 von 18 Fällen byte-identisch; Modi: Text.
+- C-053 behoben; Truncate über SD-Relabel nur gegen einen simulierten SD belegt.
 
-**Offene Logeinträge:** `C-053` ([Kompatibilitätslog](../../COMPATIBILITY-LOG.md)).
+**Paritätsfälle (18):** `c012-truncate-yes-only`, `c012-truncate-bad-volstatus`, `c012-truncate-unknown-arg`, `c012-truncate-bad-drive`, `c053-truncate-drive-negative`, `c053-truncate-drive-plus`, `c053-truncate-drive-large-confirm-no`, `c053-truncate-drive-confirm-no`, `c053-truncate-volstatus-first-without-value`, `c053-truncate-storage-first-without-value`, `c053-truncate-volume-unknown`, `c053-truncate-volume-confirm-no`, `c053-truncate-catalog-arg`, `c053-truncate-client-arg`, `truncate-noargs`, `w011-truncate-storage-cancel`, `w011-truncate-pool-cancel`, `w011-truncate-confirm-no`.
 
-**Paritätsfälle (8):** `c012-truncate-yes-only`, `c012-truncate-bad-volstatus`, `c012-truncate-unknown-arg`, `c012-truncate-bad-drive`, `truncate-noargs`, `w011-truncate-storage-cancel`, `w011-truncate-pool-cancel`, `w011-truncate-confirm-no`.
-
-**Lokaler Handler:** [crates/odir/src/commands/admin.rs:1496](../../../crates/odir/src/commands/admin.rs).
+**Lokaler Handler:** [crates/odir/src/commands/admin.rs:1517](../../../crates/odir/src/commands/admin.rs).
 
 Die folgenden vorhandenen Beispiele und Verhaltensbeschreibungen sind lokale Dokumentation; sie sind kein Beleg für vollständige Bareos-Kompatibilität. Bei Widersprüchen gilt der obige Befund.
 <!-- bareos-reference:end -->

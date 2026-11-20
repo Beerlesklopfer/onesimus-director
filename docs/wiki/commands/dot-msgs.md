@@ -13,7 +13,7 @@ Referenz: [WIP/25.1.2-pre-43-g18be77e68, `18be77e6832e`](https://github.com/bare
 
 **Onesimus-Status:** `parity_verified`. Alle unten genannten Paritätsfälle antworten byte-identisch zum Original; nicht genannte Varianten sind damit nicht belegt.
 
-- Paritätslauf 16.10.2026 (`development` `7993ce6`): 10 von 10 Fällen byte-identisch; Modi: Text, API 2, Konsolen parity-acl, parity-bvfs, parity-limited, parity-operator.
+- Paritätslauf 18.10.2026 (`development` `579da25`): 10 von 10 Fällen byte-identisch; Modi: Text, API 2, Konsolen parity-acl, parity-bvfs, parity-limited, parity-operator.
 
 **Paritätsfälle (10):** `c003-dot_msgs-api2`, `c025-msgs-limited`, `c025-msgs-limited-api2`, `c025-msgs-operator`, `c025-msgs-operator-api2`, `c025-msgs-bvfs`, `c025-msgs-bvfs-api2`, `c025-msgs-acl`, `c025-msgs-acl-api2`, `dot_msgs`.
 

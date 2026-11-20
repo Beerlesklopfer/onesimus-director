@@ -17,10 +17,9 @@ relabel storage=<storage-name> oldvolume=<old-volume-name>  volume=<new-volume-n
 
 **Onesimus-Status:** `partial`. Paritätsfälle vorhanden, vollständige Funktionsparität aber nicht nachgewiesen (siehe Befunde).
 
-- Paritätslauf 16.10.2026 (`development` `7993ce6`): 8 von 8 Fällen byte-identisch; Modi: Text.
-- Verglichen sind Dialog- und Abbruchpfade; Relabel über den SD ist nur durch Einheitentests belegt (Antwortauswertung siehe C-053).
-
-**Offene Logeinträge:** `C-053` ([Kompatibilitätslog](../../COMPATIBILITY-LOG.md)).
+- Paritätslauf 18.10.2026 (`development` `579da25`): 8 von 8 Fällen byte-identisch; Modi: Text.
+- C-084/S-32 behoben (privater bareos-sd); im Paritätslauf nur Dialog- und Abbruchpfade.
+- Offen: Option `encrypt` (C-084, S-08).
 
 **Paritätsfälle (8):** `c011-relabel-cancel`, `c011-relabel-pool-cancel`, `c011-relabel-status`, `c011-relabel-unknown-cancel`, `c012-relabel-unknown-old`, `relabel-noargs`, `t001-relabel-not-purged`, `t001-relabel-old-unknown-cancel`.
 

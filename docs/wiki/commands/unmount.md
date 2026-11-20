@@ -15,11 +15,12 @@ unmount storage=<storage-name> [ drive=<drivenum> ] jobid=<jobid> | job=<job-nam
 
 **RunScript erlaubt:** nein. **Audit-Ereignis:** ja. Beide Flags sind keine Read-only-Klassifizierung.
 
-**Onesimus-Status:** `registered_unverified`. Funktionsparität ist nicht durch einen Paritätsfall nachgewiesen.
+**Onesimus-Status:** `partial`. Paritätsfälle vorhanden, vollständige Funktionsparität aber nicht nachgewiesen (siehe Befunde).
 
-- Kein Paritätsfall: Unmount am echten SD ist laut Testregeln nicht live erlaubt; Verhalten nur durch Einheitentests belegt.
+- Paritätslauf 18.10.2026 (`development` `579da25`): 1 von 1 Fällen byte-identisch; Modi: Text.
+- C-050 behoben; ein Fall (`c050-unmount`), Unmount am echten SD ist nicht live erlaubt.
 
-**Offene Logeinträge:** `C-050` ([Kompatibilitätslog](../../COMPATIBILITY-LOG.md)).
+**Paritätsfälle (1):** `c050-unmount`.
 
 **Lokaler Handler:** [crates/odir/src/commands/admin.rs:159](../../../crates/odir/src/commands/admin.rs).
 

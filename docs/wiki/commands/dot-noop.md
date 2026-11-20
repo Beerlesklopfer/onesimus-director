@@ -13,9 +13,9 @@ Referenz: [WIP/25.1.2-pre-43-g18be77e68, `18be77e6832e`](https://github.com/bare
 
 **Onesimus-Status:** `parity_verified`. Alle unten genannten Paritätsfälle antworten byte-identisch zum Original; nicht genannte Varianten sind damit nicht belegt.
 
-- Paritätslauf 16.10.2026 (`development` `7993ce6`): 3 von 3 Fällen byte-identisch; Modi: Text.
+- Paritätslauf 18.10.2026 (`development` `579da25`): 35 von 35 Fällen byte-identisch; Modi: Text, API 1, API 2, Konsolen parity-acl, parity-bvfs, parity-c030-pool, parity-limited, parity-operator.
 
-**Paritätsfälle (3):** `c007-lone-dot`, `c007-dot-with-args`, `dot-noop`.
+**Paritätsfälle (35):** `c007-lone-dot`, `c007-dot-with-args`, `c011-enable-cancel`, `c025-run-select-limited`, `c025-enable-select-limited`, `c025-disable-select-limited`, `c025-enable-client-select-limited`, `c025-disable-schedule-select-limited`, `c025-enable-select-operator`, `c025-enable-client-select-operator`, `c025-run-select-bvfs`, `c025-enable-select-bvfs`, `c025-disable-select-bvfs`, `c025-enable-client-select-bvfs`, `c025-disable-schedule-select-bvfs`, `c025-enable-select-acl`, `c025-enable-client-select-acl`, `c025-disable-schedule-select-acl`, `c030-prune-volume-pool-cancel`, `c043-backup-mod-job-restore-no`, `c047-tree-dot-done`, `c061-dot-api0`, `c061-dot-api1`, `c061-dot-api2`, `c061-dot-args-api0`, `c061-dot-args-api1`, `c061-dot-args-api2`, `c061-dot-spaces-api2`, `c061-dot-twice-api2`, `c061-dot-then-cmd-api2`, `c061-dot-json-api2`, `c061-dot-api-off`, `c066-label-api2-cancel`, `dot-noop`, `t001-relabel-old-unknown-cancel`.
 
 **Lokaler Handler:** [crates/odir/src/commands/dot.rs:68](../../../crates/odir/src/commands/dot.rs).
 

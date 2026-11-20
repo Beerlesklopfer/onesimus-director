@@ -17,12 +17,10 @@ wait jobname=<name> | jobid=<jobid> | ujobid=<complete_name> | mount [timeout=<n
 
 **Onesimus-Status:** `partial`. Paritätsfälle vorhanden, vollständige Funktionsparität aber nicht nachgewiesen (siehe Befunde).
 
-- Paritätslauf 16.10.2026 (`development` `7993ce6`): 5 von 5 Fällen byte-identisch; Modi: Text, API 1, API 2.
-- Verglichen sind nur `wait` ohne laufende Jobs und `wait mount timeout=`; das Warten auf echte Jobenden ist nur durch Einheitentests belegt (C-048).
+- Paritätslauf 18.10.2026 (`development` `579da25`): 40 von 40 Fällen byte-identisch; Modi: Text, API 1, API 2.
+- C-048 behoben; verglichen sind `wait` ohne laufende Jobs und `wait mount timeout=`; Warten auf echte Jobenden nur mit privaten Daemons belegt.
 
-**Offene Logeinträge:** `C-048` ([Kompatibilitätslog](../../COMPATIBILITY-LOG.md)).
-
-**Paritätsfälle (5):** `c035-wait-mount-timeout`, `c035-wait-mount-timeout-api1`, `c035-wait-mount-timeout-api2`, `wait-idle`, `wait-jobid`.
+**Paritätsfälle (40):** `c035-wait-mount-timeout`, `c035-wait-mount-timeout-api1`, `c035-wait-mount-timeout-api2`, `c046-wait-jobid-nosuch-api2`, `c046-wait-job-nosuch-api2`, `c046-wait-jobname-nosuch-api2`, `c046-wait-ujobid-nosuch-api2`, `c046-wait-unknown-arg-api2`, `c046-wait-jobid-novalue-api2`, `c046-wait-jobid-bad-api2`, `c046-wait-timeout-only-api2`, `c046-wait-jobid-zero-api2`, `c046-wait-job-nosuch-api1`, `c046-wait-unknown-arg`, `c046-wait-jobid-bad-api1`, `c058-admin-yes`, `c058-admin-dialog-yes`, `c058-admin-api2`, `c058-admin-level-full-yes`, `c058-admin-disabled`, `c058-admin-when-cancel`, `c058-migrate-yes`, `c058-migrate-dialog-yes`, `c058-consolidate-yes`, `wait-idle`, `wait-jobid`, `s01-restore-no-bootstrap`, `s01-restore-bootstrap-unreadable`, `s07-runscript-all`, `s07-runscript-fail`, `s07-runscript-noerr`, `s24-runscript-copy-control`, `s22-dup-not-allowed`, `s22-dup-cancel-queued`, `s22-dup-cancel-running`, `s22-dup-ignore`, `s22-max-start-delay`, `s22-max-run-sched-time`, `s25-job-times-admin`, `s25-job-times-copy-control`.
 
 **Lokaler Handler:** [crates/odir/src/commands/wait.rs:46](../../../crates/odir/src/commands/wait.rs).
 

@@ -17,12 +17,10 @@ export storage=<storage-name> srcslots=<slot-selection> [ dstslots=<slot-selecti
 
 **Onesimus-Status:** `partial`. Paritätsfälle vorhanden, vollständige Funktionsparität aber nicht nachgewiesen (siehe Befunde).
 
-- Paritätslauf 16.10.2026 (`development` `7993ce6`): 2 von 2 Fällen byte-identisch; Modi: Text.
-- Kein Autochanger im Fixture: verglichen sind nur Guards ohne Argumente; Slotbewegungen sind nur durch Einheitentests belegt.
+- Paritätslauf 18.10.2026 (`development` `579da25`): 4 von 4 Fällen byte-identisch; Modi: Text.
+- C-071 behoben; kein Autochanger im Fixture: Slotbewegungen nur gegen einen simulierten Autochanger belegt.
 
-**Offene Logeinträge:** `C-045` ([Kompatibilitätslog](../../COMPATIBILITY-LOG.md)).
-
-**Paritätsfälle (2):** `c012-export-bad-jobid`, `export-noargs`.
+**Paritätsfälle (4):** `c012-export-bad-jobid`, `c066-export-storage-file`, `c066-export-storage-file-volume`, `export-noargs`.
 
 **Lokaler Handler:** [crates/odir/src/commands/extra.rs:985](../../../crates/odir/src/commands/extra.rs).
 

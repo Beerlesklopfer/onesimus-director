@@ -17,12 +17,10 @@ rerun jobid=<jobid> | since_jobid=<jobid> [ until_jobid=<jobid> ] | days=<nr_day
 
 **Onesimus-Status:** `partial`. Paritätsfälle vorhanden, vollständige Funktionsparität aber nicht nachgewiesen (siehe Befunde).
 
-- Paritätslauf 16.10.2026 (`development` `7993ce6`): 32 von 32 Fällen byte-identisch; Modi: Text, API 1, API 2.
-- Auswahl und Fehlertexte sind verglichen; der tatsächliche Jobstart wird im Paritätslauf nicht ausgeführt (Jobmeldungen C-051).
+- Paritätslauf 18.10.2026 (`development` `579da25`): 33 von 33 Fällen byte-identisch; Modi: Text, API 1, API 2.
+- C-033 behoben; der tatsächliche Jobstart wird im Paritätslauf nicht ausgeführt (mit privaten Daemons geprüft, S-15/S-22).
 
-**Offene Logeinträge:** `C-051` ([Kompatibilitätslog](../../COMPATIBILITY-LOG.md)).
-
-**Paritätsfälle (32):** `c006-rerun-noargs-api2`, `c006-rerun-badid-api2`, `c006-rerun-invalidid`, `c012-rerun-confirm`, `c033-since-none`, `c033-since-yes-none`, `c033-since-zero`, `c033-since-text`, `c033-since-days`, `c033-until-only`, `c033-since-until-no`, `c033-since-list-no`, `c033-since-prompt-abort`, `c033-since-invalid-answer`, `c033-since-long-answer`, `c033-since-confirm-run-no`, `c033-since-api2`, `c033-since-api1`, `c033-days-no`, `c033-days-negative`, `c033-hours-none`, `c033-days-hours-no`, `c033-jobid-list-no`, `c033-jobid-nopool`, `c033-jobid-fraction`, `c033-jobid-trailing-comma`, `c033-jobid-leading-comma`, `c033-jobid-empty`, `c033-jobid-negative`, `c033-jobid-missing-then-ok`, `rerun-noargs`, `rerun-badid`.
+**Paritätsfälle (33):** `c006-rerun-noargs-api2`, `c006-rerun-badid-api2`, `c006-rerun-invalidid`, `c012-rerun-confirm`, `c033-since-none`, `c033-since-yes-none`, `c033-since-zero`, `c033-since-text`, `c033-since-days`, `c033-until-only`, `c033-since-until-no`, `c033-since-list-no`, `c033-since-prompt-abort`, `c033-since-invalid-answer`, `c033-since-long-answer`, `c033-since-confirm-run-no`, `c033-since-api2`, `c033-since-api1`, `c033-days-no`, `c033-days-negative`, `c033-hours-none`, `c033-days-hours-no`, `c033-jobid-list-no`, `c033-jobid-nopool`, `c033-jobid-fraction`, `c033-jobid-trailing-comma`, `c033-jobid-leading-comma`, `c033-jobid-empty`, `c033-jobid-negative`, `c033-jobid-missing-then-ok`, `c046-rerun-noarg-api2`, `rerun-noargs`, `rerun-badid`.
 
 **Lokaler Handler:** [crates/odir/src/commands/extra.rs:333](../../../crates/odir/src/commands/extra.rs).
 

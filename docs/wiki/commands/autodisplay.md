@@ -17,9 +17,9 @@ autodisplay on | off
 
 **Onesimus-Status:** `parity_verified`. Alle unten genannten Paritätsfälle antworten byte-identisch zum Original; nicht genannte Varianten sind damit nicht belegt.
 
-- Paritätslauf 16.10.2026 (`development` `7993ce6`): 16 von 16 Fällen byte-identisch; Modi: Text, API 1, API 2, Konsolen parity-limited.
+- Paritätslauf 18.10.2026 (`development` `579da25`): 17 von 17 Fällen byte-identisch; Modi: Text, API 1, API 2, Konsolen parity-limited.
 
-**Paritätsfälle (16):** `c005-autodisplay-noarg`, `c005-autodisplay-foo`, `c005-autodisplay-upper`, `c005-autodisplay-later-kw`, `c005-autodisplay-kv`, `c005-autodisplay-off-on`, `c005-autodisplay-foo-api1`, `c005-autodisplay-off-api1`, `c005-autodisplay-foo-api2`, `c005-autodisplay-off-api2`, `c036-autodisplay-on-messages`, `c036-autodisplay-on-api1`, `c036-getcmd-dot-messages-autodisplay`, `c036-messages-limited`, `autodisplay-off`, `autodisplay-on`.
+**Paritätsfälle (17):** `c005-autodisplay-noarg`, `c005-autodisplay-foo`, `c005-autodisplay-upper`, `c005-autodisplay-later-kw`, `c005-autodisplay-kv`, `c005-autodisplay-off-on`, `c005-autodisplay-foo-api1`, `c005-autodisplay-off-api1`, `c005-autodisplay-foo-api2`, `c005-autodisplay-off-api2`, `c036-autodisplay-on-messages`, `c036-autodisplay-on-api1`, `c036-getcmd-dot-messages-autodisplay`, `c036-messages-limited`, `c046-autodisplay-noarg-api2`, `autodisplay-off`, `autodisplay-on`.
 
 **Lokaler Handler:** [crates/odir/src/commands/extra.rs:35](../../../crates/odir/src/commands/extra.rs).
 

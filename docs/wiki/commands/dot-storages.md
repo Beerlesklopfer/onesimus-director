@@ -17,9 +17,9 @@ Referenz: [WIP/25.1.2-pre-43-g18be77e68, `18be77e6832e`](https://github.com/bare
 
 **Onesimus-Status:** `parity_verified`. Alle unten genannten Paritätsfälle antworten byte-identisch zum Original; nicht genannte Varianten sind damit nicht belegt.
 
-- Paritätslauf 16.10.2026 (`development` `7993ce6`): 18 von 18 Fällen byte-identisch; Modi: Text, API 2, Konsolen parity-acl, parity-bvfs, parity-limited, parity-operator.
+- Paritätslauf 18.10.2026 (`development` `579da25`): 22 von 22 Fällen byte-identisch; Modi: Text, API 2, Konsolen parity-acl, parity-bvfs, parity-limited, parity-operator.
 
-**Paritätsfälle (18):** `c025-storages-limited`, `c025-storages-limited-api2`, `c025-storages-enabled-limited`, `c025-storages-enabled-limited-api2`, `c025-storages-operator`, `c025-storages-operator-api2`, `c025-storages-enabled-operator`, `c025-storages-enabled-operator-api2`, `c025-storages-bvfs`, `c025-storages-bvfs-api2`, `c025-storages-enabled-bvfs`, `c025-storages-enabled-bvfs-api2`, `c025-storages-acl`, `c025-storages-acl-api2`, `c025-storages-enabled-acl`, `c025-storages-enabled-acl-api2`, `dot_storages`, `dot_storages-limited`.
+**Paritätsfälle (22):** `c025-storages-limited`, `c025-storages-limited-api2`, `c025-storages-enabled-limited`, `c025-storages-enabled-limited-api2`, `c025-storages-operator`, `c025-storages-operator-api2`, `c025-storages-enabled-operator`, `c025-storages-enabled-operator-api2`, `c025-storages-bvfs`, `c025-storages-bvfs-api2`, `c025-storages-enabled-bvfs`, `c025-storages-enabled-bvfs-api2`, `c025-storages-acl`, `c025-storages-acl-api2`, `c025-storages-enabled-acl`, `c025-storages-enabled-acl-api2`, `c044-storages-enabled-disabled`, `c044-storages-enabled-value`, `c044-storages-disabled-upper`, `c046-dotstorages-enabled-api2`, `dot_storages`, `dot_storages-limited`.
 
 **Lokaler Handler:** [crates/odir/src/commands/dot.rs:113](../../../crates/odir/src/commands/dot.rs).
 

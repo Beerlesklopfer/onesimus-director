@@ -11,11 +11,15 @@ Referenz: [WIP/25.1.2-pre-43-g18be77e68, `18be77e6832e`](https://github.com/bare
 
 **RunScript erlaubt:** ja. **Audit-Ereignis:** ja. Beide Flags sind keine Read-only-Klassifizierung.
 
-**Onesimus-Status:** `registered_unverified`. Funktionsparität ist nicht durch einen Paritätsfall nachgewiesen.
+**Onesimus-Status:** `parity_verified`. Alle unten genannten Paritätsfälle antworten byte-identisch zum Original; nicht genannte Varianten sind damit nicht belegt.
 
-- Kein Paritätsfall (Reload ändert die laufende Konfiguration beider Directors).
+- Paritätslauf 18.10.2026 (`development` `579da25`): 23 von 23 Fällen byte-identisch; Modi: Text, API 2.
+- C-057, C-075 behoben; Fälle `c057-*`/`c075-*` laufen je auf eigener Director-Instanz.
+- Offen außerhalb von `reload` (C-057): der normale Start prüft die Konfiguration nicht wie `-t`.
 
-**Lokaler Handler:** [crates/odir/src/commands/admin.rs:1817](../../../crates/odir/src/commands/admin.rs).
+**Paritätsfälle (23):** `c057-reload-show-all`, `c057-reload-again-show-pools`, `c057-reload-syntax-error`, `c057-reload-unknown-directive`, `c057-reload-missing-reference`, `c057-reload-missing-required`, `c057-reload-duplicate-name`, `c057-reload-check-resources`, `c057-reload-job-without-fileset`, `c057-reload-job-without-messages`, `c057-reload-always-incremental-restore`, `c057-reload-failed-api2`, `c057-reload-add-client`, `c062-reload`, `c063-disable-reloaded`, `c075-reload-bad-catalog`, `c075-reload-bad-catalog-api2`, `s22-dup-not-allowed`, `s22-dup-cancel-queued`, `s22-dup-cancel-running`, `s22-dup-ignore`, `s22-max-start-delay`, `s22-max-run-sched-time`.
+
+**Lokaler Handler:** [crates/odir/src/commands/admin.rs:1838](../../../crates/odir/src/commands/admin.rs).
 
 Die folgenden vorhandenen Beispiele und Verhaltensbeschreibungen sind lokale Dokumentation; sie sind kein Beleg für vollständige Bareos-Kompatibilität. Bei Widersprüchen gilt der obige Befund.
 <!-- bareos-reference:end -->

@@ -17,10 +17,11 @@ label storage=<storage-name> volume=<volume-name> pool=<pool-name> slot=<slot> [
 
 **Onesimus-Status:** `partial`. Paritätsfälle vorhanden, vollständige Funktionsparität aber nicht nachgewiesen (siehe Befunde).
 
-- Paritätslauf 16.10.2026 (`development` `7993ce6`): 13 von 13 Fällen byte-identisch; Modi: Text, API 1.
-- Verglichen sind Dialog-, Namens- und Abbruchpfade; das Labeln selbst (SD-Wirkung, Katalogeintrag) ist laut Testregeln nicht live erlaubt und nur durch Einheitentests belegt.
+- Paritätslauf 18.10.2026 (`development` `579da25`): 16 von 16 Fällen byte-identisch; Modi: Text, API 1, API 2.
+- C-084/S-32 behoben: Label am SD gegen einen privaten bareos-sd mit dem Original verglichen; im Paritätslauf nur Dialog-, Namens- und Abbruchpfade.
+- Offen: Option `encrypt` erzeugt noch keinen Volume-Schlüssel (C-084, S-08).
 
-**Paritätsfälle (13):** `c011-label-cancel`, `c011-label-name-cancel`, `c011-label-pool-cancel`, `c011-label-illegal-cancel`, `c011-label-used-cancel`, `c011-label-barcodes`, `c011-label-unknown-storage-cancel`, `c011-label-api1-cancel`, `c012-label-no-pool`, `label-nostorage`, `t001-label-existing-cancel`, `t001-label-illegal-arg-cancel`, `t001-label-illegal-char-cancel`.
+**Paritätsfälle (16):** `c011-label-cancel`, `c011-label-name-cancel`, `c011-label-pool-cancel`, `c011-label-illegal-cancel`, `c011-label-used-cancel`, `c011-label-barcodes`, `c011-label-unknown-storage-cancel`, `c011-label-api1-cancel`, `c012-label-no-pool`, `c050-label-native`, `c066-label-api2-cancel`, `c066-label-dot-api1`, `label-nostorage`, `t001-label-existing-cancel`, `t001-label-illegal-arg-cancel`, `t001-label-illegal-char-cancel`.
 
 **Lokaler Handler:** [crates/odir/src/commands/admin.rs:10](../../../crates/odir/src/commands/admin.rs).
 

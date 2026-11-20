@@ -17,9 +17,9 @@ use catalog=<catalog>
 
 **Onesimus-Status:** `parity_verified`. Alle unten genannten Paritätsfälle antworten byte-identisch zum Original; nicht genannte Varianten sind damit nicht belegt.
 
-- Paritätslauf 16.10.2026 (`development` `7993ce6`): 7 von 7 Fällen byte-identisch; Modi: Text, Konsolen parity-limited, parity-operator.
+- Paritätslauf 18.10.2026 (`development` `579da25`): 9 von 9 Fällen byte-identisch; Modi: Text, API 2, Konsolen parity-limited, parity-operator.
 
-**Paritätsfälle (7):** `c002-use-then-list`, `c002-use-noargs`, `c023-use`, `c023-use-var`, `c023-limited`, `c023-operator`, `use`.
+**Paritätsfälle (9):** `c002-use-then-list`, `c002-use-noargs`, `c023-use`, `c023-use-var`, `c023-limited`, `c023-operator`, `c046-use-nosuch-api2`, `c046-use-noarg-api2`, `use`.
 
 **Lokaler Handler:** [crates/odir/src/commands/extra.rs:209](../../../crates/odir/src/commands/extra.rs).
 

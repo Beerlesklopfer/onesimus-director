@@ -17,12 +17,10 @@ setbandwidth [ client=<client-name> | storage=<storage-name> | jobid=<jobid> | j
 
 **Onesimus-Status:** `partial`. Paritätsfälle vorhanden, vollständige Funktionsparität aber nicht nachgewiesen (siehe Befunde).
 
-- Paritätslauf 16.10.2026 (`development` `7993ce6`): 6 von 6 Fällen byte-identisch; Modi: Text, API 1, API 2.
-- Verglichen sind Dialog/Abbruch und `setbandwidth limit=100 client=bareos-fd` in API 1/2 (setzt das Limit am gemeinsamen echten FD; die tatsächliche Drosselung wird nicht geprüft). SD-Limits und Jobselektoren sind nur durch Einheitentests belegt (NDMP: C-050).
+- Paritätslauf 18.10.2026 (`development` `579da25`): 54 von 54 Fällen byte-identisch; Modi: Text, API 1, API 2.
+- C-056 behoben; Fälle nur ohne Daemon-Kontakt. Offen: `max_bandwidth` laufender Jobs, Jmsg bei Connect-/Antwortfehlern (C-056).
 
-**Offene Logeinträge:** `C-050` ([Kompatibilitätslog](../../COMPATIBILITY-LOG.md)).
-
-**Paritätsfälle (6):** `c011-setbandwidth-cancel`, `c011-setbandwidth-badlimit-cancel`, `c011-setbandwidth-api2`, `c035-setbandwidth-api1`, `c035-setbandwidth-api2`, `setbandwidth-noargs`.
+**Paritätsfälle (54):** `c011-setbandwidth-cancel`, `c011-setbandwidth-badlimit-cancel`, `c011-setbandwidth-api2`, `c050-setbandwidth-storage`, `c050-setbandwidth-native`, `c056-all`, `c056-state-running`, `c056-state-bogus`, `c056-jobid`, `c056-jobid-two`, `c056-jobid-zero`, `c056-jobid-text`, `c056-ujobid`, `c056-ujobid-novalue`, `c056-jobid-then-job`, `c056-job-first-cancel`, `c056-job-cancel`, `c056-nolimit-all`, `c056-prompt-cancel`, `c056-prompt-bad-cancel`, `c056-limit-text-cancel`, `c056-limit-negative-cancel`, `c056-limit-novalue-cancel`, `c056-client-missing-cancel`, `c056-fd-missing-cancel`, `c056-client-novalue-cancel`, `c056-storage-missing-cancel`, `c056-storage-novalue-cancel`, `c056-storage-ndmp`, `c056-all-api1`, `c056-all-api2`, `c056-state-running-api1`, `c056-state-running-api2`, `c056-state-bogus-api1`, `c056-state-bogus-api2`, `c056-jobid-api1`, `c056-jobid-api2`, `c056-jobid-two-api1`, `c056-jobid-two-api2`, `c056-ujobid-api1`, `c056-ujobid-api2`, `c056-jobid-then-job-api1`, `c056-jobid-then-job-api2`, `c056-job-cancel-api1`, `c056-job-cancel-api2`, `c056-prompt-cancel-api1`, `c056-prompt-cancel-api2`, `c056-client-missing-cancel-api1`, `c056-client-missing-cancel-api2`, `c056-storage-missing-cancel-api1`, `c056-storage-missing-cancel-api2`, `c056-storage-ndmp-api1`, `c056-storage-ndmp-api2`, `setbandwidth-noargs`.
 
 **Lokaler Handler:** [crates/odir/src/commands/bandwidth.rs:78](../../../crates/odir/src/commands/bandwidth.rs).
 

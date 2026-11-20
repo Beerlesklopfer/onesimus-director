@@ -17,8 +17,8 @@ Referenz: [WIP/25.1.2-pre-43-g18be77e68, `18be77e6832e`](https://github.com/bare
 
 **Onesimus-Status:** `partial`. Paritätsfälle vorhanden, vollständige Funktionsparität aber nicht nachgewiesen (siehe Befunde).
 
-- Paritätslauf 16.10.2026 (`development` `7993ce6`): 3 von 3 Fällen byte-identisch; Modi: Text, API 1, API 2.
-- Verglichen sind Ausgaben ohne `yes`; `.bvfs_clear_cache yes` ändert den Katalog und ist nur durch Einheitentests belegt.
+- Paritätslauf 18.10.2026 (`development` `579da25`): 3 von 3 Fällen byte-identisch; Modi: Text, API 1, API 2.
+- `.bvfs_clear_cache yes` ändert den Katalog und ist nur durch Einheitentests belegt.
 
 **Paritätsfälle (3):** `c022-clear-cache-noyes`, `c035-bvfs-clear-cache-api1`, `c035-bvfs-clear-cache-api2`.
 

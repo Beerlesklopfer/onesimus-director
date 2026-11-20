@@ -13,9 +13,9 @@ Referenz: [WIP/25.1.2-pre-43-g18be77e68, `18be77e6832e`](https://github.com/bare
 
 **Onesimus-Status:** `parity_verified`. Alle unten genannten Paritätsfälle antworten byte-identisch zum Original; nicht genannte Varianten sind damit nicht belegt.
 
-- Paritätslauf 16.10.2026 (`development` `7993ce6`): 2 von 2 Fällen byte-identisch; Modi: Text, API 2.
+- Paritätslauf 18.10.2026 (`development` `579da25`): 3 von 3 Fällen byte-identisch; Modi: Text, API 2.
 
-**Paritätsfälle (2):** `c029-volstatus-api2`, `dot_volstatus`.
+**Paritätsfälle (3):** `c029-volstatus-api2`, `c046-dotvolstatus-api2`, `dot_volstatus`.
 
 **Lokaler Handler:** [crates/odir/src/commands/dot.rs:393](../../../crates/odir/src/commands/dot.rs).
 

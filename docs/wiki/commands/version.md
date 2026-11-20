@@ -13,9 +13,9 @@ Referenz: [WIP/25.1.2-pre-43-g18be77e68, `18be77e6832e`](https://github.com/bare
 
 **Onesimus-Status:** `parity_verified`. Alle unten genannten Paritätsfälle antworten byte-identisch zum Original; nicht genannte Varianten sind damit nicht belegt.
 
-- Paritätslauf 16.10.2026 (`development` `7993ce6`): 9 von 9 Fällen byte-identisch; Modi: Text, API 1, API 2.
+- Paritätslauf 18.10.2026 (`development` `579da25`): 10 von 10 Fällen byte-identisch; Modi: Text, API 1, API 2.
 
-**Paritätsfälle (9):** `c004-quit-after-command`, `c009-version`, `c009-version-json`, `c009-version-api1`, `c020-compact-version`, `c020-json-version`, `c020-compact-persists`, `c020-compact-reset`, `version`.
+**Paritätsfälle (10):** `c004-quit-after-command`, `c009-version`, `c009-version-json`, `c009-version-api1`, `c020-compact-version`, `c020-json-version`, `c020-compact-persists`, `c020-compact-reset`, `c061-dot-then-cmd-api2`, `version`.
 
 **Lokaler Handler:** [crates/odir/src/commands/basic.rs:13](../../../crates/odir/src/commands/basic.rs).
 

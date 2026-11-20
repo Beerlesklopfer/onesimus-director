@@ -17,9 +17,9 @@ Referenz: [WIP/25.1.2-pre-43-g18be77e68, `18be77e6832e`](https://github.com/bare
 
 **Onesimus-Status:** `parity_verified`. Alle unten genannten Paritätsfälle antworten byte-identisch zum Original; nicht genannte Varianten sind damit nicht belegt.
 
-- Paritätslauf 16.10.2026 (`development` `7993ce6`): 3 von 3 Fällen byte-identisch; Modi: Text, Konsolen parity-limited.
+- Paritätslauf 18.10.2026 (`development` `579da25`): 4 von 4 Fällen byte-identisch; Modi: Text, API 2, Konsolen parity-limited.
 
-**Paritätsfälle (3):** `dot-authorized-job`, `dot-authorized-job-denied`, `dot-authorized-cmd`.
+**Paritätsfälle (4):** `c046-dotauthorized-api2`, `dot-authorized-job`, `dot-authorized-job-denied`, `dot-authorized-cmd`.
 
 **Lokaler Handler:** [crates/odir/src/commands/dot.rs:220](../../../crates/odir/src/commands/dot.rs).
 

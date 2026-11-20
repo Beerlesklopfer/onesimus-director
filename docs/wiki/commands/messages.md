@@ -13,10 +13,10 @@ Referenz: [WIP/25.1.2-pre-43-g18be77e68, `18be77e6832e`](https://github.com/bare
 
 **Onesimus-Status:** `parity_verified`. Alle unten genannten Paritätsfälle antworten byte-identisch zum Original; nicht genannte Varianten sind damit nicht belegt.
 
-- Paritätslauf 16.10.2026 (`development` `7993ce6`): 13 von 13 Fällen byte-identisch; Modi: Text, API 1, API 2, GUI, Konsolen parity-limited, parity-operator.
+- Paritätslauf 18.10.2026 (`development` `579da25`): 34 von 34 Fällen byte-identisch; Modi: Text, API 1, API 2, GUI, Konsolen parity-limited, parity-operator.
 - Jobmeldungen selbst (Texte aus Jobs) sind Gegenstand von C-051, nicht dieses Befehls.
 
-**Paritätsfälle (13):** `c027-gui-messages`, `c028-messages`, `c036-messages-twice`, `c036-messages-abbrev`, `c036-messages-args`, `c036-autodisplay-on-messages`, `c036-gui-on-messages`, `c036-messages-api1`, `c036-messages-api2`, `c036-autodisplay-on-api1`, `c036-messages-limited`, `c036-messages-operator`, `messages`.
+**Paritätsfälle (34):** `c027-gui-messages`, `c028-messages`, `c036-messages-twice`, `c036-messages-abbrev`, `c036-messages-args`, `c036-autodisplay-on-messages`, `c036-gui-on-messages`, `c036-messages-api1`, `c036-messages-api2`, `c036-autodisplay-on-api1`, `c036-messages-limited`, `c036-messages-operator`, `c058-admin-yes`, `c058-admin-dialog-yes`, `c058-admin-api2`, `c058-admin-level-full-yes`, `c058-admin-disabled`, `c058-admin-when-cancel`, `c058-migrate-yes`, `c058-migrate-dialog-yes`, `c058-consolidate-yes`, `messages`, `s01-restore-no-bootstrap`, `s01-restore-bootstrap-unreadable`, `s07-runscript-all`, `s07-runscript-fail`, `s07-runscript-noerr`, `s24-runscript-copy-control`, `s22-dup-not-allowed`, `s22-dup-cancel-queued`, `s22-dup-cancel-running`, `s22-dup-ignore`, `s22-max-start-delay`, `s22-max-run-sched-time`.
 
 **Lokaler Handler:** [crates/odir/src/commands/extra.rs:72](../../../crates/odir/src/commands/extra.rs).
 

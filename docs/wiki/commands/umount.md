@@ -17,9 +17,8 @@ umount storage=<storage-name> [ drive=<drivenum> ] jobid=<jobid> | job=<job-name
 
 **Onesimus-Status:** `registered_unverified`. Funktionsparität ist nicht durch einen Paritätsfall nachgewiesen.
 
-- Alias von unmount; kein Paritätsfall (siehe unmount).
-
-**Offene Logeinträge:** `C-050` ([Kompatibilitätslog](../../COMPATIBILITY-LOG.md)).
+- Kein Paritätsfall im Lauf vom 18.10.2026.
+- Alias von `unmount`; kein eigener Paritätsfall.
 
 **Lokaler Handler:** [crates/odir/src/commands/admin.rs:159](../../../crates/odir/src/commands/admin.rs).
 

@@ -17,7 +17,7 @@ resolve client=<client-name> | storage=<storage-name> <host-name>
 
 **Onesimus-Status:** `parity_verified`. Alle unten genannten Paritätsfälle antworten byte-identisch zum Original; nicht genannte Varianten sind damit nicht belegt.
 
-- Paritätslauf 16.10.2026 (`development` `7993ce6`): 19 von 19 Fällen byte-identisch; Modi: Text, API 2.
+- Paritätslauf 18.10.2026 (`development` `579da25`): 19 von 19 Fällen byte-identisch; Modi: Text, API 2.
 - Legacy-/Nicht-TLS-Daemons sind im Fixture nicht vorhanden.
 
 **Paritätsfälle (19):** `c018-localhost`, `c018-ipv4-literal`, `c018-ipv6-literal`, `c018-multiple`, `c018-unknown`, `c018-unknown-after-known`, `c018-keyword-value`, `c018-no-args`, `c018-client-missing-name`, `c018-client-unknown`, `c018-storage-unknown`, `c018-client`, `c018-client-twice`, `c018-storage`, `c018-client-storage`, `c018-api2`, `c018-api2-client`, `resolve-local`, `resolve-client`.

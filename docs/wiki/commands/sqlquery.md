@@ -13,9 +13,9 @@ Referenz: [WIP/25.1.2-pre-43-g18be77e68, `18be77e6832e`](https://github.com/bare
 
 **Onesimus-Status:** `parity_verified`. Alle unten genannten Paritätsfälle antworten byte-identisch zum Original; nicht genannte Varianten sind damit nicht belegt.
 
-- Paritätslauf 16.10.2026 (`development` `7993ce6`): 13 von 13 Fällen byte-identisch; Modi: Text, API 1, API 2, Konsolen parity-limited.
+- Paritätslauf 18.10.2026 (`development` `579da25`): 35 von 35 Fällen byte-identisch; Modi: Text, API 1, API 2, Konsolen parity-limited.
 
-**Paritätsfälle (13):** `c006-unknown-limited`, `c011-sqlquery-cancel`, `c011-sqlquery-empty`, `c011-sqlquery-multiline`, `c011-sqlquery-args-ignored`, `c016-sqlquery-select`, `c016-sqlquery-multiline`, `c016-sqlquery-error`, `c016-sqlquery-empty`, `c016-sqlquery-args-ignored`, `c016-sqlquery-api2`, `c028-sqlquery`, `sqlquery-select`.
+**Paritätsfälle (35):** `c006-unknown-limited`, `c011-sqlquery-cancel`, `c011-sqlquery-empty`, `c011-sqlquery-multiline`, `c011-sqlquery-args-ignored`, `c016-sqlquery-select`, `c016-sqlquery-multiline`, `c016-sqlquery-error`, `c016-sqlquery-empty`, `c016-sqlquery-args-ignored`, `c016-sqlquery-api2`, `c028-sqlquery`, `c046-sqlquery-api2`, `c058-admin-yes`, `c058-admin-dialog-yes`, `c058-admin-level-full-yes`, `c058-admin-when-cancel`, `c058-migrate-yes`, `c058-migrate-dialog-yes`, `c058-consolidate-yes`, `sqlquery-select`, `s01-restore-no-bootstrap`, `s01-restore-bootstrap-unreadable`, `s07-runscript-all`, `s07-runscript-fail`, `s07-runscript-noerr`, `s24-runscript-copy-control`, `s22-dup-not-allowed`, `s22-dup-cancel-queued`, `s22-dup-cancel-running`, `s22-dup-ignore`, `s22-max-start-delay`, `s22-max-run-sched-time`, `s25-job-times-admin`, `s25-job-times-copy-control`.
 
 **Lokaler Handler:** [crates/odir/src/commands/sql.rs:89](../../../crates/odir/src/commands/sql.rs).
 

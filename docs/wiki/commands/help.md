@@ -17,9 +17,9 @@ help add autodisplay automount cancel configure create delete disable enable est
 
 **Onesimus-Status:** `parity_verified`. Alle unten genannten Paritätsfälle antworten byte-identisch zum Original; nicht genannte Varianten sind damit nicht belegt.
 
-- Paritätslauf 16.10.2026 (`development` `7993ce6`): 7 von 7 Fällen byte-identisch; Modi: Text, API 1, Konsolen parity-limited.
+- Paritätslauf 18.10.2026 (`development` `579da25`): 11 von 11 Fällen byte-identisch; Modi: Text, API 1, API 2, Konsolen parity-limited.
 
-**Paritätsfälle (7):** `c028-help`, `c028-help-run`, `help`, `help-run`, `help-configure`, `help-unknown`, `help-limited`.
+**Paritätsfälle (11):** `c028-help`, `c028-help-run`, `c046-help-api2`, `c046-help-list-api2`, `c046-help-nosuch-api2`, `c047-tree-help-abort`, `help`, `help-run`, `help-configure`, `help-unknown`, `help-limited`.
 
 **Lokaler Handler:** [crates/odir/src/commands/basic.rs:130](../../../crates/odir/src/commands/basic.rs).
 

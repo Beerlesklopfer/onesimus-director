@@ -17,9 +17,9 @@ Referenz: [WIP/25.1.2-pre-43-g18be77e68, `18be77e6832e`](https://github.com/bare
 
 **Onesimus-Status:** `parity_verified`. Alle unten genannten Paritätsfälle antworten byte-identisch zum Original; nicht genannte Varianten sind damit nicht belegt.
 
-- Paritätslauf 16.10.2026 (`development` `7993ce6`): 20 von 20 Fällen byte-identisch; Modi: Text, API 1, API 2, Konsolen parity-acl, parity-bvfs, parity-limited, parity-operator.
+- Paritätslauf 18.10.2026 (`development` `579da25`): 24 von 24 Fällen byte-identisch; Modi: Text, API 1, API 2, Konsolen parity-acl, parity-bvfs, parity-limited, parity-operator.
 
-**Paritätsfälle (20):** `c025-clients-limited`, `c025-clients-limited-api2`, `c025-clients-disabled-limited`, `c025-clients-disabled-limited-api2`, `c025-clients-operator`, `c025-clients-operator-api2`, `c025-clients-disabled-operator`, `c025-clients-disabled-operator-api2`, `c025-clients-bvfs`, `c025-clients-bvfs-api2`, `c025-clients-disabled-bvfs`, `c025-clients-disabled-bvfs-api2`, `c025-clients-acl`, `c025-clients-acl-api2`, `c025-clients-disabled-acl`, `c025-clients-disabled-acl-api2`, `c028-dot-clients`, `dot_clients`, `dot_clients-limited`, `dot_clients-api2`.
+**Paritätsfälle (24):** `c025-clients-limited`, `c025-clients-limited-api2`, `c025-clients-disabled-limited`, `c025-clients-disabled-limited-api2`, `c025-clients-operator`, `c025-clients-operator-api2`, `c025-clients-disabled-operator`, `c025-clients-disabled-operator-api2`, `c025-clients-bvfs`, `c025-clients-bvfs-api2`, `c025-clients-disabled-bvfs`, `c025-clients-disabled-bvfs-api2`, `c025-clients-acl`, `c025-clients-acl-api2`, `c025-clients-disabled-acl`, `c025-clients-disabled-acl-api2`, `c028-dot-clients`, `c044-clients-enabled-disabled`, `c044-clients-enabled-upper`, `c044-clients-disabled-value`, `c046-dotclients-enabled-api2`, `dot_clients`, `dot_clients-limited`, `dot_clients-api2`.
 
 **Lokaler Handler:** [crates/odir/src/commands/dot.rs:73](../../../crates/odir/src/commands/dot.rs).
 

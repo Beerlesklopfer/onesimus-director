@@ -15,14 +15,12 @@ Referenz: [WIP/25.1.2-pre-43-g18be77e68, `18be77e6832e`](https://github.com/bare
 
 **RunScript erlaubt:** ja. **Audit-Ereignis:** nein. Beide Flags sind keine Read-only-Klassifizierung.
 
-**Onesimus-Status:** `partial`. Paritätsfälle vorhanden, vollständige Funktionsparität aber nicht nachgewiesen (siehe Befunde).
+**Onesimus-Status:** `parity_verified`. Alle unten genannten Paritätsfälle antworten byte-identisch zum Original; nicht genannte Varianten sind damit nicht belegt.
 
-- Paritätslauf 16.10.2026 (`development` `7993ce6`): 21 von 21 Fällen byte-identisch; Modi: Text, API 1, API 2, Konsolen parity-acl, parity-bvfs, parity-limited, parity-operator.
-- `type=` vergleicht exakt statt als Präfix ohne Groß-/Kleinschreibung (C-044); die Fälle prüfen nur vollständige Typnamen.
+- Paritätslauf 18.10.2026 (`development` `579da25`): 34 von 34 Fällen byte-identisch; Modi: Text, API 1, API 2, Konsolen parity-acl, parity-bvfs, parity-limited, parity-operator.
+- C-044 behoben (Präfixvergleich für `type=`).
 
-**Offene Logeinträge:** `C-044` ([Kompatibilitätslog](../../COMPATIBILITY-LOG.md)).
-
-**Paritätsfälle (21):** `c025-pools-limited`, `c025-pools-limited-api2`, `c025-pools-type-Backup-limited`, `c025-pools-type-Backup-limited-api2`, `c025-pools-operator`, `c025-pools-operator-api2`, `c025-pools-type-Backup-operator`, `c025-pools-type-Backup-operator-api2`, `c025-pools-bvfs`, `c025-pools-bvfs-api2`, `c025-pools-type-Backup-bvfs`, `c025-pools-type-Backup-bvfs-api2`, `c025-pools-acl`, `c025-pools-acl-api2`, `c025-pools-type-Backup-acl`, `c025-pools-type-Backup-acl-api2`, `c028-dot-pools`, `dot_pools`, `dot_pools-type-Backup`, `dot_pools-limited`, `dot_pools-api2`.
+**Paritätsfälle (34):** `c025-pools-limited`, `c025-pools-limited-api2`, `c025-pools-type-Backup-limited`, `c025-pools-type-Backup-limited-api2`, `c025-pools-operator`, `c025-pools-operator-api2`, `c025-pools-type-Backup-operator`, `c025-pools-type-Backup-operator-api2`, `c025-pools-bvfs`, `c025-pools-bvfs-api2`, `c025-pools-type-Backup-bvfs`, `c025-pools-type-Backup-bvfs-api2`, `c025-pools-acl`, `c025-pools-acl-api2`, `c025-pools-type-Backup-acl`, `c025-pools-type-Backup-acl-api2`, `c028-dot-pools`, `c044-pools-type-exact`, `c044-pools-type-prefix`, `c044-pools-type-upper`, `c044-pools-type-one`, `c044-pools-type-longer`, `c044-pools-type-other`, `c044-pools-type-empty`, `c044-pools-type-novalue`, `c044-pools-type-first-novalue`, `c044-pools-type-key-upper`, `c044-pools-type-prefix-json`, `c044-command-prefix-upper`, `c046-dotpools-type-api2`, `dot_pools`, `dot_pools-type-Backup`, `dot_pools-limited`, `dot_pools-api2`.
 
 **Lokaler Handler:** [crates/odir/src/commands/dot.rs:100](../../../crates/odir/src/commands/dot.rs).
 

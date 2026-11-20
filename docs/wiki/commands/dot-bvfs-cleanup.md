@@ -17,8 +17,8 @@ Referenz: [WIP/25.1.2-pre-43-g18be77e68, `18be77e6832e`](https://github.com/bare
 
 **Onesimus-Status:** `partial`. Paritätsfälle vorhanden, vollständige Funktionsparität aber nicht nachgewiesen (siehe Befunde).
 
-- Paritätslauf 16.10.2026 (`development` `7993ce6`): 1 von 1 Fällen byte-identisch; Modi: Text.
-- Nur `.bvfs_cleanup` ohne Argumente verglichen; das Löschen einer Handle-Tabelle ist nur durch Einheitentests belegt.
+- Paritätslauf 18.10.2026 (`development` `579da25`): 1 von 1 Fällen byte-identisch; Modi: Text.
+- Nur `.bvfs_cleanup` ohne Handle-Tabelle verglichen; das Löschen einer Tabelle ist nur durch Einheitentests belegt.
 
 **Paritätsfälle (1):** `c002-bvfs-noargs`.
 

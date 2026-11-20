@@ -17,9 +17,9 @@ Referenz: [WIP/25.1.2-pre-43-g18be77e68, `18be77e6832e`](https://github.com/bare
 
 **Onesimus-Status:** `parity_verified`. Alle unten genannten Paritätsfälle antworten byte-identisch zum Original; nicht genannte Varianten sind damit nicht belegt.
 
-- Paritätslauf 16.10.2026 (`development` `7993ce6`): 9 von 9 Fällen byte-identisch; Modi: Text, API 2.
+- Paritätslauf 18.10.2026 (`development` `579da25`): 18 von 18 Fällen byte-identisch; Modi: Text, API 2, Konsolen parity-limited.
 
-**Paritätsfälle (9):** `c041-defaults-backupcatalog`, `c041-defaults-backupcatalog-api2`, `c041-defaults-jobdefs`, `dot-defaults-job`, `dot-defaults-client`, `dot-defaults-storage`, `dot-defaults-pool`, `dot-defaults-restore`, `dot-defaults-job-api2`.
+**Paritätsfälle (18):** `c041-defaults-backupcatalog`, `c041-defaults-backupcatalog-api2`, `c041-defaults-jobdefs`, `c046-dotdefaults-client-api2`, `c046-dotdefaults-job-api2`, `c046-dotdefaults-pool-api2`, `c046-dotdefaults-storage-api2`, `c046-dotdefaults-nosuch-api2`, `c073-defaults-noarg-api2`, `c073-defaults-noarg-json`, `c073-defaults-noarg-text`, `c073-defaults-limited-api2`, `dot-defaults-job`, `dot-defaults-client`, `dot-defaults-storage`, `dot-defaults-pool`, `dot-defaults-restore`, `dot-defaults-job-api2`.
 
 **Lokaler Handler:** [crates/odir/src/commands/dot.rs:142](../../../crates/odir/src/commands/dot.rs).
 

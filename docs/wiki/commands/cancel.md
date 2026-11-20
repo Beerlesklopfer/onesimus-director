@@ -17,13 +17,13 @@ cancel storage=<storage-name> | jobid=<jobid> | job=<job-name> | ujobid=<unique-
 
 **Onesimus-Status:** `partial`. Paritätsfälle vorhanden, vollständige Funktionsparität aber nicht nachgewiesen (siehe Befunde).
 
-- Paritätslauf 16.10.2026 (`development` `7993ce6`): 24 von 24 Fällen byte-identisch; Modi: Text, API 1, API 2.
-- Verglichen sind Selektion und Fehlertexte nur mit nicht existierenden bzw. nicht laufenden Jobs. Abbruch laufender Jobs über FD/SD ist nur durch Einheitentests belegt.
-- RunScripts „AfterJob“ bei Cancel und Warte-Zustände fehlen (C-048).
+- Paritätslauf 18.10.2026 (`development` `579da25`): 27 von 27 Fällen byte-identisch; Modi: Text, API 1, API 2.
+- Selektion und Fehlertexte verglichen; Abbruch laufender Jobs über FD/SD nur mit privaten Daemons (S-22, S-26) und Einheitentests belegt.
+- Offen (C-058, S-26): Berichtszeilen „Director's comm line to SD dropped“/SD termination status beim Cancel; `*JobCancel*` des Job-Threads ohne Jobnamen-Nummer. Cancel-Dialog ohne eigenen Fall (C-011).
 
-**Offene Logeinträge:** `C-048` ([Kompatibilitätslog](../../COMPATIBILITY-LOG.md)).
+**Offene Logeinträge:** `C-058` ([Kompatibilitätslog](../../COMPATIBILITY-LOG.md)).
 
-**Paritätsfälle (24):** `c006-cancel-none-api2`, `c006-cancel-noargs-api2`, `c006-cancel-job`, `c006-cancel-ujobid`, `c006-cancel-badjobid`, `c006-cancel-all`, `c034-storage-nosuch-job`, `c034-storage-nosuch-job-api2`, `c034-storage-badjobid`, `c034-storage-nojobid`, `c034-storage-jobid-novalue`, `c034-storage-unknown`, `c034-storage-after-jobid`, `c034-storage-novalue`, `c034-sd-keyword`, `c034-state-running`, `c034-state-idle`, `c034-state-novalue`, `c034-all-yes`, `c034-all-api1`, `c035-cancel-job-nosuch-api1`, `c035-cancel-job-nosuch-api2`, `cancel-none`, `cancel-dialog`.
+**Paritätsfälle (27):** `c006-cancel-none-api2`, `c006-cancel-noargs-api2`, `c006-cancel-job`, `c006-cancel-ujobid`, `c006-cancel-badjobid`, `c006-cancel-all`, `c034-storage-nosuch-job`, `c034-storage-nosuch-job-api2`, `c034-storage-badjobid`, `c034-storage-nojobid`, `c034-storage-jobid-novalue`, `c034-storage-unknown`, `c034-storage-after-jobid`, `c034-storage-novalue`, `c034-sd-keyword`, `c034-state-running`, `c034-state-idle`, `c034-state-novalue`, `c034-all-yes`, `c034-all-api1`, `c035-cancel-job-nosuch-api1`, `c035-cancel-job-nosuch-api2`, `c058-admin-when-cancel`, `cancel-none`, `cancel-dialog`, `s22-dup-not-allowed`, `s22-dup-ignore`.
 
 **Lokaler Handler:** [crates/odir/src/commands/cancel.rs:64](../../../crates/odir/src/commands/cancel.rs).
 

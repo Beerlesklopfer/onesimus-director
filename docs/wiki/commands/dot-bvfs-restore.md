@@ -17,7 +17,8 @@ Referenz: [WIP/25.1.2-pre-43-g18be77e68, `18be77e6832e`](https://github.com/bare
 
 **Onesimus-Status:** `registered_unverified`. Funktionsparität ist nicht durch einen Paritätsfall nachgewiesen.
 
-- Kein Paritätsfall: ändert den Katalog (Handle-Tabelle); nur durch Einheitentests belegt.
+- Kein Paritätsfall im Lauf vom 18.10.2026.
+- Kein Paritätsfall (ändert den Katalog über eine Handle-Tabelle); nur Einheitentests.
 
 **Lokaler Handler:** [crates/odir/src/commands/bvfs.rs:876](../../../crates/odir/src/commands/bvfs.rs).
 

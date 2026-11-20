@@ -17,9 +17,9 @@ Referenz: [WIP/25.1.2-pre-43-g18be77e68, `18be77e6832e`](https://github.com/bare
 
 **Onesimus-Status:** `parity_verified`. Alle unten genannten Paritätsfälle antworten byte-identisch zum Original; nicht genannte Varianten sind damit nicht belegt.
 
-- Paritätslauf 16.10.2026 (`development` `7993ce6`): 18 von 18 Fällen byte-identisch; Modi: Text, API 2, Konsolen parity-acl, parity-bvfs, parity-limited, parity-operator.
+- Paritätslauf 18.10.2026 (`development` `579da25`): 25 von 25 Fällen byte-identisch; Modi: Text, API 2, Konsolen parity-acl, parity-bvfs, parity-limited, parity-operator.
 
-**Paritätsfälle (18):** `c003-dot_schedule-api2`, `c025-schedule-limited`, `c025-schedule-limited-api2`, `c025-schedule-enabled-limited`, `c025-schedule-enabled-limited-api2`, `c025-schedule-operator`, `c025-schedule-operator-api2`, `c025-schedule-enabled-operator`, `c025-schedule-enabled-operator-api2`, `c025-schedule-bvfs`, `c025-schedule-bvfs-api2`, `c025-schedule-enabled-bvfs`, `c025-schedule-enabled-bvfs-api2`, `c025-schedule-acl`, `c025-schedule-acl-api2`, `c025-schedule-enabled-acl`, `c025-schedule-enabled-acl-api2`, `dot_schedule`.
+**Paritätsfälle (25):** `c003-dot_schedule-api2`, `c025-schedule-limited`, `c025-schedule-limited-api2`, `c025-schedule-enabled-limited`, `c025-schedule-enabled-limited-api2`, `c025-schedule-operator`, `c025-schedule-operator-api2`, `c025-schedule-enabled-operator`, `c025-schedule-enabled-operator-api2`, `c025-schedule-bvfs`, `c025-schedule-bvfs-api2`, `c025-schedule-enabled-bvfs`, `c025-schedule-enabled-bvfs-api2`, `c025-schedule-acl`, `c025-schedule-acl-api2`, `c025-schedule-enabled-acl`, `c025-schedule-enabled-acl-api2`, `c044-schedule-enabled-disabled`, `c044-schedule-disabled-upper`, `c044-schedule-enabled-value`, `c044-schedule-enabled-disabled-json`, `c046-dotschedule-enabled-api2`, `c046-dotschedule-disabled-api2`, `dot_schedule`, `c046-dotschedule-name-api2`.
 
 **Lokaler Handler:** [crates/odir/src/commands/dot.rs:130](../../../crates/odir/src/commands/dot.rs).
 

@@ -17,10 +17,10 @@ create pool=<pool-name>
 
 **Onesimus-Status:** `partial`. Paritätsfälle vorhanden, vollständige Funktionsparität aber nicht nachgewiesen (siehe Befunde).
 
-- Paritätslauf 16.10.2026 (`development` `7993ce6`): 4 von 4 Fällen byte-identisch; Modi: Text.
-- Verglichen sind Dialog und unbekannter Pool; das Anlegen eines Pools im Katalog ist nicht verglichen.
+- Paritätslauf 18.10.2026 (`development` `579da25`): 7 von 7 Fällen byte-identisch; Modi: Text, API 2.
+- C-066 behoben; der Katalogzustand nach dem Anlegen ist nur über Folgeschritte in `c066`-Fällen sichtbar.
 
-**Paritätsfälle (4):** `c011-create-cancel`, `c011-create-unknown-cancel`, `c012-create-unknown-pool`, `create-noargs`.
+**Paritätsfälle (7):** `c011-create-cancel`, `c011-create-unknown-cancel`, `c012-create-unknown-pool`, `c066-create-exists`, `c066-create-dialog-exists`, `c066-create-api2`, `create-noargs`.
 
 **Lokaler Handler:** [crates/odir/src/commands/extra.rs:805](../../../crates/odir/src/commands/extra.rs).
 

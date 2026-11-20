@@ -13,7 +13,7 @@ Referenz: [WIP/25.1.2-pre-43-g18be77e68, `18be77e6832e`](https://github.com/bare
 
 **Onesimus-Status:** `parity_verified`. Alle unten genannten Paritätsfälle antworten byte-identisch zum Original; nicht genannte Varianten sind damit nicht belegt.
 
-- Paritätslauf 16.10.2026 (`development` `7993ce6`): 5 von 5 Fällen byte-identisch; Modi: Text, API 1, API 2.
+- Paritätslauf 18.10.2026 (`development` `579da25`): 5 von 5 Fällen byte-identisch; Modi: Text, API 1, API 2.
 
 **Paritätsfälle (5):** `c002-shared-then-private`, `c029-media`, `c029-media-api1`, `c029-media-api2`, `dot_media`.
 

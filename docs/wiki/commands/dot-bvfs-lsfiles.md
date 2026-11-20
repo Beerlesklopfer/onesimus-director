@@ -17,7 +17,7 @@ Referenz: [WIP/25.1.2-pre-43-g18be77e68, `18be77e6832e`](https://github.com/bare
 
 **Onesimus-Status:** `parity_verified`. Alle unten genannten Paritätsfälle antworten byte-identisch zum Original; nicht genannte Varianten sind damit nicht belegt.
 
-- Paritätslauf 16.10.2026 (`development` `7993ce6`): 9 von 9 Fällen byte-identisch; Modi: Text, API 1, API 2, Konsolen parity-bvfs.
+- Paritätslauf 18.10.2026 (`development` `579da25`): 9 von 9 Fällen byte-identisch; Modi: Text, API 1, API 2, Konsolen parity-bvfs.
 
 **Paritätsfälle (9):** `c022-lsfiles`, `c022-lsfiles-all`, `c022-lsfiles-other`, `c022-lsfiles-errors`, `c022-lsfiles-api1`, `c022-lsfiles-api2`, `c022-acl-limited`, `c022-negative-limit`, `bvfs-lsfiles`.
 

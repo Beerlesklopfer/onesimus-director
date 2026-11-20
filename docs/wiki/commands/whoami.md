@@ -13,7 +13,7 @@ Referenz: [WIP/25.1.2-pre-43-g18be77e68, `18be77e6832e`](https://github.com/bare
 
 **Onesimus-Status:** `parity_verified`. Alle unten genannten Paritätsfälle antworten byte-identisch zum Original; nicht genannte Varianten sind damit nicht belegt.
 
-- Paritätslauf 16.10.2026 (`development` `7993ce6`): 9 von 9 Fällen byte-identisch; Modi: Text, API 1, API 2, Konsolen parity-limited, parity-operator.
+- Paritätslauf 18.10.2026 (`development` `579da25`): 9 von 9 Fällen byte-identisch; Modi: Text, API 1, API 2, Konsolen parity-limited, parity-operator.
 
 **Paritätsfälle (9):** `c010-whoami-default`, `c010-whoami-named`, `c010-whoami-limited`, `c010-whoami-json`, `c010-whoami-json-named`, `c010-whoami-api1`, `c036-messages-operator`, `whoami`, `whoami-limited`.
 

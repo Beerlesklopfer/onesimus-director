@@ -13,9 +13,9 @@ Referenz: [WIP/25.1.2-pre-43-g18be77e68, `18be77e6832e`](https://github.com/bare
 
 **Onesimus-Status:** `parity_verified`. Alle unten genannten Paritätsfälle antworten byte-identisch zum Original; nicht genannte Varianten sind damit nicht belegt.
 
-- Paritätslauf 16.10.2026 (`development` `7993ce6`): 6 von 6 Fällen byte-identisch; Modi: Text, API 2.
+- Paritätslauf 18.10.2026 (`development` `579da25`): 10 von 10 Fällen byte-identisch; Modi: Text, API 2.
 
-**Paritätsfälle (6):** `c029-levels-api2-type`, `c029-levels-backup`, `c029-levels-two`, `dot_levels`, `dot_levels-type-Backup`, `dot_levels-api2`.
+**Paritätsfälle (10):** `c029-levels-api2-type`, `c029-levels-backup`, `c029-levels-two`, `c044-levels-upper`, `c044-levels-prefix`, `c046-dotlevels-type-api2`, `c046-dotlevels-restore-api2`, `dot_levels`, `dot_levels-type-Backup`, `dot_levels-api2`.
 
 **Lokaler Handler:** [crates/odir/src/commands/dot.rs:263](../../../crates/odir/src/commands/dot.rs).
 

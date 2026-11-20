@@ -13,9 +13,9 @@ Referenz: [WIP/25.1.2-pre-43-g18be77e68, `18be77e6832e`](https://github.com/bare
 
 **Onesimus-Status:** `parity_verified`. Alle unten genannten Paritätsfälle antworten byte-identisch zum Original; nicht genannte Varianten sind damit nicht belegt.
 
-- Paritätslauf 16.10.2026 (`development` `7993ce6`): 1 von 1 Fällen byte-identisch; Modi: Text.
+- Paritätslauf 18.10.2026 (`development` `579da25`): 2 von 2 Fällen byte-identisch; Modi: Text, API 2.
 
-**Paritätsfälle (1):** `time`.
+**Paritätsfälle (2):** `c046-time-api2`, `time`.
 
 **Lokaler Handler:** [crates/odir/src/commands/basic.rs:45](../../../crates/odir/src/commands/basic.rs).
 

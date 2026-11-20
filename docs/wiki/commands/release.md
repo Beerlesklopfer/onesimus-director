@@ -15,14 +15,12 @@ release storage=<storage-name> [ drive=<drivenum> ] [ alldrives ]
 
 **RunScript erlaubt:** ja. **Audit-Ereignis:** ja. Beide Flags sind keine Read-only-Klassifizierung.
 
-**Onesimus-Status:** `partial`. Paritätsfälle vorhanden, vollständige Funktionsparität aber nicht nachgewiesen (siehe Befunde).
+**Onesimus-Status:** `parity_verified`. Alle unten genannten Paritätsfälle antworten byte-identisch zum Original; nicht genannte Varianten sind damit nicht belegt.
 
-- Paritätslauf 16.10.2026 (`development` `7993ce6`): 7 von 7 Fällen byte-identisch; Modi: Text.
-- Verglichen sind Auswahl und Fehlerpfade am File-Storage; NDMP (C-050) ungeprüft.
+- Paritätslauf 18.10.2026 (`development` `579da25`): 9 von 9 Fällen byte-identisch; Modi: Text.
+- C-050 behoben.
 
-**Offene Logeinträge:** `C-050` ([Kompatibilitätslog](../../COMPATIBILITY-LOG.md)).
-
-**Paritätsfälle (7):** `c013-release-auto`, `c013-release-positional`, `c013-release-drive`, `c013-release-alldrives`, `c013-release-notfound`, `c013-release-then-mount`, `release-dialog`.
+**Paritätsfälle (9):** `c013-release-auto`, `c013-release-positional`, `c013-release-drive`, `c013-release-alldrives`, `c013-release-notfound`, `c013-release-then-mount`, `c050-release`, `c050-release-alldrives`, `release-dialog`.
 
 **Lokaler Handler:** [crates/odir/src/commands/admin.rs:163](../../../crates/odir/src/commands/admin.rs).
 

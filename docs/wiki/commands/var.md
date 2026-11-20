@@ -13,7 +13,7 @@ Referenz: [WIP/25.1.2-pre-43-g18be77e68, `18be77e6832e`](https://github.com/bare
 
 **Onesimus-Status:** `parity_verified`. Alle unten genannten Paritätsfälle antworten byte-identisch zum Original; nicht genannte Varianten sind damit nicht belegt.
 
-- Paritätslauf 16.10.2026 (`development` `7993ce6`): 16 von 16 Fällen byte-identisch; Modi: Text, API 2, Konsolen parity-limited, parity-operator.
+- Paritätslauf 18.10.2026 (`development` `579da25`): 16 von 16 Fällen byte-identisch; Modi: Text, API 2, Konsolen parity-limited, parity-operator.
 - Nacktes `var` gibt im Original undefinierte Speicherreste aus; der Fall `var` prüft deshalb nur die Katalogzeilen davor.
 
 **Paritätsfälle (16):** `c023-var-blank`, `c023-var-date`, `c023-var-job`, `c023-var-jobname`, `c023-var-undefined`, `c023-var-env`, `c023-var-ops`, `c023-var-errors`, `c023-var-escapes`, `c023-var-loops`, `c023-var-catalog-arg`, `c023-var-api2`, `c023-use-var`, `c023-limited`, `c023-operator`, `var`.

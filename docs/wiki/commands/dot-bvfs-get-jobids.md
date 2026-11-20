@@ -17,9 +17,9 @@ Referenz: [WIP/25.1.2-pre-43-g18be77e68, `18be77e6832e`](https://github.com/bare
 
 **Onesimus-Status:** `parity_verified`. Alle unten genannten Paritätsfälle antworten byte-identisch zum Original; nicht genannte Varianten sind damit nicht belegt.
 
-- Paritätslauf 16.10.2026 (`development` `7993ce6`): 7 von 7 Fällen byte-identisch; Modi: Text, API 2, Konsolen parity-bvfs.
+- Paritätslauf 18.10.2026 (`development` `579da25`): 8 von 8 Fällen byte-identisch; Modi: Text, API 2, Konsolen parity-bvfs.
 
-**Paritätsfälle (7):** `c022-get-jobids`, `c022-get-jobids-all`, `c022-get-jobids-ujobid`, `c022-get-jobids-errors`, `c022-get-jobids-api2`, `c022-acl-limited`, `bvfs-get-jobids`.
+**Paritätsfälle (8):** `c022-get-jobids`, `c022-get-jobids-all`, `c022-get-jobids-ujobid`, `c022-get-jobids-errors`, `c022-get-jobids-api2`, `c022-acl-limited`, `c046-dotbvfs-get-jobids-nosuch-api2`, `bvfs-get-jobids`.
 
 **Lokaler Handler:** [crates/odir/src/commands/bvfs.rs:982](../../../crates/odir/src/commands/bvfs.rs).
 

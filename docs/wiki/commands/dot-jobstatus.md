@@ -17,9 +17,9 @@ Referenz: [WIP/25.1.2-pre-43-g18be77e68, `18be77e6832e`](https://github.com/bare
 
 **Onesimus-Status:** `parity_verified`. Alle unten genannten Paritätsfälle antworten byte-identisch zum Original; nicht genannte Varianten sind damit nicht belegt.
 
-- Paritätslauf 16.10.2026 (`development` `7993ce6`): 21 von 21 Fällen byte-identisch; Modi: Text, API 1, API 2.
+- Paritätslauf 18.10.2026 (`development` `579da25`): 21 von 21 Fällen byte-identisch; Modi: Text, API 1, API 2.
 
-**Paritätsfälle (21):** `c029-jobstatus`, `c029-jobstatus-T`, `c029-jobstatus-e`, `c029-jobstatus-unknown-char`, `c029-jobstatus-long`, `c029-jobstatus-empty`, `c029-jobstatus-arg-ignored`, `c029-jobstatus-kv-ignored`, `c029-jobstatus-twice`, `c029-jobstatus-catalog`, `c029-jobstatus-catalog-bogus`, `c029-jobstatus-api1`, `c029-jobstatus-api1-T`, `c029-jobstatus-api1-bad`, `c029-jobstatus-api2`, `c029-jobstatus-api2-T`, `c029-jobstatus-api2-Z`, `c029-jobstatus-api2-bad`, `c029-jobstatus-api1-Z`, `c029-jobstatus-quote`, `dot-jobstatus`.
+**Paritätsfälle (21):** `c029-jobstatus`, `c029-jobstatus-arg-ignored`, `c029-jobstatus-kv-ignored`, `c029-jobstatus-catalog`, `c029-jobstatus-catalog-bogus`, `c029-jobstatus-api1`, `c029-jobstatus-api2`, `dot-jobstatus`, `c029-jobstatus-T`, `c029-jobstatus-e`, `c029-jobstatus-unknown-char`, `c029-jobstatus-long`, `c029-jobstatus-empty`, `c029-jobstatus-twice`, `c029-jobstatus-api1-T`, `c029-jobstatus-api1-bad`, `c029-jobstatus-api2-T`, `c029-jobstatus-api2-Z`, `c029-jobstatus-api2-bad`, `c029-jobstatus-api1-Z`, `c029-jobstatus-quote`.
 
 **Lokaler Handler:** [crates/odir/src/commands/dot.rs:150](../../../crates/odir/src/commands/dot.rs).
 
