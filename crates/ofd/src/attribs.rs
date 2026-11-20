@@ -6,7 +6,7 @@ use std::ffi::{CString, OsStr};
 use std::os::unix::ffi::OsStrExt;
 use std::path::Path;
 
-use crate::breg::Bregexp;
+use bareos_format::breg::Bregexp;
 
 // include/filetypes.h (bareos-format, one definition for ofd, osd and odir)
 pub use bareos_format::filetype::{
@@ -99,10 +99,10 @@ pub fn build_attr_output_fnames(attr: &mut Attributes, where_: &Where, prefix_li
     let is_link = attr.type_ == FT_LNKSAVED || attr.type_ == FT_LNK;
     match where_ {
         Where::Regex(list) => {
-            attr.ofname = crate::breg::apply_bregexps(&attr.fname, list);
+            attr.ofname = bareos_format::breg::apply_bregexps(&attr.fname, list);
             if is_link {
                 attr.olname = if attr.type_ == FT_LNKSAVED || prefix_links {
-                    crate::breg::apply_bregexps(&attr.lname, list)
+                    bareos_format::breg::apply_bregexps(&attr.lname, list)
                 } else {
                     attr.lname.clone()
                 };
@@ -264,50 +264,8 @@ pub fn set_attributes(attr: &Attributes, ofd: Option<std::fs::File>) -> Vec<Stri
 mod tests {
     use super::*;
 
-    /// lib/base64.cc ToBase64() for the tests.
-    pub fn to_base64(v: i64) -> String {
-        const MAP: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
-        let mut out = Vec::new();
-        let (neg, mut u) = if v < 0 { (true, v.wrapping_neg() as u64) } else { (false, v as u64) };
-        if u == 0 {
-            out.push(b'A');
-        }
-        while u > 0 {
-            out.push(MAP[(u & 0x3f) as usize]);
-            u >>= 6;
-        }
-        if neg {
-            out.push(b'-');
-        }
-        out.reverse();
-        String::from_utf8(out).unwrap()
-    }
-
-    #[test]
-    fn base64_roundtrip() {
-        for v in [0i64, 1, 63, 64, 0o100644, 1_700_000_000, -5, i64::MAX] {
-            let s = to_base64(v);
-            assert_eq!(from_base64(s.as_bytes()), (v, s.len()));
-        }
-    }
-
-    #[test]
-    fn decode_stat_like_original() {
-        // dev ino mode nlink uid gid rdev size blksize blocks atime mtime ctime LinkFI flags data_stream
-        let vals = [2049i64, 1234, 0o100644, 1, 1000, 100, 0, 5, 4096, 8, 1_700_000_001, 1_700_000_002, 1_700_000_003, 0, 0, 2];
-        let s = vals.iter().map(|v| to_base64(*v)).collect::<Vec<_>>().join(" ");
-        let (st, lfi, ds) = decode_stat(s.as_bytes());
-        assert_eq!(st.mode, 0o100644);
-        assert_eq!(st.uid, 1000);
-        assert_eq!(st.size, 5);
-        assert_eq!(st.mtime, 1_700_000_002);
-        assert_eq!(lfi, 0);
-        assert_eq!(ds, 2);
-        // Short (old) form without LinkFI
-        let s = vals[..13].iter().map(|v| to_base64(*v)).collect::<Vec<_>>().join(" ");
-        let (st, lfi, ds) = decode_stat(s.as_bytes());
-        assert_eq!((st.ctime, lfi, ds), (1_700_000_003, 0, 0));
-    }
+    // ToBase64/FromBase64 and DecodeStat are tested in bareos-format
+    // (base64.rs, lstat.rs decode_stat_like_original) since 19.11.2026.
 
     #[test]
     fn unpack_record_and_where() {
@@ -335,7 +293,7 @@ mod tests {
         build_attr_output_fnames(&mut a, &Where::Prefix(b"/r".to_vec()), false);
         assert_eq!(a.olname, b"/r/a/orig");
         // regexwhere
-        let list = crate::breg::get_bregexps("!/a!/b!").unwrap();
+        let list = bareos_format::breg::get_bregexps("!/a!/b!").unwrap();
         build_attr_output_fnames(&mut a, &Where::Regex(list), false);
         assert_eq!((a.ofname.as_slice(), a.olname.as_slice()), (&b"/b/hard"[..], &b"/b/orig"[..]));
         // bsscanf: numbers without digits are 0 and still count

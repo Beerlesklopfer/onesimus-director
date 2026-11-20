@@ -89,26 +89,8 @@ pub fn decode(lstat: &str) -> Option<Stat> {
 pub(crate) mod tests {
     use super::*;
 
-    /// Inverse of `from_base64`, as in Bareos `ToBase64`.
-    fn to_base64(value: i64) -> String {
-        const DIGITS: &[u8; 64] =
-            b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
-        let mut out = Vec::new();
-        let negative = value < 0;
-        let mut v = value.unsigned_abs();
-        loop {
-            out.push(DIGITS[(v & 0x3f) as usize]);
-            v >>= 6;
-            if v == 0 {
-                break;
-            }
-        }
-        if negative {
-            out.push(b'-');
-        }
-        out.reverse();
-        String::from_utf8(out).unwrap()
-    }
+    // Inverse of `from_base64` (bareos-format `ToBase64`).
+    use bareos_format::base64::to_base64;
 
     pub(crate) fn encode(stat: [i64; 16]) -> String {
         stat.iter().map(|v| to_base64(*v)).collect::<Vec<_>>().join(" ")

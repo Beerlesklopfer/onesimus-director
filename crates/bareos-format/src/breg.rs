@@ -1,14 +1,33 @@
-//! lib/breg.cc: the `!from!to!opts` file name manipulation of restores
-//! (RegexWhere, strip_prefix/add_prefix/add_suffix) with POSIX regcomp/
-//! regexec like the C original.
+//! Dateinamen beim Restore umschreiben: `regexwhere=!von!nach!optionen`.
+//!
+//! Zweck: Ein Restore kann Dateinamen per regulärem Ausdruck umschreiben
+//! (`restore … regexwhere=`, `strip_prefix`, `add_prefix`, `add_suffix`).
+//! Der Director baut den Ausdruck ([`build_where`]) und prüft ihn im
+//! Dialog, der FD wendet ihn auf jeden Namen an ([`apply_bregexps`]).
+//! Beide müssen dasselbe Ergebnis liefern, deshalb steht der Code hier
+//! einmal. Gearbeitet wird auf Bytes, weil Dateinamen kein UTF-8 sein
+//! müssen. Die Ausdrücke übersetzt POSIX `regcomp`/`regexec` aus der libc
+//! wie im C-Original; das ist die einzige Abhängigkeit des Crates.
+//!
+//! Datenfluss: Director (`restore`-Dialog) → `regexwhere=` im
+//! Restore-Kommando → FD [`get_bregexps`] → [`apply_bregexps`] je Datei.
+//!
+//! Bareos-Gegenstück: `core/src/lib/breg.cc` (`NewBregexp`,
+//! `ExtractRegexp`, `BareosRegex::replace`, `get_bregexps`,
+//! `ApplyBregexps`, `bregexp_build_where`, `bregexp_escape_string`).
+//!
+//! Zusammengeführt (20.11.2026) aus `ofd/src/breg.rs` (Bytes) und
+//! `odir/src/breg.rs` (Zeichenketten, dazu `build_where`); der Code war
+//! bis auf diese Signaturen gleich.
 
 use std::ffi::CString;
 
-/// BREG_NREGS (breg.h:44)
+/// `BREG_NREGS` (breg.h:44): the number of match registers.
 const NREGS: usize = 11;
 
-/// One compiled BareosRegex.
+/// One compiled `BareosRegex`.
 pub struct Bregexp {
+    /// The compiled POSIX regular expression.
     preg: libc::regex_t,
     /// Substitution with `$n`/`\n` back references.
     subst: Vec<u8>,
@@ -104,7 +123,7 @@ impl Bregexp {
     }
 }
 
-/// get_bregexps(): every regexp of a `where` list, None when there is none.
+/// `get_bregexps()`: every regexp of a `where` list, `None` when there is none.
 pub fn get_bregexps(regexwhere: &str) -> Option<Vec<Bregexp>> {
     let mut list = Vec::new();
     let mut rest = regexwhere.as_bytes();
@@ -115,16 +134,16 @@ pub fn get_bregexps(regexwhere: &str) -> Option<Vec<Bregexp>> {
     (!list.is_empty()).then_some(list)
 }
 
-/// ApplyBregexps(): all regexps applied one after the other.
-pub fn apply_bregexps(fname: &str, list: &[Bregexp]) -> String {
-    let mut name = fname.as_bytes().to_vec();
+/// `ApplyBregexps()`: all regexps applied one after the other.
+pub fn apply_bregexps(fname: &[u8], list: &[Bregexp]) -> Vec<u8> {
+    let mut name = fname.to_vec();
     for reg in list {
         name = reg.replace(&name).0;
     }
-    String::from_utf8_lossy(&name).into_owned()
+    name
 }
 
-/// bregexp_escape_string() with the `!` separator.
+/// `bregexp_escape_string()` with the `!` separator.
 fn escape(text: &str) -> String {
     text.chars().fold(String::new(), |mut out, c| {
         if c == '!' || c == '\\' {
@@ -135,7 +154,8 @@ fn escape(text: &str) -> String {
     })
 }
 
-/// bregexp_build_where().
+/// `bregexp_build_where()`: the `regexwhere` list of `strip_prefix`,
+/// `add_suffix` and `add_prefix` (in this order, as Bareos builds it).
 pub fn build_where(strip_prefix: Option<&str>, add_prefix: Option<&str>, add_suffix: Option<&str>) -> String {
     let mut parts = Vec::new();
     if let Some(strip) = strip_prefix {
@@ -154,23 +174,36 @@ pub fn build_where(strip_prefix: Option<&str>, add_prefix: Option<&str>, add_suf
 mod tests {
     use super::*;
 
+    /// The tests of `ofd/src/breg.rs` and `odir/src/breg.rs`, joined.
     #[test]
     fn regexps_are_parsed_and_applied_like_breg_cc() {
         let list = get_bregexps("!a!b!").unwrap();
-        assert_eq!(apply_bregexps("/tmp/a/a", &list), "/tmp/b/a");
+        assert_eq!(apply_bregexps(b"/tmp/a/a", &list), b"/tmp/b/a");
         assert!(get_bregexps("bad").is_none());
         assert!(get_bregexps("!a!b").is_none());
         let built = build_where(Some("/tmp"), Some("/new"), Some(".rst"));
         assert_eq!(built, "!/tmp!!i,!([^/])$!$1.rst!,!^!/new!");
         let list = get_bregexps(&built).unwrap();
         assert_eq!(list.len(), 3);
-        assert_eq!(apply_bregexps("/TMP/a/b", &list), "/new/a/b.rst");
+        assert_eq!(apply_bregexps(b"/TMP/a/b", &list), b"/new/a/b.rst");
         // `\!` copies the separator and then ends the expression there
         // (breg.cc keeps `search` on the copied separator).
         let list = get_bregexps("!x\\!y!z!").unwrap();
         assert_eq!(list.len(), 1);
-        assert_eq!(apply_bregexps("ax!b", &list), "ayb");
+        assert_eq!(apply_bregexps(b"ax!b", &list), b"ayb");
         let list = get_bregexps("!(a)(b)!$2\\1!").unwrap();
-        assert_eq!(apply_bregexps("xaby", &list), "xbay");
+        assert_eq!(apply_bregexps(b"xaby", &list), b"xbay");
+    }
+
+    #[test]
+    fn non_utf8_names_pass_through() {
+        let list = get_bregexps("!^/a!/b!").unwrap();
+        assert_eq!(apply_bregexps(b"/a/\xff\xfe", &list), b"/b/\xff\xfe");
+    }
+
+    #[test]
+    fn build_where_escapes_separator_and_backslash() {
+        assert_eq!(build_where(Some("a!b\\c"), None, None), "!a\\!b\\\\c!!i");
+        assert_eq!(build_where(None, None, None), "");
     }
 }

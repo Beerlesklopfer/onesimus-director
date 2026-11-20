@@ -1544,14 +1544,14 @@ fn select_where_regexp(ua: &mut crate::ua_select::Ua, jcr: &mut Jcr) {
                 let regs = match rwhere.as_deref().filter(|r| !r.is_empty()) {
                     Some(rwhere) => {
                         ua.send_msg(format!("regexwhere={rwhere}\n"));
-                        crate::breg::get_bregexps(rwhere)
+                        bareos_format::breg::get_bregexps(rwhere)
                     }
                     None => {
-                        let regexp = crate::breg::build_where(strip_prefix.as_deref(), add_prefix.as_deref(),
+                        let regexp = bareos_format::breg::build_where(strip_prefix.as_deref(), add_prefix.as_deref(),
                             add_suffix.as_deref());
                         ua.send_msg(format!("strip_prefix={} add_prefix={} add_suffix={} result={regexp}\n",
                             nprt(&strip_prefix), nprt(&add_prefix), nprt(&add_suffix)));
-                        crate::breg::get_bregexps(&regexp)
+                        bareos_format::breg::get_bregexps(&regexp)
                     }
                 };
                 let Some(regs) = regs else {
@@ -1560,7 +1560,7 @@ fn select_where_regexp(ua: &mut crate::ua_select::Ua, jcr: &mut Jcr) {
                 };
                 ua.send_msg("Enter a period (.) to stop this test\n");
                 while let Some(name) = ua.get_cmd("Please enter filename to test: ") {
-                    let result = crate::breg::apply_bregexps(&name, &regs);
+                    let result = String::from_utf8_lossy(&bareos_format::breg::apply_bregexps(name.as_bytes(), &regs)).into_owned();
                     ua.send_msg(format!("{name} -> {result}\n"));
                 }
                 continue;
@@ -1574,14 +1574,14 @@ fn select_where_regexp(ua: &mut crate::ua_select::Ua, jcr: &mut Jcr) {
         if let Some(rwhere) = &rwhere {
             jcr.regex_where = Some(rwhere.clone());
         } else if strip_prefix.is_some() || add_prefix.is_some() || add_suffix.is_some() {
-            let regexp = crate::breg::build_where(strip_prefix.as_deref(), add_prefix.as_deref(), add_suffix.as_deref());
+            let regexp = bareos_format::breg::build_where(strip_prefix.as_deref(), add_prefix.as_deref(), add_suffix.as_deref());
             if !crate::acl::access_audited(ua.ctx, crate::acl::Kind::Where, &regexp) {
                 ua.send_msg(format!("Regex ({regexp}) denied by \"WhereACL\" configuration.\n"));
                 continue;
             }
             jcr.regex_where = Some(regexp);
         }
-        if jcr.regex_where.as_deref().and_then(crate::breg::get_bregexps).is_none() {
+        if jcr.regex_where.as_deref().and_then(bareos_format::breg::get_bregexps).is_none() {
             jcr.regex_where = None;
             ua.send_msg("Cannot use your regexp.\n");
         }

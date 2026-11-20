@@ -1806,7 +1806,7 @@ pub(crate) fn start_restore(ctx: &ExecContext, launch: Launch) -> CommandResult 
     let job_regex_where = job_value("regexwhere").or_else(|| {
         let (strip, add, suffix) = (job_value("stripprefix"), job_value("addprefix"), job_value("addsuffix"));
         (strip.is_some() || add.is_some() || suffix.is_some())
-            .then(|| crate::breg::build_where(strip.as_deref(), add.as_deref(), suffix.as_deref()))
+            .then(|| bareos_format::breg::build_where(strip.as_deref(), add.as_deref(), suffix.as_deref()))
     });
     let (where_path, regex_where) = match (regex_where, job_regex_where) {
         (Some(r), _) => (None, Some(r)),

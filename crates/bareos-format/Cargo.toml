@@ -8,6 +8,7 @@ license.workspace = true
 
 [dependencies]
 aquamarine.workspace = true
+libc.workspace = true
 
 [dev-dependencies]
 base64.workspace = true

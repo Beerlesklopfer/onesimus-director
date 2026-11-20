@@ -677,7 +677,7 @@ impl Session<'_> {
             self.msgs.flush(dir);
             let Some(hdr) = next_raw(sd) else { break true };
             let h = String::from_utf8_lossy(&hdr).into_owned();
-            let parsed = scan(&hdr, "rechdr %u %u %d %d %u", 5).map(|v| (v[3].int() as i32, v[4].int() as u32));
+            let parsed = bareos_format::record::RecHdr::parse(&hdr).map(|h| (h.stream, h.data_len));
             let Some((stream, size)) = parsed else {
                 self.msgs.jmsg(M_FATAL, &format!("Record header scan error: {h}\n"));
                 break false;
@@ -690,14 +690,7 @@ impl Session<'_> {
                 self.msgs.jmsg(M_FATAL, &format!("Actual data size {} not same as header {size}\n", data.len()));
                 break false;
             }
-            let digest_name = match stream {
-                STREAM_MD5_DIGEST => Some("MD5"),
-                STREAM_SHA1_DIGEST => Some("SHA1"),
-                STREAM_SHA256_DIGEST => Some("SHA256"),
-                STREAM_SHA512_DIGEST => Some("SHA512"),
-                STREAM_XXH128_DIGEST => Some("XXH128"),
-                _ => None,
-            };
+            let digest_name = bareos_format::stream::digest_name(stream);
             match stream {
                 STREAM_UNIX_ATTRIBUTES | STREAM_UNIX_ATTRIBUTES_EX => {
                     let mut parts = data.splitn(3, |&b| b == b' ');

@@ -4,9 +4,11 @@
 //! das Bareos-Format wissen müssen, steht hier genau einmal: die
 //! LStat-Kodierung der Dateiattribute, das Bareos-eigene Base64, die
 //! Stream-Kennungen (`STREAM_*`), die Dateitypen (`FT_*`), die
-//! Meldungsarten (`M_*`), BashSpaces und das Job-Kommando an den Storage
-//! Daemon. Das Crate hat keine Abhängigkeiten, macht kein IO und kennt weder
-//! Netz noch Datenbank.
+//! Meldungsarten (`M_*`), die Prüfsummenarten, BashSpaces, die Köpfe der
+//! Datensätze zwischen FD und SD, das Umschreiben von Dateinamen beim
+//! Restore (`regexwhere`) und das Job-Kommando an den Storage Daemon. Das
+//! Crate macht kein IO und kennt weder Netz noch Datenbank; einzige
+//! Abhängigkeit ist die libc für POSIX-Regex ([`breg`]).
 //!
 //! Datenfluss: Ein Backup erzeugt im FD je Datei einen Attribut-Datensatz
 //! (`STREAM_UNIX_ATTRIBUTES`, darin die LStat-Zeichenkette aus
@@ -17,7 +19,8 @@
 //!
 //! Bareos-Gegenstück: `core/src/include/streams.h`, `include/filetypes.h`,
 //! `lib/message_severity.h`, `lib/attribs.cc` (`EncodeStat`, `DecodeStat`),
-//! `lib/base64.cc`, `lib/util.cc` (`BashSpaces`), `dird/msgchan.cc`
+//! `lib/base64.cc`, `lib/util.cc` (`BashSpaces`), `lib/breg.cc`,
+//! `stored/read.cc` / `filed/backup.cc` (Netz-Köpfe), `dird/msgchan.cc`
 //! (`StartStorageDaemonJob`) und für die Volume-Ebene `stored/block.cc`,
 //! `stored/record.cc`, `stored/label.cc` (Zweig `bareos-25`).
 //!
@@ -30,6 +33,7 @@
 
 pub mod base64;
 pub mod bash;
+pub mod breg;
 pub mod filetype;
 pub mod glossary;
 pub mod lstat;

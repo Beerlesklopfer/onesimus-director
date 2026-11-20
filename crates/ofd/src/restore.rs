@@ -161,9 +161,10 @@ fn bget_msg<S: Read + Write>(sd: &mut BnetStream<S>) -> Result<Vec<u8>, String> 
     }
 }
 
+/// The SD's record header (`bareos_format::record::RecHdr`).
 fn parse_rechdr(msg: &[u8]) -> Option<(u32, u32, i32, i32, u32)> {
-    let v = crate::scan::scan(msg, "rechdr %u %u %d %d %u", 5)?;
-    Some((v[0].int() as u32, v[1].int() as u32, v[2].int() as i32, v[3].int() as i32, v[4].int() as u32))
+    let h = bareos_format::record::RecHdr::parse(msg)?;
+    Some((h.vol_session_id, h.vol_session_time, h.file_index, h.stream, h.data_len))
 }
 
 /// The restore of one SD read session.

@@ -14,7 +14,6 @@ mod acl_xattr;
 mod attribs;
 mod backup;
 mod berrno;
-mod breg;
 mod broker;
 mod compression;
 mod config;

@@ -133,6 +133,19 @@ pub fn is_digest_stream(s: i32) -> bool {
     matches!(s, STREAM_MD5_DIGEST | STREAM_SHA1_DIGEST | STREAM_SHA256_DIGEST | STREAM_SHA512_DIGEST | STREAM_XXH128_DIGEST)
 }
 
+/// `crypto_digest_name()` of the digest a digest stream carries
+/// (`CryptoDigestStreamType()`), `None` for any other stream.
+pub fn digest_name(s: i32) -> Option<&'static str> {
+    match s {
+        STREAM_MD5_DIGEST => Some("MD5"),
+        STREAM_SHA1_DIGEST => Some("SHA1"),
+        STREAM_SHA256_DIGEST => Some("SHA256"),
+        STREAM_SHA512_DIGEST => Some("SHA512"),
+        STREAM_XXH128_DIGEST => Some("XXH128"),
+        _ => None,
+    }
+}
+
 /// `stream_to_ascii()` (findlib/bfile.cc) for the messages; unknown ids as number.
 pub fn stream_to_ascii(s: i32) -> String {
     match s {
@@ -199,6 +212,10 @@ mod tests {
         assert_eq!(stream_to_ascii(STREAM_MD5_DIGEST), "MD5 digest");
         assert_eq!(stream_to_ascii(STREAM_XXH128_DIGEST), "XXH128 digest");
         assert_eq!(stream_to_ascii(4711), "4711");
+        // ofd backup_cmds.rs do_verify_volume() and digest.rs Digest::name()
+        let names: Vec<_> = digests.iter().map(|s| digest_name(*s).unwrap()).collect();
+        assert_eq!(names, ["MD5", "SHA1", "SHA256", "SHA512", "XXH128"]);
+        assert_eq!(digest_name(STREAM_FILE_DATA), None);
     }
 
     #[test]

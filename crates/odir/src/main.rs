@@ -8,7 +8,6 @@ mod acl;
 mod audit;
 mod backup;
 mod backup_worker;
-mod breg;
 mod btime;
 mod catalog_acl;
 mod catalog_worker;

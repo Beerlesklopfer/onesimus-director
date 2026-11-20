@@ -389,6 +389,7 @@ version = "25.1.2+onesimus.0.2.0"
 dependencies = [
  "aquamarine",
  "base64 0.22.1",
+ "libc",
 ]
 
 [[package]]

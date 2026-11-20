@@ -471,7 +471,7 @@ impl<'a> Session<'a> {
         debug!("Got replace {}, where={args}", replace as char);
         let mut create = CreateState { keep_path_list: replace == REPLACE_NEVER, ..Default::default() };
         let where_ = if regex {
-            match crate::breg::get_bregexps(&args) {
+            match bareos_format::breg::get_bregexps(&args) {
                 Some(list) => Where::Regex(list),
                 None => {
                     self.msgs.jmsg(M_FATAL, &format!("Bad where regexp. where={args}\n"));

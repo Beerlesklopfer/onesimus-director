@@ -146,7 +146,7 @@ impl<S: Read + Write> SdSender<'_, S> {
         true
     }
     fn header(&mut self, stream: i32) -> bool {
-        let h = format!("{} {} 0", self.counters.job_files, stream);
+        let h = bareos_format::record::data_header(self.counters.job_files, stream);
         self.send(h.as_bytes())
     }
     fn eod(&mut self) -> bool {

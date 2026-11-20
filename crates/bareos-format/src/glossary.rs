@@ -20,4 +20,7 @@
 //! | **Unterstrich-Kodierung** | Onesimus-Hello-Form `' '` → `'_'` ([`crate::bash::underscore_spaces`]); nicht Bareos (D13). |
 //! | **Job-Kommando** | Die Anmeldezeile eines Jobs beim SD (`JobId=… job=…`, [`crate::sd_job::JobCommand`]). |
 //! | **eindeutiger Jobname** | `job=`: Jobname mit Datum und Zähler, z. B. `VBackup.2026-11-19_05.06.21_04`. |
+//! | **rechdr** | Kopf vor jedem Datensatz, den der SD beim Restore an den FD schickt ([`crate::record::RecHdr`]). |
+//! | **Datenkopf** | Kopf `<FileIndex> <Stream> 0` vor jedem Datensatz vom FD an den SD ([`crate::record::data_header`]). |
+//! | **regexwhere** | Liste `!von!nach!optionen` zum Umschreiben von Dateinamen beim Restore ([`crate::breg`]). |
 //! | **Sitzung** (VolSessionId/-Time) | Kennung, unter der ein SD die Datensätze eines Jobs schreibt; nicht die TCP-Sitzung. |
