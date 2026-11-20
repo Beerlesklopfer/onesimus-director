@@ -1,0 +1,188 @@
+.TH "OCONSOLE" "1" "" "Onesimus @VERSION@" "Onesimus"
+.SH NAME
+oconsole \- console of the Onesimus and Bareos Directors
+.SH SYNOPSIS
+.B oconsole
+.RI [ options ]
+.br
+.B oconsole
+.RI [ options ]
+.B \-e
+.I command
+.br
+.B oconsole \-\-mcp
+.RB [ \-\-mcp\-http
+.IR address ]
+.RI [ options ]
+.SH DESCRIPTION
+.PP
+.B oconsole
+connects to a Director and sends console commands, like
+.BR bconsole (1).
+It speaks gRPC to the Onesimus Director (tried first) and the classic
+Bareos console protocol (BNET) to every Director, including bareos\-dir.
+The interactive mode offers completion, fish\-style suggestions and key
+bindings built from the Director's command grammar.
+.PP
+With
+.B \-\-mcp
+it serves the Model Context Protocol for AI assistants instead: on
+stdin/stdout, or as Streamable HTTP with
+.BR \-\-mcp\-http .
+.SH OPTIONS
+.TP
+.BI \-c " path" "\fR, \fP\-\-config " path
+Configuration file. Default: /etc/bareos/oconsole.conf, then
+/etc/bareos/bconsole.conf.
+.TP
+.BI \-a " address" "\fR, \fP\-\-address " address
+Director address (overrides the configuration).
+.TP
+.BI \-p " port" "\fR, \fP\-\-port " port
+Director port (overrides the configuration).
+.TP
+.BI \-n " name" "\fR, \fP\-\-name " name
+Console name (overrides the configuration).
+.TP
+.BI \-w " password" "\fR, \fP\-\-password " password
+Password (overrides the configuration).
+.TP
+.B \-\-grpc
+Use gRPC only, without falling back to BNET.
+.TP
+.B \-\-bnet
+Use the classic console protocol (BNET) only.
+.TP
+.BI \-\-grpc\-port " port"
+gRPC port. Default: Director port + 1000.
+.TP
+.BI \-\-grpc\-fingerprint " sha256"
+Expected SHA\-256 fingerprint of the Director's gRPC certificate.
+Default: ~/.config/oconsole/known_directors, asked on first use.
+.TP
+.BI \-e " command" "\fR, \fP\-\-command " command
+Run one command, print its reply and exit.
+.TP
+.B \-\-mcp
+Serve the Model Context Protocol on stdin/stdout.
+.TP
+.BI \-\-mcp\-http " address"
+Serve MCP as Streamable HTTP at /mcp on this address (read only unless the
+development build allows writing).
+.TP
+.BI \-\-mcp\-token\-file " path"
+Bearer token file for \-\-mcp\-http (created with mode 0600 if missing).
+.TP
+.BI \-\-mcp\-host " authority"
+Additional HTTP Host authority to accept (repeatable).
+.TP
+.B \-\-mcp\-read\-only
+Offer only the read tools, also on stdio.
+.TP
+.B \-h\fR, \fP\-\-help
+Print the options.
+.TP
+.B \-V\fR, \fP\-\-version
+Print the version.
+.SH CONFIGURATION
+.PP
+The configuration file has the bconsole syntax: a
+.B Director
+resource (Name, Address, Port, Password) and optionally a
+.B Console
+resource (Name, Password) for a named console. The MCP mode logs in as the
+console whose name ends in
+.BR \-mcp ,
+if there is one.
+.SH COMPLETION
+.PP
+At connect
+.B oconsole
+loads the command grammar with
+.BR ".api 2" ,
+.B .grammar
+and
+.BR ".api 0" ,
+and again after
+.B reload
+and
+.BR configure .
+The grammar lists only the commands the console may run. A Director
+without
+.B .grammar
+(bareos\-dir, older odir) answers "is an invalid command"; then the
+completion is built from
+.BR .help .
+The values of resource names (clients, jobs, pools, volumes, ...) are read
+once at connect with the dot commands the grammar names.
+.PP
+.B Tab
+completes the word at the cursor: the command, then the subcommand words,
+keywords and
+.B key=
+of the arguments, then values after
+.BR key= ,
+also after a comma in a list value. Arguments already given are not
+offered again unless they are repeatable; once one member of an exclusive
+group is given, the others are left out. Required arguments come first.
+Values with blanks are quoted.
+.PP
+While typing, a dimmed suggestion follows the cursor at the end of the line:
+the newest history line that starts with the input, else the rest of the
+only possible completion, else the usage of the next arguments. Lines the
+Director refused are not suggested.
+.PP
+.B help
+.I command
+prints the usage, description, arguments and examples from the grammar
+(the text of the man page
+.BR odir\-\fIcommand\fR (7)).
+.SH KEYS
+.TP
+.B Up\fR, \fPDown
+Search the history backwards or forwards for lines that start with the
+input; on an empty line the previous or next line.
+.TP
+.B Right\fR, \fPCtrl\-F\fR, \fPEnd
+At the end of the line with a suggestion: accept the whole suggestion;
+otherwise move right or to the end.
+.TP
+.B Alt\-Right\fR, \fPAlt\-F
+With a suggestion: accept its next word; otherwise move one word forward.
+.TP
+.B Tab
+Complete; several candidates are listed.
+.TP
+.B Ctrl\-R
+Incremental history search.
+.TP
+.B Esc
+Hide the suggestion until the line changes.
+.TP
+.B Ctrl\-C
+Clear the line and stay connected; while a command runs, cancel it.
+.TP
+.B Ctrl\-D
+On an empty line: quit.
+.SH FILES
+.TP
+.I /etc/bareos/oconsole.conf
+Configuration (fallback /etc/bareos/bconsole.conf).
+.TP
+.I ~/.oconsole_history
+Command history.
+.TP
+.I ~/.config/oconsole/known_directors
+Accepted gRPC certificate fingerprints.
+.SH COMMANDS
+.PP
+The commands of the Onesimus Director; each has its page
+.BR odir\-\fIcommand\fR (7),
+all are in
+.BR odir\-commands (7).
+.\" @COMMANDS@
+.SH SEE ALSO
+.BR odir\-commands (7),
+.BR odir (8),
+.BR ofd (8),
+.BR bconsole (1)

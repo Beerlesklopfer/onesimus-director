@@ -1,0 +1,10 @@
+version -- Print Director version
+
+USAGE
+  version
+
+DESCRIPTION
+  Prints the Director's name, version and build date.
+
+ORIGIN
+  Bareos console command.

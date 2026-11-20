@@ -70,4 +70,6 @@ systemd-units = { unit-name = "ofd", unit-scripts = "../../packaging/ofd", enabl
 assets = [
     ["target/release/ofd", "usr/sbin/ofd", "755"],
     ["../../config/bareos-fd.d/**/*.conf", "usr/share/bareos/defaultconfigs/bareos-fd.d/", "644"],
+    # written by odir --write-man-pages packaging/man (template packaging/man/src/ofd.8.in)
+    ["../../packaging/man/ofd.8", "usr/share/man/man8/", "644"],
 ]

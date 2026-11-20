@@ -64,4 +64,6 @@ maintainer-scripts = "../../packaging/oconsole"
 assets = [
     ["target/release/oconsole", "usr/bin/oconsole", "755"],
     ["../../config/brconsole.conf", "usr/share/bareos/defaultconfigs/oconsole.conf", "644"],
+    # written by odir --write-man-pages packaging/man (template packaging/man/src/oconsole.1.in)
+    ["../../packaging/man/oconsole.1", "usr/share/man/man1/", "644"],
 ]

@@ -90,4 +90,7 @@ assets = [
     ["target/release/odir", "usr/sbin/odir", "755"],
     ["../bareos-orm/schema/*.json", "usr/lib/bareos/scripts/ddl/", "644"],
     ["../../config/bareos-dir.d/**/*.conf", "usr/share/bareos/defaultconfigs/bareos-dir.d/", "644"],
+    # man pages generated from the console grammar (odir --write-man-pages packaging/man)
+    ["../../packaging/man/odir.8", "usr/share/man/man8/", "644"],
+    ["../../packaging/man/odir-*.7", "usr/share/man/man7/", "644"],
 ]

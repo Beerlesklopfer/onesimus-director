@@ -45,6 +45,7 @@ mod listen;
 mod localtime;
 mod logging;
 mod mail;
+mod manpages;
 mod mdns;
 mod ndmp;
 mod ovfs;
@@ -202,10 +203,26 @@ struct Cli {
     /// PEM private key for gRPC.
     #[arg(long, requires = "grpc_cert")]
     grpc_key: Option<String>,
+
+    /// Write the man pages generated from the console grammar into <dir> and exit (packaging).
+    #[arg(long, hide = true, value_name = "DIR")]
+    write_man_pages: Option<PathBuf>,
 }
 
 fn main() {
     let cli = Cli::parse();
+    if let Some(dir) = &cli.write_man_pages {
+        match manpages::write_all(command_grammar::roots(), dir, env!("CARGO_PKG_VERSION")) {
+            Ok(names) => {
+                println!("{} man pages written to {}", names.len(), dir.display());
+                std::process::exit(0);
+            }
+            Err(e) => {
+                eprintln!("odir: cannot write man pages to {}: {e}", dir.display());
+                std::process::exit(1);
+            }
+        }
+    }
     localtime::init_locale();
     localtime::mark_daemon_start();
     if cli.kill {

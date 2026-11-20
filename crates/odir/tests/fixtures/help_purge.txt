@@ -1,0 +1,94 @@
+purge -- Purge records from catalog
+
+USAGE
+  purge [catalog=<catalog>]
+  purge files [job=<job>] [jobid=<jobid>[,...]] [client=<client>] [volume=<volume>] [yes]
+  purge jobs [client=<client>] [volume=<volume>] [pool=<pool>] [jobstatus=<jobstatus>[,...]] [yes]
+  purge volume[=<volume>] [all] [pool=<pool> | allpools] [volstatus=<volstatus>[,...]] [volume=<volume> ...] [storage=<storage>] [devicetype=<devicetype>] [drive=<drive>] [action=<truncate|all>] [dryrun | yes]
+  purge quota [client=<client>] [yes]
+
+DESCRIPTION
+  Deletes catalog records without regard to retention periods. It needs full access to every resource.
+
+  purge volume all (Onesimus extension) purges every volume of one pool (pool=) or of all pools the console may access (allpools) whose status is one of volstatus= (default Full,Used,Error). It is never interactive: dryrun only shows what would be purged, yes purges.
+
+SUBCOMMANDS
+  purge files
+      File records
+  purge jobs
+      Job records
+  purge volume[=<volume>]
+      Volume records
+  purge quota
+      Quota of a client
+
+ARGUMENTS
+  purge
+    catalog=<catalog>
+        Catalog name (name; values from .catalogs)
+  purge files
+    job=<job>
+        Job name (name; values from .jobs)
+    jobid=<jobid>[,...]
+        Job IDs (text; several values separated by commas)
+    client=<client>
+        Client name (name; values from .clients)
+    volume=<volume>
+        Volume name (name; values from .media)
+    yes
+        Do not ask (keyword)
+  purge jobs
+    client=<client>
+        Client name (name; values from .clients)
+    volume=<volume>
+        Volume name (name; values from .media)
+    pool=<pool>
+        Pool name (name; values from .pools)
+    jobstatus=<jobstatus>[,...]
+        Job status letters (text; several values separated by commas)
+    yes
+        Do not ask (keyword)
+  purge volume[=<volume>]
+    volume[=<volume>]
+        Volume name (name; values from .media; the value may be left out)
+    all
+        Every volume of the pool selection (Onesimus) (keyword)
+    pool=<pool>
+        Pool name (name; values from .pools; excludes the other arguments of group scope)
+    allpools
+        Every pool (keyword; excludes the other arguments of group scope)
+    volstatus=<volstatus>[,...]
+        Volume status (Onesimus) (one of a fixed set; values: Full, Used, Error, Append, Archive, Disabled, Read-Only; several values separated by commas)
+    volume=<volume> ...
+        Volumes for action= (several allowed) (name; values from .media; may be repeated)
+    storage=<storage>
+        Storage name (name; values from .storages)
+    devicetype=<devicetype>
+        Device type (text)
+    drive=<drive>
+        Drive number (number)
+    action=<truncate|all>
+        Action on purge (one of a fixed set; values: truncate, all)
+    dryrun
+        Only show what would be purged (Onesimus) (keyword; excludes the other arguments of group mode)
+    yes
+        Do not ask (keyword; excludes the other arguments of group mode)
+  purge quota
+    client=<client>
+        Client name (name; values from .clients)
+    yes
+        Do not ask (keyword)
+
+EXAMPLES
+  purge volume=Full-0001 yes
+      purge one volume
+  purge volume all pool=Full volstatus=Full,Used dryrun
+      show what would be purged (Onesimus)
+  purge volume all allpools yes
+      purge every Full, Used or Error volume (Onesimus)
+
+ORIGIN
+  Bareos console command.
+
+SEE ALSO
+  prune, delete, truncate

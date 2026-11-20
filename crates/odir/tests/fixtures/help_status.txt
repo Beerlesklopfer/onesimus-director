@@ -1,0 +1,98 @@
+status -- Report status
+
+USAGE
+  status
+  status all
+  status director[=<director>] [days=<days>] [verbose]
+  status client=<client>
+  status storage[=<storage>] [slots] [drive=<drive>] [device=<device>]
+  status job=<job>
+  status jobid=<jobid>
+  status ujobid=<ujobid>
+  status scheduler[=<schedule>] [client=<client>] [job=<job>] [days=<days>] [schedule=<schedule>]
+  status subscriptions [detail] [clients] [plugins] [all] [anonymize] [client=<client>] [unknown]
+  status configuration
+
+DESCRIPTION
+  Shows the state of the Director, a client, a storage or the scheduler. Without argument the Director asks which daemon.
+
+SUBCOMMANDS
+  status all
+      Director, every storage and every client
+  status director[=<director>]
+      Director status
+  status client=<client>
+      Status of a File Daemon
+  status storage[=<storage>]
+      Status of a Storage Daemon
+  status job=<job>
+      Status of the storage of a job
+  status jobid=<jobid>
+      Status of the storage of a job
+  status ujobid=<ujobid>
+      Status of the storage of a job
+  status scheduler[=<schedule>]
+      Jobs the scheduler will start
+  status subscriptions
+      Subscription and unit counts
+  status configuration
+      Configuration warnings
+
+ARGUMENTS
+  status director[=<director>]
+    director[=<director>]
+        Director name (text; the value may be left out)
+    days=<days>
+        Scheduled jobs of the next days (number)
+    verbose
+        More detail (keyword)
+  status client=<client>
+    client=<client>
+        Client name (name; values from .clients)
+  status storage[=<storage>]
+    storage[=<storage>]
+        Storage name (name; values from .storages; the value may be left out)
+    slots
+        Autochanger slots (keyword)
+    drive=<drive>
+        Drive number (number)
+    device=<device>
+        Device name (text)
+  status job=<job>
+    job=<job>
+        Job name (name; values from .jobs)
+  status jobid=<jobid>
+    jobid=<jobid>
+        Job ID (number)
+  status ujobid=<ujobid>
+    ujobid=<ujobid>
+        Unique job name (text)
+  status scheduler[=<schedule>]
+    scheduler[=<scheduler>]
+        Schedule name (name; values from .schedule; the value may be left out)
+    client=<client>
+        Jobs of a client (name; values from .clients)
+    job=<job>
+        One job (name; values from .jobs)
+    days=<days>
+        Days ahead (number)
+    schedule=<schedule>
+        Schedule name (name; values from .schedule)
+  status subscriptions
+    detail
+        Details (keyword)
+    clients
+        Per client (keyword)
+    plugins
+        Per plugin (keyword)
+    all
+        Everything (keyword)
+    anonymize
+        Anonymize names (keyword)
+    client=<client>
+        One client (name; values from .clients)
+    unknown
+        Unknown clients (keyword)
+
+ORIGIN
+  Bareos console command.

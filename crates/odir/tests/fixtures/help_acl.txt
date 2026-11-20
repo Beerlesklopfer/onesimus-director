@@ -1,0 +1,99 @@
+.acl -- Manage console ACLs (Onesimus)
+
+USAGE
+  .acl
+  .acl list [console=<console>]
+  .acl set console=<console> [jobacl=<jobacl>[,...] ...] [clientacl=<clientacl>[,...] ...] [storageacl=<storageacl>[,...] ...] [scheduleacl=<scheduleacl>[,...] ...] [poolacl=<poolacl>[,...] ...] [commandacl=<commandacl>[,...] ...] [filesetacl=<filesetacl>[,...] ...] [catalogacl=<catalogacl>[,...] ...] [whereacl=<whereacl>[,...] ...] [pluginoptionsacl=<pluginoptionsacl>[,...] ...]
+  .acl delete console=<console> [jobacl[=<jobacl>[,...]] ...] [clientacl[=<clientacl>[,...]] ...] [storageacl[=<storageacl>[,...]] ...] [scheduleacl[=<scheduleacl>[,...]] ...] [poolacl[=<poolacl>[,...]] ...] [commandacl[=<commandacl>[,...]] ...] [filesetacl[=<filesetacl>[,...]] ...] [catalogacl[=<catalogacl>[,...]] ...] [whereacl[=<whereacl>[,...]] ...] [pluginoptionsacl[=<pluginoptionsacl>[,...]] ...]
+  .acl clear console=<console>
+  .acl copy from=<from> to=<to>
+
+DESCRIPTION
+  Shows and changes the catalog tier of the two-tier console ACLs. The ACL directives of the Console and Profile resources are the outer frame (changed in the editor); the catalog ACL can only restrict further. Effective is what both allow.
+
+  set, delete, clear and copy need the CommandACL .acl and configure. Entries are comma separated; commas inside {}, [] or () belong to the entry (regular expressions), a repeated key adds entries.
+
+SUBCOMMANDS
+  .acl list
+      File and catalog entries, effective result
+  .acl set
+      Replace catalog entries of types
+  .acl delete
+      Delete catalog entries
+  .acl clear
+      Delete every catalog entry of a console
+  .acl copy
+      Copy the catalog entries of a console
+
+ARGUMENTS
+  .acl list
+    console=<console>
+        Console name (name; values from .consoles)
+  .acl set
+    console=<console>
+        Console name (name; values from .consoles; required)
+    jobacl=<jobacl>[,...] ...
+        Catalog ACL entries (comma list, repeatable) (text; several values separated by commas; may be repeated)
+    clientacl=<clientacl>[,...] ...
+        Catalog ACL entries (comma list, repeatable) (text; several values separated by commas; may be repeated)
+    storageacl=<storageacl>[,...] ...
+        Catalog ACL entries (comma list, repeatable) (text; several values separated by commas; may be repeated)
+    scheduleacl=<scheduleacl>[,...] ...
+        Catalog ACL entries (comma list, repeatable) (text; several values separated by commas; may be repeated)
+    poolacl=<poolacl>[,...] ...
+        Catalog ACL entries (comma list, repeatable) (text; several values separated by commas; may be repeated)
+    commandacl=<commandacl>[,...] ...
+        Catalog ACL entries (comma list, repeatable) (text; several values separated by commas; may be repeated)
+    filesetacl=<filesetacl>[,...] ...
+        Catalog ACL entries (comma list, repeatable) (text; several values separated by commas; may be repeated)
+    catalogacl=<catalogacl>[,...] ...
+        Catalog ACL entries (comma list, repeatable) (text; several values separated by commas; may be repeated)
+    whereacl=<whereacl>[,...] ...
+        Catalog ACL entries (comma list, repeatable) (text; several values separated by commas; may be repeated)
+    pluginoptionsacl=<pluginoptionsacl>[,...] ...
+        Catalog ACL entries (comma list, repeatable) (text; several values separated by commas; may be repeated)
+  .acl delete
+    console=<console>
+        Console name (name; values from .consoles; required)
+    jobacl[=<jobacl>[,...]] ...
+        Entries to delete; without value every entry of the type (text; the value may be left out; several values separated by commas; may be repeated)
+    clientacl[=<clientacl>[,...]] ...
+        Entries to delete; without value every entry of the type (text; the value may be left out; several values separated by commas; may be repeated)
+    storageacl[=<storageacl>[,...]] ...
+        Entries to delete; without value every entry of the type (text; the value may be left out; several values separated by commas; may be repeated)
+    scheduleacl[=<scheduleacl>[,...]] ...
+        Entries to delete; without value every entry of the type (text; the value may be left out; several values separated by commas; may be repeated)
+    poolacl[=<poolacl>[,...]] ...
+        Entries to delete; without value every entry of the type (text; the value may be left out; several values separated by commas; may be repeated)
+    commandacl[=<commandacl>[,...]] ...
+        Entries to delete; without value every entry of the type (text; the value may be left out; several values separated by commas; may be repeated)
+    filesetacl[=<filesetacl>[,...]] ...
+        Entries to delete; without value every entry of the type (text; the value may be left out; several values separated by commas; may be repeated)
+    catalogacl[=<catalogacl>[,...]] ...
+        Entries to delete; without value every entry of the type (text; the value may be left out; several values separated by commas; may be repeated)
+    whereacl[=<whereacl>[,...]] ...
+        Entries to delete; without value every entry of the type (text; the value may be left out; several values separated by commas; may be repeated)
+    pluginoptionsacl[=<pluginoptionsacl>[,...]] ...
+        Entries to delete; without value every entry of the type (text; the value may be left out; several values separated by commas; may be repeated)
+  .acl clear
+    console=<console>
+        Console name (name; values from .consoles; required)
+  .acl copy
+    from=<from>
+        Source console (name; values from .consoles; required)
+    to=<to>
+        Target console (name; values from .consoles; required)
+
+EXAMPLES
+  .acl list console=ops
+      file and catalog ACL of ops
+  .acl set console=ops jobacl=Backup-*,Restore commandacl=status,list
+      restrict ops
+  .acl delete console=ops jobacl
+      remove the catalog JobACL entries
+
+ORIGIN
+  Onesimus extension. The Bareos Director does not know this command and answers "is an invalid command".
+
+SEE ALSO
+  configure, .profiles

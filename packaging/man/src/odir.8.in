@@ -1,0 +1,139 @@
+.TH "ODIR" "8" "" "Onesimus @VERSION@" "Onesimus"
+.SH NAME
+odir \- Onesimus Director, a drop\-in replacement for the Bareos Director
+.SH SYNOPSIS
+.B odir
+.RI [ options ]
+.SH DESCRIPTION
+.PP
+.B odir
+schedules and runs backup, restore, copy, migration and verify jobs, keeps
+the catalog and serves the consoles. It reads the Bareos Director
+configuration (bareos\-dir.d), speaks the Bareos protocols to File and
+Storage Daemons and consoles (bconsole, oconsole) and adds a TLS gRPC
+interface (DirectorApi) on the Director port + 1000.
+.SH OPTIONS
+.TP
+.BI \-c " path" "\fR, \fP\-\-config " path
+Configuration file or directory. Default: /etc/bareos/bareos\-dir.d.
+.TP
+.BI \-d " level" "\fR, \fP\-\-debug\-level " level
+Debug level (999 prints the levels).
+.TP
+.B \-\-dt
+Timestamps in debug output.
+.TP
+.B \-f\fR, \fP\-\-foreground
+Run in the foreground.
+.TP
+.BI \-u " user" "\fR, \fP\-\-user " user
+Run as this user (started as root).
+.TP
+.BI \-g " group" "\fR, \fP\-\-group " group
+Run as this group (started as root).
+.TP
+.B \-t\fR, \fP\-\-test\-config
+Read the configuration, check the resources and the catalog connection,
+print the problems and exit (exit status 42 on configuration errors), like
+bareos\-dir \-t.
+.TP
+.B \-k\fR, \fP\-\-kill
+Stop the running Director and exit.
+.TP
+.BI \-p " file" "\fR, \fP\-\-pid\-file " file
+PID file.
+.TP
+.B \-s\fR, \fP\-\-no\-signals
+No signal handling (debugging).
+.TP
+.B \-v\fR, \fP\-\-verbose
+Verbose messages.
+.TP
+.BR \-\-xc " [\fIresource\fR]"
+Print the configuration, or one resource, and exit.
+.TP
+.B \-\-xs
+Print the configuration schema as JSON and exit.
+.TP
+.BI \-P " port" "\fR, \fP\-\-port " port
+Listening port (default from the configuration, usually 9101).
+.TP
+.BI \-b " address" "\fR, \fP\-\-bind\-address " address
+Listen on this address only.
+.TP
+.BI \-\-name " name"
+Director name (default from the configuration).
+.TP
+.BI \-w " dir" "\fR, \fP\-\-working\-directory " dir
+Working directory (default /var/lib/bareos).
+.TP
+.B \-r\fR, \fP\-\-restore\-only
+Accept restore jobs only.
+.TP
+.BI \-m " n" "\fR, \fP\-\-max\-jobs " n
+Override the maximum number of concurrent jobs.
+.TP
+.BI \-\-tls\-cert " file" "\fR, \fP\-\-tls\-key " file "\fR, \fP\-\-tls\-ca " file
+TLS certificate, key and CA (PEM) for the Bareos protocols.
+.TP
+.B \-\-disable\-grpc
+Do not start the gRPC server.
+.TP
+.BI \-\-grpc\-port " port"
+gRPC port (default: Director port + 1000).
+.TP
+.BI \-\-grpc\-cert " file" "\fR, \fP\-\-grpc\-key " file
+PEM certificate and key for gRPC (default: generated in the working
+directory).
+.SH CONFIGURATION
+.PP
+The configuration is the Bareos Director configuration: one directory
+bareos\-dir.d with a subdirectory per resource type (director, catalog,
+client, job, jobdefs, fileset, schedule, pool, storage, messages, console,
+profile, user, counter) and one resource per file. Onesimus directives the
+original does not know (GrpcPort, GrpcTlsCertificate, GrpcTlsKey,
+MdnsAdvertise, DbDriver) are accepted.
+.B configure
+and
+.B .config
+write resources there and reload.
+.SH CATALOG
+.PP
+The catalog is the Bareos PostgreSQL catalog. At start the Director
+applies its schema extension in the schema
+.B onesimus
+(catalog ACLs, journal, helper views and functions); the Bareos tables stay
+unchanged.
+.SH SYSTEMD
+.PP
+The package installs
+.B odir.service
+(user bareos,
+.BR "odir \-c /etc/bareos/bareos\-dir.d \-f" ).
+.B systemctl reload odir
+sends SIGHUP, which reloads the configuration like the console command
+.BR reload .
+.SH CONSOLE COMMANDS
+.PP
+Every command has its page
+.BR odir\-\fIcommand\fR (7)
+(dot commands:
+.BR odir\-dot\-\fIname\fR (7));
+all are in
+.BR odir\-commands (7).
+.\" @COMMANDS@
+.SH FILES
+.TP
+.I /etc/bareos/bareos\-dir.d
+Configuration.
+.TP
+.I /var/lib/bareos
+Working directory (state files, gRPC certificate).
+.TP
+.I /usr/lib/bareos/scripts/ddl
+Catalog schema files.
+.SH SEE ALSO
+.BR odir\-commands (7),
+.BR oconsole (1),
+.BR ofd (8),
+.BR bareos\-dir (8)
