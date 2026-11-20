@@ -72,6 +72,10 @@ Neben dem Text sendet der Director Steuersignale, die oconsole nicht anzeigt, di
 
 Ein unbekannter Befehl unter Modus 1/2 liefert `ERROR_MSG` (-21) vor dem Text und dann `MAIN_PROMPT`, ohne `CMD_BEGIN`. Beim Umschalten selbst gilt der Modus, der beim Empfang aktiv war, für den Anfang der Antwort und der neue für ihr Ende: `.api 1` aus Modus 0 liefert `CMD_OK`, `MAIN_PROMPT`; `.api 0` aus Modus 1 liefert `CMD_BEGIN`, Text, `EOD`. Eine leere Zeile wird unter Modus 1/2 nur mit `MAIN_PROMPT` beantwortet, unter Modus 0 mit `EOD`. Wie der Leerbefehl `.` gerahmt wird, steht bei [`.`](dot-noop.md).
 
+### Über gRPC
+
+Am gRPC-Port ist jeder Aufruf von `ExecuteCommand` für sich: Das Antwortformat steht im Feld `response_format` der Anfrage (`TEXT`, `API`, `JSON`), ein vorher gesendetes `.api` merkt sich der Director dort nicht. Damit `.api` in `oconsole --grpc` trotzdem wie über BNET wirkt, merkt sich `oconsole` den mit `.api` gewählten Modus (nach denselben Regeln wie oben, ein ungültiges `.api` ändert nichts) und schickt ihn mit jedem folgenden Befehl als Antwortformat mit; die Antwort auf `.api` selbst kommt schon im neuen Modus.
+
 ## Beispiele
 
 ### In den Skriptmodus wechseln

@@ -995,18 +995,91 @@ fn read_guarded_dialog(
     }
 }
 
-/// Reply text, colored by keyword.
-fn print_reply(text: &str) {
-    for line in text.lines() {
-        if line.contains("Error") || line.contains("FEHLER") || line.contains("failed") {
-            println!("\x1b[31m{line}\x1b[0m");
-        } else if line.contains("Warning") || line.contains("WARNUNG") {
-            println!("\x1b[33m{line}\x1b[0m");
-        } else if line.contains("OK") || line.contains("success") {
-            println!("\x1b[32m{line}\x1b[0m");
-        } else {
-            println!("{line}");
+/// Output mode of the session as switched with `.api` (C++ DotApiCmd).
+/// BNET keeps it in the Director's session; gRPC calls are stateless, so
+/// the console sends it with every ExecuteCommand request.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+enum ApiMode {
+    /// API 0: human-readable text
+    #[default]
+    Text,
+    /// API 1: framed text for programs
+    Api,
+    /// API 2: JSON-RPC envelope
+    Json,
+}
+
+impl ApiMode {
+    /// The mode a `.api` line switches to, with the Director's rules
+    /// (odir `parse_dot_api`): no argument means 1, more than two arguments
+    /// or an unknown keyword fail. None for every other line.
+    fn from_line(line: &str) -> Option<ApiMode> {
+        let mut words = line.split_whitespace();
+        if !words.next()?.eq_ignore_ascii_case(".api") {
+            return None;
         }
+        let args: Vec<&str> = words.collect();
+        if args.len() > 2 {
+            return None;
+        }
+        let Some(first) = args.first() else { return Some(ApiMode::Api) };
+        match first.to_ascii_lowercase().as_str() {
+            "off" | "0" => Some(ApiMode::Text),
+            "on" | "1" => Some(ApiMode::Api),
+            "json" | "2" => Some(ApiMode::Json),
+            _ => None,
+        }
+    }
+
+    /// The `.api` line that selects this mode again.
+    fn command(self) -> &'static str {
+        match self {
+            ApiMode::Text => ".api 0",
+            ApiMode::Api => ".api 1",
+            ApiMode::Json => ".api 2",
+        }
+    }
+
+    /// The per-request format of a gRPC ExecuteCommand call in this mode.
+    fn grpc_format(self) -> onesimus_proto_rs::onesimus::director::ResponseFormat {
+        use onesimus_proto_rs::onesimus::director::ResponseFormat;
+        match self {
+            ApiMode::Text => ResponseFormat::Text,
+            ApiMode::Api => ResponseFormat::Api,
+            ApiMode::Json => ResponseFormat::Json,
+        }
+    }
+}
+
+/// Replies are coloured only for a person: text mode (never API 1/2, whose
+/// output programs parse) on a terminal, and not under NO_COLOR.
+fn reply_coloured(mode: ApiMode, stdout_is_tty: bool, color_enabled: bool) -> bool {
+    mode == ApiMode::Text && stdout_is_tty && color_enabled
+}
+
+/// One reply line, coloured by keyword when `coloured`.
+fn reply_line(line: &str, coloured: bool) -> std::borrow::Cow<'_, str> {
+    if !coloured {
+        return std::borrow::Cow::Borrowed(line);
+    }
+    let colour = if line.contains("Error") || line.contains("FEHLER") || line.contains("failed") {
+        "\x1b[31m"
+    } else if line.contains("Warning") || line.contains("WARNUNG") {
+        "\x1b[33m"
+    } else if line.contains("OK") || line.contains("success") {
+        "\x1b[32m"
+    } else {
+        return std::borrow::Cow::Borrowed(line);
+    };
+    std::borrow::Cow::Owned(format!("{colour}{line}\x1b[0m"))
+}
+
+/// Reply text, coloured by keyword in text mode on a terminal only.
+fn print_reply(text: &str, mode: ApiMode) {
+    use std::io::IsTerminal;
+    let coloured = reply_coloured(mode, io::stdout().is_terminal(), color::enabled());
+    for line in text.lines() {
+        println!("{}", reply_line(line, coloured));
     }
 }
 
@@ -1083,6 +1156,8 @@ fn interactive_loop(
 
     let version = env!("CARGO_PKG_VERSION");
     let prompt = format!("{}@{}[{}]> ", console_name, director_name, version);
+    // The session's output mode, as last switched with `.api`
+    let mut api_mode = ApiMode::default();
 
     loop {
         // Kein drain() hier — der State ist nach Init/Command-Response synchron.
@@ -1104,6 +1179,9 @@ fn interactive_loop(
                     None => continue,
                     Some(false) => { eprintln!("Connection lost"); break; }
                     Some(true) => { rl.add_history_entry(cmd).ok(); }
+                }
+                if let Some(mode) = ApiMode::from_line(cmd) {
+                    api_mode = mode;
                 }
 
                 // Quit
@@ -1133,7 +1211,7 @@ fn interactive_loop(
                     match msg {
                         Some(RecvResult::Data(text)) => {
                             if let Some((before, dialog_prompt)) = dialog.prompt(&text) {
-                                print_reply(&before);
+                                print_reply(&before, api_mode);
                                 if !read_guarded_dialog(&mut rl, dir.as_mut(), &guard, &refresh,
                                     &dialog_prompt, false) {
                                     let _ = rl.save_history(&history_file);
@@ -1142,7 +1220,7 @@ fn interactive_loop(
                                 continue;
                             }
                             refused |= text.contains("is an invalid command");
-                            print_reply(&text);
+                            print_reply(&text, api_mode);
                         }
                         Some(RecvResult::Signal(BnetSignal::CmdFailed)) => refused = true,
                         // API 1 input dialogs: the prompt text follows (C-076)
@@ -1204,6 +1282,10 @@ fn interactive_loop(
                 if matches!(first.as_str(), "reload" | "configure") {
                     if let Some(helper) = rl.helper_mut() {
                         helper.refresh(dir.as_mut());
+                        // the loader leaves the Director in API 0
+                        if api_mode != ApiMode::Text {
+                            dir.query(api_mode.command());
+                        }
                         eprintln!("\x1b[2m(tab-completion refreshed: {})\x1b[0m", helper.summary());
                     }
                 }
@@ -1341,7 +1423,7 @@ fn run_grpc_mode(cli: &EffCli) {
 
     // Interactive mode: same line editor (history, tab completion) as BNET
     let name = session.director_name.clone();
-    interactive_loop(Box::new(GrpcConn { rt, session, pending: Vec::new() }), &cli.name, &name);
+    interactive_loop(Box::new(GrpcConn { rt, session, pending: Vec::new(), api_mode: ApiMode::default() }), &cli.name, &name);
 }
 
 /// gRPC implementation of DirectorConn: each command is one ExecuteCommand
@@ -1350,12 +1432,17 @@ struct GrpcConn {
     rt: tokio::runtime::Runtime,
     session: grpc_client::GrpcSession,
     pending: Vec<RecvResult>,
+    /// The mode set with `.api`; ExecuteCommand is stateless, so every
+    /// command carries it as its response format.
+    api_mode: ApiMode,
 }
 
 impl GrpcConn {
     fn execute(&mut self, cmd: &str, format: onesimus_proto_rs::onesimus::director::ResponseFormat) -> Result<String, String> {
         let out = self.rt.block_on(self.session.execute(cmd, format)).map_err(|e| format!("gRPC error: {e}"))?;
-        Ok(if out.error.is_empty() { out.text } else { format!("{}{}", out.text, out.error) })
+        // A JSON reply carries its errors in the envelope; appending them would break the JSON
+        let json = format == onesimus_proto_rs::onesimus::director::ResponseFormat::Json && !out.text.is_empty();
+        Ok(if out.error.is_empty() || json { out.text } else { format!("{}{}", out.text, out.error) })
     }
 }
 
@@ -1379,13 +1466,16 @@ impl DirectorConn for GrpcConn {
     }
 
     fn send_cmd(&mut self, cmd: &str) -> bool {
-        use onesimus_proto_rs::onesimus::director::ResponseFormat;
         if matches!(cmd, "quit" | "exit" | ".quit") {
             // Like the BNET Director: quit produces no output
             self.pending = vec![RecvResult::Closed];
             return true;
         }
-        let text = match self.execute(cmd, ResponseFormat::Text) {
+        // As on BNET, `.api` answers in the new mode and sets it for what follows
+        if let Some(mode) = ApiMode::from_line(cmd) {
+            self.api_mode = mode;
+        }
+        let text = match self.execute(cmd, self.api_mode.grpc_format()) {
             Ok(t) => t,
             // A failed call is shown like a command error; the session goes on
             Err(e) => format!("Error: {e}\n"),
@@ -1777,6 +1867,51 @@ mod tests {
         assert!(helper.grammar.command("run").is_some());
         assert_eq!(bareos.sent[3..6], [".api 1", ".help", ".api 0"]);
         assert!(helper.summary().contains("(from .help)"));
+    }
+
+    /// The volstatus enum of `.grammar` contains the word "Error": in API 2
+    /// and on a pipe the reply must stay byte-exact JSON.
+    #[test]
+    fn replies_are_coloured_only_in_text_mode_on_a_terminal() {
+        let json = r#"{"jsonrpc":"2.0","result":{"values":["Append","Error","Full"]}}"#;
+        let pretty = "  \"values\": [\n    \"Error\",\n    \"Full\"\n  ]";
+        for mode in [ApiMode::Api, ApiMode::Json] {
+            assert!(!reply_coloured(mode, true, true), "{mode:?}");
+        }
+        assert!(!reply_coloured(ApiMode::Text, false, true), "not on a pipe");
+        assert!(!reply_coloured(ApiMode::Text, true, false), "NO_COLOR");
+        assert!(reply_coloured(ApiMode::Text, true, true));
+        for text in [json, pretty] {
+            for line in text.lines() {
+                assert_eq!(reply_line(line, reply_coloured(ApiMode::Json, true, true)), line);
+                assert_eq!(reply_line(line, reply_coloured(ApiMode::Text, false, true)), line);
+            }
+        }
+        assert_eq!(reply_line("Error: no such job", true), "\x1b[31mError: no such job\x1b[0m");
+        assert_eq!(reply_line("plain", true), "plain");
+    }
+
+    /// `.api` over gRPC: the console keeps the mode and sends it as the
+    /// response format of every following ExecuteCommand call (C++ DotApiCmd rules).
+    #[test]
+    fn dot_api_sets_the_grpc_response_format() {
+        use onesimus_proto_rs::onesimus::director::ResponseFormat;
+        assert_eq!(ApiMode::from_line(".api 2"), Some(ApiMode::Json));
+        assert_eq!(ApiMode::from_line(".API json compact=yes"), Some(ApiMode::Json));
+        assert_eq!(ApiMode::from_line(".api"), Some(ApiMode::Api));
+        assert_eq!(ApiMode::from_line(".api on"), Some(ApiMode::Api));
+        assert_eq!(ApiMode::from_line(".api off"), Some(ApiMode::Text));
+        assert_eq!(ApiMode::from_line(".api 0"), Some(ApiMode::Text));
+        assert_eq!(ApiMode::from_line(".api 3"), None);
+        assert_eq!(ApiMode::from_line(".api 2 compact=yes x"), None);
+        assert_eq!(ApiMode::from_line(".apis"), None);
+        assert_eq!(ApiMode::from_line(".grammar"), None);
+        assert_eq!(ApiMode::default().grpc_format(), ResponseFormat::Text);
+        assert_eq!(ApiMode::Api.grpc_format(), ResponseFormat::Api);
+        assert_eq!(ApiMode::Json.grpc_format(), ResponseFormat::Json);
+        for mode in [ApiMode::Text, ApiMode::Api, ApiMode::Json] {
+            assert_eq!(ApiMode::from_line(mode.command()), Some(mode));
+        }
     }
 
     #[test]
