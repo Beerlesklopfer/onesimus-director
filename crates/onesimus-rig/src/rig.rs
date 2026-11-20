@@ -115,6 +115,7 @@ pub struct FdEndJob {
 ///         +wait_job(id) JobRow
 ///         +restore(jobid) u32
 ///         +diff_restore() (i32, String)
+///         +replace_sd(program)
 ///     }
 ///     class Cluster { +query(sql) String }
 ///     class Daemon { +stop() }
@@ -140,6 +141,8 @@ pub struct Rig {
     daemons: Vec<Daemon>,
     /// The catalog cluster.
     catalog: Option<Cluster>,
+    /// How often [`Rig::replace_sd`] ran (names the new SD logs).
+    sd_restarts: usize,
 }
 
 impl Rig {
@@ -171,7 +174,7 @@ impl Rig {
         let _ = std::fs::remove_dir_all(&root);
         std::fs::create_dir_all(&root).map_err(|e| format!("{}: {e}", root.display()))?;
         let layout = Layout::new(&root);
-        let mut rig = Rig { layout, ports, programs, options, daemons: Vec::new(), catalog: None };
+        let mut rig = Rig { layout, ports, programs, options, daemons: Vec::new(), catalog: None, sd_restarts: 0 };
         rig.setup()?;
         Ok(rig)
     }
@@ -381,6 +384,24 @@ impl Rig {
             text += &format!("--- {} ({}) ---\n{}\n", daemon.name, daemon.log.display(), daemon.log_tail(15));
         }
         text
+    }
+
+    /// Stops the Storage Daemon and starts `program` in its place with the
+    /// same configuration and port; the new one logs to `sd-<n>.log`
+    /// (n = 1, 2, …). Volumes and catalog stay; used to read with osd what
+    /// bareos-sd wrote and the other way round.
+    pub fn replace_sd(&mut self, program: &Path) -> Result<(), String> {
+        let index = self.daemons.iter().position(|d| d.name == "sd").ok_or("kein SD im Gerüst")?;
+        self.daemons[index].stop();
+        self.sd_restarts += 1;
+        let n = self.sd_restarts;
+        let sd_conf = self.layout.sd_conf.display().to_string();
+        let log = self.layout.root.join(format!("sd-{n}.log"));
+        let mut sd = Daemon::spawn("sd", program, &["-f", "-c", &sd_conf, "-d", "50"], &log)?;
+        let started = wait_port(&mut sd, SocketAddr::from(([127, 0, 0, 1], self.ports.sd)), Duration::from_secs(20));
+        self.daemons[index] = sd;
+        self.programs.sd = program.to_path_buf();
+        started
     }
 
     /// The rig root directory.

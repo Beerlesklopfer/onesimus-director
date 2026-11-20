@@ -7,7 +7,8 @@
 //! bitgenau; [`hardlinks_preserved`] prüft zusätzlich die Inode-Gleichheit.
 //!
 //! Datenfluss: [`build`] schreibt den Baum, [`build_big`] die große Datei des
-//! Abbruch-Falls. Inhalte sind deterministisch (xorshift), damit ein
+//! Abbruch-Falls, [`compare_trees`] vergleicht Quelle und Restore samt
+//! Attributen (Rechte, Eigentümer, Zeiten, Symlink-Ziele). Inhalte sind deterministisch (xorshift), damit ein
 //! Fehlschlag reproduzierbar ist.
 //!
 //! Bareos-Gegenstück: die Testdaten der `systemtests` (`tmp/data`), dort meist
@@ -82,6 +83,67 @@ pub fn hardlinks_preserved(root: &Path) -> std::io::Result<bool> {
     Ok(a.dev() == b.dev() && a.ino() == b.ino())
 }
 
+/// Every difference between the tree `source` and its restored copy
+/// `restored` in what a restore must keep: the set of names, the file
+/// type, content, size, permission bits, owner, group, modification time
+/// (seconds; for directories too) and symlink targets. Empty when both
+/// agree. Hardlinks are checked by [`hardlinks_preserved`].
+pub fn compare_trees(source: &Path, restored: &Path) -> Vec<String> {
+    let mut diffs = Vec::new();
+    compare_entry(source, restored, Path::new(""), &mut diffs);
+    diffs
+}
+
+/// [`compare_trees`] for the entry `rel` below both roots, recursively.
+fn compare_entry(source: &Path, restored: &Path, rel: &Path, diffs: &mut Vec<String>) {
+    let (a_path, b_path) = (source.join(rel), restored.join(rel));
+    let shown = if rel.as_os_str().is_empty() { ".".to_string() } else { rel.display().to_string() };
+    let (a, b) = match (std::fs::symlink_metadata(&a_path), std::fs::symlink_metadata(&b_path)) {
+        (Ok(a), Ok(b)) => (a, b),
+        (Ok(_), Err(e)) => return diffs.push(format!("{shown}: missing in the restore ({e})")),
+        (Err(e), _) => return diffs.push(format!("{shown}: unreadable in the source ({e})")),
+    };
+    let kind = |m: &std::fs::Metadata| m.mode() & libc::S_IFMT;
+    if kind(&a) != kind(&b) {
+        return diffs.push(format!("{shown}: file type {:o} != {:o}", kind(&a), kind(&b)));
+    }
+    if a.mode() & 0o7777 != b.mode() & 0o7777 {
+        diffs.push(format!("{shown}: mode {:o} != {:o}", a.mode() & 0o7777, b.mode() & 0o7777));
+    }
+    let mut check = |what: &str, x: u64, y: u64| {
+        if x != y {
+            diffs.push(format!("{shown}: {what} {x} != {y}"));
+        }
+    };
+    check("uid", u64::from(a.uid()), u64::from(b.uid()));
+    check("gid", u64::from(a.gid()), u64::from(b.gid()));
+    if !a.file_type().is_symlink() {
+        check("mtime", a.mtime() as u64, b.mtime() as u64);
+    }
+    if a.file_type().is_file() {
+        check("size", a.len(), b.len());
+        if a.len() == b.len() && std::fs::read(&a_path).ok() != std::fs::read(&b_path).ok() {
+            diffs.push(format!("{shown}: content differs"));
+        }
+    } else if a.file_type().is_symlink() {
+        let (x, y) = (std::fs::read_link(&a_path).ok(), std::fs::read_link(&b_path).ok());
+        if x != y {
+            diffs.push(format!("{shown}: symlink target {x:?} != {y:?}"));
+        }
+    } else if a.file_type().is_dir() {
+        let names = |p: &Path| -> std::collections::BTreeSet<std::ffi::OsString> {
+            std::fs::read_dir(p).map(|d| d.filter_map(|e| e.ok().map(|e| e.file_name())).collect()).unwrap_or_default()
+        };
+        let (na, nb) = (names(&a_path), names(&b_path));
+        for extra in nb.difference(&na) {
+            diffs.push(format!("{}: only in the restore", rel.join(extra).display()));
+        }
+        for name in &na {
+            compare_entry(source, restored, &rel.join(name), diffs);
+        }
+    }
+}
+
 /// Allocated bytes of `path` (`st_blocks` × 512), to see whether holes stay.
 pub fn allocated_bytes(path: &Path) -> std::io::Result<u64> {
     Ok(std::fs::metadata(path)?.blocks() * 512)
@@ -103,6 +165,26 @@ mod tests {
         assert!(dir.join(OsStr::from_bytes(NON_UTF8_NAME)).exists());
         assert_eq!(std::fs::metadata(dir.join("sparse.bin")).unwrap().len(), SPARSE_FILE_BYTES);
         std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn compare_trees_sees_content_mode_and_missing_entries() {
+        let base = std::env::temp_dir().join(format!("onesimus-rig-cmp-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&base);
+        let (a, b) = (base.join("a"), base.join("b"));
+        build(&a).unwrap();
+        let copy = std::process::Command::new("cp").arg("-a").arg(&a).arg(&b).status().unwrap();
+        assert!(copy.success());
+        assert_eq!(compare_trees(&a, &b), Vec::<String>::new());
+        std::fs::write(b.join("file0.txt"), "Content 0\n").unwrap();
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(b.join("file1.txt"), std::fs::Permissions::from_mode(0o600)).unwrap();
+        std::fs::remove_file(b.join("sub").join("inner.txt")).unwrap();
+        let diffs = compare_trees(&a, &b).join("\n");
+        assert!(diffs.contains("file0.txt: content differs"), "{diffs}");
+        assert!(diffs.contains("file1.txt: mode"), "{diffs}");
+        assert!(diffs.contains("sub/inner.txt: missing in the restore"), "{diffs}");
+        std::fs::remove_dir_all(&base).unwrap();
     }
 
     #[test]

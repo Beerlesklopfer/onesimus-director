@@ -1,5 +1,5 @@
 //! Ende-zu-Ende-Läufe mit osd als Storage Daemon (Plan
-//! `docs/plans/OSD-GERAETE-UND-VERTEILUNG.md`, P1 Stufe 1).
+//! `docs/plans/OSD-GERAETE-UND-VERTEILUNG.md`, P1 Stufe 1 und 2).
 //!
 //! Start: `cargo test -p onesimus-rig --test osd -- --ignored`
 //! (docs/wiki/testgeruest.md, docs/wiki/osd.md). Der Test baut `odir`, `ofd`
@@ -11,7 +11,17 @@
 //! Job, Media und JobMedia, das Volume trägt das Bareos-Format (eigener
 //! Leser aus `bareos-format`: Volume-Label, SOS- und EOS-Label, Attribute
 //! jeder Datei, Prüfsumme jedes Blocks) und `bls` listet die Dateien, wenn
-//! `/usr/sbin/bls` installiert ist.
+//! `/usr/sbin/bls` installiert ist. Danach stellt ein Restore den Baum in
+//! einem anderen Verzeichnis wieder her; verglichen werden Inhalt (`diff
+//! -r`) und Attribute (Rechte, Eigentümer, Zeiten, Symlink-Ziele,
+//! Hardlinks, Löcher der Sparse-Datei).
+//!
+//! | Test | Ports | Inhalt |
+//! |---|---|---|
+//! | `osd_backup_restore_active_client` | ab 39471 | Backup und Restore, der FD ruft den SD an |
+//! | `osd_backup_restore_passive_client` | ab 39481 | dasselbe mit `Passive = yes`, der SD ruft den FD an |
+//! | `osd_backup_verify_restore_over_several_volumes` | ab 39491 | `Maximum Volume Bytes = 5M`: Backup über mehrere Volumes, Verify VolumeToCatalog, Restore über alle |
+//! | `osd_and_bareos_sd_read_each_others_volumes` | ab 39501 | Backup mit bareos-sd → Restore mit osd; Backup mit osd auf dasselbe Volume → Restore mit bareos-sd; `bls` liest das gemischte Volume |
 
 #![deny(missing_docs)]
 
@@ -57,8 +67,8 @@ fn check(rig: &Rig, ok: bool, what: &str) {
     assert!(ok, "{what}\n{}", rig.diagnostics());
 }
 
-/// One full backup and every check of the module comment.
-fn backup_and_check(rig: &Rig) {
+/// One full backup and every check of the module comment; the JobId.
+fn backup_and_check(rig: &Rig) -> u32 {
     let backup = rig.run_job("VBackup").unwrap_or_else(|e| panic!("{e}"));
     let row = rig.wait_job(backup, JOB_TIMEOUT).unwrap_or_else(|e| panic!("{e}"));
     let log = rig.job_log(backup);
@@ -127,22 +137,166 @@ fn backup_and_check(rig: &Rig) {
     } else {
         eprintln!("{BLS} nicht installiert (bareos-storage-tools): nur der eigene Leser hat das Volume geprüft");
     }
+    backup
 }
 
-/// Full backup of the test tree with osd: the FD connects to the SD
-/// (active client, the default).
+/// Restores job `backup` into the (emptied) restore directory and
+/// compares the restored tree with the source: content, attributes,
+/// hardlinks and holes.
+fn restore_and_compare(rig: &Rig, backup: u32) {
+    let _ = std::fs::remove_dir_all(&rig.layout.restore);
+    std::fs::create_dir_all(&rig.layout.restore).unwrap_or_else(|e| panic!("{e}"));
+    let restore = rig.restore(backup).unwrap_or_else(|e| panic!("{e}"));
+    let row = rig.wait_job(restore, JOB_TIMEOUT).unwrap_or_else(|e| panic!("{e}"));
+    let log = rig.job_log(restore);
+    eprintln!("Job-Log {restore} (Restore von {backup}):\n{log}");
+    check(rig, row.status == 'T' && row.files == ENTRIES, &format!("Restore: {row:?}\n{log}"));
+    check(rig, log.contains("Restore OK"), &format!("kein \"Restore OK\" im Job-Log:\n{log}"));
+    let (rc, diff) = rig.diff_restore();
+    check(rig, rc == 0, &format!("diff -r Quelle/Restore rc={rc}:\n{diff}"));
+    let restored = rig.layout.restored_data();
+    let diffs = onesimus_rig::tree::compare_trees(&rig.layout.data, &restored);
+    check(rig, diffs.is_empty(), &format!("Attribute nach dem Restore verschieden:\n{}", diffs.join("\n")));
+    check(rig, onesimus_rig::tree::hardlinks_preserved(&restored).unwrap_or(false), "Hardlink hard1/sub/hard2 ist keine gemeinsame Inode");
+    let allocated = onesimus_rig::tree::allocated_bytes(&restored.join("sparse.bin")).unwrap_or(u64::MAX);
+    check(rig, allocated < onesimus_rig::tree::SPARSE_FILE_BYTES / 4, &format!("Sparse-Datei ohne Löcher: {allocated} Bytes belegt"));
+    eprintln!("Restore {restore}: diff -r rc=0, Attribute gleich ({ENTRIES} Einträge), Hardlinks und Löcher erhalten");
+}
+
+/// Full backup and restore of the test tree with osd: the FD connects to
+/// the SD (active client, the default).
 #[test]
 #[ignore = "needs initdb and the Bareos catalog schema: run with --ignored"]
-fn osd_full_backup_active_client() {
+fn osd_backup_restore_active_client() {
     let rig = start(39471, false);
-    backup_and_check(&rig);
+    let backup = backup_and_check(&rig);
+    restore_and_compare(&rig, backup);
 }
 
-/// Full backup with `Passive = yes` on the Client: the Director sends the SD
-/// `passive client address=… port=… ssl=…`, and the SD connects to the FD.
+/// Full backup and restore with `Passive = yes` on the Client: the Director
+/// sends the SD `passive client address=… port=… ssl=…`, and the SD
+/// connects to the FD, for the backup and for the restore.
 #[test]
 #[ignore = "needs initdb and the Bareos catalog schema: run with --ignored"]
-fn osd_full_backup_passive_client() {
+fn osd_backup_restore_passive_client() {
     let rig = start(39481, true);
-    backup_and_check(&rig);
+    let backup = backup_and_check(&rig);
+    restore_and_compare(&rig, backup);
+}
+
+/// A pool with `Maximum Volume Bytes = 5M`: the 12 MiB file of the test
+/// tree spreads the backup over three volumes. Verify VolumeToCatalog and
+/// the restore read across them; the record cut at each volume end is
+/// joined again.
+#[test]
+#[ignore = "needs initdb and the Bareos catalog schema: run with --ignored"]
+fn osd_backup_verify_restore_over_several_volumes() {
+    let (sd, is_osd) = storage_daemon();
+    let mut packages = vec!["odir", "ofd"];
+    if is_osd {
+        packages.push("osd-daemon");
+    }
+    onesimus_rig::build_workspace_packages(&packages).unwrap_or_else(|e| panic!("{e}"));
+    let mut options = RigOptions::new(39491);
+    options.sd = Some(sd);
+    options.extra_director = vec![(
+        "pool/VPool.conf".into(),
+        "Pool {\n  Name = VPool\n  Pool Type = Backup\n  Label Format = \"VVol-\"\n  Maximum Volume Bytes = 5M\n}\n".into(),
+    )];
+    let rig = Rig::start(options).unwrap_or_else(|e| panic!("Gerüst startet nicht: {e}"));
+
+    let backup = rig.run_job("VBackup").unwrap_or_else(|e| panic!("{e}"));
+    let row = rig.wait_job(backup, JOB_TIMEOUT).unwrap_or_else(|e| panic!("{e}"));
+    let log = rig.job_log(backup);
+    eprintln!("Job-Log {backup}:\n{log}");
+    check(&rig, row.status == 'T' && row.files == ENTRIES, &format!("Backup: {row:?}\n{log}"));
+    let media = rig
+        .catalog()
+        .query("SELECT MediaId, VolumeName, VolStatus, VolJobs, VolBlocks, VolBytes FROM Media ORDER BY MediaId")
+        .unwrap_or_else(|e| panic!("{e}"));
+    let jobmedia = rig
+        .catalog()
+        .query(&format!(
+            "SELECT JobMediaId, MediaId, FirstIndex, LastIndex, StartFile, EndFile, StartBlock, EndBlock FROM JobMedia \
+             WHERE JobId = {backup} ORDER BY JobMediaId"
+        ))
+        .unwrap_or_else(|e| panic!("{e}"));
+    eprintln!("Media:\n{media}JobMedia:\n{jobmedia}");
+    let volumes: Vec<String> = media.lines().filter_map(|l| l.split('|').nth(1).map(str::to_string)).collect();
+    check(&rig, volumes.len() >= 2, &format!("Backup nicht über mehrere Volumes:\n{media}"));
+    check(&rig, jobmedia.lines().count() >= volumes.len(), &format!("zu wenige JobMedia-Sätze:\n{jobmedia}"));
+    check(&rig, media.lines().filter(|l| l.contains("|Full|")).count() == volumes.len() - 1, &format!("alle bis auf das letzte Volume Full:\n{media}"));
+    for v in &volumes {
+        let bytes = std::fs::read(rig.layout.storage.join(v)).unwrap_or_else(|e| panic!("{v}: {e}"));
+        let contents = bareos_format::volume::read_volume(&bytes).unwrap_or_else(|e| panic!("Volume {v}: {e}"));
+        eprintln!("Volume {v}: {} Bytes, {} Blöcke, {} Datensätze, Rest am Ende fehlt: {:?}", bytes.len(), contents.blocks.len(), contents.records.len(), contents.truncated);
+    }
+
+    let verify = rig.run_job("VVol").unwrap_or_else(|e| panic!("{e}"));
+    let row = rig.wait_job(verify, JOB_TIMEOUT).unwrap_or_else(|e| panic!("{e}"));
+    let log = rig.job_log(verify);
+    eprintln!("Job-Log {verify} (Verify):\n{log}");
+    check(&rig, row.status == 'T' && row.files == ENTRIES, &format!("Verify: {row:?}\n{log}"));
+    for v in &volumes {
+        check(&rig, log.contains(&format!("Ready to read from volume \"{v}\"")), &format!("Verify liest {v} nicht:\n{log}"));
+    }
+
+    restore_and_compare(&rig, backup);
+}
+
+/// osd reads what bareos-sd wrote and the other way round, on one volume:
+/// a backup with bareos-sd is restored with osd; then osd appends a second
+/// backup to the same volume, and bareos-sd restores that one. `bls` lists
+/// both sessions of the mixed volume. Needs `/usr/sbin/bareos-sd`.
+#[test]
+#[ignore = "needs bareos-sd, initdb and the Bareos catalog schema: run with --ignored"]
+fn osd_and_bareos_sd_read_each_others_volumes() {
+    let bareos_sd = PathBuf::from("/usr/sbin/bareos-sd");
+    if !bareos_sd.is_file() {
+        eprintln!("{} nicht installiert (bareos-storage): Gegenprobe übersprungen", bareos_sd.display());
+        return;
+    }
+    let osd = onesimus_rig::prereq::target_profile_dir().join("osd");
+    onesimus_rig::build_workspace_packages(&["odir", "ofd", "osd-daemon"]).unwrap_or_else(|e| panic!("{e}"));
+    let mut options = RigOptions::new(39501);
+    options.sd = Some(bareos_sd.clone());
+    let mut rig = Rig::start(options).unwrap_or_else(|e| panic!("Gerüst startet nicht: {e}"));
+
+    let first = rig.run_job("VBackup").unwrap_or_else(|e| panic!("{e}"));
+    let row = rig.wait_job(first, JOB_TIMEOUT).unwrap_or_else(|e| panic!("{e}"));
+    check(&rig, row.status == 'T' && row.files == ENTRIES, &format!("Backup mit bareos-sd: {row:?}\n{}", rig.job_log(first)));
+    eprintln!("Backup {first} mit bareos-sd: T, {} Dateien", row.files);
+
+    rig.replace_sd(&osd).unwrap_or_else(|e| panic!("osd startet nicht: {e}"));
+    eprintln!("SD gewechselt: osd liest das Volume von bareos-sd");
+    restore_and_compare(&rig, first);
+
+    let second = rig.run_job("VBackup").unwrap_or_else(|e| panic!("{e}"));
+    let row = rig.wait_job(second, JOB_TIMEOUT).unwrap_or_else(|e| panic!("{e}"));
+    check(&rig, row.status == 'T' && row.files == ENTRIES, &format!("Backup mit osd: {row:?}\n{}", rig.job_log(second)));
+    eprintln!("Backup {second} mit osd auf dasselbe Volume: T, {} Dateien", row.files);
+
+    rig.replace_sd(&bareos_sd).unwrap_or_else(|e| panic!("bareos-sd startet nicht: {e}"));
+    eprintln!("SD gewechselt: bareos-sd liest, was osd angehängt hat");
+    restore_and_compare(&rig, second);
+
+    let media = rig.catalog().query("SELECT VolumeName, VolJobs FROM Media ORDER BY MediaId").unwrap_or_else(|e| panic!("{e}"));
+    eprintln!("Media:\n{media}");
+    check(&rig, media.lines().count() == 1 && media.trim().ends_with("|2"), &format!("ein Volume mit zwei Jobs erwartet:\n{media}"));
+    let volume = media.split('|').next().unwrap_or_default().to_string();
+    if std::path::Path::new(BLS).is_file() {
+        let out = Command::new(BLS)
+            .arg("-c")
+            .arg(&rig.layout.sd_conf)
+            .arg("-V")
+            .arg(&volume)
+            .arg("VDev")
+            .env("LC_ALL", "C")
+            .output()
+            .unwrap_or_else(|e| panic!("{BLS}: {e}"));
+        let text = format!("{}{}", String::from_utf8_lossy(&out.stdout), String::from_utf8_lossy(&out.stderr));
+        eprintln!("bls -V {volume}:\n{text}");
+        check(&rig, out.status.success(), &format!("bls endet mit {}:\n{text}", out.status));
+        check(&rig, text.contains(&format!("{} files and directories found", 2 * ENTRIES)), &format!("bls: nicht {} Dateien:\n{text}", 2 * ENTRIES));
+    }
 }
