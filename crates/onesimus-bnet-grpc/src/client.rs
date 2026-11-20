@@ -174,6 +174,21 @@ pub fn connect(target: &Target, rpc: Rpc, timeout: Option<Duration>) -> io::Resu
     ready_rx.recv().map_err(io::Error::other)?
 }
 
+/// `error` with all its sources ("transport error: tcp connect error:
+/// Connection refused …"), so a log line says why gRPC failed.
+fn chain(error: &dyn std::error::Error) -> String {
+    let mut text = error.to_string();
+    let mut source = error.source();
+    while let Some(e) = source {
+        let part = e.to_string();
+        if !text.contains(&part) {
+            text = format!("{text}: {part}");
+        }
+        source = e.source();
+    }
+    text
+}
+
 /// Connects, calls the RPC with `call`, hands the [`ControlIo`] to the
 /// caller through `ready` and pumps the incoming messages until either
 /// side closes.
@@ -190,8 +205,8 @@ async fn run<M, F, Fut>(
     let (io, peer) = pair(timeout);
     let outgoing: Outgoing<M> = ReceiverStream::new(peer.outgoing).map(M::from_frame as fn(Frame) -> M);
     let setup = async {
-        let channel = endpoint.connect().await.map_err(io::Error::other)?;
-        call(channel, outgoing).await.map(|r| r.into_inner()).map_err(io::Error::other)
+        let channel = endpoint.connect().await.map_err(|e| io::Error::other(chain(&e)))?;
+        call(channel, outgoing).await.map(|r| r.into_inner()).map_err(|e| io::Error::other(chain(&e)))
     };
     let stream = match tokio::time::timeout(SETUP_TIMEOUT, setup).await {
         Ok(Ok(stream)) => stream,
