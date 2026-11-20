@@ -4680,7 +4680,7 @@
     {
       "name": "configure_update",
       "title": "Change a configuration resource",
-      "description": "Change directives of a resource in its configuration file and reload the Director, through the Director's configuration CRUD (gRPC ReadResource/UpdateResource, BNET '.config'): only the given directives change, every other directive, comment and the indentation stay. Directive names as in Bareos (case and blanks do not matter, e.g. 'File Retention'); a missing directive is added. Directives of nested blocks (RunScript, Include …) are refused. Only for the types the Director offers with READ_RAW and UPDATE_RAW (odir: schedule, job, jobdefs, client); bareos-dir is refused. Returns the changed directives, the old and new sha256 and whether the Director reloaded.",
+      "description": "Change directives of a resource in its configuration file and reload the Director, through the Director's configuration CRUD (gRPC ReadResource/UpdateResource, BNET '.config'): only the given directives change, every other directive, comment and the indentation stay. Directive names as in Bareos (case, blanks and underscores do not matter, e.g. 'Description', 'File Retention'); a missing directive is added. A list value replaces every line of a repeated directive, e.g. a Schedule's Run lines: {\"Description\":\"Weekly full\",\"Run\":[\"Full sun at 23:30\",\"Incremental mon-sat at 23:30\"]} (Run is written unquoted). Directives of nested blocks (RunScript, Include …) are refused. Types: client, job, jobdefs, schedule, fileset, as far as the Director offers them with READ_RAW and UPDATE_RAW; bareos-dir is refused. Returns the changed directives, the old and new sha256 and whether the Director reloaded.",
       "inputSchema": {
         "type": "object",
         "properties": {
@@ -4688,18 +4688,10 @@
             "type": "string",
             "enum": [
               "client",
-              "jobdefs",
               "job",
-              "storage",
-              "catalog",
+              "jobdefs",
               "schedule",
-              "fileset",
-              "pool",
-              "messages",
-              "counter",
-              "profile",
-              "console",
-              "user"
+              "fileset"
             ],
             "description": "resource type"
           },
@@ -4709,13 +4701,17 @@
           },
           "directives": {
             "type": "object",
-            "description": "directive -> new value (booleans become yes/no)",
+            "description": "directive -> new value (booleans become yes/no); a list of strings replaces every line of a repeated directive (Run)",
             "additionalProperties": {
               "type": [
                 "string",
                 "number",
-                "boolean"
-              ]
+                "boolean",
+                "array"
+              ],
+              "items": {
+                "type": "string"
+              }
             }
           }
         },

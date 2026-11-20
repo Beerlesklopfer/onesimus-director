@@ -127,15 +127,20 @@ pub(super) fn tools() -> Vec<Value> {
             "Change directives of a resource in its configuration file and reload the Director, through the \
              Director's configuration CRUD (gRPC ReadResource/UpdateResource, BNET '.config'): only the given \
              directives change, every other directive, comment and the indentation stay. Directive names as in \
-             Bareos (case and blanks do not matter, e.g. 'File Retention'); a missing directive is added. Directives \
-             of nested blocks (RunScript, Include …) are refused. Only for the types the Director offers with \
-             READ_RAW and UPDATE_RAW (odir: schedule, job, jobdefs, client); bareos-dir is refused. Returns the \
-             changed directives, the old and new sha256 and whether the Director reloaded.",
+             Bareos (case, blanks and underscores do not matter, e.g. 'Description', 'File Retention'); a missing \
+             directive is added. A list value replaces every line of a repeated directive, e.g. a Schedule's Run \
+             lines: {\"Description\":\"Weekly full\",\"Run\":[\"Full sun at 23:30\",\"Incremental mon-sat at 23:30\"]} \
+             (Run is written unquoted). Directives of nested blocks (RunScript, Include …) are refused. Types: \
+             client, job, jobdefs, schedule, fileset, as far as the Director offers them with READ_RAW and \
+             UPDATE_RAW; bareos-dir is refused. Returns the changed directives, the old and new sha256 and whether \
+             the Director reloaded.",
             json!({
-                "resource": e(CONFIGURE_TYPES, "resource type"),
+                "resource": e(crate::mcp_config::TYPES, "resource type"),
                 "name": s("resource name"),
-                "directives": { "type": "object", "description": "directive -> new value (booleans become yes/no)",
-                    "additionalProperties": { "type": ["string", "number", "boolean"] } },
+                "directives": { "type": "object", "description": "directive -> new value (booleans become yes/no); \
+                    a list of strings replaces every line of a repeated directive (Run)",
+                    "additionalProperties": { "type": ["string", "number", "boolean", "array"],
+                        "items": { "type": "string" } } },
             }), &["resource", "name", "directives"], annotations(false, false, true)),
         tool("configure_delete", "Delete a configuration resource",
             "Remove a resource from the running Director and delete its file (Onesimus 'configure delete'). \
@@ -410,35 +415,16 @@ fn profile_modify(a: &Args) -> Result<Plan, String> {
     Ok(Plan::new(p.join(" ")))
 }
 
-/// `configure update|delete <type>=<name> [directive=value …]` (Onesimus).
+/// `configure delete <type>=<name> yes` (Onesimus; `configure_update` goes
+/// through mcp_config.rs).
 fn configure_change(a: &Args, action: &str) -> Result<Plan, String> {
     let kind = a.choice("resource", CONFIGURE_TYPES)?.ok_or("resource is required")?;
     let mut p = vec![format!("configure {action}"), name_arg(&kind, &req(a, "name")?)?];
     match a.map.get("directives") {
-        None | Some(Value::Null) if action == "delete" => {}
-        Some(Value::Object(directives)) if action == "update" && !directives.is_empty() => {
-            for (key, value) in directives {
-                if key.is_empty() || !key.chars().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit()) || key == "name" {
-                    return Err(format!("directive '{key}': lowercase letters and digits only, without spaces (not name)"));
-                }
-                let text = match value {
-                    Value::String(s) => s.clone(),
-                    Value::Number(n) => n.to_string(),
-                    Value::Bool(b) => yes_no(*b).to_string(),
-                    _ => return Err(format!("directive '{key}': string, number or boolean")),
-                };
-                if text.contains('@') || text.contains(';') {
-                    return Err(format!("directive '{key}': '@' and ';' are not allowed"));
-                }
-                p.push(quoted(key, &text)?);
-            }
-        }
-        _ if action == "update" => return Err("directives must be a non-empty object".into()),
-        _ => return Err("directives does not apply to configure delete".into()),
+        None | Some(Value::Null) => {}
+        _ => return Err(format!("directives does not apply to configure {action}")),
     }
-    if action == "delete" {
-        p.push("yes".into());
-    }
+    p.push("yes".into());
     Ok(Plan::new(p.join(" ")))
 }
 
@@ -467,6 +453,8 @@ mod tests {
         assert_eq!(line("acl_modify", json!({"action":"copy","from":"a","to":"b"})), ".acl copy from=a to=b");
         assert_eq!(line("profile_modify", json!({"action":"assign","console":"c","profile":"p"})), ".profile assign console=c profile=p");
         assert_eq!(line("configure_update", json!({"resource":"client","name":"fd","directives":{"address":"h"}})), ".config read type=client name=fd");
+        assert_eq!(line("configure_update", json!({"resource":"schedule","name":"WeeklyCycle","directives":{
+            "Description":"Weekly full","Run":["Full sun at 23:30","Incremental mon-sat at 23:30"]}})), ".config read type=schedule name=WeeklyCycle");
         assert_eq!(line("configure_delete", json!({"resource":"client","name":"fd","confirm":true})), "configure delete client=fd yes");
         assert_eq!(line("use_catalog", json!({"catalog":"MyCatalog"})), "use catalog=MyCatalog");
         assert_eq!(line("setdevice", json!({"storage":"S","device":"D","autoselect":false})), "setdevice storage=S device=D autoselect=no");
@@ -490,6 +478,8 @@ mod tests {
             ("acl_modify", json!({"action":"clear","console":"c","type":"job"})),
             ("configure_delete", json!({"resource":"client","name":"fd"})),
             ("configure_update", json!({"resource":"client","name":"fd"})),
+            ("configure_update", json!({"resource":"pool","name":"Full","directives":{"a":"b"}})),
+            ("configure_update", json!({"resource":"client","name":"fd","directives":{"a=b":"x"}})),
             ("session_option", json!({"option":"gui","on":true})),
             ("add_volumes", json!({"pool":"P","storage":"S","count":0,"name":"a b"})),
         ] {

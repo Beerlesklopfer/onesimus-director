@@ -279,6 +279,18 @@ fn line_end_of(text: &str) -> &'static str {
     }
 }
 
+/// The value of a Schedule `Run` directive as one line for
+/// [`bareos_config::parser::check_run`] (tokens separated by blanks, `=`
+/// and `,` as written).
+fn run_value(d: &Directive) -> String {
+    d.tokens.iter().filter_map(|t| match t {
+        bareos_config::raw::Tok::Word(s) | bareos_config::raw::Tok::Quoted(s) => Some(s.clone()),
+        bareos_config::raw::Tok::Eq => Some("=".into()),
+        bareos_config::raw::Tok::Comma => Some(",".into()),
+        bareos_config::raw::Tok::Block(_) => None,
+    }).collect::<Vec<_>>().join(" ")
+}
+
 /// Text without anything but blanks, line ends, `;` and comments.
 fn only_comments(text: &str) -> bool {
     text.lines().all(|l| {
@@ -803,6 +815,15 @@ impl ConfigEditor {
             return Err(invalid(format!("text is a {} resource, not {}", res.rtype, rtype.word()), None));
         }
         let name = res.name().ok_or_else(|| invalid(format!("{} resource without Name", rtype.word()), None))?;
+        if rtype == RType::Schedule {
+            for d in res.directives.iter().filter(|d| d.norm_key() == "run") {
+                let value = run_value(d);
+                if let Err(e) = bareos_config::parser::check_run(&value) {
+                    let message = format!("Run = {value}: {e}");
+                    return Err(invalid(message.clone(), Some(Problem { file: file.to_string(), text: message, ..Default::default() })));
+                }
+            }
+        }
         Ok((name.to_string(), text))
     }
 

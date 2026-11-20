@@ -467,4 +467,94 @@ Console {\n  Name = viewer\n  Password = pw\n  CommandACL = .config\n  ClientACL
         assert!(h.dir.join("bareos-dir.d/pool/Full.conf").exists());
         assert_eq!(run("configure delete job=nosuch"), "Job \"nosuch\" not found\n");
     }
+
+    /// `configure update` goes through the CRUD: only the given directives
+    /// change in the raw text (K-10: the earlier implementation rewrote a
+    /// Client file with four directives), the `odir -t` check and the ACL
+    /// apply, a refused change leaves the file as it was.
+    #[test]
+    fn configure_update_goes_through_the_crud() {
+        let h = Arc::new(harness("configure-update"));
+        let schedule = h.dir.join("bareos-dir.d/schedule/WeeklyCycle.conf");
+        let weekly = "# the weekly cycle\nSchedule {\n  Name = \"WeeklyCycle\"\n  Description = \"old\"  # shown in the GUI\n  \
+            Run = Full 1st sat at 21:00\n  Run = Differential 2nd-5th sat at 21:00\n}\n";
+        std::fs::write(&schedule, weekly).unwrap();
+        let job = h.dir.join("bareos-dir.d/job/a.conf");
+        std::fs::write(&job, crate::config_edit::tests::JOB_A.replace("}\n", "  Schedule = WeeklyCycle\n}\n")).unwrap();
+        let client = h.dir.join("bareos-dir.d/client/fd.conf");
+        let fd = "Client {\n  Name = fd  # the file daemon\n  Address = localhost\n  Password = p\n  \
+            Maximum Concurrent Jobs = 3\n  Heartbeat Interval = 60 ; Port = 9102\n}\n";
+        std::fs::write(&client, fd).unwrap();
+        let admin = context(&h, "admin");
+        let editor = h_editor(&h);
+        let run = |ctx: &ExecContext, line: &str| {
+            let r = crate::commands::configure::configure_update_with(&crate::session::parse_cli_command(line), ctx, &editor);
+            format!("{}{}", r.text_output, r.error_message)
+        };
+
+        // Schedule Description
+        assert_eq!(run(&admin, "configure update schedule=WeeklyCycle description=\"Weekly full, daily incremental\""),
+            "Schedule 'WeeklyCycle' updated: description=Weekly full, daily incremental\n");
+        let weekly = weekly.replace("\"old\"", "\"Weekly full, daily incremental\"");
+        assert_eq!(std::fs::read_to_string(&schedule).unwrap(), weekly);
+
+        // Run lines replaced as a whole, written unquoted
+        assert_eq!(run(&admin, "configure update schedule=WeeklyCycle Run=\"Full sun at 23:30\" run=\"Incremental mon-sat at 23:30\""),
+            "Schedule 'WeeklyCycle' updated: Run=Full sun at 23:30, Run=Incremental mon-sat at 23:30\n");
+        let weekly = weekly.replace("Run = Full 1st sat at 21:00\n  Run = Differential 2nd-5th sat at 21:00",
+            "Run = Full sun at 23:30\n  Run = Incremental mon-sat at 23:30");
+        assert_eq!(std::fs::read_to_string(&schedule).unwrap(), weekly);
+        let loaded = DirectorConfig::load(&h.dir).unwrap();
+        assert_eq!(loaded.schedules.iter().find(|s| s.name == "WeeklyCycle").unwrap().runs.len(), 2);
+
+        // refused by the check: a bad Run line, an unknown keyword; the file stays
+        let out = run(&admin, "configure update schedule=WeeklyCycle run=\"Fulll sun at 23:30\"");
+        assert!(out.contains("Run = Fulll sun at 23:30") && out.contains("Job type field: Fulll"), "{out}");
+        let out = run(&admin, "configure update schedule=WeeklyCycle bogus=1");
+        assert!(out.contains("configuration invalid") && out.contains("Keyword \"bogus\" not permitted"), "{out}");
+        assert_eq!(std::fs::read_to_string(&schedule).unwrap(), weekly);
+
+        // removing a directive
+        assert_eq!(run(&admin, "configure update schedule=WeeklyCycle description="),
+            "Schedule 'WeeklyCycle' updated: description=\n");
+        let weekly = weekly.replace("  Description = \"Weekly full, daily incremental\"  # shown in the GUI\n", "");
+        assert_eq!(std::fs::read_to_string(&schedule).unwrap(), weekly);
+
+        // ACL: the admin console has no JobACL
+        let before = std::fs::read_to_string(&job).unwrap();
+        let out = run(&admin, "configure update job=a priority=5");
+        assert!(out.contains("not allowed by the console's ACL"), "{out}");
+        assert_eq!(std::fs::read_to_string(&job).unwrap(), before);
+
+        // K-10: a Client change keeps every other directive and comment
+        assert_eq!(run(&admin, "configure update client=fd address=fd.example port=9112 password=secret2"),
+            "Client 'fd' updated: address=fd.example, port=9112, password=***\n");
+        assert_eq!(std::fs::read_to_string(&client).unwrap(), fd.replace("localhost", "fd.example")
+            .replace("9102", "9112").replace("Password = p\n", "Password = secret2\n"));
+
+        // refusals before anything is read
+        for (line, expected) in [
+            ("configure update client=fd name=x", "renaming is not supported"),
+            ("configure update pool=Full maximumvolumes=3", "cannot be changed with configure update"),
+            ("configure update client=fd", "no directive given"),
+            ("configure update client=fd address=a run=x address=", "cannot be combined"),
+            ("configure update client=fd a{b=1", "letters, digits"),
+            ("configure update nosuch=x a=b", "unknown resource type"),
+            ("configure update client=nosuch address=a", "Client \"nosuch\" not allowed"),
+        ] {
+            let out = run(&admin, line);
+            assert!(out.contains(expected), "{line}: {out}");
+        }
+
+        // Job: the old aliases, Run as a quoted string (CFG_TYPE_ALIST_STR)
+        let all = ExecContext { session_id: 0, config: admin.config.clone(), session_mgr: None, catalog: None,
+            api_mode: ApiMode::Human, bus_rx: None, job_manager: None };
+        assert_eq!(run(&all, "configure update job=a newpool=Full"), "Job 'a': no change (pool=Full)\n");
+        assert_eq!(run(&all, "configure update job=a run=\"job=a level=Full\" Priority=5"),
+            "Job 'a' updated: run=job=a level=Full, Priority=5\n");
+        let text = std::fs::read_to_string(&job).unwrap();
+        assert!(text.ends_with("  Schedule = WeeklyCycle\n  Run = \"job=a level=Full\"\n  Priority = 5\n}\n"), "{text}");
+        assert!(run(&all, "configure update job=a client=nosuch").contains("Could not find config resource \"nosuch\""));
+        assert_eq!(std::fs::read_to_string(&job).unwrap(), text);
+    }
 }

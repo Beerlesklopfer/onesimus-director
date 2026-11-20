@@ -255,11 +255,12 @@ Beispiel `DeleteResource`, noch verwendet:
 
 ## Bestehende Onesimus-Erweiterungen der Konsole
 
-`configure update client|job`, `configure delete` und `configure read`
+`configure update`, `configure delete` und `configure read`
 (Zusammenfassung) der Konsole bleiben für ältere Clients bestehen, werden aber
-in `GetConfigCapabilities` nicht genannt und von der GUI nicht benutzt
-(K-10: `configure update client` verliert Direktiven). Ob sie entfernt werden,
-entscheidet der Nutzer.
+in `GetConfigCapabilities` nicht genannt und von der GUI nicht benutzt.
+`configure delete` (19.11.2026) und `configure update` (20.11.2026) laufen
+inzwischen durch das CRUD (K-10 behoben, siehe unten). Ob `configure read`
+entfernt wird, entscheidet der Nutzer.
 
 ## Umsetzung (nach Abstimmung)
 
@@ -414,6 +415,46 @@ konnte es nicht löschen.
   laufende Konfiguration zu ändern. Test
   `configure_delete_goes_through_the_crud`.
 
+### `configure update` über das CRUD (20.11.2026)
+
+Anlass: Eine GUI-Sitzung muss auf der Produktion Schedule-Ressourcen ändern
+(Description, Run-Zeilen). Löschen und neu Anlegen geht nicht (die Jobs
+verweisen auf den Schedule, REFERENCED), und das alte `configure update`
+(K-10) schrieb eine Client-Datei mit vier Direktiven neu und änderte einen Job
+nur im Speicher.
+
+- `configure update <typ>=<name> <direktive>=<wert> …` (Konsole,
+  `ConfigureUpdate` über gRPC) geht wie `configure delete` durch den Editor:
+  ReadResource für Text und SHA-256, die Direktiven werden im Rohtext
+  geändert, UpdateResource mit dieser Prüfsumme (`-t`-Prüfung, atomares
+  Schreiben, Reload mit Rücknahme, Ressourcen-ACL). Typen: client, job,
+  jobdefs, schedule, fileset; Pool, Storage und Console werden abgelehnt.
+  Ohne Konfigurationspfad lehnt der Befehl ab.
+- Die Textänderung liegt in `bareos_config::edit` und wird auch vom
+  MCP-Werkzeug `configure_update` benutzt: Schlüssel wie Bareos-Schlüsselwörter
+  verglichen (Groß-/Kleinschreibung, Leerzeichen und `_` egal), nur
+  Direktiven der Ressource selbst (Klammertiefe 1), verschachtelte Blöcke
+  bleiben unberührt; Anführungszeichen, `#`-Kommentare und `;`-Trenner
+  (mehrere Direktiven auf einer Zeile) werden beachtet, ersetzt wird nur der
+  Wertbereich. Alles andere bleibt Byte für Byte.
+- Ein mehrfach angegebener Schlüssel (`run=… run=…`) ersetzt alle
+  vorhandenen Zeilen der Direktive an der Stelle der ersten; `<direktive>=`
+  ohne Wert entfernt sie; fehlende Direktiven kommen vor die schließende
+  Klammer. Werte ohne Leerzeichen und ohne `{}=;#",\@` stehen ohne
+  Anführungszeichen, sonst in Anführungszeichen; Schedule-`Run` immer ohne
+  (StoreRun liest eigene Tokens). Job-`Run` ist in Bareos eine Zeichenkette
+  (CFG_TYPE_ALIST_STR) und wird deshalb wie jeder andere Wert gesetzt.
+- Neu im Editor: Bei Schedule-Ressourcen prüft CREATE/UPDATE jede `Run`-Zeile
+  wie C++ StoreRun() (`bareos_config::parser::check_run`); die
+  `-t`-Prüfung allein tut das nicht (der typisierte Parser überspringt eine
+  falsche Run-Zeile nur mit Warnung).
+- gRPC: `ConfigureUpdateCommand.directives` ist `map<string, string>`, trägt
+  also einen Wert je Schlüssel. Mehrere Run-Zeilen gehen über gRPC nur mit
+  `UpdateResource` (Rohtext); die Planung nimmt Listenwerte nur aus
+  JSON-Anfragen an. Das proto bleibt unverändert.
+- Tests: `configure_update_goes_through_the_crud`,
+  `configure_update_plans_crud_lines`, `bareos_config::edit::tests`.
+
 Offen: RENAME (Grundsatz 9), weitere Typen (Grundsatz 17) mit `followups`
-für Pool (Grundsatz 15), ob die alten Konsolenerweiterungen
-`configure update/read` entfernt werden.
+für Pool (Grundsatz 15), ob die alte Konsolenerweiterung `configure read`
+entfernt wird.

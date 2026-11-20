@@ -46,11 +46,18 @@ Jedes Tool prüft zuerst seine Parameter und baut daraus die Konsolenzeile. Dann
 
 `configure_delete`, `delete` mit `kind: storage` und `setbandwidth` (auch `limit: 0` und `all: true`) gehen über die typisierte RPC (S-38/S-39: der Entwicklungs-Director baut dafür die Zeilen, die seine Befehle annehmen; `SetBandwidth` hat ein optionales `limit`). 
 
-`configure_update` ändert Direktiven über das Konfigurations-CRUD des Directors ([CONFIG-CRUD-GRPC.md](../plans/CONFIG-CRUD-GRPC.md)), nicht mehr über `configure update` (das schreibt eine Client-Datei mit vier Feldern neu und verliert die übrigen Direktiven, K-10):
+`configure_update` ändert Direktiven über das Konfigurations-CRUD des Directors ([CONFIG-CRUD-GRPC.md](../plans/CONFIG-CRUD-GRPC.md)), nie über die Konsolenzeile `configure update` (die schrieb in älteren odir-Versionen eine Client-Datei mit vier Feldern neu und verlor die übrigen Direktiven, K-10). Typen: `client`, `job`, `jobdefs`, `schedule`, `fileset`. Die Textänderung ist dieselbe wie bei `configure update` im Director (`bareos_config::edit`). Beispiel – Beschreibung und Run-Zeilen eines Schedules:
+
+```json
+{ "resource": "schedule", "name": "WeeklyCycle",
+  "directives": { "Description": "Weekly full, daily incremental",
+                  "Run": ["Full sun at 23:30", "Incremental mon-sat at 23:30"] } }
+```
+
 
 1. Die Fähigkeiten der Verbindung entscheiden: über gRPC `GetConfigCapabilities`, über BNET `.config capabilities`. Bietet der Director den Typ nicht mit `READ_RAW` und `UPDATE_RAW` an (bareos-dir, älterer odir), verweigert das Werkzeug mit einer Meldung; einen Konsolenweg gibt es nicht mehr.
 2. `ReadResource` bzw. `.config read` liefert Rohtext und sha256.
-3. Nur die genannten Direktiven werden im Rohtext ersetzt: Namen wie in Bareos verglichen (Groß-/Kleinschreibung und Leerzeichen egal, `File Retention` = `fileretention`); ersetzt wird der Wert des letzten Vorkommens, Schlüssel, Einrückung, Kommentar und Zeilenende bleiben. Fehlt die Direktive, kommt eine Zeile vor die schließende Klammer der Ressource, eingerückt wie die letzte Direktive, mit dem Zeilenende der Datei. Werte mit Leerzeichen oder Sonderzeichen werden in Anführungszeichen gesetzt (`\` und `"` maskiert), Wahrheitswerte als `yes`/`no`. Verschachtelte Blöcke (RunScript, Include …) bleiben unangetastet; Direktiven darin lehnt das Werkzeug ab. `Name` ist nicht änderbar.
+3. Nur die genannten Direktiven werden im Rohtext ersetzt: Namen wie in Bareos verglichen (Groß-/Kleinschreibung, Leerzeichen und `_` egal, `File Retention` = `fileretention` = `file_retention`); alle Zeilen der Direktive werden durch die angegebenen Werte ersetzt, an der Stelle der ersten (ein Wert: eine Zeile; eine Liste: je Element eine Zeile, z. B. die `Run`-Zeilen eines Schedules); Schlüssel, Einrückung, Kommentar und Zeilenende der ersten Zeile bleiben, `;`-getrennte Direktiven auf einer Zeile werden einzeln behandelt. Fehlt die Direktive, kommt eine Zeile vor die schließende Klammer der Ressource, eingerückt wie die letzte Direktive, mit dem Zeilenende der Datei. Werte mit Leerzeichen oder Sonderzeichen werden in Anführungszeichen gesetzt (`\` und `"` maskiert), Wahrheitswerte als `yes`/`no`; die `Run`-Zeilen eines Schedules stehen immer ohne Anführungszeichen (dann sind `"`, `;`, `#`, `{`, `}` verboten), und der Director prüft sie wie Bareos (StoreRun). Verschachtelte Blöcke (RunScript, Include …) bleiben unangetastet; Direktiven darin lehnt das Werkzeug ab. `Name` ist nicht änderbar.
 4. `UpdateResource` bzw. `.config update` mit dem gelesenen sha256. Bei `CONFLICT` liest das Werkzeug einmal neu und versucht es erneut, danach meldet es den Fehler. `INVALID` kommt mit Datei, Zeile, Spalte und dem Text der Prüfung (`odir -t`) zurück.
 
 Ergebnis: die geänderten Direktiven (alt → neu, hinzugefügt), alter und neuer sha256, ob neu geladen wurde, und der Weg (`grpc`/`bnet`).

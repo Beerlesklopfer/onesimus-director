@@ -2073,6 +2073,7 @@ dependencies = [
  "anyhow",
  "axum 0.8.9",
  "bareos-bnet",
+ "bareos-config",
  "base64 0.22.1",
  "bytes",
  "clap",

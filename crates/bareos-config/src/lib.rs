@@ -7,6 +7,7 @@ pub mod resources;
 pub mod jobdefs;
 pub mod parser;
 pub mod raw;
+pub mod edit;
 pub mod values;
 pub mod secrets;
 

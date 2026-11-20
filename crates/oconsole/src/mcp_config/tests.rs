@@ -1,20 +1,22 @@
 use super::*;
 use sha2::{Digest, Sha256};
 
-fn ch(pairs: &[(&str, &str)]) -> Vec<(String, String)> {
-    pairs.iter().map(|(k, v)| (k.to_string(), v.to_string())).collect()
+/// One value per directive.
+fn ch(pairs: &[(&str, &str)]) -> Vec<(String, Vec<String>)> {
+    pairs.iter().map(|(k, v)| (k.to_string(), vec![v.to_string()])).collect()
 }
 
 const CLIENT: &str = "Client {\n  # laptop\n  Name = \"laptop-fd\"   # name\n  Address = old.example   ; Port = 9102\n  \
     Password = \"[md5]0123\"\n  TLS Enable = yes\n  File Retention = 30 days  # keep\n  FileRetention = 40 days\n}\n";
 
 #[test]
-fn replaces_the_value_of_the_last_occurrence_and_keeps_everything_else() {
-    let (out, report) = replace_directives(CLIENT, &ch(&[("file retention", "\"60 days\""), ("ADDRESS", "new.example")])).unwrap();
-    assert_eq!(out, CLIENT.replace("FileRetention = 40 days", "FileRetention = \"60 days\"")
+fn replaces_every_occurrence_at_the_first_and_keeps_everything_else() {
+    let (out, report) = replace_directives(CLIENT, &ch(&[("file_retention", "\"60 days\""), ("ADDRESS", "new.example")])).unwrap();
+    assert_eq!(out, CLIENT.replace("File Retention = 30 days  # keep\n  FileRetention = 40 days\n", "File Retention = \"60 days\"  # keep\n")
         .replace("Address = old.example   ;", "Address = new.example   ;"));
-    assert_eq!(report[0], Change { directive: "file retention".into(), old: Some("40 days".into()), new: "\"60 days\"".into() });
-    assert_eq!(report[1].old.as_deref(), Some("old.example"));
+    assert_eq!(report[0], Change { directive: "file_retention".into(), old: vec!["30 days".into(), "40 days".into()],
+        new: vec!["\"60 days\"".into()] });
+    assert_eq!(report[1].old, ["old.example"]);
     // the comment after a replaced value stays
     let (out, _) = replace_directives(CLIENT, &ch(&[("Password", "x")])).unwrap();
     assert!(out.contains("  Password = x\n"));
@@ -30,7 +32,7 @@ fn replaces_the_value_of_the_last_occurrence_and_keeps_everything_else() {
 fn missing_directive_is_added_before_the_closing_brace_in_the_file_style() {
     let (out, report) = replace_directives(CLIENT, &ch(&[("Heartbeat Interval", "60")])).unwrap();
     assert_eq!(out, CLIENT.replace("}\n", "  Heartbeat Interval = 60\n}\n"));
-    assert_eq!(report[0].old, None);
+    assert!(report[0].old.is_empty());
     // tab indentation and CRLF
     let crlf = "Client {\r\n\tName = a\r\n\tAddress = h\r\n}\r\n";
     let (out, _) = replace_directives(crlf, &ch(&[("Password", "p"), ("address", "k")])).unwrap();
@@ -55,7 +57,7 @@ fn quoted_values_with_braces_and_comment_signs_are_one_value() {
     let text = "Job {\n  Name = j\n  Description = \"a } b # c \\\" d\"  # real comment\n  Client = fd\n}\n";
     let (out, report) = replace_directives(text, &ch(&[("description", "\"new\""), ("client", "fd2")])).unwrap();
     assert_eq!(out, "Job {\n  Name = j\n  Description = \"new\"  # real comment\n  Client = fd2\n}\n");
-    assert_eq!(report[0].old.as_deref(), Some("\"a } b # c \\\" d\""));
+    assert_eq!(report[0].old, ["\"a } b # c \\\" d\""]);
 }
 
 #[test]
@@ -91,11 +93,18 @@ fn values_are_formatted_like_the_configuration() {
     assert_eq!(f(json!("")), "\"\"");
     assert!(format_value("k", &json!("a\nb")).is_err());
     assert!(format_value("k", &json!([1])).is_err());
-    assert!(directives(&json!({"directives": {"name": "x"}})).is_err());
-    assert!(directives(&json!({"directives": {"a=b": "x"}})).is_err());
-    assert!(directives(&json!({"directives": {}})).is_err());
-    assert_eq!(directives(&json!({"directives": {"File Retention": "60 days"}})).unwrap(),
+    assert!(directives(&json!({"directives": {"name": "x"}}), "client").is_err());
+    assert!(directives(&json!({"directives": {"N_ame": "x"}}), "client").is_err());
+    assert!(directives(&json!({"directives": {"a=b": "x"}}), "client").is_err());
+    assert!(directives(&json!({"directives": {}}), "client").is_err());
+    assert!(directives(&json!({"directives": {"run": []}}), "schedule").is_err());
+    assert_eq!(directives(&json!({"directives": {"File Retention": "60 days"}}), "client").unwrap(),
                ch(&[("File Retention", "\"60 days\"")]));
+    assert_eq!(directives(&json!({"directives": {"Description": "Weekly"}}), "schedule").unwrap(), ch(&[("Description", "Weekly")]));
+    // Schedule Run: unquoted, a list replaces every Run line
+    assert_eq!(directives(&json!({"directives": {"run": ["Full sun at 23:30", "Incremental mon-sat at 23:30"]}}), "schedule").unwrap(),
+        vec![("run".to_string(), vec!["Full sun at 23:30".to_string(), "Incremental mon-sat at 23:30".to_string()])]);
+    assert!(directives(&json!({"directives": {"run": "Full; x"}}), "schedule").is_err());
 }
 
 // ---------------------------------------------------------------------------
@@ -240,16 +249,16 @@ fn updates_over_grpc_and_bnet_with_the_same_result() {
         let old = sha(CLIENT);
         let r = configure_update(&mut d, &args(json!({ "File Retention": "60 days", "Heartbeat Interval": 30 })));
         assert_eq!(r["isError"], false, "{r}");
-        let expected = CLIENT.replace("FileRetention = 40 days", "FileRetention = \"60 days\"")
+        let expected = CLIENT.replace("File Retention = 30 days  # keep\n  FileRetention = 40 days\n", "File Retention = \"60 days\"  # keep\n")
             .replace("}\n", "  Heartbeat Interval = 30\n}\n");
         assert_eq!(d.updates, vec![expected.clone()], "grpc={grpc}");
         let s = &r["structuredContent"];
         assert_eq!((s["old_sha256"].as_str().unwrap(), s["new_sha256"].as_str().unwrap()), (old.as_str(), sha(&expected).as_str()));
         assert_eq!((s["reloaded"].as_bool(), s["route"].as_str()), (Some(true), Some(if grpc { "grpc" } else { "bnet" })));
-        assert_eq!(s["changed"][0]["old"], "40 days");
+        assert_eq!(s["changed"][0]["old"], json!(["30 days", "40 days"]));
         assert_eq!(s["changed"][1]["added"], true);
         let text = r["content"][0]["text"].as_str().unwrap();
-        assert!(text.contains("File Retention: 40 days -> \"60 days\"") && text.contains("reloaded: yes"), "{text}");
+        assert!(text.contains("File Retention: 30 days | 40 days -> \"60 days\"") && text.contains("reloaded: yes"), "{text}");
         if grpc {
             assert_eq!(d.lines, ["GetConfigCapabilities", "ReadResource", "UpdateResource"]);
         } else {
@@ -305,8 +314,11 @@ fn refuses_without_crud_and_never_uses_configure_update() {
         assert!(!d.lines.iter().any(|l| l.starts_with("configure")), "{:?}", d.lines);
         // a type the Director does not offer
         let mut d = FakeDirector::new(grpc);
+        let r = configure_update(&mut d, &json!({ "resource": "fileset", "name": "fs", "directives": { "a": "b" } }));
+        assert!(r["content"][0]["text"].as_str().unwrap().contains("does not offer READ_RAW and UPDATE_RAW for fileset"), "{r}");
+        // a type without CRUD
         let r = configure_update(&mut d, &json!({ "resource": "pool", "name": "Full", "directives": { "a": "b" } }));
-        assert!(r["content"][0]["text"].as_str().unwrap().contains("does not offer READ_RAW and UPDATE_RAW for pool"), "{r}");
+        assert!(r["content"][0]["text"].as_str().unwrap().contains("resource: one of client, job"), "{r}");
         // nested block, unknown resource
         let mut d = FakeDirector::new(grpc);
         d.text = "Client {\n  Name = laptop-fd\n  X {\n    Y = 1\n  }\n}\n".into();

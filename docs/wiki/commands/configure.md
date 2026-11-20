@@ -27,7 +27,7 @@ Die folgenden vorhandenen Beispiele und Verhaltensbeschreibungen sind lokale Dok
 
 ## Zweck
 
-`configure` legt zur Laufzeit neue Ressourcen in der Director-Konfiguration an (`configure add`) oder erzeugt für einen Client die passende Director-Ressource des File Daemons (`configure export`). Der Befehl verändert die Konfiguration: `add` schreibt eine neue Datei `bareos-dir.d/<typ>/<name>.conf` und lädt die Ressource sofort in den laufenden Director, ohne `reload`. `export` schreibt eine Datei unter `bareos-dir-export/client/<client>/bareos-fd.d/director/`, die man auf den Client kopiert. Vorhandene Ressourcen ändert oder löscht `configure` nicht; dafür bearbeitet man die Dateien und ruft [reload](reload.md) auf.
+`configure` legt zur Laufzeit neue Ressourcen in der Director-Konfiguration an (`configure add`) oder erzeugt für einen Client die passende Director-Ressource des File Daemons (`configure export`). Der Befehl verändert die Konfiguration: `add` schreibt eine neue Datei `bareos-dir.d/<typ>/<name>.conf` und lädt die Ressource sofort in den laufenden Director, ohne `reload`. `export` schreibt eine Datei unter `bareos-dir-export/client/<client>/bareos-fd.d/director/`, die man auf den Client kopiert. Vorhandene Ressourcen ändert oder löscht das Bareos-`configure` nicht; dafür bearbeitet man die Dateien und ruft [reload](reload.md) auf. odir hat dafür die Erweiterungen `configure update` und `configure delete`, beide über das Konfigurations-CRUD ([unten](#configure-update--ressource-ändern-onesimus-erweiterung)).
 
 ## Syntax
 
@@ -527,6 +527,78 @@ parity-limited@bareos-dir[25.1.2+onesimus.0.2.0]> configure add console name=dcf
 configure: is an invalid command.
 parity-limited@bareos-dir[25.1.2+onesimus.0.2.0]>
 ```
+
+## configure update — Ressource ändern (Onesimus-Erweiterung)
+
+```text
+configure update <typ>=<name> <direktive>=<wert> [<direktive>=<wert> …]
+```
+
+Ändert Direktiven einer vorhandenen Ressource in ihrer Datei und lädt die Konfiguration neu. Der Befehl geht durch das Konfigurations-CRUD ([.config](dot-config.md), [CONFIG-CRUD-GRPC.md](../../plans/CONFIG-CRUD-GRPC.md)): Er liest den Rohtext der Ressource mit seiner SHA-256, ändert darin nur die genannten Direktiven und schreibt ihn mit dieser Prüfsumme zurück. Kommentare, Reihenfolge, Einrückung, Zeilenenden und alle anderen Direktiven bleiben Byte für Byte; die geänderte Gesamtkonfiguration wird vorher wie `odir -t` geprüft, geschrieben wird atomar, ein fehlgeschlagener Reload stellt den alten Stand wieder her. Die Ressourcen-ACL der Konsole gilt (wie `show`).
+
+| Argument | Bedeutung |
+|---|---|
+| `<typ>=<name>` | Erstes Argument mit Wert: `client`, `job`, `jobdefs`, `schedule` oder `fileset`. `pool`, `storage` und `console` werden abgelehnt (noch nicht im CRUD). |
+| `<direktive>=<wert>` | Schlüssel wie Bareos-Schlüsselwörter: Groß-/Kleinschreibung, Leerzeichen und `_` egal (`Description`, `description`; `fileretention`, `file_retention`). Nur Direktiven der Ressource selbst; Direktiven in verschachtelten Blöcken (Job `RunScript { }`, FileSet `Include { }`/`Options { }`) werden abgelehnt. Eine vorhandene Direktive bekommt den neuen Wert, eine fehlende kommt als neue Zeile vor die schließende Klammer (eingerückt wie die übrigen). Unbekannte Schlüssel werden eingetragen und von der Prüfung abgelehnt. `name` ist nicht änderbar. |
+| mehrfach derselbe Schlüssel | Ersetzt **alle** vorhandenen Zeilen der Direktive durch die angegebenen Werte, an der Stelle der ersten (Run-Zeilen eines Schedules). |
+| `<direktive>=` | Ohne Wert: entfernt alle Zeilen der Direktive (bei `;`-getrennten Direktiven auf einer Zeile nur diese). |
+| `newclient=`, `newstorage=`, `newpool=` | Frühere Schreibweisen bei `job`: wie `client=`, `storage=`, `pool=`. |
+
+Werte ohne Leerzeichen und ohne `{ } = ; # " , \ @` werden ohne Anführungszeichen geschrieben, alle anderen in Anführungszeichen. Ausnahme: `Run` eines Schedules steht immer ohne Anführungszeichen (wie in Bareos) und wird wie von StoreRun geprüft; `Run` eines Jobs ist eine Zeichenkette und wird normal gesetzt. Steuerzeichen und `"` sind in Werten verboten.
+
+Ausgabe: `<Typ> '<name>' updated: <direktive>=<wert>, …` (Passwörter als `password=***`); ändert sich nichts, `<Typ> '<name>': no change (…)`. Über gRPC entspricht das `ConfigureUpdate`, über MCP dem Werkzeug `configure_update`.
+
+### Beschreibung und Run-Zeilen eines Schedules ändern
+
+```text
+*configure update schedule=WeeklyCycle description="Weekly full, daily incremental"
+Schedule 'WeeklyCycle' updated: description=Weekly full, daily incremental
+*configure update schedule=WeeklyCycle run="Full sun at 23:30" run="Incremental mon-sat at 23:30"
+Schedule 'WeeklyCycle' updated: run=Full sun at 23:30, run=Incremental mon-sat at 23:30
+```
+
+Aus
+
+```text
+Schedule {
+  Name = "WeeklyCycle"
+  Description = "old"  # shown in the GUI
+  Run = Full 1st sat at 21:00
+  Run = Differential 2nd-5th sat at 21:00
+}
+```
+
+wird
+
+```text
+Schedule {
+  Name = "WeeklyCycle"
+  Description = "Weekly full, daily incremental"  # shown in the GUI
+  Run = Full sun at 23:30
+  Run = Incremental mon-sat at 23:30
+}
+```
+
+### Client-Adresse ändern
+
+```text
+*configure update client=fd address=fd.example port=9112
+Client 'fd' updated: address=fd.example, port=9112
+```
+
+Alle übrigen Direktiven und Kommentare der Client-Datei bleiben (behebt K-10: die frühere Fassung schrieb die Datei mit vier Direktiven neu).
+
+### Fehler
+
+| Meldung | Ursache |
+|---|---|
+| `configure update: configuration editing is not available (no configuration path)` | Director ohne Konfigurationspfad (nur in Tests). |
+| `<Typ> "<name>" not allowed by the console's ACL` | Ressourcen-ACL der Konsole. |
+| `<Typ> "<name>" not found` | Ressource gibt es nicht. |
+| `configuration invalid: …` mit dem Text der Prüfung | Die geänderte Konfiguration besteht `odir -t` nicht (z. B. `Keyword "bogus" not permitted`, Verweis auf eine unbekannte Ressource); die Datei bleibt unverändert. |
+| `Run = <wert>: <fehler>` | Run-Zeile eines Schedules ungültig (z. B. `Job type field: Fulll in run record not found`). |
+| `configure update: … nested block …` | Direktive in einem verschachtelten Block. |
+| `configure update: <typ> resources cannot be changed with configure update yet` | `pool`, `storage`, `console`. |
 
 ## Fehlermeldungen
 

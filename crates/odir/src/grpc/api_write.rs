@@ -824,20 +824,16 @@ fn configure(r: &Req, action: &str) -> Result<Plan, String> {
     Ok(Plan::new(l))
 }
 
-/// Resource types `configure delete` removes (commands/configure.rs).
-const CONFIGURE_DELETE_TYPES: &[&str] = &["client", "job", "jobdefs", "schedule", "fileset"];
-/// Resource types and directives `configure update` changes.
-const CONFIGURE_UPDATE: &[(&str, &[&str])] = &[
-    ("client", &["address", "port", "password"]),
-    ("job", &["newclient", "newstorage", "newpool"]),
-];
+/// Resource types `configure update` and `configure delete` change: the
+/// types of the configuration CRUD (commands/configure.rs, config_edit.rs).
+const CONFIGURE_CRUD_TYPES: &[&str] = &["client", "job", "jobdefs", "schedule", "fileset"];
 
 /// S-38: `configure delete <type>=<name> [yes]`, the line the command
 /// accepts (it takes the first `<type>=<name>` argument).
 fn configure_delete(r: &Req) -> Result<Plan, String> {
     let kind = resource_type(r)?;
-    if !CONFIGURE_DELETE_TYPES.contains(&kind.as_str()) {
-        return Err(format!("configure delete supports resource types {}", CONFIGURE_DELETE_TYPES.join(", ")));
+    if !CONFIGURE_CRUD_TYPES.contains(&kind.as_str()) {
+        return Err(format!("configure delete supports resource types {}", CONFIGURE_CRUD_TYPES.join(", ")));
     }
     let mut l = Line::new("configure delete");
     l.kv(&kind, r.req("name")?);
@@ -847,29 +843,46 @@ fn configure_delete(r: &Req) -> Result<Plan, String> {
     Ok(Plan::new(l))
 }
 
-/// S-38: `configure update client=<n> address=… port=… password=…` or
-/// `configure update job=<n> newclient=… newstorage=… newpool=…`, the
-/// lines the command accepts.
+/// S-38: `configure update <type>=<name> <directive>=<value> ...`, the line
+/// the command accepts (it goes through the configuration CRUD, K-10).
+/// Directive keys are normalized like Bareos keywords (lowercase, without
+/// blanks and underscores); a value is a string (empty: remove the
+/// directive) or, from a JSON request, a list of strings for a repeated
+/// directive (Schedule `Run`): one `key=value` argument per element. The
+/// typed request (`map<string, string> directives`) carries one value per
+/// key; several Run lines over gRPC need UpdateResource.
 fn configure_update(r: &Req) -> Result<Plan, String> {
     let kind = resource_type(r)?;
-    let (_, allowed) = CONFIGURE_UPDATE.iter().find(|(k, _)| *k == kind)
-        .ok_or_else(|| format!("configure update supports resource types {}",
-            CONFIGURE_UPDATE.iter().map(|(k, _)| *k).collect::<Vec<_>>().join(", ")))?;
+    if !CONFIGURE_CRUD_TYPES.contains(&kind.as_str()) {
+        return Err(format!("configure update supports resource types {}", CONFIGURE_CRUD_TYPES.join(", ")));
+    }
     let mut l = Line::new("configure update");
     l.kv(&kind, r.req("name")?);
     let Some(Value::Object(directives)) = r.0.get("directives").filter(|d| d.as_object().is_some_and(|m| !m.is_empty())) else {
-        return Err(format!("directives: give at least one of {}", allowed.join(", ")));
+        return Err("directives: give at least one directive".into());
     };
-    for key in *allowed {
-        let Some(value) = directives.get(*key) else { continue };
-        let value = value.as_str().unwrap_or("");
-        if value.is_empty() || value.chars().any(|c| c.is_control() || c == '"' || c == '@' || c == ';') {
-            return Err(format!("directive '{key}': empty value or not allowed characters"));
+    for (key, value) in directives {
+        let norm = bareos_config::edit::norm_key(key);
+        if norm.is_empty() || key.chars().any(char::is_control) || !norm.chars().all(|c| c.is_ascii_alphanumeric()) {
+            return Err(format!("directive '{key}': letters, digits, blanks and underscores only"));
         }
-        l.kv(key, value);
-    }
-    if let Some(key) = directives.keys().find(|k| !allowed.contains(&k.as_str())) {
-        return Err(format!("directive '{key}' does not apply to {kind} (allowed: {})", allowed.join(", ")));
+        if norm == "name" {
+            return Err("the Name cannot be changed (renaming is not supported)".into());
+        }
+        let values: Vec<&str> = match value {
+            Value::String(s) => vec![s.as_str()],
+            Value::Array(items) if !items.is_empty() => items.iter()
+                .map(|v| v.as_str().filter(|s| !s.is_empty())
+                    .ok_or_else(|| format!("directive '{key}': a list holds non-empty strings only")))
+                .collect::<Result<_, _>>()?,
+            _ => return Err(format!("directive '{key}': a string or a non-empty list of strings")),
+        };
+        for value in values {
+            if value.chars().any(|c| c.is_control() || c == '"' || c == '@' || c == ';') {
+                return Err(format!("directive '{key}': not allowed characters (control characters, '\"', '@', ';')"));
+            }
+            l.kv(&norm, value);
+        }
     }
     Ok(Plan::new(l))
 }
@@ -1158,13 +1171,14 @@ mod tests {
         assert_eq!(line("MoveVolumes", json!({"storage": "T", "srcslots": "1", "dstslots": "2"})), "move storage=T srcslots=1 dstslots=2");
         assert_eq!(line("ConfigureAdd", json!({"resource_type": 1, "name": "c1", "directives": {"address": "h", "password": "p"}})),
                    "configure add client name=c1 address=h password=p");
-        // S-38: the lines `configure update|delete` accept
+        // S-38: the lines `configure update|delete` accept (directives in request order)
         assert_eq!(line("ConfigureUpdate", json!({"resource_type": 1, "name": "c1", "directives": {"port": "9102", "address": "h"}})),
-                   "configure update client=c1 address=h port=9102");
+                   "configure update client=c1 port=9102 address=h");
         assert_eq!(line("ConfigureUpdate", json!({"resource_type": 3, "name": "j", "directives": {"newpool": "Full"}})),
                    "configure update job=j newpool=Full");
         assert!(err("ConfigureUpdate", json!({"resource_type": 1, "name": "c1"})).contains("at least one"));
-        assert!(err("ConfigureUpdate", json!({"resource_type": 1, "name": "c1", "directives": {"enabled": "no"}})).contains("does not apply"));
+        assert_eq!(line("ConfigureUpdate", json!({"resource_type": 1, "name": "c1", "directives": {"Enabled": "no"}})),
+                   "configure update client=c1 enabled=no");
         assert!(err("ConfigureUpdate", json!({"resource_type": 8, "name": "p", "directives": {"x": "y"}})).contains("supports"));
         assert_eq!(line("ConfigureDelete", json!({"resource_type": 6, "name": "s1", "yes": true})), "configure delete schedule=s1 yes");
         assert_eq!(line("ConfigureDelete", json!({"resource_type": 7, "name": "fs"})), "configure delete fileset=fs");
@@ -1192,8 +1206,9 @@ mod tests {
         assert_eq!(line("DotAclCopy", json!({"from": "a", "to": "b"})), ".acl copy from=a to=b");
     }
 
-    /// S-38: the planned lines run through `configure` itself; update changes
-    /// the running configuration (no config path in tests: nothing on disk).
+    /// S-38: the planned lines run through `configure` itself. Without a
+    /// configuration path (no CRUD editor) update and delete refuse instead
+    /// of changing only the running configuration (K-10).
     #[test]
     fn configure_update_delete_lines_are_accepted() {
         use std::sync::{Arc, RwLock};
@@ -1211,16 +1226,56 @@ mod tests {
             let result = crate::commands::configure::cmd_configure(&p.ast, &ctx);
             format!("{}{}", result.text_output, result.error_message)
         };
-        assert_eq!(run("ConfigureUpdate", json!({"resource_type": 1, "name": "c1", "directives": {"address": "new", "port": "9112"}})),
-                   "Client 'c1' updated: address=new, port=9112\n");
-        assert_eq!(config.read().unwrap().find_client("c1").unwrap().address, "new");
-        assert_eq!(run("ConfigureUpdate", json!({"resource_type": 3, "name": "j", "directives": {"newpool": "Full"}})),
-                   "Job 'j' updated: pool=Full\n");
-        // `configure delete` needs a configuration path (CRUD editor); without
-        // one it refuses instead of changing only the running configuration.
+        assert!(run("ConfigureUpdate", json!({"resource_type": 1, "name": "c1", "directives": {"address": "new"}})).contains("not available"));
+        assert_eq!(config.read().unwrap().find_client("c1").unwrap().address, "old");
         // The CRUD path itself: config_crud::tests::configure_delete_goes_through_the_crud.
         assert!(run("ConfigureDelete", json!({"resource_type": 6, "name": "s1", "yes": true})).contains("not available"));
         assert!(config.read().unwrap().schedules.iter().any(|s| s.name == "s1"));
+    }
+
+    /// K-10: ConfigureUpdate plans `configure update` for the five CRUD
+    /// types with normalized keys and list values as repeated arguments; the
+    /// line runs through the CRUD on a real configuration directory.
+    #[test]
+    fn configure_update_plans_crud_lines() {
+        let line = |request: Value| plan("ConfigureUpdate", request.as_object().unwrap()).unwrap().map(|p| p.line());
+        assert_eq!(line(json!({"resource_type": 6, "name": "WeeklyCycle", "directives": {
+                "Description": "Weekly full", "run": ["Full sun at 23:30", "Incremental mon-sat at 23:30"]}})).unwrap(),
+            "configure update schedule=WeeklyCycle description=\"Weekly full\" run=\"Full sun at 23:30\" \
+             run=\"Incremental mon-sat at 23:30\"");
+        assert_eq!(line(json!({"resource_type": 1, "name": "c1", "directives": {"File Retention": "60 days", "address": "new", "port": "9112"}})).unwrap(),
+            "configure update client=c1 fileretention=\"60 days\" address=new port=9112");
+        assert_eq!(line(json!({"resource_type": 7, "name": "fs", "directives": {"description": ""}})).unwrap(),
+            "configure update fileset=fs description=");
+        assert_eq!(line(json!({"resource_type": 3, "name": "j", "directives": {"newpool": "Full"}})).unwrap(),
+            "configure update job=j newpool=Full");
+        for (request, error) in [
+            (json!({"resource_type": 8, "name": "Full", "directives": {"a": "b"}}), "supports resource types"),
+            (json!({"resource_type": 1, "name": "c1"}), "at least one"),
+            (json!({"resource_type": 1, "name": "c1", "directives": {"name": "x"}}), "renaming"),
+            (json!({"resource_type": 1, "name": "c1", "directives": {"a=b": "x"}}), "letters"),
+            (json!({"resource_type": 1, "name": "c1", "directives": {"address": "a;b"}}), "not allowed"),
+            (json!({"resource_type": 1, "name": "c1", "directives": {"address": "a\"b"}}), "not allowed"),
+            (json!({"resource_type": 6, "name": "s", "directives": {"run": []}}), "non-empty list"),
+            (json!({"resource_type": 6, "name": "s", "directives": {"run": [1]}}), "non-empty strings"),
+        ] {
+            let e = line(request.clone()).unwrap_err();
+            assert!(e.contains(error), "{request}: {e}");
+        }
+
+        // the planned line through the CRUD
+        let h = crate::config_edit::tests::harness("grpc-configure-update");
+        std::fs::write(h.dir.join("bareos-dir.d/schedule/WeeklyCycle.conf"), crate::config_edit::tests::WEEKLY).unwrap();
+        let config = std::sync::Arc::new(std::sync::RwLock::new(crate::director_config::DirectorConfig::load(&h.dir).unwrap()));
+        let ctx = crate::command_executor::ExecContext { session_id: 0, config: Some(config), session_mgr: None, catalog: None,
+            api_mode: crate::command_executor::ApiMode::Human, bus_rx: None, job_manager: None };
+        let p = plan("ConfigureUpdate", json!({"resource_type": 6, "name": "WeeklyCycle", "directives": {
+            "Description": "Weekly full", "run": ["Full sun at 23:30", "Incremental mon-sat at 23:30"]}}).as_object().unwrap()).unwrap().unwrap();
+        let r = crate::commands::configure::configure_update_with(&p.ast, &ctx, &h.editor);
+        assert!(r.success, "{}", r.error_message);
+        assert_eq!(std::fs::read_to_string(h.dir.join("bareos-dir.d/schedule/WeeklyCycle.conf")).unwrap(),
+            "Schedule {\n  Name = \"WeeklyCycle\"\n  Run = Full sun at 23:30\n  Run = Incremental mon-sat at 23:30\n  \
+             Description = \"Weekly full\"\n}\n");
     }
 
     /// S-39: limit=0 survives the wire (optional field) and becomes

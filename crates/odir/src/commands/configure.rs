@@ -23,17 +23,6 @@ use crate::command_executor::ExecContext;
 use crate::command_queue::CommandResult;
 use crate::director_config::DirectorConfig;
 
-/// Write a resource config file to disk.
-/// Path: <config_dir>/bareos-dir.d/<resource_type>/<name>.conf
-fn persist_resource(config_dir: &str, resource_type: &str, name: &str, content: &str) -> Result<(), String> {
-    let dir = format!("{config_dir}/bareos-dir.d/{resource_type}");
-    std::fs::create_dir_all(&dir).map_err(|e| format!("mkdir {dir}: {e}"))?;
-    let path = format!("{dir}/{name}.conf");
-    std::fs::write(&path, content).map_err(|e| format!("write {path}: {e}"))?;
-    tracing::info!("Persisted {resource_type}/{name}.conf");
-    Ok(())
-}
-
 /// Configuration layout derived from the `-c` path, like the C++
 /// ConfigurationParser (config_dir_, config_include_dir_).
 struct Layout {
@@ -56,11 +45,6 @@ fn layout(path: &Path) -> Layout {
     }
     let parent = path.parent().map(Path::to_path_buf).unwrap_or_default();
     Layout { include_dir: parent.join("bareos-dir.d"), config_dir: parent, using_include_dir: false }
-}
-
-/// Get the config directory path (`<configdir>`, see [`Layout`]).
-fn config_dir(_ctx: &ExecContext) -> Option<String> {
-    crate::reload::config_path().map(|p| layout(&p).config_dir.to_string_lossy().into_owned())
 }
 
 const USAGE: &str = "usage:\n  configure add <resourcetype> <key1>=<value1> ...\n  configure export client=<clientname>\n";
@@ -792,83 +776,171 @@ fn configure_read(ast: &CommandAst, ctx: &ExecContext) -> CommandResult {
     CommandResult::ok("configure read: specify client=, job=, pool=, or storage=\n".to_string())
 }
 
+/// `configure update <type>=<name> <directive>=<value> ...` (Onesimus extension).
+///
+/// Goes through the configuration CRUD ([`crate::config_edit`]) like
+/// `configure delete`: the resource is read with its SHA-256, the given
+/// directives are changed in its raw text ([`bareos_config::edit::apply`]:
+/// comments, order, indentation, line ends and every other directive stay
+/// byte for byte), and the text is written back with UpdateResource and
+/// the read checksum (the `odir -t` check, the atomic file change and the
+/// reload with rollback apply). The earlier implementation rewrote a
+/// Client file with four directives and changed a Job only in memory (K-10).
 fn configure_update(ast: &CommandAst, ctx: &ExecContext) -> CommandResult {
-    let config = match &ctx.config {
-        Some(c) => c,
-        None => return CommandResult::error("No config loaded\n".to_string()),
+    let editor = match ctx.config.as_ref().and_then(crate::config_edit::shared_editor) {
+        Some(e) => e,
+        None => return CommandResult::error("configure update: configuration editing is not available (no configuration path)\n".to_string()),
     };
+    configure_update_with(ast, ctx, &editor)
+}
 
-    let get_arg = |key: &str| -> Option<&str> {
-        ast.arguments.iter()
-            .find(|a| a.key == key)
-            .and_then(|a| a.value.as_deref())
-    };
+/// Usage text of `configure update`.
+const UPDATE_USAGE: &str = "configure update: usage: configure update <type>=<name> <directive>=<value> ...\n  \
+    type: client, job, jobdefs, schedule, fileset; a directive given several times (Run) replaces all its \
+    lines, <directive>= removes it\n";
 
-    // configure update client=<name> address=<new> port=<new>
-    if let Some(name) = get_arg("client") {
-        let mut cfg = config.write().unwrap();
-        if let Some(c) = cfg.clients.iter_mut().find(|c| c.name == name) {
-            let mut changes = Vec::new();
-            if let Some(addr) = get_arg("address") {
-                c.address = addr.to_string();
-                changes.push(format!("address={addr}"));
+/// One directive of a `configure update` line: the key as typed (aliases
+/// resolved) and its values in command line order (empty: remove).
+struct UpdateArg {
+    /// Key as typed (old Job aliases `newclient` … mapped to `client` …).
+    key: String,
+    /// Values as typed; an empty list removes the directive.
+    values: Vec<String>,
+}
+
+/// The directive arguments of `configure update` after the `<type>=<name>`
+/// argument, grouped by normalized key (first appearance order).
+fn update_args(args: &[Argument], rtype: crate::config_edit::RType) -> Result<Vec<UpdateArg>, String> {
+    use crate::config_edit::RType;
+    use bareos_config::edit::norm_key;
+    let mut out: Vec<UpdateArg> = Vec::new();
+    for a in args {
+        let Some(value) = a.value.as_deref() else {
+            if a.key.eq_ignore_ascii_case("yes") {
+                continue;
             }
-            if let Some(port) = get_arg("port") {
-                if let Ok(p) = port.parse() {
-                    c.port = p;
-                    changes.push(format!("port={port}"));
+            return Err(format!("\"{}\" is not a <directive>=<value> argument", a.key));
+        };
+        let mut key = a.key.as_str();
+        if matches!(rtype, RType::Job | RType::JobDefs) {
+            // aliases of the earlier implementation
+            key = match key.to_ascii_lowercase().as_str() {
+                "newclient" => "client",
+                "newstorage" => "storage",
+                "newpool" => "pool",
+                _ => key,
+            };
+        }
+        if key.trim().is_empty() || key.chars().any(char::is_control) {
+            return Err("empty directive name or control characters in it".into());
+        }
+        if !key.chars().all(|c| c.is_alphanumeric() || c == ' ' || c == '_') {
+            return Err(format!("directive \"{key}\": letters, digits, blanks and underscores only"));
+        }
+        let norm = norm_key(key);
+        if norm == "name" {
+            return Err("the Name cannot be changed (renaming is not supported)".into());
+        }
+        if value.chars().any(|c| c.is_control() || c == '"') {
+            return Err(format!("directive \"{key}\": control characters, line ends and '\"' are not allowed in the value"));
+        }
+        match out.iter_mut().find(|u| norm_key(&u.key) == norm) {
+            Some(u) => {
+                if value.is_empty() || u.values.is_empty() {
+                    return Err(format!("directive \"{key}\": an empty value (remove) cannot be combined with other values"));
+                }
+                u.values.push(value.to_string());
+            }
+            None => out.push(UpdateArg {
+                key: key.to_string(),
+                values: if value.is_empty() { Vec::new() } else { vec![value.to_string()] },
+            }),
+        }
+    }
+    if out.is_empty() {
+        return Err("no directive given".into());
+    }
+    Ok(out)
+}
+
+/// [`configure_update`] with an explicit editor (tests: a throw-away configuration).
+pub(crate) fn configure_update_with(ast: &CommandAst, ctx: &ExecContext, editor: &crate::config_edit::ConfigEditor) -> CommandResult {
+    use crate::config_edit::{RType, Status};
+    use bareos_config::edit::{norm_key, Edit};
+    /// Types without a CRUD type: refused with a hint.
+    const UNSUPPORTED: [&str; 3] = ["pool", "storage", "console"];
+    let Some(at) = ast.arguments.iter().position(|a| a.value.is_some()) else {
+        return CommandResult::error(UPDATE_USAGE.to_string());
+    };
+    let key = ast.arguments[at].key.to_ascii_lowercase();
+    let name = ast.arguments[at].value.clone().unwrap_or_default();
+    let Some(rtype) = RType::ALL.into_iter().find(|t| t.norm() == key) else {
+        if UNSUPPORTED.contains(&key.as_str()) {
+            return CommandResult::error(format!("configure update: {key} resources cannot be changed with configure \
+                update yet; change the file by hand and reload\n"));
+        }
+        return CommandResult::error(format!("configure update: unknown resource type \"{key}\"\n{UPDATE_USAGE}"));
+    };
+    let args = match update_args(&ast.arguments[at + 1..], rtype) {
+        Ok(a) => a,
+        Err(e) => return CommandResult::error(format!("configure update: {e}\n")),
+    };
+    // directive names as in the item tables when the directive is added
+    let items = crate::config_check::items_of(rtype.norm()).unwrap_or(&[]);
+    let mut edits = Vec::new();
+    for a in &args {
+        let norm = norm_key(&a.key);
+        let written = items.iter().find(|i| norm_key(i.name) == norm || i.aliases.iter().any(|x| norm_key(x) == norm))
+            .map(|i| i.name.to_string()).unwrap_or_else(|| a.key.clone());
+        let mut values = Vec::new();
+        for v in &a.values {
+            match bareos_config::edit::format_value(rtype.norm(), &a.key, v) {
+                Ok(f) => values.push(f),
+                Err(e) => return CommandResult::error(format!("configure update: {e}\n")),
+            }
+        }
+        edits.push(Edit { key: written, values });
+    }
+    let allow = |n: &str| crate::acl::access(ctx, rtype.acl(), n);
+    let console = super::config_crud::console_of(ctx);
+    let read = match editor.read(rtype, &name, &allow) {
+        Ok(o) => o,
+        Err(e) => return CommandResult::error(format!("configure update: {e}\n")),
+    };
+    if read.status != Status::Ok {
+        return CommandResult::error(format!("{}\n", read.message));
+    }
+    let text = match bareos_config::edit::apply(&read.text, &edits) {
+        Ok((text, _)) => text,
+        Err(e) => return CommandResult::error(format!("configure update: {} \"{name}\": {e}\n", rtype.word())),
+    };
+    let summary = args.iter().flat_map(|a| {
+        let masked = norm_key(&a.key) == "password";
+        if a.values.is_empty() {
+            return vec![format!("{}=", a.key)];
+        }
+        a.values.iter().map(|v| format!("{}={}", a.key, if masked { "***" } else { v })).collect()
+    }).collect::<Vec<_>>().join(", ");
+    if text == read.text {
+        return CommandResult::ok(format!("{} '{name}': no change ({summary})\n", rtype.word()));
+    }
+    let o = match editor.update(rtype, &name, &read.sha256, &text, false, &console, &allow) {
+        Ok(o) => o,
+        Err(e) => return CommandResult::error(format!("configure update: {e}\n")),
+    };
+    match o.status {
+        Status::Ok => CommandResult::ok(format!("{} '{name}' updated: {summary}\n", rtype.word())),
+        _ => {
+            let mut text = format!("{}\n", o.message);
+            if let Some(p) = o.problem.as_ref().filter(|p| p.text.trim_end() != o.message) {
+                text.push_str(&p.text);
+                if !text.ends_with('\n') {
+                    text.push('\n');
                 }
             }
-            if let Some(pw) = get_arg("password") {
-                c.password = pw.to_string();
-                changes.push("password=***".to_string());
-            }
-            if changes.is_empty() {
-                return CommandResult::ok(format!("Client '{name}': no changes specified\n"));
-            }
-            // Re-persist the updated client
-            if let Some(dir) = config_dir(ctx) {
-                let content = format!(
-                    "Client {{\n  Name = \"{}\"\n  Address = \"{}\"\n  Port = {}\n  Password = \"{}\"\n}}\n",
-                    c.name, c.address, c.port, c.password
-                );
-                let _ = persist_resource(&dir, "client", name, &content);
-            }
-            return CommandResult::ok(format!("Client '{name}' updated: {}\n", changes.join(", ")));
+            CommandResult::error(text)
         }
-        return CommandResult::error(format!("Client '{name}' not found\n"));
     }
-
-    if let Some(name) = get_arg("job") {
-        let mut cfg = config.write().unwrap();
-        if let Some(j) = cfg.jobs.iter_mut().find(|j| j.name == name) {
-            let mut changes = Vec::new();
-            if let Some(client) = get_arg("newclient") {
-                j.client = client.to_string();
-                changes.push(format!("client={client}"));
-            }
-            if let Some(storage) = get_arg("newstorage") {
-                j.storage = storage.to_string();
-                changes.push(format!("storage={storage}"));
-            }
-            if let Some(pool) = get_arg("newpool") {
-                j.pool = pool.to_string();
-                changes.push(format!("pool={pool}"));
-            }
-            if changes.is_empty() {
-                return CommandResult::ok(format!("Job '{name}': no changes specified\n"));
-            }
-            return CommandResult::ok(format!("Job '{name}' updated: {}\n", changes.join(", ")));
-        }
-        return CommandResult::error(format!("Job '{name}' not found\n"));
-    }
-
-    CommandResult::ok(
-        "configure update: specify resource to update:\n  \
-         configure update client=<name> address=<new> port=<new>\n  \
-         configure update job=<name> newclient=<c> newstorage=<s>\n"
-            .to_string()
-    )
 }
 
 #[cfg(test)]

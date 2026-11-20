@@ -679,6 +679,15 @@ fn convert_raw_resource(raw: &RawResource) -> Result<Resource, ConfigError> {
 /// StoreRun(). Examples: "Full 1st sun at 23:45", "Incremental mon-sat at
 /// 23:45", "Level=Full Pool=Monthly 1 jan at 0:05". C++ scan errors are
 /// logged and the Run directive is skipped.
+/// Checks the value of a Schedule `Run` directive like C++ StoreRun():
+/// `Err` with the C++ scan error text when the Director would refuse it.
+/// The typed parser itself only logs such errors and skips the directive;
+/// the configuration CRUD uses this to refuse a bad Run line before it is
+/// written.
+pub fn check_run(input: &str) -> Result<(), String> {
+    store_run(input).map(|_| ())
+}
+
 fn parse_run_directive(input: &str) -> Option<RunDirective> {
     match store_run(input) {
         Ok(run) => Some(run),
