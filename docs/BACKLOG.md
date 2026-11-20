@@ -18,6 +18,18 @@ Belege stehen im [Kompatibilitätslog](COMPATIBILITY-LOG.md), in
 | [S-41](STUBS.md) | `list nextvolume` findet in einem Pool mit frisch gelabeltem Volume keins (gegen das Original prüfen) |
 | [S-13](STUBS.md) (Rest) | Eigener FD `ofd`: PKI-Verschlüsselung/Signaturen, Plugins, Heartbeat, client-initiierte Verbindungen, LMDB für Accurate, VSS/Windows/macOS; `breg.rs` noch als Kopie |
 
+### gRPC-Lücken aus der GUI (20.11.2026, Sitzung onesimus-gui)
+
+Gemeldet beim Bau der Live-Job-Ansicht und der Schedule-Ansicht (proto `72abd06`). Mit G-1 bis G-3 könnte die GUI die Job-Historie typisiert lesen und Starts genau zeigen.
+
+| ID | Punkt | Art | Ort |
+| --- | --- | --- | --- |
+| G-1 | `ListJobsCommand` hat kein Feld `reverse`. Die GUI braucht die neuesten N Zeilen (`llist jobs days=N reverse limit=M`); typisiert liefert `limit` die ältesten, deshalb bleibt die GUI beim Befehlsweg | Proto-Feld (onesimus-proto) + Abbildung in odir | `ListJobsCommand`, `grpc/api.rs` |
+| G-2 | `count` bei ListJobs ist nicht nach den Console-ACLs gefiltert. Eingeschränkte Consoles sehen die Zahl aller Jobs, und count+offset kann `reverse` nicht nachbilden | **Fehler** (ACL), unabhängig von G-1 beheben | `list jobs count` |
+| G-3 | `JobStatusEvent` kennt nur Queued, Canceling, Success und Error, kein Ereignis beim tatsächlichen Start (der Proto-Kommentar nennt Running/OK/Canceled). Die GUI nimmt ersatzweise die Meldung „Start Backup JobId …“. Gewünscht: ein Running-Ereignis, möglichst mit geplanter Zeit | Push-Event in odir | `grpc/push_events.rs` |
+| G-4 | `GetDirectorStatus.running` hat weder Start- noch geplante Zeit; laufende Jobs lassen sich daraus allein nicht auf eine Zeitachse legen | Proto-Felder + odir | `GetDirectorStatus` |
+| G-5 | Die GUI verwirft `JobStatusEvent.timestamp` | GUI-Seite, kein odir-Punkt | – |
+
 ### Offene Reste an Befehlen
 
 | Befehl | Offen | Bezug |
