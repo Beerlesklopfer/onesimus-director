@@ -541,18 +541,172 @@ fn add_resource(cfg: &mut DirectorConfig, layout: &Layout, args: &[Argument]) ->
 }
 
 /// Resource types `configure add` refuses (decision of the maintainer,
-/// 19.11.2026, F-1 of docs/plans/ACL-ZWEISTUFIG.md): Console, Profile and
-/// User carry the ACLs of the outer tier, which are written in the editor
-/// only. Deviation from Bareos (ConfigureAddResource accepts them); without
-/// it a console allowed `configure` could add a console with `*all*` and log
-/// in as that one.
-const ADD_REFUSED: [&str; 3] = ["console", "profile", "user"];
+/// 19.11.2026, F-1 of docs/plans/ACL-ZWEISTUFIG.md): Profile and User carry
+/// the ACLs of the outer tier, which are written in the editor only.
+/// Deviation from Bareos (ConfigureAddResource accepts them). Console is
+/// accepted in the narrow form of [`configure_add_console`] since the
+/// amendment of 20.11.2026.
+const ADD_REFUSED: [&str; 2] = ["profile", "user"];
+
+/// The directives `configure add console` accepts (normalized keys).
+const CONSOLE_DIRECTIVES: [&str; 4] = ["name", "password", "profile", "description"];
+
+/// The checked arguments of `configure add console`.
+struct ConsoleRequest {
+    /// Name of the new console.
+    name: String,
+    /// Its password (never echoed).
+    password: String,
+    /// Its profiles in the given order (at least one).
+    profiles: Vec<String>,
+    /// Optional description.
+    description: Option<String>,
+}
+
+/// Parse and check the arguments of `configure add console` (`args[0]` is
+/// the resource type). Only name, password, one or more profile (repeated
+/// or as a comma list) and an optional description are accepted; keys are
+/// normalized like Bareos keywords.
+fn console_request(cfg: &DirectorConfig, args: &[Argument]) -> Result<ConsoleRequest, String> {
+    if args[0].value.is_some() {
+        return Err("give the name as name=<name>".into());
+    }
+    let (mut name, mut password, mut description) = (None, None, None);
+    let mut profiles: Vec<String> = Vec::new();
+    for arg in &args[1..] {
+        let key = bareos_config::edit::norm_key(&arg.key);
+        if key.ends_with("acl") {
+            return Err(format!("directive \"{}\" not allowed: a new console has no own ACL lines; it gets the \
+                rights of its profiles, the catalog ACL (.acl set) can narrow them", arg.key));
+        }
+        if !CONSOLE_DIRECTIVES.contains(&key.as_str()) {
+            return Err(format!("directive \"{}\" not allowed: only name, password, profile and description \
+                (other directives in the editor)", arg.key));
+        }
+        let Some(value) = arg.value.as_deref() else {
+            return Err(format!("missing value for directive \"{}\"", arg.key));
+        };
+        if value.chars().any(|c| c.is_control() || matches!(c, '"' | '\\' | ';' | '@')) {
+            return Err(format!("directive \"{key}\": control characters, '\"', '\\', ';' and '@' are not allowed"));
+        }
+        let slot = match key.as_str() {
+            "name" => &mut name,
+            "password" => &mut password,
+            "description" => &mut description,
+            _ => {
+                let given = list_values(value);
+                if given.is_empty() {
+                    return Err("profile: empty value".into());
+                }
+                profiles.extend(given.into_iter().map(str::to_string));
+                continue;
+            }
+        };
+        if slot.replace(value.to_string()).is_some() {
+            return Err(format!("directive \"{key}\" given twice"));
+        }
+    }
+    let name = name.ok_or("missing name=<name>")?;
+    if name == "*UserAgent*" {
+        return Err("the name *UserAgent* is reserved for the default console".into());
+    }
+    if let Some(e) = name_error(&name) {
+        return Err(format!("invalid name: {}", e.trim_end()));
+    }
+    if cfg.raw.iter().any(|r| r.norm_type() == "console" && r.name() == Some(name.as_str())) {
+        return Err(format!("Resource \"Console\" with name \"{name}\" already exists"));
+    }
+    let password = password.filter(|p| !p.is_empty()).ok_or("missing password=<password>")?;
+    if profiles.is_empty() {
+        return Err("give at least one profile=<profile>; the new console gets the rights of its profiles".into());
+    }
+    for profile in &profiles {
+        if name_error(profile).is_some() || profile.contains(' ') {
+            return Err(format!("invalid profile name \"{profile}\""));
+        }
+        if !cfg.raw.iter().any(|r| r.norm_type() == "profile" && r.name() == Some(profile.as_str())) {
+            return Err(format!("unknown Profile \"{profile}\""));
+        }
+    }
+    Ok(ConsoleRequest { name, password, profiles, description })
+}
+
+/// `configure add console name=<n> password=<p> profile=<P1> [profile=<P2>
+/// ...] [description=<d>]` (F-1 amendment of 20.11.2026,
+/// docs/plans/ACL-ZWEISTUFIG.md). The new console has no own ACL lines and
+/// gets the rights of its profiles; [`crate::acl::grant_error`] refuses
+/// profiles that exceed the rights of the creating console. Written and
+/// added to the running configuration like every `configure add`
+/// ([`add_resource`]); the password is masked in the reply.
+fn configure_add_console(ast: &CommandAst, ctx: &ExecContext, layout: Option<&Layout>) -> CommandResult {
+    let refused = |e: String| CommandResult::error(format!("configure add console: refused, {e}.\n"))
+        .with_json(json!({ "configure": {} }));
+    let (Some(config), Some(layout)) = (&ctx.config, layout) else {
+        return CommandResult::error("No config loaded\n".to_string());
+    };
+    let mut cfg = match config.write() {
+        Ok(cfg) => cfg,
+        Err(_) => return CommandResult::error("Config error\n".to_string()),
+    };
+    let request = match console_request(&cfg, &ast.arguments[1..]) {
+        Ok(request) => request,
+        Err(e) => return refused(e),
+    };
+    let creator = super::config_crud::console_of(ctx);
+    let profiles: Vec<&str> = request.profiles.iter().map(String::as_str).collect();
+    if let Some(e) = crate::acl::grant_error(&cfg, &creator, &profiles) {
+        tracing::warn!("configure add console {}: refused for Console \"{creator}\": {e}", request.name);
+        return refused(e);
+    }
+    let arg = |key: &str, value: &str| Argument { key: key.into(), value: Some(value.into()) };
+    let mut args = vec![Argument { key: "console".into(), value: None }, arg("name", &request.name),
+        arg("password", &request.password)];
+    if let Some(description) = &request.description {
+        args.push(arg("description", description));
+    }
+    args.extend(request.profiles.iter().map(|p| arg("profile", p)));
+    let (text, mut json) = match add_resource(&mut cfg, layout, &args) {
+        Ok(added) => added,
+        // The md5 checks quote one character of the value: never echo it.
+        Err(e) if e.contains("md5 password") || e.contains(&request.password) =>
+            return refused("the password is not valid (clear text, or [md5] with 32 hex digits)".into()),
+        Err(e) => return CommandResult::error(e).with_json(json!({ "configure": {} })),
+    };
+    // Post-condition: the console as parsed has exactly the requested
+    // directives and profiles; otherwise roll back.
+    let table = table_by_name("console").expect("console table");
+    let path = layout.include_dir.join("console").join(format!("{}.conf", request.name));
+    let parsed_ok = cfg.raw.iter().find(|r| r.norm_type() == "console" && r.name() == Some(request.name.as_str()))
+        .is_some_and(|r| {
+            r.directives.iter().all(|d| CONSOLE_DIRECTIVES.contains(&bareos_config::edit::norm_key(&d.key).as_str()))
+                && r.directives.iter().filter(|d| d.norm_key() == "profile").flat_map(|d| d.values())
+                    .eq(request.profiles.iter().map(String::as_str))
+        });
+    if !parsed_ok {
+        let _ = std::fs::remove_file(&path);
+        remove_resource(&mut cfg, table, &request.name);
+        return refused("the written resource does not parse as requested; nothing was added".into());
+    }
+    let clear = directive_text(find_item(tables::CONSOLE_ITEMS, "password").expect("password item"), &request.password);
+    let masked = format!("  Password = \"{}\"\n", crate::secrets::MASK);
+    let text = text.replace(&clear, &masked);
+    if let Some(content) = json.pointer_mut("/add/content") {
+        *content = Value::String(content.as_str().unwrap_or("").replace(&clear, &masked));
+    }
+    tracing::info!("configure add console: Console \"{creator}\" created Console \"{}\" with Profile {}",
+        request.name, request.profiles.join(","));
+    CommandResult::ok(text).with_json(json!({ "configure": json }))
+}
 
 fn configure_add(ast: &CommandAst, ctx: &ExecContext, layout: Option<&Layout>) -> CommandResult {
-    if let Some(kind) = ast.arguments.get(1).map(|a| a.key.to_ascii_lowercase())
-        && ADD_REFUSED.contains(&kind.as_str()) {
-        return CommandResult::error(format!("configure add {kind}: refused. Console, Profile and User resources \
-            carry ACLs and are created in the editor only (docs/plans/ACL-ZWEISTUFIG.md).\n"));
+    if let Some(kind) = ast.arguments.get(1).map(|a| a.key.to_ascii_lowercase()) {
+        if ADD_REFUSED.contains(&kind.as_str()) {
+            return CommandResult::error(format!("configure add {kind}: refused. Profile and User resources \
+                carry ACLs and are created in the editor only (docs/plans/ACL-ZWEISTUFIG.md).\n"));
+        }
+        if kind == "console" {
+            return configure_add_console(ast, ctx, layout);
+        }
     }
     let (Some(config), Some(layout)) = (&ctx.config, layout) else {
         return CommandResult::error("No config loaded\n".to_string());
@@ -975,8 +1129,9 @@ Profile { Name = operator }
         }).collect()
     }
 
-    /// F-1: `configure add console|profile|user` is refused before anything
-    /// is parsed or written, whatever the console's CommandACL.
+    /// F-1: `configure add profile|user` is refused before anything is
+    /// parsed or written, whatever the console's CommandACL; `configure add
+    /// console` with ACL lines or without a profile too.
     #[test]
     fn configure_add_of_acl_resources_is_refused() {
         use std::sync::{Arc, RwLock};
@@ -1088,5 +1243,199 @@ Profile { Name = operator }
         let inner = layout(&l.include_dir);
         assert_eq!(inner.config_dir, l.config_dir);
         assert_eq!(inner.include_dir, l.include_dir);
+    }
+
+    /// Configuration of the `configure add console` tests: an unrestricted
+    /// creator, a creator like PDC's MCP console, a creator narrowed by the
+    /// catalog tier and profiles of different reach.
+    const CONSOLES: &str = r#"
+Director { Name = bareos-dir; Password = "dirpw" }
+Client { Name = bareos-fd; Address = localhost; Password = "fdpw" }
+Profile { Name = everything; CommandAcl = *all*; JobAcl = *all*; ClientAcl = *all*; StorageAcl = *all*
+  ScheduleAcl = *all*; PoolAcl = *all*; FileSetAcl = *all*; CatalogAcl = *all*; WhereAcl = *all*; PluginOptionsAcl = *all* }
+Profile { Name = operator; CommandAcl = status, show, list, llist, messages; JobAcl = backup-a, !secret
+  ClientAcl = bareos-fd; PoolAcl = Full; WhereAcl = /tmp/bareos-restores }
+Profile { Name = jobs-b; JobAcl = backup-b }
+Profile { Name = jobs-regex; JobAcl = "backup-.*" }
+Profile { Name = where-other; WhereAcl = /srv }
+Profile { Name = acl-admin; CommandAcl = .acl, configure }
+Profile { Name = narrowing; JobAcl = !backup-a }
+Console { Name = admin; Password = "adminpw"; CommandAcl = *all*; JobAcl = *all*; ClientAcl = *all*; StorageAcl = *all*
+  ScheduleAcl = *all*; PoolAcl = *all*; FileSetAcl = *all*; CatalogAcl = *all*; WhereAcl = *all*; PluginOptionsAcl = *all* }
+Console { Name = pdc-mcp; Password = "mcppw"; CommandAcl = "!.acl", "!.profile", "configure", ".config"; Profile = operator }
+Console { Name = narrowed; Password = "npw"; CommandAcl = configure; Profile = everything }
+"#;
+
+    /// Secret of the new consoles; must never appear in a reply.
+    const SECRET: &str = "S3cr3t-Pw";
+
+    /// A context authenticated as `console` on [`CONSOLES`] with a fresh
+    /// include directory.
+    fn console_ctx(tag: &str, console: &str) -> (ExecContext, Layout) {
+        use std::sync::{Arc, RwLock};
+        let base = std::env::temp_dir().join(format!("onesimus-configure-console-{tag}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&base);
+        for t in ["console", "profile", "user"] {
+            std::fs::create_dir_all(base.join("bareos-dir.d").join(t)).unwrap();
+        }
+        let manager = Arc::new(crate::session_manager::SessionManager::new(Arc::new(crate::message_bus::MessageBus::new(16))));
+        let id = manager.create_session(console);
+        manager.authenticate_session(id);
+        let config = DirectorConfig::from_str(CONSOLES).unwrap();
+        config.catalog_acl.set_for_test(crate::catalog_acl::LoadState::Loaded, &[
+            ("narrowed", crate::acl::Kind::Job, &["backup-a"]),
+        ]);
+        let ctx = ExecContext { session_id: id, config: Some(Arc::new(RwLock::new(config))), session_mgr: Some(manager),
+            catalog: None, api_mode: crate::command_executor::ApiMode::Json, bus_rx: None, job_manager: None };
+        (ctx, layout(&base))
+    }
+
+    /// Run the console line `line` through `configure add` and assert that
+    /// [`SECRET`] appears nowhere in the reply (text, errors, JSON).
+    fn add_line(ctx: &ExecContext, layout: &Layout, line: &str) -> CommandResult {
+        let r = configure_add(&crate::session::parse_cli_command(line), ctx, Some(layout));
+        let json = r.json.as_ref().map(Value::to_string).unwrap_or_default();
+        for text in [&r.text_output, &r.error_message, &json] {
+            assert!(!text.contains(SECRET), "{line}: password in the reply: {text}");
+        }
+        r
+    }
+
+    /// The new console's effective ACL equals the file ACL of `profiles`
+    /// (first match over their lists) for a sample of names of every type.
+    fn assert_effective_is_profiles(cfg: &DirectorConfig, console: &str, profiles: &[&str]) {
+        use crate::acl::{allowed, first_match, Kind};
+        let names = ["status", "delete", "configure", ".acl", "backup-a", "backup-b", "secret", "bareos-fd",
+            "Full", "/tmp/bareos-restores", "/srv", "other"];
+        for kind in Kind::ALL {
+            let entries: Vec<&str> = profiles.iter()
+                .filter_map(|p| cfg.raw.iter().find(|r| r.norm_type() == "profile" && r.name() == Some(*p)))
+                .flat_map(|p| p.directives.iter().filter(|d| d.norm_key() == kind.directive().to_ascii_lowercase())
+                    .flat_map(|d| d.values()))
+                .collect();
+            for name in names {
+                let valid = matches!(kind, Kind::Where | Kind::PluginOptions) || crate::acl::valid_name(name);
+                let expected = valid && first_match(entries.iter().copied(), name) == Some(true);
+                assert_eq!(allowed(cfg, console, kind, name), expected, "{console} {kind:?} {name}");
+            }
+        }
+    }
+
+    /// F-1 amendment: an unrestricted creator may add a console with a
+    /// profile granting everything; the file is written, the console is in
+    /// the running configuration with exactly the profile's rights, and the
+    /// password is masked in text and JSON.
+    #[test]
+    fn unrestricted_creator_adds_console_with_all_profile() {
+        let (ctx, layout) = console_ctx("unrestricted", "admin");
+        let r = add_line(&ctx, &layout, &format!("configure add console name=newc password={SECRET} Profile=everything description=GUI"));
+        assert!(r.success, "{}", r.error_message);
+        let path = layout.include_dir.join("console/newc.conf");
+        let content = format!("Console {{\n  Name = \"newc\"\n  Password = \"{SECRET}\"\n  Description = \"GUI\"\n  Profile = everything\n}}\n");
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), content);
+        let masked = "Console {\n  Name = \"newc\"\n  Password = \"***\"\n  Description = \"GUI\"\n  Profile = everything\n}\n";
+        assert_eq!(r.text_output, format!("Created resource config file \"{}\":\n{masked}", path.display()));
+        let json = r.json.unwrap();
+        assert_eq!(json["configure"]["add"]["resource"], "Console");
+        assert_eq!(json["configure"]["add"]["name"], "newc");
+        assert_eq!(json["configure"]["add"]["filename"], path.display().to_string());
+        assert_eq!(json["configure"]["add"]["content"], masked);
+        let cfg = ctx.config.as_ref().unwrap().read().unwrap();
+        assert!(cfg.find_console("newc").is_some());
+        assert_effective_is_profiles(&cfg, "newc", &["everything"]);
+    }
+
+    /// Anti-escalation: a creator like PDC's MCP console may hand out its
+    /// own profile, but no profile with `*all*`, a regex or a name beyond
+    /// its rights; several profiles are all checked.
+    #[test]
+    fn restricted_creator_cannot_escalate() {
+        let (ctx, layout) = console_ctx("mcp", "pdc-mcp");
+        for (line, why) in [
+            ("profile=everything", "the profiles grant CommandAcl"),
+            ("profile=operator profile=everything", "the profiles grant CommandAcl"),
+            ("profile=operator,jobs-b", "grant JobAcl \"backup-b\", which Console \"pdc-mcp\" may not use"),
+            ("profile=jobs-regex", "grant JobAcl names beyond a fixed list"),
+            ("profile=where-other", "grant WhereAcl \"/srv\""),
+            ("profile=acl-admin", "grant CommandAcl \".acl\""),
+        ] {
+            let r = add_line(&ctx, &layout, &format!("configure add console name=x password={SECRET} {line}"));
+            assert!(!r.success && r.error_message.contains(why), "{line}: {}", r.error_message);
+            assert_eq!(r.json.unwrap(), json!({ "configure": {} }));
+        }
+        assert_eq!(std::fs::read_dir(layout.include_dir.join("console")).unwrap().count(), 0);
+        let r = add_line(&ctx, &layout, &format!("configure add console name=op2 password={SECRET} profile=operator profile=narrowing"));
+        assert!(r.success, "{}", r.error_message);
+        let cfg = ctx.config.as_ref().unwrap().read().unwrap();
+        assert_effective_is_profiles(&cfg, "op2", &["operator", "narrowing"]);
+        assert!(!crate::acl::allowed(&cfg, "op2", crate::acl::Kind::Command, "configure"));
+    }
+
+    /// Anti-escalation with the catalog tier: catalog entries narrowing a
+    /// type make the creator restricted for it, so a profile naming
+    /// something the catalog forbids (or a pattern) is refused; profiles
+    /// granting `.acl` are refused while the creator has catalog entries;
+    /// a locked creator (F-4) creates nothing.
+    #[test]
+    fn catalog_tier_limits_the_creator() {
+        let (ctx, layout) = console_ctx("catalog", "narrowed");
+        for (line, why) in [
+            ("profile=jobs-b", "grant JobAcl \"backup-b\""),
+            ("profile=everything", "grant JobAcl names beyond"),
+            ("profile=acl-admin", "the profiles grant .acl"),
+        ] {
+            let r = add_line(&ctx, &layout, &format!("configure add console name=x password={SECRET} {line}"));
+            assert!(!r.success && r.error_message.contains(why), "{line}: {}", r.error_message);
+        }
+        let r = add_line(&ctx, &layout, &format!("configure add console name=ops password={SECRET} profile=operator"));
+        assert!(r.success, "{}", r.error_message);
+        let config = ctx.config.as_ref().unwrap();
+        config.read().unwrap().catalog_acl.set_for_test(crate::catalog_acl::LoadState::Failed("down".into()), &[
+            ("narrowed", crate::acl::Kind::Job, &["backup-a"]),
+        ]);
+        let r = add_line(&ctx, &layout, &format!("configure add console name=y password={SECRET} profile=operator"));
+        assert!(!r.success && r.error_message.contains("locked"), "{}", r.error_message);
+        // Without catalog entries the same creator is unrestricted again.
+        config.read().unwrap().catalog_acl.set_for_test(crate::catalog_acl::LoadState::Loaded, &[]);
+        let r = add_line(&ctx, &layout, &format!("configure add console name=z password={SECRET} profile=acl-admin"));
+        assert!(r.success, "{}", r.error_message);
+    }
+
+    /// Refusals of the narrow form; Profile and User stay refused.
+    #[test]
+    fn console_form_refusals() {
+        let (ctx, layout) = console_ctx("refusals", "admin");
+        for (line, why) in [
+            (format!("configure add console name=x password={SECRET} profile=operator jobacl=*all*"), "a new console has no own ACL lines"),
+            (format!("configure add console name=x password={SECRET} profile=operator Command_Acl=*all*"), "no own ACL lines"),
+            (format!("configure add console name=x password={SECRET} profile=operator tlsenable=no"), "only name, password, profile and description"),
+            (format!("configure add console name=x password={SECRET} profile=nosuch"), "unknown Profile \"nosuch\""),
+            (format!("configure add console name=x password={SECRET}"), "at least one profile"),
+            ("configure add console name=x profile=operator".to_string(), "missing password"),
+            (format!("configure add console name=admin password={SECRET} profile=operator"), "already exists"),
+            (format!("configure add console name=*UserAgent* password={SECRET} profile=operator"), "reserved"),
+            (format!("configure add console name=a! password={SECRET} profile=operator"), "invalid name"),
+            (format!("configure add console=x password={SECRET} profile=operator"), "name=<name>"),
+            (format!("configure add console name=x name=y password={SECRET} profile=operator"), "given twice"),
+            (format!("configure add console name=x password={SECRET} profile=operator description=@x"), "not allowed"),
+            ("configure add console name=x password=[md5]S3cr3t-Pw0000000000000000000000 profile=operator".to_string(), "password is not valid"),
+            ("configure add profile name=p commandacl=*all*".to_string(), "Profile and User resources"),
+            ("configure add user name=u commandacl=*all*".to_string(), "Profile and User resources"),
+        ] {
+            let r = add_line(&ctx, &layout, &line);
+            assert!(!r.success && r.error_message.contains("refused") && r.error_message.contains(why), "{line}: {}", r.error_message);
+        }
+        assert_eq!(std::fs::read_dir(layout.include_dir.join("console")).unwrap().count(), 0);
+        assert_eq!(std::fs::read_dir(layout.include_dir.join("profile")).unwrap().count(), 0);
+        let cfg = ctx.config.as_ref().unwrap().read().unwrap();
+        assert!(cfg.find_console("x").is_none());
+        // Quotes and backslashes could end the quoted value in the file.
+        for bad in ["a\"b", "a\\b", "a\nb"] {
+            let args = [Argument { key: "console".into(), value: None },
+                Argument { key: "name".into(), value: Some("x".into()) },
+                Argument { key: "password".into(), value: Some(bad.into()) },
+                Argument { key: "profile".into(), value: Some("operator".into()) }];
+            assert!(console_request(&cfg, &args).is_err_and(|e| e.contains("not allowed")), "{bad:?}");
+        }
     }
 }

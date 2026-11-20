@@ -310,7 +310,8 @@ impl DirectorApiImpl {
         if let Some(q) = question {
             response.insert("question".into(), json!(q));
         }
-        response.insert("command".into(), json!(plan.line()));
+        // The line can carry passwords (`configure add client|console password=…`).
+        response.insert("command".into(), json!(crate::secrets::mask(&plan.line())));
         if success {
             self.follow_up(session_id, &plan.follow, &jobids, &mut response).await;
         }

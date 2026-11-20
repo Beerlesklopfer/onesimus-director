@@ -63,6 +63,50 @@ Beim Anlegen eines Clients exportiert `configure add client` automatisch auch de
 
 Die Konfiguration muss in Verzeichnisform vorliegen (`bareos-dir.d/<typ>/*.conf`), und das Verzeichnis für den Typ muss bereits existieren; `configure` legt es nicht an.
 
+## configure add console — enge Form (Onesimus-Abweichung)
+
+Console, Profile und User tragen die ACLs der äußeren Stufe ([ACL-ZWEISTUFIG.md](../../plans/ACL-ZWEISTUFIG.md)). odir lehnt deshalb `configure add profile` und `configure add user` immer ab (F-1, 19.11.2026) und nimmt `configure add console` seit 20.11.2026 nur in dieser Form an:
+
+```text
+configure add console name=<name> password=<passwort> profile=<P1> [profile=<P2> …] [description=<text>]
+```
+
+| Regel | Ablehnung (`configure add console: refused, …`) |
+|---|---|
+| Erlaubt sind genau `name`, `password`, ein oder mehrere `profile` und optional `description`; Schlüssel wie Bareos-Schlüsselwörter (Groß-/Kleinschreibung, Leerzeichen, `_` egal). `profile=a,b` zählt wie `profile=a profile=b`. | jede `…acl`-Direktive (`directive "jobacl" not allowed: a new console has no own ACL lines …`), jede andere Direktive (`tlsenable`, `usepamauthentication`, …: `only name, password, profile and description`) |
+| Pflicht: Name, nicht leeres Passwort, mindestens ein Profil. | `missing name=<name>`, `missing password=<password>`, `give at least one profile=<profile>` |
+| Profile müssen existieren. | `unknown Profile "<p>"` |
+| Name: gültiger Ressourcenname, noch keine Console, nicht `*UserAgent*`; die Kurzform `console=<name>` gibt es hier nicht. | `invalid name: …`, `Resource "Console" with name "<n>" already exists`, `the name *UserAgent* is reserved …`, `give the name as name=<name>` |
+| Werte ohne Steuerzeichen, `"`, `\`, `;`, `@` (sie könnten den Wert in der Datei beenden). | `directive "<k>": control characters, … are not allowed` |
+| **Profile ≤ eigene Rechte:** Die Profile dürfen nicht mehr erlauben als die anlegende Console selbst (Regel unten). | `the profiles grant <Typ>Acl "<name>", which Console "<c>" may not use` bzw. `… names beyond a fixed list (*all* or a pattern) …` |
+| Eine gesperrte Console (Katalog-ACL nicht lesbar, F-4) legt nichts an. | `Console "<c>" is locked (catalog ACL not readable)` |
+| Profile mit `.acl` nur, wenn die anlegende Console keine Katalog-ACL-Einträge hat. | `the profiles grant .acl, and Console "<c>" has catalog ACL entries the new console could remove` |
+
+Die neue Console hat keine eigenen ACL-Zeilen und keine Katalog-Einträge; ihre effektive ACL ist die Datei-ACL ihrer Profile (erster Treffer über die Profile in der angegebenen Reihenfolge). Weiter einschränken kann man sie danach mit [.acl set](dot-acl.md). Geschrieben wird wie bei jedem `configure add` (`bareos-dir.d/console/<name>.conf`, sofort im laufenden Director, ohne `reload`); zusätzlich prüft odir nach dem Einlesen, dass die Console genau die verlangten Direktiven und Profile hat, sonst wird Datei und Ressource wieder entfernt.
+
+**Prüfung „Profile ≤ eigene Rechte“** (`acl::grant_error`), je ACL-Typ, gegen die effektiven Rechte der anlegenden Console (Datei-ACL ∩ Katalog-ACL, dieselbe Auswertung wie bei jeder Berechtigungsprüfung):
+
+- **CommandAcl:** für jeden Befehlsnamen, den eine Prüfung treffen kann (Bareos-Befehlstabelle, registrierte Befehle und Aliasse): erlauben die Profile ihn, muss ihn auch die anlegende Console dürfen. Punktbefehle wie `.api` (in Bareos Regexe) werden so genau entschieden.
+- **Alle anderen Typen** (Job, Client, Storage, Schedule, Pool, FileSet, Catalog, Where, PluginOptions; auch künftige Namen zählen): Listen aus Namen, `!`-Einträgen und `*all*` werden genau verglichen. Regexe machen den Vergleich vorsichtig: ein erlaubender Regex in einem Profil zählt wie `*all*`, ein `!`-Regex der anlegenden Console wie `!*all*`, ein erlaubender Regex der anlegenden Console wird nicht mitgezählt. Im Zweifel wird abgelehnt.
+- `!`-Einträge in den Profilen schränken nur ein; ein Typ ohne Einträge erlaubt nichts.
+
+Unter `.api 2` steht der Erfolg wie bei jedem `configure add` in `result.configure.add` (`resource`, `name`, `filename`, `content`), eine Ablehnung als JSON-RPC-Fehler mit `error.data.messages.error[]` und `result.configure` leer. Das Passwort steht nie in der Antwort: Text und `content` zeigen `Password = "***"`; in Audit-Zeile und gRPC-Antwortfeld `command` ist `password=` maskiert.
+
+```text
+admin@bareos-dir> configure add console name=gui-anna password=[…] profile=operator description="GUI Anna"
+Created resource config file "/etc/bareos/bareos-dir.d/console/gui-anna.conf":
+Console {
+  Name = "gui-anna"
+  Password = "***"
+  Description = "GUI Anna"
+  Profile = operator
+}
+pdc-mcp@bareos-dir> configure add console name=x password=[…] profile=webui-admin
+configure add console: refused, the profiles grant CommandAcl ".acl", which Console "pdc-mcp" may not use.
+```
+
+`configure delete console` bleibt abgelehnt; Consoles löscht man im Editor.
+
 ## API-Modi
 
 Unter `.api 0` und `.api 1` kommt dieselbe Textausgabe. Unter `.api 2` steht das Ergebnis in `result.configure.add` mit den Feldern `resource`, `name`, `filename` und `content` (der geschriebene Ressourcentext) beziehungsweise in `result.configure.export` mit `clientname`, `component`, `resource`, `name`, `filename` und `content`. Fehler kommen als JSON-RPC-Fehler `"message": "failed"`, der Meldungstext steht in `error.data.messages.error`.
@@ -73,7 +117,7 @@ Die Dateipfade in den Beispielen sind auf das Standardverzeichnis `/etc/bareos` 
 
 ### Console anlegen
 
-Legt eine Console mit Beschreibung und ACLs an und zeigt sie danach mit `show` (Paritätsfall `c019-add-console`). `show` gibt das Passwort als MD5-Wert aus.
+In odir abgelehnt (ACL-Direktiven, siehe [enge Form](#configure-add-console--enge-form-onesimus-abweichung)); das Beispiel zeigt das Bareos-Original. Legt eine Console mit Beschreibung und ACLs an und zeigt sie danach mit `show` (Paritätsfall `c019-add-console`). `show` gibt das Passwort als MD5-Wert aus.
 
 ```text
 *UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]> configure add console name=c019e password=[…] description="Parity console" jobacl=*all* commandacl=status,show
@@ -99,7 +143,7 @@ Console {
 
 ### Console in Kurzform anlegen
 
-`console=<name>` ersetzt `console name=<name>` (Paritätsfall `c019-add-console-type-name`).
+`console=<name>` ersetzt `console name=<name>` (Paritätsfall `c019-add-console-type-name`). In odir abgelehnt (kein Profil, Kurzform); Bareos-Original.
 
 ```text
 *UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]> configure add console=c019f password=[…]
@@ -340,7 +384,7 @@ Counter {
 
 ### Profile anlegen
 
-Schlüsselwörter dürfen groß geschrieben werden; in der Datei stehen sie in der kanonischen Schreibweise (Paritätsfall `c019-add-case-keys`).
+Schlüsselwörter dürfen groß geschrieben werden; in der Datei stehen sie in der kanonischen Schreibweise (Paritätsfall `c019-add-case-keys`). In odir abgelehnt (F-1, Profile nur im Editor); Bareos-Original.
 
 ```text
 *UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]> configure add Profile Name=c019s JobACL=a
@@ -354,7 +398,7 @@ Profile {
 
 ### User anlegen
 
-Voraussetzung ist das Verzeichnis `bareos-dir.d/user/` (Paritätsfall `dcfg-add-user`).
+Voraussetzung ist das Verzeichnis `bareos-dir.d/user/` (Paritätsfall `dcfg-add-user`). In odir abgelehnt (F-1, User nur im Editor); Bareos-Original.
 
 ```text
 *UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]> configure add user name=dcfg-user profile=operator
@@ -374,7 +418,7 @@ User {
 
 ### Ressource anlegen unter `.api 2`
 
-Paritätsfall `dcfg-add-console-api2`.
+Paritätsfall `dcfg-add-console-api2` (Bareos-Original). odir nimmt diesen Aufruf in der [engen Form](#configure-add-console--enge-form-onesimus-abweichung) an, `content` zeigt dort `Password = "***"`.
 
 ```text
 *UserAgent*@bareos-dir[25.1.2+onesimus.0.2.0]> .api 2
@@ -622,6 +666,8 @@ Alle übrigen Direktiven und Kommentare der Client-Datei bleiben (behebt K-10: d
 | `failed to create config resource "<name>"` | Job/JobDefs ist auch mit den JobDefs-Werten unvollständig (fehlt `type`, `messages` oder `pool`). |
 | `usage: configure export client=<clientname>` | `client=` fehlt, hat keinen Wert oder nennt keinen bekannten Client. |
 | `configure: is an invalid command.` | Die Konsole darf `configure` nicht ausführen. |
+| `configure add profile: refused. …` / `configure add user: refused. …` | Profile und User nur im Editor (F-1). |
+| `configure add console: refused, …` | Die enge Form ist verletzt oder die Profile übersteigen die eigenen Rechte ([enge Form](#configure-add-console--enge-form-onesimus-abweichung)). |
 
 ## Siehe auch
 

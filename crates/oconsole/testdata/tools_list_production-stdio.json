@@ -3868,7 +3868,7 @@
     {
       "name": "configure_add",
       "title": "Add a configuration resource",
-      "description": "Create a Director resource and write it to bareos-dir.d/<type>/<name>.conf (bconsole 'configure add'). directives: lowercase directive names without spaces (e.g. {\"address\":\"host\",\"password\":\"x\"}); an array value repeats the directive. Mandatory per type: client address+password; job/jobdefs type, messages, pool (or jobdefs); storage address, password, device, mediatype; catalog dbname, dbuser; console password.",
+      "description": "Create a Director resource and write it to bareos-dir.d/<type>/<name>.conf (bconsole 'configure add'). directives: lowercase directive names without spaces (e.g. {\"address\":\"host\",\"password\":\"x\"}); an array value repeats the directive. Mandatory per type: client address+password; job/jobdefs type, messages, pool (or jobdefs); storage address, password, device, mediatype; catalog dbname, dbuser. console: only password, profile (one or more, e.g. {\"password\":\"x\",\"profile\":[\"a\",\"b\"]}) and description; no ACL directives, the console gets the rights of its profiles, which must not exceed your own (the Director refuses otherwise). profile and user are refused (editor only).",
       "inputSchema": {
         "type": "object",
         "properties": {

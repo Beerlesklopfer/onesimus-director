@@ -428,7 +428,10 @@ pub fn tools() -> Vec<Value> {
              (bconsole 'configure add'). directives: lowercase directive names without spaces \
              (e.g. {\"address\":\"host\",\"password\":\"x\"}); an array value repeats the directive. \
              Mandatory per type: client address+password; job/jobdefs type, messages, pool (or jobdefs); \
-             storage address, password, device, mediatype; catalog dbname, dbuser; console password.",
+             storage address, password, device, mediatype; catalog dbname, dbuser. \
+             console: only password, profile (one or more, e.g. {\"password\":\"x\",\"profile\":[\"a\",\"b\"]}) \
+             and description; no ACL directives, the console gets the rights of its profiles, which must not \
+             exceed your own (the Director refuses otherwise). profile and user are refused (editor only).",
             json!({
                 "resource": e(CONFIGURE_TYPES, "resource type"),
                 "name": s("resource name"),
@@ -1435,6 +1438,8 @@ mod tests {
             line("configure_add", json!({"resource":"client","name":"new-fd","directives":{"address":"10.0.0.1","password":"p w","fdport":9102,"run":["a","b"]}})),
             "configure add client name=new-fd address=\"10.0.0.1\" password=\"p w\" fdport=\"9102\" run=\"a\" run=\"b\""
         );
+        assert_eq!(line("configure_add", json!({"resource":"console","name":"gui","directives":{"password":"pw","profile":["operator","readonly"],"description":"GUI"}})),
+                   "configure add console name=gui password=\"pw\" profile=\"operator\" profile=\"readonly\" description=\"GUI\"");
         assert_eq!(line("configure_add", json!({"resource":"schedule","name":"s","directives":{"Description":"d","File Retention":"30 days"}})),
                    "configure add schedule name=s description=\"d\" fileretention=\"30 days\"", "keys normalized like Bareos keywords");
         assert_eq!(line("configure_export", json!({"client":"fd"})), "configure export client=fd");

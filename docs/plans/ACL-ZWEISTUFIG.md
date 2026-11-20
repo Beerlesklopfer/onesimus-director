@@ -51,7 +51,7 @@ mit `*all*` an. Die BgLage-Sitzung konnte deshalb `delete`, `purge` und
 | --- | --- | --- |
 | `.acl set/delete/clear/copy` (Onesimus-Erweiterung, `commands/acl.rs`) | ~~schreibt die Console-Datei um~~ ~~19.11.2026 abgelehnt~~ | **umgesetzt 20.11.2026:** schreibt die **Katalog-ACL**; die Datei bleibt unberührt |
 | `.acl list` | zeigt Datei-ACLs | **umgesetzt:** zeigt Datei-, Katalog- und effektive ACL |
-| `configure add console`/`profile`/`user` (Bareos-Befehl) | ~~legt eine Datei mit ACL-Direktiven an~~ seit 19.11.2026 abgelehnt (F-1) | bleibt abgelehnt |
+| `configure add console`/`profile`/`user` (Bareos-Befehl) | ~~legt eine Datei mit ACL-Direktiven an~~ seit 19.11.2026 abgelehnt (F-1) | `profile`/`user` bleiben abgelehnt; `console` seit 20.11.2026 in enger Form ([Nachtrag F-1](#nachtrag-20112026-f-1-configure-add-console-in-enger-form)) |
 | `configure delete console` | seit `233a6f3` abgelehnt | bleibt abgelehnt |
 | Konfigurations-CRUD (gRPC, `.config`) | Console/Profile/User nicht editierbar | bleibt so (Regel 3) |
 | Push-Ereignisse gRPC | ungefiltert (K-19) | gefiltert über die zentrale Funktion, **beide Stufen** |
@@ -93,7 +93,7 @@ nicht ein.
 
 | # | Frage | Entscheider |
 | --- | --- | --- |
-| ~~F-1~~ | **Entschieden und umgesetzt 19.11.2026:** `configure add console`, `profile` und `user` werden immer abgelehnt (nicht nur mit ACL-Zeilen); Consoles legt nur der Editor an. Ursprüngliche Frage: `configure add console`/`profile` ist ein Bareos-Befehl und schreibt ACL-Direktiven in eine Datei. Regel 3 schließt das aus. Vorschlag: ablehnen, wenn ACL-Direktiven (`*Acl`, `Profile`) im Aufruf stehen; eine Console ohne ACL-Zeilen hat in Bareos keine Rechte und darf angelegt werden. Abweichung von Bareos, kommt in betrieb-odir.md. | Maintainer |
+| ~~F-1~~ | **Nachtrag 20.11.2026:** `configure add console` in enger Form erlaubt, siehe [Nachtrag F-1](#nachtrag-20112026-f-1-configure-add-console-in-enger-form); `profile`, `user` und `configure delete console` bleiben abgelehnt. **Entschieden und umgesetzt 19.11.2026:** `configure add console`, `profile` und `user` werden immer abgelehnt (nicht nur mit ACL-Zeilen); Consoles legt nur der Editor an. Ursprüngliche Frage: `configure add console`/`profile` ist ein Bareos-Befehl und schreibt ACL-Direktiven in eine Datei. Regel 3 schließt das aus. Vorschlag: ablehnen, wenn ACL-Direktiven (`*Acl`, `Profile`) im Aufruf stehen; eine Console ohne ACL-Zeilen hat in Bareos keine Rechte und darf angelegt werden. Abweichung von Bareos, kommt in betrieb-odir.md. | Maintainer |
 | ~~F-2~~ | **Entschieden 19.11.2026 wie vorgeschlagen, umgesetzt 20.11.2026** (genaue Regel unter Umsetzung). Wer darf die Katalog-ACL ändern? Vorschlag: Command-ACL `.acl` **und** `configure` (wie heute), und nur für **andere** Consoles; die eigene Console kann sich nur selbst einschränken, nie lockern. | Maintainer |
 | ~~F-3~~ | **Entschieden wie vorgeschlagen, umgesetzt 20.11.2026.** Ein Katalog-Eintrag, der mehr erlaubt als die Datei: ablehnen oder speichern und als wirkungslos melden? Vorschlag: speichern und melden, weil sich die Datei später ändern kann. | Maintainer |
 | ~~F-4~~ | **Entschieden wie vorgeschlagen (`status`/`version`), umgesetzt 20.11.2026; `.api` dazu (Nachtrag unter Umsetzung).** Katalog nicht erreichbar bei einer Console mit Katalog-Einträgen: nur `status`/`version` (Vorschlag) oder gar nichts? | Maintainer |
@@ -258,6 +258,100 @@ verschobener Katalog, fehlendes `CREATE`-Recht; braucht `BAREOS_ORM_TEST_DB`).
   `catalog_worker::within_tests::*`,
   `acl::tests::catalog_tier_intersects_and_counts_as_restriction` (`.api`
   erlaubt, `.help` gesperrt).
+
+### Nachtrag 20.11.2026: F-1, `configure add console` in enger Form
+
+Entscheidung des Nutzers 20.11.2026: Consoles (etwa für GUI-Benutzer) sollen
+ohne Editor angelegt werden können, ohne einen Weg zur Selbstausweitung zu
+öffnen. Variante „Profile ≤ eigene Rechte“. Profile und User bleiben reine
+Editor-Sache, `configure delete console` bleibt abgelehnt (Meldung
+unverändert).
+
+**Form.** `configure add console name=<n> password=<p> profile=<P1>
+[profile=<P2> …] [description=<d>]`; Schlüssel wie Bareos-Schlüsselwörter
+normalisiert, `profile=a,b` wie zwei Profile. Abgelehnt: jede `…acl`-Direktive,
+jede andere Direktive, fehlendes Passwort, kein oder ein unbekanntes Profil,
+vorhandener Name, `*UserAgent*`, ungültige Namen, Werte mit Steuerzeichen,
+`"`, `\`, `;`, `@`. Die neue Console hat keine eigenen ACL-Zeilen; ihre
+effektive ACL ist die Datei-ACL ihrer Profile, die Katalog-ACL (`.acl set`)
+kann sie danach weiter einschränken. Schreiben wie jedes `configure add`
+(Datei `bareos-dir.d/console/<n>.conf`, sofort im laufenden Director);
+danach prüft odir, dass die eingelesene Console genau die verlangten
+Direktiven und Profile hat, sonst werden Datei und Ressource entfernt.
+Das Passwort steht nie in einer Antwort (Text und `content`:
+`Password = "***"`); Audit-Zeile und gRPC-Feld `command` maskieren
+`password=`.
+
+**Regel „Profile ≤ eigene Rechte“** (`crates/odir/src/acl.rs`,
+`grant_error`). Die anlegende Console C darf nur Profile vergeben, deren
+Rechte ihre eigenen effektiven Rechte (Datei ∩ Katalog, dieselbe Auswertung
+wie `acl::allowed`) nicht übersteigen, je ACL-Typ (`Kind::ALL`):
+
+- *CommandAcl:* Für jeden Befehlsnamen, den eine Prüfung treffen kann
+  (Bareos-Befehlstabelle, registrierte Befehle und Aliasse; auch die festen
+  Prüfungen wie `configure`, `.sql`, `messages` verwenden diese Namen) gilt:
+  erlauben die Profile ihn (erster Treffer über die Profile), muss
+  `acl::allowed(C, Command, name)` gelten. Punktbefehle wie `.api` sind in
+  Bareos Regexe; über die endliche Namensmenge werden sie genau entschieden.
+- *Übrige Typen* (Namen offen, auch künftige Ressourcen zählen): Die von den
+  Profilen erlaubten Namen werden nach oben abgeschätzt, die von C erlaubten
+  nach unten, beide als „genau diese Namen“ oder „alle außer diesen“; die
+  obere Schätzung muss in der unteren liegen. Für Listen aus Namen,
+  `!`-Einträgen und `*all*` ist das genau. Regexe: in einem Profil zählt ein
+  erlaubender Regex wie `*all*`, ein `!`-Regex wird übergangen; bei C wird
+  ein erlaubender Regex übergangen, ein `!`-Regex zählt wie `!*all*`. Jede
+  dieser Ersetzungen verschiebt die Menge nur in die sichere Richtung
+  (erster Treffer entscheidet: einen erlaubenden Eintrag weglassen oder die
+  Liste mit einem Verbot beenden kann nur weniger erlauben, und umgekehrt).
+  Katalog-Einträge von C werden genauso als zweite Liste geschnitten.
+- `!`-Einträge in Profilen schränken nur ein; ein leerer Typ erlaubt nichts.
+- Eine gesperrte C (F-4) legt nichts an; ohne angemeldete Console auch nicht.
+- Erlauben die Profile `.acl` (oder den Alias `.profile`), muss C frei von
+  Katalog-Einträgen sein. Grund: F-2 begrenzt nur Änderungen an der
+  *eigenen* Console; die neue Console dürfte die Katalog-Einträge von C
+  löschen und C damit über die Rechte heben, die C beim Anlegen hatte.
+
+**Warum das keine Selbstausweitung öffnet.** C kennt das Passwort der neuen
+Console N und kann sich als N anmelden. Die Regel stellt sicher, dass N je
+Typ nur Namen erlaubt, die C beim Anlegen selbst durfte; über N gewinnt C
+also kein Recht dazu. Ohne Katalog-Einträge von C kann N mit `.acl` an C
+nur rückgängig machen, was später hinzukommt, nicht über den Stand beim
+Anlegen hinaus.
+
+**Was ein Mensch erwarten könnte, aber abgelehnt wird.** Eine Console wie
+die MCP-Console auf PDC (`CommandAcl = "!.acl", "!.profile", "configure",
+".config"; Profile = operator`) kann ein Profil mit `*all*` in CommandAcl
+nicht vergeben, auch nicht das Bareos-Standardprofil `operator`
+(`!…, *all*`): es erlaubt `.acl`, das ihr selbst verboten ist. Vergeben
+lassen sich nur Profile, die genau innerhalb ihrer Rechte liegen. Ein
+erlaubender Regex in einem Profil (außer CommandAcl) zählt wie `*all*`; er
+lässt sich nur vergeben, wenn C für den Typ alle Namen außer höchstens
+denen darf, die das Profil vorher mit `!` verbietet (etwa C `!geheim,
+*all*`, Profil `!geheim, backup-.*`), auch wenn C den Regex selbst in der
+Liste hat. Pfade in WhereAcl mit `.` sind Regexe und fallen ebenfalls
+darunter.
+
+**Bleibende Eigenschaften.** N ist eine eigene Identität: wird C später
+eingeschränkt (Datei oder Katalog), betrifft das N nicht; N muss dann
+eigens eingeschränkt oder im Editor gelöscht werden. Eine künftige
+odir-Version mit neuen Befehlen wertet CommandAcl-Einträge `*all*` oder
+Regexe der Profile von N auch für die neuen Befehle aus; die Prüfung
+geschah über die Befehle der Version beim Anlegen. Katalog-Einträge, die
+unter dem Namen von N aus einer früheren, gelöschten Console stehen,
+gelten weiter; sie schränken nur ein.
+
+**Schnittstellen.** gRPC `ConfigureAdd` (`CONFIGURE_RESOURCE_CONSOLE`):
+`directives` ist `map<string, string>`, mehrere Profile als Kommaliste;
+JSON-Anfragen dürfen eine Liste angeben. MCP `configure_add`
+(`resource: "console"`): `profile` als Zeichenkette oder Liste. Die
+Prüfung liegt nur in odir.
+
+Tests: `commands::configure::tests::unrestricted_creator_adds_console_with_all_profile`,
+`restricted_creator_cannot_escalate`, `catalog_tier_limits_the_creator`,
+`console_form_refusals`, `configure_add_of_acl_resources_is_refused`,
+`acl::tests::name_sets_approximate_in_the_safe_direction`,
+`grpc::api_write::tests::admin_lines` (Plan), oconsole
+`mcp_write::tests::configuration_and_daemon_lines`, `mcp_typed` (Kommaliste).
 
 ### Offen
 

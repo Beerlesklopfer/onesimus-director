@@ -805,6 +805,14 @@ fn resource_type(r: &Req) -> Result<String, String> {
         .ok_or_else(|| "resource_type is required".to_string())
 }
 
+/// `configure add <type> name=<name> <directive>=<value> ...`. Directive
+/// keys are normalized like Bareos keywords. A value is a string or, from a
+/// JSON request, a list of strings (one argument per element, e.g. several
+/// `profile` of a console). The typed request (`map<string, string>
+/// directives`) carries one value per key; a console's profiles go there as
+/// a comma list (`"profile": "a,b"`), which `configure add console` splits.
+/// Console: odir accepts only name, password, profile and description and
+/// checks the profiles against the caller's rights (commands/configure.rs).
 fn configure(r: &Req, action: &str) -> Result<Plan, String> {
     let kind = resource_type(r)?;
     let mut l = Line::new(&format!("configure {action}"));
@@ -816,11 +824,16 @@ fn configure(r: &Req, action: &str) -> Result<Plan, String> {
             if key.is_empty() || !key.chars().all(|c| c.is_ascii_alphanumeric()) || key == "name" {
                 return Err(format!("directive '{given}': letters and digits only (not name)"));
             }
-            let value = value.as_str().unwrap_or("");
-            if value.is_empty() || value.chars().any(|c| c.is_control() || c == '"' || c == '@' || c == ';') {
-                return Err(format!("directive '{key}': empty value or not allowed characters"));
+            let values: Vec<&str> = match value {
+                Value::Array(items) if !items.is_empty() => items.iter().map(|v| v.as_str().unwrap_or("")).collect(),
+                v => vec![v.as_str().unwrap_or("")],
+            };
+            for value in values {
+                if value.is_empty() || value.chars().any(|c| c.is_control() || c == '"' || c == '@' || c == ';') {
+                    return Err(format!("directive '{key}': empty value or not allowed characters"));
+                }
+                l.kv(key, value);
             }
-            l.kv(key, value);
         }
     }
     Ok(Plan::new(l))
@@ -1175,6 +1188,12 @@ mod tests {
                    "configure add client name=c1 address=h password=p");
         assert_eq!(line("ConfigureAdd", json!({"resource_type": 1, "name": "c1", "directives": {"Address": "h", "File_Retention": "30 days"}})),
                    "configure add client name=c1 address=h fileretention=\"30 days\"", "keys normalized like Bareos keywords");
+        // F-1 amendment: console with password and profiles (comma list over the typed map, list from JSON)
+        assert_eq!(line("ConfigureAdd", json!({"resource_type": 12, "name": "gui", "directives": {"password": "pw", "profile": "operator,readonly"}})),
+                   "configure add console name=gui password=pw profile=operator,readonly");
+        assert_eq!(line("ConfigureAdd", json!({"resource_type": 12, "name": "gui", "directives": {"Password": "pw", "Profile": ["a", "b"], "description": "GUI user"}})),
+                   "configure add console name=gui password=pw profile=a profile=b description=\"GUI user\"");
+        assert!(err("ConfigureAdd", json!({"resource_type": 12, "name": "gui", "directives": {"profile": []}})).contains("empty value"));
         // S-38: the lines `configure update|delete` accept (directives in request order)
         assert_eq!(line("ConfigureUpdate", json!({"resource_type": 1, "name": "c1", "directives": {"port": "9102", "address": "h"}})),
                    "configure update client=c1 port=9102 address=h");

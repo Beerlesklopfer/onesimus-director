@@ -13,6 +13,7 @@
 use crate::{command_executor::ExecContext, director_config::DirectorConfig};
 use crate::catalog_acl::Restriction;
 use bareos_config::raw::ConfResource;
+use std::collections::{BTreeMap, BTreeSet};
 use std::ffi::CString;
 
 /// The ACL types of a Console or Profile resource.
@@ -407,6 +408,181 @@ pub fn access_audited(ctx: &ExecContext, kind: Kind, item: &str) -> bool {
     allowed
 }
 
+/// The ACL entries of type `kind` that decide for `console` in evaluation
+/// order: its own list, then the lists of its existing profiles in
+/// assignment order (the sequence [`file_allowed`] walks).
+fn file_entries<'a>(config: &'a DirectorConfig, console: &'a ConfResource, kind: Kind) -> Vec<&'a str> {
+    let own = console.directives.iter().filter(|d| d.norm_key() == kind.key()).flat_map(|d| d.values());
+    let profiles = console.directives.iter()
+        .filter(|d| d.norm_key() == "profile")
+        .flat_map(|d| d.values())
+        .filter_map(|name| config.raw.iter().find(|r| r.norm_type() == "profile" && r.name() == Some(name)))
+        .flat_map(|profile| profile.directives.iter().filter(|d| d.norm_key() == kind.key()).flat_map(|d| d.values()));
+    own.chain(profiles).collect()
+}
+
+/// The names an ACL list allows, for lists reduced to plain names and
+/// `*all*`: a finite set, or every name except a finite set. Names are
+/// ASCII-lowercased (list matching ignores ASCII case).
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum NameSet {
+    /// Exactly these names.
+    Only(BTreeSet<String>),
+    /// Every name except these.
+    AllBut(BTreeSet<String>),
+}
+
+impl NameSet {
+    /// Every name.
+    fn all() -> Self {
+        Self::AllBut(BTreeSet::new())
+    }
+
+    /// The names both sets contain.
+    fn intersect(self, other: Self) -> Self {
+        match (self, other) {
+            (Self::Only(a), Self::Only(b)) => Self::Only(a.intersection(&b).cloned().collect()),
+            (Self::Only(a), Self::AllBut(e)) | (Self::AllBut(e), Self::Only(a)) => Self::Only(a.difference(&e).cloned().collect()),
+            (Self::AllBut(a), Self::AllBut(b)) => Self::AllBut(a.union(&b).cloned().collect()),
+        }
+    }
+
+    /// A name of `self` that `other` lacks ("*all*" stands for names that
+    /// are not listed anywhere), None when `self` ⊆ `other`.
+    fn excess(&self, other: &Self) -> Option<String> {
+        match (self, other) {
+            (Self::Only(a), Self::Only(b)) => a.difference(b).next().cloned(),
+            (Self::Only(a), Self::AllBut(e)) => a.intersection(e).next().cloned(),
+            (Self::AllBut(_), Self::Only(_)) => Some("*all*".into()),
+            (Self::AllBut(a), Self::AllBut(b)) => b.difference(a).next().cloned(),
+        }
+    }
+
+    /// The names the Bareos list `entries` allows (first match decides, no
+    /// match denies), approximated where regexes occur: with `over` a
+    /// superset (a positive regex counts as `*all*`, a `!` regex is
+    /// skipped), otherwise a subset (a positive regex is skipped, a `!`
+    /// regex counts as `!*all*`). Each replacement only moves names in the
+    /// stated direction: skipping a positive entry or ending the list early
+    /// with a denial can only deny more, and vice versa.
+    fn of_list<'a>(entries: impl IntoIterator<Item = &'a str>, over: bool) -> Self {
+        let mut decided: BTreeMap<String, bool> = BTreeMap::new();
+        let names = |decided: &BTreeMap<String, bool>, allow: bool| decided.iter()
+            .filter(|(_, a)| **a == allow).map(|(n, _)| n.clone()).collect::<BTreeSet<_>>();
+        for entry in entries {
+            let (allow, pattern) = entry.strip_prefix('!').map_or((true, entry), |p| (false, p));
+            let regex = is_regex(pattern);
+            let all = pattern.eq_ignore_ascii_case("*all*") || (regex && allow == over);
+            if all {
+                return if allow { Self::AllBut(names(&decided, false)) } else { Self::Only(names(&decided, true)) };
+            }
+            if !regex {
+                decided.entry(pattern.to_ascii_lowercase()).or_insert(allow);
+            }
+        }
+        Self::Only(names(&decided, true))
+    }
+}
+
+/// The names of `kind` the existing console `creator` may use, as a subset
+/// ([`NameSet::of_list`] without `over`) of its effective ACL: file list
+/// (own entries, then profiles) intersected with its catalog list.
+fn creator_names(config: &DirectorConfig, creator: &str, kind: Kind) -> NameSet {
+    if creator == "*UserAgent*" {
+        return NameSet::all();
+    }
+    let Some(resource) = config.raw.iter().find(|r| r.norm_type() == "console" && r.name() == Some(creator)) else {
+        return NameSet::Only(BTreeSet::new());
+    };
+    let file = NameSet::of_list(file_entries(config, resource, kind), false);
+    let catalog = config.catalog_acl.with_restriction(creator, kind, |restriction| match restriction {
+        Restriction::None => NameSet::all(),
+        Restriction::List(list) => NameSet::of_list(list.iter().map(|e| e.entry.as_str()), false),
+        Restriction::Locked => NameSet::Only(BTreeSet::new()),
+    });
+    file.intersect(catalog)
+}
+
+/// Every command name an ACL check of type Command can meet: the Bareos
+/// command table, the registered commands and their aliases (all checks
+/// of commands, typed RPCs and the literal checks such as `configure` or
+/// `.sql` use these names).
+fn command_names() -> BTreeSet<&'static str> {
+    let registry = crate::command_executor::get_registry();
+    crate::ua_commands_table::UA_COMMANDS.iter().map(|c| c.0)
+        .chain(registry.iter().map(|c| c.name))
+        .chain(registry.iter().flat_map(|c| c.aliases.iter().copied()))
+        .collect()
+}
+
+/// Commands that change catalog ACLs (`.acl` and its alias `.profile`).
+const ACL_COMMANDS: [&str; 2] = [".acl", ".profile"];
+
+/// Anti-escalation check of `configure add console` (F-1 amendment of
+/// 20.11.2026, docs/plans/ACL-ZWEISTUFIG.md): may `creator` create a
+/// console whose only ACLs are those of `profiles` (no own ACL lines, no
+/// catalog entries)? Returns the reason for a refusal, None when allowed.
+///
+/// The new console's file ACL is the first match over the profiles' lists
+/// in the given order ([`file_allowed`] with an empty own list). For every
+/// ACL type ([`Kind::ALL`]) its allowed names must be a subset of the
+/// creator's effective names (file ∩ catalog tier, as [`allowed`] decides):
+/// - Command: checked name by name over every command name a check can
+///   meet ([`command_names`]), with [`first_match`] for the new console and
+///   [`allowed`] for the creator, so dot commands (regexes in Bareos terms,
+///   `.api`) are decided exactly;
+/// - all other types (resource names, Where, PluginOptions: open-ended):
+///   the new console's names as a superset and the creator's as a subset
+///   ([`NameSet::of_list`]), and the superset must lie in the subset. Lists
+///   of plain names, `!` entries and `*all*` are compared exactly; regexes
+///   make the comparison conservative (a positive regex in a profile counts
+///   as `*all*`, a `!` regex of the creator as `!*all*`).
+///
+/// Further refusals: no authenticated creator; a locked creator (F-4); and
+/// profiles that grant `.acl`/`.profile` while the creator has catalog
+/// entries of any type, because the new console could then remove them
+/// (F-2 restricts changes of the *own* console only) and lift the creator
+/// above the rights it had when it created the console.
+pub(crate) fn grant_error(config: &DirectorConfig, creator: &str, profiles: &[&str]) -> Option<String> {
+    if creator.is_empty() {
+        return Some("no authenticated console".into());
+    }
+    if config.catalog_acl.with_restriction(creator, Kind::Command, |r| matches!(r, Restriction::Locked)) {
+        return Some(format!("Console \"{creator}\" is locked (catalog ACL not readable)"));
+    }
+    let mut resources = Vec::new();
+    for name in profiles {
+        match config.raw.iter().find(|r| r.norm_type() == "profile" && r.name() == Some(*name)) {
+            Some(profile) => resources.push(profile),
+            None => return Some(format!("unknown Profile \"{name}\"")),
+        }
+    }
+    let entries = |kind: Kind| -> Vec<&str> {
+        resources.iter()
+            .flat_map(|p| p.directives.iter().filter(|d| d.norm_key() == kind.key()).flat_map(|d| d.values()))
+            .collect()
+    };
+    let commands = entries(Kind::Command);
+    for name in command_names() {
+        if first_match(commands.iter().copied(), name) == Some(true) && !allowed(config, creator, Kind::Command, name) {
+            return Some(format!("the profiles grant CommandAcl \"{name}\", which Console \"{creator}\" may not use"));
+        }
+    }
+    for kind in Kind::ALL.into_iter().filter(|k| *k != Kind::Command) {
+        let granted = NameSet::of_list(entries(kind).iter().copied(), true);
+        if let Some(name) = granted.excess(&creator_names(config, creator, kind)) {
+            let what = if name == "*all*" { "names beyond a fixed list (*all* or a pattern)".to_string() } else { format!("\"{name}\"") };
+            return Some(format!("the profiles grant {} {what}, which Console \"{creator}\" may not use", kind.directive()));
+        }
+    }
+    let grants_acl = ACL_COMMANDS.iter().any(|c| first_match(commands.iter().copied(), c) == Some(true));
+    if grants_acl && Kind::ALL.into_iter().any(|kind| config.catalog_acl.restricts(creator, kind)) {
+        return Some(format!("the profiles grant .acl, and Console \"{creator}\" has catalog ACL entries the new \
+            console could remove"));
+    }
+    None
+}
+
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
@@ -582,6 +758,43 @@ User {Name=limited; CommandACL=*all*}"#).unwrap();
         drop(cfg);
         // Locked although the console has no client entries.
         assert!(has_restrictions(&ctx, Kind::Client) && !no_restrictions(&ctx, Kind::Client));
+    }
+
+    /// `configure add console`: the name sets are exact for plain names,
+    /// `!` and `*all*`, and approximate regex lists in the stated direction
+    /// (over: superset, under: subset of what [`first_match`] allows).
+    #[test]
+    fn name_sets_approximate_in_the_safe_direction() {
+        let set = |e: &[&str], over| NameSet::of_list(e.iter().copied(), over);
+        let names = |n: &[&str]| n.iter().map(|s| s.to_string()).collect::<BTreeSet<_>>();
+        assert_eq!(set(&["A", "!b", "*all*", "!c"], false), NameSet::AllBut(names(&["b"])));
+        assert_eq!(set(&["a", "!A"], true), NameSet::Only(names(&["a"])));
+        assert_eq!(set(&["a", "!*all*", "b"], true), NameSet::Only(names(&["a"])));
+        assert_eq!(set(&["x.*", "a"], true), NameSet::all());
+        assert_eq!(set(&["x.*", "a"], false), NameSet::Only(names(&["a"])));
+        assert_eq!(set(&["!x.*", "a"], false), NameSet::Only(names(&[])));
+        assert_eq!(set(&["!x.*", "a"], true), NameSet::Only(names(&["a"])));
+        let contains = |set: &NameSet, name: &str| match set {
+            NameSet::Only(n) => n.contains(&name.to_ascii_lowercase()),
+            NameSet::AllBut(n) => !n.contains(&name.to_ascii_lowercase()),
+        };
+        let lists: [&[&str]; 6] = [&["a", "!b", "*all*"], &["!job-.*", "job-a", "*all*"], &["job-.*", "!job-a"],
+            &["!b", "a.c", "!*all*", "b"], &["B", "!b.*", "*ALL*"], &[]];
+        for list in lists {
+            for name in ["a", "A", "b", "abc", "job-a", "job-b", "other", "b1"] {
+                let real = first_match(list.iter().copied(), name) == Some(true);
+                assert!(!real || contains(&set(list, true), name), "over {list:?} {name}");
+                assert!(real || !contains(&set(list, false), name), "under {list:?} {name}");
+            }
+        }
+        assert_eq!(NameSet::Only(names(&["a"])).excess(&NameSet::AllBut(names(&["b"]))), None);
+        assert_eq!(NameSet::Only(names(&["b"])).excess(&NameSet::AllBut(names(&["b"]))), Some("b".into()));
+        assert_eq!(NameSet::all().excess(&NameSet::Only(names(&["a"]))), Some("*all*".into()));
+        assert_eq!(NameSet::AllBut(names(&["b"])).excess(&NameSet::AllBut(names(&["b", "c"]))), Some("c".into()));
+        assert_eq!(NameSet::AllBut(names(&["b", "c"])).excess(&NameSet::AllBut(names(&["b"]))), None);
+        // a profile regex after the creator's own negations stays within "!geheim, *all*"
+        assert_eq!(set(&["!geheim", "backup-.*"], true).excess(&set(&["!geheim", "*all*"], false)), None);
+        assert_eq!(set(&["backup-.*"], true).excess(&set(&["!geheim", "*all*"], false)), Some("geheim".into()));
     }
 
     #[test]

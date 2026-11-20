@@ -455,6 +455,10 @@ pub fn request(tool: &str, arguments: &Value) -> Option<(&'static str, Value)> {
                         Value::String(s) => json!(s),
                         Value::Number(n) => json!(n.to_string()),
                         Value::Bool(b) => json!(if *b { "yes" } else { "no" }),
+                        // a console's profiles: the typed map holds one value, odir splits the comma list
+                        Value::Array(items) if bareos_config::edit::norm_key(key) == "profile" && !items.is_empty()
+                            && items.iter().all(|v| v.as_str().is_some_and(|s| !s.is_empty() && !s.contains(','))) =>
+                            json!(items.iter().filter_map(Value::as_str).collect::<Vec<_>>().join(",")),
                         _ => return r.set("__directives", json!(true)).done(rpc),
                     };
                     map.insert(key.clone(), text);
@@ -572,6 +576,9 @@ mod tests {
         };
         // configure_update never takes ConfigureUpdate (K-10), see mcp_config.rs
         assert!(request("configure_update", &json!({"resource":"client","name":"fd","directives":{"address":"h"}})).is_none());
+        // a console's profiles: one comma list in the typed map (odir splits it)
+        assert_eq!(request("configure_add", &json!({"resource":"console","name":"gui","directives":{"password":"pw","profile":["a","b"]}})).unwrap(),
+            ("ConfigureAdd", json!({"resource_type":"console","name":"gui","directives":{"password":"pw","profile":"a,b"}})));
         let (rpc, req) = typed("configure_delete", json!({"resource":"schedule","name":"s","confirm":true}));
         assert_eq!((rpc, req["yes"].clone()), ("ConfigureDelete", json!(true)));
         let (rpc, req) = typed("delete", json!({"kind":"storage","storage":"S","confirm":true}));
