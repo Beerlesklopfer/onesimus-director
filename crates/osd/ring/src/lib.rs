@@ -27,6 +27,14 @@
 //! [`Ring::serve_mail`]; Verbraucher [`Ring::attach`], [`Ring::next`] →
 //! [`Ring::release`], [`Ring::call`], [`Ring::set_consumer_state`].
 //!
+//! Lesen (Restore) nutzt denselben Ring in Gegenrichtung: Die Netzsitzung
+//! legt ihn an und meldet sich als Verbraucher an, der Geräteleser
+//! übernimmt mit [`Ring::take_producer`] die Rolle des Erzeugers und füllt
+//! die Fächer mit gelesenen Blöcken. Seine Anfragen (CatReq, Job-Meldungen)
+//! gehen mit [`Ring::ask_consumer`] an die Netzsitzung, die sie mit
+//! [`Ring::serve_producer`] beantwortet; das Postfach eines Rings trägt
+//! immer nur eine Richtung.
+//!
 //! Aufbau des Speichers (alle Zahlen im Prozess-eigenen Format, der Ring
 //! verlässt den Rechner nie):
 //!
@@ -183,6 +191,9 @@ pub struct RingConfig {
 ///         +next(consumer, timeout) SlotRef
 ///         +release(consumer)
 ///         +call(consumer, request) answer
+///         +take_producer()
+///         +ask_consumer(consumer, request) answer
+///         +serve_producer(consumer, timeout, handler)
 ///     }
 ///     class SlotMut { +data +meta +publish(len) }
 ///     class SlotRef { +seq +data +meta }
@@ -562,6 +573,86 @@ impl Ring {
             }
             sys::wait(self.read_seq(), seen, POLL.min(deadline - now));
         }
+    }
+
+    /// Takes over the producer role in the calling process (the read
+    /// direction: the creator, the network session, attaches as consumer
+    /// and starts a device reader that fills the slots). Producer liveness
+    /// checks then watch this process.
+    pub fn take_producer(&self) {
+        self.word(PRODUCER_PID).store(sys::current_pid(), Ordering::Release);
+        self.word(PRODUCER_START).store(unix_now(), Ordering::Release);
+        self.word(PRODUCER_STATE).store(State::Running as u64, Ordering::Release);
+        self.bump_all();
+    }
+
+    /// Whether consumer `c` failed or its process is gone.
+    fn consumer_gone(&self, c: usize) -> bool {
+        self.consumer_state(c) == State::Failed || {
+            let pid = self.consumer_pid(c).load(Ordering::Relaxed);
+            pid != 0 && !sys::pid_alive(pid)
+        }
+    }
+
+    /// Producer: sends `request` to consumer `c` and waits for its answer
+    /// (the read direction: the device reader asks the network session for
+    /// catalog requests and job messages). Uses the consumer's mailbox with
+    /// the states 3 (request) and 4 (answer); a mailbox carries one
+    /// direction per ring. `NoConsumer` when the consumer failed or its
+    /// process is gone; a consumer that is `Done` still answers.
+    pub fn ask_consumer(&self, c: usize, request: &[u8], timeout: Duration) -> Result<Vec<u8>, RingError> {
+        if request.len() > MAILBOX_SIZE {
+            return Err(RingError::TooLarge(request.len()));
+        }
+        if c >= self.consumers {
+            return Err(RingError::Io(format!("ring {}: no consumer {c}", self.name)));
+        }
+        self.mailbox(c)[..request.len()].copy_from_slice(request);
+        self.mail_len(c).store(request.len() as u64, Ordering::Relaxed);
+        self.mail_state(c).store(3, Ordering::Release);
+        self.mail_seq().fetch_add(1, Ordering::AcqRel);
+        sys::wake(self.mail_seq());
+        let deadline = Instant::now() + timeout;
+        loop {
+            if self.mail_state(c).load(Ordering::Acquire) == 4 {
+                let len = (self.mail_len(c).load(Ordering::Relaxed) as usize).min(MAILBOX_SIZE);
+                let answer = self.mailbox(c)[..len].to_vec();
+                self.mail_state(c).store(0, Ordering::Release);
+                return Ok(answer);
+            }
+            if self.consumer_gone(c) {
+                self.mail_state(c).store(0, Ordering::Release);
+                return Err(RingError::NoConsumer);
+            }
+            let now = Instant::now();
+            if now >= deadline {
+                self.mail_state(c).store(0, Ordering::Release);
+                return Err(RingError::Timeout);
+            }
+            sys::wait(self.mail_state(c), 3, POLL.min(deadline - now));
+        }
+    }
+
+    /// Consumer `c`: answers a pending request of the producer with
+    /// `handler(request)`; waits at most `timeout` for one. True when one
+    /// was answered.
+    pub fn serve_producer(&self, c: usize, timeout: Duration, handler: impl FnOnce(&[u8]) -> Vec<u8>) -> bool {
+        let seen = self.mail_seq().load(Ordering::Acquire);
+        if self.mail_state(c).load(Ordering::Acquire) == 3 {
+            let len = (self.mail_len(c).load(Ordering::Relaxed) as usize).min(MAILBOX_SIZE);
+            let request = self.mailbox(c)[..len].to_vec();
+            let mut answer = handler(&request);
+            answer.truncate(MAILBOX_SIZE);
+            self.mailbox(c)[..answer.len()].copy_from_slice(&answer);
+            self.mail_len(c).store(answer.len() as u64, Ordering::Relaxed);
+            self.mail_state(c).store(4, Ordering::Release);
+            sys::wake(self.mail_state(c));
+            return true;
+        }
+        if !timeout.is_zero() {
+            sys::wait(self.mail_seq(), seen, timeout);
+        }
+        false
     }
 
     /// Producer: all slots are published (`Done`) or the job failed.

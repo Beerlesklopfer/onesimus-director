@@ -260,3 +260,43 @@ fn bad_names_and_configurations_are_refused() {
     assert!(Ring::create(&name("cfg"), RingConfig { slots: 1, slot_size: 8, consumers: 9 }).is_err());
     assert!(Ring::open(&name("missing")).is_err());
 }
+
+#[test]
+fn the_read_direction_reader_produces_and_asks_the_session() {
+    let n = name("reverse");
+    let _c = Cleanup(n.clone());
+    // the session creates the ring and attaches as consumer 0
+    let session = Arc::new(Ring::create(&n, RingConfig { slots: 2, slot_size: 64, consumers: 1 }).unwrap());
+    session.attach(0).unwrap();
+    let reader = std::thread::spawn({
+        let n = n.clone();
+        move || {
+            let ring = Ring::open(&n).unwrap();
+            ring.take_producer();
+            let answer = ring.ask_consumer(0, b"CatReq GetVolInfo", Duration::from_secs(10)).unwrap();
+            produce(&ring, 20);
+            answer
+        }
+    });
+    let mut served = false;
+    let mut read = 0u64;
+    loop {
+        if !served {
+            served = session.serve_producer(0, Duration::from_millis(50), |req| [b"1000 OK ".as_slice(), req].concat());
+            continue;
+        }
+        match session.next(0, Duration::from_secs(10)).unwrap() {
+            Some(slot) => {
+                assert_eq!(slot.data, &pattern(read, slot.data.len())[..]);
+                session.release(0);
+                read += 1;
+            }
+            None => break,
+        }
+    }
+    assert_eq!(read, 20);
+    assert_eq!(reader.join().unwrap(), b"1000 OK CatReq GetVolInfo");
+    // a consumer that is done does not hold slots, a failed one answers no more
+    session.set_consumer_state(0, State::Failed);
+    assert_eq!(session.ask_consumer(0, b"x", Duration::from_secs(1)).unwrap_err(), RingError::NoConsumer);
+}
