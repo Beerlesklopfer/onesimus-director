@@ -108,6 +108,11 @@ async fn check_table(pool: &sqlx::PgPool) -> Result<(), Box<dyn std::error::Erro
 /// in `public` at 2253, the objects usable qualified (and the Bareos tables
 /// unqualified as before), the ACL table intact.
 async fn check_layout(pool: &sqlx::PgPool, owner: &str) -> Result<(), Box<dyn std::error::Error>> {
+    check_layout_at(pool, owner, 2250).await
+}
+
+/// [`check_layout`] for a catalog whose Bareos `version` is `bareos`.
+async fn check_layout_at(pool: &sqlx::PgPool, owner: &str, bareos: i32) -> Result<(), Box<dyn std::error::Error>> {
     let mut expected: Vec<String> = OBJECTS.iter().map(|s| s.to_string()).chain(["console_acl".to_string()]).collect();
     expected.sort();
     assert_eq!(onesimus_objects_in(pool, "onesimus").await?, expected);
@@ -120,7 +125,7 @@ async fn check_layout(pool: &sqlx::PgPool, owner: &str) -> Result<(), Box<dyn st
         .fetch_one(pool).await?;
     assert_eq!(schema_owner, owner);
     let version: i32 = sqlx::query_scalar("SELECT MAX(versionid) FROM public.version").fetch_one(pool).await?;
-    assert_eq!(version, 2250, "bareos-dir must still open the catalog");
+    assert_eq!(version, bareos, "bareos-dir must still open the catalog");
     let ours: i32 = sqlx::query_scalar("SELECT MAX(version) FROM public.bareos_schema_version").fetch_one(pool).await?;
     assert_eq!(ours, LATEST);
     let in_onesimus: bool = sqlx::query_scalar("SELECT to_regclass('onesimus.bareos_schema_version') IS NOT NULL")
@@ -549,4 +554,88 @@ async fn self_heal_skips_catalogs_at_another_step() {
         assert!(gone, "not touched");
         Ok(())
     }).await;
+}
+
+/// Version scheme: Bareos upgrades the catalog (`version` 2260, its own
+/// update script) before odir ever ran v2253/v2254. The old rule (highest
+/// of Bareos `version` and `bareos_schema_version`) took the catalog for
+/// complete and skipped both steps silently; every Onesimus step is now
+/// checked on its own. The Bareos `version` stays 2260, self-heal checks
+/// the catalog (a Bareos version above the shipped steps is no "newer
+/// odir").
+#[tokio::test]
+#[ignore = "needs BAREOS_ORM_TEST_DB=<postgres url of a throw-away cluster>"]
+async fn bareos_upgrade_before_odir_never_skips_onesimus_steps() {
+    in_database("ons_bareos2260", |pool| async move {
+        migrate_pre_2253(&pool, "bareos2260").await?;
+        sqlx::query("UPDATE version SET versionid = 2260").execute(&pool).await?;
+        let migrator = Migrator::new(&schema_dir());
+        assert_eq!(migrator.migrate(&pool).await?, 2, "v2253 and v2254 despite Bareos 2260");
+        let user: String = sqlx::query_scalar("SELECT current_user::text").fetch_one(&pool).await?;
+        check_layout_at(&pool, &user, 2260).await?;
+        assert_eq!(migrator.migrate(&pool).await?, 0);
+        let report = migrator.heal(&pool).await;
+        assert_eq!(report.skipped, None, "{report:?}");
+        assert!(report.failed.is_empty() && report.repaired.is_empty(), "{report:?}");
+        Ok(())
+    }).await;
+}
+
+/// Catalog objects of schema `onesimus` with their definitions: columns
+/// of tables and views, function source and result, view definitions,
+/// constraints and indexes.
+async fn onesimus_catalog(pool: &sqlx::PgPool) -> Result<Vec<String>, sqlx::Error> {
+    sqlx::query_scalar(
+        "SELECT 'column ' || table_name || '.' || column_name || ' ' || data_type || ' ' || is_nullable \
+                || ' ' || coalesce(column_default, '') \
+           FROM information_schema.columns WHERE table_schema = 'onesimus' \
+         UNION ALL SELECT 'function ' || p.oid::regprocedure::text || ' ' || pg_get_function_result(p.oid) \
+                || ' ' || p.prosrc || ' ' || p.provolatile::text || p.prosecdef::text \
+           FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace WHERE n.nspname = 'onesimus' \
+         UNION ALL SELECT 'view ' || c.relname || ' ' || pg_get_viewdef(c.oid) \
+           FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace \
+          WHERE n.nspname = 'onesimus' AND c.relkind IN ('v', 'm') \
+         UNION ALL SELECT 'constraint ' || conname || ' ' || pg_get_constraintdef(oid) \
+           FROM pg_constraint WHERE connamespace = 'onesimus'::regnamespace \
+         UNION ALL SELECT 'index ' || indexdef FROM pg_indexes WHERE schemaname = 'onesimus' \
+         ORDER BY 1").fetch_all(pool).await
+}
+
+/// The whole DDL of every schema file is applied, whichever way a catalog
+/// gets there: a fresh install (every step's full statements), a catalog
+/// the Bareos DDL created (incremental steps v2251..v2254) and the
+/// production path (pre-2253 odir, then v2253/v2254) end with the same
+/// objects in `onesimus`, column for column and definition for definition.
+#[tokio::test]
+#[ignore = "needs BAREOS_ORM_TEST_DB=<postgres url of a throw-away cluster>"]
+async fn every_migration_path_ends_with_the_same_catalog() {
+    let mut results = Vec::new();
+    for path in ["fresh", "bareos_ddl", "pre2253"] {
+        let db = TestDb::create(&format!("ons_path_{path}"), None).await;
+        let pool = db.pool().await;
+        let result = async {
+            match path {
+                "bareos_ddl" => {
+                    let ddl = std::fs::read_to_string(Path::new(env!("CARGO_MANIFEST_DIR"))
+                        .join("tests/data/bareos-18be77e6-creates-postgresql.sql"))?;
+                    sqlx::raw_sql(&ddl).execute(&pool).await?;
+                }
+                "pre2253" => migrate_pre_2253(&pool, "paths").await?,
+                _ => {}
+            }
+            Migrator::new(&schema_dir()).migrate(&pool).await?;
+            Ok::<_, Box<dyn std::error::Error>>(onesimus_catalog(&pool).await?)
+        }.await;
+        pool.close().await;
+        db.drop().await;
+        results.push((path, result.unwrap()));
+    }
+    let (_, fresh) = &results[0];
+    assert!(fresh.iter().filter(|l| l.starts_with("view ")).count() == 6, "{fresh:#?}");
+    for (path, catalog) in &results[1..] {
+        let only_fresh: Vec<_> = fresh.iter().filter(|l| !catalog.contains(l)).collect();
+        let only_here: Vec<_> = catalog.iter().filter(|l| !fresh.contains(l)).collect();
+        assert!(only_fresh.is_empty() && only_here.is_empty(),
+            "{path} differs from fresh:\n only fresh: {only_fresh:#?}\n only {path}: {only_here:#?}");
+    }
 }

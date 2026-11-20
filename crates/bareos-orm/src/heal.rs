@@ -126,20 +126,26 @@ impl Migrator {
                 return report;
             }
         };
-        let latest = versions.last().map(|v| v.version).unwrap_or(0);
-        let db = match self.get_db_version(pool).await {
-            Ok(db) => db,
+        let state = match self.applied_steps(pool).await {
+            Ok(state) => state,
             Err(e) => {
                 report.skipped = Some(format!("catalog version not readable: {e}"));
                 return report;
             }
         };
-        if db != latest {
-            report.skipped = Some(if db < latest {
-                format!("catalog at v{db}, shipped v{latest}: migration incomplete, retried at the next start")
-            } else {
-                format!("catalog at v{db}, newer than the shipped v{latest}: its objects belong to a newer odir")
-            });
+        // Per step, not by the highest number: a Bareos `version` above
+        // the shipped steps (Bareos upgraded the catalog) is fine.
+        let missing: Vec<u32> = state.plan(&versions).into_iter()
+            .filter(|(_, record)| *record).map(|(i, _)| versions[i].version).collect();
+        if !missing.is_empty() {
+            report.skipped = Some(format!(
+                "schema steps {missing:?} not applied: migration incomplete, retried at the next start"));
+            return report;
+        }
+        let newer = state.newer_than(&versions);
+        if !newer.is_empty() {
+            report.skipped = Some(format!(
+                "catalog has schema steps {newer:?} unknown to this odir: its objects belong to a newer odir"));
             return report;
         }
         let shipped = Shipped::collect(&versions);

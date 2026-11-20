@@ -216,6 +216,48 @@ läuft beim nächsten Start erneut), darüber gehören die Objekte einem
 neueren odir und werden nicht angefasst. Sie braucht keine weiteren Rechte
 als die Migration (Eigentümer der Objekte).
 
+### Versionsführung: jeder Schritt einzeln
+
+Bareos-Basisversionen (2250, künftig z. B. 2260) und Onesimus-Schritte
+(2251–2254) teilen einen Nummernraum, werden aber getrennt geführt
+(`bareos_orm::migration::AppliedSteps`, seit 20.11.2026):
+
+- Ein **Onesimus-Schritt** gilt nur dann als ausgeführt, wenn genau seine
+  Nummer in `public.bareos_schema_version` steht. Die Bareos-Zahl in
+  `version` sagt darüber nichts. Bisher entschied die höchste Zahl beider
+  Tabellen. Hätte Bareos den Katalog mit seinem eigenen Update-Skript auf
+  2260 gehoben, bevor odir 2253/2254 ausführte, wären beide Schritte
+  stillschweigend übersprungen worden (nachgestellt im Test
+  `bareos_upgrade_before_odir_never_skips_onesimus_steps`; mit dem alten
+  Migrator: 0 Schritte).
+- Ein **Bareos-Basisschritt** gilt als ausgeführt, wenn er eingetragen ist
+  oder `version` mindestens seine Nummer hat. Ihn führt odir nie ein zweites
+  Mal aus.
+- Fehlt ein Onesimus-Schritt mitten in der Reihe, führt odir ihn aus und
+  danach alle späteren Onesimus-Schritte noch einmal, ohne sie doppelt
+  einzutragen. Sonst stünde die ältere Definition eines Objekts über der
+  neueren.
+- Jeder Schritt wird gegen den **Stand aller früheren Schritte** abgeglichen,
+  nicht nur gegen die vorige Datei. Erweiterungsdateien enthalten nur ihre
+  eigenen Objekte; eine neue Spalte an `onesimus.console_acl` in einem
+  späteren Schritt wäre sonst nie angelegt worden.
+- Zwei Schemadateien mit derselben Nummer lehnt odir beim Laden ab. Was der
+  Abgleich nicht ausdrücken kann (geänderte Spaltendefinition, neue
+  Fremdschlüssel oder Constraints an bestehender Tabelle, umdefinierter
+  Index), meldet odir als Warnung `not migrated automatically`.
+  Ein Unit-Test (`every_shipped_ddl_item_is_migrated`) stellt sicher, dass
+  keine ausgelieferte Datei so etwas enthält und jedes Element jeder Datei
+  in den Anweisungen landet.
+- Der Datenbanktest `every_migration_path_ends_with_the_same_catalog`
+  vergleicht drei Wege Objekt für Objekt (Spalten, Funktionsrumpf,
+  View-Definition, Constraints, Indizes): Neuinstallation, ein Katalog aus
+  dem Bareos-DDL und der Produktionsweg (Stand vor 2253, dann 2253/2254).
+  Alle drei enden gleich.
+- Die Selbstheilung prüft ebenfalls Schritt für Schritt: Eine Bareos-Zahl
+  über den ausgelieferten Schritten ist kein „neuerer odir“. Nur
+  eingetragene Onesimus-Schritte, die dieser odir nicht kennt, lassen sie
+  aussetzen.
+
 ### Rückweg auf einen älteren odir
 
 Ein odir auf Stufe 2253 (Stand `c27ad72`) auf einem Katalog auf 2254: er

@@ -1,5 +1,6 @@
 //! Schema-Migration: vergleicht JSON-Schema mit Live-DB und migriert.
 
+use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 
 use tracing::{info, warn, debug};
@@ -41,6 +42,13 @@ impl Migrator {
         }
 
         schemas.sort_by_key(|s| s.version);
+        // Bareos base versions and Onesimus steps share one number space;
+        // two files with one number would make "step N applied" ambiguous.
+        if let Some(pair) = schemas.windows(2).find(|p| p[0].version == p[1].version) {
+            return Err(OrmError::Other(format!(
+                "two schema files with version {} ({} / {})",
+                pair[0].version, pair[0].description, pair[1].description)));
+        }
         Ok(schemas)
     }
 
@@ -56,40 +64,7 @@ impl Migrator {
     /// `to_statements()` creates what a fresh `migrate()` creates, which a
     /// single extension file (no tables of its own) cannot.
     pub fn combined(&self) -> Result<Option<CatalogSchema>, OrmError> {
-        let mut versions = self.load_versions()?.into_iter();
-        let Some(mut combined) = versions.next() else { return Ok(None) };
-        for next in versions {
-            for table in next.tables {
-                match combined.tables.iter_mut().find(|t| t.name == table.name) {
-                    Some(existing) => {
-                        for col in table.columns {
-                            if !existing.columns.iter().any(|c| c.name == col.name) {
-                                existing.columns.push(col);
-                            }
-                        }
-                        for idx in table.indices {
-                            if !existing.indices.iter().any(|i| i.name == idx.name) {
-                                existing.indices.push(idx);
-                            }
-                        }
-                    }
-                    None => combined.tables.push(table),
-                }
-            }
-            // A later version redefines a function or view of the same
-            // name (v2254 the views of v2251/v2252): only the newest stays.
-            for func in next.functions {
-                combined.functions.retain(|f| f.name != func.name);
-                combined.functions.push(func);
-            }
-            for view in next.views {
-                combined.views.retain(|v| v.name != view.name);
-                combined.views.push(view);
-            }
-            combined.version = next.version;
-            combined.description = next.description;
-        }
-        Ok(Some(combined))
+        Ok(fold(&self.load_versions()?))
     }
 
     /// Generiere die Migration-SQL von Version `from` nach `to`.
@@ -128,8 +103,10 @@ impl Migrator {
             }
         }
 
-        // Gelöschte Tabellen (optional, vorsichtig)
-        for from_table in &from.tables {
+        // Gelöschte Tabellen (optional, vorsichtig). Only a Bareos base
+        // file lists the whole catalog; an extension file lists its own
+        // objects only, a table missing there is not removed.
+        for from_table in from.tables.iter().filter(|_| !is_onesimus_extension(to)) {
             if to.find_table(&from_table.name).is_none() {
                 statements.push(format!("-- DROP TABLE {} (removed in v{});\n",
                     from_table.name, to.version));
@@ -168,37 +145,45 @@ impl Migrator {
     /// schema or relocation error leaves the step unrecorded, so the next
     /// start tries again.
     pub async fn migrate(&self, pool: &sqlx::PgPool) -> Result<u32, OrmError> {
-        let db_version = self.get_db_version(pool).await?;
-
         let versions = self.load_versions()?;
         if versions.is_empty() {
             return Err(OrmError::Other("no schema versions found".to_string()));
         }
+        let state = self.applied_steps(pool).await?;
+        let fresh = state.is_fresh();
+        if fresh {
+            info!("no version table found — fresh install");
+        }
+        let newer = state.newer_than(&versions);
+        if !newer.is_empty() {
+            warn!("catalog records schema steps {newer:?} unknown to this odir (migrated by a newer odir)");
+        }
 
         let mut applied = 0;
-
-        for schema in &versions {
-            if schema.version <= db_version {
-                debug!("schema v{} already applied (db=v{}), skipping", schema.version, db_version);
-                continue;
+        for (i, record) in state.plan(&versions) {
+            let schema = &versions[i];
+            if record {
+                info!("migrating to schema v{}: {}", schema.version, schema.description);
+            } else {
+                info!("re-applying schema v{} (an earlier step was missing)", schema.version);
             }
-
-            info!("migrating to schema v{}: {}", schema.version, schema.description);
 
             // Own schemas first (hard error: the step's objects need them),
             // then objects that move there, then the step's own objects.
             ensure_schemas(pool, schema).await?;
             let problems = relocate_objects(pool, &versions, schema).await;
 
-            let stmts = if db_version == 0 {
+            let stmts = match fold(&versions[..i]).filter(|_| !fresh) {
                 // Fresh install: alle Tabellen anlegen (Statement fuer Statement)
-                schema.to_statements()
-            } else {
-                // Inkrementelle Migration: nur Diff anwenden
-                versions.iter()
-                    .rfind(|s| s.version < schema.version)
-                    .map(|prev_schema| Self::diff(prev_schema, schema))
-                    .unwrap_or_default()
+                None => schema.to_statements(),
+                // Inkrementelle Migration: Diff gegen den Stand aller
+                // früheren Schritte (nicht nur gegen die vorige Datei)
+                Some(before) => {
+                    for problem in unsupported_changes(&before, schema) {
+                        warn!("schema v{}: not migrated automatically: {problem}", schema.version);
+                    }
+                    Self::diff(&before, schema)
+                }
             };
             run_statements(pool, &stmts).await;
 
@@ -209,8 +194,10 @@ impl Migrator {
                     schema.version, problems.join("; "))));
             }
 
-            self.set_db_version(pool, schema).await?;
-            applied += 1;
+            if record {
+                self.set_db_version(pool, schema).await?;
+                applied += 1;
+            }
             info!("migration to v{} complete", schema.version);
         }
 
@@ -219,45 +206,27 @@ impl Migrator {
 
         if applied == 0 {
             let latest = versions.last().map(|s| s.version).unwrap_or(0);
-            info!("database already at v{db_version} (latest: v{latest})");
+            info!("database has every schema step (Bareos {:?}, latest shipped v{latest})", state.bareos);
         }
 
         Ok(applied)
     }
 
-    /// Applied schema version: the highest of the Bareos `version` table
-    /// (base catalog) and our `bareos_schema_version` (incl. Onesimus extensions).
-    pub(crate) async fn get_db_version(&self, pool: &sqlx::PgPool) -> Result<u32, OrmError> {
-        let mut found: Option<u32> = None;
-
-        // 1. C++ Version-Tabelle (VersionId) — Bareos-Basisschema
-        let cpp_exists = table_exists(pool, "version").await?;
-        if cpp_exists {
-            let version: Option<i32> = sqlx::query_scalar(
-                "SELECT MAX(versionid) FROM version"
-            ).fetch_one(pool).await.unwrap_or(None);
-            if let Some(v) = version {
-                debug!("found C++ version table: VersionId={v}");
-                found = Some(v as u32);
-            }
+    /// What the catalog records as applied ([`AppliedSteps`]).
+    pub async fn applied_steps(&self, pool: &sqlx::PgPool) -> Result<AppliedSteps, OrmError> {
+        let mut state = AppliedSteps::default();
+        if table_exists(pool, "version").await? {
+            let version: Option<i32> = sqlx::query_scalar("SELECT MAX(versionid) FROM version")
+                .fetch_one(pool).await.unwrap_or(None);
+            state.bareos = version.map(|v| v as u32);
         }
-
-        // 2. Unsere Version-Tabelle — enthält auch die Onesimus-Erweiterungen
-        let our_exists = table_exists(pool, "bareos_schema_version").await?;
-        if our_exists {
-            let version: Option<i32> = sqlx::query_scalar(
-                "SELECT MAX(version) FROM bareos_schema_version"
-            ).fetch_one(pool).await.unwrap_or(None);
-            if let Some(v) = version {
-                debug!("found bareos_schema_version: v={v}");
-                found = Some(found.map_or(v as u32, |f| f.max(v as u32)));
-            }
+        if table_exists(pool, "bareos_schema_version").await? {
+            let rows: Vec<i32> = sqlx::query_scalar("SELECT DISTINCT version FROM bareos_schema_version")
+                .fetch_all(pool).await?;
+            state.recorded = rows.into_iter().map(|v| v as u32).collect();
         }
-
-        if found.is_none() {
-            info!("no version table found — fresh install");
-        }
-        Ok(found.unwrap_or(0))
+        debug!("catalog versions: {state:?}");
+        Ok(state)
     }
 
     /// Record an applied schema version.
@@ -295,6 +264,159 @@ impl Migrator {
         }
 
         Ok(())
+    }
+}
+
+/// Fold `versions` (sorted) into the catalog state they produce together:
+/// the Bareos base tables plus every later addition (tables, columns,
+/// indices, functions, views; of a function or view defined again later
+/// only the newest definition). Extension files list only their own
+/// objects, so a step's diff must be taken against this state, not
+/// against the previous file alone.
+pub(crate) fn fold(versions: &[CatalogSchema]) -> Option<CatalogSchema> {
+    let mut versions = versions.iter().cloned();
+    let mut combined = versions.next()?;
+    for next in versions {
+        for table in next.tables {
+            match combined.tables.iter_mut().find(|t| t.name == table.name) {
+                Some(existing) => {
+                    for col in table.columns {
+                        if !existing.columns.iter().any(|c| c.name == col.name) {
+                            existing.columns.push(col);
+                        }
+                    }
+                    for idx in table.indices {
+                        if !existing.indices.iter().any(|i| i.name == idx.name) {
+                            existing.indices.push(idx);
+                        }
+                    }
+                }
+                None => combined.tables.push(table),
+            }
+        }
+        // A later version redefines a function or view of the same
+        // name (v2254 the views of v2251/v2252): only the newest stays.
+        for func in next.functions {
+            combined.functions.retain(|f| f.name != func.name);
+            combined.functions.push(func);
+        }
+        for view in next.views {
+            combined.views.retain(|v| v.name != view.name);
+            combined.views.push(view);
+        }
+        combined.relocate.extend(next.relocate);
+        combined.version = next.version;
+        combined.description = next.description;
+        combined.author = next.author;
+    }
+    Some(combined)
+}
+
+/// Changes of step `to` against the catalog state `from` (all earlier steps folded)
+/// that [`Migrator::diff`] cannot express and would therefore silently
+/// drop: changed column definitions, foreign keys, constraints or rows
+/// added to an existing table, an index redefined under its old name, and
+/// (Bareos base steps, which list the whole catalog) removed columns.
+/// Every shipped step must come out empty (unit test); `migrate` logs
+/// anything found.
+pub fn unsupported_changes(from: &CatalogSchema, to: &CatalogSchema) -> Vec<String> {
+    let mut found = Vec::new();
+    for table in &to.tables {
+        let Some(old) = from.find_table(&table.name) else { continue };
+        for col in &table.columns {
+            let changed = |o: &crate::schema::ColumnDef| !o.col_type.trim().eq_ignore_ascii_case(col.col_type.trim())
+                || o.not_null != col.not_null || o.default != col.default;
+            if old.columns.iter().find(|c| c.name == col.name).is_some_and(changed) {
+                found.push(format!("v{}: column {}.{} changed", to.version, table.name, col.name));
+            }
+        }
+        if !is_onesimus_extension(to) {
+            for o in &old.columns {
+                if !table.columns.iter().any(|c| c.name == o.name) {
+                    found.push(format!("v{}: column {}.{} removed", to.version, table.name, o.name));
+                }
+            }
+        }
+        for idx in &table.indices {
+            let redefined = |o: &crate::schema::IndexDef| o.columns != idx.columns || o.unique != idx.unique
+                || o.index_type != idx.index_type || o.where_clause != idx.where_clause;
+            if old.indices.iter().find(|i| i.name == idx.name).is_some_and(redefined) {
+                found.push(format!("v{}: index {} redefined", to.version, idx.name));
+            }
+        }
+        for fk in &table.foreign_keys {
+            if !old.foreign_keys.iter().any(|o| o.column == fk.column && o.references_table == fk.references_table) {
+                found.push(format!("v{}: foreign key {}.{} added to an existing table", to.version, table.name, fk.column));
+            }
+        }
+        for c in &table.constraints {
+            if !old.constraints.iter().any(|o| o.name == c.name) {
+                found.push(format!("v{}: constraint {} added to an existing table", to.version, c.name));
+            }
+        }
+        if table.initial_rows.iter().any(|r| !old.initial_rows.contains(r)) {
+            found.push(format!("v{}: rows added to existing table {}", to.version, table.name));
+        }
+    }
+    found
+}
+
+/// What a catalog records as applied: the Bareos `version` table (base
+/// catalog, written by Bareos' own update scripts too) and every step in
+/// `bareos_schema_version` (written only by odir, one row per step).
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct AppliedSteps {
+    /// `MAX(versionid)` of the Bareos `version` table, if any.
+    pub bareos: Option<u32>,
+    /// Every version recorded in `bareos_schema_version`.
+    pub recorded: BTreeSet<u32>,
+}
+
+impl AppliedSteps {
+    /// No version information at all: a fresh catalog.
+    pub fn is_fresh(&self) -> bool {
+        self.bareos.is_none() && self.recorded.is_empty()
+    }
+
+    /// Whether `step` is in the catalog. An Onesimus step only when it is
+    /// recorded itself: a Bareos base version, however high, says nothing
+    /// about the Onesimus steps (Bareos may upgrade the catalog to 2260
+    /// before odir ever ran v2253). A Bareos base step when recorded or at
+    /// most the Bareos `version`.
+    pub fn contains(&self, step: &CatalogSchema) -> bool {
+        self.recorded.contains(&step.version)
+            || (!is_onesimus_extension(step) && self.bareos.is_some_and(|b| step.version <= b))
+    }
+
+    /// Indices into `versions` of the steps to run, in order, each with
+    /// whether it still has to be recorded. Every missing step runs; after
+    /// the first missing Onesimus step every later Onesimus step runs again
+    /// too (already recorded, so not recorded twice), because an older
+    /// step re-creates its objects in their older definition and only the
+    /// later steps put the newest one back. Bareos base steps are never
+    /// run again.
+    pub fn plan(&self, versions: &[CatalogSchema]) -> Vec<(usize, bool)> {
+        let mut plan = Vec::new();
+        let mut gap = false;
+        for (i, step) in versions.iter().enumerate() {
+            let missing = !self.contains(step);
+            if missing && is_onesimus_extension(step) {
+                gap = true;
+            }
+            if missing || (gap && is_onesimus_extension(step)) {
+                plan.push((i, missing));
+            }
+        }
+        plan
+    }
+
+    /// Recorded Onesimus steps newer than every shipped one: the catalog
+    /// was migrated by a newer odir.
+    pub fn newer_than(&self, versions: &[CatalogSchema]) -> Vec<u32> {
+        let shipped: BTreeSet<u32> = versions.iter().map(|s| s.version).collect();
+        let newest = versions.iter().filter(|s| is_onesimus_extension(s)).map(|s| s.version).max().unwrap_or(0);
+        self.recorded.iter().copied().filter(|v| *v > newest && !shipped.contains(v)
+            && self.bareos.is_none_or(|b| *v != b)).collect()
     }
 }
 
@@ -766,5 +888,155 @@ mod tests {
         let stmts = Migrator::diff(&v1, &v2);
         let sql = stmts.join("\n");
         assert!(sql.contains("ALTER TABLE job ADD COLUMN metadata jsonb"));
+    }
+
+    /// A step as the plan tests need it: number and author only.
+    fn step(version: u32, author: &str) -> CatalogSchema {
+        serde_json::from_str(&format!(
+            r#"{{"version": {version}, "description": "v{version}", "created": "2026", "author": "{author}", "tables": []}}"#)).unwrap()
+    }
+
+    /// The shipped numbering: Bareos base 2250, Onesimus 2251..2254.
+    fn shipped_steps() -> Vec<CatalogSchema> {
+        vec![step(2250, "Bareos"), step(2251, "Onesimus"), step(2252, "Onesimus"),
+             step(2253, "Onesimus"), step(2254, "Onesimus")]
+    }
+
+    fn applied(bareos: Option<u32>, recorded: &[u32]) -> AppliedSteps {
+        AppliedSteps { bareos, recorded: recorded.iter().copied().collect() }
+    }
+
+    /// Versions of a plan, `+` = to be recorded, `=` = re-applied only.
+    fn plan_of(state: &AppliedSteps, versions: &[CatalogSchema]) -> Vec<String> {
+        state.plan(versions).into_iter()
+            .map(|(i, record)| format!("{}{}", if record { '+' } else { '=' }, versions[i].version))
+            .collect()
+    }
+
+    /// The bug this replaces: the highest of Bareos `version` and
+    /// `bareos_schema_version` decided. Bareos upgrading the catalog to a
+    /// base version above the Onesimus steps skipped them all silently.
+    #[test]
+    fn a_higher_bareos_version_never_skips_onesimus_steps() {
+        let v = shipped_steps();
+        assert_eq!(plan_of(&applied(Some(2260), &[2250, 2251, 2252]), &v), ["+2253", "+2254"]);
+        assert_eq!(plan_of(&applied(Some(2260), &[]), &v), ["+2251", "+2252", "+2253", "+2254"],
+            "a catalog Bareos created and upgraded alone");
+        assert!(plan_of(&applied(Some(2260), &[2250, 2251, 2252, 2253, 2254]), &v).is_empty());
+    }
+
+    #[test]
+    fn plan_runs_every_missing_step_and_replays_onesimus_steps_after_a_gap() {
+        let v = shipped_steps();
+        assert_eq!(plan_of(&applied(None, &[]), &v), ["+2250", "+2251", "+2252", "+2253", "+2254"], "fresh");
+        assert_eq!(plan_of(&applied(Some(2250), &[2251, 2252]), &v), ["+2253", "+2254"], "production 2026-11-20");
+        assert_eq!(plan_of(&applied(Some(2250), &[2250, 2251, 2253, 2254]), &v), ["+2252", "=2253", "=2254"],
+            "after a missing step the later ones put their newer definitions back");
+        assert!(plan_of(&applied(Some(2250), &[2251, 2252, 2253, 2254]), &v).is_empty());
+        // Base steps: never re-run when the Bareos version covers them.
+        let with_base = [step(2250, "Bareos"), step(2251, "Onesimus"), step(2260, "Bareos"), step(2261, "Onesimus")];
+        assert_eq!(plan_of(&applied(Some(2250), &[2251]), &with_base), ["+2260", "+2261"]);
+        assert_eq!(plan_of(&applied(Some(2260), &[2251]), &with_base), ["+2261"], "Bareos did 2260 itself");
+        assert_eq!(plan_of(&applied(Some(2260), &[2261]), &with_base), ["+2251", "=2261"]);
+    }
+
+    #[test]
+    fn newer_steps_are_recognised_but_a_bareos_upgrade_is_not_newer() {
+        let v = shipped_steps();
+        assert!(applied(Some(2260), &[2250, 2251, 2252, 2253, 2254]).newer_than(&v).is_empty());
+        assert_eq!(applied(Some(2250), &[2251, 2252, 2253, 2254, 2255]).newer_than(&v), [2255]);
+        // An older odir wrote extension versions into `version`; the base
+        // version recorded in both tables is no Onesimus step either.
+        assert!(applied(Some(2260), &[2260]).newer_than(&v).is_empty());
+    }
+
+    #[test]
+    fn two_schema_files_with_one_version_are_refused() {
+        let dir = std::env::temp_dir().join(format!("bareos-orm-dup-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        for (file, author) in [("a.json", "Bareos"), ("b.json", "Onesimus")] {
+            std::fs::write(dir.join(file), format!(
+                r#"{{"version": 2260, "description": "{author}", "created": "2026", "author": "{author}", "tables": []}}"#)).unwrap();
+        }
+        let err = Migrator::new(&dir).load_versions().unwrap_err().to_string();
+        std::fs::remove_dir_all(&dir).unwrap();
+        assert!(err.contains("two schema files with version 2260"), "{err}");
+    }
+
+    /// The previous-file diff lost DDL: an extension step changing a table
+    /// of an earlier extension step (not in the previous file) produced
+    /// `CREATE TABLE IF NOT EXISTS`, a no-op, instead of the new column.
+    #[test]
+    fn diff_against_all_earlier_steps_adds_the_column() {
+        let mk = |v: u32, tables: &str| -> CatalogSchema { serde_json::from_str(&format!(
+            r#"{{"version": {v}, "description": "v{v}", "created": "2026", "author": "Onesimus", "tables": [{tables}]}}"#)).unwrap() };
+        let acl = r#"{"name": "onesimus.console_acl", "primary_key": "id", "columns": [{"name": "id", "type": "integer", "not_null": true}]}"#;
+        let acl2 = r#"{"name": "onesimus.console_acl", "primary_key": "id", "columns": [{"name": "id", "type": "integer", "not_null": true}, {"name": "note", "type": "text"}]}"#;
+        let versions = [mk(1, acl), mk(2, ""), mk(3, acl2)];
+        let sql = Migrator::diff(&fold(&versions[..2]).unwrap(), &versions[2]).join("\n");
+        assert!(sql.contains("ALTER TABLE onesimus.console_acl ADD COLUMN note text"), "{sql}");
+        assert!(!sql.contains("CREATE TABLE"), "{sql}");
+        assert!(!sql.contains("DROP"), "an extension file lists only its own objects: {sql}");
+    }
+
+    #[test]
+    fn unsupported_changes_are_reported() {
+        let mk = |v: u32, col: &str, extra: &str| -> CatalogSchema { serde_json::from_str(&format!(
+            r#"{{"version": {v}, "description": "v{v}", "created": "2026", "author": "Onesimus", "tables": [
+                {{"name": "t", "primary_key": "id", "columns": [{{"name": "id", "type": "integer", "not_null": true}}, {col}] {extra}}}]}}"#)).unwrap() };
+        let before = mk(1, r#"{"name": "a", "type": "text"}"#, "");
+        let after = mk(2, r#"{"name": "a", "type": "bigint"}"#,
+            r#", "constraints": [{"name": "c", "type": "check", "expression": "id > 0"}]"#);
+        let found = unsupported_changes(&before, &after);
+        assert_eq!(found, ["v2: column t.a changed", "v2: constraint c added to an existing table"]);
+    }
+
+    /// Every item of every shipped schema file reaches the catalog: for
+    /// each step, the statements `migrate` runs on an existing catalog
+    /// (diff against all earlier steps) create each new table, add each
+    /// new column and index, (re)define each function and view, and the
+    /// step has nothing `diff` cannot express. Relocations run separately
+    /// (`relocate_objects`) and are checked against their newest definition.
+    #[test]
+    fn every_shipped_ddl_item_is_migrated() {
+        let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("schema");
+        let versions = Migrator::new(&dir).load_versions().unwrap();
+        for i in 1..versions.len() {
+            let step = &versions[i];
+            let before = fold(&versions[..i]).unwrap();
+            assert!(unsupported_changes(&before, step).is_empty(), "v{}: {:?}", step.version,
+                unsupported_changes(&before, step));
+            let stmts = Migrator::diff(&before, step);
+            for table in &step.tables {
+                match before.find_table(&table.name) {
+                    None => for s in table.to_statements() {
+                        assert!(stmts.contains(&s), "v{}: table {} not created: {s}", step.version, table.name);
+                    },
+                    Some(old) => {
+                        for col in table.columns.iter().filter(|c| !old.columns.iter().any(|o| o.name == c.name)) {
+                            let s = crate::schema::TableDef::alter_add_column(&table.name, col);
+                            assert!(stmts.contains(&s), "v{}: column {}.{} not added", step.version, table.name, col.name);
+                        }
+                        for idx in table.indices.iter().filter(|x| !old.indices.iter().any(|o| o.name == x.name)) {
+                            assert!(stmts.contains(&idx.to_sql(&table.name)), "v{}: index {} not created", step.version, idx.name);
+                        }
+                    }
+                }
+            }
+            for f in &step.functions {
+                assert!(stmts.contains(&f.to_sql()), "v{}: function {} not defined", step.version, f.name);
+            }
+            for v in &step.views {
+                assert!(stmts.contains(&v.to_sql()), "v{}: view {} not defined", step.version, v.name);
+            }
+            for r in &step.relocate {
+                let defined = versions[..=i].iter().any(|s| match r.kind {
+                    ObjectKind::View => s.views.iter().any(|v| v.name == r.name),
+                    ObjectKind::Function => s.functions.iter().any(|f| f.name == r.name),
+                });
+                assert!(defined, "v{}: relocated {} has no definition", step.version, r.name);
+            }
+        }
     }
 }
