@@ -344,11 +344,18 @@ pub fn parse_str(input: &str, source: Option<&Path>) -> Result<Vec<ConfResource>
 
 /// Load a configuration file or `bareos-dir.d` tree in C++ resource order.
 pub fn load(path: &Path) -> Result<Vec<ConfResource>, String> {
+    load_tree(path, "bareos-dir.d")
+}
+
+/// Load a configuration file, or the `<path>/<tree>/*/*.conf` tree (e.g.
+/// `bareos-sd.d`), or `<path>/*/*.conf` when `path` is the tree itself, in
+/// C++ resource order.
+pub fn load_tree(path: &Path, tree: &str) -> Result<Vec<ConfResource>, String> {
     if path.is_file() {
         let text = std::fs::read_to_string(path).map_err(|e| format!("read {}: {e}", path.display()))?;
         return parse_str(&text, Some(path));
     }
-    let dir_d = path.join("bareos-dir.d");
+    let dir_d = path.join(tree);
     let base = if dir_d.is_dir() { dir_d } else { path.to_path_buf() };
 
     let mut files = Vec::new();

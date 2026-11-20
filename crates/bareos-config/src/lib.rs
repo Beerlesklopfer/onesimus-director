@@ -1,6 +1,7 @@
 //! Bareos configuration file parser.
 //!
-//! Parses the Bareos Director configuration syntax into typed resource structs.
+//! Parses the Bareos Director configuration syntax into typed resource structs,
+//! and the Storage Daemon configuration (`bareos-sd.d`, [`sd`]).
 //! Supports all major resource types and directive value formats.
 
 pub mod resources;
@@ -10,6 +11,7 @@ pub mod raw;
 pub mod edit;
 pub mod values;
 pub mod secrets;
+pub mod sd;
 
 pub use resources::*;
 pub use parser::parse_config;
