@@ -156,13 +156,13 @@ Commits auf `development` (lokal, nicht gepusht), in dieser Reihenfolge:
 
 | Commit | Inhalt |
 | --- | --- |
-| `8f308ed` | `bareos-format`: breg (aus ofd und odir zusammengeführt), Netz-Köpfe der Datensätze (`data_header`, `RecHdr`), `digest_name`; ofd und odir nutzen sie. Macht ofd und odir wieder baubar, nachdem `5cab9c8` die alten breg-Dateien versehentlich mitgelöscht hatte |
-| `09fc1c0` | neun Inline-Kopien von BashSpaces auf `bareos_format::bash`; D13 am Bareos-Quelltext geprüft |
-| `7c7277a` | `onesimus-daemon`: Accept-Schleife, TLS-PSK-Wahl, Director-Handshake, gRPC-TLS, Bandbreitengrenze; ofd nutzt sie |
-| `8a4b617` | osd: ein `connect_sd` (D12), echtes FileSet im SD-Job-Kommando (D11), `use storage` mit BashSpaces, Modulkommentar richtiggestellt |
-| `48eb9ed` | `bareos-config`: SD-Ressourcen (Storage, Director, Device, Messages, Autochanger) |
-| `46ece8b` | `crates/osd/daemon` (Paket `osd-daemon`, Programm `osd`): `-c -f -d -t -v`, `-t` prüft `bareos-sd.d`, sonst „osd: P1 pending“ (Exit 2); Paketierung `packaging/osd/` |
-| `9a91c53` | CI testet und dokumentiert osd und osd-daemon, README |
+| `dac4237` | `bareos-format`: breg (aus ofd und odir zusammengeführt), Netz-Köpfe der Datensätze (`data_header`, `RecHdr`), `digest_name`; ofd und odir nutzen sie. Macht ofd und odir wieder baubar, nachdem `9ff7efc` die alten breg-Dateien versehentlich mitgelöscht hatte |
+| `15b069a` | neun Inline-Kopien von BashSpaces auf `bareos_format::bash`; D13 am Bareos-Quelltext geprüft |
+| `38339c7` | `onesimus-daemon`: Accept-Schleife, TLS-PSK-Wahl, Director-Handshake, gRPC-TLS, Bandbreitengrenze; ofd nutzt sie |
+| `cec505f` | osd: ein `connect_sd` (D12), echtes FileSet im SD-Job-Kommando (D11), `use storage` mit BashSpaces, Modulkommentar richtiggestellt |
+| `5e3366c` | `bareos-config`: SD-Ressourcen (Storage, Director, Device, Messages, Autochanger) |
+| `be26325` | `crates/osd/daemon` (Paket `osd-daemon`, Programm `osd`): `-c -f -d -t -v`, `-t` prüft `bareos-sd.d`, sonst „osd: P1 pending“ (Exit 2); Paketierung `packaging/osd/` |
+| `793be93` | CI testet und dokumentiert osd und osd-daemon, README |
 
 Prüfung: `cargo test --workspace --exclude onesimus-rig` grün, 1255 Tests bestanden, 0 fehlgeschlagen, 34 ignoriert. `cargo doc --workspace --no-deps` ohne Fehler und ohne Namenskollision `osd` (M9).
 

@@ -337,27 +337,27 @@ Schritt 0a kommt aus dem Fachmann-Bericht („Erst das Gerüst und Tests für `j
 
 ## §6.A Amendment 2026-11-20 — P0 umgesetzt
 
-Nachtrag vom 20.11.2026. Der Text oben bleibt unverändert. Umgesetzt ist Phase P0 des Plans `docs/plans/OSD-GERAETE-UND-VERTEILUNG.md`, also Schritte aus der Reihenfolge in §6, Stand `9a91c53`.
+Nachtrag vom 20.11.2026. Der Text oben bleibt unverändert. Umgesetzt ist Phase P0 des Plans `docs/plans/OSD-GERAETE-UND-VERTEILUNG.md`, also Schritte aus der Reihenfolge in §6, Stand `793be93`.
 
 **Erledigte Schritte:**
 
 | §6-Schritt | Umsetzung | Commit |
 |---|---|---|
-| 1 (Hausmeister, Teil) | Modulkommentar in `crates/osd/src/lib.rs` richtiggestellt (§4). Tote Abhängigkeit `bareos-config` aus osd entfernt. `deny(missing_docs)` in osd | `8a4b617` |
-| 2 | `bareos-format` (am 19.11. angelegt, `b912a92`) um breg, die Netz-Köpfe `data_header`/`RecHdr`, `digest_name` und die letzten BashSpaces-Inlinekopien ergänzt. Die Kopien in ofd und odir sind gelöscht, die Tests liegen jetzt in `bareos-format` | `8f308ed`, `09fc1c0` |
-| 5 (Teil) | Ein `osd::connect::connect_sd`/`connect_sd_on` statt drei Fassungen (`osd/connect.rs`, `osd/status.rs`, `odir/job_worker.rs::connect_sd_on`). Ein Job-Kommando-Formatierer (`bareos_format::sd_job`, seit `b912a92`) mit echtem FileSet | `8a4b617` |
-| 8 (Teil) | `bareos-config` liest `bareos-sd.d`. `onesimus-daemon` hat jetzt Accept-Schleife, PSK-Auflösung, Server-Handshake, gRPC-TLS und Bandbreitengrenze, ofd nutzt sie | `48eb9ed`, `7c7277a` |
-| osd-Neubau (§6, Befund zum osd-Neubau) | `crates/osd/daemon`, Paket `osd-daemon`, Programm `osd`. Bisher nur `-t`. `doc = false` gegen M9, deb-Pfade nach M7/M8, CI mit `-p osd-daemon` gegen M3 | `46ece8b`, `9a91c53` |
+| 1 (Hausmeister, Teil) | Modulkommentar in `crates/osd/src/lib.rs` richtiggestellt (§4). Tote Abhängigkeit `bareos-config` aus osd entfernt. `deny(missing_docs)` in osd | `cec505f` |
+| 2 | `bareos-format` (am 19.11. angelegt, `b912a92`) um breg, die Netz-Köpfe `data_header`/`RecHdr`, `digest_name` und die letzten BashSpaces-Inlinekopien ergänzt. Die Kopien in ofd und odir sind gelöscht, die Tests liegen jetzt in `bareos-format` | `dac4237`, `15b069a` |
+| 5 (Teil) | Ein `osd::connect::connect_sd`/`connect_sd_on` statt drei Fassungen (`osd/connect.rs`, `osd/status.rs`, `odir/job_worker.rs::connect_sd_on`). Ein Job-Kommando-Formatierer (`bareos_format::sd_job`, seit `b912a92`) mit echtem FileSet | `cec505f` |
+| 8 (Teil) | `bareos-config` liest `bareos-sd.d`. `onesimus-daemon` hat jetzt Accept-Schleife, PSK-Auflösung, Server-Handshake, gRPC-TLS und Bandbreitengrenze, ofd nutzt sie | `5e3366c`, `38339c7` |
+| osd-Neubau (§6, Befund zum osd-Neubau) | `crates/osd/daemon`, Paket `osd-daemon`, Programm `osd`. Bisher nur `-t`. `doc = false` gegen M9, deb-Pfade nach M7/M8, CI mit `-p osd-daemon` gegen M3 | `be26325`, `793be93` |
 
 **Defekte:**
 
-- **D11 – behoben.** Am 19.11. (`b912a92`) war der Formatierer zusammengeführt: Client-Name statt Adresse, kein festes `FileSet=LinuxAll`, BashSpaces für `job_name`, `client_name` und `FileSet` wie in `dird/msgchan.cc` `StartStorageDaemonJob`. Seit `8a4b617` trägt `JobParams` außerdem `fileset_name`. Der Restore schickt so das FileSet der Job-Ressource statt `**None**`. `use storage`/`use device` in `osd::job` gehen jetzt ebenfalls durch BashSpaces (`ReserveReadDevice`/`ReserveWriteDevice`). Tests: `osd::job::tests::d11_*`, `use_device_lines_are_bashed_like_msgchan`, `bareos_format::sd_job::tests`.
+- **D11 – behoben.** Am 19.11. (`b912a92`) war der Formatierer zusammengeführt: Client-Name statt Adresse, kein festes `FileSet=LinuxAll`, BashSpaces für `job_name`, `client_name` und `FileSet` wie in `dird/msgchan.cc` `StartStorageDaemonJob`. Seit `cec505f` trägt `JobParams` außerdem `fileset_name`. Der Restore schickt so das FileSet der Job-Ressource statt `**None**`. `use storage`/`use device` in `osd::job` gehen jetzt ebenfalls durch BashSpaces (`ReserveReadDevice`/`ReserveWriteDevice`). Tests: `osd::job::tests::d11_*`, `use_device_lines_are_bashed_like_msgchan`, `bareos_format::sd_job::tests`.
 - **D12 – behoben.** Für den Handshake gilt ein Lese-Timeout von 60 s. Antwortet der SD auf das Hello nicht mit `3000 OK Hello`, ist das ein Fehler (`SD hello: …`), so wie in Bareos `AuthenticateWithStorageDaemon`. Danach läuft der Job-Pfad wie bisher ohne Timeout. Die bisherigen Fehlertexte des Directors bleiben. Tests gegen einen Schein-SD: falsches Hello, stummer SD, falsches Passwort (`osd::connect::tests`).
 - **D13 – am Bareos-Quelltext belegt, Verhalten unverändert.** Geprüft an Bareos `18be77e6` (bareos-25, sparse geklont): `lib/util.cc` `BashSpaces` ersetzt `' '` durch `0x01`. Der Director bashed seinen Namen im Hello an FD und SD (`dird/authenticate.cc` Z. 73), die Konsole ebenso (`lib/bsock.cc` Z. 344). Die Gegenstelle macht `0x01` wieder zu `' '` (`lib/util.cc` Z. 238). Eine `'_'`-Variante gibt es nicht. Damit ist der Verdacht bestätigt: Ein Director-Name mit Leerzeichen geht über `bareos-bnet` als `My_Dir` hinaus und wird abgelehnt. Die zwei Semantiken bleiben als benannte Funktionen bestehen (`bareos_format::bash::bash_spaces` gegen `underscore_spaces`), jede Aufrufstelle behält ihr Verhalten. Die Umstellung des Hello ist für P1 vorgemerkt.
 
 **Nicht in P0 (siehe Plan, Abschnitt „P0 umgesetzt“):** ofd- und Plugin-Verschiebung (Schritte 6 und 7), `fd_grpc` aus bareos-bnet (Schritt 3), die ofd-Schnittstelle (Schritt 4), FD→SD-Client `R_JOB`, Jobtabelle und gRPC-Dienst von ofd in `onesimus-daemon`.
 
-**Nebenbefund:** Commit `5cab9c8` („chore(proto): Submodul auf 3302131“) enthält außer dem Submodul die Löschung von `crates/odir/src/breg.rs` und `crates/ofd/src/breg.rs`. Ein abgebrochener Agent hatte sie vorgemerkt. Bis `8f308ed` bauten odir und ofd auf `development` deshalb nicht.
+~~**Nebenbefund:** Commit „chore(proto): Submodul auf 3302131“ enthielt außer dem Submodul die Löschung von `crates/odir/src/breg.rs` und `crates/ofd/src/breg.rs` (von einem abgebrochenen Agenten vorgemerkt), dazwischen bauten odir und ofd nicht.~~ Behoben vor dem Push (20.11.2026): die Löschungen liegen jetzt in `dac4237`, `9ff7efc` enthält nur das Submodul; jeder Commit baut.
 
 ---
 
