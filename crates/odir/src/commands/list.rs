@@ -983,6 +983,32 @@ fn list_jobs(args: &Args, ctx: &ExecContext, cat: &CatalogHandle, ty: ListType, 
     }
 
     let range = query_range(args, out);
+    // Onesimus deviation (G-2): bareos-dir counts every job, also those the
+    // console's Job/Client ACL hides. With restrictions, count only the
+    // jobs `list jobs` would show (same tri-state ACL filter).
+    if opts.count && out.ctx.is_some_and(|ctx| crate::acl::has_restrictions(ctx, Kind::Job)
+        || crate::acl::has_restrictions(ctx, Kind::Client)) {
+        let sql = format!("SELECT DISTINCT Job.JobId, Job.Name, Client.Name AS ClientName
+FROM Job
+LEFT JOIN Client ON Client.ClientId=Job.ClientId
+LEFT JOIN JobMedia ON JobMedia.JobId=Job.JobId
+LEFT JOIN Media ON JobMedia.MediaId=Media.MediaId
+LEFT JOIN FileSet ON FileSet.FileSetId=Job.FileSetId
+WHERE Job.JobId > 0
+{selection};
+");
+        let Some(rows) = query(cat, &sql, out) else { return false };
+        let mut acl = ListOut { ctx: out.ctx, ..Default::default() };
+        acl.acl(1, Kind::Job);
+        acl.acl(2, Kind::Client);
+        let count = acl.shown(&rows).into_iter().filter(|shown| *shown).count();
+        let t = SqlTable {
+            columns: vec![crate::catalog_worker::SqlColumn { name: "count".into(), numeric: true }],
+            rows: vec![vec![Some(count.to_string())]],
+        };
+        out.array("jobs", &t, ty);
+        return true;
+    }
     let sql = if opts.count {
         format!("SELECT DISTINCT COUNT(DISTINCT Job.JobId) as count
 FROM Job
@@ -1695,6 +1721,38 @@ mod tests {
         out.filters.push(Filter::Acl(1, Kind::Client));
         t.rows.truncate(3);
         assert_eq!(out.shown(&t), vec![true, false, true]);
+    }
+
+    /// G-2 (Onesimus deviation): `list jobs count` counts only the jobs the
+    /// console's Job/Client ACL lets `list jobs` show.
+    #[test]
+    fn job_count_follows_the_console_acl() {
+        use crate::catalog_worker::{CatalogRequest, CatalogResponse, SqlColumn};
+        use crate::command_ast::{Argument, CommandAst};
+        let mut ctx = crate::acl::tests::context(); // JobACL = !blocked, *all*
+        let seen = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+        let log = seen.clone();
+        let cat = CatalogHandle::mock(move |request| {
+            let (CatalogRequest::TextRows { sql } | CatalogRequest::RawQuery { sql }) = request else {
+                return CatalogResponse::Error("unexpected".into());
+            };
+            log.lock().unwrap().push(sql);
+            let s = |v: &str| Some(v.to_string());
+            let column = |name: &str| SqlColumn { name: name.into(), numeric: false };
+            CatalogResponse::Rows(SqlTable { columns: vec![column("jobid"), column("name"), column("clientname")], rows: vec![
+                vec![s("1"), s("ok"), s("c")], vec![s("2"), s("blocked"), s("c")], vec![s("3"), s("other"), s("c")],
+            ] })
+        });
+        ctx.catalog = Some(cat.clone());
+        let ast = CommandAst { command_name: "list".into(), arguments: vec![
+            Argument { key: "jobs".into(), value: None }, Argument { key: "count".into(), value: None }], ..Default::default() };
+        let opts = ListOptions { count: true, ..Default::default() };
+        let mut out = ListOut { ctx: Some(&ctx), ..Default::default() };
+        assert!(list_jobs(&Args(&ast), &ctx, &cat, ListType::Horz, &opts, &mut out));
+        let sql = seen.lock().unwrap().join("\n");
+        assert!(sql.contains("SELECT DISTINCT Job.JobId, Job.Name, Client.Name") && !sql.contains("COUNT("), "{sql}");
+        let json = serde_json::to_string(&out.json).unwrap();
+        assert!(json.contains("\"count\":2") || json.contains("\"count\":\"2\""), "blocked job not counted: {json}");
     }
 
     #[test]
