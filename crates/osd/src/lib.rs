@@ -6,7 +6,9 @@
 //! alle Wege), das Job-Kommando, `use storage`/`use device` und der
 //! Bootstrap ([`job`]), einzelne Befehle wie `status`, `setdebug`,
 //! `.status` ([`command`], [`status`]) und die Weiterleitung der
-//! Katalog-Anfragen ([`catrec`]). Das Crate ist eine Bibliothek, kein
+//! Katalog-Anfragen ([`catrec`]) sowie die Nachrichten, die der SD selbst
+//! im Job an den Director schickt ([`askdir`]: CatReq, UpdCat, Jmsg,
+//! Status; seit P1 genutzt vom Daemon `osd`). Das Crate ist eine Bibliothek, kein
 //! Daemon; der Daemon selbst ist das Paket `osd-daemon`
 //! (`crates/osd/daemon`, Programm `osd`).
 //!
@@ -34,6 +36,7 @@
 
 #![deny(missing_docs)]
 
+pub mod askdir;
 pub mod connect;
 pub mod command;
 pub mod job;
