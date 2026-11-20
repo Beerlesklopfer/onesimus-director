@@ -77,6 +77,9 @@ pub struct JobParams {
     pub fd_password: String,
     #[serde(default)]
     pub fd_grpc: Option<crate::fd_grpc::Target>,
+    /// gRPC endpoint of the Storage (osd), snapshotted before fork.
+    #[serde(default)]
+    pub sd_grpc: Option<crate::fd_grpc::Target>,
     pub sd_address: String,
     pub sd_port: u16,
     pub sd_password: String,
@@ -455,7 +458,7 @@ pub fn run_worker(
     let job_id = params.job_id;
 
     let mut fd: Option<BnetStream<bareos_bnet::AnyStream>> = None;
-    let mut sd: Option<BnetStream<tls_psk::PskStream>> = None;
+    let mut sd: Option<BnetStream<bareos_bnet::AnyStream>> = None;
     let mut sd_auth_key = String::new();
     let mut vol_session_id: i32 = 0;
     let mut vol_session_time: i32 = 0;
@@ -617,7 +620,9 @@ pub fn run_worker(
             WorkerState::FDStorage if params.job_type == WorkerJobType::Restore && params.passive_client => {
                 // Client Passive = yes: the SD connects to the FD, so the FD
                 // gets no "storage" command (restore.cc, passive client).
-                let cmd = format!("passive client address={} port={} ssl=4\n", params.fd_address, params.fd_port);
+                let grpc = crate::sd_grpc::tokens(params.fd_grpc.as_ref(), &params.fd_address,
+                    sd.as_ref().is_some_and(crate::sd_grpc::on_grpc), fd.as_ref().is_some_and(crate::sd_grpc::on_grpc));
+                let cmd = format!("passive client address={} port={} ssl=4{grpc}\n", params.fd_address, params.fd_port);
                 match send_expect(sd.as_mut().unwrap(), &cmd, "2000 OK passive client", job_id, "SD passive client") {
                     Ok(_) => match sd.as_mut().unwrap().send_str("run\n") {
                         Ok(_) => WorkerState::FDRestore,
@@ -629,11 +634,13 @@ pub fn run_worker(
 
             WorkerState::FDStorage => {
                 // Restore: storage command includes Authorization (FD uses it to auth to SD)
+                let grpc = crate::sd_grpc::tokens(params.sd_grpc.as_ref(), &params.sd_address,
+                    sd.as_ref().is_some_and(crate::sd_grpc::on_grpc), fd.as_ref().is_some_and(crate::sd_grpc::on_grpc));
                 let cmd = if params.job_type == WorkerJobType::Restore {
-                    format!("storage address={} port={} ssl=4 Authorization={}\n",
+                    format!("storage address={} port={} ssl=4 Authorization={}{grpc}\n",
                         params.sd_address, params.sd_port, sd_auth_key)
                 } else {
-                    format!("storage address={} port={} ssl=4\n",
+                    format!("storage address={} port={} ssl=4{grpc}\n",
                         params.sd_address, params.sd_port)
                 };
                 match send_expect(fd.as_mut().unwrap(), &cmd, "2000 OK storage", job_id, "FD storage") {
@@ -770,7 +777,7 @@ pub fn run_worker(
 /// Returns (files, bytes, errors, term_code) from FD "2800 End Job".
 fn run_backup_phase(
     mut fd: BnetStream<bareos_bnet::AnyStream>,
-    mut sd: BnetStream<tls_psk::PskStream>,
+    mut sd: BnetStream<bareos_bnet::AnyStream>,
     job_id: u32,
     pipes: &mut WorkerPipes,
 ) -> Result<(i64, i64, i32, i32), String> {
@@ -802,13 +809,13 @@ fn run_backup_phase(
 
 use osd::job::{SdSession, SdJobParams, SdJobType};
 
-fn sd_job_setup(sd: &mut BnetStream<tls_psk::PskStream>, p: &JobParams) -> Result<SdSession, String> {
+fn sd_job_setup(sd: &mut BnetStream<bareos_bnet::AnyStream>, p: &JobParams) -> Result<SdSession, String> {
     osd::job::sd_job_setup(sd, &to_sd_params(p))
 }
 
 /// The device the Storage daemon accepted (OK_device "3000 OK use device
 /// device=%s", unbashed); its job messages are forwarded.
-fn sd_use_device(sd: &mut BnetStream<tls_psk::PskStream>, p: &JobParams) -> Result<String, String> {
+fn sd_use_device(sd: &mut BnetStream<bareos_bnet::AnyStream>, p: &JobParams) -> Result<String, String> {
     let (answer, jmsgs) = osd::job::sd_use_device(sd, &to_sd_params(p))?;
     for line in &jmsgs {
         forward_daemon_jmsg(p.job_id, line);
@@ -886,7 +893,7 @@ fn storage_wait_state(message: &str) -> Result<Option<&'static str>, &'static st
 }
 
 pub(crate) fn sd_catrec_loop(
-    sd: &mut BnetStream<tls_psk::PskStream>,
+    sd: &mut BnetStream<bareos_bnet::AnyStream>,
     job_id: u32,
     _to_dir: &mut std::fs::File,
     from_dir: &mut std::fs::File,
@@ -1162,7 +1169,11 @@ pub(crate) fn connect_fd_on(p: &JobParams, sock: std::net::TcpStream) -> Result<
     Ok((bnet, cipher))
 }
 
-pub(crate) fn connect_sd(p: &JobParams) -> Result<(BnetStream<tls_psk::PskStream>, String), String> {
+pub(crate) fn connect_sd(p: &JobParams) -> Result<(BnetStream<bareos_bnet::AnyStream>, String), String> {
+    // osd: gRPC first (Storage Grpc Enable = yes), BNET on any failure.
+    if let Some(sd) = crate::sd_grpc::try_connect(p.sd_grpc.as_ref(), &p.sd_address, p.sd_port, &p.sd_password, &p.director_name, None) {
+        return Ok((sd, onesimus_bnet_grpc::TRANSPORT.to_string()));
+    }
     let sock = resolve_connect(&format!("{}:{}", p.sd_address, p.sd_port), 3)?;
     connect_sd_on(p, sock)
 }
@@ -1171,7 +1182,7 @@ pub(crate) fn connect_sd(p: &JobParams) -> Result<(BnetStream<tls_psk::PskStream
 /// connected socket (`osd::connect::connect_sd_on`): a read timeout during
 /// the handshake, none afterwards, because a job may wait on the SD for as
 /// long as a mount takes.
-pub(crate) fn connect_sd_on(p: &JobParams, sock: std::net::TcpStream) -> Result<(BnetStream<tls_psk::PskStream>, String), String> {
+pub(crate) fn connect_sd_on(p: &JobParams, sock: std::net::TcpStream) -> Result<(BnetStream<bareos_bnet::AnyStream>, String), String> {
     osd::connect::connect_sd_on(sock, &p.sd_password, &p.director_name, None).map_err(|e| e.to_string())
 }
 
@@ -1458,7 +1469,7 @@ mod wait_protocol_tests {
     fn restore_command_like_build_restore_command() {
         let mut p = JobParams {
             job_id: 1, unique_job: "R.1".into(), job_name: "R".into(), job_type: WorkerJobType::Restore,
-            level: "full".into(), fd_address: String::new(), fd_port: 0, fd_password: String::new(), fd_grpc: None,
+            level: "full".into(), fd_address: String::new(), fd_port: 0, fd_password: String::new(), fd_grpc: None, sd_grpc: None,
             sd_address: String::new(), sd_port: 0, sd_password: String::new(), sd_device: String::new(),
             sd_media_type: String::new(), director_name: String::new(), pool_name: String::new(),
             fileset_name: String::new(), fileset_includes: vec![], fileset_excludes: vec![], since_utime: 0, prev_job: String::new(),

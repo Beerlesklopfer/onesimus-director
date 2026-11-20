@@ -18,7 +18,7 @@ use std::collections::HashMap;
 use std::sync::Mutex;
 
 use bareos_bnet::{BnetMessage, BnetSignal, BnetStream};
-use bareos_bnet::tls_psk::PskStream;
+use bareos_bnet::AnyStream;
 use serde::{Deserialize, Serialize};
 
 use crate::catalog_worker::CatalogHandle;
@@ -322,6 +322,7 @@ pub(crate) fn run_verify(
     };
     let director = config.director.name.clone();
     let fd_grpc = crate::fd_grpc::for_client(&config, &client);
+    let sd_grpc = storage.as_ref().and_then(|s| crate::sd_grpc::for_storage(&config, s));
     drop(config);
 
     let Some(cat) = ctx.catalog.clone() else {
@@ -408,6 +409,7 @@ pub(crate) fn run_verify(
         && crate::job_messages::first_client_connection(&client.name);
     params.pool_name = pool;
     if let Some(store) = &storage {
+        params.sd_grpc = sd_grpc;
         params.sd_address = store.address.clone();
         params.sd_port = store.port;
         params.sd_password = store.password.clone();
@@ -812,7 +814,7 @@ fn info(job_id: u32, text: String) {
     crate::job_worker::worker_jmsg(job_id, 6, text);
 }
 
-type Bnet = BnetStream<PskStream>;
+type Bnet = BnetStream<AnyStream>;
 
 /// BgetDirmsg(): the next message that is not a job message; None at a
 /// signal, Err at a socket error.
@@ -936,10 +938,12 @@ pub(crate) fn run_worker(p: &JobParams, pipes: &mut WorkerPipes) -> i32 {
     // VolumeToCatalog: the Storage daemon first.
     let mut sd_thread = None;
     let (mut sdid, mut sdtime, mut auth_key) = (0, 0, "dummy".to_string());
+    let mut sd_on_grpc = false;
     if level == L_VERIFY_VOLUME_TO_CATALOG {
         state(pipes, "ConnectingSD");
         let mut sd = match crate::job_worker::connect_sd(p) {
             Ok((sd, cipher)) => {
+                sd_on_grpc = crate::sd_grpc::on_grpc(&sd);
                 info(job_id, crate::job_messages::connected_text("Storage daemon", &p.sd_address, p.sd_port, Some(&cipher)));
                 info(job_id, crate::job_messages::cipher_text(Some(&cipher)));
                 sd
@@ -1004,7 +1008,8 @@ pub(crate) fn run_worker(p: &JobParams, pipes: &mut WorkerPipes) -> i32 {
         }
     }
     if level == L_VERIFY_VOLUME_TO_CATALOG {
-        let _ = fd.send_str(&format!("storage address={} port={} ssl=4 Authorization={auth_key}\n", p.sd_address, p.sd_port));
+        let grpc = crate::sd_grpc::tokens(p.sd_grpc.as_ref(), &p.sd_address, sd_on_grpc, crate::sd_grpc::on_grpc(&fd));
+        let _ = fd.send_str(&format!("storage address={} port={} ssl=4 Authorization={auth_key}{grpc}\n", p.sd_address, p.sd_port));
         if let Err(e) = response(&mut fd, job_id, "2000 OK storage", "Storage") {
             return bail(pipes, &mut fd, e);
         }

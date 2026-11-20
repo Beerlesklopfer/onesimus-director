@@ -345,6 +345,8 @@ pub fn start_worker(config: &DirectorConfig, catalog: &CatalogHandle, req: &Work
             devices: s.device.split(',').map(|d| d.trim().to_string()).filter(|d| !d.is_empty()).collect(),
             pool: pool.to_string(),
             pool_type: config.find_pool(pool).map(|p| p.pool_type.clone()).unwrap_or_else(|| "Backup".into()),
+            // SD-to-SD copy/migration is BNET only (osd: open after P1).
+            grpc: None,
         })
     };
     let (Some(read), Some(write)) = (store(&read_store, &read_pool), store(&write_store, &next_pool)) else {
@@ -425,7 +427,7 @@ pub fn start_worker(config: &DirectorConfig, catalog: &CatalogHandle, req: &Work
     let params = crate::job_worker::JobParams {
         job_id, unique_job: unique.clone(), job_name: job.name.clone(),
         job_type: crate::job_worker::WorkerJobType::Backup, level: level_name(job_level).to_ascii_lowercase(),
-        fd_address: String::new(), fd_port: 0, fd_password: String::new(), fd_grpc: None,
+        fd_address: String::new(), fd_port: 0, fd_password: String::new(), fd_grpc: None, sd_grpc: None,
         sd_address: write.address.clone(), sd_port: write.port, sd_password: write.password.clone(),
         sd_device: write.devices.first().cloned().unwrap_or_default(), sd_media_type: write.media_type.clone(),
         director_name: config.director.name.clone(), pool_name: next_pool.clone(),

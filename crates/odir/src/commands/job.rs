@@ -1781,6 +1781,7 @@ fn run_selected(
         devices: storage.device.split(',').map(|d| d.trim().to_string()).filter(|d| !d.is_empty()).collect(),
         pool: pool.to_string(),
         pool_type: config.find_pool(pool).map(|p| p.pool_type.clone()).unwrap_or_else(|| "Backup".into()),
+        grpc: crate::sd_grpc::for_storage(&config, storage),
     };
     let client_dirs: Vec<bareos_config::raw::Directive> = crate::commands::defaults::raw(&config, "client", &client.name)
         .map(|r| r.directives.clone()).unwrap_or_default();
@@ -1855,6 +1856,7 @@ fn run_selected(
         fd_port: client.port,
         fd_password: client.password.clone(),
         fd_grpc: crate::fd_grpc::for_client(&config, client),
+        sd_grpc: crate::sd_grpc::for_storage(&config, storage),
         sd_address: storage.address.clone(),
         sd_port: storage.port,
         sd_password: storage.password.clone(),
@@ -1985,7 +1987,7 @@ pub(crate) fn plain_params(job_id: u32, unique: &str, job: &bareos_config::resou
                 level: &str, director: &str, client: &str) -> JobParams {
     JobParams {
         job_id, unique_job: unique.to_string(), job_name: job.name.clone(), job_type, level: level.to_string(),
-        fd_address: String::new(), fd_port: 0, fd_password: String::new(), fd_grpc: None, sd_address: String::new(), sd_port: 0,
+        fd_address: String::new(), fd_port: 0, fd_password: String::new(), fd_grpc: None, sd_grpc: None, sd_address: String::new(), sd_port: 0,
         sd_password: String::new(), sd_device: String::new(), sd_media_type: String::new(),
         director_name: director.to_string(), pool_name: String::new(), fileset_name: job.fileset.clone(), fileset_includes: Vec::new(),
         fileset_excludes: Vec::new(), since_utime: 0, prev_job: String::new(), where_path: None, regex_where: None, prefix_links: false, replace: None,

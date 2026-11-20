@@ -30,6 +30,7 @@ mod expand;
 mod director_config;
 mod fd_protocol;
 mod fd_grpc;
+mod sd_grpc;
 mod fd_progress;
 mod fsm;
 mod grammar_table;
@@ -390,6 +391,7 @@ fn main() {
     }
 
     fd_grpc::configure(&config);
+    sd_grpc::configure(&config);
 
     // Daemonize wenn NICHT -f/--foreground — before any thread exists (fork keeps
     // only the calling thread) and before privileges are dropped (PID file).

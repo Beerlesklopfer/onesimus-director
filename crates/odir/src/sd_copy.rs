@@ -20,6 +20,9 @@ pub struct StorageUse {
     /// Pool name and Pool Type (read: rpool, write: pool).
     pub pool: String,
     pub pool_type: String,
+    /// gRPC endpoint of the Storage (osd); `None`: BNET only.
+    #[serde(default)]
+    pub grpc: Option<crate::fd_grpc::Target>,
 }
 
 /// What the worker needs for the SD session (JobParams.copy).
@@ -77,7 +80,7 @@ use std::sync::Mutex;
 use std::sync::atomic::Ordering;
 
 use bareos_bnet::{BnetMessage, BnetSignal, BnetStream};
-use bareos_bnet::tls_psk::PskStream;
+use bareos_bnet::AnyStream;
 use tracing::{debug, warn};
 
 use crate::job_worker::{self, JobParams, PipeMessage, WorkerPipes, M_FATAL, M_INFO};
@@ -153,7 +156,7 @@ pub fn use_storage_commands(store: &StorageUse, append: bool) -> Vec<String> {
 }
 
 /// A reply of the SD; its job messages are forwarded for JCR `job_id` (BgetDirmsg).
-fn dir_msg(sd: &mut BnetStream<PskStream>, job_id: u32) -> Result<String, String> {
+fn dir_msg(sd: &mut BnetStream<AnyStream>, job_id: u32) -> Result<String, String> {
     loop {
         match sd.recv() {
             Ok(BnetMessage::Data(data)) => {
@@ -208,11 +211,12 @@ impl<'a> Pipe<'a> {
 
 /// ConnectToStorageDaemon() to one Storage: its "Connected Storage daemon"
 /// and cipher messages go to JCR `msg_job`.
-fn connect(params: &JobParams, store: &StorageUse, msg_job: u32) -> Result<BnetStream<PskStream>, String> {
+fn connect(params: &JobParams, store: &StorageUse, msg_job: u32) -> Result<BnetStream<AnyStream>, String> {
     let mut target = params.clone();
     target.sd_address = store.address.clone();
     target.sd_port = store.port;
     target.sd_password = store.password.clone();
+    target.sd_grpc = store.grpc.clone();
     target.copy = None;
     let (sd, cipher) = job_worker::connect_sd(&target)?;
     job_worker::worker_jmsg(msg_job, M_INFO,
@@ -351,7 +355,7 @@ pub fn run(params: &JobParams, copy: &CopySession, pipes: &mut WorkerPipes) -> i
 
 /// StartStorageDaemonJob(jcr, send_bsr): (VolSessionId, VolSessionTime) and
 /// the authorization key.
-fn start_job(sd: &mut BnetStream<PskStream>, job_id: u32, command: &str, bootstrap: Option<&str>)
+fn start_job(sd: &mut BnetStream<AnyStream>, job_id: u32, command: &str, bootstrap: Option<&str>)
     -> Result<((i32, i32), String), String> {
     sd.send_str(command).map_err(|e| format!("<stored: bad response to Job command: {e}\n"))?;
     let reply = dir_msg(sd, job_id).map_err(|e| format!("<stored: bad response to Job command: {e}\n"))?;
@@ -380,7 +384,7 @@ fn start_job(sd: &mut BnetStream<PskStream>, job_id: u32, command: &str, bootstr
 
 /// ReserveReadDevice / ReserveWriteDevice: "Using Device ... to read/write."
 /// for JCR `job_id`.
-fn reserve(sd: &mut BnetStream<PskStream>, job_id: u32, store: &StorageUse, append: bool) -> Result<(), String> {
+fn reserve(sd: &mut BnetStream<AnyStream>, job_id: u32, store: &StorageUse, append: bool) -> Result<(), String> {
     for line in use_storage_commands(store, append) {
         sd.send_str(&line).map_err(|e| e.to_string())?;
     }
@@ -403,7 +407,7 @@ fn reserve(sd: &mut BnetStream<PskStream>, job_id: u32, store: &StorageUse, appe
 /// msgchan.cc msg_thread() of JCR `jcr` (the worker job or mig_jcr): catalog
 /// requests and job messages until the SD reports the job end. Only the
 /// worker job's own SD status reaches its JobStatus (`own_status`).
-fn message_thread(sd: &mut BnetStream<PskStream>, job_id: u32, jcr: u32, pipe: &Pipe, own_status: bool) -> Option<SdEnd> {
+fn message_thread(sd: &mut BnetStream<AnyStream>, job_id: u32, jcr: u32, pipe: &Pipe, own_status: bool) -> Option<SdEnd> {
     loop {
         match sd.recv() {
             Ok(BnetMessage::Data(data)) => {

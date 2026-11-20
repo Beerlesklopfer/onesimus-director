@@ -7,7 +7,7 @@
 use std::io::{BufRead, BufReader, Write};
 
 use bareos_bnet::{BnetStream, BnetMessage, BnetSignal};
-use bareos_bnet::tls_psk::PskStream;
+use bareos_bnet::AnyStream;
 use tracing::{debug, warn, error};
 
 use serde::{Serialize, Deserialize};
@@ -39,7 +39,7 @@ pub enum CatReqMessage {
 ///
 /// Terminates on: SD disconnect, "3099 Job end", or pipe EOF.
 pub fn sd_catrec_loop(
-    sd: &mut BnetStream<PskStream>,
+    sd: &mut BnetStream<AnyStream>,
     job_id: u32,
     to_dir: &mut dyn Write,
     from_dir: &mut dyn std::io::Read,

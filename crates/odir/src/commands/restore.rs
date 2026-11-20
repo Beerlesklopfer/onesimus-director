@@ -1835,6 +1835,7 @@ pub(crate) fn start_restore(ctx: &ExecContext, launch: Launch) -> CommandResult 
 
     let dir_name = config.director.name.clone();
     let fd_grpc = crate::fd_grpc::for_client(&config, &client);
+    let sd_grpc = crate::sd_grpc::for_storage(&config, &storage);
     // Client Passive = yes: the SD connects to the FD (restore.cc, passive client).
     let passive_client = crate::commands::defaults::bool_directive(
         &crate::commands::defaults::raw(&config, "client", &client.name)
@@ -1865,6 +1866,7 @@ pub(crate) fn start_restore(ctx: &ExecContext, launch: Launch) -> CommandResult 
         fd_port: client.port,
         fd_password: client.password.clone(),
         fd_grpc,
+        sd_grpc,
         sd_address: storage.address.clone(),
         sd_port: storage.port,
         sd_password: storage.password.clone(),

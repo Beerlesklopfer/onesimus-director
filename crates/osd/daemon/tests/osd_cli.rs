@@ -87,7 +87,7 @@ fn free_port() -> u16 {
 }
 
 /// Sends `cmd` and collects the answer up to EOD.
-fn ask(sd: &mut bareos_bnet::BnetStream<bareos_bnet::tls_psk::PskStream>, cmd: &str) -> String {
+fn ask<S: std::io::Read + std::io::Write>(sd: &mut bareos_bnet::BnetStream<S>, cmd: &str) -> String {
     sd.send_str(cmd).unwrap();
     let mut out = String::new();
     loop {
@@ -140,6 +140,66 @@ fn daemon_answers_a_director_and_labels_a_volume() {
     let unknown = ask(&mut sd, "frobnicate");
     assert_eq!(unknown, "3900 Invalid command: frobnicate\n");
     // SIGTERM ends the daemon with 0
+    unsafe { libc::kill(child.id() as i32, libc::SIGTERM) };
+    assert_eq!(child.wait().unwrap().code(), Some(0));
+    std::fs::remove_dir_all(&dir).ok();
+}
+
+/// The Director's side of gRPC (`onesimus.stored.StorageDaemon`): Control
+/// carries the same session as the SD port, Data takes only the FD of a
+/// job, a wrong certificate is refused, `--disable-grpc` closes the port.
+#[test]
+fn daemon_answers_a_director_over_grpc() {
+    let dir = scratch("grpc");
+    let tree = shipped_config(&dir);
+    let (port, grpc_port) = (free_port(), free_port());
+    let conf = std::fs::read_to_string(tree.join("storage/bareos-sd.conf")).unwrap()
+        .replace("# SD Port = 9103", &format!("SD Port = {port}\n  SD Address = 127.0.0.1"))
+        .replace("Working Directory = /var/lib/bareos", &format!("Working Directory = {}", dir.display()));
+    std::fs::write(tree.join("storage/bareos-sd.conf"), conf).unwrap();
+    // D-8: the gRPC port is an osd.d extension of the same-named Storage.
+    std::fs::create_dir_all(dir.join("osd.d/storage")).unwrap();
+    std::fs::write(dir.join("osd.d/storage/test-sd.conf"), format!("Storage {{\n  Name = test-sd\n  Grpc Port = {grpc_port}\n}}\n")).unwrap();
+    let mut child = Command::new(env!("CARGO_BIN_EXE_osd")).args(["-f", "-c", dir.to_str().unwrap()]).spawn().unwrap();
+    let cert = dir.join("onesimus-sd-grpc.crt");
+    let target = |ca: Vec<u8>| onesimus_bnet_grpc::Target { host: "127.0.0.1".into(), port: grpc_port, ca, server_name: "localhost".into() };
+    let mut io = None;
+    for _ in 0..100 {
+        if let Ok(ca) = std::fs::read(&cert)
+            && let Ok(s) = onesimus_bnet_grpc::client::connect(&target(ca), onesimus_bnet_grpc::Rpc::StorageDaemonControl, Some(std::time::Duration::from_secs(10)))
+        {
+            io = Some(s);
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(100));
+    }
+    let mut sd = bareos_bnet::BnetStream::new(io.expect("osd answers on its gRPC port"));
+    osd::connect::handshake(&mut sd, "secret", "bareos-dir").unwrap();
+    let header = ask(&mut sd, ".status header");
+    assert!(header.starts_with("test-sd Version: "), "{header}");
+    drop(sd);
+    // Data takes only "Hello Start Job"; a Director is turned away.
+    let ca = std::fs::read(&cert).unwrap();
+    let io = onesimus_bnet_grpc::client::connect(&target(ca.clone()), onesimus_bnet_grpc::Rpc::StorageDaemonData, Some(std::time::Duration::from_secs(10))).unwrap();
+    let mut data = bareos_bnet::BnetStream::new(io);
+    assert!(osd::connect::handshake(&mut data, "secret", "bareos-dir").is_err());
+    // Another certificate is not trusted (pinning).
+    let other = rcgen::generate_simple_self_signed(vec!["localhost".into()]).unwrap().cert.pem().into_bytes();
+    assert!(onesimus_bnet_grpc::client::connect(&target(other), onesimus_bnet_grpc::Rpc::StorageDaemonControl, None).is_err());
+    unsafe { libc::kill(child.id() as i32, libc::SIGTERM) };
+    assert_eq!(child.wait().unwrap().code(), Some(0));
+
+    let mut child = Command::new(env!("CARGO_BIN_EXE_osd")).args(["-f", "--disable-grpc", "-c", dir.to_str().unwrap()]).spawn().unwrap();
+    let mut bnet = None;
+    for _ in 0..100 {
+        if let Ok(s) = osd::connect::connect_sd("127.0.0.1", port, "secret", "bareos-dir") {
+            bnet = Some(s);
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(100));
+    }
+    assert!(bnet.is_some(), "BNET stays with --disable-grpc");
+    assert!(onesimus_bnet_grpc::client::connect(&target(ca), onesimus_bnet_grpc::Rpc::StorageDaemonControl, None).is_err());
     unsafe { libc::kill(child.id() as i32, libc::SIGTERM) };
     assert_eq!(child.wait().unwrap().code(), Some(0));
     std::fs::remove_dir_all(&dir).ok();

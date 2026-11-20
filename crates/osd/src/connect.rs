@@ -15,6 +15,14 @@
 //! 4. Der SD antwortet `3000 OK Hello`; jede andere Antwort ist eine
 //!    Ablehnung ([`SdConnectError::Rejected`]).
 //!
+//! Über gRPC (`onesimus.stored.StorageDaemon/Control`, osd) entfällt
+//! Schritt 1, weil der Strom schon TLS ist; 2–4 laufen unverändert im
+//! Strom ([`handshake`]). Den gRPC-Strom baut der Director selbst auf (er
+//! kennt CA und Port aus seiner Storage-Ressource) und meldet ihn mit
+//! [`set_grpc_dialer`] an; [`connect_sd`] fragt ihn zuerst und nimmt BNET,
+//! wenn er keinen Strom liefert. So laufen `status storage`, `label`,
+//! `setdebug` und alle anderen Befehlswege ohne eigene Änderung über gRPC.
+//!
 //! Während des Handshakes gilt ein Lese-Timeout ([`HANDSHAKE_TIMEOUT`]).
 //! Danach setzt der Aufrufer den Timeout, den er braucht (Befehle: 60 s;
 //! Jobs: keiner, weil ein SD auf Mount-Anforderungen beliebig lange warten
@@ -27,14 +35,35 @@
 //! ablehnt, fiel erst beim nächsten Befehl auf, ein stummer SD hielt den Job
 //! für immer fest.
 
+use std::io::{Read, Write};
 use std::net::TcpStream;
+use std::sync::OnceLock;
 use std::time::Duration;
 
 use tracing::debug;
 
 use bareos_bnet::hello::{SD_OK_HELLO, make_director_hello};
-use bareos_bnet::tls_psk::{self as psk, PskStream};
-use bareos_bnet::{BnetStream, CramMd5Auth};
+use bareos_bnet::tls_psk as psk;
+use bareos_bnet::{AnyStream, BnetStream, CramMd5Auth};
+
+/// An authenticated connection to a Storage Daemon, over BNET (TLS-PSK) or
+/// gRPC (`AnyStream::External`).
+pub type SdStream = BnetStream<AnyStream>;
+
+/// Opens an authenticated gRPC connection to the SD at `address:port` for
+/// `director` with `password`, with [`COMMAND_TIMEOUT`] as read limit;
+/// `None` when the SD has no gRPC target or gRPC failed (the dialer logs
+/// why), so [`connect_sd`] takes BNET.
+pub type GrpcDialer = fn(address: &str, port: u16, password: &str, director: &str) -> Option<SdStream>;
+
+/// The Director's gRPC dialer ([`set_grpc_dialer`]).
+static GRPC_DIALER: OnceLock<GrpcDialer> = OnceLock::new();
+
+/// Registers the gRPC dialer [`connect_sd`] tries first (odir at start).
+/// Only the first call counts.
+pub fn set_grpc_dialer(dialer: GrpcDialer) {
+    let _ = GRPC_DIALER.set(dialer);
+}
 
 /// Read timeout while the handshake runs (TLS-PSK, CRAM-MD5, OK-Hello).
 pub const HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(60);
@@ -80,6 +109,22 @@ impl std::fmt::Display for SdConnectError {
 
 impl std::error::Error for SdConnectError {}
 
+/// Steps 2–4 of the handshake (Hello, CRAM-MD5 both ways, OK-Hello) on an
+/// already secured stream: the TLS-PSK socket or a gRPC stream.
+pub fn handshake<S: Read + Write>(bnet: &mut BnetStream<S>, password: &str, director_name: &str) -> Result<(), SdConnectError> {
+    bnet.send_str(&make_director_hello(director_name)).map_err(|e| SdConnectError::Hello(e.to_string()))?;
+    let auth = CramMd5Auth::new(password, director_name, 2);
+    let r = auth.two_way_authenticate(bnet, false).map_err(|e| SdConnectError::Cram(e.to_string()))?;
+    if !r.success {
+        return Err(SdConnectError::CramFailed);
+    }
+    let resp = bnet.recv_str().map_err(|e| SdConnectError::HelloResponse(e.to_string()))?;
+    if !resp.starts_with(SD_OK_HELLO) {
+        return Err(SdConnectError::Rejected(resp));
+    }
+    Ok(())
+}
+
 /// The handshake on a connected socket. [`HANDSHAKE_TIMEOUT`] applies
 /// while it runs, `read_timeout_after` once it succeeded (`None`: block).
 /// Returns the authenticated connection and the TLS cipher name.
@@ -88,7 +133,7 @@ pub fn connect_sd_on(
     password: &str,
     director_name: &str,
     read_timeout_after: Option<Duration>,
-) -> Result<(BnetStream<PskStream>, String), SdConnectError> {
+) -> Result<(SdStream, String), SdConnectError> {
     connect_sd_on_with(sock, password, director_name, HANDSHAKE_TIMEOUT, read_timeout_after)
 }
 
@@ -99,7 +144,7 @@ pub fn connect_sd_on_with(
     director_name: &str,
     handshake_timeout: Duration,
     read_timeout_after: Option<Duration>,
-) -> Result<(BnetStream<PskStream>, String), SdConnectError> {
+) -> Result<(SdStream, String), SdConnectError> {
     sock.set_read_timeout(Some(handshake_timeout)).ok();
     let tcp = sock.try_clone().ok();
 
@@ -107,18 +152,8 @@ pub fn connect_sd_on_with(
     let stream = psk::psk_connect(sock, &format!("R_DIRECTOR\x1e{director_name}"), &key)
         .map_err(|e| SdConnectError::Tls(e.to_string()))?;
     let cipher = stream.cipher_name();
-    let mut bnet = BnetStream::new(stream);
-
-    bnet.send_str(&make_director_hello(director_name)).map_err(|e| SdConnectError::Hello(e.to_string()))?;
-    let auth = CramMd5Auth::new(password, director_name, 2);
-    let r = auth.two_way_authenticate(&mut bnet, false).map_err(|e| SdConnectError::Cram(e.to_string()))?;
-    if !r.success {
-        return Err(SdConnectError::CramFailed);
-    }
-    let resp = bnet.recv_str().map_err(|e| SdConnectError::HelloResponse(e.to_string()))?;
-    if !resp.starts_with(SD_OK_HELLO) {
-        return Err(SdConnectError::Rejected(resp));
-    }
+    let mut bnet = BnetStream::new(AnyStream::Psk(stream));
+    handshake(&mut bnet, password, director_name)?;
 
     if let Some(tcp) = tcp {
         tcp.set_read_timeout(read_timeout_after).ok();
@@ -127,13 +162,31 @@ pub fn connect_sd_on_with(
 }
 
 /// Connects to a Storage Daemon at `address:port` and authenticates;
-/// [`COMMAND_TIMEOUT`] stays set for the commands that follow.
+/// [`COMMAND_TIMEOUT`] stays set for the commands that follow. Over gRPC
+/// when the registered dialer ([`set_grpc_dialer`]) delivers a stream,
+/// else over BNET.
 pub fn connect_sd(
     address: &str,
     port: u16,
     password: &str,
     director_name: &str,
-) -> Result<BnetStream<PskStream>, String> {
+) -> Result<SdStream, String> {
+    if let Some(dial) = GRPC_DIALER.get()
+        && let Some(bnet) = dial(address, port, password, director_name)
+    {
+        debug!("SD connected over gRPC: {address}:{port}");
+        return Ok(bnet);
+    }
+    connect_sd_bnet(address, port, password, director_name)
+}
+
+/// [`connect_sd`] over BNET only.
+pub fn connect_sd_bnet(
+    address: &str,
+    port: u16,
+    password: &str,
+    director_name: &str,
+) -> Result<SdStream, String> {
     let addr = format!("{address}:{port}");
 
     // TCP connect

@@ -996,7 +996,7 @@ pub(crate) trait SdSession {
 /// (CloseSdBsock).
 pub(crate) struct NetSdSession {
     director: String,
-    sd: Option<bareos_bnet::BnetStream<bareos_bnet::tls_psk::PskStream>>,
+    sd: Option<bareos_bnet::BnetStream<bareos_bnet::AnyStream>>,
 }
 
 impl NetSdSession {

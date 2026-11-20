@@ -1625,7 +1625,7 @@ Job { Name = single; Client = fd1; Storage = File }
     fn params(id: u32, name: &str) -> JobParams {
         JobParams { job_id: id, unique_job: format!("{name}.2026-10-16_10.00.00_{id:02}"), job_name: name.into(),
             job_type: WorkerJobType::Backup, level: "Full".into(), fd_address: String::new(), fd_port: 0,
-            fd_password: String::new(), fd_grpc: None, sd_address: String::new(), sd_port: 0, sd_password: String::new(),
+            fd_password: String::new(), fd_grpc: None, sd_grpc: None, sd_address: String::new(), sd_port: 0, sd_password: String::new(),
             sd_device: String::new(), sd_media_type: String::new(), director_name: "dir".into(), pool_name: "Full".into(),
             fileset_name: String::new(), fileset_includes: Vec::new(), fileset_excludes: Vec::new(), since_utime: 0, prev_job: String::new(),
             where_path: None, regex_where: None, prefix_links: false, replace: None, restore_jobid: None, bootstrap: None,

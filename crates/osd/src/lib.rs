@@ -21,6 +21,13 @@
 //! (Bis 20.11.2026 behauptete dieser Kommentar, `connect` werde von odir
 //! nicht genutzt; das war falsch, ofd-Gutachten §4.)
 //!
+//! Seit P1 Stufe 3 geht jeder dieser Wege zu einem osd zuerst über gRPC
+//! (`onesimus.stored.StorageDaemon/Control`): [`connect::handshake`] läuft
+//! im gRPC-Strom, [`connect::connect_sd`] fragt den vom Director
+//! angemeldeten gRPC-Wähler ([`connect::set_grpc_dialer`]) und nimmt BNET,
+//! wenn der keinen Strom liefert. Die Verbindung ist immer
+//! [`connect::SdStream`] (`BnetStream<AnyStream>`).
+//!
 //! Datenfluss: odir → [`connect`] (TLS-PSK, Hello, CRAM-MD5, OK-Hello) →
 //! [`job`] (Job-Kommando aus `bareos_format::sd_job`, `use storage`,
 //! Bootstrap, `run`) → SD; Katalog-Anfragen des SD → [`catrec`] → odir.

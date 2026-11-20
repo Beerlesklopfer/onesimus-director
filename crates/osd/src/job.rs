@@ -1,7 +1,7 @@
 //! SD job protocol: setup, use device, bootstrap, run.
 
 use bareos_bnet::{BnetStream, BnetSignal};
-use bareos_bnet::tls_psk::PskStream;
+use bareos_bnet::AnyStream;
 use tracing::debug;
 
 /// SD session info returned from job setup.
@@ -89,7 +89,7 @@ pub fn job_command(p: &SdJobParams) -> String {
 ///
 /// Protocol: `JobId=N job=UNIQUE type=T level=L ...` ([`job_command`])
 /// Response: `3000 OK Job SDid=N SDtime=T Authorization=KEY`
-pub fn sd_job_setup(sd: &mut BnetStream<PskStream>, p: &SdJobParams) -> Result<SdSession, String> {
+pub fn sd_job_setup(sd: &mut BnetStream<AnyStream>, p: &SdJobParams) -> Result<SdSession, String> {
     let cmd = job_command(p);
     sd.send_str(&cmd).map_err(|e| format!("send: {e}"))?;
 
@@ -131,7 +131,7 @@ pub fn use_device_commands(p: &SdJobParams) -> [String; 2] {
 /// Send "use storage/device" commands to SD.
 /// Returns the SD's answer ("3000 OK use device device=...") and the job
 /// messages ("Jmsg Job=...") it sent before.
-pub fn sd_use_device(sd: &mut BnetStream<PskStream>, p: &SdJobParams) -> Result<(String, Vec<String>), String> {
+pub fn sd_use_device(sd: &mut BnetStream<AnyStream>, p: &SdJobParams) -> Result<(String, Vec<String>), String> {
     for cmd in use_device_commands(p) {
         sd.send_str(&cmd).map_err(|e| format!("send: {e}"))?;
     }
@@ -150,7 +150,7 @@ pub fn sd_use_device(sd: &mut BnetStream<PskStream>, p: &SdJobParams) -> Result<
 }
 
 /// Send bootstrap data to SD for restore.
-pub fn sd_send_bootstrap(sd: &mut BnetStream<PskStream>, bootstrap: &str) -> Result<(), String> {
+pub fn sd_send_bootstrap(sd: &mut BnetStream<AnyStream>, bootstrap: &str) -> Result<(), String> {
     if bootstrap.is_empty() {
         return Err("no bootstrap data".into());
     }
@@ -171,7 +171,7 @@ pub fn sd_send_bootstrap(sd: &mut BnetStream<PskStream>, bootstrap: &str) -> Res
 }
 
 /// Send "run" command to SD (starts WaitFD).
-pub fn sd_run(sd: &mut BnetStream<PskStream>) -> Result<(), String> {
+pub fn sd_run(sd: &mut BnetStream<AnyStream>) -> Result<(), String> {
     sd.send_str("run\n").map_err(|e| format!("run: {e}"))
 }
 

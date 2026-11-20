@@ -103,6 +103,8 @@ fn storage_use(config: &DirectorConfig, storage: &str, pool: &str) -> Result<cra
         name: store.name.clone(), address: store.address.clone(), port: store.port, password: store.password.clone(),
         media_type: store.media_type.clone(), devices: storage_devices(config, storage), pool: pool.to_string(),
         pool_type,
+        // VirtualFull reads and writes SD-internally: BNET only (osd: open after P1).
+        grpc: None,
     })
 }
 
@@ -292,7 +294,7 @@ pub fn start(config: &DirectorConfig, catalog: Option<&CatalogHandle>, req: &Req
     let params = crate::job_worker::JobParams {
         job_id, unique_job: unique.clone(), job_name: job.name.clone(),
         job_type: crate::job_worker::WorkerJobType::Backup, level: "VirtualFull".into(),
-        fd_address: String::new(), fd_port: 0, fd_password: String::new(), fd_grpc: None,
+        fd_address: String::new(), fd_port: 0, fd_password: String::new(), fd_grpc: None, sd_grpc: None,
         sd_address: write.address.clone(), sd_port: write.port, sd_password: write.password.clone(),
         sd_device: write.devices.first().cloned().unwrap_or_default(), sd_media_type: write.media_type.clone(),
         director_name: config.director.name.clone(), pool_name: wpool.clone(), fileset_name: fileset.clone(), fileset_includes: Vec::new(),

@@ -643,7 +643,7 @@ Job { Name = backup; JobDefs = d
     fn script_job(name: &str, status: char, job_type: WorkerJobType) -> ScriptJob {
         let params = crate::job_worker::JobParams {
             job_id: 5, unique_job: format!("{name}.2026-10-17_06.50.25_03"), job_name: name.into(), job_type,
-            level: String::new(), fd_address: String::new(), fd_port: 0, fd_password: String::new(), fd_grpc: None,
+            level: String::new(), fd_address: String::new(), fd_port: 0, fd_password: String::new(), fd_grpc: None, sd_grpc: None,
             sd_address: String::new(), sd_port: 0, sd_password: String::new(), sd_device: String::new(),
             sd_media_type: String::new(), director_name: "dir".into(), pool_name: "Incremental".into(),
             fileset_name: String::new(), fileset_includes: Vec::new(), fileset_excludes: Vec::new(), since_utime: 0, prev_job: String::new(),

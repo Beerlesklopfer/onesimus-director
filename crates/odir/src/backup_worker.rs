@@ -12,7 +12,6 @@ use std::io::{Read, Write};
 use std::sync::atomic::Ordering;
 
 use bareos_bnet::stream::AnyStream;
-use bareos_bnet::tls_psk::PskStream;
 use bareos_bnet::{BnetMessage, BnetSignal, BnetStream};
 use tracing::{debug, warn};
 
@@ -388,8 +387,13 @@ pub fn run(params: &JobParams, session: &BackupSession, pipes: &mut WorkerPipes)
 
     // ConnectToStorageDaemon() (JS_WaitSD) and StartStorageDaemonJob().
     state(job_id, "BackupConnectingSD");
-    let sd = connect_retry(job_id, "Storage daemon", &params.sd_address, params.sd_port, session.sd_connect_timeout)
-        .and_then(|sock| job_worker::connect_sd_on(params, sock).map_err(|e| format!("Failed to connect to Storage daemon: {e}\n")));
+    // osd: gRPC first (Storage Grpc Enable = yes), BNET on any failure.
+    let sd = match crate::sd_grpc::try_connect(params.sd_grpc.as_ref(), &params.sd_address, params.sd_port,
+        &params.sd_password, &params.director_name, None) {
+        Some(sd) => Ok((sd, onesimus_bnet_grpc::TRANSPORT.to_string())),
+        None => connect_retry(job_id, "Storage daemon", &params.sd_address, params.sd_port, session.sd_connect_timeout)
+            .and_then(|sock| job_worker::connect_sd_on(params, sock).map_err(|e| format!("Failed to connect to Storage daemon: {e}\n"))),
+    };
     let mut sd = match sd {
         Ok((sd, cipher)) => {
             jmsg(job_id, M_INFO, crate::job_messages::connected_text("Storage daemon", &params.sd_address, params.sd_port, Some(&cipher)));
@@ -453,13 +457,17 @@ pub fn run(params: &JobParams, session: &BackupSession, pipes: &mut WorkerPipes)
     // ConfigureMessageThread(): the FD's storage address (or, for a passive
     // client, the SD connects to the FD), SD "run", message thread.
     let contact = if session.passive_client {
-        let cmd = format!("passive client address={} port={} ssl=4\n", session.client_contact, params.fd_port);
+        let grpc = crate::sd_grpc::tokens(params.fd_grpc.as_ref(), &session.client_contact,
+            crate::sd_grpc::on_grpc(&sd), crate::sd_grpc::on_grpc(&fd));
+        let cmd = format!("passive client address={} port={} ssl=4{grpc}\n", session.client_contact, params.fd_port);
         send(&mut sd, &cmd).and_then(|_| {
             std::thread::sleep(std::time::Duration::from_secs(2));
             response(&mut sd, job_id, "2000 OK passive client\n", "Passive client")
         })
     } else {
-        let cmd = format!("storage address={} port={} ssl=4\n", session.storage_contact, session.write.port);
+        let grpc = crate::sd_grpc::tokens(params.sd_grpc.as_ref(), &session.storage_contact,
+            crate::sd_grpc::on_grpc(&sd), crate::sd_grpc::on_grpc(&fd));
+        let cmd = format!("storage address={} port={} ssl=4{grpc}\n", session.storage_contact, session.write.port);
         send(&mut fd, &cmd).and_then(|_| response(&mut fd, job_id, "2000 OK storage\n", "Storage"))
     };
     if let Err(e) = contact {
@@ -501,7 +509,7 @@ pub fn run(params: &JobParams, session: &BackupSession, pipes: &mut WorkerPipes)
 /// Director, FD or SD. `sd` is the SD connection without message thread.
 #[allow(clippy::too_many_arguments)]
 fn terminate(job_id: u32, session: &BackupSession, fd: Option<&mut BnetStream<AnyStream>>,
-             sd_thread: Option<std::thread::JoinHandle<Option<SdEnd>>>, sd: Option<BnetStream<PskStream>>,
+             sd_thread: Option<std::thread::JoinHandle<Option<SdEnd>>>, sd: Option<BnetStream<AnyStream>>,
              vol: (u32, u32), before_errors: u32) -> i32 {
     if sd_thread.is_none() {
         // TerminateBackupWithError(): JS_ErrorTerminated.
@@ -628,7 +636,7 @@ pub(crate) fn parse_end_job(msg: &str) -> Option<(u8, u64, u64, u64, u32, bool, 
 }
 
 /// StartStorageDaemonJob(jcr, send_bsr=false): ((VolSessionId, VolSessionTime), Authorization).
-fn start_sd_job(sd: &mut BnetStream<PskStream>, params: &JobParams, session: &BackupSession, quota: u64)
+fn start_sd_job(sd: &mut BnetStream<AnyStream>, params: &JobParams, session: &BackupSession, quota: u64)
     -> Result<((u32, u32), String), String> {
     let job_id = params.job_id;
     // The Job command with Quota= of FetchRemainingQuotas().
@@ -737,7 +745,7 @@ fn setup_fd(fd: &mut BnetStream<AnyStream>, params: &JobParams, session: &Backup
 }
 
 /// msgchan.cc ReserveWriteDevice(): "Using Device \"%s\" to write."
-fn reserve_write_device(sd: &mut BnetStream<PskStream>, job_id: u32, store: &crate::sd_copy::StorageUse) -> Result<(), String> {
+fn reserve_write_device(sd: &mut BnetStream<AnyStream>, job_id: u32, store: &crate::sd_copy::StorageUse) -> Result<(), String> {
     for line in crate::sd_copy::use_storage_commands(store, true) {
         send(sd, &line)?;
     }
@@ -758,7 +766,7 @@ fn reserve_write_device(sd: &mut BnetStream<PskStream>, job_id: u32, store: &cra
 
 /// msgchan.cc msg_thread(): catalog requests and job messages of the SD
 /// until "3099 Job end" (None: the SD went away first).
-fn message_thread(sd: &mut BnetStream<PskStream>, job_id: u32, mut from_director: std::fs::File) -> Option<SdEnd> {
+fn message_thread(sd: &mut BnetStream<AnyStream>, job_id: u32, mut from_director: std::fs::File) -> Option<SdEnd> {
     let result = loop {
         match sd.recv() {
             Ok(BnetMessage::Data(data)) => {

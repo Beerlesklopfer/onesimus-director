@@ -143,6 +143,7 @@ fn install_config(shared_config: &SharedConfig, mut new_config: DirectorConfig)
     let mut cfg = shared_config.write().map_err(|e| format!("config lock: {e}"))?;
     new_config.catalog_acl = cfg.catalog_acl.clone();
     crate::fd_grpc::configure(&new_config);
+    crate::sd_grpc::configure(&new_config);
     *cfg = new_config;
     crate::scheduler::config_replaced();
     crate::fd_protocol::reset_handshake_modes();
