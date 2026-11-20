@@ -26,6 +26,7 @@ onesimus-daemon.workspace = true
 bareos-config.workspace = true
 bareos-catalog.workspace = true
 onesimus-proto-rs.workspace = true
+onesimus-bnet-grpc.workspace = true
 bareos-orm = { path = "../bareos-orm" }
 osd = { path = "../osd" }
 

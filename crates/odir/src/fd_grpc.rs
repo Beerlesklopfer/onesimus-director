@@ -5,12 +5,41 @@ use std::collections::HashMap;
 use std::sync::{LazyLock, RwLock};
 use std::time::Duration;
 
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+/// The gRPC endpoint of a Client or Storage resource (Onesimus directives
+/// `Grpc Enable`, `Grpc Port`, `Grpc CA Certificate File`, `Grpc Server
+/// Name`), snapshotted into job parameters.
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub(crate) struct Target {
-    port: u16,
-    ca: String,
-    server_name: String,
+    /// gRPC port (default: the BNET port + 1000).
+    pub(crate) port: u16,
+    /// PEM file of the CA (or pinned self-signed certificate) to trust.
+    pub(crate) ca: String,
+    /// Name the server certificate must carry (default: the address).
+    pub(crate) server_name: String,
 }
+
+impl Target {
+    /// The target of resource `name` of type `kind` (`client`, `storage`)
+    /// at `address:port`; `None` unless `Grpc Enable = yes`.
+    pub(crate) fn from_directives(config: &DirectorConfig, kind: &str, name: &str, address: &str, port: u16) -> Option<Target> {
+        let value = |key: &str| crate::job_messages::raw_directive(config, kind, name, key);
+        if !value("grpcenable").is_some_and(|v| matches!(v.to_ascii_lowercase().as_str(), "yes" | "true" | "1")) {
+            return None;
+        }
+        Some(Target {
+            port: value("grpcport").and_then(|p| p.parse().ok()).unwrap_or(port.saturating_add(1000)),
+            ca: value("grpccacertificatefile").unwrap_or_default(),
+            server_name: value("grpcservername").unwrap_or_else(|| address.to_string()),
+        })
+    }
+
+    /// The transport target at `host` (reads the CA file).
+    pub(crate) fn resolve(&self, host: &str) -> Result<onesimus_bnet_grpc::Target, String> {
+        let ca = std::fs::read(&self.ca).map_err(|e| format!("gRPC CA {}: {e}", self.ca))?;
+        Ok(onesimus_bnet_grpc::Target { host: host.to_string(), port: self.port, ca, server_name: self.server_name.clone() })
+    }
+}
+
 static TARGETS: LazyLock<RwLock<HashMap<(String, u16), Target>>> =
     LazyLock::new(|| RwLock::new(HashMap::new()));
 
@@ -32,19 +61,7 @@ pub fn for_client(
     config: &DirectorConfig,
     client: &bareos_config::ClientResource,
 ) -> Option<Target> {
-    let value = |key: &str| crate::job_messages::raw_directive(config, "client", &client.name, key);
-    if !value("grpcenable")
-        .is_some_and(|v| matches!(v.to_ascii_lowercase().as_str(), "yes" | "true" | "1"))
-    {
-        return None;
-    }
-    Some(Target {
-        port: value("grpcport")
-            .and_then(|p| p.parse().ok())
-            .unwrap_or(client.port.saturating_add(1000)),
-        ca: value("grpccacertificatefile").unwrap_or_default(),
-        server_name: value("grpcservername").unwrap_or_else(|| client.address.clone()),
-    })
+    Target::from_directives(config, "client", &client.name, &client.address, client.port)
 }
 
 pub fn try_worker(
@@ -86,17 +103,16 @@ fn connect_target(
     timeout: Option<Duration>,
 ) -> Option<(BnetStream<AnyStream>, String)> {
     let connect = || -> Result<_, String> {
-        let ca = std::fs::read(&target.ca).map_err(|e| format!("gRPC CA {}: {e}", target.ca))?;
-        let mut io = bareos_bnet::fd_grpc::connect(
-            address,
-            target.port,
-            ca,
-            &target.server_name,
+        let grpc = target.resolve(address)?;
+        let mut io = onesimus_bnet_grpc::client::connect(
+            &grpc,
+            onesimus_bnet_grpc::Rpc::FileDaemonControl,
             Some(Duration::from_secs(15)),
         )
         .map_err(|e| e.to_string())?;
         io.cancel = Some(&crate::job_worker::WORKER_CANCEL);
-        let mut stream = BnetStream::new(AnyStream::Grpc(io));
+        // The stream stays authenticated-with-limit until the FD's OK Hello.
+        let mut stream = BnetStream::new(io);
         stream
             .send_str(&bareos_bnet::hello::make_director_hello(director))
             .map_err(|e| e.to_string())?;
@@ -111,13 +127,15 @@ fn connect_target(
         if !hello.starts_with(bareos_bnet::hello::FD_OK_HELLO) {
             return Err("invalid gRPC FD hello".into());
         }
-        if let AnyStream::Grpc(io) = stream.inner_mut() {
-            io.set_read_timeout(timeout);
-        }
-        Ok((stream, "gRPC TLS".to_string()))
+        stream.inner_mut().set_read_timeout(timeout);
+        let stream = BnetStream::new(AnyStream::External(Box::new(stream.into_inner())));
+        Ok((stream, onesimus_bnet_grpc::TRANSPORT.to_string()))
     };
     match connect() {
-        Ok(result) => Some(result),
+        Ok(result) => {
+            tracing::info!("FD {address}:{}: connected over gRPC TLS", target.port);
+            Some(result)
+        }
         Err(error) => {
             tracing::warn!(
                 "FD {address}:{}: {error}; falling back to BNET on port {port}",

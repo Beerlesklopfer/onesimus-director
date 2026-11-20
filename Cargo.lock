@@ -339,12 +339,10 @@ dependencies = [
  "anyhow",
  "bareos-format",
  "base64 0.22.1",
- "flume",
  "hex",
  "hmac",
  "libc",
  "md-5",
- "onesimus-proto-rs",
  "openssl",
  "rand 0.8.8",
  "rustls",
@@ -352,9 +350,6 @@ dependencies = [
  "serde_json",
  "sha2",
  "thiserror",
- "tokio",
- "tokio-stream",
- "tonic",
  "tracing",
 ]
 
@@ -2133,6 +2128,7 @@ dependencies = [
  "md-5",
  "mdns-sd",
  "nix 0.29.0",
+ "onesimus-bnet-grpc",
  "onesimus-daemon",
  "onesimus-proto-rs",
  "openssl",
@@ -2173,6 +2169,7 @@ dependencies = [
  "libc",
  "md-5",
  "nix 0.29.0",
+ "onesimus-bnet-grpc",
  "onesimus-daemon",
  "onesimus-plugins",
  "onesimus-podman-core",
@@ -2215,6 +2212,24 @@ name = "once_cell_polyfill"
 version = "1.70.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "384b8ab6d37215f3c5301a95a4accb5d64aa607f1fcb26a11b5303878451b4fe"
+
+[[package]]
+name = "onesimus-bnet-grpc"
+version = "25.1.2+onesimus.0.2.0"
+dependencies = [
+ "aquamarine",
+ "bareos-bnet",
+ "base64 0.22.1",
+ "flume",
+ "onesimus-proto-rs",
+ "prost",
+ "rcgen",
+ "rustls",
+ "tokio",
+ "tokio-stream",
+ "tonic",
+ "tracing",
+]
 
 [[package]]
 name = "onesimus-daemon"

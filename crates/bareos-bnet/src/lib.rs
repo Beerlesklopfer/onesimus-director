@@ -10,8 +10,12 @@
 //! 3. **BNET** — length-prefixed framing: `[i32 BE length][payload]`
 //! 4. **Hello** — first message identifies connection type
 //! 5. **CRAM-MD5** — two-way authentication
+//!
+//! The same BNET messages also travel over gRPC between the Onesimus
+//! daemons; that transport lives in the crate `onesimus-bnet-grpc` and
+//! plugs in as [`stream::ExternalStream`], so this crate needs neither
+//! tonic nor tokio nor the protos.
 
-pub mod fd_grpc;
 pub mod debug;
 pub mod wire;
 pub mod signal;

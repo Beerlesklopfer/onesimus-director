@@ -23,11 +23,5 @@ openssl.workspace = true
 
 libc.workspace = true
 
-tokio.workspace = true
-tonic.workspace = true
-onesimus-proto-rs.workspace = true
-tokio-stream = "0.1"
-flume.workspace = true
-
 [dev-dependencies]
 serde_json.workspace = true

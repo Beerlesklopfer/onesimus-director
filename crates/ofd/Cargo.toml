@@ -16,6 +16,7 @@ onesimus-podman-core = { path = "../onesimus-podman-core" }
 tonic.workspace = true
 tokio.workspace = true
 onesimus-proto-rs.workspace = true
+onesimus-bnet-grpc.workspace = true
 prost.workspace = true
 tokio-stream = { version = "0.1", features = ["net"] }
 bareos-bnet.workspace = true

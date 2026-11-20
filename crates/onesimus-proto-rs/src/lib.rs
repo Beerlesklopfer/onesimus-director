@@ -26,6 +26,11 @@ pub mod onesimus {
             }
         }
     }
+    /// Storage Daemon service (stored_service.proto): Control and Data
+    /// streams of odir and ofd to osd.
+    pub mod stored {
+        tonic::include_proto!("onesimus.stored");
+    }
     pub mod director {
         tonic::include_proto!("onesimus.director");
 

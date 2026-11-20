@@ -1,25 +1,75 @@
-//! Unified stream type that supports plaintext, TLS (rustls), and TLS-PSK (openssl).
+//! Unified stream type that supports plaintext, TLS (rustls), TLS-PSK
+//! (openssl) and any other transport the caller brings (gRPC: the crate
+//! `onesimus-bnet-grpc`), so `BnetStream<AnyStream>` runs over each.
+//!
+//! Since 20.11.2026 the gRPC transport is no longer a variant here: this
+//! crate stays free of tonic and the protos (ofd audit §5 point 1); a
+//! transport outside it implements [`ExternalStream`].
 
 use std::io::{self, Read, Write};
 use std::net::TcpStream;
 
-use crate::fd_grpc::ControlIo;
 use crate::tls_psk::PskStream;
 
-/// A unified stream that can be plaintext TCP, TLS (rustls), or TLS-PSK (openssl).
+/// A byte stream from outside this crate (e.g. a gRPC stream carrying
+/// BNET frames).
+pub trait ExternalStream: Read + Write + Send {
+    /// Name of the transport for log lines and job messages
+    /// (e.g. `"gRPC TLS"`).
+    fn transport(&self) -> &str;
+}
+
+/// A unified stream that can be plaintext TCP, TLS (rustls), TLS-PSK
+/// (openssl) or an [`ExternalStream`].
 pub enum AnyStream {
+    /// Plaintext TCP.
     Plain(TcpStream),
-    Grpc(ControlIo),
+    /// A transport from outside this crate (gRPC).
+    External(Box<dyn ExternalStream>),
+    /// TLS-PSK (openssl).
     Psk(PskStream),
+    /// TLS server side (rustls).
     RustlsServer(rustls::StreamOwned<rustls::ServerConnection, TcpStream>),
+    /// TLS client side (rustls).
     RustlsClient(rustls::StreamOwned<rustls::ClientConnection, TcpStream>),
+}
+
+impl AnyStream {
+    /// Name of the transport: `"BNET"`, `"BNET TLS-PSK"`, `"BNET TLS"` or
+    /// the external stream's own name.
+    pub fn transport(&self) -> &str {
+        match self {
+            AnyStream::Plain(_) => "BNET",
+            AnyStream::External(s) => s.transport(),
+            AnyStream::Psk(_) => "BNET TLS-PSK",
+            AnyStream::RustlsServer(_) | AnyStream::RustlsClient(_) => "BNET TLS",
+        }
+    }
+
+    /// The cipher name for "Encryption: …" lines: the TLS-PSK cipher, the
+    /// rustls cipher suite, the external transport's name; empty for
+    /// plaintext.
+    pub fn cipher_name(&self) -> String {
+        match self {
+            AnyStream::Plain(_) => String::new(),
+            AnyStream::External(s) => s.transport().to_string(),
+            AnyStream::Psk(s) => s.cipher_name(),
+            AnyStream::RustlsServer(s) => s.conn.negotiated_cipher_suite().map(|c| format!("{:?}", c.suite())).unwrap_or_default(),
+            AnyStream::RustlsClient(s) => s.conn.negotiated_cipher_suite().map(|c| format!("{:?}", c.suite())).unwrap_or_default(),
+        }
+    }
+
+    /// Whether this is an [`ExternalStream`] (the gRPC path).
+    pub fn is_external(&self) -> bool {
+        matches!(self, AnyStream::External(_))
+    }
 }
 
 impl Read for AnyStream {
     fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
         match self {
             AnyStream::Plain(s) => s.read(buf),
-            AnyStream::Grpc(s) => s.read(buf),
+            AnyStream::External(s) => s.read(buf),
             AnyStream::Psk(s) => s.read(buf),
             AnyStream::RustlsServer(s) => s.read(buf),
             AnyStream::RustlsClient(s) => s.read(buf),
@@ -31,7 +81,7 @@ impl Write for AnyStream {
     fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
         match self {
             AnyStream::Plain(s) => s.write(buf),
-            AnyStream::Grpc(s) => s.write(buf),
+            AnyStream::External(s) => s.write(buf),
             AnyStream::Psk(s) => s.write(buf),
             AnyStream::RustlsServer(s) => s.write(buf),
             AnyStream::RustlsClient(s) => s.write(buf),
@@ -41,7 +91,7 @@ impl Write for AnyStream {
     fn flush(&mut self) -> io::Result<()> {
         match self {
             AnyStream::Plain(s) => s.flush(),
-            AnyStream::Grpc(s) => s.flush(),
+            AnyStream::External(s) => s.flush(),
             AnyStream::Psk(s) => s.flush(),
             AnyStream::RustlsServer(s) => s.flush(),
             AnyStream::RustlsClient(s) => s.flush(),

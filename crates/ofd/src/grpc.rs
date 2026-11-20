@@ -1,5 +1,13 @@
-//! Additional TLS gRPC control listener. BNET remains available on the FD port
-//! for legacy Directors and for passive Storage Daemon connections.
+//! Additional TLS gRPC listener (`onesimus.filed.FileDaemon`). BNET remains
+//! available on the FD port for legacy Directors and Storage Daemons.
+//!
+//! - `Control`: a Director session (Hello, CRAM-MD5, commands), the same
+//!   session as on the BNET port (`accept::handle_session`).
+//! - `Data`: the connection of an Onesimus Storage Daemon to a passive
+//!   client ("Hello Storage calling Start Job <Job>"), handed to the job
+//!   like a BNET connection (`sd::handle_stored_connection`).
+//!
+//! Stream adapter and server loop: `onesimus-bnet-grpc` (shared with osd).
 use std::net::SocketAddr;
 use std::path::Path;
 use std::sync::{
@@ -9,17 +17,18 @@ use std::sync::{
 use std::time::Duration;
 
 use crate::config::FdConfig;
-use bareos_bnet::{BnetStream, fd_grpc};
+use bareos_bnet::BnetStream;
+use onesimus_bnet_grpc::server::{ResponseStream, accept};
 use onesimus_proto_rs::onesimus::filed::{
     ControlFrame,
     file_daemon_server::{FileDaemon, FileDaemonServer},
 };
-use tokio_stream::{StreamExt, wrappers::ReceiverStream};
-use tonic::transport::Server;
 use tonic::{Request, Response, Status};
 
 static SESSION: AtomicU64 = AtomicU64::new(1 << 32);
 const MAX_SESSIONS: usize = 128;
+/// Idle unauthenticated sessions must not retain a worker indefinitely.
+const LOGIN_TIMEOUT: Duration = Duration::from_secs(30);
 
 struct Service {
     config: Arc<FdConfig>,
@@ -27,53 +36,30 @@ struct Service {
     sessions: Arc<tokio::sync::Semaphore>,
 }
 
+impl Service {
+    fn permit(&self) -> Result<tokio::sync::OwnedSemaphorePermit, Status> {
+        self.sessions
+            .clone()
+            .try_acquire_owned()
+            .map_err(|_| Status::resource_exhausted("too many FD gRPC sessions"))
+    }
+}
+
 #[tonic::async_trait]
 impl FileDaemon for Service {
-    type ControlStream =
-        std::pin::Pin<Box<dyn tokio_stream::Stream<Item = Result<ControlFrame, Status>> + Send>>;
+    type ControlStream = ResponseStream<ControlFrame>;
+    type DataStream = ResponseStream<ControlFrame>;
 
     async fn control(
         &self,
         request: Request<tonic::Streaming<ControlFrame>>,
     ) -> Result<Response<Self::ControlStream>, Status> {
-        let permit = self
-            .sessions
-            .clone()
-            .try_acquire_owned()
-            .map_err(|_| Status::resource_exhausted("too many FD control sessions"))?;
-        let mut input = request.into_inner();
-        // Idle unauthenticated sessions must not retain a worker indefinitely.
-        let (mut io, peer) = fd_grpc::pair(Some(Duration::from_secs(30)));
+        let permit = self.permit()?;
+        let (mut io, output) = accept(request.into_inner(), Some(LOGIN_TIMEOUT));
         io.cancel = Some(self.shutdown);
         let authenticated = io.authenticated.clone();
         let config = self.config.clone();
         let session = SESSION.fetch_add(1, Ordering::Relaxed);
-        tokio::spawn(async move {
-            loop {
-                let result = tokio::select! {
-                    _ = tokio::time::sleep(Duration::from_millis(100)) => {
-                        if peer.incoming.is_disconnected() { break; }
-                        continue;
-                    },
-                    result = input.message() => result,
-                };
-                match result {
-                    Ok(Some(frame)) => {
-                        if peer.incoming.send_async(Ok(frame)).await.is_err() {
-                            break;
-                        }
-                    }
-                    Ok(None) => break,
-                    Err(status) => {
-                        let _ = peer
-                            .incoming
-                            .send_async(Err(std::io::Error::other(status)))
-                            .await;
-                        break;
-                    }
-                }
-            }
-        });
         tokio::task::spawn_blocking(move || {
             let _permit = permit;
             // Authentication is shared with BNET, including monitor restrictions.
@@ -86,9 +72,41 @@ impl FileDaemon for Service {
                 || authenticated.store(true, Ordering::Relaxed),
             );
         });
-        Ok(Response::new(Box::pin(
-            ReceiverStream::new(peer.outgoing).map(Ok),
-        )))
+        Ok(Response::new(output))
+    }
+
+    async fn data(
+        &self,
+        request: Request<tonic::Streaming<ControlFrame>>,
+    ) -> Result<Response<Self::DataStream>, Status> {
+        let permit = self.permit()?;
+        let (mut io, output) = accept(request.into_inner(), Some(LOGIN_TIMEOUT));
+        io.cancel = Some(self.shutdown);
+        let config = self.config.clone();
+        let session = SESSION.fetch_add(1, Ordering::Relaxed);
+        tokio::task::spawn_blocking(move || {
+            let _permit = permit;
+            let close = io.close_handle();
+            io.set_read_timeout(Some(LOGIN_TIMEOUT));
+            let authenticated = io.authenticated.clone();
+            let mut bnet: crate::sd::SdStream = BnetStream::new(Box::new(io));
+            let hello = match bnet.recv_str() {
+                Ok(h) => h,
+                Err(e) => {
+                    tracing::debug!("session {session}: failed to read hello: {e}");
+                    return;
+                }
+            };
+            if !hello.starts_with("Hello Storage") {
+                tracing::warn!("session {session}: FileDaemon/Data accepts only a Storage daemon: {}", hello.trim_end());
+                return;
+            }
+            tracing::info!("session {session}: Storage daemon connects over gRPC (passive client)");
+            // A job's data transfer may pause for as long as a mount takes.
+            authenticated.store(true, Ordering::Relaxed);
+            crate::sd::handle_stored_grpc_connection(bnet, &hello, &config.name, close);
+        });
+        Ok(Response::new(output))
     }
 }
 
@@ -99,49 +117,19 @@ pub fn start(
     key: &Path,
     shutdown: &'static AtomicBool,
 ) -> Result<(SocketAddr, std::thread::JoinHandle<()>), String> {
-    let mut builder = Server::builder()
-        .tls_config(onesimus_daemon::grpc_tls::server_tls_config(cert, key)?)
-        .map_err(|e| e.to_string())?;
-    // Bind before reporting a successful startup (also catches port conflicts).
-    let listener = std::net::TcpListener::bind(address).map_err(|e| e.to_string())?;
-    let address = listener.local_addr().map_err(|e| e.to_string())?;
-    listener.set_nonblocking(true).map_err(|e| e.to_string())?;
-    let handle = std::thread::Builder::new()
-        .name("fd:grpc".into())
-        .spawn(move || {
-            let rt = tokio::runtime::Builder::new_multi_thread()
-                .enable_all()
-                .build()
-                .expect("FD gRPC runtime");
-            rt.block_on(async move {
-                let listener =
-                    tokio::net::TcpListener::from_std(listener).expect("FD gRPC listener");
-                let service = FileDaemonServer::new(Service {
-                    config,
-                    shutdown,
-                    sessions: Arc::new(tokio::sync::Semaphore::new(MAX_SESSIONS)),
-                })
-                .max_decoding_message_size(1_000_064)
-                .max_encoding_message_size(1_000_064);
-                let serve = builder
-                    .add_service(service)
-                    .serve_with_incoming(tokio_stream::wrappers::TcpListenerStream::new(listener));
-                tokio::select! {
-                    result = serve => if let Err(error) = result {
-                        tracing::error!("FD gRPC server: {error}");
-                    },
-                    _ = async {
-                        while !shutdown.load(Ordering::Relaxed) {
-                            tokio::time::sleep(Duration::from_millis(100)).await;
-                        }
-                    } => {},
-                }
-            });
-            rt.shutdown_timeout(Duration::from_secs(2));
+    let tls = onesimus_daemon::grpc_tls::server_tls_config(cert, key)?;
+    let started = onesimus_bnet_grpc::server::spawn("fd:grpc", address, tls, shutdown, move |builder| {
+        let service = FileDaemonServer::new(Service {
+            config,
+            shutdown,
+            sessions: Arc::new(tokio::sync::Semaphore::new(MAX_SESSIONS)),
         })
-        .map_err(|e| e.to_string())?;
-    tracing::info!("FD gRPC listening on {address} (TLS)");
-    Ok((address, handle))
+        .max_decoding_message_size(onesimus_bnet_grpc::io::MAX_MESSAGE)
+        .max_encoding_message_size(onesimus_bnet_grpc::io::MAX_MESSAGE);
+        builder.add_service(service)
+    })?;
+    tracing::info!("FD gRPC listening on {} (TLS)", started.0);
+    Ok(started)
 }
 
 #[cfg(test)]
@@ -170,11 +158,15 @@ mod tests {
         )
         .unwrap();
         let connect = |ca: Vec<u8>| {
-            fd_grpc::connect(
-                "127.0.0.1",
-                addr.port(),
+            let target = onesimus_bnet_grpc::Target {
+                host: "127.0.0.1".into(),
+                port: addr.port(),
                 ca,
-                "localhost",
+                server_name: "localhost".into(),
+            };
+            onesimus_bnet_grpc::client::connect(
+                &target,
+                onesimus_bnet_grpc::Rpc::FileDaemonControl,
                 Some(Duration::from_secs(5)),
             )
         };
@@ -210,7 +202,7 @@ mod tests {
         let sd_port = listener.local_addr().unwrap().port();
         let storage = crate::job::tests::fake_sd(listener, "grpc-sd-key");
         let restored = dir.join("restored");
-        let text = |fd: &mut BnetStream<fd_grpc::ControlIo>| -> String {
+        let text = |fd: &mut BnetStream<onesimus_bnet_grpc::ControlIo>| -> String {
             loop {
                 match fd.recv().unwrap() {
                     BnetMessage::Data(bytes) => {

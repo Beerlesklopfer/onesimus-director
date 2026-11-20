@@ -13,7 +13,7 @@ use std::sync::Arc;
 use std::sync::atomic::Ordering;
 use std::time::Duration;
 
-use tracing::{debug, info};
+use tracing::{debug, info, warn};
 
 use bareos_bnet::{BnetMessage, BnetSignal, BnetStream};
 
@@ -353,7 +353,28 @@ impl<'a> Session<'a> {
         shared.bw.bursting.store(self.config.allow_bw_bursting, Ordering::Relaxed);
         debug!("Open storage: {addr}:{port} ssl={tls}");
         let timeout = Duration::from_secs(self.config.sd_connect_timeout_secs);
-        match sd::connect_storage(addr, port, tls, &self.msgs.job, &self.sd_auth_key, &self.config.name, timeout, &shared) {
+        // An Onesimus Director appends the SD's gRPC target when the SD
+        // offers gRPC (onesimus-bnet-grpc Target::to_tokens): try it first,
+        // fall back to BNET on any error.
+        let grpc = onesimus_bnet_grpc::Target::from_tokens(addr, cmd).and_then(|target| {
+            match sd::connect_storage_grpc(&target, &self.msgs.job, &self.sd_auth_key, &self.config.name, &shared) {
+                Ok(c) => {
+                    info!("Connected Storage daemon at {}:{} over gRPC TLS", target.host, target.port);
+                    Some(Ok(c))
+                }
+                Err(e) if e == "auth" => Some(Err(e)),
+                Err(e) => {
+                    warn!("Storage daemon {}:{}: {e}; falling back to BNET on port {port}", target.host, target.port);
+                    None
+                }
+            }
+        });
+        let connected = match grpc {
+            Some(result) => result,
+            None => sd::connect_storage(addr, port, tls, &self.msgs.job, &self.sd_auth_key, &self.config.name, timeout, &shared)
+                .inspect(|_| info!("Connected Storage daemon at {addr}:{port} over BNET")),
+        };
+        match connected {
             Ok(c) => {
                 for i in &c.infos {
                     if self.msgs.job_id != 0 {

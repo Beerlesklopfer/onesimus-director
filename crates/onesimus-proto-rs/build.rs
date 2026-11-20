@@ -11,6 +11,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 &format!("{proto_dir}/director_commands.proto"),
                 &format!("{proto_dir}/plugin_ccc.proto"),
                 &format!("{proto_dir}/filed_service.proto"),
+                &format!("{proto_dir}/stored_service.proto"),
                 &format!("{proto_dir}/filed_plugin.proto"),
                 &format!("{proto_dir}/postgresql_broker.proto"),
                 &format!("{proto_dir}/openldap_broker.proto"),
@@ -31,6 +32,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .compile_protos(&[format!("{proto_dir}/director_api.proto")], &[proto_dir])?;
 
     println!("cargo:rerun-if-changed={proto_dir}/filed_service.proto");
+    println!("cargo:rerun-if-changed={proto_dir}/stored_service.proto");
     println!("cargo:rerun-if-changed={proto_dir}/filed_plugin.proto");
     println!("cargo:rerun-if-changed={proto_dir}/postgresql_broker.proto");
     println!("cargo:rerun-if-changed={proto_dir}/openldap_broker.proto");

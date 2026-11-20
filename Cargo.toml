@@ -20,6 +20,7 @@ members = [
     "crates/onesimus-rig",
     "crates/bareos-format",
     "crates/onesimus-daemon",
+    "crates/onesimus-bnet-grpc",
 ]
 
 [workspace.package]
@@ -106,6 +107,7 @@ thiserror = "2"
 bareos-bnet = { path = "crates/bareos-bnet" }
 bareos-format = { path = "crates/bareos-format" }
 onesimus-daemon = { path = "crates/onesimus-daemon" }
+onesimus-bnet-grpc = { path = "crates/onesimus-bnet-grpc" }
 bareos-config = { path = "crates/bareos-config" }
 osd = { path = "crates/osd" }
 osd-ring = { path = "crates/osd/ring" }

@@ -27,6 +27,8 @@ pub struct JobShared {
     pub canceled: AtomicBool,
     /// Raw socket of the SD connection, to break a blocked read on cancel.
     pub sd_socket: Mutex<Option<TcpStream>>,
+    /// Close flag of a gRPC SD connection (the `sd_socket` of gRPC).
+    pub sd_grpc_close: Mutex<Option<Arc<AtomicBool>>>,
     /// Bandwidth limit of the SD connection (setbandwidth Job=).
     pub bw: Arc<BwState>,
     /// What `status` reports about the running job.
@@ -99,6 +101,7 @@ pub fn register(job: &str, sd_auth_key: &str) -> Arc<JobShared> {
         cv: Condvar::new(),
         canceled: AtomicBool::new(false),
         sd_socket: Mutex::new(None),
+        sd_grpc_close: Mutex::new(None),
         bw: Arc::new(BwState::default()),
         progress: Progress::default(),
     });
@@ -131,6 +134,9 @@ impl JobShared {
             // SetTimedOut()/SetTerminated() + kTimeoutSignal: wake a blocked
             // read, but do not close the connection to the SD.
             let _ = s.shutdown(std::net::Shutdown::Read);
+        }
+        if let Some(close) = self.sd_grpc_close.lock().unwrap_or_else(|e| e.into_inner()).as_ref() {
+            close.store(true, Ordering::SeqCst);
         }
         self.cv.notify_all();
     }
@@ -236,9 +242,56 @@ pub fn connect_storage(
     }
 }
 
+/// StorageCmd() over gRPC (Onesimus Storage Daemon, `StorageDaemon/Data`):
+/// the Director appended the SD's gRPC target to the storage command.
+/// "Hello Start Job <Job>" and CRAM-MD5 with the authorization key run
+/// inside the TLS stream as over BNET. An error makes the caller fall back
+/// to [`connect_storage`].
+pub fn connect_storage_grpc(
+    target: &onesimus_bnet_grpc::Target,
+    job: &str,
+    auth_key: &str,
+    client_name: &str,
+    shared: &JobShared,
+) -> Result<Connected, String> {
+    let io = onesimus_bnet_grpc::client::connect(target, onesimus_bnet_grpc::Rpc::StorageDaemonData, Some(Duration::from_secs(30)))
+        .map_err(|e| e.to_string())?;
+    let close = io.close_handle();
+    let mut sd = BnetStream::new(io);
+    sd.send_str(&format!("Hello Start Job {job}\n")).map_err(|e| e.to_string())?;
+    let auth = CramMd5Auth::new_raw(auth_key, &format!("R_CLIENT::{client_name}"), 2);
+    match auth.two_way_authenticate(&mut sd, false) {
+        Ok(r) if r.success => {}
+        Ok(_) => return Err("auth".into()),
+        Err(e) => return Err(format!("CRAM: {e}")),
+    }
+    let mut io = sd.into_inner();
+    // Jobs wait for the SD as long as a mount takes.
+    io.set_read_timeout(None);
+    *shared.sd_grpc_close.lock().unwrap_or_else(|e| e.into_inner()) = Some(close);
+    let transport = onesimus_bnet_grpc::TRANSPORT;
+    let infos = vec![
+        format!("Connected Storage daemon at {}:{}, encryption: {transport}\n", target.host, target.port),
+        format!("{}\n", tls_psk::cipher_message_string(Some(transport))),
+    ];
+    let stream: Box<dyn Rw> = Box::new(Limited { inner: Box::new(io) as Box<dyn Rw>, bw: shared.bw.clone() });
+    Ok(Connected { sd: BnetStream::new(stream), infos })
+}
+
 /// handle_stored_connection(): "Hello Storage calling Start Job <Job>";
 /// authenticate with the job's key and hand the connection to the job.
-pub fn handle_stored_connection(mut sd: SdStream, hello: &str, client_name: &str) {
+pub fn handle_stored_connection(sd: SdStream, hello: &str, client_name: &str) {
+    stored_connection(sd, hello, client_name, None);
+}
+
+/// [`handle_stored_connection`] for a gRPC stream (`FileDaemon/Data`);
+/// `close` breaks it on cancel.
+pub fn handle_stored_grpc_connection(sd: SdStream, hello: &str, client_name: &str, close: Arc<AtomicBool>) {
+    stored_connection(sd, hello, client_name, Some(close));
+}
+
+/// The common part of both: find the job, CRAM-MD5 with its key, deliver.
+fn stored_connection(mut sd: SdStream, hello: &str, client_name: &str, close: Option<Arc<AtomicBool>>) {
     let Some(job) = hello.trim_end().strip_prefix("Hello Storage calling Start Job ").map(|j| j.split_whitespace().next().unwrap_or("").to_string()) else {
         tracing::error!("Bad Hello command from Director: {hello}");
         return;
@@ -254,6 +307,9 @@ pub fn handle_stored_connection(mut sd: SdStream, hello: &str, client_name: &str
             tracing::debug!("OK Authentication Job {job}");
             let inner = sd.into_inner();
             let sd: SdStream = BnetStream::new(Box::new(Limited { inner, bw: shared.bw.clone() }));
+            if close.is_some() {
+                *shared.sd_grpc_close.lock().unwrap_or_else(|e| e.into_inner()) = close;
+            }
             shared.deliver_passive_sd(sd);
         }
         _ => tracing::error!("Unable to authenticate Storage daemon for job {job}"),
