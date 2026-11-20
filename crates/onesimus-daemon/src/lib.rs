@@ -59,6 +59,7 @@ pub mod handshake;
 pub mod logging;
 pub mod pidfile;
 pub mod privileges;
+pub mod version;
 #[cfg_attr(doc, aquamarine::aquamarine)]
 /// Signale: Abschalten (`SIGTERM`, `SIGINT`) und Neuladen (`SIGHUP`).
 ///
