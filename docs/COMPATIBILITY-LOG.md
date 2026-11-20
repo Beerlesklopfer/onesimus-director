@@ -184,9 +184,11 @@ Stand 17.10.2026; nur Punkte, die in einem Eintrag ausdrücklich offen stehen:
 - C-059 (Hinweis): `update jobid=… starttime=` und Run On Incoming Connect Interval fehlen.
 - C-086: auf PDC per Katalogabfrage klären, warum `list volumes pool=BGLAGE` nur BGLAGE-0015 zeigte.
 - S-13: eigener FD ohne PKI, Plugins, Heartbeat, client-initiierte Verbindungen, LMDB-Accurate.
-- Befehlsstatus im Wiki (`docs/wiki/commands`): noch 53 `parity_verified`, 31 `partial`,
+- ~~Befehlsstatus im Wiki (`docs/wiki/commands`): noch 53 `parity_verified`, 31 `partial`,
   4 `registered_unverified`, 26 Restore-Baum-Befehle `missing_context` vom 16.10.2026;
-  Auffrischung nach dem laufenden Volllauf.
+  Auffrischung nach dem laufenden Volllauf.~~ Aufgefrischt 20.11.2026 (`1232a32`) mit dem
+  Volllauf vom 18.10.2026: 60 `parity_verified`, 26 `partial`, 2 `registered_unverified`;
+  Restore-Baum 5 `parity_verified`, 21 `registered_unverified`.
 
 Erledigt seit der letzten Fassung dieses Abschnitts: C-074 entschieden und umgesetzt (S-10),
 C-080 behoben (S-01: Restore ohne Bootstrap endet wie im Original), RunScripts (S-07),
