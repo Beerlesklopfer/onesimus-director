@@ -14,6 +14,10 @@ Prints resources of the running configuration in configuration syntax; passwords
 .TP
 .B "show disabled"
 Disabled resources
+.IP
+Lists which jobs, clients and schedules are disabled. Without a further word all three lists are printed; jobs, clients or schedules limit the output to one list, any other word acts like none. In API mode 1 only the names are printed, in mode 2 the result is an object "disabled" with the lists jobs, clients and schedules.
+.IP
+Deviation from Bareos: odir shows the configured state, so a job disabled at runtime with the disable command does not appear here, whereas Bareos lists it.
 .SH ARGUMENTS
 .SS "show"
 .TP
@@ -117,6 +121,18 @@ Disabled schedules (keyword)
 .TP
 .B "show pool=Full client=fd"
 two resources
+.TP
+.B "show jobs"
+every job resource in configuration syntax
+.TP
+.B "show client=bareos\-fd verbose"
+one client including all directives at their default values
+.TP
+.B "show disabled"
+disabled jobs, clients and schedules
+.TP
+.B "show disabled schedules"
+only the disabled schedules
 .SH ORIGIN
 Bareos console command.
 .SH SEE ALSO

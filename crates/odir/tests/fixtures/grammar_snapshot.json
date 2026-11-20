@@ -25,6 +25,14 @@
           {
             "line": "purge volume all allpools yes",
             "explanation": "purge every Full, Used or Error volume (Onesimus)"
+          },
+          {
+            "line": "purge",
+            "explanation": "choose what to purge from the menu"
+          },
+          {
+            "line": "purge jobs client=bareos-fd jobstatus=E",
+            "explanation": "purge the failed jobs of bareos-fd"
           }
         ],
         "see_also": [
@@ -56,8 +64,20 @@
             "origin": "bareos",
             "description": "File records",
             "value": null,
-            "long": [],
-            "examples": [],
+            "long": [
+              "Deletes file records from the catalog regardless of retention periods, for one job (job= or jobid=), a client or a volume; the jobs themselves stay. Like every purge it prints a warning, needs full access to all resources and cannot be undone.",
+              "Onesimus deviation: the file records of the latest Full chain of a client and FileSet are skipped, and each purge runs in one transaction whose errors are reported instead of ignored."
+            ],
+            "examples": [
+              {
+                "line": "purge files jobid=599",
+                "explanation": "purge the file records of job 599"
+              },
+              {
+                "line": "purge files client=bareos-fd yes",
+                "explanation": "purge all file records of bareos-fd"
+              }
+            ],
             "see_also": [],
             "free_text": false,
             "args": [
@@ -134,8 +154,20 @@
             "origin": "bareos",
             "description": "Job records",
             "value": null,
-            "long": [],
-            "examples": [],
+            "long": [
+              "Deletes whole jobs with all their records regardless of retention periods, for a client, a volume or a pool. jobstatus= limits this to jobs with the given status letters (T, E, f, ...) or names such as error, separated by commas. The Director counts the jobs and asks Purge (yes/no)? unless yes is given. A volume left without jobs becomes Purged.",
+              "Onesimus deviation: jobs of the latest Full chain of a client and FileSet are skipped, and each purge runs in one transaction whose errors are reported."
+            ],
+            "examples": [
+              {
+                "line": "purge jobs volume=Full-0001 yes",
+                "explanation": "purge every job on volume Full-0001"
+              },
+              {
+                "line": "purge jobs pool=Incremental jobstatus=E,f",
+                "explanation": "purge the failed jobs of pool Incremental"
+              }
+            ],
             "see_also": [],
             "free_text": false,
             "args": [
@@ -224,8 +256,20 @@
               "description": "Volume name",
               "source": ".media"
             },
-            "long": [],
-            "examples": [],
+            "long": [
+              "Deletes every job on a volume from the catalog regardless of retention; the volume then becomes Purged and can be reused. Several volume= may be given, and each is confirmed on its own unless yes is given. action=truncate or all runs the ActionOnPurge on Purged volumes through the Storage Daemon, with storage=, pool= or allpools, devicetype= and drive=. A volume holding the latest Full chain of a client is never purged (Onesimus).",
+              "Onesimus extension: purge volume all purges every volume of pool= or of all permitted pools (allpools) whose status is in volstatus=, by default Full, Used and Error. Purged and Recycle volumes are never selected and Cleaning tapes cannot be purged. It never asks: exactly one of dryrun (preview) and yes is required, and refused volumes are skipped with their reason."
+            ],
+            "examples": [
+              {
+                "line": "purge volume action=truncate storage=File pool=Full",
+                "explanation": "truncate the purged volumes of pool Full"
+              },
+              {
+                "line": "purge volume all pool=Incremental volstatus=Error dryrun",
+                "explanation": "preview purging the Error volumes of Incremental (Onesimus)"
+              }
+            ],
             "see_also": [],
             "free_text": false,
             "args": [
@@ -387,8 +431,15 @@
             "origin": "bareos",
             "description": "Quota of a client",
             "value": null,
-            "long": [],
-            "examples": [],
+            "long": [
+              "Resets the quota counters of a client; without client= the client is chosen from a list. Like every purge it prints a warning and needs full access to all resources."
+            ],
+            "examples": [
+              {
+                "line": "purge quota client=bareos-fd",
+                "explanation": "reset the quota of bareos-fd"
+              }
+            ],
             "see_also": [],
             "free_text": false,
             "args": [
@@ -447,6 +498,14 @@
           {
             "line": ".acl delete console=ops jobacl",
             "explanation": "remove the catalog JobACL entries"
+          },
+          {
+            "line": ".acl clear console=ops",
+            "explanation": "remove all catalog ACL entries of a console"
+          },
+          {
+            "line": ".acl copy from=ops to=operator",
+            "explanation": "give a console the catalog ACL lists of another"
           }
         ],
         "see_also": [
@@ -463,8 +522,19 @@
             "origin": "bareos",
             "description": "File and catalog entries, effective result",
             "value": null,
-            "long": [],
-            "examples": [],
+            "long": [
+              "Shows per ACL type the file entries (first those of the console, then those of its profiles), the catalog entries and the effective result, plus the load state of the catalog ACL. list is also the default when no subcommand is given. Without console= the own console is shown, or all consoles for a console that may use configure; the ACLs of another console need configure. Catalog entries that only allow what the file ACL forbids are marked as having no effect."
+            ],
+            "examples": [
+              {
+                "line": ".acl list",
+                "explanation": "the ACLs of the own console"
+              },
+              {
+                "line": ".acl list console=operator",
+                "explanation": "the file, catalog and effective ACLs of another console"
+              }
+            ],
             "see_also": [],
             "free_text": false,
             "args": [
@@ -491,8 +561,16 @@
             "origin": "bareos",
             "description": "Replace catalog entries of types",
             "value": null,
-            "long": [],
-            "examples": [],
+            "long": [
+              "Replaces the catalog list of the console for every ACL type given. Entries are evaluated like a Bareos list: the first matching entry decides, ! forbids, regular expressions and *all* work as in the file, and a name no entry matches is forbidden. The change takes effect at once. Needs the CommandACL .acl and configure.",
+              "The catalog ACL of another console may be changed freely, since it can never go beyond that console's file ACL. On the own console only a narrowing change is allowed: a first list for a type without catalog entries, or a list made from the old one only by inserting ! entries and removing entries without !."
+            ],
+            "examples": [
+              {
+                "line": ".acl set console=ops clientacl=bareos-fd,!old-fd",
+                "explanation": "restrict a console to some clients"
+              }
+            ],
             "see_also": [],
             "free_text": false,
             "args": [
@@ -639,8 +717,19 @@
             "origin": "bareos",
             "description": "Delete catalog entries",
             "value": null,
-            "long": [],
-            "examples": [],
+            "long": [
+              "Removes the given entries from the catalog ACL of the console; a type key without a value removes the whole catalog list of that type, which then no longer restricts. An entry the catalog ACL does not have is an error and nothing changes. Works also for a console that is no longer configured but still has catalog entries. Needs the CommandACL .acl and configure; on the own console only removing entries without ! is allowed."
+            ],
+            "examples": [
+              {
+                "line": ".acl delete console=ops commandacl=status",
+                "explanation": "remove one catalog entry"
+              },
+              {
+                "line": ".acl delete console=ops poolacl",
+                "explanation": "remove the whole catalog pool list"
+              }
+            ],
             "see_also": [],
             "free_text": false,
             "args": [
@@ -787,8 +876,15 @@
             "origin": "bareos",
             "description": "Delete every catalog entry of a console",
             "value": null,
-            "long": [],
-            "examples": [],
+            "long": [
+              "Removes all catalog ACL entries of the console, so only its file ACL applies again. Works also for a console that is no longer configured. Needs the CommandACL .acl and configure and is refused on the own console, since it could widen the rights."
+            ],
+            "examples": [
+              {
+                "line": ".acl clear console=ops",
+                "explanation": "drop all catalog restrictions of a console"
+              }
+            ],
             "see_also": [],
             "free_text": false,
             "args": [
@@ -815,8 +911,15 @@
             "origin": "bareos",
             "description": "Copy the catalog entries of a console",
             "value": null,
-            "long": [],
-            "examples": [],
+            "long": [
+              "Gives the console to= the catalog ACL lists of the console from=. Types that from= has no catalog entries for lose their entries at to=. The file ACLs of both consoles stay as they are. Needs the CommandACL .acl and configure."
+            ],
+            "examples": [
+              {
+                "line": ".acl copy from=ops to=gui-anna",
+                "explanation": "apply the catalog restrictions of ops to gui-anna"
+              }
+            ],
             "see_also": [],
             "free_text": false,
             "args": [
@@ -875,6 +978,14 @@
           {
             "line": "llist volume=Full-0001",
             "explanation": "every field of one volume"
+          },
+          {
+            "line": "list volumes pool=Full",
+            "explanation": "the volumes of the pool Full"
+          },
+          {
+            "line": "list jobs jobstatus=E,f days=7",
+            "explanation": "jobs that failed during the last week"
           }
         ],
         "see_also": [
@@ -966,8 +1077,15 @@
             "origin": "bareos",
             "description": "Base files of a job",
             "value": null,
-            "long": [],
-            "examples": [],
+            "long": [
+              "Lists the base files of a job that used a Base job, that is the files taken over from the base backup instead of being saved again; jobid= or ujobid= is required."
+            ],
+            "examples": [
+              {
+                "line": "list basefiles jobid=42",
+                "explanation": "the base files referenced by job 42"
+              }
+            ],
             "see_also": [],
             "free_text": false,
             "args": [
@@ -1005,8 +1123,20 @@
             "origin": "bareos",
             "description": "Backups of a client",
             "value": null,
-            "long": [],
-            "examples": [],
+            "long": [
+              "Lists the backups of one client; client= is required. fileset= limits the listing to one FileSet, fileset=any includes all of them. jobstatus=, level=, days= and hours= filter as with list jobs, order=asc or order=desc sorts by start time; any other order value is an error.",
+              "Without client= the reply is \"missing parameter: client\". A FileSet outside the FileSet ACL of the console gives \"Access to specified FileSet not allowed.\""
+            ],
+            "examples": [
+              {
+                "line": "list backups client=bareos-fd fileset=any order=desc limit=5",
+                "explanation": "the five newest backups of bareos-fd"
+              },
+              {
+                "line": "list backups client=bareos-fd level=Full",
+                "explanation": "the full backups of bareos-fd"
+              }
+            ],
             "see_also": [],
             "free_text": false,
             "args": [
@@ -1141,8 +1271,15 @@
               "description": "Client name",
               "source": ".clients"
             },
-            "long": [],
-            "examples": [],
+            "long": [
+              "Shows the catalog record of one client by name. list client without a value is not a valid keyword and gives \"Unknown list keyword\"."
+            ],
+            "examples": [
+              {
+                "line": "list client=bareos-fd",
+                "explanation": "the catalog record of bareos-fd"
+              }
+            ],
             "see_also": [],
             "free_text": false,
             "args": [],
@@ -1155,8 +1292,19 @@
             "origin": "bareos",
             "description": "Every client",
             "value": null,
-            "long": [],
-            "examples": [],
+            "long": [
+              "Lists every client record of the catalog with id, name, file retention and job retention; llist adds the uname and autoprune setting. enabled or disabled keep only clients in that state in the configuration, current only clients still configured."
+            ],
+            "examples": [
+              {
+                "line": "list clients",
+                "explanation": "all clients of the catalog"
+              },
+              {
+                "line": "list clients disabled",
+                "explanation": "clients disabled in the configuration"
+              }
+            ],
             "see_also": [],
             "free_text": false,
             "args": [],
@@ -1169,8 +1317,19 @@
             "origin": "bareos",
             "description": "Copies of jobs",
             "value": null,
-            "long": [],
-            "examples": [],
+            "long": [
+              "Lists copy jobs together with the job they were copied from and the media type. jobid= takes one JobId or a comma-separated list and limits the listing to copies of or made by these jobs. If there are no copy jobs, the reply is empty."
+            ],
+            "examples": [
+              {
+                "line": "list copies",
+                "explanation": "all copy jobs of the catalog"
+              },
+              {
+                "line": "list copies jobid=42,43",
+                "explanation": "the copies of jobs 42 and 43"
+              }
+            ],
             "see_also": [],
             "free_text": false,
             "args": [
@@ -1196,8 +1355,15 @@
             "origin": "bareos",
             "description": "Files of a job",
             "value": null,
-            "long": [],
-            "examples": [],
+            "long": [
+              "Lists the paths of all files saved by one job, including the base files it refers to; jobid= or ujobid= is required. limit= and offset= do not shorten the text listing, they only appear in the range information of API mode 2."
+            ],
+            "examples": [
+              {
+                "line": "list files jobid=42",
+                "explanation": "every file saved by job 42"
+              }
+            ],
             "see_also": [],
             "free_text": false,
             "args": [
@@ -1247,8 +1413,19 @@
             "origin": "bareos",
             "description": "Every FileSet",
             "value": null,
-            "long": [],
-            "examples": [],
+            "long": [
+              "Lists every FileSet record of the catalog with id, name, MD5 sum, creation time and FileSet text. A FileSet gets a new record whenever its definition changes; current keeps only FileSets still defined in the configuration."
+            ],
+            "examples": [
+              {
+                "line": "list filesets",
+                "explanation": "all FileSet records of the catalog"
+              },
+              {
+                "line": "list filesets current",
+                "explanation": "only FileSets still present in the configuration"
+              }
+            ],
             "see_also": [],
             "free_text": false,
             "args": [],
@@ -1273,8 +1450,19 @@
               "description": "FileSet name",
               "source": ".filesets"
             },
-            "long": [],
-            "examples": [],
+            "long": [
+              "Shows one FileSet record of the catalog, including the stored FileSet text and its MD5 sum. The record is selected by filesetid= or by the job that used it with jobid= or ujobid=; without one of them the command reports an error."
+            ],
+            "examples": [
+              {
+                "line": "list fileset jobid=42",
+                "explanation": "the FileSet used by job 42"
+              },
+              {
+                "line": "list fileset filesetid=3",
+                "explanation": "the FileSet record with id 3"
+              }
+            ],
             "see_also": [],
             "free_text": false,
             "args": [
@@ -1324,8 +1512,24 @@
             "origin": "bareos",
             "description": "Jobs",
             "value": null,
-            "long": [],
-            "examples": [],
+            "long": [
+              "Lists the jobs of the catalog, one row per job. The filters can be combined: job= or jobname=, client=, jobstatus= (letters such as T, E, f or names such as error, comma-separated), jobtype= (letter or exact name such as Backup), joblevel= or level= (F, I, D or Full, Incremental, Differential), volume=, pool=, days= and hours=. last keeps only the latest run per job name, count prints just the number of rows, reverse shows the newest first.",
+              "limit= and offset= page through the result. For a console with ACLs the limit is applied before the rows the console may not see are removed, so a limited listing can come out shorter or even empty. An unknown jobtype or level is an error."
+            ],
+            "examples": [
+              {
+                "line": "list jobs client=bareos-fd last",
+                "explanation": "the latest run of every job name on bareos-fd"
+              },
+              {
+                "line": "list jobs level=Full jobstatus=T days=30",
+                "explanation": "successful full backups of the last 30 days"
+              },
+              {
+                "line": "list jobs count",
+                "explanation": "the number of jobs in the catalog"
+              }
+            ],
             "see_also": [],
             "free_text": false,
             "args": [
@@ -1560,8 +1764,19 @@
               "description": "Job name",
               "source": ".jobs"
             },
-            "long": [],
-            "examples": [],
+            "long": [
+              "Lists the jobs with the given job name; it works like list jobs job=<name> and accepts the same filters."
+            ],
+            "examples": [
+              {
+                "line": "list job=BackupClient1 limit=5",
+                "explanation": "the first five runs of BackupClient1"
+              },
+              {
+                "line": "list job=BackupClient1 jobstatus=E",
+                "explanation": "the failed runs of BackupClient1"
+              }
+            ],
             "see_also": [],
             "free_text": false,
             "args": [
@@ -2005,8 +2220,15 @@
               "value_optional": false,
               "description": "Job IDs"
             },
-            "long": [],
-            "examples": [],
+            "long": [
+              "Lists exactly the job with this JobId; llist jobid= shows all its fields one below the other. An unknown JobId gives an empty reply, and list jobid without a value reports \"Missing jobid parameter\"."
+            ],
+            "examples": [
+              {
+                "line": "list jobid=42",
+                "explanation": "the catalog row of job 42"
+              }
+            ],
             "see_also": [],
             "free_text": false,
             "args": [],
@@ -2044,8 +2266,19 @@
             "origin": "bareos",
             "description": "Log of a job",
             "value": null,
-            "long": [],
-            "examples": [],
+            "long": [
+              "Prints the stored log of one job with time stamps; jobid= or ujobid= selects the job. count prints only the number of log lines. An unknown JobId or a job the console may not access gives \"jobid not found in db, access to job or client denied by ACL, or client not found in db\"."
+            ],
+            "examples": [
+              {
+                "line": "list joblog jobid=42",
+                "explanation": "the complete log of job 42"
+              },
+              {
+                "line": "list joblog jobid=42 count",
+                "explanation": "the number of log lines of job 42"
+              }
+            ],
             "see_also": [],
             "free_text": false,
             "args": [
@@ -2107,8 +2340,15 @@
             "origin": "bareos",
             "description": "Volumes of a job",
             "value": null,
-            "long": [],
-            "examples": [],
+            "long": [
+              "Shows which volumes a job wrote, with the first and last file index on each volume; without jobid= or ujobid= the records of all jobs are listed. llist adds the media id, start and end file and block."
+            ],
+            "examples": [
+              {
+                "line": "list jobmedia jobid=42",
+                "explanation": "the volumes written by job 42"
+              }
+            ],
             "see_also": [],
             "free_text": false,
             "args": [
@@ -2146,8 +2386,15 @@
             "origin": "bareos",
             "description": "Totals per job name",
             "value": null,
-            "long": [],
-            "examples": [],
+            "long": [
+              "Shows the number of jobs, files and bytes per job name for backup, archive and copy jobs, followed by the totals over all of them. In API mode 2 the rows are under \"jobs\" and the sums under \"jobtotals\"."
+            ],
+            "examples": [
+              {
+                "line": "list jobtotals",
+                "explanation": "jobs, files and bytes per job name and in total"
+              }
+            ],
             "see_also": [],
             "free_text": false,
             "args": [],
@@ -2162,8 +2409,15 @@
             "origin": "bareos",
             "description": "Statistics of a job",
             "value": null,
-            "long": [],
-            "examples": [],
+            "long": [
+              "Lists the statistics samples (sample time, files and bytes) recorded for a running or finished job; jobid= is required. Without it, or for a job the console may not access, the reply is \"no jobid given\"; a job without statistics gives \"No results to list.\" The alias jobstats is accepted."
+            ],
+            "examples": [
+              {
+                "line": "list jobstatistics jobid=42",
+                "explanation": "the statistics samples of job 42"
+              }
+            ],
             "see_also": [],
             "free_text": false,
             "args": [
@@ -2202,8 +2456,19 @@
             "origin": "bareos",
             "description": "Director log",
             "value": null,
-            "long": [],
-            "examples": [],
+            "long": [
+              "Prints the most recent log lines of all jobs from the catalog, by default the last five; limit= changes the number. client= restricts them to jobs of one client, an unknown client gives \"invalid client argument\". The lines appear oldest first, reverse puts the newest first."
+            ],
+            "examples": [
+              {
+                "line": "list log limit=20",
+                "explanation": "the last 20 log lines of all jobs"
+              },
+              {
+                "line": "list log client=bareos-fd reverse",
+                "explanation": "the latest log lines of bareos-fd, newest first"
+              }
+            ],
             "see_also": [],
             "free_text": false,
             "args": [
@@ -2254,8 +2519,19 @@
               "description": "Volume name",
               "source": ".media"
             },
-            "long": [],
-            "examples": [],
+            "long": [
+              "Alias of list volumes: without a value it lists the volumes grouped by pool and takes the same keywords all, pool=, jobid= and ujobid=; with a value, media=<name>, it shows that single volume like list volume=."
+            ],
+            "examples": [
+              {
+                "line": "list media pool=Incremental",
+                "explanation": "the volumes of the pool Incremental"
+              },
+              {
+                "line": "list media=Full-0001",
+                "explanation": "one volume by name"
+              }
+            ],
             "see_also": [],
             "free_text": false,
             "args": [
@@ -2320,8 +2596,20 @@
             "origin": "bareos",
             "description": "Next volume of a job",
             "value": null,
-            "long": [],
-            "examples": [],
+            "long": [
+              "Shows which volume a job would write next, once for every scheduled run within the coming days; days= sets how many days to look ahead (at most 50, other values are ignored with a warning). Without job= the Director lists the job resources and asks for one; a dot aborts. For jobs that write no volume, such as restore jobs, it reports that no next volume can be found.",
+              "Deviation from Bareos: for an unknown job odir reports success, whereas Bareos returns an error. In API mode 2 the result is empty."
+            ],
+            "examples": [
+              {
+                "line": "list nextvolume job=BackupClient1",
+                "explanation": "the next volume BackupClient1 will use"
+              },
+              {
+                "line": "list nextvolume job=BackupClient1 days=7",
+                "explanation": "the next volumes for the runs of the coming week"
+              }
+            ],
             "see_also": [],
             "free_text": false,
             "args": [
@@ -2360,8 +2648,15 @@
             "origin": "bareos",
             "description": "Every pool",
             "value": null,
-            "long": [],
-            "examples": [],
+            "long": [
+              "Lists every pool record of the catalog with id, name, number of volumes, maximum volumes, pool type and label format. llist adds all other fields of the records."
+            ],
+            "examples": [
+              {
+                "line": "list pools",
+                "explanation": "all pools of the catalog"
+              }
+            ],
             "see_also": [],
             "free_text": false,
             "args": [],
@@ -2386,8 +2681,15 @@
               "description": "Pool name",
               "source": ".pools"
             },
-            "long": [],
-            "examples": [],
+            "long": [
+              "Shows the catalog record of one pool by name; poolid= selects it by id instead."
+            ],
+            "examples": [
+              {
+                "line": "list pool=Full",
+                "explanation": "the catalog record of the pool Full"
+              }
+            ],
             "see_also": [],
             "free_text": false,
             "args": [],
@@ -2425,8 +2727,15 @@
             "origin": "bareos",
             "description": "Every storage",
             "value": null,
-            "long": [],
-            "examples": [],
+            "long": [
+              "Lists every storage record of the catalog. current, enabled and disabled restrict the listing to storages still configured or in that state."
+            ],
+            "examples": [
+              {
+                "line": "list storages",
+                "explanation": "all storages of the catalog"
+              }
+            ],
             "see_also": [],
             "free_text": false,
             "args": [],
@@ -2465,8 +2774,24 @@
             "origin": "bareos",
             "description": "Volumes",
             "value": null,
-            "long": [],
-            "examples": [],
+            "long": [
+              "Lists the volumes of the catalog grouped by pool. all prints them in one table, pool= restricts the listing to one pool, jobid= or ujobid= shows only the names of the volumes a job used, and count prints the number of volumes per pool. media is an alias with the same keywords.",
+              "If the pool given with pool= is not in the catalog, the Director lists the defined pools and asks for a selection; a dot aborts. In API mode 2 there is no question and the error is returned directly."
+            ],
+            "examples": [
+              {
+                "line": "list volumes pool=Full",
+                "explanation": "the volumes of the pool Full"
+              },
+              {
+                "line": "list volumes all",
+                "explanation": "all volumes in a single table"
+              },
+              {
+                "line": "list volumes jobid=42",
+                "explanation": "the names of the volumes job 42 wrote to"
+              }
+            ],
             "see_also": [],
             "free_text": false,
             "args": [
@@ -2553,8 +2878,15 @@
               "description": "Volume name",
               "source": ".media"
             },
-            "long": [],
-            "examples": [],
+            "long": [
+              "Shows exactly one volume by its name, with status, bytes, retention, slot, media type and last write time. volumeid= and mediaid= select it by its media id instead."
+            ],
+            "examples": [
+              {
+                "line": "list volume=Full-0001",
+                "explanation": "the catalog record of Full-0001"
+              }
+            ],
             "see_also": [],
             "free_text": false,
             "args": [],
@@ -2615,10 +2947,17 @@
             "aliases": [],
             "dot": false,
             "origin": "bareos",
-            "description": "Every schedule",
+            "description": "Not a catalog list: answered as unknown keyword (see show schedules)",
             "value": null,
-            "long": [],
-            "examples": [],
+            "long": [
+              "Schedules are configuration resources and have no table in the catalog, so like Bareos odir answers \"Unknown list keyword: schedules\". Use show schedules for the schedule resources and show disabled schedules for the disabled ones."
+            ],
+            "examples": [
+              {
+                "line": "list schedules disabled",
+                "explanation": "answered with Unknown list keyword, use show disabled schedules instead"
+              }
+            ],
             "see_also": [],
             "free_text": false,
             "args": [],
@@ -2649,6 +2988,10 @@
           {
             "line": ".grammar command=purge",
             "explanation": "only purge"
+          },
+          {
+            "line": ".grammar command=list",
+            "explanation": "only the grammar of list and its subcommands"
           }
         ],
         "see_also": [

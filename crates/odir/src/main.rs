@@ -34,6 +34,7 @@ mod sd_grpc;
 mod fd_progress;
 mod fsm;
 mod grammar_table;
+mod grammar_docs;
 mod grpc;
 mod internal_jobs;
 mod job_manager;

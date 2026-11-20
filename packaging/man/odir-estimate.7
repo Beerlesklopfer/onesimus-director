@@ -8,7 +8,9 @@ estimate [job=<job>] [client=<client>] [fd=<fd>] [fileset=<fileset>] [level=<lev
 .fi
 .SH DESCRIPTION
 .PP
-Performs FileSet estimate, listing gives full listing.
+Asks the File Daemon how many files and bytes a backup job would save at the chosen level, without starting a job. The Director connects to the client, sends fileset and level and prints the answer; with listing every file that would be saved is printed as well. Without job= the Director offers the list of jobs.
+.PP
+level=, client= (or fd=), fileset= and accurate= override the values of the job. Only native clients are supported, not NDMP. Nothing is changed; for Incremental and Differential the catalog is only read to find the last matching job.
 .SH ARGUMENTS
 .SS "estimate"
 .TP
@@ -35,6 +37,13 @@ List every file (keyword)
 .TP
 .B "catalog=<catalog>"
 Catalog name (name; values from .catalogs)
+.SH EXAMPLES
+.TP
+.B "estimate job=BackupClient1 level=Full"
+size of a full backup of BackupClient1
+.TP
+.B "estimate job=BackupClient1 level=Incremental listing"
+every file the next incremental would save
 .SH ORIGIN
 Bareos console command.
 .SH SEE ALSO

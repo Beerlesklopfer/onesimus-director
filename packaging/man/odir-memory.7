@@ -8,7 +8,11 @@ memory
 .fi
 .SH DESCRIPTION
 .PP
-Print current memory usage.
+Despite its description this command reports no memory usage. Like Bareos it prints only the header lines of status director: name, version, build date and operating system of the Director, start time, number of finished and running jobs, database type and binary kind. The command only reads; further words are ignored.
+.SH EXAMPLES
+.TP
+.B "memory"
+header lines of the Director status
 .SH ORIGIN
 Bareos console command.
 .SH SEE ALSO

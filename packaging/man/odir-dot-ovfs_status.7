@@ -8,7 +8,9 @@ odir\-dot\-ovfs_status \- \&.ovfs_status: Show whether restore trees use the ovf
 .fi
 .SH DESCRIPTION
 .PP
-Show whether restore trees use the ovfs extension or the Director fallback.
+Onesimus extension: shows whether the PostgreSQL extension ovfs is installed and usable in the catalog database and which path answers the .ovfs commands, the extension or the equivalent plain SQL fallback in the Director. Both give the same results; the extension is faster on large catalogs. If the extension is not usable the reason is shown.
+.PP
+refresh checks the extension again instead of showing the stored result. json prints the result as one JSON line in every API mode.
 .SH ARGUMENTS
 .SS "\&.ovfs_status"
 .TP
@@ -17,6 +19,13 @@ Check the extension again now (keyword)
 .TP
 .B "json"
 Print the JSON object as text (keyword)
+.SH EXAMPLES
+.TP
+.B "\&.ovfs_status"
+extension state and restore tree path
+.TP
+.B "\&.ovfs_status refresh json"
+check again and print JSON
 .SH ORIGIN
 Onesimus extension. The Bareos Director does not know this command and answers "is an invalid command".
 .SH SEE ALSO

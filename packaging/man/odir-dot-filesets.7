@@ -8,7 +8,11 @@ odir\-dot\-filesets \- \&.filesets: List all filesets
 .fi
 .SH DESCRIPTION
 .PP
-List all filesets.
+Prints the names of all FileSet resources of the Director configuration, one per line, for completion of fileset= (for example with run or restore) and selection lists. Only FileSets allowed by the console's FileSet ACL appear. It takes no arguments, reads only the configuration and changes nothing.
+.SH EXAMPLES
+.TP
+.B "\&.filesets"
+list all visible filesets
 .SH ORIGIN
 Bareos console command.
 .SH SEE ALSO

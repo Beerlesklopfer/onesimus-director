@@ -23,6 +23,16 @@ Output format (one of a fixed set; values: json, text)
 .TP
 .B "compact=<yes|no>"
 Compact JSON (yes or no)
+.SH EXAMPLES
+.TP
+.B "\&.grpc"
+the state of the session and whether the gRPC service is enabled
+.TP
+.B "\&.grpc on compact=yes"
+switch to gRPC mode with compact JSON
+.TP
+.B "\&.grpc off"
+return to the API mode used before .grpc on
 .SH ORIGIN
 Onesimus extension. The Bareos Director does not know this command and answers "is an invalid command".
 .SH SEE ALSO

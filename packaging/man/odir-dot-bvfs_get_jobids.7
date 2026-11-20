@@ -8,7 +8,9 @@ odir\-dot\-bvfs_get_jobids \- \&.bvfs_get_jobids: Get jobids required for a rest
 .fi
 .SH DESCRIPTION
 .PP
-Get jobids required for a restore.
+Returns the chain of JobIds needed to restore the state of a job: the Full backup, the last Differential and all Incrementals up to that job, as one comma separated line. The list is the jobid= argument of the other .bvfs commands. ujobid= gives the job by its unique job name instead and takes precedence. all combines the chains of all filesets of the client.
+.PP
+For a Base job only its own JobId is returned. JobIds the console may not see by its job, client or fileset ACL are left out. The command only reads the catalog; the OVFS counterpart is .ovfs_latest.
 .SH ARGUMENTS
 .SS "\&.bvfs_get_jobids"
 .TP
@@ -20,6 +22,13 @@ Unique job name (text)
 .TP
 .B "all"
 Every job of the chain (keyword)
+.SH EXAMPLES
+.TP
+.B "\&.bvfs_get_jobids jobid=628"
+the job chain for restoring job 628
+.TP
+.B "\&.bvfs_get_jobids jobid=628 all"
+the chains of all filesets of the client
 .SH ORIGIN
 Bareos console command.
 .SH SEE ALSO

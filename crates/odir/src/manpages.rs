@@ -127,6 +127,11 @@ fn paragraphs(node: &Node) -> Vec<String> {
     }
 }
 
+/// The examples of a command and then of its subcommands, in tree order.
+fn examples<'a>(all: &[(String, &'a Node)]) -> Vec<&'a (String, String)> {
+    all.iter().flat_map(|(_, node)| node.examples.iter()).collect()
+}
+
 /// The nodes that have arguments, with their path.
 fn argument_blocks(node: &Node) -> Vec<(String, &Node)> {
     let mut all = Vec::new();
@@ -160,6 +165,9 @@ pub fn help_text(node: &Node) -> String {
         out.push_str("\nSUBCOMMANDS\n");
         for (path, sub) in all.iter().skip(1) {
             out.push_str(&format!("  {path}\n      {}\n", sub.description));
+            for paragraph in &sub.long {
+                out.push_str(&format!("\n      {paragraph}\n"));
+            }
         }
     }
     let blocks = argument_blocks(node);
@@ -172,9 +180,10 @@ pub fn help_text(node: &Node) -> String {
             }
         }
     }
-    if !node.examples.is_empty() {
+    let examples = examples(&all);
+    if !examples.is_empty() {
         out.push_str("\nEXAMPLES\n");
-        for (line, text) in &node.examples {
+        for (line, text) in examples {
             out.push_str(&format!("  {line}\n      {text}\n"));
         }
     }
@@ -208,6 +217,9 @@ fn command_body(node: &Node, page: bool) -> String {
         out.push_str(&section("SUBCOMMANDS"));
         for (path, sub) in all.iter().skip(1) {
             out.push_str(&format!(".TP\n.B {}\n{}\n", roff_arg(path), roff(&sub.description)));
+            for paragraph in &sub.long {
+                out.push_str(&format!(".IP\n{}\n", roff(paragraph)));
+            }
         }
     }
     let blocks = argument_blocks(node);
@@ -224,9 +236,10 @@ fn command_body(node: &Node, page: bool) -> String {
             }
         }
     }
-    if !node.examples.is_empty() {
+    let examples = examples(&all);
+    if !examples.is_empty() {
         out.push_str(&section("EXAMPLES"));
-        for (line, text) in &node.examples {
+        for (line, text) in examples {
             out.push_str(&format!(".TP\n.B {}\n{}\n", roff_arg(line), roff(text)));
         }
     }

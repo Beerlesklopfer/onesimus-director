@@ -6,5 +6,9 @@ USAGE
 DESCRIPTION
   Prints the Director's name, version and build date.
 
+EXAMPLES
+  version
+      name, version and build date of the running Director
+
 ORIGIN
   Bareos console command.

@@ -8,7 +8,13 @@ odir\-dot\-quit \- \&.quit: Close connection
 .fi
 .SH DESCRIPTION
 .PP
-Close connection.
+Ends the console session: the Director closes the connection without sending text. It is the dot\-command form of quit and exit meant for programs. Running jobs continue. Further words on the line are ignored.
+.PP
+In API mode 1 the Director sends the signals CMD_BEGIN and CMD_OK before closing, in mode 2 additionally an empty JSON\-RPC result; no MAIN_PROMPT follows in any mode. If the Command ACL does not allow .quit, the connection stays open.
+.SH EXAMPLES
+.TP
+.B "\&.quit"
+close the connection
 .SH ORIGIN
 Bareos console command.
 .SH SEE ALSO

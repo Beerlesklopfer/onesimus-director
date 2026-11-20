@@ -8,7 +8,9 @@ rerun [jobid=<jobid>[,...]] [since_jobid=<since_jobid>] [until_jobid=<until_jobi
 .fi
 .SH DESCRIPTION
 .PP
-Rerun a job.
+Starts earlier jobs again with the parameters they ran with (job, level, client, fileset, pool). Jobs are chosen by JobId, by a JobId range with since_jobid= and until_jobid=, or by a time window with days= and hours=. For every job the Director shows the run summary and asks yes, mod or no; yes on the command line starts all chosen jobs without asking.
+.PP
+since_jobid=, days= and hours= consider only jobs that ended with a fatal error (status f); for days= and hours= the scheduled start time counts, and both values add up. until_jobid= is only valid together with since_jobid=. Before rerunning several jobs found this way the Director lists the JobIds and asks for confirmation.
 .SH ARGUMENTS
 .SS "rerun"
 .TP
@@ -29,6 +31,16 @@ Failed jobs of the last hours (number)
 .TP
 .B "yes"
 Do not ask (keyword)
+.SH EXAMPLES
+.TP
+.B "rerun jobid=42"
+run job 42 again with its original parameters
+.TP
+.B "rerun days=1 yes"
+restart every job that failed during the last day
+.TP
+.B "rerun since_jobid=100 until_jobid=120"
+failed jobs between JobId 100 and 120
 .SH ORIGIN
 Bareos console command.
 .SH SEE ALSO

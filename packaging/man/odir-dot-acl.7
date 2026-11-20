@@ -20,18 +20,30 @@ set, delete, clear and copy need the CommandACL .acl and configure. Entries are 
 .TP
 .B "\&.acl list"
 File and catalog entries, effective result
+.IP
+Shows per ACL type the file entries (first those of the console, then those of its profiles), the catalog entries and the effective result, plus the load state of the catalog ACL. list is also the default when no subcommand is given. Without console= the own console is shown, or all consoles for a console that may use configure; the ACLs of another console need configure. Catalog entries that only allow what the file ACL forbids are marked as having no effect.
 .TP
 .B "\&.acl set"
 Replace catalog entries of types
+.IP
+Replaces the catalog list of the console for every ACL type given. Entries are evaluated like a Bareos list: the first matching entry decides, ! forbids, regular expressions and *all* work as in the file, and a name no entry matches is forbidden. The change takes effect at once. Needs the CommandACL .acl and configure.
+.IP
+The catalog ACL of another console may be changed freely, since it can never go beyond that console's file ACL. On the own console only a narrowing change is allowed: a first list for a type without catalog entries, or a list made from the old one only by inserting ! entries and removing entries without !.
 .TP
 .B "\&.acl delete"
 Delete catalog entries
+.IP
+Removes the given entries from the catalog ACL of the console; a type key without a value removes the whole catalog list of that type, which then no longer restricts. An entry the catalog ACL does not have is an error and nothing changes. Works also for a console that is no longer configured but still has catalog entries. Needs the CommandACL .acl and configure; on the own console only removing entries without ! is allowed.
 .TP
 .B "\&.acl clear"
 Delete every catalog entry of a console
+.IP
+Removes all catalog ACL entries of the console, so only its file ACL applies again. Works also for a console that is no longer configured. Needs the CommandACL .acl and configure and is refused on the own console, since it could widen the rights.
 .TP
 .B "\&.acl copy"
 Copy the catalog entries of a console
+.IP
+Gives the console to= the catalog ACL lists of the console from=. Types that from= has no catalog entries for lose their entries at to=. The file ACLs of both consoles stay as they are. Needs the CommandACL .acl and configure.
 .SH ARGUMENTS
 .SS "\&.acl list"
 .TP
@@ -126,6 +138,33 @@ restrict ops
 .TP
 .B "\&.acl delete console=ops jobacl"
 remove the catalog JobACL entries
+.TP
+.B "\&.acl clear console=ops"
+remove all catalog ACL entries of a console
+.TP
+.B "\&.acl copy from=ops to=operator"
+give a console the catalog ACL lists of another
+.TP
+.B "\&.acl list"
+the ACLs of the own console
+.TP
+.B "\&.acl list console=operator"
+the file, catalog and effective ACLs of another console
+.TP
+.B "\&.acl set console=ops clientacl=bareos\-fd,!old\-fd"
+restrict a console to some clients
+.TP
+.B "\&.acl delete console=ops commandacl=status"
+remove one catalog entry
+.TP
+.B "\&.acl delete console=ops poolacl"
+remove the whole catalog pool list
+.TP
+.B "\&.acl clear console=ops"
+drop all catalog restrictions of a console
+.TP
+.B "\&.acl copy from=ops to=gui\-anna"
+apply the catalog restrictions of ops to gui\-anna
 .SH ORIGIN
 Onesimus extension. The Bareos Director does not know this command and answers "is an invalid command".
 .SH SEE ALSO

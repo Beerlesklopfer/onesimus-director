@@ -117,6 +117,15 @@ Do not ask (keyword)
 .TP
 .B "run job=BackupClient1 level=Full yes"
 start a full backup without asking
+.TP
+.B "run job=BackupClient1"
+show the job settings and ask yes, mod or no
+.TP
+.B "run job=BackupClient1 level=Incremental pool=File when=\(dq2026\-11\-21 22:00:00\(dq yes"
+schedule an incremental for tomorrow night
+.TP
+.B "run job=RestoreFiles jobid=42 where=/tmp/bareos\-restores replace=never yes"
+restore the files of job 42 without overwriting
 .SH ORIGIN
 Bareos console command.
 .SH SEE ALSO

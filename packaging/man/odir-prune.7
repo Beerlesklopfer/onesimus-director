@@ -18,18 +18,34 @@ Removes expired catalog records, respecting the retention periods.
 .TP
 .B "prune files"
 File records
+.IP
+Removes file records whose File Retention has expired, for one client (client=) or for the retention of a pool (pool=); without client= the client is chosen from a list. The Director shows the retention period and asks yes/mod/no, where mod sets a different period for the running Director until the next reload; yes skips the question. Full access to the involved resources is required.
+.IP
+Onesimus deviation: the file records of the latest Full chain of every client and FileSet are always kept.
 .TP
 .B "prune jobs"
 Job records
+.IP
+Removes job records whose Job Retention has expired, for one client (client=), a pool (pool=) or a job type (jobtype=). The Director shows the retention period and asks yes/mod/no unless yes is given. Full access to the involved resources is required.
+.IP
+Onesimus deviation: the latest successful Full chain of every client and FileSet name is never pruned, even if it is older than the retention and even when job, FileSet or client are no longer configured. If that chain cannot be determined, nothing is deleted.
 .TP
 .B "prune volume[=<volume>]"
 Volume records
+.IP
+Removes the jobs of a volume whose Volume Retention has expired; the volume must have status Full or Used. Without a name the pool and volume are selected in a dialogue. all prunes every volume, of one pool with pool=. The Director asks yes/mod/no unless yes is given.
+.IP
+Onesimus deviation: a volume holding jobs of the latest Full chain of a client and FileSet is never pruned.
 .TP
 .B "prune stats"
 Job statistics
+.IP
+Removes entries from JobHisto, DeviceStats and JobStats that are older than the Statistics Retention. The Director shows the retention period and asks unless yes is given.
 .TP
 .B "prune directory[=<directory>]"
 Directory cache
+.IP
+Removes the file records below one directory from the catalog; recursive includes subdirectories. Without client= the Director first asks whether the directory should be removed for all clients, and without a path it asks for the full path. yes skips the confirmation.
 .SH ARGUMENTS
 .SS "prune files"
 .TP
@@ -84,6 +100,31 @@ With subdirectories (keyword)
 .TP
 .B "yes"
 Do not ask (keyword)
+.SH EXAMPLES
+.TP
+.B "prune"
+choose what to prune from the menu
+.TP
+.B "prune jobs client=bareos\-fd yes"
+remove expired job records of bareos\-fd
+.TP
+.B "prune files client=bareos\-fd yes"
+prune expired file records of bareos\-fd
+.TP
+.B "prune jobs pool=Incremental yes"
+prune expired jobs using the retention of pool Incremental
+.TP
+.B "prune volume=Full\-0001 yes"
+prune one volume without asking
+.TP
+.B "prune volume all pool=Full"
+prune every volume of pool Full after confirmation
+.TP
+.B "prune stats yes"
+prune old statistics without asking
+.TP
+.B "prune directory=/var/cache client=bareos\-fd recursive yes"
+drop /var/cache and below from the catalog of bareos\-fd
 .SH ORIGIN
 Bareos console command.
 .SH SEE ALSO

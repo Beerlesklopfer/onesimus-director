@@ -8,12 +8,21 @@ trace [<on|off>]
 .fi
 .SH DESCRIPTION
 .PP
-Turn on/off trace to file.
+trace on makes the Director write its debug output to the file bareos\-dir.trace in its working directory; trace off stops this and closes the file. How much is written depends on the debug level set with setdebug. The setting affects the whole Director, not only the own session, and lasts until it is switched off or the Director restarts.
+.PP
+Only off switches it off; every other word switches it on, including typos. Without exactly one word the Director asks "Turn on or off?"; a single dot aborts. Onesimus extension: if the trace file cannot be opened, odir reports the path and the error, whereas Bareos stays silent.
 .SH ARGUMENTS
 .SS "trace"
 .TP
 .B "<on|off>"
 Switch on or off (positional value; values: on, off)
+.SH EXAMPLES
+.TP
+.B "trace on"
+write debug output to bareos\-dir.trace
+.TP
+.B "trace off"
+stop tracing and close the file
 .SH ORIGIN
 Bareos console command.
 .SH SEE ALSO

@@ -8,12 +8,16 @@ odir\-dot\-bvfs_clear_cache \- \&.bvfs_clear_cache: Clear BVFS cache
 .fi
 .SH DESCRIPTION
 .PP
-Clear BVFS cache.
+Clears the whole BVFS cache in the catalog: Job.HasCache is reset for all jobs and the tables PathHierarchy and PathVisibility are emptied. The keyword yes is required; without it nothing happens and there is no confirmation prompt. Afterwards the cache must be rebuilt with .bvfs_update. Backup data and file records are not touched.
 .SH ARGUMENTS
 .SS "\&.bvfs_clear_cache"
 .TP
 .B "yes"
 Confirm (keyword)
+.SH EXAMPLES
+.TP
+.B "\&.bvfs_clear_cache yes"
+empty the BVFS cache
 .SH ORIGIN
 Bareos console command.
 .SH SEE ALSO

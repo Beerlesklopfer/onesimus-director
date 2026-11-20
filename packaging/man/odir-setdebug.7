@@ -8,7 +8,9 @@ setdebug [level=<level>] [trace=<\-1|0|1>] [timestamp=<\-1|0|1>] [hangup=<\-1|0|
 .fi
 .SH DESCRIPTION
 .PP
-Sets debug level.
+Sets the debug level of the Director (dir or director), a File Daemon (client=), a Storage Daemon (storage=) or all daemons at once (all). Level 0 switches debug output off. The running daemon is changed, not its configuration; after a restart the start value applies again.
+.PP
+trace= writes the debug output to a trace file in the working directory, timestamp= prefixes every debug line with a time stamp; without them the setting stays unchanged. hangup= is a File Daemon test aid that drops the connection after n files. A missing level is asked for, a missing target leads to a daemon selection.
 .SH ARGUMENTS
 .SS "setdebug"
 .TP
@@ -41,6 +43,16 @@ The Director (keyword)
 .TP
 .B "all"
 Every daemon (keyword)
+.SH EXAMPLES
+.TP
+.B "setdebug level=100 trace=1 dir"
+verbose Director debugging into the trace file
+.TP
+.B "setdebug level=200 timestamp=1 client=bareos\-fd"
+debug the File Daemon with time stamps
+.TP
+.B "setdebug level=0 all"
+switch debug output off everywhere
 .SH ORIGIN
 Bareos console command.
 .SH SEE ALSO

@@ -8,7 +8,11 @@ mount [storage=<storage>] [sd=<sd>] [<storage\-name>] [slot=<slot>] [drive=<driv
 .fi
 .SH DESCRIPTION
 .PP
-Mount storage.
+Asks the Storage Daemon to use a device again: on tape drives to read the loaded tape and make it available to jobs, on autochangers to load a volume from a slot first (slot=). Needed after unmount, after inserting a tape, or when a job waits for a volume. It changes the device state in the Storage Daemon, not the catalog. File devices are always mounted.
+.PP
+The storage is given as storage=, sd= or by its bare name; without it a selection list appears. jobid=, job= or ujobid= use the storage of a running job. A keyword without a value is read as a storage name.
+.PP
+Onesimus deviation: a job waiting for a volume whose Job resource has no Max Wait Time is cancelled after 10 minutes (unlimited in Bareos). Until then mount or a newly labelled volume lets the job continue.
 .SH ARGUMENTS
 .SS "mount"
 .TP
@@ -38,6 +42,13 @@ Storage of a job (name; values from .jobs)
 .TP
 .B "ujobid=<ujobid>"
 Storage of a job (text)
+.SH EXAMPLES
+.TP
+.B "mount storage=Autochanger slot=3 drive=0"
+load slot 3 into drive 0 and mount it
+.TP
+.B "mount jobid=42"
+mount the storage the running job 42 waits on
 .SH ORIGIN
 Bareos console command.
 .SH SEE ALSO

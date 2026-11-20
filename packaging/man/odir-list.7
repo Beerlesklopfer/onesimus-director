@@ -43,84 +43,138 @@ Lists catalog records; llist prints every field of each record. `limit=` and `of
 .TP
 .B "list basefiles"
 Base files of a job
+.IP
+Lists the base files of a job that used a Base job, that is the files taken over from the base backup instead of being saved again; jobid= or ujobid= is required.
 .TP
 .B "list backups"
 Backups of a client
+.IP
+Lists the backups of one client; client= is required. fileset= limits the listing to one FileSet, fileset=any includes all of them. jobstatus=, level=, days= and hours= filter as with list jobs, order=asc or order=desc sorts by start time; any other order value is an error.
+.IP
+Without client= the reply is "missing parameter: client". A FileSet outside the FileSet ACL of the console gives "Access to specified FileSet not allowed."
 .TP
 .B "list client=<client>"
 One client
+.IP
+Shows the catalog record of one client by name. list client without a value is not a valid keyword and gives "Unknown list keyword".
 .TP
 .B "list clients"
 Every client
+.IP
+Lists every client record of the catalog with id, name, file retention and job retention; llist adds the uname and autoprune setting. enabled or disabled keep only clients in that state in the configuration, current only clients still configured.
 .TP
 .B "list copies"
 Copies of jobs
+.IP
+Lists copy jobs together with the job they were copied from and the media type. jobid= takes one JobId or a comma\-separated list and limits the listing to copies of or made by these jobs. If there are no copy jobs, the reply is empty.
 .TP
 .B "list files"
 Files of a job
+.IP
+Lists the paths of all files saved by one job, including the base files it refers to; jobid= or ujobid= is required. limit= and offset= do not shorten the text listing, they only appear in the range information of API mode 2.
 .TP
 .B "list filesets"
 Every FileSet
+.IP
+Lists every FileSet record of the catalog with id, name, MD5 sum, creation time and FileSet text. A FileSet gets a new record whenever its definition changes; current keeps only FileSets still defined in the configuration.
 .TP
 .B "list fileset[=<fileset>]"
 One FileSet
+.IP
+Shows one FileSet record of the catalog, including the stored FileSet text and its MD5 sum. The record is selected by filesetid= or by the job that used it with jobid= or ujobid=; without one of them the command reports an error.
 .TP
 .B "list jobs"
 Jobs
+.IP
+Lists the jobs of the catalog, one row per job. The filters can be combined: job= or jobname=, client=, jobstatus= (letters such as T, E, f or names such as error, comma\-separated), jobtype= (letter or exact name such as Backup), joblevel= or level= (F, I, D or Full, Incremental, Differential), volume=, pool=, days= and hours=. last keeps only the latest run per job name, count prints just the number of rows, reverse shows the newest first.
+.IP
+limit= and offset= page through the result. For a console with ACLs the limit is applied before the rows the console may not see are removed, so a limited listing can come out shorter or even empty. An unknown jobtype or level is an error.
 .TP
 .B "list job=<job>"
 Jobs of one name
+.IP
+Lists the jobs with the given job name; it works like list jobs job=<name> and accepts the same filters.
 .TP
 .B "list jobname=<jobname>"
 Jobs of one name
 .TP
 .B "list jobid=<jobid>[,...]"
 One job
+.IP
+Lists exactly the job with this JobId; llist jobid= shows all its fields one below the other. An unknown JobId gives an empty reply, and list jobid without a value reports "Missing jobid parameter".
 .TP
 .B "list ujobid=<ujobid>"
 One job
 .TP
 .B "list joblog"
 Log of a job
+.IP
+Prints the stored log of one job with time stamps; jobid= or ujobid= selects the job. count prints only the number of log lines. An unknown JobId or a job the console may not access gives "jobid not found in db, access to job or client denied by ACL, or client not found in db".
 .TP
 .B "list jobmedia"
 Volumes of a job
+.IP
+Shows which volumes a job wrote, with the first and last file index on each volume; without jobid= or ujobid= the records of all jobs are listed. llist adds the media id, start and end file and block.
 .TP
 .B "list jobtotals"
 Totals per job name
+.IP
+Shows the number of jobs, files and bytes per job name for backup, archive and copy jobs, followed by the totals over all of them. In API mode 2 the rows are under "jobs" and the sums under "jobtotals".
 .TP
 .B "list jobstatistics"
 Statistics of a job
+.IP
+Lists the statistics samples (sample time, files and bytes) recorded for a running or finished job; jobid= is required. Without it, or for a job the console may not access, the reply is "no jobid given"; a job without statistics gives "No results to list." The alias jobstats is accepted.
 .TP
 .B "list log"
 Director log
+.IP
+Prints the most recent log lines of all jobs from the catalog, by default the last five; limit= changes the number. client= restricts them to jobs of one client, an unknown client gives "invalid client argument". The lines appear oldest first, reverse puts the newest first.
 .TP
 .B "list media[=<media>]"
 Volumes
+.IP
+Alias of list volumes: without a value it lists the volumes grouped by pool and takes the same keywords all, pool=, jobid= and ujobid=; with a value, media=<name>, it shows that single volume like list volume=.
 .TP
 .B "list nextvolume"
 Next volume of a job
+.IP
+Shows which volume a job would write next, once for every scheduled run within the coming days; days= sets how many days to look ahead (at most 50, other values are ignored with a warning). Without job= the Director lists the job resources and asks for one; a dot aborts. For jobs that write no volume, such as restore jobs, it reports that no next volume can be found.
+.IP
+Deviation from Bareos: for an unknown job odir reports success, whereas Bareos returns an error. In API mode 2 the result is empty.
 .TP
 .B "list pools"
 Every pool
+.IP
+Lists every pool record of the catalog with id, name, number of volumes, maximum volumes, pool type and label format. llist adds all other fields of the records.
 .TP
 .B "list pool=<pool>"
 One pool
+.IP
+Shows the catalog record of one pool by name; poolid= selects it by id instead.
 .TP
 .B "list poolid=<poolid>"
 One pool
 .TP
 .B "list storages"
 Every storage
+.IP
+Lists every storage record of the catalog. current, enabled and disabled restrict the listing to storages still configured or in that state.
 .TP
 .B "list storage=<storage>"
 One storage
 .TP
 .B "list volumes"
 Volumes
+.IP
+Lists the volumes of the catalog grouped by pool. all prints them in one table, pool= restricts the listing to one pool, jobid= or ujobid= shows only the names of the volumes a job used, and count prints the number of volumes per pool. media is an alias with the same keywords.
+.IP
+If the pool given with pool= is not in the catalog, the Director lists the defined pools and asks for a selection; a dot aborts. In API mode 2 there is no question and the error is returned directly.
 .TP
 .B "list volume=<volume>"
 One volume
+.IP
+Shows exactly one volume by its name, with status, bytes, retention, slot, media type and last write time. volumeid= and mediaid= select it by its media id instead.
 .TP
 .B "list volumeid=<volumeid>"
 One volume
@@ -129,7 +183,9 @@ One volume
 One volume
 .TP
 .B "list schedules"
-Every schedule
+Not a catalog list: answered as unknown keyword (see show schedules)
+.IP
+Schedules are configuration resources and have no table in the catalog, so like Bareos odir answers "Unknown list keyword: schedules". Use show schedules for the schedule resources and show disabled schedules for the disabled ones.
 .SH ARGUMENTS
 .SS "list"
 .TP
@@ -484,6 +540,126 @@ the ten newest jobs (Onesimus)
 .TP
 .B "llist volume=Full\-0001"
 every field of one volume
+.TP
+.B "list volumes pool=Full"
+the volumes of the pool Full
+.TP
+.B "list jobs jobstatus=E,f days=7"
+jobs that failed during the last week
+.TP
+.B "list basefiles jobid=42"
+the base files referenced by job 42
+.TP
+.B "list backups client=bareos\-fd fileset=any order=desc limit=5"
+the five newest backups of bareos\-fd
+.TP
+.B "list backups client=bareos\-fd level=Full"
+the full backups of bareos\-fd
+.TP
+.B "list client=bareos\-fd"
+the catalog record of bareos\-fd
+.TP
+.B "list clients"
+all clients of the catalog
+.TP
+.B "list clients disabled"
+clients disabled in the configuration
+.TP
+.B "list copies"
+all copy jobs of the catalog
+.TP
+.B "list copies jobid=42,43"
+the copies of jobs 42 and 43
+.TP
+.B "list files jobid=42"
+every file saved by job 42
+.TP
+.B "list filesets"
+all FileSet records of the catalog
+.TP
+.B "list filesets current"
+only FileSets still present in the configuration
+.TP
+.B "list fileset jobid=42"
+the FileSet used by job 42
+.TP
+.B "list fileset filesetid=3"
+the FileSet record with id 3
+.TP
+.B "list jobs client=bareos\-fd last"
+the latest run of every job name on bareos\-fd
+.TP
+.B "list jobs level=Full jobstatus=T days=30"
+successful full backups of the last 30 days
+.TP
+.B "list jobs count"
+the number of jobs in the catalog
+.TP
+.B "list job=BackupClient1 limit=5"
+the first five runs of BackupClient1
+.TP
+.B "list job=BackupClient1 jobstatus=E"
+the failed runs of BackupClient1
+.TP
+.B "list jobid=42"
+the catalog row of job 42
+.TP
+.B "list joblog jobid=42"
+the complete log of job 42
+.TP
+.B "list joblog jobid=42 count"
+the number of log lines of job 42
+.TP
+.B "list jobmedia jobid=42"
+the volumes written by job 42
+.TP
+.B "list jobtotals"
+jobs, files and bytes per job name and in total
+.TP
+.B "list jobstatistics jobid=42"
+the statistics samples of job 42
+.TP
+.B "list log limit=20"
+the last 20 log lines of all jobs
+.TP
+.B "list log client=bareos\-fd reverse"
+the latest log lines of bareos\-fd, newest first
+.TP
+.B "list media pool=Incremental"
+the volumes of the pool Incremental
+.TP
+.B "list media=Full\-0001"
+one volume by name
+.TP
+.B "list nextvolume job=BackupClient1"
+the next volume BackupClient1 will use
+.TP
+.B "list nextvolume job=BackupClient1 days=7"
+the next volumes for the runs of the coming week
+.TP
+.B "list pools"
+all pools of the catalog
+.TP
+.B "list pool=Full"
+the catalog record of the pool Full
+.TP
+.B "list storages"
+all storages of the catalog
+.TP
+.B "list volumes pool=Full"
+the volumes of the pool Full
+.TP
+.B "list volumes all"
+all volumes in a single table
+.TP
+.B "list volumes jobid=42"
+the names of the volumes job 42 wrote to
+.TP
+.B "list volume=Full\-0001"
+the catalog record of Full\-0001
+.TP
+.B "list schedules disabled"
+answered with Unknown list keyword, use show disabled schedules instead
 .SH ORIGIN
 Bareos console command.
 .SH SEE ALSO

@@ -8,12 +8,18 @@ create [pool=<pool>]
 .fi
 .SH DESCRIPTION
 .PP
-Create DB Pool from resource.
+Creates the catalog Pool record for a Pool resource of the Director configuration. The Director normally does this at startup; create is needed when a pool was newly configured and must be in the catalog before the next job. Only the catalog is changed.
+.PP
+Without a valid pool= the Director lists the configured pools in alphabetical order and asks for one; . aborts. To bring an existing Pool record in line with a changed configuration use update pool instead.
 .SH ARGUMENTS
 .SS "create"
 .TP
 .B "pool=<pool>"
 Pool name (name; values from .pools)
+.SH EXAMPLES
+.TP
+.B "create pool=Incremental"
+create the catalog record of pool Incremental
 .SH ORIGIN
 Bareos console command.
 .SH SEE ALSO

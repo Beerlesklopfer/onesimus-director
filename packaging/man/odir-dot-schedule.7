@@ -8,7 +8,7 @@ odir\-dot\-schedule \- \&.schedule: List all schedule resources
 .fi
 .SH DESCRIPTION
 .PP
-List all schedule resources.
+Prints the names of all Schedule resources of the Director configuration, one per line, for selection lists such as enabling or disabling a schedule. Only schedules allowed by the console's Schedule ACL appear. enabled or disabled filter by state; a value after the keyword is ignored and both together give an empty list.
 .SH ARGUMENTS
 .SS "\&.schedule"
 .TP
@@ -17,6 +17,13 @@ Only enabled resources (keyword; excludes the other arguments of group state)
 .TP
 .B "disabled"
 Only disabled resources (keyword; excludes the other arguments of group state)
+.SH EXAMPLES
+.TP
+.B "\&.schedule"
+list all visible schedules
+.TP
+.B "\&.schedule disabled"
+list only disabled schedules
 .SH ORIGIN
 Bareos console command.
 .SH SEE ALSO

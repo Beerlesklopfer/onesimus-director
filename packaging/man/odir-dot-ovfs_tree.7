@@ -8,7 +8,9 @@ odir\-dot\-ovfs_tree \- \&.ovfs_tree: Restore tree of a job chain as JSON (OVFS)
 .fi
 .SH DESCRIPTION
 .PP
-Restore tree of a job chain as JSON (OVFS).
+Onesimus extension: returns the directory tree of a job chain below a directory as a restore would bring it back: per path the version from the newest job, deleted files left out, hardlinks and delta files resolved. Every node with a catalog record carries its restore identity (jobid, fileindex). No cache is needed. The chain is given by jobid= or by client= (and fileset=) for the newest state like .ovfs_latest.
+.PP
+root= sets the top of the tree (default /), depth= the number of levels (default 1; directories at the limit show their entry count), max_entries= the maximum number of nodes (default 100000; beyond it the command stops with a message). For large backups load the top with a small depth and expand directories with .ovfs_ls. json prints one JSON line.
 .SH ARGUMENTS
 .SS "\&.ovfs_tree"
 .TP
@@ -32,6 +34,13 @@ Most nodes in the result (number; default 100000)
 .TP
 .B "json"
 Print the JSON object as text (keyword)
+.SH EXAMPLES
+.TP
+.B "\&.ovfs_tree jobid=600,615,616 root=/home/ depth=2"
+two levels below /home of a job chain
+.TP
+.B "\&.ovfs_tree client=bareos\-fd depth=1 json"
+the top level of the newest state as JSON
 .SH ORIGIN
 Onesimus extension. The Bareos Director does not know this command and answers "is an invalid command".
 .SH SEE ALSO

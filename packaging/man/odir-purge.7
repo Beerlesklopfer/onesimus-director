@@ -19,15 +19,29 @@ purge volume all (Onesimus extension) purges every volume of one pool (pool=) or
 .TP
 .B "purge files"
 File records
+.IP
+Deletes file records from the catalog regardless of retention periods, for one job (job= or jobid=), a client or a volume; the jobs themselves stay. Like every purge it prints a warning, needs full access to all resources and cannot be undone.
+.IP
+Onesimus deviation: the file records of the latest Full chain of a client and FileSet are skipped, and each purge runs in one transaction whose errors are reported instead of ignored.
 .TP
 .B "purge jobs"
 Job records
+.IP
+Deletes whole jobs with all their records regardless of retention periods, for a client, a volume or a pool. jobstatus= limits this to jobs with the given status letters (T, E, f, ...) or names such as error, separated by commas. The Director counts the jobs and asks Purge (yes/no)? unless yes is given. A volume left without jobs becomes Purged.
+.IP
+Onesimus deviation: jobs of the latest Full chain of a client and FileSet are skipped, and each purge runs in one transaction whose errors are reported.
 .TP
 .B "purge volume[=<volume>]"
 Volume records
+.IP
+Deletes every job on a volume from the catalog regardless of retention; the volume then becomes Purged and can be reused. Several volume= may be given, and each is confirmed on its own unless yes is given. action=truncate or all runs the ActionOnPurge on Purged volumes through the Storage Daemon, with storage=, pool= or allpools, devicetype= and drive=. A volume holding the latest Full chain of a client is never purged (Onesimus).
+.IP
+Onesimus extension: purge volume all purges every volume of pool= or of all permitted pools (allpools) whose status is in volstatus=, by default Full, Used and Error. Purged and Recycle volumes are never selected and Cleaning tapes cannot be purged. It never asks: exactly one of dryrun (preview) and yes is required, and refused volumes are skipped with their reason.
 .TP
 .B "purge quota"
 Quota of a client
+.IP
+Resets the quota counters of a client; without client= the client is chosen from a list. Like every purge it prints a warning and needs full access to all resources.
 .SH ARGUMENTS
 .SS "purge"
 .TP
@@ -119,6 +133,33 @@ show what would be purged (Onesimus)
 .TP
 .B "purge volume all allpools yes"
 purge every Full, Used or Error volume (Onesimus)
+.TP
+.B "purge"
+choose what to purge from the menu
+.TP
+.B "purge jobs client=bareos\-fd jobstatus=E"
+purge the failed jobs of bareos\-fd
+.TP
+.B "purge files jobid=599"
+purge the file records of job 599
+.TP
+.B "purge files client=bareos\-fd yes"
+purge all file records of bareos\-fd
+.TP
+.B "purge jobs volume=Full\-0001 yes"
+purge every job on volume Full\-0001
+.TP
+.B "purge jobs pool=Incremental jobstatus=E,f"
+purge the failed jobs of pool Incremental
+.TP
+.B "purge volume action=truncate storage=File pool=Full"
+truncate the purged volumes of pool Full
+.TP
+.B "purge volume all pool=Incremental volstatus=Error dryrun"
+preview purging the Error volumes of Incremental (Onesimus)
+.TP
+.B "purge quota client=bareos\-fd"
+reset the quota of bareos\-fd
 .SH ORIGIN
 Bareos console command.
 .SH SEE ALSO

@@ -8,7 +8,11 @@ label [storage=<storage>] [sd=<sd>] [volume=<volume>] [pool=<pool>] [slot=<slot>
 .fi
 .SH DESCRIPTION
 .PP
-Label a tape.
+Writes a Bareos label onto a new medium (file or tape) through the Storage Daemon and creates the matching Media record in the catalog. Only a labelled volume can be used for backups. The command changes both the medium and the catalog. Missing values are asked for: storage, volume name, slot and pool.
+.PP
+Volume names may contain letters, digits and :.\-_/ but must not start with /. slot= greater than 0 also sets the InChanger flag; on an autochanger without slot= the Director asks for the slot. drive= selects the drive and defaults to 0. encrypt creates a new key for hardware (LTO) encryption and stores it in the catalog.
+.PP
+barcodes labels every volume of an autochanger with the name read from its barcode; slots= restricts this to a slot list such as 1\-5,8, and yes answers the confirmation question. Only autochanger storages qualify.
 .SH ARGUMENTS
 .SS "label"
 .TP
@@ -50,6 +54,13 @@ Do not ask (keyword)
 .TP
 .B "device=<device>"
 Device name (text)
+.SH EXAMPLES
+.TP
+.B "label storage=File volume=Full\-0001 pool=Full"
+label one file volume into pool Full
+.TP
+.B "label barcodes storage=Autochanger pool=Scratch slots=1\-5 yes"
+label slots 1 to 5 with their barcodes, without asking
 .SH ORIGIN
 Bareos console command.
 .SH SEE ALSO

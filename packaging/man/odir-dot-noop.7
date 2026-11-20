@@ -8,12 +8,21 @@ odir\-dot\-noop \- \&.: no op
 .fi
 .SH DESCRIPTION
 .PP
-no op.
+A single dot as command does nothing and replies without text. Programs send it to check that the connection is alive or to make sure they are back at the main prompt after an error. Words after the dot are ignored; two dots are an unknown command.
+.PP
+Inside a dialog the dot has a different role: as answer to a question of the Director, for example a selection list, it aborts the dialog. In API modes 1 and 2 the reply is framed twice (CMD_BEGIN, CMD_BEGIN, CMD_OK, CMD_OK, MAIN_PROMPT), which programs splitting replies at the signals must take into account.
 .SH ARGUMENTS
 .SS "\&."
 .TP
 .B "<text> ..."
 Ignored (positional value; may be repeated)
+.SH EXAMPLES
+.TP
+.B "\&."
+check that the connection is alive
+.TP
+.B "\&. keepalive"
+the same, trailing words are ignored
 .SH ORIGIN
 Bareos console command.
 .SH SEE ALSO

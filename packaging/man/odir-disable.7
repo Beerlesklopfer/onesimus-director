@@ -8,7 +8,9 @@ disable [job=<job>] [client=<client>] [schedule=<schedule>] [storage=<storage>]
 .fi
 .SH DESCRIPTION
 .PP
-Disable a job/client/schedule.
+Switches a job, client or schedule off. A disabled job is no longer started by its schedule, a disabled client is no longer backed up, a disabled schedule triggers no jobs. A disabled job can still be started by hand with run. Without an argument, or with job, client or schedule without a value, the Director offers the enabled resources of that kind.
+.PP
+The change lives only in the memory of the running Director until the next reload or restart. A permanent setting requires Enabled = no in the configuration.
 .SH ARGUMENTS
 .SS "disable"
 .TP
@@ -23,6 +25,16 @@ Schedule name (name; values from .schedule)
 .TP
 .B "storage=<storage>"
 Storage name (name; values from .storages)
+.SH EXAMPLES
+.TP
+.B "disable job=BackupClient1"
+stop scheduled runs of BackupClient1 until the next reload
+.TP
+.B "disable client=bareos\-fd"
+skip the client during maintenance
+.TP
+.B "disable schedule=WeeklyCycle"
+suspend a schedule
 .SH ORIGIN
 Bareos console command.
 .SH SEE ALSO

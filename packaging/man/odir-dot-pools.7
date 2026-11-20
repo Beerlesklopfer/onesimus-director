@@ -8,12 +8,18 @@ odir\-dot\-pools \- \&.pools: List all pool resources
 .fi
 .SH DESCRIPTION
 .PP
-List all pool resources.
+Prints the names of all Pool resources of the Director configuration, one per line, for completion of pool= and selection lists. It reads the configuration, not the catalog Pool table. Only pools allowed by the console's Pool ACL appear.
+.PP
+type= keeps pools whose type starts with the given text, ignoring case: type=b and type=BACKUP give the same result. Without a value no filter applies.
 .SH ARGUMENTS
 .SS "\&.pools"
 .TP
 .B "type=<type>"
 Pool type (one of a fixed set; values: Backup, Copy, Cloned, Archive, Migration, Scratch)
+.SH EXAMPLES
+.TP
+.B "\&.pools type=Scratch"
+list the scratch pools
 .SH ORIGIN
 Bareos console command.
 .SH SEE ALSO

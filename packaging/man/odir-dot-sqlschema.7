@@ -8,7 +8,9 @@ odir\-dot\-sqlschema \- \&.sqlschema: Show catalog schema
 .fi
 .SH DESCRIPTION
 .PP
-Show catalog schema.
+Shows every column of the tables in the public schema of the catalog database with its data type, ordered by table and column position; table= restricts the output to one table. An unknown table yields an empty list, a name that is not a plain identifier is rejected. The command only reads and helps writing queries for .sql.
+.PP
+Onesimus extension: Bareos does not know the command and answers ".sqlschema: is an invalid command.". Besides .sqlschema in its Command ACL the console needs .sql or sqlquery, as for any raw catalog access.
 .SH ARGUMENTS
 .SS "\&.sqlschema"
 .TP
@@ -17,6 +19,13 @@ Table name (text)
 .TP
 .B "catalog=<catalog>"
 Catalog name (name; values from .catalogs)
+.SH EXAMPLES
+.TP
+.B "\&.sqlschema table=pool"
+columns and data types of the pool table
+.TP
+.B "\&.sqlschema"
+the columns of every catalog table
 .SH ORIGIN
 Onesimus extension. The Bareos Director does not know this command and answers "is an invalid command".
 .SH SEE ALSO

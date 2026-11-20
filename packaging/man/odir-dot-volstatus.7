@@ -8,7 +8,11 @@ odir\-dot\-volstatus \- \&.volstatus: List all volume status
 .fi
 .SH DESCRIPTION
 .PP
-List all volume status.
+Prints all states a volume can have in the catalog (Append, Full, Used, Purged and so on). Programs fill the volstatus= selection of update volume or truncate with it. The list is built into the Director; it takes no arguments and reads neither configuration nor catalog.
+.SH EXAMPLES
+.TP
+.B "\&.volstatus"
+list all volume states
 .SH ORIGIN
 Bareos console command.
 .SH SEE ALSO

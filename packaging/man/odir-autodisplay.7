@@ -8,12 +8,21 @@ autodisplay [<on|off>]
 .fi
 .SH DESCRIPTION
 .PP
-Autodisplay console messages.
+The Director collects messages for the console, such as job reports or requests to mount a volume. With autodisplay off (the default) it only prints "You have messages." after a command, and the messages are fetched with messages. With autodisplay on the Director prints pending messages itself after every command.
+.PP
+The setting applies only to the own session and requires that the console may use the messages command. Case does not matter; the first word that reads on or off counts.
 .SH ARGUMENTS
 .SS "autodisplay"
 .TP
 .B "<on|off>"
 Switch on or off (positional value; values: on, off)
+.SH EXAMPLES
+.TP
+.B "autodisplay on"
+print queued messages after every command
+.TP
+.B "autodisplay off"
+only show the you have messages hint
 .SH ORIGIN
 Bareos console command.
 .SH SEE ALSO

@@ -83,7 +83,8 @@ pub fn describe(name: &str) -> Option<Node> {
         "var" => sub(name, "").free_text("text", "Text with variables to expand"),
         "use" => sub(name, "").args(vec![res("catalog", "Catalog name", CATALOGS), pos("catalog-name", "Catalog name without key").source(CATALOGS)]),
         "wait" => sub(name, "").args(vec![
-            int("jobid", "Job ID"), val("jobname", "Running job name prefix"), val("ujobid", "Unique running job name"),
+            int("jobid", "Job ID"), val("jobname", "Running job name prefix"), val("job", "Same as jobname="),
+            val("ujobid", "Unique running job name"),
             kw("mount", "Wait for a media or mount request"), int("timeout", "Mount wait timeout in seconds"), catalog(),
         ]),
         "status" => status(),
@@ -291,7 +292,7 @@ fn status() -> Node {
         sub("all", "Director, every storage and every client"),
         vsub("director", "Director status", val("director", "Director name").optional_value()).alias(&["dir"])
             .args(vec![int("days", "Scheduled jobs of the next days"), kw("verbose", "More detail")]),
-        vsub("client", "Status of a File Daemon", res("client", "Client name", CLIENTS)).alias(&["fd"]),
+        vsub("client", "Status of a File Daemon", res("client", "Client name", CLIENTS).optional_value()).alias(&["fd"]),
         vsub("storage", "Status of a Storage Daemon", res("storage", "Storage name", STORAGES).optional_value()).alias(&["sd"])
             .args(vec![kw("slots", "Autochanger slots"), int("drive", "Drive number"), val("device", "Device name")]),
         vsub("job", "Status of the storage of a job", res("job", "Job name", JOBS)),
@@ -432,7 +433,7 @@ fn list() -> Node {
         vsub("volume", "One volume", res("volume", "Volume name", MEDIA)),
         vsub("volumeid", "One volume", int("volumeid", "Media ID")),
         vsub("mediaid", "One volume", int("mediaid", "Media ID")),
-        sub("schedules", "Every schedule"),
+        sub("schedules", "Not a catalog list: answered as unknown keyword (see show schedules)"),
     ]).example("list jobs client=fd last", "the last run of every job of a client")
         .example("list jobs reverse limit=10", "the ten newest jobs (Onesimus)")
         .example("llist volume=Full-0001", "every field of one volume")

@@ -8,7 +8,11 @@ odir\-dot\-locations \- \&.locations: List location names
 .fi
 .SH DESCRIPTION
 .PP
-List location names.
+Prints the locations from the catalog Location table, sorted alphabetically and without duplicates. Locations describe where a tape physically is, for example a safe or an offsite store. It only reads the catalog; without locations the list is empty.
+.SH EXAMPLES
+.TP
+.B "\&.locations"
+list the tape locations
 .SH ORIGIN
 Bareos console command.
 .SH SEE ALSO

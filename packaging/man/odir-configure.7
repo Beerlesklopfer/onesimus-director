@@ -39,6 +39,10 @@ Adds resources to the configuration and exports them. Onesimus extensions read, 
 .TP
 .B "configure add"
 Add a resource
+.IP
+Creates a new resource of the given type (client, jobdefs, job, storage, catalog, schedule, fileset, pool, messages, counter, profile, console, user). The resource is written to bareos\-dir.d/<type>/<name>.conf and loaded into the running Director at once, without reload. Directives are written in lower case without blanks (maximumvolumejobs=1); a directive may repeat where the resource allows it (run= of a schedule). The characters @ and ; are not allowed in values.
+.IP
+The configuration must be in directory form and the directory of the type must already exist. Adding a client also exports its file daemon resource, like configure export. Onesimus deviation: profile and user are always refused (edit them in the configuration files), and console is only accepted as name, password, one or more profile and an optional description, with profiles that grant no more than the creating console may use itself.
 .TP
 .B "configure add client"
 New resource
@@ -81,12 +85,20 @@ New resource
 .TP
 .B "configure export"
 Export a client resource
+.IP
+Writes the Director resource a file daemon needs to accept this Director, for the given client, to bareos\-dir\-export/client/<client>/bareos\-fd.d/director/. Copy the file to the client into bareos\-fd.d/director/. Calling it again overwrites the file with the same content. client= must name a configured client.
 .TP
 .B "configure read"
 Show a resource (Onesimus)
+.IP
+Onesimus extension: shows a short summary of one client, job, pool or storage of the running configuration (for a client name, address, port and enabled; for a job type, level, client, storage, pool, fileset, priority and enabled). The resource ACLs of the console apply as with show; a resource the console may not see reads like an unknown one. For the raw resource text use .config read.
 .TP
 .B "configure update"
 Change directives of a resource (Onesimus)
+.IP
+Onesimus extension: changes directives of an existing client, job, jobdefs, schedule or fileset in its configuration file and reloads. Only the named directives change; comments, order, indentation and all other directives stay byte for byte. It is checked like odir \-t, written atomically, and a failed reload restores the old state. pool, storage and console are refused, as are directives in nested blocks (RunScript, Include, Options) and changing the name.
+.IP
+A directive given several times replaces all its lines (the run lines of a schedule); a directive with an empty value (description=) removes it. A missing directive is added before the closing brace. The resource ACL of the console applies. The old job keys newclient, newstorage and newpool are accepted as client, storage and pool.
 .TP
 .B "configure update client=<client>"
 Change a client
@@ -105,6 +117,10 @@ Change a fileset
 .TP
 .B "configure delete"
 Delete an unreferenced resource (Onesimus)
+.IP
+Onesimus extension: deletes a client, job, jobdefs, schedule or fileset through the configuration CRUD, the same path as .config delete. The resource is read for its current checksum and deleted only if no other resource still refers to it; otherwise the referring resources are listed and nothing is deleted. The remaining configuration is checked like odir \-t, the file change is atomic and a failed reload is rolled back.
+.IP
+pool, storage and console are refused; remove such files by hand and reload. The resource ACL of the console applies.
 .TP
 .B "configure delete client=<client>"
 Delete a client
@@ -1894,6 +1910,42 @@ a console with the rights of a profile
 .TP
 .B "configure update schedule=Nightly run=\(dqFull sun at 23:00\(dq run=\(dqIncremental mon\-sat at 23:00\(dq"
 replace the Run lines (Onesimus)
+.TP
+.B "configure export client=bareos\-fd"
+write the director resource for the file daemon of bareos\-fd
+.TP
+.B "configure delete schedule=OldNightly"
+remove an unused schedule (Onesimus)
+.TP
+.B "configure add pool name=Weekly pooltype=Backup maximumvolumejobs=1 labelformat=Weekly\-"
+a new backup pool with one job per volume
+.TP
+.B "configure add schedule name=Nightly run=\(dqFull 1st sun at 23:05\(dq run=\(dqIncremental mon\-sat at 23:05\(dq"
+a schedule with two run lines
+.TP
+.B "configure add job name=BackupClient2 jobdefs=DefaultJob client=bareos\-fd"
+a job whose required directives come from a jobdefs
+.TP
+.B "configure export client=bareos\-fd"
+export the director resource for bareos\-fd
+.TP
+.B "configure read client=bareos\-fd"
+summary of a client
+.TP
+.B "configure read job=BackupClient1"
+summary of a job
+.TP
+.B "configure update client=bareos\-fd address=fd.example.org port=9112"
+change the address and port of a client
+.TP
+.B "configure update job=BackupClient1 description="
+remove the description of a job
+.TP
+.B "configure delete fileset=OldFileSet"
+delete a fileset no job uses any more
+.TP
+.B "configure delete client=old\-fd"
+delete a client, refused while a job still names it
 .SH ORIGIN
 Bareos console command. Onesimus extensions: configure add console, configure read, configure update, configure delete.
 .SH SEE ALSO

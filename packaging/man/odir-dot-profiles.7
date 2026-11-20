@@ -8,7 +8,11 @@ odir\-dot\-profiles \- \&.profiles: List all profile resources
 .fi
 .SH DESCRIPTION
 .PP
-List all profile resources.
+Prints the names of all Profile resources, one per line. Profiles bundle ACLs that Console and User resources take over with Profile = <name>. The order is the internal configuration order and the list is not filtered by ACLs. It takes no arguments and only reads.
+.SH EXAMPLES
+.TP
+.B "\&.profiles"
+list all profiles
 .SH ORIGIN
 Bareos console command.
 .SH SEE ALSO

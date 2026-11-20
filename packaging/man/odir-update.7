@@ -18,18 +18,32 @@ Changes catalog records of volumes, pools, slots and jobs; without arguments the
 .TP
 .B "update volume[=<volume>]"
 Volume record
+.IP
+Changes the catalog properties of one volume: volstatus (Append, Archive, Disabled, Full, Used, Cleaning, Recycle, Read\-Only, Error), volretention, voluse, maxvoljobs, maxvolfiles, maxvolbytes, recycle, inchanger, slot, enabled, encrypt, pool, recyclepool, actiononpurge and storage. Several parameters may be given on one line; each is checked and reported on its own. Without parameters a menu opens, without a name the volume is selected first.
+.IP
+allfrompool=<pool> resets the defaults of all volumes of a pool from the Pool resource, fromallpools those of every pool. encrypt=yes|no|rotate sets, removes or renews the hardware encryption key and only applies to volumes with a key.
 .TP
 .B "update pool[=<pool>]"
 Pool record from the resource
+.IP
+Updates the catalog Pool record from the Pool resource of the configuration and shows the record afterwards. Use it after changing a pool in the configuration; without a name the pool is chosen from a list. To create a missing Pool record use create.
 .TP
 .B "update slots[=<slots>]"
 Slots from the autochanger
+.IP
+Asks the Storage Daemon for the contents of an autochanger and records slot and InChanger for the volumes found. It is the only form of update that contacts the Storage Daemon. Without storage= only autochanger storages are offered; a slot list restricts the update.
+.IP
+scan loads volumes one by one into the drive given by drive= and reads their labels, for changers without a barcode reader. enabled= sets the Enabled value of the volumes found.
 .TP
 .B "update jobid=<jobid>"
 Job record
+.IP
+Changes fields of one job record without confirmation: jobname, starttime (YYYY\-MM\-DD hh:mm:ss, quoted because of the blank), client, filesetid and jobtype. Without any field the Director reports that nothing was specified; an unknown JobId is reported by the catalog.
 .TP
 .B "update stats"
 Job statistics
+.IP
+Carries the long\-term job statistics forward by copying finished jobs into the statistics tables. days= takes only jobs of the last given number of days into account. The Director reports how many jobs were updated.
 .SH ARGUMENTS
 .SS "update volume[=<volume>]"
 .TP
@@ -153,6 +167,40 @@ Job type letter (text)
 .TP
 .B "days=<days>"
 Keep this many days (number)
+.SH EXAMPLES
+.TP
+.B "update"
+choose what to update from the menu
+.TP
+.B "update volume=Full\-0001 volstatus=Used"
+set the status of one volume
+.TP
+.B "update volume=Full\-0001 volretention=30days maxvolbytes=10G recycle=no"
+change several limits at once
+.TP
+.B "update volume=Full\-0001 pool=Incremental"
+move a volume to another pool
+.TP
+.B "update volume allfrompool=Full"
+reapply the pool defaults to all volumes of Full
+.TP
+.B "update pool=Full"
+refresh the catalog record of pool Full
+.TP
+.B "update slots storage=Autochanger"
+refresh all slots of the autochanger
+.TP
+.B "update slots=1\-3,7 storage=Autochanger scan drive=0"
+read the labels in slots 1 to 3 and 7
+.TP
+.B "update jobid=506 jobname=DocsRenamed"
+rename the job of a record
+.TP
+.B "update jobid=506 starttime=\(dq2026\-10\-01 10:00:00\(dq"
+correct the start time of a job
+.TP
+.B "update stats days=30"
+update the statistics with the last 30 days
 .SH ORIGIN
 Bareos console command.
 .SH SEE ALSO

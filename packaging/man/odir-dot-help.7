@@ -8,7 +8,9 @@ odir\-dot\-help \- \&.help: Print parsable information about a command
 .fi
 .SH DESCRIPTION
 .PP
-Print parsable information about a command.
+Prints the command table of the Director in a form programs can parse easily. bconsole and oconsole build their completion from it and the WebUI uses it to check which commands a console may use; help is the variant for humans. Only commands allowed by the Command ACL of the console are listed, and only the commands of Bareos: Onesimus extensions such as .sqlcount or the .ovfs commands are missing (see .grammar).
+.PP
+Without an argument or with full, every command is printed as one line "name description \-\- arguments". all prints only the names of the ordinary commands without dot commands, item= only the argument list of one command; an unknown name gives an empty reply. In API mode 2 the result is an object keyed by command name with command, description, arguments and permission.
 .SH ARGUMENTS
 .SS "\&.help"
 .TP
@@ -20,6 +22,13 @@ One command (name; a command name)
 .TP
 .B "full"
 With arguments (keyword)
+.SH EXAMPLES
+.TP
+.B "\&.help item=list"
+the argument list of list
+.TP
+.B "\&.help all"
+the names of all ordinary commands, one per line
 .SH ORIGIN
 Bareos console command.
 .SH SEE ALSO

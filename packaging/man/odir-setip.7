@@ -8,7 +8,13 @@ setip
 .fi
 .SH DESCRIPTION
 .PP
-Sets new client address \-\- if authorized.
+Meant for clients with changing IP addresses such as laptops. The client logs in to the Director through its own console whose name equals the name of its Client resource and calls setip; the Director then takes the source address of that console connection as the client's new address.
+.PP
+The change applies only to the running Director; the configuration files stay unchanged. The command takes no arguments; further words are ignored.
+.SH EXAMPLES
+.TP
+.B "setip"
+register the address of this console connection as the client address
 .SH ORIGIN
 Bareos console command.
 .SH SEE ALSO

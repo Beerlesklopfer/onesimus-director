@@ -8,7 +8,9 @@ odir\-dot\-clients \- \&.clients: List all client resources
 .fi
 .SH DESCRIPTION
 .PP
-List all client resources.
+Prints the names of all Client resources of the Director configuration, one per line, without a header. Meant for programs: bconsole and oconsole complete client= with it, the WebUI fills its selection lists. It reads only the configuration and changes nothing.
+.PP
+Only clients allowed by the console's Client ACL appear, in configuration order. enabled or disabled filter by state; a value after the keyword is ignored, and both together give an empty list.
 .SH ARGUMENTS
 .SS "\&.clients"
 .TP
@@ -17,6 +19,13 @@ Only enabled resources (keyword; excludes the other arguments of group state)
 .TP
 .B "disabled"
 Only disabled resources (keyword; excludes the other arguments of group state)
+.SH EXAMPLES
+.TP
+.B "\&.clients"
+list all visible clients
+.TP
+.B "\&.clients enabled"
+list only enabled clients
 .SH ORIGIN
 Bareos console command.
 .SH SEE ALSO

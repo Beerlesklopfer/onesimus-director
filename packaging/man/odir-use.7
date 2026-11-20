@@ -8,7 +8,9 @@ use [catalog=<catalog>] [<catalog\-name>]
 .fi
 .SH DESCRIPTION
 .PP
-Use specific catalog.
+Sets the catalog the session works with. All following catalog commands such as list, query or sqlquery use it until the session ends or another one is chosen. An open catalog connection is closed and the new one opened; configuration and other sessions are not affected.
+.PP
+Without catalog= the Director selects: with only one permitted catalog it takes that one, with several it asks (in GUI mode it takes the first). An unknown name, a name without the catalog= keyword and catalog without a value are treated like a missing catalog=.
 .SH ARGUMENTS
 .SS "use"
 .TP
@@ -17,6 +19,10 @@ Catalog name (name; values from .catalogs)
 .TP
 .B "<catalog\-name>"
 Catalog name without key (positional value; values from .catalogs)
+.SH EXAMPLES
+.TP
+.B "use catalog=MyCatalog"
+work with the catalog MyCatalog for the rest of the session
 .SH ORIGIN
 Bareos console command.
 .SH SEE ALSO

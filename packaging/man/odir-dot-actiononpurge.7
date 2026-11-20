@@ -8,7 +8,11 @@ odir\-dot\-actiononpurge \- \&.actiononpurge: List possible actions on purge
 .fi
 .SH DESCRIPTION
 .PP
-List possible actions on purge.
+Prints the values allowed for actiononpurge= (in update volume, update pool and the Pool resource): None, do nothing, and Truncate, shrink the volume file after the purge to free space. The list is built into the Director; it takes no arguments and reads neither configuration nor catalog.
+.SH EXAMPLES
+.TP
+.B "\&.actiononpurge"
+list the actions on purge
 .SH ORIGIN
 Bareos console command.
 .SH SEE ALSO

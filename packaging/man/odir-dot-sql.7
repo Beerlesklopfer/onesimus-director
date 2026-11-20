@@ -8,7 +8,9 @@ odir\-dot\-sql \- \&.sql: Send an arbitrary SQL command
 .fi
 .SH DESCRIPTION
 .PP
-Send an arbitrary SQL command.
+Sends an arbitrary SQL statement to the catalog database and prints the result. The WebUI and scripts use it for evaluations no other command provides. The statement is executed without any check: UPDATE, DELETE or DROP change the catalog permanently, so use plain SELECT statements for reading.
+.PP
+If the text holds several statements separated by semicolons, all of them are executed but only the result of the last one is shown. Database errors are passed through as "Query failed: ...". In API mode 0 the result is a framed table, in mode 1 the cells are tab\-separated on a single line, in mode 2 the rows are objects under "query" with all values as strings.
 .SH ARGUMENTS
 .SS "\&.sql"
 .TP
@@ -17,6 +19,13 @@ SQL statement (text; required)
 .TP
 .B "catalog=<catalog>"
 Catalog name (name; values from .catalogs)
+.SH EXAMPLES
+.TP
+.B "\&.sql query=\(dqSELECT poolid, name FROM pool\(dq"
+ids and names of all pools
+.TP
+.B "\&.sql query=\(dqSELECT count(*) FROM job WHERE jobstatus = 'E'\(dq catalog=MyCatalog"
+number of failed jobs in the catalog MyCatalog
 .SH ORIGIN
 Bareos console command.
 .SH SEE ALSO

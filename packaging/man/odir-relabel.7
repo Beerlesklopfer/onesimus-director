@@ -8,7 +8,9 @@ relabel [storage=<storage>] [oldvolume=<oldvolume>] [volume=<volume>] [pool=<poo
 .fi
 .SH DESCRIPTION
 .PP
-Relabel a tape.
+Writes a new label onto a volume that is already in the catalog and gives it a new name. This works only for volumes with status Purged or Recycle, that is when no jobs refer to the volume any more. The Storage Daemon overwrites the medium, the old Media record is removed and a new one created. All data on the volume is lost.
+.PP
+oldvolume= names the existing volume and volume= the new name, which follows the same rules as for label; missing or unknown names are chosen in a dialogue. pool= restricts the selection of the old volume. yes is accepted, but relabel asks no yes/no question.
 .SH ARGUMENTS
 .SS "relabel"
 .TP
@@ -35,6 +37,10 @@ Encrypt the volume (keyword)
 .TP
 .B "yes"
 Do not ask (keyword)
+.SH EXAMPLES
+.TP
+.B "relabel storage=File oldvolume=Full\-0001 volume=Full\-0101"
+relabel purged volume Full\-0001 as Full\-0101
 .SH ORIGIN
 Bareos console command.
 .SH SEE ALSO

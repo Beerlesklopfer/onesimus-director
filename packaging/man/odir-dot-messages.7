@@ -8,7 +8,11 @@ odir\-dot\-messages \- \&.messages: Display pending messages
 .fi
 .SH DESCRIPTION
 .PP
-Display pending messages.
+Prints the messages queued for the console since they were last fetched (job reports, daemon warnings) and empties the queue. Unlike messages it prints nothing at all when nothing is waiting, which suits programs that poll regularly, such as bconsole and the WebUI. It works regardless of autodisplay and gui and takes no arguments.
+.SH EXAMPLES
+.TP
+.B "\&.messages"
+fetch pending messages, silent if there are none
 .SH ORIGIN
 Bareos console command.
 .SH SEE ALSO

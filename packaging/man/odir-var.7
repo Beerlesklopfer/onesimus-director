@@ -8,12 +8,21 @@ var [<text> ...]
 .fi
 .SH DESCRIPTION
 .PP
-Does variable expansion.
+Expands variables in a text the way the Director does for volume names (LabelFormat) and prints the result, so a LabelFormat can be tried before it goes into the configuration. Supported are date and time variables such as ${Year} and ${Month}, job variables such as ${Job}, ${Client}, ${Pool} and ${NumVols}, counters, environment variables, and operations like :u, :l, :p and :s/pattern/replacement/.
+.PP
+The values come from the console job of the session: job, client, pool and storage are the defaults of the first job in the configuration, ${Type} is Console and ${JobId} is 0. The command opens the session catalog. ${Counter+} increments a counter permanently. Unknown variables stay unchanged. Without text odir prints an empty line.
 .SH ARGUMENTS
 .SS "var"
 .TP
 .B "<text> ..."
 Text with variables to expand (positional value; may be repeated)
+.SH EXAMPLES
+.TP
+.B "var Full\-${Year}${Month}${Day}"
+try a date based volume label
+.TP
+.B "var ${Pool}\-${NumVols:p/4/0/r}"
+pool name with the volume count padded to four digits
 .SH ORIGIN
 Bareos console command.
 .SH SEE ALSO

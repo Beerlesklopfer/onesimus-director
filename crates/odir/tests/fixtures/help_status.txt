@@ -4,7 +4,7 @@ USAGE
   status
   status all
   status director[=<director>] [days=<days>] [verbose]
-  status client=<client>
+  status client[=<client>]
   status storage[=<storage>] [slots] [drive=<drive>] [device=<device>]
   status job=<job>
   status jobid=<jobid>
@@ -19,24 +19,52 @@ DESCRIPTION
 SUBCOMMANDS
   status all
       Director, every storage and every client
+
+      Prints the Director status, followed by the status report of every Storage Daemon and every File Daemon the console may see. A daemon reachable under the same address is queried only once, so several Storage resources pointing at one Storage Daemon produce a single report.
   status director[=<director>]
       Director status
-  status client=<client>
+
+      Shows the Director's header line (version, start time, job counters, database type), the jobs scheduled for the coming days, the running jobs, the most recently terminated jobs and connections initiated by clients. Any word starting with dir selects this report, so status dir works as well.
+
+      days= sets how many days ahead scheduled jobs are listed, from 0 to 500, default 1. An invalid value is ignored with a notice and 1 day is used.
+  status client[=<client>]
       Status of a File Daemon
+
+      Connects to the File Daemon of the given client and passes on its status report: version, running jobs and recently terminated jobs. Without a value, or with a name the console may not see or that does not exist, the Director shows the list of clients to choose from.
   status storage[=<storage>]
       Status of a Storage Daemon
+
+      Connects to the Storage Daemon of the given Storage resource and passes on its report: devices, mounted volumes, running and terminated jobs. Without a value or with an unknown name the Director offers a list of storages. sd= is accepted as a synonym for storage=.
+
+      With slots the Director prints the slot table of an autochanger instead of the status report; for a device that is not an autochanger the Storage Daemon answers with an error.
   status job=<job>
       Status of the storage of a job
+
+      Shows the Storage Daemon report for the storage used by the running job with this name. If no job of that name is running, the Director says so; for finished jobs use list jobs instead.
   status jobid=<jobid>
       Status of the storage of a job
+
+      Like status job, but selects the running job by its JobId. If the job is not running, the Director reports "JobId <n> is not running.".
   status ujobid=<ujobid>
       Status of the storage of a job
+
+      Like status job, but selects the running job by its unique job name, the name with date, time and sequence number that the Director gives every job run.
   status scheduler[=<schedule>]
       Jobs the scheduler will start
+
+      Lists which schedules trigger which jobs and previews the upcoming runs with level and pool. schedule= restricts the output to one schedule, client= to the jobs of one client and job= to one job; an unknown job name leads to the job selection list.
+
+      days= sets the preview period, from -365 to 365, default 7; negative values look back. days=<from>,<to> gives a range relative to now. In text mode only the larger absolute value of the two counts as days from now; under .api 2 the range is applied exactly.
   status subscriptions
       Subscription and unit counts
+
+      Evaluates the backup units relevant for subscriptions from the catalog. clients adds a summary per client, plugins a summary per plugin, all every partial report; anonymize replaces client names by Client 1, Client 2 and so on. client= prints a detail report per fileset for one client.
+
+      The command needs access to all client, job and fileset resources and is refused for consoles with restricted ACLs. The words detail and unknown are obsolete and are ignored with a notice.
   status configuration
       Configuration warnings
+
+      Checks the loaded configuration for deprecated settings and lists them. The console needs the right to run the configure command; otherwise the Director refuses the report.
 
 ARGUMENTS
   status director[=<director>]
@@ -46,9 +74,9 @@ ARGUMENTS
         Scheduled jobs of the next days (number)
     verbose
         More detail (keyword)
-  status client=<client>
-    client=<client>
-        Client name (name; values from .clients)
+  status client[=<client>]
+    client[=<client>]
+        Client name (name; values from .clients; the value may be left out)
   status storage[=<storage>]
     storage[=<storage>]
         Storage name (name; values from .storages; the value may be left out)
@@ -93,6 +121,46 @@ ARGUMENTS
         One client (name; values from .clients)
     unknown
         Unknown clients (keyword)
+
+EXAMPLES
+  status
+      ask whether to show the Director, a storage, a client, the scheduler or all
+  status director days=3
+      Director status with jobs scheduled for the next three days
+  status all
+      Director, every storage and every client in one report
+  status director
+      header, scheduled, running and terminated jobs
+  status director days=7
+      scheduled jobs of the coming week
+  status client=bareos-fd
+      what the File Daemon bareos-fd is doing right now
+  status client
+      choose the client from a list
+  status storage=File
+      devices and jobs of the Storage Daemon behind File
+  status storage=Tape slots
+      slot table of the autochanger
+  status job=BackupClient1
+      storage status of the running BackupClient1 job
+  status jobid=42
+      storage status of the running job 42
+  status ujobid=BackupClient1.2026-11-20_21.00.00_09
+      storage status of exactly this job run
+  status scheduler
+      preview of the next seven days
+  status scheduler schedule=WeeklyCycle days=14
+      runs of one schedule over two weeks
+  status scheduler client=bareos-fd
+      only the jobs of one client
+  status subscriptions
+      total backup units of all clients
+  status subscriptions all anonymize
+      every partial report with client names hidden
+  status subscriptions client=bareos-fd
+      units per fileset of one client
+  status configuration
+      list deprecated directives in the configuration
 
 ORIGIN
   Bareos console command.

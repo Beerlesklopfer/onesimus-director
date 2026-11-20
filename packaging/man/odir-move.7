@@ -8,7 +8,9 @@ move [storage=<storage>] [srcslots=<srcslots>] [dstslots=<dstslots>] [drive=<dri
 .fi
 .SH DESCRIPTION
 .PP
-Move slots in an autochanger.
+Has an autochanger move volumes from one slot to another. Source and destination are slot lists; the Director first asks the Storage Daemon which slots are occupied and moves only occupied source slots into free destination slots. The command changes the autochanger contents and the slot data in the catalog. It works only with autochanger storages.
+.PP
+Without storage= the Director offers the autochanger storages. Empty slots in srcslots= are skipped; without a source or destination selection move does nothing.
 .SH ARGUMENTS
 .SS "move"
 .TP
@@ -23,6 +25,10 @@ Destination slots (text)
 .TP
 .B "drive=<drive>"
 Drive number (number)
+.SH EXAMPLES
+.TP
+.B "move storage=Autochanger srcslots=1\-3 dstslots=10\-12"
+move slots 1 to 3 into slots 10 to 12
 .SH ORIGIN
 Bareos console command.
 .SH SEE ALSO

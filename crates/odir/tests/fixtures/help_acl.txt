@@ -16,14 +16,26 @@ DESCRIPTION
 SUBCOMMANDS
   .acl list
       File and catalog entries, effective result
+
+      Shows per ACL type the file entries (first those of the console, then those of its profiles), the catalog entries and the effective result, plus the load state of the catalog ACL. list is also the default when no subcommand is given. Without console= the own console is shown, or all consoles for a console that may use configure; the ACLs of another console need configure. Catalog entries that only allow what the file ACL forbids are marked as having no effect.
   .acl set
       Replace catalog entries of types
+
+      Replaces the catalog list of the console for every ACL type given. Entries are evaluated like a Bareos list: the first matching entry decides, ! forbids, regular expressions and *all* work as in the file, and a name no entry matches is forbidden. The change takes effect at once. Needs the CommandACL .acl and configure.
+
+      The catalog ACL of another console may be changed freely, since it can never go beyond that console's file ACL. On the own console only a narrowing change is allowed: a first list for a type without catalog entries, or a list made from the old one only by inserting ! entries and removing entries without !.
   .acl delete
       Delete catalog entries
+
+      Removes the given entries from the catalog ACL of the console; a type key without a value removes the whole catalog list of that type, which then no longer restricts. An entry the catalog ACL does not have is an error and nothing changes. Works also for a console that is no longer configured but still has catalog entries. Needs the CommandACL .acl and configure; on the own console only removing entries without ! is allowed.
   .acl clear
       Delete every catalog entry of a console
+
+      Removes all catalog ACL entries of the console, so only its file ACL applies again. Works also for a console that is no longer configured. Needs the CommandACL .acl and configure and is refused on the own console, since it could widen the rights.
   .acl copy
       Copy the catalog entries of a console
+
+      Gives the console to= the catalog ACL lists of the console from=. Types that from= has no catalog entries for lose their entries at to=. The file ACLs of both consoles stay as they are. Needs the CommandACL .acl and configure.
 
 ARGUMENTS
   .acl list
@@ -91,6 +103,24 @@ EXAMPLES
       restrict ops
   .acl delete console=ops jobacl
       remove the catalog JobACL entries
+  .acl clear console=ops
+      remove all catalog ACL entries of a console
+  .acl copy from=ops to=operator
+      give a console the catalog ACL lists of another
+  .acl list
+      the ACLs of the own console
+  .acl list console=operator
+      the file, catalog and effective ACLs of another console
+  .acl set console=ops clientacl=bareos-fd,!old-fd
+      restrict a console to some clients
+  .acl delete console=ops commandacl=status
+      remove one catalog entry
+  .acl delete console=ops poolacl
+      remove the whole catalog pool list
+  .acl clear console=ops
+      drop all catalog restrictions of a console
+  .acl copy from=ops to=gui-anna
+      apply the catalog restrictions of ops to gui-anna
 
 ORIGIN
   Onesimus extension. The Bareos Director does not know this command and answers "is an invalid command".

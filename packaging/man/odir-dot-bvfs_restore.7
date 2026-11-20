@@ -8,7 +8,9 @@ odir\-dot\-bvfs_restore \- \&.bvfs_restore: Mark BVFS files/directories for rest
 .fi
 .SH DESCRIPTION
 .PP
-Mark BVFS files/directories for restore. Stored in handle.
+Creates a table in the catalog holding a restore selection: single files (fileid=), whole directories with their content (dirid=, PathIds from .bvfs_lsdirs) and hardlinks (hardlink=, pairs of JobId and FileIndex). At least one of them is required. path= names the table (b2 followed by a number); an existing table of that name is replaced.
+.PP
+Pass the table to restore with file=?<table>; restore then skips the menu and the file tree. Drop the table afterwards with .bvfs_cleanup. The command only writes to the catalog and starts no job.
 .SH ARGUMENTS
 .SS "\&.bvfs_restore"
 .TP
@@ -29,6 +31,13 @@ JobId,FileIndex pairs (text; several values separated by commas)
 .TP
 .B "useemptypath"
 Use an empty path (keyword)
+.SH EXAMPLES
+.TP
+.B "\&.bvfs_restore path=b2101 jobid=600,615,616 fileid=4711,4712"
+select two files for a restore
+.TP
+.B "\&.bvfs_restore path=b2102 jobid=600,615,616 dirid=7"
+select a whole directory
 .SH ORIGIN
 Bareos console command.
 .SH SEE ALSO

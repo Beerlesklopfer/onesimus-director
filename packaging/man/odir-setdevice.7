@@ -8,7 +8,9 @@ setdevice [storage=<storage>] [device=<device>] [autoselect=<yes|no>]
 .fi
 .SH DESCRIPTION
 .PP
-Sets device parameter.
+Changes the Auto Select setting of a device in the Storage Daemon at run time. With autoselect=no the Storage Daemon no longer picks the device for jobs, for example during maintenance; with autoselect=yes it is available again. The state lasts until the Storage Daemon restarts; configuration and catalog are not touched.
+.PP
+storage=, device= and autoselect= are all required, in any order, and the keywords must be lower case; no other arguments are allowed. A console restricted to certain storages may only change their devices.
 .SH ARGUMENTS
 .SS "setdevice"
 .TP
@@ -20,6 +22,13 @@ Device name (text)
 .TP
 .B "autoselect=<yes|no>"
 Autoselect flag (yes or no)
+.SH EXAMPLES
+.TP
+.B "setdevice storage=Tape device=Drive\-1 autoselect=no"
+keep jobs away from Drive\-1 during maintenance
+.TP
+.B "setdevice storage=Tape device=Drive\-1 autoselect=yes"
+make the drive available again
 .SH ORIGIN
 Bareos console command.
 .SH SEE ALSO

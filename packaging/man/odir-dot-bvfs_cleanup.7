@@ -8,12 +8,16 @@ odir\-dot\-bvfs_cleanup \- \&.bvfs_cleanup: Cleanup BVFS cache for a certain han
 .fi
 .SH DESCRIPTION
 .PP
-Cleanup BVFS cache for a certain handle.
+Drops the table that .bvfs_restore created for a restore selection, after the restore was started with file=?<table> or abandoned. path= names the table (b2 followed by a number); other names are skipped silently and a missing table is not an error. The BVFS cache stays.
 .SH ARGUMENTS
 .SS "\&.bvfs_cleanup"
 .TP
 .B "path=<path>"
 Handle (table name) (text; required)
+.SH EXAMPLES
+.TP
+.B "\&.bvfs_cleanup path=b2101"
+drop a restore selection table
 .SH ORIGIN
 Bareos console command.
 .SH SEE ALSO

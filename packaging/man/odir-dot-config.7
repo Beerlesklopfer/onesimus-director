@@ -19,21 +19,35 @@ Reads, creates, changes and deletes configuration resources as raw text (the sam
 .TP
 .B "\&.config capabilities"
 Editable types and operations
+.IP
+Shows the interface version and, per resource type, the operations the configuration CRUD offers (READ_RAW, CREATE_RAW, UPDATE_RAW, DELETE). The editable types are schedule, job, jobdefs and client. Without the CommandACL configure no types are listed.
 .TP
 .B "\&.config list"
 Resources of a type
+.IP
+Lists the resources of one type (schedule, job, jobdefs or client) with their file, SHA\-256 and whether the file holds more than one resource. Resources the console may not see by its resource ACL are left out.
 .TP
 .B "\&.config read"
 Raw text of a resource
+.IP
+Returns the raw text of one resource byte for byte, with its file and SHA\-256. The checksum is the optimistic lock for a later update or delete. A resource the console may not see gives the status DENIED.
 .TP
 .B "\&.config create"
 New resource from text
+.IP
+Creates a resource from its raw text, given base64 encoded in text64= because a console line carries no line ends. The new configuration is checked like odir \-t, written atomically and reloaded, with rollback if the reload fails. With validate_only the text is only checked, nothing is written.
+.IP
+A result status other than OK (EXISTS, INVALID, DENIED ...) is reported in the response, not as a command error. Needs the CommandACL configure.
 .TP
 .B "\&.config update"
 Replace a resource
+.IP
+Replaces the raw text of a resource. sha256= must be the checksum from the last read; if the file changed since, the status is CONFLICT and nothing is written. The text is checked like odir \-t, written atomically and reloaded with rollback; validate_only only checks. Needs the CommandACL configure.
 .TP
 .B "\&.config delete"
 Delete a resource
+.IP
+Deletes a resource, guarded by the checksum from the last read. If other resources still refer to it the status is REFERENCED, the referring resources are listed and nothing is deleted. validate_only only checks. Needs the CommandACL configure.
 .SH ARGUMENTS
 .SS "\&.config"
 .TP
@@ -89,6 +103,31 @@ SHA\-256 of the text read (text; required)
 .TP
 .B "validate_only"
 Check only, write nothing (keyword)
+.SH EXAMPLES
+.TP
+.B "\&.config list type=job json"
+the job resources as one JSON line
+.TP
+.B "\&.config read type=schedule name=WeeklyCycle"
+the raw text of a schedule with its checksum
+.TP
+.B "\&.config capabilities"
+the editable types and their operations
+.TP
+.B "\&.config list type=client"
+all client resources with file and checksum
+.TP
+.B "\&.config read type=client name=bareos\-fd"
+the raw client text and its checksum
+.TP
+.B "\&.config create type=schedule text64=U2NoZWR1bGUgewogIE5hbWUgPSBOaWdodGx5CiAgUnVuID0gRnVsbCBzdW4gYXQgMjM6MDAKfQo validate_only"
+check a new schedule without writing it
+.TP
+.B "\&.config update type=schedule name=Nightly sha256=5b1e9a3c text64=U2NoZWR1bGUgewogIE5hbWUgPSBOaWdodGx5CiAgUnVuID0gRnVsbCBzYXQgYXQgMjI6MDAKfQo"
+replace a schedule with new text
+.TP
+.B "\&.config delete type=client name=old\-fd sha256=5b1e9a3c validate_only"
+check whether a client could be deleted
 .SH ORIGIN
 Onesimus extension. The Bareos Director does not know this command and answers "is an invalid command".
 .SH SEE ALSO

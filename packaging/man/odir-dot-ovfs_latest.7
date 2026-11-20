@@ -8,7 +8,9 @@ odir\-dot\-ovfs_latest \- \&.ovfs_latest: Job chain of a client's latest state (
 .fi
 .SH DESCRIPTION
 .PP
-Job chain of a client's latest state (restore option 5).
+Onesimus extension: determines the job chain for the newest state of a client, as restore menu item 5 selects it: the last Full backup of the fileset, the last Differential after it and all Incrementals after Full or Differential. Only backups with status T or W count, Differentials and Incrementals only if they are on an enabled volume. fileset= is needed when the client has backups of several filesets.
+.PP
+Pass the comma separated list as jobid= to .ovfs_tree and .ovfs_ls, so the tree stays the same while browsing even if a new backup finishes. json prints the result as one JSON line.
 .SH ARGUMENTS
 .SS "\&.ovfs_latest"
 .TP
@@ -20,6 +22,13 @@ FileSet name (name; values from .filesets)
 .TP
 .B "json"
 Print the JSON object as text (keyword)
+.SH EXAMPLES
+.TP
+.B "\&.ovfs_latest client=bareos\-fd"
+the newest job chain of a client
+.TP
+.B "\&.ovfs_latest client=bareos\-fd fileset=LinuxAll json"
+the chain of one fileset as JSON
 .SH ORIGIN
 Onesimus extension. The Bareos Director does not know this command and answers "is an invalid command".
 .SH SEE ALSO

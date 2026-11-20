@@ -8,7 +8,9 @@ odir\-dot\-authorized \- \&.authorized: Check for authorization
 .fi
 .SH DESCRIPTION
 .PP
-Check for authorization.
+Checks whether the own console may access a resource or command and answers authorized or not authorized. The check uses the ACLs of the Console resource and its profiles (Job, Client, Storage, Schedule, Pool, Command, FileSet and Catalog ACL). User interfaces such as bareos\-webui use it to show buttons only when permitted. It only reads.
+.PP
+Keys are case\-insensitive, and only the ACL is checked, not whether the resource exists. With several arguments the last known one decides. Without arguments, with unknown keys only or with a key lacking a value the answer is not authorized, even for an unrestricted console.
 .SH ARGUMENTS
 .SS "\&.authorized"
 .TP
@@ -35,6 +37,13 @@ FileSet name (name; values from .filesets)
 .TP
 .B "catalog=<catalog>"
 Catalog name (name; values from .catalogs)
+.SH EXAMPLES
+.TP
+.B "\&.authorized cmd=purge"
+check whether the console may run purge
+.TP
+.B "\&.authorized client=bareos\-fd"
+check access to client bareos\-fd
 .SH ORIGIN
 Bareos console command.
 .SH SEE ALSO

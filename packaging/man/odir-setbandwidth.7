@@ -8,7 +8,9 @@ setbandwidth [client=<client>] [fd=<fd>] [storage=<storage>] [sd=<sd>] [jobid=<j
 .fi
 .SH DESCRIPTION
 .PP
-Sets bandwidth.
+Limits the bandwidth of a File Daemon, a Storage Daemon or running jobs without changing the configuration. The Director connects to the daemon and sends the new limit in kB/s; it applies until the daemon restarts or the job ends. limit=0 removes the limit; a missing limit is asked for. NDMP storages cannot be limited.
+.PP
+job=, jobid=, ujobid=, all and state= select running jobs. For backup and restore the limit is applied through the File Daemon, for copy and migrate through the reading Storage Daemon. Without client, storage or a job selection the Director asks for the client.
 .SH ARGUMENTS
 .SS "setbandwidth"
 .TP
@@ -44,6 +46,16 @@ KiB/s (0: unlimited) (number)
 .TP
 .B "yes"
 Do not ask (keyword)
+.SH EXAMPLES
+.TP
+.B "setbandwidth limit=10000 client=bareos\-fd"
+throttle the File Daemon to about 10 MB/s
+.TP
+.B "setbandwidth limit=5000 jobid=42"
+slow down the running job 42
+.TP
+.B "setbandwidth limit=0 client=bareos\-fd"
+remove the limit again
 .SH ORIGIN
 Bareos console command.
 .SH SEE ALSO

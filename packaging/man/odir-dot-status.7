@@ -11,17 +11,27 @@ odir\-dot\-status \- \&.status: Report status
 .fi
 .SH DESCRIPTION
 .PP
-Report status.
+Returns one section of the status display of the Director, a Storage Daemon or a client, for example only the header or only the running jobs. The WebUI and monitoring scripts use it so they need not parse the full output of status, and in API mode 2 .status dir returns structured JSON. For storage= and client= the Director connects to the daemon.
+.PP
+A target must follow: dir, storage=<name> or client=<name>; without one the reply is "1900 Bad .status command, missing arguments." Unknown targets and a missing or unknown section under dir give "1900 Bad .status command, wrong argument."
 .SH SUBCOMMANDS
 .TP
 .B "\&.status dir"
 Director
+.IP
+Shows one section of the Director status: header (version, start time and job counters), scheduled, running or terminated jobs. current and last only reply with the short answer "1000 OK .status". A section is required.
+.IP
+In API mode 2 the sections are JSON: result.header with director, version, release_date, os, binary_info, daemon_started, jobs_run, jobs_running and config_warnings, and result.scheduled, result.running and result.terminated as arrays.
 .TP
 .B "\&.status storage=<storage>"
 Storage Daemon
+.IP
+Shows the status of a Storage Daemon, which the Director contacts for this. Without a section the full status output is printed; header, waitreservation, devices, volumes, spooling, running and terminated select one part. In API mode 2 there is no JSON for this target and the result is empty.
 .TP
 .B "\&.status client=<client>"
 File Daemon
+.IP
+Shows the status of a File Daemon, which the Director contacts for this; header, running or terminated select the section. In API mode 2 there is no JSON for this target and the result is empty. If the client cannot be reached, the same connection messages as with status appear.
 .SH ARGUMENTS
 .SS "\&.status dir"
 .TP
@@ -80,6 +90,31 @@ Part of the status (keyword; excludes the other arguments of group part)
 .TP
 .B "running"
 Part of the status (keyword; excludes the other arguments of group part)
+.SH EXAMPLES
+.TP
+.B "\&.status dir running"
+the jobs currently running on the Director
+.TP
+.B "\&.status storage=File devices"
+the devices of the storage File
+.TP
+.B "\&.status dir header"
+version, start time and job counters of the Director
+.TP
+.B "\&.status dir scheduled"
+the jobs scheduled for the coming days
+.TP
+.B "\&.status storage=File header"
+the header of the storage daemon behind File
+.TP
+.B "\&.status storage=File"
+the full status of the storage daemon
+.TP
+.B "\&.status client=bareos\-fd header"
+version and start time of the client bareos\-fd
+.TP
+.B "\&.status client=bareos\-fd terminated"
+the jobs the client finished last
 .SH ORIGIN
 Bareos console command.
 .SH SEE ALSO

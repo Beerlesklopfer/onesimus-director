@@ -8,7 +8,9 @@ odir\-dot\-sqlcount \- \&.sqlcount: Count catalog records
 .fi
 .SH DESCRIPTION
 .PP
-Count catalog records.
+Counts the rows of catalog tables. Without an argument it reports the most important tables (client, fileset, job, jobmedia, media, pool, storage); File and Path are left out on purpose because counting them takes long in large catalogs. With table= exactly one table is counted. The command only reads.
+.PP
+Onesimus extension: Bareos does not know the command and answers ".sqlcount: is an invalid command.", so programs that must work with both directors should not rely on it. The console needs .sql or sqlquery in its Command ACL in addition to .sqlcount.
 .SH ARGUMENTS
 .SS "\&.sqlcount"
 .TP
@@ -17,6 +19,13 @@ Table name (text)
 .TP
 .B "catalog=<catalog>"
 Catalog name (name; values from .catalogs)
+.SH EXAMPLES
+.TP
+.B "\&.sqlcount"
+row counts of the main catalog tables
+.TP
+.B "\&.sqlcount table=file"
+number of rows in the file table
 .SH ORIGIN
 Onesimus extension. The Bareos Director does not know this command and answers "is an invalid command".
 .SH SEE ALSO

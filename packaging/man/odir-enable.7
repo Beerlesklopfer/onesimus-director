@@ -8,7 +8,9 @@ enable [job=<job>] [client=<client>] [schedule=<schedule>] [storage=<storage>]
 .fi
 .SH DESCRIPTION
 .PP
-Enable a job/client/schedule.
+Switches a job, client or schedule back on that was switched off with disable. An enabled job is started by its schedule again, an enabled client is backed up again. Without an argument, or with job, client or schedule without a value, the Director offers the disabled resources of that kind; if there is exactly one it is selected automatically.
+.PP
+The change lives only in the memory of the running Director and is lost at the next reload or restart. A permanent setting requires the Enabled directive in the configuration. The catalog is not changed.
 .SH ARGUMENTS
 .SS "enable"
 .TP
@@ -23,6 +25,16 @@ Schedule name (name; values from .schedule)
 .TP
 .B "storage=<storage>"
 Storage name (name; values from .storages)
+.SH EXAMPLES
+.TP
+.B "enable job=BackupClient1"
+let the scheduler start BackupClient1 again
+.TP
+.B "enable client=bareos\-fd"
+back up the client bareos\-fd again
+.TP
+.B "enable schedule=WeeklyCycle"
+reactivate a schedule
 .SH ORIGIN
 Bareos console command.
 .SH SEE ALSO

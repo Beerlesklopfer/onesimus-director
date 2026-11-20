@@ -8,7 +8,9 @@ resolve [client=<client>] [fd=<fd>] [storage=<storage>] [sd=<sd>] [<hostname> ..
 .fi
 .SH DESCRIPTION
 .PP
-Resolve a hostname.
+Shows the IP addresses a host name resolves to. Without client= or storage= the Director resolves the name itself; with client= (or fd=) the File Daemon resolves it, with storage= the Storage Daemon, and the Director prints their answer. This helps to locate name resolution problems on either side of a connection. Several host names may be given; nothing is changed.
+.PP
+When the Director resolves itself and a name fails, the command stops there and later names are not tried. Without any argument there is no output.
 .SH ARGUMENTS
 .SS "resolve"
 .TP
@@ -26,6 +28,13 @@ Storage name (as storage=) (name; values from .storages)
 .TP
 .B "<hostname> ..."
 Host name to resolve (positional value; may be repeated)
+.SH EXAMPLES
+.TP
+.B "resolve backup.example.com"
+addresses as seen by the Director
+.TP
+.B "resolve client=bareos\-fd backup.example.com"
+how the File Daemon resolves the Director host
 .SH ORIGIN
 Bareos console command.
 .SH SEE ALSO

@@ -8,7 +8,11 @@ odir\-dot\-jobdefs \- \&.jobdefs: List all job defaults resources
 .fi
 .SH DESCRIPTION
 .PP
-List all job defaults resources.
+Prints the names of all JobDefs resources of the Director configuration, one per line. JobDefs are templates from which jobs inherit default values; configuration tools need the list when creating jobs. Only JobDefs allowed by the console's Job ACL appear. It takes no arguments and changes nothing.
+.SH EXAMPLES
+.TP
+.B "\&.jobdefs"
+list all job templates
 .SH ORIGIN
 Bareos console command.
 .SH SEE ALSO

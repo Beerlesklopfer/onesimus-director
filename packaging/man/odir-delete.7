@@ -17,15 +17,25 @@ Deletes catalog records of volumes, pools, jobs or storages; asks unless yes is 
 .TP
 .B "delete volume[=<volume>]"
 A volume record
+.IP
+Deletes a volume and every job stored on it from the catalog. The data on the medium is untouched, but it can no longer be selected for restore. Without a name the pool and volume are selected in a dialogue; pool= sets the pool for this selection. The Director asks for confirmation unless yes is given; the action cannot be undone.
+.IP
+Onesimus deviation: a volume holding jobs of the latest Full chain of a client and FileSet is never deleted, not even with yes.
 .TP
 .B "delete pool[=<pool>]"
 A pool record
+.IP
+Deletes a Pool record from the catalog after confirmation; without a name the pool is chosen from a list. Onesimus deviation: deleting pools is not implemented yet, and after yes the Director answers delete pool: not supported.
 .TP
 .B "delete jobid=<jobid>[,...]"
 Job records (list or ranges)
+.IP
+Deletes jobs together with their file and JobMedia records from the catalog. The value may be a comma\-separated list with ranges such as 507\-509,511; a range of more than 25 JobIds requires confirmation. Without a value the Director asks for the JobId. This is also the way to remove a single job of a protected latest Full chain.
 .TP
 .B "delete storage[=<storage>]"
 A storage record
+.IP
+Deletes an orphaned Storage record from the catalog, one that no longer exists in the configuration. A storage still configured is refused; remove it from the configuration first. Without a value the Director asks for the name.
 .SH ARGUMENTS
 .SS "delete"
 .TP
@@ -56,6 +66,31 @@ Storage name (name; values from .storages; the value may be left out)
 .TP
 .B "storage=<storage>"
 Storage name (name; values from .storages)
+.SH EXAMPLES
+.TP
+.B "delete"
+choose what to delete from the menu
+.TP
+.B "delete jobid=507\-509,511"
+delete four job records
+.TP
+.B "delete volume=Full\-0001 yes"
+delete a volume without asking
+.TP
+.B "delete volume pool=Scratch"
+choose the volume to delete from pool Scratch
+.TP
+.B "delete pool=Scratch"
+ask to delete the Scratch pool record
+.TP
+.B "delete jobid=14"
+delete one job record
+.TP
+.B "delete jobid=600,602"
+delete two job records
+.TP
+.B "delete storage=OldTape"
+remove the catalog record of a removed storage
 .SH ORIGIN
 Bareos console command.
 .SH SEE ALSO

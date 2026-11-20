@@ -8,7 +8,11 @@ odir\-dot\-consoles \- \&.consoles: List all console resources
 .fi
 .SH DESCRIPTION
 .PP
-List all console resources.
+Prints the names of all Console resources, one per line, for user interfaces and tab completion. The list includes the built\-in default console *UserAgent* and consoles created at runtime with configure. The order is the internal configuration order, not alphabetical, and the list is not filtered by ACLs. It takes no arguments and only reads.
+.SH EXAMPLES
+.TP
+.B "\&.consoles"
+list all consoles
 .SH ORIGIN
 Bareos console command.
 .SH SEE ALSO

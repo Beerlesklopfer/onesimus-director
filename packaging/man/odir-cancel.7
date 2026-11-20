@@ -35,6 +35,16 @@ Every job (keyword)
 .TP
 .B "yes"
 Do not ask (keyword)
+.SH EXAMPLES
+.TP
+.B "cancel jobid=42"
+cancel job 42 after confirmation
+.TP
+.B "cancel job=BackupClient1 yes"
+cancel the running BackupClient1 job without asking
+.TP
+.B "cancel state=waiting yes"
+cancel every waiting job
 .SH ORIGIN
 Bareos console command.
 .SH SEE ALSO

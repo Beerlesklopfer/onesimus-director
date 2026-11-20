@@ -8,7 +8,11 @@ odir\-dot\-users \- \&.users: List all user resources
 .fi
 .SH DESCRIPTION
 .PP
-List all user resources.
+Prints the names of all User resources, one per line. User resources describe users who log in through a console with PAM authentication; their rights come from profiles. Without User resources the answer is empty. The order is the internal configuration order and the list is not filtered by ACLs. It takes no arguments and only reads.
+.SH EXAMPLES
+.TP
+.B "\&.users"
+list the PAM users
 .SH ORIGIN
 Bareos console command.
 .SH SEE ALSO

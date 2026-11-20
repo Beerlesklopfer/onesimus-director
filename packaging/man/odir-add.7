@@ -8,7 +8,9 @@ add [pool=<pool>] [storage=<storage>] [jobid=<jobid>] [volume=<volume>] [slot=<s
 .fi
 .SH DESCRIPTION
 .PP
-Add media to a pool.
+Creates Media records for volumes in the catalog without labelling the media. This is only needed in special cases, for example when tapes already carry a Bareos label or volumes should be listed in advance. The Storage Daemon is not contacted. Normally label is the right command, and the Director says so on every call.
+.PP
+pool= selects the pool (asked for if missing, automatic if the console may use only one pool); storage= determines Media Type and storage of the new volumes. Number, name, start number and, on autochangers, slot and InChanger are always asked in the dialogue: 0 creates one volume with a fixed name, a larger number a series with a four\-digit suffix. jobid= is accepted but ignored.
 .SH ARGUMENTS
 .SS "add"
 .TP
@@ -29,6 +31,10 @@ Slot (number)
 .TP
 .B "drive=<drive>"
 Drive number (number)
+.SH EXAMPLES
+.TP
+.B "add pool=Full storage=File"
+add volumes to pool Full for storage File
 .SH ORIGIN
 Bareos console command.
 .SH SEE ALSO

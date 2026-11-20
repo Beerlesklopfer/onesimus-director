@@ -8,7 +8,9 @@ odir\-dot\-ovfs_versions \- \&.ovfs_versions: All versions of one file of a clie
 .fi
 .SH DESCRIPTION
 .PP
-All versions of one file of a client (OVFS).
+Onesimus extension: lists all backed up versions of a file or directory of a client, newest first. Only versions stored on a volume from backup and archive jobs count; copies adds copy jobs. Versions from jobs the console may not see are left out. path= is the directory, name= the file; without name= the versions of the directory itself are listed.
+.PP
+Each line has ten tab separated columns: JobId, level, job type, start time, size, modification time, FileIndex, volumes, InChanger and MD5. json prints the result as one JSON line. Unlike .bvfs_versions no PathIds are needed.
 .SH ARGUMENTS
 .SS "\&.ovfs_versions"
 .TP
@@ -26,6 +28,13 @@ Include copy jobs (keyword)
 .TP
 .B "json"
 Print the JSON object as text (keyword)
+.SH EXAMPLES
+.TP
+.B "\&.ovfs_versions client=bareos\-fd path=/etc/ name=hosts"
+all versions of /etc/hosts
+.TP
+.B "\&.ovfs_versions client=bareos\-fd path=/etc/ name=fstab copies json"
+including copy jobs, as JSON
 .SH ORIGIN
 Onesimus extension. The Bareos Director does not know this command and answers "is an invalid command".
 .SH SEE ALSO

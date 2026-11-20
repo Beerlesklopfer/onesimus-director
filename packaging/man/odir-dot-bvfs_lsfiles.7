@@ -8,7 +8,9 @@ odir\-dot\-bvfs_lsfiles \- \&.bvfs_lsfiles: List files using BVFS
 .fi
 .SH DESCRIPTION
 .PP
-List files using BVFS.
+Lists the files (without subdirectories) of a directory in the state of a job chain; for each file the version from the newest job of the chain is shown. The FileIds are the input for .bvfs_restore. The BVFS cache must have been filled with .bvfs_update first. pattern= keeps only file names matching a regular expression; limit= (default 2000) and offset= page through the result.
+.PP
+Each line has five tab separated columns: PathId, FileId, JobId, LStat and file name.
 .SH ARGUMENTS
 .SS "\&.bvfs_lsfiles"
 .TP
@@ -32,6 +34,13 @@ Name filter (regular expression) (text)
 .TP
 .B "filename=<filename>"
 File name (text)
+.SH EXAMPLES
+.TP
+.B "\&.bvfs_lsfiles jobid=600,615,616 path=/etc/"
+the files of /etc in a job chain
+.TP
+.B "\&.bvfs_lsfiles jobid=600,615,616 pathid=7 pattern=conf"
+only file names matching a pattern
 .SH ORIGIN
 Bareos console command.
 .SH SEE ALSO

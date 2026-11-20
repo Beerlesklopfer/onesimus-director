@@ -8,7 +8,11 @@ truncate volstatus=<Purged> [storage=<storage>] [pool=<pool>] [volume=<volume>[,
 .fi
 .SH DESCRIPTION
 .PP
-Truncate purged volumes.
+Frees the space of volumes whose jobs have already been removed (status Purged). The Director lists the matching volumes, asks for confirmation and has the Storage Daemon relabel them, which shrinks the volume file or tape to its label. The volumes stay in the catalog. Only native (non\-NDMP) storages are supported, and only the volumes of one storage per call.
+.PP
+volstatus=Purged is required. storage=, pool= and volume= narrow the selection; an unknown storage or pool opens a selection list. drive= selects the drive, yes skips the question. Other keywords, including client= and catalog=, end with Invalid parameter. Under API 1 and 2 nothing is asked, so without yes nothing happens.
+.PP
+Onesimus deviation: a volume holding jobs of the latest Full chain of a client and FileSet is never truncated.
 .SH ARGUMENTS
 .SS "truncate"
 .TP
@@ -32,6 +36,13 @@ Do not ask (keyword)
 .TP
 .B "catalog=<catalog>"
 Catalog name (name; values from .catalogs)
+.SH EXAMPLES
+.TP
+.B "truncate volstatus=Purged storage=File pool=Full yes"
+truncate all purged volumes of pool Full on File
+.TP
+.B "truncate volstatus=Purged volume=Full\-0003"
+truncate one purged volume after confirmation
 .SH ORIGIN
 Bareos console command.
 .SH SEE ALSO

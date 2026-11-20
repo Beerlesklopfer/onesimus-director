@@ -8,12 +8,18 @@ odir\-dot\-levels \- \&.levels: List all backup levels
 .fi
 .SH DESCRIPTION
 .PP
-List all backup levels.
+Prints the levels allowed for jobs, such as Full, Incremental or VirtualFull for backups and Catalog or VolumeToCatalog for verify jobs. Programs fill the level= selection of run or estimate with it. The table is built into the Director; nothing is read from configuration or catalog.
+.PP
+Without an argument the whole table is printed, so Full, Incremental and Differential appear several times (once each for Backup, Copy and Migrate). A job type given as a single bare word, written out in full in any case, restricts the list; a prefix, more than one word or the form type=Backup gives an empty list, as do job types without levels.
 .SH ARGUMENTS
 .SS "\&.levels"
 .TP
 .B "<type>"
 Job type (positional value; values from .types)
+.SH EXAMPLES
+.TP
+.B "\&.levels"
+list all job levels
 .SH ORIGIN
 Bareos console command.
 .SH SEE ALSO

@@ -8,7 +8,9 @@ import [storage=<storage>] [srcslots=<srcslots>] [dstslots=<dstslots>] [volume=<
 .fi
 .SH DESCRIPTION
 .PP
-Import volumes from import/export slots to normal slots.
+Has an autochanger move volumes from its import/export slots (mail slots) into free normal slots. The Director instructs the Storage Daemon, which moves the robot, and then records the slots in the catalog. It works only with storages configured as autochangers; the counterpart is export.
+.PP
+srcslots= lists occupied import/export slots (default: all occupied ones), dstslots= empty normal slots (default: free slots in order); slot lists use numbers from 1, ranges with \- and commas. volume= restricts the import to names separated by |. scan reads the tapes in a drive instead of using barcodes and asks for the drive. Onesimus deviation: on a storage without autochanger the command is sent to the Storage Daemon, which rejects it.
 .SH ARGUMENTS
 .SS "import"
 .TP
@@ -29,6 +31,13 @@ Scan the volumes (keyword)
 .TP
 .B "drive=<drive>"
 Drive number (number)
+.SH EXAMPLES
+.TP
+.B "import storage=Autochanger"
+import every volume from the mail slots
+.TP
+.B "import storage=Autochanger srcslots=41\-42 dstslots=10\-11"
+move mail slots 41 and 42 into slots 10 and 11
 .SH ORIGIN
 Bareos console command.
 .SH SEE ALSO

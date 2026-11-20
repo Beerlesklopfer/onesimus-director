@@ -8,7 +8,9 @@ odir\-dot\-jobs \- \&.jobs: List all job resources
 .fi
 .SH DESCRIPTION
 .PP
-List all job resources.
+Prints the names of all Job resources of the Director configuration, one per line, for completion of job= and selection lists. Only jobs allowed by the console's Job ACL appear, in configuration order. It reads only the configuration.
+.PP
+type= compares only the first letter of its value, case\-sensitively, with the job type letter (B Backup, R Restore, V Verify, D Admin, c Copy, g Migrate, O Consolidate, A Archive); so type=Backup works but type=backup returns nothing. enabled and disabled filter as for .clients.
 .SH ARGUMENTS
 .SS "\&.jobs"
 .TP
@@ -20,6 +22,13 @@ Only enabled resources (keyword; excludes the other arguments of group state)
 .TP
 .B "disabled"
 Only disabled resources (keyword; excludes the other arguments of group state)
+.SH EXAMPLES
+.TP
+.B "\&.jobs type=Backup"
+list the backup jobs
+.TP
+.B "\&.jobs disabled"
+list only disabled jobs
 .SH ORIGIN
 Bareos console command.
 .SH SEE ALSO

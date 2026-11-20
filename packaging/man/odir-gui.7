@@ -8,12 +8,21 @@ gui [<on|off>]
 .fi
 .SH DESCRIPTION
 .PP
-Switch between interactive (gui off) and non\-interactive (gui on) mode.
+gui on switches the session into a mode for graphical front ends and scripts, gui off back to the interactive default. In GUI mode the Director silently uses the first catalog of the configuration when no catalog= is given, prints catalog numbers without thousands separators and left aligned, and omits the "You have messages." hint.
+.PP
+The setting applies only to the own session until it ends. Case does not matter; the first word that reads on or off counts.
 .SH ARGUMENTS
 .SS "gui"
 .TP
 .B "<on|off>"
 Switch on or off (positional value; values: on, off)
+.SH EXAMPLES
+.TP
+.B "gui on"
+machine friendly output without catalog prompts
+.TP
+.B "gui off"
+back to interactive mode
 .SH ORIGIN
 Bareos console command.
 .SH SEE ALSO

@@ -8,7 +8,11 @@ odir\-dot\-msgs \- \&.msgs: List all message resources
 .fi
 .SH DESCRIPTION
 .PP
-List all message resources.
+Prints the names of all Messages resources of the Director configuration, one per line. A Messages resource defines where job and daemon messages go (console, file, mail, catalog); configuration tools need the list for messages=. It takes no arguments and changes nothing. Not to be confused with .messages, which prints pending messages.
+.SH EXAMPLES
+.TP
+.B "\&.msgs"
+list the messages resources
 .SH ORIGIN
 Bareos console command.
 .SH SEE ALSO

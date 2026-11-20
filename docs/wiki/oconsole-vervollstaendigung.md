@@ -33,7 +33,7 @@ Zeilen, die der Director in dieser Sitzung abgelehnt hat („is an invalid comma
 
 ## help \<befehl\>
 
-Mit der Grammatik eines odir beantwortet `oconsole` `help <befehl>` selbst: Usage, Beschreibung, Unterbefehle, Argumente, Beispiele, Herkunft (Bareos oder Onesimus) – der Text der Man-Page `odir-<befehl>(7)` ohne Formatierung. `help` allein und alles beim Rückfall auf `.help` geht wie bisher an den Director.
+Mit der Grammatik eines odir beantwortet `oconsole` `help <befehl>` selbst: Usage, Beschreibung, Unterbefehle (die wichtigen mit eigenen Absätzen), Argumente, Beispiele (die des Befehls, dann die der Unterbefehle), Herkunft (Bareos oder Onesimus) – der Text der Man-Page `odir-<befehl>(7)` ohne Formatierung. `help` allein und alles beim Rückfall auf `.help` geht wie bisher an den Director.
 
 ## Tasten
 

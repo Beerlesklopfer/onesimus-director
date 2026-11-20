@@ -8,7 +8,9 @@ odir\-dot\-bvfs_lsdirs \- \&.bvfs_lsdirs: List directories using BVFS
 .fi
 .SH DESCRIPTION
 .PP
-List directories using BVFS.
+Lists the subdirectories of a directory in the state of a job chain, as a restore file browser needs them. The BVFS cache must have been filled with .bvfs_update first. The directory is given by path= (with a trailing slash, / for the root) or by pathid= from an earlier output; limit= (default 2000) and offset= page through the result.
+.PP
+Each line has five tab separated columns: PathId, FileId, JobId, LStat and name. The first two lines are . and ..; directories without their own catalog record have FileId and JobId 0. A JobId the console may not see is refused.
 .SH ARGUMENTS
 .SS "\&.bvfs_lsdirs"
 .TP
@@ -32,6 +34,13 @@ Name filter (regular expression) (text)
 .TP
 .B "filename=<filename>"
 File name (text)
+.SH EXAMPLES
+.TP
+.B "\&.bvfs_lsdirs jobid=600,615,616 path=/"
+the top level directories of a job chain
+.TP
+.B "\&.bvfs_lsdirs jobid=600,615,616 pathid=7 limit=100"
+the first 100 subdirectories of a known path
 .SH ORIGIN
 Bareos console command.
 .SH SEE ALSO

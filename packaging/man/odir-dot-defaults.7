@@ -8,7 +8,9 @@ odir\-dot\-defaults \- \&.defaults: Get default settings
 .fi
 .SH DESCRIPTION
 .PP
-Get default settings.
+Shows the main settings of a job, client, storage or pool as key=value lines. The WebUI and scripts use it to prefill forms such as run or restore with values from the configuration. It reads only the configuration and changes nothing.
+.PP
+Give exactly one resource per call; the name must match exactly. A JobDefs template is not a job and returns nothing, nor does a resource hidden by the console's ACL. For pool= one line reads purge_oldest_volume==0 with a double equals sign, as in Bareos. Under API 2 an error leaves result empty instead of an empty defaults object.
 .SH ARGUMENTS
 .SS "\&.defaults"
 .TP
@@ -23,6 +25,13 @@ Storage name (name; values from .storages)
 .TP
 .B "pool=<pool>"
 Pool name (name; values from .pools)
+.SH EXAMPLES
+.TP
+.B "\&.defaults job=backup\-bareos\-fd"
+show the defaults of a job
+.TP
+.B "\&.defaults pool=Full"
+show the settings of pool Full
 .SH ORIGIN
 Bareos console command.
 .SH SEE ALSO

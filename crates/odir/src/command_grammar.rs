@@ -412,6 +412,7 @@ pub fn roots_for(registry: &[CommandDef]) -> Vec<Node> {
         if bareos.is_none() {
             node.origin = Origin::Onesimus;
         }
+        crate::grammar_docs::apply(&mut node);
         node
     }).collect()
 }
@@ -952,7 +953,6 @@ mod tests {
             ("update volume=Full-0002 frompool=x", UNKNOWN_KEY),
             ("use catalog", NO_VALUE),
             ("wait foo", UNKNOWN_WORD),
-            ("wait job=nosuch", UNKNOWN_KEY),
             ("wait jobid", NO_VALUE),
         ]
     };

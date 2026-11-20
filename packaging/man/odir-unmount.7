@@ -8,7 +8,9 @@ unmount [storage=<storage>] [sd=<sd>] [<storage\-name>] [drive=<drive>] [device=
 .fi
 .SH DESCRIPTION
 .PP
-Unmount storage.
+Asks the Storage Daemon to stop using a device and release its volume, so a tape can be removed or the device serviced. While a device is unmounted no job writes to it; mount brings it back. It changes the device state in the Storage Daemon, not the catalog. umount is another name for the same command.
+.PP
+The storage is given as storage=, sd= or by its bare name; without it a selection list appears. drive= picks one drive, alldrives unmounts every drive of the autochanger one after another. jobid=, job= or ujobid= use the storage of a running job.
 .SH ARGUMENTS
 .SS "unmount"
 .TP
@@ -38,6 +40,13 @@ Storage of a job (name; values from .jobs)
 .TP
 .B "ujobid=<ujobid>"
 Storage of a job (text)
+.SH EXAMPLES
+.TP
+.B "unmount storage=Autochanger drive=1"
+unmount drive 1 of the autochanger
+.TP
+.B "unmount storage=Autochanger alldrives"
+unmount every drive of the autochanger
 .SH ORIGIN
 Bareos console command.
 .SH SEE ALSO

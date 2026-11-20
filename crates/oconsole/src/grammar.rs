@@ -801,6 +801,9 @@ pub fn help_text(node: &Node) -> String {
         out.push_str("\nSUBCOMMANDS\n");
         for (path, sub) in all.iter().skip(1) {
             out.push_str(&format!("  {path}\n      {}\n", sub.description));
+            for paragraph in &sub.long {
+                out.push_str(&format!("\n      {paragraph}\n"));
+            }
         }
     }
     let blocks: Vec<&(String, &Node)> = all.iter().filter(|(_, n)| !n.args.is_empty() || n.value.is_some()).collect();
@@ -814,9 +817,11 @@ pub fn help_text(node: &Node) -> String {
             }
         }
     }
-    if !node.examples.is_empty() {
+    // the command's examples, then those of its subcommands in tree order
+    let examples: Vec<&(String, String)> = all.iter().flat_map(|(_, n)| n.examples.iter()).collect();
+    if !examples.is_empty() {
         out.push_str("\nEXAMPLES\n");
-        for (line, text) in &node.examples {
+        for (line, text) in examples {
             out.push_str(&format!("  {line}\n      {text}\n"));
         }
     }

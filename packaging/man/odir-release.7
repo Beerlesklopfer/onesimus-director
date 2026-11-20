@@ -8,7 +8,9 @@ release [storage=<storage>] [sd=<sd>] [<storage\-name>] [drive=<drive>] [device=
 .fi
 .SH DESCRIPTION
 .PP
-Release storage.
+Asks the Storage Daemon to release the volume in a device without unmounting the device. On tape drives the tape is rewound; the next job reads the label again and may request another volume. It changes the device state in the Storage Daemon, not the catalog.
+.PP
+The storage is given as storage=, sd= or by its bare name; without it a selection list appears. drive= picks one drive, alldrives releases every drive of the storage. jobid=, job= or ujobid= use the storage of a running job.
 .SH ARGUMENTS
 .SS "release"
 .TP
@@ -38,6 +40,13 @@ Storage of a job (name; values from .jobs)
 .TP
 .B "ujobid=<ujobid>"
 Storage of a job (text)
+.SH EXAMPLES
+.TP
+.B "release storage=File"
+release the volume of the File storage
+.TP
+.B "release storage=Autochanger alldrives"
+release every drive of the autochanger
 .SH ORIGIN
 Bareos console command.
 .SH SEE ALSO

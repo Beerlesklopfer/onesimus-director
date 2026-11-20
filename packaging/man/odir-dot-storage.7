@@ -8,7 +8,7 @@ odir\-dot\-storage \- \&.storage: List all storage resources
 .fi
 .SH DESCRIPTION
 .PP
-List all storage resources.
+Not a command of its own but an abbreviation of .storages: like Bareos, the Director accepts any unique prefix of a command name and runs the first matching command. Output, arguments, API modes and permissions are those of .storages. It reads only the configuration; enabled or disabled filter by state.
 .SH ARGUMENTS
 .SS "\&.storage"
 .TP
@@ -17,6 +17,13 @@ Only enabled resources (keyword; excludes the other arguments of group state)
 .TP
 .B "disabled"
 Only disabled resources (keyword; excludes the other arguments of group state)
+.SH EXAMPLES
+.TP
+.B "\&.storage"
+list the storage resources
+.TP
+.B "\&.storage enabled"
+list only enabled storages
 .SH ORIGIN
 Bareos console command.
 .SH SEE ALSO

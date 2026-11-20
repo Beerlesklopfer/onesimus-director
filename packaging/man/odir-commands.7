@@ -312,6 +312,11 @@ version
 .PP
 Prints the Director's name, version and build date.
 .PP
+\fBExamples\fR
+.TP
+.B "version"
+name, version and build date of the running Director
+.PP
 \fBOrigin\fR
 Bareos console command.
 .SS "time"
@@ -326,6 +331,11 @@ time
 .PP
 Prints the Director's current date and time.
 .PP
+\fBExamples\fR
+.TP
+.B "time"
+check the Director clock when schedules seem off by a time zone
+.PP
 \fBOrigin\fR
 Bareos console command.
 .SS "quit"
@@ -339,6 +349,11 @@ quit
 \fBDescription\fR
 .PP
 Ends the console session.
+.PP
+\fBExamples\fR
+.TP
+.B "quit"
+close the console session
 .PP
 \fBOrigin\fR
 Bareos console command.
@@ -365,6 +380,12 @@ Command to describe (positional value; a command name)
 .TP
 .B "help purge"
 usage of purge
+.TP
+.B "help"
+table of every command this console may run
+.TP
+.B "help run"
+all arguments of run
 .PP
 \fBOrigin\fR
 Bareos console command.
@@ -376,7 +397,7 @@ Report status
 status
 status all
 status director[=<director>] [days=<days>] [verbose]
-status client=<client>
+status client[=<client>]
 status storage[=<storage>] [slots] [drive=<drive>] [device=<device>]
 status job=<job>
 status jobid=<jobid>
@@ -394,33 +415,61 @@ Shows the state of the Director, a client, a storage or the scheduler. Without a
 .TP
 .B "status all"
 Director, every storage and every client
+.IP
+Prints the Director status, followed by the status report of every Storage Daemon and every File Daemon the console may see. A daemon reachable under the same address is queried only once, so several Storage resources pointing at one Storage Daemon produce a single report.
 .TP
 .B "status director[=<director>]"
 Director status
+.IP
+Shows the Director's header line (version, start time, job counters, database type), the jobs scheduled for the coming days, the running jobs, the most recently terminated jobs and connections initiated by clients. Any word starting with dir selects this report, so status dir works as well.
+.IP
+days= sets how many days ahead scheduled jobs are listed, from 0 to 500, default 1. An invalid value is ignored with a notice and 1 day is used.
 .TP
-.B "status client=<client>"
+.B "status client[=<client>]"
 Status of a File Daemon
+.IP
+Connects to the File Daemon of the given client and passes on its status report: version, running jobs and recently terminated jobs. Without a value, or with a name the console may not see or that does not exist, the Director shows the list of clients to choose from.
 .TP
 .B "status storage[=<storage>]"
 Status of a Storage Daemon
+.IP
+Connects to the Storage Daemon of the given Storage resource and passes on its report: devices, mounted volumes, running and terminated jobs. Without a value or with an unknown name the Director offers a list of storages. sd= is accepted as a synonym for storage=.
+.IP
+With slots the Director prints the slot table of an autochanger instead of the status report; for a device that is not an autochanger the Storage Daemon answers with an error.
 .TP
 .B "status job=<job>"
 Status of the storage of a job
+.IP
+Shows the Storage Daemon report for the storage used by the running job with this name. If no job of that name is running, the Director says so; for finished jobs use list jobs instead.
 .TP
 .B "status jobid=<jobid>"
 Status of the storage of a job
+.IP
+Like status job, but selects the running job by its JobId. If the job is not running, the Director reports "JobId <n> is not running.".
 .TP
 .B "status ujobid=<ujobid>"
 Status of the storage of a job
+.IP
+Like status job, but selects the running job by its unique job name, the name with date, time and sequence number that the Director gives every job run.
 .TP
 .B "status scheduler[=<schedule>]"
 Jobs the scheduler will start
+.IP
+Lists which schedules trigger which jobs and previews the upcoming runs with level and pool. schedule= restricts the output to one schedule, client= to the jobs of one client and job= to one job; an unknown job name leads to the job selection list.
+.IP
+days= sets the preview period, from \-365 to 365, default 7; negative values look back. days=<from>,<to> gives a range relative to now. In text mode only the larger absolute value of the two counts as days from now; under .api 2 the range is applied exactly.
 .TP
 .B "status subscriptions"
 Subscription and unit counts
+.IP
+Evaluates the backup units relevant for subscriptions from the catalog. clients adds a summary per client, plugins a summary per plugin, all every partial report; anonymize replaces client names by Client 1, Client 2 and so on. client= prints a detail report per fileset for one client.
+.IP
+The command needs access to all client, job and fileset resources and is refused for consoles with restricted ACLs. The words detail and unknown are obsolete and are ignored with a notice.
 .TP
 .B "status configuration"
 Configuration warnings
+.IP
+Checks the loaded configuration for deprecated settings and lists them. The console needs the right to run the configure command; otherwise the Director refuses the report.
 .PP
 \fBArguments\fR
 .PP
@@ -435,10 +484,10 @@ Scheduled jobs of the next days (number)
 .B "verbose"
 More detail (keyword)
 .PP
-\fIstatus client=<client>\fR
+\fIstatus client[=<client>]\fR
 .TP
-.B "client=<client>"
-Client name (name; values from .clients)
+.B "client[=<client>]"
+Client name (name; values from .clients; the value may be left out)
 .PP
 \fIstatus storage[=<storage>]\fR
 .TP
@@ -508,6 +557,65 @@ One client (name; values from .clients)
 .TP
 .B "unknown"
 Unknown clients (keyword)
+.PP
+\fBExamples\fR
+.TP
+.B "status"
+ask whether to show the Director, a storage, a client, the scheduler or all
+.TP
+.B "status director days=3"
+Director status with jobs scheduled for the next three days
+.TP
+.B "status all"
+Director, every storage and every client in one report
+.TP
+.B "status director"
+header, scheduled, running and terminated jobs
+.TP
+.B "status director days=7"
+scheduled jobs of the coming week
+.TP
+.B "status client=bareos\-fd"
+what the File Daemon bareos\-fd is doing right now
+.TP
+.B "status client"
+choose the client from a list
+.TP
+.B "status storage=File"
+devices and jobs of the Storage Daemon behind File
+.TP
+.B "status storage=Tape slots"
+slot table of the autochanger
+.TP
+.B "status job=BackupClient1"
+storage status of the running BackupClient1 job
+.TP
+.B "status jobid=42"
+storage status of the running job 42
+.TP
+.B "status ujobid=BackupClient1.2026\-11\-20_21.00.00_09"
+storage status of exactly this job run
+.TP
+.B "status scheduler"
+preview of the next seven days
+.TP
+.B "status scheduler schedule=WeeklyCycle days=14"
+runs of one schedule over two weeks
+.TP
+.B "status scheduler client=bareos\-fd"
+only the jobs of one client
+.TP
+.B "status subscriptions"
+total backup units of all clients
+.TP
+.B "status subscriptions all anonymize"
+every partial report with client names hidden
+.TP
+.B "status subscriptions client=bareos\-fd"
+units per fileset of one client
+.TP
+.B "status configuration"
+list deprecated directives in the configuration
 .PP
 \fBOrigin\fR
 Bareos console command.
@@ -633,6 +741,15 @@ Do not ask (keyword)
 .TP
 .B "run job=BackupClient1 level=Full yes"
 start a full backup without asking
+.TP
+.B "run job=BackupClient1"
+show the job settings and ask yes, mod or no
+.TP
+.B "run job=BackupClient1 level=Incremental pool=File when=\(dq2026\-11\-21 22:00:00\(dq yes"
+schedule an incremental for tomorrow night
+.TP
+.B "run job=RestoreFiles jobid=42 where=/tmp/bareos\-restores replace=never yes"
+restore the files of job 42 without overwriting
 .PP
 \fBOrigin\fR
 Bareos console command.
@@ -675,6 +792,17 @@ Every job (keyword)
 .TP
 .B "yes"
 Do not ask (keyword)
+.PP
+\fBExamples\fR
+.TP
+.B "cancel jobid=42"
+cancel job 42 after confirmation
+.TP
+.B "cancel job=BackupClient1 yes"
+cancel the running BackupClient1 job without asking
+.TP
+.B "cancel state=waiting yes"
+cancel every waiting job
 .PP
 \fBOrigin\fR
 Bareos console command.
@@ -797,6 +925,15 @@ Catalog name (name; values from .catalogs)
 .TP
 .B "restore client=fd select current all done yes where=/tmp/r"
 restore everything of a client
+.TP
+.B "restore"
+open the selection menu
+.TP
+.B "restore jobid=42 client=bareos\-fd restorejob=RestoreFiles where=/tmp/bareos\-restores all done yes"
+restore all files of job 42 to a separate directory
+.TP
+.B "restore client=bareos\-fd restorejob=RestoreFiles file=/etc/fstab where=/tmp/bareos\-restores yes"
+restore a single file from the latest backup
 .PP
 \fBOrigin\fR
 Bareos console command.
@@ -810,7 +947,9 @@ enable [job=<job>] [client=<client>] [schedule=<schedule>] [storage=<storage>]
 .PP
 \fBDescription\fR
 .PP
-Enable a job/client/schedule.
+Switches a job, client or schedule back on that was switched off with disable. An enabled job is started by its schedule again, an enabled client is backed up again. Without an argument, or with job, client or schedule without a value, the Director offers the disabled resources of that kind; if there is exactly one it is selected automatically.
+.PP
+The change lives only in the memory of the running Director and is lost at the next reload or restart. A permanent setting requires the Enabled directive in the configuration. The catalog is not changed.
 .PP
 \fBArguments\fR
 .PP
@@ -828,6 +967,17 @@ Schedule name (name; values from .schedule)
 .B "storage=<storage>"
 Storage name (name; values from .storages)
 .PP
+\fBExamples\fR
+.TP
+.B "enable job=BackupClient1"
+let the scheduler start BackupClient1 again
+.TP
+.B "enable client=bareos\-fd"
+back up the client bareos\-fd again
+.TP
+.B "enable schedule=WeeklyCycle"
+reactivate a schedule
+.PP
 \fBOrigin\fR
 Bareos console command.
 .SS "disable"
@@ -840,7 +990,9 @@ disable [job=<job>] [client=<client>] [schedule=<schedule>] [storage=<storage>]
 .PP
 \fBDescription\fR
 .PP
-Disable a job/client/schedule.
+Switches a job, client or schedule off. A disabled job is no longer started by its schedule, a disabled client is no longer backed up, a disabled schedule triggers no jobs. A disabled job can still be started by hand with run. Without an argument, or with job, client or schedule without a value, the Director offers the enabled resources of that kind.
+.PP
+The change lives only in the memory of the running Director until the next reload or restart. A permanent setting requires Enabled = no in the configuration.
 .PP
 \fBArguments\fR
 .PP
@@ -857,6 +1009,17 @@ Schedule name (name; values from .schedule)
 .TP
 .B "storage=<storage>"
 Storage name (name; values from .storages)
+.PP
+\fBExamples\fR
+.TP
+.B "disable job=BackupClient1"
+stop scheduled runs of BackupClient1 until the next reload
+.TP
+.B "disable client=bareos\-fd"
+skip the client during maintenance
+.TP
+.B "disable schedule=WeeklyCycle"
+suspend a schedule
 .PP
 \fBOrigin\fR
 Bareos console command.
@@ -906,84 +1069,138 @@ Lists catalog records; llist prints every field of each record. `limit=` and `of
 .TP
 .B "list basefiles"
 Base files of a job
+.IP
+Lists the base files of a job that used a Base job, that is the files taken over from the base backup instead of being saved again; jobid= or ujobid= is required.
 .TP
 .B "list backups"
 Backups of a client
+.IP
+Lists the backups of one client; client= is required. fileset= limits the listing to one FileSet, fileset=any includes all of them. jobstatus=, level=, days= and hours= filter as with list jobs, order=asc or order=desc sorts by start time; any other order value is an error.
+.IP
+Without client= the reply is "missing parameter: client". A FileSet outside the FileSet ACL of the console gives "Access to specified FileSet not allowed."
 .TP
 .B "list client=<client>"
 One client
+.IP
+Shows the catalog record of one client by name. list client without a value is not a valid keyword and gives "Unknown list keyword".
 .TP
 .B "list clients"
 Every client
+.IP
+Lists every client record of the catalog with id, name, file retention and job retention; llist adds the uname and autoprune setting. enabled or disabled keep only clients in that state in the configuration, current only clients still configured.
 .TP
 .B "list copies"
 Copies of jobs
+.IP
+Lists copy jobs together with the job they were copied from and the media type. jobid= takes one JobId or a comma\-separated list and limits the listing to copies of or made by these jobs. If there are no copy jobs, the reply is empty.
 .TP
 .B "list files"
 Files of a job
+.IP
+Lists the paths of all files saved by one job, including the base files it refers to; jobid= or ujobid= is required. limit= and offset= do not shorten the text listing, they only appear in the range information of API mode 2.
 .TP
 .B "list filesets"
 Every FileSet
+.IP
+Lists every FileSet record of the catalog with id, name, MD5 sum, creation time and FileSet text. A FileSet gets a new record whenever its definition changes; current keeps only FileSets still defined in the configuration.
 .TP
 .B "list fileset[=<fileset>]"
 One FileSet
+.IP
+Shows one FileSet record of the catalog, including the stored FileSet text and its MD5 sum. The record is selected by filesetid= or by the job that used it with jobid= or ujobid=; without one of them the command reports an error.
 .TP
 .B "list jobs"
 Jobs
+.IP
+Lists the jobs of the catalog, one row per job. The filters can be combined: job= or jobname=, client=, jobstatus= (letters such as T, E, f or names such as error, comma\-separated), jobtype= (letter or exact name such as Backup), joblevel= or level= (F, I, D or Full, Incremental, Differential), volume=, pool=, days= and hours=. last keeps only the latest run per job name, count prints just the number of rows, reverse shows the newest first.
+.IP
+limit= and offset= page through the result. For a console with ACLs the limit is applied before the rows the console may not see are removed, so a limited listing can come out shorter or even empty. An unknown jobtype or level is an error.
 .TP
 .B "list job=<job>"
 Jobs of one name
+.IP
+Lists the jobs with the given job name; it works like list jobs job=<name> and accepts the same filters.
 .TP
 .B "list jobname=<jobname>"
 Jobs of one name
 .TP
 .B "list jobid=<jobid>[,...]"
 One job
+.IP
+Lists exactly the job with this JobId; llist jobid= shows all its fields one below the other. An unknown JobId gives an empty reply, and list jobid without a value reports "Missing jobid parameter".
 .TP
 .B "list ujobid=<ujobid>"
 One job
 .TP
 .B "list joblog"
 Log of a job
+.IP
+Prints the stored log of one job with time stamps; jobid= or ujobid= selects the job. count prints only the number of log lines. An unknown JobId or a job the console may not access gives "jobid not found in db, access to job or client denied by ACL, or client not found in db".
 .TP
 .B "list jobmedia"
 Volumes of a job
+.IP
+Shows which volumes a job wrote, with the first and last file index on each volume; without jobid= or ujobid= the records of all jobs are listed. llist adds the media id, start and end file and block.
 .TP
 .B "list jobtotals"
 Totals per job name
+.IP
+Shows the number of jobs, files and bytes per job name for backup, archive and copy jobs, followed by the totals over all of them. In API mode 2 the rows are under "jobs" and the sums under "jobtotals".
 .TP
 .B "list jobstatistics"
 Statistics of a job
+.IP
+Lists the statistics samples (sample time, files and bytes) recorded for a running or finished job; jobid= is required. Without it, or for a job the console may not access, the reply is "no jobid given"; a job without statistics gives "No results to list." The alias jobstats is accepted.
 .TP
 .B "list log"
 Director log
+.IP
+Prints the most recent log lines of all jobs from the catalog, by default the last five; limit= changes the number. client= restricts them to jobs of one client, an unknown client gives "invalid client argument". The lines appear oldest first, reverse puts the newest first.
 .TP
 .B "list media[=<media>]"
 Volumes
+.IP
+Alias of list volumes: without a value it lists the volumes grouped by pool and takes the same keywords all, pool=, jobid= and ujobid=; with a value, media=<name>, it shows that single volume like list volume=.
 .TP
 .B "list nextvolume"
 Next volume of a job
+.IP
+Shows which volume a job would write next, once for every scheduled run within the coming days; days= sets how many days to look ahead (at most 50, other values are ignored with a warning). Without job= the Director lists the job resources and asks for one; a dot aborts. For jobs that write no volume, such as restore jobs, it reports that no next volume can be found.
+.IP
+Deviation from Bareos: for an unknown job odir reports success, whereas Bareos returns an error. In API mode 2 the result is empty.
 .TP
 .B "list pools"
 Every pool
+.IP
+Lists every pool record of the catalog with id, name, number of volumes, maximum volumes, pool type and label format. llist adds all other fields of the records.
 .TP
 .B "list pool=<pool>"
 One pool
+.IP
+Shows the catalog record of one pool by name; poolid= selects it by id instead.
 .TP
 .B "list poolid=<poolid>"
 One pool
 .TP
 .B "list storages"
 Every storage
+.IP
+Lists every storage record of the catalog. current, enabled and disabled restrict the listing to storages still configured or in that state.
 .TP
 .B "list storage=<storage>"
 One storage
 .TP
 .B "list volumes"
 Volumes
+.IP
+Lists the volumes of the catalog grouped by pool. all prints them in one table, pool= restricts the listing to one pool, jobid= or ujobid= shows only the names of the volumes a job used, and count prints the number of volumes per pool. media is an alias with the same keywords.
+.IP
+If the pool given with pool= is not in the catalog, the Director lists the defined pools and asks for a selection; a dot aborts. In API mode 2 there is no question and the error is returned directly.
 .TP
 .B "list volume=<volume>"
 One volume
+.IP
+Shows exactly one volume by its name, with status, bytes, retention, slot, media type and last write time. volumeid= and mediaid= select it by its media id instead.
 .TP
 .B "list volumeid=<volumeid>"
 One volume
@@ -992,7 +1209,9 @@ One volume
 One volume
 .TP
 .B "list schedules"
-Every schedule
+Not a catalog list: answered as unknown keyword (see show schedules)
+.IP
+Schedules are configuration resources and have no table in the catalog, so like Bareos odir answers "Unknown list keyword: schedules". Use show schedules for the schedule resources and show disabled schedules for the disabled ones.
 .PP
 \fBArguments\fR
 .PP
@@ -1374,6 +1593,126 @@ the ten newest jobs (Onesimus)
 .TP
 .B "llist volume=Full\-0001"
 every field of one volume
+.TP
+.B "list volumes pool=Full"
+the volumes of the pool Full
+.TP
+.B "list jobs jobstatus=E,f days=7"
+jobs that failed during the last week
+.TP
+.B "list basefiles jobid=42"
+the base files referenced by job 42
+.TP
+.B "list backups client=bareos\-fd fileset=any order=desc limit=5"
+the five newest backups of bareos\-fd
+.TP
+.B "list backups client=bareos\-fd level=Full"
+the full backups of bareos\-fd
+.TP
+.B "list client=bareos\-fd"
+the catalog record of bareos\-fd
+.TP
+.B "list clients"
+all clients of the catalog
+.TP
+.B "list clients disabled"
+clients disabled in the configuration
+.TP
+.B "list copies"
+all copy jobs of the catalog
+.TP
+.B "list copies jobid=42,43"
+the copies of jobs 42 and 43
+.TP
+.B "list files jobid=42"
+every file saved by job 42
+.TP
+.B "list filesets"
+all FileSet records of the catalog
+.TP
+.B "list filesets current"
+only FileSets still present in the configuration
+.TP
+.B "list fileset jobid=42"
+the FileSet used by job 42
+.TP
+.B "list fileset filesetid=3"
+the FileSet record with id 3
+.TP
+.B "list jobs client=bareos\-fd last"
+the latest run of every job name on bareos\-fd
+.TP
+.B "list jobs level=Full jobstatus=T days=30"
+successful full backups of the last 30 days
+.TP
+.B "list jobs count"
+the number of jobs in the catalog
+.TP
+.B "list job=BackupClient1 limit=5"
+the first five runs of BackupClient1
+.TP
+.B "list job=BackupClient1 jobstatus=E"
+the failed runs of BackupClient1
+.TP
+.B "list jobid=42"
+the catalog row of job 42
+.TP
+.B "list joblog jobid=42"
+the complete log of job 42
+.TP
+.B "list joblog jobid=42 count"
+the number of log lines of job 42
+.TP
+.B "list jobmedia jobid=42"
+the volumes written by job 42
+.TP
+.B "list jobtotals"
+jobs, files and bytes per job name and in total
+.TP
+.B "list jobstatistics jobid=42"
+the statistics samples of job 42
+.TP
+.B "list log limit=20"
+the last 20 log lines of all jobs
+.TP
+.B "list log client=bareos\-fd reverse"
+the latest log lines of bareos\-fd, newest first
+.TP
+.B "list media pool=Incremental"
+the volumes of the pool Incremental
+.TP
+.B "list media=Full\-0001"
+one volume by name
+.TP
+.B "list nextvolume job=BackupClient1"
+the next volume BackupClient1 will use
+.TP
+.B "list nextvolume job=BackupClient1 days=7"
+the next volumes for the runs of the coming week
+.TP
+.B "list pools"
+all pools of the catalog
+.TP
+.B "list pool=Full"
+the catalog record of the pool Full
+.TP
+.B "list storages"
+all storages of the catalog
+.TP
+.B "list volumes pool=Full"
+the volumes of the pool Full
+.TP
+.B "list volumes all"
+all volumes in a single table
+.TP
+.B "list volumes jobid=42"
+the names of the volumes job 42 wrote to
+.TP
+.B "list volume=Full\-0001"
+the catalog record of Full\-0001
+.TP
+.B "list schedules disabled"
+answered with Unknown list keyword, use show disabled schedules instead
 .PP
 \fBOrigin\fR
 Bareos console command.
@@ -1387,7 +1726,11 @@ label [storage=<storage>] [sd=<sd>] [volume=<volume>] [pool=<pool>] [slot=<slot>
 .PP
 \fBDescription\fR
 .PP
-Label a tape.
+Writes a Bareos label onto a new medium (file or tape) through the Storage Daemon and creates the matching Media record in the catalog. Only a labelled volume can be used for backups. The command changes both the medium and the catalog. Missing values are asked for: storage, volume name, slot and pool.
+.PP
+Volume names may contain letters, digits and :.\-_/ but must not start with /. slot= greater than 0 also sets the InChanger flag; on an autochanger without slot= the Director asks for the slot. drive= selects the drive and defaults to 0. encrypt creates a new key for hardware (LTO) encryption and stores it in the catalog.
+.PP
+barcodes labels every volume of an autochanger with the name read from its barcode; slots= restricts this to a slot list such as 1\-5,8, and yes answers the confirmation question. Only autochanger storages qualify.
 .PP
 \fBArguments\fR
 .PP
@@ -1432,6 +1775,14 @@ Do not ask (keyword)
 .B "device=<device>"
 Device name (text)
 .PP
+\fBExamples\fR
+.TP
+.B "label storage=File volume=Full\-0001 pool=Full"
+label one file volume into pool Full
+.TP
+.B "label barcodes storage=Autochanger pool=Scratch slots=1\-5 yes"
+label slots 1 to 5 with their barcodes, without asking
+.PP
 \fBOrigin\fR
 Bareos console command.
 .SS "mount"
@@ -1444,7 +1795,11 @@ mount [storage=<storage>] [sd=<sd>] [<storage\-name>] [slot=<slot>] [drive=<driv
 .PP
 \fBDescription\fR
 .PP
-Mount storage.
+Asks the Storage Daemon to use a device again: on tape drives to read the loaded tape and make it available to jobs, on autochangers to load a volume from a slot first (slot=). Needed after unmount, after inserting a tape, or when a job waits for a volume. It changes the device state in the Storage Daemon, not the catalog. File devices are always mounted.
+.PP
+The storage is given as storage=, sd= or by its bare name; without it a selection list appears. jobid=, job= or ujobid= use the storage of a running job. A keyword without a value is read as a storage name.
+.PP
+Onesimus deviation: a job waiting for a volume whose Job resource has no Max Wait Time is cancelled after 10 minutes (unlimited in Bareos). Until then mount or a newly labelled volume lets the job continue.
 .PP
 \fBArguments\fR
 .PP
@@ -1477,6 +1832,14 @@ Storage of a job (name; values from .jobs)
 .B "ujobid=<ujobid>"
 Storage of a job (text)
 .PP
+\fBExamples\fR
+.TP
+.B "mount storage=Autochanger slot=3 drive=0"
+load slot 3 into drive 0 and mount it
+.TP
+.B "mount jobid=42"
+mount the storage the running job 42 waits on
+.PP
 \fBOrigin\fR
 Bareos console command.
 .SS "unmount"
@@ -1489,7 +1852,9 @@ unmount [storage=<storage>] [sd=<sd>] [<storage\-name>] [drive=<drive>] [device=
 .PP
 \fBDescription\fR
 .PP
-Unmount storage.
+Asks the Storage Daemon to stop using a device and release its volume, so a tape can be removed or the device serviced. While a device is unmounted no job writes to it; mount brings it back. It changes the device state in the Storage Daemon, not the catalog. umount is another name for the same command.
+.PP
+The storage is given as storage=, sd= or by its bare name; without it a selection list appears. drive= picks one drive, alldrives unmounts every drive of the autochanger one after another. jobid=, job= or ujobid= use the storage of a running job.
 .PP
 \fBArguments\fR
 .PP
@@ -1522,6 +1887,14 @@ Storage of a job (name; values from .jobs)
 .B "ujobid=<ujobid>"
 Storage of a job (text)
 .PP
+\fBExamples\fR
+.TP
+.B "unmount storage=Autochanger drive=1"
+unmount drive 1 of the autochanger
+.TP
+.B "unmount storage=Autochanger alldrives"
+unmount every drive of the autochanger
+.PP
 \fBOrigin\fR
 Bareos console command.
 .SS "release"
@@ -1534,7 +1907,9 @@ release [storage=<storage>] [sd=<sd>] [<storage\-name>] [drive=<drive>] [device=
 .PP
 \fBDescription\fR
 .PP
-Release storage.
+Asks the Storage Daemon to release the volume in a device without unmounting the device. On tape drives the tape is rewound; the next job reads the label again and may request another volume. It changes the device state in the Storage Daemon, not the catalog.
+.PP
+The storage is given as storage=, sd= or by its bare name; without it a selection list appears. drive= picks one drive, alldrives releases every drive of the storage. jobid=, job= or ujobid= use the storage of a running job.
 .PP
 \fBArguments\fR
 .PP
@@ -1567,6 +1942,14 @@ Storage of a job (name; values from .jobs)
 .B "ujobid=<ujobid>"
 Storage of a job (text)
 .PP
+\fBExamples\fR
+.TP
+.B "release storage=File"
+release the volume of the File storage
+.TP
+.B "release storage=Autochanger alldrives"
+release every drive of the autochanger
+.PP
 \fBOrigin\fR
 Bareos console command.
 .SS "update"
@@ -1590,18 +1973,32 @@ Changes catalog records of volumes, pools, slots and jobs; without arguments the
 .TP
 .B "update volume[=<volume>]"
 Volume record
+.IP
+Changes the catalog properties of one volume: volstatus (Append, Archive, Disabled, Full, Used, Cleaning, Recycle, Read\-Only, Error), volretention, voluse, maxvoljobs, maxvolfiles, maxvolbytes, recycle, inchanger, slot, enabled, encrypt, pool, recyclepool, actiononpurge and storage. Several parameters may be given on one line; each is checked and reported on its own. Without parameters a menu opens, without a name the volume is selected first.
+.IP
+allfrompool=<pool> resets the defaults of all volumes of a pool from the Pool resource, fromallpools those of every pool. encrypt=yes|no|rotate sets, removes or renews the hardware encryption key and only applies to volumes with a key.
 .TP
 .B "update pool[=<pool>]"
 Pool record from the resource
+.IP
+Updates the catalog Pool record from the Pool resource of the configuration and shows the record afterwards. Use it after changing a pool in the configuration; without a name the pool is chosen from a list. To create a missing Pool record use create.
 .TP
 .B "update slots[=<slots>]"
 Slots from the autochanger
+.IP
+Asks the Storage Daemon for the contents of an autochanger and records slot and InChanger for the volumes found. It is the only form of update that contacts the Storage Daemon. Without storage= only autochanger storages are offered; a slot list restricts the update.
+.IP
+scan loads volumes one by one into the drive given by drive= and reads their labels, for changers without a barcode reader. enabled= sets the Enabled value of the volumes found.
 .TP
 .B "update jobid=<jobid>"
 Job record
+.IP
+Changes fields of one job record without confirmation: jobname, starttime (YYYY\-MM\-DD hh:mm:ss, quoted because of the blank), client, filesetid and jobtype. Without any field the Director reports that nothing was specified; an unknown JobId is reported by the catalog.
 .TP
 .B "update stats"
 Job statistics
+.IP
+Carries the long\-term job statistics forward by copying finished jobs into the statistics tables. days= takes only jobs of the last given number of days into account. The Director reports how many jobs were updated.
 .PP
 \fBArguments\fR
 .PP
@@ -1732,6 +2129,41 @@ Job type letter (text)
 .B "days=<days>"
 Keep this many days (number)
 .PP
+\fBExamples\fR
+.TP
+.B "update"
+choose what to update from the menu
+.TP
+.B "update volume=Full\-0001 volstatus=Used"
+set the status of one volume
+.TP
+.B "update volume=Full\-0001 volretention=30days maxvolbytes=10G recycle=no"
+change several limits at once
+.TP
+.B "update volume=Full\-0001 pool=Incremental"
+move a volume to another pool
+.TP
+.B "update volume allfrompool=Full"
+reapply the pool defaults to all volumes of Full
+.TP
+.B "update pool=Full"
+refresh the catalog record of pool Full
+.TP
+.B "update slots storage=Autochanger"
+refresh all slots of the autochanger
+.TP
+.B "update slots=1\-3,7 storage=Autochanger scan drive=0"
+read the labels in slots 1 to 3 and 7
+.TP
+.B "update jobid=506 jobname=DocsRenamed"
+rename the job of a record
+.TP
+.B "update jobid=506 starttime=\(dq2026\-10\-01 10:00:00\(dq"
+correct the start time of a job
+.TP
+.B "update stats days=30"
+update the statistics with the last 30 days
+.PP
 \fBOrigin\fR
 Bareos console command.
 .SS "estimate"
@@ -1744,7 +2176,9 @@ estimate [job=<job>] [client=<client>] [fd=<fd>] [fileset=<fileset>] [level=<lev
 .PP
 \fBDescription\fR
 .PP
-Performs FileSet estimate, listing gives full listing.
+Asks the File Daemon how many files and bytes a backup job would save at the chosen level, without starting a job. The Director connects to the client, sends fileset and level and prints the answer; with listing every file that would be saved is printed as well. Without job= the Director offers the list of jobs.
+.PP
+level=, client= (or fd=), fileset= and accurate= override the values of the job. Only native clients are supported, not NDMP. Nothing is changed; for Incremental and Differential the catalog is only read to find the last matching job.
 .PP
 \fBArguments\fR
 .PP
@@ -1774,6 +2208,14 @@ List every file (keyword)
 .B "catalog=<catalog>"
 Catalog name (name; values from .catalogs)
 .PP
+\fBExamples\fR
+.TP
+.B "estimate job=BackupClient1 level=Full"
+size of a full backup of BackupClient1
+.TP
+.B "estimate job=BackupClient1 level=Incremental listing"
+every file the next incremental would save
+.PP
 \fBOrigin\fR
 Bareos console command.
 .SS "delete"
@@ -1796,15 +2238,25 @@ Deletes catalog records of volumes, pools, jobs or storages; asks unless yes is 
 .TP
 .B "delete volume[=<volume>]"
 A volume record
+.IP
+Deletes a volume and every job stored on it from the catalog. The data on the medium is untouched, but it can no longer be selected for restore. Without a name the pool and volume are selected in a dialogue; pool= sets the pool for this selection. The Director asks for confirmation unless yes is given; the action cannot be undone.
+.IP
+Onesimus deviation: a volume holding jobs of the latest Full chain of a client and FileSet is never deleted, not even with yes.
 .TP
 .B "delete pool[=<pool>]"
 A pool record
+.IP
+Deletes a Pool record from the catalog after confirmation; without a name the pool is chosen from a list. Onesimus deviation: deleting pools is not implemented yet, and after yes the Director answers delete pool: not supported.
 .TP
 .B "delete jobid=<jobid>[,...]"
 Job records (list or ranges)
+.IP
+Deletes jobs together with their file and JobMedia records from the catalog. The value may be a comma\-separated list with ranges such as 507\-509,511; a range of more than 25 JobIds requires confirmation. Without a value the Director asks for the JobId. This is also the way to remove a single job of a protected latest Full chain.
 .TP
 .B "delete storage[=<storage>]"
 A storage record
+.IP
+Deletes an orphaned Storage record from the catalog, one that no longer exists in the configuration. A storage still configured is refused; remove it from the configuration first. Without a value the Director asks for the name.
 .PP
 \fBArguments\fR
 .PP
@@ -1842,6 +2294,32 @@ Storage name (name; values from .storages; the value may be left out)
 .B "storage=<storage>"
 Storage name (name; values from .storages)
 .PP
+\fBExamples\fR
+.TP
+.B "delete"
+choose what to delete from the menu
+.TP
+.B "delete jobid=507\-509,511"
+delete four job records
+.TP
+.B "delete volume=Full\-0001 yes"
+delete a volume without asking
+.TP
+.B "delete volume pool=Scratch"
+choose the volume to delete from pool Scratch
+.TP
+.B "delete pool=Scratch"
+ask to delete the Scratch pool record
+.TP
+.B "delete jobid=14"
+delete one job record
+.TP
+.B "delete jobid=600,602"
+delete two job records
+.TP
+.B "delete storage=OldTape"
+remove the catalog record of a removed storage
+.PP
 \fBOrigin\fR
 Bareos console command.
 .SS "prune"
@@ -1865,18 +2343,34 @@ Removes expired catalog records, respecting the retention periods.
 .TP
 .B "prune files"
 File records
+.IP
+Removes file records whose File Retention has expired, for one client (client=) or for the retention of a pool (pool=); without client= the client is chosen from a list. The Director shows the retention period and asks yes/mod/no, where mod sets a different period for the running Director until the next reload; yes skips the question. Full access to the involved resources is required.
+.IP
+Onesimus deviation: the file records of the latest Full chain of every client and FileSet are always kept.
 .TP
 .B "prune jobs"
 Job records
+.IP
+Removes job records whose Job Retention has expired, for one client (client=), a pool (pool=) or a job type (jobtype=). The Director shows the retention period and asks yes/mod/no unless yes is given. Full access to the involved resources is required.
+.IP
+Onesimus deviation: the latest successful Full chain of every client and FileSet name is never pruned, even if it is older than the retention and even when job, FileSet or client are no longer configured. If that chain cannot be determined, nothing is deleted.
 .TP
 .B "prune volume[=<volume>]"
 Volume records
+.IP
+Removes the jobs of a volume whose Volume Retention has expired; the volume must have status Full or Used. Without a name the pool and volume are selected in a dialogue. all prunes every volume, of one pool with pool=. The Director asks yes/mod/no unless yes is given.
+.IP
+Onesimus deviation: a volume holding jobs of the latest Full chain of a client and FileSet is never pruned.
 .TP
 .B "prune stats"
 Job statistics
+.IP
+Removes entries from JobHisto, DeviceStats and JobStats that are older than the Statistics Retention. The Director shows the retention period and asks unless yes is given.
 .TP
 .B "prune directory[=<directory>]"
 Directory cache
+.IP
+Removes the file records below one directory from the catalog; recursive includes subdirectories. Without client= the Director first asks whether the directory should be removed for all clients, and without a path it asks for the full path. yes skips the confirmation.
 .PP
 \fBArguments\fR
 .PP
@@ -1938,6 +2432,32 @@ With subdirectories (keyword)
 .B "yes"
 Do not ask (keyword)
 .PP
+\fBExamples\fR
+.TP
+.B "prune"
+choose what to prune from the menu
+.TP
+.B "prune jobs client=bareos\-fd yes"
+remove expired job records of bareos\-fd
+.TP
+.B "prune files client=bareos\-fd yes"
+prune expired file records of bareos\-fd
+.TP
+.B "prune jobs pool=Incremental yes"
+prune expired jobs using the retention of pool Incremental
+.TP
+.B "prune volume=Full\-0001 yes"
+prune one volume without asking
+.TP
+.B "prune volume all pool=Full"
+prune every volume of pool Full after confirmation
+.TP
+.B "prune stats yes"
+prune old statistics without asking
+.TP
+.B "prune directory=/var/cache client=bareos\-fd recursive yes"
+drop /var/cache and below from the catalog of bareos\-fd
+.PP
 \fBOrigin\fR
 Bareos console command.
 .SS "purge"
@@ -1962,15 +2482,29 @@ purge volume all (Onesimus extension) purges every volume of one pool (pool=) or
 .TP
 .B "purge files"
 File records
+.IP
+Deletes file records from the catalog regardless of retention periods, for one job (job= or jobid=), a client or a volume; the jobs themselves stay. Like every purge it prints a warning, needs full access to all resources and cannot be undone.
+.IP
+Onesimus deviation: the file records of the latest Full chain of a client and FileSet are skipped, and each purge runs in one transaction whose errors are reported instead of ignored.
 .TP
 .B "purge jobs"
 Job records
+.IP
+Deletes whole jobs with all their records regardless of retention periods, for a client, a volume or a pool. jobstatus= limits this to jobs with the given status letters (T, E, f, ...) or names such as error, separated by commas. The Director counts the jobs and asks Purge (yes/no)? unless yes is given. A volume left without jobs becomes Purged.
+.IP
+Onesimus deviation: jobs of the latest Full chain of a client and FileSet are skipped, and each purge runs in one transaction whose errors are reported.
 .TP
 .B "purge volume[=<volume>]"
 Volume records
+.IP
+Deletes every job on a volume from the catalog regardless of retention; the volume then becomes Purged and can be reused. Several volume= may be given, and each is confirmed on its own unless yes is given. action=truncate or all runs the ActionOnPurge on Purged volumes through the Storage Daemon, with storage=, pool= or allpools, devicetype= and drive=. A volume holding the latest Full chain of a client is never purged (Onesimus).
+.IP
+Onesimus extension: purge volume all purges every volume of pool= or of all permitted pools (allpools) whose status is in volstatus=, by default Full, Used and Error. Purged and Recycle volumes are never selected and Cleaning tapes cannot be purged. It never asks: exactly one of dryrun (preview) and yes is required, and refused volumes are skipped with their reason.
 .TP
 .B "purge quota"
 Quota of a client
+.IP
+Resets the quota counters of a client; without client= the client is chosen from a list. Like every purge it prints a warning and needs full access to all resources.
 .PP
 \fBArguments\fR
 .PP
@@ -2069,6 +2603,33 @@ show what would be purged (Onesimus)
 .TP
 .B "purge volume all allpools yes"
 purge every Full, Used or Error volume (Onesimus)
+.TP
+.B "purge"
+choose what to purge from the menu
+.TP
+.B "purge jobs client=bareos\-fd jobstatus=E"
+purge the failed jobs of bareos\-fd
+.TP
+.B "purge files jobid=599"
+purge the file records of job 599
+.TP
+.B "purge files client=bareos\-fd yes"
+purge all file records of bareos\-fd
+.TP
+.B "purge jobs volume=Full\-0001 yes"
+purge every job on volume Full\-0001
+.TP
+.B "purge jobs pool=Incremental jobstatus=E,f"
+purge the failed jobs of pool Incremental
+.TP
+.B "purge volume action=truncate storage=File pool=Full"
+truncate the purged volumes of pool Full
+.TP
+.B "purge volume all pool=Incremental volstatus=Error dryrun"
+preview purging the Error volumes of Incremental (Onesimus)
+.TP
+.B "purge quota client=bareos\-fd"
+reset the quota of bareos\-fd
 .PP
 \fBOrigin\fR
 Bareos console command.
@@ -2082,7 +2643,11 @@ truncate volstatus=<Purged> [storage=<storage>] [pool=<pool>] [volume=<volume>[,
 .PP
 \fBDescription\fR
 .PP
-Truncate purged volumes.
+Frees the space of volumes whose jobs have already been removed (status Purged). The Director lists the matching volumes, asks for confirmation and has the Storage Daemon relabel them, which shrinks the volume file or tape to its label. The volumes stay in the catalog. Only native (non\-NDMP) storages are supported, and only the volumes of one storage per call.
+.PP
+volstatus=Purged is required. storage=, pool= and volume= narrow the selection; an unknown storage or pool opens a selection list. drive= selects the drive, yes skips the question. Other keywords, including client= and catalog=, end with Invalid parameter. Under API 1 and 2 nothing is asked, so without yes nothing happens.
+.PP
+Onesimus deviation: a volume holding jobs of the latest Full chain of a client and FileSet is never truncated.
 .PP
 \fBArguments\fR
 .PP
@@ -2109,6 +2674,14 @@ Do not ask (keyword)
 .B "catalog=<catalog>"
 Catalog name (name; values from .catalogs)
 .PP
+\fBExamples\fR
+.TP
+.B "truncate volstatus=Purged storage=File pool=Full yes"
+truncate all purged volumes of pool Full on File
+.TP
+.B "truncate volstatus=Purged volume=Full\-0003"
+truncate one purged volume after confirmation
+.PP
 \fBOrigin\fR
 Bareos console command.
 .SS "reload"
@@ -2122,6 +2695,11 @@ reload
 \fBDescription\fR
 .PP
 Re\-reads the configuration; a configuration with errors is refused and the running one stays.
+.PP
+\fBExamples\fR
+.TP
+.B "reload"
+apply edited configuration files without restarting odir
 .PP
 \fBOrigin\fR
 Bareos console command.
@@ -2167,6 +2745,10 @@ Adds resources to the configuration and exports them. Onesimus extensions read, 
 .TP
 .B "configure add"
 Add a resource
+.IP
+Creates a new resource of the given type (client, jobdefs, job, storage, catalog, schedule, fileset, pool, messages, counter, profile, console, user). The resource is written to bareos\-dir.d/<type>/<name>.conf and loaded into the running Director at once, without reload. Directives are written in lower case without blanks (maximumvolumejobs=1); a directive may repeat where the resource allows it (run= of a schedule). The characters @ and ; are not allowed in values.
+.IP
+The configuration must be in directory form and the directory of the type must already exist. Adding a client also exports its file daemon resource, like configure export. Onesimus deviation: profile and user are always refused (edit them in the configuration files), and console is only accepted as name, password, one or more profile and an optional description, with profiles that grant no more than the creating console may use itself.
 .TP
 .B "configure add client"
 New resource
@@ -2209,12 +2791,20 @@ New resource
 .TP
 .B "configure export"
 Export a client resource
+.IP
+Writes the Director resource a file daemon needs to accept this Director, for the given client, to bareos\-dir\-export/client/<client>/bareos\-fd.d/director/. Copy the file to the client into bareos\-fd.d/director/. Calling it again overwrites the file with the same content. client= must name a configured client.
 .TP
 .B "configure read"
 Show a resource (Onesimus)
+.IP
+Onesimus extension: shows a short summary of one client, job, pool or storage of the running configuration (for a client name, address, port and enabled; for a job type, level, client, storage, pool, fileset, priority and enabled). The resource ACLs of the console apply as with show; a resource the console may not see reads like an unknown one. For the raw resource text use .config read.
 .TP
 .B "configure update"
 Change directives of a resource (Onesimus)
+.IP
+Onesimus extension: changes directives of an existing client, job, jobdefs, schedule or fileset in its configuration file and reloads. Only the named directives change; comments, order, indentation and all other directives stay byte for byte. It is checked like odir \-t, written atomically, and a failed reload restores the old state. pool, storage and console are refused, as are directives in nested blocks (RunScript, Include, Options) and changing the name.
+.IP
+A directive given several times replaces all its lines (the run lines of a schedule); a directive with an empty value (description=) removes it. A missing directive is added before the closing brace. The resource ACL of the console applies. The old job keys newclient, newstorage and newpool are accepted as client, storage and pool.
 .TP
 .B "configure update client=<client>"
 Change a client
@@ -2233,6 +2823,10 @@ Change a fileset
 .TP
 .B "configure delete"
 Delete an unreferenced resource (Onesimus)
+.IP
+Onesimus extension: deletes a client, job, jobdefs, schedule or fileset through the configuration CRUD, the same path as .config delete. The resource is read for its current checksum and deleted only if no other resource still refers to it; otherwise the referring resources are listed and nothing is deleted. The remaining configuration is checked like odir \-t, the file change is atomic and a failed reload is rolled back.
+.IP
+pool, storage and console are refused; remove such files by hand and reload. The resource ACL of the console applies.
 .TP
 .B "configure delete client=<client>"
 Delete a client
@@ -4050,6 +4644,42 @@ a console with the rights of a profile
 .TP
 .B "configure update schedule=Nightly run=\(dqFull sun at 23:00\(dq run=\(dqIncremental mon\-sat at 23:00\(dq"
 replace the Run lines (Onesimus)
+.TP
+.B "configure export client=bareos\-fd"
+write the director resource for the file daemon of bareos\-fd
+.TP
+.B "configure delete schedule=OldNightly"
+remove an unused schedule (Onesimus)
+.TP
+.B "configure add pool name=Weekly pooltype=Backup maximumvolumejobs=1 labelformat=Weekly\-"
+a new backup pool with one job per volume
+.TP
+.B "configure add schedule name=Nightly run=\(dqFull 1st sun at 23:05\(dq run=\(dqIncremental mon\-sat at 23:05\(dq"
+a schedule with two run lines
+.TP
+.B "configure add job name=BackupClient2 jobdefs=DefaultJob client=bareos\-fd"
+a job whose required directives come from a jobdefs
+.TP
+.B "configure export client=bareos\-fd"
+export the director resource for bareos\-fd
+.TP
+.B "configure read client=bareos\-fd"
+summary of a client
+.TP
+.B "configure read job=BackupClient1"
+summary of a job
+.TP
+.B "configure update client=bareos\-fd address=fd.example.org port=9112"
+change the address and port of a client
+.TP
+.B "configure update job=BackupClient1 description="
+remove the description of a job
+.TP
+.B "configure delete fileset=OldFileSet"
+delete a fileset no job uses any more
+.TP
+.B "configure delete client=old\-fd"
+delete a client, refused while a job still names it
 .PP
 \fBOrigin\fR
 Bareos console command. Onesimus extensions: configure add console, configure read, configure update, configure delete.
@@ -4065,6 +4695,11 @@ sqlquery
 .PP
 Reads SQL statements interactively and prints their results; an empty line ends the input.
 .PP
+\fBExamples\fR
+.TP
+.B "sqlquery"
+enter SQL statements ending with a semicolon, an empty line leaves the mode
+.PP
 \fBOrigin\fR
 Bareos console command.
 .SS "query"
@@ -4079,6 +4714,11 @@ query
 .PP
 Selects one of the predefined catalog queries and asks for its parameters.
 .PP
+\fBExamples\fR
+.TP
+.B "query"
+pick a predefined catalog query by number and answer its questions
+.PP
 \fBOrigin\fR
 Bareos console command.
 .SS "autodisplay"
@@ -4091,7 +4731,9 @@ autodisplay [<on|off>]
 .PP
 \fBDescription\fR
 .PP
-Autodisplay console messages.
+The Director collects messages for the console, such as job reports or requests to mount a volume. With autodisplay off (the default) it only prints "You have messages." after a command, and the messages are fetched with messages. With autodisplay on the Director prints pending messages itself after every command.
+.PP
+The setting applies only to the own session and requires that the console may use the messages command. Case does not matter; the first word that reads on or off counts.
 .PP
 \fBArguments\fR
 .PP
@@ -4099,6 +4741,14 @@ Autodisplay console messages.
 .TP
 .B "<on|off>"
 Switch on or off (positional value; values: on, off)
+.PP
+\fBExamples\fR
+.TP
+.B "autodisplay on"
+print queued messages after every command
+.TP
+.B "autodisplay off"
+only show the you have messages hint
 .PP
 \fBOrigin\fR
 Bareos console command.
@@ -4112,7 +4762,9 @@ automount [<on|off>]
 .PP
 \fBDescription\fR
 .PP
-Automount after label.
+Decides for the current console session whether a volume is mounted automatically after label. The setting starts switched on, applies only to this session and changes neither catalog, configuration nor daemons. There is no confirmation.
+.PP
+Only off (in any case) switches it off; every other word switches it on without an error. If not exactly one word follows, the Director asks "Turn on or off?" and evaluates the answer the same way.
 .PP
 \fBArguments\fR
 .PP
@@ -4120,6 +4772,14 @@ Automount after label.
 .TP
 .B "<on|off>"
 Switch on or off (positional value; values: on, off)
+.PP
+\fBExamples\fR
+.TP
+.B "automount off"
+label volumes without mounting them
+.TP
+.B "automount on"
+mount every newly labelled volume
 .PP
 \fBOrigin\fR
 Bareos console command.
@@ -4133,7 +4793,9 @@ gui [<on|off>]
 .PP
 \fBDescription\fR
 .PP
-Switch between interactive (gui off) and non\-interactive (gui on) mode.
+gui on switches the session into a mode for graphical front ends and scripts, gui off back to the interactive default. In GUI mode the Director silently uses the first catalog of the configuration when no catalog= is given, prints catalog numbers without thousands separators and left aligned, and omits the "You have messages." hint.
+.PP
+The setting applies only to the own session until it ends. Case does not matter; the first word that reads on or off counts.
 .PP
 \fBArguments\fR
 .PP
@@ -4141,6 +4803,14 @@ Switch between interactive (gui off) and non\-interactive (gui on) mode.
 .TP
 .B "<on|off>"
 Switch on or off (positional value; values: on, off)
+.PP
+\fBExamples\fR
+.TP
+.B "gui on"
+machine friendly output without catalog prompts
+.TP
+.B "gui off"
+back to interactive mode
 .PP
 \fBOrigin\fR
 Bareos console command.
@@ -4156,6 +4826,11 @@ messages
 .PP
 Prints the queued Director and job messages of this console.
 .PP
+\fBExamples\fR
+.TP
+.B "messages"
+fetch job reports and mount requests queued for this console
+.PP
 \fBOrigin\fR
 Bareos console command.
 .SS "memory"
@@ -4168,7 +4843,12 @@ memory
 .PP
 \fBDescription\fR
 .PP
-Print current memory usage.
+Despite its description this command reports no memory usage. Like Bareos it prints only the header lines of status director: name, version, build date and operating system of the Director, start time, number of finished and running jobs, database type and binary kind. The command only reads; further words are ignored.
+.PP
+\fBExamples\fR
+.TP
+.B "memory"
+header lines of the Director status
 .PP
 \fBOrigin\fR
 Bareos console command.
@@ -4189,6 +4869,10 @@ Prints resources of the running configuration in configuration syntax; passwords
 .TP
 .B "show disabled"
 Disabled resources
+.IP
+Lists which jobs, clients and schedules are disabled. Without a further word all three lists are printed; jobs, clients or schedules limit the output to one list, any other word acts like none. In API mode 1 only the names are printed, in mode 2 the result is an object "disabled" with the lists jobs, clients and schedules.
+.IP
+Deviation from Bareos: odir shows the configured state, so a job disabled at runtime with the disable command does not appear here, whereas Bareos lists it.
 .PP
 \fBArguments\fR
 .PP
@@ -4296,6 +4980,18 @@ Disabled schedules (keyword)
 .TP
 .B "show pool=Full client=fd"
 two resources
+.TP
+.B "show jobs"
+every job resource in configuration syntax
+.TP
+.B "show client=bareos\-fd verbose"
+one client including all directives at their default values
+.TP
+.B "show disabled"
+disabled jobs, clients and schedules
+.TP
+.B "show disabled schedules"
+only the disabled schedules
 .PP
 \fBOrigin\fR
 Bareos console command.
@@ -4309,7 +5005,9 @@ trace [<on|off>]
 .PP
 \fBDescription\fR
 .PP
-Turn on/off trace to file.
+trace on makes the Director write its debug output to the file bareos\-dir.trace in its working directory; trace off stops this and closes the file. How much is written depends on the debug level set with setdebug. The setting affects the whole Director, not only the own session, and lasts until it is switched off or the Director restarts.
+.PP
+Only off switches it off; every other word switches it on, including typos. Without exactly one word the Director asks "Turn on or off?"; a single dot aborts. Onesimus extension: if the trace file cannot be opened, odir reports the path and the error, whereas Bareos stays silent.
 .PP
 \fBArguments\fR
 .PP
@@ -4317,6 +5015,14 @@ Turn on/off trace to file.
 .TP
 .B "<on|off>"
 Switch on or off (positional value; values: on, off)
+.PP
+\fBExamples\fR
+.TP
+.B "trace on"
+write debug output to bareos\-dir.trace
+.TP
+.B "trace off"
+stop tracing and close the file
 .PP
 \fBOrigin\fR
 Bareos console command.
@@ -4330,7 +5036,9 @@ var [<text> ...]
 .PP
 \fBDescription\fR
 .PP
-Does variable expansion.
+Expands variables in a text the way the Director does for volume names (LabelFormat) and prints the result, so a LabelFormat can be tried before it goes into the configuration. Supported are date and time variables such as ${Year} and ${Month}, job variables such as ${Job}, ${Client}, ${Pool} and ${NumVols}, counters, environment variables, and operations like :u, :l, :p and :s/pattern/replacement/.
+.PP
+The values come from the console job of the session: job, client, pool and storage are the defaults of the first job in the configuration, ${Type} is Console and ${JobId} is 0. The command opens the session catalog. ${Counter+} increments a counter permanently. Unknown variables stay unchanged. Without text odir prints an empty line.
 .PP
 \fBArguments\fR
 .PP
@@ -4339,6 +5047,14 @@ Does variable expansion.
 .B "<text> ..."
 Text with variables to expand (positional value; may be repeated)
 .PP
+\fBExamples\fR
+.TP
+.B "var Full\-${Year}${Month}${Day}"
+try a date based volume label
+.TP
+.B "var ${Pool}\-${NumVols:p/4/0/r}"
+pool name with the volume count padded to four digits
+.PP
 \fBOrigin\fR
 Bareos console command.
 .SS "wait"
@@ -4346,12 +5062,14 @@ Wait until no jobs are running
 .PP
 \fBSynopsis\fR
 .nf
-wait [jobid=<jobid>] [jobname=<jobname>] [ujobid=<ujobid>] [mount] [timeout=<timeout>] [catalog=<catalog>]
+wait [jobid=<jobid>] [jobname=<jobname>] [job=<job>] [ujobid=<ujobid>] [mount] [timeout=<timeout>] [catalog=<catalog>]
 .fi
 .PP
 \fBDescription\fR
 .PP
-Wait until no jobs are running.
+Blocks the session until jobs have finished. Without an argument it waits until no job is running. With jobid=, jobname= or job= (a prefix of a running job's name suffices) or ujobid= it waits for that one job and then prints JobId and JobStatus; a JobId that is not running is looked up in the catalog at once. Only the first such argument counts.
+.PP
+With mount the command waits until a running job asks for a volume or a mount; timeout= limits that wait in seconds. Nothing is changed. The command is meant for scripts, for example after run ... yes and before evaluating the result.
 .PP
 \fBArguments\fR
 .PP
@@ -4362,6 +5080,9 @@ Job ID (number)
 .TP
 .B "jobname=<jobname>"
 Running job name prefix (text)
+.TP
+.B "job=<job>"
+Same as jobname= (text)
 .TP
 .B "ujobid=<ujobid>"
 Unique running job name (text)
@@ -4374,6 +5095,17 @@ Mount wait timeout in seconds (number)
 .TP
 .B "catalog=<catalog>"
 Catalog name (name; values from .catalogs)
+.PP
+\fBExamples\fR
+.TP
+.B "wait"
+return when no job is running any more
+.TP
+.B "wait jobid=42"
+wait for job 42 and print its final status
+.TP
+.B "wait mount timeout=300"
+wait up to five minutes for a mount request
 .PP
 \fBOrigin\fR
 Bareos console command.
@@ -4389,6 +5121,11 @@ whoami
 .PP
 Prints the name of the console of this session.
 .PP
+\fBExamples\fR
+.TP
+.B "whoami"
+name of the console this session is logged in with
+.PP
 \fBOrigin\fR
 Bareos console command.
 .SS "use"
@@ -4401,7 +5138,9 @@ use [catalog=<catalog>] [<catalog\-name>]
 .PP
 \fBDescription\fR
 .PP
-Use specific catalog.
+Sets the catalog the session works with. All following catalog commands such as list, query or sqlquery use it until the session ends or another one is chosen. An open catalog connection is closed and the new one opened; configuration and other sessions are not affected.
+.PP
+Without catalog= the Director selects: with only one permitted catalog it takes that one, with several it asks (in GUI mode it takes the first). An unknown name, a name without the catalog= keyword and catalog without a value are treated like a missing catalog=.
 .PP
 \fBArguments\fR
 .PP
@@ -4412,6 +5151,11 @@ Catalog name (name; values from .catalogs)
 .TP
 .B "<catalog\-name>"
 Catalog name without key (positional value; values from .catalogs)
+.PP
+\fBExamples\fR
+.TP
+.B "use catalog=MyCatalog"
+work with the catalog MyCatalog for the rest of the session
 .PP
 \fBOrigin\fR
 Bareos console command.
@@ -4425,7 +5169,9 @@ setdebug [level=<level>] [trace=<\-1|0|1>] [timestamp=<\-1|0|1>] [hangup=<\-1|0|
 .PP
 \fBDescription\fR
 .PP
-Sets debug level.
+Sets the debug level of the Director (dir or director), a File Daemon (client=), a Storage Daemon (storage=) or all daemons at once (all). Level 0 switches debug output off. The running daemon is changed, not its configuration; after a restart the start value applies again.
+.PP
+trace= writes the debug output to a trace file in the working directory, timestamp= prefixes every debug line with a time stamp; without them the setting stays unchanged. hangup= is a File Daemon test aid that drops the connection after n files. A missing level is asked for, a missing target leads to a daemon selection.
 .PP
 \fBArguments\fR
 .PP
@@ -4461,6 +5207,17 @@ The Director (keyword)
 .B "all"
 Every daemon (keyword)
 .PP
+\fBExamples\fR
+.TP
+.B "setdebug level=100 trace=1 dir"
+verbose Director debugging into the trace file
+.TP
+.B "setdebug level=200 timestamp=1 client=bareos\-fd"
+debug the File Daemon with time stamps
+.TP
+.B "setdebug level=0 all"
+switch debug output off everywhere
+.PP
 \fBOrigin\fR
 Bareos console command.
 .SS "setbandwidth"
@@ -4473,7 +5230,9 @@ setbandwidth [client=<client>] [fd=<fd>] [storage=<storage>] [sd=<sd>] [jobid=<j
 .PP
 \fBDescription\fR
 .PP
-Sets bandwidth.
+Limits the bandwidth of a File Daemon, a Storage Daemon or running jobs without changing the configuration. The Director connects to the daemon and sends the new limit in kB/s; it applies until the daemon restarts or the job ends. limit=0 removes the limit; a missing limit is asked for. NDMP storages cannot be limited.
+.PP
+job=, jobid=, ujobid=, all and state= select running jobs. For backup and restore the limit is applied through the File Daemon, for copy and migrate through the reading Storage Daemon. Without client, storage or a job selection the Director asks for the client.
 .PP
 \fBArguments\fR
 .PP
@@ -4512,6 +5271,17 @@ KiB/s (0: unlimited) (number)
 .B "yes"
 Do not ask (keyword)
 .PP
+\fBExamples\fR
+.TP
+.B "setbandwidth limit=10000 client=bareos\-fd"
+throttle the File Daemon to about 10 MB/s
+.TP
+.B "setbandwidth limit=5000 jobid=42"
+slow down the running job 42
+.TP
+.B "setbandwidth limit=0 client=bareos\-fd"
+remove the limit again
+.PP
 \fBOrigin\fR
 Bareos console command.
 .SS "setip"
@@ -4524,7 +5294,14 @@ setip
 .PP
 \fBDescription\fR
 .PP
-Sets new client address \-\- if authorized.
+Meant for clients with changing IP addresses such as laptops. The client logs in to the Director through its own console whose name equals the name of its Client resource and calls setip; the Director then takes the source address of that console connection as the client's new address.
+.PP
+The change applies only to the running Director; the configuration files stay unchanged. The command takes no arguments; further words are ignored.
+.PP
+\fBExamples\fR
+.TP
+.B "setip"
+register the address of this console connection as the client address
 .PP
 \fBOrigin\fR
 Bareos console command.
@@ -4538,7 +5315,9 @@ setdevice [storage=<storage>] [device=<device>] [autoselect=<yes|no>]
 .PP
 \fBDescription\fR
 .PP
-Sets device parameter.
+Changes the Auto Select setting of a device in the Storage Daemon at run time. With autoselect=no the Storage Daemon no longer picks the device for jobs, for example during maintenance; with autoselect=yes it is available again. The state lasts until the Storage Daemon restarts; configuration and catalog are not touched.
+.PP
+storage=, device= and autoselect= are all required, in any order, and the keywords must be lower case; no other arguments are allowed. A console restricted to certain storages may only change their devices.
 .PP
 \fBArguments\fR
 .PP
@@ -4553,6 +5332,14 @@ Device name (text)
 .B "autoselect=<yes|no>"
 Autoselect flag (yes or no)
 .PP
+\fBExamples\fR
+.TP
+.B "setdevice storage=Tape device=Drive\-1 autoselect=no"
+keep jobs away from Drive\-1 during maintenance
+.TP
+.B "setdevice storage=Tape device=Drive\-1 autoselect=yes"
+make the drive available again
+.PP
 \fBOrigin\fR
 Bareos console command.
 .SS "resolve"
@@ -4565,7 +5352,9 @@ resolve [client=<client>] [fd=<fd>] [storage=<storage>] [sd=<sd>] [<hostname> ..
 .PP
 \fBDescription\fR
 .PP
-Resolve a hostname.
+Shows the IP addresses a host name resolves to. Without client= or storage= the Director resolves the name itself; with client= (or fd=) the File Daemon resolves it, with storage= the Storage Daemon, and the Director prints their answer. This helps to locate name resolution problems on either side of a connection. Several host names may be given; nothing is changed.
+.PP
+When the Director resolves itself and a name fails, the command stops there and later names are not tried. Without any argument there is no output.
 .PP
 \fBArguments\fR
 .PP
@@ -4586,6 +5375,14 @@ Storage name (as storage=) (name; values from .storages)
 .B "<hostname> ..."
 Host name to resolve (positional value; may be repeated)
 .PP
+\fBExamples\fR
+.TP
+.B "resolve backup.example.com"
+addresses as seen by the Director
+.TP
+.B "resolve client=bareos\-fd backup.example.com"
+how the File Daemon resolves the Director host
+.PP
 \fBOrigin\fR
 Bareos console command.
 .SS "rerun"
@@ -4598,7 +5395,9 @@ rerun [jobid=<jobid>[,...]] [since_jobid=<since_jobid>] [until_jobid=<until_jobi
 .PP
 \fBDescription\fR
 .PP
-Rerun a job.
+Starts earlier jobs again with the parameters they ran with (job, level, client, fileset, pool). Jobs are chosen by JobId, by a JobId range with since_jobid= and until_jobid=, or by a time window with days= and hours=. For every job the Director shows the run summary and asks yes, mod or no; yes on the command line starts all chosen jobs without asking.
+.PP
+since_jobid=, days= and hours= consider only jobs that ended with a fatal error (status f); for days= and hours= the scheduled start time counts, and both values add up. until_jobid= is only valid together with since_jobid=. Before rerunning several jobs found this way the Director lists the JobIds and asks for confirmation.
 .PP
 \fBArguments\fR
 .PP
@@ -4622,6 +5421,17 @@ Failed jobs of the last hours (number)
 .B "yes"
 Do not ask (keyword)
 .PP
+\fBExamples\fR
+.TP
+.B "rerun jobid=42"
+run job 42 again with its original parameters
+.TP
+.B "rerun days=1 yes"
+restart every job that failed during the last day
+.TP
+.B "rerun since_jobid=100 until_jobid=120"
+failed jobs between JobId 100 and 120
+.PP
 \fBOrigin\fR
 Bareos console command.
 .SS "relabel"
@@ -4634,7 +5444,9 @@ relabel [storage=<storage>] [oldvolume=<oldvolume>] [volume=<volume>] [pool=<poo
 .PP
 \fBDescription\fR
 .PP
-Relabel a tape.
+Writes a new label onto a volume that is already in the catalog and gives it a new name. This works only for volumes with status Purged or Recycle, that is when no jobs refer to the volume any more. The Storage Daemon overwrites the medium, the old Media record is removed and a new one created. All data on the volume is lost.
+.PP
+oldvolume= names the existing volume and volume= the new name, which follows the same rules as for label; missing or unknown names are chosen in a dialogue. pool= restricts the selection of the old volume. yes is accepted, but relabel asks no yes/no question.
 .PP
 \fBArguments\fR
 .PP
@@ -4664,6 +5476,11 @@ Encrypt the volume (keyword)
 .B "yes"
 Do not ask (keyword)
 .PP
+\fBExamples\fR
+.TP
+.B "relabel storage=File oldvolume=Full\-0001 volume=Full\-0101"
+relabel purged volume Full\-0001 as Full\-0101
+.PP
 \fBOrigin\fR
 Bareos console command.
 .SS "create"
@@ -4676,7 +5493,9 @@ create [pool=<pool>]
 .PP
 \fBDescription\fR
 .PP
-Create DB Pool from resource.
+Creates the catalog Pool record for a Pool resource of the Director configuration. The Director normally does this at startup; create is needed when a pool was newly configured and must be in the catalog before the next job. Only the catalog is changed.
+.PP
+Without a valid pool= the Director lists the configured pools in alphabetical order and asks for one; . aborts. To bring an existing Pool record in line with a changed configuration use update pool instead.
 .PP
 \fBArguments\fR
 .PP
@@ -4684,6 +5503,11 @@ Create DB Pool from resource.
 .TP
 .B "pool=<pool>"
 Pool name (name; values from .pools)
+.PP
+\fBExamples\fR
+.TP
+.B "create pool=Incremental"
+create the catalog record of pool Incremental
 .PP
 \fBOrigin\fR
 Bareos console command.
@@ -4697,7 +5521,9 @@ add [pool=<pool>] [storage=<storage>] [jobid=<jobid>] [volume=<volume>] [slot=<s
 .PP
 \fBDescription\fR
 .PP
-Add media to a pool.
+Creates Media records for volumes in the catalog without labelling the media. This is only needed in special cases, for example when tapes already carry a Bareos label or volumes should be listed in advance. The Storage Daemon is not contacted. Normally label is the right command, and the Director says so on every call.
+.PP
+pool= selects the pool (asked for if missing, automatic if the console may use only one pool); storage= determines Media Type and storage of the new volumes. Number, name, start number and, on autochangers, slot and InChanger are always asked in the dialogue: 0 creates one volume with a fixed name, a larger number a series with a four\-digit suffix. jobid= is accepted but ignored.
 .PP
 \fBArguments\fR
 .PP
@@ -4721,6 +5547,11 @@ Slot (number)
 .B "drive=<drive>"
 Drive number (number)
 .PP
+\fBExamples\fR
+.TP
+.B "add pool=Full storage=File"
+add volumes to pool Full for storage File
+.PP
 \fBOrigin\fR
 Bareos console command.
 .SS "import"
@@ -4733,7 +5564,9 @@ import [storage=<storage>] [srcslots=<srcslots>] [dstslots=<dstslots>] [volume=<
 .PP
 \fBDescription\fR
 .PP
-Import volumes from import/export slots to normal slots.
+Has an autochanger move volumes from its import/export slots (mail slots) into free normal slots. The Director instructs the Storage Daemon, which moves the robot, and then records the slots in the catalog. It works only with storages configured as autochangers; the counterpart is export.
+.PP
+srcslots= lists occupied import/export slots (default: all occupied ones), dstslots= empty normal slots (default: free slots in order); slot lists use numbers from 1, ranges with \- and commas. volume= restricts the import to names separated by |. scan reads the tapes in a drive instead of using barcodes and asks for the drive. Onesimus deviation: on a storage without autochanger the command is sent to the Storage Daemon, which rejects it.
 .PP
 \fBArguments\fR
 .PP
@@ -4757,6 +5590,14 @@ Scan the volumes (keyword)
 .B "drive=<drive>"
 Drive number (number)
 .PP
+\fBExamples\fR
+.TP
+.B "import storage=Autochanger"
+import every volume from the mail slots
+.TP
+.B "import storage=Autochanger srcslots=41\-42 dstslots=10\-11"
+move mail slots 41 and 42 into slots 10 and 11
+.PP
 \fBOrigin\fR
 Bareos console command.
 .SS "export"
@@ -4769,7 +5610,9 @@ export [storage=<storage>] [srcslots=<srcslots>] [dstslots=<dstslots>] [volume=<
 .PP
 \fBDescription\fR
 .PP
-Export volumes from normal slots to import/export slots.
+Has an autochanger move volumes from normal slots into its import/export slots (mail slots) so the tapes can be removed, for example for offsite storage. The Director instructs the Storage Daemon, which moves the robot, and then records the new slots in the catalog. It works only with storages configured as autochangers.
+.PP
+A source is required: srcslots= with occupied normal slots or volume= with names separated by |; empty source slots are skipped silently. dstslots= gives empty import/export slots, by default free ones in order. scan reads the tapes in a drive instead of using barcodes. Onesimus deviation: without a source the Director refuses before contacting the Storage Daemon.
 .PP
 \fBArguments\fR
 .PP
@@ -4793,6 +5636,14 @@ Scan the volumes (keyword)
 .B "drive=<drive>"
 Drive number (number)
 .PP
+\fBExamples\fR
+.TP
+.B "export storage=Autochanger srcslots=1\-3"
+export the volumes in slots 1 to 3
+.TP
+.B "export storage=Autochanger volume=Full\-0001|Full\-0002"
+export two volumes by name
+.PP
 \fBOrigin\fR
 Bareos console command.
 .SS "move"
@@ -4805,7 +5656,9 @@ move [storage=<storage>] [srcslots=<srcslots>] [dstslots=<dstslots>] [drive=<dri
 .PP
 \fBDescription\fR
 .PP
-Move slots in an autochanger.
+Has an autochanger move volumes from one slot to another. Source and destination are slot lists; the Director first asks the Storage Daemon which slots are occupied and moves only occupied source slots into free destination slots. The command changes the autochanger contents and the slot data in the catalog. It works only with autochanger storages.
+.PP
+Without storage= the Director offers the autochanger storages. Empty slots in srcslots= are skipped; without a source or destination selection move does nothing.
 .PP
 \fBArguments\fR
 .PP
@@ -4823,6 +5676,11 @@ Destination slots (text)
 .B "drive=<drive>"
 Drive number (number)
 .PP
+\fBExamples\fR
+.TP
+.B "move storage=Autochanger srcslots=1\-3 dstslots=10\-12"
+move slots 1 to 3 into slots 10 to 12
+.PP
 \fBOrigin\fR
 Bareos console command.
 .SS "\&.help"
@@ -4835,7 +5693,9 @@ Print parsable information about a command
 .PP
 \fBDescription\fR
 .PP
-Print parsable information about a command.
+Prints the command table of the Director in a form programs can parse easily. bconsole and oconsole build their completion from it and the WebUI uses it to check which commands a console may use; help is the variant for humans. Only commands allowed by the Command ACL of the console are listed, and only the commands of Bareos: Onesimus extensions such as .sqlcount or the .ovfs commands are missing (see .grammar).
+.PP
+Without an argument or with full, every command is printed as one line "name description \-\- arguments". all prints only the names of the ordinary commands without dot commands, item= only the argument list of one command; an unknown name gives an empty reply. In API mode 2 the result is an object keyed by command name with command, description, arguments and permission.
 .PP
 \fBArguments\fR
 .PP
@@ -4850,6 +5710,14 @@ One command (name; a command name)
 .B "full"
 With arguments (keyword)
 .PP
+\fBExamples\fR
+.TP
+.B "\&.help item=list"
+the argument list of list
+.TP
+.B "\&.help all"
+the names of all ordinary commands, one per line
+.PP
 \fBOrigin\fR
 Bareos console command.
 .SS "\&.quit"
@@ -4862,7 +5730,14 @@ Close connection
 .PP
 \fBDescription\fR
 .PP
-Close connection.
+Ends the console session: the Director closes the connection without sending text. It is the dot\-command form of quit and exit meant for programs. Running jobs continue. Further words on the line are ignored.
+.PP
+In API mode 1 the Director sends the signals CMD_BEGIN and CMD_OK before closing, in mode 2 additionally an empty JSON\-RPC result; no MAIN_PROMPT follows in any mode. If the Command ACL does not allow .quit, the connection stays open.
+.PP
+\fBExamples\fR
+.TP
+.B "\&.quit"
+close the connection
 .PP
 \fBOrigin\fR
 Bareos console command.
@@ -4879,18 +5754,28 @@ Report status
 .PP
 \fBDescription\fR
 .PP
-Report status.
+Returns one section of the status display of the Director, a Storage Daemon or a client, for example only the header or only the running jobs. The WebUI and monitoring scripts use it so they need not parse the full output of status, and in API mode 2 .status dir returns structured JSON. For storage= and client= the Director connects to the daemon.
+.PP
+A target must follow: dir, storage=<name> or client=<name>; without one the reply is "1900 Bad .status command, missing arguments." Unknown targets and a missing or unknown section under dir give "1900 Bad .status command, wrong argument."
 .PP
 \fBSubcommands\fR
 .TP
 .B "\&.status dir"
 Director
+.IP
+Shows one section of the Director status: header (version, start time and job counters), scheduled, running or terminated jobs. current and last only reply with the short answer "1000 OK .status". A section is required.
+.IP
+In API mode 2 the sections are JSON: result.header with director, version, release_date, os, binary_info, daemon_started, jobs_run, jobs_running and config_warnings, and result.scheduled, result.running and result.terminated as arrays.
 .TP
 .B "\&.status storage=<storage>"
 Storage Daemon
+.IP
+Shows the status of a Storage Daemon, which the Director contacts for this. Without a section the full status output is printed; header, waitreservation, devices, volumes, spooling, running and terminated select one part. In API mode 2 there is no JSON for this target and the result is empty.
 .TP
 .B "\&.status client=<client>"
 File Daemon
+.IP
+Shows the status of a File Daemon, which the Director contacts for this; header, running or terminated select the section. In API mode 2 there is no JSON for this target and the result is empty. If the client cannot be reached, the same connection messages as with status appear.
 .PP
 \fBArguments\fR
 .PP
@@ -4954,6 +5839,32 @@ Part of the status (keyword; excludes the other arguments of group part)
 .B "running"
 Part of the status (keyword; excludes the other arguments of group part)
 .PP
+\fBExamples\fR
+.TP
+.B "\&.status dir running"
+the jobs currently running on the Director
+.TP
+.B "\&.status storage=File devices"
+the devices of the storage File
+.TP
+.B "\&.status dir header"
+version, start time and job counters of the Director
+.TP
+.B "\&.status dir scheduled"
+the jobs scheduled for the coming days
+.TP
+.B "\&.status storage=File header"
+the header of the storage daemon behind File
+.TP
+.B "\&.status storage=File"
+the full status of the storage daemon
+.TP
+.B "\&.status client=bareos\-fd header"
+version and start time of the client bareos\-fd
+.TP
+.B "\&.status client=bareos\-fd terminated"
+the jobs the client finished last
+.PP
 \fBOrigin\fR
 Bareos console command.
 .SS "\&."
@@ -4966,7 +5877,9 @@ no op
 .PP
 \fBDescription\fR
 .PP
-no op.
+A single dot as command does nothing and replies without text. Programs send it to check that the connection is alive or to make sure they are back at the main prompt after an error. Words after the dot are ignored; two dots are an unknown command.
+.PP
+Inside a dialog the dot has a different role: as answer to a question of the Director, for example a selection list, it aborts the dialog. In API modes 1 and 2 the reply is framed twice (CMD_BEGIN, CMD_BEGIN, CMD_OK, CMD_OK, MAIN_PROMPT), which programs splitting replies at the signals must take into account.
 .PP
 \fBArguments\fR
 .PP
@@ -4974,6 +5887,14 @@ no op.
 .TP
 .B "<text> ..."
 Ignored (positional value; may be repeated)
+.PP
+\fBExamples\fR
+.TP
+.B "\&."
+check that the connection is alive
+.TP
+.B "\&. keepalive"
+the same, trailing words are ignored
 .PP
 \fBOrigin\fR
 Bareos console command.
@@ -4987,7 +5908,9 @@ List all client resources
 .PP
 \fBDescription\fR
 .PP
-List all client resources.
+Prints the names of all Client resources of the Director configuration, one per line, without a header. Meant for programs: bconsole and oconsole complete client= with it, the WebUI fills its selection lists. It reads only the configuration and changes nothing.
+.PP
+Only clients allowed by the console's Client ACL appear, in configuration order. enabled or disabled filter by state; a value after the keyword is ignored, and both together give an empty list.
 .PP
 \fBArguments\fR
 .PP
@@ -4998,6 +5921,14 @@ Only enabled resources (keyword; excludes the other arguments of group state)
 .TP
 .B "disabled"
 Only disabled resources (keyword; excludes the other arguments of group state)
+.PP
+\fBExamples\fR
+.TP
+.B "\&.clients"
+list all visible clients
+.TP
+.B "\&.clients enabled"
+list only enabled clients
 .PP
 \fBOrigin\fR
 Bareos console command.
@@ -5011,7 +5942,9 @@ List all job resources
 .PP
 \fBDescription\fR
 .PP
-List all job resources.
+Prints the names of all Job resources of the Director configuration, one per line, for completion of job= and selection lists. Only jobs allowed by the console's Job ACL appear, in configuration order. It reads only the configuration.
+.PP
+type= compares only the first letter of its value, case\-sensitively, with the job type letter (B Backup, R Restore, V Verify, D Admin, c Copy, g Migrate, O Consolidate, A Archive); so type=Backup works but type=backup returns nothing. enabled and disabled filter as for .clients.
 .PP
 \fBArguments\fR
 .PP
@@ -5026,6 +5959,14 @@ Only enabled resources (keyword; excludes the other arguments of group state)
 .B "disabled"
 Only disabled resources (keyword; excludes the other arguments of group state)
 .PP
+\fBExamples\fR
+.TP
+.B "\&.jobs type=Backup"
+list the backup jobs
+.TP
+.B "\&.jobs disabled"
+list only disabled jobs
+.PP
 \fBOrigin\fR
 Bareos console command.
 .SS "\&.pools"
@@ -5038,7 +5979,9 @@ List all pool resources
 .PP
 \fBDescription\fR
 .PP
-List all pool resources.
+Prints the names of all Pool resources of the Director configuration, one per line, for completion of pool= and selection lists. It reads the configuration, not the catalog Pool table. Only pools allowed by the console's Pool ACL appear.
+.PP
+type= keeps pools whose type starts with the given text, ignoring case: type=b and type=BACKUP give the same result. Without a value no filter applies.
 .PP
 \fBArguments\fR
 .PP
@@ -5046,6 +5989,11 @@ List all pool resources.
 .TP
 .B "type=<type>"
 Pool type (one of a fixed set; values: Backup, Copy, Cloned, Archive, Migration, Scratch)
+.PP
+\fBExamples\fR
+.TP
+.B "\&.pools type=Scratch"
+list the scratch pools
 .PP
 \fBOrigin\fR
 Bareos console command.
@@ -5059,7 +6007,7 @@ List all storage resources
 .PP
 \fBDescription\fR
 .PP
-List all storage resources.
+Not a command of its own but an abbreviation of .storages: like Bareos, the Director accepts any unique prefix of a command name and runs the first matching command. Output, arguments, API modes and permissions are those of .storages. It reads only the configuration; enabled or disabled filter by state.
 .PP
 \fBArguments\fR
 .PP
@@ -5070,6 +6018,14 @@ Only enabled resources (keyword; excludes the other arguments of group state)
 .TP
 .B "disabled"
 Only disabled resources (keyword; excludes the other arguments of group state)
+.PP
+\fBExamples\fR
+.TP
+.B "\&.storage"
+list the storage resources
+.TP
+.B "\&.storage enabled"
+list only enabled storages
 .PP
 \fBOrigin\fR
 Bareos console command.
@@ -5083,7 +6039,12 @@ List all filesets
 .PP
 \fBDescription\fR
 .PP
-List all filesets.
+Prints the names of all FileSet resources of the Director configuration, one per line, for completion of fileset= (for example with run or restore) and selection lists. Only FileSets allowed by the console's FileSet ACL appear. It takes no arguments, reads only the configuration and changes nothing.
+.PP
+\fBExamples\fR
+.TP
+.B "\&.filesets"
+list all visible filesets
 .PP
 \fBOrigin\fR
 Bareos console command.
@@ -5097,7 +6058,7 @@ List all schedule resources
 .PP
 \fBDescription\fR
 .PP
-List all schedule resources.
+Prints the names of all Schedule resources of the Director configuration, one per line, for selection lists such as enabling or disabling a schedule. Only schedules allowed by the console's Schedule ACL appear. enabled or disabled filter by state; a value after the keyword is ignored and both together give an empty list.
 .PP
 \fBArguments\fR
 .PP
@@ -5108,6 +6069,14 @@ Only enabled resources (keyword; excludes the other arguments of group state)
 .TP
 .B "disabled"
 Only disabled resources (keyword; excludes the other arguments of group state)
+.PP
+\fBExamples\fR
+.TP
+.B "\&.schedule"
+list all visible schedules
+.TP
+.B "\&.schedule disabled"
+list only disabled schedules
 .PP
 \fBOrigin\fR
 Bareos console command.
@@ -5121,7 +6090,12 @@ List all catalog resources
 .PP
 \fBDescription\fR
 .PP
-List all catalog resources.
+Prints the names of all Catalog resources of the Director configuration, one per line, for completion of catalog=. Only catalogs allowed by the console's Catalog ACL appear. It takes no arguments, opens no database connection and changes nothing.
+.PP
+\fBExamples\fR
+.TP
+.B "\&.catalogs"
+list all visible catalogs
 .PP
 \fBOrigin\fR
 Bareos console command.
@@ -5135,7 +6109,12 @@ List all console resources
 .PP
 \fBDescription\fR
 .PP
-List all console resources.
+Prints the names of all Console resources, one per line, for user interfaces and tab completion. The list includes the built\-in default console *UserAgent* and consoles created at runtime with configure. The order is the internal configuration order, not alphabetical, and the list is not filtered by ACLs. It takes no arguments and only reads.
+.PP
+\fBExamples\fR
+.TP
+.B "\&.consoles"
+list all consoles
 .PP
 \fBOrigin\fR
 Bareos console command.
@@ -5149,7 +6128,12 @@ List all job defaults resources
 .PP
 \fBDescription\fR
 .PP
-List all job defaults resources.
+Prints the names of all JobDefs resources of the Director configuration, one per line. JobDefs are templates from which jobs inherit default values; configuration tools need the list when creating jobs. Only JobDefs allowed by the console's Job ACL appear. It takes no arguments and changes nothing.
+.PP
+\fBExamples\fR
+.TP
+.B "\&.jobdefs"
+list all job templates
 .PP
 \fBOrigin\fR
 Bareos console command.
@@ -5163,7 +6147,12 @@ List all profile resources
 .PP
 \fBDescription\fR
 .PP
-List all profile resources.
+Prints the names of all Profile resources, one per line. Profiles bundle ACLs that Console and User resources take over with Profile = <name>. The order is the internal configuration order and the list is not filtered by ACLs. It takes no arguments and only reads.
+.PP
+\fBExamples\fR
+.TP
+.B "\&.profiles"
+list all profiles
 .PP
 \fBOrigin\fR
 Bareos console command.
@@ -5177,7 +6166,12 @@ List location names
 .PP
 \fBDescription\fR
 .PP
-List location names.
+Prints the locations from the catalog Location table, sorted alphabetically and without duplicates. Locations describe where a tape physically is, for example a safe or an offsite store. It only reads the catalog; without locations the list is empty.
+.PP
+\fBExamples\fR
+.TP
+.B "\&.locations"
+list the tape locations
 .PP
 \fBOrigin\fR
 Bareos console command.
@@ -5191,7 +6185,12 @@ List all medias
 .PP
 \fBDescription\fR
 .PP
-List all medias.
+Prints the names of all volumes in the catalog Media table, sorted alphabetically and without duplicates. Programs use the list for completion of volume= and for selection lists. It only reads the catalog and changes nothing.
+.PP
+\fBExamples\fR
+.TP
+.B "\&.media"
+list all volume names
 .PP
 \fBOrigin\fR
 Bareos console command.
@@ -5205,7 +6204,12 @@ List all media types
 .PP
 \fBDescription\fR
 .PP
-List all media types.
+Prints the media types recorded in the catalog MediaType table, sorted alphabetically and without duplicates. Programs use the list, for example when labelling or adding volumes. It only reads the catalog and changes nothing.
+.PP
+\fBExamples\fR
+.TP
+.B "\&.mediatypes"
+list the media types
 .PP
 \fBOrigin\fR
 Bareos console command.
@@ -5219,7 +6223,12 @@ Display pending messages
 .PP
 \fBDescription\fR
 .PP
-Display pending messages.
+Prints the messages queued for the console since they were last fetched (job reports, daemon warnings) and empties the queue. Unlike messages it prints nothing at all when nothing is waiting, which suits programs that poll regularly, such as bconsole and the WebUI. It works regardless of autodisplay and gui and takes no arguments.
+.PP
+\fBExamples\fR
+.TP
+.B "\&.messages"
+fetch pending messages, silent if there are none
 .PP
 \fBOrigin\fR
 Bareos console command.
@@ -5233,7 +6242,12 @@ List all message resources
 .PP
 \fBDescription\fR
 .PP
-List all message resources.
+Prints the names of all Messages resources of the Director configuration, one per line. A Messages resource defines where job and daemon messages go (console, file, mail, catalog); configuration tools need the list for messages=. It takes no arguments and changes nothing. Not to be confused with .messages, which prints pending messages.
+.PP
+\fBExamples\fR
+.TP
+.B "\&.msgs"
+list the messages resources
 .PP
 \fBOrigin\fR
 Bareos console command.
@@ -5247,7 +6261,12 @@ List all user resources
 .PP
 \fBDescription\fR
 .PP
-List all user resources.
+Prints the names of all User resources, one per line. User resources describe users who log in through a console with PAM authentication; their rights come from profiles. Without User resources the answer is empty. The order is the internal configuration order and the list is not filtered by ACLs. It takes no arguments and only reads.
+.PP
+\fBExamples\fR
+.TP
+.B "\&.users"
+list the PAM users
 .PP
 \fBOrigin\fR
 Bareos console command.
@@ -5261,7 +6280,9 @@ Get default settings
 .PP
 \fBDescription\fR
 .PP
-Get default settings.
+Shows the main settings of a job, client, storage or pool as key=value lines. The WebUI and scripts use it to prefill forms such as run or restore with values from the configuration. It reads only the configuration and changes nothing.
+.PP
+Give exactly one resource per call; the name must match exactly. A JobDefs template is not a job and returns nothing, nor does a resource hidden by the console's ACL. For pool= one line reads purge_oldest_volume==0 with a double equals sign, as in Bareos. Under API 2 an error leaves result empty instead of an empty defaults object.
 .PP
 \fBArguments\fR
 .PP
@@ -5279,6 +6300,14 @@ Storage name (name; values from .storages)
 .B "pool=<pool>"
 Pool name (name; values from .pools)
 .PP
+\fBExamples\fR
+.TP
+.B "\&.defaults job=backup\-bareos\-fd"
+show the defaults of a job
+.TP
+.B "\&.defaults pool=Full"
+show the settings of pool Full
+.PP
 \fBOrigin\fR
 Bareos console command.
 .SS "\&.jobstatus"
@@ -5291,7 +6320,9 @@ List jobstatus information
 .PP
 \fBDescription\fR
 .PP
-List jobstatus information.
+Shows the table of job status codes from the catalog Status table: code letter (T, E, f, ...), description, severity, and exit level and exit status for finished states. Programs use it to explain the one\-letter status of list jobs. It only reads the catalog.
+.PP
+The filter must be attached to the command word (.jobstatus=T); a separate word is ignored and gives the whole table. catalog= selects a catalog; an unknown name is ignored and the first catalog is used.
 .PP
 \fBArguments\fR
 .PP
@@ -5302,6 +6333,14 @@ One JobStatus letter (text; the value may be left out)
 .TP
 .B "catalog=<catalog>"
 Catalog name (name; values from .catalogs)
+.PP
+\fBExamples\fR
+.TP
+.B "\&.jobstatus"
+show all job status codes
+.TP
+.B "\&.jobstatus=T"
+show only the row for code T
 .PP
 \fBOrigin\fR
 Bareos console command.
@@ -5315,7 +6354,9 @@ Check for authorization
 .PP
 \fBDescription\fR
 .PP
-Check for authorization.
+Checks whether the own console may access a resource or command and answers authorized or not authorized. The check uses the ACLs of the Console resource and its profiles (Job, Client, Storage, Schedule, Pool, Command, FileSet and Catalog ACL). User interfaces such as bareos\-webui use it to show buttons only when permitted. It only reads.
+.PP
+Keys are case\-insensitive, and only the ACL is checked, not whether the resource exists. With several arguments the last known one decides. Without arguments, with unknown keys only or with a key lacking a value the answer is not authorized, even for an unrestricted console.
 .PP
 \fBArguments\fR
 .PP
@@ -5345,6 +6386,14 @@ FileSet name (name; values from .filesets)
 .B "catalog=<catalog>"
 Catalog name (name; values from .catalogs)
 .PP
+\fBExamples\fR
+.TP
+.B "\&.authorized cmd=purge"
+check whether the console may run purge
+.TP
+.B "\&.authorized client=bareos\-fd"
+check access to client bareos\-fd
+.PP
 \fBOrigin\fR
 Bareos console command.
 .SS "\&.levels"
@@ -5357,7 +6406,9 @@ List all backup levels
 .PP
 \fBDescription\fR
 .PP
-List all backup levels.
+Prints the levels allowed for jobs, such as Full, Incremental or VirtualFull for backups and Catalog or VolumeToCatalog for verify jobs. Programs fill the level= selection of run or estimate with it. The table is built into the Director; nothing is read from configuration or catalog.
+.PP
+Without an argument the whole table is printed, so Full, Incremental and Differential appear several times (once each for Backup, Copy and Migrate). A job type given as a single bare word, written out in full in any case, restricts the list; a prefix, more than one word or the form type=Backup gives an empty list, as do job types without levels.
 .PP
 \fBArguments\fR
 .PP
@@ -5365,6 +6416,11 @@ List all backup levels.
 .TP
 .B "<type>"
 Job type (positional value; values from .types)
+.PP
+\fBExamples\fR
+.TP
+.B "\&.levels"
+list all job levels
 .PP
 \fBOrigin\fR
 Bareos console command.
@@ -5378,7 +6434,12 @@ List all job types
 .PP
 \fBDescription\fR
 .PP
-List all job types.
+Prints all job types the Director knows (Backup, Restore, Verify and so on). Programs fill selection lists with it, for example type= of .jobs or jobtype= of list jobs. The list is built into the Director; it takes no arguments and reads neither configuration nor catalog.
+.PP
+\fBExamples\fR
+.TP
+.B "\&.types"
+list all job types
 .PP
 \fBOrigin\fR
 Bareos console command.
@@ -5392,7 +6453,12 @@ List all volume status
 .PP
 \fBDescription\fR
 .PP
-List all volume status.
+Prints all states a volume can have in the catalog (Append, Full, Used, Purged and so on). Programs fill the volstatus= selection of update volume or truncate with it. The list is built into the Director; it takes no arguments and reads neither configuration nor catalog.
+.PP
+\fBExamples\fR
+.TP
+.B "\&.volstatus"
+list all volume states
 .PP
 \fBOrigin\fR
 Bareos console command.
@@ -5406,7 +6472,12 @@ List possible actions on purge
 .PP
 \fBDescription\fR
 .PP
-List possible actions on purge.
+Prints the values allowed for actiononpurge= (in update volume, update pool and the Pool resource): None, do nothing, and Truncate, shrink the volume file after the purge to free space. The list is built into the Director; it takes no arguments and reads neither configuration nor catalog.
+.PP
+\fBExamples\fR
+.TP
+.B "\&.actiononpurge"
+list the actions on purge
 .PP
 \fBOrigin\fR
 Bareos console command.
@@ -5420,7 +6491,11 @@ Switch between different api modes
 .PP
 \fBDescription\fR
 .PP
-Switch between different api modes.
+Selects the reply format of the Director for this console session: mode 0 or off is text for humans (the default after login), mode 1 or on is terse text for scripts without table frames and catalog notices, mode 2 or json answers every command with a JSON\-RPC 2.0 object. Without an argument it acts like .api 1. The mode lasts until the next .api or the end of the session.
+.PP
+compact=yes after 2 or json prints the JSON on one line, any other value switches back to indented JSON; after 0 or 1 it is ignored. An unknown mode or more than two words leave the mode unchanged. In modes 1 and 2 every reply is framed by CMD_BEGIN, CMD_OK or CMD_FAILED and MAIN_PROMPT.
+.PP
+Over gRPC each ExecuteCommand call carries its own response_format and the Director does not remember .api; oconsole \-\-grpc remembers the mode chosen with .api and sends it with every following command, so .api behaves as over BNET.
 .PP
 \fBArguments\fR
 .PP
@@ -5431,6 +6506,17 @@ API mode (positional value; values: 0, 1, 2, off, on, json)
 .TP
 .B "compact=<yes|no>"
 Compact JSON (yes or no)
+.PP
+\fBExamples\fR
+.TP
+.B "\&.api 2"
+switch to JSON replies
+.TP
+.B "\&.api json compact=yes"
+JSON replies on a single line
+.TP
+.B "\&.api 0"
+back to text mode
 .PP
 \fBOrigin\fR
 Bareos console command.
@@ -5462,6 +6548,17 @@ Output format (one of a fixed set; values: json, text)
 .B "compact=<yes|no>"
 Compact JSON (yes or no)
 .PP
+\fBExamples\fR
+.TP
+.B "\&.grpc"
+the state of the session and whether the gRPC service is enabled
+.TP
+.B "\&.grpc on compact=yes"
+switch to gRPC mode with compact JSON
+.TP
+.B "\&.grpc off"
+return to the API mode used before .grpc on
+.PP
 \fBOrigin\fR
 Onesimus extension. The Bareos Director does not know this command and answers "is an invalid command".
 .SS "\&.sql"
@@ -5474,7 +6571,9 @@ Send an arbitrary SQL command
 .PP
 \fBDescription\fR
 .PP
-Send an arbitrary SQL command.
+Sends an arbitrary SQL statement to the catalog database and prints the result. The WebUI and scripts use it for evaluations no other command provides. The statement is executed without any check: UPDATE, DELETE or DROP change the catalog permanently, so use plain SELECT statements for reading.
+.PP
+If the text holds several statements separated by semicolons, all of them are executed but only the result of the last one is shown. Database errors are passed through as "Query failed: ...". In API mode 0 the result is a framed table, in mode 1 the cells are tab\-separated on a single line, in mode 2 the rows are objects under "query" with all values as strings.
 .PP
 \fBArguments\fR
 .PP
@@ -5485,6 +6584,14 @@ SQL statement (text; required)
 .TP
 .B "catalog=<catalog>"
 Catalog name (name; values from .catalogs)
+.PP
+\fBExamples\fR
+.TP
+.B "\&.sql query=\(dqSELECT poolid, name FROM pool\(dq"
+ids and names of all pools
+.TP
+.B "\&.sql query=\(dqSELECT count(*) FROM job WHERE jobstatus = 'E'\(dq catalog=MyCatalog"
+number of failed jobs in the catalog MyCatalog
 .PP
 \fBOrigin\fR
 Bareos console command.
@@ -5507,6 +6614,14 @@ Lists the tables of the catalog database.
 .B "catalog=<catalog>"
 Catalog name (name; values from .catalogs)
 .PP
+\fBExamples\fR
+.TP
+.B "\&.sqltables"
+the tables of the public schema in alphabetical order
+.TP
+.B "\&.sqltables catalog=MyCatalog"
+the tables of the catalog MyCatalog
+.PP
 \fBOrigin\fR
 Onesimus extension. The Bareos Director does not know this command and answers "is an invalid command".
 .SS "\&.sqlschema"
@@ -5519,7 +6634,9 @@ Show catalog schema
 .PP
 \fBDescription\fR
 .PP
-Show catalog schema.
+Shows every column of the tables in the public schema of the catalog database with its data type, ordered by table and column position; table= restricts the output to one table. An unknown table yields an empty list, a name that is not a plain identifier is rejected. The command only reads and helps writing queries for .sql.
+.PP
+Onesimus extension: Bareos does not know the command and answers ".sqlschema: is an invalid command.". Besides .sqlschema in its Command ACL the console needs .sql or sqlquery, as for any raw catalog access.
 .PP
 \fBArguments\fR
 .PP
@@ -5530,6 +6647,14 @@ Table name (text)
 .TP
 .B "catalog=<catalog>"
 Catalog name (name; values from .catalogs)
+.PP
+\fBExamples\fR
+.TP
+.B "\&.sqlschema table=pool"
+columns and data types of the pool table
+.TP
+.B "\&.sqlschema"
+the columns of every catalog table
 .PP
 \fBOrigin\fR
 Onesimus extension. The Bareos Director does not know this command and answers "is an invalid command".
@@ -5543,7 +6668,9 @@ Count catalog records
 .PP
 \fBDescription\fR
 .PP
-Count catalog records.
+Counts the rows of catalog tables. Without an argument it reports the most important tables (client, fileset, job, jobmedia, media, pool, storage); File and Path are left out on purpose because counting them takes long in large catalogs. With table= exactly one table is counted. The command only reads.
+.PP
+Onesimus extension: Bareos does not know the command and answers ".sqlcount: is an invalid command.", so programs that must work with both directors should not rely on it. The console needs .sql or sqlquery in its Command ACL in addition to .sqlcount.
 .PP
 \fBArguments\fR
 .PP
@@ -5554,6 +6681,14 @@ Table name (text)
 .TP
 .B "catalog=<catalog>"
 Catalog name (name; values from .catalogs)
+.PP
+\fBExamples\fR
+.TP
+.B "\&.sqlcount"
+row counts of the main catalog tables
+.TP
+.B "\&.sqlcount table=file"
+number of rows in the file table
 .PP
 \fBOrigin\fR
 Onesimus extension. The Bareos Director does not know this command and answers "is an invalid command".
@@ -5580,18 +6715,30 @@ set, delete, clear and copy need the CommandACL .acl and configure. Entries are 
 .TP
 .B "\&.acl list"
 File and catalog entries, effective result
+.IP
+Shows per ACL type the file entries (first those of the console, then those of its profiles), the catalog entries and the effective result, plus the load state of the catalog ACL. list is also the default when no subcommand is given. Without console= the own console is shown, or all consoles for a console that may use configure; the ACLs of another console need configure. Catalog entries that only allow what the file ACL forbids are marked as having no effect.
 .TP
 .B "\&.acl set"
 Replace catalog entries of types
+.IP
+Replaces the catalog list of the console for every ACL type given. Entries are evaluated like a Bareos list: the first matching entry decides, ! forbids, regular expressions and *all* work as in the file, and a name no entry matches is forbidden. The change takes effect at once. Needs the CommandACL .acl and configure.
+.IP
+The catalog ACL of another console may be changed freely, since it can never go beyond that console's file ACL. On the own console only a narrowing change is allowed: a first list for a type without catalog entries, or a list made from the old one only by inserting ! entries and removing entries without !.
 .TP
 .B "\&.acl delete"
 Delete catalog entries
+.IP
+Removes the given entries from the catalog ACL of the console; a type key without a value removes the whole catalog list of that type, which then no longer restricts. An entry the catalog ACL does not have is an error and nothing changes. Works also for a console that is no longer configured but still has catalog entries. Needs the CommandACL .acl and configure; on the own console only removing entries without ! is allowed.
 .TP
 .B "\&.acl clear"
 Delete every catalog entry of a console
+.IP
+Removes all catalog ACL entries of the console, so only its file ACL applies again. Works also for a console that is no longer configured. Needs the CommandACL .acl and configure and is refused on the own console, since it could widen the rights.
 .TP
 .B "\&.acl copy"
 Copy the catalog entries of a console
+.IP
+Gives the console to= the catalog ACL lists of the console from=. Types that from= has no catalog entries for lose their entries at to=. The file ACLs of both consoles stay as they are. Needs the CommandACL .acl and configure.
 .PP
 \fBArguments\fR
 .PP
@@ -5693,6 +6840,33 @@ restrict ops
 .TP
 .B "\&.acl delete console=ops jobacl"
 remove the catalog JobACL entries
+.TP
+.B "\&.acl clear console=ops"
+remove all catalog ACL entries of a console
+.TP
+.B "\&.acl copy from=ops to=operator"
+give a console the catalog ACL lists of another
+.TP
+.B "\&.acl list"
+the ACLs of the own console
+.TP
+.B "\&.acl list console=operator"
+the file, catalog and effective ACLs of another console
+.TP
+.B "\&.acl set console=ops clientacl=bareos\-fd,!old\-fd"
+restrict a console to some clients
+.TP
+.B "\&.acl delete console=ops commandacl=status"
+remove one catalog entry
+.TP
+.B "\&.acl delete console=ops poolacl"
+remove the whole catalog pool list
+.TP
+.B "\&.acl clear console=ops"
+drop all catalog restrictions of a console
+.TP
+.B "\&.acl copy from=ops to=gui\-anna"
+apply the catalog restrictions of ops to gui\-anna
 .PP
 \fBOrigin\fR
 Onesimus extension. The Bareos Director does not know this command and answers "is an invalid command".
@@ -5727,6 +6901,9 @@ the grammar of every permitted command
 .TP
 .B "\&.grammar command=purge"
 only purge
+.TP
+.B "\&.grammar command=list"
+only the grammar of list and its subcommands
 .PP
 \fBOrigin\fR
 Onesimus extension. The Bareos Director does not know this command and answers "is an invalid command".
@@ -5740,7 +6917,9 @@ Update BVFS cache
 .PP
 \fBDescription\fR
 .PP
-Update BVFS cache.
+Fills the BVFS cache in the catalog (the tables PathHierarchy and PathVisibility and the flag Job.HasCache). Without this cache .bvfs_lsdirs and .bvfs_lsfiles find no directories. With jobid= only the listed jobs are prepared; without it all jobs without cache are, which can take long on large catalogs. Jobs that already have a cache are skipped. Backup data is not changed.
+.PP
+On success nothing is printed. BVFS is kept unchanged for compatibility with Bareos tools such as bareos\-webui; the OVFS commands need no cache.
 .PP
 \fBArguments\fR
 .PP
@@ -5751,6 +6930,14 @@ Job IDs (text; several values separated by commas)
 .TP
 .B "catalog=<catalog>"
 Catalog name (name; values from .catalogs)
+.PP
+\fBExamples\fR
+.TP
+.B "\&.bvfs_update jobid=600,615,616"
+build the cache for one job chain
+.TP
+.B "\&.bvfs_update"
+build the cache for all jobs without one
 .PP
 \fBOrigin\fR
 Bareos console command.
@@ -5764,7 +6951,7 @@ Cleanup BVFS cache for a certain handle
 .PP
 \fBDescription\fR
 .PP
-Cleanup BVFS cache for a certain handle.
+Drops the table that .bvfs_restore created for a restore selection, after the restore was started with file=?<table> or abandoned. path= names the table (b2 followed by a number); other names are skipped silently and a missing table is not an error. The BVFS cache stays.
 .PP
 \fBArguments\fR
 .PP
@@ -5772,6 +6959,11 @@ Cleanup BVFS cache for a certain handle.
 .TP
 .B "path=<path>"
 Handle (table name) (text; required)
+.PP
+\fBExamples\fR
+.TP
+.B "\&.bvfs_cleanup path=b2101"
+drop a restore selection table
 .PP
 \fBOrigin\fR
 Bareos console command.
@@ -5785,7 +6977,7 @@ Clear BVFS cache
 .PP
 \fBDescription\fR
 .PP
-Clear BVFS cache.
+Clears the whole BVFS cache in the catalog: Job.HasCache is reset for all jobs and the tables PathHierarchy and PathVisibility are emptied. The keyword yes is required; without it nothing happens and there is no confirmation prompt. Afterwards the cache must be rebuilt with .bvfs_update. Backup data and file records are not touched.
 .PP
 \fBArguments\fR
 .PP
@@ -5793,6 +6985,11 @@ Clear BVFS cache.
 .TP
 .B "yes"
 Confirm (keyword)
+.PP
+\fBExamples\fR
+.TP
+.B "\&.bvfs_clear_cache yes"
+empty the BVFS cache
 .PP
 \fBOrigin\fR
 Bareos console command.
@@ -5806,7 +7003,9 @@ Get jobids required for a restore
 .PP
 \fBDescription\fR
 .PP
-Get jobids required for a restore.
+Returns the chain of JobIds needed to restore the state of a job: the Full backup, the last Differential and all Incrementals up to that job, as one comma separated line. The list is the jobid= argument of the other .bvfs commands. ujobid= gives the job by its unique job name instead and takes precedence. all combines the chains of all filesets of the client.
+.PP
+For a Base job only its own JobId is returned. JobIds the console may not see by its job, client or fileset ACL are left out. The command only reads the catalog; the OVFS counterpart is .ovfs_latest.
 .PP
 \fBArguments\fR
 .PP
@@ -5821,6 +7020,14 @@ Unique job name (text)
 .B "all"
 Every job of the chain (keyword)
 .PP
+\fBExamples\fR
+.TP
+.B "\&.bvfs_get_jobids jobid=628"
+the job chain for restoring job 628
+.TP
+.B "\&.bvfs_get_jobids jobid=628 all"
+the chains of all filesets of the client
+.PP
 \fBOrigin\fR
 Bareos console command.
 .SS "\&.bvfs_lsdirs"
@@ -5833,7 +7040,9 @@ List directories using BVFS
 .PP
 \fBDescription\fR
 .PP
-List directories using BVFS.
+Lists the subdirectories of a directory in the state of a job chain, as a restore file browser needs them. The BVFS cache must have been filled with .bvfs_update first. The directory is given by path= (with a trailing slash, / for the root) or by pathid= from an earlier output; limit= (default 2000) and offset= page through the result.
+.PP
+Each line has five tab separated columns: PathId, FileId, JobId, LStat and name. The first two lines are . and ..; directories without their own catalog record have FileId and JobId 0. A JobId the console may not see is refused.
 .PP
 \fBArguments\fR
 .PP
@@ -5860,6 +7069,14 @@ Name filter (regular expression) (text)
 .B "filename=<filename>"
 File name (text)
 .PP
+\fBExamples\fR
+.TP
+.B "\&.bvfs_lsdirs jobid=600,615,616 path=/"
+the top level directories of a job chain
+.TP
+.B "\&.bvfs_lsdirs jobid=600,615,616 pathid=7 limit=100"
+the first 100 subdirectories of a known path
+.PP
 \fBOrigin\fR
 Bareos console command.
 .SS "\&.bvfs_lsfiles"
@@ -5872,7 +7089,9 @@ List files using BVFS
 .PP
 \fBDescription\fR
 .PP
-List files using BVFS.
+Lists the files (without subdirectories) of a directory in the state of a job chain; for each file the version from the newest job of the chain is shown. The FileIds are the input for .bvfs_restore. The BVFS cache must have been filled with .bvfs_update first. pattern= keeps only file names matching a regular expression; limit= (default 2000) and offset= page through the result.
+.PP
+Each line has five tab separated columns: PathId, FileId, JobId, LStat and file name.
 .PP
 \fBArguments\fR
 .PP
@@ -5899,6 +7118,14 @@ Name filter (regular expression) (text)
 .B "filename=<filename>"
 File name (text)
 .PP
+\fBExamples\fR
+.TP
+.B "\&.bvfs_lsfiles jobid=600,615,616 path=/etc/"
+the files of /etc in a job chain
+.TP
+.B "\&.bvfs_lsfiles jobid=600,615,616 pathid=7 pattern=conf"
+only file names matching a pattern
+.PP
 \fBOrigin\fR
 Bareos console command.
 .SS "\&.bvfs_versions"
@@ -5911,7 +7138,9 @@ List versions of a file
 .PP
 \fBDescription\fR
 .PP
-List versions of a file.
+Lists all backed up versions of one file of a client across all jobs, each with its volume, so an older version can be picked for .bvfs_restore by its FileId. Only versions stored on a volume count. jobid= is required but not evaluated (by Bareos convention 0); the directory is given by path= or pathid=, the file by fname= (also filename= or name=). copies includes versions from copy jobs; versions is accepted but has no effect.
+.PP
+Each line has seven tab separated columns: PathId, FileId, JobId, LStat, MD5, volume name and InChanger.
 .PP
 \fBArguments\fR
 .PP
@@ -5950,6 +7179,14 @@ Most rows (number)
 .B "offset=<offset>"
 Rows to skip (number)
 .PP
+\fBExamples\fR
+.TP
+.B "\&.bvfs_versions jobid=0 client=bareos\-fd path=/etc/ fname=hosts"
+all versions of /etc/hosts
+.TP
+.B "\&.bvfs_versions jobid=0 client=bareos\-fd path=/etc/ fname=hosts copies"
+including versions from copy jobs
+.PP
 \fBOrigin\fR
 Bareos console command.
 .SS "\&.bvfs_restore"
@@ -5962,7 +7199,9 @@ Mark BVFS files/directories for restore. Stored in handle.
 .PP
 \fBDescription\fR
 .PP
-Mark BVFS files/directories for restore. Stored in handle.
+Creates a table in the catalog holding a restore selection: single files (fileid=), whole directories with their content (dirid=, PathIds from .bvfs_lsdirs) and hardlinks (hardlink=, pairs of JobId and FileIndex). At least one of them is required. path= names the table (b2 followed by a number); an existing table of that name is replaced.
+.PP
+Pass the table to restore with file=?<table>; restore then skips the menu and the file tree. Drop the table afterwards with .bvfs_cleanup. The command only writes to the catalog and starts no job.
 .PP
 \fBArguments\fR
 .PP
@@ -5985,6 +7224,14 @@ JobId,FileIndex pairs (text; several values separated by commas)
 .TP
 .B "useemptypath"
 Use an empty path (keyword)
+.PP
+\fBExamples\fR
+.TP
+.B "\&.bvfs_restore path=b2101 jobid=600,615,616 fileid=4711,4712"
+select two files for a restore
+.TP
+.B "\&.bvfs_restore path=b2102 jobid=600,615,616 dirid=7"
+select a whole directory
 .PP
 \fBOrigin\fR
 Bareos console command.
@@ -6010,21 +7257,35 @@ Reads, creates, changes and deletes configuration resources as raw text (the sam
 .TP
 .B "\&.config capabilities"
 Editable types and operations
+.IP
+Shows the interface version and, per resource type, the operations the configuration CRUD offers (READ_RAW, CREATE_RAW, UPDATE_RAW, DELETE). The editable types are schedule, job, jobdefs and client. Without the CommandACL configure no types are listed.
 .TP
 .B "\&.config list"
 Resources of a type
+.IP
+Lists the resources of one type (schedule, job, jobdefs or client) with their file, SHA\-256 and whether the file holds more than one resource. Resources the console may not see by its resource ACL are left out.
 .TP
 .B "\&.config read"
 Raw text of a resource
+.IP
+Returns the raw text of one resource byte for byte, with its file and SHA\-256. The checksum is the optimistic lock for a later update or delete. A resource the console may not see gives the status DENIED.
 .TP
 .B "\&.config create"
 New resource from text
+.IP
+Creates a resource from its raw text, given base64 encoded in text64= because a console line carries no line ends. The new configuration is checked like odir \-t, written atomically and reloaded, with rollback if the reload fails. With validate_only the text is only checked, nothing is written.
+.IP
+A result status other than OK (EXISTS, INVALID, DENIED ...) is reported in the response, not as a command error. Needs the CommandACL configure.
 .TP
 .B "\&.config update"
 Replace a resource
+.IP
+Replaces the raw text of a resource. sha256= must be the checksum from the last read; if the file changed since, the status is CONFLICT and nothing is written. The text is checked like odir \-t, written atomically and reloaded with rollback; validate_only only checks. Needs the CommandACL configure.
 .TP
 .B "\&.config delete"
 Delete a resource
+.IP
+Deletes a resource, guarded by the checksum from the last read. If other resources still refer to it the status is REFERENCED, the referring resources are listed and nothing is deleted. validate_only only checks. Needs the CommandACL configure.
 .PP
 \fBArguments\fR
 .PP
@@ -6088,6 +7349,32 @@ SHA\-256 of the text read (text; required)
 .B "validate_only"
 Check only, write nothing (keyword)
 .PP
+\fBExamples\fR
+.TP
+.B "\&.config list type=job json"
+the job resources as one JSON line
+.TP
+.B "\&.config read type=schedule name=WeeklyCycle"
+the raw text of a schedule with its checksum
+.TP
+.B "\&.config capabilities"
+the editable types and their operations
+.TP
+.B "\&.config list type=client"
+all client resources with file and checksum
+.TP
+.B "\&.config read type=client name=bareos\-fd"
+the raw client text and its checksum
+.TP
+.B "\&.config create type=schedule text64=U2NoZWR1bGUgewogIE5hbWUgPSBOaWdodGx5CiAgUnVuID0gRnVsbCBzdW4gYXQgMjM6MDAKfQo validate_only"
+check a new schedule without writing it
+.TP
+.B "\&.config update type=schedule name=Nightly sha256=5b1e9a3c text64=U2NoZWR1bGUgewogIE5hbWUgPSBOaWdodGx5CiAgUnVuID0gRnVsbCBzYXQgYXQgMjI6MDAKfQo"
+replace a schedule with new text
+.TP
+.B "\&.config delete type=client name=old\-fd sha256=5b1e9a3c validate_only"
+check whether a client could be deleted
+.PP
 \fBOrigin\fR
 Onesimus extension. The Bareos Director does not know this command and answers "is an invalid command".
 .SS "\&.ovfs_status"
@@ -6100,7 +7387,9 @@ Show whether restore trees use the ovfs extension or the Director fallback
 .PP
 \fBDescription\fR
 .PP
-Show whether restore trees use the ovfs extension or the Director fallback.
+Onesimus extension: shows whether the PostgreSQL extension ovfs is installed and usable in the catalog database and which path answers the .ovfs commands, the extension or the equivalent plain SQL fallback in the Director. Both give the same results; the extension is faster on large catalogs. If the extension is not usable the reason is shown.
+.PP
+refresh checks the extension again instead of showing the stored result. json prints the result as one JSON line in every API mode.
 .PP
 \fBArguments\fR
 .PP
@@ -6111,6 +7400,14 @@ Check the extension again now (keyword)
 .TP
 .B "json"
 Print the JSON object as text (keyword)
+.PP
+\fBExamples\fR
+.TP
+.B "\&.ovfs_status"
+extension state and restore tree path
+.TP
+.B "\&.ovfs_status refresh json"
+check again and print JSON
 .PP
 \fBOrigin\fR
 Onesimus extension. The Bareos Director does not know this command and answers "is an invalid command".
@@ -6124,7 +7421,9 @@ Job chain of a client's latest state (restore option 5)
 .PP
 \fBDescription\fR
 .PP
-Job chain of a client's latest state (restore option 5).
+Onesimus extension: determines the job chain for the newest state of a client, as restore menu item 5 selects it: the last Full backup of the fileset, the last Differential after it and all Incrementals after Full or Differential. Only backups with status T or W count, Differentials and Incrementals only if they are on an enabled volume. fileset= is needed when the client has backups of several filesets.
+.PP
+Pass the comma separated list as jobid= to .ovfs_tree and .ovfs_ls, so the tree stays the same while browsing even if a new backup finishes. json prints the result as one JSON line.
 .PP
 \fBArguments\fR
 .PP
@@ -6139,6 +7438,14 @@ FileSet name (name; values from .filesets)
 .B "json"
 Print the JSON object as text (keyword)
 .PP
+\fBExamples\fR
+.TP
+.B "\&.ovfs_latest client=bareos\-fd"
+the newest job chain of a client
+.TP
+.B "\&.ovfs_latest client=bareos\-fd fileset=LinuxAll json"
+the chain of one fileset as JSON
+.PP
 \fBOrigin\fR
 Onesimus extension. The Bareos Director does not know this command and answers "is an invalid command".
 .SS "\&.ovfs_tree"
@@ -6151,7 +7458,9 @@ Restore tree of a job chain as JSON (OVFS)
 .PP
 \fBDescription\fR
 .PP
-Restore tree of a job chain as JSON (OVFS).
+Onesimus extension: returns the directory tree of a job chain below a directory as a restore would bring it back: per path the version from the newest job, deleted files left out, hardlinks and delta files resolved. Every node with a catalog record carries its restore identity (jobid, fileindex). No cache is needed. The chain is given by jobid= or by client= (and fileset=) for the newest state like .ovfs_latest.
+.PP
+root= sets the top of the tree (default /), depth= the number of levels (default 1; directories at the limit show their entry count), max_entries= the maximum number of nodes (default 100000; beyond it the command stops with a message). For large backups load the top with a small depth and expand directories with .ovfs_ls. json prints one JSON line.
 .PP
 \fBArguments\fR
 .PP
@@ -6178,6 +7487,14 @@ Most nodes in the result (number; default 100000)
 .B "json"
 Print the JSON object as text (keyword)
 .PP
+\fBExamples\fR
+.TP
+.B "\&.ovfs_tree jobid=600,615,616 root=/home/ depth=2"
+two levels below /home of a job chain
+.TP
+.B "\&.ovfs_tree client=bareos\-fd depth=1 json"
+the top level of the newest state as JSON
+.PP
 \fBOrigin\fR
 Onesimus extension. The Bareos Director does not know this command and answers "is an invalid command".
 .SS "\&.ovfs_ls"
@@ -6190,7 +7507,9 @@ Direct children of one directory of a job chain (OVFS)
 .PP
 \fBDescription\fR
 .PP
-Direct children of one directory of a job chain (OVFS).
+Onesimus extension: lists the direct entries of one directory in the state of a job chain, first the files, then the subdirectories with the number of their entries, so a restore browser can load the tree directory by directory. Directories below which nothing can be restored are left out. The chain is given by jobid= or by client= (and fileset=) for the newest state; path= is required and ends with a slash.
+.PP
+Each entry carries its restore identity (jobid, fileindex). json prints the result as one JSON line in every API mode.
 .PP
 \fBArguments\fR
 .PP
@@ -6211,6 +7530,14 @@ Directory (text; required)
 .B "json"
 Print the JSON object as text (keyword)
 .PP
+\fBExamples\fR
+.TP
+.B "\&.ovfs_ls jobid=600,615,616 path=/etc/"
+the entries of /etc in a job chain
+.TP
+.B "\&.ovfs_ls client=bareos\-fd path=/home/ json"
+a directory of the newest state as JSON
+.PP
 \fBOrigin\fR
 Onesimus extension. The Bareos Director does not know this command and answers "is an invalid command".
 .SS "\&.ovfs_versions"
@@ -6223,7 +7550,9 @@ All versions of one file of a client (OVFS)
 .PP
 \fBDescription\fR
 .PP
-All versions of one file of a client (OVFS).
+Onesimus extension: lists all backed up versions of a file or directory of a client, newest first. Only versions stored on a volume from backup and archive jobs count; copies adds copy jobs. Versions from jobs the console may not see are left out. path= is the directory, name= the file; without name= the versions of the directory itself are listed.
+.PP
+Each line has ten tab separated columns: JobId, level, job type, start time, size, modification time, FileIndex, volumes, InChanger and MD5. json prints the result as one JSON line. Unlike .bvfs_versions no PathIds are needed.
 .PP
 \fBArguments\fR
 .PP
@@ -6243,6 +7572,14 @@ Include copy jobs (keyword)
 .TP
 .B "json"
 Print the JSON object as text (keyword)
+.PP
+\fBExamples\fR
+.TP
+.B "\&.ovfs_versions client=bareos\-fd path=/etc/ name=hosts"
+all versions of /etc/hosts
+.TP
+.B "\&.ovfs_versions client=bareos\-fd path=/etc/ name=fstab copies json"
+including copy jobs, as JSON
 .PP
 \fBOrigin\fR
 Onesimus extension. The Bareos Director does not know this command and answers "is an invalid command".

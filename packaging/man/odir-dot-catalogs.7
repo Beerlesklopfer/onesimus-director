@@ -8,7 +8,11 @@ odir\-dot\-catalogs \- \&.catalogs: List all catalog resources
 .fi
 .SH DESCRIPTION
 .PP
-List all catalog resources.
+Prints the names of all Catalog resources of the Director configuration, one per line, for completion of catalog=. Only catalogs allowed by the console's Catalog ACL appear. It takes no arguments, opens no database connection and changes nothing.
+.SH EXAMPLES
+.TP
+.B "\&.catalogs"
+list all visible catalogs
 .SH ORIGIN
 Bareos console command.
 .SH SEE ALSO

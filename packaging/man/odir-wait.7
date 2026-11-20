@@ -4,11 +4,13 @@
 odir\-wait \- wait: Wait until no jobs are running
 .SH SYNOPSIS
 .nf
-wait [jobid=<jobid>] [jobname=<jobname>] [ujobid=<ujobid>] [mount] [timeout=<timeout>] [catalog=<catalog>]
+wait [jobid=<jobid>] [jobname=<jobname>] [job=<job>] [ujobid=<ujobid>] [mount] [timeout=<timeout>] [catalog=<catalog>]
 .fi
 .SH DESCRIPTION
 .PP
-Wait until no jobs are running.
+Blocks the session until jobs have finished. Without an argument it waits until no job is running. With jobid=, jobname= or job= (a prefix of a running job's name suffices) or ujobid= it waits for that one job and then prints JobId and JobStatus; a JobId that is not running is looked up in the catalog at once. Only the first such argument counts.
+.PP
+With mount the command waits until a running job asks for a volume or a mount; timeout= limits that wait in seconds. Nothing is changed. The command is meant for scripts, for example after run ... yes and before evaluating the result.
 .SH ARGUMENTS
 .SS "wait"
 .TP
@@ -17,6 +19,9 @@ Job ID (number)
 .TP
 .B "jobname=<jobname>"
 Running job name prefix (text)
+.TP
+.B "job=<job>"
+Same as jobname= (text)
 .TP
 .B "ujobid=<ujobid>"
 Unique running job name (text)
@@ -29,6 +34,16 @@ Mount wait timeout in seconds (number)
 .TP
 .B "catalog=<catalog>"
 Catalog name (name; values from .catalogs)
+.SH EXAMPLES
+.TP
+.B "wait"
+return when no job is running any more
+.TP
+.B "wait jobid=42"
+wait for job 42 and print its final status
+.TP
+.B "wait mount timeout=300"
+wait up to five minutes for a mount request
 .SH ORIGIN
 Bareos console command.
 .SH SEE ALSO

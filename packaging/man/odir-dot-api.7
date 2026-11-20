@@ -8,7 +8,11 @@ odir\-dot\-api \- \&.api: Switch between different api modes
 .fi
 .SH DESCRIPTION
 .PP
-Switch between different api modes.
+Selects the reply format of the Director for this console session: mode 0 or off is text for humans (the default after login), mode 1 or on is terse text for scripts without table frames and catalog notices, mode 2 or json answers every command with a JSON\-RPC 2.0 object. Without an argument it acts like .api 1. The mode lasts until the next .api or the end of the session.
+.PP
+compact=yes after 2 or json prints the JSON on one line, any other value switches back to indented JSON; after 0 or 1 it is ignored. An unknown mode or more than two words leave the mode unchanged. In modes 1 and 2 every reply is framed by CMD_BEGIN, CMD_OK or CMD_FAILED and MAIN_PROMPT.
+.PP
+Over gRPC each ExecuteCommand call carries its own response_format and the Director does not remember .api; oconsole \-\-grpc remembers the mode chosen with .api and sends it with every following command, so .api behaves as over BNET.
 .SH ARGUMENTS
 .SS "\&.api"
 .TP
@@ -17,6 +21,16 @@ API mode (positional value; values: 0, 1, 2, off, on, json)
 .TP
 .B "compact=<yes|no>"
 Compact JSON (yes or no)
+.SH EXAMPLES
+.TP
+.B "\&.api 2"
+switch to JSON replies
+.TP
+.B "\&.api json compact=yes"
+JSON replies on a single line
+.TP
+.B "\&.api 0"
+back to text mode
 .SH ORIGIN
 Bareos console command.
 .SH SEE ALSO

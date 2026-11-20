@@ -8,7 +8,11 @@ odir\-dot\-types \- \&.types: List all job types
 .fi
 .SH DESCRIPTION
 .PP
-List all job types.
+Prints all job types the Director knows (Backup, Restore, Verify and so on). Programs fill selection lists with it, for example type= of .jobs or jobtype= of list jobs. The list is built into the Director; it takes no arguments and reads neither configuration nor catalog.
+.SH EXAMPLES
+.TP
+.B "\&.types"
+list all job types
 .SH ORIGIN
 Bareos console command.
 .SH SEE ALSO

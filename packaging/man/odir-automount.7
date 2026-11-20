@@ -8,12 +8,21 @@ automount [<on|off>]
 .fi
 .SH DESCRIPTION
 .PP
-Automount after label.
+Decides for the current console session whether a volume is mounted automatically after label. The setting starts switched on, applies only to this session and changes neither catalog, configuration nor daemons. There is no confirmation.
+.PP
+Only off (in any case) switches it off; every other word switches it on without an error. If not exactly one word follows, the Director asks "Turn on or off?" and evaluates the answer the same way.
 .SH ARGUMENTS
 .SS "automount"
 .TP
 .B "<on|off>"
 Switch on or off (positional value; values: on, off)
+.SH EXAMPLES
+.TP
+.B "automount off"
+label volumes without mounting them
+.TP
+.B "automount on"
+mount every newly labelled volume
 .SH ORIGIN
 Bareos console command.
 .SH SEE ALSO

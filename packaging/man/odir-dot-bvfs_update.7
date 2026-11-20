@@ -8,7 +8,9 @@ odir\-dot\-bvfs_update \- \&.bvfs_update: Update BVFS cache
 .fi
 .SH DESCRIPTION
 .PP
-Update BVFS cache.
+Fills the BVFS cache in the catalog (the tables PathHierarchy and PathVisibility and the flag Job.HasCache). Without this cache .bvfs_lsdirs and .bvfs_lsfiles find no directories. With jobid= only the listed jobs are prepared; without it all jobs without cache are, which can take long on large catalogs. Jobs that already have a cache are skipped. Backup data is not changed.
+.PP
+On success nothing is printed. BVFS is kept unchanged for compatibility with Bareos tools such as bareos\-webui; the OVFS commands need no cache.
 .SH ARGUMENTS
 .SS "\&.bvfs_update"
 .TP
@@ -17,6 +19,13 @@ Job IDs (text; several values separated by commas)
 .TP
 .B "catalog=<catalog>"
 Catalog name (name; values from .catalogs)
+.SH EXAMPLES
+.TP
+.B "\&.bvfs_update jobid=600,615,616"
+build the cache for one job chain
+.TP
+.B "\&.bvfs_update"
+build the cache for all jobs without one
 .SH ORIGIN
 Bareos console command.
 .SH SEE ALSO

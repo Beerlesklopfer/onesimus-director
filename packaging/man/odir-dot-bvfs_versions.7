@@ -8,7 +8,9 @@ odir\-dot\-bvfs_versions \- \&.bvfs_versions: List versions of a file
 .fi
 .SH DESCRIPTION
 .PP
-List versions of a file.
+Lists all backed up versions of one file of a client across all jobs, each with its volume, so an older version can be picked for .bvfs_restore by its FileId. Only versions stored on a volume count. jobid= is required but not evaluated (by Bareos convention 0); the directory is given by path= or pathid=, the file by fname= (also filename= or name=). copies includes versions from copy jobs; versions is accepted but has no effect.
+.PP
+Each line has seven tab separated columns: PathId, FileId, JobId, LStat, MD5, volume name and InChanger.
 .SH ARGUMENTS
 .SS "\&.bvfs_versions"
 .TP
@@ -44,6 +46,13 @@ Most rows (number)
 .TP
 .B "offset=<offset>"
 Rows to skip (number)
+.SH EXAMPLES
+.TP
+.B "\&.bvfs_versions jobid=0 client=bareos\-fd path=/etc/ fname=hosts"
+all versions of /etc/hosts
+.TP
+.B "\&.bvfs_versions jobid=0 client=bareos\-fd path=/etc/ fname=hosts copies"
+including versions from copy jobs
 .SH ORIGIN
 Bareos console command.
 .SH SEE ALSO

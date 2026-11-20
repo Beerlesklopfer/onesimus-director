@@ -8,7 +8,9 @@ odir\-dot\-jobstatus \- \&.jobstatus: List jobstatus information
 .fi
 .SH DESCRIPTION
 .PP
-List jobstatus information.
+Shows the table of job status codes from the catalog Status table: code letter (T, E, f, ...), description, severity, and exit level and exit status for finished states. Programs use it to explain the one\-letter status of list jobs. It only reads the catalog.
+.PP
+The filter must be attached to the command word (.jobstatus=T); a separate word is ignored and gives the whole table. catalog= selects a catalog; an unknown name is ignored and the first catalog is used.
 .SH ARGUMENTS
 .SS "\&.jobstatus"
 .TP
@@ -17,6 +19,13 @@ One JobStatus letter (text; the value may be left out)
 .TP
 .B "catalog=<catalog>"
 Catalog name (name; values from .catalogs)
+.SH EXAMPLES
+.TP
+.B "\&.jobstatus"
+show all job status codes
+.TP
+.B "\&.jobstatus=T"
+show only the row for code T
 .SH ORIGIN
 Bareos console command.
 .SH SEE ALSO

@@ -114,6 +114,15 @@ Catalog name (name; values from .catalogs)
 .TP
 .B "restore client=fd select current all done yes where=/tmp/r"
 restore everything of a client
+.TP
+.B "restore"
+open the selection menu
+.TP
+.B "restore jobid=42 client=bareos\-fd restorejob=RestoreFiles where=/tmp/bareos\-restores all done yes"
+restore all files of job 42 to a separate directory
+.TP
+.B "restore client=bareos\-fd restorejob=RestoreFiles file=/etc/fstab where=/tmp/bareos\-restores yes"
+restore a single file from the latest backup
 .SH ORIGIN
 Bareos console command.
 .SH SEE ALSO
