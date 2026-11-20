@@ -13,6 +13,8 @@ libc.workspace = true
 aquamarine.workspace = true
 
 [dev-dependencies]
+# tests/osd.rs: reads back the volume the SD wrote
+bareos-format.workspace = true
 # tests/ldap_o7.rs: a throwaway plugin CA and a signed OpenLDAP bundle at test time
 onesimus-plugins = { path = "../onesimus-plugins", features = ["test-ca"] }
 onesimus-proto-rs.workspace = true

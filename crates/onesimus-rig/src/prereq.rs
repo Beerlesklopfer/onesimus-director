@@ -50,6 +50,13 @@ impl Programs {
     /// `target_dir` is the cargo target directory with the profile
     /// (`<workspace>/target/debug`), where `odir` and `ofd` are expected.
     pub fn find(target_dir: &Path) -> Result<Programs, String> {
+        Programs::find_with_sd(target_dir, None)
+    }
+
+    /// Like [`Programs::find`], with the Storage Daemon `sd` taking
+    /// precedence over `ONESIMUS_RIG_SD` and [`DEFAULT_SD`]
+    /// ([`crate::RigOptions::sd`]).
+    pub fn find_with_sd(target_dir: &Path, sd: Option<PathBuf>) -> Result<Programs, String> {
         let mut missing = Vec::new();
         let mut need = |what: &str, path: Option<PathBuf>, hint: &str| -> PathBuf {
             match path {
@@ -72,7 +79,7 @@ impl Programs {
             env_path("ONESIMUS_RIG_OFD").or(Some(target_dir.join("ofd"))),
             "cargo build -p ofd (oder ONESIMUS_RIG_OFD setzen)",
         );
-        let sd_path = env_path("ONESIMUS_RIG_SD").unwrap_or_else(|| PathBuf::from(DEFAULT_SD));
+        let sd_path = sd.or_else(|| env_path("ONESIMUS_RIG_SD")).unwrap_or_else(|| PathBuf::from(DEFAULT_SD));
         let sd_is_bareos = sd_path.file_name().is_some_and(|n| n.to_string_lossy().starts_with("bareos-sd"));
         let sd = need(
             "Storage Daemon",

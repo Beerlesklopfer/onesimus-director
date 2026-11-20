@@ -144,6 +144,18 @@ pub fn auditing_resources(layout: &Layout, ports: Ports, catalog_user: &str) -> 
         .collect()
 }
 
+/// The Client resource with `Passive = yes` ([`crate::RigOptions::passive_client`]):
+/// the Director tells the SD to connect to the FD; written over the default.
+pub fn passive_client_resources(ports: Ports) -> Vec<(String, String)> {
+    vec![(
+        format!("client/{CLIENT}.conf"),
+        format!(
+            "Client {{\n  Name = {CLIENT}\n  Address = 127.0.0.1\n  FD Port = {fd}\n  Password = \"vfd-pw\"\n  Passive = yes\n}}\n",
+            fd = ports.fd
+        ),
+    )]
+}
+
 /// Creates the parent directory of `path` and writes `text`.
 fn write(path: &Path, text: &str) -> std::io::Result<()> {
     if let Some(parent) = path.parent() {

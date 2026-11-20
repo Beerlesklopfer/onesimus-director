@@ -38,4 +38,4 @@ pub mod process;
 mod rig;
 pub mod tree;
 
-pub use rig::{FdEndJob, JobRow, Rig, RigOptions, build_workspace_binaries};
+pub use rig::{FdEndJob, JobRow, Rig, RigOptions, build_workspace_binaries, build_workspace_packages};

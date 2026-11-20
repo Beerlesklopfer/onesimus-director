@@ -44,6 +44,13 @@ pub struct RigOptions {
     /// `Auditing = yes` in the Director; audit messages go to
     /// `dir-work/audit.log` ([`Rig::daemon_log`] with `audit`).
     pub auditing: bool,
+    /// The Storage Daemon to start; takes precedence over `ONESIMUS_RIG_SD`
+    /// (e.g. `target/debug/osd` in `tests/osd.rs`). `None`: the variable or
+    /// `/usr/sbin/bareos-sd`.
+    pub sd: Option<PathBuf>,
+    /// `Passive = yes` on the Client: the SD connects to the FD instead of
+    /// the FD to the SD (`passive client address=… port=… ssl=…`).
+    pub passive_client: bool,
 }
 
 impl RigOptions {
@@ -56,6 +63,8 @@ impl RigOptions {
             start_fd: true,
             extra_director: Vec::new(),
             auditing: false,
+            sd: None,
+            passive_client: false,
         }
     }
 }
@@ -139,7 +148,7 @@ impl Rig {
     /// Panics with a clear message if a prerequisite is missing (T-9); any
     /// other failure is returned and the partial rig is cleaned up.
     pub fn start(options: RigOptions) -> Result<Rig, String> {
-        let programs = match Programs::find(&crate::prereq::target_profile_dir()) {
+        let programs = match Programs::find_with_sd(&crate::prereq::target_profile_dir(), options.sd.clone()) {
             Ok(programs) => programs,
             Err(missing) => panic!("{missing}"),
         };
@@ -177,6 +186,10 @@ impl Rig {
         if self.options.auditing {
             let audit = crate::config::auditing_resources(&self.layout, self.ports, &cluster.user);
             crate::config::write_director_resources(&self.layout, &audit).map_err(io)?;
+        }
+        if self.options.passive_client {
+            let passive = crate::config::passive_client_resources(self.ports);
+            crate::config::write_director_resources(&self.layout, &passive).map_err(io)?;
         }
         crate::config::write_director_resources(&self.layout, &self.options.extra_director).map_err(io)?;
         self.catalog = Some(cluster);
@@ -395,15 +408,26 @@ impl Drop for Rig {
 /// Builds `odir` and `ofd` of the workspace with the cargo that runs the test,
 /// unless `ONESIMUS_RIG_NO_BUILD` is set (then the existing binaries are used).
 pub fn build_workspace_binaries() -> Result<(), String> {
+    build_workspace_packages(&["odir", "ofd"])
+}
+
+/// Builds the workspace `packages` (e.g. `osd-daemon` for the program `osd`)
+/// with the cargo that runs the test, unless `ONESIMUS_RIG_NO_BUILD` is set.
+pub fn build_workspace_packages(packages: &[&str]) -> Result<(), String> {
     if std::env::var_os("ONESIMUS_RIG_NO_BUILD").is_some() {
         return Ok(());
     }
     let cargo = std::env::var_os("CARGO").unwrap_or_else(|| "cargo".into());
     let workspace = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+    let mut args = vec!["build"];
+    for package in packages {
+        args.extend(["-p", package]);
+    }
+    let shown = format!("cargo {}", args.join(" "));
     let status = Command::new(cargo)
         .current_dir(&workspace)
-        .args(["build", "-p", "odir", "-p", "ofd"])
+        .args(&args)
         .status()
-        .map_err(|e| format!("cargo build -p odir -p ofd: {e}"))?;
-    if status.success() { Ok(()) } else { Err(format!("cargo build -p odir -p ofd: {status}")) }
+        .map_err(|e| format!("{shown}: {e}"))?;
+    if status.success() { Ok(()) } else { Err(format!("{shown}: {status}")) }
 }
