@@ -48,7 +48,7 @@ impl Kind {
         Self::FileSet, Self::Catalog, Self::Where, Self::PluginOptions,
     ];
     /// Normalized directive key (`bareos_config::raw::normalize_key`).
-    fn key(self) -> &'static str {
+    pub(crate) fn key(self) -> &'static str {
         match self {
             Self::Command => "commandacl",
             Self::Job => "jobacl",
@@ -628,7 +628,6 @@ User {Name=limited; CommandACL=*all*}"#).unwrap();
             name: "delete",
             aliases: &["remove"],
             description: "",
-            args: vec![],
             handler: never,
             dot_command: false,
         }];

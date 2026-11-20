@@ -262,6 +262,11 @@ fn every_command_and_subcommand_has_a_tool() {
     let rows = doc_rows();
     assert!(rows.len() > 250, "coverage table too short: {}", rows.len());
     for (command, sub, rpc) in &rows {
+        // A command without an RPC yet (`.grammar`, see NO_RPC_YET in
+        // crates/odir/src/grpc/coverage.rs) has no typed tool either.
+        if rpc == "–" {
+            continue;
+        }
         let covered = COVERAGE.iter().any(|(r, ..)| r == rpc) || NOT_APPLICABLE.iter().any(|(r, _)| r == rpc);
         assert!(covered, "{command} {sub} ({rpc}) has no MCP tool");
     }

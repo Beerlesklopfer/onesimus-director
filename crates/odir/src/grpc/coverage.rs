@@ -305,6 +305,13 @@ pub const NOT_APPLICABLE: &[(&str, &str)] = &[
     ("SetIp", "setip takes the address of a BNET console connection; the gRPC path has none"),
 ];
 
+/// Console commands without an RPC yet and why (they reach gRPC clients
+/// only through `ExecuteCommand`).
+pub const NO_RPC_YET: &[(&str, &str)] = &[
+    (".grammar", "GetGrammar needs a proto change in onesimus-proto, shared with the GUI; \
+        planned after the console completion (docs/plans/OCONSOLE-COMPLETION.md)"),
+];
+
 /// RPCs of a later stage: UNIMPLEMENTED in every build.
 pub const LATER: &[(&str, &str)] = &[
     ("RenameResource", "renaming with all references comes later (CONFIG-CRUD-GRPC.md, principle 9)"),
@@ -338,6 +345,9 @@ pub fn markdown_table() -> String {
     }
     for (command, rpc) in RESTORE_TREE {
         out.push_str(&format!("| Restore-Baum: `{command}` | – | `{rpc}` | {} |\n", state(rpc)));
+    }
+    for (command, why) in NO_RPC_YET {
+        out.push_str(&format!("| `{command}` | – | – | noch kein RPC: {why} |\n"));
     }
     out
 }
@@ -438,7 +448,7 @@ mod tests {
         assert_eq!(listed.len(), 88, "inventory should list the 88 Director commands");
         for command in listed.iter().chain(inventory["onesimus_extensions"].as_array().unwrap()) {
             let name = command["name"].as_str().unwrap();
-            if !commands.contains(name) {
+            if !commands.contains(name) && !NO_RPC_YET.iter().any(|(c, _)| *c == name) {
                 missing.push(format!("command {name}"));
             }
         }

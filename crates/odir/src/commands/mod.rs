@@ -18,6 +18,7 @@ pub mod configure;
 pub mod config_crud;
 pub mod sql;
 pub mod acl;
+pub mod grammar;
 pub mod catalog;
 pub mod extra;
 pub mod purge;

@@ -723,4 +723,5 @@ Unterbefehl `key=` steht für die Form `key=<wert>`, ein Wort für das Schlüsse
 | Restore-Baum: `quit` | – | `RestoreTreeAbort` | Entwicklungs-Build (`grpc-development`) |
 | Restore-Baum: `.help` | – | `RestoreTreeHelp` | Entwicklungs-Build (`grpc-development`) |
 | Restore-Baum: `?` | – | `RestoreTreeHelp` | Entwicklungs-Build (`grpc-development`) |
+| `.grammar` | – | – | noch kein RPC: GetGrammar needs a proto change in onesimus-proto, shared with the GUI; planned after the console completion (docs/plans/OCONSOLE-COMPLETION.md) |
 <!-- coverage:end -->

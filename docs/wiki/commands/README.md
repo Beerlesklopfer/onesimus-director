@@ -305,6 +305,7 @@ Diese Befehle gibt es nur im Onesimus Director.
 | [.acl](dot-acl.md) | ACLs von Konsolen anzeigen und ändern |
 | [.catalog](dot-catalog.md) | Katalogschema verwalten (Prüfung, Migration, …) |
 | [.config](dot-config.md) | Konfigurationsressourcen als Rohtext lesen, anlegen, ändern, löschen (wie die gRPC-CRUD-RPCs) |
+| [.grammar](dot-grammar.md) | Grammatik der erlaubten Konsolenbefehle (Vervollständigung in oconsole, Man-Pages) |
 
 ### OVFS: Restore-Bäume (Onesimus)
 

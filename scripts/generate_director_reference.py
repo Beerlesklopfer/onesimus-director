@@ -107,6 +107,27 @@ def definitions(source, handler):
     raise ValueError(f'Upstream handler definition not found: {handler}')
 
 
+def grammar_arguments(name):
+    """Argument keys and subcommand words of a command's console grammar
+    (docs/wiki/commands/console-grammar.json, written by the odir test
+    console_grammar_doc_is_current), in first-appearance order."""
+    grammar = json.loads((ROOT / 'docs/wiki/commands/console-grammar.json').read_text())
+    node = next((c for c in grammar['grammar']['commands'] if c['word'] == name), None)
+    names = []
+
+    def walk(node):
+        for arg in node['args']:
+            if not arg['positional'] and arg['name'] not in names:
+                names.append(arg['name'])
+        for sub in node['subs']:
+            if sub['word'] not in names:
+                names.append(sub['word'])
+            walk(sub)
+    if node:
+        walk(node)
+    return names
+
+
 def registry():
     path = 'crates/odir/src/command_registry.rs'
     text = clean((ROOT / path).read_text())
@@ -126,7 +147,7 @@ def registry():
             'handler': f'commands::{module}::{function}',
             'registry': location(path, text.count('\n', 0, match.start()) + 1),
             'implementation': location(handler_path, code.count('\n', 0, definition.start()) + 1),
-            'declared_arguments': re.findall(r'arg(?:_required|_enum|_resource|_int)?\("([^"\n]+)"', block),
+            'declared_arguments': grammar_arguments(name),
         }
         for key in [name] + re.findall(r'"([^"\n]+)"', aliases):
             if key in result:
@@ -235,6 +256,8 @@ def main():
             {'path': str(p.relative_to(ROOT)), 'sha256': hashlib.sha256(p.read_bytes()).hexdigest()}
             for p in sorted(set((ROOT / 'crates/odir/src/commands').glob('*.rs')) | {
                 ROOT / 'crates/odir/src/command_registry.rs',
+                ROOT / 'crates/odir/src/command_grammar.rs',
+                ROOT / 'crates/odir/src/grammar_table.rs',
                 ROOT / 'crates/odir/src/command_executor.rs',
                 ROOT / 'crates/bareos-bnet/src/debug.rs',
                 ROOT / 'crates/odir/src/main.rs',
