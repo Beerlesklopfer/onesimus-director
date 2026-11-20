@@ -1856,7 +1856,7 @@ Module `oconsole/src/mcp_write.rs`, `mcp_write/admin.rs` (weitere Befehle) und `
   → purge volume all pool=Full volstatus=Full,Used yes
 ```
 
-Ohne `dryrun` und ohne `confirm: true` wird nichts ausgeführt; `yes` hängt das Tool nur mit `confirm: true` an. Die Form stellt keine Rückfrage. Über gRPC fällt das Tool auf `ExecuteCommand` mit der Konsolenzeile zurück, bis das gemeinsame proto (`PurgeTargetCommand`) Felder für `all`, `volstatus` und `dryrun` hat (siehe [grpc-api](grpc-api.md#schreibende-rpcs-entwicklungs-build)).
+Ohne `dryrun` und ohne `confirm: true` wird nichts ausgeführt; `yes` hängt das Tool nur mit `confirm: true` an. Die Form stellt keine Rückfrage. Über gRPC nimmt das Tool die typisierte RPC `PurgeVolume` mit `all`, `volstatus` (Liste als Komma-Text) und `dryrun` (Felder 13–15 von `PurgeTargetCommand`, siehe [grpc-api](grpc-api.md#schreibende-rpcs-entwicklungs-build)).
 
 Die Befehle selbst beschreiben [run](commands/run.md), [rerun](commands/rerun.md), [cancel](commands/cancel.md), [wait](commands/wait.md), [restore](commands/restore.md), [label](commands/label.md), [relabel](commands/relabel.md), [mount](commands/mount.md), [unmount](commands/unmount.md), [release](commands/release.md), [update](commands/update.md), [prune](commands/prune.md), [purge](commands/purge.md), [delete](commands/delete.md), [truncate](commands/truncate.md), [enable](commands/enable.md), [disable](commands/disable.md), [configure](commands/configure.md), [reload](commands/reload.md), [setdebug](commands/setdebug.md) und [setbandwidth](commands/setbandwidth.md).
 

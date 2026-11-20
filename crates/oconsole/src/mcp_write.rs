@@ -1535,10 +1535,10 @@ mod tests {
         // dryrun and volstatus do not apply to the single forms, which still need confirm
         assert!(err("purge", json!({"kind":"volume","volume":"A","dryrun":true,"confirm":true})).contains("does not apply"));
         assert!(err("purge", json!({"kind":"volume","volume":"A","dryrun":true})).contains("confirm=true"));
-        // typed route: PurgeVolume with fields the shared proto lacks, so the console line is used
-        let (rpc, request) = mcp_typed::request("purge", &json!({"kind":"volumes","pool":"Full","volstatus":["Used"],"dryrun":true})).unwrap();
-        assert_eq!((rpc, &request), ("PurgeVolume", &json!({"pool":"Full","dryrun":true,"volstatus":["Used"],"all":true})));
-        assert!(mcp_typed::encode(rpc, &request).is_err(), "falls back to the console line");
+        // typed route: PurgeVolume with all/volstatus/dryrun (PurgeTargetCommand fields 13-15)
+        let (rpc, request) = mcp_typed::request("purge", &json!({"kind":"volumes","pool":"Full","volstatus":["Used","Full"],"dryrun":true})).unwrap();
+        assert_eq!((rpc, &request), ("PurgeVolume", &json!({"pool":"Full","dryrun":true,"volstatus":"Used,Full","all":true})));
+        assert!(mcp_typed::encode(rpc, &request).is_ok(), "the typed request encodes");
     }
 
     #[test]

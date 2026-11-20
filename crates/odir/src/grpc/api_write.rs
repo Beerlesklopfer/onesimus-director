@@ -667,10 +667,9 @@ fn prune_directory(r: &Req) -> Result<Plan, String> {
 /// needs `confirm = true` and only then gets `yes`. Result in API mode 2
 /// (`ActionResponse.result.purge`).
 ///
-/// Proto: PurgeTargetCommand (shared onesimus-proto) has `pool`, `allpools`
-/// and `confirm`, but no `all`, `volstatus` or `dryrun` yet; until they are
-/// added there, only callers of this JSON path (tests, a future proto)
-/// reach the bulk form.
+/// Proto: PurgeTargetCommand (shared onesimus-proto) fields `all` (13),
+/// `volstatus` (14, comma-separated) and `dryrun` (15), next to `pool`,
+/// `allpools` and `confirm`; JSON requests may also give `volstatus` as a list.
 fn purge_volumes_bulk(r: &Req) -> Result<Plan, String> {
     r.reject(&["volume", "jobid", "job", "client", "jobstatus", "action", "storage", "drive", "devicetype"],
         "PurgeVolume with all")?;
@@ -1388,6 +1387,29 @@ mod tests {
         let request = SetBandwidthLimitCommand { client: "fd".into(), ..Default::default() };
         let Value::Object(m) = typed::message_to_json(&input, &request.encode_to_vec()) else { panic!() };
         assert!(plan("SetBandwidth", &m).unwrap().unwrap_err().contains("limit is required"));
+    }
+
+    /// The bulk purge over the typed wire: PurgeTargetCommand fields
+    /// `all`, `volstatus`, `dryrun` (13-15) reach the plan; a single
+    /// PurgeVolume without `all` is unchanged.
+    #[test]
+    fn purge_volumes_bulk_on_the_wire() {
+        use onesimus_proto_rs::onesimus::director::api::PurgeTargetCommand;
+        use onesimus_proto_rs::typed;
+        use prost::Message;
+        let (input, _) = typed::registry().rpc_types(typed::DIRECTOR_API_SERVICE, "PurgeVolume").unwrap();
+        let line = |request: PurgeTargetCommand| {
+            let Value::Object(m) = typed::message_to_json(&input, &request.encode_to_vec()) else { panic!() };
+            plan("PurgeVolume", &m).unwrap().map(|p| p.line())
+        };
+        let dry = PurgeTargetCommand { all: true, pool: "Full".into(), volstatus: "Used,Full".into(), dryrun: true, ..Default::default() };
+        assert_eq!(line(dry).unwrap(), "purge volume all pool=Full volstatus=Used,Full dryrun");
+        let real = PurgeTargetCommand { all: true, allpools: true, confirm: true, ..Default::default() };
+        assert_eq!(line(real).unwrap(), "purge volume all allpools yes");
+        let unconfirmed = PurgeTargetCommand { all: true, pool: "Full".into(), ..Default::default() };
+        assert!(line(unconfirmed).is_err(), "the real run needs confirm");
+        let single = PurgeTargetCommand { volume: vec!["A".into()], confirm: true, ..Default::default() };
+        assert_eq!(line(single).unwrap(), "purge volume=A", "the single form answers its question in the dialog");
     }
 
     #[test]
