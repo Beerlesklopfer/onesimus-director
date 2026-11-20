@@ -190,6 +190,12 @@ impl<'a> Ua<'a> {
         self.segments.push(Segment::Info(text.into()));
     }
 
+    /// Sets the JSON object of the command result (`result` in API mode 2),
+    /// like a sub-result taken over by [`Ua::send_result`].
+    pub(crate) fn set_json(&mut self, json: serde_json::Value) {
+        self.json = Some(json);
+    }
+
     /// Append a result produced by not yet ported code (text, then errors
     /// or the other way round as recorded).
     pub fn send_result(&mut self, mut result: CommandResult) {

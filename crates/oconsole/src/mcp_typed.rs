@@ -414,6 +414,11 @@ pub fn request(tool: &str, arguments: &Value) -> Option<(&'static str, Value)> {
                 _ => r.copy(&["directory", "client", "recursive", "confirm"]).set("yes", json!(true)).done("PruneDirectory"),
             }
         }
+        // kind volumes (Onesimus bulk purge): PurgeVolume with all/volstatus/dryrun;
+        // the shared proto has no such fields yet, so the encoder falls back to
+        // the console line `purge volume all …` until it has them.
+        "purge" if r.str("kind") == Some("volumes") => r.copy(&["pool", "allpools", "dryrun", "confirm"])
+            .list("volstatus", "volstatus").set("all", json!(true)).done("PurgeVolume"),
         "purge" => {
             let rpc = match r.str("kind")? { "files" => "PurgeFiles", "jobs" => "PurgeJobs", "volume" => "PurgeVolume", _ => "PurgeQuota" };
             r.list("volume", "volume").copy(&["jobid", "job", "client", "pool", "jobstatus", "action", "storage", "allpools", "drive", "confirm"]).done(rpc)

@@ -1796,7 +1796,7 @@ Module `oconsole/src/mcp_write.rs`, `mcp_write/admin.rs` (weitere Befehle) und `
 - **Eine Zeile pro Aufruf.** Jedes Tool baut aus den Parametern genau eine Konsolenzeile und hängt `yes` an, wo der Befehl das Schlüsselwort kennt (`run`, `rerun`, `cancel`, `restore`, `label`, `relabel`, `prune`, `delete volume`, `truncate`). Es läuft im normalen Konsolenmodus (nicht unter der JSON-API), die Ausgabe ist der Text des Directors. Vor der Ausgabe steht die gesendete Zeile mit `> `.
 - **Prüfung vor dem Senden.** Namen von Ressourcen und Volumes: Buchstaben, Ziffern, `: . - _ /` und Leerzeichen im Inneren, höchstens 127 Zeichen, kein `/` am Anfang. Pfade, reguläre Ausdrücke und Kommentare werden in Anführungszeichen gesetzt (`\` und `"` maskiert), Steuerzeichen sind verboten. Zeitpunkte nur als `JJJJ-MM-TT HH:MM[:SS]`, JobIds als Ganzzahlen ≥ 1. Unbekannte Parameter, fehlende Pflichtangaben oder widersprüchliche Kombinationen liefern ein Tool-Ergebnis mit `isError: true`. In diesem Fall erreicht kein Befehl den Director.
 - **Rückfragen des Directors.** Ein Tool beantwortet nur die Fragen, die zu seinem Zweck gehören: `Purge (yes/no)?` bei `purge` und `Are you sure you want to delete …` bei `delete` mit `yes`; `add_volumes`, `sqlquery` und `run_query` beantworten die Fragen ihres Dialogs aus ihren Parametern (Anzahl/Name/Startnummer/Slot; SQL-Anweisung und Leerzeile; Nummer der Abfrage und ihre Parameter). Jede andere Frage (Auswahlliste bei einem unbekannten Namen, fehlender Restore-Job …) bricht oconsole mit `.` ab. Das Ergebnis ist dann `isError: true` mit dem Hinweis, welcher Parameter fehlt. Die Sitzung bleibt in jedem Fall bedienbar. Über gRPC beantwortet die typisierte RPC des Entwicklungs-Directors diese Fragen selbst; über `ExecuteCommand` (Produktions-Director) gibt es keine Rückfragen (siehe [Weg zum Director](#weg-zum-director)).
-- **Bestätigung.** `relabel_volume`, `prune`, `purge`, `delete` und `truncate` verlangen den Parameter `confirm: true`. Ohne ihn lautet die Antwort `<tool> is destructive: ask the user, then call it again with confirm=true`, und nichts wird ausgeführt. Diese Tools sowie `cancel_job` und `restore` tragen `destructiveHint: true`.
+- **Bestätigung.** `relabel_volume`, `prune`, `purge`, `delete` und `truncate` verlangen den Parameter `confirm: true`. Ohne ihn lautet die Antwort `<tool> is destructive: ask the user, then call it again with confirm=true`, und nichts wird ausgeführt. Einzige Ausnahme: die Vorschau `purge` mit `kind: "volumes"` und `dryrun: true` ändert nichts und braucht kein `confirm` (im Schema ist `confirm` bei `purge` deshalb nicht mehr Pflicht; der Builder prüft es für jede andere Form). Diese Tools sowie `cancel_job` und `restore` tragen `destructiveHint: true`.
 - **Gestartete Jobs.** Bei `run_job`, `rerun_job` und `restore` enthält das Ergebnis zusätzlich `structuredContent: {"jobids": [n, …]}` aus den Zeilen `Job queued. JobId=n`.
 - **Lange Befehle.** `wait_job` und große Restores belegen die Director-Sitzung, bis der Director antwortet. Läuft ein Befehl länger als das 30-Sekunden-Lesezeitlimit des Sockets, wartet oconsole einfach weiter.
 
@@ -1818,6 +1818,7 @@ Module `oconsole/src/mcp_write.rs`, `mcp_write/admin.rs` (weitere Befehle) und `
 | `update_pool` | `update pool=…` | idempotent | – |
 | `prune` | `prune files\|jobs [client= pool=]`, `prune volume=… \| volume all [pool=]`, `prune stats`, `prune directory=… client= [recursive]`, jeweils `yes` | destruktiv | ja |
 | `purge` | `purge files jobid=\|job=\|client=\|volume=`, `purge jobs client=\|volume=\|pool= [jobstatus=]`, `purge volume=… [volume=…] [jobstatus=] [action= storage= pool=\|allpools drive=]`, `purge quota [client=]` | destruktiv | ja |
+| `purge` (`kind: "volumes"`, Onesimus-Erweiterung) | `purge volume all pool=…\|allpools [volstatus=…,…] dryrun\|yes` | destruktiv; Vorschau ändert nichts | nur ohne `dryrun` |
 | `delete` | `delete volume=… [pool=] yes`, `delete pool=…`, `delete jobid=1,2,…`, `delete storage=…` | destruktiv | ja |
 | `truncate` | `truncate volstatus=Purged [storage= pool= volume= drive=] yes` | destruktiv | ja |
 | `enable`, `disable` | `enable\|disable job=\|client=\|schedule=…` | idempotent | – |
@@ -1845,6 +1846,17 @@ Module `oconsole/src/mcp_write.rs`, `mcp_write/admin.rs` (weitere Befehle) und `
 | `session_option` | `autodisplay\|automount\|trace on\|off` | idempotent | – |
 | `restore_tree_*` | interaktive Dateiauswahl, siehe unten | – | – |
 | `execute` (nur Entwicklungs-Build) | beliebige einzelne Zeile (nicht `quit`, `.api`, `@…`) | destruktiv | – |
+
+**Mehrere Volumes purgen** (`purge` mit `kind: "volumes"`, Onesimus-Erweiterung, [purge](commands/purge.md#mehrere-volumes-auf-einmal-onesimus-erweiterung)): Parameter `pool` oder `allpools: true` (genau eines), `volstatus` (Liste aus `Full`, `Used`, `Error`, `Append`, `Archive`, `Disabled`, `Read-Only`; Vorgabe `Full`, `Used`, `Error`), `dryrun`. Ablauf für einen Agenten: zuerst die Vorschau, dem Nutzer zeigen, erst nach seiner Zustimmung der echte Lauf.
+
+```text
+{"name":"purge","arguments":{"kind":"volumes","pool":"Full","dryrun":true}}
+  → purge volume all pool=Full dryrun          (kein confirm nötig, ändert nichts)
+{"name":"purge","arguments":{"kind":"volumes","pool":"Full","volstatus":["Full","Used"],"confirm":true}}
+  → purge volume all pool=Full volstatus=Full,Used yes
+```
+
+Ohne `dryrun` und ohne `confirm: true` wird nichts ausgeführt; `yes` hängt das Tool nur mit `confirm: true` an. Die Form stellt keine Rückfrage. Über gRPC fällt das Tool auf `ExecuteCommand` mit der Konsolenzeile zurück, bis das gemeinsame proto (`PurgeTargetCommand`) Felder für `all`, `volstatus` und `dryrun` hat (siehe [grpc-api](grpc-api.md#schreibende-rpcs-entwicklungs-build)).
 
 Die Befehle selbst beschreiben [run](commands/run.md), [rerun](commands/rerun.md), [cancel](commands/cancel.md), [wait](commands/wait.md), [restore](commands/restore.md), [label](commands/label.md), [relabel](commands/relabel.md), [mount](commands/mount.md), [unmount](commands/unmount.md), [release](commands/release.md), [update](commands/update.md), [prune](commands/prune.md), [purge](commands/purge.md), [delete](commands/delete.md), [truncate](commands/truncate.md), [enable](commands/enable.md), [disable](commands/disable.md), [configure](commands/configure.md), [reload](commands/reload.md), [setdebug](commands/setdebug.md) und [setbandwidth](commands/setbandwidth.md).
 

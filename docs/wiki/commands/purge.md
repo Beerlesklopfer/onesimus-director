@@ -42,6 +42,7 @@ purge jobs [client=<client> | volume=<volume> | pool=<pool>] [jobstatus=<status>
 purge volume[=<volume>] [volume=<volume> …] [jobstatus=<status>]
 purge volume[=<volume>] action=<aktion> [storage=<storage>] [pool=<pool> | allpools] [devicetype=<typ>] [drive=<n>]
 purge quota [client=<client>]
+purge volume all pool=<pool> | allpools [volstatus=<status>[,<status>…]] dryrun | yes   # Onesimus-Erweiterung
 ```
 
 ## Argumente
@@ -371,6 +372,80 @@ parity-c030-pool@bareos-dir[25.1.2+onesimus.0.2.0]>
 | `No Volumes found to perform <aktion> action.` | Kein Volume im Status `Purged` mit dieser ActionOnPurge. |
 | `Error: Pool resource "<name>" does not exist.` | Unbekannter Pool bei `action=`; es folgt die Pool-Auswahl. |
 | `Storage resource "<name>": not found` | Unbekannter Storage bei `action=`; es folgt die Storage-Auswahl. |
+
+## Mehrere Volumes auf einmal (Onesimus-Erweiterung)
+
+**Nicht in Bareos.** `bareos-dir` kennt diese Form nicht; Entscheidung des Nutzers vom 20.11.2026 („Ja, mit Vorschau“).
+
+```text
+purge volume all pool=<pool> | allpools [volstatus=<status>[,<status>…]] dryrun | yes
+```
+
+Purgt alle Volumes eines Pools (oder aller Pools) mit dem gewählten VolStatus auf einmal. Wie jedes `purge` ignoriert das die Aufbewahrungszeiten und löscht die Job- und Dateieinträge aus dem Katalog. Deshalb gibt es immer zuerst eine Vorschau:
+
+| Argument | Bedeutung |
+|---|---|
+| `all` | Das bloße Wort wählt die Erweiterung. `action=all` ist etwas anderes (ActionOnPurge) und bleibt unverändert. |
+| `pool=<pool>` \| `allpools` | Genau eines von beiden ist Pflicht. Ein Pool, den die Pool-ACL der Konsole nicht erlaubt, gilt als unbekannt; bei `allpools` fallen seine Volumes weg. |
+| `volstatus=<liste>` | Nur Volumes mit diesem VolStatus, durch Komma getrennt: `Full`, `Used`, `Error`, `Append`, `Archive`, `Disabled`, `Read-Only`. Ohne Angabe: `Full`, `Used`, `Error`. Volumes im Status `Purged` oder `Recycle` werden nie angefasst. |
+| `dryrun` | Vorschau: zeigt je Volume, was geschähe; ändert nichts. |
+| `yes` | Purgt. Genau eines von `dryrun` und `yes` ist Pflicht; ohne beide lehnt der Director ab und fragt **nicht** nach. |
+
+Andere Argumente (`volume=<name>`, `action=`, `jobstatus=`, `storage=` …) werden mit dieser Form abgelehnt.
+
+**Sicherheit.** Jedes Volume läuft mit `yes` durch genau denselben Code wie `purge volume=<name> yes`, mit allen Prüfungen. Lehnt diese Form ein Volume ab, überspringt die Sammelform es mit dem Grund; sie umgeht keine Prüfung. Die Vorschau stellt dieselben Prüfungen, ohne etwas zu schreiben. Mögliche Gründe für `skipped`:
+
+- `Volume "<v>" has VolStatus "<s>" and cannot be purged. The VolStatus must be: Append, Full, Used or Error to be purged.` – z. B. bei `volstatus=Archive`, `Disabled`, `Read-Only`.
+- `Volume "<v>" holds the latest Full chain of client "<c>" FileSet "<f>" (JobIds …); not purged.` – die jüngste Kette jedes Clients bleibt immer erhalten (siehe [Betrieb](../betrieb-odir.md#autoprune-am-job-ende)).
+- `Cannot determine whether volume "<v>" holds the latest Full chain of a client (…); not purged.` – Katalogfehler bei der Prüfung.
+- `in use by running job <JobIds>` – ein laufender Job hat schon auf das Volume geschrieben (JobMedia). Ein Volume, auf das ein laufender Job erst schreiben wird oder das nur zum Schreiben gemountet ist, erkennt der Director nicht; dafür sorgt die Statusauswahl (`Append` ist nicht in der Vorgabe).
+- `no longer in pool <p>`, `VolStatus changed to <s>` – das Volume hat sich zwischen Auswahl und Purge geändert.
+- ein Katalogfehler beim Löschen (das Volume bleibt unverändert, die Transaktion wird zurückgerollt).
+
+Die Zahlen je Volume stammen aus dem Katalog: Jobs = verschiedene JobIds in JobMedia, Dateien = Summe von `Job.JobFiles` dieser Jobs, Bytes = `Media.VolBytes`. Bei `yes` sind es die Zahlen vor dem Purge.
+
+**Ausgabe (Text, `.api 1`).** Nach Warnung und Katalogauswahl eine Zeile je Volume und eine Zusammenfassung (Beispiel nach den Tests):
+
+```text
+*purge volume all pool=Full dryrun
+…
+Volume "Full-A" (Pool Full, Full, 2 jobs, 12 files): would purge
+Volume "Full-B" (Pool Full, Full, 1 jobs, 5 files): skipped: Volume "Full-B" holds the latest Full chain of client "fd1" FileSet "fs" (JobIds 3); not purged.
+Volume "Full-C" (Pool Full, Used, 1 jobs, 5 files): skipped: in use by running job 5
+Volume "Full-D" (Pool Full, Error, 0 jobs, 0 files): would purge
+Dry run: 4 volumes selected, 2 would be purged, 2 skipped. Nothing was changed.
+*purge volume all pool=Full yes
+…
+Volume "Full-A" (Pool Full, Full, 2 jobs, 12 files): purged
+…
+4 volumes selected, 2 purged, 2 skipped.
+```
+
+**Ausgabe unter `.api 2`.** Die Einzelformen behalten ihr Ergebnis (leeres `result`). Die Sammelform liefert:
+
+```json
+{"purge": {"mode": "dryrun", "pool": "Full", "allpools": false, "volstatus": ["Full", "Used", "Error"],
+  "volumes": [{"volume": "Full-A", "pool": "Full", "volstatus": "Full", "jobs": 2, "files": 12, "bytes": 1000,
+               "action": "would_purge", "reason": null}],
+  "summary": {"selected": 1, "purged": 1, "skipped": 0}}}
+```
+
+`mode` ist `dryrun` oder `yes`, `pool` ist `null` bei `allpools`, `action` je Volume `would_purge`, `purged` oder `skipped` (dann mit `reason`). `summary.purged` zählt bei `dryrun` die Volumes, die purgt würden. Fehler (unbekannter Pool, fehlendes `dryrun`/`yes`, Berechtigung) kommen im üblichen Fehlerumschlag.
+
+**Rechte.** Wie jedes `purge` braucht die Form vollen Zugriff auf Clients, Jobs, Pools und Storages (`Permission denied: need full pool permission.`); zusätzlich prüft sie die Pool-ACL je Pool.
+
+**gRPC und MCP.** `PurgeVolume` mit `all = true` (siehe [grpc-api](../grpc-api.md#schreibende-rpcs-entwicklungs-build)); MCP-Tool `purge` mit `kind: "volumes"`, `dryrun: true` ohne `confirm`, der echte Lauf mit `confirm: true` (siehe [MCP](../mcp.md)).
+
+Zusätzliche Fehlermeldungen:
+
+| Meldung | Ursache und Abhilfe |
+|---|---|
+| `purge volume all: give exactly one of dryrun (preview, changes nothing) or yes (purge); this form never asks for confirmation.` | Weder oder beide von `dryrun` und `yes`. |
+| `purge volume all: give exactly one of pool=<pool> or allpools.` | Weder oder beide von `pool=` und `allpools`. |
+| `purge volume all: invalid volstatus "<s>"; allowed: …` | Unbekannter oder nicht zulässiger VolStatus (`Purged`, `Recycle`). |
+| `purge volume all: argument "<a>" does not apply to this form.` | Argument der Einzelformen. |
+| `purge volume all: "all" cannot be combined with volume=<name>.` | `volume=<name>` zusammen mit `all`. |
+| `Could not find Pool "<p>": ERR=Pool record not found in Catalog.` | Pool unbekannt oder durch die Pool-ACL verboten. |
 
 ## Siehe auch
 

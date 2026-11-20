@@ -149,6 +149,8 @@ const CANCEL_STATES: &[&str] = &["created", "blocked", "waiting", "running"];
 const VOLSTATUS: &[&str] = &[
     "Append", "Archive", "Disabled", "Full", "Used", "Cleaning", "Recycle", "Read-Only", "Error",
 ];
+/// VolStatus values of `purge` kind `volumes` (Onesimus bulk purge).
+const BULK_VOLSTATUS: &[&str] = &["Full", "Used", "Error", "Append", "Archive", "Disabled", "Read-Only"];
 const ENABLED: &[&str] = &["yes", "no", "archived"];
 const ACTION_ON_PURGE: &[&str] = &["None", "Truncate"];
 const RESOURCE_KINDS: &[&str] = &["job", "client", "schedule"];
@@ -378,22 +380,34 @@ pub fn tools() -> Vec<Value> {
         tool("purge", "Purge catalog records",
             "Remove catalog records regardless of retention (bconsole 'purge'; the Director's \
              'Purge (yes/no)?' is answered yes): files of a job/client/volume, jobs of a client/volume/pool, \
-             volumes (optionally with action truncate), or quota. Requires confirm=true.",
+             volumes (optionally with action truncate), or quota. Requires confirm=true. \
+             kind 'volumes' (Onesimus extension, not in Bareos): purge every volume of a pool (or of all \
+             pools) with the selected VolStatus (default Full, Used, Error) through the checks of a single \
+             volume purge; refused volumes are skipped with the reason. Always run it with dryrun=true first \
+             (no confirm needed, changes nothing) and show the preview to the user; the real run needs \
+             confirm=true.",
             json!({
-                "kind": e(&["files", "jobs", "volume", "quota"], "what to purge"),
+                "kind": e(&["files", "jobs", "volume", "volumes", "quota"],
+                    "what to purge; volumes: several volumes at once (Onesimus extension)"),
                 "jobid": i(1, "files: of this job"),
                 "job": s("files: of this job name"),
                 "client": s("files/jobs/quota: of this client"),
                 "volume": { "type": "array", "items": { "type": "string" }, "minItems": 1,
                     "description": "files/jobs: of this volume (one); volume: these volumes" },
-                "pool": s("jobs: of this pool; volume with action: volumes of this pool (with action: pool or allpools is required)"),
+                "pool": s("jobs: of this pool; volume with action: volumes of this pool (with action: pool or allpools is required); \
+                    volumes: the pool (or allpools)"),
                 "jobstatus": s("jobs/volume: only jobs with these status letters, comma-separated, e.g. E,f"),
                 "action": e(&["truncate", "all"], "volume: run ActionOnPurge for purged volumes"),
                 "storage": s("with action: storage (needed when the Director has more than one Storage, else it asks)"),
-                "allpools": b("with action: volumes of all pools"),
+                "allpools": b("with action, or kind volumes: volumes of all pools"),
                 "drive": i(0, "with action: drive"),
-                "confirm": confirm()
-            }), &["kind", "confirm"], annotations(false, true, true)),
+                "volstatus": { "type": "array", "items": { "type": "string", "enum": BULK_VOLSTATUS }, "minItems": 1,
+                    "description": "volumes: only volumes with this VolStatus (default Full, Used, Error)" },
+                "dryrun": b("volumes: preview only, changes nothing, needs no confirm"),
+                "confirm": { "type": "boolean", "const": true,
+                    "description": "must be true: the user explicitly confirmed this destructive action \
+                        (not needed for kind volumes with dryrun=true)" }
+            }), &["kind"], annotations(false, true, true)),
         tool("delete", "Delete catalog entries",
             "Delete a volume (and its jobs), a pool, jobs or a storage entry from the catalog \
              (bconsole 'delete'). Requires confirm=true.",
@@ -1041,7 +1055,45 @@ fn jobstatus(value: &str) -> Result<String, String> {
     }
 }
 
+/// `purge` kind `volumes`: the Onesimus bulk form `purge volume all
+/// pool=<p>|allpools [volstatus=<s>,…] dryrun|yes`. The dry run needs no
+/// confirm; `yes` is added only with confirm=true. Never a question.
+fn purge_volumes(a: &Args) -> Result<Plan, String> {
+    for key in ["jobid", "job", "client", "volume", "jobstatus", "action", "storage", "drive"] {
+        if a.has(key) {
+            return Err(format!("{key} does not apply to purge volumes"));
+        }
+    }
+    let mut p = vec!["purge".to_string(), "volume".to_string(), "all".to_string()];
+    match (a.text("pool")?, a.flag("allpools")?) {
+        (Some(pool), false) => p.push(name_arg("pool", &pool)?),
+        (None, true) => p.push("allpools".into()),
+        _ => return Err("purge volumes needs exactly one of pool or allpools".into()),
+    }
+    if let Some(statuses) = a.strings("volstatus")? {
+        let mut canonical: Vec<&str> = Vec::new();
+        for status in &statuses {
+            let found = BULK_VOLSTATUS.iter().find(|v| v.eq_ignore_ascii_case(status))
+                .ok_or_else(|| format!("volstatus must be of: {}", BULK_VOLSTATUS.join(", ")))?;
+            if !canonical.contains(found) {
+                canonical.push(found);
+            }
+        }
+        p.push(format!("volstatus={}", canonical.join(",")));
+    }
+    if a.flag("dryrun")? {
+        p.push("dryrun".into());
+    } else {
+        a.confirmed()?;
+        p.push("yes".into());
+    }
+    Ok(Plan::new(p.join(" ")))
+}
+
 fn purge(a: &Args) -> Result<Plan, String> {
+    if a.choice("kind", &["volumes"]).ok().flatten().is_some() {
+        return purge_volumes(a);
+    }
     a.confirmed()?;
     let kind = a.choice("kind", &["files", "jobs", "volume", "quota"])?.ok_or("kind is required")?;
     let volumes = a.strings("volume")?;
@@ -1052,7 +1104,8 @@ fn purge(a: &Args) -> Result<Plan, String> {
         "volume" => &["volume", "jobstatus", "action", "storage", "pool", "allpools", "drive"],
         _ => &["client"],
     };
-    for key in ["jobid", "job", "client", "volume", "pool", "jobstatus", "action", "storage", "allpools", "drive"] {
+    for key in ["jobid", "job", "client", "volume", "pool", "jobstatus", "action", "storage", "allpools", "drive",
+                "volstatus", "dryrun"] {
         if a.has(key) && a.map.get(key) != Some(&Value::Bool(false)) && !allowed.contains(&key) {
             return Err(format!("{key} does not apply to purge {kind}"));
         }
@@ -1343,7 +1396,8 @@ mod tests {
             for r in t["inputSchema"]["required"].as_array().unwrap() {
                 assert!(t["inputSchema"]["properties"].get(r.as_str().unwrap()).is_some(), "{name}: {r}");
             }
-            let needs_confirm = ["relabel_volume", "prune", "purge", "delete", "truncate"].contains(&name);
+            // purge: confirm is checked by the builder (kind volumes with dryrun needs none)
+            let needs_confirm = ["relabel_volume", "prune", "delete", "truncate"].contains(&name);
             assert_eq!(t["inputSchema"]["required"].as_array().unwrap().contains(&json!("confirm")), needs_confirm, "{name}");
         }
         assert_eq!(tools.iter().filter(|t| t["annotations"]["readOnlyHint"] == true).count(), 1, "only wait_job reads");
@@ -1448,6 +1502,43 @@ mod tests {
         assert_eq!(line("setdebug", json!({"level":0,"target":"dir"})), "setdebug level=0 dir");
         assert_eq!(line("setbandwidth", json!({"limit":1000,"client":"fd"})), "setbandwidth limit=1000 client=fd");
         assert_eq!(line("setbandwidth", json!({"limit":0,"jobid":4})), "setbandwidth limit=0 jobid=4");
+    }
+
+    /// purge kind volumes: the Onesimus bulk form `purge volume all …`.
+    #[test]
+    fn purge_volumes_lines_and_confirm() {
+        // the dry run needs no confirm
+        assert_eq!(line("purge", json!({"kind":"volumes","pool":"Full","dryrun":true})), "purge volume all pool=Full dryrun");
+        assert_eq!(line("purge", json!({"kind":"volumes","allpools":true,"volstatus":["full","Read-Only","Full"],"dryrun":true})),
+            "purge volume all allpools volstatus=Full,Read-Only dryrun");
+        assert_eq!(line("purge", json!({"kind":"volumes","pool":"My Pool","volstatus":"Error","dryrun":true})),
+            "purge volume all pool=\"My Pool\" volstatus=Error dryrun");
+        // the real run needs confirm=true; only then `yes`
+        for args in [json!({"kind":"volumes","pool":"Full"}), json!({"kind":"volumes","pool":"Full","dryrun":false}),
+                     json!({"kind":"volumes","pool":"Full","confirm":false})] {
+            assert!(err("purge", args.clone()).contains("confirm=true"), "{args}");
+        }
+        assert_eq!(line("purge", json!({"kind":"volumes","pool":"Full","volstatus":["Used"],"confirm":true})),
+            "purge volume all pool=Full volstatus=Used yes");
+        let p = plan("purge", &json!({"kind":"volumes","pool":"Full","confirm":true})).unwrap().unwrap();
+        assert_eq!((p.yes_to.len(), p.grpc_suffix, p.dialog), (0, None, false), "never a question, no second yes");
+        // exactly one of pool / allpools; nothing of the single forms; valid statuses
+        assert!(err("purge", json!({"kind":"volumes","dryrun":true})).contains("exactly one of pool or allpools"));
+        assert!(err("purge", json!({"kind":"volumes","pool":"P","allpools":true,"dryrun":true})).contains("exactly one"));
+        for key in ["volume", "action", "jobstatus", "storage"] {
+            let mut args = json!({"kind":"volumes","pool":"P","dryrun":true});
+            args[key] = json!("x");
+            assert!(err("purge", args).contains("does not apply to purge volumes"), "{key}");
+        }
+        assert!(err("purge", json!({"kind":"volumes","pool":"P","volstatus":["Purged"],"dryrun":true})).contains("volstatus"));
+        assert!(err("purge", json!({"kind":"volumes","pool":"P;x","dryrun":true})).contains("not a valid name"));
+        // dryrun and volstatus do not apply to the single forms, which still need confirm
+        assert!(err("purge", json!({"kind":"volume","volume":"A","dryrun":true,"confirm":true})).contains("does not apply"));
+        assert!(err("purge", json!({"kind":"volume","volume":"A","dryrun":true})).contains("confirm=true"));
+        // typed route: PurgeVolume with fields the shared proto lacks, so the console line is used
+        let (rpc, request) = mcp_typed::request("purge", &json!({"kind":"volumes","pool":"Full","volstatus":["Used"],"dryrun":true})).unwrap();
+        assert_eq!((rpc, &request), ("PurgeVolume", &json!({"pool":"Full","dryrun":true,"volstatus":["Used"],"all":true})));
+        assert!(mcp_typed::encode(rpc, &request).is_err(), "falls back to the console line");
     }
 
     #[test]

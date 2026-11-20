@@ -43,7 +43,7 @@ fn with_commas(v: u64) -> String {
 }
 
 /// JobIds of the jobs the Director is running (foreach_jcr).
-fn running_jobids(ctx: &ExecContext) -> Vec<u32> {
+pub(crate) fn running_jobids(ctx: &ExecContext) -> Vec<u32> {
     ctx.job_manager.as_ref()
         .and_then(|m| m.lock().ok().map(|m| m.running_jobs().into_iter().map(|(id, _, _)| id).collect()))
         .unwrap_or_default()
@@ -419,15 +419,24 @@ pub(crate) fn purge_quota_from_client(ua: &mut Ua, db: &dyn Db, client: &str) {
     ua.info_msg(format!("Purged quota for Client \"{client}\"\n"));
 }
 
-/// ua_purge.cc PurgeJobsFromVolume(); true when the volume is purged.
-pub(crate) fn purge_jobs_from_volume(ua: &mut Ua, ast: &CommandAst, db: &dyn Db, volume: &mut Volume, force: bool) -> bool {
+/// The checks PurgeJobsFromVolume() makes before it counts the jobs: the
+/// VolStatus (Append, Full, Used or Error) and, Onesimus (protect.rs), the
+/// latest chain of every client. True (reason sent as an error) when the
+/// volume must not be purged. Shared by `purge volume=<name>` and the bulk
+/// form `purge volume all …` (its dry run included), so both refuse alike.
+pub(crate) fn volume_purge_refused(ua: &mut Ua, db: &dyn Db, volume: &Volume) -> bool {
     if !matches!(volume.status.as_str(), "Append" | "Full" | "Used" | "Error") {
         ua.error_msg(format!("\nVolume \"{}\" has VolStatus \"{}\" and cannot be purged.\n\
             The VolStatus must be: Append, Full, Used or Error to be purged.\n", volume.name, volume.status));
-        return false;
+        return true;
     }
     // Onesimus (protect.rs): never a volume of the latest chain, `yes` or not.
-    if !volume_unprotected(ua, db, volume.media_id, &volume.name, "purged") {
+    !volume_unprotected(ua, db, volume.media_id, &volume.name, "purged")
+}
+
+/// ua_purge.cc PurgeJobsFromVolume(); true when the volume is purged.
+pub(crate) fn purge_jobs_from_volume(ua: &mut Ua, ast: &CommandAst, db: &dyn Db, volume: &mut Volume, force: bool) -> bool {
+    if volume_purge_refused(ua, db, volume) {
         return false;
     }
     let Some(statuses) = job_status_selection(ast) else {

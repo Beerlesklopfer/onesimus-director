@@ -3615,7 +3615,7 @@
     {
       "name": "purge",
       "title": "Purge catalog records",
-      "description": "Remove catalog records regardless of retention (bconsole 'purge'; the Director's 'Purge (yes/no)?' is answered yes): files of a job/client/volume, jobs of a client/volume/pool, volumes (optionally with action truncate), or quota. Requires confirm=true.",
+      "description": "Remove catalog records regardless of retention (bconsole 'purge'; the Director's 'Purge (yes/no)?' is answered yes): files of a job/client/volume, jobs of a client/volume/pool, volumes (optionally with action truncate), or quota. Requires confirm=true. kind 'volumes' (Onesimus extension, not in Bareos): purge every volume of a pool (or of all pools) with the selected VolStatus (default Full, Used, Error) through the checks of a single volume purge; refused volumes are skipped with the reason. Always run it with dryrun=true first (no confirm needed, changes nothing) and show the preview to the user; the real run needs confirm=true.",
       "inputSchema": {
         "type": "object",
         "properties": {
@@ -3625,9 +3625,10 @@
               "files",
               "jobs",
               "volume",
+              "volumes",
               "quota"
             ],
-            "description": "what to purge"
+            "description": "what to purge; volumes: several volumes at once (Onesimus extension)"
           },
           "jobid": {
             "type": "integer",
@@ -3652,7 +3653,7 @@
           },
           "pool": {
             "type": "string",
-            "description": "jobs: of this pool; volume with action: volumes of this pool (with action: pool or allpools is required)"
+            "description": "jobs: of this pool; volume with action: volumes of this pool (with action: pool or allpools is required); volumes: the pool (or allpools)"
           },
           "jobstatus": {
             "type": "string",
@@ -3672,22 +3673,42 @@
           },
           "allpools": {
             "type": "boolean",
-            "description": "with action: volumes of all pools"
+            "description": "with action, or kind volumes: volumes of all pools"
           },
           "drive": {
             "type": "integer",
             "minimum": 0,
             "description": "with action: drive"
           },
+          "volstatus": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": [
+                "Full",
+                "Used",
+                "Error",
+                "Append",
+                "Archive",
+                "Disabled",
+                "Read-Only"
+              ]
+            },
+            "minItems": 1,
+            "description": "volumes: only volumes with this VolStatus (default Full, Used, Error)"
+          },
+          "dryrun": {
+            "type": "boolean",
+            "description": "volumes: preview only, changes nothing, needs no confirm"
+          },
           "confirm": {
             "type": "boolean",
             "const": true,
-            "description": "must be true: the user explicitly confirmed this destructive action"
+            "description": "must be true: the user explicitly confirmed this destructive action (not needed for kind volumes with dryrun=true)"
           }
         },
         "required": [
-          "kind",
-          "confirm"
+          "kind"
         ],
         "additionalProperties": false
       },

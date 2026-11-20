@@ -661,7 +661,52 @@ fn prune_directory(r: &Req) -> Result<Plan, String> {
     Ok(Plan::new(l))
 }
 
+/// PurgeVolume with `all = true`: the Onesimus bulk form
+/// `purge volume all pool=<p>|allpools [volstatus=<s>,…] dryrun|yes`
+/// (commands/purge_bulk.rs). The dry run needs no confirm; the real run
+/// needs `confirm = true` and only then gets `yes`. Result in API mode 2
+/// (`ActionResponse.result.purge`).
+///
+/// Proto: PurgeTargetCommand (shared onesimus-proto) has `pool`, `allpools`
+/// and `confirm`, but no `all`, `volstatus` or `dryrun` yet; until they are
+/// added there, only callers of this JSON path (tests, a future proto)
+/// reach the bulk form.
+fn purge_volumes_bulk(r: &Req) -> Result<Plan, String> {
+    r.reject(&["volume", "jobid", "job", "client", "jobstatus", "action", "storage", "drive", "devicetype"],
+        "PurgeVolume with all")?;
+    let mut l = Line::new("purge volume all");
+    match (r.text("pool")?, r.flag("allpools")) {
+        (Some(pool), false) => { l.kv("pool", pool); }
+        (None, true) => { l.word("allpools"); }
+        _ => return Err("PurgeVolume with all needs exactly one of pool or allpools".into()),
+    }
+    let statuses: Vec<String> = match r.0.get("volstatus") {
+        Some(Value::Array(_)) => r.texts("volstatus")?,
+        _ => r.text("volstatus")?.map(|s| s.split(',').map(str::to_string).collect()).unwrap_or_default(),
+    };
+    if !statuses.is_empty() {
+        let allowed = crate::commands::purge_bulk::VOLSTATUS;
+        let mut canonical = Vec::new();
+        for status in &statuses {
+            let found = allowed.iter().find(|a| a.eq_ignore_ascii_case(status.trim()))
+                .ok_or_else(|| format!("volstatus must be of {}", allowed.join(", ")))?;
+            canonical.push(*found);
+        }
+        l.kv("volstatus", canonical.join(","));
+    }
+    if r.flag("dryrun") {
+        l.word("dryrun");
+    } else {
+        r.confirmed("PurgeVolume")?;
+        l.word("yes");
+    }
+    Ok(Plan::new(l).json())
+}
+
 fn purge(r: &Req, kind: &str) -> Result<Plan, String> {
+    if kind == "volume" && r.flag("all") {
+        return purge_volumes_bulk(r);
+    }
     let rpc = format!("Purge{}{}", kind[..1].to_ascii_uppercase(), &kind[1..]);
     r.confirmed(&rpc)?;
     let allowed: &[&str] = match kind {
@@ -1176,6 +1221,29 @@ mod tests {
         assert_eq!(line("PurgeJobs", json!({"client": "fd", "jobstatus": "E,f", "confirm": true})), "purge jobs client=fd jobstatus=E,f");
         assert_eq!(line("PurgeQuota", json!({"confirm": true})), "purge quota");
         assert!(err("PurgeFiles", json!({"pool": "x", "jobid": 1, "confirm": true})).contains("does not apply"));
+    }
+
+    /// PurgeVolume with `all`: the Onesimus bulk form (purge_bulk.rs).
+    #[test]
+    fn purge_volume_all_plan() {
+        // the dry run needs no confirm
+        assert_eq!(line("PurgeVolume", json!({"all": true, "pool": "Full", "dryrun": true})), "purge volume all pool=Full dryrun");
+        assert_eq!(line("PurgeVolume", json!({"all": true, "allpools": true, "volstatus": ["full", "Read-Only"], "dryrun": true})),
+                   "purge volume all allpools volstatus=Full,Read-Only dryrun");
+        // the real run needs confirm and gets yes
+        assert!(err("PurgeVolume", json!({"all": true, "pool": "Full"})).contains("set confirm = true"));
+        assert_eq!(line("PurgeVolume", json!({"all": true, "pool": "Full", "volstatus": "Used,Error", "confirm": true})),
+                   "purge volume all pool=Full volstatus=Used,Error yes");
+        let p = plan("PurgeVolume", json!({"all": true, "pool": "Full", "confirm": true}).as_object().unwrap()).unwrap().unwrap();
+        assert_eq!((p.mode, p.yes_to.len(), &p.follow), (Mode::Json, 0, &Follow::None));
+        // exactly one of pool / allpools; nothing of the single forms; valid statuses
+        assert!(err("PurgeVolume", json!({"all": true, "dryrun": true})).contains("exactly one of pool or allpools"));
+        assert!(err("PurgeVolume", json!({"all": true, "pool": "P", "allpools": true, "dryrun": true})).contains("exactly one"));
+        assert!(err("PurgeVolume", json!({"all": true, "pool": "P", "volume": ["A"], "dryrun": true})).contains("does not apply"));
+        assert!(err("PurgeVolume", json!({"all": true, "pool": "P", "action": "all", "dryrun": true})).contains("does not apply"));
+        assert!(err("PurgeVolume", json!({"all": true, "pool": "P", "volstatus": "Purged", "dryrun": true})).contains("volstatus"));
+        // without all: the existing forms are unchanged
+        assert!(err("PurgeVolume", json!({"pool": "P", "confirm": true})).contains("needs volume (or action)"));
     }
 
     #[test]

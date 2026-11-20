@@ -1254,6 +1254,8 @@ enum PurgeAction {
     QuotaOfClient(String),
     /// ActionOnPurgeCmd on the restored arguments (key, value).
     ActionOnPurge(Vec<(String, Option<String>)>),
+    /// Onesimus extension `purge volume all …` (purge_bulk.rs).
+    Volumes(super::purge_bulk::BulkPurge),
 }
 
 /// The console line of the command (C++ `ua->cmd`); commands that did not
@@ -1339,6 +1341,19 @@ fn purge_dialog(ua: &mut crate::ua_select::Ua, ast: &CommandAst,
             None => {}
         },
         Some(2) => {
+            // Onesimus extension `purge volume all …` (purge_bulk.rs): never
+            // a menu or a question; the Bareos forms below stay unchanged.
+            match super::purge_bulk::bulk_request(ast) {
+                Some(Ok(request)) => {
+                    act(ua, PurgeAction::Volumes(request));
+                    return true;
+                }
+                Some(Err(error)) => {
+                    ua.error_msg(error);
+                    return false;
+                }
+                None => {}
+            }
             // One SelectMediaDbr per `volume` keyword (each seen keyword is
             // zapped, so the next lookup starts behind it).
             // cmd_holder: the command line, plus " volume=<name>" for every
@@ -1483,6 +1498,12 @@ fn purge_execute(ua: &mut crate::ua_select::Ua, ast: &CommandAst, action: PurgeA
             let director = ua.ctx.config.as_ref().and_then(|c| c.read().ok())
                 .map(|c| c.director.name.clone()).unwrap_or_default();
             purge::action_on_purge(ua, &restored, &db, &mut purge::NetSdSession::new(director));
+        }
+        PurgeAction::Volumes(request) => {
+            let ctx = ua.ctx;
+            let running = purge::running_jobids(ctx);
+            super::purge_bulk::purge_volumes(ua, &db, &request, &running,
+                &|pool| crate::acl::access(ctx, crate::acl::Kind::Pool, pool));
         }
     }
 }
@@ -1929,6 +1950,81 @@ pub(crate) mod side_effect_tests {
             vec![args(&[("volume", None), ("action", Some("truncate")), ("volume", Some(""))])]);
         // Without action= nothing follows the volume purges.
         assert!(purge("purge volume=v1", &[]).is_empty());
+    }
+
+    /// Onesimus extension `purge volume all …`: selected only by the bare
+    /// word `all`, refused without dryrun|yes before anything is asked or
+    /// written; the Bareos volume forms are unchanged.
+    #[test]
+    fn purge_volume_all_is_an_extension_beside_the_bareos_forms() {
+        use crate::ua_select::tests::scripted;
+        use super::super::purge_bulk::BulkPurge;
+        let ctx = context();
+        let purge = |ctx: &ExecContext, line: &str, answers: &[&str]| {
+            let mut acted = Vec::new();
+            let (ok, console) = scripted(answers, || {
+                let mut ua = crate::ua_select::Ua::new(ctx);
+                let ok = purge_dialog(&mut ua, &crate::session::parse_cli_command(line), |_, action| acted.push(action));
+                (ok, ua.finish(true))
+            });
+            (ok, console.transcript(), acted)
+        };
+        let bulk = |pool: Option<&str>, volstatus: &[&str], dryrun: bool| PurgeAction::Volumes(BulkPurge {
+            pool: pool.map(str::to_string), allpools: pool.is_none(),
+            volstatus: volstatus.iter().map(|s| s.to_string()).collect(), dryrun });
+        assert_eq!(purge(&ctx, "purge volume all pool=Full dryrun", &[]).2,
+            vec![bulk(Some("Full"), &["Full", "Used", "Error"], true)]);
+        assert_eq!(purge(&ctx, "purge volume all allpools volstatus=Append yes", &[]).2,
+            vec![bulk(None, &["Append"], false)]);
+        // Refused without asking: no dryrun|yes, pool and allpools.
+        for line in ["purge volume all pool=Full", "purge volume all pool=Full allpools yes"] {
+            let ((ok, result), transcript, acted) = purge(&ctx, line, &[]);
+            assert!(!ok && acted.is_empty() && transcript.is_empty(), "{line}");
+            assert!(result.error_message.starts_with("purge volume all: give exactly one of"), "{line}: {}", result.error_message);
+        }
+        // The Bareos forms: the volume menu, action=, a named volume.
+        let mut pools = context();
+        pools.catalog = Some(crate::catalog_worker::CatalogHandle::mock(|request| {
+            use crate::catalog_worker::{CatalogRequest, CatalogResponse, SqlColumn, SqlTable};
+            let rows: Vec<&str> = match &request {
+                CatalogRequest::TextRows { sql } if sql == "SELECT Name FROM Pool" => vec!["Full"],
+                CatalogRequest::TextRows { sql } if sql.starts_with("SELECT PoolId FROM Pool") => vec!["1"],
+                CatalogRequest::TextRows { .. } => vec![],
+                _ => return CatalogResponse::Error("double".into()),
+            };
+            CatalogResponse::Rows(SqlTable { columns: vec![SqlColumn { name: "c".into(), numeric: false }],
+                rows: rows.into_iter().map(|v| vec![Some(v.to_string())]).collect() })
+        }));
+        let (_, transcript, acted) = purge(&pools, "purge volume pool=Full", &["."]);
+        assert!(acted.is_empty() && transcript.contains("Enter the volume name or MediaId"), "{transcript}");
+        assert!(matches!(purge(&ctx, "purge volume action=truncate allpools", &[]).2.as_slice(),
+            [PurgeAction::ActionOnPurge(_)]));
+        assert!(matches!(purge(&ctx, "purge volume action=all allpools", &[]).2.as_slice(),
+            [PurgeAction::ActionOnPurge(_)]));
+
+        // A console without full Pool ACL is denied like every purge.
+        let config = crate::director_config::DirectorConfig::from_str(
+            "Director { Name = dir }\nPool { Name = Full; Pool Type = Backup }\n\
+             Console { Name = c; Password = x; CommandACL = *all*; JobACL = *all*; ClientACL = *all*; \
+             StorageACL = *all*; PoolACL = Full }").unwrap();
+        let manager = Arc::new(crate::session_manager::SessionManager::new(Arc::new(
+            crate::message_bus::MessageBus::new(16))));
+        let id = manager.create_session("c");
+        manager.authenticate_session(id);
+        let restricted = ExecContext { session_id: id, config: Some(Arc::new(RwLock::new(config))),
+            session_mgr: Some(manager), ..context() };
+        let ((ok, result), _, acted) = purge(&restricted, "purge volume all pool=Full dryrun", &[]);
+        assert!(!ok && acted.is_empty());
+        assert_eq!(result.error_message, "Permission denied: need full pool permission.\n");
+
+        // The whole command: refused before the catalog is opened or written.
+        let mut ctx = ctx;
+        let (catalog, log) = recording_catalog("b1");
+        ctx.catalog = Some(catalog);
+        let result = cmd_purge(&crate::session::parse_cli_command("purge volume all allpools"), &ctx);
+        assert!(!result.success);
+        assert!(log.lock().unwrap().iter().all(|q| q.trim_start().to_ascii_uppercase().starts_with("SELECT")),
+            "{:?}", log.lock().unwrap());
     }
 
     #[test]
