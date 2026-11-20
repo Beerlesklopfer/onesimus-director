@@ -3,8 +3,11 @@
 //! Zweck: Ein Director ruft osd an, meldet sich mit CRAM-MD5 an und
 //! schickt Befehle, eine Zeile je Befehl. Für einen Job: `JobId=…`
 //! (Anmeldung, Antwort mit Sitzung und Schlüssel), `getSecureEraseCmd`,
-//! `use storage=…`/`use device=…`, bei passivem Client `passive client …`,
-//! dann `run` (wartet auf den FD, führt die Datenphase, meldet `3099`).
+//! `use storage=…`/`use device=…` (Schreiben mit `append=1`: Reservierung
+//! erst mit den Daten, Just-In-Time; Lesen mit `append=0`: das Device wird
+//! sofort reserviert), bei Restore und Verify `bootstrap` (vor oder nach
+//! `use storage`), bei passivem Client `passive client …`, dann `run`
+//! (wartet auf den FD, führt die Datenphase, meldet `3099`).
 //! Ohne Job: `status`, `.status`, `label`, `mount`, `unmount`, `release`,
 //! `cancel`, `setdebug`, `setbandwidth`. Ein unbekannter Befehl wird wie
 //! bei bareos-sd mit `3900 Invalid command: …` beantwortet, danach endet
@@ -16,7 +19,9 @@
 //! `SetbandwidthCmd`, `PassiveCmd`, `RunCmd`, `SecureerasereqCmd`),
 //! `stored/authenticate.cc` (`AuthenticateDirector`), `stored/job.cc`
 //! (`job_cmd`), `stored/reserve.cc` (`use_cmd`, `UseDeviceCmd`),
-//! `stored/status.cc` (`StatusCmd`, `DotstatusCmd`).
+//! `stored/status.cc` (`StatusCmd`, `DotstatusCmd`), `stored/dir_cmd.cc`
+//! (`BootstrapCmd`, `GetBootstrapFile`), `stored/reserve.cc`
+//! (`ReserveDeviceForRead`).
 
 use std::sync::atomic::Ordering;
 use std::sync::{Arc, Mutex};
@@ -188,6 +193,9 @@ impl DirSession {
             if let Some(dev) = self.d.reserved_device(&job.cmd.job) {
                 self.d.release_device(&dev);
             }
+            if let Some(b) = job.bootstrap.lock().unwrap_or_else(|e| e.into_inner()).take() {
+                let _ = std::fs::remove_file(b.path);
+            }
             self.d.jobs.remove(&job.cmd.job);
         }
     }
@@ -245,15 +253,8 @@ impl DirSession {
             job.set_status('E');
             return Next::Quit;
         }
-        let Some(storage) = storages.into_iter().find(|s| s.append) else {
-            // a read reservation: restore is stage 2
-            let job_id = job.cmd.job_id;
-            self.d.jmsg(&self.dir, &job, M_FATAL, &format!(
-                "Device reservation failed for JobId={job_id}: osd cannot read volumes yet (restore follows in stage 2)\n"
-            ));
-            self.send("3924 Device \"\" not in SD Device resources or no matching Media Type.\n");
-            job.set_status('E');
-            return Next::Quit;
+        let Some(storage) = storages.iter().find(|s| s.append).cloned() else {
+            return self.use_for_read(&job, storages);
         };
         let device = if self.d.config.storage.just_in_time_reservation {
             self.d.jmsg(&self.dir, &job, M_INFO, &format!("Using just in time reservation for job {}\n", job.cmd.job_id));
@@ -276,6 +277,31 @@ impl DirSession {
             }
             None => {
                 self.d.jmsg(&self.dir, &job, M_FATAL, &format!("Device reservation failed for JobId={}: no suitable device\n", job.cmd.job_id));
+                self.send(&format!("3924 Device \"{wanted}\" not in SD Device resources or no matching Media Type.\n"));
+                job.set_status('E');
+                Next::Quit
+            }
+        }
+    }
+
+    /// `TryReserveAfterUse(jcr, false)` → `ReserveDeviceForRead`: a read
+    /// job (restore, verify) reserves a device now; there is no
+    /// just-in-time reservation for reading.
+    fn use_for_read(&mut self, job: &Arc<Job>, storages: Vec<UseStorage>) -> Next {
+        let reserved = storages.iter().find_map(|st| self.d.reserve_device(st, &job.cmd.job).map(|r| (st.clone(), r)));
+        match reserved {
+            Some((storage, r)) => {
+                *job.storage.lock().unwrap_or_else(|e| e.into_inner()) = Some(storage);
+                self.send(&format!("3000 OK use device device={}\n", bash_spaces(&r.device.name)));
+                Next::Continue
+            }
+            None => {
+                let wanted = storages.first().and_then(|s| s.devices.first()).cloned().unwrap_or_default();
+                let reason = match storages.first().and_then(|s| s.devices.first()).and_then(|n| self.d.device_user(n)) {
+                    Some(_) => format!("3602 JobId={} device {wanted} is busy (already reading/writing).", job.cmd.job_id),
+                    None => format!("3924 Device \"{wanted}\" not in SD Device resources or no matching Media Type."),
+                };
+                self.d.jmsg(&self.dir, job, M_FATAL, &format!("Device reservation failed for JobId={}: {reason}\n", job.cmd.job_id));
                 self.send(&format!("3924 Device \"{wanted}\" not in SD Device resources or no matching Media Type.\n"));
                 job.set_status('E');
                 Next::Quit
@@ -461,13 +487,52 @@ impl DirSession {
         }
     }
 
-    /// `BootstrapCmd`: restore is stage 2; the bootstrap is read and refused.
+    /// `BootstrapCmd` → `GetBootstrapFile`: receives the bootstrap up to
+    /// the EOD, writes it to `<Working Directory>/<Storage>.<Job>.<n>.bootstrap`
+    /// and parses it (`parse_bsr`); `3000 OK bootstrap` or `3904 Error
+    /// bootstrap`. bareos-sd erases the file right after parsing; osd keeps
+    /// it until the job ends because the device reader (own process) reads
+    /// it again.
     fn bootstrap_cmd(&mut self) -> Next {
-        while let Ok(BnetMessage::Data(_)) = lock(&self.dir).recv() {}
-        self.send("3904 Error bootstrap\n");
-        Next::Quit
+        let mut text = String::new();
+        while let Ok(BnetMessage::Data(data)) = lock(&self.dir).recv() {
+            text.push_str(&String::from_utf8_lossy(&data));
+        }
+        let Some(job) = self.job.clone() else {
+            self.send("3904 Error bootstrap\n");
+            return Next::Quit;
+        };
+        let n = BOOTSTRAP_UNIQ.fetch_add(1, Ordering::AcqRel) + 1;
+        let work = self.d.config.storage.working_directory.as_deref().unwrap_or("/var/lib/bareos");
+        let path = std::path::PathBuf::from(format!("{work}/{}.{}.{n}.bootstrap", self.d.name(), job.cmd.job));
+        if let Err(e) = std::fs::write(&path, &text) {
+            self.d.jmsg(&self.dir, &job, M_FATAL, &format!("Could not create bootstrap file {}: ERR={e}\n", path.display()));
+            self.send("3904 Error bootstrap\n");
+            return Next::Quit;
+        }
+        match bareos_format::bsr::Bsr::parse(&text) {
+            Ok(bsr) => {
+                tracing::debug!("{}: bootstrap {} with {} section(s)", job.cmd.job, path.display(), bsr.entries.len());
+                let old = job.bootstrap.lock().unwrap_or_else(|e| e.into_inner()).replace(crate::jobs::Bootstrap { path, bsr });
+                if let Some(old) = old {
+                    let _ = std::fs::remove_file(old.path);
+                }
+                self.send("3000 OK bootstrap\n");
+                Next::Continue
+            }
+            Err(e) => {
+                self.d.jmsg(&self.dir, &job, M_FATAL, &format!("{e}, col 0 of file {}\n", path.display()));
+                self.d.jmsg(&self.dir, &job, M_FATAL, "Error parsing bootstrap file.\n");
+                let _ = std::fs::remove_file(&path);
+                self.send("3904 Error bootstrap\n");
+                Next::Quit
+            }
+        }
     }
 }
+
+/// `bsr_uniq`: numbers the bootstrap files of this daemon.
+static BOOTSTRAP_UNIQ: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
 
 /// Labels `volume` on `dev` unless it already carries a label
 /// (`LabelVolumeIfOk`); the reply line for the Director.

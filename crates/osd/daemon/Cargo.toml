@@ -1,6 +1,6 @@
 [package]
 name = "osd-daemon"
-description = "Onesimus Storage Daemon (binary osd) — Rust replacement for the Bareos Storage Daemon; P1 stage 1: backup to File devices over BNET"
+description = "Onesimus Storage Daemon (binary osd) — Rust replacement for the Bareos Storage Daemon; P1 stage 2: backup, restore and verify on File devices over BNET"
 version.workspace = true
 edition.workspace = true
 authors.workspace = true
@@ -37,9 +37,10 @@ license-file = ["../../../packaging/copyright", "0"]
 extended-description = """\
 Storage Daemon written in Rust, to replace the Bareos Storage Daemon.
 Reads /etc/bareos/bareos-sd.d/ config tree (Bareos-compatible).
-Development state P1 stage 1: backup to File devices over BNET (active and
-passive clients, Bareos volume format); restore follows in stage 2. The
-service is installed but neither enabled nor started.
+Development state P1 stage 2: backup, restore and verify on File devices
+over BNET (active and passive clients, Bareos volume format, jobs over
+several volumes); gRPC follows in stage 3. The service is installed but
+neither enabled nor started.
 .
 Binary: /usr/sbin/osd
 Service: osd.service (alias bareos-storage.service)"""
@@ -47,7 +48,8 @@ section = "admin"
 priority = "optional"
 depends = "$auto"
 maintainer-scripts = "../../../packaging/osd"
-# Not enabled or started while osd cannot restore (P1 stage 2).
+# Not enabled or started until the maintainer switches a host to osd
+# (restore works since P1 stage 2; gRPC follows in stage 3).
 systemd-units = { unit-name = "osd", unit-scripts = "../../../packaging/osd", enable = false, start = false }
 # M7/M8: `target/…` is relative to the workspace, everything else to this
 # package directory (three levels below the root).

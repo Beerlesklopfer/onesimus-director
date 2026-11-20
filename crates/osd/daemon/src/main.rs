@@ -1,9 +1,9 @@
 //! # osd – der Onesimus Storage Daemon (Programm)
 //!
 //! Zweck: osd ersetzt bareos-sd (Plan `docs/plans/OSD-GERAETE-UND-VERTEILUNG.md`).
-//! Stand P1 Stufe 1: Backup über BNET auf ein File-Device, mit aktivem und
-//! passivem Client, im Bareos-Volume-Format; Restore folgt in Stufe 2, gRPC
-//! in Stufe 3. Anleitung und Abweichungen: `docs/wiki/osd.md`.
+//! Stand P1 Stufe 2: Backup, Restore und Verify über BNET auf bzw. von
+//! File-Devices, mit aktivem und passivem Client, im Bareos-Volume-Format;
+//! gRPC folgt in Stufe 3. Anleitung und Abweichungen: `docs/wiki/osd.md`.
 //!
 //! Argumente (wie `stored/stored.cc`):
 //!
@@ -15,6 +15,7 @@
 //! | `-t` | Konfiguration prüfen, Exit 0 (gut) oder 1 (Fehler) |
 //! | `-v` | ausführliche Meldungen |
 //! | `--device-writer <Ring>` | intern: Geräteschreiber eines Jobs (Kindprozess, D-13) |
+//! | `--device-reader <Ring>` | intern: Geräteleser eines Restore- oder Verify-Jobs (Kindprozess) |
 //!
 //! Exit-Codes: 0 Ende nach Signal bzw. Konfiguration gut (`-t`),
 //! 1 Konfigurationsfehler (`-t`) oder Port nicht zu binden,
@@ -25,6 +26,8 @@
 //! [`onesimus_daemon::accept::serve`] → je Verbindung [`server`] →
 //! [`director`] bzw. FD-Anschluss → `run` → [`fd_session`] (Erzeuger) →
 //! Ring (`osd-ring`) → [`writer`] (Kindprozess) → Volume ([`device`]).
+//! Lesen: `read data` → [`read_session`] (Verbraucher) ← Ring ←
+//! [`reader`] (Kindprozess) ← Volume.
 //!
 //! Paket: `osd-daemon` (`crates/osd/daemon`), Programm `osd`; die
 //! Schnittstelle zum SD ist das Paket `osd` (`crates/osd`). Mit `-p osd`
@@ -41,6 +44,8 @@ mod device;
 mod director;
 mod fd_session;
 mod jobs;
+mod read_session;
+mod reader;
 mod ringproto;
 mod server;
 mod status;
@@ -81,6 +86,10 @@ struct Cli {
     /// Internal: run as the device writer of ring <RING> (started by osd).
     #[arg(long, value_name = "RING", hide = true)]
     device_writer: Option<String>,
+
+    /// Internal: run as the device reader of ring <RING> (started by osd).
+    #[arg(long, value_name = "RING", hide = true)]
+    device_reader: Option<String>,
 }
 
 /// The line `-t` prints for a good configuration.
@@ -112,6 +121,9 @@ fn main() {
 
     if let Some(ring) = &cli.device_writer {
         std::process::exit(writer::run(ring));
+    }
+    if let Some(ring) = &cli.device_reader {
+        std::process::exit(reader::run(ring));
     }
 
     let loaded = bareos_config::sd::load(&cli.config)

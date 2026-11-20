@@ -120,6 +120,16 @@ impl JobCommand {
     }
 }
 
+/// The bootstrap of a read job (`bootstrap` command of the Director).
+#[derive(Debug, Clone)]
+pub struct Bootstrap {
+    /// The file it was written to (`<Working Directory>/<Storage>.<Job>.<n>.bootstrap`);
+    /// the device reader reads it again, it is removed with the job.
+    pub path: std::path::PathBuf,
+    /// The parsed bootstrap.
+    pub bsr: bareos_format::bsr::Bsr,
+}
+
 /// The FD side of a job once connected and authenticated.
 pub struct FdConnection {
     /// The data channel.
@@ -140,6 +150,8 @@ pub struct Job {
     pub auth_key: String,
     /// `use storage` (set by the Director before `run`).
     pub storage: Mutex<Option<UseStorage>>,
+    /// The bootstrap of a restore or verify (`bootstrap` command).
+    pub bootstrap: Mutex<Option<Bootstrap>>,
     /// The FD connection, once there.
     pub fd: Mutex<Option<FdConnection>>,
     /// Signalled when the FD connected or the job was canceled.
@@ -237,6 +249,7 @@ impl JobTable {
             vol_session_time: stime,
             auth_key: make_session_key(),
             storage: Mutex::new(None),
+            bootstrap: Mutex::new(None),
             fd: Mutex::new(None),
             fd_arrived: Condvar::new(),
             authenticated: AtomicBool::new(false),

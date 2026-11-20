@@ -10,6 +10,12 @@
 //! |---|---|---|
 //! | [`SlotKind::Data`] | Datensätze eines vollen Blocks (ohne Blockkopf) | Art, FirstIndex, LastIndex, VolSessionId, VolSessionTime |
 //! | [`SlotKind::End`] | der angefangene letzte Block | dazu JobFiles, JobBytes, JobErrors und JobStatus für das EOS-Label |
+//! | [`SlotKind::Block`] (Lesen) | ein ganzer Block, wie er auf dem Volume steht (Kopf, Datensätze) | Art, Nummer des Volumes in der Restore-Liste, Adresse des Blocks ([`BlockMeta`]) |
+//!
+//! Beim Schreiben füllt die Netzsitzung die Fächer und der Geräteschreiber
+//! stellt die Anfragen; beim Lesen füllt der Geräteleser die Fächer und
+//! stellt die Anfragen (`Ring::ask_consumer`), die Netzsitzung beantwortet
+//! sie.
 //!
 //! | Anfrage | Antwort |
 //! |---|---|
@@ -37,6 +43,8 @@ pub enum SlotKind {
     Data = 1,
     /// The last, partial block and the end-of-session counters.
     End = 2,
+    /// Read direction: a whole block from a volume.
+    Block = 3,
 }
 
 impl SlotKind {
@@ -45,6 +53,7 @@ impl SlotKind {
         match v {
             1 => Some(SlotKind::Data),
             2 => Some(SlotKind::End),
+            3 => Some(SlotKind::Block),
             _ => None,
         }
     }
@@ -104,7 +113,29 @@ impl SlotMeta {
     }
 }
 
-/// A request of the device writer to the network session.
+/// The meta words of a [`SlotKind::Block`] slot (read direction).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct BlockMeta {
+    /// Index of the volume in the restore volume list
+    /// (`bareos_format::bsr::Bsr::restore_volumes`).
+    pub volume: u32,
+    /// Byte address of the block on its volume.
+    pub address: u64,
+}
+
+impl BlockMeta {
+    /// Packs into the ring's meta words.
+    pub fn to_words(self) -> [u64; osd_ring::SLOT_META] {
+        [SlotKind::Block as u64, self.volume as u64, self.address, 0, 0, 0, 0]
+    }
+
+    /// Unpacks the meta words; `None` for another slot kind.
+    pub fn from_words(w: [u64; osd_ring::SLOT_META]) -> Option<BlockMeta> {
+        (SlotKind::from_word(w[0]) == Some(SlotKind::Block)).then_some(BlockMeta { volume: w[1] as u32, address: w[2] })
+    }
+}
+
+/// A request of the device writer or reader to the network session.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Request {
     /// A catalog request line for the Director; the answer is its reply.
@@ -178,6 +209,8 @@ pub struct JobInfo {
     pub client_name: String,
     /// `FileSet=`.
     pub fileset_name: String,
+    /// Read direction: the bootstrap file of the job (empty when writing).
+    pub bootstrap: String,
     /// `FileSetMD5=`.
     pub fileset_md5: String,
     /// `type=` as number (`'B'` = 66).
@@ -193,7 +226,7 @@ impl JobInfo {
             "job={}\njob_id={}\nvol_session_id={}\nvol_session_time={}\npool_name={}\npool_type={}\nmedia_type={}\n\
              storage={}\ndevice={}\narchive_device={}\nlabel_media={}\nmax_block_size={}\nlabel_block_size={}\n\
              max_volume_size={}\njob_name={}\nclient_name={}\nfileset_name={}\nfileset_md5={}\njob_type={}\n\
-             job_level={}\n",
+             job_level={}\nbootstrap={}\n",
             self.job,
             self.job_id,
             self.vol_session_id,
@@ -213,7 +246,8 @@ impl JobInfo {
             self.fileset_name,
             self.fileset_md5,
             self.job_type,
-            self.job_level
+            self.job_level,
+            self.bootstrap
         )
     }
 
@@ -247,6 +281,7 @@ impl JobInfo {
             fileset_md5: get("fileset_md5")?,
             job_type: num("job_type")? as u32,
             job_level: num("job_level")? as u32,
+            bootstrap: get("bootstrap")?,
         })
     }
 
@@ -313,6 +348,11 @@ mod tests {
         assert_eq!(Request::decode(b""), None);
         let info = JobInfo { job: "J.1".into(), job_id: 7, pool_name: "P".into(), label_media: true, max_block_size: 1 << 20, ..Default::default() };
         assert_eq!(JobInfo::decode(&info.encode()).unwrap(), info);
+        let read = JobInfo { bootstrap: "/var/lib/bareos/vsd.J.1.bootstrap".into(), ..info };
+        assert_eq!(JobInfo::decode(&read.encode()).unwrap(), read);
+        let b = BlockMeta { volume: 2, address: 5_000_230 };
+        assert_eq!(BlockMeta::from_words(b.to_words()), Some(b));
+        assert_eq!(BlockMeta::from_words(SlotMeta::default().to_words()), None);
         assert_eq!(ring_name(39473, 7), "osd-39473-7.ring");
     }
 }

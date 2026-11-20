@@ -184,7 +184,7 @@ impl<'a> Writer<'a> {
             let result = match SlotKind::from_word(meta.kind) {
                 Some(SlotKind::Data) => self.write_block(&payload, &meta),
                 Some(SlotKind::End) => self.end_session(&payload, &meta).and_then(|_| self.release()),
-                None => Err(format!("ring slot of unknown kind {}", meta.kind)),
+                Some(SlotKind::Block) | None => Err(format!("ring slot of unknown kind {}", meta.kind)),
             };
             match result {
                 Ok(()) if SlotKind::from_word(meta.kind) == Some(SlotKind::End) => return true,
@@ -542,7 +542,7 @@ fn vol_name(vol: &Option<Volume>) -> String {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use bareos_format::label::SOS_LABEL;
     use osd_ring::RingConfig;
@@ -572,20 +572,20 @@ mod tests {
     /// A fake Director: answers the catalog requests of the writer, creating
     /// volumes `Vol1`, `Vol2`, … in the pool on demand.
     #[derive(Default)]
-    struct FakeDirector {
+    pub(crate) struct FakeDirector {
         /// Volumes by name.
         media: HashMap<String, Media>,
         /// Every request line, in order.
-        requests: Vec<String>,
+        pub(crate) requests: Vec<String>,
         /// Job messages.
-        messages: Vec<String>,
+        pub(crate) messages: Vec<String>,
         /// MaxVolBytes of new volumes.
         max_bytes: u64,
     }
 
     impl FakeDirector {
         /// The answer to one mailbox request.
-        fn answer(&mut self, req: &[u8], ready: &mut bool) -> Vec<u8> {
+        pub(crate) fn answer(&mut self, req: &[u8], ready: &mut bool) -> Vec<u8> {
             match Request::decode(req).unwrap() {
                 Request::Ready => {
                     *ready = true;
@@ -633,7 +633,7 @@ mod tests {
 
     /// Runs one job through the ring with a writer thread: SOS, `records`
     /// data records of `size` bytes, End slot. Returns the fake Director.
-    fn job(dir: &std::path::Path, ring_name: &str, records: usize, size: usize, max_bytes: u64) -> FakeDirector {
+    pub(crate) fn job(dir: &std::path::Path, ring_name: &str, records: usize, size: usize, max_bytes: u64) -> FakeDirector {
         let info = JobInfo {
             job: "J.2026-11-20_01.00.00_01".into(),
             job_id: 9,
@@ -655,6 +655,7 @@ mod tests {
             fileset_md5: "m".into(),
             job_type: 'B' as u32,
             job_level: 'F' as u32,
+            bootstrap: String::new(),
         };
         let _ = Ring::remove(ring_name);
         let ring = Ring::create(ring_name, RingConfig { slots: 3, slot_size: 4096, consumers: 1 }).unwrap();

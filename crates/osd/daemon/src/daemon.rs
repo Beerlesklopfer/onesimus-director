@@ -22,10 +22,11 @@ use crate::fd_session::{WriterHandle, DEFAULT_RING_SLOTS};
 use crate::jobs::{Job, JobTable, UseStorage};
 use crate::transport::{lock, SharedChannel};
 
-/// How device writers are started.
+/// How device writers and readers are started.
 #[derive(Debug, Clone)]
 pub enum Launcher {
-    /// As child process `<exe> --device-writer <ring>` (D-13).
+    /// As child process `<exe> --device-writer <ring>` or
+    /// `<exe> --device-reader <ring>` (D-13).
     Process(PathBuf),
     /// As thread of this process (tests); it talks only through the ring.
     Thread,
@@ -126,7 +127,7 @@ impl Daemon {
                 continue;
             }
             busy.insert(dev.name.clone(), job.to_string());
-            let slots = dev.ring_slots.or(self.config.storage.ring_slots).unwrap_or(DEFAULT_RING_SLOTS);
+            let slots = self.ring_slots(dev);
             return Some(Reserved { device: FileDevice::from_config(dev), slots });
         }
         None
@@ -147,21 +148,37 @@ impl Daemon {
         self.busy.lock().unwrap_or_else(|e| e.into_inner()).remove(name);
     }
 
+    /// Ring slots for a job on `dev` (osd.d `Ring Slots` of the device,
+    /// else of the Storage, else [`DEFAULT_RING_SLOTS`]).
+    pub fn ring_slots(&self, dev: &bareos_config::sd::SdDevice) -> u32 {
+        dev.ring_slots.or(self.config.storage.ring_slots).unwrap_or(DEFAULT_RING_SLOTS)
+    }
+
     /// Starts the device writer for ring `ring`.
     pub fn launch_writer(&self, ring: &str) -> Result<WriterHandle, String> {
+        self.launch(ring, "--device-writer", "device writer", crate::writer::run)
+    }
+
+    /// Starts the device reader for ring `ring` (restore, verify).
+    pub fn launch_reader(&self, ring: &str) -> Result<WriterHandle, String> {
+        self.launch(ring, "--device-reader", "device reader", crate::reader::run)
+    }
+
+    /// Starts `<exe> <flag> <ring>`, or `run(ring)` in a thread.
+    fn launch(&self, ring: &str, flag: &str, what: &str, run: fn(&str) -> i32) -> Result<WriterHandle, String> {
         match &self.launcher {
             Launcher::Process(exe) => std::process::Command::new(exe)
-                .arg("--device-writer")
+                .arg(flag)
                 .arg(ring)
                 .stdin(std::process::Stdio::null())
                 .spawn()
                 .map(WriterHandle::Process)
-                .map_err(|e| format!("Cannot start the device writer {}: {e}", exe.display())),
+                .map_err(|e| format!("Cannot start the {what} {}: {e}", exe.display())),
             Launcher::Thread => {
                 let ring = ring.to_string();
                 std::thread::Builder::new()
-                    .name("device-writer".into())
-                    .spawn(move || crate::writer::run(&ring))
+                    .name(what.replace(' ', "-"))
+                    .spawn(move || run(&ring))
                     .map(|t| WriterHandle::Thread(Some(t)))
                     .map_err(|e| e.to_string())
             }

@@ -1,4 +1,5 @@
-//! Die Datenphase mit dem File Daemon: append open/data/end/close.
+//! Die Datenphase mit dem File Daemon: append open/data/end/close und
+//! read open/data/close.
 //!
 //! Zweck: Nach `run` führt der FD die Sitzung. Er öffnet sie (`append
 //! open session`), schickt die Datensätze (`append data`, je Datensatz ein
@@ -7,6 +8,9 @@
 //! wie bareos-sd (erst das SOS-Label, dann die Datensätze, am Ende das
 //! EOS-Label beim Schreiber) und legt jeden vollen Block in ein Fach. Der
 //! Geräteschreiber (eigener Prozess) schreibt sie aufs Volume.
+//!
+//! Beim Restore und Verify (`read open`, `read data`, `read close`) liest
+//! [`crate::read_session`] die Volumes über den Ring in Gegenrichtung.
 //!
 //! Die Datenphase ist vom Verbindungsaufbau getrennt: Sie bekommt einen
 //! [`Channel`], gleich ob der FD angerufen hat (aktiv) oder osd den FD
@@ -18,7 +22,8 @@
 //!
 //! Bareos-Gegenstück: `core/src/stored/fd_cmds.cc` (`RunJob`,
 //! `DoFdCommands`, `AppendOpenSession`, `AppendDataCmd`, `AppendEndSession`,
-//! `AppendCloseSession`), `stored/append.cc` (`DoAppendData`, `SetupDCR`,
+//! `AppendCloseSession`, `ReadOpenSession`, `ReadDataCmd`,
+//! `ReadCloseSession`), `stored/append.cc` (`DoAppendData`, `SetupDCR`,
 //! `IsAttribute`, `SendAttrsToDir`), `stored/label.cc` (`WriteSessionLabel`),
 //! `stored/reserve.cc` (`TryReserveAfterUse`).
 
@@ -138,8 +143,43 @@ fn do_fd_commands(d: &Daemon, job: &Arc<Job>, dir: &SharedChannel, fd: &mut dyn 
                 fatal_with_fd(d, dir, job, "Attempt to close non-open session.\n");
                 true
             }
+        } else if msg.starts_with("read open") {
+            // ReadOpenSession: the fields (`read open session = <Volume>
+            // <VolSessionId> <VolSessionTime> <StartFile> <EndFile>
+            // <StartBlock> <EndBlock>`) are only logged by bareos-sd; the
+            // bootstrap decides what is read.
+            if s.opened {
+                let _ = fd.send_str("3901 Error session already open\n");
+                fatal_with_fd(d, dir, job, "Attempt to open read on non-open session.\n");
+                true
+            } else {
+                s.opened = true;
+                fd.send_str(&format!("3000 OK open ticket = {}\n", job.vol_session_id)).is_err()
+            }
+        } else if msg.starts_with("read data") {
+            if s.opened {
+                let ok = crate::read_session::do_read_data(d, job, dir, fd);
+                if !ok {
+                    fatal_with_fd(d, dir, job, "");
+                }
+                !ok
+            } else {
+                let _ = fd.send_str("3902 Error session not opened\n");
+                fatal_with_fd(d, dir, job, "Attempt to read on non-open session.\n");
+                true
+            }
+        } else if msg.starts_with("read close") {
+            if s.opened {
+                let r = fd.send_str(&format!("3000 OK close Status = {}\n", job.status() as u32));
+                let _ = fd.signal(BnetSignal::Eod);
+                s.opened = false;
+                r.is_err()
+            } else {
+                let _ = fd.send_str("3902 Error session not opened\n");
+                fatal_with_fd(d, dir, job, "");
+                true
+            }
         } else {
-            // read open/data/close: restore is stage 2.
             if !job.canceled.load(Ordering::Acquire) {
                 d.jmsg(dir, job, M_FATAL, &format!("FD command not found: {msg}"));
             }
@@ -153,10 +193,16 @@ fn do_fd_commands(d: &Daemon, job: &Arc<Job>, dir: &SharedChannel, fd: &mut dyn 
     }
 }
 
-/// "Command error with FD, hanging up. <reason>" and JS_ErrorTerminated.
+/// "Command error with FD, hanging up. <reason>" (or without a reason
+/// "Command error with FD, hanging up.") and JS_ErrorTerminated.
 fn fatal_with_fd(d: &Daemon, dir: &SharedChannel, job: &Arc<Job>, reason: &str) {
     if !job.canceled.load(Ordering::Acquire) {
-        d.jmsg(dir, job, M_FATAL, &format!("Command error with FD, hanging up. {reason}"));
+        let text = if reason.is_empty() {
+            "Command error with FD, hanging up.\n".to_string()
+        } else {
+            format!("Command error with FD, hanging up. {reason}")
+        };
+        d.jmsg(dir, job, M_FATAL, &text);
         job.set_status('E');
     }
 }
@@ -180,7 +226,7 @@ struct Producer {
     pending_attrs: VecDeque<(u64, Vec<u8>)>,
 }
 
-/// How the device writer runs.
+/// How a device writer or reader runs.
 pub enum WriterHandle {
     /// A child process (`osd --device-writer`, D-13).
     Process(std::process::Child),
@@ -190,7 +236,7 @@ pub enum WriterHandle {
 
 impl WriterHandle {
     /// Whether the writer has ended.
-    fn exited(&mut self) -> bool {
+    pub fn exited(&mut self) -> bool {
         match self {
             WriterHandle::Process(child) => !matches!(child.try_wait(), Ok(None)),
             WriterHandle::Thread(t) => t.as_ref().is_none_or(|t| t.is_finished()),
@@ -198,7 +244,7 @@ impl WriterHandle {
     }
 
     /// Waits for the end of the writer.
-    fn join(&mut self) {
+    pub fn join(&mut self) {
         match self {
             WriterHandle::Process(child) => {
                 let _ = child.wait();
@@ -242,6 +288,7 @@ impl Producer {
             fileset_md5: job.cmd.fileset_md5.clone(),
             job_type: job.cmd.job_type as u32,
             job_level: job.cmd.level as u32,
+            bootstrap: String::new(),
         };
         let result = Self::start(d, job, dir, &info, &dev.device, dev.slots);
         if result.is_err() {
