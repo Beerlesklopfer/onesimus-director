@@ -31,12 +31,25 @@
 //! older versions created in `public` there ([`schema::RelocateDef`]). The
 //! version bookkeeping `bareos_schema_version` deliberately stays in the
 //! default schema, where every odir release looks for it.
+//!
+//! # Bareos upgrades and self-healing
+//!
+//! No Onesimus object depends on a Bareos table: functions have string
+//! bodies (resolved when called), and since v2254 every view reads a
+//! set-returning SQL function (`onesimus.vw_job_summary` = `SELECT … FROM
+//! onesimus.fn_vw_job_summary()`) instead of the tables, so the Bareos
+//! update scripts may alter or drop columns and tables. [`Migrator::heal`]
+//! (module [`heal`]) runs after the migration at every odir start and
+//! re-applies the shipped definition of any Onesimus object that is missing
+//! or broken.
 
 pub mod schema;
 pub mod migration;
 pub mod codegen;
 pub mod error;
+pub mod heal;
 
 pub use schema::{CatalogSchema, TableDef, ColumnDef, IndexDef, ObjectKind, RelocateDef};
 pub use migration::Migrator;
 pub use error::OrmError;
+pub use heal::HealReport;

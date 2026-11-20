@@ -861,7 +861,7 @@ Console { Name = mcp; Password = pw4; CommandAcl = *all*; JobAcl = backup-a, res
         assert!(!allowed(&ctx, "op", Kind::Client, "fd1") && !allowed(&ctx, "op", Kind::Job, "backup-a"));
         assert!(allowed(&ctx, "admin", Kind::Command, "delete"), "known without catalog entries");
         let list = run(&ctx, ".acl list console=op");
-        assert!(list.text_output.contains("Catalog ACL = NOT READABLE (could not connect to server); console limited to status, .status, version"),
+        assert!(list.text_output.contains("Catalog ACL = NOT READABLE (could not connect to server); console limited to status, .status, version, .api"),
             "{}", list.text_output);
         assert!(list.text_output.contains("    Effective = locked (catalog ACL not readable): 1 of"), "{}", list.text_output);
         let change = run(&ctx, ".acl set console=viewer commandacl=!status");

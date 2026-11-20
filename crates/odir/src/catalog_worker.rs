@@ -63,6 +63,14 @@ pub enum CatalogRequest {
     Prepare { sql: String },
     /// Ping / health check.
     Ping,
+    /// `request` (only [`CatalogRequest::TextRows`] or
+    /// [`CatalogRequest::Execute`]) bounded by `deadline`: the worker does
+    /// not start it once the deadline has passed (it may have waited in the
+    /// queue behind slow requests) and stops waiting for a connection or the
+    /// result at the deadline, answering with an error. Used where a clear
+    /// answer within seconds matters more than waiting for the pool's
+    /// acquire timeout (catalog ACL, [`CatalogHandle::query_rows_within`]).
+    Within { request: Box<CatalogRequest>, deadline: std::time::Instant },
     /// Reserve one pooled connection for a sequence of statements (C++
     /// private catalog connection, e.g. BVFS with BEGIN/LOCK/COMMIT).
     Dedicated { ops: flume::Receiver<(ConnectionOp, flume::Sender<CatalogResponse>)> },
@@ -129,7 +137,12 @@ impl CatalogHandle {
     #[cfg(test)]
     pub(crate) fn mock(mut handle: impl FnMut(CatalogRequest) -> CatalogResponse + Send + 'static) -> Self {
         let (tx, rx) = flume::bounded::<(CatalogRequest, flume::Sender<CatalogResponse>)>(16);
+        // A bounded request reaches the mock as the plain request.
         std::thread::spawn(move || while let Ok((request, response)) = rx.recv() {
+            let request = match request {
+                CatalogRequest::Within { request, .. } => *request,
+                other => other,
+            };
             let _ = response.send(handle(request));
         });
         Self { tx, ovfs: Arc::default() }
@@ -141,6 +154,41 @@ impl CatalogHandle {
             .map_err(|_| "catalog worker shut down".to_string())?;
         resp_rx.recv()
             .map_err(|_| "catalog worker dropped response".to_string())
+    }
+
+    /// Send `request` bounded by `timeout` ([`CatalogRequest::Within`]) and
+    /// wait at most `timeout` plus [`WITHIN_GRACE`] for the answer. The
+    /// worker drops a request whose deadline has passed, so a request this
+    /// side gave up on is not run later.
+    fn request_within(&self, request: CatalogRequest, timeout: std::time::Duration) -> Result<CatalogResponse, String> {
+        let deadline = std::time::Instant::now() + timeout;
+        let (resp_tx, resp_rx) = flume::bounded(1);
+        self.tx.send((CatalogRequest::Within { request: Box::new(request), deadline }, resp_tx))
+            .map_err(|_| "catalog worker shut down".to_string())?;
+        resp_rx.recv_deadline(deadline + WITHIN_GRACE).map_err(|e| match e {
+            flume::RecvTimeoutError::Timeout => within_timeout_message(timeout),
+            flume::RecvTimeoutError::Disconnected => "catalog worker dropped response".to_string(),
+        })
+    }
+
+    /// [`Self::query_rows`] with an answer within `timeout` (error
+    /// `catalog did not answer within N s` otherwise).
+    pub fn query_rows_within(&self, sql: &str, timeout: std::time::Duration) -> Result<SqlTable, String> {
+        match self.request_within(CatalogRequest::TextRows { sql: sql.to_string() }, timeout)? {
+            CatalogResponse::Rows(t) => Ok(t),
+            CatalogResponse::Error(e) => Err(e),
+            other => Err(format!("unexpected response: {:?}", resp_debug(&other))),
+        }
+    }
+
+    /// [`Self::execute`] with an answer within `timeout`; past the deadline
+    /// the statements are not started.
+    pub fn execute_within(&self, sql: &str, timeout: std::time::Duration) -> Result<u64, String> {
+        match self.request_within(CatalogRequest::Execute { sql: sql.to_string() }, timeout)? {
+            CatalogResponse::Ok(n) => Ok(n),
+            CatalogResponse::Error(e) => Err(e),
+            other => Err(format!("unexpected response: {:?}", resp_debug(&other))),
+        }
     }
 
     /// Execute a raw SQL query, returning formatted text.
@@ -339,6 +387,16 @@ fn resp_debug(r: &CatalogResponse) -> &'static str {
 // Worker thread
 // ---------------------------------------------------------------------------
 
+/// Extra time [`CatalogHandle::request_within`] waits beyond the deadline,
+/// so the worker's own timeout answer (with the database error, if any)
+/// normally arrives first.
+pub const WITHIN_GRACE: std::time::Duration = std::time::Duration::from_secs(1);
+
+/// Error text of a bounded request that got no answer in time.
+fn within_timeout_message(timeout: std::time::Duration) -> String {
+    format!("catalog did not answer within {} s", timeout.as_secs_f32().ceil() as u64)
+}
+
 /// Spawn the catalog worker. Returns the CatalogHandle for callers.
 ///
 /// The pool connects lazily: a database that is (or becomes) unreachable
@@ -411,6 +469,27 @@ pub fn spawn_catalog_worker(
                             handle_since_utime(&pool, &client_name, &job_name, &fileset_name, &level).await,
                         CatalogRequest::Prepare { sql } => handle_prepare(&pool, &sql).await,
                         CatalogRequest::Ping => CatalogResponse::Pong,
+                        CatalogRequest::Within { request, deadline } => {
+                            let left = deadline.checked_duration_since(std::time::Instant::now())
+                                .filter(|left| !left.is_zero());
+                            match (left, *request) {
+                                (None, _) => CatalogResponse::Error(
+                                    "catalog busy or not reachable, request expired before it started".into()),
+                                (Some(left), CatalogRequest::TextRows { sql }) =>
+                                    tokio::time::timeout(left, handle_text_rows(&pool, &sql)).await
+                                        .unwrap_or_else(|_| CatalogResponse::Error(within_timeout_message(left))),
+                                (Some(left), CatalogRequest::Execute { sql }) =>
+                                    tokio::time::timeout(left, async {
+                                        match sqlx::raw_sql(&sql).execute(&pool).await {
+                                            Ok(r) => CatalogResponse::Ok(r.rows_affected()),
+                                            Err(e) => CatalogResponse::Error(pq_error_message(&pool, &sql, &e).await),
+                                        }
+                                    }).await
+                                        .unwrap_or_else(|_| CatalogResponse::Error(within_timeout_message(left))),
+                                (Some(_), _) => CatalogResponse::Error(
+                                    "bounded catalog request: only TextRows and Execute are supported".into()),
+                            }
+                        }
                         CatalogRequest::Dedicated { ops } => {
                             // Serve the statements in a task so other requests
                             // keep running while the connection is reserved
@@ -961,5 +1040,50 @@ mod pq_error_tests {
         assert_eq!(localized_error_word("de_DE.UTF-8"), "FEHLER");
         assert_eq!(localized_error_word("C"), "ERROR");
         assert_eq!(localized_error_word("en_US.UTF-8"), "ERROR");
+    }
+}
+
+/// Bounded requests ([`CatalogRequest::Within`]) of the catalog ACL.
+#[cfg(test)]
+mod within_tests {
+    use super::*;
+    use std::time::{Duration, Instant};
+
+    /// A bounded request answers like the plain one when the catalog is
+    /// fast, and with a clear error after the timeout (plus grace) when it
+    /// is not, instead of waiting for the slow answer.
+    #[test]
+    fn bounded_requests_answer_in_time() {
+        let handle = CatalogHandle::mock(|request| match request {
+            CatalogRequest::TextRows { sql } if sql == "slow" => {
+                std::thread::sleep(Duration::from_secs(5));
+                CatalogResponse::Rows(SqlTable::default())
+            }
+            CatalogRequest::TextRows { .. } => CatalogResponse::Rows(SqlTable {
+                columns: vec![], rows: vec![vec![Some("1".into())]] }),
+            CatalogRequest::Execute { .. } => CatalogResponse::Ok(3),
+            _ => CatalogResponse::Error("unexpected".into()),
+        });
+        assert_eq!(handle.query_rows_within("fast", Duration::from_secs(2)).unwrap().rows.len(), 1);
+        assert_eq!(handle.execute_within("UPDATE", Duration::from_secs(2)).unwrap(), 3);
+        let start = Instant::now();
+        let error = handle.query_rows_within("slow", Duration::from_millis(300)).unwrap_err();
+        assert_eq!(error, "catalog did not answer within 1 s");
+        assert!(start.elapsed() < Duration::from_secs(3), "{:?}", start.elapsed());
+    }
+
+    /// The real worker against an unreachable database (nothing listens on
+    /// 127.0.0.1:1): the pool would wait its 30 s acquire timeout, a bounded
+    /// request gets its answer after the timeout plus grace.
+    #[test]
+    fn bounded_request_to_an_unreachable_catalog_fails_fast() {
+        static SHUTDOWN: AtomicBool = AtomicBool::new(false);
+        let options = sqlx::postgres::PgConnectOptions::new().host("127.0.0.1").port(1)
+            .username("nobody").database("none");
+        let (handle, _join) = spawn_catalog_worker(options, &SHUTDOWN);
+        let start = Instant::now();
+        let error = handle.execute_within("DELETE FROM onesimus.console_acl", Duration::from_secs(1)).unwrap_err();
+        assert!(error.contains("within 1 s") || error.contains("connect") || error.contains("refused"), "{error}");
+        assert!(start.elapsed() < Duration::from_secs(4), "{:?}", start.elapsed());
     }
 }

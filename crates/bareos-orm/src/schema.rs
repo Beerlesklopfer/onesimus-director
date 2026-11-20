@@ -464,6 +464,50 @@ impl ViewDef {
 }
 
 impl FunctionDef {
+    /// Types of the input parameters of [`Self::params`] in order, as
+    /// PostgreSQL identifies the function (`p_type char(1), p_pool text
+    /// DEFAULT NULL` → `["char(1)", "text"]`): parameter names, `DEFAULT`
+    /// / `=` clauses and the mode words `IN`/`VARIADIC` are dropped, `OUT`
+    /// parameters are left out (they are not part of the identity). Commas
+    /// inside parentheses (`numeric(10,2)`) do not split.
+    pub fn arg_types(&self) -> Vec<String> {
+        let mut parts = Vec::new();
+        let (mut depth, mut start) = (0i32, 0usize);
+        for (i, c) in self.params.char_indices() {
+            match c {
+                '(' => depth += 1,
+                ')' => depth -= 1,
+                ',' if depth == 0 => {
+                    parts.push(&self.params[start..i]);
+                    start = i + 1;
+                }
+                _ => {}
+            }
+        }
+        parts.push(&self.params[start..]);
+        parts.into_iter().filter_map(|part| {
+            let lower = part.to_ascii_lowercase();
+            let end = [lower.find(" default "), lower.find('=')].into_iter().flatten().min().unwrap_or(part.len());
+            let mut words: Vec<&str> = part[..end].split_whitespace().collect();
+            match words.first().map(|w| w.to_ascii_uppercase()) {
+                Some(mode) if mode == "OUT" => return None,
+                Some(mode) if matches!(mode.as_str(), "IN" | "INOUT" | "VARIADIC") => { words.remove(0); }
+                None => return None,
+                _ => {}
+            }
+            // "name type…" or a bare (unnamed) type of one word.
+            let ty = if words.len() > 1 { words[1..].join(" ") } else { words.join(" ") };
+            Some(ty)
+        }).collect()
+    }
+
+    /// The function's identity for `to_regprocedure` and `DROP FUNCTION`:
+    /// qualified name with the input parameter types of [`Self::arg_types`]
+    /// (`onesimus.fn_since_utime(text, char(1))`).
+    pub fn identity(&self) -> String {
+        format!("{}({})", self.name, self.arg_types().join(", "))
+    }
+
     /// Generiere CREATE OR REPLACE FUNCTION SQL.
     pub fn to_sql(&self) -> String {
         let security = if self.security_definer { "\nSECURITY DEFINER" } else { "" };
@@ -557,6 +601,23 @@ mod tests {
         };
         let sql = idx.to_sql("job");
         assert!(sql.contains("WHERE jobstatus = 'R'"));
+    }
+
+    /// Parameter lists reduce to the input types PostgreSQL identifies a
+    /// function by.
+    #[test]
+    fn function_identity_from_params() {
+        let f = |params: &str| FunctionDef {
+            name: "onesimus.f".into(), description: String::new(), params: params.into(),
+            returns: "void".into(), language: "sql".into(), body: String::new(),
+            security_definer: false, volatility: "STABLE".into(), parallel: None,
+        };
+        assert_eq!(f("").identity(), "onesimus.f()");
+        assert_eq!(f("p_client_name text, p_level char(1)").identity(), "onesimus.f(text, char(1))");
+        assert_eq!(f("p_client_name text DEFAULT NULL, p_days integer DEFAULT 180").arg_types(), ["text", "integer"]);
+        assert_eq!(f("IN a numeric(10,2), OUT b text, c timestamp without time zone = now()").arg_types(),
+            ["numeric(10,2)", "timestamp without time zone"]);
+        assert_eq!(f("text, VARIADIC v integer[]").arg_types(), ["text", "integer[]"]);
     }
 
     const SAMPLE_SCHEMA_JSON: &str = r#"{

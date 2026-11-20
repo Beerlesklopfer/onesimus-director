@@ -1,0 +1,102 @@
+{
+  "version": 2254,
+  "description": "Late-bound Onesimus views: every view of v2251/v2252 reads a set-returning SQL function with a string body (onesimus.fn_vw_*) instead of the Bareos tables, so no Onesimus object depends on a table in public and Bareos upgrades (update_bareos_tables: ALTER COLUMN TYPE, DROP COLUMN, DROP TABLE) are never blocked; view names, columns and types stay the same",
+  "created": "2026-11-20",
+  "author": "Onesimus",
+  "min_compatible_version": 2253,
+  "tables": [],
+  "views": [
+    {
+      "name": "onesimus.vw_job_summary",
+      "description": "Zusammenfassung aller Jobs mit Client- und Pool-Namen; reads only onesimus.fn_vw_job_summary() (no dependency on Bareos tables), same columns and types as before",
+      "query": "SELECT jobid, job, jobname, type::character(1) AS type, level::character(1) AS level, jobstatus::character(1) AS jobstatus, schedtime, starttime, endtime, jobfiles, jobbytes, joberrors, volsessionid, volsessiontime, clientname, poolname FROM onesimus.fn_vw_job_summary()"
+    },
+    {
+      "name": "onesimus.vw_volume_status",
+      "description": "Volume-Status mit Pool-Name und Fuellstand; reads only onesimus.fn_vw_volume_status() (no dependency on Bareos tables), same columns and types as before",
+      "query": "SELECT mediaid, volumename, volstatus, volbytes, voljobs, volfiles, volmounts, volerrors, maxvolbytes, mediatype, slot, poolname, pct_full FROM onesimus.fn_vw_volume_status()"
+    },
+    {
+      "name": "onesimus.vw_last_backup_per_client",
+      "description": "Letzter erfolgreicher Backup pro Client; reads only onesimus.fn_vw_last_backup_per_client() (no dependency on Bareos tables), same columns and types as before",
+      "query": "SELECT clientname, jobid, jobname, level::character(1) AS level, starttime, endtime, jobfiles, jobbytes FROM onesimus.fn_vw_last_backup_per_client() ORDER BY clientname"
+    },
+    {
+      "name": "onesimus.vw_file_list",
+      "description": "Dateiliste mit Pfaden (ersetzt den fehleranfaelligen filename-Join); reads only onesimus.fn_vw_file_list() (no dependency on Bareos tables), same columns and types as before",
+      "query": "SELECT fileid, jobid, filepath, fileindex, markid FROM onesimus.fn_vw_file_list()"
+    },
+    {
+      "name": "onesimus.vw_running_jobs",
+      "description": "Aktuell laufende Jobs (status dir); reads only onesimus.fn_vw_running_jobs() (no dependency on Bareos tables), same columns and types as before",
+      "query": "SELECT jobid, job, jobname, type::character(1) AS type, level::character(1) AS level, jobstatus::character(1) AS jobstatus, starttime, jobfiles, jobbytes, joberrors, clientname, volsessionid, volsessiontime FROM onesimus.fn_vw_running_jobs()"
+    },
+    {
+      "name": "onesimus.vw_media_list",
+      "description": "Alle Volumes mit Pool-Name (fuer .media Completion); reads only onesimus.fn_vw_media_list() (no dependency on Bareos tables), same columns and types as before",
+      "query": "SELECT mediaid, volumename, volstatus, mediatype, volbytes, voljobs, volfiles, maxvolbytes, poolname FROM onesimus.fn_vw_media_list() ORDER BY volumename"
+    }
+  ],
+  "functions": [
+    {
+      "name": "onesimus.fn_vw_job_summary",
+      "description": "Rows of the view onesimus.vw_job_summary (Zusammenfassung aller Jobs mit Client- und Pool-Namen). Late-bound SQL body (string, not BEGIN ATOMIC): PostgreSQL records no dependency on the Bareos tables, so update_bareos_tables may alter or drop their columns; every column is cast to the type the view has always had.",
+      "params": "",
+      "returns": "TABLE(jobid integer, job text, jobname text, type character, level character, jobstatus character, schedtime timestamp without time zone, starttime timestamp without time zone, endtime timestamp without time zone, jobfiles integer, jobbytes bigint, joberrors integer, volsessionid integer, volsessiontime integer, clientname text, poolname text)",
+      "language": "sql",
+      "volatility": "STABLE",
+      "parallel": "SAFE",
+      "body": "SELECT j.jobid::integer, j.job::text, j.name::text, j.type::character(1), j.level::character(1), j.jobstatus::character(1), j.schedtime::timestamp without time zone, j.starttime::timestamp without time zone, j.endtime::timestamp without time zone, j.jobfiles::integer, j.jobbytes::bigint, j.joberrors::integer, j.volsessionid::integer, j.volsessiontime::integer, c.name::text, p.name::text FROM job j LEFT JOIN client c ON j.clientid = c.clientid LEFT JOIN pool p ON j.poolid = p.poolid;"
+    },
+    {
+      "name": "onesimus.fn_vw_volume_status",
+      "description": "Rows of the view onesimus.vw_volume_status (Volume-Status mit Pool-Name und Fuellstand). Late-bound SQL body (string, not BEGIN ATOMIC): PostgreSQL records no dependency on the Bareos tables, so update_bareos_tables may alter or drop their columns; every column is cast to the type the view has always had.",
+      "params": "",
+      "returns": "TABLE(mediaid integer, volumename text, volstatus text, volbytes bigint, voljobs bigint, volfiles bigint, volmounts bigint, volerrors bigint, maxvolbytes bigint, mediatype text, slot bigint, poolname text, pct_full numeric)",
+      "language": "sql",
+      "volatility": "STABLE",
+      "parallel": "SAFE",
+      "body": "SELECT m.mediaid::integer, m.volumename::text, m.volstatus::text, m.volbytes::bigint, m.voljobs::bigint, m.volfiles::bigint, m.volmounts::bigint, m.volerrors::bigint, m.maxvolbytes::bigint, m.mediatype::text, m.slot::bigint, p.name::text, (CASE WHEN m.maxvolbytes > 0 THEN ROUND(100.0 * m.volbytes / m.maxvolbytes, 1) ELSE 0 END)::numeric FROM media m LEFT JOIN pool p ON m.poolid = p.poolid;"
+    },
+    {
+      "name": "onesimus.fn_vw_last_backup_per_client",
+      "description": "Rows of the view onesimus.vw_last_backup_per_client (Letzter erfolgreicher Backup pro Client). Late-bound SQL body (string, not BEGIN ATOMIC): PostgreSQL records no dependency on the Bareos tables, so update_bareos_tables may alter or drop their columns; every column is cast to the type the view has always had.",
+      "params": "",
+      "returns": "TABLE(clientname text, jobid integer, jobname text, level character, starttime timestamp without time zone, endtime timestamp without time zone, jobfiles integer, jobbytes bigint)",
+      "language": "sql",
+      "volatility": "STABLE",
+      "parallel": "SAFE",
+      "body": "SELECT DISTINCT ON (c.name) c.name::text, j.jobid::integer, j.name::text, j.level::character(1), j.starttime::timestamp without time zone, j.endtime::timestamp without time zone, j.jobfiles::integer, j.jobbytes::bigint FROM job j JOIN client c ON j.clientid = c.clientid WHERE j.type = 'B' AND j.jobstatus = 'T' ORDER BY c.name, j.starttime DESC;"
+    },
+    {
+      "name": "onesimus.fn_vw_file_list",
+      "description": "Rows of the view onesimus.vw_file_list (Dateiliste mit Pfaden (ersetzt den fehleranfaelligen filename-Join)). Late-bound SQL body (string, not BEGIN ATOMIC): PostgreSQL records no dependency on the Bareos tables, so update_bareos_tables may alter or drop their columns; every column is cast to the type the view has always had.",
+      "params": "",
+      "returns": "TABLE(fileid bigint, jobid integer, filepath text, fileindex integer, markid integer)",
+      "language": "sql",
+      "volatility": "STABLE",
+      "parallel": "SAFE",
+      "body": "SELECT f.fileid::bigint, f.jobid::integer, (p.path || f.name)::text, f.fileindex::integer, f.markid::integer FROM file f JOIN path p ON f.pathid = p.pathid;"
+    },
+    {
+      "name": "onesimus.fn_vw_running_jobs",
+      "description": "Rows of the view onesimus.vw_running_jobs (Aktuell laufende Jobs (status dir)). Late-bound SQL body (string, not BEGIN ATOMIC): PostgreSQL records no dependency on the Bareos tables, so update_bareos_tables may alter or drop their columns; every column is cast to the type the view has always had.",
+      "params": "",
+      "returns": "TABLE(jobid integer, job text, jobname text, type character, level character, jobstatus character, starttime timestamp without time zone, jobfiles integer, jobbytes bigint, joberrors integer, clientname text, volsessionid integer, volsessiontime integer)",
+      "language": "sql",
+      "volatility": "STABLE",
+      "parallel": "SAFE",
+      "body": "SELECT j.jobid::integer, j.job::text, j.name::text, j.type::character(1), j.level::character(1), j.jobstatus::character(1), j.starttime::timestamp without time zone, j.jobfiles::integer, j.jobbytes::bigint, j.joberrors::integer, c.name::text, j.volsessionid::integer, j.volsessiontime::integer FROM job j LEFT JOIN client c ON j.clientid = c.clientid WHERE j.jobstatus IN ('R', 'C', 'B', 'e', 'D', 'F', 'S', 'm', 'M', 's', 'j', 'c', 'd', 't', 'p', 'i', 'a', 'l', 'L');"
+    },
+    {
+      "name": "onesimus.fn_vw_media_list",
+      "description": "Rows of the view onesimus.vw_media_list (Alle Volumes mit Pool-Name (fuer .media Completion)). Late-bound SQL body (string, not BEGIN ATOMIC): PostgreSQL records no dependency on the Bareos tables, so update_bareos_tables may alter or drop their columns; every column is cast to the type the view has always had.",
+      "params": "",
+      "returns": "TABLE(mediaid integer, volumename text, volstatus text, mediatype text, volbytes bigint, voljobs bigint, volfiles bigint, maxvolbytes bigint, poolname text)",
+      "language": "sql",
+      "volatility": "STABLE",
+      "parallel": "SAFE",
+      "body": "SELECT m.mediaid::integer, m.volumename::text, m.volstatus::text, m.mediatype::text, m.volbytes::bigint, m.voljobs::bigint, m.volfiles::bigint, m.maxvolbytes::bigint, p.name::text FROM media m LEFT JOIN pool p ON m.poolid = p.poolid ORDER BY m.volumename;"
+    }
+  ]
+}

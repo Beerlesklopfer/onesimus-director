@@ -435,15 +435,28 @@ fn main() {
         if schema_dir.exists() {
             let migrator = bareos_orm::migration::Migrator::new(&schema_dir);
             let rt = tokio::runtime::Runtime::new().unwrap();
-            match rt.block_on(async {
-                let pool = sqlx::postgres::PgPoolOptions::new()
+            // Migration, then self-heal of the Onesimus objects on the same
+            // connection (bareos_orm::heal; never ends the start).
+            let (migrated, healed) = rt.block_on(async {
+                let pool = match sqlx::postgres::PgPoolOptions::new()
                     .max_connections(1)
-                    .connect_with(options.clone()).await?;
-                migrator.migrate(&pool).await
-            }) {
+                    .connect_with(options.clone()).await
+                {
+                    Ok(pool) => pool,
+                    Err(e) => return (Err(bareos_orm::OrmError::from(e)), None),
+                };
+                let migrated = migrator.migrate(&pool).await;
+                let healed = migrator.heal(&pool).await;
+                pool.close().await;
+                (migrated, Some(healed))
+            });
+            match migrated {
                 Ok(0) => info!("catalog '{}' schema up to date", cat.db_name),
                 Ok(n) => info!("catalog '{}': applied {} schema migration(s)", cat.db_name, n),
                 Err(e) => warn!("catalog migration failed: {e} (continuing without the schema extension)"),
+            }
+            if let Some(report) = healed {
+                log_heal_report(&cat.db_name, &report);
             }
         } else {
             debug!("no schema directory found at {}, skipping migration", schema_dir.display());
@@ -529,7 +542,7 @@ fn main() {
             catalog_acl::LoadState::Loaded => info!("catalog ACL loaded ({} console(s) with entries)", store.consoles().len()),
             state => warn!("catalog ACL: {state:?}"),
         }
-        catalog_acl::spawn_retry_thread(store, &SHUTDOWN);
+        catalog_acl::spawn_refresh_thread(store, &SHUTDOWN);
     }
     let bus = Arc::new(MessageBus::new(1024));
     let session_mgr = Arc::new(SessionManager::new(bus.clone()));
@@ -581,6 +594,30 @@ fn main() {
     mail::shutdown();
 
     info!("Onesimus Director stopped");
+}
+
+/// Journal summary of the self-heal after the migration
+/// (`bareos_orm::Migrator::heal`, which logs each repaired or broken object
+/// itself): skipped (debug), all intact (info), repairs (warn), objects that
+/// stay broken (warn). Never ends the start.
+fn log_heal_report(db_name: &str, report: &bareos_orm::HealReport) {
+    if let Some(reason) = &report.skipped {
+        debug!("catalog '{db_name}': self-heal skipped ({reason})");
+        return;
+    }
+    if report.repaired.is_empty() && report.failed.is_empty() {
+        info!("catalog '{db_name}': {} Onesimus catalog objects intact", report.checked);
+        return;
+    }
+    if !report.repaired.is_empty() {
+        warn!("catalog '{db_name}': self-heal re-created {} Onesimus object(s): {}",
+            report.repaired.len(), report.repaired.join("; "));
+    }
+    if !report.failed.is_empty() {
+        warn!("catalog '{db_name}': {} Onesimus object(s) missing or broken and not repairable \
+               (the Director runs on; see docs/wiki/betrieb-odir.md, Katalog-Schema onesimus): {}",
+            report.failed.len(), report.failed.join("; "));
+    }
 }
 
 fn spawn_named_threads(

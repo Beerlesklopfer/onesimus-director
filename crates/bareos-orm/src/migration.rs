@@ -51,7 +51,8 @@ impl Migrator {
     }
 
     /// All versions folded into one schema: the Bareos base tables plus every
-    /// later addition (tables, columns, indices, functions, views). Its
+    /// later addition (tables, columns, indices, functions, views; of a
+    /// function or view defined again later only the newest definition). Its
     /// `to_statements()` creates what a fresh `migrate()` creates, which a
     /// single extension file (no tables of its own) cannot.
     pub fn combined(&self) -> Result<Option<CatalogSchema>, OrmError> {
@@ -75,8 +76,16 @@ impl Migrator {
                     None => combined.tables.push(table),
                 }
             }
-            combined.functions.extend(next.functions);
-            combined.views.extend(next.views);
+            // A later version redefines a function or view of the same
+            // name (v2254 the views of v2251/v2252): only the newest stays.
+            for func in next.functions {
+                combined.functions.retain(|f| f.name != func.name);
+                combined.functions.push(func);
+            }
+            for view in next.views {
+                combined.views.retain(|v| v.name != view.name);
+                combined.views.push(view);
+            }
             combined.version = next.version;
             combined.description = next.description;
         }
@@ -218,7 +227,7 @@ impl Migrator {
 
     /// Applied schema version: the highest of the Bareos `version` table
     /// (base catalog) and our `bareos_schema_version` (incl. Onesimus extensions).
-    async fn get_db_version(&self, pool: &sqlx::PgPool) -> Result<u32, OrmError> {
+    pub(crate) async fn get_db_version(&self, pool: &sqlx::PgPool) -> Result<u32, OrmError> {
         let mut found: Option<u32> = None;
 
         // 1. C++ Version-Tabelle (VersionId) — Bareos-Basisschema
@@ -511,7 +520,7 @@ impl SequenceLag {
 }
 
 /// Double-quoted SQL identifier (`"` doubled).
-fn quote_ident(name: &str) -> String {
+pub(crate) fn quote_ident(name: &str) -> String {
     format!("\"{}\"", name.replace('"', "\"\""))
 }
 
@@ -555,7 +564,7 @@ pub async fn check_sequences(pool: &sqlx::PgPool) -> Result<Vec<SequenceLag>, Or
 
 /// Schema files authored by Onesimus extend the catalog (views, functions)
 /// but are no Bareos schema versions.
-fn is_onesimus_extension(schema: &CatalogSchema) -> bool {
+pub(crate) fn is_onesimus_extension(schema: &CatalogSchema) -> bool {
     schema.author.eq_ignore_ascii_case("onesimus")
 }
 

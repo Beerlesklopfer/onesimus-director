@@ -41,7 +41,8 @@ mit `*all*` an. Die BgLage-Sitzung konnte deshalb `delete`, `purge` und
    eingehängt.
 5. **Katalog nicht erreichbar:** konservativ. Hat die Console Katalog-Einträge,
    die gerade nicht lesbar sind, gilt für sie „nichts erlaubt“ außer `status`,
-   `.status` und `version` (F-4). Nie stillschweigend nur die Datei-ACL, denn
+   `.status` und `version` (F-4) sowie `.api` (nur Ausgabeformat, Nachtrag
+   20.11.2026 unter Umsetzung). Nie stillschweigend nur die Datei-ACL, denn
    das wäre eine Rechteausweitung.
 
 ## Was sich am Bestand ändert
@@ -95,7 +96,7 @@ nicht ein.
 | ~~F-1~~ | **Entschieden und umgesetzt 19.11.2026:** `configure add console`, `profile` und `user` werden immer abgelehnt (nicht nur mit ACL-Zeilen); Consoles legt nur der Editor an. Ursprüngliche Frage: `configure add console`/`profile` ist ein Bareos-Befehl und schreibt ACL-Direktiven in eine Datei. Regel 3 schließt das aus. Vorschlag: ablehnen, wenn ACL-Direktiven (`*Acl`, `Profile`) im Aufruf stehen; eine Console ohne ACL-Zeilen hat in Bareos keine Rechte und darf angelegt werden. Abweichung von Bareos, kommt in betrieb-odir.md. | Maintainer |
 | ~~F-2~~ | **Entschieden 19.11.2026 wie vorgeschlagen, umgesetzt 20.11.2026** (genaue Regel unter Umsetzung). Wer darf die Katalog-ACL ändern? Vorschlag: Command-ACL `.acl` **und** `configure` (wie heute), und nur für **andere** Consoles; die eigene Console kann sich nur selbst einschränken, nie lockern. | Maintainer |
 | ~~F-3~~ | **Entschieden wie vorgeschlagen, umgesetzt 20.11.2026.** Ein Katalog-Eintrag, der mehr erlaubt als die Datei: ablehnen oder speichern und als wirkungslos melden? Vorschlag: speichern und melden, weil sich die Datei später ändern kann. | Maintainer |
-| ~~F-4~~ | **Entschieden wie vorgeschlagen (`status`/`version`), umgesetzt 20.11.2026.** Katalog nicht erreichbar bei einer Console mit Katalog-Einträgen: nur `status`/`version` (Vorschlag) oder gar nichts? | Maintainer |
+| ~~F-4~~ | **Entschieden wie vorgeschlagen (`status`/`version`), umgesetzt 20.11.2026; `.api` dazu (Nachtrag unter Umsetzung).** Katalog nicht erreichbar bei einer Console mit Katalog-Einträgen: nur `status`/`version` (Vorschlag) oder gar nichts? | Maintainer |
 | ~~F-5~~ | **Entschieden wie vorgeschlagen (nur je Console), umgesetzt 20.11.2026.** Gilt die innere Stufe auch für Profile (Einträge je Profil) oder nur je Console? Vorschlag: nur je Console, Profile bleiben reine Datei-Sache. | Maintainer |
 | ~~F-6~~ | ~~Sitzungen des MCP~~ **Entschieden 19.11.2026:** Der MCP-Weg MUSS eine eigene Console in der Konfiguration haben, Suffix `-mcp` (`<console>-mcp`). oconsole meldet sich im MCP-Modus nur so an und startet ohne sie nicht. Die innere Stufe bleibt damit je Console. | Maintainer |
 
@@ -178,10 +179,12 @@ registrierten Befehl trifft und dessen Treffer die Datei alle verbietet
 ### Verhalten bei unlesbarem Katalog, F-4
 
 - Geladen wird beim Start (vor den Listenern), nach jedem erfolgreichen
-  `reload`, nach jeder `.acl`-Änderung und alle 30 s, solange das letzte Laden
-  scheiterte (Thread `dir:catalog-acl`). Keine DB-Abfrage je ACL-Prüfung.
+  `reload`, nach jeder `.acl`-Änderung, alle 30 s, solange das letzte Laden
+  scheiterte, und alle 60 s, solange es gelang (Thread `dir:catalog-acl`,
+  `catalog_acl::refresh_tick`; Nachtrag 20.11.2026, siehe unten). Keine
+  DB-Abfrage je ACL-Prüfung.
 - Scheitert das Laden, ist eine Console **gesperrt** (nur `status`,
-  `.status`, `version`; daneben wie immer `quit`/`exit`/`whoami`; alle anderen
+  `.status`, `version`, `.api`; daneben wie immer `quit`/`exit`/`whoami`; alle anderen
   ACL-Typen nichts), außer sie ist als einträgefrei **bekannt**: das letzte
   erfolgreiche Laden fand keine Einträge für sie, und seitdem wurde keine
   `.acl`-Änderung an ihr begonnen (eine Änderung markiert die Console vor dem
@@ -195,6 +198,10 @@ registrierten Befehl trifft und dessen Treffer die Datei alle verbietet
   Bareos), solange nie Einträge gelesen wurden; sonst als Fehler.
 - `.acl set/delete/clear/copy` lädt vor der Entscheidung neu und lehnt ab,
   wenn das nicht gelingt.
+- Jede Katalogabfrage der Katalog-ACL (Laden, Schreiben) ist auf 5 s
+  begrenzt (`catalog_acl::CATALOG_TIMEOUT`, `CatalogHandle::query_rows_within`
+  / `execute_within`): bei einem Katalogausfall kommt die Ablehnung nach
+  höchstens etwa 6 s statt nach dem Acquire-Timeout des Pools (30 s).
 - Ohne Katalog (kein `Catalog`) ist die innere Stufe aus.
 
 ### Zentrale Funktion, geprüfte Aufrufer
@@ -220,9 +227,41 @@ F-4; Cache nach Änderung und Reload; typisierte DotAclList-Antwort),
 Stufe 2252 mit den Objekten in `public`, reiner Bareos-Katalog, halb
 verschobener Katalog, fehlendes `CREATE`-Recht; braucht `BAREOS_ORM_TEST_DB`).
 
+### Nachtrag 20.11.2026: offene Punkte erledigt
+
+- **Regelmäßiges Neuladen:** Der Thread `dir:catalog-acl` lädt die
+  Katalog-ACL auch im gesunden Zustand alle 60 s neu
+  (`catalog_acl::REFRESH_INTERVAL`, `refresh_due`/`refresh_tick`). Änderungen
+  direkt per SQL an `onesimus.console_acl` wirken damit spätestens nach
+  einer Minute ohne `reload`; Journal `catalog ACL changed in the catalog,
+  reloaded (N console(s) with entries)`. Änderungen über `.acl` laden sofort
+  und erscheinen dort nicht.
+- **`.api` auf der Sperrliste (F-4), `.help` nicht:** `.api` schaltet nur das
+  Ausgabeformat der Sitzung um (API 0/1/2, JSON) und gibt nichts preis.
+  API-Clients (bconsole `-api`, WebUI, GUI, MCP) senden es als Erstes; ohne
+  `.api` könnte ein gesperrter API-Client nicht einmal die Antworten auf
+  `status`/`version` auswerten. `.help` listet die Befehle (Konfiguration)
+  und bleibt konservativ gesperrt; für die Fehlersuche reicht `status`.
+- **Kurzer Timeout:** Laden und Schreiben der Katalog-ACL warten höchstens
+  5 s (`CATALOG_TIMEOUT`). Neue Anfrageart `CatalogRequest::Within` im
+  Katalog-Worker: Er beginnt eine Anfrage nach Ablauf der Frist nicht mehr
+  (sie kann hinter langsamen Anfragen in der Warteschlange gestanden haben)
+  und bricht Verbindungsaufbau bzw. Ausführung an der Frist ab; der Aufrufer
+  wartet Frist + 1 s. Eine abgelehnte `.acl`-Änderung wird also nicht später
+  doch noch ausgeführt. Restfall: Läuft die Frist ab, während PostgreSQL
+  das COMMIT schon ausgeführt, die Antwort aber noch nicht geschickt hat,
+  meldet `.acl` einen Fehler, obwohl die Änderung gilt; das anschließende
+  Laden bzw. `.acl list` zeigt den tatsächlichen Stand.
+- Tests: `catalog_acl::tests::refresh_schedule`,
+  `periodic_refresh_picks_up_rows_changed_by_sql`,
+  `outage_answers_within_the_catalog_timeout`,
+  `catalog_worker::within_tests::*`,
+  `acl::tests::catalog_tier_intersects_and_counts_as_restriction` (`.api`
+  erlaubt, `.help` gesperrt).
+
 ### Offen
 
 - Die Katalog-Einträge stehen im typisierten gRPC-Ergebnis nur in
-  `extra_fields` (JSON-Text); eigene Proto-Felder wären eine spätere Erweiterung.
-- Änderungen direkt per SQL an `onesimus.console_acl` wirken erst beim
-  nächsten Laden (`reload`, `.acl`-Änderung).
+  `extra_fields` (JSON-Text); eigene Proto-Felder (`catalog`, `effective`,
+  `catalog_state`, `locked` in `ConsoleAclInfo`) brauchen die GUI-Seite und
+  sind bewusst nicht umgesetzt.

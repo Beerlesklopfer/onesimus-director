@@ -15,10 +15,18 @@
 //!   followed by [`CatalogAcl::refresh`] in `main`),
 //! - after every successful configuration reload (`reload.rs`),
 //! - after every change through `.acl set/delete/clear/copy`
-//!   (`commands/acl.rs`), and
+//!   (`commands/acl.rs`),
 //! - every [`RETRY_INTERVAL`] while the last load failed (thread
-//!   `dir:catalog-acl`, [`spawn_retry_thread`]), so the Director recovers by
-//!   itself when the catalog is back.
+//!   `dir:catalog-acl`, [`spawn_refresh_thread`]), so the Director recovers
+//!   by itself when the catalog is back, and
+//! - every [`REFRESH_INTERVAL`] while the last load succeeded (same thread),
+//!   so rows changed directly by SQL in `onesimus.console_acl` take effect
+//!   without `reload` (logged when the content changed).
+//!
+//! Every database access of this module is bounded by [`CATALOG_TIMEOUT`]
+//! ([`CatalogHandle::query_rows_within`]): during a catalog outage a load or
+//! an `.acl` change fails after a few seconds with a clear message instead
+//! of waiting for the pool's acquire timeout (30 s).
 //!
 //! # Unreadable catalog (decision F-4)
 //!
@@ -43,13 +51,28 @@ use crate::acl::Kind;
 use crate::catalog_worker::CatalogHandle;
 
 /// Commands a locked console may still run (F-4): the Director's status and
-/// version, nothing that reads or changes catalog data or resources. Every
-/// other ACL type allows nothing while locked. `quit`, `exit` and `whoami`
-/// stay possible as for every console (command_registry::resolve_permitted).
-pub const LOCKED_COMMANDS: &[&str] = &["status", ".status", "version"];
+/// version, nothing that reads or changes catalog data or resources, plus
+/// `.api`, which only switches the output format of the session (API 0/1/2,
+/// JSON) and reveals nothing: API clients (bconsole -api, WebUI, the
+/// Onesimus GUI, MCP) send it first, and without it they could not even
+/// parse the `status`/`version` answers a locked console still gets.
+/// `.help` stays locked (it lists the commands, i.e. configuration), like
+/// every other command. Every other ACL type allows nothing while locked.
+/// `quit`, `exit` and `whoami` stay possible as for every console
+/// (command_registry::resolve_permitted).
+pub const LOCKED_COMMANDS: &[&str] = &["status", ".status", "version", ".api"];
 
 /// Pause between two load attempts while the last load failed.
 pub const RETRY_INTERVAL: Duration = Duration::from_secs(30);
+
+/// Pause between two loads while the last load succeeded: picks up rows
+/// changed directly in the catalog (SQL) without `reload`.
+pub const REFRESH_INTERVAL: Duration = Duration::from_secs(60);
+
+/// Upper bound for every catalog access of the catalog ACL (load, `.acl`
+/// write): a few seconds, so a console gets its refusal promptly during a
+/// catalog outage (F-4) instead of after the pool's 30 s acquire timeout.
+pub const CATALOG_TIMEOUT: Duration = Duration::from_secs(5);
 
 /// Name of the catalog table of the inner tier, schema-qualified: Onesimus
 /// objects live in the schema `onesimus` (v2253), `public` holds only the
@@ -290,9 +313,15 @@ impl CatalogAcl {
     pub fn write(&self, console: &str, changes: &[(Kind, Vec<String>)], changed_by: &str) -> Result<(), String> {
         let catalog = self.catalog().ok_or("no catalog")?;
         self.mark_pending(console);
-        let result = catalog.execute(&write_sql(console, changes, changed_by)).map(|_| ());
+        let result = catalog.execute_within(&write_sql(console, changes, changed_by), CATALOG_TIMEOUT).map(|_| ());
         self.refresh();
         result
+    }
+
+    /// Copy of the entries of the last successful load (change detection
+    /// of the refresh thread).
+    fn entries_snapshot(&self) -> BTreeMap<String, ConsoleLists> {
+        self.state.read().map(|s| s.entries.clone()).unwrap_or_default()
     }
 
     /// Replace the cache directly (tests).
@@ -335,13 +364,13 @@ fn write_sql(console: &str, changes: &[(Kind, Vec<String>)], changed_by: &str) -
 
 /// Read the whole table. `Ok(None)`: the table does not exist.
 fn load(catalog: &CatalogHandle) -> Result<Option<BTreeMap<String, ConsoleLists>>, String> {
-    let exists = catalog.query_rows(&format!("SELECT to_regclass('{TABLE}')::text"))?;
+    let exists = catalog.query_rows_within(&format!("SELECT to_regclass('{TABLE}')::text"), CATALOG_TIMEOUT)?;
     if exists.rows.first().and_then(|r| r.first()).is_none_or(|v| v.is_none()) {
         return Ok(None);
     }
-    let table = catalog.query_rows(&format!(
+    let table = catalog.query_rows_within(&format!(
         "SELECT console, acl_type, position, entry, changed_by, changed_at FROM {TABLE} \
-         ORDER BY console, acl_type, position"))?;
+         ORDER BY console, acl_type, position"), CATALOG_TIMEOUT)?;
     let mut entries: BTreeMap<String, ConsoleLists> = BTreeMap::new();
     for row in &table.rows {
         let text = |i: usize| row.get(i).cloned().flatten().unwrap_or_default();
@@ -357,21 +386,50 @@ fn load(catalog: &CatalogHandle) -> Result<Option<BTreeMap<String, ConsoleLists>
     Ok(Some(entries))
 }
 
+/// Whether the refresh thread loads again after `waited` since its last
+/// attempt: every [`RETRY_INTERVAL`] while the last load failed, every
+/// [`REFRESH_INTERVAL`] while it succeeded, never without a catalog.
+fn refresh_due(load: &LoadState, waited: Duration) -> bool {
+    match load {
+        LoadState::Off => false,
+        LoadState::Failed(_) => waited >= RETRY_INTERVAL,
+        LoadState::Loaded => waited >= REFRESH_INTERVAL,
+    }
+}
+
+/// One attempt of the refresh thread: reload when [`refresh_due`]; logs a
+/// recovery and a content change (rows edited by SQL; changes through
+/// `.acl` reload at once and show no difference here). Returns whether it
+/// loaded.
+fn refresh_tick(store: &CatalogAcl, waited: Duration) -> bool {
+    let before_state = store.load_state();
+    if !refresh_due(&before_state, waited) {
+        return false;
+    }
+    let before = store.entries_snapshot();
+    if store.refresh() == LoadState::Loaded {
+        if matches!(before_state, LoadState::Failed(_)) {
+            tracing::info!("catalog ACL readable again, consoles use their catalog ACL");
+        } else if store.entries_snapshot() != before {
+            tracing::info!("catalog ACL changed in the catalog, reloaded ({} console(s) with entries)",
+                store.consoles().len());
+        }
+    }
+    true
+}
+
 /// Thread `dir:catalog-acl`: reloads the cache every [`RETRY_INTERVAL`] while
-/// the last load failed, until `shutdown` is set.
-pub fn spawn_retry_thread(store: Arc<CatalogAcl>, shutdown: &'static std::sync::atomic::AtomicBool) {
+/// the last load failed and every [`REFRESH_INTERVAL`] while it succeeded
+/// ([`refresh_tick`]), until `shutdown` is set.
+pub fn spawn_refresh_thread(store: Arc<CatalogAcl>, shutdown: &'static std::sync::atomic::AtomicBool) {
     let spawned = std::thread::Builder::new().name("dir:catalog-acl".into()).spawn(move || {
         let step = Duration::from_millis(500);
         let mut waited = Duration::ZERO;
         while !shutdown.load(std::sync::atomic::Ordering::SeqCst) {
             std::thread::sleep(step);
             waited += step;
-            if waited < RETRY_INTERVAL {
-                continue;
-            }
-            waited = Duration::ZERO;
-            if matches!(store.load_state(), LoadState::Failed(_)) && store.refresh() == LoadState::Loaded {
-                tracing::info!("catalog ACL readable again, consoles use their catalog ACL");
+            if refresh_tick(&store, waited) {
+                waited = Duration::ZERO;
             }
         }
     });
@@ -454,6 +512,61 @@ mod tests {
         store.attach(mock(vec![], Arc::default(), true));
         assert!(matches!(store.refresh(), LoadState::Failed(_)));
         assert!(store.restricts("op", Kind::Job));
+    }
+
+    /// The refresh thread's schedule: failed loads retry every 30 s, a
+    /// healthy cache reloads every 60 s, no catalog never.
+    #[test]
+    fn refresh_schedule() {
+        assert!(!refresh_due(&LoadState::Off, Duration::from_secs(3600)));
+        assert!(!refresh_due(&LoadState::Failed("x".into()), Duration::from_secs(29)));
+        assert!(refresh_due(&LoadState::Failed("x".into()), RETRY_INTERVAL));
+        assert!(!refresh_due(&LoadState::Loaded, Duration::from_secs(59)));
+        assert!(refresh_due(&LoadState::Loaded, REFRESH_INTERVAL));
+    }
+
+    /// Rows changed by SQL (behind the Director's back) take effect at the
+    /// next periodic tick, without reload.
+    #[test]
+    fn periodic_refresh_picks_up_rows_changed_by_sql() {
+        let rows: Arc<Mutex<Vec<[&'static str; 4]>>> = Arc::default();
+        let source = rows.clone();
+        let store = CatalogAcl::default();
+        store.attach(CatalogHandle::mock(move |request| match request {
+            CatalogRequest::TextRows { sql } if sql.contains("to_regclass") => CatalogResponse::Rows(SqlTable {
+                columns: vec![], rows: vec![vec![Some(TABLE.into())]] }),
+            CatalogRequest::TextRows { .. } => CatalogResponse::Rows(SqlTable {
+                columns: vec![],
+                rows: source.lock().unwrap().iter().map(|[c, t, p, e]| vec![Some(c.to_string()), Some(t.to_string()),
+                    Some(p.to_string()), Some(e.to_string()), Some("sql".into()), Some("now".into())]).collect(),
+            }),
+            _ => CatalogResponse::Ok(0),
+        }));
+        assert_eq!(store.refresh(), LoadState::Loaded);
+        assert!(!store.restricts("op", Kind::Command));
+        rows.lock().unwrap().push(["op", "command", "0", "status"]);
+        assert!(!refresh_tick(&store, Duration::from_secs(30)), "not yet due");
+        assert!(!store.restricts("op", Kind::Command));
+        assert!(refresh_tick(&store, REFRESH_INTERVAL));
+        assert!(store.restricts("op", Kind::Command));
+    }
+
+    /// During a catalog outage a load and an `.acl` write fail within
+    /// [`CATALOG_TIMEOUT`] (plus grace), not after the pool's 30 s.
+    #[test]
+    fn outage_answers_within_the_catalog_timeout() {
+        let store = CatalogAcl::default();
+        store.attach(CatalogHandle::mock(|_| {
+            std::thread::sleep(Duration::from_secs(40));
+            CatalogResponse::Error("pool timed out while waiting for an open connection".into())
+        }));
+        let start = std::time::Instant::now();
+        assert_eq!(store.refresh(), LoadState::Failed("catalog did not answer within 5 s".into()));
+        let error = store.write("op", &[(Kind::Job, vec!["a".into()])], "admin").unwrap_err();
+        assert_eq!(error, "catalog did not answer within 5 s");
+        let limit = 3 * (CATALOG_TIMEOUT + crate::catalog_worker::WITHIN_GRACE) + Duration::from_secs(3);
+        assert!(start.elapsed() < limit, "{:?}", start.elapsed());
+        assert!(store.restricts("op", Kind::Command), "the console of the failed write is locked");
     }
 
     /// The write replaces whole types and quotes every literal.

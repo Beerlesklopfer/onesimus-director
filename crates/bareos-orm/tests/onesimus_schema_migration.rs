@@ -1,7 +1,10 @@
 //! Schema step v2253: own PostgreSQL schema `onesimus` for every Onesimus
 //! catalog object (views and functions of v2251/v2252, the console ACL table
 //! `onesimus.console_acl` of the two-tier console ACLs,
-//! docs/plans/ACL-ZWEISTUFIG.md); `public` stays pure Bareos.
+//! docs/plans/ACL-ZWEISTUFIG.md); `public` stays pure Bareos. Schema step
+//! v2254: late-bound views (no Onesimus object depends on a Bareos table, so
+//! Bareos upgrades are never blocked), and the self-healing of
+//! [`Migrator::heal`] at every start.
 //!
 //! Needs a throw-away PostgreSQL cluster: set `BAREOS_ORM_TEST_DB` to a
 //! connection URL whose role may create databases and roles (see
@@ -19,6 +22,9 @@ use common::{in_database, TestDb};
 fn schema_dir() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("schema")
 }
+
+/// The newest shipped schema step.
+const LATEST: i32 = 2254;
 
 /// The views and functions of v2251/v2252 (all shipped Onesimus views and
 /// functions), unqualified.
@@ -116,7 +122,7 @@ async fn check_layout(pool: &sqlx::PgPool, owner: &str) -> Result<(), Box<dyn st
     let version: i32 = sqlx::query_scalar("SELECT MAX(versionid) FROM public.version").fetch_one(pool).await?;
     assert_eq!(version, 2250, "bareos-dir must still open the catalog");
     let ours: i32 = sqlx::query_scalar("SELECT MAX(version) FROM public.bareos_schema_version").fetch_one(pool).await?;
-    assert_eq!(ours, 2253);
+    assert_eq!(ours, LATEST);
     let in_onesimus: bool = sqlx::query_scalar("SELECT to_regclass('onesimus.bareos_schema_version') IS NOT NULL")
         .fetch_one(pool).await?;
     assert!(!in_onesimus, "version bookkeeping stays in public");
@@ -135,28 +141,119 @@ async fn check_layout(pool: &sqlx::PgPool, owner: &str) -> Result<(), Box<dyn st
     assert_eq!(status, 1);
     let unqualified = sqlx::query("SELECT * FROM vw_job_summary").execute(pool).await;
     assert!(unqualified.is_err(), "nothing of Onesimus resolves through the default search_path");
+    check_late_bound(pool).await?;
+    let report = Migrator::new(&schema_dir()).heal(pool).await;
+    assert_eq!(report.skipped, None);
+    assert!(report.repaired.is_empty() && report.failed.is_empty(), "a healthy catalog needs no repair: {report:?}");
+    assert_eq!(report.checked, 1 + 1 + 16 + 6, "schema, table, functions, views");
     check_table(pool).await
 }
 
+/// Every column of the Onesimus views as `view|position|name|type`, exactly
+/// as v2251/v2252 created them (with typmod): v2254 must not change what
+/// callers see.
+const VIEW_COLUMNS: &[&str] = &[
+    "vw_file_list|1|fileid|bigint", "vw_file_list|2|jobid|integer", "vw_file_list|3|filepath|text",
+    "vw_file_list|4|fileindex|integer", "vw_file_list|5|markid|integer",
+    "vw_job_summary|1|jobid|integer", "vw_job_summary|2|job|text", "vw_job_summary|3|jobname|text",
+    "vw_job_summary|4|type|character(1)", "vw_job_summary|5|level|character(1)", "vw_job_summary|6|jobstatus|character(1)",
+    "vw_job_summary|7|schedtime|timestamp without time zone", "vw_job_summary|8|starttime|timestamp without time zone",
+    "vw_job_summary|9|endtime|timestamp without time zone", "vw_job_summary|10|jobfiles|integer",
+    "vw_job_summary|11|jobbytes|bigint", "vw_job_summary|12|joberrors|integer", "vw_job_summary|13|volsessionid|integer",
+    "vw_job_summary|14|volsessiontime|integer", "vw_job_summary|15|clientname|text", "vw_job_summary|16|poolname|text",
+    "vw_last_backup_per_client|1|clientname|text", "vw_last_backup_per_client|2|jobid|integer",
+    "vw_last_backup_per_client|3|jobname|text", "vw_last_backup_per_client|4|level|character(1)",
+    "vw_last_backup_per_client|5|starttime|timestamp without time zone",
+    "vw_last_backup_per_client|6|endtime|timestamp without time zone", "vw_last_backup_per_client|7|jobfiles|integer",
+    "vw_last_backup_per_client|8|jobbytes|bigint",
+    "vw_media_list|1|mediaid|integer", "vw_media_list|2|volumename|text", "vw_media_list|3|volstatus|text",
+    "vw_media_list|4|mediatype|text", "vw_media_list|5|volbytes|bigint", "vw_media_list|6|voljobs|bigint",
+    "vw_media_list|7|volfiles|bigint", "vw_media_list|8|maxvolbytes|bigint", "vw_media_list|9|poolname|text",
+    "vw_running_jobs|1|jobid|integer", "vw_running_jobs|2|job|text", "vw_running_jobs|3|jobname|text",
+    "vw_running_jobs|4|type|character(1)", "vw_running_jobs|5|level|character(1)", "vw_running_jobs|6|jobstatus|character(1)",
+    "vw_running_jobs|7|starttime|timestamp without time zone", "vw_running_jobs|8|jobfiles|integer",
+    "vw_running_jobs|9|jobbytes|bigint", "vw_running_jobs|10|joberrors|integer", "vw_running_jobs|11|clientname|text",
+    "vw_running_jobs|12|volsessionid|integer", "vw_running_jobs|13|volsessiontime|integer",
+    "vw_volume_status|1|mediaid|integer", "vw_volume_status|2|volumename|text", "vw_volume_status|3|volstatus|text",
+    "vw_volume_status|4|volbytes|bigint", "vw_volume_status|5|voljobs|bigint", "vw_volume_status|6|volfiles|bigint",
+    "vw_volume_status|7|volmounts|bigint", "vw_volume_status|8|volerrors|bigint", "vw_volume_status|9|maxvolbytes|bigint",
+    "vw_volume_status|10|mediatype|text", "vw_volume_status|11|slot|bigint", "vw_volume_status|12|poolname|text",
+    "vw_volume_status|13|pct_full|numeric",
+];
+
+/// Columns of the views in schema `onesimus` (format of [`VIEW_COLUMNS`]).
+async fn view_columns(pool: &sqlx::PgPool) -> Result<Vec<String>, sqlx::Error> {
+    sqlx::query_scalar(
+        "SELECT c.relname || '|' || a.attnum || '|' || a.attname || '|' || format_type(a.atttypid, a.atttypmod) \
+        FROM pg_attribute a JOIN pg_class c ON c.oid = a.attrelid JOIN pg_namespace n ON n.oid = c.relnamespace \
+        WHERE n.nspname = 'onesimus' AND c.relkind = 'v' AND a.attnum > 0 ORDER BY c.relname, a.attnum")
+        .fetch_all(pool).await
+}
+
+/// Every dependency recorded in `pg_depend` from an object of schema
+/// `onesimus` (relation, view rule, function, type, constraint, default)
+/// on a relation, type or function of `public`, described by PostgreSQL.
+/// Empty: Bareos may alter or drop any of its tables and columns.
+async fn public_dependencies(pool: &sqlx::PgPool) -> Result<Vec<String>, sqlx::Error> {
+    sqlx::query_scalar(
+        "WITH dep AS (SELECT d.*, \
+        CASE d.classid \
+        WHEN 'pg_class'::regclass THEN (SELECT relnamespace FROM pg_class WHERE oid = d.objid) \
+        WHEN 'pg_rewrite'::regclass THEN (SELECT c.relnamespace FROM pg_rewrite r JOIN pg_class c ON c.oid = r.ev_class WHERE r.oid = d.objid) \
+        WHEN 'pg_proc'::regclass THEN (SELECT pronamespace FROM pg_proc WHERE oid = d.objid) \
+        WHEN 'pg_type'::regclass THEN (SELECT typnamespace FROM pg_type WHERE oid = d.objid) \
+        WHEN 'pg_constraint'::regclass THEN (SELECT connamespace FROM pg_constraint WHERE oid = d.objid) \
+        WHEN 'pg_attrdef'::regclass THEN (SELECT c.relnamespace FROM pg_attrdef a JOIN pg_class c ON c.oid = a.adrelid WHERE a.oid = d.objid) \
+        END AS dep_ns, \
+        CASE d.refclassid \
+        WHEN 'pg_class'::regclass THEN (SELECT relnamespace FROM pg_class WHERE oid = d.refobjid) \
+        WHEN 'pg_proc'::regclass THEN (SELECT pronamespace FROM pg_proc WHERE oid = d.refobjid) \
+        WHEN 'pg_type'::regclass THEN (SELECT typnamespace FROM pg_type WHERE oid = d.refobjid) \
+        END AS ref_ns FROM pg_depend d) \
+        SELECT pg_describe_object(classid, objid, objsubid) || ' -> ' || pg_describe_object(refclassid, refobjid, refobjsubid) \
+        FROM dep WHERE dep_ns = 'onesimus'::regnamespace AND ref_ns = 'public'::regnamespace ORDER BY 1")
+        .fetch_all(pool).await
+}
+
+/// v2254: no Onesimus object depends on a Bareos table, each view reads
+/// only its function, and the view columns are unchanged.
+async fn check_late_bound(pool: &sqlx::PgPool) -> Result<(), Box<dyn std::error::Error>> {
+    assert_eq!(public_dependencies(pool).await?, Vec::<String>::new());
+    assert_eq!(view_columns(pool).await?, VIEW_COLUMNS);
+    let reads: Vec<String> = sqlx::query_scalar(
+        "SELECT DISTINCT c.relname || ' -> ' || CASE d.refclassid \
+           WHEN 'pg_proc'::regclass THEN 'function ' || d.refobjid::regprocedure::text \
+           WHEN 'pg_class'::regclass THEN 'relation ' || d.refobjid::regclass::text \
+           ELSE d.refclassid::regclass::text END \
+        FROM pg_rewrite r JOIN pg_class c ON c.oid = r.ev_class JOIN pg_namespace n ON n.oid = c.relnamespace \
+        JOIN pg_depend d ON d.classid = 'pg_rewrite'::regclass AND d.objid = r.oid AND d.refobjid <> c.oid \
+        WHERE n.nspname = 'onesimus' ORDER BY 1").fetch_all(pool).await?;
+    let expected: Vec<String> = ["vw_file_list", "vw_job_summary", "vw_last_backup_per_client", "vw_media_list",
+        "vw_running_jobs", "vw_volume_status"].iter()
+        .map(|v| format!("{v} -> function onesimus.fn_{v}()")).collect();
+    assert_eq!(reads, expected, "each view depends on its function only");
+    Ok(())
+}
+
 /// A fresh catalog: v2251/v2252 create directly in `onesimus` (v2253 moves
-/// nothing), the Bareos `version` stays 2250, every step is recorded; a
-/// second start is a no-op.
+/// nothing, v2254 makes the views late-bound), the Bareos `version` stays
+/// 2250, every step is recorded; a second start is a no-op.
 #[tokio::test]
 #[ignore = "needs BAREOS_ORM_TEST_DB=<postgres url of a throw-away cluster>"]
 async fn fresh_catalog_gets_the_onesimus_schema() {
     in_database("ons_fresh", |pool| async move {
         let migrator = Migrator::new(&schema_dir());
-        assert_eq!(migrator.migrate(&pool).await?, 4);
+        assert_eq!(migrator.migrate(&pool).await?, 5);
         let ours: Vec<i32> = sqlx::query_scalar("SELECT version FROM bareos_schema_version ORDER BY version")
             .fetch_all(&pool).await?;
-        assert_eq!(ours, [2250, 2251, 2252, 2253]);
+        assert_eq!(ours, [2250, 2251, 2252, 2253, 2254]);
         let user: String = sqlx::query_scalar("SELECT current_user::text").fetch_one(&pool).await?;
         check_layout(&pool, &user).await?;
         assert_eq!(migrator.migrate(&pool).await?, 0);
         let rows: i64 = sqlx::query_scalar("SELECT count(*) FROM onesimus.console_acl").fetch_one(&pool).await?;
         assert_eq!(rows, 1);
         let steps: i64 = sqlx::query_scalar("SELECT count(*) FROM bareos_schema_version").fetch_one(&pool).await?;
-        assert_eq!(steps, 4, "a second start records nothing");
+        assert_eq!(steps, 5, "a second start records nothing");
         Ok(())
     }).await;
 }
@@ -189,7 +286,7 @@ async fn catalog_at_2252_moves_its_objects_to_onesimus() {
         sqlx::query(&format!("GRANT SELECT ON vw_job_summary TO {reader}")).execute(&pool).await?;
 
         let migrator = Migrator::new(&schema_dir());
-        assert_eq!(migrator.migrate(&pool).await?, 1);
+        assert_eq!(migrator.migrate(&pool).await?, 2, "v2253 and v2254");
         check_layout(&pool, &role).await?;
         let report: i64 = sqlx::query_scalar("SELECT count(*) FROM public.my_report").fetch_one(&pool).await?;
         assert_eq!(report, 1, "the operator's view follows the moved view");
@@ -210,7 +307,7 @@ async fn catalog_at_2252_moves_its_objects_to_onesimus() {
 }
 
 /// A catalog created by the Bareos DDL alone (`version` 2250, no
-/// `bareos_schema_version`): v2251..v2253 create everything in `onesimus`.
+/// `bareos_schema_version`): v2251..v2254 create everything in `onesimus`.
 #[tokio::test]
 #[ignore = "needs BAREOS_ORM_TEST_DB=<postgres url of a throw-away cluster>"]
 async fn bareos_ddl_catalog_gets_the_onesimus_schema() {
@@ -219,7 +316,7 @@ async fn bareos_ddl_catalog_gets_the_onesimus_schema() {
             Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/data/bareos-18be77e6-creates-postgresql.sql"))?;
         sqlx::raw_sql(&ddl).execute(&pool).await?;
         let migrator = Migrator::new(&schema_dir());
-        assert_eq!(migrator.migrate(&pool).await?, 3);
+        assert_eq!(migrator.migrate(&pool).await?, 4);
         let user: String = sqlx::query_scalar("SELECT current_user::text").fetch_one(&pool).await?;
         check_layout(&pool, &user).await?;
         assert_eq!(migrator.migrate(&pool).await?, 0);
@@ -245,7 +342,7 @@ async fn partly_moved_catalog_is_completed() {
         sqlx::query("CREATE FUNCTION onesimus.fn_director_status() RETURNS TABLE(total_jobs bigint, running bigint, \
                      successful bigint, errors bigint, total_bytes bigint, total_files bigint) AS $$ SELECT 0::bigint, \
                      0::bigint, 0::bigint, 0::bigint, 0::bigint, 0::bigint $$ LANGUAGE sql").execute(&pool).await?;
-        assert_eq!(Migrator::new(&schema_dir()).migrate(&pool).await?, 1);
+        assert_eq!(Migrator::new(&schema_dir()).migrate(&pool).await?, 2);
         let user: String = sqlx::query_scalar("SELECT current_user::text").fetch_one(&pool).await?;
         // check_layout also proves the stub fn_director_status was replaced
         // by the shipped definition (total_jobs counts the job).
@@ -280,7 +377,7 @@ async fn missing_create_privilege_fails_without_recording() {
         assert_eq!(onesimus_objects_in(&pool, "public").await?.len(), OBJECTS.len());
 
         sqlx::query(&format!("CREATE SCHEMA onesimus AUTHORIZATION {role}")).execute(&owner_pool).await?;
-        assert_eq!(migrator.migrate(&pool).await?, 1);
+        assert_eq!(migrator.migrate(&pool).await?, 2);
         check_layout(&pool, &role).await?;
         Ok::<_, Box<dyn std::error::Error>>(())
     }.await;
@@ -289,4 +386,167 @@ async fn missing_create_privilege_fails_without_recording() {
     db.drop().await;
     sqlx::query(&format!("DROP ROLE IF EXISTS {role}")).execute(&admin).await.unwrap();
     result.unwrap();
+}
+
+/// One client and one successful backup job of it, for the view probes.
+async fn insert_job(pool: &sqlx::PgPool) -> Result<(), sqlx::Error> {
+    sqlx::query("INSERT INTO client (name, uname, autoprune, fileretention, jobretention) VALUES ('fd9', '', 1, 1, 1)")
+        .execute(pool).await?;
+    sqlx::query("INSERT INTO job (job, name, type, level, clientid, jobstatus, jobtdate, jobfiles) \
+                 SELECT 'j.9', 'j', 'B', 'F', clientid, 'T', 0, 7 FROM client WHERE name = 'fd9'")
+        .execute(pool).await?;
+    Ok(())
+}
+
+/// The DDL of a Bareos upgrade (`update_bareos_tables`) on a production-like
+/// catalog (v2252 with the objects in `public`, migrated through v2253 and
+/// v2254): ALTER COLUMN TYPE and DROP COLUMN on columns the views read,
+/// DROP TABLE of tables they read — all succeed with the extension
+/// installed. A changed type is absorbed by the casts (view columns stay);
+/// a dropped column only breaks the functions reading it (self-heal reports
+/// them, cannot repair, never fails), and they work again once the column
+/// is back.
+#[tokio::test]
+#[ignore = "needs BAREOS_ORM_TEST_DB=<postgres url of a throw-away cluster>"]
+async fn bareos_upgrade_ddl_is_not_blocked_by_the_extension() {
+    in_database("ons_upgrade", |pool| async move {
+        migrate_pre_2253(&pool, "upgrade").await?;
+        let migrator = Migrator::new(&schema_dir());
+        assert_eq!(migrator.migrate(&pool).await?, 2);
+        check_late_bound(&pool).await?;
+        insert_job(&pool).await?;
+
+        // Type change of a column every job view reads.
+        sqlx::query("ALTER TABLE public.job ALTER COLUMN jobfiles TYPE bigint").execute(&pool).await?;
+        sqlx::query("ALTER TABLE public.media ALTER COLUMN volbytes TYPE numeric(20)").execute(&pool).await?;
+        let files: i32 = sqlx::query_scalar("SELECT jobfiles FROM onesimus.vw_job_summary WHERE clientname = 'fd9'")
+            .fetch_one(&pool).await?;
+        assert_eq!(files, 7);
+        sqlx::query("SELECT * FROM onesimus.vw_volume_status").execute(&pool).await?;
+        assert_eq!(view_columns(&pool).await?, VIEW_COLUMNS, "the casts keep the view columns");
+        let report = migrator.heal(&pool).await;
+        assert!(report.repaired.is_empty() && report.failed.is_empty(), "{report:?}");
+
+        // DROP COLUMN of a column no view reads, and DROP TABLE of tables
+        // views read (in a transaction rolled back: the test needs them).
+        sqlx::query("ALTER TABLE public.job DROP COLUMN comment").execute(&pool).await?;
+        let mut tx = pool.begin().await?;
+        sqlx::query("DROP TABLE public.file").execute(&mut *tx).await?;
+        sqlx::query("DROP TABLE public.path").execute(&mut *tx).await?;
+        sqlx::query("ALTER TABLE public.job DROP COLUMN jobstatus").execute(&mut *tx).await?;
+        tx.rollback().await?;
+
+        // DROP COLUMN of a column two views read: not blocked; the functions
+        // reading it fail until the column is back.
+        sqlx::query("ALTER TABLE public.job DROP COLUMN joberrors").execute(&pool).await?;
+        assert!(sqlx::query("SELECT * FROM onesimus.vw_job_summary").execute(&pool).await.is_err());
+        let report = migrator.heal(&pool).await;
+        assert_eq!(report.skipped, None);
+        assert!(report.repaired.is_empty(), "{report:?}");
+        let failed = report.failed.join("\n");
+        for object in ["function onesimus.fn_vw_job_summary", "function onesimus.fn_vw_running_jobs",
+                       "view onesimus.vw_job_summary", "view onesimus.vw_running_jobs"] {
+            assert!(failed.contains(object), "{object} in {failed}");
+        }
+        assert_eq!(report.failed.len(), 4, "{failed}");
+        let summary: Option<i32> = sqlx::query_scalar("SELECT to_regprocedure('onesimus.fn_vw_job_summary()')::oid::int")
+            .fetch_one(&pool).await?;
+        assert!(summary.is_some(), "a failed repair leaves the function in place");
+        sqlx::query("ALTER TABLE public.job ADD COLUMN joberrors integer NOT NULL DEFAULT 0").execute(&pool).await?;
+        let report = migrator.heal(&pool).await;
+        assert!(report.repaired.is_empty() && report.failed.is_empty(), "{report:?}");
+        let jobs: i64 = sqlx::query_scalar("SELECT count(*) FROM onesimus.vw_job_summary").fetch_one(&pool).await?;
+        assert_eq!(jobs, 1);
+        check_late_bound(&pool).await
+    }).await;
+}
+
+/// Self-heal at start: dropped views, functions and the ACL table come
+/// back, an edited function body and a changed result type are replaced
+/// (DROP + CREATE together with the shipped view depending on it), a view
+/// put back in its old direct form is made late-bound again. An operator's
+/// own view on a function that needs DROP blocks only that repair. A second
+/// run changes nothing.
+#[tokio::test]
+#[ignore = "needs BAREOS_ORM_TEST_DB=<postgres url of a throw-away cluster>"]
+async fn self_heal_restores_missing_and_broken_objects() {
+    in_database("ons_heal", |pool| async move {
+        let migrator = Migrator::new(&schema_dir());
+        migrator.migrate(&pool).await?;
+        let user: String = sqlx::query_scalar("SELECT current_user::text").fetch_one(&pool).await?;
+        for sql in [
+            "DROP VIEW onesimus.vw_file_list",
+            "DROP FUNCTION onesimus.fn_vw_volume_status() CASCADE",
+            "DROP FUNCTION onesimus.sp_purge_volume(text)",
+            "DROP TABLE onesimus.console_acl",
+            "CREATE OR REPLACE FUNCTION onesimus.fn_director_status() RETURNS TABLE(total_jobs bigint, running bigint, \
+             successful bigint, errors bigint, total_bytes bigint, total_files bigint) AS $$ SELECT 0::bigint, 0::bigint, \
+             0::bigint, 0::bigint, 0::bigint, 0::bigint $$ LANGUAGE sql",
+            // Result type changed, with the shipped view on it.
+            "DROP VIEW onesimus.vw_media_list",
+            "DROP FUNCTION onesimus.fn_vw_media_list()",
+            "CREATE FUNCTION onesimus.fn_vw_media_list() RETURNS TABLE(mediaid integer) AS $$ SELECT 1 $$ LANGUAGE sql",
+            "CREATE VIEW onesimus.vw_media_list AS SELECT mediaid FROM onesimus.fn_vw_media_list()",
+            // The pre-v2254 direct form (same columns).
+            "CREATE OR REPLACE VIEW onesimus.vw_last_backup_per_client AS SELECT DISTINCT ON (c.name) c.name AS clientname, \
+             j.jobid, j.name AS jobname, j.level, j.starttime, j.endtime, j.jobfiles, j.jobbytes FROM job j \
+             JOIN client c ON j.clientid = c.clientid WHERE j.type = 'B' AND j.jobstatus = 'T' ORDER BY c.name, j.starttime DESC",
+            // Result type changed, an operator's view on it.
+            "DROP FUNCTION onesimus.fn_find_latest_backup(text)",
+            "CREATE FUNCTION onesimus.fn_find_latest_backup(p_client_name text) RETURNS bigint AS $$ SELECT 1::bigint $$ LANGUAGE sql",
+            "CREATE VIEW public.my_latest AS SELECT onesimus.fn_find_latest_backup('fd9') AS id",
+        ] {
+            sqlx::query(sql).execute(&pool).await?;
+        }
+        assert!(!public_dependencies(&pool).await?.is_empty(), "the direct view form depends on public tables");
+
+        let report = migrator.heal(&pool).await;
+        let repaired = report.repaired.join("\n");
+        for line in [
+            "table onesimus.console_acl: missing",
+            "function onesimus.fn_vw_volume_status: missing",
+            "function onesimus.sp_purge_volume: missing",
+            "function onesimus.fn_director_status: body differs from the shipped definition",
+            "function onesimus.fn_vw_media_list: returns TABLE(mediaid integer), shipped TABLE(mediaid integer, volumename text",
+            "view onesimus.vw_file_list: missing",
+            "view onesimus.vw_volume_status: missing",
+            "view onesimus.vw_last_backup_per_client: reads public.client, public.job directly (blocks Bareos upgrades)",
+        ] {
+            assert!(repaired.contains(line), "{line} in\n{repaired}");
+        }
+        assert_eq!(report.repaired.len(), 8, "{repaired}");
+        assert_eq!(report.failed.len(), 1, "{report:?}");
+        assert!(report.failed[0].starts_with("function onesimus.fn_find_latest_backup: returns bigint, shipped integer:")
+            && report.failed[0].contains("public.my_latest (not shipped) depends on it"), "{}", report.failed[0]);
+
+        sqlx::query("DROP VIEW public.my_latest").execute(&pool).await?;
+        let report = migrator.heal(&pool).await;
+        assert_eq!(report.repaired, ["function onesimus.fn_find_latest_backup: returns bigint, shipped integer"]);
+        assert!(report.failed.is_empty());
+        let report = migrator.heal(&pool).await;
+        assert!(report.repaired.is_empty() && report.failed.is_empty(), "second run: {report:?}");
+        check_layout(&pool, &user).await
+    }).await;
+}
+
+/// Self-heal only touches a catalog at exactly the shipped step: below, the
+/// migration is incomplete; above, a newer odir owns the definitions.
+#[tokio::test]
+#[ignore = "needs BAREOS_ORM_TEST_DB=<postgres url of a throw-away cluster>"]
+async fn self_heal_skips_catalogs_at_another_step() {
+    in_database("ons_heal_skip", |pool| async move {
+        migrate_pre_2253(&pool, "heal-skip").await?;
+        let migrator = Migrator::new(&schema_dir());
+        let report = migrator.heal(&pool).await;
+        assert!(report.skipped.as_deref().is_some_and(|s| s.contains("migration incomplete")), "{report:?}");
+        assert_eq!(report.checked, 0);
+        migrator.migrate(&pool).await?;
+        sqlx::query("DROP VIEW onesimus.vw_file_list").execute(&pool).await?;
+        sqlx::query("INSERT INTO bareos_schema_version (version) VALUES ($1)").bind(LATEST + 1).execute(&pool).await?;
+        let report = migrator.heal(&pool).await;
+        assert!(report.skipped.as_deref().is_some_and(|s| s.contains("newer odir")), "{report:?}");
+        let gone: bool = sqlx::query_scalar("SELECT to_regclass('onesimus.vw_file_list') IS NULL").fetch_one(&pool).await?;
+        assert!(gone, "not touched");
+        Ok(())
+    }).await;
 }

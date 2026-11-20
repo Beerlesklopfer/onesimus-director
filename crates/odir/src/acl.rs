@@ -566,13 +566,16 @@ User {Name=limited; CommandACL=*all*}"#).unwrap();
         assert!(has_restrictions(&ctx, Kind::Client) && !no_restrictions(&ctx, Kind::Client));
         config.read().unwrap().catalog_acl.set_for_test(LoadState::Loaded, &[("limited", Kind::Pool, &["!x"])]);
         assert!(!has_restrictions(&ctx, Kind::Client) && no_restrictions(&ctx, Kind::Client), "no client entries");
-        // Locked (F-4): only status, .status and version, nothing else.
+        // Locked (F-4): only status, .status, version and .api (output
+        // format only), nothing else; .help stays locked.
         config.read().unwrap().catalog_acl.set_for_test(LoadState::Failed("down".into()), &[
             ("limited", Kind::Pool, &["!x"]),
         ]);
         let cfg = config.read().unwrap();
         assert!(allowed(&cfg, "limited", Kind::Command, "version"));
         assert!(!allowed(&cfg, "limited", Kind::Command, "help"));
+        assert!(catalog_allowed(&cfg, "limited", Kind::Command, ".api"), "API clients switch the format first");
+        assert!(!allowed(&cfg, "limited", Kind::Command, ".help"), "in the file ACL, but locked");
         assert!(!allowed(&cfg, "limited", Kind::Client, "fd-one"));
         assert!(!any_allowed(&cfg, "limited", Kind::Job) && any_allowed(&cfg, "limited", Kind::Command));
         assert!(allowed(&cfg, "*UserAgent*", Kind::Job, "any"), "default console never locked");
