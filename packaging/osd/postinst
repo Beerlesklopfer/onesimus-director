@@ -38,7 +38,7 @@ case "$1" in
 
         systemctl daemon-reload 2>/dev/null || true
         echo ""
-        echo "Onesimus Storage Daemon installiert (Stand P0: nur Konfigurationspruefung)."
+        echo "Onesimus Storage Daemon installiert (Stand P1 Stufe 1: Backup auf File-Devices, noch kein Restore)."
         echo "  Storage Daemon: /usr/sbin/osd"
         echo "  Config:         /etc/bareos/bareos-sd.d/"
         echo "  Pruefen:        osd -t -c /etc/bareos/bareos-sd.d"

@@ -2367,9 +2367,15 @@ dependencies = [
 name = "osd-daemon"
 version = "25.1.2+onesimus.0.2.0"
 dependencies = [
+ "bareos-bnet",
  "bareos-config",
+ "bareos-format",
  "clap",
+ "libc",
+ "nix 0.29.0",
  "onesimus-daemon",
+ "osd",
+ "osd-ring",
  "tracing",
 ]
 

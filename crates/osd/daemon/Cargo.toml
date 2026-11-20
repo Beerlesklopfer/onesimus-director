@@ -1,6 +1,6 @@
 [package]
 name = "osd-daemon"
-description = "Onesimus Storage Daemon (binary osd) — Rust replacement for the Bareos Storage Daemon; P0: configuration check only"
+description = "Onesimus Storage Daemon (binary osd) — Rust replacement for the Bareos Storage Daemon; P1 stage 1: backup to File devices over BNET"
 version.workspace = true
 edition.workspace = true
 authors.workspace = true
@@ -18,9 +18,15 @@ path = "src/main.rs"
 doc = false
 
 [dependencies]
+bareos-bnet.workspace = true
 bareos-config.workspace = true
+bareos-format.workspace = true
 onesimus-daemon.workspace = true
+osd.workspace = true
+osd-ring.workspace = true
 clap.workspace = true
+libc.workspace = true
+nix.workspace = true
 tracing.workspace = true
 
 [package.metadata.deb]
@@ -31,7 +37,8 @@ license-file = ["../../../packaging/copyright", "0"]
 extended-description = """\
 Storage Daemon written in Rust, to replace the Bareos Storage Daemon.
 Reads /etc/bareos/bareos-sd.d/ config tree (Bareos-compatible).
-Development state P0: only the configuration check (osd -t) works; the
+Development state P1 stage 1: backup to File devices over BNET (active and
+passive clients, Bareos volume format); restore follows in stage 2. The
 service is installed but neither enabled nor started.
 .
 Binary: /usr/sbin/osd
@@ -40,7 +47,7 @@ section = "admin"
 priority = "optional"
 depends = "$auto"
 maintainer-scripts = "../../../packaging/osd"
-# Not enabled or started before P1: without networking osd exits with 2.
+# Not enabled or started while osd cannot restore (P1 stage 2).
 systemd-units = { unit-name = "osd", unit-scripts = "../../../packaging/osd", enable = false, start = false }
 # M7/M8: `target/…` is relative to the workspace, everything else to this
 # package directory (three levels below the root).

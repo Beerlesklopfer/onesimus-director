@@ -1,4 +1,5 @@
-//! `osd -t` and the P0 behaviour of the binary on sample configurations.
+//! `osd -t`, the osd.d overlay and the running daemon seen from a Director
+//! (the interface crate `osd` connects as odir does).
 
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
@@ -67,12 +68,80 @@ fn t_rejects_a_broken_config_with_1() {
 }
 
 #[test]
-fn without_t_osd_is_pending_p1() {
-    let dir = scratch("run");
+fn t_reports_an_orphaned_osd_d_extension() {
+    let dir = scratch("orphan");
     shipped_config(&dir);
-    let out = osd(&["-f", "-d", "100", "-v", "-c", dir.to_str().unwrap()]);
-    assert_eq!(out.status.code(), Some(2));
-    assert!(String::from_utf8_lossy(&out.stderr).contains("osd: P1 pending"));
+    std::fs::create_dir_all(dir.join("osd.d/device")).unwrap();
+    std::fs::write(dir.join("osd.d/device/Nope.conf"), "Device {\n Name = Nope\n Ring Slots = 4\n}\n").unwrap();
+    let out = osd(&["-t", "-c", dir.to_str().unwrap()]);
+    assert_eq!(out.status.code(), Some(1));
+    assert!(String::from_utf8_lossy(&out.stderr).contains("Device \"Nope\" extends no Device of that name in bareos-sd.d"));
+    std::fs::write(dir.join("osd.d/device/Nope.conf"), "Device {\n Name = FileStorage\n Ring Slots = 4\n}\n").unwrap();
+    assert_eq!(osd(&["-t", "-c", dir.to_str().unwrap()]).status.code(), Some(0));
+    std::fs::remove_dir_all(&dir).ok();
+}
+
+/// A free TCP port on 127.0.0.1.
+fn free_port() -> u16 {
+    std::net::TcpListener::bind("127.0.0.1:0").unwrap().local_addr().unwrap().port()
+}
+
+/// Sends `cmd` and collects the answer up to EOD.
+fn ask(sd: &mut bareos_bnet::BnetStream<bareos_bnet::tls_psk::PskStream>, cmd: &str) -> String {
+    sd.send_str(cmd).unwrap();
+    let mut out = String::new();
+    loop {
+        match sd.recv() {
+            Ok(bareos_bnet::BnetMessage::Data(d)) => out.push_str(&String::from_utf8_lossy(&d)),
+            Ok(bareos_bnet::BnetMessage::Signal(bareos_bnet::BnetSignal::Eod)) => return out,
+            Ok(bareos_bnet::BnetMessage::Signal(_)) | Err(_) => return out,
+        }
+    }
+}
+
+#[test]
+fn daemon_answers_a_director_and_labels_a_volume() {
+    let dir = scratch("run");
+    let tree = shipped_config(&dir);
+    let port = free_port();
+    let storage = dir.join("storage");
+    std::fs::create_dir_all(&storage).unwrap();
+    let conf = std::fs::read_to_string(tree.join("storage/bareos-sd.conf")).unwrap()
+        .replace("# SD Port = 9103", &format!("SD Port = {port}\n  SD Address = 127.0.0.1"))
+        .replace("Working Directory = /var/lib/bareos", &format!("Working Directory = {}", dir.display()));
+    std::fs::write(tree.join("storage/bareos-sd.conf"), conf).unwrap();
+    let dev = std::fs::read_to_string(tree.join("device/FileStorage.conf")).unwrap()
+        .replace("/var/lib/bareos/storage", storage.to_str().unwrap());
+    std::fs::write(tree.join("device/FileStorage.conf"), dev).unwrap();
+    let mut child = Command::new(env!("CARGO_BIN_EXE_osd")).args(["-f", "-c", dir.to_str().unwrap()]).spawn().unwrap();
+    let mut sd = None;
+    for _ in 0..100 {
+        match osd::connect::connect_sd("127.0.0.1", port, "secret", "bareos-dir") {
+            Ok(s) => {
+                sd = Some(s);
+                break;
+            }
+            Err(_) => std::thread::sleep(std::time::Duration::from_millis(100)),
+        }
+    }
+    let mut sd = sd.expect("osd answers on its SD port");
+    let header = ask(&mut sd, ".status header");
+    assert!(header.starts_with("test-sd Version: "), "{header}");
+    let label = ask(&mut sd, "label FileStorage VolumeName=Vol-1 PoolName=Full MediaType=File Slot=0 drive=0 MinBlocksize=0 MaxBlocksize=0");
+    assert!(label.starts_with("3000 OK label. VolFiles=0 VolBytes="), "{label}");
+    assert!(label.contains("Volume=\"Vol-1\" Device=\"FileStorage\""), "{label}");
+    let again = ask(&mut sd, "label FileStorage VolumeName=Vol-1 PoolName=Full MediaType=File Slot=0 drive=0 MinBlocksize=0 MaxBlocksize=0");
+    assert_eq!(again, "3920 Cannot label Volume because it is already labeled: \"Vol-1\"\n");
+    let volume = std::fs::read(storage.join("Vol-1")).unwrap();
+    let summary = bareos_format::volume::summarize(&volume).unwrap();
+    assert_eq!((summary.label.volume_name.as_str(), summary.label.label_prog.as_str()), ("Vol-1", "test-sd"));
+    assert!(ask(&mut sd, "mount FileStorage drive=0").starts_with("3906 File device \"FileStorage\""));
+    assert!(ask(&mut sd, "release FileStorage drive=0").starts_with("3921 Device"));
+    let unknown = ask(&mut sd, "frobnicate");
+    assert_eq!(unknown, "3900 Invalid command: frobnicate\n");
+    // SIGTERM ends the daemon with 0
+    unsafe { libc::kill(child.id() as i32, libc::SIGTERM) };
+    assert_eq!(child.wait().unwrap().code(), Some(0));
     std::fs::remove_dir_all(&dir).ok();
 }
 
