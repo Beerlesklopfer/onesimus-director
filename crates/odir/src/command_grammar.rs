@@ -24,6 +24,8 @@
 //!   asks for most missing values interactively, so a line without them is
 //!   not refused by the grammar ([`validate`]).
 
+#![warn(clippy::missing_docs_in_private_items)]
+
 use std::collections::HashMap;
 
 use serde_json::{json, Value};
@@ -178,6 +180,7 @@ pub struct Node {
 
 // --- Builders: keep the grammar table readable ------------------------------------
 
+/// An optional, single argument; the builders below set the kind and type.
 fn arg(name: &str, kind: ArgKind, arg_type: ArgType, description: &str, values: Values) -> GrammarArg {
     GrammarArg {
         name: name.to_string(),

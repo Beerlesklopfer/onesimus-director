@@ -1,6 +1,8 @@
 //! `.grammar` (Onesimus extension): the console grammar for clients
 //! ([`crate::command_grammar`]).
 
+#![warn(clippy::missing_docs_in_private_items)]
+
 use crate::command_ast::CommandAst;
 use crate::command_executor::{ApiMode, ExecContext};
 use crate::command_grammar::{find_root, grammar_json, grammar_text, permitted_roots, roots, Node};

@@ -10,6 +10,7 @@
 - [Signierbare Plugin-Architektur](plugin-architektur.md)
 - [Befehlsübersicht](commands/README.md)
 - [MCP-Server von oconsole (Tools mit Beispielen)](mcp.md)
+- [oconsole: Vervollständigung, Vorschläge und Tasten](oconsole-vervollstaendigung.md)
 - [Typisierte gRPC-API (DirectorApi)](grpc-api.md)
 - [Architekturvergleich Bareos-Director (C++) und Onesimus-Director (Rust)](architektur-vergleich.md)
 - [Bareos-Originalreferenz und Vollständigkeitsabgleich](commands/bareos-reference.md)

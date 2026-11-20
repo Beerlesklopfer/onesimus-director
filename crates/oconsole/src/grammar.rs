@@ -6,6 +6,8 @@
 //! [`Grammar`] and a [`ValueCache`] and calls [`complete`] and [`suggest`]
 //! from its Completer and Hinter.
 
+#![warn(clippy::missing_docs_in_private_items)]
+
 use std::collections::HashMap;
 
 use serde_json::Value;
@@ -109,14 +111,17 @@ pub struct Grammar {
 /// Values of dot-commands: ".clients" -> ["PDC-fd", ...].
 pub type ValueCache = HashMap<String, Vec<String>>;
 
+/// The string field `key` of a JSON object, empty if missing.
 fn text(value: &Value, key: &str) -> String {
     value[key].as_str().unwrap_or("").to_string()
 }
 
+/// A JSON array of strings (other elements skipped).
 fn strings(value: &Value) -> Vec<String> {
     value.as_array().map(|a| a.iter().filter_map(|v| v.as_str().map(str::to_string)).collect()).unwrap_or_default()
 }
 
+/// One argument of the `.grammar` JSON; None without a name.
 fn arg_from_json(value: &Value) -> Option<Arg> {
     let name = value["name"].as_str()?.to_string();
     let values = if let Some(values) = value["values"].as_array() {
@@ -142,6 +147,7 @@ fn arg_from_json(value: &Value) -> Option<Arg> {
     })
 }
 
+/// One node of the `.grammar` JSON with its subtree; None without a word.
 fn node_from_json(value: &Value) -> Option<Node> {
     Some(Node {
         word: value["word"].as_str()?.to_string(),
@@ -199,10 +205,9 @@ impl Grammar {
     pub fn value_sources(&self) -> Vec<String> {
         fn collect(node: &Node, out: &mut Vec<String>) {
             for arg in node.value.iter().map(|b| b.as_ref()).chain(node.args.iter()) {
-                if let Values::Source(source) = &arg.values {
-                    if source.starts_with('.') && !out.contains(source) {
-                        out.push(source.clone());
-                    }
+                match &arg.values {
+                    Values::Source(source) if source.starts_with('.') && !out.contains(source) => out.push(source.clone()),
+                    _ => {}
                 }
             }
             for sub in &node.subs {
@@ -231,6 +236,7 @@ impl Grammar {
     }
 }
 
+/// A node without arguments and subcommands.
 fn plain_node(word: &str, description: &str) -> Node {
     Node {
         word: word.to_string(), aliases: Vec::new(), description: description.to_string(), dot: word.starts_with('.'),
@@ -409,15 +415,18 @@ pub struct Candidate {
     pub display: String,
 }
 
+/// A candidate shown as `replacement  -- description`.
 fn candidate(replacement: String, description: &str) -> Candidate {
     let display = if description.is_empty() { replacement.clone() } else { format!("{replacement:<22} -- {description}") };
     Candidate { replacement, display }
 }
 
+/// A value in double quotes when it contains blanks (Bareos quoting).
 fn quote(value: &str) -> String {
     if value.contains(char::is_whitespace) { format!("\"{value}\"") } else { value.to_string() }
 }
 
+/// Case-insensitive `starts_with`.
 fn starts_with_ci(text: &str, prefix: &str) -> bool {
     text.len() >= prefix.len() && text.is_char_boundary(prefix.len()) && text[..prefix.len()].eq_ignore_ascii_case(prefix)
 }
@@ -453,6 +462,7 @@ impl<'g> Position<'g> {
         self.path[self.path.len() - 1]
     }
 
+    /// How often the argument `name` was given.
     fn count(&self, name: &str) -> usize {
         self.used.iter().filter(|u| u.eq_ignore_ascii_case(name)).count()
     }
@@ -527,25 +537,27 @@ pub fn complete(grammar: &Grammar, cache: &ValueCache, line: &str, pos: usize) -
     let scope = position.scope();
 
     // a value after `key=`
-    if let Some(token) = partial {
-        if let (key, Some(_)) = token.key_value() {
-            let raw_value = &token.text[key.len() + 1..];
-            let node = position.node();
-            let target = node.subs.iter().find(|s| s.is_named(&key)).and_then(|s| s.value.as_deref())
-                .or_else(|| scope.iter().copied().find(|a| !a.positional && a.kind == Kind::Value && a.name.eq_ignore_ascii_case(&key)));
-            let Some(arg) = target else { return (pos, Vec::new()) };
-            let (done_values, current) = match (arg.list, raw_value.rfind(',')) {
-                (true, Some(comma)) => (&raw_value[..=comma], &raw_value[comma + 1..]),
-                _ => ("", raw_value),
-            };
-            let given: Vec<String> = done_values.split(',').map(|v| v.trim_matches('"').to_string()).collect();
-            let current_bare = current.trim_start_matches('"');
-            let mut values: Vec<Candidate> = values_of(grammar, cache, arg).into_iter()
-                .filter(|v| starts_with_ci(v, current_bare) && !given.contains(v))
-                .map(|v| Candidate { replacement: quote(&v), display: v }).collect();
-            values.dedup();
-            return (token.start + key.len() + 1 + done_values.len(), values);
-        }
+    let with_value = partial.and_then(|t| match t.key_value() {
+        (key, Some(_)) => Some((t, key)),
+        _ => None,
+    });
+    if let Some((token, key)) = with_value {
+        let raw_value = &token.text[key.len() + 1..];
+        let node = position.node();
+        let target = node.subs.iter().find(|s| s.is_named(&key)).and_then(|s| s.value.as_deref())
+            .or_else(|| scope.iter().copied().find(|a| !a.positional && a.kind == Kind::Value && a.name.eq_ignore_ascii_case(&key)));
+        let Some(arg) = target else { return (pos, Vec::new()) };
+        let (done_values, current) = match (arg.list, raw_value.rfind(',')) {
+            (true, Some(comma)) => (&raw_value[..=comma], &raw_value[comma + 1..]),
+            _ => ("", raw_value),
+        };
+        let given: Vec<String> = done_values.split(',').map(|v| v.trim_matches('"').to_string()).collect();
+        let current_bare = current.trim_start_matches('"');
+        let mut values: Vec<Candidate> = values_of(grammar, cache, arg).into_iter()
+            .filter(|v| starts_with_ci(v, current_bare) && !given.contains(v))
+            .map(|v| Candidate { replacement: quote(&v), display: v }).collect();
+        values.dedup();
+        return (token.start + key.len() + 1 + done_values.len(), values);
     }
 
     // subcommand words, keywords, `key=`, positional values
@@ -596,6 +608,7 @@ pub struct Suggestion {
 }
 
 impl Suggestion {
+    /// A suggestion that is shown and inserted when accepted.
     fn insert(text: &str) -> Suggestion {
         Suggestion { display: text.to_string(), completion: Some(text.to_string()) }
     }
@@ -651,6 +664,7 @@ fn usage_hint(grammar: &Grammar, line: &str) -> Option<String> {
 
 // --- Usage lines and help text (the same text as odir's manpages::help_text) -----
 
+/// The placeholder of a value (`<name>`, short fixed lists as `<a|b>`), as odir writes it.
 fn placeholder(arg: &Arg) -> String {
     let inner = match &arg.values {
         Values::Fixed(_) if arg.arg_type == "bool" => "yes|no".to_string(),
@@ -723,6 +737,7 @@ pub fn usage_lines(node: &Node, prefix: &str) -> Vec<String> {
     lines
 }
 
+/// The description of an argument in the help text, as odir writes it.
 fn argument_item(arg: &Arg) -> String {
     let mut parts = Vec::new();
     parts.push(match (arg.kind, arg.positional, arg.arg_type.as_str()) {
@@ -761,6 +776,7 @@ fn argument_item(arg: &Arg) -> String {
     parts.join("; ")
 }
 
+/// Every node below `node` with its full path (`purge volume`), depth first.
 fn paths<'a>(node: &'a Node, prefix: &str, out: &mut Vec<(String, &'a Node)>) {
     let path = if prefix.is_empty() { node.word.clone() } else { format!("{prefix} {}", word_usage(node)) };
     out.push((path.clone(), node));

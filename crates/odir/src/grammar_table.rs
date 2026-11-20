@@ -14,28 +14,48 @@
 //! Keep this table in step with the handlers: the test
 //! `grammar_accepts_the_parity_cases` walks every parity case line.
 
+#![warn(clippy::missing_docs_in_private_items)]
+
 use crate::command_grammar::{boolean, enm, int, kw, pos, res, sub, val, vsub, GrammarArg, Node, COMMANDS_SOURCE};
 
 // Value sources (dot-commands whose output lines are the values).
+/// Value source `.clients`.
 const CLIENTS: &str = ".clients";
+/// Value source `.jobs`.
 const JOBS: &str = ".jobs";
+/// Value source `.pools`.
 const POOLS: &str = ".pools";
+/// Value source `.storages`.
 const STORAGES: &str = ".storages";
+/// Value source `.filesets`.
 const FILESETS: &str = ".filesets";
+/// Value source `.schedule`.
 const SCHEDULES: &str = ".schedule";
+/// Value source `.catalogs`.
 const CATALOGS: &str = ".catalogs";
+/// Value source `.consoles`.
 const CONSOLES: &str = ".consoles";
+/// Value source `.profiles`.
 const PROFILES: &str = ".profiles";
+/// Value source `.media`.
 const MEDIA: &str = ".media";
+/// Value source `.types`.
 const TYPES: &str = ".types";
+/// Value source `.msgs`.
 const MESSAGES: &str = ".msgs";
+/// Value source `.users`.
 const USERS: &str = ".users";
+/// Value source `.jobdefs`.
 const JOBDEFS: &str = ".jobdefs";
 
+/// Backup levels (`level=`).
 const LEVEL_VALUES: &[&str] = &["Full", "Incremental", "Differential", "VirtualFull", "Base", "Since",
     "VolumeToCatalog", "DiskToCatalog", "Catalog", "Data", "InitCatalog"];
+/// Volume status values `update volume volstatus=` accepts.
 const VOLSTATUS_UPDATE: &[&str] = &["Append", "Archive", "Disabled", "Full", "Used", "Cleaning", "Read-Only", "Recycle", "Purged", "Error"];
+/// Replace modes of run and restore.
 const REPLACE: &[&str] = &["always", "ifnewer", "ifolder", "never"];
+/// `on|off` of autodisplay, automount, gui, trace.
 const ON_OFF: &[&str] = &["on", "off"];
 /// Resource types `configure update|delete` and `.config` edit.
 const EDITABLE: &[&str] = &["client", "job", "jobdefs", "schedule", "fileset"];
@@ -237,6 +257,7 @@ pub fn describe(name: &str) -> Option<Node> {
     })
 }
 
+/// `catalog=`: every command that opens the catalog (OpenClientDb) accepts it.
 fn catalog() -> GrammarArg {
     res("catalog", "Catalog name", CATALOGS)
 }
@@ -251,14 +272,17 @@ fn fd() -> GrammarArg {
     res("fd", "Client name (as client=)", CLIENTS)
 }
 
+/// `json`: the Onesimus commands print their JSON object as text.
 fn json_kw() -> GrammarArg {
     kw("json", "Print the JSON object as text")
 }
 
+/// `enabled | disabled` of the resource listings.
 fn enabled_group() -> Vec<GrammarArg> {
     vec![kw("enabled", "Only enabled resources").group("state"), kw("disabled", "Only disabled resources").group("state")]
 }
 
+/// `status`: the first argument selects the daemon (StatusCmd).
 fn status() -> Node {
     sub("status", "").long(&[
         "Shows the state of the Director, a client, a storage or the scheduler. Without argument the Director asks which daemon.",
@@ -284,6 +308,7 @@ fn status() -> Node {
     ])
 }
 
+/// `.status dir|storage=|client=` with the part to show (DotStatusCmd).
 fn dot_status() -> Node {
     let what = |words: &[&str]| words.iter().map(|w| kw(w, "Part of the status").group("part")).collect::<Vec<_>>();
     sub(".status", "").subs(vec![
@@ -294,6 +319,7 @@ fn dot_status() -> Node {
     ])
 }
 
+/// `run`: the keywords of ua_run.cc (`fd`/`sd` as aliases of client/storage).
 fn run() -> Node {
     sub("run", "").long(&[
         "Starts a job. Missing values come from the Job resource; without yes the Director shows the job and asks \
@@ -314,6 +340,7 @@ fn run() -> Node {
     ]).example("run job=BackupClient1 level=Full yes", "start a full backup without asking").see(&["rerun", "cancel", "status"])
 }
 
+/// `restore`: selection, target and the keywords of the file selection.
 fn restore() -> Node {
     sub("restore", "").long(&[
         "Selects files from backups and starts a restore job. Without a selection the Director shows the selection menu; \
@@ -334,6 +361,7 @@ fn restore() -> Node {
     ]).example("restore client=fd select current all done yes where=/tmp/r", "restore everything of a client").see(&["run", ".bvfs_restore"])
 }
 
+/// Arguments of `label`.
 fn label_args(_relabel: bool) -> Vec<GrammarArg> {
     vec![
         res("storage", "Storage name", STORAGES), sd(), val("volume", "Volume name"), res("pool", "Pool name", POOLS),
@@ -343,6 +371,7 @@ fn label_args(_relabel: bool) -> Vec<GrammarArg> {
     ]
 }
 
+/// `list`/`llist`: the subcommands of the Bareos usage, `reverse` (Onesimus) and the modifiers.
 fn list() -> Node {
     let jobid = || int("jobid", "Job ID");
     let ujobid = || val("ujobid", "Unique job name");
@@ -409,6 +438,7 @@ fn list() -> Node {
         .see(&["show", "status", "query"])
 }
 
+/// `show`: any number of resource items in one line, `disabled` with its types.
 fn show() -> Node {
     // Bareos show takes any number of items in one line (`show pool=Full client=fd`)
     let mut args = Vec::new();
@@ -434,6 +464,7 @@ fn show() -> Node {
         .see(&["configure", "list"])
 }
 
+/// `update volume|pool|slots|jobid|stats` (UpdateCmd keywords).
 fn update() -> Node {
     sub("update", "").long(&[
         "Changes catalog records of volumes, pools, slots and jobs; without arguments the Director asks what to update.",
@@ -463,6 +494,7 @@ fn update() -> Node {
     ]).see(&["list", "label"])
 }
 
+/// `delete volume|pool|jobid|storage`.
 fn delete() -> Node {
     sub("delete", "").long(&["Deletes catalog records of volumes, pools, jobs or storages; asks unless yes is given."])
         .args(vec![kw("yes", "Do not ask"), catalog()])
@@ -476,6 +508,7 @@ fn delete() -> Node {
         ]).see(&["purge", "prune"])
 }
 
+/// `prune files|jobs|volume|stats|directory`.
 fn prune() -> Node {
     let yes = || kw("yes", "Do not ask");
     sub("prune", "").long(&["Removes expired catalog records, respecting the retention periods."]).subs(vec![
@@ -491,6 +524,7 @@ fn prune() -> Node {
     ]).see(&["purge"])
 }
 
+/// `purge files|jobs|volume|quota` with the Onesimus extension `purge volume all`.
 fn purge() -> Node {
     let yes = || kw("yes", "Do not ask");
     sub("purge", "").long(&[
@@ -550,6 +584,7 @@ fn configure_add_args(line: &str) -> Vec<GrammarArg> {
     }).collect()
 }
 
+/// `configure add|export` (Bareos) and `read|update|delete` (Onesimus).
 fn configure() -> Node {
     let usage = crate::commands::configure_usage::USAGE;
     let mut add_subs = Vec::new();
@@ -631,6 +666,7 @@ fn update_directives(rtype: &str) -> Vec<GrammarArg> {
     args
 }
 
+/// `.acl list|set|delete|clear|copy` (Onesimus); the ACL types come from [`crate::acl::Kind`].
 fn acl() -> Node {
     let types: Vec<&str> = crate::acl::Kind::ALL.iter().map(|k| k.key()).collect();
     let console = || res("console", "Console name", CONSOLES);
@@ -662,6 +698,7 @@ fn acl() -> Node {
         .see(&["configure", ".profiles"])
 }
 
+/// `.config` (Onesimus): configuration resources as raw text.
 fn config_crud() -> Node {
     let type_arg = || enm("type", "Resource type", EDITABLE).req();
     let name = || val("name", "Resource name").req();

@@ -17,8 +17,9 @@ Werte in `<…>` sind Platzhalter und werden durch eigene Angaben ersetzt.
 oconsole [OPTIONEN]
 ```
 
-Ohne `--command` oder `--mcp` startet die interaktive Konsole mit History und
-Tab-Vervollständigung. Kommandozeilenwerte überschreiben die Konfigurationsdatei.
+Ohne `--command` oder `--mcp` startet die interaktive Konsole mit History,
+Tab-Vervollständigung aus der Grammatik des Directors, Vorschlägen und
+Tasten wie in fish ([oconsole-vervollstaendigung.md](oconsole-vervollstaendigung.md)). Kommandozeilenwerte überschreiben die Konfigurationsdatei.
 Ohne expliziten Pfad wird zuerst `/etc/bareos/oconsole.conf`, danach
 `/etc/bareos/bconsole.conf` versucht; die erste lesbare Datei wird verwendet.
 

@@ -9,6 +9,8 @@
 //! (list), Ctrl-R searches the history incrementally, Ctrl-C clears the
 //! line (the main loop keeps the session), Ctrl-D on an empty line quits.
 
+#![warn(clippy::missing_docs_in_private_items)]
+
 use std::sync::{Arc, Mutex};
 
 use rustyline::{
@@ -85,6 +87,7 @@ pub fn bindings() -> Vec<(KeyEvent, &'static str)> {
     ]
 }
 
+/// Right, Ctrl-F, End: accept the suggestion ([`right_action`]).
 struct AcceptHint;
 
 impl ConditionalEventHandler for AcceptHint {
@@ -96,6 +99,7 @@ impl ConditionalEventHandler for AcceptHint {
     }
 }
 
+/// Alt-Right, Alt-F: accept the next word of the suggestion ([`word_action`]).
 struct AcceptWord;
 
 impl ConditionalEventHandler for AcceptWord {
@@ -107,6 +111,7 @@ impl ConditionalEventHandler for AcceptWord {
     }
 }
 
+/// Esc: hide the suggestion for the current line ([`esc_action`]).
 struct HideHint(HiddenHint);
 
 impl ConditionalEventHandler for HideHint {
