@@ -265,7 +265,9 @@ entfernt wird, entscheidet der Nutzer.
 ## Umsetzung (nach Abstimmung)
 
 1. proto: Ergänzung auf einem neuen Zweig `config-crud` des proto-Submoduls
-   (ab `plugin-phase1`).
+   (ab `plugin-phase1`; seit 20.11.2026 liegt `config-crud` direkt auf `main`,
+   `plugin-phase1` ist in `filed-plugin` und `postgresql` aufgeteilt, alles
+   zusammen im Integrationszweig `development` von onesimus-proto).
 2. odir: Modul `config_edit` (Bereich einer Ressource in der Datei finden,
    Ersetzen/Entfernen, Prüfen der neuen Gesamtkonfiguration mit derselben
    Logik wie `-t`, atomares Schreiben, Reload, Referenzsuche), dann die RPCs
