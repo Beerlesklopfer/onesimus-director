@@ -186,7 +186,7 @@ FD ─ Netz ─► Empfänger (schreibt) ─► /dev/shm/osd-<JobId>.ring ─┬
 | # | Inhalt | Prüfung |
 | --- | --- | --- |
 | P0 ✅ (20.11.2026) | `bareos-format` und `onesimus-daemon` als gemeinsame Crates (ofd-Gutachten §5), osd-Schnittstelle (`crates/osd`) und Daemon (`crates/osd/daemon`) trennen | ofd und odir bauen unverändert. Erledigt, siehe [P0 umgesetzt](#p0-umgesetzt-20112026) |
-| P1 | osd als Ersatz für bareos-sd mit **einem File-Device**: Label, Mount, Append, Read, Status, CatReq, Bareos-Volume-Format. Steuer- und Datenweg über **gRPC** (odir, ofd) und BNET (bareos-dir, bareos-fd) | Testgerüst Director+FD+SD (`onesimus-rig`): Backup und Restore mit odir+ofd über gRPC und mit bareos-fd über BNET. `bls` liest das Volume |
+| P1 (Stufe 1 ✅ 20.11.2026) | osd als Ersatz für bareos-sd mit **einem File-Device**: Label, Mount, Append, Read, Status, CatReq, Bareos-Volume-Format. Steuer- und Datenweg über **gRPC** (odir, ofd) und BNET (bareos-dir, bareos-fd). Stufe 1: Backup über BNET, aktiver und passiver Client, Datenweg über den Ring; Stufe 2: Lesen/Restore; Stufe 3: gRPC | Testgerüst Director+FD+SD (`onesimus-rig`): Backup und Restore mit odir+ofd über gRPC und mit bareos-fd über BNET. `bls` liest das Volume. Stufe 1 erledigt, siehe [P1 Stufe 1 umgesetzt](#p1-stufe-1-umgesetzt-20112026) |
 | P2 | Verteiler mit Routen über File-Devices | Routing-Fälle im Rig, Restore über den MediaType |
 | P2b | Zweige (Branch): odir startet Haupt- und Zweig-Jobs, osd verteilt an beide, Katalogsätze je Zweig | Inc auf File, AI auf zweites File-Device; Restore aus jedem Zweig einzeln; ein gescheiterter Zweig bricht den anderen nicht ab; Konsolidierung des AI-Zweigs |
 | P3 | Wechselplatten und Device-Watcher | Rig mit Loop-Device, Ein- und Abziehen simuliert |
@@ -221,6 +221,46 @@ Nach P1 verschoben, jeweils mit Grund:
 - **Unbekannte Direktiven in `bareos-sd.d`** werden noch nicht abgelehnt. bareos-sd lehnt sie ab.
 - **ofd nach `crates/ofd/daemon` und die Plugins verschieben** gehört nicht zu P0 (Vorgabe).
 - **Client-Connects zum FD** (sechs Varianten in odir) gehören zur ofd-Schnittstelle (Gutachten §6 Schritt 4), nicht zu P0.
+
+## P1 Stufe 1 umgesetzt (20.11.2026)
+
+osd sichert über BNET auf ein File-Device und schreibt das Bareos-Volume-Format; der Datenweg läuft schon über den Ring mit genau einem Geräteschreiber als eigenem Prozess (D-12, D-13). Anleitung, Stand und alle Abweichungen von bareos-sd: [`docs/wiki/osd.md`](../wiki/osd.md).
+
+Commits auf `development` (lokal, nicht gepusht), in dieser Reihenfolge:
+
+| Commit | Inhalt |
+| --- | --- |
+| `41cc205` | `bareos-format`: Blockkopf `BB02` mit CRC-32, Datensätze wie `WriteRecordToBlock` (Fortsetzungsköpfe), Volume- und Sitzungslabels, Leser `read_volume`/`summarize`; Label-Block und letzter Block eines bareos-sd-Volumes werden byte-genau nachgebaut |
+| `223d9fb`, `8007c5f` | `osd-ring` (`crates/osd/ring`): Ring je Job, ein Erzeuger, N Verbraucher, Freigabe = kleinster Lesezeiger, Postfach, Info-Bereich; `memmap2`, futex mit 100 ms Zeitgrenze, Cache-Zeilen, seitenweise Fächer, Lebendfrist (Recherche B, D-15); macOS/Windows übersetzbare Platzhalter |
+| `783ef76` | `onesimus-rig`: SD wählbar (`RigOptions::sd`), Client mit `Passive = yes`, beliebige Pakete bauen |
+| `f7dcabb` | `bareos-config`: `osd.d/` als Erweiterung von `bareos-sd.d` nach D-8 (Namensgleichheit, nur Onesimus-Direktiven, Waisen sind Fehler); `Maximum Block Size`, `Label Block Size`, `Maximum Volume Size`, `Just In Time Reservation`, `Client Connect Wait` |
+| `892e34c` | `osd::askdir`: CatReq, UpdCat, Jmsg und Status des SD wie `stored/askdir.cc` |
+| `41dfce3` | `onesimus-daemon::version`: Versionszeile mit Baudatum und Betriebssystem |
+| `5ca4403` | `bareos-format`: Rest eines Datensatzes am Volume-Ende (Job über mehrere Volumes) |
+| `c10fc05` | `osd-daemon`: Director-Befehle, aktiver und passiver FD, Datenphase über `transport::Channel`, Erzeuger und Geräteschreiber (`osd --device-writer`), Volume-Wahl, Label, Volume-Wechsel, EOS; Gerüst-Tests `tests/osd.rs` |
+| `0427cbb` | Glossar und Klassendiagramm von `osd-ring`, CI, README |
+| dieser Commit | Wiki-Seite `osd.md`, Testgerüst, dieser Abschnitt |
+
+Belege (Gerüst, 20.11.2026, odir + ofd `--disable-grpc` + osd; `bareos-fd` ist auf dem Rechner nicht installiert):
+
+- Aktiver und passiver Client: „Termination: Backup OK“, 13 Dateien, Katalog `Media 1|VVol-0001|VFile|Append|1|0|14|12592459`, `JobMedia FirstIndex=1 LastIndex=13 StartBlock=226 EndBlock=12592458`, 13 File-Sätze; `bls` listet 13 Dateien und Verzeichnisse.
+- Die Katalog-Anfragen kommen in derselben Reihenfolge wie bei bareos-sd 25.1.3 (FindMedia, GetVolInfo, UpdateMedia relabel=1, GetVolInfo, UpdateMedia VolMounts, UpdateMedia VolJobs, CreateJobMedia 0, CreateJobMedia, UpdateMedia, DeleteNullJobmediaRecords).
+- Volume von osd gegen Volume von bareos-sd aus demselben Gerüst: gleiche Blockzahl (14), gleiche Blocklängen und -nummern, gleiche Datensatzköpfe; die Nutzdaten der Blöcke 2–12 sind byte-gleich, Block 0 (Label: Version, Zeit), 1 und 13 (SOS/EOS-Zeit, Attribute mit anderen Zeiten) unterscheiden sich nur in diesen Feldern.
+- Passiver Client: odir schickt `passive client address=127.0.0.1 port=… ssl=4` (war schon vorhanden), osd ruft ofd an.
+
+Prüfung: `cargo test --workspace --exclude onesimus-rig` grün, 1298 Tests bestanden, 0 fehlgeschlagen, 35 ignoriert (davon neu: bareos-format 32, osd-ring 10, osd 13, osd-daemon 13 + 5, bareos-config 61, onesimus-daemon 21). `cargo test -p onesimus-rig --test osd -- --ignored`: 2 von 2 mit osd, ebenso 2 von 2 mit `ONESIMUS_RIG_SD=/usr/sbin/bareos-sd`. `cargo doc --no-deps --document-private-items` der neuen Crates ohne Warnung.
+
+Offen für **Stufe 2** (Lesen):
+
+- `use storage … append=0`, `bootstrap`, `read open/data/close`, der Lesepfad über den Ring in Gegenrichtung (Geräteleser füllen, Netzsitzung leert), `rechdr` an den FD.
+- Verify VolumeToCatalog und Restore im Gerüst (`tests/rig.rs` mit osd: Backup und Estimate bestehen, Verify scheitert); `bls`/`bextract` lesen osd-Volumes schon heute.
+- Volumes über mehrere Dateien lesen (Fortsetzung am Volume-Anfang).
+
+Offen für **Stufe 3** (gRPC):
+
+- Zweite Umsetzung von `transport::Channel` über `onesimus-proto-stored` zu odir und ofd; Onesimus-Erweiterungen nur dort.
+
+Weiter offen aus Stufe 1 (siehe Abweichungen in der Wiki): Warten auf ein Volume (`JS_WaitMedia`, `mount`), Recycling und `relabel`, Spooling, Bandbreite, mehrere Jobs je Device, Hintergrundbetrieb/PID-Datei, die übrigen bareos-sd-Befehle (`autochanger`, `readlabel`, `resolve` …), die macOS-/Windows-Teile des Rings, Striping im Ring (Verbraucher k liest Fach ≡ k mod N).
 
 ## Entscheidungen (Maintainer, 20.11.2026)
 

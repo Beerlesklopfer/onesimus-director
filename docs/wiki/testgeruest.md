@@ -136,20 +136,33 @@ einem eigenen Zielverzeichnis `target/ldap-o7`, nie in `target/debug` oder
 
 ## bareos-sd durch osd ersetzen
 
-Der Storage Daemon ist eine Variable:
+Der Storage Daemon ist eine Variable (`ONESIMUS_RIG_SD` oder
+`RigOptions::sd`). Das Gerüst startet ihn mit `-f -c <Datei> -d 50`; osd
+liest `<Gerüst>/sd/bareos-sd.conf` wie bareos-sd (Seite `docs/wiki/osd.md`).
+
+Eigene Tests für osd (P1 Stufe 1, nur Backup) stehen in
+`crates/onesimus-rig/tests/osd.rs`:
 
 ```sh
-cargo build -p osd-daemon        # sobald es crates/osd/daemon gibt
-ONESIMUS_RIG_SD=$PWD/target/debug/osd cargo test -p onesimus-rig -- --ignored
+cargo test -p onesimus-rig --test osd -- --ignored --nocapture
 ```
 
-Das Gerüst startet den SD mit `-f -c <Datei> -d 50` und erwartet, dass er
-`<Gerüst>/sd/bareos-sd.conf` liest (Storage, Director, Device, Messages; siehe
-`onesimus_rig::config::sd_config`) und auf dem Port aus `SD Port` annimmt.
-Ein osd, der dieselbe Konfiguration und dieselbe Kommandozeile versteht, ist
-damit ohne Änderung am Gerüst prüfbar. Dieselben Tests müssen dann grün
-werden; die erwarteten Defekte D1, D14, D15 und D16 liegen in ofd bzw. odir
-und bleiben vom Tausch des SD unberührt.
+| Test | Ports | Client |
+|---|---|---|
+| `osd_full_backup_active_client` | ab 39471 | der FD ruft osd an |
+| `osd_full_backup_passive_client` | ab 39481 | `Passive = yes` (`RigOptions::passive_client`): osd ruft den FD an |
+
+Beide bauen odir, ofd und osd-daemon und prüfen: Backup `T` mit 13 Dateien
+und „Backup OK“, je ein Media-, JobMedia- und 13 File-Sätze, `VolBytes`
+gleich der Dateigröße, das Volume mit dem Leser aus `bareos-format`
+(Volume-Label, SOS/EOS, Attribute, Prüfsummen) und mit `/usr/sbin/bls`, falls
+installiert. Mit `ONESIMUS_RIG_SD=/usr/sbin/bareos-sd` laufen dieselben Tests
+als Gegenprobe gegen bareos-sd.
+
+Die Tests in `tests/rig.rs` mit `ONESIMUS_RIG_SD=$PWD/target/debug/osd`
+(gemessen 20.11.2026): Backup und Estimate bestehen, Verify VolumeToCatalog
+scheitert, weil osd noch nicht liest (Stufe 2); die vier Tests der
+erwarteten Defekte D1, D14, D15, D16 bestehen (sie liegen in ofd bzw. odir).
 
 Ebenso lassen sich Director und FD tauschen (`ONESIMUS_RIG_ODIR`,
 `ONESIMUS_RIG_OFD`), etwa gegen `/usr/sbin/bareos-dir` als Gegenprobe. Die
