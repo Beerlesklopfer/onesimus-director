@@ -2354,6 +2354,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "osd-daemon"
+version = "25.1.2+onesimus.0.2.0"
+dependencies = [
+ "bareos-config",
+ "clap",
+ "onesimus-daemon",
+ "tracing",
+]
+
+[[package]]
 name = "parking"
 version = "2.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"

@@ -1,0 +1,31 @@
+[Unit]
+Description=Onesimus Storage Daemon
+Documentation=https://github.com/Beerlesklopfer/onesimus-director
+# Same ordering, conditions and restart limits as Bareos
+# core/platforms/systemd/bareos-sd.service.in (18be77e6): a configuration
+# error (exit 42) or wrong arguments (41) are not restarted, other failures
+# at most 10 times a day, 30 s apart.
+Requires=network.target nss-lookup.target time-sync.target
+After=network-online.target nss-lookup.target local-fs.target remote-fs.target time-sync.target
+# Only one Storage daemon on port 9103: starting osd stops bareos-sd and
+# vice versa; both packages stay installable for a way back.
+Conflicts=bareos-sd.service
+ConditionPathExists=/var/lib/bareos
+StartLimitIntervalSec=1d
+
+[Service]
+Type=simple
+User=bareos
+Group=bareos
+WorkingDirectory=/var/lib/bareos
+ExecStart=/usr/sbin/osd -f -c /etc/bareos/bareos-sd.d
+SuccessExitStatus=0 15
+LimitNOFILE=8192:524288
+Restart=on-failure
+RestartSec=30
+StartLimitBurst=10
+RestartPreventExitStatus=41 42
+
+[Install]
+Alias=bareos-storage.service
+WantedBy=multi-user.target

@@ -9,6 +9,7 @@ members = [
     "crates/oconsole",
     "crates/bareos-orm",
     "crates/osd",
+    "crates/osd/daemon",
     "crates/ofd",
     "crates/onesimus-plugins",
     "crates/onesimus-pg-broker",

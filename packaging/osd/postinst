@@ -1,0 +1,51 @@
+#!/bin/bash
+set -e
+
+case "$1" in
+    configure)
+        if ! getent group bareos >/dev/null 2>&1; then
+            addgroup --system bareos
+        fi
+        if ! getent passwd bareos >/dev/null 2>&1; then
+            adduser --system --home /var/lib/bareos --no-create-home \
+                    --ingroup bareos --shell /usr/sbin/nologin bareos
+        fi
+        install -d -m 750 -o bareos -g bareos /var/lib/bareos
+        install -d -m 750 -o bareos -g bareos /var/lib/bareos/storage
+        install -d -m 750 -o bareos -g bareos /var/log/bareos
+        if [ ! -d /etc/bareos ]; then
+            install -d -m 750 -o bareos -g bareos /etc/bareos
+        fi
+
+        # Vorhandene Konfiguration bleibt (auch die eines bareos-sd); sonst
+        # Vorlage anlegen. Name des Directors: OSD_DIRECTOR_NAME (Vorgabe
+        # bareos-dir), Passwort zufaellig.
+        if [ ! -d /etc/bareos/bareos-sd.d ] || [ -z "$(find /etc/bareos/bareos-sd.d/ -name '*.conf' 2>/dev/null)" ]; then
+            echo "Installiere Default-Konfiguration nach /etc/bareos/bareos-sd.d/ ..."
+            cp -r /usr/share/bareos/defaultconfigs/bareos-sd.d /etc/bareos/
+            DIR_NAME="${OSD_DIRECTOR_NAME:-bareos-dir}"
+            STORAGE_NAME="$(hostname -s 2>/dev/null || hostname)-sd"
+            DIR_PW=$(openssl rand -base64 32 2>/dev/null || head -c 32 /dev/urandom | base64)
+            DIR_PW_ESC=$(printf '%s' "$DIR_PW" | sed 's/[\\&|]/\\&/g')
+            sed -i -e "s|@DIRECTOR_NAME@|${DIR_NAME}|g" -e "s|@STORAGE_NAME@|${STORAGE_NAME}|g" \
+                   -e "s|CHANGEME|${DIR_PW_ESC}|" /etc/bareos/bareos-sd.d/*/*.conf
+            chown -R root:bareos /etc/bareos/bareos-sd.d
+            chmod -R u=rwX,g=rX,o= /etc/bareos/bareos-sd.d
+            echo "Default-Konfiguration installiert: Director '${DIR_NAME}', Storage '${STORAGE_NAME}'."
+        else
+            echo "Bestehende Konfiguration in /etc/bareos/bareos-sd.d/ gefunden — nicht veraendert."
+        fi
+
+        systemctl daemon-reload 2>/dev/null || true
+        echo ""
+        echo "Onesimus Storage Daemon installiert (Stand P0: nur Konfigurationspruefung)."
+        echo "  Storage Daemon: /usr/sbin/osd"
+        echo "  Config:         /etc/bareos/bareos-sd.d/"
+        echo "  Pruefen:        osd -t -c /etc/bareos/bareos-sd.d"
+        ;;
+esac
+
+
+#DEBHELPER#
+
+exit 0
