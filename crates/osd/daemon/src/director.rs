@@ -179,7 +179,7 @@ impl DirSession {
                 }
                 "bootstrap" => self.bootstrap_cmd(),
                 _ => {
-                    // Known to bareos-sd, not implemented in osd stage 1.
+                    // Known to bareos-sd, not implemented in osd yet.
                     self.send(&format!("3900 Invalid command: {msg}\n"));
                     Next::Quit
                 }

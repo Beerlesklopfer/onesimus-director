@@ -193,8 +193,8 @@ fn do_fd_commands(d: &Daemon, job: &Arc<Job>, dir: &SharedChannel, fd: &mut dyn 
     }
 }
 
-/// "Command error with FD, hanging up. <reason>" (or without a reason
-/// "Command error with FD, hanging up.") and JS_ErrorTerminated.
+/// `Command error with FD, hanging up. <reason>` (or without a reason
+/// `Command error with FD, hanging up.`) and `JS_ErrorTerminated`.
 fn fatal_with_fd(d: &Daemon, dir: &SharedChannel, job: &Arc<Job>, reason: &str) {
     if !job.canceled.load(Ordering::Acquire) {
         let text = if reason.is_empty() {

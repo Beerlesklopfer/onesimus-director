@@ -186,7 +186,7 @@ FD ─ Netz ─► Empfänger (schreibt) ─► /dev/shm/osd-<JobId>.ring ─┬
 | # | Inhalt | Prüfung |
 | --- | --- | --- |
 | P0 ✅ (20.11.2026) | `bareos-format` und `onesimus-daemon` als gemeinsame Crates (ofd-Gutachten §5), osd-Schnittstelle (`crates/osd`) und Daemon (`crates/osd/daemon`) trennen | ofd und odir bauen unverändert. Erledigt, siehe [P0 umgesetzt](#p0-umgesetzt-20112026) |
-| P1 (Stufe 1 ✅ 20.11.2026) | osd als Ersatz für bareos-sd mit **einem File-Device**: Label, Mount, Append, Read, Status, CatReq, Bareos-Volume-Format. Steuer- und Datenweg über **gRPC** (odir, ofd) und BNET (bareos-dir, bareos-fd). Stufe 1: Backup über BNET, aktiver und passiver Client, Datenweg über den Ring; Stufe 2: Lesen/Restore; Stufe 3: gRPC | Testgerüst Director+FD+SD (`onesimus-rig`): Backup und Restore mit odir+ofd über gRPC und mit bareos-fd über BNET. `bls` liest das Volume. Stufe 1 erledigt, siehe [P1 Stufe 1 umgesetzt](#p1-stufe-1-umgesetzt-20112026) |
+| P1 (Stufe 1 ✅, Stufe 2 ✅ 20.11.2026) | osd als Ersatz für bareos-sd mit **einem File-Device**: Label, Mount, Append, Read, Status, CatReq, Bareos-Volume-Format. Steuer- und Datenweg über **gRPC** (odir, ofd) und BNET (bareos-dir, bareos-fd). Stufe 1: Backup über BNET, aktiver und passiver Client, Datenweg über den Ring; Stufe 2: Lesen/Restore; Stufe 3: gRPC | Testgerüst Director+FD+SD (`onesimus-rig`): Backup und Restore mit odir+ofd über gRPC und mit bareos-fd über BNET. `bls` liest das Volume. Stufe 1 erledigt, siehe [P1 Stufe 1 umgesetzt](#p1-stufe-1-umgesetzt-20112026); Stufe 2 erledigt, siehe [P1 Stufe 2 umgesetzt](#p1-stufe-2-umgesetzt-20112026) |
 | P2 | Verteiler mit Routen über File-Devices | Routing-Fälle im Rig, Restore über den MediaType |
 | P2b | Zweige (Branch): odir startet Haupt- und Zweig-Jobs, osd verteilt an beide, Katalogsätze je Zweig | Inc auf File, AI auf zweites File-Device; Restore aus jedem Zweig einzeln; ein gescheiterter Zweig bricht den anderen nicht ab; Konsolidierung des AI-Zweigs |
 | P3 | Wechselplatten und Device-Watcher | Rig mit Loop-Device, Ein- und Abziehen simuliert |
@@ -250,17 +250,47 @@ Belege (Gerüst, 20.11.2026, odir + ofd `--disable-grpc` + osd; `bareos-fd` ist 
 
 Prüfung: `cargo test --workspace --exclude onesimus-rig` grün, 1298 Tests bestanden, 0 fehlgeschlagen, 35 ignoriert (davon neu: bareos-format 32, osd-ring 10, osd 13, osd-daemon 13 + 5, bareos-config 61, onesimus-daemon 21). `cargo test -p onesimus-rig --test osd -- --ignored`: 2 von 2 mit osd, ebenso 2 von 2 mit `ONESIMUS_RIG_SD=/usr/sbin/bareos-sd`. `cargo doc --no-deps --document-private-items` der neuen Crates ohne Warnung.
 
-Offen für **Stufe 2** (Lesen):
+Stufe 2 (Lesen) ist erledigt, siehe [P1 Stufe 2 umgesetzt](#p1-stufe-2-umgesetzt-20112026).
 
-- `use storage … append=0`, `bootstrap`, `read open/data/close`, der Lesepfad über den Ring in Gegenrichtung (Geräteleser füllen, Netzsitzung leert), `rechdr` an den FD.
-- Verify VolumeToCatalog und Restore im Gerüst (`tests/rig.rs` mit osd: Backup und Estimate bestehen, Verify scheitert); `bls`/`bextract` lesen osd-Volumes schon heute.
-- Volumes über mehrere Dateien lesen (Fortsetzung am Volume-Anfang).
+## P1 Stufe 2 umgesetzt (20.11.2026)
+
+osd liest wie bareos-sd für Restore und Verify (VolumeToCatalog) über
+BNET, mit aktivem und passivem Client, auch über mehrere Volumes. Der
+Lesepfad nutzt den Ring in Gegenrichtung (siehe
+[Datenpfad](#datenpfad-ringpuffer-in-devshm)): Ein Geräteleser (`osd
+--device-reader`, eigener Prozess) übernimmt die Erzeugerrolle und füllt
+die Fächer mit den Blöcken der Volumes, die Netzsitzung leert sie, setzt
+die Datensätze zusammen, filtert sie nach dem Bootstrap und schickt sie mit
+`rechdr` an den FD. Anleitung, Stand und Abweichungen:
+[`docs/wiki/osd.md`](../wiki/osd.md).
+
+Commits auf `development` (lokal, nicht gepusht), in dieser Reihenfolge:
+
+| Commit | Inhalt |
+| --- | --- |
+| `b98998a` | `bareos-format`: Bootstrap (`bsr`: `parse_bsr`, `CreateRestoreVolumeList`, Lesebereiche je Volume, `BsrMatcher` mit den Erledigt-Merkern von `stored/bsr.cc`), `volume::RecordAssembler` (Datensätze je Sitzung über Blöcke und Volumes) |
+| `8d14b91` | `osd-ring`: Gegenrichtung – `take_producer`, Postfach vom Erzeuger zum Verbraucher (`ask_consumer`, `serve_producer`) |
+| `4805160` | `osd-daemon`: `use storage … append=0`, `bootstrap`, `read open/data/close`, Geräteleser, Netzsitzung als Verbraucher, Label-Prüfung mit den bareos-sd-Meldungen, Lesen über mehrere Volumes, `UpdateMedia` beim Freigeben |
+| `0a8241b` | `onesimus-rig`: `tree::compare_trees`, `Rig::replace_sd`; Gerüst-Tests für Restore (aktiv, passiv), drei Volumes, bareos-sd ↔ osd |
+| dieser Commit | Wiki `osd.md`, Testgerüst, dieser Abschnitt |
+
+Belege (Gerüst, 20.11.2026, odir + ofd `--disable-grpc` + osd; `bareos-fd` ist nicht installiert):
+
+- `tests/rig.rs` mit `ONESIMUS_RIG_SD=$PWD/target/debug/osd`: 5 von 5 (Backup, Estimate, Verify VolumeToCatalog „Verify OK“, Restore „Restore OK“ mit `diff -r` ohne Unterschied, Abbruch; D1, D14, D15, D16 bestehen wie erwartet). Gegenprobe mit bareos-sd: 5 von 5 (D16 im zweiten Lauf; im ersten war Port 39432 von einem kurzlebigen Client-Socket eines parallelen Gerüsts belegt).
+- `tests/osd.rs` mit osd: 4 von 4. Restore aktiv und passiv: „Restore OK“, 13 Dateien, `diff -r` rc=0, Rechte, Eigentümer, mtime und Symlink-Ziele gleich, Hardlinks und Löcher der Sparse-Datei erhalten. Beim passiven Client meldet der FD keine eigene SD-Verbindung, osd hat ihn angerufen.
+- Drei Volumes (`Maximum Volume Bytes = 5M`): `VVol-0001` und `VVol-0002` Full mit je 4 194 530 Bytes, `VVol-0003` Append; JobMedia `1–5`, `5–5`, `5–13`; die ersten beiden Volumes enden mitten in einem Datensatz (3 505 bzw. 5 409 Bytes fehlen dort). Verify und Restore melden „Ready to read from volume“ für alle drei, „End of all volumes.“, „Verify OK“ bzw. „Restore OK“.
+- bareos-sd ↔ osd auf einem Volume: Backup mit bareos-sd → Restore mit osd OK; osd hängt ein zweites Backup an dasselbe Volume → Restore mit bareos-sd OK; `bls` meldet „26 files and directories found.“. Die Job-Meldungen von osd beim Lesen gleichen denen von bareos-sd 25.1.3 Zeile für Zeile („Ready to read from volume …“, „Forward spacing Volume … to file:block 0:…“, „End of Volume at file 0 on device …“, „End of all volumes.“, „Releasing device …“); die Katalog-Anfragen auch (`GetVolInfo … write=0` je Volume, `UpdateMedia` am Ende).
+- `tests/osd.rs` mit `ONESIMUS_RIG_SD=/usr/sbin/bareos-sd`: 4 von 4 (Gegenprobe; bei bareos-sd sind die Volumes 4 194 534 Bytes groß, das Label ist 4 Bytes länger).
+
+Prüfung: `cargo test --workspace --exclude onesimus-rig` grün, 1357 Tests bestanden, 0 fehlgeschlagen, 35 ignoriert; neu sind bareos-format 12 (Bootstrap, Zusammensetzen über Volumes, Sitzungen), osd-ring 1 (Gegenrichtung), osd-daemon 4 (Filter, Job über zwei Volumes, falsches Volume), onesimus-rig 1 (`compare_trees`) und 2 neue Gerüst-Tests (aus den beiden Backup-Tests wurden Backup-und-Restore-Tests).
 
 Offen für **Stufe 3** (gRPC):
 
-- Zweite Umsetzung von `transport::Channel` über `onesimus-proto-stored` zu odir und ofd; Onesimus-Erweiterungen nur dort.
+- Zweite Umsetzung von `transport::Channel` über `onesimus-proto-stored` zu odir und ofd, für Schreiben und Lesen; Onesimus-Erweiterungen nur dort.
+- Der Lesepfad schickt heute je Datensatz `rechdr` und Daten als zwei BNET-Nachrichten; über gRPC sollte ein Datensatz eine Nachricht sein (Kopf als Felder).
+- Medien-Ereignisse (D-7) und Stripe-Angaben brauchen Proto-Felder.
 
-Weiter offen aus Stufe 1 (siehe Abweichungen in der Wiki): Warten auf ein Volume (`JS_WaitMedia`, `mount`), Recycling und `relabel`, Spooling, Bandbreite, mehrere Jobs je Device, Hintergrundbetrieb/PID-Datei, die übrigen bareos-sd-Befehle (`autochanger`, `readlabel`, `resolve` …), die macOS-/Windows-Teile des Rings, Striping im Ring (Verbraucher k liest Fach ≡ k mod N).
+Weiter offen aus Stufe 1 und 2 (siehe Abweichungen in der Wiki): Warten auf ein Volume beim Schreiben (`JS_WaitMedia`, `mount`) und beim Lesen (Mount-Anforderung statt Abbruch), ein anderes Device beim Lesen, wenn der MediaType des Bootstraps nicht passt, Recycling und `relabel`, Spooling, Bandbreite, mehrere Jobs je Device (getrennte Lese-/Schreibzählung), Hintergrundbetrieb/PID-Datei, die übrigen bareos-sd-Befehle (`autochanger`, `readlabel`, `resolve` …), Copy/Migration (SD-zu-SD, `replicate`), die macOS-/Windows-Teile des Ring, Striping im Ring (Verbraucher k liest Fach ≡ k mod N; beim Lesen setzt die Netzsitzung nach Folgenummer zusammen).
 
 ## Entscheidungen (Maintainer, 20.11.2026)
 

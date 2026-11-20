@@ -140,29 +140,40 @@ Der Storage Daemon ist eine Variable (`ONESIMUS_RIG_SD` oder
 `RigOptions::sd`). Das Gerüst startet ihn mit `-f -c <Datei> -d 50`; osd
 liest `<Gerüst>/sd/bareos-sd.conf` wie bareos-sd (Seite `docs/wiki/osd.md`).
 
-Eigene Tests für osd (P1 Stufe 1, nur Backup) stehen in
+Eigene Tests für osd (P1 Stufe 1 und 2) stehen in
 `crates/onesimus-rig/tests/osd.rs`:
 
 ```sh
 cargo test -p onesimus-rig --test osd -- --ignored --nocapture
 ```
 
-| Test | Ports | Client |
+| Test | Ports | Inhalt |
 |---|---|---|
-| `osd_full_backup_active_client` | ab 39471 | der FD ruft osd an |
-| `osd_full_backup_passive_client` | ab 39481 | `Passive = yes` (`RigOptions::passive_client`): osd ruft den FD an |
+| `osd_backup_restore_active_client` | ab 39471 | Backup und Restore, der FD ruft osd an |
+| `osd_backup_restore_passive_client` | ab 39481 | dasselbe mit `Passive = yes` (`RigOptions::passive_client`): osd ruft den FD an |
+| `osd_backup_verify_restore_over_several_volumes` | ab 39491 | Pool mit `Maximum Volume Bytes = 5M`: Backup über drei Volumes, Verify VolumeToCatalog, Restore |
+| `osd_and_bareos_sd_read_each_others_volumes` | ab 39501 | Backup mit bareos-sd, Restore mit osd; Backup mit osd auf dasselbe Volume, Restore mit bareos-sd (`Rig::replace_sd`); `bls` liest das gemischte Volume. Ohne `/usr/sbin/bareos-sd` übersprungen |
 
-Beide bauen odir, ofd und osd-daemon und prüfen: Backup `T` mit 13 Dateien
-und „Backup OK“, je ein Media-, JobMedia- und 13 File-Sätze, `VolBytes`
-gleich der Dateigröße, das Volume mit dem Leser aus `bareos-format`
-(Volume-Label, SOS/EOS, Attribute, Prüfsummen) und mit `/usr/sbin/bls`, falls
-installiert. Mit `ONESIMUS_RIG_SD=/usr/sbin/bareos-sd` laufen dieselben Tests
-als Gegenprobe gegen bareos-sd.
+Die Backup-Prüfungen: `T` mit 13 Dateien und „Backup OK“, je ein Media-,
+JobMedia- und 13 File-Sätze, `VolBytes` gleich der Dateigröße, das Volume
+mit dem Leser aus `bareos-format` (Volume-Label, SOS/EOS, Attribute,
+Prüfsummen) und mit `/usr/sbin/bls`, falls installiert. Die
+Restore-Prüfungen: „Restore OK“ mit 13 Dateien, `diff -r` ohne Unterschied
+und `tree::compare_trees` (Typ, Inhalt, Größe, Rechte, Eigentümer, mtime,
+Symlink-Ziele), Hardlinks auf einer Inode, Löcher der Sparse-Datei. Mit
+`ONESIMUS_RIG_SD=/usr/sbin/bareos-sd` laufen die ersten drei als Gegenprobe
+gegen bareos-sd.
 
 Die Tests in `tests/rig.rs` mit `ONESIMUS_RIG_SD=$PWD/target/debug/osd`
-(gemessen 20.11.2026): Backup und Estimate bestehen, Verify VolumeToCatalog
-scheitert, weil osd noch nicht liest (Stufe 2); die vier Tests der
-erwarteten Defekte D1, D14, D15, D16 bestehen (sie liegen in ofd bzw. odir).
+(vorher `cargo build -p osd-daemon`; gemessen 20.11.2026): alle fünf
+bestehen, Backup, Estimate, Verify VolumeToCatalog, Restore und Abbruch
+sowie die vier erwarteten Defekte D1, D14, D15, D16 (sie liegen in ofd bzw.
+odir).
+
+Bekannte Falle: Die Gerüst-Ports liegen im Bereich, aus dem Linux
+kurzlebige Client-Ports vergibt. Ein Socket eines eben beendeten Gerüsts
+(`TIME-WAIT`) kann einen Port bis zu 60 s belegen; der Test meldet dann
+„Port … ist belegt“. Ein zweiter Lauf besteht (`ss -tan | grep <Port>`).
 
 Ebenso lassen sich Director und FD tauschen (`ONESIMUS_RIG_ODIR`,
 `ONESIMUS_RIG_OFD`), etwa gegen `/usr/sbin/bareos-dir` als Gegenprobe. Die
