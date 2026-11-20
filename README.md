@@ -41,8 +41,9 @@ Drop-in replacement for the Bareos Director daemon — independent project after
 | `bareos-catalog` | Protocol | PostgreSQL catalog queries (sqlx) |
 | `bareos-orm` | Protocol | ORM + schema migration + codegen |
 | `osd` | Protocol | Storage Daemon interface: one SD connect (TLS-PSK, CRAM-MD5, checked OK-Hello), job command, `use storage`, CatReq relay, status |
-| `osd-daemon` | Product | `osd` — Onesimus Storage Daemon (`crates/osd/daemon`); P0: `osd -t` checks `bareos-sd.d`, the daemon follows in P1. Build/test with `-p osd-daemon` (`-p osd` is the interface only) |
-| `bareos-format` | Protocol | Bareos stream format shared by odir, ofd and osd: stream IDs, record headers, LStat, Bareos Base64, digests, `M_*`, BashSpaces, `regexwhere` (breg), SD job command |
+| `osd-daemon` | Product | `osd` — Onesimus Storage Daemon (`crates/osd/daemon`); P1 stage 1: backup over BNET to File devices in the Bareos volume format, active and passive clients (docs/wiki/osd.md). Build/test with `-p osd-daemon` (`-p osd` is the interface only) |
+| `osd-ring` | Protocol | Shared-memory block ring of osd (`crates/osd/ring`): one producer, N device writers, cross-process wait/wake, mailbox |
+| `bareos-format` | Protocol | Bareos stream and volume format shared by odir, ofd and osd: stream IDs, record headers, volume blocks (BB02, CRC-32), volume and session labels, LStat, Bareos Base64, digests, `M_*`, BashSpaces, `regexwhere` (breg), SD job command |
 | `onesimus-daemon` | Protocol | Common daemon frame of ofd and osd: accept loop, TLS-PSK, Director handshake, gRPC TLS, bandwidth limit, logging, signals, PID file, privileges, `-t` |
 | `onesimus-proto-rs` | Protocol | gRPC codegen from the onesimus-proto definitions (submodule `proto/`) |
 | `ofd` | Protocol | File Daemon skeleton |

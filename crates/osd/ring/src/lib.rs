@@ -53,6 +53,7 @@
 #![deny(missing_docs)]
 #![deny(clippy::missing_docs_in_private_items)]
 
+pub mod glossary;
 pub mod sys;
 
 use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
@@ -165,7 +166,31 @@ pub struct RingConfig {
     pub consumers: u32,
 }
 
+#[cfg_attr(doc, aquamarine::aquamarine)]
 /// One mapped ring.
+///
+/// ```mermaid
+/// classDiagram
+///     class Ring {
+///         +create(name, RingConfig) Ring
+///         +open(name) Ring
+///         +remove(name)
+///         +remove_stale(prefix)
+///         +claim(timeout) SlotMut
+///         +finish(State)
+///         +serve_mail(timeout, handler)
+///         +attach(consumer)
+///         +next(consumer, timeout) SlotRef
+///         +release(consumer)
+///         +call(consumer, request) answer
+///     }
+///     class SlotMut { +data +meta +publish(len) }
+///     class SlotRef { +seq +data +meta }
+///     class Mapping { memmap2 }
+///     Ring *-- Mapping : sys
+///     Ring ..> SlotMut : Erzeuger
+///     Ring ..> SlotRef : Verbraucher
+/// ```
 #[derive(Debug)]
 pub struct Ring {
     /// The ring's name.

@@ -2383,6 +2383,7 @@ dependencies = [
 name = "osd-ring"
 version = "25.1.2+onesimus.0.2.0"
 dependencies = [
+ "aquamarine",
  "libc",
  "memmap2",
 ]
