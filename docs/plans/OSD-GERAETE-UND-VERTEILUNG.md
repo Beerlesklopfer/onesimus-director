@@ -156,7 +156,7 @@ FD ─ Netz ─► Empfänger (schreibt) ─► /dev/shm/osd-<JobId>.ring ─┬
   - Belegt wird fast nur durch Anhängen. Freigegeben wird volumeweise beim Recyceln, wie bei Bareos: prune, purge, recycle.
   - Die Metadaten sind gegen Abstürze gesichert (Journal oder Copy-on-Write).
   - Ein Stripe-Satz besteht aus mehreren Platten mit gemeinsamem Superblock-Verweis (D-4/D-5). Prüfsummen werden je Block geführt.
-- **Status:** Richtung festgelegt; Layout und erster Schritt folgen aus der laufenden Recherche (Vorbilder: Ceph BlueStore, SPDK Blobstore, LTFS, logstrukturierte und ZNS-Layouts). Als **eigene Phase nach P1** wird dazu eine Entscheidung D-14 nachgetragen.
+- **Status:** Richtung festgelegt. Recherche: [OSD-RECHERCHE-SPEICHER-UND-RING.md](OSD-RECHERCHE-SPEICHER-UND-RING.md). Empfehlung dort: selbst schreiben mit `rustix`/`nix` (+ optional `io-uring`), Entwurf nach BlueStore (Label mit Kopien, crc32c je Block) und Blobstore (A/B-Verzeichnis, Wiederaufbau vorwärts); SPDK und BlueStore selbst nicht übernehmen. Als **eigene Phase nach P1**; Entscheidung D-14 (siehe Tabelle) steht aus.
 
 ## Gerätearten
 
@@ -241,3 +241,5 @@ Alle wie empfohlen, D-8 präzisiert: „additiv, rückwärtskompatibel“.
 | D-11 | Ein gescheiterter Zweig bricht die anderen nicht ab | ja |
 | D-12 | Ring: ein Fach = ein Bareos-Block; Fachgröße = Blockgröße des Devices, Fachzahl einstellbar (Vorgabe z. B. 64 Fächer je Job) | ja |
 | D-13 | Geräte-Schreiber als eigene Prozesse (wie die Job-Worker von odir) statt Threads | ja (Ausfall eines Geräts reißt den Job nicht mit) |
+| D-14 | Eigenes Backup-Dateisystem auf Rohgeräten nach dem Entwurf der Recherche (A, Punkte 1–6), als eigene Phase nach P1 | **offen** (Empfehlung: ja) |
+| D-15 | Ring: `memmap2` + eigene Plattformschicht, Logik nach Disruptor/Aeron, Warten immer mit Zeitlimit (Recherche B) | **offen** (Empfehlung: ja) |
