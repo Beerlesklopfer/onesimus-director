@@ -165,7 +165,7 @@ FD ─ Netz ─► Empfänger (schreibt) ─► /dev/shm/osd-<JobId>.ring ─┬
 
 - osd liest `bareos-sd.d` (Storage, Director, Device, Autochanger, Messages) mit `bareos-config`.
 - Neue Ressourcen: `Distributor` mit `Route`-Blöcken, und am Device `Removable Label` sowie die S3-Angaben.
-- **D-8 (entschieden: additiv, rückwärtskompatibel):** osd liest `bareos-sd.d` unverändert, die neuen Ressourcen kommen zusätzlich aus `osd.d/`. Ohne `osd.d/` verhält sich osd wie bareos-sd; ein bareos-sd läuft mit derselben `bareos-sd.d` weiter (Bareos würde `Distributor` dort als unbekannte Ressource ablehnen).
+- **D-8 (entschieden: additiv, rückwärtskompatibel, Namensgleichheit):** osd liest `bareos-sd.d` unverändert, die neuen Ressourcen und Direktiven kommen zusätzlich aus `osd.d/`, das dieselbe Struktur hat; eine Ergänzung gilt der gleichnamigen Ressource gleichen Typs in `bareos-sd.d`. Ohne `osd.d/` verhält sich osd wie bareos-sd; ein bareos-sd läuft mit derselben `bareos-sd.d` weiter (Bareos würde `Distributor` dort als unbekannte Ressource ablehnen).
 
 ## Phasen
 
@@ -221,7 +221,7 @@ Alle wie empfohlen, D-8 präzisiert: „additiv, rückwärtskompatibel“.
 | D-5 | Stripe nur innerhalb einer Geräteart | ja |
 | D-6 | Device-Watcher im osd-Prozess | ja |
 | D-7 | gRPC-Push „Medium eingelegt/entfernt“ für die GUI | später, mit GUI-Sitzung abstimmen |
-| D-8 | Neue Ressourcen in `osd.d/` statt `bareos-sd.d/` | **additiv, rückwärtskompatibel:** osd liest `bareos-sd.d` unverändert; Onesimus-Erweiterungen (Verteiler, Routen, Zweig-, Ring- und S3-Angaben, `Removable Label`) kommen zusätzlich aus `osd.d/`. Ohne `osd.d/` verhält sich osd wie bareos-sd, und bareos-sd läuft mit derselben `bareos-sd.d` weiter |
+| D-8 | Neue Ressourcen in `osd.d/` statt `bareos-sd.d/` | **additiv, rückwärtskompatibel:** osd liest `bareos-sd.d` unverändert; Onesimus-Erweiterungen (Verteiler, Routen, Zweig-, Ring- und S3-Angaben, `Removable Label`) kommen zusätzlich aus `osd.d/`. Ohne `osd.d/` verhält sich osd wie bareos-sd, und bareos-sd läuft mit derselben `bareos-sd.d` weiter. **Namensgleichheit ist Bedingung:** `osd.d/` hat dieselbe Struktur wie `bareos-sd.d` (`osd.d/<typ>/<Name>.conf`); eine Ergänzung gilt der Ressource gleichen Typs und gleichen `Name` in `bareos-sd.d` und fügt nur Onesimus-Direktiven hinzu (überschreibt keine Bareos-Direktive). Eine Ergänzung ohne gleichnamige Ressource in `bareos-sd.d` ist ein Konfigurationsfehler (`-t` meldet ihn). Neue Ressourcentypen (`Distributor`) stehen nur in `osd.d/` und verweisen auf Devices **mit deren Namen aus `bareos-sd.d`** |
 | D-9 | Zweige: Direktive `Branch = <Job>` am Haupt-Job; der Zweig-Job ist eine normale Job-Ressource | ja |
 | D-10 | Unterschiedliche Basis der Zweige: der Haupt-Job liest ab der älteren Basis | ja |
 | D-11 | Ein gescheiterter Zweig bricht die anderen nicht ab | ja |
