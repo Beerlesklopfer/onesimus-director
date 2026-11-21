@@ -333,8 +333,12 @@ fn handle_hello<S: std::io::Read + std::io::Write>(
     match hello {
         Hello::DefaultConsole | Hello::NamedConsole { .. } => unreachable!(),
         Hello::FileDaemon { client_name, fd_protocol_version } => {
-            debug!("FD '{client_name}' connected (proto={fd_protocol_version})");
-            session_mgr.add_fd_connection(&client_name, fd_protocol_version);
+            // Client-initiated connections (Connection From Client To Director) are
+            // not served (docs/STUBS.md S-46). Registering the name would list a
+            // connection nobody authenticated and no job can use, and the entry
+            // would stay after the socket is closed.
+            let _ = session_mgr;
+            debug!("FD '{client_name}' (proto={fd_protocol_version}) connected: client-initiated connections are not served, closed");
         }
     }
 }
