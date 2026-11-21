@@ -1,0 +1,21 @@
+{
+  "version": 2255,
+  "description": "Usage of the month for the free tier display (docs/plans/FREE-TIER-LIZENZ.md, L-1/L-3): onesimus.fn_usage_month(p_month) sums JobBytes of backup jobs (Type B) without VirtualFull (Level f), by StartTime in the session time zone, regardless of the final status; one source for odir (status dir, GetDirectorStatus.usage) and the GUI. held_jobs stays 0 until the free tier holds jobs (table job_skip, later step).",
+  "created": "2026-11-21",
+  "author": "Onesimus",
+  "min_compatible_version": 2254,
+  "tables": [],
+  "views": [],
+  "functions": [
+    {
+      "name": "onesimus.fn_usage_month",
+      "description": "Bytes written by backup jobs (Type B, Level not f = VirtualFull) started in the calendar month of p_month (session time zone), number of such jobs and of jobs held by the free tier limit (0 until job_skip exists). Late-bound SQL body (string): no dependency on Bareos tables recorded.",
+      "params": "p_month date DEFAULT (date_trunc('month', now()))::date",
+      "returns": "TABLE(month date, bytes_written numeric, jobs bigint, held_jobs bigint)",
+      "language": "sql",
+      "volatility": "STABLE",
+      "parallel": "SAFE",
+      "body": "SELECT date_trunc('month', p_month)::date, COALESCE(sum(j.jobbytes), 0)::numeric, count(j.jobid)::bigint, 0::bigint FROM public.job j WHERE j.type = 'B' AND j.level <> 'f' AND j.starttime >= date_trunc('month', p_month) AND j.starttime < date_trunc('month', p_month) + interval '1 month'"
+    }
+  ]
+}

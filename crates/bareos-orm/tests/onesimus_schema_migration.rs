@@ -24,7 +24,7 @@ fn schema_dir() -> PathBuf {
 }
 
 /// The newest shipped schema step.
-const LATEST: i32 = 2254;
+const LATEST: i32 = 2255;
 
 /// The views and functions of v2251/v2252 (all shipped Onesimus views and
 /// functions), unqualified.
@@ -150,7 +150,7 @@ async fn check_layout_at(pool: &sqlx::PgPool, owner: &str, bareos: i32) -> Resul
     let report = Migrator::new(&schema_dir()).heal(pool).await;
     assert_eq!(report.skipped, None);
     assert!(report.repaired.is_empty() && report.failed.is_empty(), "a healthy catalog needs no repair: {report:?}");
-    assert_eq!(report.checked, 1 + 1 + 16 + 6, "schema, table, functions, views");
+    assert_eq!(report.checked, 1 + 1 + 17 + 6, "schema, table, functions, views");
     check_table(pool).await
 }
 
@@ -248,17 +248,17 @@ async fn check_late_bound(pool: &sqlx::PgPool) -> Result<(), Box<dyn std::error:
 async fn fresh_catalog_gets_the_onesimus_schema() {
     in_database("ons_fresh", |pool| async move {
         let migrator = Migrator::new(&schema_dir());
-        assert_eq!(migrator.migrate(&pool).await?, 5);
+        assert_eq!(migrator.migrate(&pool).await?, 6);
         let ours: Vec<i32> = sqlx::query_scalar("SELECT version FROM bareos_schema_version ORDER BY version")
             .fetch_all(&pool).await?;
-        assert_eq!(ours, [2250, 2251, 2252, 2253, 2254]);
+        assert_eq!(ours, [2250, 2251, 2252, 2253, 2254, 2255]);
         let user: String = sqlx::query_scalar("SELECT current_user::text").fetch_one(&pool).await?;
         check_layout(&pool, &user).await?;
         assert_eq!(migrator.migrate(&pool).await?, 0);
         let rows: i64 = sqlx::query_scalar("SELECT count(*) FROM onesimus.console_acl").fetch_one(&pool).await?;
         assert_eq!(rows, 1);
         let steps: i64 = sqlx::query_scalar("SELECT count(*) FROM bareos_schema_version").fetch_one(&pool).await?;
-        assert_eq!(steps, 5, "a second start records nothing");
+        assert_eq!(steps, 6, "a second start records nothing");
         Ok(())
     }).await;
 }
@@ -291,7 +291,7 @@ async fn catalog_at_2252_moves_its_objects_to_onesimus() {
         sqlx::query(&format!("GRANT SELECT ON vw_job_summary TO {reader}")).execute(&pool).await?;
 
         let migrator = Migrator::new(&schema_dir());
-        assert_eq!(migrator.migrate(&pool).await?, 2, "v2253 and v2254");
+        assert_eq!(migrator.migrate(&pool).await?, 3, "v2253, v2254 and v2255");
         check_layout(&pool, &role).await?;
         let report: i64 = sqlx::query_scalar("SELECT count(*) FROM public.my_report").fetch_one(&pool).await?;
         assert_eq!(report, 1, "the operator's view follows the moved view");
@@ -321,7 +321,7 @@ async fn bareos_ddl_catalog_gets_the_onesimus_schema() {
             Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/data/bareos-18be77e6-creates-postgresql.sql"))?;
         sqlx::raw_sql(&ddl).execute(&pool).await?;
         let migrator = Migrator::new(&schema_dir());
-        assert_eq!(migrator.migrate(&pool).await?, 4);
+        assert_eq!(migrator.migrate(&pool).await?, 5);
         let user: String = sqlx::query_scalar("SELECT current_user::text").fetch_one(&pool).await?;
         check_layout(&pool, &user).await?;
         assert_eq!(migrator.migrate(&pool).await?, 0);
@@ -347,7 +347,7 @@ async fn partly_moved_catalog_is_completed() {
         sqlx::query("CREATE FUNCTION onesimus.fn_director_status() RETURNS TABLE(total_jobs bigint, running bigint, \
                      successful bigint, errors bigint, total_bytes bigint, total_files bigint) AS $$ SELECT 0::bigint, \
                      0::bigint, 0::bigint, 0::bigint, 0::bigint, 0::bigint $$ LANGUAGE sql").execute(&pool).await?;
-        assert_eq!(Migrator::new(&schema_dir()).migrate(&pool).await?, 2);
+        assert_eq!(Migrator::new(&schema_dir()).migrate(&pool).await?, 3);
         let user: String = sqlx::query_scalar("SELECT current_user::text").fetch_one(&pool).await?;
         // check_layout also proves the stub fn_director_status was replaced
         // by the shipped definition (total_jobs counts the job).
@@ -385,7 +385,7 @@ async fn missing_create_privilege_fails_without_recording() {
         assert_eq!(onesimus_objects_in(&pool, "public").await?.len(), OBJECTS.len());
 
         sqlx::query(&format!("CREATE SCHEMA onesimus AUTHORIZATION {role}")).execute(&owner_pool).await?;
-        assert_eq!(migrator.migrate(&pool).await?, 2);
+        assert_eq!(migrator.migrate(&pool).await?, 3);
         check_layout(&pool, &role).await?;
         Ok::<_, Box<dyn std::error::Error>>(())
     }.await;
@@ -420,7 +420,7 @@ async fn bareos_upgrade_ddl_is_not_blocked_by_the_extension() {
     in_database("ons_upgrade", |pool| async move {
         migrate_pre_2253(&pool, "upgrade").await?;
         let migrator = Migrator::new(&schema_dir());
-        assert_eq!(migrator.migrate(&pool).await?, 2);
+        assert_eq!(migrator.migrate(&pool).await?, 3);
         check_late_bound(&pool).await?;
         insert_job(&pool).await?;
 
@@ -573,7 +573,7 @@ async fn bareos_upgrade_before_odir_never_skips_onesimus_steps() {
         migrate_pre_2253(&pool, "bareos2260").await?;
         sqlx::query("UPDATE version SET versionid = 2260").execute(&pool).await?;
         let migrator = Migrator::new(&schema_dir());
-        assert_eq!(migrator.migrate(&pool).await?, 2, "v2253 and v2254 despite Bareos 2260");
+        assert_eq!(migrator.migrate(&pool).await?, 3, "v2253..v2255 despite Bareos 2260");
         let user: String = sqlx::query_scalar("SELECT current_user::text").fetch_one(&pool).await?;
         check_layout_at(&pool, &user, 2260).await?;
         assert_eq!(migrator.migrate(&pool).await?, 0);
@@ -641,4 +641,44 @@ async fn every_migration_path_ends_with_the_same_catalog() {
         assert!(only_fresh.is_empty() && only_here.is_empty(),
             "{path} differs from fresh:\n only fresh: {only_fresh:#?}\n only {path}: {only_here:#?}");
     }
+}
+
+/// v2255 `onesimus.fn_usage_month` (free tier display, docs/plans/FREE-TIER-LIZENZ.md L-1/L-3):
+/// JobBytes of backup jobs of the month by StartTime, regardless of the final
+/// status; VirtualFull (Level f), Copy (Type C), Restore (Type R), Verify
+/// InitCatalog (Level V of Type V) and jobs of other months do not count.
+#[tokio::test]
+#[ignore = "needs BAREOS_ORM_TEST_DB=<postgres url of a throw-away cluster>"]
+async fn usage_month_counts_backup_bytes_of_the_month() {
+    in_database("ons_usage", |pool| async move {
+        Migrator::new(&schema_dir()).migrate(&pool).await?;
+        sqlx::query("INSERT INTO client (name, uname, autoprune, fileretention, jobretention) VALUES ('fd1', '', 1, 1, 1)")
+            .execute(&pool).await?;
+        for (job, ty, level, status, start, bytes) in [
+            ("full", "B", "F", "T", "2026-11-03 23:30:00", 400_i64),
+            ("incr", "B", "I", "E", "2026-11-30 23:59:59", 100),       // failed, still counts
+            ("diff", "B", "D", "T", "2026-11-01 00:00:00", 50),        // first second of the month
+            ("vfull", "B", "f", "T", "2026-11-10 10:00:00", 9_000),    // VirtualFull: no
+            ("copy", "C", "F", "T", "2026-11-11 10:00:00", 8_000),     // Copy: no
+            ("restore", "R", "F", "T", "2026-11-12 10:00:00", 7_000),  // Restore: no
+            ("verify", "V", "V", "T", "2026-11-13 10:00:00", 6_000),   // InitCatalog: no
+            ("oct", "B", "F", "T", "2026-10-31 23:59:59", 5_000),      // other month
+            ("dec", "B", "F", "T", "2026-12-01 00:00:00", 4_000),      // other month
+        ] {
+            sqlx::query("INSERT INTO job (job, name, type, level, clientid, jobstatus, jobtdate, starttime, jobbytes) \
+                         SELECT $1, $1, $2, $3, clientid, $4, 0, $5::timestamp, $6 FROM client WHERE name = 'fd1'")
+                .bind(job).bind(ty).bind(level).bind(status).bind(start).bind(bytes).execute(&pool).await?;
+        }
+        let row: (String, String, i64, i64) = sqlx::query_as(
+            "SELECT month::text, bytes_written::text, jobs, held_jobs FROM onesimus.fn_usage_month('2026-11-17')")
+            .fetch_one(&pool).await?;
+        assert_eq!(row.0, "2026-11-01");
+        assert_eq!(row.1, "550");
+        assert_eq!((row.2, row.3), (3, 0));
+        // default: the current month (an empty one here)
+        let jobs: i64 = sqlx::query_scalar("SELECT jobs FROM onesimus.fn_usage_month()").fetch_one(&pool).await?;
+        assert!(jobs >= 0);
+        Ok(())
+    })
+    .await;
 }

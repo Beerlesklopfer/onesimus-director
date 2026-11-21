@@ -381,7 +381,7 @@ mod tests {
         assert_eq!(shipped.schemas.iter().collect::<Vec<_>>(), ["onesimus"]);
         assert_eq!(shipped.tables.iter().map(|t| t.name.as_str()).collect::<Vec<_>>(), ["onesimus.console_acl"]);
         assert_eq!(shipped.views.len(), 6);
-        assert_eq!(shipped.functions.len(), 16);
+        assert_eq!(shipped.functions.len(), 17, "16 up to v2254, onesimus.fn_usage_month (v2255)");
         for view in &shipped.views {
             let function = format!("onesimus.fn_{}()", split_qualified(&view.name).1);
             assert!(view.query.contains(&format!("FROM {function}")), "{}: {}", view.name, view.query);
