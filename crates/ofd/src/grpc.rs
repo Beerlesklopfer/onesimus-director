@@ -117,7 +117,7 @@ pub fn start(
     key: &Path,
     shutdown: &'static AtomicBool,
 ) -> Result<(SocketAddr, std::thread::JoinHandle<()>), String> {
-    let tls = onesimus_daemon::grpc_tls::server_tls_config(cert, key)?;
+    let tls = onesimus_bnet_grpc::tls::server_tls_config(cert, key)?;
     let started = onesimus_bnet_grpc::server::spawn("fd:grpc", address, tls, shutdown, move |builder| {
         let service = FileDaemonServer::new(Service {
             config,

@@ -2165,6 +2165,7 @@ dependencies = [
  "bareos-bnet",
  "base64 0.22.1",
  "flume",
+ "nix 0.29.0",
  "onesimus-proto-rs",
  "prost",
  "rcgen",
@@ -2185,8 +2186,6 @@ dependencies = [
  "ctrlc",
  "daemonize",
  "nix 0.29.0",
- "rcgen",
- "tonic",
  "tracing",
  "tracing-subscriber",
 ]

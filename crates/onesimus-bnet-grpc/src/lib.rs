@@ -39,6 +39,9 @@
 //! Bareos-Gegenstück: keins (Onesimus-Erweiterung); die Rahmen entsprechen
 //! `core/src/lib/bsock_tcp.cc` (`send`, `recv`, `signal`).
 //!
+//! Dazu die TLS-Identität des gRPC-Servers eines Daemons ([`tls`]:
+//! selbstsigniertes Zertifikat beim ersten Start, `ServerTlsConfig`).
+//!
 //! Begriffe: [`glossary`]. Klassendiagramm: an [`ControlIo`].
 #![doc = include_str!(concat!(env!("OUT_DIR"), "/module_tree.md"))]
 #![deny(missing_docs)]
@@ -48,6 +51,7 @@ pub mod frame;
 pub mod glossary;
 pub mod io;
 pub mod server;
+pub mod tls;
 
 pub use client::{Rpc, Target};
 pub use frame::{Frame, WireFrame};

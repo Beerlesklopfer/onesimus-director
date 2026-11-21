@@ -14,7 +14,10 @@
 //!
 //! Herkunft: `ofd/src/grpc_tls.rs` (`load_or_generate`) und der Anfang von
 //! `ofd/src/grpc.rs` `start` (Identity aus PEM-Dateien), am 20.11.2026
-//! ohne Verhaltensänderung herausgelöst. Die Fassung des Directors
+//! ohne Verhaltensänderung herausgelöst; am 21.11.2026 aus
+//! `onesimus-daemon` (`grpc_tls`) hierher verschoben, damit die eigenen,
+//! nicht von Bareos abgeleiteten Teile in einem Crate mit dualer Lizenz
+//! liegen (docs/LIZENZEN.md). Die Fassung des Directors
 //! (`odir/src/grpc/tls.rs`, mit mDNS-Namen und Fingerabdruck) bleibt in odir
 //! und folgt in P1.
 
@@ -67,7 +70,7 @@ mod tests {
 
     #[test]
     fn generates_once_then_reuses() {
-        let dir = std::env::temp_dir().join(format!("onesimus-daemon-tls-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("onesimus-bnet-grpc-tls-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         let d = dir.to_str().unwrap();
         let (cert, key) = load_or_generate(d, "onesimus-test-grpc", "test-fd").unwrap();

@@ -1,6 +1,6 @@
 [package]
 name = "onesimus-daemon"
-description = "Common daemon frame of ofd and osd: accept loop, TLS-PSK, Director handshake, gRPC TLS, bandwidth limit, signals, logging, PID file, daemonize, privilege drop, -t, Bareos exit codes"
+description = "Common daemon frame of ofd and osd: accept loop, TLS-PSK, Director handshake, bandwidth limit, signals, logging, PID file, daemonize, privilege drop, -t, Bareos exit codes"
 version.workspace = true
 edition.workspace = true
 authors.workspace = true
@@ -13,7 +13,5 @@ bareos-format.workspace = true
 ctrlc.workspace = true
 daemonize.workspace = true
 nix.workspace = true
-rcgen.workspace = true
-tonic.workspace = true
 tracing.workspace = true
 tracing-subscriber.workspace = true

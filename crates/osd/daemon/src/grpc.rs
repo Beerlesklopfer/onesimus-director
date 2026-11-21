@@ -19,7 +19,7 @@
 //!
 //! TLS: eigenes Zertifikat (`--grpc-cert`/`--grpc-key`) oder ein beim
 //! ersten Start im Arbeitsverzeichnis erzeugtes selbstsigniertes
-//! (`onesimus-sd-grpc.crt`/`.key`, `onesimus_daemon::grpc_tls`). Der
+//! (`onesimus-sd-grpc.crt`/`.key`, `onesimus_bnet_grpc::tls`). Der
 //! Director hält es mit `Grpc CA Certificate File` in seiner
 //! Storage-Ressource fest.
 //!
@@ -105,14 +105,14 @@ pub fn certificate(d: &Daemon, cert: Option<&Path>, key: Option<&Path>) -> Resul
         (Some(c), Some(k)) => Ok((c.to_path_buf(), k.to_path_buf())),
         _ => {
             let dir = d.config.storage.working_directory.as_deref().unwrap_or(".");
-            onesimus_daemon::grpc_tls::load_or_generate(dir, CERT_BASE, d.name())
+            onesimus_bnet_grpc::tls::load_or_generate(dir, CERT_BASE, d.name())
         }
     }
 }
 
 /// Starts the gRPC listener on `address` with `cert`/`key`.
 pub fn start(d: Daemon, address: SocketAddr, cert: &Path, key: &Path) -> Result<(SocketAddr, std::thread::JoinHandle<()>), String> {
-    let tls = onesimus_daemon::grpc_tls::server_tls_config(cert, key)?;
+    let tls = onesimus_bnet_grpc::tls::server_tls_config(cert, key)?;
     onesimus_bnet_grpc::server::spawn("sd:grpc", address, tls, &crate::SHUTDOWN, move |builder| {
         let service = StorageDaemonServer::new(Service { daemon: d, sessions: Arc::new(tokio::sync::Semaphore::new(MAX_SESSIONS)) })
             .max_decoding_message_size(onesimus_bnet_grpc::io::MAX_MESSAGE)

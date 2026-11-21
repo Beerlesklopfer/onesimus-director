@@ -7,8 +7,7 @@
 //! eigenen Thread leiten, mit den Bareos-Exit-Codes enden. Dazu kommt seit
 //! 20.11.2026 die Netzseite: Verbindungen annehmen ([`accept`], TLS-PSK mit
 //! Schlüsselwahl nach PSK-Identität), den Director anmelden ([`handshake`]),
-//! TLS für den gRPC-Server ([`grpc_tls`]) und die Bandbreitenbegrenzung
-//! ([`bwlimit`]). ofd nutzt es seit 19.11.2026; der neue osd
+//! und die Bandbreitenbegrenzung ([`bwlimit`]). ofd nutzt es seit 19.11.2026; der neue osd
 //! (`crates/osd/daemon`) nutzt es von Anfang an.
 //!
 //! **Folgt in P1** (zu eng mit ofd verflochten, bleibt vorerst dort):
@@ -20,8 +19,10 @@
 //!
 //! Der gRPC-Server mit Laufzeit und Strompumpe (früher `ofd/src/grpc.rs`
 //! `start`) liegt seit 20.11.2026 in `onesimus-bnet-grpc` (`server::spawn`,
-//! `server::accept`), gemeinsam für ofd und osd; hier bleibt die
-//! TLS-Einstellung ([`grpc_tls`]).
+//! `server::accept`), gemeinsam für ofd und osd; die TLS-Einstellung
+//! (früher `grpc_tls` hier) seit 21.11.2026 ebenfalls dort (`tls`), weil sie
+//! keine Bareos-Ableitung ist und mit dem gRPC-Crate dual lizenziert ist
+//! (docs/LIZENZEN.md).
 //!
 //! Datenfluss eines Starts (Reihenfolge, wie `main` sie aufruft):
 //!
@@ -57,7 +58,6 @@ pub mod bwlimit;
 pub mod config_check;
 pub mod exit;
 pub mod glossary;
-pub mod grpc_tls;
 pub mod handshake;
 pub mod logging;
 pub mod pidfile;
