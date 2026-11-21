@@ -706,6 +706,7 @@ impl<S: Read + Write> Backup<'_, '_, S> {
         self.plugin_index += 1;
         match Session::open_covered(self.config, &line, job, index, chunk, covered) {
             Ok(session) => {
+                self.jmsg(M_INFO, format!("Plugin: \"{shown}\": {}.\n", session.loaded));
                 for w in &session.warnings {
                     self.jmsg(M_WARNING, format!("Plugin: \"{shown}\": {w}\n"));
                 }
@@ -740,12 +741,15 @@ impl<S: Read + Write> Backup<'_, '_, S> {
                 }
             }
         }
+        let plugin_id = session.plugin_id.clone();
         if let Err(e) = session.finish(ok) {
             if ok {
                 self.jmsg(M_FATAL, format!("Plugin: \"{shown}\": finish: {e}\n"));
                 ok = false;
             }
         }
+        self.jmsg(M_INFO, format!("Plugin: \"{shown}\": {plugin_id} finished, {}.\n",
+            if ok { "job part succeeded" } else { "job part failed" }));
         i32::from(ok)
     }
 

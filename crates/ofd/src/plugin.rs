@@ -233,6 +233,9 @@ pub struct Session {
     job: pb::JobContext,
     pub line: PluginLine,
     pub plugin_id: String,
+    /// What the host verified before it ran the plugin, for the job log
+    /// (plugin ID, version, signing key, suite, broker).
+    pub loaded: String,
     /// Largest block ReadFile/WriteFile may carry.
     pub chunk: u32,
     started: bool,
@@ -448,8 +451,11 @@ impl Session {
         let port = prepared.as_ref().map(|p| p.handle.clone());
         let warnings = prepared.as_ref().map(|p| p.warnings.clone()).unwrap_or_default();
         let scans = prepared.as_ref().and_then(|p| p.scans.clone());
+        let loaded = format!("Plugin {} {} verified (signing key {}, suite {}, broker {})", manifest.plugin_id,
+            manifest.version, manifest.signing_key_id, policy.suite,
+            if prepared.as_ref().is_some_and(|p| p.broker.is_some()) { "started" } else { "none" });
         let broker = prepared.and_then(|p| p.broker.map(|b| (b, p.cancel)));
-        Ok(Self { worker, binding, job, line: line.clone(), plugin_id: manifest.plugin_id, chunk, started: false, broker,
+        Ok(Self { worker, binding, job, line: line.clone(), plugin_id: manifest.plugin_id, loaded, chunk, started: false, broker,
             port, warnings, scans })
     }
 
@@ -790,6 +796,7 @@ mod tests {
             let (d, s) = open(&script, pb::JobOperation::Backup);
             let mut s = s.unwrap();
             assert_eq!(s.plugin_id, "test.postgresql");
+            assert!(s.loaded.starts_with("Plugin test.postgresql ") && s.loaded.contains("verified (signing key "), "{}", s.loaded);
             s.start(&NEVER).unwrap();
             let f = s.next_file(&NEVER).unwrap().unwrap();
             assert_eq!(f.path, b"@postgresql/main/db/a/a.dump");

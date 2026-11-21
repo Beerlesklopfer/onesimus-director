@@ -552,7 +552,7 @@ impl Restore<'_> {
             let opened = self.open_session(config, &line, job, r.sessions.len());
             match opened {
                 Ok(session) => {
-                    self.jmsg(M_INFO, format!("Plugin: \"{shown}\": restoring online through {}.\n", session.plugin_id));
+                    self.jmsg(M_INFO, format!("Plugin: \"{shown}\": restoring online through {} ({}).\n", session.plugin_id, session.loaded));
                     r.sessions.insert(line.name.clone(), session);
                 }
                 Err(e) => {
