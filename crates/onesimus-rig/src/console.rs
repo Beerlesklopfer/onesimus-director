@@ -48,16 +48,23 @@ impl std::fmt::Debug for Console {
 impl Console {
     /// Connects to the Director at `address` as `*UserAgent*` with `password`.
     pub fn connect(address: SocketAddr, password: &str) -> Result<Console, String> {
+        Self::connect_as(address, "*UserAgent*", password)
+    }
+
+    /// Connects as the console `name` (a `Console` resource of the Director,
+    /// e.g. `admin-mcp`), the way `bconsole -c` does.
+    pub fn connect_as(address: SocketAddr, name: &str, password: &str) -> Result<Console, String> {
         let stream = TcpStream::connect_timeout(&address, Duration::from_secs(10))
             .map_err(|e| format!("Konsole: connect {address}: {e}"))?;
         let socket = stream.try_clone().map_err(|e| e.to_string())?;
         let psk = bareos_bnet::tls_psk::password_to_psk(password);
-        let tls = bareos_bnet::tls_psk::psk_connect(stream, "R_CONSOLE\x1e*UserAgent*", &psk)
+        let tls = bareos_bnet::tls_psk::psk_connect(stream, &format!("R_CONSOLE\x1e{name}"), &psk)
             .map_err(|e| format!("Konsole: TLS-PSK: {e}"))?;
         let mut bnet = BnetStream::new(tls);
-        let hello = make_console_hello("*UserAgent*", "", false);
+        let version = if name == "*UserAgent*" { "" } else { "25.1.3" };
+        let hello = make_console_hello(name, version, false);
         bnet.send_str(&hello).map_err(|e| format!("Konsole: Hello: {e}"))?;
-        let authenticated = CramMd5Auth::new(password, "*UserAgent*", 0)
+        let authenticated = CramMd5Auth::new(password, name, 0)
             .two_way_authenticate(&mut bnet, false)
             .is_ok_and(|result| result.success);
         if !authenticated {

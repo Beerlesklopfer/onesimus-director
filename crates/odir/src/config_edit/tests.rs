@@ -514,3 +514,26 @@ fn storage_update_and_referenced() {
         Schedule {\n Name = S\n Run = Level=Full Storage=Tape sun at 23:05\n}\n", None).unwrap();
     assert_eq!(references(&raw, RType::Storage, "Tape"), vec![("pool".into(), "P".into()), ("schedule".into(), "S".into())]);
 }
+
+/// An assistant console may not store a program (S-55): command directives,
+/// `File = "|…"` and plugins are refused, other text is not.
+#[test]
+fn assistant_may_not_store_programs() {
+    for text in [
+        "Job { Name = x; Run Before Job = \"touch /tmp/a\" }",
+        "Job {\n Name = x\n ClientRunAfterJob = \"id\"\n}",
+        "Job {\n Name = x\n RunScript {\n  Command = \"id\"\n }\n}",
+        "FileSet {\n Name = x\n Include {\n  File = \"|cat /etc/shadow\"\n  Plugin = \"python\"\n }\n}",
+        "Job {\n Name = x\n Write Bootstrap = \"|mail me\"\n}",
+    ] {
+        assert!(assistant_refusal("a-mcp", text).is_some(), "{text}");
+        assert!(assistant_refusal("admin", text).is_none(), "other consoles are not limited: {text}");
+    }
+    for text in [
+        "Job {\n Name = x\n Write Bootstrap = \"/var/lib/bareos/%c.bsr\"\n}",
+        "FileSet {\n Name = x\n Include {\n  File = /etc\n }\n}",
+        "Schedule {\n Name = s\n Run = Full daily at 23:00\n}",
+    ] {
+        assert!(assistant_refusal("a-mcp", text).is_none(), "{text}");
+    }
+}

@@ -470,6 +470,12 @@ fn remove_resource(cfg: &mut DirectorConfig, table: &Table, name: &str) {
 /// ConfigureAdd + ConfigureAddResource. `args[0]` is the resource type.
 /// Returns the text output and the JSON object, or the error lines.
 fn add_resource(cfg: &mut DirectorConfig, layout: &Layout, args: &[Argument]) -> Result<(String, Value), String> {
+    add_resource_by(cfg, layout, args, "")
+}
+
+/// [`add_resource`] for the console `creator` ("" for the internal callers
+/// that have no console): an assistant console stores no program (S-55).
+fn add_resource_by(cfg: &mut DirectorConfig, layout: &Layout, args: &[Argument], creator: &str) -> Result<(String, Value), String> {
     let type_key = args[0].key.as_str();
     let table = table_by_name(type_key).filter(|t| t.items.is_some())
         .ok_or_else(|| format!("invalid resource type {type_key}.\n"))?;
@@ -478,6 +484,10 @@ fn add_resource(cfg: &mut DirectorConfig, layout: &Layout, args: &[Argument]) ->
     }
     let items = table.items.unwrap();
     let (name, text, lines) = create_resource_string(table, items, args)?;
+    // an assistant console stores no program (S-55)
+    if let Some(why) = crate::config_edit::assistant_refusal(creator, &text) {
+        return Err(format!("{why}\n"));
+    }
     if resource_exists(cfg, table, &name) {
         return Err(format!("Resource \"{}\" with name \"{name}\" already exists.\n", table.name));
     }
@@ -719,7 +729,7 @@ fn configure_add(ast: &CommandAst, ctx: &ExecContext, layout: Option<&Layout>) -
     // valid and not the Director, so a later failure keeps "configure": {}.
     let type_key = ast.arguments[1].key.as_str();
     let started = table_by_name(type_key).filter(|t| t.items.is_some()).is_some_and(|t| t.rcode != "R_DIRECTOR");
-    match add_resource(&mut cfg, layout, &ast.arguments[1..]) {
+    match add_resource_by(&mut cfg, layout, &ast.arguments[1..], &super::config_crud::console_of(ctx)) {
         Ok((text, json)) => CommandResult::ok(text).with_json(json!({ "configure": json })),
         Err(errors) if started => CommandResult::error(errors).with_json(json!({ "configure": {} })),
         Err(errors) => CommandResult::error(errors),

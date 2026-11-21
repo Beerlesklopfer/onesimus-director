@@ -53,6 +53,50 @@ pub enum RType {
     Storage,
 }
 
+/// Directives that make the Director or a File Daemon run a program or load
+/// code: command lines (`RunScript`, `Run Before Job` …) and plugins.
+const COMMAND_DIRECTIVES: [&str; 8] = [
+    "runscript", "runbeforejob", "runafterjob", "runafterfailedjob", "clientrunbeforejob", "clientrunafterjob",
+    "plugin", "writebootstrap",
+];
+
+/// Why an assistant console (`*-mcp`, [`crate::acl::is_assistant`]) may not
+/// store `text`, or `None`. An assistant may change the configuration, but
+/// not write a program into it: a Job with `Run Before Job` that a Schedule
+/// starts runs that command as the Director's user, which would lift every
+/// limit of [`crate::acl::ASSISTANT_REFUSED`]. The same holds for a FileSet
+/// `File = "|command"` and for plugins. `WriteBootstrap` only when it is a
+/// command (`|`).
+pub(crate) fn assistant_refusal(console: &str, text: &str) -> Option<String> {
+    if !crate::acl::is_assistant(console) {
+        return None;
+    }
+    let refused = |what: String| Some(format!("Console \"{console}\" is an assistant console (*{}): it may not \
+        store `{what}`, which runs a program or loads a plugin", crate::acl::ASSISTANT_SUFFIX));
+    // The text as the configuration reader sees it, so one-line resources,
+    // quoting and nested blocks (Include, RunScript) are read the same way.
+    let Ok(resources) = bareos_config::raw::parse_str(text, None) else {
+        // not parseable: the editor refuses it anyway; never let it pass here
+        return refused("(text that does not parse)".into());
+    };
+    fn walk(directives: &[Directive]) -> Option<String> {
+        for d in directives {
+            let key = d.norm_key();
+            let value = d.first().unwrap_or("").trim();
+            let command = value.starts_with('|') || value.starts_with("\\|");
+            if COMMAND_DIRECTIVES.contains(&key.as_str()) && !(key == "writebootstrap" && !command)
+                || (key == "file" && command) {
+                return Some(format!("{} = {value}", d.key));
+            }
+            if let Some(inner) = walk(d.block.as_deref().unwrap_or(&[])) {
+                return Some(inner);
+            }
+        }
+        None
+    }
+    resources.iter().find_map(|r| walk(&r.directives)).and_then(refused)
+}
+
 impl RType {
     pub const ALL: [RType; 7] =
         [RType::Schedule, RType::Job, RType::JobDefs, RType::Client, RType::FileSet, RType::Pool, RType::Storage];
@@ -876,6 +920,9 @@ impl ConfigEditor {
         if let Some(e) = name_error(&name) {
             return Ok(Outcome::new(Status::Invalid, &name, e));
         }
+        if let Some(why) = assistant_refusal(console, &text) {
+            return Ok(Outcome::new(Status::Invalid, &name, why));
+        }
         if !allow(&name) {
             return Ok(denied(rtype, &name));
         }
@@ -941,6 +988,9 @@ impl ConfigEditor {
                 return Ok(o);
             }
         };
+        if let Some(why) = assistant_refusal(console, &text) {
+            return Ok(Outcome::new(Status::Invalid, name, why));
+        }
         if new_name != name {
             return Ok(Outcome::new(Status::Invalid, name, format!("the Name in the text (\"{new_name}\") must be \
                 \"{name}\"; renaming is not supported")));
