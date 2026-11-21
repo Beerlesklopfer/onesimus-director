@@ -483,7 +483,7 @@ Aus den Stufen 1–3 zusammengeführt, mit Grund:
 
 ## Review-RFC vom 21.11.2026 (Einordnung)
 
-Eingereicht vom Maintainer („RFC: Review & Präzisierungen zu osd … D-1 bis D-21“). Je Punkt Bewertung und Vorschlag; Beschlüsse D-22 bis D-27 in der Tabelle unten (offen).
+Eingereicht vom Maintainer („RFC: Review & Präzisierungen zu osd … D-1 bis D-21“). Je Punkt Bewertung und Vorschlag; D-22 bis D-27 am 21.11.2026 so beschlossen (Tabelle unten).
 
 - **Testbarkeit ohne LTO:** zutreffend. PT über Loop-Devices (`losetup --direct-io=on`), PT2 über LIO (`targetcli`, `fileio`-Backstore) mit `dm-multipath`; ein echtes LTO (gebrauchtes SAS-Laufwerk mit HBA) erst in P6 als Gegenprobe zu mhvtl. In die Phasentabelle übernommen.
 - **2.1 Bounce-Buffer (D-22):** übernehmen, als Vorgabe. Die Recherche hatte `O_DIRECT` direkt aus dem Ring schon als ungetestet markiert. Die Aussage, es scheitere mit EINVAL/EFAULT, ist nicht belegt (GUP auf shmem-Seiten funktioniert in der Regel; Grenzen gibt es bei DAX und Langzeit-Pins) **[unbelegt]**, ändert aber nichts: Ein `memcpy` von 64 KiB je Block in einen prozesslokalen, auf die DIO-Ausrichtung (STATX_DIOALIGN, mindestens 4 KiB) ausgerichteten Puffer kostet wenig und macht den Pfad unabhängig von Kernel und Treiber. Der Weg ohne Kopie bleibt eine Option, die erst nach Messung je Treiber (loop, SCSI/iSCSI, NVMe) eingeschaltet wird.
@@ -523,10 +523,10 @@ Alle wie empfohlen, D-8 präzisiert: „additiv, rückwärtskompatibel“.
 | D-19 | Ablauf „Volume beschädigt“ in odir (Übersicht, Kopien hochstufen, neuen Full anstoßen), unabhängig von osd | **ja** (21.11.2026) |
 | D-20 | Plattenbänder auf SAN-LUNs über iSCSI: osd als Initiator, LUN = Magazin, Kennung aus VPD 0x83, Persistent Reservations + Lease für den alleinigen Zugriff, Logout als Auslagern; osd als iSCSI-Target für fremde Hosts später optional | **ja** (21.11.2026) |
 | D-21 | Gesundheit der Medien überwachen und melden: SMART/NVMe/SAS, Zähler des Bandkerns, Werte des SAN-Speichersystems, TapeAlert; Zustände ok/warnung/kritisch/ausgefallen; kritisch = keine neuen Schreibjobs + Übersicht nach D-19; Scrub; Meldung über Messages, gRPC-Ereignis, `status storage`, Verlauf im Schema `onesimus` | **ja** (21.11.2026) |
-| D-22 | Device-Schreiber kopieren Blöcke vor `pwrite`/`pread` mit `O_DIRECT` in einen prozesslokalen, DIO-ausgerichteten Puffer; Weg ohne Kopie nur nach Messung je Treiber | **offen** (Empfehlung: ja) |
-| D-23 | EOD-Abgleich beim Laden: physisches EOD hinter dem bestätigten Katalogstand wird beim nächsten Anhängen auf den Katalogstand gekürzt (mit Meldung, COMPATIBILITY-LOG); davor → Volume `Error` und Prüflauf | **offen** (Empfehlung: ja) |
-| D-24 | Auf `dm-multipath` Reservierungen über `mpathpersist` mit `reservation_key`; Lease ohne PR als Herzschlagzähler mit monotonen Zeitlimits (ohne Wanduhr), `WARN` ohne PR | **offen** (Empfehlung: ja) |
-| D-25 | Ring-Vorgabe 512 Fächer bei Jobs mit Zweig, einstellbar; dauerhaft langsame Zweige über Zeitlimit/D-11 bzw. später Spooling | **offen** (Empfehlung: ja) |
-| D-26 | Stripe-Label zusätzlich: erste logische Blocknummer des Mitglied-Volumes, Blockgröße beim Schreiben | **offen** (Empfehlung: ja) |
-| D-27 | LTFS-Kassetten: Partition 0 (Index) fest hinter dem Kassettenkopf, Größe einstellbar (Vorgabe max(1 GiB, 1 %)), Partition 1 dahinter | **offen** (Empfehlung: ja) |
+| D-22 | Device-Schreiber kopieren Blöcke vor `pwrite`/`pread` mit `O_DIRECT` in einen prozesslokalen, DIO-ausgerichteten Puffer; Weg ohne Kopie nur nach Messung je Treiber | **ja** (21.11.2026) |
+| D-23 | EOD-Abgleich beim Laden: physisches EOD hinter dem bestätigten Katalogstand wird beim nächsten Anhängen auf den Katalogstand gekürzt (mit Meldung, COMPATIBILITY-LOG); davor → Volume `Error` und Prüflauf | **ja** (21.11.2026) |
+| D-24 | Auf `dm-multipath` Reservierungen über `mpathpersist` mit `reservation_key`; Lease ohne PR als Herzschlagzähler mit monotonen Zeitlimits (ohne Wanduhr), `WARN` ohne PR | **ja** (21.11.2026) |
+| D-25 | Ring-Vorgabe 512 Fächer bei Jobs mit Zweig, einstellbar; dauerhaft langsame Zweige über Zeitlimit/D-11 bzw. später Spooling | **ja** (21.11.2026) |
+| D-26 | Stripe-Label zusätzlich: erste logische Blocknummer des Mitglied-Volumes, Blockgröße beim Schreiben | **ja** (21.11.2026) |
+| D-27 | LTFS-Kassetten: Partition 0 (Index) fest hinter dem Kassettenkopf, Größe einstellbar (Vorgabe max(1 GiB, 1 %)), Partition 1 dahinter | **ja** (21.11.2026) |
 | D-15 | Ring: `memmap2` + eigene Plattformschicht, Logik nach Disruptor/Aeron, Warten immer mit Zeitlimit (Recherche B) | **offen** (Empfehlung: ja) |
