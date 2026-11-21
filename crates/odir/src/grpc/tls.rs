@@ -80,7 +80,7 @@ fn generate(director_name: &str) -> anyhow::Result<GrpcIdentity> {
 }
 
 fn fingerprint_of_pem(pem: &str) -> anyhow::Result<String> {
-    let der = rustls_pemfile::certs(&mut pem.as_bytes())
+    let der = <rustls_pki_types::CertificateDer as rustls_pki_types::pem::PemObject>::pem_slice_iter(pem.as_bytes())
         .next()
         .ok_or_else(|| anyhow::anyhow!("no certificate in PEM"))??;
     Ok(hex::encode(Sha256::digest(der.as_ref())))

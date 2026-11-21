@@ -1,0 +1,41 @@
+# cargo-deny: Lizenzen, bekannte Schwachstellen (RustSec) und Quellen der
+# Abhängigkeiten. CI-Schritt "Abhängigkeiten" in .github/workflows/package.yml.
+# Die eigenen Crates stehen unter AGPL-3.0-only (Cargo.toml); Abhängigkeiten
+# dürfen nur Lizenzen haben, die sich damit verbinden lassen.
+
+[graph]
+# alle Ziele, auch Windows und macOS (die Portierung ist Teil des Stacks)
+all-features = false
+
+[advisories]
+# unmaintained/yanked melden, aber nicht scheitern lassen; Schwachstellen scheitern
+unmaintained = "workspace"
+yanked = "warn"
+ignore = [
+    # daemonize: seit 2023 ohne Pflege (UB-Korrektur offen). Ersatz: der eigene
+    # Hintergrundstart von onesimus-daemon (background.rs) für odir; STUBS S-58.
+    { id = "RUSTSEC-2025-0069", reason = "daemonize unmaintained; replacement tracked in docs/STUBS.md S-58" },
+    { id = "RUSTSEC-2026-0543", reason = "chrono unmaintained; replacement tracked in docs/STUBS.md S-58" },
+]
+
+[licenses]
+confidence-threshold = 0.9
+allow = [
+    "AGPL-3.0-only",
+    "MIT", "Apache-2.0", "Apache-2.0 WITH LLVM-exception", "BSD-2-Clause", "BSD-3-Clause",
+    "ISC", "Zlib", "Unicode-3.0", "Unicode-DFS-2016", "CC0-1.0", "0BSD", "BSL-1.0",
+    "MPL-2.0",          # pam-client2 (Dateiebenen-Copyleft, mit AGPL verbindbar)
+    "OpenSSL",
+    "CDLA-Permissive-2.0",   # webpki-roots (Datenlizenz der Mozilla-Wurzelzertifikate)
+]
+
+[bans]
+multiple-versions = "warn"
+wildcards = "allow"
+
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"
+# rustyline: fester Stand (rev) für oconsole
+allow-git = ["https://github.com/kkawakam/rustyline.git"]
+allow-registry = ["https://github.com/rust-lang/crates.io-index"]

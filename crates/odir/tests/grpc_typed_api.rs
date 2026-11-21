@@ -207,7 +207,7 @@ impl ServerCertVerifier for Pin {
 async fn channel(director: &Director) -> Channel {
     // The Director keeps its self-signed certificate in the working directory
     let pem = std::fs::read(&director.cert).unwrap();
-    let der = rustls_pemfile::certs(&mut pem.as_slice()).next().unwrap().unwrap();
+    let der = <rustls_pki_types::CertificateDer as rustls_pki_types::pem::PemObject>::pem_slice_iter(pem.as_slice()).next().unwrap().unwrap();
     let fingerprint = hex::encode(Sha256::digest(der.as_ref()));
     let port = director.grpc_port;
     let connector = tower::service_fn(move |_: Uri| {

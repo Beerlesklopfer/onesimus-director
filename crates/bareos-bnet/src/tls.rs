@@ -8,6 +8,7 @@ use std::io::{self, BufReader, Read, Write};
 use std::net::TcpStream;
 use std::sync::Arc;
 
+use rustls::pki_types::pem::PemObject;
 use rustls::pki_types::{CertificateDer, PrivateKeyDer, ServerName};
 
 /// TLS configuration loaded from Bareos resource directives.
@@ -69,16 +70,17 @@ impl Write for TlsOrPlain {
 pub fn load_certs(path: &str) -> io::Result<Vec<CertificateDer<'static>>> {
     let file = fs::File::open(path)?;
     let mut reader = BufReader::new(file);
-    rustls_pemfile::certs(&mut reader)
+    CertificateDer::pem_reader_iter(&mut reader)
         .collect::<Result<Vec<_>, _>>()
+        .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e.to_string()))
 }
 
 /// Load private key from PEM file.
 pub fn load_private_key(path: &str) -> io::Result<PrivateKeyDer<'static>> {
     let file = fs::File::open(path)?;
     let mut reader = BufReader::new(file);
-    rustls_pemfile::private_key(&mut reader)?
-        .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, "no private key found in PEM"))
+    PrivateKeyDer::from_pem_reader(&mut reader)
+        .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, format!("no private key found in PEM: {e}")))
 }
 
 /// Build a rustls ServerConfig from TlsConfig.

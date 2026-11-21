@@ -41,7 +41,7 @@ jobs:
             libssl-dev zlib1g-dev liblzo2-dev libacl1-dev libpam0g-dev >/dev/null
           curl -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal --default-toolchain stable
           echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
-          "$HOME/.cargo/bin/cargo" install cargo-deb --locked
+          "$HOME/.cargo/bin/cargo" install cargo-deb cargo-deny --locked
 
       - name: Checkout
         uses: actions/checkout@v4
@@ -79,6 +79,12 @@ jobs:
             -p bareos-format -p onesimus-daemon -p onesimus-rig -p osd -p osd-daemon -p osd-ring \
             -p onesimus-bnet-grpc \
             --no-default-features --features oconsole/mcp-production
+
+      # Lizenzen, bekannte Schwachstellen (RustSec) und Quellen der Abhängigkeiten
+      # (deny.toml). Eine bekannte Schwachstelle lässt den Lauf scheitern;
+      # Ausnahmen stehen mit Begründung in deny.toml.
+      - name: Abhängigkeiten
+        run: $AS_CI cargo deny --locked check
 
       # Dokumentationsregel (docs/wiki/dokumentation.md): die neuen Crates
       # bauen ihre Doku samt privater Elemente ohne Warnung. Das Testgerüst

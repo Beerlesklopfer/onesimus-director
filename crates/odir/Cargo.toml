@@ -60,7 +60,7 @@ mdns-sd.workspace = true
 # compatible with AGPL-3.0. Build needs libpam0g-dev, the package libpam0g ($auto).
 pam-client2 = { version = "0.5.6", default-features = false }
 hex.workspace = true
-rustls-pemfile.workspace = true
+rustls-pki-types.workspace = true
 md-5.workspace = true
 rand.workspace = true
 openssl.workspace = true
