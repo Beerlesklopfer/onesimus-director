@@ -13,9 +13,11 @@
 //! other descriptors, `PR_SET_NO_NEW_PRIVS`, `PR_SET_PDEATHSIG` and its own
 //! process group, and drops to the instance user (never root) before exec.
 
+#[cfg(target_os = "linux")]
 use std::ffi::CString;
 use std::fs::File;
 use std::io::Read;
+#[cfg(target_os = "linux")]
 use std::os::fd::AsRawFd;
 use std::os::unix::fs::{MetadataExt, OpenOptionsExt};
 use std::os::unix::net::UnixStream;
@@ -98,6 +100,7 @@ fn open_part(plugin_dir: &Path, entry: &onesimus_plugins::NativePart, part: &str
 /// The user namespace of a rootless Podman broker
 /// (docs/plans/PODMAN-PLUGIN.md, "Namespace und Start").
 #[derive(Debug, Clone)]
+#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
 pub struct UserNs {
     /// Text for `/proc/<pid>/uid_map` (`0 <uid> 1`, `1 <subuid> <count>`).
     pub uid_map: String,
@@ -137,6 +140,7 @@ pub(crate) fn launch_in_userns(plugin_dir: &Path, manifest: &onesimus_plugins::M
 /// fork; the child unshares as root and waits; the parent writes the maps;
 /// the child switches to ns-root and execs. Everything the child needs is
 /// prepared before fork.
+#[cfg(target_os = "linux")]
 fn spawn_userns(file: &File, name: &str, args: &[String], ns: &UserNs) -> std::io::Result<Broker> {
     let (parent, child) = UnixStream::pair()?;
     let devnull = File::options().write(true).open("/dev/null")?;
@@ -197,6 +201,7 @@ fn spawn_userns(file: &File, name: &str, args: &[String], ns: &UserNs) -> std::i
 ///
 /// # Safety
 /// Only between fork and exec, with pointers valid in the parent's image.
+#[cfg(target_os = "linux")]
 unsafe fn child_userns(exe: i32, sock: i32, null: i32, ready: i32, go: i32, argv: &[*const libc::c_char],
     envp: &[*const libc::c_char]) -> ! {
     // SAFETY: raw system calls on valid descriptors and pointers.
@@ -243,6 +248,20 @@ unsafe fn child_userns(exe: i32, sock: i32, null: i32, ready: i32, go: i32, argv
     }
 }
 
+/// User namespaces exist only on Linux: no broker on other platforms.
+#[cfg(not(target_os = "linux"))]
+fn spawn_userns(_file: &File, _name: &str, _args: &[String], _ns: &UserNs) -> std::io::Result<Broker> {
+    Err(unsupported())
+}
+
+/// The error of a broker start on a platform without the Linux process
+/// controls the broker relies on (`PR_SET_NO_NEW_PRIVS`,
+/// `PR_SET_PDEATHSIG`, `fexecve`, namespaces).
+#[cfg(not(target_os = "linux"))]
+fn unsupported() -> std::io::Error {
+    std::io::Error::new(std::io::ErrorKind::Unsupported, "native plugin brokers are not supported on this platform")
+}
+
 /// For `ofd --check-plugin`: every native part the verified manifest lists
 /// for `triplet` is a regular file (not a link) below `plugin_dir` with the
 /// signed SHA-256. Returns how many parts were checked. Nothing is started.
@@ -282,6 +301,7 @@ fn sha256_of(file: &mut File) -> std::io::Result<String> {
 
 /// fork + exec of the open descriptor. Everything the child needs is
 /// prepared before fork; the child only makes raw system calls.
+#[cfg(target_os = "linux")]
 fn spawn(file: &File, run_as: RunAs, name: &str, args: &[String]) -> std::io::Result<Broker> {
     let (parent, child) = UnixStream::pair()?;
     let devnull = File::options().write(true).open("/dev/null")?;
@@ -320,6 +340,7 @@ fn spawn(file: &File, run_as: RunAs, name: &str, args: &[String]) -> std::io::Re
 ///
 /// # Safety
 /// Only between fork and exec, with pointers valid in the parent's image.
+#[cfg(target_os = "linux")]
 unsafe fn child_exec(exe: i32, sock: i32, null: i32, switch: bool, run_as: RunAs,
     argv: &[*const libc::c_char], envp: &[*const libc::c_char; 1]) -> ! {
     // SAFETY: raw system calls on valid descriptors and pointers.
@@ -359,6 +380,12 @@ unsafe fn child_exec(exe: i32, sock: i32, null: i32, switch: bool, run_as: RunAs
         libc::fexecve(exe_fd, argv.as_ptr(), envp.as_ptr());
         fail(5)
     }
+}
+
+/// Brokers need Linux process controls; see [`unsupported`].
+#[cfg(not(target_os = "linux"))]
+fn spawn(_file: &File, _run_as: RunAs, _name: &str, _args: &[String]) -> std::io::Result<Broker> {
+    Err(unsupported())
 }
 
 impl Broker {

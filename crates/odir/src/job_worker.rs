@@ -1471,9 +1471,11 @@ pub fn spawn_job_worker(job_id: u32, job_name: &str, params: &JobParams) -> io::
             keep.extend(TOKIO_SIGNAL_FDS.get().into_iter().flatten());
             for fd in 3..1024 { if !keep.contains(&fd) { unsafe { libc::close(fd); } } }
 
-            let proc_name = format!("job:{job_id}");
             #[cfg(target_os = "linux")]
-            { use std::ffi::CString; if let Ok(n) = CString::new(proc_name.as_str()) { unsafe { libc::prctl(libc::PR_SET_NAME, n.as_ptr()); } } }
+            {
+                let proc_name = format!("job:{job_id}");
+                use std::ffi::CString; if let Ok(n) = CString::new(proc_name.as_str()) { unsafe { libc::prctl(libc::PR_SET_NAME, n.as_ptr()); } }
+            }
 
             install_worker_signal_handlers();
             eprintln!("[worker:{job_id}] started pid={}", std::process::id());

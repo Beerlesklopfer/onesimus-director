@@ -457,7 +457,9 @@ pub fn broker_args(account: &AccountEntry) -> Vec<String> {
 /// /dev/null. As root `ofd` switches to the account first; otherwise only
 /// its own uid is possible. Used by the lifecycle (P2); proven in P0.
 #[allow(dead_code)]
+#[cfg_attr(not(target_os = "linux"), allow(unused_variables, unused_mut))]
 pub fn unit_show_as_account(uid: u32, gid: u32, runtime: &Path, units: &[String]) -> Result<Vec<u8>, String> {
+    #[cfg(target_os = "linux")]
     use std::os::unix::process::CommandExt;
     let argv = onesimus_podman_core::exec::Operation::UnitShow { user: true, units: units.to_vec() }.argv(&Storage::default())?;
     // SAFETY: geteuid has no preconditions.
@@ -474,8 +476,13 @@ pub fn unit_show_as_account(uid: u32, gid: u32, runtime: &Path, units: &[String]
         .env("XDG_RUNTIME_DIR", runtime)
         .stdin(std::process::Stdio::null())
         .stderr(std::process::Stdio::null());
+    if cfg!(not(target_os = "linux")) {
+        return Err("systemctl --user as an account is not supported on this platform".into());
+    }
+    #[cfg(target_os = "linux")]
     let switch = euid == 0;
     // SAFETY: only async-signal-safe calls between fork and exec.
+    #[cfg(target_os = "linux")]
     unsafe {
         cmd.pre_exec(move || {
             if switch && (libc::setgroups(0, std::ptr::null()) < 0 || libc::setresgid(gid, gid, gid) < 0 || libc::setresuid(uid, uid, uid) < 0) {

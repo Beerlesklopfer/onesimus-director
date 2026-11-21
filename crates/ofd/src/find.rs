@@ -73,23 +73,39 @@ pub trait Handler {
     }
 }
 
+/// The Stat record of a libc stat. `st_dev`/`st_rdev` are `i32` and
+/// `st_mode` is `u16` on macOS: widened like `(int64_t)` in Bareos
+/// encode_stat(); `st_flags` is saved where it exists (HAVE_CHFLAGS).
+#[allow(clippy::unnecessary_cast)]
 pub fn stat_from(st: &libc::stat) -> Stat {
     Stat {
-        dev: st.st_dev,
+        dev: st.st_dev as u64,
         ino: st.st_ino,
-        mode: st.st_mode,
+        mode: st.st_mode as u32,
         nlink: u64::from(st.st_nlink),
         uid: st.st_uid,
         gid: st.st_gid,
-        rdev: st.st_rdev,
+        rdev: st.st_rdev as u64,
         size: st.st_size,
         blksize: i64::from(st.st_blksize),
         blocks: st.st_blocks,
         atime: st.st_atime,
         mtime: st.st_mtime,
         ctime: st.st_ctime,
-        flags: 0,
+        flags: st_flags(st),
     }
+}
+
+/// `st_flags` (BSD file flags); Linux has none.
+#[cfg(not(target_vendor = "apple"))]
+fn st_flags(_st: &libc::stat) -> u64 {
+    0
+}
+
+/// `st_flags` (BSD file flags, chflags(2)).
+#[cfg(target_vendor = "apple")]
+fn st_flags(st: &libc::stat) -> u64 {
+    u64::from(st.st_flags)
 }
 
 fn cpath(p: &[u8]) -> CString {
@@ -206,7 +222,7 @@ impl<'a> Finder<'a> {
             FT_NOACCESS | FT_NOFOLLOW | FT_NOSTAT | FT_NOCHG | FT_ISARCH | FT_NORECURSE | FT_NOFSCHG
             | FT_INVALIDFS | FT_INVALIDDT | FT_NOOPEN | FT_LNKSAVED | FT_REGE | FT_REG | FT_LNK | FT_DIRBEGIN
             | FT_DIREND | FT_RAW | FT_FIFO | FT_SPEC | FT_DIRNOCHG | FT_REPARSE | FT_JUNCTION => {
-                let is_dir = ff.statp.mode & libc::S_IFMT == libc::S_IFDIR;
+                let is_dir = ff.statp.mode & crate::stmode::S_IFMT == crate::stmode::S_IFDIR;
                 let incexe = &self.fileset.include[self.incexe];
                 let fname = ff.fname.clone();
                 if accept_file(self.fileset, incexe, &fname, is_dir, &mut ff.opts) {
@@ -264,9 +280,9 @@ impl<'a> Finder<'a> {
             h.jmsg(t, format!("Top level directory \"{}\" has unlisted fstype \"{fs}\"\n", String::from_utf8_lossy(&fname)));
             return 1;
         }
-        let fmt = ff.statp.mode & libc::S_IFMT;
-        if fmt != libc::S_IFDIR {
-            if fmt == libc::S_IFREG {
+        let fmt = ff.statp.mode & crate::stmode::S_IFMT;
+        if fmt != crate::stmode::S_IFDIR {
+            if fmt == crate::stmode::S_IFREG {
                 if let Some(sm) = ff.size_match {
                     if !sm.accepts(ff.statp.size) {
                         return 1;
@@ -284,7 +300,7 @@ impl<'a> Finder<'a> {
         ff.digest = None;
         if !ff.opts.flags.has(FO_NO_HARDLINK)
             && ff.statp.nlink > 1
-            && matches!(fmt, libc::S_IFREG | libc::S_IFCHR | libc::S_IFBLK | libc::S_IFIFO | libc::S_IFSOCK)
+            && matches!(fmt, crate::stmode::S_IFREG | crate::stmode::S_IFCHR | crate::stmode::S_IFBLK | crate::stmode::S_IFIFO | crate::stmode::S_IFSOCK)
         {
             // process_hardlink()
             let key = (ff.statp.dev, ff.statp.ino);
@@ -303,7 +319,7 @@ impl<'a> Finder<'a> {
             }
         }
         let r = match fmt {
-            libc::S_IFREG => {
+            crate::stmode::S_IFREG => {
                 // MODE_RALL: world readable empty files are not opened
                 ff.type_ = if ff.statp.size == 0 && (ff.statp.mode & 0o444) == 0o444 { FT_REGE } else { FT_REG };
                 let r = self.callback(ff, h, top_level);
@@ -313,7 +329,7 @@ impl<'a> Finder<'a> {
                 }
                 r
             }
-            libc::S_IFLNK => {
+            crate::stmode::S_IFLNK => {
                 match std::fs::read_link(std::ffi::OsStr::from_bytes(&fname)) {
                     Ok(t) => {
                         ff.link = t.as_os_str().as_bytes().to_vec();
@@ -328,11 +344,11 @@ impl<'a> Finder<'a> {
                 self.set_linked(ff);
                 r
             }
-            libc::S_IFDIR => self.process_directory(ff, h, fname, parent_dev, top_level),
+            crate::stmode::S_IFDIR => self.process_directory(ff, h, fname, parent_dev, top_level),
             _ => {
-                ff.type_ = if top_level && fmt == libc::S_IFBLK {
+                ff.type_ = if top_level && fmt == crate::stmode::S_IFBLK {
                     FT_RAW
-                } else if top_level && fmt == libc::S_IFIFO && ff.opts.flags.has(FO_READFIFO) {
+                } else if top_level && fmt == crate::stmode::S_IFIFO && ff.opts.flags.has(FO_READFIFO) {
                     FT_FIFO
                 } else {
                     FT_SPEC

@@ -31,6 +31,15 @@ use onesimus_proto_rs::onesimus::filed::plugin::v1 as pb;
 
 pub use bareos_format::msg::M_NOTSAVED;
 
+/// O_NOATIME (Linux only; elsewhere 0, like `#ifdef O_NOATIME` in Bareos
+/// bfile.cc).
+#[cfg(target_os = "linux")]
+const O_NOATIME: i32 = libc::O_NOATIME;
+/// O_NOATIME (Linux only; elsewhere 0, like `#ifdef O_NOATIME` in Bareos
+/// bfile.cc).
+#[cfg(not(target_os = "linux"))]
+const O_NOATIME: i32 = 0;
+
 /// SelectDataStream() (no encryption, portable data).
 pub fn select_data_stream(flags: Flags) -> i32 {
     let stream = if flags.has(FO_SPARSE) || flags.has(FO_OFFSETS) { STREAM_SPARSE_DATA } else { STREAM_FILE_DATA };
@@ -181,7 +190,7 @@ pub fn file_checksum(ff: &FfPkt, counters: &mut Counters, msgs: &mut JobMsgs, is
     let mut opts = std::fs::OpenOptions::new();
     opts.read(true);
     if ff.opts.flags.has(FO_NOATIME) {
-        opts.custom_flags(libc::O_NOATIME);
+        opts.custom_flags(O_NOATIME);
     }
     let fname = String::from_utf8_lossy(&ff.fname).into_owned();
     let mut f = match opts.open(std::ffi::OsStr::from_bytes(&ff.fname)) {
@@ -230,14 +239,14 @@ pub fn accurate_check_file(ff: &mut FfPkt, env: &mut JobEnv, counters: &mut Coun
     ff.accurate_found = false;
     let Some(list) = env.accurate.as_deref_mut() else { return true };
     let (sf, sl) = stripped_names(ff);
-    let is_dir = ff.statp.mode & libc::S_IFMT == libc::S_IFDIR;
+    let is_dir = ff.statp.mode & crate::stmode::S_IFMT == crate::stmode::S_IFDIR;
     let key = if is_dir { sl } else { sf };
     let Some(payload) = list.files.get(&key).cloned() else { return true };
     ff.accurate_found = true;
     ff.delta_seq = payload.delta_seq;
     let (cat, _, _) = decode_stat(&payload.lstat);
     let opts = if !env.rerunning && env.level_full { ff.basejob_opts.clone() } else { ff.accurate_opts.clone() };
-    let can_checksum = ff.type_ != FT_LNKSAVED && ff.statp.mode & libc::S_IFMT == libc::S_IFREG && ff.opts.flags.any_digest();
+    let can_checksum = ff.type_ != FT_LNKSAVED && ff.statp.mode & crate::stmode::S_IFMT == crate::stmode::S_IFREG && ff.opts.flags.any_digest();
     let fname = String::from_utf8_lossy(&ff.fname).into_owned();
     let mut warnings = Vec::new();
     let status = {
@@ -403,7 +412,7 @@ impl<S: Read + Write> Backup<'_, '_, S> {
                 self.jmsg(M_INFO, format!("     Disallowed drive type. Will not descend into {fname}\n"));
             }
             FT_SPEC => {
-                if ff.statp.mode & libc::S_IFMT == libc::S_IFSOCK {
+                if ff.statp.mode & crate::stmode::S_IFMT == crate::stmode::S_IFSOCK {
                     self.jmsg(M_SKIPPED, format!("     Socket file skipped: {fname}\n"));
                     return 1;
                 }
@@ -449,8 +458,8 @@ impl<S: Read + Write> Backup<'_, '_, S> {
             return self.good_rtn();
         }
 
-        let fmt = ff.statp.mode & libc::S_IFMT;
-        let do_read = if ff.type_ != FT_LNKSAVED && fmt == libc::S_IFREG {
+        let fmt = ff.statp.mode & crate::stmode::S_IFMT;
+        let do_read = if ff.type_ != FT_LNKSAVED && fmt == crate::stmode::S_IFREG {
             ff.statp.size > 0
         } else {
             matches!(ff.type_, FT_RAW | FT_FIFO | FT_REPARSE | FT_JUNCTION)
@@ -459,7 +468,7 @@ impl<S: Read + Write> Backup<'_, '_, S> {
             let mut opts = std::fs::OpenOptions::new();
             opts.read(true);
             if ff.opts.flags.has(FO_NOATIME) {
-                opts.custom_flags(libc::O_NOATIME);
+                opts.custom_flags(O_NOATIME);
             }
             match opts.open(std::ffi::OsStr::from_bytes(&ff.fname)) {
                 Ok(mut file) => {
@@ -500,7 +509,7 @@ impl<S: Read + Write> Backup<'_, '_, S> {
         if ff.opts.flags.has(FO_XATTR) && !self.xattr_disabled {
             match acl_xattr::build_xattr_stream(&ff.fname, ff.opts.flags.has(FO_ACL)) {
                 Ok(Some(content)) => {
-                    if !(self.sd.header(STREAM_XATTR_LINUX) && self.sd.send(&content)) {
+                    if !(self.sd.header(acl_xattr::XATTR_STREAM) && self.sd.send(&content)) {
                         return self.bail_out();
                     }
                     self.sd.counters.job_bytes += content.len() as u64;
@@ -985,12 +994,12 @@ pub fn plugin_ff(include: &FfPkt, entry: &pb::FileEntry) -> Option<FfPkt> {
     let path = plugin_path(&entry.path)?;
     let (type_, link) = match pb::FileKind::try_from(entry.kind).ok()? {
         pb::FileKind::Regular | pb::FileKind::Virtual => {
-            statp.mode = libc::S_IFREG | if perm == 0 { 0o600 } else { perm };
+            statp.mode = crate::stmode::S_IFREG | if perm == 0 { 0o600 } else { perm };
             statp.size = i64::try_from(entry.size).ok()?;
             (FT_REG, path.clone())
         }
         pb::FileKind::Directory => {
-            statp.mode = libc::S_IFDIR | if perm == 0 { 0o700 } else { perm };
+            statp.mode = crate::stmode::S_IFDIR | if perm == 0 { 0o700 } else { perm };
             let mut dir = path.clone();
             if dir.last() != Some(&b'/') {
                 dir.push(b'/');
@@ -998,7 +1007,7 @@ pub fn plugin_ff(include: &FfPkt, entry: &pb::FileEntry) -> Option<FfPkt> {
             (FT_DIREND, dir)
         }
         pb::FileKind::Symlink => {
-            statp.mode = libc::S_IFLNK | 0o777;
+            statp.mode = crate::stmode::S_IFLNK | 0o777;
             (FT_LNK, entry.symlink_target.clone())
         }
         // FIFO and hard link exist only as host scan entries (source_ref,
@@ -1060,7 +1069,7 @@ impl Handler for EstimateHandler<'_, '_> {
             | FT_REPARSE | FT_JUNCTION | FT_DIREND | FT_SPEC | FT_RAW | FT_FIFO => {}
             _ => return 1,
         }
-        if ff.type_ != FT_LNKSAVED && ff.statp.mode & libc::S_IFMT == libc::S_IFREG && ff.statp.size > 0 {
+        if ff.type_ != FT_LNKSAVED && ff.statp.mode & crate::stmode::S_IFMT == crate::stmode::S_IFREG && ff.statp.size > 0 {
             self.counters.job_bytes += ff.statp.size as u64;
         }
         self.counters.num_files_examined += 1;
@@ -1189,7 +1198,7 @@ impl<D: Read + Write> Handler for VerifyHandler<'_, D> {
             self.msgs.jmsg(M_FATAL, "Network error in send to Director: ERR=Broken pipe\n");
             return 0;
         }
-        if ff.type_ != FT_LNKSAVED && ff.statp.mode & libc::S_IFMT == libc::S_IFREG && ff.opts.flags.any_digest() {
+        if ff.type_ != FT_LNKSAVED && ff.statp.mode & crate::stmode::S_IFMT == crate::stmode::S_IFREG && ff.opts.flags.any_digest() {
             match file_checksum(ff, self.counters, self.msgs, true) {
                 Some(Some((name, stream, b64))) => {
                     let _ = self.dir.send_str(&format!("{fi} {stream} {b64} *{name}-{fi}*"));
@@ -1217,11 +1226,11 @@ mod tests {
         let include = FfPkt::default();
         let entry = |mode| pb::FileEntry { path: b"/@t/x".to_vec(), kind: pb::FileKind::Regular as i32, size: 1, mode, ..Default::default() };
         let ff = plugin_ff(&include, &entry(0o4755)).unwrap();
-        assert_eq!(ff.statp.mode, libc::S_IFREG | 0o755);
+        assert_eq!(ff.statp.mode, crate::stmode::S_IFREG | 0o755);
         let ff = plugin_ff(&include, &entry(0o7000)).unwrap();
-        assert_eq!(ff.statp.mode, libc::S_IFREG | 0o600, "only special bits: default permissions");
+        assert_eq!(ff.statp.mode, crate::stmode::S_IFREG | 0o600, "only special bits: default permissions");
         let dir = pb::FileEntry { kind: pb::FileKind::Directory as i32, ..entry(0o3775) };
-        assert_eq!(plugin_ff(&include, &dir).unwrap().statp.mode, libc::S_IFDIR | 0o775);
+        assert_eq!(plugin_ff(&include, &dir).unwrap().statp.mode, crate::stmode::S_IFDIR | 0o775);
     }
     use super::*;
 

@@ -99,6 +99,8 @@ pub const STREAM_ACL_PLUGIN: i32 = 1020;
 pub const STREAM_XATTR_PLUGIN: i32 = 1988;
 /// Solaris extended attributes.
 pub const STREAM_XATTR_SOLARIS: i32 = 1995;
+/// Darwin (macOS) extended attributes.
+pub const STREAM_XATTR_DARWIN: i32 = 1996;
 /// Linux extended attributes.
 pub const STREAM_XATTR_LINUX: i32 = 1998;
 /// NetBSD extended attributes.

@@ -136,27 +136,27 @@ pub fn build_attr_output_fnames(attr: &mut Attributes, where_: &Where, prefix_li
 
 /// encode_mode() of lib/edit.cc ("drwxr-xr-x").
 fn encode_mode(mode: u32) -> String {
-    let fmt = mode & libc::S_IFMT;
+    let fmt = mode & crate::stmode::S_IFMT;
     let mut s = String::with_capacity(10);
     s.push(match fmt {
-        libc::S_IFDIR => 'd',
-        libc::S_IFCHR => 'c',
-        libc::S_IFBLK => 'b',
-        libc::S_IFIFO => 'f',
-        libc::S_IFLNK => 'l',
-        libc::S_IFSOCK => 's',
+        crate::stmode::S_IFDIR => 'd',
+        crate::stmode::S_IFCHR => 'c',
+        crate::stmode::S_IFBLK => 'b',
+        crate::stmode::S_IFIFO => 'f',
+        crate::stmode::S_IFLNK => 'l',
+        crate::stmode::S_IFSOCK => 's',
         _ => '-',
     });
     let bit = |b: u32, c: char| if mode & b != 0 { c } else { '-' };
-    s.push(bit(libc::S_IRUSR, 'r'));
-    s.push(bit(libc::S_IWUSR, 'w'));
-    s.push(if mode & libc::S_ISUID != 0 { if mode & libc::S_IXUSR != 0 { 's' } else { 'S' } } else { bit(libc::S_IXUSR, 'x') });
-    s.push(bit(libc::S_IRGRP, 'r'));
-    s.push(bit(libc::S_IWGRP, 'w'));
-    s.push(if mode & libc::S_ISGID != 0 { if mode & libc::S_IXGRP != 0 { 's' } else { 'S' } } else { bit(libc::S_IXGRP, 'x') });
-    s.push(bit(libc::S_IROTH, 'r'));
-    s.push(bit(libc::S_IWOTH, 'w'));
-    s.push(if mode & libc::S_ISVTX != 0 { if mode & libc::S_IXOTH != 0 { 't' } else { 'T' } } else { bit(libc::S_IXOTH, 'x') });
+    s.push(bit(crate::stmode::S_IRUSR, 'r'));
+    s.push(bit(crate::stmode::S_IWUSR, 'w'));
+    s.push(if mode & crate::stmode::S_ISUID != 0 { if mode & crate::stmode::S_IXUSR != 0 { 's' } else { 'S' } } else { bit(crate::stmode::S_IXUSR, 'x') });
+    s.push(bit(crate::stmode::S_IRGRP, 'r'));
+    s.push(bit(crate::stmode::S_IWGRP, 'w'));
+    s.push(if mode & crate::stmode::S_ISGID != 0 { if mode & crate::stmode::S_IXGRP != 0 { 's' } else { 'S' } } else { bit(crate::stmode::S_IXGRP, 'x') });
+    s.push(bit(crate::stmode::S_IROTH, 'r'));
+    s.push(bit(crate::stmode::S_IWOTH, 'w'));
+    s.push(if mode & crate::stmode::S_ISVTX != 0 { if mode & crate::stmode::S_IXOTH != 0 { 't' } else { 'T' } } else { bit(crate::stmode::S_IXOTH, 'x') });
     s
 }
 
@@ -217,7 +217,7 @@ pub fn set_attributes(attr: &Attributes, ofd: Option<std::fs::File>) -> Vec<Stri
         }
     }
 
-    let is_sock = attr.type_ == FT_SPEC && attr.statp.mode & libc::S_IFMT == libc::S_IFSOCK;
+    let is_sock = attr.type_ == FT_SPEC && attr.statp.mode & crate::stmode::S_IFMT == crate::stmode::S_IFSOCK;
     if is_sock {
         // We do not restore sockets.
     } else if attr.type_ == FT_LNK {
@@ -226,6 +226,11 @@ pub fn set_attributes(attr: &Attributes, ofd: Option<std::fs::File>) -> Vec<Stri
         }
         // No lchmod on Linux (HAVE_LCHMOD unset). Symlink times are not set
         // either (the original only uses futimes/utime on non-links).
+        // macOS has lchmod (HAVE_LCHMOD): the full st_mode, like SetAttributes().
+        #[cfg(target_vendor = "apple")]
+        if unsafe { libc::lchmod(name.as_ptr(), crate::stmode::to_mode_t(attr.statp.mode)) } < 0 && !suppress {
+            errors.push(format!("Unable to set file modes {oname}: ERR={}\n", errno()));
+        }
     } else {
         use std::os::fd::AsRawFd;
         let fd = ofd.as_ref().map(|f| f.as_raw_fd());
@@ -237,8 +242,8 @@ pub fn set_attributes(attr: &Attributes, ofd: Option<std::fs::File>) -> Vec<Stri
             errors.push(format!("Unable to set file owner {oname}: ERR={}\n", errno()));
         }
         let r = match fd {
-            Some(fd) => unsafe { libc::fchmod(fd, attr.statp.mode & 0o7777) },
-            None => unsafe { libc::chmod(name.as_ptr(), attr.statp.mode & 0o7777) },
+            Some(fd) => unsafe { libc::fchmod(fd, crate::stmode::to_mode_t(attr.statp.mode & 0o7777)) },
+            None => unsafe { libc::chmod(name.as_ptr(), crate::stmode::to_mode_t(attr.statp.mode & 0o7777)) },
         };
         if r < 0 && !suppress {
             errors.push(format!("Unable to set file modes {oname}: ERR={}\n", errno()));
@@ -253,6 +258,12 @@ pub fn set_attributes(attr: &Attributes, ofd: Option<std::fs::File>) -> Vec<Stri
         };
         if r < 0 && !suppress {
             errors.push(format!("Unable to set file times {oname}: ERR={}\n", errno()));
+        }
+        // HAVE_CHFLAGS (macOS): the BSD file flags last, after the times,
+        // since an immutable flag would make utimes() fail.
+        #[cfg(target_vendor = "apple")]
+        if unsafe { libc::chflags(name.as_ptr(), attr.statp.flags as libc::c_uint) } < 0 && !suppress {
+            errors.push(format!("Unable to set file flags {oname}: ERR={}\n", errno()));
         }
     }
     drop(ofd);

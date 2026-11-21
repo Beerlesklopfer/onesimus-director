@@ -51,7 +51,9 @@
 use std::collections::HashMap;
 use std::ffi::CString;
 use std::fs::File;
-use std::os::fd::{AsRawFd, FromRawFd, OwnedFd};
+use std::os::fd::{AsRawFd, OwnedFd};
+#[cfg(target_os = "linux")]
+use std::os::fd::FromRawFd;
 use std::os::unix::ffi::OsStrExt;
 use std::path::Path;
 use std::sync::{Arc, Mutex};
@@ -63,6 +65,7 @@ use onesimus_proto_rs::onesimus::filed::plugin::v1 as pb;
 use crate::attribs::Stat;
 
 /// `struct open_how` of openat2(2) (libc's is non-exhaustive).
+#[cfg(target_os = "linux")]
 #[repr(C)]
 struct OpenHow {
     /// O_* flags.
@@ -73,10 +76,37 @@ struct OpenHow {
     resolve: u64,
 }
 
+/// RESOLVE_BENEATH of openat2(2).
+#[cfg(target_os = "linux")]
+const RESOLVE_BENEATH: u64 = libc::RESOLVE_BENEATH;
+/// RESOLVE_NO_SYMLINKS of openat2(2).
+#[cfg(target_os = "linux")]
+const RESOLVE_NO_SYMLINKS: u64 = libc::RESOLVE_NO_SYMLINKS;
+/// RESOLVE_NO_XDEV of openat2(2).
+#[cfg(target_os = "linux")]
+const RESOLVE_NO_XDEV: u64 = libc::RESOLVE_NO_XDEV;
+/// RESOLVE_BENEATH: unused without openat2 (Linux only).
+#[cfg(not(target_os = "linux"))]
+const RESOLVE_BENEATH: u64 = 0;
+/// RESOLVE_NO_SYMLINKS: unused without openat2 (Linux only).
+#[cfg(not(target_os = "linux"))]
+const RESOLVE_NO_SYMLINKS: u64 = 0;
+/// RESOLVE_NO_XDEV: unused without openat2 (Linux only).
+#[cfg(not(target_os = "linux"))]
+const RESOLVE_NO_XDEV: u64 = 0;
+
 /// The resolve flags of every open below a volume.
-const RESOLVE: u64 = libc::RESOLVE_BENEATH | libc::RESOLVE_NO_SYMLINKS | libc::RESOLVE_NO_XDEV;
+const RESOLVE: u64 = RESOLVE_BENEATH | RESOLVE_NO_SYMLINKS | RESOLVE_NO_XDEV;
+
+/// openat2(2) is Linux only: the Podman plugin (rootless volumes below a
+/// graphroot) is not supported on other platforms.
+#[cfg(not(target_os = "linux"))]
+pub fn openat2(_dir: i32, _path: &[u8], _flags: i32, _resolve: u64) -> std::io::Result<OwnedFd> {
+    Err(std::io::Error::new(std::io::ErrorKind::Unsupported, "openat2 (Podman volumes) is not supported on this platform"))
+}
 
 /// openat2(2) relative to `dir`; `path` must be relative.
+#[cfg(target_os = "linux")]
 pub fn openat2(dir: i32, path: &[u8], flags: i32, resolve: u64) -> std::io::Result<OwnedFd> {
     let c = CString::new(if path.is_empty() { &b"."[..] } else { path }).map_err(|_| std::io::Error::other("NUL in path"))?;
     let how = OpenHow { flags: (flags | libc::O_CLOEXEC | libc::O_NOFOLLOW) as u64, mode: 0, resolve };
@@ -118,15 +148,15 @@ fn read_xattrs(target: XattrTarget<'_>) -> std::io::Result<Vec<(Vec<u8>, Vec<u8>
     let list = |buf: *mut libc::c_char, len: usize| -> isize {
         match target {
             // SAFETY: valid descriptor and buffer of `len` bytes.
-            XattrTarget::Fd(fd) => unsafe { libc::flistxattr(fd, buf, len) },
-            XattrTarget::Path(p) => unsafe { libc::llistxattr(p.as_ptr(), buf, len) },
+            XattrTarget::Fd(fd) => unsafe { crate::acl_xattr::sys::flistxattr(fd, buf, len) },
+            XattrTarget::Path(p) => unsafe { crate::acl_xattr::sys::llistxattr(p.as_ptr(), buf, len) },
         }
     };
     let get = |name: &CString, buf: *mut libc::c_void, len: usize| -> isize {
         match target {
             // SAFETY: valid descriptor, name and buffer.
-            XattrTarget::Fd(fd) => unsafe { libc::fgetxattr(fd, name.as_ptr(), buf, len) },
-            XattrTarget::Path(p) => unsafe { libc::lgetxattr(p.as_ptr(), name.as_ptr(), buf, len) },
+            XattrTarget::Fd(fd) => unsafe { crate::acl_xattr::sys::fgetxattr(fd, name.as_ptr(), buf, len) },
+            XattrTarget::Path(p) => unsafe { crate::acl_xattr::sys::lgetxattr(p.as_ptr(), name.as_ptr(), buf, len) },
         }
     };
     let len = list(std::ptr::null_mut(), 0);
@@ -261,25 +291,30 @@ pub struct VolumeScan {
 fn new_ref() -> std::io::Result<[u8; 16]> {
     let mut r = [0u8; 16];
     // SAFETY: buffer of 16 bytes.
-    let n = unsafe { libc::getrandom(r.as_mut_ptr().cast(), r.len(), 0) };
-    if n != 16 {
+    #[cfg(target_os = "linux")]
+    let ok = unsafe { libc::getrandom(r.as_mut_ptr().cast(), r.len(), 0) } == 16;
+    // SAFETY: buffer of 16 bytes (getentropy allows up to 256).
+    #[cfg(not(target_os = "linux"))]
+    let ok = unsafe { libc::getentropy(r.as_mut_ptr().cast(), r.len()) } == 0;
+    if !ok {
         return Err(std::io::Error::other("getrandom failed"));
     }
     Ok(r)
 }
 
 /// The Stat record of a libc stat with cleaned mode (`& 0o777` plus type).
+#[allow(clippy::unnecessary_cast, clippy::useless_conversion)]
 fn stat_of(st: &libc::stat, perm: u32, uid: u32, gid: u32) -> Stat {
     Stat {
-        dev: st.st_dev,
+        dev: st.st_dev as u64,
         ino: st.st_ino,
-        mode: (st.st_mode & libc::S_IFMT) | (perm & 0o777),
-        nlink: st.st_nlink,
+        mode: (st.st_mode as u32 & crate::stmode::S_IFMT) | (perm & 0o777),
+        nlink: u64::from(st.st_nlink),
         uid,
         gid,
         rdev: 0,
         size: st.st_size,
-        blksize: st.st_blksize,
+        blksize: i64::from(st.st_blksize),
         blocks: st.st_blocks,
         atime: st.st_atime,
         mtime: st.st_mtime,
@@ -330,7 +365,7 @@ impl Walker<'_> {
         if rel.len() > MAX_PATH {
             return Err("path too long in volume".into());
         }
-        let kind = RawKind::of_mode(st.st_mode).ok_or("unknown file type")?;
+        let kind = RawKind::of_mode(st.st_mode as u32).ok_or("unknown file type")?;
         // Directories and regular files: open below _data, compare inode.
         let opened = match kind {
             RawKind::Directory | RawKind::Regular => {
@@ -355,7 +390,7 @@ impl Walker<'_> {
             _ => Ok(Vec::new()),
         }
         .map_err(|e| format!("{}: xattrs: {e}", String::from_utf8_lossy(&rel)))?;
-        let raw = RawEntry { relpath: rel.clone(), kind, mode: st.st_mode & 0o7777, uid: st.st_uid, gid: st.st_gid, xattrs: xattrs.clone() };
+        let raw = RawEntry { relpath: rel.clone(), kind, mode: st.st_mode as u32 & 0o7777, uid: st.st_uid, gid: st.st_gid, xattrs: xattrs.clone() };
         let (attrs, row) = match sanitize::classify(&raw, self.domain) {
             Outcome::Rejected(reason) => {
                 self.rejected.push(Rejection { relpath: rel, reason });
@@ -365,10 +400,10 @@ impl Walker<'_> {
         };
         let (acl_access, acl_default) = acls(&xattrs);
         let entry_kind = match kind {
-            RawKind::Regular if st.st_nlink > 1 => match self.links.get(&(st.st_dev, st.st_ino)) {
+            RawKind::Regular if st.st_nlink > 1 => match self.links.get(&(st.st_dev as u64, st.st_ino)) {
                 Some(first) => EntryKind::Hardlink(first.clone()),
                 None => {
-                    self.links.insert((st.st_dev, st.st_ino), rel.clone());
+                    self.links.insert((st.st_dev as u64, st.st_ino), rel.clone());
                     EntryKind::Regular
                 }
             },
@@ -401,7 +436,7 @@ impl Walker<'_> {
             names.sort();
             for child in names {
                 let cst = fstatat(dir.as_raw_fd(), &child).map_err(|e| e.to_string())?;
-                if cst.st_dev != self.dev {
+                if cst.st_dev as u64 != self.dev {
                     // Another filesystem below the volume: not followed.
                     continue;
                 }
@@ -475,7 +510,7 @@ pub fn open_graphroot(path: &Path) -> Result<OwnedFd, String> {
     }
     let root = openat2(libc::AT_FDCWD, b"/", libc::O_RDONLY | libc::O_DIRECTORY, 0).map_err(|e| e.to_string())?;
     let rel = path.strip_prefix("/").map_err(|_| "graphroot")?;
-    openat2(root.as_raw_fd(), rel.as_os_str().as_bytes(), libc::O_RDONLY | libc::O_DIRECTORY, libc::RESOLVE_NO_SYMLINKS)
+    openat2(root.as_raw_fd(), rel.as_os_str().as_bytes(), libc::O_RDONLY | libc::O_DIRECTORY, RESOLVE_NO_SYMLINKS)
         .map_err(|e| format!("graphroot {}: {e}", path.display()))
 }
 
@@ -496,7 +531,7 @@ pub fn scan_volume(graphroot: &OwnedFd, name: &str, domain: &Domain, domain_id: 
     let st = fstat(data.as_raw_fd()).map_err(|e| e.to_string())?;
     let mut w = Walker {
         data: &data,
-        dev: st.st_dev,
+        dev: st.st_dev as u64,
         domain,
         prefix: [prefix, b"/data"].concat(),
         entries: Vec::new(),
@@ -518,7 +553,7 @@ pub fn scan_volume(graphroot: &OwnedFd, name: &str, domain: &Domain, domain_id: 
         stat: Stat {
             uid: euid,
             gid: egid,
-            mode: libc::S_IFREG | 0o600,
+            mode: crate::stmode::S_IFREG | 0o600,
             nlink: 1,
             size: tsv.len() as i64,
             blksize: 4096,
@@ -610,7 +645,7 @@ impl ScanTable {
                 let fd = openat2(scan.data.as_raw_fd(), &entry.relpath, libc::O_RDONLY | libc::O_NONBLOCK, RESOLVE)
                     .map_err(|e| format!("reopening: {e}"))?;
                 let st = fstat(fd.as_raw_fd()).map_err(|e| e.to_string())?;
-                if (st.st_dev, st.st_ino) != (entry.stat.dev, entry.stat.ino) || st.st_mode & libc::S_IFMT != libc::S_IFREG {
+                if (st.st_dev as u64, st.st_ino) != (entry.stat.dev, entry.stat.ino) || st.st_mode as u32 & crate::stmode::S_IFMT != crate::stmode::S_IFREG {
                     return Err("file replaced since the scan".into());
                 }
                 Some(File::from(fd))

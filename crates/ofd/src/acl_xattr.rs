@@ -5,6 +5,16 @@
 //! The ACL text (acl_to_text() of the backup) is turned into the kernel's
 //! `system.posix_acl_access` / `system.posix_acl_default` xattr value
 //! directly, which is what acl_set_file() writes on Linux; no libacl needed.
+//!
+//! macOS: extended attributes use the Darwin branch of findlib/xattr.cc
+//! (listxattr/getxattr/setxattr with XATTR_NOFOLLOW, STREAM_XATTR_DARWIN and
+//! the Darwin skip lists). ACLs (Darwin extended ACLs, acl_get_link_np with
+//! ACL_TYPE_EXTENDED, STREAM_ACL_DARWIN_ACCESS_ACL in Bareos) are not
+//! implemented: backup saves none, restore reports the stream as
+//! incompatible.
+
+// Without ACL support (macOS) the POSIX ACL text conversion is unused.
+#![cfg_attr(target_vendor = "apple", allow(dead_code))]
 
 use std::ffi::CString;
 
@@ -126,8 +136,99 @@ fn errno() -> crate::berrno::BErr {
     crate::berrno::BErr::last()
 }
 
+/// The xattr calls that do not follow a final symlink. Linux has the
+/// l*xattr() family; macOS takes XATTR_NOFOLLOW (and a resource fork
+/// `position`) instead, like the `#if defined(HAVE_DARWIN_OS)` macros of
+/// Bareos findlib/xattr.cc.
+pub(crate) mod sys {
+    use libc::{c_char, c_void, size_t, ssize_t};
+
+    /// llistxattr(2)
+    #[cfg(not(target_vendor = "apple"))]
+    pub unsafe fn llistxattr(path: *const c_char, list: *mut c_char, size: size_t) -> ssize_t {
+        // SAFETY: forwarded caller contract.
+        unsafe { libc::llistxattr(path, list, size) }
+    }
+
+    /// listxattr(2) with XATTR_NOFOLLOW (macOS).
+    #[cfg(target_vendor = "apple")]
+    pub unsafe fn llistxattr(path: *const c_char, list: *mut c_char, size: size_t) -> ssize_t {
+        // SAFETY: forwarded caller contract.
+        unsafe { libc::listxattr(path, list, size, libc::XATTR_NOFOLLOW) }
+    }
+
+    /// lgetxattr(2)
+    #[cfg(not(target_vendor = "apple"))]
+    pub unsafe fn lgetxattr(path: *const c_char, name: *const c_char, value: *mut c_void, size: size_t) -> ssize_t {
+        // SAFETY: forwarded caller contract.
+        unsafe { libc::lgetxattr(path, name, value, size) }
+    }
+
+    /// getxattr(2) at position 0 with XATTR_NOFOLLOW (macOS).
+    #[cfg(target_vendor = "apple")]
+    pub unsafe fn lgetxattr(path: *const c_char, name: *const c_char, value: *mut c_void, size: size_t) -> ssize_t {
+        // SAFETY: forwarded caller contract.
+        unsafe { libc::getxattr(path, name, value, size, 0, libc::XATTR_NOFOLLOW) }
+    }
+
+    /// flistxattr(2)
+    #[cfg(not(target_vendor = "apple"))]
+    pub unsafe fn flistxattr(fd: libc::c_int, list: *mut c_char, size: size_t) -> ssize_t {
+        // SAFETY: forwarded caller contract.
+        unsafe { libc::flistxattr(fd, list, size) }
+    }
+
+    /// flistxattr(2) (macOS: with options 0).
+    #[cfg(target_vendor = "apple")]
+    pub unsafe fn flistxattr(fd: libc::c_int, list: *mut c_char, size: size_t) -> ssize_t {
+        // SAFETY: forwarded caller contract.
+        unsafe { libc::flistxattr(fd, list, size, 0) }
+    }
+
+    /// fgetxattr(2)
+    #[cfg(not(target_vendor = "apple"))]
+    pub unsafe fn fgetxattr(fd: libc::c_int, name: *const c_char, value: *mut c_void, size: size_t) -> ssize_t {
+        // SAFETY: forwarded caller contract.
+        unsafe { libc::fgetxattr(fd, name, value, size) }
+    }
+
+    /// fgetxattr(2) at position 0 (macOS).
+    #[cfg(target_vendor = "apple")]
+    pub unsafe fn fgetxattr(fd: libc::c_int, name: *const c_char, value: *mut c_void, size: size_t) -> ssize_t {
+        // SAFETY: forwarded caller contract.
+        unsafe { libc::fgetxattr(fd, name, value, size, 0, 0) }
+    }
+
+    /// lsetxattr(2) with flags 0.
+    #[cfg(not(target_vendor = "apple"))]
+    pub unsafe fn lsetxattr(path: *const c_char, name: *const c_char, value: *const c_void, size: size_t) -> libc::c_int {
+        // SAFETY: forwarded caller contract.
+        unsafe { libc::lsetxattr(path, name, value, size, 0) }
+    }
+
+    /// setxattr(2) at position 0 with XATTR_NOFOLLOW (macOS).
+    #[cfg(target_vendor = "apple")]
+    pub unsafe fn lsetxattr(path: *const c_char, name: *const c_char, value: *const c_void, size: size_t) -> libc::c_int {
+        // SAFETY: forwarded caller contract.
+        unsafe { libc::setxattr(path, name, value, size, 0, libc::XATTR_NOFOLLOW) }
+    }
+}
+
+/// The xattr stream this platform writes and restores
+/// (os_default_xattr_streams of findlib/xattr.cc).
+#[cfg(not(target_vendor = "apple"))]
+pub const XATTR_STREAM: i32 = STREAM_XATTR_LINUX;
+/// The xattr stream this platform writes and restores
+/// (os_default_xattr_streams of findlib/xattr.cc, Darwin branch).
+#[cfg(target_vendor = "apple")]
+pub const XATTR_STREAM: i32 = STREAM_XATTR_DARWIN;
+
+/// Whether this platform saves and restores ACLs (have_acl).
+pub const ACL_SUPPORTED: bool = cfg!(not(target_vendor = "apple"));
+
 /// parse_acl_streams() for Linux. `content` is the ACL text with its
 /// trailing NUL as sent by the backup.
+#[cfg(not(target_vendor = "apple"))]
 pub fn restore_acl(fname: &[u8], filetype: i32, stream: i32, content: &[u8]) -> Exit {
     let name = String::from_utf8_lossy(fname);
     let default = match stream {
@@ -171,6 +272,14 @@ pub fn restore_acl(fname: &[u8], filetype: i32, stream: i32, content: &[u8]) -> 
     Exit::Ok
 }
 
+/// parse_acl_streams() without ACL support (macOS): every ACL stream is
+/// incompatible, with the message of Bareos for an unknown stream.
+#[cfg(target_vendor = "apple")]
+pub fn restore_acl(fname: &[u8], _filetype: i32, stream: i32, _content: &[u8]) -> Exit {
+    let name = String::from_utf8_lossy(fname);
+    Exit::Error(format!("Can't restore ACLs of {name} - incompatible acl stream encountered - {stream}\n"))
+}
+
 /// XATTR_MAGIC (xattr.h:54)
 const XATTR_MAGIC: u32 = 0x5C5884;
 
@@ -200,10 +309,11 @@ pub fn unserialize_xattr(fname: &str, mut content: &[u8]) -> Result<Vec<(Vec<u8>
     Ok(list)
 }
 
-/// generic_parse_xattr_streams(): lsetxattr() every attribute.
+/// generic_parse_xattr_streams(): lsetxattr() every attribute; only the
+/// stream of this platform ([`XATTR_STREAM`]) is accepted.
 pub fn restore_xattr(fname: &[u8], stream: i32, content: &[u8], state: &mut AclXattrState) -> Exit {
     let name = String::from_utf8_lossy(fname).into_owned();
-    if stream != STREAM_XATTR_LINUX {
+    if stream != XATTR_STREAM {
         return Exit::Error(format!(
             "Can't restore Extended Attributes of {name} - incompatible xattr stream encountered - {stream}\n"
         ));
@@ -218,7 +328,7 @@ pub fn restore_xattr(fname: &[u8], stream: i32, content: &[u8], state: &mut AclX
     let path = cpath(fname);
     for (n, v) in list {
         let cn = CString::new(n).unwrap_or_default();
-        if unsafe { libc::lsetxattr(path.as_ptr(), cn.as_ptr(), v.as_ptr().cast(), v.len(), 0) } != 0 {
+        if unsafe { sys::lsetxattr(path.as_ptr(), cn.as_ptr(), v.as_ptr().cast(), v.len()) } != 0 {
             let e = errno();
             return match e.raw_os_error() {
                 Some(libc::ENOENT) => Exit::Error(String::new()),
@@ -241,6 +351,7 @@ pub fn restore_xattr(fname: &[u8], stream: i32, content: &[u8], state: &mut AclX
 // ---------------------------------------------------------------------------
 
 /// libacl functions (dlopen; the original links libacl).
+#[cfg(not(target_vendor = "apple"))]
 struct LibAcl {
     get_file: unsafe extern "C" fn(*const libc::c_char, u32) -> *mut libc::c_void,
     to_text: unsafe extern "C" fn(*mut libc::c_void, *mut isize) -> *mut libc::c_char,
@@ -249,6 +360,7 @@ struct LibAcl {
     get_tag_type: unsafe extern "C" fn(*mut libc::c_void, *mut libc::c_int) -> libc::c_int,
 }
 
+#[cfg(not(target_vendor = "apple"))]
 fn libacl() -> Option<&'static LibAcl> {
     static L: std::sync::OnceLock<Option<LibAcl>> = std::sync::OnceLock::new();
     L.get_or_init(|| unsafe {
@@ -268,11 +380,14 @@ fn libacl() -> Option<&'static LibAcl> {
     .as_ref()
 }
 
+#[cfg(not(target_vendor = "apple"))]
 const ACL_TYPE_ACCESS: u32 = 0x8000;
+#[cfg(not(target_vendor = "apple"))]
 const ACL_TYPE_DEFAULT: u32 = 0x4000;
 
 /// generic_get_acl_from_os(): Ok(Some(text)) / Ok(None) (no or trivial
 /// ACL) / Err(message).
+#[cfg(not(target_vendor = "apple"))]
 fn get_acl_text(fname: &[u8], default: bool) -> Result<Option<String>, String> {
     let name = String::from_utf8_lossy(fname);
     let path = cpath(fname);
@@ -316,6 +431,7 @@ fn get_acl_text(fname: &[u8], default: bool) -> Result<Option<String>, String> {
 }
 
 /// Without libacl: the ACL from its xattr, as acl_to_text() writes it.
+#[cfg(not(target_vendor = "apple"))]
 fn get_acl_text_xattr(fname: &[u8], default: bool) -> Result<Option<String>, String> {
     let path = cpath(fname);
     let attr = if default { c"system.posix_acl_default" } else { c"system.posix_acl_access" };
@@ -363,6 +479,7 @@ fn get_acl_text_xattr(fname: &[u8], default: bool) -> Result<Option<String>, Str
 /// The ACL streams of one file (STREAM_ACL_LINUX_ACCESS_ACL, and for
 /// directories STREAM_ACL_LINUX_DEFAULT_ACL), each with its trailing NUL;
 /// errors are bacl_exit_error messages.
+#[cfg(not(target_vendor = "apple"))]
 pub fn build_acl_streams(fname: &[u8], is_dir: bool) -> (Vec<(i32, Vec<u8>)>, Vec<String>) {
     let mut streams = Vec::new();
     let mut errors = Vec::new();
@@ -383,6 +500,13 @@ pub fn build_acl_streams(fname: &[u8], is_dir: bool) -> (Vec<(i32, Vec<u8>)>, Ve
     (streams, errors)
 }
 
+/// Without ACL support (macOS) no ACL stream is built; the job warns once
+/// at its start (see [`ACL_SUPPORTED`]).
+#[cfg(target_vendor = "apple")]
+pub fn build_acl_streams(_fname: &[u8], _is_dir: bool) -> (Vec<(i32, Vec<u8>)>, Vec<String>) {
+    (Vec::new(), Vec::new())
+}
+
 /// A STREAM_XATTR_LINUX record of `list` (name, value), as
 /// `build_xattr_stream` writes it; used for the cleaned `user.*` xattrs of
 /// host scan entries (podman_scan).
@@ -398,15 +522,26 @@ pub fn serialize_xattrs(list: &[(Vec<u8>, Vec<u8>)]) -> Vec<u8> {
     out
 }
 
-/// generic_build_xattr_streams(): Ok(Some(serialized STREAM_XATTR_LINUX))
+/// xattr_acl_skiplist: attributes saved by the ACL streams instead.
+#[cfg(not(target_vendor = "apple"))]
+const ACL_SKIP: &[&[u8]] = &[b"system.posix_acl_access", b"system.posix_acl_default"];
+/// xattr_skiplist: attributes never saved.
+#[cfg(not(target_vendor = "apple"))]
+const SKIP: &[&[u8]] = &[b"ceph.dir.entries", b"ceph.dir.files", b"ceph.dir.rbytes", b"ceph.dir.rctime",
+    b"ceph.dir.rentries", b"ceph.dir.rfiles", b"ceph.dir.rsubdirs", b"ceph.dir.subdirs"];
+/// xattr_acl_skiplist of the Darwin branch of Bareos findlib/xattr.cc.
+#[cfg(target_vendor = "apple")]
+const ACL_SKIP: &[&[u8]] = &[b"com.apple.system.Security"];
+/// xattr_skiplist of the Darwin branch of Bareos findlib/xattr.cc.
+#[cfg(target_vendor = "apple")]
+const SKIP: &[&[u8]] = &[b"com.apple.system.extendedsecurity", b"com.apple.ResourceFork"];
+
+/// generic_build_xattr_streams(): Ok(Some(serialized [`XATTR_STREAM`]))
 /// / Ok(None) / Err((is_info, message)).
 pub fn build_xattr_stream(fname: &[u8], skip_acl_names: bool) -> Result<Option<Vec<u8>>, (bool, String)> {
-    const ACL_SKIP: [&[u8]; 2] = [b"system.posix_acl_access", b"system.posix_acl_default"];
-    const SKIP: [&[u8]; 8] = [b"ceph.dir.entries", b"ceph.dir.files", b"ceph.dir.rbytes", b"ceph.dir.rctime",
-        b"ceph.dir.rentries", b"ceph.dir.rfiles", b"ceph.dir.rsubdirs", b"ceph.dir.subdirs"];
     let name = String::from_utf8_lossy(fname).into_owned();
     let path = cpath(fname);
-    let len = unsafe { libc::llistxattr(path.as_ptr(), std::ptr::null_mut(), 0) };
+    let len = unsafe { sys::llistxattr(path.as_ptr(), std::ptr::null_mut(), 0) };
     if len < 0 {
         let e = errno();
         return match e.raw_os_error() {
@@ -420,7 +555,7 @@ pub fn build_xattr_stream(fname: &[u8], skip_acl_names: bool) -> Result<Option<V
         return Ok(None);
     }
     let mut list = vec![0u8; len as usize + 1];
-    let len = unsafe { libc::llistxattr(path.as_ptr(), list.as_mut_ptr().cast(), len as usize) };
+    let len = unsafe { sys::llistxattr(path.as_ptr(), list.as_mut_ptr().cast(), len as usize) };
     if len < 0 {
         let e = errno();
         return match e.raw_os_error() {
@@ -436,7 +571,7 @@ pub fn build_xattr_stream(fname: &[u8], skip_acl_names: bool) -> Result<Option<V
             continue;
         }
         let cn = CString::new(xname.to_vec()).unwrap_or_default();
-        let vlen = unsafe { libc::lgetxattr(path.as_ptr(), cn.as_ptr(), std::ptr::null_mut(), 0) };
+        let vlen = unsafe { sys::lgetxattr(path.as_ptr(), cn.as_ptr(), std::ptr::null_mut(), 0) };
         if vlen < 0 {
             let e = errno();
             return match e.raw_os_error() {
@@ -446,7 +581,7 @@ pub fn build_xattr_stream(fname: &[u8], skip_acl_names: bool) -> Result<Option<V
         }
         let mut value = vec![0u8; vlen as usize];
         if vlen > 0 {
-            let r = unsafe { libc::lgetxattr(path.as_ptr(), cn.as_ptr(), value.as_mut_ptr().cast(), value.len()) };
+            let r = unsafe { sys::lgetxattr(path.as_ptr(), cn.as_ptr(), value.as_mut_ptr().cast(), value.len()) };
             if r < 0 {
                 let e = errno();
                 return match e.raw_os_error() {

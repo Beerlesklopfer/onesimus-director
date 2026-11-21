@@ -70,7 +70,7 @@ pub fn create_file(
 ) -> Cf {
     use crate::jmsg::{M_ERROR, M_INFO};
     let new_mode = attr.statp.mode;
-    let parent_mode = libc::S_IWUSR | libc::S_IXUSR | new_mode;
+    let parent_mode = crate::stmode::S_IWUSR | crate::stmode::S_IXUSR | new_mode;
     let (uid, gid) = (attr.statp.uid, attr.statp.gid);
     let oname = attr.ofname_str();
 
@@ -155,7 +155,7 @@ fn create_typed(attr: &mut Attributes, exists: bool, msg: &mut dyn FnMut(i32, St
     use crate::jmsg::M_ERROR;
     let oname = attr.ofname_str();
     let mode = attr.statp.mode;
-    let fmt = mode & libc::S_IFMT;
+    let fmt = mode & crate::stmode::S_IFMT;
     let open_write = |create: bool| -> std::io::Result<File> {
         let mut o = std::fs::OpenOptions::new();
         o.write(true);
@@ -176,17 +176,17 @@ fn create_typed(attr: &mut Attributes, exists: bool, msg: &mut dyn FnMut(i32, St
             let c = cpath(&attr.ofname);
             let is_on_root = attr.fname == attr.ofname;
             let mut create = false;
-            if fmt == libc::S_IFIFO {
+            if fmt == crate::stmode::S_IFIFO {
                 if unsafe { libc::mkfifo(c.as_ptr(), mode as libc::mode_t) } != 0 && errno().raw_os_error() != Some(libc::EEXIST) {
                     msg(M_ERROR, format!("Cannot make fifo {oname}: ERR={}\n", errno()));
                     return Cf::Error;
                 }
-            } else if fmt == libc::S_IFSOCK {
+            } else if fmt == crate::stmode::S_IFSOCK {
                 // Skipping restore of socket
-            } else if (fmt == libc::S_IFBLK || fmt == libc::S_IFCHR) && !exists && is_on_root {
+            } else if (fmt == crate::stmode::S_IFBLK || fmt == crate::stmode::S_IFCHR) && !exists && is_on_root {
                 msg(M_ERROR, format!("Device restore on root failed, device {} missing.\n", attr.fname_str()));
                 return Cf::Error;
-            } else if fmt == libc::S_IFBLK || fmt == libc::S_IFCHR {
+            } else if fmt == crate::stmode::S_IFBLK || fmt == crate::stmode::S_IFCHR {
                 // Restoring a device as a file
                 create = true;
             } else if unsafe { libc::mknod(c.as_ptr(), mode as libc::mode_t, attr.statp.rdev as libc::dev_t) } != 0
@@ -252,7 +252,7 @@ fn set_own_mod(path: &[u8], owner: u32, group: u32, mode: u32, msg: &mut dyn FnM
     if unsafe { libc::lchown(c.as_ptr(), owner, group) } != 0 && root {
         msg(crate::jmsg::M_WARNING, format!("Cannot change owner and/or group of {p}: ERR={}\n", errno()));
     }
-    if unsafe { libc::chmod(c.as_ptr(), mode & 0o7777) } != 0 && root {
+    if unsafe { libc::chmod(c.as_ptr(), crate::stmode::to_mode_t(mode & 0o7777)) } != 0 && root {
         msg(crate::jmsg::M_WARNING, format!("Cannot change permissions of {p}: ERR={}\n", errno()));
     }
 }

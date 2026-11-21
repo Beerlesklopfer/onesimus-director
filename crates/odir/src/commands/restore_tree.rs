@@ -267,7 +267,7 @@ impl Tree {
             node.file_index = file_index;
             node.job_id = job_id;
             node.node_type = node_type;
-            node.set(SOFT_LINK, stat.mode as u32 & libc::S_IFMT == libc::S_IFLNK);
+            node.set(SOFT_LINK, stat.mode as u32 & mode::S_IFMT == mode::S_IFLNK);
             node.delta_seq = delta_seq;
             if all {
                 node.set(EXTRACT, true);
@@ -797,15 +797,62 @@ fn lsmark_cmd(ua: &mut Ua, tree: &mut Tree, args: &[String]) -> bool {
     true
 }
 
+/// The `st_mode` bits of libc as `u32` (mode_t is u32 on Linux, u16 on
+/// macOS; the values are the same).
+#[allow(clippy::unnecessary_cast)]
+mod mode {
+    /// S_IFMT
+    pub const S_IFMT: u32 = libc::S_IFMT as u32;
+    /// S_IFREG
+    pub const S_IFREG: u32 = libc::S_IFREG as u32;
+    /// S_IFDIR
+    pub const S_IFDIR: u32 = libc::S_IFDIR as u32;
+    /// S_IFBLK
+    pub const S_IFBLK: u32 = libc::S_IFBLK as u32;
+    /// S_IFCHR
+    pub const S_IFCHR: u32 = libc::S_IFCHR as u32;
+    /// S_IFLNK
+    pub const S_IFLNK: u32 = libc::S_IFLNK as u32;
+    /// S_IFIFO
+    pub const S_IFIFO: u32 = libc::S_IFIFO as u32;
+    /// S_IFSOCK
+    pub const S_IFSOCK: u32 = libc::S_IFSOCK as u32;
+    /// S_IRUSR
+    pub const S_IRUSR: u32 = libc::S_IRUSR as u32;
+    /// S_IWUSR
+    pub const S_IWUSR: u32 = libc::S_IWUSR as u32;
+    /// S_IXUSR
+    pub const S_IXUSR: u32 = libc::S_IXUSR as u32;
+    /// S_IRGRP
+    pub const S_IRGRP: u32 = libc::S_IRGRP as u32;
+    /// S_IWGRP
+    pub const S_IWGRP: u32 = libc::S_IWGRP as u32;
+    /// S_IXGRP
+    pub const S_IXGRP: u32 = libc::S_IXGRP as u32;
+    /// S_IROTH
+    pub const S_IROTH: u32 = libc::S_IROTH as u32;
+    /// S_IWOTH
+    pub const S_IWOTH: u32 = libc::S_IWOTH as u32;
+    /// S_IXOTH
+    pub const S_IXOTH: u32 = libc::S_IXOTH as u32;
+    /// S_ISUID
+    pub const S_ISUID: u32 = libc::S_ISUID as u32;
+    /// S_ISGID
+    pub const S_ISGID: u32 = libc::S_ISGID as u32;
+    /// S_ISVTX
+    pub const S_ISVTX: u32 = libc::S_ISVTX as u32;
+}
+
 /// encode_mode() (lib/util.cc)
 fn encode_mode(mode: u32) -> String {
-    let file_type = match mode & libc::S_IFMT {
-        libc::S_IFDIR => 'd',
-        libc::S_IFBLK => 'b',
-        libc::S_IFCHR => 'c',
-        libc::S_IFLNK => 'l',
-        libc::S_IFIFO => 'f',
-        libc::S_IFSOCK => 's',
+    use self::mode::*;
+    let file_type = match mode & S_IFMT {
+        S_IFDIR => 'd',
+        S_IFBLK => 'b',
+        S_IFCHR => 'c',
+        S_IFLNK => 'l',
+        S_IFIFO => 'f',
+        S_IFSOCK => 's',
         _ => '-',
     };
     let bit = |m: u32, c: char| if mode & m != 0 { c } else { '-' };
@@ -817,9 +864,9 @@ fn encode_mode(mode: u32) -> String {
     };
     [
         file_type,
-        bit(libc::S_IRUSR, 'r'), bit(libc::S_IWUSR, 'w'), exec(libc::S_ISUID, libc::S_IXUSR, 's', 'S'),
-        bit(libc::S_IRGRP, 'r'), bit(libc::S_IWGRP, 'w'), exec(libc::S_ISGID, libc::S_IXGRP, 's', 'S'),
-        bit(libc::S_IROTH, 'r'), bit(libc::S_IWOTH, 'w'), exec(libc::S_ISVTX, libc::S_IXOTH, 't', 'T'),
+        bit(S_IRUSR, 'r'), bit(S_IWUSR, 'w'), exec(S_ISUID, S_IXUSR, 's', 'S'),
+        bit(S_IRGRP, 'r'), bit(S_IWGRP, 'w'), exec(S_ISGID, S_IXGRP, 's', 'S'),
+        bit(S_IROTH, 'r'), bit(S_IWOTH, 'w'), exec(S_ISVTX, S_IXOTH, 't', 'T'),
     ].iter().collect()
 }
 
@@ -932,7 +979,7 @@ fn estimate_cmd(ua: &mut Ua, tree: &mut Tree, _: &[String]) -> bool {
             // If regular file, get size
             extract += 1;
             if let Some(stat) = attributes.get(ua, &tree.getpath(index), node.job_id) {
-                if stat.mode as u32 & libc::S_IFMT == libc::S_IFREG && stat.size > 0 {
+                if stat.mode as u32 & mode::S_IFMT == mode::S_IFREG && stat.size > 0 {
                     bytes += stat.size as u64;
                 }
             }

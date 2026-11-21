@@ -88,7 +88,7 @@ fn radix() -> char {
         if locale.is_null() {
             return '.';
         }
-        let point = libc::nl_langinfo_l(libc::RADIXCHAR, locale);
+        let point = radix_of(locale);
         let c = if point.is_null() {
             '.'
         } else {
@@ -97,6 +97,25 @@ fn radix() -> char {
         libc::freelocale(locale);
         c
     })
+}
+
+/// The RADIXCHAR string of `locale` (nl_langinfo_l).
+#[cfg(not(target_vendor = "apple"))]
+unsafe fn radix_of(locale: libc::locale_t) -> *const libc::c_char {
+    // SAFETY: `locale` is a valid locale object of the caller.
+    unsafe { libc::nl_langinfo_l(libc::RADIXCHAR, locale) }
+}
+
+/// The decimal point of `locale` (localeconv_l; macOS has no
+/// nl_langinfo_l in libc).
+#[cfg(target_vendor = "apple")]
+unsafe fn radix_of(locale: libc::locale_t) -> *const libc::c_char {
+    // SAFETY: `locale` is a valid locale object of the caller; the lconv
+    // stays valid until the locale is freed.
+    unsafe {
+        let conv = libc::localeconv_l(locale);
+        if conv.is_null() { std::ptr::null() } else { (*conv).decimal_point }
+    }
 }
 
 /// printf("%.1f") in the process locale.

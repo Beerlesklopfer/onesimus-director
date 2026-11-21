@@ -487,6 +487,11 @@ impl Session<'_> {
     fn blast_data<S: Read + Write, D: Read + Write>(&mut self, sd: &mut BnetStream<S>, fs: &FileSet, dir: &mut BnetStream<D>, canceled: &AtomicBool) -> bool {
         self.msgs.set_status(JS_RUNNING);
         self.msgs.jmsg(M_INFO, &format!("Version: {} ({}) {}\n", crate::version::FULL, crate::version::DATE, crate::version::os_info()));
+        if !crate::acl_xattr::ACL_SUPPORTED
+            && fs.include.iter().any(|ie| ie.opts.iter().any(|o| o.flags.has(FO_ACL)))
+        {
+            self.msgs.jmsg(M_WARNING, "FileSet requests ACL support, but ACLs are not supported on this platform: ACLs are not saved\n");
+        }
         self.msgs.flush(dir);
         let mut ff = self.new_ff();
         let mut list = self.file_list.take();

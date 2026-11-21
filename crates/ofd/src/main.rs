@@ -44,6 +44,7 @@ mod scan;
 mod secrets;
 mod sd;
 mod status;
+mod stmode;
 mod streams;
 mod version;
 
