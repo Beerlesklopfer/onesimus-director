@@ -66,6 +66,7 @@ mod status;
 mod stmode;
 mod streams;
 mod version;
+mod winattr;
 #[cfg(windows)]
 mod winfs;
 

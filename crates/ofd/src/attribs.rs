@@ -312,9 +312,10 @@ pub fn set_attributes(attr: &Attributes, ofd: Option<std::fs::File>) -> Vec<Stri
 }
 
 /// SetAttributes() on Windows: the access and modification time of the
-/// restored file or directory from the catalog's `Stat` (`SetFileTime`);
-/// links keep the time they were created with. Owner and mode do not exist
-/// on Windows. The Win32 attributes follow in a later step.
+/// restored file or directory (`SetFileTime`) and the attributes of a Windows
+/// FD's `attribsEx` (read-only, hidden, system, archive, creation time),
+/// else the times of the catalog's `Stat`; links keep the time they were
+/// created with. Owner and mode do not exist on Windows.
 #[cfg(windows)]
 pub fn set_attributes(attr: &Attributes, ofd: Option<std::fs::File>) -> Vec<String> {
     let mut errors = Vec::new();
@@ -330,8 +331,14 @@ pub fn set_attributes(attr: &Attributes, ofd: Option<std::fs::File>) -> Vec<Stri
     }
     drop(ofd);
     if !matches!(attr.type_, FT_LNK | FT_LNKSAVED) {
-        if let Err(code) = crate::winfs::set_times(&attr.ofname, attr.statp.atime, attr.statp.mtime) {
-            errors.push(format!("Unable to set file times of {oname}: ERR={}\n", crate::berrno::BErr(code)));
+        // the exact times and attributes of a Windows FD's backup, else the
+        // times of the catalog's Stat (whole seconds)
+        let result = match crate::winattr::decode(&attr.attr_ex) {
+            Some(meta) => crate::winfs::apply_meta(&attr.ofname, &meta),
+            None => crate::winfs::set_times(&attr.ofname, attr.statp.atime, attr.statp.mtime),
+        };
+        if let Err(code) = result {
+            errors.push(format!("Unable to set file attributes of {oname}: ERR={}\n", crate::berrno::BErr(code)));
         }
     }
     errors

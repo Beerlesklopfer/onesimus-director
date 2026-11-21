@@ -1,19 +1,50 @@
-$a='D:\odir-test\testdata'; $b='D:\odir-test\restore\D\odir-test\testdata'
-"restore tree exists: " + (Test-Path $b)
-$fa = Get-ChildItem $a -Recurse -File | Sort-Object FullName
-$fb = Get-ChildItem $b -Recurse -File -ErrorAction SilentlyContinue | Sort-Object FullName
-"files: source $($fa.Count), restored $($fb.Count)"
-$bad = 0
-foreach ($f in $fa) {
-  $rel = $f.FullName.Substring($a.Length)
-  $g = Join-Path $b $rel
-  if (-not (Test-Path -LiteralPath $g)) { "MISSING $rel"; $bad++; continue }
-  $h1 = (Get-FileHash -LiteralPath $f.FullName -Algorithm SHA256).Hash
-  $h2 = (Get-FileHash -LiteralPath $g -Algorithm SHA256).Hash
-  $t1 = $f.LastWriteTimeUtc.ToString('o'); $t2 = (Get-Item -LiteralPath $g).LastWriteTimeUtc.ToString('o')
-  $same = ($h1 -eq $h2); $tsec = ($f.LastWriteTimeUtc.Ticks - (Get-Item -LiteralPath $g).LastWriteTimeUtc.Ticks)
-  "{0,-18} hash {1}  size {2}/{3}  mtime delta ticks {4}" -f $rel.TrimStart('\'), $(if($same){'SAME'}else{'DIFFER'}), $f.Length, (Get-Item -LiteralPath $g).Length, $tsec
-  if (-not $same) { $bad++ }
+# Compares D:\odir-test\testdata with its restore below D:\odir-test\restore\D\odir-test\testdata (Windows host)
+$ErrorActionPreference = 'Continue'
+$a = 'D:\odir-test\testdata'; $b = 'D:\odir-test\restore\D\odir-test\testdata'
+$sha = [Security.Cryptography.SHA256]::Create()
+function V($p) { if ($p.Length -gt 240) { '\\?\' + $p } else { $p } }
+function Hash($p) { $s = [IO.File]::OpenRead((V $p)); try { [BitConverter]::ToString($sha.ComputeHash($s)) } finally { $s.Close() } }
+function Walk($root, $rel) {
+  $dir = if ($rel) { "$root\$rel" } else { $root }
+  foreach ($e in [IO.Directory]::GetFileSystemEntries((V $dir))) {
+    $name = [IO.Path]::GetFileName($e)
+    $r = if ($rel) { "$rel\$name" } else { $name }
+    $attr = [IO.File]::GetAttributes($e)
+    $r
+    if (($attr -band [IO.FileAttributes]::Directory) -and -not ($attr -band [IO.FileAttributes]::ReparsePoint)) { Walk $root $r }
+  }
 }
-"dir mtime source/restored (testdata): " + (Get-Item $a).LastWriteTimeUtc.ToString('s') + " / " + (Get-Item $b).LastWriteTimeUtc.ToString('s')
+"restore tree exists: " + (Test-Path -LiteralPath $b)
+$sa = @(Walk $a '' | Sort-Object); $sb = @(Walk $b '' | Sort-Object)
+"entries: source $($sa.Count), restored $($sb.Count)"
+$bad = 0
+foreach ($m in (Compare-Object $sa $sb)) { "ONLY " + $(if ($m.SideIndicator -eq '<=') { 'in source' } else { 'in restore' }) + ": " + $m.InputObject; $bad++ }
+$files = 0
+foreach ($r in $sa) {
+  $pa = "$a\$r"; $pb = "$b\$r"
+  if (-not ($sb -contains $r)) { continue }
+  $aa = [IO.File]::GetAttributes((V $pa)); $ab = [IO.File]::GetAttributes((V $pb))
+  $isLink = [bool]($aa -band [IO.FileAttributes]::ReparsePoint)
+  if ($isLink) {
+    $ia = Get-Item -LiteralPath $pa -Force; $ib = Get-Item -LiteralPath $pb -Force
+    $same = ($ia.LinkType -eq $ib.LinkType) -and ($ib.Target -ne $null)
+    "{0,-22} link {1}  source {2} -> {3}  restored {4} -> {5}" -f $r, $(if ($same) { 'SAME TYPE' } else { 'DIFFER' }), $ia.LinkType, ($ia.Target -join ','), $ib.LinkType, ($ib.Target -join ',')
+    if (-not $same) { $bad++ }
+    continue
+  }
+  if ($aa -band [IO.FileAttributes]::Directory) { continue }
+  $files++
+  $h = (Hash $pa) -eq (Hash $pb)
+  $mask = [IO.FileAttributes]::ReadOnly -bor [IO.FileAttributes]::Hidden -bor [IO.FileAttributes]::System
+  $attrSame = (($aa -band $mask) -eq ($ab -band $mask))
+  $dm = ([IO.File]::GetLastWriteTimeUtc((V $pa)).Ticks - [IO.File]::GetLastWriteTimeUtc((V $pb)).Ticks)
+  $dc = ([IO.File]::GetCreationTimeUtc((V $pa)).Ticks - [IO.File]::GetCreationTimeUtc((V $pb)).Ticks)
+  $show = if ($r.Length -gt 22) { '...' + $r.Substring($r.Length - 19) } else { $r }
+  "{0,-22} hash {1}  attrs {2}  mtime delta {3}  ctime delta {4}" -f $show, $(if ($h) { 'SAME' } else { 'DIFFER' }), $(if ($attrSame) { 'SAME' } else { "DIFFER ($aa / $ab)" }), $dm, $dc
+  if (-not ($h -and $attrSame)) { $bad++ }
+}
+$n = { param($p) $o = fsutil hardlink list $p 2>&1; @($o | Where-Object { $_ -match '^\\' }).Count }
+"hard links of a.txt: source " + (& $n "$a\a.txt") + ", restored " + (& $n "$b\a.txt")
+if ((& $n "$a\a.txt") -ne (& $n "$b\a.txt")) { "hard link count DIFFERS"; $bad++ }
+"files compared: $files"
 "bad=$bad"

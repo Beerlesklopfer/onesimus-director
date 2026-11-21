@@ -492,6 +492,14 @@ fn create_typed(attr: &mut Attributes, msg: &mut dyn FnMut(i32, String)) -> Cf {
             }
             Cf::Created
         }
+        FT_LNK if crate::winattr::decode(&attr.attr_ex).is_some_and(|m| m.reparse_tag == crate::winfs::TAG_MOUNT_POINT) => {
+            // a junction of the source: a junction again, not a symbolic link
+            if let Err(code) = crate::winfs::create_junction(&attr.ofname, &attr.olname) {
+                msg(M_ERROR, format!("Could not create junction {oname} -> {}: ERR={}\n", String::from_utf8_lossy(&attr.olname), crate::berrno::BErr(code)));
+                return Cf::Error;
+            }
+            Cf::Created
+        }
         FT_LNK => {
             let target = std::path::Path::new(std::ffi::OsStr::from_bytes(&attr.olname));
             // a link to a directory is a different kind of link on Windows

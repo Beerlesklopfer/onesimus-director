@@ -24,12 +24,14 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use bareos_format::lstat::Stat;
 use windows_sys::Win32::Storage::FileSystem::{
-    FileBasicInfo, GetFileInformationByHandle, GetFileInformationByHandleEx, GetVolumeInformationW,
+    FileAttributeTagInfo, FileBasicInfo, GetFileInformationByHandle, GetFileInformationByHandleEx, GetVolumeInformationW,
     GetVolumePathNameW, BY_HANDLE_FILE_INFORMATION, FILE_ATTRIBUTE_DIRECTORY, FILE_ATTRIBUTE_READONLY,
-    FILE_BASIC_INFO, FILE_FLAG_BACKUP_SEMANTICS, FILE_FLAG_OPEN_REPARSE_POINT,
+    FILE_ATTRIBUTE_REPARSE_POINT, FILE_ATTRIBUTE_TAG_INFO, FILE_BASIC_INFO, FILE_FLAG_BACKUP_SEMANTICS,
+    FILE_FLAG_OPEN_REPARSE_POINT,
 };
 
 use crate::platform::OsStrExt;
+use crate::winattr::{self, WinMeta};
 
 /// `FILE_WRITE_ATTRIBUTES`: enough to set times and attributes.
 const FILE_WRITE_ATTRIBUTES: u32 = 0x0100;
@@ -60,7 +62,13 @@ pub fn unix_to_ticks(secs: i64) -> i64 {
 
 /// The `Stat` of `path` without following a symbolic link or junction
 /// (`lstat`); the error is the Win32 error code.
+#[allow(dead_code)]
 pub fn stat(path: &[u8]) -> Result<Stat, i32> {
+    stat_ex(path).map(|(st, _)| st)
+}
+
+/// [`stat`] and the Win32 data of the file (`attribsEx`).
+pub fn stat_ex(path: &[u8]) -> Result<(Stat, WinMeta), i32> {
     let link = std::fs::symlink_metadata(os(path)).map_err(code)?.file_type().is_symlink();
     let file = std::fs::OpenOptions::new()
         .access_mode(0)
@@ -88,6 +96,23 @@ pub fn stat(path: &[u8]) -> Result<Stat, i32> {
         (info, basic)
     };
     let attributes = info.dwFileAttributes;
+    // the tag tells a junction (mount point) from a symbolic link
+    let mut reparse_tag = 0;
+    if attributes & FILE_ATTRIBUTE_REPARSE_POINT != 0 {
+        // SAFETY: zeroed plain-data struct, a valid handle, the size of the struct.
+        unsafe {
+            let mut tag: FILE_ATTRIBUTE_TAG_INFO = std::mem::zeroed();
+            let ok = GetFileInformationByHandleEx(
+                handle,
+                FileAttributeTagInfo,
+                (&mut tag as *mut FILE_ATTRIBUTE_TAG_INFO).cast(),
+                std::mem::size_of::<FILE_ATTRIBUTE_TAG_INFO>() as u32,
+            );
+            if ok != 0 {
+                reparse_tag = tag.ReparseTag;
+            }
+        }
+    }
     let size = (i64::from(info.nFileSizeHigh) << 32) | i64::from(info.nFileSizeLow);
     let mode = if link {
         crate::stmode::S_IFLNK | 0o777
@@ -99,7 +124,15 @@ pub fn stat(path: &[u8]) -> Result<Stat, i32> {
         crate::stmode::S_IFREG | 0o777
     };
     let size = if attributes & FILE_ATTRIBUTE_DIRECTORY != 0 { 0 } else { size };
-    Ok(Stat {
+    let meta = WinMeta {
+        attributes,
+        creation: basic.CreationTime,
+        access: basic.LastAccessTime,
+        write: basic.LastWriteTime,
+        size: size.max(0) as u64,
+        reparse_tag,
+    };
+    let st = Stat {
         dev: u64::from(info.dwVolumeSerialNumber),
         ino: (u64::from(info.nFileIndexHigh) << 32) | u64::from(info.nFileIndexLow),
         mode,
@@ -114,26 +147,65 @@ pub fn stat(path: &[u8]) -> Result<Stat, i32> {
         mtime: ticks_to_unix(basic.LastWriteTime),
         ctime: ticks_to_unix(basic.ChangeTime),
         flags: 0,
-    })
+    };
+    Ok((st, meta))
 }
 
-/// The Win32 file attributes of `path` (`GetFileAttributes`, without
-/// following a link).
-pub fn attributes(path: &[u8]) -> Result<u32, i32> {
+/// `path` as a NUL-terminated wide string for a Win32 call: `/` becomes `\`
+/// and a long absolute path gets the `\\?\` prefix (no 260-character limit).
+fn wide(path: &[u8]) -> Vec<u16> {
+    use std::os::windows::ffi::OsStrExt as _;
+    let mut w: Vec<u16> = os(path).encode_wide().map(|c| if c == u16::from(b'/') { u16::from(b'\\') } else { c }).collect();
+    let drive = w.len() >= 3 && w[1] == u16::from(b':') && w[2] == u16::from(b'\\');
+    let unc = w.len() >= 2 && w[0] == u16::from(b'\\') && w[1] == u16::from(b'\\') && !w.starts_with(&[92, 92, 63, 92]);
+    if w.len() >= 248 && drive {
+        let mut v: Vec<u16> = r"\\?\".encode_utf16().collect();
+        v.extend(w);
+        w = v;
+    } else if w.len() >= 248 && unc {
+        let mut v: Vec<u16> = r"\\?\UNC\".encode_utf16().collect();
+        v.extend(&w[2..]);
+        w = v;
+    }
+    w.push(0);
+    w
+}
+
+/// SystemTime of FILETIME ticks.
+fn system_time(ticks: i64) -> SystemTime {
+    let since_unix = ticks - EPOCH_DIFF_TICKS;
+    if since_unix >= 0 {
+        UNIX_EPOCH + Duration::from_nanos(since_unix as u64 * 100)
+    } else {
+        UNIX_EPOCH - Duration::from_nanos(since_unix.unsigned_abs() * 100)
+    }
+}
+
+/// Sets the Win32 attributes `meta` carries on a restored file or
+/// directory, after its times: the exact times (with the creation time)
+/// and the settable attribute bits ([`winattr::SETTABLE`]).
+pub fn apply_meta(path: &[u8], meta: &WinMeta) -> Result<(), i32> {
+    use std::os::windows::fs::FileTimesExt as _;
+    use windows_sys::Win32::Storage::FileSystem::{SetFileAttributesW, FILE_ATTRIBUTE_NORMAL};
     let file = std::fs::OpenOptions::new()
-        .access_mode(0)
+        .access_mode(FILE_WRITE_ATTRIBUTES)
         .share_mode(SHARE_ALL)
         .custom_flags(FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT)
         .open(os(path))
         .map_err(code)?;
-    // SAFETY: zeroed plain-data struct, a valid handle.
-    unsafe {
-        let mut info: BY_HANDLE_FILE_INFORMATION = std::mem::zeroed();
-        if GetFileInformationByHandle(file.as_raw_handle(), &mut info) == 0 {
-            return Err(std::io::Error::last_os_error().raw_os_error().unwrap_or(0));
-        }
-        Ok(info.dwFileAttributes)
+    let times = std::fs::FileTimes::new()
+        .set_created(system_time(meta.creation))
+        .set_accessed(system_time(meta.access))
+        .set_modified(system_time(meta.write));
+    file.set_times(times).map_err(code)?;
+    drop(file);
+    let wanted = meta.attributes & winattr::SETTABLE;
+    let wanted = if wanted == 0 { FILE_ATTRIBUTE_NORMAL } else { wanted };
+    // SAFETY: a NUL-terminated wide path.
+    if unsafe { SetFileAttributesW(wide(path).as_ptr(), wanted) } == 0 {
+        return Err(std::io::Error::last_os_error().raw_os_error().unwrap_or(0));
     }
+    Ok(())
 }
 
 /// The name of the file system the volume of `path` has ("NTFS", "ReFS",
@@ -187,4 +259,60 @@ pub fn set_times(path: &[u8], atime: i64, mtime: i64) -> Result<(), i32> {
 #[allow(dead_code)]
 pub fn representable(t: SystemTime) -> bool {
     t.duration_since(UNIX_EPOCH).is_ok() || UNIX_EPOCH.duration_since(t).map(|d| d.as_secs() < 11_644_473_600).unwrap_or(false)
+}
+
+/// `IO_REPARSE_TAG_MOUNT_POINT`: the tag of a junction.
+pub const TAG_MOUNT_POINT: u32 = 0xA000_0003;
+
+/// Creates the junction `link` to the directory `target` (an absolute
+/// path): an empty directory with a mount-point reparse point
+/// (`FSCTL_SET_REPARSE_POINT`). A junction needs no special privilege.
+pub fn create_junction(link: &[u8], target: &[u8]) -> Result<(), i32> {
+    use std::os::windows::ffi::OsStrExt as _;
+    use windows_sys::Win32::System::IO::DeviceIoControl;
+    use windows_sys::Win32::System::Ioctl::FSCTL_SET_REPARSE_POINT;
+    std::fs::create_dir(os(link)).map_err(code)?;
+    let result = (|| {
+        let target_path: Vec<u16> = os(target).encode_wide().map(|c| if c == u16::from(b'/') { u16::from(b'\\') } else { c }).collect();
+        let mut substitute: Vec<u16> = r"\??\".encode_utf16().collect();
+        substitute.extend(&target_path);
+        let (sub_bytes, print_bytes) = (substitute.len() * 2, target_path.len() * 2);
+        let data_len = 8 + sub_bytes + 2 + print_bytes + 2;
+        let mut buf: Vec<u8> = Vec::with_capacity(8 + data_len);
+        buf.extend(TAG_MOUNT_POINT.to_le_bytes());
+        buf.extend((data_len as u16).to_le_bytes());
+        buf.extend(0u16.to_le_bytes());
+        buf.extend(0u16.to_le_bytes());
+        buf.extend((sub_bytes as u16).to_le_bytes());
+        buf.extend(((sub_bytes + 2) as u16).to_le_bytes());
+        buf.extend((print_bytes as u16).to_le_bytes());
+        for unit in substitute.iter().chain(Some(&0u16)).chain(target_path.iter()).chain(Some(&0u16)) {
+            buf.extend(unit.to_le_bytes());
+        }
+        let dir = std::fs::OpenOptions::new()
+            .write(true)
+            .share_mode(SHARE_ALL)
+            .custom_flags(FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT)
+            .open(os(link))
+            .map_err(code)?;
+        let mut returned = 0u32;
+        // SAFETY: a valid handle, a buffer of the length given, no output buffer.
+        let ok = unsafe {
+            DeviceIoControl(
+                dir.as_raw_handle(),
+                FSCTL_SET_REPARSE_POINT,
+                buf.as_ptr().cast(),
+                buf.len() as u32,
+                std::ptr::null_mut(),
+                0,
+                &mut returned,
+                std::ptr::null_mut(),
+            )
+        };
+        if ok == 0 { Err(std::io::Error::last_os_error().raw_os_error().unwrap_or(0)) } else { Ok(()) }
+    })();
+    if result.is_err() {
+        let _ = std::fs::remove_dir(os(link));
+    }
+    result
 }

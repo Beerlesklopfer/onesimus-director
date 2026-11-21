@@ -57,7 +57,7 @@ fn backup_and_restore_through_the_windows_fd() {
     options.start_fd = false;
     options.extra_director = vec![
         ("client/vfd.conf".into(), format!("Client {{\n  Name = vfd\n  Address = {host}\n  FD Port = 19102\n  Password = \"vfd-pw\"\n  Passive = yes\n}}\n")),
-        ("fileset/VSet.conf".into(), format!("FileSet {{\n  Name = VSet\n  Include {{\n    Options {{\n      Signature = MD5\n      Compression = GZIP\n    }}\n    File = {DATA}\n  }}\n}}\n")),
+        ("fileset/VSet.conf".into(), format!("FileSet {{\n  Name = VSet\n  Include {{\n    Options {{\n      Signature = MD5\n      Compression = GZIP\n      HardLinks = yes\n    }}\n    File = {DATA}\n  }}\n}}\n")),
     ];
     let rig = Rig::start(options).unwrap_or_else(|e| panic!("Gerüst startet nicht: {e}"));
 
@@ -69,6 +69,11 @@ fn backup_and_restore_through_the_windows_fd() {
     eprintln!("backup: {row:?}\n{}", rig.job_log(backup));
     assert_eq!(row.status, 'T', "backup: {row:?}\n{}", rig.job_log(backup));
 
+    let rows = rig
+        .catalog()
+        .query(&format!("SELECT p.path || f.name, f.lstat FROM file f JOIN path p ON p.pathid = f.pathid WHERE f.jobid = {backup} AND (f.name = 'a.txt' OR f.name = 'hard1.txt') ORDER BY 1"))
+        .unwrap_or_default();
+    eprintln!("catalog rows of the hard link pair:\n{rows}");
     let reply = rig
         .command(&format!("restore jobid={backup} client=vfd where={RESTORE} all done yes"))
         .unwrap_or_else(|e| panic!("{e}"));
@@ -79,7 +84,9 @@ fn backup_and_restore_through_the_windows_fd() {
 
     let compare = vm(&host, "cmp.ps1");
     eprintln!("compare:\n{compare}");
-    assert!(compare.contains("files: source 5, restored 5"), "{compare}");
+    let entries = compare.lines().find(|l| l.starts_with("entries: source ")).unwrap_or_default();
+    let numbers: Vec<&str> = entries.split(|c: char| !c.is_ascii_digit()).filter(|n| !n.is_empty()).collect();
+    assert!(numbers.len() == 2 && numbers[0] == numbers[1] && numbers[0] != "0", "{compare}");
     assert!(compare.contains("bad=0"), "{compare}");
     let _ = vm(&host, "stop.ps1");
 }

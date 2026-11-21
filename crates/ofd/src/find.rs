@@ -26,6 +26,9 @@ pub struct FfPkt {
     pub ff_errno: i32,
     pub link_fi: i32,
     pub file_index: i32,
+    /// `attribsEx` of the attribute record: the Win32 data of a file on a
+    /// Windows FD, empty on Unix.
+    pub attribs_ex: Vec<u8>,
     pub opts: FileOpts,
     pub delta_seq: i32,
     /// FT_LNKSAVED: the digest of the saved file (stream, bytes).
@@ -162,13 +165,18 @@ fn restore_file_times(ff: &FfPkt, fname: &[u8]) {
 /// The `Stat` of `p` without following a link (`lstat`); the error is the
 /// errno (Unix) or the Win32 error code (Windows).
 pub fn stat_of(p: &[u8]) -> Result<Stat, i32> {
+    stat_of_ex(p).map(|(st, _)| st)
+}
+
+/// [`stat_of`] and the `attribsEx` field of the file (empty on Unix).
+pub fn stat_of_ex(p: &[u8]) -> Result<(Stat, Vec<u8>), i32> {
     #[cfg(unix)]
     {
-        lstat(p).map(|st| stat_from(&st))
+        lstat(p).map(|st| (stat_from(&st), Vec::new()))
     }
     #[cfg(windows)]
     {
-        crate::winfs::stat(p)
+        crate::winfs::stat_ex(p).map(|(st, meta)| (st, crate::winattr::encode(&meta)))
     }
 }
 
@@ -293,8 +301,12 @@ impl<'a> Finder<'a> {
         ff.fname = fname.clone();
         ff.link = fname.clone();
         ff.type_ = 0xFFFF;
-        match stat_of(&fname) {
-            Ok(st) => ff.statp = st,
+        ff.attribs_ex.clear();
+        match stat_of_ex(&fname) {
+            Ok((st, ex)) => {
+                ff.statp = st;
+                ff.attribs_ex = ex;
+            }
             Err(e) => {
                 ff.type_ = FT_NOSTAT;
                 ff.ff_errno = e;

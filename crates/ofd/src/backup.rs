@@ -372,7 +372,8 @@ impl<S: Read + Write> Backup<'_, '_, S> {
                 rec.push(0);
             }
         }
-        // attribsEx (empty), delta_seq
+        // attribsEx (the Win32 data on Windows, else empty), delta_seq
+        rec.extend_from_slice(&ff.attribs_ex);
         rec.push(0);
         rec.extend_from_slice(delta.as_bytes());
         rec.push(0);
