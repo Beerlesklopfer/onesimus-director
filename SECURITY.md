@@ -50,6 +50,10 @@ and `oconsole` in CycloneDX 1.5 (JSON): attached to the release and to the
 build artefact of every CI run, generated from the same state and features as
 the packages.
 
+The Debian packages and their SBOMs carry a signed GitHub attestation
+(build provenance and SBOM, Sigstore). Verify a download with
+`gh attestation verify <package>.deb -R Beerlesklopfer/onesimus-director`.
+
 ## Scope
 
 In scope, for example:

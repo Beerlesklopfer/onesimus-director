@@ -109,6 +109,8 @@ jobs:
     container: debian:trixie
     permissions:
       contents: write
+      id-token: write       # Attestierung: keyloses Signieren über OIDC
+      attestations: write
     steps:
       - name: Werkzeuge
         run: |
@@ -172,6 +174,38 @@ jobs:
             cp "crates/$p/${p}_bin.cdx.json" "dist/sbom/$p.cdx.json"
           done
           ls -l dist/sbom
+
+      # Signatur ohne eigenen Schlüssel: GitHub signiert Herkunft (Repository,
+      # Commit, Workflow-Lauf) und Stückliste je Paket mit einem kurzlebigen
+      # Zertifikat und trägt sie in das öffentliche Sigstore-Transparenzlog ein.
+      # Prüfen: gh attestation verify <paket>.deb -R Beerlesklopfer/onesimus-director
+      # Nicht bei Pull Requests (ohne Schreibrechte kein OIDC-Token).
+      - name: Herkunft der Pakete signieren
+        if: github.event_name != 'pull_request'
+        uses: actions/attest-build-provenance@v2
+        with:
+          subject-path: dist/*.deb
+
+      - name: SBOM odir an das Paket binden und signieren
+        if: github.event_name != 'pull_request'
+        uses: actions/attest-sbom@v2
+        with:
+          subject-path: dist/odir_*.deb
+          sbom-path: dist/sbom/odir.cdx.json
+
+      - name: SBOM ofd an das Paket binden und signieren
+        if: github.event_name != 'pull_request'
+        uses: actions/attest-sbom@v2
+        with:
+          subject-path: dist/ofd_*.deb
+          sbom-path: dist/sbom/ofd.cdx.json
+
+      - name: SBOM oconsole an das Paket binden und signieren
+        if: github.event_name != 'pull_request'
+        uses: actions/attest-sbom@v2
+        with:
+          subject-path: dist/oconsole_*.deb
+          sbom-path: dist/sbom/oconsole.cdx.json
 
       - name: Artefakt
         uses: actions/upload-artifact@v4
