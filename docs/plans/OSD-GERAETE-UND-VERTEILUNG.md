@@ -162,7 +162,7 @@ FD ─ Netz ─► Empfänger (schreibt) ─► /dev/shm/osd-<JobId>.ring ─┬
 - **Schutz fremder Platten** (IBM-Warnung, Recherche): Magic-Label mit Kopien verlangen, Platten mit Partitionstabelle oder Dateisystem-Signatur ohne `--force` ablehnen, `O_EXCL`.
 - **Striping (D-4/D-5) und Zweige:** über N emulierte Laufwerke wie bei echten Bändern; I- und AI-Zweig schreiben auf verschiedene Kassetten oder Platten.
 - **Wechselplatten (D-6):** eine eingesteckte Platte ist ein eingelegtes Magazin; osd erkennt sie am Platten-Label (UUID), nicht am Gerätepfad.
-- **Platten im SAN über iSCSI (D-20, Richtung Maintainer 21.11.2026):** „Gerade bei Platten ist es sinnvoll, SCSI über IP zu nehmen und diese in einem SAN zu betreiben.“
+- **Platten im SAN über iSCSI (D-20, beschlossen 21.11.2026):** „Gerade bei Platten ist es sinnvoll, SCSI über IP zu nehmen und diese in einem SAN zu betreiben.“
   - **osd als iSCSI-Initiator:** die Plattenbänder liegen auf LUNs eines SAN; osd sieht sie als Blockgeräte (Linux: open-iscsi, ggf. dm-multipath) und schreibt den Bandkern darauf wie auf eine lokale Platte. Ein LUN ist ein Magazin.
   - **Kennung:** statt `ID_SERIAL` die LUN-Kennung aus SCSI-VPD-Seite 0x83 (WWN/NAA) im Magazin-Label; osd erkennt einen LUN daran, auch über mehrere Pfade.
   - **Alleiniger Zugriff über das Netz:** `O_EXCL` wirkt nur auf dem eigenen Host. Mehrere Hosts sehen denselben LUN, deshalb **SCSI Persistent Reservations** (SPC-3, „Write Exclusive – Registrants Only“) beim Laden des Magazins, dazu Eigentümer (osd-Instanz) und Lease-Zeit im Magazin-Label. Ein zweiter osd übernimmt nur nach Ablauf der Lease bzw. mit `--force` (Übernahme bei Ausfall, wie bei einer geteilten Bandbibliothek).
@@ -465,5 +465,5 @@ Alle wie empfohlen, D-8 präzisiert: „additiv, rückwärtskompatibel“.
 | D-17 | Plattenband liest hinter Schadstellen weiter (Satzkopf + crc32c) und meldet die Lücke | **ja** (21.11.2026) |
 | D-18 | Striping nur mit Zweig auf anderes Medium oder Parität; `-t` lehnt sonst ab | **ja** (21.11.2026) |
 | D-19 | Ablauf „Volume beschädigt“ in odir (Übersicht, Kopien hochstufen, neuen Full anstoßen), unabhängig von osd | **ja** (21.11.2026) |
-| D-20 | Plattenbänder auf SAN-LUNs über iSCSI: osd als Initiator, LUN = Magazin, Kennung aus VPD 0x83, Persistent Reservations + Lease für den alleinigen Zugriff, Logout als Auslagern; osd als iSCSI-Target für fremde Hosts später optional | **Richtung ja** (21.11.2026); Einzelheiten wie vorgeschlagen, offen zur Bestätigung |
+| D-20 | Plattenbänder auf SAN-LUNs über iSCSI: osd als Initiator, LUN = Magazin, Kennung aus VPD 0x83, Persistent Reservations + Lease für den alleinigen Zugriff, Logout als Auslagern; osd als iSCSI-Target für fremde Hosts später optional | **ja** (21.11.2026) |
 | D-15 | Ring: `memmap2` + eigene Plattformschicht, Logik nach Disruptor/Aeron, Warten immer mit Zeitlimit (Recherche B) | **offen** (Empfehlung: ja) |
