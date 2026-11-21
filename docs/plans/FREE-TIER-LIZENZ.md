@@ -16,6 +16,12 @@ Korrektur des Nutzers (21.11.2026): „Das ist der Zusatz der AGPL-Lizenz. Wer d
 - Mögliche Wege: (1) AGPL ohne Zusatz, Limit nur als Voreinstellung, bezahlt wird für Lizenzdatei, Support und Pakete; (2) duale Lizenz für Teile, die nicht von Bareos abgeleitet sind; (3) Source-available-Lizenz nur für eigenen Code ohne Bareos-Anteil; (4) Markenschutz für „Onesimus“ (§7e verträglich).
 - Empfehlung: Klärung durch einen Anwalt für Open-Source-Lizenzen, insbesondere ob odir ein abgeleitetes Werk von Bareos ist. Die Technik unten ist von dieser Entscheidung unabhängig.
 
+**Entscheidung des Nutzers (21.11.2026): duale Lizenz** (AGPL plus kommerzielle Lizenz) für die Teile, die ihm allein gehören und nicht von Bareos abgeleitet sind: Lizenzmodul, GUI, osd-Erweiterungen, Plattenband. Folgen:
+- Code trennen: je Crate festhalten, ob von Bareos abgeleitet (AGPL der Bareos-Urheber) oder eigen (dual); Lizenz- und Copyright-Angabe je Crate.
+- Die Lizenz- und Limit-Prüfung kommt in eine eigene Crate außerhalb des Bareos-abgeleiteten Kerns.
+- Beiträge Dritter zu dual lizenzierten Teilen nur mit CLA.
+- **Offen:** Auf der AGPL-Seite darf jeder das Limit mit veröffentlichtem Quelltext entfernen; soll das Umgehen ein Lizenzbruch sein, braucht die Limit-Crate eine Source-available- oder kommerzielle statt der AGPL-Lizenz.
+
 ## Anforderung (übernommen)
 
 - Gezählt werden die von **Backup-Jobs** geschriebenen Bytes (`JobBytes`) je Kalendermonat. Copy und Migration zählen nicht doppelt.
