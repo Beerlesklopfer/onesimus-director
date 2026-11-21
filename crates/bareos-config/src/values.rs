@@ -11,27 +11,49 @@ pub fn parse_bool(input: &str) -> Result<((), bool), String> {
     }
 }
 
-/// Parse a time duration with units.
-/// Examples: "30", "30 seconds", "5 minutes", "2 hours", "365 days"
+/// Time modifiers of lib/edit.cc `DurationToUtime`: a modifier is any prefix
+/// of a name (case-insensitive) and the first table entry that matches wins,
+/// so `m` is months and `mi` minutes.
+const TIME_MODS: [(&str, u64); 10] = [
+    ("n", 60), ("seconds", 1), ("months", 2_592_000), ("minutes", 60), ("mins", 60), ("hours", 3600),
+    ("days", 86_400), ("weeks", 604_800), ("quarters", 7_862_400), ("years", 31_536_000),
+];
+
+/// Parse a time duration as the original does: a sequence of numbers, each
+/// with an optional modifier, added up. A bare number is seconds.
+/// Examples: "30", "5 minutes", "365 days", "30d", "1 year 6 months".
+/// An unknown modifier or text after the last number is an error.
 pub fn parse_time(input: &str) -> Result<((), Duration), String> {
-    let input = input.trim();
-
-    // Split into number and optional unit
-    let (num_str, unit_str) = split_number_unit(input);
-    let number: u64 = num_str.parse().map_err(|e| format!("invalid number: {e}"))?;
-
-    let multiplier = match unit_str.to_lowercase().as_str() {
-        "" | "s" | "sec" | "secs" | "second" | "seconds" => 1u64,
-        "min" | "mins" | "minute" | "minutes" => 60,
-        "h" | "hr" | "hrs" | "hour" | "hours" => 3600,
-        "day" | "days" => 86400,
-        "week" | "weeks" => 604800,
-        "month" | "months" => 2592000,
-        "year" | "years" => 31536000,
-        other => return Err(format!("unknown time unit: {other}")),
-    };
-
-    Ok(((), Duration::from_secs(number * multiplier)))
+    let text = input.trim();
+    let mut rest = text;
+    let mut total = 0f64;
+    let mut any = false;
+    while !rest.is_empty() {
+        let digits = rest.find(|c: char| !(c.is_ascii_digit() || c == '.')).unwrap_or(rest.len());
+        if digits == 0 {
+            return Err(format!("invalid time: {text}"));
+        }
+        let number: f64 = rest[..digits].parse().map_err(|e| format!("invalid number: {e}"))?;
+        rest = rest[digits..].trim_start();
+        let word = rest.find(|c: char| c.is_ascii_digit() || c.is_whitespace()).unwrap_or(rest.len());
+        let modifier = &rest[..word];
+        let multiplier = if modifier.is_empty() {
+            1
+        } else {
+            TIME_MODS
+                .iter()
+                .find(|(name, _)| name.len() >= modifier.len() && name[..modifier.len()].eq_ignore_ascii_case(modifier))
+                .map(|(_, m)| *m)
+                .ok_or_else(|| format!("unknown time unit: {modifier}"))?
+        };
+        total += number * multiplier as f64;
+        any = true;
+        rest = rest[word..].trim_start();
+    }
+    if !any {
+        return Err("empty time".into());
+    }
+    Ok(((), Duration::from_secs(total as u64)))
 }
 
 /// Parse a size with units (returns bytes).
@@ -124,6 +146,13 @@ mod tests {
         assert_eq!(parse_time("1 week").unwrap().1, Duration::from_secs(604800));
         assert_eq!(parse_time("1 month").unwrap().1, Duration::from_secs(2592000));
         assert_eq!(parse_time("1 year").unwrap().1, Duration::from_secs(31536000));
+        assert_eq!(parse_time("1 year 6 months").unwrap().1, Duration::from_secs(31_536_000 + 6 * 2_592_000));
+        assert_eq!(parse_time("30d").unwrap().1, Duration::from_secs(30 * 86_400));
+        assert_eq!(parse_time("2 quarters").unwrap().1, Duration::from_secs(2 * 7_862_400));
+        assert_eq!(parse_time("1 m").unwrap().1, Duration::from_secs(2_592_000), "m is months, as in the original");
+        assert_eq!(parse_time("1 mi").unwrap().1, Duration::from_secs(60));
+        assert!(parse_time("10 x").is_err());
+        assert!(parse_time("ten days").is_err());
     }
 
     #[test]
