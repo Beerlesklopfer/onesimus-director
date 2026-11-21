@@ -48,6 +48,28 @@ case "$1" in
 esac
 
 
+# The restart below (debhelper) counts against the unit's start limit
+# (StartLimitBurst per StartLimitIntervalSec, as bareos-director). Several
+# upgrades in a day used it up on PDC (21.11.2026): systemd refused the start
+# ("start-limit-hit"), deb-systemd-invoke only printed "Could not execute
+# systemctl" and the daemon stayed down. Reset the counter first.
+if [ "$1" = "configure" ] && [ -d /run/systemd/system ]; then
+    systemctl reset-failed osd.service >/dev/null 2>&1 || true
+fi
+
 #DEBHELPER#
+
+# An enabled unit that is not running after the restart: say so loudly.
+if [ "$1" = "configure" ] && [ -d /run/systemd/system ] \
+        && systemctl is-enabled --quiet osd.service 2>/dev/null; then
+    sleep 1
+    if ! systemctl is-active --quiet osd.service; then
+        echo "" >&2
+        echo "WARNING: osd is NOT running after the installation." >&2
+        echo "  Start it:  systemctl reset-failed osd && systemctl start osd" >&2
+        echo "  Why:       journalctl -u osd -n 50   and   /var/log/onesimus/osd.log" >&2
+        echo "" >&2
+    fi
+fi
 
 exit 0

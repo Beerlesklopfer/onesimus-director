@@ -131,7 +131,7 @@ pub(super) fn tools() -> Vec<Value> {
              directive is added. A list value replaces every line of a repeated directive, e.g. a Schedule's Run \
              lines: {\"Description\":\"Weekly full\",\"Run\":[\"Full sun at 23:30\",\"Incremental mon-sat at 23:30\"]} \
              (Run is written unquoted). Directives of nested blocks (RunScript, Include …) are refused. Types: \
-             client, job, jobdefs, schedule, fileset, pool, as far as the Director offers them with READ_RAW and \
+             client, job, jobdefs, schedule, fileset, pool, storage, as far as the Director offers them with READ_RAW and \
              UPDATE_RAW; bareos-dir is refused. Returns the changed directives, the old and new sha256 and whether \
              the Director reloaded.",
             json!({
@@ -478,7 +478,7 @@ mod tests {
             ("acl_modify", json!({"action":"clear","console":"c","type":"job"})),
             ("configure_delete", json!({"resource":"client","name":"fd"})),
             ("configure_update", json!({"resource":"client","name":"fd"})),
-            ("configure_update", json!({"resource":"storage","name":"File","directives":{"a":"b"}})),
+            ("configure_update", json!({"resource":"console","name":"admin","directives":{"a":"b"}})),
             ("configure_update", json!({"resource":"client","name":"fd","directives":{"a=b":"x"}})),
             ("session_option", json!({"option":"gui","on":true})),
             ("add_volumes", json!({"pool":"P","storage":"S","count":0,"name":"a b"})),

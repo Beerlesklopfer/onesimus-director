@@ -103,6 +103,9 @@ const KINDS: &[(&str, &str, &[Item], &str)] = &[
 const EXTENSIONS: &[(&str, &str)] = &[
     ("director", "grpcport"), ("director", "grpctlscertificate"),
     ("director", "grpctlskey"), ("director", "mdnsadvertise"), ("catalog", "dbdriver"),
+    // gRPC to ofd/osd (fd_grpc.rs Target::from_directives, docs/wiki/osd.md)
+    ("client", "grpcenable"), ("client", "grpcport"), ("client", "grpccacertificatefile"), ("client", "grpcservername"),
+    ("storage", "grpcenable"), ("storage", "grpcport"), ("storage", "grpccacertificatefile"), ("storage", "grpcservername"),
 ];
 
 fn kind(rtype: &str) -> Option<&'static (&'static str, &'static str, &'static [Item], &'static str)> {

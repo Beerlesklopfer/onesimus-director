@@ -48,10 +48,14 @@ pub enum RType {
     /// rewrites the catalog Pool record; volumes keep their values
     /// (`followups`).
     Pool,
+    /// Storage; deleting one that a Job, JobDefs or Pool (`Storage =`) or a
+    /// Schedule/Job `Run` override (`Storage=`) names is REFERENCED.
+    Storage,
 }
 
 impl RType {
-    pub const ALL: [RType; 6] = [RType::Schedule, RType::Job, RType::JobDefs, RType::Client, RType::FileSet, RType::Pool];
+    pub const ALL: [RType; 7] =
+        [RType::Schedule, RType::Job, RType::JobDefs, RType::Client, RType::FileSet, RType::Pool, RType::Storage];
 
     /// Type word as written in new files and messages.
     pub fn word(self) -> &'static str {
@@ -62,6 +66,7 @@ impl RType {
             RType::Client => "Client",
             RType::FileSet => "FileSet",
             RType::Pool => "Pool",
+            RType::Storage => "Storage",
         }
     }
 
@@ -74,6 +79,7 @@ impl RType {
             RType::Client => "client",
             RType::FileSet => "fileset",
             RType::Pool => "pool",
+            RType::Storage => "storage",
         }
     }
 
@@ -86,6 +92,7 @@ impl RType {
             RType::Client => "R_CLIENT",
             RType::FileSet => "R_FILESET",
             RType::Pool => "R_POOL",
+            RType::Storage => "R_STORAGE",
         }
     }
 
@@ -98,6 +105,7 @@ impl RType {
             RType::Client => crate::acl::Kind::Client,
             RType::FileSet => crate::acl::Kind::FileSet,
             RType::Pool => crate::acl::Kind::Pool,
+            RType::Storage => crate::acl::Kind::Storage,
         }
     }
 }
@@ -521,10 +529,15 @@ pub fn references(raw: &[ConfResource], rtype: RType, name: &str) -> Vec<(String
                 RType::Client => &["client="],
                 RType::FileSet => &["fileset="],
                 RType::Pool => &["pool=", "fullpool=", "incrementalpool=", "differentialpool=", "virtualfullpool=", "nextpool="],
+                RType::Storage => &["storage="],
                 _ => &[],
             };
             let in_run = |v: &str| keys.iter().any(|key| run_arg(v, key).as_deref() == Some(name));
-            let run_holders: &[&str] = if rtype == RType::Pool { &["job", "jobdefs", "schedule"] } else { &["job", "jobdefs"] };
+            let run_holders: &[&str] = if matches!(rtype, RType::Pool | RType::Storage) {
+                &["job", "jobdefs", "schedule"]
+            } else {
+                &["job", "jobdefs"]
+            };
             if !keys.is_empty() && run_holders.contains(&res.norm_type().as_str()) {
                 if d.norm_key() == "run" && d.values().iter().any(|v| in_run(v)) {
                     return true;

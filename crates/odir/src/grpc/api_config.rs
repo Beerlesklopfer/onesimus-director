@@ -46,6 +46,7 @@ fn to_proto_type(rtype: RType) -> pb::ResourceType {
         RType::Client => pb::ResourceType::Client,
         RType::FileSet => pb::ResourceType::Fileset,
         RType::Pool => pb::ResourceType::Pool,
+        RType::Storage => pb::ResourceType::Storage,
     }
 }
 
@@ -82,6 +83,7 @@ fn rtype(value: i32) -> Result<RType, Status> {
         pb::ResourceType::Client => Ok(RType::Client),
         pb::ResourceType::Fileset => Ok(RType::FileSet),
         pb::ResourceType::Pool => Ok(RType::Pool),
+        pb::ResourceType::Storage => Ok(RType::Storage),
         other => Err(Status::unimplemented(format!("{} cannot be edited yet (see GetConfigCapabilities)", other.as_str_name()))),
     }
 }
@@ -352,7 +354,7 @@ Console {\n  Name = clients\n  Password = pw\n  CommandACL = configure\n  Client
         // later: RenameResource, other types
         let err = f.api.rename_resource(req(pb::RenameResourceRequest::default(), &token)).await.unwrap_err();
         assert_eq!(err.code(), tonic::Code::Unimplemented);
-        let err = f.api.list_resources(req(pb::ListResourcesRequest { r#type: pb::ResourceType::Storage as i32 }, &token))
+        let err = f.api.list_resources(req(pb::ListResourcesRequest { r#type: pb::ResourceType::Console as i32 }, &token))
             .await.unwrap_err();
         assert_eq!(err.code(), tonic::Code::Unimplemented);
         let err = f.api.read_resource(req(pb::ReadResourceRequest { resource: None }, &token)).await.unwrap_err();
@@ -372,11 +374,11 @@ Console {\n  Name = clients\n  Password = pw\n  CommandACL = configure\n  Client
         let err = f.api.get_config_capabilities(Request::new(pb::ConfigCapabilitiesRequest {})).await.unwrap_err();
         assert_eq!(err.code(), tonic::Code::Unauthenticated);
 
-        // default console: all six types with all implemented operations
+        // default console: all seven types with all implemented operations
         let caps = f.api.get_config_capabilities(req(pb::ConfigCapabilitiesRequest {}, &root)).await.unwrap().into_inner();
         assert_eq!(caps.interface_version, 1);
         assert_eq!(types(&caps), [pb::ResourceType::Schedule, pb::ResourceType::Job, pb::ResourceType::Jobdefs, pb::ResourceType::Client,
-            pb::ResourceType::Fileset, pb::ResourceType::Pool]);
+            pb::ResourceType::Fileset, pb::ResourceType::Pool, pb::ResourceType::Storage]);
         assert!(caps.types.iter().all(|t| t.operations().collect::<Vec<_>>() == OPERATIONS));
 
         // no Command ACL configure: PERMISSION_DENIED, no types

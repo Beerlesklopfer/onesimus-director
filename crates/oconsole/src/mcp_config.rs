@@ -88,7 +88,7 @@ pub fn format_value(key: &str, value: &Value) -> Result<String, String> {
 
 /// The resource types the tool changes: those of the Director's
 /// configuration CRUD.
-pub const TYPES: &[&str] = &["client", "job", "jobdefs", "schedule", "fileset", "pool"];
+pub const TYPES: &[&str] = &["client", "job", "jobdefs", "schedule", "fileset", "pool", "storage"];
 
 /// Checked directive arguments of a resource of type `resource`: (name as
 /// given, formatted values). A list value is a repeated directive (Schedule

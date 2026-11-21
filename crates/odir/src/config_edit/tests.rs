@@ -496,3 +496,21 @@ fn pool_create_read_update_delete_and_referenced() {
     assert_eq!(references(&raw, RType::Pool, "Copy"),
         vec![("pool".into(), "Daily".into()), ("schedule".into(), "S".into()), ("job".into(), "r".into())]);
 }
+
+/// Storage in the CRUD: update keeps comments (gRPC directives of an osd),
+/// REFERENCED by Job `Storage =`, Pool `Storage =` and a Run override.
+#[test]
+fn storage_update_and_referenced() {
+    let h = harness("storage");
+    let read = h.read(RType::Storage, "File");
+    assert_eq!(read.status, Status::Ok, "{read:?}");
+    let changed = read.text.replace("}\n", "  Grpc Enable = yes\n  Grpc Server Name = sd-01\n}\n");
+    let updated = h.update(RType::Storage, "File", &read.sha256, &changed);
+    assert_eq!(updated.status, Status::Ok, "{updated:?}");
+    assert!(updated.followups.is_empty());
+    let o = h.delete(RType::Storage, "File", &updated.sha256);
+    assert_eq!((o.status, o.referenced_by.clone()), (Status::Referenced, vec![("job".to_string(), "a".to_string())]));
+    let raw = bareos_config::raw::parse_str("Pool {\n Name = P\n Storage = Tape\n}\n\
+        Schedule {\n Name = S\n Run = Level=Full Storage=Tape sun at 23:05\n}\n", None).unwrap();
+    assert_eq!(references(&raw, RType::Storage, "Tape"), vec![("pool".into(), "P".into()), ("schedule".into(), "S".into())]);
+}

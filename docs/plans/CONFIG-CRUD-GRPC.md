@@ -483,5 +483,15 @@ nicht umgesetzt (Grundsatz 17).
 - Test `pool_create_read_update_delete_and_referenced`; die Tests, die Pool
   als nicht bearbeitbar prüften, nehmen jetzt Storage.
 
-Offen: RENAME (Grundsatz 9), Storage und Console (Grundsatz 17), ob die alte
+### Storage im CRUD (21.11.2026)
+
+Anlass: odir soll osd auf dem H340 über gRPC ansprechen; dafür braucht die
+Storage-Ressource `Grpc Enable`, `Grpc CA Certificate File`, `Grpc Server
+Name`. `RType::Storage` wie Pool: Storage-ACL, Verweise über `R_STORAGE`
+(Job/JobDefs/Pool `Storage`) und `Storage=` in Run-Overrides. Keine
+`followups`. Dazu erkannt: die gRPC-Direktiven von Client und Storage fehlten
+in `config_check::EXTENSIONS`, `odir -t` hätte sie abgelehnt (behoben). Nur
+Console bleibt außerhalb des CRUD.
+
+Offen: RENAME (Grundsatz 9), Console (Grundsatz 17), ob die alte
 Konsolenerweiterung `configure read` entfernt wird.

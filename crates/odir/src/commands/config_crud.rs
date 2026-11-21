@@ -64,6 +64,7 @@ pub fn type_text(rtype: RType) -> &'static str {
         RType::Client => "CLIENT",
         RType::FileSet => "FILESET",
         RType::Pool => "POOL",
+        RType::Storage => "STORAGE",
     }
 }
 
@@ -414,7 +415,7 @@ Console {\n  Name = viewer\n  Password = pw\n  CommandACL = .config\n  ClientACL
         let r = run(&h, &viewer, ".config read type=client name=fd");
         assert!(!r.success && r.error_message.contains("configure"), "{r:?}");
         // arguments
-        for line in [".config", ".config frobnicate", ".config read name=fd", ".config read type=storage name=x",
+        for line in [".config", ".config frobnicate", ".config read name=fd", ".config read type=console name=x",
                      ".config read type=client", ".config create type=schedule", ".config create type=schedule text64=!!"] {
             assert!(!run(&h, &admin, line).success, "{line}");
         }
@@ -464,12 +465,14 @@ Console {\n  Name = viewer\n  Password = pw\n  CommandACL = .config\n  ClientACL
         std::fs::write(&orphan, "FileSet {\n  Name = orphan\n  Include {\n    File = /srv\n  }\n}\n").unwrap();
         assert_eq!(run("configure delete fileset=orphan yes"), "Deleted FileSet 'orphan'\n");
         assert!(!orphan.exists());
-        // Pool is in the CRUD: REFERENCED by the job; Storage is still refused
+        // Pool and Storage are in the CRUD: REFERENCED by the job; Console is still refused
         let out = run("configure delete pool=Full yes");
         assert!(out.contains("is used by 1 resource") && out.contains("job \"a\""), "{out}");
         assert!(h.dir.join("bareos-dir.d/pool/Full.conf").exists());
-        assert!(run("configure delete storage=File yes").contains("cannot be deleted safely"));
+        let out = run("configure delete storage=File yes");
+        assert!(out.contains("is used by 1 resource") && out.contains("job \"a\""), "{out}");
         assert!(h.dir.join("bareos-dir.d/storage/File.conf").exists());
+        assert!(run("configure delete console=admin yes").contains("cannot be deleted safely"));
         assert_eq!(run("configure delete job=nosuch"), "Job \"nosuch\" not found\n");
     }
 
@@ -540,7 +543,7 @@ Console {\n  Name = viewer\n  Password = pw\n  CommandACL = .config\n  ClientACL
         // refusals before anything is read
         for (line, expected) in [
             ("configure update client=fd name=x", "renaming is not supported"),
-            ("configure update storage=File maximumconcurrentjobs=3", "cannot be changed with configure update"),
+            ("configure update console=admin password=x", "cannot be changed with configure update"),
             ("configure update client=fd", "no directive given"),
             ("configure update client=fd address=a run=x address=", "cannot be combined"),
             ("configure update client=fd a{b=1", "letters, digits"),

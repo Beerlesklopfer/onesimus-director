@@ -2731,17 +2731,19 @@ configure update jobdefs=<jobdefs> [description=<description> ...] [type=<type> 
 configure update schedule=<schedule> [description=<description> ...] [run=<run> ...] [enabled=<yes|no> ...]
 configure update fileset=<fileset> [description=<description> ...] [include=<include> ...] [exclude=<exclude> ...] [ignorefilesetchanges=<yes|no> ...] [enablevss=<yes|no> ...]
 configure update pool=<pool> [description=<description> ...] [pooltype=<pooltype> ...] [labelformat=<labelformat> ...] [cleaningprefix=<cleaningprefix> ...] [usecatalog=<yes|no> ...] [purgeoldestvolume=<yes|no> ...] [actiononpurge=<None|Truncate> ...] [recycleoldestvolume=<yes|no> ...] [recyclecurrentvolume=<yes|no> ...] [maximumvolumes=<maximumvolumes> ...] [maximumvolumejobs=<maximumvolumejobs> ...] [maximumvolumefiles=<maximumvolumefiles> ...] [maximumvolumebytes=<maximumvolumebytes> ...] [catalogfiles=<yes|no> ...] [volumeretention=<volumeretention> ...] [volumeuseduration=<volumeuseduration> ...] [migrationtime=<migrationtime> ...] [migrationhighbytes=<migrationhighbytes> ...] [migrationlowbytes=<migrationlowbytes> ...] [nextpool=<nextpool> ...] [storage=<storage> ...] [autoprune=<yes|no> ...] [recycle=<yes|no> ...] [recyclepool=<recyclepool> ...] [scratchpool=<scratchpool> ...] [catalog=<catalog> ...] [minimumblocksize=<minimumblocksize> ...] [maximumblocksize=<maximumblocksize> ...]
+configure update storage=<storage> [description=<description> ...] [protocol=<Native|NDMPV2|NDMPV3|NDMPV4> ...] [authtype=<None|Clear|MD5> ...] [address=<address> ...] [sdaddress=<sdaddress> ...] [lanaddress=<lanaddress> ...] [port=<port> ...] [sdport=<sdport> ...] [username=<username> ...] [password=<password> ...] [sdpassword=<sdpassword> ...] [device=<device> ...] [mediatype=<mediatype> ...] [autochanger=<yes|no> ...] [enabled=<yes|no> ...] [allowcompression=<yes|no> ...] [heartbeatinterval=<heartbeatinterval> ...] [cachestatusinterval=<cachestatusinterval> ...] [maximumconcurrentjobs=<maximumconcurrentjobs> ...] [maximumconcurrentreadjobs=<maximumconcurrentreadjobs> ...] [pairedstorage=<pairedstorage> ...] [maximumbandwidthperjob=<maximumbandwidthperjob> ...] [ndmpchangerdevice=<ndmpchangerdevice> ...] [tlsauthenticate=<yes|no> ...] [tlsenable=<yes|no> ...] [tlsrequire=<yes|no> ...] [tlscipherlist=<tlscipherlist> ...] [tlsciphersuites=<tlsciphersuites> ...] [tlsdhfile=<tlsdhfile> ...] [tlsprotocol=<tlsprotocol> ...] [tlsverifypeer=<yes|no> ...] [tlscacertificatefile=<tlscacertificatefile> ...] [tlscacertificatedir=<tlscacertificatedir> ...] [tlscertificaterevocationlist=<tlscertificaterevocationlist> ...] [tlscertificate=<tlscertificate> ...] [tlskey=<tlskey> ...] [tlsallowedcn=<tlsallowedcn> ...]
 configure delete client=<client>
 configure delete job=<job>
 configure delete jobdefs=<jobdefs>
 configure delete schedule=<schedule>
 configure delete fileset=<fileset>
 configure delete pool=<pool>
+configure delete storage=<storage>
 .fi
 .PP
 \fBDescription\fR
 .PP
-Adds resources to the configuration and exports them. Onesimus extensions read, update and delete resources of the editable types (client, job, jobdefs, schedule, fileset, pool); every change is checked like a reload and written to the configuration directory.
+Adds resources to the configuration and exports them. Onesimus extensions read, update and delete resources of the editable types (client, job, jobdefs, schedule, fileset, pool, storage); every change is checked like a reload and written to the configuration directory.
 .PP
 \fBSubcommands\fR
 .TP
@@ -2826,10 +2828,13 @@ Change a fileset
 .B "configure update pool=<pool>"
 Change a pool
 .TP
+.B "configure update storage=<storage>"
+Change a storage
+.TP
 .B "configure delete"
 Delete an unreferenced resource (Onesimus)
 .IP
-Onesimus extension: deletes a client, job, jobdefs, schedule, fileset or pool through the configuration CRUD, the same path as .config delete. The resource is read for its current checksum and deleted only if no other resource still refers to it; otherwise the referring resources are listed and nothing is deleted. The remaining configuration is checked like odir \-t, the file change is atomic and a failed reload is rolled back.
+Onesimus extension: deletes a client, job, jobdefs, schedule, fileset, pool or storage through the configuration CRUD, the same path as .config delete. The resource is read for its current checksum and deleted only if no other resource still refers to it; otherwise the referring resources are listed and nothing is deleted. The remaining configuration is checked like odir \-t, the file change is atomic and a failed reload is rolled back.
 .IP
 pool, storage and console are refused; remove such files by hand and reload. The resource ACL of the console applies.
 .TP
@@ -2850,6 +2855,9 @@ Delete a fileset
 .TP
 .B "configure delete pool=<pool>"
 Delete a pool
+.TP
+.B "configure delete storage=<storage>"
+Delete a storage
 .PP
 \fBArguments\fR
 .PP
@@ -4706,6 +4714,122 @@ Directive (empty value removes it) (text; may be repeated)
 .B "maximumblocksize=<maximumblocksize> ..."
 Directive (empty value removes it) (text; may be repeated)
 .PP
+\fIconfigure update storage=<storage>\fR
+.TP
+.B "storage=<storage>"
+Resource name (name; values from .filesets)
+.TP
+.B "description=<description> ..."
+Directive (empty value removes it) (text; may be repeated)
+.TP
+.B "protocol=<Native|NDMPV2|NDMPV3|NDMPV4> ..."
+Directive (empty value removes it) (one of a fixed set; values: Native, NDMPV2, NDMPV3, NDMPV4; may be repeated)
+.TP
+.B "authtype=<None|Clear|MD5> ..."
+Directive (empty value removes it) (one of a fixed set; values: None, Clear, MD5; may be repeated)
+.TP
+.B "address=<address> ..."
+Directive (empty value removes it) (text; may be repeated)
+.TP
+.B "sdaddress=<sdaddress> ..."
+Directive (empty value removes it) (text; may be repeated)
+.TP
+.B "lanaddress=<lanaddress> ..."
+Directive (empty value removes it) (text; may be repeated)
+.TP
+.B "port=<port> ..."
+Directive (empty value removes it) (text; may be repeated)
+.TP
+.B "sdport=<sdport> ..."
+Directive (empty value removes it) (text; may be repeated)
+.TP
+.B "username=<username> ..."
+Directive (empty value removes it) (text; may be repeated)
+.TP
+.B "password=<password> ..."
+Directive (empty value removes it) (text; may be repeated)
+.TP
+.B "sdpassword=<sdpassword> ..."
+Directive (empty value removes it) (text; may be repeated)
+.TP
+.B "device=<device> ..."
+Directive (empty value removes it) (text; may be repeated)
+.TP
+.B "mediatype=<mediatype> ..."
+Directive (empty value removes it) (text; may be repeated)
+.TP
+.B "autochanger=<yes|no> ..."
+Directive (empty value removes it) (yes or no; may be repeated)
+.TP
+.B "enabled=<yes|no> ..."
+Directive (empty value removes it) (yes or no; may be repeated)
+.TP
+.B "allowcompression=<yes|no> ..."
+Directive (empty value removes it) (yes or no; may be repeated)
+.TP
+.B "heartbeatinterval=<heartbeatinterval> ..."
+Directive (empty value removes it) (text; may be repeated)
+.TP
+.B "cachestatusinterval=<cachestatusinterval> ..."
+Directive (empty value removes it) (text; may be repeated)
+.TP
+.B "maximumconcurrentjobs=<maximumconcurrentjobs> ..."
+Directive (empty value removes it) (text; may be repeated)
+.TP
+.B "maximumconcurrentreadjobs=<maximumconcurrentreadjobs> ..."
+Directive (empty value removes it) (text; may be repeated)
+.TP
+.B "pairedstorage=<pairedstorage> ..."
+Directive (empty value removes it) (name; values from .storages; may be repeated)
+.TP
+.B "maximumbandwidthperjob=<maximumbandwidthperjob> ..."
+Directive (empty value removes it) (text; may be repeated)
+.TP
+.B "ndmpchangerdevice=<ndmpchangerdevice> ..."
+Directive (empty value removes it) (text; may be repeated)
+.TP
+.B "tlsauthenticate=<yes|no> ..."
+Directive (empty value removes it) (yes or no; may be repeated)
+.TP
+.B "tlsenable=<yes|no> ..."
+Directive (empty value removes it) (yes or no; may be repeated)
+.TP
+.B "tlsrequire=<yes|no> ..."
+Directive (empty value removes it) (yes or no; may be repeated)
+.TP
+.B "tlscipherlist=<tlscipherlist> ..."
+Directive (empty value removes it) (text; may be repeated)
+.TP
+.B "tlsciphersuites=<tlsciphersuites> ..."
+Directive (empty value removes it) (text; may be repeated)
+.TP
+.B "tlsdhfile=<tlsdhfile> ..."
+Directive (empty value removes it) (text; may be repeated)
+.TP
+.B "tlsprotocol=<tlsprotocol> ..."
+Directive (empty value removes it) (text; may be repeated)
+.TP
+.B "tlsverifypeer=<yes|no> ..."
+Directive (empty value removes it) (yes or no; may be repeated)
+.TP
+.B "tlscacertificatefile=<tlscacertificatefile> ..."
+Directive (empty value removes it) (text; may be repeated)
+.TP
+.B "tlscacertificatedir=<tlscacertificatedir> ..."
+Directive (empty value removes it) (text; may be repeated)
+.TP
+.B "tlscertificaterevocationlist=<tlscertificaterevocationlist> ..."
+Directive (empty value removes it) (text; may be repeated)
+.TP
+.B "tlscertificate=<tlscertificate> ..."
+Directive (empty value removes it) (text; may be repeated)
+.TP
+.B "tlskey=<tlskey> ..."
+Directive (empty value removes it) (text; may be repeated)
+.TP
+.B "tlsallowedcn=<tlsallowedcn> ..."
+Directive (empty value removes it) (text; may be repeated)
+.PP
 \fIconfigure delete client=<client>\fR
 .TP
 .B "client=<client>"
@@ -4734,6 +4858,11 @@ Resource name (name; values from .filesets)
 \fIconfigure delete pool=<pool>\fR
 .TP
 .B "pool=<pool>"
+Resource name (name; values from .filesets)
+.PP
+\fIconfigure delete storage=<storage>\fR
+.TP
+.B "storage=<storage>"
 Resource name (name; values from .filesets)
 .PP
 \fBExamples\fR
@@ -7399,12 +7528,12 @@ Print the JSON object as text (keyword)
 \fI\&.config list\fR
 .TP
 .B "type=<type>"
-Resource type (one of a fixed set; values: client, job, jobdefs, schedule, fileset, pool; required)
+Resource type (one of a fixed set; values: client, job, jobdefs, schedule, fileset, pool, storage; required)
 .PP
 \fI\&.config read\fR
 .TP
 .B "type=<type>"
-Resource type (one of a fixed set; values: client, job, jobdefs, schedule, fileset, pool; required)
+Resource type (one of a fixed set; values: client, job, jobdefs, schedule, fileset, pool, storage; required)
 .TP
 .B "name=<name>"
 Resource name (text; required)
@@ -7412,7 +7541,7 @@ Resource name (text; required)
 \fI\&.config create\fR
 .TP
 .B "type=<type>"
-Resource type (one of a fixed set; values: client, job, jobdefs, schedule, fileset, pool; required)
+Resource type (one of a fixed set; values: client, job, jobdefs, schedule, fileset, pool, storage; required)
 .TP
 .B "text64=<text64>"
 Resource text, base64 (text; required)
@@ -7423,7 +7552,7 @@ Check only, write nothing (keyword)
 \fI\&.config update\fR
 .TP
 .B "type=<type>"
-Resource type (one of a fixed set; values: client, job, jobdefs, schedule, fileset, pool; required)
+Resource type (one of a fixed set; values: client, job, jobdefs, schedule, fileset, pool, storage; required)
 .TP
 .B "name=<name>"
 Resource name (text; required)
@@ -7440,7 +7569,7 @@ Check only, write nothing (keyword)
 \fI\&.config delete\fR
 .TP
 .B "type=<type>"
-Resource type (one of a fixed set; values: client, job, jobdefs, schedule, fileset, pool; required)
+Resource type (one of a fixed set; values: client, job, jobdefs, schedule, fileset, pool, storage; required)
 .TP
 .B "name=<name>"
 Resource name (text; required)
