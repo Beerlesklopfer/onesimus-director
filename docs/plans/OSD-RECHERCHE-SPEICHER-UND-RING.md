@@ -164,7 +164,9 @@ Daten      Segmente, z. B. 256 MiB (Zonengröße), nur Anhängen;
 ```
 Platte/Partition
 LBA 0      Wechsler-Label (4 KiB, Kopien an festen Stellen): Magic "OSDTAPE1",
-           Platten-UUID, Sektorgröße, Kassettenzahl, Kassettengröße,
+           Magazin-Barcode, Platten-UUID, Seriennummer bzw. LUN-Kennung (VPD 0x83),
+           Eigentümer + Lease (SAN), Kassetten-Präfix,
+           Sektorgröße, Kassettenzahl, Kassettengröße,
            Geräteart (fest/USB), Generation, crc32c
 Fachtabelle  2 × (A/B, Generation + crc32c): Fach → Barcode, Zustand
            (leer/geladen/geschützt), Laufwerk
@@ -179,6 +181,9 @@ Kassette k fester Bereich, 64-KiB-ausgerichtet:
 - **Bareos-Frontend:** eine Kassette mit einer Partition; Satz = Bareos-Block, Dateimarken wie bareos-sd auf Band; JobMedia mit Datei/Block. Export einer Kassette als Bandabbild bzw. Satzstrom, 1:1 auf LTO kopierbar.
 - **LTFS-Frontend:** `libtape-osd.so` implementiert `tape_ops` in Rust mit C-ABI (`#[no_mangle] extern "C"`) und spricht den Bandkern direkt (Platte im selben Prozess, `O_EXCL`) oder über osd (gRPC/Unix-Socket). Zwei Partitionen (Index, Daten), MAM für Barcode und Volume-Kohärenz.
 - **SCSI-Frontend (optional):** LIO/TCMU oder mhVTL; ob TCMU Geräte vom Typ „sequential access“ trägt, ist **[unbelegt]**.
+- **Labels (D-16):** Kassetten-Barcode `<Präfix><Nr>D1` (Präfix frei wählbar) in Fachtabelle und MAM; der Wechsler meldet ihn an Bareos (`update slots`/`label barcodes`) und an LTFS (`format` mit `barcode_name`, MAM). Etikett als PDF beim `osd disk init`.
+- **Schadstellen (D-17):** bei einem Lesefehler ab der nächsten Sektorgrenze nach einem gültigen Satzkopf suchen (Magic, Satznummer > letzte, crc32c) und dort fortsetzen; das Satzverzeichnis begrenzt die Suche.
+- **SAN/iSCSI (D-20):** Persistent Reservations über SG_IO (`PERSISTENT RESERVE OUT`, Typ „Write Exclusive – Registrants Only“, Schlüssel je osd-Instanz); Lease im Magazin-Label als zweite Sicherung für Speichersysteme ohne PR-Unterstützung. Zu prüfen: PR über dm-multipath (`reservation_key` in multipath.conf) **[unbelegt]**.
 - **Absturz:** je Partition ab dem bestätigten EOD vorwärts lesen, solange Satzkopf, Folge und crc32c stimmen; dann EOD neu setzen. Bestätigen: Sätze fsync, dann EOD-Kopie A/B schreiben, fsync.
 - **Recyceln:** `rewind` + Überschreiben ab Satz 0 (bzw. `format`); bei ZNS/SMR später Zonen-Reset.
 

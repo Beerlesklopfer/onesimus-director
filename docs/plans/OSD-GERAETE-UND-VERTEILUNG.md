@@ -82,6 +82,7 @@ Im Director bleibt der Storage, wie er ist: `Storage PDC-sd`, `Device = Verteile
 - **D-4 (Abweichung):** bareos-sd würde die Volumes nacheinander lesen und Unsinn liefern. Stripe-Volumes bekommen deshalb einen eigenen MediaType (z. B. `LTO-Stripe`), den nur osd bedient. Ein Restore solcher Jobs geht nur mit osd.
 - **D-5:** Stripe nur innerhalb gleicher Gerätearten (z. B. 2× Band, 2× Datei auf verschiedenen Platten) oder auch gemischt? Empfehlung: nur gleiche Art. Das langsamste Device bestimmt den Takt.
 - **Fehler:** Fällt ein Device im Stripe-Satz aus, scheitert der Job. Teil-Sätze sind wertlos.
+- **D-18 (Bedingung):** Striping vervielfacht das Ausfallrisiko: reißt ein Band oder fällt eine Platte eines Stripe-Satzes aus, fehlt jeder N-te Block und der ganze Job ist verloren. Ein Verteiler mit Striping ist deshalb nur gültig, wenn der Job einen Zweig (Branch, D-9) auf ein anderes Medium hat oder (später) Parität; `osd -t` und odir `-t` lehnen Striping ohne eins von beiden ab.
 
 ## Zweige (Branch): 3-2-1 im laufenden Betrieb
 
@@ -161,7 +162,43 @@ FD ─ Netz ─► Empfänger (schreibt) ─► /dev/shm/osd-<JobId>.ring ─┬
 - **Schutz fremder Platten** (IBM-Warnung, Recherche): Magic-Label mit Kopien verlangen, Platten mit Partitionstabelle oder Dateisystem-Signatur ohne `--force` ablehnen, `O_EXCL`.
 - **Striping (D-4/D-5) und Zweige:** über N emulierte Laufwerke wie bei echten Bändern; I- und AI-Zweig schreiben auf verschiedene Kassetten oder Platten.
 - **Wechselplatten (D-6):** eine eingesteckte Platte ist ein eingelegtes Magazin; osd erkennt sie am Platten-Label (UUID), nicht am Gerätepfad.
+- **Platten im SAN über iSCSI (D-20, Richtung Maintainer 21.11.2026):** „Gerade bei Platten ist es sinnvoll, SCSI über IP zu nehmen und diese in einem SAN zu betreiben.“
+  - **osd als iSCSI-Initiator:** die Plattenbänder liegen auf LUNs eines SAN; osd sieht sie als Blockgeräte (Linux: open-iscsi, ggf. dm-multipath) und schreibt den Bandkern darauf wie auf eine lokale Platte. Ein LUN ist ein Magazin.
+  - **Kennung:** statt `ID_SERIAL` die LUN-Kennung aus SCSI-VPD-Seite 0x83 (WWN/NAA) im Magazin-Label; osd erkennt einen LUN daran, auch über mehrere Pfade.
+  - **Alleiniger Zugriff über das Netz:** `O_EXCL` wirkt nur auf dem eigenen Host. Mehrere Hosts sehen denselben LUN, deshalb **SCSI Persistent Reservations** (SPC-3, „Write Exclusive – Registrants Only“) beim Laden des Magazins, dazu Eigentümer (osd-Instanz) und Lease-Zeit im Magazin-Label. Ein zweiter osd übernimmt nur nach Ablauf der Lease bzw. mit `--force` (Übernahme bei Ausfall, wie bei einer geteilten Bandbibliothek).
+  - **Pfadausfall:** iSCSI-Zeitlimits (`replacement_timeout`) und multipath `no_path_retry` begrenzen; ein Schreibfehler nach Pfadverlust ist ein Gerätefehler des Laufwerks, kein Datenfehler. Bestätigt ist nur, was nach fsync im EOD-Zeiger steht; Wiederherstellung wie nach einem Absturz.
+  - **Auslagern ohne Abziehen:** iSCSI-Logout bzw. Wegnehmen des LUN-Mappings im SAN = Magazin aus der Bibliothek genommen (Air-Gap gegen Ransomware, ohne Platten zu tragen); osd meldet es wie das Abziehen einer Wechselplatte (D-6/D-7).
+  - **osd als iSCSI-Target (später, optional):** das emulierte Band und den Wechsler selbst als SCSI-Geräte (SSC/SMC) über iSCSI anbieten, damit andere Hosts (bareos-sd, LTFS mit dem `sg`-Treiber, fremde Backup-Software) sie als Bandbibliothek sehen. Ersetzt bzw. ergänzt das lokale SCSI-Frontend (Punkt 3 oben). Wege: LIO mit TCMU oder `tgt`, das Band- und Wechsler-Emulation mitbringen soll **[unbelegt]**.
+  - **Rechte und Plattformen:** Initiator unter Linux mit open-iscsi; Windows und macOS haben eigene Initiatoren (macOS nur über Drittanbieter **[unbelegt]**). Persistent Reservations brauchen root bzw. `CAP_SYS_RAWIO` (SG_IO).
+- **Labels (D-16)** auf drei Ebenen, wie Barcode-Aufkleber und Cartridge Memory bei LTO:
+  1. **Magazin-Label, elektronisch** (Wechsler-Label an LBA 0, mit Kopien): Magazin-Barcode der Platte, Platten-UUID, **Seriennummer des Laufwerks** (lokal: udev `ID_SERIAL`, sonst ioctl; im SAN: LUN-Kennung aus VPD 0x83), Kassettenzahl und -größe, Generation. osd erkennt eine Platte an UUID und Barcode; eine unbekannte Platte oder eine abweichende Seriennummer (geklont, getauscht) wird gemeldet und nicht eingehängt.
+  2. **Kassetten-Barcode** je Fach, in der Fachtabelle und im MAM der Kassette. Aufbau `<Präfix><laufende Nummer><Medienkennung>`, Medienkennung `D1` (Plattenband, Format 1; analog `L8` bei LTO-8). **Das Präfix ist frei wählbar** (je Magazin beim Einrichten); Vorgabe `OSM` für Magazine und `OS` für Kassetten, also z. B. `OSM001` und `OS0001D1`. Empfohlen sind 6 + 2 Zeichen wie bei LTO, damit eine Kassette mit gleichem Namen auf ein echtes LTO kopiert werden kann; längere Namen sind erlaubt. osd lehnt einen Barcode ab, den ein bekanntes Magazin schon trägt. Der emulierte Wechsler meldet die Barcodes an Bareos, `update slots`, `label barcodes` und `status slots` funktionieren unverändert, und **der Bareos-Volume-Name ist der Kassetten-Barcode**. Im Katalog verweist `Media.Location` auf den Magazin-Barcode: Volume → Fach → Platte → Seriennummer.
+  3. **Physischer Aufkleber:** beim Einrichten erzeugt osd ein Etikett als PDF: Magazin-Barcode als Code 39 (wie LTO), QR-Code mit der UUID, Seriennummer, Kassetten-Barcodes mit Fach. Direktes Drucken auf einem Etikettendrucker ist offen; das PDF reicht für den Anfang. Für LUNs im SAN entfällt der Aufkleber; dort steht der Magazin-Barcode zusätzlich im LUN-Namen bzw. Alias des SAN.
+- **Einrichten:**
+  ```
+  osd disk init device=/dev/sdX barcode=<Magazin-Barcode> prefix=<Kassetten-Präfix> cassettes=<N> [size=…] [--force]
+     → lehnt Platten mit Partitionstabelle oder Dateisystem-Signatur ohne --force ab,
+       schreibt das Magazin-Label, legt die Fächer an, erzeugt das Etikett (PDF)
+  update slots storage=… ; label barcodes storage=… pool=…
+  ```
+- **Weiterlesen hinter Schadstellen (D-17):** Jeder Satz trägt Kopf, Satznummer und crc32c. Bei einem Lesefehler (Sektorfehler) springt der Bandkern zum nächsten gültigen Satz und liest dahinter weiter; verloren sind nur die betroffenen Sätze, nicht der Rest der Kassette. Die Lücke wird als Fehler mit Satzbereich gemeldet (Job-Log, Medien-Ereignis D-7). Das kann ein echtes LTO nach einem Bandriss nicht.
+- **Ausfall einer ganzen Platte bzw. eines LUN** entspricht einem Bandriss: nur ein zweiter Zweig oder eine Kopie rettet (siehe [Beschädigte Volumes](#beschädigte-volumes-bandriss-plattenschaden)). Im SAN gehört der zweite Zweig auf ein anderes Speichersystem bzw. einen anderen Standort.
 - **Status:** beschlossen, **eigene Phase nach P1** (PT, siehe [Phasen](#phasen)). Entwurf und Belege: [OSD-RECHERCHE-SPEICHER-UND-RING.md](OSD-RECHERCHE-SPEICHER-UND-RING.md), Nachtrag B. Die frühere osdfs-Skizze (Nachtrag A) ist damit ersetzt; Label mit Kopien, crc32c und das Vorwärtslesen nach Absturz bleiben übernommen.
+
+## Beschädigte Volumes (Bandriss, Plattenschaden)
+
+Gilt für echte Bänder, Plattenbänder und Datei-Volumes.
+
+- **Bareos heute:** Ein Volume mit Lesefehler wird `VolStatus = Error`. Verloren sind alle Jobs mit JobMedia auf diesem Volume, bei Jobs über mehrere Volumes der ganze Job. Ein Copy-Job wird zum Backup hochgestuft, wenn der Original-Job gelöscht oder purged wird **[unbelegt, aus der Bareos-Doku aus dem Gedächtnis; vor der Umsetzung prüfen]**. Ohne Kopie bleiben `bls`/`bextract` bis zur Schadstelle und bei LTO eine Labor-Spleißung. Nach einem Bandriss das Laufwerk reinigen und prüfen.
+- **Vorsorge:** 3-2-1 über Zweige (I und AI parallel auf verschiedene Kassetten bzw. Platten oder SAN-Systeme); kleinere Volumes (`Maximum Volume Jobs`/`Maximum Volume Bytes`) begrenzen den Schaden, als Empfehlung in die Doku; Striping nur mit Zweig oder Parität (D-18).
+- **Ablauf „Volume beschädigt“ in odir (D-19)**, als Befehl (Name offen, z. B. `volume damaged volume=<v> [dryrun|yes]`), typisiert über gRPC und als GUI-Dialog:
+  1. Volume auf `Error` setzen;
+  2. betroffene Jobs aus JobMedia auflisten (bei Jobs über mehrere Volumes alle);
+  3. je Job zeigen, ob es eine Kopie oder einen Zweig gibt;
+  4. Kopien hochstufen (Original-Job purgen, damit die Kopie zum Backup wird);
+  5. für Clients ohne Kopie einen neuen Full vorschlagen bzw. mit `yes` starten;
+  6. bei Plattenbändern Magazin-Barcode und Seriennummer bzw. LUN nennen (welche Platte zu ziehen ist).
+  Mit `dryrun` nur die Übersicht. Unabhängig von osd umsetzbar; Backlog-Punkt V-1.
 
 ## Gerätearten
 
@@ -193,7 +230,7 @@ FD ─ Netz ─► Empfänger (schreibt) ─► /dev/shm/osd-<JobId>.ring ─┬
 | --- | --- | --- |
 | P0 ✅ (20.11.2026) | `bareos-format` und `onesimus-daemon` als gemeinsame Crates (ofd-Gutachten §5), osd-Schnittstelle (`crates/osd`) und Daemon (`crates/osd/daemon`) trennen | ofd und odir bauen unverändert. Erledigt, siehe [P0 umgesetzt](#p0-umgesetzt-20112026) |
 | P1 ✅ (20.11.2026; Stufen 1, 2, 3) | osd als Ersatz für bareos-sd mit **einem File-Device**: Label, Mount, Append, Read, Status, CatReq, Bareos-Volume-Format. Steuer- und Datenweg über **gRPC** (odir, ofd) und BNET (bareos-dir, bareos-fd). Stufe 1: Backup über BNET, aktiver und passiver Client, Datenweg über den Ring; Stufe 2: Lesen/Restore; Stufe 3: gRPC | Testgerüst Director+FD+SD (`onesimus-rig`): Backup und Restore mit odir+ofd über gRPC und mit bareos-fd über BNET. `bls` liest das Volume. Erledigt, siehe [Stufe 1](#p1-stufe-1-umgesetzt-20112026), [Stufe 2](#p1-stufe-2-umgesetzt-20112026), [Stufe 3](#p1-stufe-3-umgesetzt-20112026); was bleibt: [Nach P1](#nach-p1-offen) |
-| PT | Plattenband v1 (D-14): Bandkern auf einer vorbelegten Datei bzw. einem Loop-Device, dann `/dev/sdX` mit `O_DIRECT\|O_EXCL` (zunächst Linux); eine Platte, kein Striping; Kassetten mit zwei Partitionen, MAM, Wechsler; Bareos-Frontend und LTFS-Plugin `libtape-osd.so` | ohne root testbar; Export einer Kassette in eine Bandabbild- bzw. Volume-Datei besteht `bls`; `mkltfs` + `ltfs` + Dateien schreiben/lesen auf einer emulierten Kassette; kill -9 während des Schreibens verliert keinen bestätigten Satz. Teilt das Bareos-Bandformat mit P6 |
+| PT | Plattenband v1 (D-14): Bandkern auf einer vorbelegten Datei bzw. einem Loop-Device, dann `/dev/sdX` mit `O_DIRECT\|O_EXCL` (zunächst Linux); eine Platte, kein Striping; Kassetten mit zwei Partitionen, MAM, Wechsler; Labels (D-16) mit `osd disk init` und Etikett-PDF; Weiterlesen hinter Schadstellen (D-17); Bareos-Frontend und LTFS-Plugin `libtape-osd.so`. Danach PT2: LUNs im SAN über iSCSI mit Persistent Reservations (D-20) | ohne root testbar; Export einer Kassette in eine Bandabbild- bzw. Volume-Datei besteht `bls`; `mkltfs` + `ltfs` + Dateien schreiben/lesen auf einer emulierten Kassette; kill -9 während des Schreibens verliert keinen bestätigten Satz; `update slots`/`label barcodes` liefern die Kassetten-Barcodes; fremde Platte ohne `--force` abgelehnt; eingeschleuste Schadstelle: Lesen setzt dahinter fort und meldet den Satzbereich. PT2: iSCSI-Target im Rig (LIO mit `fileio`-Backstore, eigener Netz-Namespace), zwei osd-Instanzen auf demselben LUN, die zweite wird per Reservation abgewiesen; Pfadabbruch während des Schreibens. Teilt das Bareos-Bandformat mit P6 |
 | P2 | Verteiler mit Routen über File-Devices | Routing-Fälle im Rig, Restore über den MediaType |
 | P2b | Zweige (Branch): odir startet Haupt- und Zweig-Jobs, osd verteilt an beide, Katalogsätze je Zweig | Inc auf File, AI auf zweites File-Device; Restore aus jedem Zweig einzeln; ein gescheiterter Zweig bricht den anderen nicht ab; Konsolidierung des AI-Zweigs |
 | P3 | Wechselplatten und Device-Watcher | Rig mit Loop-Device, Ein- und Abziehen simuliert |
@@ -394,6 +431,8 @@ Aus den Stufen 1–3 zusammengeführt, mit Grund:
 - **Hintergrundbetrieb, PID-Datei**, `-u`/`-g` für osd.
 - **Übrige bareos-sd-Befehle:** `autochanger`, `readlabel`, `resolve`,
   `listen`, `nextrun`, `finish`, `setdevice`, `stats`.
+- **Ablauf „Volume beschädigt“** (D-19, odir, Backlog V-1), siehe
+  [Beschädigte Volumes](#beschädigte-volumes-bandriss-plattenschaden).
 - **Ring:** macOS- und Windows-Teile; Striping im Ring (Verbraucher k liest
   Fach ≡ k mod N, beim Lesen setzt die Netzsitzung nach Folgenummer
   zusammen).
@@ -422,4 +461,9 @@ Alle wie empfohlen, D-8 präzisiert: „additiv, rückwärtskompatibel“.
 | D-12 | Ring: ein Fach = ein Bareos-Block; Fachgröße = Blockgröße des Devices, Fachzahl einstellbar (Vorgabe z. B. 64 Fächer je Job) | ja |
 | D-13 | Geräte-Schreiber als eigene Prozesse (wie die Job-Worker von odir) statt Threads | ja (Ausfall eines Geräts reißt den Job nicht mit) |
 | D-14 | Platte als **emuliertes Band** (Wechsler mit Kassetten, Bandkern in osd, ohne Kernelmodul); Frontends Bareos-Bandformat und LTFS (`tape_ops`-Plugin), SCSI (TCMU/mhVTL) optional später; eigene Phase PT nach P1. Ersetzt die osdfs-Skizze | **ja** (21.11.2026) |
+| D-16 | Labels für Plattenbänder: Magazin-Label elektronisch (Barcode, UUID, Seriennummer bzw. LUN-Kennung), Kassetten-Barcodes `<Präfix><Nr><D1>` mit **frei wählbarem Präfix**, physisches Etikett als PDF | **ja** (21.11.2026) |
+| D-17 | Plattenband liest hinter Schadstellen weiter (Satzkopf + crc32c) und meldet die Lücke | **ja** (21.11.2026) |
+| D-18 | Striping nur mit Zweig auf anderes Medium oder Parität; `-t` lehnt sonst ab | **ja** (21.11.2026) |
+| D-19 | Ablauf „Volume beschädigt“ in odir (Übersicht, Kopien hochstufen, neuen Full anstoßen), unabhängig von osd | **ja** (21.11.2026) |
+| D-20 | Plattenbänder auf SAN-LUNs über iSCSI: osd als Initiator, LUN = Magazin, Kennung aus VPD 0x83, Persistent Reservations + Lease für den alleinigen Zugriff, Logout als Auslagern; osd als iSCSI-Target für fremde Hosts später optional | **Richtung ja** (21.11.2026); Einzelheiten wie vorgeschlagen, offen zur Bestätigung |
 | D-15 | Ring: `memmap2` + eigene Plattformschicht, Logik nach Disruptor/Aeron, Warten immer mit Zeitlimit (Recherche B) | **offen** (Empfehlung: ja) |

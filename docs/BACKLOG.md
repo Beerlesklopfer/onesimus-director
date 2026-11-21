@@ -30,6 +30,12 @@ Gemeldet beim Bau der Live-Job-Ansicht und der Schedule-Ansicht (proto `72abd06`
 | G-4 | ~~`GetDirectorStatus.running` hat weder Start- noch geplante Zeit; laufende Jobs lassen sich daraus allein nicht auf eine Zeitachse legen~~ **erledigt 20.11.2026:** `RunningJobInfo.start_time`/`sched_time` (Felder 8, 9). | Proto-Felder + odir | `GetDirectorStatus` |
 | G-5 | Die GUI verwirft `JobStatusEvent.timestamp` | GUI-Seite, kein odir-Punkt | – |
 
+### Beschädigte Volumes (21.11.2026, D-19)
+
+| ID | Punkt | Art | Ort |
+| --- | --- | --- | --- |
+| V-1 | Ablauf „Volume beschädigt“ (Bandriss, Plattenschaden, defektes Datei-Volume): Volume auf Error, betroffene Jobs aus JobMedia, je Job Kopie/Zweig anzeigen, Kopien hochstufen, für Clients ohne Kopie neuen Full vorschlagen oder starten, bei Plattenbändern Magazin-Barcode und Seriennummer bzw. LUN nennen; `dryrun`/`yes`; typisiert über gRPC (Proto-Feld mit der GUI-Sitzung abstimmen) und MCP. Vorher prüfen, wie Bareos Copy-Jobs hochstuft | Onesimus-Erweiterung, unabhängig von osd | neuer Befehl, Name offen; Plan [osd § Beschädigte Volumes](plans/OSD-GERAETE-UND-VERTEILUNG.md#beschädigte-volumes-bandriss-plattenschaden) |
+
 ### Offene Reste an Befehlen
 
 | Befehl | Offen | Bezug |
