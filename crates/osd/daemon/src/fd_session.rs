@@ -289,6 +289,7 @@ impl Producer {
             job_type: job.cmd.job_type as u32,
             job_level: job.cmd.level as u32,
             bootstrap: String::new(),
+            vol_poll_interval: d.config.find_device(&dev.device.name).map(vol_poll_interval).unwrap_or(300),
         };
         let result = Self::start(d, job, dir, &info, &dev.device, dev.slots);
         if result.is_err() {
@@ -308,6 +309,7 @@ impl Producer {
         let stop = Arc::new(AtomicBool::new(false));
         let mail = {
             let (ring, ready, stop, dir, job) = (ring.clone(), ready.clone(), stop.clone(), dir.clone(), job.clone());
+            let device = dev.name.clone();
             let daemon = d.clone();
             std::thread::Builder::new()
                 .name(format!("mail:{}", job.cmd.job_id))
@@ -321,6 +323,11 @@ impl Producer {
                             }
                             Some(Request::Ready) => {
                                 ready.store(true, Ordering::Release);
+                                b"ok".to_vec()
+                            }
+                            Some(Request::WaitMedia(secs)) => daemon.wait_for_sysop(&dir, &job, &device, secs),
+                            Some(Request::JobStatus(c)) => {
+                                daemon.send_status(&dir, &job, c);
                                 b"ok".to_vec()
                             }
                             None => b"Ebad request".to_vec(),
@@ -613,4 +620,13 @@ mod tests {
         assert!(!is_attribute(stream::STREAM_FILE_DATA));
         assert!(!is_attribute(stream::STREAM_GZIP_DATA));
     }
+}
+
+/// `Volume Poll Interval` of a device (seconds; Bareos default 300).
+fn vol_poll_interval(dev: &bareos_config::sd::SdDevice) -> u64 {
+    dev.other.iter().find(|d| d.norm_key() == "volumepollinterval")
+        .and_then(|d| d.first())
+        .and_then(|v| bareos_config::values::parse_time(v).ok())
+        .map(|(_, t)| t.as_secs())
+        .unwrap_or(300)
 }

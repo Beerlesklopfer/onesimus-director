@@ -33,7 +33,7 @@ use std::io::Write;
 use std::time::{Duration, Instant};
 
 use bareos_format::label::{SessionLabel, BAREOS_ID, BAREOS_TAPE_VERSION, EOS_LABEL};
-use bareos_format::msg::{M_ERROR, M_FATAL, M_INFO, M_WARNING};
+use bareos_format::msg::{M_ERROR, M_FATAL, M_INFO, M_MOUNT, M_WARNING};
 use bareos_format::volume::{BlockBuilder, RecordProgress, RecordRef, BLKHDR2_LENGTH};
 use osd::askdir::{CreateJobMedia, UpdateMedia, VolumeInfo};
 use osd_ring::{Ring, State};
@@ -160,7 +160,10 @@ impl<'a> Writer<'a> {
     /// False when the job failed (the reason went out as a job message).
     pub fn work(&mut self) -> bool {
         if let Err(e) = self.acquire() {
-            self.jmsg(M_FATAL, &e);
+            // empty: the reason already went out (a cancel while waiting)
+            if !e.is_empty() {
+                self.jmsg(M_FATAL, &e);
+            }
             return false;
         }
         loop {
@@ -247,22 +250,75 @@ impl<'a> Writer<'a> {
         Ok(())
     }
 
+    /// `DirFindNextAppendableVolume`, and without a volume
+    /// `DirAskSysopToCreateAppendableVolume` (askdir.cc:494, C-089): tell the
+    /// operator (M_MOUNT), report JS_WaitMedia and wait like bareos-sd —
+    /// woken by `label`/`mount` on the device, asking the Director again
+    /// every Volume Poll Interval, the wait time starting at one hour and
+    /// doubling up to one day (dev.cc InitDevWaitTimers/DoubleDevWaitTime),
+    /// giving up after nine waits. Err("") after a cancel (message sent).
+    fn find_appendable(&mut self, previous: &str) -> Result<VolumeInfo, String> {
+        const MIN_WAIT: u64 = 60 * 60;
+        const MAX_WAIT: u64 = 24 * 60 * 60;
+        const MAX_NUM_WAIT: u32 = 9;
+        let job = self.info.job.clone();
+        let find = osd::askdir::find_media(&job, 1, &self.info.pool_name, &self.info.media_type, previous);
+        let (mut wait_sec, mut rem_wait, mut num_wait) = (MIN_WAIT, MIN_WAIT, 0u32);
+        // the message goes out first and after a timeout, not after a poll
+        let mut announce = true;
+        let mut waited = false;
+        loop {
+            if let Ok(found) = self.vol_req(&find) {
+                if waited {
+                    let _ = self.ring.call(CONSUMER, &Request::JobStatus('R').encode(), CATREQ_TIMEOUT);
+                }
+                return Ok(found);
+            }
+            if announce {
+                self.jmsg(M_MOUNT, &format!(
+                    "Job {job} is waiting. Cannot find any appendable volumes.\nPlease use the \"label\" command to create a new \
+                     Volume for:\n    Storage:      {}\n    Pool:         {}\n    Media type:   {}\n",
+                    self.dev.print_name(), self.info.pool_name, self.info.media_type
+                ));
+            }
+            let poll = self.info.vol_poll_interval;
+            let slice = if poll > 0 { rem_wait.min(poll) } else { rem_wait };
+            let answer = self.ring
+                .call(CONSUMER, &Request::WaitMedia(slice as u32).encode(), Duration::from_secs(slice + 60))
+                .map_err(|e| e.to_string())?;
+            waited = true;
+            match answer.as_slice() {
+                b"c" => {
+                    self.jmsg(M_INFO, &format!(
+                        "Job {job} canceled while waiting for mount on Storage Device {}.\n", self.dev.print_name()));
+                    return Err(String::new());
+                }
+                b"w" => announce = false, // label/mount: ask again
+                _ if slice < rem_wait => {
+                    rem_wait -= slice; // poll: ask again, no new message
+                    announce = false;
+                }
+                _ => {
+                    // DoubleDevWaitTime
+                    wait_sec = (wait_sec * 2).min(MAX_WAIT);
+                    num_wait += 1;
+                    rem_wait = wait_sec;
+                    if num_wait >= MAX_NUM_WAIT {
+                        return Err(format!(
+                            "Max time exceeded waiting to mount Storage Device {} for Job {job}", self.dev.print_name()));
+                    }
+                    announce = true;
+                }
+            }
+        }
+    }
+
     /// `MountNextWriteVolume` for a File device: find a volume, label it if
     /// new, check the label, go to its end (`is_eod_valid`), VolMounts+1,
     /// VolJobs+1. `previous`: the full volume being replaced.
     fn mount(&mut self, previous: Option<&str>) -> Result<(), String> {
         let job = self.info.job.clone();
-        let find = osd::askdir::find_media(&job, 1, &self.info.pool_name, &self.info.media_type, previous.unwrap_or(""));
-        let found = self.vol_req(&find).map_err(|_| {
-            format!(
-                "Job {job} is waiting. Cannot find any appendable volumes.\nPlease use the \"label\" command to create a new \
-                 Volume for:\n    Storage:      {}\n    Pool:         {}\n    Media type:   {}\n(osd stage 1 does not wait for an \
-                 operator; the job ends.)",
-                self.dev.print_name(),
-                self.info.pool_name,
-                self.info.media_type
-            )
-        })?;
+        let found = self.find_appendable(previous.unwrap_or(""))?;
         let mut info = self.vol_req(&osd::askdir::get_vol_info(&job, &found.volume, true))?;
         let name = info.volume.clone();
         match self.dev.read_label(&name) {
@@ -581,6 +637,13 @@ pub(crate) mod tests {
         pub(crate) messages: Vec<String>,
         /// MaxVolBytes of new volumes.
         max_bytes: u64,
+        /// No volume until the writer waits for media (C-089): FindMedia
+        /// answers "1901 No Media." until a WaitMedia, which "labels" one.
+        pub(crate) no_volume: bool,
+        /// The seconds of every WaitMedia, in order.
+        pub(crate) waits: Vec<u32>,
+        /// Job status reports (JobStatus requests).
+        pub(crate) statuses: Vec<char>,
     }
 
     impl FakeDirector {
@@ -594,6 +657,23 @@ pub(crate) mod tests {
                 Request::Jmsg(_, text) => {
                     self.messages.push(text);
                     b"ok".to_vec()
+                }
+                Request::WaitMedia(secs) => {
+                    self.waits.push(secs);
+                    // the operator labels a volume after the second wait
+                    if self.waits.len() >= 2 {
+                        self.no_volume = false;
+                        return b"w".to_vec();
+                    }
+                    b"t".to_vec()
+                }
+                Request::JobStatus(c) => {
+                    self.statuses.push(c);
+                    b"ok".to_vec()
+                }
+                Request::CatReq(line) if line.contains(" FindMedia=") && self.no_volume => {
+                    self.requests.push(line.trim_end().to_string());
+                    b"1901 No Media.\n".to_vec()
                 }
                 Request::CatReq(line) => {
                     self.requests.push(line.trim_end().to_string());
@@ -634,6 +714,13 @@ pub(crate) mod tests {
     /// Runs one job through the ring with a writer thread: SOS, `records`
     /// data records of `size` bytes, End slot. Returns the fake Director.
     pub(crate) fn job(dir: &std::path::Path, ring_name: &str, records: usize, size: usize, max_bytes: u64) -> FakeDirector {
+        job_with(dir, ring_name, records, size, max_bytes, false)
+    }
+
+    /// [`job`], with `no_volume`: the Director has no volume until the
+    /// writer waits for media (C-089).
+    pub(crate) fn job_with(dir: &std::path::Path, ring_name: &str, records: usize, size: usize, max_bytes: u64,
+                           no_volume: bool) -> FakeDirector {
         let info = JobInfo {
             job: "J.2026-11-20_01.00.00_01".into(),
             job_id: 9,
@@ -656,13 +743,14 @@ pub(crate) mod tests {
             job_type: 'B' as u32,
             job_level: 'F' as u32,
             bootstrap: String::new(),
+            vol_poll_interval: 300,
         };
         let _ = Ring::remove(ring_name);
         let ring = Ring::create(ring_name, RingConfig { slots: 3, slot_size: 4096, consumers: 1 }).unwrap();
         ring.set_info(info.encode().as_bytes()).unwrap();
         let name = ring_name.to_string();
         let writer = std::thread::spawn(move || run(&name));
-        let mut fake = FakeDirector { max_bytes, ..Default::default() };
+        let mut fake = FakeDirector { max_bytes, no_volume, ..Default::default() };
         let mut ready = false;
         let serve = |fake: &mut FakeDirector, ready: &mut bool| {
             ring.serve_mail(Duration::from_millis(20), |_, req| fake.answer(req, ready));
@@ -719,6 +807,28 @@ pub(crate) mod tests {
         assert_eq!(ring.consumer_state(CONSUMER), State::Done);
         Ring::remove(ring_name).unwrap();
         fake
+    }
+
+    #[test]
+    fn waits_for_the_operator_like_bareos_sd() {
+        // C-089: no appendable volume → M_MOUNT message once, JS_WaitMedia
+        // waits (Volume Poll Interval 300 s), a poll asks again without a new
+        // message, the label wakes the writer, the job runs to its end.
+        let dir = std::env::temp_dir().join(format!("osd-writer-wait-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let ring = format!("osd-test-wait-{}", std::process::id());
+        let fake = job_with(&dir, &ring, 4, 100, 0, true);
+        let waiting: Vec<_> = fake.messages.iter().filter(|m| m.contains("Cannot find any appendable volumes")).collect();
+        assert_eq!(waiting.len(), 1, "{:?}", fake.messages);
+        assert!(waiting[0].starts_with("Job J.2026-11-20_01.00.00_01 is waiting. Cannot find any appendable volumes.\n\
+            Please use the \"label\" command to create a new Volume for:\n"), "{}", waiting[0]);
+        assert!(!waiting[0].contains("osd stage 1"));
+        assert_eq!(fake.waits, vec![300, 300]);
+        assert_eq!(fake.statuses, vec!['R']);
+        assert_eq!(fake.requests.iter().filter(|r| r.contains(" FindMedia=")).count(), 3, "first, after the poll, after the label");
+        assert!(fake.messages.iter().any(|m| m.starts_with("Labeled new Volume \"Vol1\"")), "{:?}", fake.messages);
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

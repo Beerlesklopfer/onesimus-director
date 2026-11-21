@@ -96,7 +96,8 @@ impl ReadPipe {
                                 ready.store(true, Ordering::Release);
                                 b"ok".to_vec()
                             }
-                            None => b"Ebad request".to_vec(),
+                            // the reader does not wait for media yet
+                            Some(Request::WaitMedia(_) | Request::JobStatus(_)) | None => b"Ebad request".to_vec(),
                         });
                     }
                 })
@@ -216,6 +217,7 @@ fn read_info(d: &Daemon, job: &Job, dev: &FileDevice, bootstrap: &Bootstrap) -> 
         job_type: job.cmd.job_type as u32,
         job_level: job.cmd.level as u32,
         bootstrap: bootstrap.path.display().to_string(),
+        vol_poll_interval: 300,
     }
 }
 

@@ -56,6 +56,40 @@ pub struct Daemon {
     busy: Arc<Mutex<HashMap<String, String>>>,
     /// Jobs run since start.
     pub jobs_run: Arc<std::sync::atomic::AtomicUsize>,
+    /// Media events (`label`, `mount`) counted per device; a job waiting for
+    /// media (`WaitForSysop`) wakes on a change of its device's count.
+    media: Arc<MediaEvents>,
+    /// Devices whose job waits for the operator (BST_WAITING_FOR_SYSOP):
+    /// `label` is allowed on them although a job holds them.
+    waiting: Arc<Mutex<std::collections::HashSet<String>>>,
+}
+
+/// Media event counters per device and the condition they signal.
+type MediaEvents = (Mutex<HashMap<String, u64>>, std::sync::Condvar);
+
+/// `WaitForSysop`'s wait: until the event count of `device` changes (`w`),
+/// `canceled` is set (`c`) or `timeout` passed (`t`); wakes at least every
+/// second to see a cancel.
+fn wait_media_event(media: &MediaEvents, device: &str, canceled: &std::sync::atomic::AtomicBool,
+                    timeout: std::time::Duration) -> &'static [u8] {
+    let (count, cond) = media;
+    let end = std::time::Instant::now() + timeout;
+    let mut events = count.lock().unwrap_or_else(|e| e.into_inner());
+    let seen = events.get(device).copied().unwrap_or(0);
+    loop {
+        if canceled.load(std::sync::atomic::Ordering::Acquire) {
+            return b"c";
+        }
+        if events.get(device).copied().unwrap_or(0) != seen {
+            return b"w";
+        }
+        let now = std::time::Instant::now();
+        if now >= end {
+            return b"t";
+        }
+        let step = (end - now).min(std::time::Duration::from_secs(1));
+        events = cond.wait_timeout(events, step).unwrap_or_else(|e| e.into_inner()).0;
+    }
 }
 
 impl Daemon {
@@ -69,6 +103,8 @@ impl Daemon {
             launcher,
             busy: Arc::new(Mutex::new(HashMap::new())),
             jobs_run: Arc::new(std::sync::atomic::AtomicUsize::new(0)),
+            media: Arc::default(),
+            waiting: Arc::default(),
         }
     }
 
@@ -138,6 +174,33 @@ impl Daemon {
         self.busy.lock().unwrap_or_else(|e| e.into_inner()).iter().find(|(_, j)| j.as_str() == job).map(|(d, _)| d.clone())
     }
 
+    /// A `label` or `mount` on device `name`: wakes a job waiting for media.
+    pub fn media_event(&self, name: &str) {
+        let (count, cond) = &*self.media;
+        *count.lock().unwrap_or_else(|e| e.into_inner()).entry(name.to_string()).or_default() += 1;
+        cond.notify_all();
+    }
+
+    /// Whether the job on device `name` waits for the operator.
+    pub fn waiting_for_sysop(&self, name: &str) -> bool {
+        self.waiting.lock().unwrap_or_else(|e| e.into_inner()).contains(name)
+    }
+
+    /// `DirAskSysopToCreateAppendableVolume` → `WaitForSysop` for a device
+    /// writer: JS_WaitMedia, then wait up to `secs` for a media event on
+    /// `device` or a cancel. Answer `w`, `t` or `c` (ring [`Request::WaitMedia`]).
+    ///
+    /// [`Request::WaitMedia`]: crate::ringproto::Request::WaitMedia
+    pub fn wait_for_sysop(&self, dir: &SharedChannel, job: &Job, device: &str, secs: u32) -> Vec<u8> {
+        if job.status() != 'm' {
+            self.send_status(dir, job, 'm');
+        }
+        self.waiting.lock().unwrap_or_else(|e| e.into_inner()).insert(device.to_string());
+        let answer = wait_media_event(&self.media, device, &job.canceled, std::time::Duration::from_secs(secs as u64));
+        self.waiting.lock().unwrap_or_else(|e| e.into_inner()).remove(device);
+        answer.to_vec()
+    }
+
     /// The job using device `name`.
     pub fn device_user(&self, name: &str) -> Option<String> {
         self.busy.lock().unwrap_or_else(|e| e.into_inner()).get(name).cloned()
@@ -183,5 +246,34 @@ impl Daemon {
                     .map_err(|e| e.to_string())
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod media_wait_tests {
+    use super::*;
+    use std::sync::atomic::AtomicBool;
+    use std::time::Duration;
+
+    /// C-089: a label/mount on the device wakes the waiting writer, an event
+    /// on another device does not, a cancel ends the wait, else timeout.
+    #[test]
+    fn label_wakes_cancel_ends_else_timeout() {
+        let media: Arc<MediaEvents> = Arc::default();
+        let canceled = AtomicBool::new(false);
+        assert_eq!(wait_media_event(&media, "Dev", &canceled, Duration::from_millis(50)), b"t");
+        let m = media.clone();
+        let other = std::thread::spawn(move || {
+            std::thread::sleep(Duration::from_millis(50));
+            *m.0.lock().unwrap().entry("Other".into()).or_default() += 1;
+            m.1.notify_all();
+            std::thread::sleep(Duration::from_millis(50));
+            *m.0.lock().unwrap().entry("Dev".into()).or_default() += 1;
+            m.1.notify_all();
+        });
+        assert_eq!(wait_media_event(&media, "Dev", &canceled, Duration::from_secs(5)), b"w");
+        other.join().unwrap();
+        canceled.store(true, std::sync::atomic::Ordering::Release);
+        assert_eq!(wait_media_event(&media, "Dev", &canceled, Duration::from_secs(5)), b"c");
     }
 }

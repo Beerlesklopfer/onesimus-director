@@ -144,6 +144,12 @@ pub enum Request {
     Jmsg(i32, String),
     /// The device is acquired and the volume ready.
     Ready,
+    /// No appendable volume: report JS_WaitMedia and wait at most this many
+    /// seconds for a `label`/`mount` on the device or a cancel
+    /// (`WaitForSysop`). Answer `w` (woken), `t` (timeout), `c` (canceled).
+    WaitMedia(u32),
+    /// `sendJobStatus(status)` (back to `R` after waiting for media).
+    JobStatus(char),
 }
 
 impl Request {
@@ -153,6 +159,8 @@ impl Request {
             Request::CatReq(line) => format!("C{line}").into_bytes(),
             Request::Jmsg(t, text) => format!("M{t} {text}").into_bytes(),
             Request::Ready => b"R".to_vec(),
+            Request::WaitMedia(secs) => format!("W{secs}").into_bytes(),
+            Request::JobStatus(c) => format!("S{c}").into_bytes(),
         }
     }
 
@@ -167,6 +175,8 @@ impl Request {
                 Some(Request::Jmsg(t.parse().ok()?, msg.to_string()))
             }
             "R" => Some(Request::Ready),
+            "W" => Some(Request::WaitMedia(rest.parse().ok()?)),
+            "S" => Some(Request::JobStatus(rest.chars().next()?)),
             _ => None,
         }
     }
@@ -217,6 +227,9 @@ pub struct JobInfo {
     pub job_type: u32,
     /// `level=` as number (`'F'` = 70).
     pub job_level: u32,
+    /// `Volume Poll Interval` of the device in seconds (Bareos default 300;
+    /// 0 = no polling, only `label`/`mount` wake a waiting job).
+    pub vol_poll_interval: u64,
 }
 
 impl JobInfo {
@@ -226,7 +239,7 @@ impl JobInfo {
             "job={}\njob_id={}\nvol_session_id={}\nvol_session_time={}\npool_name={}\npool_type={}\nmedia_type={}\n\
              storage={}\ndevice={}\narchive_device={}\nlabel_media={}\nmax_block_size={}\nlabel_block_size={}\n\
              max_volume_size={}\njob_name={}\nclient_name={}\nfileset_name={}\nfileset_md5={}\njob_type={}\n\
-             job_level={}\nbootstrap={}\n",
+             job_level={}\nbootstrap={}\nvol_poll_interval={}\n",
             self.job,
             self.job_id,
             self.vol_session_id,
@@ -247,7 +260,8 @@ impl JobInfo {
             self.fileset_md5,
             self.job_type,
             self.job_level,
-            self.bootstrap
+            self.bootstrap,
+            self.vol_poll_interval
         )
     }
 
@@ -282,6 +296,8 @@ impl JobInfo {
             job_type: num("job_type")? as u32,
             job_level: num("job_level")? as u32,
             bootstrap: get("bootstrap")?,
+            // older rings without the line: the Bareos default
+            vol_poll_interval: num("vol_poll_interval").unwrap_or(300),
         })
     }
 

@@ -393,13 +393,19 @@ impl DirSession {
             None => format!("3903 Error scanning label command: {msg}\n"),
             Some(l) => match self.d.config.find_device(&l.device) {
                 None => format!("3999 Device \"{}\" not found or could not be opened.\n", l.device),
-                Some(_) if self.d.device_user(&l.device).is_some() => {
+                // a job holds the device: refused unless it waits for the
+                // operator (Bareos labels a BST_WAITING_FOR_SYSOP device)
+                Some(_) if self.d.device_user(&l.device).is_some() && !self.d.waiting_for_sysop(&l.device) => {
                     let dev = self.d.config.find_device(&l.device).map(FileDevice::from_config);
                     format!("3937 Device {} is busy with writers=1 reserved=0.\n", dev.map(|d| d.print_name()).unwrap_or_default())
                 }
                 Some(conf) => {
                     let dev = FileDevice::from_config(conf);
-                    label_volume(&self.d, &dev, &l.volume, &l.pool)
+                    let reply = label_volume(&self.d, &dev, &l.volume, &l.pool);
+                    if reply.starts_with("3000 ") {
+                        self.d.media_event(&dev.name);
+                    }
+                    reply
                 }
             },
         };
@@ -422,7 +428,10 @@ impl DirSession {
                 let dev = FileDevice::from_config(conf);
                 let busy = self.d.device_user(&dev.name).is_some();
                 match (what, busy) {
-                    ("mount", _) => format!("3906 File device {} is always mounted.\n", dev.print_name()),
+                    ("mount", _) => {
+                        self.d.media_event(&dev.name);
+                        format!("3906 File device {} is always mounted.\n", dev.print_name())
+                    }
                     (_, true) => format!("3937 Device {} is busy with writers=1 reserved=0.\n", dev.print_name()),
                     ("unmount", false) => format!("3901 Device \"{}\" is already unmounted.\n", dev.print_name()),
                     _ => format!("3921 Device \"{}\" already released.\n", dev.print_name()),
