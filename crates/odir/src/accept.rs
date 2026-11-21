@@ -221,6 +221,23 @@ fn console_password(shared_config: &Option<SharedConfig>, name: &str) -> Option<
     (!pw.is_empty()).then_some(pw)
 }
 
+/// True when the Console resource `name` has `Use Pam Authentication = yes`.
+fn console_uses_pam(shared_config: &Option<SharedConfig>, name: &str) -> bool {
+    let Some(cfg) = shared_config.as_ref().and_then(|c| c.read().ok()) else { return false };
+    uses_pam(&cfg.raw, name)
+}
+
+/// [`console_uses_pam`] over the raw resources.
+fn uses_pam(raw: &[bareos_config::raw::ConfResource], name: &str) -> bool {
+    raw.iter()
+        .filter(|r| r.norm_type() == "console" && r.name().is_some_and(|n| n == name))
+        .any(|r| {
+            r.directives.iter().rev().find(|d| d.norm_key() == "usepamauthentication")
+                .and_then(|d| d.first())
+                .is_some_and(|v| v.eq_ignore_ascii_case("yes") || v.eq_ignore_ascii_case("true"))
+        })
+}
+
 /// TLS-PSK key for a client identity "R_CONSOLE\x1e<name>" / "R_CLIENT\x1e<name>".
 fn psk_for_identity(shared_config: &Option<SharedConfig>, identity: &str) -> Option<Vec<u8>> {
     let (kind, name) = identity.split_once('\x1e')?;
@@ -288,6 +305,13 @@ fn handle_hello<S: std::io::Read + std::io::Write>(
             warn!("session {session_id}: unknown console '{name}' or no password configured, rejected");
             return;
         };
+        // Use Pam Authentication: the original asks for a PAM login after the
+        // password. That dialog is not served (docs/STUBS.md S-43), and a
+        // password alone must not log such a console in: refused.
+        if console_uses_pam(shared_config, &name) {
+            warn!("session {session_id}: console '{name}' requires PAM authentication, which odir does not serve yet; rejected");
+            return;
+        }
         // C++ CreateConsoleAuthenticator: the Hello version selects the
         // protocol (before/from 18.2); an unparsable version is an invalid Hello
         let Some((_, _, version_number)) = name_type_and_version_from_hello(&hello_msg) else {
@@ -354,5 +378,15 @@ mod tests {
         let n = Arc::new(AtomicUsize::new(1));
         drop(OpenSlot(n.clone()));
         assert_eq!(n.load(Ordering::Acquire), 0);
+    }
+
+    #[test]
+    fn a_pam_console_is_not_logged_in_by_its_password_alone() {
+        let raw = bareos_config::raw::parse_str(
+            "Console {\n Name = pam\n Password = x\n Use Pam Authentication = yes\n}\n\
+             Console {\n Name = plain\n Password = x\n}\n", None).unwrap();
+        assert!(uses_pam(&raw, "pam"));
+        assert!(!uses_pam(&raw, "plain"));
+        assert!(!uses_pam(&raw, "unknown"));
     }
 }
