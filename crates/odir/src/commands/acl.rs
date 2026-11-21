@@ -136,10 +136,25 @@ pub fn cmd_dot_acl(ast: &CommandAst, ctx: &ExecContext) -> CommandResult {
         .filter(|a| a.value.is_none())
         .map(|a| a.key.to_ascii_lowercase());
     match action.as_deref() {
+        Some(action @ ("create" | "set" | "delete" | "assign" | "unassign"))
+            if ast.command_name.eq_ignore_ascii_case(".profile") => profile_refused(action),
         None | Some("list") => acl_list(ast, ctx),
         Some(action @ ("set" | "delete" | "clear" | "copy")) => acl_change(action, ast, ctx),
         Some(_) => CommandResult::error(USAGE.to_string()).with_error_parts(),
     }
+}
+
+/// Answer of `.profile create|set|delete|assign|unassign` (Onesimus
+/// extension, S-37): refused, with the way that works. A Profile is a
+/// resource of the configuration files, and the files are changed through
+/// `configure`, which checks the caller's rights against the profile (no
+/// escalation through a second path).
+fn profile_refused(action: &str) -> CommandResult {
+    CommandResult::error(format!(
+        ".profile {action}: profiles are resources of the configuration, not of the catalog ACL.\n\
+         Create one with `configure add profile name=<name> ...`, change it with `configure update profile ...`,\n\
+         remove it with `configure delete profile name=<name>`, and give a console its profiles with\n\
+         `configure update console name=<console> profile=<a>,<b>`.\n")).with_error_parts()
 }
 
 // ---------------------------------------------------------------------------
@@ -965,5 +980,20 @@ Console { Name = mcp; Password = pw4; CommandAcl = *all*; JobAcl = backup-a, res
         let mut off = setup("admin", &table);
         off.config = Some(Arc::new(RwLock::new(DirectorConfig::from_str(CONFIG).unwrap())));
         assert!(run(&off, ".acl set console=op jobacl=a").error_message.contains("no catalog"));
+    }
+
+    /// `.profile create|set|delete|assign|unassign` is refused and names the
+    /// `configure` command that does it; `.acl set` stays the catalog ACL.
+    #[test]
+    fn profile_subcommands_point_to_configure() {
+        let table = FakeTable::default();
+        let ctx = setup("admin", &table);
+        for action in ["create", "set", "delete", "assign", "unassign"] {
+            let r = cmd_dot_acl(&crate::session::parse_cli_command(&format!(".profile {action} name=x")), &ctx);
+            assert!(!r.success, "{action}");
+            assert!(r.error_message.contains("configure add profile"), "{action}: {}", r.error_message);
+        }
+        let r = cmd_dot_acl(&crate::session::parse_cli_command(".acl set console=x jobacl=y"), &ctx);
+        assert!(!r.error_message.contains("configure add profile"), "{}", r.error_message);
     }
 }
