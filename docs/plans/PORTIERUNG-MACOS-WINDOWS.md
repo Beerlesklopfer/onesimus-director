@@ -2,7 +2,7 @@
 
 Stand: 21.11.2026. Status: **macOS übersetzt** (x86_64-apple-darwin und
 aarch64-apple-darwin, `odir` und `ofd` samt Abhängigkeiten);
-**Windows nicht begonnen**, nur Blocker gesammelt.
+**Windows: ofd sichert und stellt Dateien wieder her** (gemessen auf Windows 11, Abschnitt „Windows: Stand von ofd“); odir und der Rest bleiben Blocker.
 
 ## Bauen ohne Mac
 
@@ -115,3 +115,35 @@ Die GUI-Sitzung hat einen MSI-Installer (WiX 6, GitHub Actions im GUI-Repo, Bran
 - **Konfigurationsvorlage:** Ersetzung der Platzhalter (`@CLIENT_NAME@`, Passwort) beim ersten Start oder durch den Installer; der Installer legt nur `C:\ProgramData\Onesimus\bareos-fd.d\` an (Rechte: SYSTEM/Administratoren).
 - **Release-Artefakt:** der Installer holt `onesimus-dird-<version>-windows-x86_64.zip` (`bin/oconsole.exe`, `bin/ofd.exe`) per URL und SHA-256; das liefert erst die Windows-CI dieses Repos.
 - **Offen beim Maintainer:** Dienstname (`ofd`), Ports (9102/10102) und Pfade (`C:\ProgramData\Onesimus\…`) sind Vorschlag; sie stehen im GUI-Repo in `packaging/windows/config.wxi`.
+
+## Windows: Stand von ofd (21.11.2026)
+
+Gemessen auf `joerg.bernau@vm` (Windows 11, `VM-WIN11-DEV`), gebaut mit MSVC 14.44 in `D:\odir-test` (`scripts/windows-vm/ship.sh`), **kein Wine**. Director und Storage Daemon laufen auf der Workstation, der Client ist passiv (`Passive = yes`, der SD verbindet sich zum FD auf Port 19102). Der Test ist `crates/onesimus-rig/tests/windows_fd.rs` (`ONESIMUS_WINDOWS_FD=<Adresse> cargo test -p onesimus-rig --test windows_fd -- --ignored --nocapture`); er richtet den Baum ein (`prep.ps1`), sichert, stellt wieder her und lässt `cmp.ps1` auf der VM alles vergleichen (`bad=0`).
+
+### Was funktioniert (jeweils im Test geprüft)
+
+| Bereich | Ergebnis |
+|---|---|
+| Netz | `ofd` lauscht auf `[::]` für IPv4 und IPv6 (`bareos_bnet::listen::bind`; vorher nahm Windows kein IPv4 an), TLS-PSK, CRAM-MD5, passiver SD |
+| Dateien | leer, Unicode-Name, 20 MB, verschachtelt: SHA-256 gleich |
+| Zeiten | Änderungs- und Erstellungszeit auf 100 ns gleich (`attribsEx`), Verzeichniszeiten gleich |
+| Attribute | schreibgeschützt, versteckt bleiben erhalten |
+| Links | Datei- und Verzeichnis-Symlink, Junction (wieder als Junction, `FSCTL_SET_REPARSE_POINT`), Hardlink (Zahl bleibt 2, FileSet braucht `HardLinks = yes`) |
+| Lange Pfade | 347 Zeichen (`\\?\`-Präfix, wo ein Win32-Aufruf es braucht) |
+| Sicherheit | Besitzer, DACL (auch ein Deny-Eintrag, geschützte Vererbung) und Alternate Data Streams, auch einer leeren Datei; ebenso die ACL eines Verzeichnisses (`BackupRead`/`BackupWrite`, Strom 31) |
+| Gesperrte Datei | `Cannot open "…": ERR=Permission denied.`, Job „OK -- with warnings“, die übrigen Dateien sind gesichert |
+| Wiederherstellung unter `where=` | `D:/x/y` landet unter `<where>/D/x/y` (Laufwerksbuchstabe ohne Doppelpunkt) |
+
+### Formate (nicht gegen einen Bareos-Windows-FD geprüft)
+
+- `attribsEx`: zehn Zahlen in Bareos-Base64 (Attribute, Erstellungs-, Zugriffs-, Schreibzeit je niedrig/hoch, Größe hoch/niedrig, Reparse-Tag), `winattr.rs`; aus dem Gedächtnis des Bareos-Quelltextes, ein Bareos-FD könnte ein anderes Format erwarten. Das Lesen akzeptiert auch neun Zahlen.
+- Dateimodus `0777` (schreibgeschützt `0555`, Verzeichnisse `0777`), Besitzer und Gruppe 0, `st_ctime` = `ChangeTime`; Bareos setzt dort nach meiner Erinnerung ähnliche Werte, geprüft ist es nicht.
+- Der Datenstrom ist das Ergebnis von `BackupRead`; Bareos sendet dasselbe als `STREAM_WIN32_DATA`. Ein Unix-FD kann ihn wiederherstellen (`Win32Decomp` in `restore.rs`, nur die Dateidaten).
+
+### Was fehlt oder abweicht
+
+- **VSS:** nicht umgesetzt. Auf der VM lässt sich eine Schattenkopie per WMI (`Win32_ShadowCopy.Create`) anlegen und löschen (gemessen); ofd benutzt sie nicht, gesperrte Dateien werden daher nur gemeldet. Ein Weg wäre: Schattenkopie je Laufwerk anlegen, die Pfade des Laufwerks für Öffnen und Lesen auf `\\?\GLOBALROOT\Device\HarddiskVolumeShadowCopyN\…` abbilden, die Namen im Katalog unverändert lassen, am Jobende löschen.
+- **Plugin-Vertrauensprüfung:** unverändert fail-closed (S-52), Plugins laden auf Windows nicht.
+- **Dienstbetrieb:** `winservice.rs` ist nicht ohne Dienst-Installation getestet und wurde nicht installiert.
+- **Nicht gemessen:** Netzlaufwerke und UNC-Pfade, ganze Laufwerke (`C:/`), `fstype`-Filter, `Portable = yes`, Estimate und Verify auf Windows (der Prüfsummenpfad benutzt den Win32-Strom, damit er mit dem Backup übereinstimmt), inkrementelle Läufe, Dateien über 4 GB, EFS-verschlüsselte und komprimierte NTFS-Dateien, OneDrive-Platzhalter.
+- **Rechte:** Der Test lief mit einer erhöhten Administrator-Sitzung (`IsInRole(Administrator)` war wahr); Backup- und Restore-Privilegien werden eingeschaltet (`enable_backup_privileges`). Ohne Administratorrechte nicht gemessen.
