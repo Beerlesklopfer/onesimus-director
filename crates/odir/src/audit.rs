@@ -225,8 +225,8 @@ pub(crate) fn messages_resource<'a>(config: &'a DirectorConfig, name: &str) -> O
 /// has a catalog: `job_id`), `mail`, `mailonerror` and `mailonsuccess`
 /// (collected for the job `job_id`, None or 0: the daemon, and sent when
 /// it ends, message.cc:780-808) and `operator` (sent at once,
-/// message.cc:760-779), see `mail.rs`. Syslog and the std streams are not
-/// served.
+/// message.cc:760-779), see `mail.rs`, `stdout` and `stderr` (date prefix,
+/// then the message) and `syslog` (LOG_DAEMON | LOG_ERR, the message alone).
 pub(crate) fn dispatch(res: &ConfResource, code: u32, mtime: i64, msg: &str, job_id: Option<u32>) {
     // Secrets in RunScript command lines never reach a destination
     // (catalog Log, journal, mail, console): crate::secrets.
@@ -266,6 +266,23 @@ pub(crate) fn dispatch(res: &ConfResource, code: u32, mtime: i64, msg: &str, job
                 crate::mail::collect(res, dest.code, &dest.where_, &format!("{dt}{msg}"), job_id);
                 continue;
             }
+            "stdout" => {
+                use std::io::Write as _;
+                let mut out = std::io::stdout().lock();
+                let _ = out.write_all(format!("{dt}{msg}").as_bytes()).and_then(|()| out.flush());
+                continue;
+            }
+            "stderr" => {
+                use std::io::Write as _;
+                let mut err = std::io::stderr().lock();
+                let _ = err.write_all(format!("{dt}{msg}").as_bytes()).and_then(|()| err.flush());
+                continue;
+            }
+            "syslog" => {
+                // message.cc: syslog(LOG_DAEMON | LOG_ERR, "%s", msg), without the date prefix
+                syslog_daemon_err(msg);
+                continue;
+            }
             "file" | "append" => {}
             _ => continue,
         }
@@ -289,6 +306,21 @@ pub(crate) fn dispatch(res: &ConfResource, code: u32, mtime: i64, msg: &str, job
             }
         }
     }
+}
+
+/// The message as the C string `syslog(3)` takes: an interior NUL ends it
+/// there, like it ends a C++ `char*`.
+fn syslog_text(msg: &str) -> std::ffi::CString {
+    let end = msg.find('\0').unwrap_or(msg.len());
+    std::ffi::CString::new(&msg[..end]).unwrap_or_default()
+}
+
+/// `syslog(LOG_DAEMON | LOG_ERR, "%s", msg)` as in message.cc (which
+/// does not call `openlog` either).
+fn syslog_daemon_err(msg: &str) {
+    let text = syslog_text(msg);
+    // SAFETY: both strings are NUL-terminated and "%s" takes exactly one.
+    unsafe { libc::syslog(libc::LOG_DAEMON | libc::LOG_ERR, c"%s".as_ptr(), text.as_ptr()) };
 }
 
 #[cfg(test)]
@@ -378,5 +410,11 @@ Console {{ Name = limited; Password = pw; CommandACL = list, show; CatalogACL = 
         ]);
         assert!(!dir.join("all.log").exists());
         std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn syslog_text_ends_at_a_nul() {
+        assert_eq!(syslog_text("abc\0def").to_str().unwrap(), "abc");
+        assert_eq!(syslog_text("plain").to_str().unwrap(), "plain");
     }
 }
