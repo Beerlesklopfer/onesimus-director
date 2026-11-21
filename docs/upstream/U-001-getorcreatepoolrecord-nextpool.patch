@@ -1,0 +1,24 @@
+diff --git a/core/src/dird/job.cc b/core/src/dird/job.cc
+index ad115b974..a69e93495 100644
+--- a/core/src/dird/job.cc
++++ b/core/src/dird/job.cc
+@@ -861,9 +861,17 @@ DBId_t GetOrCreatePoolRecord(JobControlRecord* jcr, char* pool_name)
+   Dmsg1(110, "get_or_create_pool=%s\n", pool_name);
+ 
+   while (!jcr->db->GetPoolRecord(jcr, &pr)) { /* get by Name */
+-    /* Try to create the pool */
++    /* Try to create the pool from the resource of the requested name, not
++     * from the job's pool: for a missing NextPool record the latter already
++     * exists, CreatePool() returns 0 and this loop never ends. */
++    PoolResource* pool = static_cast<PoolResource*>(
++        my_config->GetResWithName(R_POOL, pool_name));
++    if (!pool) {
++      Jmsg(jcr, M_FATAL, 0, T_("Pool resource \"%s\" not found.\n"), pool_name);
++      return 0;
++    }
+     if (DbLocker _{jcr->db};
+-        CreatePool(jcr, jcr->db, jcr->dir_impl->res.pool, POOL_OP_CREATE) < 0) {
++        CreatePool(jcr, jcr->db, pool, POOL_OP_CREATE) < 0) {
+       Jmsg(jcr, M_FATAL, 0, T_("Pool \"%s\" not in database. ERR=%s"), pr.Name,
+            jcr->db->strerror());
+       return 0;

@@ -318,11 +318,10 @@ pub(crate) fn get_level_since_time(db: &dyn SinceDb, job_name: &str, client_id: 
     out
 }
 
-/// backup.cc DoNativeBackupInit(): GetOrCreatePoolRecord (lookup).
-pub(crate) fn pool_id(cat: &CatalogHandle, pool: &str) -> i64 {
-    first_row(cat, &format!("SELECT PoolId FROM Pool WHERE Name='{}'", esc(pool))).ok().flatten()
-        .map(|r| cell(&r, 0).parse().unwrap_or(0)).unwrap_or(0)
-}
+/// job.cc GetOrCreatePoolRecord(): the M_INFO text after creating a record.
+pub(crate) const POOL_CREATED: &str = "Created database record for Pool \"{}\".\n";
+/// job.cc GetOrCreatePoolRecord(): the M_FATAL text when CreatePool fails.
+pub(crate) const POOL_NOT_IN_DB: &str = "Pool \"{name}\" not in database. ERR={err}";
 
 /// Catalog ids of the job's Job record (jcr->dir_impl->jr).
 #[derive(Debug, Clone, Copy, Default, serde::Serialize, serde::Deserialize)]

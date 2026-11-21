@@ -172,12 +172,6 @@ fn client_id(catalog: &CatalogHandle, client: &str) -> Result<String, String> {
         .map(|r| r[0].clone()).ok_or_else(|| "CreateClientRecord failed".into())
 }
 
-/// GetOrCreatePoolRecord(): the PoolId ("" when the pool is unknown).
-fn pool_id(catalog: &CatalogHandle, pool: &str) -> String {
-    first_row(catalog, &format!("SELECT PoolId FROM Pool WHERE Name='{}'", esc(pool))).ok().flatten()
-        .map(|r| r[0].clone()).unwrap_or_default()
-}
-
 /// CreateJobRecord(): the Job row of a job (JobStatus 'C').
 fn create_job_record(catalog: &CatalogHandle, unique: &str, name: &str, job_type: char, level: char,
                      client_id: &str, now: i64) -> Result<u32, String> {
@@ -245,7 +239,11 @@ pub fn start_worker(config: &DirectorConfig, catalog: &CatalogHandle, req: &Work
     // DoMigrationInit(): the read pool.
     let read_pool = req.pool.clone().unwrap_or_else(|| job.pool.clone());
     let read_pool_source = if req.pool.as_ref().is_some_and(|p| *p != job.pool) { "Run pool override" } else { "Job resource" };
-    if pool_id(catalog, &read_pool).is_empty() {
+    // GetOrCreatePoolRecord (C-088).
+    let get_or_create = |name: &str, msgs: &mut Vec<JobMsg>| crate::commands::pool_db::get_or_create_pool_record(
+        config, catalog, name, crate::backup::POOL_CREATED, crate::backup::POOL_NOT_IN_DB, msgs);
+    if let Err(e) = get_or_create(&read_pool, msgs) {
+        fatal(msgs, e);
         fatal(msgs, "Could not get or create a Pool record.\n".into());
         return started;
     }
@@ -297,10 +295,16 @@ pub fn start_worker(config: &DirectorConfig, catalog: &CatalogHandle, req: &Work
         fatal(msgs, format!("No Next Pool specification found in Pool \"{read_pool}\".\n"));
         return started;
     };
-    let next_pool_id = pool_id(catalog, &next_pool);
-    if next_pool_id.is_empty() {
-        return started;
-    }
+    // migrate.cc:290: the Next Pool's record. Bareos creates it from the
+    // job's pool resource and loops forever when it is missing (upstream
+    // U-001); here it is created under its own name.
+    let next_pool_id = match get_or_create(&next_pool, msgs) {
+        Ok(id) => id.to_string(),
+        Err(e) => {
+            fatal(msgs, e);
+            return started;
+        }
+    };
     let Some(write_store) = raw(config, "pool", &next_pool, "storage").map(|s| s.split(',').next().unwrap_or("").trim().to_string())
     else {
         fatal(msgs, format!("No Storage specification found in Next Pool \"{next_pool}\".\n"));

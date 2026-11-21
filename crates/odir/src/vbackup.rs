@@ -132,12 +132,6 @@ fn fileset_record(catalog: &CatalogHandle, fileset: &str) -> (i64, String) {
         .unwrap_or((0, "**Dummy**".to_string()))
 }
 
-/// GetOrCreatePoolRecord() (lookup).
-fn pool_id(catalog: &CatalogHandle, pool: &str) -> Option<i64> {
-    first_value(catalog, &format!("SELECT PoolId FROM Pool WHERE Name='{}'", sql_esc(pool))).ok().flatten()
-        .and_then(|v| v.parse().ok())
-}
-
 /// AccurateGetJobids() of a job with JobLevel Incremental/VirtualFull.
 pub fn accurate_jobids(catalog: &CatalogHandle, job_id: u32, client_id: i64, fileset_id: i64, start_time: i64,
                        limit: u64) -> Vec<String> {
@@ -224,8 +218,23 @@ pub fn start(config: &DirectorConfig, catalog: Option<&CatalogHandle>, req: &Req
         }
         Vec::new()
     };
-    let Some(rpool_id) = pool_id(catalog, &rpool) else {
-        return Err(fail_init("Could not get or create a Pool record.\n".into(), &rpool, &rpool_source, 0));
+    // GetOrCreatePoolRecord (C-088); its messages are job messages.
+    let pool_record = |name: &str| {
+        let mut msgs = Vec::new();
+        let id = crate::commands::pool_db::get_or_create_pool_record(config, catalog, name,
+            crate::backup::POOL_CREATED, crate::backup::POOL_NOT_IN_DB, &mut msgs);
+        let now = chrono::Utc::now().timestamp();
+        for (msg_type, text) in msgs {
+            crate::console_msg::job_message(config, &job.name, job_id, msg_type, now, &text);
+        }
+        id
+    };
+    let rpool_id = match pool_record(&rpool) {
+        Ok(id) => id,
+        Err(e) => {
+            let text = format!("{e}\nCould not get or create a Pool record.\n");
+            return Err(fail_init(text, &rpool, &rpool_source, 0));
+        }
     };
     // If pool storage specified, use it for restore (CopyRstorage).
     let (rstore, _rstore_source) = match first_item(&rpool_dirs, "storage") {
@@ -254,7 +263,13 @@ pub fn start(config: &DirectorConfig, catalog: Option<&CatalogHandle>, req: &Req
         .map_err(|e| fail_init(e, &rpool, npool_source, rpool_id))?;
     let write = storage_use(config, &wstore, &wpool)
         .map_err(|e| fail_init(e, &rpool, npool_source, rpool_id))?;
-    let wpool_id = pool_id(catalog, &wpool).unwrap_or(rpool_id);
+    // The Next Pool's record (vbackup.cc:195). Bareos creates it from the
+    // job's pool resource and loops forever when it is missing (upstream
+    // U-001); here it is created under its own name.
+    let wpool_id = match pool_record(&wpool) {
+        Ok(id) => id,
+        Err(e) => return Err(fail_init(e, &rpool, npool_source, rpool_id)),
+    };
     // UpdateJobStartRecord (PoolId, FileSetId, ClientId); the write pool,
     // which the catalog requests of the Storage daemon check.
     let _ = catalog.execute(&format!(

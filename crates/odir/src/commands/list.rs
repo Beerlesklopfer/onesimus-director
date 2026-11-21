@@ -1521,7 +1521,8 @@ fn list_media(args: &Args, ctx: &ExecContext, cat: &CatalogHandle, ty: ListType,
 /// may also recycle purged volumes, prune volumes, mark expired Append
 /// volumes Full/Used and create a missing pool. Onesimus only looks the
 /// volume up (Append, then Unlabeled; expired volumes are skipped instead of
-/// being marked) and changes nothing in the catalog.
+/// being marked); the only catalog write is a missing pool record, as in
+/// CompleteJcrForJob (C-088).
 fn list_nextvol(args: &Args, ctx: &ExecContext, cat: &CatalogHandle, out: &mut ListOut) -> bool {
     use crate::acl::access;
     const MAX_DAYS: i64 = 50; // kDefaultNumberOfDays
@@ -1561,10 +1562,15 @@ fn list_nextvol(args: &Args, ctx: &ExecContext, cat: &CatalogHandle, out: &mut L
         }
         // CompleteJcrForJob: the (run) pool must be in the catalog
         let pool = run.pool.clone().unwrap_or_else(|| job.pool.clone());
-        let pool_id = cat.query_rows(&format!("SELECT PoolId FROM Pool WHERE Name='{}'", esc(&pool))).ok()
-            .and_then(|t| t.rows.first().and_then(|r| r[0].clone()));
-        let Some(pool_id) = pool_id else {
-            // upstream creates the pool here (catalog write): not done
+        // CompleteJcrForJob creates a missing pool record (C-088); its
+        // Jmsg go to the Director's messages (JobId 0).
+        let mut pool_msgs = Vec::new();
+        let pool_id = crate::commands::pool_db::get_or_create_pool_record(&config, cat, &pool,
+            "Pool {} created in database.\n", "Pool {name} not in database. {err}\n", &mut pool_msgs);
+        for (msg_type, text) in pool_msgs.iter().cloned().chain(pool_id.as_ref().err().map(|e| (crate::message_bus::MsgType::Fatal, e.clone()))) {
+            crate::console_msg::job_message(&config, "*Console*", 0, msg_type, now, &text);
+        }
+        let Ok(pool_id) = pool_id.map(|id| id.to_string()) else {
             found = false;
             break;
         };

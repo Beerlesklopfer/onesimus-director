@@ -1715,7 +1715,12 @@ fn run_selected(
     // A scheduled run: the pool overrides of its Run directive (S-15).
     let run_pool = crate::scheduled_run::backup_pool(&job, &level_char.to_string());
     let pool = run_pool.as_deref().unwrap_or(pool);
-    let pool_id = crate::backup::pool_id(cat, pool);
+    // DoNativeBackupInit(): GetOrCreatePoolRecord (C-088).
+    let pool_id = match crate::commands::pool_db::get_or_create_pool_record(&config, cat, pool,
+        crate::backup::POOL_CREATED, crate::backup::POOL_NOT_IN_DB, &mut setup_messages) {
+        Ok(id) => id,
+        Err(e) => return job_failed(e),
+    };
 
     // Max Virtual Full Interval upgraded the job: it runs as a VirtualFull
     // with its Job record (job.cc SetupJob → DoNativeVbackupInit). S-23.

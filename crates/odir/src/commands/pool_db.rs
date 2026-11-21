@@ -177,6 +177,41 @@ pub(crate) fn create_pool(cat: &mut Cat, pool: &PoolSettings, create: bool) -> i
     1
 }
 
+/// job.cc GetOrCreatePoolRecord() and the pool part of ua_output.cc
+/// CompleteJcrForJob() (C-088): the PoolId of `name`. A missing record is
+/// created from the Pool resource (CreatePool, POOL_OP_CREATE) and
+/// `created` (with `{}` for the name) goes to `msgs` as M_INFO, followed by
+/// the Jmsg side effects of the catalog session. Err: the M_FATAL text
+/// (`not_in_db`, `{name}` and `{err}` replaced) when the record can neither
+/// be read nor created.
+pub(crate) fn get_or_create_pool_record(cfg: &DirectorConfig, catalog: &dyn crate::commands::bvfs::Db, name: &str,
+                                        created: &str, not_in_db: &str,
+                                        msgs: &mut Vec<(crate::message_bus::MsgType, String)>) -> Result<i64, String> {
+    use crate::message_bus::MsgType;
+    let (mut errmsg, mut side) = (String::new(), Vec::new());
+    let mut cat = Cat::new(catalog, &mut errmsg, &mut side);
+    let mut pr = PoolRecord { name: name.to_string(), ..Default::default() };
+    let mut result = Ok(0);
+    // while (!GetPoolRecord) { CreatePool … } — one creation, then the read.
+    for attempt in 0..2 {
+        if catreq::get_pool_record(&mut cat, &mut pr) {
+            result = Ok(pr.pool_id);
+            break;
+        }
+        let created_ok = attempt == 0
+            && pool_settings(cfg, name).is_some_and(|settings| create_pool(&mut cat, &settings, true) >= 0);
+        if !created_ok {
+            let err = cat.errmsg.clone();
+            result = Err(not_in_db.replace("{name}", name).replace("{err}", &err));
+            break;
+        }
+        cat.jmsg_pub(MsgType::Info, created.replace("{}", name));
+    }
+    drop(cat);
+    msgs.extend(side);
+    result
+}
+
 /// ua_db.cc UpdatePoolReferences(): only pools with a RecyclePool or
 /// ScratchPool are rewritten.
 pub(crate) fn update_pool_references(cat: &mut Cat, pool: &PoolSettings) -> bool {
@@ -225,6 +260,57 @@ mod tests {
         let mut pr = PoolRecord::default();
         set_pooldbr_from_poolres(&mut pr, &pool_settings(&cfg, "Scratch").unwrap(), true);
         assert_eq!((pr.label_format.as_str(), pr.pool_type.as_str(), pr.vol_retention), ("*", "Scratch", 31_536_000));
+    }
+
+    /// Pool table double: `Name -> PoolId`; INSERT … currval creates a row.
+    struct PoolTable(std::sync::Mutex<Vec<(String, i64)>>);
+    impl crate::commands::bvfs::Db for PoolTable {
+        fn rows(&self, sql: &str) -> Result<crate::catalog_worker::SqlTable, String> {
+            let mut pools = self.0.lock().unwrap();
+            let quoted = |s: &str| s.split('\'').nth(1).unwrap_or("").to_string();
+            let rows = if sql.starts_with("INSERT INTO Pool") {
+                let id = pools.len() as i64 + 1;
+                pools.push((quoted(sql), id));
+                vec![vec![Some(id.to_string())]]
+            } else if sql.contains(" FROM Pool WHERE ") {
+                let name = quoted(sql);
+                pools.iter().filter(|(n, _)| *n == name).map(|(n, id)| {
+                    let mut row = vec![Some("0".to_string()); 22];
+                    row[0] = Some(id.to_string());
+                    row[1] = Some(n.clone());
+                    row
+                }).collect()
+            } else {
+                Vec::new()
+            };
+            Ok(crate::catalog_worker::SqlTable { columns: Vec::new(), rows })
+        }
+        fn exec(&self, _sql: &str) -> Result<u64, String> {
+            Ok(1)
+        }
+    }
+
+    /// C-088: job.cc GetOrCreatePoolRecord creates a missing record with
+    /// M_INFO "Created database record for Pool"; an existing record gives
+    /// its id without a message. The Next Pool is created under its own name
+    /// (Bareos would create the job's pool and loop forever, U-001).
+    #[test]
+    fn get_or_create_pool_record_creates_a_missing_pool() {
+        let cfg = DirectorConfig::from_str(
+            "Director { Name = dir }\nPool { Name = Full; Pool Type = Backup; Label Format = \"Full-\" }\n\
+             Pool { Name = Copy; Pool Type = Backup }").unwrap();
+        let db = PoolTable(std::sync::Mutex::new(vec![("Full".into(), 1)]));
+        let mut msgs = Vec::new();
+        let created = crate::backup::POOL_CREATED;
+        let missing = crate::backup::POOL_NOT_IN_DB;
+        assert_eq!(get_or_create_pool_record(&cfg, &db, "Full", created, missing, &mut msgs), Ok(1));
+        assert!(msgs.is_empty());
+        assert_eq!(get_or_create_pool_record(&cfg, &db, "Copy", created, missing, &mut msgs), Ok(2));
+        assert_eq!(msgs, vec![(crate::message_bus::MsgType::Info, "Created database record for Pool \"Copy\".\n".to_string())]);
+        assert_eq!(db.0.lock().unwrap().iter().filter(|(n, _)| n == "Copy").count(), 1);
+        // a pool without resource cannot be created: the M_FATAL text
+        let err = get_or_create_pool_record(&cfg, &db, "Nosuch", created, missing, &mut msgs).unwrap_err();
+        assert!(err.starts_with("Pool \"Nosuch\" not in database. ERR="), "{err}");
     }
 
     #[test]
