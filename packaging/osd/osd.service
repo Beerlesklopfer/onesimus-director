@@ -7,9 +7,16 @@ Documentation=https://github.com/Beerlesklopfer/onesimus-director
 # at most 10 times a day, 30 s apart.
 Requires=network.target nss-lookup.target time-sync.target
 After=network-online.target nss-lookup.target local-fs.target remote-fs.target time-sync.target
-# Only one Storage daemon on port 9103: starting osd stops bareos-sd and
-# vice versa; both packages stay installable for a way back.
-Conflicts=bareos-sd.service
+# Only one Storage daemon on port 9103: starting osd stops the Bareos storage
+# daemon and vice versa; both packages stay installable for a way back.
+# bareos-storage.service is the real unit of Bareos 25; bareos-sd.service is
+# only its alias, which exists once that unit is enabled. Naming the alias
+# alone leaves a Bareos daemon that is installed but not enabled running
+# next to osd (measured with a user unit pair, S-56). Once osd is enabled its
+# own Alias=bareos-storage.service merges the two names (systemd drops the
+# dependency on itself), so the Bareos unit then no longer exists under that
+# name; both lines are needed for the two cases.
+Conflicts=bareos-storage.service bareos-sd.service
 ConditionPathExists=/var/lib/bareos
 StartLimitIntervalSec=1d
 
