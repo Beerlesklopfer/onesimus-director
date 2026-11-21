@@ -1,8 +1,10 @@
 //! findlib/create_file.cc CreateFile() and findlib/mkpath.cc makepath().
 
 use std::collections::HashSet;
+#[cfg(unix)]
 use std::ffi::CString;
 use std::fs::File;
+#[cfg(unix)]
 use std::os::unix::fs::OpenOptionsExt;
 
 use crate::attribs::*;
@@ -37,30 +39,36 @@ pub struct CreateState {
     pub cached_path: Option<Vec<u8>>,
 }
 
+#[cfg(unix)]
 fn cpath(p: &[u8]) -> CString {
     CString::new(p.to_vec()).unwrap_or_default()
 }
 
+#[cfg(unix)]
 fn errno() -> crate::berrno::BErr {
     crate::berrno::BErr::last()
 }
 
+#[cfg(unix)]
 fn lstat(p: &[u8]) -> Option<libc::stat> {
     let c = cpath(p);
     let mut st: libc::stat = unsafe { std::mem::zeroed() };
     (unsafe { libc::lstat(c.as_ptr(), &mut st) } == 0).then_some(st)
 }
 
+#[cfg(unix)]
 fn stat(p: &[u8]) -> Option<libc::stat> {
     let c = cpath(p);
     let mut st: libc::stat = unsafe { std::mem::zeroed() };
     (unsafe { libc::stat(c.as_ptr(), &mut st) } == 0).then_some(st)
 }
 
+#[cfg(unix)]
 fn is_dir(st: &libc::stat) -> bool {
     st.st_mode & libc::S_IFMT == libc::S_IFDIR
 }
 
+#[cfg(unix)]
 /// CreateFile(). Messages (Qmsg/Jmsg) go to `msg(type, text)`.
 pub fn create_file(
     attr: &mut Attributes,
@@ -150,6 +158,7 @@ pub fn create_file(
     }
 }
 
+#[cfg(unix)]
 /// The type specific part of CreateFile() for non-directories.
 fn create_typed(attr: &mut Attributes, exists: bool, msg: &mut dyn FnMut(i32, String)) -> Cf {
     use crate::jmsg::M_ERROR;
@@ -244,6 +253,7 @@ fn create_typed(attr: &mut Attributes, exists: bool, msg: &mut dyn FnMut(i32, St
     }
 }
 
+#[cfg(unix)]
 /// SetOwnMod(): warnings only when running as root.
 fn set_own_mod(path: &[u8], owner: u32, group: u32, mode: u32, msg: &mut dyn FnMut(i32, String)) {
     let root = nix::unistd::getuid().is_root();
@@ -257,6 +267,7 @@ fn set_own_mod(path: &[u8], owner: u32, group: u32, mode: u32, msg: &mut dyn FnM
     }
 }
 
+#[cfg(unix)]
 /// makedir(): Some(created) or None on error.
 fn makedir(path: &[u8], state: &mut CreateState, msg: &mut dyn FnMut(i32, String)) -> Option<bool> {
     let c = cpath(path);
@@ -280,6 +291,7 @@ fn makedir(path: &[u8], state: &mut CreateState, msg: &mut dyn FnMut(i32, String
     Some(true)
 }
 
+#[cfg(unix)]
 /// makepath(): create `apath` and missing parents; created parents get
 /// `parent_mode`, the directory itself `mode` (unless keep_dir_modes).
 #[allow(clippy::too_many_arguments)]
@@ -340,4 +352,19 @@ pub fn makepath(
         }
     }
     true
+}
+
+/// CreateFile() on Windows: not implemented before W2 (Bareos creates the
+/// file with `CreateFileW` and restores the BackupWrite stream, see
+/// docs/plans/PORTIERUNG-MACOS-WINDOWS.md). Restore jobs are refused at
+/// their start; reaching this is an error, never a silent skip.
+#[cfg(windows)]
+pub fn create_file(
+    attr: &mut Attributes,
+    _replace: u8,
+    _state: &mut CreateState,
+    msg: &mut dyn FnMut(i32, String),
+) -> Cf {
+    msg(crate::jmsg::M_ERROR, format!("Cannot create {}: {}\n", attr.ofname_str(), crate::platform::FILE_JOBS_UNSUPPORTED));
+    Cf::Error
 }

@@ -335,6 +335,8 @@ impl KnownDirectors {
         let base = std::env::var_os("XDG_CONFIG_HOME")
             .map(PathBuf::from)
             .or_else(|| std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".config")))
+            // Windows: the roaming application data of the user
+            .or_else(|| if cfg!(windows) { std::env::var_os("APPDATA").map(PathBuf::from) } else { None })
             .unwrap_or_else(|| PathBuf::from("."));
         Self::load_from(base.join("oconsole").join("known_directors"))
     }

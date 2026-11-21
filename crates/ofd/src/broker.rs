@@ -35,6 +35,9 @@ pub struct RunAs {
     pub gid: u32,
 }
 
+/// The socket to a broker (one end of a Unix stream pair).
+pub type BrokerSocket = UnixStream;
+
 /// A running broker: its socket and process group. Dropping it stops it.
 #[derive(Debug)]
 pub struct Broker {

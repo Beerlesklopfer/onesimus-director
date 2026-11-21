@@ -55,8 +55,6 @@
 //! Abweichungen: `JobType` und `JobLevel` überspringen ihren Wert (Bareos
 //! liest ihn nicht und meldet den Wert dann als unbekanntes Schlüsselwort).
 
-use std::ffi::CString;
-
 use crate::label::SessionLabel;
 
 /// One volume of a bootstrap section (`BsrVolume`).
@@ -439,41 +437,18 @@ impl Bsr {
 
 /// A compiled POSIX extended regular expression (`regcomp` with
 /// `REG_EXTENDED | REG_NOSUB`, as `store_fileregex`).
-struct PosixRegex {
-    /// The compiled expression.
-    preg: libc::regex_t,
-}
+struct PosixRegex(crate::posix_regex::Regex);
 
 impl PosixRegex {
     /// Compiles `pattern`; the error text of `regerror` on failure.
     fn new(pattern: &str) -> Result<PosixRegex, String> {
-        let c = CString::new(pattern).map_err(|e| e.to_string())?;
-        // SAFETY: regcomp initializes `preg`; it is freed in Drop only on success.
-        unsafe {
-            let mut preg: libc::regex_t = std::mem::zeroed();
-            let rc = libc::regcomp(&mut preg, c.as_ptr(), libc::REG_EXTENDED | libc::REG_NOSUB);
-            if rc != 0 {
-                let mut buf = [0u8; 500];
-                libc::regerror(rc, &preg, buf.as_mut_ptr().cast(), buf.len());
-                let end = buf.iter().position(|&b| b == 0).unwrap_or(buf.len());
-                return Err(String::from_utf8_lossy(&buf[..end]).into_owned());
-            }
-            Ok(PosixRegex { preg })
-        }
+        let opts = crate::posix_regex::Options { nosub: true, ..Default::default() };
+        crate::posix_regex::Regex::new(pattern.as_bytes(), opts).map(PosixRegex)
     }
 
     /// `regexec(...) == 0` for `name`.
     fn is_match(&self, name: &[u8]) -> bool {
-        let Ok(c) = CString::new(name) else { return false };
-        // SAFETY: valid compiled expression and NUL-terminated input.
-        unsafe { libc::regexec(&self.preg, c.as_ptr(), 0, std::ptr::null_mut(), 0) == 0 }
-    }
-}
-
-impl Drop for PosixRegex {
-    fn drop(&mut self) {
-        // SAFETY: compiled by regcomp in `new`.
-        unsafe { libc::regfree(&mut self.preg) };
+        self.0.is_match(name)
     }
 }
 

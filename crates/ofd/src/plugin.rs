@@ -9,6 +9,7 @@
 
 use std::collections::BTreeMap;
 use std::fmt;
+#[cfg(unix)]
 use std::os::unix::fs::MetadataExt;
 use std::path::{Path, PathBuf};
 
@@ -183,6 +184,7 @@ fn policy_ca_files(policy: &Path) -> Result<Vec<PathBuf>, PluginError> {
 
 /// `path` and every directory above it up to `top` (as written and after
 /// resolving links) are owned by `owner` and not writable by group or others.
+#[cfg(unix)]
 pub(crate) fn check_trusted(path: &Path, owner: u32, directory: bool, top: &Path) -> Result<(), PluginError> {
     let untrusted = |p: &Path, reason: String| PluginError::Untrusted { path: p.to_path_buf(), reason };
     if !path.is_absolute() {
@@ -208,6 +210,17 @@ pub(crate) fn check_trusted(path: &Path, owner: u32, directory: bool, top: &Path
         }
     }
     Ok(())
+}
+
+/// Windows: the rule above (root-owned, not writable by others) would need
+/// the owner SID and the ACL of every path; until that exists no path is
+/// trusted, so signed plugins do not load on Windows.
+#[cfg(windows)]
+pub(crate) fn check_trusted(path: &Path, _owner: u32, _directory: bool, _top: &Path) -> Result<(), PluginError> {
+    Err(PluginError::Untrusted {
+        path: path.to_path_buf(),
+        reason: "the ownership check of signed plugins is not implemented on this platform".into(),
+    })
 }
 
 /// Most plugin instances one File Daemon runs at the same time.
@@ -241,7 +254,7 @@ pub struct Session {
     started: bool,
     /// The native broker of this session (stopped with it) and a second
     /// handle on its socket: shutting it down unblocks a waiting broker call.
-    broker: Option<(crate::broker::Broker, std::os::unix::net::UnixStream)>,
+    broker: Option<(crate::broker::Broker, crate::broker::BrokerSocket)>,
     /// The checked port of that broker (told the job's end).
     port: Option<onesimus_plugins::wasm::BrokerHandle>,
     /// Warnings from preparing the broker, for the job log.
@@ -256,7 +269,7 @@ pub(crate) struct PreparedBroker {
     pub(crate) handle: onesimus_plugins::wasm::BrokerHandle,
     /// The broker process; None for the rootful Podman backend in ofd.
     pub(crate) broker: Option<crate::broker::Broker>,
-    pub(crate) cancel: std::os::unix::net::UnixStream,
+    pub(crate) cancel: crate::broker::BrokerSocket,
     /// Warnings for the job log (e.g. TLS files the FileSet misses).
     pub(crate) warnings: Vec<String>,
     /// Host scans whose references the guest may list (Podman, contract 2).
@@ -288,7 +301,7 @@ pub(crate) fn prepare_broker(resolved: &Resolved, line: &PluginLine, plugin_dir:
 /// manifest: `postgresql.read` (see `prepare_postgresql`; in a restore job
 /// `pg_restore_stub`), `openldap.read` (see `ldap_port::prepare`), otherwise
 /// none.
-#[allow(clippy::too_many_arguments)]
+#[allow(clippy::too_many_arguments, clippy::needless_return)]
 pub(crate) fn prepare_broker_for(resolved: &Resolved, line: &PluginLine, plugin_dir: &Path, triplet: &str, chunk: u32,
     owner: u32, top: &Path, context: &BrokerContext) -> Result<Option<PreparedBroker>, PluginError> {
     use onesimus_plugins::wasm::{OPENLDAP_READ, POSTGRESQL_READ};
@@ -301,7 +314,18 @@ pub(crate) fn prepare_broker_for(resolved: &Resolved, line: &PluginLine, plugin_
         &bundle.x509_certificate_chain_der, &policy, now).map_err(|e| load(&e))?;
     let manifest = verified.manifest();
     let has = |c: &str| manifest.capabilities.iter().any(|m| m == c);
-    if has(onesimus_plugins::wasm::PODMAN_INVENTORY) {
+    // No native brokers on this platform (broker_unsupported.rs).
+    #[cfg(windows)]
+    return {
+        let _ = (line, plugin_dir, triplet, chunk, owner, top, context);
+        if has(onesimus_plugins::wasm::PODMAN_INVENTORY) || has(POSTGRESQL_READ) || has(OPENLDAP_READ) {
+            Err(PluginError::Load(crate::broker::UNSUPPORTED.into()))
+        } else {
+            Ok(None)
+        }
+    };
+    #[cfg(unix)]
+    return if has(onesimus_plugins::wasm::PODMAN_INVENTORY) {
         // Fixed binding (V-11): only io.onesimus.podman with contract 2.
         let files = crate::podman_port::HostFiles::system();
         crate::podman_port::prepare(manifest, line, plugin_dir, triplet, chunk, owner, top, context, &files).map(Some)
@@ -314,9 +338,10 @@ pub(crate) fn prepare_broker_for(resolved: &Resolved, line: &PluginLine, plugin_
         crate::ldap_port::prepare(manifest, line, plugin_dir, triplet, chunk, owner, top, context).map(Some)
     } else {
         Ok(None)
-    }
+    };
 }
 
+#[cfg(unix)]
 /// The PostgreSQL port of a restore job: no broker process, no instance
 /// discovery and no check of the backup-time `databases=` list against the
 /// live server (a restore of a dropped database must not fail on its very
@@ -326,6 +351,7 @@ pub(crate) fn prepare_broker_for(resolved: &Resolved, line: &PluginLine, plugin_
 /// a new database is phase 3 and will bring its own write port).
 struct PgRestoreStub;
 
+#[cfg(unix)]
 impl onesimus_plugins::wasm::BrokerPort for PgRestoreStub {
     /// The PostgreSQL family, so the guest's imports are linked.
     fn capability(&self) -> &'static str {
@@ -341,6 +367,7 @@ impl onesimus_plugins::wasm::BrokerPort for PgRestoreStub {
     }
 }
 
+#[cfg(unix)]
 /// The prepared broker of a PostgreSQL restore job: `PgRestoreStub`, no
 /// process. The cancel socket is one end of a fresh pair (nothing waits on it).
 fn pg_restore_stub() -> Result<PreparedBroker, PluginError> {
@@ -356,6 +383,7 @@ fn pg_restore_stub() -> Result<PreparedBroker, PluginError> {
     })
 }
 
+#[cfg(unix)]
 /// `postgresql.read` in a backup job: the instance named by `socket=`/`port=` (default
 /// /var/run/postgresql, 5432), its user, and `<name>/onesimus-pg-broker`.
 fn prepare_postgresql(manifest: &onesimus_plugins::Manifest, line: &PluginLine, plugin_dir: &Path, triplet: &str,

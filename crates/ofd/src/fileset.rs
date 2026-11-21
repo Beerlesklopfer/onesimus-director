@@ -2,6 +2,7 @@
 //! (AddFileset, SetOptionsAndFlags, AddFileToFileset) and the matching of
 //! findlib/find.cc (AcceptFile) and findlib/match.cc (ParseSizeMatch).
 
+#[cfg(unix)]
 use std::ffi::CString;
 use std::io::BufRead;
 
@@ -118,46 +119,40 @@ pub fn parse_size_match(p: &str) -> Option<SizeMatch> {
     }
 }
 
-/// A compiled POSIX regex (regcomp REG_EXTENDED).
-pub struct Regex(Box<libc::regex_t>);
-
-impl Drop for Regex {
-    fn drop(&mut self) {
-        unsafe { libc::regfree(&mut *self.0) };
-    }
-}
+/// A compiled POSIX regex (regcomp REG_EXTENDED; on Windows the `regex`
+/// crate like Bareos' PCRE2, see `bareos_format::posix_regex`).
+pub struct Regex(bareos_format::posix_regex::Regex);
 
 impl Regex {
     pub fn new(pattern: &str, icase: bool) -> Result<Self, String> {
-        let c = CString::new(pattern).map_err(|e| e.to_string())?;
-        let mut preg: Box<libc::regex_t> = Box::new(unsafe { std::mem::zeroed() });
-        let flags = libc::REG_EXTENDED | if icase { libc::REG_ICASE } else { 0 };
-        let rc = unsafe { libc::regcomp(&mut *preg, c.as_ptr(), flags) };
-        if rc != 0 {
-            let mut buf = [0u8; 500];
-            unsafe { libc::regerror(rc, &*preg, buf.as_mut_ptr().cast(), buf.len()) };
-            let end = buf.iter().position(|&b| b == 0).unwrap_or(buf.len());
-            return Err(String::from_utf8_lossy(&buf[..end]).into_owned());
-        }
-        Ok(Regex(preg))
+        let opts = bareos_format::posix_regex::Options { icase, ..Default::default() };
+        bareos_format::posix_regex::Regex::new(pattern.as_bytes(), opts).map(Regex)
     }
     pub fn is_match(&self, s: &[u8]) -> bool {
-        let Ok(c) = CString::new(s) else { return false };
-        unsafe { libc::regexec(&*self.0, c.as_ptr(), 0, std::ptr::null_mut(), 0) == 0 }
+        self.0.is_match(s)
     }
 }
 
 const FNM_PATHNAME: i32 = 1 << 0;
 const FNM_CASEFOLD: i32 = 1 << 4;
 
+#[cfg(unix)]
 unsafe extern "C" {
     fn fnmatch(pattern: *const libc::c_char, string: *const libc::c_char, flags: libc::c_int) -> libc::c_int;
 }
 
 /// fnmatch() == 0
+#[cfg(unix)]
 pub fn fn_match(pattern: &[u8], s: &[u8], flags: i32) -> bool {
     let (Ok(p), Ok(s)) = (CString::new(pattern), CString::new(s)) else { return false };
     unsafe { fnmatch(p.as_ptr(), s.as_ptr(), flags) == 0 }
+}
+
+/// fnmatch() == 0: Bareos' own BSD fnmatch (lib/fnmatch.cc), the Windows
+/// C runtime has none.
+#[cfg(windows)]
+pub fn fn_match(pattern: &[u8], s: &[u8], flags: i32) -> bool {
+    crate::fnmatch::fnmatch(pattern, s, flags)
 }
 
 /// findFOPTS

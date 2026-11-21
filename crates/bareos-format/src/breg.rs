@@ -7,7 +7,8 @@
 //! Beide müssen dasselbe Ergebnis liefern, deshalb steht der Code hier
 //! einmal. Gearbeitet wird auf Bytes, weil Dateinamen kein UTF-8 sein
 //! müssen. Die Ausdrücke übersetzt POSIX `regcomp`/`regexec` aus der libc
-//! wie im C-Original; das ist die einzige Abhängigkeit des Crates.
+//! wie im C-Original, auf Windows die Crate `regex` wie dort PCRE2
+//! ([`crate::posix_regex`]).
 //!
 //! Datenfluss: Director (`restore`-Dialog) → `regexwhere=` im
 //! Restore-Kommando → FD [`get_bregexps`] → [`apply_bregexps`] je Datei.
@@ -20,23 +21,14 @@
 //! `odir/src/breg.rs` (Zeichenketten, dazu `build_where`); der Code war
 //! bis auf diese Signaturen gleich.
 
-use std::ffi::CString;
-
-/// `BREG_NREGS` (breg.h:44): the number of match registers.
-const NREGS: usize = 11;
+use crate::posix_regex::{Options, Regex};
 
 /// One compiled `BareosRegex`.
 pub struct Bregexp {
-    /// The compiled POSIX regular expression.
-    preg: libc::regex_t,
+    /// The compiled POSIX regular expression (`BREG_NREGS` registers).
+    preg: Regex,
     /// Substitution with `$n`/`\n` back references.
     subst: Vec<u8>,
-}
-
-impl Drop for Bregexp {
-    fn drop(&mut self) {
-        unsafe { libc::regfree(&mut self.preg) };
-    }
 }
 
 impl Bregexp {
@@ -73,44 +65,35 @@ impl Bregexp {
             }
         }
         let subst = subst.filter(|_| ok)?;
-        let mut options = libc::REG_EXTENDED | libc::REG_NEWLINE;
+        // REG_EXTENDED | REG_NEWLINE
+        let mut options = Options { newline: true, ..Options::default() };
         let mut done = false;
         while i < motif.len() && !done {
             match motif[i] {
-                b'i' => options |= libc::REG_ICASE,
+                b'i' => options.icase = true,
                 b'g' => {}
                 c if c == sep => {}
                 _ => done = true,
             }
             i += 1;
         }
-        let pattern = CString::new(expr).ok()?;
-        let mut preg: libc::regex_t = unsafe { std::mem::zeroed() };
-        if unsafe { libc::regcomp(&mut preg, pattern.as_ptr(), options) } != 0 {
-            return None;
-        }
+        let preg = Regex::new(&expr, options).ok()?;
         Some((Self { preg, subst }, &motif[i..]))
     }
 
     /// BareosRegex::replace(): the file name with the substitution applied,
     /// and whether it matched.
     fn replace(&self, fname: &[u8]) -> (Vec<u8>, bool) {
-        let Ok(cname) = CString::new(fname) else { return (fname.to_vec(), false) };
-        let mut regs = [libc::regmatch_t { rm_so: -1, rm_eo: -1 }; NREGS];
-        if unsafe { libc::regexec(&self.preg, cname.as_ptr(), NREGS, regs.as_mut_ptr(), 0) } != 0
-            || regs[0].rm_so < 0
-        {
-            return (fname.to_vec(), false);
-        }
-        let mut result = fname[..regs[0].rm_so as usize].to_vec();
+        let Some(regs) = self.preg.captures(fname) else { return (fname.to_vec(), false) };
+        let Some((so, eo)) = regs[0] else { return (fname.to_vec(), false) };
+        let mut result = fname[..so].to_vec();
         let mut p = 0;
         while p < self.subst.len() {
             let c = self.subst[p];
             let next = self.subst.get(p + 1).copied().unwrap_or(0);
             if (c == b'$' || c == b'\\') && next.is_ascii_digit() {
-                let reg = regs[usize::from(next - b'0')];
-                if reg.rm_so >= 0 && reg.rm_eo >= 0 {
-                    result.extend_from_slice(&fname[reg.rm_so as usize..reg.rm_eo as usize]);
+                if let Some((rso, reo)) = regs[usize::from(next - b'0')] {
+                    result.extend_from_slice(&fname[rso..reo]);
                 }
                 p += 2;
             } else {
@@ -118,7 +101,7 @@ impl Bregexp {
                 p += 1;
             }
         }
-        result.extend_from_slice(&fname[regs[0].rm_eo as usize..]);
+        result.extend_from_slice(&fname[eo..]);
         (result, true)
     }
 }

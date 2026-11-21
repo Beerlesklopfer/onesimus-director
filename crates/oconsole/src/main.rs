@@ -61,7 +61,8 @@ use bareos_bnet::cram_md5::CramMd5Auth;
 )]
 struct Cli {
     /// Use <path> as configuration file [default: /etc/bareos/oconsole.conf,
-    /// then /etc/bareos/bconsole.conf].
+    /// then /etc/bareos/bconsole.conf; Windows: C:\ProgramData\Onesimus\oconsole.conf,
+    /// then C:\ProgramData\Bareos\bconsole.conf].
     #[arg(short, long)]
     config: Option<String>,
 
@@ -226,7 +227,12 @@ struct EffCli {
 
 /// Default config files, in order: oconsole's own, then bconsole's (the same
 /// format, already set up wherever a Bareos console works).
+#[cfg(unix)]
 const DEFAULT_CONFIGS: [&str; 2] = ["/etc/bareos/oconsole.conf", "/etc/bareos/bconsole.conf"];
+/// Windows: the Onesimus data directory of the MSI, then the bconsole
+/// configuration of a Bareos installation (`%ProgramData%\Bareos`).
+#[cfg(windows)]
+const DEFAULT_CONFIGS: [&str; 2] = [r"C:\ProgramData\Onesimus\oconsole.conf", r"C:\ProgramData\Bareos\bconsole.conf"];
 
 fn load_console_config(path: Option<&str>) -> ConsoleConfig {
     let candidates: Vec<&str> = match path {
@@ -247,12 +253,6 @@ fn load_console_config(path: Option<&str>) -> ConsoleConfig {
     parse_console_config("")
 }
 
-/// console_conf.cc semantics: `Director { Name Address DirPort Password }`
-/// names the Director to connect to; a `Console { Name Password }` resource is
-/// the named console to log in as. Without one the console logs in as
-/// "*UserAgent*" with the Director's password. Director/Console `Name` is never
-/// the login of the other resource.
-fn parse_console_config(content: &str) -> ConsoleConfig {
 /// Bareos writes a resource on one line as well: `Console { Name = x; Password = "y" }`.
 /// The line parser below reads one directive per line, so this puts every
 /// `{`, `}` and `;` that is outside quotes and comments on a line of its own.
@@ -278,13 +278,19 @@ fn split_one_line_resources(content: &str) -> String {
     out
 }
 
+/// console_conf.cc semantics: `Director { Name Address DirPort Password }`
+/// names the Director to connect to; a `Console { Name Password }` resource is
+/// the named console to log in as. Without one the console logs in as
+/// "*UserAgent*" with the Director's password. Director/Console `Name` is never
+/// the login of the other resource.
+fn parse_console_config(content: &str) -> ConsoleConfig {
+    let content = &split_one_line_resources(content);
     let mut cfg = ConsoleConfig {
         address: "localhost".to_string(),
         port: 9101,
         name: "*UserAgent*".to_string(),
         password: String::new(),
         grpc: None,
-    let content = &split_one_line_resources(content);
         grpc_port: None,
         grpc_fingerprint: None,
         consoles: Vec::new(),
@@ -1385,10 +1391,20 @@ fn is_interrupted(e: &BnetError) -> bool {
     }
 }
 
+#[cfg(unix)]
 fn dirs_home() -> std::path::PathBuf {
     std::env::var("HOME")
         .map(std::path::PathBuf::from)
         .unwrap_or_else(|_| std::path::PathBuf::from("/tmp"))
+}
+
+/// Windows: `HOME` if set (MSYS, Git Bash), else the profile directory.
+#[cfg(windows)]
+fn dirs_home() -> std::path::PathBuf {
+    std::env::var_os("HOME")
+        .or_else(|| std::env::var_os("USERPROFILE"))
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(std::env::temp_dir)
 }
 
 // drain_signals removed — now part of DirectorConn::drain()
@@ -1598,6 +1614,21 @@ impl mcp::CommandRunner for GrpcRunner {
 
 #[cfg(test)]
 mod tests {
+
+    /// The page "AI assistants (MCP)" writes the resources of oconsole.conf on
+    /// one line each, as Bareos allows.
+    #[test]
+    fn one_line_resources_are_read() {
+        let cfg = parse_console_config(
+            "Director { Name = backup-dir; Address = backup.example.org; Password = \"d;pw\" }\n\
+             Console  { Name = admin;     Password = \"a\" }  # human\n\
+             Console  { Name = admin-mcp; Password = \"a-long-random-password\" }\n");
+        assert_eq!(cfg.address, "backup.example.org");
+        assert_eq!(cfg.consoles, vec![("admin".into(), "a".into()), ("admin-mcp".into(), "a-long-random-password".into())]);
+        assert_eq!((cfg.name.as_str(), cfg.password.as_str()), ("admin", "a"));
+        assert_eq!(mcp_login(&cfg, None, None).unwrap(), ("admin-mcp".to_string(), "a-long-random-password".to_string()));
+    }
+
     use super::*;
 
     /// A Director side for BnetRunner: canned reads (Err = a read timeout), recorded writes.
@@ -1614,21 +1645,6 @@ mod tests {
                     let n = chunk.len().min(buf.len());
                     buf[..n].copy_from_slice(&chunk[..n]);
                     if n < chunk.len() {
-
-    /// The page "AI assistants (MCP)" writes the resources of oconsole.conf on
-    /// one line each, as Bareos allows.
-    #[test]
-    fn one_line_resources_are_read() {
-        let cfg = parse_console_config(
-            "Director { Name = backup-dir; Address = backup.example.org; Password = \"d;pw\" }\n\
-             Console  { Name = admin;     Password = \"a\" }  # human\n\
-             Console  { Name = admin-mcp; Password = \"a-long-random-password\" }\n");
-        assert_eq!(cfg.address, "backup.example.org");
-        assert_eq!(cfg.consoles, vec![("admin".into(), "a".into()), ("admin-mcp".into(), "a-long-random-password".into())]);
-        assert_eq!((cfg.name.as_str(), cfg.password.as_str()), ("admin", "a"));
-        assert_eq!(mcp_login(&cfg, None, None).unwrap(), ("admin-mcp".to_string(), "a-long-random-password".to_string()));
-    }
-
                         self.reads.push_front(Ok(chunk.split_off(n)));
                     }
                     Ok(n)

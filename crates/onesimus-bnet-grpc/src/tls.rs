@@ -10,6 +10,11 @@
 //! Datenfluss: `main` → [`load_or_generate`] (oder `--grpc-cert/--grpc-key`)
 //! → [`server_tls_config`] → `tonic::transport::Server::tls_config`.
 //!
+//! Windows: die Schlüsseldatei bekommt keinen Modus 0600, sondern erbt die
+//! Zugriffsliste ihres Verzeichnisses; das Arbeitsverzeichnis legt der
+//! Daemon dort nur für SYSTEM und Administratoren an (ofd `paths`). Der
+//! Rechnername kommt aus `GetComputerNameExW` (DNS-Name).
+//!
 //! Bareos-Gegenstück: keins (Onesimus-Erweiterung).
 //!
 //! Herkunft: `ofd/src/grpc_tls.rs` (`load_or_generate`) und der Anfang von
@@ -22,6 +27,7 @@
 //! und folgt in P1.
 
 use std::io::Write;
+#[cfg(unix)]
 use std::os::unix::fs::OpenOptionsExt;
 use std::path::{Path, PathBuf};
 
@@ -37,22 +43,43 @@ pub fn load_or_generate(working_directory: &str, base: &str, name: &str) -> Resu
         return Ok((cert, key));
     }
     let mut names = vec![name.to_string(), "localhost".to_string()];
-    if let Ok(host) = nix::unistd::gethostname() {
-        names.push(host.to_string_lossy().into_owned());
+    if let Some(host) = host_name() {
+        names.push(host);
     }
     names.sort();
     names.dedup();
     let certified = rcgen::generate_simple_self_signed(names).map_err(|e| e.to_string())?;
-    let mut key_file = std::fs::OpenOptions::new()
-        .write(true)
-        .create_new(true)
-        .mode(0o600)
+    let mut options = std::fs::OpenOptions::new();
+    options.write(true).create_new(true);
+    #[cfg(unix)]
+    options.mode(0o600);
+    let mut key_file = options
         .open(&key)
         .map_err(|e| format!("{}: {e}", key.display()))?;
     key_file.write_all(certified.key_pair.serialize_pem().as_bytes()).map_err(|e| e.to_string())?;
     std::fs::write(&cert, certified.cert.pem()).map_err(|e| format!("{}: {e}", cert.display()))?;
     tracing::info!("generated gRPC TLS certificate {}", cert.display());
     Ok((cert, key))
+}
+
+/// The host name (`gethostname`), `None` if it cannot be read.
+#[cfg(unix)]
+pub fn host_name() -> Option<String> {
+    nix::unistd::gethostname().ok().map(|h| h.to_string_lossy().into_owned())
+}
+
+/// The DNS host name of the computer (`GetComputerNameExW` with
+/// `ComputerNameDnsHostname`), `None` if it cannot be read.
+#[cfg(windows)]
+pub fn host_name() -> Option<String> {
+    use windows_sys::Win32::System::SystemInformation::{ComputerNameDnsHostname, GetComputerNameExW};
+    let mut buf = [0u16; 256];
+    let mut len = buf.len() as u32;
+    // SAFETY: `buf` holds `len` UTF-16 units; the call writes at most that many.
+    if unsafe { GetComputerNameExW(ComputerNameDnsHostname, buf.as_mut_ptr(), &mut len) } == 0 {
+        return None;
+    }
+    Some(String::from_utf16_lossy(&buf[..len as usize])).filter(|h| !h.is_empty())
 }
 
 /// The server TLS configuration of a PEM certificate and key file.
@@ -75,8 +102,11 @@ mod tests {
         let d = dir.to_str().unwrap();
         let (cert, key) = load_or_generate(d, "onesimus-test-grpc", "test-fd").unwrap();
         assert_eq!(cert, dir.join("onesimus-test-grpc.crt"));
-        use std::os::unix::fs::PermissionsExt;
-        assert_eq!(std::fs::metadata(&key).unwrap().permissions().mode() & 0o777, 0o600);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            assert_eq!(std::fs::metadata(&key).unwrap().permissions().mode() & 0o777, 0o600);
+        }
         let pem = std::fs::read(&cert).unwrap();
         assert_eq!(load_or_generate(d, "onesimus-test-grpc", "test-fd").unwrap(), (cert.clone(), key.clone()));
         assert_eq!(std::fs::read(&cert).unwrap(), pem);

@@ -12,7 +12,6 @@ path = "src/main.rs"
 
 [dependencies]
 onesimus-plugins = { path = "../onesimus-plugins" }
-onesimus-podman-core = { path = "../onesimus-podman-core" }
 tonic.workspace = true
 tokio.workspace = true
 onesimus-proto-rs.workspace = true
@@ -30,7 +29,6 @@ tracing.workspace = true
 crossbeam-channel.workspace = true
 serde.workspace = true
 serde_json.workspace = true
-nix.workspace = true
 rustls.workspace = true
 libc.workspace = true
 clap.workspace = true
@@ -41,6 +39,18 @@ md5 = { package = "md-5", version = "0.10" }
 sha1 = "0.10"
 sha2.workspace = true
 twox-hash = { version = "2", default-features = false, features = ["xxhash3_128", "std"] }
+
+# Podman-Plugin (Linux-only: openat2, User-Namespaces, /proc) und die
+# POSIX-Schicht; auf Windows nicht gebaut (docs/plans/PORTIERUNG-MACOS-WINDOWS.md)
+[target.'cfg(unix)'.dependencies]
+onesimus-podman-core = { path = "../onesimus-podman-core" }
+nix.workspace = true
+
+# Windows: Zufallspasswort der Vorlage (src/first_start.rs) und das private
+# Arbeitsverzeichnis (src/paths.rs ensure_private_dir)
+[target.'cfg(windows)'.dependencies]
+getrandom = "0.2"
+windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Security", "Win32_Security_Authorization", "Win32_Storage_FileSystem"] }
 
 [dev-dependencies]
 rcgen.workspace = true

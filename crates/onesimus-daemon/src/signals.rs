@@ -16,11 +16,18 @@
 //! Datenfluss: Kernel → blockiertes Signal → `sigwait` in `main` bzw. im
 //! SIGHUP-Thread → Abschalt-Flag bzw. Neulade-Funktion des Daemons.
 //!
+//! Windows: nur [`wait_for_interrupt`] (der `ctrlc`-Handler nutzt dort
+//! `SetConsoleCtrlHandler`); Signalmasken und `SIGHUP` sind Unix. Unter
+//! dem Service Control Manager wartet der Daemon stattdessen in
+//! `winservice::Service::wait_for_stop`.
+//!
 //! Bareos-Gegenstück: `lib/signal.cc` `InitSignals` (Handler für
 //! `SIGTERM` → `Terminate…`), `dird/dird.cc` `ReloadConfig` an `SIGHUP`.
 
+#[cfg(unix)]
 use nix::sys::signal::{SigSet, Signal};
 
+#[cfg(unix)]
 /// The shutdown signals `SIGINT` and `SIGTERM`.
 pub fn shutdown_sigset() -> SigSet {
     let mut set = SigSet::empty();
@@ -29,6 +36,7 @@ pub fn shutdown_sigset() -> SigSet {
     set
 }
 
+#[cfg(unix)]
 /// Blocks `SIGINT`/`SIGTERM` in the calling thread and every thread it
 /// starts later; call it in `main` before the first thread.
 pub fn block_shutdown_signals() {
@@ -37,6 +45,7 @@ pub fn block_shutdown_signals() {
     }
 }
 
+#[cfg(unix)]
 /// Waits for `SIGINT` or `SIGTERM` (blocked before with
 /// [`block_shutdown_signals`]); returns the signal, `None` if `sigwait` fails.
 pub fn wait_for_shutdown() -> Option<Signal> {
@@ -52,6 +61,7 @@ pub fn wait_for_shutdown() -> Option<Signal> {
     }
 }
 
+#[cfg(unix)]
 /// Blocks `SIGHUP` in the calling thread and its future threads, so that
 /// only the thread of [`spawn_sighup_thread`] receives it.
 pub fn block_sighup() {
@@ -62,6 +72,7 @@ pub fn block_sighup() {
     }
 }
 
+#[cfg(unix)]
 /// Starts thread `name` that calls `reload` for every `SIGHUP`.
 pub fn spawn_sighup_thread<F>(name: &str, mut reload: F) -> std::io::Result<std::thread::JoinHandle<()>>
 where
@@ -97,7 +108,7 @@ pub fn wait_for_interrupt() {
     let _ = rx.recv();
 }
 
-#[cfg(test)]
+#[cfg(all(test, unix))]
 mod tests {
     use super::*;
 

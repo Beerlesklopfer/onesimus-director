@@ -2,8 +2,10 @@
 //! BuildAttrOutputFnames, PrintLsOutput), lib/attribs.cc (DecodeStat),
 //! lib/base64.cc (FromBase64) and findlib/attribs.cc (SetAttributes).
 
-use std::ffi::{CString, OsStr};
-use std::os::unix::ffi::OsStrExt;
+#[cfg(unix)]
+use std::ffi::CString;
+use std::ffi::OsStr;
+use crate::platform::OsStrExt;
 use std::path::Path;
 
 use bareos_format::breg::Bregexp;
@@ -160,12 +162,27 @@ fn encode_mode(mode: u32) -> String {
     s
 }
 
+#[cfg(unix)]
 fn uid_name(uid: u32) -> String {
     nix::unistd::User::from_uid(nix::unistd::Uid::from_raw(uid)).ok().flatten().map(|u| u.name).unwrap_or_else(|| uid.to_string())
 }
 
+#[cfg(unix)]
 fn gid_name(gid: u32) -> String {
     nix::unistd::Group::from_gid(nix::unistd::Gid::from_raw(gid)).ok().flatten().map(|g| g.name).unwrap_or_else(|| gid.to_string())
+}
+
+/// Windows: no user database for POSIX uids; the number (as Bareos for an
+/// unknown uid).
+#[cfg(windows)]
+fn uid_name(uid: u32) -> String {
+    uid.to_string()
+}
+
+/// Windows: the number, see `uid_name`.
+#[cfg(windows)]
+fn gid_name(gid: u32) -> String {
+    gid.to_string()
 }
 
 /// attr_to_ls_output(): the M_RESTORED line of PrintLsOutput().
@@ -192,12 +209,14 @@ pub fn ls_output(attr: &Attributes) -> String {
     out
 }
 
+#[cfg(unix)]
 fn cpath(p: &[u8]) -> CString {
     CString::new(p.to_vec()).unwrap_or_default()
 }
 
 /// SetAttributes(): owner, mode and times of a restored file (the open
 /// output file is closed). Returns the error messages (M_ERROR).
+#[cfg(unix)]
 pub fn set_attributes(attr: &Attributes, ofd: Option<std::fs::File>) -> Vec<String> {
     let mut errors = Vec::new();
     // suppress_errors = (debug_level >= 100 || my_uid != 0)
@@ -269,6 +288,16 @@ pub fn set_attributes(attr: &Attributes, ofd: Option<std::fs::File>) -> Vec<Stri
     drop(ofd);
     unsafe { libc::umask(old_mask) };
     errors
+}
+
+/// SetAttributes() on Windows: not before W2 (Bareos `SetAttributes` with
+/// `win32_restore_file_attributes`/`SetFileAttributesW` and the times of
+/// `WIN32_FILE_ATTRIBUTE_DATA` from the extended attributes). Restore jobs
+/// are refused at their start.
+#[cfg(windows)]
+pub fn set_attributes(attr: &Attributes, ofd: Option<std::fs::File>) -> Vec<String> {
+    drop(ofd);
+    vec![format!("Unable to set attributes of {}: {}\n", attr.ofname_str(), crate::platform::FILE_JOBS_UNSUPPORTED)]
 }
 
 #[cfg(test)]

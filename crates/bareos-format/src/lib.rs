@@ -8,7 +8,8 @@
 //! Datensätze zwischen FD und SD, das Umschreiben von Dateinamen beim
 //! Restore (`regexwhere`) und das Job-Kommando an den Storage Daemon. Das
 //! Crate macht kein IO und kennt weder Netz noch Datenbank; einzige
-//! Abhängigkeit ist die libc für POSIX-Regex ([`breg`]).
+//! Abhängigkeit ist die libc für POSIX-Regex ([`breg`], [`posix_regex`]),
+//! auf Windows statt ihrer die Crate `regex`.
 //!
 //! Datenfluss: Ein Backup erzeugt im FD je Datei einen Attribut-Datensatz
 //! (`STREAM_UNIX_ATTRIBUTES`, darin die LStat-Zeichenkette aus
@@ -41,6 +42,7 @@ pub mod glossary;
 pub mod label;
 pub mod lstat;
 pub mod msg;
+pub mod posix_regex;
 pub mod record;
 #[cfg_attr(doc, aquamarine::aquamarine)]
 /// Job-Kommando des Directors an den Storage Daemon.

@@ -8,12 +8,17 @@
 //! - fd:session:N — one per Director connection (status, backup, restore)
 //! - fd:heartbeat — periodic keepalive
 
+// Windows (W1): the POSIX file tree code stays compiled but is unreachable
+// there (file jobs are refused, see platform.rs); no dead-code noise for it.
+#![cfg_attr(windows, allow(dead_code))]
+
 mod accept;
 mod accurate;
 mod acl_xattr;
 mod attribs;
 mod backup;
 mod berrno;
+#[cfg_attr(windows, path = "broker_unsupported.rs")]
 mod broker;
 mod compression;
 mod config;
@@ -21,22 +26,36 @@ mod create_file;
 mod digest;
 mod fileset;
 mod find;
+mod first_start;
+mod fnmatch;
 mod heartbeat;
 mod grpc;
 mod grpc_tls;
 mod jmsg;
+#[cfg(unix)]
 mod ldap_instance;
+#[cfg(unix)]
 mod ldap_port;
-#[cfg(test)]
+#[cfg(all(test, unix))]
 mod ldap_e2e;
 mod job;
+#[cfg(unix)]
 mod pg_instance;
+#[cfg(unix)]
 mod pg_port;
+mod platform;
+mod paths;
 mod plugin;
-#[cfg(test)]
+#[cfg(all(test, unix))]
 mod podman_e2e;
+#[cfg(unix)]
 mod podman_port;
+#[cfg(unix)]
 mod podman_rootful;
+#[cfg(unix)]
+mod podman_scan;
+#[cfg(windows)]
+#[path = "podman_scan_unsupported.rs"]
 mod podman_scan;
 mod restore;
 mod runscript;
@@ -63,7 +82,7 @@ static SHUTDOWN: AtomicBool = AtomicBool::new(false);
 enum PluginCheckOperation { Backup, Restore }
 
 /// Onesimus File Daemon — Backup Archiving REcovery Open Sourced
-#[derive(Parser, Debug)]
+#[derive(Parser, Debug, Clone)]
 #[command(
     name = "ofd",
     version,
@@ -91,7 +110,7 @@ struct Cli {
     conmon_executable: Vec<PathBuf>,
 
     /// Log file (also stderr); `none` for stderr only.
-    #[arg(long, value_name = "PATH", default_value = "/var/log/onesimus/ofd.log")]
+    #[arg(long, value_name = "PATH", default_value = paths::LOG_FILE)]
     log_file: PathBuf,
 
     /// TLS gRPC control listener (default: [::]:<port + 1000>); BNET always remains available.
@@ -111,22 +130,22 @@ struct Cli {
     disable_grpc: bool,
 
     /// Use <path> as configuration file or directory.
-    #[arg(short, long, default_value = "/etc/bareos/bareos-fd.d")]
+    #[arg(short, long, default_value = paths::CONFIG_DIR)]
     config: PathBuf,
 
     /// Set debug level to <level>.
     #[arg(short, long, default_value_t = 0)]
     debug_level: u32,
 
-    /// Run in foreground.
+    /// Run in foreground (Windows: always; under the service control manager ofd runs as a service).
     #[arg(short, long)]
     foreground: bool,
 
-    /// Run as given user.
+    /// Run as given user (Unix only).
     #[arg(short, long)]
     user: Option<String>,
 
-    /// Run as given group.
+    /// Run as given group (Unix only).
     #[arg(short, long)]
     group: Option<String>,
 
@@ -169,6 +188,39 @@ fn main() {
         return;
     }
 
+    // -t never runs as a service.
+    if cli.test_config {
+        std::process::exit(run(cli, &|| {}, &|| {}));
+    }
+
+    // Windows: as a service when the service control manager started us
+    // (the MSI registers `-f -c … --log-file …`), else in the console.
+    #[cfg(windows)]
+    {
+        use onesimus_daemon::winservice::{self, Dispatch};
+        let service_cli = cli.clone();
+        match winservice::run(paths::SERVICE_NAME, move |service| run(service_cli, &|| service.running(), &|| service.wait_for_stop())) {
+            Dispatch::Ran => return,
+            Dispatch::NotAService => {}
+            Dispatch::Failed(e) => {
+                eprintln!("ofd: StartServiceCtrlDispatcher failed: {e}");
+                std::process::exit(1);
+            }
+        }
+    }
+
+    // Console / Unix: wait for Ctrl-C (onesimus-daemon: ctrlc handler, SIGINT, as before)
+    let code = run(cli, &|| {}, &onesimus_daemon::signals::wait_for_interrupt);
+    if code != 0 {
+        std::process::exit(code);
+    }
+}
+
+/// The daemon from logging to shutdown; returns the exit code.
+/// `running` is called once the listeners are up (service: `SERVICE_RUNNING`),
+/// `wait` blocks until the daemon shall stop (Ctrl-C, SIGINT or the
+/// service's Stop/Shutdown).
+fn run(cli: Cli, running: &dyn Fn(), wait: &dyn Fn()) -> i32 {
     // Logging (onesimus-daemon)
     let log_file = onesimus_daemon::logging::log_file_arg(&cli.log_file);
     onesimus_daemon::logging::init(&onesimus_daemon::logging::default_filter(cli.debug_level, &["hyper", "h2"]), log_file.as_deref());
@@ -180,6 +232,13 @@ fn main() {
 
     info!("Onesimus File Daemon Version {} starting", env!("CARGO_PKG_VERSION"));
 
+    // Windows: write or fill the configuration template (first_start.rs);
+    // on Linux the package's postinst does it.
+    #[cfg(windows)]
+    if !cli.test_config {
+        first_start::prepare(&cli.config);
+    }
+
     // Load configuration
     let fd_config = match config::FdConfig::load(&cli.config) {
         Ok(c) => {
@@ -188,28 +247,44 @@ fn main() {
         }
         Err(e) => {
             error!("failed to load config {}: {e}", cli.config.display());
-            std::process::exit(1);
+            return 1;
         }
     };
 
     if cli.test_config {
         println!("configuration OK: FD '{}', port {}, {} director(s)",
             fd_config.name, fd_config.port, fd_config.directors.len());
-        std::process::exit(0);
+        return 0;
     }
 
     // Privilege drop (onesimus-daemon, lenient as before; open point: strict)
+    #[cfg(unix)]
     onesimus_daemon::privileges::drop_privileges_lenient(cli.user.as_deref(), cli.group.as_deref());
 
     // Daemonize (onesimus-daemon)
+    #[cfg(unix)]
     if !cli.foreground {
         info!("daemonizing...");
         match onesimus_daemon::background::daemonize(std::path::Path::new("/var/lib/bareos"), None) {
             Ok(()) => info!("daemon started"),
             Err(e) => {
                 error!("FATAL: daemonize failed: {e}");
-                std::process::exit(1);
+                return 1;
             }
+        }
+    }
+
+    // Windows: no user switch (the service account is set in the service
+    // control manager, as for bareos-fd on Win32) and no fork; the working
+    // directory holds the gRPC key, so it is created for SYSTEM and
+    // Administrators only.
+    #[cfg(windows)]
+    {
+        if cli.user.is_some() || cli.group.is_some() {
+            warn!("-u/-g are ignored on Windows: the service runs as the account configured for it");
+        }
+        if let Err(e) = paths::ensure_private_dir(std::path::Path::new(&fd_config.working_directory)) {
+            warn!("cannot create working directory {}: {e}", fd_config.working_directory);
         }
     }
 
@@ -230,7 +305,7 @@ fn main() {
                 Ok(a) => a[0],
                 Err(e) => {
                     error!("{e}");
-                    std::process::exit(1);
+                    return 1;
                 }
             },
         };
@@ -245,7 +320,7 @@ fn main() {
             }
             Err(error) if explicit => {
                 error!("cannot start FD gRPC listener: {error}");
-                std::process::exit(1);
+                return 1;
             }
             Err(error) => {
                 warn!("FD gRPC listener on {address} not started, BNET only: {error}");
@@ -273,8 +348,8 @@ fn main() {
         })
         .expect("failed to spawn fd:heartbeat");
 
-    // Wait for shutdown (onesimus-daemon: ctrlc handler, SIGINT, as before)
-    onesimus_daemon::signals::wait_for_interrupt();
+    running();
+    wait();
 
     info!("Onesimus File Daemon shutting down");
     SHUTDOWN.store(true, Ordering::SeqCst);
@@ -284,6 +359,7 @@ fn main() {
     if let Some((_, handle)) = grpc_handle { handle.join().ok(); }
 
     info!("Onesimus File Daemon stopped");
+    0
 }
 
 /// Checks a bundle as a job would: trust base, local policy, signature,

@@ -90,7 +90,7 @@ impl FdConfig {
             directors: Vec::new(),
             heartbeat_interval_secs: 0,
             sd_connect_timeout_secs: 1800,
-            working_directory: "/var/lib/bareos".to_string(),
+            working_directory: crate::paths::WORKING_DIRECTORY.to_string(),
             max_network_buffer_size: 0,
             max_workers_per_job: 2,
             max_bandwidth_per_job: 0,
@@ -360,7 +360,8 @@ fn parse_block(block_type: &str, content: &str, config: &mut FdConfig) {
 
 /// The Debian multiarch triplet of the architecture ofd was built for.
 pub fn multiarch_triplet() -> Option<&'static str> {
-    Some(match (std::env::consts::ARCH, cfg!(target_env = "gnu")) {
+    // Linux only: windows-gnu is also `target_env = "gnu"`.
+    Some(match (std::env::consts::ARCH, cfg!(all(target_os = "linux", target_env = "gnu"))) {
         ("x86_64", true) => "x86_64-linux-gnu",
         ("aarch64", true) => "aarch64-linux-gnu",
         ("arm", true) if cfg!(target_abi = "eabihf") => "arm-linux-gnueabihf",

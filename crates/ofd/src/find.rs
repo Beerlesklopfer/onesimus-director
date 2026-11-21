@@ -4,8 +4,9 @@
 //! system crossing, IgnoreDir, size matching, keep atime).
 
 use std::collections::HashMap;
+#[cfg(unix)]
 use std::ffi::CString;
-use std::os::unix::ffi::OsStrExt;
+use crate::platform::OsStrExt;
 
 use crate::attribs::*;
 use crate::fileset::*;
@@ -77,6 +78,7 @@ pub trait Handler {
 /// `st_mode` is `u16` on macOS: widened like `(int64_t)` in Bareos
 /// encode_stat(); `st_flags` is saved where it exists (HAVE_CHFLAGS).
 #[allow(clippy::unnecessary_cast)]
+#[cfg(unix)]
 pub fn stat_from(st: &libc::stat) -> Stat {
     Stat {
         dev: st.st_dev as u64,
@@ -97,7 +99,7 @@ pub fn stat_from(st: &libc::stat) -> Stat {
 }
 
 /// `st_flags` (BSD file flags); Linux has none.
-#[cfg(not(target_vendor = "apple"))]
+#[cfg(all(unix, not(target_vendor = "apple")))]
 fn st_flags(_st: &libc::stat) -> u64 {
     0
 }
@@ -108,10 +110,12 @@ fn st_flags(st: &libc::stat) -> u64 {
     u64::from(st.st_flags)
 }
 
+#[cfg(unix)]
 fn cpath(p: &[u8]) -> CString {
     CString::new(p.to_vec()).unwrap_or_default()
 }
 
+#[cfg(unix)]
 pub fn lstat(p: &[u8]) -> Result<libc::stat, i32> {
     let c = cpath(p);
     let mut st: libc::stat = unsafe { std::mem::zeroed() };
@@ -124,6 +128,7 @@ pub fn lstat(p: &[u8]) -> Result<libc::stat, i32> {
 
 /// fstype() via the mount table (mntent_cache: the mount whose device is
 /// st_dev).
+#[cfg(unix)]
 pub fn fstype(fname: &[u8]) -> Option<String> {
     let st = lstat(fname).ok()?;
     let mounts = std::fs::read_to_string("/proc/self/mounts").ok()?;
@@ -144,6 +149,7 @@ pub fn fstype(fname: &[u8]) -> Option<String> {
 }
 
 /// RestoreFileTimes() (lutimes)
+#[cfg(unix)]
 fn restore_file_times(ff: &FfPkt, fname: &[u8]) {
     let c = cpath(fname);
     let times = [
@@ -152,6 +158,47 @@ fn restore_file_times(ff: &FfPkt, fname: &[u8]) {
     ];
     unsafe { libc::lutimes(c.as_ptr(), times.as_ptr()) };
 }
+
+/// The Stat record of the C runtime's `stat` (Windows; unused before W2,
+/// where Bareos fills it from `WIN32_FILE_ATTRIBUTE_DATA`, see
+/// `win32/compat/compat.cc` `fstat`/`stat2`).
+#[allow(clippy::unnecessary_cast)]
+#[cfg(windows)]
+pub fn stat_from(st: &libc::stat) -> Stat {
+    Stat {
+        dev: st.st_dev as u64,
+        ino: st.st_ino as u64,
+        mode: st.st_mode as u32,
+        nlink: st.st_nlink as u64,
+        uid: st.st_uid as u32,
+        gid: st.st_gid as u32,
+        rdev: st.st_rdev as u64,
+        size: st.st_size,
+        blksize: 4096,
+        blocks: (st.st_size + 511) / 512,
+        atime: st.st_atime,
+        mtime: st.st_mtime,
+        ctime: st.st_ctime,
+        flags: 0,
+    }
+}
+
+/// lstat() on Windows: not before W2 (`ENOSYS`); every file of a walk is
+/// then "Could not stat". Backup jobs are refused at their start.
+#[cfg(windows)]
+pub fn lstat(_p: &[u8]) -> Result<libc::stat, i32> {
+    Err(crate::platform::ENOSYS)
+}
+
+/// fstype() on Windows: unknown (Bareos: `GetVolumeInformationW`, W2).
+#[cfg(windows)]
+pub fn fstype(_fname: &[u8]) -> Option<String> {
+    None
+}
+
+/// RestoreFileTimes() on Windows: not before W2.
+#[cfg(windows)]
+fn restore_file_times(_ff: &FfPkt, _fname: &[u8]) {}
 
 /// The FileSet walker.
 pub struct Finder<'a> {

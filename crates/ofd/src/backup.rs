@@ -9,7 +9,8 @@
 
 use std::collections::HashMap;
 use std::io::{Read, Write};
-use std::os::unix::ffi::OsStrExt;
+use crate::platform::OsStrExt;
+#[cfg(unix)]
 use std::os::unix::fs::OpenOptionsExt;
 use std::sync::atomic::{AtomicBool, Ordering};
 
@@ -37,7 +38,7 @@ pub use bareos_format::msg::M_NOTSAVED;
 const O_NOATIME: i32 = libc::O_NOATIME;
 /// O_NOATIME (Linux only; elsewhere 0, like `#ifdef O_NOATIME` in Bareos
 /// bfile.cc).
-#[cfg(not(target_os = "linux"))]
+#[cfg(all(unix, not(target_os = "linux")))]
 const O_NOATIME: i32 = 0;
 
 /// SelectDataStream() (no encryption, portable data).
@@ -189,6 +190,7 @@ pub fn file_checksum(ff: &FfPkt, counters: &mut Counters, msgs: &mut JobMsgs, is
     let name = d.name();
     let mut opts = std::fs::OpenOptions::new();
     opts.read(true);
+    #[cfg(unix)]
     if ff.opts.flags.has(FO_NOATIME) {
         opts.custom_flags(O_NOATIME);
     }
@@ -467,6 +469,7 @@ impl<S: Read + Write> Backup<'_, '_, S> {
         if do_read {
             let mut opts = std::fs::OpenOptions::new();
             opts.read(true);
+            #[cfg(unix)]
             if ff.opts.flags.has(FO_NOATIME) {
                 opts.custom_flags(O_NOATIME);
             }
@@ -801,6 +804,7 @@ impl<S: Read + Write> Backup<'_, '_, S> {
     /// never called, and the guest's size, mode and time are ignored. The
     /// stream carries host IDs, mode & 0o777, only `user.*` xattrs and no
     /// devices (V-1, S-13).
+    #[cfg(unix)]
     fn save_scan_file(&mut self, session: &Session, include: &FfPkt, shown: &str, entry: &pb::FileEntry) -> bool {
         use crate::podman_scan::EntryKind;
         let taken = match session.take_scan(entry) {
@@ -894,6 +898,13 @@ impl<S: Read + Write> Backup<'_, '_, S> {
         }
         session.mark_saved(&path, ff.file_index);
         self.send_plugin_name(shown, false)
+    }
+
+    /// Host scan entries come from the Podman plugin, which is Linux-only.
+    #[cfg(windows)]
+    fn save_scan_file(&mut self, _session: &Session, _include: &FfPkt, shown: &str, _entry: &pb::FileEntry) -> bool {
+        self.jmsg(M_FATAL, format!("Plugin: \"{shown}\": host scan entries are not supported on this platform\n"));
+        false
     }
 
     /// send_plugin_name(): "<index> 1 1 <line>\0" before a plugin file,
@@ -990,7 +1001,11 @@ pub fn plugin_ff(include: &FfPkt, entry: &pb::FileEntry) -> Option<FfPkt> {
     }
     let secs = entry.modified_unix_nanos.div_euclid(1_000_000_000);
     // SAFETY: geteuid/getegid have no preconditions and cannot fail.
+    #[cfg(unix)]
     let (uid, gid) = unsafe { (libc::geteuid(), libc::getegid()) };
+    // Windows has no POSIX owner (Bareos Win32 stores 0 as uid/gid).
+    #[cfg(windows)]
+    let (uid, gid) = (0, 0);
     // Only permission bits from the guest: setuid, setgid and sticky would
     // come back as root-owned special files on a restore to files (S-13).
     let perm = entry.mode & 0o777;

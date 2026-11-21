@@ -68,6 +68,13 @@ impl Session<'_> {
     /// ValidateCommand(): the Director's (else the Client's) Allowed Job
     /// Command list.
     pub(super) fn validate_command(&mut self, cmd: &str) -> bool {
+        // Windows before W2: no file tree layer, so the file jobs end here
+        // with a fatal job message, like a command Allowed Job Cmds forbids.
+        #[cfg(windows)]
+        if matches!(cmd, "backup" | "estimate" | "verify" | "restore") {
+            self.msgs.jmsg(M_FATAL, &format!("{}.\n", crate::platform::FILE_JOBS_UNSUPPORTED));
+            return false;
+        }
         let list = if !self.director.allowed_job_cmds.is_empty() {
             &self.director.allowed_job_cmds
         } else {

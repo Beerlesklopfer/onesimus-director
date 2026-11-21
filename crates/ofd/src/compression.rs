@@ -261,22 +261,37 @@ fn fastlz_block(src: &[u8], out: &mut Vec<u8>, maxout: usize) -> bool {
 // LZO via liblzo2 (dlopen)
 // ---------------------------------------------------------------------------
 
-type LzoDecompress = unsafe extern "C" fn(*const u8, usize, *mut u8, *mut usize, *mut libc::c_void) -> libc::c_int;
-
-fn lzo_fn() -> Option<LzoDecompress> {
-    static F: std::sync::OnceLock<Option<usize>> = std::sync::OnceLock::new();
-    let addr = *F.get_or_init(|| unsafe {
-        for lib in [c"liblzo2.so.2", c"liblzo2.so"] {
+/// The address of `symbol` in the first of `libs` that `dlopen` finds.
+#[cfg(unix)]
+fn dl_symbol(libs: &[&std::ffi::CStr], symbol: &std::ffi::CStr) -> Option<usize> {
+    for lib in libs {
+        // SAFETY: NUL-terminated names; the handle stays open for the process.
+        unsafe {
             let h = libc::dlopen(lib.as_ptr(), libc::RTLD_NOW);
             if !h.is_null() {
-                let s = libc::dlsym(h, c"lzo1x_decompress_safe".as_ptr());
+                let s = libc::dlsym(h, symbol.as_ptr());
                 if !s.is_null() {
                     return Some(s as usize);
                 }
             }
         }
-        None
-    });
+    }
+    None
+}
+
+/// Windows: no system liblzo2/zlib is loaded. LZO is then "not supported"
+/// (as on a Linux host without liblzo2); GZIP uses flate2 (Bareos ships
+/// zlib and LZO DLLs with its Windows client: open point for W2).
+#[cfg(windows)]
+fn dl_symbol(_libs: &[&std::ffi::CStr], _symbol: &std::ffi::CStr) -> Option<usize> {
+    None
+}
+
+type LzoDecompress = unsafe extern "C" fn(*const u8, usize, *mut u8, *mut usize, *mut libc::c_void) -> libc::c_int;
+
+fn lzo_fn() -> Option<LzoDecompress> {
+    static F: std::sync::OnceLock<Option<usize>> = std::sync::OnceLock::new();
+    let addr = *F.get_or_init(|| dl_symbol(&[c"liblzo2.so.2", c"liblzo2.so"], c"lzo1x_decompress_safe"));
     addr.map(|a| unsafe { std::mem::transmute::<usize, LzoDecompress>(a) })
 }
 
@@ -598,18 +613,7 @@ type ZCompress2 = unsafe extern "C" fn(*mut u8, *mut libc::c_ulong, *const u8, l
 /// fresh stream produces); None without libz.
 fn zlib_compress2() -> Option<ZCompress2> {
     static F: std::sync::OnceLock<Option<usize>> = std::sync::OnceLock::new();
-    let addr = *F.get_or_init(|| unsafe {
-        for lib in [c"libz.so.1", c"libz.so"] {
-            let h = libc::dlopen(lib.as_ptr(), libc::RTLD_NOW);
-            if !h.is_null() {
-                let s = libc::dlsym(h, c"compress2".as_ptr());
-                if !s.is_null() {
-                    return Some(s as usize);
-                }
-            }
-        }
-        None
-    });
+    let addr = *F.get_or_init(|| dl_symbol(&[c"libz.so.1", c"libz.so"], c"compress2"));
     addr.map(|a| unsafe { std::mem::transmute::<usize, ZCompress2>(a) })
 }
 
@@ -636,18 +640,7 @@ type LzoCompress = unsafe extern "C" fn(*const u8, usize, *mut u8, *mut usize, *
 
 fn lzo_compress_fn() -> Option<LzoCompress> {
     static F: std::sync::OnceLock<Option<usize>> = std::sync::OnceLock::new();
-    let addr = *F.get_or_init(|| unsafe {
-        for lib in [c"liblzo2.so.2", c"liblzo2.so"] {
-            let h = libc::dlopen(lib.as_ptr(), libc::RTLD_NOW);
-            if !h.is_null() {
-                let s = libc::dlsym(h, c"lzo1x_1_compress".as_ptr());
-                if !s.is_null() {
-                    return Some(s as usize);
-                }
-            }
-        }
-        None
-    });
+    let addr = *F.get_or_init(|| dl_symbol(&[c"liblzo2.so.2", c"liblzo2.so"], c"lzo1x_1_compress"));
     addr.map(|a| unsafe { std::mem::transmute::<usize, LzoCompress>(a) })
 }
 

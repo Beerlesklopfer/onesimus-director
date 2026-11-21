@@ -22,6 +22,7 @@ use std::fs::{File, OpenOptions};
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
+#[cfg(unix)]
 use std::os::unix::fs::OpenOptionsExt;
 
 /// One synchronized sink for protocol debug messages and daemon diagnostics.
@@ -48,8 +49,7 @@ impl TraceOutput {
             return Ok(());
         }
         if current.as_ref().is_some_and(|(active, _)| active == path) { return Ok(()); }
-        let file = OpenOptions::new().append(true).create(true).mode(0o600)
-            .custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK).open(path)?;
+        let file = open_trace_file(path)?;
         if !file.metadata()?.is_file() { return Err(io::Error::other("trace path is not a regular file")); }
         *current = Some((path.to_path_buf(), file));
         Ok(())
@@ -67,6 +67,23 @@ impl TraceOutput {
         }
         Ok(true)
     }
+}
+
+/// Opens a trace file append-only, mode 0600, without following a symlink.
+#[cfg(unix)]
+fn open_trace_file(path: &Path) -> io::Result<File> {
+    OpenOptions::new().append(true).create(true).mode(0o600)
+        .custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK).open(path)
+}
+
+/// Windows: no `O_NOFOLLOW`; a symlink (or junction) at `path` is refused
+/// before opening. The file inherits the ACL of its directory.
+#[cfg(windows)]
+fn open_trace_file(path: &Path) -> io::Result<File> {
+    if std::fs::symlink_metadata(path).is_ok_and(|m| m.file_type().is_symlink()) {
+        return Err(io::Error::other("trace path is a symbolic link"));
+    }
+    OpenOptions::new().append(true).create(true).open(path)
 }
 
 static TRACE_OUTPUT: TraceOutput = TraceOutput::new();

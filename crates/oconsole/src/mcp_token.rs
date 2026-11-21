@@ -1,6 +1,7 @@
 //! Persistent bearer credential for the HTTP MCP endpoint.
 use std::fs::{DirBuilder, OpenOptions};
 use std::io::{Read, Write};
+#[cfg(unix)]
 use std::os::unix::fs::{DirBuilderExt, MetadataExt, OpenOptionsExt};
 use std::path::{Path, PathBuf};
 
@@ -10,6 +11,10 @@ use rand::RngCore;
 pub fn default_path() -> anyhow::Result<PathBuf> {
     let base = match std::env::var_os("XDG_CONFIG_HOME") {
         Some(path) => PathBuf::from(path),
+        // Windows without HOME: %APPDATA%\oconsole\mcp.token
+        None if cfg!(windows) && std::env::var_os("HOME").is_none() => PathBuf::from(
+            std::env::var_os("APPDATA").context("APPDATA is unset; supply --mcp-token-file")?,
+        ),
         None => PathBuf::from(
             std::env::var_os("HOME").context("HOME is unset; supply --mcp-token-file")?,
         )
@@ -20,17 +25,19 @@ pub fn default_path() -> anyhow::Result<PathBuf> {
 
 pub fn load_or_create(path: &Path) -> anyhow::Result<String> {
     if let Some(parent) = path.parent().filter(|p| !p.as_os_str().is_empty()) {
-        DirBuilder::new()
-            .recursive(true)
-            .mode(0o700)
-            .create(parent)?;
+        let mut builder = DirBuilder::new();
+        builder.recursive(true);
+        #[cfg(unix)]
+        builder.mode(0o700);
+        builder.create(parent)?;
     }
-    match OpenOptions::new()
-        .write(true)
-        .create_new(true)
-        .mode(0o600)
-        .open(path)
-    {
+    // Windows: no mode; the file inherits the ACL of the user's profile
+    // directory (only the user, SYSTEM and Administrators).
+    let mut create = OpenOptions::new();
+    create.write(true).create_new(true);
+    #[cfg(unix)]
+    create.mode(0o600);
+    match create.open(path) {
         Ok(mut file) => {
             let mut bytes = [0u8; 32];
             rand::rngs::OsRng.fill_bytes(&mut bytes);
@@ -40,18 +47,36 @@ pub fn load_or_create(path: &Path) -> anyhow::Result<String> {
             Ok(token)
         }
         Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {
+            #[cfg(unix)]
             let mut file = OpenOptions::new()
                 .read(true)
                 .custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK)
                 .open(path)?;
-            let metadata = file.metadata()?;
-            if metadata.len() > 128
-                || !metadata.is_file()
-                || metadata.mode() & 0o077 != 0
-                || metadata.uid() != unsafe { libc::geteuid() }
+            #[cfg(unix)]
             {
-                bail!("MCP token file must be a regular file owned by this user with mode 0600");
+                let metadata = file.metadata()?;
+                if metadata.len() > 128
+                    || !metadata.is_file()
+                    || metadata.mode() & 0o077 != 0
+                    || metadata.uid() != unsafe { libc::geteuid() }
+                {
+                    bail!("MCP token file must be a regular file owned by this user with mode 0600");
+                }
             }
+            // Windows: no owner/mode check (open point: owner SID and ACL);
+            // a link or anything but a small regular file is refused.
+            #[cfg(windows)]
+            let mut file = {
+                if std::fs::symlink_metadata(path)?.file_type().is_symlink() {
+                    bail!("MCP token file must be a regular file, not a link");
+                }
+                let file = OpenOptions::new().read(true).open(path)?;
+                let metadata = file.metadata()?;
+                if metadata.len() > 128 || !metadata.is_file() {
+                    bail!("MCP token file must be a regular file");
+                }
+                file
+            };
             let mut token = String::new();
             Read::by_ref(&mut file)
                 .take(128)

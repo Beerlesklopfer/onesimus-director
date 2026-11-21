@@ -11,7 +11,14 @@ aquamarine.workspace = true
 bareos-bnet.workspace = true
 bareos-format.workspace = true
 ctrlc.workspace = true
-daemonize.workspace = true
-nix.workspace = true
 tracing.workspace = true
 tracing-subscriber.workspace = true
+
+# fork/setsid, Signale, uid/gid: nur Unix (Windows: Dienst-Rahmen, src/winservice.rs)
+[target.'cfg(unix)'.dependencies]
+daemonize.workspace = true
+nix.workspace = true
+
+# Anmeldung beim Service Control Manager (src/winservice.rs)
+[target.'cfg(windows)'.dependencies]
+windows-service = "0.8"

@@ -35,6 +35,13 @@
 //! 6. Threads starten, dann [`signals::wait_for_shutdown`] bzw.
 //!    [`signals::wait_for_interrupt`].
 //!
+//! Windows (seit 21.11.2026): Hintergrund-Start, Rechteabgabe und die
+//! Unix-Signale gibt es dort nicht ([`background`], [`privileges`] und
+//! die Signalmasken in [`signals`] sind `cfg(unix)`). An ihre Stelle tritt
+//! der Dienst-Rahmen `winservice` (Anmeldung beim Service Control
+//! Manager, Stop/Shutdown); [`signals::wait_for_interrupt`] (Strg-C) gilt
+//! auf beiden Plattformen für den Start aus der Konsole.
+//!
 //! Bareos-Gegenstück: `core/src/lib/daemon.cc` (`daemon_start`),
 //! `lib/bsys.cc` (`drop`, `CreatePidFile`, `DeletePidFile`),
 //! `lib/signal.cc` (`InitSignals`), `include/exit_codes.h`, `filed/filed.cc`
@@ -53,6 +60,7 @@
 #![deny(clippy::missing_docs_in_private_items)]
 
 pub mod accept;
+#[cfg(unix)]
 pub mod background;
 pub mod bwlimit;
 pub mod config_check;
@@ -61,8 +69,11 @@ pub mod glossary;
 pub mod handshake;
 pub mod logging;
 pub mod pidfile;
+#[cfg(unix)]
 pub mod privileges;
 pub mod version;
+#[cfg(windows)]
+pub mod winservice;
 #[cfg_attr(doc, aquamarine::aquamarine)]
 /// Signale: Abschalten (`SIGTERM`, `SIGINT`) und Neuladen (`SIGHUP`).
 ///
