@@ -106,3 +106,12 @@ Reihenfolge, wenn Windows angegangen wird: `daemonize` und Signale hinter
 `cfg(unix)` (Dienst-Rahmen für Windows), Podman-Crates optional machen,
 Regex in `breg.rs`, danach `odir` (fork → Prozessstart) und zuletzt der
 Win32-Dateizugriff in `ofd`.
+
+## Windows: Anforderungen aus dem MSI-Installer der GUI (21.11.2026)
+
+Die GUI-Sitzung hat einen MSI-Installer (WiX 6, GitHub Actions im GUI-Repo, Branch `ci`) gebaut. Für ofd unter Windows folgt daraus:
+
+- **Dienststeuerung:** ofd muss sich beim Service Control Manager anmelden (`StartServiceCtrlDispatcher`/`SetServiceStatus`, z. B. Crate `windows-service`) und auf Stop/Shutdown reagieren; sonst bricht der Dienststart mit Fehler 1053 ab. Bis dahin registriert der Installer den Dienst `ofd` nur mit Startart „manuell“ und startet ihn nicht.
+- **Konfigurationsvorlage:** Ersetzung der Platzhalter (`@CLIENT_NAME@`, Passwort) beim ersten Start oder durch den Installer; der Installer legt nur `C:\ProgramData\Onesimus\bareos-fd.d\` an (Rechte: SYSTEM/Administratoren).
+- **Release-Artefakt:** der Installer holt `onesimus-dird-<version>-windows-x86_64.zip` (`bin/oconsole.exe`, `bin/ofd.exe`) per URL und SHA-256; das liefert erst die Windows-CI dieses Repos.
+- **Offen beim Maintainer:** Dienstname (`ofd`), Ports (9102/10102) und Pfade (`C:\ProgramData\Onesimus\…`) sind Vorschlag; sie stehen im GUI-Repo in `packaging/windows/config.wxi`.
