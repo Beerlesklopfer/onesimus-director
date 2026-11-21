@@ -248,6 +248,11 @@ fn locate(raw: &[ConfResource], error: &ConfigError, read: Reader) -> Option<Pos
         file: source.display().to_string(), line: line + 1, col: col + 1, text: lines[line].to_string() });
     match &error.anchor {
         Anchor::End => position(end_line, end_col),
+        Anchor::EndOfValue(key) => (start + 1..=end_line).find_map(|i| {
+            let line = code(&lines[i]);
+            keyword_end(line, key)?;
+            Some((i, line.trim_end().len()))
+        }).and_then(|(i, col)| position(i, col)),
         Anchor::Keyword(key) => (start..=end_line)
             .find_map(|i| keyword_end(code(&lines[i]), key).filter(|_| i != start).map(|col| (i, col)))
             .and_then(|(i, col)| position(i, col)),
@@ -357,6 +362,38 @@ mod tests {
             Config error: Keyword \"Base\" not permitted in this resource.\n\
             Perhaps you left the trailing brace off of the previous resource.\n            : line 4, col 7 of file {}\n\
             \x20 Base = a\n\n", file(&dir)), 42));
+    }
+
+    /// S-57: a value of the wrong type is rejected as the original does,
+    /// each message and position taken from `bareos-dir -t` (25.1.3) for the
+    /// same file.
+    #[test]
+    fn a_malformed_value_is_a_config_error_with_the_originals_text() {
+        for (directive, at, message, col) in [
+            ("Volume Retention = 10 x", "lib/res.cc:1089", "expected a time period, got: 10x", 26),
+            ("Volume Retention = ten days", "lib/res.cc:1089", "expected a time period, got: tendays", 30),
+            ("Volume Retention = \"10 x\"", "lib/res.cc:1095", "expected a time period, got: 10 x", 28),
+            ("Maximum Volume Bytes = 5 zz", "lib/res.cc:995", "expected a size number, got: zz", 30),
+            ("Maximum Volumes = abc", "lib/lex.cc:471", "expected a positive integer number, got: abc", 24),
+            ("Maximum Volumes = -1", "lib/lex.cc:476", "expected a positive integer number, got: -1", 23),
+            ("Auto Prune = maybe", "lib/res.cc:1137", "Expect YES, NO, TRUE, or FALSE, got: maybe", 21),
+            ("Auto Prune = 1", "lib/lex.cc:996", "expected a name, got BCT_NUMBER: 1", 17),
+        ] {
+            let dir = config_dir("value", JOB);
+            let pool = dir.join("bareos-dir.d/pool/x.conf");
+            std::fs::write(&pool, format!("Pool {{\n  Name = Full\n  Pool Type = Backup\n  {directive}\n}}\n")).unwrap();
+            let (text, code) = run_with(&dir, std::time::Duration::ZERO);
+            assert_eq!(code, 42, "{directive}: {text}");
+            assert_eq!(text, format!("odir: CONFIG ERROR at {at}\nConfig error: {message}\n            : line 4, col {col} of file {}\n  {directive}\n\n",
+                pool.display()), "{directive}");
+        }
+        for fine in ["Volume Retention = 30d", "Volume Retention = 1 year 6 months", "Volume Retention = 5 minutes 3 q",
+                     "Maximum Volume Bytes = 50G", "Maximum Volumes = 1.5", "Auto Prune = No"] {
+            let dir = config_dir("valuefine", JOB);
+            std::fs::write(dir.join("bareos-dir.d/pool/x.conf"), format!("Pool {{\n  Name = Full\n  Pool Type = Backup\n  {fine}\n}}\n")).unwrap();
+            let (text, _) = run_with(&dir, std::time::Duration::ZERO);
+            assert!(!text.contains("expected") && !text.contains("Expect YES"), "{fine}: {text}");
+        }
     }
 
     #[test]

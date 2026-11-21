@@ -62,6 +62,9 @@ pub enum Anchor {
     Value { key: String, value: String },
     /// At the closing brace of the resource.
     End,
+    /// After the last token of the value of directive `key` (the lexer has
+    /// read the whole value when a value check fails).
+    EndOfValue(String),
 }
 
 impl Diag {
@@ -117,6 +120,53 @@ fn kind_of_code(code: &str) -> Option<&'static str> {
     KINDS.iter().find(|k| k.3 == code).map(|k| k.0)
 }
 
+/// Why the value of `d` is not a `ty`, as the original's lexer and store
+/// functions say it (`scan_err`): the source position of that call and the
+/// message. `None` for a value that is fine or of a type not checked here.
+fn value_error(ty: Ty, d: &Directive) -> Option<(&'static str, String)> {
+    use bareos_config::raw::Tok;
+    let words: Vec<&Tok> = d.tokens.iter().filter(|t| matches!(t, Tok::Word(_) | Tok::Quoted(_))).collect();
+    let first = words.first()?;
+    let text = |t: &Tok| t.text().unwrap_or("").to_string();
+    match ty {
+        Ty::Time => {
+            if let (1, Tok::Quoted(s)) = (words.len(), first) {
+                return crate::commands::show::parse_duration(s).is_none()
+                    .then(|| ("lib/res.cc:1095", format!("expected a time period, got: {s}")));
+            }
+            let joined: Vec<String> = words.iter().map(|t| text(t)).collect();
+            crate::commands::show::parse_duration(&joined.join(" ")).is_none()
+                .then(|| ("lib/res.cc:1089", format!("expected a time period, got: {}", joined.concat())))
+        }
+        Ty::Size32 | Ty::Size64 => {
+            let tokens: Vec<String> = words.iter().map(|t| text(t)).collect();
+            (1..=tokens.len()).find(|n| crate::commands::show::parse_size(&tokens[..*n].join(" ")).is_none())
+                .map(|n| ("lib/res.cc:995", format!("expected a size number, got: {}", tokens[n - 1])))
+        }
+        Ty::Pint32 => {
+            let token = text(first);
+            if token.starts_with('-') {
+                return Some(("lib/lex.cc:476", format!("expected a positive integer number, got: {token}")));
+            }
+            let number = !token.is_empty() && token.chars().all(|c| c.is_ascii_digit() || c == '.')
+                && token.matches('.').count() <= 1 && token.starts_with(|c: char| c.is_ascii_digit());
+            (!number).then(|| ("lib/lex.cc:471", format!("expected a positive integer number, got: {token}")))
+        }
+        Ty::Bool | Ty::Bit => {
+            let token = text(first);
+            let name = ["yes", "no", "true", "false"].iter().any(|b| token.eq_ignore_ascii_case(b));
+            if name {
+                None
+            } else if matches!(first, Tok::Word(_)) && token.parse::<f64>().is_ok() {
+                Some(("lib/lex.cc:996", format!("expected a name, got BCT_NUMBER: {token}")))
+            } else {
+                Some(("lib/res.cc:1137", format!("Expect YES, NO, TRUE, or FALSE, got: {token}")))
+            }
+        }
+        _ => None,
+    }
+}
+
 /// The directive table of a resource type (as written).
 pub fn items_of(rtype: &str) -> Option<&'static [Item]> {
     kind(rtype).map(|k| k.2)
@@ -152,14 +202,25 @@ pub fn check(raw: &[ConfResource], base: &str) -> Result<(), Vec<Diag>> {
         let Some(&(norm, cname, items, _)) = kind(&res.rtype) else {
             return Err(vec![Diag::Parser(format!("unknown resource type {}", res.rtype))]);
         };
-        if let Some(d) = res.directives.iter().find(|d| {
-            item_of(items, &d.key).is_none() && !EXTENSIONS.contains(&(norm, d.norm_key().as_str()))
-        }) {
-            return Err(vec![Diag::Config(ConfigError {
-                at: "lib/parse_conf_state_machine.cc:162",
-                message: format!("Keyword \"{}\" not permitted in this resource.\n\
-                    Perhaps you left the trailing brace off of the previous resource.", d.key),
-                resource: index, anchor: Anchor::Keyword(d.key.clone()) })]);
+        // The original reads a resource directive by directive: the first
+        // unknown keyword or malformed value in file order ends the check.
+        for d in &res.directives {
+            match item_of(items, &d.key) {
+                None if !EXTENSIONS.contains(&(norm, d.norm_key().as_str())) => {
+                    return Err(vec![Diag::Config(ConfigError {
+                        at: "lib/parse_conf_state_machine.cc:162",
+                        message: format!("Keyword \"{}\" not permitted in this resource.\n\
+                            Perhaps you left the trailing brace off of the previous resource.", d.key),
+                        resource: index, anchor: Anchor::Keyword(d.key.clone()) })]);
+                }
+                Some(item) => {
+                    if let Some((at, message)) = value_error(item.ty, d) {
+                        return Err(vec![Diag::Config(ConfigError {
+                            at, message, resource: index, anchor: Anchor::EndOfValue(d.key.clone()) })]);
+                    }
+                }
+                None => {}
+            }
         }
         let Some(name) = res.name() else {
             return Err(vec![Diag::Daemon(format!(
