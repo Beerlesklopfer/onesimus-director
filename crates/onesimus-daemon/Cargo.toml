@@ -16,8 +16,8 @@ tracing-subscriber.workspace = true
 
 # fork/setsid, Signale, uid/gid: nur Unix (Windows: Dienst-Rahmen, src/winservice.rs)
 [target.'cfg(unix)'.dependencies]
-daemonize.workspace = true
 nix.workspace = true
+libc.workspace = true
 
 # Anmeldung beim Service Control Manager (src/winservice.rs)
 [target.'cfg(windows)'.dependencies]

@@ -12,9 +12,6 @@ all-features = false
 unmaintained = "workspace"
 yanked = "warn"
 ignore = [
-    # daemonize: seit 2023 ohne Pflege (UB-Korrektur offen). Ersatz: der eigene
-    # Hintergrundstart von onesimus-daemon (background.rs) für odir; STUBS S-58.
-    { id = "RUSTSEC-2025-0069", reason = "daemonize unmaintained; replacement tracked in docs/STUBS.md S-58" },
     { id = "RUSTSEC-2026-0543", reason = "chrono unmaintained; replacement tracked in docs/STUBS.md S-58" },
 ]
 

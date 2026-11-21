@@ -411,15 +411,11 @@ fn main() {
     // only the calling thread) and before privileges are dropped (PID file).
     if !cli.foreground && !cli.test_config {
         info!("daemonizing...");
-        let mut daemon = daemonize::Daemonize::new()
-            .working_directory(&config.director.working_directory);
-
-        if let Some(ref pid_file) = cli.pid_file {
-            daemon = daemon.pid_file(pid_file);
-        }
-
-        match daemon.start() {
-            Ok(_) => info!("daemon started"),
+        match onesimus_daemon::background::daemonize(
+            std::path::Path::new(&config.director.working_directory),
+            cli.pid_file.as_deref(),
+        ) {
+            Ok(()) => info!("daemon started"),
             Err(e) => {
                 error!("FATAL: daemonize failed: {e}");
                 std::process::exit(1);
@@ -427,7 +423,7 @@ fn main() {
         }
     }
 
-    // -p/--pid-file in foreground mode (daemonize writes it itself)
+    // -p/--pid-file in foreground mode (the background start writes it itself)
     if cli.foreground {
         if let Some(ref pid_file) = cli.pid_file {
             if let Err(e) = std::fs::write(pid_file, format!("{}\n", std::process::id())) {
