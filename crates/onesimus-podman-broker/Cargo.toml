@@ -4,7 +4,8 @@ description = "Broker of the signed Podman plugin for ofd: runs as the account i
 version.workspace = true
 edition.workspace = true
 authors.workspace = true
-license = "AGPL-3.0-only"
+# Eigener Teil, nicht von Bareos abgeleitet: duale Lizenz (docs/LIZENZEN.md)
+license = "AGPL-3.0-only OR LicenseRef-Onesimus-Commercial"
 
 [[bin]]
 name = "onesimus-podman-broker"

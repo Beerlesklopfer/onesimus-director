@@ -4,7 +4,8 @@ description = "Shared-memory block ring of osd: one producer (network session), 
 version.workspace = true
 edition.workspace = true
 authors.workspace = true
-license.workspace = true
+# Eigener Teil, nicht von Bareos abgeleitet: duale Lizenz (docs/LIZENZEN.md)
+license = "AGPL-3.0-only OR LicenseRef-Onesimus-Commercial"
 
 [dependencies]
 aquamarine.workspace = true

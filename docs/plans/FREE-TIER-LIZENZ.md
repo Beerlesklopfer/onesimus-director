@@ -17,7 +17,7 @@ Korrektur des Nutzers (21.11.2026): „Das ist der Zusatz der AGPL-Lizenz. Wer d
 - Empfehlung: Klärung durch einen Anwalt für Open-Source-Lizenzen, insbesondere ob odir ein abgeleitetes Werk von Bareos ist. Die Technik unten ist von dieser Entscheidung unabhängig.
 
 **Entscheidung des Nutzers (21.11.2026): duale Lizenz** (AGPL plus kommerzielle Lizenz) für die Teile, die ihm allein gehören und nicht von Bareos abgeleitet sind: Lizenzmodul, GUI, osd-Erweiterungen, Plattenband. Folgen:
-- Code trennen: je Crate festhalten, ob von Bareos abgeleitet (AGPL der Bareos-Urheber) oder eigen (dual); Lizenz- und Copyright-Angabe je Crate.
+- Code trennen: je Crate festhalten, ob von Bareos abgeleitet (AGPL der Bareos-Urheber) oder eigen (dual); Lizenz- und Copyright-Angabe je Crate. Umgesetzt: [docs/LIZENZEN.md](../LIZENZEN.md) (Bestandsaufnahme, `license` je Crate, offene Trennungen).
 - Die Lizenz- und Limit-Prüfung kommt in eine eigene Crate außerhalb des Bareos-abgeleiteten Kerns.
 - Beiträge Dritter zu dual lizenzierten Teilen nur mit CLA.
 - **Offen:** Auf der AGPL-Seite darf jeder das Limit mit veröffentlichtem Quelltext entfernen; soll das Umgehen ein Lizenzbruch sein, braucht die Limit-Crate eine Source-available- oder kommerzielle statt der AGPL-Lizenz.

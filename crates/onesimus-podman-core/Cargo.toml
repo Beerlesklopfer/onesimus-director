@@ -4,7 +4,8 @@ description = "Shared logic of the Podman plugin host side and broker: plugin li
 version.workspace = true
 edition.workspace = true
 authors.workspace = true
-license = "AGPL-3.0-only"
+# Eigener Teil, nicht von Bareos abgeleitet: duale Lizenz (docs/LIZENZEN.md)
+license = "AGPL-3.0-only OR LicenseRef-Onesimus-Commercial"
 
 [dependencies]
 serde.workspace = true

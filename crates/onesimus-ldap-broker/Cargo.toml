@@ -4,7 +4,8 @@ description = "Broker of the signed OpenLDAP plugin for ofd: runs as the slapd u
 version.workspace = true
 edition.workspace = true
 authors.workspace = true
-license = "AGPL-3.0-only"
+# Eigener Teil, nicht von Bareos abgeleitet: duale Lizenz (docs/LIZENZEN.md)
+license = "AGPL-3.0-only OR LicenseRef-Onesimus-Commercial"
 
 [[bin]]
 name = "onesimus-ldap-broker"
