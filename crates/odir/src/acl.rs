@@ -211,8 +211,7 @@ pub const ASSISTANT_REFUSED: [&str; 5] = [".acl", ".profile", "sqlquery", ".sql"
 /// Whether `console` is an assistant console (name ends in
 /// [`ASSISTANT_SUFFIX`], any case).
 pub fn is_assistant(console: &str) -> bool {
-    console.len() > ASSISTANT_SUFFIX.len()
-        && console.to_ascii_lowercase().ends_with(ASSISTANT_SUFFIX)
+    console.to_ascii_lowercase().ends_with(ASSISTANT_SUFFIX)
 }
 
 /// The assistant tier: false only for a command of [`ASSISTANT_REFUSED`]
@@ -652,7 +651,7 @@ Console {{ Name=admin; Password=pw; CommandACL=*all* }}
         for c in ["run", "restore", "purge", "delete", "cancel", "label", "reload", ".bvfs_restore"] {
             assert!(!allowed(&cfg, "Helper-MCP", Kind::Command, c), "{c}");
         }
-        assert!(!is_assistant("-mcp") && is_assistant("x-mcp") && !is_assistant("mcp"));
+        assert!(is_assistant("-mcp") && is_assistant("x-mcp") && is_assistant("X-MCP") && !is_assistant("mcp"));
         let refused = grant_error(&cfg, "admin-mcp", &["assistant"]).unwrap();
         assert!(refused.contains("creates no consoles"), "{refused}");
     }
