@@ -28,7 +28,7 @@ Entscheidung des Maintainers (19.11.2026): Der MCP-Weg **muss** eine eigene Cons
 
 **Grenzen jeder `*-mcp`-Console (im Director durchgesetzt, 21.11.2026):** Unabhängig von ihren ACLs und Profilen führt der Director für eine Console, deren Name auf `-mcp` endet (Groß-/Kleinschreibung gleich), nie aus: `.acl`, `.profile` (ACL-Änderungen, mit denen sie ihre eigenen Grenzen aufheben könnte) und `sqlquery`, `.sql`, `query` (rohes SQL, der einzige Weg zu gespeicherten Inhalten wie der Katalogtabelle RestoreObject). Sie legt auch keine Consolen an (`configure add console`). Alles andere folgt den ACLs der Console. Test: `acl::tests::assistant_consoles_never_change_acls_or_read_sql`.
 
-**Profil `assistant`** (`config/bareos-dir.d/profile/assistant.conf`, im Paket unter `/usr/share/bareos/defaultconfigs/bareos-dir.d/profile/`): lesen (`status`, `show`, `list`, `llist`, `.bvfs_*`, `.ovfs_*` …) und `configure`; kein `run`, `restore`, `purge`, `delete`, `cancel`, `label`, `reload`. Wer dem MCP mehr geben will, ergänzt das in der Console selbst.
+**Profil `assistant`** (`config/bareos-dir.d/profile/assistant.conf`, im Quellbaum; das Paket legt es ab dem nächsten Paketbau unter `/usr/share/bareos/defaultconfigs/bareos-dir.d/profile/` ab): lesen (`status`, `show`, `list`, `llist`, `.bvfs_*`, `.ovfs_*` …) und `configure`; kein `run`, `restore`, `purge`, `delete`, `cancel`, `label`, `reload`. Wer dem MCP mehr geben will, ergänzt das in der Console selbst.
 
 Beispiel `oconsole.conf`:
 
@@ -50,7 +50,7 @@ Jedes Tool prüft zuerst seine Parameter und baut daraus die Konsolenzeile. Dann
 
 `configure_delete`, `delete` mit `kind: storage` und `setbandwidth` (auch `limit: 0` und `all: true`) gehen über die typisierte RPC (S-38/S-39: der Entwicklungs-Director baut dafür die Zeilen, die seine Befehle annehmen; `SetBandwidth` hat ein optionales `limit`). 
 
-`configure_update` ändert Direktiven über das Konfigurations-CRUD des Directors ([CONFIG-CRUD-GRPC.md](../plans/CONFIG-CRUD-GRPC.md)), nie über die Konsolenzeile `configure update` (die schrieb in älteren odir-Versionen eine Client-Datei mit vier Feldern neu und verlor die übrigen Direktiven, K-10). Typen: `client`, `job`, `jobdefs`, `schedule`, `fileset`. Die Textänderung ist dieselbe wie bei `configure update` im Director (`bareos_config::edit`). Beispiel – Beschreibung und Run-Zeilen eines Schedules:
+`configure_update` ändert Direktiven über das Konfigurations-CRUD des Directors ([CONFIG-CRUD-GRPC.md](../plans/CONFIG-CRUD-GRPC.md)), nie über die Konsolenzeile `configure update` (die schrieb in älteren odir-Versionen eine Client-Datei mit vier Feldern neu und verlor die übrigen Direktiven, K-10). Typen: `client`, `job`, `jobdefs`, `schedule`, `fileset`, `pool`, `storage`. Die Textänderung ist dieselbe wie bei `configure update` im Director (`bareos_config::edit`). Beispiel – Beschreibung und Run-Zeilen eines Schedules:
 
 ```json
 { "resource": "schedule", "name": "WeeklyCycle",

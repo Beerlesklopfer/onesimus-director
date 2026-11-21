@@ -804,7 +804,7 @@ fn configure_export(ast: &CommandAst, ctx: &ExecContext, layout: Option<&Layout>
 /// checksum, so the reference check (REFERENCED: a Job still names the
 /// Client/FileSet/Schedule …), the `odir -t` check of the remaining
 /// configuration, the atomic file change and the reload with rollback all
-/// apply. Types the CRUD does not edit (Pool, Storage, Console) are refused:
+/// apply. Types the CRUD does not edit (Console) are refused:
 /// the earlier implementation removed them from memory and deleted the file
 /// without any reference check.
 fn configure_delete(ast: &CommandAst, ctx: &ExecContext) -> CommandResult {
@@ -1022,7 +1022,7 @@ pub(crate) fn configure_update_with(ast: &CommandAst, ctx: &ExecContext, editor:
     use crate::config_edit::{RType, Status};
     use bareos_config::edit::{norm_key, Edit};
     /// Types without a CRUD type: refused with a hint.
-    const UNSUPPORTED: [&str; 3] = ["pool", "storage", "console"];
+    const UNSUPPORTED: [&str; 1] = ["console"];
     let Some(at) = ast.arguments.iter().position(|a| a.value.is_some()) else {
         return CommandResult::error(UPDATE_USAGE.to_string());
     };
