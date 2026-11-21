@@ -667,10 +667,22 @@ mod tests {
         let begin = Instant::now();
         b.stop(Duration::from_millis(500));
         assert!(begin.elapsed() < Duration::from_secs(3));
-        // No member of the group is left.
-        // SAFETY: probing a process group with signal 0.
-        let alive = unsafe { libc::kill(-b.pid, 0) } == 0;
-        assert!(!alive, "a child of the broker survived");
+        // No living member of the group is left. Zombies do not count: an
+        // orphaned grandchild goes to PID 1, and in a container (CI) PID 1
+        // may never reap it, so `kill(-pgid, 0)` would still see it.
+        let living = |pgid: i32| -> Vec<String> {
+            std::fs::read_dir("/proc").into_iter().flatten().flatten().filter_map(|e| {
+                let stat = std::fs::read_to_string(e.path().join("stat")).ok()?;
+                // pid (comm) state ppid pgrp …; comm may contain spaces
+                let rest = &stat[stat.rfind(')')? + 2..];
+                let mut f = rest.split(' ');
+                let state = f.next()?;
+                let pgrp: i32 = f.nth(1)?.parse().ok()?;
+                (pgrp == pgid && state != "Z" && state != "X").then(|| stat)
+            }).collect()
+        };
+        let survivors = living(b.pid);
+        assert!(survivors.is_empty(), "a child of the broker survived: {survivors:?}");
         std::fs::remove_dir_all(&d).unwrap();
     }
 }
