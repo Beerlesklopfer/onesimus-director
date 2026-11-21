@@ -106,6 +106,10 @@ struct Cli {
     #[arg(short, long, default_value = "/etc/bareos/bareos-dir.d")]
     config: PathBuf,
 
+    /// Log file (also stderr or the trace file); `none` for no log file.
+    #[arg(long, value_name = "PATH", default_value = "/var/log/onesimus/odir.log")]
+    log_file: PathBuf,
+
     /// Set debug level to <level>.
     #[arg(short, long, default_value_t = 0)]
     debug_level: u32,
@@ -268,9 +272,13 @@ fn main() {
     let (filter_layer, filter_handle) = tracing_subscriber::reload::Layer::new(
         EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new(&filter)));
     logging::install(filter_handle);
+    // stderr or the trace file (DebugWriter), and the log file
+    let log_file = onesimus_daemon::logging::log_file_arg(&cli.log_file)
+        .and_then(|path| onesimus_daemon::logging::open_log_file(&path));
     tracing_subscriber::registry().with(filter_layer)
         .with(tracing_subscriber::fmt::layer().with_ansi(false)
-            .with_writer(|| bareos_bnet::debug::DebugWriter))
+            .with_writer(move || onesimus_daemon::logging::TeeWriter {
+                inner: bareos_bnet::debug::DebugWriter, file: log_file.clone() }))
         .init();
 
     // Install rustls CryptoProvider for TLS support

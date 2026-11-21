@@ -94,6 +94,10 @@ struct Cli {
     #[arg(short, long)]
     verbose: bool,
 
+    /// Log file (also stderr); `none` for stderr only.
+    #[arg(long, value_name = "PATH", default_value = "/var/log/onesimus/osd.log")]
+    log_file: PathBuf,
+
     /// Do not start the gRPC listener (BNET only).
     #[arg(long, conflicts_with = "grpc_listen")]
     disable_grpc: bool,
@@ -175,7 +179,8 @@ fn main() {
         }
     };
     let level = if cli.verbose { cli.debug_level.max(1) } else { cli.debug_level };
-    onesimus_daemon::logging::init(&onesimus_daemon::logging::default_filter(level, &["hyper", "h2"]));
+    let log_file = onesimus_daemon::logging::log_file_arg(&cli.log_file);
+    onesimus_daemon::logging::init(&onesimus_daemon::logging::default_filter(level, &["hyper", "h2"]), log_file.as_deref());
 
     if let Some(ring) = &cli.device_writer {
         std::process::exit(writer::run(ring));

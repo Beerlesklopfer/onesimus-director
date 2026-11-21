@@ -88,6 +88,7 @@ replaces = "onesimusd (<< 0.25.0-3~), onesimus-dird"
 maintainer-scripts = "../../packaging/odir"
 systemd-units = { unit-name = "odir", unit-scripts = "../../packaging/odir", enable = true, start = true }
 assets = [
+    ["../../packaging/odir/logrotate", "etc/logrotate.d/onesimus-odir", "644"],
     ["target/release/odir", "usr/sbin/odir", "755"],
     ["../bareos-orm/schema/*.json", "usr/lib/bareos/scripts/ddl/", "644"],
     ["../../config/bareos-dir.d/**/*.conf", "usr/share/bareos/defaultconfigs/bareos-dir.d/", "644"],

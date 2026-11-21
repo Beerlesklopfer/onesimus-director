@@ -10,6 +10,8 @@ case "$1" in
             adduser --system --home /var/lib/bareos --no-create-home \
                     --ingroup bareos --shell /usr/sbin/nologin bareos
         fi
+        # Log-Dateien (--log-file, Standard /var/log/onesimus/<daemon>.log)
+        install -d -m 750 -o bareos -g bareos /var/log/onesimus
         install -d -m 750 -o bareos -g bareos /var/lib/bareos
         install -d -m 750 -o bareos -g bareos /var/lib/bareos/storage
         install -d -m 750 -o bareos -g bareos /var/log/bareos

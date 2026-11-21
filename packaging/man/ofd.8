@@ -15,6 +15,16 @@ listener runs on the File Daemon port + 1000. Plugins are signed WASM
 bundles (ofd\-plugin\-\fIname\fR packages).
 .SH OPTIONS
 .TP
+.BI \-\-log\-file " path"
+Write the log to
+.I path
+as well (default
+.IR /var/log/onesimus/ofd.log );
+.B none
+for no log file. Without the right to open it ofd warns and logs to
+stderr only. Colour codes are written only when the log goes to a terminal
+alone.
+.TP
 .BI \-c " path" "\fR, \fP\-\-config " path
 Configuration file or directory. Default: /etc/bareos/bareos\-fd.d.
 .TP
@@ -69,6 +79,12 @@ The package installs
 (user root,
 .BR "ofd \-f \-c /etc/bareos/bareos\-fd.d" ).
 .SH FILES
+.TP
+.I /var/log/onesimus/ofd.log
+Log file (option
+.BR \-\-log\-file ;
+rotated by
+.IR /etc/logrotate.d/onesimus\-ofd ).
 .TP
 .I /etc/bareos/bareos\-fd.d
 Configuration.

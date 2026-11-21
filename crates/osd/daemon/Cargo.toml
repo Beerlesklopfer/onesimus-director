@@ -62,6 +62,7 @@ systemd-units = { unit-name = "osd", unit-scripts = "../../../packaging/osd", en
 # M7/M8: `target/…` is relative to the workspace, everything else to this
 # package directory (three levels below the root).
 assets = [
+    ["../../../packaging/osd/logrotate", "etc/logrotate.d/onesimus-osd", "644"],
     ["target/release/osd", "usr/sbin/osd", "755"],
     ["../../../config/bareos-sd.d/**/*.conf", "usr/share/bareos/defaultconfigs/bareos-sd.d/", "644"],
 ]

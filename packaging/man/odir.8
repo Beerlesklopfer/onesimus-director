@@ -15,6 +15,16 @@ Storage Daemons and consoles (bconsole, oconsole) and adds a TLS gRPC
 interface (DirectorApi) on the Director port + 1000.
 .SH OPTIONS
 .TP
+.BI \-\-log\-file " path"
+Write the log to
+.I path
+as well (default
+.IR /var/log/onesimus/odir.log );
+.B none
+for no log file. Without the right to open it odir warns and logs to
+stderr only. Colour codes are written only when the log goes to a terminal
+alone.
+.TP
 .BI \-c " path" "\fR, \fP\-\-config " path
 Configuration file or directory. Default: /etc/bareos/bareos\-dir.d.
 .TP
@@ -414,6 +424,12 @@ Direct children of one directory of a job chain (OVFS)
 .B "\&.ovfs_versions"
 All versions of one file of a client (OVFS)
 .SH FILES
+.TP
+.I /var/log/onesimus/odir.log
+Log file (option
+.BR \-\-log\-file ;
+rotated by
+.IR /etc/logrotate.d/onesimus\-odir ).
 .TP
 .I /etc/bareos/bareos\-dir.d
 Configuration.

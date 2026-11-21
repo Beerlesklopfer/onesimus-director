@@ -89,6 +89,10 @@ struct Cli {
     #[arg(long, requires = "discover_podman")]
     conmon_executable: Vec<PathBuf>,
 
+    /// Log file (also stderr); `none` for stderr only.
+    #[arg(long, value_name = "PATH", default_value = "/var/log/onesimus/ofd.log")]
+    log_file: PathBuf,
+
     /// TLS gRPC control listener (default: [::]:<port + 1000>); BNET always remains available.
     #[arg(long)]
     grpc_listen: Option<std::net::SocketAddr>,
@@ -165,7 +169,8 @@ fn main() {
     }
 
     // Logging (onesimus-daemon)
-    onesimus_daemon::logging::init(&onesimus_daemon::logging::default_filter(cli.debug_level, &["hyper", "h2"]));
+    let log_file = onesimus_daemon::logging::log_file_arg(&cli.log_file);
+    onesimus_daemon::logging::init(&onesimus_daemon::logging::default_filter(cli.debug_level, &["hyper", "h2"]), log_file.as_deref());
 
     let _ = rustls::crypto::ring::default_provider().install_default();
 

@@ -1,0 +1,11 @@
+# Log of the Onesimus ofd (option --log-file, default /var/log/onesimus/ofd.log).
+# copytruncate: the daemon keeps its file open and does not reopen it.
+/var/log/onesimus/ofd.log {
+    weekly
+    rotate 8
+    compress
+    delaycompress
+    missingok
+    notifempty
+    copytruncate
+}
