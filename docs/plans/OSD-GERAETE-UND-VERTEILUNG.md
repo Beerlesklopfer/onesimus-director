@@ -272,7 +272,7 @@ Anlass: ein altes ASUSTOR-NAS (i386, Debian, 32-Bit-Kernel) mit 2-TB-Platten sol
 | P3 | Wechselplatten und Device-Watcher | Rig mit Loop-Device, Ein- und Abziehen simuliert |
 | P4 | S3 | gegen einen lokalen S3 (z. B. MinIO im eigenen Podman-root, siehe Podman-Isolation) |
 | P5 | Striping | Backup über 2–3 File-Devices, Restore nur mit osd, bareos-sd lehnt den MediaType ab |
-| P6 | Band und Autochanger | `mhvtl` (virtuelles Band) im Rig |
+| P6 | Band und Autochanger | `mhvtl` (virtuelles Band) im Rig: Bibliothek mit Roboter (`/dev/sch0` bzw. `/dev/sgN`) und mehreren Laufwerken (`/dev/nstN`) auf demselben Rechner; osd über `mtx`/SCSI MOVE MEDIUM, READ ELEMENT STATUS und Barcodes. Zugleich **Referenz für PT:** derselbe Ablauf (`update slots`, `label barcodes`, Laden/Entladen, Dateimarken, EOD) einmal gegen mhvtl und einmal gegen das emulierte Plattenband, Ergebnisse vergleichen; LTFS mit dem `sg`-Treiber gegen mhvtl als Gegenprobe zum LTFS-Plugin. mhvtl braucht ein Kernelmodul (DKMS) und root, installiert der Maintainer; nicht auf PDC. Kompatibilität mit Kernel 6.12 und Paketlage in Debian 13 **[unbelegt]** |
 
 ## P0 umgesetzt (20.11.2026)
 
