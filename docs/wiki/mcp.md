@@ -26,6 +26,10 @@ Entscheidung des Maintainers (19.11.2026): Der MCP-Weg **muss** eine eigene Cons
 - Fehlt die MCP-Console in `oconsole.conf` (oder steht dort nur `*UserAgent*`), startet das MCP nicht (Exit 2, Meldung mit den nötigen Zeilen). Ein Rückfall auf die Rechte des Menschen ist ausgeschlossen.
 - Ohne `--mcp` meldet sich oconsole wie bisher als erste `Console` ohne Suffix an, auch wenn die MCP-Console in der Datei zuerst steht.
 
+**Grenzen jeder `*-mcp`-Console (im Director durchgesetzt, 21.11.2026):** Unabhängig von ihren ACLs und Profilen führt der Director für eine Console, deren Name auf `-mcp` endet (Groß-/Kleinschreibung gleich), nie aus: `.acl`, `.profile` (ACL-Änderungen, mit denen sie ihre eigenen Grenzen aufheben könnte) und `sqlquery`, `.sql`, `query` (rohes SQL, der einzige Weg zu gespeicherten Inhalten wie der Katalogtabelle RestoreObject). Sie legt auch keine Consolen an (`configure add console`). Alles andere folgt den ACLs der Console. Test: `acl::tests::assistant_consoles_never_change_acls_or_read_sql`.
+
+**Profil `assistant`** (`config/bareos-dir.d/profile/assistant.conf`, im Paket unter `/usr/share/bareos/defaultconfigs/bareos-dir.d/profile/`): lesen (`status`, `show`, `list`, `llist`, `.bvfs_*`, `.ovfs_*` …) und `configure`; kein `run`, `restore`, `purge`, `delete`, `cancel`, `label`, `reload`. Wer dem MCP mehr geben will, ergänzt das in der Console selbst.
+
 Beispiel `oconsole.conf`:
 
 ```text

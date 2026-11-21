@@ -1262,7 +1262,7 @@ Profile { Name = acl-admin; CommandAcl = .acl, configure }
 Profile { Name = narrowing; JobAcl = !backup-a }
 Console { Name = admin; Password = "adminpw"; CommandAcl = *all*; JobAcl = *all*; ClientAcl = *all*; StorageAcl = *all*
   ScheduleAcl = *all*; PoolAcl = *all*; FileSetAcl = *all*; CatalogAcl = *all*; WhereAcl = *all*; PluginOptionsAcl = *all* }
-Console { Name = pdc-mcp; Password = "mcppw"; CommandAcl = "!.acl", "!.profile", "configure", ".config"; Profile = operator }
+Console { Name = pdc-ops; Password = "mcppw"; CommandAcl = "!.acl", "!.profile", "configure", ".config"; Profile = operator }
 Console { Name = narrowed; Password = "npw"; CommandAcl = configure; Profile = everything }
 "#;
 
@@ -1350,11 +1350,11 @@ Console { Name = narrowed; Password = "npw"; CommandAcl = configure; Profile = e
     /// its rights; several profiles are all checked.
     #[test]
     fn restricted_creator_cannot_escalate() {
-        let (ctx, layout) = console_ctx("mcp", "pdc-mcp");
+        let (ctx, layout) = console_ctx("mcp", "pdc-ops");
         for (line, why) in [
             ("profile=everything", "the profiles grant CommandAcl"),
             ("profile=operator profile=everything", "the profiles grant CommandAcl"),
-            ("profile=operator,jobs-b", "grant JobAcl \"backup-b\", which Console \"pdc-mcp\" may not use"),
+            ("profile=operator,jobs-b", "grant JobAcl \"backup-b\", which Console \"pdc-ops\" may not use"),
             ("profile=jobs-regex", "grant JobAcl names beyond a fixed list"),
             ("profile=where-other", "grant WhereAcl \"/srv\""),
             ("profile=acl-admin", "grant CommandAcl \".acl\""),

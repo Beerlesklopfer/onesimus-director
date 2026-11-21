@@ -192,7 +192,35 @@ fn list(resource: &ConfResource, kind: Kind, item: &str) -> Option<bool> {
 /// `kind`. Allowed only when the file ACL ([`file_allowed`]) **and** the
 /// catalog ACL ([`catalog_allowed`]) allow it (two-tier ACLs).
 pub fn allowed(config: &DirectorConfig, console: &str, kind: Kind, item: &str) -> bool {
-    file_allowed(config, console, kind, item) && catalog_allowed(config, console, kind, item)
+    assistant_allowed(console, kind, item)
+        && file_allowed(config, console, kind, item)
+        && catalog_allowed(config, console, kind, item)
+}
+
+/// Name suffix of an assistant console: `oconsole --mcp` logs in only as
+/// `<console>-mcp` (oconsole `MCP_CONSOLE_SUFFIX`).
+pub const ASSISTANT_SUFFIX: &str = "-mcp";
+
+/// Commands an assistant console never runs, whatever its ACLs say: ACL
+/// changes (`.acl` and its alias `.profile`), with which it could lift its
+/// own limits, and raw SQL (`sqlquery`, `.sql`, `query`), the only way to
+/// stored contents (catalog table RestoreObject). Onesimus addition, Bareos
+/// has no assistant consoles.
+pub const ASSISTANT_REFUSED: [&str; 5] = [".acl", ".profile", "sqlquery", ".sql", "query"];
+
+/// Whether `console` is an assistant console (name ends in
+/// [`ASSISTANT_SUFFIX`], any case).
+pub fn is_assistant(console: &str) -> bool {
+    console.len() > ASSISTANT_SUFFIX.len()
+        && console.to_ascii_lowercase().ends_with(ASSISTANT_SUFFIX)
+}
+
+/// The assistant tier: false only for a command of [`ASSISTANT_REFUSED`]
+/// asked by an assistant console ([`is_assistant`]).
+fn assistant_allowed(console: &str, kind: Kind, item: &str) -> bool {
+    !(kind == Kind::Command
+        && is_assistant(console)
+        && ASSISTANT_REFUSED.iter().any(|c| c.eq_ignore_ascii_case(item)))
 }
 
 /// The inner tier alone: a type without catalog entries allows everything;
@@ -547,6 +575,9 @@ pub(crate) fn grant_error(config: &DirectorConfig, creator: &str, profiles: &[&s
     if creator.is_empty() {
         return Some("no authenticated console".into());
     }
+    if is_assistant(creator) {
+        return Some(format!("Console \"{creator}\" is an assistant console (*{ASSISTANT_SUFFIX}): it creates no consoles"));
+    }
     if config.catalog_acl.with_restriction(creator, Kind::Command, |r| matches!(r, Restriction::Locked)) {
         return Some(format!("Console \"{creator}\" is locked (catalog ACL not readable)"));
     }
@@ -596,6 +627,36 @@ Console { Name=ordered; Password=test; CommandACL=*all*,!delete }
 User { Name=restricted; CommandACL=*all* }
 "#).unwrap()
     }
+    /// An assistant console (`*-mcp`) never runs ACL changes or raw SQL,
+    /// not even with `CommandACL = *all*`; the shipped profile `assistant`
+    /// reads and configures but runs, restores and deletes nothing.
+    #[test]
+    fn assistant_consoles_never_change_acls_or_read_sql() {
+        let profile = std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/../../config/bareos-dir.d/profile/assistant.conf")).unwrap();
+        let cfg = DirectorConfig::from_str(&format!(r#"
+Director {{ Name=dir; Password=secret }}
+{profile}
+Console {{ Name=admin-mcp; Password=pw; CommandACL=*all*; JobACL=*all* }}
+Console {{ Name=Helper-MCP; Password=pw; Profile=assistant }}
+Console {{ Name=admin; Password=pw; CommandACL=*all* }}
+"#)).unwrap();
+        for c in ASSISTANT_REFUSED.iter().chain(&["SQLQUERY", ".Acl"]) {
+            assert!(!allowed(&cfg, "admin-mcp", Kind::Command, c), "{c}");
+            assert!(!allowed(&cfg, "Helper-MCP", Kind::Command, c), "{c}");
+            assert!(allowed(&cfg, "admin", Kind::Command, c), "{c}: other consoles keep their ACLs");
+        }
+        assert!(allowed(&cfg, "admin-mcp", Kind::Command, "purge"), "everything else follows the ACLs");
+        for c in ["status", "list", "show", "configure", ".ovfs_ls", ".bvfs_lsfiles", ".jobs", ".api"] {
+            assert!(allowed(&cfg, "Helper-MCP", Kind::Command, c), "{c}");
+        }
+        for c in ["run", "restore", "purge", "delete", "cancel", "label", "reload", ".bvfs_restore"] {
+            assert!(!allowed(&cfg, "Helper-MCP", Kind::Command, c), "{c}");
+        }
+        assert!(!is_assistant("-mcp") && is_assistant("x-mcp") && !is_assistant("mcp"));
+        let refused = grant_error(&cfg, "admin-mcp", &["assistant"]).unwrap();
+        assert!(refused.contains("creates no consoles"), "{refused}");
+    }
+
     pub(crate) fn context() -> ExecContext {
         use std::sync::{Arc, RwLock};
         let config=DirectorConfig::from_str(r#"Director {Name=dir; Password=secret}

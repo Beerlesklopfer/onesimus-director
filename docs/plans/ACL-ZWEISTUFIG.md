@@ -359,3 +359,7 @@ Tests: `commands::configure::tests::unrestricted_creator_adds_console_with_all_p
   `extra_fields` (JSON-Text); eigene Proto-Felder (`catalog`, `effective`,
   `catalog_state`, `locked` in `ConsoleAclInfo`) brauchen die GUI-Seite und
   sind bewusst nicht umgesetzt.
+
+## Assistentenkonsolen (`*-mcp`, 21.11.2026)
+
+Eine dritte Stufe vor den beiden ACL-Stufen: `acl::allowed` fragt zuerst `assistant_allowed`. Für eine Console, deren Name auf `-mcp` endet, sind `.acl`, `.profile`, `sqlquery`, `.sql` und `query` immer verboten, gleich was Datei-ACL und Katalog-ACL sagen (`ASSISTANT_REFUSED`). Ein Assistent kann damit weder seine eigenen Grenzen lösen noch rohes SQL lesen. `grant_error` verweigert ihm außerdem `configure add console`. Das Profil `assistant` gibt Lesen und `configure`. Dokumentation für Anwender: [mcp.md](../wiki/mcp.md). Tests: `acl::tests::assistant_consoles_never_change_acls_or_read_sql`, `restricted_creator_cannot_escalate` (Creator-Console heißt dort `pdc-ops`, weil ein `*-mcp`-Creator keine Consolen mehr anlegt).
