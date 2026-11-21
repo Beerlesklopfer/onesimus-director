@@ -144,19 +144,24 @@ FD ─ Netz ─► Empfänger (schreibt) ─► /dev/shm/osd-<JobId>.ring ─┬
 - **Lesen (Restore)** nutzt denselben Ring in Gegenrichtung: Geräteleser füllen ihn, die Netzsitzung leert ihn. Beim Striping setzt die Netzsitzung die Blöcke nach Folgenummer zusammen.
 - **Stufe 1 (ein File-Device)** baut den Ring schon mit genau einem Verbraucher, damit Routen, Striping und Zweige später nur Verbraucher hinzufügen.
 
-## Eigenes Backup-Dateisystem (Richtung, Maintainer 20.11.2026)
+## Platte als emuliertes Band (D-14, Maintainer 21.11.2026)
 
-> Es macht Sinn, ein eigenes Filesystem für Backups zu etablieren, um auf die Platten zu schreiben. Dann haben wir die doppelte Organisation gespart.
+> Es macht Sinn, ein eigenes Filesystem für Backups zu etablieren, um auf die Platten zu schreiben. Dann haben wir die doppelte Organisation gespart. (20.11.2026)
+>
+> Für uns wäre das die Emulation eines Tape-Devices, also ein Treiber, der eine HDD wie ein Tape anspricht. Linear Tape File System sollte ebenfalls funktionieren. (21.11.2026)
 
 - **Heute** ist die Organisation doppelt: Ein allgemeines Dateisystem verwaltet Dateien und Extents, und in den Volume-Dateien verwaltet das Bareos-Volume-Format noch einmal Blöcke, Labels und Sitzungen.
-- **Ziel:** osd schreibt auf Rohgeräte oder Partitionen in einem **eigenen, auf Backups zugeschnittenen Layout**, am Betriebssystem vorbei, also ohne fremdes Dateisystem und ohne Seitencache (`O_DIRECT` bzw. die Gegenstücke auf macOS und Windows).
-- **Skizze** (Grundlage: Recherche, siehe unten):
-  - je Platte ein Superblock mit Label, das sich selbst beschreibt; Wechselplatten werden daran erkannt (D-6);
-  - ein Volume ist eine benannte Menge von Extents. Darin stehen die Bareos-Blöcke unverändert, also Labels, Sitzungen und Records. Ein Volume lässt sich als gewöhnliche Bareos-Volume-Datei **exportieren**, für `bls` oder bareos-sd. Damit bleibt die Kompatibilität aus dem [Grundsatz](#grundsatz-grpc-ist-der-weg-bnet-bleibt-für-bareos) erhalten.
-  - Belegt wird fast nur durch Anhängen. Freigegeben wird volumeweise beim Recyceln, wie bei Bareos: prune, purge, recycle.
-  - Die Metadaten sind gegen Abstürze gesichert (Journal oder Copy-on-Write).
-  - Ein Stripe-Satz besteht aus mehreren Platten mit gemeinsamem Superblock-Verweis (D-4/D-5). Prüfsummen werden je Block geführt.
-- **Status:** Richtung festgelegt. Recherche: [OSD-RECHERCHE-SPEICHER-UND-RING.md](OSD-RECHERCHE-SPEICHER-UND-RING.md). Empfehlung dort: selbst schreiben mit `rustix`/`nix` (+ optional `io-uring`), Entwurf nach BlueStore (Label mit Kopien, crc32c je Block) und Blobstore (A/B-Verzeichnis, Wiederaufbau vorwärts); SPDK und BlueStore selbst nicht übernehmen. Als **eigene Phase nach P1**; Entscheidung D-14 (siehe Tabelle) steht aus.
+- **Beschluss (D-14):** osd spricht eine Platte oder Partition **wie ein Band** an, am Betriebssystem vorbei (Linux `O_DIRECT|O_EXCL`, die Gegenstücke auf macOS und Windows später). Statt eines Dateisystems mit Extents und Belegung gilt Band-Semantik: Kassetten, Partitionen, Sätze, Dateimarken, Datenende (EOD), Bandende-Vorwarnung, MAM. Die Platte ist ein **Wechsler mit Fächern**, jede Kassette ein fester Bereich mit Barcode.
+- **Ebene:** der **Bandkern ist eine Rust-Schicht in osd**, ohne Kernelmodul. Frontends darauf:
+  1. **Bareos:** osd schreibt bytegleich das Bareos-Bandformat (Volume-Label als erster Satz, Bareos-Blöcke als Sätze, Dateimarken). JobMedia adressiert Datei/Block wie bei einem echten Band. Eine Kassette lässt sich 1:1 auf ein echtes LTO kopieren.
+  2. **LTFS:** ein Treiber-Plugin `libtape-osd.so` für die LTFS-Referenzimplementierung über deren Schnittstelle `tape_ops` (`src/libltfs/tape_ops.h`; mitgeliefert sind dort schon die Nicht-SCSI-Treiber `file` und `itdtimg`). `mkltfs`/`ltfs` arbeiten damit auf einer emulierten Kassette wie auf einem LTO-Band.
+  3. **Optional später:** ein SCSI-Frontend (`/dev/nstX`, Wechsler über `/dev/sgX`) über LIO/TCMU oder mhVTL, damit auch bareos-sd, `mt`, `mtx` und `btape` die Platte direkt ansprechen. Nur Linux, root.
+- **Folgen für das Modell** (aus `tape_ops`): zwei Partitionen je Kassette (`format`), je Partition eigenes EOD; Sätze variabler Länge (LTFS 512 KiB, Bareos 64 KiB); `locate`/`space`/`readpos` über ein Satzverzeichnis je Partition; ein kleiner MAM-Bereich je Kassette (`read_attribute`/`write_attribute`: Barcode, Volume-Kohärenz); `remaining_capacity`, `allow_overwrite`, `load`/`unload`. Log-/Mode-Pages, Verschlüsselung und WORM liefern Festwerte oder sind abgeschaltet.
+- **Absturzsicherheit:** wie bei einem Band. Nach einem Absturz liest osd je Partition vom letzten bestätigten Zeiger bis zum Datenende vorwärts, solange crc32c und Satzfolge stimmen. Maßgeblich bleibt der Katalog (JobMedia). Recyceln heißt zurückspulen und überschreiben; eine Belegungs-Bitmap entfällt.
+- **Schutz fremder Platten** (IBM-Warnung, Recherche): Magic-Label mit Kopien verlangen, Platten mit Partitionstabelle oder Dateisystem-Signatur ohne `--force` ablehnen, `O_EXCL`.
+- **Striping (D-4/D-5) und Zweige:** über N emulierte Laufwerke wie bei echten Bändern; I- und AI-Zweig schreiben auf verschiedene Kassetten oder Platten.
+- **Wechselplatten (D-6):** eine eingesteckte Platte ist ein eingelegtes Magazin; osd erkennt sie am Platten-Label (UUID), nicht am Gerätepfad.
+- **Status:** beschlossen, **eigene Phase nach P1** (PT, siehe [Phasen](#phasen)). Entwurf und Belege: [OSD-RECHERCHE-SPEICHER-UND-RING.md](OSD-RECHERCHE-SPEICHER-UND-RING.md), Nachtrag B. Die frühere osdfs-Skizze (Nachtrag A) ist damit ersetzt; Label mit Kopien, crc32c und das Vorwärtslesen nach Absturz bleiben übernommen.
 
 ## Gerätearten
 
@@ -166,6 +171,7 @@ FD ─ Netz ─► Empfänger (schreibt) ─► /dev/shm/osd-<JobId>.ring ─┬
 | Wechselplatte (USB) | `File` + `RemovableMedia = yes`, Mount-Befehle | dazu ein **Device-Watcher** (D-6): erkennt das Einstecken (udev oder Dateisystem-Label), hängt ein, prüft und liest das Volume-Label, meldet „bereit“ und löst wartende Mount-Anforderungen aus. Beim Abziehen gibt er das Device sauber frei |
 | Objektspeicher (S3) | `DeviceType = droplet`/`dplcompat` (Chunks) | Volume in Stücken als Objekte, Chunk-Größe einstellbar, Zugangsdaten aus Datei |
 | Band | `DeviceType = Tape`, Autochanger mit `mtx` | Bareos-Bandformat (Blockgröße, EOF-Marken), Autochanger-Befehle. Größter Aufwand, zuletzt |
+| Plattenband (D-14) | `DeviceType = Tape` + Autochanger, aber auf Platte | Platte oder Partition als emulierter Wechsler mit Kassetten (Bandkern in osd); Bareos-Bandformat und LTFS-Plugin, siehe [Platte als emuliertes Band](#platte-als-emuliertes-band-d-14-maintainer-21112026) |
 
 ## Device-Watcher (D-6)
 
@@ -187,6 +193,7 @@ FD ─ Netz ─► Empfänger (schreibt) ─► /dev/shm/osd-<JobId>.ring ─┬
 | --- | --- | --- |
 | P0 ✅ (20.11.2026) | `bareos-format` und `onesimus-daemon` als gemeinsame Crates (ofd-Gutachten §5), osd-Schnittstelle (`crates/osd`) und Daemon (`crates/osd/daemon`) trennen | ofd und odir bauen unverändert. Erledigt, siehe [P0 umgesetzt](#p0-umgesetzt-20112026) |
 | P1 ✅ (20.11.2026; Stufen 1, 2, 3) | osd als Ersatz für bareos-sd mit **einem File-Device**: Label, Mount, Append, Read, Status, CatReq, Bareos-Volume-Format. Steuer- und Datenweg über **gRPC** (odir, ofd) und BNET (bareos-dir, bareos-fd). Stufe 1: Backup über BNET, aktiver und passiver Client, Datenweg über den Ring; Stufe 2: Lesen/Restore; Stufe 3: gRPC | Testgerüst Director+FD+SD (`onesimus-rig`): Backup und Restore mit odir+ofd über gRPC und mit bareos-fd über BNET. `bls` liest das Volume. Erledigt, siehe [Stufe 1](#p1-stufe-1-umgesetzt-20112026), [Stufe 2](#p1-stufe-2-umgesetzt-20112026), [Stufe 3](#p1-stufe-3-umgesetzt-20112026); was bleibt: [Nach P1](#nach-p1-offen) |
+| PT | Plattenband v1 (D-14): Bandkern auf einer vorbelegten Datei bzw. einem Loop-Device, dann `/dev/sdX` mit `O_DIRECT\|O_EXCL` (zunächst Linux); eine Platte, kein Striping; Kassetten mit zwei Partitionen, MAM, Wechsler; Bareos-Frontend und LTFS-Plugin `libtape-osd.so` | ohne root testbar; Export einer Kassette in eine Bandabbild- bzw. Volume-Datei besteht `bls`; `mkltfs` + `ltfs` + Dateien schreiben/lesen auf einer emulierten Kassette; kill -9 während des Schreibens verliert keinen bestätigten Satz. Teilt das Bareos-Bandformat mit P6 |
 | P2 | Verteiler mit Routen über File-Devices | Routing-Fälle im Rig, Restore über den MediaType |
 | P2b | Zweige (Branch): odir startet Haupt- und Zweig-Jobs, osd verteilt an beide, Katalogsätze je Zweig | Inc auf File, AI auf zweites File-Device; Restore aus jedem Zweig einzeln; ein gescheiterter Zweig bricht den anderen nicht ab; Konsolidierung des AI-Zweigs |
 | P3 | Wechselplatten und Device-Watcher | Rig mit Loop-Device, Ein- und Abziehen simuliert |
@@ -414,5 +421,5 @@ Alle wie empfohlen, D-8 präzisiert: „additiv, rückwärtskompatibel“.
 | D-11 | Ein gescheiterter Zweig bricht die anderen nicht ab | ja |
 | D-12 | Ring: ein Fach = ein Bareos-Block; Fachgröße = Blockgröße des Devices, Fachzahl einstellbar (Vorgabe z. B. 64 Fächer je Job) | ja |
 | D-13 | Geräte-Schreiber als eigene Prozesse (wie die Job-Worker von odir) statt Threads | ja (Ausfall eines Geräts reißt den Job nicht mit) |
-| D-14 | Eigenes Backup-Dateisystem auf Rohgeräten nach dem Entwurf der Recherche (A, Punkte 1–6), als eigene Phase nach P1 | **offen** (Empfehlung: ja) |
+| D-14 | Platte als **emuliertes Band** (Wechsler mit Kassetten, Bandkern in osd, ohne Kernelmodul); Frontends Bareos-Bandformat und LTFS (`tape_ops`-Plugin), SCSI (TCMU/mhVTL) optional später; eigene Phase PT nach P1. Ersetzt die osdfs-Skizze | **ja** (21.11.2026) |
 | D-15 | Ring: `memmap2` + eigene Plattformschicht, Logik nach Disruptor/Aeron, Warten immer mit Zeitlimit (Recherche B) | **offen** (Empfehlung: ja) |

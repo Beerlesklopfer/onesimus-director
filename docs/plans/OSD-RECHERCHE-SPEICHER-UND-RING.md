@@ -1,6 +1,6 @@
 # osd: Recherche Speicherschicht und Ringpuffer
 
-Stand: 20.11.2026. Alle Versions- und Datumsangaben stammen von crates.io bzw. der GitHub-API vom selben Tag. **[unbelegt]** heißt: aus zweiter Hand oder aus dem Gedächtnis, nicht an einer Primärquelle geprüft. Ergänzt den Plan [OSD-GERAETE-UND-VERTEILUNG.md](OSD-GERAETE-UND-VERTEILUNG.md), Abschnitte „Datenpfad: Ringpuffer“ und „Eigenes Backup-Dateisystem“.
+Stand: 20.11.2026. Alle Versions- und Datumsangaben stammen von crates.io bzw. der GitHub-API vom selben Tag. **[unbelegt]** heißt: aus zweiter Hand oder aus dem Gedächtnis, nicht an einer Primärquelle geprüft. Ergänzt den Plan [OSD-GERAETE-UND-VERTEILUNG.md](OSD-GERAETE-UND-VERTEILUNG.md), Abschnitte „Datenpfad: Ringpuffer“ und „Platte als emuliertes Band (D-14)“. Nachtrag B vom 21.11.2026.
 
 ## Ergebnis in Kürze
 
@@ -73,6 +73,8 @@ Stand: 20.11.2026. Alle Versions- und Datumsangaben stammen von crates.io bzw. d
 
 ## Nachtrag A: eigenes Backup-Dateisystem („osdfs“)
 
+> **Ersetzt durch Nachtrag B** (D-14, 21.11.2026): Die Platte wird als Band emuliert, nicht als Dateisystem organisiert. Übernommen bleiben Label mit Kopien, crc32c, Vorwärtslesen nach Absturz, Schutz fremder Platten und der Bau zuerst gegen eine Datei bzw. ein Loop-Device.
+
 **Ergebnis:** machbar, ohne die Bareos-Kompatibilität aufzugeben, **wenn jedes osd-Volume ein bytegleiches Bareos-Datei-Volume bleibt** (Volume-Label, dann Bareos-Blöcke). Die Dateisystem-Schicht verwaltet dann nur Extents und Volume-Namen. Das ist die eingesparte doppelte Organisation.
 
 ### Vorbilder
@@ -138,3 +140,58 @@ Daten      Segmente, z. B. 256 MiB (Zonengröße), nur Anhängen;
 3. Umfang: eine Platte, kein Striping; Label, Volume anlegen/anhängen/schließen, Recyceln (Segmente frei), `osd export` in eine einfache Bareos-Datei, Wiederherstellung nach kill -9.
 4. Abnahme: ein exportiertes Volume besteht `bls`; Tests mit eingeschleusten Abstürzen stellen ohne Verlust bestätigter Blöcke wieder her.
 5. Danach in dieser Reihenfolge: Striping über N Mitglieder, Wechselplatten mit Selbstbeschreibung, dann Rohzugriff unter macOS und Windows.
+
+## Nachtrag B: Platte als emuliertes Band (D-14, 21.11.2026)
+
+**Beschluss (Maintainer):** „Für uns wäre das die Emulation eines Tape-Devices, also ein Treiber, der eine HDD wie ein Tape anspricht. Linear Tape File System sollte ebenfalls funktionieren.“
+
+**Ergebnis:** Band-Semantik passt besser als ein Dateisystem, weil Bareos ohnehin nur anhängt und volumeweise recycelt. Volume-Tabelle, Segmentlisten und Belegungs-Bitmap aus Nachtrag A entfallen. LTFS lässt sich ohne Kernelmodul anbinden, über die Treiber-Schnittstelle der Referenzimplementierung.
+
+### LTFS-Referenzimplementierung (GitHub-API, 21.11.2026)
+
+| Punkt | Befund |
+| --- | --- |
+| Repository | `LinearTapeFileSystem/ltfs`, BSD-3-Clause, nicht archiviert, letzter Push 12.11.2026, Release v2.4.9.1-10524 (11.11.2026) |
+| Plattformen (README) | Linux, macOS, FreeBSD, NetBSD; Windows nicht aufgeführt (der Treiber `file` enthält `#ifdef _WIN32`-Zweige) |
+| Treiber-Schnittstelle | `struct tape_ops` in `src/libltfs/tape_ops.h`, geladen über `src/libltfs/plugin.c` (Plugins per `ltfs.conf`) |
+| Mitgelieferte Treiber ohne SCSI | `src/tape_drivers/generic/file` (`filedebug_tc.c`: Band in Dateien emuliert, `MAX_PARTITIONS 2`, Marke `MISSING_EOD`) und `generic/itdtimg` (Band-Abbilder) |
+| Standard-Blockgröße | `LTFS_DEFAULT_BLOCKSIZE` = 512 KiB (`src/libltfs/ltfs.h`, außer wo `MAXPHYS` gilt) |
+
+**Funktionen von `tape_ops`**, die der Bandkern tragen muss: `open`/`close`, `inquiry`, `test_unit_ready`, `read` (variable Satzgröße, `unusual_size`), `write`, `writefm`, `rewind`, `locate` (Partition + Block), `space` (Sätze/Dateimarken/EOD), `erase`, `load`/`unload`, `readpos`, `setcap`, `format` (Partitionierung, Volume-Name, Barcode, MAM-UUID), `remaining_capacity`, `read_attribute`/`write_attribute` (MAM je Partition), `allow_overwrite`, `get_eod_status`, `get_device_list`, `is_readonly`, `get_worm_status`, `get_serialnumber`. Mit Festwerten bzw. „nicht unterstützt“: `logsense`, `modesense`/`modeselect`, `reserve_unit`/`release_unit`, `set_compression`, `get_cartridge_health`, `get_tape_alert`, `set_key`/`get_keyalias`, `takedump_drive`, `grao`/`rrao`, `set_profiler`.
+
+### Bandkern (Skizze)
+
+```
+Platte/Partition
+LBA 0      Wechsler-Label (4 KiB, Kopien an festen Stellen): Magic "OSDTAPE1",
+           Platten-UUID, Sektorgröße, Kassettenzahl, Kassettengröße,
+           Geräteart (fest/USB), Generation, crc32c
+Fachtabelle  2 × (A/B, Generation + crc32c): Fach → Barcode, Zustand
+           (leer/geladen/geschützt), Laufwerk
+Kassette k fester Bereich, 64-KiB-ausgerichtet:
+           Kopf: MAM-Bereich (Attribute je Partition), Partitionsgrenzen
+           Partition 0..1: Sätze variabler Länge, je Satz Kopf
+             (Typ Satz/Dateimarke, Länge, Satznummer, crc32c) + Daten;
+           Satzverzeichnis (Checkpoints alle n Sätze) für locate/readpos;
+           bestätigter EOD-Zeiger je Partition (A/B im Kassettenkopf)
+```
+
+- **Bareos-Frontend:** eine Kassette mit einer Partition; Satz = Bareos-Block, Dateimarken wie bareos-sd auf Band; JobMedia mit Datei/Block. Export einer Kassette als Bandabbild bzw. Satzstrom, 1:1 auf LTO kopierbar.
+- **LTFS-Frontend:** `libtape-osd.so` implementiert `tape_ops` in Rust mit C-ABI (`#[no_mangle] extern "C"`) und spricht den Bandkern direkt (Platte im selben Prozess, `O_EXCL`) oder über osd (gRPC/Unix-Socket). Zwei Partitionen (Index, Daten), MAM für Barcode und Volume-Kohärenz.
+- **SCSI-Frontend (optional):** LIO/TCMU oder mhVTL; ob TCMU Geräte vom Typ „sequential access“ trägt, ist **[unbelegt]**.
+- **Absturz:** je Partition ab dem bestätigten EOD vorwärts lesen, solange Satzkopf, Folge und crc32c stimmen; dann EOD neu setzen. Bestätigen: Sätze fsync, dann EOD-Kopie A/B schreiben, fsync.
+- **Recyceln:** `rewind` + Überschreiben ab Satz 0 (bzw. `format`); bei ZNS/SMR später Zonen-Reset.
+
+### Risiken
+
+1. Die LTFS-Plugin-Schnittstelle ist ein C-Header ohne ABI-Zusage; Versionen der Referenzimplementierung müssen getestet werden.
+2. LTFS setzt Semantik voraus, die nur `tape_ops` dokumentiert (z. B. Verhalten bei EOD, Early Warning, Fehlercodes); die Treiber `file` und `itdtimg` sind die Vorlage.
+3. Windows: von der LTFS-Referenz nicht unterstützt; dort nur das Bareos-Frontend.
+4. Weiter gelten die Risiken aus Nachtrag A: fremde Platte, Wiederherstellungsfehler, Rechte, fehlende gewohnte Werkzeuge.
+
+### Erster Schritt (Phase PT)
+
+1. Bandkern gegen eine vorbelegte Datei bzw. ein Loop-Device: Wechsler-Label, Fächer, Kassetten mit zwei Partitionen, Sätze, Dateimarken, `locate`/`space`/`readpos`, MAM, Wiederherstellung nach kill -9.
+2. Bareos-Frontend in osd: Backup und Restore im Rig auf eine emulierte Kassette; Export besteht `bls`.
+3. LTFS-Plugin: `mkltfs` formatiert eine emulierte Kassette, `ltfs` hängt sie ein, Dateien schreiben, aushängen, wieder einhängen, vergleichen.
+4. Danach `/dev/sdX` mit `O_DIRECT|O_EXCL` (Linux), dann Striping über mehrere emulierte Laufwerke, Wechselplatten, macOS.
