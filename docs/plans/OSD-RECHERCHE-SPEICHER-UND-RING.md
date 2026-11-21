@@ -200,3 +200,27 @@ Kassette k fester Bereich, 64-KiB-ausgerichtet:
 2. Bareos-Frontend in osd: Backup und Restore im Rig auf eine emulierte Kassette; Export besteht `bls`.
 3. LTFS-Plugin: `mkltfs` formatiert eine emulierte Kassette, `ltfs` hängt sie ein, Dateien schreiben, aushängen, wieder einhängen, vergleichen.
 4. Danach `/dev/sdX` mit `O_DIRECT|O_EXCL` (Linux), dann Striping über mehrere emulierte Laufwerke, Wechselplatten, macOS.
+
+## Nachtrag C: Ring auf Windows und macOS – Alternativen (21.11.2026)
+
+Anlass: Der Ring (`crates/osd/ring`) wartet und weckt über Prozessgrenzen nur unter Linux (futex); `sys/wait_other.rs` ist auf macOS und Windows `unimplemented!()`, `pid_alive` fehlt unter Windows. Maintainer-Vorgabe: Aeron und iceoryx2 sind zu groß. Drei Agenten haben gesucht (Rust-Crates, Fremdbibliotheken und Betriebssystem-Bausteine, Architektur); Stand der Angaben: READMEs und Herstellerdoku, Quelltext der Crates nicht gelesen.
+
+**Ergebnis:** Kein Crate und keine Bibliothek liefert Gating, Absturzerkennung und prozessübergreifendes Wecken auf allen drei Systemen belegt und zugleich ausgereift. Es bleibt beim eigenen Ring (`memmap2`, Disruptor-Gating, Zeitlimit-Warten).
+
+| Kandidat | Befund | Urteil |
+| --- | --- | --- |
+| fipc 1.0.0 (28.10.2026, 20 Downloads, MIT) | Broadcast mit Gating, futex / `os_sync` / Windows-Event, Peer-Ende sofort erkannt; Zig-Kern als Binärbibliothek, 2 Commits, x86-64-v3, kein Striping | Messlatte und Prüfling, kein Fundament |
+| SubEtha 0.6.0 (MIT) | Ring, Heartbeat-Tabelle, Eigentümer-Lease; Gating und Wartemechanismus offen | Quelltext prüfen, wahrscheinlichster Rust-Kandidat |
+| shm-rings 1.0.0 | Gating mit Cursor je Leser, aber feste Slots und Wecken nur Linux | Muster |
+| crossbar, ringfire, bcast, outcry, xchannel, orbitive | Linux-only, überschreibend oder ohne Gating | ausgeschieden |
+| shmem_providers (LibAFL) | nur Speicherabbildung, kein Ring | nicht nötig (`memmap2`) |
+| cpp-ipc/libipc (MIT) | C++-Ring mit Broadcast, höchstens 32 Empfänger | nur Entwurf |
+| Boost.Interprocess, nng, ZeroMQ, Cap'n Proto, io_uring | lösen Warten und Gating nicht oder zu groß | nein (nng/ZeroMQ höchstens Steuerkanal) |
+
+**Betriebssystem-Bausteine (Herstellerdoku):** Linux futex ohne `_PRIVATE` wirkt über Prozesse, `pidfd` (ab 5.3) meldet das Prozessende. macOS: `os_sync_wait_on_address` mit `OS_SYNC_WAIT_ON_ADDRESS_SHARED` ab 14.4, `kqueue` `EVFILT_PROC`/`NOTE_EXIT` für das Prozessende. Windows: `WaitOnAddress` nur im selben Prozess; benannte Events und Semaphoren sowie `DuplicateHandle` prozessübergreifend, Prozess-Handles sind selbst wartbar.
+
+**Vergleichssysteme:** NetBackup schreibt mehrere Kopien aus einem Puffersatz (Leistung des langsamsten Geräts); Bareos kopiert nur nachträglich; SPDK RAID1 markiert ein ausgefallenes Mitglied als gescheitert und schreibt weiter.
+
+**Architektur:** `Launcher::Thread` besteht schon (`crates/osd/daemon/src/daemon.rs:30`), nutzt aber denselben mmap-Ring. Die einzige belegte Begründung für eigene Prozesse (D-13) ist: Fällt ein Geräteprozess aus, bleiben die anderen Geräte stehen. Handle-Weitergabe und ein Weck-Byte über eine Pipe lösen das Weckproblem nicht besser.
+
+**Empfehlung (für D-15):** Auf Windows und macOS zuerst Abfrage mit Zeitlimit (yield/sleep bis 1 ms, der Ring wartet ohnehin höchstens 100 ms) plus `pid_alive`; benannte Events (Windows) und `os_sync_wait_on_address` SHARED (macOS ab 14.4) nur als spätere Latenzoptimierung, falls Messungen sie rechtfertigen. Offen: Polling-Latenz und Durchsatz sind nicht gemessen (Windows-VM `joerg.bernau@vm`, kein wine); Prozessstart und -überwachung auf Windows/macOS sind eine zweite, ungetestete Lücke.
