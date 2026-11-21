@@ -71,13 +71,102 @@ impl HiddenHint {
     }
 }
 
+/// The history as the Up/Down search sees it: the entries of the history
+/// file and every line added in this session, oldest first. rustyline's
+/// handlers get no history, so the main loop keeps this copy in step with
+/// `add_history_entry`.
+#[derive(Debug, Clone, Default)]
+pub struct SharedHistory(Arc<Mutex<Vec<String>>>);
+
+impl SharedHistory {
+    /// Append a line (a repeat of the newest entry is not stored twice,
+    /// as in rustyline's history with `history_ignore_dups`).
+    pub fn push(&self, line: &str) {
+        if let Ok(mut entries) = self.0.lock() {
+            if entries.last().map(String::as_str) != Some(line) {
+                entries.push(line.to_string());
+            }
+        }
+    }
+
+    /// Replace the entries (after loading the history file).
+    pub fn set(&self, entries: impl IntoIterator<Item = String>) {
+        if let Ok(mut all) = self.0.lock() {
+            *all = entries.into_iter().collect();
+        }
+    }
+}
+
+/// A running Up/Down search: the text typed before the first key (the
+/// prefix), the position in the history and the line shown last. A line
+/// different from the shown one starts a new search.
+#[derive(Debug, Clone, Default)]
+pub struct SearchState {
+    /// What was typed when the search started.
+    prefix: String,
+    /// Index of the entry shown last; the history length before the first.
+    index: usize,
+    /// The line the last key put in the editor.
+    shown: Option<String>,
+}
+
+/// Up (`backward`) and Down like fish: through the entries that start with
+/// the text typed before the first key (all entries on an empty line),
+/// skipping entries equal to the line on screen. Down past the newest match
+/// brings back the typed text. None: no further match (the line stays).
+pub fn history_search(history: &[String], state: &mut SearchState, line: &str, backward: bool) -> Option<String> {
+    if state.shown.as_deref() != Some(line) {
+        *state = SearchState { prefix: line.to_string(), index: history.len(), shown: None };
+    }
+    let matches = |i: &usize| history[*i].starts_with(&state.prefix) && history[*i] != line;
+    let next = if backward {
+        (0..state.index).rev().find(matches)
+    } else {
+        (state.index + 1..history.len()).find(matches)
+    };
+    let text = match next {
+        Some(i) => {
+            state.index = i;
+            history[i].clone()
+        }
+        None if !backward && state.index < history.len() => {
+            state.index = history.len();
+            state.prefix.clone()
+        }
+        None => return None,
+    };
+    state.shown = Some(text.clone());
+    Some(text)
+}
+
+/// Up and Down ([`history_search`]).
+struct SearchHistory {
+    /// The entries to search.
+    history: SharedHistory,
+    /// The running search, shared by Up and Down.
+    state: Arc<Mutex<SearchState>>,
+    /// Up (true) or Down.
+    backward: bool,
+}
+
+impl ConditionalEventHandler for SearchHistory {
+    fn handle(&self, _evt: &Event, _n: RepeatCount, _positive: bool, ctx: &EventContext) -> Option<Cmd> {
+        let history = self.history.0.lock().ok()?;
+        let mut state = self.state.lock().ok()?;
+        match history_search(&history, &mut state, ctx.line(), self.backward) {
+            Some(text) => Some(Cmd::Replace(Movement::WholeLine, Some(text))),
+            None => Some(Cmd::Noop),
+        }
+    }
+}
+
 /// The bound keys and what they do (oconsole(1) KEYS lists them; the test
 /// checks that [`bind`] binds each).
 #[cfg_attr(not(test), allow(dead_code))]
 pub fn bindings() -> Vec<(KeyEvent, &'static str)> {
     vec![
-        (KeyEvent(KeyCode::Up, Modifiers::NONE), "history search backwards with the line as prefix"),
-        (KeyEvent(KeyCode::Down, Modifiers::NONE), "history search forwards with the line as prefix"),
+        (KeyEvent(KeyCode::Up, Modifiers::NONE), "previous history entry starting with the typed text (all on an empty line)"),
+        (KeyEvent(KeyCode::Down, Modifiers::NONE), "next history entry starting with the typed text, at the end the typed text"),
         (KeyEvent(KeyCode::Right, Modifiers::NONE), "accept the suggestion, else move right"),
         (KeyEvent::ctrl('F'), "accept the suggestion, else move right"),
         (KeyEvent(KeyCode::End, Modifiers::NONE), "accept the suggestion, else move to the end"),
@@ -125,10 +214,15 @@ impl ConditionalEventHandler for HideHint {
     }
 }
 
-/// Bind the keys of [`bindings`]; `hidden` is the Hinter's [`HiddenHint`].
-pub fn bind<H: rustyline::Helper, I: rustyline::history::History>(rl: &mut Editor<H, I>, hidden: HiddenHint) {
-    rl.bind_sequence(KeyEvent(KeyCode::Up, Modifiers::NONE), EventHandler::Simple(Cmd::HistorySearchBackward));
-    rl.bind_sequence(KeyEvent(KeyCode::Down, Modifiers::NONE), EventHandler::Simple(Cmd::HistorySearchForward));
+/// Bind the keys of [`bindings`]; `hidden` is the Hinter's [`HiddenHint`],
+/// `history` the copy the main loop keeps.
+pub fn bind<H: rustyline::Helper, I: rustyline::history::History>(rl: &mut Editor<H, I>, hidden: HiddenHint,
+                                                                   history: SharedHistory) {
+    let state = Arc::new(Mutex::new(SearchState::default()));
+    for (key, backward) in [(KeyCode::Up, true), (KeyCode::Down, false)] {
+        let handler = SearchHistory { history: history.clone(), state: state.clone(), backward };
+        rl.bind_sequence(KeyEvent(key, Modifiers::NONE), EventHandler::Conditional(Box::new(handler)));
+    }
     for key in [KeyEvent(KeyCode::Right, Modifiers::NONE), KeyEvent::ctrl('F'), KeyEvent(KeyCode::End, Modifiers::NONE)] {
         rl.bind_sequence(key, EventHandler::Conditional(Box::new(AcceptHint)));
     }
@@ -166,6 +260,47 @@ mod tests {
         assert!(esc_action(true));
     }
 
+    fn h(lines: &[&str]) -> Vec<String> {
+        lines.iter().map(|s| s.to_string()).collect()
+    }
+
+    #[test]
+    fn up_on_an_empty_line_walks_the_whole_history() {
+        let history = h(&["status dir", "list jobs", "version"]);
+        let mut s = SearchState::default();
+        assert_eq!(history_search(&history, &mut s, "", true).as_deref(), Some("version"));
+        assert_eq!(history_search(&history, &mut s, "version", true).as_deref(), Some("list jobs"));
+        assert_eq!(history_search(&history, &mut s, "list jobs", true).as_deref(), Some("status dir"));
+        assert_eq!(history_search(&history, &mut s, "status dir", true), None, "oldest reached");
+        assert_eq!(history_search(&history, &mut s, "status dir", false).as_deref(), Some("list jobs"));
+        assert_eq!(history_search(&history, &mut s, "list jobs", false).as_deref(), Some("version"));
+        assert_eq!(history_search(&history, &mut s, "version", false).as_deref(), Some(""), "back to the typed text");
+        assert_eq!(history_search(&history, &mut s, "", false), None);
+    }
+
+    #[test]
+    fn up_keeps_the_typed_prefix_and_skips_the_line_itself() {
+        let history = h(&["list volumes", "status dir", "list jobs", "list jobs", "version"]);
+        let mut s = SearchState::default();
+        assert_eq!(history_search(&history, &mut s, "list", true).as_deref(), Some("list jobs"));
+        assert_eq!(history_search(&history, &mut s, "list jobs", true).as_deref(), Some("list volumes"),
+            "the duplicate equal to the shown line is skipped");
+        assert_eq!(history_search(&history, &mut s, "list volumes", false).as_deref(), Some("list jobs"));
+        // editing the recalled line starts a new search with it as prefix
+        assert_eq!(history_search(&history, &mut s, "list jobs ", true), None);
+        assert_eq!(history_search(&history, &mut s, "st", true).as_deref(), Some("status dir"));
+    }
+
+    #[test]
+    fn shared_history_drops_repeats_of_the_newest_entry() {
+        let shared = SharedHistory::default();
+        shared.set(h(&["a"]));
+        shared.push("b");
+        shared.push("b");
+        shared.push("a");
+        assert_eq!(*shared.0.lock().unwrap(), h(&["a", "b", "a"]));
+    }
+
     #[test]
     fn esc_hides_until_the_line_changes() {
         let hidden = HiddenHint::default();
@@ -185,7 +320,7 @@ mod tests {
             assert!(!keys[i + 1..].contains(key), "{key:?} twice");
         }
         let mut rl: Editor<(), rustyline::history::DefaultHistory> = Editor::new().unwrap();
-        bind(&mut rl, HiddenHint::default());
+        bind(&mut rl, HiddenHint::default(), SharedHistory::default());
         for key in keys {
             assert!(rl.bind_sequence(key, EventHandler::Simple(Cmd::Noop)).is_some(), "{key:?} not bound");
         }

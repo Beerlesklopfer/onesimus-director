@@ -26,7 +26,7 @@ Danach liest `oconsole` einmal die Werte jeder Quelle, die die Grammatik nennt (
 Steht der Cursor am Zeilenende, folgt ihm ein abgeblendeter Vorschlag:
 
 1. die neueste Zeile der History, die mit der Eingabe beginnt (wie fish);
-2. sonst der Rest der einzigen möglichen Vervollständigung (`purge volume all allp` → `ools`);
+2. sonst, wie fish, der Rest der ersten passenden Vervollständigung des angefangenen Worts, auch wenn es mehrere gibt (Pflichtargumente zuerst, dann alphabetisch; `purge volume all allp` → `ools`, `list jo` → der erste Kandidat); Tab zeigt alle;
 3. sonst, nach einem Leerzeichen, was folgen kann: die Unterbefehle (`purge ` → `<files|jobs|volume[=<volume>]|quota>`) oder die offenen Argumente (`.acl copy ` → `from=<from> to=<to>`). Diese Usage wird nur gezeigt; die Übernahmetasten fügen sie nicht ein.
 
 Zeilen, die der Director in dieser Sitzung abgelehnt hat („is an invalid command“ oder ein CMD_FAILED-Signal), werden nicht mehr vorgeschlagen; sie bleiben in der History und mit Pfeil hoch erreichbar.
@@ -39,7 +39,7 @@ Mit der Grammatik eines odir beantwortet `oconsole` `help <befehl>` selbst: Usag
 
 | Taste | Mit Vorschlag am Zeilenende | Sonst |
 |---|---|---|
-| Pfeil hoch / runter | History rückwärts / vorwärts nach Zeilen, die mit der Eingabe beginnen; leere Zeile: vorige / nächste Zeile | gleich |
+| Pfeil hoch / runter | wie fish: History rückwärts / vorwärts durch die Zeilen, die mit dem vor dem ersten Druck Getippten beginnen (auf leerer Zeile alle), gleiche Zeilen übersprungen; runter hinter der neuesten bringt das Getippte zurück | gleich |
 | Pfeil rechts, Ctrl-F, Ende | ganzen Vorschlag übernehmen | ein Zeichen nach rechts / ans Ende |
 | Alt-Pfeil rechts, Alt-F | nächstes Wort des Vorschlags übernehmen | ein Wort weiter |
 | Tab | vervollständigen, mehrere Kandidaten als Liste | gleich |

@@ -129,9 +129,10 @@ group is given, the others are left out. Required arguments come first.
 Values with blanks are quoted.
 .PP
 While typing, a dimmed suggestion follows the cursor at the end of the line:
-the newest history line that starts with the input, else the rest of the
-only possible completion, else the usage of the next arguments. Lines the
-Director refused are not suggested.
+the newest history line that starts with the input, else (as in fish) the
+rest of the first completion of the word being typed, even among several,
+else the usage of the next arguments. Lines the Director refused are not
+suggested.
 .PP
 .B help
 .I command
@@ -141,8 +142,9 @@ prints the usage, description, arguments and examples from the grammar
 .SH KEYS
 .TP
 .B Up\fR, \fPDown
-Search the history backwards or forwards for lines that start with the
-input; on an empty line the previous or next line.
+As in fish: walk the history backwards or forwards through the lines that
+start with the text typed before the first key (all lines on an empty line),
+skipping repeats; Down past the newest line brings back the typed text.
 .TP
 .B Right\fR, \fPCtrl\-F\fR, \fPEnd
 At the end of the line with a suggestion: accept the whole suggestion;

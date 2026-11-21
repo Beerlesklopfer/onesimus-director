@@ -1146,13 +1146,15 @@ fn interactive_loop(
         .build();
     let mut rl = Editor::with_config(rl_config).unwrap();
     rl.set_helper(Some(helper));
-    fishkeys::bind(&mut rl, hidden_hint);
+    let shared_history = fishkeys::SharedHistory::default();
+    fishkeys::bind(&mut rl, hidden_hint, shared_history.clone());
     let refresh = if color::enabled() {
         rl.create_external_printer().map(rate_guard::PromptRefresh::new).unwrap_or_default()
     } else { rate_guard::PromptRefresh::default() };
 
     let history_file = dirs_home().join(".oconsole_history");
     let _ = rl.load_history(&history_file);
+    shared_history.set(rl.history().iter().cloned());
 
     let version = env!("CARGO_PKG_VERSION");
     let prompt = format!("{}@{}[{}]> ", console_name, director_name, version);
@@ -1172,13 +1174,14 @@ fn interactive_loop(
                 if let Some(text) = rl.helper().and_then(|h| grammar::local_help(&h.grammar, cmd)) {
                     print!("{text}");
                     rl.add_history_entry(cmd).ok();
+                    shared_history.push(cmd);
                     continue;
                 }
 
                 match send_terminal_line(dir.as_mut(), &guard, cmd) {
                     None => continue,
                     Some(false) => { eprintln!("Connection lost"); break; }
-                    Some(true) => { rl.add_history_entry(cmd).ok(); }
+                    Some(true) => { rl.add_history_entry(cmd).ok(); shared_history.push(cmd); }
                 }
                 if let Some(mode) = ApiMode::from_line(cmd) {
                     api_mode = mode;

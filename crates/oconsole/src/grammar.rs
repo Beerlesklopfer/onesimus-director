@@ -626,12 +626,15 @@ pub fn suggest(grammar: &Grammar, cache: &ValueCache, history: &[String], failed
     if let Some(entry) = history.iter().find(|h| h.len() > line.len() && h.starts_with(line) && !failed.contains(h)) {
         return Some(Suggestion::insert(&entry[line.len()..]));
     }
+    // Like fish: the first completion (required arguments first, then
+    // alphabetical) that extends the typed word, even among several; Right
+    // accepts it, Tab lists all. After a blank fish suggests nothing from
+    // completions; the usage below shows what may follow.
     let (start, candidates) = complete(grammar, cache, line, pos);
-    if let [only] = candidates.as_slice() {
-        let typed = &line[start..];
-        if only.replacement.len() > typed.len() && only.replacement.starts_with(typed) {
-            return Some(Suggestion::insert(&only.replacement[typed.len()..]));
-        }
+    let typed = &line[start..];
+    let extends = |c: &&Candidate| c.replacement.len() > typed.len() && c.replacement.starts_with(typed);
+    if let Some(first) = candidates.iter().filter(|_| !typed.is_empty()).find(extends) {
+        return Some(Suggestion::insert(&first.replacement[typed.len()..]));
     }
     usage_hint(grammar, line).map(|display| Suggestion { display, completion: None })
 }
@@ -1021,10 +1024,19 @@ mod tests {
     }
 
     #[test]
-    fn suggestion_completes_a_single_candidate() {
+    fn suggestion_completes_the_first_candidate() {
         let grammar = odir_grammar();
         let s = suggest(&grammar, &cache(), &[], &[], "purge volume all allp", 21).unwrap();
         assert_eq!(s.completion.as_deref(), Some("ools"));
+        // several candidates: the first, as fish does
+        let (_, all) = complete(&grammar, &cache(), "purge vol", 9);
+        assert!(!all.is_empty());
+        let s = suggest(&grammar, &cache(), &[], &[], "purge vol", 9).unwrap();
+        assert_eq!(s.completion.as_deref(), Some(&all[0].replacement["vol".len()..]));
+        let (_, all) = complete(&grammar, &cache(), "list jo", 7);
+        assert!(all.len() > 1, "{all:?}");
+        let s = suggest(&grammar, &cache(), &[], &[], "list jo", 7).unwrap();
+        assert_eq!(s.completion.as_deref(), Some(&all[0].replacement["jo".len()..]));
         // usage: subcommand words, then open arguments; shown, not inserted
         let s = suggest(&grammar, &cache(), &[], &[], "purge ", 6).unwrap();
         assert_eq!(s.display, "<files|jobs|volume[=<volume>]|quota>");
