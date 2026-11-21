@@ -159,46 +159,32 @@ fn restore_file_times(ff: &FfPkt, fname: &[u8]) {
     unsafe { libc::lutimes(c.as_ptr(), times.as_ptr()) };
 }
 
-/// The Stat record of the C runtime's `stat` (Windows; unused before W2,
-/// where Bareos fills it from `WIN32_FILE_ATTRIBUTE_DATA`, see
-/// `win32/compat/compat.cc` `fstat`/`stat2`).
-#[allow(clippy::unnecessary_cast)]
-#[cfg(windows)]
-pub fn stat_from(st: &libc::stat) -> Stat {
-    Stat {
-        dev: st.st_dev as u64,
-        ino: st.st_ino as u64,
-        mode: st.st_mode as u32,
-        nlink: st.st_nlink as u64,
-        uid: st.st_uid as u32,
-        gid: st.st_gid as u32,
-        rdev: st.st_rdev as u64,
-        size: st.st_size,
-        blksize: 4096,
-        blocks: (st.st_size + 511) / 512,
-        atime: st.st_atime,
-        mtime: st.st_mtime,
-        ctime: st.st_ctime,
-        flags: 0,
+/// The `Stat` of `p` without following a link (`lstat`); the error is the
+/// errno (Unix) or the Win32 error code (Windows).
+pub fn stat_of(p: &[u8]) -> Result<Stat, i32> {
+    #[cfg(unix)]
+    {
+        lstat(p).map(|st| stat_from(&st))
+    }
+    #[cfg(windows)]
+    {
+        crate::winfs::stat(p)
     }
 }
 
-/// lstat() on Windows: not before W2 (`ENOSYS`); every file of a walk is
-/// then "Could not stat". Backup jobs are refused at their start.
+/// fstype() on Windows: the name of the volume's file system ("NTFS", …;
+/// Bareos: `GetVolumeInformationW`).
 #[cfg(windows)]
-pub fn lstat(_p: &[u8]) -> Result<libc::stat, i32> {
-    Err(crate::platform::ENOSYS)
+pub fn fstype(fname: &[u8]) -> Option<String> {
+    crate::winfs::fstype(fname)
 }
 
-/// fstype() on Windows: unknown (Bareos: `GetVolumeInformationW`, W2).
+/// RestoreFileTimes() on Windows: the access and modification time the
+/// walk read are set again (FO_KEEPATIME).
 #[cfg(windows)]
-pub fn fstype(_fname: &[u8]) -> Option<String> {
-    None
+fn restore_file_times(ff: &FfPkt, fname: &[u8]) {
+    let _ = crate::winfs::set_times(fname, ff.statp.atime, ff.statp.mtime);
 }
-
-/// RestoreFileTimes() on Windows: not before W2.
-#[cfg(windows)]
-fn restore_file_times(_ff: &FfPkt, _fname: &[u8]) {}
 
 /// The FileSet walker.
 pub struct Finder<'a> {
@@ -307,8 +293,8 @@ impl<'a> Finder<'a> {
         ff.fname = fname.clone();
         ff.link = fname.clone();
         ff.type_ = 0xFFFF;
-        match lstat(&fname) {
-            Ok(st) => ff.statp = stat_from(&st),
+        match stat_of(&fname) {
+            Ok(st) => ff.statp = st,
             Err(e) => {
                 ff.type_ = FT_NOSTAT;
                 ff.ff_errno = e;

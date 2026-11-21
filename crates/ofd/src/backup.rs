@@ -570,10 +570,9 @@ impl<S: Read + Write> Backup<'_, '_, S> {
             return;
         }
         let fname = String::from_utf8_lossy(&ff.fname).into_owned();
-        match lstat(&ff.fname) {
+        match stat_of(&ff.fname) {
             Err(e) => self.jmsg(M_WARNING, format!("Cannot stat file {fname}: ERR={}\n", crate::berrno::BErr(e))),
             Ok(st) => {
-                let st = stat_from(&st);
                 if st.mtime != ff.statp.mtime {
                     self.jmsg(M_ERROR, format!("{fname}: mtime changed during backup.\n"));
                 } else if st.ctime != ff.statp.ctime {

@@ -115,24 +115,45 @@ pub fn build_attr_output_fnames(attr: &mut Attributes, where_: &Where, prefix_li
             attr.olname = attr.lname.clone();
         }
         Where::Prefix(w) => {
+            // Windows: `C:/data/a` below a prefix is `<prefix>/C/data/a`, the
+            // colon of the drive letter cannot be part of a path component
+            let fname = restore_path(&attr.fname);
+            let lname = restore_path(&attr.lname);
             let mut of = w.clone();
-            if w.last() != Some(&b'/') && attr.fname.first() != Some(&b'/') {
+            if w.last() != Some(&b'/') && fname.first() != Some(&b'/') {
                 of.push(b'/');
             }
-            of.extend_from_slice(&attr.fname);
+            of.extend_from_slice(&fname);
             attr.ofname = of;
             if is_link {
-                let absolute = attr.lname.first() == Some(&b'/');
+                let absolute = lname.first() == Some(&b'/') || (cfg!(windows) && has_drive(&attr.lname));
                 let allow_prefix = attr.type_ == FT_LNKSAVED || prefix_links;
                 let add_link = absolute && allow_prefix;
                 let mut ol = if add_link { w.clone() } else { Vec::new() };
-                if add_link && w.last() != Some(&b'/') && attr.lname.first() != Some(&b'/') {
+                if add_link && w.last() != Some(&b'/') && lname.first() != Some(&b'/') {
                     ol.push(b'/');
                 }
-                ol.extend_from_slice(&attr.lname);
+                ol.extend_from_slice(if add_link { &lname } else { &attr.lname });
                 attr.olname = ol;
             }
         }
+    }
+}
+
+/// Whether `name` starts with a Windows drive (`C:/…`, `C:\\…`, `C:`).
+pub fn has_drive(name: &[u8]) -> bool {
+    name.len() >= 2 && name[0].is_ascii_alphabetic() && name[1] == b':' && name.get(2).is_none_or(|c| matches!(c, b'/' | b'\\'))
+}
+
+/// The name as it is appended to a restore prefix: on Windows the drive
+/// `C:/x` becomes `C/x`; on Unix and for names without a drive unchanged.
+pub fn restore_path(name: &[u8]) -> Vec<u8> {
+    if cfg!(windows) && has_drive(name) {
+        let mut out = vec![name[0]];
+        out.extend_from_slice(&name[2..]);
+        out
+    } else {
+        name.to_vec()
     }
 }
 
@@ -290,14 +311,30 @@ pub fn set_attributes(attr: &Attributes, ofd: Option<std::fs::File>) -> Vec<Stri
     errors
 }
 
-/// SetAttributes() on Windows: not before W2 (Bareos `SetAttributes` with
-/// `win32_restore_file_attributes`/`SetFileAttributesW` and the times of
-/// `WIN32_FILE_ATTRIBUTE_DATA` from the extended attributes). Restore jobs
-/// are refused at their start.
+/// SetAttributes() on Windows: the access and modification time of the
+/// restored file or directory from the catalog's `Stat` (`SetFileTime`);
+/// links keep the time they were created with. Owner and mode do not exist
+/// on Windows. The Win32 attributes follow in a later step.
 #[cfg(windows)]
 pub fn set_attributes(attr: &Attributes, ofd: Option<std::fs::File>) -> Vec<String> {
+    let mut errors = Vec::new();
+    let oname = attr.ofname_str();
+    let size = match &ofd {
+        Some(f) => f.metadata().map(|m| m.len() as i64).ok(),
+        None => std::fs::symlink_metadata(attr.ofname_path()).map(|m| m.len() as i64).ok(),
+    };
+    if let Some(fsize) = size {
+        if attr.type_ == FT_REG && fsize > 0 && attr.statp.size > 0 && fsize != attr.statp.size {
+            errors.push(format!("File size of restored file {oname} not correct. Original {}, restored {fsize}.\n", attr.statp.size));
+        }
+    }
     drop(ofd);
-    vec![format!("Unable to set attributes of {}: {}\n", attr.ofname_str(), crate::platform::FILE_JOBS_UNSUPPORTED)]
+    if !matches!(attr.type_, FT_LNK | FT_LNKSAVED) {
+        if let Err(code) = crate::winfs::set_times(&attr.ofname, attr.statp.atime, attr.statp.mtime) {
+            errors.push(format!("Unable to set file times of {oname}: ERR={}\n", crate::berrno::BErr(code)));
+        }
+    }
+    errors
 }
 
 #[cfg(test)]
@@ -338,6 +375,16 @@ mod tests {
         assert_eq!((a.ofname.as_slice(), a.olname.as_slice()), (&b"/b/hard"[..], &b"/b/orig"[..]));
         // bsscanf: numbers without digits are 0 and still count
         assert_eq!(unpack_attributes_record(1, b"x y").unwrap().file_index, 0);
+    }
+
+    #[test]
+    fn drive_letters() {
+        assert!(has_drive(b"C:/Users/x") && has_drive(b"d:\\x") && has_drive(b"C:"));
+        assert!(!has_drive(b"/C:/x") && !has_drive(b"CC:/x") && !has_drive(b"C:x") && !has_drive(b"/etc"));
+        // on Unix names are never rewritten
+        if !cfg!(windows) {
+            assert_eq!(restore_path(b"C:/Users/x"), b"C:/Users/x");
+        }
     }
 
     #[test]

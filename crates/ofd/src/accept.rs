@@ -16,7 +16,7 @@
 //! There are no FD-to-FD connections in Bareos ("Hello Client ..." is a
 //! client initiated connection to a Director, never to a File Daemon).
 
-use std::net::{TcpListener, TcpStream};
+use std::net::TcpStream;
 use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
 use std::time::Duration;

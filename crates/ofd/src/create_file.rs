@@ -8,6 +8,8 @@ use std::fs::File;
 use std::os::unix::fs::OpenOptionsExt;
 
 use crate::attribs::*;
+#[cfg(windows)]
+use crate::platform::OsStrExt;
 
 // include/baconfig.h
 #[allow(dead_code)]
@@ -354,17 +356,200 @@ pub fn makepath(
     true
 }
 
-/// CreateFile() on Windows: not implemented before W2 (Bareos creates the
-/// file with `CreateFileW` and restores the BackupWrite stream, see
-/// docs/plans/PORTIERUNG-MACOS-WINDOWS.md). Restore jobs are refused at
-/// their start; reaching this is an error, never a silent skip.
+/// CreateFile() on Windows through `std::fs`: the same decisions as the
+/// Unix one (replace policy, parents, one type per branch), no owner, mode
+/// or device nodes. Symbolic links need the privilege to create them
+/// (an administrator or developer mode); without it the file is reported
+/// as "Could not symlink". Hard links need an NTFS volume.
 #[cfg(windows)]
 pub fn create_file(
     attr: &mut Attributes,
-    _replace: u8,
-    _state: &mut CreateState,
+    replace: u8,
+    state: &mut CreateState,
     msg: &mut dyn FnMut(i32, String),
 ) -> Cf {
-    msg(crate::jmsg::M_ERROR, format!("Cannot create {}: {}\n", attr.ofname_str(), crate::platform::FILE_JOBS_UNSUPPORTED));
-    Cf::Error
+    use crate::jmsg::{M_ERROR, M_INFO};
+    let oname = attr.ofname_str();
+    let mtime_of = |m: &std::fs::Metadata| {
+        m.modified().ok().map(|t| match t.duration_since(std::time::UNIX_EPOCH) {
+            Ok(d) => d.as_secs() as i64,
+            Err(e) => -(e.duration().as_secs() as i64),
+        })
+    };
+    let existing = std::fs::symlink_metadata(attr.ofname_path()).ok();
+    let exists = existing.is_some();
+    if let Some(m) = &existing {
+        let theirs = mtime_of(m).unwrap_or(0);
+        match replace {
+            REPLACE_IFNEWER if attr.statp.mtime <= theirs => {
+                msg(M_INFO, format!("File skipped. Not newer: {oname}\n"));
+                return Cf::Skip;
+            }
+            REPLACE_IFOLDER if attr.statp.mtime >= theirs => {
+                msg(M_INFO, format!("File skipped. Not older: {oname}\n"));
+                return Cf::Skip;
+            }
+            REPLACE_NEVER => {
+                if !(attr.type_ == FT_DIREND && state.path_list.contains(&attr.ofname)) {
+                    msg(M_INFO, format!("File skipped. Already exists: {oname}\n"));
+                    return Cf::Skip;
+                }
+            }
+            _ => {}
+        }
+    }
+    match attr.type_ {
+        FT_LNKSAVED | FT_LNK | FT_REGE | FT_REG => {
+            if exists {
+                if let Err(e) = remove_existing(attr.ofname_path()) {
+                    msg(M_ERROR, format!("File {oname} already exists and could not be replaced. ERR={}.\n", crate::berrno::s(&e)));
+                }
+            }
+            let Some(slash) = attr.ofname.iter().rposition(|&b| b == b'/') else {
+                if attr.ofname.is_empty() {
+                    msg(M_ERROR, format!("Zero length filename: {}\n", attr.fname_str()));
+                    return Cf::Error;
+                }
+                return create_typed(attr, msg);
+            };
+            if slash + 1 == attr.ofname.len() {
+                msg(M_ERROR, format!("Zero length filename: {}\n", attr.fname_str()));
+                return Cf::Error;
+            }
+            if slash > 0 {
+                let dir = attr.ofname[..slash].to_vec();
+                if state.cached_path.as_ref() != Some(&dir) {
+                    state.cached_path = Some(dir.clone());
+                    if !makepath(&dir, state, msg) {
+                        return Cf::Error;
+                    }
+                }
+            }
+            create_typed(attr, msg)
+        }
+        FT_REPARSE | FT_JUNCTION | FT_DIRBEGIN | FT_DIREND => {
+            let path = attr.ofname.clone();
+            if !makepath(&path, state, msg) {
+                return Cf::Error;
+            }
+            Cf::Created
+        }
+        FT_RAW | FT_FIFO | FT_SPEC => {
+            msg(M_ERROR, format!("Cannot restore {oname}: devices, FIFOs and sockets do not exist on Windows.\n"));
+            Cf::Error
+        }
+        FT_DELETED => {
+            msg(M_INFO, format!("Original file {} have been deleted: type={}\n", attr.fname_str(), attr.type_));
+            Cf::Error
+        }
+        FT_NOACCESS | FT_NOFOLLOW | FT_NOSTAT | FT_DIRNOCHG | FT_NOCHG | FT_ISARCH | FT_NORECURSE | FT_NOFSCHG | FT_NOOPEN => {
+            msg(M_ERROR, format!("Original file {} not saved: type={}\n", attr.fname_str(), attr.type_));
+            Cf::Error
+        }
+        t => {
+            msg(M_ERROR, format!("Unknown file type {t}; not restored: {}\n", attr.fname_str()));
+            Cf::Error
+        }
+    }
+}
+
+/// Removes a file or link that is in the way; a read-only file loses its
+/// read-only attribute first (Windows refuses to delete it otherwise).
+#[cfg(windows)]
+fn remove_existing(path: &std::path::Path) -> std::io::Result<()> {
+    if let Ok(m) = std::fs::symlink_metadata(path) {
+        let mut perm = m.permissions();
+        if perm.readonly() {
+            #[allow(clippy::permissions_set_readonly_false)]
+            perm.set_readonly(false);
+            let _ = std::fs::set_permissions(path, perm);
+        }
+        if m.file_type().is_dir() || (m.file_type().is_symlink() && std::os::windows::fs::FileTypeExt::is_symlink_dir(&m.file_type())) {
+            return std::fs::remove_dir(path);
+        }
+    }
+    std::fs::remove_file(path)
+}
+
+/// The type specific part of CreateFile() for non-directories.
+#[cfg(windows)]
+fn create_typed(attr: &mut Attributes, msg: &mut dyn FnMut(i32, String)) -> Cf {
+    use crate::jmsg::M_ERROR;
+    let oname = attr.ofname_str();
+    match attr.type_ {
+        FT_REGE | FT_REG => match std::fs::OpenOptions::new().write(true).create(true).truncate(true).open(attr.ofname_path()) {
+            Ok(f) => Cf::Extract(f),
+            Err(e) => {
+                msg(M_ERROR, format!("Could not create {oname}: ERR={}\n", crate::berrno::s(&e)));
+                Cf::Error
+            }
+        },
+        FT_LNKSAVED => {
+            let from = std::ffi::OsStr::from_bytes(&attr.olname);
+            if let Err(e) = std::fs::hard_link(from, attr.ofname_path()) {
+                msg(M_ERROR, format!("Could not hard link {oname} -> {}: ERR={}\n", String::from_utf8_lossy(&attr.olname), crate::berrno::s(&e)));
+                return Cf::Error;
+            }
+            Cf::Created
+        }
+        FT_LNK => {
+            let target = std::path::Path::new(std::ffi::OsStr::from_bytes(&attr.olname));
+            // a link to a directory is a different kind of link on Windows
+            let resolved = match attr.ofname_path().parent() {
+                Some(parent) if target.is_relative() => parent.join(target),
+                _ => target.to_path_buf(),
+            };
+            let result = if resolved.is_dir() {
+                std::os::windows::fs::symlink_dir(target, attr.ofname_path())
+            } else {
+                std::os::windows::fs::symlink_file(target, attr.ofname_path())
+            };
+            if let Err(e) = result {
+                msg(M_ERROR, format!("Could not symlink {oname} -> {}: ERR={}\n", String::from_utf8_lossy(&attr.olname), crate::berrno::s(&e)));
+                return Cf::Error;
+            }
+            Cf::Created
+        }
+        t => {
+            msg(M_ERROR, format!("unhandled type: {t}\n"));
+            Cf::Error
+        }
+    }
+}
+
+/// makepath() on Windows: `apath` and every missing parent; the directories
+/// this restore created are remembered for replace=never.
+#[cfg(windows)]
+pub fn makepath(apath: &[u8], state: &mut CreateState, msg: &mut dyn FnMut(i32, String)) -> bool {
+    use crate::jmsg::M_ERROR;
+    let path = std::path::Path::new(std::ffi::OsStr::from_bytes(apath));
+    match std::fs::metadata(path) {
+        Ok(m) if m.is_dir() => return true,
+        Ok(_) => {
+            msg(M_ERROR, format!("{} exists but is not a directory.\n", String::from_utf8_lossy(apath)));
+            return false;
+        }
+        Err(_) => {}
+    }
+    // missing parents first
+    let mut missing: Vec<&std::path::Path> = Vec::new();
+    let mut cur = Some(path);
+    while let Some(p) = cur {
+        if p.as_os_str().is_empty() || p.is_dir() {
+            break;
+        }
+        missing.push(p);
+        cur = p.parent();
+    }
+    for p in missing.into_iter().rev() {
+        if let Err(e) = std::fs::create_dir(p) {
+            if !p.is_dir() {
+                msg(M_ERROR, format!("Cannot create directory {}: ERR={}\n", p.display(), crate::berrno::s(&e)));
+                return false;
+            }
+        } else if state.keep_path_list {
+            state.path_list.insert(p.as_os_str().as_bytes().to_vec());
+        }
+    }
+    true
 }

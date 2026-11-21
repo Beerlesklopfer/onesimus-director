@@ -66,6 +66,8 @@ mod status;
 mod stmode;
 mod streams;
 mod version;
+#[cfg(windows)]
+mod winfs;
 
 use std::path::PathBuf;
 use std::sync::Arc;
