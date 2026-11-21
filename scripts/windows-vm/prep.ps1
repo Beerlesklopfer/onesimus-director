@@ -19,6 +19,13 @@ $b = New-Object byte[] 20971520; $rnd.NextBytes($b); [IO.File]::WriteAllBytes("$
 # attributes
 [IO.File]::WriteAllText("$t\ro.txt", 'read only'); [IO.File]::SetAttributes("$t\ro.txt", [IO.FileAttributes]::ReadOnly)
 [IO.File]::WriteAllText("$t\hid.txt", 'hidden');  [IO.File]::SetAttributes("$t\hid.txt", [IO.FileAttributes]::Hidden -bor [IO.FileAttributes]::Archive)
+# an access control list of its own and an alternate data stream; an empty file with a stream
+[IO.File]::WriteAllText("$t\acl.txt", 'acl file')
+$me = (whoami)
+icacls "$t\acl.txt" /inheritance:r /grant:r "${me}:(F)" /grant "BUILTIN\Users:(R)" | Out-Null
+Set-Content -Path "$t\acl.txt" -Stream second -Value 'alternate data'
+[IO.File]::WriteAllBytes("$t\emptyads.txt", [byte[]]@())
+Set-Content -Path "$t\emptyads.txt" -Stream only -Value 'stream of an empty file'
 # times that are not "now": 2001-02-03 04:05:06.789 modified, 1999-12-31 23:59:58 created
 [IO.File]::WriteAllText("$t\old.txt", 'old')
 [IO.File]::SetLastWriteTimeUtc("$t\old.txt", [DateTime]::new(2001, 2, 3, 4, 5, 6, 789, [DateTimeKind]::Utc))

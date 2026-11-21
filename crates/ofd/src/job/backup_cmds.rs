@@ -488,7 +488,9 @@ impl Session<'_> {
         self.msgs.set_status(JS_RUNNING);
         self.msgs.jmsg(M_INFO, &format!("Version: {} ({}) {}\n", crate::version::FULL, crate::version::DATE, crate::version::os_info()));
         if !crate::acl_xattr::ACL_SUPPORTED
-            && fs.include.iter().any(|ie| ie.opts.iter().any(|o| o.flags.has(FO_ACL)))
+            // on Windows the security descriptor travels in the Win32 data stream
+            // unless the option is `Portable`
+            && fs.include.iter().any(|ie| ie.opts.iter().any(|o| o.flags.has(FO_ACL) && !(cfg!(windows) && !o.flags.has(crate::fileset::FO_PORTABLE))))
         {
             self.msgs.jmsg(M_WARNING, "FileSet requests ACL support, but ACLs are not supported on this platform: ACLs are not saved\n");
         }

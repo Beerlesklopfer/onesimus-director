@@ -47,6 +47,7 @@ pub struct Counters {
 /// processWin32BackupAPIBlock(): the file data of a BackupRead stream
 /// (WIN32_STREAM_ID headers of 20 bytes, the stream name, the content; only
 /// BACKUP_DATA content is written).
+#[cfg(unix)]
 #[derive(Default)]
 struct Win32Decomp {
     header: Vec<u8>,
@@ -55,7 +56,16 @@ struct Win32Decomp {
     in_data: bool,
 }
 
+/// On Windows the stream goes to `BackupWrite`, which restores the data,
+/// the alternate data streams and the security descriptor.
+#[cfg(windows)]
+type Win32Decomp = crate::winfs::BackupWriter;
+
+#[cfg(unix)]
 impl Win32Decomp {
+    /// Nothing to end: the data was written as it came.
+    fn finish(&mut self, _out: &File) {}
+
     fn process(&mut self, mut buf: &[u8], out: &mut File) -> std::io::Result<()> {
         const WIN32_BACKUP_DATA: u32 = 1;
         while !buf.is_empty() {
@@ -751,6 +761,9 @@ impl Restore<'_> {
         if r.extract {
             if r.size > 0 && r.bfd.is_none() {
                 self.jmsg(M_ERROR, "Logic error: output file should be open\n");
+            }
+            if let (Some(w), Some(f)) = (r.win32.as_mut(), r.bfd.as_ref()) {
+                w.finish(f);
             }
             for e in set_attributes(&r.attr, r.bfd.take()) {
                 self.jmsg(M_ERROR, e);

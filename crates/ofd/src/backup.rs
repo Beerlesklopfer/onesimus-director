@@ -41,8 +41,14 @@ const O_NOATIME: i32 = libc::O_NOATIME;
 #[cfg(all(unix, not(target_os = "linux")))]
 const O_NOATIME: i32 = 0;
 
-/// SelectDataStream() (no encryption, portable data).
+/// SelectDataStream() (no encryption). On Windows the data of a file that
+/// is not marked `Portable` is the `BackupRead` stream (`STREAM_WIN32_DATA`)
+/// with its security descriptor and alternate data streams.
 pub fn select_data_stream(flags: Flags) -> i32 {
+    #[cfg(windows)]
+    if !flags.has(FO_PORTABLE) {
+        return if flags.has(FO_COMPRESS) { STREAM_WIN32_COMPRESSED_DATA } else { STREAM_WIN32_DATA };
+    }
     let stream = if flags.has(FO_SPARSE) || flags.has(FO_OFFSETS) { STREAM_SPARSE_DATA } else { STREAM_FILE_DATA };
     if flags.has(FO_COMPRESS) {
         if stream == STREAM_SPARSE_DATA { STREAM_SPARSE_COMPRESSED_DATA } else { STREAM_COMPRESSED_DATA }
@@ -183,19 +189,30 @@ pub struct JobEnv<'a> {
     pub base_size: u64,
 }
 
-/// calculate_file_chksum(): (digest name, base64 digest) of the whole file
-/// (zero blocks skipped like ReadDigest() when FO_SPARSE).
-pub fn file_checksum(ff: &FfPkt, counters: &mut Counters, msgs: &mut JobMsgs, is_verify: bool) -> Option<Option<(&'static str, i32, String)>> {
-    let (mut d, stream) = Digest::for_flags(ff.opts.flags)?;
-    let name = d.name();
+/// The reader of a file's data for a backup: the file itself, on Windows
+/// the `BackupRead` stream when the data stream is a Win32 one.
+fn open_for_backup(ff: &FfPkt, data_stream: i32) -> std::io::Result<Box<dyn Read>> {
+    #[cfg(windows)]
+    if is_win32_stream(data_stream) {
+        return crate::winfs::open_backup_reader(&ff.fname).map(|r| Box::new(r) as Box<dyn Read>);
+    }
+    let _ = data_stream;
     let mut opts = std::fs::OpenOptions::new();
     opts.read(true);
     #[cfg(unix)]
     if ff.opts.flags.has(FO_NOATIME) {
         opts.custom_flags(O_NOATIME);
     }
+    opts.open(std::ffi::OsStr::from_bytes(&ff.fname)).map(|f| Box::new(f) as Box<dyn Read>)
+}
+
+/// calculate_file_chksum(): (digest name, base64 digest) of the whole file
+/// (zero blocks skipped like ReadDigest() when FO_SPARSE).
+pub fn file_checksum(ff: &FfPkt, counters: &mut Counters, msgs: &mut JobMsgs, is_verify: bool) -> Option<Option<(&'static str, i32, String)>> {
+    let (mut d, stream) = Digest::for_flags(ff.opts.flags)?;
+    let name = d.name();
     let fname = String::from_utf8_lossy(&ff.fname).into_owned();
-    let mut f = match opts.open(std::ffi::OsStr::from_bytes(&ff.fname)) {
+    let mut f = match open_for_backup(ff, select_data_stream(ff.opts.flags)) {
         Ok(f) => f,
         Err(e) => {
             msgs.jmsg(M_ERROR, &format!("     Cannot open {fname}: ERR={}.\n", crate::berrno::s(&e)));
@@ -462,21 +479,19 @@ impl<S: Read + Write> Backup<'_, '_, S> {
         }
 
         let fmt = ff.statp.mode & crate::stmode::S_IFMT;
-        let do_read = if ff.type_ != FT_LNKSAVED && fmt == crate::stmode::S_IFREG {
+        let win32 = cfg!(windows) && is_win32_stream(data_stream);
+        let do_read = if win32 && matches!(ff.type_, FT_REG | FT_REGE) {
+            // an empty file can still have a security descriptor and streams
+            true
+        } else if ff.type_ != FT_LNKSAVED && fmt == crate::stmode::S_IFREG {
             ff.statp.size > 0
         } else {
             matches!(ff.type_, FT_RAW | FT_FIFO | FT_REPARSE | FT_JUNCTION)
         };
         if do_read {
-            let mut opts = std::fs::OpenOptions::new();
-            opts.read(true);
-            #[cfg(unix)]
-            if ff.opts.flags.has(FO_NOATIME) {
-                opts.custom_flags(O_NOATIME);
-            }
-            match opts.open(std::ffi::OsStr::from_bytes(&ff.fname)) {
+            match open_for_backup(ff, data_stream) {
                 Ok(mut file) => {
-                    let ok = self.send_data(data_stream, ff, &mut file, digest.as_mut().map(|(d, _)| d));
+                    let ok = self.send_data(data_stream, ff, &mut *file, digest.as_mut().map(|(d, _)| d));
                     if ff.opts.flags.has(FO_CHKCHANGES) {
                         self.has_file_changed(ff);
                     }

@@ -316,3 +316,160 @@ pub fn create_junction(link: &[u8], target: &[u8]) -> Result<(), i32> {
     }
     result
 }
+
+// ---------------------------------------------------------------------------
+// BackupRead / BackupWrite: the Win32 data stream
+// ---------------------------------------------------------------------------
+
+/// Enables the backup privileges of the process token once: read any file
+/// (`SeBackupPrivilege`), write any file and set any owner
+/// (`SeRestorePrivilege`), take ownership (`SeTakeOwnershipPrivilege`).
+/// A privilege the token does not have stays off; the calls then work for
+/// the files the account may access anyway. Bareos: `win32/compat`
+/// `enable_backup_privileges`.
+pub fn enable_backup_privileges() {
+    use std::sync::Once;
+    use windows_sys::Win32::Foundation::{CloseHandle, HANDLE, LUID};
+    use windows_sys::Win32::Security::{
+        AdjustTokenPrivileges, LookupPrivilegeValueW, LUID_AND_ATTRIBUTES, SE_PRIVILEGE_ENABLED, TOKEN_ADJUST_PRIVILEGES,
+        TOKEN_PRIVILEGES,
+    };
+    use windows_sys::Win32::System::Threading::{GetCurrentProcess, OpenProcessToken};
+    static ONCE: Once = Once::new();
+    ONCE.call_once(|| {
+        let mut token: HANDLE = std::ptr::null_mut();
+        // SAFETY: the pseudo handle of this process, an out pointer for the token.
+        if unsafe { OpenProcessToken(GetCurrentProcess(), TOKEN_ADJUST_PRIVILEGES, &mut token) } == 0 {
+            return;
+        }
+        for name in ["SeBackupPrivilege", "SeRestorePrivilege", "SeTakeOwnershipPrivilege"] {
+            let wide: Vec<u16> = name.encode_utf16().chain(Some(0)).collect();
+            let mut luid = LUID { LowPart: 0, HighPart: 0 };
+            // SAFETY: NUL-terminated name, out pointer for the LUID.
+            if unsafe { LookupPrivilegeValueW(std::ptr::null(), wide.as_ptr(), &mut luid) } == 0 {
+                continue;
+            }
+            let privileges = TOKEN_PRIVILEGES {
+                PrivilegeCount: 1,
+                Privileges: [LUID_AND_ATTRIBUTES { Luid: luid, Attributes: SE_PRIVILEGE_ENABLED }],
+            };
+            // SAFETY: a valid token with TOKEN_ADJUST_PRIVILEGES and a one-entry privilege set.
+            unsafe { AdjustTokenPrivileges(token, 0, &privileges, 0, std::ptr::null_mut(), std::ptr::null_mut()) };
+        }
+        // SAFETY: the token handle opened above.
+        unsafe { CloseHandle(token) };
+    });
+}
+
+/// `GENERIC_READ`, `GENERIC_WRITE`, `WRITE_DAC`, `WRITE_OWNER`.
+const GENERIC_READ: u32 = 0x8000_0000;
+const GENERIC_WRITE: u32 = 0x4000_0000;
+const WRITE_DAC: u32 = 0x0004_0000;
+const WRITE_OWNER: u32 = 0x0008_0000;
+
+/// The rights a file needs to receive a `BackupWrite` stream with its
+/// security descriptor.
+pub const RESTORE_ACCESS: u32 = GENERIC_WRITE | WRITE_DAC | WRITE_OWNER;
+
+/// The Win32 data stream of a file as `BackupRead` produces it
+/// (`WIN32_STREAM_ID` headers, names, the data stream, alternate data
+/// streams, the security descriptor): what Bareos sends as
+/// `STREAM_WIN32_DATA`.
+pub struct BackupReader {
+    file: std::fs::File,
+    context: usize,
+    done: bool,
+}
+
+/// Opens `path` for [`BackupReader`] (no link is followed, directories and
+/// files held open by others for reading work, files locked against
+/// sharing do not).
+pub fn open_backup_reader(path: &[u8]) -> std::io::Result<BackupReader> {
+    enable_backup_privileges();
+    let file = std::fs::OpenOptions::new()
+        .access_mode(GENERIC_READ)
+        .share_mode(SHARE_ALL)
+        .custom_flags(FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT | 0x0800_0000) // | FILE_FLAG_SEQUENTIAL_SCAN
+        .open(os(path))?;
+    Ok(BackupReader { file, context: 0, done: false })
+}
+
+impl std::io::Read for BackupReader {
+    fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+        use windows_sys::Win32::Storage::FileSystem::BackupRead;
+        if self.done || buf.is_empty() {
+            return Ok(0);
+        }
+        let mut read = 0u32;
+        let mut context = self.context as *mut std::ffi::c_void;
+        let wanted = buf.len().min(u32::MAX as usize) as u32;
+        // SAFETY: a valid handle, a buffer of `wanted` bytes, the context of this reader only.
+        let ok = unsafe { BackupRead(self.file.as_raw_handle(), buf.as_mut_ptr(), wanted, &mut read, 0, 1, &mut context) };
+        self.context = context as usize;
+        if ok == 0 {
+            return Err(std::io::Error::last_os_error());
+        }
+        if read == 0 {
+            self.done = true;
+        }
+        Ok(read as usize)
+    }
+}
+
+impl Drop for BackupReader {
+    fn drop(&mut self) {
+        use windows_sys::Win32::Storage::FileSystem::BackupRead;
+        if self.context != 0 {
+            let mut context = self.context as *mut std::ffi::c_void;
+            let mut read = 0u32;
+            // SAFETY: the same handle and context; abort = TRUE frees the context.
+            unsafe { BackupRead(self.file.as_raw_handle(), std::ptr::null_mut(), 0, &mut read, 1, 0, &mut context) };
+            self.context = 0;
+        }
+    }
+}
+
+/// Writes a `BackupRead` stream back into a file (`BackupWrite`), with its
+/// security descriptor and alternate data streams.
+#[derive(Default)]
+pub struct BackupWriter {
+    context: usize,
+}
+
+impl BackupWriter {
+    /// Writes `buf` into `file`, which must have been opened with
+    /// [`RESTORE_ACCESS`].
+    pub fn process(&mut self, buf: &[u8], file: &mut std::fs::File) -> std::io::Result<()> {
+        use windows_sys::Win32::Storage::FileSystem::BackupWrite;
+        enable_backup_privileges();
+        let mut rest = buf;
+        while !rest.is_empty() {
+            let mut written = 0u32;
+            let mut context = self.context as *mut std::ffi::c_void;
+            let wanted = rest.len().min(u32::MAX as usize) as u32;
+            // SAFETY: a valid handle, a buffer of `wanted` bytes, the context of this writer only.
+            let ok = unsafe { BackupWrite(file.as_raw_handle(), rest.as_ptr(), wanted, &mut written, 0, 1, &mut context) };
+            self.context = context as usize;
+            if ok == 0 {
+                return Err(std::io::Error::last_os_error());
+            }
+            if written == 0 {
+                return Err(std::io::Error::new(std::io::ErrorKind::WriteZero, "BackupWrite wrote nothing"));
+            }
+            rest = &rest[written as usize..];
+        }
+        Ok(())
+    }
+
+    /// Ends the stream (frees the context of `BackupWrite`).
+    pub fn finish(&mut self, file: &std::fs::File) {
+        use windows_sys::Win32::Storage::FileSystem::BackupWrite;
+        if self.context != 0 {
+            let mut context = self.context as *mut std::ffi::c_void;
+            let mut written = 0u32;
+            // SAFETY: the same handle and context; abort = TRUE frees the context.
+            unsafe { BackupWrite(file.as_raw_handle(), std::ptr::null(), 0, &mut written, 1, 0, &mut context) };
+            self.context = 0;
+        }
+    }
+}

@@ -79,6 +79,8 @@ fn backup_and_restore_through_the_windows_fd() {
         .query(&format!("SELECT p.path || f.name, f.lstat FROM file f JOIN path p ON p.pathid = f.pathid WHERE f.jobid = {backup} AND (f.name = 'a.txt' OR f.name = 'hard1.txt') ORDER BY 1"))
         .unwrap_or_default();
     eprintln!("catalog rows of the hard link pair:\n{rows}");
+    // the data of a Windows file is the BackupRead stream: STREAM_WIN32_COMPRESSED_DATA (31, "f")
+    assert!(rows.lines().all(|l| l.trim_end().ends_with(" f")), "the data stream is not the Win32 one:\n{rows}");
     let reply = rig
         .command(&format!("restore jobid={backup} client=vfd where={RESTORE} all done yes"))
         .unwrap_or_else(|e| panic!("{e}"));

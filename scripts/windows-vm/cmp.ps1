@@ -46,5 +46,12 @@ foreach ($r in $sa) {
 $n = { param($p) $o = fsutil hardlink list $p 2>&1; @($o | Where-Object { $_ -match '^\\' }).Count }
 "hard links of a.txt: source " + (& $n "$a\a.txt") + ", restored " + (& $n "$b\a.txt")
 if ((& $n "$a\a.txt") -ne (& $n "$b\a.txt")) { "hard link count DIFFERS"; $bad++ }
+foreach ($r in 'acl.txt', 'emptyads.txt', 'a.txt') {
+  $sa = (Get-Acl -LiteralPath "$a\$r").Sddl; $sb = (Get-Acl -LiteralPath "$b\$r").Sddl
+  $na = @(Get-Item -LiteralPath "$a\$r" -Stream * | ForEach-Object { $_.Stream + '=' + $(if ($_.Stream -ne ':$DATA') { Get-Content -LiteralPath "$a\$r" -Stream $_.Stream } else { '' }) } | Sort-Object)
+  $nb = @(Get-Item -LiteralPath "$b\$r" -Stream * | ForEach-Object { $_.Stream + '=' + $(if ($_.Stream -ne ':$DATA') { Get-Content -LiteralPath "$b\$r" -Stream $_.Stream } else { '' }) } | Sort-Object)
+  "{0,-14} sddl {1}  streams {2} ({3})" -f $r, $(if ($sa -eq $sb) { 'SAME' } else { "DIFFER`n  $sa`n  $sb" }), $(if (($na -join '|') -eq ($nb -join '|')) { 'SAME' } else { 'DIFFER' }), ($na -join ',')
+  if ($sa -ne $sb -or ($na -join '|') -ne ($nb -join '|')) { $bad++ }
+}
 "files compared: $files"
 "bad=$bad"

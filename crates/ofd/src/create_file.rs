@@ -471,13 +471,27 @@ fn remove_existing(path: &std::path::Path) -> std::io::Result<()> {
     std::fs::remove_file(path)
 }
 
+/// The output file of a restored regular file: with the rights `BackupWrite`
+/// needs for the security descriptor when the data is a Win32 stream.
+#[cfg(windows)]
+fn open_for_restore(attr: &Attributes) -> std::io::Result<File> {
+    use std::os::windows::fs::OpenOptionsExt as _;
+    let mut options = std::fs::OpenOptions::new();
+    options.write(true).create(true).truncate(true);
+    if bareos_format::stream::is_win32_stream(attr.data_stream) {
+        crate::winfs::enable_backup_privileges();
+        options.access_mode(crate::winfs::RESTORE_ACCESS).custom_flags(0x0200_0000); // FILE_FLAG_BACKUP_SEMANTICS
+    }
+    options.open(attr.ofname_path())
+}
+
 /// The type specific part of CreateFile() for non-directories.
 #[cfg(windows)]
 fn create_typed(attr: &mut Attributes, msg: &mut dyn FnMut(i32, String)) -> Cf {
     use crate::jmsg::M_ERROR;
     let oname = attr.ofname_str();
     match attr.type_ {
-        FT_REGE | FT_REG => match std::fs::OpenOptions::new().write(true).create(true).truncate(true).open(attr.ofname_path()) {
+        FT_REGE | FT_REG => match open_for_restore(attr) {
             Ok(f) => Cf::Extract(f),
             Err(e) => {
                 msg(M_ERROR, format!("Could not create {oname}: ERR={}\n", crate::berrno::s(&e)));
