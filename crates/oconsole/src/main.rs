@@ -253,12 +253,38 @@ fn load_console_config(path: Option<&str>) -> ConsoleConfig {
 /// "*UserAgent*" with the Director's password. Director/Console `Name` is never
 /// the login of the other resource.
 fn parse_console_config(content: &str) -> ConsoleConfig {
+/// Bareos writes a resource on one line as well: `Console { Name = x; Password = "y" }`.
+/// The line parser below reads one directive per line, so this puts every
+/// `{`, `}` and `;` that is outside quotes and comments on a line of its own.
+fn split_one_line_resources(content: &str) -> String {
+    let mut out = String::with_capacity(content.len() + 16);
+    let (mut quoted, mut comment) = (false, false);
+    for c in content.chars() {
+        if comment {
+            out.push(c);
+            comment = c != '\n';
+            continue;
+        }
+        match c {
+            '"' => { quoted = !quoted; out.push(c); }
+            '#' if !quoted => { comment = true; out.push(c); }
+            '{' if !quoted => out.push_str("{\n"),
+            '}' if !quoted => out.push_str("\n}\n"),
+            ';' if !quoted => out.push('\n'),
+            '\n' => { quoted = false; out.push(c); }
+            _ => out.push(c),
+        }
+    }
+    out
+}
+
     let mut cfg = ConsoleConfig {
         address: "localhost".to_string(),
         port: 9101,
         name: "*UserAgent*".to_string(),
         password: String::new(),
         grpc: None,
+    let content = &split_one_line_resources(content);
         grpc_port: None,
         grpc_fingerprint: None,
         consoles: Vec::new(),
@@ -1588,6 +1614,21 @@ mod tests {
                     let n = chunk.len().min(buf.len());
                     buf[..n].copy_from_slice(&chunk[..n]);
                     if n < chunk.len() {
+
+    /// The page "AI assistants (MCP)" writes the resources of oconsole.conf on
+    /// one line each, as Bareos allows.
+    #[test]
+    fn one_line_resources_are_read() {
+        let cfg = parse_console_config(
+            "Director { Name = backup-dir; Address = backup.example.org; Password = \"d;pw\" }\n\
+             Console  { Name = admin;     Password = \"a\" }  # human\n\
+             Console  { Name = admin-mcp; Password = \"a-long-random-password\" }\n");
+        assert_eq!(cfg.address, "backup.example.org");
+        assert_eq!(cfg.consoles, vec![("admin".into(), "a".into()), ("admin-mcp".into(), "a-long-random-password".into())]);
+        assert_eq!((cfg.name.as_str(), cfg.password.as_str()), ("admin", "a"));
+        assert_eq!(mcp_login(&cfg, None, None).unwrap(), ("admin-mcp".to_string(), "a-long-random-password".to_string()));
+    }
+
                         self.reads.push_front(Ok(chunk.split_off(n)));
                     }
                     Ok(n)
