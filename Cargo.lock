@@ -2078,6 +2078,7 @@ dependencies = [
  "openssl",
  "osd",
  "prost",
+ "pam-client2",
  "prost-types",
  "rand 0.8.8",
  "rcgen",
@@ -2367,6 +2368,27 @@ name = "parking"
 version = "2.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f38d5652c16fde515bb1ecef450ab0f6a219d619a7274976324d5e377f7dceba"
+[[package]]
+name = "pam-client2"
+version = "0.5.6"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1b5ccccd7ec3047ba2347dfcff28cd57ba39613da9143c4364038ffb32d82fc3"
+dependencies = [
+ "bitflags",
+ "libc",
+ "pam-sys2",
+ "rustversion",
+]
+
+[[package]]
+name = "pam-sys2"
+version = "1.0.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "63e07ea89c210813e1a48fc32cb358ba693aae8ca70163461e22d11f1884bf1d"
+dependencies = [
+ "libc",
+]
+
 
 [[package]]
 name = "parking_lot"

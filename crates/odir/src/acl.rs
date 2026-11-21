@@ -197,6 +197,27 @@ pub fn allowed(config: &DirectorConfig, console: &str, kind: Kind, item: &str) -
         && catalog_allowed(config, console, kind, item)
 }
 
+/// Start of the ACL subject of a session that logged in with PAM: the
+/// subject is `PAM_SUBJECT_PREFIX` + the PAM user, and its ACLs are those of
+/// the `User` resource of that name, not of the Console that carried the
+/// password. The prefix has a control character, which no resource name can
+/// contain, so no Console can take the place of a User.
+pub const PAM_SUBJECT_PREFIX: &str = "\u{1f}pam:";
+
+/// The ACL subject of the PAM user `user`.
+pub fn pam_subject(user: &str) -> String {
+    format!("{PAM_SUBJECT_PREFIX}{user}")
+}
+
+/// Whether `resource` is the one whose ACLs apply to `subject`: the Console
+/// of that name, or for a PAM subject the `User` of that name.
+fn subject_is(resource: &ConfResource, subject: &str) -> bool {
+    match subject.strip_prefix(PAM_SUBJECT_PREFIX) {
+        Some(user) => resource.norm_type() == "user" && resource.name() == Some(user),
+        None => resource.norm_type() == "console" && resource.name() == Some(subject),
+    }
+}
+
 /// Name suffix of an assistant console: `oconsole --mcp` logs in only as
 /// `<console>-mcp` (oconsole `MCP_CONSOLE_SUFFIX`).
 pub const ASSISTANT_SUFFIX: &str = "-mcp";
@@ -249,7 +270,7 @@ pub(crate) fn file_allowed(config: &DirectorConfig, console: &str, kind: Kind, i
     let Some(resource) = config
         .raw
         .iter()
-        .find(|r| r.norm_type() == "console" && r.name() == Some(console))
+        .find(|r| subject_is(r, console))
     else {
         return false;
     };
@@ -297,7 +318,7 @@ pub(crate) fn file_any_allowed(config: &DirectorConfig, console: &str, kind: Kin
         return true;
     }
     let Some(resource) = config.raw.iter()
-        .find(|r| r.norm_type() == "console" && r.name() == Some(console))
+        .find(|r| subject_is(r, console))
     else {
         return false;
     };
@@ -333,7 +354,7 @@ pub fn no_restrictions(ctx: &ExecContext, kind: Kind) -> bool {
     let Some(config) = &ctx.config else { return false };
     let Ok(config) = config.read() else { return false };
     let Some(resource) = config.raw.iter()
-        .find(|r| r.norm_type() == "console" && r.name() == Some(console.as_str()))
+        .find(|r| subject_is(r, console.as_str()))
     else {
         return false;
     };
@@ -404,7 +425,7 @@ pub fn has_restrictions(ctx: &ExecContext, kind: Kind) -> bool {
     }
     let Some(config) = ctx.config.as_ref().and_then(|c| c.read().ok()) else { return true };
     let Some(resource) = config.raw.iter()
-        .find(|r| r.norm_type() == "console" && r.name() == Some(console.as_str())) else { return true };
+        .find(|r| subject_is(r, console.as_str())) else { return true };
     if config.catalog_acl.restricts(&console, kind) {
         return true;
     }
@@ -654,6 +675,24 @@ Console {{ Name=admin; Password=pw; CommandACL=*all* }}
         assert!(is_assistant("-mcp") && is_assistant("x-mcp") && is_assistant("X-MCP") && !is_assistant("mcp"));
         let refused = grant_error(&cfg, "admin-mcp", &["assistant"]).unwrap();
         assert!(refused.contains("creates no consoles"), "{refused}");
+    }
+
+    /// A PAM session runs with the ACLs of its `User`, not of a Console; a
+    /// Console named like the user does not take its place and a user without a
+    /// `User` resource gets nothing.
+    #[test]
+    fn a_pam_subject_has_the_acls_of_its_user_resource() {
+        let cfg = DirectorConfig::from_str(r#"
+Director { Name=dir; Password=secret }
+Console { Name=anna; Password=pw; CommandACL=*all* }
+User { Name=anna; CommandACL=version }
+"#).unwrap();
+        let anna = pam_subject("anna");
+        assert!(allowed(&cfg, &anna, Kind::Command, "version"));
+        assert!(!allowed(&cfg, &anna, Kind::Command, "status"), "the User allows only version");
+        assert!(allowed(&cfg, "anna", Kind::Command, "status"), "the Console keeps its own ACL");
+        assert!(!allowed(&cfg, &pam_subject("ghost"), Kind::Command, "version"), "no User resource");
+        assert!(!allowed(&cfg, &pam_subject("anna"), Kind::Job, "any"), "a User with no JobACL allows no job");
     }
 
     pub(crate) fn context() -> ExecContext {

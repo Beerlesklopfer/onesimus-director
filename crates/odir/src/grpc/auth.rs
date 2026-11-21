@@ -236,6 +236,11 @@ impl AuthState {
     /// otherwise the password of the named Console resource.
     fn console_key(&self, console: &str) -> Option<String> {
         let cfg = self.config.read().ok()?;
+        // A console with `Use Pam Authentication` has no PAM dialog over gRPC:
+        // its password alone must not log it in (S-43).
+        if crate::pam_auth::console_uses_pam(&cfg.raw, console) {
+            return None;
+        }
         let password = if console == DEFAULT_CONSOLE {
             cfg.director.password.clone()
         } else {
@@ -425,6 +430,24 @@ mod tests {
              Console {\n  Name = admin\n  Password = \"adminpass\"\n}\n",
         ).unwrap();
         AuthState::new(Arc::new(RwLock::new(cfg)), Arc::new(crate::session_manager::SessionManager::new(Arc::new(crate::message_bus::MessageBus::new(16)))))
+    }
+
+    /// A console with `Use Pam Authentication` has no PAM dialog over gRPC,
+    /// so its password alone does not log it in (S-43).
+    #[test]
+    fn a_pam_console_does_not_log_in_with_its_password_over_grpc() {
+        let cfg = crate::director_config::DirectorConfig::from_str(
+            "Director {\n  Name = test-dir\n  Password = \"dirpass\"\n}\n\
+             Console {\n  Name = viapam\n  Password = \"pw\"\n  Use Pam Authentication = yes\n}\n\
+             Console {\n  Name = plain\n  Password = \"pw\"\n}\n",
+        ).unwrap();
+        let st = AuthState::new(Arc::new(RwLock::new(cfg)),
+            Arc::new(crate::session_manager::SessionManager::new(Arc::new(crate::message_bus::MessageBus::new(16)))));
+        for (console, ok) in [("viapam", false), ("plain", true)] {
+            let nonce = st.challenge(console);
+            let proof = compute_proof(&password_key("pw"), &nonce);
+            assert_eq!(st.login(console, &nonce, &proof).is_ok(), ok, "{console}");
+        }
     }
 
     /// A named console logs in with its own password.

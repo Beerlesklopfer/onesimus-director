@@ -221,23 +221,6 @@ fn console_password(shared_config: &Option<SharedConfig>, name: &str) -> Option<
     (!pw.is_empty()).then_some(pw)
 }
 
-/// True when the Console resource `name` has `Use Pam Authentication = yes`.
-fn console_uses_pam(shared_config: &Option<SharedConfig>, name: &str) -> bool {
-    let Some(cfg) = shared_config.as_ref().and_then(|c| c.read().ok()) else { return false };
-    uses_pam(&cfg.raw, name)
-}
-
-/// [`console_uses_pam`] over the raw resources.
-fn uses_pam(raw: &[bareos_config::raw::ConfResource], name: &str) -> bool {
-    raw.iter()
-        .filter(|r| r.norm_type() == "console" && r.name().is_some_and(|n| n == name))
-        .any(|r| {
-            r.directives.iter().rev().find(|d| d.norm_key() == "usepamauthentication")
-                .and_then(|d| d.first())
-                .is_some_and(|v| v.eq_ignore_ascii_case("yes") || v.eq_ignore_ascii_case("true"))
-        })
-}
-
 /// TLS-PSK key for a client identity "R_CONSOLE\x1e<name>" / "R_CLIENT\x1e<name>".
 fn psk_for_identity(shared_config: &Option<SharedConfig>, identity: &str) -> Option<Vec<u8>> {
     let (kind, name) = identity.split_once('\x1e')?;
@@ -305,13 +288,6 @@ fn handle_hello<S: std::io::Read + std::io::Write>(
             warn!("session {session_id}: unknown console '{name}' or no password configured, rejected");
             return;
         };
-        // Use Pam Authentication: the original asks for a PAM login after the
-        // password. That dialog is not served (docs/STUBS.md S-43), and a
-        // password alone must not log such a console in: refused.
-        if console_uses_pam(shared_config, &name) {
-            warn!("session {session_id}: console '{name}' requires PAM authentication, which odir does not serve yet; rejected");
-            return;
-        }
         // C++ CreateConsoleAuthenticator: the Hello version selects the
         // protocol (before/from 18.2); an unparsable version is an invalid Hello
         let Some((_, _, version_number)) = name_type_and_version_from_hello(&hello_msg) else {
@@ -384,13 +360,97 @@ mod tests {
         assert_eq!(n.load(Ordering::Acquire), 0);
     }
 
+
+    /// A PAM that accepts the user `testuser` with the password `testpass`
+    /// and asks like `pam_unix` does: the name (echoed) if it has none, then
+    /// the password (not echoed).
+    struct TestPam;
+
+    impl crate::pam_auth::Backend for TestPam {
+        fn authenticate(&self, user: Option<&str>, conversation: &mut dyn crate::pam_auth::Conversation)
+            -> Result<String, String> {
+            let user = match user {
+                Some(user) => user.to_string(),
+                None => conversation.prompt(true, "login: ")?,
+            };
+            let password = conversation.prompt(false, "Password: ")?;
+            if user == "testuser" && password == "testpass" { Ok(user) } else { Err("authentication failure".into()) }
+        }
+    }
+
+    /// Runs the Director's console accept path on a loopback port for
+    /// `connections` connections and returns the address.
+    fn serve(connections: usize) -> (std::net::SocketAddr, thread::JoinHandle<()>) {
+        crate::pam_auth::set_test_backend(Some(Arc::new(TestPam)));
+        let config = crate::director_config::DirectorConfig::from_str(
+            "Director { Name = dir; Password = dirpw }\n\
+             Console { Name = pamc; Password = pw; Use Pam Authentication = yes }\n\
+             Console { Name = plainc; Password = pw }\n\
+             User { Name = testuser; Command ACL = version, .api }\n").unwrap();
+        let shared: SharedConfig = Arc::new(std::sync::RwLock::new(config));
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = listener.local_addr().unwrap();
+        let handle = thread::spawn(move || {
+            let sessions = Arc::new(SessionManager::new(Arc::new(crate::message_bus::MessageBus::new(64))));
+            let queue = CommandQueue::new(256);
+            for id in 0..connections {
+                let (stream, _) = listener.accept().unwrap();
+                handle_connection(stream, id as u64 + 1, "", None, &sessions, &queue, &Some(shared.clone()), &None, &None);
+            }
+        });
+        (address, handle)
+    }
+
+    /// Runs the installed original `bconsole` against `address` as the
+    /// console `console` with `stdin` and returns what it printed.
+    fn bconsole(address: std::net::SocketAddr, console: &str, credentials: Option<&str>, stdin: &str) -> String {
+        use std::io::Write;
+        let dir = std::env::temp_dir().join(format!("odir-pam-{}-{}", std::process::id(), address.port()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let conf = dir.join("bconsole.conf");
+        std::fs::write(&conf, format!(
+            "Director {{ Name = dir; DIRport = {}; Address = 127.0.0.1; Password = \"dirpw\" }}\n\
+             Console {{ Name = {console}; Password = \"pw\" }}\n", address.port())).unwrap();
+        let mut command = std::process::Command::new("/usr/sbin/bconsole");
+        command.arg("-c").arg(&conf).arg("-u").arg("20");
+        if let Some(credentials) = credentials {
+            let file = dir.join("pam.cred");
+            std::fs::write(&file, credentials).unwrap();
+            command.arg("-p").arg(&file);
+        }
+        let mut child = command.stdin(std::process::Stdio::piped()).stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::piped()).spawn().unwrap();
+        child.stdin.take().unwrap().write_all(stdin.as_bytes()).unwrap();
+        let out = child.wait_with_output().unwrap();
+        std::fs::remove_dir_all(&dir).ok();
+        let text = format!("{}{}", String::from_utf8_lossy(&out.stdout), String::from_utf8_lossy(&out.stderr));
+        eprintln!("--- bconsole as {console} (credentials {credentials:?}):\n{text}");
+        text
+    }
+
+    /// S-43 against the installed original console: credentials from a file
+    /// (`bconsole -p`), then the interactive dialog; the session runs with the
+    /// ACLs of the User, a wrong password gets no session.
     #[test]
-    fn a_pam_console_is_not_logged_in_by_its_password_alone() {
-        let raw = bareos_config::raw::parse_str(
-            "Console {\n Name = pam\n Password = x\n Use Pam Authentication = yes\n}\n\
-             Console {\n Name = plain\n Password = x\n}\n", None).unwrap();
-        assert!(uses_pam(&raw, "pam"));
-        assert!(!uses_pam(&raw, "plain"));
-        assert!(!uses_pam(&raw, "unknown"));
+    #[ignore = "needs the original /usr/sbin/bconsole: run with --ignored"]
+    fn pam_console_logs_in_through_the_original_bconsole() {
+        let (address, server) = serve(5);
+        // 1. credentials file: version is allowed to the User, status is not
+        let out = bconsole(address, "pamc", Some("testuser\ntestpass\n"), "version\nstatus dir\nquit\n");
+        assert!(out.contains("Version:"), "direct credentials: version missing\n{out}");
+        assert!(!out.contains("Daemon started"), "status must be refused for the User\n{out}");
+        // 2. interactive: the console answers the questions from stdin
+        let out = bconsole(address, "pamc", None, "testuser\ntestpass\nversion\nquit\n");
+        assert!(out.contains("Version:"), "interactive: version missing\n{out}");
+        // 3. wrong password: no session, no command output
+        let out = bconsole(address, "pamc", Some("testuser\nwrong\n"), "version\nquit\n");
+        assert!(!out.contains("Version:"), "wrong password must not log in\n{out}");
+        let out = bconsole(address, "pamc", None, "testuser\nwrong\nversion\nquit\n");
+        assert!(!out.contains("Version:"), "interactive wrong password must not log in\n{out}");
+        // 4. a PAM user without a User resource gets nothing
+        let out = bconsole(address, "pamc", Some("nobody\ntestpass\n"), "version\nquit\n");
+        assert!(!out.contains("Version:"), "unknown user\n{out}");
+        server.join().unwrap();
+        crate::pam_auth::set_test_backend(None);
     }
 }

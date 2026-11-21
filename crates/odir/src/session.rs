@@ -121,6 +121,42 @@ pub fn handle_console_session_with<S: Read + Write>(
         }
     }
 
+    // Use Pam Authentication: after the password, a PAM login (pam_auth.rs, S-43)
+    let uses_pam = config.as_ref()
+        .and_then(|c| c.read().ok().map(|c| crate::pam_auth::console_uses_pam(&c.raw, console_name)))
+        .unwrap_or(false);
+    if uses_pam {
+        let denied = |bnet: &mut BnetStream<S>, why: &str| {
+            warn!("session {session_id}: PAM login of console '{console_name}' failed: {why}");
+            let _ = bnet.send_str("1999 PAM authentication failed.\n");
+        };
+        if before_18_2 {
+            warn!("session {session_id}: PAM authentication using outdated Bareos console denied: {console_name}");
+            let _ = bnet.send_str("1999 PAM authentication using outdated Bareos console denied.\n");
+            session_mgr.remove_session(mgr_session_id);
+            return;
+        }
+        match crate::pam_auth::run_dialog(&mut bnet, crate::pam_auth::backend().as_ref()) {
+            Ok(user) => {
+                let known = config.as_ref()
+                    .and_then(|c| c.read().ok().map(|c| crate::pam_auth::user_resource(&c.raw, &user).is_some()))
+                    .unwrap_or(false);
+                if !known {
+                    denied(&mut bnet, &format!("no User resource for user {user}"));
+                    session_mgr.remove_session(mgr_session_id);
+                    return;
+                }
+                debug!("session {session_id}: PAM login of '{user}' through console '{console_name}'");
+                session_mgr.set_pam_user(mgr_session_id, &user);
+            }
+            Err(why) => {
+                denied(&mut bnet, &why);
+                session_mgr.remove_session(mgr_session_id);
+                return;
+            }
+        }
+    }
+
     let director = config.as_ref().and_then(|c| c.read().ok().map(|c| c.director.name.clone()))
         .unwrap_or_else(|| "bareos-dir".to_string());
     for message in console_banner(&director, console_name, connection) {

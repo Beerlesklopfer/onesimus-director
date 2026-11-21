@@ -4,6 +4,7 @@
 //! tokio only for gRPC.
 
 mod accept;
+mod pam_auth;
 mod acl;
 mod audit;
 mod backup;

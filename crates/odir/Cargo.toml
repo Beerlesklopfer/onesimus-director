@@ -56,6 +56,9 @@ sqlx.workspace = true
 chrono = "0.4"
 rcgen.workspace = true
 mdns-sd.workspace = true
+# PAM login of consoles with `Use Pam Authentication = yes` (S-43); MPL-2.0 is
+# compatible with AGPL-3.0. Build needs libpam0g-dev, the package libpam0g ($auto).
+pam-client2 = { version = "0.5.6", default-features = false }
 hex.workspace = true
 rustls-pemfile.workspace = true
 md-5.workspace = true

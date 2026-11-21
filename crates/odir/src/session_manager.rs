@@ -118,6 +118,14 @@ impl SessionManager {
         self.with_session_catalog(id, |catalog| catalog.gui = gui);
     }
 
+    /// The session logged in with PAM as `user`: from now on the ACLs of the
+    /// `User` resource apply ([`crate::acl::pam_subject`]).
+    pub fn set_pam_user(&self, id: u64, user: &str) {
+        if let Some(mut session) = self.sessions.get_mut(&id) {
+            session.client_name = crate::acl::pam_subject(user);
+        }
+    }
+
     pub fn authenticate_session(&self, id: u64) {
         if let Some(mut session) = self.sessions.get_mut(&id) {
             session.authenticated = true;

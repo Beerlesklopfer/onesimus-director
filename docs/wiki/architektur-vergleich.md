@@ -360,7 +360,7 @@ desselben Jobs liest nach dem Tausch die neue Konfiguration. Ob das in Randfäll
 | Erkennung TLS/Klartext | `TryTlsHandshakeAsAServer` | erstes Byte `0x16` (ClientHello) per Peek (`accept.rs::handle_connection`) |
 | Hello und Routing | `HandleConnectionRequest` (`dird/socket_server.cc:70`): FD-Hello → `HandleFiledConnection`, sonst `HandleUserAgentClientRequest` | `bareos-bnet/src/hello.rs::parse_hello` → `Hello::DefaultConsole`/`NamedConsole`/`FileDaemon` (`accept.rs::handle_hello`) |
 | CRAM-MD5 | `lib/cram_md5.cc` | `bareos-bnet/src/cram_md5.rs` |
-| Konsolen-Authentisierung | `dird/authenticate_console.cc` (`ConsoleAuthenticatorBefore_18_2`/`From_18_2`, PAM) | `accept.rs` + `session.rs` (Versionswahl aus dem Hello wie `CreateConsoleAuthenticator`); **kein PAM** |
+| Konsolen-Authentisierung | `dird/authenticate_console.cc` (`ConsoleAuthenticatorBefore_18_2`/`From_18_2`, PAM) | `accept.rs` + `session.rs` (Versionswahl aus dem Hello wie `CreateConsoleAuthenticator`); PAM-Anmeldung in `pam_auth.rs` (BNET, siehe [pam-konsolen.md](pam-konsolen.md)) |
 | Verbindungsgrenze | `MaximumConsoleConnections` (Standard 20) über `ConsoleConnectionLease` (`authenticate_console.cc:398`) | keine Grenze gefunden (nur in `show_items.rs` als Direktive bekannt) |
 | Client-initiierte FD-Verbindung | `HandleFiledConnection` hält die Verbindung im `connection_pool` für spätere Jobs | `handle_hello` registriert nur Name und Protokollversion (`SessionManager::add_fd_connection`); Nutzung für Jobs nicht gefunden (S-13 nennt client-initiierte Verbindungen für den eigenen FD als offen) |
 
@@ -822,7 +822,7 @@ flowchart TB
 | `show` und Geheimnisse | `DumpResource`/`IsResAllowed`, `hide_sensitive_data` | gleich (C-062): Filter nach ACL, Passwörter als `****************` ohne `configure`-Recht | vorher sah eine eingeschränkte Konsole alle Hashes (Sicherheitsfund) |
 | Onesimus-Erweiterungen | — | ~~`configure update/delete` prüfen die Ressourcen-ACL noch nicht~~ (erledigt 20.11.2026, `c116264`: beide über das Konfigurations-CRUD mit Ressourcen-ACL; Hinweis C-062); `.sqlcount/.sqltables/.sqlschema` mit derselben ACL wie `.sql` (C-074) | |
 | Transport | TLS-PSK aus dem Passwort, optional Zertifikate (`tls_conf.cc`), kTLS (`SetEnableKtls`) | TLS-PSK (OpenSSL), Zertifikat-TLS nur per CLI ohne Peer-Prüfung; gRPC mit rustls und Zertifikats-Pinning beim Client | |
-| Authentisierung | CRAM-MD5 zweiseitig; PAM für Konsolen (`dird/auth_pam.cc`, `AuthenticatePamUser`) | CRAM-MD5 zweiseitig; **kein PAM** (nur die Konfigurationsprüfung für PAM-Konsolen in `config_check.rs`); gRPC: HMAC-SHA256-Challenge, Sitzungstoken mit Ablauf (`session_manager.rs::authenticate_session_with_ttl`) | |
+| Authentisierung | CRAM-MD5 zweiseitig; PAM für Konsolen (`dird/auth_pam.cc`, `AuthenticatePamUser`) | CRAM-MD5 zweiseitig; PAM für Konsolen über BNET (`pam_auth.rs`, [pam-konsolen.md](pam-konsolen.md)), über gRPC nicht (eine PAM-Console meldet sich dort nicht an); gRPC: HMAC-SHA256-Challenge, Sitzungstoken mit Ablauf (`session_manager.rs::authenticate_session_with_ttl`) | |
 | Verbindungsgrenzen | `MaximumConsoleConnections` | nicht durchgesetzt | Angriffsfläche für Verbindungsfluten (jede Verbindung ein Thread) |
 | Rechte | `-u`/`-g` (`lib/bsys` `drop`) | `privileges.rs`, vor allen Threads und vor der ersten DB-Verbindung; Fehler sind fatal | |
 | MCP | — | stdio voll, HTTP nur lesend, zerstörende Tools mit `confirm: true` (C-087, [mcp.md](mcp.md)) | neue Angriffsfläche, bewusst begrenzt |
@@ -933,7 +933,7 @@ flowchart LR
 | Konsolen | Thread-Pool mit Grenze | Thread je Verbindung ohne Grenze | siehe Risiken |
 | gRPC/MCP | keine | `dir:grpc` + `dir:cmdworker` (seriell), oconsole MCP | neue Schnittstellen, aber auf der Konsolenlogik aufgesetzt |
 | Meldungsziele | alle inkl. Mail/Syslog | console, file, append, catalog | Mail-Berichte fehlen |
-| PAM | ja | nein | PAM-Konsolen nicht nutzbar |
+| PAM | ja | ja, nur über BNET | gegen bconsole 25.1.3 geprüft, mit Testbackend; eine echte PAM-Anmeldung braucht den Dienst `bareos` unter `/etc/pam.d` (nicht geprüft) |
 | Plugins | Director- und FD-Plugins | keine im Director | Plugin-Ereignisse entfallen |
 | NDMP | ja | nein (Meldung wie Build ohne NDMP) | NDMP-Umgebungen nicht abgedeckt |
 | SD-SD-Replikation | ja | nein (nur lokales Replizieren) | Copy/Migrate zwischen zwei SDs endet fatal |
@@ -979,7 +979,7 @@ prüfen, ob sie aufgenommen werden sollen):
 - Meldungsziele `mail`, `mailonerror`, `mailonsuccess`, `operator`, `syslog`, `stdout`,
   `stderr` werden nicht bedient (`audit.rs::dispatch`).
 - `MaximumConsoleConnections` wird nicht durchgesetzt.
-- PAM-Anmeldung für Konsolen fehlt.
+- PAM-Anmeldung für Konsolen: nur über BNET, nicht über gRPC.
 - Client-initiierte FD-Verbindungen (`Connection From Client To Director`) werden nur
   registriert.
 - Start ohne Konfigurationsdatei mit eingebauter Minimal-Konfiguration (`main.rs`).
