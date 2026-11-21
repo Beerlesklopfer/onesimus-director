@@ -19,7 +19,7 @@ members = [
     "crates/onesimus-podman-broker",
     "crates/onesimus-rig",
     "crates/bareos-format",
-    "crates/onesimus-daemon",
+    "crates/daemon-crate",
     "crates/onesimus-bnet-grpc",
 ]
 
@@ -107,7 +107,7 @@ thiserror = "2"
 # Workspace crates
 bareos-bnet = { path = "crates/bareos-bnet" }
 bareos-format = { path = "crates/bareos-format" }
-onesimus-daemon = { path = "crates/onesimus-daemon" }
+daemon-crate = { path = "crates/daemon-crate" }
 onesimus-bnet-grpc = { path = "crates/onesimus-bnet-grpc" }
 bareos-config = { path = "crates/bareos-config" }
 osd = { path = "crates/osd" }

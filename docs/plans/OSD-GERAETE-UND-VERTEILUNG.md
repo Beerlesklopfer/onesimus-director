@@ -16,7 +16,7 @@ Präzisiert per Rückfrage:
 
 - `crates/osd` ist eine **Protokoll-Bibliothek** und noch kein Daemon (621 Zeilen: `connect`, `command`, `job`, `catrec`, `status`). odir benutzt sie an 8 Stellen ([ofd-Gutachten §4](../audits/ofd-struktur-2026-11-19.md)).
 - Auf PDC läuft **bareos-sd 25** mit einem einzigen File-Device. Im Director ist es so konfiguriert: `Storage PDC-sd`, `Device = FileStorage`, `MediaType = File`.
-- Laut ofd-Gutachten §5 sollen vor dem osd-Bau `bareos-format` (Stromformat, Record-Header, später Volume-/Blockformat) und `onesimus-daemon` (Accept-Schleife, Handshake, TLS, Bandbreite) wenigstens als Hülle vorliegen. Sonst entsteht eine dritte Kopie dieser Teile neben odir und ofd.
+- Laut ofd-Gutachten §5 sollen vor dem osd-Bau `bareos-format` (Stromformat, Record-Header, später Volume-/Blockformat) und `daemon-crate` (Accept-Schleife, Handshake, TLS, Bandbreite) wenigstens als Hülle vorliegen. Sonst entsteht eine dritte Kopie dieser Teile neben odir und ofd.
 
 ## Begriffe
 
@@ -274,7 +274,7 @@ Anlass: ein altes NAS mit 2-TB-Platten soll osd direkt tragen, als Plattenband-H
 
 | # | Inhalt | Prüfung |
 | --- | --- | --- |
-| P0 ✅ (20.11.2026) | `bareos-format` und `onesimus-daemon` als gemeinsame Crates (ofd-Gutachten §5), osd-Schnittstelle (`crates/osd`) und Daemon (`crates/osd/daemon`) trennen | ofd und odir bauen unverändert. Erledigt, siehe [P0 umgesetzt](#p0-umgesetzt-20112026) |
+| P0 ✅ (20.11.2026) | `bareos-format` und `daemon-crate` als gemeinsame Crates (ofd-Gutachten §5), osd-Schnittstelle (`crates/osd`) und Daemon (`crates/osd/daemon`) trennen | ofd und odir bauen unverändert. Erledigt, siehe [P0 umgesetzt](#p0-umgesetzt-20112026) |
 | P1 ✅ (20.11.2026; Stufen 1, 2, 3) | osd als Ersatz für bareos-sd mit **einem File-Device**: Label, Mount, Append, Read, Status, CatReq, Bareos-Volume-Format. Steuer- und Datenweg über **gRPC** (odir, ofd) und BNET (bareos-dir, bareos-fd). Stufe 1: Backup über BNET, aktiver und passiver Client, Datenweg über den Ring; Stufe 2: Lesen/Restore; Stufe 3: gRPC | Testgerüst Director+FD+SD (`onesimus-rig`): Backup und Restore mit odir+ofd über gRPC und mit bareos-fd über BNET. `bls` liest das Volume. Erledigt, siehe [Stufe 1](#p1-stufe-1-umgesetzt-20112026), [Stufe 2](#p1-stufe-2-umgesetzt-20112026), [Stufe 3](#p1-stufe-3-umgesetzt-20112026); was bleibt: [Nach P1](#nach-p1-offen) |
 | PT | Plattenband v1 (D-14): Bandkern auf einer vorbelegten Datei bzw. einem Loop-Device (`losetup --direct-io=on`), dann `/dev/sdX` mit `O_DIRECT\|O_EXCL` (zunächst Linux); eine Platte, kein Striping; Kassetten mit zwei Partitionen, MAM, Wechsler; Labels (D-16) mit `osd disk init` und Etikett-PDF; Weiterlesen hinter Schadstellen (D-17); Bareos-Frontend und LTFS-Plugin `libtape-osd.so`. Gesundheit (D-21): SMART, Zähler, Bewertung, Meldung, Scrub. Danach PT2: LUNs im SAN über iSCSI mit Persistent Reservations (D-20), Gesundheit vom Speichersystem | ohne root testbar; Export einer Kassette in eine Bandabbild- bzw. Volume-Datei besteht `bls`; `mkltfs` + `ltfs` + Dateien schreiben/lesen auf einer emulierten Kassette; kill -9 während des Schreibens verliert keinen bestätigten Satz; `update slots`/`label barcodes` liefern die Kassetten-Barcodes; fremde Platte ohne `--force` abgelehnt; eingeschleuste Schadstelle: Lesen setzt dahinter fort und meldet den Satzbereich. PT2: iSCSI-Target im Rig (LIO mit `fileio`-Backstore, eigener Netz-Namespace), zwei osd-Instanzen auf demselben LUN, die zweite wird per Reservation abgewiesen; Pfadabbruch während des Schreibens. Teilt das Bareos-Bandformat mit P6 |
 | P2 | Verteiler mit Routen über File-Devices | Routing-Fälle im Rig, Restore über den MediaType |
@@ -292,7 +292,7 @@ Commits auf `development` (lokal, nicht gepusht), in dieser Reihenfolge:
 | --- | --- |
 | `dac4237` | `bareos-format`: breg (aus ofd und odir zusammengeführt), Netz-Köpfe der Datensätze (`data_header`, `RecHdr`), `digest_name`; ofd und odir nutzen sie. Macht ofd und odir wieder baubar, nachdem `9ff7efc` die alten breg-Dateien versehentlich mitgelöscht hatte |
 | `15b069a` | neun Inline-Kopien von BashSpaces auf `bareos_format::bash`; D13 am Bareos-Quelltext geprüft |
-| `38339c7` | `onesimus-daemon`: Accept-Schleife, TLS-PSK-Wahl, Director-Handshake, gRPC-TLS, Bandbreitengrenze; ofd nutzt sie |
+| `38339c7` | `daemon-crate`: Accept-Schleife, TLS-PSK-Wahl, Director-Handshake, gRPC-TLS, Bandbreitengrenze; ofd nutzt sie |
 | `cec505f` | osd: ein `connect_sd` (D12), echtes FileSet im SD-Job-Kommando (D11), `use storage` mit BashSpaces, Modulkommentar richtiggestellt |
 | `5e3366c` | `bareos-config`: SD-Ressourcen (Storage, Director, Device, Messages, Autochanger) |
 | `be26325` | `crates/osd/daemon` (Paket `osd-daemon`, Programm `osd`): `-c -f -d -t -v`, `-t` prüft `bareos-sd.d`, sonst „osd: P1 pending“ (Exit 2); Paketierung `packaging/osd/` |
@@ -300,12 +300,12 @@ Commits auf `development` (lokal, nicht gepusht), in dieser Reihenfolge:
 
 Prüfung: `cargo test --workspace --exclude onesimus-rig` grün, 1255 Tests bestanden, 0 fehlgeschlagen, 34 ignoriert. `cargo doc --workspace --no-deps` ohne Fehler und ohne Namenskollision `osd` (M9).
 
-Schon am 19.11.2026 vorhanden (`b912a92`, `771a98d`): `bareos-format` mit LStat, Base64, Stream-IDs, `M_*`, BashSpaces und dem einen SD-Job-Formatierer; `onesimus-daemon` mit Logging, Signalen, PID-Datei, Hintergrund, Rechteabgabe und `-t`.
+Schon am 19.11.2026 vorhanden (`b912a92`, `771a98d`): `bareos-format` mit LStat, Base64, Stream-IDs, `M_*`, BashSpaces und dem einen SD-Job-Formatierer; `daemon-crate` mit Logging, Signalen, PID-Datei, Hintergrund, Rechteabgabe und `-t`.
 
 Nach P1 verschoben, jeweils mit Grund:
 
 - **Hello mit `0x01` statt `'_'` (D13):** In P0 ändert sich kein Verhalten. Die Umstellung trifft jede Director-Verbindung zu FD und SD und braucht einen Lauf gegen bareos-sd/-fd im Gerüst.
-- **Teile von ofd, die zu eng verflochten sind:** Jobtabelle und passiver SD-Anschluss (`sd.rs`), der gRPC-Dienst mit Laufzeit (`grpc.rs` `start`), das Binden des Ports mit den FD-Fehlertexten. Dazu Signale, PID-Datei und `-k` in odir sowie dessen gRPC-TLS mit mDNS-Namen. Die Liste steht in der Crate-Doku von `onesimus-daemon`.
+- **Teile von ofd, die zu eng verflochten sind:** Jobtabelle und passiver SD-Anschluss (`sd.rs`), der gRPC-Dienst mit Laufzeit (`grpc.rs` `start`), das Binden des Ports mit den FD-Fehlertexten. Dazu Signale, PID-Datei und `-k` in odir sowie dessen gRPC-TLS mit mDNS-Namen. Die Liste steht in der Crate-Doku von `daemon-crate`.
 - **Verbindungsaufbau „Client zum SD“ (`R_JOB`)** in der osd-Schnittstelle: Den braucht erst ein osd, der Daten annimmt.
 - **Storage-Name in `use storage`** aus `osd::job`: Die Job-Parameter tragen keinen Storage-Namen, es bleibt `File`. In `sd_copy` und `verify` ist der Name richtig.
 - **Unbekannte Direktiven in `bareos-sd.d`** werden noch nicht abgelehnt. bareos-sd lehnt sie ab.
@@ -325,7 +325,7 @@ Commits auf `development` (lokal, nicht gepusht), in dieser Reihenfolge:
 | `783ef76` | `onesimus-rig`: SD wählbar (`RigOptions::sd`), Client mit `Passive = yes`, beliebige Pakete bauen |
 | `f7dcabb` | `bareos-config`: `osd.d/` als Erweiterung von `bareos-sd.d` nach D-8 (Namensgleichheit, nur Onesimus-Direktiven, Waisen sind Fehler); `Maximum Block Size`, `Label Block Size`, `Maximum Volume Size`, `Just In Time Reservation`, `Client Connect Wait` |
 | `cff310a` | `osd::askdir`: CatReq, UpdCat, Jmsg und Status des SD wie `stored/askdir.cc` |
-| `21104b9` | `onesimus-daemon::version`: Versionszeile mit Baudatum und Betriebssystem |
+| `21104b9` | `daemon-crate::version`: Versionszeile mit Baudatum und Betriebssystem |
 | `cb0b31b` | `bareos-format`: Rest eines Datensatzes am Volume-Ende (Job über mehrere Volumes) |
 | `036c15c` | `osd-daemon`: Director-Befehle, aktiver und passiver FD, Datenphase über `transport::Channel`, Erzeuger und Geräteschreiber (`osd --device-writer`), Volume-Wahl, Label, Volume-Wechsel, EOS; Gerüst-Tests `tests/osd.rs` |
 | `e964f77` | Glossar und Klassendiagramm von `osd-ring`, CI, README |
@@ -338,7 +338,7 @@ Belege (Gerüst, 20.11.2026, odir + ofd `--disable-grpc` + osd; `bareos-fd` ist 
 - Volume von osd gegen Volume von bareos-sd aus demselben Gerüst: gleiche Blockzahl (14), gleiche Blocklängen und -nummern, gleiche Datensatzköpfe; die Nutzdaten der Blöcke 2–12 sind byte-gleich, Block 0 (Label: Version, Zeit), 1 und 13 (SOS/EOS-Zeit, Attribute mit anderen Zeiten) unterscheiden sich nur in diesen Feldern.
 - Passiver Client: odir schickt `passive client address=127.0.0.1 port=… ssl=4` (war schon vorhanden), osd ruft ofd an.
 
-Prüfung: `cargo test --workspace --exclude onesimus-rig` grün, 1298 Tests bestanden, 0 fehlgeschlagen, 35 ignoriert (davon neu: bareos-format 32, osd-ring 10, osd 13, osd-daemon 13 + 5, bareos-config 61, onesimus-daemon 21). `cargo test -p onesimus-rig --test osd -- --ignored`: 2 von 2 mit osd, ebenso 2 von 2 mit `ONESIMUS_RIG_SD=/usr/sbin/bareos-sd`. `cargo doc --no-deps --document-private-items` der neuen Crates ohne Warnung.
+Prüfung: `cargo test --workspace --exclude onesimus-rig` grün, 1298 Tests bestanden, 0 fehlgeschlagen, 35 ignoriert (davon neu: bareos-format 32, osd-ring 10, osd 13, osd-daemon 13 + 5, bareos-config 61, daemon-crate 21). `cargo test -p onesimus-rig --test osd -- --ignored`: 2 von 2 mit osd, ebenso 2 von 2 mit `ONESIMUS_RIG_SD=/usr/sbin/bareos-sd`. `cargo doc --no-deps --document-private-items` der neuen Crates ohne Warnung.
 
 Stufe 2 (Lesen) ist erledigt, siehe [P1 Stufe 2 umgesetzt](#p1-stufe-2-umgesetzt-20112026).
 

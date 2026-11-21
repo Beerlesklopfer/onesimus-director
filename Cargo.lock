@@ -843,6 +843,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "daemon-crate"
+version = "25.1.2+onesimus.0.2.0"
+dependencies = [
+ "aquamarine",
+ "bareos-bnet",
+ "bareos-format",
+ "ctrlc",
+ "nix 0.29.0",
+ "tracing",
+ "tracing-subscriber",
+ "windows-service",
+]
+
+[[package]]
 name = "dashmap"
 version = "6.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2100,6 +2114,7 @@ dependencies = [
  "chrono",
  "clap",
  "crossbeam-channel",
+ "daemon-crate",
  "dashmap",
  "flume",
  "hex",
@@ -2110,7 +2125,6 @@ dependencies = [
  "mdns-sd",
  "nix 0.29.0",
  "onesimus-bnet-grpc",
- "onesimus-daemon",
  "onesimus-proto-rs",
  "openssl",
  "osd",
@@ -2147,13 +2161,13 @@ dependencies = [
  "chrono",
  "clap",
  "crossbeam-channel",
+ "daemon-crate",
  "flate2",
  "getrandom 0.2.17",
  "libc",
  "md-5",
  "nix 0.29.0",
  "onesimus-bnet-grpc",
- "onesimus-daemon",
  "onesimus-plugins",
  "onesimus-podman-core",
  "onesimus-proto-rs",
@@ -2215,20 +2229,6 @@ dependencies = [
  "tonic",
  "tracing",
  "windows-sys 0.61.2",
-]
-
-[[package]]
-name = "onesimus-daemon"
-version = "25.1.2+onesimus.0.2.0"
-dependencies = [
- "aquamarine",
- "bareos-bnet",
- "bareos-format",
- "ctrlc",
- "nix 0.29.0",
- "tracing",
- "tracing-subscriber",
- "windows-service",
 ]
 
 [[package]]
@@ -2381,10 +2381,10 @@ dependencies = [
  "bareos-config",
  "bareos-format",
  "clap",
+ "daemon-crate",
  "libc",
  "nix 0.29.0",
  "onesimus-bnet-grpc",
- "onesimus-daemon",
  "onesimus-proto-rs",
  "osd",
  "osd-ring",

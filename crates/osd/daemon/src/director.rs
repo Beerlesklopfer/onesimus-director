@@ -30,8 +30,8 @@ use std::time::Duration;
 use bareos_bnet::{BnetMessage, BnetSignal};
 use bareos_format::bash::{bash_spaces, unbash_spaces};
 use bareos_format::msg::{M_FATAL, M_INFO};
-use onesimus_daemon::accept::AnyBnet;
-use onesimus_daemon::handshake::{authenticate_director, DirectorAuthError, HelloReplies};
+use daemon_crate::accept::AnyBnet;
+use daemon_crate::handshake::{authenticate_director, DirectorAuthError, HelloReplies};
 
 use crate::daemon::Daemon;
 use crate::device::{FileDevice, LabelState};

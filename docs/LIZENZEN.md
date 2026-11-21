@@ -69,8 +69,8 @@ den Modulköpfen und die Git-Historie.
 | `osd` | abgeleitet | `AGPL-3.0-only` | Director-Seite des SD-Protokolls nach `dird/authenticate.cc`, `dird/msgchan.cc`, `dird/catreq.cc`, `stored/askdir.cc`. |
 | `osd-daemon` (`crates/osd/daemon`) | gemischt, überwiegend abgeleitet | `AGPL-3.0-only` | Nachbau von `bareos-sd` (Sitzungen, Device, Leser/Schreiber; 45 Verweise auf `stored/*.cc`). Eigen: `grpc.rs`, `ringproto.rs` (beide „Bareos-Gegenstück: keins“). |
 | `osd-ring` (`crates/osd/ring`) | eigen | `AGPL-3.0-only OR LicenseRef-Onesimus-Commercial` | Blockring im gemeinsamen Speicher; Modulkopf „Bareos-Gegenstück: keins. bareos-sd schreibt aus dem Job-Thread direkt auf das Device“. Keine Abhängigkeit von anderen Workspace-Crates. |
-| `onesimus-daemon` | abgeleitet | `AGPL-3.0-only` | Daemon-Rahmen nach `lib/daemon.cc`, `include/exit_codes.h`, `filed/filed.cc`/`stored/stored.cc` `main`, `filed/authenticate.cc`, `lib/message.cc`. Das einzige eigene Modul (gRPC-TLS) ist seit 21.11.2026 in `onesimus-bnet-grpc::tls`. |
-| `onesimus-bnet-grpc` | eigen | `AGPL-3.0-only OR LicenseRef-Onesimus-Commercial` | BNET-Rahmen über gRPC mit TLS, Modulkopf „Bareos-Gegenstück: keins (Onesimus-Erweiterung)“; transportiert Bareos-Rahmen, portiert keine Bareos-Logik. Dazu `tls` (aus `onesimus-daemon`). |
+| `daemon-crate` | abgeleitet | `AGPL-3.0-only` | Daemon-Rahmen nach `lib/daemon.cc`, `include/exit_codes.h`, `filed/filed.cc`/`stored/stored.cc` `main`, `filed/authenticate.cc`, `lib/message.cc`. Das einzige eigene Modul (gRPC-TLS) ist seit 21.11.2026 in `onesimus-bnet-grpc::tls`. |
+| `onesimus-bnet-grpc` | eigen | `AGPL-3.0-only OR LicenseRef-Onesimus-Commercial` | BNET-Rahmen über gRPC mit TLS, Modulkopf „Bareos-Gegenstück: keins (Onesimus-Erweiterung)“; transportiert Bareos-Rahmen, portiert keine Bareos-Logik. Dazu `tls` (aus `daemon-crate`). |
 | `onesimus-proto-rs` | gemischt | `AGPL-3.0-only` | Aus allen Protos des Submoduls erzeugt, darunter `director_commands.proto` („Auto-generated from ua_cmds.cc by scrape_commands.py“). |
 | `onesimus-plugins` | eigen | `AGPL-3.0-only OR LicenseRef-Onesimus-Commercial` | Signierte WebAssembly-Plugins, Ed25519/X.509-Vertrauenskette (`docs/plans/SIGNIER-INFRASTRUKTUR.md`); ersetzt die Bareos-Plugins, ohne deren Code (keine Verweise auf Bareos-Quellen). |
 | `onesimus-pg-broker` | eigen | `AGPL-3.0-only OR LicenseRef-Onesimus-Commercial` | Broker des PostgreSQL-Plugins (`pg_dump`/`psql`); keine Bareos-Verweise. |
@@ -99,9 +99,9 @@ Vorschlag: ebenfalls dual.
 
 ## Durchgeführte Trennung
 
-- **gRPC-TLS** (21.11.2026): `onesimus-daemon/src/grpc_tls.rs` →
+- **gRPC-TLS** (21.11.2026): `daemon-crate/src/grpc_tls.rs` →
   `onesimus-bnet-grpc/src/tls.rs` (Aufrufer `ofd`, `osd-daemon` umgestellt,
-  keine Verhaltensänderung). Danach ist `onesimus-daemon` rein abgeleitet und
+  keine Verhaltensänderung). Danach ist `daemon-crate` rein abgeleitet und
   `onesimus-bnet-grpc` rein eigen.
 
 ## Offene Trennungen

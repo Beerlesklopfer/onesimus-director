@@ -66,7 +66,7 @@ pub fn run_job(d: &Daemon, job: &Arc<Job>, dir: &SharedChannel) {
     let name = job.cmd.job.clone();
     let _ = lock(dir).send_str(&format!("3010 Job {name} start\n"));
     d.send_status(dir, job, 'R');
-    d.jmsg(dir, job, M_INFO, &format!("{}\n", onesimus_daemon::version::version_line()));
+    d.jmsg(dir, job, M_INFO, &format!("{}\n", daemon_crate::version::version_line()));
     let Some(mut conn) = job.fd.lock().unwrap_or_else(|e| e.into_inner()).take() else { return };
     let started = Instant::now();
     let mut session = Session { opened: false, started };

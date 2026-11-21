@@ -1,6 +1,6 @@
 //! TLS identity of the FD's gRPC listener: a self-signed certificate generated
 //! once in the working directory, so its fingerprint stays stable for pinning
-//! (onesimus-daemon `grpc_tls` since 20.11.2026, onesimus-bnet-grpc `tls`
+//! (daemon-crate `grpc_tls` since 20.11.2026, onesimus-bnet-grpc `tls`
 //! since 21.11.2026).
 use std::path::PathBuf;
 

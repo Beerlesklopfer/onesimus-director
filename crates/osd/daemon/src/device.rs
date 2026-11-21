@@ -183,8 +183,8 @@ pub fn host_name() -> String {
 /// daemon name (the Storage resource name, Bareos `my_name`).
 pub fn new_label(volume: &str, pool: &str, media_type: &str, daemon: &str) -> VolumeLabel {
     let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default();
-    let version = onesimus_daemon::version::VERSION;
-    let date = onesimus_daemon::version::BUILD_DATE;
+    let version = daemon_crate::version::VERSION;
+    let date = daemon_crate::version::BUILD_DATE;
     VolumeLabel::new(
         volume,
         pool,

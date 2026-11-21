@@ -1,4 +1,4 @@
-//! Glossar von onesimus-daemon: ein Begriff je Bedeutung.
+//! Glossar von daemon-crate: ein Begriff je Bedeutung.
 //!
 //! Zweck: die Begriffe des Daemon-Gerüsts ohne Bareos-Vorwissen. Kein Code.
 //!

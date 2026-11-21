@@ -276,11 +276,11 @@ fn main() {
         EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new(&filter)));
     logging::install(filter_handle);
     // stderr or the trace file (DebugWriter), and the log file
-    let log_file = onesimus_daemon::logging::log_file_arg(&cli.log_file)
-        .and_then(|path| onesimus_daemon::logging::open_log_file(&path));
+    let log_file = daemon_crate::logging::log_file_arg(&cli.log_file)
+        .and_then(|path| daemon_crate::logging::open_log_file(&path));
     tracing_subscriber::registry().with(filter_layer)
         .with(tracing_subscriber::fmt::layer().with_ansi(false)
-            .with_writer(move || onesimus_daemon::logging::TeeWriter {
+            .with_writer(move || daemon_crate::logging::TeeWriter {
                 inner: bareos_bnet::debug::DebugWriter, file: log_file.clone() }))
         .init();
 
@@ -411,7 +411,7 @@ fn main() {
     // only the calling thread) and before privileges are dropped (PID file).
     if !cli.foreground && !cli.test_config {
         info!("daemonizing...");
-        match onesimus_daemon::background::daemonize(
+        match daemon_crate::background::daemonize(
             std::path::Path::new(&config.director.working_directory),
             cli.pid_file.as_deref(),
         ) {

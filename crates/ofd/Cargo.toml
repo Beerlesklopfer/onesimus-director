@@ -20,7 +20,7 @@ prost.workspace = true
 tokio-stream = { version = "0.1", features = ["net"] }
 bareos-bnet.workspace = true
 bareos-format.workspace = true
-onesimus-daemon.workspace = true
+daemon-crate.workspace = true
 bareos-config.workspace = true
 
 anyhow.workspace = true

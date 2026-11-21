@@ -30,9 +30,9 @@ fn header(d: &Daemon) -> Vec<String> {
         format!(
             "{} Version: {} ({}) {} \n",
             d.name(),
-            onesimus_daemon::version::VERSION,
-            onesimus_daemon::version::BUILD_DATE,
-            onesimus_daemon::version::os_info()
+            daemon_crate::version::VERSION,
+            daemon_crate::version::BUILD_DATE,
+            daemon_crate::version::os_info()
         ),
         format!(
             "Daemon started {}. Jobs: run={}, running={}, Onesimus binary\n",

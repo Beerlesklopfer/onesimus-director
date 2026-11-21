@@ -1,5 +1,5 @@
 [package]
-name = "onesimus-daemon"
+name = "daemon-crate"
 description = "Common daemon frame of ofd and osd: accept loop, TLS-PSK, Director handshake, bandwidth limit, signals, logging, PID file, daemonize, privilege drop, -t, Bareos exit codes"
 version.workspace = true
 edition.workspace = true

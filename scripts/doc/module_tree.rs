@@ -1,7 +1,7 @@
 // Module and type tree for rustdoc, generated at build time.
 //
 // Included with `include!` into the build.rs of the crates that follow the
-// documentation rule (bareos-format, onesimus-daemon, onesimus-rig). The build
+// documentation rule (bareos-format, daemon-crate, onesimus-rig). The build
 // script walks `src/` from `lib.rs`, follows every `mod name;` / `mod name {`
 // declaration and lists the items each module declares (struct, enum, trait,
 // fn, const, static, type, macro). The result is written to

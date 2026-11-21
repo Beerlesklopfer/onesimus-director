@@ -42,7 +42,7 @@ bzw. `u64`).
 | `odir/src/job_messages.rs` | Dezimalzeichen: Linux weiter `nl_langinfo_l(RADIXCHAR)`, macOS `localeconv_l()->decimal_point` (gleiche Quelle: LC_NUMERIC der Umgebung) | – |
 | `odir/src/commands/restore_tree.rs` | `mode_t`-Breite (Modul `mode` mit `u32`-Konstanten) | – |
 | `odir/src/job_worker.rs` | `proc_name` nur im Linux-Zweig (`PR_SET_NAME`) | – |
-| `onesimus-daemon/src/privileges.rs`, `onesimus-podman-core/src/sanitize.rs` | schon in c04d948 | – |
+| `daemon-crate/src/privileges.rs`, `onesimus-podman-core/src/sanitize.rs` | schon in c04d948 | – |
 
 ## Auf macOS nicht unterstützt (offen)
 
@@ -69,12 +69,12 @@ dahinter kommt, ist aus dem Quelltext gesammelt (Unix-APIs je Datei).
 
 | Crate / Datei | Blocker |
 | --- | --- |
-| `daemonize` (extern, über `onesimus-daemon` und `odir`) | durchgehend POSIX (`fork`, `setsid`, `umask`, `getpwnam`, `flock`, `chroot`); auf Windows durch Dienst-Start (Service Control Manager) ersetzen, Abhängigkeit per `cfg(unix)` |
+| `daemonize` (extern, über `daemon-crate` und `odir`) | durchgehend POSIX (`fork`, `setsid`, `umask`, `getpwnam`, `flock`, `chroot`); auf Windows durch Dienst-Start (Service Control Manager) ersetzen, Abhängigkeit per `cfg(unix)` |
 | `bareos-format/src/breg.rs`, `bsr.rs` | POSIX-Regex über `libc::regex_t`/`regcomp`/`regexec`; Windows braucht eine eigene Regex-Engine mit gleicher Semantik (Bareos nutzt auf Windows die mitgelieferte GNU-regex) |
 | `onesimus-podman-core/src/journal.rs`, `sanitize.rs`, `idmap.rs`, `policy.rs` | `openat`/`mkdirat`/`renameat`/`unlinkat`, `flock`, `fcntl`, `S_IF*`, `std::os::unix`; Podman ist Linux-only → Crate auf Windows gar nicht bauen (optional machen) |
-| `onesimus-daemon/src/privileges.rs` | uid/gid, `initgroups`/`setuid` (Windows: Dienstkonto, kein Rechteabwurf) |
-| `onesimus-daemon/src/signals.rs` | SIGHUP/SIGTERM/SIGUSR; Windows: Console-Control-Handler / Dienst-Stopp |
-| `onesimus-daemon` (PID-Datei, `-u/-g`) | POSIX-Semantik |
+| `daemon-crate/src/privileges.rs` | uid/gid, `initgroups`/`setuid` (Windows: Dienstkonto, kein Rechteabwurf) |
+| `daemon-crate/src/signals.rs` | SIGHUP/SIGTERM/SIGUSR; Windows: Console-Control-Handler / Dienst-Stopp |
+| `daemon-crate` (PID-Datei, `-u/-g`) | POSIX-Semantik |
 | `onesimus-bnet-grpc/src/tls.rs` | `OpenOptionsExt::mode`, `PermissionsExt` (Schlüsseldatei 0600), `nix::unistd::gethostname` |
 | `onesimus-plugins/src/discovery.rs` | `MetadataExt` (Eigentümer-Prüfung uid 0), Quadlet-Pfade |
 | `bareos-bnet/src/debug.rs` | Unix-spezifische Teile (prüfen) |
@@ -100,7 +100,7 @@ dahinter kommt, ist aus dem Quelltext gesammelt (Unix-APIs je Datei).
 | `broker.rs`, `pg_*`, `ldap_*`, `podman_*` | `fork`/`fexecve`/`prctl`, Unix-Sockets (`UnixStream`); Broker auf Windows nicht vorgesehen |
 | `plugin.rs` | Unix-Sockets zum Broker, `MetadataExt` |
 | `runscript.rs` | `/bin/sh -c` |
-| `config.rs`, `fileset.rs`, `version.rs`, `compression.rs`, `main.rs` | Unix-Pfade, Signale, `daemonize` über `onesimus-daemon` |
+| `config.rs`, `fileset.rs`, `version.rs`, `compression.rs`, `main.rs` | Unix-Pfade, Signale, `daemonize` über `daemon-crate` |
 
 Reihenfolge, wenn Windows angegangen wird: `daemonize` und Signale hinter
 `cfg(unix)` (Dienst-Rahmen für Windows), Podman-Crates optional machen,

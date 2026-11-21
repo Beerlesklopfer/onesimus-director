@@ -25,7 +25,7 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use bareos_bnet::{tls_psk, BnetStream, CramMd5Auth};
-use onesimus_daemon::accept::{open_bnet, AnyBnet, PskIdentity, Rw};
+use daemon_crate::accept::{open_bnet, AnyBnet, PskIdentity, Rw};
 
 use crate::daemon::Daemon;
 use crate::jobs::{Breaker, FdConnection, Job};

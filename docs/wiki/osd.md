@@ -315,4 +315,4 @@ Verify, Restore, Abbruch und die vier erwarteten Defekte).
 | Hintergrund (`-f` weglassen), PID-Datei, `-u`/`-g` | ja | osd bleibt im Vordergrund |
 | Unbekannte Direktiven in `bareos-sd.d` | Fehler | werden noch nicht abgelehnt (aus P0) |
 | Job-Kommando fehlerhaft | `3915 … stat=<Zahl der Felder>` | `stat=0` |
-| Hello eines Directors mit Leerzeichen im Namen | `0x01` | wie bareos-sd (Server-Seite in `onesimus-daemon`) |
+| Hello eines Directors mit Leerzeichen im Namen | `0x01` | wie bareos-sd (Server-Seite in `daemon-crate`) |

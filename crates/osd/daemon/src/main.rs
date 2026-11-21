@@ -26,9 +26,9 @@
 //! 1 Konfigurationsfehler (`-t`) oder Port nicht zu binden,
 //! 41 falsche Argumente, 42 Konfigurationsfehler beim Start.
 //!
-//! Datenfluss: Argumente → [`onesimus_daemon::logging`] →
+//! Datenfluss: Argumente → [`daemon_crate::logging`] →
 //! [`bareos_config::sd::load`] → verwaiste Ringe löschen → Port binden →
-//! gRPC-Port ([`grpc`]) → [`onesimus_daemon::accept::serve`] → je
+//! gRPC-Port ([`grpc`]) → [`daemon_crate::accept::serve`] → je
 //! Verbindung (BNET oder gRPC-Strom) [`server`] →
 //! [`director`] bzw. FD-Anschluss → `run` → [`fd_session`] (Erzeuger) →
 //! Ring (`osd-ring`) → [`writer`] (Kindprozess) → Volume ([`device`]).
@@ -148,7 +148,7 @@ fn start_grpc(cli: &Cli, d: &daemon::Daemon) {
         Ok((address, _thread)) => tracing::info!("osd: gRPC (TLS) listening on {address}"),
         Err(e) if explicit => {
             eprintln!("osd: cannot start the gRPC listener: {e}");
-            std::process::exit(onesimus_daemon::exit::EXIT_FAILURE);
+            std::process::exit(daemon_crate::exit::EXIT_FAILURE);
         }
         Err(e) => tracing::warn!("osd: gRPC listener not started, BNET only: {e}"),
     }
@@ -171,16 +171,16 @@ fn main() {
         Ok(cli) => cli,
         Err(e) if e.use_stderr() => {
             let _ = e.print();
-            std::process::exit(onesimus_daemon::exit::EXIT_ARGUMENTS);
+            std::process::exit(daemon_crate::exit::EXIT_ARGUMENTS);
         }
         Err(e) => {
             let _ = e.print();
-            std::process::exit(onesimus_daemon::exit::EXIT_SUCCESS);
+            std::process::exit(daemon_crate::exit::EXIT_SUCCESS);
         }
     };
     let level = if cli.verbose { cli.debug_level.max(1) } else { cli.debug_level };
-    let log_file = onesimus_daemon::logging::log_file_arg(&cli.log_file);
-    onesimus_daemon::logging::init(&onesimus_daemon::logging::default_filter(level, &["hyper", "h2"]), log_file.as_deref());
+    let log_file = daemon_crate::logging::log_file_arg(&cli.log_file);
+    daemon_crate::logging::init(&daemon_crate::logging::default_filter(level, &["hyper", "h2"]), log_file.as_deref());
 
     if let Some(ring) = &cli.device_writer {
         std::process::exit(writer::run(ring));
@@ -193,7 +193,7 @@ fn main() {
         .map_err(|e| format!("osd: configuration error in {}: {e}", cli.config.display()));
 
     if cli.test_config {
-        let code = onesimus_daemon::config_check::report(loaded.as_ref().map(summary).map_err(Clone::clone), 1);
+        let code = daemon_crate::config_check::report(loaded.as_ref().map(summary).map_err(Clone::clone), 1);
         std::process::exit(code);
     }
 
@@ -201,14 +201,14 @@ fn main() {
         Ok(config) => config,
         Err(e) => {
             eprintln!("{e}");
-            std::process::exit(onesimus_daemon::exit::EXIT_CONFIG_ERROR);
+            std::process::exit(daemon_crate::exit::EXIT_CONFIG_ERROR);
         }
     };
     tracing::debug!("{}", summary(&config));
     if !cli.foreground {
         tracing::info!("osd runs in the foreground (daemonizing follows with the packaging)");
     }
-    onesimus_daemon::signals::block_shutdown_signals();
+    daemon_crate::signals::block_shutdown_signals();
 
     let removed = osd_ring::Ring::remove_stale(&ringproto::ring_prefix(config.storage.port));
     for name in removed {
@@ -219,10 +219,10 @@ fn main() {
         Ok(l) => l,
         Err(e) => {
             eprintln!("osd: cannot bind {addr}: {e} (another Storage daemon running? ss -ltnp)");
-            std::process::exit(onesimus_daemon::exit::EXIT_FAILURE);
+            std::process::exit(daemon_crate::exit::EXIT_FAILURE);
         }
     };
-    tracing::info!("osd {}: listening on {addr}", onesimus_daemon::version::VERSION);
+    tracing::info!("osd {}: listening on {addr}", daemon_crate::version::VERSION);
     let launcher = match std::env::current_exe() {
         Ok(exe) => daemon::Launcher::Process(exe),
         Err(_) => daemon::Launcher::Thread,
@@ -232,16 +232,16 @@ fn main() {
     std::thread::Builder::new()
         .name("accept".into())
         .spawn(move || {
-            onesimus_daemon::accept::serve(listener, "sd:session", &SHUTDOWN, move |stream, n| {
+            daemon_crate::accept::serve(listener, "sd:session", &SHUTDOWN, move |stream, n| {
                 server::handle_connection(d.clone(), stream, n);
             });
         })
         .unwrap_or_else(|e| {
             eprintln!("osd: cannot start the accept thread: {e}");
-            std::process::exit(onesimus_daemon::exit::EXIT_FAILURE);
+            std::process::exit(daemon_crate::exit::EXIT_FAILURE);
         });
-    let signal = onesimus_daemon::signals::wait_for_shutdown();
+    let signal = daemon_crate::signals::wait_for_shutdown();
     tracing::info!("osd: shutting down ({signal:?})");
     SHUTDOWN.store(true, std::sync::atomic::Ordering::Relaxed);
-    std::process::exit(onesimus_daemon::exit::EXIT_SUCCESS);
+    std::process::exit(daemon_crate::exit::EXIT_SUCCESS);
 }

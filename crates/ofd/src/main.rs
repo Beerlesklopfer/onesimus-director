@@ -200,7 +200,7 @@ fn main() {
     // (the MSI registers `-f -c … --log-file …`), else in the console.
     #[cfg(windows)]
     {
-        use onesimus_daemon::winservice::{self, Dispatch};
+        use daemon_crate::winservice::{self, Dispatch};
         let service_cli = cli.clone();
         match winservice::run(paths::SERVICE_NAME, move |service| run(service_cli, &|| service.running(), &|| service.wait_for_stop())) {
             Dispatch::Ran => return,
@@ -212,8 +212,8 @@ fn main() {
         }
     }
 
-    // Console / Unix: wait for Ctrl-C (onesimus-daemon: ctrlc handler, SIGINT, as before)
-    let code = run(cli, &|| {}, &onesimus_daemon::signals::wait_for_interrupt);
+    // Console / Unix: wait for Ctrl-C (daemon-crate: ctrlc handler, SIGINT, as before)
+    let code = run(cli, &|| {}, &daemon_crate::signals::wait_for_interrupt);
     if code != 0 {
         std::process::exit(code);
     }
@@ -224,9 +224,9 @@ fn main() {
 /// `wait` blocks until the daemon shall stop (Ctrl-C, SIGINT or the
 /// service's Stop/Shutdown).
 fn run(cli: Cli, running: &dyn Fn(), wait: &dyn Fn()) -> i32 {
-    // Logging (onesimus-daemon)
-    let log_file = onesimus_daemon::logging::log_file_arg(&cli.log_file);
-    onesimus_daemon::logging::init(&onesimus_daemon::logging::default_filter(cli.debug_level, &["hyper", "h2"]), log_file.as_deref());
+    // Logging (daemon-crate)
+    let log_file = daemon_crate::logging::log_file_arg(&cli.log_file);
+    daemon_crate::logging::init(&daemon_crate::logging::default_filter(cli.debug_level, &["hyper", "h2"]), log_file.as_deref());
 
     let _ = rustls::crypto::ring::default_provider().install_default();
 
@@ -260,15 +260,15 @@ fn run(cli: Cli, running: &dyn Fn(), wait: &dyn Fn()) -> i32 {
         return 0;
     }
 
-    // Privilege drop (onesimus-daemon, lenient as before; open point: strict)
+    // Privilege drop (daemon-crate, lenient as before; open point: strict)
     #[cfg(unix)]
-    onesimus_daemon::privileges::drop_privileges_lenient(cli.user.as_deref(), cli.group.as_deref());
+    daemon_crate::privileges::drop_privileges_lenient(cli.user.as_deref(), cli.group.as_deref());
 
-    // Daemonize (onesimus-daemon)
+    // Daemonize (daemon-crate)
     #[cfg(unix)]
     if !cli.foreground {
         info!("daemonizing...");
-        match onesimus_daemon::background::daemonize(std::path::Path::new("/var/lib/bareos"), None) {
+        match daemon_crate::background::daemonize(std::path::Path::new("/var/lib/bareos"), None) {
             Ok(()) => info!("daemon started"),
             Err(e) => {
                 error!("FATAL: daemonize failed: {e}");

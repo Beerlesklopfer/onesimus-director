@@ -45,7 +45,7 @@ Drop-in replacement for the Bareos Director daemon — independent project after
 | `osd-daemon` | Product | `osd` — Onesimus Storage Daemon (`crates/osd/daemon`); P1 complete: backup, restore and verify on File devices in the Bareos volume format, active and passive clients, jobs over several volumes; gRPC with TLS to odir/ofd, BNET to bareos-dir/bareos-fd (docs/wiki/osd.md). Build/test with `-p osd-daemon` (`-p osd` is the interface only) |
 | `osd-ring` | Protocol | Shared-memory block ring of osd (`crates/osd/ring`): one producer, N device writers, cross-process wait/wake, mailbox |
 | `bareos-format` | Protocol | Bareos stream and volume format shared by odir, ofd and osd: stream IDs, record headers, volume blocks (BB02, CRC-32), volume and session labels, LStat, Bareos Base64, digests, `M_*`, BashSpaces, `regexwhere` (breg), SD job command |
-| `onesimus-daemon` | Protocol | Common daemon frame of ofd and osd: accept loop, TLS-PSK, Director handshake, gRPC TLS, bandwidth limit, logging, signals, PID file, privileges, `-t` |
+| `daemon-crate` | Protocol | Common daemon frame of ofd and osd: accept loop, TLS-PSK, Director handshake, gRPC TLS, bandwidth limit, logging, signals, PID file, privileges, `-t` |
 | `onesimus-proto-rs` | Protocol | gRPC codegen from the onesimus-proto definitions (submodule `proto/`) |
 | `ofd` | Protocol | File Daemon skeleton |
 | `onesimus-plugins` | Security | Signed Rust/WebAssembly plugin verification; no Python runtime |

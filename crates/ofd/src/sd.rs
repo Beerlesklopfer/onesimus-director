@@ -11,8 +11,8 @@ use std::time::{Duration, Instant};
 
 use bareos_bnet::{BnetStream, CramMd5Auth, tls_psk};
 
-/// Any byte stream a BNET connection can run over (onesimus-daemon).
-pub use onesimus_daemon::accept::Rw;
+/// Any byte stream a BNET connection can run over (daemon-crate).
+pub use daemon_crate::accept::Rw;
 
 pub type SdStream = BnetStream<Box<dyn Rw>>;
 
@@ -88,8 +88,8 @@ pub fn running() -> Vec<Arc<JobShared>> {
     v
 }
 
-// BwState and Limited: onesimus-daemon (bwlimit), since 20.11.2026.
-pub use onesimus_daemon::bwlimit::{BwState, Limited};
+// BwState and Limited: daemon-crate (bwlimit), since 20.11.2026.
+pub use daemon_crate::bwlimit::{BwState, Limited};
 
 static JOBS: LazyLock<Mutex<HashMap<String, Arc<JobShared>>>> = LazyLock::new(|| Mutex::new(HashMap::new()));
 

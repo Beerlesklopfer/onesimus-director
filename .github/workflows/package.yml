@@ -1,6 +1,6 @@
 # Tests und Debian-Pakete.
 #   test    – cargo test der Workspace-Crates (Director, Konsole, Konfiguration, FD,
-#             BNET-Protokoll, Katalog-ORM, bareos-format, onesimus-daemon,
+#             BNET-Protokoll, Katalog-ORM, bareos-format, daemon-crate,
 #             Testgerüst ohne --ignored) und cargo doc der neuen Crates
 #   package – nur wenn test grün ist: cargo-deb auf Debian 13 (trixie),
 #             Pakete odir, ofd und oconsole als Artefakt; bei einem Tag v*
@@ -76,7 +76,7 @@ jobs:
           $AS_CI cargo test --locked \
             -p odir -p oconsole -p bareos-config -p ofd -p onesimus-plugins \
             -p bareos-bnet -p bareos-orm \
-            -p bareos-format -p onesimus-daemon -p onesimus-rig -p osd -p osd-daemon -p osd-ring \
+            -p bareos-format -p daemon-crate -p onesimus-rig -p osd -p osd-daemon -p osd-ring \
             -p onesimus-bnet-grpc \
             --no-default-features --features oconsole/mcp-production
 
@@ -94,7 +94,7 @@ jobs:
           RUSTDOCFLAGS: -D warnings
         run: |
           $AS_CI cargo doc --locked --no-deps --document-private-items \
-            -p bareos-format -p onesimus-daemon -p onesimus-rig -p osd -p osd-daemon -p osd-ring \
+            -p bareos-format -p daemon-crate -p onesimus-rig -p osd -p osd-daemon -p osd-ring \
             -p onesimus-bnet-grpc
 
       # Entwicklungs-Build der typisierten gRPC-API (S-35): nur Tests, die

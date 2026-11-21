@@ -18,7 +18,7 @@ jede Crate, die ein Umbau anfasst.
 
 ## Wie es erzwungen wird
 
-In neuen Crates (`bareos-format`, `onesimus-daemon`, `onesimus-rig`):
+In neuen Crates (`bareos-format`, `daemon-crate`, `onesimus-rig`):
 
 ```rust
 #![deny(missing_docs)]
@@ -33,9 +33,9 @@ Arbeitsschritt.
 Prüfung:
 
 ```sh
-cargo clippy -p bareos-format -p onesimus-daemon -p onesimus-rig --all-targets
+cargo clippy -p bareos-format -p daemon-crate -p onesimus-rig --all-targets
 RUSTDOCFLAGS="-D warnings" cargo doc --no-deps --document-private-items \
-  -p bareos-format -p onesimus-daemon -p onesimus-rig
+  -p bareos-format -p daemon-crate -p onesimus-rig
 ```
 
 ## Modulbaum
@@ -56,7 +56,7 @@ Eine typgeprüfte, vollständige Sicht liefert `cargo-modules`:
 ```sh
 cargo install cargo-modules --locked
 cargo modules structure --package bareos-format --lib
-cargo modules dependencies --package onesimus-daemon --lib | dot -Tsvg > deps.svg
+cargo modules dependencies --package daemon-crate --lib | dot -Tsvg > deps.svg
 ```
 
 `cargo-modules` ist auf dem Entwicklungsrechner nicht installiert

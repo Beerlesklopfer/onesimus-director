@@ -20,7 +20,7 @@
 //! Herkunft: `ofd/src/grpc_tls.rs` (`load_or_generate`) und der Anfang von
 //! `ofd/src/grpc.rs` `start` (Identity aus PEM-Dateien), am 20.11.2026
 //! ohne Verhaltensänderung herausgelöst; am 21.11.2026 aus
-//! `onesimus-daemon` (`grpc_tls`) hierher verschoben, damit die eigenen,
+//! `daemon-crate` (`grpc_tls`) hierher verschoben, damit die eigenen,
 //! nicht von Bareos abgeleiteten Teile in einem Crate mit dualer Lizenz
 //! liegen (docs/LIZENZEN.md). Die Fassung des Directors
 //! (`odir/src/grpc/tls.rs`, mit mDNS-Namen und Fingerabdruck) bleibt in odir

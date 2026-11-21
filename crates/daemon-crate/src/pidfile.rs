@@ -36,7 +36,7 @@ mod tests {
 
     #[test]
     fn write_read_remove() {
-        let path = std::env::temp_dir().join(format!("onesimus-daemon-pid-{}", std::process::id()));
+        let path = std::env::temp_dir().join(format!("daemon-crate-pid-{}", std::process::id()));
         write(&path).unwrap();
         assert_eq!(std::fs::read_to_string(&path).unwrap(), format!("{}\n", std::process::id()));
         assert_eq!(read(&path), Some(std::process::id() as i32));
@@ -46,7 +46,7 @@ mod tests {
 
     #[test]
     fn foreign_pid_file_is_kept() {
-        let path = std::env::temp_dir().join(format!("onesimus-daemon-pid-other-{}", std::process::id()));
+        let path = std::env::temp_dir().join(format!("daemon-crate-pid-other-{}", std::process::id()));
         std::fs::write(&path, "1\n").unwrap();
         remove(&path);
         assert!(path.exists());

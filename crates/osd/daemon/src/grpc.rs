@@ -33,7 +33,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 
 use bareos_bnet::BnetStream;
 use onesimus_bnet_grpc::server::{ResponseStream, accept};
-use onesimus_daemon::accept::AnyBnet;
+use daemon_crate::accept::AnyBnet;
 use onesimus_proto_rs::onesimus::stored::StoredFrame;
 use onesimus_proto_rs::onesimus::stored::storage_daemon_server::{StorageDaemon, StorageDaemonServer};
 use tonic::{Request, Response, Status};

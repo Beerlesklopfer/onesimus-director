@@ -1,4 +1,4 @@
-//! # onesimus-daemon – das gemeinsame Daemon-Gerüst
+//! # daemon-crate – das gemeinsame Daemon-Gerüst
 //!
 //! Zweck: Was jeder Onesimus-Daemon beim Start und beim Ende gleich tut,
 //! steht hier einmal: Logging einrichten, Konfiguration mit `-t` prüfen,

@@ -11,7 +11,7 @@
 //! chosen by the PSK identity: "R_DIRECTOR\x1e<name>" → the Director's
 //! password, "R_JOB\x1e<Job>" → the job's Storage daemon authorization key.
 //! The loop, the TLS-PSK/plaintext choice and the Director handshake are
-//! onesimus-daemon (`accept`, `handshake`) since 20.11.2026; binding the
+//! daemon-crate (`accept`, `handshake`) since 20.11.2026; binding the
 //! port, the key lookup and the session stay here.
 //! There are no FD-to-FD connections in Bareos ("Hello Client ..." is a
 //! client initiated connection to a Director, never to a File Daemon).
@@ -24,8 +24,8 @@ use std::time::Duration;
 use tracing::{debug, error, info, warn};
 
 use bareos_bnet::{BnetStream, tls_psk};
-use onesimus_daemon::accept::PskIdentity;
-use onesimus_daemon::handshake::{DirectorAuthError, HelloReplies, authenticate_director};
+use daemon_crate::accept::PskIdentity;
+use daemon_crate::handshake::{DirectorAuthError, HelloReplies, authenticate_director};
 
 use crate::config::FdConfig;
 use crate::job::Session;
@@ -59,7 +59,7 @@ pub fn accept_loop(config: &Arc<FdConfig>, shutdown: &AtomicBool) {
     };
 
     let cfg = config.clone();
-    onesimus_daemon::accept::serve(listener, "fd:session", shutdown, move |stream, session_id| {
+    daemon_crate::accept::serve(listener, "fd:session", shutdown, move |stream, session_id| {
         handle_connection(stream, session_id, cfg.clone());
     });
 }
@@ -80,7 +80,7 @@ fn handle_connection(stream: TcpStream, session_id: u64, config: Arc<FdConfig>) 
 
     // Peek first byte: 0x16 = TLS ClientHello, else plaintext BNET
     let cfg = config.clone();
-    let Some(bnet) = onesimus_daemon::accept::open_bnet(stream, session_id, move |id| psk_for_identity(&cfg, id)) else {
+    let Some(bnet) = daemon_crate::accept::open_bnet(stream, session_id, move |id| psk_for_identity(&cfg, id)) else {
         return;
     };
     handle_session(bnet, session_id, &config, Some(&tcp), || {});
