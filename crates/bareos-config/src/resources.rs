@@ -25,6 +25,9 @@ pub struct DirectorResource {
     pub password: String,
     pub port: u16,
     pub max_concurrent_jobs: u32,
+    /// `Maximum Console Connections` (default 20): connections to the BNET
+    /// port served at the same time; further ones are closed at once.
+    pub max_console_connections: u32,
     pub fd_connect_timeout: Duration,
     pub sd_connect_timeout: Duration,
     pub heartbeat_interval: Duration,
@@ -50,6 +53,7 @@ impl Default for DirectorResource {
             password: String::new(),
             port: 9101,
             max_concurrent_jobs: 1,
+            max_console_connections: 20,
             fd_connect_timeout: Duration::from_secs(180),
             sd_connect_timeout: Duration::from_secs(1800),
             heartbeat_interval: Duration::ZERO,

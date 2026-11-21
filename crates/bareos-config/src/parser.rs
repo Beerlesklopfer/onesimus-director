@@ -466,6 +466,9 @@ fn convert_raw_resource(raw: &RawResource) -> Result<Resource, ConfigError> {
             if let Some(v) = get("maximum concurrent jobs") {
                 dir.max_concurrent_jobs = v.parse().unwrap_or(1);
             }
+            if let Some(v) = get("maximum console connections") {
+                dir.max_console_connections = v.parse().unwrap_or(20);
+            }
             let get_any = |keys: &[&str]| keys.iter().find_map(|k| get(k));
             if let Some(v) = get_any(&["grpc port", "grpcport"]) {
                 dir.grpc_port = v.parse().ok();
@@ -1157,6 +1160,16 @@ Director {
             }
         }
         assert_eq!(seen, 3);
+    }
+
+    #[test]
+    fn maximum_console_connections_defaults_to_20() {
+        let limit = |text: &str| match &parse_config(text).unwrap()[0] {
+            Resource::Director(d) => d.max_console_connections,
+            _ => unreachable!(),
+        };
+        assert_eq!(limit("Director {\n Name = d\n}\n"), 20);
+        assert_eq!(limit("Director {\n Name = d\n Maximum Console Connections = 3\n}\n"), 3);
     }
 
     /// C-050: Protocol/AuthType keywords (case-insensitive), NDMP items.

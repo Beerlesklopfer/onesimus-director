@@ -6,7 +6,7 @@
 
 use std::net::{TcpListener, TcpStream};
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::thread;
 
 use tracing::{info, error, debug, warn};
@@ -82,6 +82,7 @@ pub fn accept_loop(
         listener.set_nonblocking(true).ok();
     }
 
+    let open = Arc::new(AtomicUsize::new(0));
     while !shutdown.load(Ordering::Relaxed) {
         let mut idle = true;
         for listener in &config.listeners {
@@ -91,6 +92,16 @@ pub fn accept_loop(
                     debug!("new connection from {peer_addr}");
                     stream.set_nonblocking(false).ok();
                     stream.set_nodelay(true).ok(); // Disable Nagle — EOD signal must arrive immediately
+
+                    // Maximum Console Connections (read per connection, so a reload applies)
+                    let limit = max_console_connections(&config.shared_config);
+                    let in_use = open.fetch_add(1, Ordering::AcqRel);
+                    if connection_refused(in_use, limit) {
+                        open.fetch_sub(1, Ordering::AcqRel);
+                        warn!("connection from {peer_addr} refused: {in_use} connections open, Maximum Console Connections = {limit}");
+                        continue;
+                    }
+                    let slot = OpenSlot(open.clone());
 
                     let smgr = session_mgr.clone();
                     let q = cmd_queue.clone();
@@ -104,6 +115,7 @@ pub fn accept_loop(
                     thread::Builder::new()
                         .name(format!("dir:session:{session_id}"))
                         .spawn(move || {
+                            let _slot = slot; // released when the session ends
                             handle_connection(stream, session_id, &password, tls_cfg, &smgr, &q, &shared_cfg, &job_mgr, &cat);
                         })
                         .ok();
@@ -120,6 +132,28 @@ pub fn accept_loop(
     }
 
     info!("accept loop stopped");
+}
+
+/// One connection counted against `Maximum Console Connections`.
+struct OpenSlot(Arc<AtomicUsize>);
+
+impl Drop for OpenSlot {
+    fn drop(&mut self) {
+        self.0.fetch_sub(1, Ordering::AcqRel);
+    }
+}
+
+/// The configured `Maximum Console Connections` (default 20).
+fn max_console_connections(shared_config: &Option<SharedConfig>) -> usize {
+    shared_config
+        .as_ref()
+        .and_then(|c| c.read().ok())
+        .map_or(20, |c| c.director.max_console_connections as usize)
+}
+
+/// True when a connection arriving with `in_use` others open is over the limit.
+fn connection_refused(in_use: usize, limit: usize) -> bool {
+    in_use >= limit
 }
 
 /// Handle a single incoming connection.
@@ -305,5 +339,20 @@ mod tests {
             parse_hello("Hello Client bareos-fd FdProtocolVersion=54 calling"),
             Some(Hello::FileDaemon { .. })
         ));
+    }
+
+    #[test]
+    fn the_connection_over_the_limit_is_refused() {
+        assert!(!connection_refused(0, 20));
+        assert!(!connection_refused(19, 20));
+        assert!(connection_refused(20, 20));
+        assert!(connection_refused(0, 0));
+    }
+
+    #[test]
+    fn a_slot_is_released_when_dropped() {
+        let n = Arc::new(AtomicUsize::new(1));
+        drop(OpenSlot(n.clone()));
+        assert_eq!(n.load(Ordering::Acquire), 0);
     }
 }
