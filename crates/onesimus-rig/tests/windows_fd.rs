@@ -27,6 +27,17 @@ const RESTORE: &str = "D:/odir-test/restore";
 /// Runs `script` of `scripts/windows-vm` on the Windows host (copied there
 /// first) and returns its output.
 fn vm(host: &str, script: &str) -> String {
+    put(host, script);
+    let run = std::process::Command::new("ssh")
+        .args(["-o", "BatchMode=yes", host, "powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File"])
+        .arg(format!("D:\\odir-test\\{script}"))
+        .output()
+        .expect("ssh starts");
+    format!("{}{}", String::from_utf8_lossy(&run.stdout), String::from_utf8_lossy(&run.stderr))
+}
+
+/// Copies `script` of `scripts/windows-vm` to the Windows host.
+fn put(host: &str, script: &str) {
     let local = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../scripts/windows-vm").join(script);
     let copy = std::process::Command::new("scp")
         .args(["-o", "BatchMode=yes"])
@@ -35,12 +46,6 @@ fn vm(host: &str, script: &str) -> String {
         .output()
         .expect("scp starts");
     assert!(copy.status.success(), "scp {script}: {}", String::from_utf8_lossy(&copy.stderr));
-    let run = std::process::Command::new("ssh")
-        .args(["-o", "BatchMode=yes", host, "powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File"])
-        .arg(format!("D:\\odir-test\\{script}"))
-        .output()
-        .expect("ssh starts");
-    format!("{}{}", String::from_utf8_lossy(&run.stdout), String::from_utf8_lossy(&run.stderr))
 }
 
 /// Backup of the Windows tree, then a restore to `RESTORE`.
@@ -88,5 +93,17 @@ fn backup_and_restore_through_the_windows_fd() {
     let numbers: Vec<&str> = entries.split(|c: char| !c.is_ascii_digit()).filter(|n| !n.is_empty()).collect();
     assert!(numbers.len() == 2 && numbers[0] == numbers[1] && numbers[0] != "0", "{compare}");
     assert!(compare.contains("bad=0"), "{compare}");
+
+    // A file another program holds open without sharing cannot be read (no
+    // VSS): the job reports it and saves the rest.
+    put(&host, "hold.ps1");
+    eprintln!("lock: {}", vm(&host, "lock.ps1"));
+    let again = rig.run_job("VBackup").unwrap_or_else(|e| panic!("{e}"));
+    let row = rig.wait_job(again, Duration::from_secs(300)).unwrap_or_else(|e| panic!("{e}"));
+    let log = rig.job_log(again);
+    eprintln!("backup with a locked file: {row:?}\n{log}");
+    let _ = vm(&host, "unlock.ps1");
+    assert!(log.contains("locked.bin"), "the locked file is not named in the job log:\n{log}");
+    assert!(row.files >= 20, "the other files were not saved: {row:?}");
     let _ = vm(&host, "stop.ps1");
 }
