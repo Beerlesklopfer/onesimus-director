@@ -411,7 +411,7 @@ konnte es nicht löschen.
   für die aktuelle SHA-256, dann DeleteResource mit dieser Prüfsumme. Damit
   gelten REFERENCED (es wird nichts gelöscht, die Verweise werden genannt),
   die `-t`-Prüfung der Restkonfiguration, atomares Schreiben und Reload mit
-  Rücknahme. Typen: client, job, jobdefs, schedule, fileset. Pool, Storage
+  Rücknahme. Typen: client, job, jobdefs, schedule, fileset (seit 21.11.2026 auch pool). Storage
   und Console werden abgelehnt („cannot be deleted safely yet“), bis sie im
   CRUD sind. Ohne Konfigurationspfad lehnt der Befehl ab, statt nur die
   laufende Konfiguration zu ändern. Test
@@ -457,6 +457,31 @@ nur im Speicher.
 - Tests: `configure_update_goes_through_the_crud`,
   `configure_update_plans_crud_lines`, `bareos_config::edit::tests`.
 
-Offen: RENAME (Grundsatz 9), weitere Typen (Grundsatz 17) mit `followups`
-für Pool (Grundsatz 15), ob die alte Konsolenerweiterung `configure read`
-entfernt wird.
+### Pool im CRUD (21.11.2026)
+
+Anlass: Auftrag der GUI-Sitzung im Namen des Nutzers („odir kann Pools derzeit
+nicht bearbeiten“); erster Einsatz: Volume Retention des Pools H340 von einem
+auf drei Monate. Pool fehlte nicht aus Sicherheitsgründen, sondern war noch
+nicht umgesetzt (Grundsatz 17).
+
+- `RType::Pool` in `config_edit.rs`: `.config` (CREATE_RAW, READ_RAW,
+  UPDATE_RAW, DELETE, Capabilities), `configure update pool=…`,
+  `configure delete pool=…`, gRPC `ConfigEditor` und die typisierten
+  `ConfigureUpdate`/`ConfigureDelete`, Grammatik, MCP `configure_update`.
+  Rechte über die Pool-ACL. Storage und Console bleiben abgelehnt.
+- Verweise (REFERENCED beim Löschen): jede Direktive mit Pool-Verweis
+  (`R_POOL`: Job/JobDefs `Pool`, `Full/Incremental/Differential/Virtual
+  Full Backup Pool`, `Next Pool`; Pool `Next Pool`, `Recycle Pool`,
+  `Scratch Pool`) sowie die Overrides `Pool=`, `FullPool=`,
+  `IncrementalPool=`, `DifferentialPool=`, `VirtualFullPool=`, `NextPool=` in
+  Schedule-`Run`-Zeilen (als Tokens) und in Job-`Run`-Werten und
+  RunScript-`run`-Befehlen.
+- `followups` (Grundsatz 15): nach UPDATE `update volume allfrompool=<pool>`
+  (der Reload schreibt den Pool-Satz des Katalogs neu, die Volumes behalten
+  ihre Werte); nach DELETE der Hinweis, dass Pool-Satz und Volumes im Katalog
+  bleiben.
+- Test `pool_create_read_update_delete_and_referenced`; die Tests, die Pool
+  als nicht bearbeitbar prüften, nehmen jetzt Storage.
+
+Offen: RENAME (Grundsatz 9), Storage und Console (Grundsatz 17), ob die alte
+Konsolenerweiterung `configure read` entfernt wird.

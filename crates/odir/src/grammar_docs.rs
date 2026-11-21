@@ -1610,7 +1610,7 @@ pub static DOCS: &[Doc] = &[
     Doc {
         path: "configure delete",
         long: &[
-            "Onesimus extension: deletes a client, job, jobdefs, schedule or fileset through the configuration CRUD, the same path as .config delete. The resource is read for its current checksum and deleted only if no other resource still refers to it; otherwise the referring resources are listed and nothing is deleted. The remaining configuration is checked like odir -t, the file change is atomic and a failed reload is rolled back.",
+            "Onesimus extension: deletes a client, job, jobdefs, schedule, fileset or pool through the configuration CRUD, the same path as .config delete. The resource is read for its current checksum and deleted only if no other resource still refers to it; otherwise the referring resources are listed and nothing is deleted. The remaining configuration is checked like odir -t, the file change is atomic and a failed reload is rolled back.",
             "pool, storage and console are refused; remove such files by hand and reload. The resource ACL of the console applies.",
         ],
         examples: &[

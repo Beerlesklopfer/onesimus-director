@@ -2730,16 +2730,18 @@ configure update job=<job> [description=<description> ...] [type=<type> ...] [pr
 configure update jobdefs=<jobdefs> [description=<description> ...] [type=<type> ...] [protocol=<Native|NDMP_BAREOS|NDMP|NDMP_NATIVE> ...] [backupformat=<backupformat> ...] [level=<level> ...] [messages=<messages> ...] [storage=<storage> ...] [pool=<pool> ...] [fullbackuppool=<fullbackuppool> ...] [virtualfullbackuppool=<virtualfullbackuppool> ...] [incrementalbackuppool=<incrementalbackuppool> ...] [differentialbackuppool=<differentialbackuppool> ...] [nextpool=<nextpool> ...] [client=<client> ...] [fileset=<fileset> ...] [schedule=<schedule> ...] [jobtoverify=<jobtoverify> ...] [verifyjob=<verifyjob> ...] [catalog=<catalog> ...] [jobdefs=<jobdefs> ...] [run=<run> ...] [where=<where> ...] [regexwhere=<regexwhere> ...] [stripprefix=<stripprefix> ...] [addprefix=<addprefix> ...] [addsuffix=<addsuffix> ...] [bootstrap=<bootstrap> ...] [writebootstrap=<writebootstrap> ...] [replace=<Always|IfNewer|IfOlder|Never> ...] [maximumbandwidth=<maximumbandwidth> ...] [maxrunschedtime=<maxrunschedtime> ...] [maxruntime=<maxruntime> ...] [fullmaxruntime=<fullmaxruntime> ...] [incrementalmaxruntime=<incrementalmaxruntime> ...] [differentialmaxruntime=<differentialmaxruntime> ...] [maxwaittime=<maxwaittime> ...] [maxstartdelay=<maxstartdelay> ...] [maxfullinterval=<maxfullinterval> ...] [maxvirtualfullinterval=<maxvirtualfullinterval> ...] [maxdiffinterval=<maxdiffinterval> ...] [prefixlinks=<yes|no> ...] [prunejobs=<yes|no> ...] [prunefiles=<yes|no> ...] [prunevolumes=<yes|no> ...] [purgemigrationjob=<yes|no> ...] [enabled=<yes|no> ...] [spoolattributes=<yes|no> ...] [spooldata=<yes|no> ...] [spoolsize=<spoolsize> ...] [rerunfailedlevels=<yes|no> ...] [prefermountedvolumes=<yes|no> ...] [runbeforejob=<runbeforejob> ...] [runafterjob=<runafterjob> ...] [runafterfailedjob=<runafterfailedjob> ...] [clientrunbeforejob=<clientrunbeforejob> ...] [clientrunafterjob=<clientrunafterjob> ...] [maximumconcurrentjobs=<maximumconcurrentjobs> ...] [rescheduleonerror=<yes|no> ...] [rescheduleinterval=<rescheduleinterval> ...] [rescheduletimes=<rescheduletimes> ...] [priority=<priority> ...] [allowmixedpriority=<yes|no> ...] [selectionpattern=<selectionpattern> ...] [runscript=<runscript> ...] [selectiontype=<selectiontype> ...] [accurate=<yes|no> ...] [allowduplicatejobs=<yes|no> ...] [cancellowerlevelduplicates=<yes|no> ...] [cancelqueuedduplicates=<yes|no> ...] [cancelrunningduplicates=<yes|no> ...] [savefilehistory=<yes|no> ...] [filehistorysize=<filehistorysize> ...] [fdpluginoptions=<fdpluginoptions> ...] [sdpluginoptions=<sdpluginoptions> ...] [dirpluginoptions=<dirpluginoptions> ...] [maxconcurrentcopies=<maxconcurrentcopies> ...] [alwaysincremental=<yes|no> ...] [alwaysincrementaljobretention=<alwaysincrementaljobretention> ...] [alwaysincrementalkeepnumber=<alwaysincrementalkeepnumber> ...] [alwaysincrementalmaxfullage=<alwaysincrementalmaxfullage> ...] [maxfullconsolidations=<maxfullconsolidations> ...] [runonincomingconnectinterval=<runonincomingconnectinterval> ...] [newclient=<newclient> ...] [newfileset=<newfileset> ...] [newpool=<newpool> ...] [newstorage=<newstorage> ...] [newschedule=<newschedule> ...]
 configure update schedule=<schedule> [description=<description> ...] [run=<run> ...] [enabled=<yes|no> ...]
 configure update fileset=<fileset> [description=<description> ...] [include=<include> ...] [exclude=<exclude> ...] [ignorefilesetchanges=<yes|no> ...] [enablevss=<yes|no> ...]
+configure update pool=<pool> [description=<description> ...] [pooltype=<pooltype> ...] [labelformat=<labelformat> ...] [cleaningprefix=<cleaningprefix> ...] [usecatalog=<yes|no> ...] [purgeoldestvolume=<yes|no> ...] [actiononpurge=<None|Truncate> ...] [recycleoldestvolume=<yes|no> ...] [recyclecurrentvolume=<yes|no> ...] [maximumvolumes=<maximumvolumes> ...] [maximumvolumejobs=<maximumvolumejobs> ...] [maximumvolumefiles=<maximumvolumefiles> ...] [maximumvolumebytes=<maximumvolumebytes> ...] [catalogfiles=<yes|no> ...] [volumeretention=<volumeretention> ...] [volumeuseduration=<volumeuseduration> ...] [migrationtime=<migrationtime> ...] [migrationhighbytes=<migrationhighbytes> ...] [migrationlowbytes=<migrationlowbytes> ...] [nextpool=<nextpool> ...] [storage=<storage> ...] [autoprune=<yes|no> ...] [recycle=<yes|no> ...] [recyclepool=<recyclepool> ...] [scratchpool=<scratchpool> ...] [catalog=<catalog> ...] [minimumblocksize=<minimumblocksize> ...] [maximumblocksize=<maximumblocksize> ...]
 configure delete client=<client>
 configure delete job=<job>
 configure delete jobdefs=<jobdefs>
 configure delete schedule=<schedule>
 configure delete fileset=<fileset>
+configure delete pool=<pool>
 .fi
 .PP
 \fBDescription\fR
 .PP
-Adds resources to the configuration and exports them. Onesimus extensions read, update and delete resources of the editable types (client, job, jobdefs, schedule, fileset); every change is checked like a reload and written to the configuration directory.
+Adds resources to the configuration and exports them. Onesimus extensions read, update and delete resources of the editable types (client, job, jobdefs, schedule, fileset, pool); every change is checked like a reload and written to the configuration directory.
 .PP
 \fBSubcommands\fR
 .TP
@@ -2821,10 +2823,13 @@ Change a schedule
 .B "configure update fileset=<fileset>"
 Change a fileset
 .TP
+.B "configure update pool=<pool>"
+Change a pool
+.TP
 .B "configure delete"
 Delete an unreferenced resource (Onesimus)
 .IP
-Onesimus extension: deletes a client, job, jobdefs, schedule or fileset through the configuration CRUD, the same path as .config delete. The resource is read for its current checksum and deleted only if no other resource still refers to it; otherwise the referring resources are listed and nothing is deleted. The remaining configuration is checked like odir \-t, the file change is atomic and a failed reload is rolled back.
+Onesimus extension: deletes a client, job, jobdefs, schedule, fileset or pool through the configuration CRUD, the same path as .config delete. The resource is read for its current checksum and deleted only if no other resource still refers to it; otherwise the referring resources are listed and nothing is deleted. The remaining configuration is checked like odir \-t, the file change is atomic and a failed reload is rolled back.
 .IP
 pool, storage and console are refused; remove such files by hand and reload. The resource ACL of the console applies.
 .TP
@@ -2842,6 +2847,9 @@ Delete a schedule
 .TP
 .B "configure delete fileset=<fileset>"
 Delete a fileset
+.TP
+.B "configure delete pool=<pool>"
+Delete a pool
 .PP
 \fBArguments\fR
 .PP
@@ -4609,6 +4617,95 @@ Directive (empty value removes it) (yes or no; may be repeated)
 .B "enablevss=<yes|no> ..."
 Directive (empty value removes it) (yes or no; may be repeated)
 .PP
+\fIconfigure update pool=<pool>\fR
+.TP
+.B "pool=<pool>"
+Resource name (name; values from .filesets)
+.TP
+.B "description=<description> ..."
+Directive (empty value removes it) (text; may be repeated)
+.TP
+.B "pooltype=<pooltype> ..."
+Directive (empty value removes it) (one of a fixed set; values: Backup, Copy, Cloned, Archive, Migration, Scratch; may be repeated)
+.TP
+.B "labelformat=<labelformat> ..."
+Directive (empty value removes it) (text; may be repeated)
+.TP
+.B "cleaningprefix=<cleaningprefix> ..."
+Directive (empty value removes it) (text; may be repeated)
+.TP
+.B "usecatalog=<yes|no> ..."
+Directive (empty value removes it) (yes or no; may be repeated)
+.TP
+.B "purgeoldestvolume=<yes|no> ..."
+Directive (empty value removes it) (yes or no; may be repeated)
+.TP
+.B "actiononpurge=<None|Truncate> ..."
+Directive (empty value removes it) (one of a fixed set; values: None, Truncate; may be repeated)
+.TP
+.B "recycleoldestvolume=<yes|no> ..."
+Directive (empty value removes it) (yes or no; may be repeated)
+.TP
+.B "recyclecurrentvolume=<yes|no> ..."
+Directive (empty value removes it) (yes or no; may be repeated)
+.TP
+.B "maximumvolumes=<maximumvolumes> ..."
+Directive (empty value removes it) (text; may be repeated)
+.TP
+.B "maximumvolumejobs=<maximumvolumejobs> ..."
+Directive (empty value removes it) (text; may be repeated)
+.TP
+.B "maximumvolumefiles=<maximumvolumefiles> ..."
+Directive (empty value removes it) (text; may be repeated)
+.TP
+.B "maximumvolumebytes=<maximumvolumebytes> ..."
+Directive (empty value removes it) (text; may be repeated)
+.TP
+.B "catalogfiles=<yes|no> ..."
+Directive (empty value removes it) (yes or no; may be repeated)
+.TP
+.B "volumeretention=<volumeretention> ..."
+Directive (empty value removes it) (text; may be repeated)
+.TP
+.B "volumeuseduration=<volumeuseduration> ..."
+Directive (empty value removes it) (text; may be repeated)
+.TP
+.B "migrationtime=<migrationtime> ..."
+Directive (empty value removes it) (text; may be repeated)
+.TP
+.B "migrationhighbytes=<migrationhighbytes> ..."
+Directive (empty value removes it) (text; may be repeated)
+.TP
+.B "migrationlowbytes=<migrationlowbytes> ..."
+Directive (empty value removes it) (text; may be repeated)
+.TP
+.B "nextpool=<nextpool> ..."
+Directive (empty value removes it) (name; values from .pools; may be repeated)
+.TP
+.B "storage=<storage> ..."
+Directive (empty value removes it) (name; values from .storages; may be repeated)
+.TP
+.B "autoprune=<yes|no> ..."
+Directive (empty value removes it) (yes or no; may be repeated)
+.TP
+.B "recycle=<yes|no> ..."
+Directive (empty value removes it) (yes or no; may be repeated)
+.TP
+.B "recyclepool=<recyclepool> ..."
+Directive (empty value removes it) (name; values from .pools; may be repeated)
+.TP
+.B "scratchpool=<scratchpool> ..."
+Directive (empty value removes it) (name; values from .pools; may be repeated)
+.TP
+.B "catalog=<catalog> ..."
+Directive (empty value removes it) (name; values from .catalogs; may be repeated)
+.TP
+.B "minimumblocksize=<minimumblocksize> ..."
+Directive (empty value removes it) (text; may be repeated)
+.TP
+.B "maximumblocksize=<maximumblocksize> ..."
+Directive (empty value removes it) (text; may be repeated)
+.PP
 \fIconfigure delete client=<client>\fR
 .TP
 .B "client=<client>"
@@ -4632,6 +4729,11 @@ Resource name (name; values from .schedule)
 \fIconfigure delete fileset=<fileset>\fR
 .TP
 .B "fileset=<fileset>"
+Resource name (name; values from .filesets)
+.PP
+\fIconfigure delete pool=<pool>\fR
+.TP
+.B "pool=<pool>"
 Resource name (name; values from .filesets)
 .PP
 \fBExamples\fR
@@ -7297,12 +7399,12 @@ Print the JSON object as text (keyword)
 \fI\&.config list\fR
 .TP
 .B "type=<type>"
-Resource type (one of a fixed set; values: client, job, jobdefs, schedule, fileset; required)
+Resource type (one of a fixed set; values: client, job, jobdefs, schedule, fileset, pool; required)
 .PP
 \fI\&.config read\fR
 .TP
 .B "type=<type>"
-Resource type (one of a fixed set; values: client, job, jobdefs, schedule, fileset; required)
+Resource type (one of a fixed set; values: client, job, jobdefs, schedule, fileset, pool; required)
 .TP
 .B "name=<name>"
 Resource name (text; required)
@@ -7310,7 +7412,7 @@ Resource name (text; required)
 \fI\&.config create\fR
 .TP
 .B "type=<type>"
-Resource type (one of a fixed set; values: client, job, jobdefs, schedule, fileset; required)
+Resource type (one of a fixed set; values: client, job, jobdefs, schedule, fileset, pool; required)
 .TP
 .B "text64=<text64>"
 Resource text, base64 (text; required)
@@ -7321,7 +7423,7 @@ Check only, write nothing (keyword)
 \fI\&.config update\fR
 .TP
 .B "type=<type>"
-Resource type (one of a fixed set; values: client, job, jobdefs, schedule, fileset; required)
+Resource type (one of a fixed set; values: client, job, jobdefs, schedule, fileset, pool; required)
 .TP
 .B "name=<name>"
 Resource name (text; required)
@@ -7338,7 +7440,7 @@ Check only, write nothing (keyword)
 \fI\&.config delete\fR
 .TP
 .B "type=<type>"
-Resource type (one of a fixed set; values: client, job, jobdefs, schedule, fileset; required)
+Resource type (one of a fixed set; values: client, job, jobdefs, schedule, fileset, pool; required)
 .TP
 .B "name=<name>"
 Resource name (text; required)

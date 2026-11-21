@@ -460,3 +460,39 @@ fn fileset_create_read_update_delete_and_referenced() {
     let raw = bareos_config::raw::parse_str("Job {\n Name = r\n Run = \"job=a fileset=orphan level=Full\"\n}\n", None).unwrap();
     assert_eq!(references(&raw, RType::FileSet, "orphan"), vec![("job".into(), "r".into())]);
 }
+
+/// A pool with a comment and a value the GUI changes (Volume Retention).
+const POOL_SPARE: &str = "Pool {\n  Name = Spare\n  # kept as written\n  Pool Type = Backup\n  Volume Retention = 30 days\n  Label Format = \"Spare-\"\n}\n";
+
+/// Pool in the CRUD: create, read, update with the follow-up for the
+/// volumes, delete; REFERENCED by Job `Pool =`, Pool `Next Pool =` and a
+/// Schedule `Run` override `Pool=`.
+#[test]
+fn pool_create_read_update_delete_and_referenced() {
+    let h = harness("pool");
+    let created = h.create(RType::Pool, POOL_SPARE);
+    assert_eq!(created.status, Status::Ok, "{created:?}");
+    assert_eq!(std::fs::read_to_string(h.file("pool", "Spare.conf")).unwrap(), POOL_SPARE);
+    let read = h.read(RType::Pool, "Spare");
+    assert_eq!((read.status, read.text.as_str()), (Status::Ok, POOL_SPARE));
+    let changed = POOL_SPARE.replace("30 days", "3 months");
+    let updated = h.update(RType::Pool, "Spare", &read.sha256, &changed);
+    assert_eq!(updated.status, Status::Ok, "{updated:?}");
+    assert_eq!(updated.followups, vec!["update volume allfrompool=Spare".to_string()]);
+    assert!(std::fs::read_to_string(h.file("pool", "Spare.conf")).unwrap().contains("# kept as written"));
+    let o = h.delete(RType::Pool, "Spare", &updated.sha256);
+    assert_eq!(o.status, Status::Ok, "{o:?}");
+    assert!(!h.file("pool", "Spare.conf").exists());
+    assert_eq!(o.followups.len(), 1, "{o:?}");
+    // JOB_A uses Pool = Full
+    let read = h.read(RType::Pool, "Full");
+    let o = h.delete(RType::Pool, "Full", &read.sha256);
+    assert_eq!((o.status, o.referenced_by.clone()), (Status::Referenced, vec![("job".to_string(), "a".to_string())]));
+    assert!(h.file("pool", "Full.conf").exists());
+    // Next Pool of another pool, a Schedule Run override, a Job Run value
+    let raw = bareos_config::raw::parse_str("Pool {\n Name = Daily\n Next Pool = Copy\n}\n\
+        Schedule {\n Name = S\n Run = Level=Full Pool=Copy 1st sun at 23:05\n}\n\
+        Job {\n Name = r\n Run = \"job=a fullpool=Copy level=Full\"\n}\n", None).unwrap();
+    assert_eq!(references(&raw, RType::Pool, "Copy"),
+        vec![("pool".into(), "Daily".into()), ("schedule".into(), "S".into()), ("job".into(), "r".into())]);
+}

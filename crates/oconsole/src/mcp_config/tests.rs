@@ -317,7 +317,7 @@ fn refuses_without_crud_and_never_uses_configure_update() {
         let r = configure_update(&mut d, &json!({ "resource": "fileset", "name": "fs", "directives": { "a": "b" } }));
         assert!(r["content"][0]["text"].as_str().unwrap().contains("does not offer READ_RAW and UPDATE_RAW for fileset"), "{r}");
         // a type without CRUD
-        let r = configure_update(&mut d, &json!({ "resource": "pool", "name": "Full", "directives": { "a": "b" } }));
+        let r = configure_update(&mut d, &json!({ "resource": "storage", "name": "File", "directives": { "a": "b" } }));
         assert!(r["content"][0]["text"].as_str().unwrap().contains("resource: one of client, job"), "{r}");
         // nested block, unknown resource
         let mut d = FakeDirector::new(grpc);

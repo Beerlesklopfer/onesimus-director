@@ -43,10 +43,15 @@ pub enum RType {
     Client,
     /// FileSet; deleting one that a Job or JobDefs names is REFERENCED.
     FileSet,
+    /// Pool; deleting one that a Job, JobDefs, Pool (Next/Recycle/Scratch
+    /// Pool) or a Schedule/Job `Run` override names is REFERENCED. The reload
+    /// rewrites the catalog Pool record; volumes keep their values
+    /// (`followups`).
+    Pool,
 }
 
 impl RType {
-    pub const ALL: [RType; 5] = [RType::Schedule, RType::Job, RType::JobDefs, RType::Client, RType::FileSet];
+    pub const ALL: [RType; 6] = [RType::Schedule, RType::Job, RType::JobDefs, RType::Client, RType::FileSet, RType::Pool];
 
     /// Type word as written in new files and messages.
     pub fn word(self) -> &'static str {
@@ -56,6 +61,7 @@ impl RType {
             RType::JobDefs => "JobDefs",
             RType::Client => "Client",
             RType::FileSet => "FileSet",
+            RType::Pool => "Pool",
         }
     }
 
@@ -67,6 +73,7 @@ impl RType {
             RType::JobDefs => "jobdefs",
             RType::Client => "client",
             RType::FileSet => "fileset",
+            RType::Pool => "pool",
         }
     }
 
@@ -78,6 +85,7 @@ impl RType {
             RType::JobDefs => "R_JOBDEFS",
             RType::Client => "R_CLIENT",
             RType::FileSet => "R_FILESET",
+            RType::Pool => "R_POOL",
         }
     }
 
@@ -89,6 +97,7 @@ impl RType {
             RType::Job | RType::JobDefs => crate::acl::Kind::Job,
             RType::Client => crate::acl::Kind::Client,
             RType::FileSet => crate::acl::Kind::FileSet,
+            RType::Pool => crate::acl::Kind::Pool,
         }
     }
 }
@@ -505,21 +514,31 @@ pub fn references(raw: &[ConfResource], rtype: RType, name: &str) -> Vec<(String
                 return true;
             }
             // `run job=<name>` / `run ... client=<name>` in Job `Run` values
-            // and RunScript console commands
-            let key = match rtype {
-                RType::Job => Some("job="),
-                RType::Client => Some("client="),
-                RType::FileSet => Some("fileset="),
-                _ => None,
+            // and RunScript console commands; pool overrides also in
+            // Schedule `Run` lines (`Pool=`, `FullPool=` …, StoreRun)
+            let keys: &[&str] = match rtype {
+                RType::Job => &["job="],
+                RType::Client => &["client="],
+                RType::FileSet => &["fileset="],
+                RType::Pool => &["pool=", "fullpool=", "incrementalpool=", "differentialpool=", "virtualfullpool=", "nextpool="],
+                _ => &[],
             };
-            if let Some(key) = key && matches!(res.norm_type().as_str(), "job" | "jobdefs") {
-                if d.norm_key() == "run" && d.values().iter().any(|v| run_arg(v, key).as_deref() == Some(name)) {
+            let in_run = |v: &str| keys.iter().any(|key| run_arg(v, key).as_deref() == Some(name));
+            let run_holders: &[&str] = if rtype == RType::Pool { &["job", "jobdefs", "schedule"] } else { &["job", "jobdefs"] };
+            if !keys.is_empty() && run_holders.contains(&res.norm_type().as_str()) {
+                if d.norm_key() == "run" && d.values().iter().any(|v| in_run(v)) {
+                    return true;
+                }
+                // an unquoted Schedule Run line comes as tokens: `Pool`, `Copy`
+                // (the `=` is no value token)
+                if d.norm_key() == "run" && d.values().windows(2).any(|w| {
+                    keys.contains(&format!("{}=", w[0].to_ascii_lowercase()).as_str()) && w[1] == name
+                }) {
                     return true;
                 }
                 if d.norm_key() == "runscript" {
                     return d.block.iter().flatten().filter(|c| c.norm_key() == "console").flat_map(|c| c.values())
-                        .any(|v| v.trim_start().to_ascii_lowercase().starts_with("run ")
-                            && run_arg(v, key).as_deref() == Some(name));
+                        .any(|v| v.trim_start().to_ascii_lowercase().starts_with("run ") && in_run(v));
                 }
             }
             false
@@ -1024,7 +1043,15 @@ impl ConfigEditor {
                 // frompool`) goes into `followups`; Schedule/Job/JobDefs/Client/FileSet
                 // have nothing of that kind (the catalog Client record takes
                 // AutoPrune and the retentions at the next job, as in Bareos), so the list stays empty in this stage.
-                outcome.followups = Vec::new();
+                outcome.followups = match (rtype, op) {
+                    // CheckCatalog rewrote the Pool record; the volumes keep
+                    // retention, recycle, sizes … until updated from the pool
+                    (RType::Pool, Op::Update) => vec![format!("update volume allfrompool={}", outcome.name)],
+                    (RType::Pool, Op::Delete) => vec![format!(
+                        "the catalog keeps the Pool record \"{}\" and its volumes; move or delete them (update volume pool=…, delete volume)",
+                        outcome.name)],
+                    _ => Vec::new(),
+                };
                 Ok(outcome)
             }
             Err(reason) => {

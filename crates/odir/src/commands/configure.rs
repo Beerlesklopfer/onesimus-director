@@ -820,10 +820,10 @@ pub(crate) fn configure_delete_with(ast: &CommandAst, ctx: &ExecContext, editor:
     use crate::config_edit::{RType, Status};
     /// Types `configure delete` accepted before the CRUD path; those without
     /// a CRUD type are refused with a hint.
-    const UNSAFE: [&str; 3] = ["pool", "storage", "console"];
+    const UNSAFE: [&str; 2] = ["storage", "console"];
     let Some((key, name)) = ast.arguments.iter()
         .find_map(|a| a.value.as_deref().map(|v| (a.key.to_ascii_lowercase(), v.to_string()))) else {
-        return CommandResult::ok("configure delete: specify client=<name>, job=<name>, jobdefs=<name>, schedule=<name> or fileset=<name>\n".to_string());
+        return CommandResult::ok("configure delete: specify client=<name>, job=<name>, jobdefs=<name>, schedule=<name>, fileset=<name> or pool=<name>\n".to_string());
     };
     let Some(rtype) = RType::ALL.into_iter().find(|t| t.norm() == key) else {
         if UNSAFE.contains(&key.as_str()) {
@@ -950,7 +950,7 @@ fn configure_update(ast: &CommandAst, ctx: &ExecContext) -> CommandResult {
 
 /// Usage text of `configure update`.
 const UPDATE_USAGE: &str = "configure update: usage: configure update <type>=<name> <directive>=<value> ...\n  \
-    type: client, job, jobdefs, schedule, fileset; a directive given several times (Run) replaces all its \
+    type: client, job, jobdefs, schedule, fileset, pool; a directive given several times (Run) replaces all its \
     lines, <directive>= removes it\n";
 
 /// One directive of a `configure update` line: the key as typed (aliases

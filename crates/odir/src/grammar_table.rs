@@ -59,7 +59,7 @@ const REPLACE: &[&str] = &["always", "ifnewer", "ifolder", "never"];
 /// `on|off` of autodisplay, automount, gui, trace.
 const ON_OFF: &[&str] = &["on", "off"];
 /// Resource types `configure update|delete` and `.config` edit.
-const EDITABLE: &[&str] = &["client", "job", "jobdefs", "schedule", "fileset"];
+const EDITABLE: &[&str] = &["client", "job", "jobdefs", "schedule", "fileset", "pool"];
 
 /// The root node of a registered command, None for a name without entry.
 pub fn describe(name: &str) -> Option<Node> {
@@ -668,7 +668,7 @@ fn configure() -> Node {
     };
     sub("configure", "").long(&[
         "Adds resources to the configuration and exports them. Onesimus extensions read, update and delete \
-         resources of the editable types (client, job, jobdefs, schedule, fileset); every change is checked like \
+         resources of the editable types (client, job, jobdefs, schedule, fileset, pool); every change is checked like \
          a reload and written to the configuration directory.",
     ]).subs(vec![
         sub("add", "Add a resource").subs(add_subs),

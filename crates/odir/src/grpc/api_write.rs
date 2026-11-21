@@ -885,7 +885,7 @@ fn configure(r: &Req, action: &str) -> Result<Plan, String> {
 
 /// Resource types `configure update` and `configure delete` change: the
 /// types of the configuration CRUD (commands/configure.rs, config_edit.rs).
-const CONFIGURE_CRUD_TYPES: &[&str] = &["client", "job", "jobdefs", "schedule", "fileset"];
+const CONFIGURE_CRUD_TYPES: &[&str] = &["client", "job", "jobdefs", "schedule", "fileset", "pool"];
 
 /// S-38: `configure delete <type>=<name> [yes]`, the line the command
 /// accepts (it takes the first `<type>=<name>` argument).
@@ -1269,10 +1269,10 @@ mod tests {
         assert!(err("ConfigureUpdate", json!({"resource_type": 1, "name": "c1"})).contains("at least one"));
         assert_eq!(line("ConfigureUpdate", json!({"resource_type": 1, "name": "c1", "directives": {"Enabled": "no"}})),
                    "configure update client=c1 enabled=no");
-        assert!(err("ConfigureUpdate", json!({"resource_type": 8, "name": "p", "directives": {"x": "y"}})).contains("supports"));
+        assert!(err("ConfigureUpdate", json!({"resource_type": 4, "name": "p", "directives": {"x": "y"}})).contains("supports"));
         assert_eq!(line("ConfigureDelete", json!({"resource_type": 6, "name": "s1", "yes": true})), "configure delete schedule=s1 yes");
         assert_eq!(line("ConfigureDelete", json!({"resource_type": 7, "name": "fs"})), "configure delete fileset=fs");
-        assert!(err("ConfigureDelete", json!({"resource_type": 8, "name": "p"})).contains("supports"));
+        assert!(err("ConfigureDelete", json!({"resource_type": 4, "name": "p"})).contains("supports"));
         assert_eq!(line("ConfigureExport", json!({"client": "fd"})), "configure export client=fd");
         assert_eq!(line("SetDebug", json!({"level": 100, "trace": true, "dir": true})), "setdebug level=100 trace=1 dir");
         assert_eq!(line("SetDebug", json!({"level": 0, "client": "fd"})), "setdebug level=0 client=fd");
@@ -1340,7 +1340,7 @@ mod tests {
         assert_eq!(line(json!({"resource_type": 3, "name": "j", "directives": {"newpool": "Full"}})).unwrap(),
             "configure update job=j newpool=Full");
         for (request, error) in [
-            (json!({"resource_type": 8, "name": "Full", "directives": {"a": "b"}}), "supports resource types"),
+            (json!({"resource_type": 4, "name": "File", "directives": {"a": "b"}}), "supports resource types"),
             (json!({"resource_type": 1, "name": "c1"}), "at least one"),
             (json!({"resource_type": 1, "name": "c1", "directives": {"name": "x"}}), "renaming"),
             (json!({"resource_type": 1, "name": "c1", "directives": {"a=b": "x"}}), "letters"),
