@@ -23,5 +23,9 @@ openssl.workspace = true
 
 libc.workspace = true
 
+[features]
+## Baut OpenSSL aus den Quellen und linkt es statisch (Cross-Builds, z. B. i686-musl für 32-Bit-Hosts).
+vendored-openssl = ["openssl/vendored"]
+
 [dev-dependencies]
 serde_json.workspace = true

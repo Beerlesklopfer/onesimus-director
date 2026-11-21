@@ -65,3 +65,7 @@ assets = [
     ["target/release/osd", "usr/sbin/osd", "755"],
     ["../../../config/bareos-sd.d/**/*.conf", "usr/share/bareos/defaultconfigs/bareos-sd.d/", "644"],
 ]
+
+[features]
+## OpenSSL statisch aus den Quellen (für Cross-Builds wie `i686-unknown-linux-musl`, 32-Bit-Hosts).
+vendored-openssl = ["bareos-bnet/vendored-openssl"]

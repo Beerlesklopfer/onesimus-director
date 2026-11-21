@@ -234,6 +234,18 @@ Gilt für echte Bänder, Plattenbänder und Datei-Volumes.
 | Band | `DeviceType = Tape`, Autochanger mit `mtx` | Bareos-Bandformat (Blockgröße, EOF-Marken), Autochanger-Befehle. Größter Aufwand, zuletzt |
 | Plattenband (D-14) | `DeviceType = Tape` + Autochanger, aber auf Platte | Platte oder Partition als emulierter Wechsler mit Kassetten (Bandkern in osd); Bareos-Bandformat und LTFS-Plugin, siehe [Platte als emuliertes Band](#platte-als-emuliertes-band-d-14-maintainer-21112026) |
 
+## 32-Bit-Hosts (Maintainer 21.11.2026)
+
+Anlass: ein altes ASUSTOR-NAS (i386, Debian, 32-Bit-Kernel) mit 2-TB-Platten soll osd direkt tragen, als Plattenband-Host (PT) mit lokalen Platten und SMART (D-21), ohne iSCSI.
+
+- **Bau:** `scripts/build-osd-i686.sh` baut osd als **statisches i686-musl-Programm** (läuft unabhängig von der glibc des alten Debian) und ein Paket `osd-<rev>-i386.deb`. Werkzeuge ohne root: `rustup target add i686-unknown-linux-musl`, zig und cargo-zigbuild aus PyPI (`ziglang`, `cargo-zigbuild`). Ziel-CPU der zig-Vorgabe: `pentium4` (SSE2), das trägt auch ein Atom.
+- **TLS:** Der Workspace nutzt nur noch `ring` als rustls-Provider (`default-features = false` bei `rustls` und `tokio-rustls`); `aws-lc-rs`/`aws-lc-sys` sind aus dem ganzen Workspace entfernt (brauchten cmake und einen C-Cross-Compiler). Der Code installierte ohnehin überall den ring-Provider.
+- **OpenSSL** (TLS-PSK für BNET; rustls kann kein PSK) wird für dieses Ziel mit dem Feature `vendored-openssl` (osd-daemon → bareos-bnet → `openssl/vendored`) aus den Quellen gebaut und statisch gelinkt. `CFLAGS_i686_unknown_linux_musl=-DBROKEN_CLANG_ATOMICS`, weil die zig-Laufzeit für i686 kein `__atomic_is_lock_free` hat; OpenSSL nimmt dann seinen Mutex-Weg.
+- **Nachweis (21.11.2026):** Tests von `bareos-bnet`, `bareos-format`, `osd`, `osd-daemon` (einschließlich `osd_cli`) und `osd-ring` laufen als i686-musl-Programme grün (140 Tests, ein ignorierter wie auf x86_64). Der übrige Workspace besteht nach dem TLS-Umbau seine Tests auf x86_64 unverändert.
+- **Code-Regel:** Offsets, Satznummern, Volume- und Plattengrößen sind `u64`, nie `usize` (2-TB-Platten, Volumes über 4 GiB). Durchgesehen: `usize` steht nur für Blocklängen (u32) und Ringgrößen (wenige MiB). Ein Test mit einem Volume über 4 GiB unter i686 steht noch aus.
+- **Leistung:** Ein alter Atom hat vermutlich kein AES-NI **[unbelegt]**; TLS mit AES-GCM bremst dort. Für solche Hosts ChaCha20-Poly1305 bevorzugen (Cipher-Reihenfolge in osd abhängig von der CPU-Erkennung, offen). crc32c ohne SSE4.2 in Software; bei 1 GbE voraussichtlich ausreichend. io-uring auf altem Kernel nicht vorausgesetzt.
+- **Offen:** Ist-Stand des Geräts (Debian-Version, Kernel, Platten, SMART), Test auf dem Gerät selbst, systemd-Unit auf altem Debian prüfen.
+
 ## Device-Watcher (D-6)
 
 - **Auftrag:** Die Wechselplatten stehen auf dem SD-Rechner, also erkennt **osd selbst** sie. Ein eigener Dienst wäre ein zweiter Prozess mit eigener Fehlerquelle.

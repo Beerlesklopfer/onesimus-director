@@ -54,9 +54,9 @@ base64 = "0.22"
 rand = "0.8"
 
 # TLS
-rustls = { version = "0.23", features = ["ring"] }
+rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12", "logging"] }
 rustls-pemfile = "2"
-tokio-rustls = "0.26"
+tokio-rustls = { version = "0.26", default-features = false, features = ["ring", "logging", "tls12"] }
 
 # TLS-PSK (for FD/SD connections — Bareos uses PSK, not certificates)
 openssl = "0.10"
