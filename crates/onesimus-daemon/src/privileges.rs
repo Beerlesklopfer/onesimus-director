@@ -61,9 +61,9 @@ pub fn drop_privileges(user: Option<&str>, group: Option<&str>) -> Result<(), St
     match &target_user {
         Some(u) => {
             let cname = CString::new(u.name.as_str()).map_err(|_| "invalid user name".to_string())?;
-            nix::unistd::initgroups(&cname, gid).map_err(|e| format!("initgroups({}): {e}", u.name))?;
+            init_groups(&cname, gid).map_err(|e| format!("initgroups({}): {e}", u.name))?;
         }
-        None => nix::unistd::setgroups(&[gid]).map_err(|e| format!("setgroups: {e}"))?,
+        None => set_groups(gid).map_err(|e| format!("setgroups: {e}"))?,
     }
     nix::unistd::setgid(gid).map_err(|e| format!("setgid({gid}): {e}"))?;
     nix::unistd::setuid(uid).map_err(|e| format!("setuid({uid}): {e}"))?;
@@ -142,4 +142,34 @@ mod tests {
         let primary = Group::from_gid(me.gid).unwrap().unwrap();
         assert!(drop_privileges(Some(&me.name), Some(&primary.name)).is_ok());
     }
+}
+
+/// `initgroups(3)`: nix offers it everywhere but on Apple targets, where libc
+/// takes the group as `c_int`.
+#[cfg(not(target_vendor = "apple"))]
+fn init_groups(user: &CString, gid: nix::unistd::Gid) -> nix::Result<()> {
+    nix::unistd::initgroups(user, gid)
+}
+
+/// `initgroups(3)` on macOS (libc directly).
+#[cfg(target_vendor = "apple")]
+fn init_groups(user: &CString, gid: nix::unistd::Gid) -> nix::Result<()> {
+    // SAFETY: `user` is a valid NUL-terminated string for the call.
+    let rc = unsafe { nix::libc::initgroups(user.as_ptr(), gid.as_raw() as nix::libc::c_int) };
+    nix::errno::Errno::result(rc).map(drop)
+}
+
+/// `setgroups(2)` with only `gid`.
+#[cfg(not(target_vendor = "apple"))]
+fn set_groups(gid: nix::unistd::Gid) -> nix::Result<()> {
+    nix::unistd::setgroups(&[gid])
+}
+
+/// `setgroups(2)` with only `gid` on macOS (libc directly).
+#[cfg(target_vendor = "apple")]
+fn set_groups(gid: nix::unistd::Gid) -> nix::Result<()> {
+    let groups = [gid.as_raw()];
+    // SAFETY: one valid gid_t in `groups`.
+    let rc = unsafe { nix::libc::setgroups(1, groups.as_ptr()) };
+    nix::errno::Errno::result(rc).map(drop)
 }

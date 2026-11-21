@@ -77,14 +77,18 @@ pub enum RawKind {
 impl RawKind {
     /// The kind of an `st_mode`.
     pub fn of_mode(mode: u32) -> Option<Self> {
-        Some(match mode & libc::S_IFMT {
-            libc::S_IFREG => Self::Regular,
-            libc::S_IFDIR => Self::Directory,
-            libc::S_IFLNK => Self::Symlink,
-            libc::S_IFIFO => Self::Fifo,
-            libc::S_IFCHR => Self::Char,
-            libc::S_IFBLK => Self::Block,
-            libc::S_IFSOCK => Self::Socket,
+        // mode_t is u32 on Linux, u16 on macOS
+        #[allow(clippy::unnecessary_cast)]
+        let (fmt, kind) = (libc::S_IFMT as u32, |bits: libc::mode_t| bits as u32);
+        let m = mode & fmt;
+        Some(match m {
+            _ if m == kind(libc::S_IFREG) => Self::Regular,
+            _ if m == kind(libc::S_IFDIR) => Self::Directory,
+            _ if m == kind(libc::S_IFLNK) => Self::Symlink,
+            _ if m == kind(libc::S_IFIFO) => Self::Fifo,
+            _ if m == kind(libc::S_IFCHR) => Self::Char,
+            _ if m == kind(libc::S_IFBLK) => Self::Block,
+            _ if m == kind(libc::S_IFSOCK) => Self::Socket,
             _ => return None,
         })
     }
