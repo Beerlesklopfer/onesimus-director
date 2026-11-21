@@ -52,6 +52,8 @@ message UsageInfo {
   UsageState state = 4;          // OK, NEAR (>= 80 %), REACHED
   int64 resets_at = 5;           // Unix-Zeit des Monatswechsels
   LicenceInfo licence = 6;
+  uint64 bytes_running = 7;      // was laufende gezählte Jobs bisher geschrieben haben (nicht in bytes_written)
+  uint32 held_jobs_this_month = 8; // wegen des Limits übersprungene geplante Jobs (L-5)
 }
 message LicenceInfo {
   LicenceKind kind = 1;          // FREE, LICENSED, EXPIRED, INVALID
@@ -61,7 +63,13 @@ message LicenceInfo {
   string message = 5;            // Grund bei EXPIRED/INVALID
 }
 ```
-in `GetDirectorStatus` (Feld `usage`) und als Push-Ereignis `UsageEvent { UsageInfo usage = 1; }` bei Zustandswechsel (OK → NEAR → REACHED, Monatswechsel, Lizenz geladen/abgelaufen).
+in `GetDirectorStatus` (Feld `usage`) und als Push-Ereignis `UsageEvent { UsageInfo usage = 1; }` bei Zustandswechsel (OK → NEAR → REACHED, Monatswechsel, Lizenz geladen/abgelaufen) **und einmal direkt nach dem Login** auf dem Push-Strom (die Ampel braucht kein Abfragen).
+
+Ergänzungen der GUI-Sitzung (21.11.2026), übernommen:
+- `bytes_running` getrennt von `bytes_written` (abgeschlossene Jobs aus dem Katalog), damit der Balken nicht erst am Jobende springt; der Zustand NEAR/REACHED rechnet mit der Summe beider.
+- `held_jobs_this_month` für „3 Sicherungen übersprungen“.
+- Erkennbarer Grund ohne Textauswertung: `JobStatusEvent.reason` (Enum, `LIMIT_REACHED`) und im typisierten Job-Satz `extra_fields["skip_reason"] = "free_tier_limit"`; der Grund wird je Job im Schema `onesimus` gespeichert (Tabelle `job_skip`, JobId + Grund, Migrationsschritt in bareos-orm), weil die Bareos-Tabelle `Job` keine Spalte dafür hat.
+- Hochrechnung bis Monatsende rechnet die GUI aus `month`, `bytes_written`, `bytes_running` und `resets_at`; odir legt keine Prognose-Politik fest.
 
 Job-Log-Meldung beim Zurückhalten (M_FATAL im übersprungenen Job, bzw. Antwort auf `run`):
 
