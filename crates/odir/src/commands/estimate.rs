@@ -288,15 +288,22 @@ fn estimate_job(ast: &CommandAst, ctx: &ExecContext, mut reply: Reply, job: Opti
     }
 
     let start_time = chrono::Local::now().timestamp();
-    let catalog = ctx.catalog.as_ref();
-    // GetOrCreateClientRecord / GetOrCreateFilesetRecord (lookup only).
-    let client_id = catalog.and_then(|c| catalog_id(c, &format!(
-        "SELECT ClientId FROM Client WHERE Name='{}'", escape(&plan.client))));
-    let fileset_id = catalog.and_then(|c| catalog_id(c, &format!(
-        "SELECT FileSetId FROM FileSet WHERE FileSet='{}' ORDER BY CreateTime DESC, FileSetId DESC LIMIT 1",
-        escape(&plan.fileset_name))));
-    let (Some(catalog), Some(client_id), Some(fileset_id)) = (catalog, client_id, fileset_id) else {
-        return reply.done();
+    let Some(catalog) = ctx.catalog.as_ref() else { return reply.done() };
+    // ua_cmds.cc:1871-1873: GetOrCreateClientRecord, GetOrCreateFilesetRecord
+    // – a client or FileSet that never ran gets its record here, as in
+    // Bareos (C-090); without it the estimate ended without a word.
+    let records = {
+        let cfg = config.read().unwrap_or_else(|e| e.into_inner());
+        let retention = crate::backup::client_retention(&cfg, &plan.client);
+        crate::backup::get_or_create_client_record(catalog, &plan.client, retention).and_then(|client_id| {
+            let fileset = crate::commands::defaults::raw(&cfg, "fileset", &plan.fileset_name)
+                .ok_or_else(|| format!("FileSet {} not found\n", plan.fileset_name))?;
+            crate::backup::get_or_create_fileset_record(catalog, fileset, start_time).map(|fsr| (client_id, fsr.id))
+        })
+    };
+    let (client_id, fileset_id) = match records {
+        Ok(ids) => ids,
+        Err(e) => return reply.error(&e),
     };
 
     let since = level_since_time(catalog, &plan, &mut level, client_id, fileset_id);
@@ -380,10 +387,6 @@ use crate::btime::str_to_utime;
 
 fn escape(value: &str) -> String {
     value.replace('\'', "''")
-}
-
-fn catalog_id(catalog: &CatalogHandle, sql: &str) -> Option<i64> {
-    catalog.query_rows(sql).ok()?.rows.first()?.first()?.as_deref()?.parse().ok()
 }
 
 fn send<S: std::io::Read + std::io::Write>(fd: &mut BnetStream<S>, text: &str) -> Result<(), String> {
