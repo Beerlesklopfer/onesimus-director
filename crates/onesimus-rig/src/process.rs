@@ -51,6 +51,11 @@ impl Daemon {
         Ok(Daemon { name: name.into(), child: Some(child), log: log.to_path_buf() })
     }
 
+    /// The process id, `None` after [`Daemon::stop`].
+    pub fn pid(&self) -> Option<u32> {
+        self.child.as_ref().map(Child::id)
+    }
+
     /// The exit status, if the daemon has ended already.
     pub fn exited(&mut self) -> Option<std::process::ExitStatus> {
         self.child.as_mut().and_then(|c| c.try_wait().ok().flatten())

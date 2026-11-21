@@ -446,6 +446,12 @@ impl Rig {
         started
     }
 
+    /// The process id of the daemon `name` (`odir`, `ofd`, `sd`), for
+    /// measurements of its CPU time in `/proc`.
+    pub fn pid_of(&self, name: &str) -> Option<u32> {
+        self.daemons.iter().find(|d| d.name == name).and_then(Daemon::pid)
+    }
+
     /// The rig root directory.
     pub fn root(&self) -> &Path {
         &self.layout.root
