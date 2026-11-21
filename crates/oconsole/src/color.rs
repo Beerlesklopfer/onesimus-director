@@ -9,6 +9,23 @@ pub fn output(text: &str) -> Cow<'_, str> {
     without_sgr(text, !enabled())
 }
 
+/// Console decoration for stdout: styling only with colour enabled and stdout on a terminal.
+pub fn stdout(text: &str) -> Cow<'_, str> {
+    use std::io::IsTerminal;
+    for_terminal(text, std::io::stdout().is_terminal())
+}
+
+/// Console decoration for stderr: styling only with colour enabled and stderr on a terminal.
+pub fn stderr(text: &str) -> Cow<'_, str> {
+    use std::io::IsTerminal;
+    for_terminal(text, std::io::stderr().is_terminal())
+}
+
+/// Styling stays only when colour is enabled and the stream is a terminal.
+fn for_terminal(text: &str, is_terminal: bool) -> Cow<'_, str> {
+    without_sgr(text, !enabled() || !is_terminal)
+}
+
 fn without_sgr(text: &str, disabled: bool) -> Cow<'_, str> {
     if !disabled || !text.contains('\x1b') {
         return Cow::Borrowed(text);
@@ -38,6 +55,12 @@ fn without_sgr(text: &str, disabled: bool) -> Cow<'_, str> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn no_styling_without_a_terminal() {
+        assert_eq!(super::for_terminal("\x1b[2m(97 commands)\x1b[0m", false), "(97 commands)");
+        assert_eq!(super::for_terminal("plain", false), "plain");
+    }
+
     use super::*;
 
     #[test]

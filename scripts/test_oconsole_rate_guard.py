@@ -49,6 +49,11 @@ class Director:
                 if command.startswith('.api'):
                     self.send(-1)
                     continue
+                if command == '.grammar':
+                    # Connect-time probe of oconsole; answer like Bareos so it falls back to .help.
+                    self.send('.grammar: is an invalid command.\n')
+                    self.send(-1)
+                    continue
                 if command == '.help':
                     self.send('version Version -- version\ndialog Dialog -- dialog\nquit Quit -- quit\n')
                     self.send(-1)
@@ -59,10 +64,15 @@ class Director:
                 if command == 'dialog':
                     dialog = 1
                     self.send(-24)  # YesNo
+                    # Like GetCmd() (C-076): the prompt follows the input signal as a data frame.
+                    self.send('Continue? (yes/no): ')
                 elif dialog:
                     self.send(f'ANSWER {command}\n')
                     dialog += 1
-                    self.send({2: -27, 3: -28}.get(dialog, -1))
+                    signal = {2: -27, 3: -28}.get(dialog, -1)
+                    self.send(signal)
+                    if signal == -28:  # TEXT_INPUT: prompt follows; SUB_PROMPT (-27) uses the text before it
+                        self.send('Enter text: ')
                     if dialog == 4:
                         dialog = 0
                 else:
@@ -197,7 +207,8 @@ class RateGuardTests(unittest.TestCase):
         self.assertNotIn(b'Command Rate Guard', stdout)
         self.assertNotIn(b'\x1b', stdout)  # NO_COLOR
         self.assertEqual([c for c, _ in self.director.commands], ['version', 'version'])
-        self.assertGreaterEqual(second - first, 3)
+        # Director-side receive times: the first line may arrive a few ms after oconsole started the interval.
+        self.assertGreaterEqual(second - first, 2.95)
         history = (Path(console.temporary.name) / '.oconsole_history').read_text()
         self.assertIn('version', history)
         self.assertNotIn('spam-intruder', history)
@@ -237,7 +248,8 @@ class RateGuardTests(unittest.TestCase):
         console.write(b'\x04')  # EOF closes without an extra unguarded quit command.
         console.process.wait(timeout=3)
         self.assertEqual([c for c, _ in self.director.commands], ['version', 'version'])
-        self.assertGreaterEqual(second - first, 3)
+        # Director-side receive times: the first line may arrive a few ms after oconsole started the interval.
+        self.assertGreaterEqual(second - first, 2.95)
         self.assertEqual(console.process.returncode, 0)
 
     def test_multiline_paste_cannot_bypass_guard_in_one_packet(self):

@@ -13,9 +13,9 @@ mod fishkeys;
 mod grammar;
 
 // Keep all console stdout/stderr decoration under the same NO_COLOR policy.
-macro_rules! print { ($($arg:tt)*) => { std::print!("{}", crate::color::output(&format!($($arg)*))) }; }
-macro_rules! println { () => { std::println!() }; ($($arg:tt)*) => { std::println!("{}", crate::color::output(&format!($($arg)*))) }; }
-macro_rules! eprintln { () => { std::eprintln!() }; ($($arg:tt)*) => { std::eprintln!("{}", crate::color::output(&format!($($arg)*))) }; }
+macro_rules! print { ($($arg:tt)*) => { std::print!("{}", crate::color::stdout(&format!($($arg)*))) }; }
+macro_rules! println { () => { std::println!() }; ($($arg:tt)*) => { std::println!("{}", crate::color::stdout(&format!($($arg)*))) }; }
+macro_rules! eprintln { () => { std::eprintln!() }; ($($arg:tt)*) => { std::eprintln!("{}", crate::color::stderr(&format!($($arg)*))) }; }
 
 mod grpc_client;
 mod mcp;
