@@ -108,10 +108,13 @@ jobs:
         run: |
           apt-get update -q >/dev/null
           apt-get install -y -q --no-install-recommends \
-            ca-certificates curl git build-essential \
-            pkg-config protobuf-compiler libprotobuf-dev libssl-dev libpam0g-dev >/dev/null
+            ca-certificates curl git build-essential python3 \
+            pkg-config protobuf-compiler libprotobuf-dev libssl-dev zlib1g-dev liblzo2-dev libacl1-dev \
+            libpam0g-dev >/dev/null
           curl -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal --default-toolchain stable
           echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
+          # python3: Versionsnummer; cargo-deb: der Paketjob ist ein frischer Container
+          "$HOME/.cargo/bin/cargo" install cargo-deb --locked
 
       - name: Checkout
         uses: actions/checkout@v4
