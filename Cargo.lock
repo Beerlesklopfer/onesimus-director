@@ -2225,7 +2225,6 @@ dependencies = [
  "bareos-bnet",
  "bareos-format",
  "ctrlc",
- "libc",
  "nix 0.29.0",
  "tracing",
  "tracing-subscriber",
