@@ -60,9 +60,20 @@ jobs:
           key: test-${{ hashFiles('Cargo.lock') }}
           restore-keys: test-
 
+      # Die Tests laufen als unprivilegierter Benutzer: der Job-Container
+      # läuft als root, die Broker-, LDAP- und Podman-Tests von ofd prüfen
+      # aber gerade, dass nichts als root läuft (ein Broker läuft nie als
+      # root; die Konten-Policy darf UID 0 nicht doppelt sehen). Als root
+      # scheiterten seit dem 20.11.2026 jeder Lauf an denselben 16 Tests.
+      - name: Testbenutzer
+        run: |
+          useradd --create-home --shell /bin/bash ci
+          chown -R ci:ci "$GITHUB_WORKSPACE" "$HOME/.cargo" "$HOME/.rustup"
+          echo "AS_CI=runuser -u ci -- env HOME=/home/ci CARGO_HOME=$HOME/.cargo RUSTUP_HOME=$HOME/.rustup PATH=$HOME/.cargo/bin:/usr/bin:/bin" >> "$GITHUB_ENV"
+
       - name: Tests
         run: |
-          cargo test --locked \
+          $AS_CI cargo test --locked \
             -p odir -p oconsole -p bareos-config -p ofd -p onesimus-plugins \
             -p bareos-bnet -p bareos-orm \
             -p bareos-format -p onesimus-daemon -p onesimus-rig -p osd -p osd-daemon -p osd-ring \
@@ -76,7 +87,7 @@ jobs:
         env:
           RUSTDOCFLAGS: -D warnings
         run: |
-          cargo doc --locked --no-deps --document-private-items \
+          $AS_CI cargo doc --locked --no-deps --document-private-items \
             -p bareos-format -p onesimus-daemon -p onesimus-rig -p osd -p osd-daemon -p osd-ring \
             -p onesimus-bnet-grpc
 
@@ -84,7 +95,7 @@ jobs:
       # Pakete bleiben Produktions-Builds
       - name: Tests gRPC-Entwicklungs-Build
         run: |
-          cargo test --locked -p odir --features grpc-development
+          $AS_CI cargo test --locked -p odir --features grpc-development
 
   package:
     needs: test
