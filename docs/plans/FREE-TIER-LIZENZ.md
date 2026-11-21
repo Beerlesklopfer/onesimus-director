@@ -102,3 +102,37 @@ A licence file removes or raises the limit (see https://onesimus.io).
 5. `onesimus-licence` (nicht ausgeliefert), Testschlüssel nur in Tests.
 6. Tests: Zählung (Typen, Level V, Monatsgrenze, Zeitzone, mehrere Kataloge), Sperre und Ausnahmen, Lizenz gültig/abgelaufen/falsche Signatur/falscher Director, Meldungstexte.
 7. Doku: betrieb-odir.md (Abweichung von Bareos: Bareos kennt kein Limit), Wiki-Seite, COMPATIBILITY-LOG als Entscheidung.
+
+## Preismodell (Entwurf, nicht beschlossen)
+
+Vorschlag der GUI-Sitzung; Stand 21.11.2026, vom Nutzer als Entwurf freigegeben. Nichts davon ist umgesetzt oder zugesagt.
+
+### Stufen
+
+Je Director, gezählt als geschriebene Bytes je Monat (Abschnitt „Anforderung“), signierte Lizenzdatei.
+
+| Stufe | Grenze | Preis | Zielgruppe |
+|---|---|---|---|
+| Free | 1 TB | 0 € | Haushalte. Beispiel: 400 GB Daten mit monatlichem Full und täglichen Incrementals ergeben etwa 450 bis 500 GB je Monat |
+| Home Plus | 5 TB | etwa 39 €/Jahr | große Mediensammlungen, Homelab |
+| Small Business | 25 TB | etwa 290 €/Jahr | Büro, Praxis, Kanzlei |
+| Business | unbegrenzt, mit Support und Reaktionszeiten | ab etwa 990 €/Jahr je Director | |
+
+### Früh-Buchung (auch auf der Webseite)
+
+Wer vor v1.0.0 reserviert, behält den ermäßigten Preis, solange das Abonnement ohne Unterbrechung läuft. Vorschlag: Home Plus 29 €, Small Business 199 €, Business 690 € je Jahr. Reservierung jetzt per E-Mail, keine Zahlung vor v1.0.0; die Lizenz wird zum Release ausgestellt.
+
+### Begründung
+
+- AGPL: Der Preis muss unter dem Aufwand bleiben, die Grenze herauszupatchen. Bei 3 bis 4 € im Monat forkt niemand, bei 20 € im Monat veröffentlicht jemand einen „unbegrenzten“ Fork.
+- Bezahlt werden signierte Pakete, Updates und Support; die Grenze ist nur der Auslöser.
+- Nur Jahrespreise: Monatsgebühren fressen bei kleinen Beträgen sich selbst auf.
+
+### Offene Punkte
+
+- Zahlungsanbieter als Merchant of Record (EU-OSS-Umsatzsteuer, Rechnungen), zum Beispiel Paddle oder Lemon Squeezy mit etwa 5 % plus Gebühr.
+- Ablauf eines Abonnements: Rückfall auf Free mit 1 TB, ohne Datenverlust; ein Restore bleibt immer möglich (passt zur Ausnahme für Restore, Verify, Copy, Migrate und Admin in der Prüfung vor dem Jobstart).
+
+### Nicht überprüft
+
+Die Vergleichspreise stammen aus dem Gedächtnis der GUI-Sitzung und sind nicht belegt: restic und borg frei, Acronis Home etwa 50 bis 90 €/Jahr, Veeam frei bis 10 Workloads, Bareos-Subscriptions einige hundert bis tausende € im Jahr.
