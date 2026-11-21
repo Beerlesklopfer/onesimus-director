@@ -78,6 +78,8 @@ where
             Ok((stream, peer_addr)) => {
                 debug!("new connection from {peer_addr}");
                 stream.set_nonblocking(false).ok();
+                // small BNET frames must not wait for a delayed ACK (about 45 ms per message)
+                stream.set_nodelay(true).ok();
 
                 let session_id = next_session;
                 next_session += 1;

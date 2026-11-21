@@ -112,6 +112,12 @@ fn director_cost_idle_running_and_queued() {
     let times = command_times(&rig, "version");
     report("1 job running, `version`", &delta(&before, &cpu_by_thread(pid)), times);
 
+    // The FD's own answer time: `status client=` asks the same FD with the
+    // same command as the progress query of `status dir` (S-54).
+    let before = cpu_by_thread(pid);
+    let times = command_times(&rig, "status client=vfd");
+    report("1 job running, `status client=vfd`", &delta(&before, &cpu_by_thread(pid)), times);
+
     let queued = [rig.run_job("VBackup").ok(), rig.run_job("VBackup").ok()];
     eprintln!("queued behind it: {queued:?}");
     std::thread::sleep(Duration::from_secs(2));

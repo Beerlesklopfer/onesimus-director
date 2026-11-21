@@ -58,6 +58,9 @@ pub fn query_fd_status(
         Err(e) => return fail(client_name, &format!("Connect to {addr} failed: {e}")),
     };
     stream.set_read_timeout(Some(Duration::from_secs(30))).ok();
+    // BNET sends many small frames: without TCP_NODELAY every request waits for
+    // the peer's delayed ACK (about 45 ms each, S-54)
+    stream.set_nodelay(true).ok();
 
     // 2. TLS-PSK handshake FIRST (Bareos 18.2+ requirement)
     // Identity format: "R_DIRECTOR\x1e<name>" with Record Separator
@@ -203,6 +206,9 @@ pub(crate) fn connect_fd_with_timeout(address: &str, port: u16, password: &str, 
     let stream = TcpStream::connect_timeout(&socket, Duration::from_secs(5))
         .map_err(|e| format!("connect: {e}"))?;
     stream.set_read_timeout(read_timeout).map_err(|e| e.to_string())?;
+    // BNET sends many small frames: without TCP_NODELAY every request waits for
+    // the peer's delayed ACK (about 45 ms each, S-54)
+    stream.set_nodelay(true).ok();
     stream.set_write_timeout(Some(Duration::from_secs(15))).map_err(|e| e.to_string())?;
     let stream = tls_psk::psk_connect(stream, &format!("R_DIRECTOR\x1e{director_name}"),
         &tls_psk::password_to_psk(password)).map_err(|e| format!("TLS-PSK: {e}"))?;
@@ -316,6 +322,9 @@ fn connect_fd_mode(address: &str, port: u16, password: &str, director_name: &str
     let stream = TcpStream::connect_timeout(&socket, Duration::from_secs(5))
         .map_err(|e| format!("connect: {e}"))?;
     stream.set_read_timeout(Some(Duration::from_secs(15))).map_err(|e| e.to_string())?;
+    // BNET sends many small frames: without TCP_NODELAY every request waits for
+    // the peer's delayed ACK (about 45 ms each, S-54)
+    stream.set_nodelay(true).ok();
     stream.set_write_timeout(Some(Duration::from_secs(15))).map_err(|e| e.to_string())?;
     let (stream, cipher) = match mode {
         HandshakeMode::TlsFirst => {
