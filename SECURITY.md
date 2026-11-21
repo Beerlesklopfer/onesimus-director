@@ -45,6 +45,11 @@ backup volume that holds data you cannot lose.
 Actively exploited vulnerabilities and severe incidents are reported to the
 authorities as Article 14 of the Cyber Resilience Act requires.
 
+Each release comes with a software bill of materials (SBOM) for `odir`, `ofd`
+and `oconsole` in CycloneDX 1.5 (JSON): attached to the release and to the
+build artefact of every CI run, generated from the same state and features as
+the packages.
+
 ## Scope
 
 In scope, for example:

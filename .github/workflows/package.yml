@@ -114,7 +114,7 @@ jobs:
           curl -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal --default-toolchain stable
           echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
           # python3: Versionsnummer; cargo-deb: der Paketjob ist ein frischer Container
-          "$HOME/.cargo/bin/cargo" install cargo-deb --locked
+          "$HOME/.cargo/bin/cargo" install cargo-deb cargo-cyclonedx --locked
 
       - name: Checkout
         uses: actions/checkout@v4
@@ -154,6 +154,19 @@ jobs:
           done
           ls -l dist
 
+      # Software-Stückliste (CycloneDX 1.5, JSON) je Programm, aus demselben
+      # Stand und mit denselben Features wie die Pakete; CRA Anhang I Teil II
+      # Nr. 1. Sie liegt neben den Paketen im Artefakt und im Release.
+      - name: SBOM
+        run: |
+          cargo cyclonedx --format json --spec-version 1.5 --describe binaries \
+            --no-default-features --features oconsole/mcp-production
+          mkdir -p dist/sbom
+          for p in odir ofd oconsole; do
+            cp "crates/$p/${p}_bin.cdx.json" "dist/sbom/$p.cdx.json"
+          done
+          ls -l dist/sbom
+
       - name: Artefakt
         uses: actions/upload-artifact@v4
         with:
@@ -176,4 +189,4 @@ jobs:
           }
           gh release view "${GITHUB_REF_NAME}" >/dev/null 2>&1 \
             || gh release create "${GITHUB_REF_NAME}" --title "${GITHUB_REF_NAME}" --generate-notes
-          gh release upload "${GITHUB_REF_NAME}" dist/*.deb --clobber
+          gh release upload "${GITHUB_REF_NAME}" dist/*.deb dist/sbom/*.json --clobber

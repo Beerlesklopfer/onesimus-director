@@ -48,3 +48,6 @@ bareos-dir.d.tar
 .claude/
 __pycache__/
 /oconsole.conf
+
+# cargo-cyclonedx schreibt neben jede Cargo.toml (CI sammelt sie in dist/sbom)
+*.cdx.json
