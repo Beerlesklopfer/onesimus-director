@@ -14,7 +14,7 @@
 //! Ablauf:
 //!
 //! 1. Eine Wegwerf-Plugin-CA (Ed25519-Wurzel und -Generation, RSA-4096-Signierer
-//!    mit den Grants `org.onesimus.openldap`, `file.read`, `file.write`,
+//!    mit den Grants `io.onesimus.openldap`, `file.read`, `file.write`,
 //!    `openldap.read`, `openldap.write`) entsteht im Speicher; nur die
 //!    öffentlichen Zertifikate landen in `<work>/ca`. Kein privater Schlüssel
 //!    wird geschrieben.
@@ -57,7 +57,7 @@ const FD_PASSWORD: &str = "ldap-o7-fd-pw";
 /// Longest time one job may take (debug ofd, the WASM is compiled per job).
 const JOB_TIMEOUT: Duration = Duration::from_secs(600);
 /// Plugin id the signing certificate grants.
-const PLUGIN_ID: &str = "org.onesimus.openldap";
+const PLUGIN_ID: &str = "io.onesimus.openldap";
 /// Capabilities of the bundle (as the package README names them).
 const CAPABILITIES: [&str; 4] = ["file.read", "file.write", "openldap.read", "openldap.write"];
 /// The plugin line of both FileSets.
@@ -716,7 +716,7 @@ fn end_to_end(rig: &Rig, work: &Work, kind: Kind) -> u32 {
     for l in &audit_lines {
         eprintln!("O7 7.7 [{name}]:   {l}");
     }
-    check(rig, restore_lines.iter().any(|l| l.contains("restoring online through org.onesimus.openldap")), "online restore names the plugin id");
+    check(rig, restore_lines.iter().any(|l| l.contains("restoring online through io.onesimus.openldap")), "online restore names the plugin id");
     id
 }
 

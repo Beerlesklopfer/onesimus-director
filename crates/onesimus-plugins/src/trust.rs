@@ -321,7 +321,7 @@ mod tests {
     #[test]
     fn grants_roundtrip_and_strict_parsing() {
         let grants = Grants {
-            plugin_ids: ["org.onesimus.postgresql".into()].into(),
+            plugin_ids: ["io.onesimus.postgresql".into()].into(),
             capabilities: ["file.read".into(), "postgresql.read".into()].into(),
         };
         let der = grants.to_der();

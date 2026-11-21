@@ -314,7 +314,7 @@ fn contract_versions_one_and_two_are_accepted() {
     }
 }
 
-/// Podman grants are bound to org.onesimus.podman (V-11, user decision
+/// Podman grants are bound to io.onesimus.podman (V-11, user decision
 /// 19.11.2026), even when the certificate grants them to another plugin
 /// id, and need contract 2.
 #[test]
@@ -392,9 +392,9 @@ fn prepare_external_openssl_signature_assemble_round_trip() {
     let dir = tmp("roundtrip");
     let ca = TestCa::shared();
     let key = rsa4096();
-    let leaf = ca.leaf(key, &grants(&["org.onesimus.example"], &["file.read"]), 100, testca::FOREVER);
+    let leaf = ca.leaf(key, &grants(&["io.onesimus.example"], &["file.read"]), 100, testca::FOREVER);
     let request = signing::PrepareRequest {
-        plugin_id: "org.onesimus.example".into(),
+        plugin_id: "io.onesimus.example".into(),
         version: "1.2.3".into(),
         capabilities: vec!["file.read".into()],
         native: Default::default(),
@@ -431,9 +431,9 @@ fn prepare_external_openssl_signature_assemble_round_trip() {
 #[test]
 fn prepare_refuses_what_the_certificate_does_not_grant() {
     let ca = TestCa::shared();
-    let leaf = ca.leaf(rsa4096(), &grants(&["org.onesimus.example"], &["file.read"]), 100, testca::FOREVER);
+    let leaf = ca.leaf(rsa4096(), &grants(&["io.onesimus.example"], &["file.read"]), 100, testca::FOREVER);
     let mut request = signing::PrepareRequest {
-        plugin_id: "org.onesimus.example".into(),
+        plugin_id: "io.onesimus.example".into(),
         version: "1".into(),
         capabilities: vec!["postgresql.read".into()],
         native: Default::default(),
@@ -444,11 +444,11 @@ fn prepare_refuses_what_the_certificate_does_not_grant() {
     let der = leaf.to_der().unwrap();
     assert!(signing::prepare(&component(), &der, &request).unwrap_err().contains("postgresql.read"));
     request.capabilities.clear();
-    request.plugin_id = "org.onesimus.other".into();
+    request.plugin_id = "io.onesimus.other".into();
     assert!(signing::prepare(&component(), &der, &request).is_err());
-    request.plugin_id = "org.onesimus.example".into();
+    request.plugin_id = "io.onesimus.example".into();
     assert!(signing::prepare(b"not wasm", &der, &request).is_err());
-    let small = ca.leaf(&testca::rsa(2048), &grants(&["org.onesimus.example"], &[]), 100, testca::FOREVER);
+    let small = ca.leaf(&testca::rsa(2048), &grants(&["io.onesimus.example"], &[]), 100, testca::FOREVER);
     assert!(signing::prepare(&component(), &small.to_der().unwrap(), &request).unwrap_err().contains("4096"));
     signing::prepare(&component(), &der, &request).unwrap();
 }

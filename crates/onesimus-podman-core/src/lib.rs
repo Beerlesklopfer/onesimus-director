@@ -69,7 +69,7 @@ pub mod positive;
 pub mod sanitize;
 
 /// The plugin id every Podman grant and import is bound to (V-11).
-pub const PLUGIN_ID: &str = "org.onesimus.podman";
+pub const PLUGIN_ID: &str = "io.onesimus.podman";
 
 /// Largest frame between host and broker (4-byte length + message).
 pub const MAX_FRAME: usize = 2 * 1024 * 1024;

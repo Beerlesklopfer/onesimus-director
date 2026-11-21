@@ -8,7 +8,7 @@
 //! (`onesimus_podman_core::line`), the account must be released in the
 //! root-owned account policy, the grants the line needs must be in the
 //! verified manifest, and the Podman imports are linked only for the
-//! plugin id `org.onesimus.podman` with contract 2 (V-11, fixed in this
+//! plugin id `io.onesimus.podman` with contract 2 (V-11, fixed in this
 //! code in addition to `onesimus_plugins::verify`). Rootless lines get a
 //! broker as the account in a root-owned user namespace
 //! (`broker::launch_in_userns`); `user=root` gets the rootful backend in
@@ -401,7 +401,7 @@ impl BrokerPort for PodmanPort {
 pub fn check_line(manifest: &onesimus_plugins::Manifest, line: &PluginLine, files: &HostFiles)
     -> Result<(PodmanLine, AccountEntry), PluginError> {
     if manifest.plugin_id != onesimus_plugins::PODMAN_PLUGIN_ID || manifest.api_version < onesimus_plugins::API_VERSION_SOURCE_REF {
-        return Err(plan("the Podman imports are bound to org.onesimus.podman with contract 2"));
+        return Err(plan("the Podman imports are bound to io.onesimus.podman with contract 2"));
     }
     let parsed = PodmanLine::parse(&line.options).map_err(plan)?;
     if let Some(g) = parsed.missing_grant(&manifest.capabilities) {
@@ -501,7 +501,7 @@ pub fn unit_show_as_account(uid: u32, gid: u32, runtime: &Path, units: &[String]
     Ok(out.stdout)
 }
 
-/// `podman.inventory` granted to org.onesimus.podman: check the line, start
+/// `podman.inventory` granted to io.onesimus.podman: check the line, start
 /// the broker (rootless) or the rootful backend, confirm the engine.
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn prepare(manifest: &onesimus_plugins::Manifest, line: &PluginLine, plugin_dir: &Path, triplet: &str,

@@ -302,7 +302,7 @@ pub(crate) fn prepare_broker_for(resolved: &Resolved, line: &PluginLine, plugin_
     let manifest = verified.manifest();
     let has = |c: &str| manifest.capabilities.iter().any(|m| m == c);
     if has(onesimus_plugins::wasm::PODMAN_INVENTORY) {
-        // Fixed binding (V-11): only org.onesimus.podman with contract 2.
+        // Fixed binding (V-11): only io.onesimus.podman with contract 2.
         let files = crate::podman_port::HostFiles::system();
         crate::podman_port::prepare(manifest, line, plugin_dir, triplet, chunk, owner, top, context, &files).map(Some)
     } else if has(POSTGRESQL_READ) && context.operation == pb::JobOperation::Restore {

@@ -24,7 +24,7 @@ nativer Broker als Instanzbenutzer, nie als root, der Host prüft jede Anfrage.
 | E-1 | Zugriff | `slapcat` über den eigenen signierten Broker `onesimus-ldap-broker`, der als Instanzbenutzer (`openldap`) läuft, nie als root. **Kein Online-Lesen über ldapi**, kein LDAP-Protokoll im Broker. |
 | E-2 | Entfernte Server | nicht unterstützt; `ofd` läuft auf dem LDAP-Host (BgLage: dort installieren). |
 | E-3 | Passwörter | keine in Plugin-Zeilen. `ofd` **lehnt** eine `openldap`-Zeile mit geheimem Schlüssel (`password=`, `bind_pw=`, `credentials=`, …) ab, statt sie nur zu maskieren. |
-| E-4 | Namen | Plugin-ID `org.onesimus.openldap`, Capabilities `openldap.read` und `openldap.write` (siehe unten); vor dem Ausstellen des G1-Signierzertifikats in `signer.cnf`. |
+| E-4 | Namen | Plugin-ID `io.onesimus.openldap`, Capabilities `openldap.read` und `openldap.write` (siehe unten); vor dem Ausstellen des G1-Signierzertifikats in `signer.cnf`. |
 | E-6 | Form | **eine LDIF-Datei je Datenbank**, kein Eintragsbaum. cn=config bei slapd.d über `slapcat -n 0`, Datenbanken immer über `slapcat -b <suffix>` (die Nummern verschieben sich, L-11). |
 | E-7 | Online-Restore | nur `slapadd` in ein **neues, leeres Ziel**, das der Host anlegt; der Host schreibt `olcDbDirectory`/`directory` auf das Ziel um. Nie in einen laufenden Produktivserver, kein modify/delete. |
 | E-8 | Konfigurationsarten | Online-Konfiguration (slapd.d/cn=config) und Datei-Konfiguration (slapd.conf) gleichwertig, Erkennung automatisch. Restore stellt die gesicherte Art wieder her, keine Umwandlung. |
@@ -169,7 +169,7 @@ world openldap-plugin { include plugin; import openldap; import openldap-restore
 
 ```ini
 [onesimus_plugin_ids]
-p3 = UTF8String:org.onesimus.openldap
+p3 = UTF8String:io.onesimus.openldap
 [onesimus_capabilities]
 c4 = UTF8String:openldap.read
 c5 = UTF8String:openldap.write
@@ -352,7 +352,7 @@ Test: `crates/onesimus-rig/tests/ldap_o7.rs` (ignoriert), Podman-Treiber
 (Dauer 85 s ohne Image-Bau; das WASM-Plugin muss gebaut sein).
 
 Aufbau: Wegwerf-Plugin-CA im Speicher (Ed25519-Wurzel und Generation
-„O7 throwaway“, RSA-4096-Signierer mit den Grants `org.onesimus.openldap`,
+„O7 throwaway“, RSA-4096-Signierer mit den Grants `io.onesimus.openldap`,
 `file.read`, `file.write`, `openldap.read`, `openldap.write`); nur die
 Zertifikate liegen auf der Platte, kein privater Schlüssel. `ofd` wird damit
 in `target/ldap-o7` gebaut (nie `target/debug`/`target/release`) und mit
@@ -366,14 +366,14 @@ ofd auf `127.0.0.2:39461/39462`, slapd nur auf ldapi
 
 | Punkt | Ergebnis | Messung |
 | --- | --- | --- |
-| 7.1 Pakete | bestanden | `dpkg -i` ofd, dann ofd-plugin-openldap: postinst „added Plugin Names = "openldap" to …/client/myself.conf“, Zeile `Plugin Names = "openldap"   # ofd-plugin-openldap`, `ofd -t` gut; Bundle, Broker und jedes Verzeichnis bis `/` sowie Policy uid 0 und nicht gruppen-/weltschreibbar (644/755/555); `ofd --check-plugin`: „Plugin org.onesimus.openldap 1.0.0 (suite 0.2.0, Onesimus Plugin Signing O7 throwaway): X.509, signature, manifest and 1 native part(s) for x86_64-linux-gnu OK; not initialized (needs a broker)“ |
+| 7.1 Pakete | bestanden | `dpkg -i` ofd, dann ofd-plugin-openldap: postinst „added Plugin Names = "openldap" to …/client/myself.conf“, Zeile `Plugin Names = "openldap"   # ofd-plugin-openldap`, `ofd -t` gut; Bundle, Broker und jedes Verzeichnis bis `/` sowie Policy uid 0 und nicht gruppen-/weltschreibbar (644/755/555); `ofd --check-plugin`: „Plugin io.onesimus.openldap 1.0.0 (suite 0.2.0, Onesimus Plugin Signing O7 throwaway): X.509, signature, manifest and 1 native part(s) for x86_64-linux-gnu OK; not initialized (needs a broker)“ |
 | 7.2 Daemon | bestanden | ofd mit `ExecStart` der Unit (+`-d 100`) im Container; `status client=ldap-olc-fd`: TLS 1.3, „ldap-olc-fd Version: 25.1.2+onesimus.0.2.0“ |
 | 7.3 Backup | bestanden | über die Konsole `run job=…`: olc JobId 1 `T`, conf JobId 4 `T`, JobErrors 0 |
 | 7.4 Katalog | bestanden | FileSetText enthält `Plugin = "openldap:instance=main"`; `list files`: olc 8 Einträge unter `/@openldap/main/` (`_info.json`, `config/cn=config.ldif`, `config/files/etc/default/slapd`, beide `data/*.ldif`, 3 Verzeichnisse), conf 13 (+7 aus `File = /etc/ldap/tls`); JobFiles 8 bzw. 20 = Einträge; JobBytes 143 271 bzw. 156 066 ≥ LDIF beider Datenbanken (97 580 bzw. 97 480) |
 | 7.5 Lecktest | bestanden | rootpw-Hash (roh und Base64), `annaPass1` (roh und Base64), Proxy-Passwort (`admin123` bzw. `MetaSecret-4711`), `credentials=`: in keinem Path-/File-Namen, nicht in der Tabelle Log, nicht im ganzen `pg_dump --data-only` des Katalogs, nicht in job.log, audit.log, odir-Log und ofd-Log (`-d 100`, 1,8 MB). Gegenprobe: Proxy-Passwort und `credentials=` stehen auf dem Volume |
 | 7.6a Restore in Dateien | bestanden | `restore … where=/root/o7-files all done yes` → `T`; beide Daten-LDIFs per `cmp` byte-gleich mit `slapcat -b`, cn=config mit `slapcat -n 0` (olc), slapd.conf/Schema/`/etc/default/slapd` mit den Originalen (conf); Modus 600, root |
 | 7.6b Online-Restore | bestanden | `restore … pluginoptions=openldap:restore_mode=online all done yes` → `T`, Ziel `/var/lib/onesimus-ldap-restore/<JobId>`; zweiter slapd auf dem Ziel, `ldapwhoami` anna/`annaPass1` gelingt; beide Datenbanken (sortiert) gleich; `data.mdb` sha256 vorher = nachher |
-| 7.7 Audit/Joblog | **nicht bestanden (Lücke)** | Das Backup-Joblog enthält **keine** Zeile zu Plugin-Laden, Signaturprüfung, Broker-Start oder -Ende; ebenso nicht das ofd-Log mit `-d 100`. Vorhanden nur beim Online-Restore: „restoring online through org.onesimus.openldap“ und „OpenLDAP restored online into …“. Das odir-Audit-Log (`Auditing = yes`) nennt nur Konsolenbefehle (`run job=…`, `restore … pluginoptions=…`). Fehlschläge erscheinen dagegen als Fatal error im Joblog (7.8) |
+| 7.7 Audit/Joblog | **nicht bestanden (Lücke)** | Das Backup-Joblog enthält **keine** Zeile zu Plugin-Laden, Signaturprüfung, Broker-Start oder -Ende; ebenso nicht das ofd-Log mit `-d 100`. Vorhanden nur beim Online-Restore: „restoring online through io.onesimus.openldap“ und „OpenLDAP restored online into …“. Das odir-Audit-Log (`Auditing = yes`) nennt nur Konsolenbefehle (`run job=…`, `restore … pluginoptions=…`). Fehlschläge erscheinen dagegen als Fatal error im Joblog (7.8) |
 | 7.8 Negativ | bestanden | jeweils Job `f`, Fatal error im Joblog: manipulierter Broker → „…/onesimus-ldap-broker: SHA-256 does not match the signed manifest“; Signaturbyte gekippt → „cannot load: invalid plugin signature“; Bundle einer fremden CA → „cannot load: plugin key or identity is untrusted or revoked“; Zeile aus Plugin Names entfernt + Neustart → „plugin "openldap" is not in Plugin Names“. Gegenprobe: postinst erneut, Neustart, Backup `T` |
 
 Befunde:
@@ -382,7 +382,7 @@ Befunde:
   weder Plugin-ID/Version/Signierer, noch Ergebnis der Signaturprüfung, noch
   Broker-Start/-Ende (Benutzer-ID, Exit-Status). Für ein signiertes Plugin,
   das als Instanzbenutzer Programme startet, fehlt damit die Spur im Joblog.
-  **Vorschlag, offen:** je Job eine M_INFO-Zeile „Plugin org.onesimus.openldap
+  **Vorschlag, offen:** je Job eine M_INFO-Zeile „Plugin io.onesimus.openldap
   1.0.0 verified (signer …, suite …), broker started as uid N“ und beim Ende
   der Exit-Status; ggf. zusätzlich M_AUDIT.
 - **B-2 (Paket):** `ofd-plugin-openldap` hängt von `iproute2` ab (`ss` im

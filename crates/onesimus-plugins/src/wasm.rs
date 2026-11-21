@@ -137,7 +137,7 @@ pub const POSTGRESQL_READ: &str = "postgresql.read";
 pub const OPENLDAP_READ: &str = "openldap.read";
 pub const OPENLDAP_WRITE: &str = "openldap.write";
 /// The Podman grants (docs/plans/PODMAN-PLUGIN.md, "Grants"); bound to the
-/// plugin id org.onesimus.podman by `verify`.
+/// plugin id io.onesimus.podman by `verify`.
 pub const PODMAN_INVENTORY: &str = "podman.inventory";
 /// Image metadata and blobs, read by the host.
 pub const PODMAN_IMAGE_READ: &str = "podman.image.read";

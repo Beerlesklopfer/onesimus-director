@@ -153,7 +153,7 @@ pub fn signed_plugin(dir: &Path, name: &str, script: &Script) -> Resolved {
 }
 
 /// A scripted guest signed for `plugin_id` (not `test.<name>`) with these
-/// capabilities, e.g. org.onesimus.podman with contract 2.
+/// capabilities, e.g. io.onesimus.podman with contract 2.
 pub fn signed_plugin_as(dir: &Path, name: &str, plugin_id: &str, caps: &[&str], script: &Script) -> Resolved {
     let now = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs();
     let bundle = testca::signed_bundle(component(script), plugin_id, caps, Default::default(), now);

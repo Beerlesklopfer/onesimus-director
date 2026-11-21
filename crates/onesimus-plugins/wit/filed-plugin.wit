@@ -63,7 +63,7 @@ world openldap-plugin {
 
 /// The Podman broker and host (proto/podman_broker.proto,
 /// docs/plans/PODMAN-PLUGIN.md): linked only for the plugin id
-/// org.onesimus.podman with contract 2 and the grant "podman.inventory".
+/// io.onesimus.podman with contract 2 and the grant "podman.inventory".
 /// The host computes the allowed object set and filters every answer
 /// through a positive list; stop, mask and restart are host-only.
 interface podman {

@@ -35,7 +35,7 @@ pub const API_VERSION_SOURCE_REF: u32 = 2;
 /// (V-11, user decision 19.11.2026): a suite certificate grants its
 /// capabilities to each of its plugin ids, so without this fixed binding any
 /// other signed plugin could request `podman.rootful`.
-pub const PODMAN_PLUGIN_ID: &str = "org.onesimus.podman";
+pub const PODMAN_PLUGIN_ID: &str = "io.onesimus.podman";
 /// Prefix of every Podman grant (`podman.inventory`, `podman.rootful`, ...).
 pub const PODMAN_GRANT_PREFIX: &str = "podman.";
 
@@ -220,7 +220,7 @@ pub fn verify(
     {
         return Err(VerifyError::Compatibility);
     }
-    // Podman grants: only org.onesimus.podman, only with contract 2 (its
+    // Podman grants: only io.onesimus.podman, only with contract 2 (its
     // file entries carry host scan references).
     if manifest.capabilities.iter().any(|c| is_podman_grant(c)) {
         if manifest.plugin_id != PODMAN_PLUGIN_ID {

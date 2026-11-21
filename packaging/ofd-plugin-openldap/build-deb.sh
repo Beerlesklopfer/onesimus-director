@@ -3,7 +3,7 @@
 #
 # Input is an already signed bundle; this script never sees a private key.
 # Signing happens before (docs/plans/SIGNIER-INFRASTRUKTUR.md): plugin id
-# org.onesimus.openldap, capabilities file.read, file.write, openldap.read,
+# io.onesimus.openldap, capabilities file.read, file.write, openldap.read,
 # openldap.write, native part openldap/onesimus-ldap-broker.
 #
 #   packaging/ofd-plugin-openldap/build-deb.sh <openldap.pb> <onesimus-ldap-broker> [outdir]

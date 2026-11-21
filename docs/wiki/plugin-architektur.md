@@ -60,7 +60,7 @@ Ein Bundle (`SignedPluginArtifact`, [Protobuf](../../proto/filed_plugin.proto)) 
 ```json
 {
   "schema_version": 3,
-  "plugin_id": "org.onesimus.postgresql",
+  "plugin_id": "io.onesimus.postgresql",
   "version": "1.0.0",
   "api_version": 1,
   "artifact_sha256": "<SHA-256 der exakten Komponenten-Bytes>",
@@ -89,7 +89,7 @@ privaten Schlüssel sieht:
 
 ```bash
 cargo run -p onesimus-plugins --example sign-component -- prepare --component plugin.wasm \
-    --cert signer.pem --plugin-id org.onesimus.postgresql --version 1.0.0 \
+    --cert signer.pem --plugin-id io.onesimus.postgresql --version 1.0.0 \
     --capability file.read --capability postgresql.read --out manifest.json
 openssl dgst -sha256 -sign handle:0x81000010 -provider tpm2 -provider default \
     -sigopt rsa_padding_mode:pss -sigopt rsa_pss_saltlen:digest -out manifest.sig manifest.json

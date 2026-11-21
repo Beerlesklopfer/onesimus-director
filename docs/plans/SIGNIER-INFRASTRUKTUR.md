@@ -192,7 +192,7 @@ Manifest Schema 3 (Beispiel):
 ```json
 {
   "schema_version": 3,
-  "plugin_id": "org.onesimus.postgresql",
+  "plugin_id": "io.onesimus.postgresql",
   "version": "1.0.0",
   "api_version": 1,
   "artifact_sha256": "…",
@@ -303,9 +303,9 @@ version      = INTEGER:1
 plugin_ids   = SEQUENCE:onesimus_plugin_ids
 capabilities = SEQUENCE:onesimus_capabilities
 [onesimus_plugin_ids]
-p1 = UTF8String:org.onesimus.example-tree
-p2 = UTF8String:org.onesimus.postgresql
-p3 = UTF8String:org.onesimus.openldap
+p1 = UTF8String:io.onesimus.example-tree
+p2 = UTF8String:io.onesimus.postgresql
+p3 = UTF8String:io.onesimus.openldap
 [onesimus_capabilities]
 c1 = UTF8String:file.read
 c2 = UTF8String:file.write
@@ -383,7 +383,7 @@ W=target/plugins/wasm32-wasip2/release/onesimus_plugin_postgresql.wasm
 
 cargo run -p onesimus-plugins --example sign-component -- prepare \
     --component "$W" --cert signer.pem \
-    --plugin-id org.onesimus.postgresql --version 1.0.0 \
+    --plugin-id io.onesimus.postgresql --version 1.0.0 \
     --capability file.read --capability postgresql.read \
     --native x86_64-linux-gnu:postgresql/onesimus-pg-broker=target/release/onesimus-pg-broker \
     --out manifest.json            # --suite: Vorgabe ist die Suite dieses Arbeitsstands
@@ -418,7 +418,7 @@ ONESIMUS_PLUGIN_CA=/pfad/zu/plugin-ca-g1 cargo build --release -p ofd
     --plugin-policy /etc/onesimus/plugin-policy.json
 ```
 
-Erwartet: `Plugin org.onesimus.postgresql 1.0.0 (suite 0.2.0, Onesimus Plugin
+Erwartet: `Plugin io.onesimus.postgresql 1.0.0 (suite 0.2.0, Onesimus Plugin
 Signing G1): X.509, signature, manifest and 1 native part(s) for
 x86_64-linux-gnu OK; not initialized (needs a broker)`. Ein Build ohne die
 Variable meldet „built without ONESIMUS_PLUGIN_CA“ und lädt kein Plugin.
@@ -434,7 +434,7 @@ openssl x509 -in signer.pem -outform DER | sha256sum                            
 
 - **Sofort auf den Hosts** über die lokale Policy (wirkt beim nächsten Job):
   `{"revoked_keys": ["<spki>"], "revoked_certificates": ["<zert>"],
-  "revoked_plugins": ["org.onesimus.…"]}` in `/etc/onesimus/plugin-policy.json`
+  "revoked_plugins": ["io.onesimus.…"]}` in `/etc/onesimus/plugin-policy.json`
   (root-eigen, Modus 0644).
 - **Dauerhaft** in `revoked.json` des Build-Verzeichnisses (gleiche Felder)
   und mit dem nächsten `ofd`-Release ausliefern.

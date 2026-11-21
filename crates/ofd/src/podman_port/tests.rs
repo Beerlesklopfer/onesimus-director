@@ -74,24 +74,24 @@ fn the_line_is_bound_to_the_podman_plugin_and_its_grants() {
     let d = tmp("line");
     let f = files(&d, Path::new("/srv/g"));
     let ok_line = parse_line("podman:user=forgejo:pods=*:consistency=crash").unwrap();
-    let (line, account) = check_line(&manifest("org.onesimus.podman", 2, ALL), &ok_line, &f).unwrap();
+    let (line, account) = check_line(&manifest("io.onesimus.podman", 2, ALL), &ok_line, &f).unwrap();
     assert_eq!((line.consistency, account.name.as_str()), (Consistency::Crash, "forgejo"));
     let refused = |m: onesimus_plugins::Manifest, l: &str| check_line(&m, &parse_line(l).unwrap(), &f).unwrap_err().to_string();
     // Another plugin id with the same grants, or contract 1: never linked (V-11).
-    assert!(refused(manifest("org.onesimus.other", 2, ALL), "podman:user=forgejo:pods=*:consistency=crash").contains("bound"));
-    assert!(refused(manifest("org.onesimus.podman", 1, ALL), "podman:user=forgejo:pods=*:consistency=crash").contains("bound"));
+    assert!(refused(manifest("io.onesimus.other", 2, ALL), "podman:user=forgejo:pods=*:consistency=crash").contains("bound"));
+    assert!(refused(manifest("io.onesimus.podman", 1, ALL), "podman:user=forgejo:pods=*:consistency=crash").contains("bound"));
     // Missing grants are plan errors, never a silent fallback.
-    let no_rootful = manifest("org.onesimus.podman", 2, &["podman.inventory", "podman.volume.read"]);
+    let no_rootful = manifest("io.onesimus.podman", 2, &["podman.inventory", "podman.volume.read"]);
     assert!(refused(no_rootful.clone(), "podman:user=root:quadlet=x:consistency=crash").contains("podman.rootful"));
     assert!(refused(no_rootful.clone(), "podman:user=forgejo:pods=*").contains("podman.lifecycle"));
-    assert!(refused(manifest("org.onesimus.podman", 2, &["podman.inventory"]), "podman:user=forgejo:pods=*:consistency=crash")
+    assert!(refused(manifest("io.onesimus.podman", 2, &["podman.inventory"]), "podman:user=forgejo:pods=*:consistency=crash")
         .contains("podman.volume.read"));
     // consistency=stop needs P2; an unreleased account is a plan error.
-    assert!(refused(manifest("org.onesimus.podman", 2, ALL), "podman:user=forgejo:pods=*").contains("P2"));
-    assert!(refused(manifest("org.onesimus.podman", 2, ALL), "podman:user=www-data:pods=*:consistency=crash").contains("not released"));
+    assert!(refused(manifest("io.onesimus.podman", 2, ALL), "podman:user=forgejo:pods=*").contains("P2"));
+    assert!(refused(manifest("io.onesimus.podman", 2, ALL), "podman:user=www-data:pods=*:consistency=crash").contains("not released"));
     // A writable policy is not trusted.
     std::fs::set_permissions(d.join("accounts.json"), std::fs::Permissions::from_mode(0o666)).unwrap();
-    assert!(check_line(&manifest("org.onesimus.podman", 2, ALL), &ok_line, &f).is_err());
+    assert!(check_line(&manifest("io.onesimus.podman", 2, ALL), &ok_line, &f).is_err());
     std::fs::remove_dir_all(&d).unwrap();
 }
 
@@ -151,7 +151,7 @@ fn port(d: &Path, g: &Path) -> PodmanPort {
     });
     let volume = serde_json::json!([{"Name": "v", "Driver": "local", "Options": {}, "Mountpoint": g.join("volumes/v/_data")}]);
     let f = files(d, g);
-    let (line, account) = check_line(&manifest("org.onesimus.podman", 2, ALL), &parse_line("podman:user=forgejo:pods=*:consistency=crash").unwrap(), &f).unwrap();
+    let (line, account) = check_line(&manifest("io.onesimus.podman", 2, ALL), &parse_line("podman:user=forgejo:pods=*:consistency=crash").unwrap(), &f).unwrap();
     let domain = Domain { uid_map: IdMap::rootless(uid, &[(100000, 65536)]).unwrap(), gid_map: IdMap::rootless(gid, &[(100000, 65536)]).unwrap(), rootless: true };
     PodmanPort::new(Box::new(FakeBackend { info, volume }), line, account, domain, podman_scan::open_graphroot(g).unwrap(), &manifest("", 2, ALL).capabilities)
 }
@@ -237,7 +237,7 @@ fn backup(session: Session) -> (i32, Vec<u8>, Vec<String>) {
     (ok, sd.into_inner().into_inner(), msgs.take_queued())
 }
 
-/// A podman test plugin (org.onesimus.podman, contract 2) running `script`.
+/// A podman test plugin (io.onesimus.podman, contract 2) running `script`.
 fn podman_session(d: &Path, script: Script, scans: Option<SharedScans>, job_id: u64) -> Session {
     let resolved = signed_plugin_as(d, "podman", onesimus_plugins::PODMAN_PLUGIN_ID, &["file.read", "podman.inventory"],
         &Script { interface_version: 2, ..script });
@@ -374,7 +374,7 @@ impl TapMkdir for PathBuf {
 fn contract_one_and_two_plugins_load_side_by_side() {
     let d = tmp("side");
     let pg_dir = d.join("pg").tap_mkdir();
-    let pg = signed_plugin_as(&pg_dir, "postgresql", "org.onesimus.postgresql", &["file.read"], &Script {
+    let pg = signed_plugin_as(&pg_dir, "postgresql", "io.onesimus.postgresql", &["file.read"], &Script {
         next: vec![file_step(b"@postgresql/main/a.dump", 2), complete_step()],
         read: vec![data_step(b"pg", true)],
         ..Default::default()
@@ -393,7 +393,7 @@ fn contract_one_and_two_plugins_load_side_by_side() {
     assert!(s1.windows(2).any(|w| w == b"pg"));
     // Contract 1 with a scan reference: refused by the host's contract check.
     let v1_dir = d.join("v1").tap_mkdir();
-    let v1 = signed_plugin_as(&v1_dir, "postgresql", "org.onesimus.postgresql", &["file.read"], &Script {
+    let v1 = signed_plugin_as(&v1_dir, "postgresql", "io.onesimus.postgresql", &["file.read"], &Script {
         next: vec![ref_step(b"/@x/y", fpb::FileKind::Regular, &[1; 16], 1, 0o644), complete_step()],
         ..Default::default()
     });
