@@ -6,7 +6,15 @@ Stand 21.11.2026, Entwurf. Anforderung des Nutzers, übermittelt von der GUI-Sit
 >
 > wer das umgehen will, der muss programmieren
 
-Das Limit liegt also im Code von odir; AGPL-Forks, die es entfernen, sind in Ordnung. Keine Lizenzserver, keine Telemetrie.
+Das Limit liegt im Code von odir. Keine Lizenzserver, keine Telemetrie.
+
+Korrektur des Nutzers (21.11.2026): „Das ist der Zusatz der AGPL-Lizenz. Wer das umgeht, bricht die Lizenz.“ Das Limit soll also als Zusatzbedingung zur AGPL gelten.
+
+**Rechtlicher Vorbehalt (offen, vor der Umsetzung klären; keine Rechtsberatung):**
+- AGPLv3 §7 erlaubt nur bestimmte zusätzliche Bedingungen (Haftung, Namensnennung, Markenschutz …). Andere Einschränkungen gelten als „further restrictions“, die jeder Empfänger entfernen darf; §10 verbietet, sie aufzuerlegen. Ein Nutzungslimit als Lizenzbedingung wäre so eine Einschränkung.
+- Ist odir als enger Nachbau von Bareos (AGPLv3) ein abgeleitetes Werk, muss es unter der AGPLv3 der Bareos-Urheber bleiben; zusätzliche Einschränkungen gehen dann nicht.
+- Mögliche Wege: (1) AGPL ohne Zusatz, Limit nur als Voreinstellung, bezahlt wird für Lizenzdatei, Support und Pakete; (2) duale Lizenz für Teile, die nicht von Bareos abgeleitet sind; (3) Source-available-Lizenz nur für eigenen Code ohne Bareos-Anteil; (4) Markenschutz für „Onesimus“ (§7e verträglich).
+- Empfehlung: Klärung durch einen Anwalt für Open-Source-Lizenzen, insbesondere ob odir ein abgeleitetes Werk von Bareos ist. Die Technik unten ist von dieser Entscheidung unabhängig.
 
 ## Anforderung (übernommen)
 
