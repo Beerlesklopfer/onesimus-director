@@ -51,7 +51,11 @@ foreach ($r in 'acl.txt', 'emptyads.txt', 'a.txt') {
   $na = @(Get-Item -LiteralPath "$a\$r" -Stream * | ForEach-Object { $_.Stream + '=' + $(if ($_.Stream -ne ':$DATA') { Get-Content -LiteralPath "$a\$r" -Stream $_.Stream } else { '' }) } | Sort-Object)
   $nb = @(Get-Item -LiteralPath "$b\$r" -Stream * | ForEach-Object { $_.Stream + '=' + $(if ($_.Stream -ne ':$DATA') { Get-Content -LiteralPath "$b\$r" -Stream $_.Stream } else { '' }) } | Sort-Object)
   "{0,-14} sddl {1}  streams {2} ({3})" -f $r, $(if ($sa -eq $sb) { 'SAME' } else { "DIFFER`n  $sa`n  $sb" }), $(if (($na -join '|') -eq ($nb -join '|')) { 'SAME' } else { 'DIFFER' }), ($na -join ',')
+  if ($r -eq 'acl.txt' -and $sa -notmatch '\(D;;[^)]*;;;BG\)') { "source ACL of acl.txt was not set (test setup)"; $bad++ }
   if ($sa -ne $sb -or ($na -join '|') -ne ($nb -join '|')) { $bad++ }
 }
+$da = (Get-Acl -LiteralPath "$a\aclsub").Sddl; $db = (Get-Acl -LiteralPath "$b\aclsub").Sddl
+"directory aclsub: source has its own ACL: " + ($da -match '\(A;OICI;[^)]*;;;BU\)') + "; sddl " + $(if ($da -eq $db) { 'SAME' } else { 'DIFFER' })
+if ($da -ne $db) { $bad++ }
 "files compared: $files"
 "bad=$bad"

@@ -10,6 +10,8 @@ use std::os::unix::fs::OpenOptionsExt;
 use crate::attribs::*;
 #[cfg(windows)]
 use crate::platform::OsStrExt;
+#[cfg(windows)]
+use std::os::windows::fs::OpenOptionsExt;
 
 // include/baconfig.h
 #[allow(dead_code)]
@@ -431,6 +433,20 @@ pub fn create_file(
             let path = attr.ofname.clone();
             if !makepath(&path, state, msg) {
                 return Cf::Error;
+            }
+            // the security descriptor of a directory arrives as a Win32 stream
+            if attr.type_ == FT_DIREND && bareos_format::stream::is_win32_stream(attr.data_stream) {
+                crate::winfs::enable_backup_privileges();
+                let handle = std::fs::OpenOptions::new()
+                    .write(true)
+                    .access_mode(crate::winfs::RESTORE_ACCESS)
+                    .share_mode(7)
+                    .custom_flags(0x0200_0000) // FILE_FLAG_BACKUP_SEMANTICS
+                    .open(attr.ofname_path());
+                match handle {
+                    Ok(f) => return Cf::Extract(f),
+                    Err(e) => msg(M_ERROR, format!("Could not open directory {oname} to restore its security: ERR={}\n", crate::berrno::s(&e))),
+                }
             }
             Cf::Created
         }

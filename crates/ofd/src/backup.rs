@@ -480,8 +480,9 @@ impl<S: Read + Write> Backup<'_, '_, S> {
 
         let fmt = ff.statp.mode & crate::stmode::S_IFMT;
         let win32 = cfg!(windows) && is_win32_stream(data_stream);
-        let do_read = if win32 && matches!(ff.type_, FT_REG | FT_REGE) {
-            // an empty file can still have a security descriptor and streams
+        let do_read = if win32 && matches!(ff.type_, FT_REG | FT_REGE | FT_DIREND) {
+            // an empty file can still have a security descriptor and streams;
+            // a directory has its security descriptor (and no data)
             true
         } else if ff.type_ != FT_LNKSAVED && fmt == crate::stmode::S_IFREG {
             ff.statp.size > 0
