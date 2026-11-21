@@ -185,6 +185,30 @@ FD ─ Netz ─► Empfänger (schreibt) ─► /dev/shm/osd-<JobId>.ring ─┬
 - **Ausfall einer ganzen Platte bzw. eines LUN** entspricht einem Bandriss: nur ein zweiter Zweig oder eine Kopie rettet (siehe [Beschädigte Volumes](#beschädigte-volumes-bandriss-plattenschaden)). Im SAN gehört der zweite Zweig auf ein anderes Speichersystem bzw. einen anderen Standort.
 - **Status:** beschlossen, **eigene Phase nach P1** (PT, siehe [Phasen](#phasen)). Entwurf und Belege: [OSD-RECHERCHE-SPEICHER-UND-RING.md](OSD-RECHERCHE-SPEICHER-UND-RING.md), Nachtrag B. Die frühere osdfs-Skizze (Nachtrag A) ist damit ersetzt; Label mit Kopien, crc32c und das Vorwärtslesen nach Absturz bleiben übernommen.
 
+## Gesundheit der Medien (D-21, Maintainer 21.11.2026)
+
+> Die Platten (Stichwort alt) müssen gemonitort werden und ihre Gesundheit gemeldet.
+
+Gilt für Plattenbänder (lokal und im SAN), Wechselplatten, Platten unter File-Devices und echte Bandlaufwerke.
+
+- **Quellen:**
+  1. **SMART** lokaler Platten: ATA/SATA über SG_IO (ATA PASS-THROUGH), NVMe über das Health-Log, SAS über Log-Seiten; Rohwerte u. a. Reallocated/Pending/Offline-Uncorrectable Sectors, CRC-Fehler, Betriebsstunden, Temperatur, Ergebnis des Selbsttests. Erste Umsetzung über `smartctl --json` (smartmontools), später nativ.
+  2. **Eigene Zähler des Bandkerns:** Lesefehler, crc32c-Fehler, übersprungene Satzbereiche (D-17), Schreibwiederholungen, Latenz je Satz. Die gibt es auch dort, wo SMART nicht durchkommt.
+  3. **SAN-LUNs:** über iSCSI ist SMART der Platten im Speichersystem nicht sichtbar. Dort liefert das Speichersystem die Gesundheit: SNMP oder API des NAS (z. B. ASUSTOR ADM **[unbelegt]**), bzw. auf einem Linux-Target (LIO) ein kleiner osd-Agent, der SMART liest und per gRPC meldet. Die LUN-Kennung (VPD 0x83, D-20) ordnet die Werte dem Magazin zu.
+  4. **Echte Bänder:** TapeAlert (Log-Seite 0x2E) und Fehlerzähler des Laufwerks; Reinigungsbedarf.
+- **Bewertung:** je Medium `ok` / `warnung` / `kritisch` / `ausgefallen`. Warnung z. B. bei wachsenden Reallocated/Pending Sectors, Temperatur über Grenze, ersten übersprungenen Sätzen; kritisch bei SMART „FAILED“, fehlgeschlagenem Selbsttest oder steigender Fehlerrate. Grenzen einstellbar in `osd.d` (D-8, je Device bzw. Magazin).
+- **Folgen:**
+  - **Warnung:** melden, sonst nichts.
+  - **Kritisch:** Magazin nimmt keine neuen Schreibjobs mehr (Kassetten auf `Read-Only`), osd meldet es, und odir zeigt die Übersicht aus „Volume beschädigt“ (D-19) mit `dryrun`: welche Jobs liegen darauf, gibt es Kopien. Vorschlag: Daten per Copy-Job auf ein gesundes Medium ziehen.
+  - **Ausgefallen:** wie ein Bandriss (D-19).
+- **Prüflesen (Scrub):** zeitgesteuert alle Kassetten eines Magazins lesen und crc32c prüfen, mit Bandbreitengrenze und außerhalb der Backup-Fenster; dazu den SMART-Langtest anstoßen. Gerade bei alten Platten der einzige Weg, schleichenden Verfall zu sehen, bevor ein Restore ihn findet.
+- **Melden:**
+  - **Job-/Director-Meldungen** über die Messages-Ressource (E-Mail, Operator) bei jedem Zustandswechsel;
+  - **gRPC-Medien-Ereignis** (D-7) an die GUI, mit Zustand, Grund und Rohwerten (Proto mit der GUI-Sitzung abstimmen);
+  - **`status storage`** zeigt je Device bzw. Magazin den Zustand und die wichtigsten Werte; MCP/typisiert ebenso;
+  - **Verlauf** im Schema `onesimus` (Tabelle je Medium und Zeitpunkt, Migrationsschritt in bareos-orm), damit Trends erkennbar sind.
+- **Rechte:** SMART über SG_IO braucht root bzw. `CAP_SYS_RAWIO`; osd läuft dafür mit der Capability oder holt die Werte über einen kleinen Helfer.
+
 ## Beschädigte Volumes (Bandriss, Plattenschaden)
 
 Gilt für echte Bänder, Plattenbänder und Datei-Volumes.
@@ -230,7 +254,7 @@ Gilt für echte Bänder, Plattenbänder und Datei-Volumes.
 | --- | --- | --- |
 | P0 ✅ (20.11.2026) | `bareos-format` und `onesimus-daemon` als gemeinsame Crates (ofd-Gutachten §5), osd-Schnittstelle (`crates/osd`) und Daemon (`crates/osd/daemon`) trennen | ofd und odir bauen unverändert. Erledigt, siehe [P0 umgesetzt](#p0-umgesetzt-20112026) |
 | P1 ✅ (20.11.2026; Stufen 1, 2, 3) | osd als Ersatz für bareos-sd mit **einem File-Device**: Label, Mount, Append, Read, Status, CatReq, Bareos-Volume-Format. Steuer- und Datenweg über **gRPC** (odir, ofd) und BNET (bareos-dir, bareos-fd). Stufe 1: Backup über BNET, aktiver und passiver Client, Datenweg über den Ring; Stufe 2: Lesen/Restore; Stufe 3: gRPC | Testgerüst Director+FD+SD (`onesimus-rig`): Backup und Restore mit odir+ofd über gRPC und mit bareos-fd über BNET. `bls` liest das Volume. Erledigt, siehe [Stufe 1](#p1-stufe-1-umgesetzt-20112026), [Stufe 2](#p1-stufe-2-umgesetzt-20112026), [Stufe 3](#p1-stufe-3-umgesetzt-20112026); was bleibt: [Nach P1](#nach-p1-offen) |
-| PT | Plattenband v1 (D-14): Bandkern auf einer vorbelegten Datei bzw. einem Loop-Device, dann `/dev/sdX` mit `O_DIRECT\|O_EXCL` (zunächst Linux); eine Platte, kein Striping; Kassetten mit zwei Partitionen, MAM, Wechsler; Labels (D-16) mit `osd disk init` und Etikett-PDF; Weiterlesen hinter Schadstellen (D-17); Bareos-Frontend und LTFS-Plugin `libtape-osd.so`. Danach PT2: LUNs im SAN über iSCSI mit Persistent Reservations (D-20) | ohne root testbar; Export einer Kassette in eine Bandabbild- bzw. Volume-Datei besteht `bls`; `mkltfs` + `ltfs` + Dateien schreiben/lesen auf einer emulierten Kassette; kill -9 während des Schreibens verliert keinen bestätigten Satz; `update slots`/`label barcodes` liefern die Kassetten-Barcodes; fremde Platte ohne `--force` abgelehnt; eingeschleuste Schadstelle: Lesen setzt dahinter fort und meldet den Satzbereich. PT2: iSCSI-Target im Rig (LIO mit `fileio`-Backstore, eigener Netz-Namespace), zwei osd-Instanzen auf demselben LUN, die zweite wird per Reservation abgewiesen; Pfadabbruch während des Schreibens. Teilt das Bareos-Bandformat mit P6 |
+| PT | Plattenband v1 (D-14): Bandkern auf einer vorbelegten Datei bzw. einem Loop-Device, dann `/dev/sdX` mit `O_DIRECT\|O_EXCL` (zunächst Linux); eine Platte, kein Striping; Kassetten mit zwei Partitionen, MAM, Wechsler; Labels (D-16) mit `osd disk init` und Etikett-PDF; Weiterlesen hinter Schadstellen (D-17); Bareos-Frontend und LTFS-Plugin `libtape-osd.so`. Gesundheit (D-21): SMART, Zähler, Bewertung, Meldung, Scrub. Danach PT2: LUNs im SAN über iSCSI mit Persistent Reservations (D-20), Gesundheit vom Speichersystem | ohne root testbar; Export einer Kassette in eine Bandabbild- bzw. Volume-Datei besteht `bls`; `mkltfs` + `ltfs` + Dateien schreiben/lesen auf einer emulierten Kassette; kill -9 während des Schreibens verliert keinen bestätigten Satz; `update slots`/`label barcodes` liefern die Kassetten-Barcodes; fremde Platte ohne `--force` abgelehnt; eingeschleuste Schadstelle: Lesen setzt dahinter fort und meldet den Satzbereich. PT2: iSCSI-Target im Rig (LIO mit `fileio`-Backstore, eigener Netz-Namespace), zwei osd-Instanzen auf demselben LUN, die zweite wird per Reservation abgewiesen; Pfadabbruch während des Schreibens. Teilt das Bareos-Bandformat mit P6 |
 | P2 | Verteiler mit Routen über File-Devices | Routing-Fälle im Rig, Restore über den MediaType |
 | P2b | Zweige (Branch): odir startet Haupt- und Zweig-Jobs, osd verteilt an beide, Katalogsätze je Zweig | Inc auf File, AI auf zweites File-Device; Restore aus jedem Zweig einzeln; ein gescheiterter Zweig bricht den anderen nicht ab; Konsolidierung des AI-Zweigs |
 | P3 | Wechselplatten und Device-Watcher | Rig mit Loop-Device, Ein- und Abziehen simuliert |
@@ -431,6 +455,10 @@ Aus den Stufen 1–3 zusammengeführt, mit Grund:
 - **Hintergrundbetrieb, PID-Datei**, `-u`/`-g` für osd.
 - **Übrige bareos-sd-Befehle:** `autochanger`, `readlabel`, `resolve`,
   `listen`, `nextrun`, `finish`, `setdevice`, `stats`.
+- **Gesundheit der Medien** (D-21): SMART, Zähler des Bandkerns,
+  SAN-Speichersystem, TapeAlert; Bewertung, Folgen, Scrub, Meldung,
+  Verlauf. Siehe [Gesundheit der Medien](#gesundheit-der-medien-d-21-maintainer-21112026).
+  Die SMART-Überwachung der Platten unter File-Devices lohnt schon vor PT.
 - **Ablauf „Volume beschädigt“** (D-19, odir, Backlog V-1), siehe
   [Beschädigte Volumes](#beschädigte-volumes-bandriss-plattenschaden).
 - **Ring:** macOS- und Windows-Teile; Striping im Ring (Verbraucher k liest
@@ -466,4 +494,5 @@ Alle wie empfohlen, D-8 präzisiert: „additiv, rückwärtskompatibel“.
 | D-18 | Striping nur mit Zweig auf anderes Medium oder Parität; `-t` lehnt sonst ab | **ja** (21.11.2026) |
 | D-19 | Ablauf „Volume beschädigt“ in odir (Übersicht, Kopien hochstufen, neuen Full anstoßen), unabhängig von osd | **ja** (21.11.2026) |
 | D-20 | Plattenbänder auf SAN-LUNs über iSCSI: osd als Initiator, LUN = Magazin, Kennung aus VPD 0x83, Persistent Reservations + Lease für den alleinigen Zugriff, Logout als Auslagern; osd als iSCSI-Target für fremde Hosts später optional | **ja** (21.11.2026) |
+| D-21 | Gesundheit der Medien überwachen und melden: SMART/NVMe/SAS, Zähler des Bandkerns, Werte des SAN-Speichersystems, TapeAlert; Zustände ok/warnung/kritisch/ausgefallen; kritisch = keine neuen Schreibjobs + Übersicht nach D-19; Scrub; Meldung über Messages, gRPC-Ereignis, `status storage`, Verlauf im Schema `onesimus` | **ja** (21.11.2026) |
 | D-15 | Ring: `memmap2` + eigene Plattformschicht, Logik nach Disruptor/Aeron, Warten immer mit Zeitlimit (Recherche B) | **offen** (Empfehlung: ja) |
