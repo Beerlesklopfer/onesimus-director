@@ -277,6 +277,8 @@ pub struct JobManager {
     monitor: limits::Monitor,
     /// The shared JobManager itself, for console commands of run scripts.
     self_ref: Option<std::sync::Weak<Mutex<JobManager>>>,
+    /// State file with the recent job results (state_file.rs, S-47).
+    state_file: Option<std::path::PathBuf>,
 }
 
 /// RecentJobResultsList max_count_recent_job_results.
@@ -292,7 +294,16 @@ impl JobManager {
             start_delay: std::time::Duration::from_secs(if cfg!(test) { 0 } else { 2 }),
             wait_check: std::collections::HashMap::new(),
             wait_interval: std::time::Duration::from_secs(if cfg!(test) { 0 } else { 30 }),
-            wait_messages: Vec::new(), monitor: Default::default(), self_ref: None }
+            wait_messages: Vec::new(), monitor: Default::default(), self_ref: None, state_file: None }
+    }
+
+    /// Keeps the recent job results in `file`: reads what an earlier run
+    /// left there and writes the list whenever a job ends.
+    pub fn set_state_file(&mut self, file: std::path::PathBuf) {
+        let mut earlier: std::collections::VecDeque<u32> = crate::state_file::read(&file).into();
+        while earlier.len() > MAX_RECENT_JOB_RESULTS { earlier.pop_front(); }
+        self.recent = earlier;
+        self.state_file = Some(file);
     }
 
     /// Let console commands of run scripts see this JobManager (`status`).
@@ -1256,6 +1267,14 @@ impl JobManager {
             self.jobs_run += 1;
             self.recent.push_back(job.job_id);
             if self.recent.len() > MAX_RECENT_JOB_RESULTS { self.recent.pop_front(); }
+        }
+        if self.jobs_run != jobs_run {
+            if let Some(file) = &self.state_file {
+                let recent: Vec<u32> = self.recent.iter().copied().collect();
+                if let Err(e) = crate::state_file::write(file, &recent) {
+                    tracing::warn!("cannot write the state file {}: {e}", file.display());
+                }
+            }
         }
         // Jobs that ended free their resources for the queue.
         let queued = !(self.waiting.is_empty() && self.ready.is_empty() && self.delayed.is_empty());

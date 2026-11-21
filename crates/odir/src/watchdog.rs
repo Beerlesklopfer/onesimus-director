@@ -3,8 +3,9 @@
 //! The original Director's watchdog thread (lib/watchdog.cc) runs timer
 //! callbacks: JcrTimeoutCheck (lib/jcr.cc, socket timers) and
 //! JobMonitorWatchdog (dird/job.cc, Max Wait/Run/Run Sched Time). Socket
-//! timeouts are per connection here; the job time limits belong to the job
-//! queue (job_manager.rs) and are not implemented yet (docs/STUBS.md).
+//! timeouts are per connection here; the job time limits (Max Wait/Run/Run
+//! Sched Time, Max Start Delay) are checked by the job manager
+//! (job_manager/limits.rs, docs/STUBS.md S-22).
 //!
 //! What this thread does, specific to Onesimus' process model:
 //! - Orphaned children: job workers are forked processes that the job

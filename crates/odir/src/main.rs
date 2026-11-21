@@ -64,6 +64,7 @@ mod migrate;
 mod sd_copy;
 mod sd_label;
 mod scan;
+mod state_file;
 mod sd_protocol;
 mod session;
 mod session_manager;
@@ -532,6 +533,7 @@ fn main() {
     job_messages::set_catalog(catalog.clone());
 
     let port = config.director.port;
+    let state_dir = config.director.working_directory.clone();
     // --bind-address, else every DirAddresses entry, else DirAddress, else
     // every IPv4 interface. Bound here, before any listener thread, so a
     // wrong address stops the start with a message.
@@ -598,6 +600,8 @@ fn main() {
         job_manager::JobManager::new(bus.clone(), Some(shared_config.clone()), catalog.clone())
     ));
     job_mgr.lock().unwrap().set_self_ref(Arc::downgrade(&job_mgr));
+    // The last jobs that ended before the restart (WriteStateFile/ReadStateFile)
+    job_mgr.lock().unwrap().set_state_file(state_file::path(&state_dir, port));
 
     info!("Director '{}' listening on {}", dir_name,
         listen_addrs.iter().map(|a| a.to_string()).collect::<Vec<_>>().join(", "));
