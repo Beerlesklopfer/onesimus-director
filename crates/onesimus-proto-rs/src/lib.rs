@@ -34,6 +34,11 @@ pub mod onesimus {
     pub mod director {
         tonic::include_proto!("onesimus.director");
 
+        /// Usage of the month and licence state (usage.proto)
+        pub mod usage {
+            tonic::include_proto!("onesimus.director.usage");
+        }
+
         /// Command parameter messages (director_commands.proto)
         pub mod commands {
             tonic::include_proto!("onesimus.director.commands");

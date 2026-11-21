@@ -53,6 +53,7 @@ mod ndmp;
 mod ovfs;
 mod privileges;
 mod message_bus;
+mod usage;
 mod reload;
 mod run_time;
 mod runscript;
@@ -585,6 +586,12 @@ fn main() {
         catalog_acl::spawn_refresh_thread(store, &SHUTDOWN);
     }
     let bus = Arc::new(MessageBus::new(1024));
+    // free tier display: usage of the month from the catalog (crate::usage)
+    if let Some(catalog) = catalog.clone()
+        && let Err(e) = usage::spawn_watcher(catalog, bus.clone())
+    {
+        warn!("usage watcher not started: {e}");
+    }
     let session_mgr = Arc::new(SessionManager::new(bus.clone()));
     let cmd_queue = Arc::new(CommandQueue::new(256));
     let job_mgr = Arc::new(std::sync::Mutex::new(

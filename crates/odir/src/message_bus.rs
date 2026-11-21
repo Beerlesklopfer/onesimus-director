@@ -23,6 +23,8 @@ pub enum BusMessage {
     /// Job message — like C++ Jmsg(). Goes to all consoles that subscribed.
     /// msg_type maps to Messages resource types: info, warning, error, fatal, mount, ...
     JobMessage { job_id: u32, job_name: String, msg_type: MsgType, text: String, timestamp: i64 },
+    /// Usage of the month changed (free tier display, crate::usage).
+    Usage(crate::usage::Usage),
 }
 
 /// Message severity type (maps to C++ M_INFO, M_WARNING, M_ERROR, etc.)

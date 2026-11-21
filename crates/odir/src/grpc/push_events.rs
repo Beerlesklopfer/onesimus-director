@@ -10,7 +10,7 @@
 use onesimus_proto_rs::onesimus::director::{
     PushEvent, push_event,
     ConsoleTextEvent, FdConnectedEvent, FdDisconnectedEvent, FdStatusEvent,
-    SdConnectedEvent, SdDisconnectedEvent, SdStatusEvent, JobStatusEvent,
+    SdConnectedEvent, SdDisconnectedEvent, SdStatusEvent, JobStatusEvent, UsageEvent,
 };
 
 use crate::acl::{self, Kind};
@@ -69,6 +69,8 @@ pub fn visible_to(config: &DirectorConfig, console: &str, msg: &BusMessage) -> b
     let sees_everything = || sees_every_resource(config, console);
     match msg {
         BusMessage::ConsoleText { .. } => sees_everything(),
+        // the Director's usage of the month: every console (tray light)
+        BusMessage::Usage(_) => true,
         BusMessage::JobMessage { job_id: 0, .. } => sees_everything(),
         BusMessage::JobStatus { job_name, .. } | BusMessage::JobMessage { job_name, .. } => {
             acl::allowed(config, console, Kind::Job, job_name)
@@ -139,6 +141,7 @@ pub fn to_push_event(msg: &BusMessage) -> PushEvent {
                 sched_time: *sched_time,
             })
         }
+        BusMessage::Usage(usage) => push_event::Event::Usage(UsageEvent { usage: Some(usage.to_proto()) }),
         BusMessage::JobMessage { job_id, job_name, text, .. } => {
             // JobMessage als ConsoleText ueber gRPC senden
             push_event::Event::ConsoleText(ConsoleTextEvent {

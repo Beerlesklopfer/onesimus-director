@@ -231,6 +231,15 @@ fn status_director(ast: &CommandAst, ctx: &ExecContext) -> CommandResult {
     }
     list_scheduled_jobs(&mut ua, ast, ctx);
     list_running_jobs(&mut ua, ctx);
+    // typed gRPC (GetDirectorStatus.usage) only: the console output stays as
+    // in Bareos (parity)
+    if ua.api == ApiMode::Json && ast.source == crate::command_ast::CommandSource::Grpc {
+        let usage = crate::usage::current().or_else(|| ctx.catalog.as_ref().and_then(crate::usage::query));
+        if let Some(mut usage) = usage {
+            usage.bytes_running = crate::usage::running_bytes(ua.json.get("running"));
+            ua.json.insert("usage".into(), usage.to_json());
+        }
+    }
     list_terminated_jobs(&mut ua, ctx);
     list_connected_clients(&mut ua, ctx);
     ua.send("====\n");

@@ -199,6 +199,18 @@ impl Director for DirectorServiceImpl {
         tokio::spawn(async move {
             // Subscribe to bus for push events
             let bus_rx = bus.subscribe();
+            // the usage of the month right after login (free tier display)
+            if let Some(usage) = crate::usage::current() {
+                let push_event = super::push_events::to_push_event(&crate::message_bus::BusMessage::Usage(usage));
+                let first = SessionMessage {
+                    r#type: session_message::Type::PushEvent as i32,
+                    push_event: Some(push_event),
+                    ..Default::default()
+                };
+                if tx.send(Ok(first)).await.is_err() {
+                    return;
+                }
+            }
 
             loop {
                 tokio::select! {
