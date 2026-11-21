@@ -95,6 +95,46 @@ resource (Name, Password) for a named console. The MCP mode logs in as the
 console whose name ends in
 .BR \-mcp ,
 if there is one.
+.SH PROMPT
+.PP
+The interactive prompt has the form
+.PP
+.RS
+.IB console @ director [ version ]>
+.RE
+.PP
+.I console
+is the name of the
+.B Console
+resource
+.B oconsole
+logs in with: the
+.B Name
+of the Console resource in the configuration file. The Director knows a
+console of that name and applies its ACLs and profiles to every command.
+Without a Console resource
+.B oconsole
+logs in as the Director's default console and the prompt shows
+.BR *UserAgent* .
+.I director
+is the name the Director reports (over gRPC in the session reply, over BNET
+in the banner
+.BR "1000 OK: \fIname\fP Version: ..." ),
+.I version
+the version of
+.BR oconsole .
+For example, with
+.B "Console { Name = \(dqoconsole\(dq }"
+in the configuration file, against a Director named
+.B bareos\-dir
+(the Bareos default):
+.PP
+.RS
+.BI oconsole@bareos\-dir[ version ]>
+.RE
+.PP
+On a terminal the prompt is green while a command may be sent and red
+during the three seconds the rate guard keeps after each command.
 .SH COMPLETION
 .PP
 At connect

@@ -474,10 +474,14 @@ fn run_bnet_session<S: std::io::Read + std::io::Write + Send + 'static>(cli: &Ef
     // C++ Director sends NO signal after init — goes straight to recv().
     // A Director answering in the pre-18.2 form (one frame "1000 OK: ... --
     // Encryption: ...", authenticate_console.cc:129) sends nothing more.
+    let mut director_name = "bareos-dir".to_string();
     for _ in 0..2 {
         match bnet.recv() {
             Ok(BnetMessage::Data(data)) => {
                 let text = String::from_utf8_lossy(&data);
+                if let Some(name) = director_from_banner(&text) {
+                    director_name = name;
+                }
                 if let Some(pos) = text.find('\x1e') {
                     eprintln!("{}", &text[pos+1..].trim());
                     if !text.starts_with("1000\x1e") { break; }
@@ -514,7 +518,28 @@ fn run_bnet_session<S: std::io::Read + std::io::Write + Send + 'static>(cli: &Ef
     }
 
     // Interactive mode
-    interactive_loop(Box::new(BnetConn { bnet }), &cli.name, "bareos-dir");
+    interactive_loop(Box::new(BnetConn { bnet }), &cli.name, &director_name);
+}
+
+/// The Director's name from the BNET banner (`1000 OK: <name> Version: …`,
+/// authenticate_console.cc:129, also with the record separator after 1000);
+/// None for a banner without it.
+fn director_from_banner(text: &str) -> Option<String> {
+    let rest = text.split_once("OK: ")?.1;
+    let name = rest.split_once(" Version:")?.0.trim();
+    (!name.is_empty() && !name.contains(char::is_whitespace)).then(|| name.to_string())
+}
+
+#[cfg(test)]
+mod banner_tests {
+    #[test]
+    fn director_name_from_the_banner() {
+        use super::director_from_banner as d;
+        assert_eq!(d("1000 OK: PDC-dir Version: 25.1.2+onesimus.0.2.0 (19 November 2026)").as_deref(), Some("PDC-dir"));
+        assert_eq!(d("1000\x1eOK: bareos-dir Version: 25.1.2 (09 October 2026) -- TLS").as_deref(), Some("bareos-dir"));
+        assert_eq!(d("1000 OK"), None);
+        assert_eq!(d("1002 fake Director for rate-guard tests"), None);
+    }
 }
 
 /// MCP command runner over an authenticated BNET session (api=0: response ends with EOD).
