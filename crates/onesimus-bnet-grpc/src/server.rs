@@ -95,7 +95,7 @@ where
     crate::install_crypto_provider();
     let mut builder = Server::builder().tls_config(tls).map_err(|e| e.to_string())?;
     // Bind before reporting a successful start (also catches port conflicts).
-    let listener = std::net::TcpListener::bind(address).map_err(|e| format!("{address}: {e}"))?;
+    let listener = bareos_bnet::listen::bind(address).map_err(|e| format!("{address}: {e}"))?;
     let address = listener.local_addr().map_err(|e| e.to_string())?;
     listener.set_nonblocking(true).map_err(|e| e.to_string())?;
     let label = name.to_string();

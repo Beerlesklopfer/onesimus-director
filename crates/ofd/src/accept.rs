@@ -46,7 +46,7 @@ pub fn accept_loop(config: &Arc<FdConfig>, shutdown: &AtomicBool) {
         }
     };
 
-    let listener = match TcpListener::bind(addr) {
+    let listener = match bareos_bnet::listen::bind(addr) {
         Ok(l) => {
             info!("listening on {addr}");
             l

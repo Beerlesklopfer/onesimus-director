@@ -17,6 +17,7 @@
 //! tonic nor tokio nor the protos.
 
 pub mod debug;
+pub mod listen;
 pub mod wire;
 pub mod signal;
 pub mod tls;
