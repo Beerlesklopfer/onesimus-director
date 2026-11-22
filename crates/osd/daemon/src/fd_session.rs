@@ -45,8 +45,15 @@ use crate::jobs::Job;
 use crate::ringproto::{ring_name, JobInfo, Request, SlotKind, SlotMeta};
 use crate::transport::{lock, text, Channel, SharedChannel};
 
-/// Default number of ring slots (`Ring Slots` in osd.d overrides it).
+/// Default number of ring slots (`Ring Slots` in osd.d overrides it): 8 where
+/// the ring wakes waiters (Linux), 64 where it polls (macOS, Windows; measured
+/// in docs/plans/OSD-RECHERCHE-SPEICHER-UND-RING.md: with 8 slots the sleep of
+/// a polling reader limits the ring to a few hundred MiB/s).
+#[cfg(target_os = "linux")]
 pub const DEFAULT_RING_SLOTS: u32 = 8;
+/// See above.
+#[cfg(not(target_os = "linux"))]
+pub const DEFAULT_RING_SLOTS: u32 = 64;
 
 /// Longest wait for a free slot before the writer counts as stuck.
 const CLAIM_TIMEOUT: Duration = Duration::from_secs(3600);
