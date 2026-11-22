@@ -268,3 +268,64 @@ fn a_locked_file_is_saved_from_a_shadow_copy_on_windows() {
     assert!(content.contains("locked content"), "the restored file has not the content of the locked one: {content}");
     let _ = vm(&host, "stop.ps1");
 }
+
+/// A UNC path (`//host/share`, a network drive reached by its share name) is
+/// saved and restored: the share `odirunc` of `unc-prep.ps1` is on the
+/// Windows host itself and read through SMB.
+#[test]
+#[ignore = "needs a running ofd.exe on a Windows host (ONESIMUS_WINDOWS_FD)"]
+fn a_unc_path_through_the_windows_fd() {
+    let Some(host) = std::env::var_os("ONESIMUS_WINDOWS_FD").and_then(|h| h.into_string().ok()) else {
+        panic!("ONESIMUS_WINDOWS_FD is not set");
+    };
+    onesimus_rig::build_workspace_binaries().unwrap_or_else(|e| panic!("{e}"));
+    eprintln!("deploy:\n{}", vm(&host, "deploy.ps1"));
+    eprintln!("prep:\n{}", vm(&host, "prep.ps1"));
+    let unc = vm(&host, "unc-prep.ps1");
+    eprintln!("unc-prep:\n{unc}");
+    assert!(unc.contains("read: unc a"), "the share does not work: {unc}");
+    let mut options = RigOptions::new(40091);
+    options.start_fd = false;
+    options.extra_director = vec![
+        ("client/vfd.conf".into(), format!("Client {{\n  Name = vfd\n  Address = {host}\n  FD Port = 19102\n  Password = \"vfd-pw\"\n  Passive = yes\n}}\n")),
+        ("fileset/VSet.conf".into(), "FileSet {\n  Name = VSet\n  Include {\n    Options {\n      Signature = MD5\n    }\n    File = //localhost/odirunc\n  }\n}\n".to_string()),
+    ];
+    let rig = Rig::start(options).unwrap_or_else(|e| panic!("Gerüst startet nicht: {e}"));
+    let backup = rig.run_job("VBackup").unwrap_or_else(|e| panic!("{e}"));
+    let row = rig.wait_job(backup, Duration::from_secs(300)).unwrap_or_else(|e| panic!("{e}"));
+    let log = rig.job_log(backup);
+    eprintln!("backup: {row:?}\n{log}");
+    let names = rig.catalog().query(&format!("SELECT p.path || f.name FROM file f JOIN path p ON p.pathid = f.pathid WHERE f.jobid = {backup} ORDER BY 1")).unwrap_or_default();
+    eprintln!("catalog names:\n{names}");
+    assert_eq!(row.status, 'T', "backup: {row:?}\n{log}");
+    assert!(names.contains("//localhost/odirunc/sub/big.bin"), "the UNC names are not in the catalog as sent:\n{names}");
+    let hex = rig.catalog().query(&format!("SELECT encode(convert_to(f.name, 'SQL_ASCII'), 'hex') FROM file f WHERE f.jobid = {backup} AND f.name LIKE '%.txt' AND f.name <> 'a.txt'")).unwrap_or_default();
+    eprintln!("hex of the unicode name: {hex}");
+    assert!(hex.contains("c3bc6ec3af2e747874"), "the unicode name is not UTF-8 in the catalog:\n{hex}");
+    let reply = rig.command(&format!("restore jobid={backup} client=vfd where=D:/odir-test/uncrestore all done yes")).unwrap_or_else(|e| panic!("{e}"));
+    let restore = queued_job_id(&reply).unwrap_or_else(|| panic!("restore: no JobId\n{reply}"));
+    let row = rig.wait_job(restore, Duration::from_secs(300)).unwrap_or_else(|e| panic!("{e}"));
+    eprintln!("restore: {row:?}\n{}", rig.job_log(restore));
+    assert_eq!(row.status, 'T', "restore: {row:?}\n{}", rig.job_log(restore));
+    let list = vm(&host, "unc-list.ps1");
+    eprintln!("{list}");
+    // the same files by content (the console shows the unicode name garbled, so names are not compared)
+    let hashes = |part: &str| -> Vec<String> {
+        let mut v: Vec<String> = part.lines().filter(|l| l.starts_with('\\')).map(|l| l.trim_end().rsplit(' ').next().unwrap_or("").to_string()).collect();
+        v.sort();
+        v
+    };
+    let (source, restored) = list.split_once("== D:\\odir-test\\uncrestore").unwrap_or_else(|| panic!("{list}"));
+    assert_eq!(hashes(source).len(), 3, "{list}");
+    assert_eq!(hashes(source), hashes(restored), "source and restore differ:\n{list}");
+    // restore onto the share itself: the files arrive below its directory on the host
+    let reply = rig.command(&format!("restore jobid={backup} client=vfd where=//localhost/odirunc/back all done yes")).unwrap_or_else(|e| panic!("{e}"));
+    let again = queued_job_id(&reply).unwrap_or_else(|| panic!("restore to the share: no JobId\n{reply}"));
+    let row = rig.wait_job(again, Duration::from_secs(300)).unwrap_or_else(|e| panic!("{e}"));
+    eprintln!("restore to the share: {row:?}\n{}", rig.job_log(again));
+    assert_eq!(row.status, 'T', "restore to the share: {row:?}\n{}", rig.job_log(again));
+    let back = vm(&host, "unc-back.ps1");
+    eprintln!("{back}");
+    assert!(back.contains("back: 3 files, same hashes: True"), "{back}");
+    let _ = vm(&host, "stop.ps1");
+}
