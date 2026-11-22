@@ -226,3 +226,16 @@ Anlass: Der Ring (`crates/osd/ring`) wartet und weckt über Prozessgrenzen nur u
 **Empfehlung (für D-15):** Auf Windows und macOS zuerst Abfrage mit Zeitlimit (yield/sleep bis 1 ms, der Ring wartet ohnehin höchstens 100 ms) plus `pid_alive`; benannte Events (Windows) und `os_sync_wait_on_address` SHARED (macOS ab 14.4) nur als spätere Latenzoptimierung, falls Messungen sie rechtfertigen. Offen: Polling-Latenz und Durchsatz sind nicht gemessen (Windows-VM `joerg.bernau@vm`, kein wine); Prozessstart und -überwachung auf Windows/macOS sind eine zweite, ungetestete Lücke.
 
 **Umgesetzt (22.11.2026):** Abfragen mit Zeitgrenze in `sys/wait_other.rs` (macOS und Windows), `pid_alive` unter Windows mit `OpenProcess`/`GetExitCodeProcess`, die Tests des Rings laufen auf allen Systemen. Gemessen auf `joerg.bernau@vm` (Windows 11, MSVC): alle 11 Tests bestehen, darunter „ein zweiter Prozess liest über den gemeinsamen Speicher“ und „ein verschwundener Verbraucher wird als gescheitert markiert“ (1,0 s). macOS ist nicht getestet. Durchsatz und Latenz sind noch nicht gemessen. SubEtha wurde im Quelltext geprüft und verworfen (52-Byte-Slots, 16 Verbraucher, kein blockierendes Gating, tote Verbraucher bleiben im Gating); lesenswert nur `park_event.rs` (benanntes Event, Nachprüfung alle 20 ms).
+
+**Gemessen (22.11.2026):** `cargo test -p osd-ring --release -- --ignored --nocapture bench`, ein Erzeuger, Leser als Threads, 1 GiB je Lauf, Blöcke werden nicht kopiert (misst nur das Warten, Weitergeben und Freigeben der Fächer, nicht den Speicherdurchsatz). Linux (futex) und Windows 11 auf der VM (Abfragen mit Zeitgrenze, Schlaf bis 1 ms):
+
+| Lauf | Linux | Windows |
+| --- | --- | --- |
+| 64 KiB, 8 Fächer, 1 Leser | 143 000 MiB/s | 572 MiB/s |
+| 64 KiB, 8 Fächer, 3 Leser | 120 000 MiB/s | 325 MiB/s |
+| 64 KiB, 64 Fächer, 3 Leser | 216 000 MiB/s | 2 600 MiB/s |
+| 64 KiB, 512 Fächer, 3 Leser | 130 000 MiB/s | 19 000 MiB/s |
+| 1 MiB, 8 Fächer, 3 Leser | 1 570 000 MiB/s | 3 700 MiB/s |
+| Rundlauf mit einem Fach (Erzeuger, Leser, zurück) | 4 µs | 570 bis 930 µs |
+
+Die Windows-Werte schwanken stark von Lauf zu Lauf (der erste Lauf maß für 64 KiB und 8 Fächer mit 1 Leser 312 000 MiB/s, weil der Leser nie schlafen musste). **Folgerung:** Abfragen reicht auf Windows und macOS, wenn der Ring genug Fächer hat: mit 8 Fächern (Vorgabe D-12, 512 KiB Puffer) bremst der Schlaf der Leser auf einige 100 MiB/s, mit 64 Fächern und mehr liegt die Synchronisation weit über dem, was ein Band (LTO-9 rund 400 MB/s) oder eine Platte schafft. Die Vorgabe für Windows und macOS sollte deshalb mindestens 64 Fächer sein; die benannten Events und `os_sync_wait_on_address` bleiben eine mögliche Optimierung für wenige Fächer, kein Muss. Nicht gemessen: macOS, Leser als eigene Prozesse, echter Gerätedurchsatz.

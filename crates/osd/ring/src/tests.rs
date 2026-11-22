@@ -300,3 +300,79 @@ fn the_read_direction_reader_produces_and_asks_the_session() {
     session.set_consumer_state(0, State::Failed);
     assert_eq!(session.ask_consumer(0, b"x", Duration::from_secs(1)).unwrap_err(), RingError::NoConsumer);
 }
+
+/// Throughput: `total` bytes in slots of `slot_size` to `consumers` readers,
+/// each reader reads every slot (broadcast); prints MiB/s of the producer.
+fn throughput(slot_size: usize, slots: u32, consumers: u32, total: usize) -> f64 {
+    let n = name(&format!("bench{slot_size}"));
+    let _c = Cleanup(n.clone());
+    let ring = Arc::new(Ring::create(&n, RingConfig { slots, slot_size: slot_size as u32, consumers }).unwrap());
+    let count = (total / slot_size) as u64;
+    let readers: Vec<_> = (0..consumers as usize)
+        .map(|c| {
+            let ring = Arc::new(Ring::open(&n).unwrap());
+            std::thread::spawn(move || {
+                ring.attach(c).unwrap();
+                let mut bytes = 0usize;
+                while let Some(slot) = ring.next(c, Duration::from_secs(30)).expect("next") {
+                    bytes += slot.data.len();
+                    ring.release(c);
+                }
+                ring.set_consumer_state(c, State::Done);
+                bytes
+            })
+        })
+        .collect();
+    let start = Instant::now();
+    for _ in 0..count {
+        let mut slot = ring.claim(Duration::from_secs(30)).expect("claim");
+        slot.data[0] = 1;
+        slot.publish(slot_size);
+    }
+    ring.finish(State::Done);
+    for r in readers {
+        assert_eq!(r.join().unwrap(), count as usize * slot_size);
+    }
+    total as f64 / (1 << 20) as f64 / start.elapsed().as_secs_f64()
+}
+
+/// Round trip with a single slot: the producer can only claim again after the
+/// reader woke up, read and released, so one step is wake + wake.
+fn round_trip_micros(rounds: u32) -> f64 {
+    let n = name("latency");
+    let _c = Cleanup(n.clone());
+    let ring = Arc::new(Ring::create(&n, RingConfig { slots: 1, slot_size: 4096, consumers: 1 }).unwrap());
+    let reader = {
+        let ring = Arc::new(Ring::open(&n).unwrap());
+        std::thread::spawn(move || {
+            ring.attach(0).unwrap();
+            while let Some(_slot) = ring.next(0, Duration::from_secs(30)).expect("next") {
+                ring.release(0);
+            }
+        })
+    };
+    let start = Instant::now();
+    for _ in 0..rounds {
+        ring.claim(Duration::from_secs(30)).expect("claim").publish(1);
+    }
+    ring.finish(State::Done);
+    reader.join().unwrap();
+    start.elapsed().as_secs_f64() * 1e6 / rounds as f64
+}
+
+/// Prints the numbers of the ring (`cargo test -p osd-ring --release -- --ignored --nocapture bench`).
+#[test]
+#[ignore = "measurement, not a check"]
+fn bench() {
+    for (slot, slots, consumers, total) in [
+        (64 << 10, 8, 1, 1 << 30),
+        (64 << 10, 8, 3, 1 << 30),
+        (64 << 10, 64, 3, 1 << 30),
+        (64 << 10, 512, 3, 1 << 30),
+        (1 << 20, 8, 3, 1 << 30),
+    ] {
+        let mibs = throughput(slot, slots, consumers, total);
+        println!("BENCH slot {:>4} KiB, {slots} slots, {consumers} reader(s): {mibs:8.0} MiB/s", slot >> 10);
+    }
+    println!("BENCH one slot per step, producer to reader and back: {:.1} us", round_trip_micros(20_000));
+}
