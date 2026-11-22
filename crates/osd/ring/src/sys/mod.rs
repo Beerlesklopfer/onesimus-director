@@ -11,13 +11,13 @@
 //! | Plattform | Verzeichnis der Ringe | Warten/Wecken | Stand |
 //! |---|---|---|---|
 //! | Linux | `/dev/shm` | `futex` ohne `FUTEX_PRIVATE_FLAG` (prozessübergreifend) | umgesetzt (Stufe 1) |
-//! | macOS | `$TMPDIR/osd-rings` (privat, 0700) | `os_sync_wait_on_address` mit `OS_SYNC_WAIT_ON_ADDRESS_SHARED` (ab 14.4) | Platzhalter |
-//! | Windows | `%TEMP%\osd-rings`, `FILE_ATTRIBUTE_TEMPORARY` | benannte Auto-Reset-Events je Wartendem (`WaitOnAddress` wirkt nicht prozessübergreifend) | Platzhalter |
+//! | macOS | `$TMPDIR/osd-rings` (privat, 0700) | `os_sync_wait_on_address` mit `OS_SYNC_WAIT_ON_ADDRESS_SHARED` (ab 14.4), vorerst Abfragen mit Zeitgrenze | Abfragen umgesetzt, Wecken später |
+//! | Windows | `%TEMP%\osd-rings`, `FILE_ATTRIBUTE_TEMPORARY` | benannte Auto-Reset-Events je Wartendem (`WaitOnAddress` wirkt nicht prozessübergreifend), vorerst Abfragen mit Zeitgrenze | Abfragen umgesetzt, Wecken später |
 //!
 //! Gewartet wird immer mit Zeitgrenze (der Ring nimmt 100 ms), damit die
-//! Lebendprüfungen auch nach einem verlorenen Wecken laufen. Die
-//! Platzhalter übersetzen, `wait`/`wake` enden dort aber mit
-//! `unimplemented!()`.
+//! Lebendprüfungen auch nach einem verlorenen Wecken laufen. Auf macOS und
+//! Windows fragt `wait` das Wort ab (erst `yield_now`, dann Schlaf bis
+//! 1 ms), `wake` ist leer ([`wait_other`]).
 
 use std::fs::OpenOptions;
 use std::io;
@@ -148,8 +148,28 @@ pub fn pid_alive(pid: u64) -> bool {
     r == 0 || io::Error::last_os_error().raw_os_error() == Some(libc::EPERM)
 }
 
-/// Whether process `pid` exists (not implemented on this platform).
-#[cfg(not(unix))]
-pub fn pid_alive(_pid: u64) -> bool {
-    unimplemented!("osd ring: process check on this platform (OpenProcess)")
+/// Whether process `pid` exists (`OpenProcess` plus `GetExitCodeProcess`:
+/// a process object outlives its process while handles are open, so the
+/// exit code must be `STILL_ACTIVE`).
+#[cfg(windows)]
+pub fn pid_alive(pid: u64) -> bool {
+    use windows_sys::Win32::Foundation::{CloseHandle, STILL_ACTIVE};
+    use windows_sys::Win32::System::Threading::{
+        GetExitCodeProcess, OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION,
+    };
+    if pid == 0 || pid > u32::MAX as u64 {
+        return false;
+    }
+    // SAFETY: plain Win32 calls; the handle is closed on every path.
+    unsafe {
+        let handle = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, pid as u32);
+        if handle.is_null() {
+            // ERROR_ACCESS_DENIED means the process exists but is not ours.
+            return io::Error::last_os_error().raw_os_error() == Some(5);
+        }
+        let mut code = 0u32;
+        let ok = GetExitCodeProcess(handle, &mut code) != 0;
+        CloseHandle(handle);
+        ok && code == STILL_ACTIVE as u32
+    }
 }
