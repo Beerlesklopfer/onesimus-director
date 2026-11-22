@@ -212,15 +212,17 @@ pub(crate) fn check_trusted(path: &Path, owner: u32, directory: bool, top: &Path
     Ok(())
 }
 
-/// Windows: the rule above (root-owned, not writable by others) would need
-/// the owner SID and the ACL of every path; until that exists no path is
-/// trusted, so signed plugins do not load on Windows.
+/// Windows: the same rule in the terms of Windows. `path` and every
+/// directory above it have an owner SYSTEM, Administrators or
+/// TrustedInstaller, contain no link, and nobody else may change them
+/// (`trust_acl`, `win_trust`). `owner` is the Unix user id and has no
+/// meaning here; `top` limits the walk only when it is not the Unix root
+/// that production passes.
 #[cfg(windows)]
-pub(crate) fn check_trusted(path: &Path, _owner: u32, _directory: bool, _top: &Path) -> Result<(), PluginError> {
-    Err(PluginError::Untrusted {
-        path: path.to_path_buf(),
-        reason: "the ownership check of signed plugins is not implemented on this platform".into(),
-    })
+pub(crate) fn check_trusted(path: &Path, _owner: u32, directory: bool, top: &Path) -> Result<(), PluginError> {
+    let limit = (top != Path::new("/")).then_some(top);
+    crate::win_trust::check(path, directory, limit)
+        .map_err(|(component, reason)| PluginError::Untrusted { path: component, reason })
 }
 
 /// Most plugin instances one File Daemon runs at the same time.
@@ -638,7 +640,7 @@ impl Session {
 pub(crate) mod testkit;
 pub(crate) mod trust;
 
-#[cfg(test)]
+#[cfg(all(test, unix))]
 mod tests {
     use super::*;
     use std::os::unix::fs::PermissionsExt;
@@ -952,7 +954,7 @@ mod tests {
 /// BNET stream, the stream as the SD returns it, restore to files and online.
 /// Build the guest first (see plugins/example-tree/README.md), then
 /// `cargo test -p ofd -- --ignored example_tree`.
-#[cfg(test)]
+#[cfg(all(test, unix))]
 pub(crate) mod guest {
     use super::testkit::signed_artifact;
     use super::*;

@@ -545,6 +545,7 @@ mod tests {
         ]);
     }
 
+    #[cfg(unix)]
     #[test]
     fn walks_like_find_one() {
         let tmp = std::env::temp_dir().join(format!("ofd-find-{}", std::process::id()));

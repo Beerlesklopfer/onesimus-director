@@ -635,6 +635,7 @@ pub fn build_xattr_stream(fname: &[u8], skip_acl_names: bool) -> Result<Option<V
 mod tests {
     use super::*;
 
+    #[cfg(unix)]
     #[test]
     fn acl_text_conversion() {
         let v = acl_text_to_xattr("user::rw-\nuser:0:r--\ngroup::r--\nmask::r--\nother::---\n").unwrap();

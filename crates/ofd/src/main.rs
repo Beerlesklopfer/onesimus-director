@@ -65,6 +65,10 @@ mod sd;
 mod status;
 mod stmode;
 mod streams;
+#[cfg_attr(not(windows), allow(dead_code))]
+mod trust_acl;
+#[cfg(windows)]
+mod win_trust;
 mod version;
 mod winattr;
 #[cfg(windows)]

@@ -846,6 +846,7 @@ mod tests {
         String::from_utf8(out).unwrap()
     }
 
+    #[cfg(unix)]
     fn lstat(mode: u32, size: i64, mtime: i64, data_stream: i32) -> String {
         let uid = nix::unistd::getuid().as_raw() as i64;
         let gid = nix::unistd::getgid().as_raw() as i64;
@@ -868,6 +869,7 @@ mod tests {
         }
     }
 
+    #[cfg(unix)]
     #[test]
     fn restores_files_dirs_links_sparse_and_gzip() {
         let tmp = std::env::temp_dir().join(format!("ofd-restore-test-{}", std::process::id()));
@@ -956,6 +958,7 @@ mod tests {
         let _ = std::fs::remove_dir_all(&tmp);
     }
 
+    #[cfg(unix)]
     fn plugin_records(t: i64) -> Vec<u8> {
         let mut r = Rec(Vec::new());
         let line = "postgresql:instance=main:password=*****";
@@ -989,6 +992,7 @@ mod tests {
 
     /// Plugin files restore to files below Where without loading the plugin:
     /// a backup stays restorable when the plugin is missing or revoked.
+    #[cfg(unix)]
     #[test]
     fn plugin_files_restore_to_where_without_the_plugin() {
         let tmp = std::env::temp_dir().join(format!("ofd-restore-plugin-{}", std::process::id()));
@@ -1017,6 +1021,7 @@ mod tests {
         assert!(online_line(&stored, &["postgresql:target_db=x".to_string()]).is_none());
     }
 
+    #[cfg(unix)]
     #[test]
     fn plugin_files_restore_online_through_the_plugin() {
         use crate::plugin::testkit::*;
@@ -1052,6 +1057,7 @@ mod tests {
         std::fs::remove_dir_all(&dir).unwrap();
     }
 
+    #[cfg(unix)]
     #[test]
     fn plugin_files_without_where_are_refused() {
         let (msgs, counters, sent) = run_restore(plugin_records(1_600_000_000), Vec::new());
