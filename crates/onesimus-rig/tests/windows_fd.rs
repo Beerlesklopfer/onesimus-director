@@ -180,3 +180,48 @@ fn incremental_and_estimate_through_the_windows_fd() {
     assert!(compare.contains("bad=0"), "{compare}");
     let _ = vm(&host, "stop.ps1");
 }
+
+/// A file larger than 4 GiB (random blocks at the 32 bit limit and at the end)
+/// survives backup and restore on Windows byte for byte.
+#[test]
+#[ignore = "needs a running ofd.exe on a Windows host (ONESIMUS_WINDOWS_FD) and 10 GB free below D:\\odir-test"]
+fn a_file_over_four_gigabytes_through_the_windows_fd() {
+    let Some(host) = std::env::var_os("ONESIMUS_WINDOWS_FD").and_then(|h| h.into_string().ok()) else {
+        panic!("ONESIMUS_WINDOWS_FD is not set");
+    };
+    onesimus_rig::build_workspace_binaries().unwrap_or_else(|e| panic!("{e}"));
+    eprintln!("deploy:\n{}", vm(&host, "deploy.ps1"));
+    eprintln!("prep:\n{}", vm(&host, "prep.ps1"));
+    eprintln!("big:\n{}", vm(&host, "big-prep.ps1"));
+    let mut options = RigOptions::new(39891);
+    options.start_fd = false;
+    options.extra_director = vec![
+        ("client/vfd.conf".into(), format!("Client {{\n  Name = vfd\n  Address = {host}\n  FD Port = 19102\n  Password = \"vfd-pw\"\n  Passive = yes\n}}\n")),
+        ("fileset/VSet.conf".into(), "FileSet {\n  Name = VSet\n  Include {\n    Options {\n      Signature = MD5\n      Compression = GZIP\n    }\n    File = D:/odir-test/bigdata\n  }\n}\n".into()),
+    ];
+    let rig = Rig::start(options).unwrap_or_else(|e| panic!("Gerüst startet nicht: {e}"));
+    let backup = rig.run_job("VBackup").unwrap_or_else(|e| panic!("{e}"));
+    let row = rig.wait_job(backup, Duration::from_secs(1200)).unwrap_or_else(|e| panic!("{e}"));
+    eprintln!("backup: {row:?}\n{}", rig.job_log(backup));
+    assert_eq!(row.status, 'T', "backup: {row:?}\n{}", rig.job_log(backup));
+    // JobBytes counts what was stored (compressed zeros), the log what the FD read
+    let log = rig.job_log(backup);
+    let read: u64 = log
+        .lines()
+        .find_map(|l| l.trim().strip_prefix("FD Bytes Read:"))
+        .and_then(|v| v.split_whitespace().next())
+        .and_then(|n| n.replace(',', "").parse().ok())
+        .unwrap_or(0);
+    assert!(read > 4 << 30, "the FD read {read} bytes, less than 4 GiB:\n{log}");
+    let reply = rig
+        .command(&format!("restore jobid={backup} client=vfd where={RESTORE} all done yes"))
+        .unwrap_or_else(|e| panic!("{e}"));
+    let restore = queued_job_id(&reply).unwrap_or_else(|| panic!("restore: no JobId\n{reply}"));
+    let row = rig.wait_job(restore, Duration::from_secs(1200)).unwrap_or_else(|e| panic!("{e}"));
+    eprintln!("restore: {row:?}\n{}", rig.job_log(restore));
+    assert_eq!(row.status, 'T', "restore: {row:?}\n{}", rig.job_log(restore));
+    let compare = vm(&host, "big-cmp.ps1");
+    eprintln!("compare:\n{compare}");
+    assert!(compare.contains("bad=0"), "{compare}");
+    let _ = vm(&host, "stop.ps1");
+}
