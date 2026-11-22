@@ -52,7 +52,6 @@ clap.workspace = true
 tokio-stream = { version = "0.1", features = ["net"] }
 socket2 = { version = "0.5", features = ["all"] }
 sqlx.workspace = true
-chrono = "0.4"
 rcgen.workspace = true
 mdns-sd.workspace = true
 # PAM login of consoles with `Use Pam Authentication = yes` (S-43); MPL-2.0 is

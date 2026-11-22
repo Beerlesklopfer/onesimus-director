@@ -490,9 +490,7 @@ fn has_value<'a>(ua: &mut Ua, key: &str, value: Option<&'a str>) -> Option<&'a s
 
 /// bstrutime(): local time "YYYY-MM-DD HH:MM:SS".
 fn bstrutime(time: i64) -> String {
-    use chrono::TimeZone;
-    chrono::Local.timestamp_opt(time, 0).single()
-        .map(|t| t.format("%Y-%m-%d %H:%M:%S").to_string()).unwrap_or_default()
+    crate::localtime::format(time, "%Y-%m-%d %H:%M:%S")
 }
 
 /// UserSelectJobidsOrFiles (ua_restore.cc:485): 0 error, 1 JobIds,
@@ -500,7 +498,7 @@ fn bstrutime(time: i64) -> String {
 fn user_select_jobids_or_files(ua: &mut Ua, ast: &CommandAst, rx: &mut Rx) -> i32 {
     let ctx = ua.ctx;
     // Include current second if using current time
-    let now = chrono::Local::now().timestamp() + 1;
+    let now = crate::localtime::now() + 1;
     let mut date = String::new();
     let mut have_date = false;
     let mut done = false;

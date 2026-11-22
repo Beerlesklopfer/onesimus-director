@@ -7,7 +7,7 @@ use crate::config::FdConfig;
 /// Generate status output (same format as C++ FD).
 pub fn fd_status(config: &FdConfig) -> String {
     let version = env!("CARGO_PKG_VERSION");
-    let now = chrono::Local::now();
+    let now = jiff::Zoned::now();
 
     let mut output = String::new();
 
@@ -15,12 +15,12 @@ pub fn fd_status(config: &FdConfig) -> String {
     output.push_str(&format!(
         "{} Version: {version} ({}) {}\n",
         config.name,
-        now.format("%d %B %Y"),
+        now.strftime("%d %B %Y"),
         std::env::consts::OS,
     ));
     output.push_str(&format!(
         "Daemon started {}. Jobs: run=0 running={}, Bareos Rust binary\n",
-        now.format("%d-%b-%Y %H:%M"),
+        now.strftime("%d-%b-%Y %H:%M"),
         crate::sd::running().len(),
     ));
 
@@ -61,8 +61,8 @@ fn running_jobs() -> String {
         return "No Jobs running.\n".to_string();
     }
     let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0);
-    let time = |t: u64| chrono::DateTime::from_timestamp(t as i64, 0)
-        .map(|d| d.with_timezone(&chrono::Local).format("%d-%b-%y %H:%M:%S").to_string()).unwrap_or_default();
+    let time = |t: u64| jiff::Timestamp::from_second(t as i64)
+        .map(|d| d.to_zoned(jiff::tz::TimeZone::system()).strftime("%d-%b-%y %H:%M:%S").to_string()).unwrap_or_default();
     let mut out = String::new();
     for job in running {
         let p = &job.progress;

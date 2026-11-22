@@ -13,6 +13,5 @@ tracing.workspace = true
 sqlx.workspace = true
 serde.workspace = true
 serde_json.workspace = true
-chrono = "0.4"
 
 [dev-dependencies]

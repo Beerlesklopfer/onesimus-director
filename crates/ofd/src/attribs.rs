@@ -213,8 +213,8 @@ pub fn ls_output(attr: &Attributes) -> String {
         out.push_str("----------   - -        -                - ---------- --------");
     } else {
         let st = &attr.statp;
-        let t = chrono::DateTime::from_timestamp(st.ctime, 0)
-            .map(|d| d.with_timezone(&chrono::Local).format("%Y-%m-%d %H:%M:%S").to_string())
+        let t = jiff::Timestamp::from_second(st.ctime)
+            .map(|d| d.to_zoned(jiff::tz::TimeZone::system()).strftime("%Y-%m-%d %H:%M:%S").to_string())
             .unwrap_or_default();
         let trunc8 = |s: String| s.chars().take(8).collect::<String>();
         out.push_str(&format!("{}  {:2} {:<8} {:<8}{:>12} {}", encode_mode(st.mode), st.nlink as u32,

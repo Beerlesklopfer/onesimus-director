@@ -13,7 +13,6 @@
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use chrono::{Local, TimeZone};
 use serde_json::{json, Value};
 
 use crate::catalog_worker::CatalogHandle;
@@ -122,7 +121,7 @@ impl Usage {
 /// the local time zone.
 fn next_month_start(year: i32, month: u32) -> i64 {
     let (y, m) = if month >= 12 { (year + 1, 1) } else { (year, month + 1) };
-    Local.with_ymd_and_hms(y, m, 1, 0, 0, 0).earliest().map(|t| t.timestamp()).unwrap_or(0)
+    crate::localtime::local_time(y, m as i32, 1, 0)
 }
 
 /// The usage of the current month from `catalog` (None: no catalog, or the
@@ -246,9 +245,8 @@ mod tests {
 
     #[test]
     fn next_month_wraps_the_year() {
-        use chrono::Datelike;
         let dec = next_month_start(2026, 12);
-        let jan = Local.timestamp_opt(dec, 0).unwrap();
-        assert_eq!((jan.year(), jan.month(), jan.day()), (2027, 1, 1));
+        let jan = crate::localtime::local_tm(dec);
+        assert_eq!((jan.tm_year + 1900, jan.tm_mon + 1, jan.tm_mday), (2027, 1, 1));
     }
 }

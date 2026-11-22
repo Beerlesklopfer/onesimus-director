@@ -121,7 +121,7 @@ impl JobMsgs {
         for (file, types) in &self.append {
             if types & (1u64 << msg_type) != 0 {
                 use std::io::Write as _;
-                let dt = chrono::Local::now().format("%d-%b %H:%M ");
+                let dt = jiff::Zoned::now().strftime("%d-%b %H:%M ");
                 if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open(file) {
                     let _ = write!(f, "{dt}{prefix}{text}");
                 }
@@ -130,7 +130,7 @@ impl JobMsgs {
         if !(0..64).contains(&msg_type) || self.director_types & (1u64 << msg_type) == 0 {
             return;
         }
-        let mtime = chrono::Utc::now().timestamp();
+        let mtime = jiff::Timestamp::now().as_second();
         self.queued.push(format!("Jmsg Job={} type={msg_type} level={mtime} {prefix}{text}", self.job));
     }
 

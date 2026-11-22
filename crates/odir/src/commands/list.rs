@@ -4,7 +4,6 @@
 //! (cats/postgresql_queries.inc), the same JSON keys (`.api 2`) and the same
 //! table/vertical text rendering (see sql_list.rs).
 
-use chrono::{Datelike, Local, TimeZone, Timelike};
 use serde_json::{json, Map, Value};
 
 use crate::catalog_worker::{CatalogHandle, SqlTable};
@@ -917,7 +916,7 @@ fn list_jobs(args: &Args, ctx: &ExecContext, cat: &CatalogHandle, ty: ListType, 
         return false;
     }
 
-    let since = schedtime(args, chrono::Utc::now().timestamp());
+    let since = schedtime(args, crate::localtime::now());
 
     let client = match client_from_db(args, ctx, cat, out) {
         Ok(c) => c,
@@ -978,8 +977,7 @@ fn list_jobs(args: &Args, ctx: &ExecContext, cat: &CatalogHandle, ty: ListType, 
         selection.push_str(&format!("AND Job.poolid = (SELECT poolid FROM pool WHERE name = '{}' LIMIT 1) ", esc(p)));
     }
     if since != 0 {
-        let t = Local.timestamp_opt(since, 0).single().unwrap_or_else(Local::now);
-        selection.push_str(&format!("AND Job.SchedTime > '{}' ", t.format("%Y-%m-%d %H:%M:%S")));
+        selection.push_str(&format!("AND Job.SchedTime > '{}' ", crate::localtime::format(since, "%Y-%m-%d %H:%M:%S")));
     }
 
     let range = query_range(args, out);
@@ -1296,7 +1294,7 @@ impl PruneReport {
 
 /// GetPoolPruneReport (ua_prune.cc): read-only catalog queries.
 fn pool_prune_report(ctx: &ExecContext, cat: &CatalogHandle, pool_id: i64) -> Option<PruneReport> {
-    let now = chrono::Utc::now().timestamp();
+    let now = crate::localtime::now();
     let ids = |t: &SqlTable| -> Vec<i64> { t.rows.iter().filter_map(|r| r[0].as_deref().map(str_to_int64)).collect() };
     let running: Vec<i64> = ctx.job_manager.as_ref().and_then(|m| m.lock().ok())
         .map(|m| m.running_jobs().into_iter().map(|j| j.0 as i64).collect()).unwrap_or_default();
@@ -1554,7 +1552,7 @@ fn list_nextvol(args: &Args, ctx: &ExecContext, cat: &CatalogHandle, out: &mut L
     let runs: Vec<_> = raw("schedule", &job.schedule).map(|s| s.directives.iter()
         .filter(|d| d.norm_key() == "run").map(|d| super::show::parse_run(&d.tokens)).collect()).unwrap_or_default();
 
-    let now = chrono::Utc::now().timestamp();
+    let now = crate::localtime::now();
     let mut found = false;
     for run in &runs {
         if !triggers_within(run, now, days) {
@@ -1609,7 +1607,7 @@ fn list_nextvol(args: &Args, ctx: &ExecContext, cat: &CatalogHandle, out: &mut L
 /// restriction. HasVolumeExpired volumes are skipped (upstream marks them
 /// Full/Used in the catalog and searches again).
 fn find_next_volume(cat: &CatalogHandle, pool_id: &str, media_type: &str, storage_id: &str, mut in_changer: bool) -> Option<String> {
-    let now = chrono::Utc::now().timestamp();
+    let now = crate::localtime::now();
     loop {
         let changer = if in_changer { format!("AND InChanger=1 AND StorageId={storage_id}") } else { String::new() };
         for status in ["Append", "Unlabeled"] {
@@ -1643,12 +1641,11 @@ fn find_next_volume(cat: &CatalogHandle, pool_id: &str, media_type: &str, storag
 fn triggers_within(run: &super::show::RunSpec, start: i64, ndays: i64) -> bool {
     let mut time = start;
     for d in 0..=ndays {
-        if let Some(tm) = Local.timestamp_opt(time, 0).single() {
-            if triggers_on_day(run, &tm) {
-                let first = if d == 0 { tm.hour() as usize } else { 0 };
-                if run.hour[first..].iter().any(|h| *h) {
-                    return true;
-                }
+        let tm = crate::localtime::local_tm(time);
+        if triggers_on_day(run, &tm) {
+            let first = if d == 0 { tm.tm_hour as usize } else { 0 };
+            if run.hour[first..].iter().any(|h| *h) {
+                return true;
             }
         }
         time += 24 * 60 * 60;
@@ -1657,30 +1654,29 @@ fn triggers_within(run: &super::show::RunSpec, start: i64, ndays: i64) -> bool {
 }
 
 /// dird/date_time_mask.cc TriggersOnDay with dird/date_time.cc DateTime.
-fn triggers_on_day(run: &super::show::RunSpec, tm: &chrono::DateTime<Local>) -> bool {
-    let mday = tm.day0() as usize;
-    let yday = tm.ordinal0() as i64;
+fn triggers_on_day(run: &super::show::RunSpec, tm: &libc::tm) -> bool {
+    let mday = tm.tm_mday as usize - 1;
+    let yday = i64::from(tm.tm_yday);
     // LastDayOfMonth uses tm_year (years since 1900) for the leap year test
-    let year = tm.year() as i64 - 1900;
+    let year = i64::from(tm.tm_year);
     let leap = year % 400 == 0 || (year % 100 != 0 && year % 4 == 0);
     let last_days: [i64; 12] = if leap {
         [30, 59, 90, 120, 151, 181, 212, 243, 273, 304, 334, 365]
     } else {
         [30, 58, 89, 119, 150, 180, 211, 242, 272, 303, 333, 364]
     };
-    let last_7days = last_days[tm.month0() as usize] - 7 < yday;
+    let last_7days = last_days[tm.tm_mon as usize] - 7 < yday;
     run.mday[mday]
-        && run.wday[tm.weekday().num_days_from_sunday() as usize]
-        && run.month[tm.month0() as usize]
+        && run.wday[tm.tm_wday as usize]
+        && run.month[tm.tm_mon as usize]
         && (run.wom.get(mday / 7).copied().unwrap_or(false) || (last_7days && run.last_7days))
         && run.woy.get(week_of_year(tm)).copied().unwrap_or(false)
 }
 
 /// lib/btime.cc TmWoy: ISO-like week of the year (week of 4 January = 1).
-fn week_of_year(tm: &chrono::DateTime<Local>) -> usize {
-    let yday = tm.ordinal0() as i64;
-    let jan4 = chrono::NaiveDate::from_ymd_opt(tm.year(), 1, 4).map(|d| d.weekday().num_days_from_sunday() as i64)
-        .unwrap_or(0);
+fn week_of_year(tm: &libc::tm) -> usize {
+    let yday = i64::from(tm.tm_yday);
+    let jan4 = i64::from(crate::localtime::local_tm(crate::localtime::local_time(tm.tm_year + 1900, 1, 4, 12)).tm_wday);
     let mut fty = 1 - jan4;
     if fty <= 0 {
         fty += 7;
@@ -1777,8 +1773,7 @@ mod tests {
 
     #[test]
     fn week_of_year_like_tm_woy() {
-        let at = |y, m, d| Local.from_local_datetime(&chrono::NaiveDate::from_ymd_opt(y, m, d).unwrap()
-            .and_hms_opt(12, 0, 0).unwrap()).single().unwrap();
+        let at = |y, m, d| crate::localtime::local_tm(crate::localtime::local_time(y, m, d, 12));
         // 4 January 2026 is a Sunday: fty = 1, woy = yday + 3
         assert_eq!(week_of_year(&at(2026, 1, 1)), 1);
         assert_eq!(week_of_year(&at(2026, 10, 15)), 42);
@@ -1788,8 +1783,7 @@ mod tests {
     fn schedule_runs_within_days() {
         use bareos_config::raw::Tok;
         let run = |spec: &str| super::super::show::parse_run(&spec.split(' ').map(|w| Tok::Word(w.into())).collect::<Vec<_>>());
-        let at = |y, m, d, h| Local.from_local_datetime(&chrono::NaiveDate::from_ymd_opt(y, m, d).unwrap()
-            .and_hms_opt(h, 0, 0).unwrap()).single().unwrap().timestamp();
+        let at = |y, m, d, h| crate::localtime::local_time(y, m, d, h);
         // Thursday 15 October 2026
         assert!(triggers_within(&run("Incremental mon-fri at 21:00"), at(2026, 10, 15, 12), 0));
         assert!(!triggers_within(&run("Incremental mon-fri at 21:00"), at(2026, 10, 15, 22), 0));

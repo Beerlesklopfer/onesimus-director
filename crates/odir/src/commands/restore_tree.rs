@@ -872,12 +872,7 @@ fn encode_mode(mode: u32) -> String {
 
 /// encode_time(): local time "YYYY-MM-DD HH:MM:SS".
 fn encode_time(time: i64) -> String {
-    use chrono::TimeZone;
-    match chrono::Local.timestamp_opt(time, 0) {
-        chrono::LocalResult::Single(t) | chrono::LocalResult::Ambiguous(t, _) =>
-            t.format("%Y-%m-%d %H:%M:%S").to_string(),
-        chrono::LocalResult::None => String::new(),
-    }
+    crate::localtime::format(time, "%Y-%m-%d %H:%M:%S")
 }
 
 /// Catalog lookups of the tree commands (BareosDb::GetFileAttributesRecord

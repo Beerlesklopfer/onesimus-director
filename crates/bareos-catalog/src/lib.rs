@@ -94,7 +94,8 @@ impl CatalogDb {
     pub async fn get_job(&self, job_id: JobId) -> Result<JobRecord, CatalogError> {
         sqlx::query_as::<_, JobRecord>(
             "SELECT JobId, Job, Name, Type, Level, ClientId, JobStatus, \
-             SchedTime, StartTime, EndTime, RealEndTime, JobTDate, \
+             SchedTime::text AS schedtime, StartTime::text AS starttime, \
+             EndTime::text AS endtime, RealEndTime::text AS realendtime, JobTDate, \
              VolSessionId, VolSessionTime, JobFiles, JobBytes, JobErrors, \
              PoolId, FileSetId, PriorJobId, Comment \
              FROM Job WHERE JobId = $1"

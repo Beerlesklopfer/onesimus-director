@@ -223,7 +223,7 @@ pub fn start(config: &DirectorConfig, catalog: Option<&CatalogHandle>, req: &Req
         let mut msgs = Vec::new();
         let id = crate::commands::pool_db::get_or_create_pool_record(config, catalog, name,
             crate::backup::POOL_CREATED, crate::backup::POOL_NOT_IN_DB, &mut msgs);
-        let now = chrono::Utc::now().timestamp();
+        let now = crate::localtime::now();
         for (msg_type, text) in msgs {
             crate::console_msg::job_message(config, &job.name, job_id, msg_type, now, &text);
         }

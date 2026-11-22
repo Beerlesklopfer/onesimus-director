@@ -9,7 +9,6 @@
 use bareos_bnet::{BnetMessage, BnetSignal, BnetStream};
 use bareos_config::raw::Directive;
 use bareos_config::resources::JobType;
-use chrono::TimeZone;
 
 use crate::acl::{self, Kind};
 use crate::catalog_worker::CatalogHandle;
@@ -287,7 +286,7 @@ fn estimate_job(ast: &CommandAst, ctx: &ExecContext, mut reply: Reply, job: Opti
         }
     }
 
-    let start_time = chrono::Local::now().timestamp();
+    let start_time = crate::localtime::now();
     let Some(catalog) = ctx.catalog.as_ref() else { return reply.done() };
     // ua_cmds.cc:1871-1873: GetOrCreateClientRecord, GetOrCreateFilesetRecord
     // – a client or FileSet that never ran gets its record here, as in
@@ -338,7 +337,7 @@ fn level_since_time(catalog: &CatalogHandle, plan: &Plan, level: &mut Level, cli
     if !matches!(*level, Level::Incremental | Level::Differential) {
         return (String::new(), String::new());
     }
-    let now = chrono::Local::now().timestamp();
+    let now = crate::localtime::now();
     let name = escape(&plan.job_name);
     let query = |levels: &str| format!(
         "SELECT StartTime, Job FROM Job WHERE JobStatus IN ('T','W') AND Type='B' AND \
@@ -405,8 +404,7 @@ fn estimate_on_fd<S: std::io::Read + std::io::Write>(fd: &mut BnetStream<S>, cat
     const CONNECT_FAILED: &str = "Failed to connect to Client.\n";
     // SendJobInfoToFileDaemon(): JobId 0, the console's unique job name.
     let job = format!("-Console-.{}_{:02}",
-        chrono::Local.timestamp_opt(start_time, 0).single().map(|t| t.format("%Y-%m-%d_%H.%M.%S").to_string())
-            .unwrap_or_default(), 1);
+        crate::localtime::format(start_time, "%Y-%m-%d_%H.%M.%S"), 1);
     send(fd, &format!("JobId=0 Job={job} SDid=0 SDtime=0 Authorization=dummy ssl=4\n"))
         .map_err(|_| CONNECT_FAILED.to_string())?;
     match fd_protocol::get_dir_msg(fd).map_err(|_| CONNECT_FAILED.to_string())? {
@@ -557,8 +555,7 @@ fn send_accurate_files<S: std::io::Read + std::io::Write>(fd: &mut BnetStream<S>
     if !accurate || matches!(level, Level::Base | Level::Full) {
         return Ok(());
     }
-    let date = chrono::Local.timestamp_opt(start_time + 1, 0).single()
-        .map(|t| t.format("%Y-%m-%d %H:%M:%S").to_string()).unwrap_or_default();
+    let date = crate::localtime::format(start_time + 1, "%Y-%m-%d %H:%M:%S");
     let ids = |sql: String| -> Result<Vec<String>, String> {
         Ok(catalog.query_rows(&sql)?.rows.into_iter().filter_map(|r| r.into_iter().next().flatten()).collect())
     };

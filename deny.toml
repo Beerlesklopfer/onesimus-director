@@ -11,9 +11,7 @@ all-features = false
 # unmaintained/yanked melden, aber nicht scheitern lassen; Schwachstellen scheitern
 unmaintained = "workspace"
 yanked = "warn"
-ignore = [
-    { id = "RUSTSEC-2026-0543", reason = "chrono unmaintained; replacement tracked in docs/STUBS.md S-58" },
-]
+ignore = []
 
 [licenses]
 confidence-threshold = 0.9

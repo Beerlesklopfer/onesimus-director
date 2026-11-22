@@ -32,7 +32,7 @@ serde_json.workspace = true
 rustls.workspace = true
 libc.workspace = true
 clap.workspace = true
-chrono = "0.4"
+jiff.workspace = true
 walkdir = "2"
 flate2 = "1"
 md5 = { package = "md-5", version = "0.10" }

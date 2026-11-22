@@ -43,7 +43,8 @@ prost = "0.13"
 prost-types = "0.13"
 
 # Database
-sqlx = { version = "0.8", features = ["runtime-tokio", "tls-rustls", "postgres", "chrono"] }
+jiff = "0.2"
+sqlx = { version = "0.8", features = ["runtime-tokio", "tls-rustls", "postgres"] }
 
 # Parsing
 nom = "7"

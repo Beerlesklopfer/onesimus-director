@@ -551,6 +551,42 @@ fn record_ovfs(target: &std::sync::RwLock<crate::ovfs::Capability>, capability: 
 // Async handlers — one per CatalogRequest variant
 // ---------------------------------------------------------------------------
 
+/// Unix `seconds` as "YYYY-MM-DD HH:MM:SS" in UTC.
+fn utc_text(seconds: i64) -> String {
+    let (days, rest) = (seconds.div_euclid(86_400), seconds.rem_euclid(86_400));
+    // days since 1970-01-01 to year/month/day (H. Hinnant, days_from_civil inverted)
+    let z = days + 719_468;
+    let era = z.div_euclid(146_097);
+    let doe = z.rem_euclid(146_097);
+    let yoe = (doe - doe / 1_460 + doe / 36_524 - doe / 146_096) / 365;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    let mp = (5 * doy + 2) / 153;
+    let day = doy - (153 * mp + 2) / 5 + 1;
+    let month = if mp < 10 { mp + 3 } else { mp - 9 };
+    let year = yoe + era * 400 + i64::from(month <= 2);
+    format!("{year:04}-{month:02}-{day:02} {:02}:{:02}:{:02}", rest / 3_600, rest % 3_600 / 60, rest % 60)
+}
+
+/// A `timestamp`/`timestamptz` column as "YYYY-MM-DD HH:MM:SS" (UTC, like the
+/// naive value), read from the binary wire format: 8 bytes, microseconds
+/// since 2000-01-01 00:00:00. `None` for NULL and other column types.
+fn timestamp_text(row: &sqlx::postgres::PgRow, ordinal: usize) -> Option<String> {
+    use sqlx::{Row, TypeInfo, ValueRef};
+    /// Seconds from 1970-01-01 to 2000-01-01.
+    const POSTGRES_EPOCH: i64 = 946_684_800;
+    let raw = row.try_get_raw(ordinal).ok()?;
+    if raw.is_null() || !matches!(raw.type_info().name(), "TIMESTAMP" | "TIMESTAMPTZ") {
+        return None;
+    }
+    if raw.format() == sqlx::postgres::PgValueFormat::Text {
+        // "2026-11-22 10:00:00.123456+00": the first 19 characters
+        return raw.as_str().ok()?.get(..19).map(str::to_string);
+    }
+    let micros = i64::from_be_bytes(raw.as_bytes().ok()?.try_into().ok()?);
+    let seconds = POSTGRES_EPOCH + micros.div_euclid(1_000_000);
+    Some(utc_text(seconds))
+}
+
 async fn handle_raw_query(pool: &sqlx::PgPool, sql: &str) -> CatalogResponse {
     let rows = match sqlx::query(sql).fetch_all(pool).await {
         Ok(r) => r,
@@ -579,8 +615,7 @@ async fn handle_raw_query(pool: &sqlx::PgPool, sql: &str) -> CatalogResponse {
                 .or_else(|_| row.try_get::<i64, _>(col.ordinal()).map(|v| v.to_string()))
                 .or_else(|_| row.try_get::<i32, _>(col.ordinal()).map(|v| v.to_string()))
                 .or_else(|_| row.try_get::<bool, _>(col.ordinal()).map(|v| v.to_string()))
-                .or_else(|_| row.try_get::<chrono::NaiveDateTime, _>(col.ordinal()).map(|v| v.format("%Y-%m-%d %H:%M:%S").to_string()))
-                .or_else(|_| row.try_get::<chrono::DateTime<chrono::Utc>, _>(col.ordinal()).map(|v| v.format("%Y-%m-%d %H:%M:%S").to_string()))
+                .or_else(|e| timestamp_text(row, col.ordinal()).ok_or(e))
                 .unwrap_or_else(|_| "NULL".to_string());
             output.push_str(&format!("{:<20}", val));
         }
@@ -1085,5 +1120,21 @@ mod within_tests {
         let error = handle.execute_within("DELETE FROM onesimus.console_acl", Duration::from_secs(1)).unwrap_err();
         assert!(error.contains("within 1 s") || error.contains("connect") || error.contains("refused"), "{error}");
         assert!(start.elapsed() < Duration::from_secs(4), "{:?}", start.elapsed());
+    }
+}
+
+#[cfg(test)]
+mod utc_text_tests {
+    use super::utc_text;
+
+    #[test]
+    fn unix_seconds_become_utc_dates() {
+        assert_eq!(utc_text(0), "1970-01-01 00:00:00");
+        assert_eq!(utc_text(1_700_000_000), "2023-11-14 22:13:20");
+        // leap day and the PostgreSQL epoch
+        assert_eq!(utc_text(951_782_400), "2000-02-29 00:00:00");
+        assert_eq!(utc_text(946_684_800), "2000-01-01 00:00:00");
+        // before 1970
+        assert_eq!(utc_text(-1), "1969-12-31 23:59:59");
     }
 }

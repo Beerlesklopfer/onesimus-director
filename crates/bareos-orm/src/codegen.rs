@@ -10,7 +10,7 @@ pub fn generate_rust_models(schema: &CatalogSchema) -> String {
     code.push_str(&format!("// Schema Version: {}\n", schema.version));
     code.push_str("// DO NOT EDIT — regenerate with bareos-orm codegen\n\n");
     code.push_str("use serde::{Serialize, Deserialize};\n");
-    code.push_str("use chrono::NaiveDateTime;\n\n");
+    code.push_str("\n");
 
     for table in &schema.tables {
         code.push_str(&generate_struct(table));
@@ -50,7 +50,7 @@ fn sql_to_rust_type(sql_type: &str, nullable: bool) -> String {
         "boolean" | "bool" => "bool",
         "text" | "varchar" => "String",
         "char(1)" => "String",
-        "timestamp" | "timestamptz" => "NaiveDateTime",
+        "timestamp" | "timestamptz" => "String",
         "jsonb" | "json" => "serde_json::Value",
         "bytea" => "Vec<u8>",
         "real" | "float4" => "f32",
@@ -94,7 +94,7 @@ mod tests {
         assert_eq!(sql_to_rust_type("bigint", false), "i64");
         assert_eq!(sql_to_rust_type("text", false), "String");
         assert_eq!(sql_to_rust_type("boolean", false), "bool");
-        assert_eq!(sql_to_rust_type("timestamp", true), "Option<NaiveDateTime>");
+        assert_eq!(sql_to_rust_type("timestamp", true), "Option<String>");
         assert_eq!(sql_to_rust_type("jsonb", true), "Option<serde_json::Value>");
     }
 
@@ -119,7 +119,7 @@ mod tests {
         assert!(code.contains("pub struct Job"));
         assert!(code.contains("pub jobid: i32"));
         assert!(code.contains("pub name: String"));
-        assert!(code.contains("pub starttime: Option<NaiveDateTime>"));
+        assert!(code.contains("pub starttime: Option<String>"));
         assert!(code.contains("pub metadata: Option<serde_json::Value>"));
     }
 }

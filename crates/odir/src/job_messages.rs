@@ -732,9 +732,11 @@ mod tests {
     }
 
     fn local(text: &str) -> i64 {
-        let t = chrono::NaiveDateTime::parse_from_str(text, "%Y-%m-%d %H:%M:%S").unwrap();
-        use chrono::TimeZone;
-        chrono::Local.from_local_datetime(&t).single().unwrap().timestamp()
+        let n: Vec<i32> = text.split(|c| c == '-' || c == ' ' || c == ':').map(|x| x.parse().unwrap()).collect();
+        let mut tm: libc::tm = unsafe { std::mem::zeroed() };
+        (tm.tm_year, tm.tm_mon, tm.tm_mday) = (n[0] - 1900, n[1] - 1, n[2]);
+        (tm.tm_hour, tm.tm_min, tm.tm_sec, tm.tm_isdst) = (n[3], n[4], n[5], -1);
+        unsafe { libc::mktime(&mut tm) as i64 }
     }
 
     fn report_626() -> JobReport {
