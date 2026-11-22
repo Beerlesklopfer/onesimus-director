@@ -134,7 +134,7 @@ fn fileset_items(cfg: &DirectorConfig, name: &str) -> Option<FilesetItems> {
     }
     let enable_vss = res.directives.iter().rev().find(|d| d.norm_key() == "enablevss")
         .and_then(|d| d.first())
-        .is_some_and(|v| bareos_config::values::parse_bool(v).map(|(_, v)| v).unwrap_or(false));
+        .map_or(true, |v| bareos_config::values::parse_bool(v).map(|(_, v)| v).unwrap_or(false)); // EnableVSS = yes by default
     Some(FilesetItems { enable_vss, includes, excludes })
 }
 

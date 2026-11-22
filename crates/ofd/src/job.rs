@@ -69,6 +69,8 @@ pub struct Session<'a> {
     old_sd: Vec<SdStream>,
     /// "pluginoptions" of a restore: plugin lines with restore options.
     plugin_options: Vec<String>,
+    /// The VSS shadow copies of this job (Windows, `fileset vss=1`).
+    vss: Option<crate::vss::Guard>,
 }
 
 /// Command handler: false ends the command loop.
@@ -98,6 +100,7 @@ impl<'a> Session<'a> {
             end_block: 0,
             bootstrap: Vec::new(),
             fileset: None,
+            vss: None,
             level: b' ',
             incremental: false,
             since_time: 0,
@@ -199,9 +202,11 @@ impl<'a> Session<'a> {
                 self.msgs.set_status(JS_CANCELED);
             }
             let c = self.counters;
+            // the shadow copies are deleted before the Director hears the end
+            let vss = u8::from(self.vss.take().is_some());
             let end = format!(
-                "2800 End Job TermCode={} JobFiles={} ReadBytes={} JobBytes={} Errors={} VSS=0 Encrypt=0\n",
-                self.msgs.status(), c.job_files, c.read_bytes, c.job_bytes, self.msgs.job_errors
+                "2800 End Job TermCode={} JobFiles={} ReadBytes={} JobBytes={} Errors={} VSS={} Encrypt=0\n",
+                self.msgs.status(), c.job_files, c.read_bytes, c.job_bytes, self.msgs.job_errors, vss
             );
             info!("job {} ({}) ended: {}", self.msgs.job_id, self.msgs.job, end.trim_end());
             self.reply(dir, &end);

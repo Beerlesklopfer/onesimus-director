@@ -62,7 +62,7 @@ fn backup_and_restore_through_the_windows_fd() {
     options.start_fd = false;
     options.extra_director = vec![
         ("client/vfd.conf".into(), format!("Client {{\n  Name = vfd\n  Address = {host}\n  FD Port = 19102\n  Password = \"vfd-pw\"\n  Passive = yes\n}}\n")),
-        ("fileset/VSet.conf".into(), format!("FileSet {{\n  Name = VSet\n  Include {{\n    Options {{\n      Signature = MD5\n      Compression = GZIP\n      HardLinks = yes\n    }}\n    File = {DATA}\n  }}\n}}\n")),
+        ("fileset/VSet.conf".into(), format!("FileSet {{\n  Name = VSet\n  EnableVSS = no\n  Include {{\n    Options {{\n      Signature = MD5\n      Compression = GZIP\n      HardLinks = yes\n    }}\n    File = {DATA}\n  }}\n}}\n")),
     ];
     let rig = Rig::start(options).unwrap_or_else(|e| panic!("Gerüst startet nicht: {e}"));
 
@@ -96,8 +96,7 @@ fn backup_and_restore_through_the_windows_fd() {
     assert!(numbers.len() == 2 && numbers[0] == numbers[1] && numbers[0] != "0", "{compare}");
     assert!(compare.contains("bad=0"), "{compare}");
 
-    // A file another program holds open without sharing cannot be read (no
-    // VSS): the job reports it and saves the rest.
+    // A file another program holds open without sharing cannot be read (EnableVSS = no): the job reports it and saves the rest.
     put(&host, "hold.ps1");
     eprintln!("lock: {}", vm(&host, "lock.ps1"));
     let again = rig.run_job("VBackup").unwrap_or_else(|e| panic!("{e}"));
@@ -223,5 +222,49 @@ fn a_file_over_four_gigabytes_through_the_windows_fd() {
     let compare = vm(&host, "big-cmp.ps1");
     eprintln!("compare:\n{compare}");
     assert!(compare.contains("bad=0"), "{compare}");
+    let _ = vm(&host, "stop.ps1");
+}
+
+/// A file another program holds open without sharing is saved from a VSS
+/// shadow copy (`EnableVSS = yes`, the default) and restored with its content.
+#[test]
+#[ignore = "needs a running ofd.exe on a Windows host (ONESIMUS_WINDOWS_FD)"]
+fn a_locked_file_is_saved_from_a_shadow_copy_on_windows() {
+    let Some(host) = std::env::var_os("ONESIMUS_WINDOWS_FD").and_then(|h| h.into_string().ok()) else {
+        panic!("ONESIMUS_WINDOWS_FD is not set");
+    };
+    onesimus_rig::build_workspace_binaries().unwrap_or_else(|e| panic!("{e}"));
+    eprintln!("deploy:\n{}", vm(&host, "deploy.ps1"));
+    eprintln!("prep:\n{}", vm(&host, "prep.ps1"));
+    let mut options = RigOptions::new(39991);
+    options.start_fd = false;
+    options.extra_director = vec![
+        ("client/vfd.conf".into(), format!("Client {{\n  Name = vfd\n  Address = {host}\n  FD Port = 19102\n  Password = \"vfd-pw\"\n  Passive = yes\n}}\n")),
+        ("fileset/VSet.conf".into(), format!("FileSet {{\n  Name = VSet\n  EnableVSS = yes\n  Include {{\n    Options {{\n      Signature = MD5\n      Compression = GZIP\n      HardLinks = yes\n    }}\n    File = {DATA}\n  }}\n}}\n")),
+    ];
+    let rig = Rig::start(options).unwrap_or_else(|e| panic!("Gerüst startet nicht: {e}"));
+
+    put(&host, "hold.ps1");
+    let locked = vm(&host, "lock.ps1");
+    eprintln!("lock: {locked}");
+    assert!(locked.contains("locked: True"), "the file is not locked: {locked}");
+    let backup = rig.run_job("VBackup").unwrap_or_else(|e| panic!("{e}"));
+    let row = rig.wait_job(backup, Duration::from_secs(300)).unwrap_or_else(|e| panic!("{e}"));
+    let log = rig.job_log(backup);
+    eprintln!("backup with VSS: {row:?}\n{log}");
+    let _ = vm(&host, "unlock.ps1");
+    assert!(log.contains("VSS: reading from the shadow copy of D:"), "no shadow copy was used:\n{log}");
+    assert!(!log.contains("Cannot open") && !log.contains("locked.bin: "), "the locked file was not read:\n{log}");
+    assert_eq!(row.status, 'T', "backup: {row:?}\n{log}");
+
+    let reply = rig
+        .command(&format!("restore jobid={backup} client=vfd where={RESTORE} all done yes"))
+        .unwrap_or_else(|e| panic!("{e}"));
+    let restore = queued_job_id(&reply).unwrap_or_else(|| panic!("restore: no JobId\n{reply}"));
+    let row = rig.wait_job(restore, Duration::from_secs(300)).unwrap_or_else(|e| panic!("{e}"));
+    assert_eq!(row.status, 'T', "restore: {row:?}\n{}", rig.job_log(restore));
+    let content = vm(&host, "show-locked.ps1");
+    eprintln!("restored locked.bin: {content}");
+    assert!(content.contains("locked content"), "the restored file has not the content of the locked one: {content}");
     let _ = vm(&host, "stop.ps1");
 }

@@ -70,6 +70,7 @@ mod trust_acl;
 #[cfg(windows)]
 mod win_trust;
 mod version;
+mod vss;
 mod winattr;
 #[cfg(windows)]
 mod winfs;

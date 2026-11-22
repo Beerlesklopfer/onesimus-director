@@ -306,7 +306,7 @@ impl Session<'_> {
     }
 
     /// FilesetCmd()
-    pub(super) fn fileset_cmd<S: Read + Write>(&mut self, dir: &mut BnetStream<S>, _cmd: &str) -> bool {
+    pub(super) fn fileset_cmd<S: Read + Write>(&mut self, dir: &mut BnetStream<S>, cmd: &str) -> bool {
         if self.fileset.is_some() {
             return false;
         }
@@ -328,7 +328,34 @@ impl Session<'_> {
         if !ok {
             return false;
         }
+        if cmd.contains("vss=1") {
+            self.start_vss();
+        }
         self.reply(dir, "2000 OK include\n")
+    }
+
+    /// `fileset vss=1`: a shadow copy of each drive in the include list
+    /// (Windows). A failure is a warning; the job goes on without the copy.
+    fn start_vss(&mut self) {
+        #[cfg(windows)]
+        {
+            let Some(fs) = self.fileset.as_ref() else { return };
+            let mut drives: Vec<u8> = fs.include.iter().flat_map(|i| i.names.iter()).filter_map(|n| crate::vss::drive_of(n)).collect();
+            drives.sort_unstable();
+            drives.dedup();
+            if drives.is_empty() {
+                return;
+            }
+            let (guard, errors) = crate::vss::acquire(&drives);
+            for e in errors {
+                self.msgs.jmsg(M_WARNING, &format!("VSS: no shadow copy of drive {e}; files other programs hold open cannot be saved\n"));
+            }
+            if !guard.drives().is_empty() {
+                let list: Vec<String> = guard.drives().iter().map(|&d| format!("{}:", d as char)).collect();
+                self.msgs.jmsg(M_INFO, &format!("VSS: reading from the shadow copy of {}\n", list.join(", ")));
+                self.vss = Some(guard);
+            }
+        }
     }
 
     /// AccurateCmd(): "accurate files=%u", then the file records. No reply.

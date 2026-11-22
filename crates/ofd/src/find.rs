@@ -176,7 +176,7 @@ pub fn stat_of_ex(p: &[u8]) -> Result<(Stat, Vec<u8>), i32> {
     }
     #[cfg(windows)]
     {
-        crate::winfs::stat_ex(p).map(|(st, meta)| (st, crate::winattr::encode(&meta)))
+        crate::winfs::stat_ex(&crate::vss::translate(p)).map(|(st, meta)| (st, crate::winattr::encode(&meta)))
     }
 }
 
@@ -184,7 +184,7 @@ pub fn stat_of_ex(p: &[u8]) -> Result<(Stat, Vec<u8>), i32> {
 /// Bareos: `GetVolumeInformationW`).
 #[cfg(windows)]
 pub fn fstype(fname: &[u8]) -> Option<String> {
-    crate::winfs::fstype(fname)
+    crate::winfs::fstype(&crate::vss::translate(fname))
 }
 
 /// RestoreFileTimes() on Windows: the access and modification time the
@@ -375,7 +375,7 @@ impl<'a> Finder<'a> {
                 r
             }
             crate::stmode::S_IFLNK => {
-                match std::fs::read_link(std::ffi::OsStr::from_bytes(&fname)) {
+                match std::fs::read_link(std::ffi::OsStr::from_bytes(&crate::vss::translate(&fname))) {
                     Ok(t) => {
                         ff.link = t.as_os_str().as_bytes().to_vec();
                         ff.type_ = FT_LNK;
@@ -421,7 +421,7 @@ impl<'a> Finder<'a> {
             let mut p = fname.to_vec();
             p.push(b'/');
             p.extend_from_slice(i.as_bytes());
-            std::fs::metadata(std::ffi::OsStr::from_bytes(&p)).is_ok()
+            std::fs::metadata(std::ffi::OsStr::from_bytes(&crate::vss::translate(&p))).is_ok()
         })
     }
 
@@ -470,7 +470,7 @@ impl<'a> Finder<'a> {
             return r;
         }
         ff.link = ff.fname.clone();
-        let dir = match std::fs::read_dir(std::ffi::OsStr::from_bytes(&fname)) {
+        let dir = match std::fs::read_dir(std::ffi::OsStr::from_bytes(&crate::vss::translate(&fname))) {
             Ok(d) => d,
             Err(e) => {
                 ff.type_ = FT_NOOPEN;

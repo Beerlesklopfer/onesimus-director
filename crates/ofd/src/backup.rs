@@ -194,7 +194,7 @@ pub struct JobEnv<'a> {
 fn open_for_backup(ff: &FfPkt, data_stream: i32) -> std::io::Result<Box<dyn Read>> {
     #[cfg(windows)]
     if is_win32_stream(data_stream) {
-        return crate::winfs::open_backup_reader(&ff.fname).map(|r| Box::new(r) as Box<dyn Read>);
+        return crate::winfs::open_backup_reader(&crate::vss::translate(&ff.fname)).map(|r| Box::new(r) as Box<dyn Read>);
     }
     let _ = data_stream;
     let mut opts = std::fs::OpenOptions::new();
