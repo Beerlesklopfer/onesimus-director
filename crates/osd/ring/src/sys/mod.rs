@@ -17,7 +17,7 @@
 //! Gewartet wird immer mit Zeitgrenze (der Ring nimmt 100 ms), damit die
 //! Lebendprüfungen auch nach einem verlorenen Wecken laufen. Auf macOS und
 //! Windows fragt `wait` das Wort ab (erst `yield_now`, dann Schlaf bis
-//! 1 ms), `wake` ist leer ([`wait_other`]).
+//! 1 ms), `wake` ist leer (`wait_other.rs`).
 
 use std::fs::OpenOptions;
 use std::io;
