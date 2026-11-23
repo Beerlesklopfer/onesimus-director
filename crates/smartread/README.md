@@ -31,7 +31,7 @@ started, no SMART setting is changed.
 
 | Platform | ATA | NVMe | State |
 |---|---|---|---|
-| **Linux** (`SG_IO`, `NVME_IOCTL_ADMIN_CMD`) | yes | yes | ATA verified on two WD Red 2 TB SATA disks on a 32-bit (`i686-unknown-linux-musl`) machine: every attribute, threshold, self test status and the health verdict equal the output of `smartctl 7.5`. The NVMe ioctl number and the parsers are tested; reading a real NVMe drive is **not yet verified** (it needs root). |
+| **Linux** (`SG_IO`, `NVME_IOCTL_ADMIN_CMD`) | yes | yes | ATA verified on two WD Red 2 TB SATA disks on a 32-bit (`i686-unknown-linux-musl`) machine: every attribute, threshold, self test status and the health verdict equal the output of `smartctl 7.5`. NVMe read on a Samsung SSD 990 PRO 2 TB (identity, temperature, spare, endurance, counters, plausible); a comparison with `smartctl` output is still to be made. |
 | **Windows** (`IOCTL_ATA_PASS_THROUGH`, `IOCTL_STORAGE_QUERY_PROPERTY`) | yes | yes | compiles and runs; opening the drive and the error path were checked on a Windows 11 virtual machine, whose VirtIO disks refuse both commands (`ERROR_INVALID_FUNCTION`). Reading real SMART data on Windows is **not yet verified**. |
 | **macOS** | – | – | **not implemented yet** (the plan is `IOKit`: `IOATASMARTInterface` and the NVMe SMART user client). `read` returns `Error::Unsupported`. |
 
