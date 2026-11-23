@@ -82,7 +82,6 @@ pub fn accept_loop(
         listener.set_nonblocking(true).ok();
     }
 
-    let open = Arc::new(AtomicUsize::new(0));
     while !shutdown.load(Ordering::Relaxed) {
         let mut idle = true;
         for listener in &config.listeners {
@@ -92,16 +91,6 @@ pub fn accept_loop(
                     debug!("new connection from {peer_addr}");
                     stream.set_nonblocking(false).ok();
                     stream.set_nodelay(true).ok(); // Disable Nagle — EOD signal must arrive immediately
-
-                    // Maximum Console Connections (read per connection, so a reload applies)
-                    let limit = max_console_connections(&config.shared_config);
-                    let in_use = open.fetch_add(1, Ordering::AcqRel);
-                    if connection_refused(in_use, limit) {
-                        open.fetch_sub(1, Ordering::AcqRel);
-                        warn!("connection from {peer_addr} refused: {in_use} connections open, Maximum Console Connections = {limit}");
-                        continue;
-                    }
-                    let slot = OpenSlot(open.clone());
 
                     let smgr = session_mgr.clone();
                     let q = cmd_queue.clone();
@@ -115,7 +104,6 @@ pub fn accept_loop(
                     thread::Builder::new()
                         .name(format!("dir:session:{session_id}"))
                         .spawn(move || {
-                            let _slot = slot; // released when the session ends
                             handle_connection(stream, session_id, &password, tls_cfg, &smgr, &q, &shared_cfg, &job_mgr, &cat);
                         })
                         .ok();
@@ -134,12 +122,23 @@ pub fn accept_loop(
     info!("accept loop stopped");
 }
 
-/// One connection counted against `Maximum Console Connections`.
-struct OpenSlot(Arc<AtomicUsize>);
+/// The console connections that are open (`ConsoleConnectionLease::num_leases`).
+static CONSOLE_LEASES: AtomicUsize = AtomicUsize::new(0);
 
-impl Drop for OpenSlot {
+/// One console connection, counted from the Hello until the session ends
+/// (`ConsoleConnectionLease`, dird/console_connection_lease.h).
+struct ConsoleLease;
+
+impl ConsoleLease {
+    /// Counts one more console connection; the value includes this one.
+    fn take() -> (ConsoleLease, usize) {
+        (ConsoleLease, CONSOLE_LEASES.fetch_add(1, Ordering::AcqRel) + 1)
+    }
+}
+
+impl Drop for ConsoleLease {
     fn drop(&mut self) {
-        self.0.fetch_sub(1, Ordering::AcqRel);
+        CONSOLE_LEASES.fetch_sub(1, Ordering::AcqRel);
     }
 }
 
@@ -151,9 +150,11 @@ fn max_console_connections(shared_config: &Option<SharedConfig>) -> usize {
         .map_or(20, |c| c.director.max_console_connections as usize)
 }
 
-/// True when a connection arriving with `in_use` others open is over the limit.
-fn connection_refused(in_use: usize, limit: usize) -> bool {
-    in_use >= limit
+/// What authenticate.cc does with `num_leases` console connections against the limit:
+/// `None` below it (and at it), the message otherwise, and whether the connection is refused
+/// (the default console only gets the message at info level, a named console is refused).
+fn console_limit(leases: usize, limit: usize, default_console: bool) -> Option<(String, bool)> {
+    (leases > limit).then(|| (format!("Number of console connections exceeded Maximum :{limit}, Current: {leases}"), !default_console))
 }
 
 /// Handle a single incoming connection.
@@ -273,6 +274,8 @@ fn handle_hello<S: std::io::Read + std::io::Write>(
         Hello::FileDaemon { .. } => None,
     };
     if let Some(name) = console_name {
+        // ConsoleConnectionLease: taken before the authentication, held until the session ends
+        let (_lease, leases) = ConsoleLease::take();
         // ua_server.cc HandleUserAgentClientRequest(): new_control_jcr("-Console-")
         // takes a CreateUniqueJobName() sequence number before authentication.
         let _ = crate::commands::job::new_control_jcr_name("-Console-");
@@ -288,6 +291,15 @@ fn handle_hello<S: std::io::Read + std::io::Write>(
             warn!("session {session_id}: unknown console '{name}' or no password configured, rejected");
             return;
         };
+        // authenticate.cc: more console connections than `Maximum Console Connections`: the default
+        // console gets through with an info message, a named console is refused
+        if let Some((message, refused)) = console_limit(leases, max_console_connections(shared_config), matches!(hello, Hello::DefaultConsole)) {
+            if refused {
+                error!("session {session_id}: {message}");
+                return;
+            }
+            info!("session {session_id}: {message}");
+        }
         // C++ CreateConsoleAuthenticator: the Hello version selects the
         // protocol (before/from 18.2); an unparsable version is an invalid Hello
         let Some((_, _, version_number)) = name_type_and_version_from_hello(&hello_msg) else {
@@ -346,20 +358,25 @@ mod tests {
     }
 
     #[test]
-    fn the_connection_over_the_limit_is_refused() {
-        assert!(!connection_refused(0, 20));
-        assert!(!connection_refused(19, 20));
-        assert!(connection_refused(20, 20));
-        assert!(connection_refused(0, 0));
+    fn the_limit_counts_leases_like_authenticate_cc() {
+        // at the limit nothing happens; one more is over it
+        assert_eq!(console_limit(20, 20, false), None);
+        let (m, refused) = console_limit(21, 20, false).unwrap();
+        assert_eq!(m, "Number of console connections exceeded Maximum :20, Current: 21");
+        assert!(refused, "a named console is refused");
+        let (_, refused) = console_limit(21, 20, true).unwrap();
+        assert!(!refused, "the default console gets through");
     }
 
     #[test]
-    fn a_slot_is_released_when_dropped() {
-        let n = Arc::new(AtomicUsize::new(1));
-        drop(OpenSlot(n.clone()));
-        assert_eq!(n.load(Ordering::Acquire), 0);
+    fn a_lease_is_counted_and_released() {
+        let (lease, n) = ConsoleLease::take();
+        let (second, m) = ConsoleLease::take();
+        assert_eq!(m, n + 1);
+        drop(second);
+        drop(lease);
+        assert_eq!(ConsoleLease::take().1, n, "both leases are gone again");
     }
-
 
     /// A PAM that accepts the user `testuser` with the password `testpass`
     /// and asks like `pam_unix` does: the name (echoed) if it has none, then
