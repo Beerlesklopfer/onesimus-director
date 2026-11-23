@@ -7,9 +7,14 @@ bewusst anders verhält als `bareos-dir`. Die Kommandozeilenparameter stehen in
 
 `odir` ist ein Drop-in-Ersatz für `bareos-dir` 25: dieselbe Konfiguration,
 derselbe Katalog, dieselben Clients und Storage-Daemons. Der Rückweg auf
-`bareos-dir` muss jederzeit offen bleiben. Deshalb gibt es keine eigenen
-Direktiven für Einstellungen, die `bareos-dir` nicht kennt; solche
-Einstellungen laufen über Umgebungsvariablen (siehe unten).
+`bareos-dir` muss jederzeit offen bleiben. Deshalb stehen in `bareos-dir.d` keine
+Direktiven, die `bareos-dir` nicht kennt. Einstellungen von Onesimus liegen
+im Overlay `/etc/onesimus/odir.d/` (Option `--overlay`; `configure update …
+overlay` schreibt es, Näheres in [osd.md](osd.md#der-director-wertet-es-aus))
+oder laufen über Umgebungsvariablen (siehe unten). Dasselbe gilt für
+`osd.d/` und `ofd.d/` im selben Verzeichnis. Ältere Einträge dieser
+Direktiven in `bareos-dir.d` (gRPC, mDNS, DB Driver) nimmt `odir` noch an,
+warnt aber.
 
 ## Dienst
 

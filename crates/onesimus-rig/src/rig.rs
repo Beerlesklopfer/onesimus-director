@@ -306,7 +306,8 @@ impl Rig {
         if self.options.start_fd {
             let fd_conf = self.layout.fd_conf.display().to_string();
             let grpc_listen = format!("127.0.0.1:{}", self.ports.fd_grpc);
-            let mut fd_args = vec!["-f", "-c", &fd_conf, "-d", &debug];
+            let overlay = self.layout.root.join("onesimus").display().to_string();
+            let mut fd_args = vec!["-f", "-c", &fd_conf, "--overlay", &overlay, "-d", &debug];
             if self.options.fd_grpc.disabled() {
                 fd_args.push("--disable-grpc");
             } else {

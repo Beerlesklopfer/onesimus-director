@@ -44,6 +44,7 @@ mod pg_instance;
 #[cfg(unix)]
 mod pg_port;
 mod platform;
+mod overlay;
 mod paths;
 mod plugin;
 #[cfg(all(test, unix))]
@@ -140,6 +141,10 @@ struct Cli {
     /// Use <path> as configuration file or directory.
     #[arg(short, long, default_value = paths::CONFIG_DIR)]
     config: PathBuf,
+
+    /// Overlay directory: its `ofd.d/` extends the Bareos files (`-c`) with Onesimus directives.
+    #[arg(long, value_name = "DIR", default_value = "/etc/onesimus")]
+    overlay: PathBuf,
 
     /// Set debug level to <level>.
     #[arg(short, long, default_value_t = 0)]
@@ -296,21 +301,35 @@ fn run(cli: Cli, running: &dyn Fn(), wait: &dyn Fn()) -> i32 {
         }
     }
 
+    // Onesimus directives of the Client, from ofd.d/ (the command line wins)
+    let grpc_overlay = match overlay::load(&cli.overlay.join("ofd.d"), &fd_config.name) {
+        Ok(s) => s,
+        Err(e) => {
+            error!("{e}");
+            return 1;
+        }
+    };
     let port = fd_config.port;
     let shared_config = Arc::new(fd_config);
 
     // gRPC is the default control channel; it is started with a certificate
     // generated once in the working directory unless one is given. A listener
     // asked for explicitly must start, the default one only warns.
-    let grpc_handle = if cli.disable_grpc {
+    let grpc_handle = if cli.disable_grpc || !grpc_overlay.enable {
         None
     } else {
-        let explicit = cli.grpc_listen.is_some();
-        // Default: the BNET address (FD Address) on port + 1000.
+        let explicit = cli.grpc_listen.is_some() || grpc_overlay.port.is_some() || grpc_overlay.address.is_some();
+        // Default: the BNET address (FD Address) on port + 1000; `Grpc Port` and `Grpc Address` of ofd.d change it.
         let address = match cli.grpc_listen {
             Some(a) => a,
-            None => match shared_config.listen_addresses(port.saturating_add(1000)) {
-                Ok(a) => a[0],
+            None => match shared_config.listen_addresses(grpc_overlay.port.unwrap_or(port.saturating_add(1000))) {
+                Ok(a) => {
+                    let mut chosen = a[0];
+                    if let Some(ip) = grpc_overlay.address {
+                        chosen.set_ip(ip);
+                    }
+                    chosen
+                }
                 Err(e) => {
                     error!("{e}");
                     return 1;

@@ -355,6 +355,8 @@ Jede Ressource in `odir.d/` erweitert die gleichnamige Ressource aus `bareos-dir
 | `Client` | `Grpc Enable`, `Grpc Port`, `Grpc CA Certificate File`, `Grpc Server Name` |
 | `Storage` | `Grpc Enable`, `Grpc Port`, `Grpc CA Certificate File`, `Grpc Server Name`, `Health Check Interval` |
 
+**osd und ofd:** `osd.d/` und `ofd.d/` liegen im selben Verzeichnis (`--overlay <Verzeichnis>`, Vorgabe `/etc/onesimus`), also `/etc/onesimus/osd.d/storage/<Name>.conf` und `/etc/onesimus/ofd.d/client/<Name>.conf`. Für ofd gelten dort `Grpc Enable`, `Grpc Port` und `Grpc Address` (die Kommandozeile `--grpc-listen` und `--disable-grpc` geht vor).
+
 Die gRPC-Direktiven standen früher in `bareos-dir.d`. Dort nimmt sie der Director noch an (damit eine bestehende Konfiguration läuft), warnt aber beim Laden und nennt den Zielort; was in `odir.d/` steht, gilt zuletzt und gewinnt. Bareos selbst lehnt sie in `bareos-dir.d` ab: wer zu Bareos zurückwill, nimmt sie dort heraus.
 
 Der Director fragt dann `.status health` im Abstand (er schaut alle 30 Sekunden nach fälligen Abfragen) und
