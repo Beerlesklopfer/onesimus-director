@@ -21,6 +21,36 @@ Comment: Parts derived from Bareos stay AGPL-3.0-only, because Bareos grants
  same notice in their SPDX headers. The package as a whole is AGPL-3.0-only while
  these parts are included; code without a Bareos origin is AGPL-3.0-or-later.
 
+Files: crates/bareos-format/src/compression.rs
+Copyright: 2005-2007 Ariya Hidayat <ariya@kde.org>
+           2010-2013 Exalead SA
+License: MIT
+Comment: Port of the FastLZ and fastlzlib decoders (as in Bareos
+ core/src/fastlz). Full notice: THIRD-PARTY-NOTICES.
+
+Files: crates/bareos-format/src/compression.rs
+Copyright: 2011-2015 Yann Collet
+License: BSD-2-Clause
+Comment: Port of the LZ4 block decoder. Full notice: THIRD-PARTY-NOTICES.
+
+Files: crates/ofd/src/fnmatch.rs
+Copyright: 1989, 1993, 1994 The Regents of the University of California
+License: BSD-3-Clause
+Comment: Port of OpenBSD fnmatch.c 1.6 (as in Bareos core/src/lib/fnmatch.cc).
+ Full notice: THIRD-PARTY-NOTICES.
+
+Files: crates/odir/src/expand.rs
+Copyright: 2001-2002 Ralf S. Engelschall <rse@engelschall.com>
+           2001-2002 The OSSP Project
+           2001-2002 Cable & Wireless Deutschland
+License: OSSP-var
+ Permission to use, copy, modify, and distribute this software for
+ any purpose with or without fee is hereby granted, provided that
+ the above copyright notice and this permission notice appear in all
+ copies.
+Comment: Port of OSSP var (as in Bareos core/src/lib/var.cc). Full notice:
+ THIRD-PARTY-NOTICES.
+
 License: AGPL-3.0-only
                      GNU AFFERO GENERAL PUBLIC LICENSE
                         Version 3, 19 November 2007

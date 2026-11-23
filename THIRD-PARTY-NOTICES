@@ -1,0 +1,200 @@
+Onesimus Director – Hinweise zu Code von Dritten / Third-party notices
+======================================================================
+
+Onesimus Director is a Rust re-implementation of Bareos. Some Bareos source
+files are themselves taken from other projects and carry the notices of these
+projects. Where this code was ported to Rust, the notices are kept here and in
+the SPDX headers of the Rust files. Stand: 2026-11-23. Not legal advice.
+
+The notices below are reproduced from the Bareos sources
+(https://github.com/bareos/bareos, branch master, core/src/...).
+
+Summary
+-------
+
+| Component                | Rust file                              | Licence           | Origin in Bareos                         |
+|--------------------------|----------------------------------------|-------------------|------------------------------------------|
+| FastLZ                   | crates/bareos-format/src/compression.rs | MIT               | core/src/fastlz/src/fastlz.c             |
+| fastlzlib (block stream) | crates/bareos-format/src/compression.rs | MIT               | core/src/fastlz/src/fastlzlib.c          |
+| LZ4                      | crates/bareos-format/src/compression.rs | BSD-2-Clause      | core/src/fastlz/src/lz4.c                |
+| OpenBSD fnmatch()        | crates/ofd/src/fnmatch.rs               | BSD-3-Clause      | core/src/lib/fnmatch.cc (OpenBSD 1.6)    |
+| OSSP var                 | crates/odir/src/expand.rs               | OSSP permissive (LicenseRef-OSSP-var) | core/src/lib/var.cc, var.h |
+
+Only the decoders (FastLZ levels 1 and 2, LZ4 block decoder) and the
+algorithms of fnmatch() and OSSP var were ported; no C code is shipped.
+
+Checked and not ported (no notice required):
+ - CRC-32 (crates/bareos-format/src/volume.rs): the standard polynomial
+   0xEDB88320 with a table computed at compile time; Bareos' crc32.cc
+   (S. Brumme) is not copied.
+ - MD5, SHA, HMAC, Base64, TLS: from the Rust crates listed in Cargo.lock
+   (md-5, sha2, hmac, base64, rustls, openssl); the Bareos Base64 variant is
+   Bareos' own code (AGPL-3.0-only, see LICENSE).
+ - liblzo2 is not part of the program; it is loaded at run time if installed
+   (GPL-2.0-or-later, separate package).
+
+Rust dependencies
+-----------------
+
+The binaries link the Rust crates of Cargo.lock (mostly MIT or Apache-2.0).
+Their licence texts are available with `cargo about` / `cargo license`; the
+policy is enforced in CI by `cargo deny` (deny.toml). The i386 package of osd
+is built with `vendored-openssl` and contains OpenSSL (Apache-2.0;
+https://www.openssl.org/source/license.html).
+
+
+FastLZ  (MIT)
+-------------
+
+  FastLZ - lightning-fast lossless compression library
+
+  Copyright (C) 2007 Ariya Hidayat (ariya@kde.org)
+  Copyright (C) 2006 Ariya Hidayat (ariya@kde.org)
+  Copyright (C) 2005 Ariya Hidayat (ariya@kde.org)
+
+  Permission is hereby granted, free of charge, to any person obtaining a copy
+  of this software and associated documentation files (the "Software"), to deal
+  in the Software without restriction, including without limitation the rights
+  to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+  copies of the Software, and to permit persons to whom the Software is
+  furnished to do so, subject to the following conditions:
+
+  The above copyright notice and this permission notice shall be included in
+  all copies or substantial portions of the Software.
+
+  THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+  IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+  FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+  AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+  LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+  OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+  THE SOFTWARE.
+
+
+fastlzlib  (MIT)
+----------------
+
+  zlib-like interface to fast block compression (LZ4 or FastLZ) libraries
+  Copyright (C) 2010-2013 Exalead SA. (http://www.exalead.com/)
+
+  Permission is hereby granted, free of charge, to any person obtaining a copy
+  of this software and associated documentation files (the "Software"), to deal
+  in the Software without restriction, including without limitation the rights
+  to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+  copies of the Software, and to permit persons to whom the Software is
+  furnished to do so, subject to the following conditions:
+
+  The above copyright notice and this permission notice shall be included in
+  all copies or substantial portions of the Software.
+
+  THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+  IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+  FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+  AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+  LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+  OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+  THE SOFTWARE.
+
+  Remarks/Bugs:
+  LZ4 compression library by Yann Collet (yann.collet.73@gmail.com)
+  FastLZ compression library by Ariya Hidayat (ariya@kde.org)
+  Library encapsulation by Xavier Roche (fastlz@exalead.com)
+
+
+LZ4  (BSD-2-Clause)
+-------------------
+
+   LZ4 - Fast LZ compression algorithm
+   Copyright (C) 2011-2015, Yann Collet.
+
+   BSD 2-Clause License (http://www.opensource.org/licenses/bsd-license.php)
+
+   Redistribution and use in source and binary forms, with or without
+   modification, are permitted provided that the following conditions are
+   met:
+
+       * Redistributions of source code must retain the above copyright
+   notice, this list of conditions and the following disclaimer.
+       * Redistributions in binary form must reproduce the above
+   copyright notice, this list of conditions and the following disclaimer
+   in the documentation and/or other materials provided with the
+   distribution.
+
+   THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+   "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+   LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
+   A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT
+   OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
+   SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT
+   LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
+   DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
+   THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
+   (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
+   OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+
+   You can contact the author at :
+   - LZ4 source repository : http://code.google.com/p/lz4/
+   - LZ4 source mirror : https://github.com/Cyan4973/lz4
+   - LZ4 public forum : https://groups.google.com/forum/#!forum/lz4c
+
+
+OpenBSD fnmatch()  (BSD-3-Clause)
+---------------------------------
+
+ * Copyright (c) 1989, 1993, 1994
+ *      The Regents of the University of California.  All rights reserved.
+ *
+ * This code is derived from software contributed to Berkeley by
+ * Guido van Rossum.
+ *
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in the
+ *    documentation and/or other materials provided with the distribution.
+ * 3. Neither the name of the University nor the names of its contributors
+ *    may be used to endorse or promote products derived from this software
+ *    without specific prior written permission.
+ *
+ * THIS SOFTWARE IS PROVIDED BY THE REGENTS AND CONTRIBUTORS ``AS IS'' AND
+ * ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+ * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
+ * ARE DISCLAIMED.  IN NO EVENT SHALL THE REGENTS OR CONTRIBUTORS BE LIABLE
+ * FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+ * DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS
+ * OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION)
+ * HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY
+ * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
+ * SUCH DAMAGE.
+
+  (OpenBSD: fnmatch.c,v 1.6 1998/03/19 00:29:59 millert)
+
+
+OSSP var  (LicenseRef-OSSP-var)
+-------------------------------
+
+ *  OSSP var - Variable Expansion
+ *  Copyright (c) 2001-2002 Ralf S. Engelschall <rse@engelschall.com>
+ *  Copyright (c) 2001-2002 The OSSP Project (http://www.ossp.org/)
+ *  Copyright (c) 2001-2002 Cable & Wireless Deutschland (http://www.cw.com/de/)
+ *
+ *  This file is part of OSSP var, a variable expansion
+ *  library which can be found at http://www.ossp.org/pkg/lib/var/.
+ *
+ *  Permission to use, copy, modify, and distribute this software for
+ *  any purpose with or without fee is hereby granted, provided that
+ *  the above copyright notice and this permission notice appear in all
+ *  copies.
+ *
+ *  For disclaimer see below.
+
+  Adapted by Kern Sibbald to Bacula, June 2003.
+
+  Note: the Bareos copy of var.cc / var.h refers to a disclaimer "below" but
+  does not contain one. The upstream OSSP text is not reproduced here from
+  memory; see http://www.ossp.org/pkg/lib/var/ for the original wording.
+  (Open point: copy the original disclaimer from the OSSP distribution.)

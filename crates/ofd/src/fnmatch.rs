@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: AGPL-3.0-only
+// SPDX-License-Identifier: AGPL-3.0-only AND BSD-3-Clause
+// SPDX-FileCopyrightText: 1989, 1993, 1994 The Regents of the University of California (OpenBSD fnmatch)
 // SPDX-FileCopyrightText: 2000-2012 Free Software Foundation Europe e.V.
 // SPDX-FileCopyrightText: 2010-2017 Planets Communications B.V.
 // SPDX-FileCopyrightText: 2012-2026 Bareos GmbH & Co. KG

@@ -64,6 +64,7 @@ systemd-units = { unit-name = "osd", unit-scripts = "../../../packaging/osd", en
 # M7/M8: `target/…` is relative to the workspace, everything else to this
 # package directory (three levels below the root).
 assets = [
+    ["../../../THIRD-PARTY-NOTICES", "usr/share/doc/osd/", "644"],
     ["../../../packaging/osd/logrotate", "etc/logrotate.d/onesimus-osd", "644"],
     ["target/release/osd", "usr/sbin/osd", "755"],
     # Volume tools (crates/outils)
