@@ -2436,7 +2436,7 @@ dependencies = [
  "osd",
  "osd-ring",
  "rcgen",
- "serde_json",
+ "smartread",
  "tokio",
  "tonic",
  "tracing",

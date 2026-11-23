@@ -3,28 +3,25 @@
 //! Zweck: osd findet zu jedem File-Device die Platte, auf der sein
 //! `Archive Device` liegt (Einhängepunkt in `/proc/self/mountinfo`, bei einer
 //! Partition die Platte darüber in `/sys/class/block`), fragt SMART über
-//! `smartctl --json` (smartmontools) ab und bewertet das Ergebnis mit
-//! `ok`, `warning` oder `critical`. `status storage` zeigt den Zustand je
-//! Device, `.status health` liefert ihn zeilenweise zum Auswerten (odir).
-//! Die Abfrage läuft höchstens alle zehn Minuten je Platte.
+//! das Crate `smartread` ab (SG_IO/SAT und NVMe, ohne `smartctl`) und bewertet
+//! das Ergebnis mit `ok`, `warning` oder `critical`. `status storage` zeigt den
+//! Zustand je Device, `.status health` liefert ihn zeilenweise zum Auswerten
+//! (odir). Die Abfrage läuft höchstens alle zehn Minuten je Platte.
 //!
-//! Grenzen der ersten Umsetzung: nur Platten, die `smartctl` kennt (ATA über
-//! SATA/USB mit passendem Treiber, NVMe, SAS); eine Platte hinter md, LVM
-//! oder btrfs über mehrere Platten bleibt `unknown`; SMART braucht root oder
-//! `CAP_SYS_RAWIO`.
+//! Grenzen der ersten Umsetzung: nur ATA/SATA und NVMe (SAS liest `smartread`
+//! noch nicht); eine Platte hinter md, LVM oder btrfs über mehrere Platten
+//! bleibt `unknown`; SMART braucht root oder `CAP_SYS_RAWIO` (NVMe
+//! `CAP_SYS_ADMIN`). Fehlerprotokoll und Selbsttestprotokoll der Platte
+//! liest `smartread` nicht; die Bewertung stützt sich auf Attribute,
+//! Gesamturteil und Ergebnis des letzten Selbsttests.
 
 use std::collections::HashMap;
 use std::path::Path;
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
-use serde_json::Value;
-
 /// How long a result is reused.
 const CACHE: Duration = Duration::from_secs(600);
-
-/// How long `smartctl` may run.
-const SMARTCTL_TIMEOUT: Duration = Duration::from_secs(30);
 
 /// Temperature (°C) from which a disk is `warning` and `critical`.
 const TEMP_WARNING: i64 = 55;
@@ -35,9 +32,9 @@ const TEMP_CRITICAL: i64 = 60;
 pub enum Level {
     /// No finding.
     Ok,
-    /// Growing defects, high temperature, error log entries.
+    /// Growing defects, high temperature.
     Warning,
-    /// SMART says FAILED, a failed self test, a pre-fail attribute below its threshold.
+    /// SMART says FAILED, a failed self test, a pre-fail attribute at its threshold.
     Critical,
 }
 
@@ -79,39 +76,28 @@ pub struct Health {
     pub self_test: String,
 }
 
-/// The raw value of the ATA attribute `id`.
-fn attribute(json: &Value, id: i64) -> Option<i64> {
-    json.pointer("/ata_smart_attributes/table")?.as_array()?.iter().find(|a| a["id"].as_i64() == Some(id))?.pointer("/raw/value")?.as_i64()
-}
-
-/// Evaluates the output of `smartctl --json -a` for `disk`.
-pub fn evaluate(disk: &str, json: &Value) -> Health {
-    let model = json["model_name"].as_str().unwrap_or("").to_string();
-    let mut reasons = Vec::new();
+/// Evaluates what `smartread` read from `disk`.
+pub fn evaluate(disk: &str, report: &smartread::Report) -> Health {
     let mut level = Level::Ok;
+    let mut reasons = Vec::new();
     let mut raise = |to: Level, why: String, level: &mut Level| {
         if to > *level {
             *level = to;
         }
         reasons.push(why);
     };
-    let pending = attribute(json, 197);
-    let reallocated = attribute(json, 5);
-    let offline = attribute(json, 198);
-    let crc = attribute(json, 199);
-    let temperature = json.pointer("/temperature/current").and_then(Value::as_i64);
-    let power_on_hours = json.pointer("/power_on_time/hours").and_then(Value::as_i64);
-    if json.pointer("/smart_status/passed").and_then(Value::as_bool) == Some(false) {
+    let raw = |id: u8| report.attribute(id).map(|a| a.raw as i64);
+    let (pending, reallocated, offline, crc) = (raw(197), raw(5), raw(198), raw(199));
+    if report.health == smartread::Health::Failed {
         raise(Level::Critical, "SMART overall health: FAILED".into(), &mut level);
     }
-    let self_test = json.pointer("/ata_smart_data/self_test/status/string").and_then(Value::as_str).unwrap_or("").to_string();
-    if json.pointer("/ata_smart_data/self_test/status/passed").and_then(Value::as_bool) == Some(false) {
-        raise(Level::Critical, format!("self test failed: {self_test}"), &mut level);
+    let self_test = report.self_test.as_ref().map(|t| t.text().to_string()).unwrap_or_default();
+    // an aborted (1), interrupted (2) or running (15) test is no failure
+    if let Some(t) = report.self_test.as_ref().filter(|t| !t.passed() && !matches!(t.status, 1 | 2 | 15)) {
+        raise(Level::Critical, format!("self test failed: {}", t.text()), &mut level);
     }
-    // the exit status of smartctl: bit 3 = disk failing, bit 4 = a pre-fail attribute at or below its threshold
-    let exit = json.pointer("/smartctl/exit_status").and_then(Value::as_i64).unwrap_or(0);
-    if exit & 0x10 != 0 && level < Level::Critical {
-        raise(Level::Critical, "a pre-fail attribute is at or below its threshold".into(), &mut level);
+    for a in report.attributes.iter().filter(|a| a.is_prefail() && a.failing()) {
+        raise(Level::Critical, format!("attribute {} ({}) is at its threshold", a.id, a.name().unwrap_or("?")), &mut level);
     }
     for (value, what) in [(pending, "pending sectors"), (reallocated, "reallocated sectors"), (offline, "offline uncorrectable sectors")] {
         if let Some(n) = value.filter(|n| *n > 0) {
@@ -121,12 +107,18 @@ pub fn evaluate(disk: &str, json: &Value) -> Health {
     if let Some(n) = crc.filter(|n| *n > 0) {
         raise(Level::Warning, format!("{n} interface CRC errors (cable or controller)"), &mut level);
     }
-    if exit & 0x40 != 0 {
-        raise(Level::Warning, "the device error log has entries".into(), &mut level);
+    if let Some(n) = report.nvme.as_ref() {
+        if n.failing() {
+            raise(Level::Critical, format!("NVMe critical warning {:#04x} or spare below threshold", n.critical_warning), &mut level);
+        }
+        if n.media_errors > 0 {
+            raise(Level::Warning, format!("{} media and data integrity errors", n.media_errors), &mut level);
+        }
+        if n.percentage_used >= 90 {
+            raise(Level::Warning, format!("{} % of the endurance used", n.percentage_used), &mut level);
+        }
     }
-    if exit & 0x80 != 0 {
-        raise(Level::Warning, "the self test log has errors".into(), &mut level);
-    }
+    let temperature = report.temperature.map(i64::from);
     match temperature {
         Some(t) if t >= TEMP_CRITICAL => raise(Level::Critical, format!("temperature {t} °C"), &mut level),
         Some(t) if t >= TEMP_WARNING => raise(Level::Warning, format!("temperature {t} °C"), &mut level),
@@ -134,30 +126,17 @@ pub fn evaluate(disk: &str, json: &Value) -> Health {
     }
     Health {
         disk: disk.to_string(),
-        model,
+        model: report.model.clone(),
         level,
         reasons,
         temperature,
-        power_on_hours,
+        power_on_hours: report.power_on_hours.map(|h| h as i64),
         pending,
         reallocated,
         offline_uncorrectable: offline,
         crc_errors: crc,
         self_test,
     }
-}
-
-/// Why `smartctl` gave no SMART data (no permission, no SMART on the device), `None` when it did.
-fn unreadable(json: &Value) -> Option<String> {
-    if json.pointer("/ata_smart_attributes/table").is_some() || json.get("smart_status").is_some() || json.get("nvme_smart_health_information_log").is_some() {
-        return None;
-    }
-    let messages: Vec<&str> = json
-        .pointer("/smartctl/messages")
-        .and_then(Value::as_array)
-        .map(|m| m.iter().filter_map(|x| x["string"].as_str()).collect())
-        .unwrap_or_default();
-    Some(if messages.is_empty() { "smartctl returned no SMART data".to_string() } else { messages.join("; ") })
 }
 
 /// The mount source (`/dev/sdb`) of the longest mount point that holds `path`.
@@ -194,33 +173,6 @@ pub fn disk_of(path: &Path) -> Option<String> {
     whole_disk(name)
 }
 
-/// Runs `smartctl --json=c -a /dev/<disk>`; the exit status bits are in the JSON.
-fn smartctl(disk: &str) -> Result<Value, String> {
-    let program = ["/usr/sbin/smartctl", "/usr/bin/smartctl", "/sbin/smartctl"]
-        .into_iter()
-        .find(|p| Path::new(p).is_file())
-        .ok_or("smartctl (smartmontools) is not installed")?;
-    let mut child = std::process::Command::new(program)
-        .args(["--json=c", "-a", &format!("/dev/{disk}")])
-        .stdout(std::process::Stdio::piped())
-        .stderr(std::process::Stdio::null())
-        .spawn()
-        .map_err(|e| format!("{program}: {e}"))?;
-    let start = Instant::now();
-    loop {
-        match child.try_wait().map_err(|e| e.to_string())? {
-            Some(_) => break,
-            None if start.elapsed() > SMARTCTL_TIMEOUT => {
-                let _ = child.kill();
-                return Err("smartctl does not answer".into());
-            }
-            None => std::thread::sleep(Duration::from_millis(50)),
-        }
-    }
-    let out = child.wait_with_output().map_err(|e| e.to_string())?;
-    serde_json::from_slice(&out.stdout).map_err(|e| format!("smartctl output: {e}"))
-}
-
 /// The health of the disk under `archive_device`, at most every ten minutes per disk.
 pub fn of_device(archive_device: &Path) -> Result<Health, String> {
     static CACHE_MAP: Mutex<Option<HashMap<String, (Instant, Result<Health, String>)>>> = Mutex::new(None);
@@ -230,10 +182,7 @@ pub fn of_device(archive_device: &Path) -> Result<Health, String> {
     if let Some((at, result)) = map.get(&disk) && at.elapsed() < CACHE {
         return result.clone();
     }
-    let result = smartctl(&disk).and_then(|json| match unreadable(&json) {
-        Some(why) => Err(why),
-        None => Ok(evaluate(&disk, &json)),
-    });
+    let result = smartread::read(format!("/dev/{disk}")).map(|report| evaluate(&disk, &report)).map_err(|e| e.to_string());
     map.insert(disk, (Instant::now(), result.clone()));
     result
 }
@@ -281,15 +230,36 @@ impl Health {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use smartread::{Attribute, Report, SelfTest};
 
-    /// `smartctl --json -a` of a healthy WD Red (the H340's `sdb`).
-    fn healthy() -> Value {
-        serde_json::from_str(include_str!("../tests/fixtures/smartctl-wd20efrx-sdb.json")).unwrap()
+    /// An attribute with the common flags (pre-fail for 1, 3 and 5).
+    fn attr(id: u8, value: u8, threshold: u8, raw: u64) -> Attribute {
+        let prefail = matches!(id, 1 | 3 | 5);
+        Attribute { id, flags: if prefail { 0x33 } else { 0x32 }, value, worst: value, raw, threshold: Some(threshold) }
     }
 
-    /// … of the H340's `sdd`: 232 pending sectors, one CRC error, error log entries.
-    fn damaged() -> Value {
-        serde_json::from_str(include_str!("../tests/fixtures/smartctl-wd20efrx-sdd.json")).unwrap()
+    /// A healthy WD Red as the H340's `sdb`.
+    fn healthy() -> Report {
+        Report {
+            protocol: "ata",
+            model: "WDC WD20EFRX-68EUZN0".into(),
+            serial: String::new(),
+            firmware: String::new(),
+            health: smartread::Health::Passed,
+            temperature: Some(32),
+            power_on_hours: Some(54879),
+            attributes: vec![attr(5, 200, 140, 0), attr(9, 25, 0, 54879), attr(194, 115, 0, 32), attr(197, 200, 0, 0), attr(198, 100, 0, 0), attr(199, 200, 0, 0)],
+            self_test: Some(SelfTest { status: 0, remaining_percent: 0 }),
+            nvme: None,
+        }
+    }
+
+    /// … with the values of the H340's `sdd`: 232 pending sectors, one CRC error.
+    fn damaged() -> Report {
+        let mut r = healthy();
+        r.attributes = vec![attr(5, 200, 140, 0), attr(197, 200, 0, 232), attr(199, 200, 0, 1), attr(194, 111, 0, 36)];
+        r.temperature = Some(36);
+        r
     }
 
     #[test]
@@ -313,32 +283,50 @@ mod tests {
     }
 
     #[test]
-    fn a_failed_smart_status_or_self_test_is_critical() {
-        let mut j = healthy();
-        j["smart_status"]["passed"] = Value::Bool(false);
-        assert_eq!(evaluate("sdb", &j).level, Level::Critical);
-        let mut j = healthy();
-        j["ata_smart_data"]["self_test"]["status"]["passed"] = Value::Bool(false);
-        assert_eq!(evaluate("sdb", &j).level, Level::Critical);
-        let mut j = healthy();
-        j["smartctl"]["exit_status"] = Value::from(16);
-        assert_eq!(evaluate("sdb", &j).level, Level::Critical);
+    fn a_failed_status_self_test_or_threshold_is_critical() {
+        let mut r = healthy();
+        r.health = smartread::Health::Failed;
+        assert_eq!(evaluate("sdb", &r).level, Level::Critical);
+        let mut r = healthy();
+        r.self_test = Some(SelfTest { status: 7, remaining_percent: 0 });
+        assert_eq!(evaluate("sdb", &r).level, Level::Critical);
+        // an aborted test is no failure
+        let mut r = healthy();
+        r.self_test = Some(SelfTest { status: 1, remaining_percent: 0 });
+        assert_eq!(evaluate("sdb", &r).level, Level::Ok);
+        let mut r = healthy();
+        r.attributes[0] = attr(5, 140, 140, 0); // reallocated sectors at the threshold
+        assert_eq!(evaluate("sdb", &r).level, Level::Critical);
     }
 
     #[test]
     fn the_temperature_raises_the_level() {
-        let mut j = healthy();
-        j["temperature"]["current"] = Value::from(56);
-        assert_eq!(evaluate("sdb", &j).level, Level::Warning);
-        j["temperature"]["current"] = Value::from(61);
-        assert_eq!(evaluate("sdb", &j).level, Level::Critical);
+        let mut r = healthy();
+        r.temperature = Some(56);
+        assert_eq!(evaluate("sdb", &r).level, Level::Warning);
+        r.temperature = Some(61);
+        assert_eq!(evaluate("sdb", &r).level, Level::Critical);
     }
 
     #[test]
-    fn no_data_is_not_ok() {
-        let j: Value = serde_json::from_str(r#"{"smartctl":{"exit_status":2,"messages":[{"string":"Smartctl open device: /dev/sdb failed: Permission denied","severity":"error"}]}}"#).unwrap();
-        assert_eq!(unreadable(&j).as_deref(), Some("Smartctl open device: /dev/sdb failed: Permission denied"));
-        assert_eq!(unreadable(&healthy()), None);
+    fn nvme_warnings_and_media_errors() {
+        let mut sector = vec![0u8; 512];
+        sector[1..3].copy_from_slice(&310u16.to_le_bytes());
+        sector[3] = 100;
+        sector[4] = 10;
+        let mut log = smartread::nvme::parse_health_log(&sector).unwrap();
+        let mut r = healthy();
+        r.protocol = "nvme";
+        r.attributes.clear();
+        r.self_test = None;
+        r.nvme = Some(log);
+        assert_eq!(evaluate("nvme0n1", &r).level, Level::Ok);
+        log.media_errors = 2;
+        r.nvme = Some(log);
+        assert_eq!(evaluate("nvme0n1", &r).level, Level::Warning);
+        log.critical_warning = 0x04;
+        r.nvme = Some(log);
+        assert_eq!(evaluate("nvme0n1", &r).level, Level::Critical);
     }
 
     #[test]
