@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-FileCopyrightText: 2026 Jörg Bernau <contact@onesimus.io>
 //! Signed ofd plugin "postgresql": logical backups of a PostgreSQL instance
 //! (docs/plans/POSTGRESQL-PLUGIN.md, class `logical`).
 //!

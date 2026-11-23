@@ -3,7 +3,7 @@ name = "onesimus-plugin-openldap"
 version = "1.0.0"
 edition = "2024"
 description = "Signed ofd plugin: slapcat backups (configuration and every mdb database) of a local slapd through its broker, online restore into a new target"
-license = "AGPL-3.0-only"
+license = "AGPL-3.0-or-later"
 publish = false
 
 # Built for wasm32-wasip2 on its own, not part of the host workspace.

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-FileCopyrightText: 2026 Jörg Bernau <contact@onesimus.io>
 //! Signed ofd plugin "openldap": slapcat backups of a local slapd and the
 //! online restore into a new target (docs/plans/OPENLDAP-PLUGIN.md).
 //!

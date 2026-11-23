@@ -3,7 +3,7 @@ name = "onesimus-plugin-example-tree"
 version = "1.0.0"
 edition = "2024"
 description = "Test plugin for ofd: a fixed tree of virtual files; online restore keeps checksums in memory"
-license = "AGPL-3.0-only"
+license = "AGPL-3.0-or-later"
 publish = false
 
 # Built for wasm32-wasip2 on its own, not part of the host workspace.

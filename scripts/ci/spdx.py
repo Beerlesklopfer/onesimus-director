@@ -25,7 +25,7 @@ THIS_YEAR = 2026
 COMMENT = {".rs": "//", ".proto": "//", ".wit": "//", ".sh": "#", ".fish": "#", ".py": "#", ".ps1": "#", ".bat": "REM"}
 # Pfadpräfixe, die nicht angefasst werden: Bareos-Ableitungen, Fremdcode, Testdaten
 SKIP = ("proto/", "docs/upstream/", "crates/bareos-orm/tests/data/", "crates/bareos-format/testdata/", "crates/odir/tests/fixtures/",
-        "crates/odir/src/ua_commands_table.rs", "target/", "dist/", "plugins/")
+        "crates/odir/src/ua_commands_table.rs", "target/", "dist/")
 
 
 def tracked():

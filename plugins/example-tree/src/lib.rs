@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-FileCopyrightText: 2026 Jörg Bernau <contact@onesimus.io>
 //! Test plugin for ofd (phase 1 of docs/plans/PLUGIN-PHASE1.md).
 //!
 //! Backup: a fixed tree under `/@example/<instance>/` with a directory, an
