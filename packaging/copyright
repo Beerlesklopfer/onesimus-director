@@ -10,6 +10,8 @@ License: AGPL-3.0-or-later
 Files: crates/bareos-bnet/* crates/bareos-catalog/* crates/bareos-config/*
  crates/bareos-format/* crates/bareos-orm/* crates/daemon-crate/* crates/outils/*
  proto/* docs/wiki/commands/* crates/odir/src/ua_commands_table.rs
+ tests/bareos-dir.d/* docs/upstream/U-001-*.patch crates/odir/src/state_file.rs
+ crates/ofd/src/streams.rs
 Copyright: 2026 Jörg Bernau <contact@onesimus.io>
            2000-2012 Free Software Foundation Europe e.V.
            2010-2017 Planets Communications B.V.

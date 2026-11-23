@@ -839,3 +839,23 @@ Juristen:
   (keine, außer allgemeinen Bezügen auf Bareos-Datenströme).
 - Die Einstufungsschwellen (a: mindestens 8 Treffer und 40 %) sind eine Arbeitsregel dieser Tabelle,
   keine rechtliche Grenze.
+
+## Nachtrag 23.11.2026: Umsetzung der Vorschläge 1 bis 3
+
+Auf Freigabe des Maintainers (Weitergabe durch die GUI-Sitzung), Vorsicht vor Großzügigkeit:
+
+- **Als `AGPL-3.0-only` mit den Bareos-Zeilen gekennzeichnet:** die 17 inhaltsgleichen
+  `tests/bareos-dir.d/**/*.conf` (Kopf als `#`-Kommentar), `crates/odir/src/state_file.rs`,
+  `crates/ofd/src/streams.rs`; in `scripts/ci/bareos-derived.txt` und `packaging/copyright` eingetragen.
+  `docs/wiki/commands/*` und `docs/upstream/U-001-*.patch` stehen unter den Bareos-Urhebern in
+  `packaging/copyright` (Markdown und Patch tragen keinen Kopf). Die 23 abweichenden `.conf` (b) bleiben
+  ohne Kopf und sind weiter für den Juristen offen.
+- **Aus der Liste genommen** (Kopf nennt „Bareos-Gegenstück: keins“, die Verweise grenzen nur ab):
+  `crates/osd/ring/src/lib.rs` (damit `osd-ring` als Crate wieder rein `AGPL-3.0-or-later OR
+  LicenseRef-Onesimus-Commercial`), `crates/onesimus-bnet-grpc/src/lib.rs` und `client.rs`.
+  `frame.rs`, `io.rs`, `server.rs` von `onesimus-bnet-grpc` bleiben `-only`: ihre Köpfe nennen
+  `bsock_tcp.cc` / `bnet_server_tcp.cc` als Gegenstück. Das Crate ist damit gemischt und behält den
+  Ausdruck `(… OR …) AND AGPL-3.0-only`.
+- **`bareos-catalog`:** nur vermerkt, nicht gelöscht; das Crate wird weiter von `odir` nicht benutzt
+  (`Cargo.toml:27`), bleibt `-only`.
+- **Fremdcode** (FastLZ, LZ4, OpenBSD fnmatch, OSSP var): siehe `THIRD-PARTY-NOTICES`.
