@@ -25,7 +25,7 @@
 //!
 //! The parsers ([`ata::parse_identify`], [`ata::parse_smart_data`],
 //! [`nvme::parse_health_log`]) take the raw sectors and work on every
-//! platform; the device access is Linux only.
+//! platform; the device access is Linux and Windows (macOS: see the README).
 
 #![deny(missing_docs)]
 
@@ -46,7 +46,7 @@ pub enum Error {
     Io(std::io::Error),
     /// The drive did not answer a SMART command as expected (no SMART, a bridge that does not translate).
     Device(String),
-    /// Not Linux, or a drive type this crate cannot read yet (SCSI/SAS).
+    /// Not Linux or Windows (macOS is not implemented, see the README), or a drive type this crate cannot read.
     Unsupported(String),
 }
 
@@ -215,5 +215,5 @@ pub fn read(path: impl AsRef<std::path::Path>) -> Result<Report, Error> {
 /// Reads the SMART data of the drive at `path` (not implemented on this platform).
 #[cfg(not(any(target_os = "linux", windows)))]
 pub fn read(_path: impl AsRef<std::path::Path>) -> Result<Report, Error> {
-    Err(Error::Unsupported("smartread reads drives on Linux and Windows; macOS is not implemented yet".into()))
+    Err(Error::Unsupported("smartread reads drives on Linux and Windows; macOS is not implemented (see the README of the crate)".into()))
 }

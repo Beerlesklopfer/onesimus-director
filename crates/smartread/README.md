@@ -94,3 +94,21 @@ compared with `smartctl -A -H`.
 
 Version 0.1.0, not yet published on crates.io (`publish = false` until the
 licence of the release is decided). Contact: <contact@onesimus.io>.
+
+## What is still open, and why only hardware can close it
+
+The crate is complete for what could be tested here: Linux ATA/SATA and NVMe
+(read on real drives), the parsers on every platform, the SCSI/SAS log page
+parsers against SPC-4 byte layouts, and the Windows code against the error
+path. Three parts cannot be finished without the matching hardware; each has a
+short procedure, and a report from it settles the row in the table above.
+
+| Open | Needs | Procedure |
+|---|---|---|
+| **SAS drive** (Linux) | a SAS disk on an HBA (not behind a RAID controller) | `cargo run --example smartread -- /dev/sdX` as root; compare identity, temperature, grown defect count and the error counters with `smartctl -a /dev/sdX` (smartctl 7.x) |
+| **Windows, real disk** | a physical machine (the VirtIO disks of a VM refuse the commands) | run the example as administrator against `\\.\PhysicalDrive0`; compare with `smartctl -a /dev/pd0` |
+| **macOS** | a Mac | not implemented: `read` returns `Error::Unsupported`. The plan is IOKit (`IOATASMARTInterface` for SATA, the NVMe SMART user client for NVMe), whose plug-in vtables are only checkable on a Mac; guessing their layout without one could crash the caller, so it is left out on purpose |
+| **NVMe against `smartctl`** | root on the machine with the drive | `sudo cargo run --example smartread -- /dev/nvme0` and `sudo smartctl -a /dev/nvme0`; temperature, spare, endurance and the counters must agree |
+
+Send the output of both programs to <contact@onesimus.io>.
+
