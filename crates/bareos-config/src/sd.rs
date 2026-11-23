@@ -690,7 +690,7 @@ Messages {
     #[test]
     fn tls_enable_of_the_storage_defaults_to_yes() {
         assert!(parse(SAMPLE).unwrap().storage.tls_enable);
-        let c = parse("Storage {\n Name = x\n TLS Enable = no\n}\nDirector {\n Name = d\n Password = p\n}\n").unwrap();
+        let c = parse(&SAMPLE.replace("Maximum Concurrent Jobs = 20", "Maximum Concurrent Jobs = 20\n  TLS Enable = no")).unwrap();
         assert!(!c.storage.tls_enable);
     }
 
