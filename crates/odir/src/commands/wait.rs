@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-FileCopyrightText: 2026 Jörg Bernau <contact@onesimus.io>
 //! Bareos wait: select a running job, then report its actual catalog outcome.
 use std::time::{Duration, Instant};
 use crate::{command_ast::CommandAst, command_executor::ExecContext, command_queue::CommandResult,

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-FileCopyrightText: 2026 Jörg Bernau <contact@onesimus.io>
 //! TLS identity of the FD's gRPC listener: a self-signed certificate generated
 //! once in the working directory, so its fingerprint stays stable for pinning
 //! (daemon-crate `grpc_tls` since 20.11.2026, onesimus-bnet-grpc `tls`

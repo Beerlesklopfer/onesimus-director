@@ -1,4 +1,6 @@
 #!/bin/sh
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# SPDX-FileCopyrightText: 2026 Jörg Bernau <contact@onesimus.io>
 # End-to-end tests of the OpenLDAP plugin in two throwaway Podman containers
 # (debian:trixie, slapd 2.6): ldaptest-olc (slapd.d) and ldaptest-conf
 # (slapd.conf). Called by the ignored test ldap_e2e::podman_both_configurations

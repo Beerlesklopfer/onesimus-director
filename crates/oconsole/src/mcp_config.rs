@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-FileCopyrightText: 2026 Jörg Bernau <contact@onesimus.io>
 //! MCP tool `configure_update` over the Director's configuration CRUD
 //! (docs/plans/CONFIG-CRUD-GRPC.md).
 //!

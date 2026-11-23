@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-FileCopyrightText: 2026 Jörg Bernau <contact@onesimus.io>
 //! When a Schedule Run directive triggers — port of C++ dird/date_time.cc,
 //! dird/date_time_mask.cc, RunResource::NextScheduleTime (dird_conf.cc) and
 //! lib/btime.cc TmWoy(). Everything works in local time (localtime_r /

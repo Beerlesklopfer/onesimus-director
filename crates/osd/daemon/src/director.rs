@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-FileCopyrightText: 2026 Jörg Bernau <contact@onesimus.io>
 //! Die Sitzung mit dem Director: Anmeldung und Befehle.
 //!
 //! Zweck: Ein Director ruft osd an, meldet sich mit CRAM-MD5 an und

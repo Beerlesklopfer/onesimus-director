@@ -1,4 +1,6 @@
 #!/bin/sh
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# SPDX-FileCopyrightText: 2026 Jörg Bernau <contact@onesimus.io>
 # Isolated Podman for the O-7 end-to-end test of the OpenLDAP plugin
 # (docs/plans/OPENLDAP-PLUGIN.md, O-7): the packaged ofd runs as a real
 # daemon in a slapd container (--network host), odir, bareos-sd and the

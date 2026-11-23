@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-FileCopyrightText: 2026 Jörg Bernau <contact@onesimus.io>
 //! Console helpers of the commands. The interactive dialogs themselves
 //! (StartPrompt/DoPrompt, GetCmd, GetYesno, GetPint with BNET_SUB_PROMPT)
 //! live in [`crate::ua_select`] (compatibility log C-011).

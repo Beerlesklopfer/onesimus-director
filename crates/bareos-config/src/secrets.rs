@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-FileCopyrightText: 2026 Jörg Bernau <contact@onesimus.io>
 //! Keeps passwords out of messages and the catalog: plugin option strings
 //! ("name:key=value:key=value", `\:` escapes a colon) carry credentials
 //! (e.g. `password=` of the LDAP plugin). The Job log is readable by every

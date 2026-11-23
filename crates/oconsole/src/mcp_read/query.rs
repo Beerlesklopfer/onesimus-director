@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-FileCopyrightText: 2026 Jörg Bernau <contact@onesimus.io>
 //! The generic read-only `query` tool: one bconsole line, checked against
 //! an allowlist of reading commands. In every build. Moved unchanged from
 //! mcp.rs; `validate_command` also guards the development `execute` tool.

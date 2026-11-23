@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-FileCopyrightText: 2026 Jörg Bernau <contact@onesimus.io>
 //! Der Adapter: ein gRPC-Strom als `Read`/`Write` von BNET-Rahmen.
 //!
 //! Zweck: Die Daemons sprechen synchron (`BnetStream` über `Read`/`Write`),

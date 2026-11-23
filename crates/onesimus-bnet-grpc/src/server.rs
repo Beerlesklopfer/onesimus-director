@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-FileCopyrightText: 2026 Jörg Bernau <contact@onesimus.io>
 //! Die Serverseite: eingehende Ströme und der gRPC-Server eines Daemons.
 //!
 //! Zweck: Ein Dienst (ofd: FileDaemon, osd: StorageDaemon) bekommt in jeder

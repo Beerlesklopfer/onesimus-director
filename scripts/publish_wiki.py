@@ -1,4 +1,6 @@
 #!/usr/bin/env python3
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# SPDX-FileCopyrightText: 2026 Jörg Bernau <contact@onesimus.io>
 """Publish docs/wiki to the GitHub wiki of onesimus-director.
 
 docs/wiki (branch development) is the source of truth; the GitHub wiki is

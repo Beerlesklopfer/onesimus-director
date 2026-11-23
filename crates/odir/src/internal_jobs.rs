@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-FileCopyrightText: 2026 Jörg Bernau <contact@onesimus.io>
 //! Jobs the Director runs itself without daemon contact (Compatibility log
 //! C-058): the selection of a Copy/Migrate control job (migrate.cc
 //! DoMigrationSelection/getJobs_to_migrate) and a Consolidate job

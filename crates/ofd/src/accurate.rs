@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-FileCopyrightText: 2026 Jörg Bernau <contact@onesimus.io>
 //! Accurate mode: filed/accurate.cc (AccurateCmd, AccurateCheckFile,
 //! AccurateFinish) with the hash table file list of accurate_htable.cc.
 

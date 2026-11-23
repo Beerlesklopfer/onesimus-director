@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-FileCopyrightText: 2026 Jörg Bernau <contact@onesimus.io>
 //! Linux: Warten und Wecken mit `futex` auf einem Wort im gemeinsamen
 //! Speicher (ohne `FUTEX_PRIVATE_FLAG`, also prozessübergreifend).
 

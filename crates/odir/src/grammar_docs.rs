@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-FileCopyrightText: 2026 Jörg Bernau <contact@onesimus.io>
 //! Man-page prose of the console grammar: the DESCRIPTION paragraphs and
 //! examples of commands and subcommands, kept apart from the grammar table
 //! ([`crate::grammar_table`]) so that the table stays a readable list of

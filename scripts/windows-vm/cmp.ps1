@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# SPDX-FileCopyrightText: 2026 Jörg Bernau <contact@onesimus.io>
 # Compares D:\odir-test\testdata with its restore below D:\odir-test\restore\D\odir-test\testdata (Windows host)
 $ErrorActionPreference = 'Continue'
 $a = 'D:\odir-test\testdata'; $b = 'D:\odir-test\restore\D\odir-test\testdata'

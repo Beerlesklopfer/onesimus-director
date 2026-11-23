@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-FileCopyrightText: 2026 Jörg Bernau <contact@onesimus.io>
 //! Onesimus Console (oconsole) — Interactive console client for the Director.
 //!
 //! Connects via BNET (TCP + TLS + CRAM-MD5) or gRPC (TLS + pinned certificate).

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-FileCopyrightText: 2026 Jörg Bernau <contact@onesimus.io>
 //! Leerzeichen in Namen auf der Leitung: zwei verschiedene Kodierungen.
 //!
 //! Zweck: Bareos-Kommandos sind Zeilen aus `schlüssel=wert`-Paaren, durch

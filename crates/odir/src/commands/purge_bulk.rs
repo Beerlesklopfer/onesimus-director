@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-FileCopyrightText: 2026 Jörg Bernau <contact@onesimus.io>
 //! Onesimus extension, not in Bareos: purge several volumes at once with a
 //! mandatory preview (decision of the user, 2026-11-20).
 //!

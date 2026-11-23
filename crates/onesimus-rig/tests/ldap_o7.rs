@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-FileCopyrightText: 2026 Jörg Bernau <contact@onesimus.io>
 //! O-7 des OpenLDAP-Plans (`docs/plans/OPENLDAP-PLUGIN.md`): das Plugin Ende
 //! zu Ende mit dem echten, als Debian-Paket installierten `ofd`-Daemon in
 //! einem slapd-Container, gesteuert von `odir`, `bareos-sd` und einem

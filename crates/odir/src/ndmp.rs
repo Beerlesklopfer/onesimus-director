@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-FileCopyrightText: 2026 Jörg Bernau <contact@onesimus.io>
 //! NDMP branches of the console commands (compatibility log C-050).
 //!
 //! Storage and Client resources with `Protocol = NDMPv2|NDMPv3|NDMPv4` take

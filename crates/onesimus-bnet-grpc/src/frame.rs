@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-FileCopyrightText: 2026 Jörg Bernau <contact@onesimus.io>
 //! Ein BNET-Rahmen und seine Proto-Formen.
 //!
 //! Zweck: [`Frame`] ist eine BNET-Nachricht ohne Längenkopf: Nutzdaten oder

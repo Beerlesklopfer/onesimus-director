@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-FileCopyrightText: 2026 Jörg Bernau <contact@onesimus.io>
 //! Job scheduler — dir:scheduler thread (dird/scheduler.cc,
 //! scheduler_private.cc, scheduler_job_item_queue.cc).
 //!

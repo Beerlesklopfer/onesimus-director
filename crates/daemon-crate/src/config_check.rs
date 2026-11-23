@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-FileCopyrightText: 2026 Jörg Bernau <contact@onesimus.io>
 //! Konfigurationsprüfung mit `-t`.
 //!
 //! Zweck: `<daemon> -t -c <Pfad>` liest die Konfiguration, meldet das

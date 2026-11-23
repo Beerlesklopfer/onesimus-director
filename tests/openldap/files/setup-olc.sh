@@ -1,4 +1,6 @@
 #!/bin/sh
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# SPDX-FileCopyrightText: 2026 Jörg Bernau <contact@onesimus.io>
 # Server 1: Online-Konfiguration (cn=config, /etc/ldap/slapd.d), Debian-Standard plus Testinhalt
 set -e
 F=/opt/ldaptest

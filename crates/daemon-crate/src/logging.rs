@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-FileCopyrightText: 2026 Jörg Bernau <contact@onesimus.io>
 //! Logging-Einrichtung (`tracing`).
 //!
 //! Zweck: Alle Daemons loggen über `tracing` nach stderr. Der Debug-Level

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-FileCopyrightText: 2026 Jörg Bernau <contact@onesimus.io>
 //! Raw console capture for Director parity tests (tests/parity/parity.py).
 //!
 //! Opens one authenticated console session, sends each step and records every

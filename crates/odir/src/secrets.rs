@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-FileCopyrightText: 2026 Jörg Bernau <contact@onesimus.io>
 //! Masking of secrets in text odir passes on: job messages (catalog
 //! `Log`, journal, mail, console, gRPC push events) and the RunScript
 //! commands `show` prints.

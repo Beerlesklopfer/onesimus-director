@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-FileCopyrightText: 2026 Jörg Bernau <contact@onesimus.io>
 //! # osd – Schnittstelle zum Storage Daemon
 //!
 //! Zweck: Alles, was eine Gegenstelle des Storage Daemons (heute der

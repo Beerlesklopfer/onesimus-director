@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-FileCopyrightText: 2026 Jörg Bernau <contact@onesimus.io>
 //! Datensätze (Records): Netz-Köpfe; die Volume-Köpfe stehen in [`crate::volume`].
 //!
 //! Zweck: Der SD zerlegt den Datenstrom des FD in Datensätze und schreibt sie

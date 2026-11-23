@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-FileCopyrightText: 2026 Jörg Bernau <contact@onesimus.io>
 //! Stream-Kennungen: welche Art Daten ein Datensatz trägt.
 //!
 //! Zweck: Jeder Datensatz, den der FD an den SD schickt und der SD in ein

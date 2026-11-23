@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-FileCopyrightText: 2026 Jörg Bernau <contact@onesimus.io>
 //! Diagnostics of slapcat/slapadd without their words (S-7.2).
 //!
 //! An slapadd error quotes the LDIF it failed on (`could not add entry

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-FileCopyrightText: 2026 Jörg Bernau <contact@onesimus.io>
 //! JSON API mode (`.api 2`) output — the json-rpc style envelope of the
 //! C++ OutputFormatter (lib/output_formatter.cc, JsonFinalizeResult):
 //!

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-FileCopyrightText: 2026 Jörg Bernau <contact@onesimus.io>
 //! Glossar des Testgerüsts: ein Begriff je Bedeutung.
 //!
 //! Zweck: Die Namen im Gerüst sind Bareos-Begriffe. Dieses Modul erklärt sie

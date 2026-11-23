@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-FileCopyrightText: 2026 Jörg Bernau <contact@onesimus.io>
 //! Typed DirectorApi route of the MCP tools (S-36, C-087).
 //!
 //! When oconsole is connected via gRPC, a tool first calls the typed RPC of

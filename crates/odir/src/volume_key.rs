@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-FileCopyrightText: 2026 Jörg Bernau <contact@onesimus.io>
 //! Volume encryption keys (dird/volume_key.cc, lib/passphrase.cc,
 //! lib/crypto_wrap.cc): a semi random ASCII passphrase, optionally wrapped
 //! with the Director's `Key Encryption Key` (RFC 3394 AES-128 key wrap),

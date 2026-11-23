@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# SPDX-FileCopyrightText: 2026 Jörg Bernau <contact@onesimus.io>
 # cargo test -p osd-ring auf der Windows-VM, eigenes Verzeichnis D:\odir-ring-test (teilt nichts mit build-inner.ps1)
 $ErrorActionPreference = 'Continue'
 Set-Location D:\odir-ring-test\src

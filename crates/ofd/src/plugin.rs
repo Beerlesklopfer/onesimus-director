@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-FileCopyrightText: 2026 Jörg Bernau <contact@onesimus.io>
 //! Signed plugins in ofd (plan: docs/plans/PLUGIN-PHASE1.md).
 //!
 //! A `Plugin = "name:key=value:…"` line of a FileSet names a signed bundle

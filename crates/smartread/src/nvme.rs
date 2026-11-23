@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-FileCopyrightText: 2026 Jörg Bernau <contact@onesimus.io>
 //! NVMe drives: the *SMART / Health Information* log page.
 //!
 //! The admin command *Get Log Page* (opcode `0x02`, log identifier `0x02`,

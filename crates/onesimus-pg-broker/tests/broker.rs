@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-FileCopyrightText: 2026 Jörg Bernau <contact@onesimus.io>
 //! The broker against a throwaway cluster of the test user (initdb, own
 //! socket directory, no TCP). Skipped without PostgreSQL server binaries.
 //! The socket directory lies directly under /tmp: a Unix socket path holds at

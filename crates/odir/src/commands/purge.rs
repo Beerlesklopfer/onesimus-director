@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-FileCopyrightText: 2026 Jörg Bernau <contact@onesimus.io>
 //! Catalog work of `prune` and `purge` (ua_prune.cc, ua_purge.cc and the
 //! catalog functions of cats/sql_delete.cc, sql_create.cc, sql_update.cc).
 //! The dialogs live in admin.rs; everything here runs after the request is

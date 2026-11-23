@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-FileCopyrightText: 2026 Jörg Bernau <contact@onesimus.io>
 //! Glossar von bareos-format: ein Begriff je Bedeutung.
 //!
 //! Zweck: Bareos benutzt manche Wörter für mehrere Dinge. Hier steht, was ein

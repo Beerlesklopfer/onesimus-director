@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-FileCopyrightText: 2026 Jörg Bernau <contact@onesimus.io>
 //! Meldungsarten (`M_*`): Schwere und Ziel einer Job- oder Daemon-Meldung.
 //!
 //! Zweck: Jede Meldung, die ein Daemon an den Director schickt

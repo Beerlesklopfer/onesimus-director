@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-FileCopyrightText: 2026 Jörg Bernau <contact@onesimus.io>
 //! Port of `ovfs-core/src/lstat.rs` of the OVFS extension (commit `4041335`).
 //!
 //! Decoder for the Bareos `File.LStat` column.

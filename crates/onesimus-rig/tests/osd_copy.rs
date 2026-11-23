@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-FileCopyrightText: 2026 Jörg Bernau <contact@onesimus.io>
 //! Copy between two Storage Daemons with osd as the writing side
 //! (`listen`, `Hello Start Storage Job`, `start replicate`, `replicate
 //! data`, `end replicate`): bareos-sd reads the volume of a backup and

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-FileCopyrightText: 2026 Jörg Bernau <contact@onesimus.io>
 //! Wegwerf-Katalog: ein eigener PostgreSQL-Cluster je Gerüst.
 //!
 //! Zweck: Der Director braucht einen Bareos-Katalog. Statt den Systemdienst

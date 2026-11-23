@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-FileCopyrightText: 2026 Jörg Bernau <contact@onesimus.io>
 //! SD job protocol: setup, use device, bootstrap, run.
 
 use bareos_bnet::{BnetStream, BnetSignal};

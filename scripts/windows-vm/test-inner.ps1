@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# SPDX-FileCopyrightText: 2026 Jörg Bernau <contact@onesimus.io>
 # cargo test of ofd on the Windows host, started detached by test.ps1; the filter is in D:\odir-test\test-filter.txt
 $ErrorActionPreference = 'Continue'
 Set-Location D:\odir-test\src

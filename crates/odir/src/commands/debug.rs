@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-FileCopyrightText: 2026 Jörg Bernau <contact@onesimus.io>
 //! setdebug: Director, client and storage targets using Bareos control packets.
 use crate::{command_ast::CommandAst, command_executor::ExecContext, command_queue::CommandResult};
 use bareos_config::resources::{ClientResource, StorageResource};

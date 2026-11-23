@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-FileCopyrightText: 2026 Jörg Bernau <contact@onesimus.io>
 package onesimus:filed-plugin@1.0.0;
 
 /// Component ABI for the protobuf service onesimus.filed.plugin.v1.

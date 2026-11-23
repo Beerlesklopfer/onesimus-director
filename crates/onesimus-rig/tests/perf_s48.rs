@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-FileCopyrightText: 2026 Jörg Bernau <contact@onesimus.io>
 //! Measurement for docs/STUBS.md S-48: what the job monitor and the
 //! JobManager mutex cost the Director while jobs run.
 //!

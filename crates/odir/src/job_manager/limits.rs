@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-FileCopyrightText: 2026 Jörg Bernau <contact@onesimus.io>
 //! Job time limits and duplicate checks of the job queue (S-22).
 //!
 //! - AllowDuplicateJob() (dird/job.cc:883), done in SetupJob() through the

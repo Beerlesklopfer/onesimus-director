@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-FileCopyrightText: 2026 Jörg Bernau <contact@onesimus.io>
 //! The client side of the console grammar (docs/plans/OCONSOLE-COMPLETION.md):
 //! the model read from the Director's `.grammar` (schema 1) or, without it
 //! (Bareos, older odir), rebuilt from the `.help` usage lines; completion,

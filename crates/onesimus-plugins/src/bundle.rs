@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-FileCopyrightText: 2026 Jörg Bernau <contact@onesimus.io>
 //! Bounded file inputs for the administrator's plugin check/load path.
 //! Only certificates and public policy are accepted by this module.
 use crate::{LocalPolicy, Revocations, TrustBase};

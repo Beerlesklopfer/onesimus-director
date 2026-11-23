@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-FileCopyrightText: 2026 Jörg Bernau <contact@onesimus.io>
 //! Tests of the Podman host port: line and grant checks, the engine
 //! confirmation, volume scans, and the session path of scan references
 //! (exit criteria P0 (2), (5), (7)).

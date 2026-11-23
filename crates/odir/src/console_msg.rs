@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-FileCopyrightText: 2026 Jörg Bernau <contact@onesimus.io>
 //! Console message queue (lib/message.cc InitConsoleMsg / `con_fd`,
 //! `console_msg_pending`; dird/ua_output.cc DoMessages).
 //!

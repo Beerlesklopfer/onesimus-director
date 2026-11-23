@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-FileCopyrightText: 2026 Jörg Bernau <contact@onesimus.io>
 //! Basic commands: version, time, quit, help, .help
 //!
 //! Help text and structured metadata follow the upstream Bareos command table.

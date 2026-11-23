@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-FileCopyrightText: 2026 Jörg Bernau <contact@onesimus.io>
 //! Dateien aus den Datensätzen eines Volumes zurückschreiben (`oextract`).
 //!
 //! Der [`Extractor`] bekommt die Datensätze in Volume-Reihenfolge. Je Job

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-FileCopyrightText: 2026 Jörg Bernau <contact@onesimus.io>
 //! The latest successful backup chain of every (client, FileSet name) is
 //! never pruned or purged (decision of the user, 19.11.2026; deliberate
 //! deviation from bareos-dir, see docs/wiki/betrieb-odir.md "Abweichungen

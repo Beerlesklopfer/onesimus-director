@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-FileCopyrightText: 2026 Jörg Bernau <contact@onesimus.io>
 //! Cleaning volume files for the Bareos stream (docs/plans/PODMAN-PLUGIN.md,
 //! "Attribute der Volume-Dateien", V-1, V-3, S-13).
 //!

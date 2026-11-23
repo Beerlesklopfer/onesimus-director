@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-FileCopyrightText: 2026 Jörg Bernau <contact@onesimus.io>
 //! `.config` — configuration CRUD (raw text) over the classic console
 //! (BNET). Onesimus extension without a bareos-dir counterpart; the same
 //! operations as the DirectorApi RPCs (docs/plans/CONFIG-CRUD-GRPC.md,

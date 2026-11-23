@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-FileCopyrightText: 2026 Jörg Bernau <contact@onesimus.io>
 //! Vordergrund/Hintergrund: der Start ohne `-f`.
 //!
 //! Zweck: Ohne `-f` löst sich der Daemon vom Terminal (`fork`, neue

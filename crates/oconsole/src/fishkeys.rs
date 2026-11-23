@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-FileCopyrightText: 2026 Jörg Bernau <contact@onesimus.io>
 //! Key bindings like fish for the interactive console
 //! (docs/plans/OCONSOLE-COMPLETION.md, D7), on rustyline's
 //! `bind_sequence` with conditional handlers.

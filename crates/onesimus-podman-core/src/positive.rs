@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-FileCopyrightText: 2026 Jörg Bernau <contact@onesimus.io>
 //! Positive lists for Podman answers (docs/plans/PODMAN-PLUGIN.md,
 //! "Umgebungsvariablen", V-6).
 //!

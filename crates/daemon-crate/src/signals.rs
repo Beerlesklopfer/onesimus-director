@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-FileCopyrightText: 2026 Jörg Bernau <contact@onesimus.io>
 //! Signale: `SIGTERM`/`SIGINT` beenden, `SIGHUP` lädt neu.
 //!
 //! Zweck: Ein Daemon soll auf `systemctl stop` (`SIGTERM`) und Strg-C

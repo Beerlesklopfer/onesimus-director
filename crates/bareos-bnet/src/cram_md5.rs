@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-FileCopyrightText: 2026 Jörg Bernau <contact@onesimus.io>
 //! CRAM-MD5 two-way authentication for Bareos daemon connections.
 //!
 //! Protocol:

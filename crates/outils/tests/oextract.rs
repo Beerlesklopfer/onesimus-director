@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-FileCopyrightText: 2026 Jörg Bernau <contact@onesimus.io>
 //! `oextract` gegen ein von `bareos-format` geschriebenes Volume: Verzeichnis,
 //! einfache, gzip-komprimierte und spärliche Datei, Symlink, Hartlink.
 

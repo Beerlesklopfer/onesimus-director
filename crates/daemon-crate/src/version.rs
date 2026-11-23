@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-FileCopyrightText: 2026 Jörg Bernau <contact@onesimus.io>
 //! Versionszeile eines Daemons, wie Bareos sie in Job-Meldungen und
 //! `status` zeigt.
 //!

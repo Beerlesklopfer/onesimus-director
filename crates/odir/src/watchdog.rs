@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-FileCopyrightText: 2026 Jörg Bernau <contact@onesimus.io>
 //! Watchdog — dir:watchdog thread (Onesimus).
 //!
 //! The original Director's watchdog thread (lib/watchdog.cc) runs timer

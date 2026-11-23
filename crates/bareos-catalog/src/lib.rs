@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-FileCopyrightText: 2026 Jörg Bernau <contact@onesimus.io>
 //! PostgreSQL catalog interface for the Bareos Director.
 //!
 //! Provides async database access for job records, media/volume management,

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-FileCopyrightText: 2026 Jörg Bernau <contact@onesimus.io>
 use super::*;
 use crate::testca::{self, Key, Kind, TestCa, grants, issue, rsa4096, sign};
 use openssl::{pkey::PKey, x509::X509};

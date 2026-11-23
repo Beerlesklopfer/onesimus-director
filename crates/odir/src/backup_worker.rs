@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-FileCopyrightText: 2026 Jörg Bernau <contact@onesimus.io>
 //! Daemon side of a native Backup job in the forked job worker (S-19,
 //! Compatibility log C-058): backup.cc DoNativeBackup() in its order —
 //! UpdateJobStartRecord, Storage daemon connection and Job command

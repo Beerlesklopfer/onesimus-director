@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-FileCopyrightText: 2026 Jörg Bernau <contact@onesimus.io>
 //! Nachrichten des SD an den Director während eines Jobs.
 //!
 //! Zweck: Der SD fragt den Director nach Volumes und meldet, was er

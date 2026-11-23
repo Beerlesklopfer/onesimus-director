@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-FileCopyrightText: 2026 Jörg Bernau <contact@onesimus.io>
 //! Integration test of the typed gRPC API (DirectorApi, S-34).
 //!
 //! Starts target/debug/odir with the parity harness configuration

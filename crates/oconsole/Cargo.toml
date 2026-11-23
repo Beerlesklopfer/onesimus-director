@@ -48,7 +48,7 @@ bytes = "1"
 
 [package.metadata.deb]
 name = "oconsole"
-maintainer = "Joerg Bernau <joerg@bernau.family>"
+maintainer = "Jörg Bernau <contact@onesimus.io>"
 copyright = "2026, Joerg Bernau"
 license-file = ["../../packaging/copyright", "0"]
 extended-description = """\

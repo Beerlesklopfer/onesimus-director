@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-FileCopyrightText: 2026 Jörg Bernau <contact@onesimus.io>
 //! The Onesimus configuration directory (`/etc/onesimus`).
 //!
 //! The Bareos configuration trees (`bareos-dir.d`, `bareos-sd.d`,

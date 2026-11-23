@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# SPDX-FileCopyrightText: 2026 Jörg Bernau <contact@onesimus.io>
 """Normalized diff of the rig.py outputs (out-cpp vs out-rust)."""
 import re, sys, difflib
 from pathlib import Path

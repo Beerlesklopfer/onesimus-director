@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-FileCopyrightText: 2026 Jörg Bernau <contact@onesimus.io>
 //! Shared pieces of the Storage daemon label/relabel exchange: the
 //! acceptance of the SD reply and BashSpaces().
 //!

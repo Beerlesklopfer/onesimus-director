@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-FileCopyrightText: 2026 Jörg Bernau <contact@onesimus.io>
 //! Local time formatting like C++ bstrftime(): libc strftime with the
 //! process locale, so "%a %d-%b-%Y" reads "Di 13-Okt-2026" on a German
 //! system exactly as with bareos-dir. `init_locale()` runs once at startup.

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-FileCopyrightText: 2026 Jörg Bernau <contact@onesimus.io>
 //! `oextract`: Dateien aus Datei-Volumes zurückschreiben, ohne Director,
 //! Storage Daemon und Katalog (Ersatz für `bextract`).
 //!

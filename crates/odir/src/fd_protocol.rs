@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-FileCopyrightText: 2026 Jörg Bernau <contact@onesimus.io>
 //! File Daemon protocol handler.
 //!
 //! Bareos 18.2+ Director→FD connection sequence:

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-FileCopyrightText: 2026 Jörg Bernau <contact@onesimus.io>
 //! Raw (untyped) view of a Bareos configuration, as the C++ lexer sees it.
 //!
 //! The typed parser in `parser.rs` keeps only what the Director needs at

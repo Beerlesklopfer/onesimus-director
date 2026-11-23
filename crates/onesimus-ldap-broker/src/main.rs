@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-FileCopyrightText: 2026 Jörg Bernau <contact@onesimus.io>
 //! Broker of the signed OpenLDAP plugin (docs/plans/OPENLDAP-PLUGIN.md).
 //!
 //! ofd starts it from its checked descriptor as the user slapd runs as

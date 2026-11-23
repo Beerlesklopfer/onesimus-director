@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-FileCopyrightText: 2026 Jörg Bernau <contact@onesimus.io>
 //! Verbindungen annehmen und aufbauen: Director, aktiver und passiver FD.
 //!
 //! Zweck: Auf dem `SD Port` (BNET) und über gRPC (`StorageDaemon`,

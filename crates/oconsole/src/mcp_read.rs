@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-FileCopyrightText: 2026 Jörg Bernau <contact@onesimus.io>
 //! Typed read-only MCP tools (S-30): one tool per console command family
 //! (`list`/`llist`, `show`, `status`, `messages`, `version`, `time` and the
 //! read-only dot listings). Every tool takes JSON-Schema parameters, checks

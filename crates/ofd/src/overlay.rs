@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-FileCopyrightText: 2026 Jörg Bernau <contact@onesimus.io>
 //! The `ofd.d/` overlay of the Onesimus configuration directory (`--overlay`,
 //! default `/etc/onesimus`): Onesimus directives of the Client resource that
 //! Bareos does not know. `bareos-fd.d` stays what `bareos-fd` reads.

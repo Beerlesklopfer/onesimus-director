@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-FileCopyrightText: 2026 Jörg Bernau <contact@onesimus.io>
 //! The file tree layer of ofd on Windows: `stat`, file system type, times.
 //!
 //! Zweck: Auf Unix liefert `lstat` die Werte, die `EncodeStat` in den

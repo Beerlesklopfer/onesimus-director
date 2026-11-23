@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-FileCopyrightText: 2026 Jörg Bernau <contact@onesimus.io>
 //! Console dialogs: port of C++ dird/ua_input.cc (GetCmd, GetPint,
 //! GetYesno, IsYesno, GetConfirmation) and the prompt machinery of
 //! ua_select.cc (StartPrompt/AddPrompt/DoPrompt, FormatPrompts,

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-FileCopyrightText: 2026 Jörg Bernau <contact@onesimus.io>
 //! Test CA hierarchy for tests only (this crate's tests and the `test-ca`
 //! feature, which only dev-dependencies enable): Ed25519 root → Ed25519
 //! generation → signing certificate (RSA 4096 by default) with the grants

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-FileCopyrightText: 2026 Jörg Bernau <contact@onesimus.io>
 //! # onesimus-rig – Testgerüst Director + FD + SD
 //!
 //! Zweck: ein Ende-zu-Ende-Netz für den Umbau von ofd und den Neubau von osd.

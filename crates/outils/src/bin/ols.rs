@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-FileCopyrightText: 2026 Jörg Bernau <contact@onesimus.io>
 //! `ols`: zeigt, was auf einem Datei-Volume steht (Ersatz für `bls`).
 //!
 //! ```text

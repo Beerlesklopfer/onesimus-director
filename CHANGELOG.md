@@ -1,5 +1,11 @@
 onesimus (25.1.2+onesimus.0.2.0-2) UNRELEASED; urgency=medium
 
+  * licence: AGPL-3.0-or-later instead of AGPL-3.0-only (decision of the
+    owner, also for the proto submodule); dual-licensed crates are now
+    "AGPL-3.0-or-later OR LicenseRef-Onesimus-Commercial". Every source and
+    script file carries SPDX-License-Identifier and SPDX-FileCopyrightText
+    (checked in CI by scripts/ci/check-spdx.sh). Maintainer contact is
+    contact@onesimus.io.
   * odir: DirectorApi configuration CRUD (raw text) also for Client
     resources: Read/Create/Update/Delete/ListResources, listed by
     GetConfigCapabilities when the Client ACL allows a client. Delete

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-FileCopyrightText: 2026 Jörg Bernau <contact@onesimus.io>
 //! Reading waits for a Volume that is not there (`DirAskSysopToMountVolume`):
 //! the Volume file is moved away, the restore starts, the job asks the
 //! operator to mount it (message in the job log), the file

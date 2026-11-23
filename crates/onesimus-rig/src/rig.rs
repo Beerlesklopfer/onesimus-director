@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-FileCopyrightText: 2026 Jörg Bernau <contact@onesimus.io>
 //! Das Gerüst als Ganzes: anlegen, starten, befragen, abräumen.
 //!
 //! Zweck: [`Rig`] bündelt Verzeichnis, Katalog und Daemons eines Laufs und

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-FileCopyrightText: 2026 Jörg Bernau <contact@onesimus.io>
 //! Job message texts of the Director (C++ dird/job.cc, backup.cc,
 //! restore.cc, admin.cc, msgchan.cc, fd_cmds.cc, sd_cmds.cc, lib/bsock.cc)
 //! and the `catalog` message destination (dird.cc DirDbLogInsert).

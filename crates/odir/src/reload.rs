@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-FileCopyrightText: 2026 Jörg Bernau <contact@onesimus.io>
 //! Configuration hot-reload via SIGHUP.
 //!
 //! When the Director receives SIGHUP, it reloads the configuration file

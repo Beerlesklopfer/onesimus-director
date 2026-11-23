@@ -1,4 +1,6 @@
 #!/usr/bin/env python3
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# SPDX-FileCopyrightText: 2026 Jörg Bernau <contact@onesimus.io>
 """Exercise the actual oconsole binary with a fake BNET Director and a real PTY.
 
 Usage: python3 scripts/test_oconsole_rate_guard.py --binary target/debug/oconsole

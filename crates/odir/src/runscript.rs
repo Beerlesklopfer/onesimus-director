@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-FileCopyrightText: 2026 Jörg Bernau <contact@onesimus.io>
 //! Director-side RunScripts: lib/runscript.cc RunScripts() and
 //! RunScript::Run(), lib/util.cc edit_job_codes() with
 //! dird_conf.cc job_code_callback_director(), lib/bpipe_unix.cc

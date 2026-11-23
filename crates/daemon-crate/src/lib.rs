@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-FileCopyrightText: 2026 Jörg Bernau <contact@onesimus.io>
 //! # daemon-crate – das gemeinsame Daemon-Gerüst
 //!
 //! Zweck: Was jeder Onesimus-Daemon beim Start und beim Ende gleich tut,

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-FileCopyrightText: 2026 Jörg Bernau <contact@onesimus.io>
 //! Inner tier of the two-tier console ACLs (docs/plans/ACL-ZWEISTUFIG.md).
 //!
 //! The ACL directives of the Console and Profile resources in the

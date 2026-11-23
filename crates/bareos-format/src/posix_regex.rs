@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-FileCopyrightText: 2026 Jörg Bernau <contact@onesimus.io>
 //! POSIX-Regex je Plattform: `regcomp`/`regexec` der libc auf Unix, die
 //! Crate `regex` auf Windows.
 //!

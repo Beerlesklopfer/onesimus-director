@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-FileCopyrightText: 2026 Jörg Bernau <contact@onesimus.io>
 //! Director side of a native Backup job (S-19, Compatibility log C-058):
 //! job.cc SetupJob for JT_BACKUP (GetOrCreateClientRecord,
 //! GetOrCreateFilesetRecord, GetLevelSinceTime), backup.cc

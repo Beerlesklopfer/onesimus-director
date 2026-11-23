@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-FileCopyrightText: 2026 Jörg Bernau <contact@onesimus.io>
 //! Client run scripts: lib/runscript.cc (RunScripts, RunScript::Run),
 //! lib/bpipe_unix.cc (OpenBpipe/BuildArgcArgv: no shell, the command line
 //! is split at blanks with '…' / "…" quoting) and lib/util.cc

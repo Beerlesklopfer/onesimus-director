@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-FileCopyrightText: 2026 Jörg Bernau <contact@onesimus.io>
 //! The catalog work of `update` (ua_update.cc) beyond single Media
 //! columns: UpdatePool, UpdateVolPool, UpdateVolRecyclepool,
 //! UpdateVolActiononpurge, UpdateVolenabled, UpdateVolStorage,

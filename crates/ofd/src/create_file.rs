@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-FileCopyrightText: 2026 Jörg Bernau <contact@onesimus.io>
 //! findlib/create_file.cc CreateFile() and findlib/mkpath.cc makepath().
 
 use std::collections::HashSet;

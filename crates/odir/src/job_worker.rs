@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-FileCopyrightText: 2026 Jörg Bernau <contact@onesimus.io>
 //! Job worker — autonomous backup/restore execution via fork().
 //!
 //! Each job runs in its own process. The worker uses a State Machine

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-FileCopyrightText: 2026 Jörg Bernau <contact@onesimus.io>
 //! Bareos-Base64: Zahlen und Binärdaten im Bareos-eigenen Base64.
 //!
 //! Zweck: Bareos kodiert zwei Dinge mit demselben Alphabet

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-FileCopyrightText: 2026 Jörg Bernau <contact@onesimus.io>
 //! Server-Handshake mit einem Director: Hello prüfen, CRAM-MD5, OK-Hello.
 //!
 //! Zweck: Ruft ein Director einen Daemon (FD oder SD) an, schickt er zuerst

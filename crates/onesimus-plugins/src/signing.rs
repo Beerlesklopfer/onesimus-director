@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-FileCopyrightText: 2026 Jörg Bernau <contact@onesimus.io>
 //! Build-system side of plugin signing, without any private key: `prepare`
 //! writes the manifest bytes, an external signer (OpenSSL with the TPM
 //! provider) signs them, `assemble` checks the signature and builds the

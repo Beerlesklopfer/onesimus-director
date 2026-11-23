@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-FileCopyrightText: 2026 Jörg Bernau <contact@onesimus.io>
 //! OVFS — Onesimus restore trees from the Bareos catalog.
 //!
 //! The PostgreSQL extension `ovfs` (repository `oenesimus-postgres-plugin`,

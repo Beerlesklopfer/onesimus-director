@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-FileCopyrightText: 2026 Jörg Bernau <contact@onesimus.io>
 //! DirectorApi: configuration resources as raw text (CRUD; Onesimus
 //! extension, docs/plans/CONFIG-CRUD-GRPC.md, logic in `config_edit`).
 //!

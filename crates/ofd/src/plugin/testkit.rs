@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-FileCopyrightText: 2026 Jörg Bernau <contact@onesimus.io>
 //! Signed test plugins: a scripted Component Model guest, the shared test
 //! hierarchy of onesimus-plugins (feature test-ca) and a local policy. Private keys stay in memory; the bundle
 //! and the policy hold only public certificates. Test use only.

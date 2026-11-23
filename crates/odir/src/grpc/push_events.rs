@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-FileCopyrightText: 2026 Jörg Bernau <contact@onesimus.io>
 //! Convert BusMessage to gRPC PushEvent and decide which console may see it.
 //!
 //! Push events reach an interactive gRPC session only when the session's

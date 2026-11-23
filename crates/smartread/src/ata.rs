@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-FileCopyrightText: 2026 Jörg Bernau <contact@onesimus.io>
 //! ATA/SATA drives: `IDENTIFY DEVICE` and the SMART commands through
 //! `SG_IO`, and the parsers of their 512-byte answers.
 //!

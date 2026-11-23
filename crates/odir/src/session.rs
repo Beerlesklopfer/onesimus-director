@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-FileCopyrightText: 2026 Jörg Bernau <contact@onesimus.io>
 //! Console session — BNET command loop with FSM.
 //!
 //! Each console session runs in its own named thread (dir:session:N).

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-FileCopyrightText: 2026 Jörg Bernau <contact@onesimus.io>
 //! State file of the Director (`WriteStateFile` / `ReadStateFile`,
 //! dird/dir_plugins and lib/bstat of the original): the JobIds of the last
 //! jobs that ended, so that `status dir` still lists them after a restart.

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-FileCopyrightText: 2026 Jörg Bernau <contact@onesimus.io>
 //! The console grammar: every registered command as a tree of subcommand
 //! words, bare keywords and `key=value` arguments (docs/plans/OCONSOLE-COMPLETION.md).
 //!

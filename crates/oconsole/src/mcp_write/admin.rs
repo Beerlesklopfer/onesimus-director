@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-FileCopyrightText: 2026 Jörg Bernau <contact@onesimus.io>
 //! The remaining write commands as typed tools (S-36): add, create,
 //! export/import/move, update slots/jobid/stats, sqlquery, query, .sql,
 //! .bvfs_update/_restore/_cleanup/_clear_cache, .acl and .profile changes,

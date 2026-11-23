@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-FileCopyrightText: 2026 Jörg Bernau <contact@onesimus.io>
 //! Status commands: status, .status (C++ dird/ua_status.cc)
 
 use bareos_config::resources::{JobLevel, JobType, RunDirective};

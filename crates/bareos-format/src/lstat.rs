@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-FileCopyrightText: 2026 Jörg Bernau <contact@onesimus.io>
 //! LStat: die Attribut-Zeichenkette einer Datei (`File.LStat`).
 //!
 //! Zweck: Bareos speichert die Felder von `struct stat` einer gesicherten

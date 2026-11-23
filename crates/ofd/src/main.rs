@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-FileCopyrightText: 2026 Jörg Bernau <contact@onesimus.io>
 //! Onesimus File Daemon — Rust rewrite of the Bareos File Daemon.
 //!
 //! Named threads, TLS-PSK authentication, BNET wire protocol.

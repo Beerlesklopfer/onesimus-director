@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-FileCopyrightText: 2026 Jörg Bernau <contact@onesimus.io>
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let proto_dir = "../../proto";
     let out_dir = std::path::PathBuf::from(std::env::var("OUT_DIR")?);

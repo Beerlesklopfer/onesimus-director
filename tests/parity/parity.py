@@ -1,4 +1,6 @@
 #!/usr/bin/env python3
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# SPDX-FileCopyrightText: 2026 Jörg Bernau <contact@onesimus.io>
 """Director parity: original bareos-dir vs. odir on identical fixtures.
 
 Both Directors get the same configuration (derived from --source, default

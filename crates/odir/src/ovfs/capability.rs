@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-FileCopyrightText: 2026 Jörg Bernau <contact@onesimus.io>
 //! Detection of the OVFS PostgreSQL extension in the catalog database.
 //!
 //! The Director checks on every new catalog connection, on `reload` and on

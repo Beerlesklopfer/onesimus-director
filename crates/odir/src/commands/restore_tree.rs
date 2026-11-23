@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-FileCopyrightText: 2026 Jörg Bernau <contact@onesimus.io>
 //! The restore file selection tree (compatibility log C-047): port of
 //! lib/tree.cc (the in-memory directory tree), dird/ua_tree.cc
 //! (InsertTreeHandler and the 26 commands of the file selection mode) for

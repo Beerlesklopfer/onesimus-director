@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-FileCopyrightText: 2026 Jörg Bernau <contact@onesimus.io>
 //! Storage selection and storage-daemon volume operations of the console.
 //!
 //! Port of C++ dird/ua_select.cc get_storage_resource() (:1320),

@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# SPDX-FileCopyrightText: 2026 Jörg Bernau <contact@onesimus.io>
 # Prepares the directories of the plugin trust test (ofd win_trust::tests::prepared_directories)
 # below D:\odir-test\trust. Locale independent: only SIDs are used with icacls.
 # Run on the Windows test host in an ELEVATED session (the owner "Administrators" can only be set from there).

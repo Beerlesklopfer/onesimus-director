@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-FileCopyrightText: 2026 Jörg Bernau <contact@onesimus.io>
 //! Resolve hostnames locally or on the selected File/Storage Daemon
 //! (C++ ua_cmds.cc ResolveCmd, fd_cmds.cc DoClientResolve, sd_cmds.cc DoStorageResolve).
 use crate::{command_ast::CommandAst, command_executor::{ApiMode, ExecContext}, command_queue::CommandResult};

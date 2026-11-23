@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-FileCopyrightText: 2026 Jörg Bernau <contact@onesimus.io>
 //! Interactive restore file selection as MCP tools (S-36): the 26 commands
 //! of the Director's restore tree (ua_tree.cc) behind `restore_tree_start`
 //! … `restore_tree_done` / `restore_tree_abort`.

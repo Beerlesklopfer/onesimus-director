@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-FileCopyrightText: 2026 Jörg Bernau <contact@onesimus.io>
 //! Persistent bearer credential for the HTTP MCP endpoint.
 use std::fs::{DirBuilder, OpenOptions};
 use std::io::{Read, Write};

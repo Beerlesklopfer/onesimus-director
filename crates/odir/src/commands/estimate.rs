@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-FileCopyrightText: 2026 Jörg Bernau <contact@onesimus.io>
 //! `estimate` — port of C++ ua_cmds.cc EstimateCmd().
 //!
 //! Connects to the File Daemon like a backup does (fd_cmds.cc

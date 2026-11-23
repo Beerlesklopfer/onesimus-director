@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-FileCopyrightText: 2026 Jörg Bernau <contact@onesimus.io>
 //! Command Registry — Single Source of Truth for all Director commands.
 //!
 //! Every command is declared with its name, aliases, description and

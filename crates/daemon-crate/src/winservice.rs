@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-FileCopyrightText: 2026 Jörg Bernau <contact@onesimus.io>
 //! Windows-Dienst: Anmeldung beim Service Control Manager (SCM).
 //!
 //! Zweck: Unter Windows startet der SCM den Daemon als Dienst und erwartet,

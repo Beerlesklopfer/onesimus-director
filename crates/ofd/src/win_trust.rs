@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-FileCopyrightText: 2026 Jörg Bernau <contact@onesimus.io>
 //! The plugin trust check on Windows: reads owner and DACL of every
 //! component of a path and asks [`crate::trust_acl`].
 //!

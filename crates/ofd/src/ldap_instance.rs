@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-FileCopyrightText: 2026 Jörg Bernau <contact@onesimus.io>
 //! A local slapd instance and the account it runs as
 //! (docs/plans/OPENLDAP-PLUGIN.md, "Instanz erkennen"; L-11).
 //!

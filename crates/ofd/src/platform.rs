@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-FileCopyrightText: 2026 Jörg Bernau <contact@onesimus.io>
 //! What ofd needs from the platform beyond std, in one place.
 //!
 //! Unix: re-exports of `std::os::unix` (no behaviour of its own).

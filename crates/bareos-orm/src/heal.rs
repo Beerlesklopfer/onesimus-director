@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-FileCopyrightText: 2026 Jörg Bernau <contact@onesimus.io>
 //! Self-healing of the Onesimus catalog objects, run by odir at every start
 //! after [`Migrator::migrate`].
 //!

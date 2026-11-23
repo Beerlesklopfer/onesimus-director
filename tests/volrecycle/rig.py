@@ -1,4 +1,6 @@
 #!/usr/bin/env python3
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# SPDX-FileCopyrightText: 2026 Jörg Bernau <contact@onesimus.io>
 """Volume recycling / autolabel on file volumes (C-085): original bareos-dir
 vs odir against PRIVATE bareos-fd/bareos-sd daemons (own config,
 ports, storage, working directories), never the live ones and never

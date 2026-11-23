@@ -17,12 +17,12 @@ Stand 21.11.2026. Umsetzung der Entscheidung des Maintainers vom 21.11.2026
 
 | Angabe (SPDX) | Gilt für | Bedeutung |
 | --- | --- | --- |
-| `AGPL-3.0-only` | von Bareos abgeleitete Teile | GNU AGPL v3, wie Bareos. Die Rechte der Bareos-Urheber (Bareos GmbH & Co. KG, Planets Communications B.V., Free Software Foundation Europe e.V. u. a.) bleiben bestehen; eine andere Lizenz ist nicht möglich. |
-| `AGPL-3.0-only OR LicenseRef-Onesimus-Commercial` | eigene Teile | Wahlweise AGPL v3 oder eine kommerzielle Lizenz des Maintainers ([LICENSE-COMMERCIAL.md](../LICENSE-COMMERCIAL.md), Text folgt). |
+| `AGPL-3.0-only` | von Bareos abgeleitete Teile (Tabelle unten) | GNU AGPL v3, wie Bareos; nach Entscheidung des Besitzers vom 23.11.2026 tragen die Crates aber die Voreinstellung des Workspaces (`AGPL-3.0-or-later`), siehe „Offene Rechtsfragen“. Die Rechte der Bareos-Urheber (Bareos GmbH & Co. KG, Planets Communications B.V., Free Software Foundation Europe e.V. u. a.) bleiben bestehen; eine andere Lizenz ist nicht möglich. |
+| `AGPL-3.0-or-later OR LicenseRef-Onesimus-Commercial` | eigene Teile | Wahlweise AGPL v3 oder später oder eine kommerzielle Lizenz des Maintainers ([LICENSE-COMMERCIAL.md](../LICENSE-COMMERCIAL.md), Text folgt). |
 
 Der AGPL-Text liegt unverändert in [LICENSE](../LICENSE). Die Angabe steht je
 Crate im Feld `license` der `Cargo.toml`; die Voreinstellung des Workspaces
-(`[workspace.package] license`) bleibt `AGPL-3.0-only`, eigene Crates
+(`[workspace.package] license`) ist `AGPL-3.0-or-later`, eigene Crates
 überschreiben sie.
 
 ## Was „eigen“ heißt
@@ -68,17 +68,17 @@ den Modulköpfen und die Git-Historie.
 | `ofd` | gemischt, überwiegend abgeleitet | `AGPL-3.0-only` | Nachbau von `bareos-fd`; 56 Verweise (`filed/backup.cc`, `filed/restore.cc`, `findlib/*.cc`, `lib/attr.cc` …). Eigene Module siehe unten. |
 | `osd` | abgeleitet | `AGPL-3.0-only` | Director-Seite des SD-Protokolls nach `dird/authenticate.cc`, `dird/msgchan.cc`, `dird/catreq.cc`, `stored/askdir.cc`. |
 | `osd-daemon` (`crates/osd/daemon`) | gemischt, überwiegend abgeleitet | `AGPL-3.0-only` | Nachbau von `bareos-sd` (Sitzungen, Device, Leser/Schreiber; 45 Verweise auf `stored/*.cc`). Eigen: `grpc.rs`, `ringproto.rs` (beide „Bareos-Gegenstück: keins“). |
-| `osd-ring` (`crates/osd/ring`) | eigen | `AGPL-3.0-only OR LicenseRef-Onesimus-Commercial` | Blockring im gemeinsamen Speicher; Modulkopf „Bareos-Gegenstück: keins. bareos-sd schreibt aus dem Job-Thread direkt auf das Device“. Keine Abhängigkeit von anderen Workspace-Crates. |
+| `osd-ring` (`crates/osd/ring`) | eigen | `AGPL-3.0-or-later OR LicenseRef-Onesimus-Commercial` | Blockring im gemeinsamen Speicher; Modulkopf „Bareos-Gegenstück: keins. bareos-sd schreibt aus dem Job-Thread direkt auf das Device“. Keine Abhängigkeit von anderen Workspace-Crates. |
 | `daemon-crate` | abgeleitet | `AGPL-3.0-only` | Daemon-Rahmen nach `lib/daemon.cc`, `include/exit_codes.h`, `filed/filed.cc`/`stored/stored.cc` `main`, `filed/authenticate.cc`, `lib/message.cc`. Das einzige eigene Modul (gRPC-TLS) ist seit 21.11.2026 in `onesimus-bnet-grpc::tls`. |
-| `onesimus-bnet-grpc` | eigen | `AGPL-3.0-only OR LicenseRef-Onesimus-Commercial` | BNET-Rahmen über gRPC mit TLS, Modulkopf „Bareos-Gegenstück: keins (Onesimus-Erweiterung)“; transportiert Bareos-Rahmen, portiert keine Bareos-Logik. Dazu `tls` (aus `daemon-crate`). |
+| `onesimus-bnet-grpc` | eigen | `AGPL-3.0-or-later OR LicenseRef-Onesimus-Commercial` | BNET-Rahmen über gRPC mit TLS, Modulkopf „Bareos-Gegenstück: keins (Onesimus-Erweiterung)“; transportiert Bareos-Rahmen, portiert keine Bareos-Logik. Dazu `tls` (aus `daemon-crate`). |
 | `onesimus-proto-rs` | gemischt | `AGPL-3.0-only` | Aus allen Protos des Submoduls erzeugt, darunter `director_commands.proto` („Auto-generated from ua_cmds.cc by scrape_commands.py“). |
-| `onesimus-plugins` | eigen | `AGPL-3.0-only OR LicenseRef-Onesimus-Commercial` | Signierte WebAssembly-Plugins, Ed25519/X.509-Vertrauenskette (`docs/plans/SIGNIER-INFRASTRUKTUR.md`); ersetzt die Bareos-Plugins, ohne deren Code (keine Verweise auf Bareos-Quellen). |
-| `onesimus-pg-broker` | eigen | `AGPL-3.0-only OR LicenseRef-Onesimus-Commercial` | Broker des PostgreSQL-Plugins (`pg_dump`/`psql`); keine Bareos-Verweise. |
-| `onesimus-ldap-broker` | eigen | `AGPL-3.0-only OR LicenseRef-Onesimus-Commercial` | Broker des OpenLDAP-Plugins (`slapcat`/`slapadd`); keine Bareos-Verweise. |
-| `onesimus-podman-core` | eigen | `AGPL-3.0-only OR LicenseRef-Onesimus-Commercial` | Podman-Plugin: Richtlinien, ID-Maps, Journal; nennt den Bareos-Strom nur als Ziel. Keine Abhängigkeit von anderen Workspace-Crates. |
-| `onesimus-podman-broker` | eigen | `AGPL-3.0-only OR LicenseRef-Onesimus-Commercial` | Broker des Podman-Plugins; keine Bareos-Verweise. |
+| `onesimus-plugins` | eigen | `AGPL-3.0-or-later OR LicenseRef-Onesimus-Commercial` | Signierte WebAssembly-Plugins, Ed25519/X.509-Vertrauenskette (`docs/plans/SIGNIER-INFRASTRUKTUR.md`); ersetzt die Bareos-Plugins, ohne deren Code (keine Verweise auf Bareos-Quellen). |
+| `onesimus-pg-broker` | eigen | `AGPL-3.0-or-later OR LicenseRef-Onesimus-Commercial` | Broker des PostgreSQL-Plugins (`pg_dump`/`psql`); keine Bareos-Verweise. |
+| `onesimus-ldap-broker` | eigen | `AGPL-3.0-or-later OR LicenseRef-Onesimus-Commercial` | Broker des OpenLDAP-Plugins (`slapcat`/`slapadd`); keine Bareos-Verweise. |
+| `onesimus-podman-core` | eigen | `AGPL-3.0-or-later OR LicenseRef-Onesimus-Commercial` | Podman-Plugin: Richtlinien, ID-Maps, Journal; nennt den Bareos-Strom nur als Ziel. Keine Abhängigkeit von anderen Workspace-Crates. |
+| `onesimus-podman-broker` | eigen | `AGPL-3.0-or-later OR LicenseRef-Onesimus-Commercial` | Broker des Podman-Plugins; keine Bareos-Verweise. |
 | `onesimus-rig` | gemischt (Testgerüst) | `AGPL-3.0-only` | Nicht ausgeliefert. Eigenes Gerüst, aber `console.rs` bildet den `bconsole`-Ablauf nach (`console/console.cc`, `lib/cram_md5.cc`), `catalog.rs` lädt das Bareos-Schema `postgresql.sql`. Vorsichtshalber AGPL; kann nach Prüfung dual werden. |
-| Submodul `proto` | gemischt | `AGPL-3.0-only` (eigenes Repository, unverändert) | `director_commands.proto` aus `ua_cmds.cc` erzeugt; eigen sind u. a. `filed_plugin.proto`, `plugin_ccc.proto`, `*_broker.proto`, `onesimus_options.proto`. Lizenzänderungen gehören in das Repository `onesimus-proto`. |
+| Submodul `proto` | gemischt | `AGPL-3.0-or-later` (eigenes Repository, seit 23.11.2026) | `director_commands.proto` aus `ua_cmds.cc` erzeugt; eigen sind u. a. `filed_plugin.proto`, `plugin_ccc.proto`, `*_broker.proto`, `onesimus_options.proto`. Lizenzänderungen gehören in das Repository `onesimus-proto`. |
 
 Außerhalb des Workspaces: die Gast-Plugins unter `plugins/`
 (`onesimus-guest-runtime`, `onesimus-plugin-postgresql`,
@@ -132,7 +132,7 @@ einen risikoarmen Schritt ist. Vorschlag je Fall:
   `ofd-plugin-*` (Broker) enthalten Binärdateien, die dual lizenzierte Crates
   mit `AGPL-3.0-only`-Crates verbinden. Ausgeliefert ist jede dieser
   Binärdateien als Ganzes unter der AGPL; `packaging/copyright`
-  (`License: AGPL-3.0-only`) bleibt daher zutreffend. Offen für die
+  (`License: AGPL-3.0-or-later`) bleibt daher zutreffend. Offen für die
   Paketpflege: `Files: *` nennt nur den Maintainer als Urheber; für die
   abgeleiteten Crates gehören die Bareos-Urheber dazu (bisher nur für
   `docs/wiki/commands/*` und `ua_commands_table.rs` eingetragen).
@@ -157,3 +157,8 @@ vor. Beiträge zu `AGPL-3.0-only`-Crates brauchen keine CLA.
    dass er sie kommerziell lizenzieren kann?
 4. Lizenz der Limit-Crate (AGPL, dual oder Source-available), siehe
    FREE-TIER-LIZENZ.md.
+
+Nachtrag 23.11.2026: Die Umstellung auf `AGPL-3.0-or-later` (Workspace, SPDX-Köpfe,
+`proto`) gilt auch für die abgeleiteten Crates der Tabelle oben. Ob ein „or later“
+für Teile zulässig ist, die von Bareos (AGPL-3.0-only) abgeleitet sind, ist für
+die Anwaltsprüfung offen; die Zeilen der Bareos-Urheber bleiben unverändert.

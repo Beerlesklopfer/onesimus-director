@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-FileCopyrightText: 2026 Jörg Bernau <contact@onesimus.io>
 //! BVFS — the Bareos virtual file system used by restore browsers.
 //!
 //! Port of C++ dird/ua_dotcmds.cc (DotBvfs*Cmd, BvfsParseArg,

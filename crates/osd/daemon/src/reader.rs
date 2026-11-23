@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-FileCopyrightText: 2026 Jörg Bernau <contact@onesimus.io>
 //! Der Geräteleser: liest die Volumes eines Restores und füllt den Ring.
 //!
 //! Zweck: Restore und Verify (VolumeToCatalog) lesen über denselben Ring wie

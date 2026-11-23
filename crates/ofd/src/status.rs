@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-FileCopyrightText: 2026 Jörg Bernau <contact@onesimus.io>
 //! FD status command — returns daemon status information.
 //!
 //! Compatible with C++ bareos-fd status output format.

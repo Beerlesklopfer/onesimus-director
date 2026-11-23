@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-FileCopyrightText: 2026 Jörg Bernau <contact@onesimus.io>
 //! macOS und Windows: Warten durch Abfragen mit Zeitgrenze (siehe [`super`]).
 //!
 //! Zweck: Der Ring wartet immer mit Zeitgrenze und prüft nach jedem Warten

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-FileCopyrightText: 2026 Jörg Bernau <contact@onesimus.io>
 //! Reading, creating, changing and deleting configuration resources as raw
 //! text (DirectorApi CRUD, docs/plans/CONFIG-CRUD-GRPC.md; Onesimus
 //! extension without a bareos-dir counterpart).

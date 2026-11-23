@@ -39,7 +39,7 @@ rcgen.workspace = true
 
 [package.metadata.deb]
 name = "osd"
-maintainer = "Joerg Bernau <joerg@bernau.family>"
+maintainer = "Jörg Bernau <contact@onesimus.io>"
 copyright = "2026, Joerg Bernau"
 license-file = ["../../../packaging/copyright", "0"]
 extended-description = """\

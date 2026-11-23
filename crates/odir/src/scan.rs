@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-FileCopyrightText: 2026 Jörg Bernau <contact@onesimus.io>
 //! lib/scan.cc bsscanf(): what `sscanf` means in the C++ Director
 //! (include/baconfig.h `#define sscanf bsscanf`). Shared by the catalog
 //! requests of the Storage daemon (C-055) and lib/btime.cc StrToUtime()

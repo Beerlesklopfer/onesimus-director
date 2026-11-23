@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-FileCopyrightText: 2026 Jörg Bernau <contact@onesimus.io>
 //! Which DirectorApi RPC covers which console command / subcommand.
 //!
 //! The test below checks this table against the command inventory

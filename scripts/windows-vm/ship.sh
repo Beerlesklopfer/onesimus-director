@@ -1,4 +1,6 @@
 #!/bin/bash
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# SPDX-FileCopyrightText: 2026 Jörg Bernau <contact@onesimus.io>
 # Windows test host (docs/plans/PORTIERUNG-MACOS-WINDOWS.md, "Testen auf der VM"): no Wine, work only in D:\odir-test.
 # pack the tree, copy it to the VM, rebuild ofd there (detached), wait for build.done
 set -e

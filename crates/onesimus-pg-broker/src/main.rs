@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-FileCopyrightText: 2026 Jörg Bernau <contact@onesimus.io>
 //! Broker of the signed PostgreSQL plugin (docs/plans/POSTGRESQL-PHASE2.md, E).
 //!
 //! ofd starts it from its checked descriptor as the instance's user, with

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-FileCopyrightText: 2026 Jörg Bernau <contact@onesimus.io>
 //! `setbandwidth` — C++ ua_cmds.cc SetbwlimitCmd (:935) with
 //! SetbwlimitFiled (:842), setbwlimit_stored (:886), fd_cmds.cc
 //! SendBwlimitToFd (:453) and ua_select.cc select_jobs (:1566).

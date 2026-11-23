@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-FileCopyrightText: 2026 Jörg Bernau <contact@onesimus.io>
 //! Der Geräteschreiber: liest Blöcke aus dem Ring und schreibt das Volume.
 //!
 //! Zweck: Je Job und Ziel-Device läuft ein Schreiber, in Stufe 1 genau

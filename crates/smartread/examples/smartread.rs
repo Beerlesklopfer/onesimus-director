@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-FileCopyrightText: 2026 Jörg Bernau <contact@onesimus.io>
 //! `cargo run -p smartread --example smartread -- /dev/sda`: prints what the drive reports.
 
 fn main() {

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-FileCopyrightText: 2026 Jörg Bernau <contact@onesimus.io>
 //! Der Client: eine TLS-Verbindung zu FileDaemon oder StorageDaemon.
 //!
 //! Zweck: [`connect`] öffnet einen der vier Ströme ([`Rpc`]) und gibt ihn

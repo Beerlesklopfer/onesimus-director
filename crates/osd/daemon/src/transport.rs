@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-FileCopyrightText: 2026 Jörg Bernau <contact@onesimus.io>
 //! Transport der Steuer- und Datenverbindungen.
 //!
 //! Zweck: Director-Sitzung und FD-Datenphase sprechen über [`Channel`],

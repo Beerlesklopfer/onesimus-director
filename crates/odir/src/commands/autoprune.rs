@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-FileCopyrightText: 2026 Jörg Bernau <contact@onesimus.io>
 //! Auto prune of Jobs and Files at the end of a job (dird/autoprune.cc
 //! DoAutoprune()). DELETES CATALOG RECORDS: with `AutoPrune = yes` on the
 //! Client (or `Prune Jobs`/`Prune Files` on the Job) every job that ends

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-FileCopyrightText: 2026 Jörg Bernau <contact@onesimus.io>
 //! Throw-away databases for the live PostgreSQL tests of this crate.
 //!
 //! `BAREOS_ORM_TEST_DB` is the connection URL of a throw-away cluster

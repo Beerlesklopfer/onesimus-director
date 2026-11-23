@@ -253,13 +253,13 @@ for p in odir ofd oconsole; do cargo deb -p $p --no-build; done   # -> target/de
 
 ## License
 
-GNU Affero General Public License v3.0 only (`AGPL-3.0-only`); see [LICENSE](LICENSE).
+GNU Affero General Public License v3.0 or later (`AGPL-3.0-or-later`); see [LICENSE](LICENSE).
 Crates that are not derived from Bareos are dual-licensed
-(`AGPL-3.0-only OR LicenseRef-Onesimus-Commercial`, see
+(`AGPL-3.0-or-later OR LicenseRef-Onesimus-Commercial`, see
 [LICENSE-COMMERCIAL.md](LICENSE-COMMERCIAL.md)); the per-crate list is in
 [docs/LIZENZEN.md](docs/LIZENZEN.md).
 
-Maintainer: Joerg Bernau <Joerg.Bernau@onesimus.io>.
+Maintainer: Jörg Bernau <contact@onesimus.io>.
 
 Die aktuelle [Befehls-Roadmap und Vollständigkeitsprüfung](docs/TOD-COMMANDS.md)
 führt offene Teilabläufe, Prioritäten und Abnahmen zusammen.

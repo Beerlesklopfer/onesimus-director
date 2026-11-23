@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-FileCopyrightText: 2026 Jörg Bernau <contact@onesimus.io>
 //! Annahme von BNET-Verbindungen: Accept-Schleife, TLS-PSK oder Klartext.
 //!
 //! Zweck: Jeder Daemon wartet auf einem TCP-Port auf Gegenstellen

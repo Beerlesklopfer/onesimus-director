@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-FileCopyrightText: 2026 Jörg Bernau <contact@onesimus.io>
 //! Storage daemon read+write session of the jobs that copy data from
 //! volume to volume without a File daemon (Compatibility log C-058, S-05):
 //! Copy/Migrate worker jobs (migrate.cc DoActualMigration, local replicate)

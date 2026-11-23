@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-FileCopyrightText: 2026 Jörg Bernau <contact@onesimus.io>
 //! The plugin trust base of this ofd build and the suite it belongs to.
 //!
 //! Root, generation and revocation list are compiled in from

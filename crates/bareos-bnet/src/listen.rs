@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-FileCopyrightText: 2026 Jörg Bernau <contact@onesimus.io>
 //! Listening sockets of the daemons: one socket for IPv4 and IPv6.
 //!
 //! Zweck: `[::]:port` soll IPv4 und IPv6 annehmen ("dual-stack on every

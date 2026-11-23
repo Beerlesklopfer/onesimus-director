@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-FileCopyrightText: 2026 Jörg Bernau <contact@onesimus.io>
 //! Onesimus Director — Drop-in replacement for the Bareos Director daemon.
 //!
 //! Named threads, fork-per-job, crossbeam channels for core,

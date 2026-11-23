@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-FileCopyrightText: 2026 Jörg Bernau <contact@onesimus.io>
 //! Interop-Matrix gRPC/BNET zwischen odir, ofd und osd (Plan
 //! `docs/plans/OSD-GERAETE-UND-VERTEILUNG.md`, P1 Stufe 3).
 //!

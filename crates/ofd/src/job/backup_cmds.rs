@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-FileCopyrightText: 2026 Jörg Bernau <contact@onesimus.io>
 //! The backup side of the Director commands (filed/dir_cmd.cc LevelCmd,
 //! FilesetCmd, AccurateCmd, BackupCmd, EstimateCmd, VerifyCmd,
 //! RunscriptCmd, RunbeforenowCmd, SetbandwidthCmd, ValidateCommand) and

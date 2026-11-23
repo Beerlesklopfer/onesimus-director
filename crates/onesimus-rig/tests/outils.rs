@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-FileCopyrightText: 2026 Jörg Bernau <contact@onesimus.io>
 //! `oscan` und `oextract` gegen ein Volume, das osd im Gerüst geschrieben
 //! hat: Der Katalogeintrag des Jobs wird gelöscht, `oscan -s` baut ihn aus
 //! dem Volume neu auf, danach läuft die Rücksicherung durch den Director und

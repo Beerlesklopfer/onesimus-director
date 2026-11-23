@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-FileCopyrightText: 2026 Jörg Bernau <contact@onesimus.io>
 //! gRPC-first Storage Daemon connections (osd) with an unconditional BNET
 //! fallback, the counterpart of `fd_grpc` for Storage resources.
 //!

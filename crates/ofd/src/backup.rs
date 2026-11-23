@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-FileCopyrightText: 2026 Jörg Bernau <contact@onesimus.io>
 //! Backup — FD side: filed/backup.cc (BlastDataToStorageDaemon, SaveFile,
 //! send_data/SendDataToSd, EncodeAndSendAttributes, StripPath),
 //! findlib/attribs.cc SelectDataStream, accurate.cc (AccurateCheckFile,

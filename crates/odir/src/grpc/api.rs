@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-FileCopyrightText: 2026 Jörg Bernau <contact@onesimus.io>
 //! DirectorApi (proto/director_api.proto): typed RPCs on top of the console
 //! commands.
 //!

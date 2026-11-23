@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-FileCopyrightText: 2026 Jörg Bernau <contact@onesimus.io>
 //! Backup and restore of a File Daemon on Windows (`ofd.exe`) from a rig
 //! whose Director and Storage Daemon run on this host.
 //!

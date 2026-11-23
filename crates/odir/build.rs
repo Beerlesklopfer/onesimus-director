@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-FileCopyrightText: 2026 Jörg Bernau <contact@onesimus.io>
 //! Build-time version strings (C++ lib/version.cc kBareosVersionStrings and
 //! the configure-time BAREOS_PLATFORM / DISTVER), see src/version_strings.rs.
 //! Dates honour SOURCE_DATE_EPOCH for reproducible Debian builds.

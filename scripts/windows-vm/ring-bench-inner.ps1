@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# SPDX-FileCopyrightText: 2026 Jörg Bernau <contact@onesimus.io>
 # cargo test -p osd-ring --release bench auf der Windows-VM (Durchsatz und Rundlaufzeit des Rings)
 $ErrorActionPreference = 'Continue'
 Set-Location D:\odir-ring-test\src

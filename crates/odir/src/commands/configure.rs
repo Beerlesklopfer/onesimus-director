@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-FileCopyrightText: 2026 Jörg Bernau <contact@onesimus.io>
 //! `configure` — port of dird/ua_configure.cc (Bareos 25.1.2).
 //!
 //! Original subcommands, byte-compatible with the C++ Director:

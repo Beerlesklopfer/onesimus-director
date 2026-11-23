@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-FileCopyrightText: 2026 Jörg Bernau <contact@onesimus.io>
 //! Walking the FileSet: findlib/find.cc FindFiles()/OurCallback() and
 //! findlib/find_one.cc FindOneFile() (hard links, directories with the
 //! DIRBEGIN/DIREND pair, special files, incremental change check, file

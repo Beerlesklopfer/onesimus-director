@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-FileCopyrightText: 2026 Jörg Bernau <contact@onesimus.io>
 //! Dateitypen (`FT_*`): wie der FD eine gefundene Datei einordnet.
 //!
 //! Zweck: Der Attribut-Datensatz trägt neben der LStat-Zeichenkette den

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-FileCopyrightText: 2026 Jörg Bernau <contact@onesimus.io>
 //! # osd-ring – der Blockring von osd im gemeinsamen Speicher
 //!
 //! Zweck: osd verteilt den Datenstrom eines Jobs über einen Ring im

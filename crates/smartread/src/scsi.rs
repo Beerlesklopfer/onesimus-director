@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-FileCopyrightText: 2026 Jörg Bernau <contact@onesimus.io>
 //! SCSI / SAS drives: `INQUIRY` and the SMART related log pages (`LOG SENSE`).
 //!
 //! SAS and Fibre Channel disks, and SCSI disks in general, do not have the ATA

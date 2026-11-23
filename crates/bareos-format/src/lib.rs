@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-FileCopyrightText: 2026 Jörg Bernau <contact@onesimus.io>
 //! # bareos-format – das Bareos-Strom- und Volume-Format
 //!
 //! Zweck: die gemeinsame Grundlage für ofd, osd und odir. Was alle drei über

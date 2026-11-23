@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-FileCopyrightText: 2026 Jörg Bernau <contact@onesimus.io>
 //! Console ACL semantics from Bareos ua_acl.cc; policies are read after reload.
 //!
 //! Two tiers (docs/plans/ACL-ZWEISTUFIG.md): the ACL directives of the

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-FileCopyrightText: 2026 Jörg Bernau <contact@onesimus.io>
 //! Tests of the OVFS paths with a catalog test double, plus the equivalence
 //! test of fallback and extension against a real catalog (`equivalence`).
 

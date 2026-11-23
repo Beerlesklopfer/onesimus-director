@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-FileCopyrightText: 2026 Jörg Bernau <contact@onesimus.io>
 //! CatReq relay loop: SD ↔ Director catalog request proxy.
 //!
 //! The SD sends CatReq messages to the Director (via the worker pipe)

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-FileCopyrightText: 2026 Jörg Bernau <contact@onesimus.io>
 //! Gestartete Daemons des Gerüsts und ihr sicheres Ende.
 //!
 //! Zweck: Jeder Daemon läuft in einer eigenen Prozessgruppe, damit ein

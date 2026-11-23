@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-FileCopyrightText: 2026 Jörg Bernau <contact@onesimus.io>
 //! Instance workers for trusted WASM-host adapters. This is scheduling, not a
 //! component engine: an adapter must enforce memory/fuel limits and provide a
 //! nonblocking, thread-safe interrupt handle for both WASM and host I/O.

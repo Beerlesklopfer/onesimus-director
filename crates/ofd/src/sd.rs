@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-FileCopyrightText: 2026 Jörg Bernau <contact@onesimus.io>
 //! Storage daemon connections of a job: filed/dir_cmd.cc StorageCmd()
 //! (the FD connects to the SD) and filed/sd_cmds.cc
 //! handle_stored_connection() (passive client: the SD connects to the FD),

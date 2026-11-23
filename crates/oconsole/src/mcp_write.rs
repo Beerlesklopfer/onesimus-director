@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-FileCopyrightText: 2026 Jörg Bernau <contact@onesimus.io>
 //! Typed write and restore MCP tools (S-31, S-36).
 //!
 //! Offered with write access (C-087): local stdio in every build (unless

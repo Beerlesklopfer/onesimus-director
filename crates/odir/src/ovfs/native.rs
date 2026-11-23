@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-FileCopyrightText: 2026 Jörg Bernau <contact@onesimus.io>
 //! Calls of the `ovfs` extension functions (schema `ovfs`).
 //!
 //! Arguments are checked here first with the extension's own messages, so an

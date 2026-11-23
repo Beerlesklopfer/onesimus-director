@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# SPDX-FileCopyrightText: 2026 Jörg Bernau <contact@onesimus.io>
 # Changes the test tree after a full backup (crates/onesimus-rig/tests/windows_fd.rs, incremental test): D:\odir-test\testdata only
 $ErrorActionPreference = 'Stop'
 Start-Sleep 2

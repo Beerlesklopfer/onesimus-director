@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-FileCopyrightText: 2026 Jörg Bernau <contact@onesimus.io>
 //! TCP accept loop — dir:accept thread.
 //!
 //! Listens for incoming BNET connections from consoles and file daemons.

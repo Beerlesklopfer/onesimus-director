@@ -12,7 +12,7 @@ Zusammenfassung der bestehenden Dateien (`director_service.proto`, `director_com
 
 | Konvention (bestehend) | `director_api.proto` |
 |---|---|
-| Kopf: `SPDX-License-Identifier: AGPL-3.0-only`, Zeile `BAREOS® - Backup Archiving REcovery Open Sourced`, Copyright-Zeile, Leerzeile, Kurzbeschreibung | gleich |
+| Kopf: `SPDX-License-Identifier: AGPL-3.0-or-later`, Zeile `BAREOS® - Backup Archiving REcovery Open Sourced`, Copyright-Zeile, Leerzeile, Kurzbeschreibung | gleich |
 | `syntax = "proto3"`, Paketschema `onesimus.director[.*]` | Paket `onesimus.director.api` |
 | Abschnitte mit `// ====…` und Titel, Befehle als `// name — Beschreibung` | gleich |
 | Kommentare deutsch, Umlaute als ae/oe/ue (service), Feldkommentare am Zeilenende | gleich |

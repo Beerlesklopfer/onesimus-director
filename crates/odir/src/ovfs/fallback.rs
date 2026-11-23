@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-FileCopyrightText: 2026 Jörg Bernau <contact@onesimus.io>
 //! The Director fallback for catalogs without the `ovfs` extension: the
 //! extension's SQL (`ovfs/src/lib.rs`, commit `4041335`) sent as plain
 //! statements, the rows streamed through a server-side cursor in batches of

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-FileCopyrightText: 2026 Jörg Bernau <contact@onesimus.io>
 //! Bootstrap of a console restore (compatibility log C-047): port of
 //! dird/bsr.cc (AddFindex, AddFindexAll, AddVolumeInformationToBsr,
 //! WriteBsrFile, DisplayBsrInfo) and FindStorageResource (ua_restore.cc).

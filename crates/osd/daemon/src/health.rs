@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-FileCopyrightText: 2026 Jörg Bernau <contact@onesimus.io>
 //! Gesundheit der Platten unter den File-Devices (D-21, erste Umsetzung).
 //!
 //! Zweck: osd findet zu jedem File-Device die Platte, auf der sein

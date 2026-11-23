@@ -1,4 +1,6 @@
 #!/usr/bin/env python3
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# SPDX-FileCopyrightText: 2026 Jörg Bernau <contact@onesimus.io>
 """Generate configure help exactly from the pinned Bareos ResourceItem tables.
 
 Run against the original source checkout; --check rejects stale generated Rust.

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-FileCopyrightText: 2026 Jörg Bernau <contact@onesimus.io>
 //! Job-Kommando des Directors an den Storage Daemon.
 //!
 //! Zweck: Bevor ein Job Daten bewegt, meldet der Director ihn beim SD an:

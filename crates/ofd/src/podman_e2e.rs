@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-FileCopyrightText: 2026 Jörg Bernau <contact@onesimus.io>
 //! End-to-end tests of the Podman plugin, phase P0
 //! (docs/plans/PODMAN-PLUGIN.md, "Testaufbau", exit criteria P0).
 //!

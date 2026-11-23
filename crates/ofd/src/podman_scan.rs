@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-FileCopyrightText: 2026 Jörg Bernau <contact@onesimus.io>
 //! The host's scan handle for volume data (docs/plans/PODMAN-PLUGIN.md,
 //! "Named Volumes", "Erweiterung von FileEntry", V-2, V-3).
 //!

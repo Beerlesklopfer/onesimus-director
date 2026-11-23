@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# SPDX-FileCopyrightText: 2026 Jörg Bernau <contact@onesimus.io>
 # Compares D:\odir-test\bigdata\huge.bin with its restore (length and SHA-256)
 $ErrorActionPreference = 'Continue'
 $a = 'D:\odir-test\bigdata\huge.bin'; $b = 'D:\odir-test\restore\D\odir-test\bigdata\huge.bin'

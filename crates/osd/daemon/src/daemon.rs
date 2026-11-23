@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-FileCopyrightText: 2026 Jörg Bernau <contact@onesimus.io>
 //! Der gemeinsame Zustand des Daemons und die Wege zum Director.
 //!
 //! Zweck: [`Daemon`] hält, was alle Verbindungen brauchen: Konfiguration,

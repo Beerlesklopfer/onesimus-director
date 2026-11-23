@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-FileCopyrightText: 2026 Jörg Bernau <contact@onesimus.io>
 //! Volume Shadow Copy (VSS) for the Windows FD (S-53).
 //!
 //! The Director sends `fileset vss=1` (`EnableVSS = yes`, the default). The

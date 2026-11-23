@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-FileCopyrightText: 2026 Jörg Bernau <contact@onesimus.io>
 //! Decision of the plugin trust check on Windows: who may change a file.
 //!
 //! Zweck: Auf Unix gilt für Richtlinie, CA-Dateien, Plugin-Verzeichnis und

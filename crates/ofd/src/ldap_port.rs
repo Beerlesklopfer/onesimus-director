@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-FileCopyrightText: 2026 Jörg Bernau <contact@onesimus.io>
 //! The host side of the OpenLDAP broker imports
 //! (docs/plans/OPENLDAP-PLUGIN.md).
 //!

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-FileCopyrightText: 2026 Jörg Bernau <contact@onesimus.io>
 //! Schema-Migration: vergleicht JSON-Schema mit Live-DB und migriert.
 
 use std::collections::BTreeSet;

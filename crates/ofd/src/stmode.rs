@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-FileCopyrightText: 2026 Jörg Bernau <contact@onesimus.io>
 //! The `st_mode` bits of libc as `u32`, the type of `Stat::mode`.
 //!
 //! `mode_t` is `u32` on Linux and `u16` on macOS; the bit values are the

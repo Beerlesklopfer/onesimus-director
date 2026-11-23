@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# SPDX-FileCopyrightText: 2026 Jörg Bernau <contact@onesimus.io>
 # A file larger than 4 GiB below D:\odir-test\bigdata (crates/onesimus-rig/tests/windows_fd.rs, big file test).
 # Random blocks sit around the 32 bit limit (4 GiB) and at the end, zeros elsewhere (compresses well).
 $ErrorActionPreference = 'Stop'

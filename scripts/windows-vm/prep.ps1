@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# SPDX-FileCopyrightText: 2026 Jörg Bernau <contact@onesimus.io>
 # Test tree and ofd start for crates/onesimus-rig/tests/windows_fd.rs (runs on the Windows host, in D:\odir-test only)
 $ErrorActionPreference = 'Stop'
 Get-Process ofd -ErrorAction SilentlyContinue | Where-Object { $_.Path -eq 'D:\odir-test\bin\ofd.exe' } | Stop-Process -Force

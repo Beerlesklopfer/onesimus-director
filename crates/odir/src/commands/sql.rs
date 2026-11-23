@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-FileCopyrightText: 2026 Jörg Bernau <contact@onesimus.io>
 //! SQL commands: .sql, sqlquery
 //!
 //! Execute raw SQL against the PostgreSQL catalog via CatalogHandle. Results

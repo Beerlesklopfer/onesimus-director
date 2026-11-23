@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-FileCopyrightText: 2026 Jörg Bernau <contact@onesimus.io>
 //! mDNS / DNS-SD announcement — dir:mdns thread.
 //!
 //! Announces `_onesimus-dir._tcp.local.` so oconsole and the Onesimus GUI

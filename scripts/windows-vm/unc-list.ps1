@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# SPDX-FileCopyrightText: 2026 Jörg Bernau <contact@onesimus.io>
 # Lists the files below D:\odir-test\uncrestore with their size and SHA-256, and the source of unc-prep.ps1
 foreach ($root in 'D:\odir-test\uncdata', 'D:\odir-test\uncrestore') {
   "== $root"

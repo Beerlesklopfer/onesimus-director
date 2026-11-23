@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-FileCopyrightText: 2026 Jörg Bernau <contact@onesimus.io>
 //! Schema step v2253: own PostgreSQL schema `onesimus` for every Onesimus
 //! catalog object (views and functions of v2251/v2252, the console ACL table
 //! `onesimus.console_acl` of the two-tier console ACLs,

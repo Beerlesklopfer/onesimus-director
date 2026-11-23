@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-FileCopyrightText: 2026 Jörg Bernau <contact@onesimus.io>
 //! File digests (lib/crypto.cc crypto_digest_new/Update/Finalize,
 //! lib/xxhash.cc): MD5, SHA1, SHA256, SHA512, XXH128 (canonical form).
 

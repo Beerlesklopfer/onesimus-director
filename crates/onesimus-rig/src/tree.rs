@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-FileCopyrightText: 2026 Jörg Bernau <contact@onesimus.io>
 //! Testbaum mit den Sonderfällen eines Datei-Backups.
 //!
 //! Zweck: Ein Backup soll nicht nur gewöhnliche Dateien sichern. Der Baum

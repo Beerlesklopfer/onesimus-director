@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-FileCopyrightText: 2026 Jörg Bernau <contact@onesimus.io>
 //! The Director asks osd for the health of the disks under its devices
 //! (`Health Check Interval` of the Storage resource, `.status health`),
 //! writes the history to `onesimus.medium_health` and sends a Director

@@ -5,7 +5,7 @@ version.workspace = true
 edition.workspace = true
 authors.workspace = true
 # Eigener Teil, nicht von Bareos abgeleitet: duale Lizenz (docs/LIZENZEN.md)
-license = "AGPL-3.0-only OR LicenseRef-Onesimus-Commercial"
+license = "AGPL-3.0-or-later OR LicenseRef-Onesimus-Commercial"
 
 [dependencies]
 bareos-bnet.workspace = true

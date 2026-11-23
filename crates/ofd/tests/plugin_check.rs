@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-FileCopyrightText: 2026 Jörg Bernau <contact@onesimus.io>
 //! The real ofd binary with a correctly signed bundle (test hierarchy).
 //! A binary built without ONESIMUS_PLUGIN_CA has no trust base and must
 //! refuse every plugin; with ONESIMUS_PLUGIN_CA it trusts only that CA,

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-FileCopyrightText: 2026 Jörg Bernau <contact@onesimus.io>
 //! Startup part of C++ CheckCatalog() (dird/check_catalog.cc:118-162):
 //! every Client of the catalog and every Storage (with its MediaType) gets
 //! its basic catalog record, as upstream does at Director start. Pools,

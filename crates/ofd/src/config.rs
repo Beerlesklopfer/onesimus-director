@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-FileCopyrightText: 2026 Jörg Bernau <contact@onesimus.io>
 //! FD configuration — parsed from bareos-fd.d/ or bareos-fd.conf
 //! (filed/filed_conf.cc: Client/FileDaemon, Director, Messages).
 

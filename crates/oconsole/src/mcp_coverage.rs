@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-FileCopyrightText: 2026 Jörg Bernau <contact@onesimus.io>
 //! Coverage of the Director's command set by MCP tools (S-36, C-087).
 //!
 //! Every RPC of `DirectorApi` stands for one console command or subcommand

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-FileCopyrightText: 2026 Jörg Bernau <contact@onesimus.io>
 //! Claims of the website page "AI assistants (MCP)" checked against a
 //! running Director (docs/wiki/mcp.md): which commands an `*-mcp` console
 //! may run, whatever its ACLs say, over the classic console protocol with a

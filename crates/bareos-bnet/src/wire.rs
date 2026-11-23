@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-FileCopyrightText: 2026 Jörg Bernau <contact@onesimus.io>
 //! BNET wire protocol: length-prefixed framing over TCP.
 //!
 //! The Bareos network protocol uses a simple framing:

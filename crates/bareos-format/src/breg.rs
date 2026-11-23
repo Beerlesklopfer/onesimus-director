@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-FileCopyrightText: 2026 Jörg Bernau <contact@onesimus.io>
 //! Dateinamen beim Restore umschreiben: `regexwhere=!von!nach!optionen`.
 //!
 //! Zweck: Ein Restore kann Dateinamen per regulärem Ausdruck umschreiben

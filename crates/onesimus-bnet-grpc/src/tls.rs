@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-FileCopyrightText: 2026 Jörg Bernau <contact@onesimus.io>
 //! TLS des gRPC-Servers eines Daemons.
 //!
 //! Zweck: Der gRPC-Zugang (ofd heute, osd ab P1) läuft immer über TLS.

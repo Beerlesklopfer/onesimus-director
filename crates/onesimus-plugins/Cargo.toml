@@ -6,7 +6,7 @@ edition.workspace = true
 rust-version = "1.96"
 authors.workspace = true
 # Eigener Teil, nicht von Bareos abgeleitet: duale Lizenz (docs/LIZENZEN.md)
-license = "AGPL-3.0-only OR LicenseRef-Onesimus-Commercial"
+license = "AGPL-3.0-or-later OR LicenseRef-Onesimus-Commercial"
 
 [dependencies]
 serde.workspace = true

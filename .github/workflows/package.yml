@@ -37,7 +37,7 @@ jobs:
         run: |
           apt-get update -q >/dev/null
           apt-get install -y -q --no-install-recommends \
-            ca-certificates curl git build-essential pkg-config protobuf-compiler libprotobuf-dev \
+            ca-certificates curl git python3 build-essential pkg-config protobuf-compiler libprotobuf-dev \
             libssl-dev zlib1g-dev liblzo2-dev libacl1-dev libpam0g-dev >/dev/null
           curl -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal --default-toolchain stable
           echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
@@ -48,6 +48,11 @@ jobs:
         with:
           submodules: recursive
           persist-credentials: false
+
+      # Jede Quell- und Skriptdatei trägt den SPDX-Kopf AGPL-3.0-or-later
+      # (scripts/ci/spdx.py; Ausnahmen stehen dort in SKIP).
+      - name: SPDX-Köpfe
+        run: scripts/ci/check-spdx.sh
 
       - name: Cache
         uses: actions/cache@v4

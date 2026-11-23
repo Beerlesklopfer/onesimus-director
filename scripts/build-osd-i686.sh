@@ -1,4 +1,6 @@
 #!/bin/sh
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# SPDX-FileCopyrightText: 2026 Jörg Bernau <contact@onesimus.io>
 # Baut osd als statisches 32-Bit-Programm (i686, musl) und ein Debian-Paket
 # für i386, z. B. für ein altes NAS mit 32-Bit-Kernel (Plan osd, „32-Bit-Hosts“).
 #

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-FileCopyrightText: 2026 Jörg Bernau <contact@onesimus.io>
 //! Drift check: the Bareos base schema description
 //! (`schema/v2250_bareos_catalog.json`) against the original Bareos DDL
 //! (Compatibility log C-052).

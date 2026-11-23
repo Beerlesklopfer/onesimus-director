@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-FileCopyrightText: 2026 Jörg Bernau <contact@onesimus.io>
 //! Job Manager — Director-side tracking of all running job workers.
 //!
 //! Maintains a Vec of active jobs (up to 1000+ concurrent).

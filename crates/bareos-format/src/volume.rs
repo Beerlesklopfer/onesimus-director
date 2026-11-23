@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-FileCopyrightText: 2026 Jörg Bernau <contact@onesimus.io>
 //! Volume-Blockformat: Blockkopf `BB02`, Prüfsumme, Datensätze im Block.
 //!
 //! Zweck: Ein Datei-Volume des SD ist eine lückenlose Folge von Blöcken.

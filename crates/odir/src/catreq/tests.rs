@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-FileCopyrightText: 2026 Jörg Bernau <contact@onesimus.io>
 //! Requests in the exact stored/askdir.cc formats against a catalog double
 //! (and, with ONESIMUS_CATREQ_DB set, against a real throw-away catalog).
 

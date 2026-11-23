@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-FileCopyrightText: 2026 Jörg Bernau <contact@onesimus.io>
 //! `import`, `export` and `move` (dird/ua_impexp.cc PerformMoveOperation):
 //! slot count and `autochanger listall` from the Storage daemon, slot
 //! selections, `autochanger transfer` per volume and the catalog update of

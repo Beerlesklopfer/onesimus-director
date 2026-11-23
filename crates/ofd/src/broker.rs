@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-FileCopyrightText: 2026 Jörg Bernau <contact@onesimus.io>
 //! Native broker processes of signed plugins (docs/plans/POSTGRESQL-PHASE2.md, B).
 //!
 //! A broker is the one native part of a plugin package. It runs as a real

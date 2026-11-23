@@ -1,4 +1,6 @@
 #!/usr/bin/env python3
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# SPDX-FileCopyrightText: 2026 Jörg Bernau <contact@onesimus.io>
 """
 Generiert 10 Millionen Mockup-Dateien die ein Home-Verzeichnis simulieren.
 

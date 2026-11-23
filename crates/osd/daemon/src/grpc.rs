@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-FileCopyrightText: 2026 Jörg Bernau <contact@onesimus.io>
 //! Der gRPC-Zugang von osd: `onesimus.stored.StorageDaemon`.
 //!
 //! Zweck: gRPC mit TLS ist der Hauptweg zwischen odir/ofd und osd (Plan,

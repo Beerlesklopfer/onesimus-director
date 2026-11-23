@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-FileCopyrightText: 2026 Jörg Bernau <contact@onesimus.io>
 //! `cancel` — C++ ua_cmds.cc CancelCmd (:803) with CancelStorageDaemonJob
 //! (:758), CancelJobs (:779), ua_select.cc select_jobs (:1566), job.cc
 //! CancelJob (:673), fd_cmds.cc CancelFileDaemonJob (:976) and sd_cmds.cc

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-FileCopyrightText: 2026 Jörg Bernau <contact@onesimus.io>
 //! Additional TLS gRPC listener (`onesimus.filed.FileDaemon`). BNET remains
 //! available on the FD port for legacy Directors and Storage Daemons.
 //!

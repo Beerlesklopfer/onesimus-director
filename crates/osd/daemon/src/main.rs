@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-FileCopyrightText: 2026 Jörg Bernau <contact@onesimus.io>
 //! # osd – der Onesimus Storage Daemon (Programm)
 //!
 //! Zweck: osd ersetzt bareos-sd (Plan `docs/plans/OSD-GERAETE-UND-VERTEILUNG.md`).

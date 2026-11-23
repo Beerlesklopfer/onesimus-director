@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-FileCopyrightText: 2026 Jörg Bernau <contact@onesimus.io>
 //! Rendering of catalog query results like C++ `BareosDb::ListResult`
 //! (cats/sql.cc): bconsole tables (HORZ), `llist` blocks (VERT), raw rows,
 //! and the JSON array of row objects for `.api 2`.

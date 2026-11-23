@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-FileCopyrightText: 2026 Jörg Bernau <contact@onesimus.io>
 //! S-35: write, session and restore-tree RPCs of DirectorApi.
 //!
 //! The command lines (plans) are always compiled, so their unit tests run

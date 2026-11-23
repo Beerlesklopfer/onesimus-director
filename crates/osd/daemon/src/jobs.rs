@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-FileCopyrightText: 2026 Jörg Bernau <contact@onesimus.io>
 //! Die Jobs des SD: Job-Kommando, Tabelle, Warten auf den File Daemon.
 //!
 //! Zweck: Der Director meldet jeden Job mit einer Zeile `JobId=… job=…`

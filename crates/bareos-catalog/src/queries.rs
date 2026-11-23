@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-FileCopyrightText: 2026 Jörg Bernau <contact@onesimus.io>
 //! SQL query constants for catalog operations.
 //!
 //! These mirror the queries in the C++ cats/dml/ directory.

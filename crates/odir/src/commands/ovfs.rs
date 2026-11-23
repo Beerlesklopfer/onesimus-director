@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-FileCopyrightText: 2026 Jörg Bernau <contact@onesimus.io>
 //! OVFS console commands — Onesimus extensions without Bareos equivalent.
 //!
 //! `.ovfs_status`, `.ovfs_latest`, `.ovfs_tree`, `.ovfs_ls`, `.ovfs_versions`

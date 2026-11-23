@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-FileCopyrightText: 2026 Jörg Bernau <contact@onesimus.io>
 //! Unfiltered MCP traffic mirror. stdout remains reserved for the protocol.
 use http_body_util::BodyExt;
 use serde_json::json;

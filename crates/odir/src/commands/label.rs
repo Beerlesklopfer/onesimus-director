@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-FileCopyrightText: 2026 Jörg Bernau <contact@onesimus.io>
 //! The Storage daemon and catalog part of `label`/`relabel` (ua_label.cc):
 //! SendLabelRequest / native_send_label_request, update_database, the
 //! deletion of the relabeled volume, the automount on the same SD

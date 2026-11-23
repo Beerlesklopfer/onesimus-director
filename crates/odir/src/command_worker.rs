@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-FileCopyrightText: 2026 Jörg Bernau <contact@onesimus.io>
 //! Command worker thread — processes commands from the CommandQueue.
 //!
 //! Takes commands submitted by gRPC handlers or other producers,

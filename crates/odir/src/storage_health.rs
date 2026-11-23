@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-FileCopyrightText: 2026 Jörg Bernau <contact@onesimus.io>
 //! Health of the disks under the devices of a Storage Daemon (Onesimus,
 //! docs/plans/OSD-GERAETE-UND-VERTEILUNG.md, D-21).
 //!

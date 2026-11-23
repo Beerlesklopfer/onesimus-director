@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-FileCopyrightText: 2026 Jörg Bernau <contact@onesimus.io>
 //! PAM login of a console (`Use Pam Authentication = yes`), the dialog of
 //! `dird/auth_pam.cc` and `console/auth_pam.cc` (docs/STUBS.md S-43).
 //!

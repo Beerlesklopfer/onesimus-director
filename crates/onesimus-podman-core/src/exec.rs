@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-FileCopyrightText: 2026 Jörg Bernau <contact@onesimus.io>
 //! The fixed argument lists (docs/plans/PODMAN-PLUGIN.md, "Broker und
 //! Rootful-Backend", operation table).
 //!

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-FileCopyrightText: 2026 Jörg Bernau <contact@onesimus.io>
 //! TLS identity for the gRPC endpoint.
 //!
 //! Uses `Grpc Tls Certificate`/`Grpc Tls Key` from the Director resource if

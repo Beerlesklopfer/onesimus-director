@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-FileCopyrightText: 2026 Jörg Bernau <contact@onesimus.io>
 //! Konfiguration des Storage Daemons (`bareos-sd.d`).
 //!
 //! Zweck: osd liest dieselbe Konfiguration wie bareos-sd, damit ein Wechsel

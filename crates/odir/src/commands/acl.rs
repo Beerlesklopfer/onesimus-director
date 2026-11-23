@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-FileCopyrightText: 2026 Jörg Bernau <contact@onesimus.io>
 //! `.acl list|set|delete|clear|copy` — Onesimus extension (no Bareos
 //! counterpart; the original answers ".acl: is an invalid command.").
 //!

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-FileCopyrightText: 2026 Jörg Bernau <contact@onesimus.io>
 //! TLS support for Bareos — PSK and X.509 certificate modes.
 //!
 //! Bareos supports two TLS modes:

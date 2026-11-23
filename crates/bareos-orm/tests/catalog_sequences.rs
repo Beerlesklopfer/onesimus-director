@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-FileCopyrightText: 2026 Jörg Bernau <contact@onesimus.io>
 //! Catalog sequences across migrations (Compatibility log C-039).
 //!
 //! Needs a throw-away PostgreSQL cluster: set `BAREOS_ORM_TEST_DB` to a

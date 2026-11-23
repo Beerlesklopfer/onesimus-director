@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-FileCopyrightText: 2026 Jörg Bernau <contact@onesimus.io>
 //! gRPC-first File Daemon connections with an unconditional BNET fallback.
 use crate::director_config::DirectorConfig;
 use bareos_bnet::{AnyStream, BnetStream, CramMd5Auth};

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-FileCopyrightText: 2026 Jörg Bernau <contact@onesimus.io>
 //! MCP server mode (`oconsole --mcp`).
 //!
 //! Speaks the Model Context Protocol (JSON-RPC 2.0, one message per line) on

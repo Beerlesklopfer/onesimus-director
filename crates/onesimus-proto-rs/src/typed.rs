@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-FileCopyrightText: 2026 Jörg Bernau <contact@onesimus.io>
 //! Descriptor-driven codec between the Director's API 2 JSON results
 //! (`.api 2`) and the typed messages of `director_api.proto`.
 //!

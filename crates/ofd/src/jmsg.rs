@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-FileCopyrightText: 2026 Jörg Bernau <contact@onesimus.io>
 //! Job messages of the File Daemon (lib/message.cc Jmsg()/Qmsg()) and the
 //! job status bookkeeping of the jcr they update.
 

@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# SPDX-FileCopyrightText: 2026 Jörg Bernau <contact@onesimus.io>
 $ErrorActionPreference = 'Continue'
 Set-Location D:\odir-test\src
 $env:PROTOC = 'D:\onesimus-ci\protoc\bin\protoc.exe'

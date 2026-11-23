@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-FileCopyrightText: 2026 Jörg Bernau <contact@onesimus.io>
 //! Die Netzseite des Lesens: `read data` – Blöcke aus dem Ring, Datensätze an den FD.
 //!
 //! Zweck: Bei Restore und Verify (VolumeToCatalog) schickt der SD dem FD die

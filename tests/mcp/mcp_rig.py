@@ -1,4 +1,6 @@
 #!/usr/bin/env python3
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# SPDX-FileCopyrightText: 2026 Jörg Bernau <contact@onesimus.io>
 """Integration run of oconsole's MCP tools (S-36) against a Rust Director.
 
 Starts odir with a PRIVATE bareos-fd/bareos-sd (own configs, ports,

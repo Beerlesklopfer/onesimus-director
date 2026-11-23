@@ -1,4 +1,6 @@
 #!/bin/bash
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# SPDX-FileCopyrightText: 2026 Jörg Bernau <contact@onesimus.io>
 # onesimus-container-dump.sh — Container-Dump vor der Sicherung (Podman und Docker)
 #
 # Gedacht als ClientRunBeforeJob des Bareos/Onesimus-Jobs. Schreibt nach

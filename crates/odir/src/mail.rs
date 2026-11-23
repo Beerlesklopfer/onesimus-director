@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-FileCopyrightText: 2026 Jörg Bernau <contact@onesimus.io>
 //! The `mail`, `mailonerror`, `mailonsuccess` and `operator` message
 //! destinations (Bareos 25 lib/message.cc).
 //!

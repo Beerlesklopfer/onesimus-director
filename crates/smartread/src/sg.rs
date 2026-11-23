@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-FileCopyrightText: 2026 Jörg Bernau <contact@onesimus.io>
 //! `SG_IO` (`<scsi/sg.h>`): the Linux SCSI generic request used for ATA PASS-THROUGH.
 
 use std::fs::File;

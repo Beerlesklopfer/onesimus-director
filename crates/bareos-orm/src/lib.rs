@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-FileCopyrightText: 2026 Jörg Bernau <contact@onesimus.io>
 //! JSON-basiertes Schema-ORM für den Bareos Catalog.
 //!
 //! Die JSON-Dateien in `/var/lib/bareos/catalog/` sind die Single Source of Truth

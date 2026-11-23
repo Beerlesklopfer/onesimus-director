@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-FileCopyrightText: 2026 Jörg Bernau <contact@onesimus.io>
 //! Bareos configuration file parser.
 //!
 //! Parses the Bareos Director configuration syntax into typed resource structs,

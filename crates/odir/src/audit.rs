@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-FileCopyrightText: 2026 Jörg Bernau <contact@onesimus.io>
 //! Console auditing (dird/ua_audit.cc) and the daemon message delivery it
 //! needs (lib/message.cc e_msg/DispatchMessage; mail and operator in
 //! `mail.rs`).

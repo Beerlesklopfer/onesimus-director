@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-FileCopyrightText: 2026 Jörg Bernau <contact@onesimus.io>
 //! Native plugin brokers on platforms without them (Windows).
 //!
 //! The broker of a signed plugin is a native process started with

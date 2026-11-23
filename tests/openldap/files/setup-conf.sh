@@ -1,4 +1,6 @@
 #!/bin/sh
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# SPDX-FileCopyrightText: 2026 Jörg Bernau <contact@onesimus.io>
 # Server 2: Datei-Konfiguration (slapd.conf, slapd -f), Debian-Standard-ACL (root/EXTERNAL ohne userPassword)
 set -e
 F=/opt/ldaptest

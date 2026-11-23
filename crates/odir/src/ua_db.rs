@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-FileCopyrightText: 2026 Jörg Bernau <contact@onesimus.io>
 //! Catalog selection of a console session.
 //!
 //! Port of C++ dird/ua_db.cc OpenClientDb()/OpenDb()/CloseDb() and

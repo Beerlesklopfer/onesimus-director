@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-FileCopyrightText: 2026 Jörg Bernau <contact@onesimus.io>
 //! Attribute records of a restore: lib/attr.cc (UnpackAttributesRecord,
 //! BuildAttrOutputFnames, PrintLsOutput), lib/attribs.cc (DecodeStat),
 //! lib/base64.cc (FromBase64) and findlib/attribs.cc (SetAttributes).

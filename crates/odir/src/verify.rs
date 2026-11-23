@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-FileCopyrightText: 2026 Jörg Bernau <contact@onesimus.io>
 //! Verify jobs: port of dird/verify.cc (DoVerifyInit, DoVerify,
 //! VerifyCleanup, GetAttributesAndCompareToCatalog, MissingHandler) and
 //! fd_cmds.cc GetAttributesAndPutInCatalog() for Level=InitCatalog.

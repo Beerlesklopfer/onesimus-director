@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-FileCopyrightText: 2026 Jörg Bernau <contact@onesimus.io>
 //! Die Datenphase mit dem File Daemon: append open/data/end/close und
 //! read open/data/close.
 //!

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-FileCopyrightText: 2026 Jörg Bernau <contact@onesimus.io>
 //! Debug-Level System — 1:1 kompatibel mit C++ Bareos d_msg/Dmsg.
 //!
 //! C++ Original (baconfig.h):

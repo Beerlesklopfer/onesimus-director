@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-FileCopyrightText: 2026 Jörg Bernau <contact@onesimus.io>
 //! End-to-end tests of the OpenLDAP plugin against a real slapd 2.6, for
 //! both configuration kinds, in throwaway Podman containers
 //! (docs/plans/OPENLDAP-PLUGIN.md, "Tests").

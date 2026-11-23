@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-FileCopyrightText: 2026 Jörg Bernau <contact@onesimus.io>
 //! Catalog services for the Storage daemon during a job.
 //!
 //! Port of dird/catreq.cc (CatalogRequest, CatalogUpdate/UpdateAttribute,

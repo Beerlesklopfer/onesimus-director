@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-FileCopyrightText: 2026 Jörg Bernau <contact@onesimus.io>
 //! Usage of the month for the free tier display (docs/plans/FREE-TIER-LIZENZ.md).
 //!
 //! The source is the catalog function `onesimus.fn_usage_month()` (schema

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-FileCopyrightText: 2026 Jörg Bernau <contact@onesimus.io>
 //! Bootstrap (BSR): welche Datensätze ein Restore von welchen Volumes liest.
 //!
 //! Zweck: Für Restore, Verify (VolumeToCatalog), Copy und Migration schickt

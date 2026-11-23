@@ -1,4 +1,6 @@
 #!/bin/sh
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# SPDX-FileCopyrightText: 2026 Jörg Bernau <contact@onesimus.io>
 # Debian package ofd-plugin-openldap (docs/plans/OPENLDAP-PLUGIN.md).
 #
 # Input is an already signed bundle; this script never sees a private key.
@@ -58,7 +60,7 @@ Package: ofd-plugin-openldap
 Version: $debversion
 Architecture: $arch
 Multi-Arch: same
-Maintainer: Joerg Bernau <Joerg.Bernau@onesimus.io>
+Maintainer: Jörg Bernau <contact@onesimus.io>
 Installed-Size: $size
 Depends: ofd (= $debversion), libc6, iproute2
 Recommends: slapd

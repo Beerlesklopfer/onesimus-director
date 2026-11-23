@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-FileCopyrightText: 2026 Jörg Bernau <contact@onesimus.io>
 //! Director command loop of the File Daemon: filed/dir_cmd.cc
 //! process_director_commands() with the job commands of a restore
 //! (JobId, storage, session, setauthorization, bootstrap, restoreobject,

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-FileCopyrightText: 2026 Jörg Bernau <contact@onesimus.io>
 //! Equivalence of the Director fallback and the `ovfs` extension.
 //!
 //! Both tests are `#[ignore]`d; run them with `--ignored`. The first needs

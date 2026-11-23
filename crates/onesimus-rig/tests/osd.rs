@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-FileCopyrightText: 2026 Jörg Bernau <contact@onesimus.io>
 //! Ende-zu-Ende-Läufe mit osd als Storage Daemon (Plan
 //! `docs/plans/OSD-GERAETE-UND-VERTEILUNG.md`, P1 Stufe 1 bis 3).
 //!

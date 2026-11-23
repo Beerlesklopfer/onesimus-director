@@ -1,4 +1,6 @@
 #!/bin/bash
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# SPDX-FileCopyrightText: 2026 Jörg Bernau <contact@onesimus.io>
 # baReos Mixed Stress-Test: BNET + TLS-PSK + gRPC + DDoS
 set -euo pipefail
 

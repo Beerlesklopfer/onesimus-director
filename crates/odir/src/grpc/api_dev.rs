@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-FileCopyrightText: 2026 Jörg Bernau <contact@onesimus.io>
 //! S-35 execution of the write, session and restore-tree RPCs (only with the
 //! cargo feature `grpc-development`). Plans come from api_write.rs.
 

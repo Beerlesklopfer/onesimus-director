@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-FileCopyrightText: 2026 Jörg Bernau <contact@onesimus.io>
 //! Variable expansion: port of the OSSP var library (C++ lib/var.cc) and of
 //! the Director's lookup callbacks (C++ dird/expand.cc VariableExpansion).
 //!

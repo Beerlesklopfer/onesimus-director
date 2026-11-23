@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# SPDX-FileCopyrightText: 2026 Jörg Bernau <contact@onesimus.io>
 # Creates the SMB share odirunc (D:\odir-test\uncdata) on this host and fills it: the UNC path \\localhost\odirunc stands for a network drive
 $ErrorActionPreference = 'Continue'
 $elevated = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)

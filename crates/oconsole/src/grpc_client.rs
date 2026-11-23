@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-FileCopyrightText: 2026 Jörg Bernau <contact@onesimus.io>
 //! gRPC client for odir: TLS with certificate pinning + console login.
 //!
 //! The Director uses a self-signed certificate. Instead of CA validation the

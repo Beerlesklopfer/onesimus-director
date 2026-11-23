@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-FileCopyrightText: 2026 Jörg Bernau <contact@onesimus.io>
 //! The lifecycle journal with recovery (docs/plans/PODMAN-PLUGIN.md,
 //! "Journal mit Recovery", "consistency_scope=job").
 //!

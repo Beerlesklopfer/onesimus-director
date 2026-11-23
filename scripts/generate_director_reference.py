@@ -1,4 +1,6 @@
 #!/usr/bin/env python3
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# SPDX-FileCopyrightText: 2026 Jörg Bernau <contact@onesimus.io>
 """Extract the pinned Bareos command tables and compare local dispatch metadata.
 
 No runtime commands are executed. Usage strings are upstream help text, not a

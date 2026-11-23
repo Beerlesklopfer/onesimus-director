@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-FileCopyrightText: 2026 Jörg Bernau <contact@onesimus.io>
 //! restore: port of C++ ua_restore.cc RestoreCmd and UserSelectJobidsOrFiles
 //! (compatibility log C-021, C-047).
 //!

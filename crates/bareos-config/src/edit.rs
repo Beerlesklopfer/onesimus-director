@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-FileCopyrightText: 2026 Jörg Bernau <contact@onesimus.io>
 //! Changing directives in the raw text of one resource, byte for byte.
 //!
 //! Used by the Onesimus `configure update` command (odir) and the MCP tool

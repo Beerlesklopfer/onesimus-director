@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-FileCopyrightText: 2026 Jörg Bernau <contact@onesimus.io>
 //! Das File-Device: Volumes als Dateien im `Archive Device`.
 //!
 //! Zweck: Ein Device vom Typ `File` legt jedes Volume als Datei

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-FileCopyrightText: 2026 Jörg Bernau <contact@onesimus.io>
 //! lib/scan.cc bsscanf(): the `sscanf` of all Bareos daemons
 //! (include/baconfig.h `#define sscanf bsscanf`). Unlike the C library:
 //! a blank in the format eats zero or more blanks, `%s` takes the

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-FileCopyrightText: 2026 Jörg Bernau <contact@onesimus.io>
 //! Ausgabe von `status` und `.status`.
 //!
 //! Zweck: Der Director (`status storage`) und Werkzeuge fragen den Zustand

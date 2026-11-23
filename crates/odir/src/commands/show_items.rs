@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-FileCopyrightText: 2026 Jörg Bernau <contact@onesimus.io>
 //! Directive tables of the Bareos 25.1.2 Director (C++ ResourceItem arrays).
 //!
 //! GENERATED from bareos core/src/dird/dird_conf.cc, lib/tls_resource_items.h

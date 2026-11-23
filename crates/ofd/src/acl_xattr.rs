@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-FileCopyrightText: 2026 Jörg Bernau <contact@onesimus.io>
 //! ACL and extended attribute restore on Linux: findlib/acl.cc
 //! (generic_set_acl_on_os: acl_from_text + acl_set_file) and findlib/xattr.cc
 //! (UnSerializeXattrStream + generic_parse_xattr_streams: lsetxattr).

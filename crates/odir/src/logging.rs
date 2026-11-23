@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-FileCopyrightText: 2026 Jörg Bernau <contact@onesimus.io>
 //! Reload the daemon's tracing filter when the console changes debug level.
 use std::sync::{Mutex, MutexGuard, OnceLock};
 use tracing_subscriber::{EnvFilter, Registry, reload};

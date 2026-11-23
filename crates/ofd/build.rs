@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-FileCopyrightText: 2026 Jörg Bernau <contact@onesimus.io>
 //! Compiles the plugin trust base into ofd (plan: docs/plans/SIGNIER-INFRASTRUKTUR.md).
 //!
 //! `ONESIMUS_PLUGIN_CA` names a directory (absolute path) with

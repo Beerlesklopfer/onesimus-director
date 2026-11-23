@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-FileCopyrightText: 2026 Jörg Bernau <contact@onesimus.io>
 //! TLS support for BNET connections using rustls.
 //!
 //! TLS wraps the entire TCP socket — all BNET framing (headers + payloads)

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-FileCopyrightText: 2026 Jörg Bernau <contact@onesimus.io>
 //! The FileSet the Director sends (`fileset` command): filed/fileset.cc
 //! (AddFileset, SetOptionsAndFlags, AddFileToFileset) and the matching of
 //! findlib/find.cc (AcceptFile) and findlib/match.cc (ParseSizeMatch).

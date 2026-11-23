@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-FileCopyrightText: 2026 Jörg Bernau <contact@onesimus.io>
 //! Capture of the console side of the PAM dialog: a fake Director (TLS-PSK,
 //! Hello, CRAM-MD5) talks to the installed original `bconsole` and logs every
 //! frame it receives after the authentication, to learn the dialog of

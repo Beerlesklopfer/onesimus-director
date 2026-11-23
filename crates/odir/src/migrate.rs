@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-FileCopyrightText: 2026 Jörg Bernau <contact@onesimus.io>
 //! Copy/Migrate worker jobs (Compatibility log C-058, S-05): the part of
 //! dird/migrate.cc after the selection — StartNewMigrationJob() (the
 //! `run job=<Copy|Migrate> jobid=N` of the control job), DoMigrationInit()

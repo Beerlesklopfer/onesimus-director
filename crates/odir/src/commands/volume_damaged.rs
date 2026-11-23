@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-FileCopyrightText: 2026 Jörg Bernau <contact@onesimus.io>
 //! Onesimus extension, not in Bareos: the flow for a damaged Volume (tape tear,
 //! disk failure, a broken file Volume), docs/plans/OSD-GERAETE-UND-VERTEILUNG.md
 //! D-19, backlog V-1.

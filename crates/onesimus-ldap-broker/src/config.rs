@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-FileCopyrightText: 2026 Jörg Bernau <contact@onesimus.io>
 //! Reading the configuration of a slapd instance: the `slapcat -n 0` LDIF
 //! of slapd.d, or slapd.conf with its include files. Only what the plugin
 //! needs is taken: databases (number, backend, suffix, directory, overlays),

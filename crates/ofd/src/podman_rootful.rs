@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-FileCopyrightText: 2026 Jörg Bernau <contact@onesimus.io>
 //! The rootful Podman backend in `ofd` (docs/plans/PODMAN-PLUGIN.md,
 //! "Rootful", user decision 19.11.2026, variant B).
 //!

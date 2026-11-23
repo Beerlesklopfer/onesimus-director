@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-FileCopyrightText: 2026 Jörg Bernau <contact@onesimus.io>
 //! # onesimus-bnet-grpc – BNET-Nachrichten über gRPC
 //!
 //! Zweck: Zwischen den Onesimus-Daemons (odir, ofd, osd) ist gRPC mit TLS

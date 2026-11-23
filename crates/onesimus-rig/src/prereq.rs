@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-FileCopyrightText: 2026 Jörg Bernau <contact@onesimus.io>
 //! Voraussetzungen des Gerüsts: welche Programme es braucht und wo sie liegen.
 //!
 //! Zweck: Fehlt eine Voraussetzung, soll der Test laut scheitern und sagen,

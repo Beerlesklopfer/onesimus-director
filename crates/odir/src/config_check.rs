@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-FileCopyrightText: 2026 Jörg Bernau <contact@onesimus.io>
 //! Configuration checks the C++ Director makes while parsing and in
 //! CheckResources() (compatibility log C-057).
 //!

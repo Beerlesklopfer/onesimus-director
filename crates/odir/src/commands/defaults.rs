@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-FileCopyrightText: 2026 Jörg Bernau <contact@onesimus.io>
 //! `.defaults` field order and types from Bareos ua_dotcmds.cc::DotDefaultsCmd.
 use crate::{
     command_ast::CommandAst, command_executor::ExecContext, command_queue::CommandResult,

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-FileCopyrightText: 2026 Jörg Bernau <contact@onesimus.io>
 //! Man pages generated from the console grammar ([`crate::command_grammar`]):
 //! one page per command, `odir-<command>(7)`, the collection
 //! `odir-commands(7)`, and the hand-written pages `oconsole(1)`, `odir(8)`

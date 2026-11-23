@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-FileCopyrightText: 2026 Jörg Bernau <contact@onesimus.io>
 //! Verbindung des Directors zum Storage Daemon: TLS-PSK, Hello, CRAM-MD5, OK-Hello.
 //!
 //! Zweck: Jeder Weg vom Director zum SD (Job, `status storage`, `label`,

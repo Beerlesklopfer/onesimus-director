@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-FileCopyrightText: 2026 Jörg Bernau <contact@onesimus.io>
 // Module and type tree for rustdoc, generated at build time.
 //
 // Included with `include!` into the build.rs of the crates that follow the

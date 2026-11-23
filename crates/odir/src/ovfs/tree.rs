@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-FileCopyrightText: 2026 Jörg Bernau <contact@onesimus.io>
 //! Port of `ovfs-core/src/tree.rs` of the OVFS PostgreSQL extension
 //! (https://github.com/Beerlesklopfer/oenesimus-postgres-plugin, commit
 //! `4041335`), the Director-side fallback when the extension is not installed.

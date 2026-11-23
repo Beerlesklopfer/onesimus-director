@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-FileCopyrightText: 2026 Jörg Bernau <contact@onesimus.io>
 //! `osd -t`, the osd.d overlay and the running daemon seen from a Director
 //! (the interface crate `osd` connects as odir does).
 

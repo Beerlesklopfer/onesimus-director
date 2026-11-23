@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-FileCopyrightText: 2026 Jörg Bernau <contact@onesimus.io>
 //! JobDefs inheritance, as dird_conf.cc PopulateJobdefaults() does it.
 //!
 //! - every JobDefs resource, in resource-chain order, takes the defaults of

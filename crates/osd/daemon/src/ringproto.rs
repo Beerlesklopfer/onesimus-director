@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-FileCopyrightText: 2026 Jörg Bernau <contact@onesimus.io>
 //! Was Netzsitzung und Geräteschreiber über den Ring austauschen.
 //!
 //! Zweck: Der Ring (`osd-ring`) transportiert nur Bytes. Hier steht, was
