@@ -323,6 +323,12 @@ impl Daemon {
         dev.ring_slots.or(self.config.storage.ring_slots).unwrap_or(DEFAULT_RING_SLOTS)
     }
 
+    /// Ring slots for a job of a branch group (D-25): `Ring Slots` of the
+    /// device or the Storage when set, else [`crate::branch::BRANCH_RING_SLOTS`].
+    pub fn branch_ring_slots(&self, dev: &bareos_config::sd::SdDevice) -> u32 {
+        dev.ring_slots.or(self.config.storage.ring_slots).unwrap_or(crate::branch::BRANCH_RING_SLOTS)
+    }
+
     /// Starts the device writer for ring `ring`.
     pub fn launch_writer(&self, ring: &str) -> Result<WriterHandle, String> {
         self.launch(ring, "--device-writer", "device writer", crate::writer::run)

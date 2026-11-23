@@ -39,6 +39,7 @@ use crate::daemon::Daemon;
 use crate::device::{FileDevice, LabelState};
 use crate::jobs::{Job, JobCommand, UseStorage};
 use crate::transport::{lock, text, SharedChannel};
+use onesimus_bnet_grpc::branch::BranchMessage;
 
 /// `OK_hello` of `stored/authenticate.cc`.
 const OK_HELLO: &str = "3000 OK Hello\n";
@@ -138,10 +139,18 @@ impl DirSession {
     /// `HandleDirectorConnection`'s loop.
     fn run(&mut self) {
         loop {
-            let msg = match lock(&self.dir).recv() {
-                Ok(BnetMessage::Data(data)) => text(&data),
+            let data = match lock(&self.dir).recv() {
+                Ok(BnetMessage::Data(data)) => data,
                 _ => break,
             };
+            // a typed branch message (gRPC only, P2b)
+            if let Some(message) = BranchMessage::decode(&data) {
+                if matches!(self.branch_cmd(message), Next::Quit) {
+                    break;
+                }
+                continue;
+            }
+            let msg = text(&data);
             tracing::debug!("<dird: {}", msg.trim_end());
             let Some(&(cmd, monitor_ok)) = COMMANDS.iter().find(|(c, _)| msg.starts_with(c)) else {
                 self.send(&format!("3900 Invalid command: {msg}\n"));
@@ -194,6 +203,7 @@ impl DirSession {
         }
         let _ = lock(&self.dir).signal(BnetSignal::Terminate);
         if let Some(job) = self.job.take() {
+            crate::branch::abandon(&self.d, &job);
             self.d.release_job_devices(&job.cmd.job);
             if let Some(b) = job.bootstrap.lock().unwrap_or_else(|e| e.into_inner()).take() {
                 let _ = std::fs::remove_file(b.path);
@@ -215,6 +225,48 @@ impl DirSession {
         ));
         self.job = Some(job);
         Next::Continue
+    }
+
+    /// A branch message (P2b): `BranchPlan` on a main job's connection (before
+    /// `run`), `BranchAttach` on a branch job's connection in place of `run`.
+    fn branch_cmd(&mut self, message: BranchMessage) -> Next {
+        let Some(job) = self.job.clone() else {
+            self.reply_branch(Err("no Job command before the branch message".into()));
+            return Next::Quit;
+        };
+        match message {
+            BranchMessage::Plan(names) => {
+                let _ = crate::branch::plan(&job, names);
+                self.reply_branch(Ok(()));
+                Next::Continue
+            }
+            BranchMessage::Attach(main) => {
+                let wait = Duration::from_secs(self.d.config.storage.branch_attach_wait);
+                match crate::branch::attach(&self.d, &job, &self.dir, &main, wait) {
+                    Ok((main_job, end)) => {
+                        self.reply_branch(Ok(()));
+                        self.d.send_status(&self.dir, &job, 'F');
+                        self.d.jobs_run.fetch_add(1, Ordering::AcqRel);
+                        crate::branch::run_branch(&self.d, &job, &self.dir, &main_job, &end);
+                    }
+                    Err(e) => {
+                        self.d.jmsg(&self.dir, &job, M_FATAL, &format!("Cannot attach to the main job {main}: {e}\n"));
+                        job.set_status('E');
+                        self.reply_branch(Err(e));
+                    }
+                }
+                Next::Quit
+            }
+            BranchMessage::Reply(_) => {
+                self.send("3900 Invalid command: a branch reply\n");
+                Next::Quit
+            }
+        }
+    }
+
+    /// Answers a branch message.
+    fn reply_branch(&self, result: Result<(), String>) {
+        let _ = lock(&self.dir).send(&BranchMessage::Reply(result).encode());
     }
 
     /// `use_cmd` / `UseDeviceCmd`.

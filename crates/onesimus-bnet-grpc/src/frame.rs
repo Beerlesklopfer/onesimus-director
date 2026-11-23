@@ -53,7 +53,11 @@ impl WireFrame for StoredFrame {
     fn from_frame(frame: Frame) -> Self {
         StoredFrame {
             frame: Some(match frame {
-                Frame::Payload(p) => stored_frame::Frame::Payload(p),
+                // a branch message travels as its typed message, not as bytes
+                Frame::Payload(p) => match crate::branch::BranchMessage::decode(&p) {
+                    Some(message) => stored_frame::Frame::Branch(message.to_proto()),
+                    None => stored_frame::Frame::Payload(p),
+                },
                 Frame::Signal(s) => stored_frame::Frame::Signal(s),
             }),
         }
@@ -63,6 +67,7 @@ impl WireFrame for StoredFrame {
         match self.frame? {
             stored_frame::Frame::Payload(p) => Some(Frame::Payload(p)),
             stored_frame::Frame::Signal(s) => Some(Frame::Signal(s)),
+            stored_frame::Frame::Branch(b) => crate::branch::BranchMessage::from_proto(b).map(|m| Frame::Payload(m.encode())),
         }
     }
 }
@@ -82,5 +87,15 @@ mod tests {
             assert_eq!(stored.into_frame(), Some(frame));
         }
         assert_eq!(StoredFrame::default().into_frame(), None);
+    }
+
+    #[test]
+    fn a_branch_message_is_typed_on_the_wire_and_a_payload_in_the_process() {
+        let message = crate::branch::BranchMessage::Attach("Main.2026-11-23_10.00.00_01".into());
+        let wire = StoredFrame::from_frame(Frame::Payload(message.encode()));
+        assert!(matches!(wire.frame, Some(stored_frame::Frame::Branch(_))), "{wire:?}");
+        assert_eq!(wire.into_frame(), Some(Frame::Payload(message.encode())));
+        // a branch message does not exist on the FileDaemon stream: it stays bytes
+        assert!(matches!(ControlFrame::from_frame(Frame::Payload(message.encode())).frame, Some(control_frame::Frame::Payload(_))));
     }
 }

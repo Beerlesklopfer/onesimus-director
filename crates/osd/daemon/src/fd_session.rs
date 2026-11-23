@@ -438,7 +438,13 @@ impl Producer {
             vol_poll_interval: d.config.find_device(&dev.device.name).map(vol_poll_interval).unwrap_or(300),
             alternatives: Vec::new(),
         };
-        let result = Self::start(d, job, dir, &info, &dev.device, dev.slots);
+        // a job of a branch group (main job or branch): the ring is larger (D-25)
+        let grouped = !job.branches.planned().is_empty() || job.branch_of.lock().unwrap_or_else(|e| e.into_inner()).is_some();
+        let slots = match d.config.find_device(&dev.device.name) {
+            Some(conf) if grouped => d.branch_ring_slots(conf),
+            _ => dev.slots,
+        };
+        let result = Self::start(d, job, dir, &info, &dev.device, slots);
         if result.is_err() {
             d.release_device(&dev.device.name);
         }
@@ -570,29 +576,185 @@ impl Producer {
     }
 }
 
-/// `DoAppendData`: receives the data of the FD and writes it through the
-/// ring. True when everything went well.
-fn do_append_data(d: &Daemon, job: &Arc<Job>, dir: &SharedChannel, fd: &mut dyn Channel, s: &mut Session, sd: bool) -> bool {
-    let mut ok = true;
-    let mut producer: Option<Producer> = None;
-    let mut device_name: Option<String> = None;
-    let jit = d.config.storage.just_in_time_reservation;
-    let setup = |producer: &mut Option<Producer>, device_name: &mut Option<String>| -> bool {
-        match Producer::setup(d, job, dir) {
+/// One receiver of the records of an append: the job itself (the first
+/// sink) or a branch job attached to it. Every sink has its own ring, device
+/// writer, volumes and catalog records; a failing sink ends alone (D-11).
+struct Sink {
+    /// The job the records are written for.
+    job: Arc<Job>,
+    /// The job's Director connection (messages, attributes, catalog requests).
+    dir: SharedChannel,
+    /// The ring side; `None` before the setup (just-in-time reservation) and
+    /// after the sink was finished.
+    producer: Option<Producer>,
+    /// The device the job holds, released when the sink is finished.
+    device_name: Option<String>,
+    /// The sink gets no more records (it failed, was canceled or is done).
+    ended: bool,
+    /// [`finish_sink`] ran.
+    finalized: bool,
+    /// Data bytes so far (`JobBytes`).
+    bytes: u64,
+    /// The last FileIndex so far (`JobFiles`).
+    files: u32,
+    /// For a branch: signalled when the sink is finished.
+    branch: Option<Arc<crate::jobs::BranchEnd>>,
+}
+
+impl Sink {
+    /// A sink for `job` on its Director connection `dir`.
+    fn new(job: Arc<Job>, dir: SharedChannel, branch: Option<Arc<crate::jobs::BranchEnd>>) -> Sink {
+        Sink { job, dir, producer: None, device_name: None, ended: false, finalized: false, bytes: 0, files: 0, branch }
+    }
+
+    /// `SetupDCR` for the sink: device, ring, writer, volume. False (the
+    /// sink ended, its job failed) with the reason sent to its job's log.
+    fn setup(&mut self, d: &Daemon) -> bool {
+        match Producer::setup(d, &self.job, &self.dir) {
             Ok(p) => {
-                let read = job.read_device.lock().unwrap_or_else(|e| e.into_inner()).clone();
-                *device_name = d.reserved_device_except(&job.cmd.job, read.as_deref());
-                *producer = Some(p);
+                let read = self.job.read_device.lock().unwrap_or_else(|e| e.into_inner()).clone();
+                self.device_name = d.reserved_device_except(&self.job.cmd.job, read.as_deref());
+                self.producer = Some(p);
                 true
             }
             Err(e) => {
-                d.jmsg(dir, job, M_FATAL, &format!("{e}\n"));
-                job.set_status('E');
+                d.jmsg(&self.dir, &self.job, M_FATAL, &format!("{e}\n"));
+                self.job.set_status('E');
+                self.ended = true;
                 false
             }
         }
+    }
+
+    /// The sink's job failed on its own with `reason` (a branch; the others go on).
+    fn fail(&mut self, d: &Daemon, started: Instant, reason: &str) {
+        d.jmsg(&self.dir, &self.job, M_FATAL, &format!("{reason}\n"));
+        self.job.set_status('E');
+        self.ended = true;
+        finish_sink(d, self, started);
+    }
+}
+
+/// Ends the sink's ring and reports the end of its job to the Director: the
+/// End slot (the writer appends the EOS label), the attributes still waiting,
+/// the device, the placeholder `JobMedia` records and the transfer rate. A
+/// branch is released at last. True when the device writer ended well.
+fn finish_sink(d: &Daemon, sink: &mut Sink, started: Instant) -> bool {
+    if sink.finalized {
+        return true;
+    }
+    sink.finalized = true;
+    let (job, dir) = (sink.job.clone(), sink.dir.clone());
+    let mut ok = true;
+    job.files.store(sink.files, Ordering::Release);
+    if let Some(mut p) = sink.producer.take() {
+        // EOS label and the last block: the writer appends the EOS label to
+        // the partial block it gets in the End slot.
+        let meta = SlotMeta {
+            kind: SlotKind::End as u64,
+            job_files: sink.files,
+            job_errors: 0,
+            job_status: job.status() as u8,
+            job_bytes: sink.bytes,
+            ..Default::default()
+        };
+        let ended = p.publish(meta);
+        let state = if ended.is_ok() { State::Done } else { State::Failed };
+        p.shutdown(state);
+        if p.ring.consumer_state(crate::writer::CONSUMER) != State::Done {
+            if !job.canceled.load(Ordering::Acquire) {
+                d.jmsg(&dir, &job, M_FATAL, "Fatal append error on device: the device writer failed.\n");
+            }
+            job.set_status('E');
+            ok = false;
+        }
+        p.flush_attrs(d, &dir, true);
+        if let Some(dev) = sink.device_name.take() {
+            d.release_device(&dev);
+        }
+    } else if job.status() == 'T' {
+        d.jmsg(
+            &dir,
+            &job,
+            M_INFO,
+            "Because no backup data was received, no device was reserved. As such no Session Labels were written for this job.\n",
+        );
+    }
+    let answer = d.cat_req(&dir, &osd::askdir::delete_null_jobmedia(&job.cmd.job, job.cmd.job_id));
+    if !answer.starts_with(b"1000") {
+        d.jmsg(&dir, &job, bareos_format::msg::M_WARNING, "Could not delete placeholder media records.\n");
+    }
+    let elapsed = started.elapsed().as_secs().max(1);
+    d.jmsg(&dir, &job, M_INFO, &format!(
+        "Elapsed time={:02}:{:02}:{:02}, Transfer rate={} Bytes/second\n",
+        elapsed / 3600,
+        elapsed % 3600 / 60,
+        elapsed % 60,
+        with_suffix(sink.bytes / elapsed)
+    ));
+    d.send_status(&dir, &job, job.status());
+    if let Some(end) = &sink.branch {
+        *job.bytes.lock().unwrap_or_else(|e| e.into_inner()) = sink.bytes;
+        end.complete(job.status());
+    }
+    ok
+}
+
+/// The branches a main job waits for before it writes (`BranchPlan`): every
+/// planned one has attached or is gone (its `use storage` failed, it was
+/// canceled), or `Branch Attach Wait` passed. A branch that is missing ends
+/// without data: the main job's log says why.
+fn collect_branches(d: &Daemon, job: &Arc<Job>, dir: &SharedChannel) -> Vec<crate::jobs::AttachedBranch> {
+    if job.branches.planned().is_empty() {
+        return Vec::new();
+    }
+    let mut seen = std::collections::HashSet::new();
+    let wait = Duration::from_secs(d.config.storage.branch_attach_wait);
+    let (attached, missing) = job.branches.collect(wait, |name| match d.jobs.find(name) {
+        Some(j) => {
+            seen.insert(name.to_string());
+            if j.canceled.load(Ordering::Acquire) {
+                Some("it was canceled".to_string())
+            } else if matches!(j.status(), 'E' | 'f') {
+                Some("its job failed".to_string())
+            } else {
+                None
+            }
+        }
+        None => seen.contains(name).then(|| "its job ended before it attached".to_string()),
+    });
+    for (name, why) in missing {
+        d.jmsg(dir, job, bareos_format::msg::M_WARNING, &format!("Branch job {name} is not written: {why}.\n"));
+    }
+    for b in &attached {
+        d.jmsg(dir, job, M_INFO, &format!("Branch job {} (JobId {}) takes this stream.\n", b.job.cmd.job, b.job.cmd.job_id));
+    }
+    attached
+}
+
+/// `DoAppendData`: receives the data of the FD and writes it through the
+/// ring of every sink: the job's own and those of its branches. True when
+/// everything went well for the job itself.
+fn do_append_data(d: &Daemon, job: &Arc<Job>, dir: &SharedChannel, fd: &mut dyn Channel, s: &mut Session, sd: bool) -> bool {
+    let mut ok = true;
+    let mut sinks = vec![Sink::new(job.clone(), dir.clone(), None)];
+    if !sd {
+        sinks.extend(collect_branches(d, job, dir).into_iter().map(|b| Sink::new(b.job, b.dir, Some(b.end))));
+    }
+    let jit = d.config.storage.just_in_time_reservation;
+    let started = s.started;
+    // `SetupDCR` for every sink; false when none is left
+    let setup_all = |sinks: &mut Vec<Sink>| -> bool {
+        for sink in sinks.iter_mut() {
+            sink.setup(d);
+        }
+        sinks.iter().any(|s| !s.ended)
     };
-    if !jit && !setup(&mut producer, &mut device_name) {
+    if !jit && !setup_all(&mut sinks) {
+        // nothing is written: the branches end, the job itself fails as before
+        for sink in sinks.iter_mut().skip(1) {
+            finish_sink(d, sink, started);
+        }
         return false;
     }
     if fd.send_str("3000 OK data\n").is_err() {
@@ -600,9 +762,8 @@ fn do_append_data(d: &Daemon, job: &Arc<Job>, dir: &SharedChannel, fd: &mut dyn 
         ok = false;
     }
     let what = if sd { "SD" } else { "FD" };
+    let mut setup_done = !jit;
     let mut last_file_index: i64 = 0;
-    let mut job_bytes: u64 = 0;
-    let mut job_files: u32 = 0;
     'outer: while ok && !job.canceled.load(Ordering::Acquire) {
         // stream header
         let header = match fd.recv() {
@@ -657,49 +818,63 @@ fn do_append_data(d: &Daemon, job: &Arc<Job>, dir: &SharedChannel, fd: &mut dyn 
                     break 'outer;
                 }
             };
-            if producer.is_none() {
+            if !setup_done {
                 d.jmsg(dir, job, M_INFO, "JustInTime Reservation: Finding drive to reserve.\n");
-                if !setup(&mut producer, &mut device_name) {
+                setup_done = true;
+                if !setup_all(&mut sinks) {
                     d.jmsg(dir, job, M_FATAL, "Unable to setup device for this job.\n");
                     ok = false;
                     break 'outer;
                 }
             }
-            let Some(p) = producer.as_mut() else { break 'outer };
-            let rec = RecordRef {
-                vol_session_id: job.vol_session_id,
-                vol_session_time: job.vol_session_time,
-                file_index: file_index as i32,
-                stream: stream_id as i32,
-                data: &data,
-            };
-            if let Err(e) = p.write(&rec) {
-                d.jmsg(dir, job, M_FATAL, &format!("{e}\n"));
+            for sink in sinks.iter_mut().filter(|s| !s.ended) {
+                if sink.job.canceled.load(Ordering::Acquire) {
+                    // a branch canceled on its own: its job ends, the others go on
+                    sink.ended = true;
+                    finish_sink(d, sink, started);
+                    continue;
+                }
+                let rec = RecordRef {
+                    vol_session_id: sink.job.vol_session_id,
+                    vol_session_time: sink.job.vol_session_time,
+                    file_index: file_index as i32,
+                    stream: stream_id as i32,
+                    data: &data,
+                };
+                let Some(p) = sink.producer.as_mut() else { continue };
+                if let Err(e) = p.write(&rec) {
+                    sink.fail(d, started, &e);
+                    continue;
+                }
+                sink.bytes += data.len() as u64;
+                *sink.job.bytes.lock().unwrap_or_else(|e| e.into_inner()) = sink.bytes;
+                if is_attribute(stream_id as i32) && !sink.job.cmd.no_attributes {
+                    let msg = osd::askdir::file_attributes(
+                        &sink.job.cmd.job,
+                        sink.job.vol_session_id,
+                        sink.job.vol_session_time,
+                        file_index as i32,
+                        stream_id as i32,
+                        &data,
+                    );
+                    p.pending_attrs.push_back((p.published, msg));
+                }
+                sink.files = file_index as u32;
+                p.flush_attrs(d, &sink.dir, false);
+            }
+            if sinks.iter().all(|s| s.ended) {
                 ok = false;
                 break 'outer;
             }
-            job_bytes += data.len() as u64;
-            *job.bytes.lock().unwrap_or_else(|e| e.into_inner()) = job_bytes;
-            if is_attribute(stream_id as i32) && !job.cmd.no_attributes {
-                let msg = osd::askdir::file_attributes(
-                    &job.cmd.job,
-                    job.vol_session_id,
-                    job.vol_session_time,
-                    file_index as i32,
-                    stream_id as i32,
-                    &data,
-                );
-                p.pending_attrs.push_back((p.published, msg));
-            }
-            job_files = file_index as u32;
-            p.flush_attrs(d, dir, false);
         }
     }
     if job.canceled.load(Ordering::Acquire) {
         ok = false;
         job.set_status('A');
     }
-    job.set_status(if ok { 'T' } else { 'E' });
+    for sink in sinks.iter().filter(|s| !s.ended) {
+        sink.job.set_status(if ok { 'T' } else { 'E' });
+    }
     if ok && sd {
         // replicate data: back to the commands of the reading SD
         let _ = fd.send_str("3000 OK replicate data\n");
@@ -710,53 +885,15 @@ fn do_append_data(d: &Daemon, job: &Arc<Job>, dir: &SharedChannel, fd: &mut dyn 
     } else {
         let _ = fd.send_str("3999 Failed append\n");
     }
-    job.files.store(job_files, Ordering::Release);
-    if let Some(mut p) = producer {
-        // EOS label and the last block: the writer appends the EOS label to
-        // the partial block it gets in the End slot.
-        let meta = SlotMeta {
-            kind: SlotKind::End as u64,
-            job_files,
-            job_errors: 0,
-            job_status: job.status() as u8,
-            job_bytes,
-            ..Default::default()
-        };
-        let ended = p.publish(meta);
-        let state = if ended.is_ok() { State::Done } else { State::Failed };
-        p.shutdown(state);
-        if p.ring.consumer_state(crate::writer::CONSUMER) != State::Done {
-            if ok && !job.canceled.load(Ordering::Acquire) {
-                d.jmsg(dir, job, M_FATAL, "Fatal append error on device: the device writer failed.\n");
-            }
-            job.set_status('E');
+    // the branches first, then the job: its end is what the Director waits for
+    for sink in sinks.iter_mut().skip(1) {
+        finish_sink(d, sink, started);
+    }
+    if let Some(main) = sinks.first_mut() {
+        if !finish_sink(d, main, started) {
             ok = false;
         }
-        p.flush_attrs(d, dir, true);
-        if let Some(dev) = device_name {
-            d.release_device(&dev);
-        }
-    } else if ok {
-        d.jmsg(
-            dir,
-            job,
-            M_INFO,
-            "Because no backup data was received, no device was reserved. As such no Session Labels were written for this job.\n",
-        );
     }
-    let answer = d.cat_req(dir, &osd::askdir::delete_null_jobmedia(&job.cmd.job, job.cmd.job_id));
-    if !answer.starts_with(b"1000") {
-        d.jmsg(dir, job, bareos_format::msg::M_WARNING, "Could not delete placeholder media records.\n");
-    }
-    let elapsed = s.started.elapsed().as_secs().max(1);
-    d.jmsg(dir, job, M_INFO, &format!(
-        "Elapsed time={:02}:{:02}:{:02}, Transfer rate={} Bytes/second\n",
-        elapsed / 3600,
-        elapsed % 3600 / 60,
-        elapsed % 60,
-        with_suffix(job_bytes / elapsed)
-    ));
-    d.send_status(dir, job, job.status());
     ok
 }
 

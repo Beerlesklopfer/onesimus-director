@@ -47,6 +47,7 @@
 //! `test_config`).
 #![deny(missing_docs)]
 
+mod branch;
 mod daemon;
 mod device;
 mod director;

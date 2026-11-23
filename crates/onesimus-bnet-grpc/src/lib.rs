@@ -48,6 +48,7 @@
 #![doc = include_str!(concat!(env!("OUT_DIR"), "/module_tree.md"))]
 #![deny(missing_docs)]
 
+pub mod branch;
 pub mod client;
 pub mod frame;
 pub mod glossary;

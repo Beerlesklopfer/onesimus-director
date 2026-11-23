@@ -39,7 +39,8 @@
 //! - Ohne `osd.d/` ist das Ergebnis genau das von `bareos-sd.d` allein;
 //!   ein bareos-sd liest denselben Baum unverändert.
 //!
-//! Onesimus-Direktiven heute: `Ring Slots` (Storage, Device) und für den
+//! Onesimus-Direktiven heute: `Ring Slots` (Storage, Device), `Branch Attach
+//! Wait` (Storage, P2b: wie lange ein Haupt-Job auf seine Zweige wartet) und für den
 //! gRPC-Zugang (P1 Stufe 3) an der Storage `Grpc Enable` (Vorgabe yes),
 //! `Grpc Port` (Vorgabe `SD Port` + 1000, wie ofd) und `Grpc Address`
 //! (Vorgabe `SD Address`).
@@ -67,6 +68,9 @@ pub const DEFAULT_LABEL_BLOCK_SIZE: u32 = 64_512;
 /// Default `Client Connect Wait` in seconds (`stored_conf.cc`).
 pub const DEFAULT_CLIENT_CONNECT_WAIT: u64 = 1800;
 
+/// Default of `Branch Attach Wait` in seconds (osd.d, Storage).
+pub const DEFAULT_BRANCH_ATTACH_WAIT: u64 = 120;
+
 /// The Onesimus directives `osd.d/` may add, per resource type (normalized
 /// type, normalized key). Everything else in `osd.d/` is an error.
 pub const ONESIMUS_DIRECTIVES: &[(&str, &str)] = &[
@@ -75,6 +79,7 @@ pub const ONESIMUS_DIRECTIVES: &[(&str, &str)] = &[
     ("storage", "grpcenable"),
     ("storage", "grpcport"),
     ("storage", "grpcaddress"),
+    ("storage", "branchattachwait"),
 ];
 
 /// Offset of the default gRPC port from the `SD Port` (as ofd: FD port + 1000).
@@ -109,6 +114,9 @@ pub struct SdStorage {
     pub client_connect_wait: u64,
     /// osd.d: `Ring Slots`, default slot count of the job rings (Onesimus).
     pub ring_slots: Option<u32>,
+    /// osd.d: `Branch Attach Wait` in seconds (default [`DEFAULT_BRANCH_ATTACH_WAIT`]):
+    /// how long a main job waits for its branch jobs to attach before it writes (P2b).
+    pub branch_attach_wait: u64,
     /// `TLS Enable` (default yes). Off: osd tells its peers `ssl=0` after the
     /// CRAM-MD5 of a clear-text connection, so a Bareos peer does not start
     /// TLS-PSK on it (a Copy with `ssl=0`).
@@ -590,6 +598,7 @@ impl SdConfig {
                         just_in_time_reservation: r.boolean("justintimereservation", true)?,
                         client_connect_wait: r.duration("clientconnectwait", DEFAULT_CLIENT_CONNECT_WAIT)?,
                         ring_slots: None,
+                        branch_attach_wait: DEFAULT_BRANCH_ATTACH_WAIT,
                         tls_enable: r.boolean("tlsenable", true)?,
                         grpc_enable: true,
                         grpc_port: None,
@@ -752,6 +761,7 @@ impl SdConfig {
                 if let Some(address) = r.text("grpcaddress") {
                     self.storage.grpc_address = Some(address);
                 }
+                self.storage.branch_attach_wait = r.duration("branchattachwait", self.storage.branch_attach_wait)?;
             }
             match rtype.as_str() {
                 "storage" => self.storage.ring_slots = slots.or(self.storage.ring_slots),
@@ -948,6 +958,15 @@ Messages {
         assert_eq!(c.storage.ring_slots, Some(8));
         // Bareos directives are untouched
         assert_eq!(c.find_device("FileStorage").unwrap().media_type, "File");
+    }
+
+    #[test]
+    fn branch_attach_wait_of_the_storage() {
+        assert_eq!(parse(SAMPLE).unwrap().storage.branch_attach_wait, DEFAULT_BRANCH_ATTACH_WAIT);
+        let c = overlay("Storage {\n Name = PDC-sd\n Branch Attach Wait = 5 minutes\n}\n").unwrap();
+        assert_eq!(c.storage.branch_attach_wait, 300);
+        // only the Storage knows it
+        assert!(overlay("Device {\n Name = FileStorage\n Branch Attach Wait = 5\n}\n").is_err());
     }
 
     #[test]

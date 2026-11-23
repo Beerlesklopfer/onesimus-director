@@ -22,7 +22,7 @@ use std::time::{Duration, Instant};
 
 use bareos_format::bash::unbash_spaces;
 
-use crate::transport::Channel;
+use crate::transport::{Channel, SharedChannel};
 
 /// `use storage` of a job: what the Director wants written where.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -172,6 +172,134 @@ pub struct FdConnection {
     pub replicate: bool,
 }
 
+/// How a branch job ended, handed from the main job's append to the
+/// branch's control session, which then reports `3099` for it.
+#[derive(Default)]
+pub struct BranchEnd {
+    /// The status letter of the branch once it ended.
+    state: Mutex<Option<char>>,
+    /// Signalled when [`BranchEnd::state`] is set.
+    cond: Condvar,
+}
+
+impl BranchEnd {
+    /// Marks the branch as ended with `status` (the first call wins).
+    pub fn complete(&self, status: char) {
+        let mut state = self.state.lock().unwrap_or_else(|e| e.into_inner());
+        if state.is_none() {
+            *state = Some(status);
+        }
+        self.cond.notify_all();
+    }
+
+    /// Whether the branch has ended.
+    pub fn is_complete(&self) -> bool {
+        self.state.lock().unwrap_or_else(|e| e.into_inner()).is_some()
+    }
+
+    /// Waits until the branch ended; wakes at least every `step` to call
+    /// `abandoned`, which returns a status when the wait should end (the
+    /// branch was canceled, its main job is gone). The final status.
+    pub fn wait(&self, step: Duration, mut abandoned: impl FnMut() -> Option<char>) -> char {
+        let mut state = self.state.lock().unwrap_or_else(|e| e.into_inner());
+        loop {
+            if let Some(status) = *state {
+                return status;
+            }
+            if let Some(status) = abandoned() {
+                *state = Some(status);
+                return status;
+            }
+            state = self.cond.wait_timeout(state, step).unwrap_or_else(|e| e.into_inner()).0;
+        }
+    }
+}
+
+/// A branch job that attached to a main job (`BranchAttach`): the stream of
+/// the main job is also written for it.
+#[derive(Clone)]
+pub struct AttachedBranch {
+    /// The branch job.
+    pub job: Arc<Job>,
+    /// The branch job's Director connection (its job messages, attributes
+    /// and catalog requests go there, not to the main job's).
+    pub dir: SharedChannel,
+    /// Signalled when the branch ended.
+    pub end: Arc<BranchEnd>,
+}
+
+/// The branches of a main job.
+#[derive(Default)]
+pub struct Branches {
+    /// The unique names the Director announced (`BranchPlan`).
+    planned: Mutex<Vec<String>>,
+    /// The branches that attached.
+    attached: Mutex<Vec<AttachedBranch>>,
+    /// The stream began: later attaches are refused.
+    closed: AtomicBool,
+    /// Signalled when a branch attached or the stream began.
+    changed: Condvar,
+}
+
+impl Branches {
+    /// Records the names of the branch jobs the main job waits for.
+    pub fn plan(&self, names: Vec<String>) {
+        *self.planned.lock().unwrap_or_else(|e| e.into_inner()) = names;
+    }
+
+    /// The names announced.
+    pub fn planned(&self) -> Vec<String> {
+        self.planned.lock().unwrap_or_else(|e| e.into_inner()).clone()
+    }
+
+    /// A branch attaches; false when the stream began already.
+    pub fn attach(&self, branch: AttachedBranch) -> bool {
+        let mut attached = self.attached.lock().unwrap_or_else(|e| e.into_inner());
+        if self.closed.load(Ordering::Acquire) {
+            return false;
+        }
+        attached.push(branch);
+        self.changed.notify_all();
+        true
+    }
+
+    /// The branches that attached up to now.
+    pub fn attached(&self) -> Vec<AttachedBranch> {
+        self.attached.lock().unwrap_or_else(|e| e.into_inner()).clone()
+    }
+
+    /// Waits until every planned branch attached or is `gone` (it was seen
+    /// and left without attaching, e.g. its `use storage` failed) or until
+    /// `timeout`; closes the set for later attaches. The branches that
+    /// attached and the planned ones that did not, with the reason.
+    pub fn collect(&self, timeout: Duration, mut gone: impl FnMut(&str) -> Option<String>) -> (Vec<AttachedBranch>, Vec<(String, String)>) {
+        let planned = self.planned();
+        let deadline = Instant::now() + timeout;
+        let mut attached = self.attached.lock().unwrap_or_else(|e| e.into_inner());
+        let missing = loop {
+            let mut missing: Vec<(String, String)> = Vec::new();
+            let mut waiting = false;
+            for name in planned.iter().filter(|n| !attached.iter().any(|b| &b.job.cmd.job == *n)) {
+                match gone(name) {
+                    Some(why) => missing.push((name.clone(), why)),
+                    None => {
+                        waiting = true;
+                        if Instant::now() >= deadline {
+                            missing.push((name.clone(), "it did not attach in time".to_string()));
+                        }
+                    }
+                }
+            }
+            if !waiting || Instant::now() >= deadline {
+                break missing;
+            }
+            attached = self.changed.wait_timeout(attached, Duration::from_millis(100)).unwrap_or_else(|e| e.into_inner()).0;
+        };
+        self.closed.store(true, Ordering::Release);
+        (attached.clone(), missing)
+    }
+}
+
 /// One job of the SD (`JobControlRecord` of `stored`).
 pub struct Job {
     /// The Job command.
@@ -209,6 +337,10 @@ pub struct Job {
     pub bytes: Mutex<u64>,
     /// When the job was created.
     pub created: Instant,
+    /// The branch jobs of this (main) job.
+    pub branches: Branches,
+    /// For a branch job: the unique name of its main job (`BranchAttach`).
+    pub branch_of: Mutex<Option<String>>,
 }
 
 impl Job {
@@ -300,6 +432,8 @@ impl JobTable {
             files: AtomicU32::new(0),
             bytes: Mutex::new(0),
             created: Instant::now(),
+            branches: Branches::default(),
+            branch_of: Mutex::new(None),
             cmd,
         });
         self.jobs.lock().unwrap_or_else(|e| e.into_inner()).insert(job.cmd.job.clone(), job.clone());
@@ -386,5 +520,68 @@ mod tests {
         j.set_status('E');
         j.set_status('T');
         assert_eq!(j.status(), 'E');
+    }
+
+    /// A job named `name` with JobId `id` in `table`.
+    fn job(table: &JobTable, name: &str, id: u32) -> Arc<Job> {
+        let cmd = CMD.replace("JobId=1 ", &format!("JobId={id} ")).replace("VBackup.2026-11-20_19.59.23_03", name);
+        table.create(JobCommand::parse(&cmd).unwrap(), 1)
+    }
+
+    /// A connection that goes nowhere (the Director side of a branch in tests).
+    fn nowhere() -> SharedChannel {
+        let (a, _b) = crate::transport::MemChannel::pair();
+        Arc::new(Mutex::new(Box::new(a)))
+    }
+
+    #[test]
+    fn a_main_job_collects_the_planned_branches_that_attach_and_names_the_gone_ones() {
+        let t = JobTable::default();
+        let main = job(&t, "Main.1", 1);
+        let (b1, b2) = (job(&t, "B.1", 2), job(&t, "B.2", 3));
+        main.branches.plan(vec![b1.cmd.job.clone(), b2.cmd.job.clone()]);
+        let attaching = {
+            let (main, b1) = (main.clone(), b1.clone());
+            std::thread::spawn(move || {
+                std::thread::sleep(Duration::from_millis(150));
+                assert!(main.branches.attach(AttachedBranch { job: b1, dir: nowhere(), end: Arc::default() }));
+            })
+        };
+        // B.2 was seen and left (its use storage failed): no waiting for it
+        t.remove("B.2");
+        let (attached, missing) = main.branches.collect(Duration::from_secs(10), |n| (n == "B.2").then(|| "its job ended".to_string()));
+        attaching.join().unwrap();
+        assert_eq!(attached.iter().map(|b| b.job.cmd.job.as_str()).collect::<Vec<_>>(), ["B.1"]);
+        assert_eq!(missing, [("B.2".to_string(), "its job ended".to_string())]);
+        // the stream began: a late branch is refused
+        assert!(!main.branches.attach(AttachedBranch { job: b2, dir: nowhere(), end: Arc::default() }));
+    }
+
+    #[test]
+    fn a_branch_that_never_comes_costs_the_wait_and_no_more() {
+        let t = JobTable::default();
+        let main = job(&t, "Main.1", 1);
+        main.branches.plan(vec!["Never.1".into()]);
+        let begin = Instant::now();
+        let (attached, missing) = main.branches.collect(Duration::from_millis(300), |_| None);
+        assert!(attached.is_empty() && begin.elapsed() >= Duration::from_millis(300) && begin.elapsed() < Duration::from_secs(5));
+        assert_eq!(missing, [("Never.1".to_string(), "it did not attach in time".to_string())]);
+        // no plan: nothing to wait for
+        let alone = job(&t, "Alone.1", 2);
+        let (attached, missing) = alone.branches.collect(Duration::from_secs(10), |_| None);
+        assert!(attached.is_empty() && missing.is_empty());
+    }
+
+    #[test]
+    fn a_branch_end_is_final_and_a_watcher_can_end_the_wait() {
+        let end = BranchEnd::default();
+        assert!(!end.is_complete());
+        assert_eq!(end.wait(Duration::from_millis(20), || Some('A')), 'A', "the watcher ends the wait");
+        end.complete('T');
+        assert_eq!(end.wait(Duration::from_millis(20), || None), 'A', "the first end stays");
+        let fresh = BranchEnd::default();
+        fresh.complete('T');
+        fresh.complete('E');
+        assert_eq!(fresh.wait(Duration::from_millis(20), || None), 'T');
     }
 }
