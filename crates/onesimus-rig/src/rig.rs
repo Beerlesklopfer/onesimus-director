@@ -60,6 +60,9 @@ pub struct RigOptions {
     /// the program to start (`osd`) and the Director resources of the Copy
     /// (job `VCopy`, pool `VCopyPool`, `Next Pool` of `VPool`).
     pub copy_target: Option<PathBuf>,
+    /// Instead of a second SD, a second device (`VDev2`) in the rig SD with
+    /// the same Director resources: Copy and VirtualFull inside one SD.
+    pub copy_same_sd: bool,
 }
 
 impl RigOptions {
@@ -77,6 +80,7 @@ impl RigOptions {
             fd_grpc: Grpc::Off,
             sd_grpc: Grpc::Off,
             copy_target: None,
+            copy_same_sd: false,
         }
     }
 }
@@ -226,8 +230,15 @@ impl Rig {
             crate::config::write_director_resources(&self.layout, &[storage]).map_err(io)?;
             crate::config::write_sd_grpc_extension(&self.layout, self.ports).map_err(io)?;
         }
+        if self.options.copy_same_sd {
+            crate::config::write_director_resources(&self.layout, &crate::config::copy_resources(self.ports, true)).map_err(io)?;
+            std::fs::create_dir_all(self.layout.root.join("storage2")).map_err(io)?;
+            let mut conf = std::fs::read_to_string(&self.layout.sd_conf).map_err(io)?;
+            conf += &crate::config::second_device(&self.layout.root);
+            std::fs::write(&self.layout.sd_conf, conf).map_err(io)?;
+        }
         if self.options.copy_target.is_some() {
-            crate::config::write_director_resources(&self.layout, &crate::config::copy_resources(self.ports)).map_err(io)?;
+            crate::config::write_director_resources(&self.layout, &crate::config::copy_resources(self.ports, false)).map_err(io)?;
             for dir in ["sd2", "sd2-work", "storage2"] {
                 std::fs::create_dir_all(self.layout.root.join(dir)).map_err(io)?;
             }

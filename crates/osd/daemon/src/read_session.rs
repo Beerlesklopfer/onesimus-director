@@ -47,6 +47,9 @@ use crate::transport::{Channel, SharedChannel};
 /// `FD_error` of `stored/read.cc`.
 const FD_ERROR: &str = "3000 error\n";
 
+/// Set in the JobId of the read ring of a copy inside one SD (the write ring keeps the JobId).
+const READ_RING_FLAG: u32 = 0x8000_0000;
+
 /// Smallest ring slot for reading: a volume may hold blocks up to the
 /// `Maximum Block Size` it was written with (osd and bareos-sd write up to
 /// 1 MiB on a File device by default).
@@ -72,7 +75,9 @@ impl ReadPipe {
     /// Creates the ring, attaches as consumer, starts the mailbox server
     /// and the reader.
     fn start(d: &Daemon, job: &Arc<Job>, dir: &SharedChannel, info: &JobInfo, slots: u32, slot_size: u32) -> Result<ReadPipe, String> {
-        let name = ring_name(d.config.storage.port, job.cmd.job_id);
+        // a copy inside one SD also writes: its ring has the JobId, the read ring another name
+        let local = job.local_write.lock().unwrap_or_else(|e| e.into_inner()).is_some();
+        let name = ring_name(d.config.storage.port, job.cmd.job_id | if local { READ_RING_FLAG } else { 0 });
         let _ = Ring::remove(&name);
         let cfg = RingConfig { slots, slot_size, consumers: 1 };
         let ring = Arc::new(Ring::create(&name, cfg).map_err(|e| format!("Cannot create the job ring: {e}"))?);
@@ -175,11 +180,17 @@ pub fn do_read_data(d: &Daemon, job: &Arc<Job>, dir: &SharedChannel, fd: &mut dy
 /// replicate`. Returns the records' file count and byte count, or `None`
 /// when the job failed (the reason went out as a job message).
 pub fn do_replicate_read(d: &Daemon, job: &Arc<Job>, dir: &SharedChannel, sd: &mut dyn Channel) -> Option<(u64, u64)> {
+    do_replicate_read_with(d, job, dir, sd, &mut || {})
+}
+
+/// [`do_replicate_read`] that calls `opened` once the volumes are claimed.
+fn do_replicate_read_with(d: &Daemon, job: &Arc<Job>, dir: &SharedChannel, sd: &mut dyn Channel, opened: &mut dyn FnMut()) -> Option<(u64, u64)> {
     let fail = |text: &str| {
         d.jmsg(dir, job, M_FATAL, text);
         None
     };
     let (mut pipe, bsr, volumes) = open_read(d, job, dir)?;
+    opened();
     let ticket = match sd_dialog(sd, "start replicate\n", "3000 OK start replicate ticket = ") {
         Ok(rest) => rest.trim().to_string(),
         Err(e) => {
@@ -192,7 +203,9 @@ pub fn do_replicate_read(d: &Daemon, job: &Arc<Job>, dir: &SharedChannel, sd: &m
         return fail(&format!("Replicate data failed: {e}\n"));
     }
     d.send_status(dir, job, 'R');
-    let mut sink = SdSink { sd, last: None, files: 0, bytes: 0 };
+    // a VirtualFull job (type Backup) reads several jobs into one: the file indexes are renumbered
+    let renumber = job.cmd.job_type == 'B';
+    let mut sink = SdSink { sd, last: None, files: 0, bytes: 0, renumber, source: None };
     let mut ok = send_records(d, job, dir, &mut sink, &mut pipe, BsrMatcher::new(bsr), &volumes);
     let (files, bytes) = (sink.files, sink.bytes);
     // end of the stream and of the data: two EODs
@@ -213,6 +226,26 @@ pub fn do_replicate_read(d: &Daemon, job: &Arc<Job>, dir: &SharedChannel, sd: &m
     }
     let _ = sd.signal(BnetSignal::Terminate);
     Some((files, bytes))
+}
+
+/// The read side of a copy inside one SD: like [`do_replicate_read`] with
+/// the writing side on the other end of `sd` (in this process). The write
+/// storage replaces the job's storage once the volumes are claimed; `go`
+/// tells the write side to start then.
+pub fn do_local_read(
+    d: &Daemon,
+    job: &Arc<Job>,
+    dir: &SharedChannel,
+    sd: &mut dyn Channel,
+    write: Option<crate::jobs::UseStorage>,
+    go: &std::sync::mpsc::Sender<()>,
+) -> Option<(u64, u64)> {
+    // the volumes of the read side are claimed inside do_replicate_read; the
+    // write side is released there (before the first record) through `go`
+    do_replicate_read_with(d, job, dir, sd, &mut || {
+        *job.storage.lock().unwrap_or_else(|e| e.into_inner()) = write.clone();
+        let _ = go.send(());
+    })
 }
 
 /// Sends `command` to the writing SD and waits for an answer that starts
@@ -273,6 +306,10 @@ struct SdSink<'a> {
     files: u64,
     /// Bytes of data sent.
     bytes: u64,
+    /// Number the files anew (several jobs go into one, as for a VirtualFull job).
+    renumber: bool,
+    /// (VolSessionId, VolSessionTime, FileIndex) of the file being copied, when renumbering.
+    source: Option<(u32, u32, i32)>,
 }
 
 impl SdSink<'_> {
@@ -287,15 +324,27 @@ impl SdSink<'_> {
 
 impl RecordSink for SdSink<'_> {
     fn record(&mut self, rec: &bareos_format::volume::VolRecord) -> Result<(), String> {
-        let key = (rec.file_index, rec.stream);
+        let mut file_index = rec.file_index;
+        if self.renumber {
+            // mac.cc RecordCb: a new (job, FileIndex) is the next file of the new job
+            let source = (rec.vol_session_id, rec.vol_session_time, rec.file_index);
+            if self.source != Some(source) {
+                self.source = Some(source);
+                self.files += 1;
+            }
+            file_index = self.files as i32;
+        }
+        let key = (file_index, rec.stream);
         if self.last != Some(key) {
             if self.last.is_some() {
                 self.sd.signal(BnetSignal::Eod)?;
             }
-            self.sd.send_str(&format!("{} {} 0", rec.file_index, rec.stream))?;
+            self.sd.send_str(&format!("{} {} 0", file_index, rec.stream))?;
             self.last = Some(key);
         }
-        self.files = self.files.max(rec.file_index.max(0) as u64);
+        if !self.renumber {
+            self.files = self.files.max(rec.file_index.max(0) as u64);
+        }
         self.bytes += rec.data.len() as u64;
         if rec.data.is_empty() {
             return Ok(());
@@ -313,7 +362,8 @@ fn open_read(d: &Daemon, job: &Arc<Job>, dir: &SharedChannel) -> Option<(ReadPip
         d.jmsg(dir, job, M_FATAL, "No Volume names found for restore.\n");
         return None;
     };
-    let device = d.reserved_device(&job.cmd.job).and_then(|n| d.config.find_device(&n).cloned());
+    let read_device = job.read_device.lock().unwrap_or_else(|e| e.into_inner()).clone().or_else(|| d.reserved_device(&job.cmd.job));
+    let device = read_device.and_then(|n| d.config.find_device(&n).cloned());
     let Some(conf) = device else {
         d.jmsg(dir, job, M_FATAL, "No device reserved for reading. Job canceled.\n");
         return None;

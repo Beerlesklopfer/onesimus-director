@@ -30,11 +30,12 @@ fn osd() -> std::path::PathBuf {
 /// Backup on the reading SD `reader`, Copy to the writing SD `writer`
 /// (`copy_target`), Restore of the copy from the writer, compared with the
 /// source tree. `media` is the media type the volume of the copy carries.
-fn copy_and_restore(base_port: u16, reader: std::path::PathBuf, writer: std::path::PathBuf) {
+fn copy_and_restore(base_port: u16, reader: std::path::PathBuf, writer: Option<std::path::PathBuf>) {
     onesimus_rig::build_workspace_packages(&["odir", "ofd", "osd-daemon"]).unwrap_or_else(|e| panic!("{e}"));
     let mut options = RigOptions::new(base_port);
     options.sd = Some(reader);
-    options.copy_target = Some(writer);
+    options.copy_same_sd = writer.is_none();
+    options.copy_target = writer;
     let rig = Rig::start(options).unwrap_or_else(|e| panic!("Gerüst startet nicht: {e}"));
 
     let backup = rig.run_job("VBackup").unwrap_or_else(|e| panic!("{e}"));
@@ -91,7 +92,7 @@ fn copy_and_restore(base_port: u16, reader: std::path::PathBuf, writer: std::pat
 #[test]
 #[ignore = "needs /usr/sbin/bareos-sd and the osd binary"]
 fn bareos_sd_copies_to_osd_and_the_copy_restores() {
-    copy_and_restore(39561, "/usr/sbin/bareos-sd".into(), osd());
+    copy_and_restore(39561, "/usr/sbin/bareos-sd".into(), Some(osd()));
 }
 
 /// Backup with osd, Copy osd to osd (osd is the reading SD: `replicate`),
@@ -99,7 +100,22 @@ fn bareos_sd_copies_to_osd_and_the_copy_restores() {
 #[test]
 #[ignore = "needs the osd binary"]
 fn osd_copies_to_osd_and_the_copy_restores() {
-    copy_and_restore(39581, osd(), osd());
+    copy_and_restore(39581, osd(), Some(osd()));
+}
+
+/// Backup and Copy inside one osd (read device `VDev`, write device
+/// `VDev2`: the local copy), Restore of the copy.
+#[test]
+#[ignore = "needs the osd binary"]
+fn osd_copies_inside_one_sd_and_the_copy_restores() {
+    copy_and_restore(39621, osd(), None);
+}
+
+/// The same inside one bareos-sd (reference).
+#[test]
+#[ignore = "needs /usr/sbin/bareos-sd"]
+fn bareos_sd_copies_inside_one_sd_and_the_copy_restores() {
+    copy_and_restore(39631, "/usr/sbin/bareos-sd".into(), None);
 }
 
 /// Backup with osd, Copy to bareos-sd (osd replicates to the original SD),
@@ -107,7 +123,7 @@ fn osd_copies_to_osd_and_the_copy_restores() {
 #[test]
 #[ignore = "needs /usr/sbin/bareos-sd and the osd binary"]
 fn osd_copies_to_bareos_sd_and_the_copy_restores() {
-    copy_and_restore(39591, osd(), "/usr/sbin/bareos-sd".into());
+    copy_and_restore(39591, osd(), Some("/usr/sbin/bareos-sd".into()));
 }
 
 /// Two backups, one Copy control job: the two copy jobs replicate to osd
@@ -146,4 +162,53 @@ fn two_backups_are_copied_to_osd_by_one_control_job() {
     eprintln!("jobs of VCopyPool:\n{jobs}");
     let done = jobs.lines().filter(|l| l.ends_with(&format!("|T|{ENTRIES}"))).count();
     assert_eq!(done, 2, "two finished copies expected:\n{jobs}\n{}", rig.diagnostics());
+}
+
+/// Full and Incremental backup, then a VirtualFull job inside one SD (read
+/// device `VDev`, write device `VDev2` of the Next Pool), restore of the
+/// VirtualFull job compared with the source tree (including the file
+/// added for the Incremental job).
+fn virtual_full(base_port: u16, sd: std::path::PathBuf) {
+    onesimus_rig::build_workspace_packages(&["odir", "ofd", "osd-daemon"]).unwrap_or_else(|e| panic!("{e}"));
+    let mut options = RigOptions::new(base_port);
+    options.sd = Some(sd);
+    options.copy_same_sd = true;
+    let rig = Rig::start(options).unwrap_or_else(|e| panic!("Gerüst startet nicht: {e}"));
+    let run = |what: &str, command: &str| -> u32 {
+        let reply = rig.command(command).unwrap_or_else(|e| panic!("{e}"));
+        let id = onesimus_rig::console::queued_job_id(&reply).unwrap_or_else(|| panic!("{what}: no JobId\n{reply}"));
+        let row = rig.wait_job(id, JOB_TIMEOUT).unwrap_or_else(|e| panic!("{e}"));
+        assert_eq!(row.status, 'T', "{what}: {row:?}\n{}\n{}", rig.job_log(id), rig.diagnostics());
+        id
+    };
+    run("full", "run job=VBackup level=Full yes");
+    std::thread::sleep(Duration::from_secs(2));
+    std::fs::write(rig.layout.data.join("added-for-incremental.txt"), "added\n").unwrap_or_else(|e| panic!("{e}"));
+    run("incremental", "run job=VBackup level=Incremental yes");
+    std::thread::sleep(Duration::from_secs(2));
+    let vfull = run("virtual full", "run job=VFull level=VirtualFull yes");
+    let log = rig.job_log(vfull);
+    eprintln!("VirtualFull {vfull}:\n{log}");
+    let reply = rig
+        .command(&format!("restore jobid={vfull} client=vfd storage=vsd2 where={} all done yes", rig.layout.restore.display()))
+        .unwrap_or_else(|e| panic!("{e}"));
+    let restore = onesimus_rig::console::queued_job_id(&reply).unwrap_or_else(|| panic!("restore: no JobId\n{reply}"));
+    let row = rig.wait_job(restore, JOB_TIMEOUT).unwrap_or_else(|e| panic!("{e}"));
+    assert_eq!(row.status, 'T', "restore: {row:?}\n{}\n{}", rig.job_log(restore), rig.diagnostics());
+    let (code, diff) = rig.diff_restore();
+    assert_eq!(code, 0, "restore of the VirtualFull job differs from the source:\n{diff}");
+}
+
+/// VirtualFull with bareos-sd (reference).
+#[test]
+#[ignore = "needs /usr/sbin/bareos-sd"]
+fn virtual_full_with_bareos_sd() {
+    virtual_full(39601, "/usr/sbin/bareos-sd".into());
+}
+
+/// VirtualFull with osd.
+#[test]
+#[ignore = "needs the osd binary"]
+fn virtual_full_with_osd() {
+    virtual_full(39611, osd());
 }

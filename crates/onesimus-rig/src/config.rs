@@ -280,6 +280,17 @@ pub fn fd_config(layout: &Layout, ports: Ports) -> String {
     )
 }
 
+/// The second device of the rig SD (`VDev2`, media type `VFile2`, volumes
+/// below `root/storage2`), appended to its configuration for a Copy or a
+/// VirtualFull inside one SD.
+pub fn second_device(root: &Path) -> String {
+    format!(
+        "Device {{\n  Name = VDev2\n  Media Type = VFile2\n  Archive Device = {root}/storage2\n  LabelMedia = yes\n  \
+         Random Access = yes\n  AutomaticMount = yes\n  RemovableMedia = no\n  AlwaysOpen = no\n}}\n",
+        root = root.display()
+    )
+}
+
 /// Configuration of the second SD (`vsd2`, device `VDev2`, media type
 /// `VFile2`, volumes below `root/storage2`).
 pub fn copy_sd_config(root: &Path, ports: Ports) -> String {
@@ -297,14 +308,15 @@ pub fn copy_sd_config(root: &Path, ports: Ports) -> String {
 /// The Director resources of a Copy to the second SD: its Storage, the
 /// pool `VCopyPool`, `VPool` with it as Next Pool, and the Copy job `VCopy`
 /// (uncopied jobs of `VPool`, read from `vsd`).
-pub fn copy_resources(ports: Ports) -> Vec<(String, String)> {
+pub fn copy_resources(ports: Ports, same_sd: bool) -> Vec<(String, String)> {
+    // a second SD process (own port and password), or a second device of the rig SD
+    let (port, password) = if same_sd { (ports.sd, "vsd-pw") } else { (ports.copy_sd, "vsd2-pw") };
     vec![
         (
             "storage/vsd2.conf".into(),
             format!(
-                "Storage {{\n  Name = vsd2\n  Address = 127.0.0.1\n  SD Port = {sd}\n  Password = \"vsd2-pw\"\n  Device = VDev2\n  \
-                 Media Type = VFile2\n  Maximum Concurrent Jobs = 10\n}}\n",
-                sd = ports.copy_sd
+                "Storage {{\n  Name = vsd2\n  Address = 127.0.0.1\n  SD Port = {port}\n  Password = \"{password}\"\n  Device = VDev2\n  \
+                 Media Type = VFile2\n  Maximum Concurrent Jobs = 10\n}}\n"
             ),
         ),
         (
@@ -314,6 +326,10 @@ pub fn copy_resources(ports: Ports) -> Vec<(String, String)> {
         (
             "pool/VPool.conf".into(),
             "Pool {\n  Name = VPool\n  Pool Type = Backup\n  Label Format = \"VVol-\"\n  Maximum Volume Bytes = 1G\n  Next Pool = VCopyPool\n}\n".into(),
+        ),
+        (
+            "job/VFull.conf".into(),
+            "Job {\n  Name = VFull\n  JobDefs = VDefs\n  Type = Backup\n  Level = VirtualFull\n  Accurate = yes\n}\n".into(),
         ),
         (
             "job/VCopy.conf".into(),

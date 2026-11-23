@@ -182,6 +182,10 @@ pub struct Job {
     pub auth_key: String,
     /// `use storage` (set by the Director before `run`).
     pub storage: Mutex<Option<UseStorage>>,
+    /// The device reserved for reading (a restore, verify, or the read side of a copy).
+    pub read_device: Mutex<Option<String>>,
+    /// The write side of a copy inside this SD (`use storage append=1` after a read reservation).
+    pub local_write: Mutex<Option<UseStorage>>,
     /// The bootstrap of a restore or verify (`bootstrap` command).
     pub bootstrap: Mutex<Option<Bootstrap>>,
     /// The FD connection, once there.
@@ -279,6 +283,8 @@ impl JobTable {
             vol_session_time: stime,
             auth_key: make_session_key(),
             storage: Mutex::new(None),
+            read_device: Mutex::new(None),
+            local_write: Mutex::new(None),
             bootstrap: Mutex::new(None),
             fd: Mutex::new(None),
             fd_arrived: Condvar::new(),

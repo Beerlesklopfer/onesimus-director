@@ -192,9 +192,7 @@ impl DirSession {
         }
         let _ = lock(&self.dir).signal(BnetSignal::Terminate);
         if let Some(job) = self.job.take() {
-            if let Some(dev) = self.d.reserved_device(&job.cmd.job) {
-                self.d.release_device(&dev);
-            }
+            self.d.release_job_devices(&job.cmd.job);
             if let Some(b) = job.bootstrap.lock().unwrap_or_else(|e| e.into_inner()).take() {
                 let _ = std::fs::remove_file(b.path);
             }
@@ -258,6 +256,11 @@ impl DirSession {
         let Some(storage) = storages.iter().find(|s| s.append).cloned() else {
             return self.use_for_read(&job, storages);
         };
+        // a write reservation after a read one: a copy inside this SD (VirtualFull, Copy to a
+        // second device); `run` copies from the read device to this one
+        if job.read_device.lock().unwrap_or_else(|e| e.into_inner()).is_some() {
+            return self.use_for_local_write(&job, storage);
+        }
         let device = if self.d.config.storage.just_in_time_reservation {
             self.d.jmsg(&self.dir, &job, M_INFO, &format!("Using just in time reservation for job {}\n", job.cmd.job_id));
             Some("JustInTime Device".to_string())
@@ -286,6 +289,32 @@ impl DirSession {
         }
     }
 
+    /// The write side of a copy inside one SD: the device is only checked
+    /// now (like a backup's) and reserved when `run` starts the copy.
+    fn use_for_local_write(&mut self, job: &Arc<Job>, storage: UseStorage) -> Next {
+        let wanted = storage.devices.first().cloned().unwrap_or_default();
+        let device = match self.d.reserve_device(&storage, &job.cmd.job).map(|r| r.device.name) {
+            Some(name) => {
+                self.d.release_device(&name);
+                Some(name)
+            }
+            None => None,
+        };
+        match device {
+            Some(name) => {
+                *job.local_write.lock().unwrap_or_else(|e| e.into_inner()) = Some(storage);
+                self.send(&format!("3000 OK use device device={}\n", bash_spaces(&name)));
+                Next::Continue
+            }
+            None => {
+                self.d.jmsg(&self.dir, job, M_FATAL, &format!("Device reservation failed for JobId={}: no suitable write device\n", job.cmd.job_id));
+                self.send(&format!("3924 Device \"{wanted}\" not in SD Device resources or no matching Media Type.\n"));
+                job.set_status('E');
+                Next::Quit
+            }
+        }
+    }
+
     /// `TryReserveAfterUse(jcr, false)` → `ReserveDeviceForRead`: a read
     /// job (restore, verify) reserves a device now; there is no
     /// just-in-time reservation for reading.
@@ -294,6 +323,7 @@ impl DirSession {
         match reserved {
             Some((storage, r)) => {
                 *job.storage.lock().unwrap_or_else(|e| e.into_inner()) = Some(storage);
+                *job.read_device.lock().unwrap_or_else(|e| e.into_inner()) = Some(r.device.name.clone());
                 self.send(&format!("3000 OK use device device={}\n", bash_spaces(&r.device.name)));
                 Next::Continue
             }
@@ -315,6 +345,11 @@ impl DirSession {
     fn run_cmd(&mut self) -> Next {
         let Some(job) = self.job.clone() else { return Next::Quit };
         self.d.send_status(&self.dir, &job, 'F');
+        if job.local_write.lock().unwrap_or_else(|e| e.into_inner()).is_some() {
+            self.d.jobs_run.fetch_add(1, Ordering::AcqRel);
+            crate::fd_session::run_local_copy(&self.d, &job, &self.dir);
+            return Next::Quit;
+        }
         let wait = Duration::from_secs(match self.d.config.storage.client_connect_wait {
             0 => 1800,
             n => n,

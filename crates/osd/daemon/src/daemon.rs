@@ -206,6 +206,22 @@ impl Daemon {
         self.busy.lock().unwrap_or_else(|e| e.into_inner()).get(name).cloned()
     }
 
+    /// The device `job` has reserved, not counting `except` (the read
+    /// device of a copy inside one SD, when the write device is wanted).
+    pub fn reserved_device_except(&self, job: &str, except: Option<&str>) -> Option<String> {
+        self.busy
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .iter()
+            .find(|(d, j)| j.as_str() == job && Some(d.as_str()) != except)
+            .map(|(d, _)| d.clone())
+    }
+
+    /// Frees every device `job` has reserved.
+    pub fn release_job_devices(&self, job: &str) {
+        self.busy.lock().unwrap_or_else(|e| e.into_inner()).retain(|_, j| j.as_str() != job);
+    }
+
     /// Frees device `name`.
     pub fn release_device(&self, name: &str) {
         self.busy.lock().unwrap_or_else(|e| e.into_inner()).remove(name);

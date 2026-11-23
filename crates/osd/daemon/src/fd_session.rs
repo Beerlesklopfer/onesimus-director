@@ -118,6 +118,60 @@ pub fn run_job(d: &Daemon, job: &Arc<Job>, dir: &SharedChannel) {
     drop(conn);
 }
 
+/// The copy inside one SD (VirtualFull, Copy to a second device of this
+/// SD; `use storage append=0`, then `append=1`, then `run`): the reading
+/// and the writing side of the copy protocol run against each other over
+/// an in-process connection, the read side on this thread, the write
+/// side on another. The job's end is reported like a backup's.
+pub fn run_local_copy(d: &Daemon, job: &Arc<Job>, dir: &SharedChannel) {
+    let name = job.cmd.job.clone();
+    let _ = lock(dir).send_str(&format!("3010 Job {name} start\n"));
+    d.send_status(dir, job, 'R');
+    let write = job.local_write.lock().unwrap_or_else(|e| e.into_inner()).take();
+    let (mut reader_end, mut writer_end) = crate::transport::MemChannel::pair();
+    let (opened_tx, opened_rx) = std::sync::mpsc::channel::<()>();
+    let writer = {
+        let (d, job, dir) = (d.clone(), job.clone(), dir.clone());
+        std::thread::Builder::new().name(format!("local-copy:{}", job.cmd.job_id)).spawn(move || {
+            // the read side has claimed its volumes (its ring is up) before the write side starts
+            if opened_rx.recv().is_err() {
+                return;
+            }
+            let mut session = Session { opened: false, started: Instant::now() };
+            do_sd_commands(&d, &job, &dir, &mut writer_end, &mut session);
+        })
+    };
+    let result = match writer {
+        Ok(thread) => {
+            // the write side uses the write storage from now on
+            let read_storage = job.storage.lock().unwrap_or_else(|e| e.into_inner()).clone();
+            let r = crate::read_session::do_local_read(d, job, dir, &mut reader_end, write, &opened_tx);
+            drop(opened_tx);
+            let _ = reader_end.signal(BnetSignal::Terminate);
+            let _ = thread.join();
+            *job.storage.lock().unwrap_or_else(|e| e.into_inner()) = read_storage;
+            r
+        }
+        Err(e) => {
+            d.jmsg(dir, job, M_FATAL, &format!("Cannot start the write side of the copy: {e}\n"));
+            None
+        }
+    };
+    if result.is_none() && !job.canceled.load(Ordering::Acquire) {
+        job.set_status('E');
+    } else if result.is_some() && job.status() != 'E' as _ {
+        job.set_status('T');
+    }
+    let bytes = *job.bytes.lock().unwrap_or_else(|e| e.into_inner());
+    let mut dir_lock = lock(dir);
+    let _ = dir_lock.send_str(&format!(
+        "3099 Job {name} end JobStatus={} JobFiles={} JobBytes={bytes} JobErrors=0\n",
+        job.status() as u32,
+        job.files.load(Ordering::Acquire)
+    ));
+    let _ = dir_lock.signal(BnetSignal::Eod);
+}
+
 /// State of the FD dialog (`session_opened`).
 struct Session {
     /// `append open session` was accepted.
@@ -523,7 +577,8 @@ fn do_append_data(d: &Daemon, job: &Arc<Job>, dir: &SharedChannel, fd: &mut dyn 
     let setup = |producer: &mut Option<Producer>, device_name: &mut Option<String>| -> bool {
         match Producer::setup(d, job, dir) {
             Ok(p) => {
-                *device_name = d.reserved_device(&job.cmd.job);
+                let read = job.read_device.lock().unwrap_or_else(|e| e.into_inner()).clone();
+                *device_name = d.reserved_device_except(&job.cmd.job, read.as_deref());
                 *producer = Some(p);
                 true
             }

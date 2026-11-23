@@ -63,3 +63,41 @@ pub fn lock(shared: &SharedChannel) -> std::sync::MutexGuard<'_, Box<dyn Channel
 pub fn text(data: &[u8]) -> String {
     String::from_utf8_lossy(data).into_owned()
 }
+
+/// One end of an in-process connection (two [`MemChannel`]s are a socket
+/// pair): the copy inside one SD runs the reading and the writing side of
+/// the copy protocol against each other without a network.
+pub struct MemChannel {
+    /// Messages for the other end; `None` after TERMINATE (hang up).
+    tx: Option<std::sync::mpsc::Sender<Message>>,
+    /// Messages from the other end.
+    rx: std::sync::mpsc::Receiver<Message>,
+}
+
+impl MemChannel {
+    /// Two connected ends.
+    pub fn pair() -> (MemChannel, MemChannel) {
+        let (a_tx, b_rx) = std::sync::mpsc::channel();
+        let (b_tx, a_rx) = std::sync::mpsc::channel();
+        (MemChannel { tx: Some(a_tx), rx: a_rx }, MemChannel { tx: Some(b_tx), rx: b_rx })
+    }
+}
+
+impl Channel for MemChannel {
+    fn recv(&mut self) -> Result<Message, String> {
+        self.rx.recv().map_err(|_| "connection closed".to_string())
+    }
+
+    fn send(&mut self, data: &[u8]) -> Result<(), String> {
+        self.tx.as_ref().ok_or("connection closed")?.send(Message::Data(data.to_vec())).map_err(|_| "connection closed".to_string())
+    }
+
+    fn signal(&mut self, signal: BnetSignal) -> Result<(), String> {
+        if signal == BnetSignal::Terminate {
+            // like a hang-up: the other end's recv fails
+            self.tx = None;
+            return Ok(());
+        }
+        self.tx.as_ref().ok_or("connection closed")?.send(Message::Signal(signal)).map_err(|_| "connection closed".to_string())
+    }
+}
