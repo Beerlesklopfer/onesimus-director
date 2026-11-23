@@ -28,6 +28,8 @@ pub mod ata;
 pub mod nvme;
 #[cfg(target_os = "linux")]
 mod sg;
+#[cfg(windows)]
+mod windows;
 
 use std::fmt;
 
@@ -170,7 +172,8 @@ impl Report {
     }
 }
 
-/// Reads the SMART data of the drive at `path` (`/dev/sda`, `/dev/nvme0`, `/dev/nvme0n1`).
+/// Reads the SMART data of the drive at `path`: on Linux `/dev/sda`, `/dev/nvme0`, `/dev/nvme0n1`;
+/// on Windows `\\.\PhysicalDrive0`.
 #[cfg(target_os = "linux")]
 pub fn read(path: impl AsRef<std::path::Path>) -> Result<Report, Error> {
     let path = path.as_ref();
@@ -182,8 +185,14 @@ pub fn read(path: impl AsRef<std::path::Path>) -> Result<Report, Error> {
     }
 }
 
-/// Reads the SMART data of the drive at `path` (Linux only).
-#[cfg(not(target_os = "linux"))]
+/// Reads the SMART data of the drive at `path` (`\\.\PhysicalDrive0`); needs administrator rights.
+#[cfg(windows)]
+pub fn read(path: impl AsRef<std::path::Path>) -> Result<Report, Error> {
+    windows::read(path.as_ref())
+}
+
+/// Reads the SMART data of the drive at `path` (not implemented on this platform).
+#[cfg(not(any(target_os = "linux", windows)))]
 pub fn read(_path: impl AsRef<std::path::Path>) -> Result<Report, Error> {
-    Err(Error::Unsupported("smartread reads drives on Linux only".into()))
+    Err(Error::Unsupported("smartread reads drives on Linux and Windows; macOS is not implemented yet".into()))
 }

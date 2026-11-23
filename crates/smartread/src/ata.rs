@@ -27,7 +27,9 @@
 //! raw sectors and need no hardware; the tests use sectors read from real
 //! drives.
 
-use crate::{Attribute, Error, Health, Report, SelfTest};
+use crate::{Attribute, Error, Health, SelfTest};
+#[cfg(target_os = "linux")]
+use crate::Report;
 
 /// The 12 attribute slots of 12 bytes in a SMART data sector start at byte 2.
 const ATTRIBUTE_OFFSET: usize = 2;
