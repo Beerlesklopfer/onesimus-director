@@ -411,7 +411,7 @@ impl Producer {
     fn setup(d: &Daemon, job: &Arc<Job>, dir: &SharedChannel) -> Result<Producer, String> {
         d.send_status(dir, job, 'S');
         let storage = job.storage.lock().unwrap_or_else(|e| e.into_inner()).clone().unwrap_or_default();
-        let dev = d.reserve_device(&storage, &job.cmd.job).ok_or("Could not reserve any device for this job.")?;
+        let dev = d.reserve_device(&storage, &job.cmd).ok_or("Could not reserve any device for this job.")?;
         d.jmsg(dir, job, M_INFO, &format!("Using Device {} to write.\n", dev.device.print_name()));
         let info = JobInfo {
             job: job.cmd.job.clone(),
@@ -436,6 +436,7 @@ impl Producer {
             job_level: job.cmd.level as u32,
             bootstrap: String::new(),
             vol_poll_interval: d.config.find_device(&dev.device.name).map(vol_poll_interval).unwrap_or(300),
+            alternatives: Vec::new(),
         };
         let result = Self::start(d, job, dir, &info, &dev.device, dev.slots);
         if result.is_err() {

@@ -65,6 +65,12 @@ pub struct RigOptions {
     /// Instead of a second SD, a second device (`VDev2`) in the rig SD with
     /// the same Director resources: Copy and VirtualFull inside one SD.
     pub copy_same_sd: bool,
+    /// A Distributor in the rig SD (osd only): a second device `VDev2`
+    /// (media type `VFile2`, volumes below `<root>/storage2`), the Distributor
+    /// `VDist` in `osd.d/distributor/` (Full to `VDev`, the rest to `VDev2`) and
+    /// the Director's Storage `vsd` with `Device = VDist` and the
+    /// Distributor's media type. Excludes `copy_same_sd`.
+    pub distributor: bool,
     /// No TLS to and between the SDs of a Copy (`TLS Enable = no` on the
     /// second SD and its Storage resource: `replicate … ssl=0`, clear text).
     pub copy_plain: bool,
@@ -88,6 +94,7 @@ impl RigOptions {
             sd_grpc: Grpc::Off,
             copy_target: None,
             copy_same_sd: false,
+            distributor: false,
             copy_plain: false,
             extra_odir_d: Vec::new(),
         }
@@ -271,6 +278,20 @@ impl Rig {
             let mut conf = std::fs::read_to_string(&self.layout.sd_conf).map_err(io)?;
             conf += &crate::config::second_device(&self.layout.root);
             std::fs::write(&self.layout.sd_conf, conf).map_err(io)?;
+        }
+        if self.options.distributor {
+            if !is_osd(&self.programs.sd) {
+                return Err("distributor: only osd has Distributors (osd.d)".into());
+            }
+            std::fs::create_dir_all(self.layout.root.join("storage2")).map_err(io)?;
+            let mut conf = std::fs::read_to_string(&self.layout.sd_conf).map_err(io)?;
+            conf += &crate::config::second_device(&self.layout.root);
+            std::fs::write(&self.layout.sd_conf, conf).map_err(io)?;
+            crate::config::write_director_resources(&self.layout, &[crate::config::distributor_storage(self.ports)]).map_err(io)?;
+            let (relative, text) = crate::config::distributor_extension();
+            let path = self.layout.root.join("onesimus").join("osd.d").join(relative);
+            std::fs::create_dir_all(path.parent().unwrap_or(&self.layout.root)).map_err(io)?;
+            std::fs::write(&path, text).map_err(io)?;
         }
         if self.options.copy_target.is_some() {
             crate::config::write_director_resources(&self.layout, &crate::config::copy_resources(self.ports, false, self.options.copy_plain)).map_err(io)?;

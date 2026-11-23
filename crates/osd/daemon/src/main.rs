@@ -163,8 +163,12 @@ fn start_grpc(cli: &Cli, d: &daemon::Daemon) {
 
 /// The line `-t` prints for a good configuration.
 fn summary(config: &bareos_config::sd::SdConfig) -> String {
+    let distributors = match config.distributors.len() {
+        0 => String::new(),
+        n => format!(", {n} Distributor(s)"),
+    };
     format!(
-        "osd: configuration OK: Storage \"{}\" (port {}), {} Director(s), {} Device(s), {} Autochanger(s)",
+        "osd: configuration OK: Storage \"{}\" (port {}), {} Director(s), {} Device(s), {} Autochanger(s){distributors}",
         config.storage.name,
         config.storage.port,
         config.directors.len(),

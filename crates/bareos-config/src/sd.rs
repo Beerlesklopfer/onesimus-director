@@ -32,8 +32,10 @@
 //! - Er darf nur Onesimus-Direktiven setzen ([`ONESIMUS_DIRECTIVES`]);
 //!   jede andere Direktive, also jede Bareos-Direktive, ist ein Fehler.
 //! - Ohne gleichnamige Ressource in `bareos-sd.d` ist er ein Fehler.
-//! - Reine osd-Ressourcen (`Distributor` mit `Route`) kommen in P2; bis
-//!   dahin lehnt der Lader sie als noch nicht unterstützt ab.
+//! - Reine osd-Ressourcen gibt es einmal: `Distributor` mit `Route`-Blöcken
+//!   (P2, [`SdDistributor`]). Sie stehen nur in `osd.d/distributor/<Name>.conf`
+//!   und verweisen mit ihren Namen auf Devices aus `bareos-sd.d`; in
+//!   `bareos-sd.d` selbst bleibt ein `Distributor` eine unbekannte Ressource.
 //! - Ohne `osd.d/` ist das Ergebnis genau das von `bareos-sd.d` allein;
 //!   ein bareos-sd liest denselben Baum unverändert.
 //!
@@ -235,6 +237,232 @@ pub struct SdConfig {
     pub messages: Vec<SdMessages>,
     /// Autochangers.
     pub autochangers: Vec<SdAutochanger>,
+    /// Distributors from `osd.d/distributor/` (Onesimus, P2); empty without `osd.d`.
+    pub distributors: Vec<SdDistributor>,
+}
+
+/// One `Route { … }` of a [`SdDistributor`]: conditions on the job and the
+/// device the job goes to when all of them hold (Plan D-1, D-3). An empty
+/// condition list is the catch-all route.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct SdRoute {
+    /// `Job`: name of the Job resource (`job_name=` of the Job command).
+    pub job: Option<String>,
+    /// `Client`: name of the client.
+    pub client: Option<String>,
+    /// `Level`: job level letter as in the Job command (`F`, `I`, `D`, `f` …).
+    pub level: Option<char>,
+    /// `Pool`: pool of the Director's `use storage`.
+    pub pool: Option<String>,
+    /// `Type`: job type letter (`B` backup, `C` copy …).
+    pub job_type: Option<char>,
+    /// `FileSet`: name of the FileSet.
+    pub fileset: Option<String>,
+    /// `Device`: the target device (a Device of `bareos-sd.d`).
+    pub device: String,
+}
+
+/// What a route is matched against: the facts of the job that wants to write.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct RouteFacts<'a> {
+    /// `job_name=`.
+    pub job: &'a str,
+    /// `client_name=`.
+    pub client: &'a str,
+    /// `level=` letter.
+    pub level: char,
+    /// `pool_name=` of `use storage`.
+    pub pool: &'a str,
+    /// `type=` letter.
+    pub job_type: char,
+    /// `FileSet=`.
+    pub fileset: &'a str,
+}
+
+impl SdRoute {
+    /// Whether the route has no condition (the catch-all).
+    pub fn is_catch_all(&self) -> bool {
+        self.job.is_none() && self.client.is_none() && self.level.is_none() && self.pool.is_none()
+            && self.job_type.is_none() && self.fileset.is_none()
+    }
+
+    /// Whether every condition of the route holds for `facts`.
+    pub fn matches(&self, facts: &RouteFacts<'_>) -> bool {
+        self.job.as_deref().is_none_or(|v| v == facts.job)
+            && self.client.as_deref().is_none_or(|v| v == facts.client)
+            && self.level.is_none_or(|v| v == facts.level)
+            && self.pool.as_deref().is_none_or(|v| v == facts.pool)
+            && self.job_type.is_none_or(|v| v == facts.job_type)
+            && self.fileset.as_deref().is_none_or(|v| v == facts.fileset)
+    }
+
+    /// The conditions as `Level = Full, Client = x` text for status output
+    /// (`always` for the catch-all).
+    pub fn conditions(&self) -> String {
+        let mut out: Vec<String> = Vec::new();
+        if let Some(v) = &self.job {
+            out.push(format!("Job = {v}"));
+        }
+        if let Some(v) = &self.client {
+            out.push(format!("Client = {v}"));
+        }
+        if let Some(v) = self.level {
+            out.push(format!("Level = {}", level_name(v)));
+        }
+        if let Some(v) = &self.pool {
+            out.push(format!("Pool = {v}"));
+        }
+        if let Some(v) = self.job_type {
+            out.push(format!("Type = {}", type_name(v)));
+        }
+        if let Some(v) = &self.fileset {
+            out.push(format!("FileSet = {v}"));
+        }
+        if out.is_empty() { "always".to_string() } else { out.join(", ") }
+    }
+}
+
+/// A `Distributor` resource (`osd.d/distributor/<Name>.conf`, Onesimus, P2):
+/// to the Director it is a device (`Device = <Name>`, `Media Type = …`); for
+/// each writing job osd picks the target device by the first matching route.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SdDistributor {
+    /// `Name`: what the Director's Storage names as `Device`.
+    pub name: String,
+    /// `Description`.
+    pub description: Option<String>,
+    /// `Media Type`: what the Director's Storage carries; every target keeps its own (D-2 a).
+    pub media_type: String,
+    /// The routes in the order of the file; the first match decides.
+    pub routes: Vec<SdRoute>,
+}
+
+impl SdDistributor {
+    /// The first route that matches `facts`.
+    pub fn select(&self, facts: &RouteFacts<'_>) -> Option<&SdRoute> {
+        self.routes.iter().find(|r| r.matches(facts))
+    }
+
+    /// The target device names, each once, in the order of the routes.
+    pub fn targets(&self) -> Vec<&str> {
+        let mut out: Vec<&str> = Vec::new();
+        for r in &self.routes {
+            if !out.contains(&r.device.as_str()) {
+                out.push(&r.device);
+            }
+        }
+        out
+    }
+
+    /// Reads a `Distributor` resource of `osd.d`; `at` is the source note for errors.
+    fn from_raw(raw: &ConfResource, at: &str) -> Result<SdDistributor, String> {
+        let r = Res::new(raw, "Distributor");
+        let name = r.required("name", "Name")?;
+        let err = |m: String| format!("osd.d: Distributor \"{name}\": {m}{at}");
+        let mut routes = Vec::new();
+        for d in &raw.directives {
+            match d.norm_key().as_str() {
+                "name" | "description" | "mediatype" => {}
+                "route" => {
+                    let Some(block) = &d.block else {
+                        return Err(err("Route must be a block: Route { Level = Full; Device = X }".into()));
+                    };
+                    routes.push(SdRoute::from_block(block).map_err(err)?);
+                }
+                _ => return Err(err(format!("unknown directive \"{}\" (known: Name, Description, Media Type, Route)", d.key))),
+            }
+        }
+        let media_type = r.required("mediatype", "Media Type").map_err(|e| format!("osd.d: {e}{at}"))?;
+        if routes.is_empty() {
+            return Err(err("no Route defined".into()));
+        }
+        if let Some(i) = routes.iter().position(SdRoute::is_catch_all)
+            && i + 1 < routes.len()
+        {
+            return Err(err(if routes.iter().filter(|r| r.is_catch_all()).count() > 1 {
+                "more than one Route without conditions".to_string()
+            } else {
+                "a Route without conditions must be the last one; the Routes behind it would never be used".to_string()
+            }));
+        }
+        Ok(SdDistributor { name, description: r.text("description"), media_type, routes })
+    }
+}
+
+impl SdRoute {
+    /// Reads the directives of a `Route { … }` block.
+    fn from_block(block: &[Directive]) -> Result<SdRoute, String> {
+        let mut route = SdRoute::default();
+        let mut device: Option<String> = None;
+        for d in block {
+            let value = || d.values().join(" ");
+            let one = || d.first().map(str::to_string).filter(|v| !v.is_empty()).ok_or_else(|| format!("Route: \"{}\" has no value", d.key));
+            match d.norm_key().as_str() {
+                "job" => route.job = Some(one()?),
+                "client" => route.client = Some(one()?),
+                "pool" => route.pool = Some(one()?),
+                "fileset" => route.fileset = Some(one()?),
+                "level" => {
+                    let v = one()?;
+                    route.level = Some(letter(LEVELS, &v).ok_or_else(|| format!("Route: unknown Level \"{v}\""))?);
+                }
+                "type" => {
+                    let v = one()?;
+                    route.job_type = Some(letter(TYPES, &v).ok_or_else(|| format!("Route: unknown Type \"{v}\""))?);
+                }
+                "device" | "devices" => {
+                    let names: Vec<&str> = d.values();
+                    if names.len() > 1 {
+                        return Err(format!(
+                            "Route: several Devices ({}) need striping, which is not supported yet (planned for P5); name one Device",
+                            names.join(", ")
+                        ));
+                    }
+                    if device.is_some() {
+                        return Err("Route: Device given twice".into());
+                    }
+                    device = Some(one()?);
+                }
+                "stripe" => match parse_bool(&value()) {
+                    Ok((_, false)) => {}
+                    Ok((_, true)) => return Err("Route: Stripe = yes is not supported yet (planned for P5)".into()),
+                    Err(e) => return Err(format!("Route: Stripe: {e}")),
+                },
+                _ => {
+                    return Err(format!(
+                        "Route: unknown directive \"{}\" (known: Job, Client, Level, Pool, Type, FileSet, Device)", d.key
+                    ))
+                }
+            }
+        }
+        route.device = device.ok_or("Route without Device (a Route needs its target)")?;
+        Ok(route)
+    }
+}
+
+/// The name of a job level letter (`F` → `Full`), the letter itself if unknown.
+pub fn level_name(level: char) -> String {
+    LEVELS.iter().find(|(_, c)| *c == level).map(|(n, _)| (*n).to_string()).unwrap_or_else(|| level.to_string())
+}
+
+/// The name of a job type letter (`B` → `Backup`), the letter itself if unknown.
+pub fn type_name(job_type: char) -> String {
+    TYPES.iter().find(|(_, c)| *c == job_type).map(|(n, _)| (*n).to_string()).unwrap_or_else(|| job_type.to_string())
+}
+
+/// Job levels by name (as the Director's `Level` writes them) and letter.
+const LEVELS: &[(&str, char)] = &[
+    ("Full", 'F'), ("Incremental", 'I'), ("Differential", 'D'), ("VirtualFull", 'f'), ("Base", 'B'), ("Since", 'S'),
+];
+
+/// Job types by name and letter (`job.h` `JT_*`).
+const TYPES: &[(&str, char)] = &[
+    ("Backup", 'B'), ("Copy", 'C'), ("Migrate", 'M'), ("Archive", 'A'), ("Consolidate", 'O'), ("Restore", 'R'), ("Verify", 'V'),
+];
+
+/// The letter for `name` in `table` (case-insensitive).
+fn letter(table: &[(&str, char)], name: &str) -> Option<char> {
+    table.iter().find(|(n, _)| n.eq_ignore_ascii_case(name)).map(|(_, c)| *c)
 }
 
 /// Loads `path` (a file, a directory containing `bareos-sd.d`, or the
@@ -466,7 +694,7 @@ impl SdConfig {
                 }
             }
         }
-        Ok(Self { storage, directors, devices, messages, autochangers })
+        Ok(Self { storage, directors, devices, messages, autochangers, distributors: Vec::new() })
     }
 
     /// Applies the `osd.d/` extensions `resources` (rules in the module
@@ -479,12 +707,13 @@ impl SdConfig {
             let Some(name) = raw.name().map(str::to_string) else {
                 return Err(format!("osd.d: {} without Name{at}", raw.rtype));
             };
+            if rtype == "distributor" {
+                self.distributors.push(SdDistributor::from_raw(raw, &at)?);
+                continue;
+            }
             let known_type = matches!(rtype.as_str(), "storage" | "director" | "device" | "messages" | "autochanger");
             if !known_type {
-                return Err(format!(
-                    "osd.d: resource type \"{}\" is not supported yet{at} (Distributor and Route follow in P2)",
-                    raw.rtype
-                ));
+                return Err(format!("osd.d: resource type \"{}\" is not supported{at}", raw.rtype));
             }
             let exists = match rtype.as_str() {
                 "storage" => self.storage.name == name,
@@ -534,7 +763,41 @@ impl SdConfig {
                 _ => {}
             }
         }
+        self.check_distributors()
+    }
+
+    /// Checks the distributors against the rest of the configuration: names
+    /// unique among Devices, Autochangers and Distributors; every route target
+    /// an existing File Device (never a Distributor).
+    fn check_distributors(&self) -> Result<(), String> {
+        duplicates("Distributor", self.distributors.iter().map(|d| &d.name))?;
+        for dist in &self.distributors {
+            if self.devices.iter().any(|d| d.name == dist.name) || self.autochangers.iter().any(|a| a.name == dist.name) {
+                return Err(format!("Distributor \"{}\": the name is already used by a Device or Autochanger", dist.name));
+            }
+            for route in &dist.routes {
+                if self.distributors.iter().any(|d| d.name == route.device) {
+                    return Err(format!(
+                        "Distributor \"{}\": Route target \"{}\" is a Distributor; a target must be a Device", dist.name, route.device
+                    ));
+                }
+                let Some(dev) = self.find_device(&route.device) else {
+                    return Err(format!("Distributor \"{}\": Route target Device \"{}\" not found in bareos-sd.d", dist.name, route.device));
+                };
+                if dev.device_type.as_deref().is_some_and(|t| !t.eq_ignore_ascii_case("file")) {
+                    return Err(format!(
+                        "Distributor \"{}\": Route target Device \"{}\" is not a File device; only File devices are supported",
+                        dist.name, route.device
+                    ));
+                }
+            }
+        }
         Ok(())
+    }
+
+    /// The Distributor resource named `name`.
+    pub fn find_distributor(&self, name: &str) -> Option<&SdDistributor> {
+        self.distributors.iter().find(|d| d.name == name)
     }
 
     /// The Director resource named `name`.
@@ -722,10 +985,126 @@ Messages {
     fn osd_d_orphan_and_new_types_are_rejected() {
         let e = overlay("Device {\n Name = NoSuchDevice\n Ring Slots = 4\n}\n").unwrap_err();
         assert!(e.contains("Device \"NoSuchDevice\" extends no Device of that name in bareos-sd.d"), "{e}");
-        let e = overlay("Distributor {\n Name = V\n}\n").unwrap_err();
-        assert!(e.contains("not supported yet"), "{e}");
+        let e = overlay("Storage2 {\n Name = V\n}\n").unwrap_err();
+        assert!(e.contains("is not supported"), "{e}");
         let e = overlay("Device {\n Ring Slots = 4\n}\n").unwrap_err();
         assert!(e.contains("without Name"), "{e}");
+    }
+
+    /// A second device for the distributor tests (media type `Other`).
+    const SECOND: &str = "Device {\n Name = Second\n Media Type = Other\n Archive Device = /tmp/second\n}\n";
+
+    /// Applies the osd.d text `overlay` to [`SAMPLE`] plus [`SECOND`].
+    fn with_second(overlay: &str) -> Result<SdConfig, String> {
+        let mut c = parse(&format!("{SAMPLE}{SECOND}"))?;
+        c.apply_overlay(&crate::raw::parse_str(overlay, None).unwrap())?;
+        Ok(c)
+    }
+
+    /// The distributor of the plan (D-1) with all six conditions.
+    const DIST: &str = "Distributor {\n Name = Verteiler\n Media Type = Onesimus\n \
+        Route { Level = Full; Device = FileStorage }\n \
+        Route { Client = \"CLOUD-fd\"; Device = Second }\n \
+        Route { Pool = Monatlich; Device = Second }\n \
+        Route { Job = Wochen; Type = Backup; FileSet = Etc; Device = FileStorage }\n \
+        Route { Device = Second }\n}\n";
+
+    #[test]
+    fn distributor_is_read_from_osd_d() {
+        let c = with_second(DIST).unwrap();
+        let d = c.find_distributor("Verteiler").unwrap();
+        assert_eq!(d.media_type, "Onesimus");
+        assert_eq!(d.routes.len(), 5);
+        assert_eq!(d.routes[0].level, Some('F'));
+        assert_eq!(d.routes[1].client.as_deref(), Some("CLOUD-fd"));
+        assert_eq!(d.routes[3].job_type, Some('B'));
+        assert!(d.routes[4].is_catch_all());
+        assert_eq!(d.targets(), ["FileStorage", "Second"]);
+        assert_eq!(d.routes[0].conditions(), "Level = Full");
+        assert_eq!(d.routes[4].conditions(), "always");
+        // the Bareos resources are untouched
+        assert_eq!(c.devices.len(), 2);
+        assert!(c.find_device("Verteiler").is_none());
+    }
+
+    /// Route selection facts for a backup of `client` into `pool`.
+    fn facts<'a>(level: char, client: &'a str, pool: &'a str) -> RouteFacts<'a> {
+        RouteFacts { job: "Other", client, level, pool, job_type: 'B', fileset: "Home" }
+    }
+
+    #[test]
+    fn route_selection_by_level_client_pool_and_rest() {
+        let c = with_second(DIST).unwrap();
+        let d = c.find_distributor("Verteiler").unwrap();
+        let pick = |f: &RouteFacts<'_>| d.select(f).unwrap().device.clone();
+        // the first matching route decides: Full wins over the client and the pool
+        assert_eq!(pick(&facts('F', "CLOUD-fd", "Monatlich")), "FileStorage");
+        assert_eq!(pick(&facts('I', "CLOUD-fd", "Taeglich")), "Second");
+        assert_eq!(pick(&facts('I', "other-fd", "Monatlich")), "Second");
+        // job, type and file set must all match
+        let mut f = facts('I', "other-fd", "Taeglich");
+        f.job = "Wochen";
+        f.fileset = "Etc";
+        assert_eq!(pick(&f), "FileStorage");
+        f.fileset = "Home";
+        assert_eq!(pick(&f), "Second", "FileSet differs: the catch-all route");
+        f.fileset = "Etc";
+        f.job_type = 'C';
+        assert_eq!(pick(&f), "Second", "Type differs: the catch-all route");
+        // no catch-all: nothing matches
+        let c = with_second("Distributor {\n Name = V\n Media Type = M\n Route { Pool = A; Device = Second }\n}\n").unwrap();
+        assert!(c.find_distributor("V").unwrap().select(&facts('F', "x", "B")).is_none());
+        assert!(c.find_distributor("V").unwrap().select(&facts('F', "x", "A")).is_some());
+    }
+
+    #[test]
+    fn distributor_errors_are_reported() {
+        let route = |routes: &str| format!("Distributor {{\n Name = V\n Media Type = M\n {routes}\n}}\n");
+        let cases = [
+            (route("Route { Level = Full; Device = Nope }"), "Route target Device \"Nope\" not found in bareos-sd.d"),
+            (route("Route { Level = Full }"), "Route without Device"),
+            (route(""), "no Route defined"),
+            (route("Route { Level = Full; Device = FileStorage }\n Route { Device = Second }\n Route { Device = FileStorage }"),
+                "more than one Route without conditions"),
+            (route("Route { Device = FileStorage }\n Route { Level = Full; Device = Second }"), "must be the last one"),
+            (route("Route { Level = Sometimes; Device = Second }"), "unknown Level \"Sometimes\""),
+            (route("Route { Stripe = yes; Device = Second }"), "Stripe = yes is not supported yet"),
+            (route("Route { Devices = FileStorage, Second }"), "striping"),
+            (route("Route { Colour = red; Device = Second }"), "unknown directive \"Colour\""),
+            (route("Route = Second"), "Route must be a block"),
+            ("Distributor {\n Name = V\n Route { Device = Second }\n}\n".into(), "required directive \"Media Type\" missing"),
+            (route("Route { Device = Second }\n Colour = red"), "unknown directive \"Colour\""),
+            (format!("{}{}", route("Route { Device = Second }"), route("Route { Device = Second }")), "Distributor \"V\" defined twice"),
+            ("Distributor {\n Name = Second\n Media Type = M\n Route { Device = FileStorage }\n}\n".into(), "already used by a Device"),
+            (format!("{}Distributor {{\n Name = W\n Media Type = M\n Route {{ Device = V }}\n}}\n", route("Route { Device = Second }")),
+                "target \"V\" is a Distributor"),
+        ];
+        for (text, want) in cases {
+            let e = with_second(&text).unwrap_err();
+            assert!(e.contains(want), "want {want:?} in {e:?}");
+        }
+        // Stripe = no is fine
+        assert!(with_second("Distributor {\n Name = V\n Media Type = M\n Route { Stripe = no; Device = Second }\n}\n").is_ok());
+        // a non-File device cannot be a target
+        let mut c = parse(&format!("{SAMPLE}{SECOND}")).unwrap();
+        c.devices[1].device_type = Some("Tape".into());
+        let e = c.apply_overlay(&crate::raw::parse_str(&route("Route { Device = Second }"), None).unwrap()).unwrap_err();
+        assert!(e.contains("not a File device"), "{e}");
+    }
+
+    #[test]
+    fn distributor_is_loaded_from_the_overlay_tree() {
+        let dir = std::env::temp_dir().join(format!("bareos-config-dist-{}", std::process::id()));
+        let file = dir.join("bareos-sd.conf");
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(&file, format!("{SAMPLE}{SECOND}")).unwrap();
+        let overlay = dir.join("onesimus").join("osd.d");
+        std::fs::create_dir_all(overlay.join("distributor")).unwrap();
+        std::fs::write(overlay.join("distributor/Verteiler.conf"), DIST).unwrap();
+        let c = load_with_overlay(&file, &overlay).unwrap();
+        assert_eq!(c.distributors.len(), 1);
+        assert_eq!(load_with_overlay(&file, &dir.join("none")).unwrap().distributors.len(), 0);
+        std::fs::remove_dir_all(&dir).ok();
     }
 
     #[test]

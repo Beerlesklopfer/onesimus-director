@@ -269,7 +269,7 @@ impl DirSession {
         } else {
             // reserved now, freed at the end of the session; the append
             // reserves again from the same list
-            let r = self.d.reserve_device(&storage, &job.cmd.job).map(|r| r.device.name);
+            let r = self.d.reserve_device(&storage, &job.cmd).map(|r| r.device.name);
             if let Some(name) = &r {
                 self.d.release_device(name);
             }
@@ -295,7 +295,7 @@ impl DirSession {
     /// now (like a backup's) and reserved when `run` starts the copy.
     fn use_for_local_write(&mut self, job: &Arc<Job>, storage: UseStorage) -> Next {
         let wanted = storage.devices.first().cloned().unwrap_or_default();
-        let device = match self.d.reserve_device(&storage, &job.cmd.job).map(|r| r.device.name) {
+        let device = match self.d.reserve_device(&storage, &job.cmd).map(|r| r.device.name) {
             Some(name) => {
                 self.d.release_device(&name);
                 Some(name)
@@ -321,11 +321,12 @@ impl DirSession {
     /// job (restore, verify) reserves a device now; there is no
     /// just-in-time reservation for reading.
     fn use_for_read(&mut self, job: &Arc<Job>, storages: Vec<UseStorage>) -> Next {
-        let reserved = storages.iter().find_map(|st| self.d.reserve_device(st, &job.cmd.job).map(|r| (st.clone(), r)));
+        let reserved = storages.iter().find_map(|st| self.d.reserve_device(st, &job.cmd).map(|r| (st.clone(), r)));
         match reserved {
             Some((storage, r)) => {
                 *job.storage.lock().unwrap_or_else(|e| e.into_inner()) = Some(storage);
                 *job.read_device.lock().unwrap_or_else(|e| e.into_inner()) = Some(r.device.name.clone());
+                *job.read_alternatives.lock().unwrap_or_else(|e| e.into_inner()) = r.alternatives.iter().map(|a| a.name.clone()).collect();
                 self.send(&format!("3000 OK use device device={}\n", bash_spaces(&r.device.name)));
                 Next::Continue
             }
@@ -473,26 +474,14 @@ impl DirSession {
         }
     }
 
-    /// `LabelCmd` / `LabelVolumeIfOk` for a File device.
+    /// `LabelCmd` / `LabelVolumeIfOk` for a File device. A Distributor name
+    /// stands for its target of the label's media type.
     fn label_cmd(&mut self, msg: &str) -> Next {
         let reply = match parse_label(msg) {
             None => format!("3903 Error scanning label command: {msg}\n"),
-            Some(l) => match self.d.config.find_device(&l.device) {
-                None => format!("3999 Device \"{}\" not found or could not be opened.\n", l.device),
-                // a job holds the device: refused unless it waits for the
-                // operator (Bareos labels a BST_WAITING_FOR_SYSOP device)
-                Some(_) if self.d.device_user(&l.device).is_some() && !self.d.waiting_for_sysop(&l.device) => {
-                    let dev = self.d.config.find_device(&l.device).map(FileDevice::from_config);
-                    format!("3937 Device {} is busy with writers=1 reserved=0.\n", dev.map(|d| d.print_name()).unwrap_or_default())
-                }
-                Some(conf) => {
-                    let dev = FileDevice::from_config(conf);
-                    let reply = label_volume(&self.d, &dev, &l.volume, &l.pool);
-                    if reply.starts_with("3000 ") {
-                        self.d.media_event(&dev.name);
-                    }
-                    reply
-                }
+            Some(l) => match self.label_device(&l) {
+                Err(e) => e,
+                Ok(name) => self.label_on(&name, &l),
             },
         };
         self.send(&reply);
@@ -500,10 +489,73 @@ impl DirSession {
         Next::Continue
     }
 
+    /// The device `label` acts on: the named Device, or for a Distributor its
+    /// target whose media type is the label's (an error reply when none is).
+    fn label_device(&self, l: &LabelCommand) -> Result<String, String> {
+        let Some(dist) = self.d.config.find_distributor(&l.device) else { return Ok(l.device.clone()) };
+        dist.targets()
+            .into_iter()
+            .filter_map(|t| self.d.config.find_device(t))
+            .find(|t| t.media_type == l.media_type)
+            .map(|t| t.name.clone())
+            .ok_or_else(|| {
+                format!(
+                    "3999 Device \"{}\" is a Distributor: label with the Media Type of one of its devices ({}), not \"{}\".\n",
+                    l.device,
+                    dist.targets().join(", "),
+                    l.media_type
+                )
+            })
+    }
+
+    /// The label of `l` on device `name`; the reply line.
+    fn label_on(&self, name: &str, l: &LabelCommand) -> String {
+        match self.d.config.find_device(name) {
+            None => format!("3999 Device \"{name}\" not found or could not be opened.\n"),
+            // a job holds the device: refused unless it waits for the
+            // operator (Bareos labels a BST_WAITING_FOR_SYSOP device)
+            Some(conf) if self.d.device_user(name).is_some() && !self.d.waiting_for_sysop(name) => {
+                format!("3937 Device {} is busy with writers=1 reserved=0.\n", FileDevice::from_config(conf).print_name())
+            }
+            Some(conf) => {
+                let dev = FileDevice::from_config(conf);
+                let reply = label_volume(&self.d, &dev, &l.volume, &l.pool);
+                if reply.starts_with("3000 ") {
+                    self.d.media_event(&dev.name);
+                }
+                reply
+            }
+        }
+    }
+
     /// `mount`, `unmount`, `release` for a File device.
     fn device_cmd(&mut self, msg: &str, what: &str) -> Next {
         let name = msg.split_whitespace().nth(1).map(unbash_spaces);
-        let reply = match name.as_deref().and_then(|n| self.d.config.find_device(n)) {
+        let reply = match name.as_deref().and_then(|n| self.d.config.find_distributor(n)) {
+            // a Distributor: the command goes to all its targets
+            Some(dist) => {
+                let targets = dist.targets();
+                let busy = targets.iter().any(|t| self.d.device_user(t).is_some());
+                match (what, busy) {
+                    ("mount", _) => {
+                        targets.iter().for_each(|t| self.d.media_event(t));
+                        format!("3906 Distributor \"{}\": its File devices are always mounted.\n", dist.name)
+                    }
+                    (_, true) => format!("3937 Distributor \"{}\" is busy with writers=1 reserved=0.\n", dist.name),
+                    ("unmount", false) => format!("3901 Distributor \"{}\" is already unmounted.\n", dist.name),
+                    _ => format!("3921 Distributor \"{}\" already released.\n", dist.name),
+                }
+            }
+            None => self.device_reply(msg, what, name),
+        };
+        self.send(&reply);
+        self.eod();
+        Next::Continue
+    }
+
+    /// The reply of [`Director::device_cmd`] for a plain device named `name`.
+    fn device_reply(&self, msg: &str, what: &str, name: Option<String>) -> String {
+        match name.as_deref().and_then(|n| self.d.config.find_device(n)) {
             None if name.is_none() => match what {
                 "mount" => format!("3909 Error scanning mount command: {msg}\n"),
                 "unmount" => format!("3907 Error scanning unmount command: {msg}\n"),
@@ -523,10 +575,7 @@ impl DirSession {
                     _ => format!("3921 Device \"{}\" already released.\n", dev.print_name()),
                 }
             }
-        };
-        self.send(&reply);
-        self.eod();
-        Next::Continue
+        }
     }
 
     /// `CancelCmd`.

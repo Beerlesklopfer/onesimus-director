@@ -84,8 +84,11 @@ struct Reader<'a> {
     ring: &'a Ring,
     /// The job.
     info: JobInfo,
-    /// The device.
+    /// The device being read.
     dev: FileDevice,
+    /// Every device the job may read from: the targets of a Distributor
+    /// (the initial device and [`JobInfo::alternatives`]); one entry otherwise.
+    pool: Vec<FileDevice>,
     /// The mounted volume.
     vol: Option<Mounted>,
 }
@@ -108,7 +111,9 @@ pub fn run(ring_name: &str) -> i32 {
     let ok = match JobInfo::decode(&String::from_utf8_lossy(&ring.info())) {
         Ok(info) => {
             let dev = info.device();
-            Reader { ring: &ring, info, dev, vol: None }.work()
+            let mut pool = info.alternatives.clone();
+            pool.push(dev.clone());
+            Reader { ring: &ring, info, dev, pool, vol: None }.work()
         }
         Err(e) => {
             eprintln!("osd device reader: {e}");
@@ -244,6 +249,20 @@ impl Reader<'_> {
     /// One try of [`Reader::acquire`].
     fn try_acquire(&mut self, vol: &RestoreVolume) -> Result<(), String> {
         self.close_volume();
+        if !vol.media_type.is_empty() && vol.media_type != self.dev.media_type {
+            // a Distributor's target of the volume's media type: read from it (`Changing read device`)
+            if let Some(next) = self.pool.iter().find(|d| d.media_type == vol.media_type).cloned() {
+                self.jmsg(M_INFO, &format!(
+                    "Changing read device. Want Media Type=\"{}\" have=\"{}\"\n  device={}",
+                    vol.media_type,
+                    self.dev.media_type,
+                    self.dev.print_name()
+                ));
+                self.jmsg(M_INFO, &format!(
+                    "Media Type change.  New read device {} chosen.", next.print_name()));
+                self.dev = next;
+            }
+        }
         if !vol.media_type.is_empty() && vol.media_type != self.dev.media_type {
             self.jmsg(M_INFO, &format!(
                 "Changing read device. Want Media Type=\"{}\" have=\"{}\"\n  device={}",
@@ -429,7 +448,13 @@ mod tests {
     /// Reads with a reader thread like the network session does; returns
     /// the records that went to the "FD", the reader's exit code and the
     /// fake Director.
-    fn read(dir: &std::path::Path, ring_name: &str, bsr_text: &str, mut fake: FakeDirector) -> (Vec<Sent>, i32, FakeDirector) {
+    fn read(dir: &std::path::Path, ring_name: &str, bsr_text: &str, fake: FakeDirector) -> (Vec<Sent>, i32, FakeDirector) {
+        read_with(dir, ring_name, bsr_text, fake, Vec::new())
+    }
+
+    /// [`read`] with the other targets of a Distributor the job holds.
+    fn read_with(dir: &std::path::Path, ring_name: &str, bsr_text: &str, mut fake: FakeDirector,
+                 alternatives: Vec<FileDevice>) -> (Vec<Sent>, i32, FakeDirector) {
         let bsr_path = dir.join("test.bootstrap");
         std::fs::write(&bsr_path, bsr_text).unwrap();
         let info = JobInfo {
@@ -442,6 +467,7 @@ mod tests {
             max_block_size: 4096,
             label_block_size: 64512,
             bootstrap: bsr_path.display().to_string(),
+            alternatives,
             ..Default::default()
         };
         let _ = Ring::remove(ring_name);
@@ -511,6 +537,36 @@ mod tests {
             assert!(m.iter().any(|x| x.starts_with(want)), "{want} missing in {m:?}");
         }
         std::fs::remove_dir_all(&dir).ok();
+    }
+
+    /// A Distributor's job: Vol1 is on the device `Dev` (media type `File`), Vol2 on `Dev2` (`File2`).
+    #[test]
+    fn a_job_over_two_targets_of_a_distributor_is_read_from_both() {
+        let dir = std::env::temp_dir().join(format!("osd-reader-dist-{}", std::process::id()));
+        let dir2 = std::env::temp_dir().join(format!("osd-reader-dist2-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::create_dir_all(&dir2).unwrap();
+        let ring = format!("osd-readertest-{}-dist", std::process::id());
+        let mut fake = job(&dir, &ring, 30, 1000, 20_000);
+        std::fs::rename(dir.join("Vol2"), dir2.join("Vol2")).unwrap();
+        let text = bootstrap(&fake);
+        let (head, tail) = text.split_once("Volume=\"Vol2\"").unwrap();
+        let text = format!("{head}Volume=\"Vol2\"{}", tail.replacen("MediaType=\"File\"", "MediaType=\"File2\"", 1));
+        assert!(text.contains("MediaType=\"File2\""), "{text}");
+        fake.requests.clear();
+        fake.messages.clear();
+        let second = FileDevice { name: "Dev2".into(), archive_device: dir2.clone(), media_type: "File2".into(), label_media: true,
+            max_block_size: 4096, label_block_size: 64512, max_volume_size: 0 };
+        let (sent, code, fake) = read_with(&dir, &ring, &text, fake, vec![second]);
+        assert_eq!(code, 0, "{:?}", fake.messages);
+        assert_eq!(sent.len(), 30, "all records of both volumes");
+        let m = &fake.messages;
+        for want in ["Ready to read from volume \"Vol1\" on device \"Dev\"", "Changing read device. Want Media Type=\"File2\" have=\"File\"",
+            "Media Type change.  New read device \"Dev2\"", "Ready to read from volume \"Vol2\" on device \"Dev2\"", "End of all volumes."] {
+            assert!(m.iter().any(|x| x.starts_with(want)), "{want} missing in {m:?}");
+        }
+        std::fs::remove_dir_all(&dir).ok();
+        std::fs::remove_dir_all(&dir2).ok();
     }
 
     #[test]

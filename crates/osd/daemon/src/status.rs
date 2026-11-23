@@ -80,7 +80,7 @@ fn level_name(level: char) -> &'static str {
     }
 }
 
-/// `ListDevices` (File devices only).
+/// `ListDevices` (File devices only), then the Distributors with their routes (Onesimus).
 fn devices(d: &Daemon) -> Vec<String> {
     let mut out = vec!["\nDevice status:\n".to_string()];
     for conf in &d.config.devices {
@@ -93,6 +93,16 @@ fn devices(d: &Daemon) -> Vec<String> {
             Ok(h) => format!("    Health: {}\n", h.status_line()),
             Err(e) => format!("    Health: unknown ({e})\n"),
         });
+    }
+    for dist in &d.config.distributors {
+        out.push(format!("\nDistributor \"{}\" (Media Type \"{}\") routes jobs to its devices:\n", dist.name, dist.media_type));
+        for (i, route) in dist.routes.iter().enumerate() {
+            let state = match d.device_user(&route.device) {
+                Some(job) => format!("in use by job {job}"),
+                None => "free".to_string(),
+            };
+            out.push(format!("    Route {}: {} -> Device \"{}\" ({state})\n", i + 1, route.conditions(), route.device));
+        }
     }
     out.push("====\n".into());
     out

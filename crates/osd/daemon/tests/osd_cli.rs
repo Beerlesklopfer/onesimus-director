@@ -59,7 +59,7 @@ fn t_rejects_a_broken_config_with_1() {
     let dir = scratch("bad");
     let tree = shipped_config(&dir);
     std::fs::write(tree.join("device/FileStorage.conf"), "Device {\n Name = FileStorage\n Media Type = File\n}\n").unwrap();
-    let out = osd(&["-t", "-c", dir.to_str().unwrap()]);
+    let out = osd(&["-t", "-c", dir.to_str().unwrap(), "--overlay", dir.to_str().unwrap()]);
     assert_eq!(out.status.code(), Some(1));
     let stderr = String::from_utf8_lossy(&out.stderr);
     assert!(stderr.contains("Device \"FileStorage\": required directive \"Archive Device\" missing"), "{stderr}");
@@ -75,11 +75,38 @@ fn t_reports_an_orphaned_osd_d_extension() {
     shipped_config(&dir);
     std::fs::create_dir_all(dir.join("osd.d/device")).unwrap();
     std::fs::write(dir.join("osd.d/device/Nope.conf"), "Device {\n Name = Nope\n Ring Slots = 4\n}\n").unwrap();
-    let out = osd(&["-t", "-c", dir.to_str().unwrap()]);
+    let out = osd(&["-t", "-c", dir.to_str().unwrap(), "--overlay", dir.to_str().unwrap()]);
     assert_eq!(out.status.code(), Some(1));
     assert!(String::from_utf8_lossy(&out.stderr).contains("Device \"Nope\" extends no Device of that name in bareos-sd.d"));
     std::fs::write(dir.join("osd.d/device/Nope.conf"), "Device {\n Name = FileStorage\n Ring Slots = 4\n}\n").unwrap();
-    assert_eq!(osd(&["-t", "-c", dir.to_str().unwrap()]).status.code(), Some(0));
+    assert_eq!(osd(&["-t", "-c", dir.to_str().unwrap(), "--overlay", dir.to_str().unwrap()]).status.code(), Some(0));
+    std::fs::remove_dir_all(&dir).ok();
+}
+
+/// `osd -t` accepts a Distributor of `osd.d/distributor/` and reports its errors (P2).
+#[test]
+fn t_checks_a_distributor() {
+    let dir = scratch("distributor");
+    shipped_config(&dir);
+    std::fs::create_dir_all(dir.join("osd.d/distributor")).unwrap();
+    let check = |text: &str| {
+        std::fs::write(dir.join("osd.d/distributor/Verteiler.conf"), text).unwrap();
+        osd(&["-t", "-c", dir.to_str().unwrap(), "--overlay", dir.to_str().unwrap()])
+    };
+    let out = check("Distributor {\n Name = Verteiler\n Media Type = Onesimus\n Route { Level = Full; Device = FileStorage }\n Route { Device = FileStorage }\n}\n");
+    assert_eq!(out.status.code(), Some(0), "{}", String::from_utf8_lossy(&out.stderr));
+    for (text, want) in [
+        ("Distributor {\n Name = Verteiler\n Media Type = O\n Route { Device = Nirgends }\n}\n", "Route target Device \"Nirgends\" not found"),
+        ("Distributor {\n Name = Verteiler\n Media Type = O\n Route { Level = Full }\n}\n", "Route without Device"),
+        ("Distributor {\n Name = FileStorage\n Media Type = O\n Route { Device = FileStorage }\n}\n", "already used by a Device"),
+        ("Distributor {\n Name = Verteiler\n Media Type = O\n Route { Device = FileStorage }\n Route { Device = FileStorage }\n}\n", "more than one Route without conditions"),
+        ("Distributor {\n Name = Verteiler\n Media Type = O\n Route { Stripe = yes; Device = FileStorage }\n}\n", "Stripe = yes is not supported yet"),
+    ] {
+        let out = check(text);
+        assert_eq!(out.status.code(), Some(1), "{text}");
+        let stderr = String::from_utf8_lossy(&out.stderr);
+        assert!(stderr.contains(want), "want {want:?} in {stderr}");
+    }
     std::fs::remove_dir_all(&dir).ok();
 }
 
@@ -115,7 +142,7 @@ fn daemon_answers_a_director_and_labels_a_volume() {
     let dev = std::fs::read_to_string(tree.join("device/FileStorage.conf")).unwrap()
         .replace("/var/lib/bareos/storage", storage.to_str().unwrap());
     std::fs::write(tree.join("device/FileStorage.conf"), dev).unwrap();
-    let mut child = Command::new(env!("CARGO_BIN_EXE_osd")).args(["-f", "-c", dir.to_str().unwrap()]).spawn().unwrap();
+    let mut child = Command::new(env!("CARGO_BIN_EXE_osd")).args(["-f", "-c", dir.to_str().unwrap(), "--overlay", dir.to_str().unwrap()]).spawn().unwrap();
     let mut sd = None;
     for _ in 0..100 {
         match osd::connect::connect_sd("127.0.0.1", port, "secret", "bareos-dir") {
@@ -162,7 +189,7 @@ fn daemon_answers_a_director_over_grpc() {
     // D-8: the gRPC port is an osd.d extension of the same-named Storage.
     std::fs::create_dir_all(dir.join("osd.d/storage")).unwrap();
     std::fs::write(dir.join("osd.d/storage/test-sd.conf"), format!("Storage {{\n  Name = test-sd\n  Grpc Port = {grpc_port}\n}}\n")).unwrap();
-    let mut child = Command::new(env!("CARGO_BIN_EXE_osd")).args(["-f", "-c", dir.to_str().unwrap()]).spawn().unwrap();
+    let mut child = Command::new(env!("CARGO_BIN_EXE_osd")).args(["-f", "-c", dir.to_str().unwrap(), "--overlay", dir.to_str().unwrap()]).spawn().unwrap();
     let cert = dir.join("onesimus-sd-grpc.crt");
     let target = |ca: Vec<u8>| onesimus_bnet_grpc::Target { host: "127.0.0.1".into(), port: grpc_port, ca, server_name: "localhost".into() };
     let mut io = None;
@@ -191,7 +218,7 @@ fn daemon_answers_a_director_over_grpc() {
     unsafe { libc::kill(child.id() as i32, libc::SIGTERM) };
     assert_eq!(child.wait().unwrap().code(), Some(0));
 
-    let mut child = Command::new(env!("CARGO_BIN_EXE_osd")).args(["-f", "--disable-grpc", "-c", dir.to_str().unwrap()]).spawn().unwrap();
+    let mut child = Command::new(env!("CARGO_BIN_EXE_osd")).args(["-f", "--disable-grpc", "-c", dir.to_str().unwrap(), "--overlay", dir.to_str().unwrap()]).spawn().unwrap();
     let mut bnet = None;
     for _ in 0..100 {
         if let Ok(s) = osd::connect::connect_sd("127.0.0.1", port, "secret", "bareos-dir") {
