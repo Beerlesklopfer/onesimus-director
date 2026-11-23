@@ -28,7 +28,7 @@ Gemeldet beim Bau der Live-Job-Ansicht und der Schedule-Ansicht (proto `72abd06`
 | G-2 | ~~`count` bei ListJobs ist nicht nach den Console-ACLs gefiltert.~~ **erledigt 20.11.2026:** bei eingeschränkter Job-/Client-ACL zählt odir nur, was `list jobs` zeigt (Abweichung von Bareos, betrieb-odir.md). Eingeschränkte Consoles sehen die Zahl aller Jobs, und count+offset kann `reverse` nicht nachbilden | **Fehler** (ACL), unabhängig von G-1 beheben | `list jobs count` |
 | G-3 | ~~`JobStatusEvent` kennt nur Queued, Canceling, Success und Error, kein Ereignis beim tatsächlichen Start (der Proto-Kommentar nennt Running/OK/Canceled). Die GUI nimmt ersatzweise die Meldung „Start Backup JobId …“. Gewünscht: ein Running-Ereignis, möglichst mit geplanter Zeit~~ **erledigt 20.11.2026:** odir sendet `Running` beim tatsächlichen Start, `JobStatusEvent.sched_time` (Feld 5). | Push-Event in odir | `grpc/push_events.rs` |
 | G-4 | ~~`GetDirectorStatus.running` hat weder Start- noch geplante Zeit; laufende Jobs lassen sich daraus allein nicht auf eine Zeitachse legen~~ **erledigt 20.11.2026:** `RunningJobInfo.start_time`/`sched_time` (Felder 8, 9). | Proto-Felder + odir | `GetDirectorStatus` |
-| G-5 | Die GUI verwirft `JobStatusEvent.timestamp` | GUI-Seite, kein odir-Punkt | – |
+| G-5 | ~~Die GUI verwirft `JobStatusEvent.timestamp`~~ **erledigt (GUI, 889b979, geprüft am 23.11.2026 auf origin/development):** `bgrpctransport.cpp:310` reicht `timestamp` und `schedTime` weiter, `BScheduleWidget::onJobStatusEvent` zeigt sie auf der Zeitachse. odir setzt beide Felder verlässlich (`now_unix()`, `sched_time` bei Running). | GUI-Seite, kein odir-Punkt | – |
 
 ### Beschädigte Volumes (21.11.2026, D-19)
 
