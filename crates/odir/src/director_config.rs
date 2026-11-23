@@ -45,17 +45,6 @@ pub struct DirectorConfig {
     pub catalog_acl: std::sync::Arc<crate::catalog_acl::CatalogAcl>,
 }
 
-/// The Onesimus configuration directory when the command line names none.
-const DEFAULT_ONESIMUS_DIR: &str = "/etc/onesimus";
-
-/// The Onesimus configuration directory (`--onesimus-config`), set once at startup.
-static ONESIMUS_DIR: std::sync::OnceLock<std::path::PathBuf> = std::sync::OnceLock::new();
-
-/// Sets the Onesimus configuration directory whose `odir.d/` extends the Bareos files.
-pub fn set_onesimus_dir(dir: std::path::PathBuf) {
-    let _ = ONESIMUS_DIR.set(dir);
-}
-
 impl DirectorConfig {
     /// Load configuration from a file or directory tree.
     /// If path is a directory (e.g. /etc/bareos/bareos-dir.d/), reads all *.conf recursively.
@@ -85,15 +74,15 @@ impl DirectorConfig {
     }
 
     /// Where `odir.d/` lies: below the Onesimus configuration directory
-    /// ([`set_onesimus_dir`], default `/etc/onesimus`), not next to the Bareos
+    /// ([`bareos_config::onesimus`], default `/etc/onesimus`), not next to the Bareos
     /// files, which stay exactly what Bareos reads.
     pub fn overlay_dir() -> std::path::PathBuf {
-        ONESIMUS_DIR.get().map_or_else(|| Path::new(DEFAULT_ONESIMUS_DIR).to_path_buf(), Clone::clone).join("odir.d")
+        bareos_config::onesimus::overlay("odir.d")
     }
 
     /// The directives `odir.d/` may add, per resource type and normalized key.
     /// Everything else in `odir.d/` is an error; the Bareos files stay standard.
-    const EXTENSION_DIRECTIVES: &'static [(&'static str, &'static str)] = &[
+    pub(crate) const EXTENSION_DIRECTIVES: &'static [(&'static str, &'static str)] = &[
         // health of the disks under the devices of a Storage Daemon (storage_health.rs)
         ("storage", "healthcheckinterval"),
         // gRPC to ofd/osd (fd_grpc.rs) and the Director's own gRPC and mDNS
@@ -122,17 +111,15 @@ impl DirectorConfig {
         Ok(())
     }
 
-    /// Puts the directives of `odir.d/` where the code reads them: the raw
-    /// resources (client and storage gRPC, read by name) get them appended
-    /// (the last one wins, so `odir.d/` beats an old entry in `bareos-dir.d`),
-    /// the typed Director and Catalog resource are set.
+    /// Puts the directives of `odir.d/` where the code reads them: the typed
+    /// Director and Catalog resource are set; client and storage directives are
+    /// read by name through [`Self::extension`] (`job_messages::raw_directive`),
+    /// where `odir.d/` beats an old entry in `bareos-dir.d`. `raw` stays what the
+    /// Bareos files say, so the configuration check sees only those.
     fn apply_extensions(&mut self) {
         for ext in &self.extensions {
             let kind = ext.norm_type();
             let name = ext.name().unwrap_or_default().to_string();
-            if let Some(raw) = self.raw.iter_mut().find(|r| r.norm_type() == kind && r.name().is_some_and(|n| n.eq_ignore_ascii_case(&name))) {
-                raw.directives.extend(ext.directives.iter().filter(|d| d.norm_key() != "name").cloned());
-            }
             let value = |key: &str| ext.directives.iter().rev().find(|d| d.norm_key() == key).map(|d| d.values().join(" "));
             match kind.as_str() {
                 "director" => {

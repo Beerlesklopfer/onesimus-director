@@ -12,6 +12,7 @@ pub mod edit;
 pub mod values;
 pub mod secrets;
 pub mod sd;
+pub mod onesimus;
 
 pub use resources::*;
 pub use parser::parse_config;

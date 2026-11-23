@@ -49,3 +49,37 @@ fn the_director_records_and_reports_the_health_of_a_storage() {
         assert!(log.contains("Storage \"vsd\", device \"VDev\"") && log.contains(&format!("is {level}")), "no health message in the daemon log:\n{log}");
     }
 }
+
+/// The same through the console: `configure update storage=vsd … overlay` writes the
+/// Onesimus directive to `odir.d/`, reloads, and the check starts.
+#[test]
+#[ignore = "needs the osd binary and takes about a minute"]
+fn configure_update_with_overlay_switches_the_health_check_on() {
+    onesimus_rig::build_workspace_packages(&["odir", "ofd", "osd-daemon"]).unwrap_or_else(|e| panic!("{e}"));
+    let mut options = RigOptions::new(39711);
+    options.sd = Some(onesimus_rig::prereq::target_profile_dir().join("osd"));
+    let rig = Rig::start(options).unwrap_or_else(|e| panic!("Gerüst startet nicht: {e}"));
+
+    // a Bareos directive with `overlay` is refused, an Onesimus one is written to odir.d
+    let refused = rig.command("configure update storage=vsd password=x overlay").unwrap_or_else(|e| panic!("{e}"));
+    assert!(refused.contains("is not an Onesimus directive"), "{refused}");
+    let reply = rig.command("configure update storage=vsd healthcheckinterval=\"1 min\" overlay").unwrap_or_else(|e| panic!("{e}"));
+    eprintln!("configure: {reply}");
+    assert!(reply.contains("overlay updated"), "{reply}");
+    let file = rig.layout.root.join("onesimus/odir.d/storage/vsd.conf");
+    let text = std::fs::read_to_string(&file).unwrap_or_else(|e| panic!("{}: {e}", file.display()));
+    assert!(text.contains("Name = vsd") && text.contains("healthcheckinterval"), "{text}");
+    // bareos-dir.d stays untouched
+    let bareos = std::fs::read_to_string(rig.layout.dir_conf.join("storage/vsd.conf")).unwrap_or_default();
+    assert!(!bareos.to_ascii_lowercase().contains("healthcheck"), "{bareos}");
+
+    let deadline = Instant::now() + Duration::from_secs(120);
+    loop {
+        let rows = rig.catalog().query("SELECT storage, device, level FROM onesimus.medium_health").unwrap_or_default();
+        if rows.starts_with("vsd|VDev|") {
+            break;
+        }
+        assert!(Instant::now() < deadline, "no health row after two minutes\n{}", rig.diagnostics());
+        std::thread::sleep(Duration::from_secs(3));
+    }
+}

@@ -288,6 +288,10 @@ pub fn first_client_connection(name: &str) -> bool {
 }
 
 pub(crate) fn raw_directive(config: &crate::director_config::DirectorConfig, kind: &str, name: &str, key: &str) -> Option<String> {
+    // an Onesimus directive of odir.d/ wins over an old entry in bareos-dir.d
+    if let Some(v) = config.extension(kind, name, key) {
+        return Some(v);
+    }
     config.raw.iter().find(|r| r.norm_type() == kind && r.name().is_some_and(|n| n.eq_ignore_ascii_case(name)))?
         .directives.iter().rev().find(|d| d.norm_key() == key).and_then(|d| d.first()).map(str::to_string)
 }

@@ -335,7 +335,7 @@ osd liest zu jedem File-Device die SMART-Werte der Platte, auf der das `Archive 
 
 ### Der Director wertet es aus
 
-`Health Check Interval` (Onesimus-Direktive, ohne Angabe aus: der Director fragt einen SD sonst nie von sich aus ab). Bareos kennt sie nicht; damit `bareos-dir.d` Standard bleibt, steht sie im Overlay `/etc/onesimus/odir.d/` (Option `--onesimus-config <Verzeichnis>`, Vorgabe `/etc/onesimus`), in `/etc/onesimus/odir.d/storage/H340.conf`:
+`Health Check Interval` (Onesimus-Direktive, ohne Angabe aus: der Director fragt einen SD sonst nie von sich aus ab). Bareos kennt sie nicht; damit `bareos-dir.d` Standard bleibt, steht sie im Overlay `/etc/onesimus/odir.d/` (Option `--overlay <Verzeichnis>` von odir und osd, Vorgabe `/etc/onesimus`), in `/etc/onesimus/odir.d/storage/H340.conf`:
 
 ```
 Storage {
@@ -343,6 +343,8 @@ Storage {
   Health Check Interval = 1 hour
 }
 ```
+
+Statt die Datei von Hand anzulegen: `configure update storage=H340 healthcheckinterval="1 hour" overlay` schreibt die Datei (`/etc/onesimus/odir.d/storage/H340.conf`), lädt die Konfiguration neu und stellt die alte Datei wieder her, wenn der Director die Änderung nicht annimmt. Der Schalter `overlay` nimmt nur Onesimus-Direktiven; eine Bareos-Direktive weist er ab. `healthcheckinterval=` (leer) entfernt die Direktive.
 
 Jede Ressource in `odir.d/` erweitert die gleichnamige Ressource aus `bareos-dir.d`; unbekannte Ressourcen und andere Direktiven lehnt der Director beim Laden ab (`odir.d: Storage "H340": "Password" is not an Onesimus extension directive`). Erlaubt sind alle Onesimus-Direktiven des Directors:
 

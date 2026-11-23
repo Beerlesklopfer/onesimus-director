@@ -961,7 +961,8 @@ fn configure_update(ast: &CommandAst, ctx: &ExecContext) -> CommandResult {
 /// Usage text of `configure update`.
 const UPDATE_USAGE: &str = "configure update: usage: configure update <type>=<name> <directive>=<value> ...\n  \
     type: client, job, jobdefs, schedule, fileset, pool, storage; a directive given several times (Run) replaces all its \
-    lines, <directive>= removes it\n";
+    lines, <directive>= removes it; with the switch `overlay` the directives are Onesimus directives (gRPC, mDNS, Health \
+    Check Interval, DB Driver) and go to odir.d/ in the Onesimus configuration directory, not to bareos-dir.d\n";
 
 /// One directive of a `configure update` line: the key as typed (aliases
 /// resolved) and its values in command line order (empty: remove).
@@ -1027,6 +1028,77 @@ fn update_args(args: &[Argument], rtype: crate::config_edit::RType) -> Result<Ve
     Ok(out)
 }
 
+/// `configure update <type>=<name> <directive>=<value> … overlay`: the Onesimus
+/// directives go to `odir.d/<type>/<name>.conf` in the Onesimus configuration
+/// directory ([`DirectorConfig::overlay_dir`]); the configuration is reloaded and
+/// the file put back when the Director does not accept it.
+fn configure_update_overlay(ctx: &ExecContext, rtype: crate::config_edit::RType, name: &str, args: &[UpdateArg]) -> CommandResult {
+    use bareos_config::edit::{norm_key, Edit};
+    let allow = |n: &str| crate::acl::access(ctx, rtype.acl(), n);
+    if !allow(name) {
+        return CommandResult::error(format!("configure update: access to {} \"{name}\" is denied\n", rtype.word()));
+    }
+    let exists = ctx.config.as_ref().and_then(|c| c.read().ok()).is_some_and(|c| {
+        c.raw.iter().any(|r| r.norm_type() == rtype.norm() && r.name().is_some_and(|n| n.eq_ignore_ascii_case(name)))
+    });
+    if !exists {
+        return CommandResult::error(format!("configure update: {} \"{name}\" does not exist in the configuration\n", rtype.word()));
+    }
+    let mut edits = Vec::new();
+    for a in args {
+        let norm = norm_key(&a.key);
+        if !DirectorConfig::EXTENSION_DIRECTIVES.contains(&(rtype.norm(), norm.as_str())) {
+            return CommandResult::error(format!(
+                "configure update: \"{}\" is not an Onesimus directive of a {}; `overlay` takes only Onesimus directives \
+                 (see docs/wiki/osd.md); Bareos directives go to bareos-dir.d without `overlay`\n",
+                a.key,
+                rtype.word()
+            ));
+        }
+        edits.push(Edit { key: a.key.clone(), values: a.values.iter().map(|v| bareos_config::edit::format_value(rtype.norm(), &a.key, v)).collect::<Result<_, _>>().unwrap_or_default() });
+    }
+    let summary = args.iter().map(|a| if a.values.is_empty() { format!("{}=", a.key) } else { a.values.iter().map(|v| format!("{}={v}", a.key)).collect::<Vec<_>>().join(", ") }).collect::<Vec<_>>().join(", ");
+    let dir = DirectorConfig::overlay_dir();
+    let (path, old, new) = match overlay_file_edit(&dir, rtype.norm(), rtype.word(), name, &edits) {
+        Ok(t) => t,
+        Err(e) => return CommandResult::error(format!("configure update: {e}\n")),
+    };
+    if old.as_deref() == Some(new.as_str()) {
+        return CommandResult::ok(format!("{} '{name}' overlay: no change ({summary})\n", rtype.word()));
+    }
+    if let Err(e) = std::fs::create_dir_all(path.parent().unwrap_or(&dir)).and_then(|()| std::fs::write(&path, &new)) {
+        return CommandResult::error(format!("configure update: cannot write {}: {e}\n", path.display()));
+    }
+    if let Err(e) = crate::reload::reload_now() {
+        // the Director refused the new file: put the old one back
+        let _ = match &old {
+            Some(old) => std::fs::write(&path, old),
+            None => std::fs::remove_file(&path),
+        };
+        return CommandResult::error(format!("configure update: the Director does not accept the change ({e}); {} restored\n", path.display()));
+    }
+    CommandResult::ok(format!("{} '{name}' overlay updated: {summary} ({})\n", rtype.word(), path.display()))
+}
+
+/// The file of resource `name` in the overlay tree `dir` after `edits`: its path,
+/// the old text (`None`: the file did not exist) and the new text.
+fn overlay_file_edit(dir: &Path, kind: &str, word: &str, name: &str, edits: &[bareos_config::edit::Edit]) -> Result<(std::path::PathBuf, Option<String>, String), String> {
+    if let Some(e) = crate::config_edit::name_error(name) {
+        return Err(e);
+    }
+    let path = dir.join(kind).join(format!("{name}.conf"));
+    let old = std::fs::read_to_string(&path).ok();
+    let base = old.clone().unwrap_or_else(|| format!("{} {{\n  Name = {name}\n}}\n", capitalize(word)));
+    let (new, _) = bareos_config::edit::apply(&base, edits).map_err(|e| format!("{word} \"{name}\": {e}"))?;
+    Ok((path, old, new))
+}
+
+/// `storage` → `Storage`.
+fn capitalize(word: &str) -> String {
+    let mut c = word.chars();
+    c.next().map(|f| f.to_uppercase().collect::<String>() + c.as_str()).unwrap_or_default()
+}
+
 /// [`configure_update`] with an explicit editor (tests: a throw-away configuration).
 pub(crate) fn configure_update_with(ast: &CommandAst, ctx: &ExecContext, editor: &crate::config_edit::ConfigEditor) -> CommandResult {
     use crate::config_edit::{RType, Status};
@@ -1045,10 +1117,16 @@ pub(crate) fn configure_update_with(ast: &CommandAst, ctx: &ExecContext, editor:
         }
         return CommandResult::error(format!("configure update: unknown resource type \"{key}\"\n{UPDATE_USAGE}"));
     };
-    let args = match update_args(&ast.arguments[at + 1..], rtype) {
+    let overlay = ast.arguments[at + 1..].iter().any(|a| a.value.is_none() && a.key.eq_ignore_ascii_case("overlay"));
+    let arguments: Vec<Argument> =
+        ast.arguments[at + 1..].iter().filter(|a| !(a.value.is_none() && a.key.eq_ignore_ascii_case("overlay"))).cloned().collect();
+    let args = match update_args(&arguments, rtype) {
         Ok(a) => a,
         Err(e) => return CommandResult::error(format!("configure update: {e}\n")),
     };
+    if overlay {
+        return configure_update_overlay(ctx, rtype, &name, &args);
+    }
     // directive names as in the item tables when the directive is added
     let items = crate::config_check::items_of(rtype.norm()).unwrap_or(&[]);
     let mut edits = Vec::new();
@@ -1110,6 +1188,39 @@ pub(crate) fn configure_update_with(ast: &CommandAst, ctx: &ExecContext, editor:
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_overlay_file_is_created_changed_and_cleared() {
+        use bareos_config::edit::Edit;
+        let dir = std::env::temp_dir().join(format!("onesimus-overlay-edit-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let set = |v: &[&str]| vec![Edit { key: "Health Check Interval".into(), values: v.iter().map(|s| s.to_string()).collect() }];
+        // a new file with the resource header and the directive
+        let (path, old, new) = overlay_file_edit(&dir, "storage", "storage", "H340", &set(&["1 hour"])).unwrap();
+        assert_eq!(path, dir.join("storage").join("H340.conf"));
+        assert_eq!(old, None);
+        assert!(new.starts_with("Storage {\n  Name = H340\n") && new.contains("Health Check Interval = 1 hour"), "{new}");
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(&path, &new).unwrap();
+        // changed
+        let (_, old, new2) = overlay_file_edit(&dir, "storage", "storage", "H340", &set(&["2 hours"])).unwrap();
+        assert_eq!(old.as_deref(), Some(new.as_str()));
+        assert!(new2.contains("Health Check Interval = 2 hours") && !new2.contains("1 hour"), "{new2}");
+        // cleared: an empty value removes the directive
+        let (_, _, cleared) = overlay_file_edit(&dir, "storage", "storage", "H340", &set(&[])).unwrap();
+        assert!(!cleared.contains("Health Check Interval"), "{cleared}");
+        // a name that cannot be a file name is refused
+        assert!(overlay_file_edit(&dir, "storage", "storage", "../x", &set(&["1 hour"])).is_err());
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn only_onesimus_directives_are_allowed_in_the_overlay() {
+        assert!(DirectorConfig::EXTENSION_DIRECTIVES.contains(&("storage", "healthcheckinterval")));
+        assert!(DirectorConfig::EXTENSION_DIRECTIVES.contains(&("client", "grpcenable")));
+        assert!(!DirectorConfig::EXTENSION_DIRECTIVES.contains(&("storage", "password")));
+        assert!(!DirectorConfig::EXTENSION_DIRECTIVES.contains(&("job", "healthcheckinterval")));
+    }
 
     const BASE: &str = r#"
 Director { Name = bareos-dir; Password = "dirpw" }

@@ -293,9 +293,10 @@ impl Rig {
         started?;
         if let Some(program) = self.options.copy_target.clone() {
             let conf = self.layout.root.join("sd2").join("bareos-sd.conf").display().to_string();
+            let own = self.layout.root.join("onesimus-sd2").display().to_string();
             let mut args = vec!["-f", "-c", &conf, "-d", "50"];
             if is_osd(&program) {
-                args.push("--disable-grpc");
+                args.extend(["--disable-grpc", "--overlay", &own]);
             }
             let mut sd2 = Daemon::spawn("sd2", &program, &args, &self.layout.root.join("sd2.log"))?;
             let started = wait_port(&mut sd2, local(self.ports.copy_sd), Duration::from_secs(20));
@@ -322,7 +323,7 @@ impl Rig {
         let mut dir = Daemon::spawn(
             "odir",
             &self.programs.odir,
-            &["-f", "--disable-grpc", "-c", &dir_conf, "--onesimus-config", &onesimus_conf, "-d", &debug],
+            &["-f", "--disable-grpc", "-c", &dir_conf, "--overlay", &onesimus_conf, "-d", &debug],
             &self.layout.root.join("dir.log"),
         )?;
         let started = wait_port(&mut dir, local(self.ports.dir), Duration::from_secs(30));
@@ -339,6 +340,10 @@ impl Rig {
         args.extend(["-d".to_string(), "50".to_string()]);
         if is_osd(program) && self.options.sd_grpc.disabled() {
             args.push("--disable-grpc".into());
+        }
+        if is_osd(program) {
+            // never the host's /etc/onesimus
+            args.extend(["--overlay".to_string(), self.layout.root.join("onesimus").display().to_string()]);
         }
         args
     }

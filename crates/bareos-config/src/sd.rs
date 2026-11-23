@@ -23,7 +23,7 @@
 //!
 //! **Erweiterung `osd.d/` (Plan D-8, „additiv, rückwärtskompatibel“):**
 //! Onesimus-Angaben stehen nie in `bareos-sd.d`, sondern in einem eigenen
-//! Baum `osd.d/<Typ>/<Name>.conf` neben `bareos-sd.d` ([`overlay_dir`]).
+//! Baum `osd.d/<Typ>/<Name>.conf` im Onesimus-Verzeichnis `/etc/onesimus` ([`overlay_dir`]; Option `--overlay`).
 //! Ein Eintrag dort erweitert die Ressource gleichen Typs und gleichen
 //! Namens aus `bareos-sd.d` („Namensgleichheit ist Bedingung“):
 //!
@@ -238,26 +238,24 @@ pub struct SdConfig {
 /// Loads `path` (a file, a directory containing `bareos-sd.d`, or the
 /// `bareos-sd.d` directory itself) and checks it.
 pub fn load(path: &Path) -> Result<SdConfig, String> {
+    load_with_overlay(path, &overlay_dir())
+}
+
+/// [`load`] with the overlay tree `overlay` (`osd.d`) given.
+pub fn load_with_overlay(path: &Path, overlay: &Path) -> Result<SdConfig, String> {
     let resources = crate::raw::load_tree(path, "bareos-sd.d")?;
     let mut config = SdConfig::from_resources(&resources)?;
-    let overlay = overlay_dir(path);
     if overlay.is_dir() {
-        let extensions = crate::raw::load_tree(&overlay, "osd.d").map_err(|e| format!("osd.d: {e}"))?;
+        let extensions = crate::raw::load_tree(overlay, "osd.d").map_err(|e| format!("osd.d: {e}"))?;
         config.apply_overlay(&extensions)?;
     }
     Ok(config)
 }
 
-/// Where `osd.d/` belongs for the configuration `path`: next to the file,
-/// inside the directory that holds `bareos-sd.d`, or next to `bareos-sd.d`.
-pub fn overlay_dir(path: &Path) -> std::path::PathBuf {
-    if path.is_file() {
-        return path.parent().unwrap_or(Path::new(".")).join("osd.d");
-    }
-    if path.file_name().is_some_and(|n| n == "bareos-sd.d") {
-        return path.parent().unwrap_or(Path::new(".")).join("osd.d");
-    }
-    path.join("osd.d")
+/// Where `osd.d/` lies: in the Onesimus configuration directory
+/// ([`crate::onesimus`], default `/etc/onesimus`), not next to the Bareos files.
+pub fn overlay_dir() -> std::path::PathBuf {
+    crate::onesimus::overlay("osd.d")
 }
 
 /// The directives of one resource, looked up by normalized key.
@@ -734,14 +732,16 @@ Messages {
         let file = dir.join("bareos-sd.conf");
         std::fs::create_dir_all(&dir).unwrap();
         std::fs::write(&file, SAMPLE).unwrap();
-        assert_eq!(overlay_dir(&file), dir.join("osd.d"));
+        assert_eq!(overlay_dir(), Path::new("/etc/onesimus/osd.d"));
+        let overlay = dir.join("onesimus").join("osd.d");
+        let load = |f: &Path| load_with_overlay(f, &overlay);
         let plain = load(&file).unwrap();
         assert_eq!(plain, parse(SAMPLE).unwrap());
         assert_eq!(plain.find_device("FileStorage").unwrap().ring_slots, None);
-        std::fs::create_dir_all(dir.join("osd.d").join("device")).unwrap();
-        std::fs::write(dir.join("osd.d/device/FileStorage.conf"), "Device {\n Name = FileStorage\n Ring Slots = 4\n}\n").unwrap();
+        std::fs::create_dir_all(overlay.join("device")).unwrap();
+        std::fs::write(overlay.join("device/FileStorage.conf"), "Device {\n Name = FileStorage\n Ring Slots = 4\n}\n").unwrap();
         assert_eq!(load(&file).unwrap().find_device("FileStorage").unwrap().ring_slots, Some(4));
-        std::fs::write(dir.join("osd.d/device/FileStorage.conf"), "Device {\n Name = Other\n Ring Slots = 4\n}\n").unwrap();
+        std::fs::write(overlay.join("device/FileStorage.conf"), "Device {\n Name = Other\n Ring Slots = 4\n}\n").unwrap();
         assert!(load(&file).unwrap_err().contains("extends no Device"));
         std::fs::remove_dir_all(&dir).ok();
     }

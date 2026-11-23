@@ -79,6 +79,10 @@ struct Cli {
     #[arg(short, long, default_value = "/etc/bareos")]
     config: PathBuf,
 
+    /// Overlay directory: its `osd.d/` extends the Bareos files (`-c`) with Onesimus directives.
+    #[arg(long, value_name = "DIR", default_value = "/etc/onesimus")]
+    overlay: PathBuf,
+
     /// Run in foreground.
     #[arg(short, long)]
     foreground: bool,
@@ -179,6 +183,7 @@ fn main() {
             std::process::exit(daemon_crate::exit::EXIT_SUCCESS);
         }
     };
+    bareos_config::onesimus::set_dir(cli.overlay.clone());
     let level = if cli.verbose { cli.debug_level.max(1) } else { cli.debug_level };
     let log_file = daemon_crate::logging::log_file_arg(&cli.log_file);
     daemon_crate::logging::init(&daemon_crate::logging::default_filter(level, &["hyper", "h2"]), log_file.as_deref());

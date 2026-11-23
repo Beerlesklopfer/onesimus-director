@@ -110,9 +110,9 @@ struct Cli {
     #[arg(short, long, default_value = "/etc/bareos/bareos-dir.d")]
     config: PathBuf,
 
-    /// Onesimus configuration directory: its `odir.d/` extends the Bareos files with Onesimus directives.
+    /// Overlay directory: its `odir.d/` extends the Bareos files (`-c`) with Onesimus directives.
     #[arg(long, value_name = "DIR", default_value = "/etc/onesimus")]
-    onesimus_config: PathBuf,
+    overlay: PathBuf,
 
     /// Log file (also stderr or the trace file); `none` for no log file.
     #[arg(long, value_name = "PATH", default_value = "/var/log/onesimus/odir.log")]
@@ -227,7 +227,7 @@ fn main() {
     // Before any thread or runtime: workers keep tokio's signal pipe open.
     job_worker::reserve_tokio_signal_fds();
     let cli = Cli::parse();
-    director_config::set_onesimus_dir(cli.onesimus_config.clone());
+    bareos_config::onesimus::set_dir(cli.overlay.clone());
     if let Some(dir) = &cli.write_man_pages {
         match manpages::write_all(command_grammar::roots(), dir, env!("CARGO_PKG_VERSION")) {
             Ok(names) => {

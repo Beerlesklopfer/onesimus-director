@@ -149,7 +149,7 @@ pub fn write_stand_in_certificate(path: &Path) -> std::io::Result<()> {
 /// Writes `osd.d/storage/vsd.conf` next to the SD configuration: the gRPC
 /// port of the rig as an osd.d extension (D-8). bareos-sd never reads it.
 pub fn write_sd_grpc_extension(layout: &Layout, ports: Ports) -> std::io::Result<()> {
-    let dir = layout.sd_conf.parent().unwrap_or(Path::new(".")).join("osd.d").join("storage");
+    let dir = layout.root.join("onesimus").join("osd.d").join("storage");
     write(
         &dir.join("vsd.conf"),
         &format!("Storage {{\n  Name = vsd\n  Grpc Port = {}\n  Grpc Address = 127.0.0.1\n}}\n", ports.sd_grpc),
