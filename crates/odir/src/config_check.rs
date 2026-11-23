@@ -70,6 +70,14 @@ pub enum Anchor {
     /// After the last token of the value of directive `key` (the lexer has
     /// read the whole value when a value check fails).
     EndOfValue(String),
+    /// At the `{` of the block `key` that stands inside the block `outer`
+    /// (`Exclude {` inside `Options {`).
+    NestedBrace {
+        /// The enclosing block (`options`).
+        outer: String,
+        /// The block whose opening brace is meant (`exclude`).
+        key: String,
+    },
 }
 
 impl Diag {
@@ -172,6 +180,13 @@ fn value_error(ty: Ty, d: &Directive) -> Option<(&'static str, String)> {
     }
 }
 
+/// An `Include { Options { Exclude { … } } }`: a block the original refuses.
+fn nested_exclude(d: &Directive) -> bool {
+    normalize_key(&d.key) == "include" && d.block.iter().flatten()
+        .filter(|o| normalize_key(&o.key) == "options")
+        .any(|o| o.block.iter().flatten().any(|e| normalize_key(&e.key) == "exclude" && e.block.is_some()))
+}
+
 /// The directive table of a resource type (as written).
 pub fn items_of(rtype: &str) -> Option<&'static [Item]> {
     kind(rtype).map(|k| k.2)
@@ -217,6 +232,13 @@ pub fn check(raw: &[ConfResource], base: &str) -> Result<(), Vec<Diag>> {
                         message: format!("Keyword \"{}\" not permitted in this resource.\n\
                             Perhaps you left the trailing brace off of the previous resource.", d.key),
                         resource: index, anchor: Anchor::Keyword(d.key.clone()) })]);
+                }
+                Some(_) if norm == "fileset" && nested_exclude(d) => {
+                    // inc_conf.cc: inside Options { } the keyword Exclude is read as a
+                    // directive that needs "=", the "{" ends the check
+                    return Err(vec![Diag::Config(ConfigError {
+                        at: "dird/inc_conf.cc:813", message: "expected an equals, got: {".into(),
+                        resource: index, anchor: Anchor::NestedBrace { outer: "options".into(), key: "exclude".into() } })]);
                 }
                 Some(item) => {
                     if let Some((at, message)) = value_error(item.ty, d) {

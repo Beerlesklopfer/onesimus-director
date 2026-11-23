@@ -261,6 +261,14 @@ fn locate(raw: &[ConfResource], error: &ConfigError, read: Reader) -> Option<Pos
         Anchor::Keyword(key) => (start..=end_line)
             .find_map(|i| keyword_end(code(&lines[i]), key).filter(|_| i != start).map(|col| (i, col)))
             .and_then(|(i, col)| position(i, col)),
+        Anchor::NestedBrace { outer, key } => (start + 1..=end_line)
+            .find(|&i| keyword_end(code(&lines[i]), outer).is_some())
+            .and_then(|o| (o + 1..=end_line).find_map(|i| {
+                let line = code(&lines[i]);
+                let after = keyword_end(line, key)?;
+                Some((i, after + line[after..].find('{')?))
+            }))
+            .and_then(|(i, col)| position(i, col)),
         Anchor::Value { key, value } => (start + 1..=end_line).find_map(|i| {
             let line = code(&lines[i]);
             let after = keyword_end(line, key)?;
@@ -295,6 +303,16 @@ mod tests {
         write("fileset", "FileSet {\n  Name = fs\n  Include {\n    File = /etc\n  }\n}\n");
         write("job", job);
         dir
+    }
+
+    #[test]
+    fn exclude_inside_options_is_refused_like_the_original() {
+        let dir = config_dir("nested-exclude", JOB);
+        let fs = dir.join("bareos-dir.d/fileset/x.conf");
+        std::fs::write(&fs, "FileSet {\n  Name = fs\n  Include {\n    Options {\n      Signature = MD5\n      Exclude {\n        File = /tmp/x\n      }\n    }\n    File = /etc\n  }\n}\n").unwrap();
+        let (text, code) = run_with(&dir, std::time::Duration::ZERO);
+        assert_eq!(code, 42, "{text}");
+        assert_eq!(text, format!("odir: CONFIG ERROR at dird/inc_conf.cc:813\nConfig error: expected an equals, got: {{\n            : line 6, col 15 of file {}\n      Exclude {{\n\n", fs.display()));
     }
 
     const JOB: &str = "# jobs\nJob {\n  Name = a\n  Type = Backup\n  Client = fd\n  FileSet = \"fs\"\n  Storage = File\n  Pool = Full\n  Messages = Standard\n}\n";
