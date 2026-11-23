@@ -332,6 +332,42 @@ pub fn distributor_storage(ports: Ports) -> (String, String) {
     )
 }
 
+/// The Director resources of the branch of `VBackup` ([`crate::RigOptions::branch`]):
+/// the Storage `vsd2` (device `VDev2` of the rig SD), the pool `VBranchPool` and the
+/// job `VBranch` (an ordinary Backup job; it takes client and FileSet of its main job).
+pub fn branch_resources(ports: Ports) -> Vec<(String, String)> {
+    vec![
+        (
+            "storage/vsd2.conf".into(),
+            format!(
+                "Storage {{\n  Name = vsd2\n  Address = 127.0.0.1\n  SD Port = {sd}\n  Password = \"vsd-pw\"\n  Device = VDev2\n  \
+                 Media Type = VFile2\n  Maximum Concurrent Jobs = 10\n}}\n",
+                sd = ports.sd
+            ),
+        ),
+        (
+            "pool/VBranchPool.conf".into(),
+            "Pool {\n  Name = VBranchPool\n  Pool Type = Backup\n  Label Format = \"VBr-\"\n  Maximum Volume Bytes = 1G\n  Storage = vsd2\n}\n".into(),
+        ),
+        (
+            "job/VBranch.conf".into(),
+            "Job {\n  Name = VBranch\n  JobDefs = VDefs\n  Type = Backup\n  Level = Incremental\n  Storage = vsd2\n  Pool = VBranchPool\n}\n".into(),
+        ),
+    ]
+}
+
+/// The `odir.d` files of the branch: `job/VBackup.conf` (`Branch = VBranch`) and the gRPC
+/// directives of the Storage `vsd2` (a branch job needs gRPC to the SD).
+pub fn branch_extension(layout: &Layout, ports: Ports) -> Vec<(String, String)> {
+    vec![
+        ("job/VBackup.conf".into(), "Job {\n  Name = VBackup\n  Branch = VBranch\n}\n".into()),
+        (
+            "storage/vsd2.conf".into(),
+            format!("Storage {{\n  Name = vsd2\n{}}}\n", grpc_directives(ports.sd_grpc, &layout.sd_work.join(SD_GRPC_CERT))),
+        ),
+    ]
+}
+
 /// Configuration of the second SD (`vsd2`, device `VDev2`, media type
 /// `VFile2`, volumes below `root/storage2`).
 pub fn copy_sd_config(root: &Path, ports: Ports, plain: bool) -> String {

@@ -889,10 +889,10 @@ fn do_append_data(d: &Daemon, job: &Arc<Job>, dir: &SharedChannel, fd: &mut dyn 
     for sink in sinks.iter_mut().skip(1) {
         finish_sink(d, sink, started);
     }
-    if let Some(main) = sinks.first_mut() {
-        if !finish_sink(d, main, started) {
-            ok = false;
-        }
+    if let Some(main) = sinks.first_mut()
+        && !finish_sink(d, main, started)
+    {
+        ok = false;
     }
     ok
 }

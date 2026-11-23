@@ -279,7 +279,7 @@ Anlass: ein altes NAS mit 2-TB-Platten soll osd direkt tragen, als Plattenband-H
 | P1 ✅ (20.11.2026; Stufen 1, 2, 3) | osd als Ersatz für bareos-sd mit **einem File-Device**: Label, Mount, Append, Read, Status, CatReq, Bareos-Volume-Format. Steuer- und Datenweg über **gRPC** (odir, ofd) und BNET (bareos-dir, bareos-fd). Stufe 1: Backup über BNET, aktiver und passiver Client, Datenweg über den Ring; Stufe 2: Lesen/Restore; Stufe 3: gRPC | Testgerüst Director+FD+SD (`onesimus-rig`): Backup und Restore mit odir+ofd über gRPC und mit bareos-fd über BNET. `bls` liest das Volume. Erledigt, siehe [Stufe 1](#p1-stufe-1-umgesetzt-20112026), [Stufe 2](#p1-stufe-2-umgesetzt-20112026), [Stufe 3](#p1-stufe-3-umgesetzt-20112026); was bleibt: [Nach P1](#nach-p1-offen) |
 | PT | Plattenband v1 (D-14): Bandkern auf einer vorbelegten Datei bzw. einem Loop-Device (`losetup --direct-io=on`), dann `/dev/sdX` mit `O_DIRECT\|O_EXCL` (zunächst Linux); eine Platte, kein Striping; Kassetten mit zwei Partitionen, MAM, Wechsler; Labels (D-16) mit `osd disk init` und Etikett-PDF; Weiterlesen hinter Schadstellen (D-17); Bareos-Frontend und LTFS-Plugin `libtape-osd.so`. Gesundheit (D-21): SMART, Zähler, Bewertung, Meldung, Scrub. Danach PT2: LUNs im SAN über iSCSI mit Persistent Reservations (D-20), Gesundheit vom Speichersystem | ohne root testbar; Export einer Kassette in eine Bandabbild- bzw. Volume-Datei besteht `bls`; `mkltfs` + `ltfs` + Dateien schreiben/lesen auf einer emulierten Kassette; kill -9 während des Schreibens verliert keinen bestätigten Satz; `update slots`/`label barcodes` liefern die Kassetten-Barcodes; fremde Platte ohne `--force` abgelehnt; eingeschleuste Schadstelle: Lesen setzt dahinter fort und meldet den Satzbereich. PT2: iSCSI-Target im Rig (LIO mit `fileio`-Backstore, eigener Netz-Namespace), zwei osd-Instanzen auf demselben LUN, die zweite wird per Reservation abgewiesen; Pfadabbruch während des Schreibens. Teilt das Bareos-Bandformat mit P6 |
 | P2 ✅ (23.11.2026) | Verteiler mit Routen über File-Devices | Routing-Fälle im Rig, Restore über den MediaType. Erledigt, siehe [P2 umgesetzt](#p2-umgesetzt-23112026) |
-| P2b | Zweige (Branch): odir startet Haupt- und Zweig-Jobs, osd verteilt an beide, Katalogsätze je Zweig | Inc auf File, AI auf zweites File-Device; Restore aus jedem Zweig einzeln; ein gescheiterter Zweig bricht den anderen nicht ab; Konsolidierung des AI-Zweigs |
+| P2b ✅ (23.11.2026; Konsolidierung nur mit ausdrücklicher JobId-Liste) | Zweige (Branch): odir startet Haupt- und Zweig-Jobs, osd verteilt an beide, Katalogsätze je Zweig | Inc auf File, AI auf zweites File-Device; Restore aus jedem Zweig einzeln; ein gescheiterter Zweig bricht den anderen nicht ab; Konsolidierung des AI-Zweigs. Erledigt; die automatische Kettenwahl mischt Haupt-Job und Zweige (BACKLOG ZW-1), siehe [P2b umgesetzt](#p2b-umgesetzt-23112026) und [P2B-ZWEIGE-ENTWURF.md](P2B-ZWEIGE-ENTWURF.md) |
 | P3 | Wechselplatten und Device-Watcher | Rig mit Loop-Device, Ein- und Abziehen simuliert |
 | P4 | S3 | gegen einen lokalen S3 (z. B. MinIO im eigenen Podman-root, siehe Podman-Isolation) |
 | P5 | Striping | Backup über 2–3 File-Devices, Restore nur mit osd, bareos-sd lehnt den MediaType ab |
@@ -489,13 +489,52 @@ Bedienung und Syntax: [osd § Verteiler](../wiki/osd.md#verteiler-distributor-p2
   geprüft); Verteiler als Storage des Directors mit `Device = a, b` (Variante a
   mit mehreren Director-Devices) nicht geprüft.
 
+## P2b umgesetzt (23.11.2026)
+
+Zweige (Branch): ein FD-Lauf, mehrere Jobs mit eigenem Ziel. Bedienung:
+[osd § Zweige](../wiki/osd.md#zweige-branch-p2b) und
+[Betrieb odir § Zweige](../wiki/betrieb-odir.md#zweige-branch-p2b); Entwurf mit
+Begründung der Architektur: [P2B-ZWEIGE-ENTWURF.md](P2B-ZWEIGE-ENTWURF.md).
+
+- **Konfiguration (D-9):** `Branch = <Job>` (mehrfach) im Overlay
+  `odir.d/job/<Haupt-Job>.conf`; der Zweig ist eine normale Job-Ressource.
+  `DirectorConfig::branches_of`, Prüfung beim Laden (Zweig vorhanden, Backup,
+  nicht der Job selbst, einmal, ohne eigene Zweige, nicht von zwei Jobs).
+- **Nachrichten (nur gRPC):** `BranchFrame` (`BranchPlan`, `BranchAttach`,
+  `BranchReply`) im `StoredFrame` von `stored_service.proto`
+  (onesimus-proto, Zweig `p2b-zweige`); im Prozess Nutzdaten mit Kennung
+  (`onesimus_bnet_grpc::branch`).
+- **osd:** Senken je Job (`fd_session::Sink`: eigener Ring, Schreiber,
+  Postfach, `VolSessionId`, Steuerverbindung des Zweig-Jobs);
+  `branch.rs` (Anhängen, Sitzung des Zweigs, `3099`); `Branch Attach Wait`
+  (Storage, osd.d, 120 s); Ring 512 Fächer bei Zweig-Gruppen (D-25).
+  **Abweichung vom Plantext:** ein Ring je Senke statt eines Rings mit mehreren
+  Verbrauchern, weil jeder Zweig eigene Blockgrenzen und Sitzungsnummern braucht.
+- **odir:** `branches.rs` (Level und Basis des Streams nach D-10, Job-Sätze,
+  Worker-Parameter, Warteschlange), `backup_worker::run_branch` (Zweig-Worker ohne
+  FD), Zweig-Jobs zählen nicht gegen Client-/Director-Grenzen, `cancel` des
+  Haupt-Jobs bricht die Zweige ab, ein wartender Zweig ohne Haupt-Job wird
+  abgebrochen. Katalog: `onesimus.job_branch` (v2257).
+- **Fehler (D-11):** eine gescheiterte Senke endet allein (`E`), der Partner `T`.
+- **Prüfung:** Rig-Test `tests/osd_branch.rs` (vier Fälle), Unit-Tests in
+  `bareos-config`, `onesimus-bnet-grpc`, `osd-daemon` (`jobs.rs`) und `odir`
+  (`branches.rs`, `director_config.rs`, `job_manager.rs`).
+- **Konsolidierung:** der VirtualFull des Zweigs (Full und Incremental des
+  Zweig-Jobs auf `VDev2` nach `VDev`) läuft im Rig mit ausdrücklicher
+  `jobid=`-Liste (`the_branch_consolidates_to_a_virtual_full`); die automatische
+  Kettenwahl wählt wie in Bareos nach Client und FileSet und mischt Haupt-Job und
+  Zweige.
+- **Offen:** Trennung der Kettenwahl nach Pool (Entscheidung); eigenes Level-Schema je Zweig; Warten auf Medien eines Zweigs hält den Strom
+  an (Zeitlimit, Spooling); Accurate je Zweig-Kette; typisierte Sicht auf die
+  Zuordnung (GUI/MCP); siehe [BACKLOG](../BACKLOG.md#zweige-im-verbund-odir--osd-23112026-p2b).
+
 ## Nach P1 (offen)
 
 Aus den Stufen 1–3 zusammengeführt, mit Grund:
 
-- **gRPC-Erweiterungen von Onesimus:** Zweige (Branch), Medien-Ereignisse
-  (D-7) und Stripe-Angaben als typisierte Nachrichten in
-  `stored_service.proto` (Grundsatz: nur über gRPC). Nicht Teil von P1.
+- **gRPC-Erweiterungen von Onesimus:** Zweige (Branch) sind seit P2b als
+  typisierte Nachrichten in `stored_service.proto`; Medien-Ereignisse (D-7) und
+  Stripe-Angaben stehen aus (Grundsatz: nur über gRPC). Nicht Teil von P1.
 - **Datensatz als eine gRPC-Nachricht:** Der Lesepfad schickt je
   Datensatz `rechdr` und Daten als zwei Nachrichten, über gRPC wie über
   BNET; ein Datensatz je Nachricht mit dem Kopf als Feldern spart eine

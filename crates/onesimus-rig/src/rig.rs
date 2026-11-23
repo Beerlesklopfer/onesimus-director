@@ -71,6 +71,12 @@ pub struct RigOptions {
     /// the Director's Storage `vsd` with `Device = VDist` and the
     /// Distributor's media type. Excludes `copy_same_sd`.
     pub distributor: bool,
+    /// A branch of the job `VBackup` (osd only, P2b): a second device `VDev2`
+    /// (media type `VFile2`, volumes below `<root>/storage2`) behind the Storage
+    /// `vsd2`, the pool `VBranchPool` and the job `VBranch` with them; the
+    /// overlay `odir.d/job/VBackup.conf` says `Branch = VBranch`. The FD of
+    /// one run of `VBackup` then feeds both jobs. Needs gRPC to the SD.
+    pub branch: bool,
     /// No TLS to and between the SDs of a Copy (`TLS Enable = no` on the
     /// second SD and its Storage resource: `replicate … ssl=0`, clear text).
     pub copy_plain: bool,
@@ -95,6 +101,7 @@ impl RigOptions {
             copy_target: None,
             copy_same_sd: false,
             distributor: false,
+            branch: false,
             copy_plain: false,
             extra_odir_d: Vec::new(),
         }
@@ -292,6 +299,19 @@ impl Rig {
             let path = self.layout.root.join("onesimus").join("osd.d").join(relative);
             std::fs::create_dir_all(path.parent().unwrap_or(&self.layout.root)).map_err(io)?;
             std::fs::write(&path, text).map_err(io)?;
+        }
+        if self.options.branch {
+            if !is_osd(&self.programs.sd) {
+                return Err("branch: only osd has branches".into());
+            }
+            std::fs::create_dir_all(self.layout.root.join("storage2")).map_err(io)?;
+            let mut conf = std::fs::read_to_string(&self.layout.sd_conf).map_err(io)?;
+            conf += &crate::config::second_device(&self.layout.root);
+            std::fs::write(&self.layout.sd_conf, conf).map_err(io)?;
+            crate::config::write_director_resources(&self.layout, &crate::config::branch_resources(self.ports)).map_err(io)?;
+            for file in crate::config::branch_extension(&self.layout, self.ports) {
+                self.write_odir_d(file).map_err(io)?;
+            }
         }
         if self.options.copy_target.is_some() {
             crate::config::write_director_resources(&self.layout, &crate::config::copy_resources(self.ports, false, self.options.copy_plain)).map_err(io)?;

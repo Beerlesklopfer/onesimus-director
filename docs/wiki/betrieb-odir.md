@@ -101,6 +101,7 @@ eigenes PostgreSQL-Schema, `public` bleibt reines Bareos.
 | Views `vw_job_summary`, `vw_volume_status`, `vw_last_backup_per_client`, `vw_file_list`; Funktionen `sp_create_job_record`, `sp_update_job_end`, `fn_find_appendable_volume`, `fn_find_latest_backup`, `sp_create_jobmedia`, `fn_since_utime` | `onesimus` | 2251 |
 | Views `vw_running_jobs`, `vw_media_list`; Funktionen `sp_prune_expired_volumes`, `sp_prune_expired_jobs`, `sp_purge_volume`, `fn_director_status` | `onesimus` | 2252 |
 | Tabelle `console_acl` (Katalog-ACL, [ACL-ZWEISTUFIG.md](../plans/ACL-ZWEISTUFIG.md)) | `onesimus` | 2253 |
+| Tabelle `job_branch` (Zuordnung Zweig-Job → Haupt-Job, siehe [Zweige](#zweige-branch-p2b)) | `onesimus` | 2257 |
 | Funktionen `fn_vw_job_summary`, `fn_vw_volume_status`, `fn_vw_last_backup_per_client`, `fn_vw_file_list`, `fn_vw_running_jobs`, `fn_vw_media_list`; die sechs Views lesen nur noch diese (spätgebunden) | `onesimus` | 2254 |
 | `bareos_schema_version` (Onesimus-Stufen) | `public` (**Ausnahme**, siehe unten) | – |
 
@@ -301,6 +302,105 @@ migrierten Katalog:
   oben, dann `DELETE FROM bareos_schema_version WHERE version = 2253;`. Die
   Tabelle `onesimus.console_acl` stört einen alten odir nicht.
 
+## Zweige (Branch, P2b)
+
+3-2-1 im laufenden Betrieb: **ein** Lauf des File Daemons, mehrere Jobs mit
+eigenem Ziel. Der Haupt-Job liest den Client; jeder **Zweig** ist ein eigener
+Job (eigene JobId, Level, Pool, Storage/Device, Fristen, Volumes, `Job`-,
+`File`- und `JobMedia`-Sätze), der den Stream des Haupt-Jobs mitschreibt. Beispiel:
+der Haupt-Job `Etc` (Incremental → FileStorage, Pool Inc) und der Zweig
+`Etc-AI` (Always Incremental → zweites File-Device, Pool AI). Nur odir und osd
+über gRPC können das; bareos-dir und bareos-sd kennen keine Zweige. Ablauf im
+SD: [osd § Zweige](osd.md#zweige-branch-p2b); Entwurf: [P2B-ZWEIGE-ENTWURF.md](../plans/P2B-ZWEIGE-ENTWURF.md).
+
+**Konfiguration.** Die Bareos-Dateien bleiben Standard. Der Zweig ist eine
+**normale Job-Ressource** (Type Backup, mit eigenem Pool, Storage, Messages,
+`Max Full Interval` usw.); die Verbindung steht im Overlay
+`<Overlay>/odir.d/job/<Haupt-Job>.conf` (Vorgabe `/etc/onesimus/odir.d/job/`):
+
+```
+# /etc/onesimus/odir.d/job/Etc.conf
+Job {
+  Name = Etc                    # der Haupt-Job aus bareos-dir.d
+  Branch = Etc-AI               # mehrfach, ein Zweig je Zeile
+  Branch = Etc-USB
+}
+```
+
+Der Zweig-Job nimmt **Client und FileSet des Haupt-Jobs** (der FD liest einmal);
+`Client` und `FileSet` in seiner Ressource gelten nicht. Pool (mit
+`Full Backup Pool` usw. für das Level), Storage, Retention, `Messages`,
+RunScripts und Mail sind die der Ressource des Zweigs. odir lehnt beim Laden
+(`-t`, `reload`) einen Zweig ab, der nicht existiert, kein Backup-Job ist, der
+Haupt-Job selbst ist, doppelt oder bei zwei Haupt-Jobs genannt wird oder selbst
+Zweige hat. Ein Zweig-Job lässt sich auch allein starten (wie jeder Backup-Job);
+einen Zeitplan braucht er nicht, er läuft mit dem Haupt-Job.
+
+**Start.** `run job=Etc` (Konsole, Zeitplan, `rerun`) legt für jeden Zweig einen
+`Job`-Satz an und stellt die Zweig-Jobs mit dem Haupt-Job in die Warteschlange.
+Jeder Zweig-Job hat seine JobId, sein `status`, `list jobs`, `joblog`,
+`cancel`. Zweig-Jobs zählen **nicht** gegen `Maximum Concurrent Jobs` des Clients
+und des Directors (sie lesen den Client nicht und gehören zum laufenden
+Haupt-Job); die Grenzen von Storage und Job-Ressource gelten. Darum braucht ein
+Storage, das Haupt-Job und Zweig zugleich bedient, `Maximum Concurrent Jobs`
+von mindestens 2; sonst wartet der Zweig, der Haupt-Job wartet bis `Branch
+Attach Wait` (osd) und läuft ohne ihn; der Zweig scheitert danach („main job … already writes“).
+
+**Level und Basis (D-10).** Der Haupt-Job bestimmt das Level des Streams:
+
+- Braucht der Haupt-Job oder ein Zweig nach seinen Regeln einen **Full** (kein
+  früherer Full des Zweig-Jobs für Client und FileSet, `Max Full Interval`), wird
+  der Stream ein Full und damit das Level **aller** (Meldung im Job-Log des
+  Haupt-Jobs: „Branch job … needs a Full backup: the stream is Full for all jobs.“).
+- Sonst gilt das höchste Level (Differential vor Incremental) und die **älteste**
+  Basis (`since`-Zeit) von Haupt-Job und Zweigen: hat ein Zweig einen Lauf
+  verpasst, liest der Haupt-Job ab dessen älterer Basis; der Zweig mit der
+  jüngeren Basis speichert etwas mehr als nötig („Branch job … has an older
+  basis …“).
+- Der Zweig-Job hat das Level des Streams; sein Pool folgt dem Level seiner
+  eigenen Ressource.
+
+**Katalog.** Standardtabellen bleiben, wie sie sind. Die Zuordnung steht in
+`onesimus.job_branch` (Schema v2257: `branch_job_id`, `main_job_id`,
+`created_at`), nie in einem Feld der Job-Tabelle:
+
+```sql
+SELECT b.main_job_id, b.branch_job_id, j.Name, j.Level, j.JobStatus
+  FROM onesimus.job_branch b JOIN Job j ON j.JobId = b.branch_job_id ORDER BY 1, 2;
+```
+
+Die Attribute liefert der FD einmal; osd schickt sie an die Steuerverbindung
+jedes Zweig-Jobs, odir schreibt sie auf dessen JobId. Jeder Zweig hat darum
+**eigene `File`-Sätze**: Restore, Prune und Purge je Job bleiben unabhängig
+(`restore jobid=<Zweig>` liest nur aus dem Volume des Zweigs).
+
+**Fehler und Abbruch (D-11).** Scheitert ein Zweig (Device nicht vorhanden oder
+nicht beschreibbar, Volume nicht verfügbar, Schreibfehler), endet **nur** sein Job
+mit `E`/`f` und der Meldung im eigenen Joblog; der Haupt-Job und die übrigen
+Zweige enden `T`. `cancel jobid=<Zweig>` bricht nur den Zweig ab (`A`);
+`cancel jobid=<Haupt-Job>` bricht den Haupt-Job und seine Zweige ab. Ein Zweig,
+dessen Haupt-Job vor dem Start endet, wird abgebrochen.
+
+**Grenzen.**
+
+- Nur über gRPC zwischen odir und osd (`Grpc Enable = yes` am Storage des
+  Haupt-Jobs **und** an dem jedes Zweigs, osd als SD). Mit BNET scheitert der
+  Zweig-Job mit klarer Meldung; der Haupt-Job läuft ohne ihn.
+- Accurate: die Liste der bekannten Dateien kommt aus der Kette des Haupt-Jobs.
+- Ein Zweig, der auf ein Volume wartet, hält den Stream an (der langsamste
+  Zweig bestimmt den Takt).
+- Zwei Zweige schreiben nicht auf dasselbe Device (ein Device, ein Volume zur Zeit).
+- Eigenes Level-Schema je Zweig (z. B. Full nur sonntags im Zweig, täglich im
+  Haupt-Job) gibt es noch nicht: alle Zweige haben das Level des Streams.
+- **Kettenwahl:** Accurate, VirtualFull ohne `jobid=` und `restore` wählen die
+  Kette wie Bareos nach Client und FileSet, nicht nach Job-Name; Haupt-Job und
+  Zweige teilen beides, die Wahl kann also Jobs beider mischen (gleiche Daten,
+  aber Volumes beider Ziele). Die Konsolidierung (VirtualFull) des AI-Zweigs
+  gibt deshalb die Jobs ausdrücklich an: `run job=<VirtualFull-Job>
+  level=VirtualFull jobid=<Full>,<Incremental>,…`; so ist sie im Rig geprüft
+  (`the_branch_consolidates_to_a_virtual_full`). Eine Trennung der Kettenwahl
+  nach Pool ist als Entscheidung offen (BACKLOG ZW-1).
+
 ## Umgebungsvariablen
 
 Vollständige Liste der Variablen, die `odir` im Betrieb liest. Gesetzt werden
@@ -420,12 +520,14 @@ Bewusst entschieden (Stand 20.11.2026):
 | Geheimnisse in Befehlszeilen | RunScript-Befehle stehen ungekürzt im Job-Log (`shell command: run ClientBeforeJob "…"`) und in `show` | odir ersetzt Werte von `--password=…`, `--password …`, `PGPASSWORD=…`, `MYSQL_PWD=…`, Namen auf `…password/passwd/pwd/passphrase/secret/token/apikey` und Zugangsdaten in URLs (`://user:…@`) durch `***`: in jeder Job- und Daemon-Meldung vor allen Zielen (Katalog-`Log`, Journal, Mail, Datei, Console, gRPC-Push) und in `show` für jede Console. Ungekürzt bleibt der Text nur über `.config read` / `configure export` (Recht `configure`). Einträge, die vor dieser Version im Katalog gespeichert wurden, bleiben unverändert | Entscheidung des Nutzers 20.11.2026: rückwärtskompatibel, bestehende Konfigurationen bleiben gültig (`crates/odir/src/secrets.rs`) |
 | `list jobs count` | zählt alle Jobs, auch die, die Job-/Client-ACL der Console verbirgt | zählt bei eingeschränkter Job- oder Client-ACL nur die Jobs, die `list jobs` zeigen würde (derselbe ACL-Filter); ohne Einschränkung unverändert | ACL-Grenze: eine eingeschränkte Console soll nichts über gesperrte Jobs erfahren (G-2, 20.11.2026) |
 | gRPC | gibt es nicht | TLS auf `DirPort + 1000`, gleiche Adressen wie BNET | Schnittstelle der GUI |
+| Zweige (`Branch`) | gibt es nicht | `Branch = <Job>` im Overlay `odir.d/job/`; ein FD-Lauf, mehrere Jobs mit eigenem Ziel, nur mit osd über gRPC; Zuordnung in `onesimus.job_branch` (v2257) ([Zweige](#zweige-branch-p2b)) | 3-2-1 im laufenden Betrieb (Maintainer 20.11.2026, D-9 bis D-11) |
 | Mail-Sammlung | Dateien `<WorkingDirectory>/*.mail` | im Speicher | – |
 | Paketversion | – | bleibt `25.1.2+onesimus.0.2.0`, Installation mit `dpkg -i` | Entscheidung des Nutzers; neue Builds an Prüfsumme und Build-Datum erkennbar |
 
 Vor dem Rückweg auf `bareos-dir` müssen Onesimus-eigene Direktiven (`gRPC Port`,
 `gRPC TLS Certificate`, `gRPC TLS Key`, `mDNS Advertise`) aus der Konfiguration
-entfernt werden; `bareos-dir` kennt sie nicht.
+entfernt werden; `bareos-dir` kennt sie nicht. Das Overlay `odir.d/` (auch
+`Branch`) liest bareos-dir nie; ohne es laufen alle Jobs wie Standard-Backups.
 
 ## Volume-Werkzeuge (ols, oscan, oextract)
 

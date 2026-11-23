@@ -50,10 +50,11 @@ Die einfachste tragfähige Lösung nutzt, was es gibt: **Ein Zweig ist ein volls
 - **Accurate:** Die Liste der bekannten Dateien kommt aus der Kette des Haupt-Jobs. Löschungen eines Zweigs mit abweichender Kette werden daran gemessen.
 - **Warten auf Medien:** Wartet ein Zweig auf ein Volume (Mount-Anforderung), hält er den Strom an (der langsamste Zweig bestimmt den Takt, D-13/D-25; später Zeitlimit und Spooling).
 - **Nur gRPC:** Mit BNET zum SD scheitert ein Zweig-Job mit klarer Meldung; der Haupt-Job läuft ohne Zweige weiter.
-- **Konsolidierung (VirtualFull des AI-Zweigs):** Der Zweig-Job ist ein normaler Backup-Job; Always-Incremental-Konsolidierung läuft wie in Bareos über seinen Pool. Ein eigener Test für diesen Weg steht aus (siehe Bericht).
+- **Konsolidierung (VirtualFull des AI-Zweigs):** Der Zweig-Job ist ein normaler Backup-Job. Der VirtualFull aus seinen Jobs läuft im Rig mit ausdrücklicher `jobid=`-Liste. **Die automatische Kettenwahl (Accurate, VirtualFull ohne Liste, `restore`) wählt wie in Bareos nach Client und FileSet und mischt Haupt-Job und Zweige** (im Rig beobachtet: „Consolidating JobIds 2,4,3“ mit dem Incremental des Haupt-Jobs). Frage 3 unten.
 - **Zweig-Job allein starten:** Er ist eine normale Job-Ressource und lässt sich mit `run` allein starten; ein Zeitplan dafür ist nicht sinnvoll (er schreibt dann wie jeder Backup-Job aus eigener FD-Sitzung).
 
 ## Fragen an den Besitzer
 
 1. **Level der Zweige:** Die Umsetzung gibt allen Zweigen das Level des Streams (Haupt-Level, bei Bedarf auf Full angehoben). Soll ein Zweig mit abweichendem Rhythmus (z. B. Zweig nur sonntags Full) später ein eigenes Level-Schema mit eigener Basis bekommen, wird der Stream das Maximum bilden müssen (Folge-Punkt im BACKLOG)?
 2. **Ring je Senke statt gemeinsamer Ring:** Abweichung vom Plantext (Begründung oben). Einverstanden?
+3. **Kettenwahl:** Soll die Wahl der Kette (Accurate, VirtualFull, Restore „letzte Sicherung“) für Jobs aus `onesimus.job_branch` nach Pool getrennt werden (Haupt-Jobs sehen nie Zweige, ein Zweig nur die Jobs seines Pools)? Das weicht von Bareos ab (nur für Zweig-Gruppen) und löst die Mischung; ohne sie bleibt die ausdrückliche `jobid=`-Liste.

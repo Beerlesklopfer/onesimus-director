@@ -167,7 +167,7 @@ Direktive oder unbekannter Level/Typ, `Stripe = yes`/mehrere `Devices`,
 fehlender `Media Type`.
 
 **Grenzen.** Nur File-Devices als Ziel (S3, Wechselplatte, Band folgen mit
-P3, P4, P6). Kein Striping (P5), keine Zweige (P2b). Beim Lesen wartet ein Job
+P3, P4, P6). Kein Striping (P5); Zweige gibt es seit P2b ([Zweige](#zweige-branch-p2b)). Beim Lesen wartet ein Job
 nicht auf ein belegtes Ziel, er hält die freien und liest von ihnen; ein
 `mount`/`label` auf einem Ziel, das nicht das erste Lesegerät ist, weckt den
 wartenden Job nicht (er fragt nach der Wartezeit erneut).
@@ -176,6 +176,84 @@ Test: `cargo test -p onesimus-rig --test osd_distributor -- --ignored --nocaptur
 (Full auf `VDev`, Incremental auf `VDev2`, Restore der Kette aus beiden);
 Auswahl und Konfigurationsfehler als Unit-Tests in `bareos-config`
 (`sd.rs`) und `osd-daemon` (`daemon.rs`, `reader.rs`).
+
+## Zweige (Branch, P2b)
+
+3-2-1 im laufenden Betrieb: Der FD liest die Daten **einmal**, osd schreibt den
+Stream für den Haupt-Job und für jeden seiner **Zweige**. Ein Zweig ist ein
+eigener Job des Directors (eigene JobId, Level, Pool, Storage/Device, Fristen,
+Volumes und Katalogsätze), der keine FD-Sitzung hat, sondern an den Haupt-Job
+hängt. Konfiguration und Ablauf im Director: [Betrieb odir § Zweige](betrieb-odir.md#zweige-branch-p2b);
+Entwurf und Begründung: [P2B-ZWEIGE-ENTWURF.md](../plans/P2B-ZWEIGE-ENTWURF.md).
+
+```
+                 odir                                   osd
+ Haupt-Job   Worker H ── FD (liest einmal) ── Daten ──► Job H ─┬─ Senke H: Ring H → Schreiber → Device 1 (Pool Inc)
+                    └── SD-Steuerung (Job, use storage, BranchPlan, run)
+ Zweig-Job   Worker Z ── SD-Steuerung (Job, use storage, BranchAttach) ► Job Z ─ Senke Z: Ring Z → Schreiber → Device 2 (Pool AI)
+```
+
+**Nur gRPC.** Zwei typisierte Nachrichten in `stored_service.proto`
+(`BranchFrame` im `StoredFrame`): `BranchPlan` am Haupt-Job (vor `run`: die
+eindeutigen Namen der Zweige), `BranchAttach` am Zweig-Job (an Stelle von `run`:
+der Name des Haupt-Jobs), beide mit `BranchReply` beantwortet. Über BNET gibt es
+sie nicht; ein bareos-dir oder bareos-fd sieht nie einen Zweig, osd verhält sich
+dort wie bareos-sd. Ein Zweig-Job gegen einen SD ohne gRPC scheitert mit klarer
+Meldung, der Haupt-Job läuft ohne ihn.
+
+**Senken statt eines gemeinsamen Rings.** Der Haupt-Job hält je Job eine
+*Senke*: eigener Ring in `/dev/shm`, eigener Geräteschreiber (Prozess), eigene
+Postfach-Schleife, eigene `VolSessionId` im Satzkopf und die Steuerverbindung
+des **Zweig-Jobs** für dessen Meldungen, Attribute und Katalogfragen. Jeder
+Datensatz des FD geht der Reihe nach an alle lebenden Senken. Damit hat jeder
+Zweig eigene Volumes (Label, Pool, MediaType seines Ziels, auch über einen
+[Verteiler](#verteiler-distributor-p2)), eigene `JobMedia`-, `File`- und
+`Job`-Sätze, ohne dass der Schreiber etwas von Zweigen weiß. Abweichung vom
+Plantext („ein Ring, jeder Zweig liest jedes Fach“): je Zweig eigene
+Blockgrenzen und Sitzungsnummern gehen nur mit eigenem Ring. Ringgröße (D-25):
+Jobs einer Zweig-Gruppe bekommen **512 Fächer**, wenn `Ring Slots` an Device
+und Storage fehlt.
+
+**Ablauf.**
+
+1. Der Haupt-Job meldet sich mit `Job`, `use storage` und `BranchPlan`; jeder
+   Zweig mit `Job`, `use storage` und `BranchAttach`. Die Reihenfolge der
+   Zweige und des Haupt-Jobs ist egal: ein Zweig wartet bis zu `Branch Attach
+   Wait` (Storage, osd.d, Vorgabe 120 s) auf den Haupt-Job.
+2. Mit `append data` (vor der Reservierung des eigenen Devices) wartet der
+   Haupt-Job, bis jeder geplante Zweig angehängt ist oder weg ist
+   (sein `use storage` scheiterte, er wurde abgebrochen) oder die Wartezeit
+   verstrichen ist; dann ist die Menge geschlossen (ein Zweig, der später
+   kommt, wird abgewiesen). Das Job-Log des Haupt-Jobs sagt „Branch job … takes
+   this stream“ bzw. „Branch job … is not written: …“.
+3. Jede Senke reserviert ihr Device und holt ihr Volume (`CatReq` über die
+   Steuerverbindung ihres Jobs). Die Reservierung des Zweigs folgt dem **Storage
+   des Zweig-Jobs** (eigenes Device, auch ein Verteiler, eigener MediaType).
+4. Am Ende schließt jede Senke ihr Volume (EOS-Label), gibt die Attribute frei
+   und meldet `3099 Job … end` über die Steuerverbindung ihres Jobs; der
+   Zweig-Job meldet seine Dateizahl und Bytes.
+
+**Fehler (D-11).** Scheitert eine Senke (Device nicht vorhanden oder nicht
+beschreibbar, Schreiber stirbt, Pool/Volume nicht verfügbar mit Fehler), endet
+nur deren Job mit `E` (Meldung im Job-Log des Zweigs); der Partner schreibt
+weiter und endet `T`. Scheitert die Senke des Haupt-Jobs, bekommen die Zweige
+den Stream trotzdem (der Haupt-Job endet `E`). Scheitern alle, endet der
+FD-Strom mit Fehler. **Abbruch:** `cancel` auf einen Zweig-Job schließt nur
+dessen Senke (`A`); `cancel` auf den Haupt-Job beendet den Strom für alle
+(odir bricht die Zweige mit ab). Endet der Haupt-Job, ohne seinen Zweig zu
+schreiben (kein FD), endet der Zweig mit `E`.
+
+**Grenzen.** Wartet ein Zweig auf ein Volume (Mount-Anforderung), hält er den
+Strom an: der langsamste Zweig bestimmt den Takt (D-13/D-25); Zeitlimit und
+Spooling des langsamen Zweigs stehen aus ([BACKLOG](../BACKLOG.md#zweige-im-verbund-odir--osd-23112026-p2b)).
+Mit einem Zweig auf **demselben** Device wie der Haupt-Job geht es nicht (ein
+Device schreibt ein Volume zur Zeit): Ziele über Pool, Storage oder einen
+Verteiler trennen.
+
+Test: `cargo test -p onesimus-rig --test osd_branch -- --ignored --nocapture`
+(Full und Incremental mit einem FD-Lauf, Restore aus jedem Zweig, gescheiterte
+Zweige und Abbruch eines Zweigs); `Branches` und `BranchEnd` als Unit-Tests in
+`jobs.rs`, die Nachrichten in `onesimus-bnet-grpc` (`branch.rs`, `frame.rs`).
 
 ## Transporte: gRPC und BNET
 
@@ -195,6 +273,9 @@ bareos-dir ──BNET──► osd ◄──BNET── bareos-fd
   denselben Feldern wie `filed.ControlFrame`. Hello, CRAM-MD5 und alle
   Befehle laufen im TLS-Strom unverändert, wie über BNET. `FileDaemon` hat
   dazu `Data` für die Verbindung eines osd zum passiven Client bekommen.
+  Seit P2b trägt der `StoredFrame` als drittes Feld die typisierten
+  Zweig-Nachrichten (`BranchFrame`, [Zweige](#zweige-branch-p2b)); im Prozess
+  erscheinen sie als Nutzdaten mit einer Kennung (`onesimus_bnet_grpc::branch`).
 - **Transport:** das Crate `onesimus-bnet-grpc` (gemeinsam für odir, ofd,
   osd; Herkunft `bareos-bnet` `fd_grpc`). In osd ist ein gRPC-Strom die
   zweite Umsetzung von `transport::Channel`; Befehlsschleife, Schreiben und
