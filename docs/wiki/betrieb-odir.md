@@ -429,7 +429,7 @@ entfernt werden; `bareos-dir` kennt sie nicht.
 
 ## Volume-Werkzeuge (ols, oscan, oextract)
 
-Das Paket `odir` bringt die Rust-Ersatzwerkzeuge für `bls`, `bscan` und `bextract` mit (Crate `crates/outils`, installiert nach `/usr/bin`). Sie lesen Datei-Volumes (auch die von bareos-sd und osd geschriebenen, Blockformat BB01/BB02) ohne Director und Storage Daemon, Block für Block (Speicherbedarf: ein Block). Bandgeräte lesen sie nicht.
+Das Paket `osd` (nicht `odir`) bringt die Rust-Ersatzwerkzeuge für `bls`, `bscan` und `bextract` mit (Crate `crates/outils`, installiert nach `/usr/bin`). Sie lesen Datei-Volumes (auch die von bareos-sd und osd geschriebenen, Blockformat BB01/BB02) ohne Director und Storage Daemon, Block für Block (Speicherbedarf: ein Block). Bandgeräte lesen sie nicht.
 
 | Werkzeug | Aufruf | Zweck |
 |---|---|---|

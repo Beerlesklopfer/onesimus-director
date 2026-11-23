@@ -80,9 +80,7 @@ extended-description = """\
 High-performance Director daemon written in Rust.
 Reads /etc/bareos/bareos-dir.d/ config tree (Bareos-compatible).
 .
-Binary: /usr/sbin/odir
-.
-Volume tools: /usr/bin/ols, oscan, oextract (replace bls, bscan, bextract for file Volumes)"""
+Binary: /usr/sbin/odir"""
 section = "admin"
 priority = "optional"
 depends = "$auto"
@@ -93,10 +91,6 @@ systemd-units = { unit-name = "odir", unit-scripts = "../../packaging/odir", ena
 assets = [
     ["../../packaging/odir/logrotate", "etc/logrotate.d/onesimus-odir", "644"],
     ["target/release/odir", "usr/sbin/odir", "755"],
-    # Volume-Werkzeuge (crates/outils)
-    ["target/release/ols", "usr/bin/ols", "755"],
-    ["target/release/oscan", "usr/bin/oscan", "755"],
-    ["target/release/oextract", "usr/bin/oextract", "755"],
     ["../bareos-orm/schema/*.json", "usr/lib/bareos/scripts/ddl/", "644"],
     ["../../config/bareos-dir.d/**/*.conf", "usr/share/bareos/defaultconfigs/bareos-dir.d/", "644"],
     # man pages generated from the console grammar (odir --write-man-pages packaging/man)

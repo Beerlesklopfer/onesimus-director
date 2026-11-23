@@ -29,7 +29,7 @@ export PATH="$zigenv/bin:$PATH"
 export CFLAGS_i686_unknown_linux_musl=-DBROKEN_CLANG_ATOMICS
 export CARGO_BUILD_JOBS=${CARGO_BUILD_JOBS:-4}
 
-cargo zigbuild --release --target "$target" -p osd-daemon --features vendored-openssl
+cargo zigbuild --release --target "$target" -p osd-daemon -p outils --features osd-daemon/vendored-openssl
 file "target/$target/release/osd"
 
 rev=$(git rev-parse --short HEAD)

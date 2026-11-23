@@ -52,6 +52,7 @@ bareos-dir and bareos-fd. The service is installed but neither enabled
 nor started.
 .
 Binary: /usr/sbin/osd
+Volume tools: /usr/bin/ols, oscan, oextract (replace bls, bscan and bextract for file Volumes)
 Service: osd.service (alias bareos-storage.service)"""
 section = "admin"
 priority = "optional"
@@ -65,6 +66,10 @@ systemd-units = { unit-name = "osd", unit-scripts = "../../../packaging/osd", en
 assets = [
     ["../../../packaging/osd/logrotate", "etc/logrotate.d/onesimus-osd", "644"],
     ["target/release/osd", "usr/sbin/osd", "755"],
+    # Volume tools (crates/outils)
+    ["target/release/ols", "usr/bin/ols", "755"],
+    ["target/release/oscan", "usr/bin/oscan", "755"],
+    ["target/release/oextract", "usr/bin/oextract", "755"],
     ["../../../config/bareos-sd.d/**/*.conf", "usr/share/bareos/defaultconfigs/bareos-sd.d/", "644"],
 ]
 
