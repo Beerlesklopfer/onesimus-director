@@ -291,6 +291,10 @@ impl<'a> Finder<'a> {
             return true;
         }
         match fstype(&ff.fname) {
+            // Windows names the file system in capitals ("NTFS"), a FileSet writes `fstype = ntfs`
+            #[cfg(windows)]
+            Some(fs) => ff.fstypes.iter().any(|t| t.eq_ignore_ascii_case(&fs)),
+            #[cfg(not(windows))]
             Some(fs) => ff.fstypes.iter().any(|t| *t == fs),
             None => false,
         }

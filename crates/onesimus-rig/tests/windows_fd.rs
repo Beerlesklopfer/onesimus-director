@@ -329,3 +329,36 @@ fn a_unc_path_through_the_windows_fd() {
     assert!(back.contains("back: 3 files, same hashes: True"), "{back}");
     let _ = vm(&host, "stop.ps1");
 }
+
+/// A whole drive (`File = C:/`) with the big system and tool trees excluded (the VM's C: holds 90 GB): the walk
+/// meets junctions, locked system files and `System Volume Information`.
+/// `ONESIMUS_WINDOWS_DRIVE_BACKUP=0` runs only the estimate.
+#[test]
+#[ignore = "needs a running ofd.exe on a Windows host (ONESIMUS_WINDOWS_FD)"]
+fn a_whole_drive_through_the_windows_fd() {
+    let Some(host) = std::env::var_os("ONESIMUS_WINDOWS_FD").and_then(|h| h.into_string().ok()) else {
+        panic!("ONESIMUS_WINDOWS_FD is not set");
+    };
+    onesimus_rig::build_workspace_binaries().unwrap_or_else(|e| panic!("{e}"));
+    eprintln!("deploy:\n{}", vm(&host, "deploy.ps1"));
+    eprintln!("prep:\n{}", vm(&host, "prep.ps1"));
+    let mut options = RigOptions::new(40191);
+    options.start_fd = false;
+    options.extra_director = vec![
+        ("client/vfd.conf".into(), format!("Client {{\n  Name = vfd\n  Address = {host}\n  FD Port = 19102\n  Password = \"vfd-pw\"\n  Passive = yes\n}}\n")),
+        ("fileset/VSet.conf".into(), "FileSet {\n  Name = VSet\n  Include {\n    Options {\n      Signature = MD5\n      Compression = GZIP\n      fstype = ntfs\n    }\n    File = C:/\n  }\n  Exclude {\n    File = C:/Windows\n    File = \"C:/Program Files\"\n    File = \"C:/Program Files (x86)\"\n    File = C:/ProgramData\n    File = C:/Qt\n    File = C:/msys64\n    File = C:/vcpkg\n    File = C:/cmake\n    File = C:/Strawberry\n    File = C:/ESD\n    File = \"C:/$WINDOWS.~BT\"\n    File = C:/forgejo-runner\n    File = C:/v\n    File = C:/tmp\n  }\n}\n".to_string()),
+    ];
+    let rig = Rig::start(options).unwrap_or_else(|e| panic!("Gerüst startet nicht: {e}"));
+    let started = std::time::Instant::now();
+    let estimate = rig.command("estimate job=VBackup level=Full").unwrap_or_else(|e| panic!("{e}"));
+    eprintln!("estimate in {:?}:\n{estimate}", started.elapsed());
+    if std::env::var("ONESIMUS_WINDOWS_DRIVE_BACKUP").as_deref() == Ok("0") {
+        let _ = vm(&host, "stop.ps1");
+        return;
+    }
+    let backup = rig.run_job("VBackup").unwrap_or_else(|e| panic!("{e}"));
+    let row = rig.wait_job(backup, Duration::from_secs(3 * 3600)).unwrap_or_else(|e| panic!("{e}"));
+    let log = rig.job_log(backup);
+    eprintln!("backup in {:?}: {row:?}\n{log}", started.elapsed());
+    let _ = vm(&host, "stop.ps1");
+}
