@@ -4,7 +4,7 @@
 
 `.grpc` schaltet eine Konsolensitzung in den maschinenlesbaren Modus, den gRPC-Oberflächen erwarten, und wieder zurück. Ohne Argument meldet der Befehl den Zustand der Sitzung und ob der gRPC-Dienst des Directors eingeschaltet ist (`Enable gRPC = yes` in der Director-Ressource). Ein eigener gRPC-Datenstrom wird über die Konsolenverbindung nicht aufgebaut; der gRPC-Dienst läuft auf seinem eigenen Port. Der Befehl ändert nur den Zustand der eigenen Sitzung.
 
-**Onesimus-Erweiterung, nicht im Original (C-074, Entscheidung in [#4](https://github.com/Beerlesklopfer/onesimus-director/issues/4): bleibt als dokumentierte Erweiterung).** Das Bareos-Original kennt den Befehl nicht und antwortet `.grpc: is an invalid command.`.
+**Onesimus-Erweiterung, nicht im Original (C-074, Entscheidung in [#4](https://github.com/Onesimus-io/onesimus-director/issues/4): bleibt als dokumentierte Erweiterung).** Das Bareos-Original kennt den Befehl nicht und antwortet `.grpc: is an invalid command.`.
 
 ## Syntax
 

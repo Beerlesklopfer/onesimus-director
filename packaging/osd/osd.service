@@ -1,6 +1,6 @@
 [Unit]
 Description=Onesimus Storage Daemon
-Documentation=https://github.com/Beerlesklopfer/onesimus-director
+Documentation=https://github.com/Onesimus-io/onesimus-director
 # Same ordering, conditions and restart limits as Bareos
 # core/platforms/systemd/bareos-sd.service.in (18be77e6): a configuration
 # error (exit 42) or wrong arguments (41) are not restarted, other failures

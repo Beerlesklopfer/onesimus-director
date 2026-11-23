@@ -1,4 +1,4 @@
 [submodule "proto"]
 	path = proto
-	url = https://github.com/Beerlesklopfer/onesimus-proto.git
+	url = https://github.com/Onesimus-io/onesimus-proto.git
 	branch = development

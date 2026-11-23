@@ -1,6 +1,6 @@
 [Unit]
 Description=Onesimus File Daemon
-Documentation=https://github.com/Beerlesklopfer/onesimus-director
+Documentation=https://github.com/Onesimus-io/onesimus-director
 Requires=network.target nss-lookup.target time-sync.target
 After=network-online.target nss-lookup.target local-fs.target remote-fs.target time-sync.target
 ConditionPathExists=/var/lib/bareos

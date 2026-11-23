@@ -105,7 +105,7 @@ def sidebar(mapping: dict) -> str:
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("checkout", type=Path)
-    parser.add_argument("--repo", default="Beerlesklopfer/onesimus-director")
+    parser.add_argument("--repo", default="Onesimus-io/onesimus-director")
     parser.add_argument("--branch", default="development")
     args = parser.parse_args()
     blob = f"https://github.com/{args.repo}/blob/{args.branch}"

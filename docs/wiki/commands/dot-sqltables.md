@@ -4,7 +4,7 @@
 
 `.sqltables` listet alle Tabellen im Schema `public` der Katalogdatenbank, alphabetisch sortiert. Das hilft, bevor man mit [.sql](dot-sql.md) eine eigene Abfrage schreibt. Der Befehl liest nur und verändert nichts.
 
-**Onesimus-Erweiterung, nicht im Original (C-074, Entscheidung in [#4](https://github.com/Beerlesklopfer/onesimus-director/issues/4): bleibt als dokumentierte Erweiterung).** Das Bareos-Original kennt den Befehl nicht und antwortet `.sqltables: is an invalid command.`.
+**Onesimus-Erweiterung, nicht im Original (C-074, Entscheidung in [#4](https://github.com/Onesimus-io/onesimus-director/issues/4): bleibt als dokumentierte Erweiterung).** Das Bareos-Original kennt den Befehl nicht und antwortet `.sqltables: is an invalid command.`.
 
 ## Berechtigungen
 

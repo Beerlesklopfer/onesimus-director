@@ -52,7 +52,7 @@ the packages.
 
 The Debian packages and their SBOMs carry a signed GitHub attestation
 (build provenance and SBOM, Sigstore). Verify a download with
-`gh attestation verify <package>.deb -R Beerlesklopfer/onesimus-director`.
+`gh attestation verify <package>.deb -R Onesimus-io/onesimus-director`.
 
 ## Scope
 

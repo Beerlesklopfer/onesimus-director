@@ -10,7 +10,7 @@
 
 Die Katalog-Liste wird wie eine Bareos-Liste ausgewertet: der erste passende Eintrag entscheidet, `!` verbietet, reguläre Ausdrücke (POSIX ERE, ganzer Name, ohne Groß-/Kleinschreibung) und `*all*` gelten wie in der Datei, passt kein Eintrag, ist der Name verboten. Eine Änderung wirkt sofort (der Director lädt die Katalog-ACL nach jeder Änderung, nach `reload` und beim Start neu).
 
-**Onesimus-Erweiterung, nicht im Original (C-074, Entscheidung in [#4](https://github.com/Beerlesklopfer/onesimus-director/issues/4)).** Das Bareos-Original kennt den Befehl nicht und antwortet `.acl: is an invalid command.`.
+**Onesimus-Erweiterung, nicht im Original (C-074, Entscheidung in [#4](https://github.com/Onesimus-io/onesimus-director/issues/4)).** Das Bareos-Original kennt den Befehl nicht und antwortet `.acl: is an invalid command.`.
 
 ## Berechtigungen
 

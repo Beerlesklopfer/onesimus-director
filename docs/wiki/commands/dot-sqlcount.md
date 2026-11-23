@@ -4,7 +4,7 @@
 
 `.sqlcount` zählt die Zeilen von Katalogtabellen. Ohne Argument kommen die Zahlen der wichtigsten Tabellen (`client`, `fileset`, `job`, `jobmedia`, `media`, `pool`, `storage`); `File` und `Path` fehlen absichtlich, weil das Zählen dort bei großen Katalogen lange dauert. Mit `table=<name>` wird genau eine Tabelle gezählt. Der Befehl liest nur und verändert nichts.
 
-**Onesimus-Erweiterung, nicht im Original (C-074, Entscheidung in [#4](https://github.com/Beerlesklopfer/onesimus-director/issues/4): bleibt als dokumentierte Erweiterung).** Das Bareos-Original kennt den Befehl nicht und antwortet `.sqlcount: is an invalid command.`; Programme, die mit beiden Directors arbeiten sollen, dürfen sich nicht auf ihn verlassen.
+**Onesimus-Erweiterung, nicht im Original (C-074, Entscheidung in [#4](https://github.com/Onesimus-io/onesimus-director/issues/4): bleibt als dokumentierte Erweiterung).** Das Bareos-Original kennt den Befehl nicht und antwortet `.sqlcount: is an invalid command.`; Programme, die mit beiden Directors arbeiten sollen, dürfen sich nicht auf ihn verlassen.
 
 ## Berechtigungen
 

@@ -178,7 +178,7 @@ jobs:
       # Signatur ohne eigenen Schlüssel: GitHub signiert Herkunft (Repository,
       # Commit, Workflow-Lauf) und Stückliste je Paket mit einem kurzlebigen
       # Zertifikat und trägt sie in das öffentliche Sigstore-Transparenzlog ein.
-      # Prüfen: gh attestation verify <paket>.deb -R Beerlesklopfer/onesimus-director
+      # Prüfen: gh attestation verify <paket>.deb -R Onesimus-io/onesimus-director
       # Nicht bei Pull Requests (ohne Schreibrechte kein OIDC-Token).
       - name: Herkunft der Pakete signieren
         if: github.event_name != 'pull_request'

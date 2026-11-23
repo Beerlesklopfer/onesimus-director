@@ -31,7 +31,7 @@ authors = ["Joerg Bernau <Joerg.Bernau@onesimus.io>"]
 # Default for crates derived from Bareos; own crates override it with
 # "AGPL-3.0-only OR LicenseRef-Onesimus-Commercial" (docs/LIZENZEN.md).
 license = "AGPL-3.0-only"
-repository = "https://github.com/Beerlesklopfer/onesimus-director"
+repository = "https://github.com/Onesimus-io/onesimus-director"
 
 [workspace.dependencies]
 # Async runtime (only for gRPC)

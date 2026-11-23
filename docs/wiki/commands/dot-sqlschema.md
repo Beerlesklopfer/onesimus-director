@@ -4,7 +4,7 @@
 
 `.sqlschema` zeigt für die Tabellen im Schema `public` der Katalogdatenbank alle Spalten mit ihrem Datentyp, sortiert nach Tabelle und Spaltenreihenfolge; mit `table=<name>` nur für eine Tabelle. Das hilft beim Schreiben eigener Abfragen mit [.sql](dot-sql.md). Der Befehl liest nur und verändert nichts.
 
-**Onesimus-Erweiterung, nicht im Original (C-074, Entscheidung in [#4](https://github.com/Beerlesklopfer/onesimus-director/issues/4): bleibt als dokumentierte Erweiterung).** Das Bareos-Original kennt den Befehl nicht und antwortet `.sqlschema: is an invalid command.`.
+**Onesimus-Erweiterung, nicht im Original (C-074, Entscheidung in [#4](https://github.com/Onesimus-io/onesimus-director/issues/4): bleibt als dokumentierte Erweiterung).** Das Bareos-Original kennt den Befehl nicht und antwortet `.sqlschema: is an invalid command.`.
 
 ## Berechtigungen
 

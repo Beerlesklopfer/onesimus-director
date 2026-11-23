@@ -1,7 +1,7 @@
 Format: https://www.debian.org/doc/packaging-manuals/copyright-format/1.0/
 Upstream-Name: Onesimus Director
 Upstream-Contact: Joerg Bernau <Joerg.Bernau@onesimus.io>
-Source: https://github.com/Beerlesklopfer/onesimus-director
+Source: https://github.com/Onesimus-io/onesimus-director
 
 Files: *
 Copyright: 2026 Joerg Bernau <Joerg.Bernau@onesimus.io>
