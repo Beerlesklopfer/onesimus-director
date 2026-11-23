@@ -147,6 +147,19 @@ pub fn evaluate(disk: &str, json: &Value) -> Health {
     }
 }
 
+/// Why `smartctl` gave no SMART data (no permission, no SMART on the device), `None` when it did.
+fn unreadable(json: &Value) -> Option<String> {
+    if json.pointer("/ata_smart_attributes/table").is_some() || json.get("smart_status").is_some() || json.get("nvme_smart_health_information_log").is_some() {
+        return None;
+    }
+    let messages: Vec<&str> = json
+        .pointer("/smartctl/messages")
+        .and_then(Value::as_array)
+        .map(|m| m.iter().filter_map(|x| x["string"].as_str()).collect())
+        .unwrap_or_default();
+    Some(if messages.is_empty() { "smartctl returned no SMART data".to_string() } else { messages.join("; ") })
+}
+
 /// The mount source (`/dev/sdb`) of the longest mount point that holds `path`.
 pub fn mount_source(mountinfo: &str, path: &Path) -> Option<String> {
     let mut best: Option<(usize, String)> = None;
@@ -217,7 +230,10 @@ pub fn of_device(archive_device: &Path) -> Result<Health, String> {
     if let Some((at, result)) = map.get(&disk) && at.elapsed() < CACHE {
         return result.clone();
     }
-    let result = smartctl(&disk).map(|json| evaluate(&disk, &json));
+    let result = smartctl(&disk).and_then(|json| match unreadable(&json) {
+        Some(why) => Err(why),
+        None => Ok(evaluate(&disk, &json)),
+    });
     map.insert(disk, (Instant::now(), result.clone()));
     result
 }
@@ -316,6 +332,13 @@ mod tests {
         assert_eq!(evaluate("sdb", &j).level, Level::Warning);
         j["temperature"]["current"] = Value::from(61);
         assert_eq!(evaluate("sdb", &j).level, Level::Critical);
+    }
+
+    #[test]
+    fn no_data_is_not_ok() {
+        let j: Value = serde_json::from_str(r#"{"smartctl":{"exit_status":2,"messages":[{"string":"Smartctl open device: /dev/sdb failed: Permission denied","severity":"error"}]}}"#).unwrap();
+        assert_eq!(unreadable(&j).as_deref(), Some("Smartctl open device: /dev/sdb failed: Permission denied"));
+        assert_eq!(unreadable(&healthy()), None);
     }
 
     #[test]

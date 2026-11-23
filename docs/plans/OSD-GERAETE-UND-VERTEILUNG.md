@@ -207,7 +207,7 @@ Gilt für Plattenbänder (lokal und im SAN), Wechselplatten, Platten unter File-
   - **gRPC-Medien-Ereignis** (D-7) an die GUI, mit Zustand, Grund und Rohwerten (Proto mit der GUI-Sitzung abstimmen);
   - **`status storage`** zeigt je Device bzw. Magazin den Zustand und die wichtigsten Werte; MCP/typisiert ebenso;
   - **Verlauf** im Schema `onesimus` (Tabelle je Medium und Zeitpunkt, Migrationsschritt in bareos-orm), damit Trends erkennbar sind.
-- **Rechte:** SMART über SG_IO braucht root bzw. `CAP_SYS_RAWIO`; osd läuft dafür mit der Capability oder holt die Werte über einen kleinen Helfer.
+- **Rechte:** SMART über SG_IO braucht root bzw. `CAP_SYS_RAWIO`; osd läuft dafür mit der Capability oder holt die Werte über einen kleinen Helfer. **Auf dem H340 (23.11.2026, gemessen):** osd läuft als `bareos`; damit `smartctl` eine Platte öffnen darf, steht `bareos` in der Gruppe `disk` (`/dev/sdX` ist `root:disk 0660`), und der OpenRC-Dienst setzt `capabilities="^cap_sys_rawio"` (Ambient-Capability, wird an `smartctl` vererbt). Beides liegt in `lbu` (`/etc/init.d/osd`, `/etc/group`). Ohne Rechte meldet `status storage` `Health: unknown (… Permission denied)`.
 
 ## Beschädigte Volumes (Bandriss, Plattenschaden)
 
