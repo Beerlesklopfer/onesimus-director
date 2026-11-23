@@ -399,7 +399,7 @@ fn open_read(d: &Daemon, job: &Arc<Job>, dir: &SharedChannel) -> Option<(ReadPip
             Some(c) => conf = c.clone(),
             None => return None,
         }
-        d.jmsg(dir, job, M_INFO, &format!("Media Type change.  New read device \"{}\" ({}) chosen.\n", conf.name, conf.archive_device.display()));
+        d.jmsg(dir, job, M_INFO, &format!("Media Type change.  New read device \"{}\" ({}) chosen.\n", conf.name, conf.archive_device));
     }
     let dev = FileDevice::from_config(&conf);
     let info = read_info(d, job, &dev, &bootstrap);
