@@ -54,6 +54,7 @@ mod ndmp;
 mod ovfs;
 mod privileges;
 mod message_bus;
+mod storage_health;
 mod usage;
 mod reload;
 mod run_time;
@@ -590,6 +591,10 @@ fn main() {
         && let Err(e) = usage::spawn_watcher(catalog, bus.clone())
     {
         warn!("usage watcher not started: {e}");
+    }
+    // health of the disks under the devices of Storage Daemons (Health Check Interval, crate::storage_health)
+    if let Err(e) = storage_health::spawn_watcher(shared_config.clone(), catalog.clone()) {
+        warn!("storage health watcher not started: {e}");
     }
     let session_mgr = Arc::new(SessionManager::new(bus.clone()));
     let cmd_queue = Arc::new(CommandQueue::new(256));

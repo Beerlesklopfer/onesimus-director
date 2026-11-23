@@ -318,3 +318,38 @@ Verify, Restore, Abbruch und die vier erwarteten Defekte).
 | Unbekannte Direktiven in `bareos-sd.d` | Fehler | werden noch nicht abgelehnt (aus P0) |
 | Job-Kommando fehlerhaft | `3915 … stat=<Zahl der Felder>` | `stat=0` |
 | Hello eines Directors mit Leerzeichen im Namen | `0x01` | wie bareos-sd (Server-Seite in `daemon-crate`) |
+
+
+## Gesundheit der Platten (SMART, seit 23.11.2026)
+
+osd liest zu jedem File-Device die SMART-Werte der Platte, auf der das `Archive Device` liegt (Crate `smartread`, ATA/SATA über SG_IO und NVMe, ohne `smartctl`), und bewertet sie mit `ok`, `warning` oder `critical`. Die Platte wird über den Einhängepunkt gefunden; md, LVM und Netz-Dateisysteme bleiben `unknown`. Die Abfrage läuft höchstens alle zehn Minuten je Platte.
+
+| Wo | Was |
+| --- | --- |
+| `status storage` | je Device eine Zeile `Health: Disk /dev/sdb (<Modell>): ok, 32 °C, 54879 h, pending 0, reallocated 0, uncorrectable 0, CRC 0` |
+| `.status health` | je Device eine Zeile `Device=… Disk=… Level=… Temperature=… PowerOnHours=… Pending=… Reallocated=… OfflineUncorrectable=… CrcErrors=… SelfTest="…" Model="…" Reasons="…"` |
+
+**Bewertung:** `critical` bei SMART FAILED, fehlgeschlagenem Selbsttest, einem Pre-Fail-Attribut an seiner Schwelle oder ab 60 °C (NVMe: kritische Warnung, Reserve unter der Schwelle); `warning` bei Pending, Reallocated oder Offline-Uncorrectable Sectors, CRC-Fehlern, ab 55 °C (NVMe: Medienfehler, 90 % Haltbarkeit verbraucht). Fehlerprotokoll und Selbsttestprotokoll der Platte liest `smartread` noch nicht.
+
+**Rechte:** SMART braucht `CAP_SYS_RAWIO` (NVMe `CAP_SYS_ADMIN`) und Zugriff auf `/dev/sdX`; ohne beides meldet osd `unknown` mit dem Grund. Auf dem H340: Gruppe `disk` und `capabilities="^cap_sys_rawio"` im OpenRC-Dienst (siehe den Plan, D-21).
+
+### Der Director wertet es aus
+
+`Health Check Interval` am Storage (Onesimus-Direktive, ohne Angabe aus: der Director fragt einen SD sonst nie von sich aus ab):
+
+```
+Storage {
+  Name = H340
+  ...
+  Health Check Interval = 1 hour
+}
+```
+
+Der Director fragt dann `.status health` im Abstand (er schaut alle 30 Sekunden nach fälligen Abfragen) und
+
+* schreibt je Device und Abfrage eine Zeile in `onesimus.medium_health` (Schema-Schritt v2256: `storage`, `device`, `checked_at`, `disk`, `model`, `level`, `reasons`, Temperatur, Betriebsstunden, Pending/Reallocated/Uncorrectable/CRC, Selbsttest) für Verläufe,
+* meldet über die Messages-Ressource des Directors (`Daemon`: Mail, Operator) jeden Wechsel des Urteils und eine erste Messung, die nicht `ok` ist: Warnung bei `warning` und `unknown`, Fehler bei `critical`, Info, wenn das Device wieder `ok` ist.
+
+Beispiel einer Auswertung des Verlaufs: `SELECT DISTINCT ON (storage, device) * FROM onesimus.medium_health ORDER BY storage, device, checked_at DESC`.
+
+Getestet: `onesimus-rig/tests/osd_health.rs` (Zeile in der Tabelle und Meldung im Daemon-Log), Unit-Tests in `storage_health.rs`. Gemessen auf dem H340: `status storage` zeigt `sdb` und `sdc` als `ok`.

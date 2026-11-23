@@ -1,0 +1,37 @@
+{
+  "version": 2256,
+  "description": "History of the health of the disks under the devices of a Storage Daemon (docs/plans/OSD-GERAETE-UND-VERTEILUNG.md, D-21): odir asks `.status health` of each Storage with `Health Check Interval` and writes one row per device and check. Written only by odir (storage_health.rs).",
+  "created": "2026-11-23",
+  "author": "Onesimus",
+  "min_compatible_version": 2255,
+  "tables": [
+    {
+      "name": "onesimus.medium_health",
+      "description": "One check of the disk under one device of a Storage Daemon: verdict (ok, warning, critical, unknown) and the SMART values behind it.",
+      "columns": [
+        {"name": "storage", "type": "text", "not_null": true, "description": "Name of the Storage resource"},
+        {"name": "device", "type": "text", "not_null": true, "description": "Name of the device in the Storage Daemon"},
+        {"name": "checked_at", "type": "timestamptz", "not_null": true, "default": "now()", "description": "Time of the check"},
+        {"name": "disk", "type": "text", "not_null": true, "default": "''", "description": "The disk under the device, e.g. sdb"},
+        {"name": "model", "type": "text", "not_null": true, "default": "''", "description": "Model of the drive"},
+        {"name": "level", "type": "text", "not_null": true, "description": "ok, warning, critical or unknown"},
+        {"name": "reasons", "type": "text", "not_null": true, "default": "''", "description": "Why not ok, separated by semicolons"},
+        {"name": "temperature", "type": "integer", "description": "Temperature in degrees Celsius"},
+        {"name": "power_on_hours", "type": "bigint", "description": "Power-on hours"},
+        {"name": "pending_sectors", "type": "bigint", "description": "Current_Pending_Sector (ATA ID 197)"},
+        {"name": "reallocated_sectors", "type": "bigint", "description": "Reallocated_Sector_Ct (ATA ID 5)"},
+        {"name": "offline_uncorrectable", "type": "bigint", "description": "Offline_Uncorrectable (ATA ID 198)"},
+        {"name": "crc_errors", "type": "bigint", "description": "UDMA_CRC_Error_Count (ATA ID 199)"},
+        {"name": "self_test", "type": "text", "not_null": true, "default": "''", "description": "Result of the last self test"}
+      ],
+      "primary_key": "storage, device, checked_at",
+      "indices": [],
+      "foreign_keys": [],
+      "constraints": [
+        {"name": "medium_health_level_check", "type": "check", "expression": "level IN ('ok', 'warning', 'critical', 'unknown')"}
+      ]
+    }
+  ],
+  "views": [],
+  "functions": []
+}
