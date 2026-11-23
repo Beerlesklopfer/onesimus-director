@@ -1,4 +1,7 @@
-// SPDX-License-Identifier: AGPL-3.0-only
+// SPDX-License-Identifier: AGPL-3.0-only AND LicenseRef-OSSP-var
+// SPDX-FileCopyrightText: 2001-2002 Ralf S. Engelschall <rse@engelschall.com>
+// SPDX-FileCopyrightText: 2001-2002 The OSSP Project
+// SPDX-FileCopyrightText: 2001-2002 Cable & Wireless Deutschland
 // SPDX-FileCopyrightText: 2000-2012 Free Software Foundation Europe e.V.
 // SPDX-FileCopyrightText: 2010-2017 Planets Communications B.V.
 // SPDX-FileCopyrightText: 2012-2026 Bareos GmbH & Co. KG

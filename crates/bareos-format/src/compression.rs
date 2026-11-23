@@ -1,4 +1,7 @@
-// SPDX-License-Identifier: AGPL-3.0-only
+// SPDX-License-Identifier: AGPL-3.0-only AND MIT AND BSD-2-Clause
+// SPDX-FileCopyrightText: 2005-2007 Ariya Hidayat <ariya@kde.org> (FastLZ)
+// SPDX-FileCopyrightText: 2010-2013 Exalead SA (fastlzlib)
+// SPDX-FileCopyrightText: 2011-2015 Yann Collet (LZ4)
 // SPDX-FileCopyrightText: 2000-2012 Free Software Foundation Europe e.V.
 // SPDX-FileCopyrightText: 2010-2017 Planets Communications B.V.
 // SPDX-FileCopyrightText: 2012-2026 Bareos GmbH & Co. KG

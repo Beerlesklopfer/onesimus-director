@@ -60,6 +60,16 @@ BAREOS_HOLDERS = [
 ]
 
 
+# Von Dritten übernommene (portierte) Dateien: SPDX-Ausdruck und Rechteinhaber; Texte in THIRD-PARTY-NOTICES
+THIRD_PARTY = {
+    "crates/bareos-format/src/compression.rs": ("AGPL-3.0-only AND MIT AND BSD-2-Clause", [
+        "2005-2007 Ariya Hidayat <ariya@kde.org> (FastLZ)", "2010-2013 Exalead SA (fastlzlib)", "2011-2015 Yann Collet (LZ4)"]),
+    "crates/ofd/src/fnmatch.rs": ("AGPL-3.0-only AND BSD-3-Clause", ["1989, 1993, 1994 The Regents of the University of California (OpenBSD fnmatch)"]),
+    "crates/odir/src/expand.rs": ("AGPL-3.0-only AND LicenseRef-OSSP-var", [
+        "2001-2002 Ralf S. Engelschall <rse@engelschall.com>", "2001-2002 The OSSP Project", "2001-2002 Cable & Wireless Deutschland"]),
+}
+
+
 def derived_list():
     """Pfade und Präfixe aus bareos-derived.txt (Bareos-nahe Teile: AGPL-3.0-only)."""
     try:
@@ -78,6 +88,9 @@ def header(path, year, entries):
     c = COMMENT["." + path.rsplit(".", 1)[-1]]
     span = f"{year}-{THIS_YEAR}" if year < THIS_YEAR else f"{THIS_YEAR}"
     mine = f"{c} SPDX-FileCopyrightText: {span} {HOLDER}"
+    if path in THIRD_PARTY:
+        lic, holders = THIRD_PARTY[path]
+        return [f"{c} SPDX-License-Identifier: {lic}"] + [f"{c} SPDX-FileCopyrightText: {h}" for h in holders + BAREOS_HOLDERS] + [mine]
     if is_derived(path, entries):
         return [f"{c} SPDX-License-Identifier: {DERIVED_LICENSE}"] + [f"{c} SPDX-FileCopyrightText: {h}" for h in BAREOS_HOLDERS] + [mine]
     return [f"{c} SPDX-License-Identifier: {LICENSE}", mine]
@@ -110,7 +123,7 @@ def process(path, years, apply, entries):
         end += 1
     current = lines[n:end]
     ok = bool(current) and current[0] == wanted[0] and all(
-        any(w.split(" ", 1)[1] in c for c in current) for w in wanted[1:] if "Bareos" in w or "Free Software" in w or "Planets" in w)
+        any(w.split(" ", 1)[1] in c for c in current) for w in wanted[1:] if "Bareos" in w or "Free Software" in w or "Planets" in w or path in THIRD_PARTY)
     if ok or not apply:
         return ok
     lines[n:end] = wanted
