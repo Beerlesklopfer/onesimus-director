@@ -35,7 +35,7 @@ use std::io::{Read, Seek, SeekFrom};
 use std::time::{Duration, Instant};
 
 use bareos_format::bsr::{Bsr, RestoreVolume};
-use bareos_format::msg::{M_ERROR, M_FATAL, M_INFO, M_WARNING};
+use bareos_format::msg::{M_ERROR, M_FATAL, M_INFO, M_MOUNT, M_WARNING};
 use bareos_format::volume::{verify_block, BlockHeader, BLKHDR2_LENGTH};
 use osd::askdir::VolumeInfo;
 use osd_ring::{Ring, RingError, State};
@@ -192,6 +192,55 @@ impl Reader<'_> {
     /// file, check its label. bareos-sd asks the operator to mount the
     /// volume when this fails; osd ends the job (as it does when writing).
     fn acquire(&mut self, vol: &RestoreVolume) -> Result<(), String> {
+        // `DirAskSysopToMountVolume` (mount.cc): a Volume that is not there
+        // (file missing, wrong or unlabeled Volume) is asked of the operator
+        // (M_MOUNT), JS_WaitMedia, woken by `mount`/`label` on the device;
+        // the wait starts at one hour and doubles up to one day, nine waits.
+        const MIN_WAIT: u64 = 60 * 60;
+        const MAX_WAIT: u64 = 24 * 60 * 60;
+        const MAX_NUM_WAIT: u32 = 9;
+        let (mut wait_sec, mut num_wait) = (MIN_WAIT, 0u32);
+        let mut waited = false;
+        loop {
+            match self.try_acquire(vol) {
+                Err(e) if e.starts_with("Too many errors trying to mount") => {
+                    self.jmsg(M_MOUNT, &format!(
+                        "Please mount read Volume \"{}\" for:\n    Job:          {}\n    Storage:      {}\n    Pool:         {}\n    Media type:   {}\n",
+                        vol.name, self.info.job, self.dev.print_name(), self.info.pool_name, self.info.media_type
+                    ));
+                    let answer = self.ring
+                        .ask_consumer(CONSUMER, &Request::WaitMedia(wait_sec as u32).encode(), Duration::from_secs(wait_sec + 60))
+                        .map_err(|e| e.to_string())?;
+                    waited = true;
+                    match answer.as_slice() {
+                        b"c" => {
+                            self.jmsg(M_INFO, &format!(
+                                "Job {} canceled while waiting for mount on Storage Device {}.\n", self.info.job, self.dev.print_name()));
+                            return Err(String::new());
+                        }
+                        b"w" => {} // mount or label: try again
+                        _ => {
+                            wait_sec = (wait_sec * 2).min(MAX_WAIT);
+                            num_wait += 1;
+                            if num_wait >= MAX_NUM_WAIT {
+                                return Err(format!(
+                                    "Max time exceeded waiting to mount Storage Device {} for Job {}", self.dev.print_name(), self.info.job));
+                            }
+                        }
+                    }
+                }
+                other => {
+                    if other.is_ok() && waited {
+                        let _ = self.ring.ask_consumer(CONSUMER, &Request::JobStatus('R').encode(), ASK_TIMEOUT);
+                    }
+                    return other;
+                }
+            }
+        }
+    }
+
+    /// One try of [`Reader::acquire`].
+    fn try_acquire(&mut self, vol: &RestoreVolume) -> Result<(), String> {
         self.close_volume();
         if !vol.media_type.is_empty() && vol.media_type != self.dev.media_type {
             self.jmsg(M_INFO, &format!(

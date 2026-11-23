@@ -188,12 +188,13 @@ impl Daemon {
 
     /// `DirAskSysopToCreateAppendableVolume` → `WaitForSysop` for a device
     /// writer: JS_WaitMedia, then wait up to `secs` for a media event on
-    /// `device` or a cancel. Answer `w`, `t` or `c` (ring [`Request::WaitMedia`]).
+    /// `device` or a cancel. `status` is `m` (JS_WaitMedia, a writer without a volume) or
+    /// `M` (JS_WaitMount, a reader whose volume is not there). Answer `w`, `t` or `c` (ring [`Request::WaitMedia`]).
     ///
     /// [`Request::WaitMedia`]: crate::ringproto::Request::WaitMedia
-    pub fn wait_for_sysop(&self, dir: &SharedChannel, job: &Job, device: &str, secs: u32) -> Vec<u8> {
-        if job.status() != 'm' {
-            self.send_status(dir, job, 'm');
+    pub fn wait_for_sysop(&self, dir: &SharedChannel, job: &Job, device: &str, secs: u32, status: char) -> Vec<u8> {
+        if job.status() != status {
+            self.send_status(dir, job, status);
         }
         self.waiting.lock().unwrap_or_else(|e| e.into_inner()).insert(device.to_string());
         let answer = wait_media_event(&self.media, device, &job.canceled, std::time::Duration::from_secs(secs as u64));

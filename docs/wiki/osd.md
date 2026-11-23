@@ -285,7 +285,7 @@ Verify, Restore, Abbruch und die vier erwarteten Defekte).
 | Thema | bareos-sd | osd (P1) |
 |---|---|---|
 | Lesen: Gerät | im Job-Thread | Geräteleser als eigener Prozess füllt den Ring, die Netzsitzung leert ihn (D-13) |
-| Lesen: falsches, fehlendes oder unlesbares Volume | Warnung, dann Mount-Anforderung an den Operator (`DirAskSysopToMountVolume`) | Warnung wie bareos-sd, dann „Too many errors trying to mount device … for reading.“, der Job endet |
+| Lesen: falsches, fehlendes oder unlesbares Volume | Warnung, dann Mount-Anforderung an den Operator (`DirAskSysopToMountVolume`) | Warnung wie bareos-sd, dann Mount-Anforderung an den Operator (M_MOUNT „Please mount read Volume …“, Status JS_WaitMount, geweckt von `mount`/`label` auf dem Device, Wartezeit eine Stunde, verdoppelt bis ein Tag, neun Runden; seit 23.11.2026, `tests/osd_read_wait.rs` gegen bareos-sd als Gegenprobe) |
 | Lesen: Volume mit anderem MediaType im Bootstrap | sucht ein anderes Device („Changing read device …“) | Meldung „Changing read device …“, dann „No suitable device found to read Volume …“ (ein Device je Job) |
 | Lesen: Positionieren | springt erst, wenn ein Bootstrap-Abschnitt erledigt ist (`TryDeviceRepositioning`) | liest je Volume genau die vereinigten `VolAddr`-Bereiche; welche Datensätze an den FD gehen, entscheidet derselbe Filter wie bei bareos-sd |
 | Lesen: `MatchBsrBlock` (Blöcke fremder Sitzungen überspringen) | nur bei Labels ausgewertet | nicht benutzt |

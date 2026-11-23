@@ -87,6 +87,7 @@ impl ReadPipe {
         let stop = Arc::new(AtomicBool::new(false));
         let mail = {
             let (ring, ready, stop, dir, job, daemon) = (ring.clone(), ready.clone(), stop.clone(), dir.clone(), job.clone(), d.clone());
+            let device = info.device.clone();
             std::thread::Builder::new()
                 .name(format!("rmail:{}", job.cmd.job_id))
                 .spawn(move || {
@@ -101,8 +102,13 @@ impl ReadPipe {
                                 ready.store(true, Ordering::Release);
                                 b"ok".to_vec()
                             }
-                            // the reader does not wait for media yet
-                            Some(Request::WaitMedia(_) | Request::JobStatus(_)) | None => b"Ebad request".to_vec(),
+                            // a volume is not there: wait for `mount`/`label` on the device
+                            Some(Request::WaitMedia(secs)) => daemon.wait_for_sysop(&dir, &job, &device, secs, 'M'),
+                            Some(Request::JobStatus(c)) => {
+                                daemon.send_status(&dir, &job, c);
+                                b"ok".to_vec()
+                            }
+                            None => b"Ebad request".to_vec(),
                         });
                     }
                 })

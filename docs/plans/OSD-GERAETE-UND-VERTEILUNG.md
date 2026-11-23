@@ -469,8 +469,9 @@ Aus den Stufen 1–3 zusammengeführt, mit Grund:
 - **Verbindungsaufbau „Client zum SD“** (ofd `sd.rs`, BNET und gRPC) liegt
   noch in ofd; nach Gutachten §5 gehört er in die osd-Schnittstelle.
 - **Warten auf ein Volume:** beim Schreiben erledigt (21.11.2026, C-089:
-  wie bareos-sd, geweckt von `label`/`mount`, Poll, Wartezeiten); offen beim
-  Lesen (Mount-Anforderung statt Abbruch) und die Herzschläge während des Wartens.
+  wie bareos-sd, geweckt von `label`/`mount`, Poll, Wartezeiten); beim Lesen
+  seit 23.11.2026 ebenfalls (Mount-Anforderung, JS_WaitMount, `tests/osd_read_wait.rs`);
+  offen: die Herzschläge während des Wartens.
 - **Anderes Device beim Lesen**, wenn der MediaType des Bootstraps nicht
   passt.
 - **Recycling und `relabel`**, Spooling, Bandbreite (`setbandwidth` wird

@@ -469,7 +469,7 @@ impl Producer {
                                 ready.store(true, Ordering::Release);
                                 b"ok".to_vec()
                             }
-                            Some(Request::WaitMedia(secs)) => daemon.wait_for_sysop(&dir, &job, &device, secs),
+                            Some(Request::WaitMedia(secs)) => daemon.wait_for_sysop(&dir, &job, &device, secs, 'm'),
                             Some(Request::JobStatus(c)) => {
                                 daemon.send_status(&dir, &job, c);
                                 b"ok".to_vec()
