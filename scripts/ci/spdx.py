@@ -12,8 +12,9 @@ mit zwei Zeilen (nach einer Shebang-Zeile bzw. „@echo off“):
     SPDX-License-Identifier: AGPL-3.0-or-later
     SPDX-FileCopyrightText: <Jahr der ersten Fassung>[-2026] Jörg Bernau <contact@onesimus.io>
 
-Ausgenommen sind Dateien, die von Bareos stammen (Lizenz bleibt AGPL-3.0-only
-und die Zeilen von Bareos), erzeugte und Testdaten: siehe SKIP.
+Bareos-nahe Teile (scripts/ci/bareos-derived.txt) bleiben AGPL-3.0-only und tragen
+zusätzlich die Zeilen der Bareos-Rechteinhaber. Ausgenommen sind erzeugte Dateien
+und Testdaten: siehe SKIP.
 """
 import re
 import subprocess
@@ -50,11 +51,36 @@ def first_years():
     return years
 
 
-def header(path, year):
+DERIVED_LIST = "scripts/ci/bareos-derived.txt"
+DERIVED_LICENSE = "AGPL-3.0-only"
+BAREOS_HOLDERS = [
+    "2000-2012 Free Software Foundation Europe e.V.",
+    "2010-2017 Planets Communications B.V.",
+    "2012-2026 Bareos GmbH & Co. KG",
+]
+
+
+def derived_list():
+    """Pfade und Präfixe aus bareos-derived.txt (Bareos-nahe Teile: AGPL-3.0-only)."""
+    try:
+        lines = open(DERIVED_LIST, encoding="utf-8").read().split("\n")
+    except OSError:
+        return []
+    return [l.strip() for l in lines if l.strip() and not l.startswith("#")]
+
+
+def is_derived(path, entries):
+    return any(path.startswith(e) if e.endswith("/") else path == e for e in entries)
+
+
+def header(path, year, entries):
+    """Die Kopfzeilen: eigener Code or-later; Bareos-nahe Teile only mit den Zeilen der Rechteinhaber."""
     c = COMMENT["." + path.rsplit(".", 1)[-1]]
     span = f"{year}-{THIS_YEAR}" if year < THIS_YEAR else f"{THIS_YEAR}"
-    sep = " " if c != "REM" else " "
-    return [f"{c}{sep}SPDX-License-Identifier: {LICENSE}", f"{c}{sep}SPDX-FileCopyrightText: {span} {HOLDER}"]
+    mine = f"{c} SPDX-FileCopyrightText: {span} {HOLDER}"
+    if is_derived(path, entries):
+        return [f"{c} SPDX-License-Identifier: {DERIVED_LICENSE}"] + [f"{c} SPDX-FileCopyrightText: {h}" for h in BAREOS_HOLDERS] + [mine]
+    return [f"{c} SPDX-License-Identifier: {LICENSE}", mine]
 
 
 def split_prologue(lines, path):
@@ -69,7 +95,7 @@ def split_prologue(lines, path):
     return n
 
 
-def process(path, years, apply):
+def process(path, years, apply, entries):
     raw = open(path, "rb").read()
     crlf = b"\r\n" in raw
     bom = raw.startswith(b"\xef\xbb\xbf")
@@ -77,22 +103,17 @@ def process(path, years, apply):
     eol = "\r\n" if crlf else "\n"
     lines = text.split(eol)
     n = split_prologue(lines, path)
-    wanted = header(path, years.get(path, THIS_YEAR))
-    existing = [i for i, l in enumerate(lines[:n + 6]) if "SPDX-License-Identifier" in l]
-    if existing:
-        i = existing[0]
-        ok = LICENSE in lines[i]
-        if ok or not apply:
-            return ok
-        lines[i] = wanted[0]
-        if i + 1 < len(lines) and "SPDX-FileCopyrightText" in lines[i + 1]:
-            return_ok = True
-        else:
-            lines.insert(i + 1, wanted[1])
-    else:
-        if not apply:
-            return False
-        lines[n:n] = wanted
+    wanted = header(path, years.get(path, THIS_YEAR), entries)
+    # the existing header block: consecutive SPDX lines after the prologue
+    end = n
+    while end < len(lines) and "SPDX-" in lines[end]:
+        end += 1
+    current = lines[n:end]
+    ok = bool(current) and current[0] == wanted[0] and all(
+        any(w.split(" ", 1)[1] in c for c in current) for w in wanted[1:] if "Bareos" in w or "Free Software" in w or "Planets" in w)
+    if ok or not apply:
+        return ok
+    lines[n:end] = wanted
     out = eol.join(lines)
     data = (b"\xef\xbb\xbf" if bom else b"") + out.encode("utf-8", "surrogateescape")
     open(path, "wb").write(data)
@@ -102,7 +123,8 @@ def process(path, years, apply):
 def main():
     mode = sys.argv[1] if len(sys.argv) > 1 else "check"
     years = first_years() if mode == "apply" else {}
-    bad = [p for p in tracked() if not process(p, years, mode == "apply")]
+    entries = derived_list()
+    bad = [p for p in tracked() if not process(p, years, mode == "apply", entries)]
     if mode == "check" and bad:
         print("SPDX header missing or not " + LICENSE + ":\n  " + "\n  ".join(bad))
         sys.exit(1)

@@ -4,7 +4,7 @@ description = "Storage Daemon interface — Director/client side of the SD proto
 version.workspace = true
 edition.workspace = true
 authors.workspace = true
-license.workspace = true
+license = "AGPL-3.0-or-later AND AGPL-3.0-only"
 
 [dependencies]
 bareos-bnet.workspace = true

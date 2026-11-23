@@ -7,21 +7,19 @@ Files: *
 Copyright: 2026 Jörg Bernau <contact@onesimus.io>
 License: AGPL-3.0-or-later
 
-Files: proto/*
-Copyright: 2025-2026 Jörg Bernau <contact@onesimus.io>
-           2025 Bareos GmbH & Co. KG
-License: AGPL-3.0-or-later
-Comment: Shared protocol submodule; original notices are preserved.
- The licence of this file group was changed to AGPL-3.0-or-later by decision
- of the owner (2026-11-23).
-
-Files: docs/wiki/commands/* crates/odir/src/ua_commands_table.rs
+Files: crates/bareos-bnet/* crates/bareos-catalog/* crates/bareos-config/*
+ crates/bareos-format/* crates/bareos-orm/* crates/daemon-crate/* crates/outils/*
+ proto/* docs/wiki/commands/* crates/odir/src/ua_commands_table.rs
 Copyright: 2026 Jörg Bernau <contact@onesimus.io>
            2000-2012 Free Software Foundation Europe e.V.
-           2011-2016 Planets Communications B.V.
-           2013-2026 Bareos GmbH & Co. KG
+           2010-2017 Planets Communications B.V.
+           2012-2026 Bareos GmbH & Co. KG
 License: AGPL-3.0-only
-Comment: Includes command help and syntax derived from Bareos upstream sources.
+Comment: Parts derived from Bareos stay AGPL-3.0-only, because Bareos grants
+ version 3 without "or later". Further single files in odir, ofd, osd, oconsole,
+ onesimus-rig and others are listed in scripts/ci/bareos-derived.txt and carry the
+ same notice in their SPDX headers. The package as a whole is AGPL-3.0-only while
+ these parts are included; code without a Bareos origin is AGPL-3.0-or-later.
 
 License: AGPL-3.0-only
                      GNU AFFERO GENERAL PUBLIC LICENSE

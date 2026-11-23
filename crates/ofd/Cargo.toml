@@ -4,7 +4,7 @@ description = "Onesimus File Daemon — Rust rewrite of the Bareos File Daemon"
 version.workspace = true
 edition.workspace = true
 authors.workspace = true
-license.workspace = true
+license = "AGPL-3.0-or-later AND AGPL-3.0-only"
 
 [[bin]]
 name = "ofd"

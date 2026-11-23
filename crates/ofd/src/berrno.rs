@@ -1,4 +1,7 @@
-// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-License-Identifier: AGPL-3.0-only
+// SPDX-FileCopyrightText: 2000-2012 Free Software Foundation Europe e.V.
+// SPDX-FileCopyrightText: 2010-2017 Planets Communications B.V.
+// SPDX-FileCopyrightText: 2012-2026 Bareos GmbH & Co. KG
 // SPDX-FileCopyrightText: 2026 Jörg Bernau <contact@onesimus.io>
 //! lib/berrno.cc BErrNo::bstrerror(): the plain strerror() text in the
 //! messages ("No such file or directory", without Rust's "(os error 2)").

@@ -4,7 +4,7 @@ description = "JSON ORM for Bareos Catalog — serde + sqlx JSONB mapping"
 version.workspace = true
 edition.workspace = true
 authors.workspace = true
-license.workspace = true
+license = "AGPL-3.0-only"
 
 [dependencies]
 sqlx.workspace = true

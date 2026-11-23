@@ -4,7 +4,7 @@ description = "Onesimus Console — Drop-in replacement for Bareos bconsole"
 version.workspace = true
 edition.workspace = true
 authors.workspace = true
-license.workspace = true
+license = "AGPL-3.0-or-later AND AGPL-3.0-only"
 
 [[bin]]
 name = "oconsole"

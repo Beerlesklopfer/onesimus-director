@@ -1,4 +1,7 @@
-// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-License-Identifier: AGPL-3.0-only
+// SPDX-FileCopyrightText: 2000-2012 Free Software Foundation Europe e.V.
+// SPDX-FileCopyrightText: 2010-2017 Planets Communications B.V.
+// SPDX-FileCopyrightText: 2012-2026 Bareos GmbH & Co. KG
 // SPDX-FileCopyrightText: 2026 Jörg Bernau <contact@onesimus.io>
 //! The Storage daemon and catalog part of `label`/`relabel` (ua_label.cc):
 //! SendLabelRequest / native_send_label_request, update_database, the

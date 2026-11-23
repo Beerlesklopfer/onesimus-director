@@ -4,7 +4,7 @@ description = "End-to-end test rig: odir + ofd + bareos-sd (later osd) with a th
 version.workspace = true
 edition.workspace = true
 authors.workspace = true
-license.workspace = true
+license = "AGPL-3.0-or-later AND AGPL-3.0-only"
 publish = false
 
 [dependencies]

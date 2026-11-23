@@ -4,7 +4,7 @@ description = "Onesimus Storage Daemon (binary osd) — Rust replacement for the
 version.workspace = true
 edition.workspace = true
 authors.workspace = true
-license.workspace = true
+license = "AGPL-3.0-or-later AND AGPL-3.0-only"
 
 # Package `osd-daemon`, binary `osd` (ofd audit M1/M2: the package name must
 # differ from the interface `osd`, the binary name may stay). Pitfalls of

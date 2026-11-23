@@ -4,7 +4,7 @@ description = "Common daemon frame of ofd and osd: accept loop, TLS-PSK, Directo
 version.workspace = true
 edition.workspace = true
 authors.workspace = true
-license.workspace = true
+license = "AGPL-3.0-only"
 
 [dependencies]
 aquamarine.workspace = true

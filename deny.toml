@@ -1,6 +1,6 @@
 # cargo-deny: Lizenzen, bekannte Schwachstellen (RustSec) und Quellen der
 # Abhängigkeiten. CI-Schritt "Abhängigkeiten" in .github/workflows/package.yml.
-# Die eigenen Crates stehen unter AGPL-3.0-or-later (Cargo.toml); Abhängigkeiten
+# Eigene Crates: AGPL-3.0-or-later, Bareos-nahe Teile AGPL-3.0-only (Cargo.toml, scripts/ci/bareos-derived.txt); Abhängigkeiten
 # dürfen nur Lizenzen haben, die sich damit verbinden lassen.
 
 [graph]

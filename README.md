@@ -253,11 +253,19 @@ for p in odir ofd oconsole; do cargo deb -p $p --no-build; done   # -> target/de
 
 ## License
 
-GNU Affero General Public License v3.0 or later (`AGPL-3.0-or-later`); see [LICENSE](LICENSE).
-Crates that are not derived from Bareos are dual-licensed
+**The package as a whole is `AGPL-3.0-only`** as long as it contains parts derived
+from Bareos. Bareos grants only "version three of the GNU Affero General Public
+License", without "or later". Those parts keep `AGPL-3.0-only` and the copyright
+lines of the Bareos rights holders in their SPDX headers; the list is
+[scripts/ci/bareos-derived.txt](scripts/ci/bareos-derived.txt) (whole crates:
+`bareos-bnet`, `bareos-catalog`, `bareos-config`, `bareos-format`, `bareos-orm`,
+`daemon-crate`, `outils`, the `proto` submodule, and single files in `odir`, `ofd`,
+`osd` and others). Code without Bareos origin is `AGPL-3.0-or-later`; crates that are
+not derived from Bareos are additionally dual-licensed
 (`AGPL-3.0-or-later OR LicenseRef-Onesimus-Commercial`, see
-[LICENSE-COMMERCIAL.md](LICENSE-COMMERCIAL.md)); the per-crate list is in
-[docs/LIZENZEN.md](docs/LIZENZEN.md).
+[LICENSE-COMMERCIAL.md](LICENSE-COMMERCIAL.md)). The classification of each part and its
+evidence is in [docs/LIZENZEN.md](docs/LIZENZEN.md); a lawyer will decide which parts
+may move to "or later". The licence text is [LICENSE](LICENSE).
 
 Maintainer: Jörg Bernau <contact@onesimus.io>.
 

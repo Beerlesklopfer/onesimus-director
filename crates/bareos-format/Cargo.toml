@@ -4,7 +4,7 @@ description = "Bareos stream and volume format: LStat, Bareos base64, stream ids
 version.workspace = true
 edition.workspace = true
 authors.workspace = true
-license.workspace = true
+license = "AGPL-3.0-only"
 
 [dependencies]
 aquamarine.workspace = true

@@ -4,7 +4,7 @@ description = "Onesimus Volume-Werkzeuge: ols, oscan, oextract (Ersatz für bls,
 version.workspace = true
 edition.workspace = true
 authors.workspace = true
-license.workspace = true
+license = "AGPL-3.0-only"
 
 [lib]
 name = "outils"

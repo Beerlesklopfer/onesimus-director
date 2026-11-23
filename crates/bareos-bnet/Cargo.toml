@@ -4,7 +4,7 @@ description = "BNET wire protocol, TLS, and CRAM-MD5 authentication for Bareos"
 version.workspace = true
 edition.workspace = true
 authors.workspace = true
-license.workspace = true
+license = "AGPL-3.0-only"
 
 [dependencies]
 bareos-format.workspace = true
