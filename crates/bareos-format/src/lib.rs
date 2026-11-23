@@ -36,6 +36,7 @@
 pub mod base64;
 pub mod bash;
 pub mod breg;
+pub mod compression;
 pub mod bsr;
 pub mod filetype;
 pub mod glossary;

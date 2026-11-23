@@ -1,7 +1,7 @@
-//! `obls`: zeigt, was auf einem Datei-Volume steht (Ersatz für `bls`).
+//! `ols`: zeigt, was auf einem Datei-Volume steht (Ersatz für `bls`).
 //!
 //! ```text
-//! obls [-j] [-l] [-k] [-i <JobId>] <Volume-Datei>...
+//! ols [-j] [-l] [-k] [-i <JobId>] <Volume-Datei>...
 //! ```
 //!
 //! * ohne Option: Volume-Label und die Jobs (SOS/EOS-Labels) des Volumes
@@ -32,7 +32,7 @@ struct Options {
     volumes: Vec<PathBuf>,
 }
 
-const USAGE: &str = "usage: obls [-j] [-l] [-k] [-i <JobId>] <volume-file>...\n\
+const USAGE: &str = "usage: ols [-j] [-l] [-k] [-i <JobId>] <volume-file>...\n\
   -j  only the volume label and the jobs\n  -l  long listing of the files\n  -k  do not check block checksums\n  -i  only the files of this JobId";
 
 fn parse_args(args: &[String]) -> Result<Options, String> {
@@ -179,7 +179,7 @@ fn main() -> ExitCode {
         Ok(o) => o,
         Err(e) => {
             if !e.is_empty() {
-                eprintln!("obls: {e}");
+                eprintln!("ols: {e}");
             }
             eprintln!("{USAGE}");
             return ExitCode::from(if e.is_empty() { 0 } else { 2 });
@@ -188,7 +188,7 @@ fn main() -> ExitCode {
     let mut failed = false;
     for volume in &options.volumes {
         if let Err(e) = list(volume, &options) {
-            eprintln!("obls: {e}");
+            eprintln!("ols: {e}");
             failed = true;
         }
     }

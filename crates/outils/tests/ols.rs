@@ -1,4 +1,4 @@
-//! `obls` gegen ein Volume, das `bareos-format` schreibt: Label, ein Job mit
+//! `ols` gegen ein Volume, das `bareos-format` schreibt: Label, ein Job mit
 //! zwei Dateien und EOS.
 
 use std::process::Command;
@@ -35,7 +35,7 @@ fn attributes(index: i32, name: &str, size: i64) -> Vec<u8> {
 }
 
 #[test]
-fn obls_lists_label_job_and_files() {
+fn ols_lists_label_job_and_files() {
     let label = VolumeLabel::new("Vol-0001", "Full", "File", "host", "osd", "Ver. 1", "Build", 1_700_000_000_000_000);
     let start = SessionLabel {
         id: "Bareos 2.0 immortal\n".into(), ver_num: 20, job_id: 42, write_btime: 1_700_000_000_000_000,
@@ -52,13 +52,13 @@ fn obls_lists_label_job_and_files() {
         (2, STREAM_FILE_DATA, b"world!".to_vec()),
         (EOS_LABEL, 42, end.serialize()),
     ]);
-    let dir = std::env::temp_dir().join(format!("obls-test-{}", std::process::id()));
+    let dir = std::env::temp_dir().join(format!("ols-test-{}", std::process::id()));
     std::fs::create_dir_all(&dir).unwrap();
     let path = dir.join("Vol-0001");
     std::fs::write(&path, &bytes).unwrap();
 
     let run = |args: &[&str]| {
-        let out = Command::new(env!("CARGO_BIN_EXE_obls")).args(args).arg(&path).output().unwrap();
+        let out = Command::new(env!("CARGO_BIN_EXE_ols")).args(args).arg(&path).output().unwrap();
         assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
         String::from_utf8(out.stdout).unwrap()
     };
@@ -76,11 +76,11 @@ fn obls_lists_label_job_and_files() {
     let mut broken = bytes.clone();
     broken[100] ^= 0xff;
     std::fs::write(&path, &broken).unwrap();
-    let out = Command::new(env!("CARGO_BIN_EXE_obls")).arg(&path).output().unwrap();
+    let out = Command::new(env!("CARGO_BIN_EXE_ols")).arg(&path).output().unwrap();
     assert!(!out.status.success());
     assert!(String::from_utf8_lossy(&out.stderr).contains("at byte 0"), "{}", String::from_utf8_lossy(&out.stderr));
     // -k does not look at the checksum: the damaged byte is in a record, the listing still works
-    let skipped = Command::new(env!("CARGO_BIN_EXE_obls")).arg("-k").arg(&path).output().unwrap();
+    let skipped = Command::new(env!("CARGO_BIN_EXE_ols")).arg("-k").arg(&path).output().unwrap();
     assert!(!String::from_utf8_lossy(&skipped.stderr).contains("checksum"), "{}", String::from_utf8_lossy(&skipped.stderr));
     let _ = std::fs::remove_dir_all(&dir);
 }

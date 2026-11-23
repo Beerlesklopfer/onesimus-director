@@ -361,6 +361,7 @@ version = "25.1.2+onesimus.0.2.0"
 dependencies = [
  "aquamarine",
  "base64 0.22.1",
+ "flate2",
  "libc",
  "regex",
 ]
@@ -2456,7 +2457,9 @@ dependencies = [
 name = "outils"
 version = "25.1.2+onesimus.0.2.0"
 dependencies = [
+ "bareos-config",
  "bareos-format",
+ "libc",
 ]
 
 [[package]]

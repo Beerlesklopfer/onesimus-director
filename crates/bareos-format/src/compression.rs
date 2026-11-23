@@ -11,15 +11,22 @@
 
 use std::io::Read;
 
-use crate::streams::*;
+use crate::stream::*;
 
 // include/ch.h
+/// `COMPRESS_GZIP` (include/ch.h): zlib in a compression stream header.
 pub const COMPRESS_GZIP: u32 = 0x475a_4950;
+/// `COMPRESS_LZO1X`: LZO1X, loaded from liblzo2 at run time.
 pub const COMPRESS_LZO1X: u32 = 0x4c5a_4f58;
+/// `COMPRESS_FZFZ`: fastlzlib block stream with FastLZ blocks.
 pub const COMPRESS_FZFZ: u32 = 0x465A_465A;
+/// `COMPRESS_FZ4L`: fastlzlib block stream with LZ4 blocks (fast).
 pub const COMPRESS_FZ4L: u32 = 0x465A_344C;
+/// `COMPRESS_FZ4H`: fastlzlib block stream with LZ4 blocks (high compression).
 pub const COMPRESS_FZ4H: u32 = 0x465A_3448;
+/// Version of the compression stream header (`COMP_HEAD_VERSION`).
 const COMP_HEAD_VERSION: u16 = 1;
+/// Size of the compression stream header in bytes.
 const COMP_HEADER_SIZE: usize = 12;
 
 /// DecompressData() with want_data_stream=false. Err: the M_ERROR text.
@@ -57,6 +64,7 @@ pub fn decompress_data(last_fname: &str, stream: i32, data: &[u8]) -> Result<Vec
     }
 }
 
+/// zlib `uncompress()` of one record; the error is the `M_ERROR` text.
 fn zlib(last_fname: &str, data: &[u8]) -> Result<Vec<u8>, String> {
     let mut out = Vec::with_capacity(data.len() * 4);
     flate2::read::ZlibDecoder::new(data)
@@ -77,8 +85,11 @@ fn zlib_strerror(e: &std::io::Error) -> &'static str {
 // fastlzlib block stream
 // ---------------------------------------------------------------------------
 
+/// Size of the fastlzlib stream header in bytes.
 const FLZ_HEADER_SIZE: usize = 16;
+/// Block type: stored uncompressed.
 const BLOCK_TYPE_RAW: u8 = 0x10;
+/// Block type: compressed.
 const BLOCK_TYPE_COMPRESSED: u8 = 0xc0;
 
 /// fastlzlibDecompress() over a whole buffer: blocks of a 16 byte header
@@ -287,14 +298,17 @@ fn dl_symbol(_libs: &[&std::ffi::CStr], _symbol: &std::ffi::CStr) -> Option<usiz
     None
 }
 
+/// `lzo1x_decompress_safe()` of liblzo2.
 type LzoDecompress = unsafe extern "C" fn(*const u8, usize, *mut u8, *mut usize, *mut libc::c_void) -> libc::c_int;
 
+/// The liblzo2 decompressor, if the library can be loaded.
 fn lzo_fn() -> Option<LzoDecompress> {
     static F: std::sync::OnceLock<Option<usize>> = std::sync::OnceLock::new();
     let addr = *F.get_or_init(|| dl_symbol(&[c"liblzo2.so.2", c"liblzo2.so"], c"lzo1x_decompress_safe"));
     addr.map(|a| unsafe { std::mem::transmute::<usize, LzoDecompress>(a) })
 }
 
+/// LZO1X decompression of one record; the error is the `M_ERROR` text.
 fn lzo(last_fname: &str, data: &[u8]) -> Result<Vec<u8>, String> {
     let Some(f) = lzo_fn() else {
         return Err(format!("Compression algorithm 0x{COMPRESS_LZO1X:x} found, but not supported!\n"));
@@ -371,7 +385,9 @@ pub fn compressor_name(algo: u32) -> &'static str {
     }
 }
 
+/// Default block size of the fastlzlib writer.
 const FLZ_DEFAULT_BLOCK_SIZE: usize = 262144;
+/// Smallest block size the fastlzlib writer accepts.
 const FLZ_MIN_BLOCK_SIZE: usize = 64;
 
 /// fastlzlibCompress(Z_FINISH) over a whole buffer (fastlz_compress_hdr per
@@ -406,14 +422,17 @@ pub fn fastlzlib_compress(input: &[u8], lz4: bool) -> Vec<u8> {
     out
 }
 
+/// Hash of a 32-bit value into `bits` bits (FastLZ match table).
 fn hash_bits(v: u32, bits: u32) -> usize {
     (v.wrapping_mul(2654435761) >> (32 - bits)) as usize
 }
 
+/// The little-endian `u32` at `i`.
 fn read_u32(b: &[u8], i: usize) -> u32 {
     u32::from_le_bytes([b[i], b[i + 1], b[i + 2], b[i + 3]])
 }
 
+/// Appends a FastLZ run length.
 fn push_len(out: &mut Vec<u8>, mut r: usize) {
     while r >= 255 {
         out.push(255);
@@ -607,6 +626,7 @@ pub fn fastlz1_compress_block(src: &[u8]) -> Vec<u8> {
     out
 }
 
+/// zlib `compress2()` of libz.
 type ZCompress2 = unsafe extern "C" fn(*mut u8, *mut libc::c_ulong, *const u8, libc::c_ulong, libc::c_int) -> libc::c_int;
 
 /// compress2() of the system zlib (what the original's deflate() on a
@@ -636,8 +656,10 @@ fn gzip_compress(level: i32, data: &[u8]) -> Result<Vec<u8>, String> {
     enc.finish().map_err(|e| format!("Compression deflate error: {e}\n"))
 }
 
+/// `lzo1x_1_compress()` of liblzo2.
 type LzoCompress = unsafe extern "C" fn(*const u8, usize, *mut u8, *mut usize, *mut libc::c_void) -> libc::c_int;
 
+/// The liblzo2 compressor, if the library can be loaded.
 fn lzo_compress_fn() -> Option<LzoCompress> {
     static F: std::sync::OnceLock<Option<usize>> = std::sync::OnceLock::new();
     let addr = *F.get_or_init(|| dl_symbol(&[c"liblzo2.so.2", c"liblzo2.so"], c"lzo1x_1_compress"));

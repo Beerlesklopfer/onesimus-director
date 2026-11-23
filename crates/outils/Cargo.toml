@@ -1,6 +1,6 @@
 [package]
 name = "outils"
-description = "Onesimus Volume-Werkzeuge: obls (Volume lesen), später obscan, obextract"
+description = "Onesimus Volume-Werkzeuge: ols, oscan, oextract (Ersatz für bls, bscan, bextract)"
 version.workspace = true
 edition.workspace = true
 authors.workspace = true
@@ -11,8 +11,18 @@ name = "outils"
 path = "src/lib.rs"
 
 [[bin]]
-name = "obls"
-path = "src/bin/obls.rs"
+name = "oscan"
+path = "src/bin/oscan.rs"
+
+[[bin]]
+name = "oextract"
+path = "src/bin/oextract.rs"
+
+[[bin]]
+name = "ols"
+path = "src/bin/ols.rs"
 
 [dependencies]
 bareos-format.workspace = true
+libc.workspace = true
+bareos-config.workspace = true

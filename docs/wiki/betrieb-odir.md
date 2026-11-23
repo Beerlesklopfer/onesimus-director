@@ -427,14 +427,16 @@ Vor dem Rückweg auf `bareos-dir` müssen Onesimus-eigene Direktiven (`gRPC Port
 `gRPC TLS Certificate`, `gRPC TLS Key`, `mDNS Advertise`) aus der Konfiguration
 entfernt werden; `bareos-dir` kennt sie nicht.
 
-## Volume-Werkzeuge (obls, später obscan und obextract)
+## Volume-Werkzeuge (ols, oscan, oextract)
 
-Das Paket `odir` bringt die Rust-Ersatzwerkzeuge für `bls`, `bscan` und `bextract` mit (Crate `crates/outils`, installiert nach `/usr/bin`). Sie lesen Datei-Volumes (auch die von bareos-sd und osd geschriebenen, Blockformat BB01/BB02) ohne Director, Storage Daemon und Katalog.
+Das Paket `odir` bringt die Rust-Ersatzwerkzeuge für `bls`, `bscan` und `bextract` mit (Crate `crates/outils`, installiert nach `/usr/bin`). Sie lesen Datei-Volumes (auch die von bareos-sd und osd geschriebenen, Blockformat BB01/BB02) ohne Director und Storage Daemon, Block für Block (Speicherbedarf: ein Block). Bandgeräte lesen sie nicht.
 
-| Werkzeug | Stand | Zweck |
+| Werkzeug | Aufruf | Zweck |
 |---|---|---|
-| `obls` | fertig (23.11.2026) | `obls [-j] [-l] [-k] [-i <JobId>] <Volume-Datei>...`: Volume-Label, Jobs (SOS/EOS), Dateien; `-j` nur Label und Jobs, `-l` lange Zeilen, `-k` ohne Prüfsummen, `-i` nur ein Job. Liest Block für Block, der Speicherbedarf ist ein Block. |
-| `obscan` | offen | Katalog aus Volumes wiederherstellen (`bscan`) |
-| `obextract` | offen | Dateien aus Volumes ohne Katalog zurückschreiben (`bextract`) |
+| `ols` | `ols [-j] [-l] [-k] [-i <JobId>] <Volume>...` | Label, Jobs (SOS/EOS) und Dateien; `-j` nur Label und Jobs, `-l` lange Zeilen, `-i` ein Job, `-k` ohne Prüfsummen |
+| `oextract` | `oextract [-i <JobId>] [-p <Präfix>]... [-n] [-O] [-k] <Ziel> <Volume>...` | Dateien zurückschreiben: Dateien, Verzeichnisse, Symlinks, Hartlinks, spärliche und komprimierte Daten (gzip, lz4, fastlz, lzo), Zeit und Rechte; `-n` Trockenlauf, `-O` Eigentümer (Root). Nicht: Windows-Datenströme, ACLs, erweiterte Attribute, Geräte, verschlüsselte Daten (gemeldet). Pfade mit `..` werden abgewiesen |
+| `oscan` | `oscan [-s] [-m] [-p <Pool>] [-x] [-c <Verz.>] [-C <Catalog>] [-k] <Volume>...` | Katalog aus Volumes aufbauen: Pool, Client, FileSet, Media, Job, JobMedia und mit `-s` die File-Einträge samt Prüfsumme. Ohne `-x` gibt es das SQL-Skript aus (ändert nichts), mit `-x` führt es `psql` in einer Transaktion aus (Verbindung aus der Catalog-Ressource von `-c`, Voreinstellung `/etc/bareos/bareos-dir.d`) |
 
-Getestet gegen ein von `bareos-format` aufgebautes Volume (`crates/outils/tests/obls.rs`) und gegen ein von osd im Rig geschriebenes. Gegen ein Volume von bareos-sd noch nicht verglichen; Bandgeräte werden nicht gelesen, nur Dateien.
+`oscan` ist wiederholbar: was im Katalog steht (JobId, Volume, Dateien eines Jobs), wird nicht noch einmal angelegt; steht eine JobId unter einem anderen Job-Namen im Katalog, bricht das Skript ab. Ein neu angelegtes Volume bekommt den Status `Full` (`update volume volstatus=Append` gibt es frei), ein neuer Pool die Art `Backup`. JobBytes kommt aus dem End-Label (was der SD schrieb), nicht vom FD. Start und Ende im JobMedia sind Byte-Positionen in der Datei, wie osd und bareos-sd sie führen. Eigene Angaben (Herkunft eines gescannten Jobs) gehören ins Schema `onesimus`, nicht in die Standardtabellen: `oscan` schreibt deshalb nichts in `Job.Comment`.
+
+Getestet: `crates/outils/tests/` gegen ein von `bareos-format` aufgebautes Volume; im Gerüst (`onesimus-rig`, Test `outils`) gegen ein Volume, das osd schrieb: Job, Dateien und Volume werden gelöscht, `oscan -s` baut sie auf (Job, JobMedia gleich dem Original), die Rücksicherung durch den Director und `oextract` ohne Director ergeben beide denselben Baum wie die Quelle. Nicht verglichen: Volumes von bareos-sd, Mehr-Volume-Jobs mit `oscan`.

@@ -1,11 +1,14 @@
-//! Gemeinsamer Teil der Onesimus-Volume-Werkzeuge (`obls`, später `obscan`,
-//! `obextract`): ein Volume Block für Block aus einer Datei lesen.
+//! Gemeinsamer Teil der Onesimus-Volume-Werkzeuge (`ols`, später `oscan`,
+//! `oextract`): ein Volume Block für Block aus einer Datei lesen.
 //!
 //! Die Werkzeuge ersetzen `bls`, `bscan` und `bextract` von Bareos. Sie
 //! lesen Datei-Volumes (auch die von bareos-sd geschriebenen, Blockformat
 //! BB01/BB02) und brauchen weder Director noch Storage Daemon noch Katalog.
 
 #![deny(missing_docs)]
+
+pub mod extract;
+pub mod scan;
 
 use std::fs::File;
 use std::io::Read;
@@ -75,17 +78,24 @@ fn read_up_to(file: &mut File, buf: &mut [u8]) -> std::io::Result<usize> {
     Ok(done)
 }
 
-/// Der Dateiname aus einem Attributsatz (`STREAM_UNIX_ATTRIBUTES[_EX]`):
-/// `<FileIndex> <Typ> <Name>\0<LStat>\0<Linkziel>\0…`; Name, LStat und
-/// Linkziel, wenn der Satz so aufgebaut ist.
-pub fn parse_attributes(data: &[u8]) -> Option<(String, Vec<u8>, String)> {
+/// Name (Rohbytes, auf Unix ohne Umwandlung gültig), LStat und Linkziel
+/// aus einem Attributsatz (`STREAM_UNIX_ATTRIBUTES[_EX]`):
+/// `<FileIndex> <Typ> <Name>\0<LStat>\0<Linkziel>\0…`.
+pub fn parse_attributes_raw(data: &[u8]) -> Option<(Vec<u8>, Vec<u8>, Vec<u8>)> {
     let mut parts = data.splitn(3, |&b| b == b' ');
     let (_index, _kind, rest) = (parts.next()?, parts.next()?, parts.next()?);
     let mut fields = rest.split(|&b| b == 0);
-    let name = String::from_utf8_lossy(fields.next()?).into_owned();
+    let name = fields.next()?.to_vec();
     let lstat = fields.next().unwrap_or_default().to_vec();
-    let link = String::from_utf8_lossy(fields.next().unwrap_or_default()).into_owned();
+    let link = fields.next().unwrap_or_default().to_vec();
     Some((name, lstat, link))
+}
+
+/// Wie [`parse_attributes_raw`], Name und Linkziel als Text (ungültiges UTF-8
+/// wird ersetzt: zur Anzeige und für SQL, nicht zum Schreiben von Dateien).
+pub fn parse_attributes(data: &[u8]) -> Option<(String, Vec<u8>, String)> {
+    let (name, lstat, link) = parse_attributes_raw(data)?;
+    Some((String::from_utf8_lossy(&name).into_owned(), lstat, String::from_utf8_lossy(&link).into_owned()))
 }
 
 #[cfg(test)]

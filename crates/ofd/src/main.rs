@@ -20,7 +20,7 @@ mod backup;
 mod berrno;
 #[cfg_attr(windows, path = "broker_unsupported.rs")]
 mod broker;
-mod compression;
+use bareos_format::compression;
 mod config;
 mod create_file;
 mod digest;
