@@ -21089,6 +21089,81 @@
         ]
       },
       {
+        "word": ".volume_damaged",
+        "aliases": [],
+        "dot": true,
+        "origin": "onesimus",
+        "description": "Damaged Volume: affected jobs, copies, new Full backups (Onesimus)",
+        "value": null,
+        "long": [
+          "Onesimus extension: the flow for a damaged Volume (tape tear, disk failure, a broken file Volume). Without yes (or with dryrun) it only reports: the jobs that have data on the Volume (a job over several Volumes is lost as a whole, the other Volumes are named), for each job whether a usable copy exists (a finished Backup or Copy job of the same original that lies on no damaged Volume and no Volume with status Error), the Full backups to start for the jobs without a copy, and the later Incremental and Differential jobs of a damaged Full.",
+          "With yes the Volume is set to VolStatus Error and the damaged jobs that have a usable copy are purged; the oldest copy becomes a Backup job (UpgradeCopies), so a restore finds it. Jobs without a copy stay in the catalog. full additionally starts a Full of every job without a copy."
+        ],
+        "examples": [
+          {
+            "line": ".volume_damaged volume=Vol-0007",
+            "explanation": "what a damaged Volume costs"
+          },
+          {
+            "line": ".volume_damaged volume=Vol-0007 yes full",
+            "explanation": "set it to Error, promote the copies, start new Fulls"
+          }
+        ],
+        "see_also": [],
+        "free_text": false,
+        "args": [
+          {
+            "name": "volume",
+            "kind": "value",
+            "type": "string",
+            "required": true,
+            "repeatable": false,
+            "group": null,
+            "list": false,
+            "positional": false,
+            "value_optional": false,
+            "description": "Volume name"
+          },
+          {
+            "name": "dryrun",
+            "kind": "keyword",
+            "type": "string",
+            "required": false,
+            "repeatable": false,
+            "group": null,
+            "list": false,
+            "positional": false,
+            "value_optional": false,
+            "description": "Only report"
+          },
+          {
+            "name": "yes",
+            "kind": "keyword",
+            "type": "string",
+            "required": false,
+            "repeatable": false,
+            "group": null,
+            "list": false,
+            "positional": false,
+            "value_optional": false,
+            "description": "Set the Volume to Error and purge the damaged jobs that have a copy"
+          },
+          {
+            "name": "full",
+            "kind": "keyword",
+            "type": "string",
+            "required": false,
+            "repeatable": false,
+            "group": null,
+            "list": false,
+            "positional": false,
+            "value_optional": false,
+            "description": "With yes: start a Full of the jobs without a copy"
+          }
+        ],
+        "subs": []
+      },
+      {
         "word": ".ovfs_status",
         "aliases": [],
         "dot": true,

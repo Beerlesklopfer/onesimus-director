@@ -313,3 +313,47 @@ fn bareos_sd_changes_the_read_device() {
 fn osd_changes_the_read_device() {
     restore_of_the_copy_changes_the_read_device(39691, osd());
 }
+
+/// `.volume_damaged`: a backup and its copy on a second volume; the report shows the
+/// copy, `yes` sets the Volume to Error and promotes the copy (the original job goes).
+#[test]
+#[ignore = "needs the osd binary"]
+fn a_damaged_volume_promotes_the_copy() {
+    onesimus_rig::build_workspace_packages(&["odir", "ofd", "osd-daemon"]).unwrap_or_else(|e| panic!("{e}"));
+    let mut options = RigOptions::new(39731);
+    options.sd = Some(osd());
+    options.copy_same_sd = true;
+    let rig = Rig::start(options).unwrap_or_else(|e| panic!("Gerüst startet nicht: {e}"));
+    let backup = rig.run_job("VBackup").unwrap_or_else(|e| panic!("{e}"));
+    assert_eq!(rig.wait_job(backup, JOB_TIMEOUT).unwrap_or_else(|e| panic!("{e}")).status, 'T');
+    let copy = rig.run_job("VCopy").unwrap_or_else(|e| panic!("{e}"));
+    rig.wait_job(copy, JOB_TIMEOUT).unwrap_or_else(|e| panic!("{e}"));
+    let deadline = std::time::Instant::now() + JOB_TIMEOUT;
+    let new_job: u32 = loop {
+        let jobs = rig.catalog().query("SELECT JobId, JobStatus FROM Job WHERE Type = 'C' ORDER BY 1").unwrap_or_default();
+        if let Some(line) = jobs.lines().next().filter(|l| l.ends_with("|T")) {
+            break line.split('|').next().and_then(|v| v.trim().parse().ok()).unwrap_or(0);
+        }
+        assert!(std::time::Instant::now() < deadline, "the copy does not end:\n{jobs}\n{}", rig.diagnostics());
+        std::thread::sleep(Duration::from_secs(2));
+    };
+    let volume = rig.catalog().query("SELECT m.VolumeName FROM JobMedia jm JOIN Media m ON m.MediaId = jm.MediaId WHERE jm.JobId = 1 LIMIT 1").unwrap_or_default().trim().to_string();
+    assert!(volume.starts_with("VVol-"), "{volume}");
+
+    // the report changes nothing
+    let report = rig.command(&format!(".volume_damaged volume={volume}")).unwrap_or_else(|e| panic!("{e}"));
+    eprintln!("{report}");
+    assert!(report.contains("JobId      1") && report.contains(&format!("copy: JobId {new_job}")), "{report}");
+    assert!(report.contains("dry run"), "{report}");
+    let status = rig.catalog().query(&format!("SELECT VolStatus FROM Media WHERE VolumeName = '{volume}'")).unwrap_or_default();
+    assert!(!status.contains("Error"), "the dry run changed the volume: {status}");
+
+    // yes: Error, the original goes, the copy is a Backup job
+    let done = rig.command(&format!(".volume_damaged volume={volume} yes")).unwrap_or_else(|e| panic!("{e}"));
+    eprintln!("{done}");
+    assert!(done.contains("is now in status Error") && done.contains("their copies are Backup jobs now"), "{done}");
+    let status = rig.catalog().query(&format!("SELECT VolStatus FROM Media WHERE VolumeName = '{volume}'")).unwrap_or_default();
+    assert!(status.contains("Error"), "{status}");
+    let jobs = rig.catalog().query(&format!("SELECT JobId, Type FROM Job WHERE JobId IN (1, {new_job}) ORDER BY 1")).unwrap_or_default();
+    assert_eq!(jobs.trim(), format!("{new_job}|B"), "the original is gone, the copy is a backup:\n{jobs}");
+}

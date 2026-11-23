@@ -1511,6 +1511,17 @@ pub static DOCS: &[Doc] = &[
         ],
     },
     Doc {
+        path: ".volume_damaged",
+        long: &[
+            "Onesimus extension: the flow for a damaged Volume (tape tear, disk failure, a broken file Volume). Without yes (or with dryrun) it only reports: the jobs that have data on the Volume (a job over several Volumes is lost as a whole, the other Volumes are named), for each job whether a usable copy exists (a finished Backup or Copy job of the same original that lies on no damaged Volume and no Volume with status Error), the Full backups to start for the jobs without a copy, and the later Incremental and Differential jobs of a damaged Full.",
+            "With yes the Volume is set to VolStatus Error and the damaged jobs that have a usable copy are purged; the oldest copy becomes a Backup job (UpgradeCopies), so a restore finds it. Jobs without a copy stay in the catalog. full additionally starts a Full of every job without a copy.",
+        ],
+        examples: &[
+            (".volume_damaged volume=Vol-0007", "what a damaged Volume costs"),
+            (".volume_damaged volume=Vol-0007 yes full", "set it to Error, promote the copies, start new Fulls"),
+        ],
+    },
+    Doc {
         path: ".ovfs_status",
         long: &[
             "Onesimus extension: shows whether the PostgreSQL extension ovfs is installed and usable in the catalog database and which path answers the .ovfs commands, the extension or the equivalent plain SQL fallback in the Director. Both give the same results; the extension is faster on large catalogs. If the extension is not usable the reason is shown.",

@@ -23,6 +23,7 @@ pub mod catalog;
 pub mod extra;
 pub mod purge;
 pub mod purge_bulk;
+pub mod volume_damaged;
 pub mod autoprune;
 pub mod show;
 pub mod show_items;

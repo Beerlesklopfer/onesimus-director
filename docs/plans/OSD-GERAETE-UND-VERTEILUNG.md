@@ -223,6 +223,7 @@ Gilt für echte Bänder, Plattenbänder und Datei-Volumes.
   5. für Clients ohne Kopie einen neuen Full vorschlagen bzw. mit `yes` starten;
   6. bei Plattenbändern Magazin-Barcode und Seriennummer bzw. LUN nennen (welche Platte zu ziehen ist).
   Mit `dryrun` nur die Übersicht. Unabhängig von osd umsetzbar; Backlog-Punkt V-1.
+  **Umgesetzt (23.11.2026) als `.volume_damaged volume=<v> [dryrun | yes] [full]`**: Schritte 1 bis 5 (ohne Zweige und ohne Plattenband-Angaben). Bareos stuft die Kopie so hoch: beim Löschen oder Purgen des Original-Jobs macht `UpgradeCopies` (cats/sql_update.cc) die älteste Kopie zum Backup und entfernt den Copy-Steuerjob; odir hat das in `purge_jobs` und nutzt es hier.
 
 ## Gerätearten
 

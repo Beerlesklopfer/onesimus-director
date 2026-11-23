@@ -174,6 +174,9 @@ pub fn build_registry() -> Vec<CommandDef> {
         // Configuration CRUD (Onesimus extension, raw text; same logic as the DirectorApi RPCs)
         CommandDef { name: ".config", aliases: &[], description: "Read, create, change, delete configuration resources as raw text (Onesimus)", handler: commands::config_crud::cmd_dot_config, dot_command: true },
 
+        // Damaged Volume (Onesimus extension, backlog V-1)
+        CommandDef { name: ".volume_damaged", aliases: &[], description: "Damaged Volume: affected jobs, copies, new Full backups (Onesimus)", handler: commands::volume_damaged::cmd_volume_damaged, dot_command: true },
+
         // OVFS (Onesimus extension, no Bareos equivalent; exact names only)
         CommandDef { name: ".ovfs_status", aliases: &[], description: "Show whether restore trees use the ovfs extension or the Director fallback", handler: commands::ovfs::cmd_ovfs_status, dot_command: true },
         CommandDef { name: ".ovfs_latest", aliases: &[], description: "Job chain of a client's latest state (restore option 5)", handler: commands::ovfs::cmd_ovfs_latest, dot_command: true },

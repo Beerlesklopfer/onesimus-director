@@ -230,6 +230,7 @@ pub fn describe(name: &str) -> Option<Node> {
             val("dirid", "Directory IDs").list(), val("hardlink", "JobId,FileIndex pairs").list(), kw("useemptypath", "Use an empty path"),
         ]),
         ".config" => config_crud(),
+        ".volume_damaged" => sub(name, "").args(vec![val("volume", "Volume name").req(), kw("dryrun", "Only report"), kw("yes", "Set the Volume to Error and purge the damaged jobs that have a copy"), kw("full", "With yes: start a Full of the jobs without a copy")]),
         ".ovfs_status" => sub(name, "").args(vec![kw("refresh", "Check the extension again now"), json_kw()]),
         ".ovfs_latest" => sub(name, "").args(vec![res("client", "Client name", CLIENTS).req(), res("fileset", "FileSet name", FILESETS), json_kw()]),
         ".ovfs_tree" => sub(name, "").args(vec![
