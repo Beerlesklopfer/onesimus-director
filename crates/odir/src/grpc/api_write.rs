@@ -1270,7 +1270,7 @@ mod tests {
                    "configure update client=c1 port=9102 address=h");
         assert_eq!(line("ConfigureUpdate", json!({"resource_type": 3, "name": "j", "directives": {"newpool": "Full"}})),
                    "configure update job=j newpool=Full");
-        assert_eq!(line("ConfigureUpdate", json!({"resource_type": 6, "name": "s", "directives": {"healthcheckinterval": "1 hour"}, "overlay": true})),
+        assert_eq!(line("ConfigureUpdate", json!({"resource_type": 4, "name": "s", "directives": {"healthcheckinterval": "1 hour"}, "overlay": true})),
                    "configure update storage=s healthcheckinterval=\"1 hour\" overlay");
         assert!(err("ConfigureUpdate", json!({"resource_type": 1, "name": "c1"})).contains("at least one"));
         assert_eq!(line("ConfigureUpdate", json!({"resource_type": 1, "name": "c1", "directives": {"Enabled": "no"}})),
