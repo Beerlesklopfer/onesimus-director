@@ -140,7 +140,7 @@ fn handle_fd(d: &Daemon, mut bnet: AnyBnet, job_name: &str, breaker: Breaker, se
     match auth.two_way_authenticate(&mut bnet, true) {
         Ok(r) if r.success => {
             tracing::debug!("session {session}: OK Authentication jid={} Job {}", job.cmd.job_id, job.cmd.job);
-            job.connect_fd(FdConnection { channel: Box::new(bnet), breaker, sd });
+            job.connect_fd(FdConnection { channel: Box::new(bnet), breaker, sd, replicate: false });
         }
         _ => {
             tracing::error!("session {session}: Authorization problem: Two way security handshake failed with File daemon");
@@ -196,10 +196,46 @@ fn connect_passive_fd_grpc(d: &Daemon, job: &Arc<Job>, target: &onesimus_bnet_gr
             let mut io = bnet.into_inner();
             io.set_read_timeout(None);
             let channel: AnyBnet = BnetStream::new(Box::new(io));
-            Ok(FdConnection { channel: Box::new(channel), breaker: Breaker::Grpc(close), sd: false })
+            Ok(FdConnection { channel: Box::new(channel), breaker: Breaker::Grpc(close), sd: false, replicate: false })
         }
         Ok(_) => Err("Failed to authenticate File daemon.".into()),
         Err(e) => Err(format!("CRAM: {e}")),
+    }
+}
+
+/// `ReplicateCmd` (stored/dir_cmd.cc): the reading SD of a Copy/Migrate
+/// connects to the writing SD at `addr:port` (retrying for up to 30 s),
+/// TLS-PSK with identity `R_JOB\x1e<Job>` and the job's key when `ssl` is
+/// `kBnetTlsAuto`, `Hello Start Storage Job <Job>`, CRAM-MD5 with the key
+/// (`Authorization`). `job` is the Job of the *writing* side (the copy).
+pub fn connect_to_storage(d: &Daemon, job: &str, key: &str, addr: &str, port: u16, ssl: i32) -> Result<FdConnection, String> {
+    let deadline = Instant::now() + Duration::from_secs(30);
+    let tcp = loop {
+        let attempt = (addr, port)
+            .to_socket_addrs()
+            .map_err(|e| e.to_string())
+            .and_then(|mut a| a.next().ok_or_else(|| "no address".to_string()))
+            .and_then(|sa| TcpStream::connect_timeout(&sa, Duration::from_secs(10)).map_err(|e| e.to_string()));
+        match attempt {
+            Ok(s) => break s,
+            Err(e) if Instant::now() >= deadline => return Err(format!("connect {addr}:{port}: {e}")),
+            Err(_) => std::thread::sleep(Duration::from_secs(1)),
+        }
+    };
+    tcp.set_nodelay(true).ok();
+    let breaker = Breaker::socket(tcp.try_clone().ok());
+    let stream: Box<dyn Rw> = if ssl == TLS_AUTO {
+        let identity = format!("R_JOB\x1e{job}");
+        Box::new(tls_psk::psk_connect(tcp, &identity, key.as_bytes()).map_err(|e| format!("TLS: {e}"))?)
+    } else {
+        Box::new(tcp)
+    };
+    let mut bnet = BnetStream::new(stream);
+    bnet.send_str(&format!("Hello Start Storage Job {job}\n")).map_err(|e| e.to_string())?;
+    let auth = CramMd5Auth::new_raw(key, &format!("R_STORAGE::{}", d.name()), 2);
+    match auth.two_way_authenticate(&mut bnet, false) {
+        Ok(r) if r.success => Ok(FdConnection { channel: Box::new(bnet), breaker, sd: false, replicate: true }),
+        _ => Err("Failed to authenticate the Storage daemon.".into()),
     }
 }
 
@@ -233,7 +269,7 @@ fn connect_passive_fd_bnet(d: &Daemon, job: &Arc<Job>, addr: &str, port: u16, ss
     bnet.send_str(&format!("Hello Storage calling Start Job {}\n", job.cmd.job)).map_err(|e| e.to_string())?;
     let auth = CramMd5Auth::new_raw(&job.auth_key, &format!("R_STORAGE::{}", d.name()), 2);
     match auth.two_way_authenticate(&mut bnet, false) {
-        Ok(r) if r.success => Ok(FdConnection { channel: Box::new(bnet), breaker, sd: false }),
+        Ok(r) if r.success => Ok(FdConnection { channel: Box::new(bnet), breaker, sd: false, replicate: false }),
         _ => Err("Failed to authenticate File daemon.".into()),
     }
 }

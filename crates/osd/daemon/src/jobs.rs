@@ -166,6 +166,8 @@ pub struct FdConnection {
     pub breaker: Breaker,
     /// The peer is the reading SD of a Copy/Migrate (`Hello Start Storage Job`), not an FD.
     pub sd: bool,
+    /// The connection osd made to the writing SD of a Copy (`replicate`); osd sends the data.
+    pub replicate: bool,
 }
 
 /// One job of the SD (`JobControlRecord` of `stored`).

@@ -22,14 +22,19 @@ const JOB_TIMEOUT: Duration = Duration::from_secs(240);
 /// Entries of the rig's test tree.
 const ENTRIES: u64 = 13;
 
-/// Backup with bareos-sd, Copy to osd, Restore of the copy from osd.
-#[test]
-#[ignore = "needs /usr/sbin/bareos-sd and the osd binary"]
-fn bareos_sd_copies_to_osd_and_the_copy_restores() {
+/// The osd binary of the workspace.
+fn osd() -> std::path::PathBuf {
+    onesimus_rig::prereq::target_profile_dir().join("osd")
+}
+
+/// Backup on the reading SD `reader`, Copy to the writing SD `writer`
+/// (`copy_target`), Restore of the copy from the writer, compared with the
+/// source tree. `media` is the media type the volume of the copy carries.
+fn copy_and_restore(base_port: u16, reader: std::path::PathBuf, writer: std::path::PathBuf) {
     onesimus_rig::build_workspace_packages(&["odir", "ofd", "osd-daemon"]).unwrap_or_else(|e| panic!("{e}"));
-    let mut options = RigOptions::new(39561);
-    options.sd = Some("/usr/sbin/bareos-sd".into());
-    options.copy_target = Some(onesimus_rig::prereq::target_profile_dir().join("osd"));
+    let mut options = RigOptions::new(base_port);
+    options.sd = Some(reader);
+    options.copy_target = Some(writer);
     let rig = Rig::start(options).unwrap_or_else(|e| panic!("Gerüst startet nicht: {e}"));
 
     let backup = rig.run_job("VBackup").unwrap_or_else(|e| panic!("{e}"));
@@ -80,6 +85,29 @@ fn bareos_sd_copies_to_osd_and_the_copy_restores() {
     assert_eq!(row.status, 'T', "restore: {row:?}\n{}\n{}", rig.job_log(restore), rig.diagnostics());
     let (code, diff) = rig.diff_restore();
     assert_eq!(code, 0, "restore of the copy differs from the source:\n{diff}");
+}
+
+/// Backup with bareos-sd, Copy to osd, Restore of the copy from osd.
+#[test]
+#[ignore = "needs /usr/sbin/bareos-sd and the osd binary"]
+fn bareos_sd_copies_to_osd_and_the_copy_restores() {
+    copy_and_restore(39561, "/usr/sbin/bareos-sd".into(), osd());
+}
+
+/// Backup with osd, Copy osd to osd (osd is the reading SD: `replicate`),
+/// Restore of the copy.
+#[test]
+#[ignore = "needs the osd binary"]
+fn osd_copies_to_osd_and_the_copy_restores() {
+    copy_and_restore(39581, osd(), osd());
+}
+
+/// Backup with osd, Copy to bareos-sd (osd replicates to the original SD),
+/// Restore of the copy from bareos-sd.
+#[test]
+#[ignore = "needs /usr/sbin/bareos-sd and the osd binary"]
+fn osd_copies_to_bareos_sd_and_the_copy_restores() {
+    copy_and_restore(39591, osd(), "/usr/sbin/bareos-sd".into());
 }
 
 /// Two backups, one Copy control job: the two copy jobs replicate to osd

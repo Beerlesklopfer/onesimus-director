@@ -296,13 +296,13 @@ Verify, Restore, Abbruch und die vier erwarteten Defekte).
 | Bootstrap: `JobType`, `JobLevel` | lesen den Wert nicht (er wird dann als unbekanntes Schlüsselwort gemeldet) | Wert wird übersprungen |
 | gRPC zu odir/ofd | – | `StorageDaemon` Control/Data mit TLS, BNET als Rückfall (Stufe 3) |
 | Datensatz über gRPC | – | wie über BNET zwei Nachrichten (`rechdr`, Daten); ein Datensatz je Nachricht mit Kopf als Feldern folgt nach P1 |
-| Copy/Migration | SD-zu-SD (`listen` am schreibenden, `replicate` am lesenden SD) | osd kann die **schreibende** Seite (seit 23.11.2026): `listen` wartet ohne Zeitgrenze auf den lesenden SD (`Hello Start Storage Job <Job>`, TLS-PSK `R_JOB`, CRAM-MD5 mit dem Auth-Schlüssel des Jobs, nur BNET), dann `start replicate` / `replicate data` / `end replicate` mit denselben Datensätzen wie ein FD. Gemessen mit bareos-sd als Leser: `tests/osd_copy.rs` (eine Kopie, zwei Kopien durch einen Steuerjob; ob sie überlappen, ist nicht geprüft; `ssl=0` nicht gemessen). Die lesende Seite (`replicate` an osd) fehlt noch, also kein Copy von osd zu osd |
+| Copy/Migration | SD-zu-SD (`listen` am schreibenden, `replicate` am lesenden SD) | osd kann beide Seiten (seit 23.11.2026). **Schreibende Seite**: `listen` wartet ohne Zeitgrenze auf den lesenden SD (`Hello Start Storage Job <Job>`, TLS-PSK `R_JOB`, CRAM-MD5 mit dem Auth-Schlüssel des Jobs, nur BNET), dann `start replicate` / `replicate data` / `end replicate` mit denselben Datensätzen wie ein FD. Gemessen mit bareos-sd als Leser: `tests/osd_copy.rs` (eine Kopie, zwei Kopien durch einen Steuerjob; ob sie überlappen, ist nicht geprüft; `ssl=0` nicht gemessen). **Lesende Seite** (`replicate`): osd verbindet sich zum schreibenden SD (`Hello Start Storage Job`, TLS-PSK `R_JOB`, CRAM-MD5 mit `Authorization`), antwortet `3000 OK replicate` und schickt auf `run` die Datensätze wie ein FD (`start replicate`, `replicate data`, Kopf `<FileIndex> <Stream> 0`, zwei EOD, `end replicate`). Gemessen: osd zu osd und osd zu bareos-sd, jeweils mit Restore der Kopie und `diff` gegen den Quellbaum (`tests/osd_copy.rs`) |
 | VirtualFull | SD-zu-SD | wie Copy; nicht gemessen |
 | Gerätearten | File, Tape, Fifo, Droplet … | nur `File` |
 | Kein Volume verfügbar (Schreiben) | wartet auf `label`/`mount` des Operators (`JS_WaitMedia`) | Meldung wie bareos-sd, dann endet der Job mit Fehler |
 | Recycling, `relabel`, `Purged`-Volumes | ja | nein; `relabel` antwortet mit 3912 |
-| `listen` | ja | ja (schreibende Seite einer Kopie) |
-| `autochanger`, `nextrun`, `finish`, `readlabel`, `replicate`, `resolve`, `setdevice`, `stats` | ja | unbekannt (3900) |
+| `listen`, `replicate` | ja | ja (schreibende und lesende Seite einer Kopie) |
+| `autochanger`, `nextrun`, `finish`, `readlabel`, `resolve`, `setdevice`, `stats` | ja | unbekannt (3900) |
 | Spooling (Daten, Attribute), Checkpoints, Quota | ja | nein (die Angaben im Job-Kommando werden gelesen und ignoriert) |
 | Bandbreite (`setbandwidth`) | begrenzt die Verbindung | nur mit `2000 OK Bandwidth` beantwortet |
 | `Maximum Concurrent Jobs`, Device-Belegung | Reservierungslogik mit Warteschlange, Lesen und Schreiben getrennt gezählt | ein Job je Device, ob lesend oder schreibend; ist es belegt, scheitert die Reservierung |

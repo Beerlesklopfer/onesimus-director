@@ -159,6 +159,7 @@ impl DirSession {
                 "use storage=" => self.use_cmd(&msg),
                 "run" => self.run_cmd(),
                 "listen" => self.listen_cmd(),
+                "replicate" => self.replicate_cmd(&msg),
                 "passive" => self.passive_cmd(&msg),
                 "status" => self.status_cmd(&msg),
                 ".status" => self.dot_status_cmd(&msg),
@@ -346,6 +347,30 @@ impl DirSession {
             let _ = dir.signal(BnetSignal::Eod);
         }
         Next::Quit
+    }
+
+    /// `ReplicateCmd`: the reading SD of a Copy connects to the writing SD
+    /// (`replicate JobId=%d Job=%s address=%s port=%d ssl=%d
+    /// Authorization=%s`); `3000 OK replicate` when it is authenticated.
+    /// `run` then sends the data.
+    fn replicate_cmd(&mut self, msg: &str) -> Next {
+        let Some(job) = self.job.clone() else { return Next::Quit };
+        let Some(r) = parse_replicate(msg) else {
+            self.send(&format!("3991 Bad replicate command: {}\n", msg.trim_end()));
+            return Next::Quit;
+        };
+        match crate::server::connect_to_storage(&self.d, &r.job, &r.key, &r.address, r.port, r.ssl) {
+            Ok(conn) => {
+                job.connect_fd(conn);
+                self.send("3000 OK replicate\n");
+                Next::Continue
+            }
+            Err(e) => {
+                self.d.jmsg(&self.dir, &job, M_FATAL, &format!("Failed to connect to the Storage daemon {}:{} for the copy: {e}\n", r.address, r.port));
+                self.send(&format!("3991 Bad replicate command: {e}\n"));
+                Next::Quit
+            }
+        }
     }
 
     /// `PassiveCmd`: osd connects to the FD (over gRPC when the command
@@ -613,6 +638,34 @@ pub fn parse_use_storage(line: &str) -> Option<UseStorage> {
     })
 }
 
+/// The fields of a `replicate` command.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ReplicateCommand {
+    /// `Job=` of the writing side.
+    pub job: String,
+    /// `address=`.
+    pub address: String,
+    /// `port=`.
+    pub port: u16,
+    /// `ssl=`.
+    pub ssl: i32,
+    /// `Authorization=`: the writing job's key.
+    pub key: String,
+}
+
+/// `replicate JobId=%d Job=%s address=%s port=%d ssl=%d Authorization=%s`.
+pub fn parse_replicate(msg: &str) -> Option<ReplicateCommand> {
+    let rest = msg.trim_end().strip_prefix("replicate ")?;
+    let field = |k: &str| rest.split_whitespace().find_map(|w| w.strip_prefix(k)).map(str::to_string);
+    Some(ReplicateCommand {
+        job: field("Job=")?,
+        address: field("address=")?,
+        port: field("port=")?.parse().ok()?,
+        ssl: field("ssl=")?.parse().ok()?,
+        key: field("Authorization=")?,
+    })
+}
+
 /// `passive client address=%s port=%d ssl=%d`.
 pub fn parse_passive(msg: &str) -> Option<(String, u16, i32)> {
     let rest = msg.trim_end().strip_prefix("passive client ")?;
@@ -658,6 +711,17 @@ pub fn parse_label(msg: &str) -> Option<LabelCommand> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn replicate_command_fields() {
+        let r = parse_replicate("replicate JobId=7 Job=Copy.2026-11-23_06.00.00_03 address=192.168.24.43 port=9103 ssl=4 Authorization=abc123\n").unwrap();
+        assert_eq!(
+            r,
+            ReplicateCommand { job: "Copy.2026-11-23_06.00.00_03".into(), address: "192.168.24.43".into(), port: 9103, ssl: 4, key: "abc123".into() }
+        );
+        assert!(parse_replicate("replicate JobId=7 Job=X address=a port=x ssl=0 Authorization=k").is_none(), "port must be a number");
+        assert!(parse_replicate("replicate Job=X address=a port=1 ssl=0").is_none(), "Authorization is required");
+    }
+
     use super::*;
 
     #[test]

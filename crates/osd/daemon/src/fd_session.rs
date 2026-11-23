@@ -74,12 +74,31 @@ pub fn run_job(d: &Daemon, job: &Arc<Job>, dir: &SharedChannel) {
     let _ = lock(dir).send_str(&format!("3010 Job {name} start\n"));
     d.send_status(dir, job, 'R');
     let Some(mut conn) = job.fd.lock().unwrap_or_else(|e| e.into_inner()).take() else { return };
-    if !conn.sd {
+    if !conn.sd && !conn.replicate {
         // DoListenRun (the writing SD of a replication) sends no version line
         d.jmsg(dir, job, M_INFO, &format!("{}\n", daemon_crate::version::version_line()));
     }
     let started = Instant::now();
     let mut session = Session { opened: false, started };
+    if conn.replicate {
+        // the reading side of a Copy: osd sends the data
+        match crate::read_session::do_replicate_read(d, job, dir, conn.channel.as_mut()) {
+            Some((files, bytes)) => {
+                job.files.store(files as _, Ordering::Release);
+                *job.bytes.lock().unwrap_or_else(|e| e.into_inner()) = bytes as _;
+                job.set_status('T');
+            }
+            None => job.set_status('E'),
+        }
+        let _ = conn.channel.signal(BnetSignal::Terminate);
+        let end_status = job.status() as u32;
+        let (files, bytes) = (job.files.load(Ordering::Acquire), *job.bytes.lock().unwrap_or_else(|e| e.into_inner()));
+        let mut dir_lock = lock(dir);
+        let _ = dir_lock.send_str(&format!("3099 Job {name} end JobStatus={end_status} JobFiles={files} JobBytes={bytes} JobErrors=0\n"));
+        let _ = dir_lock.signal(BnetSignal::Eod);
+        drop(dir_lock);
+        return;
+    }
     if conn.sd {
         do_sd_commands(d, job, dir, conn.channel.as_mut(), &mut session);
     } else {

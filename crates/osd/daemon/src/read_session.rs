@@ -150,18 +150,173 @@ impl ReadPipe {
 /// the FD. False when the job failed (the reason went out as a job
 /// message).
 pub fn do_read_data(d: &Daemon, job: &Arc<Job>, dir: &SharedChannel, fd: &mut dyn Channel) -> bool {
+    let Some((mut pipe, bsr, volumes)) = open_read(d, job, dir) else {
+        let _ = fd.send_str(FD_ERROR);
+        return false;
+    };
+    if fd.send_str("3000 OK data\n").is_err() {
+        pipe.shutdown();
+        return false;
+    }
+    d.send_status(dir, job, 'R');
+    let mut sink = FdSink { fd };
+    let mut ok = send_records(d, job, dir, &mut sink, &mut pipe, BsrMatcher::new(bsr), &volumes);
+    let _ = fd.signal(BnetSignal::Eod);
+    if !pipe.shutdown() {
+        ok = false;
+    }
+    ok
+}
+
+/// The reading side of a Copy/Migrate (`DoMacRun`, stored/mac.cc): reads the
+/// job's volumes and sends the wanted records to the writing SD `sd` the
+/// way an FD sends a backup: `start replicate`, `replicate data <ticket>`,
+/// the records under a `<FileIndex> <Stream> 0` header, two EODs, `end
+/// replicate`. Returns the records' file count and byte count, or `None`
+/// when the job failed (the reason went out as a job message).
+pub fn do_replicate_read(d: &Daemon, job: &Arc<Job>, dir: &SharedChannel, sd: &mut dyn Channel) -> Option<(u64, u64)> {
+    let fail = |text: &str| {
+        d.jmsg(dir, job, M_FATAL, text);
+        None
+    };
+    let (mut pipe, bsr, volumes) = open_read(d, job, dir)?;
+    let ticket = match sd_dialog(sd, "start replicate\n", "3000 OK start replicate ticket = ") {
+        Ok(rest) => rest.trim().to_string(),
+        Err(e) => {
+            pipe.shutdown();
+            return fail(&format!("Start replicate failed: {e}\n"));
+        }
+    };
+    if let Err(e) = sd_dialog(sd, &format!("replicate data {ticket}\n"), "3000 OK data") {
+        pipe.shutdown();
+        return fail(&format!("Replicate data failed: {e}\n"));
+    }
+    d.send_status(dir, job, 'R');
+    let mut sink = SdSink { sd, last: None, files: 0, bytes: 0 };
+    let mut ok = send_records(d, job, dir, &mut sink, &mut pipe, BsrMatcher::new(bsr), &volumes);
+    let (files, bytes) = (sink.files, sink.bytes);
+    // end of the stream and of the data: two EODs
+    if ok && (sink.finish().is_err()) {
+        ok = false;
+    }
+    if !pipe.shutdown() {
+        ok = false;
+    }
+    if !ok {
+        return None;
+    }
+    if let Err(e) = sd_wait(sd, "3000 OK replicate data") {
+        return fail(&format!("The writing Storage daemon did not accept the data: {e}\n"));
+    }
+    if let Err(e) = sd_dialog(sd, "end replicate\n", "3000 OK end replicate") {
+        return fail(&format!("End replicate failed: {e}\n"));
+    }
+    let _ = sd.signal(BnetSignal::Terminate);
+    Some((files, bytes))
+}
+
+/// Sends `command` to the writing SD and waits for an answer that starts
+/// with `expect`; the rest of the line is returned.
+fn sd_dialog(sd: &mut dyn Channel, command: &str, expect: &str) -> Result<String, String> {
+    sd.send_str(command)?;
+    sd_wait(sd, expect)
+}
+
+/// The next text message of the writing SD, which must start with `expect`.
+fn sd_wait(sd: &mut dyn Channel, expect: &str) -> Result<String, String> {
+    loop {
+        match sd.recv()? {
+            crate::transport::Message::Data(data) if !data.is_empty() => {
+                let text = String::from_utf8_lossy(&data).to_string();
+                return match text.strip_prefix(expect) {
+                    Some(rest) => Ok(rest.to_string()),
+                    None => Err(text.trim_end().to_string()),
+                };
+            }
+            _ => continue,
+        }
+    }
+}
+
+/// Where the wanted records go: the FD of a restore or the writing SD of a Copy.
+trait RecordSink {
+    /// Sends one record.
+    fn record(&mut self, rec: &bareos_format::volume::VolRecord) -> Result<(), String>;
+}
+
+/// The records of a restore: `rechdr` and the data to the FD.
+struct FdSink<'a> {
+    fd: &'a mut dyn Channel,
+}
+
+impl RecordSink for FdSink<'_> {
+    fn record(&mut self, rec: &bareos_format::volume::VolRecord) -> Result<(), String> {
+        let hdr = RecHdr {
+            vol_session_id: rec.vol_session_id,
+            vol_session_time: rec.vol_session_time,
+            file_index: rec.file_index,
+            stream: rec.stream,
+            data_len: rec.data.len() as u32,
+        };
+        self.fd.send_str(&hdr.format()).and_then(|_| self.fd.send(&rec.data))
+    }
+}
+
+/// The records of a Copy: like an FD's backup stream to the writing SD. A
+/// `<FileIndex> <Stream> 0` header starts each run of records of one
+/// (FileIndex, Stream), a change of either ends the run with an EOD.
+struct SdSink<'a> {
+    sd: &'a mut dyn Channel,
+    /// (FileIndex, Stream) of the open run.
+    last: Option<(i32, i32)>,
+    /// The highest FileIndex sent.
+    files: u64,
+    /// Bytes of data sent.
+    bytes: u64,
+}
+
+impl SdSink<'_> {
+    /// Ends the open run and the data (two EODs).
+    fn finish(&mut self) -> Result<(), String> {
+        if self.last.take().is_some() {
+            self.sd.signal(BnetSignal::Eod)?;
+        }
+        self.sd.signal(BnetSignal::Eod)
+    }
+}
+
+impl RecordSink for SdSink<'_> {
+    fn record(&mut self, rec: &bareos_format::volume::VolRecord) -> Result<(), String> {
+        let key = (rec.file_index, rec.stream);
+        if self.last != Some(key) {
+            if self.last.is_some() {
+                self.sd.signal(BnetSignal::Eod)?;
+            }
+            self.sd.send_str(&format!("{} {} 0", rec.file_index, rec.stream))?;
+            self.last = Some(key);
+        }
+        self.files = self.files.max(rec.file_index.max(0) as u64);
+        self.bytes += rec.data.len() as u64;
+        if rec.data.is_empty() {
+            return Ok(());
+        }
+        self.sd.send(&rec.data)
+    }
+}
+
+/// Claims the job's volumes: ring, reader process, first volume ready. The
+/// reason of a failure went out as a job message.
+fn open_read(d: &Daemon, job: &Arc<Job>, dir: &SharedChannel) -> Option<(ReadPipe, bareos_format::bsr::Bsr, Vec<RestoreVolume>)> {
     let bootstrap = job.bootstrap.lock().unwrap_or_else(|e| e.into_inner()).clone();
     let volumes = bootstrap.as_ref().map(|b| b.bsr.restore_volumes()).unwrap_or_default();
     let (Some(bootstrap), false) = (bootstrap, volumes.is_empty()) else {
         d.jmsg(dir, job, M_FATAL, "No Volume names found for restore.\n");
-        let _ = fd.send_str(FD_ERROR);
-        return false;
+        return None;
     };
     let device = d.reserved_device(&job.cmd.job).and_then(|n| d.config.find_device(&n).cloned());
     let Some(conf) = device else {
         d.jmsg(dir, job, M_FATAL, "No device reserved for reading. Job canceled.\n");
-        let _ = fd.send_str(FD_ERROR);
-        return false;
+        return None;
     };
     let dev = FileDevice::from_config(&conf);
     let info = read_info(d, job, &dev, &bootstrap);
@@ -170,26 +325,14 @@ pub fn do_read_data(d: &Daemon, job: &Arc<Job>, dir: &SharedChannel, fd: &mut dy
         Ok(p) => p,
         Err(e) => {
             d.jmsg(dir, job, M_FATAL, &format!("{e}\n"));
-            let _ = fd.send_str(FD_ERROR);
-            return false;
+            return None;
         }
     };
     if !pipe.wait_ready(job) {
         pipe.shutdown();
-        let _ = fd.send_str(FD_ERROR);
-        return false;
+        return None;
     }
-    if fd.send_str("3000 OK data\n").is_err() {
-        pipe.shutdown();
-        return false;
-    }
-    d.send_status(dir, job, 'R');
-    let mut ok = send_records(d, job, dir, fd, &mut pipe, BsrMatcher::new(bootstrap.bsr), &volumes);
-    let _ = fd.signal(BnetSignal::Eod);
-    if !pipe.shutdown() {
-        ok = false;
-    }
-    ok
+    Some((pipe, bootstrap.bsr, volumes))
 }
 
 /// The ring info of a read job.
@@ -303,7 +446,7 @@ fn send_records(
     d: &Daemon,
     job: &Arc<Job>,
     dir: &SharedChannel,
-    fd: &mut dyn Channel,
+    sink: &mut dyn RecordSink,
     pipe: &mut ReadPipe,
     matcher: BsrMatcher,
     volumes: &[RestoreVolume],
@@ -363,14 +506,7 @@ fn send_records(
                 }
                 Decision::Done => return true,
                 Decision::Send => {
-                    let hdr = RecHdr {
-                        vol_session_id: rec.vol_session_id,
-                        vol_session_time: rec.vol_session_time,
-                        file_index: rec.file_index,
-                        stream: rec.stream,
-                        data_len: rec.data.len() as u32,
-                    };
-                    if let Err(e) = fd.send_str(&hdr.format()).and_then(|_| fd.send(&rec.data)) {
+                    if let Err(e) = sink.record(&rec) {
                         if !job.canceled.load(Ordering::Acquire) {
                             d.jmsg(dir, job, M_FATAL, &format!("Error sending to File daemon. ERR={e}\n"));
                         }
