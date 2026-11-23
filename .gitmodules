@@ -2,3 +2,6 @@
 	path = proto
 	url = https://github.com/Onesimus-io/onesimus-proto.git
 	branch = development
+[submodule "docs/webseite"]
+	path = docs/webseite
+	url = https://github.com/Onesimus-io/onesimus.io.git
