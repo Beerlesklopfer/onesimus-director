@@ -47,7 +47,7 @@ Drop-in replacement for the Bareos Director daemon — independent project after
 | `bareos-format` | Protocol | Bareos stream and volume format shared by odir, ofd and osd: stream IDs, record headers, volume blocks (BB02, CRC-32), volume and session labels, LStat, Bareos Base64, digests, `M_*`, BashSpaces, `regexwhere` (breg), SD job command |
 | `daemon-crate` | Protocol | Common daemon frame of ofd and osd: accept loop, TLS-PSK, Director handshake, gRPC TLS, bandwidth limit, logging, signals, PID file, privileges, `-t` |
 | `onesimus-proto-rs` | Protocol | gRPC codegen from the onesimus-proto definitions (submodule `proto/`) |
-| `ofd` | Protocol | File Daemon skeleton |
+| `ofd` | Product | `ofd` — Onesimus File Daemon: backup, restore, estimate and verify; gRPC with TLS to odir and osd, BNET as the fallback and to bareos-sd; runs on Linux and Windows (Windows 11 tested: VSS, ACLs, alternate data streams, UNC paths; macOS untested) (docs/wiki/file-daemon.md, docs/plans/PORTIERUNG-MACOS-WINDOWS.md) |
 | `onesimus-plugins` | Security | Signed Rust/WebAssembly plugin verification; no Python runtime |
 
 ## Build & Run
