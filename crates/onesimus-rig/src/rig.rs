@@ -66,6 +66,8 @@ pub struct RigOptions {
     /// No TLS to and between the SDs of a Copy (`TLS Enable = no` on the
     /// second SD and its Storage resource: `replicate … ssl=0`, clear text).
     pub copy_plain: bool,
+    /// Files of the Director's `odir.d/` (relative path below it, text): Onesimus extensions next to the standard `bareos-dir.d`.
+    pub extra_odir_d: Vec<(String, String)>,
 }
 
 impl RigOptions {
@@ -85,6 +87,7 @@ impl RigOptions {
             copy_target: None,
             copy_same_sd: false,
             copy_plain: false,
+            extra_odir_d: Vec::new(),
         }
     }
 }
@@ -263,6 +266,11 @@ impl Rig {
             std::fs::write(self.layout.root.join("sd2").join("bareos-sd.conf"), crate::config::copy_sd_config(&self.layout.root, self.ports, self.options.copy_plain)).map_err(io)?;
         }
         crate::config::write_director_resources(&self.layout, &self.options.extra_director).map_err(io)?;
+        for (relative, text) in &self.options.extra_odir_d {
+            let path = self.layout.dir_conf.parent().unwrap_or(&self.layout.root).join("odir.d").join(relative);
+            std::fs::create_dir_all(path.parent().unwrap_or(&self.layout.root)).map_err(io)?;
+            std::fs::write(&path, text).map_err(io)?;
+        }
         self.catalog = Some(cluster);
 
         let debug = self.options.debug_level.to_string();

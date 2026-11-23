@@ -335,15 +335,16 @@ osd liest zu jedem File-Device die SMART-Werte der Platte, auf der das `Archive 
 
 ### Der Director wertet es aus
 
-`Health Check Interval` am Storage (Onesimus-Direktive, ohne Angabe aus: der Director fragt einen SD sonst nie von sich aus ab):
+`Health Check Interval` (Onesimus-Direktive, ohne Angabe aus: der Director fragt einen SD sonst nie von sich aus ab). Bareos kennt sie nicht; damit `bareos-dir.d` Standard bleibt, steht sie im Overlay `odir.d/` neben `bareos-dir.d` (wie `osd.d/` beim SD), in `odir.d/storage/H340.conf`:
 
 ```
 Storage {
   Name = H340
-  ...
   Health Check Interval = 1 hour
 }
 ```
+
+Jede Ressource in `odir.d/` erweitert die gleichnamige Ressource aus `bareos-dir.d`; unbekannte Ressourcen und andere Direktiven lehnt der Director beim Laden ab (`odir.d: Storage "H340": "Password" is not an Onesimus extension directive`). In `bareos-dir.d` selbst ist die Direktive ein Fehler wie bei Bareos.
 
 Der Director fragt dann `.status health` im Abstand (er schaut alle 30 Sekunden nach fälligen Abfragen) und
 

@@ -31,6 +31,8 @@ pub struct DirectorConfig {
     pub loaded_consoles: usize,
     /// Raw directives in C++ resource order (for `show`)
     pub raw: Vec<bareos_config::raw::ConfResource>,
+    /// The Onesimus extensions of `odir.d/` (additive; the Bareos files stay standard): see [`Self::extension`].
+    pub extensions: Vec<bareos_config::raw::ConfResource>,
     /// Parsed by `reload` rather than at startup. The C++ parser then runs
     /// with `omit_defaults_` (set by the first CheckResources()), which
     /// changes what `show` prints (compatibility log C-057).
@@ -60,7 +62,55 @@ impl DirectorConfig {
             Ok(raw) => config.raw = raw,
             Err(e) => tracing::warn!("raw config view unavailable (show): {e}"),
         }
+        let overlay = Self::overlay_dir(path);
+        if overlay.is_dir() {
+            config.extensions = bareos_config::raw::load_tree(&overlay, "odir.d")
+                .map_err(|e| ConfigError::ParseError(format!("odir.d: {e}")))?;
+            config.check_extensions().map_err(ConfigError::ParseError)?;
+        }
         Ok(config)
+    }
+
+    /// Where `odir.d/` belongs for the configuration `path`: next to the
+    /// file, next to the `bareos-dir.d` directory, or inside another directory.
+    pub fn overlay_dir(path: &Path) -> std::path::PathBuf {
+        if path.is_file() || path.file_name().is_some_and(|n| n == "bareos-dir.d") {
+            return path.parent().unwrap_or(Path::new(".")).join("odir.d");
+        }
+        path.join("odir.d")
+    }
+
+    /// The directives `odir.d/` may add, per resource type and normalized key.
+    /// Everything else in `odir.d/` is an error; the Bareos files stay standard.
+    const EXTENSION_DIRECTIVES: &'static [(&'static str, &'static str)] = &[
+        // health of the disks under the devices of a Storage Daemon (storage_health.rs)
+        ("storage", "healthcheckinterval"),
+    ];
+
+    /// Every resource of `odir.d/` extends a resource of the same type and name that
+    /// exists, with directives from [`Self::EXTENSION_DIRECTIVES`] only.
+    fn check_extensions(&self) -> Result<(), String> {
+        for res in &self.extensions {
+            let kind = res.norm_type();
+            let name = res.name().unwrap_or_default();
+            if !self.raw.iter().any(|r| r.norm_type() == kind && r.name().is_some_and(|n| n.eq_ignore_ascii_case(name))) {
+                return Err(format!("odir.d: {} \"{name}\" extends a resource that does not exist in the configuration", res.rtype));
+            }
+            for d in &res.directives {
+                let key = d.norm_key();
+                if key != "name" && !Self::EXTENSION_DIRECTIVES.contains(&(kind.as_str(), key.as_str())) {
+                    return Err(format!("odir.d: {} \"{name}\": \"{}\" is not an Onesimus extension directive", res.rtype, d.key));
+                }
+            }
+        }
+        Ok(())
+    }
+
+    /// An Onesimus directive of `odir.d/`: the value of `key` (all words, `1 hour`) of the
+    /// resource `kind` `name`.
+    pub fn extension(&self, kind: &str, name: &str, key: &str) -> Option<String> {
+        self.extensions.iter().find(|r| r.norm_type() == kind && r.name().is_some_and(|n| n.eq_ignore_ascii_case(name)))?
+            .directives.iter().rev().find(|d| d.norm_key() == key).map(|d| d.values().join(" "))
     }
 
     /// Parse configuration files given in memory, in read order (for the
@@ -104,6 +154,7 @@ impl DirectorConfig {
             profiles: Vec::new(),
             loaded_consoles: 0,
             raw: Vec::new(),
+            extensions: Vec::new(),
             reloaded: false,
             catalog_acl: std::sync::Arc::default(),
         };
@@ -370,5 +421,36 @@ JobDefs { Name = "Late"; Type = Restore; Level = Differential; Priority = 3 }
         for h in handles {
             h.join().unwrap();
         }
+    }
+
+    /// The configuration with the `odir.d` files `extension` loaded.
+    fn with_extension(extension: &str) -> Result<DirectorConfig, String> {
+        let mut config = DirectorConfig::from_str(TEST_CONFIG).unwrap();
+        config.extensions = bareos_config::raw::parse_str(extension, None).unwrap();
+        config.check_extensions().map(|()| config)
+    }
+
+    #[test]
+    fn odir_d_adds_onesimus_directives_to_an_existing_resource() {
+        let c = with_extension("Storage {\n  Name = File\n  Health Check Interval = 1 hour\n}\n").unwrap();
+        assert_eq!(c.extension("storage", "File", "healthcheckinterval").as_deref(), Some("1 hour"));
+        assert_eq!(c.extension("storage", "file", "healthcheckinterval").as_deref(), Some("1 hour"), "names compare without case");
+        assert_eq!(c.extension("storage", "Other", "healthcheckinterval"), None);
+    }
+
+    #[test]
+    fn odir_d_refuses_unknown_directives_and_unknown_resources() {
+        let e = with_extension("Storage {\n  Name = File\n  Password = x\n}\n").unwrap_err();
+        assert!(e.contains("\"Password\" is not an Onesimus extension directive"), "{e}");
+        let e = with_extension("Storage {\n  Name = Nowhere\n  Health Check Interval = 1 hour\n}\n").unwrap_err();
+        assert!(e.contains("does not exist in the configuration"), "{e}");
+        let e = with_extension("Client {\n  Name = bareos-fd\n  Health Check Interval = 1 hour\n}\n").unwrap_err();
+        assert!(e.contains("not an Onesimus extension directive"), "{e}");
+    }
+
+    #[test]
+    fn the_overlay_lies_next_to_bareos_dir_d() {
+        assert_eq!(DirectorConfig::overlay_dir(Path::new("/etc/bareos/bareos-dir.d")), Path::new("/etc/bareos/odir.d"));
+        assert_eq!(DirectorConfig::overlay_dir(Path::new("/etc/bareos")), Path::new("/etc/bareos/odir.d"));
     }
 }

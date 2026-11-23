@@ -22,11 +22,8 @@ fn the_director_records_and_reports_the_health_of_a_storage() {
     onesimus_rig::build_workspace_packages(&["odir", "ofd", "osd-daemon"]).unwrap_or_else(|e| panic!("{e}"));
     let mut options = RigOptions::new(39701);
     options.sd = Some(onesimus_rig::prereq::target_profile_dir().join("osd"));
-    let storage = format!(
-        "Storage {{\n  Name = vsd\n  Address = 127.0.0.1\n  SD Port = {}\n  Password = \"vsd-pw\"\n  Device = VDev\n  Media Type = VFile\n  Maximum Concurrent Jobs = 10\n  Health Check Interval = 1 min\n}}\n",
-        39703
-    );
-    options.extra_director = vec![("storage/vsd.conf".into(), storage)];
+    // the Onesimus directive goes into odir.d, bareos-dir.d stays standard
+    options.extra_odir_d = vec![("storage/vsd.conf".into(), "Storage {\n  Name = vsd\n  Health Check Interval = 1 min\n}\n".into())];
     let rig = Rig::start(options).unwrap_or_else(|e| panic!("Gerüst startet nicht: {e}"));
 
     let deadline = Instant::now() + Duration::from_secs(120);

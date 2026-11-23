@@ -3,7 +3,8 @@
 //!
 //! osd reads SMART of the disk under each File device and answers
 //! `.status health` with one `key=value` line per device. For every Storage
-//! resource that has `Health Check Interval` (an Onesimus directive; off when
+//! resource that has `Health Check Interval` (an Onesimus directive in
+//! `odir.d/storage/<Name>.conf`, so that `bareos-dir.d` stays standard; off when
 //! absent) the Director asks that question at the interval, and
 //!
 //! * writes one row per device and check to `onesimus.medium_health` (schema
@@ -197,7 +198,7 @@ pub fn change_message(storage: &str, previous: Option<&str>, h: &DeviceHealth) -
 
 /// The `Health Check Interval` of a Storage resource, when set and not zero.
 fn interval(config: &crate::director_config::DirectorConfig, store: &StorageResource) -> Option<Duration> {
-    let raw = crate::job_messages::raw_directive(config, "storage", &store.name, "healthcheckinterval")?;
+    let raw = config.extension("storage", &store.name, "healthcheckinterval")?;
     let (_, d) = bareos_config::values::parse_time(&raw).ok()?;
     (!d.is_zero()).then_some(d)
 }

@@ -109,8 +109,6 @@ const EXTENSIONS: &[(&str, &str)] = &[
     // gRPC to ofd/osd (fd_grpc.rs Target::from_directives, docs/wiki/osd.md)
     ("client", "grpcenable"), ("client", "grpcport"), ("client", "grpccacertificatefile"), ("client", "grpcservername"),
     ("storage", "grpcenable"), ("storage", "grpcport"), ("storage", "grpccacertificatefile"), ("storage", "grpcservername"),
-    // health of the disks under the devices (storage_health.rs): checked at this interval, off when absent
-    ("storage", "healthcheckinterval"),
 ];
 
 fn kind(rtype: &str) -> Option<&'static (&'static str, &'static str, &'static [Item], &'static str)> {
