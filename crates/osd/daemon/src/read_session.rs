@@ -31,7 +31,7 @@ use std::time::Duration;
 use bareos_bnet::BnetSignal;
 use bareos_format::bsr::{BsrMatcher, Match, RecordKey, RestoreVolume};
 use bareos_format::label::{SessionLabel, SOS_LABEL};
-use bareos_format::msg::M_FATAL;
+use bareos_format::msg::{M_FATAL, M_INFO};
 use bareos_format::record::RecHdr;
 use bareos_format::volume::{RecordAssembler, DEFAULT_BLOCK_SIZE};
 use osd_ring::{Ring, RingConfig, RingError, State};
@@ -370,10 +370,37 @@ fn open_read(d: &Daemon, job: &Arc<Job>, dir: &SharedChannel) -> Option<(ReadPip
     };
     let read_device = job.read_device.lock().unwrap_or_else(|e| e.into_inner()).clone().or_else(|| d.reserved_device(&job.cmd.job));
     let device = read_device.and_then(|n| d.config.find_device(&n).cloned());
-    let Some(conf) = device else {
+    let Some(mut conf) = device else {
         d.jmsg(dir, job, M_FATAL, "No device reserved for reading. Job canceled.\n");
         return None;
     };
+    // The volumes are of another media type than the device the Director named (a restore with
+    // `storage=` of another media type): read from a free device of this SD that has it
+    // (`Changing read device`, reserve.cc)
+    let want = volumes[0].media_type.clone();
+    if !want.is_empty() && want != conf.media_type && volumes.iter().all(|v| v.media_type == want) {
+        d.jmsg(dir, job, M_INFO, &format!(
+            "Changing read device. Want Media Type=\"{want}\" have=\"{}\"\n  device={}\n",
+            conf.media_type, conf.name
+        ));
+        let any = crate::jobs::UseStorage {
+            media_type: want.clone(),
+            devices: d.config.devices.iter().map(|x| x.name.clone()).collect(),
+            ..Default::default()
+        };
+        let old = conf.name.clone();
+        let Some(r) = d.reserve_device(&any, &job.cmd.job) else {
+            d.jmsg(dir, job, M_FATAL, &format!("No suitable device found to read Volume \"{}\"\n", volumes[0].name));
+            return None;
+        };
+        d.release_device(&old);
+        *job.read_device.lock().unwrap_or_else(|e| e.into_inner()) = Some(r.device.name.clone());
+        match d.config.find_device(&r.device.name) {
+            Some(c) => conf = c.clone(),
+            None => return None,
+        }
+        d.jmsg(dir, job, M_INFO, &format!("Media Type change.  New read device \"{}\" ({}) chosen.\n", conf.name, conf.archive_device.display()));
+    }
     let dev = FileDevice::from_config(&conf);
     let info = read_info(d, job, &dev, &bootstrap);
     let slot_size = dev.max_block_size.max(dev.label_block_size).max(DEFAULT_BLOCK_SIZE as u32).max(MIN_READ_SLOT);

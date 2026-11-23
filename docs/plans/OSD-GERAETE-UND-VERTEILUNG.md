@@ -473,7 +473,9 @@ Aus den Stufen 1–3 zusammengeführt, mit Grund:
   seit 23.11.2026 ebenfalls (Mount-Anforderung, JS_WaitMount, `tests/osd_read_wait.rs`);
   offen: die Herzschläge während des Wartens.
 - **Anderes Device beim Lesen**, wenn der MediaType des Bootstraps nicht
-  passt.
+  passt: seit 23.11.2026 (`Changing read device`, `Media Type change`,
+  `tests/osd_copy.rs`, mit bareos-sd als Gegenprobe); das Device wird vor dem
+  Start des Lesers gewechselt, gemischte MediaTypes in einem Bootstrap nicht.
 - **Recycling und `relabel`**, Spooling, Bandbreite (`setbandwidth` wird
   nur beantwortet), mehrere Jobs je Device (getrennte Lese-/Schreibzählung).
 - **Hintergrundbetrieb, PID-Datei**, `-u`/`-g` für osd.

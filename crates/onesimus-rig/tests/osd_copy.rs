@@ -260,3 +260,56 @@ fn bareos_sd_copies_to_osd_in_clear_text() {
 fn osd_copies_to_osd_in_clear_text() {
     copy_in_clear_text(39651, osd());
 }
+
+/// Backup, Copy to a second device of the same SD (media type `VFile2`),
+/// then a restore of the copy with `storage=vsd` (the first device, media
+/// type `VFile`): the SD reads from the device that has the volume
+/// (`Changing read device`).
+fn restore_of_the_copy_changes_the_read_device(base_port: u16, sd: std::path::PathBuf) {
+    onesimus_rig::build_workspace_packages(&["odir", "ofd", "osd-daemon"]).unwrap_or_else(|e| panic!("{e}"));
+    let mut options = RigOptions::new(base_port);
+    options.sd = Some(sd);
+    options.copy_same_sd = true;
+    let rig = Rig::start(options).unwrap_or_else(|e| panic!("Gerüst startet nicht: {e}"));
+    let backup = rig.run_job("VBackup").unwrap_or_else(|e| panic!("{e}"));
+    let row = rig.wait_job(backup, JOB_TIMEOUT).unwrap_or_else(|e| panic!("{e}"));
+    assert_eq!(row.status, 'T', "Backup: {row:?}\n{}", rig.job_log(backup));
+    let copy = rig.run_job("VCopy").unwrap_or_else(|e| panic!("{e}"));
+    rig.wait_job(copy, JOB_TIMEOUT).unwrap_or_else(|e| panic!("{e}"));
+    let deadline = std::time::Instant::now() + JOB_TIMEOUT;
+    let new_job: u32 = loop {
+        let jobs = rig
+            .catalog()
+            .query("SELECT j.JobId, j.JobStatus FROM Job j JOIN Pool p ON p.PoolId = j.PoolId WHERE p.Name = 'VCopyPool' AND j.Type = 'C' ORDER BY 1")
+            .unwrap_or_default();
+        if let Some(line) = jobs.lines().next().filter(|l| l.ends_with("|T")) {
+            break line.split('|').next().and_then(|v| v.trim().parse().ok()).unwrap_or(0);
+        }
+        assert!(std::time::Instant::now() < deadline, "the copy does not end:\n{jobs}\n{}", rig.diagnostics());
+        std::thread::sleep(Duration::from_secs(2));
+    };
+    let reply = rig
+        .command(&format!("restore jobid={new_job} client=vfd storage=vsd where={} all done yes", rig.layout.restore.display()))
+        .unwrap_or_else(|e| panic!("{e}"));
+    let restore = onesimus_rig::console::queued_job_id(&reply).unwrap_or_else(|| panic!("restore: no JobId\n{reply}"));
+    let row = rig.wait_job(restore, JOB_TIMEOUT).unwrap_or_else(|e| panic!("{e}"));
+    let log = rig.job_log(restore);
+    eprintln!("restore {restore}: {row:?}\n{log}");
+    assert_eq!(row.status, 'T', "restore: {row:?}\n{log}\n{}", rig.diagnostics());
+    let (code, diff) = rig.diff_restore();
+    assert_eq!(code, 0, "restore differs from the source:\n{diff}");
+}
+
+/// bareos-sd (reference).
+#[test]
+#[ignore = "needs /usr/sbin/bareos-sd"]
+fn bareos_sd_changes_the_read_device() {
+    restore_of_the_copy_changes_the_read_device(39681, "/usr/sbin/bareos-sd".into());
+}
+
+/// osd.
+#[test]
+#[ignore = "needs the osd binary"]
+fn osd_changes_the_read_device() {
+    restore_of_the_copy_changes_the_read_device(39691, osd());
+}
