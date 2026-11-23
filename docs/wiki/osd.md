@@ -56,8 +56,9 @@ entscheidet der Maintainer.
   ```
 
   Fehler, die `osd -t` meldet: eine Bareos-Direktive in `osd.d`, ein Eintrag
-  ohne gleichnamige Ressource in `bareos-sd.d`, eine neue Ressourcenart
-  (`Distributor` kommt in P2). Ohne `osd.d/` verhält sich osd wie bareos-sd,
+  ohne gleichnamige Ressource in `bareos-sd.d`, eine unbekannte
+  Ressourcenart, die Fehler des [Verteilers](#verteiler-distributor-p2).
+  Ohne `osd.d/` verhält sich osd wie bareos-sd,
   bis auf den gRPC-Port (Vorgabe `SD Port` + 1000, siehe unten).
 - **gRPC-Port** (Stufe 3) an der Storage in `osd.d`: `Grpc Enable`
   (Vorgabe yes), `Grpc Port` (Vorgabe `SD Port` + 1000, wie ofd mit FD-Port
@@ -70,6 +71,111 @@ entscheidet der Maintainer.
     Grpc Port = 10103
   }
   ```
+
+## Verteiler (Distributor, P2)
+
+Ein Verteiler ist für den Director ein Device; osd wählt für jeden
+schreibenden Job anhand von Regeln (Routen) ein **Ziel-Device** aus
+`bareos-sd.d`. So gehen z. B. Fulls auf eine Wechselplatte und Incrementals
+auf die Platte im Rechner, ohne dass der Director mehr als einen Storage
+kennt (Plan: Abschnitte „Routen“, D-1, D-2).
+
+**Syntax.** Die Ressource gibt es nur im Onesimus-Verzeichnis,
+`<Overlay>/osd.d/distributor/<Name>.conf` (Vorgabe `/etc/onesimus`,
+`--overlay`); in `bareos-sd.d` wäre sie eine unbekannte Ressource, ein
+bareos-sd liest die Datei nie. Die Ziele nennt sie mit den Namen ihrer
+`Device`-Ressourcen aus `bareos-sd.d`. Eine Route ist eine Unterressource;
+die Direktiven stehen in `{ }` mit `;` oder Zeilenwechsel getrennt, wie im
+Plan:
+
+```
+# /etc/onesimus/osd.d/distributor/Verteiler.conf
+Distributor {
+  Name = Verteiler
+  Media Type = Onesimus                 # was der Director sieht
+  Route { Level = Full;          Device = USB-Wechsel }
+  Route { Client = "CLOUD-fd";   Device = S3-Archiv }
+  Route { Pool = Monatlich;      Device = Band-1 }
+  Route { Job = Etc; Type = Backup; FileSet = Etc; Device = Platte-2 }
+  Route {                        Device = FileStorage }   # ohne Merkmal: der Rest
+}
+```
+
+Im Director bleibt alles wie bei einem Device: `Storage { … Device =
+Verteiler; Media Type = Onesimus }`.
+
+| Direktive | Bedeutung |
+|---|---|
+| `Name`, `Media Type` | Pflicht. `Name` darf kein Device und kein Autochanger sein. `Media Type` ist der des Director-Storage |
+| `Description` | Text |
+| `Route { … }` | mindestens eine; die **erste** passende entscheidet |
+| Merkmale `Job`, `Client`, `Pool`, `FileSet` | Name der Job-Ressource, des Clients, des Pools (`use storage`), des FileSets; genau gleich geschrieben |
+| Merkmal `Level` | `Full`, `Incremental`, `Differential`, `VirtualFull`, `Base`, `Since` |
+| Merkmal `Type` | `Backup`, `Copy`, `Migrate`, `Archive`, `Consolidate`, `Restore`, `Verify` |
+| `Device` | das Ziel, genau eins (Pflicht je Route) |
+| `Stripe`, mehrere `Devices` | Striping gibt es erst in P5: `Stripe = yes` und eine Liste von Devices lehnt osd ab (`Stripe = no` ist erlaubt) |
+
+Mehrere Merkmale einer Route gelten zusammen (und). Eine Route ohne Merkmal
+passt immer; sie muss die letzte sein, und es darf nur eine geben (sonst wären
+die folgenden Routen nie erreichbar). Fehlt sie und passt keine Route, schlägt
+die Reservierung wie bei einem Device ohne passendes Medium fehl.
+
+**Schreiben.** Mit `use storage` (oder, mit `Just In Time Reservation`, wenn
+die ersten Daten eintreffen) prüft osd, dass der MediaType des Director-Storage
+der des Verteilers ist, wählt die erste passende Route aus Level, Client
+(`client_name` des `JobCommand`), Pool (`use storage`), Job, Typ und FileSet
+und reserviert das **Ziel-Device**. Jedes Ziel behält seinen eigenen
+MediaType (D-2 Variante a): der Katalogverkehr (`CatReq`: nächstes Volume,
+Label, Update) und das Volume-Label tragen den MediaType des **Ziels**; im
+Katalog stehen die Volumes also mit `VFile`, `VFile2` usw., nicht mit dem
+MediaType des Verteilers. Ist das Ziel belegt, weicht osd nicht auf ein
+anderes Ziel aus; es verhält sich wie bei einem normalen Device (belegt: die
+Reservierung scheitert; ohne Volume: Mount-Anforderung und Warten). Das Job-Log
+nennt das Ziel („Using Device "VDev2" … to write.“), das Daemon-Log die Route
+(„Distributor VDist: job … goes to device VDev2 (Level = Full)“).
+
+**Lesen.** Restore, Verify und der lesende Teil von Copy/Migration: Welches
+Ziel gelesen wird, steht erst im Bootstrap fest. Der Job hält deshalb alle
+freien Ziele des Verteilers (belegte stehen nicht zur Verfügung), das Ziel mit
+dem MediaType des Director-Storage zuerst, sonst das erste. Der Geräteleser
+nimmt für **jedes Volume** das Ziel, dessen MediaType zum Volume im Bootstrap
+passt („Changing read device. Want Media Type=… have=…“, „Media Type change.
+New read device … chosen.“ im Job-Log). So liest ein Restore einer Kette
+(Full auf Ziel A, Incremental auf Ziel B) in einem Job von beiden Devices.
+Passt kein Ziel zum MediaType, endet der Job wie bei einem Device
+(„No suitable device found to read Volume …“).
+
+**Andere Befehle.** `label` mit dem Verteiler als Device nimmt das Ziel, dessen
+MediaType der des `label`-Befehls ist (der Director gibt den des Storage
+mit, also nur der eines Ziels, z. B. `label … mediatype=VFile2`), sonst
+Fehler 3999 mit den Zielen. `mount`/`unmount`/`release` gelten für alle Ziele.
+`status storage` (und `.status devices`) nennen nach den Devices jeden
+Verteiler mit seinen Routen:
+
+```
+Distributor "VDist" (Media Type "VDistMT") routes jobs to its devices:
+    Route 1: Level = Full -> Device "VDev" (free)
+    Route 2: always -> Device "VDev2" (in use by job Backup.2026-11-23_10.00.00_02)
+```
+
+**Prüfung (`osd -t`).** Fehler beim Laden: Ziel-Device nicht in `bareos-sd.d`
+(„Route target Device … not found in bareos-sd.d“), Ziel ist ein Verteiler,
+Ziel ist kein File-Device (P2 kennt nur File-Devices), Route ohne `Device`,
+Verteiler ohne Route, mehr als eine Route ohne Merkmal oder eine Route nach
+der ohne Merkmal, doppelter Name oder Name eines Devices/Autochangers, unbekannte
+Direktive oder unbekannter Level/Typ, `Stripe = yes`/mehrere `Devices`,
+fehlender `Media Type`.
+
+**Grenzen.** Nur File-Devices als Ziel (S3, Wechselplatte, Band folgen mit
+P3, P4, P6). Kein Striping (P5), keine Zweige (P2b). Beim Lesen wartet ein Job
+nicht auf ein belegtes Ziel, er hält die freien und liest von ihnen; ein
+`mount`/`label` auf einem Ziel, das nicht das erste Lesegerät ist, weckt den
+wartenden Job nicht (er fragt nach der Wartezeit erneut).
+
+Test: `cargo test -p onesimus-rig --test osd_distributor -- --ignored --nocapture`
+(Full auf `VDev`, Incremental auf `VDev2`, Restore der Kette aus beiden);
+Auswahl und Konfigurationsfehler als Unit-Tests in `bareos-config`
+(`sd.rs`) und `osd-daemon` (`daemon.rs`, `reader.rs`).
 
 ## Transporte: gRPC und BNET
 

@@ -52,7 +52,7 @@ Routen im SD heißt also: Der Verteiler wählt für den Job **ein Device unter s
 ### Vorschlag D-1: Verteiler als Device-Ersatz
 
 ```
-# bareos-sd.d/device/Verteiler.conf (osd)
+# <Overlay>/osd.d/distributor/Verteiler.conf (osd, endgültiger Ort seit D-8; `Devices = …; Stripe = yes` erst ab P5)
 Distributor {
   Name = Verteiler
   Media Type = Onesimus            # was der Director sieht (D-2)
@@ -278,7 +278,7 @@ Anlass: ein altes NAS mit 2-TB-Platten soll osd direkt tragen, als Plattenband-H
 | P0 ✅ (20.11.2026) | `bareos-format` und `daemon-crate` als gemeinsame Crates (ofd-Gutachten §5), osd-Schnittstelle (`crates/osd`) und Daemon (`crates/osd/daemon`) trennen | ofd und odir bauen unverändert. Erledigt, siehe [P0 umgesetzt](#p0-umgesetzt-20112026) |
 | P1 ✅ (20.11.2026; Stufen 1, 2, 3) | osd als Ersatz für bareos-sd mit **einem File-Device**: Label, Mount, Append, Read, Status, CatReq, Bareos-Volume-Format. Steuer- und Datenweg über **gRPC** (odir, ofd) und BNET (bareos-dir, bareos-fd). Stufe 1: Backup über BNET, aktiver und passiver Client, Datenweg über den Ring; Stufe 2: Lesen/Restore; Stufe 3: gRPC | Testgerüst Director+FD+SD (`onesimus-rig`): Backup und Restore mit odir+ofd über gRPC und mit bareos-fd über BNET. `bls` liest das Volume. Erledigt, siehe [Stufe 1](#p1-stufe-1-umgesetzt-20112026), [Stufe 2](#p1-stufe-2-umgesetzt-20112026), [Stufe 3](#p1-stufe-3-umgesetzt-20112026); was bleibt: [Nach P1](#nach-p1-offen) |
 | PT | Plattenband v1 (D-14): Bandkern auf einer vorbelegten Datei bzw. einem Loop-Device (`losetup --direct-io=on`), dann `/dev/sdX` mit `O_DIRECT\|O_EXCL` (zunächst Linux); eine Platte, kein Striping; Kassetten mit zwei Partitionen, MAM, Wechsler; Labels (D-16) mit `osd disk init` und Etikett-PDF; Weiterlesen hinter Schadstellen (D-17); Bareos-Frontend und LTFS-Plugin `libtape-osd.so`. Gesundheit (D-21): SMART, Zähler, Bewertung, Meldung, Scrub. Danach PT2: LUNs im SAN über iSCSI mit Persistent Reservations (D-20), Gesundheit vom Speichersystem | ohne root testbar; Export einer Kassette in eine Bandabbild- bzw. Volume-Datei besteht `bls`; `mkltfs` + `ltfs` + Dateien schreiben/lesen auf einer emulierten Kassette; kill -9 während des Schreibens verliert keinen bestätigten Satz; `update slots`/`label barcodes` liefern die Kassetten-Barcodes; fremde Platte ohne `--force` abgelehnt; eingeschleuste Schadstelle: Lesen setzt dahinter fort und meldet den Satzbereich. PT2: iSCSI-Target im Rig (LIO mit `fileio`-Backstore, eigener Netz-Namespace), zwei osd-Instanzen auf demselben LUN, die zweite wird per Reservation abgewiesen; Pfadabbruch während des Schreibens. Teilt das Bareos-Bandformat mit P6 |
-| P2 | Verteiler mit Routen über File-Devices | Routing-Fälle im Rig, Restore über den MediaType |
+| P2 ✅ (23.11.2026) | Verteiler mit Routen über File-Devices | Routing-Fälle im Rig, Restore über den MediaType. Erledigt, siehe [P2 umgesetzt](#p2-umgesetzt-23112026) |
 | P2b | Zweige (Branch): odir startet Haupt- und Zweig-Jobs, osd verteilt an beide, Katalogsätze je Zweig | Inc auf File, AI auf zweites File-Device; Restore aus jedem Zweig einzeln; ein gescheiterter Zweig bricht den anderen nicht ab; Konsolidierung des AI-Zweigs |
 | P3 | Wechselplatten und Device-Watcher | Rig mit Loop-Device, Ein- und Abziehen simuliert |
 | P4 | S3 | gegen einen lokalen S3 (z. B. MinIO im eigenen Podman-root, siehe Podman-Isolation) |
@@ -450,6 +450,44 @@ Belege (Gerüst, 20.11.2026; `bareos-fd` ist nicht installiert):
 - `tests/osd.rs` mit osd (jetzt auf gRPC): 4 von 4; im gemischten Test laufen die bareos-sd-Abschnitte über TLS-PSK, der osd-Abschnitt über gRPC („Connected Storage daemon at 127.0.0.1:39506, encryption: gRPC TLS“ vom FD). `tests/rig.rs` mit `ONESIMUS_RIG_SD=$PWD/target/debug/osd`: 5 von 5.
 
 Prüfung: `cargo test --workspace --exclude onesimus-rig` grün, 1364 Tests bestanden, 0 fehlgeschlagen, 35 ignoriert; neu sind onesimus-bnet-grpc 6, bareos-config 1 (`osd.d` gRPC), osd-daemon 1 (gRPC-Port, Pinning, `--disable-grpc`), odir 1 (`sd_grpc`); 6 neue Gerüst-Tests. `cargo doc --no-deps --document-private-items` der neuen Crates ohne Warnung.
+
+## P2 umgesetzt (23.11.2026)
+
+Verteiler mit Routen über File-Devices, ohne Striping und ohne Zweige.
+Bedienung und Syntax: [osd § Verteiler](../wiki/osd.md#verteiler-distributor-p2).
+
+- **Konfiguration (D-1, D-8):** `Distributor` steht nur in
+  `<Overlay>/osd.d/distributor/<Name>.conf`; `bareos-sd.d` bleibt unverändert.
+  `Route { … }` ist eine Unterressource des vorhandenen Parsers; die Direktiven
+  stehen wie im Plan in einer Zeile mit `;`. Merkmale (D-3): `Job`, `Client`,
+  `Pool`, `FileSet`, `Level`, `Type`; Ziel: `Device` (genau eins). `Stripe = yes`
+  und mehrere `Devices` lehnt `osd -t` ab (P5). `bareos-config::sd`:
+  `SdDistributor`, `SdRoute`, `RouteFacts`, `SdDistributor::select`.
+- **Schreiben (D-1):** `Daemon::reserve_device` löst einen Verteiler zur ersten
+  passenden Route auf (Level, Client aus dem `JobCommand`, Pool aus `use storage`)
+  und reserviert das Ziel. Ein belegtes Ziel wird nicht umgangen. Der MediaType
+  des Ziels geht in `JobInfo` und damit in `CatReq` und Label (D-2 Variante a);
+  der Verteiler hat nur den MediaType, den der Director-Storage trägt.
+- **Lesen:** Der Job hält alle freien Ziele (`Reserved::alternatives`), der
+  Geräteleser (`JobInfo::alternatives`) nimmt je Volume das Ziel mit dem
+  MediaType des Volumes. Damit liest ein Restore eine Kette aus Full auf Ziel A
+  und Incremental auf Ziel B in einem Job. Das Wechseln beim Lesen
+  („Changing read device“, Stufe „Nach P1“) gilt damit auch für gemischte
+  MediaTypes in einem Bootstrap, wenn sie von einem Verteiler stammen.
+- **`label`, `mount`, `status`:** `label` über den Verteiler geht auf das Ziel
+  des Label-MediaTypes; `mount`/`unmount`/`release` gelten für alle Ziele;
+  `status storage` zeigt Verteiler und Routen mit Belegung.
+- **Prüfung:** Unit-Tests in `bareos-config` (Auswahl nach Level, Client, Pool,
+  Job, Typ, FileSet, Rest; alle Konfigurationsfehler) und `osd-daemon`
+  (Reservierung, kein Ausweichen, Lesen mit Alternativen, Geräteleser über zwei
+  Ziele); Rig-Test `tests/osd_distributor.rs` (Full auf `VDev`, Incremental auf
+  `VDev2`, Restore des Incrementals und der Kette, Vergleich mit dem Quellbaum).
+- **Offen aus P2:** Warten auf ein belegtes Ziel beim Lesen (heute hält der Job die
+  freien Ziele, ein belegtes fehlt ihm); `mount`/`label` weckt nur ein wartendes
+  Lesen auf dem ersten Lesegerät; Ziele anderer Gerätearten (P3, P4, P6);
+  Ziel-Auswahl für Copy-Jobs (`Type = Copy` ist wählbar, aber nicht im Rig
+  geprüft); Verteiler als Storage des Directors mit `Device = a, b` (Variante a
+  mit mehreren Director-Devices) nicht geprüft.
 
 ## Nach P1 (offen)
 

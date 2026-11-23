@@ -301,6 +301,37 @@ pub fn second_device(root: &Path) -> String {
     )
 }
 
+/// Name of the rig's Distributor ([`crate::RigOptions::distributor`]).
+pub const DISTRIBUTOR: &str = "VDist";
+
+/// Media type of the rig's Distributor: what the Director's Storage carries;
+/// the targets `VDev` and `VDev2` keep `VFile` and `VFile2`.
+pub const DISTRIBUTOR_MEDIA_TYPE: &str = "VDistMT";
+
+/// The Distributor of the rig as `osd.d/distributor/VDist.conf` (relative path
+/// below `osd.d`, text): Full goes to `VDev`, the rest to `VDev2`.
+pub fn distributor_extension() -> (String, String) {
+    (
+        format!("distributor/{DISTRIBUTOR}.conf"),
+        format!(
+            "Distributor {{\n  Name = {DISTRIBUTOR}\n  Media Type = {DISTRIBUTOR_MEDIA_TYPE}\n  \
+             Route {{ Level = Full; Device = VDev }}\n  Route {{ Device = VDev2 }}\n}}\n"
+        ),
+    )
+}
+
+/// The Director's Storage `vsd` as the Distributor: `Device = VDist`, its media type.
+pub fn distributor_storage(ports: Ports) -> (String, String) {
+    (
+        "storage/vsd.conf".into(),
+        format!(
+            "Storage {{\n  Name = vsd\n  Address = 127.0.0.1\n  SD Port = {sd}\n  Password = \"vsd-pw\"\n  Device = {DISTRIBUTOR}\n  \
+             Media Type = {DISTRIBUTOR_MEDIA_TYPE}\n  Maximum Concurrent Jobs = 10\n}}\n",
+            sd = ports.sd
+        ),
+    )
+}
+
 /// Configuration of the second SD (`vsd2`, device `VDev2`, media type
 /// `VFile2`, volumes below `root/storage2`).
 pub fn copy_sd_config(root: &Path, ports: Ports, plain: bool) -> String {

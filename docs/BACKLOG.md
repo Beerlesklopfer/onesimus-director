@@ -36,6 +36,17 @@ Gemeldet beim Bau der Live-Job-Ansicht und der Schedule-Ansicht (proto `72abd06`
 | --- | --- | --- | --- |
 | V-1 | ~~Ablauf „Volume beschädigt“ (Bandriss, Plattenschaden, defektes Datei-Volume): Volume auf Error, betroffene Jobs aus JobMedia, je Job Kopie/Zweig anzeigen, Kopien hochstufen, für Clients ohne Kopie neuen Full vorschlagen oder starten, bei Plattenbändern Magazin-Barcode und Seriennummer bzw. LUN nennen; `dryrun`/`yes`; typisiert über gRPC (Proto-Feld mit der GUI-Sitzung abstimmen) und MCP. Vorher prüfen, wie Bareos Copy-Jobs hochstuft ~~ **teilweise erledigt 23.11.2026:** `.volume_damaged volume=<name> [dryrun | yes] [full]` (`commands/volume_damaged.rs`): Bericht (betroffene Jobs, weitere Volumes eines Jobs, Kopien, Jobs ohne Kopie mit `run … level=Full`, abhängige Incremental/Differential), mit `yes` Volume auf Error und Löschen der beschädigten Jobs mit Kopie (`purge_jobs` stuft die älteste Kopie zum Backup hoch, wie `UpgradeCopies`, cats/sql_update.cc), mit `full` neue Fulls. Rig-Test `a_damaged_volume_promotes_the_copy`. **Offen:** typisiert über gRPC/MCP und GUI-Dialog (Proto-Feld mit der GUI-Sitzung abstimmen), Magazin-Barcode/Seriennummer/LUN bei Plattenbändern (Plattenband noch nicht gebaut), Ablauf mit Zweigen (P2b nicht gebaut) | Onesimus-Erweiterung, unabhängig von osd | Befehl `.volume_damaged`; Plan [osd § Beschädigte Volumes](plans/OSD-GERAETE-UND-VERTEILUNG.md#beschädigte-volumes-bandriss-plattenschaden) |
 
+### Verteiler im osd (23.11.2026, P2)
+
+P2 ist erledigt (Plan [P2 umgesetzt](plans/OSD-GERAETE-UND-VERTEILUNG.md#p2-umgesetzt-23112026), [osd § Verteiler](wiki/osd.md#verteiler-distributor-p2)). Offen:
+
+| ID | Punkt | Art | Ort |
+| --- | --- | --- | --- |
+| VT-1 | Lesen über einen Verteiler wartet nicht auf ein belegtes Ziel (der Job hält die freien Ziele); `mount`/`label` auf einem anderen als dem ersten Lesegerät weckt den wartenden Job nicht (Wartekennung je Gerät, nicht je Verteiler) | Lücke | `daemon.rs` (`reserve_distributed`, `wait_for_sysop`) |
+| VT-2 | Ziele anderer Gerätearten (Wechselplatte P3, S3 P4, Band P6); Striping `Stripe = yes` (P5) und Zweige (P2b) | Phasen | Plan |
+| VT-3 | `Type = Copy`/`Migrate`-Routen und ein Director-Storage mit `Device = a, b` für die Ziele sind nicht im Rig geprüft | Prüfung | `tests/osd_distributor.rs` |
+| VT-4 | `osd -t` prüft nicht, ob der `Media Type` des Verteilers zu einem Director-Storage passt (osd kennt den Director nicht); odir `-t` kennt den Verteiler nicht | Prüfung | odir/osd `-t` |
+
 ### Offene Reste an Befehlen
 
 | Befehl | Offen | Bezug |
