@@ -63,7 +63,7 @@ fn read_file(path: &std::path::Path) -> Option<String> {
 }
 
 /// The messages of a rejected configuration and the exit code.
-fn report(raw: &[ConfResource], diags: &[Diag], base: &str) -> (String, i32) {
+pub(crate) fn report(raw: &[ConfResource], diags: &[Diag], base: &str) -> (String, i32) {
     let (text, code, _) = report_in(raw, diags, base, &read_file);
     (text, code)
 }

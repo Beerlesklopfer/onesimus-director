@@ -348,6 +348,16 @@ fn main() {
         warn!("{note}");
     }
 
+    // ParseConfigOrExit() + CheckResources() at start, as with -t (C-057): a configuration
+    // bareos-dir refuses does not start the Director either. The messages go to stderr and the
+    // log; the exit code is 42 (the unit does not restart on it) or 1 as with -t.
+    if let Err(diags) = config_check::check(&config.raw, &config_check::base_config_path(&cli.config)) {
+        let (text, code) = config_test::report(&config.raw, &diags, &config_check::base_config_path(&cli.config));
+        error!("configuration check failed:\n{text}");
+        eprint!("{text}");
+        std::process::exit(code);
+    }
+
     // --export-schema: print JSON schema and exit
     if cli.export_schema {
         let schema_dir = std::path::Path::new(commands::catalog::INSTALLED_SCHEMA_DIR);
