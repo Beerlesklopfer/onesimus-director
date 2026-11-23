@@ -56,6 +56,10 @@ pub struct RigOptions {
     /// gRPC of the SD (osd; bareos-sd has none) and of the Director's
     /// Storage resource.
     pub sd_grpc: Grpc,
+    /// A second SD (`vsd2`, port base + 6) as the writing side of a Copy:
+    /// the program to start (`osd`) and the Director resources of the Copy
+    /// (job `VCopy`, pool `VCopyPool`, `Next Pool` of `VPool`).
+    pub copy_target: Option<PathBuf>,
 }
 
 impl RigOptions {
@@ -72,6 +76,7 @@ impl RigOptions {
             passive_client: false,
             fd_grpc: Grpc::Off,
             sd_grpc: Grpc::Off,
+            copy_target: None,
         }
     }
 }
@@ -170,10 +175,12 @@ impl Rig {
             ("Katalog", ports.pg, crate::catalog::LISTEN),
             ("FD gRPC", ports.fd_grpc, "127.0.0.1"),
             ("SD gRPC", ports.sd_grpc, "127.0.0.1"),
+            ("SD 2", ports.copy_sd, "127.0.0.1"),
         ] {
             if what == "FD" && !options.start_fd
                 || what == "FD gRPC" && !(options.start_fd && options.fd_grpc == Grpc::On)
                 || what == "SD gRPC" && options.sd_grpc != Grpc::On
+                || what == "SD 2" && options.copy_target.is_none()
             {
                 continue;
             }
@@ -219,6 +226,13 @@ impl Rig {
             crate::config::write_director_resources(&self.layout, &[storage]).map_err(io)?;
             crate::config::write_sd_grpc_extension(&self.layout, self.ports).map_err(io)?;
         }
+        if self.options.copy_target.is_some() {
+            crate::config::write_director_resources(&self.layout, &crate::config::copy_resources(self.ports)).map_err(io)?;
+            for dir in ["sd2", "sd2-work", "storage2"] {
+                std::fs::create_dir_all(self.layout.root.join(dir)).map_err(io)?;
+            }
+            std::fs::write(self.layout.root.join("sd2").join("bareos-sd.conf"), crate::config::copy_sd_config(&self.layout.root, self.ports)).map_err(io)?;
+        }
         crate::config::write_director_resources(&self.layout, &self.options.extra_director).map_err(io)?;
         self.catalog = Some(cluster);
 
@@ -230,6 +244,17 @@ impl Rig {
         let started = wait_port(&mut sd, local(self.ports.sd), Duration::from_secs(20));
         self.daemons.push(sd);
         started?;
+        if let Some(program) = self.options.copy_target.clone() {
+            let conf = self.layout.root.join("sd2").join("bareos-sd.conf").display().to_string();
+            let mut args = vec!["-f", "-c", &conf, "-d", "50"];
+            if is_osd(&program) {
+                args.push("--disable-grpc");
+            }
+            let mut sd2 = Daemon::spawn("sd2", &program, &args, &self.layout.root.join("sd2.log"))?;
+            let started = wait_port(&mut sd2, local(self.ports.copy_sd), Duration::from_secs(20));
+            self.daemons.push(sd2);
+            started?;
+        }
         if self.options.start_fd {
             let fd_conf = self.layout.fd_conf.display().to_string();
             let grpc_listen = format!("127.0.0.1:{}", self.ports.fd_grpc);

@@ -158,6 +158,7 @@ impl DirSession {
                 }
                 "use storage=" => self.use_cmd(&msg),
                 "run" => self.run_cmd(),
+                "listen" => self.listen_cmd(),
                 "passive" => self.passive_cmd(&msg),
                 "status" => self.status_cmd(&msg),
                 ".status" => self.dot_status_cmd(&msg),
@@ -320,6 +321,29 @@ impl DirSession {
         if job.wait_fd(wait) && !job.canceled.load(Ordering::Acquire) {
             self.d.jobs_run.fetch_add(1, Ordering::AcqRel);
             crate::fd_session::run_job(&self.d, &job, &self.dir);
+        }
+        Next::Quit
+    }
+
+    /// `ListenCmd` → `DoListenRun`: the writing SD of a Copy/Migrate waits
+    /// for the reading SD (it calls with `Hello Start Storage Job` and the
+    /// job's key after the Director sent it `replicate`) without a time
+    /// limit, then takes its records like an FD's. The Director expects no
+    /// answer to `listen`; the job ends with `3099`.
+    fn listen_cmd(&mut self) -> Next {
+        let Some(job) = self.job.clone() else { return Next::Quit };
+        self.d.send_status(&self.dir, &job, 'S');
+        if job.wait_fd(Duration::from_secs(30 * 24 * 3600)) && !job.canceled.load(Ordering::Acquire) {
+            self.d.jobs_run.fetch_add(1, Ordering::AcqRel);
+            crate::fd_session::run_job(&self.d, &job, &self.dir);
+        } else {
+            // authentication failed or canceled: the job ends without data
+            if !job.canceled.load(Ordering::Acquire) {
+                job.set_status('E');
+            }
+            let mut dir = lock(&self.dir);
+            let _ = dir.send_str(&format!("3099 Job {} end JobStatus={} JobFiles=0 JobBytes=0 JobErrors=0\n", job.cmd.job, job.status() as u32));
+            let _ = dir.signal(BnetSignal::Eod);
         }
         Next::Quit
     }

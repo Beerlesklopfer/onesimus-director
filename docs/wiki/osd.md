@@ -296,11 +296,13 @@ Verify, Restore, Abbruch und die vier erwarteten Defekte).
 | Bootstrap: `JobType`, `JobLevel` | lesen den Wert nicht (er wird dann als unbekanntes Schlüsselwort gemeldet) | Wert wird übersprungen |
 | gRPC zu odir/ofd | – | `StorageDaemon` Control/Data mit TLS, BNET als Rückfall (Stufe 3) |
 | Datensatz über gRPC | – | wie über BNET zwei Nachrichten (`rechdr`, Daten); ein Datensatz je Nachricht mit Kopf als Feldern folgt nach P1 |
-| Copy/Migration, VirtualFull | SD-zu-SD (`replicate`) | odir spricht den SD dafür nur über BNET an; `replicate` kann osd noch nicht (siehe unten) |
+| Copy/Migration | SD-zu-SD (`listen` am schreibenden, `replicate` am lesenden SD) | osd kann die **schreibende** Seite (seit 23.11.2026): `listen` wartet ohne Zeitgrenze auf den lesenden SD (`Hello Start Storage Job <Job>`, TLS-PSK `R_JOB`, CRAM-MD5 mit dem Auth-Schlüssel des Jobs, nur BNET), dann `start replicate` / `replicate data` / `end replicate` mit denselben Datensätzen wie ein FD. Gemessen mit bareos-sd als Leser: `tests/osd_copy.rs`. Die lesende Seite (`replicate` an osd) fehlt noch, also kein Copy von osd zu osd |
+| VirtualFull | SD-zu-SD | wie Copy; nicht gemessen |
 | Gerätearten | File, Tape, Fifo, Droplet … | nur `File` |
 | Kein Volume verfügbar (Schreiben) | wartet auf `label`/`mount` des Operators (`JS_WaitMedia`) | Meldung wie bareos-sd, dann endet der Job mit Fehler |
 | Recycling, `relabel`, `Purged`-Volumes | ja | nein; `relabel` antwortet mit 3912 |
-| `autochanger`, `listen`, `nextrun`, `finish`, `readlabel`, `replicate`, `resolve`, `setdevice`, `stats` | ja | unbekannt (3900) |
+| `listen` | ja | ja (schreibende Seite einer Kopie) |
+| `autochanger`, `nextrun`, `finish`, `readlabel`, `replicate`, `resolve`, `setdevice`, `stats` | ja | unbekannt (3900) |
 | Spooling (Daten, Attribute), Checkpoints, Quota | ja | nein (die Angaben im Job-Kommando werden gelesen und ignoriert) |
 | Bandbreite (`setbandwidth`) | begrenzt die Verbindung | nur mit `2000 OK Bandwidth` beantwortet |
 | `Maximum Concurrent Jobs`, Device-Belegung | Reservierungslogik mit Warteschlange, Lesen und Schreiben getrennt gezählt | ein Job je Device, ob lesend oder schreibend; ist es belegt, scheitert die Reservierung |

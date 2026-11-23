@@ -73,11 +73,18 @@ pub fn run_job(d: &Daemon, job: &Arc<Job>, dir: &SharedChannel) {
     let name = job.cmd.job.clone();
     let _ = lock(dir).send_str(&format!("3010 Job {name} start\n"));
     d.send_status(dir, job, 'R');
-    d.jmsg(dir, job, M_INFO, &format!("{}\n", daemon_crate::version::version_line()));
     let Some(mut conn) = job.fd.lock().unwrap_or_else(|e| e.into_inner()).take() else { return };
+    if !conn.sd {
+        // DoListenRun (the writing SD of a replication) sends no version line
+        d.jmsg(dir, job, M_INFO, &format!("{}\n", daemon_crate::version::version_line()));
+    }
     let started = Instant::now();
     let mut session = Session { opened: false, started };
-    do_fd_commands(d, job, dir, conn.channel.as_mut(), &mut session);
+    if conn.sd {
+        do_sd_commands(d, job, dir, conn.channel.as_mut(), &mut session);
+    } else {
+        do_fd_commands(d, job, dir, conn.channel.as_mut(), &mut session);
+    }
     let _ = conn.channel.signal(BnetSignal::Terminate);
     job.set_status('T');
     let bytes = *job.bytes.lock().unwrap_or_else(|e| e.into_inner());
@@ -120,7 +127,7 @@ fn do_fd_commands(d: &Daemon, job: &Arc<Job>, dir: &SharedChannel, fd: &mut dyn 
             }
         } else if msg.starts_with("append data") {
             if s.opened {
-                let ok = do_append_data(d, job, dir, fd, s);
+                let ok = do_append_data(d, job, dir, fd, s, false);
                 if !ok {
                     let _ = fd.send_str("3903 Error append data\n");
                     fatal_with_fd(d, dir, job, "Append data error.\n");
@@ -197,6 +204,63 @@ fn do_fd_commands(d: &Daemon, job: &Arc<Job>, dir: &SharedChannel, fd: &mut dyn 
         if quit {
             break;
         }
+    }
+}
+
+/// `DoStoredCommands` (stored/sd_cmds.cc): the commands of the reading SD
+/// of a Copy/Migrate: `start replicate`, `replicate data` (the records as an
+/// FD sends them), `end replicate`, until it hangs up.
+fn do_sd_commands(d: &Daemon, job: &Arc<Job>, dir: &SharedChannel, sd: &mut dyn Channel, s: &mut Session) {
+    loop {
+        let msg = match sd.recv() {
+            Ok(BnetMessage::Data(data)) if !data.is_empty() => text(&data),
+            Ok(BnetMessage::Data(_)) | Ok(BnetMessage::Signal(_)) => continue,
+            Err(_) => break,
+        };
+        tracing::debug!("{}: <stored: {}", job.cmd.job, msg.trim_end());
+        let quit = if msg.starts_with("start replicate") {
+            if s.opened {
+                let _ = sd.send_str("3901 Error replicate session already open\n");
+                fatal_with_sd(d, dir, job, "Attempt to open already open session.\n");
+                true
+            } else {
+                s.opened = true;
+                sd.send_str(&format!("3000 OK start replicate ticket = {}\n", job.vol_session_id)).is_err()
+            }
+        } else if msg.starts_with("replicate data") {
+            if s.opened {
+                let ok = do_append_data(d, job, dir, sd, s, true);
+                if !ok {
+                    let _ = sd.send_str("3903 Error replicate data\n");
+                    fatal_with_sd(d, dir, job, "Replicate data error.\n");
+                }
+                !ok
+            } else {
+                let _ = sd.send_str("3902 Error replicate session not opened\n");
+                fatal_with_sd(d, dir, job, "Attempt to replicate on non-open session.\n");
+                true
+            }
+        } else if msg.starts_with("end replicate") {
+            sd.send_str("3000 OK end replicate\n").is_err()
+        } else {
+            if !job.canceled.load(Ordering::Acquire) {
+                d.jmsg(dir, job, M_FATAL, &format!("Storage daemon command not found: {msg}"));
+            }
+            let _ = sd.send_str("3900 Invalid command\n");
+            job.set_status('E');
+            break;
+        };
+        if quit {
+            break;
+        }
+    }
+}
+
+/// `Command error with SD, hanging up.` and `JS_ErrorTerminated`.
+fn fatal_with_sd(d: &Daemon, dir: &SharedChannel, job: &Arc<Job>, reason: &str) {
+    if !job.canceled.load(Ordering::Acquire) {
+        d.jmsg(dir, job, M_FATAL, &format!("Command error with SD, hanging up. {reason}"));
+        job.set_status('E');
     }
 }
 
@@ -432,7 +496,7 @@ impl Producer {
 
 /// `DoAppendData`: receives the data of the FD and writes it through the
 /// ring. True when everything went well.
-fn do_append_data(d: &Daemon, job: &Arc<Job>, dir: &SharedChannel, fd: &mut dyn Channel, s: &mut Session) -> bool {
+fn do_append_data(d: &Daemon, job: &Arc<Job>, dir: &SharedChannel, fd: &mut dyn Channel, s: &mut Session, sd: bool) -> bool {
     let mut ok = true;
     let mut producer: Option<Producer> = None;
     let mut device_name: Option<String> = None;
@@ -458,7 +522,7 @@ fn do_append_data(d: &Daemon, job: &Arc<Job>, dir: &SharedChannel, fd: &mut dyn 
         d.jmsg(dir, job, M_FATAL, "Network send error to FD.\n");
         ok = false;
     }
-    let what = "FD";
+    let what = if sd { "SD" } else { "FD" };
     let mut last_file_index: i64 = 0;
     let mut job_bytes: u64 = 0;
     let mut job_files: u32 = 0;
@@ -559,7 +623,11 @@ fn do_append_data(d: &Daemon, job: &Arc<Job>, dir: &SharedChannel, fd: &mut dyn 
         job.set_status('A');
     }
     job.set_status(if ok { 'T' } else { 'E' });
-    if ok {
+    if ok && sd {
+        // replicate data: back to the commands of the reading SD
+        let _ = fd.send_str("3000 OK replicate data\n");
+        do_sd_commands(d, job, dir, fd, s);
+    } else if ok {
         let _ = fd.send_str("3000 OK append data\n");
         do_fd_commands(d, job, dir, fd, s);
     } else {

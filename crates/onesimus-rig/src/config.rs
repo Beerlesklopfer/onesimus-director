@@ -39,13 +39,15 @@ pub struct Ports {
     pub fd_grpc: u16,
     /// gRPC port of the SD (osd.d `Grpc Port`), used with [`Grpc::On`].
     pub sd_grpc: u16,
+    /// Port of the second SD, the writing side of a Copy ([`crate::RigOptions::copy_target`]).
+    pub copy_sd: u16,
 }
 
 impl Ports {
     /// Six consecutive ports from `base`: Director, FD, SD, catalog, FD
     /// gRPC, SD gRPC (the tests space their bases by 10).
     pub fn from_base(base: u16) -> Ports {
-        Ports { dir: base, fd: base + 1, sd: base + 2, pg: base + 3, fd_grpc: base + 4, sd_grpc: base + 5 }
+        Ports { dir: base, fd: base + 1, sd: base + 2, pg: base + 3, fd_grpc: base + 4, sd_grpc: base + 5, copy_sd: base + 6 }
     }
 }
 
@@ -276,6 +278,48 @@ pub fn fd_config(layout: &Layout, ports: Ports) -> String {
         fd = ports.fd,
         work = layout.fd_work.display()
     )
+}
+
+/// Configuration of the second SD (`vsd2`, device `VDev2`, media type
+/// `VFile2`, volumes below `root/storage2`).
+pub fn copy_sd_config(root: &Path, ports: Ports) -> String {
+    format!(
+        "Storage {{\n  Name = vsd2\n  SD Port = {sd}\n  SD Address = 127.0.0.1\n  Working Directory = {root}/sd2-work\n}}\n\
+         Director {{\n  Name = bareos-dir\n  Password = \"vsd2-pw\"\n}}\n\
+         Device {{\n  Name = VDev2\n  Media Type = VFile2\n  Archive Device = {root}/storage2\n  LabelMedia = yes\n  \
+         Random Access = yes\n  AutomaticMount = yes\n  RemovableMedia = no\n  AlwaysOpen = no\n}}\n\
+         Messages {{\n  Name = Standard\n  Director = bareos-dir = all\n}}\n",
+        sd = ports.copy_sd,
+        root = root.display()
+    )
+}
+
+/// The Director resources of a Copy to the second SD: its Storage, the
+/// pool `VCopyPool`, `VPool` with it as Next Pool, and the Copy job `VCopy`
+/// (uncopied jobs of `VPool`, read from `vsd`).
+pub fn copy_resources(ports: Ports) -> Vec<(String, String)> {
+    vec![
+        (
+            "storage/vsd2.conf".into(),
+            format!(
+                "Storage {{\n  Name = vsd2\n  Address = 127.0.0.1\n  SD Port = {sd}\n  Password = \"vsd2-pw\"\n  Device = VDev2\n  \
+                 Media Type = VFile2\n  Maximum Concurrent Jobs = 10\n}}\n",
+                sd = ports.copy_sd
+            ),
+        ),
+        (
+            "pool/VCopyPool.conf".into(),
+            "Pool {\n  Name = VCopyPool\n  Pool Type = Backup\n  Label Format = \"VCopy-\"\n  Maximum Volume Bytes = 1G\n  Storage = vsd2\n}\n".into(),
+        ),
+        (
+            "pool/VPool.conf".into(),
+            "Pool {\n  Name = VPool\n  Pool Type = Backup\n  Label Format = \"VVol-\"\n  Maximum Volume Bytes = 1G\n  Next Pool = VCopyPool\n}\n".into(),
+        ),
+        (
+            "job/VCopy.conf".into(),
+            "Job {\n  Name = VCopy\n  JobDefs = VDefs\n  Type = Copy\n  Selection Type = PoolUncopiedJobs\n}\n".into(),
+        ),
+    ]
 }
 
 /// Storage, Director, Device and Messages resource of the SD.

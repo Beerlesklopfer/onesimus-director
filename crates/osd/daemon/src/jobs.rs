@@ -164,6 +164,8 @@ pub struct FdConnection {
     pub channel: Box<dyn Channel>,
     /// How a cancel breaks the connection.
     pub breaker: Breaker,
+    /// The peer is the reading SD of a Copy/Migrate (`Hello Start Storage Job`), not an FD.
+    pub sd: bool,
 }
 
 /// One job of the SD (`JobControlRecord` of `stored`).
