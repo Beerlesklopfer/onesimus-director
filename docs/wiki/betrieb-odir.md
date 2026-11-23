@@ -426,3 +426,15 @@ Bewusst entschieden (Stand 20.11.2026):
 Vor dem Rückweg auf `bareos-dir` müssen Onesimus-eigene Direktiven (`gRPC Port`,
 `gRPC TLS Certificate`, `gRPC TLS Key`, `mDNS Advertise`) aus der Konfiguration
 entfernt werden; `bareos-dir` kennt sie nicht.
+
+## Volume-Werkzeuge (obls, später obscan und obextract)
+
+Das Paket `odir` bringt die Rust-Ersatzwerkzeuge für `bls`, `bscan` und `bextract` mit (Crate `crates/outils`, installiert nach `/usr/bin`). Sie lesen Datei-Volumes (auch die von bareos-sd und osd geschriebenen, Blockformat BB01/BB02) ohne Director, Storage Daemon und Katalog.
+
+| Werkzeug | Stand | Zweck |
+|---|---|---|
+| `obls` | fertig (23.11.2026) | `obls [-j] [-l] [-k] [-i <JobId>] <Volume-Datei>...`: Volume-Label, Jobs (SOS/EOS), Dateien; `-j` nur Label und Jobs, `-l` lange Zeilen, `-k` ohne Prüfsummen, `-i` nur ein Job. Liest Block für Block, der Speicherbedarf ist ein Block. |
+| `obscan` | offen | Katalog aus Volumes wiederherstellen (`bscan`) |
+| `obextract` | offen | Dateien aus Volumes ohne Katalog zurückschreiben (`bextract`) |
+
+Getestet gegen ein von `bareos-format` aufgebautes Volume (`crates/outils/tests/obls.rs`) und gegen ein von osd im Rig geschriebenes. Gegen ein Volume von bareos-sd noch nicht verglichen; Bandgeräte werden nicht gelesen, nur Dateien.

@@ -2453,6 +2453,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "outils"
+version = "25.1.2+onesimus.0.2.0"
+dependencies = [
+ "bareos-format",
+]
+
+[[package]]
 name = "pam-client2"
 version = "0.5.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"

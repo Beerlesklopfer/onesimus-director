@@ -22,6 +22,7 @@ members = [
     "crates/daemon-crate",
     "crates/onesimus-bnet-grpc",
     "crates/smartread",
+    "crates/outils",
 ]
 
 [workspace.package]

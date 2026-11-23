@@ -155,7 +155,7 @@ jobs:
       - name: Pakete bauen
         # Die Tests liefen im Job test.
         run: |
-          cargo build --release --locked -p odir -p ofd -p oconsole --no-default-features --features oconsole/mcp-production
+          cargo build --release --locked -p odir -p outils -p ofd -p oconsole --no-default-features --features oconsole/mcp-production
           mkdir -p dist
           for p in odir ofd oconsole; do
             cargo deb -p "$p" --no-build --deb-version "$DEB_VERSION" --output dist/

@@ -1,0 +1,18 @@
+[package]
+name = "outils"
+description = "Onesimus Volume-Werkzeuge: obls (Volume lesen), später obscan, obextract"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+
+[lib]
+name = "outils"
+path = "src/lib.rs"
+
+[[bin]]
+name = "obls"
+path = "src/bin/obls.rs"
+
+[dependencies]
+bareos-format.workspace = true
