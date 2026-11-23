@@ -22,6 +22,7 @@ bareos-bnet.workspace = true
 bareos-config.workspace = true
 bareos-format.workspace = true
 onesimus-bnet-grpc.workspace = true
+serde_json.workspace = true
 daemon-crate.workspace = true
 onesimus-proto-rs.workspace = true
 osd.workspace = true

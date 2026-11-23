@@ -87,6 +87,10 @@ fn devices(d: &Daemon) -> Vec<String> {
             Some(job) => out.push(format!("\nDevice {} is in use by job {job}.\n", dev.print_name())),
             None => out.push(format!("\nDevice {} is not open.\n", dev.print_name())),
         }
+        out.push(match crate::health::of_device(&dev.archive_device) {
+            Ok(h) => format!("    Health: {}\n", h.status_line()),
+            Err(e) => format!("    Health: unknown ({e})\n"),
+        });
     }
     out.push("====\n".into());
     out
@@ -114,6 +118,17 @@ pub fn dot_status(d: &Daemon, what: &str) -> Option<Vec<String>> {
         "header" => header(d),
         "running" => running(d),
         "devices" => devices(d),
+        "health" => {
+            let mut out = vec!["3000 OK .status\n".to_string()];
+            for conf in &d.config.devices {
+                let dev = FileDevice::from_config(conf);
+                out.push(match crate::health::of_device(&dev.archive_device) {
+                    Ok(h) => h.dot_line(&dev.name),
+                    Err(e) => format!("Device={} Level=unknown Reasons=\"{e}\"\n", dev.name),
+                });
+            }
+            out
+        }
         "waitreservation" | "volumes" | "spooling" | "terminated" => Vec::new(),
         _ => return None,
     })

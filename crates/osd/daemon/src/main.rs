@@ -50,6 +50,7 @@ mod device;
 mod director;
 mod fd_session;
 mod grpc;
+mod health;
 mod jobs;
 mod read_session;
 mod reader;
