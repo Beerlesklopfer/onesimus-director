@@ -642,6 +642,8 @@ pub(crate) mod tests {
         pub(crate) no_volume: bool,
         /// The seconds of every WaitMedia, in order.
         pub(crate) waits: Vec<u32>,
+        /// Answer every WaitMedia with a cancel (`c`) from this many waits on.
+        pub(crate) cancel_waits_from: Option<usize>,
         /// Job status reports (JobStatus requests).
         pub(crate) statuses: Vec<char>,
     }
@@ -660,6 +662,9 @@ pub(crate) mod tests {
                 }
                 Request::WaitMedia(secs) => {
                     self.waits.push(secs);
+                    if self.cancel_waits_from.is_some_and(|n| self.waits.len() >= n) {
+                        return b"c".to_vec();
+                    }
                     // the operator labels a volume after the second wait
                     if self.waits.len() >= 2 {
                         self.no_volume = false;

@@ -516,7 +516,9 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("osd-reader-wrong-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         let ring = format!("osd-readertest-{}-wrong", std::process::id());
-        let fake = job(&dir, &ring, 4, 100, 0);
+        let mut fake = job(&dir, &ring, 4, 100, 0);
+        // the operator is asked to mount the volume and cancels the job on the first wait
+        fake.cancel_waits_from = Some(1);
         // the file "Vol1" now carries the label of another volume
         std::fs::rename(dir.join("Vol1"), dir.join("Other")).unwrap();
         let label = crate::device::new_label("Other", "P", "File", "test-sd");
@@ -529,7 +531,9 @@ mod tests {
         assert_eq!(code, 1);
         let m = &fake.messages;
         assert!(m.iter().any(|x| x.starts_with("Read acquire: Wrong Volume mounted on device \"Dev\"") && x.contains("Wanted Vol1 have Other")), "{m:?}");
-        assert!(m.iter().any(|x| x.starts_with("Too many errors trying to mount device \"Dev\"")), "{m:?}");
+        assert!(m.iter().any(|x| x.starts_with("Please mount read Volume \"Vol1\" for:")), "no mount request: {m:?}");
+        assert!(m.iter().any(|x| x.starts_with("Job ") && x.contains("canceled while waiting for mount on Storage Device \"Dev\"")), "{m:?}");
+        assert_eq!(fake.waits, [3600], "one wait of one hour");
         std::fs::remove_dir_all(&dir).ok();
     }
 }
