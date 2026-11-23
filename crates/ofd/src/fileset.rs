@@ -177,6 +177,9 @@ pub struct FOpts {
     pub wilddir: Vec<Vec<u8>>,
     pub wildfile: Vec<Vec<u8>>,
     pub wildbase: Vec<Vec<u8>>,
+    /// Onesimus extension (`Y` line, not in Bareos): paths (and everything below)
+    /// that are excluded only for the files this option block applies to.
+    pub exclude_paths: Vec<Vec<u8>>,
     pub fstype: Vec<String>,
     pub drivetype: Vec<String>,
     pub plugin: Option<String>,
@@ -313,6 +316,14 @@ impl FileSet {
                     (b'D', Some(o)) => { o.wilddir.push(w); State::Options }
                     (b'F', Some(o)) => { o.wildfile.push(w); State::Options }
                     (b'B', Some(o)) => { o.wildbase.push(w); State::Options }
+                    _ => State::Error,
+                };
+            }
+            b'Y' => {
+                // Onesimus extension: "Y <path>" inside an option block
+                let path = item.trim_end_matches('/').as_bytes().to_vec();
+                state = match (subcode, self.start_options()) {
+                    (b' ', Some(o)) if !path.is_empty() => { o.exclude_paths.push(path); State::Options }
                     _ => State::Error,
                 };
             }
@@ -570,7 +581,10 @@ pub fn accept_file(fs: &FileSet, incexe: &IncExe, fname: &[u8], is_dir: bool, cu
             fnm |= FNM_PATHNAME;
         }
         let exclude = fo.flags.has(FO_EXCLUDE);
-        let decide = || !exclude;
+        // Onesimus: a path excluded for this option block only
+        let blocked = fo.exclude_paths.iter().any(|p| fname == p.as_slice()
+            || (fname.len() > p.len() && fname.starts_with(p) && fname[p.len()] == b'/'));
+        let decide = || !exclude && !blocked;
         if is_dir {
             if fo.wilddir.iter().any(|w| fn_match(w, fname, fnm)) {
                 return decide();
@@ -596,6 +610,12 @@ pub fn accept_file(fs: &FileSet, incexe: &IncExe, fname: &[u8], is_dir: bool, cu
         }
         if fo.regex.iter().any(|r| r.is_match(fname)) {
             return decide();
+        }
+        let no_pattern = fo.regex.is_empty() && fo.wild.is_empty() && fo.regexdir.is_empty() && fo.wilddir.is_empty()
+            && fo.regexfile.is_empty() && fo.wildfile.is_empty() && fo.wildbase.is_empty();
+        if blocked && no_pattern {
+            // an option block without patterns applies to every file
+            return false;
         }
         if exclude && fo.regex.is_empty() && fo.wild.is_empty() && fo.regexdir.is_empty() && fo.wilddir.is_empty()
             && fo.regexfile.is_empty() && fo.wildfile.is_empty() && fo.wildbase.is_empty()
@@ -636,6 +656,29 @@ mod tests {
             fs.add(l, &mut |m| panic!("{m}"), &|s| s.to_string());
         }
         fs
+    }
+
+    #[test]
+    fn exclude_path_of_an_option_block_applies_only_to_what_it_matches() {
+        // Y inside "O e"-less block with a pattern: /tmp/x/*.o is excluded, /tmp/x/a.c is not
+        let fs = build(&["I", "O M", "W *.o", "Y /tmp/x", "N", "O M", "N", "F /tmp", "N"]);
+        let inc = &fs.include[0];
+        let mut cur = FileOpts::default();
+        assert!(!accept_file(&fs, inc, b"/tmp/x/a.o", false, &mut cur), "pattern match inside the path");
+        assert!(accept_file(&fs, inc, b"/tmp/y/a.o", false, &mut cur), "pattern match outside the path");
+        assert!(accept_file(&fs, inc, b"/tmp/x/a.c", false, &mut cur), "no pattern match: not touched");
+        // without a pattern the option block applies to everything below the path
+        let fs = build(&["I", "O M", "Y /tmp/x/", "N", "F /tmp", "N"]);
+        let inc = &fs.include[0];
+        assert!(!accept_file(&fs, inc, b"/tmp/x", true, &mut cur));
+        assert!(!accept_file(&fs, inc, b"/tmp/x/a.c", false, &mut cur));
+        assert!(accept_file(&fs, inc, b"/tmp/xy/a.c", false, &mut cur), "only whole path components");
+        // a bad Y line is an error
+        let mut messages = Vec::new();
+        let mut fs = FileSet::default();
+        fs.add("I", &mut |m| messages.push(m), &|s| s.to_string());
+        fs.add("Y", &mut |m| messages.push(m), &|s| s.to_string());
+        assert!(fs.is_error());
     }
 
     #[test]
