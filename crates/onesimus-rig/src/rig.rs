@@ -63,6 +63,9 @@ pub struct RigOptions {
     /// Instead of a second SD, a second device (`VDev2`) in the rig SD with
     /// the same Director resources: Copy and VirtualFull inside one SD.
     pub copy_same_sd: bool,
+    /// No TLS to and between the SDs of a Copy (`TLS Enable = no` on the
+    /// second SD and its Storage resource: `replicate … ssl=0`, clear text).
+    pub copy_plain: bool,
 }
 
 impl RigOptions {
@@ -81,6 +84,7 @@ impl RigOptions {
             sd_grpc: Grpc::Off,
             copy_target: None,
             copy_same_sd: false,
+            copy_plain: false,
         }
     }
 }
@@ -230,19 +234,33 @@ impl Rig {
             crate::config::write_director_resources(&self.layout, &[storage]).map_err(io)?;
             crate::config::write_sd_grpc_extension(&self.layout, self.ports).map_err(io)?;
         }
+        if self.options.copy_plain {
+            // Bareos requires TLS by default: the reading SD and its Storage resource
+            // must allow clear text too, or its replicate connection starts TLS-PSK anyway
+            let tls = "  TLS Enable = no\n  TLS Require = no\n";
+            let conf = std::fs::read_to_string(&self.layout.sd_conf).map_err(io)?;
+            let conf = conf.replacen("SD Address = 127.0.0.1\n", &format!("SD Address = 127.0.0.1\n{tls}"), 1);
+            let conf = conf.replacen("Password = \"vsd-pw\"\n", &format!("Password = \"vsd-pw\"\n{tls}"), 1);
+            std::fs::write(&self.layout.sd_conf, conf).map_err(io)?;
+            let storage = format!(
+                "Storage {{\n  Name = vsd\n  Address = 127.0.0.1\n  SD Port = {}\n  Password = \"vsd-pw\"\n  Device = VDev\n  Media Type = VFile\n  Maximum Concurrent Jobs = 10\n{tls}}}\n",
+                self.ports.sd
+            );
+            crate::config::write_director_resources(&self.layout, &[("storage/vsd.conf".into(), storage)]).map_err(io)?;
+        }
         if self.options.copy_same_sd {
-            crate::config::write_director_resources(&self.layout, &crate::config::copy_resources(self.ports, true)).map_err(io)?;
+            crate::config::write_director_resources(&self.layout, &crate::config::copy_resources(self.ports, true, false)).map_err(io)?;
             std::fs::create_dir_all(self.layout.root.join("storage2")).map_err(io)?;
             let mut conf = std::fs::read_to_string(&self.layout.sd_conf).map_err(io)?;
             conf += &crate::config::second_device(&self.layout.root);
             std::fs::write(&self.layout.sd_conf, conf).map_err(io)?;
         }
         if self.options.copy_target.is_some() {
-            crate::config::write_director_resources(&self.layout, &crate::config::copy_resources(self.ports, false)).map_err(io)?;
+            crate::config::write_director_resources(&self.layout, &crate::config::copy_resources(self.ports, false, self.options.copy_plain)).map_err(io)?;
             for dir in ["sd2", "sd2-work", "storage2"] {
                 std::fs::create_dir_all(self.layout.root.join(dir)).map_err(io)?;
             }
-            std::fs::write(self.layout.root.join("sd2").join("bareos-sd.conf"), crate::config::copy_sd_config(&self.layout.root, self.ports)).map_err(io)?;
+            std::fs::write(self.layout.root.join("sd2").join("bareos-sd.conf"), crate::config::copy_sd_config(&self.layout.root, self.ports, self.options.copy_plain)).map_err(io)?;
         }
         crate::config::write_director_resources(&self.layout, &self.options.extra_director).map_err(io)?;
         self.catalog = Some(cluster);

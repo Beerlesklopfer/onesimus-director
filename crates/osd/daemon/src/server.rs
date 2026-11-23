@@ -136,7 +136,7 @@ fn handle_fd(d: &Daemon, mut bnet: AnyBnet, job_name: &str, breaker: Breaker, se
         tracing::error!("session {session}: JobId {} Job {} already authenticated.", job.cmd.job_id, job.cmd.job);
         return;
     }
-    let auth = CramMd5Auth::new_raw(&job.auth_key, &format!("R_STORAGE::{}", d.name()), 2);
+    let auth = CramMd5Auth::new_raw(&job.auth_key, &format!("R_STORAGE::{}", d.name()), d.tls_policy());
     match auth.two_way_authenticate(&mut bnet, true) {
         Ok(r) if r.success => {
             tracing::debug!("session {session}: OK Authentication jid={} Job {}", job.cmd.job_id, job.cmd.job);
@@ -190,7 +190,7 @@ fn connect_passive_fd_grpc(d: &Daemon, job: &Arc<Job>, target: &onesimus_bnet_gr
     let close = io.close_handle();
     let mut bnet = BnetStream::new(io);
     bnet.send_str(&format!("Hello Storage calling Start Job {}\n", job.cmd.job)).map_err(|e| e.to_string())?;
-    let auth = CramMd5Auth::new_raw(&job.auth_key, &format!("R_STORAGE::{}", d.name()), 2);
+    let auth = CramMd5Auth::new_raw(&job.auth_key, &format!("R_STORAGE::{}", d.name()), d.tls_policy());
     match auth.two_way_authenticate(&mut bnet, false) {
         Ok(r) if r.success => {
             let mut io = bnet.into_inner();
@@ -232,7 +232,7 @@ pub fn connect_to_storage(d: &Daemon, job: &str, key: &str, addr: &str, port: u1
     };
     let mut bnet = BnetStream::new(stream);
     bnet.send_str(&format!("Hello Start Storage Job {job}\n")).map_err(|e| e.to_string())?;
-    let auth = CramMd5Auth::new_raw(key, &format!("R_STORAGE::{}", d.name()), 2);
+    let auth = CramMd5Auth::new_raw(key, &format!("R_STORAGE::{}", d.name()), d.tls_policy());
     match auth.two_way_authenticate(&mut bnet, false) {
         Ok(r) if r.success => Ok(FdConnection { channel: Box::new(bnet), breaker, sd: false, replicate: true }),
         _ => Err("Failed to authenticate the Storage daemon.".into()),
@@ -267,7 +267,7 @@ fn connect_passive_fd_bnet(d: &Daemon, job: &Arc<Job>, addr: &str, port: u16, ss
     };
     let mut bnet = BnetStream::new(stream);
     bnet.send_str(&format!("Hello Storage calling Start Job {}\n", job.cmd.job)).map_err(|e| e.to_string())?;
-    let auth = CramMd5Auth::new_raw(&job.auth_key, &format!("R_STORAGE::{}", d.name()), 2);
+    let auth = CramMd5Auth::new_raw(&job.auth_key, &format!("R_STORAGE::{}", d.name()), d.tls_policy());
     match auth.two_way_authenticate(&mut bnet, false) {
         Ok(r) if r.success => Ok(FdConnection { channel: Box::new(bnet), breaker, sd: false, replicate: false }),
         _ => Err("Failed to authenticate File daemon.".into()),

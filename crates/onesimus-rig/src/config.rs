@@ -293,10 +293,11 @@ pub fn second_device(root: &Path) -> String {
 
 /// Configuration of the second SD (`vsd2`, device `VDev2`, media type
 /// `VFile2`, volumes below `root/storage2`).
-pub fn copy_sd_config(root: &Path, ports: Ports) -> String {
+pub fn copy_sd_config(root: &Path, ports: Ports, plain: bool) -> String {
+    let tls = if plain { "  TLS Enable = no\n  TLS Require = no\n" } else { "" };
     format!(
-        "Storage {{\n  Name = vsd2\n  SD Port = {sd}\n  SD Address = 127.0.0.1\n  Working Directory = {root}/sd2-work\n}}\n\
-         Director {{\n  Name = bareos-dir\n  Password = \"vsd2-pw\"\n}}\n\
+        "Storage {{\n  Name = vsd2\n  SD Port = {sd}\n  SD Address = 127.0.0.1\n  Working Directory = {root}/sd2-work\n{tls}}}\n\
+         Director {{\n  Name = bareos-dir\n  Password = \"vsd2-pw\"\n{tls}}}\n\
          Device {{\n  Name = VDev2\n  Media Type = VFile2\n  Archive Device = {root}/storage2\n  LabelMedia = yes\n  \
          Random Access = yes\n  AutomaticMount = yes\n  RemovableMedia = no\n  AlwaysOpen = no\n}}\n\
          Messages {{\n  Name = Standard\n  Director = bareos-dir = all\n}}\n",
@@ -308,7 +309,8 @@ pub fn copy_sd_config(root: &Path, ports: Ports) -> String {
 /// The Director resources of a Copy to the second SD: its Storage, the
 /// pool `VCopyPool`, `VPool` with it as Next Pool, and the Copy job `VCopy`
 /// (uncopied jobs of `VPool`, read from `vsd`).
-pub fn copy_resources(ports: Ports, same_sd: bool) -> Vec<(String, String)> {
+pub fn copy_resources(ports: Ports, same_sd: bool, plain: bool) -> Vec<(String, String)> {
+    let tls = if plain { "  TLS Enable = no\n  TLS Require = no\n" } else { "" };
     // a second SD process (own port and password), or a second device of the rig SD
     let (port, password) = if same_sd { (ports.sd, "vsd-pw") } else { (ports.copy_sd, "vsd2-pw") };
     vec![
@@ -316,7 +318,7 @@ pub fn copy_resources(ports: Ports, same_sd: bool) -> Vec<(String, String)> {
             "storage/vsd2.conf".into(),
             format!(
                 "Storage {{\n  Name = vsd2\n  Address = 127.0.0.1\n  SD Port = {port}\n  Password = \"{password}\"\n  Device = VDev2\n  \
-                 Media Type = VFile2\n  Maximum Concurrent Jobs = 10\n}}\n"
+                 Media Type = VFile2\n  Maximum Concurrent Jobs = 10\n{tls}}}\n"
             ),
         ),
         (

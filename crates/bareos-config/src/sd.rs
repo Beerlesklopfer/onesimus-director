@@ -105,6 +105,10 @@ pub struct SdStorage {
     pub client_connect_wait: u64,
     /// osd.d: `Ring Slots`, default slot count of the job rings (Onesimus).
     pub ring_slots: Option<u32>,
+    /// `TLS Enable` (default yes). Off: osd tells its peers `ssl=0` after the
+    /// CRAM-MD5 of a clear-text connection, so a Bareos peer does not start
+    /// TLS-PSK on it (a Copy with `ssl=0`).
+    pub tls_enable: bool,
     /// osd.d: `Grpc Enable` (default yes): start the TLS gRPC listener
     /// (`onesimus.stored.StorageDaemon`) next to the BNET port (Onesimus).
     pub grpc_enable: bool,
@@ -358,6 +362,7 @@ impl SdConfig {
                         just_in_time_reservation: r.boolean("justintimereservation", true)?,
                         client_connect_wait: r.duration("clientconnectwait", DEFAULT_CLIENT_CONNECT_WAIT)?,
                         ring_slots: None,
+                        tls_enable: r.boolean("tlsenable", true)?,
                         grpc_enable: true,
                         grpc_port: None,
                         grpc_address: None,
@@ -680,6 +685,13 @@ Messages {
         assert_eq!(c.storage.ring_slots, Some(8));
         // Bareos directives are untouched
         assert_eq!(c.find_device("FileStorage").unwrap().media_type, "File");
+    }
+
+    #[test]
+    fn tls_enable_of_the_storage_defaults_to_yes() {
+        assert!(parse(SAMPLE).unwrap().storage.tls_enable);
+        let c = parse("Storage {\n Name = x\n TLS Enable = no\n}\n").unwrap();
+        assert!(!c.storage.tls_enable);
     }
 
     #[test]

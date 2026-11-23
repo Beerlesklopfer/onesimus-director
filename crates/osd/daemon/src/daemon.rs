@@ -217,6 +217,17 @@ impl Daemon {
             .map(|(d, _)| d.clone())
     }
 
+    /// The TLS policy osd tells a peer in the CRAM-MD5 of a connection that
+    /// did not start with TLS-PSK: `ssl=0` when the Storage has `TLS Enable = no`,
+    /// else `ssl=2`.
+    pub fn tls_policy(&self) -> i32 {
+        if self.config.storage.tls_enable {
+            2
+        } else {
+            0
+        }
+    }
+
     /// Frees every device `job` has reserved.
     pub fn release_job_devices(&self, job: &str) {
         self.busy.lock().unwrap_or_else(|e| e.into_inner()).retain(|_, j| j.as_str() != job);

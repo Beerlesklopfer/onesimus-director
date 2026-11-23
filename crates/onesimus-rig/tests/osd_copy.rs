@@ -212,3 +212,51 @@ fn virtual_full_with_bareos_sd() {
 fn virtual_full_with_osd() {
     virtual_full(39611, osd());
 }
+
+/// Copy with clear text between the SDs (`ssl=0`): the writing SD has no
+/// TLS, the reading SD connects without TLS-PSK and authenticates by CRAM-MD5
+/// only.
+fn copy_in_clear_text(base_port: u16, reader: std::path::PathBuf) {
+    onesimus_rig::build_workspace_packages(&["odir", "ofd", "osd-daemon"]).unwrap_or_else(|e| panic!("{e}"));
+    let mut options = RigOptions::new(base_port);
+    options.sd = Some(reader);
+    options.copy_target = Some(osd());
+    options.copy_plain = true;
+    let rig = Rig::start(options).unwrap_or_else(|e| panic!("Gerüst startet nicht: {e}"));
+    let backup = rig.run_job("VBackup").unwrap_or_else(|e| panic!("{e}"));
+    let row = rig.wait_job(backup, JOB_TIMEOUT).unwrap_or_else(|e| panic!("{e}"));
+    assert!(row.status == 'T' && row.files == ENTRIES, "Backup: {row:?}\n{}", rig.job_log(backup));
+    let copy = rig.run_job("VCopy").unwrap_or_else(|e| panic!("{e}"));
+    let row = rig.wait_job(copy, JOB_TIMEOUT).unwrap_or_else(|e| panic!("{e}"));
+    assert_eq!(row.status, 'T', "Copy: {row:?}\n{}\n{}", rig.job_log(copy), rig.diagnostics());
+    let deadline = std::time::Instant::now() + JOB_TIMEOUT;
+    loop {
+        let states = rig.catalog().query("SELECT JobStatus FROM Job WHERE JobId > 2 ORDER BY JobId").unwrap_or_default();
+        if !states.is_empty() && states.lines().all(|l| matches!(l.trim(), "T" | "E" | "f" | "A" | "W")) {
+            break;
+        }
+        assert!(std::time::Instant::now() < deadline, "the copy jobs do not end:\n{states}\n{}", rig.diagnostics());
+        std::thread::sleep(Duration::from_secs(2));
+    }
+    let jobs = rig
+        .catalog()
+        .query("SELECT j.JobId, j.JobStatus, j.JobFiles FROM Job j JOIN Pool p ON p.PoolId = j.PoolId WHERE p.Name = 'VCopyPool' AND j.Type = 'C' ORDER BY 1")
+        .unwrap_or_else(|e| panic!("{e}"));
+    assert!(jobs.contains(&format!("|T|{ENTRIES}")), "no finished copy of {ENTRIES} files:\n{jobs}\n{}", rig.diagnostics());
+    let log = rig.job_log(copy);
+    assert!(log.contains("Copying OK"), "{log}");
+}
+
+/// bareos-sd reads and replicates to osd without TLS.
+#[test]
+#[ignore = "needs /usr/sbin/bareos-sd and the osd binary"]
+fn bareos_sd_copies_to_osd_in_clear_text() {
+    copy_in_clear_text(39641, "/usr/sbin/bareos-sd".into());
+}
+
+/// osd reads and replicates to osd without TLS.
+#[test]
+#[ignore = "needs the osd binary"]
+fn osd_copies_to_osd_in_clear_text() {
+    copy_in_clear_text(39651, osd());
+}
