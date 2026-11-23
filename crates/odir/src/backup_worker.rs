@@ -19,6 +19,7 @@ use tracing::{debug, warn};
 
 use crate::backup::{BackupEnd, ClientRetention, JobIds};
 use crate::job_worker::{self, JobParams, PipeMessage, WorkerPipes, M_ERROR, M_FATAL, M_INFO, M_WARNING};
+use onesimus_bnet_grpc::branch::BranchMessage;
 
 /// What the worker needs beyond JobParams (JobParams.backup).
 #[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
@@ -72,6 +73,14 @@ pub struct BackupSession {
     pub fd_connect_timeout: u64,
     #[serde(default)]
     pub sd_connect_timeout: u64,
+    /// Main job of a stream with branches: the unique job names of its
+    /// branch jobs, announced to the SD (`BranchPlan`) before `run`.
+    #[serde(default)]
+    pub branches: Vec<String>,
+    /// A branch job: the unique job name of the main job whose stream it
+    /// writes. The worker has no FD session ([`run_branch`]).
+    #[serde(default)]
+    pub branch_of: Option<String>,
 }
 
 /// fd_cmds.cc ConnectToFileDaemon(): the TCP connection (retried), then the
@@ -342,8 +351,114 @@ fn state(job_id: u32, name: &str) {
     job_worker::send_jmsg(PipeMessage::State { job_id, state: name.into() });
 }
 
+/// Sends the typed branch message `message` to the SD and waits for its
+/// `BranchReply` (job messages of the SD in between go to the job log). Only
+/// an osd on gRPC knows branches.
+fn branch_request(sd: &mut BnetStream<AnyStream>, job_id: u32, message: &BranchMessage) -> Result<(), String> {
+    if !crate::sd_grpc::on_grpc(sd) {
+        return Err("branches need an osd and gRPC to the Storage (Grpc Enable = yes)".into());
+    }
+    sd.send(&message.encode()).map_err(|e| e.to_string())?;
+    loop {
+        match sd.recv() {
+            Ok(BnetMessage::Data(data)) => match BranchMessage::decode(&data) {
+                Some(BranchMessage::Reply(result)) => return result,
+                Some(other) => return Err(format!("unexpected branch message {other:?}")),
+                None => {
+                    let raw = String::from_utf8_lossy(&data).into_owned();
+                    if raw.starts_with("Jmsg") {
+                        forward(job_id, &raw);
+                    }
+                }
+            },
+            Ok(BnetMessage::Signal(BnetSignal::Terminate)) => return Err("the Storage daemon hung up".into()),
+            Ok(BnetMessage::Signal(_)) => {}
+            Err(e) => return Err(e.to_string()),
+        }
+    }
+}
+
+/// The worker of a branch job (P2b): like [`run`] without a File daemon. It
+/// connects to the SD over gRPC, sends the Job command and `use storage` of
+/// its own pool and storage, then `BranchAttach` in place of `run`; osd
+/// writes the stream of the main job `main` for it. The catalog requests,
+/// attributes and job messages of the SD go through the message thread to
+/// the Director under this job's JobId, so File, JobMedia and Job records
+/// are the branch's own. The job ends with the SD's `3099`.
+pub fn run_branch(params: &JobParams, session: &BackupSession, main: &str, pipes: &mut WorkerPipes) -> i32 {
+    let job_id = params.job_id;
+    let ids = session.ids;
+    let fail = |text: String, vol: (u32, u32)| {
+        if !text.is_empty() && !canceled() {
+            jmsg(job_id, M_FATAL, text);
+        }
+        set_status(b'E');
+        let status = FIRST_ERROR.load(Ordering::SeqCst);
+        finish(job_id, session, status, 0, 0, JOB_ERRORS.load(Ordering::SeqCst) as i32, vol, None)
+    };
+    jmsg(job_id, M_INFO, crate::job_messages::version_text());
+    let before = job_worker::run_before_job(pipes, job_id);
+    if crate::job_manager::is_job_canceled(before.status) {
+        return finish(job_id, session, before.status as u8, 0, 0, before.errors as i32, (0, 0), None);
+    }
+    jmsg(job_id, M_INFO, crate::job_messages::start_backup_text(job_id, &params.unique_job));
+    jmsg(job_id, M_INFO, format!("This job is a branch of Job={main}: it writes the stream the File daemon reads for that job.\n"));
+    send_catalog(job_id, crate::backup::update_job_start_record_sql(job_id, 'R', &ids, now(), 0, 0));
+
+    state(job_id, "BackupConnectingSD");
+    let Some(sd) = crate::sd_grpc::try_connect(params.sd_grpc.as_ref(), &params.sd_address, params.sd_port,
+        &params.sd_password, &params.director_name, None) else {
+        return fail("A branch job needs the Storage daemon over gRPC (osd with Grpc Enable = yes on the Storage).\n".into(), (0, 0));
+    };
+    jmsg(job_id, M_INFO, crate::job_messages::connected_text("Storage daemon", &params.sd_address, params.sd_port,
+        Some(onesimus_bnet_grpc::TRANSPORT)));
+    let mut sd = sd;
+    state(job_id, "BackupSDJobSetup");
+    let (vol, _auth_key) = match start_sd_job(&mut sd, params, session, 0) {
+        Ok(v) => v,
+        Err(e) => {
+            let _ = sd.send_signal(BnetSignal::Terminate);
+            return fail(e, (0, 0));
+        }
+    };
+    send_catalog(job_id, crate::backup::update_job_start_record_sql(job_id, 'R', &ids, now(), vol.0, vol.1));
+    if let Err(e) = reserve_write_device(&mut sd, job_id, &session.write) {
+        let _ = sd.send_signal(BnetSignal::Terminate);
+        return fail(e, vol);
+    }
+    if let Err(e) = branch_request(&mut sd, job_id, &BranchMessage::Attach(main.to_string())) {
+        let _ = sd.send_signal(BnetSignal::Terminate);
+        return fail(format!("The Storage daemon refused the branch: {e}\n"), vol);
+    }
+    let from_director = match pipes.from_director.try_clone() {
+        Ok(f) => f,
+        Err(e) => return fail(format!("Cannot create message thread: {e}\n"), vol),
+    };
+    let sd_thread = std::thread::Builder::new().name(format!("sd-msg:{job_id}"))
+        .spawn(move || message_thread(&mut sd, job_id, from_director));
+    let Ok(sd_thread) = sd_thread else {
+        return fail("Cannot create message thread\n".into(), vol);
+    };
+    state(job_id, "Running");
+    let sd_end = sd_thread.join().ok().flatten().unwrap_or_default();
+    state(job_id, "Finishing");
+    canceled();
+    // the first error of the Director or the SD, else the SD's status
+    let status = match FIRST_ERROR.load(Ordering::SeqCst) {
+        0 if sd_end.status == 0 => b'E',
+        0 => sd_end.status,
+        first => first,
+    };
+    let errors = JOB_ERRORS.load(Ordering::SeqCst) + sd_end.errors + before.errors;
+    finish(job_id, session, status, sd_end.files as i64, sd_end.bytes as i64, errors as i32, vol,
+        Some((sd_end.status, sd_end.bytes, &sd_end, false, false)))
+}
+
 /// DoNativeBackup() in the worker.
 pub fn run(params: &JobParams, session: &BackupSession, pipes: &mut WorkerPipes) -> i32 {
+    if let Some(main) = &session.branch_of {
+        return run_branch(params, session, main, pipes);
+    }
     let job_id = params.job_id;
     let ids = session.ids;
     // DoNativeBackup() returned false: NativeBackupCleanup(JS_ErrorTerminated)
@@ -412,6 +527,14 @@ pub fn run(params: &JobParams, session: &BackupSession, pipes: &mut WorkerPipes)
             return fail(e, (0, 0));
         }
     };
+
+    // Branches (P2b): tell the SD which jobs write this stream too.
+    if !session.branches.is_empty() {
+        if let Err(e) = branch_request(&mut sd, job_id, &BranchMessage::Plan(session.branches.clone())) {
+            let _ = sd.send_signal(BnetSignal::Terminate);
+            return fail(format!("Cannot announce the branch jobs to the Storage daemon: {e}\n"), vol);
+        }
+    }
 
     // ConnectToFileDaemon() (JS_WaitFD).
     state(job_id, "BackupConnectingFD");

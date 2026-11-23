@@ -92,6 +92,8 @@ impl DirectorConfig {
         ("storage", "grpcenable"), ("storage", "grpcport"), ("storage", "grpccacertificatefile"), ("storage", "grpcservername"),
         ("director", "grpcport"), ("director", "grpctlscertificate"), ("director", "grpctlskey"), ("director", "mdnsadvertise"),
         ("catalog", "dbdriver"),
+        // branches (P2b): the Job resources that get the stream of this Job (branches.rs)
+        ("job", "branch"),
     ];
 
     /// Every resource of `odir.d/` extends a resource of the same type and name that
@@ -110,7 +112,52 @@ impl DirectorConfig {
                 }
             }
         }
+        self.check_branches()
+    }
+
+    /// The branches of `Job` resources (`Branch = <Job>`): each names an existing Backup
+    /// job other than the job itself, once, and a branch has no branches of its own
+    /// (the stream goes one level deep).
+    fn check_branches(&self) -> Result<(), String> {
+        for res in self.extensions.iter().filter(|r| r.norm_type() == "job") {
+            let name = res.name().unwrap_or_default();
+            let branches = self.branches_of(name);
+            for (i, branch) in branches.iter().enumerate() {
+                let fail = |why: &str| Err(format!("odir.d: Job \"{name}\": Branch \"{branch}\" {why}"));
+                if branch.eq_ignore_ascii_case(name) {
+                    return fail("is the job itself");
+                }
+                if branches[..i].iter().any(|b| b.eq_ignore_ascii_case(branch)) {
+                    return fail("is named twice");
+                }
+                match self.find_job(branch) {
+                    None => return fail("is not a Job resource"),
+                    Some(j) if j.job_type != bareos_config::resources::JobType::Backup => return fail("is not a Backup job"),
+                    Some(_) if !self.branches_of(branch).is_empty() => return fail("has branches of its own"),
+                    Some(_) => {}
+                }
+                if self.extensions.iter().filter(|r| r.norm_type() == "job" && !r.name().unwrap_or_default().eq_ignore_ascii_case(name))
+                    .any(|r| self.branches_of(r.name().unwrap_or_default()).iter().any(|b| b.eq_ignore_ascii_case(branch)))
+                {
+                    return fail("is a branch of another job too");
+                }
+            }
+        }
         Ok(())
+    }
+
+    /// The jobs `Branch = <Job>` of `job` names in `odir.d/`, in file order.
+    pub fn branches_of(&self, job: &str) -> Vec<String> {
+        self.extension_all("job", job, "branch")
+    }
+
+    /// Every value of the Onesimus directive `key` of resource `kind` `name`
+    /// (a directive that may stand several times), one per directive, in file order.
+    pub fn extension_all(&self, kind: &str, name: &str, key: &str) -> Vec<String> {
+        self.extensions.iter()
+            .filter(|r| r.norm_type() == kind && r.name().is_some_and(|n| n.eq_ignore_ascii_case(name)))
+            .flat_map(|r| r.directives.iter().filter(|d| d.norm_key() == key).map(|d| d.values().join(" ")))
+            .collect()
     }
 
     /// Puts the directives of `odir.d/` where the code reads them: the typed
@@ -511,6 +558,35 @@ JobDefs { Name = "Late"; Type = Restore; Level = Differential; Priority = 3 }
     fn the_overlay_lies_below_the_onesimus_directory() {
         // not set in a test run: the default, never next to the Bareos files
         assert_eq!(DirectorConfig::overlay_dir(), Path::new("/etc/onesimus/odir.d"));
+    }
+
+    /// The test configuration with two more Backup jobs `Copy2` and `Copy3` and a Restore job `Rest`.
+    fn with_branches(extension: &str) -> Result<DirectorConfig, String> {
+        let text = format!(
+            "{TEST_CONFIG}\nJob {{\n  Name = Copy2\n  Type = Backup\n  Client = bareos-fd\n  FileSet = \"Full Set\"\n  Storage = File\n  Pool = Full\n}}\n\
+             Job {{\n  Name = Copy3\n  Type = Backup\n  Client = bareos-fd\n  FileSet = \"Full Set\"\n  Storage = File\n  Pool = Full\n}}\n\
+             Job {{\n  Name = Rest\n  Type = Restore\n  Client = bareos-fd\n  FileSet = \"Full Set\"\n  Storage = File\n  Pool = Full\n}}\n"
+        );
+        let mut config = DirectorConfig::from_str(&text).unwrap();
+        config.extensions = bareos_config::raw::parse_str(extension, None).unwrap();
+        config.check_extensions().map(|()| config)
+    }
+
+    #[test]
+    fn branches_are_read_in_file_order_and_checked() {
+        let c = with_branches("Job {\n  Name = BackupClient1\n  Branch = Copy2\n  Branch = \"Copy3\"\n}\n").unwrap();
+        assert_eq!(c.branches_of("BackupClient1"), ["Copy2", "Copy3"]);
+        assert_eq!(c.branches_of("backupclient1"), ["Copy2", "Copy3"], "names compare without case");
+        assert!(c.branches_of("Copy2").is_empty());
+        let fail = |ext: &str| with_branches(ext).err().unwrap_or_else(|| panic!("accepted: {ext}"));
+        assert!(fail("Job {\n  Name = BackupClient1\n  Branch = Nowhere\n}\n").contains("is not a Job resource"));
+        assert!(fail("Job {\n  Name = BackupClient1\n  Branch = Rest\n}\n").contains("is not a Backup job"));
+        assert!(fail("Job {\n  Name = BackupClient1\n  Branch = BackupClient1\n}\n").contains("is the job itself"));
+        assert!(fail("Job {\n  Name = BackupClient1\n  Branch = Copy2\n  Branch = Copy2\n}\n").contains("is named twice"));
+        assert!(fail("Job {\n  Name = BackupClient1\n  Branch = Copy2\n}\nJob {\n  Name = Copy2\n  Branch = Copy3\n}\n").contains("has branches of its own"));
+        assert!(fail("Job {\n  Name = BackupClient1\n  Branch = Copy3\n}\nJob {\n  Name = Copy2\n  Branch = Copy3\n}\n").contains("is a branch of another job too"));
+        // only Jobs have branches
+        assert!(with_branches("Client {\n  Name = bareos-fd\n  Branch = Copy2\n}\n").is_err());
     }
 
     #[test]

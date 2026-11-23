@@ -11,6 +11,7 @@ mod acl;
 mod audit;
 mod backup;
 mod backup_worker;
+mod branches;
 mod btime;
 mod catalog_acl;
 mod catalog_worker;

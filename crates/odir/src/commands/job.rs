@@ -1700,8 +1700,21 @@ fn run_selected(
         setup_messages.push((crate::message_bus::MsgType::Warning, warning.clone()));
     }
     let job_dirs = crate::commands::defaults::job_directives(&config, &job.name);
-    let since = crate::backup::get_level_since_time(cat, &job.name, client_id, fsr.id, requested,
+    let own_since = crate::backup::get_level_since_time(cat, &job.name, client_id, fsr.id, requested,
         crate::backup::LevelPolicy::of_job(&job_dirs), now);
+    // Branches (P2b, odir.d `Branch`): the FD reads one stream for the main job and
+    // its branch jobs; its level and basis cover all of them (D-10). A VirtualFull has
+    // no stream, so no branches.
+    let branch_names = if own_since.level == 'V' { Vec::new() } else { config.branches_of(&job.name) };
+    let since = if branch_names.is_empty() {
+        own_since
+    } else {
+        let branch_since: Vec<(String, crate::backup::LevelSince)> = branch_names.iter()
+            .map(|name| (name.clone(), crate::backup::get_level_since_time(cat, name, client_id, fsr.id, requested,
+                crate::branches::policy_of(&config, name), now)))
+            .collect();
+        crate::branches::combine_since(own_since, &branch_since, requested)
+    };
     setup_messages.extend(since.messages.iter().map(|m| (crate::message_bus::MsgType::Info, m.clone())));
     let level_char = since.level;
     let level = crate::backup::level_to_string(level_char).to_string();
@@ -1756,6 +1769,19 @@ fn run_selected(
         };
     }
 
+    // The branch jobs: Job records, pairs in onesimus.job_branch, worker parameters.
+    let branch_jobs = if branch_names.is_empty() {
+        Vec::new()
+    } else {
+        let run = crate::branches::MainRun {
+            job: &job, unique_job: &unique_job, job_id, client: client_res.unwrap(), client_id, fileset_id: fsr.id,
+            fileset_name, fileset_md5: &fsr.md5, since: &since, sched_time, now, priority: job.priority,
+        };
+        match crate::branches::prepare(ctx, &config, &run) {
+            Ok(branch_jobs) => branch_jobs,
+            Err(e) => return job_failed(e),
+        }
+    };
     let client = client_res.unwrap();
     let storage = storage_res.unwrap();
     let dir_name = config.director.name.clone();
@@ -1851,6 +1877,8 @@ fn run_selected(
             && crate::commands::defaults::bool_directive(&client_dirs, "tlsrequire", true),
         fd_connect_timeout: director_time("fdconnecttimeout", 180),
         sd_connect_timeout: director_time("sdconnecttimeout", 1800),
+        branches: branch_jobs.iter().map(|b| b.unique_job.clone()).collect(),
+        branch_of: None,
     };
 
     let params = JobParams {
@@ -1934,6 +1962,13 @@ fn run_selected(
         }
     }
 
+    // The branch jobs follow the main job into the queue (P2b).
+    for branch in branch_jobs {
+        let (name, id) = (branch.job_name.clone(), branch.job_id);
+        if let Err(e) = branch.enqueue(ctx) {
+            tracing::error!("Branch job {name} (JobId {id}) of job {job_id} not started: {e}");
+        }
+    }
     job_queued(job_id)
 }
 

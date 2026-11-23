@@ -567,6 +567,26 @@ impl JobManager {
         }
     }
 
+    /// The unique job name of the main job when job `id` is a branch job (P2b).
+    fn branch_main(&self, id: u32) -> Option<String> {
+        self.get_job(id)?.jcr.params.as_ref()?.backup.as_ref()?.branch_of.clone()
+    }
+
+    /// Whether job `id` is a branch job whose main job has ended (or is not known).
+    fn branch_orphaned(&self, id: u32) -> bool {
+        let Some(main) = self.branch_main(id) else { return false };
+        self.jobs.iter().find(|j| j.handle.unique_job == main)
+            .is_none_or(|m| m.jcr.end_processed || matches!(m.phase, DirJobPhase::Completed | DirJobPhase::Error))
+    }
+
+    /// The JobIds of the branch jobs of the job with unique name `main` (P2b).
+    fn branches_of(&self, main: &str) -> Vec<u32> {
+        self.jobs.iter()
+            .filter(|j| j.jcr.params.as_ref().and_then(|p| p.backup.as_ref()).and_then(|b| b.branch_of.as_deref()) == Some(main))
+            .map(|j| j.job_id)
+            .collect()
+    }
+
     /// Fork the workers of ready jobs while fewer than the Director's
     /// Maximum Concurrent Jobs run. A canceled job ends without a worker.
     fn start_ready(&mut self) {
@@ -584,11 +604,14 @@ impl JobManager {
     fn start_ready_jobs(&mut self, children: &mut Vec<crate::internal_jobs::ChildStart>) {
         let host = self.script_host();
         while let Some(&id) = self.ready.front() {
+            // a branch job whose main job ended before it could start has nothing to write
+            if self.branch_orphaned(id) { self.set_status(id, 'A'); }
             let canceled = self.get_job(id).is_some_and(|j| is_job_canceled(j.observed_status));
             if !canceled {
                 let name = self.get_job(id).map(|j| j.job_name.clone()).unwrap_or_default();
                 let (max_workers, ..) = self.limits(&name, "", "");
-                if self.running().count() >= max_workers { break; }
+                // a branch job is part of its running main job: the Director's worker limit does not count it
+                if self.running().count() >= max_workers && self.branch_main(id).is_none() { break; }
                 if self.ready_at.get(&id).is_some_and(|at| *at > std::time::Instant::now()) { break; }
             }
             // job_thread(): Max Start Delay, MaxRunSchedTime (limits.rs).
@@ -750,6 +773,16 @@ impl JobManager {
     /// to the front of the ready queue (JobqRemove) and ends there without a
     /// worker; a forked worker gets SIGTERM.
     pub fn cancel_job(&mut self, job_id: u32) -> bool {
+        // canceling a main job cancels its branch jobs too; a branch alone cancels only itself
+        let main = self.get_job(job_id).map(|j| j.handle.unique_job.clone()).unwrap_or_default();
+        for branch in self.branches_of(&main) {
+            self.cancel_one(branch);
+        }
+        self.cancel_one(job_id)
+    }
+
+    /// The cancel of one job without its branches.
+    fn cancel_one(&mut self, job_id: u32) -> bool {
         let Some(job) = self.jobs.iter_mut().find(|j| j.job_id == job_id
             && !matches!(j.phase, DirJobPhase::Completed | DirJobPhase::Error)) else { return false };
         if !job.handle.spawned() {
@@ -1904,6 +1937,69 @@ Job { Name = single; Client = fd1; Storage = File }
         // Its post scripts run once.
         assert!(m.take_post_scripts(2).is_some_and(|j| j.status == 'A' && j.unique_job == "single.2026-10-16_10.00.00_02"));
         assert!(m.take_post_scripts(2).is_none());
+        kill_all(&mut m);
+    }
+
+    /// Queues job `id` named `name` as a branch job of the job with unique name `main`
+    /// (no client: it does not read one).
+    fn enqueue_branch(m: &mut JobManager, id: u32, name: &str, main: &str) {
+        let mut p = params(id, name);
+        p.backup = Some(crate::backup_worker::BackupSession { branch_of: Some(main.to_string()), ..Default::default() });
+        m.enqueue_job(id, name, QueuedStart { params: p, priority: 10, sched_time: now_unix() }, "", "File");
+    }
+
+    #[test]
+    fn p2b_a_branch_job_runs_beside_its_main_job_even_at_the_worker_limit() {
+        let mut m = manager(&CONFIG.replace("Director { Name = dir; Password = x; Maximum Concurrent Jobs = 10 }",
+            "Director { Name = dir; Password = x; Maximum Concurrent Jobs = 1 }"));
+        enqueue(&mut m, 1, "a", 10, "fd1", "File");
+        let main = m.get_job(1).unwrap().handle.unique_job.clone();
+        enqueue_branch(&mut m, 2, "b", &main);
+        assert_eq!(state(&m, 1), ('R', true));
+        assert_eq!(state(&m, 2), ('R', true), "the Director's limit of one worker does not count a branch");
+        // another ordinary job still waits for the limit
+        enqueue(&mut m, 3, "single", 10, "fd1", "File");
+        assert!(!state(&m, 3).1);
+        kill_all(&mut m);
+    }
+
+    #[test]
+    fn p2b_canceling_the_main_job_cancels_its_branches_and_a_branch_alone_only_itself() {
+        let mut m = manager(CONFIG);
+        enqueue(&mut m, 1, "a", 10, "fd1", "File");
+        let main = m.get_job(1).unwrap().handle.unique_job.clone();
+        enqueue_branch(&mut m, 2, "b", &main);
+        enqueue_branch(&mut m, 3, "b", &main);
+        assert!(m.cancel_job(3));
+        assert_eq!(m.get_job(3).unwrap().phase, DirJobPhase::Canceling);
+        assert_ne!(m.get_job(1).unwrap().phase, DirJobPhase::Canceling);
+        assert_ne!(m.get_job(2).unwrap().phase, DirJobPhase::Canceling);
+        assert!(m.cancel_job(1));
+        for id in [1, 2] {
+            assert_eq!(m.get_job(id).unwrap().phase, DirJobPhase::Canceling, "job {id}");
+        }
+        kill_all(&mut m);
+    }
+
+    #[test]
+    fn p2b_a_queued_branch_job_is_canceled_when_its_main_job_has_ended() {
+        let mut m = manager(&CONFIG.replace("Storage { Name = File; Address = sd.example; Password = y; Device = D; Media Type = File; Maximum Concurrent Jobs = 10 }",
+            "Storage { Name = File; Address = sd.example; Password = y; Device = D; Media Type = File; Maximum Concurrent Jobs = 1 }"));
+        enqueue(&mut m, 1, "a", 10, "fd1", "File");
+        let main = m.get_job(1).unwrap().handle.unique_job.clone();
+        // the Storage holds one job: the branch waits behind its main job
+        enqueue_branch(&mut m, 2, "b", &main);
+        assert_eq!(state(&m, 2), ('s', false));
+        finish(&mut m, 1);
+        m.poll_all();
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        while !m.get_job(2).is_some_and(|j| matches!(j.phase, DirJobPhase::Error | DirJobPhase::Completed)) {
+            m.poll_all();
+            assert!(std::time::Instant::now() < deadline, "the branch did not end");
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+        assert_eq!(m.get_job(2).unwrap().observed_status, 'A');
+        assert!(!m.get_job(2).unwrap().handle.spawned());
         kill_all(&mut m);
     }
 

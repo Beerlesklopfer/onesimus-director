@@ -26,7 +26,7 @@ fn schema_dir() -> PathBuf {
 }
 
 /// The newest shipped schema step.
-const LATEST: i32 = 2256;
+const LATEST: i32 = 2257;
 
 /// The views and functions of v2251/v2252 (all shipped Onesimus views and
 /// functions), unqualified.
@@ -250,17 +250,17 @@ async fn check_late_bound(pool: &sqlx::PgPool) -> Result<(), Box<dyn std::error:
 async fn fresh_catalog_gets_the_onesimus_schema() {
     in_database("ons_fresh", |pool| async move {
         let migrator = Migrator::new(&schema_dir());
-        assert_eq!(migrator.migrate(&pool).await?, 6);
+        assert_eq!(migrator.migrate(&pool).await?, 7);
         let ours: Vec<i32> = sqlx::query_scalar("SELECT version FROM bareos_schema_version ORDER BY version")
             .fetch_all(&pool).await?;
-        assert_eq!(ours, [2250, 2251, 2252, 2253, 2254, 2255, 2256]);
+        assert_eq!(ours, [2250, 2251, 2252, 2253, 2254, 2255, 2256, 2257]);
         let user: String = sqlx::query_scalar("SELECT current_user::text").fetch_one(&pool).await?;
         check_layout(&pool, &user).await?;
         assert_eq!(migrator.migrate(&pool).await?, 0);
         let rows: i64 = sqlx::query_scalar("SELECT count(*) FROM onesimus.console_acl").fetch_one(&pool).await?;
         assert_eq!(rows, 1);
         let steps: i64 = sqlx::query_scalar("SELECT count(*) FROM bareos_schema_version").fetch_one(&pool).await?;
-        assert_eq!(steps, 6, "a second start records nothing");
+        assert_eq!(steps, 7, "a second start records nothing");
         Ok(())
     }).await;
 }
@@ -293,7 +293,7 @@ async fn catalog_at_2252_moves_its_objects_to_onesimus() {
         sqlx::query(&format!("GRANT SELECT ON vw_job_summary TO {reader}")).execute(&pool).await?;
 
         let migrator = Migrator::new(&schema_dir());
-        assert_eq!(migrator.migrate(&pool).await?, 4, "v2253 to v2256");
+        assert_eq!(migrator.migrate(&pool).await?, 5, "v2253 to v2257");
         check_layout(&pool, &role).await?;
         let report: i64 = sqlx::query_scalar("SELECT count(*) FROM public.my_report").fetch_one(&pool).await?;
         assert_eq!(report, 1, "the operator's view follows the moved view");
@@ -575,7 +575,7 @@ async fn bareos_upgrade_before_odir_never_skips_onesimus_steps() {
         migrate_pre_2253(&pool, "bareos2260").await?;
         sqlx::query("UPDATE version SET versionid = 2260").execute(&pool).await?;
         let migrator = Migrator::new(&schema_dir());
-        assert_eq!(migrator.migrate(&pool).await?, 4, "v2253..v2256 despite Bareos 2260");
+        assert_eq!(migrator.migrate(&pool).await?, 5, "v2253..v2257 despite Bareos 2260");
         let user: String = sqlx::query_scalar("SELECT current_user::text").fetch_one(&pool).await?;
         check_layout_at(&pool, &user, 2260).await?;
         assert_eq!(migrator.migrate(&pool).await?, 0);

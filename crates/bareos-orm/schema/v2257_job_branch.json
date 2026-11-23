@@ -1,0 +1,28 @@
+{
+  "version": 2257,
+  "description": "Branches (3-2-1 on the fly, docs/plans/P2B-ZWEIGE-ENTWURF.md): which Job record is the branch of which main Job record. The branch is an ordinary Job (own JobId, level, pool, volumes, File and JobMedia records); only this table says that it shares its stream with the main job. Written only by odir when it starts a job with `Branch` (odir.d).",
+  "created": "2026-11-23",
+  "author": "Onesimus",
+  "min_compatible_version": 2256,
+  "tables": [
+    {
+      "name": "onesimus.job_branch",
+      "description": "One branch job of a main job: both are rows of the Job table; the branch has no File Daemon session of its own.",
+      "columns": [
+        {"name": "branch_job_id", "type": "bigint", "not_null": true, "description": "JobId of the branch job"},
+        {"name": "main_job_id", "type": "bigint", "not_null": true, "description": "JobId of the main job whose stream the branch writes"},
+        {"name": "created_at", "type": "timestamptz", "not_null": true, "default": "now()", "description": "When odir created the pair"}
+      ],
+      "primary_key": "branch_job_id",
+      "indices": [
+        {"name": "job_branch_main_idx", "columns": ["main_job_id"]}
+      ],
+      "foreign_keys": [],
+      "constraints": [
+        {"name": "job_branch_distinct_check", "type": "check", "expression": "branch_job_id <> main_job_id"}
+      ]
+    }
+  ],
+  "views": [],
+  "functions": []
+}
