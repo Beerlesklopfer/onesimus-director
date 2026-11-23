@@ -17,11 +17,11 @@ use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
 use bareos_bnet::BnetMessage;
-use bareos_config::sd::SdConfig;
+use bareos_config::sd::{RouteFacts, SdConfig, SdDevice, SdDistributor};
 
 use crate::device::FileDevice;
 use crate::fd_session::{WriterHandle, DEFAULT_RING_SLOTS};
-use crate::jobs::{Job, JobTable, UseStorage};
+use crate::jobs::{Job, JobCommand, JobTable, UseStorage};
 use crate::transport::{lock, SharedChannel};
 
 /// How device writers and readers are started.
@@ -41,6 +41,18 @@ pub struct Reserved {
     pub device: FileDevice,
     /// Ring slots for the job (osd.d `Ring Slots`, else the default).
     pub slots: u32,
+    /// Reading through a Distributor: the other targets the job holds (the
+    /// reader takes the one that has the volume); empty otherwise.
+    pub alternatives: Vec<FileDevice>,
+}
+
+/// Suffix of the holder name of a device a read job holds as alternative
+/// target of a Distributor (the job name follows it never; it ends the name).
+const ALT_MARK: &str = "\u{1}alt";
+
+/// The holder name of an alternative device of job `job`.
+fn alt_holder(job: &str) -> String {
+    format!("{job}{ALT_MARK}")
 }
 
 /// The daemon-wide state, cheap to clone.
@@ -155,23 +167,87 @@ impl Daemon {
     }
 
     /// `TryReserveAfterUse` for appending: the first device of `storage`
-    /// that exists, has the job's media type and is free.
-    pub fn reserve_device(&self, storage: &UseStorage, job: &str) -> Option<Reserved> {
+    /// that exists, has the job's media type and is free. A name that is a
+    /// Distributor (`osd.d`, P2) stands for the target its routes pick for
+    /// `job` when writing ([`Daemon::reserve_distributed`]).
+    pub fn reserve_device(&self, storage: &UseStorage, job: &JobCommand) -> Option<Reserved> {
         let mut busy = self.busy.lock().unwrap_or_else(|e| e.into_inner());
         for name in &storage.devices {
+            if let Some(dist) = self.config.find_distributor(name) {
+                if let Some(reserved) = self.reserve_distributed(&mut busy, dist, storage, job) {
+                    return Some(reserved);
+                }
+                continue;
+            }
             let Some(dev) = self.config.find_device(name) else { continue };
             let file_type = dev.device_type.as_deref().is_none_or(|t| t.eq_ignore_ascii_case("file"));
             if dev.media_type != storage.media_type || !file_type || busy.contains_key(&dev.name) {
                 continue;
             }
-            busy.insert(dev.name.clone(), job.to_string());
+            busy.insert(dev.name.clone(), job.job.clone());
             let slots = self.ring_slots(dev);
-            return Some(Reserved { device: FileDevice::from_config(dev), slots });
+            return Some(Reserved { device: FileDevice::from_config(dev), slots, alternatives: Vec::new() });
         }
         None
     }
 
-    /// The device job `job` holds.
+    /// The device of Distributor `dist` for `job`, reserved in `busy`.
+    ///
+    /// - **Writing** (`storage.append`): the Director's media type must be the
+    ///   Distributor's; the first route that matches level, client, pool …
+    ///   names the target. A busy target is not replaced by another one: the
+    ///   reservation fails like one of a busy plain device (D-1: no evasion).
+    ///   The target keeps its own media type, which the catalog traffic then
+    ///   uses (D-2 variant a).
+    /// - **Reading**: the volumes are not known yet, so the job holds the
+    ///   free targets: the first one whose media type is the Director's (else
+    ///   the first free one) is the read device, the others
+    ///   [`Reserved::alternatives`], from which the reader takes the device of
+    ///   each volume by its media type.
+    fn reserve_distributed(&self, busy: &mut HashMap<String, String>, dist: &SdDistributor, storage: &UseStorage,
+                           job: &JobCommand) -> Option<Reserved> {
+        let file = |dev: &SdDevice| dev.device_type.as_deref().is_none_or(|t| t.eq_ignore_ascii_case("file"));
+        if storage.append {
+            if dist.media_type != storage.media_type {
+                return None;
+            }
+            let facts = RouteFacts {
+                job: &job.job_name,
+                client: &job.client_name,
+                level: job.level,
+                pool: &storage.pool_name,
+                job_type: job.job_type,
+                fileset: &job.fileset,
+            };
+            let route = dist.select(&facts)?;
+            let dev = self.config.find_device(&route.device).filter(|d| file(d))?;
+            if busy.contains_key(&dev.name) {
+                return None;
+            }
+            busy.insert(dev.name.clone(), job.job.clone());
+            tracing::info!("Distributor {}: job {} goes to device {} ({})", dist.name, job.job, dev.name, route.conditions());
+            return Some(Reserved { device: FileDevice::from_config(dev), slots: self.ring_slots(dev), alternatives: Vec::new() });
+        }
+        let free: Vec<&SdDevice> = dist
+            .targets()
+            .into_iter()
+            .filter_map(|n| self.config.find_device(n))
+            .filter(|d| file(d) && !busy.contains_key(&d.name))
+            .collect();
+        let primary = free.iter().find(|d| d.media_type == storage.media_type).or(free.first()).copied()?;
+        if dist.media_type != storage.media_type && primary.media_type != storage.media_type {
+            return None;
+        }
+        busy.insert(primary.name.clone(), job.job.clone());
+        let mut alternatives = Vec::new();
+        for dev in free.iter().filter(|d| d.name != primary.name) {
+            busy.insert(dev.name.clone(), alt_holder(&job.job));
+            alternatives.push(FileDevice::from_config(dev));
+        }
+        Some(Reserved { device: FileDevice::from_config(primary), slots: self.ring_slots(primary), alternatives })
+    }
+
+    /// The device job `job` holds (as its own device, not as an alternative).
     pub fn reserved_device(&self, job: &str) -> Option<String> {
         self.busy.lock().unwrap_or_else(|e| e.into_inner()).iter().find(|(_, j)| j.as_str() == job).map(|(d, _)| d.clone())
     }
@@ -206,7 +282,7 @@ impl Daemon {
 
     /// The job using device `name`.
     pub fn device_user(&self, name: &str) -> Option<String> {
-        self.busy.lock().unwrap_or_else(|e| e.into_inner()).get(name).cloned()
+        self.busy.lock().unwrap_or_else(|e| e.into_inner()).get(name).map(|j| j.strip_suffix(ALT_MARK).unwrap_or(j).to_string())
     }
 
     /// The device `job` has reserved, not counting `except` (the read
@@ -233,7 +309,7 @@ impl Daemon {
 
     /// Frees every device `job` has reserved.
     pub fn release_job_devices(&self, job: &str) {
-        self.busy.lock().unwrap_or_else(|e| e.into_inner()).retain(|_, j| j.as_str() != job);
+        self.busy.lock().unwrap_or_else(|e| e.into_inner()).retain(|_, j| j.as_str() != job && j.strip_suffix(ALT_MARK) != Some(job));
     }
 
     /// Frees device `name`.
@@ -305,5 +381,92 @@ mod media_wait_tests {
         other.join().unwrap();
         canceled.store(true, std::sync::atomic::Ordering::Release);
         assert_eq!(wait_media_event(&media, "Dev", &canceled, Duration::from_secs(5)), b"c");
+    }
+}
+
+#[cfg(test)]
+mod distributor_tests {
+    use super::*;
+
+    /// A daemon with two File devices (`A`: media type `MA`, `B`: `MB`) and
+    /// the distributor `Dist` (media type `MD`): Full to A, client `cloud-fd`
+    /// and pool `Monthly` to B, the rest to A.
+    fn daemon() -> Daemon {
+        let text = "Storage {\n Name = sd\n}\nDirector {\n Name = dir\n Password = x\n}\n\
+            Device {\n Name = A\n Media Type = MA\n Archive Device = /tmp/a\n}\n\
+            Device {\n Name = B\n Media Type = MB\n Archive Device = /tmp/b\n}\n";
+        let mut config = SdConfig::from_resources(&bareos_config::raw::parse_str(text, None).unwrap()).unwrap();
+        let overlay = "Distributor {\n Name = Dist\n Media Type = MD\n Route { Level = Full; Device = A }\n \
+            Route { Client = cloud-fd; Device = B }\n Route { Pool = Monthly; Device = B }\n Route { Device = A }\n}\n";
+        config.apply_overlay(&bareos_config::raw::parse_str(overlay, None).unwrap()).unwrap();
+        Daemon::new(config, Launcher::Thread)
+    }
+
+    /// The job command of a backup of `client` at `level`, unique name `name`.
+    fn job(name: &str, client: &str, level: char) -> JobCommand {
+        JobCommand { job: name.into(), job_name: "Backup".into(), client_name: client.into(), level, job_type: 'B', ..Default::default() }
+    }
+
+    /// `use storage` of the distributor for writing into `pool`.
+    fn write(pool: &str, media_type: &str) -> UseStorage {
+        UseStorage {
+            storage: "s".into(),
+            media_type: media_type.into(),
+            pool_name: pool.into(),
+            append: true,
+            devices: vec!["Dist".into()],
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn writing_goes_to_the_target_of_the_first_matching_route() {
+        let d = daemon();
+        let full = d.reserve_device(&write("P", "MD"), &job("J.1", "x-fd", 'F')).unwrap();
+        assert_eq!((full.device.name.as_str(), full.device.media_type.as_str()), ("A", "MA"), "the target keeps its media type");
+        let by_client = d.reserve_device(&write("P", "MD"), &job("J.2", "cloud-fd", 'I')).unwrap();
+        assert_eq!(by_client.device.name, "B");
+        d.release_job_devices("J.1");
+        d.release_job_devices("J.2");
+        let by_pool = d.reserve_device(&write("Monthly", "MD"), &job("J.3", "x-fd", 'I')).unwrap();
+        assert_eq!(by_pool.device.name, "B");
+        d.release_job_devices("J.3");
+        let rest = d.reserve_device(&write("P", "MD"), &job("J.4", "x-fd", 'I')).unwrap();
+        assert_eq!(rest.device.name, "A");
+    }
+
+    #[test]
+    fn a_busy_target_is_not_evaded_and_the_media_type_must_match() {
+        let d = daemon();
+        assert!(d.reserve_device(&write("P", "MD"), &job("J.1", "x-fd", 'F')).is_some());
+        // the second Full job wants A as well: no evasion to B
+        assert!(d.reserve_device(&write("P", "MD"), &job("J.2", "x-fd", 'F')).is_none());
+        assert_eq!(d.device_user("A").as_deref(), Some("J.1"));
+        // the Director's Storage has another media type than the distributor
+        assert!(d.reserve_device(&write("P", "MA"), &job("J.3", "x-fd", 'I')).is_none());
+        d.release_job_devices("J.1");
+        assert!(d.reserve_device(&write("P", "MD"), &job("J.2", "x-fd", 'F')).is_some());
+    }
+
+    #[test]
+    fn reading_holds_the_targets_and_prefers_the_media_type() {
+        let d = daemon();
+        let read = |media: &str| UseStorage { append: false, ..write("P", media) };
+        let r = d.reserve_device(&read("MD"), &job("R.1", "x-fd", 'F')).unwrap();
+        assert_eq!((r.device.name.as_str(), r.alternatives.len()), ("A", 1));
+        assert_eq!(r.alternatives[0].name, "B");
+        // both are held: another reader gets nothing; the alternative shows as used by the job
+        assert!(d.reserve_device(&read("MD"), &job("R.2", "x-fd", 'F')).is_none());
+        assert_eq!(d.device_user("B").as_deref(), Some("R.1"));
+        assert_eq!(d.reserved_device("R.1").as_deref(), Some("A"));
+        d.release_job_devices("R.1");
+        assert_eq!(d.device_user("A"), None);
+        assert_eq!(d.device_user("B"), None);
+        // the Director names the media type of one target: that target is the read device
+        let r = d.reserve_device(&read("MB"), &job("R.3", "x-fd", 'F')).unwrap();
+        assert_eq!((r.device.name.as_str(), r.alternatives.len()), ("B", 1));
+        // a media type that neither the distributor nor a target has
+        d.release_job_devices("R.3");
+        assert!(d.reserve_device(&read("MX"), &job("R.4", "x-fd", 'F')).is_none());
     }
 }

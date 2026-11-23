@@ -232,11 +232,36 @@ pub struct JobInfo {
     /// `Volume Poll Interval` of the device in seconds (Bareos default 300;
     /// 0 = no polling, only `label`/`mount` wake a waiting job).
     pub vol_poll_interval: u64,
+    /// Read direction through a Distributor: the other target devices the
+    /// job holds; the reader switches to the one whose media type matches
+    /// the next volume (empty otherwise).
+    pub alternatives: Vec<crate::device::FileDevice>,
 }
 
 impl JobInfo {
     /// `key=value` lines (values without newlines).
     pub fn encode(&self) -> String {
+        let alternatives: String = self
+            .alternatives
+            .iter()
+            .map(|a| {
+                format!(
+                    "alt={}\t{}\t{}\t{}\t{}\t{}\t{}\n",
+                    a.name,
+                    a.archive_device.display(),
+                    a.media_type,
+                    a.label_media as u8,
+                    a.max_block_size,
+                    a.label_block_size,
+                    a.max_volume_size
+                )
+            })
+            .collect();
+        format!("{}{alternatives}", self.encode_fields())
+    }
+
+    /// The `key=value` lines of the fields except [`JobInfo::alternatives`].
+    fn encode_fields(&self) -> String {
         format!(
             "job={}\njob_id={}\nvol_session_id={}\nvol_session_time={}\npool_name={}\npool_type={}\nmedia_type={}\n\
              storage={}\ndevice={}\narchive_device={}\nlabel_media={}\nmax_block_size={}\nlabel_block_size={}\n\
@@ -300,6 +325,23 @@ impl JobInfo {
             bootstrap: get("bootstrap")?,
             // older rings without the line: the Bareos default
             vol_poll_interval: num("vol_poll_interval").unwrap_or(300),
+            alternatives: text.lines().filter_map(|l| l.strip_prefix("alt=")).map(Self::decode_alternative).collect::<Result<_, _>>()?,
+        })
+    }
+
+    /// One `alt=` line (without the key) as a device.
+    fn decode_alternative(line: &str) -> Result<crate::device::FileDevice, String> {
+        let f: Vec<&str> = line.split('\t').collect();
+        let bad = || format!("ring info: bad alt= line {line:?}");
+        let [name, archive, media, label, max_block, label_block, max_volume] = f[..] else { return Err(bad()) };
+        Ok(crate::device::FileDevice {
+            name: name.to_string(),
+            archive_device: archive.into(),
+            media_type: media.to_string(),
+            label_media: label == "1",
+            max_block_size: max_block.parse().map_err(|_| bad())?,
+            label_block_size: label_block.parse().map_err(|_| bad())?,
+            max_volume_size: max_volume.parse().map_err(|_| bad())?,
         })
     }
 
@@ -368,6 +410,17 @@ mod tests {
         assert_eq!(JobInfo::decode(&info.encode()).unwrap(), info);
         let read = JobInfo { bootstrap: "/var/lib/bareos/vsd.J.1.bootstrap".into(), ..info };
         assert_eq!(JobInfo::decode(&read.encode()).unwrap(), read);
+        let alt = crate::device::FileDevice {
+            name: "B".into(),
+            archive_device: "/srv/b".into(),
+            media_type: "VFile2".into(),
+            label_media: true,
+            max_block_size: 1 << 20,
+            label_block_size: 64512,
+            max_volume_size: 5,
+        };
+        let routed = JobInfo { alternatives: vec![alt.clone(), crate::device::FileDevice { name: "C".into(), ..alt }], ..read };
+        assert_eq!(JobInfo::decode(&routed.encode()).unwrap(), routed);
         let b = BlockMeta { volume: 2, address: 5_000_230 };
         assert_eq!(BlockMeta::from_words(b.to_words()), Some(b));
         assert_eq!(BlockMeta::from_words(SlotMeta::default().to_words()), None);

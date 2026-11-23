@@ -367,7 +367,7 @@ impl SdDistributor {
                     let Some(block) = &d.block else {
                         return Err(err("Route must be a block: Route { Level = Full; Device = X }".into()));
                     };
-                    routes.push(SdRoute::from_block(block).map_err(&err)?);
+                    routes.push(SdRoute::from_block(block).map_err(err)?);
                 }
                 _ => return Err(err(format!("unknown directive \"{}\" (known: Name, Description, Media Type, Route)", d.key))),
             }

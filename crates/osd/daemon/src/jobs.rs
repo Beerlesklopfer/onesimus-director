@@ -186,6 +186,9 @@ pub struct Job {
     pub storage: Mutex<Option<UseStorage>>,
     /// The device reserved for reading (a restore, verify, or the read side of a copy).
     pub read_device: Mutex<Option<String>>,
+    /// The other targets of a Distributor a read job holds besides
+    /// [`Job::read_device`]; the reader switches to them per volume.
+    pub read_alternatives: Mutex<Vec<String>>,
     /// The write side of a copy inside this SD (`use storage append=1` after a read reservation).
     pub local_write: Mutex<Option<UseStorage>>,
     /// The bootstrap of a restore or verify (`bootstrap` command).
@@ -286,6 +289,7 @@ impl JobTable {
             auth_key: make_session_key(),
             storage: Mutex::new(None),
             read_device: Mutex::new(None),
+            read_alternatives: Mutex::new(Vec::new()),
             local_write: Mutex::new(None),
             bootstrap: Mutex::new(None),
             fd: Mutex::new(None),

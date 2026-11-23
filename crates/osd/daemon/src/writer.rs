@@ -751,6 +751,7 @@ pub(crate) mod tests {
             job_level: 'F' as u32,
             bootstrap: String::new(),
             vol_poll_interval: 300,
+            alternatives: Vec::new(),
         };
         let _ = Ring::remove(ring_name);
         let ring = Ring::create(ring_name, RingConfig { slots: 3, slot_size: 4096, consumers: 1 }).unwrap();

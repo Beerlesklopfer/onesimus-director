@@ -380,7 +380,27 @@ fn open_read(d: &Daemon, job: &Arc<Job>, dir: &SharedChannel) -> Option<(ReadPip
     // `storage=` of another media type): read from a free device of this SD that has it
     // (`Changing read device`, reserve.cc)
     let want = volumes[0].media_type.clone();
-    if !want.is_empty() && want != conf.media_type && volumes.iter().all(|v| v.media_type == want) {
+    // The targets of a Distributor the job holds besides the read device: the first volume may
+    // be on one of them (the reader switches for the later volumes itself)
+    let held: Vec<bareos_config::sd::SdDevice> = job
+        .read_alternatives
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .iter()
+        .filter_map(|n| d.config.find_device(n).cloned())
+        .collect();
+    let mut alternatives: Vec<FileDevice> = held.iter().map(FileDevice::from_config).collect();
+    if !want.is_empty() && want != conf.media_type && let Some(i) = held.iter().position(|h| h.media_type == want) {
+        d.jmsg(dir, job, M_INFO, &format!(
+            "Changing read device. Want Media Type=\"{want}\" have=\"{}\"\n  device={}\n",
+            conf.media_type, conf.name
+        ));
+        let old = std::mem::replace(&mut conf, held[i].clone());
+        alternatives.remove(i);
+        alternatives.push(FileDevice::from_config(&old));
+        *job.read_device.lock().unwrap_or_else(|e| e.into_inner()) = Some(conf.name.clone());
+        d.jmsg(dir, job, M_INFO, &format!("Media Type change.  New read device \"{}\" ({}) chosen.\n", conf.name, conf.archive_device));
+    } else if !want.is_empty() && want != conf.media_type && volumes.iter().all(|v| v.media_type == want) {
         d.jmsg(dir, job, M_INFO, &format!(
             "Changing read device. Want Media Type=\"{want}\" have=\"{}\"\n  device={}\n",
             conf.media_type, conf.name
@@ -391,7 +411,7 @@ fn open_read(d: &Daemon, job: &Arc<Job>, dir: &SharedChannel) -> Option<(ReadPip
             ..Default::default()
         };
         let old = conf.name.clone();
-        let Some(r) = d.reserve_device(&any, &job.cmd.job) else {
+        let Some(r) = d.reserve_device(&any, &job.cmd) else {
             d.jmsg(dir, job, M_FATAL, &format!("No suitable device found to read Volume \"{}\"\n", volumes[0].name));
             return None;
         };
@@ -404,7 +424,7 @@ fn open_read(d: &Daemon, job: &Arc<Job>, dir: &SharedChannel) -> Option<(ReadPip
         d.jmsg(dir, job, M_INFO, &format!("Media Type change.  New read device \"{}\" ({}) chosen.\n", conf.name, conf.archive_device));
     }
     let dev = FileDevice::from_config(&conf);
-    let info = read_info(d, job, &dev, &bootstrap);
+    let info = read_info(d, job, &dev, &bootstrap, alternatives);
     let slot_size = dev.max_block_size.max(dev.label_block_size).max(DEFAULT_BLOCK_SIZE as u32).max(MIN_READ_SLOT);
     let mut pipe = match ReadPipe::start(d, job, dir, &info, d.ring_slots(&conf), slot_size) {
         Ok(p) => p,
@@ -421,7 +441,7 @@ fn open_read(d: &Daemon, job: &Arc<Job>, dir: &SharedChannel) -> Option<(ReadPip
 }
 
 /// The ring info of a read job.
-fn read_info(d: &Daemon, job: &Job, dev: &FileDevice, bootstrap: &Bootstrap) -> JobInfo {
+fn read_info(d: &Daemon, job: &Job, dev: &FileDevice, bootstrap: &Bootstrap, alternatives: Vec<FileDevice>) -> JobInfo {
     let storage = job.storage.lock().unwrap_or_else(|e| e.into_inner()).clone().unwrap_or_default();
     JobInfo {
         job: job.cmd.job.clone(),
@@ -446,6 +466,7 @@ fn read_info(d: &Daemon, job: &Job, dev: &FileDevice, bootstrap: &Bootstrap) -> 
         job_level: job.cmd.level as u32,
         bootstrap: bootstrap.path.display().to_string(),
         vol_poll_interval: 300,
+        alternatives,
     }
 }
 
