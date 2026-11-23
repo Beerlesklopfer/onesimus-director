@@ -192,6 +192,23 @@ fn osd_backup_restore_passive_client() {
     restore_and_compare(&rig, backup);
 }
 
+/// Verify VolumeToCatalog with `Passive = yes` (S-59): the Director tells the SD
+/// to connect to the FD (`passive client`), then starts the job in the SD;
+/// before, the job waited for an FD that never came.
+#[test]
+#[ignore = "needs initdb and the Bareos catalog schema: run with --ignored"]
+fn osd_verify_passive_client() {
+    let rig = start(39721, true);
+    let backup = backup_and_check(&rig);
+    let verify = rig.run_job("VVol").unwrap_or_else(|e| panic!("{e}"));
+    let row = rig.wait_job(verify, JOB_TIMEOUT).unwrap_or_else(|e| panic!("{e}"));
+    let log = rig.job_log(verify);
+    eprintln!("Job-Log {verify} (Verify, passive client):\n{log}");
+    check(&rig, row.status == 'T' && row.files == ENTRIES, &format!("Verify: {row:?}\n{log}"));
+    check(&rig, !log.contains("waiting 1800 sec"), &format!("the SD waited for the FD:\n{log}"));
+    let _ = backup;
+}
+
 /// A pool with `Maximum Volume Bytes = 5M`: the 12 MiB file of the test
 /// tree spreads the backup over three volumes. Verify VolumeToCatalog and
 /// the restore read across them; the record cut at each volume end is

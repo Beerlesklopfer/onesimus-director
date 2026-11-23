@@ -323,6 +323,12 @@ pub(crate) fn run_verify(
     let director = config.director.name.clone();
     let fd_grpc = crate::fd_grpc::for_client(&config, &client);
     let sd_grpc = storage.as_ref().and_then(|s| crate::sd_grpc::for_storage(&config, s));
+    // Client Passive = yes: the SD connects to the FD (verify.cc, passive client)
+    let passive_client = crate::commands::defaults::bool_directive(
+        &crate::commands::defaults::raw(&config, "client", &client.name).map(|r| r.directives.clone()).unwrap_or_default(),
+        "passive",
+        false,
+    );
     drop(config);
 
     let Some(cat) = ctx.catalog.clone() else {
@@ -405,6 +411,7 @@ pub(crate) fn run_verify(
     params.fd_port = client.port;
     params.fd_password = client.password.clone();
     params.fd_grpc = fd_grpc;
+    params.passive_client = passive_client;
     params.client_first_connection = !verify.failed && !verify.nothing_to_do
         && crate::job_messages::first_client_connection(&client.name);
     params.pool_name = pool;
@@ -903,8 +910,20 @@ fn start_sd(sd: &mut Bnet, p: &JobParams, v: &VerifyParams) -> Result<(i32, i32,
         return Err(format!("\n     Storage daemon didn't accept Device \"{}\" because:\n     {reply}\n", p.sd_device));
     };
     info(job_id, crate::job_messages::using_device_text(&crate::job_messages::unbash_spaces(device), false));
-    sd.send_str("run").map_err(|e| e.to_string())?;
+    // an active client: the SD runs now; a passive one (the SD must be told where the FD is) after `passive client`
+    if !p.passive_client {
+        sd.send_str("run").map_err(|e| e.to_string())?;
+    }
     Ok((sdid.parse().unwrap_or(0), sdtime.parse().unwrap_or(0), key))
+}
+
+/// StartStorageDaemonMessageThread(): the thread that answers the SD's catalog requests.
+fn spawn_sd_thread(pipes: &mut WorkerPipes, mut sd: Bnet, job_id: u32) -> Result<Option<std::thread::JoinHandle<()>>, String> {
+    let (Ok(mut to_dir), Ok(mut from_dir)) = (pipes.to_director.try_clone(), pipes.from_director.try_clone()) else {
+        return Err("Cannot create message thread\n".into());
+    };
+    Ok(std::thread::Builder::new().name(format!("sd-verify:{job_id}"))
+        .spawn(move || crate::job_worker::sd_catrec_loop(&mut sd, job_id, &mut to_dir, &mut from_dir)).ok())
 }
 
 /// DoVerify() from the daemon connections on, in the job worker.
@@ -937,6 +956,7 @@ pub(crate) fn run_worker(p: &JobParams, pipes: &mut WorkerPipes) -> i32 {
 
     // VolumeToCatalog: the Storage daemon first.
     let mut sd_thread = None;
+    let mut passive_sd: Option<Bnet> = None;
     let (mut sdid, mut sdtime, mut auth_key) = (0, 0, "dummy".to_string());
     let mut sd_on_grpc = false;
     if level == L_VERIFY_VOLUME_TO_CATALOG {
@@ -955,11 +975,14 @@ pub(crate) fn run_worker(p: &JobParams, pipes: &mut WorkerPipes) -> i32 {
             Ok((id, time, key)) => (sdid, sdtime, auth_key) = (id, time, key),
             Err(e) => return fail(pipes, e, sdid, sdtime),
         }
-        let (Ok(mut to_dir), Ok(mut from_dir)) = (pipes.to_director.try_clone(), pipes.from_director.try_clone()) else {
-            return fail(pipes, "Cannot create message thread\n".into(), sdid, sdtime);
-        };
-        sd_thread = std::thread::Builder::new().name(format!("sd-verify:{job_id}"))
-            .spawn(move || crate::job_worker::sd_catrec_loop(&mut sd, job_id, &mut to_dir, &mut from_dir)).ok();
+        if p.passive_client {
+            passive_sd = Some(sd);
+        } else {
+            sd_thread = match spawn_sd_thread(pipes, sd, job_id) {
+                Ok(t) => t,
+                Err(e) => return fail(pipes, e, sdid, sdtime),
+            };
+        }
     }
 
     state(pipes, "ConnectingFD");
@@ -1008,10 +1031,26 @@ pub(crate) fn run_worker(p: &JobParams, pipes: &mut WorkerPipes) -> i32 {
         }
     }
     if level == L_VERIFY_VOLUME_TO_CATALOG {
-        let grpc = crate::sd_grpc::tokens(p.sd_grpc.as_ref(), &p.sd_address, sd_on_grpc, crate::sd_grpc::on_grpc(&fd));
-        let _ = fd.send_str(&format!("storage address={} port={} ssl=4 Authorization={auth_key}{grpc}\n", p.sd_address, p.sd_port));
-        if let Err(e) = response(&mut fd, job_id, "2000 OK storage", "Storage") {
-            return bail(pipes, &mut fd, e);
+        if let Some(mut sd) = passive_sd.take() {
+            // Tell the SD to connect to the FD, then start the job in the SD (verify.cc)
+            let grpc = crate::sd_grpc::tokens(p.fd_grpc.as_ref(), &p.fd_address, sd_on_grpc, crate::sd_grpc::on_grpc(&fd));
+            let cmd = format!("passive client address={} port={} ssl=4{grpc}\n", p.fd_address, p.fd_port);
+            if let Err(e) = crate::job_worker::send_expect(&mut sd, &cmd, "2000 OK passive client", job_id, "SD passive client") {
+                return bail(pipes, &mut fd, format!("Bad response to Passive client command: {e}\n"));
+            }
+            if let Err(e) = sd.send_str("run") {
+                return bail(pipes, &mut fd, format!("{e}\n"));
+            }
+            sd_thread = match spawn_sd_thread(pipes, sd, job_id) {
+                Ok(t) => t,
+                Err(e) => return bail(pipes, &mut fd, e),
+            };
+        } else {
+            let grpc = crate::sd_grpc::tokens(p.sd_grpc.as_ref(), &p.sd_address, sd_on_grpc, crate::sd_grpc::on_grpc(&fd));
+            let _ = fd.send_str(&format!("storage address={} port={} ssl=4 Authorization={auth_key}{grpc}\n", p.sd_address, p.sd_port));
+            if let Err(e) = response(&mut fd, job_id, "2000 OK storage", "Storage") {
+                return bail(pipes, &mut fd, e);
+            }
         }
     }
     // SendRunscriptsCommands() (S-07)
