@@ -21,6 +21,7 @@ allow = [
     "ISC", "Zlib", "Unicode-3.0", "Unicode-DFS-2016", "CC0-1.0", "0BSD", "BSL-1.0",
     "MPL-2.0",          # pam-client2 (Dateiebenen-Copyleft, mit AGPL verbindbar)
     "OpenSSL",
+    "LicenseRef-OSSP-var",   # OSSP var (Port in odir/src/expand.rs), Text in THIRD-PARTY-NOTICES
     "CDLA-Permissive-2.0",   # webpki-roots (Datenlizenz der Mozilla-Wurzelzertifikate)
 ]
 
