@@ -22,7 +22,7 @@ for a in &report.attributes {
 |---|---|
 | **ATA / SATA** (also SATA disks behind a SAT-capable USB bridge) | `IDENTIFY DEVICE`, `SMART READ DATA`, `SMART READ THRESHOLDS`, `SMART RETURN STATUS` through ATA PASS-THROUGH(16) |
 | **NVMe** | *Identify Controller* and *Get Log Page* 0x02 (SMART / Health Information) |
-| **SCSI / SAS** | not implemented |
+| **SCSI / SAS** (Linux) | `INQUIRY` (and the unit serial VPD page 0x80), `LOG SENSE` of the pages Informational Exceptions (0x2F: predicted failure, temperature), Temperature (0x0D), Self-Test Results (0x10) and the Write/Read/Verify Error Counters (0x02/0x03/0x05), `READ DEFECT DATA(10)` for the grown defect list |
 
 Everything is **read only**: nothing is written to the drive, no self test is
 started, no SMART setting is changed.
@@ -33,10 +33,11 @@ started, no SMART setting is changed.
 |---|---|---|---|
 | **Linux** (`SG_IO`, `NVME_IOCTL_ADMIN_CMD`) | yes | yes | ATA verified on two WD Red 2 TB SATA disks on a 32-bit (`i686-unknown-linux-musl`) machine: every attribute, threshold, self test status and the health verdict equal the output of `smartctl 7.5`. NVMe read on a Samsung SSD 990 PRO 2 TB (identity, temperature, spare, endurance, counters, plausible); a comparison with `smartctl` output is still to be made. |
 | **Windows** (`IOCTL_ATA_PASS_THROUGH`, `IOCTL_STORAGE_QUERY_PROPERTY`) | yes | yes | compiles and runs; opening the drive and the error path were checked on a Windows 11 virtual machine, whose VirtIO disks refuse both commands (`ERROR_INVALID_FUNCTION`). Reading real SMART data on Windows is **not yet verified**. |
+| **Linux SCSI / SAS** | – | – | the parsers follow SPC-4 and are tested on pages built from its byte layouts; the commands were checked against SATA disks only (they answer `INQUIRY` through SAT, not the log pages). **Not verified on a SAS drive** (no hardware); reports are welcome. |
 | **macOS** | – | – | **not implemented yet** (the plan is `IOKit`: `IOATASMARTInterface` and the NVMe SMART user client). `read` returns `Error::Unsupported`. |
 
-Please report results from real hardware (especially NVMe, USB bridges,
-Windows, SAS) to <contact@onesimus.io>.
+Please report results from real hardware (especially USB bridges, Windows,
+SAS) to <contact@onesimus.io>.
 
 ## Permissions
 
@@ -75,7 +76,8 @@ capability (systemd `AmbientCapabilities=CAP_SYS_RAWIO`, OpenRC
 * SAT only. USB bridges that need the 12-byte variant or a vendor command
   (some Cypress, JMicron, Prolific chips) are not tried.
 * NVMe over a USB bridge, drives behind a hardware RAID controller and
-  `dm`/`md` devices are not reachable.
+  `dm`/`md` devices are not reachable. SAS behind a RAID controller needs the
+  controller's own pass-through (not supported).
 * Raw values are the six bytes as a number. Vendor specific encodings (for
   example the temperature field with min/max, or hours in minutes) are not
   decoded beyond temperature (194/190) and power-on hours (9).

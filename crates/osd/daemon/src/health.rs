@@ -118,6 +118,16 @@ pub fn evaluate(disk: &str, report: &smartread::Report) -> Health {
             raise(Level::Warning, format!("{} % of the endurance used", n.percentage_used), &mut level);
         }
     }
+    if let Some(sc) = report.scsi.as_ref() {
+        for (value, what) in [(sc.uncorrected_read, "uncorrected read errors"), (sc.uncorrected_write, "uncorrected write errors"), (sc.uncorrected_verify, "uncorrected verify errors")] {
+            if let Some(n) = value.filter(|n| *n > 0) {
+                raise(Level::Warning, format!("{n} {what}"), &mut level);
+            }
+        }
+        if let Some(n) = sc.grown_defects.filter(|n| *n > 0) {
+            raise(Level::Warning, format!("{n} entries in the grown defect list"), &mut level);
+        }
+    }
     let temperature = report.temperature.map(i64::from);
     match temperature {
         Some(t) if t >= TEMP_CRITICAL => raise(Level::Critical, format!("temperature {t} °C"), &mut level),
@@ -251,6 +261,7 @@ mod tests {
             attributes: vec![attr(5, 200, 140, 0), attr(9, 25, 0, 54879), attr(194, 115, 0, 32), attr(197, 200, 0, 0), attr(198, 100, 0, 0), attr(199, 200, 0, 0)],
             self_test: Some(SelfTest { status: 0, remaining_percent: 0 }),
             nvme: None,
+            scsi: None,
         }
     }
 
@@ -297,6 +308,21 @@ mod tests {
         let mut r = healthy();
         r.attributes[0] = attr(5, 140, 140, 0); // reallocated sectors at the threshold
         assert_eq!(evaluate("sdb", &r).level, Level::Critical);
+    }
+
+    #[test]
+    fn scsi_drives_are_judged_by_exceptions_defects_and_uncorrected_errors() {
+        let mut r = healthy();
+        r.protocol = "scsi";
+        r.attributes.clear();
+        r.scsi = Some(smartread::scsi::Summary::default());
+        assert_eq!(evaluate("sdz", &r).level, Level::Ok);
+        r.scsi = Some(smartread::scsi::Summary { grown_defects: Some(3), uncorrected_read: Some(2), ..Default::default() });
+        let h = evaluate("sdz", &r);
+        assert_eq!(h.level, Level::Warning, "{h:?}");
+        assert!(h.reasons.iter().any(|x| x.contains("3 entries in the grown defect list")) && h.reasons.iter().any(|x| x.contains("2 uncorrected read errors")));
+        r.health = smartread::Health::Failed; // failure predicted (ASC 0x5D)
+        assert_eq!(evaluate("sdz", &r).level, Level::Critical);
     }
 
     #[test]

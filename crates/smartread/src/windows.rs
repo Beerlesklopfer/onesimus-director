@@ -129,6 +129,7 @@ fn read_ata(drive: &Drive) -> Result<Report, Error> {
         attributes,
         self_test: Some(self_test),
         nvme: None,
+        scsi: None,
     })
 }
 

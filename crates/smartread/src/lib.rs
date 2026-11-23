@@ -5,6 +5,9 @@
 //!   with the SCSI/ATA Translation command ATA PASS-THROUGH(16): `IDENTIFY
 //!   DEVICE`, `SMART READ DATA` (attribute table, self test status),
 //!   `SMART READ THRESHOLDS`, `SMART RETURN STATUS` (the health verdict).
+//! * **SCSI / SAS**: `INQUIRY` and the log pages Informational Exceptions,
+//!   Temperature, Self-Test Results and the error counters, and the grown
+//!   defect list (not verified on a SAS drive).
 //! * **NVMe**: the admin command *Get Log Page* with the SMART / Health
 //!   information log (`NVME_IOCTL_ADMIN_CMD`).
 //!
@@ -26,6 +29,7 @@
 
 pub mod ata;
 pub mod nvme;
+pub mod scsi;
 #[cfg(target_os = "linux")]
 mod sg;
 #[cfg(windows)]
@@ -163,6 +167,8 @@ pub struct Report {
     pub self_test: Option<SelfTest>,
     /// NVMe: the SMART / Health log (`None` for ATA).
     pub nvme: Option<nvme::HealthLog>,
+    /// SCSI / SAS: what the log pages say (`None` for ATA and NVMe).
+    pub scsi: Option<scsi::Summary>,
 }
 
 impl Report {
@@ -179,10 +185,23 @@ pub fn read(path: impl AsRef<std::path::Path>) -> Result<Report, Error> {
     let path = path.as_ref();
     let name = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
     if name.starts_with("nvme") {
-        nvme::read(path)
-    } else {
-        ata::read(path)
+        return nvme::read(path);
     }
+    // SATA disks answer INQUIRY with the vendor "ATA" (SAT): they take the ATA commands; every other SCSI device the log pages
+    let file = std::fs::OpenOptions::new().read(true).open(path)?;
+    let sata = scsi::inquiry(&file, None).ok().and_then(|d| scsi::parse_inquiry(&d).ok()).is_some_and(|(vendor, _, _)| vendor == "ATA");
+    if sata || scsi::inquiry(&file, None).is_err() {
+        ata::read(path)
+    } else {
+        scsi::read(&file)
+    }
+}
+
+/// Reads the drive at `path` through the SCSI log pages only (a SAS drive, or a SATA disk as a test of this path).
+#[cfg(target_os = "linux")]
+pub fn read_scsi(path: impl AsRef<std::path::Path>) -> Result<Report, Error> {
+    let file = std::fs::OpenOptions::new().read(true).open(path.as_ref())?;
+    scsi::read(&file)
 }
 
 /// Reads the SMART data of the drive at `path` (`\\.\PhysicalDrive0`); needs administrator rights.

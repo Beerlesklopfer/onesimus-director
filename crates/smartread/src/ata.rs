@@ -254,6 +254,7 @@ mod linux {
             attributes,
             self_test: Some(self_test),
             nvme: None,
+            scsi: None,
         })
     }
 }

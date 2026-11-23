@@ -104,6 +104,7 @@ pub fn report(identify: &[u8], log: &[u8]) -> Result<Report, Error> {
         attributes: Vec::new(),
         self_test: None,
         nvme: Some(health_log),
+        scsi: None,
     })
 }
 

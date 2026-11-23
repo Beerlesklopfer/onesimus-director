@@ -5,7 +5,16 @@ fn main() {
         eprintln!("usage: smartread <device>   (needs CAP_SYS_RAWIO / root)");
         std::process::exit(2);
     };
-    match smartread::read(&path) {
+    // `smartread <device> --scsi` reads through the SCSI log pages only
+    let scsi = std::env::args().nth(2).as_deref() == Some("--scsi");
+    #[cfg(target_os = "linux")]
+    let result = if scsi { smartread::read_scsi(&path) } else { smartread::read(&path) };
+    #[cfg(not(target_os = "linux"))]
+    let result = {
+        let _ = scsi;
+        smartread::read(&path)
+    };
+    match result {
         Ok(r) => {
             println!("{} {} (serial {}, firmware {}), {}", path, r.model, r.serial, r.firmware, r.protocol);
             println!("health: {:?}", r.health);
@@ -28,6 +37,9 @@ fn main() {
             }
             if let Some(n) = &r.nvme {
                 println!("{n:#?}");
+            }
+            if let Some(s) = &r.scsi {
+                println!("{s:#?}");
             }
         }
         Err(e) => {
