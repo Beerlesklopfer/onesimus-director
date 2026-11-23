@@ -99,12 +99,19 @@ impl DirectorConfig {
 
     /// Every resource of `odir.d/` extends a resource of the same type and name that
     /// exists, with directives from [`Self::EXTENSION_DIRECTIVES`] only.
-    fn check_extensions(&self) -> Result<(), String> {
+    pub(crate) fn check_extensions(&self) -> Result<(), String> {
         for res in &self.extensions {
             let kind = res.norm_type();
             let name = res.name().unwrap_or_default();
             if !self.raw.iter().any(|r| r.norm_type() == kind && r.name().is_some_and(|n| n.eq_ignore_ascii_case(name))) {
                 return Err(format!("odir.d: {} \"{name}\" extends a resource that does not exist in the configuration", res.rtype));
+            }
+            if kind == "fileset" {
+                let orig = self.raw.iter().find(|r| r.norm_type() == "fileset" && r.name().is_some_and(|n| n.eq_ignore_ascii_case(name))).unwrap();
+                if let Some(e) = crate::commands::estimate::overlay_exclude_error(res, orig) {
+                    return Err(e);
+                }
+                continue;
             }
             for d in &res.directives {
                 let key = d.norm_key();

@@ -1839,6 +1839,8 @@ pub(crate) struct FileOptions {
     pub(crate) drivetype: Vec<String>,
     pub(crate) meta: Vec<String>,
     pub(crate) plugin: Option<String>,
+    /// Onesimus extension (overlay `odir.d`): paths excluded only for this option block (`Y` line to the FD).
+    pub(crate) exclude_paths: Vec<String>,
 }
 
 pub(crate) fn default_options(configured: &[&str]) -> String {

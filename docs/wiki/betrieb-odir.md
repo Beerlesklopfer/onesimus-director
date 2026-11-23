@@ -440,3 +440,39 @@ Das Paket `osd` (nicht `odir`) bringt die Rust-Ersatzwerkzeuge für `bls`, `bsca
 `oscan` ist wiederholbar: was im Katalog steht (JobId, Volume, Dateien eines Jobs), wird nicht noch einmal angelegt; steht eine JobId unter einem anderen Job-Namen im Katalog, bricht das Skript ab. Ein neu angelegtes Volume bekommt den Status `Full` (`update volume volstatus=Append` gibt es frei), ein neuer Pool die Art `Backup`. JobBytes kommt aus dem End-Label (was der SD schrieb), nicht vom FD. Start und Ende im JobMedia sind Byte-Positionen in der Datei, wie osd und bareos-sd sie führen. Eigene Angaben (Herkunft eines gescannten Jobs) gehören ins Schema `onesimus`, nicht in die Standardtabellen: `oscan` schreibt deshalb nichts in `Job.Comment`.
 
 Getestet: `crates/outils/tests/` gegen ein von `bareos-format` aufgebautes Volume; im Gerüst (`onesimus-rig`, Test `outils`) gegen ein Volume, das osd schrieb: Job, Dateien und Volume werden gelöscht, `oscan -s` baut sie auf (Job, JobMedia gleich dem Original), die Rücksicherung durch den Director und `oextract` ohne Director ergeben beide denselben Baum wie die Quelle. Nicht verglichen: Volumes von bareos-sd, Mehr-Volume-Jobs mit `oscan`.
+
+## Ausschluss nur für einen Options-Block (Onesimus-Erweiterung)
+
+In Bareos gilt ein `Exclude` im FileSet für den ganzen FileSet. Ein `Exclude { … }` *innerhalb* von
+`Options { … }` kennt Bareos nicht: `bareos-dir -t` lehnt es ab (`dird/inc_conf.cc:813`, „expected an
+equals, got: {“), und `odir -t` tut es seit c497421 genauso. Damit `bareos-dir.d` Standard bleibt, steht
+die Erweiterung im Overlay `/etc/onesimus/odir.d/fileset/<Name>.conf`; der FileSet gleichen Namens aus
+`bareos-dir.d` wird erweitert:
+
+```
+FileSet {
+  Name = "LinuxAll"
+  Include {            # der n-te Include des Originals (Index, ab 1; ohne Angabe 1)
+    Index = 1
+    Options {          # der m-te Options-Block dieses Includes (ab 1; ohne Angabe 1)
+      Index = 1
+      Exclude {
+        File = /var/lib/docker
+        File = /home/alice/.cache
+      }
+    }
+  }
+}
+```
+
+Die Pfade (und alles darunter, nur ganze Pfadteile: `/var/lib/docker` trifft nicht `/var/lib/dockerx`)
+sind nur für die Dateien ausgeschlossen, die dieser Options-Block erfasst, also mit `Wild`/`Regex`; ein
+Options-Block ohne Muster gilt für alle Dateien des Includes. Gezählt wird in der Reihenfolge der
+Originaldatei; ändert sich dort die Reihenfolge, verrutscht der Index (beim Laden meldet der Director
+einen Index außerhalb des Bereichs). In `odir.d` sind in diesem FileSet nur `Include`, `Options`,
+`Index`, `Exclude` und `File` erlaubt.
+
+Der Director schickt dem FD je Pfad eine Zeile `Y <Pfad>` im Options-Block (nach den `W`/`R`-Zeilen,
+vor dem `N`). Nur `ofd` versteht sie. Ein Bareos-FD antwortet auf die Include-Liste mit einem Fehler;
+der Job endet dann mit „The FileSet excludes paths inside Options (odir.d); that needs an Onesimus ofd,
+a Bareos file daemon does not understand it.“ statt Daten zu sichern, die ausgeschlossen sein sollten.

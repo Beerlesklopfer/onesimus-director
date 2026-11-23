@@ -704,7 +704,14 @@ fn setup_fd(fd: &mut BnetStream<AnyStream>, params: &JobParams, session: &Backup
             send(fd, line)?;
         }
         fd.send_signal(BnetSignal::Eod).map_err(|e| format!("Network error: {e}\n"))?;
-        response(fd, job_id, "2000 OK include\n", "Include")?;
+        response(fd, job_id, "2000 OK include\n", "Include").map_err(|e| {
+            if lines.iter().any(|l| l.starts_with("Y ")) {
+                // the Y line (Exclude inside Options, odir.d) is an Onesimus extension
+                format!("{e}The FileSet excludes paths inside Options (odir.d); that needs an Onesimus ofd, a Bareos file daemon does not understand it.\n")
+            } else {
+                e
+            }
+        })?;
     }
 
     // SendPluginOptions()

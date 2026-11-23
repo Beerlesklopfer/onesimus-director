@@ -132,8 +132,9 @@ fn fileset_items(cfg: &DirectorConfig, name: &str) -> Option<FilesetItems> {
     let blocks = |key: &str| -> Vec<Item> {
         res.directives.iter().filter(|d| d.norm_key() == key).filter_map(|d| d.block.as_ref()).map(item).collect()
     };
-    let includes = blocks("include");
+    let mut includes = blocks("include");
     let excludes = blocks("exclude");
+    apply_overlay_excludes(cfg, name, &mut includes);
     if includes.is_empty() && excludes.is_empty() {
         return None; // !fileset->new_include: nothing is sent
     }
@@ -141,6 +142,84 @@ fn fileset_items(cfg: &DirectorConfig, name: &str) -> Option<FilesetItems> {
         .and_then(|d| d.first())
         .map_or(true, |v| bareos_config::values::parse_bool(v).map(|(_, v)| v).unwrap_or(false)); // EnableVSS = yes by default
     Some(FilesetItems { enable_vss, includes, excludes })
+}
+
+/// Onesimus extension: `odir.d/` may hold a FileSet of the same name whose
+/// `Include { Index = n  Options { Index = m  Exclude { File = … } } }` excludes the
+/// paths for that one option block of the n-th Include (1-based, default 1;
+/// see [`overlay_exclude_error`]).
+fn apply_overlay_excludes(cfg: &DirectorConfig, name: &str, includes: &mut [Item]) {
+    for ext in cfg.extensions.iter().filter(|r| r.norm_type() == "fileset" && r.name() == Some(name)) {
+        for inc in ext.directives.iter().filter(|d| d.norm_key() == "include") {
+            let Some(body) = &inc.block else { continue };
+            let index = |body: &[Directive]| body.iter().find(|d| d.norm_key() == "index")
+                .and_then(|d| d.first()).and_then(|v| v.parse::<usize>().ok()).unwrap_or(1);
+            let Some(item) = includes.get_mut(index(body).saturating_sub(1)) else { continue };
+            for opt in body.iter().filter(|d| d.norm_key() == "options") {
+                let Some(opt_body) = &opt.block else { continue };
+                let Some(fo) = item.options.get_mut(index(opt_body).saturating_sub(1)) else { continue };
+                for ex in opt_body.iter().filter(|d| d.norm_key() == "exclude").filter_map(|d| d.block.as_ref()) {
+                    fo.exclude_paths.extend(ex.iter().filter(|d| d.norm_key() == "file").flat_map(|d| d.values()).map(str::to_string));
+                }
+            }
+        }
+    }
+}
+
+/// Why the overlay FileSet `ext` (an `odir.d/` resource) is wrong, if it is:
+/// `orig` is the FileSet of the same name in the Bareos files.
+pub(crate) fn overlay_exclude_error(ext: &bareos_config::raw::ConfResource, orig: &bareos_config::raw::ConfResource) -> Option<String> {
+    let name = ext.name().unwrap_or_default();
+    let count = |body: &[Directive], key: &str| body.iter().filter(|d| d.norm_key() == key && d.block.is_some()).count();
+    let index = |body: &[Directive]| -> Result<usize, String> {
+        match body.iter().find(|d| d.norm_key() == "index") {
+            None => Ok(1),
+            Some(d) => d.first().and_then(|v| v.parse::<usize>().ok()).filter(|n| *n >= 1)
+                .ok_or_else(|| format!("odir.d: FileSet \"{name}\": Index must be a number from 1, got \"{}\"", d.first().unwrap_or(""))),
+        }
+    };
+    for d in &ext.directives {
+        match d.norm_key().as_str() {
+            "name" => {}
+            "include" => {
+                let Some(body) = &d.block else { return Some(format!("odir.d: FileSet \"{name}\": Include needs a block")) };
+                let n = match index(body) { Ok(n) => n, Err(e) => return Some(e) };
+                let Some(orig_body) = orig.directives.iter().filter(|o| o.norm_key() == "include").filter_map(|o| o.block.as_ref()).nth(n - 1)
+                else { return Some(format!("odir.d: FileSet \"{name}\": Index = {n}: the FileSet has only {} Include block(s)", count(&orig.directives, "include"))) };
+                for e in body {
+                    match e.norm_key().as_str() {
+                        "index" => {}
+                        "options" => {
+                            let Some(opt) = &e.block else { return Some(format!("odir.d: FileSet \"{name}\": Options needs a block")) };
+                            let m = match index(opt) { Ok(m) => m, Err(e) => return Some(e) };
+                            // an Include without Options gets the default option block (StoreDefaultOptions)
+                            let have = count(orig_body, "options").max(1);
+                            if m > have {
+                                return Some(format!("odir.d: FileSet \"{name}\": Include {n}: Options Index = {m}, but the Include has only {have} Options block(s)"));
+                            }
+                            for x in opt {
+                                match x.norm_key().as_str() {
+                                    "index" => {}
+                                    "exclude" => match &x.block {
+                                        Some(b) if b.iter().all(|f| f.norm_key() == "file") && !b.is_empty() => {}
+                                        Some(b) => {
+                                            let bad = b.iter().find(|f| f.norm_key() != "file").map(|f| f.key.clone()).unwrap_or_else(|| "(empty)".into());
+                                            return Some(format!("odir.d: FileSet \"{name}\": Exclude inside Options takes File directives only, got \"{bad}\""));
+                                        }
+                                        None => return Some(format!("odir.d: FileSet \"{name}\": Exclude inside Options must be a block")),
+                                    },
+                                    other => return Some(format!("odir.d: FileSet \"{name}\": \"{other}\" is not allowed in an Options block of odir.d (only Index and Exclude)")),
+                                }
+                            }
+                        }
+                        other => return Some(format!("odir.d: FileSet \"{name}\": \"{other}\" is not allowed in an Include block of odir.d (only Index and Options)")),
+                    }
+                }
+            }
+            other => return Some(format!("odir.d: FileSet \"{name}\": \"{other}\" is not an Onesimus extension directive (only Include with Options {{ Exclude {{ File }} }})")),
+        }
+    }
+    None
 }
 
 fn arg_is(key: &str, name: &str) -> bool {
@@ -502,6 +581,10 @@ fn emit_item(send_msg: &mut dyn FnMut(&str) -> Result<(), String>, item: &Item) 
         if let Some(plugin) = &fo.plugin {
             send_msg(&format!("G {plugin}\n"))?;
         }
+        // Onesimus extension (only an ofd knows the Y line)
+        for path in &fo.exclude_paths {
+            send_msg(&format!("Y {path}\n"))?;
+        }
         send_msg("N\n")?;
     }
     for file in &item.files {
@@ -652,5 +735,48 @@ FileSet { Name = fs; Enable VSS = yes
         assert_eq!(items.includes[0].options[0].fstype, vec!["ext4"]);
         assert_eq!(items.excludes[0].options[0].opts, "HAX");
         assert_eq!(items.excludes[0].files, vec!["/tmp"]);
+    }
+
+    /// A FileSet of the Bareos files and the overlay `odir.d` extension for it.
+    fn with_overlay(overlay: &str) -> Result<DirectorConfig, String> {
+        let mut cfg = DirectorConfig::from_str(r#"
+Director { Name = dir; Password = x }
+FileSet { Name = fs
+  Include { Options { Signature = MD5; Wild = "*.o" } Options { Signature = SHA1 } File = /tmp }
+  Include { File = /var }
+}
+"#).unwrap();
+        cfg.extensions = bareos_config::raw::parse_str(overlay, None).unwrap();
+        cfg.check_extensions().map(|()| cfg)
+    }
+
+    #[test]
+    fn overlay_exclude_inside_options_becomes_y_lines() {
+        let cfg = with_overlay("FileSet {\n Name = fs\n Include {\n Options {\n Index = 1\n Exclude {\n File = /tmp/x\n File = /tmp/y\n }\n }\n }\n}\n").unwrap();
+        let lines = include_exclude_messages(&cfg, "fs").unwrap().unwrap();
+        let text = lines.concat();
+        // only the first Options block of the first Include carries the Y lines
+        assert!(text.contains("W *.o\nY /tmp/x\nY /tmp/y\nN\n"), "{text}");
+        assert_eq!(text.matches("Y ").count(), 2, "{text}");
+        // the second Include and the second Options block are untouched
+        let cfg = with_overlay("FileSet {\n Name = fs\n Include {\n Index = 2\n Options {\n Exclude {\n File = /var/log\n }\n }\n }\n}\n").unwrap();
+        let text = include_exclude_messages(&cfg, "fs").unwrap().unwrap().concat();
+        assert!(text.contains("O HAX\nY /var/log\nN\nF /var"), "{text}");
+    }
+
+    #[test]
+    fn overlay_exclude_is_checked() {
+        for (overlay, part) in [
+            ("FileSet {\n Name = fs\n Include {\n Index = 3\n Options {\n Exclude {\n File = /a\n }\n }\n }\n}\n", "only 2 Include"),
+            ("FileSet {\n Name = fs\n Include {\n Options {\n Index = 3\n Exclude {\n File = /a\n }\n }\n }\n}\n", "has only 2 Options"),
+            ("FileSet {\n Name = fs\n Include {\n Options {\n Exclude {\n Wild = a\n }\n }\n }\n}\n", "File directives only"),
+            ("FileSet {\n Name = fs\n Include {\n Options {\n Wild = a\n }\n }\n}\n", "not allowed in an Options block"),
+            ("FileSet {\n Name = fs\n Include {\n File = /a\n }\n}\n", "not allowed in an Include block"),
+            ("FileSet {\n Name = fs\n Enable VSS = no\n}\n", "not an Onesimus extension"),
+            ("FileSet {\n Name = fs\n Include {\n Index = 0\n }\n}\n", "Index must be a number"),
+        ] {
+            let err = with_overlay(overlay).err().unwrap_or_else(|| panic!("accepted: {overlay}"));
+            assert!(err.contains(part), "{overlay}: {err}");
+        }
     }
 }
