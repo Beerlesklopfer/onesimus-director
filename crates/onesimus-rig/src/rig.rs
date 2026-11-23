@@ -66,7 +66,7 @@ pub struct RigOptions {
     /// No TLS to and between the SDs of a Copy (`TLS Enable = no` on the
     /// second SD and its Storage resource: `replicate … ssl=0`, clear text).
     pub copy_plain: bool,
-    /// Files of the Director's `odir.d/` (relative path below it, text): Onesimus extensions next to the standard `bareos-dir.d`.
+    /// Files of the Director's `odir.d/` (below `<root>/onesimus`, relative path, text): Onesimus extensions to the standard `bareos-dir.d`.
     pub extra_odir_d: Vec<(String, String)>,
 }
 
@@ -209,6 +209,14 @@ impl Rig {
         Ok(rig)
     }
 
+    /// Writes a file of the Director's `odir.d/` (below `<root>/onesimus`); a Client or Storage
+    /// extension that already exists is extended, not replaced.
+    fn write_odir_d(&self, (relative, text): (String, String)) -> std::io::Result<()> {
+        let path = self.layout.root.join("onesimus").join("odir.d").join(relative);
+        std::fs::create_dir_all(path.parent().unwrap_or(&self.layout.root))?;
+        std::fs::write(&path, text)
+    }
+
     /// Writes trees and configurations, starts the catalog and the daemons.
     fn setup(&mut self) -> Result<(), String> {
         let io = |e: std::io::Error| e.to_string();
@@ -223,6 +231,9 @@ impl Rig {
         if self.options.passive_client || self.options.fd_grpc.configured() {
             let client = crate::config::client_resource(&self.layout, self.ports, self.options.passive_client, self.options.fd_grpc);
             crate::config::write_director_resources(&self.layout, &[client]).map_err(io)?;
+            if self.options.fd_grpc.configured() {
+                self.write_odir_d(crate::config::client_extension(&self.layout, self.ports)).map_err(io)?;
+            }
         }
         // A pinned certificate no daemon will create: the Director must
         // try the port and fall back on the refused connection.
@@ -235,6 +246,7 @@ impl Rig {
         if self.options.sd_grpc.configured() {
             let storage = crate::config::storage_resource(&self.layout, self.ports, self.options.sd_grpc);
             crate::config::write_director_resources(&self.layout, &[storage]).map_err(io)?;
+            self.write_odir_d(crate::config::storage_extension(&self.layout, self.ports)).map_err(io)?;
             crate::config::write_sd_grpc_extension(&self.layout, self.ports).map_err(io)?;
         }
         if self.options.copy_plain {
@@ -266,10 +278,8 @@ impl Rig {
             std::fs::write(self.layout.root.join("sd2").join("bareos-sd.conf"), crate::config::copy_sd_config(&self.layout.root, self.ports, self.options.copy_plain)).map_err(io)?;
         }
         crate::config::write_director_resources(&self.layout, &self.options.extra_director).map_err(io)?;
-        for (relative, text) in &self.options.extra_odir_d {
-            let path = self.layout.dir_conf.parent().unwrap_or(&self.layout.root).join("odir.d").join(relative);
-            std::fs::create_dir_all(path.parent().unwrap_or(&self.layout.root)).map_err(io)?;
-            std::fs::write(&path, text).map_err(io)?;
+        for file in self.options.extra_odir_d.clone() {
+            self.write_odir_d(file).map_err(io)?;
         }
         self.catalog = Some(cluster);
 
@@ -308,10 +318,11 @@ impl Rig {
         }
 
         let dir_conf = self.layout.dir_conf.display().to_string();
+        let onesimus_conf = self.layout.root.join("onesimus").display().to_string();
         let mut dir = Daemon::spawn(
             "odir",
             &self.programs.odir,
-            &["-f", "--disable-grpc", "-c", &dir_conf, "-d", &debug],
+            &["-f", "--disable-grpc", "-c", &dir_conf, "--onesimus-config", &onesimus_conf, "-d", &debug],
             &self.layout.root.join("dir.log"),
         )?;
         let started = wait_port(&mut dir, local(self.ports.dir), Duration::from_secs(30));

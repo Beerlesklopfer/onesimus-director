@@ -103,11 +103,22 @@ pub fn client_resource(layout: &Layout, ports: Ports, passive: bool, grpc: Grpc)
     if passive {
         text += "  Passive = yes\n";
     }
-    if grpc.configured() {
-        text += &grpc_directives(ports.fd_grpc, &layout.fd_work.join(FD_GRPC_CERT));
-    }
     text += "}\n";
     (format!("client/{CLIENT}.conf"), text)
+}
+
+/// The `odir.d` extension of the rig FD's Client resource: the gRPC
+/// directives (Onesimus, not Bareos: they stand outside `bareos-dir.d`).
+pub fn client_extension(layout: &Layout, ports: Ports) -> (String, String) {
+    (
+        format!("client/{CLIENT}.conf"),
+        format!("Client {{\n  Name = {CLIENT}\n{}}}\n", grpc_directives(ports.fd_grpc, &layout.fd_work.join(FD_GRPC_CERT))),
+    )
+}
+
+/// The `odir.d` extension of the rig SD's Storage resource (gRPC directives).
+pub fn storage_extension(layout: &Layout, ports: Ports) -> (String, String) {
+    ("storage/vsd.conf".into(), format!("Storage {{\n  Name = vsd\n{}}}\n", grpc_directives(ports.sd_grpc, &layout.sd_work.join(SD_GRPC_CERT))))
 }
 
 /// The Director's Storage resource of the rig SD, with the gRPC
@@ -118,9 +129,6 @@ pub fn storage_resource(layout: &Layout, ports: Ports, grpc: Grpc) -> (String, S
          Media Type = VFile\n  Maximum Concurrent Jobs = 10\n",
         sd = ports.sd
     );
-    if grpc.configured() {
-        text += &grpc_directives(ports.sd_grpc, &layout.sd_work.join(SD_GRPC_CERT));
-    }
     text += "}\n";
     ("storage/vsd.conf".into(), text)
 }

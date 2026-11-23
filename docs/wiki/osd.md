@@ -335,7 +335,7 @@ osd liest zu jedem File-Device die SMART-Werte der Platte, auf der das `Archive 
 
 ### Der Director wertet es aus
 
-`Health Check Interval` (Onesimus-Direktive, ohne Angabe aus: der Director fragt einen SD sonst nie von sich aus ab). Bareos kennt sie nicht; damit `bareos-dir.d` Standard bleibt, steht sie im Overlay `odir.d/` neben `bareos-dir.d` (wie `osd.d/` beim SD), in `odir.d/storage/H340.conf`:
+`Health Check Interval` (Onesimus-Direktive, ohne Angabe aus: der Director fragt einen SD sonst nie von sich aus ab). Bareos kennt sie nicht; damit `bareos-dir.d` Standard bleibt, steht sie im Overlay `/etc/onesimus/odir.d/` (Option `--onesimus-config <Verzeichnis>`, Vorgabe `/etc/onesimus`), in `/etc/onesimus/odir.d/storage/H340.conf`:
 
 ```
 Storage {
@@ -344,7 +344,16 @@ Storage {
 }
 ```
 
-Jede Ressource in `odir.d/` erweitert die gleichnamige Ressource aus `bareos-dir.d`; unbekannte Ressourcen und andere Direktiven lehnt der Director beim Laden ab (`odir.d: Storage "H340": "Password" is not an Onesimus extension directive`). In `bareos-dir.d` selbst ist die Direktive ein Fehler wie bei Bareos.
+Jede Ressource in `odir.d/` erweitert die gleichnamige Ressource aus `bareos-dir.d`; unbekannte Ressourcen und andere Direktiven lehnt der Director beim Laden ab (`odir.d: Storage "H340": "Password" is not an Onesimus extension directive`). Erlaubt sind alle Onesimus-Direktiven des Directors:
+
+| Ressource | Direktiven |
+| --- | --- |
+| `Director` | `Grpc Port`, `Grpc TLS Certificate`, `Grpc TLS Key`, `mDNS Advertise` |
+| `Catalog` | `DB Driver` |
+| `Client` | `Grpc Enable`, `Grpc Port`, `Grpc CA Certificate File`, `Grpc Server Name` |
+| `Storage` | `Grpc Enable`, `Grpc Port`, `Grpc CA Certificate File`, `Grpc Server Name`, `Health Check Interval` |
+
+Die gRPC-Direktiven standen früher in `bareos-dir.d`. Dort nimmt sie der Director noch an (damit eine bestehende Konfiguration läuft), warnt aber beim Laden und nennt den Zielort; was in `odir.d/` steht, gilt zuletzt und gewinnt. Bareos selbst lehnt sie in `bareos-dir.d` ab: wer zu Bareos zurückwill, nimmt sie dort heraus.
 
 Der Director fragt dann `.status health` im Abstand (er schaut alle 30 Sekunden nach fälligen Abfragen) und
 

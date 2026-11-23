@@ -45,6 +45,17 @@ pub struct DirectorConfig {
     pub catalog_acl: std::sync::Arc<crate::catalog_acl::CatalogAcl>,
 }
 
+/// The Onesimus configuration directory when the command line names none.
+const DEFAULT_ONESIMUS_DIR: &str = "/etc/onesimus";
+
+/// The Onesimus configuration directory (`--onesimus-config`), set once at startup.
+static ONESIMUS_DIR: std::sync::OnceLock<std::path::PathBuf> = std::sync::OnceLock::new();
+
+/// Sets the Onesimus configuration directory whose `odir.d/` extends the Bareos files.
+pub fn set_onesimus_dir(dir: std::path::PathBuf) {
+    let _ = ONESIMUS_DIR.set(dir);
+}
+
 impl DirectorConfig {
     /// Load configuration from a file or directory tree.
     /// If path is a directory (e.g. /etc/bareos/bareos-dir.d/), reads all *.conf recursively.
@@ -62,22 +73,22 @@ impl DirectorConfig {
             Ok(raw) => config.raw = raw,
             Err(e) => tracing::warn!("raw config view unavailable (show): {e}"),
         }
-        let overlay = Self::overlay_dir(path);
+        let overlay = Self::overlay_dir();
         if overlay.is_dir() {
             config.extensions = bareos_config::raw::load_tree(&overlay, "odir.d")
                 .map_err(|e| ConfigError::ParseError(format!("odir.d: {e}")))?;
             config.check_extensions().map_err(ConfigError::ParseError)?;
         }
+        config.warn_misplaced_extensions();
+        config.apply_extensions();
         Ok(config)
     }
 
-    /// Where `odir.d/` belongs for the configuration `path`: next to the
-    /// file, next to the `bareos-dir.d` directory, or inside another directory.
-    pub fn overlay_dir(path: &Path) -> std::path::PathBuf {
-        if path.is_file() || path.file_name().is_some_and(|n| n == "bareos-dir.d") {
-            return path.parent().unwrap_or(Path::new(".")).join("odir.d");
-        }
-        path.join("odir.d")
+    /// Where `odir.d/` lies: below the Onesimus configuration directory
+    /// ([`set_onesimus_dir`], default `/etc/onesimus`), not next to the Bareos
+    /// files, which stay exactly what Bareos reads.
+    pub fn overlay_dir() -> std::path::PathBuf {
+        ONESIMUS_DIR.get().map_or_else(|| Path::new(DEFAULT_ONESIMUS_DIR).to_path_buf(), Clone::clone).join("odir.d")
     }
 
     /// The directives `odir.d/` may add, per resource type and normalized key.
@@ -85,6 +96,11 @@ impl DirectorConfig {
     const EXTENSION_DIRECTIVES: &'static [(&'static str, &'static str)] = &[
         // health of the disks under the devices of a Storage Daemon (storage_health.rs)
         ("storage", "healthcheckinterval"),
+        // gRPC to ofd/osd (fd_grpc.rs) and the Director's own gRPC and mDNS
+        ("client", "grpcenable"), ("client", "grpcport"), ("client", "grpccacertificatefile"), ("client", "grpcservername"),
+        ("storage", "grpcenable"), ("storage", "grpcport"), ("storage", "grpccacertificatefile"), ("storage", "grpcservername"),
+        ("director", "grpcport"), ("director", "grpctlscertificate"), ("director", "grpctlskey"), ("director", "mdnsadvertise"),
+        ("catalog", "dbdriver"),
     ];
 
     /// Every resource of `odir.d/` extends a resource of the same type and name that
@@ -104,6 +120,60 @@ impl DirectorConfig {
             }
         }
         Ok(())
+    }
+
+    /// Puts the directives of `odir.d/` where the code reads them: the raw
+    /// resources (client and storage gRPC, read by name) get them appended
+    /// (the last one wins, so `odir.d/` beats an old entry in `bareos-dir.d`),
+    /// the typed Director and Catalog resource are set.
+    fn apply_extensions(&mut self) {
+        for ext in &self.extensions {
+            let kind = ext.norm_type();
+            let name = ext.name().unwrap_or_default().to_string();
+            if let Some(raw) = self.raw.iter_mut().find(|r| r.norm_type() == kind && r.name().is_some_and(|n| n.eq_ignore_ascii_case(&name))) {
+                raw.directives.extend(ext.directives.iter().filter(|d| d.norm_key() != "name").cloned());
+            }
+            let value = |key: &str| ext.directives.iter().rev().find(|d| d.norm_key() == key).map(|d| d.values().join(" "));
+            match kind.as_str() {
+                "director" => {
+                    if let Some(v) = value("grpcport") {
+                        self.director.grpc_port = v.parse().ok();
+                    }
+                    if let Some(v) = value("grpctlscertificate") {
+                        self.director.grpc_tls_certificate = Some(v);
+                    }
+                    if let Some(v) = value("grpctlskey") {
+                        self.director.grpc_tls_key = Some(v);
+                    }
+                    if let Some(v) = value("mdnsadvertise") {
+                        self.director.mdns_advertise = bareos_config::values::parse_bool(&v).map(|(_, b)| b).unwrap_or(true);
+                    }
+                }
+                "catalog" => {
+                    if let (Some(v), Some(cat)) = (value("dbdriver"), self.catalogs.iter_mut().find(|c| c.name.eq_ignore_ascii_case(&name))) {
+                        cat.db_driver = v;
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+
+    /// Warns about Onesimus directives that still stand in the Bareos files.
+    fn warn_misplaced_extensions(&self) {
+        for res in &self.raw {
+            for d in &res.directives {
+                if Self::EXTENSION_DIRECTIVES.contains(&(res.norm_type().as_str(), d.norm_key().as_str())) {
+                    tracing::warn!(
+                        "{} \"{}\": \"{}\" is an Onesimus directive; Bareos does not know it. Move it to {}/storage|client|director|catalog/<Name>.conf",
+                        res.rtype,
+                        res.name().unwrap_or_default(),
+                        d.key,
+                        Self::overlay_dir().display()
+                    );
+                }
+            }
+        }
     }
 
     /// An Onesimus directive of `odir.d/`: the value of `key` (all words, `1 hour`) of the
@@ -449,8 +519,23 @@ JobDefs { Name = "Late"; Type = Restore; Level = Differential; Priority = 3 }
     }
 
     #[test]
-    fn the_overlay_lies_next_to_bareos_dir_d() {
-        assert_eq!(DirectorConfig::overlay_dir(Path::new("/etc/bareos/bareos-dir.d")), Path::new("/etc/bareos/odir.d"));
-        assert_eq!(DirectorConfig::overlay_dir(Path::new("/etc/bareos")), Path::new("/etc/bareos/odir.d"));
+    fn the_overlay_lies_below_the_onesimus_directory() {
+        // not set in a test run: the default, never next to the Bareos files
+        assert_eq!(DirectorConfig::overlay_dir(), Path::new("/etc/onesimus/odir.d"));
+    }
+
+    #[test]
+    fn odir_d_sets_the_typed_and_the_raw_directives() {
+        let mut c = with_extension(
+            "Director {\n  Name = bareos-dir\n  Grpc Port = 19101\n  mDNS Advertise = no\n}\n\
+             Client {\n  Name = bareos-fd\n  Grpc Enable = yes\n  Grpc Port = 19102\n}\n",
+        )
+        .unwrap();
+        c.apply_extensions();
+        assert_eq!(c.director.grpc_port, Some(19101));
+        assert!(!c.director.mdns_advertise);
+        assert_eq!(crate::job_messages::raw_directive(&c, "client", "bareos-fd", "grpcenable").as_deref(), Some("yes"));
+        assert_eq!(crate::job_messages::raw_directive(&c, "client", "bareos-fd", "grpcport").as_deref(), Some("19102"));
+        assert_eq!(crate::job_messages::raw_directive(&c, "client", "remote-fd", "grpcenable"), None);
     }
 }
