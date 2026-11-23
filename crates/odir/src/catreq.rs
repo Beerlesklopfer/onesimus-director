@@ -910,9 +910,17 @@ impl CatReqJob {
             reply.messages.push((MsgType::Fatal, format!("Invalid Catalog request; DB not open: {text}")));
             return;
         };
-        let ctx = self.ctx.clone();
         let (n, v) = bsscanf(msg, "CatReq Job=%127s FindMedia=%d pool_name=%127s media_type=%127s unwanted_volumes=%s\n");
         if n == 5 {
+            // The SD names the media type of the device it writes to. A bareos-sd names the one of the
+            // Director's Storage resource (it must equal the device's), so nothing changes for it. An osd
+            // Distributor writes to a target with its own media type (osd plan D-2 variant a): volumes
+            // are found, created and checked with that type for the rest of the job.
+            let requested = scanned_s(&v, 3);
+            if !requested.is_empty() && let Some(store) = self.ctx.write_storage.as_mut() {
+                store.media_type = requested;
+            }
+            let ctx = self.ctx.clone();
             let mut cat = Cat { db, errmsg: &mut self.errmsg, msgs: &mut reply.messages };
             let mut pr = PoolRecord { name: unbash_spaces(&scanned_s(&v, 2)), ..Default::default() };
             let mut mr = MediaRecord { media_type: scanned_s(&v, 3), ..Default::default() };
@@ -927,6 +935,7 @@ impl CatReqJob {
             reply.to_sd = if ok { mr.ok_media() } else { "1901 No Media.\n".into() };
             return;
         }
+        let ctx = self.ctx.clone();
         let (n, v) = bsscanf(msg, "CatReq Job=%127s GetVolInfo VolName=%127s write=%d\n");
         if n == 3 {
             let mut cat = Cat { db, errmsg: &mut self.errmsg, msgs: &mut reply.messages };

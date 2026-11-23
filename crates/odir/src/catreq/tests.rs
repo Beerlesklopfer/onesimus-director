@@ -170,6 +170,34 @@ EncryptionKey= MinBlocksize=0 MaxBlocksize=0\n");
     assert!(reply.messages.is_empty());
 }
 
+/// An osd Distributor writes to a target with its own media type: FindMedia names it, the volume
+/// is searched with that type (not the Storage resource's `File`) and `GetVolInfo write=1`
+/// accepts a volume of it for the rest of the job.
+#[test]
+fn find_media_uses_the_media_type_the_sd_names() {
+    let db = MockDb::new(|sql| {
+        if sql.contains("FROM Pool WHERE Pool.Name='Full'") {
+            Some(Ok(vec![pool_row(3, "Full", 2, 100, "Full-")]))
+        } else if sql.starts_with("SELECT count(*) from Media WHERE PoolId=3") {
+            Some(Ok(vec![row(&["2"])]))
+        } else if sql.contains("VolStatus='Append'") {
+            assert!(sql.contains("MediaType='Target2'"), "{sql}");
+            Some(Ok(vec![media(7, "Full-0007", "Append", 3, 0, 0, 1, 0)]))
+        } else if sql.ends_with("WHERE VolumeName='Full-0007'") {
+            let mut r = media(7, "Full-0007", "Append", 3, 0, 0, 1, 0);
+            r[11] = Some("Target2".into());
+            Some(Ok(vec![r]))
+        } else {
+            None
+        }
+    });
+    let mut job = CatReqJob::new(context());
+    let reply = job.dispatch(Some(&db), &no_batch, b"CatReq Job=backup.2026 FindMedia=1 pool_name=Full media_type=Target2 unwanted_volumes=\n");
+    assert!(reply.to_sd.starts_with("1000 OK VolName=Full-0007 "), "{}", reply.to_sd);
+    let reply = job.dispatch(Some(&db), &no_batch, b"CatReq Job=backup.2026 GetVolInfo VolName=Full-0007 write=1\n");
+    assert!(reply.to_sd.starts_with("1000 OK VolName=Full-0007 "), "{}", reply.to_sd);
+}
+
 #[test]
 fn find_media_skips_unwanted_and_creates_a_new_volume() {
     let db = MockDb::new(|sql| {
