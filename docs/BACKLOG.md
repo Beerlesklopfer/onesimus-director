@@ -58,7 +58,7 @@ P2 ist erledigt (Plan [P2 umgesetzt](plans/OSD-GERAETE-UND-VERTEILUNG.md#p2-umge
 | `update` | ~~`update jobid=… starttime=` fehlt~~ umgesetzt (`update_db.rs`); S-40 geprüft (Original meldet denselben Fehler, a82b1ee) | Hinweis [C-059](COMPATIBILITY-LOG.md) |
 | `list`, `llist` | ~~`nextvolume` nach frischem Label~~ geprüft, kein Unterschied (S-41, a82b1ee) | S-41 |
 | `restore` | ~~Nicht-UTF-8-Dateinamen auf SQL_ASCII-Katalogen~~ belegt 24.11.2026: ganzer Job (`backup_verify_restore_estimate_cancel`) und `fileregex=` (`restore_non_utf8.rs`) stellen `caf\xe9.txt` byte-gleich wieder her; offen nur die Anzeige solcher Namen in `ls` des Restore-Baums | [C-047](COMPATIBILITY-LOG.md) |
-| `cancel` | Cancel-Dialog ohne Paritätsfall; `*JobCancel*` des Job-Threads ohne Jobnamen-Nummer; Berichtszeilen „Director's comm line to SD dropped“/SD termination status beim Cancel | [C-011](COMPATIBILITY-LOG.md), S-26 |
+| `cancel` | ~~Cancel-Dialog ohne Paritätsfall~~ erledigt 24.11.2026 (`c090`: 15 Fälle gegen das Original, auch mit wartendem Job; Dialog, `job=`, `all`, Bestätigung ja/nein); offen: `*JobCancel*` des Job-Threads ohne Jobnamen-Nummer, Berichtszeilen „Director's comm line to SD dropped“/SD termination status beim Cancel eines laufenden Jobs (Backup-Worker, S-27) | [C-011](COMPATIBILITY-LOG.md), S-26 |
 | Konfigurationsstart | ~~Normaler Start prüft nicht wie `-t`~~ erledigt (cb916f8, Exit 42); Lexer-Position im Log erledigt (24.11.2026, `reload_log.rs`) | [C-057](COMPATIBILITY-LOG.md) |
 
 Nur Testlücken, keine bekannte Abweichung: Wirkung von `setdebug`, `trace`,

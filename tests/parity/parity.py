@@ -272,6 +272,8 @@ SAFE_JOBS = {'parity-admin', 'parity-migrate', 'parity-consolidate',
              'parity-s22-nodup', 'parity-s22-cq', 'parity-s22-cr', 'parity-s22-delay', 'parity-s22-rst',
              # Admin jobs with Director-side RunScripts (fixture/job/parity-runscript.conf)
              'parity-admin-rs', 'parity-admin-rs-fail', 'parity-admin-rs-noerr',
+             # cancel dialog (cases/c090.jsonl defines it as Type = Admin)
+             'parity-c090-admin',
              # Copy control job selecting nothing, with Director-side RunScripts (S-24)
              'parity-copy-rs'}
 
