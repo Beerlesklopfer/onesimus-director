@@ -614,9 +614,17 @@ impl JobManager {
                 let name = job.job_name.clone();
                 self.post_start_fatals(id, &name, start_fatals);
                 let Some(job) = self.jobs.iter_mut().find(|j| j.job_id == id) else { continue };
-                // job_thread(): jcr->start_time = time(NULL) for a canceled job too.
+                // job_thread(): jcr->start_time = time(NULL) for a canceled job too, and the catalog gets it
+                // (UpdateJobStartRecord): `list jobs` shows its StartTime like bareos-dir 25.1.3 (c094)
                 job.start_time = now_unix();
                 if let Some(report) = job.jcr.report.as_mut() { report.start_time = job.start_time; }
+                if let Some(cat) = &self.catalog {
+                    let start = job.start_time;
+                    if let Err(e) = cat.raw_query(&format!("UPDATE Job SET StartTime='{}',JobTDate={start} WHERE JobId={id}",
+                        crate::job_messages::bstrutime(start))) {
+                        warn!("Job {id}: UpdateJobStartRecord: {e}");
+                    }
+                }
                 job.pending_end = Some(JobEnd { term_code: b'A' as i32, files: 0, bytes: 0, errors: 0,
                     vol_session_id: 0, vol_session_time: 0 });
                 job.worker_exit = Some(0);
@@ -1269,6 +1277,11 @@ impl JobManager {
             job.jcr.recorded = true;
             job.jcr.fd_connected = false;
             job.jcr.sd_connected = false;
+            // FreeJcr(): only Backup, Verify, Restore, Migrate, Copy and Admin jobs are counted and kept
+            // in the list of recent jobs, not Consolidate (status dir "Terminated Jobs", c092)
+            if job.jcr.params.as_ref().is_some_and(|p| p.job_type == crate::job_worker::WorkerJobType::Consolidate) {
+                continue;
+            }
             self.jobs_run += 1;
             self.recent.push_back(job.job_id);
             if self.recent.len() > MAX_RECENT_JOB_RESULTS { self.recent.pop_front(); }
