@@ -476,3 +476,5 @@ Der Director schickt dem FD je Pfad eine Zeile `Y <Pfad>` im Options-Block (nach
 vor dem `N`). Nur `ofd` versteht sie. Ein Bareos-FD antwortet auf die Include-Liste mit einem Fehler;
 der Job endet dann mit „The FileSet excludes paths inside Options (odir.d); that needs an Onesimus ofd,
 a Bareos file daemon does not understand it.“ statt Daten zu sichern, die ausgeschlossen sein sollten.
+
+Geprüft im Gerüst mit dem echten `ofd` (`crates/onesimus-rig/tests/options_exclude.rs`, 24.11.2026): Das Backup vor dem Overlay sichert alle 13 Einträge des Testbaums, nach `reload` mit `Exclude { File = …/data/sub }` in `Options` fehlen `sub`, `inner.txt` und `hard2` (10 Einträge), und `estimate listing` zeigt sie ebenfalls nicht. Mit einem Bareos-FD im Gerüst noch nicht geprüft (Meldung nur im Einheitentest).
