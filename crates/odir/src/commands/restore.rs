@@ -588,11 +588,16 @@ fn user_select_jobids_or_files(ua: &mut Ua, ast: &CommandAst, rx: &mut Rx) -> i3
         if !get_client_name(ua, ast, rx) {
             return 0;
         }
+        // Bareos 25: a file= that is not in the catalog (or a dir= without JobIds) ends the selection
         for file in &files {
-            insert_one_file_or_dir(ua, rx, file, &date, false);
+            if !insert_one_file_or_dir(ua, rx, file, &date, false) {
+                return 0;
+            }
         }
         for dir in &dirs {
-            insert_one_file_or_dir(ua, rx, dir, &date, true);
+            if !insert_one_file_or_dir(ua, rx, dir, &date, true) {
+                return 0;
+            }
         }
         if files.is_empty() && dirs.is_empty() {
             // Only fileregex: select the jobids if none were specified.
@@ -877,13 +882,15 @@ fn strip_trailing_junk(text: &str) -> &str {
 }
 
 /// InsertOneFileOrDir (ua_restore.cc:955)
-fn insert_one_file_or_dir(ua: &mut Ua, rx: &mut Rx, p: &str, date: &str, dir: bool) {
+/// InsertOneFileOrDir (ua_restore.cc): false ends the selection (a file not in the catalog, a
+/// directory without JobIds, a failed line of a `<` list).
+fn insert_one_file_or_dir(ua: &mut Ua, rx: &mut Rx, p: &str, date: &str, dir: bool) -> bool {
     if let Some(name) = p.strip_prefix('<') {
         let content = match std::fs::read(name) {
             Ok(content) => content,
             Err(e) => {
                 ua.error_msg(format!("Cannot open file {name}: ERR={}\n", errno_text(&e)));
-                return;
+                return true;
             }
         };
         let text = String::from_utf8_lossy(&content);
@@ -895,18 +902,21 @@ fn insert_one_file_or_dir(ua: &mut Ua, rx: &mut Rx, p: &str, date: &str, dir: bo
             };
             if !ok {
                 ua.error_msg(format!("Error occurred on line {} of file \"{name}\"\n", index + 1));
+                return false;
             }
         }
+        true
     } else if let Some(table) = p.strip_prefix('?') {
         let table = strip_trailing_junk(table);
         let sql = format!("SELECT JobId, FileIndex\n  FROM {table}\n ORDER BY JobId, FileIndex ASC\n");
         if !jobid_fileindex(ua, rx, &sql) {
             ua.error_msg(format!("No table found: {table}\n"));
         }
+        true
     } else if dir {
-        insert_dir_into_findex_list(ua, rx, p);
+        insert_dir_into_findex_list(ua, rx, p)
     } else {
-        insert_file_into_findex_list(ua, rx, p, date);
+        insert_file_into_findex_list(ua, rx, p, date)
     }
 }
 
@@ -970,7 +980,9 @@ fn insert_file_into_findex_list(ua: &mut Ua, rx: &mut Rx, file: &str, date: &str
             rx.job_ids)
     };
     if !jobid_fileindex(ua, rx, &sql) {
-        ua.error_msg(format!("No database record found for: {file}\n"));
+        // Bareos 25: one message for the file (the name only in the debug log), and the selection ends
+        ua.error_msg("Database record not found for file.\n");
+        return false;
     }
     true
 }
@@ -2145,7 +2157,7 @@ Console { Name=limited; Password=pw; CommandACL=*all*; CatalogACL=*all*; ClientA
             "client argument: Illegal character \"!\" in name.\n");
         // FindArgWithValue: the first `client` decides.
         // GetClientDbr then takes any `client=`/`fd=` with a value.
-        assert_eq!(run(&ctx, "restore client client=fd1 file=/x").error_message, "No database record found for: /x\n");
+        assert_eq!(run(&ctx, "restore client client=fd1 file=/x").error_message, "Database record not found for file.\n");
         // Without file selection the client is not looked at before the menu.
         assert!(run(&ctx, "restore client=nosuch").text_output.ends_with(MENU_BATCH));
         let bootstrap = bootstrap_file("client_argument");
