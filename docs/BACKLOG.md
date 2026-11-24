@@ -59,7 +59,7 @@ P2 ist erledigt (Plan [P2 umgesetzt](plans/OSD-GERAETE-UND-VERTEILUNG.md#p2-umge
 | `list`, `llist` | ~~`nextvolume` nach frischem Label~~ geprüft, kein Unterschied (S-41, a82b1ee) | S-41 |
 | `restore` | Nicht-UTF-8-Dateinamen auf SQL_ASCII-Katalogen | [C-047](COMPATIBILITY-LOG.md) |
 | `cancel` | Cancel-Dialog ohne Paritätsfall; `*JobCancel*` des Job-Threads ohne Jobnamen-Nummer; Berichtszeilen „Director's comm line to SD dropped“/SD termination status beim Cancel | [C-011](COMPATIBILITY-LOG.md), S-26 |
-| Konfigurationsstart | ~~Normaler Start prüft nicht wie `-t`~~ erledigt (cb916f8, Exit 42); Lexer-Diagnosen nicht im Log | [C-057](COMPATIBILITY-LOG.md) |
+| Konfigurationsstart | ~~Normaler Start prüft nicht wie `-t`~~ erledigt (cb916f8, Exit 42); Lexer-Position im Log erledigt (24.11.2026, `reload_log.rs`) | [C-057](COMPATIBILITY-LOG.md) |
 
 Nur Testlücken, keine bekannte Abweichung: Wirkung von `setdebug`, `trace`,
 `wait` auf echte Jobenden, `add`/`create`/`prune`-Katalogzustand danach,

@@ -71,9 +71,21 @@ pub fn reload_now() -> Result<(), String> {
 fn reload_config(config_path: &std::path::Path, shared_config: &SharedConfig) -> Result<(), String> {
     info!("reloading configuration from {}", config_path.display());
     let base = crate::config_check::base_config_path(config_path);
+    // the lexer position of a rejected file (scan_err: "line L, col C of file F"), rendered like `-t`
+    let mut located = String::new();
     let loaded = DirectorConfig::load(config_path)
         .map_err(|e| vec![crate::config_check::Diag::Parser(e.to_string())])
-        .and_then(|config| crate::config_check::check(&config.raw, &base).map(|()| config))
+        .and_then(|config| {
+            match crate::config_check::check(&config.raw, &base) {
+                Ok(()) => Ok(config),
+                Err(diags) => {
+                    if diags.iter().any(|d| matches!(d, crate::config_check::Diag::Config(_))) {
+                        located = crate::config_test::report(&config.raw, &diags, &base).0;
+                    }
+                    Err(diags)
+                }
+            }
+        })
         // CheckCatalog(UPDATE_CATALOG): every Catalog must open (C-075)
         .and_then(|config| {
             crate::check_catalog::check_connections(&config, |partial| {
@@ -98,8 +110,13 @@ fn reload_config(config_path: &std::path::Path, shared_config: &SharedConfig) ->
                     crate::config_check::Diag::Daemon(text) => {
                         crate::audit::daemon_message(&current, crate::message_bus::MsgType::Error, text)
                     }
-                    crate::config_check::Diag::Parser(_) | crate::config_check::Diag::Config(_) => {
+                    crate::config_check::Diag::Parser(_) => {
                         error!("configuration error: {}", diag.text());
+                    }
+                    crate::config_check::Diag::Config(_) => {
+                        // with the position, as scan_err() prints it
+                        let text = if located.is_empty() { diag.text().to_string() } else { located.trim_end().to_string() };
+                        error!("configuration error: {text}");
                     }
                 }
                 if reason.is_empty() {
