@@ -77,6 +77,8 @@ pub struct RigOptions {
     /// No TLS to and between the SDs of a Copy (`TLS Enable = no` on the
     /// second SD and its Storage resource: `replicate … ssl=0`, clear text).
     pub copy_plain: bool,
+    /// The File Daemon to start instead of `ofd` (a `bareos-fd`: no overlay and no gRPC, started with `-f -c <conf> -d`).
+    pub fd_program: Option<PathBuf>,
     /// Files of the Director's `odir.d/` (below `<root>/onesimus`, relative path, text): Onesimus extensions to the standard `bareos-dir.d`.
     pub extra_odir_d: Vec<(String, String)>,
 }
@@ -100,6 +102,7 @@ impl RigOptions {
             distributor: false,
             copy_plain: false,
             extra_odir_d: Vec::new(),
+            fd_program: None,
         }
     }
 }
@@ -330,16 +333,30 @@ impl Rig {
             started?;
         }
         if self.options.start_fd {
-            let fd_conf = self.layout.fd_conf.display().to_string();
+            let mut fd_conf = self.layout.fd_conf.display().to_string();
+            if self.options.fd_program.is_some() {
+                // a Bareos FD reads `<dir>/bareos-fd.conf` (the rig's own layout is `fd/client/vfd.conf`)
+                let dir = self.layout.root.join("fd-bareos");
+                std::fs::create_dir_all(&dir).map_err(io)?;
+                // the Bareos FD has no `Pid Directory` in its Client resource
+                let text: String = crate::config::fd_config(&self.layout, self.ports).lines()
+                    .filter(|l| !l.trim_start().starts_with("Pid Directory")).map(|l| format!("{l}\n")).collect();
+                std::fs::write(dir.join("bareos-fd.conf"), text).map_err(io)?;
+                fd_conf = dir.display().to_string();
+            }
             let grpc_listen = format!("127.0.0.1:{}", self.ports.fd_grpc);
             let overlay = self.layout.root.join("onesimus").display().to_string();
-            let mut fd_args = vec!["-f", "-c", &fd_conf, "--overlay", &overlay, "-d", &debug];
-            if self.options.fd_grpc.disabled() {
-                fd_args.push("--disable-grpc");
-            } else {
-                fd_args.extend(["--grpc-listen", &grpc_listen]);
+            let mut fd_args = vec!["-f", "-c", &fd_conf, "-d", &debug];
+            let program = self.options.fd_program.clone().unwrap_or_else(|| self.programs.ofd.clone());
+            if self.options.fd_program.is_none() {
+                fd_args.extend(["--overlay", &overlay]);
+                if self.options.fd_grpc.disabled() {
+                    fd_args.push("--disable-grpc");
+                } else {
+                    fd_args.extend(["--grpc-listen", &grpc_listen]);
+                }
             }
-            let mut fd = Daemon::spawn("ofd", &self.programs.ofd, &fd_args, &self.layout.root.join("fd.log"))?;
+            let mut fd = Daemon::spawn("ofd", &program, &fd_args, &self.layout.root.join("fd.log"))?;
             let started = wait_port(&mut fd, local(self.ports.fd), Duration::from_secs(20));
             self.daemons.push(fd);
             started?;
