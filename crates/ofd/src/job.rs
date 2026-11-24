@@ -141,7 +141,7 @@ impl<'a> Session<'a> {
     /// The command table of dir_cmd.cc (prefix match in table order),
     /// `true` when monitor directors may use the command.
     fn select<S: Read + Write>(cmd: &str) -> Option<(Handler<'a, S>, bool)> {
-        let table: [(&str, Handler<'a, S>, bool); 24] = [
+        let table: [(&str, Handler<'a, S>, bool); 25] = [
             ("accurate", Self::accurate_cmd, false),
             ("backup", Self::backup_cmd, false),
             ("bootstrap", Self::bootstrap_cmd, false),
@@ -156,6 +156,7 @@ impl<'a> Session<'a> {
             ("Run", Self::runscript_cmd, false),
             ("restoreobject", Self::restore_object_cmd, false),
             ("restore ", Self::restore_cmd, false),
+            ("resolve", Self::resolve_cmd, false),
             ("getSecureEraseCmd", Self::secure_erase_cmd, false),
             ("session", Self::session_cmd, false),
             ("setauthorization", Self::setauthorization_cmd, false),
@@ -291,6 +292,21 @@ impl<'a> Session<'a> {
         let policy = self.sd_tls_policy;
         self.set_storage_auth_key(&v[0].text(), policy);
         self.reply(dir, "2000 OK Authorization\n")
+    }
+
+    /// ResolveCmd() (filed/dir_cmd.cc): `resolve <host>` → "<name> resolves <host> to host[…] …" or
+    /// "<name>: Failed to resolve <host>", then EOD.
+    fn resolve_cmd<S: Read + Write>(&mut self, dir: &mut BnetStream<S>, cmd: &str) -> bool {
+        let host = cmd.trim_end().strip_prefix("resolve").unwrap_or("").trim_start();
+        let host = host.split_whitespace().next().unwrap_or("");
+        let reply = match bareos_bnet::resolve::host_to_ip_addrs(host) {
+            Ok(addresses) if !host.is_empty() => {
+                format!("{} resolves {host} to {}\n", self.config.name, bareos_bnet::resolve::addresses_string(&addresses))
+            }
+            _ => format!("{}: Failed to resolve {host}\n", self.config.name),
+        };
+        self.reply(dir, &reply);
+        dir.send_signal(BnetSignal::Eod).is_ok()
     }
 
     fn setdebug_cmd<S: Read + Write>(&mut self, dir: &mut BnetStream<S>, _cmd: &str) -> bool {
