@@ -36,25 +36,35 @@ dieses Clients, statt selbst zu verbinden. Für Onesimus Home ist das der Normal
   Verbindung je Director). Der FD wartet mit `WaitDataIntr(60)` auf Daten des Directors und führt dann
   die Befehle des Directors aus; `Hello Director` steht nicht in der Befehlstabelle des FD.
 
-## Nicht belegt (vor dem Bau klären)
+## Gemessen (Mitschnitt 24.11.2026)
 
-1. **Rollen der CRAM-MD5-Anmeldung** beider Seiten (wer Challenger ist, wer zweiseitig antwortet) und
-   welches Passwort der FD benutzt (`AuthenticateInboundConnection` in `lib/`,
-   `filed/authenticate.cc`).
-2. **`UseWaitingClient`**: setzt es `jcr->authenticated`? Davon hängt ab, ob der Director auf dem
-   übernommenen Socket noch `Hello Director` sendet (`AuthenticateWithFileDaemon` überspringt es bei
-   `jcr->authenticated`; der FD würde `Hello Director` mit `2999 Invalid command` ablehnen).
-3. **`dird/run_on_incoming_connect_interval.*`**: Direktivname, Einheit, Verhältnis zum Scheduler.
-4. **Direktivnamen** und Vorgaben in beiden Konfigurationen (Client-Resource des Directors,
-   Director-Resource des FD), Heartbeat-Vorgabe.
-5. **Wann `CleanupConnectionPool` läuft** (Aufrufzeitpunkt).
+Rig-Test `crates/onesimus-rig/tests/client_initiated_capture.rs`: originales `bareos-dir` 25.1.3~pre24 und
+`bareos-fd` 25.1.3 (entpackt, nicht installiert), ohne TLS, über einen mitschreibenden Proxy.
 
-Zu 1 bis 3 reicht ein Mitschnitt eines echten Laufs (Bareos-FD gegen `bareos-dir`), wie er für PAM
-schon gemacht wurde (`onesimus-rig/tests/pam_capture.rs`). Auf dieser Maschine ist kein `bareos-fd`
-installiert; er muss bereitgestellt werden (Paket `bareos-filedaemon`, Installation ist Sache des Nutzers).
+1. **Anmeldung:** `Hello Client vfd FdProtocolVersion=54 calling`; der Director fordert zuerst heraus
+   (`auth cram-md5 <…@R_DIRECTOR::bareos-dir> ssl=0`), der FD antwortet, `1000 OK auth`; dann fordert der FD
+   heraus (`<…@R_CLIENT::vfd>`), der Director antwortet, `1000 OK auth`; beide mit dem Passwort der
+   Client-Resource. Danach `1000 OK: bareos-dir Version: 25.1.3~pre24.0e7742c39 (11 November 2026)`.
+2. **Nutzung:** Nicht nur Jobs nehmen die wartende Verbindung, auch `status client` und `estimate`. Der
+   Director schickt ohne `Hello Director` sofort den Befehl (`status`, `JobId=0 Job=-Console-… SDid=0 …`);
+   der FD antwortet wie auf einer eingehenden Verbindung. Am Ende sendet der Director TERMINATE und schließt.
+3. **Neu verbinden:** Der FD baut sofort nach dem Gebrauch eine neue Verbindung auf; nach einem Fehlschlag
+   (Director nicht erreichbar) nach 60 s.
+4. **`status dir`:** Abschnitt „Client Initiated Connections (waiting for jobs):“ mit Verbindungszeit,
+   Protokoll, Authenticated (1) und Name.
+5. **`Run On Incoming Connect Interval`** (Job-Direktive; Quelltext `dird/run_on_incoming_connect_interval.cc`):
+   bei jeder angemeldeten Verbindung für jeden Job des Clients mit Intervall ≠ 0 die letzte StartTime
+   (`JobStatus IN ('T','W','C','R')`); kein früherer Job oder `jetzt − StartTime > Intervall` (Sekunden,
+   strikt größer) → `AddJobWithNoRunResourceToQueue` (Auslöser „Client“), der Job startet beim nächsten
+   Durchlauf des Schedulers (im Mitschnitt nach gut 30 s). Fehlgeschlagene Jobs zählen nicht; weil der FD
+   nach jedem Gebrauch neu verbindet, reiht das Original denselben Job dann erneut ein (Jobs 3 und 4 im
+   Mitschnitt). Ein Datenbankfehler verhindert den Start.
+
+Offen bleibt nur, wann `CleanupConnectionPool` läuft; für den Bau nicht nötig (Lebensprüfung bei jedem Zugriff).
 
 ## Umfang in Onesimus
 
+- **Schwierigster Teil:** die Job-Worker laufen in geforkten Prozessen; die Verbindung (Socket und TLS-Zustand) muss an den Worker übergeben und im Director danach geschlossen und aus dem Pool genommen werden.
 - **odir:** `accept.rs` nimmt `Hello Client` an (heute: schließen), prüft Name und Passwort, hält die
   Verbindung in einem Pool (`client_pool.rs`, neu) mit der Lebensprüfung wie das Original; die
   Job-Worker (`fd_protocol::connect_fd…`, `backup_worker`, `restore`, `verify`, `estimate`) fragen den
@@ -68,7 +78,7 @@ installiert; er muss bereitgestellt werden (Paket `bareos-filedaemon`, Installat
 
 ## Reihenfolge
 
-1. Mitschnitt mit einem Bareos-FD beschaffen (Punkte 1 bis 3).
+1. ~~Mitschnitt mit einem Bareos-FD beschaffen~~ erledigt 24.11.2026 (oben).
 2. odir-Seite mit einem Test-Client (Rig) bauen.
 3. ofd-Seite.
 4. `Run On Incoming Connect Interval`.
