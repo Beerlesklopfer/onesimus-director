@@ -1,6 +1,5 @@
 {
  "add-noargs": "match",
- "audit-log": "match",
  "autodisplay-off": "match",
  "autodisplay-on": "match",
  "automount": "match",
