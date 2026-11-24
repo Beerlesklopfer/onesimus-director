@@ -66,6 +66,11 @@ impl WorkerJobType {
     }
 }
 
+/// The TLS policy of a Client resource without TLS directives (TLS Enable and Require, both yes).
+fn default_fd_tls_policy() -> i32 {
+    2
+}
+
 /// Parameters passed from Director to Worker.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct JobParams {
@@ -80,6 +85,10 @@ pub struct JobParams {
     pub fd_address: String,
     pub fd_port: u16,
     pub fd_password: String,
+    /// `ssl=` of the Director's CRAM-MD5 challenge to the FD ([`crate::fd_protocol::tls_policy`] of the
+    /// Client's `TLS Enable`/`TLS Require`): 0 also means the FD is reached in clear text.
+    #[serde(default = "default_fd_tls_policy")]
+    pub fd_tls_policy: i32,
     #[serde(default)]
     pub fd_grpc: Option<crate::fd_grpc::Target>,
     /// gRPC endpoint of the Storage (osd), snapshotted before fork.
@@ -1145,7 +1154,7 @@ pub(crate) fn connect_fd_mode_on(p: &JobParams, sock: std::net::TcpStream, tls: 
     };
     let mut bnet = BnetStream::new(stream);
     bnet.send_str(&make_director_hello(&p.director_name)).map_err(|e| FdHandshakeError::Hello(e.to_string()))?;
-    let auth = CramMd5Auth::new(&p.fd_password, &p.director_name, 2);
+    let auth = CramMd5Auth::new(&p.fd_password, &p.director_name, p.fd_tls_policy);
     match auth.two_way_authenticate(&mut bnet, false) {
         Ok(r) if r.success => {}
         _ => return Err(FdHandshakeError::Auth),
@@ -1160,13 +1169,19 @@ pub(crate) fn connect_fd_mode_on(p: &JobParams, sock: std::net::TcpStream, tls: 
 /// TLS-PSK, Hello and CRAM-MD5 with the File daemon on a connected socket.
 pub(crate) fn connect_fd_on(p: &JobParams, sock: std::net::TcpStream) -> Result<(BnetStream<bareos_bnet::AnyStream>, String), String> {
     sock.set_read_timeout(None).ok();
-    let psk = tls_psk::password_to_psk(&p.fd_password);
-    let stream = tls_psk::psk_connect(sock, &format!("R_DIRECTOR\x1e{}", p.director_name), &psk)
-        .map_err(|e| format!("TLS-PSK: {e}"))?;
-    let cipher = stream.cipher_name();
-    let mut bnet = BnetStream::new(bareos_bnet::AnyStream::Psk(stream));
+    // a client with `TLS Enable = no` (policy 0) speaks clear text
+    let (stream, cipher) = if p.fd_tls_policy == 0 {
+        (bareos_bnet::AnyStream::Plain(sock), String::new())
+    } else {
+        let psk = tls_psk::password_to_psk(&p.fd_password);
+        let stream = tls_psk::psk_connect(sock, &format!("R_DIRECTOR\x1e{}", p.director_name), &psk)
+            .map_err(|e| format!("TLS-PSK: {e}"))?;
+        let cipher = stream.cipher_name();
+        (bareos_bnet::AnyStream::Psk(stream), cipher)
+    };
+    let mut bnet = BnetStream::new(stream);
     bnet.send_str(&make_director_hello(&p.director_name)).map_err(|e| format!("hello: {e}"))?;
-    let auth = CramMd5Auth::new(&p.fd_password, &p.director_name, 2);
+    let auth = CramMd5Auth::new(&p.fd_password, &p.director_name, p.fd_tls_policy);
     let r = auth.two_way_authenticate(&mut bnet, false).map_err(|e| format!("CRAM: {e}"))?;
     if !r.success { return Err("CRAM failed".into()); }
     let hello = bnet.recv_str().map_err(|e| format!("hello resp: {e}"))?;
@@ -1507,7 +1522,7 @@ mod wait_protocol_tests {
     fn restore_command_like_build_restore_command() {
         let mut p = JobParams {
             job_id: 1, unique_job: "R.1".into(), job_name: "R".into(), job_type: WorkerJobType::Restore,
-            level: "full".into(), fd_address: String::new(), fd_port: 0, fd_password: String::new(), fd_grpc: None, sd_grpc: None,
+            level: "full".into(), fd_address: String::new(), fd_port: 0, fd_password: String::new(), fd_tls_policy: 2, fd_grpc: None, sd_grpc: None,
             sd_address: String::new(), sd_port: 0, sd_password: String::new(), sd_device: String::new(),
             sd_media_type: String::new(), director_name: String::new(), pool_name: String::new(),
             fileset_name: String::new(), fileset_includes: vec![], fileset_excludes: vec![], since_utime: 0, prev_job: String::new(),

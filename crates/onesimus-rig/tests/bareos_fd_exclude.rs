@@ -49,3 +49,27 @@ fn bareos_fd_refuses_the_overlay_exclude_with_a_clear_message() {
     assert_ne!(row.status, 'T', "the job must not succeed with data that should be excluded: {row:?}\n{log}");
     assert!(log.contains("that needs an Onesimus ofd"), "{log}");
 }
+
+/// A Bareos FD without TLS (`TLS Enable = no` in its configuration and in the Director's Client resource):
+/// the Director reaches it in clear text and announces `ssl=0` in its CRAM-MD5 challenge (with `ssl=2`
+/// the FD refuses). Checked on the console paths `status client`, `setdebug` and `setbandwidth`; a
+/// backup would also need a Storage daemon without TLS (the FD connects to it as the SD's policy says).
+#[test]
+#[ignore = "needs bareos-sd, initdb and a bareos-fd (ONESIMUS_BAREOS_FD): run with --ignored"]
+fn bareos_fd_without_tls_is_reached_in_clear_text() {
+    let Some(fd) = std::env::var_os("ONESIMUS_BAREOS_FD").map(PathBuf::from) else {
+        panic!("ONESIMUS_BAREOS_FD is not set (path of a bareos-fd binary)");
+    };
+    onesimus_rig::build_workspace_binaries().unwrap_or_else(|e| panic!("{e}"));
+    let mut options = RigOptions::new(40051);
+    options.fd_program = Some(fd);
+    options.fd_plain = true;
+    let rig = Rig::start(options).unwrap_or_else(|e| panic!("Gerüst startet nicht: {e}"));
+
+    let status = rig.command("status client=vfd").unwrap_or_else(|e| panic!("{e}"));
+    assert!(status.contains("Handshake: Cleartext") && status.contains("vfd Version:"), "{status}");
+    let debug = rig.command("setdebug level=1 client=vfd").unwrap_or_else(|e| panic!("{e}"));
+    assert!(debug.contains("2000 OK setdebug=1"), "{debug}");
+    let bandwidth = rig.command("setbandwidth client=vfd limit=100").unwrap_or_else(|e| panic!("{e}"));
+    assert!(bandwidth.contains("OK Limiting bandwidth to 100kb/s"), "{bandwidth}");
+}

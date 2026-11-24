@@ -45,6 +45,7 @@ pub fn cmd_setdebug(ast: &CommandAst, ctx: &ExecContext) -> CommandResult {
                 client.port,
                 &client.password,
                 director,
+                (client.tls_enable, client.tls_require),
                 |version| options.client_command(version),
             )
         },

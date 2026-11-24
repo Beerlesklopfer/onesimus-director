@@ -42,7 +42,8 @@ pub struct NetLinks;
 impl BwLinks for NetLinks {
     fn file_daemon(&mut self, client: &ClientResource, director: &str, command: &str) -> FdOutcome {
         let Ok((mut fd, version)) = crate::fd_protocol::connect_fd_with_timeout(
-            &client.address, client.port, &client.password, director, Some(std::time::Duration::from_secs(15)))
+            &client.address, client.port, &client.password, director, Some(std::time::Duration::from_secs(15)),
+            (client.tls_enable, client.tls_require))
         else {
             return FdOutcome::NotConnected;
         };

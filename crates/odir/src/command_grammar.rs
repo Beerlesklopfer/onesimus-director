@@ -837,6 +837,14 @@ mod tests {
         const SQLQUERY: &str = "sqlquery ignores its arguments and reads the statement interactively";
         const LEVELS: &str = ".levels takes one job type as a bare word; anything else lists nothing";
         &[
+            // cases c091 to c094 (24.11.2026): keys the original ignores or answers with an error
+            (".defaults fileset=SelfTest", UNKNOWN_KEY),
+            ("add pool=Full storage=File num=2 name=ParityArg- start=5", UNKNOWN_KEY),
+            ("cancel client=nosuch", UNKNOWN_KEY),
+            ("help configure add", UNKNOWN_WORD),
+            ("update pool=Full maxvols=77", UNKNOWN_KEY),
+            ("update pool=Full volretention=45d", UNKNOWN_KEY),
+            ("update volume=Full-47321 maxbytes=1G", UNKNOWN_KEY),
             (".acl frobnicate", UNKNOWN_WORD),
             (".api 2 compact", NO_VALUE),
             (".api 2 compact=yes extra", UNKNOWN_WORD),

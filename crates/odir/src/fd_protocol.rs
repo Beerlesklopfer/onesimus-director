@@ -183,25 +183,25 @@ mod tests {
 /// The builder receives the negotiated protocol version (53 adds timestamp).
 /// Existing status/backup connection paths are unaffected.
 pub fn fd_command(
-    address: &str, port: u16, password: &str, director_name: &str,
+    address: &str, port: u16, password: &str, director_name: &str, tls: (bool, bool),
     command: impl FnOnce(u32) -> String,
 ) -> Result<String, String> {
-    let (mut bnet, version) = connect_control_fd(address, port, password, director_name)?;
+    let (mut bnet, version) = connect_control_fd(address, port, password, director_name, tls)?;
     bnet.send_str(&command(version)).map_err(|e| e.to_string())?;
     let result = read_control_reply(&mut bnet);
     let _ = bnet.send_signal(BnetSignal::Terminate);
     result
 }
 
-fn connect_control_fd(address: &str, port: u16, password: &str, director_name: &str)
+fn connect_control_fd(address: &str, port: u16, password: &str, director_name: &str, tls: (bool, bool))
     -> Result<(BnetStream<bareos_bnet::stream::AnyStream>, u32), String> {
-    connect_fd_with_timeout(address, port, password, director_name, Some(Duration::from_secs(15)))
+    connect_fd_with_timeout(address, port, password, director_name, Some(Duration::from_secs(15)), tls)
 }
 
 /// Authenticated Director→FD connection (TLS-PSK, Hello, CRAM-MD5) with the
 /// given read timeout; returns the stream and the FD protocol version.
 pub(crate) fn connect_fd_with_timeout(address: &str, port: u16, password: &str, director_name: &str,
-    read_timeout: Option<Duration>) -> Result<(BnetStream<bareos_bnet::stream::AnyStream>, u32), String> {
+    read_timeout: Option<Duration>, tls: (bool, bool)) -> Result<(BnetStream<bareos_bnet::stream::AnyStream>, u32), String> {
     if let Some((stream, _)) = crate::fd_grpc::try_connect(address, port, password, director_name, read_timeout) {
         return Ok((stream, 54));
     }
@@ -215,11 +215,16 @@ pub(crate) fn connect_fd_with_timeout(address: &str, port: u16, password: &str, 
     // the peer's delayed ACK (about 45 ms each, S-54)
     stream.set_nodelay(true).ok();
     stream.set_write_timeout(Some(Duration::from_secs(15))).map_err(|e| e.to_string())?;
-    let stream = tls_psk::psk_connect(stream, &format!("R_DIRECTOR\x1e{director_name}"),
-        &tls_psk::password_to_psk(password)).map_err(|e| format!("TLS-PSK: {e}"))?;
-    let mut bnet = BnetStream::new(bareos_bnet::AnyStream::Psk(stream));
+    // a client with `TLS Enable = no` speaks clear text (SetConnectionHandshakeMode)
+    let stream = if tls.0 {
+        bareos_bnet::AnyStream::Psk(tls_psk::psk_connect(stream, &format!("R_DIRECTOR\x1e{director_name}"),
+            &tls_psk::password_to_psk(password)).map_err(|e| format!("TLS-PSK: {e}"))?)
+    } else {
+        bareos_bnet::AnyStream::Plain(stream)
+    };
+    let mut bnet = BnetStream::new(stream);
     bnet.send_str(&make_director_hello(director_name)).map_err(|e| e.to_string())?;
-    let auth = CramMd5Auth::new(password, director_name, 2);
+    let auth = CramMd5Auth::new(password, director_name, tls_policy(tls.0, tls.1));
     if !auth.two_way_authenticate(&mut bnet, false).map_err(|e| e.to_string())?.success {
         return Err("FD authentication failed".into());
     }
@@ -227,6 +232,18 @@ pub(crate) fn connect_fd_with_timeout(address: &str, port: u16, password: &str, 
     let hello = hello.strip_prefix(FD_OK_HELLO).ok_or("invalid FD hello")?;
     let version = hello.split_whitespace().next().and_then(|v| v.parse().ok()).unwrap_or(0);
     Ok((bnet, version))
+}
+
+/// The TLS policy the Director announces in its CRAM-MD5 challenge to a File Daemon (`ssl=` of
+/// `auth cram-md5 … ssl=N`, C++ `TlsPolicy` of the Client resource): 0 without TLS (`TLS Enable = no`),
+/// 2 when TLS is required (`TLS Require`, default yes), else 1. A Bareos FD with `TLS Enable = no`
+/// refuses a Director that announces 2.
+pub(crate) fn tls_policy(tls_enable: bool, tls_require: bool) -> i32 {
+    match (tls_enable, tls_require) {
+        (false, _) => 0,
+        (true, true) => 2,
+        (true, false) => 1,
+    }
 }
 
 /// Handshake mode of a console connection to a File Daemon
@@ -295,7 +312,7 @@ pub fn connect_fd_console(address: &str, port: u16, password: &str, director_nam
     let mut mode = stored.unwrap_or(if tls_enable { HandshakeMode::TlsFirst } else { HandshakeMode::CleartextFirst });
     let mut last_error;
     loop {
-        match connect_fd_mode(address, port, password, director_name, mode) {
+        match connect_fd_mode(address, port, password, director_name, mode, tls_policy(tls_enable, tls_require)) {
             Ok((bnet, cipher)) => {
                 if stored.is_none() { info.push_str("\r\x0b"); }
                 info.push_str(match mode {
@@ -318,7 +335,7 @@ pub fn connect_fd_console(address: &str, port: u16, password: &str, director_nam
     (info, Err(last_error))
 }
 
-fn connect_fd_mode(address: &str, port: u16, password: &str, director_name: &str, mode: HandshakeMode)
+fn connect_fd_mode(address: &str, port: u16, password: &str, director_name: &str, mode: HandshakeMode, policy: i32)
     -> Result<(BnetStream<bareos_bnet::stream::AnyStream>, Option<String>), String> {
     use bareos_bnet::stream::AnyStream;
     use std::net::ToSocketAddrs;
@@ -342,7 +359,7 @@ fn connect_fd_mode(address: &str, port: u16, password: &str, director_name: &str
     };
     let mut bnet = BnetStream::new(stream);
     bnet.send_str(&make_director_hello(director_name)).map_err(|e| e.to_string())?;
-    let auth = CramMd5Auth::new(password, director_name, 2);
+    let auth = CramMd5Auth::new(password, director_name, policy);
     if !auth.two_way_authenticate(&mut bnet, false).map_err(|e| e.to_string())?.success {
         return Err("FD authentication failed".into());
     }

@@ -1868,6 +1868,7 @@ pub(crate) fn start_restore(ctx: &ExecContext, launch: Launch) -> CommandResult 
         fd_address: client.address.clone(),
         fd_port: client.port,
         fd_password: client.password.clone(),
+        fd_tls_policy: crate::fd_protocol::tls_policy(client.tls_enable, client.tls_require),
         fd_grpc,
         sd_grpc,
         sd_address: storage.address.clone(),

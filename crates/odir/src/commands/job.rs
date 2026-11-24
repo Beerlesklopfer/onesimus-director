@@ -1865,6 +1865,7 @@ fn run_selected(
         fd_address: client.address.clone(),
         fd_port: client.port,
         fd_password: client.password.clone(),
+        fd_tls_policy: crate::fd_protocol::tls_policy(client.tls_enable, client.tls_require),
         fd_grpc: crate::fd_grpc::for_client(&config, client),
         sd_grpc: crate::sd_grpc::for_storage(&config, storage),
         sd_address: storage.address.clone(),
@@ -1997,7 +1998,7 @@ pub(crate) fn plain_params(job_id: u32, unique: &str, job: &bareos_config::resou
                 level: &str, director: &str, client: &str) -> JobParams {
     JobParams {
         job_id, unique_job: unique.to_string(), job_name: job.name.clone(), job_type, level: level.to_string(),
-        fd_address: String::new(), fd_port: 0, fd_password: String::new(), fd_grpc: None, sd_grpc: None, sd_address: String::new(), sd_port: 0,
+        fd_address: String::new(), fd_port: 0, fd_password: String::new(), fd_tls_policy: 2, fd_grpc: None, sd_grpc: None, sd_address: String::new(), sd_port: 0,
         sd_password: String::new(), sd_device: String::new(), sd_media_type: String::new(),
         director_name: director.to_string(), pool_name: String::new(), fileset_name: job.fileset.clone(), fileset_includes: Vec::new(),
         fileset_excludes: Vec::new(), since_utime: 0, prev_job: String::new(), where_path: None, regex_where: None, prefix_links: false, replace: None,

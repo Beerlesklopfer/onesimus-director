@@ -77,6 +77,9 @@ pub struct RigOptions {
     /// No TLS to and between the SDs of a Copy (`TLS Enable = no` on the
     /// second SD and its Storage resource: `replicate … ssl=0`, clear text).
     pub copy_plain: bool,
+    /// No TLS between Director and FD: `TLS Enable = no` in the Director's Client resource and in the
+    /// FD's Director and Client resources (a FD in clear text, like an old one).
+    pub fd_plain: bool,
     /// The File Daemon to start instead of `ofd` (a `bareos-fd`: no overlay and no gRPC, started with `-f -c <conf> -d`).
     pub fd_program: Option<PathBuf>,
     /// Files of the Director's `odir.d/` (below `<root>/onesimus`, relative path, text): Onesimus extensions to the standard `bareos-dir.d`.
@@ -103,6 +106,7 @@ impl RigOptions {
             copy_plain: false,
             extra_odir_d: Vec::new(),
             fd_program: None,
+            fd_plain: false,
         }
     }
 }
@@ -332,6 +336,15 @@ impl Rig {
             self.daemons.push(sd2);
             started?;
         }
+        if self.options.fd_plain {
+            // clear text between Director and FD: both sides say so
+            let plain = |path: &std::path::Path| -> std::io::Result<()> {
+                let text = std::fs::read_to_string(path)?;
+                std::fs::write(path, tls_disabled(&text))
+            };
+            plain(&self.layout.dir_conf.join("client").join(format!("{}.conf", crate::config::CLIENT))).map_err(io)?;
+            plain(&self.layout.fd_conf.join("client").join(format!("{}.conf", crate::config::CLIENT))).map_err(io)?;
+        }
         if self.options.start_fd {
             let mut fd_conf = self.layout.fd_conf.display().to_string();
             if self.options.fd_program.is_some() {
@@ -339,8 +352,11 @@ impl Rig {
                 let dir = self.layout.root.join("fd-bareos");
                 std::fs::create_dir_all(&dir).map_err(io)?;
                 // the Bareos FD has no `Pid Directory` in its Client resource
-                let text: String = crate::config::fd_config(&self.layout, self.ports).lines()
+                let mut text: String = crate::config::fd_config(&self.layout, self.ports).lines()
                     .filter(|l| !l.trim_start().starts_with("Pid Directory")).map(|l| format!("{l}\n")).collect();
+                if self.options.fd_plain {
+                    text = tls_disabled(&text);
+                }
                 std::fs::write(dir.join("bareos-fd.conf"), text).map_err(io)?;
                 fd_conf = dir.display().to_string();
             }
@@ -578,6 +594,28 @@ impl Rig {
     pub fn root(&self) -> &Path {
         &self.layout.root
     }
+}
+
+/// `text` (resources of a configuration file) with `TLS Enable = no` in every `Client` and `Director`
+/// resource (top level only).
+fn tls_disabled(text: &str) -> String {
+    let mut out = String::new();
+    let mut current: Option<bool> = None;
+    for line in text.lines() {
+        let trimmed = line.trim();
+        if current.is_none() && trimmed.ends_with('{') {
+            let kind = trimmed.trim_end_matches('{').trim();
+            current = Some(kind.eq_ignore_ascii_case("client") || kind.eq_ignore_ascii_case("director"));
+        } else if line == "}" {
+            if current == Some(true) {
+                out.push_str("  TLS Enable = no\n");
+            }
+            current = None;
+        }
+        out.push_str(line);
+        out.push('\n');
+    }
+    out
 }
 
 /// Whether `program` is osd (by its file name), not bareos-sd.

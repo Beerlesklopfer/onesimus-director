@@ -83,6 +83,8 @@ struct Plan {
     address: String,
     port: u16,
     password: String,
+    /// `TLS Enable` and `TLS Require` of the Client resource.
+    tls: (bool, bool),
     fileset_name: String,
     fileset: Option<FilesetItems>,
     /// Options of the job's own FileSet (backup.cc IsChecksumNeededByFileset)
@@ -393,6 +395,7 @@ fn estimate_job(ast: &CommandAst, ctx: &ExecContext, mut reply: Reply, job: Opti
             address: client_res.address.clone(),
             port: client_res.port,
             password: client_res.password.clone(),
+            tls: (client_res.tls_enable, client_res.tls_require),
             fileset: fileset_items(&cfg, &fileset_name),
             fileset_name,
             job_fileset_opts,
@@ -438,7 +441,7 @@ fn estimate_job(ast: &CommandAst, ctx: &ExecContext, mut reply: Reply, job: Opti
     let since = level_since_time(catalog, &plan, &mut level, client_id, fileset_id);
 
     reply.out.push_str(&format!("Connecting to Client {} at {}:{}\n", plan.client, plan.address, plan.port));
-    let mut fd = match fd_protocol::connect_fd_with_timeout(&plan.address, plan.port, &plan.password, &plan.director, None) {
+    let mut fd = match fd_protocol::connect_fd_with_timeout(&plan.address, plan.port, &plan.password, &plan.director, None, plan.tls) {
         Ok((fd, _)) => {
             fd_protocol::note_tls_handshake(&plan.client);
             fd
