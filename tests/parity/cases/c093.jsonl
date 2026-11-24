@@ -1,0 +1,15 @@
+# Catalog state after create/add/prune/purge/delete/update (BACKLOG: Testlücken), on the throw-away catalog copy of each side. Not here: prune/purge/delete of jobs, files and volumes that hold the latest Full chain of a client: odir protects them on purpose (docs/wiki/betrieb-odir.md, user decision 19.11.2026), so the replies differ.
+{"id": "c093-prune-volume-yes", "steps": ["prune volume=Full-0001 yes", "sqlquery", "select volumename,volstatus,poolid,volretention,maxvolbytes from media order by mediaid;", ""]}
+{"id": "c093-prune-volume-pool-yes", "steps": ["prune volume pool=Full yes", "sqlquery", "select volumename,volstatus,poolid,volretention,maxvolbytes from media order by mediaid;", ""]}
+{"id": "c093-prune-stats-yes", "steps": ["prune stats yes", "sqlquery", "select count(*) from jobhisto;", ""]}
+{"id": "c093-delete-pool-nosuch", "steps": ["delete pool=nosuch yes"]}
+{"id": "c093-update-volume-status", "steps": ["update volume=Full-0001 volstatus=Append", "sqlquery", "select volumename,volstatus,poolid,volretention,maxvolbytes from media order by mediaid;", ""]}
+{"id": "c093-update-volume-pool", "steps": ["update volume=Full-47321 pool=Full", "sqlquery", "select volumename,volstatus,poolid,volretention,maxvolbytes from media order by mediaid;", ""]}
+{"id": "c093-update-volume-retention", "steps": ["update volume=Full-47321 volretention=30d", "sqlquery", "select volumename,volstatus,poolid,volretention,maxvolbytes from media order by mediaid;", ""]}
+{"id": "c093-update-volume-maxbytes", "steps": ["update volume=Full-47321 maxbytes=1G", "sqlquery", "select volumename,volstatus,poolid,volretention,maxvolbytes from media order by mediaid;", ""]}
+{"id": "c093-update-volume-recycle", "steps": ["update volume=Full-47321 recycle=no", "sqlquery", "select volumename,recycle from media order by mediaid;", ""]}
+{"id": "c093-add-volumes", "steps": ["add pool=Full storage=File", "2", "ParityAdd-", "0", "sqlquery", "select volumename,volstatus,poolid,volretention,maxvolbytes from media order by mediaid;", ""], "note": "add dialog: number of volumes, name prefix, start number"}
+{"id": "c093-add-volumes-args", "steps": ["add pool=Full storage=File num=2 name=ParityArg- start=5", "sqlquery", "select volumename,volstatus,poolid,volretention,maxvolbytes from media order by mediaid;", ""]}
+{"id": "c093-create-pool-existing", "steps": ["create pool=Full", "sqlquery", "select name,numvols,maxvols from pool order by poolid;", ""]}
+{"id": "c093-update-pool", "steps": ["update pool=Full maxvols=77", "sqlquery", "select name,maxvols from pool order by poolid;", ""]}
+{"id": "c093-update-pool-retention", "steps": ["update pool=Full volretention=45d", "sqlquery", "select name,volretention from pool order by poolid;", ""]}
