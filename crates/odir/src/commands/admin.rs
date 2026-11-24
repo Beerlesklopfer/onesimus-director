@@ -314,34 +314,15 @@ fn get_enabled(ua: &mut crate::ua_select::Ua, value: &str) -> Option<i64> {
     Some(enabled)
 }
 
-/// A numeric constant (PostgreSQL lexer): side-effect free in SQL.
-fn is_numeric_constant(value: &str) -> bool {
-    let digits = value.strip_prefix(['+', '-']).unwrap_or(value);
-    let (mantissa, exponent) = match digits.find(['e', 'E']) {
-        Some(at) => (&digits[..at], Some(&digits[at + 1..])),
-        None => (digits, None),
-    };
-    let (int, frac) = mantissa.split_once('.').unwrap_or((mantissa, ""));
-    let all_digits = |s: &str| s.bytes().all(|b| b.is_ascii_digit());
-    (!int.is_empty() || !frac.is_empty()) && all_digits(int) && all_digits(frac)
-        && exponent.is_none_or(|e| { let e = e.strip_prefix(['+', '-']).unwrap_or(e); !e.is_empty() && all_digits(e) })
-}
-
-/// UpdateVolmaxjobs/UpdateVolmaxfiles (ua_update.cc:201) put the value
-/// verbatim into `UPDATE Media SET <column>=<value>`. A numeric constant is
-/// written like that; anything else is only parsed (never run), so the
-/// catalog error of the C++ statement is reported without its side effects
-/// (C-012). Statements that would parse are refused with C-012's message.
-fn verbatim_number(ua: &mut crate::ua_select::Ua, column: &str, key: &str, value: &str, media_id: i64) -> Option<String> {
-    if is_numeric_constant(value) {
+/// UpdateVolmaxjobs/UpdateVolmaxfiles (ua_update.cc): the value as given when it is only digits,
+/// else "Invalid maximum jobs|files specified" and nothing is written.
+fn verbatim_number(ua: &mut crate::ua_select::Ua, what: &str, value: &str) -> Option<String> {
+    // Bareos 25.1.3 checks the value before the statement: only digits (no sign, no exponent, no hex);
+    // 25.1.2 passed it to the catalog unchecked (measured against bareos-dir 25.1.3~pre24, t001-probe).
+    if !value.is_empty() && value.bytes().all(|b| b.is_ascii_digit()) {
         return Some(value.to_string());
     }
-    let sql = format!("UPDATE Media SET {column}={value} WHERE MediaId={media_id}");
-    let checked = (!value.contains([';', '$'])).then(|| ua.ctx.catalog.as_ref().map(|cat| cat.check_statement(&sql))).flatten();
-    match checked {
-        Some(Err(error)) => ua.error_msg(format!("Query failed: {sql}: ERR={error}\n")),
-        _ => ua.error_msg(format!("Invalid {key} value: {value}\n")),
-    }
+    ua.error_msg(format!("Invalid maximum {what} specified: {value}\n"));
     None
 }
 
@@ -407,11 +388,11 @@ fn update_field(ua: &mut crate::ua_select::Ua, ast: &CommandAst, act: UpdateAct,
             None if field == 1 => return ua.error_msg(format!("Invalid retention period specified: {value}\n")),
             None => return ua.error_msg(format!("Invalid use duration specified: {value}\n")),
         },
-        3 => match verbatim_number(ua, "MaxVolJobs", "maxvoljobs", value, media.media_id) {
+        3 => match verbatim_number(ua, "jobs", value) {
             Some(number) => set("MaxVolJobs", number, format!("New max jobs is: {value}\n")),
             None => return,
         },
-        4 => match verbatim_number(ua, "MaxVolFiles", "maxvolfiles", value, media.media_id) {
+        4 => match verbatim_number(ua, "files", value) {
             Some(number) => set("MaxVolFiles", number, format!("New max files is: {value}\n")),
             None => return,
         },
@@ -2244,13 +2225,13 @@ pub(crate) mod side_effect_tests {
         error("update volume=v1 slot=101", "Invalid slot, it must be between 0 and MaxVols=100\n");
         error("update volume=v1 enabled=7", "Invalid Enabled value, it must be yes, no, archived, 0, 1, or 2\n");
         error("update volume=v1 enabled=maybe", "Invalid Enabled value, it must be yes, no, archived, 0, 1, or 2\n");
-        // MaxVolJobs/MaxVolFiles: the C++ statement's catalog error, never run.
-        error("update volume=v1 maxvoljobs=abc", "Query failed: UPDATE Media SET MaxVolJobs=abc WHERE MediaId=7: \
-            ERR=ERROR:  column \"abc\" does not exist\nLINE 1: x\n        ^\n\n");
-        // Statements that would parse (or carry several commands) are refused (C-012).
-        error("update volume=v1 maxvolfiles=1;DROP", "Invalid maxvolfiles value: 1;DROP\n");
-        error("update volume=v1 maxvoljobs=1+1", "Invalid maxvoljobs value: 1+1\n");
-        error("update volume=v1 maxvoljobs=$1", "Invalid maxvoljobs value: $1\n");
+        // MaxVolJobs/MaxVolFiles: only digits (Bareos 25.1.3)
+        error("update volume=v1 maxvoljobs=abc", "Invalid maximum jobs specified: abc\n");
+        error("update volume=v1 maxvolfiles=1;DROP", "Invalid maximum files specified: 1;DROP\n");
+        error("update volume=v1 maxvoljobs=1+1", "Invalid maximum jobs specified: 1+1\n");
+        error("update volume=v1 maxvoljobs=$1", "Invalid maximum jobs specified: $1\n");
+        error("update volume=v1 maxvoljobs=-5", "Invalid maximum jobs specified: -5\n");
+        error("update volume=v1 maxvolfiles=1e3", "Invalid maximum files specified: 1e3\n");
         error("update volume=v1 volstatus=Bogus maxvolbytes=xyz",
             "Invalid VolStatus specified: Bogus\nInvalid max. bytes specification: xyz\n");
         // Encrypt (UpdateVolEncryption).
@@ -2296,11 +2277,11 @@ pub(crate) mod side_effect_tests {
         assert!(acted.is_empty());
         let writes: Vec<_> = log.lock().unwrap().iter().filter(|q| !q.starts_with("SELECT") && !q.starts_with("PREPARE")).cloned().collect();
         assert!(writes.is_empty(), "{writes:?}");
-        // A numeric constant is written verbatim, like the C++ statement.
-        assert_eq!(run("update volume=v1 maxvoljobs=-5", &[]).1, vec![UpdateAction::Media { media_id: 7,
-            column: "MaxVolJobs", value: "-5".into(), message: "New max jobs is: -5\n".into() }]);
-        assert_eq!(run("update volume=v1 maxvolfiles=1.5e1", &[]).1, vec![UpdateAction::Media { media_id: 7,
-            column: "MaxVolFiles", value: "1.5e1".into(), message: "New max files is: 1.5e1\n".into() }]);
+        // Digits are written as given, with leading zeros (Bareos 25.1.3).
+        assert_eq!(run("update volume=v1 maxvoljobs=05", &[]).1, vec![UpdateAction::Media { media_id: 7,
+            column: "MaxVolJobs", value: "05".into(), message: "New max jobs is: 05\n".into() }]);
+        assert_eq!(run("update volume=v1 maxvolfiles=99999999999", &[]).1, vec![UpdateAction::Media { media_id: 7,
+            column: "MaxVolFiles", value: "99999999999".into(), message: "New max files is: 99999999999\n".into() }]);
     }
 
     /// label/relabel validation of do_label (ua_label.cc:393, C-012
@@ -2348,16 +2329,6 @@ pub(crate) mod side_effect_tests {
             "Defined Pools:\n1: Full\n2: Inc\nSelect the Pool (1-2): .\nSelection aborted, nothing done.\n");
         let writes: Vec<_> = log.lock().unwrap().iter().filter(|q| !q.starts_with("SELECT")).cloned().collect();
         assert!(writes.is_empty(), "{writes:?}");
-    }
-
-    #[test]
-    fn numeric_constants_are_side_effect_free_sql() {
-        for value in ["0", "42", "-1", "+7", "1.5", ".5", "5.", "1e3", "2E-2"] {
-            assert!(is_numeric_constant(value), "{value}");
-        }
-        for value in ["", "-", ".", "e3", "1e", "1e+", "abc", "12x", "1;DROP", "1 --", "1+1", "0x10", "(1)", " 1"] {
-            assert!(!is_numeric_constant(value), "{value}");
-        }
     }
 
     /// update_execute reports a failed statement like SqlQuery.
