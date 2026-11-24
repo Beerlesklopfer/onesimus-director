@@ -222,6 +222,52 @@ pub(crate) fn overlay_exclude_error(ext: &bareos_config::raw::ConfResource, orig
     None
 }
 
+/// What the overlay `Exclude` of an Options block points at: (FileSet name, Include index, Options
+/// index, the text of that Options block and of the File lines of its Include).
+fn overlay_targets(cfg: &DirectorConfig) -> Vec<(String, usize, usize, String, String)> {
+    let index = |body: &[Directive]| body.iter().find(|d| d.norm_key() == "index")
+        .and_then(|d| d.first()).and_then(|v| v.parse::<usize>().ok()).unwrap_or(1);
+    let mut out = Vec::new();
+    for ext in cfg.extensions.iter().filter(|r| r.norm_type() == "fileset") {
+        let name = ext.name().unwrap_or_default().to_string();
+        let Some(orig) = cfg.raw.iter().find(|r| r.norm_type() == "fileset" && r.name().is_some_and(|n| n.eq_ignore_ascii_case(&name))) else { continue };
+        let orig_includes: Vec<&Vec<Directive>> = orig.directives.iter().filter(|o| o.norm_key() == "include").filter_map(|o| o.block.as_ref()).collect();
+        for body in ext.directives.iter().filter(|d| d.norm_key() == "include").filter_map(|d| d.block.as_ref()) {
+            let n = index(body);
+            for opt in body.iter().filter(|d| d.norm_key() == "options").filter_map(|d| d.block.as_ref()) {
+                if !opt.iter().any(|d| d.norm_key() == "exclude") {
+                    continue;
+                }
+                let m = index(opt);
+                let (options, files) = match orig_includes.get(n.saturating_sub(1)) {
+                    Some(inc) => (
+                        inc.iter().filter(|d| d.norm_key() == "options").nth(m.saturating_sub(1)).map(|d| format!("{d:?}")).unwrap_or_default(),
+                        inc.iter().filter(|d| d.norm_key() == "file").map(|d| format!("{d:?}")).collect::<String>(),
+                    ),
+                    None => (String::new(), String::new()),
+                };
+                out.push((name.clone(), n, m, options, files));
+            }
+        }
+    }
+    out
+}
+
+/// Warnings for a reload: an overlay `Exclude` that is the same as before but points (by `Index`) at
+/// an Options block whose content changed, which happens when the order in the Bareos file changed.
+pub(crate) fn overlay_exclude_drift(old: &DirectorConfig, new: &DirectorConfig) -> Vec<String> {
+    let before = overlay_targets(old);
+    overlay_targets(new)
+        .into_iter()
+        .filter_map(|(name, n, m, options, files)| {
+            let same = before.iter().find(|(bn, bi, bm, _, _)| *bn == name && *bi == n && *bm == m)?;
+            (same.3 != options || same.4 != files).then(|| {
+                format!("odir.d: FileSet \"{name}\": the Options block {m} of Include {n}, to which the Exclude of the overlay refers, differs from the one before the reload; check that the Index still points at the right block")
+            })
+        })
+        .collect()
+}
+
 fn arg_is(key: &str, name: &str) -> bool {
     key.eq_ignore_ascii_case(name)
 }
@@ -762,6 +808,23 @@ FileSet { Name = fs
         let cfg = with_overlay("FileSet {\n Name = fs\n Include {\n Index = 2\n Options {\n Exclude {\n File = /var/log\n }\n }\n }\n}\n").unwrap();
         let text = include_exclude_messages(&cfg, "fs").unwrap().unwrap().concat();
         assert!(text.contains("O HAX\nY /var/log\nN\nF /var"), "{text}");
+    }
+
+    #[test]
+    fn reload_warns_when_the_index_of_an_overlay_exclude_points_elsewhere() {
+        let overlay = "FileSet {\n Name = fs\n Include {\n Options {\n Index = 2\n Exclude {\n File = /a\n }\n }\n }\n}\n";
+        let make = |orig: &str| {
+            let mut cfg = DirectorConfig::from_str(&format!("Director {{ Name = dir; Password = x }}\nFileSet {{ Name = fs\n{orig}\n}}\n")).unwrap();
+            cfg.extensions = bareos_config::raw::parse_str(overlay, None).unwrap();
+            cfg
+        };
+        let a = make("Include { Options { Signature = MD5 } Options { Signature = SHA1 } File = /tmp }");
+        let same = make("Include { Options { Signature = MD5 } Options { Signature = SHA1 } File = /tmp }");
+        assert!(overlay_exclude_drift(&a, &same).is_empty());
+        let swapped = make("Include { Options { Signature = SHA1 } Options { Signature = MD5 } File = /tmp }");
+        let w = overlay_exclude_drift(&a, &swapped);
+        assert_eq!(w.len(), 1, "{w:?}");
+        assert!(w[0].contains("Options block 2 of Include 1"), "{w:?}");
     }
 
     #[test]

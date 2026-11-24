@@ -469,7 +469,7 @@ Die Pfade (und alles darunter, nur ganze Pfadteile: `/var/lib/docker` trifft nic
 sind nur für die Dateien ausgeschlossen, die dieser Options-Block erfasst, also mit `Wild`/`Regex`; ein
 Options-Block ohne Muster gilt für alle Dateien des Includes. Gezählt wird in der Reihenfolge der
 Originaldatei; ändert sich dort die Reihenfolge, verrutscht der Index (beim Laden meldet der Director
-einen Index außerhalb des Bereichs). In `odir.d` sind in diesem FileSet nur `Include`, `Options`,
+einen Index außerhalb des Bereichs; bleibt der Index gültig, zeigt aber nach dem Reload auf einen anderen Options-Block, warnt der Director im Log: „the Options block … to which the Exclude of the overlay refers, differs from the one before the reload“). In `odir.d` sind in diesem FileSet nur `Include`, `Options`,
 `Index`, `Exclude` und `File` erlaubt.
 
 Der Director schickt dem FD je Pfad eine Zeile `Y <Pfad>` im Options-Block (nach den `W`/`R`-Zeilen,

@@ -119,6 +119,11 @@ fn reload_config(config_path: &std::path::Path, shared_config: &SharedConfig) ->
     for note in crate::config_test::deprecated_notes(&new_config.raw) {
         warn!("{note}");
     }
+    if let Ok(old) = shared_config.read() {
+        for note in crate::commands::estimate::overlay_exclude_drift(&old, &new_config) {
+            warn!("{note}");
+        }
+    }
     let mut cfg = install_config(shared_config, new_config)?;
     // DoReloadConfig(): CheckCatalog(UPDATE_CATALOG) for the new resources
     if let Some(catalog) = RELOAD_CATALOG.get() {
