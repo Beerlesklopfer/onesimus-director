@@ -78,7 +78,7 @@ den Modulköpfen und die Git-Historie.
 | `onesimus-podman-core` | eigen | `AGPL-3.0-or-later OR LicenseRef-Onesimus-Commercial` | Podman-Plugin: Richtlinien, ID-Maps, Journal; nennt den Bareos-Strom nur als Ziel. Keine Abhängigkeit von anderen Workspace-Crates. |
 | `onesimus-podman-broker` | eigen | `AGPL-3.0-or-later OR LicenseRef-Onesimus-Commercial` | Broker des Podman-Plugins; keine Bareos-Verweise. |
 | `onesimus-rig` | gemischt (Testgerüst) | `AGPL-3.0-only` | Nicht ausgeliefert. Eigenes Gerüst, aber `console.rs` bildet den `bconsole`-Ablauf nach (`console/console.cc`, `lib/cram_md5.cc`), `catalog.rs` lädt das Bareos-Schema `postgresql.sql`. Vorsichtshalber AGPL; kann nach Prüfung dual werden. |
-| Submodul `proto` | gemischt | `AGPL-3.0-or-later` (eigenes Repository, seit 23.11.2026) | `director_commands.proto` aus `ua_cmds.cc` erzeugt; eigen sind u. a. `filed_plugin.proto`, `plugin_ccc.proto`, `*_broker.proto`, `onesimus_options.proto`. Lizenzänderungen gehören in das Repository `onesimus-proto`. |
+| Submodul `proto` | gemischt, je Datei | `usage`, `podman_broker`, `postgresql_broker`, `openldap_broker`, `onesimus_options`: `AGPL-3.0-or-later` (Entscheidung des Maintainers 24.11.2026, nur Zeile Jörg Bernau); `plugin_ccc`, `filed_plugin`, `director_api`, `director_service`, `filed_service`, `stored_service`, `director_commands`: `AGPL-3.0-only` mit den Zeilen der Bareos-Rechteinhaber | Bareos-nahe Definitionen bleiben `-only`; `director_commands.proto` aus `ua_cmds.cc` erzeugt. Lizenzänderungen gehören in das Repository `onesimus-proto`. |
 
 Außerhalb des Workspaces: die Gast-Plugins unter `plugins/`
 (`onesimus-guest-runtime`, `onesimus-plugin-postgresql`,
@@ -859,3 +859,8 @@ Auf Freigabe des Maintainers (Weitergabe durch die GUI-Sitzung), Vorsicht vor Gr
 - **`bareos-catalog`:** nur vermerkt, nicht gelöscht; das Crate wird weiter von `odir` nicht benutzt
   (`Cargo.toml:27`), bleibt `-only`.
 - **Fremdcode** (FastLZ, LZ4, OpenBSD fnmatch, OSSP var): siehe `THIRD-PARTY-NOTICES`.
+
+
+## Nachtrag 24.11.2026: Submodul `proto`
+
+Der Maintainer hat entschieden: Die fünf eigenen Definitionen `usage`, `podman_broker`, `postgresql_broker`, `openldap_broker` und `onesimus_options` stehen unter `AGPL-3.0-or-later` und tragen nur die Zeile von Jörg Bernau (Commit 47c5e7e in `onesimus-proto`). Alle anderen Dateien bleiben `AGPL-3.0-only` mit den Bareos-Zeilen. `onesimus-proto-rs` ist damit gemischt; solange es auch die `-only`-Dateien enthält, bleibt das Crate `AGPL-3.0-only`. Die Aufteilung für die dualen Crates (Abschnitt „Aufteilung“, Zeile `onesimus-proto-rs` / `proto`) ist offen: `filed_plugin.proto` und `plugin_ccc.proto` bleiben `-only`.
