@@ -65,7 +65,7 @@ Nur Testlücken, keine bekannte Abweichung: Wirkung von `setdebug`, `trace`,
 `wait` auf echte Jobenden, `add`/`create`/`prune`-Katalogzustand danach,
 `import`/`export`/`move` an einem echten Autochanger (bisher simuliert),
 `resolve` gegen Legacy-/Nicht-TLS-Daemons, `.messages` über die
-gRPC-Sitzungsqueue, `.bvfs_restore`/`.bvfs_cleanup`/`.bvfs_clear_cache yes`.
+gRPC-Sitzungsqueue. (`.bvfs_restore`, `.bvfs_cleanup`, `.bvfs_clear_cache yes` und `umount` haben seit 24.11.2026 Paritätsfälle: `c091`, 17 Fälle, alle gleich; jeder der 88 Befehle hat damit mindestens einen Fall.)
 
 ### Infrastruktur
 

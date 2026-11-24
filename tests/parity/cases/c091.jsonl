@@ -1,0 +1,17 @@
+# Commands without a case so far: umount (alias of unmount), .bvfs_restore, .bvfs_cleanup with arguments.
+{"id": "c091-umount-noargs", "steps": ["umount"]}
+{"id": "c091-umount-storage", "steps": ["umount storage=File"]}
+{"id": "c091-umount-nosuch", "steps": ["umount storage=nosuch"]}
+{"id": "c091-umount-api2", "setup": [".api 2"], "steps": ["umount storage=nosuch"]}
+{"id": "c091-bvfs-restore-noargs", "steps": [".bvfs_restore"]}
+{"id": "c091-bvfs-restore-nopath", "steps": [".bvfs_restore jobid=1"]}
+{"id": "c091-bvfs-restore-badpath", "steps": [".bvfs_restore jobid=1 path=nosuchpath"]}
+{"id": "c091-bvfs-restore-api2", "setup": [".api 2"], "steps": [".bvfs_restore jobid=1 path=nosuchpath"]}
+{"id": "c091-bvfs-restore-fileid", "steps": [".bvfs_restore jobid=1 fileid=1 path=b2xxx"]}
+{"id": "c091-bvfs-cleanup-noargs", "steps": [".bvfs_cleanup"]}
+{"id": "c091-bvfs-cleanup-path", "steps": [".bvfs_cleanup path=b2xxx"]}
+{"id": "c091-bvfs-cleanup-api2", "setup": [".api 2"], "steps": [".bvfs_cleanup path=b2xxx"]}
+{"id": "c091-bvfs-restore-file", "setup": [".bvfs_update jobid=1"], "steps": [".bvfs_restore jobid=1 fileid=1,2 path=b2parity1", ".bvfs_cleanup path=b2parity1"]}
+{"id": "c091-bvfs-restore-file-api2", "setup": [".api 2", ".bvfs_update jobid=1"], "steps": [".bvfs_restore jobid=1 fileid=1,2 path=b2parity2", ".bvfs_cleanup path=b2parity2"]}
+{"id": "c091-bvfs-restore-dirid", "setup": [".bvfs_update jobid=1"], "steps": [".bvfs_restore jobid=1 dirid=1 path=b2parity3", ".bvfs_cleanup path=b2parity3"]}
+{"id": "c091-bvfs-restore-twice", "setup": [".bvfs_update jobid=1"], "steps": [".bvfs_restore jobid=1 fileid=1 path=b2parity4", ".bvfs_restore jobid=1 fileid=2 path=b2parity4", ".bvfs_cleanup path=b2parity4", ".bvfs_cleanup path=b2parity4"]}
