@@ -11,11 +11,11 @@ Belege stehen im [Kompatibilitätslog](COMPATIBILITY-LOG.md), in
 
 | ID | Punkt |
 | --- | --- |
-| [S-37](STUBS.md) | `.profile create/set/delete/assign/unassign` werden angenommen, wirken aber nicht (`.profile` ist Alias von `.acl`) |
-| [S-38](STUBS.md) | gRPC `ConfigureUpdate`, `ConfigureDelete`, `DeleteStorage` bauen Konsolenzeilen, die die eigenen Befehle ablehnen |
-| [S-39](STUBS.md) | `SetBandwidth` mit `limit=0` in proto3 nicht übertragbar; Feld als `optional` |
-| [S-40](STUBS.md) | `update jobid=…` auf einen nie gestarteten Job: SQL-Fehler wegen leerer StartTime |
-| [S-41](STUBS.md) | `list nextvolume` findet in einem Pool mit frisch gelabeltem Volume keins (gegen das Original prüfen) |
+| [S-37](STUBS.md) | ~~`.profile create/set/delete/assign/unassign` werden angenommen, wirken aber nicht (`.profile` ist Alias von `.acl`)~~ **erledigt** (Beleg in STUBS.md) |
+| [S-38](STUBS.md) | ~~gRPC `ConfigureUpdate`, `ConfigureDelete`, `DeleteStorage` bauen Konsolenzeilen, die die eigenen Befehle ablehnen~~ **erledigt** (Beleg in STUBS.md) |
+| [S-39](STUBS.md) | ~~`SetBandwidth` mit `limit=0` in proto3 nicht übertragbar; Feld als `optional`~~ **erledigt** (Beleg in STUBS.md) |
+| [S-40](STUBS.md) | ~~`update jobid=…` auf einen nie gestarteten Job: SQL-Fehler wegen leerer StartTime~~ **erledigt** (Beleg in STUBS.md) |
+| [S-41](STUBS.md) | ~~`list nextvolume` findet in einem Pool mit frisch gelabeltem Volume keins (gegen das Original prüfen)~~ **erledigt** (Beleg in STUBS.md) |
 | [S-13](STUBS.md) (Rest) | Eigener FD `ofd`: PKI-Verschlüsselung/Signaturen, Plugins, Heartbeat, client-initiierte Verbindungen, LMDB für Accurate, VSS/Windows/macOS; `breg.rs` noch als Kopie |
 
 ### gRPC-Lücken aus der GUI (20.11.2026, Sitzung onesimus-gui)
@@ -55,11 +55,11 @@ P2 ist erledigt (Plan [P2 umgesetzt](plans/OSD-GERAETE-UND-VERTEILUNG.md#p2-umge
 | `configure` | ~~`configure update/delete` (Onesimus-Erweiterungen) prüfen die Ressourcen-ACL nicht; dazu S-38~~ erledigt 20.11.2026 (`c116264`): beide prüfen die Ressourcen-ACL der Konsole (über das Konfigurations-CRUD, verbotene Ressource wie unbekannt) | Hinweis [C-062](COMPATIBILITY-LOG.md) |
 | `setbandwidth` | `max_bandwidth` laufender Jobs; Jmsg bei Connect-/Antwortfehlern | [C-056](COMPATIBILITY-LOG.md), S-39 |
 | `label`, `relabel` | Option `encrypt` erzeugt noch keinen Volume-Schlüssel | [C-084](COMPATIBILITY-LOG.md), S-08 |
-| `update` | `update jobid=… starttime=` fehlt; S-40 | Hinweis [C-059](COMPATIBILITY-LOG.md) |
-| `list`, `llist` | `nextvolume` nach frischem Label (S-41) | S-41 |
+| `update` | `update jobid=… starttime=` fehlt; S-40 ist geprüft (Original meldet denselben Fehler, a82b1ee) | Hinweis [C-059](COMPATIBILITY-LOG.md) |
+| `list`, `llist` | ~~`nextvolume` nach frischem Label~~ geprüft, kein Unterschied (S-41, a82b1ee) | S-41 |
 | `restore` | Nicht-UTF-8-Dateinamen auf SQL_ASCII-Katalogen | [C-047](COMPATIBILITY-LOG.md) |
 | `cancel` | Cancel-Dialog ohne Paritätsfall; `*JobCancel*` des Job-Threads ohne Jobnamen-Nummer; Berichtszeilen „Director's comm line to SD dropped“/SD termination status beim Cancel | [C-011](COMPATIBILITY-LOG.md), S-26 |
-| Konfigurationsstart | Normaler Start prüft nicht wie `-t`; Lexer-Diagnosen nicht im Log | [C-057](COMPATIBILITY-LOG.md) |
+| Konfigurationsstart | ~~Normaler Start prüft nicht wie `-t`~~ erledigt (cb916f8, Exit 42); Lexer-Diagnosen nicht im Log | [C-057](COMPATIBILITY-LOG.md) |
 
 Nur Testlücken, keine bekannte Abweichung: Wirkung von `setdebug`, `trace`,
 `wait` auf echte Jobenden, `add`/`create`/`prune`-Katalogzustand danach,
