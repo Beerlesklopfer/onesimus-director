@@ -200,10 +200,10 @@ Integration:
 
 Erledigt: Umschlag/Rahmung, Punkt-Befehle, list/llist, .defaults job=,
 .help, time, version, reload, status director, .messages/messages.
-Offen: `.help` Usage von configure (aus Direktiventabellen), `.defaults` für
-client/storage/pool und Restore-Jobs (where/replace) — brauchen die rohen
-Direktiven aus dem show-Port; Reihenfolge der Ressourcen wie C++ (Ladereihenfolge).
-`status director`: terminated-Liste (Jobs seit Start) wird nicht geführt.
+Seit 24.11.2026 auch belegt (Fälle `c092`, 17, alle gleich dem Original):
+`help configure`, `.defaults` für client/storage/pool/fileset und Restore-Jobs,
+die Liste beendeter Jobs bei `status director` (Text und JSON). Der frühere
+Rest (Usage von configure, Defaults, terminated-Liste) bestand nicht mehr.
 
 ## Erledigt: `llist pools`: prunablevolumes/-jobs/-bytes
 
