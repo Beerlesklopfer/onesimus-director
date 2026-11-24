@@ -178,7 +178,7 @@ fn install_config(shared_config: &SharedConfig, mut new_config: DirectorConfig)
 }
 
 /// Jmsg(nullptr, type, 0, text): JobId 0 through the daemon messages.
-fn job_msg(config: &DirectorConfig, msg_type: crate::message_bus::MsgType, text: &str) {
+pub(crate) fn job_msg(config: &DirectorConfig, msg_type: crate::message_bus::MsgType, text: &str) {
     let msg = crate::console_msg::job_message_text(&config.director.name, 0, msg_type, text);
     if let Some(res) = crate::audit::daemon_messages(config) {
         crate::audit::dispatch(res, crate::audit::code(msg_type), 0, &msg, None);

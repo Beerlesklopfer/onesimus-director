@@ -181,7 +181,7 @@ Stand 17.10.2026; nur Punkte, die in einem Eintrag ausdrücklich offen stehen:
 - S-37: `.profile create/set/delete/assign/unassign` ohne Wirkung (`.profile` ist Alias von `.acl`).
 - C-057: erledigt (Start prüft wie `-t`, Lexer-Position im Log, 24.11.2026).
 - ~~C-062 (Hinweis): `configure update/delete` (Erweiterungen) prüfen die Ressourcen-ACL nicht.~~ erledigt 20.11.2026 (`c116264`).
-- C-056: `max_bandwidth` laufender Jobs, Jmsg bei Connect-/Antwortfehlern von `setbandwidth`.
+- C-056: erledigt (24.11.2026): `max_bandwidth` laufender Jobs hat nach bareos-25 keine weitere Wirkung (nur `SendBwlimitToFd` liest es); Jmsg M_FATAL „Failed to connect to client" bei Verbindungsfehler. Offen nur der Text der `response()`-Meldung bei falscher FD-Antwort (nicht aus dem Quelltext belegt).
 - C-014: SD-Teil von `status all`/`status storage`.
 - C-047: Nicht-UTF-8-Dateinamen auf SQL_ASCII-Katalogen.
 - C-059 (Hinweis): Run On Incoming Connect Interval fehlt; `update jobid=… starttime=` ist umgesetzt (Stand 24.11.2026).

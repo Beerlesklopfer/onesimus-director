@@ -140,7 +140,8 @@ pub fn setbandwidth_with(ast: &CommandAst, ctx: &ExecContext, active: &[ActiveJo
         for id in selection {
             // get_jcr_by_id(): the job may have ended meanwhile.
             let Some(running) = active.iter().find(|j| j.id == id) else { continue };
-            // jcr->max_bandwidth = limit: running jobs keep their own limits.
+            // jcr->max_bandwidth = limit: only SendBwlimitToFd() reads it (bareos-25, fd_cmds.cc), and that
+            // sends the limit that this command already sends; the jobs' own limits are not touched.
             job = running.unique_name.clone();
             let copy_or_migrate = config(&|c| c.find_job(&running.name)
                 .filter(|j| matches!(j.job_type, JobType::Copy | JobType::Migrate))
@@ -193,7 +194,15 @@ fn setbwlimit_filed(ua: &mut Ua, links: &mut dyn BwLinks, client: &ClientResourc
     // bandwidthcmd "setbandwidth=%lld Job=%s\n"
     let command = format!("setbandwidth={limit} Job={job}\n");
     match links.file_daemon(client, director, &command) {
-        FdOutcome::NotConnected => ua.error_msg("Failed to connect to Client.\n"),
+        FdOutcome::NotConnected => {
+            // ConnectToFileDaemon(): Jmsg(jcr, M_FATAL, 0, "\nFailed to connect to client \"%s\".\n") of the console
+            // JCR (JobId 0: the daemon messages), then the console's own error
+            if let Some(config) = ua.ctx.config.as_ref().and_then(|c| c.read().ok()) {
+                crate::reload::job_msg(&config, crate::message_bus::MsgType::Fatal,
+                    &format!("\nFailed to connect to client \"{}\".\n", client.name));
+            }
+            ua.error_msg("Failed to connect to Client.\n")
+        }
         FdOutcome::Reply(reply) if reply.as_deref() != Some("2000 OK Bandwidth\n") => {
             ua.error_msg("Failed to set bandwidth limit on Client.\n")
         }
