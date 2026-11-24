@@ -63,6 +63,7 @@ depends = "$auto"
 maintainer-scripts = "../../packaging/oconsole"
 assets = [
     ["../../THIRD-PARTY-NOTICES", "usr/share/doc/oconsole/", "644"],
+    ["../../THIRD-PARTY-RUST.txt", "usr/share/doc/oconsole/", "644"],
     ["target/release/oconsole", "usr/bin/oconsole", "755"],
     ["../../config/brconsole.conf", "usr/share/bareos/defaultconfigs/oconsole.conf", "644"],
     # written by odir --write-man-pages packaging/man (template packaging/man/src/oconsole.1.in)

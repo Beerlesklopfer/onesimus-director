@@ -80,6 +80,7 @@ maintainer-scripts = "../../packaging/ofd"
 systemd-units = { unit-name = "ofd", unit-scripts = "../../packaging/ofd", enable = true, start = true }
 assets = [
     ["../../THIRD-PARTY-NOTICES", "usr/share/doc/ofd/", "644"],
+    ["../../THIRD-PARTY-RUST.txt", "usr/share/doc/ofd/", "644"],
     ["../../packaging/ofd/logrotate", "etc/logrotate.d/onesimus-ofd", "644"],
     ["target/release/ofd", "usr/sbin/ofd", "755"],
     ["../../config/bareos-fd.d/**/*.conf", "usr/share/bareos/defaultconfigs/bareos-fd.d/", "644"],

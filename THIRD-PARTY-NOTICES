@@ -37,8 +37,10 @@ Rust dependencies
 -----------------
 
 The binaries link the Rust crates of Cargo.lock (mostly MIT or Apache-2.0).
-Their licence texts are available with `cargo about` / `cargo license`; the
-policy is enforced in CI by `cargo deny` (deny.toml). The i386 package of osd
+Their licence texts, with the crates that carry each text, are in the file
+THIRD-PARTY-RUST.txt next to this one (generated with cargo-about by
+scripts/licenses/make-third-party.sh; regenerate it when Cargo.lock changes).
+The policy is enforced in CI by `cargo deny` (deny.toml). The i386 package of osd
 is built with `vendored-openssl` and contains OpenSSL (Apache-2.0;
 https://www.openssl.org/source/license.html).
 

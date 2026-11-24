@@ -90,6 +90,7 @@ maintainer-scripts = "../../packaging/odir"
 systemd-units = { unit-name = "odir", unit-scripts = "../../packaging/odir", enable = true, start = true }
 assets = [
     ["../../THIRD-PARTY-NOTICES", "usr/share/doc/odir/", "644"],
+    ["../../THIRD-PARTY-RUST.txt", "usr/share/doc/odir/", "644"],
     ["../../packaging/odir/logrotate", "etc/logrotate.d/onesimus-odir", "644"],
     ["target/release/odir", "usr/sbin/odir", "755"],
     ["../bareos-orm/schema/*.json", "usr/lib/bareos/scripts/ddl/", "644"],

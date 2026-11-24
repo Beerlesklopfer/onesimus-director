@@ -1,0 +1,9 @@
+@@HEAD
+{{#each licenses}}
+@@SECTION {{{name}}}  ({{{id}}})
+{{#each used_by}}
+@@CRATE {{{crate.name}}} {{{crate.version}}}{{#if crate.source}} @@EXT{{/if}}{{#if crate.repository}}  {{{crate.repository}}}{{/if}}
+{{/each}}
+@@TEXT
+{{{text}}}
+{{/each}}
