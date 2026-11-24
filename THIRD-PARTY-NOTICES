@@ -198,3 +198,7 @@ OSSP var  (LicenseRef-OSSP-var)
   does not contain one. The upstream OSSP text is not reproduced here from
   memory; see http://www.ossp.org/pkg/lib/var/ for the original wording.
   (Open point: copy the original disclaimer from the OSSP distribution.)
+  Checked 24.11.2026: ossp.org is not reachable, the GitHub mirrors tried do
+  not exist, and the Debian packages of Bareos (copyright file) name the
+  files but do not reproduce the disclaimer either. The wording must come
+  from an OSSP var distribution tarball.
