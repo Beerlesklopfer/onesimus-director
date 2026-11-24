@@ -201,6 +201,7 @@ impl DirSession {
             if let Some(b) = job.bootstrap.lock().unwrap_or_else(|e| e.into_inner()).take() {
                 let _ = std::fs::remove_file(b.path);
             }
+            self.d.record_terminated(&job);
             self.d.jobs.remove(&job.cmd.job);
         }
     }

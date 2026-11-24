@@ -212,6 +212,8 @@ pub struct Job {
     pub bytes: Mutex<u64>,
     /// When the job was created.
     pub created: Instant,
+    /// The volume the job uses now (from the Director's catalog replies, for `status`).
+    pub volume: Mutex<String>,
 }
 
 impl Job {
@@ -303,6 +305,7 @@ impl JobTable {
             files: AtomicU32::new(0),
             bytes: Mutex::new(0),
             created: Instant::now(),
+            volume: Mutex::new(String::new()),
             cmd,
         });
         self.jobs.lock().unwrap_or_else(|e| e.into_inner()).insert(job.cmd.job.clone(), job.clone());

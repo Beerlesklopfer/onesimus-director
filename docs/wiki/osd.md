@@ -432,7 +432,7 @@ osd liest zu jedem File-Device die SMART-Werte der Platte, auf der das `Archive 
 
 | Wo | Was |
 | --- | --- |
-| `status storage` | je Device eine Zeile `Health: Disk /dev/sdb (<Modell>): ok, 32 °C, 54879 h, pending 0, reallocated 0, uncorrectable 0, CRC 0` |
+| `status storage` | Aufbau wie bareos-sd 25.1.3 (Rig-Test `status_sd.rs`); je Device zusätzlich eine Zeile `Health: Disk /dev/sdb (<Modell>): ok, 32 °C, 54879 h, pending 0, reallocated 0, uncorrectable 0, CRC 0` |
 | `.status health` | je Device eine Zeile `Device=… Disk=… Level=… Temperature=… PowerOnHours=… Pending=… Reallocated=… OfflineUncorrectable=… CrcErrors=… SelfTest="…" Model="…" Reasons="…"` |
 
 **Bewertung:** `critical` bei SMART FAILED, fehlgeschlagenem Selbsttest, einem Pre-Fail-Attribut an seiner Schwelle oder ab 60 °C (NVMe: kritische Warnung, Reserve unter der Schwelle); `warning` bei Pending, Reallocated oder Offline-Uncorrectable Sectors, CRC-Fehlern, ab 55 °C (NVMe: Medienfehler, 90 % Haltbarkeit verbraucht). Fehlerprotokoll und Selbsttestprotokoll der Platte liest `smartread` noch nicht.

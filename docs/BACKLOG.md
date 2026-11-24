@@ -51,7 +51,7 @@ P2 ist erledigt (Plan [P2 umgesetzt](plans/OSD-GERAETE-UND-VERTEILUNG.md#p2-umge
 
 | Befehl | Offen | Bezug |
 | --- | --- | --- |
-| `status` | SD-Teil von `status all`/`status storage`; typisierte RPCs für `status client/storage` liefern nur Text | [C-014](COMPATIBILITY-LOG.md), S-34 |
+| `status` | ~~SD-Teil von `status all`/`status storage`~~ erledigt 24.11.2026: der Text von osd gleicht dem von bareos-sd 25.1.3 (Rig-Test `status_sd.rs`: leer, nach einem Backup, laufend); typisierte RPCs für `status client/storage` liefern nur Text (S-34) | [C-014](COMPATIBILITY-LOG.md), S-34 |
 | `configure` | ~~`configure update/delete` (Onesimus-Erweiterungen) prüfen die Ressourcen-ACL nicht; dazu S-38~~ erledigt 20.11.2026 (`c116264`): beide prüfen die Ressourcen-ACL der Konsole (über das Konfigurations-CRUD, verbotene Ressource wie unbekannt) | Hinweis [C-062](COMPATIBILITY-LOG.md) |
 | `setbandwidth` | ~~`max_bandwidth` laufender Jobs; Jmsg bei Connect-/Antwortfehlern~~ erledigt 24.11.2026: `jcr->max_bandwidth` wird in bareos-25 nur von `SendBwlimitToFd` gelesen (kein Unterschied von außen); Jmsg „Failed to connect to client“ (M_FATAL) bei Verbindungsfehler; Antwortfehler: `response()`-Meldung des Originals nicht belegt | [C-056](COMPATIBILITY-LOG.md), S-39 |
 | `label`, `relabel` | ~~Option `encrypt` erzeugt noch keinen Volume-Schlüssel~~ erledigt 24.11.2026 (`label.rs` `generate_key`, auch bei `barcodes`) | [C-084](COMPATIBILITY-LOG.md), S-08 |

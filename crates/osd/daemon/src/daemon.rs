@@ -71,6 +71,8 @@ pub struct Daemon {
     pub launcher: Launcher,
     /// Device name → unique job name using it.
     busy: Arc<Mutex<HashMap<String, String>>>,
+    /// The last jobs that ended (`last_jobs`, `MAX_LAST_JOBS` = 10), oldest first.
+    terminated: Arc<Mutex<std::collections::VecDeque<TerminatedJob>>>,
     /// Jobs run since start.
     pub jobs_run: Arc<std::sync::atomic::AtomicUsize>,
     /// Media events (`label`, `mount`) counted per device; a job waiting for
@@ -79,6 +81,25 @@ pub struct Daemon {
     /// Devices whose job waits for the operator (BST_WAITING_FOR_SYSOP):
     /// `label` is allowed on them although a job holds them.
     waiting: Arc<Mutex<std::collections::HashSet<String>>>,
+}
+
+/// A job that has ended (one line of `Terminated Jobs:` of `status`).
+#[derive(Debug, Clone)]
+pub struct TerminatedJob {
+    /// `JobId`.
+    pub job_id: u32,
+    /// Level letter.
+    pub level: char,
+    /// Job name.
+    pub name: String,
+    /// `JobFiles`.
+    pub files: u32,
+    /// `JobBytes`.
+    pub bytes: u64,
+    /// Status letter (`T`, `E`, `A` …).
+    pub status: char,
+    /// End time, seconds since 1970.
+    pub end_time: u64,
 }
 
 /// Media event counters per device and the condition they signal.
@@ -119,6 +140,7 @@ impl Daemon {
             start_time: now as u32,
             launcher,
             busy: Arc::new(Mutex::new(HashMap::new())),
+            terminated: Arc::default(),
             jobs_run: Arc::new(std::sync::atomic::AtomicUsize::new(0)),
             media: Arc::default(),
             waiting: Arc::default(),
@@ -156,11 +178,22 @@ impl Daemon {
             match d.recv() {
                 Ok(BnetMessage::Data(data)) => {
                     tracing::debug!("<dird {}", String::from_utf8_lossy(&data).trim_end());
+                    self.note_volume(line, &data);
                     return data;
                 }
                 Ok(BnetMessage::Signal(_)) => continue,
                 Err(e) => return format!("E{e}").into_bytes(),
             }
+        }
+    }
+
+    /// The volume of a catalog reply (`1000 OK VolName=…` to `CatReq Job=<job> …`) is the job's volume now.
+    fn note_volume(&self, line: &str, reply: &[u8]) {
+        let reply = String::from_utf8_lossy(reply);
+        let Some(volume) = reply.split_whitespace().find_map(|w| w.strip_prefix("VolName=")) else { return };
+        let Some(name) = line.split_whitespace().find_map(|w| w.strip_prefix("Job=")) else { return };
+        if let Some(job) = self.jobs.find(name) {
+            *job.volume.lock().unwrap_or_else(|e| e.into_inner()) = volume.to_string();
         }
     }
 
@@ -248,6 +281,32 @@ impl Daemon {
             alternatives.push(FileDevice::from_config(dev));
         }
         Some(Reserved { device: FileDevice::from_config(primary), slots: self.ring_slots(primary), alternatives })
+    }
+
+    /// Remembers an ended job for `status` (`last_jobs`: the newest 10).
+    pub fn record_terminated(&self, job: &Job) {
+        if matches!(job.status(), 'C' | 'R') {
+            return;
+        }
+        let end_time = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0);
+        let mut last = self.terminated.lock().unwrap_or_else(|e| e.into_inner());
+        if last.len() >= 10 {
+            last.pop_front();
+        }
+        last.push_back(TerminatedJob {
+            job_id: job.cmd.job_id,
+            level: job.cmd.level,
+            name: job.cmd.job_name.clone(),
+            files: job.files.load(std::sync::atomic::Ordering::Acquire),
+            bytes: *job.bytes.lock().unwrap_or_else(|e| e.into_inner()),
+            status: job.status(),
+            end_time,
+        });
+    }
+
+    /// The jobs that ended, oldest first.
+    pub fn terminated_jobs(&self) -> Vec<TerminatedJob> {
+        self.terminated.lock().unwrap_or_else(|e| e.into_inner()).iter().cloned().collect()
     }
 
     /// The device job `job` holds (as its own device, not as an alternative).
