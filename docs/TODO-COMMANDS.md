@@ -22,11 +22,11 @@ Weitere Architekturvorhaben stehen im [Backlog](BACKLOG.md).
 | Letzter dokumentierter Volllauf | 16.10.2026 auf `7993ce6`: 1479/1481 gleich; beide Unterschiede stehen inzwischen als `match` in der Baseline | JSON `parity_evidence` |
 | Wiki-Status (Stand 16.10., **nicht aufgefrischt**) | 53 `parity_verified`, 31 `partial`, 4 `registered_unverified` | JSON `summary` |
 | Kompatibilitätslog C-001 … C-087 | 81 behoben, 3 Entscheidung (C-074, C-085, C-087), 1 geprüft (C-086), 1 Vorfall/Ursache (C-039), 1 „teilweise behoben“ (C-058) | COMPATIBILITY-LOG |
-| Stubs S-01 … S-37 | 35 erledigt/behoben, 2 offen (S-36, S-37) | STUBS |
+| Stubs S-01 … S-37 | alle erledigt (S-36 und S-37 am 24.11.2026 im Abgleich mit STUBS.md nachgetragen) | STUBS |
 | Typisierte gRPC-RPCs (`DirectorApi`) | 181 definiert: 94 lesend im Produktions-Build, 87 schreibend/Sitzung/Restore-Baum nur mit `grpc-development` (davon 4 nicht anwendbar: Gui, `.api`, `.grpc`, SetIp) | grpc-api.md |
 | MCP-Tools Produktions-Build | 35 typisierte Lese-Tools + `query` + 5 `ovfs_*` | mcp.md |
 | MCP-Tools Entwicklungs-Build (`--mcp-allow-write`) | zusätzlich 23 Schreib-/Restore-Tools + `execute` | mcp.md |
-| MCP-Vollausbau nach C-087 (alle 88 Befehle lokal, HTTP lesend) | offen (S-36) | STUBS, C-087 |
+| MCP-Vollausbau nach C-087 (alle 88 Befehle lokal, HTTP lesend) | erledigt (S-36: 122 Tools im Produktions-Build, Abdeckungstest `mcp_coverage.rs`) | STUBS, C-087 |
 
 Seit dem 16.10.2026 umgesetzt (Commits auf `development`): alle Jobtypen über
 `run` und Scheduler — Verify (S-04), Copy/Migrate einschließlich
@@ -53,17 +53,7 @@ laut Log und Stubs.
 
 Nur Punkte, die in den Quellen ausdrücklich als offen stehen:
 
-- **S-36 / C-087:** MCP-Vollausbau — alle 88 Befehle, Unterbefehle und der
-  Restore-Baum als typisierte Tools, Schreiben lokal über stdio auch im
-  Produktions-Build, HTTP lesend, Aufrufe über die typisierte `DirectorApi`
-  mit Rückfall `ExecuteCommand`/BNET. Laut [STUBS.md](STUBS.md) „offen“
-  (Umsetzung in Arbeit). Bis dahin beschreibt [mcp.md](wiki/mcp.md) den alten
-  Stand (Schreib-Tools nur im Entwicklungs-Build).
-- **`.profile create/set/delete/assign/unassign`** (Onesimus-Erweiterung): die
-  RPCs laufen durch, der Director kennt die Unterbefehle nicht (`.profile` ist
-  Alias von `.acl`) — [S-37](STUBS.md), Hinweis in [grpc-api.md](wiki/grpc-api.md).
-- **`label`/`relabel … encrypt`:** erzeugt noch keinen Volume-Schlüssel
-  ([C-084](COMPATIBILITY-LOG.md), [S-08](STUBS.md); `update volume encrypt=` ist erledigt).
+- **S-36 / S-37, `label … encrypt`:** erledigt (siehe STUBS.md; `encrypt` seit 24.11.2026).
 - **C-058:** Tabellenstatus im Log „teilweise behoben“, die Teilpunkte (Verify,
   Copy/Migrate, PoolOccupancy, Consolidate, RunScripts) sind über S-03 … S-07,
   S-19 … S-28 erledigt. Ausdrücklich als Rest genannt bleiben nur: Berichtszeilen
