@@ -354,11 +354,20 @@ fn connect_fd_mode(address: &str, port: u16, password: &str, director_name: &str
 /// Send each command on an authenticated FD connection and collect every
 /// reply up to its EOD, then terminate the connection (DoClientResolve).
 pub fn fd_query_commands<S: std::io::Read + std::io::Write>(mut fd: BnetStream<S>, commands: &[String]) -> Result<String, String> {
+    // DoClientResolve(): `while (fd->recv() >= 0) ua->SendMsg(...)`: every signal ends the reply and what
+    // came before it is shown (a FD that does not know the command answers "2999 Invalid command" and
+    // terminates); sends after a terminate fail silently and add nothing.
     let result = (|| {
         let mut output = String::new();
         for command in commands {
-            fd.send_str(command).map_err(|e| e.to_string())?;
-            output.push_str(&read_listing_reply(&mut fd)?);
+            if fd.send_str(command).is_err() {
+                break;
+            }
+            let (text, ended) = read_until_signal(&mut fd);
+            output.push_str(&text);
+            if ended {
+                break;
+            }
         }
         Ok(output)
     })();
@@ -416,6 +425,29 @@ fn read_listing_reply<S: std::io::Read + std::io::Write>(fd: &mut BnetStream<S>)
     }
 }
 
+/// The data frames up to the next signal (heartbeats answered); `true` when the connection ended
+/// (terminate, a socket error) rather than with an EOD.
+fn read_until_signal<S: std::io::Read + std::io::Write>(fd: &mut BnetStream<S>) -> (String, bool) {
+    let mut output = String::new();
+    loop {
+        match fd.recv() {
+            Ok(BnetMessage::Data(mut bytes)) => {
+                if let Some(end) = bytes.iter().position(|&b| b == 0) {
+                    bytes.truncate(end);
+                }
+                output.push_str(&String::from_utf8_lossy(&bytes));
+            }
+            Ok(BnetMessage::Signal(BnetSignal::Heartbeat)) => {
+                if fd.send_signal(BnetSignal::HeartbeatResponse).is_err() {
+                    return (output, true);
+                }
+            }
+            Ok(BnetMessage::Signal(BnetSignal::Eod)) => return (output, false),
+            Ok(BnetMessage::Signal(_)) | Err(_) => return (output, true),
+        }
+    }
+}
+
 fn read_control_reply<S: std::io::Read + std::io::Write>(bnet: &mut BnetStream<S>) -> Result<String, String> {
     loop {
         match bnet.recv().map_err(|e| format!("FD response: {e}"))? {
@@ -449,6 +481,18 @@ mod control_reply_tests {
         let mut bnet = BnetStream::new(Stream { input: Cursor::new((-1i32).to_be_bytes().to_vec()), output: vec![] });
         assert!(read_control_reply(&mut bnet).is_err());
     }
+    #[test]
+    fn query_shows_the_reply_before_a_terminate_like_the_original() {
+        let mut bytes = Vec::new();
+        let data = b"2999 Invalid command\n";
+        bytes.extend_from_slice(&(data.len() as i32).to_be_bytes());
+        bytes.extend_from_slice(data);
+        bytes.extend_from_slice(&(-4i32).to_be_bytes()); // BNET_TERMINATE
+        let fd = BnetStream::new(Stream { input: Cursor::new(bytes), output: vec![] });
+        let commands = vec!["resolve localhost".to_string(), "resolve ::1".to_string()];
+        assert_eq!(fd_query_commands(fd, &commands).unwrap(), "2999 Invalid command\n");
+    }
+
     #[test]
     fn listing_collects_multiple_frames_without_changing_newlines() {
         let mut bytes = Vec::new();
