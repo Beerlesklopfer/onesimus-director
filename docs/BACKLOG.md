@@ -181,8 +181,7 @@ Kern aus `ovfs-core` portiert, Zeilen per Server-Cursor in 10.000er-Batches);
 Äquivalenztest gegen eine Instanz mit `ovfs` byte-gleich. In oconsole als lesende MCP-Tools
 `ovfs_*` (auch im Produktions-Build). BVFS unverändert.
 
-Offen: Restore-Auswahl über die Restore-Kennungen (Bootstrap über `JobMedia`), Restore-Baum
-im interaktiven `oconsole`; typisierte gRPC-Aufrufe (derzeit über `ExecuteCommand`). Befund
+Typisierte gRPC-Aufrufe (`DotOvfsStatus/Latest/Tree/Ls/Versions`) sind da (geprüft 24.11.2026 in `director_api.proto`). Der Restore-Baum im interaktiven `oconsole` läuft über den Dialog des Directors (`cd`, `ls`, `mark`, C-047). Offen bleibt nur die Restore-Auswahl über die OVFS-Restore-Kennungen (Bootstrap über `JobMedia`), eine neue Funktion ohne Entwurf. Befund
 für das Plugin: In einer `SQL_ASCII`-Datenbank scheitern `ovfs.tree`/`ovfs.ls` mit
 `client_encoding = UTF8`, sobald ein Pfad nicht UTF-8 ist („invalid byte sequence“); der
 Director setzt dafür je Transaktion `SET LOCAL client_encoding TO 'SQL_ASCII'`.
@@ -193,9 +192,8 @@ Integration:
   `commands/bvfs.rs`, Paritätsfälle `c022`)
 - Danach als Tools im MCP-Modus von `oconsole` anbieten (Backup-Baum durchsuchen)
 - Restore-Baum im interaktiven `oconsole` wie bei bconsole (`cd`, `ls`, `mark`)
-- Befund am Rande: `crates/bareos-orm/schema/v2250_bareos_catalog.json` setzt
-  den Primärschlüssel von `pathvisibility` auf `jobid`; im Bareos-DDL ist er
-  `(JobId, PathId)` (Kompatibilitätslog C-052)
+- Befund am Rande (erledigt, C-052): der Primärschlüssel von `pathvisibility` in
+  `crates/bareos-orm/schema/v2250_bareos_catalog.json` ist jetzt `(JobId, PathId)`
 
 ## JSON-Ausgabe: Rest
 
