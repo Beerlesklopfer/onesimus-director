@@ -256,15 +256,31 @@ impl Daemon {
     }
 
     /// A `label` or `mount` on device `name`: wakes a job waiting for media.
+    ///
+    /// A reader of a Distributor waits on its read device, but may find the volume on another
+    /// target it holds as an alternative: an event on such an alternative wakes that job too.
     pub fn media_event(&self, name: &str) {
         let (count, cond) = &*self.media;
-        *count.lock().unwrap_or_else(|e| e.into_inner()).entry(name.to_string()).or_default() += 1;
+        let mut events = count.lock().unwrap_or_else(|e| e.into_inner());
+        *events.entry(name.to_string()).or_default() += 1;
+        if let Some(primary) = self.alternative_of(name) {
+            *events.entry(primary).or_default() += 1;
+        }
+        drop(events);
         cond.notify_all();
     }
 
-    /// Whether the job on device `name` waits for the operator.
+    /// The read device of the job that holds `name` as an alternative device (Distributor), if any.
+    fn alternative_of(&self, name: &str) -> Option<String> {
+        let job = self.busy.lock().unwrap_or_else(|e| e.into_inner()).get(name)?.strip_suffix(ALT_MARK)?.to_string();
+        self.reserved_device(&job)
+    }
+
+    /// Whether the job on device `name` waits for the operator (a device held as an alternative
+    /// counts when the job waits on its read device).
     pub fn waiting_for_sysop(&self, name: &str) -> bool {
-        self.waiting.lock().unwrap_or_else(|e| e.into_inner()).contains(name)
+        let waiting = self.waiting.lock().unwrap_or_else(|e| e.into_inner());
+        waiting.contains(name) || self.alternative_of(name).is_some_and(|p| waiting.contains(&p))
     }
 
     /// `DirAskSysopToCreateAppendableVolume` → `WaitForSysop` for a device
@@ -449,6 +465,24 @@ mod distributor_tests {
         assert!(d.reserve_device(&write("P", "MA"), &job("J.3", "x-fd", 'I')).is_none());
         d.release_job_devices("J.1");
         assert!(d.reserve_device(&write("P", "MD"), &job("J.2", "x-fd", 'F')).is_some());
+    }
+
+    #[test]
+    fn an_event_on_an_alternative_wakes_the_reader_and_lets_label_through() {
+        let d = daemon();
+        let read = UseStorage { append: false, ..write("P", "MD") };
+        d.reserve_device(&read, &job("R.1", "x-fd", 'F')).unwrap();
+        // the reader reads from A and waits there; B is held as an alternative
+        d.waiting.lock().unwrap().insert("A".into());
+        assert!(d.waiting_for_sysop("B"), "label/mount on the alternative is allowed while the job waits");
+        d.waiting.lock().unwrap().clear();
+        assert!(!d.waiting_for_sysop("B"));
+        let seen = |n: &str| d.media.0.lock().unwrap().get(n).copied().unwrap_or(0);
+        d.media_event("B");
+        assert_eq!((seen("B"), seen("A")), (1, 1), "the wait of the read device is woken");
+        d.release_job_devices("R.1");
+        d.media_event("B");
+        assert_eq!((seen("B"), seen("A")), (2, 1), "without a holder only the device itself");
     }
 
     #[test]

@@ -42,7 +42,7 @@ P2 ist erledigt (Plan [P2 umgesetzt](plans/OSD-GERAETE-UND-VERTEILUNG.md#p2-umge
 
 | ID | Punkt | Art | Ort |
 | --- | --- | --- | --- |
-| VT-1 | Lesen über einen Verteiler wartet nicht auf ein belegtes Ziel (der Job hält die freien Ziele); `mount`/`label` auf einem anderen als dem ersten Lesegerät weckt den wartenden Job nicht (Wartekennung je Gerät, nicht je Verteiler) | Lücke | `daemon.rs` (`reserve_distributed`, `wait_for_sysop`) |
+| VT-1 | Lesen über einen Verteiler wartet nicht auf ein belegtes Ziel (der Job hält die freien Ziele); ~~`mount`/`label` auf einem anderen als dem ersten Lesegerät weckt den wartenden Job nicht~~ erledigt (24.11.2026: `media_event` weckt über `alternative_of` auch das Lesegerät des Jobs, `waiting_for_sysop` gilt für gehaltene Ersatzgeräte); offen bleibt das Warten auf ein belegtes Ziel | Lücke | `daemon.rs` (`reserve_distributed`, `wait_for_sysop`) |
 | VT-2 | Ziele anderer Gerätearten (Wechselplatte P3, S3 P4, Band P6); Striping `Stripe = yes` (P5) und Zweige (P2b) | Phasen | Plan |
 | VT-3 | `Type = Copy`/`Migrate`-Routen und ein Director-Storage mit `Device = a, b` für die Ziele sind nicht im Rig geprüft | Prüfung | `tests/osd_distributor.rs` |
 | VT-4 | `osd -t` prüft nicht, ob der `Media Type` des Verteilers zu einem Director-Storage passt (osd kennt den Director nicht); odir `-t` kennt den Verteiler nicht | Prüfung | odir/osd `-t` |
