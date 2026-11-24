@@ -6,7 +6,7 @@
 {"id": "c061-dot-args-api2", "steps": [". foo bar=1"], "setup": [".api 2"]}
 {"id": "c061-dot-spaces-api2", "steps": ["   .   "], "setup": [".api 2"]}
 {"id": "c061-dot-twice-api2", "steps": [".", "."], "setup": [".api 2"]}
-{"id": "c061-dot-then-cmd-api2", "steps": [".", ".api 2", "version"], "setup": [".api 2"], "normalize": ["25\\.1\\.2[~+][\\w.]+", "\"\\d\\d \\w+ \\d{4}\""]}
+{"id": "c061-dot-then-cmd-api2", "steps": [".", ".api 2", "version"], "setup": [".api 2"], "normalize": ["25\\.1\\.\\d+[~+][\\w.]+", "\"\\d\\d \\w+ \\d{4}\""]}
 {"id": "c061-dotdot-api0", "steps": [".."]}
 {"id": "c061-dotdot-api1", "steps": [".."], "setup": [".api 1"]}
 {"id": "c061-dotdot-api2", "steps": [".."], "setup": [".api 2"]}

@@ -10,9 +10,9 @@
 {"id": "c042-dot-status-storage-header", "steps": [".status storage=File header"], "timeout_ms": 20000}
 {"id": "c042-dot-status-storage-running", "steps": [".status storage=File running"], "timeout_ms": 20000}
 {"id": "c042-dot-status-storage-api2", "steps": [".api 2", ".status storage=File header"], "timeout_ms": 20000}
-{"id": "c042-status-all", "steps": ["status all"], "normalize": ["25\\.1\\.2[~+][\\w.]+", "\\(\\d\\d \\w+ \\d{4}\\)", "(Daemon started|connected at:?) \\d\\d-\\w{3}-\\d\\d \\d\\d:\\d\\d", "(Bareos community|Onesimus) binary"], "timeout_ms": 30000}
+{"id": "c042-status-all", "steps": ["status all"], "normalize": ["25\\.1\\.\\d+[~+][\\w.]+", "\\(\\d\\d \\w+ \\d{4}\\)", "(Daemon started|connected at:?) \\d\\d-\\w{3}-\\d\\d \\d\\d:\\d\\d", "(Bareos community|Onesimus) binary"], "timeout_ms": 30000}
 {"id": "c042-status-storage-twice", "steps": ["status storage=File", "status storage=File"], "timeout_ms": 30000}
 {"id": "c042-status-storage-slots-api1", "steps": [".api 1", "status storage=File slots"], "timeout_ms": 20000}
 {"id": "c042-status-storage-slots-api2", "steps": [".api 2", "status storage=File slots"], "timeout_ms": 20000}
-{"id": "c042-dot-status-client-header", "steps": [".status client=bareos-fd header"], "timeout_ms": 20000}
+{"id": "c042-dot-status-client-header", "steps": [".status client=bareos-fd header"], "timeout_ms": 20000, "normalize": ["(?<=Daemon started )\\S+ \\S+"]}
 {"id": "c042-status-storage-api1-twice", "steps": [".api 1", "status storage=File", "status sd=File"], "timeout_ms": 30000}

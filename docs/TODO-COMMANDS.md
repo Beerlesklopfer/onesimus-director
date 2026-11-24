@@ -18,7 +18,7 @@ Weitere Architekturvorhaben stehen im [Backlog](BACKLOG.md).
 | Befehle mit mindestens einem Paritätsfall | 86/88 (ohne `.bvfs_restore`, `umount`) | `tests/parity/cases` |
 | Paritätsfälle in 64 Dateien | 2178 | `tests/parity/cases` |
 | davon in der Baseline-Ratsche, alle `match` | 2163 (+ Harnessfall `audit-log` = 2164 Einträge) | `baseline.json` |
-| Fälle außerhalb der Baseline | 15 (`c074-*`: Onesimus-Erweiterungen `.acl`, `.grpc`, `.sql*`, bewusst ungleich, Entscheidung C-074) | `c074.jsonl` |
+| Fälle außerhalb der Baseline | 15 (`c074-*`: Onesimus-Erweiterungen `.acl`, `.grpc`, `.sql*`, bewusst ungleich, Entscheidung C-074); seit 24.11.2026 dazu 14 `c019-add-*` (`configure add console` in enger Form, F-1, isoliert) und 7 `c030-purge-volume-*` (Schutz der jüngsten Full-Kette) | `c074.jsonl`, `c019.jsonl`, `c030.jsonl` |
 | Letzter dokumentierter Volllauf | 16.10.2026 auf `7993ce6`: 1479/1481 gleich; beide Unterschiede stehen inzwischen als `match` in der Baseline | JSON `parity_evidence` |
 | Wiki-Status (Stand 16.10., **nicht aufgefrischt**) | 53 `parity_verified`, 31 `partial`, 4 `registered_unverified` | JSON `summary` |
 | Kompatibilitätslog C-001 … C-087 | 81 behoben, 3 Entscheidung (C-074, C-085, C-087), 1 geprüft (C-086), 1 Vorfall/Ursache (C-039), 1 „teilweise behoben“ (C-058) | COMPATIBILITY-LOG |

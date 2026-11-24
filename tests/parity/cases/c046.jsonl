@@ -60,7 +60,7 @@
 {"id": "c046-status-scheduler-job-api2", "setup": [".api 2"], "steps": ["status scheduler job=backup-bareos-fd days=2"]}
 {"id": "c046-status-scheduler-client-api2", "setup": [".api 2"], "steps": ["status scheduler client=bareos-fd days=2"]}
 {"id": "c046-status-configuration-api2", "setup": [".api 2"], "steps": ["status configuration"]}
-{"id": "c046-dotstatus-header-api2", "setup": [".api 2"], "steps": [".status dir header"], "normalize": ["25\\.1\\.2[~+][\\w.]+", "\"\\d\\d \\w+ \\d{4}\"", "\\d\\d-\\w{3}-\\d\\d \\d\\d:\\d\\d", "\"binary_info\": \"[^\"]*\""]}
+{"id": "c046-dotstatus-header-api2", "setup": [".api 2"], "steps": [".status dir header"], "normalize": ["25\\.1\\.\\d+[~+][\\w.]+", "\"\\d\\d \\w+ \\d{4}\"", "\\d\\d-\\w{3}-\\d\\d \\d\\d:\\d\\d", "\"binary_info\": \"[^\"]*\""]}
 {"id": "c046-dotstatus-bad-api2", "setup": [".api 2"], "steps": [".status dir nosuch"]}
 {"id": "c046-dotstatus-noarg-api2", "setup": [".api 2"], "steps": [".status"]}
 {"id": "c046-list-jobs-count-api2", "setup": [".api 2"], "steps": ["list jobs count"]}

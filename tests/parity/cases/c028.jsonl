@@ -56,7 +56,7 @@
 {"id": "c028-show-disabled", "steps": ["show disabled"], "setup": [".api 1"]}
 {"id": "c028-show-all", "steps": ["show all"], "setup": [".api 1"]}
 {"id": "c028-status-scheduler", "steps": ["status scheduler"], "setup": [".api 1"]}
-{"id": "c028-status-dir", "steps": ["status dir"], "setup": [".api 1"], "normalize": ["25\\.1\\.2[~+][\\w.]+", "\\(\\d\\d \\w+ \\d{4}\\)", "\\d\\d-\\w{3}-\\d\\d \\d\\d:\\d\\d", "(Bareos community|Onesimus) binary"]}
+{"id": "c028-status-dir", "steps": ["status dir"], "setup": [".api 1"], "normalize": ["25\\.1\\.\\d+[~+][\\w.]+", "\\(\\d\\d \\w+ \\d{4}\\)", "\\d\\d-\\w{3}-\\d\\d \\d\\d:\\d\\d", "(Bareos community|Onesimus) binary"]}
 {"id": "c028-status-scheduler-days", "steps": ["status scheduler days=3"], "setup": [".api 1"]}
 {"id": "c028-sql", "steps": [".sql query=\"SELECT poolid, name FROM pool ORDER BY poolid\""], "setup": [".api 1"]}
 {"id": "c028-sql-bad", "steps": [".sql query=\"SELECT nosuch FROM pool\""], "setup": [".api 1"]}

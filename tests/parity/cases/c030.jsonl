@@ -33,13 +33,13 @@
 {"id": "c030-purge-files-menu-client-no", "steps": ["purge", "1", "no"]}
 {"id": "c030-purge-jobs-pool-no", "steps": ["purge jobs pool=Full", "no"]}
 {"id": "c030-purge-jobs-pool-incremental-no", "steps": ["purge jobs pool=Incremental", "no"]}
-{"id": "c030-purge-volume-no", "steps": ["purge volume=Full-47321", "no"]}
-{"id": "c030-purge-volume-error-no", "steps": ["purge volume=Full-0001", "no"]}
-{"id": "c030-purge-volume-jobstatus-bad", "steps": ["purge volume=Full-47321 jobstatus=xx"]}
-{"id": "c030-purge-volume-jobid", "steps": ["purge volume=Full-47321 jobid=1"]}
-{"id": "c030-purge-volume-two-no", "steps": ["purge volume=Full-47321 volume=Incremental-47322", "no", "no"]}
-{"id": "c030-purge-volume-menu-no", "steps": ["purge", "3", "2", "Incremental-47322", "no"]}
-{"id": "c030-purge-volume-api1", "setup": [".api 1"], "steps": ["purge volume=Full-47321"]}
+{"id": "c030-purge-volume-no", "steps": ["purge volume=Full-47321", "no"], "note": "Deliberately unequal where the volume holds the latest Full chain of a client (user decision 19.11.2026, docs/wiki/betrieb-odir.md); not in the baseline."}
+{"id": "c030-purge-volume-error-no", "steps": ["purge volume=Full-0001", "no"], "note": "Deliberately unequal where the volume holds the latest Full chain of a client (user decision 19.11.2026, docs/wiki/betrieb-odir.md); not in the baseline."}
+{"id": "c030-purge-volume-jobstatus-bad", "steps": ["purge volume=Full-47321 jobstatus=xx"], "note": "Deliberately unequal where the volume holds the latest Full chain of a client (user decision 19.11.2026, docs/wiki/betrieb-odir.md); not in the baseline."}
+{"id": "c030-purge-volume-jobid", "steps": ["purge volume=Full-47321 jobid=1"], "note": "Deliberately unequal where the volume holds the latest Full chain of a client (user decision 19.11.2026, docs/wiki/betrieb-odir.md); not in the baseline."}
+{"id": "c030-purge-volume-two-no", "steps": ["purge volume=Full-47321 volume=Incremental-47322", "no", "no"], "note": "Deliberately unequal where the volume holds the latest Full chain of a client (user decision 19.11.2026, docs/wiki/betrieb-odir.md); not in the baseline."}
+{"id": "c030-purge-volume-menu-no", "steps": ["purge", "3", "2", "Incremental-47322", "no"], "note": "Deliberately unequal where the volume holds the latest Full chain of a client (user decision 19.11.2026, docs/wiki/betrieb-odir.md); not in the baseline."}
+{"id": "c030-purge-volume-api1", "setup": [".api 1"], "steps": ["purge volume=Full-47321"], "note": "Deliberately unequal where the volume holds the latest Full chain of a client (user decision 19.11.2026, docs/wiki/betrieb-odir.md); not in the baseline."}
 {"id": "c030-purge-quota-client", "steps": ["purge quota client=bareos-fd"]}
 {"id": "c030-prune-volume-pool-report", "steps": ["prune volume pool=Incremental"]}
 {"id": "c030-prune-volume-all-no", "steps": ["prune volume all", "no"]}
