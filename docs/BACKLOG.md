@@ -66,7 +66,7 @@ Nur Testlücken, keine bekannte Abweichung: Wirkung von `setdebug`, `trace`,
 `import`/`export`/`move` an einem echten Autochanger (bisher simuliert),
 (`add`/`create`/`prune`/`update`-Katalogzustand danach: seit 24.11.2026 belegt, Fälle `c093`, 14, alle gleich; `prune`/`purge`/`delete` von Jobs, Dateien und Volumes der jüngsten Full-Kette weichen absichtlich ab, siehe betrieb-odir.md),
 `resolve` gegen Legacy-/Nicht-TLS-Daemons, `.messages` über die
-gRPC-Sitzungsqueue. (`.bvfs_restore`, `.bvfs_cleanup`, `.bvfs_clear_cache yes` und `umount` haben seit 24.11.2026 Paritätsfälle: `c091`, 17 Fälle, alle gleich; jeder der 88 Befehle hat damit mindestens einen Fall.)
+gRPC-Sitzungsqueue. (`.bvfs_restore`, `.bvfs_cleanup`, `.bvfs_clear_cache yes` und `umount` haben seit 24.11.2026 Paritätsfälle: `c091`, 17 Fälle, alle gleich; jeder der 88 Befehle hat damit mindestens einen Fall; von den 26 Befehlen der Dateiauswahl seit `c095` auch `exit`.)
 
 ### Infrastruktur
 

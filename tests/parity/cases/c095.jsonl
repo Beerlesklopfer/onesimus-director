@@ -1,0 +1,4 @@
+# Restore tree: `exit` (same as done), the last of the 26 shell commands without a case.
+{"id": "c095-tree-exit-no", "steps": ["restore jobid=1", "cd /usr/sbin", "mark zic", "exit", "no"], "normalize": ["restore\\.\\d+\\.bsr", "When:.*"]}
+{"id": "c095-tree-exit-nothing", "steps": ["restore jobid=1", "exit", "no"], "normalize": ["restore\\.\\d+\\.bsr", "When:.*"]}
+{"id": "c095-tree-exit-api1", "setup": [".api 1"], "steps": ["restore jobid=1", "mark *", "exit", "no"], "normalize": ["restore\\.\\d+\\.bsr", "When:.*"]}
