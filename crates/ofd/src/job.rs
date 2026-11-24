@@ -299,8 +299,9 @@ impl<'a> Session<'a> {
     fn resolve_cmd<S: Read + Write>(&mut self, dir: &mut BnetStream<S>, cmd: &str) -> bool {
         let host = cmd.trim_end().strip_prefix("resolve").unwrap_or("").trim_start();
         let host = host.split_whitespace().next().unwrap_or("");
-        let reply = match bareos_bnet::resolve::host_to_ip_addrs(host) {
-            Ok(addresses) if !host.is_empty() => {
+        let addresses = if host.is_empty() { Err(String::new()) } else { bareos_bnet::resolve::host_to_ip_addrs(host) };
+        let reply = match addresses {
+            Ok(addresses) => {
                 format!("{} resolves {host} to {}\n", self.config.name, bareos_bnet::resolve::addresses_string(&addresses))
             }
             _ => format!("{}: Failed to resolve {host}\n", self.config.name),

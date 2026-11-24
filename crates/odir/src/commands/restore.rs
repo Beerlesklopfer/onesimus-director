@@ -881,7 +881,6 @@ fn strip_trailing_junk(text: &str) -> &str {
     text.trim_end_matches(['\n', '\r', ' '])
 }
 
-/// InsertOneFileOrDir (ua_restore.cc:955)
 /// InsertOneFileOrDir (ua_restore.cc): false ends the selection (a file not in the catalog, a
 /// directory without JobIds, a failed line of a `<` list).
 fn insert_one_file_or_dir(ua: &mut Ua, rx: &mut Rx, p: &str, date: &str, dir: bool) -> bool {

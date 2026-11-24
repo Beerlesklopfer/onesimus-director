@@ -877,7 +877,7 @@ fn to_sd_params(p: &JobParams) -> SdJobParams {
 
 /// SendJobInfoToFileDaemon(): after `2000 OK Job <uname>` the Client record gets the resource's AutoPrune
 /// and retentions and the FD's uname (UpdateClientRecord), for every job type.
-fn update_client_record(p: &JobParams, reply: &str) {
+pub(crate) fn update_client_record(p: &JobParams, reply: &str) {
     let Some(retention) = p.client_retention else { return };
     let uname = reply.trim_end_matches(['\n', '\r']).get("2000 OK Job".len() + 1..).unwrap_or("");
     send_jmsg(PipeMessage::CatalogSql { job_id: p.job_id, sql: crate::backup::update_client_record_sql(&p.client_name, retention, uname) });

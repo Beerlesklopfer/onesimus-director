@@ -1273,8 +1273,10 @@ impl JobManager {
         self.reschedule_jobs();
         // JcrCleanup(): num_jobs_run and RecentJobResultsList (C-048).
         let jobs_run = self.jobs_run;
+        let mut ended = false;
         for job in self.jobs.iter_mut().filter(|j| j.completed_at.is_some() && !j.jcr.recorded) {
             job.jcr.recorded = true;
+            ended = true;
             job.jcr.fd_connected = false;
             job.jcr.sd_connected = false;
             // FreeJcr(): only Backup, Verify, Restore, Migrate, Copy and Admin jobs are counted and kept
@@ -1296,7 +1298,7 @@ impl JobManager {
         }
         // Jobs that ended free their resources for the queue.
         let queued = !(self.waiting.is_empty() && self.ready.is_empty() && self.delayed.is_empty());
-        if queued && (self.jobs_run != jobs_run || self.last_schedule.elapsed() >= std::time::Duration::from_secs(2)) {
+        if queued && (ended || self.last_schedule.elapsed() >= std::time::Duration::from_secs(2)) {
             self.schedule();
         } else if !self.ready.is_empty() {
             // Ready jobs whose jobq_server pause has passed.

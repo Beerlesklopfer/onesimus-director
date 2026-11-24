@@ -446,7 +446,12 @@ fn estimate_job(ast: &CommandAst, ctx: &ExecContext, mut reply: Reply, job: Opti
     reply.out.push_str(&format!("Connecting to Client {} at {}:{}\n", plan.client, plan.address, plan.port));
     let mut fd = match fd_protocol::connect_fd_with_timeout(&plan.address, plan.port, &plan.password, &plan.director, None, plan.tls) {
         Ok((fd, _)) => {
-            fd_protocol::note_tls_handshake(&plan.client);
+            // the mode that worked: immediate TLS, or clear text for `TLS Enable = no`
+            if plan.tls.0 {
+                fd_protocol::note_tls_handshake(&plan.client);
+            } else if fd_protocol::stored_cleartext(&plan.client).is_none() {
+                fd_protocol::store_client_handshake(&plan.client, true);
+            }
             fd
         }
         Err(error) => {

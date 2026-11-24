@@ -334,6 +334,7 @@ pub(crate) fn run_verify(
         "passive",
         false,
     );
+    let client_retention = crate::backup::client_retention(&config, &client.name);
     drop(config);
 
     let Some(cat) = ctx.catalog.clone() else {
@@ -415,6 +416,8 @@ pub(crate) fn run_verify(
     params.fd_address = client.address.clone();
     params.fd_port = client.port;
     params.fd_password = client.password.clone();
+    params.fd_tls_policy = crate::fd_protocol::tls_policy(client.tls_enable, client.tls_require);
+    params.client_retention = Some(client_retention);
     params.fd_grpc = fd_grpc;
     params.passive_client = passive_client;
     params.client_first_connection = !verify.failed && !verify.nothing_to_do
@@ -1017,7 +1020,10 @@ pub(crate) fn run_worker(p: &JobParams, pipes: &mut WorkerPipes) -> i32 {
         return bail(pipes, &mut fd, format!("{e}\n"));
     }
     match next_message(&mut fd, job_id) {
-        Ok(Some(data)) if data.starts_with(b"2000 OK Job") => {}
+        Ok(Some(data)) if data.starts_with(b"2000 OK Job") => {
+            // SendJobInfoToFileDaemon(): UpdateClientRecord() with the FD's uname
+            crate::job_worker::update_client_record(p, &String::from_utf8_lossy(&data));
+        }
         other => {
             let text = match other { Ok(Some(d)) => String::from_utf8_lossy(&d).into_owned(), _ => String::new() };
             return bail(pipes, &mut fd, format!("File daemon \"{}\" rejected Job command: {text}", p.client_name));
