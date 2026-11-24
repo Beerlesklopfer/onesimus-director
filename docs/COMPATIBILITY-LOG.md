@@ -176,7 +176,7 @@ Stand 17.10.2026; nur Punkte, die in einem Eintrag ausdrücklich offen stehen:
   dropped“/„Network error with FD …“ und SD termination status; `*JobCancel*` des
   Job-Threads verbraucht keine Jobnamen-Nummer (S-26); passive Clients beim Backup
   ungeprüft (S-23).
-- C-084 / S-08: `label`/`relabel … encrypt` erzeugt noch keinen Volume-Schlüssel.
+- C-084 / S-08: erledigt (24.11.2026): `label`/`relabel … encrypt` erzeugt den Schlüssel vor dem Label-Befehl (`Generating new hardware encryption key`), der Befehl an den SD trägt keinen Schlüssel (nach `ua_label.cc` bareos-25); Fehler bei der Erzeugung bricht ab (bei Barcodes: nächstes Volume).
 - C-087 / S-36: MCP-Vollausbau (alle Befehle lokal über stdio, HTTP lesend) offen.
 - S-37: `.profile create/set/delete/assign/unassign` ohne Wirkung (`.profile` ist Alias von `.acl`).
 - C-057: erledigt (Start prüft wie `-t`, Lexer-Position im Log, 24.11.2026).

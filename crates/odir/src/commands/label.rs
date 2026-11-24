@@ -204,7 +204,7 @@ pub(crate) fn label_execute(ua: &mut Ua, request: LabelRequest, sd: &mut dyn SdS
             let args: Vec<_> = args.into_iter().map(|(key, value)| crate::command_ast::Argument { key, value }).collect();
             label_from_barcodes(ua, &mut sd, &mut catalog, link, &store, drive, yes, &args);
         }
-        LabelRequest::Label { storage, volume, pool, old_volume, slot, drive, existing } => {
+        LabelRequest::Label { storage, volume, pool, old_volume, slot, drive, existing, encrypt } => {
             let Some(store) = find_store(ua, &storage) else { return };
             let mut mr = MediaRecord { volume_name: volume.clone(), ..Default::default() };
             if existing {
@@ -220,6 +220,10 @@ pub(crate) fn label_execute(ua: &mut Ua, request: LabelRequest, sd: &mut dyn SdS
                 catreq::get_media_record(&mut catalog.cat(), &mut omr);
                 omr
             });
+            // do_label(): the key is made before the label command and goes into the Media record
+            if encrypt && !generate_key(ua, &mut mr) {
+                return;
+            }
             let ok = send_label_request(ua, &mut sd, &mut catalog, &store, &mut mr, omr.as_ref(), &mut pr, existing, drive);
             let mut print_reminder = true;
             if ok {
@@ -250,6 +254,23 @@ pub(crate) fn label_execute(ua: &mut Ua, request: LabelRequest, sd: &mut dyn SdS
             if print_reminder {
                 ua.info_msg("Do not forget to mount the drive!!!\n");
             }
+        }
+    }
+}
+
+/// do_label(): "Generating new hardware encryption key" and GenerateNewEncryptionKey() into `mr`
+/// (the key is wrapped with the Director's `Key Encryption Key` if there is one); false on error.
+fn generate_key(ua: &mut Ua, mr: &mut MediaRecord) -> bool {
+    ua.info_msg("Generating new hardware encryption key\n");
+    let kek = ua.ctx.config.as_ref().and_then(|c| c.read().ok()).and_then(|c| c.director.key_encryption_key.clone());
+    match crate::volume_key::generate_new_encryption_key(&mr.volume_name, kek.as_deref()) {
+        Ok(key) => {
+            mr.encr_key = key;
+            true
+        }
+        Err(message) => {
+            ua.error_msg(message);
+            false
         }
     }
 }
@@ -297,6 +318,7 @@ fn label_from_barcodes(ua: &mut Ua, sd: &mut LabelSd, catalog: &mut Catalog, lin
         return;
     }
     let ast = crate::command_ast::CommandAst { arguments: args.to_vec(), ..Default::default() };
+    let encrypt = args.iter().any(|a| a.key.eq_ignore_ascii_case("encrypt"));
     let Some(pool) = crate::ua_select::select_pool_dbr(ua, &ast, "pool") else { return };
     let mut pr = pool_record(catalog, &pool);
     let sid = storage_id(ua, store);
@@ -356,6 +378,9 @@ fn label_from_barcodes(ua: &mut Ua, sd: &mut LabelSd, catalog: &mut Catalog, lin
         }
         mr.media_type = store.media_type.clone();
         mr.slot = i32::from(vl.slot);
+        if encrypt && !generate_key(ua, &mut mr) {
+            continue;
+        }
         send_label_request(ua, sd, catalog, store, &mut mr, None, &mut pr, exists, drive);
     }
 }
@@ -453,7 +478,7 @@ mod tests {
 
     fn label(volume: &str) -> LabelRequest {
         LabelRequest::Label { storage: "File".into(), volume: volume.into(), pool: "Full".into(), old_volume: None,
-            slot: 0, drive: 0, existing: false }
+            slot: 0, drive: 0, existing: false, encrypt: false }
     }
 
     #[test]
@@ -478,6 +503,24 @@ mod tests {
     }
 
     #[test]
+    fn label_encrypt_makes_a_key_before_the_label_command() {
+        let mut request = label("enc1");
+        if let LabelRequest::Label { encrypt, .. } = &mut request {
+            *encrypt = true;
+        }
+        let (output, sd, writes) = run(request, |cmd| if cmd.starts_with("label ") {
+            vec!["3000 OK label. VolBytes=219 VolABI=0 Volume=\"enc1\" Device=\"File Storage\" (/srv)"]
+        } else {
+            vec!["3001 Device \"File Storage\" (/srv) is mounted with Volume \"enc1\""]
+        });
+        assert!(output.starts_with("Generating new hardware encryption key\nConnecting to Storage daemon"), "{output}");
+        assert!(!sd.sent[0].contains("ncrypt"), "the label command carries no key: {:?}", sd.sent);
+        // 32 characters of passphrase as base64 without padding: 43 characters
+        let insert = writes.iter().find(|q| q.starts_with("INSERT INTO Media")).unwrap_or_else(|| panic!("{writes:?}"));
+        assert!(insert.split('\'').any(|part| part.len() == 43 && part.chars().all(|c| c.is_ascii_alphanumeric() || c == '+' || c == '/')), "{insert}");
+    }
+
+    #[test]
     fn failed_label_changes_no_catalog_record() {
         let (output, sd, writes) = run(label("new2"), |_| vec!["3903 Error scanning label command: label x"]);
         assert_eq!(sd.sent.len(), 1, "no mount after a failed label");
@@ -489,7 +532,7 @@ mod tests {
     #[test]
     fn relabel_keeps_the_old_blocksizes_and_deletes_the_old_record() {
         let request = LabelRequest::Label { storage: "File".into(), volume: "new 3".into(), pool: "Full".into(),
-            old_volume: Some("old1".into()), slot: 0, drive: 1, existing: false };
+            old_volume: Some("old1".into()), slot: 0, drive: 1, existing: false, encrypt: false };
         let (output, sd, writes) = run(request, |cmd| if cmd.starts_with("relabel ") {
             vec!["3000 OK label. VolFiles=0 VolBytes=219 VolABI=0 Volume=\"new 3\""]
         } else {

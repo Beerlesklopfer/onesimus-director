@@ -39,7 +39,7 @@ pub(crate) enum LabelRequest {
     Barcodes { storage: String, drive: i16, yes: bool, args: Vec<(String, Option<String>)> },
     /// `existing`: a not yet labeled Media record of that name exists.
     Label { storage: String, volume: String, pool: String, old_volume: Option<String>, slot: i32, drive: i16,
-        existing: bool },
+        existing: bool, encrypt: bool },
 }
 
 /// do_label (ua_label.cc:393) with the real Storage daemon for the drive
@@ -154,7 +154,8 @@ pub(crate) fn label_dialog_with(ua: &mut crate::ua_select::Ua, ast: &CommandAst,
         0
     };
     let Some(pool) = ua_select::select_pool_dbr(ua, ast, "pool") else { return };
-    act(ua, LabelRequest::Label { storage, volume, pool, old_volume, slot, drive, existing });
+    let encrypt = find_arg(ast, "encrypt").is_some();
+    act(ua, LabelRequest::Label { storage, volume, pool, old_volume, slot, drive, existing, encrypt });
 }
 
 pub fn cmd_mount(ast: &CommandAst, ctx: &ExecContext) -> CommandResult {

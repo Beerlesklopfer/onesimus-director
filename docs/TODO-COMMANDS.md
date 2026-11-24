@@ -201,7 +201,7 @@ Wiki-Status aber nicht ändert.
 | `gui` | ja | parity_verified | 30 / 30 | — | nicht anwendbar | Entw.: nur `execute` |
 | `help` | ja | parity_verified | 7 / 11 | — | Prod: `Help` | `query` |
 | `import` | ja | partial | 2 / 4 | [C-071](COMPATIBILITY-LOG.md) behoben, nur simulierter Autochanger | Entw.: `ImportVolumes` | Entw.: nur `execute` |
-| `label` | ja | partial | 13 / 16 | [C-084](COMPATIBILITY-LOG.md)/[S-32](STUBS.md) behoben (privater SD); offen: `encrypt` ([C-084](COMPATIBILITY-LOG.md), [S-08](STUBS.md)) | Entw.: `Label` | Entw.: `label_volume` |
+| `label` | ja | partial | 13 / 16 | [C-084](COMPATIBILITY-LOG.md)/[S-32](STUBS.md) behoben (privater SD); `encrypt` erledigt 24.11.2026 ([C-084](COMPATIBILITY-LOG.md)) | Entw.: `Label` | Entw.: `label_volume` |
 | `list` | ja | partial | 299 / 333 | [C-046](COMPATIBILITY-LOG.md) behoben, Wiki-Status veraltet | Prod: 19 RPCs | `list_*` (14 Tools), `query` |
 | `llist` | ja | partial | 110 / 117 | [C-046](COMPATIBILITY-LOG.md) behoben, Wiki-Status veraltet | Prod: 19 RPCs | `list_*` (Parameter `long`), `query` |
 | `messages` | ja | parity_verified | 13 / 34 | — | Prod: `GetMessages` | `messages`, `query` |
@@ -213,7 +213,7 @@ Wiki-Status aber nicht ändert.
 | `quit` | ja | parity_verified | 5 / 23 | — | Entw.: `Quit` | – |
 | `query` | ja | parity_verified | 8 / 9 | — | Entw.: `Query` | Entw.: nur `execute` |
 | `restore` | ja | partial | 28 / 99 | [C-047](COMPATIBILITY-LOG.md) behoben (Baum, Menü, Bootstrap); offen: Nicht-UTF-8-Namen auf SQL_ASCII ([C-047](COMPATIBILITY-LOG.md)); echte Restores mit privaten Daemons belegt ([S-01](STUBS.md), [S-12](STUBS.md), [C-078](COMPATIBILITY-LOG.md)–[C-080](COMPATIBILITY-LOG.md)) | Entw.: `Restore`, `StartRestoreSession` | Entw.: `restore` |
-| `relabel` | ja | partial | 8 / 8 | [C-084](COMPATIBILITY-LOG.md)/[S-32](STUBS.md) behoben; offen: `encrypt` ([C-084](COMPATIBILITY-LOG.md), [S-08](STUBS.md)) | Entw.: `Relabel` | Entw.: `relabel_volume` |
+| `relabel` | ja | partial | 8 / 8 | [C-084](COMPATIBILITY-LOG.md)/[S-32](STUBS.md) behoben; `encrypt` erledigt 24.11.2026 ([C-084](COMPATIBILITY-LOG.md)) | Entw.: `Relabel` | Entw.: `relabel_volume` |
 | `release` | ja | partial | 7 / 9 | [C-050](COMPATIBILITY-LOG.md) behoben (NDMP-Sitzungen nicht unterstützt) | Entw.: `Release` | Entw.: `release_storage` |
 | `reload` | ja | registered_unverified | 0 / 23 | [C-057](COMPATIBILITY-LOG.md), [C-075](COMPATIBILITY-LOG.md) behoben, jetzt mit Fällen `c057`/`c075`; Start prüft wie `-t` und Lexer-Position im Log erledigt ([C-057](COMPATIBILITY-LOG.md), 24.11.2026) | Entw.: `Reload` | Entw.: `reload` |
 | `rerun` | ja | partial | 32 / 33 | [C-033](COMPATIBILITY-LOG.md) behoben; Jobstart im Paritätslauf nicht ausgeführt | Entw.: `Rerun` | Entw.: `rerun_job` |
@@ -273,7 +273,7 @@ Entwicklungs-Build; `.grpc` nicht anwendbar. MCP: `ovfs_*` in jedem Build,
 | P1.1 | Laufende Jobs: Warte-Zustände, Cancel mit AfterJob-RunScripts, Jobmeldungen | erledigt (C-048, C-051, S-07, S-22, S-26); Rest S-26 siehe „Noch offen“ |
 | P1.2 | Nicht-Backup-Jobs über `run` | erledigt (C-043, C-058 Teilpunkte über S-03 … S-06, S-20) |
 | P1.3 | Restore-Menü und Dateibaum | erledigt (C-047, S-01, S-14, C-078 … C-080); Rest Nicht-UTF-8 |
-| P1.4 | Autochanger und Volumes | erledigt gegen simulierten Autochanger/SD (C-045, C-049, C-053, C-054, C-069, C-071); label/relabel gegen privaten SD (C-084); offen `encrypt` |
+| P1.4 | Autochanger und Volumes | erledigt gegen simulierten Autochanger/SD (C-045, C-049, C-053, C-054, C-069, C-071); label/relabel gegen privaten SD (C-084); `encrypt` erledigt 24.11.2026 |
 | P1.5 | API-2-Ergebnisobjekte und Präfixvergleich | erledigt (C-044, C-046) |
 | P1.6 | NDMP | Konsolenzweige erledigt (C-050); NDMP-Sitzungen selbst nicht unterstützt |
 | P1.7 | Katalog-Nebenpfade ohne Konsolenbefehl | erledigt (C-052, C-055, S-27, S-28) |
