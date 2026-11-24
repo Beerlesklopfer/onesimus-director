@@ -187,6 +187,10 @@ tests/volrecycle/rig.py
 # Grenzfälle, vorsichtig als „only“ geführt (Stand 2026-11-23)
 crates/odir/src/state_file.rs
 crates/ofd/src/streams.rs
+# Client initiated connection (25.11.2026): ports of dird/socket_server.cc, dird/fd_cmds.cc UseWaitingClient,
+# lib/connection_pool.cc, dird/run_on_incoming_connect_interval.cc and filed/dir_cmd.cc connect_to_director
+crates/odir/src/client_pool.rs
+crates/ofd/src/dir_connect.rs
 #
 # Nicht-Quelltext (spdx.py setzt keine Köpfe; Vermerk hier und in packaging/copyright):
 # tests/bareos-dir.d/**/*.conf (17 Dateien inhaltsgleich mit den Bareos-defaultconfigs, tragen den Kopf als # -Kommentar),

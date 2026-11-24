@@ -1,4 +1,6 @@
 #!/bin/sh
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# SPDX-FileCopyrightText: 2026 Jörg Bernau <contact@onesimus.io>
 # Writes THIRD-PARTY-RUST.txt (licence texts of all Rust dependencies from registries) into the repository root.
 # The own crates (path dependencies, AGPL) are left out: their licence is LICENSE and Cargo.toml.
 # Needs: cargo install cargo-about --locked --features cli
