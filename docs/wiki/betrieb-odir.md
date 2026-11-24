@@ -478,3 +478,23 @@ der Job endet dann mit „The FileSet excludes paths inside Options (odir.d); th
 a Bareos file daemon does not understand it.“ statt Daten zu sichern, die ausgeschlossen sein sollten.
 
 Geprüft im Gerüst mit dem echten `ofd` (`crates/onesimus-rig/tests/options_exclude.rs`, 24.11.2026): Das Backup vor dem Overlay sichert alle 13 Einträge des Testbaums, nach `reload` mit `Exclude { File = …/data/sub }` in `Options` fehlen `sub`, `inner.txt` und `hard2` (10 Einträge), und `estimate listing` zeigt sie ebenfalls nicht. Mit einem echten Bareos-FD (25.1.3, aus dem Paket entpackt, nicht installiert) geprüft (`bareos_fd_exclude.rs`, `ONESIMUS_BAREOS_FD=<Pfad zu bareos-fd>`): Das Backup ohne Overlay läuft, mit dem Overlay endet der Job mit der Meldung „that needs an Onesimus ofd“ und sichert nichts.
+
+
+## Client-initiierte Verbindung (`Connection From Client To Director`)
+
+Ein Client, den der Director nicht erreicht (NAT, Firewall), verbindet sich selbst und wartet:
+
+- Director, Client-Resource: `Connection From Client To Director = yes`.
+- FD (ofd oder bareos-fd), Director-Resource: `Connection From Client To Director = yes`, `Address` und
+  `Port` des Directors; `TLS Enable` wie beim Director (TLS-PSK mit dem gemeinsamen Passwort).
+
+odir hält die Verbindung (`status dir`, Abschnitt „Client Initiated Connections“) und nimmt sie für den
+nächsten Job des Clients und für `status client`, `estimate`, `setdebug`, `setbandwidth`, `resolve`; der
+FD verbindet danach sofort neu. Mit `Run On Incoming Connect Interval = <Zeit>` in einem Job startet
+odir den Job, wenn der Client sich verbindet und der letzte Lauf (Status T, W, C oder R) länger als die
+Zeit zurückliegt oder es noch keinen gab (Bericht: „Job triggered by: Client“). Anders als bareos-dir
+startet odir ihn sofort statt beim nächsten Scheduler-Durchlauf.
+
+Noch nicht umgesetzt: `Connection From Director To Client = no` (odir versucht ohne wartende Verbindung
+weiter, selbst zu verbinden) und das Warten auf eine Verbindung. Plan und Mitschnitt:
+[CLIENT-INITIIERT.md](../plans/CLIENT-INITIIERT.md).

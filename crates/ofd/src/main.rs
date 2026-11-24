@@ -27,6 +27,7 @@ mod berrno;
 mod broker;
 use bareos_format::compression;
 mod config;
+mod dir_connect;
 mod create_file;
 mod digest;
 mod fileset;
@@ -372,6 +373,9 @@ fn run(cli: Cli, running: &dyn Fn(), wait: &dyn Fn()) -> i32 {
         })
         .expect("failed to spawn fd:accept");
 
+    // client initiated connections (Connection From Client To Director)
+    let dir_connect_handles = dir_connect::start(&shared_config, &SHUTDOWN);
+
     // fd:heartbeat thread
     let heartbeat_handle = thread::Builder::new()
         .name("fd:heartbeat".into())
@@ -388,6 +392,8 @@ fn run(cli: Cli, running: &dyn Fn(), wait: &dyn Fn()) -> i32 {
 
     accept_handle.join().ok();
     heartbeat_handle.join().ok();
+    // the connect threads wait in a blocking read for the Director; they end with the process
+    drop(dir_connect_handles);
     if let Some((_, handle)) = grpc_handle { handle.join().ok(); }
 
     info!("Onesimus File Daemon stopped");

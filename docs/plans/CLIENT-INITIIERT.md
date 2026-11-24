@@ -76,6 +76,10 @@ Offen bleibt nur, wann `CleanupConnectionPool` läuft; für den Bau nicht nötig
 - **Prüfung:** Rig mit ofd ↔ odir (beide Onesimus), Mitschnitt gegen Bareos als Gegenprobe, Fälle
   für Fehlerpfade (falsches Passwort, unbekannter Client, Verbindung stirbt im Pool, zwei Verbindungen).
 
+## Umgesetzt (25.11.2026)
+
+odir `client_pool.rs`, ofd `dir_connect.rs`, Rig-Tests `client_initiated.rs` (TLS, Klartext, Run On Incoming Connect Interval). Offen: `Connection From Director To Client = no` (odir verbindet ohne wartende Verbindung weiter selbst), Warten auf eine Verbindung (UseWaitingClient mit Wartezeit), Herzschlag der wartenden Verbindung in ofd.
+
 ## Reihenfolge
 
 1. ~~Mitschnitt mit einem Bareos-FD beschaffen~~ erledigt 24.11.2026 (oben).

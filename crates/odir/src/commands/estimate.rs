@@ -444,7 +444,7 @@ fn estimate_job(ast: &CommandAst, ctx: &ExecContext, mut reply: Reply, job: Opti
     let since = level_since_time(catalog, &plan, &mut level, client_id, fileset_id);
 
     reply.out.push_str(&format!("Connecting to Client {} at {}:{}\n", plan.client, plan.address, plan.port));
-    let mut fd = match fd_protocol::connect_fd_with_timeout(&plan.address, plan.port, &plan.password, &plan.director, None, plan.tls) {
+    let mut fd = match fd_protocol::connect_fd_with_timeout(&plan.address, plan.port, &plan.password, &plan.director, None, plan.tls, &plan.client) {
         Ok((fd, _)) => {
             // the mode that worked: immediate TLS, or clear text for `TLS Enable = no`
             if plan.tls.0 {

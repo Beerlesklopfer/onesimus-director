@@ -183,25 +183,32 @@ mod tests {
 /// The builder receives the negotiated protocol version (53 adds timestamp).
 /// Existing status/backup connection paths are unaffected.
 pub fn fd_command(
-    address: &str, port: u16, password: &str, director_name: &str, tls: (bool, bool),
+    address: &str, port: u16, password: &str, director_name: &str, tls: (bool, bool), client: &str,
     command: impl FnOnce(u32) -> String,
 ) -> Result<String, String> {
-    let (mut bnet, version) = connect_control_fd(address, port, password, director_name, tls)?;
+    let (mut bnet, version) = connect_control_fd(address, port, password, director_name, tls, client)?;
     bnet.send_str(&command(version)).map_err(|e| e.to_string())?;
     let result = read_control_reply(&mut bnet);
     let _ = bnet.send_signal(BnetSignal::Terminate);
     result
 }
 
-fn connect_control_fd(address: &str, port: u16, password: &str, director_name: &str, tls: (bool, bool))
+fn connect_control_fd(address: &str, port: u16, password: &str, director_name: &str, tls: (bool, bool), client: &str)
     -> Result<(BnetStream<bareos_bnet::stream::AnyStream>, u32), String> {
-    connect_fd_with_timeout(address, port, password, director_name, Some(Duration::from_secs(15)), tls)
+    connect_fd_with_timeout(address, port, password, director_name, Some(Duration::from_secs(15)), tls, client)
 }
 
 /// Authenticated Director→FD connection (TLS-PSK, Hello, CRAM-MD5) with the
 /// given read timeout; returns the stream and the FD protocol version.
 pub(crate) fn connect_fd_with_timeout(address: &str, port: u16, password: &str, director_name: &str,
-    read_timeout: Option<Duration>, tls: (bool, bool)) -> Result<(BnetStream<bareos_bnet::stream::AnyStream>, u32), String> {
+    read_timeout: Option<Duration>, tls: (bool, bool), client: &str) -> Result<(BnetStream<bareos_bnet::stream::AnyStream>, u32), String> {
+    // UseWaitingClient(): a client initiated connection of `client` first
+    if let Some((stream, version)) = crate::client_pool::take(client) {
+        if let Some(tcp) = stream.inner().tcp() {
+            let _ = tcp.set_read_timeout(read_timeout);
+        }
+        return Ok((stream, version.max(0) as u32));
+    }
     if let Some((stream, _)) = crate::fd_grpc::try_connect(address, port, password, director_name, read_timeout) {
         return Ok((stream, 54));
     }
@@ -298,6 +305,24 @@ fn store_handshake(client: &str, mode: HandshakeMode) {
 pub fn connect_fd_console(address: &str, port: u16, password: &str, director_name: &str, client_name: &str,
                           tls: (bool, bool))
     -> (String, Result<BnetStream<bareos_bnet::stream::AnyStream>, String>) {
+    // UseWaitingClient(): a client initiated connection first; the Handshake line names its mode
+    if let Some((stream, _)) = crate::client_pool::take(client_name) {
+        let stored = stored_handshake(client_name);
+        let mut info = String::new();
+        if stored.is_none() {
+            info.push_str("Probing client protocol... (result will be saved until config reload)\r\x0b");
+        }
+        let cipher = match stream.inner() {
+            bareos_bnet::stream::AnyStream::Psk(psk) => Some(psk.cipher_name()),
+            _ => None,
+        };
+        let mode = if cipher.is_some() { HandshakeMode::TlsFirst } else { HandshakeMode::CleartextFirst };
+        info.push_str(if cipher.is_some() { " Handshake: Immediate TLS," } else { " Handshake: Cleartext," });
+        info.push_str(&tls_psk::cipher_message_string(cipher.as_deref()));
+        info.push('\n');
+        store_handshake(client_name, mode);
+        return (info, Ok(stream));
+    }
     if let Some((stream, _)) = crate::fd_grpc::try_connect(address, port, password, director_name, Some(Duration::from_secs(15))) {
         return (" Handshake: gRPC TLS,\n".into(), Ok(stream));
     }

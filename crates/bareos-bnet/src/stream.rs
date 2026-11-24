@@ -40,6 +40,18 @@ pub enum AnyStream {
 }
 
 impl AnyStream {
+    /// The TCP socket under the stream (None for an external transport): for a liveness check of an
+    /// idle connection and to keep its descriptor across a fork.
+    pub fn tcp(&self) -> Option<&TcpStream> {
+        match self {
+            AnyStream::Plain(s) => Some(s),
+            AnyStream::Psk(s) => Some(s.tcp()),
+            AnyStream::RustlsServer(s) => Some(&s.sock),
+            AnyStream::RustlsClient(s) => Some(&s.sock),
+            AnyStream::External(_) => None,
+        }
+    }
+
     /// Name of the transport: `"BNET"`, `"BNET TLS-PSK"`, `"BNET TLS"` or
     /// the external stream's own name.
     pub fn transport(&self) -> &str {

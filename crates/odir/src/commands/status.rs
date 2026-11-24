@@ -746,15 +746,17 @@ fn list_connected_clients(ua: &mut Ua, ctx: &ExecContext) {
     ua.decoration(&format!("{:<20}{:<20}{:<20}{:<40}\n", "Connect time", "Protocol", "Authenticated", "Name"));
     ua.decoration(&format!("{sep}{sep}{sep}{sep}{sep}\n"));
     let mut rows = Vec::new();
-    for fd in ctx.session_mgr.as_ref().map(|s| s.get_fd_connections()).unwrap_or_default() {
-        let dt = bstrftime_nc(fd.connect_time as libc::time_t);
+    // the connections waiting in the pool (client_pool.rs); the session manager's list only fed events
+    let _ = &ctx.session_mgr;
+    for (name, protocol_version, connect_time) in crate::client_pool::list() {
+        let dt = bstrftime_nc(connect_time as libc::time_t);
         match ua.api {
             ApiMode::Json => rows.push(json!({
-                "connecttime": dt, "protocol_version": fd.protocol_version,
-                "authenticated": true, "name": fd.client_name,
+                "connecttime": dt, "protocol_version": protocol_version,
+                "authenticated": true, "name": name,
             })),
             _ => {
-                ua.send(&format!("{dt:<20}{:<20}{:<20}{:<40}", fd.protocol_version, 1, fd.client_name));
+                ua.send(&format!("{dt:<20}{:<20}{:<20}{:<40}", protocol_version, 1, name));
                 ua.decoration("\n");
             }
         }

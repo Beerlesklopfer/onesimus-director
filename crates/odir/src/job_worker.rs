@@ -1116,6 +1116,10 @@ fn end_job_of(msg: &str) -> Option<(i64, i64, i32, i32)> {
 // ============================================================================
 
 pub(crate) fn connect_fd(p: &JobParams) -> Result<(BnetStream<bareos_bnet::AnyStream>, String), String> {
+    // a client initiated connection the Director handed over (authenticated already)
+    if let Some((stream, _)) = crate::client_pool::take_handoff(p.job_id) {
+        return Ok((stream, String::new()));
+    }
     if let Some(stream) = crate::fd_grpc::try_worker(p) {
         return Ok(stream);
     }
@@ -1502,6 +1506,8 @@ pub fn spawn_job_worker(job_id: u32, job_name: &str, params: &JobParams) -> io::
             drop(w2d_r); drop(d2w_w);
             // Close inherited FDs (TCP listener etc)
             let mut keep = vec![w2d_w.as_raw_fd(), d2w_r.as_raw_fd()];
+            // a client initiated connection handed to this job (client_pool.rs)
+            keep.extend(crate::client_pool::handoff_fd(job_id));
             keep.extend(TOKIO_SIGNAL_FDS.get().into_iter().flatten());
             for fd in 3..1024 { if !keep.contains(&fd) { unsafe { libc::close(fd); } } }
 

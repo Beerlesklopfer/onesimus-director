@@ -194,7 +194,7 @@ fn handle_connection(
                     Ok((psk_stream, identity)) => {
                         debug!("session {session_id}: TLS-PSK accept OK (identity {})", identity.replace('\x1e', "/"));
                         let cipher = psk_stream.cipher_name();
-                        handle_hello(BnetStream::new(psk_stream), session_id, Some(identity), Some(cipher),
+                        handle_hello(BnetStream::new(bareos_bnet::AnyStream::Psk(psk_stream)), session_id, Some(identity), Some(cipher),
                                      session_mgr, cmd_queue, shared_config, job_manager, catalog);
                     }
                     Err(e) => {
@@ -204,7 +204,7 @@ fn handle_connection(
             } else {
                 // Plaintext BNET — first byte is part of i32 length header
                 debug!("session {session_id}: plaintext connection detected");
-                handle_hello(BnetStream::new(stream), session_id, None, None,
+                handle_hello(BnetStream::new(bareos_bnet::AnyStream::Plain(stream)), session_id, None, None,
                              session_mgr, cmd_queue, shared_config, job_manager, catalog);
             }
         }
@@ -244,8 +244,8 @@ fn psk_for_identity(shared_config: &Option<SharedConfig>, identity: &str) -> Opt
 }
 
 /// Handle connection after stream type is determined.
-fn handle_hello<S: std::io::Read + std::io::Write>(
-    mut bnet: BnetStream<S>,
+fn handle_hello(
+    mut bnet: BnetStream<bareos_bnet::AnyStream>,
     session_id: u64,
     tls_identity: Option<String>,
     tls_cipher: Option<String>,
@@ -326,12 +326,10 @@ fn handle_hello<S: std::io::Read + std::io::Write>(
     match hello {
         Hello::DefaultConsole | Hello::NamedConsole { .. } => unreachable!(),
         Hello::FileDaemon { client_name, fd_protocol_version } => {
-            // Client-initiated connections (Connection From Client To Director) are
-            // not served (docs/STUBS.md S-46). Registering the name would list a
-            // connection nobody authenticated and no job can use, and the entry
-            // would stay after the socket is closed.
-            let _ = session_mgr;
-            debug!("FD '{client_name}' (proto={fd_protocol_version}) connected: client-initiated connections are not served, closed");
+            // Connection From Client To Director (client_pool.rs, S-46)
+            let Some(config) = shared_config else { return };
+            crate::client_pool::accept_client(bnet, session_id, &client_name, fd_protocol_version,
+                tls_identity.as_deref(), config, catalog.as_ref(), session_mgr);
         }
     }
 }

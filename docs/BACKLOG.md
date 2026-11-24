@@ -16,7 +16,7 @@ Belege stehen im [Kompatibilitätslog](COMPATIBILITY-LOG.md), in
 | [S-39](STUBS.md) | ~~`SetBandwidth` mit `limit=0` in proto3 nicht übertragbar; Feld als `optional`~~ **erledigt** (Beleg in STUBS.md) |
 | [S-40](STUBS.md) | ~~`update jobid=…` auf einen nie gestarteten Job: SQL-Fehler wegen leerer StartTime~~ **erledigt** (Beleg in STUBS.md) |
 | [S-41](STUBS.md) | ~~`list nextvolume` findet in einem Pool mit frisch gelabeltem Volume keins (gegen das Original prüfen)~~ **erledigt** (Beleg in STUBS.md) |
-| [S-13](STUBS.md) (Rest) | Eigener FD `ofd`: PKI-Verschlüsselung/Signaturen, Plugins, Heartbeat, client-initiierte Verbindungen, LMDB für Accurate, VSS/Windows/macOS; `breg.rs` noch als Kopie |
+| [S-13](STUBS.md) (Rest) | Eigener FD `ofd`: PKI-Verschlüsselung/Signaturen, Plugins, Heartbeat, ~~client-initiierte Verbindungen~~ (erledigt 25.11.2026, S-46), LMDB für Accurate, VSS/Windows/macOS; `breg.rs` noch als Kopie |
 
 ### gRPC-Lücken aus der GUI (20.11.2026, Sitzung onesimus-gui)
 

@@ -58,6 +58,9 @@ pub struct RunOverrides {
 /// JobTriggerToString(JobTrigger::kScheduler).
 pub const TRIGGER_SCHEDULER: &str = "Scheduler";
 
+/// JobTriggerToString(JobTrigger::kClient): a job a client's connection started.
+pub const TRIGGER_CLIENT: &str = "Client";
+
 impl RunOverrides {
     /// SetJcrFromRunResource(): the overrides of `run` (none without a Run
     /// directive, as for AddJobWithNoRunResourceToQueue).
@@ -312,6 +315,11 @@ impl Launcher {
     /// `run` (None for a job queued without a Run directive). Returns the
     /// JobId, 0 when the job could not be queued.
     pub fn execute(&self, job_name: &str, run: Option<&RunDirective>, now: i64) -> u32 {
+        self.execute_with_trigger(job_name, run, now, TRIGGER_SCHEDULER)
+    }
+
+    /// [`Self::execute`] with the job trigger `trigger` (JobTriggerToString).
+    pub fn execute_with_trigger(&self, job_name: &str, run: Option<&RunDirective>, now: i64, trigger: &'static str) -> u32 {
         let (job, ast) = {
             let Ok(cfg) = self.config.read() else { return 0 };
             let Some(job) = cfg.find_job(job_name).cloned() else { return 0 };
@@ -327,8 +335,9 @@ impl Launcher {
             bus_rx: None,
             job_manager: self.job_manager.clone(),
         };
-        let result = with_overrides(RunOverrides::from_run(run),
-            || crate::commands::job::start_job(&ast, &ctx, job));
+        let mut overrides = RunOverrides::from_run(run);
+        overrides.trigger = trigger;
+        let result = with_overrides(overrides, || crate::commands::job::start_job(&ast, &ctx, job));
         let job_id = result.json.as_ref().and_then(|j| j["run"]["jobid"].as_str().and_then(|id| id.parse().ok()))
             .or_else(|| result.text_output.strip_prefix("Job queued. JobId=")
                 .and_then(|rest| rest.trim_end().parse().ok()))
@@ -426,4 +435,21 @@ mod tests {
         with_overrides(RunOverrides::from_run(None), || apply(1, &mut prio, &mut report));
         assert_eq!((prio, report.trigger.as_str()), (10, "Scheduler"));
     }
+}
+
+/// The launcher for jobs started by a client's connection (Run On Incoming Connect Interval), set at
+/// start by main.
+static INCOMING: std::sync::OnceLock<Launcher> = std::sync::OnceLock::new();
+
+/// Sets the launcher of [`execute_on_incoming_connect`].
+pub fn set_incoming_launcher(launcher: Launcher) {
+    let _ = INCOMING.set(launcher);
+}
+
+/// AddJobWithNoRunResourceToQueue(job, JobTrigger::kClient): starts job `job_name` with the job
+/// trigger "Client"; the JobId, 0 when it was not queued.
+pub fn execute_on_incoming_connect(job_name: &str) -> u32 {
+    let Some(launcher) = INCOMING.get() else { return 0 };
+    let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs() as i64).unwrap_or(0);
+    launcher.execute_with_trigger(job_name, None, now, TRIGGER_CLIENT)
 }

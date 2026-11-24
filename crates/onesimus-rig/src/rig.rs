@@ -625,21 +625,32 @@ impl Rig {
     }
 }
 
-/// `text` (resources of a configuration file) with `lines` added to every top-level resource of type
-/// `kind` (case-insensitive).
+/// `text` (resources of a configuration file) with `lines` (`Key = value`) in every top-level resource
+/// of type `kind` (case-insensitive): a line replaces one with the same key (spaces and case ignored),
+/// the others are added at the end of the resource.
 fn with_lines(text: &str, kind: &str, lines: &[String]) -> String {
     if lines.is_empty() {
         return text.to_string();
     }
+    let key = |line: &str| line.split('=').next().unwrap_or("").replace(' ', "").to_ascii_lowercase();
     let mut out = String::new();
     let mut current: Option<bool> = None;
+    let mut pending: Vec<&String> = Vec::new();
     for line in text.lines() {
         let trimmed = line.trim();
         if current.is_none() && trimmed.ends_with('{') {
             current = Some(trimmed.trim_end_matches('{').trim().eq_ignore_ascii_case(kind));
+            pending = lines.iter().collect();
+        } else if current == Some(true) && trimmed.contains('=') {
+            if let Some(at) = pending.iter().position(|l| key(l) == key(trimmed)) {
+                out.push_str("  ");
+                out.push_str(pending.remove(at));
+                out.push('\n');
+                continue;
+            }
         } else if line == "}" {
             if current == Some(true) {
-                for added in lines {
+                for added in pending.drain(..) {
                     out.push_str("  ");
                     out.push_str(added);
                     out.push('\n');

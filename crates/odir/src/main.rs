@@ -8,6 +8,7 @@
 //! Named threads, fork-per-job, crossbeam channels for core,
 //! tokio only for gRPC.
 
+mod client_pool;
 mod accept;
 mod pam_auth;
 mod acl;
@@ -748,6 +749,8 @@ fn spawn_named_threads(
             catalog: catalog.clone(),
             job_manager: Some(job_mgr.clone()),
         };
+        // jobs a client's connection starts (Run On Incoming Connect Interval)
+        scheduled_run::set_incoming_launcher(launcher.clone());
         let handle = thread::Builder::new()
             .name("dir:scheduler".into())
             .spawn(move || {

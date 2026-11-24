@@ -673,7 +673,15 @@ impl JobManager {
                 }
                 continue;
             }
-            match spawner(id, &job.job_name, &params) {
+            // UseWaitingClient(): a client initiated connection goes into the worker (client_pool.rs)
+            #[cfg(unix)]
+            if matches!(params.job_type, crate::job_worker::WorkerJobType::Backup | crate::job_worker::WorkerJobType::Restore
+                | crate::job_worker::WorkerJobType::Verify) {
+                let _ = crate::client_pool::prepare_handoff(id, &params.client_name);
+            }
+            let spawned = spawner(id, &job.job_name, &params);
+            crate::client_pool::drop_handoff(id);
+            match spawned {
                 Ok(handle) => {
                     info!("Job {id} '{}': worker pid={}", job.job_name, handle.pid);
                     job.handle = handle;

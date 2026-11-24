@@ -21,6 +21,15 @@ pub struct DirectorAuth {
     pub allowed_script_dirs: Vec<String>,
     /// AllowedJobCommand (empty: all)
     pub allowed_job_cmds: Vec<String>,
+    /// `Connection From Client To Director`: this FD connects to the Director itself and waits for its
+    /// commands (client initiated connection, dir_connect.rs).
+    pub connect_to_director: bool,
+    /// `Address` of the Director (for the client initiated connection).
+    pub address: Option<String>,
+    /// `Port` of the Director (default 9101).
+    pub port: u16,
+    /// `TLS Enable` (default yes): TLS-PSK on the client initiated connection.
+    pub tls_enable: bool,
 }
 
 /// A Messages resource: the types sent to the Director and append files.
@@ -335,6 +344,10 @@ fn parse_block(block_type: &str, content: &str, config: &mut FdConfig) {
                     max_bandwidth_per_job: get("maximumbandwidthperjob").and_then(|v| parse_speed(&v)).unwrap_or(0),
                     allowed_script_dirs: all("allowedscriptdir"),
                     allowed_job_cmds: all("allowedjobcommand"),
+                    connect_to_director: get("connectionfromclienttodirector").map(|v| is_yes(&v)).unwrap_or(false),
+                    address: get("address"),
+                    port: get("port").and_then(|v| v.parse().ok()).unwrap_or(9101),
+                    tls_enable: get("tlsenable").map(|v| is_yes(&v)).unwrap_or(true),
                 });
             }
         }

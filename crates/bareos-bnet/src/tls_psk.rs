@@ -65,6 +65,11 @@ pub struct PskStream {
 }
 
 impl PskStream {
+    /// The TCP socket under the TLS session.
+    pub fn tcp(&self) -> &TcpStream {
+        self.inner.get_ref()
+    }
+
     /// Negotiated cipher and protocol, e.g. "TLS_CHACHA20_POLY1305_SHA256 TLSv1.3"
     /// (C++ TlsOpenSsl::TlsCipherGetName, lib/tls_openssl.cc:89); empty without a cipher.
     pub fn cipher_name(&self) -> String {

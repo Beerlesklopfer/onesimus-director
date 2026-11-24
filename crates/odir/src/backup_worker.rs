@@ -83,6 +83,11 @@ pub struct BackupSession {
 /// three tries. Err: the fatal text TerminateBackupWithError starts with
 /// (empty when the messages were already sent). S-27.
 fn connect_file_daemon(params: &JobParams, session: &BackupSession) -> Result<BnetStream<AnyStream>, String> {
+    // UseWaitingClient(): the client initiated connection the Director handed over
+    if let Some((stream, _)) = crate::client_pool::take_handoff(params.job_id) {
+        state(params.job_id, "BackupFDConnected");
+        return Ok(stream);
+    }
     if let Some((stream, _)) = crate::fd_grpc::try_worker(params) {
         state(params.job_id, "BackupFDConnected");
         jmsg(params.job_id, M_INFO, format!("Connected Client: {} via gRPC TLS\n", params.client_name));
