@@ -85,6 +85,8 @@ struct Plan {
     password: String,
     /// `TLS Enable` and `TLS Require` of the Client resource.
     tls: (bool, bool),
+    /// AutoPrune and retentions of the Client resource (UpdateClientRecord after `2000 OK Job`).
+    retention: crate::backup::ClientRetention,
     fileset_name: String,
     fileset: Option<FilesetItems>,
     /// Options of the job's own FileSet (backup.cc IsChecksumNeededByFileset)
@@ -396,6 +398,7 @@ fn estimate_job(ast: &CommandAst, ctx: &ExecContext, mut reply: Reply, job: Opti
             port: client_res.port,
             password: client_res.password.clone(),
             tls: (client_res.tls_enable, client_res.tls_require),
+            retention: crate::backup::client_retention(&cfg, &client_res.name),
             fileset: fileset_items(&cfg, &fileset_name),
             fileset_name,
             job_fileset_opts,
@@ -541,7 +544,11 @@ fn estimate_on_fd<S: std::io::Read + std::io::Write>(fd: &mut BnetStream<S>, cat
     send(fd, &format!("JobId=0 Job={job} SDid=0 SDtime=0 Authorization=dummy ssl=4\n"))
         .map_err(|_| CONNECT_FAILED.to_string())?;
     match fd_protocol::get_dir_msg(fd).map_err(|_| CONNECT_FAILED.to_string())? {
-        Some(message) if message.starts_with("2000 OK Job") => {}
+        Some(message) if message.starts_with("2000 OK Job") => {
+            // SendJobInfoToFileDaemon(): UpdateClientRecord() with the FD's uname (the console JCR has a catalog)
+            let uname = message.trim_end_matches(['\n', '\r']).get("2000 OK Job".len() + 1..).unwrap_or("");
+            let _ = catalog.execute(&crate::backup::update_client_record_sql(&plan.client, plan.retention, uname));
+        }
         _ => return Err(CONNECT_FAILED.into()),
     }
 

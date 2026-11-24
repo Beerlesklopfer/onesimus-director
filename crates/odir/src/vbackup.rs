@@ -314,7 +314,7 @@ pub fn start(config: &DirectorConfig, catalog: Option<&CatalogHandle>, req: &Req
     let params = crate::job_worker::JobParams {
         job_id, unique_job: unique.clone(), job_name: job.name.clone(),
         job_type: crate::job_worker::WorkerJobType::Backup, level: "VirtualFull".into(),
-        fd_address: String::new(), fd_port: 0, fd_password: String::new(), fd_tls_policy: 2, fd_grpc: None, sd_grpc: None,
+        fd_address: String::new(), fd_port: 0, fd_password: String::new(), fd_tls_policy: 2, client_retention: None, fd_grpc: None, sd_grpc: None,
         sd_address: write.address.clone(), sd_port: write.port, sd_password: write.password.clone(),
         sd_device: write.devices.first().cloned().unwrap_or_default(), sd_media_type: write.media_type.clone(),
         director_name: config.director.name.clone(), pool_name: wpool.clone(), fileset_name: fileset.clone(), fileset_includes: Vec::new(),

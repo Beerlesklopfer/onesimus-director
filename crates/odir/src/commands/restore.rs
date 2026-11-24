@@ -1855,6 +1855,7 @@ pub(crate) fn start_restore(ctx: &ExecContext, launch: Launch) -> CommandResult 
     let passive_client = crate::commands::defaults::bool_directive(
         &crate::commands::defaults::raw(&config, "client", &client.name)
             .map(|r| r.directives.clone()).unwrap_or_default(), "passive", false);
+    let client_retention = crate::backup::client_retention(&config, &client.name);
     drop(config); // Release RwLock before fork
 
     let now = now_unix();
@@ -1881,6 +1882,7 @@ pub(crate) fn start_restore(ctx: &ExecContext, launch: Launch) -> CommandResult 
         fd_port: client.port,
         fd_password: client.password.clone(),
         fd_tls_policy: crate::fd_protocol::tls_policy(client.tls_enable, client.tls_require),
+        client_retention: Some(client_retention),
         fd_grpc,
         sd_grpc,
         sd_address: storage.address.clone(),

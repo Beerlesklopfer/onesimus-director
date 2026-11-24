@@ -89,6 +89,10 @@ pub struct JobParams {
     /// Client's `TLS Enable`/`TLS Require`): 0 also means the FD is reached in clear text.
     #[serde(default = "default_fd_tls_policy")]
     pub fd_tls_policy: i32,
+    /// AutoPrune and retentions of the Client resource: with them the worker updates the Client record
+    /// (with the FD's uname) after `2000 OK Job`, like SendJobInfoToFileDaemon; `None`: no update.
+    #[serde(default)]
+    pub client_retention: Option<crate::backup::ClientRetention>,
     #[serde(default)]
     pub fd_grpc: Option<crate::fd_grpc::Target>,
     /// gRPC endpoint of the Storage (osd), snapshotted before fork.
@@ -871,13 +875,22 @@ fn to_sd_params(p: &JobParams) -> SdJobParams {
     }
 }
 
+/// SendJobInfoToFileDaemon(): after `2000 OK Job <uname>` the Client record gets the resource's AutoPrune
+/// and retentions and the FD's uname (UpdateClientRecord), for every job type.
+fn update_client_record(p: &JobParams, reply: &str) {
+    let Some(retention) = p.client_retention else { return };
+    let uname = reply.trim_end_matches(['\n', '\r']).get("2000 OK Job".len() + 1..).unwrap_or("");
+    send_jmsg(PipeMessage::CatalogSql { job_id: p.job_id, sql: crate::backup::update_client_record_sql(&p.client_name, retention, uname) });
+}
+
 /// FD setup for restore: JobId + storage only — NO level, NO fileset.
 /// C++ Director sends: JobId → storage → session → restore
 /// See: core/src/dird/fd_cmds.cc SendRunscriptsToFd / DoRestoreInit
 fn fd_restore_setup(fd: &mut BnetStream<bareos_bnet::AnyStream>, p: &JobParams, sd_auth_key: &str) -> Result<(), String> {
     let cmd = format!("JobId={} Job={} SDid=1 SDtime={} Authorization={sd_auth_key} ssl=4\n",
         p.job_id, p.unique_job, now_unix());
-    send_expect(fd, &cmd, "2000 OK Job", p.job_id, "FD JobId")?;
+    let reply = send_expect(fd, &cmd, "2000 OK Job", p.job_id, "FD JobId")?;
+    update_client_record(p, &reply);
     // getSecureEraseCmd
     fd.send_str("getSecureEraseCmd\n").map_err(|e| format!("send secErase: {e}"))?;
     let _ = fd.recv_str(); // 2000 OK FDSecureEraseCmd *None*
@@ -985,7 +998,8 @@ pub(crate) fn sd_catrec_loop(
 
 fn fd_job_setup(fd: &mut BnetStream<bareos_bnet::AnyStream>, p: &JobParams, sd_auth_key: &str) -> Result<(), String> {
     let cmd = format!("JobId={} Job={} SDid=1 SDtime={} Authorization={sd_auth_key} ssl=4\n", p.job_id, p.unique_job, now_unix());
-    send_expect(fd, &cmd, "2000 OK Job", p.job_id, "FD JobId")?;
+    let reply = send_expect(fd, &cmd, "2000 OK Job", p.job_id, "FD JobId")?;
+    update_client_record(p, &reply);
     // getSecureEraseCmd
     fd.send_str("getSecureEraseCmd\n").map_err(|e| format!("send secErase: {e}"))?;
     let _ = fd.recv_str(); // 2000 OK FDSecureEraseCmd *None*
@@ -1522,7 +1536,7 @@ mod wait_protocol_tests {
     fn restore_command_like_build_restore_command() {
         let mut p = JobParams {
             job_id: 1, unique_job: "R.1".into(), job_name: "R".into(), job_type: WorkerJobType::Restore,
-            level: "full".into(), fd_address: String::new(), fd_port: 0, fd_password: String::new(), fd_tls_policy: 2, fd_grpc: None, sd_grpc: None,
+            level: "full".into(), fd_address: String::new(), fd_port: 0, fd_password: String::new(), fd_tls_policy: 2, client_retention: None, fd_grpc: None, sd_grpc: None,
             sd_address: String::new(), sd_port: 0, sd_password: String::new(), sd_device: String::new(),
             sd_media_type: String::new(), director_name: String::new(), pool_name: String::new(),
             fileset_name: String::new(), fileset_includes: vec![], fileset_excludes: vec![], since_utime: 0, prev_job: String::new(),
