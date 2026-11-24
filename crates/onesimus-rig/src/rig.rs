@@ -77,6 +77,14 @@ pub struct RigOptions {
     /// No TLS to and between the SDs of a Copy (`TLS Enable = no` on the
     /// second SD and its Storage resource: `replicate … ssl=0`, clear text).
     pub copy_plain: bool,
+    /// The Director to start instead of `odir` (a `bareos-dir`: started with `-f -c <dir> -d`, no overlay,
+    /// no gRPC).
+    pub dir_program: Option<PathBuf>,
+    /// Lines added to the `Director` resource of the FD's configuration (e.g. `Connection From Client To
+    /// Director = yes`).
+    pub fd_director_lines: Vec<String>,
+    /// Lines added to the Director's `Client` resource of the rig FD.
+    pub dir_client_lines: Vec<String>,
     /// No TLS between Director and FD: `TLS Enable = no` in the Director's Client resource and in the
     /// FD's Director and Client resources (a FD in clear text, like an old one).
     pub fd_plain: bool,
@@ -107,6 +115,9 @@ impl RigOptions {
             extra_odir_d: Vec::new(),
             fd_program: None,
             fd_plain: false,
+            dir_program: None,
+            fd_director_lines: Vec::new(),
+            dir_client_lines: Vec::new(),
         }
     }
 }
@@ -345,6 +356,18 @@ impl Rig {
             plain(&self.layout.dir_conf.join("client").join(format!("{}.conf", crate::config::CLIENT))).map_err(io)?;
             plain(&self.layout.fd_conf.join("client").join(format!("{}.conf", crate::config::CLIENT))).map_err(io)?;
         }
+        {
+            let client = |dir: &Path| dir.join("client").join(format!("{}.conf", crate::config::CLIENT));
+            let add = |path: &Path, kind: &str, lines: &[String]| -> std::io::Result<()> {
+                if lines.is_empty() {
+                    return Ok(());
+                }
+                let text = std::fs::read_to_string(path)?;
+                std::fs::write(path, with_lines(&text, kind, lines))
+            };
+            add(&client(&self.layout.dir_conf), "client", &self.options.dir_client_lines).map_err(io)?;
+            add(&client(&self.layout.fd_conf), "director", &self.options.fd_director_lines).map_err(io)?;
+        }
         if self.options.start_fd {
             let mut fd_conf = self.layout.fd_conf.display().to_string();
             if self.options.fd_program.is_some() {
@@ -357,6 +380,7 @@ impl Rig {
                 if self.options.fd_plain {
                     text = tls_disabled(&text);
                 }
+                text = with_lines(&text, "director", &self.options.fd_director_lines);
                 std::fs::write(dir.join("bareos-fd.conf"), text).map_err(io)?;
                 fd_conf = dir.display().to_string();
             }
@@ -380,12 +404,17 @@ impl Rig {
 
         let dir_conf = self.layout.dir_conf.display().to_string();
         let onesimus_conf = self.layout.root.join("onesimus").display().to_string();
-        let mut dir = Daemon::spawn(
-            "odir",
-            &self.programs.odir,
-            &["-f", "--disable-grpc", "-c", &dir_conf, "--overlay", &onesimus_conf, "-d", &debug],
-            &self.layout.root.join("dir.log"),
-        )?;
+        let bareos_dir_conf = self.layout.dir_conf.parent().unwrap_or(&self.layout.dir_conf).display().to_string();
+        let mut dir = match &self.options.dir_program {
+            // bareos-dir reads `<dir>/bareos-dir.d`
+            Some(program) => Daemon::spawn("odir", program, &["-f", "-c", &bareos_dir_conf, "-d", &debug], &self.layout.root.join("dir.log"))?,
+            None => Daemon::spawn(
+                "odir",
+                &self.programs.odir,
+                &["-f", "--disable-grpc", "-c", &dir_conf, "--overlay", &onesimus_conf, "-d", &debug],
+                &self.layout.root.join("dir.log"),
+            )?,
+        };
         let started = wait_port(&mut dir, local(self.ports.dir), Duration::from_secs(30));
         self.daemons.push(dir);
         started
@@ -594,6 +623,34 @@ impl Rig {
     pub fn root(&self) -> &Path {
         &self.layout.root
     }
+}
+
+/// `text` (resources of a configuration file) with `lines` added to every top-level resource of type
+/// `kind` (case-insensitive).
+fn with_lines(text: &str, kind: &str, lines: &[String]) -> String {
+    if lines.is_empty() {
+        return text.to_string();
+    }
+    let mut out = String::new();
+    let mut current: Option<bool> = None;
+    for line in text.lines() {
+        let trimmed = line.trim();
+        if current.is_none() && trimmed.ends_with('{') {
+            current = Some(trimmed.trim_end_matches('{').trim().eq_ignore_ascii_case(kind));
+        } else if line == "}" {
+            if current == Some(true) {
+                for added in lines {
+                    out.push_str("  ");
+                    out.push_str(added);
+                    out.push('\n');
+                }
+            }
+            current = None;
+        }
+        out.push_str(line);
+        out.push('\n');
+    }
+    out
 }
 
 /// `text` (resources of a configuration file) with `TLS Enable = no` in every `Client` and `Director`

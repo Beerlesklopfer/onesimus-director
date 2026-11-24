@@ -104,10 +104,19 @@ pub fn run_job(d: &Daemon, job: &Arc<Job>, dir: &SharedChannel) {
         drop(dir_lock);
         return;
     }
+    #[cfg(unix)]
+    let socket_fd = match &conn.breaker {
+        crate::jobs::Breaker::Socket(s) => std::os::fd::AsRawFd::as_raw_fd(s) as i64,
+        _ => -1,
+    };
+    #[cfg(not(unix))]
+    let socket_fd = -1;
+    job.net.fd.store(socket_fd, Ordering::Relaxed);
+    let mut counted = crate::transport::Counted { inner: conn.channel.as_mut(), counters: &job.net };
     if conn.sd {
-        do_sd_commands(d, job, dir, conn.channel.as_mut(), &mut session);
+        do_sd_commands(d, job, dir, &mut counted, &mut session);
     } else {
-        do_fd_commands(d, job, dir, conn.channel.as_mut(), &mut session);
+        do_fd_commands(d, job, dir, &mut counted, &mut session);
     }
     let _ = conn.channel.signal(BnetSignal::Terminate);
     job.set_status('T');

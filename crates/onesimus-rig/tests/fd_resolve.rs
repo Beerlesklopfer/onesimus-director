@@ -39,6 +39,7 @@ fn ofd_resolves_like_the_bareos_fd() {
     let ofd_plain = resolve_reply(40041, None, true);
     println!("=== bareos-fd, no TLS ===\n{bareos_plain:?}\n=== ofd, no TLS ===\n{ofd_plain:?}");
     assert!(!bareos_plain.contains("Encryption: TLS"), "{bareos_plain}");
+    assert!(ofd_plain.contains("Handshake: Cleartext"), "odir reaches ofd in clear text: {ofd_plain}");
     assert_eq!(strip(&ofd_plain), strip(&bareos_plain));
     assert_eq!(strip(&bareos_plain), strip(&bareos));
 }

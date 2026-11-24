@@ -214,6 +214,10 @@ pub struct Job {
     pub created: Instant,
     /// The volume the job uses now (from the Director's catalog replies, for `status`).
     pub volume: Mutex<String>,
+    /// The counters of the FD connection (`status`).
+    pub net: crate::transport::NetCounters,
+    /// Time and `JobBytes` at the last `status` (`LastBytes/sec` is the rate since then).
+    pub last_status: Mutex<Option<(Instant, u64)>>,
 }
 
 impl Job {
@@ -306,6 +310,8 @@ impl JobTable {
             bytes: Mutex::new(0),
             created: Instant::now(),
             volume: Mutex::new(String::new()),
+            net: Default::default(),
+            last_status: Mutex::new(None),
             cmd,
         });
         self.jobs.lock().unwrap_or_else(|e| e.into_inner()).insert(job.cmd.job.clone(), job.clone());

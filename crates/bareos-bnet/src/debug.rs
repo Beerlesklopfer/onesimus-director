@@ -274,3 +274,26 @@ mod trace_tests {
     }
 
 }
+
+/// The hangup value of `setdebug` (SetHangup/GetHangup; kept, no effect in Onesimus).
+static HANGUP: std::sync::atomic::AtomicI32 = std::sync::atomic::AtomicI32::new(0);
+
+/// SetdebugCmd() of the File and Storage daemon: a value of -1 keeps the current setting (`level` <
+/// 0 keeps the debug level, `trace`/`timestamp`/`hangup` < 0 keep theirs; `hangup` is `None` for the
+/// Storage daemon). Returns the settings now in force: (trace, hangup, timestamp) as 0/1 (hangup as
+/// stored), for the reply `… OK setdebug=<level> trace=… hangup=… timestamp=… tracefile=…`.
+pub fn apply_setdebug(level: i64, trace: i64, hangup: Option<i64>, timestamp: i64, tracefile: &Path) -> (i32, i32, i32) {
+    if level >= 0 {
+        set_debug_level(level.min(u32::MAX as i64) as u32);
+    }
+    if trace >= 0 {
+        let _ = set_trace(tracefile, trace != 0);
+    }
+    if let Some(h) = hangup.filter(|h| *h >= 0) {
+        HANGUP.store(h.min(i32::MAX as i64) as i32, Ordering::Relaxed);
+    }
+    if timestamp >= 0 {
+        set_debug_timestamps(timestamp != 0);
+    }
+    (i32::from(trace_enabled()), HANGUP.load(Ordering::Relaxed), i32::from(debug_timestamps()))
+}

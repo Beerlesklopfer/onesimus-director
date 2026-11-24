@@ -611,15 +611,14 @@ impl DirSession {
             self.send(&format!("3991 Bad setdebug command: {msg}\n"));
             return Next::Quit;
         };
-        let tracefile = format!(
+        let tracefile = std::path::PathBuf::from(format!(
             "{}/{}.trace",
             self.d.config.storage.working_directory.as_deref().unwrap_or("/var/lib/bareos"),
             self.d.name()
-        );
-        match num("timestamp=") {
-            Some(ts) => self.send(&format!("3000 OK setdebug={level} trace={trace} timestamp={ts} tracefile={tracefile}\n")),
-            None => self.send(&format!("3000 OK setdebug={level} tracefile={tracefile}\n")),
-        }
+        ));
+        // -1 keeps a setting; the reply names the requested level and the settings now in force
+        let (trace, _, timestamp) = bareos_bnet::debug::apply_setdebug(level, trace, None, num("timestamp=").unwrap_or(-1), &tracefile);
+        self.send(&format!("3000 OK setdebug={level} trace={trace} timestamp={timestamp} tracefile={}\n", tracefile.display()));
         Next::Continue
     }
 

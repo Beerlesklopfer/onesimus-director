@@ -61,8 +61,7 @@ P2 ist erledigt (Plan [P2 umgesetzt](plans/OSD-GERAETE-UND-VERTEILUNG.md#p2-umge
 | `cancel` | ~~Cancel-Dialog ohne Paritätsfall~~ erledigt 24.11.2026 (`c090`: 15 Fälle gegen das Original, auch mit wartendem Job; Dialog, `job=`, `all`, Bestätigung ja/nein); offen: `*JobCancel*` des Job-Threads ohne Jobnamen-Nummer, Berichtszeilen „Director's comm line to SD dropped“/SD termination status beim Cancel eines laufenden Jobs (Backup-Worker, S-27) | [C-011](COMPATIBILITY-LOG.md), S-26 |
 | Konfigurationsstart | ~~Normaler Start prüft nicht wie `-t`~~ erledigt (cb916f8, Exit 42); Lexer-Position im Log erledigt (24.11.2026, `reload_log.rs`) | [C-057](COMPATIBILITY-LOG.md) |
 
-Nur Testlücken, keine bekannte Abweichung: Wirkung von `setdebug`, `trace`,
-`wait` auf echte Jobenden, `add`/`create`/`prune`-Katalogzustand danach,
+Nur Testlücken, keine bekannte Abweichung: (`setdebug` an echten FD/SD seit 24.11.2026 belegt: `setdebug_daemons.rs`, ofd/osd antworten wie bareos-fd/bareos-sd mit den wirksamen Werten und der Trace-Datei; `wait` auf echte Jobenden: `c094`) `add`/`create`/`prune`-Katalogzustand danach,
 `import`/`export`/`move` an einem echten Autochanger (bisher simuliert),
 (`add`/`create`/`prune`/`update`-Katalogzustand danach: seit 24.11.2026 belegt, Fälle `c093`, 14, alle gleich; `prune`/`purge`/`delete` von Jobs, Dateien und Volumes der jüngsten Full-Kette weichen absichtlich ab, siehe betrieb-odir.md),
 `resolve` gegen Legacy-/Nicht-TLS-Daemons, `.messages` über die

@@ -9,9 +9,10 @@
 //! des SD ab. osd gibt den Text von bareos-sd 25.1.3 aus (Kopf mit `Sizes`,
 //! `Job inventory`, wartende und beendete Jobs, Devices mit Fähigkeiten und
 //! Zustand, benutzte Volumes). Nicht belegt, weil osd die Zähler nicht hat:
-//! `FDReadSeqNo`, `in_msg`, `out_msg`, `fd` eines laufenden Jobs, die
-//! Block- und Positionszeilen eines geöffneten Devices, `LastBytes/sec`
-//! (hier wie `AveBytes/sec`), Spooling.
+//! die Block- und Positionszeilen eines geöffneten Devices, Spooling.
+//! `FDReadSeqNo`/`in_msg`/`out_msg` zählt osd selbst am FD-Kanal
+//! ([`crate::transport::Counted`]); die Werte weichen von bareos-sd ab,
+//! weil die Daemons unterschiedlich viele Nachrichten tauschen.
 //!
 //! Bareos-Gegenstück: `core/src/stored/status.cc` (`OutputStatus`,
 //! `ListStatusHeader`, `ListRunningJobs`, `ListDevices`, `DotstatusCmd`).
@@ -48,7 +49,7 @@ fn header(d: &Daemon) -> Vec<String> {
             d.jobs_run.load(std::sync::atomic::Ordering::Acquire),
             d.jobs.all().len()
         ),
-        " Sizes: boffset_t=8 size_t=8 int32_t=4 int64_t=8 bwlimit=0kB/s\n".to_string(),
+        format!(" Sizes: boffset_t=8 size_t={} int32_t=4 int64_t=8 bwlimit=0kB/s\n", std::mem::size_of::<usize>()),
     ]
 }
 
@@ -101,8 +102,24 @@ fn running(d: &Daemon) -> Vec<String> {
             let bytes = *job.bytes.lock().unwrap_or_else(|e| e.into_inner());
             let secs = job.created.elapsed().as_secs().max(1);
             let rate = bytes / secs;
+            // LastBytes/sec: the rate since the previous status (the average at the first)
+            let now = std::time::Instant::now();
+            let last_rate = {
+                let mut last = job.last_status.lock().unwrap_or_else(|e| e.into_inner());
+                let rate_since = match *last {
+                    Some((at, seen)) if now > at => {
+                        let ms = now.duration_since(at).as_millis().max(1) as u64;
+                        bytes.saturating_sub(seen).saturating_mul(1000) / ms
+                    }
+                    _ => rate,
+                };
+                *last = Some((now, bytes));
+                rate_since
+            };
+            let net = &job.net;
+            let load = |c: &std::sync::atomic::AtomicU64| c.load(std::sync::atomic::Ordering::Relaxed);
             out.push(format!(
-                "{}: Volume=\"{}\"\n    pool=\"{}\" device=\"{}\" ({path})\n    spooling=0 despooling=0 despool_wait=0\n    Files={} Bytes={} AveBytes/sec={} LastBytes/sec={}\n\n",
+                "{}: Volume=\"{}\"\n    pool=\"{}\" device=\"{}\" ({path})\n    spooling=0 despooling=0 despool_wait=0\n    Files={} Bytes={} AveBytes/sec={} LastBytes/sec={}\n    FDReadSeqNo={} in_msg={} out_msg={} fd={}\n\n",
                 if job.cmd.job_type == 'B' { "Writing" } else { "Reading" },
                 job.volume.lock().unwrap_or_else(|e| e.into_inner()),
                 job.storage.lock().unwrap_or_else(|e| e.into_inner()).as_ref().map(|s| s.pool_name.clone()).unwrap_or_default(),
@@ -110,7 +127,11 @@ fn running(d: &Daemon) -> Vec<String> {
                 commas(job.files.load(std::sync::atomic::Ordering::Acquire).into()),
                 commas(bytes),
                 commas(rate),
-                commas(rate),
+                commas(last_rate),
+                load(&net.read_seq),
+                load(&net.in_msg),
+                load(&net.out_msg),
+                net.fd.load(std::sync::atomic::Ordering::Relaxed),
             ));
         }
     }
@@ -155,10 +176,15 @@ fn terminated(d: &Daemon) -> Vec<String> {
                 'D' => "Diffs",
                 _ => "Unknown term code",
             };
+            // ListTerminatedJobs: the level cut to 4 characters, blank for Admin and Restore jobs
+            let level: String = match job.job_type {
+                'D' | 'R' => "    ".into(),
+                _ => level_name(job.level).chars().take(4).collect(),
+            };
             out.push(format!(
                 "{:6}  {:<6} {:>8} {:>10}  {:<7}  {} {}\n",
                 job.job_id,
-                level_name(job.level),
+                level,
                 commas(job.files.into()),
                 with_suffix(job.bytes),
                 status,

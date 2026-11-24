@@ -106,3 +106,47 @@ impl Channel for MemChannel {
         self.tx.as_ref().ok_or("connection closed")?.send(Message::Signal(signal)).map_err(|_| "connection closed".to_string())
     }
 }
+
+/// The counters of a job's connection to the FD that `status` shows (`FDReadSeqNo`, `in_msg`, `out_msg`,
+/// `fd` of bareos-sd's `ListRunningJobs`).
+#[derive(Debug, Default)]
+pub struct NetCounters {
+    /// Data messages read from the FD (`FDReadSeqNo`).
+    pub read_seq: std::sync::atomic::AtomicU64,
+    /// Messages read, data and signals (`in_msg`).
+    pub in_msg: std::sync::atomic::AtomicU64,
+    /// Messages sent, data and signals (`out_msg`).
+    pub out_msg: std::sync::atomic::AtomicU64,
+    /// The socket's file descriptor (`fd`), -1 when there is none (gRPC, in-process).
+    pub fd: std::sync::atomic::AtomicI64,
+}
+
+/// A [`Channel`] that counts what passes into [`NetCounters`].
+pub struct Counted<'a> {
+    /// The channel counted.
+    pub inner: &'a mut dyn Channel,
+    /// Where the counts go.
+    pub counters: &'a NetCounters,
+}
+
+impl Channel for Counted<'_> {
+    fn recv(&mut self) -> Result<Message, String> {
+        use std::sync::atomic::Ordering::Relaxed;
+        let message = self.inner.recv()?;
+        self.counters.in_msg.fetch_add(1, Relaxed);
+        if matches!(message, BnetMessage::Data(_)) {
+            self.counters.read_seq.fetch_add(1, Relaxed);
+        }
+        Ok(message)
+    }
+
+    fn send(&mut self, data: &[u8]) -> Result<(), String> {
+        self.counters.out_msg.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        self.inner.send(data)
+    }
+
+    fn signal(&mut self, signal: BnetSignal) -> Result<(), String> {
+        self.counters.out_msg.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        self.inner.signal(signal)
+    }
+}

@@ -310,8 +310,22 @@ impl<'a> Session<'a> {
         dir.send_signal(BnetSignal::Eod).is_ok()
     }
 
-    fn setdebug_cmd<S: Read + Write>(&mut self, dir: &mut BnetStream<S>, _cmd: &str) -> bool {
-        self.reply(dir, "2000 OK setdebug\n");
+    /// SetdebugCmd() (filed/dir_cmd.cc): `setdebug=L trace=T hangup=H [timestamp=S]` (or the old
+    /// `setdebug=L trace=T`); -1 keeps a setting. The reply names the requested level and the
+    /// settings now in force.
+    fn setdebug_cmd<S: Read + Write>(&mut self, dir: &mut BnetStream<S>, cmd: &str) -> bool {
+        let num = |key: &str| cmd.split_whitespace().find_map(|w| w.strip_prefix(key)).and_then(|v| v.parse::<i64>().ok());
+        let (Some(level), Some(trace)) = (num("setdebug="), num("trace=")) else {
+            self.reply(dir, &format!("2991 Bad setdebug command: {}\n", cmd.trim_end()));
+            return false;
+        };
+        let tracefile = std::path::Path::new(&self.config.working_directory).join(format!("{}.trace", self.config.name));
+        let (trace, hangup, timestamp) =
+            bareos_bnet::debug::apply_setdebug(level, trace, Some(num("hangup=").unwrap_or(-1)), num("timestamp=").unwrap_or(-1), &tracefile);
+        self.reply(dir, &format!(
+            "2000 OK setdebug={level} trace={trace} hangup={hangup} timestamp={timestamp} tracefile={}\n",
+            tracefile.display()
+        ));
         dir.send_signal(BnetSignal::Eod).is_ok()
     }
 

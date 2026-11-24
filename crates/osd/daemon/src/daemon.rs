@@ -90,6 +90,8 @@ pub struct TerminatedJob {
     pub job_id: u32,
     /// Level letter.
     pub level: char,
+    /// Job type letter (`B`, `R`, `V`, `D` …).
+    pub job_type: char,
     /// Job name.
     pub name: String,
     /// `JobFiles`.
@@ -193,7 +195,7 @@ impl Daemon {
         let Some(volume) = reply.split_whitespace().find_map(|w| w.strip_prefix("VolName=")) else { return };
         let Some(name) = line.split_whitespace().find_map(|w| w.strip_prefix("Job=")) else { return };
         if let Some(job) = self.jobs.find(name) {
-            *job.volume.lock().unwrap_or_else(|e| e.into_inner()) = volume.to_string();
+            *job.volume.lock().unwrap_or_else(|e| e.into_inner()) = bareos_format::bash::unbash_spaces(volume);
         }
     }
 
@@ -296,6 +298,7 @@ impl Daemon {
         last.push_back(TerminatedJob {
             job_id: job.cmd.job_id,
             level: job.cmd.level,
+            job_type: job.cmd.job_type,
             name: job.cmd.job_name.clone(),
             files: job.files.load(std::sync::atomic::Ordering::Acquire),
             bytes: *job.bytes.lock().unwrap_or_else(|e| e.into_inner()),

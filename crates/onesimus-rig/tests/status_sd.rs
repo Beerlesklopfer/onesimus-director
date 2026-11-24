@@ -24,7 +24,10 @@ fn normalized(rig: &Rig, text: &str) -> String {
             "Daemon started <t>".to_string()
         } else if line.trim_start().starts_with("Files=") {
             "    Files=<n> Bytes=<n> AveBytes/sec=<n> LastBytes/sec=<n>".to_string()
-        } else if line.trim_start().starts_with("FDReadSeqNo=") || line.trim_start().starts_with("Total Bytes=")
+        } else if line.trim_start().starts_with("FDReadSeqNo=") {
+            // the counts differ by nature (the daemons exchange different numbers of messages)
+            "    FDReadSeqNo=<n> in_msg=<n> out_msg=<n> fd=<n>".to_string()
+        } else if line.trim_start().starts_with("Total Bytes=")
             || line.trim_start().starts_with("Positioned at") || line.trim_start().starts_with("Health:") {
             continue;
         } else if line.starts_with("JobId=") {
@@ -33,18 +36,26 @@ fn normalized(rig: &Rig, text: &str) -> String {
             "Attached Jobs: <n>".to_string()
         } else if line.starts_with("  File=0 block=") {
             "  File=0 block=<n>".to_string()
-        } else if line.starts_with("     ") && line.contains(" Full ") || line.contains(" VBackup") || line.contains(" BigBackup") {
-            // a row of Terminated Jobs: the time and the byte count differ
-            let mut f: Vec<&str> = line.split_whitespace().collect();
-            f.drain(4..f.len().saturating_sub(1).max(4));
-            f.remove(0); // the JobId differs: the second daemon runs after the first in one catalog
-            f.join(" ")
+        } else if let Some(row) = terminated_row(line) {
+            row
         } else {
             line.to_string()
         };
         out.push(line);
     }
     out.join("\n")
+}
+
+/// A row of `Terminated Jobs` (`%6d  %-6s %8s %10s  %-7s  %s %s`) with the columns that differ by nature
+/// (JobId: the second daemon runs after the first in one catalog; bytes; finished) left out; level,
+/// files, status and name are compared.
+fn terminated_row(line: &str) -> Option<String> {
+    let column = |from: usize, to: usize| line.get(from..to.min(line.len())).map(str::trim);
+    let jobid = column(0, 6)?;
+    if jobid.is_empty() || !jobid.bytes().all(|b| b.is_ascii_digit()) || line.len() < 62 {
+        return None;
+    }
+    Some(format!("<id> {} {} <bytes> {} <time> {}", column(8, 14)?, column(15, 23)?, column(36, 43)?, column(61, line.len())?))
 }
 
 /// Runs the same steps against both storage daemons and compares the text of `status storage`.
