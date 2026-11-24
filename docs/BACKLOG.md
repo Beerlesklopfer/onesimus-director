@@ -55,7 +55,7 @@ P2 ist erledigt (Plan [P2 umgesetzt](plans/OSD-GERAETE-UND-VERTEILUNG.md#p2-umge
 | `configure` | ~~`configure update/delete` (Onesimus-Erweiterungen) prüfen die Ressourcen-ACL nicht; dazu S-38~~ erledigt 20.11.2026 (`c116264`): beide prüfen die Ressourcen-ACL der Konsole (über das Konfigurations-CRUD, verbotene Ressource wie unbekannt) | Hinweis [C-062](COMPATIBILITY-LOG.md) |
 | `setbandwidth` | `max_bandwidth` laufender Jobs; Jmsg bei Connect-/Antwortfehlern | [C-056](COMPATIBILITY-LOG.md), S-39 |
 | `label`, `relabel` | Option `encrypt` erzeugt noch keinen Volume-Schlüssel | [C-084](COMPATIBILITY-LOG.md), S-08 |
-| `update` | `update jobid=… starttime=` fehlt; S-40 ist geprüft (Original meldet denselben Fehler, a82b1ee) | Hinweis [C-059](COMPATIBILITY-LOG.md) |
+| `update` | ~~`update jobid=… starttime=` fehlt~~ umgesetzt (`update_db.rs`); S-40 geprüft (Original meldet denselben Fehler, a82b1ee) | Hinweis [C-059](COMPATIBILITY-LOG.md) |
 | `list`, `llist` | ~~`nextvolume` nach frischem Label~~ geprüft, kein Unterschied (S-41, a82b1ee) | S-41 |
 | `restore` | Nicht-UTF-8-Dateinamen auf SQL_ASCII-Katalogen | [C-047](COMPATIBILITY-LOG.md) |
 | `cancel` | Cancel-Dialog ohne Paritätsfall; `*JobCancel*` des Job-Threads ohne Jobnamen-Nummer; Berichtszeilen „Director's comm line to SD dropped“/SD termination status beim Cancel | [C-011](COMPATIBILITY-LOG.md), S-26 |

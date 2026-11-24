@@ -133,7 +133,7 @@ Hinweis C-062: `show` prüft wie DumpResource()/IsResAllowed() jede Ressource ge
 
 Hinweis C-002: Text-Sitzungen über gRPC/Command-Queue nutzen denselben SessionManager und erhalten die Katalogzeilen jetzt ebenfalls einmal pro Sitzung (konsistent mit dem Original, aber neue Ausgabe an dieser Schnittstelle).
 
-Hinweis C-059: Die übrigen StrToUtime-Aufrufer des Originals (`update jobid=… starttime=`, Run On Incoming Connect Interval) sind in Onesimus nicht implementiert; sie müssen bei ihrer Portierung `crate::btime::str_to_utime` verwenden.
+Hinweis C-059: Von den übrigen StrToUtime-Aufrufern des Originals ist `update jobid=… starttime=` inzwischen umgesetzt (`commands/update_db.rs`, `UpdateJob`, mit `crate::btime::str_to_utime`; Stand 24.11.2026 im Code geprüft). Run On Incoming Connect Interval fehlt weiter und muss bei der Portierung `crate::btime::str_to_utime` verwenden.
 
 ## Stand 17.10.2026
 
@@ -184,7 +184,7 @@ Stand 17.10.2026; nur Punkte, die in einem Eintrag ausdrücklich offen stehen:
 - C-056: `max_bandwidth` laufender Jobs, Jmsg bei Connect-/Antwortfehlern von `setbandwidth`.
 - C-014: SD-Teil von `status all`/`status storage`.
 - C-047: Nicht-UTF-8-Dateinamen auf SQL_ASCII-Katalogen.
-- C-059 (Hinweis): `update jobid=… starttime=` und Run On Incoming Connect Interval fehlen.
+- C-059 (Hinweis): Run On Incoming Connect Interval fehlt; `update jobid=… starttime=` ist umgesetzt (Stand 24.11.2026).
 - C-086: auf PDC per Katalogabfrage klären, warum `list volumes pool=BGLAGE` nur BGLAGE-0015 zeigte.
 - S-13: eigener FD ohne PKI, Plugins, Heartbeat, client-initiierte Verbindungen, LMDB-Accurate.
 - ~~Befehlsstatus im Wiki (`docs/wiki/commands`): noch 53 `parity_verified`, 31 `partial`,
