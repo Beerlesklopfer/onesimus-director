@@ -88,7 +88,7 @@ fn interleave(base: u16, sd: Option<PathBuf>, max_volume_bytes: &str) -> Outcome
 fn two_jobs_write_into_one_volume_at_the_same_time() {
     let bareos = interleave(41701, None, "1G");
     println!("=== bareos-sd: {bareos:#?}");
-    let onesimus = interleave(41721, Some(onesimus_rig::prereq::target_profile_dir().join("osd")), "1G");
+    let onesimus = interleave(41741, Some(onesimus_rig::prereq::target_profile_dir().join("osd")), "1G");
     println!("=== osd: {onesimus:#?}");
     assert_eq!((bareos.status, bareos.overlapped, bareos.restored), (('T', 'T'), true, (true, true)));
     assert_eq!((onesimus.status, onesimus.overlapped, onesimus.restored), (('T', 'T'), true, (true, true)));
@@ -101,9 +101,9 @@ fn two_jobs_write_into_one_volume_at_the_same_time() {
 #[test]
 #[ignore = "needs bareos-sd, osd and initdb: run with --ignored --nocapture"]
 fn the_volume_changes_while_two_jobs_write() {
-    let bareos = interleave(41741, None, "20M");
+    let bareos = interleave(41801, None, "20M");
     println!("=== bareos-sd: {bareos:#?}");
-    let onesimus = interleave(41761, Some(onesimus_rig::prereq::target_profile_dir().join("osd")), "20M");
+    let onesimus = interleave(41841, Some(onesimus_rig::prereq::target_profile_dir().join("osd")), "20M");
     println!("=== osd: {onesimus:#?}");
     assert_eq!((bareos.status, bareos.restored), (('T', 'T'), (true, true)));
     assert_eq!((onesimus.status, onesimus.restored), (('T', 'T'), (true, true)));
