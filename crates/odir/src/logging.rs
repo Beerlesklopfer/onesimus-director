@@ -13,6 +13,21 @@ pub fn guard_reload_for_fork() -> MutexGuard<'static, ()> {
 
 static FILTER: OnceLock<reload::Handle<EnvFilter, Registry>> = OnceLock::new();
 
+/// The descriptor of the log file (`--log-file`), when one is open.
+static LOG_FD: OnceLock<i32> = OnceLock::new();
+
+/// Remembers the log file's descriptor: a job worker keeps it open after the fork. If it closed it,
+/// the next descriptor the worker opens (its dup of the pipe to the Director) would get the same
+/// number and every log line of the worker would go into that pipe (seen on PDC 25.11.2026).
+pub fn set_log_fd(fd: i32) {
+    let _ = LOG_FD.set(fd);
+}
+
+/// The log file's descriptor, if one is open.
+pub fn log_fd() -> Option<i32> {
+    LOG_FD.get().copied()
+}
+
 pub fn install(handle: reload::Handle<EnvFilter, Registry>) {
     let _ = FILTER.set(handle);
 }

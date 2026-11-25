@@ -290,6 +290,9 @@ fn main() {
     // stderr or the trace file (DebugWriter), and the log file
     let log_file = daemon_crate::logging::log_file_arg(&cli.log_file)
         .and_then(|path| daemon_crate::logging::open_log_file(&path));
+    if let Some(file) = &log_file {
+        logging::set_log_fd(std::os::fd::AsRawFd::as_raw_fd(&*file.lock().unwrap_or_else(|e| e.into_inner())));
+    }
     tracing_subscriber::registry().with(filter_layer)
         .with(tracing_subscriber::fmt::layer().with_ansi(false)
             .with_writer(move || daemon_crate::logging::TeeWriter {

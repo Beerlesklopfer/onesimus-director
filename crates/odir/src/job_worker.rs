@@ -1525,6 +1525,9 @@ pub fn spawn_job_worker(job_id: u32, job_name: &str, params: &JobParams) -> io::
             // a client initiated connection handed to this job (client_pool.rs)
             keep.extend(crate::client_pool::handoff_fd(job_id));
             keep.extend(TOKIO_SIGNAL_FDS.get().into_iter().flatten());
+            // the log file: the worker logs there too (closing it would let a later descriptor
+            // take its number, and the log lines would go there)
+            keep.extend(crate::logging::log_fd());
             for fd in 3..1024 { if !keep.contains(&fd) { unsafe { libc::close(fd); } } }
 
             #[cfg(target_os = "linux")]

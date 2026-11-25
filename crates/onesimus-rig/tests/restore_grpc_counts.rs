@@ -35,6 +35,10 @@ fn restore_counts(base: u16, grpc: Grpc, fd: Option<std::path::PathBuf>) -> (one
     let r = rig.wait_job(id, JOB_TIMEOUT).unwrap_or_else(|e| panic!("{e}"));
     let (code, diff) = rig.diff_restore();
     assert_eq!(code, 0, "{diff}");
+    // the job workers log into odir's log file, never into their pipe to the Director
+    let log = std::fs::read_to_string(rig.layout.root.join("odir.log")).unwrap_or_default();
+    assert!(log.contains(&format!("Worker {id}: restore running")), "no worker lines in odir.log");
+    assert!(!log.contains("unreadable worker message"), "worker log lines went into the pipe:\n{log}");
     (b, r, rig.job_log(id))
 }
 
@@ -55,7 +59,10 @@ fn restore_counts_files_over_grpc_and_bnet() {
 #[test]
 #[ignore = "needs an older ofd in ONESIMUS_OLD_OFD"]
 fn restore_with_an_older_ofd_over_grpc() {
-    let old = std::env::var_os("ONESIMUS_OLD_OFD").map(std::path::PathBuf::from).expect("ONESIMUS_OLD_OFD");
+    let Some(old) = std::env::var_os("ONESIMUS_OLD_OFD").map(std::path::PathBuf::from) else {
+        eprintln!("ONESIMUS_OLD_OFD not set: skipped");
+        return;
+    };
     let (b, r, log) = restore_counts(41981, Grpc::On, Some(old));
     println!("=== old ofd over gRPC: backup {b:?}\nrestore {r:?}\n{log}");
     assert_eq!((r.status, r.files), ('T', b.files));

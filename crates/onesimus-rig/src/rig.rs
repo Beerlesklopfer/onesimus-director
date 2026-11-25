@@ -433,12 +433,17 @@ impl Rig {
         let mut dir = match &self.options.dir_program {
             // bareos-dir reads `<dir>/bareos-dir.d`
             Some(program) => Daemon::spawn("odir", program, &["-f", "-c", &bareos_dir_conf, "-d", &debug], &self.layout.root.join("dir.log"))?,
-            None => Daemon::spawn(
-                "odir",
-                &self.programs.odir,
-                &["-f", "--disable-grpc", "-c", &dir_conf, "--overlay", &onesimus_conf, "-d", &debug],
-                &self.layout.root.join("dir.log"),
-            )?,
+            // a log file as in operation (`odir.log` in the rig root): a job worker must keep it
+            // open after the fork, or its log lines go into its pipe to the Director
+            None => {
+                let log_file = self.layout.root.join("odir.log").display().to_string();
+                Daemon::spawn(
+                    "odir",
+                    &self.programs.odir,
+                    &["-f", "--disable-grpc", "-c", &dir_conf, "--overlay", &onesimus_conf, "-d", &debug, "--log-file", &log_file],
+                    &self.layout.root.join("dir.log"),
+                )?
+            }
         };
         let started = wait_port(&mut dir, local(self.ports.dir), Duration::from_secs(30));
         self.daemons.push(dir);
