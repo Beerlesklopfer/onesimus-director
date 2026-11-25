@@ -32,8 +32,9 @@ fn fileregex_restores_a_file_with_a_latin1_name() {
     let reply = rig.command(&command).unwrap_or_else(|e| panic!("{e}"));
     let id = onesimus_rig::console::queued_job_id(&reply).unwrap_or_else(|| panic!("no JobId:\n{reply}\n{}", rig.diagnostics()));
     let row = rig.wait_job(id, JOB_TIMEOUT).unwrap_or_else(|e| panic!("{e}"));
-    // 'W': with `fileregex` the director expects 0 files and warns "File count mismatch: expected=0 , restored=1"
-    // (the port of restore.cc; not compared with the original)
+    // 'W': the catalog has no match for the Latin-1 name, so odir sends the job like bareos-dir (all FileIndexes
+    // and the FileRegex line) and warns like it: "File count mismatch: expected=13 , restored=1"
+    // (compared in restore_fileregex_compare.rs)
     assert!(matches!(row.status, 'T' | 'W') && row.files == 1, "{row:?}\n{}\n{}", rig.job_log(id), rig.diagnostics());
 
     let restored = rig.layout.restored_data().join(std::ffi::OsStr::from_bytes(onesimus_rig::tree::NON_UTF8_NAME));

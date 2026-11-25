@@ -408,6 +408,7 @@ Bewusst entschieden (Stand 20.11.2026):
 
 | Thema | bareos-dir | odir | Grund |
 | --- | --- | --- | --- |
+| `restore … fileregex=` | schickt alle FileIndexes mit der FileRegex-Zeile, erwartet alle Dateien, endet mit Warnung „File count mismatch“ | sucht die passenden Dateien im Katalog und schickt nur sie, erwartet nur sie, endet ohne Warnung; ohne Treffer wie bareos-dir | der Filter des SD kann Datensätze einer übersprungenen Datei durchlassen (J-16) |
 | Schema-Erweiterung | keine | eigenes PostgreSQL-Schema `onesimus`: Views und Funktionen (v2251/v2252), Tabelle `onesimus.console_acl` (v2253, verschiebt ältere Objekte aus `public`), spätgebundene Views (v2254: keine Abhängigkeit von Bareos-Tabellen, Bareos-Upgrades nie blockiert); Selbstheilung fehlender/kaputter Objekte bei jedem Start; `public` bleibt Bareos, einzige Ausnahme `public.bareos_schema_version`; `version` bleibt 2250 | Logik in der Datenbank änderbar ohne neuen Code; Katalog-ACL; Trennung von Bareos (Entscheidung des Maintainers 20.11.2026) |
 | Wartezeit auf ein Volume | unbegrenzt ohne `Max Wait Time` | 600 s, über `ONESIMUS_DEFAULT_MEDIA_WAIT` | kein hängender Nachtlauf; keine Direktive wegen Rückweg |
 | Gescheiterter Batch-Insert der File-Zeilen | Block wird ignoriert, Job `T`, Dateien fehlen im Katalog | Job wird fatal (`f`), „Attribute create error“ | kein stilles Fehlen von Dateien im Restore-Baum |

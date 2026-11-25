@@ -308,7 +308,9 @@ pub(crate) fn restore_with(ast: &CommandAst, ctx: &ExecContext,
     // Selected by fileregex only: the bootstrap lists every file of the jobs and
     // the FD filters, so count the files the regex matches (Files Expected).
     if let (Some(regex), true) = (arg_with_value(ast, "fileregex"), only_fileregex) {
-        if let Some(matching) = count_matching_files(&rx, regex) {
+        // nothing in the catalog matches (purged File rows, a name that is not UTF-8): the count
+        // of every file stays, as in the original (ExpectedFiles = all files of the jobs)
+        if let Some(matching) = count_matching_files(&rx, regex).filter(|m| *m > 0) {
             rx.selected_files = matching;
         }
     }
