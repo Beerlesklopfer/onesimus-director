@@ -997,6 +997,7 @@ impl JobManager {
 
                     PipeMessage::JobEnd { term_code, files, bytes, errors,
                                           vol_session_id, vol_session_time, .. } => {
+                        info!("JobManager: job {} end from worker: term_code={term_code} files={files} errors={errors}", job.job_id);
                         job.observed_status = merge_status(job.observed_status,
                             crate::job_worker::catalog_job_status(term_code).chars().next().unwrap());
                         job.last_files = files;
@@ -1149,6 +1150,9 @@ impl JobManager {
                     // M_FATAL: the job ends JS_FatalError (sql_create.cc:791-821). J-1.
                     jmsg_effects(job, &messages);
                     post_catreq_messages_of(&self.bus, self.config.as_ref(), job, owner, messages);
+                }
+                if job.pending_end.is_none() {
+                    warn!("JobManager: job {} worker exited (code={exit_code}) without reporting its end", job.job_id);
                 }
                 let mut ending = job.pending_end.take().unwrap_or_else(|| JobEnd {
                     term_code: b'E' as i32, files: job.last_files, bytes: job.last_bytes,

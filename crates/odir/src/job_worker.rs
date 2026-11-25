@@ -1388,20 +1388,36 @@ pub struct JobHandle {
 
 impl JobHandle {
     pub fn try_read_message(&mut self) -> Option<PipeMessage> {
+        let job_id = self.job_id;
         let r = self.from_worker.as_mut()?;
-        // poll() to check if data is available before blocking read
-        use std::os::unix::io::AsRawFd;
-        let fd = r.get_ref().as_raw_fd();
-        let mut pfd = libc::pollfd { fd, events: libc::POLLIN, revents: 0 };
-        let ready = unsafe { libc::poll(&mut pfd, 1, 0) }; // timeout=0 → non-blocking
-        if r.buffer().is_empty() && (ready <= 0 || (pfd.revents & libc::POLLIN) == 0) {
-            return None; // no data available
-        }
-        // Data is available — safe to read_line (will not block)
-        let mut buf = String::new();
-        match r.read_line(&mut buf) {
-            Ok(n) if n > 0 => serde_json::from_str(&buf).ok(),
-            _ => None,
+        loop {
+            // poll() to check if data is available before blocking read
+            use std::os::unix::io::AsRawFd;
+            let fd = r.get_ref().as_raw_fd();
+            let mut pfd = libc::pollfd { fd, events: libc::POLLIN, revents: 0 };
+            let ready = unsafe { libc::poll(&mut pfd, 1, 0) }; // timeout=0 → non-blocking
+            if r.buffer().is_empty() && (ready <= 0 || (pfd.revents & libc::POLLIN) == 0) {
+                return None; // no data available
+            }
+            // Data is available — safe to read a line (will not block)
+            let mut buf = Vec::new();
+            match r.read_until(b'\n', &mut buf) {
+                Ok(0) => return None,
+                Ok(_) => match serde_json::from_slice(&buf) {
+                    Ok(msg) => return Some(msg),
+                    // A line that is no message must not end the reading: the messages behind it
+                    // (JobEnd above all) would stay unread when the worker has exited (seen on PDC
+                    // 25.11.2026: a restore ended "Error, 0 files" though the FD reported OK).
+                    Err(e) => {
+                        let text = String::from_utf8_lossy(&buf);
+                        warn!("job {job_id}: unreadable worker message ({e}): {}", text.trim_end().chars().take(300).collect::<String>());
+                    }
+                },
+                Err(e) => {
+                    warn!("job {job_id}: worker pipe: {e}");
+                    return None;
+                }
+            }
         }
     }
 
@@ -1538,6 +1554,26 @@ pub fn spawn_job_worker(_: u32, _: &str, _: &JobParams) -> io::Result<JobHandle>
 #[cfg(test)]
 mod wait_protocol_tests {
     use super::*;
+
+    /// A line that is no message does not end the reading: the JobEnd behind it still arrives.
+    #[test]
+    fn an_unreadable_pipe_line_does_not_hide_the_job_end() {
+        use std::io::Write;
+        use std::os::fd::{FromRawFd, IntoRawFd};
+        let (r, w) = nix::unistd::pipe().unwrap();
+        let mut writer = unsafe { std::fs::File::from_raw_fd(w.into_raw_fd()) };
+        let reader = unsafe { std::fs::File::from_raw_fd(r.into_raw_fd()) };
+        let end = PipeMessage::JobEnd { job_id: 7, term_code: 84, files: 610, bytes: 1, errors: 0, vol_session_id: None, vol_session_time: None };
+        writeln!(writer, "not json").unwrap();
+        writeln!(writer, "{}", serde_json::to_string(&end).unwrap()).unwrap();
+        drop(writer);
+        let mut handle = JobHandle { from_worker: Some(BufReader::new(reader)), ..JobHandle::detached(0, 7, "J", "J.1") };
+        match handle.try_read_message() {
+            Some(PipeMessage::JobEnd { files: 610, term_code: 84, .. }) => {}
+            other => panic!("{other:?}"),
+        }
+        assert!(handle.try_read_message().is_none());
+    }
     #[test]
     fn restore_command_like_build_restore_command() {
         let mut p = JobParams {
