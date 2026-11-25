@@ -326,8 +326,27 @@ impl<'a> Writer<'a> {
         let found = self.find_appendable(previous.unwrap_or(""))?;
         let mut info = self.vol_req(&osd::askdir::get_vol_info(&job, &found.volume, true))?;
         let name = info.volume.clone();
+        let recycle = info.status == "Recycle";
+        let mut recycled = false;
         match self.dev.read_label(&name) {
-            LabelState::NoLabel | LabelState::Broken(_) if info.bytes == 0 || info.status == "Recycle" => {
+            // RecycleVolume(): a volume the Director recycles is written anew (the file is truncated), its
+            // old data is gone; also when the file still holds a valid label
+            LabelState::Labeled(_) if recycle => {
+                let label = crate::device::new_label(&name, &self.info.pool_name, &self.dev.media_type, &self.info.storage);
+                let len = self.dev.write_label(&label, self.info.vol_session_id, self.info.vol_session_time)?;
+                let (file, addr) = self.dev.open_append(&name)?;
+                let mut cat = info.to_update();
+                cat.bytes = len;
+                cat.blocks = 1;
+                cat.writes = 1;
+                cat.files = 0;
+                self.vol = Some(Volume { name: name.clone(), file, addr, cat, media_id: info.media_id });
+                self.update_media(true)?;
+                self.jmsg(M_INFO, &format!("Recycled volume \"{name}\" on device {}, all previous data lost.", self.dev.print_name()));
+                info = self.vol_req(&osd::askdir::get_vol_info(&job, &name, true))?;
+                recycled = true;
+            }
+            LabelState::NoLabel | LabelState::Broken(_) if info.bytes == 0 || recycle => {
                 if !self.dev.label_media {
                     return Err(format!("Device {} not configured to autolabel Volumes.", self.dev.print_name()));
                 }
@@ -361,10 +380,15 @@ impl<'a> Writer<'a> {
         let mut cat = info.to_update();
         cat.write_time = cat.write_time.max(previous_write_time);
         self.vol = Some(Volume { name: name.clone(), file, addr, cat, media_id: info.media_id });
-        self.jmsg(M_INFO, &format!("Moving to end of data on volume \"{name}\""));
+        // a recycled volume is at its start: bareos-sd says nothing about the end of data then
+        if !recycled {
+            self.jmsg(M_INFO, &format!("Moving to end of data on volume \"{name}\""));
+        }
         let catalog_bytes = info.bytes;
         if addr == catalog_bytes {
-            self.jmsg(M_INFO, &format!("Ready to append to end of Volume \"{name}\" size={addr}"));
+            if !recycled {
+                self.jmsg(M_INFO, &format!("Ready to append to end of Volume \"{name}\" size={addr}"));
+            }
         } else if addr > catalog_bytes {
             self.jmsg(M_WARNING, &format!(
                 "For Volume \"{name}\":\nThe sizes do not match! Volume={} Catalog={}\nCorrecting Catalog",
