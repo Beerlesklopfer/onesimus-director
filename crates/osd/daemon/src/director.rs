@@ -342,7 +342,25 @@ impl DirSession {
     /// job (restore, verify) reserves a device now; there is no
     /// just-in-time reservation for reading.
     fn use_for_read(&mut self, job: &Arc<Job>, storages: Vec<UseStorage>) -> Next {
-        let reserved = storages.iter().find_map(|st| self.d.reserve_device(st, &job.cmd).map(|r| (st.clone(), r)));
+        // devices held by other jobs: wait until one is free, with a heartbeat to the Director
+        // meanwhile (bareos-sd UseDeviceCmd/WaitForDevice: no job message, a heartbeat per round)
+        let mut last_heartbeat = std::time::Instant::now();
+        let reserved = loop {
+            let reserved = storages.iter().find_map(|st| self.d.reserve_device(st, &job.cmd).map(|r| (st.clone(), r)));
+            if reserved.is_some()
+                || job.canceled.load(std::sync::atomic::Ordering::Acquire)
+                || !storages.iter().any(|st| self.d.reservable_when_free(st, &job.cmd))
+            {
+                break reserved;
+            }
+            if last_heartbeat.elapsed() >= std::time::Duration::from_secs(10) {
+                if lock(&self.dir).signal(BnetSignal::Heartbeat).is_err() {
+                    break None;
+                }
+                last_heartbeat = std::time::Instant::now();
+            }
+            std::thread::sleep(std::time::Duration::from_millis(500));
+        };
         match reserved {
             Some((storage, r)) => {
                 *job.storage.lock().unwrap_or_else(|e| e.into_inner()) = Some(storage);

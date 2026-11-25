@@ -42,7 +42,7 @@ P2 ist erledigt (Plan [P2 umgesetzt](plans/OSD-GERAETE-UND-VERTEILUNG.md#p2-umge
 
 | ID | Punkt | Art | Ort |
 | --- | --- | --- | --- |
-| VT-1 | Lesen über einen Verteiler wartet nicht auf ein belegtes Ziel (der Job hält die freien Ziele); ~~`mount`/`label` auf einem anderen als dem ersten Lesegerät weckt den wartenden Job nicht~~ erledigt (24.11.2026: `media_event` weckt über `alternative_of` auch das Lesegerät des Jobs, `waiting_for_sysop` gilt für gehaltene Ersatzgeräte); offen bleibt das Warten auf ein belegtes Ziel | Lücke | `daemon.rs` (`reserve_distributed`, `wait_for_sysop`) |
+| VT-1 | Lesen über einen Verteiler wartet nicht auf ein belegtes Ziel, das erst beim Volume-Wechsel gebraucht wird (der Job hält die freien Ziele; sind beim Start **alle** Ziele belegt, wartet er seit 25.11.2026 wie bei OP-6); ~~`mount`/`label` auf einem anderen als dem ersten Lesegerät weckt den wartenden Job nicht~~ erledigt (24.11.2026: `media_event` weckt über `alternative_of` auch das Lesegerät des Jobs, `waiting_for_sysop` gilt für gehaltene Ersatzgeräte); offen bleibt das Warten auf ein belegtes Ziel | Lücke | `daemon.rs` (`reserve_distributed`, `wait_for_sysop`) |
 | VT-2 | Ziele anderer Gerätearten (Wechselplatte P3, S3 P4, Band P6); Striping `Stripe = yes` (P5) und Zweige (P2b) | Phasen | Plan |
 | VT-3 | ~~`Type = Copy`/`Migrate`-Routen und ein Director-Storage mit `Device = a, b` für die Ziele sind nicht im Rig geprüft~~ **erledigt 25.11.2026** (`copy_and_migrate_routes`). Dabei behoben: Routen `Type = Copy`/`Migrate` griffen nicht (der SD sieht `c`/`g`); der Job konnte das eigene Lese- bzw. Ersatzgerät nicht zum Schreiben übernehmen; odir schickte `Device = a, b` als ein Gerät (C-097) | Prüfung | `tests/osd_distributor.rs` |
 | VT-4 | ~~`osd -t` prüft nicht, ob der `Media Type` des Verteilers zu einem Director-Storage passt~~ **erledigt 25.11.2026:** offline nicht prüfbar (osd kennt den Director nicht, odir den Verteiler nicht); der Job nennt den Fehler jetzt beim Namen („Distributor … has Media Type …, but the Director's Storage names …“) | Prüfung | `daemon.rs` `distributor_mismatch` |
@@ -58,7 +58,8 @@ Was osd von PDC fernhielt (ein File-Device, `Maximum Concurrent Jobs = 5`, Recyc
 | OP-3 | ~~Warten auf ein Volume beim Schreiben~~ war seit C-089 da | — | `writer.rs` |
 | OP-4 | ~~Recycelte Volumes wurden angehängt statt neu beschrieben~~ **erledigt** (`sd_recycle.rs`) | Fehler | `writer.rs` |
 | OP-5 | ~~`relabel` fehlt~~ **erledigt**, Datei wird umbenannt (C-096, `sd_relabel.rs`) | Lücke | `director.rs` |
-| OP-6 | Ein lesender Job, dessen Device belegt ist, scheitert noch (bareos-sd wartet) | Lücke | `director.rs` `use_for_read` |
+| OP-6 | ~~Ein lesender Job, dessen Device belegt ist, scheitert~~ **erledigt 25.11.2026:** osd wartet wie bareos-sd ohne Job-Meldung, Heartbeat an den Director (`sd_busy_read.rs`); dabei odir behoben: es brach beim ersten Heartbeat des wartenden SD ab, auch mit bareos-sd (C-098) | Lücke | `director.rs` `use_for_read`, `osd/src/job.rs` |
+| OP-7 | Ein Restore liest bis zum Volume-Ende, auch wenn der Bootstrap schon erledigt ist (bareos-sd hört auf). Gemessen in `sd_busy_read.rs`: osd meldet „End of Volume … / End of all volumes.“ und liest die 50 MB des danach geschriebenen BigBackup mit, bareos-sd nicht. `Decision::Done/SkipVolume` gibt es, greift hier aber nicht | Abweichung | `read_session.rs` |
 
 ### Offene Reste an Befehlen
 

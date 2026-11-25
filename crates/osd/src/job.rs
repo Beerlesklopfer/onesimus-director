@@ -150,11 +150,18 @@ pub fn sd_use_device(sd: &mut BnetStream<AnyStream>, p: &SdJobParams) -> Result<
 
     let mut jmsgs = Vec::new();
     loop {
-        match sd.recv_str() {
-            Ok(r) if r.contains("3000 OK") => return Ok((r, jmsgs)),
-            Ok(r) if r.starts_with("Jmsg") => { debug!("SD Jmsg: {}", r.trim()); jmsgs.push(r); continue; }
-            Ok(r) => return Err(format!("unexpected: {r}")),
+        // a SD waiting for a busy device sends heartbeats meanwhile (bareos-sd; the Director's
+        // bget_msg ignores them)
+        let r = match sd.recv() {
+            Ok(bareos_bnet::BnetMessage::Data(d)) => String::from_utf8_lossy(&d).into_owned(),
+            Ok(bareos_bnet::BnetMessage::Signal(BnetSignal::Heartbeat)) => continue,
+            Ok(bareos_bnet::BnetMessage::Signal(s)) => return Err(format!("recv: unexpected signal {s:?}")),
             Err(e) => return Err(format!("recv: {e}")),
+        };
+        match r {
+            r if r.contains("3000 OK") => return Ok((r, jmsgs)),
+            r if r.starts_with("Jmsg") => { debug!("SD Jmsg: {}", r.trim()); jmsgs.push(r); continue; }
+            r => return Err(format!("unexpected: {r}")),
         }
     }
 }
