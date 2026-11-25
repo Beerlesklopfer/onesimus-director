@@ -411,7 +411,7 @@ Verify, Restore, Abbruch und die vier erwarteten Defekte).
 | `autochanger`, `nextrun`, `finish`, `readlabel`, `resolve`, `setdevice`, `stats` | ja | unbekannt (3900) |
 | Spooling (Daten, Attribute), Checkpoints, Quota | ja | nein (die Angaben im Job-Kommando werden gelesen und ignoriert) |
 | Bandbreite (`setbandwidth`) | begrenzt die Verbindung | nur mit `2000 OK Bandwidth` beantwortet |
-| `Maximum Concurrent Jobs`, Device-Belegung | Reservierungslogik mit Warteschlange, Lesen und Schreiben getrennt gezählt | ein Job je Device, ob lesend oder schreibend; ist es belegt, scheitert die Reservierung |
+| `Maximum Concurrent Jobs`, Device-Belegung | Reservierungslogik mit Warteschlange, Lesen und Schreiben getrennt gezählt; bei `Maximum Concurrent Jobs` > 1 am Device schreiben mehrere Jobs verschachtelt in dasselbe Volume | ein Job je Device; ein schreibender Job wartet, bis das Device frei ist (seit 25.11.2026, wie bareos-sd mit der Vorgabe 1, ohne Meldung; Rig-Test `sd_busy_device.rs` gegen bareos-sd); Verschachteln bei > 1 folgt (Schritt 2); ein lesender Job, dessen Device belegt ist, scheitert noch |
 | `status` | ausführlich (Spool, Volumes, beendete Jobs) | Kopf, laufende Jobs, Devices |
 | `.status volumes/spooling/terminated/waitreservation` | Listen | leer |
 | Attribute an den Director | wenn der Block geschrieben ist (Blockwechsel) | wenn der Geräteschreiber das Fach freigegeben hat (gleiche Reihenfolge) |

@@ -423,7 +423,20 @@ impl Producer {
     fn setup(d: &Daemon, job: &Arc<Job>, dir: &SharedChannel) -> Result<Producer, String> {
         d.send_status(dir, job, 'S');
         let storage = job.storage.lock().unwrap_or_else(|e| e.into_inner()).clone().unwrap_or_default();
-        let dev = d.reserve_device(&storage, &job.cmd).ok_or("Could not reserve any device for this job.")?;
+        // a busy device: the job waits until it is free (step 1 of several jobs per device; bareos-sd
+        // writes them interleaved into one volume, osd one after the other for now)
+        let dev = loop {
+            if let Some(dev) = d.reserve_device(&storage, &job.cmd) {
+                break dev;
+            }
+            if !d.reservable_when_free(&storage, &job.cmd) {
+                return Err("Could not reserve any device for this job.".into());
+            }
+            if job.canceled.load(Ordering::Acquire) {
+                return Err("Job canceled while waiting for a device.".into());
+            }
+            std::thread::sleep(std::time::Duration::from_millis(500));
+        };
         d.jmsg(dir, job, M_INFO, &format!("Using Device {} to write.\n", dev.device.print_name()));
         let info = JobInfo {
             job: job.cmd.job.clone(),

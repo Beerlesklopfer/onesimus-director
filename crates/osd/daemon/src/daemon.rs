@@ -210,9 +210,21 @@ impl Daemon {
     /// `job` when writing ([`Daemon::reserve_distributed`]).
     pub fn reserve_device(&self, storage: &UseStorage, job: &JobCommand) -> Option<Reserved> {
         let mut busy = self.busy.lock().unwrap_or_else(|e| e.into_inner());
+        Self::reserve_in(self, &mut busy, storage, job)
+    }
+
+    /// Whether `storage` names a device that `job` could use once it is free (the reservation fails
+    /// only because the devices are busy).
+    pub fn reservable_when_free(&self, storage: &UseStorage, job: &JobCommand) -> bool {
+        let mut nothing_busy = HashMap::new();
+        Self::reserve_in(self, &mut nothing_busy, storage, job).is_some()
+    }
+
+    /// [`Self::reserve_device`] against the reservation table `busy`.
+    fn reserve_in(&self, busy: &mut HashMap<String, String>, storage: &UseStorage, job: &JobCommand) -> Option<Reserved> {
         for name in &storage.devices {
             if let Some(dist) = self.config.find_distributor(name) {
-                if let Some(reserved) = self.reserve_distributed(&mut busy, dist, storage, job) {
+                if let Some(reserved) = self.reserve_distributed(busy, dist, storage, job) {
                     return Some(reserved);
                 }
                 continue;
