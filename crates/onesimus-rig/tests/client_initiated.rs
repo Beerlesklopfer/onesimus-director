@@ -108,3 +108,28 @@ fn a_connection_starts_the_jobs_of_the_client_that_are_due() {
     assert_eq!(row.status, 'T', "{row:?}\n{log}");
     assert!(log.contains("Job triggered by:       Client"), "{log}");
 }
+
+/// `Connection From Director To Client = no`: a job started before the FD connected waits for its
+/// connection instead of connecting itself, and runs when the FD comes (the FD sends heartbeats while
+/// its connection waits, `Heartbeat Interval = 2`).
+#[test]
+#[ignore = "needs bareos-sd and initdb: run with --ignored"]
+fn a_job_waits_for_the_connection_when_the_director_may_not_connect() {
+    onesimus_rig::build_workspace_binaries().unwrap_or_else(|e| panic!("{e}"));
+    let base = 40561;
+    let mut options = RigOptions::new(base);
+    options.fd_director_lines =
+        vec!["Connection From Client To Director = yes".into(), "Address = 127.0.0.1".into(), format!("Port = {base}")];
+    options.fd_client_lines = vec!["Heartbeat Interval = 2".into()];
+    options.dir_client_lines = vec!["Connection From Client To Director = yes".into(), "Connection From Director To Client = no".into()];
+    let rig = Rig::start(options).unwrap_or_else(|e| panic!("Gerüst startet nicht: {e}"));
+    // the FD tried before the Director listened and comes again after 60 s; the job is queued now
+    let id = rig.run_job("VBackup").unwrap_or_else(|e| panic!("{e}"));
+    let row = rig.wait_job(id, JOB_TIMEOUT).unwrap_or_else(|e| panic!("{e}"));
+    assert_eq!((row.status, row.files), ('T', 13), "{row:?}\n{}\n{}", rig.job_log(id), rig.diagnostics());
+    // the heartbeats keep the next connection alive and usable
+    wait_for_connection(&rig);
+    std::thread::sleep(Duration::from_secs(7));
+    let client = rig.command("status client=vfd").unwrap_or_else(|e| panic!("{e}"));
+    assert!(client.contains("vfd Version:"), "{client}\n{}", rig.diagnostics());
+}

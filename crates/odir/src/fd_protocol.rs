@@ -203,11 +203,16 @@ fn connect_control_fd(address: &str, port: u16, password: &str, director_name: &
 pub(crate) fn connect_fd_with_timeout(address: &str, port: u16, password: &str, director_name: &str,
     read_timeout: Option<Duration>, tls: (bool, bool), client: &str) -> Result<(BnetStream<bareos_bnet::stream::AnyStream>, u32), String> {
     // UseWaitingClient(): a client initiated connection of `client` first
-    if let Some((stream, version)) = crate::client_pool::take(client) {
+    if let Some((stream, version)) = crate::client_pool::take_for_console(client) {
         if let Some(tcp) = stream.inner().tcp() {
             let _ = tcp.set_read_timeout(read_timeout);
         }
         return Ok((stream, version.max(0) as u32));
+    }
+    if !client.is_empty() && !crate::client_pool::director_may_connect(client) {
+        // IsConnectingToClientAllowed(): Emsg "Connecting to %s is not allowed."
+        tracing::warn!("Connecting to {client} is not allowed.");
+        return Err(format!("Connecting to {client} is not allowed."));
     }
     if let Some((stream, _)) = crate::fd_grpc::try_connect(address, port, password, director_name, read_timeout) {
         return Ok((stream, 54));
@@ -306,7 +311,7 @@ pub fn connect_fd_console(address: &str, port: u16, password: &str, director_nam
                           tls: (bool, bool))
     -> (String, Result<BnetStream<bareos_bnet::stream::AnyStream>, String>) {
     // UseWaitingClient(): a client initiated connection first; the Handshake line names its mode
-    if let Some((stream, _)) = crate::client_pool::take(client_name) {
+    if let Some((stream, _)) = crate::client_pool::take_for_console(client_name) {
         let stored = stored_handshake(client_name);
         let mut info = String::new();
         if stored.is_none() {
@@ -327,6 +332,11 @@ pub fn connect_fd_console(address: &str, port: u16, password: &str, director_nam
         return (" Handshake: gRPC TLS,\n".into(), Ok(stream));
     }
     let (tls_enable, tls_require) = tls;
+    if !crate::client_pool::director_may_connect(client_name) {
+        // IsConnectingToClientAllowed(): no connection of our own
+        tracing::warn!("Connecting to {client_name} is not allowed.");
+        return (String::new(), Err(format!("Connecting to {client_name} is not allowed.")));
+    }
     let stored = stored_handshake(client_name);
     let mut info = String::new();
     if stored.is_none() {

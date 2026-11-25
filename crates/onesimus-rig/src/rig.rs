@@ -85,6 +85,8 @@ pub struct RigOptions {
     pub fd_director_lines: Vec<String>,
     /// Lines added to the Director's `Client` resource of the rig FD.
     pub dir_client_lines: Vec<String>,
+    /// Lines added to the FD's own `Client` resource (e.g. `Heartbeat Interval = 2`).
+    pub fd_client_lines: Vec<String>,
     /// No TLS between Director and FD: `TLS Enable = no` in the Director's Client resource and in the
     /// FD's Director and Client resources (a FD in clear text, like an old one).
     pub fd_plain: bool,
@@ -118,6 +120,7 @@ impl RigOptions {
             dir_program: None,
             fd_director_lines: Vec::new(),
             dir_client_lines: Vec::new(),
+            fd_client_lines: Vec::new(),
         }
     }
 }
@@ -367,6 +370,7 @@ impl Rig {
             };
             add(&client(&self.layout.dir_conf), "client", &self.options.dir_client_lines).map_err(io)?;
             add(&client(&self.layout.fd_conf), "director", &self.options.fd_director_lines).map_err(io)?;
+            add(&client(&self.layout.fd_conf), "client", &self.options.fd_client_lines).map_err(io)?;
         }
         if self.options.start_fd {
             let mut fd_conf = self.layout.fd_conf.display().to_string();
@@ -381,6 +385,7 @@ impl Rig {
                     text = tls_disabled(&text);
                 }
                 text = with_lines(&text, "director", &self.options.fd_director_lines);
+                text = with_lines(&text, "client", &self.options.fd_client_lines);
                 std::fs::write(dir.join("bareos-fd.conf"), text).map_err(io)?;
                 fd_conf = dir.display().to_string();
             }

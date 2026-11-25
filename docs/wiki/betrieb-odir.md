@@ -496,6 +496,8 @@ odir den Job, wenn der Client sich verbindet und der letzte Lauf (Status T, W, C
 Zeit zurückliegt oder es noch keinen gab (Bericht: „Job triggered by: Client“). Anders als bareos-dir
 startet odir ihn sofort statt beim nächsten Scheduler-Durchlauf.
 
-Noch nicht umgesetzt: `Connection From Director To Client = no` (odir versucht ohne wartende Verbindung
-weiter, selbst zu verbinden) und das Warten auf eine Verbindung. Plan und Mitschnitt:
+Mit `Connection From Director To Client = no` verbindet odir nie selbst: Konsolenbefehle warten bis
+15 s auf eine Verbindung des Clients, Jobs warten in der Warteschlange bis `FD Connect Timeout` (Vorgabe
+180 s), ohne andere Jobs aufzuhalten. Mit `Heartbeat Interval` im FD sendet ofd auf der wartenden
+Verbindung Herzschläge (gegen Abbrüche durch NAT und Firewalls). Plan und Mitschnitt:
 [CLIENT-INITIIERT.md](../plans/CLIENT-INITIIERT.md).

@@ -78,7 +78,7 @@ Offen bleibt nur, wann `CleanupConnectionPool` läuft; für den Bau nicht nötig
 
 ## Umgesetzt (25.11.2026)
 
-odir `client_pool.rs`, ofd `dir_connect.rs`, Rig-Tests `client_initiated.rs` (TLS, Klartext, Run On Incoming Connect Interval). Offen: `Connection From Director To Client = no` (odir verbindet ohne wartende Verbindung weiter selbst), Warten auf eine Verbindung (UseWaitingClient mit Wartezeit), Herzschlag der wartenden Verbindung in ofd.
+odir `client_pool.rs`, ofd `dir_connect.rs`, Rig-Tests `client_initiated.rs` (TLS, Klartext, Run On Incoming Connect Interval). Nachtrag: `Connection From Director To Client = no`, Warten auf eine Verbindung (Konsole 15 s, Jobs bis FD Connect Timeout) und der Herzschlag von ofd sind ebenfalls umgesetzt.
 
 ## Reihenfolge
 

@@ -51,6 +51,37 @@ struct Waiting {
 /// The connection pool (connection_pool.h: several connections per name, newest last).
 static POOL: Mutex<Vec<Waiting>> = Mutex::new(Vec::new());
 
+/// Signalled when a connection is added (element_added).
+static ADDED: std::sync::Condvar = std::sync::Condvar::new();
+
+/// The configuration, for the Client resource's connection directives (set by main).
+static CONFIG: std::sync::OnceLock<SharedConfig> = std::sync::OnceLock::new();
+
+/// Sets the configuration the connection directives are read from.
+pub fn set_config(config: SharedConfig) {
+    let _ = CONFIG.set(config);
+}
+
+/// A boolean directive of client `name` (`default` when unset or unknown).
+fn client_flag(name: &str, key: &str, default: bool) -> bool {
+    let Some(cfg) = CONFIG.get().and_then(|c| c.read().ok()) else { return default };
+    crate::commands::defaults::raw(&cfg, "client", name)
+        .and_then(|r| r.directives.iter().rev().find(|d| d.norm_key() == key))
+        .and_then(|d| d.first())
+        .and_then(|v| bareos_config::values::parse_bool(v).ok())
+        .map_or(default, |(_, v)| v)
+}
+
+/// `Connection From Director To Client` of client `name` (IsConnectingToClientAllowed, default yes).
+pub fn director_may_connect(name: &str) -> bool {
+    client_flag(name, "connectionfromdirectortoclient", true)
+}
+
+/// `Connection From Client To Director` of client `name` (IsConnectFromClientAllowed, default no).
+pub fn client_may_connect(name: &str) -> bool {
+    client_flag(name, "connectionfromclienttodirector", false)
+}
+
 /// A connection on its way into a forked job worker.
 struct Handoff {
     /// The job that takes it.
@@ -78,10 +109,31 @@ fn alive(stream: &mut BnetStream<AnyStream>) -> bool {
         Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => true,
         Ok(0) | Err(_) => false,
         Ok(_) => {
+            // heartbeats of the FD (Heartbeat Interval) are read; anything else ends the connection
             let _ = tcp.set_read_timeout(Some(Duration::from_millis(200)));
-            let message = stream.recv();
+            let mut open = true;
+            for _ in 0..64 {
+                match stream.recv() {
+                    Ok(BnetMessage::Signal(BnetSignal::Heartbeat | BnetSignal::HeartbeatResponse)) => {}
+                    _ => {
+                        open = false;
+                        break;
+                    }
+                }
+                let _ = tcp.set_nonblocking(true);
+                let more = tcp.peek(&mut byte);
+                let _ = tcp.set_nonblocking(false);
+                match more {
+                    Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => break,
+                    Ok(0) | Err(_) => {
+                        open = false;
+                        break;
+                    }
+                    Ok(_) => {}
+                }
+            }
             let _ = tcp.set_read_timeout(None);
-            matches!(message, Ok(BnetMessage::Signal(BnetSignal::Heartbeat | BnetSignal::HeartbeatResponse)))
+            open
         }
     }
 }
@@ -103,6 +155,40 @@ fn add(name: &str, protocol_version: i32, stream: BnetStream<AnyStream>) {
     remove_inactive(&mut pool);
     let connect_time = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs() as i64).unwrap_or(0);
     pool.push(Waiting { name: name.to_string(), protocol_version, connect_time, stream });
+    drop(pool);
+    ADDED.notify_all();
+}
+
+/// [`take`], waiting up to `timeout` for a connection of client `name` (UseWaitingClient with a
+/// timeout).
+pub fn take_waiting(name: &str, timeout: Duration) -> Option<(BnetStream<AnyStream>, i32)> {
+    let deadline = std::time::Instant::now() + timeout;
+    let mut pool = POOL.lock().unwrap_or_else(|e| e.into_inner());
+    loop {
+        remove_inactive(&mut pool);
+        if let Some(at) = pool.iter().rposition(|w| w.name == name) {
+            let w = pool.remove(at);
+            return Some((w.stream, w.protocol_version));
+        }
+        let now = std::time::Instant::now();
+        if now >= deadline {
+            return None;
+        }
+        pool = ADDED.wait_timeout(pool, deadline - now).unwrap_or_else(|e| e.into_inner()).0;
+    }
+}
+
+/// A connection for a console command to client `name` (ConnectToFileDaemon with a retry time of 15
+/// seconds): the waiting one, else — when the Director may not connect itself — one that arrives
+/// within 15 seconds. None: connect yourself (or fail when not allowed, see [`director_may_connect`]).
+pub fn take_for_console(name: &str) -> Option<(BnetStream<AnyStream>, i32)> {
+    if let Some(found) = take(name) {
+        return Some(found);
+    }
+    if !director_may_connect(name) && client_may_connect(name) {
+        return take_waiting(name, Duration::from_secs(15));
+    }
+    None
 }
 
 /// The newest open connection of client `name`, taken out of the pool (UseWaitingClient,
@@ -122,6 +208,11 @@ pub fn list() -> Vec<(String, i32, i64)> {
     let mut pool = POOL.lock().unwrap_or_else(|e| e.into_inner());
     remove_inactive(&mut pool);
     pool.iter().map(|w| (w.name.clone(), w.protocol_version, w.connect_time)).collect()
+}
+
+/// Whether client `name` has a waiting connection.
+pub fn has(name: &str) -> bool {
+    list().iter().any(|(n, ..)| n == name)
 }
 
 /// Before the fork of job `job_id`: its client's waiting connection into the hand-off slot; the

@@ -44,7 +44,7 @@ const FD_PROTOCOL_VERSION: u32 = 54;
 static NEXT_SESSION: AtomicU64 = AtomicU64::new(1 << 40);
 
 /// Connects to the Director, authenticates both ways and returns the waiting connection.
-fn connect(config: &FdConfig, director: &DirectorAuth) -> Result<BnetStream<Box<dyn Rw>>, String> {
+fn connect(config: &FdConfig, director: &DirectorAuth) -> Result<(BnetStream<Box<dyn Rw>>, TcpStream), String> {
     let address = director.address.as_deref().ok_or("The address config directive is missing.")?;
     if director.port == 0 {
         return Err("The port config directive is missing.".into());
@@ -76,7 +76,33 @@ fn connect(config: &FdConfig, director: &DirectorAuth) -> Result<BnetStream<Box<
     }
     // the Director's command may come much later
     tcp.set_read_timeout(None).ok();
-    Ok(bnet)
+    Ok((bnet, tcp))
+}
+
+/// Waits until the Director sends something on the idle connection; with `Heartbeat Interval` set,
+/// a BNET heartbeat goes to the Director each interval meanwhile (keeps NAT and firewalls open).
+/// False when the connection ended.
+fn wait_for_director(bnet: &mut BnetStream<Box<dyn Rw>>, tcp: &TcpStream, heartbeat: Duration, shutdown: &AtomicBool) -> bool {
+    let step = if heartbeat.is_zero() { Duration::from_secs(5) } else { heartbeat };
+    let mut byte = [0u8; 1];
+    loop {
+        if shutdown.load(Ordering::SeqCst) {
+            return false;
+        }
+        tcp.set_read_timeout(Some(step)).ok();
+        let peeked = tcp.peek(&mut byte);
+        tcp.set_read_timeout(None).ok();
+        match peeked {
+            Ok(0) => return false,
+            Ok(_) => return true,
+            Err(e) if matches!(e.kind(), std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut) => {
+                if !heartbeat.is_zero() && bnet.send_signal(bareos_bnet::BnetSignal::Heartbeat).is_err() {
+                    return false;
+                }
+            }
+            Err(_) => return false,
+        }
+    }
 }
 
 /// The loop of one Director with `Connection From Client To Director`: connect, wait for the
@@ -84,9 +110,13 @@ fn connect(config: &FdConfig, director: &DirectorAuth) -> Result<BnetStream<Box<
 fn connect_loop(config: Arc<FdConfig>, director: DirectorAuth, shutdown: &AtomicBool) {
     while !shutdown.load(Ordering::SeqCst) {
         match connect(&config, &director) {
-            Ok(mut bnet) => {
+            Ok((mut bnet, tcp)) => {
                 let session_id = NEXT_SESSION.fetch_add(1, Ordering::Relaxed);
                 info!("session {session_id}: connected to Director {} (client initiated), waiting for its commands", director.name);
+                if !wait_for_director(&mut bnet, &tcp, Duration::from_secs(config.heartbeat_interval_secs), shutdown) {
+                    info!("session {session_id}: the Director closed the idle connection");
+                    continue;
+                }
                 Session::new(&config, &director, session_id).run(&mut bnet);
                 info!("session {session_id} ({}) ended", director.name);
             }

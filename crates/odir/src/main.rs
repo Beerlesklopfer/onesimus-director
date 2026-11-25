@@ -751,6 +751,7 @@ fn spawn_named_threads(
         };
         // jobs a client's connection starts (Run On Incoming Connect Interval)
         scheduled_run::set_incoming_launcher(launcher.clone());
+        client_pool::set_config(config.clone());
         let handle = thread::Builder::new()
             .name("dir:scheduler".into())
             .spawn(move || {

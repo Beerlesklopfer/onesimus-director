@@ -272,6 +272,9 @@ pub struct JobManager {
     /// after the server's "pause for 2 seconds" (jobq.cc:550); per JobId the
     /// earliest start. Compatibility log C-058.
     ready_at: std::collections::HashMap<u32, std::time::Instant>,
+    /// Jobs whose client the Director may not connect to and that wait for its connection, since when
+    /// (ConnectToFileDaemon: UseWaitingClient up to FD Connect Timeout).
+    client_wait: std::collections::HashMap<u32, std::time::Instant>,
     start_delay: std::time::Duration,
     /// sched_wait(): next look at a delayed job (every 30 seconds).
     wait_check: std::collections::HashMap<u32, std::time::Instant>,
@@ -296,6 +299,7 @@ impl JobManager {
             spawner: crate::job_worker::spawn_job_worker, next_seq: 0,
             jobs_run: 0, recent: std::collections::VecDeque::new(), last_schedule: std::time::Instant::now(),
             ready_at: std::collections::HashMap::new(),
+            client_wait: std::collections::HashMap::new(),
             start_delay: std::time::Duration::from_secs(if cfg!(test) { 0 } else { 2 }),
             wait_check: std::collections::HashMap::new(),
             wait_interval: std::time::Duration::from_secs(if cfg!(test) { 0 } else { 30 }),
@@ -586,8 +590,16 @@ impl JobManager {
 
     fn start_ready_jobs(&mut self, children: &mut Vec<crate::internal_jobs::ChildStart>) {
         let host = self.script_host();
+        // jobs that wait for their client's connection stay at the front, the others start
+        let mut deferred: Vec<u32> = Vec::new();
         while let Some(&id) = self.ready.front() {
             let canceled = self.get_job(id).is_some_and(|j| is_job_canceled(j.observed_status));
+            if !canceled && self.waits_for_client(id) {
+                self.ready.pop_front();
+                deferred.push(id);
+                continue;
+            }
+            self.client_wait.remove(&id);
             if !canceled {
                 let name = self.get_job(id).map(|j| j.job_name.clone()).unwrap_or_default();
                 let (max_workers, ..) = self.limits(&name, "", "");
@@ -710,9 +722,36 @@ impl JobManager {
                 }
             }
         }
+        for id in deferred.into_iter().rev() {
+            self.ready.push_front(id);
+        }
     }
 
-    /// RunScripts(jcr, ..., "AfterJob") runs once per job (post_scripts_ran):
+/// Whether job `id` waits for a client initiated connection: it talks to the FD, the Director may
+    /// not connect to the client itself, the client may connect, no connection waits yet, and the FD
+    /// Connect Timeout (default 180 s) has not passed (then the job starts and fails to connect).
+    fn waits_for_client(&mut self, id: u32) -> bool {
+        let Some(params) = self.get_job(id).and_then(|j| j.jcr.params.clone()) else { return false };
+        if !matches!(params.job_type, crate::job_worker::WorkerJobType::Backup | crate::job_worker::WorkerJobType::Restore
+            | crate::job_worker::WorkerJobType::Verify) {
+            return false;
+        }
+        let client = &params.client_name;
+        if crate::client_pool::director_may_connect(client) || !crate::client_pool::client_may_connect(client)
+            || crate::client_pool::has(client) {
+            return false;
+        }
+        let timeout = self.config.as_ref().and_then(|c| c.read().ok())
+            .and_then(|c| crate::commands::defaults::raw(&c, "director", &c.director.name)
+                .and_then(|r| r.directives.iter().rev().find(|d| d.norm_key() == "fdconnecttimeout"))
+                .and_then(|d| d.first().map(str::to_string)))
+            .and_then(|v| bareos_config::values::parse_time(&v).ok())
+            .map_or(std::time::Duration::from_secs(180), |(_, d)| d);
+        let since = *self.client_wait.entry(id).or_insert_with(std::time::Instant::now);
+        since.elapsed() < timeout
+    }
+
+        /// RunScripts(jcr, ..., "AfterJob") runs once per job (post_scripts_ran):
     /// the job data for the scripts, None when they ran already.
     pub fn take_post_scripts(&mut self, job_id: u32) -> Option<ScriptJob> {
         let job = self.jobs.iter_mut().find(|j| j.job_id == job_id)?;
