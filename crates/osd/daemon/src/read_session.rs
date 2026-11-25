@@ -418,7 +418,7 @@ fn open_read(d: &Daemon, job: &Arc<Job>, dir: &SharedChannel) -> Option<(ReadPip
             d.jmsg(dir, job, M_FATAL, &format!("No suitable device found to read Volume \"{}\"\n", volumes[0].name));
             return None;
         };
-        d.release_device(&old);
+        d.release_device(&old, &job.cmd.job);
         *job.read_device.lock().unwrap_or_else(|e| e.into_inner()) = Some(r.device.name.clone());
         match d.config.find_device(&r.device.name) {
             Some(c) => conf = c.clone(),
@@ -470,6 +470,7 @@ fn read_info(d: &Daemon, job: &Job, dev: &FileDevice, bootstrap: &Bootstrap, alt
         bootstrap: bootstrap.path.display().to_string(),
         vol_poll_interval: 300,
         alternatives,
+        device_share: String::new(),
     }
 }
 

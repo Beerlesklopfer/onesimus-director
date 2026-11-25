@@ -271,7 +271,7 @@ impl DirSession {
             // reserves again from the same list
             let r = self.d.reserve_device(&storage, &job.cmd).map(|r| r.device.name);
             if let Some(name) = &r {
-                self.d.release_device(name);
+                self.d.release_device(name, &job.cmd.job);
             }
             r
         };
@@ -310,12 +310,12 @@ impl DirSession {
                     let new_read = spares.remove(0);
                     self.d.hold_device(&new_read, &job.cmd.job);
                     *job.read_device.lock().unwrap_or_else(|e| e.into_inner()) = Some(new_read);
-                    self.d.release_device(&name);
+                    self.d.release_device(&name, &job.cmd.job);
                     Some(name)
                 }
             }
             Some(name) => {
-                self.d.release_device(&name);
+                self.d.release_device(&name, &job.cmd.job);
                 // a spare read device of this job became the write device: no longer a spare
                 job.read_alternatives.lock().unwrap_or_else(|e| e.into_inner()).retain(|a| *a != name);
                 Some(name)

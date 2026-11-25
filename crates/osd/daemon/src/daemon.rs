@@ -53,6 +53,81 @@ pub struct Reserved {
 /// target of a Distributor (the job name follows it never; it ends the name).
 const ALT_MARK: &str = "\u{1}alt";
 
+/// The reservation table: per device the job that holds it (dereferences to that map) and, for a
+/// device with `Maximum Concurrent Jobs` > 1, every job appending to it at the same time (OP-2;
+/// bareos-sd writes their blocks interleaved into the mounted volume).
+#[derive(Debug, Default, Clone)]
+pub struct Holds {
+    /// Device → its (first) holder.
+    first: HashMap<String, String>,
+    /// Shared device → its appending jobs, the first holder among them.
+    sharers: HashMap<String, Vec<String>>,
+}
+
+impl std::ops::Deref for Holds {
+    type Target = HashMap<String, String>;
+    fn deref(&self) -> &Self::Target {
+        &self.first
+    }
+}
+
+impl std::ops::DerefMut for Holds {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.first
+    }
+}
+
+impl Holds {
+    /// `job` appends to device `dev`, which allows `max` jobs at once: true when it may (the
+    /// device is free, or shared by fewer than `max` appending jobs).
+    fn share(&mut self, dev: &str, job: &str, max: u32) -> bool {
+        match self.first.get(dev) {
+            None => {
+                self.first.insert(dev.to_string(), job.to_string());
+                if max > 1 {
+                    self.sharers.insert(dev.to_string(), vec![job.to_string()]);
+                }
+                true
+            }
+            Some(_) if max > 1 => match self.sharers.get_mut(dev) {
+                Some(jobs) if jobs.iter().any(|j| j == job) => true,
+                Some(jobs) if (jobs.len() as u32) < max => {
+                    jobs.push(job.to_string());
+                    true
+                }
+                _ => false,
+            },
+            Some(_) => false,
+        }
+    }
+
+    /// `job` gives up device `dev`; another appending job becomes its holder.
+    fn leave(&mut self, dev: &str, job: &str) {
+        if let Some(jobs) = self.sharers.get_mut(dev) {
+            jobs.retain(|j| j != job);
+            match jobs.first().cloned() {
+                Some(next) => {
+                    if self.first.get(dev).is_some_and(|h| h == job) {
+                        self.first.insert(dev.to_string(), next);
+                    }
+                    return;
+                }
+                None => {
+                    self.sharers.remove(dev);
+                }
+            }
+        }
+        if self.first.get(dev).is_some_and(|h| h == job || h.strip_suffix(ALT_MARK) == Some(job)) {
+            self.first.remove(dev);
+        }
+    }
+
+    /// The appending jobs of shared device `dev` (empty when it is not shared).
+    pub fn sharers(&self, dev: &str) -> &[String] {
+        self.sharers.get(dev).map(Vec::as_slice).unwrap_or(&[])
+    }
+}
+
 thread_local! {
     /// Set while [`Daemon::reservable_when_free`] tries a reservation that is not kept.
     static QUIET: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
@@ -96,8 +171,8 @@ pub struct Daemon {
     pub start_time: u32,
     /// How writers are started.
     pub launcher: Launcher,
-    /// Device name → unique job name using it.
-    busy: Arc<Mutex<HashMap<String, String>>>,
+    /// Device name → unique job name using it; the appending jobs of shared devices.
+    busy: Arc<Mutex<Holds>>,
     /// The last jobs that ended (`last_jobs`, `MAX_LAST_JOBS` = 10), oldest first.
     terminated: Arc<Mutex<std::collections::VecDeque<TerminatedJob>>>,
     /// Jobs run since start.
@@ -168,7 +243,7 @@ impl Daemon {
             jobs: Arc::new(JobTable::default()),
             start_time: now as u32,
             launcher,
-            busy: Arc::new(Mutex::new(HashMap::new())),
+            busy: Arc::new(Mutex::new(Holds::default())),
             terminated: Arc::default(),
             jobs_run: Arc::new(std::sync::atomic::AtomicUsize::new(0)),
             media: Arc::default(),
@@ -260,14 +335,15 @@ impl Daemon {
     /// reservation fails only because they hold the devices). A device the job holds itself (its
     /// read device) never becomes free while it waits.
     pub fn reservable_when_free(&self, storage: &UseStorage, job: &JobCommand) -> bool {
-        let mut own: HashMap<String, String> = self.busy.lock().unwrap_or_else(|e| e.into_inner())
+        let first = self.busy.lock().unwrap_or_else(|e| e.into_inner())
             .iter().filter(|(_, holder)| **holder == job.job).map(|(k, v)| (k.clone(), v.clone())).collect();
+        let mut own = Holds { first, sharers: HashMap::new() };
         let _quiet = Quiet::enter();
         Self::reserve_in(self, &mut own, storage, job).is_some()
     }
 
     /// [`Self::reserve_device`] against the reservation table `busy`.
-    fn reserve_in(&self, busy: &mut HashMap<String, String>, storage: &UseStorage, job: &JobCommand) -> Option<Reserved> {
+    fn reserve_in(&self, busy: &mut Holds, storage: &UseStorage, job: &JobCommand) -> Option<Reserved> {
         for name in &storage.devices {
             if let Some(dist) = self.config.find_distributor(name) {
                 if let Some(reserved) = self.reserve_distributed(busy, dist, storage, job) {
@@ -277,10 +353,14 @@ impl Daemon {
             }
             let Some(dev) = self.config.find_device(name) else { continue };
             let file_type = dev.device_type.as_deref().is_none_or(|t| t.eq_ignore_ascii_case("file"));
-            if dev.media_type != storage.media_type || !file_type || busy.contains_key(&dev.name) {
+            if dev.media_type != storage.media_type || !file_type {
                 continue;
             }
-            busy.insert(dev.name.clone(), job.job.clone());
+            // appending jobs share a device up to its Maximum Concurrent Jobs; reading is exclusive
+            let max = if storage.append { dev.maximum_concurrent_jobs } else { 1 };
+            if !busy.share(&dev.name, &job.job, max) {
+                continue;
+            }
             let slots = self.ring_slots(dev);
             return Some(Reserved { device: FileDevice::from_config(dev), slots, alternatives: Vec::new() });
         }
@@ -300,7 +380,7 @@ impl Daemon {
     ///   the first free one) is the read device, the others
     ///   [`Reserved::alternatives`], from which the reader takes the device of
     ///   each volume by its media type.
-    fn reserve_distributed(&self, busy: &mut HashMap<String, String>, dist: &SdDistributor, storage: &UseStorage,
+    fn reserve_distributed(&self, busy: &mut Holds, dist: &SdDistributor, storage: &UseStorage,
                            job: &JobCommand) -> Option<Reserved> {
         let file = |dev: &SdDevice| dev.device_type.as_deref().is_none_or(|t| t.eq_ignore_ascii_case("file"));
         if storage.append {
@@ -453,7 +533,30 @@ impl Daemon {
 
     /// Frees every device `job` has reserved.
     pub fn release_job_devices(&self, job: &str) {
-        self.busy.lock().unwrap_or_else(|e| e.into_inner()).retain(|_, j| j.as_str() != job && j.strip_suffix(ALT_MARK) != Some(job));
+        let mut busy = self.busy.lock().unwrap_or_else(|e| e.into_inner());
+        let shared: Vec<String> = busy.sharers.iter().filter(|(_, j)| j.iter().any(|j| j == job)).map(|(d, _)| d.clone()).collect();
+        for dev in shared {
+            busy.leave(&dev, job);
+        }
+        busy.retain(|_, j| j.as_str() != job && j.strip_suffix(ALT_MARK) != Some(job));
+    }
+
+    /// The device file of the writers of `name` when several jobs may append to it at once
+    /// (`Maximum Concurrent Jobs` > 1): `<Working Directory>/<Storage>.<Device>.device`; empty
+    /// otherwise.
+    pub fn device_share_path(&self, name: &str) -> String {
+        match self.config.find_device(name) {
+            Some(dev) if dev.maximum_concurrent_jobs > 1 => {
+                let dir = self.config.storage.working_directory.clone().map(std::path::PathBuf::from).unwrap_or_else(std::env::temp_dir);
+                dir.join(format!("{}.{}.device", self.config.storage.name, name)).display().to_string()
+            }
+            _ => String::new(),
+        }
+    }
+
+    /// The jobs appending to shared device `name` at the moment (empty when it is not shared).
+    pub fn device_sharers(&self, name: &str) -> Vec<String> {
+        self.busy.lock().unwrap_or_else(|e| e.into_inner()).sharers(name).to_vec()
     }
 
     /// Marks device `name` as used by `job` (its read device).
@@ -461,9 +564,9 @@ impl Daemon {
         self.busy.lock().unwrap_or_else(|e| e.into_inner()).insert(name.to_string(), job.to_string());
     }
 
-    /// Frees device `name` (end of a job's use).
-    pub fn release_device(&self, name: &str) {
-        self.busy.lock().unwrap_or_else(|e| e.into_inner()).remove(name);
+    /// Frees device `name` from `job` (end of its use); on a shared device the others keep it.
+    pub fn release_device(&self, name: &str, job: &str) {
+        self.busy.lock().unwrap_or_else(|e| e.into_inner()).leave(name, job);
     }
 
     /// Ring slots for a job on `dev` (osd.d `Ring Slots` of the device,
@@ -569,6 +672,27 @@ mod distributor_tests {
     }
 
     #[test]
+    fn appending_jobs_share_a_device_up_to_its_maximum_concurrent_jobs() {
+        let text = "Storage {\n Name = sd\n}\nDirector {\n Name = dir\n Password = x\n}\n\
+            Device {\n Name = S\n Media Type = MS\n Archive Device = /tmp/s\n Maximum Concurrent Jobs = 2\n}\n";
+        let d = Daemon::new(SdConfig::from_resources(&bareos_config::raw::parse_str(text, None).unwrap()).unwrap(), Launcher::Thread);
+        let st = |append| UseStorage { storage: "s".into(), media_type: "MS".into(), append, devices: vec!["S".into()], ..Default::default() };
+        assert!(d.reserve_device(&st(true), &job("A.1", "x-fd", 'F')).is_some());
+        assert!(d.reserve_device(&st(true), &job("A.2", "x-fd", 'F')).is_some(), "the second appending job shares the device");
+        assert!(d.reserve_device(&st(true), &job("A.3", "x-fd", 'F')).is_none(), "a third one exceeds the maximum");
+        assert!(d.reserve_device(&st(false), &job("R.1", "x-fd", 'F')).is_none(), "reading is exclusive");
+        assert_eq!(d.device_sharers("S"), ["A.1", "A.2"]);
+        // the first holder leaves: the device stays held by the other
+        d.release_job_devices("A.1");
+        assert_eq!(d.device_user("S").as_deref(), Some("A.2"));
+        assert!(d.reserve_device(&st(true), &job("A.3", "x-fd", 'F')).is_some());
+        d.release_device("S", "A.2");
+        d.release_job_devices("A.3");
+        assert!(d.device_user("S").is_none() && d.device_sharers("S").is_empty());
+        assert!(d.reserve_device(&st(false), &job("R.1", "x-fd", 'F')).is_some());
+    }
+
+    #[test]
     fn a_copy_writes_to_a_spare_read_device_of_its_own() {
         let d = daemon();
         // a Copy (c) of a Monthly job: reads through the Distributor, writes by route Pool = Monthly to B
@@ -578,7 +702,7 @@ mod distributor_tests {
         let w = d.reserve_device(&write("Monthly", "MD"), &JobCommand { level: 'I', ..copy.clone() }).unwrap();
         assert_eq!(w.device.name, "B", "the job's own spare becomes its write device");
         // another job may not take the spare
-        d.release_device("B");
+        d.release_device("B", "C.1");
         let read2 = d.reserve_device(&UseStorage { append: false, ..write("P", "MD") }, &job("R.1", "x-fd", 'F'));
         assert!(read2.is_some_and(|r| r.device.name == "B"));
         assert!(d.reserve_device(&write("Monthly", "MD"), &JobCommand { level: 'I', ..copy }).is_none());

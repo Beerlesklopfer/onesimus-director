@@ -465,10 +465,11 @@ impl Producer {
             bootstrap: String::new(),
             vol_poll_interval: d.config.find_device(&dev.device.name).map(vol_poll_interval).unwrap_or(300),
             alternatives: Vec::new(),
+            device_share: d.device_share_path(&dev.device.name),
         };
         let result = Self::start(d, job, dir, &info, &dev.device, dev.slots);
         if result.is_err() {
-            d.release_device(&dev.device.name);
+            d.release_device(&dev.device.name, &job.cmd.job);
         }
         result
     }
@@ -762,7 +763,7 @@ fn do_append_data(d: &Daemon, job: &Arc<Job>, dir: &SharedChannel, fd: &mut dyn 
         }
         p.flush_attrs(d, dir, true);
         if let Some(dev) = device_name {
-            d.release_device(&dev);
+            d.release_device(&dev, &job.cmd.job);
         }
     } else if ok {
         d.jmsg(

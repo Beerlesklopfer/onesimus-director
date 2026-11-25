@@ -236,6 +236,9 @@ pub struct JobInfo {
     /// job holds; the reader switches to the one whose media type matches
     /// the next volume (empty otherwise).
     pub alternatives: Vec<crate::device::FileDevice>,
+    /// Writing to a device several jobs share (`Maximum Concurrent Jobs` > 1): the device file of
+    /// its writers ([`crate::share`]); empty when the job has the device alone.
+    pub device_share: String,
 }
 
 impl JobInfo {
@@ -266,7 +269,7 @@ impl JobInfo {
             "job={}\njob_id={}\nvol_session_id={}\nvol_session_time={}\npool_name={}\npool_type={}\nmedia_type={}\n\
              storage={}\ndevice={}\narchive_device={}\nlabel_media={}\nmax_block_size={}\nlabel_block_size={}\n\
              max_volume_size={}\njob_name={}\nclient_name={}\nfileset_name={}\nfileset_md5={}\njob_type={}\n\
-             job_level={}\nbootstrap={}\nvol_poll_interval={}\n",
+             job_level={}\nbootstrap={}\nvol_poll_interval={}\ndevice_share={}\n",
             self.job,
             self.job_id,
             self.vol_session_id,
@@ -288,7 +291,8 @@ impl JobInfo {
             self.job_type,
             self.job_level,
             self.bootstrap,
-            self.vol_poll_interval
+            self.vol_poll_interval,
+            self.device_share
         )
     }
 
@@ -325,6 +329,7 @@ impl JobInfo {
             bootstrap: get("bootstrap")?,
             // older rings without the line: the Bareos default
             vol_poll_interval: num("vol_poll_interval").unwrap_or(300),
+            device_share: get("device_share").unwrap_or_default(),
             alternatives: text.lines().filter_map(|l| l.strip_prefix("alt=")).map(Self::decode_alternative).collect::<Result<_, _>>()?,
         })
     }

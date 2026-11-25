@@ -34,7 +34,7 @@
 //! `stored/label.cc` (`WriteSessionLabel` für EOS), `stored/askdir.cc`.
 
 use std::fs::File;
-use std::io::Write;
+use std::io::{Seek, SeekFrom, Write};
 use std::time::{Duration, Instant};
 
 use bareos_format::label::{SessionLabel, BAREOS_ID, BAREOS_TAPE_VERSION, EOS_LABEL};
@@ -45,6 +45,7 @@ use osd_ring::{Ring, State};
 
 use crate::device::{with_commas, FileDevice, LabelState};
 use crate::ringproto::{JobInfo, Request, SlotKind, SlotMeta};
+use crate::share::DeviceShare;
 
 /// The writer is consumer 0 (one device per job in stage 1).
 pub const CONSUMER: usize = 0;
@@ -95,6 +96,8 @@ pub struct Writer<'a> {
     end_file: u32,
     /// `dcr->WroteVol`.
     wrote: bool,
+    /// The device file when other jobs may write to the device at the same time (OP-2).
+    share: Option<DeviceShare>,
 }
 
 /// Seconds since 1970.
@@ -158,6 +161,7 @@ impl<'a> Writer<'a> {
             end_block: 0,
             end_file: 0,
             wrote: false,
+            share: None,
         }
     }
 
@@ -249,7 +253,15 @@ impl<'a> Writer<'a> {
     /// `AcquireDeviceForAppend`: mounts the first volume, VolJobs+1, and
     /// tells the network session the device is ready.
     fn acquire(&mut self) -> Result<(), String> {
-        self.mount(None)?;
+        if !self.info.device_share.is_empty() {
+            self.share = Some(DeviceShare::open(std::path::Path::new(&self.info.device_share))?);
+        }
+        self.enter()?;
+        let joined = self.join()?;
+        if !joined {
+            self.mount(None)?;
+        }
+        self.leave()?;
         self.block_number = 0;
         self.ring.call(CONSUMER, &Request::Ready.encode(), CATREQ_TIMEOUT).map_err(|e| e.to_string())?;
         Ok(())
@@ -418,13 +430,105 @@ impl<'a> Writer<'a> {
             v.cat.jobs += 1;
         }
         self.update_media(false)?;
-        // SetNewVolumeParameters / SetStartVolPosition
+        self.set_new_volume_parameters(addr);
+        Ok(())
+    }
+
+    /// The pid that names this writer in the device file.
+    fn pid() -> u32 {
+        std::process::id()
+    }
+
+    /// A shared device: takes its lock and brings the volume up to the device file (the counters,
+    /// the end where the next block goes); follows a volume another writer mounted meanwhile.
+    fn enter(&mut self) -> Result<(), String> {
+        let Some(share) = self.share.as_mut() else { return Ok(()) };
+        share.lock()?;
+        let state = share.read();
+        let Some(v) = self.vol.as_mut() else { return Ok(()) };
+        if state.volume == v.name {
+            v.cat = state.cat;
+            v.addr = v.file.seek(SeekFrom::End(0)).map_err(|e| format!("Seek error on device {}: {e}", self.dev.print_name()))?;
+            return Ok(());
+        }
+        if state.volume.is_empty() {
+            return Ok(());
+        }
+        // the volume was full, another writer mounted the next one: the JobMedia of the old
+        // volume, then on to the new one (VolJobs+1 like every job that writes on it)
+        let write_time = v.cat.write_time;
+        self.create_jobmedia(false)?;
+        let (file, addr) = self.dev.open_append(&state.volume)?;
+        self.vol = Some(Volume { name: state.volume.clone(), file, addr, cat: state.cat, media_id: state.media_id });
+        if let Some(v) = self.vol.as_mut() {
+            v.cat.jobs += 1;
+            v.cat.write_time = v.cat.write_time.max(write_time);
+        }
+        self.update_media(false)?;
+        self.set_new_volume_parameters(addr);
+        Ok(())
+    }
+
+    /// A shared device: writes the volume and its counters to the device file and gives the lock
+    /// up.
+    fn leave(&mut self) -> Result<(), String> {
+        let Some(share) = self.share.as_mut() else { return Ok(()) };
+        let mut state = share.read();
+        if let Some(v) = self.vol.as_ref() {
+            state.volume = v.name.clone();
+            state.media_id = v.media_id;
+            state.cat = v.cat.clone();
+            if !state.pids.contains(&Self::pid()) {
+                state.pids.push(Self::pid());
+            }
+        }
+        let written = share.write(&state);
+        share.unlock();
+        written
+    }
+
+    /// `AcquireDeviceForAppend` on a device other jobs write to: the job appends to the mounted
+    /// volume, VolJobs+1. Like bareos-sd it checks the end of data against the catalog first; the
+    /// other jobs' blocks are not in the catalog's VolBytes yet, so it warns and corrects it
+    /// (measured with bareos-sd 25.1.3, `sd_interleave.rs`). False when nobody writes (the job
+    /// mounts a volume itself).
+    fn join(&mut self) -> Result<bool, String> {
+        let Some(share) = self.share.as_mut() else { return Ok(false) };
+        let state = share.read();
+        if state.volume.is_empty() || !state.others(Self::pid()) {
+            return Ok(false);
+        }
+        let name = state.volume.clone();
+        let catalog = self.vol_req(&osd::askdir::get_vol_info(&self.info.job, &name, true))?;
+        let (file, addr) = self.dev.open_append(&name)?;
+        self.vol = Some(Volume { name: name.clone(), file, addr, cat: state.cat, media_id: state.media_id });
+        self.jmsg(M_INFO, &format!("Moving to end of data on volume \"{name}\""));
+        if addr == catalog.bytes {
+            self.jmsg(M_INFO, &format!("Ready to append to end of Volume \"{name}\" size={addr}"));
+        } else if addr > catalog.bytes {
+            self.jmsg(M_WARNING, &format!(
+                "For Volume \"{name}\":\nThe sizes do not match! Volume={} Catalog={}\nCorrecting Catalog",
+                with_commas(addr),
+                with_commas(catalog.bytes)
+            ));
+        }
+        if let Some(v) = self.vol.as_mut() {
+            v.cat.bytes = v.cat.bytes.max(addr);
+            v.cat.files = (v.cat.bytes >> 32) as u32;
+            v.cat.jobs += 1;
+        }
+        self.update_media(false)?;
+        self.set_new_volume_parameters(addr);
+        Ok(true)
+    }
+
+    /// `SetNewVolumeParameters` / `SetStartVolPosition`: the job's next JobMedia starts at `addr`.
+    fn set_new_volume_parameters(&mut self, addr: u64) {
         self.start_block = addr as u32;
         self.start_file = (addr >> 32) as u32;
         self.first_index = 0;
         self.last_index = 0;
         self.wrote = false;
-        Ok(())
     }
 
     /// `MarkVolumeInError`.
@@ -469,6 +573,14 @@ impl<'a> Writer<'a> {
     /// `WriteBlockToDevice` with `FixupDeviceBlockWriteError` for a full
     /// volume: seals the block (header, number, checksum) and appends it.
     fn write_block(&mut self, payload: &[u8], meta: &SlotMeta) -> Result<(), String> {
+        self.enter()?;
+        let written = self.write_block_locked(payload, meta);
+        let left = self.leave();
+        written.and(left)
+    }
+
+    /// [`Self::write_block`] with the device lock held (a shared device).
+    fn write_block_locked(&mut self, payload: &[u8], meta: &SlotMeta) -> Result<(), String> {
         let mut block = vec![0u8; BLKHDR2_LENGTH];
         block.extend_from_slice(payload);
         let len = block.len() as u64;
@@ -602,6 +714,28 @@ impl<'a> Writer<'a> {
     /// `ReleaseDevice`: "Releasing device", the job's JobMedia, the final
     /// catalog update.
     fn release(&mut self) -> Result<(), String> {
+        self.enter()?;
+        let released = self.release_locked();
+        // the writer leaves the device file; the last one takes the volume out
+        if let Some(share) = self.share.as_mut() {
+            let mut state = share.read();
+            if let Some(v) = self.vol.as_ref() {
+                state.cat = v.cat.clone();
+            }
+            state.pids.retain(|p| *p != Self::pid());
+            if state.pids.is_empty() {
+                state = Default::default();
+            }
+            let written = share.write(&state);
+            share.unlock();
+            written?;
+        }
+        self.vol = None;
+        released
+    }
+
+    /// [`Self::release`] with the device lock held (a shared device).
+    fn release_locked(&mut self) -> Result<(), String> {
         self.jmsg(M_INFO, &format!("Releasing device {}.", self.dev.print_name()));
         if self.vol.is_none() {
             return Ok(());
@@ -615,9 +749,7 @@ impl<'a> Writer<'a> {
         if let Some(v) = self.vol.as_mut() {
             v.cat.files = (v.addr >> 32) as u32;
         }
-        self.update_media(false)?;
-        self.vol = None;
-        Ok(())
+        self.update_media(false)
     }
 }
 
@@ -779,6 +911,7 @@ pub(crate) mod tests {
             bootstrap: String::new(),
             vol_poll_interval: 300,
             alternatives: Vec::new(),
+            device_share: String::new(),
         };
         let _ = Ring::remove(ring_name);
         let ring = Ring::create(ring_name, RingConfig { slots: 3, slot_size: 4096, consumers: 1 }).unwrap();

@@ -89,6 +89,8 @@ pub struct RigOptions {
     pub dir_client_lines: Vec<String>,
     /// Lines added to the FD's own `Client` resource (e.g. `Heartbeat Interval = 2`).
     pub fd_client_lines: Vec<String>,
+    /// Lines added to the SD's Device `VDev` (e.g. `Maximum Concurrent Jobs = 2`).
+    pub sd_device_lines: Vec<String>,
     /// No TLS between Director and FD: `TLS Enable = no` in the Director's Client resource and in the
     /// FD's Director and Client resources (a FD in clear text, like an old one).
     pub fd_plain: bool,
@@ -124,6 +126,7 @@ impl RigOptions {
             fd_director_lines: Vec::new(),
             dir_client_lines: Vec::new(),
             fd_client_lines: Vec::new(),
+            sd_device_lines: Vec::new(),
         }
     }
 }
@@ -284,6 +287,12 @@ impl Rig {
             crate::config::write_director_resources(&self.layout, &[storage]).map_err(io)?;
             self.write_odir_d(crate::config::storage_extension(&self.layout, self.ports)).map_err(io)?;
             crate::config::write_sd_grpc_extension(&self.layout, self.ports).map_err(io)?;
+        }
+        if !self.options.sd_device_lines.is_empty() {
+            let conf = std::fs::read_to_string(&self.layout.sd_conf).map_err(io)?;
+            let lines: String = self.options.sd_device_lines.iter().map(|l| format!("  {l}\n")).collect();
+            let conf = conf.replacen("Name = VDev\n", &format!("Name = VDev\n{lines}"), 1);
+            std::fs::write(&self.layout.sd_conf, conf).map_err(io)?;
         }
         if self.options.copy_plain {
             // Bareos requires TLS by default: the reading SD and its Storage resource

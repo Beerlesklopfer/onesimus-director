@@ -53,7 +53,16 @@ pub fn delete_null_jobmedia(job: &str, job_id: u32) -> String {
 /// `JobMessage`: a job message of `daemon` (`<daemon> JobId <n>: <text>`),
 /// with message type `msg_type` (`M_*`) and time `mtime`.
 pub fn jmsg(job: &str, daemon: &str, job_id: u32, msg_type: i32, mtime: i64, text: &str) -> String {
-    format!("Jmsg Job={job} type={msg_type} level={mtime} {daemon} JobId {job_id}: {text}")
+    // lib/message.cc Jmsg(): the text of an error, a warning … starts with its kind
+    use bareos_format::msg::{M_ERROR, M_FATAL, M_SECURITY, M_WARNING};
+    let kind = match msg_type {
+        M_FATAL => "Fatal error: ",
+        M_ERROR => "Error: ",
+        M_WARNING => "Warning: ",
+        M_SECURITY => "Security violation: ",
+        _ => "",
+    };
+    format!("Jmsg Job={job} type={msg_type} level={mtime} {daemon} JobId {job_id}: {kind}{text}")
 }
 
 /// `Job_status`: `Status Job=%s JobStatus=%d`.
@@ -334,6 +343,8 @@ mod tests {
              EndBlock=12592462 Copy=0 Strip=0 MediaId=1\n"));
         assert_eq!(job_status(job, 'R'), format!("Status Job={job} JobStatus=82\n"));
         assert_eq!(jmsg(job, "vsd", 1, 6, 5, "Releasing device.\n"), format!("Jmsg Job={job} type=6 level=5 vsd JobId 1: Releasing device.\n"));
+        assert_eq!(jmsg(job, "vsd", 1, 3, 5, "No device.\n"), format!("Jmsg Job={job} type=3 level=5 vsd JobId 1: Fatal error: No device.\n"));
+        assert!(jmsg(job, "vsd", 1, 5, 5, "x").ends_with(": Warning: x") && jmsg(job, "vsd", 1, 4, 5, "x").ends_with(": Error: x"));
     }
 
     #[test]

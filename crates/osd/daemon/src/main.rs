@@ -61,6 +61,7 @@ mod read_session;
 mod reader;
 mod ringproto;
 mod server;
+mod share;
 mod status;
 mod transport;
 mod writer;

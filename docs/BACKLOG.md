@@ -54,7 +54,7 @@ Was osd von PDC fernhielt (ein File-Device, `Maximum Concurrent Jobs = 5`, Recyc
 | ID | Punkt | Art | Ort |
 | --- | --- | --- | --- |
 | OP-1 | ~~Ein zweiter schreibender Job auf einem belegten Device scheitert~~ **erledigt:** er wartet wie bei bareos-sd mit `Maximum Concurrent Jobs = 1` (`sd_busy_device.rs`) | Lücke | `fd_session.rs` |
-| OP-2 | Mehrere Jobs schreiben verschachtelt in dasselbe Volume (Device `Maximum Concurrent Jobs` > 1, wie bareos-sd). Bis dahin laufen sie nacheinander | Schritt 2 | Geräteschreiber |
+| OP-2 | ~~Mehrere Jobs schreiben verschachtelt in dasselbe Volume~~ **erledigt 25.11.2026** (`share.rs`, `sd_interleave.rs`); offen nur ein Rig-Test für den Volume-Wechsel mitten in verschachtelten Jobs | Schritt 2 | Geräteschreiber |
 | OP-3 | ~~Warten auf ein Volume beim Schreiben~~ war seit C-089 da | — | `writer.rs` |
 | OP-4 | ~~Recycelte Volumes wurden angehängt statt neu beschrieben~~ **erledigt** (`sd_recycle.rs`) | Fehler | `writer.rs` |
 | OP-5 | ~~`relabel` fehlt~~ **erledigt**, Datei wird umbenannt (C-096, `sd_relabel.rs`) | Lücke | `director.rs` |
