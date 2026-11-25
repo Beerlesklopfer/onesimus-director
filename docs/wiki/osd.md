@@ -301,7 +301,10 @@ bareos-dir ──BNET──► osd ◄──BNET── bareos-fd
   (`GetVolInfo … write=0`, Label-Prüfung, „Ready to read from volume …“);
   ein Datensatz, den das Backup am Volume-Ende zerteilt hat, kommt beim FD
   ganz an. Danach „End of all volumes.“, „Releasing device …“ und
-  `UpdateMedia` für das zuletzt gelesene Volume, wie bareos-sd.
+  `UpdateMedia` für das zuletzt gelesene Volume, wie bareos-sd. Endet der
+  letzte Bereich vor dem Ende des letzten Volumes (dort folgen Daten anderer
+  Jobs), entfallen „End of Volume …“ und „End of all volumes.“ wie bei
+  bareos-sd, das dann schon fertig ist.
 - **Falsches Volume:** „Read acquire: Wrong Volume mounted on device …:
   Wanted … have …“ (Warnung), dann „Too many errors trying to mount device
   … for reading.“ und der Job endet mit Fehler; ebenso bei fehlender Datei

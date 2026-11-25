@@ -75,8 +75,8 @@ struct Mounted {
 
 /// How reading one volume ended.
 enum VolumeEnd {
-    /// Every range was read.
-    Done,
+    /// Every range was read; true when the last one reached the end of the volume file.
+    Done(bool),
     /// The network session needs no more blocks (it is done or gone).
     Stopped,
 }
@@ -179,7 +179,11 @@ impl Reader<'_> {
                 break;
             }
             match self.read_volume(&bsr, index as u32, &vol.name) {
-                Ok(VolumeEnd::Done) => {
+                // the last volume's ranges end before its end: bareos-sd's MatchBsr says "done" with
+                // the next record and the read stops without these messages (the volume goes on with
+                // other jobs' data)
+                Ok(VolumeEnd::Done(false)) if index + 1 == volumes.len() => {}
+                Ok(VolumeEnd::Done(_)) => {
                     let file = self.vol.as_ref().map(|v| v.len >> 32).unwrap_or(0);
                     self.jmsg(M_INFO, &format!("End of Volume at file {file} on device {}, Volume \"{}\"", self.dev.print_name(), vol.name));
                     finished_all = index + 1 == volumes.len();
@@ -385,7 +389,7 @@ impl Reader<'_> {
                 pos += len as u64;
             }
         }
-        Ok(VolumeEnd::Done)
+        Ok(VolumeEnd::Done(pos >= vol.len))
     }
 
     /// `VolumeUnused` + close: the file of the previous volume.

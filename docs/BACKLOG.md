@@ -59,7 +59,7 @@ Was osd von PDC fernhielt (ein File-Device, `Maximum Concurrent Jobs = 5`, Recyc
 | OP-4 | ~~Recycelte Volumes wurden angehängt statt neu beschrieben~~ **erledigt** (`sd_recycle.rs`) | Fehler | `writer.rs` |
 | OP-5 | ~~`relabel` fehlt~~ **erledigt**, Datei wird umbenannt (C-096, `sd_relabel.rs`) | Lücke | `director.rs` |
 | OP-6 | ~~Ein lesender Job, dessen Device belegt ist, scheitert~~ **erledigt 25.11.2026:** osd wartet wie bareos-sd ohne Job-Meldung, Heartbeat an den Director (`sd_busy_read.rs`); dabei odir behoben: es brach beim ersten Heartbeat des wartenden SD ab, auch mit bareos-sd (C-098) | Lücke | `director.rs` `use_for_read`, `osd/src/job.rs` |
-| OP-7 | Ein Restore liest bis zum Volume-Ende, auch wenn der Bootstrap schon erledigt ist (bareos-sd hört auf). Gemessen in `sd_busy_read.rs`: osd meldet „End of Volume … / End of all volumes.“ und liest die 50 MB des danach geschriebenen BigBackup mit, bareos-sd nicht. `Decision::Done/SkipVolume` gibt es, greift hier aber nicht | Abweichung | `read_session.rs` |
+| OP-7 | ~~Ein Restore meldet „End of Volume … / End of all volumes.“, obwohl der letzte Bootstrap-Bereich mitten im Volume endet~~ **erledigt 25.11.2026:** gelesen wurde nur der Bereich (kein Mehraufwand), aber bareos-sd ist dann schon fertig und schweigt; osd meldet die beiden Zeilen beim letzten Volume nur noch, wenn es dessen Ende erreicht hat (`sd_busy_read.rs` vergleicht die SD-Meldungen) | Abweichung | `reader.rs` |
 
 ### Offene Reste an Befehlen
 

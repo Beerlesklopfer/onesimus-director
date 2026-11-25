@@ -43,4 +43,17 @@ fn restore_waits_for_the_busy_device() {
     println!("=== osd: BigBackup {big2}, restore {restore2}\n{log2}");
     assert_eq!((big, restore), ('T', 'T'));
     assert_eq!((big2, restore2), ('T', 'T'), "osd: the restore must wait for the device, not fail");
+    // the SD's messages of the restore: the same (no "End of Volume" while the volume goes on with
+    // the backup's data; OP-7)
+    assert_eq!(sd_lines(&log2), sd_lines(&log));
+}
+
+/// The SD's messages in a job log without version, paths and the label-dependent block address.
+fn sd_lines(log: &str) -> Vec<String> {
+    log.lines()
+        .filter_map(|l| l.strip_prefix("vsd JobId 3: "))
+        .filter(|l| !l.starts_with("Version:"))
+        .map(|l| l.split(" (/tmp").next().unwrap_or("").to_string())
+        .map(|l| l.split(" to file:block").next().unwrap_or("").to_string())
+        .collect()
 }
