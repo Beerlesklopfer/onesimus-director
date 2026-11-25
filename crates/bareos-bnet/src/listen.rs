@@ -39,10 +39,39 @@ pub fn bind(addr: SocketAddr) -> io::Result<TcpListener> {
     Ok(socket.into())
 }
 
+/// Binds one entry of a daemon's address list (`DirAddresses`, `FDAddresses`, `SDAddresses`, or
+/// the default `0.0.0.0` and `::`): an IPv6 socket is IPv6-only, as in Bareos'
+/// `OpenSocketAndBind`, so `0.0.0.0:port` and `[::]:port` bind side by side.
+pub fn bind_v6only(addr: SocketAddr) -> io::Result<TcpListener> {
+    let socket = Socket::new(Domain::for_address(addr), Type::STREAM, Some(Protocol::TCP))?;
+    if addr.is_ipv6() {
+        socket.set_only_v6(true)?;
+    }
+    #[cfg(unix)]
+    socket.set_reuse_address(true)?;
+    socket.bind(&addr.into())?;
+    socket.listen(BACKLOG)?;
+    Ok(socket.into())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use std::net::TcpStream;
+
+    /// The default list of a daemon, `0.0.0.0:p` and `[::]:p`, binds side by side (osd on the
+    /// H340 failed with the dual-stack `bind`, 25.11.2026).
+    #[test]
+    fn the_wildcards_of_both_families_bind_side_by_side() {
+        let v4 = bind_v6only("0.0.0.0:0".parse().unwrap()).unwrap();
+        let port = v4.local_addr().unwrap().port();
+        match bind_v6only(SocketAddr::from(([0u16; 8], port))) {
+            Ok(v6) => assert!(v6.local_addr().unwrap().is_ipv6()),
+            // a host without IPv6
+            Err(e) if e.kind() == io::ErrorKind::AddrNotAvailable || e.raw_os_error() == Some(97) => {}
+            Err(e) => panic!("[::]:{port} next to 0.0.0.0:{port}: {e}"),
+        }
+    }
 
     /// `[::]` takes an IPv4 connection (skipped where the host has no IPv6).
     #[test]

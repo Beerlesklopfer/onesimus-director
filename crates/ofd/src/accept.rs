@@ -52,7 +52,10 @@ pub fn accept_loop(config: &Arc<FdConfig>, shutdown: &'static AtomicBool) {
     };
     let mut listeners = Vec::new();
     for addr in &addrs {
-        match bareos_bnet::listen::bind(*addr) {
+        // the address list of FD Addresses: one socket per family (IPv6-only); the default `[::]`
+        // alone: one socket for both families
+        let bound = if config.fd_addresses_given { bareos_bnet::listen::bind_v6only(*addr) } else { bareos_bnet::listen::bind(*addr) };
+        match bound {
             Ok(l) => {
                 info!("listening on {addr}");
                 listeners.push(l);

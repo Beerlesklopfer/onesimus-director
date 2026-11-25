@@ -233,7 +233,7 @@ fn main() {
     // SD Addresses (every entry), SD Address, else every interface of both families (like bareos-sd)
     let mut listeners: Vec<TcpListener> = Vec::new();
     for addr in &config.storage.listen {
-        match bareos_bnet::listen::bind(*addr) {
+        match bareos_bnet::listen::bind_v6only(*addr) {
             Ok(l) => listeners.push(l),
             Err(e) => {
                 eprintln!("osd: cannot bind {addr}: {e} (another Storage daemon running? ss -ltnp)");
