@@ -61,6 +61,18 @@ Was osd von PDC fernhielt (ein File-Device, `Maximum Concurrent Jobs = 5`, Recyc
 | OP-6 | ~~Ein lesender Job, dessen Device belegt ist, scheitert~~ **erledigt 25.11.2026:** osd wartet wie bareos-sd ohne Job-Meldung, Heartbeat an den Director (`sd_busy_read.rs`); dabei odir behoben: es brach beim ersten Heartbeat des wartenden SD ab, auch mit bareos-sd (C-098) | Lücke | `director.rs` `use_for_read`, `osd/src/job.rs` |
 | OP-7 | ~~Ein Restore meldet „End of Volume … / End of all volumes.“, obwohl der letzte Bootstrap-Bereich mitten im Volume endet~~ **erledigt 25.11.2026:** gelesen wurde nur der Bereich (kein Mehraufwand), aber bareos-sd ist dann schon fertig und schweigt; osd meldet die beiden Zeilen beim letzten Volume nur noch, wenn es dessen Ende erreicht hat (`sd_busy_read.rs` vergleicht die SD-Meldungen) | Abweichung | `reader.rs` |
 
+### Aus dem PDC- und H340-Einsatz (25.11.2026, LOP D)
+
+| ID | Punkt | Art | Ort |
+| --- | --- | --- | --- |
+| D-1 | ~~osd wertet `SDAddresses` nicht aus (lauschte auf allen IPv4-Schnittstellen)~~ **erledigt** (C-101, gemeinsame Auflösung `bareos-config/listen.rs`) | Abweichung | `osd/daemon/main.rs` |
+| D-2 | ~~oconsole über gRPC: Befehle mit Rückfrage (`delete pool`, Auswahl, Eingabe) scheitern wie im Batch-Modus~~ **erledigt**: odir meldet `CommandResponse.dialog_required`, oconsole führt den Befehl im interaktiven Modus über BNET mit Dialog aus | Lücke | oconsole, odir, proto `cd958c3` |
+| D-3 | PDC: `device/FileStorage.conf` hat `Maximum Concurrent Jobs` doppelt (5 und 1) | Konfiguration (Maintainer) | PDC |
+| D-4 | H340-Test-Ressourcen zurücksetzen (Storage `H340` 10, Job `TestH340` 2), wenn die osd-Tests dort durch sind | Aufräumen | PDC |
+| D-5 | ~~Addendum zum FD vom 15.10. als überholt kennzeichnen~~ **erledigt** | Doku | hier |
+| D-6 | ~~odir: Worker-Log-Zeilen landeten in der Pipe zum Director (fd der Logdatei nach dem Fork wiederverwendet); ein Restore endete dadurch „Error, 0 Dateien“~~ **erledigt** (`76a4163`, `a145caf`) | Fehler | `job_worker.rs` |
+| D-7 | ~~ofd startete nicht mit `FDAddresses`~~ **erledigt** (C-100) | Fehler | ofd |
+
 ### Offene Reste an Befehlen
 
 | Befehl | Offen | Bezug |
@@ -259,7 +271,8 @@ Abnahme: Tests für beide Buildvarianten, Produktions-CLI ohne Schreibschalter, 
 ## Addendum: Plattformübergreifender File Daemon und ereignisgesteuerte Backups
 
 **Stand:** 15.10.2026  
-**Status:** Geplant / Implementierung offen  
+**Status 25.11.2026: weitgehend überholt.** ofd sichert und stellt wieder her (Full, Incremental, Differential, Accurate, Ketten über mehrere Volumes; Rig-Tests gegen bareos-sd und osd), spricht gRPC mit odir und osd, kennt Plugins (Broker) und die client-initiierte Verbindung samt `Run On Incoming Connect Interval` (ereignisgesteuerter Start, S-46). Was am FD noch fehlt, steht unter [Offene Stubs](#offene-stubs) (S-13). Der Text unten ist der Stand vom 15.10.2026 und bleibt als Herleitung stehen.  
+**Status damals:** Geplant / Implementierung offen  
 **Geltungsbereich:** `crates/ofd`, `crates/odir`, `proto` (Submodule `onesimus-proto`)
 
 ### Zielsetzung
@@ -297,9 +310,9 @@ Der Rust-FD darf deshalb noch nicht als funktionaler Ersatz für den C++-FD betr
 
 **Priorität: Hoch, nach beziehungsweise abhängig von den aktuellen Director-Paritätsarbeiten.**
 
-- [ ] Tatsächlichen Dateiscan anhand der FileSet-Include-/Exclude-Regeln implementieren.
-- [ ] Dateiinhalte und erforderliche Metadaten an den Storage Daemon übertragen.
-- [ ] Full-, Incremental- und Differential-Backups implementieren und testen.
+- [x] Tatsächlichen Dateiscan anhand der FileSet-Include-/Exclude-Regeln implementieren.
+- [x] Dateiinhalte und erforderliche Metadaten an den Storage Daemon übertragen.
+- [x] Full-, Incremental- und Differential-Backups implementieren und testen.
 - [ ] Dateiänderungen, Löschungen und Umbenennungen korrekt behandeln.
 - [ ] Restore
 
