@@ -37,12 +37,14 @@ use crate::sql_list::{add_commas, ListType};
 use crate::ua_select::Ua;
 
 /// UserSelectJobidsOrFiles kw[] (ua_restore.cc:511), in upstream order.
-const KEYWORDS: [&str; 27] = [
+const KEYWORDS: [&str; 28] = [
     "jobid", "current", "before", "file", "directory", "select", "pool", "all", "fileregex",
     // handled by individual arg lookups
     "client", "storage", "fileset", "where", "yes", "bootstrap", "done", "strip_prefix",
     "add_prefix", "add_suffix", "regexwhere", "restoreclient", "copies", "comment",
     "restorejob", "replace", "pluginoptions", "archive",
+    // Onesimus: restore IDs of OVFS nodes, `ovfs=<JobId>:<FileIndex>[,…]` (select_ovfs_ids)
+    "ovfs",
 ];
 
 /// JobId selection menu (ua_restore.cc:495).
@@ -513,6 +515,7 @@ fn user_select_jobids_or_files(ua: &mut Ua, ast: &CommandAst, rx: &mut Rx) -> i3
     let mut dirs: Vec<String> = Vec::new();
     let mut use_select = false;
     let mut use_fileregex = false;
+    let mut ovfs_ids: Vec<(u32, i32)> = Vec::new();
     rx.job_ids.clear();
 
     for arg in &ast.arguments {
@@ -579,8 +582,29 @@ fn user_select_jobids_or_files(ua: &mut Ua, ast: &CommandAst, rx: &mut Rx) -> i3
             }
             7 => rx.all = true,
             8 => use_fileregex = true,
+            27 => {
+                // ovfs=<JobId>:<FileIndex>,…
+                let Some(value) = has_value(ua, &arg.key, value) else { return 0 };
+                for id in value.split(',').filter(|s| !s.is_empty()) {
+                    let parsed = id.split_once(':')
+                        .and_then(|(j, f)| Some((j.trim().parse::<u32>().ok()?, f.trim().parse::<i32>().ok()?)))
+                        .filter(|(j, f)| *j > 0 && *f > 0);
+                    let Some(pair) = parsed else {
+                        ua.error_msg(format!("Invalid restore ID \"{id}\": expected <JobId>:<FileIndex>.\n"));
+                        return 0;
+                    };
+                    ovfs_ids.push(pair);
+                }
+            }
             _ => {} // handled elsewhere
         }
+    }
+
+    if !ovfs_ids.is_empty() {
+        if !get_client_name(ua, ast, rx) {
+            return 0;
+        }
+        return if select_ovfs_ids(ua, rx, &ovfs_ids) { 2 } else { 0 };
     }
 
     if !files.is_empty() || !dirs.is_empty() || use_fileregex {
@@ -1003,6 +1027,44 @@ fn insert_dir_into_findex_list(ua: &mut Ua, rx: &mut Rx, dir: &str) -> bool {
         AND Job.ClientId=Client.ClientId\n  AND Path.PathId=File.Pathid\n", rx.job_ids);
     if !jobid_fileindex(ua, rx, &sql) {
         ua.error_msg(format!("No database record found for: {dir}\n"));
+    }
+    true
+}
+
+/// Onesimus: the restore IDs of OVFS nodes (`jobid` and `fileindex` of `.ovfs_tree`/`.ovfs_ls`) go
+/// straight into the bootstrap. Every JobId must be a job of the selected client whose Job name the
+/// console may see; false (with a message) otherwise.
+fn select_ovfs_ids(ua: &mut Ua, rx: &mut Rx, ids: &[(u32, i32)]) -> bool {
+    let client = rx.client_name.clone().unwrap_or_default();
+    let mut jobids: Vec<u32> = ids.iter().map(|(j, _)| *j).collect();
+    jobids.sort_unstable();
+    jobids.dedup();
+    let list = jobids.iter().map(u32::to_string).collect::<Vec<_>>().join(",");
+    let sql = format!("SELECT Job.JobId, Job.Name FROM Job, Client WHERE Job.JobId IN ({list}) \
+        AND Job.ClientId=Client.ClientId AND Client.Name='{}'", client.replace('\'', "''"));
+    let rows: Vec<(u32, String)> = match rx.db.rows(&sql) {
+        Ok(table) => table.rows.into_iter().filter_map(|r| {
+            let id = r.first().cloned().flatten()?.parse().ok()?;
+            Some((id, r.get(1).cloned().flatten().unwrap_or_default()))
+        }).collect(),
+        Err(e) => {
+            ua.error_msg(format!("Query failed: {e}\n"));
+            return false;
+        }
+    };
+    for jobid in &jobids {
+        let allowed = rows.iter().find(|(id, _)| id == jobid)
+            .is_some_and(|(_, name)| acl::access(ua.ctx, Kind::Job, name));
+        if !allowed {
+            ua.error_msg(format!("JobId {jobid} is not a job of client \"{client}\".\n"));
+            return false;
+        }
+    }
+    rx.job_ids = list;
+    rx.last_jobid = jobids.last().map(u32::to_string).unwrap_or_default();
+    for (jobid, findex) in ids {
+        rx.bsr.add_findex(*jobid, *findex);
+        rx.selected_files += 1;
     }
     true
 }

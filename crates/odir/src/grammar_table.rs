@@ -357,7 +357,7 @@ fn restore() -> Node {
         val("where", "Restore prefix"), res("client", "Client name", CLIENTS), res("storage", "Storage name", STORAGES),
         val("bootstrap", "Bootstrap file"), res("restorejob", "Restore job", JOBS), val("comment", "Comment"),
         val("jobid", "Job IDs").list(), res("fileset", "FileSet name", FILESETS), enm("replace", "Replace mode", REPLACE),
-        val("pluginoptions", "Plugin options"), val("regexwhere", "Restore path rewrite"), val("fileregex", "Select files by regex"),
+        val("pluginoptions", "Plugin options"), val("regexwhere", "Restore path rewrite"), val("fileregex", "Select files by regex"), val("ovfs", "Restore IDs of OVFS nodes (Onesimus): JobId:FileIndex,..."),
         res("restoreclient", "Restore client", CLIENTS), val("backupformat", "Backup format"), res("pool", "Pool name", POOLS),
         val("file", "File to restore").repeat(), val("directory", "Directory to restore").repeat(),
         val("before", "Most recent backup before this time").optional_value(), val("strip_prefix", "Strip prefix"),

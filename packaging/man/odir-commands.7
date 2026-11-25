@@ -814,7 +814,7 @@ Restore files
 .PP
 \fBSynopsis\fR
 .nf
-restore [where=<where>] [client=<client>] [storage=<storage>] [bootstrap=<bootstrap>] [restorejob=<restorejob>] [comment=<comment>] [jobid=<jobid>[,...]] [fileset=<fileset>] [replace=<always|ifnewer|ifolder|never>] [pluginoptions=<pluginoptions>] [regexwhere=<regexwhere>] [fileregex=<fileregex>] [restoreclient=<restoreclient>] [backupformat=<backupformat>] [pool=<pool>] [file=<file> ...] [directory=<directory> ...] [before[=<before>]] [strip_prefix=<strip_prefix>] [stripprefix=<stripprefix>] [add_prefix=<add_prefix>] [addprefix=<addprefix>] [add_suffix=<add_suffix>] [addsuffix=<addsuffix>] [select[=<select>]] [current] [copies] [archive] [done] [all] [job=<job>] [yes] [catalog=<catalog>]
+restore [where=<where>] [client=<client>] [storage=<storage>] [bootstrap=<bootstrap>] [restorejob=<restorejob>] [comment=<comment>] [jobid=<jobid>[,...]] [fileset=<fileset>] [replace=<always|ifnewer|ifolder|never>] [pluginoptions=<pluginoptions>] [regexwhere=<regexwhere>] [fileregex=<fileregex>] [ovfs=<ovfs>] [restoreclient=<restoreclient>] [backupformat=<backupformat>] [pool=<pool>] [file=<file> ...] [directory=<directory> ...] [before[=<before>]] [strip_prefix=<strip_prefix>] [stripprefix=<stripprefix>] [add_prefix=<add_prefix>] [addprefix=<addprefix>] [add_suffix=<add_suffix>] [addsuffix=<addsuffix>] [select[=<select>]] [current] [copies] [archive] [done] [all] [job=<job>] [yes] [catalog=<catalog>]
 .fi
 .PP
 \fBDescription\fR
@@ -860,6 +860,9 @@ Restore path rewrite (text)
 .TP
 .B "fileregex=<fileregex>"
 Select files by regex (text)
+.TP
+.B "ovfs=<ovfs>"
+Restore IDs of OVFS nodes (Onesimus): JobId:FileIndex,... (text)
 .TP
 .B "restoreclient=<restoreclient>"
 Restore client (name; values from .clients)

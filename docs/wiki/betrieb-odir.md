@@ -501,3 +501,12 @@ Mit `Connection From Director To Client = no` verbindet odir nie selbst: Konsole
 180 s), ohne andere Jobs aufzuhalten. Mit `Heartbeat Interval` im FD sendet ofd auf der wartenden
 Verbindung Herzschläge (gegen Abbrüche durch NAT und Firewalls). Plan und Mitschnitt:
 [CLIENT-INITIIERT.md](../plans/CLIENT-INITIIERT.md).
+
+
+## Restore über OVFS-Kennungen (Onesimus)
+
+Jeder Knoten von `.ovfs_tree`, `.ovfs_ls` und `.ovfs_latest` trägt `jobid` und `fileindex`, die
+Restore-Kennung. `restore client=<Client> ovfs=<JobId>:<FileIndex>[,<JobId>:<FileIndex>…] [where=…]
+[restorejob=…] yes` stellt genau diese Dateien wieder her, ohne Dateibaum. Jede JobId muss ein Job des
+angegebenen Clients sein, dessen Job-Name die Konsole sehen darf; sonst bricht der Befehl mit „JobId …
+is not a job of client …“ ab. bareos-dir kennt `ovfs=` nicht („Unknown keyword“).

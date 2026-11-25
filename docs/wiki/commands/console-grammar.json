@@ -1484,6 +1484,18 @@
             "description": "Select files by regex"
           },
           {
+            "name": "ovfs",
+            "kind": "value",
+            "type": "string",
+            "required": false,
+            "repeatable": false,
+            "group": null,
+            "list": false,
+            "positional": false,
+            "value_optional": false,
+            "description": "Restore IDs of OVFS nodes (Onesimus): JobId:FileIndex,..."
+          },
+          {
             "name": "restoreclient",
             "kind": "value",
             "type": "resource",

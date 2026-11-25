@@ -180,7 +180,7 @@ Kern aus `ovfs-core` portiert, Zeilen per Server-Cursor in 10.000er-Batches);
 Äquivalenztest gegen eine Instanz mit `ovfs` byte-gleich. In oconsole als lesende MCP-Tools
 `ovfs_*` (auch im Produktions-Build). BVFS unverändert.
 
-Typisierte gRPC-Aufrufe (`DotOvfsStatus/Latest/Tree/Ls/Versions`) sind da (geprüft 24.11.2026 in `director_api.proto`). Der Restore-Baum im interaktiven `oconsole` läuft über den Dialog des Directors (`cd`, `ls`, `mark`, C-047). Offen bleibt nur die Restore-Auswahl über die OVFS-Restore-Kennungen (Bootstrap über `JobMedia`), eine neue Funktion ohne Entwurf. Befund
+Typisierte gRPC-Aufrufe (`DotOvfsStatus/Latest/Tree/Ls/Versions`) sind da (geprüft 24.11.2026 in `director_api.proto`). Der Restore-Baum im interaktiven `oconsole` läuft über den Dialog des Directors (`cd`, `ls`, `mark`, C-047). Die Restore-Auswahl über die OVFS-Restore-Kennungen ist seit 25.11.2026 da: `restore client=<c> ovfs=<JobId>:<FileIndex>,… [where=…] yes` (Onesimus-Erweiterung, Rig-Test `restore_ovfs_ids.rs`). Befund
 für das Plugin: In einer `SQL_ASCII`-Datenbank scheitern `ovfs.tree`/`ovfs.ls` mit
 `client_encoding = UTF8`, sobald ein Pfad nicht UTF-8 ist („invalid byte sequence“); der
 Director setzt dafür je Transaktion `SET LOCAL client_encoding TO 'SQL_ASCII'`.
