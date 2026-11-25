@@ -94,7 +94,8 @@ pub struct RigOptions {
     /// No TLS between Director and FD: `TLS Enable = no` in the Director's Client resource and in the
     /// FD's Director and Client resources (a FD in clear text, like an old one).
     pub fd_plain: bool,
-    /// The File Daemon to start instead of `ofd` (a `bareos-fd`: no overlay and no gRPC, started with `-f -c <conf> -d`).
+    /// The File Daemon to start instead of the rig's `ofd`: another ofd (file name `ofd`, e.g. an older installed build) runs
+    /// like the rig's own; a `bareos-fd` gets no overlay and no gRPC and is started with `-f -c <conf> -d`.
     pub fd_program: Option<PathBuf>,
     /// Files of the Director's `odir.d/` (below `<root>/onesimus`, relative path, text): Onesimus extensions to the standard `bareos-dir.d`.
     pub extra_odir_d: Vec<(String, String)>,
@@ -386,7 +387,9 @@ impl Rig {
         }
         if self.options.start_fd {
             let mut fd_conf = self.layout.fd_conf.display().to_string();
-            if self.options.fd_program.is_some() {
+            // another ofd (e.g. an older installed build) runs like the rig's own; a Bareos FD not
+            let bareos_fd = self.options.fd_program.as_deref().is_some_and(|p| !is_ofd(p));
+            if bareos_fd {
                 // a Bareos FD reads `<dir>/bareos-fd.conf` (the rig's own layout is `fd/client/vfd.conf`)
                 let dir = self.layout.root.join("fd-bareos");
                 std::fs::create_dir_all(&dir).map_err(io)?;
@@ -405,8 +408,13 @@ impl Rig {
             let overlay = self.layout.root.join("onesimus").display().to_string();
             let mut fd_args = vec!["-f", "-c", &fd_conf, "-d", &debug];
             let program = self.options.fd_program.clone().unwrap_or_else(|| self.programs.ofd.clone());
-            if self.options.fd_program.is_none() {
-                fd_args.extend(["--overlay", &overlay]);
+            if !bareos_fd {
+                // an older ofd has no overlay yet (before 22.11.2026)
+                let overlay_known = std::process::Command::new(&program).arg("--help").output()
+                    .map(|o| String::from_utf8_lossy(&o.stdout).contains("--overlay")).unwrap_or(true);
+                if overlay_known {
+                    fd_args.extend(["--overlay", &overlay]);
+                }
                 if self.options.fd_grpc.disabled() {
                     fd_args.push("--disable-grpc");
                 } else {
@@ -701,6 +709,11 @@ fn tls_disabled(text: &str) -> String {
         out.push('\n');
     }
     out
+}
+
+/// Whether `program` is ofd (by its file name), not bareos-fd.
+pub fn is_ofd(program: &Path) -> bool {
+    program.file_name().is_some_and(|n| n == "ofd")
 }
 
 /// Whether `program` is osd (by its file name), not bareos-sd.
