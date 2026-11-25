@@ -32,12 +32,16 @@ struct Outcome {
 }
 
 /// BigBackup (slow), during it VBackup; then both restored.
-fn interleave(base: u16, sd: Option<PathBuf>) -> Outcome {
+fn interleave(base: u16, sd: Option<PathBuf>, max_volume_bytes: &str) -> Outcome {
     onesimus_rig::build_workspace_packages(&["odir", "ofd", "osd-daemon"]).unwrap_or_else(|e| panic!("{e}"));
     let mut options = RigOptions::new(base);
     options.sd = sd;
     options.dir_client_lines = vec!["Maximum Concurrent Jobs = 10".into()];
     options.sd_device_lines = vec!["Maximum Concurrent Jobs = 2".into()];
+    options.extra_director = vec![(
+        "pool/VPool.conf".into(),
+        format!("Pool {{\n  Name = VPool\n  Pool Type = Backup\n  Label Format = \"VVol-\"\n  Maximum Volume Bytes = {max_volume_bytes}\n}}\n"),
+    )];
     let rig = Rig::start(options).unwrap_or_else(|e| panic!("Gerüst startet nicht: {e}"));
     let big = rig.run_job("BigBackup").unwrap_or_else(|e| panic!("{e}"));
     rig.wait_running(big, Duration::from_secs(60)).unwrap_or_else(|e| panic!("{e}"));
@@ -82,12 +86,26 @@ fn interleave(base: u16, sd: Option<PathBuf>) -> Outcome {
 #[test]
 #[ignore = "needs bareos-sd, osd and initdb: run with --ignored --nocapture"]
 fn two_jobs_write_into_one_volume_at_the_same_time() {
-    let bareos = interleave(41701, None);
+    let bareos = interleave(41701, None, "1G");
     println!("=== bareos-sd: {bareos:#?}");
-    let onesimus = interleave(41721, Some(onesimus_rig::prereq::target_profile_dir().join("osd")));
+    let onesimus = interleave(41721, Some(onesimus_rig::prereq::target_profile_dir().join("osd")), "1G");
     println!("=== osd: {onesimus:#?}");
     assert_eq!((bareos.status, bareos.overlapped, bareos.restored), (('T', 'T'), true, (true, true)));
     assert_eq!((onesimus.status, onesimus.overlapped, onesimus.restored), (('T', 'T'), true, (true, true)));
     assert_eq!(onesimus.media, bareos.media, "both jobs on the same volume");
     assert_eq!(onesimus.sd_lines, bareos.sd_lines);
+}
+
+/// The volume fills up while both jobs write (Maximum Volume Bytes 20 MB, BigBackup about 50 MB):
+/// the writer that fills it mounts the next one, the other follows; both jobs restore completely.
+#[test]
+#[ignore = "needs bareos-sd, osd and initdb: run with --ignored --nocapture"]
+fn the_volume_changes_while_two_jobs_write() {
+    let bareos = interleave(41741, None, "20M");
+    println!("=== bareos-sd: {bareos:#?}");
+    let onesimus = interleave(41761, Some(onesimus_rig::prereq::target_profile_dir().join("osd")), "20M");
+    println!("=== osd: {onesimus:#?}");
+    assert_eq!((bareos.status, bareos.restored), (('T', 'T'), (true, true)));
+    assert_eq!((onesimus.status, onesimus.restored), (('T', 'T'), (true, true)));
+    assert!(onesimus.media.lines().count() > 2, "the jobs span more than one volume:\n{}", onesimus.media);
 }
