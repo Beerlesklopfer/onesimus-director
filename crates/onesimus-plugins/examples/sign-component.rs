@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-License-Identifier: AGPL-3.0-only
 // SPDX-FileCopyrightText: 2026 Jörg Bernau <contact@onesimus.io>
 //! Build-system tool for plugin bundles. It never sees a private key: the
 //! manifest is signed in between by OpenSSL (TPM provider in production).

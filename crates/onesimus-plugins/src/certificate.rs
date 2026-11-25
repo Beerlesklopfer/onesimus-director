@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-License-Identifier: AGPL-3.0-only
 // SPDX-FileCopyrightText: 2026 Jörg Bernau <contact@onesimus.io>
 //! Public X.509 validation only. This module accepts no private key material.
 //!

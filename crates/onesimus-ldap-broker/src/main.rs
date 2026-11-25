@@ -28,7 +28,7 @@ use std::path::{Path, PathBuf};
 use std::process::{Child, ChildStdin, ChildStdout, Command, Stdio};
 use std::thread::JoinHandle;
 
-use onesimus_proto_rs::onesimus::filed::broker::openldap::v1 as pb;
+use onesimus_broker_proto::onesimus::filed::broker::openldap::v1 as pb;
 use prost::Message;
 
 const MAX_FRAME: usize = 1024 * 1024;

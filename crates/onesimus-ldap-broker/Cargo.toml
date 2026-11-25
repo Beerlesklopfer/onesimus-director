@@ -12,6 +12,6 @@ name = "onesimus-ldap-broker"
 path = "src/main.rs"
 
 [dependencies]
-onesimus-proto-rs.workspace = true
+onesimus-broker-proto.workspace = true
 prost.workspace = true
 libc.workspace = true

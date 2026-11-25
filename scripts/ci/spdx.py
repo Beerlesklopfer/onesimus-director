@@ -70,6 +70,11 @@ THIRD_PARTY = {
 }
 
 
+# Own code that is AGPL-3.0-only because it links Bareos-near protos (onesimus-proto-rs): no Bareos
+# lines, only the own one (decision 25.11.2026, docs/LIZENZEN.md)
+ONLY_BY_DEPENDENCY = ("crates/onesimus-plugins/", "crates/onesimus-bnet-grpc/")
+
+
 def derived_list():
     """Pfade und Präfixe aus bareos-derived.txt (Bareos-nahe Teile: AGPL-3.0-only)."""
     try:
@@ -93,6 +98,8 @@ def header(path, year, entries):
         return [f"{c} SPDX-License-Identifier: {lic}"] + [f"{c} SPDX-FileCopyrightText: {h}" for h in holders + BAREOS_HOLDERS] + [mine]
     if is_derived(path, entries):
         return [f"{c} SPDX-License-Identifier: {DERIVED_LICENSE}"] + [f"{c} SPDX-FileCopyrightText: {h}" for h in BAREOS_HOLDERS] + [mine]
+    if path.startswith(ONLY_BY_DEPENDENCY):
+        return [f"{c} SPDX-License-Identifier: {DERIVED_LICENSE}", mine]
     return [f"{c} SPDX-License-Identifier: {LICENSE}", mine]
 
 

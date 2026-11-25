@@ -12,7 +12,7 @@ name = "onesimus-podman-broker"
 path = "src/main.rs"
 
 [dependencies]
-onesimus-proto-rs.workspace = true
+onesimus-broker-proto.workspace = true
 onesimus-podman-core = { path = "../onesimus-podman-core" }
 prost.workspace = true
 libc.workspace = true

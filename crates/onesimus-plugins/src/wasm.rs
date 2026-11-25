@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-License-Identifier: AGPL-3.0-only
 // SPDX-FileCopyrightText: 2026 Jörg Bernau <contact@onesimus.io>
 //! Verified Component Model host. No ambient WASI or raw engine imports are
 //! linked. All guest exports use the protobuf contract carried by the WIT ABI.

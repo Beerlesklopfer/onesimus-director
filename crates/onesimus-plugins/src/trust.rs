@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-License-Identifier: AGPL-3.0-only
 // SPDX-FileCopyrightText: 2026 Jörg Bernau <contact@onesimus.io>
 //! Trust base and grants (plan: docs/plans/SIGNIER-INFRASTRUKTUR.md).
 //!

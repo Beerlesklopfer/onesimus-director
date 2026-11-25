@@ -4,7 +4,9 @@ description = "Generated Rust types from the Onesimus gRPC protocol definitions 
 version.workspace = true
 edition.workspace = true
 authors.workspace = true
-license = "AGPL-3.0-or-later"
+# generated from all protos, among them the Bareos-near ones (AGPL-3.0-only); the broker protos are
+# also in onesimus-broker-proto (AGPL-3.0-or-later OR commercial)
+license = "AGPL-3.0-only"
 
 [dependencies]
 tonic.workspace = true

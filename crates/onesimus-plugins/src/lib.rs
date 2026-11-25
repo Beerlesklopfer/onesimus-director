@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-License-Identifier: AGPL-3.0-only
 // SPDX-FileCopyrightText: 2026 Jörg Bernau <contact@onesimus.io>
 //! Verification boundary for signed Rust/WebAssembly plugins. No Python runtime
 //! or native dynamic libraries are loaded. Component execution is a separate

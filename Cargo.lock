@@ -2280,11 +2280,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "onesimus-broker-proto"
+version = "25.1.2+onesimus.0.2.0"
+dependencies = [
+ "prost",
+ "tonic-build",
+]
+
+[[package]]
 name = "onesimus-ldap-broker"
 version = "25.1.2+onesimus.0.2.0"
 dependencies = [
  "libc",
- "onesimus-proto-rs",
+ "onesimus-broker-proto",
  "prost",
 ]
 
@@ -2293,7 +2301,7 @@ name = "onesimus-pg-broker"
 version = "25.1.2+onesimus.0.2.0"
 dependencies = [
  "libc",
- "onesimus-proto-rs",
+ "onesimus-broker-proto",
  "prost",
  "serde_json",
 ]
@@ -2320,8 +2328,8 @@ name = "onesimus-podman-broker"
 version = "25.1.2+onesimus.0.2.0"
 dependencies = [
  "libc",
+ "onesimus-broker-proto",
  "onesimus-podman-core",
- "onesimus-proto-rs",
  "prost",
 ]
 

@@ -65,7 +65,7 @@ use std::time::{Duration, Instant};
 
 use onesimus_podman_core::exec::{Kind, Operation, Storage};
 use onesimus_podman_core::{read_frame, write_frame, MAX_FRAME, MAX_INSPECT};
-use onesimus_proto_rs::onesimus::filed::broker::podman::v1 as pb;
+use onesimus_broker_proto::onesimus::filed::broker::podman::v1 as pb;
 use prost::Message;
 
 /// The only environment variables passed to podman.

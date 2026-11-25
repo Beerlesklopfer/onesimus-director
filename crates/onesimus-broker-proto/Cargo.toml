@@ -1,0 +1,16 @@
+[package]
+name = "onesimus-broker-proto"
+description = "Generated Rust types of the Onesimus plugin broker protocols (podman, openldap, postgresql) from onesimus-proto"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+# the broker protos are Onesimus's own (onesimus-proto, AGPL-3.0-or-later since 24.11.2026); the
+# Bareos-near protos stay in onesimus-proto-rs (AGPL-3.0-only) and are not linked here
+license = "AGPL-3.0-or-later OR LicenseRef-Onesimus-Commercial"
+publish = false
+
+[dependencies]
+prost.workspace = true
+
+[build-dependencies]
+tonic-build = "0.12"

@@ -6,7 +6,9 @@ edition.workspace = true
 rust-version = "1.96"
 authors.workspace = true
 # Eigener Teil, nicht von Bareos abgeleitet: duale Lizenz (docs/LIZENZEN.md)
-license = "AGPL-3.0-or-later OR LicenseRef-Onesimus-Commercial"
+# links the Bareos-near protos of onesimus-proto-rs (plugin_ccc/filed_plugin resp. filed_service/
+# stored_service, AGPL-3.0-only): AGPL-3.0-only (decision 25.11.2026, docs/LIZENZEN.md)
+license = "AGPL-3.0-only"
 
 [dependencies]
 serde.workspace = true

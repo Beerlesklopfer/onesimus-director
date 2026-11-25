@@ -9,7 +9,7 @@ use std::io::{Read, Write};
 use std::path::PathBuf;
 use std::process::{Child, Command, Stdio};
 
-use onesimus_proto_rs::onesimus::filed::broker::postgresql::v1 as pb;
+use onesimus_broker_proto::onesimus::filed::broker::postgresql::v1 as pb;
 use prost::Message;
 
 struct Cluster {

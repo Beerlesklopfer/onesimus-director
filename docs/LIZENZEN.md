@@ -70,9 +70,10 @@ den Modulköpfen und die Git-Historie.
 | `osd-daemon` (`crates/osd/daemon`) | gemischt, überwiegend abgeleitet | `AGPL-3.0-only` | Nachbau von `bareos-sd` (Sitzungen, Device, Leser/Schreiber; 45 Verweise auf `stored/*.cc`). Eigen: `grpc.rs`, `ringproto.rs` (beide „Bareos-Gegenstück: keins“). |
 | `osd-ring` (`crates/osd/ring`) | eigen | `AGPL-3.0-or-later OR LicenseRef-Onesimus-Commercial` | Blockring im gemeinsamen Speicher; Modulkopf „Bareos-Gegenstück: keins. bareos-sd schreibt aus dem Job-Thread direkt auf das Device“. Keine Abhängigkeit von anderen Workspace-Crates. |
 | `daemon-crate` | abgeleitet | `AGPL-3.0-only` | Daemon-Rahmen nach `lib/daemon.cc`, `include/exit_codes.h`, `filed/filed.cc`/`stored/stored.cc` `main`, `filed/authenticate.cc`, `lib/message.cc`. Das einzige eigene Modul (gRPC-TLS) ist seit 21.11.2026 in `onesimus-bnet-grpc::tls`. |
-| `onesimus-bnet-grpc` | eigen | `AGPL-3.0-or-later OR LicenseRef-Onesimus-Commercial` | BNET-Rahmen über gRPC mit TLS, Modulkopf „Bareos-Gegenstück: keins (Onesimus-Erweiterung)“; transportiert Bareos-Rahmen, portiert keine Bareos-Logik. Dazu `tls` (aus `daemon-crate`). |
-| `onesimus-proto-rs` | gemischt | `AGPL-3.0-only` | Aus allen Protos des Submoduls erzeugt, darunter `director_commands.proto` („Auto-generated from ua_cmds.cc by scrape_commands.py“). |
-| `onesimus-plugins` | eigen | `AGPL-3.0-or-later OR LicenseRef-Onesimus-Commercial` | Signierte WebAssembly-Plugins, Ed25519/X.509-Vertrauenskette (`docs/plans/SIGNIER-INFRASTRUKTUR.md`); ersetzt die Bareos-Plugins, ohne deren Code (keine Verweise auf Bareos-Quellen). |
+| `onesimus-bnet-grpc` | eigen, linkt Bareos-nahe Protos | `AGPL-3.0-only` (seit 25.11.2026; vorher dual, nutzt `filed_service`/`stored_service`) | BNET-Rahmen über gRPC mit TLS, Modulkopf „Bareos-Gegenstück: keins (Onesimus-Erweiterung)“; transportiert Bareos-Rahmen, portiert keine Bareos-Logik. Dazu `tls` (aus `daemon-crate`). |
+| `onesimus-proto-rs` | gemischt | `AGPL-3.0-only` (Cargo.toml seit 25.11.2026 entsprechend, vorher fälschlich or-later) | Aus allen Protos des Submoduls erzeugt, darunter `director_commands.proto` („Auto-generated from ua_cmds.cc by scrape_commands.py“). |
+| `onesimus-broker-proto` (neu 25.11.2026) | eigen | `AGPL-3.0-or-later OR LicenseRef-Onesimus-Commercial` | Nur die drei Broker-Protos (`postgresql_broker`, `openldap_broker`, `podman_broker`, seit 24.11.2026 or-later); die Broker hängen nur davon ab. |
+| `onesimus-plugins` | eigen, linkt Bareos-nahe Protos | `AGPL-3.0-only` (seit 25.11.2026; vorher dual, nutzt `plugin_ccc`/`filed_plugin`) | Signierte WebAssembly-Plugins, Ed25519/X.509-Vertrauenskette (`docs/plans/SIGNIER-INFRASTRUKTUR.md`); ersetzt die Bareos-Plugins, ohne deren Code (keine Verweise auf Bareos-Quellen). |
 | `onesimus-pg-broker` | eigen | `AGPL-3.0-or-later OR LicenseRef-Onesimus-Commercial` | Broker des PostgreSQL-Plugins (`pg_dump`/`psql`); keine Bareos-Verweise. |
 | `onesimus-ldap-broker` | eigen | `AGPL-3.0-or-later OR LicenseRef-Onesimus-Commercial` | Broker des OpenLDAP-Plugins (`slapcat`/`slapadd`); keine Bareos-Verweise. |
 | `onesimus-podman-core` | eigen | `AGPL-3.0-or-later OR LicenseRef-Onesimus-Commercial` | Podman-Plugin: Richtlinien, ID-Maps, Journal; nennt den Bareos-Strom nur als Ziel. Keine Abhängigkeit von anderen Workspace-Crates. |
@@ -876,3 +877,15 @@ Der Maintainer hat entschieden: Die fünf eigenen Definitionen `usage`, `podman_
 - **packaging/copyright:** je Datei eine Stanza mit allen Rechteinhabern und der kombinierten Lizenz
   (`AGPL-3.0-only and MIT and BSD-2-Clause` usw.) und eigenständige Lizenzabsätze mit dem vollen Text von
   MIT, BSD-2-Clause, BSD-3-Clause und OSSP-var (vorher zwei Stanzas für dieselbe Datei und keine Texte).
+
+
+## Nachtrag 25.11.2026: Aufteilung der Protos (Entscheidung des Maintainers)
+
+- **Neues Crate `onesimus-broker-proto`** (`AGPL-3.0-or-later OR LicenseRef-Onesimus-Commercial`) mit den
+  drei Broker-Protos. `onesimus-pg-broker`, `onesimus-ldap-broker` und `onesimus-podman-broker` hängen nur
+  noch davon ab, nicht mehr von `onesimus-proto-rs`; ihre duale Lizenz gilt damit tatsächlich.
+- **`onesimus-plugins` und `onesimus-bnet-grpc` sind `AGPL-3.0-only`:** sie brauchen `plugin_ccc`/`filed_plugin`
+  bzw. `filed_service`/`stored_service`, die Bareos-nah bleiben. Ihre Dateien tragen `AGPL-3.0-only` mit der
+  eigenen Zeile ohne Bareos-Zeilen (`scripts/ci/spdx.py`, `ONLY_BY_DEPENDENCY`). Eine spätere kommerzielle
+  Lizenz bräuchte eigene Proto-Definitionen ohne Bareos-Herkunft.
+- **`onesimus-proto-rs`:** Cargo.toml jetzt `AGPL-3.0-only` (stand fälschlich auf or-later).

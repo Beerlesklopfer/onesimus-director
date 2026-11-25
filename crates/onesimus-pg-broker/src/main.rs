@@ -22,7 +22,7 @@ use std::os::fd::FromRawFd;
 use std::path::PathBuf;
 use std::process::{Child, ChildStderr, ChildStdout, Command, Stdio};
 
-use onesimus_proto_rs::onesimus::filed::broker::postgresql::v1 as pb;
+use onesimus_broker_proto::onesimus::filed::broker::postgresql::v1 as pb;
 use prost::Message;
 
 const MAX_FRAME: usize = 1024 * 1024;
