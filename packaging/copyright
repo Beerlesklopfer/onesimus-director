@@ -23,6 +23,13 @@ Comment: Parts derived from Bareos stay AGPL-3.0-only, because Bareos grants
  same notice in their SPDX headers. The package as a whole is AGPL-3.0-only while
  these parts are included; code without a Bareos origin is AGPL-3.0-or-later.
 
+Files: crates/onesimus-plugins/* crates/onesimus-bnet-grpc/* crates/onesimus-proto-rs/*
+Copyright: 2025-2026 Jörg Bernau <contact@onesimus.io>
+License: AGPL-3.0-only
+Comment: Own code that links the Bareos-near protocol definitions of
+ onesimus-proto (plugin_ccc, filed_plugin, filed_service, stored_service,
+ director_*), which stay AGPL-3.0-only (docs/LIZENZEN.md, 25.11.2026).
+
 Files: crates/bareos-format/src/compression.rs
 Copyright: 2000-2012 Free Software Foundation Europe e.V.
            2010-2017 Planets Communications B.V.
