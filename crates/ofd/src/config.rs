@@ -49,9 +49,11 @@ pub struct FdConfig {
     pub port: u16,
     /// "FD Address": the one address to listen on (all when unset).
     pub fd_address: Option<String>,
-    /// "FD Addresses" was given: not supported, so ofd refuses to start
-    /// instead of silently listening on every interface.
+    /// "FD Addresses" was given.
     pub fd_addresses_given: bool,
+    /// The addresses of "FD Addresses" (each with its own port), or why they are wrong; resolved
+    /// like bareos-fd (`bareos_config::listen`).
+    pub fd_addresses: Option<Result<Vec<std::net::SocketAddr>, String>>,
     pub max_concurrent_jobs: u32,
     pub directors: Vec<DirectorAuth>,
     pub heartbeat_interval_secs: u64,
@@ -100,6 +102,7 @@ impl FdConfig {
             port: 9102,
             fd_address: None,
             fd_addresses_given: false,
+            fd_addresses: None,
             max_concurrent_jobs: 20,
             directors: Vec::new(),
             heartbeat_interval_secs: 0,
@@ -167,6 +170,11 @@ impl FdConfig {
             None => config.all_messages.first().cloned(),
         };
 
+        if config.fd_addresses_given {
+            config.fd_addresses = Some(bareos_config::raw::parse_str(input, None).and_then(|raw| {
+                bareos_config::listen::listen_addresses(&raw, &bareos_config::listen::FILE_DAEMON, None, config.port)
+            }));
+        }
         Ok(config)
     }
 
@@ -175,8 +183,16 @@ impl FdConfig {
     /// the dual-stack wildcard when none is configured.
     pub fn listen_addresses(&self, port: u16) -> Result<Vec<std::net::SocketAddr>, String> {
         use std::net::ToSocketAddrs;
-        if self.fd_addresses_given {
-            return Err("FD Addresses is not supported; use FD Address".to_string());
+        // FD Addresses: every entry; another port than FD Port (gRPC: + 1000) moves each entry's
+        // port by the same amount
+        if let Some(block) = &self.fd_addresses {
+            let offset = port as i32 - self.port as i32;
+            return block.clone().map(|addrs| {
+                addrs.into_iter().map(|mut a| {
+                    a.set_port((a.port() as i32 + offset).clamp(1, 65535) as u16);
+                    a
+                }).collect()
+            });
         }
         match &self.fd_address {
             None => Ok(vec![std::net::SocketAddr::from(([0u16; 8], port))]),
@@ -567,7 +583,21 @@ Director { Name = d; Password = "p" }
         let all = FdConfig::parse("Director { Name = d; Password = p }").unwrap();
         assert_eq!(all.listen_addresses(9102).unwrap(), vec!["[::]:9102".parse().unwrap()]);
         let multi = FdConfig::parse("Client {\n FD Addresses = {\n ipv4 = { addr = 127.0.0.1 }\n }\n}\nDirector { Name = d; Password = p }").unwrap();
-        assert!(multi.listen_addresses(9102).unwrap_err().contains("not supported"));
+        // an entry without port takes 9102
+        assert_eq!(multi.listen_addresses(9102).unwrap(), vec!["127.0.0.1:9102".parse().unwrap()]);
+        // the PDC client resource verbatim (FDAddresses with one entry, an IPv6 one commented out)
+        let pdc = FdConfig::parse("Client {\n  Name = PDC-fd\n  FDAddresses = {\n           ipv4 = { addr = 127.0.0.1; port = 9102; }\n\
+            #           ipv6 = { addr = 2001:9e8:5e49:700::250; port = 9102; }\n         }\n  WorkingDirectory = /bareos/spool\n}\n\
+            Director { Name = d; Password = p }").unwrap();
+        assert_eq!(pdc.listen_addresses(9102).unwrap(), vec!["127.0.0.1:9102".parse().unwrap()]);
+        // gRPC: the entries' ports move with it
+        assert_eq!(pdc.listen_addresses(10102).unwrap(), vec!["127.0.0.1:10102".parse().unwrap()]);
+        let two = FdConfig::parse("Client {\n FDAddresses = {\n ipv4 = { addr = 127.0.0.1; port = 9102 }\n ipv6 = { addr = ::1; port = 9102 }\n }\n}\n\
+            Director { Name = d; Password = p }").unwrap();
+        assert_eq!(two.listen_addresses(9102).unwrap(), vec!["127.0.0.1:9102".parse().unwrap(), "[::1]:9102".parse().unwrap()]);
+        // mixing with FD Port is an error, as in bareos-fd
+        let mixed = FdConfig::parse("Client {\n FD Port = 9102\n FDAddresses = {\n ipv4 = { addr = 127.0.0.1 }\n }\n}\nDirector { Name = d; Password = p }").unwrap();
+        assert!(mixed.listen_addresses(9102).unwrap_err().contains("cannot be mixed"));
         let bad = FdConfig::parse("Client { FD Address = no.such.host.invalid }\nDirector { Name = d; Password = p }").unwrap();
         assert!(bad.listen_addresses(9102).is_err());
     }

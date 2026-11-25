@@ -41,32 +41,45 @@ const OK_HELLO: &str = "2000 OK Hello 54\n";
 const DIR_SORRY: &str = "2999 Authentication failed.\n";
 
 /// Main accept loop for the File Daemon.
-pub fn accept_loop(config: &Arc<FdConfig>, shutdown: &AtomicBool) {
-    // FD Address, else dual-stack (IPv4 + IPv6) on every interface.
-    let addr = match config.listen_addresses(config.port) {
-        Ok(a) => a[0],
+pub fn accept_loop(config: &Arc<FdConfig>, shutdown: &'static AtomicBool) {
+    // FD Addresses (every entry), FD Address, else dual-stack (IPv4 + IPv6) on every interface.
+    let addrs = match config.listen_addresses(config.port) {
+        Ok(a) => a,
         Err(e) => {
             error!("FATAL: {e}");
             std::process::exit(1);
         }
     };
-
-    let listener = match bareos_bnet::listen::bind(addr) {
-        Ok(l) => {
-            info!("listening on {addr}");
-            l
+    let mut listeners = Vec::new();
+    for addr in &addrs {
+        match bareos_bnet::listen::bind(*addr) {
+            Ok(l) => {
+                info!("listening on {addr}");
+                listeners.push(l);
+            }
+            Err(e) => {
+                error!("FATAL: failed to bind {addr}: {e}");
+                error!("Another file daemon already running? Check: ss -tlnp | grep {}", addr.port());
+                std::process::exit(1);
+            }
         }
-        Err(e) => {
-            error!("FATAL: failed to bind {addr}: {e}");
-            error!("Another file daemon already running? Check: ss -tlnp | grep {}", config.port);
-            std::process::exit(1);
-        }
-    };
-
-    let cfg = config.clone();
-    daemon_crate::accept::serve(listener, "fd:session", shutdown, move |stream, session_id| {
-        handle_connection(stream, session_id, cfg.clone());
-    });
+    }
+    // one accept loop per address, the last one on this thread
+    let last = listeners.pop();
+    for listener in listeners {
+        let cfg = config.clone();
+        std::thread::spawn(move || {
+            daemon_crate::accept::serve(listener, "fd:session", shutdown, move |stream, session_id| {
+                handle_connection(stream, session_id, cfg.clone());
+            });
+        });
+    }
+    if let Some(listener) = last {
+        let cfg = config.clone();
+        daemon_crate::accept::serve(listener, "fd:session", shutdown, move |stream, session_id| {
+            handle_connection(stream, session_id, cfg.clone());
+        });
+    }
 }
 
 /// The TLS-PSK key for a peer's PSK identity.

@@ -23,128 +23,19 @@
 //!   bind is tried three times, five seconds apart, then the start fails
 //!   (OpenSocketAndBind, OpenAndBindSockets).
 
-use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, TcpListener, ToSocketAddrs};
+use std::net::{SocketAddr, TcpListener};
+#[cfg(test)]
+use std::net::{IpAddr, Ipv6Addr};
 
-use bareos_config::raw::{ConfResource, Directive, Tok};
-
-#[derive(Clone, Copy, PartialEq, Eq)]
-enum Family {
-    V4,
-    V6,
-}
-
-impl Family {
-    fn admits(self, ip: &IpAddr) -> bool {
-        match self {
-            Family::V4 => ip.is_ipv4(),
-            Family::V6 => ip.is_ipv6(),
-        }
-    }
-}
-
-/// IsFamilyEnabled(IpFamily::V6): the host can open an IPv6 socket.
-fn ipv6_available() -> bool {
-    socket2::Socket::new(socket2::Domain::IPV6, socket2::Type::STREAM, None).is_ok()
-}
-
-/// Port of a `DirAddresses` entry without `port` (default value of the item).
-const ADDRESSES_DEFAULT_PORT: u16 = 9101;
+#[cfg(test)]
+use bareos_config::listen::ipv6_available;
+use bareos_config::raw::ConfResource;
 
 /// The socket addresses the Director listens on, in configuration order,
-/// without duplicates. `port` is `DirPort` (after `-P`).
+/// without duplicates. `port` is `DirPort` (after `-P`). The rules are in
+/// [`bareos_config::listen`] (shared with ofd).
 pub fn listen_addresses(raw: &[ConfResource], cli_bind: Option<&str>, port: u16) -> Result<Vec<SocketAddr>, String> {
-    if let Some(host) = cli_bind {
-        return Ok(vec![first_address(host, port, "--bind-address")?]);
-    }
-    let director = raw.iter().find(|r| r.norm_type() == "director");
-    let last = |keys: &[&str]| director.and_then(|r| r.directives.iter().rev().find(|d| keys.contains(&d.norm_key().as_str())));
-
-    if let Some(block) = last(&["diraddresses", "addresses"]) {
-        if let Some(old) = last(&["diraddress", "address", "dirport", "port"]) {
-            return Err(format!("DirAddresses: the old style addresses cannot be mixed with new style ({})", old.key));
-        }
-        let mut out = Vec::new();
-        let entries = block.tokens.iter().filter_map(|t| match t { Tok::Block(e) => Some(e), _ => None }).flatten();
-        let mut any = false;
-        for entry in entries {
-            any = true;
-            for addr in block_entry(entry, ADDRESSES_DEFAULT_PORT)? {
-                if !out.contains(&addr) {
-                    out.push(addr);
-                }
-            }
-        }
-        if !any {
-            return Err("DirAddresses: Empty addr block is not allowed".into());
-        }
-        return Ok(out);
-    }
-    if let Some(host) = last(&["diraddress", "address"]).and_then(|d| d.first()) {
-        return Ok(vec![first_address(host, port, "DirAddress")?]);
-    }
-    let mut out = vec![SocketAddr::new(IpAddr::V4(Ipv4Addr::UNSPECIFIED), port)];
-    if ipv6_available() {
-        out.push(SocketAddr::new(IpAddr::V6(Ipv6Addr::UNSPECIFIED), port));
-    }
-    Ok(out)
-}
-
-/// One `ip|ipv4|ipv6 = { addr = …; port = … }` entry.
-fn block_entry(entry: &Directive, default_port: u16) -> Result<Vec<SocketAddr>, String> {
-    let family = match entry.norm_key().as_str() {
-        // StoreAddresses: "ip" and "ipv4" are both AF_INET
-        "ip" | "ipv4" => Family::V4,
-        "ipv6" => Family::V6,
-        other => return Err(format!("DirAddresses: expected ip, ipv4 or ipv6, got \"{}\" ({other})", entry.key)),
-    };
-    let inner: &[Directive] = match entry.tokens.iter().find_map(|t| match t { Tok::Block(b) => Some(b), _ => None }) {
-        Some(b) => b,
-        None => entry.block.as_deref().unwrap_or(&[]),
-    };
-    let mut addr = None;
-    let mut port = None;
-    for d in inner {
-        // StoreAddresses takes addr and port only unquoted (BCT_UNQUOTED_STRING,
-        // BCT_IDENTIFIER, BCT_NUMBER): bareos-dir rejects addr = "::1".
-        let value = match d.tokens.iter().find(|t| !matches!(t, Tok::Eq)) {
-            Some(Tok::Word(v)) => v.as_str(),
-            Some(Tok::Quoted(v)) if d.norm_key() == "addr" =>
-                return Err(format!("DirAddresses: Expected an IP number or a hostname, got: \"{v}\" (write it without quotes)")),
-            Some(Tok::Quoted(v)) if d.norm_key() == "port" =>
-                return Err(format!("DirAddresses: Expected a number or a string, got: \"{v}\" (write it without quotes)")),
-            _ => return Err(format!("DirAddresses: {} without a value", d.key)),
-        };
-        match d.norm_key().as_str() {
-            "addr" if addr.is_some() => return Err("DirAddresses: Only one addr per address block".into()),
-            "port" if port.is_some() => return Err("DirAddresses: Only one port per address block".into()),
-            "addr" => addr = Some(value.to_string()),
-            "port" => port = Some(value.parse().map_err(|_| format!("DirAddresses: invalid port \"{value}\""))?),
-            _ => return Err(format!("DirAddresses: expected addr or port, got \"{}\"", d.key)),
-        }
-    }
-    let port = port.unwrap_or(default_port);
-    let Some(host) = addr else {
-        let ip = match family {
-            Family::V6 => IpAddr::V6(Ipv6Addr::UNSPECIFIED),
-            _ => IpAddr::V4(Ipv4Addr::UNSPECIFIED),
-        };
-        return Ok(vec![SocketAddr::new(ip, port)]);
-    };
-    let host = host.trim_start_matches('[').trim_end_matches(']');
-    let found: Vec<SocketAddr> = (host, port).to_socket_addrs()
-        .map_err(|e| format!("DirAddresses {host}: {e}"))?
-        .filter(|a| family.admits(&a.ip()))
-        .collect();
-    if found.is_empty() {
-        return Err(format!("DirAddresses {host}: no address of the requested family"));
-    }
-    Ok(found)
-}
-
-fn first_address(host: &str, port: u16, what: &str) -> Result<SocketAddr, String> {
-    let host = host.trim_start_matches('[').trim_end_matches(']');
-    (host, port).to_socket_addrs().map_err(|e| format!("{what} {host}: {e}"))?
-        .next().ok_or_else(|| format!("{what} {host}: no address"))
+    bareos_config::listen::listen_addresses(raw, &bareos_config::listen::DIRECTOR, cli_bind, port)
 }
 
 /// Bind one listening socket. IPv6 sockets are IPv6-only, so `ipv4 = 0.0.0.0`
