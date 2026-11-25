@@ -199,8 +199,10 @@ OSSP var  (LicenseRef-OSSP-var)
   Note: the Bareos copy of var.cc / var.h refers to a disclaimer "below" but
   does not contain one. The upstream OSSP text is not reproduced here from
   memory; see http://www.ossp.org/pkg/lib/var/ for the original wording.
-  (Open point: copy the original disclaimer from the OSSP distribution.)
-  Checked 24.11.2026: ossp.org is not reachable, the GitHub mirrors tried do
-  not exist, and the Debian packages of Bareos (copyright file) name the
-  files but do not reproduce the disclaimer either. The wording must come
-  from an OSSP var distribution tarball.
+  Checked 25.11.2026: the disclaimer is missing from every copy in the chain
+  this port comes from: Bacula 9.6.7 src/lib/var.c and var.h (Debian source
+  package bacula_9.6.7.orig.tar.gz), where the code was adapted by Kern
+  Sibbald in June 2003, and Bareos core/src/lib/var.cc. ossp.org, which
+  carries the original distribution, is not reachable. The permission's
+  conditions, the copyright notice and the permission notice in all copies,
+  are met by this file.

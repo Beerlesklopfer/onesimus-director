@@ -864,3 +864,15 @@ Auf Freigabe des Maintainers (Weitergabe durch die GUI-Sitzung), Vorsicht vor Gr
 ## Nachtrag 24.11.2026: Submodul `proto`
 
 Der Maintainer hat entschieden: Die fünf eigenen Definitionen `usage`, `podman_broker`, `postgresql_broker`, `openldap_broker` und `onesimus_options` stehen unter `AGPL-3.0-or-later` und tragen nur die Zeile von Jörg Bernau (Commit 47c5e7e in `onesimus-proto`). Alle anderen Dateien bleiben `AGPL-3.0-only` mit den Bareos-Zeilen. `onesimus-proto-rs` ist damit gemischt; solange es auch die `-only`-Dateien enthält, bleibt das Crate `AGPL-3.0-only`. Die Aufteilung für die dualen Crates (Abschnitt „Aufteilung“, Zeile `onesimus-proto-rs` / `proto`) ist offen: `filed_plugin.proto` und `plugin_ccc.proto` bleiben `-only`.
+
+
+## Nachtrag 25.11.2026: OSSP var, packaging/copyright
+
+- **OSSP var:** Der Haftungsausschluss, auf den der Kopf verweist („For disclaimer see below“), fehlt in
+  jeder Kopie der Kette, aus der portiert wurde: Bacula 9.6.7 `src/lib/var.c`/`var.h` (Debian-Quellpaket
+  `bacula_9.6.7.orig.tar.gz`, übernommen von Kern Sibbald im Juni 2003) und Bareos `core/src/lib/var.cc`.
+  `ossp.org` ist nicht erreichbar. Die Bedingungen der Erlaubnis (Copyright-Hinweis und Erlaubnis-Hinweis in
+  allen Kopien) sind erfüllt; der offene Punkt ist damit geschlossen (THIRD-PARTY-NOTICES, packaging/copyright).
+- **packaging/copyright:** je Datei eine Stanza mit allen Rechteinhabern und der kombinierten Lizenz
+  (`AGPL-3.0-only and MIT and BSD-2-Clause` usw.) und eigenständige Lizenzabsätze mit dem vollen Text von
+  MIT, BSD-2-Clause, BSD-3-Clause und OSSP-var (vorher zwei Stanzas für dieselbe Datei und keine Texte).
