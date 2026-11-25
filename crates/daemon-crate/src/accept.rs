@@ -67,15 +67,18 @@ impl<'a> PskIdentity<'a> {
     }
 }
 
+/// Session numbers of the process, shared by every accept loop (a daemon listening on several
+/// addresses runs one loop per address; their sessions must not share numbers).
+static NEXT_SESSION: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
+
 /// Accepts connections on `listener` until `shutdown` is set and runs
 /// `handler(stream, n)` for each in a thread named `<thread_prefix>:<n>`,
-/// `n` counting from 1.
+/// `n` counting from 1 across all accept loops of the process.
 pub fn serve<F>(listener: TcpListener, thread_prefix: &str, shutdown: &AtomicBool, handler: F)
 where
     F: Fn(TcpStream, u64) + Send + Sync + 'static,
 {
     let handler = Arc::new(handler);
-    let mut next_session = 1u64;
     listener.set_nonblocking(true).ok();
 
     while !shutdown.load(Ordering::Relaxed) {
@@ -86,8 +89,7 @@ where
                 // small BNET frames must not wait for a delayed ACK (about 45 ms per message)
                 stream.set_nodelay(true).ok();
 
-                let session_id = next_session;
-                next_session += 1;
+                let session_id = NEXT_SESSION.fetch_add(1, Ordering::Relaxed);
                 let handler = handler.clone();
 
                 thread::Builder::new()

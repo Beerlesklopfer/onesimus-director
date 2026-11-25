@@ -230,32 +230,39 @@ fn main() {
     for name in removed {
         tracing::info!("removed stale ring {name}");
     }
-    let addr = format!("{}:{}", config.storage.address.as_deref().unwrap_or("0.0.0.0"), config.storage.port);
-    let listener = match TcpListener::bind(&addr) {
-        Ok(l) => l,
-        Err(e) => {
-            eprintln!("osd: cannot bind {addr}: {e} (another Storage daemon running? ss -ltnp)");
-            std::process::exit(daemon_crate::exit::EXIT_FAILURE);
+    // SD Addresses (every entry), SD Address, else every interface of both families (like bareos-sd)
+    let mut listeners: Vec<TcpListener> = Vec::new();
+    for addr in &config.storage.listen {
+        match bareos_bnet::listen::bind(*addr) {
+            Ok(l) => listeners.push(l),
+            Err(e) => {
+                eprintln!("osd: cannot bind {addr}: {e} (another Storage daemon running? ss -ltnp)");
+                std::process::exit(daemon_crate::exit::EXIT_FAILURE);
+            }
         }
-    };
-    tracing::info!("osd {}: listening on {addr}", daemon_crate::version::VERSION);
+        tracing::info!("osd {}: listening on {addr}", daemon_crate::version::VERSION);
+    }
     let launcher = match std::env::current_exe() {
         Ok(exe) => daemon::Launcher::Process(exe),
         Err(_) => daemon::Launcher::Thread,
     };
     let d = daemon::Daemon::new(config, launcher);
     start_grpc(&cli, &d);
-    std::thread::Builder::new()
-        .name("accept".into())
-        .spawn(move || {
-            daemon_crate::accept::serve(listener, "sd:session", &SHUTDOWN, move |stream, n| {
-                server::handle_connection(d.clone(), stream, n);
+    // one accept loop per address; the session numbers stay unique across them
+    for listener in listeners {
+        let d = d.clone();
+        std::thread::Builder::new()
+            .name("accept".into())
+            .spawn(move || {
+                daemon_crate::accept::serve(listener, "sd:session", &SHUTDOWN, move |stream, n| {
+                    server::handle_connection(d.clone(), stream, n);
+                });
+            })
+            .unwrap_or_else(|e| {
+                eprintln!("osd: cannot start the accept thread: {e}");
+                std::process::exit(daemon_crate::exit::EXIT_FAILURE);
             });
-        })
-        .unwrap_or_else(|e| {
-            eprintln!("osd: cannot start the accept thread: {e}");
-            std::process::exit(daemon_crate::exit::EXIT_FAILURE);
-        });
+    }
     let signal = daemon_crate::signals::wait_for_shutdown();
     tracing::info!("osd: shutting down ({signal:?})");
     SHUTDOWN.store(true, std::sync::atomic::Ordering::Relaxed);

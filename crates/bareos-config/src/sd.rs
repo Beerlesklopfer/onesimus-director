@@ -94,6 +94,11 @@ pub struct SdStorage {
     pub port: u16,
     /// `SD Address`: one listen address; `None` listens on all.
     pub address: Option<String>,
+    /// The addresses to listen on, resolved like bareos-sd (`SD Addresses` block, else `SD
+    /// Address`, else every interface of both families; [`crate::listen`]).
+    pub listen: Vec<std::net::SocketAddr>,
+    /// The listen addresses come from an `SD Addresses` block.
+    pub addresses_block: bool,
     /// `Working Directory`.
     pub working_directory: Option<String>,
     /// `Pid Directory`.
@@ -135,8 +140,18 @@ impl SdStorage {
 
     /// The gRPC listen address: `Grpc Address`, else `SD Address`, else
     /// `0.0.0.0`.
-    pub fn grpc_address(&self) -> &str {
-        self.grpc_address.as_deref().or(self.address.as_deref()).unwrap_or("0.0.0.0")
+    pub fn grpc_address(&self) -> String {
+        if let Some(a) = self.grpc_address.as_deref().or(self.address.as_deref()) {
+            return a.to_string();
+        }
+        // an `SD Addresses` block: its first address, as ofd takes the first of `FD Addresses`
+        match self.listen.first() {
+            Some(first) if self.addresses_block => match first.ip() {
+                std::net::IpAddr::V6(ip) => format!("[{ip}]"),
+                ip => ip.to_string(),
+            },
+            _ => "0.0.0.0".to_string(),
+        }
     }
 }
 
@@ -590,10 +605,16 @@ impl SdConfig {
             match raw.norm_type().as_str() {
                 "storage" => {
                     let r = Res::new(raw, "Storage");
+                    let port = r.number("sdport", DEFAULT_SD_PORT)?;
+                    let listen = crate::listen::listen_addresses(std::slice::from_ref(raw), &crate::listen::STORAGE, None, port)?;
+                    let addresses_block = raw.directives.iter().any(|d| d.norm_key() == "sdaddresses");
                     storages.push(SdStorage {
                         name: r.required("name", "Name")?,
                         description: r.text("description"),
-                        port: r.number("sdport", DEFAULT_SD_PORT)?,
+                        // with an `SD Addresses` block the port of its first entry (ring names, gRPC port)
+                        port: if addresses_block { listen.first().map(|a| a.port()).unwrap_or(port) } else { port },
+                        listen,
+                        addresses_block,
                         address: r.text("sdaddress"),
                         working_directory: r.text("workingdirectory"),
                         pid_directory: r.text("piddirectory"),
@@ -607,7 +628,7 @@ impl SdConfig {
                         grpc_enable: true,
                         grpc_port: None,
                         grpc_address: None,
-                        other: r.other(&["name", "description", "sdport", "sdaddress", "workingdirectory",
+                        other: r.other(&["name", "description", "sdport", "sdaddress", "sdaddresses", "workingdirectory",
                             "piddirectory", "plugindirectory", "maximumconcurrentjobs", "messages",
                             "justintimereservation", "clientconnectwait"]),
                     });
@@ -970,6 +991,25 @@ Messages {
         assert!(!c.storage.tls_enable);
     }
 
+    /// The PDC Storage resource: `SD Addresses` with several entries; every entry is listened on,
+    /// the port is the first entry's, gRPC takes the first address with port + 1000.
+    #[test]
+    fn sd_addresses_block_like_bareos_sd() {
+        let pdc = SAMPLE.replace("Name = PDC-sd\n", "Name = PDC-sd\n  SDAddresses = {\n    ipv4 = { addr = 127.0.0.1; port = 9113; }\n    \
+            ipv6 = { addr = ::1; port = 9113; }\n  }\n");
+        let c = parse(&pdc).unwrap();
+        assert!(c.storage.addresses_block);
+        assert_eq!(c.storage.listen, ["127.0.0.1:9113".parse().unwrap(), "[::1]:9113".parse::<std::net::SocketAddr>().unwrap()]);
+        assert_eq!((c.storage.port, c.storage.grpc_port(), c.storage.grpc_address().as_str()), (9113, 10113, "127.0.0.1"));
+        // the old style: one address; nothing: every interface
+        let one = parse(&SAMPLE.replace("Name = PDC-sd\n", "Name = PDC-sd\n  SD Address = 127.0.0.1\n")).unwrap();
+        assert_eq!(one.storage.listen, ["127.0.0.1:9103".parse::<std::net::SocketAddr>().unwrap()]);
+        assert!(parse(SAMPLE).unwrap().storage.listen.iter().all(|a| a.ip().is_unspecified()));
+        // mixed with SD Port: refused as by bareos-sd
+        let mixed = SAMPLE.replace("Name = PDC-sd\n", "Name = PDC-sd\n  SD Port = 9103\n  SDAddresses = {\n ipv4 = { addr = 127.0.0.1 }\n }\n");
+        assert!(parse(&mixed).unwrap_err().contains("cannot be mixed"));
+    }
+
     #[test]
     fn osd_d_grpc_directives_of_the_storage() {
         let c = parse(SAMPLE).unwrap();
@@ -977,7 +1017,7 @@ Messages {
         assert_eq!(c.storage.grpc_port(), c.storage.port + GRPC_PORT_OFFSET);
         assert_eq!(c.storage.grpc_address(), c.storage.address.as_deref().unwrap_or("0.0.0.0"));
         let c = overlay("Storage {\n Name = PDC-sd\n Grpc Port = 19103\n Grpc Address = 127.0.0.1\n}\n").unwrap();
-        assert_eq!((c.storage.grpc_port(), c.storage.grpc_address()), (19103, "127.0.0.1"));
+        assert_eq!((c.storage.grpc_port(), c.storage.grpc_address().as_str()), (19103, "127.0.0.1"));
         let c = overlay("Storage {\n Name = PDC-sd\n Grpc Enable = no\n}\n").unwrap();
         assert!(!c.storage.grpc_enable);
         let e = overlay("Storage {\n Name = PDC-sd\n Grpc Port = many\n}\n").unwrap_err();

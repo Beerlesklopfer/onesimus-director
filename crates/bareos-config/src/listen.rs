@@ -83,6 +83,17 @@ pub const FILE_DAEMON: AddressDirectives = AddressDirectives {
     single_name: "FDAddress",
 };
 
+/// The Storage resource of bareos-sd (`SdAddresses`, `SdAddress`, `SdPort`).
+pub const STORAGE: AddressDirectives = AddressDirectives {
+    resources: &["storage"],
+    block: &["sdaddresses"],
+    single: &["sdaddress"],
+    port: &["sdport"],
+    default_port: 9103,
+    block_name: "SDAddresses",
+    single_name: "SDAddress",
+};
+
 /// The socket addresses a daemon listens on, in configuration order, without duplicates. `port`
 /// is the port directive's value (after `-P`); `cli_bind` an address given on the command line.
 pub fn listen_addresses(raw: &[ConfResource], spec: &AddressDirectives, cli_bind: Option<&str>, port: u16)
