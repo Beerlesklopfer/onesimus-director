@@ -12,6 +12,7 @@
 //! | Test | Ports | Inhalt |
 //! |---|---|---|
 //! | `full_goes_to_one_device_incremental_to_the_other` | ab 39801 | Full → `VDev`, Incremental → `VDev2` (Route nach Level), Volumes mit dem MediaType des Ziels; Restore des Incrementals allein (Volume auf `VDev2`) und der Kette aus beiden Devices, verglichen mit dem Quellbaum |
+//! | `restore_waits_for_a_busy_target` | ab 39881 | Kette Full (`VDev`) + Incremental (`VDev2`); während BigBackup per Job-Route nach `VDev2` schreibt, wartet der Restore der Kette auf `VDev2` und ist danach vollständig (VT-1) |
 //! | `copy_and_migrate_routes` | ab 39841 | Routen nach `Type = Copy`/`Migrate` → `VDev2`, Backup → `VDev`; Copy und Migrate im selben SD über den Verteiler (Schreib-Storage `vdist2`, eine zweite Director-Ressource auf `VDist`) (lesen von `VDev`, schreiben nach `VDev2`); Restore der Kopie über einen Director-Storage mit `Device = VDev, VDev2` (VT-3) |
 //!
 //! Start: `cargo test -p onesimus-rig --test osd_distributor -- --ignored --nocapture`.
@@ -194,4 +195,38 @@ fn copy_and_migrate_routes() {
         "restore jobid={copy_job} client=vfd storage=vboth where={} all done yes", rig.layout.restore.display()));
     let (code, diff) = rig.diff_restore();
     assert_eq!(code, 0, "restore of the copy differs from the source:\n{diff}\n{}", rig.diagnostics());
+}
+
+/// A restore of a chain whose Incremental is on a target another job writes to waits for it (VT-1).
+#[test]
+#[ignore = "needs the osd binary and initdb"]
+fn restore_waits_for_a_busy_target() {
+    onesimus_rig::build_workspace_packages(&["odir", "ofd", "osd-daemon"]).unwrap_or_else(|e| panic!("{e}"));
+    let mut options = RigOptions::new(39881);
+    options.sd = Some(onesimus_rig::prereq::target_profile_dir().join("osd"));
+    options.distributor = true;
+    options.dir_client_lines = vec!["Maximum Concurrent Jobs = 10".into()];
+    options.distributor_routes = vec![
+        "Route { Job = BigBackup; Device = VDev2 }".into(),
+        "Route { Level = Full; Device = VDev }".into(),
+        "Route { Device = VDev2 }".into(),
+    ];
+    let rig = Rig::start(options).unwrap_or_else(|e| panic!("Gerüst startet nicht: {e}"));
+    let full = run(&rig, "full", "run job=VBackup level=Full yes");
+    std::thread::sleep(Duration::from_secs(2));
+    std::fs::write(rig.layout.data.join("added-for-incremental.txt"), "added\n").unwrap_or_else(|e| panic!("{e}"));
+    let incremental = run(&rig, "incremental", "run job=VBackup level=Incremental yes");
+    assert!(media_of(&rig, incremental).trim().ends_with("|VFile2"), "{}", media_of(&rig, incremental));
+
+    let big = rig.run_job("BigBackup").unwrap_or_else(|e| panic!("{e}"));
+    rig.wait_running(big, Duration::from_secs(60)).unwrap_or_else(|e| panic!("{e}"));
+    std::thread::sleep(Duration::from_secs(3));
+    let chain = run(&rig, "restore of the chain", &format!("restore jobid={full},{incremental} client=vfd where={} all done yes", rig.layout.restore.display()));
+    let big_row = rig.wait_job(big, JOB_TIMEOUT).unwrap_or_else(|e| panic!("{e}"));
+    assert_eq!(big_row.status, 'T', "{}", rig.job_log(big));
+    assert!(media_of(&rig, big).trim().ends_with("|VFile2"), "BigBackup went to VDev2: {}", media_of(&rig, big));
+    let (code, diff) = rig.diff_restore();
+    assert_eq!(code, 0, "restore of the chain differs:\n{diff}\n{}", rig.job_log(chain));
+    let end = |id: u32| rig.catalog().query(&format!("SELECT EndTime FROM Job WHERE JobId={id}")).unwrap_or_default();
+    assert!(end(chain) >= end(big), "the restore waited for BigBackup: restore {} BigBackup {}", end(chain), end(big));
 }

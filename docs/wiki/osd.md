@@ -185,8 +185,11 @@ Verteilers trägt, kann `osd -t` nicht prüfen, weil osd den Director nicht kenn
 Media Type = … in the Director's Storage resource for this Distributor.“
 
 **Grenzen.** Nur File-Devices als Ziel (S3, Wechselplatte, Band folgen mit
-P3, P4, P6). Kein Striping (P5), keine Zweige (P2b). Beim Lesen wartet ein Job
-nicht auf ein belegtes Ziel, er hält die freien und liest von ihnen (VT-1).
+P3, P4, P6). Kein Striping (P5), keine Zweige (P2b).
+
+**Belegtes Ziel beim Lesen (VT-1).** Braucht ein Volume des Bootstraps ein Ziel,
+das ein anderer Job belegt, wartet der Job vor dem Lesen darauf (Heartbeat an
+den Director alle 10 s, Abbruch bei Cancel) und hält es dann als Ersatzgerät.
 
 Test: `cargo test -p onesimus-rig --test osd_distributor -- --ignored --nocapture`
 (Full auf `VDev`, Incremental auf `VDev2`, Restore der Kette aus beiden);

@@ -392,6 +392,7 @@ fn open_read(d: &Daemon, job: &Arc<Job>, dir: &SharedChannel) -> Option<(ReadPip
         .iter()
         .filter_map(|n| d.config.find_device(n).cloned())
         .collect();
+    let held = wait_for_targets(d, job, dir, &conf, held, &volumes)?;
     let mut alternatives: Vec<FileDevice> = held.iter().map(FileDevice::from_config).collect();
     if !want.is_empty() && want != conf.media_type && let Some(i) = held.iter().position(|h| h.media_type == want) {
         d.jmsg(dir, job, M_INFO, &format!(
@@ -472,6 +473,47 @@ fn read_info(d: &Daemon, job: &Job, dev: &FileDevice, bootstrap: &Bootstrap, alt
         alternatives,
         device_share: String::new(),
     }
+}
+
+/// VT-1: a restore through a Distributor needs, for every volume of the bootstrap, a target of
+/// that volume's media type. The job holds the targets that were free; a needed target another
+/// job uses is waited for (a heartbeat to the Director every 10 s, like a wait for a busy device,
+/// ended by a cancel) and then held as a spare read device. `held`: the spares so far; None after a
+/// cancel or a lost Director connection.
+fn wait_for_targets(d: &Daemon, job: &Arc<Job>, dir: &SharedChannel, conf: &bareos_config::sd::SdDevice,
+                    mut held: Vec<bareos_config::sd::SdDevice>, volumes: &[RestoreVolume]) -> Option<Vec<bareos_config::sd::SdDevice>> {
+    let storage = job.storage.lock().unwrap_or_else(|e| e.into_inner()).clone().unwrap_or_default();
+    let Some(dist) = storage.devices.iter().find_map(|n| d.config.find_distributor(n)) else { return Some(held) };
+    for volume in volumes {
+        let want = &volume.media_type;
+        if want.is_empty() || *want == conf.media_type || held.iter().any(|h| h.media_type == *want) {
+            continue;
+        }
+        let Some(target) = dist.targets().into_iter().filter_map(|t| d.config.find_device(t)).find(|t| t.media_type == *want).cloned() else {
+            continue; // no target has it: the reader says so at that volume
+        };
+        let mut last_heartbeat = std::time::Instant::now();
+        let mut announced = false;
+        while !d.try_hold_alternative(&target.name, &job.cmd.job) {
+            if job.canceled.load(Ordering::Acquire) {
+                return None;
+            }
+            if !announced {
+                tracing::info!("job {} waits for device {} (Volume \"{}\", busy)", job.cmd.job, target.name, volume.name);
+                announced = true;
+            }
+            if last_heartbeat.elapsed() >= Duration::from_secs(10) {
+                if crate::transport::lock(dir).signal(bareos_bnet::BnetSignal::Heartbeat).is_err() {
+                    return None;
+                }
+                last_heartbeat = std::time::Instant::now();
+            }
+            std::thread::sleep(Duration::from_millis(500));
+        }
+        job.read_alternatives.lock().unwrap_or_else(|e| e.into_inner()).push(target.name.clone());
+        held.push(target);
+    }
+    Some(held)
 }
 
 /// What to do with one complete record (`ReadNextRecordFromBlock` and

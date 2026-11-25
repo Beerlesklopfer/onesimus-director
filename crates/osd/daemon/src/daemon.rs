@@ -559,6 +559,16 @@ impl Daemon {
         self.busy.lock().unwrap_or_else(|e| e.into_inner()).sharers(name).to_vec()
     }
 
+    /// Holds device `name` for `job` as a spare read device when nobody uses it; false when busy.
+    pub fn try_hold_alternative(&self, name: &str, job: &str) -> bool {
+        let mut busy = self.busy.lock().unwrap_or_else(|e| e.into_inner());
+        if busy.contains_key(name) {
+            return false;
+        }
+        busy.insert(name.to_string(), alt_holder(job));
+        true
+    }
+
     /// Marks device `name` as used by `job` (its read device).
     pub fn hold_device(&self, name: &str, job: &str) {
         self.busy.lock().unwrap_or_else(|e| e.into_inner()).insert(name.to_string(), job.to_string());
