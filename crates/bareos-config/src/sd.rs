@@ -295,7 +295,7 @@ impl SdRoute {
             && self.client.as_deref().is_none_or(|v| v == facts.client)
             && self.level.is_none_or(|v| v == facts.level)
             && self.pool.as_deref().is_none_or(|v| v == facts.pool)
-            && self.job_type.is_none_or(|v| v == facts.job_type)
+            && self.job_type.is_none_or(|v| v == written_type(facts.job_type))
             && self.fileset.as_deref().is_none_or(|v| v == facts.fileset)
     }
 
@@ -462,6 +462,16 @@ const LEVELS: &[(&str, char)] = &[
 const TYPES: &[(&str, char)] = &[
     ("Backup", 'B'), ("Copy", 'C'), ("Migrate", 'M'), ("Archive", 'A'), ("Consolidate", 'O'), ("Restore", 'R'), ("Verify", 'V'),
 ];
+
+/// The job type a route compares: the SD sees the Copy or Migrate job itself (`c`, `g`, Bareos
+/// JT_COPY/JT_MIGRATE), the route names what it writes (`C` copy, `M` migrated job).
+fn written_type(job_type: char) -> char {
+    match job_type {
+        'c' => 'C',
+        'g' => 'M',
+        other => other,
+    }
+}
 
 /// The letter for `name` in `table` (case-insensitive).
 fn letter(table: &[(&str, char)], name: &str) -> Option<char> {
@@ -1033,6 +1043,19 @@ Messages {
     /// Route selection facts for a backup of `client` into `pool`.
     fn facts<'a>(level: char, client: &'a str, pool: &'a str) -> RouteFacts<'a> {
         RouteFacts { job: "Other", client, level, pool, job_type: 'B', fileset: "Home" }
+    }
+
+    #[test]
+    fn copy_and_migrate_routes_match_the_jobs_the_sd_sees() {
+        let route = |t: char| SdRoute { job_type: Some(t), device: "X".into(), ..Default::default() };
+        let mut f = facts('F', "x-fd", "P");
+        // the SD gets the Copy job (c) and the Migrate job (g); the routes name C and M
+        f.job_type = 'c';
+        assert!(route('C').matches(&f) && !route('M').matches(&f) && !route('B').matches(&f));
+        f.job_type = 'g';
+        assert!(route('M').matches(&f) && !route('C').matches(&f));
+        f.job_type = 'B';
+        assert!(route('B').matches(&f) && !route('C').matches(&f));
     }
 
     #[test]

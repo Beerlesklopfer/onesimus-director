@@ -53,6 +53,33 @@ pub struct Reserved {
 /// target of a Distributor (the job name follows it never; it ends the name).
 const ALT_MARK: &str = "\u{1}alt";
 
+thread_local! {
+    /// Set while [`Daemon::reservable_when_free`] tries a reservation that is not kept.
+    static QUIET: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+/// Silences the route log of a trial reservation for its lifetime.
+struct Quiet;
+
+impl Quiet {
+    /// Starts a trial.
+    fn enter() -> Quiet {
+        QUIET.with(|q| q.set(true));
+        Quiet
+    }
+
+    /// Whether a trial is running on this thread.
+    fn active() -> bool {
+        QUIET.with(|q| q.get())
+    }
+}
+
+impl Drop for Quiet {
+    fn drop(&mut self) {
+        QUIET.with(|q| q.set(false));
+    }
+}
+
 /// The holder name of an alternative device of job `job`.
 fn alt_holder(job: &str) -> String {
     format!("{job}{ALT_MARK}")
@@ -213,11 +240,30 @@ impl Daemon {
         Self::reserve_in(self, &mut busy, storage, job)
     }
 
-    /// Whether `storage` names a device that `job` could use once it is free (the reservation fails
-    /// only because the devices are busy).
+    /// Why a write reservation on a Distributor cannot work at all (VT-4): the Director's Storage
+    /// names another Media Type than the Distributor's. osd cannot check this at `-t` (it does not
+    /// know the Director), so the job says it.
+    pub fn distributor_mismatch(&self, storage: &UseStorage) -> Option<String> {
+        if !storage.append {
+            return None;
+        }
+        storage.devices.iter().filter_map(|n| self.config.find_distributor(n)).find(|d| d.media_type != storage.media_type).map(|d| {
+            format!(
+                "Distributor \"{}\" has Media Type \"{}\", but the Director's Storage names Media Type \"{}\"; \
+                 set Media Type = {} in the Director's Storage resource for this Distributor.",
+                d.name, d.media_type, storage.media_type, d.media_type
+            )
+        })
+    }
+
+    /// Whether `storage` names a device that `job` could use once other jobs free it (the
+    /// reservation fails only because they hold the devices). A device the job holds itself (its
+    /// read device) never becomes free while it waits.
     pub fn reservable_when_free(&self, storage: &UseStorage, job: &JobCommand) -> bool {
-        let mut nothing_busy = HashMap::new();
-        Self::reserve_in(self, &mut nothing_busy, storage, job).is_some()
+        let mut own: HashMap<String, String> = self.busy.lock().unwrap_or_else(|e| e.into_inner())
+            .iter().filter(|(_, holder)| **holder == job.job).map(|(k, v)| (k.clone(), v.clone())).collect();
+        let _quiet = Quiet::enter();
+        Self::reserve_in(self, &mut own, storage, job).is_some()
     }
 
     /// [`Self::reserve_device`] against the reservation table `busy`.
@@ -271,11 +317,16 @@ impl Daemon {
             };
             let route = dist.select(&facts)?;
             let dev = self.config.find_device(&route.device).filter(|d| file(d))?;
-            if busy.contains_key(&dev.name) {
+            // busy, unless the job holds it itself for reading: a Copy or Migrate inside this SD reads
+            // through the Distributor (holding all free targets) and writes to the target of its
+            // route (VT-3); the director side gives the job another read device then
+            if busy.get(&dev.name).is_some_and(|holder| *holder != alt_holder(&job.job) && *holder != job.job) {
                 return None;
             }
             busy.insert(dev.name.clone(), job.job.clone());
-            tracing::info!("Distributor {}: job {} goes to device {} ({})", dist.name, job.job, dev.name, route.conditions());
+            if !Quiet::active() {
+                tracing::info!("Distributor {}: job {} goes to device {} ({})", dist.name, job.job, dev.name, route.conditions());
+            }
             return Some(Reserved { device: FileDevice::from_config(dev), slots: self.ring_slots(dev), alternatives: Vec::new() });
         }
         let free: Vec<&SdDevice> = dist
@@ -405,7 +456,12 @@ impl Daemon {
         self.busy.lock().unwrap_or_else(|e| e.into_inner()).retain(|_, j| j.as_str() != job && j.strip_suffix(ALT_MARK) != Some(job));
     }
 
-    /// Frees device `name`.
+    /// Marks device `name` as used by `job` (its read device).
+    pub fn hold_device(&self, name: &str, job: &str) {
+        self.busy.lock().unwrap_or_else(|e| e.into_inner()).insert(name.to_string(), job.to_string());
+    }
+
+    /// Frees device `name` (end of a job's use).
     pub fn release_device(&self, name: &str) {
         self.busy.lock().unwrap_or_else(|e| e.into_inner()).remove(name);
     }
@@ -513,6 +569,22 @@ mod distributor_tests {
     }
 
     #[test]
+    fn a_copy_writes_to_a_spare_read_device_of_its_own() {
+        let d = daemon();
+        // a Copy (c) of a Monthly job: reads through the Distributor, writes by route Pool = Monthly to B
+        let copy = JobCommand { job_type: 'c', ..job("C.1", "x-fd", 'F') };
+        let read = d.reserve_device(&UseStorage { append: false, ..write("P", "MD") }, &copy).unwrap();
+        assert_eq!((read.device.name.as_str(), read.alternatives.len()), ("A", 1));
+        let w = d.reserve_device(&write("Monthly", "MD"), &JobCommand { level: 'I', ..copy.clone() }).unwrap();
+        assert_eq!(w.device.name, "B", "the job's own spare becomes its write device");
+        // another job may not take the spare
+        d.release_device("B");
+        let read2 = d.reserve_device(&UseStorage { append: false, ..write("P", "MD") }, &job("R.1", "x-fd", 'F'));
+        assert!(read2.is_some_and(|r| r.device.name == "B"));
+        assert!(d.reserve_device(&write("Monthly", "MD"), &JobCommand { level: 'I', ..copy }).is_none());
+    }
+
+    #[test]
     fn writing_goes_to_the_target_of_the_first_matching_route() {
         let d = daemon();
         let full = d.reserve_device(&write("P", "MD"), &job("J.1", "x-fd", 'F')).unwrap();
@@ -537,6 +609,12 @@ mod distributor_tests {
         assert_eq!(d.device_user("A").as_deref(), Some("J.1"));
         // the Director's Storage has another media type than the distributor
         assert!(d.reserve_device(&write("P", "MA"), &job("J.3", "x-fd", 'I')).is_none());
+        // the busy target: the job waits; the wrong media type: it fails and says why (VT-4)
+        assert!(d.reservable_when_free(&write("P", "MD"), &job("J.2", "x-fd", 'F')));
+        assert!(d.distributor_mismatch(&write("P", "MD")).is_none());
+        assert!(!d.reservable_when_free(&write("P", "MA"), &job("J.3", "x-fd", 'I')));
+        let why = d.distributor_mismatch(&write("P", "MA")).unwrap();
+        assert!(why.contains("\"Dist\" has Media Type \"MD\"") && why.contains("names Media Type \"MA\""), "{why}");
         d.release_job_devices("J.1");
         assert!(d.reserve_device(&write("P", "MD"), &job("J.2", "x-fd", 'F')).is_some());
     }

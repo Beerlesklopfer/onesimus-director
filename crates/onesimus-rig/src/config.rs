@@ -312,14 +312,17 @@ pub const DISTRIBUTOR: &str = "VDist";
 pub const DISTRIBUTOR_MEDIA_TYPE: &str = "VDistMT";
 
 /// The Distributor of the rig as `osd.d/distributor/VDist.conf` (relative path
-/// below `osd.d`, text): Full goes to `VDev`, the rest to `VDev2`.
-pub fn distributor_extension() -> (String, String) {
+/// below `osd.d`, text): Full goes to `VDev`, the rest to `VDev2`; or the
+/// given `routes`.
+pub fn distributor_extension(routes: &[String]) -> (String, String) {
+    let routes = if routes.is_empty() {
+        "  Route { Level = Full; Device = VDev }\n  Route { Device = VDev2 }\n".to_string()
+    } else {
+        routes.iter().map(|r| format!("  {r}\n")).collect()
+    };
     (
         format!("distributor/{DISTRIBUTOR}.conf"),
-        format!(
-            "Distributor {{\n  Name = {DISTRIBUTOR}\n  Media Type = {DISTRIBUTOR_MEDIA_TYPE}\n  \
-             Route {{ Level = Full; Device = VDev }}\n  Route {{ Device = VDev2 }}\n}}\n"
-        ),
+        format!("Distributor {{\n  Name = {DISTRIBUTOR}\n  Media Type = {DISTRIBUTOR_MEDIA_TYPE}\n{routes}}}\n"),
     )
 }
 

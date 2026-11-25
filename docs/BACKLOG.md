@@ -44,8 +44,21 @@ P2 ist erledigt (Plan [P2 umgesetzt](plans/OSD-GERAETE-UND-VERTEILUNG.md#p2-umge
 | --- | --- | --- | --- |
 | VT-1 | Lesen über einen Verteiler wartet nicht auf ein belegtes Ziel (der Job hält die freien Ziele); ~~`mount`/`label` auf einem anderen als dem ersten Lesegerät weckt den wartenden Job nicht~~ erledigt (24.11.2026: `media_event` weckt über `alternative_of` auch das Lesegerät des Jobs, `waiting_for_sysop` gilt für gehaltene Ersatzgeräte); offen bleibt das Warten auf ein belegtes Ziel | Lücke | `daemon.rs` (`reserve_distributed`, `wait_for_sysop`) |
 | VT-2 | Ziele anderer Gerätearten (Wechselplatte P3, S3 P4, Band P6); Striping `Stripe = yes` (P5) und Zweige (P2b) | Phasen | Plan |
-| VT-3 | `Type = Copy`/`Migrate`-Routen und ein Director-Storage mit `Device = a, b` für die Ziele sind nicht im Rig geprüft | Prüfung | `tests/osd_distributor.rs` |
-| VT-4 | `osd -t` prüft nicht, ob der `Media Type` des Verteilers zu einem Director-Storage passt (osd kennt den Director nicht); odir `-t` kennt den Verteiler nicht | Prüfung | odir/osd `-t` |
+| VT-3 | ~~`Type = Copy`/`Migrate`-Routen und ein Director-Storage mit `Device = a, b` für die Ziele sind nicht im Rig geprüft~~ **erledigt 25.11.2026** (`copy_and_migrate_routes`). Dabei behoben: Routen `Type = Copy`/`Migrate` griffen nicht (der SD sieht `c`/`g`); der Job konnte das eigene Lese- bzw. Ersatzgerät nicht zum Schreiben übernehmen; odir schickte `Device = a, b` als ein Gerät (C-097) | Prüfung | `tests/osd_distributor.rs` |
+| VT-4 | ~~`osd -t` prüft nicht, ob der `Media Type` des Verteilers zu einem Director-Storage passt~~ **erledigt 25.11.2026:** offline nicht prüfbar (osd kennt den Director nicht, odir den Verteiler nicht); der Job nennt den Fehler jetzt beim Namen („Distributor … has Media Type …, but the Director's Storage names …“) | Prüfung | `daemon.rs` `distributor_mismatch` |
+
+### osd für PDC (25.11.2026)
+
+Was osd von PDC fernhielt (ein File-Device, `Maximum Concurrent Jobs = 5`, Recycling):
+
+| ID | Punkt | Art | Ort |
+| --- | --- | --- | --- |
+| OP-1 | ~~Ein zweiter schreibender Job auf einem belegten Device scheitert~~ **erledigt:** er wartet wie bei bareos-sd mit `Maximum Concurrent Jobs = 1` (`sd_busy_device.rs`) | Lücke | `fd_session.rs` |
+| OP-2 | Mehrere Jobs schreiben verschachtelt in dasselbe Volume (Device `Maximum Concurrent Jobs` > 1, wie bareos-sd). Bis dahin laufen sie nacheinander | Schritt 2 | Geräteschreiber |
+| OP-3 | ~~Warten auf ein Volume beim Schreiben~~ war seit C-089 da | — | `writer.rs` |
+| OP-4 | ~~Recycelte Volumes wurden angehängt statt neu beschrieben~~ **erledigt** (`sd_recycle.rs`) | Fehler | `writer.rs` |
+| OP-5 | ~~`relabel` fehlt~~ **erledigt**, Datei wird umbenannt (C-096, `sd_relabel.rs`) | Lücke | `director.rs` |
+| OP-6 | Ein lesender Job, dessen Device belegt ist, scheitert noch (bareos-sd wartet) | Lücke | `director.rs` `use_for_read` |
 
 ### Offene Reste an Befehlen
 

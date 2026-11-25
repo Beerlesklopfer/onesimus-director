@@ -430,7 +430,10 @@ impl Producer {
                 break dev;
             }
             if !d.reservable_when_free(&storage, &job.cmd) {
-                return Err("Could not reserve any device for this job.".into());
+                return Err(match d.distributor_mismatch(&storage) {
+                    Some(why) => format!("Could not reserve any device for this job. {why}"),
+                    None => "Could not reserve any device for this job.".into(),
+                });
             }
             if job.canceled.load(Ordering::Acquire) {
                 return Err("Job canceled while waiting for a device.".into());

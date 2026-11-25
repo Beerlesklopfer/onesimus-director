@@ -12,6 +12,7 @@
 //! | Test | Ports | Inhalt |
 //! |---|---|---|
 //! | `full_goes_to_one_device_incremental_to_the_other` | ab 39801 | Full → `VDev`, Incremental → `VDev2` (Route nach Level), Volumes mit dem MediaType des Ziels; Restore des Incrementals allein (Volume auf `VDev2`) und der Kette aus beiden Devices, verglichen mit dem Quellbaum |
+//! | `copy_and_migrate_routes` | ab 39841 | Routen nach `Type = Copy`/`Migrate` → `VDev2`, Backup → `VDev`; Copy und Migrate im selben SD über den Verteiler (Schreib-Storage `vdist2`, eine zweite Director-Ressource auf `VDist`) (lesen von `VDev`, schreiben nach `VDev2`); Restore der Kopie über einen Director-Storage mit `Device = VDev, VDev2` (VT-3) |
 //!
 //! Start: `cargo test -p onesimus-rig --test osd_distributor -- --ignored --nocapture`.
 
@@ -101,4 +102,96 @@ fn full_goes_to_one_device_incremental_to_the_other() {
     let (code, diff) = rig.diff_restore();
     assert_eq!(code, 0, "restore of the chain differs from the source:\n{diff}\n{}", rig.diagnostics());
     assert!(chain_log.contains("Media Type change"), "the job log shows no change of the read device:\n{chain_log}");
+}
+
+/// Runs the Copy or Migrate control job of `command` and waits for the jobs it queued; its id.
+fn run_with_queued(rig: &Rig, what: &str, command: &str) -> u32 {
+    let control = run(rig, what, command);
+    let log = rig.job_log(control);
+    for queued in log.lines().filter_map(|l| l.split("Job queued. JobId=").nth(1)).filter_map(|v| v.trim().parse::<u32>().ok()) {
+        let row = rig.wait_job(queued, JOB_TIMEOUT).unwrap_or_else(|e| panic!("{e}"));
+        assert_eq!(row.status, 'T', "{what}: job {queued} {row:?}\n{}\n{}", rig.job_log(queued), rig.diagnostics());
+    }
+    control
+}
+
+/// The new jobs of a Copy or Migrate: `JobId|Type|VolumeName|MediaType` of the jobs with a
+/// PriorJobId (copies `C`, migrated `B`).
+fn written_by_copies(rig: &Rig) -> String {
+    rig.catalog()
+        .query("SELECT DISTINCT j.JobId, j.Type, m.VolumeName, m.MediaType FROM Job j JOIN JobMedia jm USING (JobId) \
+                JOIN Media m USING (MediaId) WHERE j.PriorJobId <> 0 ORDER BY j.JobId")
+        .unwrap_or_else(|e| panic!("{e}"))
+}
+
+/// Copy and Migrate go by their `Type` route to `VDev2` while backups go to `VDev`; the copy is
+/// restored through a Director Storage that names both devices (`Device = VDev, VDev2`).
+#[test]
+#[ignore = "needs the osd binary and initdb"]
+fn copy_and_migrate_routes() {
+    onesimus_rig::build_workspace_packages(&["odir", "ofd", "osd-daemon"]).unwrap_or_else(|e| panic!("{e}"));
+    let mut options = RigOptions::new(39841);
+    options.sd = Some(onesimus_rig::prereq::target_profile_dir().join("osd"));
+    options.distributor = true;
+    options.distributor_routes = vec![
+        "Route { Type = Copy; Device = VDev2 }".into(),
+        "Route { Type = Migrate; Device = VDev2 }".into(),
+        "Route { Device = VDev }".into(),
+    ];
+    let both = format!(
+        "Storage {{\n  Name = vboth\n  Address = 127.0.0.1\n  SD Port = {}\n  Password = \"vsd-pw\"\n  Device = VDev, VDev2\n  \
+         Media Type = VFile2\n  Maximum Concurrent Jobs = 10\n}}\n",
+        39841 + 2
+    );
+    // a second Director Storage on the Distributor: the Director refuses a Copy with the same
+    // read and write Storage resource (like bareos-dir)
+    let second = format!(
+        "Storage {{\n  Name = vdist2\n  Address = 127.0.0.1\n  SD Port = {}\n  Password = \"vsd-pw\"\n  Device = VDist\n  \
+         Media Type = VDistMT\n  Maximum Concurrent Jobs = 10\n}}\n",
+        39841 + 2
+    );
+    options.extra_director = vec![
+        ("storage/vboth.conf".into(), both),
+        ("storage/vdist2.conf".into(), second),
+        (
+            "pool/VCopyPool.conf".into(),
+            "Pool {\n  Name = VCopyPool\n  Pool Type = Backup\n  Label Format = \"VCopy-\"\n  Maximum Volume Bytes = 1G\n  Storage = vdist2\n}\n".into(),
+        ),
+        (
+            "pool/VPool.conf".into(),
+            "Pool {\n  Name = VPool\n  Pool Type = Backup\n  Label Format = \"VVol-\"\n  Maximum Volume Bytes = 1G\n  Next Pool = VCopyPool\n}\n".into(),
+        ),
+        ("job/VCopy.conf".into(), "Job {\n  Name = VCopy\n  JobDefs = VDefs\n  Type = Copy\n  Selection Type = PoolUncopiedJobs\n}\n".into()),
+        (
+            "job/VMigrate.conf".into(),
+            "Job {\n  Name = VMigrate\n  JobDefs = VDefs\n  Type = Migrate\n  Selection Type = SQLQuery\n  \
+             Selection Pattern = \"SELECT MAX(JobId) FROM Job WHERE Type='B' AND Name='VBackup'\"\n}\n".into(),
+        ),
+    ];
+    let rig = Rig::start(options).unwrap_or_else(|e| panic!("Gerüst startet nicht: {e}"));
+
+    let first = run(&rig, "backup", "run job=VBackup level=Full yes");
+    assert!(media_of(&rig, first).trim().ends_with("|VFile"), "backup: {}", media_of(&rig, first));
+    let copy = run_with_queued(&rig, "copy", "run job=VCopy yes");
+    let copied = written_by_copies(&rig);
+    eprintln!("copy {copy}:\n{}\n{copied}", rig.job_log(copy + 1));
+    assert!(copied.lines().count() == 1 && copied.contains("|C|VCopy-") && copied.trim().ends_with("|VFile2"), "copy wrote:\n{copied}");
+    let copy_job: u32 = copied.split('|').next().and_then(|v| v.trim().parse().ok()).unwrap_or_else(|| panic!("{copied}"));
+    let copy_volume = copied.split('|').nth(2).unwrap_or_default().to_string();
+    assert!(rig.layout.root.join("storage2").join(&copy_volume).is_file(), "the copy's volume is not in storage2/");
+
+    let second = run(&rig, "second backup", "run job=VBackup level=Full yes");
+    let migrate = run_with_queued(&rig, "migrate", "run job=VMigrate yes");
+    let written = written_by_copies(&rig);
+    eprintln!("migrate {migrate}:\n{}\n{written}", rig.job_log(migrate));
+    let migrated: Vec<&str> = written.lines().filter(|l| l.contains("|B|")).collect();
+    assert!(migrated.len() == 1 && migrated[0].trim().ends_with("|VFile2"), "migrate wrote:\n{written}");
+    let prior = rig.catalog().query(&format!("SELECT Type FROM Job WHERE JobId={second}")).unwrap_or_default();
+    assert_eq!(prior.trim(), "M", "the migrated job is not marked migrated");
+
+    // the copy through a Storage with `Device = VDev, VDev2` (Media Type of the copy's volume)
+    run(&rig, "restore of the copy", &format!(
+        "restore jobid={copy_job} client=vfd storage=vboth where={} all done yes", rig.layout.restore.display()));
+    let (code, diff) = rig.diff_restore();
+    assert_eq!(code, 0, "restore of the copy differs from the source:\n{diff}\n{}", rig.diagnostics());
 }

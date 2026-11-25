@@ -276,6 +276,7 @@ impl DirSession {
             r
         };
         let wanted = storage.devices.first().cloned().unwrap_or_default();
+        let storage_copy = storage.clone();
         *job.storage.lock().unwrap_or_else(|e| e.into_inner()) = Some(storage);
         match device {
             Some(name) => {
@@ -283,7 +284,8 @@ impl DirSession {
                 Next::Continue
             }
             None => {
-                self.d.jmsg(&self.dir, &job, M_FATAL, &format!("Device reservation failed for JobId={}: no suitable device\n", job.cmd.job_id));
+                let why = self.d.distributor_mismatch(&storage_copy).unwrap_or_else(|| "no suitable device".into());
+                self.d.jmsg(&self.dir, &job, M_FATAL, &format!("Device reservation failed for JobId={}: {why}\n", job.cmd.job_id));
                 self.send(&format!("3924 Device \"{wanted}\" not in SD Device resources or no matching Media Type.\n"));
                 job.set_status('E');
                 Next::Quit
@@ -295,9 +297,27 @@ impl DirSession {
     /// now (like a backup's) and reserved when `run` starts the copy.
     fn use_for_local_write(&mut self, job: &Arc<Job>, storage: UseStorage) -> Next {
         let wanted = storage.devices.first().cloned().unwrap_or_default();
+        let read_device = job.read_device.lock().unwrap_or_else(|e| e.into_inner()).clone();
         let device = match self.d.reserve_device(&storage, &job.cmd).map(|r| r.device.name) {
+            // the route names the job's read device (a Distributor): a spare becomes the read
+            // device (the reader takes the device of each volume by its media type anyway); without
+            // a spare, reading and writing would need the same device
+            Some(name) if read_device.as_deref() == Some(name.as_str()) => {
+                let mut spares = job.read_alternatives.lock().unwrap_or_else(|e| e.into_inner());
+                if spares.is_empty() {
+                    None
+                } else {
+                    let new_read = spares.remove(0);
+                    self.d.hold_device(&new_read, &job.cmd.job);
+                    *job.read_device.lock().unwrap_or_else(|e| e.into_inner()) = Some(new_read);
+                    self.d.release_device(&name);
+                    Some(name)
+                }
+            }
             Some(name) => {
                 self.d.release_device(&name);
+                // a spare read device of this job became the write device: no longer a spare
+                job.read_alternatives.lock().unwrap_or_else(|e| e.into_inner()).retain(|a| *a != name);
                 Some(name)
             }
             None => None,
@@ -309,7 +329,8 @@ impl DirSession {
                 Next::Continue
             }
             None => {
-                self.d.jmsg(&self.dir, job, M_FATAL, &format!("Device reservation failed for JobId={}: no suitable write device\n", job.cmd.job_id));
+                let why = self.d.distributor_mismatch(&storage).unwrap_or_else(|| "no suitable write device".into());
+                self.d.jmsg(&self.dir, job, M_FATAL, &format!("Device reservation failed for JobId={}: {why}\n", job.cmd.job_id));
                 self.send(&format!("3924 Device \"{wanted}\" not in SD Device resources or no matching Media Type.\n"));
                 job.set_status('E');
                 Next::Quit

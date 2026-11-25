@@ -74,6 +74,8 @@ pub struct RigOptions {
     /// the Director's Storage `vsd` with `Device = VDist` and the
     /// Distributor's media type. Excludes `copy_same_sd`.
     pub distributor: bool,
+    /// Routes of the Distributor instead of the default two (`Route { … }` lines).
+    pub distributor_routes: Vec<String>,
     /// No TLS to and between the SDs of a Copy (`TLS Enable = no` on the
     /// second SD and its Storage resource: `replicate … ssl=0`, clear text).
     pub copy_plain: bool,
@@ -113,6 +115,7 @@ impl RigOptions {
             copy_target: None,
             copy_same_sd: false,
             distributor: false,
+            distributor_routes: Vec::new(),
             copy_plain: false,
             extra_odir_d: Vec::new(),
             fd_program: None,
@@ -312,7 +315,7 @@ impl Rig {
             conf += &crate::config::second_device(&self.layout.root);
             std::fs::write(&self.layout.sd_conf, conf).map_err(io)?;
             crate::config::write_director_resources(&self.layout, &[crate::config::distributor_storage(self.ports)]).map_err(io)?;
-            let (relative, text) = crate::config::distributor_extension();
+            let (relative, text) = crate::config::distributor_extension(&self.options.distributor_routes);
             let path = self.layout.root.join("onesimus").join("osd.d").join(relative);
             std::fs::create_dir_all(path.parent().unwrap_or(&self.layout.root)).map_err(io)?;
             std::fs::write(&path, text).map_err(io)?;

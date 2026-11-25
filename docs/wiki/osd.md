@@ -145,6 +145,20 @@ New read device … chosen.“ im Job-Log). So liest ein Restore einer Kette
 Passt kein Ziel zum MediaType, endet der Job wie bei einem Device
 („No suitable device found to read Volume …“).
 
+**Copy und Migrate im selben SD.** Der Kopierjob liest über den Verteiler und
+schreibt in das Ziel seiner Route (z. B. `Route { Type = Copy; Device = VDev2 }`).
+`Type = Copy` und `Type = Migrate` gelten für den Copy- bzw. Migrate-Job, den
+der SD sieht (Bareos-Typ `c`/`g`), und nicht nur für den entstehenden Datensatz
+(`C`/`M`). Hält der Job das Ziel seiner Schreibroute selbst als Lesegerät,
+übernimmt es die Schreibseite. Ein anderes gehaltenes Ziel wird dann
+Lesegerät; gibt es keines, scheitert die Reservierung. Der Director verlangt
+für Lesen und Schreiben **verschiedene Storage-Ressourcen** („cannot … using
+the same read and write storage“, wie bareos-dir). Die Pool-Ressource mit
+`Next Pool` braucht also eine zweite Director-Storage-Ressource, die ebenfalls
+`Device = <Verteiler>` nennt. Geprüft in `copy_and_migrate_routes` (VT-3),
+dort auch ein Restore der Kopie über einen Director-Storage mit
+`Device = VDev, VDev2`.
+
 **Andere Befehle.** `label` mit dem Verteiler als Device nimmt das Ziel, dessen
 MediaType der des `label`-Befehls ist (der Director gibt den des Storage
 mit, also nur der eines Ziels, z. B. `label … mediatype=VFile2`), sonst
@@ -164,13 +178,15 @@ Ziel ist kein File-Device (P2 kennt nur File-Devices), Route ohne `Device`,
 Verteiler ohne Route, mehr als eine Route ohne Merkmal oder eine Route nach
 der ohne Merkmal, doppelter Name oder Name eines Devices/Autochangers, unbekannte
 Direktive oder unbekannter Level/Typ, `Stripe = yes`/mehrere `Devices`,
-fehlender `Media Type`.
+fehlender `Media Type`. Ob der Director-Storage den `Media Type` des
+Verteilers trägt, kann `osd -t` nicht prüfen, weil osd den Director nicht kennt
+(VT-4). Ein schreibender Job mit falschem Media Type endet mit „Distributor
+"…" has Media Type "…", but the Director's Storage names Media Type "…"; set
+Media Type = … in the Director's Storage resource for this Distributor.“
 
 **Grenzen.** Nur File-Devices als Ziel (S3, Wechselplatte, Band folgen mit
 P3, P4, P6). Kein Striping (P5), keine Zweige (P2b). Beim Lesen wartet ein Job
-nicht auf ein belegtes Ziel, er hält die freien und liest von ihnen; ein
-`mount`/`label` auf einem Ziel, das nicht das erste Lesegerät ist, weckt den
-wartenden Job nicht (er fragt nach der Wartezeit erneut).
+nicht auf ein belegtes Ziel, er hält die freien und liest von ihnen (VT-1).
 
 Test: `cargo test -p onesimus-rig --test osd_distributor -- --ignored --nocapture`
 (Full auf `VDev`, Incremental auf `VDev2`, Restore der Kette aus beiden);

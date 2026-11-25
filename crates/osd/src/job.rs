@@ -119,18 +119,23 @@ pub fn sd_job_setup(sd: &mut BnetStream<AnyStream>, p: &SdJobParams) -> Result<S
 /// The `use storage` and `use device` lines of `p` (msgchan.cc
 /// `use_storage`, `use_device`); pool, media type and device go through
 /// BashSpaces as in `ReserveReadDevice`/`ReserveWriteDevice`. The storage
-/// name is `File`: the parameters carry none (open point, P1).
-pub fn use_device_commands(p: &SdJobParams) -> [String; 2] {
+/// name is `File`: the parameters carry none (open point, P1). A Storage
+/// with `Device = a, b` gives one `use device=` line per device, as
+/// `foreach_alist(dev_name, store->device)` in msgchan.cc does.
+pub fn use_device_commands(p: &SdJobParams) -> Vec<String> {
     let bash = bareos_format::bash::bash_spaces;
     let append = if p.job_type == SdJobType::Restore { 0 } else { 1 };
-    [
-        format!(
-            "use storage=File media_type={} pool_name={} pool_type=Backup append={append} copy=0 stripe=0\n",
-            bash(&p.media_type),
-            bash(&p.pool_name)
-        ),
-        format!("use device={}\n", bash(&p.device_name)),
-    ]
+    let mut lines = vec![format!(
+        "use storage=File media_type={} pool_name={} pool_type=Backup append={append} copy=0 stripe=0\n",
+        bash(&p.media_type),
+        bash(&p.pool_name)
+    )];
+    let mut devices: Vec<&str> = p.device_name.split(',').map(str::trim).filter(|d| !d.is_empty()).collect();
+    if devices.is_empty() {
+        devices.push("");
+    }
+    lines.extend(devices.into_iter().map(|d| format!("use device={}\n", bash(d))));
+    lines
 }
 
 /// Send "use storage/device" commands to SD.
@@ -241,6 +246,9 @@ mod tests {
         ]);
         p.job_type = SdJobType::Backup;
         assert!(use_device_commands(&p)[0].contains(" append=1 "));
+        // `Device = VDev, V Dev2`: one line per device
+        p.device_name = "VDev, V Dev2".into();
+        assert_eq!(use_device_commands(&p)[1..], ["use device=VDev\n".to_string(), "use device=V\u{1}Dev2\n".to_string()]);
     }
 
     #[test]
