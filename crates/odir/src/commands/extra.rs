@@ -629,6 +629,7 @@ fn delete_dialog(ua: &mut crate::ua_select::Ua, ast: &CommandAst,
         Some(1) => {
             // DeletePool
             if ua.batch() {
+                crate::ua_select::mark_dialog_wanted();
                 // DeletePool's false is ignored by DeleteCmd.
                 ua.error_msg("Deleting pools from the catalog is not supported in batch mode.\n");
                 return true;

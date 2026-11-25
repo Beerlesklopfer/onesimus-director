@@ -53,8 +53,11 @@ pub fn get_registry() -> &'static [CommandDef] {
 
 /// Dispatch a command via the registry (SSOT).
 pub fn dispatch(ast: &CommandAst, ctx: &ExecContext) -> CommandResult {
-    crate::sql_list::with_api1(ctx.api_mode == ApiMode::Api,
-        || command_registry::dispatch_registry(registry(), ast, ctx))
+    crate::ua_select::reset_dialog_wanted();
+    let mut result = crate::sql_list::with_api1(ctx.api_mode == ApiMode::Api,
+        || command_registry::dispatch_registry(registry(), ast, ctx));
+    result.dialog_required |= crate::ua_select::dialog_wanted();
+    result
 }
 
 /// Unknown or ACL-denied command (no API framing signals, see Do_a_command).
@@ -80,6 +83,18 @@ mod tests {
 
     fn make_ctx() -> ExecContext {
         ExecContext { session_id: 1, config: None, session_mgr: None, catalog: None, api_mode: ApiMode::Human, bus_rx: None, job_manager: None }
+    }
+
+    /// Without a console (gRPC ExecuteCommand) a command that would ask is marked dialog_required;
+    /// one that needs no question is not, and the mark does not leak into the next command.
+    #[test]
+    fn a_refused_question_marks_the_result_dialog_required() {
+        let mut ast = make_ast("delete");
+        ast.arguments = vec![crate::command_ast::Argument { key: "pool".into(), value: Some("Scratch".into()) },
+            crate::command_ast::Argument { key: "yes".into(), value: None }];
+        let refused = dispatch(&ast, &make_ctx());
+        assert!(refused.dialog_required, "{refused:?}");
+        assert!(!dispatch(&make_ast("version"), &make_ctx()).dialog_required);
     }
 
     #[test]

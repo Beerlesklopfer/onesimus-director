@@ -46,6 +46,8 @@ pub struct CommandOutput {
     pub success: bool,
     pub text: String,
     pub error: String,
+    /// The command wanted to ask the user; ExecuteCommand has no dialog (`dialog_required`).
+    pub dialog_required: bool,
 }
 
 /// Fetch the server certificate fingerprint without trusting it (for TOFU prompts).
@@ -140,7 +142,8 @@ impl GrpcSession {
         });
         req.metadata_mut().insert(SESSION_HEADER, self.token.clone());
         let resp = self.client.execute_command(req).await?.into_inner();
-        Ok(CommandOutput { success: resp.success, text: resp.text_output, error: resp.error_message })
+        Ok(CommandOutput { success: resp.success, text: resp.text_output, error: resp.error_message,
+            dialog_required: resp.dialog_required })
     }
 }
 

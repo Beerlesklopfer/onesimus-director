@@ -83,6 +83,7 @@ fn to_response(result: CommandResult) -> CommandResponse {
         text_output: result.text_output,
         json_output: Vec::new(),
         error_message: result.error_message,
+        dialog_required: result.dialog_required,
     }
 }
 

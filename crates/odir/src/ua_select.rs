@@ -148,6 +148,29 @@ pub struct Ua<'a> {
     json: Option<serde_json::Value>,
 }
 
+thread_local! {
+    /// Set when a command wanted to ask the user but had no dialog (see [`dialog_wanted`]).
+    static DIALOG_WANTED: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+/// Clears the mark before a command runs.
+pub(crate) fn reset_dialog_wanted() {
+    DIALOG_WANTED.with(|d| d.set(false));
+}
+
+/// Whether the command that ran on this thread wanted a dialog it did not have (batch mode, no
+/// console: a question, a selection or an input was refused). gRPC `ExecuteCommand` reports it as
+/// `dialog_required`, and an interactive console runs the command again with a dialog.
+pub(crate) fn dialog_wanted() -> bool {
+    DIALOG_WANTED.with(|d| d.get())
+}
+
+/// Marks that the running command wanted a dialog. Only where the command then stops without
+/// having changed anything: the console runs it again from the start.
+pub(crate) fn mark_dialog_wanted() {
+    DIALOG_WANTED.with(|d| d.set(true));
+}
+
 impl<'a> Ua<'a> {
     pub fn new(ctx: &'a ExecContext) -> Self {
         Self { ctx, segments: Vec::new(), interacted: false, prompts: Vec::new(), cmd: String::new(), db_error: String::new(),
@@ -307,6 +330,7 @@ impl<'a> Ua<'a> {
     pub fn get_cmd_ext(&mut self, prompt: &str, subprompt: bool) -> Option<String> {
         self.cmd.clear();
         if self.batch() {
+            mark_dialog_wanted();
             return None;
         }
         let api = self.api();
@@ -381,9 +405,17 @@ impl<'a> Ua<'a> {
             return true;
         }
         if !self.has_console() {
+            // only a refusal: with `fallback` the command goes on, and running it again in a dialog
+            // would do it twice
+            if !fallback {
+                mark_dialog_wanted();
+            }
             return fallback;
         }
         if self.api() || self.batch() {
+            if self.batch() {
+                mark_dialog_wanted();
+            }
             return false;
         }
         self.get_yesno(prompt).unwrap_or(false)
@@ -415,6 +447,7 @@ impl<'a> Ua<'a> {
         }
 
         if self.batch() {
+            mark_dialog_wanted();
             self.send_msg(prompts.first().cloned().unwrap_or_default());
             self.send_msg(format_prompts(&prompts, 80, 20));
             self.send_msg(format!(

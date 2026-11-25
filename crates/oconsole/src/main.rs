@@ -479,6 +479,44 @@ fn run_bnet_mode(cli: &EffCli, addr: &str) {
     run_bnet_session(cli, bnet);
 }
 
+/// A BNET console connection for one dialog of a gRPC session (TLS-PSK, Hello, CRAM-MD5, banner),
+/// without leaving the process on a failure.
+fn open_bnet_conn(addr: &str, name: &str, password: &str) -> Result<Box<dyn DirectorConn>, String> {
+    fn login<S: std::io::Read + std::io::Write + Send + 'static>(mut bnet: BnetStream<S>, name: &str, password: &str)
+        -> Result<Box<dyn DirectorConn>, String> {
+        bnet.send_str(&make_console_hello(name, env!("CARGO_PKG_VERSION"), false)).map_err(|e| format!("hello: {e}"))?;
+        if !password.is_empty() {
+            let auth = CramMd5Auth::new(password, name, 0);
+            if !auth.two_way_authenticate(&mut bnet, false).map_err(|e| format!("authentication: {e}"))?.success {
+                return Err("authentication failed".into());
+            }
+        }
+        // the banner (1000 OK, 1002 Info), as in run_bnet_session
+        for _ in 0..2 {
+            match bnet.recv() {
+                Ok(BnetMessage::Data(data)) if String::from_utf8_lossy(&data).starts_with("1000\x1e") => continue,
+                Ok(BnetMessage::Data(_)) | Ok(BnetMessage::Signal(BnetSignal::Eod | BnetSignal::MainPrompt)) => break,
+                Ok(BnetMessage::Signal(BnetSignal::Terminate)) => return Err("Director terminated connection".into()),
+                Ok(BnetMessage::Signal(_)) => continue,
+                Err(e) => return Err(format!("banner: {e}")),
+            }
+        }
+        Ok(Box::new(BnetConn { bnet }))
+    }
+    let stream = TcpStream::connect(addr).map_err(|e| format!("{addr}: {e}"))?;
+    stream.set_read_timeout(Some(Duration::from_secs(30))).ok();
+    if !password.is_empty() {
+        let psk = bareos_bnet::tls_psk::password_to_psk(password);
+        if let Ok(psk_stream) = bareos_bnet::tls_psk::psk_connect(stream, &format!("R_CONSOLE\x1e{name}"), &psk) {
+            return login(BnetStream::new(psk_stream), name, password);
+        }
+        let plain = TcpStream::connect(addr).map_err(|e| format!("{addr}: {e}"))?;
+        plain.set_read_timeout(Some(Duration::from_secs(30))).ok();
+        return login(BnetStream::new(plain), name, password);
+    }
+    login(BnetStream::new(stream), name, password)
+}
+
 fn run_bnet_session<S: std::io::Read + std::io::Write + Send + 'static>(cli: &EffCli, mut bnet: BnetStream<S>) {
     // Send hello
     // Like bconsole (lib/bsock.cc:348) the version goes with every console's
@@ -1498,7 +1536,9 @@ fn run_grpc_mode(cli: &EffCli) {
 
     // Interactive mode: same line editor (history, tab completion) as BNET
     let name = session.director_name.clone();
-    interactive_loop(Box::new(GrpcConn { rt, session, pending: Vec::new(), api_mode: ApiMode::default() }), &cli.name, &name);
+    let dialog_login = Some((format!("{}:{}", cli.address, cli.port), cli.name.clone(), cli.password.clone()));
+    interactive_loop(Box::new(GrpcConn { rt, session, pending: Vec::new(), api_mode: ApiMode::default(),
+        dialog_login, dialog_conn: None, in_dialog: false }), &cli.name, &name);
 }
 
 /// gRPC implementation of DirectorConn: each command is one ExecuteCommand
@@ -1510,6 +1550,13 @@ struct GrpcConn {
     /// The mode set with `.api`; ExecuteCommand is stateless, so every
     /// command carries it as its response format.
     api_mode: ApiMode,
+    /// The BNET console (`address:port`, name, password) for commands that ask (`dialog_required`):
+    /// ExecuteCommand has no dialog, so such a command runs again there.
+    dialog_login: Option<(String, String, String)>,
+    /// That BNET connection, opened at the first dialog.
+    dialog_conn: Option<Box<dyn DirectorConn>>,
+    /// A command runs in the BNET dialog: answers, cancel and replies go there until it ends.
+    in_dialog: bool,
 }
 
 impl GrpcConn {
@@ -1550,8 +1597,24 @@ impl DirectorConn for GrpcConn {
         if let Some(mode) = ApiMode::from_line(cmd) {
             self.api_mode = mode;
         }
-        let text = match self.execute(cmd, self.api_mode.grpc_format()) {
-            Ok(t) => t,
+        if self.in_dialog {
+            // an answer to the Director's question
+            return self.dialog_conn.as_mut().is_some_and(|c| c.send_cmd(cmd));
+        }
+        let format = self.api_mode.grpc_format();
+        let out = self.rt.block_on(self.session.execute(cmd, format));
+        // A command that asks: again over BNET, where the question can be answered (the batch
+        // refusal of the stateless call is not shown)
+        if let Ok(o) = &out {
+            if o.dialog_required && self.api_mode == ApiMode::default() && self.start_dialog(cmd) {
+                return true;
+            }
+        }
+        let text = match out.map_err(|e| format!("gRPC error: {e}")) {
+            Ok(o) => {
+                let json = format == onesimus_proto_rs::onesimus::director::ResponseFormat::Json && !o.text.is_empty();
+                if o.error.is_empty() || json { o.text } else { format!("{}{}", o.text, o.error) }
+            }
             // A failed call is shown like a command error; the session goes on
             Err(e) => format!("Error: {e}\n"),
         };
@@ -1561,6 +1624,19 @@ impl DirectorConn for GrpcConn {
     }
 
     fn recv_msg(&mut self) -> Option<RecvResult> {
+        if self.in_dialog {
+            let msg = self.dialog_conn.as_mut().and_then(|c| c.recv_msg());
+            // the command ended (or the connection did): back to gRPC
+            if matches!(msg, Some(RecvResult::Signal(BnetSignal::Eod | BnetSignal::MainPrompt)) | Some(RecvResult::Closed)
+                | Some(RecvResult::Error(_))) {
+                self.in_dialog = false;
+                if !matches!(msg, Some(RecvResult::Signal(_))) {
+                    self.dialog_conn = None;
+                    return Some(RecvResult::Signal(BnetSignal::Eod));
+                }
+            }
+            return msg;
+        }
         Some(self.pending.pop().unwrap_or(RecvResult::Signal(BnetSignal::Eod)))
     }
 
@@ -1568,7 +1644,37 @@ impl DirectorConn for GrpcConn {
         self.pending.clear();
     }
 
-    fn send_cancel(&mut self) {}
+    fn send_cancel(&mut self) {
+        if self.in_dialog {
+            if let Some(c) = self.dialog_conn.as_mut() {
+                c.send_cancel();
+            }
+        }
+    }
+}
+
+impl GrpcConn {
+    /// Runs `cmd` in the BNET dialog connection (opened now if needed); false when there is none.
+    fn start_dialog(&mut self, cmd: &str) -> bool {
+        if self.dialog_conn.is_none() {
+            let Some((addr, name, password)) = self.dialog_login.clone() else { return false };
+            match open_bnet_conn(&addr, &name, &password) {
+                Ok(conn) => self.dialog_conn = Some(conn),
+                Err(e) => {
+                    eprintln!("oconsole: the command asks, but no console dialog over BNET ({e}); shown as the Director answered");
+                    return false;
+                }
+            }
+        }
+        let sent = self.dialog_conn.as_mut().is_some_and(|c| c.send_cmd(cmd));
+        if !sent {
+            self.dialog_conn = None;
+            return false;
+        }
+        self.pending.clear();
+        self.in_dialog = true;
+        true
+    }
 }
 
 /// MCP command runner over an authenticated gRPC session.

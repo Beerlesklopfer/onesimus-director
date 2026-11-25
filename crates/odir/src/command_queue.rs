@@ -64,6 +64,9 @@ pub struct CommandResult {
     /// (`error_message` is a copy for inspection, `messages` drive the
     /// signals); the session sends `text_output` only.
     pub errors_inline: bool,
+    /// The command wanted to ask the user but had no dialog (batch mode, no console): gRPC
+    /// `CommandResponse.dialog_required` ([`crate::ua_select::dialog_wanted`]).
+    pub dialog_required: bool,
 }
 
 impl CommandResult {
