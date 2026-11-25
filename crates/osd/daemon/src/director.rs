@@ -169,11 +169,7 @@ impl DirSession {
                 "status" => self.status_cmd(&msg),
                 ".status" => self.dot_status_cmd(&msg),
                 "label" => self.label_cmd(&msg),
-                "relabel" => {
-                    self.send("3912 Failed to label Volume: ERR=relabel is not supported by osd yet\n");
-                    self.eod();
-                    Next::Continue
-                }
+                "relabel" => self.relabel_cmd(&msg),
                 "mount" => self.device_cmd(&msg, "mount"),
                 "unmount" => self.device_cmd(&msg, "unmount"),
                 "release" => self.device_cmd(&msg, "release"),
@@ -493,6 +489,59 @@ impl DirSession {
         Next::Continue
     }
 
+    /// `relabel <device> OldName= NewName= PoolName= MediaType= Slot= drive= MinBlocksize= MaxBlocksize=`
+    /// (`LabelVolumeIfOk` with relabel): the volume file is truncated and labeled anew. Unlike
+    /// bareos-sd 25.1.3, which keeps the old file name (the relabeled volume cannot be mounted then),
+    /// osd renames the file to the new volume name (C-096).
+    fn relabel_cmd(&mut self, msg: &str) -> Next {
+        let reply = match parse_relabel(msg) {
+            None => format!("3903 Error scanning relabel command: {msg}\n"),
+            Some((old, l)) => match self.label_device(&l) {
+                Err(e) => e,
+                Ok(name) => self.relabel_on(&name, &old, &l),
+            },
+        };
+        self.send(&reply);
+        self.eod();
+        Next::Continue
+    }
+
+    /// The relabel of volume `old` to `l.volume` on device `name`; the reply line.
+    fn relabel_on(&self, name: &str, old: &str, l: &LabelCommand) -> String {
+        let Some(conf) = self.d.config.find_device(name) else {
+            return format!("3999 Device \"{name}\" not found or could not be opened.\n");
+        };
+        let dev = FileDevice::from_config(conf);
+        if self.d.device_user(name).is_some() && !self.d.waiting_for_sysop(name) {
+            return format!("3937 Device {} is busy with writers=1 reserved=0.\n", dev.print_name());
+        }
+        if let LabelState::Labeled(have) = dev.read_label(old) {
+            if have.volume_name != old {
+                return format!("3921 Wrong volume mounted on device {}: Wanted {old} have {}\n", dev.print_name(), have.volume_name);
+            }
+        }
+        if old != l.volume {
+            if let LabelState::Labeled(other) = dev.read_label(&l.volume) {
+                return format!("3920 Cannot label Volume because it is already labeled: \"{}\"\n", other.volume_name);
+            }
+            let from = dev.volume_path(old);
+            if from.exists() {
+                if let Err(e) = std::fs::rename(&from, dev.volume_path(&l.volume)) {
+                    return format!("3912 Failed to label Volume: ERR=rename {}: {e}\n", from.display());
+                }
+            }
+        }
+        let label = crate::device::new_label(&l.volume, &l.pool, &dev.media_type, self.d.name());
+        let reply = match dev.write_label(&label, 0, 0) {
+            Ok(bytes) => format!("3000 OK label. VolFiles=0 VolBytes={bytes} Volume=\"{}\" Device={}\n", l.volume, dev.print_name()),
+            Err(e) => format!("3912 Failed to label Volume: ERR={e}\n"),
+        };
+        if reply.starts_with("3000 ") {
+            self.d.media_event(&dev.name);
+        }
+        reply
+    }
+
     /// The device `label` acts on: the named Device, or for a Distributor its
     /// target whose media type is the label's (an error reply when none is).
     fn label_device(&self, l: &LabelCommand) -> Result<String, String> {
@@ -798,6 +847,20 @@ pub fn parse_label(msg: &str) -> Option<LabelCommand> {
     Some(cmd)
 }
 
+/// `relabel %127s OldName=%127s NewName=%127s PoolName=%127s MediaType=%127s Slot=%hd drive=%hd
+/// MinBlocksize=%d MaxBlocksize=%d`: the old name and the label command for the new one.
+pub fn parse_relabel(msg: &str) -> Option<(String, LabelCommand)> {
+    let w: Vec<&str> = msg.split_whitespace().collect();
+    if w.len() < 10 || w[0] != "relabel" {
+        return None;
+    }
+    let old = w[2].strip_prefix("OldName=").map(unbash_spaces)?;
+    let new = w[3].strip_prefix("NewName=")?;
+    let rest = w[4..].join(" ");
+    let cmd = parse_label(&format!("label {} VolumeName={new} {rest}", w[1]))?;
+    Some((old, cmd))
+}
+
 #[cfg(test)]
 mod tests {
     #[test]
@@ -833,6 +896,9 @@ mod tests {
         let find = |m: &str| COMMANDS.iter().find(|(c, _)| m.starts_with(c)).map(|(c, _)| *c);
         assert_eq!(find("release VDev drive=0"), Some("release"));
         assert_eq!(find("relabel VDev OldName=a"), Some("relabel"));
+        let (old, l) = super::parse_relabel("relabel VDev OldName=Old\\x20Vol NewName=NewVol PoolName=VPool MediaType=VFile Slot=0 drive=0 MinBlocksize=0 MaxBlocksize=0").unwrap();
+        assert_eq!((old.as_str(), l.volume.as_str(), l.pool.as_str(), l.device.as_str()), ("Old\\x20Vol", "NewVol", "VPool", "VDev"));
+        assert!(super::parse_relabel("relabel VDev OldName=a NewName=b").is_none());
         assert_eq!(find(".status header"), Some(".status"));
         assert_eq!(find("use storage=x"), Some("use storage="));
         assert_eq!(find("frobnicate"), None);
