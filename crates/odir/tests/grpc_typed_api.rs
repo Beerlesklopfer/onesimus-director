@@ -914,6 +914,10 @@ fn start_private_director(base: &Path) -> Director {
         ("messages/Daemon.conf", format!("Messages {{\n  Name = Daemon\n  append = \"{}/daemon.log\" = all, !skipped, !saved, !audit\n}}\n", work.display())),
         ("messages/Standard.conf", format!("Messages {{\n  Name = Standard\n  append = \"{}/job.log\" = all, !skipped, !saved, !audit\n\
             catalog = all, !skipped, !saved, !audit\n}}\n", work.display())),
+        // console destination: the Director's console message queue (`messages`, `.messages`)
+        ("messages/ToConsole.conf", "Messages {\n  Name = ToConsole\n  console = all, !skipped, !saved, !audit\n}\n".into()),
+        ("job/Adm.conf", "Job {\n  Name = Adm\n  Type = Admin\n  Client = tfd\n  FileSet = TSet\n  Storage = tsd\n\
+            Pool = TA\n  Messages = ToConsole\n}\n".into()),
         ("client/tfd.conf", format!("Client {{\n  Name = tfd\n  Address = 127.0.0.1\n  FD Port = {fd_port}\n  Password = \"tfd-pw\"\n}}\n")),
         ("storage/tsd.conf", format!("Storage {{\n  Name = tsd\n  Address = 127.0.0.1\n  SD Port = {sd_port}\n  Password = \"tsd-pw\"\n\
             Device = FileStorage\n  Media Type = File\n}}\n")),
@@ -1088,6 +1092,23 @@ async fn typed_api_writes_on_private_daemons() {
     assert!(sqlquery["text"].as_str().unwrap().contains("42"), "{sqlquery:#}");
     let not_applicable = call(&channel, &token, "Gui", &json!({"on": true})).await.unwrap_err();
     assert_eq!(not_applicable.code(), Code::FailedPrecondition);
+
+    // console message queue over gRPC: an Admin job with a console destination queues its messages;
+    // DotMessages hands them to this session and empties the queue, so neither a second call nor a
+    // BNET console gets them again (lib/message.cc con_fd, shared by all consoles)
+    let pending = call(&channel, &token, "DotMessages", &json!({})).await.unwrap();
+    assert_eq!(pending["text"].as_str().unwrap_or(""), "", "queue not empty before the Admin job: {pending:#}");
+    let admin = act(&channel, &token, "Run", json!({"job": "Adm"})).await;
+    let admin = first_jobid(&admin);
+    wait_job(&channel, &token, admin).await;
+    let queued = call(&channel, &token, "DotMessages", &json!({})).await.unwrap();
+    let text = queued["text"].as_str().unwrap_or("");
+    assert!(text.contains(&format!("Start Admin JobId {admin}, Job=Adm.")) && text.contains("Termination:            Admin OK"),
+        "{queued:#}");
+    let again = call(&channel, &token, "DotMessages", &json!({})).await.unwrap();
+    assert_eq!(again["text"].as_str().unwrap_or(""), "", "{again:#}");
+    let bnet = console(director.port, "*UserAgent*", PASSWORD, &["messages"]);
+    assert_eq!(bnet[0], "You have no messages.\n", "{bnet:?}");
 
     // logout
     act(&channel, &token, "Quit", json!({})).await;

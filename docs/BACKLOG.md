@@ -96,8 +96,9 @@ Was osd von PDC fernhielt (ein File-Device, `Maximum Concurrent Jobs = 5`, Recyc
 Nur Testlücken, keine bekannte Abweichung: (`setdebug` an echten FD/SD seit 24.11.2026 belegt: `setdebug_daemons.rs`, ofd/osd antworten wie bareos-fd/bareos-sd mit den wirksamen Werten und der Trace-Datei; `wait` auf echte Jobenden: `c094`) `add`/`create`/`prune`-Katalogzustand danach,
 `import`/`export`/`move` an einem echten Autochanger (bisher simuliert),
 (`add`/`create`/`prune`/`update`-Katalogzustand danach: seit 24.11.2026 belegt, Fälle `c093`, 14, alle gleich; `prune`/`purge`/`delete` von Jobs, Dateien und Volumes der jüngsten Full-Kette weichen absichtlich ab, siehe betrieb-odir.md),
-`resolve` gegen Legacy-/Nicht-TLS-Daemons, `.messages` über die
-gRPC-Sitzungsqueue. (`.bvfs_restore`, `.bvfs_cleanup`, `.bvfs_clear_cache yes` und `umount` haben seit 24.11.2026 Paritätsfälle: `c091`, 17 Fälle, alle gleich; jeder der 88 Befehle hat damit mindestens einen Fall; von den 26 Befehlen der Dateiauswahl seit `c095` auch `exit`.)
+`resolve` gegen Legacy-/Nicht-TLS-Daemons. (`.messages` über gRPC seit 27.11.2026 belegt:
+`typed_api_writes_on_private_daemons`, Admin-Job mit `console`-Ziel, DotMessages liefert und leert die
+gemeinsame Warteschlange, eine BNET-Konsole bekommt danach nichts mehr.) (`.bvfs_restore`, `.bvfs_cleanup`, `.bvfs_clear_cache yes` und `umount` haben seit 24.11.2026 Paritätsfälle: `c091`, 17 Fälle, alle gleich; jeder der 88 Befehle hat damit mindestens einen Fall; von den 26 Befehlen der Dateiauswahl seit `c095` auch `exit`.)
 
 ### Infrastruktur
 
@@ -117,7 +118,7 @@ gRPC-Sitzungsqueue. (`.bvfs_restore`, `.bvfs_cleanup`, `.bvfs_clear_cache yes` u
 | `setdebug` | Dialogauswahl, NDMP, ACL | erledigt (C-011, C-050); FD/SD-Wirkung nur Einheitentests |
 | `setbandwidth` | Jobselektoren, Zustandsfilter, `all`, Dialog, NDMP/Legacy, ACL | erledigt (C-056, C-050); Rest siehe oben |
 | `resolve` | ACL, Legacy-/Nicht-TLS-Verbindungen | erledigt (C-018; 19 Fälle); Legacy/Nicht-TLS ungetestet (kein solcher Daemon im Fixture) |
-| `.messages` | Globale Spool-Semantik, gRPC-Sitzungsqueue | Spool erledigt (8 Fälle, alle API-Modi); gRPC-Sitzungsqueue nicht eigens belegt |
+| `.messages` | Globale Spool-Semantik, gRPC-Sitzungsqueue | Spool erledigt (8 Fälle, alle API-Modi); über gRPC belegt 27.11.2026 (`typed_api_writes_on_private_daemons`: dieselbe gemeinsame Warteschlange, keine eigene je Sitzung, wie con_fd in Bareos) |
 | `.defaults` | Ressourcen- und Restore-Defaults | erledigt (C-073; Fälle für job/client/storage/pool und `job=RestoreFiles`) |
 | `help` | Originalsyntax, Layout, ACL-Filter | erledigt (Fälle inkl. `parity-limited`, `help configure`) |
 | `run` | Accurate/VirtualFull, FileSet-Änderungen, weitere Optionen | erledigt (C-043, C-058, S-19, S-22, S-23: Accurate, Aufstufung zu VirtualFull, Quotas, Write Bootstrap; geändertes FileSet über die FileSetId der Vorgängersuche in `backup.rs`) |
