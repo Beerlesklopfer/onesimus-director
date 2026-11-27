@@ -107,7 +107,6 @@ eine gewöhnliche Prüfung.
 |---|---|---|
 | `expected_defect_d1_fd_reports_cancel_as_error` | D1: ofd meldet nach `cancel` `TermCode=69` (E) statt A | Gutachten §7 |
 | `expected_defect_d14_job_bandwidth_is_overwritten` | D14 (neu): Job-Direktive `Maximum Bandwidth` erreicht den FD als `setbandwidth`, `storage_cmd` überschreibt sie mit dem Client-Wert | `ofd/src/job/backup_cmds.rs` `setbandwidth_cmd`, `ofd/src/job.rs` `storage_cmd`; Bareos `filed/dir_cmd.cc` 751, 1412–1420 |
-| `expected_defect_d15_estimate_before_first_backup_is_silent` | D15 (neu): `estimate` vor dem ersten Backup antwortet nur „Using Catalog“, weil odir den FileSet-Satz nur sucht statt ihn anzulegen. Ursache des Gutachten-Befunds „Estimate-Pfad nicht erreicht“ | `odir/src/commands/estimate.rs` `estimate_job` |
 | `expected_defect_d16_canceled_backup_is_fatal_in_catalog` | D16 (neu): abgebrochenes Backup steht im Katalog als `f` statt `A` (Worker endet mit Code 1). Der Fachmann maß bei anderem Zeitverlauf `A` | `odir/src/job_manager.rs` |
 
 Nicht geprüft und bewusst ausgelassen: Verify DiskToCatalog. Mit `Sparse = yes`
@@ -180,8 +179,9 @@ gegen bareos-sd.
 Die Tests in `tests/rig.rs` mit `ONESIMUS_RIG_SD=$PWD/target/debug/osd`
 (vorher `cargo build -p osd-daemon`; gemessen 20.11.2026): alle fünf
 bestehen, Backup, Estimate, Verify VolumeToCatalog, Restore und Abbruch
-sowie die vier erwarteten Defekte D1, D14, D15, D16 (sie liegen in ofd bzw.
-odir).
+sowie die damals vier erwarteten Defekte D1, D14, D15, D16 (sie liegen in ofd bzw.
+odir). D15 ist seit 21.11.2026 behoben (C-090); aus dem Test wurde
+`estimate_before_first_backup_lists_the_tree`.
 
 Bekannte Falle: Die Gerüst-Ports liegen im Bereich, aus dem Linux
 kurzlebige Client-Ports vergibt. Ein Socket eines eben beendeten Gerüsts

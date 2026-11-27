@@ -64,7 +64,7 @@ fn backup_verify_restore_estimate_cancel() {
     check(&rig, row.status == 'T' && row.files == entries, &format!("Backup: {row:?}\n{}", rig.job_log(backup)));
 
     // Estimate (listing) after the first backup: the FD walks the FileSet
-    // without saving (before it, see expected_defect_d15_…).
+    // without saving (before it, see estimate_before_first_backup_lists_the_tree).
     let estimate = rig.command("estimate job=VBackup listing").unwrap_or_else(|e| panic!("{e}"));
     check(
         &rig,
@@ -110,20 +110,17 @@ fn backup_verify_restore_estimate_cancel() {
     );
 }
 
-/// Erwarteter Defekt D15 (neu, gemessen 19.11.2026 im Gerüst): `estimate`
-/// vor dem ersten Backup eines FileSets antwortet nur mit
-/// `Using Catalog "MyCatalog"` und spricht den FD nicht an. odir sucht den
-/// FileSet-Satz im Katalog nur (`crates/odir/src/commands/estimate.rs`
-/// `estimate_job`, „GetOrCreateFilesetRecord (lookup only)“) und gibt still
-/// auf, wenn er fehlt; Bareos legt ihn an. Das ist die Ursache des Befunds
-/// „Estimate-Pfad nicht erreicht“ im Gutachten §3.
+/// `estimate` vor dem ersten Backup eines FileSets listet den Baum (früher
+/// erwarteter Defekt D15, gemessen 19.11.2026: odir suchte den FileSet-Satz
+/// nur und antwortete still mit `Using Catalog "MyCatalog"`; behoben
+/// 21.11.2026, C-090: Client- und FileSet-Satz werden angelegt wie in
+/// Bareos ua_cmds.cc `GetOrCreateFilesetRecord`).
 #[test]
 #[ignore = "needs bareos-sd and initdb: run with --ignored"]
-#[should_panic(expected = "D15:")]
-fn expected_defect_d15_estimate_before_first_backup_is_silent() {
+fn estimate_before_first_backup_lists_the_tree() {
     let rig = start(39421);
     let estimate = rig.command("estimate job=VBackup listing").unwrap_or_else(|e| panic!("{e}"));
-    check(&rig, estimate.contains("file0.txt"), &format!("D15: estimate vor dem ersten Backup listet nichts:\n{estimate}"));
+    check(&rig, estimate.contains("file0.txt"), &format!("estimate vor dem ersten Backup listet nichts:\n{estimate}"));
 }
 
 /// Erwarteter Defekt D16 (neu, gemessen 19.11.2026 im Gerüst): Ein
