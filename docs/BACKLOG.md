@@ -68,7 +68,7 @@ Was osd von PDC fernhielt (ein File-Device, `Maximum Concurrent Jobs = 5`, Recyc
 | D-1 | ~~osd wertet `SDAddresses` nicht aus (lauschte auf allen IPv4-Schnittstellen)~~ **erledigt** (C-101, gemeinsame Auflösung `bareos-config/listen.rs`) | Abweichung | `osd/daemon/main.rs` |
 | D-2 | ~~oconsole über gRPC: Befehle mit Rückfrage (`delete pool`, Auswahl, Eingabe) scheitern wie im Batch-Modus~~ **erledigt**: odir meldet `CommandResponse.dialog_required`, oconsole führt den Befehl im interaktiven Modus über BNET mit Dialog aus | Lücke | oconsole, odir, proto `cd958c3` |
 | D-3 | PDC: `device/FileStorage.conf` hat `Maximum Concurrent Jobs` doppelt (5 und 1) | Konfiguration (Maintainer) | PDC |
-| D-4 | H340-Test-Ressourcen zurücksetzen (Storage `H340` 10, Job `TestH340` 2), wenn die osd-Tests dort durch sind | Aufräumen | PDC |
+| D-4 | ~~H340-Test-Ressourcen zurücksetzen (Storage `H340` 10, Job `TestH340` 2), wenn die osd-Tests dort durch sind~~ **erledigt** 27.11.2026 (Maintainer: GO): `Maximum Concurrent Jobs` an Storage `H340` und Job `TestH340` per CRUD entfernt (Standard 1); Test-Volume `H340-WaitTest` (180 Jobs, 24,7 GB, Retention 1 Jahr) auf `Used` gesetzt, Daten unverändert | Aufräumen | PDC |
 | D-5 | ~~Addendum zum FD vom 15.10. als überholt kennzeichnen~~ **erledigt** | Doku | hier |
 | D-6 | ~~odir: Worker-Log-Zeilen landeten in der Pipe zum Director (fd der Logdatei nach dem Fork wiederverwendet); ein Restore endete dadurch „Error, 0 Dateien“~~ **erledigt** (`76a4163`, `a145caf`) | Fehler | `job_worker.rs` |
 | D-7 | ~~ofd startete nicht mit `FDAddresses`~~ **erledigt** (C-100) | Fehler | ofd |
