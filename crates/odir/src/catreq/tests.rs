@@ -508,7 +508,8 @@ fn attributes_go_through_the_batch_table() {
         (MsgType::Info, "Insert of attributes batch table with 2 entries start\n".to_string()),
         (MsgType::Info, "Insert of attributes batch table done\n".to_string()),
     ]);
-    let log = batch.log();
+    let mut log = batch.log();
+    assert_eq!(log.remove(0), "SHOW server_encoding");
     assert!(log[0].starts_with("CREATE TEMPORARY TABLE batch (FileIndex int,JobId int,Path varchar,"));
     assert_eq!(log[1], "INSERT INTO batch VALUES (1,42,'/etc/','hosts','P0A CQOE IGk B A A A Ew BAA I BoX BoX BoX A A C',\
 '1B2M2Y8AsgTpgAmY7PhCfg',0,0,0),(2,42,'/etc/','','P0A BAA IH4 C A A A BAA BAA BoX BoX BoX A A C','0',0,0,0)");
@@ -518,6 +519,23 @@ fn attributes_go_through_the_batch_table() {
     assert!(log[5].starts_with("INSERT INTO File (FileIndex, JobId, PathId, Name, LStat, MD5, DeltaSeq, Fhinfo, Fhnode) SELECT"));
     assert_eq!(log[6], "DROP TABLE IF EXISTS batch");
     assert!(catalog.log().is_empty());
+}
+
+/// A name that is not UTF-8 goes into a `SQL_ASCII` catalog as its bytes (C-047), elsewhere as U+FFFD.
+#[test]
+fn a_latin1_name_goes_in_as_its_bytes() {
+    for (encoding, expected) in [("SQL_ASCII", r"(1,42,'/tmp/',E'caf\xe9.txt','P0A','0',0,0,0)"),
+        ("UTF8", "(1,42,'/tmp/','caf\u{fffd}.txt','P0A','0',0,0,0)")] {
+        let batch = MockDb::new(move |sql| (sql == "SHOW server_encoding").then(|| Ok(vec![row(&[encoding])])));
+        let opener_db = batch.clone();
+        let opener = move || Some(Box::new(opener_db.clone()) as Box<dyn Db + Send>);
+        let catalog = MockDb::new(|_| None);
+        let mut job = CatReqJob::new(context());
+        job.dispatch(Some(&catalog), &opener, &upd_cat(1, STREAM_UNIX_ATTRIBUTES, b"1 3 /tmp/caf\xe9.txt\0P0A\0\0"));
+        job.end_of_job(Some(&catalog), &opener);
+        let insert = batch.log().into_iter().find(|s| s.starts_with("INSERT INTO batch")).unwrap();
+        assert_eq!(insert, format!("INSERT INTO batch VALUES {expected}"), "{encoding}");
+    }
 }
 
 #[test]

@@ -49,6 +49,7 @@ pub mod label;
 pub mod lstat;
 pub mod msg;
 pub mod posix_regex;
+pub mod raw_text;
 pub mod record;
 #[cfg_attr(doc, aquamarine::aquamarine)]
 /// Job-Kommando des Directors an den Storage Daemon.

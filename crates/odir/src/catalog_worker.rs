@@ -437,6 +437,7 @@ pub fn spawn_catalog_worker(
                         let target = detect_into.clone();
                         Box::pin(async move {
                             server_time_zone(conn).await;
+                            sql_ascii_client(conn).await;
                             let capability = detect_ovfs(conn).await;
                             record_ovfs(&target, capability, "connect");
                             Ok(())
@@ -707,7 +708,7 @@ fn text_table(rows: &[sqlx::postgres::PgRow]) -> SqlTable {
     }
     for row in rows {
         let values = (0..table.columns.len())
-            .map(|i| row.try_get_unchecked::<Option<String>, _>(i).ok().flatten())
+            .map(|i| text_cell(row, i))
             .collect();
         table.rows.push(values);
     }
@@ -957,6 +958,31 @@ async fn server_time_zone(conn: &mut sqlx::PgConnection) {
             warn!("catalog: {sql}: {e}");
         }
     }
+}
+
+/// In a `SQL_ASCII` catalog (the one Bareos creates and requires) the
+/// connection uses `client_encoding` `SQL_ASCII` like bareos-dir
+/// (cats/postgresql.cc:281): file names are passed as the bytes of the file
+/// system. With `UTF8` the server refuses every row with a name that is not
+/// UTF-8 ("invalid byte sequence"). C-047.
+async fn sql_ascii_client(conn: &mut sqlx::PgConnection) {
+    let encoding: Option<String> = sqlx::query_scalar("SHOW server_encoding").fetch_one(&mut *conn).await.ok();
+    if encoding.as_deref() == Some("SQL_ASCII") {
+        if let Err(e) = sqlx::query("SET client_encoding TO 'SQL_ASCII'").execute(&mut *conn).await {
+            warn!("catalog: SET client_encoding TO 'SQL_ASCII': {e}");
+        }
+    }
+}
+
+/// A text-format value as text; bytes that are not UTF-8 are kept
+/// ([`bareos_format::raw_text`]). None for NULL.
+fn text_cell(row: &sqlx::postgres::PgRow, ordinal: usize) -> Option<String> {
+    use sqlx::{Row, ValueRef};
+    let raw = row.try_get_raw(ordinal).ok()?;
+    if raw.is_null() {
+        return None;
+    }
+    raw.as_bytes().ok().map(|bytes| bareos_format::raw_text::decode(bytes).into_owned())
 }
 
 /// Inline fallback when SP create_job_record is not yet installed.

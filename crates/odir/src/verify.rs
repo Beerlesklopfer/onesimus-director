@@ -24,6 +24,7 @@ use std::sync::Mutex;
 
 use bareos_bnet::{BnetMessage, BnetSignal, BnetStream};
 use bareos_bnet::AnyStream;
+use bareos_format::raw_text;
 use serde::{Deserialize, Serialize};
 
 use crate::catalog_worker::CatalogHandle;
@@ -522,15 +523,16 @@ fn stream_to_ascii(stream: i64) -> String {
     }
 }
 
-/// SplitPathAndFile(): everything up to the last '/' is the path.
+/// SplitPathAndFile(): everything up to the last '/' is the path. The bytes
+/// are kept ([`bareos_format::raw_text`]): the catalog has them (C-047).
 fn split_path(fname: &[u8]) -> (String, String) {
     let split = fname.iter().rposition(|c| *c == b'/').map(|i| i + 1).unwrap_or(0);
-    (String::from_utf8_lossy(&fname[..split]).into_owned(), String::from_utf8_lossy(&fname[split..]).into_owned())
+    (raw_text::decode(&fname[..split]).into_owned(), raw_text::decode(&fname[split..]).into_owned())
 }
 
 /// GetPathRecord(): 0 when the path is not in the catalog.
 fn path_id(db: &dyn Db, path: &str) -> String {
-    db.rows(&format!("SELECT PathId FROM Path WHERE Path='{}'", esc(path))).ok()
+    db.rows(&format!("SELECT PathId FROM Path WHERE Path={}", raw_text::sql_literal(path))).ok()
         .and_then(|t| t.rows.into_iter().next()).and_then(|r| r.into_iter().next().flatten())
         .unwrap_or_else(|| "0".into())
 }
@@ -542,14 +544,14 @@ fn file_record(db: &dyn Db, s: &Session, fname: &[u8], file_index: i64) -> Optio
     let sql = match s.level {
         L_VERIFY_DISK_TO_CATALOG => format!(
             "SELECT FileId, LStat, MD5, Fhinfo, Fhnode FROM File,Job WHERE File.JobId=Job.JobId AND File.PathId={path_id} AND \
-             File.Name='{}' AND Job.Type='B' AND Job.JobStatus IN ('T','W') AND ClientId={} ORDER BY StartTime DESC LIMIT 1",
-            esc(&name), s.prev_client_id),
+             File.Name={} AND Job.Type='B' AND Job.JobStatus IN ('T','W') AND ClientId={} ORDER BY StartTime DESC LIMIT 1",
+            raw_text::sql_literal(&name), s.prev_client_id),
         L_VERIFY_VOLUME_TO_CATALOG => format!(
             "SELECT FileId, LStat, MD5, Fhinfo, Fhnode FROM File WHERE File.JobId={} AND File.PathId={path_id} AND \
-             File.Name='{}' AND File.FileIndex={}", s.prev_job_id, esc(&name), file_index as u32),
+             File.Name={} AND File.FileIndex={}", s.prev_job_id, raw_text::sql_literal(&name), file_index as u32),
         _ => format!(
             "SELECT FileId, LStat, MD5, Fhinfo, Fhnode FROM File WHERE File.JobId={} AND File.PathId={path_id} AND \
-             File.Name='{}'", s.prev_job_id, esc(&name)),
+             File.Name={}", s.prev_job_id, raw_text::sql_literal(&name)),
     };
     let row = db.rows(&sql).ok()?.rows.into_iter().next()?;
     let cell = |i: usize| row.get(i).cloned().flatten().unwrap_or_default();
@@ -650,13 +652,13 @@ fn create_file_record(db: &dyn Db, job_id: u32, ar: &CachedAttr) -> Result<(), S
     let (path, name) = split_path(&ar.fname);
     let mut id = path_id(db, &path);
     if id == "0" {
-        let sql = format!("INSERT INTO Path (Path) VALUES ('{}') RETURNING PathId", esc(&path));
+        let sql = format!("INSERT INTO Path (Path) VALUES ({}) RETURNING PathId", raw_text::sql_literal(&path));
         id = db.rows(&sql).map_err(|e| format!("Create db Path record {sql} failed. ERR={e}\n"))?
             .rows.into_iter().next().and_then(|r| r.into_iter().next().flatten()).unwrap_or_default();
     }
     let digest = ar.digest.as_deref().filter(|d| !d.is_empty()).unwrap_or("0");
     let sql = format!("INSERT INTO File (FileIndex,JobId,PathId,Name,LStat,MD5,DeltaSeq,Fhinfo,Fhnode) \
-        VALUES ({},{job_id},{id},'{}','{}','{}',0,0,0)", ar.file_index as u32, esc(&name),
+        VALUES ({},{job_id},{id},{},'{}','{}',0,0,0)", ar.file_index as u32, raw_text::sql_literal(&name),
         String::from_utf8_lossy(&ar.attr), digest);
     db.exec(&sql).map(|_| ()).map_err(|e| format!("Create db File record {sql} failed. ERR={e}"))
 }

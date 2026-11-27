@@ -2124,6 +2124,7 @@ dependencies = [
  "axum 0.8.9",
  "bareos-bnet",
  "bareos-config",
+ "bareos-format",
  "base64 0.22.1",
  "bytes",
  "clap",

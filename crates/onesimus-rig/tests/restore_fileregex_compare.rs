@@ -5,8 +5,9 @@
 //! bareos-dir sends every FileIndex of the job with a FileRegex line and lets the SD filter: it expects
 //! all files (13) and ends "with warnings" (File count mismatch: expected=13 , restored=1). odir looks
 //! the matching files up in the catalog on purpose (J-16, the SD's filter can pass data records of a
-//! skipped file): it expects and restores 1 and ends OK. Where the catalog has no match (a name that is
-//! not UTF-8), odir sends the job like the original and expects all files as well.
+//! skipped file): it expects and restores 1 and ends OK. Where the catalog has no match, odir sends the
+//! job like the original and expects all files as well. (A name that is not UTF-8 was such a case until
+//! C-047: odir stored U+FFFD in the catalog; now it stores the bytes and finds the file like any other.)
 //!
 //! Needs `/usr/sbin/bareos-dir`. Start: `cargo test -p onesimus-rig --test restore_fileregex_compare -- --ignored --nocapture`.
 
@@ -53,12 +54,12 @@ fn fileregex_restore_expects_the_matching_file_where_the_original_expects_all() 
     assert_eq!(onesimus, ('T', Vec::new()));
 }
 
-/// No catalog match (the Latin-1 name): odir sends the job like the original and reports the same.
+/// No catalog match: odir sends the job like the original and reports the same.
 #[test]
 #[ignore = "needs bareos-dir, bareos-sd and initdb: run with --ignored --nocapture"]
 fn fileregex_without_catalog_match_reports_like_the_original() {
-    let original = run(41141, Some(PathBuf::from("/usr/sbin/bareos-dir")), "/caf.\\.txt$");
-    let onesimus = run(41161, None, "/caf.\\.txt$");
+    let original = run(41141, Some(PathBuf::from("/usr/sbin/bareos-dir")), "/no-such-file\\.txt$");
+    let onesimus = run(41161, None, "/no-such-file\\.txt$");
     println!("bareos-dir: {original:?}\nodir:       {onesimus:?}");
     assert_eq!(onesimus, original);
 }

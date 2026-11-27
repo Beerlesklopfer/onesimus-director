@@ -898,8 +898,9 @@ fn job_record(rx: &Rx, jobid: u32) -> Result<JobRecord, String> {
 }
 
 /// SQL string literal content (PQescapeStringConn).
+/// Raw bytes of file names are spliced in ([`bareos_format::raw_text::sql_escape`]).
 fn escape(text: &str) -> String {
-    text.replace('\'', "''")
+    bareos_format::raw_text::sql_escape(text).into_owned()
 }
 
 /// StripTrailingJunk(): trailing newlines, carriage returns and blanks.
@@ -1130,8 +1131,8 @@ fn add_matching_findex(rx: &mut Rx, regex: &str) -> bool {
         return false;
     }
     let sql = format!("SELECT File.JobId, File.FileIndex FROM File JOIN Path USING (PathId) \
-        WHERE File.JobId IN ({}) AND Path.Path||File.Name ~ '{}' ORDER BY File.JobId, File.FileIndex",
-        unpurged.iter().map(|j| j.as_str()).collect::<Vec<_>>().join(","), regex.replace('\'', "''"));
+        WHERE File.JobId IN ({}) AND Path.Path||File.Name ~ {} ORDER BY File.JobId, File.FileIndex",
+        unpurged.iter().map(|j| j.as_str()).collect::<Vec<_>>().join(","), bareos_format::raw_text::sql_literal(regex));
     let Ok(table) = rx.db.rows(&sql) else { return false };
     if table.rows.is_empty() && purged.is_empty() {
         return false;

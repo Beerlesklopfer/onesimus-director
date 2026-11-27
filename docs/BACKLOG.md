@@ -88,7 +88,7 @@ Was osd von PDC fernhielt (ein File-Device, `Maximum Concurrent Jobs = 5`, Recyc
 | `label`, `relabel` | ~~Option `encrypt` erzeugt noch keinen Volume-Schlüssel~~ erledigt 24.11.2026 (`label.rs` `generate_key`, auch bei `barcodes`) | [C-084](COMPATIBILITY-LOG.md), S-08 |
 | `update` | ~~`update jobid=… starttime=` fehlt~~ umgesetzt (`update_db.rs`); S-40 geprüft (Original meldet denselben Fehler, a82b1ee) | Hinweis [C-059](COMPATIBILITY-LOG.md) |
 | `list`, `llist` | ~~`nextvolume` nach frischem Label~~ geprüft, kein Unterschied (S-41, a82b1ee) | S-41 |
-| `restore` | ~~Nicht-UTF-8-Dateinamen auf SQL_ASCII-Katalogen~~ belegt 24.11.2026: ganzer Job (`backup_verify_restore_estimate_cancel`) und `fileregex=` (`restore_non_utf8.rs`) stellen `caf\xe9.txt` byte-gleich wieder her; offen nur die Anzeige solcher Namen in `ls` des Restore-Baums | [C-047](COMPATIBILITY-LOG.md) |
+| `restore` | ~~Nicht-UTF-8-Dateinamen auf SQL_ASCII-Katalogen~~ belegt 24.11.2026: ganzer Job (`backup_verify_restore_estimate_cancel`) und `fileregex=` (`restore_non_utf8.rs`) stellen `caf\xe9.txt` byte-gleich wieder her; **erledigt 27.11.2026:** `ls`/`mark` im Restore-Baum mit den Bytes (`restore_tree_non_utf8.rs`); dabei C-103 behoben (Katalog speicherte U+FFFD) | [C-047](COMPATIBILITY-LOG.md) |
 | `cancel` | ~~Cancel-Dialog ohne Paritätsfall~~ erledigt 24.11.2026 (`c090`: 15 Fälle gegen das Original, auch mit wartendem Job; Dialog, `job=`, `all`, Bestätigung ja/nein); offen: `*JobCancel*` des Job-Threads ohne Jobnamen-Nummer, Berichtszeilen „Director's comm line to SD dropped“/SD termination status beim Cancel eines laufenden Jobs (Backup-Worker, S-27) | [C-011](COMPATIBILITY-LOG.md), S-26 |
 | Konfigurationsstart | ~~Normaler Start prüft nicht wie `-t`~~ erledigt (cb916f8, Exit 42); Lexer-Position im Log erledigt (24.11.2026, `reload_log.rs`) | [C-057](COMPATIBILITY-LOG.md) |
 
@@ -121,7 +121,7 @@ gRPC-Sitzungsqueue. (`.bvfs_restore`, `.bvfs_cleanup`, `.bvfs_clear_cache yes` u
 | `help` | Originalsyntax, Layout, ACL-Filter | erledigt (Fälle inkl. `parity-limited`, `help configure`) |
 | `run` | Accurate/VirtualFull, FileSet-Änderungen, weitere Optionen | erledigt (C-043, C-058, S-19, S-22, S-23: Accurate, Aufstufung zu VirtualFull, Quotas, Write Bootstrap; geändertes FileSet über die FileSetId der Vorgängersuche in `backup.rs`) |
 | `rerun` | Jobbereiche, Zeitfilter, Mehrfachauswahl | erledigt (C-033; 32 Fälle) |
-| `restore` | Dateiauswahl, Storage-/Client-Overrides, fileregex | erledigt (C-047 Baum/Menü, C-079 regexwhere, S-01, S-14; `c047`-Fälle); Rest Nicht-UTF-8 |
+| `restore` | Dateiauswahl, Storage-/Client-Overrides, fileregex | erledigt (C-047 Baum/Menü, C-079 regexwhere, S-01, S-14; `c047`-Fälle; Nicht-UTF-8 C-103) |
 | `status` | Scheduler/subscriptions/configuration, geplante und beendete Jobs | erledigt (C-014, C-042, C-045, C-048); Rest SD-Teil (C-014) |
 | `.status` | Original-Unterabschnitte | erledigt (C-014, C-048) |
 | `import` | dstslots, volume, scan | erledigt (C-071, `ua_impexp.rs` PerformMoveOperation inkl. `scan`); nur simulierter Autochanger |

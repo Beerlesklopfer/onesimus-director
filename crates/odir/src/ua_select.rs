@@ -40,7 +40,7 @@ pub trait Console {
     fn recv(&mut self) -> Option<String>;
     /// Send raw bytes as one data message (C++ `UA_sock->send()`).
     fn send_bytes(&mut self, data: &[u8]) -> bool {
-        self.send(&String::from_utf8_lossy(data))
+        self.send(&bareos_format::raw_text::decode(data))
     }
 }
 
@@ -60,7 +60,7 @@ impl<S: Read + Write> Console for BnetStream<S> {
     fn recv(&mut self) -> Option<String> {
         loop {
             match BnetStream::recv(self).ok()? {
-                BnetMessage::Data(data) => return Some(String::from_utf8_lossy(&data).into_owned()),
+                BnetMessage::Data(data) => return Some(bareos_format::raw_text::decode_owned(data)),
                 BnetMessage::Signal(BnetSignal::Terminate) => return None,
                 BnetMessage::Signal(_) => continue,
             }

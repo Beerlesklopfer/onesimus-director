@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: AGPL-3.0-only
+// SPDX-License-Identifier: AGPL-3.0-or-later
 // SPDX-FileCopyrightText: 2026 Jörg Bernau <contact@onesimus.io>
 // Included by the build scripts that stamp the build date (odir, daemon-crate).
 

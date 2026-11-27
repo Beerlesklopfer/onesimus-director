@@ -55,8 +55,9 @@ fn column0(db: &dyn Db, sql: &str) -> Result<Vec<String>, String> {
 }
 
 /// C++ EscapeString (PQescapeStringConn, standard_conforming_strings on).
+/// Raw bytes of file names are spliced in ([`bareos_format::raw_text::sql_escape`]).
 fn escape(s: &str) -> String {
-    s.replace('\'', "''")
+    bareos_format::raw_text::sql_escape(s).into_owned()
 }
 
 // --- C++ lib/edit.cc helpers ----------------------------------------------

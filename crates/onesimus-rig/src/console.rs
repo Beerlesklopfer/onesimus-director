@@ -92,6 +92,12 @@ impl Console {
 
     /// Reads data frames until `EOD`, an input signal or the timeout.
     fn read_reply(&mut self) -> Result<String, String> {
+        self.read_reply_bytes().map(|text| String::from_utf8_lossy(&text).into_owned())
+    }
+
+    /// [`Self::read_reply`] as the bytes the Director sent (file names need
+    /// not be UTF-8).
+    fn read_reply_bytes(&mut self) -> Result<Vec<u8>, String> {
         let mut text = Vec::new();
         loop {
             match self.bnet.recv() {
@@ -107,7 +113,7 @@ impl Console {
                 Err(error) => return Err(format!("Konsole: Verbindung beendet: {error}")),
             }
         }
-        Ok(String::from_utf8_lossy(&text).into_owned())
+        Ok(text)
     }
 
     /// Sends `command` and returns the reply text; waits at most `timeout`.
@@ -115,6 +121,13 @@ impl Console {
         self.set_timeout(timeout);
         self.bnet.send_str(command).map_err(|e| format!("Konsole: senden '{command}': {e}"))?;
         self.read_reply()
+    }
+
+    /// [`Self::command`] with the reply as raw bytes.
+    pub fn command_bytes(&mut self, command: &str, timeout: Duration) -> Result<Vec<u8>, String> {
+        self.set_timeout(timeout);
+        self.bnet.send_str(command).map_err(|e| format!("Konsole: senden '{command}': {e}"))?;
+        self.read_reply_bytes()
     }
 }
 

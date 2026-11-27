@@ -105,8 +105,9 @@ fn str_to_int64(s: &[u8]) -> i64 {
 }
 
 /// C++ EscapeString (standard_conforming_strings on).
+/// Raw bytes of file names are spliced in ([`bareos_format::raw_text::sql_escape`]).
 pub(crate) fn esc(s: &str) -> String {
-    s.replace('\'', "''")
+    bareos_format::raw_text::sql_escape(s).into_owned()
 }
 
 fn now() -> i64 {
@@ -833,6 +834,10 @@ struct Batch {
     /// A block of rows could not be sent (`errmsg` says why): the batch
     /// takes no more rows and ends with "Batch end" (M_FATAL). J-1.
     failed: bool,
+    /// The catalog is `SQL_ASCII` (as Bareos requires it): names go in as
+    /// the bytes the FD sent. Any other encoding would reject bytes that
+    /// are not UTF-8, so they are replaced there (U+FFFD).
+    raw_names: bool,
 }
 
 impl Batch {
@@ -1223,7 +1228,11 @@ VALUES ('{}','{}','\\x{}',{},{},{},{},{},{},{})",
         if !self.batch_started {
             if self.batch.is_none() {
                 match open_batch() {
-                    Some(db) => self.batch = Some(Batch { db, errmsg: String::new(), changes: 0, pending: Vec::new(), failed: false }),
+                    Some(db) => {
+                        let raw_names = db.rows("SHOW server_encoding").ok()
+                            .is_some_and(|t| t.rows.first().and_then(|r| r.first().cloned().flatten()).as_deref() == Some("SQL_ASCII"));
+                        self.batch = Some(Batch { db, errmsg: String::new(), changes: 0, pending: Vec::new(), failed: false, raw_names });
+                    }
                     None => {
                         self.errmsg = "Could not init database batch connection\n".into();
                         msgs.push((MsgType::Fatal, self.errmsg.clone()));
@@ -1247,11 +1256,19 @@ Name varchar,LStat varchar,Md5 varchar,DeltaSeq smallint,Fhinfo NUMERIC(20),Fhno
         if path.is_empty() {
             msgs.push((MsgType::Error, format!("Path length is zero. File={}\n", String::from_utf8_lossy(name))));
         }
+        let batch = self.batch.as_mut().expect("batch connection");
+        let raw_names = batch.raw_names;
+        // Path and name as the bytes of the file system (sql_create.cc
+        // SqlBatchInsertFileTable copies them unchanged), C-047.
+        let name_literal = |b: &[u8]| if raw_names {
+            bareos_format::raw_text::sql_literal(&bareos_format::raw_text::decode(b))
+        } else {
+            format!("'{}'", esc(&String::from_utf8_lossy(b)))
+        };
         let text = |b: &[u8]| esc(&String::from_utf8_lossy(b));
         let digest = ar.digest.as_deref().filter(|d| !d.is_empty()).unwrap_or("0");
-        let batch = self.batch.as_mut().expect("batch connection");
-        batch.pending.push(format!("({},{},'{}','{}','{}','{}',{},0,0)", ar.file_index, ar.job_id as i64,
-            text(path), text(name), text(&ar.attr), esc(digest), ar.delta_seq));
+        batch.pending.push(format!("({},{},{},{},'{}','{}',{},0,0)", ar.file_index, ar.job_id as i64,
+            name_literal(path), name_literal(name), text(&ar.attr), esc(digest), ar.delta_seq));
         batch.changes += 1;
         if batch.pending.len() >= BATCH_CHUNK {
             if let Err(error) = batch.flush() {

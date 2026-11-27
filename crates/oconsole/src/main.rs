@@ -711,8 +711,7 @@ fn execute_single_command<S: std::io::Read + std::io::Write>(bnet: &mut BnetStre
     loop {
         match bnet.recv() {
             Ok(BnetMessage::Data(data)) => {
-                let text = String::from_utf8_lossy(&data);
-                print!("{text}");
+                let _ = io::stdout().write_all(&data);
             }
             Ok(BnetMessage::Signal(BnetSignal::Eod)) => break,
             Ok(BnetMessage::Signal(BnetSignal::MainPrompt)) => break,
@@ -802,7 +801,7 @@ impl<S: std::io::Read + std::io::Write + Send> DirectorConn for BnetConn<S> {
     fn recv_msg(&mut self) -> Option<RecvResult> {
         match self.bnet.recv() {
             Ok(BnetMessage::Data(data)) => {
-                Some(RecvResult::Data(String::from_utf8_lossy(&data).to_string()))
+                Some(RecvResult::Data(bareos_format::raw_text::decode_owned(data)))
             }
             Ok(BnetMessage::Signal(sig)) => Some(RecvResult::Signal(sig)),
             Err(BnetError::HardEof) | Err(BnetError::Terminated) => Some(RecvResult::Closed),
@@ -1179,8 +1178,16 @@ fn print_reply(text: &str, mode: ApiMode) {
     use std::io::IsTerminal;
     let coloured = reply_coloured(mode, io::stdout().is_terminal(), color::enabled());
     for line in text.lines() {
-        println!("{}", reply_line(line, coloured));
+        print_raw(&format!("{}\n", reply_line(line, coloured)));
     }
+}
+
+/// Write Director text to stdout; raw bytes in it (file names that are not
+/// UTF-8, [`bareos_format::raw_text`]) go out as the bytes, like bconsole
+/// shows them.
+fn print_raw(text: &str) {
+    let mut out = io::stdout().lock();
+    let _ = out.write_all(&bareos_format::raw_text::encode(text));
 }
 
 /// API 1 input dialogs of the Director (C-076). DoPrompt() (ua_select.cc)
@@ -1513,7 +1520,7 @@ fn run_grpc_mode(cli: &EffCli) {
     let mut run = |cmd: &str| -> bool {
         match rt.block_on(session.execute(cmd, ResponseFormat::Text)) {
             Ok(out) => {
-                print!("{}", out.text);
+                print_raw(&out.text);
                 if !out.error.is_empty() {
                     eprintln!("{}", out.error.trim_end());
                 }

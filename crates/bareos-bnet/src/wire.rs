@@ -125,9 +125,11 @@ impl<S: Read + Write> BnetStream<S> {
         }
     }
 
-    /// Send a UTF-8 string as data message.
+    /// Send a string as data message. Raw bytes carried in it (file names
+    /// that are not UTF-8, [`bareos_format::raw_text`]) go out as the bytes
+    /// themselves, like Bareos sends them.
     pub fn send_str(&mut self, s: &str) -> Result<(), BnetError> {
-        self.send(s.as_bytes())
+        self.send(&bareos_format::raw_text::encode(s))
     }
 
     /// Receive a data message as UTF-8 string.

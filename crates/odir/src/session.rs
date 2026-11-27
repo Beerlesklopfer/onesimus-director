@@ -198,8 +198,8 @@ pub fn handle_console_session_with<S: Read + Write>(
         // Receive command
         let msg = match bnet.recv() {
             // C++ works on raw bytes; skipping invalid UTF-8 would leave the
-            // console without a reply.
-            Ok(BnetMessage::Data(data)) => String::from_utf8_lossy(&data).into_owned(),
+            // console without a reply; the bytes are kept (raw_text, C-047).
+            Ok(BnetMessage::Data(data)) => bareos_format::raw_text::decode_owned(data),
             Ok(BnetMessage::Signal(BnetSignal::Terminate)) => {
                 debug!("session {session_id}: client sent TERMINATE");
                 break;

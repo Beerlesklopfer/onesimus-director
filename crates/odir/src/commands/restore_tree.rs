@@ -22,6 +22,7 @@ use std::collections::HashMap;
 use std::ffi::CString;
 
 use bareos_bnet::BnetSignal;
+use bareos_format::raw_text;
 
 use crate::commands::bvfs::{decode_stat, gid_name, uid_name, Stat};
 use crate::sql_list::add_commas;
@@ -97,15 +98,25 @@ impl Node {
     }
 }
 
-/// NodeCompare (lib/tree.cc): first byte as (signed) char, then strcmp.
+/// NodeCompare (lib/tree.cc): first byte as (signed) char, then strcmp, on
+/// the bytes of the names (a name that is not UTF-8 carries raw bytes,
+/// [`bareos_format::raw_text`]).
 fn node_compare(a: &str, b: &str) -> Ordering {
-    let first = |s: &str| s.as_bytes().first().map_or(0, |&c| c as i8);
-    first(a).cmp(&first(b)).then_with(|| a.as_bytes().cmp(b.as_bytes()))
+    // Raw bytes are characters starting with 0xF4 in UTF-8.
+    let (a, b) = if a.as_bytes().contains(&0xF4) || b.as_bytes().contains(&0xF4) {
+        (raw_text::encode(a), raw_text::encode(b))
+    } else {
+        (a.as_bytes().into(), b.as_bytes().into())
+    };
+    let first = |s: &[u8]| s.first().map_or(0, |&c| c as i8);
+    first(&a).cmp(&first(&b)).then_with(|| a.cmp(&b))
 }
 
-/// fnmatch(pattern, string, 0)
+/// fnmatch(pattern, string, 0) on the bytes.
 fn fnmatch(pattern: &str, name: &str) -> bool {
-    let (Ok(pattern), Ok(name)) = (CString::new(pattern), CString::new(name)) else { return false };
+    let (Ok(pattern), Ok(name)) = (CString::new(raw_text::encode(pattern)), CString::new(raw_text::encode(name))) else {
+        return false;
+    };
     // SAFETY: both are valid NUL terminated strings.
     unsafe { libc::fnmatch(pattern.as_ptr(), name.as_ptr(), 0) == 0 }
 }
@@ -895,7 +906,7 @@ impl FileAttributes {
         // SplitPathAndFile(): everything after the last / is the file name.
         let split = filename.rfind('/').map_or(0, |p| p + 1);
         let (path, fname) = filename.split_at(split);
-        let escape = |s: &str| s.replace('\'', "''");
+        let escape = |s: &str| raw_text::sql_escape(s).into_owned();
         let path_id = match &self.cached_path {
             Some((cached, id)) if cached == path => *id,
             _ => {
