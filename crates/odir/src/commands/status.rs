@@ -335,7 +335,7 @@ fn list_scheduled_jobs(ua: &mut Ua, ast: &CommandAst, ctx: &ExecContext) {
                     runtime,
                     run_pool: run.pool.clone(),
                     pool: run.pool.clone().unwrap_or_else(|| job.pool.clone()),
-                    store: run.storage.clone().unwrap_or_else(|| job.storage.clone()),
+                    store: job_storage(&cfg, job, run),
                 });
             }
         }
@@ -384,6 +384,22 @@ fn list_scheduled_jobs(ua: &mut Ua, ast: &CommandAst, ctx: &ExecContext) {
     if ua.human() {
         ua.send("====\n");
     }
+}
+
+/// job.cc GetJobStorage() for a scheduled run: the storage of the Run's
+/// Pool, the Run's Storage, the storage of the Job's Pool, the Job's
+/// Storage (the first of a list each).
+fn job_storage(cfg: &crate::DirectorConfig, job: &bareos_config::resources::JobResource,
+               run: &bareos_config::resources::RunDirective) -> String {
+    let pool_storage = |pool: &str| cfg.raw.iter()
+        .find(|r| r.norm_type() == "pool" && r.name() == Some(pool))
+        .and_then(|r| r.directives.iter().rev().find(|d| d.norm_key() == "storage").and_then(|d| d.first()))
+        .map(|s| s.split(',').next().unwrap_or("").trim().trim_matches('"').to_string())
+        .filter(|s| !s.is_empty());
+    run.pool.as_deref().and_then(pool_storage)
+        .or_else(|| run.storage.clone())
+        .or_else(|| pool_storage(&job.pool))
+        .unwrap_or_else(|| job.storage.clone())
 }
 
 /// Local time of a catalog timestamp ("YYYY-MM-DD HH:MM:SS"), C++ StrToUtime.
@@ -1790,6 +1806,29 @@ mod tests {
         let summary = " accounting_mode: volume-based (1 volume-based units >= 1 count-based units)\n            used: 1\n      configured: 0\n       remaining: -1\n\n";
         assert_eq!(compute_hash(&format!("SECRETSALT\n2026-10-15 20:47:52\n{summary}")),
                    "{SHA256}7269ae9256a0a11a1a2e71393e4f81388a697cf018b329d841d79f2e4cfc142");
+    }
+
+    #[test]
+    fn scheduled_storage_like_get_job_storage() {
+        let config = crate::DirectorConfig::from_str("Director { Name = dir }\n\
+            Storage { Name = JobSt; Address = a; Password = p; Device = d; Media Type = m }\n\
+            Storage { Name = PoolSt; Address = a; Password = p; Device = d; Media Type = m }\n\
+            Storage { Name = RunSt; Address = a; Password = p; Device = d; Media Type = m }\n\
+            Storage { Name = RunPoolSt; Address = a; Password = p; Device = d; Media Type = m }\n\
+            Pool { Name = WithStorage; Storage = PoolSt, JobSt }\n\
+            Pool { Name = Plain }\n\
+            Pool { Name = RunPool; Storage = RunPoolSt }\n\
+            Schedule { Name = s; Run = daily at 1:00; Run = Storage=RunSt daily at 2:00; Run = Pool=RunPool Storage=RunSt daily at 3:00 }\n").unwrap();
+        let job = |pool: &str, storage: &str| bareos_config::resources::JobResource {
+            pool: pool.into(), storage: storage.into(), ..Default::default() };
+        let runs = &config.schedules[0].runs;
+        // the Job's Pool storage before the Job's Storage (Onesimus-Repos on PDC had only the Pool's)
+        assert_eq!(job_storage(&config, &job("WithStorage", ""), &runs[0]), "PoolSt");
+        assert_eq!(job_storage(&config, &job("WithStorage", "JobSt"), &runs[0]), "PoolSt");
+        assert_eq!(job_storage(&config, &job("Plain", "JobSt"), &runs[0]), "JobSt");
+        // Run Storage before the Job's Pool; the Run Pool's storage before both
+        assert_eq!(job_storage(&config, &job("WithStorage", "JobSt"), &runs[1]), "RunSt");
+        assert_eq!(job_storage(&config, &job("WithStorage", "JobSt"), &runs[2]), "RunPoolSt");
     }
 
     #[test]
