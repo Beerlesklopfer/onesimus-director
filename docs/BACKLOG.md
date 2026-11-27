@@ -75,7 +75,7 @@ Was osd von PDC fernhielt (ein File-Device, `Maximum Concurrent Jobs = 5`, Recyc
 | D-8 | ~~`configure update` schrieb `VolumeRetention = "3 months"` (bareos-dir lehnt das ab, `BackupCatalog` scheiterte)~~ **erledigt** (C-102) | Fehler | `configure.rs` |
 | D-9 | ~~PDC: `pool/H340.conf` auf `VolumeRetention = 3 months` (ohne Anführungszeichen) ändern~~ **erledigt** 27.11.2026 (Maintainer), `BackupCatalog` 1771 OK | Konfiguration (Maintainer) | PDC |
 | D-10 | odir lädt Zeiträume/Größen in Anführungszeichen, bareos-dir nicht (C-102 Teil 2): ablehnen wie das Original, sobald D-9 erledigt ist? | Abweichung, Entscheidung | `bareos-config` parser, `config_check.rs` |
-| D-11 | PDC: `Vol-0005` fehlt in `/bareos/backup`, ist im Katalog aber noch verzeichnet; jeder Kopierjob von `Copy-Default`, der es liest, wartet eine Stunde und wird abgebrochen (26.11.: 9 Stück) | Betrieb (Maintainer) | PDC |
+| D-11 | ~~PDC: `Vol-0005` fehlt in `/bareos/backup`, ist im Katalog aber noch verzeichnet; jeder Kopierjob von `Copy-Default`, der es liest, wartet eine Stunde und wird abgebrochen~~ **erledigt** 27.11.2026: 8 Jobs (282–337, nur auf diesem Volume, keine Kopien) vom Maintainer gepurgt, Volume `Purged` | Betrieb (Maintainer) | PDC |
 
 ### Offene Reste an Befehlen
 
