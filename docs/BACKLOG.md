@@ -76,6 +76,7 @@ Was osd von PDC fernhielt (ein File-Device, `Maximum Concurrent Jobs = 5`, Recyc
 | D-9 | ~~PDC: `pool/H340.conf` auf `VolumeRetention = 3 months` (ohne Anführungszeichen) ändern~~ **erledigt** 27.11.2026 (Maintainer), `BackupCatalog` 1771 OK | Konfiguration (Maintainer) | PDC |
 | D-10 | ~~odir lädt Zeiträume/Größen in Anführungszeichen, bareos-dir nicht~~ **erledigt** 27.11.2026 (Entscheidung Maintainer: ablehnen wie das Original; C-102) | Abweichung | `config_check.rs` |
 | D-11 | ~~PDC: `Vol-0005` fehlt in `/bareos/backup`, ist im Katalog aber noch verzeichnet; jeder Kopierjob von `Copy-Default`, der es liest, wartet eine Stunde und wird abgebrochen~~ **erledigt** 27.11.2026: 8 Jobs (282–337, nur auf diesem Volume, keine Kopien) vom Maintainer gepurgt, Volume `Purged` | Betrieb (Maintainer) | PDC |
+| D-12 | ~~oconsole über gRPC: `purge volume=` und `delete volume=` liefen ohne Rückfrage (odir beantwortete sie ohne Konsole mit ja wie für eine Batch-Konsole; D-2 griff nicht)~~ **erledigt** 27.11.2026: ohne Konsole und ohne `yes` lehnt odir die Rückfragen von `purge`, `delete volume`, `delete jobid=a-b` (>25) und `cancel` ab und meldet `dialog_required`, oconsole fragt im Dialog; Batch- und interne Befehlszeilen (RunScript `Console =`) wie das Original | Fehler | `ua_select.rs` `needs_dialog_for_confirmation` |
 
 ### Offene Reste an Befehlen
 

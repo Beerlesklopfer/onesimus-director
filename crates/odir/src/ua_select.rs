@@ -193,6 +193,20 @@ impl<'a> Ua<'a> {
         (self.ctx.api_mode == ApiMode::Json && !self.dialog) || !has_console()
     }
 
+    /// A gRPC command line without a console and without `yes` where the original would ask
+    /// "… (yes/no)" in a console: marked dialog_required and refused, so that oconsole asks the
+    /// question in a dialog (BNET) instead of odir answering it with yes as for a batch console
+    /// (`purge volume=` and `delete volume=` ran without a question on PDC, 27.11.2026). Batch and
+    /// internal command lines (RunScript `Console =`) keep the original's answer.
+    pub fn needs_dialog_for_confirmation(&self, ast: &CommandAst) -> bool {
+        let needs = ast.source == crate::command_ast::CommandSource::Grpc && !self.has_console()
+            && find_arg(ast, "yes").is_none();
+        if needs {
+            mark_dialog_wanted();
+        }
+        needs
+    }
+
     /// True when a console is attached (C++ `ua->UA_sock != nullptr`).
     #[allow(dead_code)]
     pub fn has_console(&self) -> bool {
@@ -403,6 +417,9 @@ impl<'a> Ua<'a> {
     pub fn get_confirmation(&mut self, ast: &CommandAst, prompt: &str, fallback: bool) -> bool {
         if find_arg(ast, "yes").is_some() {
             return true;
+        }
+        if self.needs_dialog_for_confirmation(ast) {
+            return false;
         }
         if !self.has_console() {
             // only a refusal: with `fallback` the command goes on, and running it again in a dialog
@@ -1317,6 +1334,22 @@ Pool { Name=Full }
         let (value, console) = scripted(&["yes"], || Ua::new(&api).get_confirmation(&plain, "Sure? ", true));
         assert!(!value);
         assert!(console.events.is_empty());
+        // gRPC without a console: refused and marked for a dialog, even where a batch console
+        // goes on (purge volume=, PDC 27.11.2026); with yes it goes on
+        let mut grpc = crate::session::parse_cli_command("purge volume=V");
+        grpc.source = crate::command_ast::CommandSource::Grpc;
+        reset_dialog_wanted();
+        assert!(!Ua::new(&ctx).get_confirmation(&grpc, "Sure? ", true));
+        assert!(dialog_wanted());
+        reset_dialog_wanted();
+        let mut grpc_yes = crate::session::parse_cli_command("purge volume=V yes");
+        grpc_yes.source = crate::command_ast::CommandSource::Grpc;
+        assert!(Ua::new(&ctx).get_confirmation(&grpc_yes, "Sure? ", true));
+        assert!(!dialog_wanted());
+        // in a dialog (console attached) the question is asked
+        let (value, console) = scripted(&["no"], || Ua::new(&ctx).get_confirmation(&grpc, "Sure? ", true));
+        assert!(!value);
+        assert_eq!(console.transcript(), "Sure? no\n");
     }
 
     #[test]

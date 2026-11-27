@@ -617,6 +617,11 @@ fn delete_dialog(ua: &mut crate::ua_select::Ua, ast: &CommandAst,
             let Some(media) = ua_select::select_media_dbr(ua, ast) else { return true };
             ua.warning_msg(format!("\nThis command will delete volume {}\n\
                 and all Jobs saved on that volume from the Catalog\n", media.volume_name));
+            if ua.needs_dialog_for_confirmation(ast) {
+                ua.error_msg(format!("Deleting Volume \"{}\" needs a confirmation: give yes or run it in a dialog.\n",
+                    media.volume_name));
+                return true;
+            }
             if !ua.batch() && find_arg(ast, "yes").is_none() {
                 let question = format!("Are you sure you want to delete Volume \"{}\"? (yes/no): ", media.volume_name);
                 if ua.get_yesno(&question) != Some(true) {
@@ -669,6 +674,11 @@ fn delete_dialog(ua: &mut crate::ua_select::Ua, ast: &CommandAst,
                             crate::commands::job::str_to_int64(high) as u64);
                         if last <= first {
                             ua.error_msg(format!("Illegal JobId range {low} - {high} should define increasing JobIds, ignored\n"));
+                            continue;
+                        }
+                        if last - first > 25 && ua.needs_dialog_for_confirmation(ast) {
+                            ua.error_msg(format!("Deleting {} JobIds needs a confirmation: give yes or run it in a dialog.\n",
+                                last - first));
                             continue;
                         }
                         if !ua.batch() && last - first > 25 {

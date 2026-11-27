@@ -198,6 +198,10 @@ pub fn select_jobs(ua: &mut Ua, ast: &CommandAst, active: &[ActiveJob], reason: 
             ua.send_msg("No Jobs selected.\n");
             return None;
         }
+        if ua.needs_dialog_for_confirmation(ast) {
+            ua.send_msg("Cancelling the selected Jobs needs a confirmation: give yes or run it in a dialog.\n");
+            return None;
+        }
         // Only ask when not in batch mode and without "yes" on the cmdline.
         if !ua.batch() && ua_select::find_arg(ast, "yes").is_none()
             && ua.get_yesno("Confirm cancel (yes/no): ") != Some(true) {
