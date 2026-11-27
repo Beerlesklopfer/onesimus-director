@@ -9,9 +9,11 @@
 //! `%d %B %Y`, honouring `SOURCE_DATE_EPOCH` for reproducible builds).
 
 include!("../../scripts/doc/module_tree.rs");
+include!("../../scripts/build/rerun_on_commit.rs");
 
 fn main() {
     write_module_tree();
+    rerun_on_commit();
     println!("cargo:rerun-if-env-changed=SOURCE_DATE_EPOCH");
     let mut cmd = std::process::Command::new("date");
     cmd.env("LC_ALL", "C").arg("-u");

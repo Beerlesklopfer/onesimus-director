@@ -7,7 +7,10 @@
 //! the configure-time BAREOS_PLATFORM / DISTVER), see src/version_strings.rs.
 //! Dates honour SOURCE_DATE_EPOCH for reproducible Debian builds.
 
+include!("../../scripts/build/rerun_on_commit.rs");
+
 fn main() {
+    rerun_on_commit();
     println!("cargo:rerun-if-env-changed=SOURCE_DATE_EPOCH");
     println!("cargo:rerun-if-changed=/etc/os-release");
 
