@@ -2271,6 +2271,7 @@ fn run_restore(ast: &CommandAst, ctx: &ExecContext, job: bareos_config::resource
         job: Some(job.name.clone()),
         storage: value("storage"),
         plugin_options: value("pluginoptions"),
+        sched_time: value("schedtime").and_then(|t| t.parse().ok()),
     })
 }
 

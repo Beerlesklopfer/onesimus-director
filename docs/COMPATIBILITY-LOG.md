@@ -188,8 +188,9 @@ Stand 17.10.2026; nur Punkte, die in einem Eintrag ausdrücklich offen stehen:
   S-19/S-23/S-27/S-28). Der Bericht beim Cancel eines laufenden Backups ist seit 27.11.2026 der des
   Originals (gegen bareos-dir gemessen, Rig `cancel_job_name_number`; D16 behoben);
   `*JobCancel*` des Job-Threads verbraucht seit 27.11.2026 eine
-  Jobnamen-Nummer wie backup.cc:726/restore.cc:433/verify.cc:458 (S-26/S-27; Rest: vor
-  dem Start abgebrochener Restore); passive Clients beim Backup ungeprüft (S-23).
+  Jobnamen-Nummer wie backup.cc:726/restore.cc:433/verify.cc:458 (S-26/S-27, auch
+  ein vor dem Start abgebrochener Restore; `run` eines Restore-Jobs mit `when=` wartet seit
+  27.11.2026 auf seine Startzeit, vorher startete er sofort); passive Clients beim Backup ungeprüft (S-23).
 - C-084 / S-08: erledigt (24.11.2026): `label`/`relabel … encrypt` erzeugt den Schlüssel vor dem Label-Befehl (`Generating new hardware encryption key`), der Befehl an den SD trägt keinen Schlüssel (nach `ua_label.cc` bareos-25); Fehler bei der Erzeugung bricht ab (bei Barcodes: nächstes Volume).
 - C-087 / S-36: MCP-Vollausbau (alle Befehle lokal über stdio, HTTP lesend) offen.
 - S-37: `.profile create/set/delete/assign/unassign` ohne Wirkung (`.profile` ist Alias von `.acl`).

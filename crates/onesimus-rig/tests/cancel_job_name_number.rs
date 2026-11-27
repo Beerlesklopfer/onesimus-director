@@ -107,3 +107,43 @@ fn comparable(log: &str) -> Vec<String> {
     lines.sort();
     lines
 }
+
+/// A backup, a restore queued for 2099 and canceled before it starts, another backup: the step of the job
+/// name numbers from the restore to that backup, and the restore's status.
+fn queued_restore(base: u16, director: Option<PathBuf>) -> (u32, char) {
+    onesimus_rig::build_workspace_binaries().unwrap_or_else(|e| panic!("{e}"));
+    let mut options = RigOptions::new(base);
+    options.dir_program = director;
+    let rig = Rig::start(options).unwrap_or_else(|e| panic!("Gerüst startet nicht: {e}"));
+    let mut console = rig.console().unwrap_or_else(|e| panic!("{e}"));
+    let mut queued = |console: &mut onesimus_rig::console::Console, line: &str| {
+        let reply = console.command(line, STEP).unwrap_or_else(|e| panic!("{e}"));
+        onesimus_rig::console::queued_job_id(&reply).unwrap_or_else(|| panic!("no JobId:\n{reply}"))
+    };
+    let backup = queued(&mut console, "run job=VBackup yes");
+    let row = rig.wait_job(backup, JOB_TIMEOUT).unwrap_or_else(|e| panic!("{e}"));
+    assert_eq!(row.status, 'T', "{row:?}");
+    // `restore` has no when= (bareos-dir: "Unknown keyword: when"); `run` of the Restore job has
+    let restore = queued(&mut console, &format!("run job=VRestore jobid={backup} when=\"2099-01-01 00:00:00\" yes"));
+    std::thread::sleep(Duration::from_secs(2));
+    // a job waiting for its start time is only marked (job.cc CancelJob, JS_WaitStartTime)
+    let reply = console.command(&format!("cancel jobid={restore} yes"), STEP).unwrap_or_else(|e| panic!("{e}"));
+    assert!(reply.contains("marked to be canceled"), "port {base}: {reply:?}");
+    let row = rig.wait_job(restore, JOB_TIMEOUT).unwrap_or_else(|e| panic!("{e}"));
+    let after = queued(&mut console, "run job=VBackup yes");
+    let done = rig.wait_job(after, JOB_TIMEOUT).unwrap_or_else(|e| panic!("{e}"));
+    assert_eq!(done.status, 'T', "{done:?}");
+    (step(number(&rig, restore), number(&rig, after)), row.status)
+}
+
+/// A restore canceled before it starts ends with NativeRestoreCleanup(JS_Canceled) (job.cc), which
+/// cancels the SD job through a `*JobCancel*` control JCR: one job name number, as with bareos-dir.
+#[test]
+#[ignore = "needs bareos-dir, bareos-sd and initdb: run with --ignored --nocapture"]
+fn a_restore_canceled_before_its_start_takes_a_job_name_number() {
+    let original = queued_restore(40151, Some(PathBuf::from("/usr/sbin/bareos-dir")));
+    let onesimus = queued_restore(40171, None);
+    println!("bareos-dir: {original:?}\nodir:       {onesimus:?}");
+    assert_eq!(onesimus, original);
+    assert_eq!(original, (2, 'A'));
+}

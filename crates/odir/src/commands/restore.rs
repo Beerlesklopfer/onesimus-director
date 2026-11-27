@@ -92,6 +92,9 @@ pub(crate) struct Launch {
     pub storage: Option<String>,
     /// `pluginoptions=` of the run (sent to the FD before the restore).
     pub plugin_options: Option<String>,
+    /// jcr->sched_time: `when=` of the run dialog (internal `schedtime`);
+    /// None: now. A later time keeps the job waiting (JS_WaitStartTime).
+    pub sched_time: Option<i64>,
 }
 
 pub fn cmd_restore(ast: &CommandAst, ctx: &ExecContext) -> CommandResult {
@@ -398,6 +401,7 @@ pub(crate) fn restore_with(ast: &CommandAst, ctx: &ExecContext,
             job: value("job"),
             storage: value("storage"),
             plugin_options: value("pluginoptions"),
+            sched_time: value("schedtime").and_then(|t| t.parse().ok()),
         })
     });
     ua.finish(true)
@@ -1862,7 +1866,7 @@ use crate::btime::str_to_utime;
 /// Compatibility log C-058.
 pub(crate) fn start_restore(ctx: &ExecContext, launch: Launch) -> CommandResult {
     let Launch { restore_jobid, client: _, restore_client, where_path, regex_where, replace, expected_files, bootstrap_path, job, storage,
-        plugin_options } = launch;
+        plugin_options, sched_time } = launch;
 
     let config = match &ctx.config {
         Some(c) => match c.read() {
@@ -1923,9 +1927,10 @@ pub(crate) fn start_restore(ctx: &ExecContext, launch: Launch) -> CommandResult 
     drop(config); // Release RwLock before fork
 
     let now = now_unix();
+    let sched_time = sched_time.unwrap_or(now);
     let unique_job = crate::commands::job::unique_job_name(&job.name, now);
     let job_id = if ctx.catalog.is_some() {
-        match crate::commands::job::create_job_record(ctx, &unique_job, &job.name, 'R', 'F', Some(&client.name), now, "") {
+        match crate::commands::job::create_job_record(ctx, &unique_job, &job.name, 'R', 'F', Some(&client.name), sched_time, "") {
             Ok(id) => id,
             Err(e) => {
                 tracing::error!("Failed to create job record: {e}");
@@ -1976,11 +1981,11 @@ pub(crate) fn start_restore(ctx: &ExecContext, launch: Launch) -> CommandResult 
     };
     let report = crate::job_messages::JobReport {
         kind: crate::job_messages::ReportKind::Restore, job: unique_job.clone(), client: client.name.clone(),
-        sched_time: now, start_time: now, expected_files: Some(expected_files),
+        sched_time, start_time: now, expected_files: Some(expected_files),
         trigger: crate::job_messages::TRIGGER_USER.to_string(), ..Default::default()
     };
 
-    crate::commands::job::queue_job(ctx, &job, params, report, &client.name, &storage.name, now)
+    crate::commands::job::queue_job(ctx, &job, params, report, &client.name, &storage.name, sched_time)
 }
 
 /// atoi() of an optional argument (0 when absent or not a number).
