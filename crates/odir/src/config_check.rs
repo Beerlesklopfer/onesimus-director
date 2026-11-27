@@ -142,14 +142,19 @@ fn value_error(ty: Ty, d: &Directive) -> Option<(&'static str, String)> {
     let first = words.first()?;
     let text = |t: &Tok| t.text().unwrap_or("").to_string();
     match ty {
+        // StoreTime/StoreSize/StoreSpeed take only unquoted tokens: a quoted value is refused
+        // whatever it holds (bareos-dir 25.1.3: `"3 months"`, `"50 g"`, `"50"`, `"10 mb/s"`; C-102)
         Ty::Time => {
             if let (1, Tok::Quoted(s)) = (words.len(), first) {
-                return crate::commands::show::parse_duration(s).is_none()
-                    .then(|| ("lib/res.cc:1095", format!("expected a time period, got: {s}")));
+                return Some(("lib/res.cc:1095", format!("expected a time period, got: {s}")));
             }
             let joined: Vec<String> = words.iter().map(|t| text(t)).collect();
             crate::commands::show::parse_duration(&joined.join(" ")).is_none()
                 .then(|| ("lib/res.cc:1089", format!("expected a time period, got: {}", joined.concat())))
+        }
+        Ty::Size32 | Ty::Size64 | Ty::Speed if matches!((words.len(), first), (1, Tok::Quoted(_))) => {
+            let what = if ty == Ty::Speed { "speed" } else { "size" };
+            Some(("lib/res.cc:1024", format!("expected a {what}, got: {}", text(first))))
         }
         Ty::Size32 | Ty::Size64 => {
             let tokens: Vec<String> = words.iter().map(|t| text(t)).collect();

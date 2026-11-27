@@ -396,6 +396,10 @@ mod tests {
             ("Volume Retention = 10 x", "lib/res.cc:1089", "expected a time period, got: 10x", 26),
             ("Volume Retention = ten days", "lib/res.cc:1089", "expected a time period, got: tendays", 30),
             ("Volume Retention = \"10 x\"", "lib/res.cc:1095", "expected a time period, got: 10 x", 28),
+            // C-102: quoted, even when the text would be a valid value
+            ("Volume Retention = \"3 months\"", "lib/res.cc:1095", "expected a time period, got: 3 months", 32),
+            ("Maximum Volume Bytes = \"50 g\"", "lib/res.cc:1024", "expected a size, got: 50 g", 32),
+            ("Maximum Volume Bytes = \"50\"", "lib/res.cc:1024", "expected a size, got: 50", 30),
             ("Maximum Volume Bytes = 5 zz", "lib/res.cc:995", "expected a size number, got: zz", 30),
             ("Maximum Volumes = abc", "lib/lex.cc:471", "expected a positive integer number, got: abc", 24),
             ("Maximum Volumes = -1", "lib/lex.cc:476", "expected a positive integer number, got: -1", 23),

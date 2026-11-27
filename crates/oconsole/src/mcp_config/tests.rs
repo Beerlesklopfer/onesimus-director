@@ -101,7 +101,7 @@ fn values_are_formatted_like_the_configuration() {
     assert!(directives(&json!({"directives": {}}), "client").is_err());
     assert!(directives(&json!({"directives": {"run": []}}), "schedule").is_err());
     assert_eq!(directives(&json!({"directives": {"File Retention": "60 days"}}), "client").unwrap(),
-               ch(&[("File Retention", "\"60 days\"")]));
+               ch(&[("File Retention", "60 days")])); // time unquoted (C-102)
     assert_eq!(directives(&json!({"directives": {"Description": "Weekly"}}), "schedule").unwrap(), ch(&[("Description", "Weekly")]));
     // Schedule Run: unquoted, a list replaces every Run line
     assert_eq!(directives(&json!({"directives": {"run": ["Full sun at 23:30", "Incremental mon-sat at 23:30"]}}), "schedule").unwrap(),
@@ -251,7 +251,7 @@ fn updates_over_grpc_and_bnet_with_the_same_result() {
         let old = sha(CLIENT);
         let r = configure_update(&mut d, &args(json!({ "File Retention": "60 days", "Heartbeat Interval": 30 })));
         assert_eq!(r["isError"], false, "{r}");
-        let expected = CLIENT.replace("File Retention = 30 days  # keep\n  FileRetention = 40 days\n", "File Retention = \"60 days\"  # keep\n")
+        let expected = CLIENT.replace("File Retention = 30 days  # keep\n  FileRetention = 40 days\n", "File Retention = 60 days  # keep\n")
             .replace("}\n", "  Heartbeat Interval = 30\n}\n");
         assert_eq!(d.updates, vec![expected.clone()], "grpc={grpc}");
         let s = &r["structuredContent"];
@@ -260,7 +260,7 @@ fn updates_over_grpc_and_bnet_with_the_same_result() {
         assert_eq!(s["changed"][0]["old"], json!(["30 days", "40 days"]));
         assert_eq!(s["changed"][1]["added"], true);
         let text = r["content"][0]["text"].as_str().unwrap();
-        assert!(text.contains("File Retention: 30 days | 40 days -> \"60 days\"") && text.contains("reloaded: yes"), "{text}");
+        assert!(text.contains("File Retention: 30 days | 40 days -> 60 days") && text.contains("reloaded: yes"), "{text}");
         if grpc {
             assert_eq!(d.lines, ["GetConfigCapabilities", "ReadResource", "UpdateResource"]);
         } else {

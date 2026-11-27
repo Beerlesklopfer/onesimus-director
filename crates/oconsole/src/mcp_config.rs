@@ -95,8 +95,9 @@ pub const TYPES: &[&str] = &["client", "job", "jobdefs", "schedule", "fileset", 
 /// Checked directive arguments of a resource of type `resource`: (name as
 /// given, formatted values). A list value is a repeated directive (Schedule
 /// `Run`): every existing line is replaced by one line per element. The
-/// Schedule `Run` directive is written unquoted
-/// ([`bareos_config::edit::format_value`]).
+/// Schedule `Run` directive and time, size and speed values are written
+/// unquoted ([`bareos_config::edit::format_value`]; bareos-dir refuses
+/// `VolumeRetention = "3 months"`, C-102).
 pub fn directives(arguments: &Value, resource: &str) -> Result<Vec<(String, Vec<String>)>, String> {
     let Some(Value::Object(map)) = arguments.get("directives") else {
         return Err("directives must be a non-empty object".into());
@@ -127,6 +128,8 @@ pub fn directives(arguments: &Value, resource: &str) -> Result<Vec<(String, Vec<
         for v in &items {
             if bareos_config::edit::raw_directive(resource, key) {
                 let text = v.as_str().ok_or_else(|| format!("directive '{key}': strings only"))?;
+                values.push(bareos_config::edit::format_value(resource, key, text)?);
+            } else if let (true, Some(text)) = (bareos_config::edit::unquoted_directive(resource, key), v.as_str()) {
                 values.push(bareos_config::edit::format_value(resource, key, text)?);
             } else {
                 values.push(format_value(key, v)?);

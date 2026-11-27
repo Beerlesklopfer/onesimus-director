@@ -174,26 +174,6 @@ fn directive_text(item: &Item, value: &str) -> String {
     format!("  {} = \"{}\"\n", item.name, value)
 }
 
-/// The value of one `configure update` directive as written into the file:
-/// a time period, size, speed or number as given (trimmed), because the
-/// original's store functions refuse them quoted (bareos-dir 25.1:
-/// `VolumeRetention = "3 months"` → "expected a time period",
-/// lib/res.cc:1095; `make_catalog_backup` reads the configuration with
-/// bareos-dir). Every other directive keeps the rule of `format_value`
-/// (quoted unless it is one plain token).
-fn update_value(item: Option<&Item>, rtype: &str, key: &str, value: &str) -> Result<String, String> {
-    match item {
-        Some(item) if matches!(item.ty, Ty::Time | Ty::Size32 | Ty::Size64 | Ty::Speed | Ty::Int32 | Ty::Pint32) => {
-            let value = value.trim();
-            if value.is_empty() || value.chars().any(|c| c.is_control() || "\";#{}".contains(c)) {
-                return Err(format!("directive '{key}': empty value, control characters or one of \" ; # {{ }} (written unquoted)"));
-            }
-            Ok(value.to_string())
-        }
-        _ => bareos_config::edit::format_value(rtype, key, value),
-    }
-}
-
 /// lib/util.cc EscapeString
 fn escape_string(value: &str) -> String {
     let mut out = String::with_capacity(value.len() * 2);
@@ -1164,11 +1144,11 @@ pub(crate) fn configure_update_with(ast: &CommandAst, ctx: &ExecContext, editor:
     let mut edits = Vec::new();
     for a in &args {
         let norm = norm_key(&a.key);
-        let item = items.iter().find(|i| norm_key(i.name) == norm || i.aliases.iter().any(|x| norm_key(x) == norm));
-        let written = item.map(|i| i.name.to_string()).unwrap_or_else(|| a.key.clone());
+        let written = items.iter().find(|i| norm_key(i.name) == norm || i.aliases.iter().any(|x| norm_key(x) == norm))
+            .map(|i| i.name.to_string()).unwrap_or_else(|| a.key.clone());
         let mut values = Vec::new();
         for v in &a.values {
-            match update_value(item, rtype.norm(), &a.key, v) {
+            match bareos_config::edit::format_value(rtype.norm(), &a.key, v) {
                 Ok(f) => values.push(f),
                 Err(e) => return CommandResult::error(format!("configure update: {e}\n")),
             }
@@ -1221,20 +1201,27 @@ pub(crate) fn configure_update_with(ast: &CommandAst, ctx: &ExecContext, editor:
 mod tests {
     use super::*;
 
-    /// `configure update` writes a time period or size unquoted (bareos-dir 25.1 refuses
-    /// `VolumeRetention = "3 months"` with "expected a time period", lib/res.cc:1095, and with it
-    /// `make_catalog_backup` failed on PDC, BackupCatalog 26.11.2026); strings stay quoted.
+    /// The table of unquoted directives in bareos-config (`configure update`, the MCP tool)
+    /// lists exactly the time, size and speed items of the Director's tables (C-102).
     #[test]
-    fn update_writes_non_string_types_unquoted() {
-        let items = crate::config_check::items_of("pool").unwrap();
-        let item = |k: &str| crate::config_check::item_of(items, k);
-        assert_eq!(update_value(item("volumeretention"), "pool", "volumeretention", "3 months").unwrap(), "3 months");
-        assert_eq!(update_value(item("maximumvolumebytes"), "pool", "maximumvolumebytes", " 50 g ").unwrap(), "50 g");
-        assert_eq!(update_value(item("description"), "pool", "description", "a b").unwrap(), "\"a b\"");
-        assert!(update_value(item("volumeretention"), "pool", "volumeretention", "3 months\" ; x").is_err());
-        assert!(update_value(item("volumeretention"), "pool", "volumeretention", " ").is_err());
-        // unknown directive: generic rule
-        assert_eq!(update_value(None, "pool", "nosuch", "a b").unwrap(), "\"a b\"");
+    fn unquoted_directives_match_the_item_tables() {
+        use bareos_config::edit::{norm_key, UNQUOTED_DIRECTIVES};
+        let mut expected = Vec::new();
+        for (rtype, items) in [("director", tables::DIR_ITEMS), ("client", tables::CLIENT_ITEMS),
+            ("storage", tables::STORAGE_ITEMS), ("catalog", tables::CATALOG_ITEMS), ("job", tables::JOB_ITEMS),
+            ("fileset", tables::FILESET_ITEMS), ("schedule", tables::SCHEDULE_ITEMS), ("pool", tables::POOL_ITEMS),
+            ("counter", tables::COUNTER_ITEMS), ("messages", tables::MESSAGES_ITEMS), ("profile", tables::PROFILE_ITEMS),
+            ("console", tables::CONSOLE_ITEMS), ("user", tables::USER_ITEMS)] {
+            for item in items.iter().filter(|i| matches!(i.ty, Ty::Time | Ty::Size32 | Ty::Size64 | Ty::Speed)) {
+                for name in std::iter::once(&item.name).chain(item.aliases) {
+                    expected.push((rtype.to_string(), norm_key(name)));
+                }
+            }
+        }
+        let mut table: Vec<(String, String)> = UNQUOTED_DIRECTIVES.iter().map(|(t, k)| (t.to_string(), k.to_string())).collect();
+        expected.sort();
+        table.sort();
+        assert_eq!(table, expected);
     }
 
     #[test]

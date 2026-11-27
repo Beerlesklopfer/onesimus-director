@@ -381,8 +381,11 @@ fn client_create_read_update_delete_keeps_every_directive() {
     let read = h.read(RType::Client, "laptop-fd");
     assert_eq!((read.status, read.text.as_str(), read.sha256.as_str()), (Status::Ok, CLIENT_TLS, created.sha256.as_str()));
     // only one value changes, every other byte (TLS, comments, `;`) stays
-    // quoted like the MCP tool configure_update writes values with blanks
-    let changed = CLIENT_TLS.replace("File Retention = 30 days", "File Retention = \"60 days\"");
+    // a time period quoted is INVALID like `bareos-dir -t` (C-102), nothing written
+    let quoted = CLIENT_TLS.replace("File Retention = 30 days", "File Retention = \"60 days\"");
+    assert_eq!(h.update(RType::Client, "laptop-fd", &read.sha256, &quoted).status, Status::Invalid);
+    assert_eq!(std::fs::read_to_string(&path).unwrap(), CLIENT_TLS);
+    let changed = CLIENT_TLS.replace("File Retention = 30 days", "File Retention = 60 days");
     let updated = h.update(RType::Client, "laptop-fd", &read.sha256, &changed);
     assert_eq!(updated.status, Status::Ok, "{updated:?}");
     assert_eq!(std::fs::read(&path).unwrap(), changed.as_bytes());

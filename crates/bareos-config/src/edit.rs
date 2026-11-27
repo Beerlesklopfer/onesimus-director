@@ -398,6 +398,68 @@ pub fn apply(text: &str, edits: &[Edit]) -> Result<(String, Vec<Change>), String
     Ok((out, report))
 }
 
+/// Directives of type time, size or speed (dird_conf.cc: CFG_TYPE_TIME,
+/// SIZE32, SIZE64, SPEED; names and aliases normalized with [`norm_key`]).
+/// bareos-dir refuses them in quotes whatever the value ("expected a time
+/// period", lib/res.cc:1095; "expected a size"/"a speed", lib/res.cc:1024),
+/// so they are written unquoted. A JobDefs uses the Job table. Kept equal to
+/// odir's item tables by a test there (`show_items`).
+pub const UNQUOTED_DIRECTIVES: &[(&str, &str)] = &[
+    ("director", "fdconnecttimeout"),
+    ("director", "sdconnecttimeout"),
+    ("director", "heartbeatinterval"),
+    ("director", "statisticsretention"),
+    ("client", "hardquota"),
+    ("client", "softquota"),
+    ("client", "softquotagraceperiod"),
+    ("client", "fileretention"),
+    ("client", "jobretention"),
+    ("client", "heartbeatinterval"),
+    ("client", "maximumbandwidthperjob"),
+    ("client", "ndmpblocksize"),
+    ("storage", "heartbeatinterval"),
+    ("storage", "cachestatusinterval"),
+    ("storage", "maximumbandwidthperjob"),
+    ("job", "maximumbandwidth"),
+    ("job", "maxrunschedtime"),
+    ("job", "maxruntime"),
+    ("job", "fullmaxruntime"),
+    ("job", "incrementalmaxruntime"),
+    ("job", "differentialmaxruntime"),
+    ("job", "maxwaittime"),
+    ("job", "maxstartdelay"),
+    ("job", "maxfullinterval"),
+    ("job", "maxvirtualfullinterval"),
+    ("job", "maxdiffinterval"),
+    ("job", "spoolsize"),
+    ("job", "rescheduleinterval"),
+    ("job", "filehistorysize"),
+    ("job", "alwaysincrementaljobretention"),
+    ("job", "alwaysincrementalmaxfullage"),
+    ("job", "runonincomingconnectinterval"),
+    ("pool", "maximumvolumebytes"),
+    ("pool", "volumeretention"),
+    ("pool", "volumeuseduration"),
+    ("pool", "migrationtime"),
+    ("pool", "migrationhighbytes"),
+    ("pool", "migrationlowbytes"),
+    ("pool", "fileretention"),
+    ("pool", "jobretention"),
+    ("pool", "minimumblocksize"),
+    ("pool", "maximumblocksize"),
+];
+
+/// Whether `key` of a resource of type `rtype` takes an unquoted time, size
+/// or speed ([`UNQUOTED_DIRECTIVES`]).
+pub fn unquoted_directive(rtype: &str, key: &str) -> bool {
+    let rtype = match norm_key(rtype).as_str() {
+        "jobdefs" => "job".to_string(),
+        t => t.to_string(),
+    };
+    let key = norm_key(key);
+    UNQUOTED_DIRECTIVES.iter().any(|(t, k)| *t == rtype && *k == key)
+}
+
 /// Directives written without quotes whatever they contain: the Schedule
 /// `Run` directive (C++ StoreRun() scans its own tokens; a quoted value is
 /// one token and would not be understood).
@@ -413,14 +475,15 @@ pub fn plain_token(value: &str) -> bool {
 
 /// The value of `key` in a resource of type `rtype` as written into the
 /// file: a plain token ([`plain_token`]) as is, anything else in quotes
-/// (backslash before `"` and `\`); a [`raw_directive`] as is, trimmed, and
+/// (backslash before `"` and `\`); a [`raw_directive`] or an
+/// [`unquoted_directive`] (time, size, speed) as is, trimmed, and
 /// refused when it holds `"`, `;`, `#`, `{` or `}`. Control characters
 /// (line ends) are refused.
 pub fn format_value(rtype: &str, key: &str, value: &str) -> Result<String, String> {
     if value.chars().any(char::is_control) {
         return Err(format!("directive '{key}': control characters (line ends) are not allowed"));
     }
-    if raw_directive(rtype, key) {
+    if raw_directive(rtype, key) || unquoted_directive(rtype, key) {
         let value = value.trim();
         if value.is_empty() || value.contains(['"', ';', '#', '{', '}']) {
             return Err(format!("directive '{key}': empty value or one of \" ; # {{ }} (written unquoted)"));
@@ -568,5 +631,11 @@ mod tests {
         assert_eq!(format_value("schedule", "Run", " Level=Full sun at 23:30 ").unwrap(), "Level=Full sun at 23:30");
         assert!(format_value("schedule", "run", "Full; x").is_err());
         assert_eq!(format_value("Job", "run", "job=x level=Full").unwrap(), "\"job=x level=Full\"");
+        // time, size and speed unquoted (bareos-dir refuses them quoted, C-102)
+        assert_eq!(format_value("Pool", "Volume Retention", " 3 months ").unwrap(), "3 months");
+        assert_eq!(format_value("pool", "maximumvolumebytes", "50 g").unwrap(), "50 g");
+        assert_eq!(format_value("JobDefs", "Max Run Time", "2 hours").unwrap(), "2 hours");
+        assert_eq!(format_value("Pool", "Description", "3 months").unwrap(), "\"3 months\"");
+        assert!(format_value("pool", "volumeretention", "3 months\"; x").is_err());
     }
 }
