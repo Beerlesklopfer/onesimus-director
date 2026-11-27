@@ -72,6 +72,10 @@ Was osd von PDC fernhielt (ein File-Device, `Maximum Concurrent Jobs = 5`, Recyc
 | D-5 | ~~Addendum zum FD vom 15.10. als überholt kennzeichnen~~ **erledigt** | Doku | hier |
 | D-6 | ~~odir: Worker-Log-Zeilen landeten in der Pipe zum Director (fd der Logdatei nach dem Fork wiederverwendet); ein Restore endete dadurch „Error, 0 Dateien“~~ **erledigt** (`76a4163`, `a145caf`) | Fehler | `job_worker.rs` |
 | D-7 | ~~ofd startete nicht mit `FDAddresses`~~ **erledigt** (C-100) | Fehler | ofd |
+| D-8 | ~~`configure update` schrieb `VolumeRetention = "3 months"` (bareos-dir lehnt das ab, `BackupCatalog` scheiterte)~~ **erledigt** (C-102) | Fehler | `configure.rs` |
+| D-9 | PDC: `pool/H340.conf` auf `VolumeRetention = 3 months` (ohne Anführungszeichen) ändern, dann läuft `BackupCatalog` wieder | Konfiguration (Maintainer) | PDC |
+| D-10 | odir lädt Zeiträume/Größen in Anführungszeichen, bareos-dir nicht (C-102 Teil 2): ablehnen wie das Original, sobald D-9 erledigt ist? | Abweichung, Entscheidung | `bareos-config` parser, `config_check.rs` |
+| D-11 | PDC: `Vol-0005` fehlt in `/bareos/backup`, ist im Katalog aber noch verzeichnet; jeder Kopierjob von `Copy-Default`, der es liest, wartet eine Stunde und wird abgebrochen (26.11.: 9 Stück) | Betrieb (Maintainer) | PDC |
 
 ### Offene Reste an Befehlen
 
