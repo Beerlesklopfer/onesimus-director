@@ -102,13 +102,11 @@ gemeinsame Warteschlange, eine BNET-Konsole bekommt danach nichts mehr.) (`.bvfs
 
 ### Infrastruktur
 
-- **onesimus-proto:** Branch `director-typed-api` (typisierte `DirectorApi`,
-  S-34/S-35) ist in `main` enthalten (Stand 27.11.2026); `main` ist Vorfahr von
-  `development` (22 Commits voraus, `cd958c3`). Offen: `main` per Fast-Forward auf
-  `development` stellen (mit der GUI-Sitzung abgestimmt: kein Einwand, keine
-  unveröffentlichten Proto-Änderungen; GUI pinnt `47c5e7e` aus Onesimus-io/onesimus-proto,
-  Vorfahr von `cd958c3`) – der Push steht beim Maintainer. Das odir-Submodul bleibt beim
-  Zweig `development` (Commit gepinnt).
+- ~~**onesimus-proto:** Branch `director-typed-api` (typisierte `DirectorApi`,
+  S-34/S-35) nach `main` mergen~~ **erledigt** 27.11.2026: `director-typed-api` war in `main`
+  enthalten; `main` per Fast-Forward auf `development` gestellt (`aad8995..cd958c3`, Push durch
+  den Maintainer, mit der GUI-Sitzung abgestimmt: kein Einwand, GUI pinnt per SHA und zieht auf
+  `cd958c3` nach). Das odir-Submodul bleibt beim Zweig `development` (Commit gepinnt).
 - **Wiki-Status:** `bareos-director-commands.json`/`audit-notes.json` nach dem
   Paritätsvolllauf vom 17.10.2026 neu erzeugen (siehe TODO-COMMANDS, P6).
 
