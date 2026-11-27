@@ -203,6 +203,12 @@ pub enum PipeMessage {
     /// UpdateFailedConnectionHandshakeMode): even a cancel is forgotten. S-28.
     #[serde(rename = "reset_status")]
     ResetStatus { job_id: u32 },
+    /// ua_server.cc new_control_jcr(base): a control JCR the job thread makes
+    /// (sd_cmds.cc CancelStorageDaemonJob(jcr): "*JobCancel*"); its unique
+    /// job name takes a number of the Director's CreateUniqueJobName()
+    /// sequence, so the next job's name shows it. S-27.
+    #[serde(rename = "control_jcr")]
+    ControlJcr { job_id: u32, base: String },
     /// job_thread() RunScripts(jcr, ..., label) in the Director (console
     /// commands need it); the worker waits for [`PipeMessage::RunScriptsDone`].
     #[serde(rename = "run_scripts")]

@@ -75,6 +75,15 @@ pub struct BackupSession {
     pub fd_connect_timeout: u64,
     #[serde(default)]
     pub sd_connect_timeout: u64,
+    /// Job Reschedule Incomplete Jobs (default yes): without it a missing
+    /// FD job end also cancels the SD job (backup.cc:726). S-27.
+    #[serde(default = "yes")]
+    pub reschedule_incomplete: bool,
+}
+
+/// serde default `true`.
+fn yes() -> bool {
+    true
 }
 
 /// fd_cmds.cc ConnectToFileDaemon(): the TCP connection (retried), then the
@@ -558,6 +567,17 @@ fn terminate(job_id: u32, session: &BackupSession, fd: Option<&mut BnetStream<An
             }
         }
         let _ = fd.send_signal(BnetSignal::Terminate);
+        // backup.cc:726: "Force cancel in SD if failing" — IsJobCanceled()
+        // (the Director's status after the FD's end) or no FD job end
+        // without Reschedule Incomplete Jobs: CancelStorageDaemonJob(jcr)
+        // and its "*JobCancel*" control JCR. The SD job of a canceled job
+        // was already canceled by the cancel command.
+        let fd_status = fd_end.as_ref().map(|e| e.0);
+        let job_canceled = canceled() || matches!(FIRST_ERROR.load(Ordering::SeqCst), b'A' | b'E' | b'f')
+            || matches!(fd_status, Some(b'A' | b'E' | b'f'));
+        if job_canceled || (!session.reschedule_incomplete && fd_end.is_none()) {
+            job_worker::send_jmsg(PipeMessage::ControlJcr { job_id, base: "*JobCancel*".into() });
+        }
         state(job_id, "Finishing");
         let sd_end = sd_thread.and_then(|t| t.join().ok().flatten());
         if let Some(e) = fd_error {

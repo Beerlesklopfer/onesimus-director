@@ -1838,6 +1838,7 @@ fn run_selected(
             (Some(_), Some(lan)) => lan.clone(),
             _ => client.address.clone(),
         },
+        reschedule_incomplete: bool_dir("rescheduleincompletejobs", true),
         accurate_checksum: crate::backup::checksum_needed(
             &crate::commands::estimate::include_option_strings(&config, &job.fileset), level_char),
         quota: {

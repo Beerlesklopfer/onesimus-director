@@ -186,9 +186,10 @@ Stand 17.10.2026; nur Punkte, die in einem Eintrag ausdrücklich offen stehen:
 - C-058: alle Teilpunkte umgesetzt (Admin, Restore über `run`, Verify S-04, Copy/Migrate
   und PoolOccupancy S-03/S-05/S-20, Consolidate S-06, RunScripts S-07/S-24, Backup-Ablauf
   S-19/S-23/S-27/S-28). Rest: beim Cancel die Berichtszeilen „Director's comm line to SD
-  dropped“/„Network error with FD …“ und SD termination status; `*JobCancel*` des
-  Job-Threads verbraucht keine Jobnamen-Nummer (S-26); passive Clients beim Backup
-  ungeprüft (S-23).
+  dropped“ und SD termination status nicht gegen das Original gemessen („Network error
+  with FD …“ umgesetzt); `*JobCancel*` des Job-Threads verbraucht seit 27.11.2026 eine
+  Jobnamen-Nummer wie backup.cc:726/restore.cc:433/verify.cc:458 (S-26/S-27; Rest: vor
+  dem Start abgebrochener Restore); passive Clients beim Backup ungeprüft (S-23).
 - C-084 / S-08: erledigt (24.11.2026): `label`/`relabel … encrypt` erzeugt den Schlüssel vor dem Label-Befehl (`Generating new hardware encryption key`), der Befehl an den SD trägt keinen Schlüssel (nach `ua_label.cc` bareos-25); Fehler bei der Erzeugung bricht ab (bei Barcodes: nächstes Volume).
 - C-087 / S-36: MCP-Vollausbau (alle Befehle lokal über stdio, HTTP lesend) offen.
 - S-37: `.profile create/set/delete/assign/unassign` ohne Wirkung (`.profile` ist Alias von `.acl`).

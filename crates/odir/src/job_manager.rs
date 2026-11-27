@@ -1082,6 +1082,10 @@ impl JobManager {
                         job.phase = DirJobPhase::Running;
                     }
 
+                    PipeMessage::ControlJcr { base, .. } => {
+                        let _ = crate::commands::job::new_control_jcr_name(&base);
+                    }
+
                     PipeMessage::ClientHandshake { client, cleartext, .. } => {
                         crate::fd_protocol::store_client_handshake(&client, cleartext);
                     }
@@ -1252,6 +1256,16 @@ impl JobManager {
                 if let Some(vf) = &vf {
                     let messages = crate::vbackup::after_job_end(self.catalog.as_ref(), job.job_id, vf, job.observed_status);
                     post_catreq_messages(&self.bus, self.config.as_ref(), job, messages);
+                }
+                // NativeRestoreCleanup() / VerifyCleanup(): a canceled job
+                // cancels the SD job through a "*JobCancel*" control JCR
+                // (restore.cc:433, verify.cc:458, sd_cmds.cc:675), which takes
+                // a job name number; the backup worker asks for its own
+                // (backup.cc:726, PipeMessage::ControlJcr). S-27.
+                if job.jcr.report.as_ref().is_some_and(|r| matches!(r.kind,
+                        crate::job_messages::ReportKind::Restore | crate::job_messages::ReportKind::Verify))
+                    && is_job_canceled(job.observed_status) {
+                    let _ = crate::commands::job::new_control_jcr_name("*JobCancel*");
                 }
                 // NativeBackupCleanup(): UpdateBootstrapFile() (S-23).
                 if job.jcr.backup_end.is_some() {
