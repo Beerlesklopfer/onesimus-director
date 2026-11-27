@@ -261,9 +261,18 @@ pub fn cancel_from_watchdog(manager: &std::sync::Arc<std::sync::Mutex<crate::job
 fn cancel_job(ua: &mut Ua, job: &ActiveJob, links: &mut dyn CancelLinks) {
     let ctx = ua.ctx;
     let mut ok = true;
+    // The worker learns of the cancel (SIGTERM: its daemon sockets shut
+    // down, like SetTerminated + MyThreadSendSignal) once, at the place the
+    // original cuts the job's connections.
+    let mut signaled: Option<bool> = None;
+    let mut signal = || ctx.job_manager.as_ref().is_some_and(|mgr| mgr.lock().unwrap().cancel_job(job.id));
     if crate::job_manager::is_queued_status(job.status) {
         ua.info_msg(format!("JobId {}, Job {} marked to be canceled.\n", job.id, job.unique_name));
     } else if job.fd_connected || job.sd_connected {
+        // job.cc CancelJob(): JS_Canceled before the daemons are told (D16).
+        if let Some(mgr) = &ctx.job_manager {
+            mgr.lock().unwrap().mark_canceled(job.id);
+        }
         // jcr->file_bsock / jcr->store_bsock
         let (client, store) = job_daemons(ctx, job);
         let director = director_name(ctx);
@@ -273,7 +282,13 @@ fn cancel_job(ua: &mut Ua, job: &ActiveJob, links: &mut dyn CancelLinks) {
             let (info, reply) = links.file_daemon(&client, &director, &command);
             ua.send_msg(info);
             match reply {
-                Ok(messages) => messages.into_iter().for_each(|message| ua.send_msg(message)),
+                Ok(messages) => {
+                    messages.into_iter().for_each(|message| ua.send_msg(message));
+                    // fd_cmds.cc:1000-1001: jcr->file_bsock->SetTerminated(),
+                    // MyThreadSendSignal(): the job reads no FD job end any
+                    // more ("No Job status returned from FD.").
+                    signaled = Some(signal());
+                }
                 Err(_) => {
                     ua.error_msg("\nFailed to connect to File daemon.\n");
                     ok = false;
@@ -291,7 +306,10 @@ fn cancel_job(ua: &mut Ua, job: &ActiveJob, links: &mut dyn CancelLinks) {
             }
         }
     }
-    let canceled = ctx.job_manager.as_ref().is_some_and(|mgr| mgr.lock().unwrap().cancel_job(job.id));
+    let canceled = match signaled {
+        Some(canceled) => canceled,
+        None => signal(),
+    };
     if canceled {
         if let Some(smgr) = &ctx.session_mgr {
             smgr.bus().post(BusMessage::JobStatus {

@@ -97,7 +97,7 @@ fn backup_verify_restore_estimate_cancel() {
     );
 
     // Cancel: the job ends early and not as a success. Which letter the
-    // catalog shows is expected_defect_d16_…; what the FD reports is
+    // catalog shows is canceled_backup_is_canceled_in_catalog; what the FD reports is
     // expected_defect_d1_….
     let big = cancel_big_backup(&rig);
     let row = rig.job_row(big).ok().flatten();
@@ -123,20 +123,19 @@ fn estimate_before_first_backup_lists_the_tree() {
     check(&rig, estimate.contains("file0.txt"), &format!("estimate vor dem ersten Backup listet nichts:\n{estimate}"));
 }
 
-/// Erwarteter Defekt D16 (neu, gemessen 19.11.2026 im Gerüst): Ein
-/// abgebrochenes Backup steht im Katalog mit `f` (fatal) statt `A`. odirs
-/// Job-Worker endet nach dem `cancel` mit Code 1, und der JobManager trägt
-/// `f` ein („worker exited (code=1), catalog status=f“). Der Fachmann hatte
-/// im Gutachten §3 bei anderem Zeitverlauf (200 kB/s, Abbruch nach 4 s) `A`
-/// gemessen; der Endstatus hängt also vom Zeitpunkt des Abbruchs ab.
+/// Ein abgebrochenes Backup steht im Katalog mit `A` (früher erwarteter
+/// Defekt D16, gemessen 19.11.2026: `f`, weil die Fehlermeldungen des SD
+/// zwischen dem Abbruchbefehl an die Daemons und dem Signal an den Worker
+/// ankamen; behoben 27.11.2026: JS_Canceled zuerst wie job.cc:667, die
+/// FD-Verbindung des Jobs nach der Antwort des FD gekappt wie
+/// fd_cmds.cc:1000; Vergleich mit bareos-dir in `cancel_job_name_number`).
 #[test]
 #[ignore = "needs bareos-sd and initdb: run with --ignored"]
-#[should_panic(expected = "D16:")]
-fn expected_defect_d16_canceled_backup_is_fatal_in_catalog() {
+fn canceled_backup_is_canceled_in_catalog() {
     let rig = start(39431);
     let big = cancel_big_backup(&rig);
     let row = rig.job_row(big).ok().flatten();
-    check(&rig, row.as_ref().is_some_and(|r| r.status == 'A'), &format!("D16: Katalog nach cancel: {row:?}"));
+    check(&rig, row.as_ref().is_some_and(|r| r.status == 'A'), &format!("Katalog nach cancel: {row:?}"));
 }
 
 /// Erwarteter Defekt D1 (Gutachten §7): Nach `cancel` meldet ofd dem

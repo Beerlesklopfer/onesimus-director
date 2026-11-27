@@ -804,6 +804,18 @@ impl JobManager {
         }
     }
 
+    /// job.cc CancelJob() (:667): setJobStatusWithPriorityCheck(JS_Canceled)
+    /// comes first, before the FD and SD get their cancel, so that their
+    /// fatal messages in between (e.g. the SD's "Unexpected signal from FD")
+    /// do not turn the job into JS_FatalError (D16). The worker learns of
+    /// the cancel with [`JobManager::cancel_job`] afterwards.
+    pub fn mark_canceled(&mut self, job_id: u32) {
+        if let Some(job) = self.jobs.iter_mut().find(|j| j.job_id == job_id && j.handle.spawned()
+            && !j.jcr.end_processed && !matches!(j.phase, DirJobPhase::Completed | DirJobPhase::Error)) {
+            job.observed_status = merge_status(job.observed_status, 'A');
+        }
+    }
+
     /// job.cc CancelJob(): JS_Canceled. A queued job moves from the waiting
     /// to the front of the ready queue (JobqRemove) and ends there without a
     /// worker; a forked worker gets SIGTERM.
