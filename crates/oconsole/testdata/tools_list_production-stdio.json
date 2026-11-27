@@ -4701,7 +4701,7 @@
     {
       "name": "configure_update",
       "title": "Change a configuration resource",
-      "description": "Change directives of a resource in its configuration file and reload the Director, through the Director's configuration CRUD (gRPC ReadResource/UpdateResource, BNET '.config'): only the given directives change, every other directive, comment and the indentation stay. Directive names as in Bareos (case, blanks and underscores do not matter, e.g. 'Description', 'File Retention'); a missing directive is added. A list value replaces every line of a repeated directive, e.g. a Schedule's Run lines: {\"Description\":\"Weekly full\",\"Run\":[\"Full sun at 23:30\",\"Incremental mon-sat at 23:30\"]} (Run is written unquoted). Directives of nested blocks (RunScript, Include …) are refused. Types: client, job, jobdefs, schedule, fileset, pool, storage, as far as the Director offers them with READ_RAW and UPDATE_RAW; bareos-dir is refused. Returns the changed directives, the old and new sha256 and whether the Director reloaded.",
+      "description": "Change directives of a resource in its configuration file and reload the Director, through the Director's configuration CRUD (gRPC ReadResource/UpdateResource, BNET '.config'): only the given directives change, every other directive, comment and the indentation stay. Directive names as in Bareos (case, blanks and underscores do not matter, e.g. 'Description', 'File Retention'); a missing directive is added. A list value replaces every line of a repeated directive, e.g. a Schedule's Run lines: {\"Description\":\"Weekly full\",\"Run\":[\"Full sun at 23:30\",\"Incremental mon-sat at 23:30\"]} (Run is written unquoted). Directives of a nested block change with 'block', its path: {\"block\":\"Include\",\"directives\":{\"File\":[\"/etc\",\"/srv\"]}} replaces every File line of a FileSet's Include; 'Include[2]' for the second of several, 'Exclude', 'Include/Options', 'RunScript'. Blocks inside the named one stay untouched. Types: client, job, jobdefs, schedule, fileset, pool, storage, as far as the Director offers them with READ_RAW and UPDATE_RAW; bareos-dir is refused. Returns the changed directives, the old and new sha256 and whether the Director reloaded.",
       "inputSchema": {
         "type": "object",
         "properties": {
@@ -4721,6 +4721,10 @@
           "name": {
             "type": "string",
             "description": "resource name"
+          },
+          "block": {
+            "type": "string",
+            "description": "nested block whose directives change, e.g. Include, Include[2], Exclude, Include/Options, RunScript; omit for the resource's own directives"
           },
           "directives": {
             "type": "object",

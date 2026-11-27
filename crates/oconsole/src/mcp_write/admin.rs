@@ -132,13 +132,18 @@ pub(super) fn tools() -> Vec<Value> {
              Bareos (case, blanks and underscores do not matter, e.g. 'Description', 'File Retention'); a missing \
              directive is added. A list value replaces every line of a repeated directive, e.g. a Schedule's Run \
              lines: {\"Description\":\"Weekly full\",\"Run\":[\"Full sun at 23:30\",\"Incremental mon-sat at 23:30\"]} \
-             (Run is written unquoted). Directives of nested blocks (RunScript, Include …) are refused. Types: \
+             (Run is written unquoted). Directives of a nested block change with 'block', its path: \
+             {\"block\":\"Include\",\"directives\":{\"File\":[\"/etc\",\"/srv\"]}} replaces every File line of a \
+             FileSet's Include; 'Include[2]' for the second of several, 'Exclude', 'Include/Options', \
+             'RunScript'. Blocks inside the named one stay untouched. Types: \
              client, job, jobdefs, schedule, fileset, pool, storage, as far as the Director offers them with READ_RAW and \
              UPDATE_RAW; bareos-dir is refused. Returns the changed directives, the old and new sha256 and whether \
              the Director reloaded.",
             json!({
                 "resource": e(crate::mcp_config::TYPES, "resource type"),
                 "name": s("resource name"),
+                "block": s("nested block whose directives change, e.g. Include, Include[2], Exclude, \
+                    Include/Options, RunScript; omit for the resource's own directives"),
                 "directives": { "type": "object", "description": "directive -> new value (booleans become yes/no); \
                     a list of strings replaces every line of a repeated directive (Run); null removes the directive",
                     "additionalProperties": { "type": ["string", "number", "boolean", "array", "null"],
@@ -271,7 +276,7 @@ pub(super) fn plan(tool: &str, arguments: &Value) -> Option<Result<Plan, String>
         // Not executed as a console line (mcp_config.rs runs the CRUD); the
         // plan checks the arguments and names the first BNET step.
         "configure_update" => |a| {
-            let (resource, name, _) = crate::mcp_config::check_arguments(&Value::Object(a.map.clone()))?;
+            let (resource, name, _, _) = crate::mcp_config::check_arguments(&Value::Object(a.map.clone()))?;
             Ok(Plan::new(format!(".config read type={resource} {}", name_arg("name", &name)?)))
         },
         "configure_delete" => |a| {

@@ -14,10 +14,12 @@
 //! Lexer rules as in `raw.rs` / C++ lib/lex.cc: `#` comments, `;` ends a
 //! statement (several directives on one line), quoted strings with
 //! backslash escapes. Directive keys compare like Bareos keywords: case,
-//! blanks and underscores do not matter ([`norm_key`]). Only the directives
-//! of the resource itself (brace depth 1) are changed; directives inside
-//! nested blocks (Job `RunScript { }`, FileSet `Include { }` / `Options { }`)
-//! are never touched.
+//! blanks and underscores do not matter ([`norm_key`]). [`apply`] changes
+//! the directives of the resource itself (brace depth 1) and never touches
+//! nested blocks (Job `RunScript { }`, FileSet `Include { }` / `Options { }`);
+//! [`apply_in`] changes the directives of one nested block named by a path
+//! (`Include`, `Include[2]`, `Include/Options`) and leaves every other block
+//! as it is.
 //!
 //! Onesimus extension without a bareos-dir counterpart.
 
@@ -45,16 +47,29 @@ struct Stmt {
     block: bool,
 }
 
-/// The statements of a resource text.
+/// One block of a resource text: the resource itself or a nested block.
+#[derive(Debug, Default)]
+struct Block {
+    /// (normalized key, 1-based number among the blocks of that key in the
+    /// parent) from the resource down to this block; empty for the resource.
+    path: Vec<(String, usize)>,
+    /// The path as written (`Include[2]/Options`), for messages.
+    label: String,
+    /// Offset of the block's key (0 for the resource): its line gives the
+    /// indentation when the block has no directive of its own.
+    key_start: usize,
+    /// The block's own statements (nested blocks as statements with
+    /// `block` set), in text order.
+    stmts: Vec<Stmt>,
+    /// Offset of the block's closing brace.
+    close: usize,
+}
+
+/// The blocks of a resource text; `blocks[0]` is the resource itself.
 #[derive(Debug, Default)]
 struct Scan {
-    /// Statements of the resource itself (brace depth 1), in text order.
-    top: Vec<Stmt>,
-    /// (normalized key, name of the enclosing block) of every statement
-    /// inside a nested block.
-    nested: Vec<(String, String)>,
-    /// Offset of the closing brace of the resource.
-    close: usize,
+    /// Every block in the order of its opening brace.
+    blocks: Vec<Block>,
 }
 
 /// Index of the line end (`\n`) at or after `i`, or the text length.
@@ -65,10 +80,9 @@ fn skip_line(b: &[u8], mut i: usize) -> usize {
     i
 }
 
-/// Parses the statements of a block from `i` (after its `{`) to its closing
-/// brace; returns the offset of that brace. `top`: the block is the resource
-/// itself; `parent`: the key of the enclosing block (messages).
-fn parse_block(text: &str, mut i: usize, top: bool, parent: &str, scan: &mut Scan) -> Result<usize, String> {
+/// Parses the statements of block `at` of `scan` from `i` (after its `{`) to
+/// its closing brace; sets and returns the offset of that brace.
+fn parse_block(text: &str, mut i: usize, at: usize, scan: &mut Scan) -> Result<usize, String> {
     let b = text.as_bytes();
     loop {
         while i < b.len() && matches!(b[i], b' ' | b'\t' | b'\r' | b'\n' | b';') {
@@ -82,7 +96,10 @@ fn parse_block(text: &str, mut i: usize, top: bool, parent: &str, scan: &mut Sca
                 i = skip_line(b, i);
                 continue;
             }
-            b'}' => return Ok(i),
+            b'}' => {
+                scan.blocks[at].close = i;
+                return Ok(i);
+            }
             _ => {}
         }
         let key_start = i;
@@ -96,8 +113,8 @@ fn parse_block(text: &str, mut i: usize, top: bool, parent: &str, scan: &mut Sca
         let mut stmt = Stmt { norm: norm_key(&key), key: key.clone(), key_start, value_start: i, value_end: i, block: false };
         if b[i] == b'{' {
             stmt.block = true;
-            let close = parse_block(text, i + 1, false, &key, scan)?;
-            record(scan, top, parent, stmt);
+            let close = parse_block(text, i + 1, open_block(scan, at, &stmt), scan)?;
+            scan.blocks[at].stmts.push(stmt);
             i = close + 1;
             continue;
         }
@@ -152,22 +169,60 @@ fn parse_block(text: &str, mut i: usize, top: bool, parent: &str, scan: &mut Sca
         stmt.value_end = last.min(b.len());
         if let Some(open) = block_at {
             stmt.block = true;
-            let close = parse_block(text, open + 1, false, &key, scan)?;
-            record(scan, top, parent, stmt);
+            let close = parse_block(text, open + 1, open_block(scan, at, &stmt), scan)?;
+            scan.blocks[at].stmts.push(stmt);
             i = close + 1;
             continue;
         }
-        record(scan, top, parent, stmt);
+        scan.blocks[at].stmts.push(stmt);
     }
 }
 
-/// Files a statement as top-level or nested.
-fn record(scan: &mut Scan, top: bool, parent: &str, stmt: Stmt) {
-    if top {
-        scan.top.push(stmt);
-    } else {
-        scan.nested.push((stmt.norm, parent.to_string()));
+/// Adds the nested block that `stmt` opens inside block `parent` to `scan`
+/// and returns its index.
+fn open_block(scan: &mut Scan, parent: usize, stmt: &Stmt) -> usize {
+    let number = 1 + scan.blocks[parent].stmts.iter().filter(|s| s.block && s.norm == stmt.norm).count();
+    let mut path = scan.blocks[parent].path.clone();
+    path.push((stmt.norm.clone(), number));
+    let mut label = scan.blocks[parent].label.clone();
+    if !label.is_empty() {
+        label.push('/');
     }
+    label.push_str(&stmt.key);
+    if number > 1 {
+        label.push_str(&format!("[{number}]"));
+    }
+    scan.blocks.push(Block { path, label, key_start: stmt.key_start, ..Block::default() });
+    scan.blocks.len() - 1
+}
+
+/// The block named by `spec` (see [`apply_in`]): segments separated by `/`,
+/// each a block key with an optional 1-based number (`Include[2]`); without
+/// a number the key must name exactly one block.
+fn find_block(scan: &Scan, spec: &str) -> Result<usize, String> {
+    let mut at = 0;
+    for segment in spec.split('/').map(str::trim).filter(|s| !s.is_empty()) {
+        let (key, number) = match segment.strip_suffix(']').and_then(|s| s.split_once('[')) {
+            Some((key, n)) => (key, Some(n.trim().parse::<usize>().ok().filter(|n| *n > 0)
+                .ok_or_else(|| format!("block '{segment}': the number in [] must be 1 or more"))?)),
+            None => (segment, None),
+        };
+        let norm = norm_key(key);
+        let depth = scan.blocks[at].path.len();
+        let children: Vec<usize> = (0..scan.blocks.len()).filter(|&b| {
+            let p = &scan.blocks[b].path;
+            p.len() == depth + 1 && p[..depth] == scan.blocks[at].path[..] && p[depth].0 == norm
+        }).collect();
+        let within = if at == 0 { "the resource".to_string() } else { format!("block '{}'", scan.blocks[at].label) };
+        at = match (number, children.len()) {
+            (_, 0) => return Err(format!("{within} has no block '{key}'")),
+            (None, 1) => children[0],
+            (None, n) => return Err(format!("{within} has {n} blocks '{key}'; name one as {key}[1] … {key}[{n}]")),
+            (Some(k), n) if k <= n => children[k - 1],
+            (Some(k), n) => return Err(format!("{within} has {n} block(s) '{key}', not {k}")),
+        };
+    }
+    Ok(at)
 }
 
 /// Scans one resource text: comments before the type word, the type word,
@@ -194,8 +249,8 @@ fn scan(text: &str) -> Result<Scan, String> {
     if i >= b.len() {
         return Err("the text is not a resource (type word and {)".into());
     }
-    let mut scan = Scan::default();
-    scan.close = parse_block(text, i + 1, true, "", &mut scan)?;
+    let mut scan = Scan { blocks: vec![Block::default()] };
+    parse_block(text, i + 1, 0, &mut scan)?;
     Ok(scan)
 }
 
@@ -283,13 +338,65 @@ fn removal(text: &str, s: &Stmt) -> (usize, usize) {
     (s.key_start, j)
 }
 
+/// Longest common subsequence of the old values and the new ones as
+/// (old index, new index) pairs in order.
+fn common_subsequence(old: &[&str], new: &[String]) -> Vec<(usize, usize)> {
+    let (n, m) = (old.len(), new.len());
+    // len[i][j]: length for old[i..] and new[j..]
+    let mut len = vec![vec![0usize; m + 1]; n + 1];
+    for i in (0..n).rev() {
+        for j in (0..m).rev() {
+            len[i][j] = if old[i] == new[j] { len[i + 1][j + 1] + 1 } else { len[i + 1][j].max(len[i][j + 1]) };
+        }
+    }
+    let (mut i, mut j, mut pairs) = (0, 0, Vec::new());
+    while i < n && j < m {
+        if old[i] == new[j] {
+            pairs.push((i, j));
+            i += 1;
+            j += 1;
+        } else if len[i + 1][j] >= len[i][j + 1] {
+            i += 1;
+        } else {
+            j += 1;
+        }
+    }
+    pairs
+}
+
+/// The insertion of `values` as statements of `s`'s key right after `s`:
+/// lines of their own when `s` is alone on its line, else inline with `;`.
+fn after(text: &str, s: &Stmt, values: &[String], eol: &str) -> (usize, usize, String) {
+    if alone_on_line(text, s) {
+        let lead = indentation(text, s.key_start);
+        let at = next_line(text, s.value_end);
+        (at, at, values.iter().map(|v| format!("{lead}{} = {v}{eol}", s.key)).collect())
+    } else {
+        (s.value_end, s.value_end, values.iter().map(|v| format!("; {} = {v}", s.key)).collect())
+    }
+}
+
+/// The insertion of `values` as statements of `s`'s key right before `s`.
+fn before(text: &str, s: &Stmt, values: &[String], eol: &str) -> (usize, usize, String) {
+    if alone_on_line(text, s) {
+        let lead = indentation(text, s.key_start);
+        let at = line_start(text, s.key_start);
+        (at, at, values.iter().map(|v| format!("{lead}{} = {v}{eol}", s.key)).collect())
+    } else {
+        (s.key_start, s.key_start, values.iter().map(|v| format!("{} = {v}; ", s.key)).collect())
+    }
+}
+
 /// Applies `edits` to the raw text of one resource:
 /// - keys compare like Bareos ([`norm_key`]); a key given twice is refused;
-/// - a directive that exists gets the values of its edit: the first line of
-///   it keeps its key, indentation, comment and line end and gets the first
-///   value, further values follow as lines of their own right after it
-///   (inline with `;` when the first one shares its line), every further
-///   existing line of the directive is removed;
+/// - a directive that exists gets the values of its edit: lines whose value
+///   stays (the longest common subsequence of old and new values) are not
+///   touched, comments included; the other lines go, and a new value goes
+///   in right after the kept line before it (before the first kept line
+///   when there is none), as a line of its own or inline with `;` like that
+///   line. When no value stays, the first line keeps its key, indentation,
+///   comment and line end and gets the first value, the further values
+///   follow it;
 /// - a missing directive is added before the closing brace of the resource,
 ///   one line per value, indented like the other directives (or two
 ///   blanks) and with the file's line end; on a one-line resource inline
@@ -297,16 +404,36 @@ fn removal(text: &str, s: &Stmt) -> (usize, usize) {
 /// - an edit without values removes every line of the directive (a line
 ///   holding only that directive as a whole, otherwise only the statement);
 /// - a nested block, or a directive that only occurs inside one, is
-///   refused: nested blocks are never touched.
+///   refused: nested blocks are never touched (see [`apply_in`]).
 ///
 /// Values containing a line end are refused; quoting is the caller's job
 /// ([`format_value`]).
 pub fn apply(text: &str, edits: &[Edit]) -> Result<(String, Vec<Change>), String> {
+    apply_in(text, "", edits)
+}
+
+/// [`apply`] on the directives of one nested block instead of the
+/// resource's: `block` is a path of block keys separated by `/`, each with
+/// an optional 1-based number when the parent has several blocks of that
+/// key (`Include`, `Include[2]`, `Exclude`, `Include/Options[2]`, `RunScript`;
+/// keys compare like directives). Empty: the resource itself. The rules are
+/// those of [`apply`] within the block: repeated directives (`File`) are
+/// replaced as a whole, a missing one is added before the block's closing
+/// brace, blocks inside it stay untouched.
+pub fn apply_in(text: &str, block: &str, edits: &[Edit]) -> Result<(String, Vec<Change>), String> {
     let scan = scan(text)?;
+    let target = find_block(&scan, block)?;
+    let this = &scan.blocks[target];
+    let close = this.close;
     let eol = if text.contains("\r\n") { "\r\n" } else { "\n" };
-    let indent = scan.top.iter().rev().filter(|s| alone_on_line(text, s))
+    let indent = this.stmts.iter().rev().filter(|s| alone_on_line(text, s))
         .map(|s| indentation(text, s.key_start).to_string()).find(|i| !i.is_empty())
-        .unwrap_or_else(|| "  ".into());
+        .unwrap_or_else(|| format!("{}  ", if target == 0 { "" } else { indentation(text, this.key_start) }));
+    // (normalized key, block label) of the statements of the blocks below the target
+    let depth = this.path.len();
+    let nested: Vec<(&str, &str)> = scan.blocks.iter()
+        .filter(|b| b.path.len() > depth && b.path[..depth] == this.path[..])
+        .flat_map(|b| b.stmts.iter().map(move |s| (s.norm.as_str(), b.label.as_str()))).collect();
     let mut seen: Vec<String> = Vec::new();
     // (start, end, replacement)
     let mut changes: Vec<(usize, usize, String)> = Vec::new();
@@ -324,15 +451,15 @@ pub fn apply(text: &str, edits: &[Edit]) -> Result<(String, Vec<Change>), String
         if let Some(v) = edit.values.iter().find(|v| v.contains(['\n', '\r'])) {
             return Err(format!("directive '{}': the value {v:?} contains a line end", edit.key));
         }
-        let found: Vec<&Stmt> = scan.top.iter().filter(|s| s.norm == norm).collect();
+        let found: Vec<&Stmt> = this.stmts.iter().filter(|s| s.norm == norm).collect();
         if found.iter().any(|s| s.block) {
-            return Err(format!("'{}' is a nested block; nested blocks are not changed (edit the raw text instead)",
-                edit.key));
+            return Err(format!("'{}' is a nested block; a block is not replaced as a whole, its directives \
+                are changed with the block path (block \"{}\")", edit.key, join_label(&this.label, &edit.key)));
         }
         if found.is_empty() {
-            if let Some((_, parent)) = scan.nested.iter().find(|(n, _)| *n == norm) {
-                return Err(format!("directive '{}' only occurs inside the nested block '{parent}'; nested blocks \
-                    are not changed (edit the raw text instead)", edit.key));
+            if let Some((_, label)) = nested.iter().find(|(n, _)| *n == norm) {
+                return Err(format!("directive '{}' only occurs inside the nested block '{label}'; change it with \
+                    the block path (block \"{label}\")", edit.key));
             }
             for v in &edit.values {
                 added.push((edit.key.clone(), v.clone()));
@@ -355,32 +482,49 @@ pub fn apply(text: &str, edits: &[Edit]) -> Result<(String, Vec<Change>), String
                 continue;
             }
         };
-        let head = found[0];
-        changes.push((head.value_start, head.value_end, first.clone()));
-        if !rest.is_empty() {
-            if alone_on_line(text, head) {
-                let lead = indentation(text, head.key_start);
-                let lines: String = rest.iter().map(|v| format!("{lead}{} = {v}{eol}", head.key)).collect();
-                let at = next_line(text, head.value_end);
-                changes.push((at, at, lines));
-            } else {
-                let inline: String = rest.iter().map(|v| format!("; {} = {v}", head.key)).collect();
-                changes.push((head.value_end, head.value_end, inline));
+        let olds: Vec<&str> = found.iter().map(|s| &text[s.value_start..s.value_end]).collect();
+        let kept = common_subsequence(&olds, &edit.values);
+        if kept.is_empty() {
+            // nothing stays: the first line takes the first value (its key,
+            // indentation and comment stay), the others follow it
+            let head = found[0];
+            changes.push((head.value_start, head.value_end, first.clone()));
+            if !rest.is_empty() {
+                changes.push(after(text, head, rest, eol));
+            }
+            for s in &found[1..] {
+                let (a, z) = removal(text, s);
+                changes.push((a, z, String::new()));
+            }
+            continue;
+        }
+        // lines whose value stays are not touched (comments included); the
+        // others go, new values go in after the kept line before them
+        for (i, s) in found.iter().enumerate() {
+            if !kept.iter().any(|&(k, _)| k == i) {
+                let (a, z) = removal(text, s);
+                changes.push((a, z, String::new()));
             }
         }
-        for s in &found[1..] {
-            let (a, z) = removal(text, s);
-            changes.push((a, z, String::new()));
+        let (first_old, first_new) = kept[0];
+        if first_new > 0 {
+            changes.push(before(text, found[first_old], &edit.values[..first_new], eol));
+        }
+        for (n, &(i, j)) in kept.iter().enumerate() {
+            let next = kept.get(n + 1).map_or(edit.values.len(), |&(_, j)| j);
+            if next > j + 1 {
+                changes.push(after(text, found[i], &edit.values[j + 1..next], eol));
+            }
         }
     }
     if !added.is_empty() {
-        let start = line_start(text, scan.close);
-        if text[start..scan.close].trim().is_empty() {
+        let start = line_start(text, close);
+        if text[start..close].trim().is_empty() {
             let lines: String = added.iter().map(|(k, v)| format!("{indent}{k} = {v}{eol}")).collect();
             changes.push((start, start, lines));
         } else {
             // closing brace on a line with content (one-line resource)
-            let at = text[..scan.close].trim_end().len();
+            let at = text[..close].trim_end().len();
             let sep = if text[..at].ends_with('{') || text[..at].ends_with(';') { " " } else { "; " };
             let inline: Vec<String> = added.iter().map(|(k, v)| format!("{k} = {v}")).collect();
             changes.push((at, at, format!("{sep}{}", inline.join("; "))));
@@ -396,6 +540,11 @@ pub fn apply(text: &str, edits: &[Edit]) -> Result<(String, Vec<Change>), String
         out.replace_range(start..end, &new);
     }
     Ok((out, report))
+}
+
+/// `parent/key` (or `key` below the resource), for messages.
+fn join_label(parent: &str, key: &str) -> String {
+    if parent.is_empty() { key.to_string() } else { format!("{parent}/{key}") }
 }
 
 /// Directives of type time, size or speed (dird_conf.cc: CFG_TYPE_TIME,
@@ -594,8 +743,66 @@ mod tests {
         assert!(run(job, &[("Maximum Concurrent Jobs", &["2"])]).ends_with("  Priority = 10\n  Maximum Concurrent Jobs = 2\n}\n"));
         let fs = "FileSet {\n  Name = fs\n  Include {\n    Options {\n      Signature = MD5\n    }\n    File = /etc\n  }\n}\n";
         assert!(apply(fs, &ed(&[("file", &["/srv"])])).unwrap_err().contains("nested block 'Include'"));
-        assert!(apply(fs, &ed(&[("signature", &["SHA1"])])).unwrap_err().contains("nested block 'Options'"));
+        assert!(apply(fs, &ed(&[("signature", &["SHA1"])])).unwrap_err().contains("nested block 'Include/Options'; change it with the block path (block \"Include/Options\")"));
         assert_eq!(run(fs, &[("description", &["x"])]), fs.replace("  }\n}\n", "  }\n  description = x\n}\n"));
+    }
+
+    /// The changed text of block `block`.
+    fn run_in(text: &str, block: &str, pairs: &[(&str, &[&str])]) -> String {
+        apply_in(text, block, &ed(pairs)).unwrap_or_else(|e| panic!("{e}")).0
+    }
+
+    const FS: &str = "FileSet {\n  Name = fs\n  Include {\n    Options {\n      Signature = MD5\n    }\n\
+        \x20   # config\n    File = /etc\n\n    # data\n    File = /var/lib/samba\n    File = /var/lib/samba/private  # twice\n  }\n\
+        \x20 Include {\n    File = /srv\n  }\n  Exclude {\n    File = /tmp\n  }\n}\n";
+
+    #[test]
+    fn directives_of_a_named_block() {
+        // the File lines of the first Include as a whole, comments and the other blocks stay
+        let out = run_in(FS, "Include[1]", &[("file", &["/etc", "/var/lib/samba"])]);
+        assert_eq!(out, FS.replace("    File = /var/lib/samba/private  # twice\n", ""));
+        assert_eq!(run_in(FS, "include[2]", &[("File", &["/home"])]), FS.replace("/srv", "/home"));
+        assert_eq!(run_in(FS, " Exclude ", &[("file", &[])]), FS.replace("    File = /tmp\n", ""));
+        assert_eq!(run_in(FS, "Exclude", &[("File", &["/tmp", "/proc"])]), FS.replace("/tmp\n", "/tmp\n    File = /proc\n"));
+        // a missing directive goes before the closing brace of the block, indented like its directives
+        assert_eq!(run_in(FS, "Include[1]/Options", &[("signature", &["SHA1"]), ("Compression", &["GZIP"])]),
+            FS.replace("Signature = MD5\n", "Signature = SHA1\n      Compression = GZIP\n"));
+        // an empty block: one level deeper than its key
+        let empty = "FileSet {\n  Name = fs\n  Exclude {\n  }\n}\n";
+        assert_eq!(run_in(empty, "Exclude", &[("File", &["/tmp"])]), "FileSet {\n  Name = fs\n  Exclude {\n    File = /tmp\n  }\n}\n");
+        assert_eq!(run_in(empty, "", &[("Description", &["x"])]), run(empty, &[("Description", &["x"])]));
+        // the block's own blocks stay untouched
+        let err = apply_in(FS, "Include[1]", &ed(&[("signature", &["SHA1"])])).unwrap_err();
+        assert!(err.contains("(block \"Include/Options\")"), "{err}");
+        let err = apply_in(FS, "Include[1]", &ed(&[("options", &["x"])])).unwrap_err();
+        assert!(err.contains("(block \"Include/options\")"), "{err}");
+        let job = "Job {\n  Name = j\n  RunScript {\n    Command = \"/bin/true\"\n  }\n}\n";
+        assert_eq!(run_in(job, "RunScript", &[("command", &["\"/bin/false\""])]), job.replace("true", "false"));
+    }
+
+    #[test]
+    fn kept_values_keep_their_lines() {
+        let text = "Schedule {\n  Name = s\n  Run = b  # bee\n  Run = d  # dee\n}\n";
+        // new values before, between and after the kept ones
+        assert_eq!(run(text, &[("run", &["a", "b", "c", "d", "e"])]),
+            "Schedule {\n  Name = s\n  Run = a\n  Run = b  # bee\n  Run = c\n  Run = d  # dee\n  Run = e\n}\n");
+        assert_eq!(run(text, &[("run", &["d"])]), "Schedule {\n  Name = s\n  Run = d  # dee\n}\n");
+        assert_eq!(run(text, &[("run", &["b", "d"])]), text);
+        // the order changes: one stays, the other goes in after it
+        assert_eq!(run(text, &[("run", &["d", "b"])]), "Schedule {\n  Name = s\n  Run = d  # dee\n  Run = b\n}\n");
+        let inline = "Schedule { Name = s; Run = b; Run = d }\n";
+        assert_eq!(run(inline, &[("run", &["a", "b", "c", "d"])]), "Schedule { Name = s; Run = a; Run = b; Run = c; Run = d }\n");
+    }
+
+    #[test]
+    fn block_paths_must_name_one_block() {
+        let err = |block: &str| apply_in(FS, block, &ed(&[("file", &["/x"])])).unwrap_err();
+        assert!(err("Include").contains("the resource has 2 blocks 'Include'; name one as Include[1] … Include[2]"), "{}", err("Include"));
+        assert!(err("Include[3]").contains("has 2 block(s) 'Include', not 3"));
+        assert!(err("Include[0]").contains("1 or more"));
+        assert!(err("Include[x]").contains("1 or more"));
+        assert!(err("RunScript").contains("the resource has no block 'RunScript'"));
+        assert!(err("Include[2]/Options").contains("block 'Include[2]' has no block 'Options'"), "{}", err("Include[2]/Options"));
     }
 
     #[test]

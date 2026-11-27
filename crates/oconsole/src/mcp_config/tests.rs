@@ -273,6 +273,23 @@ fn updates_over_grpc_and_bnet_with_the_same_result() {
 }
 
 #[test]
+fn a_named_block_changes_and_the_rest_stays() {
+    for grpc in [true, false] {
+        let mut d = FakeDirector::new(grpc);
+        d.text = "Client {\n  Name = laptop-fd\n  X {\n    Opt {\n      F = a\n    }\n    F = /etc\n    F = /var/lib  # data\n    \
+            F = /var/lib/private\n  }\n  F = top\n}\n".into();
+        let before = d.text.clone();
+        let r = configure_update(&mut d, &json!({ "resource": "client", "name": "laptop-fd", "block": "X",
+            "directives": { "F": ["/etc", "/var/lib"] } }));
+        assert_eq!(r["isError"], false, "{r}");
+        assert_eq!(d.updates, [before.replace("    F = /var/lib/private\n", "")], "grpc={grpc}");
+        let s = &r["structuredContent"];
+        assert_eq!((s["block"].as_str(), &s["changed"][0]["old"]), (Some("X"), &json!(["/etc", "/var/lib", "/var/lib/private"])));
+        assert!(r["content"][0]["text"].as_str().unwrap().starts_with("client \"laptop-fd\" block X ("), "{r}");
+    }
+}
+
+#[test]
 fn conflict_reads_once_more_then_gives_up() {
     for grpc in [true, false] {
         let mut d = FakeDirector::new(grpc);
@@ -325,7 +342,9 @@ fn refuses_without_crud_and_never_uses_configure_update() {
         let mut d = FakeDirector::new(grpc);
         d.text = "Client {\n  Name = laptop-fd\n  X {\n    Y = 1\n  }\n}\n".into();
         let r = configure_update(&mut d, &args(json!({ "y": "2" })));
-        assert!(r["content"][0]["text"].as_str().unwrap().contains("nested block 'X'"), "{r}");
+        assert!(r["content"][0]["text"].as_str().unwrap().contains("nested block 'X'; change it with the block path (block \"X\")"), "{r}");
+        let r = configure_update(&mut d, &json!({ "resource": "client", "name": "laptop-fd", "block": "Z", "directives": { "y": "2" } }));
+        assert!(r["content"][0]["text"].as_str().unwrap().contains("has no block 'Z'"), "{r}");
         let r = configure_update(&mut d, &json!({ "resource": "client", "name": "other", "directives": { "a": "b" } }));
         assert!(r["content"][0]["text"].as_str().unwrap().contains("NOT_FOUND"), "{r}");
         assert!(d.updates.is_empty());

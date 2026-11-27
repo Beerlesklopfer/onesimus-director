@@ -436,11 +436,16 @@ nur im Speicher.
   MCP-Werkzeug `configure_update` benutzt: Schlüssel wie Bareos-Schlüsselwörter
   verglichen (Groß-/Kleinschreibung, Leerzeichen und `_` egal), nur
   Direktiven der Ressource selbst (Klammertiefe 1), verschachtelte Blöcke
-  bleiben unberührt; Anführungszeichen, `#`-Kommentare und `;`-Trenner
+  bleiben unberührt (`apply`); `apply_in` ändert die Direktiven eines
+  Blocks, den ein Pfad nennt (`Include`, `Include[2]`, `Include/Options`;
+  MCP-Argument `block`), und lässt dessen innere Blöcke unberührt; Anführungszeichen, `#`-Kommentare und `;`-Trenner
   (mehrere Direktiven auf einer Zeile) werden beachtet, ersetzt wird nur der
   Wertbereich. Alles andere bleibt Byte für Byte.
 - Ein mehrfach angegebener Schlüssel (`run=… run=…`) ersetzt alle
-  vorhandenen Zeilen der Direktive an der Stelle der ersten; `<direktive>=`
+  vorhandenen Zeilen der Direktive: Zeilen, deren Wert bleibt (längste
+  gemeinsame Teilfolge), bleiben samt Kommentar stehen, neue Werte kommen
+  nach die vorangehende behaltene Zeile; bleibt keiner, an der Stelle der
+  ersten; `<direktive>=`
   ohne Wert entfernt sie; fehlende Direktiven kommen vor die schließende
   Klammer. Werte ohne Leerzeichen und ohne `{}=;#",\@` stehen ohne
   Anführungszeichen, sonst in Anführungszeichen; Schedule-`Run` immer ohne

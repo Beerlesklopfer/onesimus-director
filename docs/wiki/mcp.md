@@ -58,7 +58,14 @@ Jedes Tool prüft zuerst seine Parameter und baut daraus die Konsolenzeile. Dann
                   "Run": ["Full sun at 23:30", "Incremental mon-sat at 23:30"] } }
 ```
 
-`null` als Wert entfernt alle Zeilen der Direktive (`{"Description": null}`).
+`null` als Wert entfernt alle Zeilen der Direktive (`{"Description": null}`). Eine Liste ersetzt alle Zeilen einer mehrfachen Direktive; Zeilen, deren Wert bleibt, bleiben unverändert stehen (samt Kommentar), wegfallende werden entfernt und neue nach der vorangehenden behaltenen Zeile eingefügt.
+
+Direktiven eines verschachtelten Blocks ändert `block` mit dem Pfad des Blocks: `Include`, `Include[2]` (der zweite von mehreren), `Exclude`, `Include/Options`, `RunScript`. Blöcke innerhalb des genannten bleiben unberührt. Beispiel – die `File`-Zeilen eines FileSets ohne doppelt gesicherte Unterverzeichnisse:
+
+```json
+{ "resource": "fileset", "name": "Samba4-fs", "block": "Include",
+  "directives": { "File": ["/etc/samba", "/var/lib/samba", "/var/backups/samba", "/etc/krb5.conf"] } }
+```
 
 
 1. Die Fähigkeiten der Verbindung entscheiden: über gRPC `GetConfigCapabilities`, über BNET `.config capabilities`. Bietet der Director den Typ nicht mit `READ_RAW` und `UPDATE_RAW` an (bareos-dir, älterer odir), verweigert das Werkzeug mit einer Meldung; einen Konsolenweg gibt es nicht mehr.

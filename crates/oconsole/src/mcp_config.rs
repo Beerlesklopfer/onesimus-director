@@ -16,8 +16,10 @@
 //! 2. ReadResource gives the raw text and its sha256;
 //! 3. only the given directives are replaced in the raw text
 //!    ([`replace_directives`]; a list value replaces every line of a
-//!    repeated directive such as Schedule `Run`); comments, indentation,
-//!    line ends and every other byte stay;
+//!    repeated directive such as Schedule `Run`; with `block` the
+//!    directives of one nested block such as a FileSet's `Include`, see
+//!    [`replace_directives_in`]); comments, indentation, line ends and every
+//!    other byte stay;
 //! 4. UpdateResource with `expected_sha256`; on CONFLICT the tool reads once
 //!    more and tries again, then it returns the error. INVALID comes back
 //!    with file, line and the text of the check.
@@ -54,12 +56,22 @@ pub type Change = bareos_config::edit::Change;
 ///   indented like the resource's directives and with the file's line end;
 /// - directives of nested blocks (RunScript, Include …) are not touched:
 ///   a change of a block or of a directive that only occurs inside one is
-///   refused.
+///   refused (the message names the block path for
+///   [`replace_directives_in`]).
+#[cfg(test)]
 pub fn replace_directives(text: &str, changes: &[(String, Vec<String>)]) -> Result<(String, Vec<Change>), String> {
+    replace_directives_in(text, "", changes)
+}
+
+/// [`replace_directives`] within the nested block `block`
+/// ([`bareos_config::edit::apply_in`]): a path of block keys separated by
+/// `/`, each with an optional 1-based number (`Include`, `Include[2]`,
+/// `Exclude`, `Include/Options`, `RunScript`); empty: the resource itself.
+pub fn replace_directives_in(text: &str, block: &str, changes: &[(String, Vec<String>)])
+                             -> Result<(String, Vec<Change>), String> {
     let edits: Vec<bareos_config::edit::Edit> = changes.iter()
         .map(|(key, values)| bareos_config::edit::Edit { key: key.clone(), values: values.clone() }).collect();
-    bareos_config::edit::apply(text, &edits).map_err(|e| e.replace("(edit the raw text instead)",
-        "(configure_update does not change nested blocks; edit the raw text instead)"))
+    bareos_config::edit::apply_in(text, block, &edits)
 }
 
 /// The value as written in the configuration: booleans as yes/no, values
@@ -275,11 +287,11 @@ fn error(text: String) -> Value {
 
 /// Arguments: resource, name, directives (checked like the tool schema).
 /// (resource type, name, checked directives)
-pub type Checked = (String, String, Vec<(String, Vec<String>)>);
+pub type Checked = (String, String, String, Vec<(String, Vec<String>)>);
 
 pub fn check_arguments(arguments: &Value) -> Result<Checked, String> {
     let Some(map) = arguments.as_object() else { return Err("arguments must be an object".into()) };
-    if let Some(key) = map.keys().find(|k| !matches!(k.as_str(), "resource" | "name" | "directives")) {
+    if let Some(key) = map.keys().find(|k| !matches!(k.as_str(), "resource" | "name" | "block" | "directives")) {
         return Err(format!("unknown argument '{key}'"));
     }
     let resource = map.get("resource").and_then(Value::as_str).ok_or("resource is required")?.to_ascii_lowercase();
@@ -290,13 +302,18 @@ pub fn check_arguments(arguments: &Value) -> Result<Checked, String> {
     if name.chars().any(|c| c.is_control() || c == '"') {
         return Err("name: control characters and quotes are not allowed".into());
     }
+    let block = match map.get("block") {
+        None | Some(Value::Null) => String::new(),
+        Some(Value::String(b)) if !b.chars().any(char::is_control) => b.trim().to_string(),
+        Some(_) => return Err("block: a path of block names such as \"Include\", \"Include[2]\", \"Include/Options\"".into()),
+    };
     let directives = directives(arguments, &resource)?;
-    Ok((resource, name.to_string(), directives))
+    Ok((resource, name.to_string(), block, directives))
 }
 
 /// The tool `configure_update`.
 pub fn configure_update<R: CommandRunner + ?Sized>(runner: &mut R, arguments: &Value) -> Value {
-    let (resource, name, changes) = match check_arguments(arguments) {
+    let (resource, name, block, changes) = match check_arguments(arguments) {
         Ok(v) => v,
         Err(e) => return error(e),
     };
@@ -328,12 +345,12 @@ pub fn configure_update<R: CommandRunner + ?Sized>(runner: &mut R, arguments: &V
         if read.status != "OK" {
             return error(format!("ReadResource {resource} \"{name}\": {} {}", read.status, read.message));
         }
-        let (text, report) = match replace_directives(&read.text, &changes) {
+        let (text, report) = match replace_directives_in(&read.text, &block, &changes) {
             Ok(v) => v,
             Err(e) => return error(format!("{resource} \"{name}\": {e}")),
         };
         if text == read.text {
-            return summary(&resource, &name, route, &report, &read.sha256, &read.sha256, false, &read.file,
+            return summary(&resource, &name, &block, route, &report, &read.sha256, &read.sha256, false, &read.file,
                 "no change: the directives already have these values");
         }
         let updated = match api.update(&rtype, &name, &read.sha256, &text) {
@@ -343,7 +360,7 @@ pub fn configure_update<R: CommandRunner + ?Sized>(runner: &mut R, arguments: &V
         match updated.status.as_str() {
             "OK" => {
                 let old = if updated.old_sha256.is_empty() { read.sha256.clone() } else { updated.old_sha256.clone() };
-                return summary(&resource, &name, route, &report, &old, &updated.sha256, updated.reloaded,
+                return summary(&resource, &name, &block, route, &report, &old, &updated.sha256, updated.reloaded,
                     &updated.file, &updated.message);
             }
             "CONFLICT" if conflicts == 0 => conflicts += 1,
@@ -364,9 +381,11 @@ pub fn configure_update<R: CommandRunner + ?Sized>(runner: &mut R, arguments: &V
 }
 
 #[allow(clippy::too_many_arguments)]
-fn summary(resource: &str, name: &str, route: Route, report: &[Change], old: &str, new: &str, reloaded: bool,
-           file: &str, message: &str) -> Value {
-    let mut text = format!("{resource} \"{name}\"{}: {message}\n", if file.is_empty() { String::new() } else { format!(" ({file})") });
+fn summary(resource: &str, name: &str, block: &str, route: Route, report: &[Change], old: &str, new: &str,
+           reloaded: bool, file: &str, message: &str) -> Value {
+    let mut text = format!("{resource} \"{name}\"{}{}: {message}\n",
+        if block.is_empty() { String::new() } else { format!(" block {block}") },
+        if file.is_empty() { String::new() } else { format!(" ({file})") });
     for c in report {
         let old = c.old.join(" | ");
         let new = if c.new.is_empty() { "(removed)".to_string() } else { c.new.join(" | ") };
@@ -386,7 +405,7 @@ fn summary(resource: &str, name: &str, route: Route, report: &[Change], old: &st
         Value::Object(m)
     }).collect();
     json!({ "content": [{ "type": "text", "text": text }], "isError": false,
-        "structuredContent": { "resource": resource, "name": name, "route": match route { Route::Grpc => "grpc", Route::Bnet => "bnet" },
+        "structuredContent": { "resource": resource, "name": name, "block": block, "route": match route { Route::Grpc => "grpc", Route::Bnet => "bnet" },
             "changed": changed, "old_sha256": old, "new_sha256": new, "reloaded": reloaded, "file": file } })
 }
 
